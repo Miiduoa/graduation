@@ -234,7 +234,7 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.accent,
   },
   subBtnOn: { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent },
-  subTxt: { color: theme.colors.accent, fontWeight: '800', fontSize: 13 },
+  subTxt: { color: theme.colors.accent, fontWeight: '700', fontSize: 13 },
   composeBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -264,7 +264,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: theme.space.sm,
   },
-  title: { fontSize: 16, fontWeight: '800', color: theme.colors.text },
+  title: { fontSize: 16, fontWeight: '700', color: theme.colors.text },
   preview: {
     marginTop: theme.space.sm,
     fontSize: 14,

@@ -129,11 +129,11 @@ export default function VideoMaterialScreen(props: RouteProps) {
   if (!Video) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-        <Ionicons name="videocam-off-outline" size={48} color="#6b7280" />
-        <Text style={{ marginTop: 12, color: '#374151', textAlign: 'center' }}>
+        <Ionicons name="videocam-off-outline" size={48} color="#8E8E93" />
+        <Text style={{ marginTop: 12, color: '#3C3C43', textAlign: 'center' }}>
           本機尚未安裝 expo-av。
         </Text>
-        <Text style={{ marginTop: 8, color: '#6b7280', fontSize: 12, textAlign: 'center' }}>
+        <Text style={{ marginTop: 8, color: '#8E8E93', fontSize: 12, textAlign: 'center' }}>
           開發者：請 `npx expo install expo-av` 後重新打包。
         </Text>
         <Pressable
@@ -145,7 +145,7 @@ export default function VideoMaterialScreen(props: RouteProps) {
               courseName,
             })
           }
-          style={{ marginTop: 16, padding: 12, backgroundColor: '#1F4E78', borderRadius: 8 }}
+          style={{ marginTop: 16, padding: 12, backgroundColor: '#003F8A', borderRadius: 8 }}
         >
           <Text style={{ color: '#fff' }}>用一般檢視器開啟</Text>
         </Pressable>
@@ -195,10 +195,10 @@ export default function VideoMaterialScreen(props: RouteProps) {
       </View>
 
       {/* 進度與資訊 */}
-      <View style={{ padding: 16, backgroundColor: '#1F4E78' }}>
+      <View style={{ padding: 16, backgroundColor: '#003F8A' }}>
         <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>{title}</Text>
         {courseName ? (
-          <Text style={{ color: '#dbeafe', fontSize: 12, marginTop: 2 }}>{courseName}</Text>
+          <Text style={{ color: '#E5F2FF', fontSize: 12, marginTop: 2 }}>{courseName}</Text>
         ) : null}
         <View
           style={{
@@ -218,7 +218,7 @@ export default function VideoMaterialScreen(props: RouteProps) {
             }}
           />
         </View>
-        <Text style={{ color: '#cbd5e1', fontSize: 11, marginTop: 4 }}>
+        <Text style={{ color: '#E5E5EA', fontSize: 11, marginTop: 4 }}>
           進度 {Math.round(progressPct)}%
           {completedReported ? ' ・ ✅ 已記錄完成' : ''}
         </Text>

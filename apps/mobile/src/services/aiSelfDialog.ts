@@ -290,14 +290,27 @@ function shufflePrompts(prompts: string[], rand: () => number): string[] {
   return shuffled;
 }
 
-function varyPrompt(prompt: string, rand: () => number): string {
-  if (prompt.trim().length <= 6 || /^[😊👍👌✅.。…\s]+$/.test(prompt)) return prompt;
+function pickTrainingText(items: readonly string[], rand: () => number): string {
+  return items[Math.floor(rand() * items.length)] ?? '';
+}
+
+function withTrainingSampleTrace(prompt: string, seed: number, index: number): string {
+  if (/（訓練情境\s+[a-z0-9-]+）/.test(prompt)) return prompt;
+  return `${prompt}（訓練樣本 ${seed.toString(36)}-${index.toString(36)}）`;
+}
+
+function varyPrompt(prompt: string, rand: () => number, seed: number, index: number): string {
+  if (/（訓練情境\s+[a-z0-9-]+）/.test(prompt)) return prompt;
+
+  if (prompt.trim().length <= 6 || /^[😊👍👌✅.。…\s]+$/.test(prompt)) {
+    return withTrainingSampleTrace(prompt, seed, index);
+  }
 
   const prefixes = ['', '', '欸，', '我說得有些亂：', 'quick question，', '先用自然語言理解一下：'];
   const suffixes = ['', '', '，有些急', '，但不要亂執行', '，先抓重心', ' thanks'];
-  const prefix = prefixes[Math.floor(rand() * prefixes.length)] ?? '';
-  const suffix = suffixes[Math.floor(rand() * suffixes.length)] ?? '';
-  return `${prefix}${prompt}${suffix}`;
+  const prefix = pickTrainingText(prefixes, rand);
+  const suffix = pickTrainingText(suffixes, rand);
+  return withTrainingSampleTrace(`${prefix}${prompt}${suffix}`, seed, index);
 }
 
 export async function runAISelfDialogEvaluation(options?: {
@@ -354,11 +367,12 @@ export async function runAISelfDialogEvaluation(options?: {
     if (i > 0 && i % promptsPool.length === 0) {
       shuffledPrompts = shufflePrompts(promptsPool, rand);
     }
+    const useStaticRegressionPrompt = !useDynamicPrompts || i < promptsPool.length;
     const baseMsg =
-      useDynamicPrompts && i % 2 === 0
+      useDynamicPrompts && !useStaticRegressionPrompt
         ? generateDynamicNaturalLanguagePrompt(seed, i)
         : shuffledPrompts[i % promptsPool.length]!;
-    const msg = varyPrompt(baseMsg, rand);
+    const msg = varyPrompt(baseMsg, rand, seed, i);
     try {
       await autonomousQuery(msg, ctx, undefined, []);
       passed += 1;

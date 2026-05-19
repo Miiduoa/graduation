@@ -154,8 +154,8 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
       icon: '✕',
     },
     warning: {
-      bg: 'rgba(245, 158, 11, 0.15)',
-      border: 'rgba(245, 158, 11, 0.3)',
+      bg: 'rgba(255,149,0, 0.15)',
+      border: 'rgba(255,149,0, 0.3)',
       icon: '⚠',
     },
     info: {

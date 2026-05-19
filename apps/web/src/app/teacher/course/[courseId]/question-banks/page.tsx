@@ -9,6 +9,8 @@ import Link from 'next/link';
 import { useMemo, useState } from 'react';
 
 import { SiteShell } from '@/components/SiteShell';
+import { useDemoRole, getCapabilities } from '@/lib/demoRole';
+import { resolveSchoolPageContext } from '@/lib/pageContext';
 import {
   drawQuestionsForQuiz,
   checkQuestionBankHealth,
@@ -39,29 +41,39 @@ const SAMPLE: QuestionBank = {
   ],
 };
 
-export default function QuestionBanksPage({ params }: { params: { courseId: string } }) {
+// 固定難度分佈，不需要動態修改（移除 setDrawDist 避免 ESLint unused-vars 警告）
+const DEFAULT_DRAW_DIST = { 1: 0.34, 2: 0.33, 3: 0.33 };
+
+export default function QuestionBanksPage({ params, searchParams }: { params: { courseId: string }; searchParams?: { school?: string; schoolId?: string } }) {
+  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
+  const [demoRole] = useDemoRole();
+  const caps = getCapabilities(demoRole);
+  const isTaView = demoRole === 'ta';
+  const isReadOnlyView = isTaView || demoRole === 'department_head';
   const [bank, setBank] = useState<QuestionBank>(SAMPLE);
   const [drawCount, setDrawCount] = useState(3);
-  const [drawDist, setDrawDist] = useState({ 1: 0.34, 2: 0.33, 3: 0.33 });
 
   const health = useMemo(() => checkQuestionBankHealth(bank), [bank]);
   const preview = useMemo(
     () =>
       drawQuestionsForQuiz(bank, {
         count: drawCount,
-        difficultyDistribution: drawDist,
+        difficultyDistribution: DEFAULT_DRAW_DIST,
         seed: 42,
       }),
-    [bank, drawCount, drawDist],
+    [bank, drawCount],
   );
 
-  const updateEntry = (id: string, patch: Partial<QuestionBankEntry>) =>
+  const updateEntry = (id: string, patch: Partial<QuestionBankEntry>) => {
+    if (!caps.canEditQuestionBank) return;
     setBank((b) => ({
       ...b,
       entries: b.entries.map((e) => (e.id === id ? { ...e, ...patch } : e)),
     }));
+  };
 
   const addEntry = () => {
+    if (!caps.canEditQuestionBank) return;
     const id = `q${Date.now()}`;
     setBank((b) => ({
       ...b,
@@ -82,26 +94,57 @@ export default function QuestionBanksPage({ params }: { params: { courseId: stri
     }));
   };
 
-  const removeEntry = (id: string) =>
+  const removeEntry = (id: string) => {
+    if (!caps.canEditQuestionBank) return;
     setBank((b) => ({ ...b, entries: b.entries.filter((e) => e.id !== id) }));
+  };
 
   return (
-    <SiteShell>
+    <SiteShell title="題庫管理" schoolName={schoolName}>
       <main style={{ maxWidth: 1200, margin: '0 auto', padding: 24 }}>
-        <nav style={{ fontSize: 14, color: '#6b7280', marginBottom: 12 }}>
-          <Link href={`/teacher/course/${params.courseId}`}>← 回課程總覽</Link>
+        {!caps.canViewTeacherDashboard ? (
+          <div className="card" style={{ padding: '24px 20px', textAlign: 'center', background: 'var(--danger-soft)', borderColor: 'var(--danger)' }}>
+            <div style={{ fontSize: 32, marginBottom: 8 }}>🔒</div>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>教師工作台專用</div>
+            <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14, lineHeight: 1.7 }}>
+              請從右上角「身份膠囊」切換為 🧑‍🏫 教師 或 🧑‍💻 助教 角色後再進入。
+            </div>
+            <Link href={`/${q}`} className="btn">← 回首頁</Link>
+          </div>
+        ) : <>
+        <nav style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 12 }}>
+          <Link href={`/teacher/course/${params.courseId}${q}`}>← 回課程總覽</Link>
         </nav>
-        <h1 style={{ fontSize: 28, fontWeight: 700 }}>題庫</h1>
-        <p style={{ color: '#6b7280', marginBottom: 16 }}>
+        <h1 style={{ fontSize: 28, fontWeight: 700 }}>
+          題庫{isReadOnlyView ? '（檢視）' : ''}
+        </h1>
+        <p style={{ color: 'var(--muted)', marginBottom: 16 }}>
           題目 {bank.entries.length} 道｜topic 覆蓋 {Object.keys(health.topicCoverage).length} 個
         </p>
+
+        {/* TA / 系主任 唯讀提示 */}
+        {isReadOnlyView && (
+          <div
+            style={{
+              padding: '10px 14px', borderRadius: 8, fontSize: 13, marginBottom: 16,
+              background: isTaView ? 'rgba(124,58,237,0.10)' : 'rgba(255,149,0,0.10)',
+              border: `1px solid ${isTaView ? '#AF52DE' : '#FF9500'}`,
+              color: isTaView ? '#5856D6' : '#92400E',
+            }}
+          >
+            {isTaView
+              ? <><span>🧑‍💻 </span><strong>助教 TA 視角</strong>：可瀏覽題庫內容，但<strong>無法新增、編輯或刪除題目</strong>（授課教師專用）。</>
+              : <><span>🏛️ </span><strong>系主任視角</strong>：可唯讀瀏覽題庫，但<strong>無法新增、編輯或刪除題目</strong>（授課教師專用）。</>
+            }
+          </div>
+        )}
 
         {/* 警告 */}
         {health.warnings.length > 0 && (
           <div
             style={{
-              background: '#fef3c7',
-              border: '1px solid #fbbf24',
+              background: 'var(--warning-soft)',
+              border: '1px solid var(--warning)',
               padding: 12,
               borderRadius: 8,
               marginBottom: 16,
@@ -120,28 +163,39 @@ export default function QuestionBanksPage({ params }: { params: { courseId: stri
           <div style={{ flex: 1 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
               <h2 style={{ fontSize: 18, fontWeight: 600 }}>題目列表</h2>
-              <button onClick={addEntry} style={primaryBtn}>
-                + 新增題目
-              </button>
+              {caps.canEditQuestionBank ? (
+                <button onClick={addEntry} style={primaryBtn}>
+                  + 新增題目
+                </button>
+              ) : (
+                <button
+                  disabled
+                  title="新增題目為授課教師專用"
+                  style={{ ...primaryBtn, background: 'var(--border)', color: 'var(--muted-light)', cursor: 'not-allowed' }}
+                >
+                  🔒 新增題目（教師專用）
+                </button>
+              )}
             </div>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
-                <tr style={{ background: '#f3f4f6' }}>
+                <tr style={{ background: 'var(--panel)' }}>
                   <th style={th}>題目</th>
                   <th style={th}>類型</th>
                   <th style={th}>難度</th>
                   <th style={th}>Topic</th>
-                  <th style={th}></th>
+                  {caps.canEditQuestionBank && <th style={th}></th>}
                 </tr>
               </thead>
               <tbody>
                 {bank.entries.map((e) => (
-                  <tr key={e.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                  <tr key={e.id} style={{ borderBottom: '1px solid var(--border)' }}>
                     <td style={td}>
                       <input
                         value={e.prompt}
                         onChange={(ev) => updateEntry(e.id, { prompt: ev.target.value })}
                         style={inputCss}
+                        disabled={!caps.canEditQuestionBank}
                       />
                     </td>
                     <td style={td}>{e.type}</td>
@@ -152,6 +206,7 @@ export default function QuestionBanksPage({ params }: { params: { courseId: stri
                           updateEntry(e.id, { difficulty: Number(ev.target.value) as 1 | 2 | 3 })
                         }
                         style={inputCss}
+                        disabled={!caps.canEditQuestionBank}
                       >
                         <option value={1}>易</option>
                         <option value={2}>中</option>
@@ -163,13 +218,16 @@ export default function QuestionBanksPage({ params }: { params: { courseId: stri
                         value={e.topic ?? ''}
                         onChange={(ev) => updateEntry(e.id, { topic: ev.target.value })}
                         style={{ ...inputCss, width: 100 }}
+                        disabled={!caps.canEditQuestionBank}
                       />
                     </td>
-                    <td style={td}>
-                      <button onClick={() => removeEntry(e.id)} style={dangerBtn}>
-                        刪除
-                      </button>
-                    </td>
+                    {caps.canEditQuestionBank && (
+                      <td style={td}>
+                        <button onClick={() => removeEntry(e.id)} style={dangerBtn}>
+                          刪除
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -179,7 +237,7 @@ export default function QuestionBanksPage({ params }: { params: { courseId: stri
           {/* ── 抽題預覽 ── */}
           <div style={{ width: 380 }}>
             <h2 style={{ fontSize: 18, fontWeight: 600 }}>抽題預覽</h2>
-            <div style={{ background: '#f9fafb', padding: 12, borderRadius: 8 }}>
+            <div style={{ background: 'var(--panel)', padding: 12, borderRadius: 8 }}>
               <label>
                 題數：
                 <input
@@ -189,8 +247,8 @@ export default function QuestionBanksPage({ params }: { params: { courseId: stri
                   style={inputCss}
                 />
               </label>
-              <div style={{ marginTop: 8, fontSize: 12, color: '#6b7280' }}>
-                難度比例：易 {drawDist[1]} / 中 {drawDist[2]} / 難 {drawDist[3]}
+              <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>
+                難度比例：易 {DEFAULT_DRAW_DIST[1]} / 中 {DEFAULT_DRAW_DIST[2]} / 難 {DEFAULT_DRAW_DIST[3]}
               </div>
               <ol style={{ marginTop: 12 }}>
                 {preview.map((q) => (
@@ -202,6 +260,37 @@ export default function QuestionBanksPage({ params }: { params: { courseId: stri
             </div>
           </div>
         </div>
+
+        {/* ── AI 題庫助理 ── */}
+        <div
+          style={{
+            marginTop: 20,
+            padding: '14px 18px',
+            borderRadius: 12,
+            background: 'rgba(88,86,214,0.08)',
+            border: '1px solid #5856D6',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 14,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#5856D6', marginBottom: 3 }}>🤖 AI 題庫助理</div>
+            <div style={{ fontSize: 13, color: 'var(--text)' }}>
+              讓 AI 根據課程主題批量生成題目，或分析現有題庫的難度分布是否平衡。
+            </div>
+          </div>
+          <a
+            href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('幫我為資料結構課程批量生成 10 道程式題（難度：易 3、中 5、難 2），涵蓋鏈結串列、堆疊、佇列，每題附上參考解答')}`}
+            className="btn"
+            style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
+          >
+            問 AI →
+          </a>
+        </div>
+        </>}
       </main>
     </SiteShell>
   );
@@ -209,11 +298,11 @@ export default function QuestionBanksPage({ params }: { params: { courseId: stri
 
 const th = { padding: '12px 8px', fontWeight: 600, fontSize: 14, textAlign: 'left' as const };
 const td = { padding: '8px', fontSize: 14 };
-const inputCss = { padding: 6, border: '1px solid #e5e7eb', borderRadius: 6, width: '100%' };
+const inputCss = { padding: 6, border: '1px solid #E5E5EA', borderRadius: 6, width: '100%' };
 const primaryBtn = {
   padding: '8px 16px',
   borderRadius: 8,
-  background: '#1F4E78',
+  background: '#003F8A',
   color: '#fff',
   border: 'none',
   cursor: 'pointer',
@@ -222,8 +311,8 @@ const dangerBtn = {
   padding: '6px 10px',
   borderRadius: 6,
   background: 'transparent',
-  color: '#dc2626',
-  border: '1px solid #dc2626',
+  color: '#FF3B30',
+  border: '1px solid #FF3B30',
   cursor: 'pointer',
   fontSize: 12,
 };

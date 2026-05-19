@@ -3,14 +3,16 @@ import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useThemeMode } from '../state/theme';
 import { createStackScreenOptions } from '../ui/navigationTheme';
-import { InboxScreen } from './InboxScreen';
-import { MessagesHomeScreen } from './MessagesHomeScreen';
+// AI-First v1：訊息 Tab 主入口（舊版 InboxScreen / MessagesHomeScreen /
+// AssignmentDetailScreen 已下架）
+import MessagesAiFirstScreen from './MessagesAiFirstScreen';
+import MessagesHomeAiFirstScreen from './MessagesHomeAiFirstScreen';
 import { GroupsScreen } from './GroupsScreen';
 import { GroupDetailScreen } from './GroupDetailScreen';
 import { GroupMembersScreen } from './GroupMembersScreen';
 import { GroupPostScreen } from './GroupPostScreen';
 import { GroupAssignmentsScreen } from './GroupAssignmentsScreen';
-import { AssignmentDetailScreen } from './AssignmentDetailScreen';
+import AssignmentDetailAiFirstScreen from './AssignmentDetailAiFirstScreen';
 import { DmsScreen } from './DmsScreen';
 import { FriendSearchScreen } from './FriendSearchScreen';
 import { FriendsManageScreen } from './FriendsManageScreen';
@@ -38,14 +40,15 @@ export function MessagesStack() {
       initialRouteName="Inbox"
       screenOptions={createStackScreenOptions()}
     >
+      {/* AI-First v1：landing 換新版 */}
       <Stack.Screen
         name="Inbox"
-        component={InboxScreen}
-        options={{ title: '訊息工作台', headerShown: false }}
+        component={MessagesAiFirstScreen}
+        options={{ title: '訊息', headerShown: false }}
       />
       <Stack.Screen
         name="MessagesHome"
-        component={MessagesHomeScreen}
+        component={MessagesHomeAiFirstScreen}
         options={{ title: '訊息', headerShown: false }}
       />
       <Stack.Screen name="Groups" component={GroupsScreen} options={{ title: '群組' }} />
@@ -63,7 +66,7 @@ export function MessagesStack() {
       />
       <Stack.Screen
         name="AssignmentDetail"
-        component={AssignmentDetailScreen}
+        component={AssignmentDetailAiFirstScreen}
         options={{ title: '作業' }}
       />
       <Stack.Screen

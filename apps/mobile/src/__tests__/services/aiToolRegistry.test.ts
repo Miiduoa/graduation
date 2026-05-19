@@ -28,6 +28,7 @@ jest.mock('firebase/functions', () => ({
 jest.mock('../../firebase', () => ({
   getFirebaseApp: jest.fn(() => ({})),
   getCloudFunctionRegion: jest.fn(() => 'asia-east1'),
+  getFunctionsInstance: jest.fn(() => ({})),
   getDb: jest.fn(() => ({})),
   hasUsableFirebaseConfig: jest.fn(() => false),
 }));

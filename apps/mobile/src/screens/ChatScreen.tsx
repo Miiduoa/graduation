@@ -43,6 +43,12 @@ import {
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
 import { recallChatMessage, toggleMessageReaction } from '../services/messaging';
 import { deriveDmConversationId } from '../utils/conversationAccess';
+import {
+  getPersona,
+  getPersonaConversationDetail,
+  getPersonaConversations,
+  isDemoPersonaUid,
+} from '../data/demoPersona';
 
 // ═══════ Types ═══════
 
@@ -237,6 +243,57 @@ export function ChatScreen(props: any) {
     }
   }, [peerName, peerOnline, peerTyping, props?.navigation]);
 
+  // ── Demo persona 模式：嚴格按身分隔離載入訊息 ──
+  useEffect(() => {
+    if (!(isFirebaseMockMode() || isDemoPersonaUid(myUid))) return;
+    if (!myUid) {
+      setLoading(false);
+      return;
+    }
+
+    // 解析對話 id：優先用 conversationIdParam，其次依 peerId 算
+    const tryIds: string[] = [];
+    if (conversationIdParam) tryIds.push(conversationIdParam);
+    if (peerId) {
+      tryIds.push([myUid, peerId].sort().join('__'));
+    }
+
+    let convo = null;
+    for (const id of tryIds) {
+      convo = getPersonaConversationDetail(myUid, id);
+      if (convo) break;
+    }
+
+    // fallback：找這個 viewer 跟 peer 之間任何已存在對話
+    if (!convo && peerId) {
+      const all = getPersonaConversations(myUid);
+      convo = all.find((c) => c.participants.includes(peerId)) ?? null;
+    }
+
+    if (convo) {
+      const mapped: Msg[] = convo.messages.map((m) => ({
+        id: m.id,
+        senderId: m.fromUid,
+        text: m.text,
+        type: 'text',
+        createdAt: { seconds: Math.floor(new Date(m.sentAt).getTime() / 1000) },
+        readBy: [m.fromUid, myUid].filter(Boolean) as string[],
+      }));
+      setMessages(mapped);
+
+      // 設定 peerName 給 demo persona
+      const otherUid = convo.participants.find((p) => p !== myUid);
+      if (otherUid) {
+        const peer = getPersona(otherUid);
+        if (peer) setPeerName(`${peer.fullName} · ${peer.shortLabel}`);
+      }
+    } else {
+      // 在 demo 模式下查無對話 → 顯示「此對話不屬於你」而非空白讓人困惑
+      setMessages([]);
+    }
+    setLoading(false);
+  }, [myUid, peerId, conversationIdParam]);
+
   // ── 訊息即時監聽 ──
   useEffect(() => {
     // 切換對話時，先把上一個對話的視覺狀態清空，避免在新對話 snapshot 抵達前
@@ -246,7 +303,8 @@ export function ChatScreen(props: any) {
     fetchedUids.current = new Set();
     setAccessError(null);
 
-    if (!convoKey || isFirebaseMockMode()) {
+    if (!convoKey || isFirebaseMockMode() || isDemoPersonaUid(myUid)) {
+      // demo 模式已在上方處理
       setLoading(false);
       activeConvoKeyRef.current = null;
       return;

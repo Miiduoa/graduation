@@ -1,5 +1,7 @@
 /** @jest-environment node */
 
+// hoisted: 須在 jest.mock 工廠執行前被宣告。
+// eslint-disable-next-line no-var
 var mockExpoConfig: { extra: Record<string, unknown> };
 
 jest.mock('expo-constants', () => {

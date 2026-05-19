@@ -1,0 +1,697 @@
+import { cacheDirectory, writeAsStringAsync, EncodingType } from 'expo-file-system/legacy';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+import { useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  FlatList,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+
+import * as XLSX from 'xlsx';
+
+import { useAuth } from '@/contexts/AuthContext';
+import { canCourseModerateGradesForum, useCourseRole } from '@/hooks/useCourseRole';
+import { supabase } from '@/lib/supabase';
+
+type Category = {
+  id: string;
+  name: string;
+  weight: number;
+};
+
+type GradeItem = {
+  id: string;
+  category_id: string;
+  source_type: 'assignment' | 'quiz';
+  source_id: string;
+  title: string;
+  max_points: number;
+  grade_categories?: { course_id: string };
+};
+
+type ScoreRow = {
+  score: number;
+  grade_items: {
+    title: string;
+    max_points: number;
+    source_type: string;
+    grade_categories: {
+      name: string;
+      weight: number;
+      course_id: string;
+    };
+  };
+};
+
+type MatrixStudent = { user_id: string; label: string };
+
+export default function CourseGradebookScreen() {
+  const { id: courseId } = useLocalSearchParams<{ id: string }>();
+  const { session } = useAuth();
+  const uid = session?.user.id;
+  const role = useCourseRole(courseId, uid);
+  const canStructureGrades = role === 'teacher';
+  const staffGradesView = canCourseModerateGradesForum(role);
+
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [items, setItems] = useState<GradeItem[]>([]);
+  const [scores, setScores] = useState<ScoreRow[]>([]);
+
+  const [matrixStudents, setMatrixStudents] = useState<MatrixStudent[]>([]);
+  const [matrixScores, setMatrixScores] = useState<Record<string, Record<string, number>>>({});
+
+  const [catName, setCatName] = useState('');
+  const [catWeight, setCatWeight] = useState('0.5');
+
+  const [pickedCategoryId, setPickedCategoryId] = useState<string | null>(null);
+  const [itemTitle, setItemTitle] = useState('');
+  const [itemMax, setItemMax] = useState('100');
+  const [sourceType, setSourceType] = useState<'assignment' | 'quiz'>('quiz');
+  const [sourceId, setSourceId] = useState('');
+
+  const [teacherRefreshing, setTeacherRefreshing] = useState(false);
+  const [studentRefreshing, setStudentRefreshing] = useState(false);
+
+  const pickedCategoryLabel = useMemo(() => {
+    const hit = categories.find((c) => c.id === pickedCategoryId);
+    return hit?.name ?? '（請先新增類別）';
+  }, [categories, pickedCategoryId]);
+
+  const refreshTeacher = useCallback(async () => {
+    if (!courseId || !staffGradesView) return;
+
+    const [{ data: cats, error: catErr }, { data: its, error: itemErr }, { data: studs }] = await Promise.all([
+      supabase.from('grade_categories').select('id, name, weight').eq('course_id', courseId).order('sort_order', { ascending: true }),
+      supabase
+        .from('grade_items')
+        .select('id, category_id, source_type, source_id, title, max_points, grade_categories!inner(course_id)')
+        .eq('grade_categories.course_id', courseId),
+      supabase
+        .from('course_members')
+        .select('user_id, profiles(display_name)')
+        .eq('course_id', courseId)
+        .eq('role', 'student'),
+    ]);
+
+    if (catErr) console.warn(catErr.message);
+    if (itemErr) console.warn(itemErr.message);
+
+    const catRows = (cats ?? []) as Category[];
+    setCategories(catRows);
+    const itemRows = ((its ?? []) as unknown) as GradeItem[];
+    setItems(itemRows);
+
+    const studRows = (studs ?? []) as unknown[];
+    const ms: MatrixStudent[] = studRows.map((raw) => {
+      const r = raw as { user_id?: string; profiles?: unknown };
+      const sid = String(r.user_id ?? '');
+      let dn: string | null = null;
+      const p = r.profiles;
+      if (p && typeof p === 'object' && !Array.isArray(p) && 'display_name' in p) {
+        const v = (p as { display_name?: unknown }).display_name;
+        dn = typeof v === 'string' ? v : null;
+      }
+      return { user_id: sid, label: dn ?? sid.slice(0, 8) };
+    });
+    setMatrixStudents(ms);
+
+    const itemIds = itemRows.map((i) => i.id);
+    if (itemIds.length === 0 || ms.length === 0) {
+      setMatrixScores({});
+    } else {
+      const { data: gsRows } = await supabase
+        .from('grade_scores')
+        .select('student_id, grade_item_id, score')
+        .in('grade_item_id', itemIds);
+
+      const mapped: Record<string, Record<string, number>> = {};
+      for (const s of ms) mapped[s.user_id] = {};
+      for (const row of gsRows ?? []) {
+        const sid = row.student_id as string;
+        const gid = row.grade_item_id as string;
+        const sc = Number(row.score);
+        if (!mapped[sid]) mapped[sid] = {};
+        mapped[sid][gid] = sc;
+      }
+      setMatrixScores(mapped);
+    }
+
+    setPickedCategoryId((prev) => {
+      if (prev && catRows.some((c) => c.id === prev)) return prev;
+      return catRows[0]?.id ?? null;
+    });
+  }, [courseId, staffGradesView]);
+
+  const refreshStudent = useCallback(async () => {
+    if (!courseId || !uid || staffGradesView) return;
+
+    const { data, error } = await supabase
+      .from('grade_scores')
+      .select(
+        `
+        score,
+        grade_items!inner (
+          title,
+          max_points,
+          source_type,
+          grade_categories!inner (
+            name,
+            weight,
+            course_id
+          )
+        )
+      `,
+      )
+      .eq('student_id', uid)
+      .eq('grade_items.grade_categories.course_id', courseId);
+
+    if (error) {
+      console.warn(error.message);
+      setScores([]);
+      return;
+    }
+
+    setScores((data ?? []) as unknown as ScoreRow[]);
+  }, [courseId, uid, staffGradesView]);
+
+  useEffect(() => {
+    refreshTeacher();
+  }, [refreshTeacher]);
+
+  useEffect(() => {
+    refreshStudent();
+  }, [refreshStudent]);
+
+  async function onTeacherRefresh() {
+    setTeacherRefreshing(true);
+    await refreshTeacher();
+    setTeacherRefreshing(false);
+  }
+
+  async function onStudentRefresh() {
+    setStudentRefreshing(true);
+    await refreshStudent();
+    setStudentRefreshing(false);
+  }
+
+  async function addCategory() {
+    if (!courseId || !canStructureGrades) return;
+    const name = catName.trim();
+    const w = Number(catWeight);
+    if (!name) {
+      Alert.alert('請輸入類別名稱');
+      return;
+    }
+    if (!Number.isFinite(w) || w < 0 || w > 1) {
+      Alert.alert('比重需為 0～1 的小數');
+      return;
+    }
+
+    const nextSort = categories.length;
+
+    const { error } = await supabase.from('grade_categories').insert({
+      course_id: courseId,
+      name,
+      weight: w,
+      sort_order: nextSort,
+    });
+
+    if (error) {
+      Alert.alert('新增類別失敗', error.message);
+      return;
+    }
+
+    setCatName('');
+    await refreshTeacher();
+  }
+
+  async function addGradeItem() {
+    if (!pickedCategoryId || !canStructureGrades) {
+      Alert.alert('請先選擇／建立成績類別');
+      return;
+    }
+
+    const title = itemTitle.trim();
+    const sid = sourceId.trim();
+    const max = Number(itemMax);
+
+    if (!title || !sid) {
+      Alert.alert('請輸入項目名稱與來源 UUID');
+      return;
+    }
+    if (!Number.isFinite(max) || max <= 0) {
+      Alert.alert('最高分需為正數');
+      return;
+    }
+
+    const { error } = await supabase.from('grade_items').insert({
+      category_id: pickedCategoryId,
+      source_type: sourceType,
+      source_id: sid,
+      title,
+      max_points: max,
+    });
+
+    if (error) {
+      Alert.alert('新增項目失敗', error.message);
+      return;
+    }
+
+    setItemTitle('');
+    setSourceId('');
+    await refreshTeacher();
+  }
+
+  async function saveMatrixScore(studentId: string, item: GradeItem, raw: string) {
+    const trimmed = raw.trim();
+    if (trimmed === '') {
+      const { error } = await supabase.from('grade_scores').delete().eq('grade_item_id', item.id).eq('student_id', studentId);
+      if (error) Alert.alert('清除分數失敗', error.message);
+      await refreshTeacher();
+      return;
+    }
+    const num = Number(trimmed);
+    if (!Number.isFinite(num) || num < 0) {
+      Alert.alert('分數格式錯誤', '請輸入非負數字');
+      await refreshTeacher();
+      return;
+    }
+    const capped = Math.min(num, Number(item.max_points));
+    const { error } = await supabase.from('grade_scores').upsert(
+      {
+        grade_item_id: item.id,
+        student_id: studentId,
+        score: capped,
+      },
+      { onConflict: 'grade_item_id,student_id' },
+    );
+    if (error) Alert.alert('儲存失敗', error.message);
+    await refreshTeacher();
+  }
+
+  function buildCsv(): string {
+    const headers = ['student_id', 'label', ...items.map((i) => `${i.title}|${i.id.slice(0, 8)}`)];
+    const lines = [headers.join(',')];
+    for (const st of matrixStudents) {
+      const row = [
+        st.user_id,
+        `"${String(st.label).replace(/"/g, '""')}"`,
+        ...items.map((it) => {
+          const v = matrixScores[st.user_id]?.[it.id];
+          return v === undefined || Number.isNaN(v) ? '' : String(v);
+        }),
+      ];
+      lines.push(row.join(','));
+    }
+    return lines.join('\n');
+  }
+
+  function buildPdfHtml(): string {
+    const escape = (s: string) =>
+      String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
+    const headers = ['學生', ...items.map((i) => escape(i.title))];
+    const headerRow = `<tr>${headers.map((h) => `<th>${h}</th>`).join('')}</tr>`;
+    const bodyRows = matrixStudents
+      .map((st) => {
+        const cells = [
+          escape(st.label),
+          ...items.map((it) => {
+            const v = matrixScores[st.user_id]?.[it.id];
+            return v === undefined || Number.isNaN(v) ? '' : escape(String(v));
+          }),
+        ];
+        return `<tr>${cells.map((c) => `<td>${c}</td>`).join('')}</tr>`;
+      })
+      .join('\n');
+
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"/>
+      <style>
+        body { font-family: system-ui, -apple-system, sans-serif; padding: 12px; }
+        h2 { margin-bottom: 8px; }
+        table { border-collapse: collapse; width: 100%; font-size: 11px; }
+        th, td { border: 1px solid #ccc; padding: 6px; text-align: left; }
+        th { background: #f3f4f6; }
+      </style></head><body>
+      <h2>成績矩陣（PDF）</h2>
+      <p style="font-size:11px;color:#666;">course ${courseId ?? ''}</p>
+      <table>${headerRow}${bodyRows}</table>
+      </body></html>`;
+  }
+
+  async function exportPdf() {
+    try {
+      if (matrixStudents.length === 0 || items.length === 0) {
+        Alert.alert('無資料', '請先有矩陣資料');
+        return;
+      }
+      const html = buildPdfHtml();
+      const file = await Print.printToFileAsync({ html });
+      const uri = file.uri;
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: '匯出成績 PDF' });
+      } else {
+        Alert.alert('PDF', uri);
+      }
+    } catch (e: unknown) {
+      Alert.alert('PDF 匯出失敗', e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function exportCsv() {
+    const csv = '\ufeff' + buildCsv();
+    try {
+      if (Platform.OS === 'web') {
+        await navigator.clipboard?.writeText(csv);
+        Alert.alert('已複製', 'CSV 已複製到剪貼簿');
+        return;
+      }
+      const base = cacheDirectory ?? '';
+      const path = `${base}grades-${courseId?.slice(0, 8)}.csv`;
+      await writeAsStringAsync(path, csv, { encoding: 'utf8' });
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) await Sharing.shareAsync(path, { mimeType: 'text/csv', dialogTitle: '匯出成績 CSV' });
+      else Alert.alert('CSV', csv.slice(0, 500));
+    } catch (e: unknown) {
+      Alert.alert('匯出失敗', e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function exportXlsx() {
+    try {
+      if (matrixStudents.length === 0 || items.length === 0) {
+        Alert.alert('無資料', '請先有矩陣資料');
+        return;
+      }
+      const header = ['student_id', 'label', ...items.map((i) => `${i.title}|${i.id.slice(0, 8)}`)];
+      const aoa: (string | number)[][] = [
+        header,
+        ...matrixStudents.map((st) => [
+          st.user_id,
+          st.label,
+          ...items.map((it) => {
+            const v = matrixScores[st.user_id]?.[it.id];
+            return v === undefined || Number.isNaN(v) ? '' : v;
+          }),
+        ]),
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, '成績');
+
+      if (Platform.OS === 'web') {
+        const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' }) as BlobPart;
+        const blob = new Blob([wbout], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `grades-${courseId ?? 'export'}.xlsx`;
+        a.click();
+        URL.revokeObjectURL(url);
+        Alert.alert('已下載', 'xlsx 已由瀏覽器儲存');
+        return;
+      }
+
+      const base = cacheDirectory ?? '';
+      const fname = `grades-${courseId?.slice(0, 8) ?? 'export'}.xlsx`;
+      const path = `${base}${fname}`;
+      const b64 = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' }) as string;
+      await writeAsStringAsync(path, b64, { encoding: EncodingType.Base64 });
+
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(path, {
+          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          dialogTitle: '匯出成績 xlsx',
+        });
+      } else {
+        Alert.alert('已寫入', path);
+      }
+    } catch (e: unknown) {
+      Alert.alert('xlsx 匯出失敗', e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  if (staffGradesView) {
+    return (
+      <ScrollView
+        style={styles.screen}
+        contentContainerStyle={{ paddingBottom: 48 }}
+        refreshControl={<RefreshControl refreshing={teacherRefreshing} onRefresh={onTeacherRefresh} />}>
+        <Text style={styles.title}>
+          {canStructureGrades ? '教師：成績簿設定' : '課程仲裁：成績矩陣'}
+        </Text>
+
+        {canStructureGrades ? (
+          <>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>新增成績類別（比重 0～1）</Text>
+              <TextInput placeholder="類別名稱（例如：平時）" style={styles.input} value={catName} onChangeText={setCatName} />
+              <TextInput placeholder="比重（例如：0.4）" style={styles.input} value={catWeight} onChangeText={setCatWeight} keyboardType="decimal-pad" />
+              <Pressable style={styles.primaryBtn} onPress={addCategory}>
+                <Text style={styles.primaryBtnText}>新增類別</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>新增成績項目（綁定作業／測驗 UUID）</Text>
+              <Text style={styles.hint}>提示：複製「測驗」或「作業」對應 UUID。</Text>
+
+              <Text style={styles.label}>作用類別：{pickedCategoryLabel}</Text>
+              <FlatList
+                horizontal
+                data={categories}
+                keyExtractor={(c) => c.id}
+                renderItem={({ item }) => (
+                  <Pressable
+                    style={[styles.chip, pickedCategoryId === item.id && styles.chipActive]}
+                    onPress={() => setPickedCategoryId(item.id)}>
+                    <Text style={[styles.chipText, pickedCategoryId === item.id && styles.chipTextActive]}>
+                      {item.name}（{item.weight}）
+                    </Text>
+                  </Pressable>
+                )}
+              />
+
+              <View style={styles.typeRow}>
+                <Pressable style={[styles.chip, sourceType === 'quiz' && styles.chipActive]} onPress={() => setSourceType('quiz')}>
+                  <Text style={[styles.chipText, sourceType === 'quiz' && styles.chipTextActive]}>quiz</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.chip, sourceType === 'assignment' && styles.chipActive]}
+                  onPress={() => setSourceType('assignment')}>
+                  <Text style={[styles.chipText, sourceType === 'assignment' && styles.chipTextActive]}>assignment</Text>
+                </Pressable>
+              </View>
+
+              <TextInput placeholder="項目標題（例如：第一次小考）" style={styles.input} value={itemTitle} onChangeText={setItemTitle} />
+              <TextInput placeholder="最高分（預設 100）" style={styles.input} value={itemMax} onChangeText={setItemMax} keyboardType="decimal-pad" />
+              <TextInput placeholder="來源 UUID" style={styles.input} value={sourceId} onChangeText={setSourceId} autoCapitalize="none" />
+
+              <Pressable style={styles.secondaryBtn} onPress={addGradeItem}>
+                <Text style={styles.secondaryBtnText}>新增項目</Text>
+              </Pressable>
+            </View>
+          </>
+        ) : null}
+
+        <Text style={styles.section}>類別列表</Text>
+        <FlatList
+          scrollEnabled={false}
+          data={categories}
+          keyExtractor={(c) => c.id}
+          renderItem={({ item }) => (
+            <View style={styles.row}>
+              <Text style={styles.rowTitle}>{item.name}</Text>
+              <Text style={styles.rowMeta}>比重：{item.weight}</Text>
+            </View>
+          )}
+        />
+
+        <Text style={styles.section}>項目列表</Text>
+        <FlatList
+          scrollEnabled={false}
+          data={items}
+          keyExtractor={(it) => it.id}
+          renderItem={({ item }) => (
+            <View style={styles.row}>
+              <Text style={styles.rowTitle}>{item.title}</Text>
+              <Text style={styles.rowMeta}>
+                {item.source_type}｜max {item.max_points}｜source {item.source_id.slice(0, 8)}…
+              </Text>
+            </View>
+          )}
+        />
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>全班成績矩陣（可編輯）</Text>
+          <Text style={styles.hint}>
+            點格子輸入分數後離開欄位即自動 upsert（超過該項最高分會自動截斷）；清空欄位可刪除此格成績。CSV 第一欄為 student_id，第二欄為 label，後面每欄對應「項目標題｜grade_item_id
+            前綴」，可直接與外部試算表對齊後再匯入自家流程。
+          </Text>
+          <Pressable style={styles.primaryBtn} onPress={exportCsv}>
+            <Text style={styles.primaryBtnText}>匯出 CSV／分享</Text>
+          </Pressable>
+          <Pressable style={[styles.secondaryBtn, { marginTop: 10 }]} onPress={exportPdf}>
+            <Text style={styles.secondaryBtnText}>匯出 PDF（試算表版面）</Text>
+          </Pressable>
+          <Pressable style={[styles.secondaryBtn, { marginTop: 10 }]} onPress={exportXlsx}>
+            <Text style={styles.secondaryBtnText}>匯出 xlsx／分享（或 Web 下載）</Text>
+          </Pressable>
+          <ScrollView horizontal showsHorizontalScrollIndicator>
+            <View>
+              <View style={styles.matrixRow}>
+                <Text style={[styles.matrixHead, styles.matrixSticky]}>學生</Text>
+                {items.map((it) => (
+                  <Text key={it.id} style={styles.matrixHead}>
+                    {it.title.slice(0, 6)}
+                  </Text>
+                ))}
+              </View>
+              {matrixStudents.map((st) => (
+                <View key={st.user_id} style={styles.matrixRow}>
+                  <Text style={[styles.matrixCell, styles.matrixSticky]} numberOfLines={1}>
+                    {st.label}
+                  </Text>
+                  {items.map((it) => (
+                    <TextInput
+                      key={`${st.user_id}-${it.id}-${matrixScores[st.user_id]?.[it.id] ?? '-'}`}
+                      style={styles.matrixInput}
+                      keyboardType="decimal-pad"
+                      defaultValue={
+                        matrixScores[st.user_id]?.[it.id] !== undefined ? String(matrixScores[st.user_id][it.id]) : ''
+                      }
+                      onEndEditing={(ev) => saveMatrixScore(st.user_id, it, ev.nativeEvent.text)}
+                    />
+                  ))}
+                </View>
+              ))}
+            </View>
+          </ScrollView>
+        </View>
+      </ScrollView>
+    );
+  }
+
+  return (
+    <View style={styles.screen}>
+      <Text style={styles.title}>我的成績細項</Text>
+      <FlatList
+        data={scores}
+        keyExtractor={(_, idx) => String(idx)}
+        refreshControl={<RefreshControl refreshing={studentRefreshing} onRefresh={onStudentRefresh} />}
+        ListEmptyComponent={<Text style={styles.empty}>尚無成績資料。</Text>}
+        renderItem={({ item }) => (
+          <View style={styles.row}>
+            <Text style={styles.rowTitle}>{item.grade_items.title}</Text>
+            <Text style={styles.rowMeta}>
+              類別：{item.grade_items.grade_categories.name}（比重 {item.grade_items.grade_categories.weight}）
+            </Text>
+            <Text style={styles.scoreLine}>
+              得分：{item.score} / {item.grade_items.max_points}
+            </Text>
+          </View>
+        )}
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, padding: 16 },
+  title: { fontSize: 20, fontWeight: '900', marginBottom: 12 },
+  card: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#ddd',
+    borderRadius: 12,
+    padding: 14,
+    gap: 10,
+    marginBottom: 12,
+  },
+  cardTitle: { fontWeight: '900' },
+  hint: { color: '#6b7280', fontSize: 12 },
+  label: { fontWeight: '800' },
+  input: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#ccc',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  primaryBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#2563eb',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  primaryBtnText: { color: '#fff', fontWeight: '900' },
+  secondaryBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#111827',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  secondaryBtnText: { color: '#fff', fontWeight: '900' },
+  section: { marginTop: 8, marginBottom: 6, fontWeight: '900' },
+  row: {
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#eee',
+    gap: 6,
+  },
+  rowTitle: { fontSize: 16, fontWeight: '800' },
+  rowMeta: { color: '#6b7280', fontSize: 12 },
+  scoreLine: { fontWeight: '800' },
+  empty: { color: '#6b7280', marginTop: 18 },
+  chip: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#ddd',
+    marginRight: 8,
+    backgroundColor: '#fafafa',
+  },
+  chipActive: { borderColor: '#2563eb', backgroundColor: '#eff6ff' },
+  chipText: { fontSize: 12, fontWeight: '800', color: '#111827' },
+  chipTextActive: { color: '#1d4ed8' },
+  typeRow: { flexDirection: 'row', gap: 8 },
+  matrixRow: { flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#eee' },
+  matrixHead: {
+    width: 72,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    fontWeight: '900',
+    fontSize: 11,
+    backgroundColor: '#f3f4f6',
+  },
+  matrixSticky: { width: 100, backgroundColor: '#e5e7eb' },
+  matrixCell: { width: 72, paddingVertical: 8, paddingHorizontal: 4, fontSize: 12 },
+  matrixInput: {
+    width: 72,
+    minHeight: 36,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+    fontSize: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#d1d5db',
+    backgroundColor: '#fff',
+  },
+});

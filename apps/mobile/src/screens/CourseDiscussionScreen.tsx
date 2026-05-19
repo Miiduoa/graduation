@@ -30,6 +30,8 @@ import {
 import { isDemoCourseId, demoFetchDiscussions } from '../data/demoCoursesAdapter';
 import { theme } from '../ui/theme';
 import { EmptyState } from '../ui/components';
+import { useAuth } from '../state/auth';
+import { emitDiscussionPosted, emitHelpRequested } from '../services/roleEventBus';
 import {
   CourseChipErrorBanner,
   CourseChipHeader,
@@ -38,6 +40,7 @@ import {
   courseChipScrollContentStyle,
 } from '../ui/courseChipShell';
 import { useNavigation } from '@react-navigation/native';
+import { safeNavigate } from '../utils/safeNavigate';
 
 type RouteProps = {
   route?: {
@@ -50,6 +53,7 @@ type RouteProps = {
 
 export default function CourseDiscussionScreen(props: RouteProps) {
   const navigation = useNavigation<any>();
+  const auth = useAuth();
   const groupName = props.route?.params?.groupName ?? '課程討論';
   const groupIdStr = props.route?.params?.groupId ?? '';
   const courseId = Number(groupIdStr.replace(/^tc:/, '')) || 0;
@@ -131,6 +135,40 @@ export default function CourseDiscussionScreen(props: RouteProps) {
         try {
           const { onDiscussionPosted } = await import('../services/companionHooks');
           onDiscussionPosted({ threadId: String(newId) });
+        } catch {
+          /* swallow */
+        }
+        // ─ Demo：emit discussion_posted 給 TA + 老師 ─
+        try {
+          await emitDiscussionPosted({
+            actorUid: auth.user?.uid ?? 'demo_student_kuchih',
+            actorName: auth.profile?.displayName ?? '顧晉瑋',
+            targetUids: ['demo_teacher_chang', 'demo_ta_lin'],
+            courseId,
+            courseName: groupName ?? '課程',
+            payload: {
+              threadId: String(newId),
+              threadTitle: newTitle.trim(),
+              authorName: auth.profile?.displayName ?? '顧晉瑋',
+              preview: (newBody.trim() || '').slice(0, 80),
+            },
+          });
+          // 標題含問號 / 「為什麼」/「怎麼」/ HELP 標記 → 升級為 help_requested
+          const looksLikeHelp = /[?？]|為什麼|怎麼|不會|不懂|help|HELP/i.test(newTitle + ' ' + newBody);
+          if (looksLikeHelp) {
+            await emitHelpRequested({
+              actorUid: auth.user?.uid ?? 'demo_student_kuchih',
+              actorName: auth.profile?.displayName ?? '顧晉瑋',
+              targetUids: ['demo_ta_lin', 'demo_teacher_chang'],
+              courseId,
+              courseName: groupName ?? '課程',
+              payload: {
+                topic: newTitle.trim().slice(0, 40),
+                preview: (newBody.trim() || newTitle.trim()).slice(0, 120),
+                urgency: /緊急|急|要交|今天/i.test(newTitle + ' ' + newBody) ? 'high' : 'medium',
+              },
+            });
+          }
         } catch {
           /* swallow */
         }
@@ -352,7 +390,7 @@ export default function CourseDiscussionScreen(props: RouteProps) {
                 opacity: pressed ? 0.92 : 1,
               })}
               onPress={() => {
-                navigation.navigate('DiscussionThreadDetail', {
+                safeNavigate(navigation, 'DiscussionThreadDetail', {
                   groupId: groupIdStr || `tc:${courseId}`,
                   groupName,
                   discussionId: t.id,

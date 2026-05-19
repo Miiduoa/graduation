@@ -91,6 +91,6 @@ const styles = StyleSheet.create({
   btnCompact: { paddingVertical: 6, paddingHorizontal: 10 },
   btnOff: { borderColor: theme.colors.border, backgroundColor: theme.colors.surface2 },
   btnOn: { borderColor: theme.colors.accent, backgroundColor: theme.colors.accentSoft },
-  txt: { fontSize: 13, fontWeight: '800', color: theme.colors.textSecondary },
+  txt: { fontSize: 13, fontWeight: '700', color: theme.colors.textSecondary },
   txtOn: { color: theme.colors.accent },
 });

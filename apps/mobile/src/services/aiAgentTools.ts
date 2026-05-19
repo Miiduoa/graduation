@@ -13,6 +13,10 @@
  */
 
 import { getDataSource, hasDataSource, type DataSource } from '../data/source';
+// LMS v2: 改 import 自 supabaseLmsCache facade。
+// flag OFF 時:facade 自動委派回 puDataCache (TronClass),行為與舊版完全相同。
+// flag ON  時:同樣的函數會自動改打 Supabase,AI 立即拿到新 LMS 資料。
+// 介面 100% 對齊,所有原本 import 語法都不用改。
 import {
   getAnyCachedCourses as getCachedCourses,
   getAnyCachedGrades as getCachedGrades,
@@ -32,7 +36,7 @@ import {
   getAnyCachedTCCourseMembers as getCachedTCCourseMembers,
   getAnyCachedTCCourseAnnouncements as getCachedTCCourseAnnouncements,
   syncAllData,
-} from './puDataCache';
+} from './supabaseLmsCache';
 import type { CampusActorRole } from '../data';
 import {
   getPuDiningMenuItems,
@@ -157,11 +161,21 @@ async function placeOrderWith(
   if (!Number.isFinite(quantity) || quantity < 1) {
     return { success: false, isWrite: true, summary: '請提供有效的數量（quantity），至少為 1。' };
   }
-  const qty = Math.floor(quantity);
-  const price = matched.price ?? 0;
-  if (typeof price !== 'number') {
-    return { success: false, isWrite: true, summary: '此品項缺少可下單價格，無法建立訂單。' };
+  // 異常數量保護：一個人不太可能一次訂 > 20 份；交回 clarification 而不是直接送單
+  // 避免：使用者打錯字 / AI 誤判 ordinal 為 quantity（雖然 detectQuantity 已修，但雙保險）
+  if (quantity > 20) {
+    return {
+      success: false,
+      isWrite: false,
+      summary: `你想點「${matched.name}」${quantity} 份嗎？一次超過 20 份是大量訂購，我先不直接下單。\n\n如果是為團體訂餐，請改到餐廳頁面確認；如果只是想點一份，請改說「點一份${matched.name}」。`,
+    };
   }
+  const qty = Math.floor(quantity);
+  // price 可能是 number、未定義、或非數字字串 — 取 number；其他情況視為「店家未公告」(0)
+  const rawPrice: unknown = matched.price;
+  const price: number =
+    typeof rawPrice === 'number' && Number.isFinite(rawPrice) ? rawPrice : 0;
+  // totalAmount = 0 時，下游 OrderSuccessCard 會顯示「金額待店家報價」而不是 $0
   const totalAmount = price * qty;
 
   if (!hasDataSource()) {

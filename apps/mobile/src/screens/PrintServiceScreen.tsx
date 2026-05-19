@@ -337,7 +337,7 @@ export function PrintServiceScreen(props: any) {
             }}
           >
             <View style={{ flex: 1 }}>
-              <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: '800' }}>
+              <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: '700' }}>
                 {greeting.text}
               </Text>
               <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>
@@ -370,7 +370,7 @@ export function PrintServiceScreen(props: any) {
                 alignItems: 'center',
               }}
             >
-              <Text style={{ color: theme.colors.accent, fontSize: 22, fontWeight: '800' }}>
+              <Text style={{ color: theme.colors.accent, fontSize: 22, fontWeight: '700' }}>
                 {cardBalance}
               </Text>
               <Text style={{ color: theme.colors.accent, fontSize: 11, marginTop: 2 }}>
@@ -386,7 +386,7 @@ export function PrintServiceScreen(props: any) {
                 alignItems: 'center',
               }}
             >
-              <Text style={{ color: theme.colors.success, fontSize: 22, fontWeight: '800' }}>
+              <Text style={{ color: theme.colors.success, fontSize: 22, fontWeight: '700' }}>
                 {ecoPoints}
               </Text>
               <Text style={{ color: theme.colors.success, fontSize: 11, marginTop: 2 }}>
@@ -402,7 +402,7 @@ export function PrintServiceScreen(props: any) {
                 alignItems: 'center',
               }}
             >
-              <Text style={{ color: theme.colors.text, fontSize: 22, fontWeight: '800' }}>
+              <Text style={{ color: theme.colors.text, fontSize: 22, fontWeight: '700' }}>
                 {totalPrintedPages}
               </Text>
               <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>
@@ -637,7 +637,7 @@ export function PrintServiceScreen(props: any) {
               <Text
                 style={{
                   color: theme.colors.text,
-                  fontWeight: '800',
+                  fontWeight: '700',
                   fontSize: 16,
                   minWidth: 28,
                   textAlign: 'center',
@@ -700,7 +700,7 @@ export function PrintServiceScreen(props: any) {
                   <Text
                     style={{
                       color: idx === 0 ? '#fff' : theme.colors.muted,
-                      fontWeight: '800',
+                      fontWeight: '700',
                       fontSize: 13,
                     }}
                   >
@@ -732,7 +732,7 @@ export function PrintServiceScreen(props: any) {
                 </View>
                 {rec.station.queueLength > 0 && (
                   <View style={{ alignItems: 'center' }}>
-                    <Text style={{ color: theme.colors.warning, fontWeight: '800', fontSize: 16 }}>
+                    <Text style={{ color: theme.colors.warning, fontWeight: '700', fontSize: 16 }}>
                       {rec.station.queueLength}
                     </Text>
                     <Text style={{ color: theme.colors.muted, fontSize: 10 }}>排隊</Text>
@@ -792,7 +792,7 @@ export function PrintServiceScreen(props: any) {
                     總計
                   </Text>
                   <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={{ color: theme.colors.accent, fontWeight: '800', fontSize: 20 }}>
+                    <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 20 }}>
                       {cost.points} 點
                     </Text>
                     <Text style={{ color: theme.colors.muted, fontSize: 11 }}>
@@ -943,7 +943,7 @@ export function PrintServiceScreen(props: any) {
           label="可用"
         />
         <StatChip
-          color="#F59E0B"
+          color="#FF9500"
           count={stations.filter((s) => s.status === 'busy').length}
           label="忙碌"
         />
@@ -1090,7 +1090,7 @@ export function PrintServiceScreen(props: any) {
               alignItems: 'center',
             }}
           >
-            <Text style={{ color: theme.colors.accent, fontSize: 28, fontWeight: '800' }}>
+            <Text style={{ color: theme.colors.accent, fontSize: 28, fontWeight: '700' }}>
               {cardBalance}
             </Text>
             <Text style={{ color: theme.colors.accent, fontSize: 12, marginTop: 4 }}>目前點數</Text>
@@ -1117,7 +1117,7 @@ export function PrintServiceScreen(props: any) {
               alignItems: 'center',
             }}
           >
-            <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '800' }}>
+            <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '700' }}>
               {totalPrintedPages}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>
@@ -1270,7 +1270,7 @@ export function PrintServiceScreen(props: any) {
           >
             <Ionicons name={currentEcoLevel.icon as any} size={36} color={currentEcoLevel.color} />
           </View>
-          <Text style={{ color: theme.colors.text, fontSize: 20, fontWeight: '800' }}>
+          <Text style={{ color: theme.colors.text, fontSize: 20, fontWeight: '700' }}>
             {currentEcoLevel.name}
           </Text>
           <Text style={{ color: theme.colors.muted, fontSize: 13 }}>
@@ -1402,7 +1402,7 @@ export function PrintServiceScreen(props: any) {
                   backgroundColor: theme.colors.successSoft,
                 }}
               >
-                <Text style={{ color: theme.colors.success, fontWeight: '800', fontSize: 13 }}>
+                <Text style={{ color: theme.colors.success, fontWeight: '700', fontSize: 13 }}>
                   +{action.points}
                 </Text>
               </View>
@@ -1423,7 +1423,7 @@ export function PrintServiceScreen(props: any) {
           }}
         >
           <Ionicons name="earth" size={40} color={theme.colors.success} />
-          <Text style={{ color: theme.colors.success, fontSize: 16, fontWeight: '800' }}>
+          <Text style={{ color: theme.colors.success, fontSize: 16, fontWeight: '700' }}>
             已節省 {Math.floor(totalPrintedPages * 0.3)} 張紙
           </Text>
           <Text style={{ color: theme.colors.success, fontSize: 12 }}>
@@ -1484,7 +1484,7 @@ export function PrintServiceScreen(props: any) {
               borderBottomColor: theme.colors.border,
             }}
           >
-            <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: '800' }}>
+            <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: '700' }}>
               常見問題
             </Text>
             <Pressable onPress={() => setShowFAQ(false)}>
@@ -1610,7 +1610,7 @@ export function PrintServiceScreen(props: any) {
                 borderBottomColor: theme.colors.border,
               }}
             >
-              <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: '800' }}>
+              <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: '700' }}>
                 {selectedStation.name}
               </Text>
               <Pressable onPress={() => setShowStationDetail(false)}>
@@ -1779,7 +1779,7 @@ function ToggleSwitch({ value, onToggle }: { value: boolean; onToggle: () => voi
 
 /** 迷你耗材條（推薦卡片用） */
 function MiniBar({ label, value }: { label: string; value: number }) {
-  const color = value > 50 ? theme.colors.success : value > 20 ? '#F59E0B' : theme.colors.danger;
+  const color = value > 50 ? theme.colors.success : value > 20 ? '#FF9500' : theme.colors.danger;
   return (
     <View style={{ flex: 1, gap: 2 }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
@@ -1795,7 +1795,7 @@ function MiniBar({ label, value }: { label: string; value: number }) {
 
 /** 耗材進度條（機器詳情用） */
 function SupplyBar({ label, value, icon }: { label: string; value: number; icon: string }) {
-  const color = value > 50 ? theme.colors.success : value > 20 ? '#F59E0B' : theme.colors.danger;
+  const color = value > 50 ? theme.colors.success : value > 20 ? '#FF9500' : theme.colors.danger;
   return (
     <View style={{ flex: 1, gap: 4 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
@@ -1869,7 +1869,7 @@ function getJobStatusLabel(status: PrintJob['status']): string {
 function getJobStatusColor(status: PrintJob['status']): string {
   const m: Record<string, string> = {
     pending: theme.colors.muted,
-    printing: '#F59E0B',
+    printing: '#FF9500',
     completed: theme.colors.success,
     failed: theme.colors.danger,
     cancelled: theme.colors.muted,

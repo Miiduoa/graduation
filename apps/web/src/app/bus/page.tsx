@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 
@@ -26,7 +27,7 @@ const DEFAULT_ROUTES: RouteDisplay[] = [
   {
     id: '1',
     name: '校園環線',
-    color: '#5E6AD2',
+    color: '#5856D6',
     stops: ['校門口', '體育館', '圖書館', '工學院', '宿舍', '校門口'],
     interval: '10–15 分',
     firstBus: '07:00',
@@ -62,14 +63,14 @@ const DEFAULT_ROUTES: RouteDisplay[] = [
 ];
 
 const DEFAULT_UPCOMING: UpcomingBus[] = [
-  { route: '校園環線', stop: '校門口', arrival: '8 分鐘', minutesAway: 8, color: '#5E6AD2' },
+  { route: '校園環線', stop: '校門口', arrival: '8 分鐘', minutesAway: 8, color: '#5856D6' },
   { route: '捷運接駁線', stop: '校門口', arrival: '12 分鐘', minutesAway: 12, color: '#34C759' },
   { route: '宿舍快線', stop: '校門口', arrival: '18 分鐘', minutesAway: 18, color: '#FF9500' },
-  { route: '校園環線', stop: '校門口', arrival: '23 分鐘', minutesAway: 23, color: '#5E6AD2' },
+  { route: '校園環線', stop: '校門口', arrival: '23 分鐘', minutesAway: 23, color: '#5856D6' },
 ];
 
 export default function BusPage(props: { searchParams?: { school?: string; schoolId?: string } }) {
-  const { schoolName } = resolveSchoolPageContext(props.searchParams);
+  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
   const [selectedRoute, setSelectedRoute] = useState<string>('all');
   const [now, setNow] = useState(new Date());
 
@@ -84,6 +85,33 @@ export default function BusPage(props: { searchParams?: { school?: string; schoo
   return (
     <SiteShell title="公車" subtitle="校園接駁即時資訊" schoolName={schoolName}>
       <div className="pageStack">
+        {/* AI 推薦卡 */}
+        <Link
+          href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('今天最近的公車到逢甲商圈幾點？')}`}
+          className="card"
+          style={{
+            padding: '14px 18px',
+            background: 'linear-gradient(135deg, rgba(88,86,214,0.10) 0%, rgba(88,86,214,0.06) 100%)',
+            border: '1px solid rgba(88,86,214,0.28)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 14,
+            textDecoration: 'none',
+            color: 'inherit',
+          }}
+        >
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#5856D6', marginBottom: 3 }}>
+              🤖 AI 助手 · 路線推薦
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>
+              想知道下一班幾點到哪裡？問 AI 規劃最快的接駁路線。
+            </div>
+          </div>
+          <span style={{ fontSize: 12, color: '#5856D6', fontWeight: 600 }}>問 AI →</span>
+        </Link>
+
         {/* ── Next Bus Hero ── */}
         <div
           className="card"
@@ -118,7 +146,7 @@ export default function BusPage(props: { searchParams?: { school?: string; schoo
                 下一班 · {timeStr}
               </p>
               <div
-                style={{ fontSize: 64, fontWeight: 900, letterSpacing: '-0.06em', lineHeight: 1 }}
+                style={{ fontSize: 64, fontWeight: 700, letterSpacing: '-0.06em', lineHeight: 1 }}
               >
                 {nextBus.minutesAway}
                 <span style={{ fontSize: 28, fontWeight: 700, marginLeft: 4 }}>分</span>
@@ -139,7 +167,7 @@ export default function BusPage(props: { searchParams?: { school?: string; schoo
                     border: '1px solid rgba(255,255,255,0.25)',
                   }}
                 >
-                  <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.05em' }}>
+                  <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.05em' }}>
                     {b.minutesAway}
                     <span style={{ fontSize: 14 }}>分</span>
                   </div>
@@ -176,7 +204,7 @@ export default function BusPage(props: { searchParams?: { school?: string; schoo
                   <div
                     style={{
                       fontSize: 20,
-                      fontWeight: 800,
+                      fontWeight: 700,
                       color: b.color,
                       letterSpacing: '-0.04em',
                     }}
@@ -317,6 +345,35 @@ export default function BusPage(props: { searchParams?: { school?: string; schoo
               </div>
             ),
           )}
+        </div>
+
+        {/* ── AI 公車查詢入口 ── */}
+        <div
+          style={{
+            padding: '14px 18px',
+            borderRadius: 'var(--radius)',
+            background: 'linear-gradient(135deg, rgba(88,86,214,0.10) 0%, rgba(90,200,250,0.07) 100%)',
+            border: '1px solid rgba(88,86,214,0.22)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 14,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand)', marginBottom: 3 }}>🤖 AI 公車助理</div>
+            <div style={{ fontSize: 13, color: 'var(--text)' }}>
+              想知道下一班到宿舍或圖書館的公車幾分鐘後到？讓 AI 幫你查詢。
+            </div>
+          </div>
+          <a
+            href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('現在最近一班到圖書館的校園公車是幾分鐘後到？途中要在哪一站換車？')}`}
+            className="btn"
+            style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
+          >
+            問 AI →
+          </a>
         </div>
       </div>
     </SiteShell>

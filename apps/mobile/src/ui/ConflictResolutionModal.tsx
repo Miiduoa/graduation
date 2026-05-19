@@ -76,13 +76,13 @@ function ConflictItem({
             width: 40,
             height: 40,
             borderRadius: 20,
-            backgroundColor: '#F59E0B20',
+            backgroundColor: '#FF950020',
             alignItems: 'center',
             justifyContent: 'center',
             marginRight: 12,
           }}
         >
-          <Ionicons name="git-compare" size={20} color="#F59E0B" />
+          <Ionicons name="git-compare" size={20} color="#FF9500" />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 15 }}>
@@ -124,7 +124,7 @@ function ConflictItem({
             </View>
             <View style={{ width: 1, backgroundColor: theme.colors.border }} />
             <View style={{ flex: 1 }}>
-              <Text style={{ color: '#3B82F6', fontSize: 10, marginBottom: 2 }}>伺服器</Text>
+              <Text style={{ color: '#5856D6', fontSize: 10, marginBottom: 2 }}>伺服器</Text>
               <Text style={{ color: theme.colors.text, fontSize: 13 }} numberOfLines={2}>
                 {formatValue(conflict.serverData[field])}
               </Text>
@@ -175,19 +175,19 @@ function ConflictItem({
             paddingVertical: 10,
             paddingHorizontal: 12,
             borderRadius: theme.radius.md,
-            backgroundColor: '#3B82F620',
+            backgroundColor: '#5856D620',
             borderWidth: 1,
-            borderColor: '#3B82F650',
+            borderColor: '#5856D650',
             alignItems: 'center',
             opacity: resolving ? 0.5 : 1,
           }}
         >
           {resolving && selectedResolution === 'keep_server' ? (
-            <ActivityIndicator size="small" color="#3B82F6" />
+            <ActivityIndicator size="small" color="#5856D6" />
           ) : (
             <>
-              <Ionicons name="cloud" size={16} color="#3B82F6" />
-              <Text style={{ color: '#3B82F6', fontSize: 12, fontWeight: '600', marginTop: 4 }}>
+              <Ionicons name="cloud" size={16} color="#5856D6" />
+              <Text style={{ color: '#5856D6', fontSize: 12, fontWeight: '600', marginTop: 4 }}>
                 保留伺服器
               </Text>
             </>
@@ -252,12 +252,12 @@ export function ConflictResolutionModal({
                   width: 40,
                   height: 40,
                   borderRadius: 20,
-                  backgroundColor: '#F59E0B20',
+                  backgroundColor: '#FF950020',
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}
               >
-                <Ionicons name="warning" size={20} color="#F59E0B" />
+                <Ionicons name="warning" size={20} color="#FF9500" />
               </View>
               <View>
                 <Text style={{ color: theme.colors.text, fontSize: 17, fontWeight: '700' }}>
