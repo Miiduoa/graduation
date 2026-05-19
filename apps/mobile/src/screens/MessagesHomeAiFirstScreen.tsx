@@ -1,8 +1,10 @@
 /**
  * Campus AI-First — 訊息對話列表 V2（私訊 + 群組）
+ *
+ * 未讀 chip 用 useUnreadMessagingCount，不再 hardcoded（fixes #8）。
  */
 import React, { useState } from 'react';
-import { View, Text } from 'react-native';
+import { View } from 'react-native';
 import {
   AIDetailScreen,
   AIInsightBanner,
@@ -12,21 +14,27 @@ import {
   AILegacyLink,
   aiTokens,
 } from '../ui/aiFirst';
+import { useUnreadMessagingCount } from '../hooks/useUnreadMessagingCount';
 
 type Filter = 'all' | 'unread' | 'private' | 'group';
 
 export default function MessagesHomeAiFirstScreen(props: any) {
   const navigation = props?.navigation;
   const [filter, setFilter] = useState<Filter>('all');
+  const unread = useUnreadMessagingCount();
 
   return (
     <AIDetailScreen
       title="訊息"
-      subtitle="5 個未讀 · 12 個對話"
+      subtitle={`${unread} 個未讀 · 12 個對話`}
       onBack={() => navigation?.goBack?.()}
     >
       <AIInsightBanner
-        text="5 個未讀中有 1 個重要：林助教問你週三能不能幫忙。其他都是社團群組訊息"
+        text={
+          unread > 0
+            ? `${unread} 個未讀中有 1 個重要：林助教問你週三能不能幫忙。其他都是社團群組訊息`
+            : '目前沒有未讀訊息 ✨'
+        }
         source="AI · 對話重要性"
         confidence="high"
       />
@@ -41,7 +49,11 @@ export default function MessagesHomeAiFirstScreen(props: any) {
         }}
       >
         <AIChip label="全部 12" active={filter === 'all'} onPress={() => setFilter('all')} />
-        <AIChip label="未讀 5" active={filter === 'unread'} onPress={() => setFilter('unread')} />
+        <AIChip
+          label={unread > 0 ? `未讀 ${unread}` : '未讀'}
+          active={filter === 'unread'}
+          onPress={() => setFilter('unread')}
+        />
         <AIChip label="私訊 7" active={filter === 'private'} onPress={() => setFilter('private')} />
         <AIChip label="群組 5" active={filter === 'group'} onPress={() => setFilter('group')} />
       </View>
