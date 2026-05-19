@@ -460,8 +460,10 @@ export function CreditAuditScreen(props: any) {
         )}
 
         {/* ═══ 分類進度 ═══ */}
-        <Card title="各類學分進度" subtitle={currentDept.shortName}>
-          {categoryOrder.map((k) => {
+        {currentDept && (
+          <>
+          <Card title="各類學分進度" subtitle={currentDept.shortName}>
+            {categoryOrder.map((k) => {
             const b = byCategory[k];
             // 體育和服務學習看門數，其他看學分
             const isCountBased = k === 'pe' || k === 'service';
@@ -542,14 +544,16 @@ export function CreditAuditScreen(props: any) {
                   </Text>
                 )}
               </View>
-            </Card>
+            );
+          })}
+          </Card>
 
-            {/* ── 資料更新時間 ── */}
-            {(campusCreditAudit as any).fetchedAt && (
-              <Text style={{ color: theme.colors.muted, fontSize: 11, textAlign: "center", marginTop: 4 }}>
-                資料更新時間：{new Date((campusCreditAudit as any).fetchedAt).toLocaleString("zh-TW")}
-              </Text>
-            )}
+          {/* ── 資料更新時間 ── */}
+          {(campusCreditAudit as any).fetchedAt && (
+            <Text style={{ color: theme.colors.muted, fontSize: 11, textAlign: "center", marginTop: 4 }}>
+              資料更新時間：{new Date((campusCreditAudit as any).fetchedAt).toLocaleString("zh-TW")}
+            </Text>
+          )}
           </>
         )}
 

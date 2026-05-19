@@ -767,30 +767,15 @@ export class PUAdapter extends BaseApiAdapter {
         }
         console.warn("[PUAdapter] getCreditAudit: direct fetch result:", fresh.success, "isV2:", isV2(fresh.data));
       } else if (!this.useDirectMode) {
-        type CreditAuditResponse = {
-          success?: boolean;
-          creditAudit?: PuCreditAuditPayload | null;
-        };
-
-    const data = await this.fetchData<GradeResponse>('grades', { semester });
-    if (!data?.success || !data.grades) return [];
-
-    return data.grades.map(
-      (item, i): Grade => ({
-        id: `pu-grade-${item.semester}-${i}`,
-        courseId: `pu-crs-${item.semester}-${i}`,
-        courseName: item.courseName,
-        courseNameEn: item.courseNameEn || undefined,
-        courseCode: undefined,
-        credits: item.credits,
-        grade: typeof item.score === 'number' ? item.score : parseFloat(String(item.score)) || 0,
-        gradePoint: 0,
-        semester: item.semester,
-        userId: studentId || this.studentId || '',
-        courseType: item.courseType || undefined,
-        courseClass: item.class || undefined,
-      }),
-    );
+        // 註:此分支原本要呼叫 backend REST API 取 v2 creditAudit;
+        // 但因 merge conflict 半段被誤覆寫成 listGrades 主體 — 暫時 noop,
+        // 改走 cache(上方已試過)+ direct mode(若啟用)。
+        // TODO:回填 REST endpoint 呼叫。
+      }
+    } catch (err) {
+      console.warn("[PUAdapter] getCreditAudit error:", err);
+    }
+    return null;
   }
 
   // ---------------------------------------------------------------------------
