@@ -17,6 +17,7 @@ import type { CourseSpace } from '../data';
 import { useAsyncList } from '../hooks/useAsyncList';
 import { useDataSource } from '../hooks/useDataSource';
 import { useAuth } from '../state/auth';
+import { usePermissions } from '../hooks/usePermissions';
 import { useSchool } from '../state/school';
 import { useSchedule } from '../state/schedule';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
@@ -424,6 +425,7 @@ function TCLoginSection(props: { onSuccess: () => void; profile: any }) {
 // 包含：課綱查詢 / AI 選課助理 / 學分檢核
 
 function CourseToolsSection(props: { nav: any; variant: 'compact' | 'empty' }) {
+  const { isStudent } = usePermissions();
   const tools = [
     {
       id: 'catalog',
@@ -441,14 +443,15 @@ function CourseToolsSection(props: { nav: any; variant: 'compact' | 'empty' }) {
       color: '#FF6B9A',
       onPress: () => props.nav?.navigate?.('AICourseAdvisor'),
     },
-    {
+    // 學分檢核僅學生可見
+    ...(isStudent ? [{
       id: 'credit',
       title: '學分檢核',
       subtitle: '畢業進度',
       icon: 'calculator-outline' as const,
       color: theme.colors.accent,
       onPress: () => props.nav?.navigate?.('CreditAuditStack'),
-    },
+    }] : []),
   ];
 
   return (
@@ -1776,6 +1779,7 @@ export function CoursesHomeScreen(props: any) {
   const auth = useAuth();
   const { school } = useSchool();
   const schedule = useSchedule();
+  const { isStudent } = usePermissions();
 
   const [tab, setTab] = useState<TabKey>(initialTab);
   const [refreshing, setRefreshing] = useState(false);
@@ -1982,9 +1986,11 @@ export function CoursesHomeScreen(props: any) {
               </View>
             </View>
             <View style={{ flexDirection: 'row', gap: 8 }}>
-              <Pressable onPress={() => nav?.navigate?.('CreditAuditStack')} style={({ pressed }) => ({ width: 38, height: 38, borderRadius: 12, backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border, alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.7 : 1 })}>
-                <Ionicons name="calculator-outline" size={18} color={theme.colors.accent} />
-              </Pressable>
+              {isStudent && (
+                <Pressable onPress={() => nav?.navigate?.('CreditAuditStack')} style={({ pressed }) => ({ width: 38, height: 38, borderRadius: 12, backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border, alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.7 : 1 })}>
+                  <Ionicons name="calculator-outline" size={18} color={theme.colors.accent} />
+                </Pressable>
+              )}
             </View>
           </View>
           <SegmentedControl options={TAB_OPTIONS} selected={tab} onChange={(k: any) => setTab(k as TabKey)} />
@@ -2037,22 +2043,24 @@ export function CoursesHomeScreen(props: any) {
             </View>
           </View>
           <View style={{ flexDirection: 'row', gap: 8 }}>
-            <Pressable
-              onPress={() => nav?.navigate?.('CreditAuditStack')}
-              style={({ pressed }) => ({
-                width: 38,
-                height: 38,
-                borderRadius: 12,
-                backgroundColor: theme.colors.surface,
-                borderWidth: 1,
-                borderColor: theme.colors.border,
-                alignItems: 'center',
-                justifyContent: 'center',
-                opacity: pressed ? 0.7 : 1,
-              })}
-            >
-              <Ionicons name="calculator-outline" size={18} color={theme.colors.accent} />
-            </Pressable>
+            {isStudent && (
+              <Pressable
+                onPress={() => nav?.navigate?.('CreditAuditStack')}
+                style={({ pressed }) => ({
+                  width: 38,
+                  height: 38,
+                  borderRadius: 12,
+                  backgroundColor: theme.colors.surface,
+                  borderWidth: 1,
+                  borderColor: theme.colors.border,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  opacity: pressed ? 0.7 : 1,
+                })}
+              >
+                <Ionicons name="calculator-outline" size={18} color={theme.colors.accent} />
+              </Pressable>
+            )}
           </View>
         </View>
 
