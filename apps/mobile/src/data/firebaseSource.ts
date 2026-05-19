@@ -434,6 +434,10 @@ async function fetchCollectionAtPath<T extends { id: string }>(
 async function fetchDocumentAtPath<T extends { id: string }>(
   pathSegments: string[],
 ): Promise<T | null> {
+  // 路徑中若帶有 demo_ uid（'users/demo_student_kuchih' 等），直接 miss。
+  if (pathSegments.some((seg) => typeof seg === 'string' && seg.startsWith('demo_'))) {
+    return null;
+  }
   try {
     const db = getDb();
     const docSnap = await getDoc(docFromSegments(db, pathSegments));
@@ -730,10 +734,24 @@ async function fetchCanonicalSchoolCollection<T extends { id: string }>(params: 
   return [];
 }
 
+/**
+ * 是否為 demo 帳號的 doc id（mockAuth 用 'demo_xxx_xxx' 前綴）。
+ * demo 帳號不存在於 Firestore，直接短路回 null，避免 toast 噴
+ *   「[firebase] Failed to fetch users/demo_student_kuchih」
+ * 干擾現場演示。
+ */
+function isDemoDocId(docId: string): boolean {
+  return typeof docId === 'string' && docId.startsWith('demo_');
+}
+
 async function fetchDocument<T extends { id: string }>(
   collectionName: string,
   docId: string,
 ): Promise<T | null> {
+  // demo uid → 不打 Firestore，直接 miss（呼叫端會 fallback 到 demoData getter）
+  if (isDemoDocId(docId)) {
+    return null;
+  }
   try {
     const db = getDb();
     const docRef = doc(db, collectionName, docId);
