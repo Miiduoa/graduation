@@ -20,6 +20,7 @@
  */
 import React from 'react';
 import { View, ActivityIndicator } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import TodayCockpitScreen from './TodayCockpitScreen';
 import TeacherCockpitScreen from './TeacherCockpitScreen';
@@ -32,6 +33,7 @@ import AlumniHomeScreen from './AlumniHomeScreen';
 import GuestHomeScreen from './GuestHomeScreen';
 import { useAuth } from '../state/auth';
 import { theme } from '../ui/theme';
+import DemoRolePill from '../components/DemoRolePill';
 
 export type ResolvedDashboardRole =
   | 'student'
@@ -89,8 +91,33 @@ export function resolveDashboardRole(profile: {
   return 'student';
 }
 
+function renderDashboard(role: ResolvedDashboardRole): React.ReactNode {
+  switch (role) {
+    case 'teacher':
+      return <TeacherCockpitScreen />;
+    case 'ta':
+      return <TADashboardScreen />;
+    case 'club_officer':
+      return <ClubOfficerDashboardScreen />;
+    case 'department':
+      return <DepartmentDashboardScreen />;
+    case 'admin':
+      return <AdminDashboardScreen />;
+    case 'vendor':
+      return <VendorDashboardScreen />;
+    case 'alumni':
+      return <AlumniHomeScreen />;
+    case 'guest':
+      return <GuestHomeScreen />;
+    case 'student':
+    default:
+      return <TodayCockpitScreen />;
+  }
+}
+
 export default function RoleAwareTodayScreen() {
   const auth = useAuth();
+  const insets = useSafeAreaInsets();
 
   // 還在 load → spinner
   if (auth.loading || auth.profileLoading) {
@@ -114,25 +141,21 @@ export default function RoleAwareTodayScreen() {
     role: auth.profile?.role ?? null,
   });
 
-  switch (resolved) {
-    case 'teacher':
-      return <TeacherCockpitScreen />;
-    case 'ta':
-      return <TADashboardScreen />;
-    case 'club_officer':
-      return <ClubOfficerDashboardScreen />;
-    case 'department':
-      return <DepartmentDashboardScreen />;
-    case 'admin':
-      return <AdminDashboardScreen />;
-    case 'vendor':
-      return <VendorDashboardScreen />;
-    case 'alumni':
-      return <AlumniHomeScreen />;
-    case 'guest':
-      return <GuestHomeScreen />;
-    case 'student':
-    default:
-      return <TodayCockpitScreen />;
-  }
+  return (
+    <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
+      {renderDashboard(resolved)}
+      {/* 全域 DemoRolePill — 浮在右上角，所有 demo dashboard 都看得到，可一鍵切角色 */}
+      <View
+        pointerEvents="box-none"
+        style={{
+          position: 'absolute',
+          top: insets.top + 6,
+          right: theme.layout.screenHorizontalPadding,
+          zIndex: 50,
+        }}
+      >
+        <DemoRolePill />
+      </View>
+    </View>
+  );
 }
