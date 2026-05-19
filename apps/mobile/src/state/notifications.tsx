@@ -51,7 +51,10 @@ const NotificationsContext = createContext<NotificationsContextValue | null>(nul
 
 export function NotificationsProvider(props: { children: React.ReactNode }) {
   const auth = useAuth();
-  const db = getDb();
+  const db = useMemo(() => {
+    if (!hasUsableFirebaseConfig()) return null;
+    return getDb();
+  }, []);
 
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(false);
@@ -66,6 +69,13 @@ export function NotificationsProvider(props: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (!db) {
+      setNotifications([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     if (!auth.user) {
       setNotifications([]);
       return;
@@ -182,7 +192,7 @@ export function NotificationsProvider(props: { children: React.ReactNode }) {
   );
 
   const markAllAsRead = useCallback(async () => {
-    if (!auth.user) return;
+    if (!auth.user || !db) return;
 
     // 使用 functional update 來獲取當前狀態並計算需要更新的項目
     let unreadIds: string[] = [];
