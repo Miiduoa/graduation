@@ -72,6 +72,7 @@ import { useProactiveAIAgentLoop } from './src/app/useProactiveAIAgentLoop';
 import { useWebLearningSync } from './src/app/useWebLearningSync';
 import { initializeRuntimeDataSource } from './src/config/runtime';
 import { usePermissions } from './src/hooks/usePermissions';
+import { useUnreadMessagingCount } from './src/hooks/useUnreadMessagingCount';
 import {
   rootNavigateNested,
   rootNavigationRef,
@@ -583,6 +584,8 @@ const FAB_CENTER_GAP = Math.max(84, FAB_SIZE + 14);
 function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   const permissions = usePermissions();
+  // 訊息 Tab 上的紅色未讀徽章：即時訂閱我自己 DM 未讀數
+  const unreadDms = useUnreadMessagingCount();
 
   // 只顯示 4 個情境 Tab，過濾掉 '我的' 隱藏 Tab
   const visibleTabKeys = permissions.tabs.map((t) => t.key);
@@ -598,6 +601,8 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
     const focused = state.index === originalIndex;
     const config = permissions.tabs.find((t) => t.key === route.name);
     const iconName = config?.icon ?? 'ic_tab_today';
+    const showUnreadBadge = route.name === '訊息' && unreadDms > 0;
+    const badgeLabel = unreadDms > 99 ? '99+' : String(unreadDms);
 
     return (
       <Pressable
@@ -632,13 +637,38 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
             minHeight: 54,
           }}
         >
-          <AppActionIcon
-            name={iconName}
-            size={focused ? 22 : 20}
-            fallback="ionicon"
-            color={focused ? theme.colors.accent : theme.colors.muted}
-            style={{ opacity: focused ? 1 : 0.66 }}
-          />
+          <View>
+            <AppActionIcon
+              name={iconName}
+              size={focused ? 22 : 20}
+              fallback="ionicon"
+              color={focused ? theme.colors.accent : theme.colors.muted}
+              style={{ opacity: focused ? 1 : 0.66 }}
+            />
+            {showUnreadBadge ? (
+              <View
+                accessibilityLabel={`未讀訊息 ${unreadDms} 則`}
+                style={{
+                  position: 'absolute',
+                  top: -4,
+                  right: -10,
+                  minWidth: 16,
+                  height: 16,
+                  paddingHorizontal: 4,
+                  borderRadius: 8,
+                  backgroundColor: '#ef4444',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderWidth: 1.5,
+                  borderColor: theme.colors.chromeTabBar,
+                }}
+              >
+                <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800' }}>
+                  {badgeLabel}
+                </Text>
+              </View>
+            ) : null}
+          </View>
           <Text
             style={{
               fontSize: 10,

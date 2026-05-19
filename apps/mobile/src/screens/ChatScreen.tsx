@@ -27,6 +27,7 @@ import { useSchool } from '../state/school';
 import { useDataSource } from '../hooks/useDataSource';
 import { getDb, isFirebaseMockMode } from '../firebase';
 import {
+  arrayUnion,
   collection,
   doc,
   getDoc,
@@ -41,6 +42,7 @@ import {
 } from 'firebase/firestore';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
 import { recallChatMessage, toggleMessageReaction } from '../services/messaging';
+import { deriveDmConversationId } from '../utils/conversationAccess';
 import {
   getPersona,
   getPersonaConversationDetail,
@@ -77,10 +79,7 @@ type ConvoMeta = {
 
 // ═══════ Helpers ═══════
 
-function dmId(schoolId: string, a: string, b: string) {
-  const [x, y] = [a, b].sort();
-  return `dm_${schoolId}_${x}_${y}`;
-}
+const dmId = deriveDmConversationId;
 
 function formatTime(ts: any): string {
   if (!ts) return '';
@@ -131,6 +130,7 @@ export function ChatScreen(props: any) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [accessError, setAccessError] = useState<string | null>(null);
   const [peerName, setPeerName] = useState<string>('');
   const [peerOnline, setPeerOnline] = useState(false);
   const [peerTyping, setPeerTyping] = useState(false);
@@ -140,6 +140,11 @@ export function ChatScreen(props: any) {
   const fetchedUids = useRef<Set<string>>(new Set());
   const flatListRef = useRef<FlatList>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * 跨對話切換的隔離鍵：每次 convoKey 變化都記錄目前生效的對話，
+   * 防止上一個對話遲到回來的 snapshot 把訊息塞回 state，導致看到別人的對話。
+   */
+  const activeConvoKeyRef = useRef<string | null>(null);
 
   const myUid = auth.user?.uid;
 
@@ -149,38 +154,65 @@ export function ChatScreen(props: any) {
     return dmId(school.id, myUid, peerId);
   }, [conversationIdParam, myUid, peerId, school.id]);
 
-  /* 由對話列表進入時，用 conversationId 反查對象（DM） */
+  /* 由對話列表進入時，用 conversationId 反查對象（DM）。
+   * 若使用者不是成員，Firestore 規則會回傳 permission-denied，
+   * 我們在此明確切到拒絕狀態，避免後面其他 useEffect 繼續對該 conversation 做事。
+   */
   useEffect(() => {
     if (!conversationIdParam || peerParam || !myUid) return;
+    let cancelled = false;
     (async () => {
       try {
         const snap = await getDoc(doc(db, 'conversations', conversationIdParam));
-        if (!snap.exists()) return;
+        if (cancelled) return;
+        if (!snap.exists()) {
+          setAccessError('找不到此對話。');
+          return;
+        }
         const data = snap.data() as ConvoMeta;
         const mids = Array.isArray(data.memberIds) ? data.memberIds : [];
+        if (!mids.includes(myUid)) {
+          setAccessError('你不是此對話的成員，無法檢視訊息。');
+          return;
+        }
         const other = mids.find((m) => m !== myUid);
         if (other) setPeerId(other);
-      } catch (_) {
-        /* ignore */
+      } catch (e: any) {
+        if (cancelled) return;
+        if (e?.code === 'permission-denied') {
+          setAccessError('你不是此對話的成員，無法檢視訊息。');
+        }
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [conversationIdParam, peerParam, myUid, db]);
 
-  // ── 取得對方名稱 ──
+  // ── 取得對方名稱（切人時先清空，避免顯示上一個對象的名稱） ──
   useEffect(() => {
+    setPeerName('');
+    setPeerOnline(false);
+    setPeerTyping(false);
     if (conversationTitle) {
       setPeerName(conversationTitle);
       return;
     }
     if (!peerId || !school.id) return;
+    let cancelled = false;
     (async () => {
       try {
         const [profile] = await fetchSchoolDirectoryProfiles(school.id, [peerId], db);
+        if (cancelled) return;
         setPeerName(profile?.displayName ?? peerId.slice(0, 8));
       } catch {
+        if (cancelled) return;
         setPeerName(peerId.slice(0, 8));
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [peerId, school.id, db, conversationTitle]);
 
   // ── 設定導航標題 ──
@@ -264,12 +296,21 @@ export function ChatScreen(props: any) {
 
   // ── 訊息即時監聽 ──
   useEffect(() => {
+    // 切換對話時，先把上一個對話的視覺狀態清空，避免在新對話 snapshot 抵達前
+    // 看到上一段對話的訊息（資安/隱私感受層級）。
+    setMessages([]);
+    setUserNames({});
+    fetchedUids.current = new Set();
+    setAccessError(null);
+
     if (!convoKey || isFirebaseMockMode() || isDemoPersonaUid(myUid)) {
       // demo 模式已在上方處理
       setLoading(false);
+      activeConvoKeyRef.current = null;
       return;
     }
 
+    activeConvoKeyRef.current = convoKey;
     setLoading(true);
     const ref = collection(db, 'conversations', convoKey, 'messages');
     const qy = query(ref, orderBy('createdAt', 'asc'));
@@ -277,6 +318,9 @@ export function ChatScreen(props: any) {
     const unsub = onSnapshot(
       qy,
       (snapshot) => {
+        // 防呆：若 callback 抵達時 convoKey 已切換，直接丟棄，不把舊對話的訊息塞回 state。
+        if (activeConvoKeyRef.current !== convoKey) return;
+
         const rows = snapshot.docs.map((d) => ({
           id: d.id,
           ...(d.data() as any),
@@ -284,13 +328,14 @@ export function ChatScreen(props: any) {
         setMessages(rows);
         setLoading(false);
 
-        // 自動標為已讀
+        // 自動標為已讀（用 arrayUnion 避免覆寫他人 readBy）
         const unread = rows.filter(
           (m) => m.senderId !== myUid && !(m.readBy ?? []).includes(myUid!),
         );
         unread.forEach((m) => {
+          if (!myUid) return;
           const msgRef = doc(db, 'conversations', convoKey!, 'messages', m.id);
-          updateDoc(msgRef, { readBy: [...(m.readBy ?? []), myUid] }).catch(() => {});
+          updateDoc(msgRef, { readBy: arrayUnion(myUid) }).catch(() => {});
         });
 
         // 預抓名稱
@@ -299,50 +344,85 @@ export function ChatScreen(props: any) {
           if (fetchedUids.current.has(uid)) return;
           fetchedUids.current.add(uid);
           fetchSchoolDirectoryProfiles(school.id, [uid], db)
-            .then(([p]) => setUserNames((prev) => ({ ...prev, [uid]: p?.displayName ?? uid.slice(0, 8) })))
-            .catch(() => setUserNames((prev) => ({ ...prev, [uid]: uid.slice(0, 8) })));
+            .then(([p]) => {
+              if (activeConvoKeyRef.current !== convoKey) return;
+              setUserNames((prev) => ({ ...prev, [uid]: p?.displayName ?? uid.slice(0, 8) }));
+            })
+            .catch(() => {
+              if (activeConvoKeyRef.current !== convoKey) return;
+              setUserNames((prev) => ({ ...prev, [uid]: uid.slice(0, 8) }));
+            });
         });
       },
-      (err) => {
-        console.error('[ChatScreen] Messages error:', err);
+      (err: any) => {
+        if (activeConvoKeyRef.current !== convoKey) return;
+        if (err?.code === 'permission-denied') {
+          setAccessError('你不是此對話的成員，無法檢視訊息。');
+        } else {
+          console.error('[ChatScreen] Messages error:', err);
+        }
         setLoading(false);
       },
     );
 
-    return () => unsub();
+    return () => {
+      if (activeConvoKeyRef.current === convoKey) {
+        activeConvoKeyRef.current = null;
+      }
+      unsub();
+    };
   }, [db, convoKey, myUid, school.id]);
 
   // ── 對方打字 & 在線狀態監聽 ──
   useEffect(() => {
+    // 切換對話／對方時，先清掉上一個對象的打字／在線狀態
+    setPeerTyping(false);
+    setPeerOnline(false);
     if (!convoKey || isFirebaseMockMode()) return;
     const convoRef = doc(db, 'conversations', convoKey);
-    const unsub = onSnapshot(convoRef, (snap) => {
-      if (!snap.exists()) return;
-      const data = snap.data() as ConvoMeta;
-      // 打字狀態
-      if (data.typingUsers && peerId && data.typingUsers[peerId]) {
-        const ts = data.typingUsers[peerId];
-        const tsMs = ts?.seconds ? ts.seconds * 1000 : Date.now();
-        setPeerTyping(Date.now() - tsMs < 5000);
-      } else {
-        setPeerTyping(false);
-      }
-      // 在線狀態
-      if (data.onlineUsers && peerId && data.onlineUsers[peerId]) {
-        const ts = data.onlineUsers[peerId];
-        const tsMs = ts?.seconds ? ts.seconds * 1000 : Date.now();
-        setPeerOnline(Date.now() - tsMs < 60000);
-      }
-    });
+    const unsub = onSnapshot(
+      convoRef,
+      (snap) => {
+        if (!snap.exists()) return;
+        const data = snap.data() as ConvoMeta;
+        // 防呆：必須是當前生效的對話，且使用者是成員
+        if (myUid && Array.isArray(data.memberIds) && !data.memberIds.includes(myUid)) {
+          setAccessError('你不是此對話的成員，無法檢視訊息。');
+          return;
+        }
+        // 打字狀態
+        if (data.typingUsers && peerId && data.typingUsers[peerId]) {
+          const ts = data.typingUsers[peerId];
+          const tsMs = ts?.seconds ? ts.seconds * 1000 : Date.now();
+          setPeerTyping(Date.now() - tsMs < 5000);
+        } else {
+          setPeerTyping(false);
+        }
+        // 在線狀態
+        if (data.onlineUsers && peerId && data.onlineUsers[peerId]) {
+          const ts = data.onlineUsers[peerId];
+          const tsMs = ts?.seconds ? ts.seconds * 1000 : Date.now();
+          setPeerOnline(Date.now() - tsMs < 60000);
+        }
+      },
+      (err: any) => {
+        if (err?.code === 'permission-denied') {
+          setAccessError('你不是此對話的成員，無法檢視訊息。');
+        }
+      },
+    );
     return () => unsub();
-  }, [db, convoKey, peerId]);
+  }, [db, convoKey, peerId, myUid]);
 
-  // ── 更新我的在線狀態 ──
+  // ── 更新我的在線狀態 + 進入即更新 lastReadBy（讓對話列表的未讀立刻歸零） ──
   useEffect(() => {
     if (!convoKey || !myUid || isFirebaseMockMode()) return;
     const convoRef = doc(db, 'conversations', convoKey);
     const updateOnline = () => {
-      updateDoc(convoRef, { [`onlineUsers.${myUid}`]: serverTimestamp() }).catch(() => {});
+      updateDoc(convoRef, {
+        [`onlineUsers.${myUid}`]: serverTimestamp(),
+        [`lastReadBy.${myUid}`]: serverTimestamp(),
+      }).catch(() => {});
     };
     updateOnline();
     const iv = setInterval(updateOnline, 30000);
@@ -475,6 +555,7 @@ export function ChatScreen(props: any) {
   // ── Guard ──
   if (!auth.user) return <ErrorState title="對話" subtitle="尚未登入" hint="請先登入" />;
   if (!convoKey) return <ErrorState title="對話" subtitle="無法開啟對話" hint="請從對話列表進入" />;
+  if (accessError) return <ErrorState title="對話" subtitle={accessError} hint="請從你的對話列表開啟對話" />;
 
   // ── Render ──
 
