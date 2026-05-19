@@ -45,6 +45,49 @@ type UserGroup = {
 
 // joinCode helpers moved to src/utils/joinCode
 
+// ─── Demo mode data ────────────────────────────────────────────────────────
+const DEMO_PUBLISHED_COURSES: Group[] = [
+  { id: 'grp-db-sys', schoolId: 'demo', type: 'course', name: '資料庫系統', joinCode: 'DBSYS001', isPublished: true, verification: { status: 'verified_teacher' } },
+  { id: 'grp-prog2', schoolId: 'demo', type: 'course', name: '程式設計二', joinCode: 'PROG0002', isPublished: true, verification: { status: 'verified_teacher' } },
+  { id: 'grp-algo', schoolId: 'demo', type: 'course', name: '演算法導論', joinCode: 'ALGO0003', isPublished: true, verification: { status: 'unverified' } },
+  { id: 'grp-web', schoolId: 'demo', type: 'course', name: 'Web 程式設計', joinCode: 'WEBP0004', isPublished: true, verification: { status: 'verified_teacher' } },
+];
+
+const DEMO_COURSE_META_MAP: Record<string, Group> = Object.fromEntries(
+  DEMO_PUBLISHED_COURSES.map((g) => [g.id, g]),
+);
+
+function getDemoGroupsForRole(role: string | undefined): UserGroup[] {
+  switch (role) {
+    case 'student':
+      return [
+        { groupId: 'grp-db-sys', schoolId: 'demo', type: 'course', name: '資料庫系統', joinCode: 'DBSYS001', role: 'member', status: 'active' },
+        { groupId: 'grp-prog2', schoolId: 'demo', type: 'course', name: '程式設計二', joinCode: 'PROG0002', role: 'member', status: 'active' },
+      ];
+    case 'teacher':
+      return [
+        { groupId: 'grp-db-sys', schoolId: 'demo', type: 'course', name: '資料庫系統', joinCode: 'DBSYS001', role: 'instructor', status: 'active' },
+        { groupId: 'grp-web', schoolId: 'demo', type: 'course', name: 'Web 程式設計', joinCode: 'WEBP0004', role: 'instructor', status: 'active' },
+      ];
+    case 'club_officer':
+      return [
+        { groupId: 'grp-club-im', schoolId: 'demo', type: 'club', name: '資管學會', joinCode: 'IMCLUB1X', role: 'owner', status: 'active' },
+      ];
+    case 'department_head':
+    case 'admin':
+      return [
+        { groupId: 'grp-admin-dept', schoolId: 'demo', type: 'admin', name: '資管系行政群組', joinCode: 'ADMIN001', role: 'owner', status: 'active' },
+      ];
+    default:
+      return [];
+  }
+}
+
+function getDemoCourseMetaForIds(ids: string[]): Group[] {
+  return ids.map((id) => DEMO_COURSE_META_MAP[id]).filter(Boolean) as Group[];
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 const AVATAR_COLORS_G = ['#5856D6', '#34C759', '#FF9500', '#5856D6', '#BF5AF2'];
 const AVATAR_EMOJIS_G = ['🧑‍💻', '👩‍🎓', '👨‍🎓', '🙋', '👩‍💻'];
 
@@ -111,7 +154,7 @@ export function GroupsScreen(props: any) {
     reload,
   } = useAsyncList<UserGroup>(async () => {
     if (!auth.user) return [];
-    if (isFirebaseMockMode()) return [];
+    if (isFirebaseMockMode()) return getDemoGroupsForRole(auth.profile?.role);
     const ref = collection(db, 'users', auth.user.uid, 'groups');
     // NOTE: Avoid composite index requirements for MVP by not combining orderBy with multiple where.
     const qy = query(ref, where('schoolId', '==', school.id), where('status', '==', 'active'));
@@ -123,8 +166,8 @@ export function GroupsScreen(props: any) {
   const myOtherGroups = useMemo(() => myGroups.filter((g) => g.type !== 'course'), [myGroups]);
 
   const { items: myCourseMeta } = useAsyncList<Group>(async () => {
-    if (isFirebaseMockMode()) return [];
     const ids = myCourseGroups.map((g) => g.groupId).filter(Boolean);
+    if (isFirebaseMockMode()) return getDemoCourseMetaForIds(ids);
     if (ids.length === 0) return [];
 
     // Firestore "in" supports up to 10 items; chunk to avoid indexes.
@@ -146,7 +189,7 @@ export function GroupsScreen(props: any) {
 
   const { items: publishedCourses, reload: reloadPublishedCourses } =
     useAsyncList<Group>(async () => {
-      if (isFirebaseMockMode()) return [];
+      if (isFirebaseMockMode()) return DEMO_PUBLISHED_COURSES;
       // NOTE: Avoid composite indexes in MVP: query by isPublished only, then filter by school/type.
       const qy = query(collection(db, 'groups'), where('isPublished', '==', true), limit(100));
       const snap = await getDocs(qy);
