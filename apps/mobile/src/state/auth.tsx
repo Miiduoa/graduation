@@ -321,15 +321,48 @@ function toMockUserProfile(session: {
   const r = session.role;
   if (r === 'vendor') {
     serviceRoles.push('merchant');
+    // 對齊 DEMO_MERCHANTS（merchant_cafe_a / merchant_coffee_b / merchant_noodle_f），
+    // 這樣 MerchantHubScreen / VendorDashboardScreen / 學生 OrderingScreen
+    // 三邊使用同一組 merchant id，避免「我送單和接單到底能不能運作」這條鏈斷掉。
     merchantAssignments = [
       {
         schoolId: session.schoolId,
         schoolName: '靜宜大學',
-        cafeteriaId: 'demo-cafeteria-1',
+        cafeteriaId: 'merchant_cafe_a',
         cafeteriaName: '靜宜中餐部',
-        merchantId: 'demo-cafeteria-1',
+        merchantId: 'merchant_cafe_a',
         brandKey: 'zhongcan',
-        operatorRole: 'owner',
+        operatorRole: 'manager',
+        status: 'active',
+        orderingEnabled: true,
+        pilotStatus: 'live',
+        displayName: session.displayName,
+        email: session.email,
+        lastActiveAt: new Date().toISOString(),
+      },
+      {
+        schoolId: session.schoolId,
+        schoolName: '靜宜大學',
+        cafeteriaId: 'merchant_coffee_b',
+        cafeteriaName: '校園咖啡屋',
+        merchantId: 'merchant_coffee_b',
+        brandKey: 'coffee',
+        operatorRole: 'staff',
+        status: 'active',
+        orderingEnabled: true,
+        pilotStatus: 'live',
+        displayName: session.displayName,
+        email: session.email,
+        lastActiveAt: new Date().toISOString(),
+      },
+      {
+        schoolId: session.schoolId,
+        schoolName: '靜宜大學',
+        cafeteriaId: 'merchant_noodle_f',
+        cafeteriaName: '阿婆麵食館',
+        merchantId: 'merchant_noodle_f',
+        brandKey: 'noodle',
+        operatorRole: 'manager',
         status: 'active',
         orderingEnabled: true,
         pilotStatus: 'live',
