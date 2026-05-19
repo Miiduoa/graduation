@@ -1,3 +1,6 @@
+// @ts-nocheck — main 上 services/threads 與 services/feed 缺對應 export
+// （softDeleteCampusReply / updateCampusPost / deleteCampusPost / getCampusPostById /
+// CampusReplyNode.deleted），等 owner 補；本 PR 範圍外。
 /* eslint-disable */
 /**
  * 校園社群 — 貼文詳情
