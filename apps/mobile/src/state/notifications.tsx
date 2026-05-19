@@ -14,7 +14,7 @@ import {
   serverTimestamp,
   writeBatch,
 } from 'firebase/firestore';
-import { getDb } from '../firebase';
+import { getDb, hasUsableFirebaseConfig } from '../firebase';
 import { useAuth } from './auth';
 
 export type NotificationType =
