@@ -103,6 +103,12 @@ import {
   getDemoTransactions,
   getDemoCourseGradebook,
 } from './demoData';
+import { DEMO_MERCHANTS, DEMO_MENU } from './demoMerchants';
+import {
+  addDemoOrder,
+  listDemoOrdersForStudent,
+  updateDemoOrderStatus,
+} from '../services/demoMerchantOrders';
 
 // 生成唯一 ID
 const generateId = () => `mock_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -275,10 +281,50 @@ export const mockSource: DataSource = {
 
   // ===== 餐廳菜單 =====
   async listCafeterias(schoolId?: string): Promise<Cafeteria[]> {
-    return getDemoCafeterias(schoolId || DEFAULT_SCHOOL);
+    const resolvedSchool = schoolId || DEFAULT_SCHOOL;
+    // demo 模式：把 DEMO_MERCHANTS 放最前面，讓學生在 OrderingScreen
+    // 看到的 cafeteriaId 跟 VendorDashboard / MerchantHub 使用的同一套，
+    // 否則「我送單和接單到底能不能運作」這條鏈會斷在 id 不對齊。
+    const demoCafeterias: Cafeteria[] = DEMO_MERCHANTS.map((m) => ({
+      id: m.id,
+      schoolId: resolvedSchool,
+      name: m.name,
+      location: m.location,
+      openingHours: m.hours,
+      seatingCapacity: undefined,
+      currentOccupancy: undefined,
+      pilotStatus: 'live',
+      orderingEnabled: m.isOpen,
+      rating: m.rating,
+      reviewCount: m.reviewCount,
+      activeOperatorCount: 1,
+      merchantId: m.id,
+    }));
+    return [...demoCafeterias, ...getDemoCafeterias(resolvedSchool)];
   },
   async listMenus(schoolId?: string) {
-    return getDemoMenuItems(schoolId || DEFAULT_SCHOOL).map((menu) => {
+    const resolvedSchool = schoolId || DEFAULT_SCHOOL;
+    // demo 模式：菜單前面塞 DEMO_MENU，方便學生對著 demo 餐廳下單
+    const demoMenus: MenuItem[] = DEMO_MENU.map((m) => {
+      const parent = DEMO_MERCHANTS.find((x) => x.id === m.merchantId);
+      return {
+        id: m.id,
+        schoolId: resolvedSchool,
+        name: m.name,
+        description: m.tags.join('、'),
+        category: m.category,
+        price: m.price,
+        cafeteria: parent?.name ?? '',
+        cafeteriaId: m.merchantId,
+        merchantId: m.merchantId,
+        available: !m.soldOut,
+        availableOn: undefined,
+        orderingEnabled: parent?.isOpen ?? true,
+        pilotStatus: 'live',
+        waitTime: 5,
+      } as MenuItem;
+    });
+    const baseMenus = getDemoMenuItems(resolvedSchool).map((menu) => {
       const cafeteria = mockCafeterias.find((row) => row.id === menu.cafeteriaId);
       return {
         ...menu,
@@ -287,6 +333,7 @@ export const mockSource: DataSource = {
         pilotStatus: cafeteria?.pilotStatus,
       };
     });
+    return [...demoMenus, ...baseMenus];
   },
   async getMenuItem(id: string, schoolId?: string) {
     const found = getDemoMenuItems(schoolId || DEFAULT_SCHOOL).find((m) => m.id === id);
@@ -1026,14 +1073,26 @@ export const mockSource: DataSource = {
 
   // ===== 訂單與支付 =====
   async listOrders(userId: string, options?: any, schoolId?: string): Promise<Order[]> {
-    return getDemoOrders(userId, schoolId || DEFAULT_SCHOOL);
+    const staticOrders = getDemoOrders(userId, schoolId || DEFAULT_SCHOOL);
+    const liveOrders = listDemoOrdersForStudent(userId);
+    // 動態下單放最前面；以 id dedupe
+    const seen = new Set(liveOrders.map((o) => o.id));
+    const merged = [
+      ...liveOrders,
+      ...staticOrders.filter((o) => !seen.has(o.id)),
+    ];
+    return merged.sort((a, b) =>
+      String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')),
+    );
   },
   async getOrder(id: string, userId?: string, schoolId?: string): Promise<Order | null> {
+    const live = listDemoOrdersForStudent(userId || 'user1').find((o) => o.id === id);
+    if (live) return live;
     const orders = getDemoOrders(userId || 'user1', schoolId || DEFAULT_SCHOOL);
     return orders.find((o) => o.id === id) || null;
   },
   async createOrder(data): Promise<Order> {
-    return {
+    const order: Order = {
       ...data,
       id: generateId(),
       createdAt: new Date().toISOString(),
@@ -1041,8 +1100,11 @@ export const mockSource: DataSource = {
       paymentStatus: 'unpaid',
       merchantId: data.merchantId ?? (data as { cafeteriaId?: string }).cafeteriaId,
     };
+    addDemoOrder(order);
+    return order;
   },
   async updateOrderStatus(id: string, status: Order['status']): Promise<Order> {
+    updateDemoOrderStatus(id, status);
     return {
       id,
       userId: 'mock',
@@ -1053,7 +1115,10 @@ export const mockSource: DataSource = {
       paymentStatus: 'unpaid',
     };
   },
-  async cancelOrder() {
+  async cancelOrder(id?: string) {
+    if (typeof id === 'string' && id) {
+      updateDemoOrderStatus(id, 'cancelled');
+    }
     console.info('[MockSource] cancelOrder 模擬成功');
   },
   async listTransactions(userId: string, options?: any, schoolId?: string): Promise<Transaction[]> {

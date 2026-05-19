@@ -7,6 +7,11 @@ import { useAuth } from '../state/auth';
 import { shouldBlockForNoLogin, isDemoUid } from '../services/demoSession';
 import { useAsyncList } from '../hooks/useAsyncList';
 import { listMerchantOrders, updateMerchantOrderStatus } from '../services/merchant';
+import {
+  listDemoMerchantOrders,
+  updateDemoOrderStatus,
+  subscribeDemoOrders,
+} from '../services/demoMerchantOrders';
 import { Screen, AnimatedCard, Button, Pill, Spinner } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
@@ -85,6 +90,8 @@ export function MerchantHubScreen() {
   const selectedAssignment =
     assignments.find((assignment) => assignment.cafeteriaId === selectedAssignmentId) ?? null;
 
+  const isDemoSession = isDemoUid(auth.user?.uid);
+
   const {
     items: orders,
     loading,
@@ -92,17 +99,37 @@ export function MerchantHubScreen() {
     error,
     refresh,
   } = useAsyncList<Order>(
-    () =>
-      selectedAssignment
-        ? listMerchantOrders({
-            schoolId: selectedAssignment.schoolId,
-            cafeteriaId: selectedAssignment.cafeteriaId,
-            max: 80,
-          })
-        : Promise.resolve([]),
-    [selectedAssignment?.schoolId, selectedAssignment?.cafeteriaId],
+    () => {
+      if (!selectedAssignment) return Promise.resolve([]);
+      // demo 模式直接讀本地 store + 預塞訂單，避免 Firestore 404 + 跨 id 對不上
+      if (isDemoSession) {
+        const merchantKey =
+          selectedAssignment.merchantId ?? selectedAssignment.cafeteriaId;
+        return Promise.resolve(listDemoMerchantOrders(merchantKey));
+      }
+      return listMerchantOrders({
+        schoolId: selectedAssignment.schoolId,
+        cafeteriaId: selectedAssignment.cafeteriaId,
+        max: 80,
+      });
+    },
+    [
+      selectedAssignment?.schoolId,
+      selectedAssignment?.cafeteriaId,
+      selectedAssignment?.merchantId,
+      isDemoSession,
+    ],
     { keepPreviousData: true },
   );
+
+  // demo 模式：學生剛下的單會走 demoMerchantOrders store。
+  // 訂閱它的變化，店家畫面就能即時刷新「新訂單」
+  useEffect(() => {
+    if (!isDemoSession) return undefined;
+    return subscribeDemoOrders(() => {
+      void refresh();
+    });
+  }, [isDemoSession, refresh]);
 
   const filteredOrders = useMemo(() => {
     if (showAllOrders) {
@@ -130,11 +157,42 @@ export function MerchantHubScreen() {
 
     setUpdatingOrderId(order.id);
     try {
-      await updateMerchantOrderStatus({
-        schoolId: selectedAssignment.schoolId,
-        orderId: order.id,
-        status: nextStatus,
-      });
+      if (isDemoSession) {
+        // demo：直接寫進 in-memory store + 推 cross-role event 給學生 inbox
+        updateDemoOrderStatus(order.id, nextStatus as Order['status']);
+        if (nextStatus === 'preparing' || nextStatus === 'ready' || nextStatus === 'completed') {
+          try {
+            const { simulateVendorAdvanceOrder } = await import(
+              '../services/demoActionSimulator'
+            );
+            const studentUid =
+              typeof order.userId === 'string' && order.userId
+                ? order.userId
+                : 'demo_student_kuchih';
+            await simulateVendorAdvanceOrder({
+              vendorUid: auth.user?.uid ?? 'demo_cafeteria',
+              vendorName: auth.profile?.displayName ?? '商家',
+              studentUid,
+              orderId: order.id,
+              merchantId:
+                selectedAssignment.merchantId ?? selectedAssignment.cafeteriaId,
+              merchantName: selectedAssignment.cafeteriaName,
+              newStatus:
+                nextStatus === 'preparing'
+                  ? 'processing'
+                  : (nextStatus as 'ready' | 'completed'),
+            });
+          } catch (busError) {
+            console.warn('[MerchantHub] simulateVendorAdvanceOrder failed:', busError);
+          }
+        }
+      } else {
+        await updateMerchantOrderStatus({
+          schoolId: selectedAssignment.schoolId,
+          orderId: order.id,
+          status: nextStatus,
+        });
+      }
       await refresh();
       void import('../services/companionEngine').then((m) =>
         m.recordCompanionFeatureSignal('vendor_hub'),

@@ -171,8 +171,10 @@ export async function simulateStudentOrderFood(input: {
   merchantName: string;
   items: string;
   total: number;
+  /** 可選：對齊到 mockSource.createOrder 回傳的 id，方便雙向追蹤狀態 */
+  orderId?: string;
 }) {
-  const orderId = `order_${Date.now()}`;
+  const orderId = input.orderId ?? `order_${Date.now()}`;
   await emitOrderPlaced({
     actorUid: input.studentUid,
     actorName: input.studentName,

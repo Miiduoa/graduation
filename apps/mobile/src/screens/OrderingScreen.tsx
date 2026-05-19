@@ -663,6 +663,26 @@ export function OrderingScreen(props: any) {
               /* optional bus */
             }
 
+            // demo 跨角色聯動：店家 VendorDashboard / MerchantHub 訂閱 order_placed，
+            // 不 emit 這個的話，店家側怎麼樣都看不到學生剛下的單。
+            try {
+              const { simulateStudentOrderFood } = await import('../services/demoActionSimulator');
+              const itemsLabel = cart
+                .map((c) => `${c.menuItem.name} ×${c.quantity}`)
+                .join('、');
+              await simulateStudentOrderFood({
+                studentUid: auth.user!.uid,
+                studentName: auth.profile?.displayName ?? '學生',
+                merchantId: selectedCafeteria.merchantId ?? selectedCafeteria.id,
+                merchantName: selectedCafeteria.name,
+                items: itemsLabel,
+                total: cartTotal,
+                orderId: createdOrder?.id,
+              });
+            } catch (busError) {
+              console.warn('[OrderingScreen] simulateStudentOrderFood failed:', busError);
+            }
+
             try {
               aiBrain.reportToolOutcome(
                 'order_meal',

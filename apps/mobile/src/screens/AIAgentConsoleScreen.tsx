@@ -19,10 +19,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 
 import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
+import { safeNavigate } from '../utils/safeNavigate';
 import {
   CockpitHero,
   CockpitMetricRow,
@@ -80,6 +82,7 @@ const MODE_META: Record<AutonomyMode, { label: string; desc: string; emoji: stri
 
 export default function AIAgentConsoleScreen() {
   const auth = useAuth();
+  const navigation = useNavigation<any>();
   const tabBarBottomPad = useTabBarContentBottomPadding();
   const role: AgentRole = inferRoleFromUid(auth.user?.uid);
 
@@ -214,6 +217,39 @@ export default function AIAgentConsoleScreen() {
           <CockpitMetricChip label="🟢 執行中" value={summary.pendingCount} />
           <CockpitMetricChip label="❌ 失敗" value={summary.failedCount} tone={summary.failedCount > 0 ? 'danger' : undefined} />
         </CockpitMetricRow>
+
+        {/* AI 信任卡入口 — 推送 / 採納 / 擋下次數一覽 */}
+        <Pressable
+          onPress={() =>
+            safeNavigate(navigation, 'AITrustCard', undefined, {
+              fallbackMessage: 'AI 信任卡暫無法開啟',
+            })
+          }
+          accessibilityLabel="查看 AI 信任卡"
+          style={({ pressed }) => ({
+            marginTop: theme.space.sm,
+            padding: theme.space.sm + 2,
+            borderRadius: theme.radius.md,
+            backgroundColor: theme.colors.accentSoft,
+            borderWidth: 1,
+            borderColor: `${theme.colors.accent}33`,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: theme.space.sm,
+            opacity: pressed ? 0.85 : 1,
+          })}
+        >
+          <Ionicons name="shield-checkmark-outline" size={18} color={theme.colors.accent} />
+          <Text style={{
+            flex: 1,
+            color: theme.colors.text,
+            fontSize: theme.typography.labelSmall.fontSize,
+            fontWeight: '600',
+          }}>
+            🛡️ AI 信任卡 — 推送 / 採納 / 擋下次數
+          </Text>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.muted} />
+        </Pressable>
 
         {/* Autonomy Mode 三段 */}
         <View style={{ marginTop: theme.space.md, marginBottom: theme.space.sm }}>
