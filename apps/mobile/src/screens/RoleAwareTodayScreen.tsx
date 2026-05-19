@@ -22,7 +22,8 @@ import React from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import TodayCockpitScreen from './TodayCockpitScreen';
+// 學生角色走新版 AI-First 介面（舊 TodayCockpitScreen 已停用）
+import TodayAiFirstScreen from './TodayAiFirstScreen';
 import TeacherCockpitScreen from './TeacherCockpitScreen';
 import TADashboardScreen from './TADashboardScreen';
 import DepartmentDashboardScreen from './DepartmentDashboardScreen';
@@ -111,7 +112,7 @@ function renderDashboard(role: ResolvedDashboardRole): React.ReactNode {
       return <GuestHomeScreen />;
     case 'student':
     default:
-      return <TodayCockpitScreen />;
+      return <TodayAiFirstScreen />;
   }
 }
 
