@@ -12,6 +12,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import {
   puFetchCourses,
+  puFetchCreditAudit,
   puFetchGrades,
   puFetchAnnouncements,
   puFetchStudentInfo,
@@ -455,6 +456,17 @@ export async function getCachedStudentInfo(): Promise<PUStudentInfo | null> {
   return entry!.data;
 }
 
+export async function getCachedCreditAudit(): Promise<PuCreditAuditPayload | null> {
+  const entry = await readCache<PuCreditAuditPayload>(KEYS.creditAudit);
+  if (isExpired(entry, TTL.creditAudit)) return null;
+  // Reject old format cache (no version field = legacy, should be re-fetched)
+  if (entry?.data && !(entry.data as any).version) {
+    console.log("[puDataCache] Discarding old format credit audit cache (no version field)");
+    return null;
+  }
+  return entry!.data;
+}
+
 /** 強制取得（不管過期），給離線模式用 */
 export async function getAnyCachedCourses(): Promise<PUCourseResult | null> {
   const entry = await readCache<PUCourseResult>(KEYS.courses);
@@ -474,6 +486,21 @@ export async function getAnyCachedAnnouncements(): Promise<PUAnnouncement[] | nu
 export async function getAnyCachedStudentInfo(): Promise<PUStudentInfo | null> {
   const entry = await readCache<PUStudentInfo>(KEYS.studentInfo);
   return entry?.data ?? null;
+}
+
+export async function getAnyCachedCreditAudit(): Promise<PuCreditAuditPayload | null> {
+  // 1. Try local AsyncStorage cache first
+  const entry = await readCache<PuCreditAuditPayload>(KEYS.creditAudit);
+  // Reject old format cache (no version field)
+  if (entry?.data && (entry.data as any).version) return entry.data;
+  // 2. Fallback to Firestore (cloud persistence)
+  const firestoreData = await readCreditAuditFromFirestore();
+  if (firestoreData && (firestoreData as any).version) {
+    // Write back to local cache for faster access next time
+    await writeCache(KEYS.creditAudit, firestoreData);
+    return firestoreData;
+  }
+  return null;
 }
 
 // ─── 單項刷新 ────────────────────────────────────────────
@@ -531,6 +558,7 @@ export async function refreshCourses(session: PUSession): Promise<PUCourseResult
   const result = await puFetchCourses(session);
   if (result.success && result.data) {
     await writeCache(KEYS.courses, result.data);
+    void writeCoursesToFirestore(result.data);
     return result.data;
   }
   console.warn('[puDataCache] refreshCourses failed:', result.error);
@@ -572,6 +600,7 @@ export async function refreshGrades(session: PUSession): Promise<PUGradeResult |
   const result = await puFetchGrades(session);
   if (result.success && result.data) {
     await writeCache(KEYS.grades, result.data);
+    void writeGradesToFirestore(result.data);
     return result.data;
   }
   console.warn('[puDataCache] refreshGrades failed:', result.error);
@@ -654,6 +683,19 @@ export async function refreshStudentInfo(session: PUSession): Promise<PUStudentI
     return result.data;
   }
   console.warn('[puDataCache] refreshStudentInfo failed:', result.error);
+  return null;
+}
+
+export async function refreshCreditAudit(session: PUSession): Promise<PuCreditAuditPayload | null> {
+  console.log("[puDataCache] refreshing credit audit (v2)…");
+  const result = await puFetchCreditAudit(session);
+  if (result.success && result.data) {
+    // Write to both AsyncStorage (local cache) and Firestore (cloud persistence)
+    await writeCache(KEYS.creditAudit, result.data);
+    void writeCreditAuditToFirestore(result.data);
+    return result.data;
+  }
+  console.warn("[puDataCache] refreshCreditAudit failed:", result.error);
   return null;
 }
 
@@ -843,7 +885,12 @@ export async function refreshTCActivitiesForCourses(
     }),
   );
 
-  await writeCache(KEYS.tcActivities, result);
+  const totalActivities = Object.values(result).reduce((sum, arr) => sum + arr.length, 0);
+  console.log(`[puDataCache] TC activities: ${totalActivities} activities across ${Object.keys(result).length} courses`);
+
+  if (totalActivities > 0 || Object.keys(result).length > 0) {
+    await writeCache(KEYS.tcActivities, result);
+  }
   return result;
 }
 
@@ -863,7 +910,12 @@ export async function refreshTCModulesForCourses(
     }),
   );
 
-  await writeCache(KEYS.tcModules, result);
+  const totalModules = Object.values(result).reduce((sum, arr) => sum + arr.length, 0);
+  console.log(`[puDataCache] TC modules: ${totalModules} modules across ${Object.keys(result).length} courses`);
+
+  if (totalModules > 0 || Object.keys(result).length > 0) {
+    await writeCache(KEYS.tcModules, result);
+  }
   return result;
 }
 
@@ -872,9 +924,15 @@ export async function refreshTCAttendance(): Promise<TCAttendance[] | null> {
   const skipped = await preservedTcCacheUnlessFetchEnabled(getAnyCachedTCAttendance);
   if (skipped !== undefined) return skipped;
   await ensureTronClassSession();
-  const data = await tcFetchAttendance();
-  await writeCache(KEYS.tcAttendance, data);
-  return data;
+  try {
+    const data = await tcFetchAttendance();
+    console.log(`[puDataCache] TC attendance: ${data.length} records`);
+    await writeCache(KEYS.tcAttendance, data);
+    return data;
+  } catch (err) {
+    console.warn("[puDataCache] refreshTCAttendance error:", err);
+    return null;
+  }
 }
 
 export async function refreshTCTodos(): Promise<TCActivity[] | null> {
@@ -882,9 +940,15 @@ export async function refreshTCTodos(): Promise<TCActivity[] | null> {
   const skipped = await preservedTcCacheUnlessFetchEnabled(getAnyCachedTCTodos);
   if (skipped !== undefined) return skipped;
   await ensureTronClassSession();
-  const data = await tcFetchTodos();
-  await writeCache(KEYS.tcTodos, data);
-  return data;
+  try {
+    const data = await tcFetchTodos();
+    console.log(`[puDataCache] TC todos: ${data.length} items`);
+    await writeCache(KEYS.tcTodos, data);
+    return data;
+  } catch (err) {
+    console.warn("[puDataCache] refreshTCTodos error:", err);
+    return null;
+  }
 }
 
 export async function refreshTCAnnouncements(): Promise<TCAnnouncementItem[] | null> {
@@ -1107,6 +1171,11 @@ export async function syncAllData(
         `studentInfo=${studentInfo ? (studentInfo as PUStudentInfo).name : 'null'}`,
     );
   }
+
+  // 學分試算 — 背景同步（不論 includeEssential）
+  void refreshCreditAudit(session).catch((e) => {
+    console.warn("[puDataCache] creditAudit sync error:", e);
+  });
 
   const tcCourses =
     options.tcCourses ??

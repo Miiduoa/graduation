@@ -664,8 +664,6 @@ async function tcFetchModules(cookies, courseId) {
       throw error;
     }
   }
-
-  return [];
 }
 
 async function tcFetchActivities(cookies, courseId) {
@@ -674,17 +672,13 @@ async function tcFetchActivities(cookies, courseId) {
     cookies,
   ).catch(() => ({ activities: [] }));
 
-  const homeworkData = await tcFetchAllPages(
-    `api/courses/${courseId}/homework-activities`,
-    'homework_activities',
-    cookies,
-    {},
-    50,
-  ).catch(() => []);
+  const examData = await tcFetchJson(`${TC_BASE}/api/courses/${courseId}/exams`, cookies)
+    .catch(() => ({ exams: [] }));
 
   const seen = new Set();
   const activities = [];
-  for (const activity of [...(activityData.activities ?? []), ...homeworkData]) {
+
+  for (const activity of (activityData.activities ?? [])) {
     if (seen.has(activity.id)) continue;
     seen.add(activity.id);
     activities.push({
@@ -696,9 +690,31 @@ async function tcFetchActivities(cookies, courseId) {
       start_time: activity.start_time ?? null,
       end_time: activity.end_time ?? null,
       score: activity.score ?? null,
-      total_score: activity.total_score ?? null,
-      status: activity.status ?? 'pending',
-      weight: activity.weight ?? null,
+      total_score: null,
+      status: 'pending',
+      weight: activity.score_percentage ? parseFloat(activity.score_percentage) : null,
+      module_id: activity.module_id ?? null,
+      completion_criterion: activity.completion_criterion_key ?? null,
+    });
+  }
+
+  for (const exam of (examData.exams ?? [])) {
+    if (seen.has(exam.id)) continue;
+    seen.add(exam.id);
+    activities.push({
+      id: exam.id,
+      course_id: courseId,
+      type: 'exam',
+      title: exam.title ?? '',
+      description: null,
+      begin_date: exam.start_time ?? null,
+      end_date: exam.end_time ?? null,
+      score: exam.score ?? null,
+      total_score: exam.total_score ?? null,
+      status: 'pending',
+      weight: null,
+      module_id: exam.module_id ?? null,
+      completion_criterion: null,
     });
   }
 
