@@ -772,25 +772,25 @@ export class PUAdapter extends BaseApiAdapter {
           creditAudit?: PuCreditAuditPayload | null;
         };
 
-    const data = await this.fetchData<GradeResponse>('grades', { semester });
-    if (!data?.success || !data.grades) return [];
+        const data = await this.fetchData<CreditAuditResponse>("creditAudit");
+        if (data?.success && data.creditAudit && isV2(data.creditAudit)) {
+          await seedCachedCreditAudit(data.creditAudit).catch(() => undefined);
+          return data.creditAudit;
+        }
+        console.warn("[PUAdapter] getCreditAudit: backend fetch returned no v2 data");
+      }
+    } catch (err) {
+      console.warn("[PUAdapter] getCreditAudit remote fetch failed:", err);
+    }
 
-    return data.grades.map(
-      (item, i): Grade => ({
-        id: `pu-grade-${item.semester}-${i}`,
-        courseId: `pu-crs-${item.semester}-${i}`,
-        courseName: item.courseName,
-        courseNameEn: item.courseNameEn || undefined,
-        courseCode: undefined,
-        credits: item.credits,
-        grade: typeof item.score === 'number' ? item.score : parseFloat(String(item.score)) || 0,
-        gradePoint: 0,
-        semester: item.semester,
-        userId: studentId || this.studentId || '',
-        courseType: item.courseType || undefined,
-        courseClass: item.class || undefined,
-      }),
-    );
+    // 遠端失敗 → 讀任何快取（離線模式）
+    const stale = await getAnyCachedCreditAudit();
+    if (isV2(stale)) {
+      console.log("[PUAdapter] getCreditAudit: returning stale v2 cached data");
+      return stale;
+    }
+
+    return null;
   }
 
   // ---------------------------------------------------------------------------
