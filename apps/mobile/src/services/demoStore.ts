@@ -125,6 +125,20 @@ export interface StoreSubmission {
   graded: boolean;
 }
 
+export interface StoreBorrowingOverride {
+  dueDate: string;
+  renewCount: number;
+}
+
+export interface StoreLibraryReservation {
+  id: string;
+  bookId: string;
+  bookTitle: string;
+  studentId: string;
+  studentName: string;
+  reservedAt: string;
+}
+
 export interface DemoStore {
   dynamicMessages: StoreDynamicMessage[];
   leaveRequests: StoreLeaveRequest[];
@@ -133,6 +147,8 @@ export interface DemoStore {
   helpRequests: StoreHelpRequest[];
   clubMemberships: StoreClubMembership[];
   submissions: StoreSubmission[];
+  borrowingOverrides: Record<string, StoreBorrowingOverride>;
+  libraryReservations: StoreLibraryReservation[];
   readMessageIds: string[];
 }
 
@@ -144,6 +160,8 @@ const EMPTY: DemoStore = {
   helpRequests: [],
   clubMemberships: [],
   submissions: [],
+  borrowingOverrides: {},
+  libraryReservations: [],
   readMessageIds: [],
 };
 
@@ -667,6 +685,92 @@ export function submitAssignment(params: {
     recipientRoles: ['teacher', 'ta'],
   });
   return sub;
+}
+
+// ─────────────────────────────────────────────────────────────
+// 動作鏈：圖書館（續借 / 預約 / 轉讓）
+// ─────────────────────────────────────────────────────────────
+
+/** 續借書本（到期日 +14 天） */
+export function renewBook(
+  bookId: string,
+  currentDueDate: string,
+  currentRenewCount: number,
+): void {
+  const due = new Date(currentDueDate);
+  due.setDate(due.getDate() + 14);
+  const newDueDate = due.toISOString().slice(0, 10);
+  updateStore((s) => ({
+    ...s,
+    borrowingOverrides: {
+      ...s.borrowingOverrides,
+      [bookId]: { dueDate: newDueDate, renewCount: currentRenewCount + 1 },
+    },
+  }));
+  sendMessage({
+    fromName: '圖書館系統',
+    fromAvatar: '📚',
+    subject: '【續借成功】',
+    body: `你的書本續借成功，新到期日：${newDueDate}（共續借 ${currentRenewCount + 1} 次）。`,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'success',
+    senderRole: 'admin',
+    recipientRoles: ['student'],
+  });
+}
+
+/** 預約一本被借走的書（歸還時系統通知預約者） */
+export function reserveBook(params: {
+  bookId: string;
+  bookTitle: string;
+  studentId: string;
+  studentName: string;
+}): StoreLibraryReservation {
+  const r: StoreLibraryReservation = {
+    id: `rsv-${Date.now()}`,
+    bookId: params.bookId,
+    bookTitle: params.bookTitle,
+    studentId: params.studentId,
+    studentName: params.studentName,
+    reservedAt: new Date().toISOString(),
+  };
+  updateStore((s) => ({
+    ...s,
+    libraryReservations: [r, ...s.libraryReservations],
+  }));
+  sendMessage({
+    fromName: '圖書館系統',
+    fromAvatar: '📚',
+    subject: `【預約成功】${params.bookTitle}`,
+    body: `你已成功預約《${params.bookTitle}》。當該書歸還後，系統會通知你前來借閱。`,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'success',
+    senderRole: 'admin',
+    recipientRoles: ['student'],
+  });
+  return r;
+}
+
+/** 轉讓一本書給另一位同學（demo 顯示用） */
+export function transferBook(params: {
+  bookId: string;
+  bookTitle: string;
+  fromStudentName: string;
+  toStudentName: string;
+}): void {
+  sendMessage({
+    fromName: '圖書館系統',
+    fromAvatar: '📚',
+    subject: `【借閱轉讓】${params.bookTitle}`,
+    body: `《${params.bookTitle}》已從 ${params.fromStudentName} 轉讓給 ${params.toStudentName}。`,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'info',
+    senderRole: 'admin',
+    recipientRoles: ['student'],
+  });
 }
 
 // ─────────────────────────────────────────────────────────────

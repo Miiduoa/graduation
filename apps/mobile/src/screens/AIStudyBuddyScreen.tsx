@@ -38,6 +38,7 @@ import {
 } from '../services/roleEventBus';
 import { DEMO_COURSES } from '../data/demoCoursesMock';
 import { useAuth } from '../state/auth';
+import { requestHelp } from '../services/demoStore';
 
 const courseNameById = (id: number): string => {
   const found = DEMO_COURSES.find((c) => c.id === id);
@@ -329,9 +330,23 @@ export default function AIStudyBuddyScreen() {
                           } catch {
                             /* swallow */
                           }
+                          // 同步寫 demoStore，讓切換到 ta/teacher 角色可在
+                          // Messages 跨角色面板看到並回覆。
+                          try {
+                            requestHelp({
+                              courseId: String(helpCourseId),
+                              courseName: courseNameById(helpCourseId),
+                              topic: `${courseNameById(helpCourseId)} 卡關（請 ${h.buddyName} 協助解題）`,
+                              urgency: 'normal',
+                              studentId: auth.user?.uid ?? 'stu-001',
+                              studentName: auth.profile?.displayName ?? '王小明',
+                            });
+                          } catch {
+                            /* swallow */
+                          }
                           Alert.alert(
                             '求助已送出',
-                            `已送訊息給 ${h.buddyName} 與助教，預估 ${h.expectedResponseMinutes} 分鐘內回。`,
+                            `已送訊息給 ${h.buddyName} 與助教，預估 ${h.expectedResponseMinutes} 分鐘內回。\n切換成 TA / 老師角色可在 Messages 跨角色面板回覆。`,
                           );
                         }}
                         style={({ pressed }) => ({
