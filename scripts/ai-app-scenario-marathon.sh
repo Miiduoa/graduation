@@ -194,8 +194,10 @@ while (( $(date +%s) < END_TS )); do
     done
   fi
 
-  if (( TYPECHECK_EVERY > 0 && iter % TYPECHECK_EVERY == 0 )); then
-    run_mobile_typecheck
+  if (( TYPECHECK_EVERY > 0 )); then
+    if (( iter % TYPECHECK_EVERY == 0 )); then
+      run_mobile_typecheck
+    fi
   fi
 
   echo "–– end iteration #$iter ($(date -Iseconds)) ––" >>"$LOG"

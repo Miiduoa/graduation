@@ -23,7 +23,7 @@ import type {
   EvidenceRef,
   RoleActionPolicy,
 } from '../data';
-import { getFirebaseApp, hasUsableFirebaseConfig } from '../firebase';
+import { getFirebaseApp, hasUsableFirebaseConfig, getFunctionsInstance } from '../firebase';
 import {
   buildThinkingChain,
   collectLearnedSkillsFromToolRound,
@@ -3111,7 +3111,7 @@ async function callCampusAssistant(
 
   try {
     const callable = httpsCallable<CampusAssistantRequest, CampusAssistantResponse>(
-      getFunctions(getFirebaseApp(), getCloudFunctionRegion()),
+      getFunctionsInstance(),
       'askCampusAssistant',
     );
 
@@ -3170,12 +3170,12 @@ async function callCampusAssistant(
   }
 }
 
-/** 訂餐／報修／座位／請假等需可靠 tool-use：避免先走本機 LLM 導致「找不到可載入模型」阻斷雲端後備。 */
+/** 訂餐／報修／座位／請假／校園地圖路線等需可靠 tool-use：避免先走本機 LLM 導致「找不到可載入模型」阻斷雲端後備。 */
 function lastUserMessageNeedsReliableCloudAssistant(messages: AIMessage[]): boolean {
   const last = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
   const t = String(last).toLowerCase();
   if (!t.trim()) return false;
-  return /點餐|訂餐|下單|報修|維修|維修單|請假|預約座位|借書|還書|洗衣|掛號|退選|加選|選課/.test(t);
+  return /點餐|訂餐|下單|報修|維修|維修單|請假|預約座位|借書|還書|洗衣|掛號|退選|加選|選課|路線|怎麼去|怎麼走|怎麼到|多遠|多久|導航|菜單|找.*在哪/.test(t);
 }
 
 async function tryReliableCloudInsteadOfLocalLLM(

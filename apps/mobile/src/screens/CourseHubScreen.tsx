@@ -13,7 +13,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 
 import type { CourseSpace } from '../data';
-import { Card, ErrorState, LoadingState, Pill, Screen, SectionTitle } from '../ui/components';
+import { Card, EmptyState, ErrorState, LoadingState, Pill, Screen, SectionTitle } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
@@ -159,10 +159,6 @@ function ActionChip(props: {
   tint: string;
   onPress?: () => void;
 }) {
-  const { course } = props;
-  const hasDueSoon = course.dueSoonCount > 0;
-  const hasAssignments = (course.assignmentCount ?? 0) > 0;
-
   return (
     <Pressable
       onPress={props.onPress}
@@ -429,6 +425,7 @@ export function CourseHubScreen(props: any) {
   const auth = useAuth();
   const { school } = useSchool();
   const ds = useDataSource();
+  const roleMode = resolveRoleMode(auth.profile?.role, Boolean(auth.user));
 
   // TronClass 登入狀態
   const [showLoginForm, setShowLoginForm] = useState(false);
@@ -577,7 +574,11 @@ export function CourseHubScreen(props: any) {
   if (!auth.user) {
     return (
       <Screen>
-        <EmptyState studentId={null} />
+        <EmptyState
+          title="需要登入"
+          subtitle="請登入後查看 TronClass 課程、作業與課堂互動。"
+          icon="school-outline"
+        />
       </Screen>
     );
   }
@@ -723,25 +724,6 @@ export function CourseHubScreen(props: any) {
             ))}
           </View>
         </Card>
-
-        {/* Empty state */}
-        {sortedCourses.length === 0 ? (
-          <EmptyState onRetry={reload} studentId={auth.profile?.studentId ?? null} />
-        ) : null}
-
-        {/* Course List */}
-        {sortedCourses.map((course) => (
-          <CourseCard
-            key={course.groupId}
-            course={course}
-            onPress={() => {
-              nav?.navigate?.("CourseModules", {
-                groupId: course.groupId,
-                groupName: course.name,
-              });
-            }}
-          />
-        ) : null}
 
         {/* 空狀態：TronClass 登入 */}
         {selectedRows.length === 0 || isTCSessionError ? (

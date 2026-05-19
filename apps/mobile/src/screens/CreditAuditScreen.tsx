@@ -542,16 +542,9 @@ export function CreditAuditScreen(props: any) {
                   </Text>
                 )}
               </View>
-            </Card>
-
-            {/* ── 資料更新時間 ── */}
-            {(campusCreditAudit as any).fetchedAt && (
-              <Text style={{ color: theme.colors.muted, fontSize: 11, textAlign: "center", marginTop: 4 }}>
-                資料更新時間：{new Date((campusCreditAudit as any).fetchedAt).toLocaleString("zh-TW")}
-              </Text>
-            )}
-          </>
-        )}
+            );
+          })}
+        </Card>
 
         {/* ═══ 各學期明細 ═══ */}
         <Card title="各學期成績明細" subtitle={`共 ${bySemester.length} 個學期`}>
