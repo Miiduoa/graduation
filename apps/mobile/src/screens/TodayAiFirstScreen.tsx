@@ -24,6 +24,7 @@ import {
   Easing,
 } from 'react-native';
 import { rootNavigateNested } from '../app/rootNavigation';
+import { requestLeave } from '../services/demoStore';
 
 // ──────────────────────────────────────────────
 // 內嵌 Design Tokens（避開 packages alias 風險）
@@ -232,8 +233,21 @@ export default function TodayAiFirstScreen() {
   const submitLeaveDraft = useCallback(() => {
     if (leaveSent) return;
     setLeaveSent(true);
+    // 寫入 mobile demoStore：切到老師 / 系主任的訊息收件匣會看到並可審核
+    requestLeave({
+      courseId: 'c7',
+      courseName: '資料庫系統',
+      studentId: 'stu-001',
+      studentName: '王小明',
+      reason: '病假（AI 草稿）',
+      dateFrom: '2026-05-21',
+      dateTo: '2026-05-21',
+    });
     setTimeout(() => {
-      Alert.alert('已送出', '請假草稿已送給授課老師審核。');
+      Alert.alert(
+        '已送出',
+        '請假已寫入 demoStore。切到老師 / 系主任 → 訊息 → 點訊息可看到核准/退回面板。',
+      );
     }, 200);
   }, [leaveSent]);
 
