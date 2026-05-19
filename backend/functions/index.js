@@ -2226,13 +2226,14 @@ exports.signInPuStudentId = onRequest(
               totalCredits: coursesResult.totalCredits ?? 0,
             }
           : null,
-        grades: gradesResult.success
+        grades: finalGradesResult.success
           ? {
-              grades: gradesResult.grades || [],
-              allSemesters: gradesResult.allSemesters || [],
-              summary: gradesResult.summary || {},
+              grades: finalGradesResult.grades || [],
+              allSemesters: finalGradesResult.allSemesters || [],
+              summary: finalGradesResult.summary || {},
             }
           : null,
+        creditAudit: finalCreditAuditResult,
         announcements: announcementsResult.success ? announcementsResult.announcements || [] : null,
       });
     } catch (error) {
@@ -6980,11 +6981,22 @@ exports.puFetchCampusData = onRequest(
         windowMs: 5 * 60 * 1000,
       });
 
-      const sessionRef = db.collection('_puSessions').doc(sessionId);
-      const sessionDoc = await sessionRef.get();
-      if (!sessionDoc.exists) {
-        res.status(401).json({ error: 'Invalid or expired PU session' });
-        return;
+      // Try Firestore first, then in-memory fallback
+      let sessionData = null;
+      try {
+        const sessionRef = db.collection('_puSessions').doc(sessionId);
+        const sessionDoc = await sessionRef.get();
+        if (sessionDoc.exists) {
+          sessionData = sessionDoc.data();
+          const expiresAt = sessionData?.expiresAt?.toDate?.() ?? null;
+          if (!sessionData?.cookies || Object.keys(sessionData.cookies).length === 0 || !expiresAt || expiresAt < new Date()) {
+            await sessionRef.delete().catch(() => null);
+            sessionData = null;
+          }
+        }
+      } catch (err) {
+        // Firestore unavailable — try in-memory
+        console.warn('[puFetchCampusData] Firestore unavailable, trying in-memory:', err.message);
       }
 
       const sessionData = sessionDoc.data();

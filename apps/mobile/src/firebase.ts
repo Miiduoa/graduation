@@ -20,6 +20,15 @@ type FirebaseWebConfig = {
   appId?: string;
 };
 
+const FALLBACK_FIREBASE_CONFIG = {
+  apiKey: "mock-api-key",
+  authDomain: "mock-project.firebaseapp.com",
+  projectId: "mock-project",
+  storageBucket: "mock-project.appspot.com",
+  messagingSenderId: "000000000000",
+  appId: "1:000000000000:web:mock",
+} as const;
+
 function getFirebaseConfig(): FirebaseWebConfig {
   const extra = (Constants.expoConfig as any)?.extra ?? (Constants as any)?.manifest?.extra ?? {};
   return (extra.firebase ?? {}) as FirebaseWebConfig;
