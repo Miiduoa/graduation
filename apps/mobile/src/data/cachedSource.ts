@@ -424,6 +424,10 @@ export function createCachedSource(
     schoolId: string,
     fetcher: () => Promise<T[]>,
     expiryMs: number,
+    // methodName 用來決定要不要跳過快取空陣列；
+    // 原本程式碼從外層 closure 拿，但 fetchAndCacheListWithExpiry 與 Proxy `get` 是不同 scope，
+    // 直接讀 methodName 會 throw ReferenceError（每次同步 events 都會跳的紅色錯誤就是這條）。
+    methodName?: string,
   ): Promise<T[]> {
     const skipCacheEmpty = methodName ? NEVER_CACHE_EMPTY_METHODS.has(methodName) : false;
 
@@ -581,6 +585,7 @@ export function createCachedSource(
             schoolId,
             () => listMethod.call(target, schoolId, options),
             expiryMs,
+            methodName,
           );
         };
       }
