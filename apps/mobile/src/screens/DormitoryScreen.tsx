@@ -39,6 +39,7 @@ import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { useDataSource } from '../hooks/useDataSource';
 import { useSchool } from '../state/school';
+import { submitDormRepair as submitDormRepairToDemoStore } from '../services/demoStore';
 import { formatDateTime } from '../utils/format';
 import type {
   RepairRequest,
@@ -289,6 +290,20 @@ export function DormitoryScreen(props: any) {
                 schoolId: school?.id,
               });
               setRepairs([newRepair, ...repairs]);
+              // 同步寫入跨角色 demoStore — 切換成 admin 角色可在 Messages
+              // 跨角色面板看到此報修並按「派工 / 完工」更新狀態。
+              try {
+                submitDormRepairToDemoStore({
+                  building: dormInfo?.building ?? '未指定',
+                  room: dormInfo?.room ?? '未指定',
+                  urgency: 'normal',
+                  description: `${label}：${desc}`,
+                  studentId: auth.user?.uid ?? 'stu-001',
+                  studentName: auth.user?.displayName ?? '王小明',
+                });
+              } catch (demoErr) {
+                console.warn('[Dormitory] demoStore write failed:', demoErr);
+              }
               try {
                 const { aiBrain } = await import('../services/aiBrain');
                 aiBrain.reportToolOutcome(
