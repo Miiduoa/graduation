@@ -19,9 +19,23 @@ import {
   AIMark,
   aiTokens,
 } from '../ui/aiFirst';
+import { safeNavigate } from '../utils/safeNavigate';
+import { DEMO_COURSES } from '../data/demoCoursesMock';
 
 export default function LearnAiFirstScreen() {
   const navigation = useNavigation<any>();
+  // 第一門 demo 課當預設目標，所有 mock AIRow 點下去都進這門課的 CourseHub，
+  // 避免「按了沒反應」（demo 用 mock 文案，實際路由統一到第一門課的工作區）。
+  const fallbackCourseId = DEMO_COURSES[0]?.id ?? 71378;
+  const openCourseHub = (courseId: number = fallbackCourseId) =>
+    safeNavigate(navigation, 'CourseHub', { courseId, groupId: String(courseId) });
+  const openAssignments = () =>
+    safeNavigate(navigation, 'CourseHub', {
+      courseId: fallbackCourseId,
+      groupId: String(fallbackCourseId),
+      initialTab: 'assignments',
+    });
+  const openAICourseAdvisor = () => safeNavigate(navigation, 'AICourseAdvisor');
 
   return (
     <AIScreen>
@@ -47,9 +61,9 @@ export default function LearnAiFirstScreen() {
             預估需 4 小時，建議今晚 19:00–23:00 完成。
           </Text>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-            <AIButton label="進入作業" icon="📖" />
-            <AIButton label="排到行事曆" variant="ghost" />
-            <AIButton label="找同學討論" variant="ghost" />
+            <AIButton label="進入作業" icon="📖" onPress={openAssignments} />
+            <AIButton label="排到行事曆" variant="ghost" onPress={() => safeNavigate(navigation, 'Calendar')} />
+            <AIButton label="找同學討論" variant="ghost" onPress={() => safeNavigate(navigation, 'CourseDiscussion', { courseId: fallbackCourseId })} />
           </View>
         </AICard>
 
@@ -64,7 +78,7 @@ export default function LearnAiFirstScreen() {
             你週四小考會考雜湊。我把上週四節課的重點整理成 5 分鐘速覽。
           </Text>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-            <AIButton label="開始 5 分鐘速覽" icon="⚡" />
+            <AIButton label="開始 5 分鐘速覽" icon="⚡" onPress={() => openCourseHub()} />
             <AIButton label="跳過" variant="ghost" />
           </View>
         </AICard>
@@ -78,7 +92,7 @@ export default function LearnAiFirstScreen() {
           subtitle="09:10–10:50 · 工程館 302 · 王大明"
           tag="下節"
           tagTone="ai"
-          onPress={() => navigation.navigate?.('AcademicStack' as never)}
+          onPress={() => openCourseHub()}
         />
         <AIRow
           icon="🗄"
@@ -86,6 +100,7 @@ export default function LearnAiFirstScreen() {
           subtitle="13:10–14:50 · 工程館 305 · 陳老師"
           tag="13:10"
           tagTone="muted"
+          onPress={() => openCourseHub(DEMO_COURSES[1]?.id ?? fallbackCourseId)}
         />
         <AIRow
           icon="📊"
@@ -93,6 +108,7 @@ export default function LearnAiFirstScreen() {
           subtitle="15:10–16:50 · 商學館 401"
           tag="15:10"
           tagTone="muted"
+          onPress={() => openCourseHub(DEMO_COURSES[2]?.id ?? fallbackCourseId)}
         />
       </AISection>
 
@@ -101,7 +117,7 @@ export default function LearnAiFirstScreen() {
         title="作業 & 截止"
         subtitle="本週共 4 件"
         action={
-          <AIButton label="全部" variant="ghost" size="sm" />
+          <AIButton label="全部" variant="ghost" size="sm" onPress={openAssignments} />
         }
       >
         <AIRow
@@ -110,6 +126,7 @@ export default function LearnAiFirstScreen() {
           subtitle="週三 23:59 · 進度 0%"
           tag="未開始"
           tagTone="warning"
+          onPress={openAssignments}
         />
         <AIRow
           icon="📝"
@@ -117,6 +134,7 @@ export default function LearnAiFirstScreen() {
           subtitle="週五 14:00 · 進度 60%"
           tag="進行中"
           tagTone="ai"
+          onPress={openAssignments}
         />
         <AIRow
           icon="✍️"
@@ -124,6 +142,7 @@ export default function LearnAiFirstScreen() {
           subtitle="週日 23:59"
           tag="待開始"
           tagTone="muted"
+          onPress={openAssignments}
         />
         <AIRow
           icon="📝"
@@ -131,17 +150,18 @@ export default function LearnAiFirstScreen() {
           subtitle="週四 09:00"
           tag="已準備"
           tagTone="success"
+          onPress={() => safeNavigate(navigation, 'QuizCenter', { courseId: fallbackCourseId })}
         />
       </AISection>
 
       {/* AI 工具入口 */}
       <AISection title="AI 學習工具">
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: aiTokens.space.md }}>
-          <AIChip label="AI 課程顧問" />
-          <AIChip label="共讀夥伴" />
-          <AIChip label="筆記摘要" />
-          <AIChip label="考前重點生成" />
-          <AIChip label="作業解題引導" />
+          <AIChip label="AI 課程顧問" onPress={openAICourseAdvisor} />
+          <AIChip label="共讀夥伴" onPress={() => safeNavigate(navigation, 'AIStudyBuddy')} />
+          <AIChip label="筆記摘要" onPress={() => safeNavigate(navigation, 'CourseNotes', { courseId: fallbackCourseId })} />
+          <AIChip label="考前重點生成" onPress={() => safeNavigate(navigation, 'AICourseAdvisor')} />
+          <AIChip label="作業解題引導" onPress={() => safeNavigate(navigation, 'AIStudyBuddy')} />
         </View>
       </AISection>
 
