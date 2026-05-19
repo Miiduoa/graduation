@@ -19,11 +19,10 @@ import { useAuth } from '../state/auth';
 import { useDataSource } from '../hooks/useDataSource';
 import { useAsyncList } from '../hooks/useAsyncList';
 import {
-  chatWithAI,
   getAIStatus,
   type AIMessage,
   type AIContext,
-  createCancellableChat,
+  createCancellableCampusChat,
 } from '../services/ai';
 import { analytics } from '../services/analytics';
 import { getFirstStorageValue, getScopedStorageKey } from '../services/scopedStorage';
@@ -121,7 +120,7 @@ function getCategoryColor(category: CourseCategory): string {
     case 'general':
       return theme.colors.success;
     case 'free':
-      return '#8B5CF6';
+      return '#AF52DE';
     default:
       return theme.colors.muted;
   }
@@ -145,7 +144,7 @@ function getDifficultyColor(difficulty: CourseDifficulty): string {
     case 'easy':
       return theme.colors.success;
     case 'medium':
-      return '#F59E0B';
+      return '#FF9500';
     case 'hard':
       return theme.colors.danger;
     default:
@@ -159,7 +158,7 @@ export function AICourseAdvisorScreen(props: any) {
   const auth = useAuth();
   const ds = useDataSource();
   const scrollRef = useRef<ScrollView>(null);
-  const aiChatRef = useRef(createCancellableChat());
+  const aiChatRef = useRef(createCancellableCampusChat());
 
   // 從 CoursesHomeScreen chip 傳進來：限縮 AI 對話到該課程
   const focusedGroupId = props?.route?.params?.groupId as string | undefined;
@@ -898,7 +897,7 @@ ${top
                         </Text>
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                        <Ionicons name="time" size={18} color="#F59E0B" />
+                        <Ionicons name="time" size={18} color="#FF9500" />
                         <Text style={{ color: theme.colors.muted, flex: 1 }}>
                           避開早八：{preferences.avoidEarly ? '是' : '否'}
                         </Text>
@@ -1045,7 +1044,7 @@ ${top
                             <Text
                               style={{
                                 color: theme.colors.accent,
-                                fontWeight: '800',
+                                fontWeight: '700',
                                 fontSize: 14,
                               }}
                             >
@@ -1056,7 +1055,7 @@ ${top
 
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                            <Ionicons name="star" size={14} color="#F59E0B" />
+                            <Ionicons name="star" size={14} color="#FF9500" />
                             <Text
                               style={{ color: theme.colors.text, fontWeight: '600', fontSize: 13 }}
                             >
@@ -1346,7 +1345,7 @@ ${top
                     }}
                   >
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                      <Ionicons name="sunny" size={22} color="#F59E0B" />
+                      <Ionicons name="sunny" size={22} color="#FF9500" />
                       <Text style={{ color: theme.colors.text, fontWeight: '600' }}>避開早八</Text>
                     </View>
                     <View

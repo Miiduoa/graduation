@@ -112,19 +112,31 @@ export function demoFetchCourseActivities(courseId: number) {
 }
 
 export function demoFetchCourseExams(courseId: number) {
-  return getDemoExamsByCourse(courseId).map((e) => ({
-    id: e.id,
-    title: e.title,
-    type: e.isPractice ? 'quiz' : 'exam',
-    module_id: e.moduleId,
-    start_time: e.startAt,
-    end_time: e.endAt,
-    total_score: e.totalScore,
-    submit_times: 1,
-    submitted_times: e.submitted ? 1 : 0,
-    is_closed: new Date(e.endAt).getTime() < Date.now(),
-    score_percentage: '0',
-  }));
+  // 把該課的 score_items 對應到 exam，找到 weight
+  const scoreItems = getDemoScoreItemsByCourse(courseId);
+  return getDemoExamsByCourse(courseId).map((e) => {
+    // 嘗試找對應的 scoreItem（exam 名或同類型）
+    const matched = scoreItems.find(
+      (s) =>
+        (s.type === 'exam' || s.type === 'quiz') &&
+        (s.name.includes(e.title.slice(0, 4)) ||
+          (e.title.includes('期中') && s.name.includes('期中')) ||
+          (e.title.includes('期末') && s.name.includes('期末'))),
+    );
+    return {
+      id: e.id,
+      title: e.title,
+      type: e.isPractice ? 'quiz' : 'exam',
+      module_id: e.moduleId,
+      start_time: e.startAt,
+      end_time: e.endAt,
+      total_score: e.totalScore,
+      submit_times: 1,
+      submitted_times: e.submitted ? 1 : 0,
+      is_closed: new Date(e.endAt).getTime() < Date.now(),
+      score_percentage: matched ? String(matched.weight) : (e.isPractice ? '0' : '30'),
+    };
+  });
 }
 
 export function demoFetchHomeworkActivities(courseId: number) {

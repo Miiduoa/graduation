@@ -1,0 +1,11 @@
+將下列檔案依序貼到 Supabase Dashboard → SQL Editor（或使用 Supabase CLI db push）：
+
+1) supabase/migrations/20260117120001_core.sql
+2) supabase/migrations/20260117120002_assignments_quizzes.sql
+3) supabase/migrations/20260117120003_forum_grades.sql
+4) supabase/migrations/20260117120004_live.sql
+
+完成後請確認：
+- Authentication → Email provider 依需求開啟。
+- Storage buckets materials/submissions 已由 migration 建立。
+- Realtime：專案中請啟用 Broadcast / Presence（不同版本 UI 位置略有差異）。

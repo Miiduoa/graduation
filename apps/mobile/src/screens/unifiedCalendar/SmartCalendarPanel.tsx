@@ -213,7 +213,7 @@ export function SmartCalendarPanel({
         {/* Header — 嵌入模式隱藏 */}
         {!embedded && (
           <View style={{ paddingHorizontal: theme.space.lg, marginBottom: theme.space.md }}>
-            <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '800' }}>
+            <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '700' }}>
               智慧行事曆
             </Text>
             <Text style={{ color: theme.colors.textSecondary, fontSize: 14, marginTop: 4 }}>
@@ -418,7 +418,7 @@ function WeekSummaryCard({ weekView }: { weekView: WeekView }) {
                     <View
                       style={{
                         height: `${(day.classMinutes / total) * 100}%` as any,
-                        backgroundColor: day.isToday ? theme.colors.accent : '#3B82F6',
+                        backgroundColor: day.isToday ? theme.colors.accent : '#5856D6',
                       }}
                     />
                   )}
@@ -441,12 +441,12 @@ function WeekSummaryCard({ weekView }: { weekView: WeekView }) {
       {/* Stats */}
       <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
         {[
-          { label: '上課', value: `${weekSummary.totalClassHours}h`, color: '#3B82F6' },
-          { label: '自習', value: `${weekSummary.totalStudyHours}h`, color: '#10B981' },
-          { label: '待辦', value: `${weekSummary.upcomingDeadlines}`, color: '#EF4444' },
+          { label: '上課', value: `${weekSummary.totalClassHours}h`, color: '#5856D6' },
+          { label: '自習', value: `${weekSummary.totalStudyHours}h`, color: '#34C759' },
+          { label: '待辦', value: `${weekSummary.upcomingDeadlines}`, color: '#FF3B30' },
         ].map((s) => (
           <View key={s.label} style={{ alignItems: 'center' }}>
-            <Text style={{ color: s.color, fontSize: 18, fontWeight: '800' }}>{s.value}</Text>
+            <Text style={{ color: s.color, fontSize: 18, fontWeight: '700' }}>{s.value}</Text>
             <Text style={{ color: theme.colors.textSecondary, fontSize: 11 }}>{s.label}</Text>
           </View>
         ))}
@@ -682,7 +682,7 @@ function StudyPlanSection({
                     borderWidth: 1,
                     borderColor: theme.colors.border,
                     borderLeftWidth: 3,
-                    borderLeftColor: '#10B981',
+                    borderLeftColor: '#34C759',
                   }}
                 >
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
@@ -779,7 +779,7 @@ function PomodoroSection({
             style={{
               color: active ? theme.colors.accent : theme.colors.text,
               fontSize: 42,
-              fontWeight: '800',
+              fontWeight: '700',
               fontVariant: ['tabular-nums'],
             }}
           >
@@ -847,12 +847,12 @@ function PomodoroSection({
                 label: '本週',
                 value: `${stats.weekSessions}`,
                 sub: `${stats.weekMinutes}分鐘`,
-                color: '#3B82F6',
+                color: '#5856D6',
               },
-              { label: '連續', value: `${stats.streak}天`, sub: '', color: '#F97316' },
+              { label: '連續', value: `${stats.streak}天`, sub: '', color: '#FF9500' },
             ].map((s) => (
               <View key={s.label} style={{ alignItems: 'center' }}>
-                <Text style={{ color: s.color, fontSize: 22, fontWeight: '800' }}>{s.value}</Text>
+                <Text style={{ color: s.color, fontSize: 22, fontWeight: '700' }}>{s.value}</Text>
                 <Text style={{ color: theme.colors.textSecondary, fontSize: 11 }}>{s.label}</Text>
                 {s.sub && <Text style={{ color: theme.colors.muted, fontSize: 10 }}>{s.sub}</Text>}
               </View>

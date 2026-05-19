@@ -10,11 +10,13 @@ import {
 import { appendSchoolContext, sanitizeInternalPath } from '@/lib/navigation';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import { useRouter } from 'next/navigation';
+import { DEMO_ROLES, writeDemoRole } from '@/lib/demoRole';
+import { getDemoUser } from '@/lib/demoData';
 
 export default function LoginPage(props: {
   searchParams?: { school?: string; schoolId?: string; redirect?: string; returnUrl?: string };
 }) {
-  const { schoolContext, schoolName } = resolveSchoolPageContext(props.searchParams);
+  const { schoolContext, schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
   const router = useRouter();
 
   const [studentId, setStudentId] = useState('');
@@ -93,7 +95,7 @@ export default function LoginPage(props: {
             background: 'linear-gradient(135deg, var(--brand) 0%, var(--brand2) 100%)',
             border: 'none',
             color: '#fff',
-            boxShadow: '6px 6px 16px rgba(94,106,210,0.36), -3px -3px 8px rgba(255,255,255,0.7)',
+            boxShadow: '6px 6px 16px rgba(88,86,214,0.36), -3px -3px 8px rgba(255,255,255,0.7)',
           }}
         >
           <div
@@ -112,7 +114,7 @@ export default function LoginPage(props: {
             🎓
           </div>
           <h1
-            style={{ margin: '0 0 6px', fontSize: 22, fontWeight: 800, letterSpacing: '-0.04em' }}
+            style={{ margin: '0 0 6px', fontSize: 22, fontWeight: 700, letterSpacing: '-0.04em' }}
           >
             {schoolName}
           </h1>
@@ -194,6 +196,100 @@ export default function LoginPage(props: {
             </p>
           </div>
         </form>
+
+        {/* Demo 快速登入：示範模式，使用內建資料，不需 Firebase */}
+        <div
+          className="card"
+          style={{
+            padding: '18px 20px',
+            background: 'var(--info-soft)',
+            border: '1px solid var(--info)',
+          }}
+        >
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: '0.12em',
+              textTransform: 'uppercase',
+              color: 'var(--info)',
+              marginBottom: 6,
+            }}
+          >
+            Demo / 示範模式 · 8 種角色
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.7, marginBottom: 12 }}>
+            畢業專題口試 / 教學示範用 — 點選任一身份直接進入，使用內建示範資料、免登入。
+            進站後可從右上角「身份膠囊」一鍵切換。
+          </div>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(2, 1fr)',
+              gap: 8,
+            }}
+          >
+            {DEMO_ROLES.map((r) => {
+              const user = r.role === 'guest' ? null : (r.demoUserUid ? getDemoUser(r.role) : null);
+              return (
+                <button
+                  key={r.role}
+                  type="button"
+                  onClick={() => {
+                    writeDemoRole(r.role);
+                    router.push(`${r.entryHref}${q}`);
+                  }}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '36px 1fr',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '12px 12px',
+                    background: 'var(--surface)',
+                    border: `1px solid ${r.tone}40`,
+                    borderRadius: 12,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    fontFamily: 'inherit',
+                    color: 'var(--text)',
+                    transition: 'transform 0.1s ease, box-shadow 0.1s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'translateY(-1px)';
+                    e.currentTarget.style.boxShadow = `0 4px 12px ${r.tone}30`;
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = '';
+                    e.currentTarget.style.boxShadow = '';
+                  }}
+                >
+                  <span
+                    aria-hidden
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: 11,
+                      background: r.toneSoft,
+                      color: r.tone,
+                      display: 'grid',
+                      placeItems: 'center',
+                      fontSize: 18,
+                    }}
+                  >
+                    {r.icon}
+                  </span>
+                  <span style={{ display: 'grid', gap: 2 }}>
+                    <span style={{ fontSize: 13, fontWeight: 700 }}>{r.label}</span>
+                    <span style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.4 }}>
+                      {user ? user.displayName : '訪客'} · {user ? r.description.slice(0, 18) : '未登入身份'}
+                      {user && r.description.length > 18 ? '…' : ''}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </SiteShell>
   );

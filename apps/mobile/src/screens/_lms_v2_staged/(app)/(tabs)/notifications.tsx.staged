@@ -1,0 +1,97 @@
+import { useCallback, useEffect, useState } from 'react';
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
+
+type Row = {
+  id: string;
+  title: string;
+  body: string;
+  read_at: string | null;
+  created_at: string;
+};
+
+export default function NotificationsInboxScreen() {
+  const { session } = useAuth();
+  const uid = session?.user.id;
+
+  const [items, setItems] = useState<Row[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!uid) {
+      setItems([]);
+      return;
+    }
+    const { data, error } = await supabase
+      .from('notifications')
+      .select('id, title, body, read_at, created_at')
+      .eq('user_id', uid)
+      .order('created_at', { ascending: false })
+      .limit(80);
+
+    if (error) {
+      console.warn(error.message);
+      setItems([]);
+      return;
+    }
+    setItems((data ?? []) as Row[]);
+  }, [uid]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function onRefresh() {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }
+
+  async function markRead(row: Row) {
+    if (!uid || row.read_at) return;
+    const { error } = await supabase.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', row.id);
+    if (error) console.warn(error.message);
+    await load();
+  }
+
+  return (
+    <View style={styles.screen}>
+      <Text style={styles.title}>通知匣</Text>
+      <Text style={styles.sub}>來自 RPC notify_course_members 或其他後端流程插入的通知。</Text>
+
+      <FlatList
+        data={items}
+        keyExtractor={(it) => it.id}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        ListEmptyComponent={<Text style={styles.empty}>{uid ? '尚無通知。' : '請先登入。'}</Text>}
+        renderItem={({ item }) => (
+          <Pressable style={[styles.row, item.read_at ? styles.rowRead : null]} onPress={() => markRead(item)}>
+            <Text style={styles.rowTitle}>{item.title}</Text>
+            <Text style={styles.rowMeta}>{new Date(item.created_at).toLocaleString()}</Text>
+            <Text style={styles.rowBody}>{item.body}</Text>
+          </Pressable>
+        )}
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, padding: 16 },
+  title: { fontSize: 20, fontWeight: '900', marginBottom: 6 },
+  sub: { fontSize: 12, color: '#6b7280', marginBottom: 12 },
+  empty: { color: '#6b7280', marginTop: 18 },
+  row: {
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#eee',
+    gap: 6,
+    backgroundColor: '#fffbeb',
+  },
+  rowRead: { backgroundColor: '#ffffff' },
+  rowTitle: { fontSize: 16, fontWeight: '800' },
+  rowMeta: { fontSize: 12, color: '#6b7280' },
+  rowBody: { fontSize: 14, lineHeight: 20 },
+});

@@ -20,6 +20,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { safeNavigate } from '../utils/safeNavigate';
 
 import { evaluateRubric, type Rubric, type RubricScore } from '@campus/shared';
 import { tcFetchPeerReviews } from '../services/tronClassClient';
@@ -379,7 +380,7 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
                 minHeight: 44,
               }}
               onPress={() =>
-                navigation.navigate('CourseMaterialViewer', {
+                safeNavigate(navigation, 'CourseMaterialViewer', {
                   url: att.url,
                   title: att.name,
                   kind: 'homework',

@@ -19,6 +19,11 @@ const getDormRepairStatus = require('./getDormRepairStatus');
 const reserveWashingMachine = require('./reserveWashingMachine');
 const createOrder = require('./createOrder');
 const cancelOrder = require('./cancelOrder');
+const findCampusPoi = require('./findCampusPoi');
+const planCampusRoute = require('./planCampusRoute');
+const listCafeterias = require('./listCafeterias');
+const getCafeteriaMenu = require('./getCafeteriaMenu');
+const proposeOrder = require('./proposeOrder');
 const submitQuizAttempt = require('./submitQuizAttempt');
 const computeGradebook = require('./computeGradebook');
 const computeCompanionState = require('./computeCompanionState');
@@ -54,6 +59,11 @@ const tools = [
   reserveWashingMachine,
   createOrder,
   cancelOrder,
+  findCampusPoi,
+  planCampusRoute,
+  listCafeterias,
+  getCafeteriaMenu,
+  proposeOrder,
 ];
 
 const byName = new Map(tools.map((t) => [t.name, t]));

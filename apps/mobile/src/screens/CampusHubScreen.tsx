@@ -401,6 +401,14 @@ export function CampusHubScreen(props: Record<string, unknown>) {
             crossTab: { tab: 'Today', screen: 'CampusSocialScreen' },
             keywords: ['社群', '看板', '動態', '匿名', '學伴', '即時', 'story', '發文'],
           },
+          {
+            icon: 'ic_tab_today',
+            label: '今天的故事',
+            subtitle: '一日完整動線',
+            tint: theme.colors.accent,
+            crossTab: { tab: 'Today', screen: 'DemoStory' },
+            keywords: ['今天', '一天', '故事', 'timeline', '行程', '時程'],
+          },
         ],
       },
       {
@@ -430,10 +438,35 @@ export function CampusHubScreen(props: Record<string, unknown>) {
           },
           {
             icon: 'ic_bus',
-            label: '交通',
+            label: '校園公車',
+            subtitle: '即時 · AI · 搭車中',
+            tint: theme.colors.info,
+            screen: 'BusV2',
+            keywords: ['公車', '校車', '搭車', '到站', 'AI 搭車', '搭車中'],
+          },
+          {
+            icon: 'ic_navigate_pin',
+            label: '校園地圖 V2',
+            subtitle: 'Google Maps 級',
+            tint: theme.colors.accent,
+            screen: 'MapV2',
+            keywords: ['地圖', '導航', 'turn by turn', '路線'],
+          },
+          {
+            icon: 'ic_navigate_pin',
+            label: '路線規劃',
+            subtitle: '走路 / 公車組合',
+            tint: theme.colors.success,
+            screen: 'TripPlanner',
+            keywords: ['路線', '導航', '規劃', 'directions', '怎麼去'],
+          },
+          {
+            icon: 'ic_bus',
+            label: '台中交通',
+            subtitle: '高鐵 / 火車',
             tint: theme.colors.info,
             screen: 'TransportHub',
-            keywords: ['交通', '公車', '搭車', '車站', '高鐵'],
+            keywords: ['交通', '車站', '高鐵', '台鐵', 'YouBike'],
           },
           {
             icon: 'ic_print',
@@ -602,7 +635,7 @@ export function CampusHubScreen(props: Record<string, unknown>) {
         {/* ── Map Card (hide when searching) ── */}
         {!searchQuery ? (
           <CompactMapCard
-            onPress={() => nav?.navigate?.('Map')}
+            onPress={() => nav?.navigate?.('MapV2')}
             onARPress={() => {
               const gate = getCampusPoi('pu-gate-main');
               nav?.navigate?.('ARNavigation', {

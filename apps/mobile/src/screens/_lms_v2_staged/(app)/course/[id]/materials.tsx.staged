@@ -1,0 +1,640 @@
+import * as DocumentPicker from 'expo-document-picker';
+import { Video, ResizeMode } from 'expo-av';
+import { useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Alert,
+  FlatList,
+  Linking,
+  Modal,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+
+import { useAuth } from '@/contexts/AuthContext';
+import { canCourseStaffManageContent, useCourseRole } from '@/hooks/useCourseRole';
+import { detectMimeHintForMaterialUrl } from '@/lib/materialMimeDetect';
+import { supabase } from '@/lib/supabase';
+
+type Material = {
+  id: string;
+  title: string;
+  storage_path: string | null;
+  external_url: string | null;
+  mime_type: string | null;
+  created_at: string;
+};
+
+type ProgressRow = {
+  material_id: string;
+  progress: number;
+  last_seconds: number;
+  opened_at: string | null;
+};
+
+function looksLikeVideoMaterial(item: Material, resolvedUrl: string): boolean {
+  const mime = (item.mime_type ?? '').toLowerCase();
+  const blob = `${mime} ${item.storage_path ?? ''} ${item.external_url ?? ''} ${resolvedUrl}`.toLowerCase();
+  if (/\.m3u8(\?|#|$)/.test(blob)) return true;
+  if (/application\/vnd\.apple\.mpegurl/.test(mime)) return true;
+  if (/\/hls\//i.test(blob)) return true;
+  if (/[?&#][^?=]*\.m3u8([&#]|$)/i.test(blob)) return true;
+  return /\.(mp4|m4v|webm)(\?|#|$)/.test(blob);
+}
+
+export default function MaterialsScreen() {
+  const { id: courseId } = useLocalSearchParams<{ id: string }>();
+  const { session } = useAuth();
+  const role = useCourseRole(courseId, session?.user.id);
+  const staffCanManageMaterials = canCourseStaffManageContent(role);
+
+  const [items, setItems] = useState<Material[]>([]);
+  const [progressByMaterial, setProgressByMaterial] = useState<Record<string, ProgressRow>>({});
+  const [refreshing, setRefreshing] = useState(false);
+  const [title, setTitle] = useState('');
+  const [url, setUrl] = useState('');
+  const [mimeHint, setMimeHint] = useState('');
+  const [mimeBusy, setMimeBusy] = useState(false);
+  const [videoPlayback, setVideoPlayback] = useState<{ item: Material; uri: string } | null>(null);
+  const lastVideoReportAt = useRef(0);
+  const [aiTarget, setAiTarget] = useState<Material | null>(null);
+  const [aiNote, setAiNote] = useState('');
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiPreview, setAiPreview] = useState<string | null>(null);
+  const [courseAiMediaEnabled, setCourseAiMediaEnabled] = useState<boolean | null>(null);
+  const [aiConsent, setAiConsent] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!courseId) return;
+    const { data, error } = await supabase
+      .from('course_materials')
+      .select('id, title, storage_path, external_url, mime_type, created_at')
+      .eq('course_id', courseId)
+      .order('created_at', { ascending: false });
+    if (error) {
+      console.warn(error.message);
+      setItems([]);
+      return;
+    }
+    const rows = (data ?? []) as Material[];
+    setItems(rows);
+
+    const uid = session?.user.id;
+    if (!uid || staffCanManageMaterials || rows.length === 0) {
+      setProgressByMaterial({});
+      return;
+    }
+
+    const ids = rows.map((r) => r.id);
+    const { data: progRows } = await supabase
+      .from('material_progress')
+      .select('material_id, progress, last_seconds, opened_at')
+      .eq('user_id', uid)
+      .in('material_id', ids);
+
+    const map: Record<string, ProgressRow> = {};
+    for (const pr of progRows ?? []) {
+      map[(pr as ProgressRow).material_id] = pr as ProgressRow;
+    }
+    setProgressByMaterial(map);
+  }, [courseId, session?.user.id, staffCanManageMaterials]);
+
+  useEffect(() => {
+    if (!courseId) {
+      setCourseAiMediaEnabled(null);
+      return;
+    }
+    let cancelled = false;
+    void supabase
+      .from('courses')
+      .select('ai_media_enabled')
+      .eq('id', courseId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelled) return;
+        const v = data?.ai_media_enabled;
+        setCourseAiMediaEnabled(typeof v === 'boolean' ? v : true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [courseId]);
+
+  useEffect(() => {
+    if (aiTarget) setAiConsent(false);
+  }, [aiTarget]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function onRefresh() {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }
+
+  async function upsertOpened(item: Material) {
+    const uid = session?.user.id;
+    if (!uid || staffCanManageMaterials) return;
+
+    await supabase.from('material_progress').upsert(
+      {
+        material_id: item.id,
+        user_id: uid,
+        progress: 1,
+        last_seconds: 0,
+        opened_at: new Date().toISOString(),
+      },
+      { onConflict: 'material_id,user_id' },
+    );
+
+    await load();
+  }
+
+  async function upsertVideoProgress(item: Material, positionSeconds: number, durationSeconds: number) {
+    const uid = session?.user.id;
+    if (!uid || staffCanManageMaterials) return;
+    const progress =
+      durationSeconds > 0 ? Math.min(1, Math.max(0, positionSeconds / durationSeconds)) : 0;
+    await supabase.from('material_progress').upsert(
+      {
+        material_id: item.id,
+        user_id: uid,
+        progress,
+        last_seconds: Math.floor(positionSeconds),
+        opened_at: new Date().toISOString(),
+      },
+      { onConflict: 'material_id,user_id' },
+    );
+    await load();
+  }
+
+  async function sniffMime() {
+    const u = url.trim();
+    if (!u) {
+      Alert.alert('請先貼上連結');
+      return;
+    }
+    setMimeBusy(true);
+    try {
+      const m = await detectMimeHintForMaterialUrl(u);
+      if (m) setMimeHint(m);
+      else Alert.alert('無法推斷', '請改手動輸入 MIME，或於 URL 附上常見副檔名。');
+    } catch {
+      Alert.alert('偵測失敗', '可能受 CDN 或 CORS／Range 限制；請手動填入。');
+    } finally {
+      setMimeBusy(false);
+    }
+  }
+
+  async function addLink() {
+    const uid = session?.user.id;
+    if (!courseId || !uid) return;
+    const trimmedTitle = title.trim();
+    const trimmedUrl = url.trim();
+    if (!trimmedTitle || !trimmedUrl) {
+      Alert.alert('請輸入標題與連結');
+      return;
+    }
+    const rawMime = mimeHint.trim();
+    const { error } = await supabase.from('course_materials').insert({
+      course_id: courseId,
+      title: trimmedTitle,
+      external_url: trimmedUrl,
+      mime_type: rawMime === '' ? null : rawMime,
+      created_by: uid,
+    });
+    if (error) {
+      Alert.alert('新增失敗', error.message);
+      return;
+    }
+    setTitle('');
+    setUrl('');
+    setMimeHint('');
+    await load();
+  }
+
+  async function uploadFile() {
+    const uid = session?.user.id;
+    if (!courseId || !uid) return;
+
+    const picked = await DocumentPicker.getDocumentAsync({ multiple: false, copyToCacheDirectory: true });
+    if (picked.canceled) return;
+
+    const asset = picked.assets?.[0];
+    if (!asset?.uri) return;
+
+    const safeName = asset.name ?? 'upload.bin';
+    const label = title.trim() || safeName;
+    const objectPath = `${courseId}/${Date.now()}-${safeName}`;
+
+    try {
+      const res = await fetch(asset.uri);
+      const blob = await res.blob();
+
+      const { error: uploadError } = await supabase.storage.from('materials').upload(objectPath, blob, {
+        cacheControl: '3600',
+        upsert: false,
+        contentType: asset.mimeType ?? 'application/octet-stream',
+      });
+      if (uploadError) throw uploadError;
+
+      const { error: insertError } = await supabase.from('course_materials').insert({
+        course_id: courseId,
+        title: label,
+        storage_path: objectPath,
+        created_by: uid,
+      });
+      if (insertError) throw insertError;
+
+      setTitle('');
+      await load();
+    } catch (e: unknown) {
+      Alert.alert('上傳失敗', e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function openMaterial(item: Material) {
+    if (item.external_url) {
+      const urlStr = item.external_url.trim();
+      if (!staffCanManageMaterials && looksLikeVideoMaterial(item, urlStr)) {
+        await upsertOpened(item);
+        setVideoPlayback({ item, uri: urlStr });
+        return;
+      }
+      await upsertOpened(item);
+      await Linking.openURL(urlStr);
+      return;
+    }
+    if (!item.storage_path) return;
+
+    const { data, error } = await supabase.storage.from('materials').createSignedUrl(item.storage_path, 3600);
+    if (error || !data?.signedUrl) {
+      Alert.alert('無法產生下載連結', error?.message ?? '');
+      return;
+    }
+    const signed = data.signedUrl;
+    if (!staffCanManageMaterials && looksLikeVideoMaterial(item, signed)) {
+      await upsertOpened(item);
+      setVideoPlayback({ item, uri: signed });
+      return;
+    }
+    await upsertOpened(item);
+    await Linking.openURL(signed);
+  }
+
+  async function runMaterialAiPipeline() {
+    const item = aiTarget;
+    if (!item) return;
+    if (courseAiMediaEnabled === false) {
+      Alert.alert('已停用', '此課程已關閉 AI 影音處理（courses.ai_media_enabled）。');
+      return;
+    }
+    if (!aiConsent) {
+      Alert.alert(
+        '請先確認同意',
+        '勾選後才會將備註或教材影音送往雲端 API（轉寫／切段摘要）；每日配額仍受伺服端約束。',
+      );
+      return;
+    }
+
+    let signed_media_url: string | undefined;
+
+    let transcribableMime = false;
+    const m = (item.mime_type ?? '').toLowerCase();
+    if (m.startsWith('audio/') || m.startsWith('video/')) transcribableMime = true;
+
+    const urlBlob = `${m} ${item.storage_path ?? ''} ${item.external_url ?? ''}`.toLowerCase();
+    const extLooksMedia =
+      /\.(mp3|wav|m4a|aac|oga|opus|webm|mp4|mpeg|mov)(\?|#|$)/i.test(urlBlob);
+
+    try {
+      if (item.storage_path && (transcribableMime || extLooksMedia)) {
+        const { data: signedData, error: signErr } = await supabase.storage
+          .from('materials')
+          .createSignedUrl(item.storage_path, 4200);
+        if (!signErr && signedData?.signedUrl) {
+          signed_media_url = signedData.signedUrl;
+        } else if (signErr) {
+          Alert.alert(
+            '簽章失敗',
+            `無法產生存儲物件簽名下載網址，將略過自動轉寫。${signErr.message}`,
+          );
+        }
+      }
+    } catch (e: unknown) {
+      Alert.alert('簽章失敗', e instanceof Error ? e.message : String(e));
+    }
+
+    setAiBusy(true);
+    setAiPreview(null);
+    try {
+      const body: Record<string, unknown> = {
+        material_id: item.id,
+        teacher_note: aiNote.trim(),
+        user_consented: true,
+      };
+      if (signed_media_url) body.signed_media_url = signed_media_url;
+
+      const { data, error } = await supabase.functions.invoke('material-ai-pipeline', { body });
+
+      if (error) {
+        Alert.alert('AI 管道失敗', error.message);
+        return;
+      }
+      const d = data as { stub?: boolean; transcribed?: boolean; segments?: unknown[] };
+      setAiPreview(JSON.stringify(d, null, 2));
+      const subtitle = [];
+      if (d?.stub) subtitle.push('占位');
+      if (d?.transcribed) subtitle.push('已嘗試轉寫');
+      Alert.alert(
+        d?.stub ? '占位完成' : '已完成',
+        `結果已寫入 material_ai_enrichment${subtitle.length ? `（${subtitle.join('／')}）` : ''}`,
+      );
+      await load();
+    } catch (e: unknown) {
+      Alert.alert('AI 管道失敗', e instanceof Error ? e.message : String(e));
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
+  function closeAiModal() {
+    setAiTarget(null);
+    setAiNote('');
+    setAiPreview(null);
+    setAiConsent(false);
+  }
+
+  function closeVideoModal() {
+    setVideoPlayback(null);
+  }
+
+  return (
+    <View style={styles.screen}>
+      {staffCanManageMaterials ? (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>新增外部連結</Text>
+          <TextInput placeholder="教材標題" style={styles.input} value={title} onChangeText={setTitle} />
+          <TextInput placeholder="https://..." style={styles.input} value={url} onChangeText={setUrl} />
+          <TextInput
+            placeholder="選填 MIME（例：application/vnd.apple.mpegurl 表示 HLS）"
+            style={styles.input}
+            value={mimeHint}
+            onChangeText={setMimeHint}
+            autoCapitalize="none"
+          />
+          <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            <Pressable
+              style={[styles.secondaryBtn, mimeBusy ? { opacity: 0.55 } : null]}
+              onPress={() => void sniffMime()}
+              disabled={mimeBusy}>
+              <Text style={styles.secondaryBtnText}>{mimeBusy ? '辨識中…' : '自動辨識 MIME'}</Text>
+            </Pressable>
+            <Text style={styles.hint}>經 HEAD／副檔名／前幾個 byte 猜測（見 docs/materials-mime-sniff.md）</Text>
+          </View>
+          <Pressable style={styles.primaryBtn} onPress={addLink}>
+            <Text style={styles.primaryBtnText}>新增連結</Text>
+          </Pressable>
+          <Pressable style={styles.secondaryBtn} onPress={uploadFile}>
+            <Text style={styles.secondaryBtnText}>上傳檔案（Storage）</Text>
+          </Pressable>
+          <Text style={styles.hint}>檔案會存入 bucket materials，路徑前綴為課程 ID。</Text>
+        </View>
+      ) : null}
+
+      <FlatList
+        data={items}
+        keyExtractor={(item) => item.id}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        ListEmptyComponent={<Text style={styles.empty}>尚無教材。</Text>}
+        renderItem={({ item }) => (
+          <View style={styles.row}>
+            <Pressable style={{ flex: 1 }} onPress={() => openMaterial(item)}>
+              <Text style={styles.rowTitle}>{item.title}</Text>
+              <Text style={styles.rowMeta}>{new Date(item.created_at).toLocaleString()}</Text>
+              {!staffCanManageMaterials && progressByMaterial[item.id] ? (
+                <Text style={styles.progressMeta}>
+                  進度：{Math.round(Number(progressByMaterial[item.id].progress) * 100)}%
+                  {progressByMaterial[item.id].opened_at
+                    ? `｜上次開啟：${new Date(progressByMaterial[item.id].opened_at as string).toLocaleString()}`
+                    : ''}
+                </Text>
+              ) : null}
+            </Pressable>
+            {staffCanManageMaterials ? (
+              <Pressable style={styles.aiMini} onPress={() => setAiTarget(item)}>
+                <Text style={styles.aiMiniText}>AI 字幕／摘要</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        )}
+      />
+
+      <Modal visible={aiTarget != null} animationType="slide" transparent onRequestClose={closeAiModal}>
+        <View style={styles.aiOverlay}>
+          <View style={styles.aiCard}>
+            <Text style={styles.aiTitle}>AI 字幕／摘要（Wave6 管線）</Text>
+            <Text style={styles.aiMeta}>{aiTarget?.title}</Text>
+            <Text style={[styles.aiMeta, { opacity: courseAiMediaEnabled === null ? 0.65 : 1 }]}>
+              課程 AI 影音開關：
+              {courseAiMediaEnabled === false
+                ? '已關閉（請勿送出）'
+                : courseAiMediaEnabled === null
+                  ? '載入中…'
+                  : '已開放'}
+            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginVertical: 8 }}>
+              <Switch
+                value={aiConsent}
+                onValueChange={setAiConsent}
+                disabled={aiBusy || courseAiMediaEnabled === false}
+              />
+              <Text style={{ flex: 1, fontSize: 13, lineHeight: 18, color: '#374151' }}>
+                我確認已取得授權，並同意將備註與／或由 Storage 產生的短期簽名網址之影音送往雲端 API
+                ，以進行自動轉寫與切段摘要；處理受每日配額與資料庫欄位紀錄約束。
+              </Text>
+            </View>
+            <TextInput
+              placeholder="教師備註或短稿／逐字片段（協助分段摘要）"
+              style={[styles.input, styles.multilineAi]}
+              value={aiNote}
+              onChangeText={setAiNote}
+              multiline
+              editable={!aiBusy}
+            />
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <Pressable
+                style={[
+                  styles.primaryBtn,
+                  (aiBusy || courseAiMediaEnabled === false || !aiConsent) && { opacity: 0.55 },
+                ]}
+                onPress={() => void runMaterialAiPipeline()}
+                disabled={aiBusy || courseAiMediaEnabled === false || !aiConsent}>
+                <Text style={styles.primaryBtnText}>{aiBusy ? '呼叫中…' : '開始處理'}</Text>
+              </Pressable>
+              <Pressable style={styles.secondaryBtn} onPress={closeAiModal} disabled={aiBusy}>
+                <Text style={styles.secondaryBtnText}>關閉</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.hint}>每日配額與 ai-course-assistant 共用 ai_usage_daily。</Text>
+            {aiPreview ? (
+              <ScrollView style={{ maxHeight: 220, marginTop: 12 }}>
+                <Text selectable style={{ fontFamily: 'Menlo', fontSize: 11 }}>
+                  {aiPreview}
+                </Text>
+              </ScrollView>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={videoPlayback != null} animationType="slide" onRequestClose={closeVideoModal}>
+        <View style={styles.videoModal}>
+          <View style={styles.videoToolbar}>
+            <Pressable style={styles.videoCloseBtn} onPress={closeVideoModal}>
+              <Text style={styles.videoCloseText}>關閉</Text>
+            </Pressable>
+            {videoPlayback && looksLikeVideoMaterial(videoPlayback.item, videoPlayback.uri) ? (
+              <Pressable
+                style={styles.videoCloseBtn}
+                onPress={() => videoPlayback && void Linking.openURL(videoPlayback.uri)}>
+                <Text style={styles.videoCloseText}>瀏覽器開啟</Text>
+              </Pressable>
+            ) : null}
+            <Text style={styles.videoToolbarHint} numberOfLines={2}>
+              {videoPlayback?.item.title ?? ''}
+            </Text>
+          </View>
+          {videoPlayback ? (
+            <Video
+              style={styles.video}
+              source={{ uri: videoPlayback.uri }}
+              useNativeControls
+              resizeMode={ResizeMode.CONTAIN}
+              onPlaybackStatusUpdate={(status) => {
+                if (!status.isLoaded || typeof status.durationMillis !== 'number') return;
+                const durSec = status.durationMillis / 1000;
+                const posSec = (status.positionMillis ?? 0) / 1000;
+                const now = Date.now();
+                const throttleMs = 4000;
+                const shouldReport =
+                  status.didJustFinish || now - lastVideoReportAt.current >= throttleMs;
+                if (!shouldReport) return;
+                lastVideoReportAt.current = now;
+                void upsertVideoProgress(videoPlayback.item, posSec, durSec);
+              }}
+            />
+          ) : null}
+          {!staffCanManageMaterials ? (
+            <Text style={styles.videoFootnote}>
+              HLS（m3u8）與 CDN 相容性視裝置而定；若在 App 內無法順利播放，請用右上角「瀏覽器開啟」。一般 mp4／webm
+              串流仍會嘗試回報觀看進度；失敗時進度可能維持保守值。
+            </Text>
+          ) : null}
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, padding: 16 },
+  card: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#ddd',
+    borderRadius: 12,
+    padding: 14,
+    gap: 10,
+    marginBottom: 12,
+  },
+  cardTitle: { fontWeight: '700' },
+  input: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#ccc',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  primaryBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#2563eb',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  primaryBtnText: { color: '#fff', fontWeight: '700' },
+  secondaryBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#111827',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  secondaryBtnText: { color: '#fff', fontWeight: '700' },
+  hint: { color: '#6b7280', fontSize: 12 },
+  empty: { color: '#6b7280', marginTop: 18 },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#eee',
+    gap: 12,
+  },
+  rowTitle: { fontSize: 17, fontWeight: '700' },
+  rowMeta: { color: '#6b7280', fontSize: 12 },
+  progressMeta: { color: '#2563eb', fontSize: 12, fontWeight: '600' },
+  aiMini: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: '#2563eb',
+  },
+  aiMiniText: { color: '#fff', fontWeight: '700', fontSize: 12 },
+  aiOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15,23,42,0.45)',
+    padding: 24,
+  },
+  aiCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 18,
+    gap: 10,
+  },
+  aiTitle: { fontSize: 18, fontWeight: '800' },
+  aiMeta: { color: '#6b7280', fontSize: 13 },
+  multilineAi: { minHeight: 100, textAlignVertical: 'top' },
+  videoModal: { flex: 1, backgroundColor: '#000', paddingTop: 52 },
+  videoToolbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+  },
+  videoCloseBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#1f2937',
+  },
+  videoCloseText: { color: '#fff', fontWeight: '700' },
+  videoToolbarHint: { flex: 1, color: '#e5e7eb', fontWeight: '600', fontSize: 14 },
+  video: { flex: 1, backgroundColor: '#000' },
+  videoFootnote: {
+    color: '#9ca3af',
+    fontSize: 12,
+    padding: 16,
+    lineHeight: 18,
+  },
+});

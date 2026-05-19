@@ -11,5 +11,12 @@
       "source": "backend/functions",
       "predeploy": ["pnpm --filter @campus/shared run build:cjs"]
     }
-  ]
+  ],
+  "emulators": {
+    "auth": { "host": "0.0.0.0", "port": 9099 },
+    "functions": { "host": "0.0.0.0", "port": 5001 },
+    "firestore": { "host": "0.0.0.0", "port": 18080 },
+    "ui": { "enabled": true, "port": 4000 },
+    "singleProjectMode": true
+  }
 }

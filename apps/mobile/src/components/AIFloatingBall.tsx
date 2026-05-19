@@ -325,7 +325,7 @@ export function AIFloatingBall({
               style={{
                 color: theme.colors.onAccent,
                 fontSize: BADGE_FONT_SIZE,
-                fontWeight: '800',
+                fontWeight: '700',
               }}
             >
               {displayCount > 9 ? '9+' : displayCount}

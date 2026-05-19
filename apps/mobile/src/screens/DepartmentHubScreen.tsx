@@ -285,7 +285,7 @@ export function DepartmentHubScreen(props: any) {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
           <HeaderAvatarButton />
           <View style={{ flex: 1, gap: 4 }}>
-            <Text style={{ fontSize: 28, fontWeight: '800', color: theme.colors.text }}>
+            <Text style={{ fontSize: 28, fontWeight: '700', color: theme.colors.text }}>
               系所主管
             </Text>
             <Text style={{ fontSize: 14, color: theme.colors.textSecondary }}>審核與統計分析</Text>

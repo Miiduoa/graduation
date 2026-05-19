@@ -40,6 +40,7 @@ import {
 } from '../services/admin';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
 import { formatDateTime } from '../utils/format';
+import { AIMissionControl } from '../components/AIMissionControl';
 
 type AdminTab = 'overview' | 'announcements' | 'events' | 'members' | 'settings';
 type SortMode = 'latest' | 'oldest' | 'pinned';
@@ -1045,7 +1046,7 @@ export function AdminDashboardScreen(props: any) {
             <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: '700', letterSpacing: 1.5, textTransform: 'uppercase' }}>
               學習 · 管理員模式
             </Text>
-            <Text style={{ color: theme.colors.text, fontSize: 22, fontWeight: '800' }}>
+            <Text style={{ color: theme.colors.text, fontSize: 22, fontWeight: '700' }}>
               管理後台
             </Text>
           </View>
@@ -1085,6 +1086,13 @@ export function AdminDashboardScreen(props: any) {
 
         {tab === 'overview' && (
           <>
+            {/* AI 任務指揮 — 管理員專屬下一步 */}
+            <AIMissionControl
+              uid={auth.user?.uid ?? 'demo_admin_sys'}
+              maxVisible={3}
+              hideWhenEmpty
+            />
+
             <AnimatedCard title="管理員總覽" subtitle={`${school.name}（${school.code}）`}>
               <View
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}
@@ -1132,7 +1140,7 @@ export function AdminDashboardScreen(props: any) {
                   icon="people-outline"
                   label="成員"
                   value={stats.members}
-                  color="#F59E0B"
+                  color="#FF9500"
                   onPress={() => setTab('members')}
                 />
               </View>

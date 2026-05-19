@@ -1,0 +1,135 @@
+import { Link, router } from 'expo-router';
+import { useState } from 'react';
+import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+
+import { signInWithOAuthNative } from '@/lib/oauthNative';
+import { supabase } from '@/lib/supabase';
+
+export default function LoginScreen() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function signIn() {
+    setBusy(true);
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    setBusy(false);
+    if (error) {
+      Alert.alert('登入失敗', error.message);
+      return;
+    }
+    router.replace('/(app)/(tabs)/courses');
+  }
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>LMS 登入</Text>
+      <TextInput
+        autoCapitalize="none"
+        keyboardType="email-address"
+        placeholder="Email"
+        style={styles.input}
+        value={email}
+        onChangeText={setEmail}
+      />
+      <TextInput
+        placeholder="密碼"
+        secureTextEntry
+        style={styles.input}
+        value={password}
+        onChangeText={setPassword}
+      />
+      <Pressable disabled={busy} style={[styles.button, busy && styles.buttonDisabled]} onPress={signIn}>
+        <Text style={styles.buttonText}>{busy ? '登入中…' : '登入'}</Text>
+      </Pressable>
+
+      <Text style={styles.oauthHint}>或使用 OAuth（請先在 Supabase Dashboard 啟用對應 Provider）</Text>
+      <View style={styles.oauthRow}>
+        <Pressable
+          disabled={busy}
+          style={[styles.oauthChip, busy && styles.buttonDisabled]}
+          onPress={async () => {
+            setBusy(true);
+            const res = await signInWithOAuthNative('google');
+            setBusy(false);
+            if (res.error) {
+              Alert.alert('OAuth', res.error);
+              return;
+            }
+            router.replace('/(app)/(tabs)/courses');
+          }}>
+          <Text style={styles.oauthChipText}>Google</Text>
+        </Pressable>
+        <Pressable
+          disabled={busy}
+          style={[styles.oauthChip, busy && styles.buttonDisabled]}
+          onPress={async () => {
+            setBusy(true);
+            const res = await signInWithOAuthNative('azure');
+            setBusy(false);
+            if (res.error) {
+              Alert.alert('OAuth', res.error);
+              return;
+            }
+            router.replace('/(app)/(tabs)/courses');
+          }}>
+          <Text style={styles.oauthChipText}>Microsoft</Text>
+        </Pressable>
+        <Pressable
+          disabled={busy}
+          style={[styles.oauthChip, busy && styles.buttonDisabled]}
+          onPress={async () => {
+            setBusy(true);
+            const res = await signInWithOAuthNative('github');
+            setBusy(false);
+            if (res.error) {
+              Alert.alert('OAuth', res.error);
+              return;
+            }
+            router.replace('/(app)/(tabs)/courses');
+          }}>
+          <Text style={styles.oauthChipText}>GitHub</Text>
+        </Pressable>
+      </View>
+
+      <Link href="/(auth)/register" style={styles.link}>
+        <Text style={styles.linkText}>建立新帳號</Text>
+      </Link>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, padding: 24, gap: 12, justifyContent: 'center' },
+  title: { fontSize: 22, fontWeight: '700', marginBottom: 8 },
+  input: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#ccc',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
+  },
+  button: {
+    marginTop: 8,
+    backgroundColor: '#2563eb',
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  buttonDisabled: { opacity: 0.6 },
+  buttonText: { color: '#fff', fontWeight: '600', fontSize: 16 },
+  link: { marginTop: 12, alignSelf: 'center' },
+  linkText: { color: '#2563eb' },
+  oauthHint: { marginTop: 16, fontSize: 13, color: '#6b7280', textAlign: 'center' },
+  oauthRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginTop: 8 },
+  oauthChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#d1d5db',
+    backgroundColor: '#f9fafb',
+  },
+  oauthChipText: { fontWeight: '700', fontSize: 14 },
+});

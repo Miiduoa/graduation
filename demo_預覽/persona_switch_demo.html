@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Persona 切換 · 同樣的 App，5 種人生</title>
+<style>
+  :root {
+    --bg: #060A0F;
+    --surface: #141B22;
+    --surface2: #1B232C;
+    --border: #2A3540;
+    --text: #F1F5F9;
+    --muted: #8B98A8;
+    --accent: #6F86FF;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { font-family: -apple-system, BlinkMacSystemFont, "PingFang TC", "Noto Sans TC", sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  .stage { max-width: 1480px; margin: 0 auto; padding: 32px 24px 80px; }
+  h1 { font-size: 26px; font-weight: 900; }
+  .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .persona-bar {
+    display: flex; gap: 8px; margin: 24px 0 32px; flex-wrap: wrap;
+    padding: 12px; background: var(--surface); border-radius: 18px; border: 1px solid var(--border);
+  }
+  .persona-bar button {
+    flex: 1; min-width: 180px;
+    padding: 14px 16px; border-radius: 14px; cursor: pointer;
+    background: transparent; border: 2px solid var(--border); color: var(--text);
+    font-size: 13px; font-weight: 700;
+    display: flex; gap: 10px; align-items: center;
+    transition: all 0.2s;
+  }
+  .persona-bar button:hover { background: var(--surface2); }
+  .persona-bar button.active {
+    background: var(--accent); border-color: var(--accent); color: white;
+    box-shadow: 0 8px 24px rgba(111,134,255,0.4);
+  }
+  .persona-bar button .emoji { font-size: 24px; }
+  .persona-bar button .info { text-align: left; }
+  .persona-bar button .name { font-size: 14px; font-weight: 800; }
+  .persona-bar button .role { font-size: 11px; opacity: 0.75; margin-top: 1px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 24px; }
+  .phone-card { display: flex; flex-direction: column; gap: 10px; }
+  .phone-label { color: var(--muted); font-size: 12px; padding-left: 4px; font-weight: 600; }
+  .phone-label .badge { color: var(--accent); margin-left: 4px; }
+  .phone {
+    width: 100%; aspect-ratio: 9 / 19.5; border-radius: 36px; overflow: hidden;
+    background: #0B1014; border: 1px solid #1F2A36; position: relative;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.55);
+  }
+  .phone::before {
+    content: ""; position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+    width: 110px; height: 28px; border-radius: 99px; background: #000; z-index: 200;
+  }
+  .statusbar {
+    position: absolute; top: 0; left: 0; right: 0; height: 44px;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0 22px; font-size: 13px; font-weight: 600; z-index: 100;
+  }
+  .content {
+    position: absolute; left: 0; right: 0; top: 44px; bottom: 0;
+    padding: 12px; overflow: hidden;
+  }
+  .greeting-bar {
+    background: var(--surface); border-radius: 14px; padding: 10px 14px;
+    border: 1px solid var(--border);
+    display: flex; gap: 10px; align-items: center;
+  }
+  .greeting-bar .emoji { font-size: 22px; }
+  .greeting-bar .name { font-size: 13px; font-weight: 800; }
+  .greeting-bar .next { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .greeting-bar .chip {
+    padding: 4px 8px; border-radius: 8px; background: rgba(111,134,255,0.18);
+    color: var(--accent); font-size: 11px; font-weight: 700;
+  }
+  .ai-card {
+    background: linear-gradient(135deg, rgba(111,134,255,0.18), rgba(124,58,237,0.12));
+    border: 1px solid rgba(111,134,255,0.4);
+    border-radius: 18px; padding: 14px; margin-top: 10px;
+    position: relative; overflow: hidden;
+  }
+  .ai-card::before {
+    content: "✨"; position: absolute; top: -10px; right: -8px; font-size: 60px; opacity: 0.1;
+  }
+  .ai-card .tag {
+    display: inline-flex; gap: 4px; align-items: center;
+    background: var(--accent); color: white; padding: 2px 8px; border-radius: 99px;
+    font-size: 10px; font-weight: 700;
+  }
+  .ai-card h4 { font-size: 14px; font-weight: 800; margin-top: 8px; line-height: 1.4; }
+  .ai-card .reason { font-size: 11px; color: var(--muted); margin-top: 6px; }
+  .saved-row { display: flex; gap: 6px; margin-top: 10px; overflow: hidden; }
+  .saved-row .chip {
+    padding: 6px 10px; border-radius: 99px; background: var(--surface);
+    border: 1px solid var(--border); font-size: 11px; font-weight: 700;
+    flex-shrink: 0;
+  }
+  .saved-row .chip.accent { background: var(--accent); color: white; border-color: var(--accent); }
+  .timeline-card {
+    background: var(--surface); border-radius: 12px; padding: 10px;
+    margin-top: 8px; border: 1px solid var(--border);
+    display: flex; gap: 10px; align-items: center;
+  }
+  .timeline-card .time { color: var(--muted); font-size: 11px; font-weight: 700; width: 40px; }
+  .timeline-card .dot { width: 8px; height: 8px; border-radius: 4px; flex-shrink: 0; }
+  .timeline-card .title { font-size: 12px; font-weight: 700; flex: 1; }
+  .timeline-card .detail { font-size: 10px; color: var(--muted); margin-top: 1px; }
+  .legend {
+    background: var(--surface); border-radius: 14px; padding: 12px 14px;
+    border: 1px solid var(--border); margin-top: 18px;
+    font-size: 12px; color: var(--muted); line-height: 1.8;
+  }
+  .legend b { color: var(--text); }
+  .diff-card {
+    grid-column: 1 / -1;
+    background: var(--surface); border-radius: 16px; padding: 18px 20px;
+    border: 1px solid var(--border); margin-top: 24px;
+  }
+  .diff-table {
+    display: grid; grid-template-columns: 140px repeat(5, 1fr); gap: 8px; margin-top: 12px;
+  }
+  .diff-table > div { padding: 8px 10px; font-size: 11px; border-radius: 8px; }
+  .diff-table .h { color: var(--muted); font-weight: 700; }
+  .diff-table .col-h {
+    text-align: center; background: var(--surface2); color: var(--text); font-weight: 800;
+  }
+  .diff-table .cell { background: rgba(111,134,255,0.06); color: var(--text); }
+  .diff-table .cell .strong { color: var(--accent); font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="stage">
+  <h1>Persona 切換 · 同樣的 App，5 種人生</h1>
+  <div class="sub">每個 demo 帳號的家、訂閱路線、下節課、行程、推薦語句都不一樣，整套 App 都會跟著切換</div>
+
+  <div class="persona-bar" id="bar">
+    <button data-uid="demo_student_kuchih" class="active">
+      <span class="emoji">🎓</span>
+      <div class="info"><div class="name">顧晉瑋</div><div class="role">資管系大三學生</div></div>
+    </button>
+    <button data-uid="demo_teacher_chang">
+      <span class="emoji">👨‍🏫</span>
+      <div class="info"><div class="name">張怡君老師</div><div class="role">資管系教師</div></div>
+    </button>
+    <button data-uid="demo_ta_lin">
+      <span class="emoji">🧑‍💼</span>
+      <div class="info"><div class="name">林助教</div><div class="role">資管系 TA</div></div>
+    </button>
+    <button data-uid="demo_admin_huang">
+      <span class="emoji">🏛️</span>
+      <div class="info"><div class="name">黃主任</div><div class="role">系所行政</div></div>
+    </button>
+    <button data-uid="demo_cafeteria">
+      <span class="emoji">🏪</span>
+      <div class="info"><div class="name">阿櫻</div><div class="role">中餐部店長</div></div>
+    </button>
+  </div>
+
+  <div class="grid">
+    <!-- Phone 1: Bus View -->
+    <div class="phone-card">
+      <div class="phone-label">校園公車 · 即時地圖<span class="badge">persona</span></div>
+      <div class="phone">
+        <div class="statusbar"><div>9:41</div><div>● ● ● ●  100%</div></div>
+        <div class="content">
+          <div class="greeting-bar">
+            <div class="emoji" id="p1-emoji">🎓</div>
+            <div style="flex:1">
+              <div class="name" id="p1-name">早安，顧晉瑋</div>
+              <div class="next" id="p1-next">下一節「資料庫管理系統」09:10（剩 22 分）· 任垣樓 R301</div>
+            </div>
+            <div class="chip" id="p1-cta">規劃</div>
+          </div>
+          <div class="ai-card">
+            <div class="tag">✨ AI 為你建議</div>
+            <h4 id="p1-aiTitle">09:10 上課前，建議搭 校園 A 線 08:45 班</h4>
+            <div class="reason" id="p1-aiReason">顧晉瑋，09:10 的「資料庫管理系統」在 任垣樓 (R301) · 走到 宿舍站 約 1 分鐘 · 學生免費</div>
+          </div>
+          <div class="saved-row" id="p1-saved"></div>
+          <div style="display:flex; gap:6px; margin-top:10px;">
+            <div style="flex:1; background: var(--surface); border-radius: 10px; padding:8px; border:1px solid var(--border);">
+              <div style="color: var(--muted); font-size: 9px;">訂閱路線</div>
+              <div id="p1-subs" style="font-size: 13px; font-weight: 800; color: #34D399; margin-top:2px;">校園 A · 300</div>
+            </div>
+            <div style="flex:1; background: var(--surface); border-radius: 10px; padding:8px; border:1px solid var(--border);">
+              <div style="color: var(--muted); font-size: 9px;">家</div>
+              <div id="p1-home" style="font-size: 13px; font-weight: 800; margin-top:2px;">宜真樓 A215</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Phone 2: Map View -->
+    <div class="phone-card">
+      <div class="phone-label">校園地圖 · 頂部 shortcuts<span class="badge">persona</span></div>
+      <div class="phone">
+        <div class="statusbar"><div>9:41</div><div>● ● ● ●  100%</div></div>
+        <div class="content">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <div style="font-size: 18px;">←</div>
+            <div style="flex:1; background: var(--surface); border:1px solid var(--border); border-radius: 12px; padding: 9px 12px; font-size: 13px; color: var(--muted);">搜尋校園或台中地點…</div>
+            <div style="color: var(--accent); font-size: 16px;">🔗</div>
+          </div>
+          <div class="saved-row" id="p2-saved" style="margin-top: 12px;"></div>
+          <div id="p2-mapPlaceholder" style="height: 220px; margin-top: 12px; border-radius: 14px;
+                background: linear-gradient(135deg, #1B232C, #0F1419);
+                border: 1px solid var(--border); display: flex; align-items: center; justify-content: center;
+                position: relative; overflow: hidden;">
+            <div style="position: absolute; inset:0; background:
+              radial-gradient(circle at 30% 40%, rgba(111,134,255,0.18), transparent 50%),
+              radial-gradient(circle at 70% 60%, rgba(52,211,153,0.18), transparent 50%);"></div>
+            <div style="position: relative; z-index: 10; text-align: center;">
+              <div style="font-size: 32px;">🗺️</div>
+              <div id="p2-mapTip" style="color: var(--accent); font-weight: 800; font-size: 13px; margin-top: 6px;">已 center 在「任垣樓」（下節課）</div>
+            </div>
+          </div>
+          <div style="margin-top: 12px; padding: 12px; background: var(--accent); border-radius: 14px; display: flex; gap: 8px; align-items: center;">
+            <div style="font-size: 18px;">🎓</div>
+            <div style="flex:1;">
+              <div style="color:#fff; font-weight: 800; font-size: 13px;" id="p2-floatTitle">下節課</div>
+              <div style="color: rgba(255,255,255,0.85); font-size: 11px;" id="p2-floatSub">09:10 · R301</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Phone 3: Timeline -->
+    <div class="phone-card">
+      <div class="phone-label">今天的故事 · Timeline<span class="badge">persona</span></div>
+      <div class="phone">
+        <div class="statusbar"><div>9:41</div><div>● ● ● ●  100%</div></div>
+        <div class="content">
+          <div style="background: var(--accent); border-radius: 14px; padding: 14px;">
+            <div style="color: rgba(255,255,255,0.85); font-size: 10px; font-weight: 700; letter-spacing: 2px;">今天的一天</div>
+            <div id="p3-title" style="color: #fff; font-size: 18px; font-weight: 900; margin-top: 4px;">顧晉瑋 的校園動態</div>
+            <div id="p3-meta" style="color: rgba(255,255,255,0.85); font-size: 11px; margin-top: 2px;">資管系 · 住 宜真樓 A215</div>
+          </div>
+          <div id="p3-timeline" style="margin-top: 10px; max-height: 410px; overflow: hidden;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Difference table -->
+  <div class="diff-card">
+    <div style="font-size: 16px; font-weight: 800;">每個 persona 拿到的「個人化資料」對照</div>
+    <div style="color: var(--muted); font-size: 12px; margin-top: 4px;">畫面結構相同，但所有資料 / 推薦都不一樣 — 這是 demo 真實感的核心</div>
+    <div class="diff-table">
+      <div class="h"></div>
+      <div class="col-h">🎓 顧晉瑋</div>
+      <div class="col-h">👨‍🏫 張老師</div>
+      <div class="col-h">🧑‍💼 林助教</div>
+      <div class="col-h">🏛️ 黃主任</div>
+      <div class="col-h">🏪 阿櫻</div>
+
+      <div class="h">家</div>
+      <div class="cell">宜真樓 A215 (宿舍)</div>
+      <div class="cell">主顧樓 教研室 (辦公室)</div>
+      <div class="cell">主顧樓 RB-201</div>
+      <div class="cell">主顧樓 RB-401</div>
+      <div class="cell">靜宜中餐部 (店面)</div>
+
+      <div class="h">下節課</div>
+      <div class="cell"><span class="strong">資料庫管理</span> R301 09:10</div>
+      <div class="cell"><span class="strong">教 資料庫</span> R301 09:10</div>
+      <div class="cell">辦公時間 RB-201 15:00</div>
+      <div class="cell">系務會議 A301 10:00</div>
+      <div class="cell">午餐尖峰 11:30</div>
+
+      <div class="h">訂閱公車</div>
+      <div class="cell">校園 A · 300</div>
+      <div class="cell">校園 A (開車為主)</div>
+      <div class="cell">校園 A · B</div>
+      <div class="cell">校園 A</div>
+      <div class="cell">無 (在店裡)</div>
+
+      <div class="h">AI 推薦語</div>
+      <div class="cell">"09:10 上課前，搭 A 線 08:45 班"</div>
+      <div class="cell">"課前 30 分到辦公室準備"</div>
+      <div class="cell">"4 位學生預約 office hour"</div>
+      <div class="cell">"3 位 risk 學生待輔導"</div>
+      <div class="cell">"預估 80 單 · 3 位人手"</div>
+
+      <div class="h">儲存地點</div>
+      <div class="cell">圖書館 · 7-11 · 球場</div>
+      <div class="cell">會議室 · 行政樓</div>
+      <div class="cell">實驗室 · 自習區</div>
+      <div class="cell">校長辦公室 · 各系辦</div>
+      <div class="cell">食材廠商 · 食安檢驗</div>
+
+      <div class="h">時間線高點</div>
+      <div class="cell">10 個事件 · 上課/球場/晚自習</div>
+      <div class="cell">7 個事件 · 教學/辦公/會議</div>
+      <div class="cell">4 個事件 · 批改/輔導</div>
+      <div class="cell">6 個事件 · 行政為主</div>
+      <div class="cell">5 個事件 · 開店/收店</div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <b>實作說明：</b><br>
+    所有 persona 資料定義在 <b>demoUserStories.ts</b>（5 個帳號，每人含住宿/課表/車牌/合約等 dimension）<br>
+    所有畫面透過 <b>usePersonaContext()</b> 取得當前登入帳號的：<br>
+    <b>· nextClass</b>（依今天星期+時間從個人課表推算）<br>
+    <b>· subscribedRoutes</b>（角色預設 + 個人覆寫）<br>
+    <b>· places</b>（家 / 學校 / 常去 — 個人化 seed）<br>
+    <b>· todayTimeline</b>（一天事件序列，可直接點擊跳轉新畫面）<br>
+    切換登入帳號後，<b>同一支 App 立刻變成另一個人的世界</b>。
+  </div>
+</div>
+
+<script>
+  const PERSONAS = {
+    demo_student_kuchih: {
+      emoji: '🎓', name: '顧晉瑋', role: 'student',
+      home: '宜真樓 A215', greeting: '早安',
+      nextClassLabel: '下一節「資料庫管理系統」09:10（剩 22 分）· 任垣樓 R301',
+      aiTitle: '09:10 上課前，建議搭 校園 A 線 08:45 班',
+      aiReason: '顧晉瑋，09:10 的「資料庫管理系統」在 任垣樓（R301）· 走到 宿舍站 約 1 分鐘 · 學生免費',
+      subs: '校園 A · 300',
+      saved: ['🏠 家', '🎓 學校', '📚 蓋夏圖書館', '🍱 靜園', '🏪 7-11', '⭐ 球場'],
+      mapTip: '已 center 在「任垣樓」(下節課 R301)',
+      floatTitle: '下節課',
+      floatSub: '09:10 · 任垣樓 R301',
+      timeline: [
+        ['07:00', '#F59E0B', '起床', '宜真樓 A215'],
+        ['07:45', '#EF4444', '早餐：靜園餐廳', '預訂的鮪魚三明治'],
+        ['08:40', '#3B82F6', '搭校園 A 線', '宿舍 → 任垣樓 · 5 分鐘'],
+        ['09:10', '#8B5CF6', '資料庫管理系統', '任垣樓 R301 · 張怡君老師'],
+        ['12:10', '#EF4444', '午餐 ready', '日式炸雞便當'],
+        ['13:00', '#06B6D4', '圖書館自習', '蓋夏 4F · 24 小時自習室'],
+        ['13:10', '#8B5CF6', '統計學', '主顧樓 PH-101'],
+        ['17:00', '#34D399', '羽球場練球', '羽球場 #2'],
+      ],
+    },
+    demo_teacher_chang: {
+      emoji: '👨‍🏫', name: '張怡君', role: 'teacher',
+      home: '主顧樓 教研室 P-308', greeting: '早安',
+      nextClassLabel: '09:10 教「資料庫管理系統」· 任垣樓 R301',
+      aiTitle: '建議 08:30 前到辦公室準備 · 路面有雨',
+      aiReason: '張老師，09:10 課程前 30 分到辦公室準備講義',
+      subs: '校園 A（多開車）',
+      saved: ['💼 辦公室', '🎓 學校', '🏛️ 系辦', '📚 蓋夏圖書館', '🏛️ 行政大樓'],
+      mapTip: '已 center 在「主顧樓」(辦公室)',
+      floatTitle: '辦公室',
+      floatSub: '主顧樓 P-308',
+      timeline: [
+        ['08:30', '#3B82F6', '開車到校', '主顧樓教職員停車場 KAA-7281'],
+        ['08:50', '#64748B', '辦公室準備', 'P-308 · 課前準備'],
+        ['09:10', '#8B5CF6', '資料庫管理系統', '任垣樓 R301 · 32 位學生'],
+        ['12:30', '#0EA5E9', '批改 HW3', '6 份新繳交 · AI 已起草評語'],
+        ['14:00', '#64748B', 'Office Hours', '已有 2 位學生預約'],
+        ['15:30', '#0EA5E9', '系務會議', '行政大樓 A301 · 黃主任'],
+      ],
+    },
+    demo_ta_lin: {
+      emoji: '🧑‍💼', name: '林助教', role: 'ta',
+      home: '主顧樓 RB-201', greeting: '午安',
+      nextClassLabel: '15:00 辦公時間 · 主顧樓 RB-201',
+      aiTitle: '建議 14:30 前到實驗室準備（已 4 位學生預約）',
+      aiReason: '林助教，下個 office hour 4 位學生預約',
+      subs: '校園 A · B',
+      saved: ['💼 實驗室', '🎓 學校', '📚 圖書館', '🏫 自習區'],
+      mapTip: '已 center 在「主顧樓」(實驗室)',
+      floatTitle: '辦公時間',
+      floatSub: '15:00 · RB-201',
+      timeline: [
+        ['13:00', '#64748B', '到實驗室', '主顧樓 RB-201 資料庫實驗室'],
+        ['13:00', '#64748B', 'TA 辦公時間', '已有 4 位學生報名'],
+        ['15:00', '#0EA5E9', '協助批改 HW3', '張怡君老師指派 · 12 份'],
+        ['17:00', '#8B5CF6', '碩士論文研討', '思源樓 R401'],
+      ],
+    },
+    demo_admin_huang: {
+      emoji: '🏛️', name: '黃主任', role: 'admin',
+      home: '主顧樓 RB-401', greeting: '早安',
+      nextClassLabel: '10:00 系務會議 · 行政大樓 A301',
+      aiTitle: '檢視儀表板 · 3 位學生 risk 標記為紅',
+      aiReason: '黃主任，今日系務會議前先看儀表板',
+      subs: '校園 A',
+      saved: ['💼 系辦', '🎓 學校', '🏛️ 校長辦公室', '🏛️ 行政大樓', '📚 各系辦'],
+      mapTip: '已 center 在「行政大樓」',
+      floatTitle: '系務會議',
+      floatSub: '10:00 · 行政大樓 A301',
+      timeline: [
+        ['08:00', '#64748B', '到系辦', '主顧樓 RB-401'],
+        ['09:00', '#0EA5E9', '檢視系所儀表板', '3 位學生 risk 標記為紅'],
+        ['10:00', '#0EA5E9', '系務會議', '行政大樓 A301'],
+        ['12:00', '#EF4444', '午餐：教職員餐廳', '至善廣場 1F'],
+        ['14:00', '#0EA5E9', 'risk 學生輔導', '與 1 位學生面談'],
+        ['15:30', '#8B5CF6', '校務發展課', '行政大樓 A301'],
+      ],
+    },
+    demo_cafeteria: {
+      emoji: '🏪', name: '阿櫻', role: 'vendor',
+      home: '靜宜中餐部', greeting: '早安',
+      nextClassLabel: '11:30 午餐尖峰 · 預估 80 單',
+      aiTitle: '11:30 午餐尖峰，已準備 3 位人手',
+      aiReason: '阿櫻，今日預估 80 單，學生悠遊卡占 78%',
+      subs: '無 (在店裡)',
+      saved: ['🏪 店面', '🎓 學校', '🍱 食材廠商', '⚙️ 食安檢驗'],
+      mapTip: '已 center 在「靜宜中餐部」(店面)',
+      floatTitle: '店面',
+      floatSub: '靜宜中餐部',
+      timeline: [
+        ['08:00', '#0EA5E9', '開店準備', '靜宜中餐部 · 進貨上架'],
+        ['11:30', '#0EA5E9', '午餐尖峰', '預估 80 單 · 3 位人手'],
+        ['14:00', '#0EA5E9', '更新明日菜單', '推播給 142 位訂閱者'],
+        ['17:00', '#0EA5E9', '日結對帳', '今日營收 $4,820'],
+        ['19:30', '#0EA5E9', '收店', '盤點 + 清潔'],
+      ],
+    },
+  };
+
+  function render(uid) {
+    const p = PERSONAS[uid];
+    document.getElementById('p1-emoji').textContent = p.emoji;
+    document.getElementById('p1-name').textContent = `${p.greeting}，${p.name}`;
+    document.getElementById('p1-next').textContent = p.nextClassLabel;
+    document.getElementById('p1-aiTitle').textContent = p.aiTitle;
+    document.getElementById('p1-aiReason').textContent = p.aiReason;
+    document.getElementById('p1-subs').textContent = p.subs;
+    document.getElementById('p1-home').textContent = p.home;
+
+    const savedHtml = p.saved.map(s => `<div class="chip">${s}</div>`).join('');
+    document.getElementById('p1-saved').innerHTML = savedHtml + '<div class="chip accent">➤ 路線規劃</div>';
+    document.getElementById('p2-saved').innerHTML = savedHtml + '<div class="chip accent">➤ 路線規劃</div>';
+
+    document.getElementById('p2-mapTip').textContent = p.mapTip;
+    document.getElementById('p2-floatTitle').textContent = p.floatTitle;
+    document.getElementById('p2-floatSub').textContent = p.floatSub;
+
+    document.getElementById('p3-title').textContent = `${p.name} 的校園動態`;
+    document.getElementById('p3-meta').textContent = uid === 'demo_student_kuchih' ? '資管系 · 住 宜真樓 A215'
+      : uid === 'demo_teacher_chang' ? '資管系教師 · 辦公室 P-308'
+      : uid === 'demo_ta_lin' ? '資管系 TA · RB-201'
+      : uid === 'demo_admin_huang' ? '資管系主任 · RB-401'
+      : '靜宜中餐部 · 店長';
+
+    const tl = p.timeline.map(([t, color, title, detail]) => `
+      <div class="timeline-card">
+        <div class="time">${t}</div>
+        <div class="dot" style="background:${color}"></div>
+        <div style="flex:1">
+          <div class="title">${title}</div>
+          <div class="detail">${detail}</div>
+        </div>
+      </div>`).join('');
+    document.getElementById('p3-timeline').innerHTML = tl;
+  }
+
+  document.querySelectorAll('#bar button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#bar button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      render(btn.dataset.uid);
+    });
+  });
+
+  render('demo_student_kuchih');
+</script>
+</body>
+</html>

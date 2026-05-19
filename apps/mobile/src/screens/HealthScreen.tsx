@@ -228,9 +228,9 @@ export function HealthScreen(props: any) {
             {alerts.slice(0, 3).map((alert) => {
               const bgColor =
                 alert.severity === 'danger'
-                  ? '#EF444415'
+                  ? '#FF3B3015'
                   : alert.severity === 'warning'
-                    ? '#F59E0B12'
+                    ? '#FF950012'
                     : `${alert.color}10`;
               return (
                 <View
@@ -262,17 +262,17 @@ export function HealthScreen(props: any) {
       <AnimatedCard title="快速操作" delay={100}>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
           {[
-            { key: 'clinic', label: '症狀自評', icon: 'git-compare-outline', color: '#3B82F6' },
-            { key: 'book', label: '預約掛號', icon: 'calendar-outline', color: '#10B981' },
-            { key: 'mood', label: '記錄心情', icon: 'happy-outline', color: '#7C3AED' },
-            { key: 'emergency', label: '緊急求助', icon: 'warning-outline', color: '#EF4444' },
+            { key: 'clinic', label: '症狀自評', icon: 'git-compare-outline', color: '#5856D6' },
+            { key: 'book', label: '預約掛號', icon: 'calendar-outline', color: '#34C759' },
+            { key: 'mood', label: '記錄心情', icon: 'happy-outline', color: '#AF52DE' },
+            { key: 'emergency', label: '緊急求助', icon: 'warning-outline', color: '#FF3B30' },
             {
               key: 'passport',
               label: '健康護照',
               icon: 'shield-checkmark-outline',
-              color: '#059669',
+              color: '#34C759',
             },
-            { key: 'peer', label: '同儕互助', icon: 'people-outline', color: '#EC4899' },
+            { key: 'peer', label: '同儕互助', icon: 'people-outline', color: '#FF2D55' },
           ].map((qa) => (
             <Pressable
               key={qa.key}
@@ -332,10 +332,10 @@ export function HealthScreen(props: any) {
                 borderRadius: theme.radius.md,
                 backgroundColor:
                   moodTrend.alertLevel === 'normal'
-                    ? '#10B98110'
+                    ? '#34C75910'
                     : moodTrend.alertLevel === 'attention'
-                      ? '#F59E0B10'
-                      : '#EF444410',
+                      ? '#FF950010'
+                      : '#FF3B3010',
               }}
             >
               <Ionicons
@@ -349,10 +349,10 @@ export function HealthScreen(props: any) {
                 size={18}
                 color={
                   moodTrend.trend === 'improving'
-                    ? '#10B981'
+                    ? '#34C759'
                     : moodTrend.trend === 'declining'
-                      ? '#EF4444'
-                      : '#F59E0B'
+                      ? '#FF3B30'
+                      : '#FF9500'
                 }
               />
               <Text style={{ color: theme.colors.text, fontSize: 12, flex: 1 }}>
@@ -415,13 +415,13 @@ export function HealthScreen(props: any) {
               name: HEALTH_CENTER.name,
               hours: HEALTH_CENTER.hours[0].time,
               icon: 'medical-outline',
-              color: '#3B82F6',
+              color: '#5856D6',
             },
             {
               name: COUNSELING_CENTER.name,
               hours: COUNSELING_CENTER.hours[0].time,
               icon: 'heart-outline',
-              color: '#7C3AED',
+              color: '#AF52DE',
             },
           ].map((svc) => (
             <View
@@ -522,21 +522,21 @@ export function HealthScreen(props: any) {
                     borderRadius: theme.radius.lg,
                     backgroundColor:
                       triageResult.severity === 'emergency'
-                        ? '#EF444420'
+                        ? '#FF3B3020'
                         : triageResult.severity === 'severe'
-                          ? '#F59E0B20'
+                          ? '#FF950020'
                           : triageResult.severity === 'moderate'
-                            ? '#3B82F620'
-                            : '#10B98115',
+                            ? '#5856D620'
+                            : '#34C75915',
                     borderWidth: 1,
                     borderColor:
                       triageResult.severity === 'emergency'
-                        ? '#EF444450'
+                        ? '#FF3B3050'
                         : triageResult.severity === 'severe'
-                          ? '#F59E0B50'
+                          ? '#FF950050'
                           : triageResult.severity === 'moderate'
-                            ? '#3B82F650'
-                            : '#10B98130',
+                            ? '#5856D650'
+                            : '#34C75930',
                   }}
                 >
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -545,10 +545,10 @@ export function HealthScreen(props: any) {
                       size={22}
                       color={
                         triageResult.severity === 'emergency'
-                          ? '#EF4444'
+                          ? '#FF3B30'
                           : triageResult.severity === 'severe'
-                            ? '#F59E0B'
-                            : '#10B981'
+                            ? '#FF9500'
+                            : '#34C759'
                       }
                     />
                     <Text
@@ -582,7 +582,7 @@ export function HealthScreen(props: any) {
                     </Text>
                     {triageResult.selfCareAdvice.map((tip, i) => (
                       <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <Ionicons name="checkmark" size={14} color="#10B981" />
+                        <Ionicons name="checkmark" size={14} color="#34C759" />
                         <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{tip}</Text>
                       </View>
                     ))}
@@ -656,10 +656,10 @@ export function HealthScreen(props: any) {
                     paddingHorizontal: 6,
                     paddingVertical: 2,
                     borderRadius: 4,
-                    backgroundColor: '#F59E0B18',
+                    backgroundColor: '#FF950018',
                   }}
                 >
-                  <Text style={{ color: '#F59E0B', fontSize: 9, fontWeight: '600' }}>需預約</Text>
+                  <Text style={{ color: '#FF9500', fontSize: 9, fontWeight: '600' }}>需預約</Text>
                 </View>
               )}
             </Pressable>
@@ -759,7 +759,7 @@ export function HealthScreen(props: any) {
                   alignItems: 'center',
                 }}
               >
-                <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 20 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 20 }}>
                   {moodTrend.weekAvg}
                 </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 10 }}>本週平均</Text>
@@ -773,7 +773,7 @@ export function HealthScreen(props: any) {
                   alignItems: 'center',
                 }}
               >
-                <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 20 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 20 }}>
                   {moodTrend.monthAvg}
                 </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 10 }}>本月平均</Text>
@@ -798,10 +798,10 @@ export function HealthScreen(props: any) {
                   size={22}
                   color={
                     moodTrend.trend === 'improving'
-                      ? '#10B981'
+                      ? '#34C759'
                       : moodTrend.trend === 'declining'
-                        ? '#EF4444'
-                        : '#F59E0B'
+                        ? '#FF3B30'
+                        : '#FF9500'
                   }
                 />
                 <Text style={{ color: theme.colors.muted, fontSize: 10 }}>趨勢</Text>
@@ -815,10 +815,10 @@ export function HealthScreen(props: any) {
                 gap: 8,
                 padding: 10,
                 borderRadius: 8,
-                backgroundColor: `${MOOD_FACTORS.find((f) => f.id === moodTrend.dominantFactor)?.id ? '#7C3AED' : '#3B82F6'}10`,
+                backgroundColor: `${MOOD_FACTORS.find((f) => f.id === moodTrend.dominantFactor)?.id ? '#AF52DE' : '#5856D6'}10`,
               }}
             >
-              <Ionicons name="analytics-outline" size={16} color="#7C3AED" />
+              <Ionicons name="analytics-outline" size={16} color="#AF52DE" />
               <Text style={{ color: theme.colors.text, fontSize: 12, flex: 1 }}>
                 主要影響因素：
                 {MOOD_FACTORS.find((f) => f.id === moodTrend.dominantFactor)?.label ?? ''}
@@ -842,10 +842,10 @@ export function HealthScreen(props: any) {
                   paddingHorizontal: 10,
                   paddingVertical: 5,
                   borderRadius: 999,
-                  backgroundColor: '#7C3AED12',
+                  backgroundColor: '#AF52DE12',
                 }}
               >
-                <Text style={{ color: '#7C3AED', fontSize: 11, fontWeight: '600' }}>{svc}</Text>
+                <Text style={{ color: '#AF52DE', fontSize: 11, fontWeight: '600' }}>{svc}</Text>
               </View>
             ))}
           </View>
@@ -925,7 +925,12 @@ export function HealthScreen(props: any) {
               </View>
             );
           })}
-          <Pressable style={{ alignItems: 'center', padding: 8 }}>
+          <Pressable
+            style={{ alignItems: 'center', padding: 8 }}
+            onPress={() =>
+              Alert.alert('心情交流圈', '查看更多 / 發布心情 — demo 版尚未啟用')
+            }
+          >
             <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '600' }}>
               查看更多 / 發布心情 →
             </Text>
@@ -985,25 +990,25 @@ export function HealthScreen(props: any) {
                   label: '血型',
                   value: passport.bloodType ?? '未登錄',
                   icon: 'water',
-                  color: '#EF4444',
+                  color: '#FF3B30',
                 },
                 {
                   label: 'BMI',
                   value: passport.bmi?.toString() ?? '--',
                   icon: 'body',
-                  color: '#3B82F6',
+                  color: '#5856D6',
                 },
                 {
                   label: '視力(左)',
                   value: passport.visionLeft?.toString() ?? '--',
                   icon: 'eye',
-                  color: '#8B5CF6',
+                  color: '#AF52DE',
                 },
                 {
                   label: '視力(右)',
                   value: passport.visionRight?.toString() ?? '--',
                   icon: 'eye',
-                  color: '#8B5CF6',
+                  color: '#AF52DE',
                 },
               ].map((info) => (
                 <View
@@ -1038,14 +1043,14 @@ export function HealthScreen(props: any) {
                 style={{
                   padding: 10,
                   borderRadius: 8,
-                  backgroundColor: '#EF444412',
+                  backgroundColor: '#FF3B3012',
                   borderWidth: 1,
-                  borderColor: '#EF444430',
+                  borderColor: '#FF3B3030',
                 }}
               >
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Ionicons name="alert-circle" size={16} color="#EF4444" />
-                  <Text style={{ color: '#EF4444', fontWeight: '700', fontSize: 12 }}>過敏史</Text>
+                  <Ionicons name="alert-circle" size={16} color="#FF3B30" />
+                  <Text style={{ color: '#FF3B30', fontWeight: '700', fontSize: 12 }}>過敏史</Text>
                 </View>
                 {passport.allergies.map((a, i) => (
                   <Text key={i} style={{ color: theme.colors.text, fontSize: 12, marginTop: 4 }}>
@@ -1105,12 +1110,12 @@ export function HealthScreen(props: any) {
                       width: 32,
                       height: 32,
                       borderRadius: 8,
-                      backgroundColor: '#05966918',
+                      backgroundColor: '#34C75918',
                       alignItems: 'center',
                       justifyContent: 'center',
                     }}
                   >
-                    <Ionicons name="shield-checkmark" size={16} color="#059669" />
+                    <Ionicons name="shield-checkmark" size={16} color="#34C759" />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 12 }}>
@@ -1126,10 +1131,10 @@ export function HealthScreen(props: any) {
                         paddingHorizontal: 6,
                         paddingVertical: 2,
                         borderRadius: 4,
-                        backgroundColor: '#10B98118',
+                        backgroundColor: '#34C75918',
                       }}
                     >
-                      <Text style={{ color: '#10B981', fontSize: 9, fontWeight: '600' }}>
+                      <Text style={{ color: '#34C759', fontSize: 9, fontWeight: '600' }}>
                         已認證
                       </Text>
                     </View>
@@ -1282,18 +1287,18 @@ export function HealthScreen(props: any) {
               name: '體育館重訓室',
               hours: '07:00-21:00',
               icon: 'barbell-outline',
-              color: '#F59E0B',
+              color: '#FF9500',
             },
-            { name: '韻律教室', hours: '08:00-21:00', icon: 'body-outline', color: '#EC4899' },
-            { name: '操場/跑道', hours: '06:00-22:00', icon: 'walk-outline', color: '#3B82F6' },
+            { name: '韻律教室', hours: '08:00-21:00', icon: 'body-outline', color: '#FF2D55' },
+            { name: '操場/跑道', hours: '06:00-22:00', icon: 'walk-outline', color: '#5856D6' },
             { name: '籃球場', hours: '06:00-22:00', icon: 'basketball-outline', color: '#EA580C' },
             {
               name: '游泳池',
               hours: '週一三五 12:00-20:00',
               icon: 'water-outline',
-              color: '#0D9488',
+              color: '#5AC8FA',
             },
-            { name: '校園步道', hours: '全天開放', icon: 'leaf-outline', color: '#10B981' },
+            { name: '校園步道', hours: '全天開放', icon: 'leaf-outline', color: '#34C759' },
           ].map((facility) => (
             <View
               key={facility.name}
@@ -1337,7 +1342,7 @@ export function HealthScreen(props: any) {
                 backgroundColor: theme.colors.surface2,
               }}
             >
-              <Ionicons name="bulb-outline" size={14} color="#F59E0B" style={{ marginTop: 1 }} />
+              <Ionicons name="bulb-outline" size={14} color="#FF9500" style={{ marginTop: 1 }} />
               <Text style={{ color: theme.colors.text, fontSize: 12, flex: 1, lineHeight: 18 }}>
                 {tip}
               </Text>
@@ -1419,7 +1424,7 @@ export function HealthScreen(props: any) {
                   width: 32,
                   height: 32,
                   borderRadius: 8,
-                  backgroundColor: aed.status === 'available' ? '#10B98115' : '#EF444415',
+                  backgroundColor: aed.status === 'available' ? '#34C75915' : '#FF3B3015',
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}
@@ -1427,7 +1432,7 @@ export function HealthScreen(props: any) {
                 <Ionicons
                   name="pulse"
                   size={16}
-                  color={aed.status === 'available' ? '#10B981' : '#EF4444'}
+                  color={aed.status === 'available' ? '#34C759' : '#FF3B30'}
                 />
               </View>
               <View style={{ flex: 1 }}>
@@ -1441,10 +1446,10 @@ export function HealthScreen(props: any) {
                   paddingHorizontal: 6,
                   paddingVertical: 2,
                   borderRadius: 4,
-                  backgroundColor: '#10B98115',
+                  backgroundColor: '#34C75915',
                 }}
               >
-                <Text style={{ color: '#10B981', fontSize: 9, fontWeight: '600' }}>可用</Text>
+                <Text style={{ color: '#34C759', fontSize: 9, fontWeight: '600' }}>可用</Text>
               </View>
             </View>
           ))}
@@ -1455,22 +1460,22 @@ export function HealthScreen(props: any) {
       <AnimatedCard title="急救步驟" subtitle="黃金 4 分鐘" delay={100}>
         <View style={{ gap: 6 }}>
           {[
-            { step: '1', text: '確認環境安全，評估意識', icon: 'eye-outline', color: '#3B82F6' },
-            { step: '2', text: '呼叫 119 + 請人取 AED', icon: 'call-outline', color: '#EF4444' },
-            { step: '3', text: '壓額抬下巴，檢查呼吸', icon: 'body-outline', color: '#F59E0B' },
+            { step: '1', text: '確認環境安全，評估意識', icon: 'eye-outline', color: '#5856D6' },
+            { step: '2', text: '呼叫 119 + 請人取 AED', icon: 'call-outline', color: '#FF3B30' },
+            { step: '3', text: '壓額抬下巴，檢查呼吸', icon: 'body-outline', color: '#FF9500' },
             {
               step: '4',
               text: '胸外按壓 30 下（5-6cm 深）',
               icon: 'hand-left-outline',
-              color: '#DC2626',
+              color: '#D70015',
             },
             {
               step: '5',
               text: '人工呼吸 2 次（30:2 循環）',
               icon: 'pulse-outline',
-              color: '#7C3AED',
+              color: '#AF52DE',
             },
-            { step: '6', text: 'AED 到達後立即使用', icon: 'flash-outline', color: '#059669' },
+            { step: '6', text: 'AED 到達後立即使用', icon: 'flash-outline', color: '#34C759' },
           ].map((s) => (
             <View
               key={s.step}
@@ -1493,7 +1498,7 @@ export function HealthScreen(props: any) {
                   justifyContent: 'center',
                 }}
               >
-                <Text style={{ color: s.color, fontWeight: '800', fontSize: 12 }}>{s.step}</Text>
+                <Text style={{ color: s.color, fontWeight: '700', fontSize: 12 }}>{s.step}</Text>
               </View>
               <Ionicons name={s.icon as any} size={16} color={s.color} />
               <Text style={{ color: theme.colors.text, fontSize: 12, flex: 1 }}>{s.text}</Text>
@@ -1516,7 +1521,7 @@ export function HealthScreen(props: any) {
               <Ionicons
                 name="alert-circle-outline"
                 size={14}
-                color="#F59E0B"
+                color="#FF9500"
                 style={{ marginTop: 1 }}
               />
               <Text style={{ color: theme.colors.text, fontSize: 12, flex: 1 }}>{note}</Text>

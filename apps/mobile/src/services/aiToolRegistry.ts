@@ -33,8 +33,8 @@ import type {
   MenuItem,
 } from '../data/types';
 import type { LearnedSkill } from '../data/puAIAgentData';
-import { getCloudFunctionRegion, getFirebaseApp } from '../firebase';
-import { getFunctions, httpsCallable } from 'firebase/functions';
+import { getCloudFunctionRegion, getFirebaseApp, getFunctionsInstance } from '../firebase';
+import { httpsCallable } from 'firebase/functions';
 import {
   executeTool as executeLegacyTool,
   type ExecutorContext as LegacyExecutorContext,
@@ -569,7 +569,7 @@ async function orderFoodHandler(
   const note = asString(args.note);
 
   try {
-    const functions = getFunctions(getFirebaseApp(), getCloudFunctionRegion());
+    const functions = getFunctionsInstance();
     const callable = httpsCallable<
       {
         userId: string;
@@ -1046,7 +1046,13 @@ const ORDER_FOOD_PARAMETERS: ToolParametersSpec = {
   required: ['vendorId', 'itemId'],
 };
 
+// LMS v2 tool specs — 從外部檔合併進來 (21 個工具,對應 docs/LMS_V2_ROLE_ACTION_MAP.md)
+// 任何 LMS 相關的 read/write 都已由 supabaseLmsCache facade 與 lmsV2WriteTools 處理。
+// 此處只是把它們註冊到 registry,讓 Agent / LLM 看見。
+import { LMS_V2_TOOL_SPECS } from './lmsV2ToolSpecs';
+
 const TOOL_SPECS: readonly ToolSpec[] = [
+  ...LMS_V2_TOOL_SPECS,
   // ── 訂餐（canonical：嚴格用 itemId/vendorId；
   //     若 AI 仍使用舊名 create_order/order_meal 則 fallback 走 legacy executor，
   //     因為它們欄位是 itemName/cafeteria，schema 不同）
@@ -1638,6 +1644,405 @@ const TOOL_SPECS: readonly ToolSpec[] = [
     allowedRoles: ALL_ROLES,
     fields: [],
     handler: makeLegacyHandler('explore_constellation', 'read'),
+  },
+
+  // ──────────────────────────────────────────────────────
+  // 差異化引擎 → AI 可調用工具（本輪新增）
+  // ──────────────────────────────────────────────────────
+
+  // grade_predict_what_if：「假設 HW 拿 N 分，總成績多少？」
+  {
+    name: 'grade_predict_what_if',
+    description: '計算「如果某評分項目拿 N 分，總成績會變多少」（what-if simulator）。',
+    kind: 'read',
+    allowedRoles: ['student', 'teacher', 'staff'],
+    fields: [
+      {
+        name: 'courseId',
+        description: '課程 ID（71378 / 71282 / 71240 / 71393 / 77418）',
+        type: 'string',
+        required: true,
+        promptIfMissing: '想試算哪門課？',
+      },
+      {
+        name: 'overrides',
+        description: 'Array of { itemId, assumedScore }; 假設某幾項拿的分數',
+        type: 'string',
+      },
+    ],
+    handler: async (args, ctx) => {
+      try {
+        const { simulateWhatIf } = await import('@campus/shared');
+        const { getDemoScoreItemsByCourse } = await import('../data/demoCoursesMock');
+        const courseId = Number(String(args.courseId).replace(/^tc:/, ''));
+        const items = getDemoScoreItemsByCourse(courseId).map((s) => ({
+          id: String(s.id),
+          title: s.name,
+          weight: s.weight,
+          maxScore: s.totalScore,
+          score: s.studentScore,
+          graded: s.studentScore !== null,
+        }));
+        let overrides: Array<{ itemId: string; assumedScore: number }> = [];
+        if (typeof args.overrides === 'string' && args.overrides.trim()) {
+          try {
+            overrides = JSON.parse(args.overrides);
+          } catch {
+            /* ignore */
+          }
+        } else if (Array.isArray(args.overrides)) {
+          overrides = args.overrides as Array<{ itemId: string; assumedScore: number }>;
+        }
+        const result = simulateWhatIf(items, overrides);
+        return {
+          success: true,
+          toolName: 'grade_predict_what_if',
+          summary: `預估總成績 ${result.likelyCase ?? '—'}%（${result.letterGrade ?? '—'}） · 範圍 ${result.worstCase}-${result.bestCase}`,
+          data: result,
+          isWrite: false,
+          isDraft: false,
+        };
+      } catch (e) {
+        return makeFailure(
+          'grade_predict_what_if',
+          'execution_failed',
+          `試算失敗：${(e as Error).message}`,
+        );
+      }
+    },
+  },
+
+  // study_plan_today：產出今日番茄鐘排程 + 待辦優先序
+  {
+    name: 'study_plan_today',
+    description: '產出今日跨課智慧排程：番茄鐘 + 待辦優先序 + 一句話總結。',
+    kind: 'read',
+    allowedRoles: ['student'],
+    fields: [
+      {
+        name: 'dailyBudgetMinutes',
+        description: '今天可投入學習的分鐘數，預設 240',
+        type: 'integer',
+        default: 240,
+      },
+    ],
+    handler: async (args, ctx) => {
+      try {
+        const { planStudy, homeworkToPlannerTask, examToPlannerTask } = await import(
+          '@campus/shared'
+        );
+        const {
+          DEMO_COURSES,
+          getDemoHomeworksByCourse,
+          getDemoExamsByCourse,
+        } = await import('../data/demoCoursesMock');
+        const tasks: any[] = [];
+        for (const c of DEMO_COURSES) {
+          for (const hw of getDemoHomeworksByCourse(c.id)) {
+            tasks.push(
+              homeworkToPlannerTask({
+                id: hw.id,
+                courseId: hw.courseId,
+                courseName: c.name,
+                title: hw.title,
+                dueAt: hw.dueAt,
+                submitted: hw.submitted,
+                totalScore: hw.totalScore,
+              }),
+            );
+          }
+          for (const e of getDemoExamsByCourse(c.id)) {
+            tasks.push(
+              examToPlannerTask({
+                id: e.id,
+                courseId: e.courseId,
+                courseName: c.name,
+                title: e.title,
+                startAt: e.startAt,
+                isPractice: e.isPractice,
+                submitted: e.submitted,
+                totalScore: e.totalScore,
+              }),
+            );
+          }
+        }
+        const dailyBudget = Number(args.dailyBudgetMinutes ?? 240) || 240;
+        const plan = planStudy(tasks, { dailyBudgetMinutes: dailyBudget });
+        return {
+          success: true,
+          toolName: 'study_plan_today',
+          summary: plan.summary,
+          data: {
+            summary: plan.summary,
+            pomodoroCount: plan.pomodoros.length,
+            totalMinutes: plan.totalEstimatedMinutes,
+            topTasks: plan.prioritized.slice(0, 5).map((t) => ({
+              title: t.title,
+              courseName: t.courseName,
+              urgency: t.urgency,
+              reason: t.reason,
+            })),
+          },
+          isWrite: false,
+          isDraft: false,
+        };
+      } catch (e) {
+        return makeFailure(
+          'study_plan_today',
+          'execution_failed',
+          `排程失敗：${(e as Error).message}`,
+        );
+      }
+    },
+  },
+
+  // mistake_due_today：今天該複習的錯題清單
+  {
+    name: 'mistake_due_today',
+    description: '查今天該複習的錯題本題目（按 Leitner 間隔重複排程）。',
+    kind: 'read',
+    allowedRoles: ['student'],
+    fields: [],
+    handler: async (args, ctx) => {
+      try {
+        const { recommendDailyPracticeSet, statsOf } = await import('@campus/shared');
+        const AsyncStorageMod = await import('@react-native-async-storage/async-storage');
+        const { getScopedStorageKey } = await import('./scopedStorage');
+        const storageKey = getScopedStorageKey('mistake_repertoire_v1', {
+          uid: ctx.userId ?? 'demo',
+          schoolId: ctx.schoolId ?? null,
+        });
+        const raw = await AsyncStorageMod.default.getItem(storageKey);
+        const entries = raw ? (JSON.parse(raw) as any[]) : [];
+        const now = new Date().toISOString();
+        const due = recommendDailyPracticeSet(entries, now, 10);
+        const stats = statsOf(entries, now);
+        return {
+          success: true,
+          toolName: 'mistake_due_today',
+          summary: `今天該練 ${due.length} 題 · 吸收率 ${Math.round(stats.masteryRate * 100)}%`,
+          data: {
+            dueCount: due.length,
+            stats,
+            preview: due.slice(0, 5).map((d) => ({
+              courseName: d.courseName,
+              question: d.questionText.slice(0, 60),
+              box: d.box,
+            })),
+          },
+          isWrite: false,
+          isDraft: false,
+        };
+      } catch (e) {
+        return makeFailure(
+          'mistake_due_today',
+          'execution_failed',
+          `讀取錯題失敗：${(e as Error).message}`,
+        );
+      }
+    },
+  },
+
+  // urgent_notifications：拉學生今天的 critical / high 通知
+  {
+    name: 'urgent_notifications',
+    description: '拉學生現在所有 critical / high 級別通知（作業到期、考試、教室異動等）。',
+    kind: 'read',
+    allowedRoles: ALL_ROLES,
+    fields: [],
+    handler: async (args, ctx) => {
+      try {
+        const { planNotifications } = await import('@campus/shared');
+        const {
+          DEMO_COURSES,
+          getDemoHomeworksByCourse,
+          getDemoExamsByCourse,
+        } = await import('../data/demoCoursesMock');
+        const homeworks = DEMO_COURSES.flatMap((c) =>
+          getDemoHomeworksByCourse(c.id).map((hw) => ({
+            id: hw.id,
+            courseId: hw.courseId,
+            courseName: c.name,
+            title: hw.title,
+            dueAt: hw.dueAt,
+            submitted: hw.submitted,
+          })),
+        );
+        const exams = DEMO_COURSES.flatMap((c) =>
+          getDemoExamsByCourse(c.id).map((e) => ({
+            id: e.id,
+            courseId: e.courseId,
+            courseName: c.name,
+            title: e.title,
+            startAt: e.startAt,
+            submitted: e.submitted,
+          })),
+        );
+        const list = planNotifications({
+          now: new Date().toISOString(),
+          homeworks,
+          exams,
+        });
+        const urgent = list.filter((n) => n.severity === 'critical' || n.severity === 'high');
+        return {
+          success: true,
+          toolName: 'urgent_notifications',
+          summary: `${urgent.length} 條立即注意`,
+          data: urgent.slice(0, 8).map((n) => ({
+            kind: n.kind,
+            severity: n.severity,
+            title: n.title,
+            body: n.body,
+          })),
+          isWrite: false,
+          isDraft: false,
+        };
+      } catch (e) {
+        return makeFailure(
+          'urgent_notifications',
+          'execution_failed',
+          `讀取通知失敗：${(e as Error).message}`,
+        );
+      }
+    },
+  },
+
+  // socratic_hint：給定題目 + 學生卡點，回 hint（不洩漏答案）
+  {
+    name: 'socratic_hint',
+    description: 'AI 解題教練：給學生 hint 而非答案（5 級漸進；不洩漏正解）。',
+    kind: 'read',
+    allowedRoles: ['student'],
+    fields: [
+      {
+        name: 'questionText',
+        description: '題目內容',
+        type: 'string',
+        required: true,
+        promptIfMissing: '請貼上題目內容',
+      },
+      {
+        name: 'studentAttempt',
+        description: '學生目前的嘗試或卡住的點',
+        type: 'string',
+      },
+      {
+        name: 'level',
+        description: 'Hint 等級 1-5；1 最輕，5 最具體',
+        type: 'integer',
+        default: 1,
+      },
+    ],
+    handler: async (args, ctx) => {
+      try {
+        const { fallbackHint, buildSocraticSystemPrompt } = await import('@campus/shared');
+        const level = Math.max(1, Math.min(5, Number(args.level) || 1)) as 1 | 2 | 3 | 4 | 5;
+        const req = {
+          questionText: String(args.questionText ?? ''),
+          studentAttempt: String(args.studentAttempt ?? ''),
+          level,
+        };
+        const hint = fallbackHint(req);
+        return {
+          success: true,
+          toolName: 'socratic_hint',
+          summary: hint.hint,
+          data: {
+            hint: hint.hint,
+            level: hint.level,
+            systemPromptForLLM: buildSocraticSystemPrompt(req),
+          },
+          isWrite: false,
+          isDraft: false,
+        };
+      } catch (e) {
+        return makeFailure(
+          'socratic_hint',
+          'execution_failed',
+          `產生 hint 失敗：${(e as Error).message}`,
+        );
+      }
+    },
+  },
+
+  // ai_full_context：拉學生整體現況，給 AI 對話用
+  {
+    name: 'ai_full_context',
+    description: '一次拉學生在 APP 內整體現況（5 門課、待辦、通知、錯題本、預估成績）。',
+    kind: 'read',
+    allowedRoles: ALL_ROLES,
+    fields: [],
+    handler: async (args, ctx) => {
+      try {
+        const { buildFullAIContext, contextToCompactJson } = await import(
+          './aiContextBuilder'
+        );
+        const fullCtx = await buildFullAIContext({
+          uid: ctx.userId ?? 'demo',
+          schoolId: ctx.schoolId ?? null,
+          displayName: undefined,
+          role: ctx.role ?? 'student',
+        });
+        return {
+          success: true,
+          toolName: 'ai_full_context',
+          summary: `${fullCtx.courses.length} 門課 · ${fullCtx.studyPlan.priorityCount} 待辦 · ${fullCtx.atRiskCourses.length} 風險`,
+          data: contextToCompactJson(fullCtx),
+          isWrite: false,
+          isDraft: false,
+        };
+      } catch (e) {
+        return makeFailure(
+          'ai_full_context',
+          'execution_failed',
+          `讀取 context 失敗：${(e as Error).message}`,
+        );
+      }
+    },
+  },
+
+  // ai_data_inventory：列出 APP 內所有 domain 與 AI 整合狀態
+  {
+    name: 'ai_data_inventory',
+    description: '列出 APP 全部 domain（課程/餐廳/圖書館/...) 與 AI 整合狀態。AI 可知道自己掌握什麼資料。',
+    kind: 'read',
+    allowedRoles: ALL_ROLES,
+    fields: [],
+    handler: async (args, ctx) => {
+      try {
+        const { AI_DATA_INVENTORY, aiDataInventoryStats, buildWideAISnapshot, wideSnapshotToPromptLine } = await import(
+          './aiDataInventory'
+        );
+        const stats = aiDataInventoryStats();
+        const snap = await buildWideAISnapshot({ uid: ctx.userId ?? 'demo', schoolId: ctx.schoolId ?? null });
+        return {
+          success: true,
+          toolName: 'ai_data_inventory',
+          summary: wideSnapshotToPromptLine(snap),
+          data: {
+            stats,
+            coverage: stats.coverage,
+            byLevel: stats.byLevel,
+            domains: AI_DATA_INVENTORY.map((e) => ({
+              key: e.key,
+              label: e.label,
+              level: e.level,
+              roles: e.roles,
+              aiKnowledge: e.aiKnowledge,
+            })),
+            snapshot: snap.domains,
+          },
+          isWrite: false,
+          isDraft: false,
+        };
+      } catch (e) {
+        return makeFailure(
+          'ai_data_inventory',
+          'execution_failed',
+          `讀取 inventory 失敗：${(e as Error).message}`,
+        );
+      }
+    },
   },
 ];
 

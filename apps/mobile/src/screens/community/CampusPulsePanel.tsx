@@ -74,7 +74,7 @@ const getCrowdColor = (level: CrowdLevel): string => {
     case 3:
       return theme.colors.warning;
     case 4:
-      return '#f97316';
+      return '#FF9500';
     case 5:
       return theme.colors.danger;
     default:

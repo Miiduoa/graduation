@@ -25,7 +25,7 @@ import {
   getAnyCachedTCAttendance,
   getAnyCachedTCTodos,
   getAnyCachedStudentInfo,
-} from './puDataCache';
+} from './supabaseLmsCache'; // LMS v2 facade
 import { resolveActivePostLoginContext } from './postLoginContextFromCaches';
 import type { PUCourse, PUGrade } from './puDirectScraper';
 import type { TCActivity, TCAttendance } from './tronClassClient';

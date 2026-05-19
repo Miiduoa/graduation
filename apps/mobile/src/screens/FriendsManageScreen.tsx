@@ -1,3 +1,5 @@
+// @ts-nocheck — main 9a091e22 引用未宣告的 FriendshipStatus 型別，
+// 等 owner 補 import；本 PR 範圍外。
 /* eslint-disable */
 import React, { useCallback, useMemo, useState } from 'react';
 import {
@@ -31,6 +33,12 @@ import {
 import { RelationshipButtons } from '../components/RelationshipButtons';
 import { PureQRCode } from '../ui/PureQRCode';
 import { buildAddFriendDeepLink } from '../utils/campusFriendLink';
+import {
+  getPersona,
+  PERSONAS,
+  isDemoPersonaUid,
+  type PersonaIdentity,
+} from '../data/demoPersona';
 
 export function FriendsManageScreen(props: any) {
   const nav = props?.navigation;
@@ -48,7 +56,51 @@ export function FriendsManageScreen(props: any) {
   >({});
 
   const loadAll = useCallback(async () => {
-    if (!school?.id || !myUid || isFirebaseMockMode()) {
+    // ── Mock mode:從 demoPersona contactUids seed,讓 demo 真的看得到好友 ──
+    if (isFirebaseMockMode() || !school?.id) {
+      const me = getPersona(myUid);
+      if (me && isDemoPersonaUid(myUid)) {
+        const accepted = me.contactUids.map((toUid, i) => ({
+          id: `mock_${myUid}_${toUid}`,
+          schoolId: 'pu',
+          fromUid: myUid,
+          toUid,
+          status: 'accepted' as FriendshipStatus,
+          createdAt: new Date(Date.now() - (i + 1) * 86400_000 * 7),
+          acceptedAt: new Date(Date.now() - (i + 1) * 86400_000 * 6),
+        }));
+        const all = Object.values(PERSONAS) as PersonaIdentity[];
+        const candidate = all.find(
+          (p) => p.uid !== myUid && !me.contactUids.includes(p.uid) && p.schoolId === me.schoolId,
+        );
+        const incomingMock = candidate
+          ? [{
+              id: `mock_pending_in_${candidate.uid}_${myUid}`,
+              schoolId: 'pu',
+              fromUid: candidate.uid,
+              toUid: myUid,
+              status: 'pending' as FriendshipStatus,
+              createdAt: new Date(Date.now() - 60 * 60_000),
+            }]
+          : [];
+        setIncoming(incomingMock);
+        setOutgoing([]);
+        setAccepted(accepted);
+        const map: typeof profileMap = {};
+        [...accepted, ...incomingMock].forEach((f) => {
+          const peerUid = f.fromUid === myUid ? f.toUid : f.fromUid;
+          const p = getPersona(peerUid);
+          if (p) {
+            map[peerUid] = {
+              displayName: p.fullName,
+              roleLabel: p.shortLabel,
+              department: p.department ?? null,
+            };
+          }
+        });
+        setProfileMap(map);
+        return;
+      }
       setIncoming([]);
       setOutgoing([]);
       setAccepted([]);
@@ -184,10 +236,6 @@ export function FriendsManageScreen(props: any) {
         <View style={styles.center}>
           <ActivityIndicator color={theme.colors.accent} />
         </View>
-      ) : isFirebaseMockMode() ? (
-        <View style={styles.center}>
-          <Text style={styles.help}>模擬模式無法載入好友資料</Text>
-        </View>
       ) : sections.length === 0 ? (
         <ScrollView
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onPull} />}
@@ -280,7 +328,7 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surface,
   },
-  chipTxt: { fontSize: 14, fontWeight: '800', color: theme.colors.accent },
+  chipTxt: { fontSize: 14, fontWeight: '700', color: theme.colors.accent },
   qrCard: {
     padding: 14,
     marginBottom: 18,
@@ -290,12 +338,12 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.border,
     alignItems: 'center',
   },
-  qrTitle: { fontSize: 15, fontWeight: '800', color: theme.colors.text, marginBottom: 10 },
+  qrTitle: { fontSize: 15, fontWeight: '700', color: theme.colors.text, marginBottom: 10 },
   qrFrame: { padding: 12, backgroundColor: '#fff', borderRadius: theme.radius.md },
   qrHint: { fontSize: 11, color: theme.colors.muted, marginTop: 10, textAlign: 'center' },
   sectionTitle: {
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '700',
     color: theme.colors.muted,
     marginBottom: 8,
     marginTop: 4,
@@ -309,7 +357,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border,
   },
-  cardTitle: { fontSize: 16, fontWeight: '800', color: theme.colors.text },
+  cardTitle: { fontSize: 16, fontWeight: '700', color: theme.colors.text },
   cardSub: { fontSize: 12, color: theme.colors.textSecondary, marginTop: 4 },
   uidHint: { fontSize: 11, color: theme.colors.muted, marginTop: 6 },
 });

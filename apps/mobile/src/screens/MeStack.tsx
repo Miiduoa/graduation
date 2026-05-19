@@ -2,15 +2,18 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
-import { PersonalHubScreen } from './PersonalHubScreen';
-import { SettingsScreen } from './SettingsScreen';
-import { ProfileEditScreen } from './ProfileEditScreen';
-import { NotificationsScreen } from './NotificationsScreen';
+// AI-First v1：我的 Tab 主入口（舊版 PersonalHubScreen / ProfileEditScreen /
+// SettingsScreen / NotificationsScreen / AchievementsScreen 已下架，
+// 引用全部走 *AiFirstScreen）
+import MeAiFirstScreen from './MeAiFirstScreen';
+import ProfileEditAiFirstScreen from './ProfileEditAiFirstScreen';
+import AchievementsAiFirstScreen from './AchievementsAiFirstScreen';
+import SettingsAiFirstScreen from './SettingsAiFirstScreen';
+import NotificationsAiFirstScreen from './NotificationsAiFirstScreen';
 import { NotificationSettingsScreen } from './NotificationSettingsScreen';
 import { QRCodeScreen } from './QRCodeScreen';
 import { GlobalSearchScreen } from './GlobalSearchScreen';
 import { WidgetPreviewScreen } from './WidgetPreviewScreen';
-import { AchievementsScreen } from './AchievementsScreen';
 import { CampusGardenScreen } from './CampusGardenScreen';
 import CompanionScreen from './CompanionScreen';
 import CompanionCollectionScreen from './CompanionCollectionScreen';
@@ -34,6 +37,7 @@ import AIModelManagerScreen from './AIModelManagerScreen';
 import { useThemeMode } from '../state/theme';
 import { createStackScreenOptions } from '../ui/navigationTheme';
 import { RouteGuard } from '../ui/RouteGuard';
+import { usePermissions } from '../hooks/usePermissions';
 
 const Stack = createNativeStackNavigator<any, undefined>();
 
@@ -54,20 +58,57 @@ function GuardedAdminCourseVerify(props: any) {
   );
 }
 
-/** 學分／畢業試算與個人修課資料綁定；職員身分僅 catalog 時不應進入。 */
+/** 學分／畢業試算 — 個人選課/畢業進度規劃工具,僅限「學生」身份使用。
+ *  非學生角色顯示「僅限在校學生使用」攔截頁,與 web /credit-planner 對齊。
+ */
 function GuardedCreditAuditStack(props: any) {
+  const { isStudent, displayName } = usePermissions();
+  if (isStudent) {
+    return <CreditAuditStack {...props} />;
+  }
+  return <CreditAuditMeBlockedScreen roleLabel={displayName} navigation={props.navigation} />;
+}
+
+function CreditAuditMeBlockedScreen({ roleLabel, navigation }: { roleLabel: string; navigation: any }) {
+  const { View, Text, Pressable, ScrollView } = require('react-native');
+  const { Ionicons } = require('@expo/vector-icons');
+  const { theme } = require('../ui/theme');
   return (
-    <RouteGuard requires="courses.view">
-      <CreditAuditStack {...props} />
-    </RouteGuard>
+    <ScrollView contentContainerStyle={{ padding: 20, alignItems: 'center', backgroundColor: theme.bg }}>
+      <View style={{ marginTop: 60, padding: 24, alignItems: 'center', maxWidth: 420 }}>
+        <View style={{
+          width: 80, height: 80, borderRadius: 24,
+          backgroundColor: 'rgba(88,86,214,0.10)',
+          alignItems: 'center', justifyContent: 'center', marginBottom: 16,
+        }}>
+          <Ionicons name="school-outline" size={48} color="#5856D6" />
+        </View>
+        <Text style={{ fontSize: 20, fontWeight: '700', color: theme.text, marginBottom: 8, textAlign: 'center' }}>
+          學分試算僅限在校學生使用
+        </Text>
+        <Text style={{ fontSize: 14, color: theme.muted, lineHeight: 22, textAlign: 'center', marginBottom: 24 }}>
+          目前身份為 <Text style={{ fontWeight: '700', color: theme.text }}>{roleLabel}</Text>。
+          學分試算是學生個人選課與畢業進度規劃工具 — 教師/職員請使用「教學工作台」,系主任/管理員請使用「管理後台」。
+        </Text>
+        <Pressable
+          onPress={() => navigation?.goBack?.()}
+          style={{
+            paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12,
+            backgroundColor: '#5856D6',
+          }}
+        >
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>← 返回</Text>
+        </Pressable>
+      </View>
+    </ScrollView>
   );
 }
 
-/** 成就與 gamification：student/teacher 等有 achievements.view；若無權限則不透過 deep link 進入。 */
-function GuardedAchievements(props: any) {
+/** 成就與 gamification：student/teacher 等有 achievements.view；無權限不透過 deep link 進入。 */
+function GuardedAchievementsAiFirst(props: any) {
   return (
     <RouteGuard requires="achievements.view">
-      <AchievementsScreen {...props} />
+      <AchievementsAiFirstScreen {...props} />
     </RouteGuard>
   );
 }
@@ -81,22 +122,22 @@ export function MeStack() {
       initialRouteName="MeHome"
       screenOptions={createStackScreenOptions()}
     >
+      {/* AI-First v1：landing 換新版 */}
       <Stack.Screen
         name="MeHome"
-        component={PersonalHubScreen}
+        component={MeAiFirstScreen}
         options={{ title: '我的', headerShown: false }}
       />
-
       <Stack.Screen
         name="ProfileEdit"
-        component={ProfileEditScreen}
-        options={{ title: '編輯個人資料' }}
+        component={ProfileEditAiFirstScreen}
+        options={{ title: '編輯個人資料', headerShown: false }}
       />
       <Stack.Screen name="SSOLogin" component={SSOLoginScreen} options={{ title: '學校登入' }} />
       <Stack.Screen
         name="Notifications"
-        component={NotificationsScreen}
-        options={{ title: '通知' }}
+        component={NotificationsAiFirstScreen}
+        options={{ title: '通知', headerShown: false }}
       />
       <Stack.Screen
         name="NotificationSettings"
@@ -112,7 +153,7 @@ export function MeStack() {
 
       <Stack.Screen
         name="Achievements"
-        component={GuardedAchievements}
+        component={GuardedAchievementsAiFirst}
         options={{ title: '成就與積分' }}
       />
       <Stack.Screen
@@ -161,7 +202,7 @@ export function MeStack() {
         component={AIModelManagerScreen}
         options={{ title: 'AI 模型管理' }}
       />
-      <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: '設定' }} />
+      <Stack.Screen name="Settings" component={SettingsAiFirstScreen} options={{ title: '設定', headerShown: false }} />
       <Stack.Screen
         name="LanguageSettings"
         component={LanguageSettingsScreen}

@@ -43,8 +43,8 @@ function BannerView({
       case 'offline':
         return {
           icon: 'cloud-offline' as const,
-          color: '#F59E0B',
-          bgColor: '#F59E0B15',
+          color: '#FF9500',
+          bgColor: '#FF950015',
           text: message || '目前處於離線模式',
         };
       case 'reconnected':
@@ -162,7 +162,7 @@ export function NetworkStatusBanner() {
               <Text style={styles.tipText}>可以查看已下載的課表</Text>
             </View>
             <View style={styles.tipItem}>
-              <Ionicons name="time" size={16} color="#F59E0B" />
+              <Ionicons name="time" size={16} color="#FF9500" />
               <Text style={styles.tipText}>新的操作會在連線後自動同步</Text>
             </View>
             <View style={styles.tipItem}>
@@ -235,7 +235,7 @@ export function OfflineIndicator() {
         position: 'absolute',
         top: 8,
         right: 8,
-        backgroundColor: '#F59E0B',
+        backgroundColor: '#FF9500',
         paddingHorizontal: 8,
         paddingVertical: 4,
         borderRadius: 12,

@@ -185,13 +185,13 @@ export class EnhancedErrorBoundary extends Component<
     const severityConfig = {
       low: {
         icon: 'information-circle',
-        color: '#3B82F6',
+        color: '#5856D6',
         title: '發生小問題',
         description: '這個區塊暫時無法顯示',
       },
       medium: {
         icon: 'warning',
-        color: '#F59E0B',
+        color: '#FF9500',
         title: '發生錯誤',
         description: '這個功能暫時無法使用',
       },

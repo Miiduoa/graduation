@@ -1,368 +1,591 @@
 'use client';
 
+/**
+ * Campus AI-First — Home (/)
+ * --------------------------
+ * 主入口已換成 AI-First 設計。
+ *
+ * 完整設計文件：docs/design/AI_FIRST_REDESIGN.md
+ * 視覺原型：docs/design/prototype.html
+ *
+ * 舊版 page.legacy.tsx 已下架，僅保留 5 行 stub。
+ */
+
+import { useCallback, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { onAuthStateChanged, type User } from 'firebase/auth';
+import { AppShell } from '@/components/AppShell';
+import { CommandBar } from '@/components/ai/CommandBar';
+import { SlotCard } from '@/components/ai/SlotCard';
 
-import { SiteShell } from '@/components/SiteShell';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
-import {
-  fetchAnnouncements,
-  fetchGPA,
-  getAuth,
-  isFirebaseConfigured,
-  type Announcement,
-} from '@/lib/firebase';
-import { mockAnnouncements } from '@campus/shared/src/mockData';
+export default function HomePage() {
+  const router = useRouter();
+  const [pinned, setPinned] = useState<string[]>([]);
+  const [leaveSubmitted, setLeaveSubmitted] = useState(false);
+  const [pickedLunch, setPickedLunch] = useState<string | null>(null);
 
-function formatGreeting() {
-  const hour = new Date().getHours();
-  if (hour < 12) return '早安';
-  if (hour < 18) return '午安';
-  return '晚上好';
-}
+  const handlePin = (id: string) =>
+    setPinned((p) => (p.includes(id) ? p : [...p, id]));
 
-export default function HomePage(props: { searchParams?: { school?: string; schoolId?: string } }) {
-  const {
-    schoolId,
-    schoolCode,
-    schoolName,
-    schoolSearch: q,
-  } = resolveSchoolPageContext(props.searchParams);
-  const [user, setUser] = useState<User | null>(null);
-  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
-  const [gpa, setGpa] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const auth = getAuth();
-    if (!auth) {
-      setLoading(false);
-      return;
-    }
-
-    const unsubscribe = onAuthStateChanged(auth, (nextUser) => {
-      setUser(nextUser);
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-
-    async function load() {
-      setLoading(true);
+  // 統一的路由 / 動作 handler — 避免 button 沒有 onClick 而看起來壞掉
+  const go = useCallback(
+    (path: string) => () => {
       try {
-        if (isFirebaseConfigured()) {
-          const [nextAnnouncements, nextGpa] = await Promise.all([
-            fetchAnnouncements(schoolId, 4),
-            user ? fetchGPA(user.uid) : Promise.resolve(null),
-          ]);
-
-          if (!active) return;
-          setAnnouncements(
-            (nextAnnouncements.length > 0
-              ? nextAnnouncements
-              : mockAnnouncements.slice(0, 4)) as Announcement[],
-          );
-          setGpa(nextGpa?.cumulative ?? null);
-        } else {
-          if (!active) return;
-          setAnnouncements(mockAnnouncements.slice(0, 4) as Announcement[]);
-        }
-      } catch {
-        if (!active) return;
-        setAnnouncements(mockAnnouncements.slice(0, 4) as Announcement[]);
-      } finally {
-        if (active) setLoading(false);
+        router.push(path);
+      } catch (err) {
+        console.warn('[HomePage] router.push failed', path, err);
       }
-    }
-
-    load();
-    return () => {
-      active = false;
-    };
-  }, [schoolId, user]);
-
-  const userLabel = user?.displayName?.split(' ')[0] ?? user?.email?.split('@')[0] ?? '訪客';
-  const importantAnnouncements = useMemo(
-    () =>
-      announcements.filter(
-        (announcement) => announcement.pinned || announcement.title.includes('重要'),
-      ).length,
-    [announcements],
+    },
+    [router],
   );
 
-  const roleCards = [
-    {
-      title: 'Today',
-      description: '先看今天最重要的一步，而不是先看功能表。',
-      accent: 'var(--brand)',
-    },
-    {
-      title: '課程',
-      description: '把教材、作業、測驗、點名與成績收回同一條課程主流程。',
-      accent: 'var(--info)',
-    },
-    {
-      title: '校園',
-      description: '地圖、公車、餐廳與支援服務留在校園，不打斷主學習流程。',
-      accent: 'var(--achievement)',
-    },
-    {
-      title: '收件匣',
-      description: '每筆更新都直接對應到下一步，而不是只顯示通知。',
-      accent: 'var(--warning)',
-    },
-  ];
-
-  if (!user) {
-    return (
-      <SiteShell schoolName={schoolName} schoolCode={schoolCode}>
-        <div className="pageStack">
-          <div
-            className="card"
-            style={{
-              background:
-                'linear-gradient(135deg, rgba(15,139,141,0.12) 0%, rgba(37,99,235,0.08) 100%)',
-              display: 'grid',
-              gap: 18,
-            }}
-          >
-            <span className="pill brand">Campus Learning OS</span>
-            <div>
-              <h1 className="h1" style={{ marginBottom: 10 }}>
-                不再是校園功能列表，而是今日學習與校園節奏的操作台
-              </h1>
-              <p className="sub" style={{ marginTop: 0 }}>
-                從 Today
-                開始，依序進入課程、校園、收件匣與我的。先降低認知負荷，再疊加信任感與黏著感。
-              </p>
-            </div>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <Link href={`/login${q}`} className="btn primary">
-                登入開始
-              </Link>
-              <Link href={`/announcements${q}`} className="btn">
-                先看公告
-              </Link>
-            </div>
-          </div>
-
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-              gap: 16,
-            }}
-          >
-            {roleCards.map((card) => (
-              <div key={card.title} className="card">
-                <div
-                  style={{
-                    width: 42,
-                    height: 42,
-                    borderRadius: 16,
-                    background: `${card.accent}20`,
-                    marginBottom: 14,
-                  }}
-                />
-                <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 8 }}>{card.title}</div>
-                <div style={{ color: 'var(--muted)', lineHeight: 1.7, fontSize: 14 }}>
-                  {card.description}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </SiteShell>
-    );
-  }
+  const submitLeave = useCallback(() => {
+    setLeaveSubmitted(true);
+    // 後端 API 串接前先給使用者明確 feedback，不要靜默
+    setTimeout(() => setLeaveSubmitted(false), 4000);
+  }, []);
 
   return (
-    <SiteShell
-      schoolName={schoolName}
-      schoolCode={schoolCode}
-      title={`${formatGreeting()}，${userLabel}`}
-      subtitle="Today 只保留下一步、課程節奏與校園情境，不再把首頁做成功能總表。"
-    >
-      <div className="pageStack">
+    <AppShell rightDrawer={<AiDrawer />}>
+      <div style={{ maxWidth: 960, margin: '0 auto', paddingTop: 16 }}>
+        <CommandBar
+          quickChips={[
+            { id: 'next', label: '下節課在哪？' },
+            { id: 'week', label: '這週還要交什麼？' },
+            { id: 'leave', label: '幫我請週四的假' },
+            { id: 'lunch', label: '中午吃什麼便宜營養' },
+          ]}
+        />
+
+        {/* Legacy switch hint — 過渡期顯示 */}
         <div
-          className="card"
+          role="note"
           style={{
-            background:
-              'linear-gradient(135deg, rgba(15,139,141,0.12) 0%, rgba(8,145,178,0.08) 100%)',
-            display: 'grid',
-            gap: 16,
+            marginTop: 12,
+            padding: '6px 14px',
+            fontSize: 11,
+            color: 'var(--muted)',
+            background: 'var(--ai-soft)',
+            borderRadius: 'var(--radius-pill)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 8,
           }}
         >
+          <span style={{ color: 'var(--ai)', fontWeight: 600 }}>✨ AI-First v1</span>
+          <span>·</span>
+          <span>新版設計已上線</span>
+        </div>
+
+        {/* Hero */}
+        <section
+          aria-label="今日總覽"
+          style={{
+            marginTop: 24,
+            padding: '28px 32px',
+            background: 'var(--ai-gradient-soft)',
+            borderRadius: 'var(--radius-lg)',
+            border: '1px solid var(--border)',
+            position: 'relative',
+            overflow: 'hidden',
+          }}
+        >
+          <span
+            aria-hidden
+            style={{
+              position: 'absolute',
+              top: -40,
+              right: -40,
+              width: 200,
+              height: 200,
+              background: 'var(--ai-gradient)',
+              opacity: 0.08,
+              borderRadius: '50%',
+              filter: 'blur(40px)',
+            }}
+          />
           <div
             style={{
-              display: 'flex',
-              alignItems: 'flex-start',
-              justifyContent: 'space-between',
-              gap: 16,
-              flexWrap: 'wrap',
+              fontSize: 12,
+              color: 'var(--ai)',
+              fontWeight: 600,
+              letterSpacing: 0.4,
+              textTransform: 'uppercase',
             }}
           >
-            <div style={{ maxWidth: 760 }}>
-              <div className="pageHeadEyebrow" style={{ marginBottom: 10 }}>
-                Today Dashboard
-              </div>
-              <h2 style={{ margin: 0, fontSize: 32, fontWeight: 900, letterSpacing: '-0.05em' }}>
-                先完成今天最重要的一步
-              </h2>
-              <p className="sub" style={{ marginTop: 10 }}>
-                課程、校園與收件匣都在，但首頁只顯示會改變你下一步的內容。
-              </p>
-            </div>
-            <span className="pill brand">
-              {loading ? '整理中…' : `${announcements.length} 則今日更新`}
-            </span>
+            Today · {new Date().toLocaleDateString('zh-TW', { weekday: 'long', month: 'long', day: 'numeric' })}
           </div>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <Link href={`/groups${q}`} className="btn primary">
-              進入課程
-            </Link>
-            <Link href={`/map${q}`} className="btn">
-              打開校園
-            </Link>
-            <Link href={`/announcements${q}`} className="btn">
-              查看收件匣
-            </Link>
-          </div>
-        </div>
+          <h1
+            style={{
+              fontSize: 28,
+              fontWeight: 700,
+              margin: '8px 0',
+              letterSpacing: -0.4,
+              color: 'var(--text)',
+            }}
+          >
+            今天 3 堂課、2 份作業，
+            <br />
+            AI 幫你排好了。
+          </h1>
+          <p style={{ color: 'var(--muted)', fontSize: 14, margin: 0 }}>
+            下節課 09:10 資料結構 工程館 302（步行 4 分鐘） · 23:59 截止 Lab 3 進度 60%
+          </p>
+        </section>
 
-        <div
+        {/* Slot Cards */}
+        <section
+          aria-label="AI 為你準備的卡片"
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
             gap: 16,
+            marginTop: 24,
           }}
         >
-          {[
-            {
-              label: '重要公告',
-              value: importantAnnouncements || announcements.length,
-              tone: 'var(--warning)',
-            },
-            { label: '累計 GPA', value: gpa != null ? gpa.toFixed(2) : '—', tone: 'var(--brand)' },
-            { label: '登入身份', value: user.email ? '已登入' : '訪客', tone: 'var(--growth)' },
-          ].map((item) => (
-            <div key={item.label} className="card" style={{ '--tone': item.tone } as CSSProperties}>
-              <div style={{ color: 'var(--muted)', fontSize: 12, fontWeight: 700 }}>
-                {item.label}
-              </div>
-              <div
-                style={{
-                  marginTop: 8,
-                  fontSize: 30,
-                  fontWeight: 900,
-                  letterSpacing: '-0.05em',
-                  color: item.tone,
-                }}
-              >
-                {item.value}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(0, 1.3fr) minmax(0, 1fr)',
-            gap: 16,
-          }}
-        >
-          <div className="card" style={{ display: 'grid', gap: 12 }}>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 10,
-              }}
-            >
-              <div>
-                <div style={{ fontSize: 18, fontWeight: 800 }}>Today 的下一步</div>
-                <div style={{ color: 'var(--muted)', fontSize: 13, marginTop: 4 }}>
-                  只顯示真正會改變你下一步的更新
-                </div>
-              </div>
-              <Link href={`/announcements${q}`} className="btn">
-                全部查看
-              </Link>
-            </div>
-
-            {announcements.map((announcement, index) => (
-              <div
-                key={announcement.id}
-                style={{
-                  padding: 16,
-                  borderRadius: 'var(--radius)',
-                  border: '1px solid var(--border)',
-                  background: index === 0 ? 'var(--accent-soft)' : 'var(--surface)',
-                }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 12,
-                  }}
+          <SlotCard
+            variant="answer"
+            title="下節課"
+            icon="⏰"
+            confidence="high"
+            source={{ name: '教務系統', timestamp: new Date() }}
+            onPinToToday={() => handlePin('next-class')}
+            actions={
+              <>
+                <button
+                  type="button"
+                  className="actionPrimary"
+                  onClick={go('/map?building=eng302')}
                 >
-                  <div style={{ fontSize: 15, fontWeight: 800 }}>{announcement.title}</div>
-                  <span className={`pill ${index === 0 ? 'warning' : 'subtle'}`}>
-                    {index === 0 ? '先看' : '更新'}
-                  </span>
-                </div>
-                <div style={{ color: 'var(--muted)', fontSize: 13, lineHeight: 1.7, marginTop: 8 }}>
-                  {announcement.body.slice(0, 110)}...
-                </div>
+                  🧭 導航
+                </button>
+                <button
+                  type="button"
+                  className="actionGhost"
+                  onClick={go('/course/CS302')}
+                >
+                  課程資料
+                </button>
+                <button
+                  type="button"
+                  className="actionGhost"
+                  onClick={go('/today-v2?action=leave')}
+                >
+                  請假
+                </button>
+              </>
+            }
+          >
+            <strong>資料結構</strong> · 09:10–10:50
+            <br />
+            📍 工程館 302（步行 4 分鐘）
+            <br />
+            👨‍🏫 王大明老師
+          </SlotCard>
+
+          <SlotCard
+            variant="schedule"
+            title="本週待辦"
+            icon="📅"
+            confidence="high"
+            source={{ name: 'LMS', timestamp: new Date() }}
+            onPinToToday={() => handlePin('week-todo')}
+            actions={
+              <>
+                <button
+                  type="button"
+                  className="actionPrimary"
+                  onClick={go('/timetable?addToCalendar=1')}
+                >
+                  📥 加入行事曆
+                </button>
+                <button
+                  type="button"
+                  className="actionGhost"
+                  onClick={go('/ai-assistant?prompt=help-me-plan-this-week')}
+                >
+                  AI 排週計畫
+                </button>
+              </>
+            }
+          >
+            <ScheduleRow when="週三 23:59" text="作業系統 Lab 3" tag="未開始" tone="warn" />
+            <ScheduleRow when="週四 09:00" text="資料庫小考" tag="已準備" tone="done" />
+            <ScheduleRow when="週五 14:00" text="專題期中報告 60%" tag="進行中" tone="todo" />
+          </SlotCard>
+
+          <SlotCard
+            variant="compare"
+            title="中午選擇 · 3 個建議"
+            icon="🍱"
+            confidence="mid"
+            source={{ name: '餐廳 + 你的偏好', timestamp: new Date() }}
+            onPinToToday={() => handlePin('lunch')}
+            actions={
+              <button
+                type="button"
+                className="actionGhost"
+                onClick={go('/cafeteria')}
+              >
+                展開全部 12 個
+              </button>
+            }
+          >
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              <CompareOption
+                name="學餐"
+                price="$65"
+                star="⭐ 4.2"
+                time="5 min"
+                onClick={() => setPickedLunch('學餐')}
+                picked={pickedLunch === '學餐'}
+              />
+              <CompareOption
+                name="主餐廳 ★"
+                price="$95"
+                star="⭐ 4.5"
+                time="8 min"
+                recommended
+                onClick={() => setPickedLunch('主餐廳')}
+                picked={pickedLunch === '主餐廳'}
+              />
+              <CompareOption
+                name="7-11"
+                price="$45"
+                star="⭐ 3.8"
+                time="2 min"
+                onClick={() => setPickedLunch('7-11')}
+                picked={pickedLunch === '7-11'}
+              />
+            </div>
+            {pickedLunch && (
+              <div style={{ marginTop: 10, fontSize: 12, color: 'var(--ai)' }}>
+                ✓ 已選擇：{pickedLunch}（再次點擊可換選）
               </div>
-            ))}
+            )}
+          </SlotCard>
+
+          <SlotCard
+            variant="action"
+            title="請假草稿（待你確認）"
+            icon="📝"
+            confidence="mid"
+            source={{ name: '從對話自動填入' }}
+            actions={
+              <>
+                <button
+                  type="button"
+                  className="actionGhost"
+                  onClick={() => setLeaveSubmitted(false)}
+                  disabled={leaveSubmitted}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="actionPrimary"
+                  onClick={submitLeave}
+                  disabled={leaveSubmitted}
+                >
+                  {leaveSubmitted ? '已送出 ✓' : '提交給授課老師 →'}
+                </button>
+                <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--muted)' }}>
+                  ⚠ AI 不會自動送出
+                </span>
+              </>
+            }
+          >
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div><strong>日期：</strong>5/22（週四）</div>
+              <div><strong>課程：</strong>資料庫系統 (CS302)</div>
+              <div><strong>事由：</strong>病假</div>
+              <div><strong>附件：</strong>診斷證明（選用）</div>
+            </div>
+            {leaveSubmitted && (
+              <div
+                role="status"
+                style={{
+                  marginTop: 10,
+                  padding: '8px 12px',
+                  background: 'var(--ai-soft)',
+                  color: 'var(--ai)',
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: 13,
+                }}
+              >
+                ✓ 草稿已送出給授課老師（後端真實串接前為 demo 行為）
+              </div>
+            )}
+          </SlotCard>
+        </section>
+
+        {pinned.length > 0 && (
+          <div
+            role="status"
+            style={{
+              marginTop: 20,
+              padding: 12,
+              borderRadius: 'var(--radius-md)',
+              background: 'var(--ai-soft)',
+              color: 'var(--ai)',
+              fontSize: 13,
+            }}
+          >
+            ✨ 已釘到 Today {pinned.length} 張卡片
           </div>
+        )}
 
-          <div style={{ display: 'grid', gap: 16 }}>
-            <div className="card">
-              <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 8 }}>課程骨架</div>
-              <div style={{ color: 'var(--muted)', fontSize: 14, lineHeight: 1.7 }}>
-                教材、作業、測驗、點名與成績應該回到同一條課程主流程，而不是散在各頁。
-              </div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 }}>
-                <span className="pill brand">教材</span>
-                <span className="pill">作業</span>
-                <span className="pill">測驗</span>
-                <span className="pill">點名</span>
-              </div>
-              <Link href={`/groups${q}`} className="btn" style={{ marginTop: 16 }}>
-                打開課程
-              </Link>
-            </div>
+        <footer
+          style={{
+            marginTop: 40,
+            padding: '20px 0',
+            borderTop: '1px solid var(--border)',
+            color: 'var(--muted)',
+            fontSize: 12,
+            textAlign: 'center',
+          }}
+        >
+          Campus AI-First v1 · 設計總綱：<code>docs/design/AI_FIRST_REDESIGN.md</code>
+        </footer>
 
-            <div className="card">
-              <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 8 }}>校園情境</div>
-              <div style={{ color: 'var(--muted)', fontSize: 14, lineHeight: 1.7 }}>
-                地圖、公車、餐廳與圖書館留在校園分頁，避免高頻課務被生活資訊打斷。
-              </div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 }}>
-                <Link href={`/map${q}`} className="btn">
-                  地圖
-                </Link>
-                <Link href={`/cafeteria${q}`} className="btn">
-                  餐廳
-                </Link>
-                <Link href={`/bus${q}`} className="btn">
-                  公車
-                </Link>
-              </div>
-            </div>
+        <style jsx global>{`
+          .actionPrimary {
+            padding: 8px 14px;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            font-weight: 500;
+            background: var(--ai);
+            color: white;
+            border: 1px solid var(--ai);
+            cursor: pointer;
+            font-family: inherit;
+            transition: background 0.15s;
+          }
+          .actionPrimary:hover { background: var(--ai-strong); }
+          .actionGhost {
+            padding: 8px 14px;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            font-weight: 500;
+            background: var(--surface);
+            color: var(--text);
+            border: 1px solid var(--border);
+            cursor: pointer;
+            font-family: inherit;
+            transition: background 0.15s;
+          }
+          .actionGhost:hover { background: var(--panel); }
+        `}</style>
+      </div>
+    </AppShell>
+  );
+}
+
+function ScheduleRow({
+  when, text, tag, tone,
+}: {
+  when: string; text: string; tag: string; tone: 'todo' | 'warn' | 'done';
+}) {
+  const map = {
+    todo: { dot: 'var(--ai)', bg: 'var(--ai-soft)', color: 'var(--ai)' },
+    warn: { dot: 'var(--warning)', bg: 'rgba(255,149,0,0.12)', color: 'var(--warning)' },
+    done: { dot: 'var(--success)', bg: 'rgba(52,199,89,0.12)', color: 'var(--success)' },
+  };
+  const t = map[tone];
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', fontSize: 13 }}>
+      <span style={{ fontSize: 12, color: 'var(--muted)', width: 80, flexShrink: 0 }}>{when}</span>
+      <span aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', background: t.dot, flexShrink: 0 }} />
+      <span style={{ flex: 1 }}>{text}</span>
+      <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 6, fontWeight: 600, background: t.bg, color: t.color }}>
+        {tag}
+      </span>
+    </div>
+  );
+}
+
+function CompareOption({
+  name, price, star, time, recommended, onClick, picked,
+}: {
+  name: string;
+  price: string;
+  star: string;
+  time: string;
+  recommended?: boolean;
+  onClick?: () => void;
+  picked?: boolean;
+}) {
+  const highlighted = picked || recommended;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={picked}
+      style={{
+        border: `2px solid ${picked ? 'var(--ai)' : recommended ? 'var(--ai)' : 'var(--border)'}`,
+        borderRadius: 'var(--radius-sm)',
+        padding: 10,
+        textAlign: 'center',
+        cursor: 'pointer',
+        transition: 'all 0.18s',
+        background: highlighted ? 'var(--ai-soft)' : 'var(--surface)',
+        font: 'inherit',
+        color: 'var(--text)',
+      }}
+    >
+      <div style={{ fontWeight: 600, fontSize: 13, color: highlighted ? 'var(--ai)' : 'var(--text)' }}>
+        {name}{picked ? ' ✓' : ''}
+      </div>
+      <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--ai)', marginTop: 4 }}>{price}</div>
+      <div style={{ fontSize: 11, color: 'var(--warning)', marginTop: 2 }}>{star}</div>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{time}</div>
+    </button>
+  );
+}
+
+type DrawerMsg = { id: string; role: 'user' | 'ai'; text: string; at: Date };
+
+function AiDrawer() {
+  const [input, setInput] = useState('');
+  const [messages, setMessages] = useState<DrawerMsg[]>([
+    {
+      id: 'seed-1',
+      role: 'ai',
+      text: '早安王同學 ☀️ 今天我幫你抓到幾件重要的事，已放在 Today 區塊。要先聊哪一件？',
+      at: new Date(),
+    },
+  ]);
+
+  const send = useCallback(() => {
+    const text = input.trim();
+    if (!text) return;
+    const userMsg: DrawerMsg = {
+      id: `u-${Date.now()}`,
+      role: 'user',
+      text,
+      at: new Date(),
+    };
+    const aiStub: DrawerMsg = {
+      id: `a-${Date.now() + 1}`,
+      role: 'ai',
+      text: '收到，AI 後端串接前先記下：「' + text + '」',
+      at: new Date(),
+    };
+    setMessages((prev) => [...prev, userMsg, aiStub]);
+    setInput('');
+  }, [input]);
+
+  return (
+    <>
+      <header
+        style={{
+          padding: '16px 20px',
+          borderBottom: '1px solid var(--border)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+        }}
+      >
+        <span
+          aria-hidden
+          style={{
+            width: 32, height: 32, borderRadius: '50%',
+            background: 'var(--ai-gradient)',
+            animation: 'aiBreath var(--ai-breath-duration) ease-in-out infinite',
+          }}
+        />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 600 }}>校園 AI</div>
+          <div style={{ fontSize: 11, color: 'var(--success)', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--success)' }} />
+            線上 · 已連結 7 個系統
           </div>
         </div>
+      </header>
+
+      <div
+        style={{
+          flex: 1, overflowY: 'auto', padding: '16px 20px',
+          display: 'flex', flexDirection: 'column', gap: 16,
+        }}
+      >
+        {messages.map((m) =>
+          m.role === 'ai' ? (
+            <div key={m.id}>
+              <div
+                style={{
+                  background: 'var(--ai-surface)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '10px 14px',
+                  fontSize: 14,
+                  lineHeight: 1.5,
+                }}
+              >
+                {m.text}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
+                校園 AI · {m.at.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })}
+              </div>
+            </div>
+          ) : (
+            <div key={m.id} style={{ alignSelf: 'flex-end', maxWidth: '90%' }}>
+              <div
+                style={{
+                  background: 'var(--ai)',
+                  color: 'white',
+                  padding: '10px 14px',
+                  borderRadius: 'var(--radius-md)',
+                  fontSize: 14,
+                }}
+              >
+                {m.text}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4, textAlign: 'right' }}>
+                你 · {m.at.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })}
+              </div>
+            </div>
+          ),
+        )}
       </div>
-    </SiteShell>
+
+      <footer style={{ padding: '12px 16px', borderTop: '1px solid var(--border)' }}>
+        <div style={{
+          display: 'flex', gap: 8, alignItems: 'center',
+          background: 'var(--panel)', borderRadius: 'var(--radius-pill)', padding: '8px 12px',
+        }}>
+          <input
+            placeholder="繼續對話..."
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                send();
+              }
+            }}
+            style={{
+              flex: 1, border: 'none', background: 'transparent',
+              outline: 'none', fontSize: 14, fontFamily: 'inherit', color: 'var(--text)',
+            }}
+          />
+          <button
+            type="button"
+            aria-label="送出"
+            onClick={send}
+            disabled={!input.trim()}
+            style={{
+              width: 32, height: 32, borderRadius: '50%',
+              background: 'var(--ai-gradient)', color: 'white',
+              border: 'none', cursor: input.trim() ? 'pointer' : 'not-allowed',
+              fontSize: 13,
+              opacity: input.trim() ? 1 : 0.5,
+            }}
+          >
+            ↑
+          </button>
+        </div>
+      </footer>
+    </>
   );
 }

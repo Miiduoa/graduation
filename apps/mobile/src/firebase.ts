@@ -1,11 +1,41 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import Constants from 'expo-constants';
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
-import { getFirestore, initializeFirestore, memoryLocalCache } from 'firebase/firestore';
-import { getFunctions, type Functions } from 'firebase/functions';
+import {
+  getFirestore,
+  initializeFirestore,
+  memoryLocalCache,
+  connectFirestoreEmulator,
+} from 'firebase/firestore';
+import { getFunctions, connectFunctionsEmulator, type Functions } from 'firebase/functions';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { getAuth, initializeAuth, onIdTokenChanged, type Auth, type User } from 'firebase/auth';
+import {
+  getAuth,
+  initializeAuth,
+  onIdTokenChanged,
+  connectAuthEmulator,
+  type Auth,
+  type User,
+} from 'firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// ── Firebase Emulator wiring（demo / 本機口試環境） ──
+// 啟用條件：EXPO_PUBLIC_USE_FIREBASE_EMULATOR = '1' | 'true'
+// iOS Simulator → localhost；Android Emulator → 10.0.2.2；實體手機 → 開發機 LAN IP
+const USE_FIREBASE_EMULATOR =
+  process.env.EXPO_PUBLIC_USE_FIREBASE_EMULATOR === '1' ||
+  process.env.EXPO_PUBLIC_USE_FIREBASE_EMULATOR === 'true';
+const EMULATOR_HOST = process.env.EXPO_PUBLIC_FIREBASE_EMULATOR_HOST || 'localhost';
+const EMULATOR_FUNCTIONS_PORT = Number(
+  process.env.EXPO_PUBLIC_FIREBASE_EMULATOR_FUNCTIONS_PORT || '5001',
+);
+const EMULATOR_FIRESTORE_PORT = Number(
+  process.env.EXPO_PUBLIC_FIREBASE_EMULATOR_FIRESTORE_PORT || '8080',
+);
+const EMULATOR_AUTH_PORT = Number(
+  process.env.EXPO_PUBLIC_FIREBASE_EMULATOR_AUTH_PORT || '9099',
+);
+let _emulatorWired = { functions: false, firestore: false, auth: false };
 
 const { getReactNativePersistence } = require('@firebase/auth/dist/rn/index.js') as {
   getReactNativePersistence: (storage: typeof AsyncStorage) => unknown;
@@ -19,6 +49,15 @@ type FirebaseWebConfig = {
   messagingSenderId?: string;
   appId?: string;
 };
+
+const FALLBACK_FIREBASE_CONFIG = {
+  apiKey: "mock-api-key",
+  authDomain: "mock-project.firebaseapp.com",
+  projectId: "mock-project",
+  storageBucket: "mock-project.appspot.com",
+  messagingSenderId: "000000000000",
+  appId: "1:000000000000:web:mock",
+} as const;
 
 function getFirebaseConfig(): FirebaseWebConfig {
   const extra = (Constants.expoConfig as any)?.extra ?? (Constants as any)?.manifest?.extra ?? {};
@@ -104,6 +143,15 @@ export function getDb() {
     // Already initialized
     _db = getFirestore(app);
   }
+  if (USE_FIREBASE_EMULATOR && !_emulatorWired.firestore) {
+    try {
+      connectFirestoreEmulator(_db, EMULATOR_HOST, EMULATOR_FIRESTORE_PORT);
+      _emulatorWired.firestore = true;
+      console.info(`[firebase] Firestore emulator @ ${EMULATOR_HOST}:${EMULATOR_FIRESTORE_PORT}`);
+    } catch (e) {
+      console.warn('[firebase] Firestore emulator wire failed:', e);
+    }
+  }
   return _db;
 }
 
@@ -115,7 +163,17 @@ export function getCloudFunctionRegion(): string {
 }
 
 export function getFunctionsInstance(): Functions {
-  return getFunctions(getFirebaseApp(), getCloudFunctionRegion());
+  const functions = getFunctions(getFirebaseApp(), getCloudFunctionRegion());
+  if (USE_FIREBASE_EMULATOR && !_emulatorWired.functions) {
+    try {
+      connectFunctionsEmulator(functions, EMULATOR_HOST, EMULATOR_FUNCTIONS_PORT);
+      _emulatorWired.functions = true;
+      console.info(`[firebase] Functions emulator @ ${EMULATOR_HOST}:${EMULATOR_FUNCTIONS_PORT}`);
+    } catch (e) {
+      console.warn('[firebase] Functions emulator wire failed:', e);
+    }
+  }
+  return functions;
 }
 
 export function getStorageInstance() {
@@ -267,6 +325,18 @@ export function getAuthInstance(): Auth {
       _auth = getAuth(app);
     } else {
       throw e;
+    }
+  }
+
+  if (USE_FIREBASE_EMULATOR && !_emulatorWired.auth && _auth) {
+    try {
+      connectAuthEmulator(_auth, `http://${EMULATOR_HOST}:${EMULATOR_AUTH_PORT}`, {
+        disableWarnings: true,
+      });
+      _emulatorWired.auth = true;
+      console.info(`[firebase] Auth emulator @ ${EMULATOR_HOST}:${EMULATOR_AUTH_PORT}`);
+    } catch (err) {
+      console.warn('[firebase] Auth emulator wire failed:', err);
     }
   }
 

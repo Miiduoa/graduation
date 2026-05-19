@@ -20,6 +20,7 @@ import {
   Modal,
   FlatList,
   KeyboardAvoidingView,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -170,7 +171,7 @@ export function CampusSocialPanel() {
           <View
             style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
           >
-            <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '800' }}>
+            <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '700' }}>
               校園社群
             </Text>
             <Pressable
@@ -469,7 +470,7 @@ function PostCard({
             marginBottom: theme.space.sm,
           }}
         >
-          <Text style={{ color: '#10B981', fontSize: 20, fontWeight: '800' }}>${post.price}</Text>
+          <Text style={{ color: '#34C759', fontSize: 20, fontWeight: '700' }}>${post.price}</Text>
           {post.condition && (
             <View
               style={{
@@ -495,13 +496,13 @@ function PostCard({
           {post.sold && (
             <View
               style={{
-                backgroundColor: '#EF444420',
+                backgroundColor: '#FF3B3020',
                 borderRadius: theme.radius.sm,
                 paddingHorizontal: 6,
                 paddingVertical: 2,
               }}
             >
-              <Text style={{ color: '#EF4444', fontSize: 11, fontWeight: '600' }}>已售出</Text>
+              <Text style={{ color: '#FF3B30', fontSize: 11, fontWeight: '600' }}>已售出</Text>
             </View>
           )}
         </View>
@@ -621,7 +622,12 @@ function PostCard({
             color={post.bookmarked ? theme.colors.accent : theme.colors.textSecondary}
           />
         </Pressable>
-        <Pressable>
+        <Pressable
+          onPress={() =>
+            Alert.alert('分享', '已複製貼文連結到剪貼簿（demo 範圍）')
+          }
+          accessibilityLabel="分享貼文"
+        >
           <Ionicons name="share-social-outline" size={18} color={theme.colors.textSecondary} />
         </Pressable>
       </View>

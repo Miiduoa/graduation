@@ -1,7 +1,5 @@
-/* eslint-disable */
 /**
- * MeScreen — DEPRECATED
- * 已被 PersonalHubScreen 取代，此檔案保留向後相容。
+ * @deprecated 已下架。請直接 import './MeAiFirstScreen'。
  */
-export { PersonalHubScreen as MeScreen } from './PersonalHubScreen';
-export { PersonalHubScreen as default } from './PersonalHubScreen';
+export { default as MeScreen } from './MeAiFirstScreen';
+export { default } from './MeAiFirstScreen';

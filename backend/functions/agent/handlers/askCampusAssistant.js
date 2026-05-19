@@ -8,6 +8,8 @@ const REGION = 'asia-east1';
 module.exports = onCall(
   {
     region: REGION,
+    timeoutSeconds: 300,
+    memory: '1GiB',
   },
   async (request) => runCampusAssistantWithAgentRuntime(request),
 );

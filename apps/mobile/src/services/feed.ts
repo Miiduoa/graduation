@@ -2,17 +2,21 @@
 import {
   collection,
   addDoc,
+  deleteDoc,
+  getDoc,
   getDocs,
   limit,
   orderBy,
   query,
   serverTimestamp,
+  updateDoc,
   where,
   increment,
   runTransaction,
   arrayUnion,
   arrayRemove,
   doc,
+  writeBatch,
   type Timestamp,
   type DocumentReference,
 } from 'firebase/firestore';
@@ -36,6 +40,7 @@ export type CampusPostDoc = {
   commentCount?: number;
   pinned?: boolean;
   createdAt?: Timestamp | Date | unknown;
+  updatedAt?: Timestamp | Date | unknown;
 };
 
 function postsCol(db: ReturnType<typeof getDb>, schoolId: string) {
@@ -125,6 +130,8 @@ export async function createCampusPost(input: {
   aliasSnapshot?: string;
   authorUid?: string;
   tags?: string[];
+  mentions?: string[];
+  mediaUrls?: string[];
   kind?: 'standard' | 'thread';
 }): Promise<DocumentReference> {
   const db = getDb();
@@ -140,7 +147,8 @@ export async function createCampusPost(input: {
     likedBy: [],
     commentCount: 0,
     pinned: false,
-    mentions: [],
+    mentions: input.mentions ?? [],
+    mediaUrls: input.mediaUrls ?? [],
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
@@ -152,4 +160,55 @@ export async function createCampusPost(input: {
   base.anonymous = false;
   base.authorUid = input.authorUid;
   return addDoc(ref, base);
+}
+
+/** 編輯自己的貼文（標題/內文/標籤/媒體）。Rules 應限制 authorUid === request.auth.uid。 */
+export async function updateCampusPost(
+  schoolId: string,
+  postId: string,
+  patch: {
+    title?: string;
+    content?: string;
+    tags?: string[];
+    mediaUrls?: string[];
+  },
+) {
+  const db = getDb();
+  const ref = doc(db, 'schools', schoolId, 'campusPosts', postId);
+  const data: Record<string, unknown> = { updatedAt: serverTimestamp() };
+  if (typeof patch.title === 'string') data.title = patch.title;
+  if (typeof patch.content === 'string') data.content = patch.content;
+  if (Array.isArray(patch.tags)) data.tags = patch.tags;
+  if (Array.isArray(patch.mediaUrls)) data.mediaUrls = patch.mediaUrls;
+  await updateDoc(ref, data);
+}
+
+/** 刪除自己貼文：同步刪掉子集合 replies（先撈出 ID 再批次刪，避免單次 batch 上限）。 */
+export async function deleteCampusPost(schoolId: string, postId: string) {
+  const db = getDb();
+  const postRef = doc(db, 'schools', schoolId, 'campusPosts', postId);
+  const repliesCol = collection(db, 'schools', schoolId, 'campusPosts', postId, 'replies');
+  const replySnap = await getDocs(query(repliesCol, limit(400)));
+  let batch = writeBatch(db);
+  let count = 0;
+  for (const r of replySnap.docs) {
+    batch.delete(r.ref);
+    count++;
+    if (count % 400 === 0) {
+      await batch.commit();
+      batch = writeBatch(db);
+    }
+  }
+  batch.delete(postRef);
+  await batch.commit();
+}
+
+export async function getCampusPostById(
+  schoolId: string,
+  postId: string,
+): Promise<CampusPostDoc | null> {
+  const db = getDb();
+  const snap = await getDoc(doc(db, 'schools', schoolId, 'campusPosts', postId));
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...(snap.data() as Omit<CampusPostDoc, 'id'>) };
 }

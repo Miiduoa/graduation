@@ -1,0 +1,97 @@
+/** 教材 URL 的 MIME／副檔名推論（HEAD → Content-Type／Range sniff → 附檔對照）。 */
+
+const EXT_HINT: Record<string, string> = {
+  '.m3u8': 'application/vnd.apple.mpegurl',
+  '.mpd': 'application/dash+xml',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.m4v': 'video/x-m4v',
+  '.mov': 'video/quicktime',
+  '.pdf': 'application/pdf',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.zip': 'application/zip',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+};
+
+function mimeFromUrlPath(u: URL): string | null {
+  const path = `${u.pathname}${u.search}`.toLowerCase();
+  const clean = path.split('?')[0] ?? path;
+  for (const ext of Object.keys(EXT_HINT)) {
+    // clean：路徑本體結尾；path：查詢字串內含副檔名（例如 /dl?url=...file.m3u8）
+    if (clean.endsWith(ext) || path.includes(`${ext}?`) || path.includes(`${ext}&`)) {
+      return EXT_HINT[ext] ?? null;
+    }
+  }
+  return null;
+}
+
+function stripQuotes(s: string): string {
+  const first = s.replace(/^["']|["']$/g, '').trim().split(';')[0]?.trim();
+  return first ?? '';
+}
+
+/**
+ * 依序：（1）路徑副檔名（2）HTTP HEAD Content-Type（3）GET Range 前數百 byte + Content-Type／魔術位元。
+ */
+export async function detectMimeHintForMaterialUrl(raw: string): Promise<string | null> {
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    return null;
+  }
+
+  const fromPath = mimeFromUrlPath(url);
+  if (fromPath) return fromPath;
+
+  const ctrl = new AbortController();
+  const to = globalThis.setTimeout(() => ctrl.abort(), 12000);
+  try {
+    const head = await fetch(url.toString(), { method: 'HEAD', signal: ctrl.signal });
+    globalThis.clearTimeout(to);
+    const ct = stripQuotes(head.headers.get('content-type') ?? '');
+    if (ct && !/^application\/octet-stream/i.test(ct) && ct.length > 2) return ct;
+
+    const ctrlGet = new AbortController();
+    const toGet = globalThis.setTimeout(() => ctrlGet.abort(), 12000);
+    let getResp: Response;
+    try {
+      getResp = await fetch(url.toString(), {
+        headers: { Range: 'bytes=0-767' },
+        signal: ctrlGet.signal,
+      });
+    } finally {
+      globalThis.clearTimeout(toGet);
+    }
+
+    const gct = stripQuotes(getResp.headers.get('content-type') ?? '');
+    if (gct && !/^application\/octet-stream/i.test(gct)) return gct;
+
+    const buf = await getResp.arrayBuffer();
+    if (buf.byteLength >= 4) {
+      const v = new Uint8Array(buf);
+      if (v[0] === 0x25 && v[1] === 0x50 && v[2] === 0x44 && v[3] === 0x46) return 'application/pdf';
+      if (
+        buf.byteLength >= 12 &&
+        v[4] === 0x66 &&
+        v[5] === 0x74 &&
+        v[6] === 0x79 &&
+        v[8] === 0x69 &&
+        v[9] === 0x73 &&
+        v[10] === 0x6f &&
+        v[11] === 0x6d
+      ) {
+        return 'video/mp4';
+      }
+    }
+  } catch {
+    globalThis.clearTimeout(to);
+  }
+
+  return null;
+}

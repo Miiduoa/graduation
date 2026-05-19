@@ -18,7 +18,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from './navigationTheme';
+import { useTabBarContentBottomPadding } from './navigationTheme';
 
 function useSafeInsetsOrDefault() {
   const value = React.useContext(SafeAreaInsetsContext);
@@ -45,6 +45,39 @@ export function Spinner({
   return <ActivityIndicator size={size} color={color} />;
 }
 
+/** 全螢幕載入（App 根層、導覽 fallback 等共用，維持品牌色與字型階梯一致） */
+export function FullScreenLoader(props: { message?: string }) {
+  return (
+    <View
+      style={{
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: theme.colors.bg,
+        paddingHorizontal: theme.layout.screenHorizontalPadding,
+      }}
+      accessibilityRole="progressbar"
+      accessibilityLabel={props.message ?? '載入中'}
+    >
+      <ActivityIndicator size="large" color={theme.colors.accent} />
+      {props.message ? (
+        <Text
+          style={{
+            marginTop: theme.space.md,
+            fontSize: theme.typography.bodySmall.fontSize,
+            lineHeight: theme.typography.bodySmall.lineHeight,
+            letterSpacing: theme.typography.bodySmall.letterSpacing,
+            color: theme.colors.muted,
+            textAlign: 'center',
+          }}
+        >
+          {props.message}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 export function Screen(props: {
   title?: string;
   subtitle?: string;
@@ -53,17 +86,21 @@ export function Screen(props: {
   headerRight?: React.ReactNode;
 }) {
   const insets = useSafeInsetsOrDefault();
+  const tabBarBottomPad = useTabBarContentBottomPadding();
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       {(props.title || props.headerRight) && (
         <View
           style={{
             flexDirection: 'row',
-            alignItems: 'flex-end',
+            alignItems: 'center',
             justifyContent: 'space-between',
             paddingHorizontal: theme.layout.screenHorizontalPadding,
-            paddingTop: Math.max(insets.top, 8) + theme.space.sm,
-            paddingBottom: theme.space.lg,
+            paddingTop: Math.max(insets.top, 8) + theme.space.md,
+            paddingBottom: theme.space.md,
+            borderBottomWidth: 1,
+            borderBottomColor: theme.colors.separator,
+            backgroundColor: theme.colors.bg,
           }}
         >
           <View style={{ flex: 1 }}>
@@ -84,7 +121,7 @@ export function Screen(props: {
                 style={{
                   fontSize: theme.typography.bodySmall.fontSize,
                   color: theme.colors.textSecondary,
-                  marginTop: theme.space.sm,
+                  marginTop: theme.space.xs,
                 }}
               >
                 {props.subtitle}
@@ -99,7 +136,7 @@ export function Screen(props: {
           flex: 1,
           paddingHorizontal: props.noPadding ? 0 : theme.layout.screenHorizontalPadding,
           paddingTop: props.noPadding ? 0 : theme.layout.contentPaddingTop,
-          paddingBottom: props.noPadding ? 0 : TAB_BAR_CONTENT_BOTTOM_PADDING,
+          paddingBottom: props.noPadding ? 0 : tabBarBottomPad,
         }}
       >
         {props.children}
@@ -169,15 +206,15 @@ export function Card(props: {
     (props.title && props.subtitle ? `${props.title}, ${props.subtitle}` : props.title);
 
   const content = (
-    <View style={{ borderRadius: theme.radius.xl, ...style.shell }}>
+    <View style={{ borderRadius: theme.radius.lg, ...style.shell }}>
       <View
         accessible={!!props.title}
         accessibilityRole={props.title ? 'header' : undefined}
         accessibilityLabel={accessibilityLabel}
         style={{
           padding: theme.layout.cardPadding,
-          borderRadius: theme.radius.xl,
-          gap: theme.space.md,
+          borderRadius: theme.radius.lg,
+          gap: theme.space.sm,
           overflow: 'hidden',
           ...style.surface,
         }}
@@ -292,7 +329,7 @@ export function Pill(props: {
           gap: theme.space.xs,
           paddingHorizontal: sStyle.px + 2,
           paddingVertical: sStyle.py + 1,
-          borderRadius: theme.radius.full,
+          borderRadius: theme.radius.sm,
           backgroundColor: kStyle.bg,
         },
         props.style,
@@ -340,9 +377,9 @@ export function Button(props: {
     outline: 'transparent',
   };
   const textColors: Record<string, string> = {
-    primary: '#FFFFFF',
+    primary: theme.colors.onAccent,
     secondary: theme.colors.text,
-    danger: '#FFFFFF',
+    danger: theme.colors.onAccent,
     ghost: theme.colors.text,
     'accent-ghost': theme.colors.accent,
     outline: theme.colors.text,
@@ -369,19 +406,19 @@ export function Button(props: {
       paddingVertical: theme.space.xs,
       paddingHorizontal: theme.space.md,
       fontSize: 13,
-      radius: theme.radius.md,
+      radius: theme.radius.sm,
     },
     default: {
       paddingVertical: theme.space.sm,
       paddingHorizontal: theme.space.lg,
       fontSize: 15,
-      radius: theme.radius.lg,
+      radius: theme.radius.md,
     },
     large: {
       paddingVertical: theme.space.md,
       paddingHorizontal: theme.space.xl,
       fontSize: 16,
-      radius: theme.radius.xl,
+      radius: theme.radius.lg,
     },
   };
 
@@ -432,7 +469,7 @@ export function Button(props: {
           color: disabled ? theme.colors.disabledText : textColors[kind],
           fontWeight: '600',
           fontSize: s.fontSize,
-          letterSpacing: -0.1,
+          letterSpacing: 0,
         }}
       >
         {props.loading ? '處理中...' : props.text}
@@ -541,7 +578,7 @@ export function EmptyState(props: {
           fontSize: 18,
           fontWeight: '700',
           textAlign: 'center',
-          letterSpacing: -0.3,
+          letterSpacing: 0,
         }}
       >
         {props.title ?? '目前沒有資料'}
@@ -679,7 +716,7 @@ export function ErrorState(props: {
                 fontSize: 16,
                 fontWeight: '700',
                 color: theme.colors.text,
-                letterSpacing: -0.2,
+                letterSpacing: 0,
               }}
             >
               {title}
@@ -729,7 +766,7 @@ export function SectionTitle(props: { text: string }) {
         color: theme.colors.text,
         fontWeight: '700',
         fontSize: theme.typography.label.fontSize,
-        letterSpacing: -0.1,
+        letterSpacing: 0,
         textTransform: 'uppercase',
       }}
     >
@@ -868,9 +905,9 @@ export function CountdownTimer(props: { targetDate: Date; label?: string; onExpi
             <Text
               style={{
                 color: theme.colors.accent,
-                fontWeight: '800',
+                fontWeight: '700',
                 fontSize: 22,
-                letterSpacing: -0.5,
+                letterSpacing: 0,
               }}
             >
               {String(unit.value).padStart(2, '0')}
@@ -933,7 +970,7 @@ export function ProgressRing(props: {
         }}
       />
       {showLabel && (
-        <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: size * 0.22 }}>
+        <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: size * 0.22 }}>
           {Math.round(progress * 100)}%
         </Text>
       )}
@@ -1014,7 +1051,7 @@ export function RatingStars(props: {
             <Ionicons
               name={filled ? 'star' : half ? 'star-half' : 'star-outline'}
               size={size}
-              color="#F59E0B"
+              color="#FF9500"
             />
           </Pressable>
         );
@@ -1078,7 +1115,7 @@ export function AnimatedCard(props: {
     >
       {props.title ? (
         <Text
-          style={{ fontSize: 17, fontWeight: '700', color: theme.colors.text, letterSpacing: -0.2 }}
+          style={{ fontSize: 17, fontWeight: '700', color: theme.colors.text, letterSpacing: 0 }}
         >
           {props.title}
         </Text>
@@ -1145,7 +1182,7 @@ export function QuickAction(props: {
           fontWeight: '600',
           color: theme.colors.text,
           textAlign: 'center',
-          letterSpacing: 0.1,
+          letterSpacing: 0,
         }}
       >
         {props.label}
@@ -1271,7 +1308,7 @@ export function FeatureHighlight(props: {
         <Ionicons name={props.icon as any} size={20} color={color} />
       </View>
       <Text
-        style={{ fontSize: 15, fontWeight: '700', color: theme.colors.text, letterSpacing: -0.2 }}
+        style={{ fontSize: 15, fontWeight: '700', color: theme.colors.text, letterSpacing: 0 }}
       >
         {props.title}
       </Text>
@@ -1567,12 +1604,12 @@ export function StatCard(props: {
       </View>
       <View style={{ gap: theme.space.xxs }}>
         <Text
-          style={{ fontSize: 12, color: theme.colors.muted, fontWeight: '500', letterSpacing: 0.2 }}
+          style={{ fontSize: 12, color: theme.colors.muted, fontWeight: '500', letterSpacing: 0 }}
         >
           {props.label}
         </Text>
         <Text
-          style={{ fontSize: 24, fontWeight: '800', color: theme.colors.text, letterSpacing: -0.6 }}
+          style={{ fontSize: 24, fontWeight: '700', color: theme.colors.text, letterSpacing: 0 }}
         >
           {valueStr}
         </Text>
@@ -1764,7 +1801,7 @@ export function ListItem(props: {
         </View>
       )}
       <View style={{ flex: 1 }}>
-        <Text style={{ color: textColor, fontWeight: '500', fontSize: 15, letterSpacing: -0.1 }}>
+        <Text style={{ color: textColor, fontWeight: '500', fontSize: 15, letterSpacing: 0 }}>
           {props.title}
         </Text>
         {props.subtitle && (

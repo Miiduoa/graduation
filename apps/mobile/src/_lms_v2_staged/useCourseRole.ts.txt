@@ -1,0 +1,68 @@
+import { useEffect, useState } from 'react';
+
+import { supabase } from '@/lib/supabase';
+
+export type CourseRole = 'teacher' | 'student' | 'assistant' | 'moderator';
+
+/**
+ * 與資料庫 `is_course_staff` 一致：教材、公告、題庫等內容維護（教師 + 課程助理）。
+ * 不含 `moderator`（仲裁／成績矩陣與論壇治理另行以 `canCourseModerateGradesForum` 判斷）。
+ */
+export function canCourseStaffManageContent(role: CourseRole | null): boolean {
+  return role === 'teacher' || role === 'assistant';
+}
+
+/**
+ * 與資料庫 `is_course_moderator` 一致：成績矩陣讀寫、論壇仲裁等（教師 + 課程內 moderator 角色）。
+ * 助理 `assistant` 不在此範圍（後端 RLS 亦同）。
+ */
+export function canCourseModerateGradesForum(role: CourseRole | null): boolean {
+  return role === 'teacher' || role === 'moderator';
+}
+
+/** 論壇版面；gates 與 `canCourseModerateGradesForum` 相同（teacher + moderator）。 */
+export function canCourseModerateForum(role: CourseRole | null): boolean {
+  return canCourseModerateGradesForum(role);
+}
+
+/**
+ * 僅「學生」角色建立／繳交測驗 attempt。教師／助教／仲裁仍以預覽或治理 UI 操作，避免與學生作答資料混淆。
+ */
+export function canTakeCourseQuizAsStudent(role: CourseRole | null): boolean {
+  return role === 'student';
+}
+
+export function useCourseRole(courseId: string | undefined, userId: string | undefined) {
+  const [role, setRole] = useState<CourseRole | null>(null);
+
+  useEffect(() => {
+    if (!courseId || !userId) {
+      setRole(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    supabase
+      .from('course_members')
+      .select('role')
+      .eq('course_id', courseId)
+      .eq('user_id', userId)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          console.warn('[useCourseRole]', error.message);
+          setRole(null);
+          return;
+        }
+        setRole((data?.role as CourseRole | undefined) ?? null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [courseId, userId]);
+
+  return role;
+}

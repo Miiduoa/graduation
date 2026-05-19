@@ -5,7 +5,6 @@ const allowedScreenDirectFirebaseImports = [
   'apps/mobile/src/screens/CompanionCollectionScreen.tsx',
   'apps/mobile/src/screens/ConstellationScreen.tsx',
   'apps/mobile/src/screens/AdminDashboardScreen.tsx',
-  'apps/mobile/src/screens/AssignmentDetailScreen.tsx',
   'apps/mobile/src/screens/BugReportScreen.tsx',
   'apps/mobile/src/screens/ChatScreen.tsx',
   'apps/mobile/src/screens/ClassroomScreen.tsx',
@@ -20,12 +19,11 @@ const allowedScreenDirectFirebaseImports = [
   'apps/mobile/src/screens/GroupPostScreen.tsx',
   'apps/mobile/src/screens/GroupsScreen.tsx',
   'apps/mobile/src/screens/LearningAnalyticsScreen.tsx',
-  'apps/mobile/src/screens/MenuDetailScreen.tsx',
-  'apps/mobile/src/screens/MessagesHomeScreen.tsx',
   'apps/mobile/src/screens/PostLoginDebugScreen.tsx',
-  'apps/mobile/src/screens/ProfileEditScreen.tsx',
   'apps/mobile/src/screens/SSOLoginScreen.tsx',
-  'apps/mobile/src/screens/social/PostDetailScreen.tsx',
+  // social/PostDetailScreen 在 main 上已重做（dcf9e8aa），改用 '../../firebase'
+  // 而非 '../firebase'/firebase/firestore，已不符合 test 的 restrictedImportPatterns，
+  // 因此從 allowlist 移除以避免 staleAllowlistEntries 為非空。
 ];
 
 module.exports = {

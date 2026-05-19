@@ -17,8 +17,13 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { safeNavigate } from '../utils/safeNavigate';
 
 import { evaluateRubric, type Rubric, type RubricScore } from '@campus/shared';
+
+import { useAuth } from '../state/auth';
+import { simulateTeacherGrade } from '../services/demoActionSimulator';
+import { emitFeedbackDrafted } from '../services/roleEventBus';
 
 interface Submission {
   id: string;
@@ -117,7 +122,10 @@ const SAMPLE_RUBRIC: Rubric = {
 
 export default function TeacherGradingScreen(props: RouteProps) {
   const navigation = useNavigation<any>();
+  const auth = useAuth();
   const assignmentTitle = props.route?.params?.assignmentTitle ?? '作業批改';
+  const assignmentId = props.route?.params?.assignmentId ?? '1';
+  const courseId = props.route?.params?.courseId ?? '101';
   const courseName = props.route?.params?.courseName ?? '';
   const passingScore = props.route?.params?.passingScore ?? 60;
   const rubric = props.route?.params?.rubric ?? SAMPLE_RUBRIC;
@@ -153,7 +161,40 @@ export default function TeacherGradingScreen(props: RouteProps) {
     }
     setSaving(true);
     try {
-      await new Promise((r) => setTimeout(r, 400));
+      // ── Demo：emit cross-role events 給該學生 ──
+      const numericCourseId = Number(courseId) || 0;
+      const numericHwId = Number(assignmentId) || 1;
+      // demo 學生 mapping：阿明/小華/小芳 一律 emit 給 demo_student_kuchih（讓 demo 角色看得到）
+      const studentTargetUid = sub.studentName === '顧晉瑋'
+        ? 'demo_student_kuchih'
+        : 'demo_student_kuchih';
+      await simulateTeacherGrade({
+        teacherUid: auth.user?.uid ?? 'demo_teacher_chang',
+        teacherName: auth.profile?.displayName ?? '張怡君',
+        studentUid: studentTargetUid,
+        studentName: sub.studentName,
+        courseId: numericCourseId,
+        courseName: courseName || assignmentTitle.split(' ')[0],
+        homeworkId: numericHwId,
+        homeworkTitle: assignmentTitle,
+        score: evaluation.totalScore,
+        totalScore: 100,
+      });
+      if (feedback.trim()) {
+        await emitFeedbackDrafted({
+          actorUid: auth.user?.uid ?? 'demo_teacher_chang',
+          actorName: auth.profile?.displayName ?? '張怡君',
+          targetUids: [studentTargetUid],
+          courseId: numericCourseId,
+          courseName: courseName || assignmentTitle.split(' ')[0],
+          payload: {
+            studentName: sub.studentName,
+            homeworkTitle: assignmentTitle,
+            draftPreview: feedback.trim(),
+          },
+        });
+      }
+
       // 更新本機 state（真實實作會 PATCH /submissions/{id}）
       setSubmissions((ss) =>
         ss.map((s, i) =>
@@ -184,15 +225,15 @@ export default function TeacherGradingScreen(props: RouteProps) {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: '#f9fafb' }}
+      style={{ flex: 1, backgroundColor: '#F2F2F7' }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       {/* 頂部進度 */}
-      <View style={{ backgroundColor: '#1F4E78', padding: 12 }}>
+      <View style={{ backgroundColor: '#003F8A', padding: 12 }}>
         <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>
           {assignmentTitle}
         </Text>
-        <Text style={{ color: '#dbeafe', fontSize: 12, marginTop: 2 }}>
+        <Text style={{ color: '#E5F2FF', fontSize: 12, marginTop: 2 }}>
           {courseName} ・ 已批改 {gradedCount} / {submissions.length}
         </Text>
         <View
@@ -231,9 +272,9 @@ export default function TeacherGradingScreen(props: RouteProps) {
                 paddingVertical: 8,
                 marginRight: 8,
                 borderRadius: 999,
-                backgroundColor: i === activeIdx ? '#1F4E78' : '#fff',
+                backgroundColor: i === activeIdx ? '#003F8A' : '#fff',
                 borderWidth: 1,
-                borderColor: i === activeIdx ? '#1F4E78' : '#e5e7eb',
+                borderColor: i === activeIdx ? '#003F8A' : '#E5E5EA',
                 flexDirection: 'row',
                 gap: 6,
                 alignItems: 'center',
@@ -241,7 +282,7 @@ export default function TeacherGradingScreen(props: RouteProps) {
             >
               <Text
                 style={{
-                  color: i === activeIdx ? '#fff' : '#111827',
+                  color: i === activeIdx ? '#fff' : '#1C1C1E',
                   fontSize: 13,
                   fontWeight: '600',
                 }}
@@ -252,11 +293,11 @@ export default function TeacherGradingScreen(props: RouteProps) {
                 <Ionicons
                   name="checkmark-circle"
                   size={16}
-                  color={i === activeIdx ? '#fbbf24' : '#16a34a'}
+                  color={i === activeIdx ? '#fbbf24' : '#34C759'}
                 />
               )}
               {s.isLate && (
-                <Text style={{ fontSize: 11, color: '#dc2626' }}>遲</Text>
+                <Text style={{ fontSize: 11, color: '#D70015' }}>遲</Text>
               )}
             </Pressable>
           ))}
@@ -270,25 +311,25 @@ export default function TeacherGradingScreen(props: RouteProps) {
             borderRadius: 12,
             padding: 14,
             borderWidth: 1,
-            borderColor: '#e5e7eb',
+            borderColor: '#E5E5EA',
           }}
         >
           <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827' }}>
+            <Text style={{ fontSize: 14, fontWeight: '600', color: '#1C1C1E' }}>
               {sub.studentName}（{sub.studentId}）
             </Text>
-            <Text style={{ fontSize: 12, color: '#6b7280' }}>
+            <Text style={{ fontSize: 12, color: '#8E8E93' }}>
               {new Date(sub.submittedAt).toLocaleString('zh-TW')}
             </Text>
           </View>
-          <Text style={{ marginTop: 10, fontSize: 13, color: '#374151', lineHeight: 20 }}>
+          <Text style={{ marginTop: 10, fontSize: 13, color: '#3C3C43', lineHeight: 20 }}>
             {sub.content}
           </Text>
           {sub.attachments?.map((att, i) => (
             <Pressable
               key={i}
               onPress={() =>
-                navigation.navigate('CourseMaterialViewer', {
+                safeNavigate(navigation, 'CourseMaterialViewer', {
                   url: att.url,
                   title: att.name,
                   kind: 'homework',
@@ -297,15 +338,15 @@ export default function TeacherGradingScreen(props: RouteProps) {
               style={{
                 marginTop: 8,
                 padding: 8,
-                backgroundColor: '#f3f4f6',
+                backgroundColor: '#F2F2F7',
                 borderRadius: 6,
                 flexDirection: 'row',
                 gap: 6,
                 alignItems: 'center',
               }}
             >
-              <Ionicons name="document-outline" size={16} color="#6b7280" />
-              <Text style={{ fontSize: 13, color: '#1F4E78' }}>{att.name}</Text>
+              <Ionicons name="document-outline" size={16} color="#8E8E93" />
+              <Text style={{ fontSize: 13, color: '#003F8A' }}>{att.name}</Text>
             </Pressable>
           ))}
         </View>
@@ -320,11 +361,11 @@ export default function TeacherGradingScreen(props: RouteProps) {
               borderRadius: 12,
             }}
           >
-            <Text style={{ fontSize: 14, fontWeight: '700', color: '#111827' }}>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: '#1C1C1E' }}>
               本份已批改：{sub.currentGrade} 分
             </Text>
             {sub.currentFeedback && (
-              <Text style={{ marginTop: 4, fontSize: 13, color: '#374151' }}>
+              <Text style={{ marginTop: 4, fontSize: 13, color: '#3C3C43' }}>
                 {sub.currentFeedback}
               </Text>
             )}
@@ -332,7 +373,7 @@ export default function TeacherGradingScreen(props: RouteProps) {
         )}
 
         {/* Rubric 打分 */}
-        <Text style={{ marginTop: 20, fontSize: 16, fontWeight: '700', color: '#111827' }}>
+        <Text style={{ marginTop: 20, fontSize: 16, fontWeight: '700', color: '#1C1C1E' }}>
           🎯 Rubric 評分
         </Text>
         {rubric.criteria.map((c) => (
@@ -344,12 +385,12 @@ export default function TeacherGradingScreen(props: RouteProps) {
               borderRadius: 12,
               padding: 14,
               borderWidth: 1,
-              borderColor: '#e5e7eb',
+              borderColor: '#E5E5EA',
             }}
           >
             <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-              <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827' }}>{c.title}</Text>
-              <Text style={{ fontSize: 12, color: '#6b7280' }}>權重 {c.weight}%</Text>
+              <Text style={{ fontSize: 14, fontWeight: '600', color: '#1C1C1E' }}>{c.title}</Text>
+              <Text style={{ fontSize: 12, color: '#8E8E93' }}>權重 {c.weight}%</Text>
             </View>
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
               {c.levels.map((l) => (
@@ -361,13 +402,13 @@ export default function TeacherGradingScreen(props: RouteProps) {
                     minWidth: 80,
                     padding: 10,
                     borderRadius: 8,
-                    backgroundColor: scores[c.id] === l.id ? '#1F4E78' : '#f3f4f6',
+                    backgroundColor: scores[c.id] === l.id ? '#003F8A' : '#F2F2F7',
                     alignItems: 'center',
                   }}
                 >
                   <Text
                     style={{
-                      color: scores[c.id] === l.id ? '#fff' : '#111827',
+                      color: scores[c.id] === l.id ? '#fff' : '#1C1C1E',
                       fontWeight: '600',
                     }}
                   >
@@ -397,7 +438,7 @@ export default function TeacherGradingScreen(props: RouteProps) {
         )}
 
         {/* 整體回饋 */}
-        <Text style={{ marginTop: 16, fontSize: 14, fontWeight: '600', color: '#111827' }}>
+        <Text style={{ marginTop: 16, fontSize: 14, fontWeight: '600', color: '#1C1C1E' }}>
           💬 給學生的回饋
         </Text>
         <TextInput
@@ -412,7 +453,7 @@ export default function TeacherGradingScreen(props: RouteProps) {
             padding: 10,
             fontSize: 13,
             borderWidth: 1,
-            borderColor: '#e5e7eb',
+            borderColor: '#E5E5EA',
             minHeight: 80,
             textAlignVertical: 'top',
           }}
@@ -425,7 +466,7 @@ export default function TeacherGradingScreen(props: RouteProps) {
             marginTop: 20,
             padding: 14,
             borderRadius: 12,
-            backgroundColor: allComplete ? '#1F4E78' : '#9ca3af',
+            backgroundColor: allComplete ? '#003F8A' : '#AEAEB2',
             alignItems: 'center',
           }}
         >

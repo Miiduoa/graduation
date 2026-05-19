@@ -310,6 +310,20 @@ async function runCampusAssistantWithAgentRuntime(request) {
     }
   }
 
+  // 後備：當 prefetch 失敗或在未登入/未綁定學校（demo/guest）狀態下，
+  // 改用 client 端 context 攜帶的資料作為 prefetched 來源。
+  // 行動端 buildLiveAIContext / demo 種子層會把 pendingAssignments、announcements
+  // 等欄位填好；這裡負責讓 backend agent 在沒有 Firestore 真實資料時也能看到。
+  const ctxArr = (v) => (Array.isArray(v) ? v : null);
+  if (!ctxArr(prefetched.assignments)) {
+    const fromCtx = ctxArr(context.pendingAssignments);
+    if (fromCtx) prefetched.assignments = fromCtx;
+  }
+  if (!ctxArr(prefetched.announcements)) {
+    const fromCtx = ctxArr(context.announcements);
+    if (fromCtx) prefetched.announcements = fromCtx;
+  }
+
   const requestForCore = {
     ...request,
     data: {
@@ -395,6 +409,7 @@ async function runCampusAssistantWithAgentRuntime(request) {
     actions: response.actions,
     citations: response.citations,
     assistantToolsUsed: Array.isArray(response.assistantToolsUsed) ? response.assistantToolsUsed : [],
+    cards: Array.isArray(response.cards) ? response.cards : [],
     error: response.error,
     usage: response.usage,
     debug: response.debug,

@@ -52,7 +52,7 @@ export function UnifiedCalendarScreen(props: Record<string, unknown>) {
         <Text
           style={{
             fontSize: 22,
-            fontWeight: '800',
+            fontWeight: '700',
             color: theme.colors.text,
             marginBottom: 10,
           }}

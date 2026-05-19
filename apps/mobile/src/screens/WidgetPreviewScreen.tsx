@@ -36,7 +36,7 @@ const WIDGETS: Widget[] = [
     description: '顯示即將開始的課程',
     sizes: ['small', 'medium'],
     icon: 'alarm',
-    color: '#2563EB',
+    color: '#5856D6',
     status: 'native',
   },
   {
@@ -54,7 +54,7 @@ const WIDGETS: Widget[] = [
     description: '顯示最新公告與未讀數',
     sizes: ['medium', 'large'],
     icon: 'megaphone',
-    color: '#F97316',
+    color: '#FF9500',
     status: 'native',
   },
   {
@@ -63,7 +63,7 @@ const WIDGETS: Widget[] = [
     description: '顯示今日推薦菜色',
     sizes: ['medium'],
     icon: 'restaurant',
-    color: '#F97316',
+    color: '#FF9500',
     status: 'preview',
   },
   {
@@ -72,7 +72,7 @@ const WIDGETS: Widget[] = [
     description: '借閱狀態與到期提醒',
     sizes: ['small', 'medium'],
     icon: 'library',
-    color: '#8B5CF6',
+    color: '#AF52DE',
     status: 'preview',
   },
   {
@@ -81,7 +81,7 @@ const WIDGETS: Widget[] = [
     description: '顯示即將舉辦的活動',
     sizes: ['medium', 'large'],
     icon: 'ticket',
-    color: '#EC4899',
+    color: '#FF2D55',
     status: 'preview',
   },
   {
@@ -99,8 +99,8 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 function WidgetStatusBadge({ status }: { status: WidgetStatus }) {
   const isNative = status === 'native';
-  const color = isNative ? '#10B981' : '#F59E0B';
-  const backgroundColor = isNative ? 'rgba(16,185,129,0.14)' : 'rgba(245,158,11,0.14)';
+  const color = isNative ? '#34C759' : '#FF9500';
+  const backgroundColor = isNative ? 'rgba(16,185,129,0.14)' : 'rgba(255,149,0,0.14)';
 
   return (
     <View
@@ -246,7 +246,7 @@ function MediumWidget({ widget }: { widget: Widget }) {
           <Text style={{ color: widget.color, fontSize: 12, fontWeight: '700' }}>
             22 分鐘後開始
           </Text>
-          <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 16 }}>
+          <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>
             程式設計
           </Text>
           <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
@@ -312,7 +312,7 @@ function MediumWidget({ widget }: { widget: Widget }) {
                       paddingHorizontal: 8,
                       paddingVertical: 4,
                       borderRadius: 999,
-                      backgroundColor: 'rgba(244,63,94,0.14)',
+                      backgroundColor: 'rgba(255,45,85,0.14)',
                     }}
                   >
                     <Text style={{ color: '#F43F5E', fontSize: 10, fontWeight: '700' }}>重要</Text>
@@ -389,7 +389,7 @@ function MediumWidget({ widget }: { widget: Widget }) {
           <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 15 }}>
             程式設計競賽
           </Text>
-          <Text style={{ color: widget.color, fontWeight: '800', fontSize: 20 }}>5 天 3 小時</Text>
+          <Text style={{ color: widget.color, fontWeight: '700', fontSize: 20 }}>5 天 3 小時</Text>
           <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
             工程館國際會議廳 · 剩餘 12 名額
           </Text>
@@ -400,7 +400,7 @@ function MediumWidget({ widget }: { widget: Widget }) {
         <View style={{ gap: 10 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
             <Text style={{ color: theme.colors.muted, fontSize: 12 }}>本學期 GPA</Text>
-            <Text style={{ color: widget.color, fontWeight: '800', fontSize: 18 }}>3.75</Text>
+            <Text style={{ color: widget.color, fontWeight: '700', fontSize: 18 }}>3.75</Text>
           </View>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
             <Text style={{ color: theme.colors.muted, fontSize: 12 }}>最新成績</Text>
@@ -531,7 +531,7 @@ function LargeWidget({ widget }: { widget: Widget }) {
                       paddingHorizontal: 8,
                       paddingVertical: 4,
                       borderRadius: 999,
-                      backgroundColor: 'rgba(244,63,94,0.14)',
+                      backgroundColor: 'rgba(255,45,85,0.14)',
                     }}
                   >
                     <Text style={{ color: '#F43F5E', fontSize: 10, fontWeight: '700' }}>重要</Text>
@@ -844,7 +844,7 @@ export function WidgetPreviewScreen() {
                       gap: 6,
                     }}
                   >
-                    <Text style={{ color: '#10B981', fontWeight: '700' }}>
+                    <Text style={{ color: '#34C759', fontWeight: '700' }}>
                       已完成原生整合 ({integratedWidgets.length})
                     </Text>
                     <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
@@ -856,11 +856,11 @@ export function WidgetPreviewScreen() {
                     style={{
                       padding: 14,
                       borderRadius: theme.radius.md,
-                      backgroundColor: 'rgba(245,158,11,0.12)',
+                      backgroundColor: 'rgba(255,149,0,0.12)',
                       gap: 6,
                     }}
                   >
-                    <Text style={{ color: '#F59E0B', fontWeight: '700' }}>
+                    <Text style={{ color: '#FF9500', fontWeight: '700' }}>
                       預覽與資料模型已完成 ({previewWidgets.length})
                     </Text>
                     <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>

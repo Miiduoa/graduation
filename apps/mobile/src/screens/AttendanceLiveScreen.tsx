@@ -42,6 +42,7 @@ import {
   getStatusColor,
   getStatusLabel,
 } from '../services/smartAttendanceEngine';
+import { simulateStudentCheckIn } from '../services/demoActionSimulator';
 
 // ============================================================================
 // TYPES
@@ -254,6 +255,20 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
         setCheckInMessage(result.message);
         Vibration.vibrate([0, 200, 100, 200]);
         await loadSession();
+        // ── Demo：emit cross-role event 給老師 ──
+        try {
+          const sess = await getSessionById(sessionId);
+          await simulateStudentCheckIn({
+            studentUid: studentId,
+            studentName,
+            teacherUid: 'demo_teacher_chang',
+            courseId: Number(sess?.courseId ?? 0) || 0,
+            courseName: sess?.courseName ?? '課程',
+            sessionId,
+            method: (((sess as any)?.method ?? 'rotating_qr')) as 'rotating_qr' | 'number_code' | 'geofence' | 'selfie_liveness' | 'multi_factor',
+            status: result.message.includes('遲') ? 'late' : 'present',
+          });
+        } catch { /* swallow demo emit failures */ }
       } else {
         Alert.alert('簽到失敗', result.message);
       }
@@ -387,15 +402,15 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
             {/* Stats */}
             <View style={s.statsRow}>
               <View style={[s.statCard, { backgroundColor: '#ECFDF5' }]}>
-                <Text style={[s.statNum, { color: '#10B981' }]}>{stats.present}</Text>
+                <Text style={[s.statNum, { color: '#34C759' }]}>{stats.present}</Text>
                 <Text style={s.statLabel}>出席</Text>
               </View>
               <View style={[s.statCard, { backgroundColor: '#FEF3C7' }]}>
-                <Text style={[s.statNum, { color: '#F59E0B' }]}>{stats.late}</Text>
+                <Text style={[s.statNum, { color: '#FF9500' }]}>{stats.late}</Text>
                 <Text style={s.statLabel}>遲到</Text>
               </View>
               <View style={[s.statCard, { backgroundColor: '#FEE2E2' }]}>
-                <Text style={[s.statNum, { color: '#EF4444' }]}>{stats.absent}</Text>
+                <Text style={[s.statNum, { color: '#FF3B30' }]}>{stats.absent}</Text>
                 <Text style={s.statLabel}>缺席</Text>
               </View>
               <View style={[s.statCard, { backgroundColor: theme.colors.surface2 }]}>
@@ -683,7 +698,7 @@ const s = StyleSheet.create({
     padding: 12,
     alignItems: 'center',
   },
-  statNum: { fontSize: 22, fontWeight: '800' },
+  statNum: { fontSize: 22, fontWeight: '700' },
   statLabel: { fontSize: 11, color: theme.colors.muted, marginTop: 2 },
 
   // Mode Display
@@ -727,7 +742,7 @@ const s = StyleSheet.create({
     borderWidth: 2,
     borderColor: theme.colors.accent,
   },
-  codeDigit: { fontSize: 28, fontWeight: '800', color: theme.colors.accent },
+  codeDigit: { fontSize: 28, fontWeight: '700', color: theme.colors.accent },
   codeHint: { fontSize: 13, color: theme.colors.muted, marginTop: 16 },
 
   // Manual mode
@@ -815,7 +830,7 @@ const s = StyleSheet.create({
     borderRadius: 20,
   },
   successIcon: {},
-  successTitle: { fontSize: 24, fontWeight: '800', color: theme.colors.success, marginTop: 12 },
+  successTitle: { fontSize: 24, fontWeight: '700', color: theme.colors.success, marginTop: 12 },
   successMessage: { fontSize: 14, color: theme.colors.muted, marginTop: 8 },
   successTime: { fontSize: 32, fontWeight: '700', color: theme.colors.text, marginTop: 8 },
   sessionInfoBox: {
@@ -846,7 +861,7 @@ const s = StyleSheet.create({
     backgroundColor: '#ECFDF5',
     borderRadius: 10,
   },
-  liveTagText: { fontSize: 11, fontWeight: '600', color: '#10B981' },
+  liveTagText: { fontSize: 11, fontWeight: '600', color: '#34C759' },
 
   // Student input
   studentInputSection: { alignItems: 'center', paddingHorizontal: 16, paddingTop: 24 },
@@ -864,7 +879,7 @@ const s = StyleSheet.create({
   },
   studentDigitSmall: { width: 38, height: 46 },
   studentDigitFilled: { borderColor: theme.colors.accent },
-  studentDigitText: { fontSize: 22, fontWeight: '800', color: theme.colors.text },
+  studentDigitText: { fontSize: 22, fontWeight: '700', color: theme.colors.text },
   hiddenInput: { position: 'absolute', width: 1, height: 1, opacity: 0 },
 
   checkInBtn: {

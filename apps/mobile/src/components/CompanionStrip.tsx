@@ -40,7 +40,7 @@ export function CompanionStrip(props: {
           <Ionicons name="happy-outline" size={26} color={theme.colors.accent} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 15 }}>
+          <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 15 }}>
             {snapshot.petStageTitle}
           </Text>
           <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 2 }}>

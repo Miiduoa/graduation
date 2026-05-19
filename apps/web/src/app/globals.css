@@ -28,23 +28,23 @@
   --border: #e5e5ea;
   --border-strong: #d1d1d6;
 
-  /* ── Brand ── */
-  --brand: #2563eb;
-  --brand2: #60a5fa;
-  --accent-soft: rgba(37, 99, 235, 0.1);
+  /* ── Brand (Apple HIG · iOS System Blue) ── */
+  --brand: #5856d6;
+  --brand2: #818cf8;
+  --accent-soft: rgba(88, 86, 214, 0.1);
 
-  /* ── Status Colors ── */
+  /* ── Status Colors (iOS system) ── */
   --success: #34c759;
   --success-soft: rgba(52, 199, 89, 0.12);
   --danger: #ff3b30;
   --danger-soft: rgba(255, 59, 48, 0.12);
   --warning: #ff9500;
   --warning-soft: rgba(255, 149, 0, 0.12);
-  --info: #007aff;
-  --info-soft: rgba(0, 122, 255, 0.12);
+  --info: #5ac8fa;
+  --info-soft: rgba(90, 200, 250, 0.12);
 
   /* ── Interaction ── */
-  --focus-ring: rgba(15, 139, 141, 0.24);
+  --focus-ring: rgba(88, 86, 214, 0.24);
   --overlay: rgba(0, 0, 0, 0.36);
   --disabled-bg: rgba(142, 142, 147, 0.12);
   --disabled-text: rgba(142, 142, 147, 0.55);
@@ -62,7 +62,7 @@
 
   /* 成長/完成（森林綠）Growth Mindset */
   --growth: #30b97b;
-  --growth-soft: rgba(48, 185, 123, 0.12);
+  --growth-soft: rgba(52,199,89, 0.12);
 
   /* 情感安撫（天空藍）Anxiety Reduction — 截止日期提醒用 */
   --calm: #8aafcd;
@@ -74,7 +74,7 @@
 
   /* ── Today Dashboard ── */
   --today-morning: linear-gradient(135deg, #ff9500 0%, #ffcc00 100%);
-  --today-afternoon: linear-gradient(135deg, #2563eb 0%, #60a5fa 100%);
+  --today-afternoon: linear-gradient(135deg, #5856d6 0%, #818cf8 100%);
   --today-evening: linear-gradient(135deg, #30b97b 0%, #5ac8fa 100%);
   --today-night: linear-gradient(135deg, #2c2c2e 0%, #3a3a3c 100%);
 
@@ -140,18 +140,18 @@
     --muted-light: #636366;
     --border: #2a2e40;
     --border-strong: #48484a;
-    --brand: #2563eb;
-    --brand2: #60a5fa;
-    --accent-soft: rgba(37, 99, 235, 0.18);
+    --brand: #818cf8;
+    --brand2: #818cf8;
+    --accent-soft: rgba(129, 140, 248, 0.18);
     --success: #30d158;
     --success-soft: rgba(48, 209, 88, 0.16);
     --danger: #ff453a;
     --danger-soft: rgba(255, 69, 58, 0.18);
     --warning: #ff9f0a;
     --warning-soft: rgba(255, 159, 10, 0.16);
-    --info: #0a84ff;
-    --info-soft: rgba(10, 132, 255, 0.16);
-    --focus-ring: rgba(37, 99, 235, 0.3);
+    --info: #818CF8;
+    --info-soft: rgba(129,140,248, 0.16);
+    --focus-ring: rgba(129, 140, 248, 0.3);
     --overlay: rgba(0, 0, 0, 0.6);
     --disabled-bg: rgba(255, 255, 255, 0.08);
     --disabled-text: rgba(255, 255, 255, 0.28);
@@ -171,7 +171,7 @@
     --gentle-warn: #ffd60a;
     --gentle-warn-soft: rgba(255, 214, 10, 0.16);
     --today-morning: linear-gradient(135deg, #ff9f0a 0%, #ffd60a 100%);
-    --today-afternoon: linear-gradient(135deg, #2563eb 0%, #60a5fa 100%);
+    --today-afternoon: linear-gradient(135deg, #818cf8 0%, #5856d6 100%);
     --today-evening: linear-gradient(135deg, #30d158 0%, #5ac8fa 100%);
     --today-night: linear-gradient(135deg, #1c1c1e 0%, #2c2c2e 100%);
   }
@@ -192,18 +192,18 @@
   --muted-light: #636366;
   --border: #2a2e40;
   --border-strong: #48484a;
-  --brand: #2563eb;
-  --brand2: #60a5fa;
-  --accent-soft: rgba(37, 99, 235, 0.18);
+  --brand: #818cf8;
+  --brand2: #818cf8;
+  --accent-soft: rgba(129, 140, 248, 0.18);
   --success: #30d158;
   --success-soft: rgba(48, 209, 88, 0.16);
   --danger: #ff453a;
   --danger-soft: rgba(255, 69, 58, 0.18);
   --warning: #ff9f0a;
   --warning-soft: rgba(255, 159, 10, 0.16);
-  --info: #0a84ff;
-  --info-soft: rgba(10, 132, 255, 0.16);
-  --focus-ring: rgba(37, 99, 235, 0.3);
+  --info: #818CF8;
+  --info-soft: rgba(129,140,248, 0.16);
+  --focus-ring: rgba(129, 140, 248, 0.3);
   --overlay: rgba(0, 0, 0, 0.6);
   --disabled-bg: rgba(255, 255, 255, 0.08);
   --disabled-text: rgba(255, 255, 255, 0.28);
@@ -224,7 +224,7 @@
   --gentle-warn: #ffd60a;
   --gentle-warn-soft: rgba(255, 214, 10, 0.16);
   --today-morning: linear-gradient(135deg, #ff9f0a 0%, #ffd60a 100%);
-  --today-afternoon: linear-gradient(135deg, #2563eb 0%, #60a5fa 100%);
+  --today-afternoon: linear-gradient(135deg, #818cf8 0%, #5856d6 100%);
   --today-evening: linear-gradient(135deg, #30d158 0%, #5ac8fa 100%);
   --today-night: linear-gradient(135deg, #1c1c1e 0%, #2c2c2e 100%);
 }
@@ -520,7 +520,7 @@ button {
   min-height: 40px;
   padding: 0 16px;
   border-radius: var(--radius-pill);
-  border: 1px solid rgba(15, 139, 141, 0.2);
+  border: 1px solid rgba(88,86,214, 0.2);
   background: var(--accent-soft);
   color: var(--brand);
   font-weight: 700;
@@ -579,12 +579,13 @@ button {
   font-weight: 600;
 }
 
+/* iOS Large Title：weight 700 / letter-spacing 微負 / line-height 1.05 */
 .h1 {
   margin: 0;
   font-size: clamp(28px, 5vw, 42px);
   line-height: 1.05;
-  font-weight: 800;
-  letter-spacing: -0.04em;
+  font-weight: 700;
+  letter-spacing: -0.02em;
   color: var(--text);
 }
 
@@ -592,7 +593,7 @@ button {
   margin: 10px 0 0;
   color: var(--muted);
   font-size: 15px;
-  line-height: 1.7;
+  line-height: 1.5;
   max-width: 62ch;
 }
 
@@ -608,6 +609,7 @@ button {
    Card Component
    ============================ */
 
+/* iOS Card：超薄邊 + 極小陰影；hover 改用較淡 elevate 而非位移 */
 .card {
   position: relative;
   overflow: hidden;
@@ -616,9 +618,7 @@ button {
   border-radius: var(--radius-lg);
   padding: 22px;
   box-shadow: var(--shadow-sm);
-  transition:
-    box-shadow 0.2s ease,
-    transform 0.2s ease;
+  transition: box-shadow 0.2s ease;
 }
 
 :root[data-theme='dark'] .card {
@@ -628,7 +628,6 @@ button {
 
 .card:hover {
   box-shadow: var(--shadow-md);
-  transform: translateY(-2px);
 }
 
 /* ============================
@@ -677,27 +676,27 @@ button {
   transform: none;
 }
 
+/* iOS Filled Button — 主要動作；無 neumorphic 雙向陰影 */
 .btn.primary,
 .btn-primary {
   color: #fff;
   background: var(--brand);
-  border-color: rgba(15, 139, 141, 0.3);
-  box-shadow:
-    4px 4px 10px rgba(15, 139, 141, 0.32),
-    -2px -2px 6px rgba(255, 255, 255, 0.7);
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .btn.primary:hover,
 .btn-primary:hover {
-  background: #0d7778;
-  box-shadow:
-    6px 6px 14px rgba(15, 139, 141, 0.4),
-    -3px -3px 8px rgba(255, 255, 255, 0.8);
+  background: var(--brand2);
+  box-shadow: none;
+  transform: none;
 }
 
 .btn.primary:active,
 .btn-primary:active {
-  box-shadow: inset 3px 3px 6px rgba(50, 56, 160, 0.4);
+  opacity: 0.85;
+  box-shadow: none;
+  transform: none;
 }
 
 .btn-success {
@@ -807,7 +806,7 @@ select.input option {
 .pill.brand {
   background: var(--accent-soft);
   color: var(--brand);
-  border-color: rgba(15, 139, 141, 0.18);
+  border-color: rgba(88,86,214, 0.18);
   box-shadow: none;
 }
 
@@ -853,9 +852,9 @@ select.input option {
 
 .toggle.on {
   background: var(--brand);
-  border-color: rgba(15, 139, 141, 0.3);
+  border-color: rgba(88,86,214, 0.3);
   box-shadow:
-    3px 3px 8px rgba(15, 139, 141, 0.3),
+    3px 3px 8px rgba(88,86,214, 0.3),
     -2px -2px 5px rgba(255, 255, 255, 0.8);
 }
 
@@ -1223,7 +1222,7 @@ select.input option {
 .metricValue {
   font-size: 26px;
   line-height: 1;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.05em;
   color: var(--tone, var(--brand));
 }
@@ -1833,7 +1832,7 @@ select.input option {
   display: grid;
   place-items: center;
   font-size: 38px;
-  font-weight: 800;
+  font-weight: 700;
   box-shadow: var(--shadow-md);
   flex-shrink: 0;
 }
@@ -1858,7 +1857,7 @@ select.input option {
   margin: 0;
   font-size: clamp(24px, 4vw, 30px);
   line-height: 1.1;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.04em;
 }
 
@@ -1921,7 +1920,7 @@ select.input option {
 
 .homeGreetingTitle {
   font-size: clamp(22px, 4vw, 28px);
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.04em;
   color: var(--text);
   margin: 0 0 4px;
@@ -1976,7 +1975,7 @@ select.input option {
 
 .homeStatValue {
   font-size: 28px;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.05em;
   color: var(--text);
 }
@@ -2304,7 +2303,7 @@ select.input option {
 .homePulseCard {
   padding: 18px;
   border-radius: var(--radius-lg);
-  border: 1px solid rgba(15, 139, 141, 0.16);
+  border: 1px solid rgba(88,86,214, 0.16);
   background: var(--accent-soft);
   box-shadow: var(--shadow-sm);
 }
@@ -2445,7 +2444,7 @@ select.input option {
 
 .announcementsPage .statValue {
   font-size: 26px;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.04em;
   line-height: 1.1;
 }
@@ -2560,7 +2559,7 @@ select.input option {
 
 .announcementsPage .categoryPills button.active {
   background: var(--accent-soft);
-  border-color: rgba(15, 139, 141, 0.2);
+  border-color: rgba(88,86,214, 0.2);
   color: var(--brand);
   box-shadow: none;
 }
@@ -3110,7 +3109,7 @@ select.input option {
   padding: 10px 14px;
   border-radius: var(--radius-lg);
   background: var(--accent-soft);
-  border: 1px solid rgba(15, 139, 141, 0.15);
+  border: 1px solid rgba(88,86,214, 0.15);
   box-shadow: var(--shadow-sm);
   font-size: 13px;
   color: var(--brand);
@@ -3168,17 +3167,17 @@ select.input option {
 
 .contextBanner.class {
   background: var(--accent-soft);
-  border: 1px solid rgba(15, 139, 141, 0.15);
+  border: 1px solid rgba(88,86,214, 0.15);
 }
 
 .contextBanner.afternoon {
-  background: linear-gradient(135deg, rgba(48, 185, 123, 0.08) 0%, rgba(15, 139, 141, 0.06) 100%);
-  border: 1px solid rgba(48, 185, 123, 0.15);
+  background: linear-gradient(135deg, rgba(52,199,89, 0.08) 0%, rgba(88,86,214, 0.06) 100%);
+  border: 1px solid rgba(52,199,89, 0.15);
 }
 
 .contextBanner.evening {
-  background: linear-gradient(135deg, rgba(48, 185, 123, 0.06) 0%, rgba(90, 200, 250, 0.06) 100%);
-  border: 1px solid rgba(48, 185, 123, 0.12);
+  background: linear-gradient(135deg, rgba(52,199,89, 0.06) 0%, rgba(90, 200, 250, 0.06) 100%);
+  border: 1px solid rgba(52,199,89, 0.12);
 }
 
 /* ============================
@@ -3196,3 +3195,74 @@ select.input option {
 /* ============================
    Leaflet Map
    ============================ */
+
+/* ════════════════════════════════════════════════════
+   AI-First Tokens v1 (附加於 Campus Soft v3.0 之後)
+   詳見：docs/design/AI_FIRST_REDESIGN.md
+   ════════════════════════════════════════════════════ */
+:root {
+  /* AI 主色：Indigo → Purple → Pink 漸層體系 */
+  --ai: #6366f1;
+  --ai-strong: #4f46e5;
+  --ai-soft: rgba(88,86,214, 0.10);
+  --ai-halo: rgba(88,86,214, 0.20);
+  --ai-surface: #fafbff;
+  --ai-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%);
+  --ai-gradient-soft: linear-gradient(180deg, #eef2ff 0%, #fce7f3 100%);
+
+  /* 信心度 */
+  --confidence-high: #34c759;
+  --confidence-mid: #ff9500;
+  --confidence-low: #ff3b30;
+  --confidence-high-soft: rgba(52, 199, 89, 0.12);
+  --confidence-mid-soft: rgba(255, 149, 0, 0.12);
+  --confidence-low-soft: rgba(255, 59, 48, 0.12);
+
+  /* AI 元件陰影 */
+  --shadow-ai: 0 0 0 3px rgba(88,86,214, 0.18),
+    0 8px 24px rgba(88,86,214, 0.12);
+  --shadow-ai-strong: 0 0 0 4px rgba(88,86,214, 0.25),
+    0 12px 32px rgba(139, 92, 246, 0.20);
+
+  /* AI 元件層級 */
+  --z-ai-drawer: 200;
+  --z-ai-command: 300;
+  --z-ai-takeover: 700;
+
+  /* 動效 */
+  --ai-breath-duration: 1600ms;
+  --ai-card-enter-duration: 220ms;
+  --ai-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ai-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* AI 簽名動畫 */
+@keyframes aiBreath {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.04); }
+}
+@keyframes aiSlotEnter {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes aiTypingDot {
+  0%, 80%, 100% { opacity: 0.3; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-3px); }
+}
+
+/* 暗黑模式 AI tokens */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ai-surface: #1a1b2e;
+    --ai-soft: rgba(139, 92, 246, 0.18);
+    --ai-halo: rgba(139, 92, 246, 0.32);
+  }
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ai-breath-duration: 0ms;
+    --ai-card-enter-duration: 0ms;
+  }
+}

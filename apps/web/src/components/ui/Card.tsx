@@ -57,7 +57,7 @@ const Card = forwardRef<HTMLDivElement, CardProps>(
         boxShadow: 'var(--shadow-inset)',
       },
       accent: {
-        border: '1px solid rgba(94,106,210,0.18)',
+        border: '1px solid var(--accent-soft)',
         background: 'var(--accent-soft)',
         boxShadow: 'var(--shadow-sm)',
       },
@@ -113,12 +113,12 @@ function CardHeader({ title, subtitle, action, icon }: CardHeaderProps) {
               height: '38px',
               borderRadius: '10px',
               background: 'var(--accent-soft)',
-              border: '1px solid rgba(94,106,210,0.14)',
+              border: '1px solid var(--accent-soft)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               fontSize: '18px',
-              boxShadow: 'var(--shadow-sm)',
+              color: 'var(--brand)',
               flexShrink: 0,
             }}
           >

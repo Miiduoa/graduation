@@ -103,7 +103,7 @@ export function AcademicScreen(props: Record<string, unknown>) {
           borderBottomColor: theme.colors.border,
         }}
       >
-        <Text style={{ fontSize: 22, fontWeight: '800', color: theme.colors.text, marginBottom: 10 }}>
+        <Text style={{ fontSize: 22, fontWeight: '700', color: theme.colors.text, marginBottom: 10 }}>
           學業總覽
         </Text>
         <View style={{ flexDirection: 'row', gap: 6 }}>

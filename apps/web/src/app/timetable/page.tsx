@@ -2,9 +2,13 @@
 
 import { SiteShell } from '@/components/SiteShell';
 import { useState, useMemo, useEffect, type CSSProperties } from 'react';
+import Link from 'next/link';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import { getAuth, fetchUserCourses, isFirebaseConfigured, type UserCourse } from '@/lib/firebase';
 import { onAuthStateChanged, type User } from 'firebase/auth';
+import { DEMO_COURSES } from '@/lib/demoData';
+import { useDemoRole } from '@/lib/demoRole';
+import { getStudentContextSummary } from '@/lib/aiContext';
 
 type ViewMode = 'week' | 'day' | 'list';
 
@@ -35,103 +39,25 @@ const PERIODS = [
   { period: 12, start: '20:30', end: '21:20' },
 ];
 
-const MOCK_COURSES: CourseSlot[] = [
-  {
-    id: 'c1',
-    name: '資料結構',
-    instructor: '王大明',
-    room: '工程館 302',
-    dayOfWeek: 1,
-    startPeriod: 1,
-    endPeriod: 2,
-    color: '#5E6AD2',
-    credits: 3,
-  },
-  {
-    id: 'c2',
-    name: '線性代數',
-    instructor: '陳小華',
-    room: '理學院 201',
-    dayOfWeek: 1,
-    startPeriod: 5,
-    endPeriod: 6,
-    color: '#34C759',
-    credits: 3,
-  },
-  {
-    id: 'c3',
-    name: '作業系統',
-    instructor: '李志明',
-    room: '資工大樓 405',
-    dayOfWeek: 2,
-    startPeriod: 3,
-    endPeriod: 4,
-    color: '#FF9500',
-    credits: 3,
-  },
-  {
-    id: 'c4',
-    name: '計算機網路',
-    instructor: '張美玲',
-    room: '工程館 105',
-    dayOfWeek: 2,
-    startPeriod: 7,
-    endPeriod: 8,
-    color: '#007AFF',
-    credits: 3,
-  },
-  {
-    id: 'c5',
-    name: '微積分',
-    instructor: '吳俊傑',
-    room: '理學院 101',
-    dayOfWeek: 3,
-    startPeriod: 1,
-    endPeriod: 3,
-    color: '#FF3B30',
-    credits: 4,
-  },
-  {
-    id: 'c6',
-    name: '英文寫作',
-    instructor: 'Smith, J.',
-    room: '語言中心 202',
-    dayOfWeek: 4,
-    startPeriod: 2,
-    endPeriod: 3,
-    color: '#BF5AF2',
-    credits: 2,
-  },
-  {
-    id: 'c7',
-    name: '資料庫系統',
-    instructor: '劉建宏',
-    room: '資工大樓 301',
-    dayOfWeek: 4,
-    startPeriod: 6,
-    endPeriod: 7,
-    color: '#32ADE6',
-    credits: 3,
-  },
-  {
-    id: 'c8',
-    name: '軟體工程',
-    instructor: '林宜珊',
-    room: '工程館 204',
-    dayOfWeek: 5,
-    startPeriod: 4,
-    endPeriod: 5,
-    color: '#FF6B35',
-    credits: 3,
-  },
-];
+// 從 demoData 衍生課表，保持單一資料源（DEMO_COURSES 是 canonical）
+const MOCK_COURSES: CourseSlot[] = DEMO_COURSES.map((c) => ({
+  id: c.id,
+  name: c.name,
+  instructor: c.instructor,
+  room: c.room,
+  dayOfWeek: c.dayOfWeek,
+  startPeriod: c.startPeriod,
+  endPeriod: c.endPeriod,
+  color: c.color,
+  credits: c.credits,
+}));
 
 const DAYS = ['一', '二', '三', '四', '五'];
 const COURSE_COLORS = [
-  '#5E6AD2',
+  '#5856D6',
   '#34C759',
   '#FF9500',
-  '#007AFF',
+  '#5856D6',
   '#FF3B30',
   '#BF5AF2',
   '#32ADE6',
@@ -202,14 +128,24 @@ function getNowLineTopPx(now: Date): number | null {
 export default function TimetablePage(props: {
   searchParams?: { school?: string; schoolId?: string };
 }) {
-  const { schoolName } = resolveSchoolPageContext(props.searchParams);
+  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const [demoRole] = useDemoRole();
+  const isRestrictedRole = demoRole === 'alumni' || demoRole === 'guest';
+  const isTeacherView = demoRole === 'teacher' || demoRole === 'ta';
+  const isDeptHead = demoRole === 'department_head';
+  const isClubOfficer = demoRole === 'club_officer';
   const [viewMode, setViewMode] = useState<ViewMode>('week');
   const [selectedDay, setSelectedDay] = useState<number>(
     Math.min(Math.max(new Date().getDay() || 5, 1), 5),
   );
   const [selectedSemester, setSelectedSemester] = useState(SEMESTERS[0]);
   const [user, setUser] = useState<User | null>(null);
-  const [courses, setCourses] = useState<CourseSlot[]>(MOCK_COURSES);
+  // 教師 / TA：只看「我授課的課」（demo 中為 c1）
+  const baseCourses = useMemo(
+    () => (isTeacherView ? MOCK_COURSES.filter((c) => c.id === 'c1') : MOCK_COURSES),
+    [isTeacherView],
+  );
+  const [courses, setCourses] = useState<CourseSlot[]>(baseCourses);
   const [usingDemo, setUsingDemo] = useState(true);
   const [loading, setLoading] = useState(false);
   const [now, setNow] = useState(() => new Date());
@@ -232,7 +168,7 @@ export default function TimetablePage(props: {
   // 依學期載入課程
   useEffect(() => {
     if (!user || !isFirebaseConfigured()) {
-      setCourses(MOCK_COURSES);
+      setCourses(baseCourses);
       setUsingDemo(true);
       return;
     }
@@ -246,12 +182,12 @@ export default function TimetablePage(props: {
           setCourses(fbCourses.map(mapUserCourse));
           setUsingDemo(false);
         } else {
-          setCourses(MOCK_COURSES);
+          setCourses(baseCourses);
           setUsingDemo(true);
         }
       } catch {
         if (active) {
-          setCourses(MOCK_COURSES);
+          setCourses(baseCourses);
           setUsingDemo(true);
         }
       } finally {
@@ -262,9 +198,10 @@ export default function TimetablePage(props: {
     return () => {
       active = false;
     };
-  }, [user, selectedSemester]);
+  }, [user, selectedSemester, baseCourses]);
 
   const totalCredits = useMemo(() => courses.reduce((acc, c) => acc + c.credits, 0), [courses]);
+  const aiCtx = useMemo(() => (demoRole === 'student' || demoRole === 'club_officer' ? getStudentContextSummary() : null), [demoRole]);
 
   const todayCourses = useMemo(
     () =>
@@ -306,6 +243,140 @@ export default function TimetablePage(props: {
     marginBottom: 6,
   });
 
+  // ── 系主任：全系課程總覽（非個人課表）──
+  if (isDeptHead) {
+    return (
+      <SiteShell title="全系課程總覽" subtitle="本學期開設課程一覽" schoolName={schoolName}>
+        <div className="pageStack">
+          <div
+            className="card"
+            style={{ padding: '14px 16px', background: 'rgba(255,149,0,0.10)', border: '1px solid rgba(255,149,0,0.30)', fontSize: 13 }}
+          >
+            🏛️ <strong>系主任視角</strong> · 以下顯示本學期全系所有開設課程，非個人修課課表。
+          </div>
+          <div className="metricGrid">
+            <div className="metricCard" style={{ '--tone': '#FF9500' } as CSSProperties}>
+              <div className="metricIcon">📚</div>
+              <div className="metricValue">{DEMO_COURSES.length + 8}</div>
+              <div className="metricLabel">本學期開設課程</div>
+            </div>
+            <div className="metricCard" style={{ '--tone': '#5856D6' } as CSSProperties}>
+              <div className="metricIcon">🧑‍🏫</div>
+              <div className="metricValue">19</div>
+              <div className="metricLabel">授課教師</div>
+            </div>
+            <div className="metricCard" style={{ '--tone': 'var(--brand)' } as CSSProperties}>
+              <div className="metricIcon">👥</div>
+              <div className="metricValue">312</div>
+              <div className="metricLabel">修課學生數</div>
+            </div>
+            <div className="metricCard" style={{ '--tone': '#34C759' } as CSSProperties}>
+              <div className="metricIcon">🎓</div>
+              <div className="metricValue">96</div>
+              <div className="metricLabel">總開課學分</div>
+            </div>
+          </div>
+          <div className="sectionCard">
+            <div className="homeSectionHeader">
+              <h2 className="homeSectionTitle">📋 課程一覽</h2>
+              <Link
+                href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('列出本學期選課人數最多和最少的課程並分析師資分配')}`}
+                className="btn"
+                style={{ fontSize: 12 }}
+              >
+                AI 分析 →
+              </Link>
+            </div>
+            <div className="insetGroup">
+              {DEMO_COURSES.map((c, i) => (
+                <div key={c.id} className="insetGroupRow" style={{ borderTop: i === 0 ? 'none' : undefined }}>
+                  <div
+                    className="insetGroupRowIcon"
+                    style={{ background: `${c.color}14`, color: c.color, fontSize: 18 }}
+                  >
+                    {c.icon}
+                  </div>
+                  <div className="insetGroupRowContent">
+                    <div className="insetGroupRowTitle">{c.name}</div>
+                    <div className="insetGroupRowMeta">
+                      {c.instructor} · {c.members} 位學生 ·{' '}
+                      週{['', '一', '二', '三', '四', '五'][c.dayOfWeek]} 第{c.startPeriod}–{c.endPeriod}節 · {c.room}
+                    </div>
+                  </div>
+                  <span style={{ fontSize: 12, color: c.color, fontWeight: 700, flexShrink: 0 }}>
+                    {c.credits} 學分
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <Link href={`/admin${q}`} className="btn" style={{ alignSelf: 'flex-start' }}>
+            ← 回行政後台
+          </Link>
+        </div>
+      </SiteShell>
+    );
+  }
+
+  // ── 校友 / 訪客：課表為個人資料，無法查看 ──
+  if (isRestrictedRole) {
+    return (
+      <SiteShell title="課表" subtitle="課表屬個人修課資料" schoolName={schoolName}>
+        <div className="pageStack">
+          <div
+            className="card"
+            style={{
+              padding: '14px 16px',
+              background: demoRole === 'alumni' ? 'rgba(142,142,147,0.10)' : 'rgba(88,86,214,0.08)',
+              border: `1px solid ${demoRole === 'alumni' ? '#8E8E93' : '#5856D6'}`,
+              fontSize: 13,
+            }}
+          >
+            {demoRole === 'alumni' ? '🎓' : '👀'}{' '}
+            <strong>{demoRole === 'alumni' ? '校友身份' : '訪客身份'}</strong>
+            {' '}· 課表屬於個人選課資料，{demoRole === 'alumni' ? '校友' : '訪客'}無法查看在校學生課表。
+          </div>
+          <div className="emptyState">
+            <div className="emptyIcon">{demoRole === 'alumni' ? '🎓' : '🔒'}</div>
+            <h3 className="emptyTitle">無法查看個人課表</h3>
+            <p className="emptyBody">
+              {demoRole === 'alumni'
+                ? '你已畢業，無個人修課課表。如需查看在校期間的歷史成績，請前往成績頁面。'
+                : '訪客身份無法查看個人課表。請登入以使用完整功能。'}
+            </p>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap', marginTop: 16 }}>
+              {demoRole === 'alumni'
+                ? <Link href={`/grades${q}`} className="btn primary">查看歷史成績</Link>
+                : <Link href={`/login${q}`} className="btn primary">登入</Link>}
+              <Link href={`/${q}`} className="btn">← 回首頁</Link>
+            </div>
+          </div>
+        </div>
+      </SiteShell>
+    );
+  }
+
+  // ── 系統管理員：不適用個人課表 ──
+  if (demoRole === 'admin') {
+    return (
+      <SiteShell title="課表" subtitle="系統管理員不適用個人課表" schoolName={schoolName}>
+        <div className="pageStack">
+          <div className="emptyState">
+            <div className="emptyIcon">🛡️</div>
+            <h3 className="emptyTitle">系統管理員不適用個人課表</h3>
+            <p className="emptyBody">
+              系統管理員不是在校修課身份，無個人課表。如需查看全系課程，請前往管理後台或系主任視角。
+            </p>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap', marginTop: 16 }}>
+              <Link href={`/admin${q}`} className="btn primary">前往管理後台</Link>
+              <Link href={`/${q}`} className="btn">← 回首頁</Link>
+            </div>
+          </div>
+        </div>
+      </SiteShell>
+    );
+  }
+
   return (
     <SiteShell
       title="課表"
@@ -314,6 +385,61 @@ export default function TimetablePage(props: {
       schoolCode={selectedSemester}
     >
       <div className="pageStack">
+        {/* 教師 / TA：顯示「我授課」 banner */}
+        {isTeacherView && (
+          <div
+            className="card"
+            style={{
+              padding: '14px 16px',
+              background: demoRole === 'ta' ? 'rgba(124,58,237,0.10)' : 'rgba(88,86,214,0.10)',
+              border: `1px solid ${demoRole === 'ta' ? '#AF52DE' : '#5856D6'}`,
+              fontSize: 13,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ flex: 1 }}>
+              {demoRole === 'ta' ? '🧑‍💻' : '🧑‍🏫'}{' '}
+              <strong>{demoRole === 'ta' ? '助教課表' : '教師課表'}</strong>
+              {' '}· 顯示你{demoRole === 'ta' ? '助教' : '授課'}的 {courses.length} 門課，
+              不是個人修課。要切回學生視角請從右上角身份膠囊。
+            </div>
+            <Link
+              href={`/teacher/course/c1${q}`}
+              className="btn primary"
+              style={{ fontSize: 12 }}
+            >
+              進入教師工作台
+            </Link>
+          </div>
+        )}
+
+        {/* 社團幹部：顯示「兼修課學生」提示 */}
+        {isClubOfficer && (
+          <div
+            className="card"
+            style={{
+              padding: '14px 16px',
+              background: 'rgba(255,204,0,0.10)',
+              border: '1px solid #FF9500',
+              fontSize: 13,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ flex: 1 }}>
+              🎪 <strong>社團幹部視角</strong> · 你同時是資工系大三學生，以下顯示你個人修課課表。
+              社課時間請前往{' '}
+              <Link href={`/clubs${q}`} style={{ color: '#FF9500', fontWeight: 600 }}>社團管理</Link>
+              {' '}查看。
+            </div>
+          </div>
+        )}
+
         {usingDemo && (
           <div
             className="card"
@@ -327,6 +453,81 @@ export default function TimetablePage(props: {
           >
             ⚠️ 目前顯示示範資料。{!user ? '請登入帳號' : '本學期尚無課表記錄'}以查看實際課表。
             {loading && ' 載入中...'}
+          </div>
+        )}
+
+        {/* ── AI 今日提醒（學生 / 社團幹部）── */}
+        {(demoRole === 'student' || demoRole === 'club_officer') && aiCtx && (aiCtx.pendingAssignmentCount > 0 || aiCtx.libraryDueSoonDays <= 3) && (
+          <div
+            className="card"
+            style={{
+              padding: '14px 18px',
+              background: 'linear-gradient(135deg, rgba(88,86,214,0.10) 0%, rgba(90,200,250,0.08) 100%)',
+              border: '1px solid rgba(88,86,214,0.25)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 14,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand)', marginBottom: 4 }}>
+                🤖 AI 今日提醒
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>
+                {aiCtx.pendingAssignmentCount > 0 && aiCtx.soonestAssignment && (
+                  <span>
+                    📝 有 <strong>{aiCtx.pendingAssignmentCount} 份作業</strong>待繳，最緊急：
+                    【{aiCtx.soonestAssignment.courseName}】{aiCtx.soonestAssignment.title}，截止 {aiCtx.soonestAssignment.due}
+                    {aiCtx.libraryDueSoonDays <= 3 && <span>　・　📚 《{aiCtx.libraryDueSoonBook}》還有 <strong>{aiCtx.libraryDueSoonDays} 天</strong>到期</span>}
+                  </span>
+                )}
+                {aiCtx.pendingAssignmentCount === 0 && aiCtx.libraryDueSoonDays <= 3 && (
+                  <span>📚 《{aiCtx.libraryDueSoonBook}》還有 <strong>{aiCtx.libraryDueSoonDays} 天</strong>到期，記得歸還或續借！</span>
+                )}
+              </div>
+            </div>
+            <Link
+              href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('我今天有什麼作業要繳？有沒有考試快到了？')}`}
+              className="btn"
+              style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
+            >
+              問 AI →
+            </Link>
+          </div>
+        )}
+
+        {/* ── 教師 AI 提示 ── */}
+        {(demoRole === 'teacher' || demoRole === 'ta') && (
+          <div
+            className="card"
+            style={{
+              padding: '14px 18px',
+              background: 'linear-gradient(135deg, rgba(88,86,214,0.10) 0%, rgba(0,200,200,0.06) 100%)',
+              border: '1px solid rgba(88,86,214,0.25)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 14,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#5856D6', marginBottom: 4 }}>
+                🤖 AI 課程助理
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--text)' }}>
+                資料結構（CS301）本週有 <strong>5 份作業</strong>待批改，班級今日出席率上週平均 <strong>92%</strong>
+              </div>
+            </div>
+            <Link
+              href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('請分析資料結構班上本週的出席與作業繳交狀況')}`}
+              className="btn"
+              style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
+            >
+              問 AI →
+            </Link>
           </div>
         )}
 
@@ -439,11 +640,14 @@ export default function TimetablePage(props: {
         {/* ── Week View ── */}
         {viewMode === 'week' && (
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            {/* Scrollable container for mobile */}
+            <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' as 'auto', minWidth: 0 }}>
             {/* Header */}
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: '56px repeat(5, 1fr)',
+                gridTemplateColumns: '56px repeat(5, minmax(80px, 1fr))',
+                minWidth: 480,
                 borderBottom: '1px solid var(--border)',
                 background: 'var(--panel)',
               }}
@@ -499,7 +703,8 @@ export default function TimetablePage(props: {
                       key={p.period}
                       style={{
                         display: 'grid',
-                        gridTemplateColumns: '56px repeat(5, 1fr)',
+                        gridTemplateColumns: '56px repeat(5, minmax(80px, 1fr))',
+                        minWidth: 480,
                         minHeight: PERIOD_ROW_HEIGHT,
                         borderBottom: '1px solid var(--border)',
                       }}
@@ -536,18 +741,24 @@ export default function TimetablePage(props: {
                               padding: '4px',
                               position: 'relative',
                               background:
-                                isNowCol && isThisWeek ? 'rgba(94,106,210,0.03)' : undefined,
+                                isNowCol && isThisWeek ? 'rgba(88,86,214,0.03)' : undefined,
                             }}
                           >
                             {course && (
-                              <div
+                              <Link
+                                href={`${isTeacherView ? '/teacher' : ''}/course/${course.id}${q}`}
                                 style={{
                                   background: `${course.color}12`,
                                   borderLeft: `3px solid ${course.color}`,
                                   borderRadius: 'var(--radius-xs)',
                                   padding: '6px 8px',
                                   height: '100%',
+                                  display: 'block',
+                                  textDecoration: 'none',
+                                  color: 'inherit',
+                                  cursor: 'pointer',
                                 }}
+                                title={`${course.name} · ${course.instructor} · ${course.room}`}
                               >
                                 <div
                                   style={{
@@ -562,7 +773,7 @@ export default function TimetablePage(props: {
                                 <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
                                   {course.room}
                                 </div>
-                              </div>
+                              </Link>
                             )}
                           </div>
                         );
@@ -603,7 +814,7 @@ export default function TimetablePage(props: {
                           left: 2,
                           top: -9,
                           fontSize: 9,
-                          fontWeight: 800,
+                          fontWeight: 700,
                           color: 'var(--danger, #FF3B30)',
                           letterSpacing: '0.02em',
                           lineHeight: 1,
@@ -618,6 +829,7 @@ export default function TimetablePage(props: {
                 </div>
               );
             })()}
+            </div>{/* end scroll wrapper */}
           </div>
         )}
 
@@ -636,12 +848,16 @@ export default function TimetablePage(props: {
                   const startP = PERIODS.find((p) => p.period === c.startPeriod);
                   const endP = PERIODS.find((p) => p.period === c.endPeriod);
                   return (
-                    <div
+                    <Link
                       key={c.id}
+                      href={`${isTeacherView ? '/teacher' : ''}/course/${c.id}${q}`}
                       className="card"
                       style={{
                         borderLeft: `4px solid ${c.color}`,
                         padding: '18px 20px',
+                        textDecoration: 'none',
+                        color: 'inherit',
+                        display: 'block',
                       }}
                     >
                       <div
@@ -690,7 +906,7 @@ export default function TimetablePage(props: {
                           {c.credits} 學分
                         </span>
                       </div>
-                    </div>
+                    </Link>
                   );
                 })}
               </div>
@@ -703,8 +919,8 @@ export default function TimetablePage(props: {
           <div className="pageStack">
             {DAYS.map((d, di) => {
               const dow = di + 1;
-              const courses = coursesByDay[dow];
-              if (!courses || courses.length === 0) return null;
+              const dayCourses = coursesByDay[dow];
+              if (!dayCourses || dayCourses.length === 0) return null;
               return (
                 <div key={d} className="sectionCard">
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -727,17 +943,23 @@ export default function TimetablePage(props: {
                         background: 'var(--border)',
                       }}
                     />
-                    <span style={{ fontSize: 12, color: 'var(--muted)' }}>{courses.length} 堂</span>
+                    <span style={{ fontSize: 12, color: 'var(--muted)' }}>{dayCourses.length} 堂</span>
                   </div>
                   <div className="insetGroup">
-                    {courses.map((c, ci) => {
+                    {dayCourses.map((c, ci) => {
                       const startP = PERIODS.find((p) => p.period === c.startPeriod);
                       const endP = PERIODS.find((p) => p.period === c.endPeriod);
                       return (
-                        <div
+                        <Link
                           key={c.id}
+                          href={`${isTeacherView ? '/teacher' : ''}/course/${c.id}${q}`}
                           className="insetGroupRow"
-                          style={{ borderTop: ci === 0 ? 'none' : undefined }}
+                          style={{
+                            borderTop: ci === 0 ? 'none' : undefined,
+                            color: 'inherit',
+                            textDecoration: 'none',
+                            cursor: 'pointer',
+                          }}
                         >
                           <div
                             className="insetGroupRowIcon"
@@ -760,7 +982,7 @@ export default function TimetablePage(props: {
                           >
                             {c.credits}學分
                           </span>
-                        </div>
+                        </Link>
                       );
                     })}
                   </div>
@@ -786,7 +1008,7 @@ export default function TimetablePage(props: {
                   <div
                     style={{
                       fontSize: 28,
-                      fontWeight: 800,
+                      fontWeight: 700,
                       color: 'var(--brand)',
                       letterSpacing: '-0.05em',
                     }}
@@ -799,7 +1021,7 @@ export default function TimetablePage(props: {
                   <div
                     style={{
                       fontSize: 28,
-                      fontWeight: 800,
+                      fontWeight: 700,
                       color: '#34C759',
                       letterSpacing: '-0.05em',
                     }}
@@ -812,7 +1034,7 @@ export default function TimetablePage(props: {
                   <div
                     style={{
                       fontSize: 28,
-                      fontWeight: 800,
+                      fontWeight: 700,
                       color: '#FF9500',
                       letterSpacing: '-0.05em',
                     }}
