@@ -146,8 +146,11 @@ export function MerchantHubScreen() {
   };
 
   // Check if user has merchant role
+  // 注意：demo 商家角色 (role === 'vendor') 也需通過此檢查
   const hasMerchantRole =
-    auth.profile?.serviceRoles?.includes('merchant') || assignments.length > 0;
+    auth.profile?.role === 'vendor' ||
+    auth.profile?.serviceRoles?.includes('merchant') ||
+    assignments.length > 0;
 
   if (!auth.user) {
     return (
