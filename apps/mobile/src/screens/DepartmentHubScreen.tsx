@@ -218,9 +218,11 @@ export function DepartmentHubScreen(props: any) {
   const currentDate = new Date().toLocaleDateString('zh-TW');
 
   // Check if user has department role
+  // 注意：demo_admin_huang 的 role 是 'department_head'，也需要通過此檢查
   const hasDepartmentRole =
     profile?.role === 'admin' ||
     profile?.role === 'principal' ||
+    profile?.role === 'department_head' ||
     profile?.serviceRoles?.includes('department');
 
   if (!user) {
