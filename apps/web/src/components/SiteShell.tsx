@@ -61,6 +61,8 @@ function SiteShellInner(props: {
     { href: '/community', label: '社群', group: 'primary' as const },
     // 訊息：訪客頁面內已自行攔截到 login,nav 仍顯示維持引導入口
     { href: '/messages', label: '訊息', group: 'primary' as const },
+    // 私訊：1 對 1 對話（與 mobile 端 DmsScreen 對齊；guest/alumni 頁面內擋）
+    ...(!isGuestOnly ? [{ href: '/dms', label: '私訊', group: 'secondary' as const }] : []),
     { href: '/map', label: '校園', group: 'primary' as const },
     { href: '/announcements', label: '收件匣', group: 'primary' as const },
     // 我的：訪客沒個人檔案
