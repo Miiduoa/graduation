@@ -7,7 +7,7 @@
  * 對應 web 端 apps/web/src/app/clubs/page.tsx 的「社團幹部管理區」綠色 banner。
  */
 import React, { useMemo, useState } from 'react';
-import { ScrollView, View, LayoutAnimation, Platform, UIManager, Text, Pressable, Alert } from 'react-native';
+import { ScrollView, View, LayoutAnimation, Platform, UIManager, Text, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
