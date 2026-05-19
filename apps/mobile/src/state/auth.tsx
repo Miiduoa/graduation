@@ -124,6 +124,10 @@ function toIsoStringOrNull(value: unknown): string | null {
 }
 
 async function loadMerchantAssignments(uid: string): Promise<MerchantAssignment[]> {
+  // demo 帳號不去 Firestore 查 cafeterias/operators/{uid}（會 permission-denied）
+  if (typeof uid === 'string' && uid.startsWith('demo_')) {
+    return [];
+  }
   const db = getDb();
   const snap = await getDocs(
     query(collectionGroup(db, 'operators'), where(documentId(), '==', uid)),
@@ -190,6 +194,13 @@ async function loadMerchantAssignments(uid: string): Promise<MerchantAssignment[
 
 async function loadProfile(u: User | null): Promise<UserProfile | null> {
   if (!u) return null;
+
+  // demo 帳號（mockAuth）uid 以 'demo_' 開頭，這些 uid 不在 Firestore；
+  // 走 mock 路徑（toMockUserProfile）已經有完整 profile，這裡直接短路，
+  // 避免 [firebase] Failed to fetch users/demo_* 的 dev toast 干擾 demo 現場。
+  if (typeof u.uid === 'string' && u.uid.startsWith('demo_')) {
+    return null;
+  }
 
   try {
     const db = getDb();

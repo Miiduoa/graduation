@@ -39,6 +39,9 @@ export const ROUTE_TO_TAB: Record<string, TabName> = {
   // ── 學習 tab（學生/老師/TA/主任/餐廳 cockpit 與相關工具）─────
   LearnHome: '學習',
   CoursesHome: '學習',
+  // deprecated 別名：4+1 改版前的 'AcademicStack' 還有殘留 caller（LearnAiFirstScreen 等）。
+  // 把它導向學習 tab，safeNavigate 會自動 fallback 到 LearnHome / CoursesHome 而不噴 alert。
+  AcademicStack: '學習',
   CourseHub: '學習',
   CourseModules: '學習',
   CourseCatalog: '學習',

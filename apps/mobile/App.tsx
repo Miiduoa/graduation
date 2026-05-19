@@ -992,6 +992,26 @@ function AppNavigation() {
         try {
           const payload = (action as any)?.payload;
           const targetName = payload?.name ?? '未知頁面';
+
+          // 已被改名 / 整合的 deprecated route：silent 自動 redirect，不再彈 alert
+          // （例如 AcademicStack 在 4+1 改版已整合進 LearnStack）
+          const DEPRECATED_REDIRECT: Record<string, { tab: string; screen: string }> = {
+            AcademicStack: { tab: '學習', screen: 'CoursesHome' },
+            TeachingStack: { tab: '學習', screen: 'TeachingHub' },
+            StaffStack: { tab: '學習', screen: 'StaffHub' },
+            DepartmentStack: { tab: '學習', screen: 'DepartmentHub' },
+            AdminStack: { tab: '學習', screen: 'AdminDashboard' },
+          };
+          const redirect = DEPRECATED_REDIRECT[targetName];
+          if (redirect) {
+            try {
+              rootNavigateNested(redirect.tab as any, redirect.screen);
+            } catch {
+              /* swallow */
+            }
+            return;
+          }
+
           // 已知子路由名 → 自動 fallback 到正確的 Tab + Stack
           const TAB_HINTS: Record<string, string> = {
             CourseGradebook: '學習',
