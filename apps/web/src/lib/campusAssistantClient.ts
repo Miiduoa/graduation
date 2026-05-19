@@ -2,19 +2,12 @@
  * Web client for `askCampusAssistant` Firebase Callable Function.
  * Mirrors apps/mobile/src/services/ai.ts callAskCampusAssistant() but returns
  * the full envelope (including cards) for the Web ai-assistant page to render.
+ *
+ * Firebase app / Functions region / Emulator wiring 統一走 lib/firebase.ts，
+ * 與 apps/mobile/src/firebase.ts 對齊（避免 region 不一致與 emulator 重複 wire）。
  */
-import { getFunctions, httpsCallable, connectFunctionsEmulator } from 'firebase/functions';
-import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
-
-const USE_EMULATOR =
-  process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === '1' ||
-  process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === 'true';
-const EMULATOR_FUNCTIONS_HOST =
-  process.env.NEXT_PUBLIC_FIREBASE_EMULATOR_HOST || 'localhost';
-const EMULATOR_FUNCTIONS_PORT = Number(
-  process.env.NEXT_PUBLIC_FIREBASE_EMULATOR_FUNCTIONS_PORT || '5001',
-);
-let emulatorWired = false;
+import { httpsCallable } from 'firebase/functions';
+import { getFunctionsInstance, isFirebaseConfigured } from './firebase';
 
 export type AgentCardKind =
   | 'route_card'
@@ -44,31 +37,6 @@ export interface CampusAssistantEnvelope {
   error?: string;
 }
 
-const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-};
-
-const REGION = process.env.NEXT_PUBLIC_FIREBASE_FUNCTIONS_REGION || 'us-central1';
-
-function getApp(): FirebaseApp | null {
-  try {
-    if (getApps().length > 0) return getApps()[0];
-    if (!firebaseConfig.projectId) return null;
-    return initializeApp(firebaseConfig);
-  } catch {
-    return null;
-  }
-}
-
-function hasUsableFirebaseConfig(): boolean {
-  return Boolean(firebaseConfig.projectId && firebaseConfig.apiKey && firebaseConfig.appId);
-}
-
 export interface CallCampusAssistantInput {
   messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>;
   schoolId?: string;
@@ -85,7 +53,7 @@ export async function callCampusAssistant(
   input: CallCampusAssistantInput,
   signal?: AbortSignal,
 ): Promise<CampusAssistantEnvelope | null> {
-  if (!hasUsableFirebaseConfig()) {
+  if (!isFirebaseConfigured()) {
     console.warn(
       '[campusAssistantClient] Firebase Web config missing. Set NEXT_PUBLIC_FIREBASE_* env vars.',
     );
@@ -93,29 +61,14 @@ export async function callCampusAssistant(
   }
   if (signal?.aborted) return null;
 
-  const app = getApp();
-  if (!app) return null;
-
   try {
-    const functions = getFunctions(app, REGION);
-    if (USE_EMULATOR && !emulatorWired && typeof window !== 'undefined') {
-      try {
-        connectFunctionsEmulator(functions, EMULATOR_FUNCTIONS_HOST, EMULATOR_FUNCTIONS_PORT);
-        emulatorWired = true;
-        console.info(
-          `[campusAssistantClient] Functions emulator @ ${EMULATOR_FUNCTIONS_HOST}:${EMULATOR_FUNCTIONS_PORT}`,
-        );
-      } catch (e) {
-        console.warn('[campusAssistantClient] emulator wire failed:', e);
-      }
-    }
     const callable = httpsCallable<
       {
         messages: CallCampusAssistantInput['messages'];
         context: Record<string, unknown>;
       },
       CampusAssistantEnvelope
-    >(functions, 'askCampusAssistant');
+    >(getFunctionsInstance(), 'askCampusAssistant');
 
     const result = await callable({
       messages: input.messages.slice(-12),
@@ -167,21 +120,12 @@ export interface CreateOrderResult {
 }
 
 export async function confirmCreateOrder(input: CreateOrderInput): Promise<CreateOrderResult> {
-  if (!hasUsableFirebaseConfig()) {
+  if (!isFirebaseConfigured()) {
     return { success: false, errorCode: 'no_firebase', errorMessage: 'Firebase 設定不可用' };
   }
-  const app = getApp();
-  if (!app) return { success: false, errorCode: 'no_app', errorMessage: 'Firebase app 未初始化' };
   try {
-    const functions = getFunctions(app, REGION);
-    if (USE_EMULATOR && !emulatorWired && typeof window !== 'undefined') {
-      try {
-        connectFunctionsEmulator(functions, EMULATOR_FUNCTIONS_HOST, EMULATOR_FUNCTIONS_PORT);
-        emulatorWired = true;
-      } catch {}
-    }
     const callable = httpsCallable<CreateOrderInput, CreateOrderResult>(
-      functions,
+      getFunctionsInstance(),
       'createOrder',
     );
     const result = await callable(input);

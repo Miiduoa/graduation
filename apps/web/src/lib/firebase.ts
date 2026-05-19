@@ -27,6 +27,7 @@ import {
   serverTimestamp,
   increment,
   runTransaction,
+  connectFirestoreEmulator,
 } from 'firebase/firestore';
 import {
   getAuth as firebaseGetAuth,
@@ -39,7 +40,14 @@ import {
   sendPasswordResetEmail,
   updateProfile,
   User,
+  connectAuthEmulator,
 } from 'firebase/auth';
+import {
+  getFunctions,
+  httpsCallable,
+  connectFunctionsEmulator,
+  type Functions,
+} from 'firebase/functions';
 import {
   findUniversalDevAccountByEmail,
   buildGroupCollectionPath,
@@ -73,6 +81,24 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
+// ── Firebase Emulator wiring（demo / 本機口試環境） ──
+// 啟用條件：NEXT_PUBLIC_USE_FIREBASE_EMULATOR = '1' | 'true'
+// 與 apps/mobile/src/firebase.ts 對齊（mobile 用 EXPO_PUBLIC_*）
+const USE_FIREBASE_EMULATOR =
+  process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === '1' ||
+  process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === 'true';
+const EMULATOR_HOST = process.env.NEXT_PUBLIC_FIREBASE_EMULATOR_HOST || 'localhost';
+const EMULATOR_FUNCTIONS_PORT = Number(
+  process.env.NEXT_PUBLIC_FIREBASE_EMULATOR_FUNCTIONS_PORT || '5001',
+);
+const EMULATOR_FIRESTORE_PORT = Number(
+  process.env.NEXT_PUBLIC_FIREBASE_EMULATOR_FIRESTORE_PORT || '8080',
+);
+const EMULATOR_AUTH_PORT = Number(
+  process.env.NEXT_PUBLIC_FIREBASE_EMULATOR_AUTH_PORT || '9099',
+);
+const _emulatorWired = { functions: false, firestore: false, auth: false };
+
 let app: FirebaseApp | null = null;
 let db: Firestore | null = null;
 let auth: Auth | null = null;
@@ -93,32 +119,68 @@ function getApp(): FirebaseApp {
   return app;
 }
 
-function getDb(): Firestore {
-  if (db) return db;
-  db = getFirestore(getApp());
+export function getDb(): Firestore {
+  if (!db) {
+    db = getFirestore(getApp());
+  }
+  if (USE_FIREBASE_EMULATOR && !_emulatorWired.firestore && typeof window !== 'undefined') {
+    try {
+      connectFirestoreEmulator(db, EMULATOR_HOST, EMULATOR_FIRESTORE_PORT);
+      _emulatorWired.firestore = true;
+      console.info(
+        `[firebase] Firestore emulator @ ${EMULATOR_HOST}:${EMULATOR_FIRESTORE_PORT}`,
+      );
+    } catch (e) {
+      console.warn('[firebase] Firestore emulator wire failed:', e);
+    }
+  }
   return db;
 }
 
 export function getAuth(): Auth | null {
   if (typeof window === 'undefined') return null;
-  if (auth) return auth;
-  try {
-    auth = firebaseGetAuth(getApp());
-    return auth;
-  } catch (error) {
-    console.error('[Firebase] Failed to initialize auth:', error);
-    return null;
+  if (!auth) {
+    try {
+      auth = firebaseGetAuth(getApp());
+    } catch (error) {
+      console.error('[Firebase] Failed to initialize auth:', error);
+      return null;
+    }
   }
+  if (USE_FIREBASE_EMULATOR && !_emulatorWired.auth && auth) {
+    try {
+      connectAuthEmulator(auth, `http://${EMULATOR_HOST}:${EMULATOR_AUTH_PORT}`, {
+        disableWarnings: true,
+      });
+      _emulatorWired.auth = true;
+      console.info(`[firebase] Auth emulator @ ${EMULATOR_HOST}:${EMULATOR_AUTH_PORT}`);
+    } catch (err) {
+      console.warn('[firebase] Auth emulator wire failed:', err);
+    }
+  }
+  return auth;
 }
 
-function getFunctionsInstance(): Functions {
+export function getFunctionsInstance(): Functions {
   if (typeof window === "undefined") {
     throw new Error("Firebase Functions can only be used in the browser.");
   }
 
-  if (functionsInstance) return functionsInstance;
-  const region = process.env.NEXT_PUBLIC_CLOUD_FUNCTION_REGION || "asia-east1";
-  functionsInstance = getFunctions(getApp(), region);
+  if (!functionsInstance) {
+    const region = process.env.NEXT_PUBLIC_CLOUD_FUNCTION_REGION || "asia-east1";
+    functionsInstance = getFunctions(getApp(), region);
+  }
+  if (USE_FIREBASE_EMULATOR && !_emulatorWired.functions) {
+    try {
+      connectFunctionsEmulator(functionsInstance, EMULATOR_HOST, EMULATOR_FUNCTIONS_PORT);
+      _emulatorWired.functions = true;
+      console.info(
+        `[firebase] Functions emulator @ ${EMULATOR_HOST}:${EMULATOR_FUNCTIONS_PORT}`,
+      );
+    } catch (e) {
+      console.warn('[firebase] Functions emulator wire failed:', e);
+    }
+  }
   return functionsInstance;
 }
 

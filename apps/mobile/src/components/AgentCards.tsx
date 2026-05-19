@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { getFunctions, httpsCallable } from 'firebase/functions';
-import { getFirebaseApp, getCloudFunctionRegion } from '../firebase';
+import { httpsCallable } from 'firebase/functions';
+import { getFunctionsInstance } from '../firebase';
 
 export interface AgentCard {
   kind:
@@ -197,7 +197,7 @@ function OrderDraftCard({ payload }: { payload: any }) {
     }
     setSubmitting(true);
     try {
-      const callable = httpsCallable(getFunctions(getFirebaseApp(), getCloudFunctionRegion()), 'createOrder');
+      const callable = httpsCallable(getFunctionsInstance(), 'createOrder');
       const res = await callable({
         schoolId: payload.confirmAction?.input?.schoolId || 'pu',
         cafeteriaId: payload.cafeteriaId,

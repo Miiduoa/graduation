@@ -769,14 +769,29 @@ export class PUAdapter extends BaseApiAdapter {
         }
         console.warn("[PUAdapter] getCreditAudit: direct fetch result:", fresh.success, "isV2:", isV2(fresh.data));
       } else if (!this.useDirectMode) {
-        // 註:此分支原本要呼叫 backend REST API 取 v2 creditAudit;
-        // 但因 merge conflict 半段被誤覆寫成 listGrades 主體 — 暫時 noop,
-        // 改走 cache(上方已試過)+ direct mode(若啟用)。
-        // TODO:回填 REST endpoint 呼叫。
+        type CreditAuditResponse = {
+          success?: boolean;
+          creditAudit?: PuCreditAuditPayload | null;
+        };
+
+        const data = await this.fetchData<CreditAuditResponse>("creditAudit");
+        if (data?.success && data.creditAudit && isV2(data.creditAudit)) {
+          await seedCachedCreditAudit(data.creditAudit).catch(() => undefined);
+          return data.creditAudit;
+        }
+        console.warn("[PUAdapter] getCreditAudit: backend fetch returned no v2 data");
       }
     } catch (err) {
-      console.warn("[PUAdapter] getCreditAudit error:", err);
+      console.warn("[PUAdapter] getCreditAudit remote fetch failed:", err);
     }
+
+    // 遠端失敗 → 讀任何快取（離線模式）
+    const stale = await getAnyCachedCreditAudit();
+    if (isV2(stale)) {
+      console.log("[PUAdapter] getCreditAudit: returning stale v2 cached data");
+      return stale;
+    }
+
     return null;
   }
 

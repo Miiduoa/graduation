@@ -33,8 +33,8 @@ import type {
   MenuItem,
 } from '../data/types';
 import type { LearnedSkill } from '../data/puAIAgentData';
-import { getCloudFunctionRegion, getFirebaseApp } from '../firebase';
-import { getFunctions, httpsCallable } from 'firebase/functions';
+import { getCloudFunctionRegion, getFirebaseApp, getFunctionsInstance } from '../firebase';
+import { httpsCallable } from 'firebase/functions';
 import {
   executeTool as executeLegacyTool,
   type ExecutorContext as LegacyExecutorContext,
@@ -569,7 +569,7 @@ async function orderFoodHandler(
   const note = asString(args.note);
 
   try {
-    const functions = getFunctions(getFirebaseApp(), getCloudFunctionRegion());
+    const functions = getFunctionsInstance();
     const callable = httpsCallable<
       {
         userId: string;

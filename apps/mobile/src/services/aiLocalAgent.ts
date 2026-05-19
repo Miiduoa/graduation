@@ -3095,8 +3095,8 @@ export async function executeLearnedSkill(
 // (原 agentWrite.ts，已併入此檔案)
 // ════════════════════════════════════════════════════════════
 
-import { getFunctions, httpsCallable, type HttpsCallableResult } from 'firebase/functions';
-import { getFirebaseApp, getCloudFunctionRegion } from '../firebase';
+import { httpsCallable, type HttpsCallableResult } from 'firebase/functions';
+import { getFirebaseApp, getCloudFunctionRegion, getFunctionsInstance } from '../firebase';
 
 export type ExecuteAgentWriteParams = {
   toolName: string;
@@ -3121,7 +3121,7 @@ export async function executeAgentWrite(
   params: ExecuteAgentWriteParams,
 ): Promise<ExecuteAgentWriteResult> {
   const fn = httpsCallable<ExecuteAgentWriteParams, ExecuteAgentWriteResult>(
-    getFunctions(getFirebaseApp(), getCloudFunctionRegion()),
+    getFunctionsInstance(),
     'executeAgentWrite',
   );
   const result: HttpsCallableResult<ExecuteAgentWriteResult> = await fn(params);
