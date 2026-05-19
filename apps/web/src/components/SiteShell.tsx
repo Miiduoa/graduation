@@ -13,6 +13,7 @@ import { useDemoStore, getUnreadCountDynamic } from '@/lib/demoStore';
 const NAV_ICONS: Record<string, string> = {
   '/': '☀️',
   '/groups': '🎓',
+  '/community': '✨',
   '/messages': '💬',
   '/map': '🗺️',
   '/announcements': '📥',
@@ -57,6 +58,7 @@ function SiteShellInner(props: {
   const navItems = [
     { href: '/', label: 'Today', group: 'primary' as const },
     { href: '/groups', label: '課程', group: 'primary' as const },
+    { href: '/community', label: '社群', group: 'primary' as const },
     // 訊息：訪客頁面內已自行攔截到 login,nav 仍顯示維持引導入口
     { href: '/messages', label: '訊息', group: 'primary' as const },
     { href: '/map', label: '校園', group: 'primary' as const },
