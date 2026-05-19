@@ -23,8 +23,9 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SmartDashboardScreen } from './SmartDashboardScreen';
-// AI-First v1 新版 Today；舊 RoleAwareTodayScreen 已停用
+// AI-First v1 新版 Today（學生角色用）；其他角色靠 RoleAwareTodayScreen dispatch
 import TodayAiFirstScreen from './TodayAiFirstScreen';
+import RoleAwareTodayScreen from './RoleAwareTodayScreen';
 // AI-First v1：公告 / 活動主入口；舊 AnnouncementsScreen / AnnouncementDetailScreen /
 // EventsScreen / EventDetailScreen 已下架
 import AnnouncementDetailAiFirstScreen from './AnnouncementDetailAiFirstScreen';
@@ -74,11 +75,18 @@ export function HomeStack() {
       initialRouteName="TodayHome"
       screenOptions={createStackScreenOptions()}
     >
-      {/* AI-First v1：主入口已換新版。舊版仍可用 navigate('TodayLegacy') 喚出 */}
+      {/* Today 主入口：用 RoleAwareTodayScreen 依角色 dispatch（student→TodayAiFirstScreen,
+          teacher→TeacherCockpit, ta→TADashboard, ...）。同時在右上角浮出 DemoRolePill。 */}
       <Stack.Screen
         name="TodayHome"
-        component={TodayAiFirstScreen}
+        component={RoleAwareTodayScreen}
         options={{ title: 'Today', headerShown: false }}
+      />
+      {/* 直接進舊 student-only AI-First Today（debug 用） */}
+      <Stack.Screen
+        name="TodayAiFirstDirect"
+        component={TodayAiFirstScreen}
+        options={{ title: 'Today (學生原型)', headerShown: false }}
       />
       <Stack.Screen
         name="SmartDashboard"
