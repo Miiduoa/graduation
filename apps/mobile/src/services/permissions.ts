@@ -56,6 +56,8 @@ export type AppRole =
   | 'student'
   | 'teacher'
   | 'professor'
+  | 'ta'
+  | 'club_officer'
   | 'staff'
   | 'department_head'
   | 'principal'
@@ -63,16 +65,30 @@ export type AppRole =
   | 'alumni'
   | 'department'
   | 'school'
-  | 'vendor';
+  | 'vendor'
+  | 'guest';
 
 // Map roles to their effective role group for tab/feature decisions
-export type RoleGroup = 'student' | 'teacher' | 'staff' | 'department_head' | 'admin';
+export type RoleGroup =
+  | 'student'
+  | 'teacher'
+  | 'ta'
+  | 'club_officer'
+  | 'staff'
+  | 'department_head'
+  | 'admin'
+  | 'alumni'
+  | 'guest';
 
 export function getRoleGroup(role: AppRole): RoleGroup {
   switch (role) {
     case 'teacher':
     case 'professor':
       return 'teacher';
+    case 'ta':
+      return 'ta';
+    case 'club_officer':
+      return 'club_officer';
     case 'staff':
     case 'vendor':
       return 'staff';
@@ -83,8 +99,11 @@ export function getRoleGroup(role: AppRole): RoleGroup {
     case 'admin':
     case 'school':
       return 'admin';
-    case 'student':
     case 'alumni':
+      return 'alumni';
+    case 'guest':
+      return 'guest';
+    case 'student':
     default:
       return 'student';
   }
@@ -222,6 +241,65 @@ const ROLE_PERMISSIONS: Record<RoleGroup, readonly Permission[]> = {
     'approval.reports',
     'approval.department',
   ],
+  // TA：能進教師工作台與看課程內容，但批改／點名才是核心；不能改教材結構、發成績
+  ta: [
+    'announcements.view',
+    'courses.view',
+    'courses.catalog',
+    'courses.grade',
+    'courses.attendance',
+    'campus.map',
+    'campus.cafeteria',
+    'campus.library',
+    'campus.bus',
+    'campus.lostfound',
+    'groups.view',
+    'groups.create',
+    'messages.view',
+    'messages.send',
+    'profile.view',
+    'profile.edit',
+    'achievements.view',
+  ],
+  // 社團幹部：學生基礎權限 + 自家社團 group 管理 + 發社團公告
+  club_officer: [
+    'announcements.view',
+    'announcements.create',
+    'announcements.edit',
+    'courses.view',
+    'courses.catalog',
+    'campus.map',
+    'campus.cafeteria',
+    'campus.library',
+    'campus.bus',
+    'campus.lostfound',
+    'groups.view',
+    'groups.create',
+    'groups.manage',
+    'messages.view',
+    'messages.send',
+    'profile.view',
+    'profile.edit',
+    'achievements.view',
+  ],
+  // 校友：只能瀏覽公開資訊，不能加入社團、不能借書、不能下單
+  alumni: [
+    'announcements.view',
+    'campus.map',
+    'campus.bus',
+    'campus.lostfound',
+    'messages.view',
+    'profile.view',
+    'profile.edit',
+  ],
+  // 訪客：未登入身分，僅公開資訊（但保留 profile.view，避免 Today header / Drawer 直接 crash）
+  guest: [
+    'announcements.view',
+    'campus.map',
+    'campus.bus',
+    'campus.cafeteria',
+    'profile.view',
+  ],
 };
 
 export function getPermissions(role: AppRole): readonly Permission[] {
@@ -316,6 +394,8 @@ export function getRoleDisplayName(role: AppRole): string {
     student: '學生',
     teacher: '教師',
     professor: '教授',
+    ta: '助教 TA',
+    club_officer: '社團幹部',
     staff: '職員',
     department_head: '系所主管',
     principal: '系所主管',
@@ -324,6 +404,7 @@ export function getRoleDisplayName(role: AppRole): string {
     department: '系辦',
     school: '校方',
     vendor: '店家',
+    guest: '訪客',
   };
   return names[role] ?? '使用者';
 }
@@ -333,9 +414,13 @@ export function getRoleBadgeColor(role: AppRole): string {
   const colors: Record<RoleGroup, string> = {
     student: '#4A90D9',
     teacher: '#27AE60',
+    ta: '#AF52DE',
+    club_officer: '#34C759',
     staff: '#F39C12',
-    department_head: '#8E44AD',
+    department_head: '#FF9500',
     admin: '#E74C3C',
+    alumni: '#8E8E93',
+    guest: '#6E6E73',
   };
   return colors[getRoleGroup(role)];
 }

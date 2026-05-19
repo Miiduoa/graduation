@@ -40,6 +40,7 @@ function aiTANextAction(input: {
 
 import {
   DEMO_COURSES,
+  getDemoCoursesForUid,
   getDemoHomeworksByCourse,
   getDemoDiscussionsByCourse,
   getDemoAttendanceByCourse,
@@ -234,7 +235,10 @@ export default function TADashboardScreen() {
     const discussions: Array<{ courseId: number; courseName: string; title: string }> = [];
     const absentStudents: Array<{ courseId: number; courseName: string; name: string; reason: string }> = [];
 
-    for (const c of DEMO_COURSES) {
+    // 權限隔離：TA 只看自己協助的課（demo_ta_lin → 機器學習 + 計概二），
+    // 不再迴圈全部 5 門課。若 uid 不在白名單，fallback 為全部（避免 demo 空白）。
+    const taCourses = getDemoCoursesForUid(auth.user?.uid);
+    for (const c of taCourses) {
       const hws = getDemoHomeworksByCourse(c.id);
       const ungraded = hws.filter((h) => h.submitted && !h.graded);
       for (const h of ungraded) {

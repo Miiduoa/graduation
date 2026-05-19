@@ -398,6 +398,36 @@ export const DEMO_ANNOUNCEMENTS: MockAnnouncement[] = [
 ];
 
 // ─────────────────────────────────────────────────────────
+// 角色 ↔ 課程 對應（demo 權限隔離用）
+// ─────────────────────────────────────────────────────────
+
+/**
+ * Demo 期間明確指定「哪個人負責哪些課」，避免 TA 看到全部 5 門課的待批改。
+ *
+ * 規則：
+ *  - 教師 demo_teacher_chang（張怡君老師）：只教「機器學習 71378」（DEMO_COURSES 中 instructor 對應）
+ *  - TA demo_ta_lin（林助教）：協助「機器學習 71378」與「計算機概論二 71282」
+ *  - 學生 demo_student_kuchih：修全部 5 門課（與課表對齊）
+ *  - 系主任 demo_admin_huang：可看本系所有課（5 門）
+ *  - 系統管理員 demo_admin_sys：可看本系所有課
+ */
+const COURSE_OWNERSHIP: Record<string, number[]> = {
+  demo_teacher_chang: [71378],
+  demo_ta_lin: [71378, 71282],
+  demo_student_kuchih: [71378, 71282, 71240, 71393, 77418],
+  demo_admin_huang: [71378, 71282, 71240, 71393, 77418],
+  demo_admin_sys: [71378, 71282, 71240, 71393, 77418],
+};
+
+/** 回傳該 uid 在 demo 中可看到的課程清單。fallback 視同學生（全選課）。 */
+export function getDemoCoursesForUid(uid: string | null | undefined): MockCourse[] {
+  if (!uid) return DEMO_COURSES;
+  const ids = COURSE_OWNERSHIP[uid];
+  if (!ids) return DEMO_COURSES;
+  return DEMO_COURSES.filter((c) => ids.includes(c.id));
+}
+
+// ─────────────────────────────────────────────────────────
 // 快取查詢 helpers
 // ─────────────────────────────────────────────────────────
 

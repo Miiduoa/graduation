@@ -3,13 +3,16 @@
  *
  * 兩條路徑：
  *  1. 「真實登入」→ 跳既有 SSO / 學號登入流程
- *  2. 「demo 體驗」→ 一鍵以 5 種角色之一登入 (student/teacher/ta/admin/staff)
+ *  2. 「demo 體驗」→ 一鍵以 8 種角色之一登入：
+ *      student / teacher / ta / club_officer / department_head / admin / vendor /
+ *      alumni / guest
  *      用 saveMockAuthSession 寫入 mockAuth，auth.tsx 會自動 picks up。
  *
  * 設計：
  *  - 純前端，無 Firebase 依賴
  *  - 視覺乾淨：頂部 hero + 兩個大區塊
  *  - 進入後立即去主畫面（auth.profile 會在背景填好）
+ *  - 與 apps/web/src/lib/demoData.ts → DEMO_USERS 對齊，故事一致
  */
 import React, { useCallback, useState } from 'react';
 import {
@@ -73,7 +76,8 @@ const DEMO_PRESETS: DemoRolePreset[] = [
     color: '#3567C8',
   },
   {
-    role: 'staff',
+    // 修正：原本誤掛 'staff'，導致 TA 走錯權限矩陣（看不到批改頁、被當成餐廳員工）。
+    role: 'ta',
     uid: 'demo_ta_lin',
     email: 'demo.ta@pu.edu.tw',
     displayName: '林助教（demo TA）',
@@ -84,18 +88,43 @@ const DEMO_PRESETS: DemoRolePreset[] = [
     color: '#7B4DB8',
   },
   {
-    role: 'admin',
+    role: 'club_officer',
+    uid: 'demo_club_wei',
+    email: 'demo.club@pu.edu.tw',
+    displayName: '魏社長（demo 程式設計社）',
+    schoolId: 'pu',
+    department: '學生社團',
+    icon: 'flag-outline',
+    description: '社團公告、成員管理、活動發布、報名審核',
+    color: '#34C759',
+  },
+  {
+    // 系主任：保留 'admin' role 以便沿用 LearnStack DepartmentDashboard 派發
+    // 但 displayName 與 uid 明確標示為「系所主管」，避免與系統管理員混淆
+    role: 'department_head',
     uid: 'demo_admin_huang',
     email: 'demo.admin@pu.edu.tw',
-    displayName: '黃主任（demo 系所）',
+    displayName: '黃主任（demo 系所主管）',
     schoolId: 'pu',
     department: '資訊管理學系',
     icon: 'business-outline',
-    description: 'AI 看全系健康度、風險課程與跨角色動態',
+    description: 'AI 看全系健康度、待審公告、教師名冊',
     color: '#C79532',
   },
   {
-    role: 'staff',
+    role: 'admin',
+    uid: 'demo_admin_sys',
+    email: 'demo.sysadmin@pu.edu.tw',
+    displayName: '系統管理員（demo）',
+    schoolId: 'pu',
+    department: '校務系統',
+    icon: 'shield-checkmark-outline',
+    description: '全校管理、使用者、學校設定、系統日誌',
+    color: '#FF3B30',
+  },
+  {
+    // 修正：原本誤掛 'staff'，導致餐廳員工得到 staff group 的全部 facilities 權限。
+    role: 'vendor',
     uid: 'demo_cafeteria',
     email: 'demo.vendor@pu.edu.tw',
     displayName: '阿英（demo 餐廳）',
@@ -104,6 +133,28 @@ const DEMO_PRESETS: DemoRolePreset[] = [
     icon: 'restaurant-outline',
     description: 'AI 提醒訂單佇列、熱門品項與下一步營運',
     color: '#C95F28',
+  },
+  {
+    role: 'alumni',
+    uid: 'demo_alumni_chang',
+    email: 'demo.alumni@pu.edu.tw',
+    displayName: '張學長（demo 校友 / 109 屆）',
+    schoolId: 'pu',
+    department: '資訊管理學系（已畢業）',
+    icon: 'ribbon-outline',
+    description: '瀏覽公告、地圖、校友動態（無法加社團、借書）',
+    color: '#8E8E93',
+  },
+  {
+    role: 'guest',
+    uid: 'demo_guest',
+    email: 'demo.guest@pu.edu.tw',
+    displayName: '訪客（demo 未登入）',
+    schoolId: 'pu',
+    department: '訪客',
+    icon: 'eye-outline',
+    description: '只看公開公告、校園地圖、餐廳、公車',
+    color: '#6E6E73',
   },
 ];
 
