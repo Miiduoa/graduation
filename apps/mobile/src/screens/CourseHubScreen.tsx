@@ -741,7 +741,7 @@ export function CourseHubScreen(props: any) {
               });
             }}
           />
-        ) : null}
+        ))}
 
         {/* 空狀態：TronClass 登入 */}
         {selectedRows.length === 0 || isTCSessionError ? (
