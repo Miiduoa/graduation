@@ -100,19 +100,32 @@ export function DmsScreen(props: any) {
     }
     setLoading(true);
     const ref = collection(db, 'conversations');
-    const qy = query(
-      ref,
-      where('type', '==', 'dm'),
-      where('memberIds', 'array-contains', myUid),
-    );
+    // 鎖到目前學校 + 我是成員，避免跨校或跨帳號的對話誤入清單。
+    const qy = school.id
+      ? query(
+          ref,
+          where('type', '==', 'dm'),
+          where('memberIds', 'array-contains', myUid),
+          where('schoolId', '==', school.id),
+        )
+      : query(
+          ref,
+          where('type', '==', 'dm'),
+          where('memberIds', 'array-contains', myUid),
+        );
 
     const unsub = onSnapshot(
       qy,
       (snapshot) => {
-        const rows = snapshot.docs.map((d) => ({
-          id: d.id,
-          ...(d.data() as any),
-        })) as Conversation[];
+        const rows = (
+          snapshot.docs.map((d) => ({
+            id: d.id,
+            ...(d.data() as any),
+          })) as Conversation[]
+        ).filter(
+          // 雙保險：即使 Firestore 出現異常資料，前端也要再次驗證我是 memberIds 之一
+          (c) => Array.isArray(c.memberIds) && c.memberIds.includes(myUid),
+        );
         setConversations(rows);
         setLoading(false);
         setRefreshing(false);

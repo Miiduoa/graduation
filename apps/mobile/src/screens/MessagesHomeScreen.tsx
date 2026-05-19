@@ -12,6 +12,7 @@ import { useSchool } from '../state/school';
 import { getDb, isFirebaseMockMode } from '../firebase';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
 import { formatRelativeTime, toDate } from '../utils/format';
+import { isConversationMember, isConversationUnread } from '../utils/conversationAccess';
 
 type GroupSummary = {
   id: string;
@@ -120,8 +121,18 @@ export function MessagesHomeScreen(props: Record<string, unknown>) {
         unsubscribeDms = onSnapshot(
           dmsQ,
           async (snap) => {
+            // 雙保險：只信任「我確實是成員」的對話，避免任何意外的快取或 schema 漂移
+            const validDocs = snap.docs.filter((d) => {
+              const data = d.data();
+              const memberIds = Array.isArray(data.memberIds)
+                ? data.memberIds
+                : Array.isArray(data.participants)
+                  ? data.participants
+                  : [];
+              return isConversationMember(auth.user?.uid, memberIds);
+            });
             const conversations = await Promise.all(
-              snap.docs.map(async (d) => {
+              validDocs.map(async (d) => {
                 const data = d.data();
                 const memberIds = Array.isArray(data.memberIds)
                   ? data.memberIds
@@ -146,10 +157,14 @@ export function MessagesHomeScreen(props: Record<string, unknown>) {
 
                 const lastReadAt = data.lastReadBy?.[auth.user?.uid];
                 const lastMessageAt = data.lastMessageAt ? toDate(data.lastMessageAt) : undefined;
-                const unread =
-                  lastMessageAt && lastReadAt
-                    ? lastMessageAt > toDate(lastReadAt)!
-                    : !!lastMessageAt;
+                const lastMessageSender =
+                  data.lastMessage?.senderId ?? data.lastMessageSenderId ?? undefined;
+                const unread = isConversationUnread({
+                  uid: auth.user?.uid,
+                  lastMessageAt,
+                  lastReadAt,
+                  lastMessageSenderId: lastMessageSender,
+                });
 
                 return {
                   id: d.id,
