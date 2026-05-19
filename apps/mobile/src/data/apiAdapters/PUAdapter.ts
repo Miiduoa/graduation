@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type breakage from main; mobile demoStore PR 範圍外
 import { PROVIDENCE_UNIVERSITY_SCHOOL_ID } from '@campus/shared/src';
 import { BaseApiAdapter } from './BaseAdapter';
 import type { AdapterCapabilities, AuthCredentials } from './types';
@@ -768,13 +767,13 @@ export class PUAdapter extends BaseApiAdapter {
         }
         console.warn("[PUAdapter] getCreditAudit: direct fetch result:", fresh.success, "isV2:", isV2(fresh.data));
       } else if (!this.useDirectMode) {
-        // 非 direct mode 暫無 credit audit fallback：原本此處被 getGrades
-        // 的程式碼錯誤覆蓋造成 syntax error。先回傳 cached v2 或 null。
-        if (isV2(cached)) return cached;
-        return null;
+        // 註:此分支原本要呼叫 backend REST API 取 v2 creditAudit;
+        // 但因 merge conflict 半段被誤覆寫成 listGrades 主體 — 暫時 noop,
+        // 改走 cache(上方已試過)+ direct mode(若啟用)。
+        // TODO:回填 REST endpoint 呼叫。
       }
     } catch (err) {
-      console.warn('[PUAdapter] getCreditAudit failed:', err);
+      console.warn("[PUAdapter] getCreditAudit error:", err);
     }
     return null;
   }
