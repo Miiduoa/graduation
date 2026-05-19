@@ -19,9 +19,11 @@ import {
 } from '../ui/aiFirst';
 import { rootNavigateNested } from '../app/rootNavigation';
 import { seedDemoQueues, resetDemoStore } from '../services/demoStore';
+import { usePermissions } from '../hooks/usePermissions';
 
 export default function MeAiFirstScreen() {
   const navigation = useNavigation<any>();
+  const { isStudent } = usePermissions();
 
   // 在 MeStack 中的 screen 直接 navigate；不在 MeStack 的（成績、課表、社團…）
   // 透過 rootNavigateNested 切到對應 Tab 再帶入子 screen，避免 navigator 找不到 route 報錯。
@@ -139,7 +141,8 @@ export default function MeAiFirstScreen() {
         </View>
       </View>
 
-      {/* AI 給我的洞察 */}
+      {/* AI 給我的洞察 — 學分試算洞察僅對學生顯示 */}
+      {isStudent && (
       <AISection title="AI 學業洞察" subtitle="基於你 3 學期的資料分析">
         <AICard
           aiGenerated
@@ -177,6 +180,7 @@ export default function MeAiFirstScreen() {
           </Text>
         </AICard>
       </AISection>
+      )}
 
       {/* 學業 */}
       <AISection title="學業">
@@ -186,12 +190,14 @@ export default function MeAiFirstScreen() {
           subtitle="所有歷年成績"
           onPress={goLearn('Grades')}
         />
-        <AIRow
-          icon="🎓"
-          title="學分試算"
-          subtitle="畢業進度 61%"
-          onPress={goMe('CreditAuditStack')}
-        />
+        {isStudent && (
+          <AIRow
+            icon="🎓"
+            title="學分試算"
+            subtitle="畢業進度 61%"
+            onPress={goMe('CreditAuditStack')}
+          />
+        )}
         <AIRow
           icon="📅"
           title="課表"

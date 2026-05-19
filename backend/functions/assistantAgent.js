@@ -2,6 +2,8 @@ const nodeCrypto = require('crypto');
 const { zodToJsonSchema } = require('zod-to-json-schema');
 
 const DEFAULT_PROVIDER_ORDER = ['groq', 'gemini'];
+const OLLAMA_BASE_URL_DEFAULT = 'http://localhost:11434/v1';
+const OLLAMA_DEFAULT_MODEL = 'qwen3:8b';
 const DEFAULT_GROQ_MODEL = 'llama-3.3-70b-versatile';
 const MAX_WEB_SOURCES = 4;
 const WEB_TIMEOUT_MS = 7000;
@@ -149,10 +151,19 @@ function resolvePermissionScope(intent, hasAuth) {
   return 'school_public';
 }
 
+// 校園 POI 關鍵字 — 命中時表示是校園內路線，跳過 web search 讓 LLM 用 planCampusRoute tool
+const CAMPUS_POI_KEYWORDS = /(校門|正門|後門|側門|宜園|靜園|至善|圖書館|蓋夏|體育館|健身房|宿舍|信德|望德|愛德|仁愛|工程館|主顧樓|任垣樓|伯鐸樓|靜安樓|格倫樓|方濟樓|思源樓|文興樓|研究大樓|行政大樓|健康中心|諮商|7-?11|7-ELEVEN|小七|OK ?便利|主顧聖母堂|聖堂|藝術中心|學生活動|會議廳|資工|資管|英文系|日文系|西文系|中文系|大傳|社工|台文|企管|國企|會計|觀光|財金|法律|財法|教育研究|師培|通識)/i;
+
 function shouldUseServerWebSearch(rawText, intent) {
   if (PERSONAL_INTENTS.has(intent)) return false;
   const text = normalizeText(rawText);
   if (!text) return false;
+  // 校園內路線 → 跳過 web search，交給 LLM 呼叫 planCampusRoute / findCampusPoi
+  const isRouteOrPath = /路線|怎麼去|如何到|怎麼到|怎麼走|搭.*公車|導航|多遠|多久/.test(text);
+  if (isRouteOrPath && CAMPUS_POI_KEYWORDS.test(text)) return false;
+  // 校園內點餐 / 菜單查詢 → 同理交給 LLM
+  if (/(點餐|訂餐|下單|菜單|早午餐|雞排|便當|滷味|水餃|簡餐|自助餐|飲料|咖啡)/.test(text)) return false;
+
   const explicitExternal =
     /連網|搜尋|查網路|公開來源|google maps|wikipedia|維基|現任|即時.*(班次|天氣)|今天.*天氣|天氣|下雨|帶傘|路線|怎麼去|如何到|搭.*公車/i.test(
       text,
@@ -671,13 +682,33 @@ async function callAssistantModel({
   const errors = [];
 
   if (Array.isArray(toolDefs) && toolDefs.length > 0) {
+    // Tool-use 路徑：依序嘗試 Groq → Ollama（本機 qwen3 也支援 OpenAI-compat tool_calls）
+    if (env('GROQ_API_KEY')) {
+      try {
+        const result = await callOpenAiCompatChat({
+          fetchImpl,
+          provider: 'groq',
+          baseUrl: env('GROQ_BASE_URL', 'https://api.groq.com/openai/v1'),
+          apiKey: env('GROQ_API_KEY'),
+          model: env('GROQ_MODEL', env('OPENAI_COMPAT_MODEL', DEFAULT_GROQ_MODEL)),
+          messages,
+          tools: toolDefs,
+        });
+        if (result && (result.toolCalls?.length > 0 || result.content)) {
+          return { ...result, errors };
+        }
+      } catch (error) {
+        errors.push({ provider: 'groq', message: error?.message || String(error) });
+      }
+    }
+    // Ollama fallback（本機免費；qwen3:8b 預設）
     try {
       const result = await callOpenAiCompatChat({
         fetchImpl,
-        provider: 'groq',
-        baseUrl: env('GROQ_BASE_URL', 'https://api.groq.com/openai/v1'),
-        apiKey: env('GROQ_API_KEY'),
-        model: env('GROQ_MODEL', env('OPENAI_COMPAT_MODEL', DEFAULT_GROQ_MODEL)),
+        provider: 'ollama',
+        baseUrl: env('OLLAMA_BASE_URL', OLLAMA_BASE_URL_DEFAULT),
+        apiKey: env('OLLAMA_API_KEY', 'ollama'),
+        model: env('OLLAMA_MODEL', OLLAMA_DEFAULT_MODEL),
         messages,
         tools: toolDefs,
       });
@@ -685,7 +716,7 @@ async function callAssistantModel({
         return { ...result, errors };
       }
     } catch (error) {
-      errors.push({ provider: 'groq', message: error?.message || String(error) });
+      errors.push({ provider: 'ollama', message: error?.message || String(error) });
     }
     return {
       provider: 'none',
@@ -699,7 +730,7 @@ async function callAssistantModel({
 
   for (const provider of providerOrder) {
     try {
-      if (provider === 'groq') {
+      if (provider === 'groq' && env('GROQ_API_KEY')) {
         const result = await callOpenAiCompatChat({
           fetchImpl,
           provider: 'groq',
@@ -712,7 +743,7 @@ async function callAssistantModel({
         if (result?.content) return { ...result, errors };
       }
 
-      if (provider === 'gemini') {
+      if (provider === 'gemini' && (env('GEMINI_API_KEY') || env('GOOGLE_API_KEY'))) {
         const result = await callGeminiGenerate({
           fetchImpl,
           apiKey: env('GEMINI_API_KEY') || env('GOOGLE_API_KEY'),
@@ -724,6 +755,22 @@ async function callAssistantModel({
     } catch (error) {
       errors.push({ provider, message: error?.message || String(error) });
     }
+  }
+
+  // 兩個雲端 provider 都跑不出來時，最後 fallback 到本機 Ollama
+  try {
+    const result = await callOpenAiCompatChat({
+      fetchImpl,
+      provider: 'ollama',
+      baseUrl: env('OLLAMA_BASE_URL', OLLAMA_BASE_URL_DEFAULT),
+      apiKey: env('OLLAMA_API_KEY', 'ollama'),
+      model: env('OLLAMA_MODEL', OLLAMA_DEFAULT_MODEL),
+      messages,
+      tools: [],
+    });
+    if (result?.content) return { ...result, errors };
+  } catch (error) {
+    errors.push({ provider: 'ollama', message: error?.message || String(error) });
   }
 
   return {

@@ -777,7 +777,17 @@ service cloud.firestore {
 
         match /grades/{gradeId} {
           allow read: if isSelf(uid);
-          allow write: if false;
+          allow write: if isSelf(uid);
+        }
+
+        match /creditAudit/{docId} {
+          allow read: if isSelf(uid);
+          allow write: if isSelf(uid);
+        }
+
+        match /courses/{courseId} {
+          allow read: if isSelf(uid);
+          allow write: if isSelf(uid);
         }
 
         match /calendarEvents/{eventId} {
