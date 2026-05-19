@@ -315,7 +315,8 @@ export const VENDORS: Vendor[] = [
     avgPrice: 65,
     tags: ['自助餐', '便宜', '份量大'],
     imageUrl: null,
-    ownerUid: 'test-vendor', // 測試店家帳號 UID
+    // 測試店家帳號 UID（同步包含 demo 切換器選到的 vendor uid）
+    ownerUid: 'demo_cafeteria',
     menuItems: [
       // 靜園自助餐
       {

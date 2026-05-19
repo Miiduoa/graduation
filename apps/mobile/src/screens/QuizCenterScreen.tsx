@@ -6,6 +6,7 @@ import type { CourseSpace, Quiz } from '../data';
 import { Button, Card, ErrorState, LoadingState, Pill, Screen } from '../ui/components';
 import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
+import { shouldBlockForNoLogin, isDemoUid } from '../services/demoSession';
 import { navigateFromInboxTask } from '../services/inboxActions';
 import { isTeachingRole } from '../utils/campusOs';
 import type { InboxTask } from '../data/types';
@@ -267,7 +268,10 @@ export function QuizCenterScreen(props: any) {
   // Demo courses 不需要登入 — 直接看 quizzes
   const routeCourseIdNum = routeGroupId ? Number(routeGroupId.replace(/^tc:/, '')) || 0 : 0;
 
-  if (!auth.user && !(routeCourseIdNum && isDemoCourseId(routeCourseIdNum))) {
+  if (
+    shouldBlockForNoLogin({ uid: auth.user?.uid ?? null, hasUser: !!auth.user }) &&
+    !(routeCourseIdNum && isDemoCourseId(routeCourseIdNum))
+  ) {
     return (
       <Screen>
         <Card title="測驗中心" subtitle="登入後即可查看測驗與考試">

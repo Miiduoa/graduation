@@ -34,6 +34,7 @@ import {
 } from 'react-native';
 import { getDb, isFirebaseMockMode } from '../../firebase';
 import { useAuth } from '../../state/auth';
+import { shouldBlockForNoLogin, isDemoUid } from '../../services/demoSession';
 import { useSchool } from '../../state/school';
 import { theme } from '../../ui/theme';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../../ui/navigationTheme';
@@ -342,7 +343,7 @@ export function PostDetailScreen(props: any) {
     );
   }
 
-  if (!auth.user) {
+  if (shouldBlockForNoLogin({ uid: auth.user?.uid ?? null, hasUser: !!auth.user })) {
     return (
       <View style={styles.center}>
         <Text style={{ color: theme.colors.textSecondary }}>請先登入以查看貼文</Text>
