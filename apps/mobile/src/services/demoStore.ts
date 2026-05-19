@@ -774,6 +774,83 @@ export function transferBook(params: {
 }
 
 // ─────────────────────────────────────────────────────────────
+// 動作鏈：公告審核（老師發布 → 系主任核准/退回 → 學生收到通知）
+// ─────────────────────────────────────────────────────────────
+
+/** 老師提交公告待審，系主任收件匣出現審核按鈕 */
+export function publishAnnouncement(params: {
+  title: string;
+  content: string;
+  teacherName: string;
+}): string {
+  const pendingId = `ann-${Date.now()}`;
+  sendMessage({
+    fromName: `${params.teacherName}（系統通知）`,
+    fromAvatar: '📢',
+    subject: `【公告待審】${params.teacherName} 提交：${params.title}`,
+    body: `${params.teacherName} 提交公告「${params.title}」等待審核。\n\n內容摘要：${params.content}\n\n請在收件匣點「核准」或「退回並說明」。`,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'action',
+    relatedPendingAnnId: pendingId,
+    senderRole: 'teacher',
+    recipientRoles: ['department_head'],
+  });
+  return pendingId;
+}
+
+/** 系主任核准公告 → 通知全體師生 + 通知原提交者 */
+export function approveAnnouncement(params: {
+  pendingId: string;
+  title: string;
+  approverName: string;
+  submitterName: string;
+}): void {
+  sendMessage({
+    fromName: '校務系統',
+    fromAvatar: '📣',
+    subject: `【公告發布】${params.title}`,
+    body: `系主任已核准公告「${params.title}」，現已正式發布。`,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'info',
+    senderRole: 'department_head',
+    recipientRoles: ['student', 'teacher', 'ta', 'alumni'],
+  });
+  sendMessage({
+    fromName: `${params.approverName}（系主任）`,
+    fromAvatar: '✅',
+    subject: `【公告已核准】${params.title}`,
+    body: `你提交的公告「${params.title}」已由 ${params.approverName} 核准並正式發布。`,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'success',
+    senderRole: 'department_head',
+    recipientRoles: ['teacher'],
+  });
+}
+
+/** 系主任退回公告並說明原因 */
+export function rejectAnnouncementWithReason(params: {
+  pendingId: string;
+  title: string;
+  approverName: string;
+  reason?: string;
+}): void {
+  sendMessage({
+    fromName: `${params.approverName}（系主任）`,
+    fromAvatar: '❌',
+    subject: `【公告退回】${params.title}`,
+    body: `你提交的公告「${params.title}」已被退回。\n\n原因：${params.reason ?? '請修改後重新提交'}`,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'warning',
+    senderRole: 'department_head',
+    recipientRoles: ['teacher'],
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
 // 一鍵 seed：對應 web 版的同名函式
 // ─────────────────────────────────────────────────────────────
 
@@ -825,5 +902,10 @@ export function seedDemoQueues(): void {
     clubName: '攝影社',
     studentId: 'stu-001',
     studentName: '王小明',
+  });
+  publishAnnouncement({
+    title: '期末考試時間公告',
+    content: '本學期期末考試訂於 6/16–6/20，各科考試時間請見附件。',
+    teacherName: '張怡君老師',
   });
 }
