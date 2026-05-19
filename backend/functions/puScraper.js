@@ -711,10 +711,11 @@ async function puFetchGrades(cookies, semester) {
     }
 
     // ── Step 2: Fetch the grade page ──
-    const res = await getFollowRedirect(MYPU_HOST, GRADE_PATH, mypuCookies);
-    if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
+    // 改名為 gradeRes 避開 function 上方 L658 已有的 `let res`（同 scope 重複宣告 → parse error）
+    const gradeRes = await getFollowRedirect(MYPU_HOST, GRADE_PATH, mypuCookies);
+    if (gradeRes.status !== 200) throw new Error(`HTTP ${gradeRes.status}`);
 
-    const html = res.data;
+    const html = gradeRes.data;
     if (looksLikePuLoginPage(html)) {
       return { success: false, grades: [], error: 'E校園 session 已失效，請重新登入' };
     }
