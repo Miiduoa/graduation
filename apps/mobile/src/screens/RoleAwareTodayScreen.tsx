@@ -1,13 +1,16 @@
 /**
  * Role-Aware Today — 每個角色看到不同的「Today」入口
  *
- * 5 條 dispatcher 路徑：
- *  - student        → TodayCockpitScreen（學生駕駛艙）
- *  - teacher        → TeacherCockpitScreen（老師駕駛艙）
- *  - staff (TA)     → TADashboardScreen
- *  - department_head → DepartmentDashboardScreen（系所主任）
- *  - admin          → DepartmentDashboardScreen
- *  - vendor / cafeteria → VendorDashboardScreen
+ * 8 條 dispatcher 路徑：
+ *  - student         → TodayCockpitScreen（學生駕駛艙）
+ *  - teacher         → TeacherCockpitScreen（老師駕駛艙）
+ *  - ta              → TADashboardScreen（助教）
+ *  - club_officer    → ClubOfficerDashboardScreen（社團幹部）
+ *  - department      → DepartmentDashboardScreen（系主任 / 行政）
+ *  - admin           → AdminDashboardScreen（系統管理員）
+ *  - vendor          → VendorDashboardScreen（餐廳店家）
+ *  - alumni          → AlumniHomeScreen（校友）
+ *  - guest           → GuestHomeScreen（訪客）
  *
  * 判斷依據：
  *  1. auth.profile.roleGroup（最權威）
@@ -23,6 +26,10 @@ import TeacherCockpitScreen from './TeacherCockpitScreen';
 import TADashboardScreen from './TADashboardScreen';
 import DepartmentDashboardScreen from './DepartmentDashboardScreen';
 import VendorDashboardScreen from './VendorDashboardScreen';
+import { AdminDashboardScreen } from './AdminDashboardScreen';
+import ClubOfficerDashboardScreen from './ClubOfficerDashboardScreen';
+import AlumniHomeScreen from './AlumniHomeScreen';
+import GuestHomeScreen from './GuestHomeScreen';
 import { useAuth } from '../state/auth';
 import { theme } from '../ui/theme';
 
@@ -30,8 +37,12 @@ export type ResolvedDashboardRole =
   | 'student'
   | 'teacher'
   | 'ta'
+  | 'club_officer'
   | 'department'
-  | 'vendor';
+  | 'admin'
+  | 'vendor'
+  | 'alumni'
+  | 'guest';
 
 /** 從 auth.profile 推斷該顯示哪個 cockpit */
 export function resolveDashboardRole(profile: {
@@ -39,25 +50,39 @@ export function resolveDashboardRole(profile: {
   roleGroup?: string | null;
   role?: string | null;
 } | null): ResolvedDashboardRole {
-  if (!profile) return 'student';
+  if (!profile) return 'guest';
 
   // 1. demo 帳號 uid prefix 判斷（最直接）
   const uid = profile.uid ?? '';
+  if (uid === 'demo_guest') return 'guest';
+  if (uid === 'demo_alumni_chang' || uid.startsWith('demo_alumni')) return 'alumni';
+  if (uid === 'demo_admin_sys') return 'admin';
   if (uid === 'demo_cafeteria' || uid.startsWith('demo_vendor')) return 'vendor';
-  if (uid === 'demo_admin_huang' || uid.startsWith('demo_admin')) return 'department';
+  if (uid === 'demo_admin_huang' || uid.startsWith('demo_dept')) return 'department';
+  if (uid === 'demo_club_wei' || uid.startsWith('demo_club')) return 'club_officer';
   if (uid === 'demo_ta_lin' || uid.startsWith('demo_ta')) return 'ta';
   if (uid === 'demo_teacher_chang' || uid.startsWith('demo_teacher')) return 'teacher';
   if (uid === 'demo_student_kuchih' || uid.startsWith('demo_student')) return 'student';
 
   // 2. roleGroup 判斷
   const rg = profile.roleGroup;
-  if (rg === 'admin' || rg === 'department_head') return 'department';
+  if (rg === 'guest') return 'guest';
+  if (rg === 'alumni') return 'alumni';
+  if (rg === 'admin') return 'admin';
+  if (rg === 'department_head') return 'department';
+  if (rg === 'club_officer') return 'club_officer';
+  if (rg === 'ta') return 'ta';
   if (rg === 'teacher') return 'teacher';
+  if (rg === 'staff') return 'vendor';
 
   // 3. role 細分
   const r = profile.role;
+  if (r === 'guest') return 'guest';
+  if (r === 'alumni') return 'alumni';
   if (r === 'vendor' || r === 'service' || r === 'cafeteria') return 'vendor';
-  if (r === 'department_head' || r === 'admin') return 'department';
+  if (r === 'admin' || r === 'school') return 'admin';
+  if (r === 'department_head' || r === 'principal' || r === 'department') return 'department';
+  if (r === 'club_officer') return 'club_officer';
   if (r === 'ta' || r === 'assistant') return 'ta';
   if (r === 'teacher' || r === 'professor') return 'teacher';
 
@@ -94,10 +119,18 @@ export default function RoleAwareTodayScreen() {
       return <TeacherCockpitScreen />;
     case 'ta':
       return <TADashboardScreen />;
+    case 'club_officer':
+      return <ClubOfficerDashboardScreen />;
     case 'department':
       return <DepartmentDashboardScreen />;
+    case 'admin':
+      return <AdminDashboardScreen />;
     case 'vendor':
       return <VendorDashboardScreen />;
+    case 'alumni':
+      return <AlumniHomeScreen />;
+    case 'guest':
+      return <GuestHomeScreen />;
     case 'student':
     default:
       return <TodayCockpitScreen />;
