@@ -21,7 +21,9 @@ const allowedScreenDirectFirebaseImports = [
   'apps/mobile/src/screens/LearningAnalyticsScreen.tsx',
   'apps/mobile/src/screens/PostLoginDebugScreen.tsx',
   'apps/mobile/src/screens/SSOLoginScreen.tsx',
-  'apps/mobile/src/screens/social/PostDetailScreen.tsx',
+  // social/PostDetailScreen 在 main 上已重做（dcf9e8aa），改用 '../../firebase'
+  // 而非 '../firebase'/firebase/firestore，已不符合 test 的 restrictedImportPatterns，
+  // 因此從 allowlist 移除以避免 staleAllowlistEntries 為非空。
 ];
 
 module.exports = {
