@@ -98,6 +98,7 @@ export const ROUTE_TO_TAB: Record<string, TabName> = {
   StudentRisk: '學習',
   TeachingEvaluation: '學習',
   CreditAuditStack: '學習',
+  DemoStory: '學習',
 
   // ── 校園 tab ───────────────────────────────────────────
   CampusHome: '校園',

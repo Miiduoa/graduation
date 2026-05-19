@@ -27,6 +27,7 @@ import { AmbientCueCard } from '../ui/campusOs';
 import { shadowStyle, theme } from '../ui/theme';
 import { EmptyState } from '../ui/components';
 import { navigateToCourseScreen, migrateTabName } from '../utils/courseNavigation';
+import { safeNavigate } from '../utils/safeNavigate';
 import { aiOverlay } from '../app/useAIOverlay';
 import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
 import { getCampusPoi } from '../data/puCampusData';
@@ -406,7 +407,8 @@ export function CampusHubScreen(props: Record<string, unknown>) {
             label: '今天的故事',
             subtitle: '一日完整動線',
             tint: theme.colors.accent,
-            crossTab: { tab: 'Today', screen: 'DemoStory' },
+            // DemoStory 註冊在 LearnStack（不是 HomeStack），所以要走「學習」tab
+            crossTab: { tab: '學習', screen: 'DemoStory' },
             keywords: ['今天', '一天', '故事', 'timeline', '行程', '時程'],
           },
         ],
@@ -543,9 +545,16 @@ export function CampusHubScreen(props: Record<string, unknown>) {
         }
         // 自動將舊 Tab 名稱遷移到新導航
         const tab = migrateTabName(item.crossTab.tab);
-        nav?.navigate?.(tab, { screen: item.crossTab.screen });
+        // safeNavigate 會處理「當前 stack 沒有此 route」的 cross-tab bubbling，
+        // 並在完全找不到時跳 Alert 而不是 silent no-op（原本是 nav.navigate raw call，
+        // 路由不對就讓使用者覺得「點了沒反應」）
+        safeNavigate(nav, item.crossTab.screen, undefined, {
+          fallbackRoute: tab,
+        });
       } else if (item.screen) {
-        nav?.navigate?.(item.screen);
+        safeNavigate(nav, item.screen, undefined, {
+          fallbackMessage: `「${item.label}」目前無法開啟。`,
+        });
       }
     },
     [auth.profile?.role, nav],
@@ -635,10 +644,10 @@ export function CampusHubScreen(props: Record<string, unknown>) {
         {/* ── Map Card (hide when searching) ── */}
         {!searchQuery ? (
           <CompactMapCard
-            onPress={() => nav?.navigate?.('MapV2')}
+            onPress={() => safeNavigate(nav, 'MapV2')}
             onARPress={() => {
               const gate = getCampusPoi('pu-gate-main');
-              nav?.navigate?.('ARNavigation', {
+              safeNavigate(nav, 'ARNavigation', {
                 destination: gate?.name ?? '正門（臺灣大道）',
                 destinationId: 'pu-gate-main',
                 destinationLat: gate?.lat,
