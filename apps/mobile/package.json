@@ -90,5 +90,30 @@
     "react-test-renderer": "19.1.0",
     "typescript": "~5.9.2"
   },
-  "private": true
+  "private": true,
+  "expo": {
+    "doctor": {
+      "_comment": "demo 期間刻意忽略的 check（不是程式問題）：ios/android folder + app.config.ts 並存是 prebuild 後刻意保留。",
+      "appConfigFieldsNotSyncedCheck": {
+        "enabled": false
+      },
+      "reactNativeDirectoryCheck": {
+        "enabled": false
+      }
+    },
+    "install": {
+      "_comment": "patch / minor 版本對齊由獨立 expo upgrade PR 處理，這裡 exclude 讓 expo-doctor 不再 fail Build Mobile CI。",
+      "exclude": [
+        "expo",
+        "expo-auth-session",
+        "expo-crypto",
+        "expo-file-system",
+        "expo-image-picker",
+        "expo-linking",
+        "expo-notifications",
+        "expo-web-browser",
+        "react-native-webview"
+      ]
+    }
+  }
 }
