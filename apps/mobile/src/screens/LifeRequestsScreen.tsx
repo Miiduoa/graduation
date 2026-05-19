@@ -38,6 +38,14 @@ import {
   type DormRepairRequestedPayload,
 } from '../services/roleEventBus';
 import { getDemoUserStory } from '../data/demoUserStories';
+import {
+  canSubmitLeaveRequest,
+  canSubmitDormRepair,
+  getLeaveRequestTargets,
+  getLeaveTargetLabel,
+  getDormRepairTargets,
+  getRoleNotEligibleMessage,
+} from '../services/roleEventTargets';
 
 const LEAVE_CATEGORIES: Array<{ id: LeaveRequestedPayload['category']; label: string; emoji: string }> = [
   { id: 'sick', label: '病假', emoji: '🤒' },
@@ -65,7 +73,18 @@ function plusDaysString(d: number) {
 export default function LifeRequestsScreen() {
   const auth = useAuth();
   const bottomPad = useTabBarContentBottomPadding();
-  const [tab, setTab] = useState<'leave' | 'repair'>('leave');
+  const currentRole = auth.profile?.role ?? null;
+  const currentUid = auth.user?.uid ?? '';
+  const currentName = auth.profile?.displayName ?? '使用者';
+
+  const canLeave = canSubmitLeaveRequest(currentRole);
+  const canRepair = canSubmitDormRepair(currentRole);
+
+  // 沒有任何流程可用 → 直接顯示「此角色不適用」
+  const noFlowAvailable = !canLeave && !canRepair;
+
+  // 預設 tab：依該角色能用什麼開
+  const [tab, setTab] = useState<'leave' | 'repair'>(canLeave ? 'leave' : 'repair');
 
   // 請假 form
   const [leaveCategory, setLeaveCategory] = useState<LeaveRequestedPayload['category']>('sick');
@@ -83,6 +102,11 @@ export default function LifeRequestsScreen() {
   const dorm = story?.dorm;
 
   const submitLeave = async () => {
+    if (!canLeave) {
+      const m = getRoleNotEligibleMessage(currentRole, '請假申請');
+      Alert.alert(m.title, m.body);
+      return;
+    }
     if (!leaveReason.trim()) {
       Alert.alert('請輸入請假原因');
       return;
@@ -91,17 +115,22 @@ export default function LifeRequestsScreen() {
       Alert.alert('結束日期必須在開始日期之後');
       return;
     }
+    const targets = getLeaveRequestTargets(currentRole, currentUid);
+    if (targets.length === 0) {
+      Alert.alert('無法送出', '此角色目前找不到合適的審核對象。');
+      return;
+    }
     try {
       const leaveId = `leave_${Date.now()}`;
       await emitLeaveRequested({
-        actorUid: auth.user?.uid ?? 'demo_student_kuchih',
-        actorName: auth.profile?.displayName ?? '顧晉瑋',
-        targetUids: ['demo_teacher_chang', 'demo_admin_huang'],
+        actorUid: currentUid || 'demo_student_kuchih',
+        actorName: currentName,
+        targetUids: targets,
         courseId: 'leave',
         courseName: '請假申請',
         payload: {
           leaveId,
-          studentName: auth.profile?.displayName ?? '顧晉瑋',
+          studentName: currentName,
           category: leaveCategory,
           fromDate: leaveFrom,
           toDate: leaveTo,
@@ -110,7 +139,7 @@ export default function LifeRequestsScreen() {
       });
       Alert.alert(
         '✅ 請假已送出',
-        `老師會收到通知並審核。\n核准/駁回結果會 push 到你的 inbox。`,
+        `${getLeaveTargetLabel(currentRole)} 會收到通知並審核。\n核准/駁回結果會 push 到你的 inbox。`,
       );
       setLeaveReason('');
     } catch (e) {
@@ -119,6 +148,11 @@ export default function LifeRequestsScreen() {
   };
 
   const submitRepair = async () => {
+    if (!canRepair) {
+      const m = getRoleNotEligibleMessage(currentRole, '宿舍報修');
+      Alert.alert(m.title, m.body);
+      return;
+    }
     if (!repairTitle.trim() || !repairDesc.trim()) {
       Alert.alert('請輸入標題與說明');
       return;
@@ -127,12 +161,17 @@ export default function LifeRequestsScreen() {
       Alert.alert('你不是住宿生', '此功能僅限住宿同學使用。');
       return;
     }
+    const targets = getDormRepairTargets(currentUid);
+    if (targets.length === 0) {
+      Alert.alert('無法送出', '此角色目前找不到合適的處理對象。');
+      return;
+    }
     try {
       const repairId = `repair_${Date.now()}`;
       await emitDormRepairRequested({
-        actorUid: auth.user?.uid ?? 'demo_student_kuchih',
-        actorName: auth.profile?.displayName ?? '顧晉瑋',
-        targetUids: ['demo_admin_huang'],
+        actorUid: currentUid || 'demo_student_kuchih',
+        actorName: currentName,
+        targetUids: targets,
         courseId: 'dorm',
         courseName: '宿舍維修',
         payload: {
@@ -175,12 +214,40 @@ export default function LifeRequestsScreen() {
             title={tab === 'leave' ? '📝 請假申請' : '🔧 宿舍報修'}
             summary={
               tab === 'leave'
-                ? '送出後老師會收到通知並審核，核准/駁回結果回到你的 inbox。'
+                ? canLeave
+                  ? `送出後「${getLeaveTargetLabel(currentRole)}」會收到通知並審核，核准/駁回結果回到你的 inbox。`
+                  : '目前角色無法使用請假流程。'
                 : dorm
                   ? `你的宿舍：${dorm.building} ${dorm.room}（${dorm.recentRepairs.length} 筆歷史紀錄）`
-                  : '你不是住宿生，宿舍報修功能僅供住宿同學使用。'
+                  : canRepair
+                    ? '你不是住宿生，宿舍報修功能僅供住宿同學使用。'
+                    : '目前角色無法使用宿舍報修流程。'
             }
           />
+
+          {/* 角色不適用：顯示醒目提示，避免「老師把假單送給老師」這類錯誤 */}
+          {noFlowAvailable && (
+            <View
+              style={{
+                marginBottom: theme.space.md,
+                padding: theme.space.md,
+                borderRadius: theme.radius.md,
+                backgroundColor: theme.colors.surface,
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: theme.colors.border,
+                borderLeftWidth: 4,
+                borderLeftColor: theme.colors.accent,
+              }}
+            >
+              <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14, marginBottom: 4 }}>
+                此功能不適用於目前角色
+              </Text>
+              <Text style={{ color: theme.colors.muted, fontSize: 13, lineHeight: 20 }}>
+                請假申請 / 宿舍報修是「校內師生與住宿生」專屬流程。{'\n'}
+                目前 demo 角色可在「我的 → 切換角色」改成學生 / 教師後再使用。
+              </Text>
+            </View>
+          )}
 
           {/* Tab switcher */}
           <View style={{ flexDirection: 'row', gap: theme.space.xs + 2, marginBottom: theme.space.md }}>

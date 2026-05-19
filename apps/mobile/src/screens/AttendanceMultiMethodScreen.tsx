@@ -38,6 +38,10 @@ import {
 } from '../data/demoCoursesAdapter';
 import { useAuth } from '../state/auth';
 import { emitAttendanceCheckedIn } from '../services/roleEventBus';
+import {
+  canCheckInAttendance,
+  getAttendanceCheckInTargets,
+} from '../services/roleEventTargets';
 import { DEMO_COURSES } from '../data/demoCoursesMock';
 import { theme } from '../ui/theme';
 import { Skeleton } from '../ui/components';
@@ -262,22 +266,28 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
         }
 
         // ── Demo 跨角色：emit 給老師（AttendanceLive / TeacherCockpit 即時看到簽到）──
+        // 只有學生身分才會真正 emit；老師本人簽到不會送給自己
         try {
-          const numericCourseId = Number(String(courseId).replace(/^tc:/, '')) || 0;
-          const courseName = DEMO_COURSES.find((c) => c.id === numericCourseId)?.name ?? '課程';
-          await emitAttendanceCheckedIn({
-            actorUid: auth.user?.uid ?? 'demo_student_kuchih',
-            actorName: auth.profile?.displayName ?? '學生',
-            targetUids: ['demo_teacher_chang'],
-            courseId: numericCourseId,
-            courseName,
-            payload: {
-              sessionId: sessionId ?? '',
-              studentName: auth.profile?.displayName ?? '學生',
-              status: localResult.status === 'late' ? 'late' : 'present',
-              method: cfg.method,
-            },
-          });
+          const actorUid = auth.user?.uid ?? 'demo_student_kuchih';
+          const actorRole = auth.profile?.role ?? null;
+          const targets = getAttendanceCheckInTargets(actorUid);
+          if (canCheckInAttendance(actorRole) && targets.length > 0) {
+            const numericCourseId = Number(String(courseId).replace(/^tc:/, '')) || 0;
+            const courseName = DEMO_COURSES.find((c) => c.id === numericCourseId)?.name ?? '課程';
+            await emitAttendanceCheckedIn({
+              actorUid,
+              actorName: auth.profile?.displayName ?? '學生',
+              targetUids: targets,
+              courseId: numericCourseId,
+              courseName,
+              payload: {
+                sessionId: sessionId ?? '',
+                studentName: auth.profile?.displayName ?? '學生',
+                status: localResult.status === 'late' ? 'late' : 'present',
+                method: cfg.method,
+              },
+            });
+          }
         } catch {
           /* swallow */
         }
@@ -288,21 +298,26 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
       } catch {
         // 後端失敗 → 仍視為本地簽到成功，會在連線時補（仍 emit 給老師）
         try {
-          const numericCourseId = Number(String(courseId).replace(/^tc:/, '')) || 0;
-          const courseName = DEMO_COURSES.find((c) => c.id === numericCourseId)?.name ?? '課程';
-          await emitAttendanceCheckedIn({
-            actorUid: auth.user?.uid ?? 'demo_student_kuchih',
-            actorName: auth.profile?.displayName ?? '學生',
-            targetUids: ['demo_teacher_chang'],
-            courseId: numericCourseId,
-            courseName,
-            payload: {
-              sessionId: sessionId ?? '',
-              studentName: auth.profile?.displayName ?? '學生',
-              status: localResult.status === 'late' ? 'late' : 'present',
-              method: cfg.method,
-            },
-          });
+          const actorUid = auth.user?.uid ?? 'demo_student_kuchih';
+          const actorRole = auth.profile?.role ?? null;
+          const targets = getAttendanceCheckInTargets(actorUid);
+          if (canCheckInAttendance(actorRole) && targets.length > 0) {
+            const numericCourseId = Number(String(courseId).replace(/^tc:/, '')) || 0;
+            const courseName = DEMO_COURSES.find((c) => c.id === numericCourseId)?.name ?? '課程';
+            await emitAttendanceCheckedIn({
+              actorUid,
+              actorName: auth.profile?.displayName ?? '學生',
+              targetUids: targets,
+              courseId: numericCourseId,
+              courseName,
+              payload: {
+                sessionId: sessionId ?? '',
+                studentName: auth.profile?.displayName ?? '學生',
+                status: localResult.status === 'late' ? 'late' : 'present',
+                method: cfg.method,
+              },
+            });
+          }
         } catch {
           /* swallow */
         }

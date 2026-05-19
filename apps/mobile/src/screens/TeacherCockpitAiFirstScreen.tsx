@@ -1,5 +1,8 @@
 /**
  * Campus AI-First — 教師駕駛艙 V2
+ *
+ * 接 demoStore：「示範：送一則公告審核」按鈕 → publishAnnouncement，
+ *   系主任會立即在收件匣看到待審；核准後全體師生 + 校友會收到「公告發布」。
  */
 import React, { useCallback } from 'react';
 import { Alert, View, Text } from 'react-native';
@@ -13,9 +16,12 @@ import {
   AILegacyLink,
   aiTokens,
 } from '../ui/aiFirst';
+import { useDemoRole } from '../state/demoRole';
+import { publishAnnouncement } from '../services/demoStore';
 
 export default function TeacherCockpitAiFirstScreen(props: any) {
   const navigation = props?.navigation;
+  const { role, definition } = useDemoRole();
   const go = useCallback(
     (screen: string, params?: any) => () => {
       try {
@@ -24,6 +30,26 @@ export default function TeacherCockpitAiFirstScreen(props: any) {
     },
     [navigation],
   );
+
+  // Demo：老師送一則公告審核 → 系主任收件匣立即出現「公告待審」action 訊息
+  const sendDemoAnnouncement = useCallback(() => {
+    if (role !== 'teacher') {
+      Alert.alert(
+        '需切換成老師角色',
+        `目前是「${definition.label}」，請至「我的 → 切換角色」改成「教師」再示範送公告。`,
+      );
+      return;
+    }
+    publishAnnouncement({
+      title: '期末考試補考時段公告',
+      content: '本學期期末考補考訂於 6/24（週三）下午 13:00，地點：任垣樓 R301。',
+      teacherName: '張怡君老師',
+    });
+    Alert.alert(
+      '✅ 公告已送審',
+      '已送到系主任收件匣。\n切換成「系主任 黃主任」→ 訊息收件匣可看到「公告待審」並核准；\n核准後全體師生 + 校友會收到「公告發布」通知。',
+    );
+  }, [role, definition.label]);
 
   return (
     <AIDetailScreen
@@ -120,6 +146,17 @@ export default function TeacherCockpitAiFirstScreen(props: any) {
         <AIRow icon="📊" title="教學分析" subtitle="出席、成績、互動" onPress={go('AcademicInsights')} />
         <AIRow icon="📅" title="教學週報" subtitle="AI 自動產生" tag="AI" tagTone="ai" onPress={() => Alert.alert('週報生成中', 'AI 正在彙整本週教學資料...')} />
         <AIRow icon="🎓" title="期末成績登錄" subtitle="6/15 截止" tag="未開始" tagTone="muted" />
+      </AISection>
+
+      <AISection title="🎬 示範工具" subtitle="口試 / 演示專用：示範跨角色公告審核流">
+        <AIRow
+          icon="📢"
+          title="示範：送一則公告審核"
+          subtitle="呼叫 demoStore.publishAnnouncement → 系主任收到待審 action 訊息"
+          tag="Demo"
+          tagTone="ai"
+          onPress={sendDemoAnnouncement}
+        />
       </AISection>
 
       <AILegacyLink label="完整教師後台" onPress={() => navigation?.navigate?.('TeacherCockpitLegacy' as never)} />
