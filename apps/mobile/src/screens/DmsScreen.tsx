@@ -26,6 +26,7 @@ import {
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
+import { shouldBlockForNoLogin, isDemoUid } from '../services/demoSession';
 import { useSchool } from '../state/school';
 import { getDb, isFirebaseMockMode } from '../firebase';
 import {
@@ -239,7 +240,7 @@ export function DmsScreen(props: any) {
   }, [rows, searchQuery]);
 
   // ── 未登入 ──
-  if (!auth.user) {
+  if (shouldBlockForNoLogin({ uid: auth.user?.uid ?? null, hasUser: !!auth.user })) {
     return (
       <Screen>
         <View style={s.emptyContainer}>

@@ -275,8 +275,7 @@ export async function seedDemoInboxIfNeeded(uid: string): Promise<{ seeded: numb
   }
 
   // ────────────────────────────────────────────────
-  // DEPARTMENT_HEAD（demo_admin_huang 共用，已在 ADMIN 段處理）
-  // SYSTEM_ADMIN demo_admin_sys 與 ALUMNI / GUEST 無預設 inbox（依設計）
+  // SYSTEM ADMIN demo_admin_sys 的 inbox 種子（與 demo_admin_huang 區隔）
   // ────────────────────────────────────────────────
   if (uid === 'demo_admin_sys') {
     await emitDepartmentBroadcast({
@@ -288,6 +287,94 @@ export async function seedDemoInboxIfNeeded(uid: string): Promise<{ seeded: numb
       payload: {
         title: '本週系統健檢通過',
         body: '推播服務 / 影片串流 / SSO 均正常。',
+        audience: 'all',
+      },
+    });
+    count++;
+
+    // 異常告警示例
+    await emitDepartmentBroadcast({
+      actorUid: 'demo_admin_sys',
+      actorName: '監控系統',
+      targetUids: [uid],
+      courseId: 'system',
+      courseName: '監控告警',
+      payload: {
+        title: 'API gateway 5xx 上升警報已解除',
+        body: '昨日 15:00-16:00 校務 API 5xx 比率短暫飆升至 2.1%，已於 16:12 自動恢復。',
+        audience: 'all',
+      },
+    });
+    count++;
+  }
+
+  // ────────────────────────────────────────────────
+  // ALUMNI 張學長的 inbox 種子
+  //  - 校友只看公開內容（活動、徵才、校友會）
+  // ────────────────────────────────────────────────
+  if (uid === 'demo_alumni_chang') {
+    await emitDepartmentBroadcast({
+      actorUid: 'demo_admin_huang',
+      actorName: '系友會',
+      targetUids: [uid],
+      courseId: 'alumni',
+      courseName: '系友會',
+      payload: {
+        title: '109 屆十週年同學會',
+        body: '時間：2026/07/15 18:00，地點：台中市西屯區某餐廳。歡迎回娘家！',
+        audience: 'all',
+      },
+    });
+    count++;
+
+    await emitDepartmentBroadcast({
+      actorUid: 'demo_admin_huang',
+      actorName: '職涯中心',
+      targetUids: [uid],
+      courseId: 'alumni',
+      courseName: '校友徵才',
+      payload: {
+        title: '徵才邀請：協助校內職涯講座',
+        body: '邀請各屆學長姐返校分享，本學期主題：「資管畢業 5 年的職涯路徑」。',
+        audience: 'all',
+      },
+    });
+    count++;
+  }
+
+  // ────────────────────────────────────────────────
+  // GUEST 訪客的 inbox 種子
+  //  - 只看公開公告（活動、地圖、餐廳、公車）
+  // ────────────────────────────────────────────────
+  if (uid === 'demo_guest') {
+    await emitDepartmentBroadcast({
+      actorUid: 'demo_admin_huang',
+      actorName: '靜宜大學',
+      targetUids: [uid],
+      courseId: 'public',
+      courseName: '公開訊息',
+      payload: {
+        title: '校園參觀指南',
+        body: '歡迎使用靜宜 App 體驗校園！可瀏覽：公告 · 地圖 · 餐廳 · 公車。',
+        audience: 'all',
+      },
+    });
+    count++;
+  }
+
+  // ────────────────────────────────────────────────
+  // VENDOR 阿英 — 補一筆「平台公告」事件（讓 inbox 不只有訂單）
+  // ────────────────────────────────────────────────
+  if (uid === 'demo_cafeteria') {
+    await emitDepartmentBroadcast({
+      actorUid: 'demo_admin_sys',
+      actorName: '校園商家管理組',
+      targetUids: [uid],
+      courseId: 'vendor',
+      courseName: '商家通知',
+      payload: {
+        title: '本月對帳單已產出',
+        body: '請至商家後台下載 2026/04 月對帳單，並於 5/25 前完成核帳。',
         audience: 'all',
       },
     });

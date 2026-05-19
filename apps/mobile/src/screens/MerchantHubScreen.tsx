@@ -4,6 +4,7 @@ import { Alert, Pressable, ScrollView, Text, View, RefreshControl } from 'react-
 import { Ionicons } from '@expo/vector-icons';
 
 import { useAuth } from '../state/auth';
+import { shouldBlockForNoLogin, isDemoUid } from '../services/demoSession';
 import { useAsyncList } from '../hooks/useAsyncList';
 import { listMerchantOrders, updateMerchantOrderStatus } from '../services/merchant';
 import { Screen, AnimatedCard, Button, Pill, Spinner } from '../ui/components';
@@ -152,7 +153,7 @@ export function MerchantHubScreen() {
     auth.profile?.serviceRoles?.includes('merchant') ||
     assignments.length > 0;
 
-  if (!auth.user) {
+  if (shouldBlockForNoLogin({ uid: auth.user?.uid ?? null, hasUser: !!auth.user })) {
     return (
       <Screen>
         <AnimatedCard title="商家接單" subtitle="未登入">

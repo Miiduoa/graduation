@@ -28,6 +28,7 @@ export type DemoUserRole =
   | 'club_officer'
   | 'department_head'
   | 'admin'
+  | 'vendor'
   | 'alumni'
   | 'guest';
 
@@ -420,6 +421,7 @@ export function placeOrder(params: {
     placedAt: new Date().toISOString(),
   };
   updateStore((s) => ({ ...s, orders: [order, ...s.orders] }));
+  // ① 給學生：訂單確認（發訊者是商家，senderRole 必須是 admin，因為 vendor 不在 DemoRole 型別內 → fallback admin）
   sendMessage({
     fromName: params.vendorName,
     fromAvatar: '🍱',
@@ -429,9 +431,10 @@ export function placeOrder(params: {
     isRead: false,
     type: 'success',
     relatedOrderId: order.id,
-    senderRole: 'student',
+    senderRole: 'admin',
     recipientRoles: ['student'],
   });
+  // ② 給商家（demo 用 admin 角色接收，DemoRolePill 切到 vendor 會 fallback 成 admin）
   sendMessage({
     fromName: `${params.studentName}（新訂單）`,
     fromAvatar: '🛎️',

@@ -1,8 +1,9 @@
 /**
  * Campus AI-First — 餐廳列表 V2
  *
- * 接 demoStore：點餐按鈕 → placeOrder（寫 orders + 通知學生 + 通知 vendor）
- * → 切換角色到 vendor 在 VendorManagement 看得到。
+ * 接 demoStore：點餐按鈕 → placeOrder（寫 orders + 通知學生 + 通知商家收件匣）
+ * → 切換到「餐廳 / admin」角色可在「訊息」收件匣看到 + 推進訂單狀態；
+ *   VendorManagement 後台則由 cafeteriaData.getOrders 提供（非 demoStore 路徑）。
  */
 import React, { useState } from 'react';
 import { Alert, View, Text } from 'react-native';
@@ -44,7 +45,7 @@ export default function CafeteriaAiFirstScreen(props: any) {
     });
     Alert.alert(
       '訂單已成立',
-      `${vendor} 已收到你的訂單《${item}》NT$${price}。\n切換成商家角色可在「店家後台」看到。`,
+      `${vendor} 已收到你的訂單《${item}》NT$${price}。\n切換成「餐廳 / 系統管理員」角色 → 訊息收件匣可推進訂單狀態。`,
     );
   }
   const hour = new Date().getHours();

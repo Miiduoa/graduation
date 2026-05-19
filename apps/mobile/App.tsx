@@ -26,6 +26,7 @@ import { theme, softShadowStyle } from './src/ui/theme';
 import { SchoolProvider, useSchool } from './src/state/school';
 import { FavoritesProvider } from './src/state/favorites';
 import { DemoProvider } from './src/state/demo';
+import { DemoRoleProvider } from './src/state/demoRole';
 import { DemoStoreProvider } from './src/state/demoStore';
 import { AuthProvider, useAuth } from './src/state/auth';
 import { ThemeProvider, useThemeMode } from './src/state/theme';
@@ -1150,9 +1151,11 @@ function AppInner() {
           <ToastProvider>
             <AuthAwareStateProviders>
               <DemoProvider>
-                <DemoStoreProvider>
-                  <AppNavigation />
-                </DemoStoreProvider>
+                <DemoRoleProvider>
+                  <DemoStoreProvider>
+                    <AppNavigation />
+                  </DemoStoreProvider>
+                </DemoRoleProvider>
               </DemoProvider>
             </AuthAwareStateProviders>
           </ToastProvider>

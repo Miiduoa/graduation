@@ -16,6 +16,7 @@ import { theme } from '../../ui/theme';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../../ui/navigationTheme';
 import { useSchool } from '../../state/school';
 import { useAuth } from '../../state/auth';
+import { shouldBlockForNoLogin, isDemoUid } from '../../services/demoSession';
 import { isFirebaseMockMode } from '../../firebase';
 import { fetchRecentCampusPosts, rankFeedPosts, type CampusPostDoc } from '../../services/feed';
 import {
@@ -117,7 +118,7 @@ export function BoardDetailScreen(props: any) {
     );
   }
 
-  if (!auth.user) {
+  if (shouldBlockForNoLogin({ uid: auth.user?.uid ?? null, hasUser: !!auth.user })) {
     return (
       <View style={styles.center}>
         <Text style={{ color: theme.colors.textSecondary }}>請先登入以瀏覽看板</Text>

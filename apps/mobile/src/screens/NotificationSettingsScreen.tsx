@@ -6,6 +6,7 @@ import { Screen, Card, Button, Pill, SectionTitle } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
+import { shouldBlockForNoLogin, isDemoUid } from '../services/demoSession';
 import {
   type NotificationPreferences,
   defaultNotificationPreferences,
@@ -152,7 +153,7 @@ export function NotificationSettingsScreen(props: Record<string, unknown>) {
     }
   };
 
-  if (!auth.user) {
+  if (shouldBlockForNoLogin({ uid: auth.user?.uid ?? null, hasUser: !!auth.user })) {
     return (
       <Screen>
         <ScrollView

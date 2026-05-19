@@ -21,7 +21,11 @@ import {
   TEACHER_CHANG,
   TA_LIN,
   ADMIN_HUANG,
+  ADMIN_SYS,
+  CLUB_OFFICER_WEI,
   VENDOR_AYING,
+  ALUMNI_CHANG,
+  GUEST_DEMO,
   type DemoUid,
   type DemoUserStory,
 } from '../data/demoUserStories';
@@ -37,7 +41,11 @@ const STORIES: Record<DemoUid, DemoUserStory> = {
   demo_teacher_chang: TEACHER_CHANG,
   demo_ta_lin: TA_LIN,
   demo_admin_huang: ADMIN_HUANG,
+  demo_admin_sys: ADMIN_SYS,
+  demo_club_wei: CLUB_OFFICER_WEI,
   demo_cafeteria: VENDOR_AYING,
+  demo_alumni_chang: ALUMNI_CHANG,
+  demo_guest: GUEST_DEMO,
 };
 
 export function getDemoStory(uid: string | null | undefined): DemoUserStory | null {
@@ -92,12 +100,32 @@ const VENDOR_FREQUENT_POI_IDS: string[] = [
   'pu-yiyuan',
 ];
 
+const CLUB_FREQUENT_POI_IDS: string[] = [
+  'pu-renyuan',
+  'pu-library',
+  'pu-jingyuan',
+  'pu-providence', // 主顧樓有社團辦
+];
+const ALUMNI_FREQUENT_POI_IDS: string[] = [
+  'pu-admin', // 校友服務在行政大樓
+  'pu-library',
+];
+const GUEST_FREQUENT_POI_IDS: string[] = [
+  'pu-admin',
+  'pu-library',
+  'pu-jingyuan',
+];
+
 const FREQUENT_BY_ROLE: Record<DemoUid, string[]> = {
   demo_student_kuchih: STUDENT_FREQUENT_POI_IDS,
   demo_teacher_chang: TEACHER_FREQUENT_POI_IDS,
   demo_ta_lin: TA_FREQUENT_POI_IDS,
   demo_admin_huang: ADMIN_FREQUENT_POI_IDS,
+  demo_admin_sys: ADMIN_FREQUENT_POI_IDS, // 系統管理員跟系主任都常在行政大樓
+  demo_club_wei: CLUB_FREQUENT_POI_IDS,
   demo_cafeteria: VENDOR_FREQUENT_POI_IDS,
+  demo_alumni_chang: ALUMNI_FREQUENT_POI_IDS,
+  demo_guest: GUEST_FREQUENT_POI_IDS,
 };
 
 function poiToPlace(poi: CampusPoi, emoji: string, label?: string): PersonaPlace {
@@ -276,7 +304,18 @@ const TIMETABLES: Record<DemoUid, ClassSlot[]> = {
     { weekday: 1, startHHmm: '10:00', endHHmm: '11:30', courseName: '系務會議', poiId: 'pu-admin', roomCode: 'A301' },
     { weekday: 3, startHHmm: '14:00', endHHmm: '16:00', courseName: '校務發展', poiId: 'pu-admin', roomCode: 'A301' },
   ],
+  demo_admin_sys: [
+    { weekday: 1, startHHmm: '09:00', endHHmm: '10:00', courseName: '系統巡檢', poiId: 'pu-admin', roomCode: 'A503' },
+    { weekday: 4, startHHmm: '14:00', endHHmm: '15:30', courseName: '資安會議', poiId: 'pu-admin', roomCode: 'A503' },
+  ],
+  demo_club_wei: [
+    { weekday: 1, startHHmm: '13:10', endHHmm: '15:00', courseName: '機器學習', poiId: 'pu-renyuan', roomCode: 'R305' },
+    { weekday: 3, startHHmm: '19:00', endHHmm: '21:00', courseName: '社課：Web3 入門', poiId: 'pu-providence', roomCode: 'C-12' },
+    { weekday: 5, startHHmm: '10:10', endHHmm: '12:00', courseName: '計算機概論二', poiId: 'pu-renyuan', roomCode: 'R301' },
+  ],
   demo_cafeteria: [],
+  demo_alumni_chang: [],
+  demo_guest: [],
 };
 
 function hhmmToMin(s: string): number {
@@ -448,6 +487,35 @@ export function getTodayTimeline(
       { id: 'finance', hhmm: '17:00', category: 'work', icon: 'cash-outline', title: '日結對帳', detail: '今日營收 $4,820 · 學生悠遊卡占 78%' },
       { id: 'close', hhmm: '19:30', category: 'work', icon: 'lock-closed-outline', title: '收店', detail: '盤點 + 清潔' },
     );
+  } else if (story.role === 'club_officer') {
+    items.push(
+      { id: 'class', hhmm: '13:10', category: 'class', icon: 'school-outline', title: '機器學習', detail: '任垣樓 R305', link: { screen: 'CourseDetail' } },
+      { id: 'club-prep', hhmm: '17:30', category: 'work', icon: 'megaphone-outline', title: '社課準備', detail: '黑客松報名審核 32 件', link: { screen: 'ClubOfficerDashboard' } },
+      { id: 'club-event', hhmm: '19:00', category: 'social', icon: 'people-outline', title: '社課：Web3 入門', detail: '社團辦 C-12 · 42 位報名', link: { screen: 'ClubOfficerDashboard' } },
+      { id: 'home', hhmm: '21:30', category: 'home', icon: 'home-outline', title: '回宿舍', detail: '宜真樓 B302' },
+    );
+  } else if (story.role === 'department_head') {
+    items.push(
+      { id: 'arrive', hhmm: '08:00', category: 'office', icon: 'briefcase-outline', title: '到系辦', detail: '主顧樓 RB-401', link: { screen: 'DepartmentDashboard' } },
+      { id: 'review', hhmm: '09:00', category: 'work', icon: 'analytics-outline', title: '檢視系所儀表板', detail: '3 位學生 risk 標記為紅', link: { screen: 'DepartmentDashboard' } },
+      { id: 'meeting', hhmm: '10:00', category: 'work', icon: 'people-circle-outline', title: '系務會議', detail: '行政大樓 A301' },
+      { id: 'lunch', hhmm: '12:00', category: 'food', icon: 'restaurant-outline', title: '午餐：教職員餐廳', detail: '至善廣場 1F' },
+      { id: 'student-talk', hhmm: '14:00', category: 'work', icon: 'chatbubbles-outline', title: 'risk 學生輔導', detail: '與 1 位學生面談' },
+    );
+  } else if (story.role === 'alumni') {
+    items.push(
+      { id: 'wake', hhmm: '07:30', category: 'wake', icon: 'sunny-outline', title: '出門上班', detail: '台北市信義區' },
+      { id: 'work', hhmm: '09:00', category: 'work', icon: 'laptop-outline', title: '進公司', detail: '某科技公司 後端工程師' },
+      { id: 'alumni-feed', hhmm: '12:30', category: 'social', icon: 'newspaper-outline', title: '逛校友動態', detail: '校友會新增「109 屆十週年聚會」', link: { screen: 'AlumniHome' } },
+      { id: 'job', hhmm: '20:00', category: 'work', icon: 'briefcase-outline', title: '校友徵才回覆', detail: '回覆 2 位學弟妹履歷', link: { screen: 'AlumniHome' } },
+    );
+  } else if (story.role === 'guest') {
+    items.push(
+      { id: 'browse', hhmm: '10:00', category: 'social', icon: 'globe-outline', title: '瀏覽公開公告', detail: '查看校園活動', link: { screen: 'Announcements' } },
+      { id: 'map', hhmm: '11:00', category: 'social', icon: 'map-outline', title: '查看校園地圖', detail: '了解校區動線', link: { screen: 'Map' } },
+      { id: 'food', hhmm: '12:00', category: 'food', icon: 'restaurant-outline', title: '查看餐廳菜單', detail: '逛靜園、至善', link: { screen: 'Cafeteria' } },
+      { id: 'bus', hhmm: '14:00', category: 'bus', icon: 'bus-outline', title: '查校園公車', detail: '路線與發車時間', link: { screen: 'BusV2' } },
+    );
   }
 
   return items.map((it) => ({ ...it, done: before(it.hhmm) }));
@@ -462,7 +530,17 @@ export type PersonaContextValue = {
   story: DemoUserStory | null;
   isDemoPersona: boolean;
   displayName: string;
-  role: 'student' | 'teacher' | 'ta' | 'admin' | 'vendor' | 'unknown';
+  role:
+    | 'student'
+    | 'teacher'
+    | 'ta'
+    | 'club_officer'
+    | 'department_head'
+    | 'admin'
+    | 'vendor'
+    | 'alumni'
+    | 'guest'
+    | 'unknown';
   /** 個人化儲存地點 */
   places: PersonaPlace[];
   /** 下一節課 / 下個行程 */
