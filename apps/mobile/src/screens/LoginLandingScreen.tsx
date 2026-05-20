@@ -149,7 +149,7 @@ const DEMO_PRESETS: DemoRolePreset[] = [
     role: 'guest',
     uid: 'demo_guest',
     email: 'demo.guest@pu.edu.tw',
-    displayName: '訪客（demo 未登入）',
+    displayName: '訪客（demo 試用）',
     schoolId: 'pu',
     department: '訪客',
     icon: 'eye-outline',

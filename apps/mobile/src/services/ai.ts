@@ -1101,8 +1101,81 @@ function retrieveAppDataRecords(
     .map((entry) => entry.record);
 }
 
-function formatAppDataRecords(records: NonNullable<AIContext['appDataRecords']>): string {
-  return records.map((record) => `- [${record.label}] ${limitText(record.text, 220)}`).join('\n');
+function formatAppDataRecords(
+  records: NonNullable<AIContext['appDataRecords']>,
+  maxChars = 220,
+): string {
+  return records.map((record) => `- [${record.label}] ${limitText(record.text, maxChars)}`).join('\n');
+}
+
+function buildRemoteAppDataRecords(
+  context: AIContext,
+  maxRecords = context.userId?.startsWith('demo_') ? 24 : 10,
+  maxChars = context.userId?.startsWith('demo_') ? 560 : 260,
+): NonNullable<AIContext['appDataRecords']> | undefined {
+  const records = context.appDataRecords ?? [];
+  if (records.length === 0) return undefined;
+  return [...records]
+    .sort((left, right) => (right.priority ?? 0) - (left.priority ?? 0))
+    .slice(0, maxRecords)
+    .map((record) => ({
+      ...record,
+      text: limitText(record.text, maxChars),
+    }));
+}
+
+function buildAgentAppDataPrompt(context: AIContext): string {
+  const records = buildRemoteAppDataRecords(context);
+  if (!records || records.length === 0) return '';
+  return [
+    '## App 已載入資料',
+    context.userId?.startsWith('demo_')
+      ? '這是 demo 角色目前可存取的完整 App 資料索引；回答 demo 問題時優先引用這些資料，不要因正式後端沒有資料就說查不到。'
+      : '這是目前使用者可存取的 App 資料索引；回答個人狀態與校園服務問題時優先引用。',
+    formatAppDataRecords(records, context.userId?.startsWith('demo_') ? 560 : 260),
+  ].join('\n');
+}
+
+function buildLocalAgentContext(context: AIContext): Record<string, unknown> {
+  return {
+    schoolId: context.schoolId,
+    userId: context.userId,
+    userName: context.userName,
+    role: context.role,
+    announcements: context.announcements?.slice(0, 5),
+    events: context.events?.slice(0, 5),
+    menus: context.menus?.slice(0, 12),
+    pois: context.pois?.slice(0, 10),
+    courses: context.courses,
+    pendingAssignments: context.pendingAssignments,
+    gradesSummary: context.gradesSummary,
+    weeklyReport: context.weeklyReport,
+    appPulseSummary: context.appPulseSummary,
+    appDataCoverage: context.appDataCoverage,
+    appDataRecords: buildRemoteAppDataRecords(context),
+  };
+}
+
+function buildManagedAssistantMessages(messages: AIMessage[], context: AIContext): AIMessage[] {
+  const recent = messages.slice(-CAMPUS_ASSISTANT_MESSAGE_WINDOW);
+  if (!context.userId?.startsWith('demo_')) return recent;
+
+  const lastUserText = [...messages].reverse().find((message) => message.role === 'user')?.content ?? '';
+  const records = retrieveAppDataRecords(context.appDataRecords, lastUserText, 14);
+  const systemContext = [
+    '【Mobile Demo 角色資料】',
+    '以下是目前 App 已載入的 demo 角色資料。回答 demo 角色問題時必須優先引用；不要因後端正式 API 無資料就回答「沒有資料」。',
+    `使用者：${context.userName ?? context.userId}`,
+    `uid：${context.userId}`,
+    `角色：${context.role ?? 'demo'}`,
+    context.appPulseSummary ? `即時摘要：\n${limitText(context.appPulseSummary, 900)}` : '',
+    getDemoPersonaPromptAddon(context.userId),
+    records.length > 0 ? `可檢索資料：\n${formatAppDataRecords(records, 360)}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  return [{ role: 'system', content: limitText(systemContext, 6000) }, ...recent];
 }
 
 type OnDeviceContextSection = {
@@ -3121,7 +3194,7 @@ async function callCampusAssistant(
     );
 
     const result = await callable({
-      messages: messages.slice(-CAMPUS_ASSISTANT_MESSAGE_WINDOW),
+      messages: buildManagedAssistantMessages(messages, context),
       context: {
         schoolId: context.schoolId,
         screen: (context as any).screen,
@@ -3861,6 +3934,8 @@ function buildAgentSystemPrompt(context: AIContext): string {
     context.userId ? `已登入` : '未登入',
     `學校：${context.schoolId}`,
     '',
+    buildAgentAppDataPrompt(context),
+    '',
     '## 重要：你有工具可以自主查詢所有資料，請一定要先查再答！',
     '',
     buildNoToolSurrogatePromptSection(),
@@ -3912,22 +3987,7 @@ async function callLocalLLM(
       body: JSON.stringify({
         message: lastMessage,
         history,
-        context: {
-          schoolId: context.schoolId,
-          userId: context.userId,
-          userName: context.userName,
-          role: context.role,
-          announcements: context.announcements?.slice(0, 5),
-          events: context.events?.slice(0, 5),
-          menus: context.menus?.slice(0, 10),
-          pois: context.pois?.slice(0, 10),
-          courses: context.courses,
-          pendingAssignments: context.pendingAssignments,
-          gradesSummary: context.gradesSummary,
-          weeklyReport: context.weeklyReport,
-          appPulseSummary: context.appPulseSummary,
-          appDataCoverage: context.appDataCoverage,
-        },
+        context: buildLocalAgentContext(context),
       }),
     });
 
@@ -4082,11 +4142,7 @@ export async function chatWithLocalLLMStreaming(
       body: JSON.stringify({
         message: lastMessage,
         history,
-        context: {
-          userName: context.userName,
-          schoolId: context.schoolId,
-          role: (context as any)?.role,
-        },
+        context: buildLocalAgentContext(context),
       }),
     });
 
