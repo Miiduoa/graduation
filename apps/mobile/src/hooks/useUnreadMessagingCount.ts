@@ -7,7 +7,8 @@ import {
   where,
 } from 'firebase/firestore';
 
-import { getDb, isFirebaseMockMode } from '../firebase';
+import { getDb } from '../firebase';
+import { shouldUseLiveFirestoreListeners } from '../services/liveFirestoreGate';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { toDate } from '../utils/format';
@@ -29,15 +30,16 @@ import {
 export function useUnreadMessagingCount(): number {
   const auth = useAuth();
   const { school } = useSchool();
-  const db = getDb();
+  const userId = auth.user?.uid ?? null;
   const [count, setCount] = useState(0);
 
   useEffect(() => {
-    if (!auth.user || !school.id || isFirebaseMockMode()) {
+    if (!userId || !school.id || !shouldUseLiveFirestoreListeners({ uid: userId })) {
       setCount(0);
       return;
     }
-    const myUid = auth.user.uid;
+    const myUid = userId;
+    const db = getDb();
 
     const ref = collection(db, 'conversations');
     const qy = query(
@@ -80,7 +82,7 @@ export function useUnreadMessagingCount(): number {
     );
 
     return () => unsub();
-  }, [auth.user?.uid, school.id, db]);
+  }, [userId, school.id]);
 
   return count;
 }

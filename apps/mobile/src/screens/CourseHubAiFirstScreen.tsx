@@ -2,7 +2,7 @@
  * Campus AI-First — 課程 Hub V2 (LMS 課程主頁)
  */
 import React from 'react';
-import { View, Text } from 'react-native';
+import { Alert, View, Text } from 'react-native';
 import {
   AIDetailScreen,
   AIInsightBanner,
@@ -11,16 +11,70 @@ import {
   AIRow,
   AIButton,
   AIChip,
-  AIMark,
-  AILegacyLink,
   aiTokens,
 } from '../ui/aiFirst';
+import { safeNavigate } from '../utils/safeNavigate';
 
 export default function CourseHubAiFirstScreen(props: any) {
   const navigation = props?.navigation;
   const params = props?.route?.params ?? {};
   const courseId = params.courseId || 'CS302';
   const courseName = params.name || '資料庫系統';
+  const groupId = String(params.groupId ?? params.courseSpaceId ?? courseId);
+
+  const go = (screen: string, nextParams?: Record<string, unknown>) =>
+    safeNavigate(navigation, screen, nextParams, {
+      fallbackMessage: `已保留「${screen}」入口，demo 可先回到課程中心。`,
+      fallbackRoute: 'CourseHub',
+      fallbackParams: { courseId, groupId, name: courseName },
+    });
+
+  const openAIAssistant = () => {
+    go('AIStudyBuddy', {
+      courseId,
+      groupId,
+      courseName,
+      initialPrompt: `我是${courseName}課程助理，可以回答期末範圍、補考申請、上週課程重點與 SQL JOIN 練習。`,
+    });
+  };
+
+  const openAssignment = () => {
+    go('HomeworkSubmit', {
+      courseId,
+      groupId,
+      homeworkId: 'demo-sql-join-lab-4',
+      title: 'Lab 4：SQL JOIN 練習',
+    });
+  };
+
+  const openQuiz = () => {
+    go('QuizCenter', {
+      courseId,
+      groupId,
+      quizId: 'demo-db-quiz-3',
+    });
+  };
+
+  const openMaterial = (title: string, materialId: string, type: 'pdf' | 'video' = 'pdf') => {
+    if (type === 'video') {
+      Alert.alert('影片摘要已開啟', '老師上週影片回放已整理成 5 段重點，可在教材檢視器查看。');
+    }
+    go('CourseMaterialViewer', {
+      courseId,
+      groupId,
+      materialId,
+      title,
+      type,
+    });
+  };
+
+  const openDiscussion = (threadTitle: string) => {
+    go('CourseDiscussion', {
+      courseId,
+      groupId,
+      focusThreadTitle: threadTitle,
+    });
+  };
 
   return (
     <AIDetailScreen
@@ -104,12 +158,12 @@ export default function CourseHubAiFirstScreen(props: any) {
           marginTop: aiTokens.space.md,
         }}
       >
-        <AIChip label="📚 教材" />
-        <AIChip label="📝 作業" />
-        <AIChip label="📊 測驗" />
-        <AIChip label="💬 討論" />
-        <AIChip label="📅 課表" />
-        <AIChip label="📈 成績" />
+        <AIChip label="📚 教材" onPress={() => openMaterial('第 10 章 · 索引與優化', 'demo-db-index-ch10')} />
+        <AIChip label="📝 作業" onPress={openAssignment} />
+        <AIChip label="📊 測驗" onPress={openQuiz} />
+        <AIChip label="💬 討論" onPress={() => openDiscussion('期末範圍會包含預存程序嗎？')} />
+        <AIChip label="📅 課表" onPress={() => go('Calendar', { courseId, groupId })} />
+        <AIChip label="📈 成績" onPress={() => go('CourseScores', { courseId, groupId })} />
       </View>
 
       {/* AI 課程助理 */}
@@ -119,7 +173,7 @@ export default function CourseHubAiFirstScreen(props: any) {
             「老師上週說了什麼」「期末範圍」「補考怎麼申請」
           </Text>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-            <AIButton label="開始對話" icon="✨" />
+            <AIButton label="開始對話" icon="✨" onPress={openAIAssistant} />
           </View>
         </AICard>
       </AISection>
@@ -132,6 +186,7 @@ export default function CourseHubAiFirstScreen(props: any) {
           subtitle="週五 23:59 · 進度 0%"
           tag="未開始"
           tagTone="warning"
+          onPress={openAssignment}
         />
         <AIRow
           icon="📊"
@@ -139,27 +194,59 @@ export default function CourseHubAiFirstScreen(props: any) {
           subtitle="週四 09:00 · 範圍：第 9-10 章"
           tag="已準備"
           tagTone="success"
+          onPress={openQuiz}
         />
       </AISection>
 
       {/* 最近教材 */}
       <AISection title="最近教材">
-        <AIRow icon="📄" title="第 10 章 · 索引與優化" subtitle="PDF · 5/17" />
-        <AIRow icon="🎥" title="老師上週影片回放" subtitle="50:32 · AI 已切重點" tag="AI 摘要" tagTone="ai" />
-        <AIRow icon="📄" title="JOIN 範例集" subtitle="PDF · 5/15" />
+        <AIRow
+          icon="📄"
+          title="第 10 章 · 索引與優化"
+          subtitle="PDF · 5/17"
+          onPress={() => openMaterial('第 10 章 · 索引與優化', 'demo-db-index-ch10')}
+        />
+        <AIRow
+          icon="🎥"
+          title="老師上週影片回放"
+          subtitle="50:32 · AI 已切重點"
+          tag="AI 摘要"
+          tagTone="ai"
+          onPress={() => openMaterial('老師上週影片回放', 'demo-db-week-video', 'video')}
+        />
+        <AIRow
+          icon="📄"
+          title="JOIN 範例集"
+          subtitle="PDF · 5/15"
+          onPress={() => openMaterial('JOIN 範例集', 'demo-db-join-examples')}
+        />
       </AISection>
 
       {/* 討論區 */}
       <AISection title="課程討論" subtitle="3 個熱議">
-        <AIRow icon="💬" title="期末範圍會包含預存程序嗎？" subtitle="林同學 · 12 回應" />
-        <AIRow icon="💬" title="Lab 3 第二題的索引怎麼建？" subtitle="王同學 · 8 回應" tag="未解" tagTone="warning" />
-        <AIRow icon="💬" title="期中考分數有人比想的高很多嗎" subtitle="陳同學 · 24 回應" tag="熱門" tagTone="ai" />
+        <AIRow
+          icon="💬"
+          title="期末範圍會包含預存程序嗎？"
+          subtitle="林同學 · 12 回應"
+          onPress={() => openDiscussion('期末範圍會包含預存程序嗎？')}
+        />
+        <AIRow
+          icon="💬"
+          title="Lab 3 第二題的索引怎麼建？"
+          subtitle="王同學 · 8 回應"
+          tag="未解"
+          tagTone="warning"
+          onPress={() => openDiscussion('Lab 3 第二題的索引怎麼建？')}
+        />
+        <AIRow
+          icon="💬"
+          title="期中考分數有人比想的高很多嗎"
+          subtitle="陳同學 · 24 回應"
+          tag="熱門"
+          tagTone="ai"
+          onPress={() => openDiscussion('期中考分數有人比想的高很多嗎')}
+        />
       </AISection>
-
-      <AILegacyLink
-        label="完整 LMS（含影音、評量、教評）"
-        onPress={() => navigation?.navigate?.('CourseHubV2Legacy' as never, params as never)}
-      />
     </AIDetailScreen>
   );
 }
