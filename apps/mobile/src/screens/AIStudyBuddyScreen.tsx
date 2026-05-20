@@ -39,6 +39,7 @@ import {
 import { DEMO_COURSES } from '../data/demoCoursesMock';
 import { useAuth } from '../state/auth';
 import { requestHelp } from '../services/demoStore';
+import { canRequestHelp } from '../services/roleEventTargets';
 
 const courseNameById = (id: number): string => {
   const found = DEMO_COURSES.find((c) => c.id === id);
@@ -319,6 +320,10 @@ export default function AIStudyBuddyScreen() {
                       </View>
                       <Pressable
                         onPress={async () => {
+                          if (!canRequestHelp(auth.profile?.role ?? null)) {
+                            Alert.alert('此角色不適用', '求助流程僅供學生 / 社團幹部 demo 角色使用。');
+                            return;
+                          }
                           // 真的 emit help_requested → TA inbox + 學伴 inbox
                           // 收件人會自動排除 actor 自己（避免老師對自己求助）
                           try {

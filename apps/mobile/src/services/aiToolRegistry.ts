@@ -40,6 +40,7 @@ import {
   type ExecutorContext as LegacyExecutorContext,
   type ToolCallResult,
 } from './aiAgentTools';
+import { createDemoDiningOrder } from './demoOrdering';
 
 // ════════════════════════════════════════════════════════════
 // Stage 1：標準化型別契約
@@ -572,49 +573,36 @@ async function orderFoodHandler(
   // 避免打 Firebase Functions（demo 帳號過不了 security rules）。
   if (typeof ctx.userId === 'string' && ctx.userId.startsWith('demo_')) {
     try {
-      const itemName = asString(args.itemName) || asString(args.name) || itemId || '推薦套餐';
-      const unitPrice = Math.max(0, asInt(args.price, 90));
-      const vendorName = asString(args.vendorName) || vendorId || '校園小棧';
-      // 動態 import 避免循環引用
-      const demoStore = await import('./demoStore');
-      const demoMerchant = await import('./demoMerchantOrders');
-      const order = demoStore.placeOrder({
-        studentId: ctx.userId!,
-        studentName: asString(args.studentName) || '顧晉瑋',
-        vendorName,
-        items: [{ name: itemName, qty: quantity, price: unitPrice }],
-      });
-      // 同步寫入 merchant orders，讓阿櫻 (vendor) 的 VendorDashboard 也看得到
-      demoMerchant.addDemoOrder({
-        id: order.id,
-        userId: ctx.userId!,
-        items: [
-          {
-            menuItemId: itemId || `${vendorId || 'demo'}-line`,
-            name: itemName,
-            quantity,
-            price: unitPrice,
-          },
-        ],
-        total: order.total,
-        totalAmount: order.total,
-        totalPrice: order.total,
-        status: 'pending',
-        paymentStatus: 'paid',
-        merchantId: vendorId || 'merchant_cafe_a',
-        cafeteria: vendorId || 'merchant_cafe_a',
-        cafeteriaId: vendorId || 'merchant_cafe_a',
+      const demo = await createDemoDiningOrder({
+        userId: ctx.userId,
+        schoolId: ctx.schoolId,
+        userName: asString(args.studentName),
+        role: String(ctx.role ?? ''),
+        merchantId: vendorId,
+        merchantName: asString(args.vendorName),
+        itemId,
+        itemName: asString(args.itemName) || asString(args.name),
+        quantity,
+        price: args.price as any,
         note,
-        createdAt: order.placedAt,
-      } as any);
+        source: 'ai_agent',
+      });
+      const suffix = demo.substituted ? `（原指定品項不可用，已改用 demo 可下單品項）` : '';
       return {
         success: true,
         toolName: 'order_food',
-        summary: `已為你向「${vendorName}」訂購「${itemName}」${quantity} 份，訂單編號 ${order.id}。切到「餐廳 阿櫻」角色或訊息收件匣可看到訂單。`,
-        data: { orderNo: order.id, vendorName, itemName, quantity, total: order.total },
+        summary: `已為你向「${demo.merchant.name}」訂購「${demo.item.name}」${demo.quantity} 份${suffix}，訂單編號 ${demo.order.id}。切到「餐廳 阿英」角色或訊息收件匣可看到訂單。`,
+        data: {
+          orderNo: demo.order.id,
+          vendorName: demo.merchant.name,
+          itemName: demo.item.name,
+          quantity: demo.quantity,
+          total: demo.total,
+          actorRole: demo.actor.role,
+        },
         isWrite: true,
         isDraft: false,
-        recordId: order.id,
+        recordId: demo.order.id,
       };
     } catch (e: any) {
       return makeFailure(
@@ -1119,7 +1107,7 @@ const TOOL_SPECS: readonly ToolSpec[] = [
     description: '從已開通接單的校園餐廳，依 itemId/vendorId 下單一筆餐點。',
     kind: 'cross_role_write',
     parameters: ORDER_FOOD_PARAMETERS,
-    allowedRoles: ['student', 'teacher', 'staff', 'department_head', 'admin'],
+    allowedRoles: ALL_ROLES,
     fields: [
       {
         name: 'vendorId',
@@ -2164,8 +2152,13 @@ export function getRegistryGeminiDeclarations(
   role?: CampusActorRole,
 ): RegistryGeminiDeclaration[] {
   const out: RegistryGeminiDeclaration[] = [];
+  const roleName = String(role ?? '');
   for (const spec of TOOL_SPECS) {
-    if (role && !spec.allowedRoles.includes(role)) continue;
+    if (
+      role &&
+      !spec.allowedRoles.includes(role) &&
+      !(spec.name === 'order_food' && (roleName === 'alumni' || roleName === 'guest'))
+    ) continue;
     const properties: RegistryGeminiDeclaration['parameters']['properties'] = {};
     const required: string[] = [];
     for (const field of spec.fields) {
@@ -2226,7 +2219,13 @@ export async function executeToolStandard(
 
   // 角色檢查
   const role = ctx.role ?? 'student';
-  if (!spec.allowedRoles.includes(role)) {
+  const roleName = String(role);
+  const demoDiningRoleOverride =
+    spec.name === 'order_food' &&
+    typeof ctx.userId === 'string' &&
+    ctx.userId.startsWith('demo_') &&
+    (roleName === 'alumni' || roleName === 'guest');
+  if (!spec.allowedRoles.includes(role) && !demoDiningRoleOverride) {
     return makeFailure(
       spec.name,
       'role_denied',

@@ -5,7 +5,7 @@
  * 設計規範：docs/design/AI_FIRST_REDESIGN.md
  */
 import React from 'react';
-import { View, Text } from 'react-native';
+import { Alert, View, Text } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import {
   AIScreen,
@@ -23,6 +23,15 @@ export default function CampusAiFirstScreen() {
   const navigation = useNavigation<any>();
   const hour = new Date().getHours();
   const isLunch = hour >= 11 && hour < 14;
+  const go = (screen: string, params?: Record<string, unknown>) => {
+    navigation?.navigate?.(screen as never, params as never);
+  };
+  const openDemoOrdering = () => go('Ordering', {
+    cafeteriaId: 'merchant_demo_exam_bento',
+    cafeteria: '口試 Demo 便當店',
+    itemName: '口試招牌雞腿便當',
+    quantity: 1,
+  });
 
   return (
     <AIScreen>
@@ -49,9 +58,9 @@ export default function CampusAiFirstScreen() {
               {'\n'}今日主餐：紅燒牛肉麵、糖醋排骨
             </Text>
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-              <AIButton label="🧭 導航" />
-              <AIButton label="查看菜單" variant="ghost" />
-              <AIButton label="線上點餐" variant="ghost" />
+              <AIButton label="🧭 導航" onPress={() => go('MapV2', { destination: '主餐廳' })} />
+              <AIButton label="查看菜單" variant="ghost" onPress={() => go('MenuDetail', { name: '口試 Demo 便當店' })} />
+              <AIButton label="線上點餐" variant="ghost" onPress={openDemoOrdering} />
             </View>
           </AICard>
 
@@ -94,7 +103,7 @@ export default function CampusAiFirstScreen() {
           icon="🗺"
           title="校園地圖 · AR 導航"
           subtitle="找教室、廁所、會議室"
-          right={<Text style={{ color: aiTokens.muted, fontSize: 16 }}>›</Text>}
+          onPress={() => go('MapV2')}
         />
         <AIRow
           icon="📚"
@@ -102,6 +111,7 @@ export default function CampusAiFirstScreen() {
           subtitle="3F 自習區 · 剩 23 個座位"
           tag="63% 滿"
           tagTone="warning"
+          onPress={() => go('Library')}
         />
         <AIRow
           icon="🚌"
@@ -109,6 +119,7 @@ export default function CampusAiFirstScreen() {
           subtitle="下班 14:20 · 還有 32 分鐘"
           tag="14:20"
           tagTone="ai"
+          onPress={() => go('BusV2')}
         />
         <AIRow
           icon="🍱"
@@ -116,6 +127,7 @@ export default function CampusAiFirstScreen() {
           subtitle={isLunch ? '正午尖峰 · 主餐廳 8 min' : '4 家現營業'}
           tag={isLunch ? '尖峰' : '營業中'}
           tagTone={isLunch ? 'warning' : 'success'}
+          onPress={() => go('餐廳總覽')}
         />
       </AISection>
 
@@ -126,8 +138,8 @@ export default function CampusAiFirstScreen() {
             5/23 09:00 工程館 B101 · 已 32/50 報名
           </Text>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-            <AIButton label="立即報名" />
-            <AIButton label="查看詳情" variant="ghost" />
+            <AIButton label="立即報名" onPress={() => Alert.alert('已報名', '黑客松報名資料已送出，活動會出現在通知中。')} />
+            <AIButton label="查看詳情" variant="ghost" onPress={() => Alert.alert('黑客松 2026', '5/23 09:00 工程館 B101，已 32/50 報名。')} />
           </View>
         </AICard>
 
@@ -137,23 +149,25 @@ export default function CampusAiFirstScreen() {
           subtitle="5/19 19:00 學生活動中心 201"
           tag="本週"
           tagTone="ai"
+          onPress={() => Alert.alert('吉他社招新講座', '已加入你的活動提醒。')}
         />
         <AIRow
           icon="📷"
           title="攝影社 — 校園走拍"
           subtitle="5/20 16:00 集合點：行政大樓前"
+          onPress={() => Alert.alert('攝影社校園走拍', '集合點：行政大樓前，已開啟活動資訊。')}
         />
       </AISection>
 
       {/* Quick filters */}
       <AISection title="探索校園">
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: aiTokens.space.md }}>
-          <AIChip label="找教室" />
-          <AIChip label="找廁所" />
-          <AIChip label="找充電插座" />
-          <AIChip label="無障礙路線" />
-          <AIChip label="場地預約" />
-          <AIChip label="校園活動" />
+          <AIChip label="找教室" onPress={() => go('MapV2', { query: '教室' })} />
+          <AIChip label="找廁所" onPress={() => go('MapV2', { query: '廁所' })} />
+          <AIChip label="找充電插座" onPress={() => go('MapV2', { query: '充電插座' })} />
+          <AIChip label="無障礙路線" onPress={() => go('AccessibleRoute')} />
+          <AIChip label="場地預約" onPress={() => Alert.alert('場地預約', '已開啟可預約場地清單。')} />
+          <AIChip label="校園活動" onPress={() => Alert.alert('校園活動', '已整理本週活動與報名狀態。')} />
         </View>
       </AISection>
 

@@ -13,7 +13,10 @@ import {
   emitFeedbackDrafted,
   emitDepartmentBroadcast,
   emitHomeworkSubmitted,
+  emitHelpRequested,
+  emitLeaveRequested,
   emitOrderPlaced,
+  emitOrderStatusChanged,
   loadRoleEventInbox,
   loadVisibleRoleEventInbox,
   clearRoleEventInbox,
@@ -172,6 +175,122 @@ describe('roleEventBus', () => {
     expect(await loadVisibleRoleEventInbox({ uid: 'demo_cafeteria', role: 'vendor' })).toHaveLength(1);
     expect(await loadVisibleRoleEventInbox({ uid: 'stu_order_owner', role: 'student' })).toHaveLength(1);
     expect(await loadVisibleRoleEventInbox({ uid: 'stu_other', role: 'student' })).toHaveLength(0);
+  });
+
+  it('order_placed 下單本人不限 student role，vendor/alumni/guest 也只看自己的單', async () => {
+    await emitOrderPlaced({
+      actorUid: 'demo_alumni_chang',
+      actorName: '張學長',
+      targetUids: undefined,
+      courseId: 'merchant_cafe_a',
+      courseName: '靜宜中餐部',
+      payload: {
+        orderId: 'o_alumni',
+        merchantId: 'merchant_cafe_a',
+        merchantName: '靜宜中餐部',
+        items: '排骨便當 ×1',
+        total: 85,
+        studentName: '張學長',
+      },
+    });
+
+    expect(await loadVisibleRoleEventInbox({ uid: 'demo_alumni_chang', role: 'alumni' })).toHaveLength(1);
+    expect(await loadVisibleRoleEventInbox({ uid: 'demo_guest', role: 'guest' })).toHaveLength(0);
+  });
+
+  it('order_status_changed 明確 target 到誰，該 demo 角色就看得到', async () => {
+    await emitOrderStatusChanged({
+      actorUid: 'demo_cafeteria',
+      actorName: '阿英',
+      targetUids: ['demo_guest'],
+      courseId: 'merchant_cafe_a',
+      courseName: '靜宜中餐部',
+      payload: {
+        orderId: 'o_guest',
+        merchantName: '靜宜中餐部',
+        newStatus: 'ready',
+        message: '餐點好了',
+      },
+    });
+
+    expect(await loadVisibleRoleEventInbox({ uid: 'demo_guest', role: 'guest' })).toHaveLength(1);
+    expect(await loadVisibleRoleEventInbox({ uid: 'demo_student_kuchih', role: 'student' })).toHaveLength(0);
+  });
+
+  it('學生請假會出現在老師與系主任 visible inbox，不會出現在其他學生 inbox', async () => {
+    await emitLeaveRequested({
+      actorUid: 'demo_student_kuchih',
+      actorName: '顧晉瑋',
+      targetUids: ['demo_teacher_chang', 'demo_admin_huang'],
+      courseId: 'leave',
+      courseName: '請假申請',
+      payload: {
+        leaveId: 'leave_demo',
+        studentName: '顧晉瑋',
+        category: 'sick',
+        fromDate: '2026-05-21',
+        toDate: '2026-05-21',
+        reason: '看醫生',
+      },
+    });
+
+    expect(await loadVisibleRoleEventInbox({ uid: 'demo_teacher_chang', role: 'teacher' })).toHaveLength(1);
+    expect(await loadVisibleRoleEventInbox({ uid: 'demo_admin_huang', role: 'department_head' })).toHaveLength(1);
+    expect(await loadVisibleRoleEventInbox({ uid: 'student_other', role: 'student' })).toHaveLength(0);
+  });
+
+  it('老師請假只會送到系主任，不會送回老師自己', async () => {
+    await emitLeaveRequested({
+      actorUid: 'demo_teacher_chang',
+      actorName: '張怡君',
+      targetUids: ['demo_teacher_chang', 'demo_admin_huang'],
+      courseId: 'leave',
+      courseName: '請假申請',
+      payload: {
+        leaveId: 'leave_teacher',
+        studentName: '張怡君',
+        category: 'personal',
+        fromDate: '2026-05-22',
+        toDate: '2026-05-22',
+        reason: '校外會議',
+      },
+    });
+
+    expect(await loadVisibleRoleEventInbox({ uid: 'demo_teacher_chang', role: 'teacher' })).toHaveLength(0);
+    expect(await loadVisibleRoleEventInbox({ uid: 'demo_admin_huang', role: 'department_head' })).toHaveLength(1);
+  });
+
+  it('作業繳交與求助只進老師 / TA visible inbox', async () => {
+    await emitHomeworkSubmitted({
+      actorUid: 'demo_student_kuchih',
+      actorName: '顧晉瑋',
+      targetUids: ['demo_teacher_chang', 'demo_ta_lin'],
+      courseId: 'c1',
+      courseName: '機器學習',
+      payload: {
+        homeworkId: 'hw1',
+        homeworkTitle: 'HW1',
+        studentName: '顧晉瑋',
+        isLate: false,
+        submittedAt: '2026-05-20T00:00:00Z',
+      },
+    });
+    await emitHelpRequested({
+      actorUid: 'demo_student_kuchih',
+      actorName: '顧晉瑋',
+      targetUids: ['demo_teacher_chang', 'demo_ta_lin'],
+      courseId: 'c1',
+      courseName: '機器學習',
+      payload: {
+        topic: '鏈結串列卡關',
+        preview: '想請助教協助',
+        urgency: 'medium',
+      },
+    });
+
+    expect(await loadVisibleRoleEventInbox({ uid: 'demo_teacher_chang', role: 'teacher' })).toHaveLength(2);
+    expect(await loadVisibleRoleEventInbox({ uid: 'demo_ta_lin', role: 'ta' })).toHaveLength(2);
+    expect(await loadVisibleRoleEventInbox({ uid: 'demo_student_kuchih', role: 'student' })).toHaveLength(0);
   });
 
   it('department_broadcast audience=teachers 不會出現在學生 visible inbox', async () => {

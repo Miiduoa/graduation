@@ -5,7 +5,7 @@
  * 設計規範：docs/design/AI_FIRST_REDESIGN.md §4 Slot Cards
  */
 import React from 'react';
-import { View, Text } from 'react-native';
+import { Alert, View, Text } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import {
   AIScreen,
@@ -79,7 +79,7 @@ export default function LearnAiFirstScreen() {
           </Text>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
             <AIButton label="開始 5 分鐘速覽" icon="⚡" onPress={() => openCourseHub()} />
-            <AIButton label="跳過" variant="ghost" />
+            <AIButton label="跳過" variant="ghost" onPress={() => Alert.alert('已跳過', 'AI 已把這張複習卡移到稍後提醒。')} />
           </View>
         </AICard>
       </AISection>

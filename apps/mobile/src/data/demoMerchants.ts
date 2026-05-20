@@ -95,7 +95,44 @@ export interface DemoMerchant {
   description: string;
 }
 
+export const DEMO_EXAM_BENTO_MERCHANT_ID = 'merchant_demo_exam_bento';
+
+export type DemoMerchantAssignmentSpec = {
+  merchantId: string;
+  role: 'owner' | 'manager' | 'staff';
+};
+
+export function getDemoMerchantAssignmentsForUid(
+  uid: string | null | undefined,
+): DemoMerchantAssignmentSpec[] {
+  if (uid === 'demo_cafeteria') {
+    return [
+      { merchantId: DEMO_EXAM_BENTO_MERCHANT_ID, role: 'manager' },
+      { merchantId: 'merchant_cafe_a', role: 'manager' },
+      { merchantId: 'merchant_coffee_b', role: 'staff' },
+      { merchantId: 'merchant_noodle_f', role: 'manager' },
+    ];
+  }
+  return [];
+}
+
 export const DEMO_MERCHANTS: DemoMerchant[] = [
+  {
+    id: DEMO_EXAM_BENTO_MERCHANT_ID,
+    name: '口試 Demo 便當店',
+    category: 'cafeteria',
+    emoji: '🍱',
+    location: '主顧樓 B1 口試展示區',
+    staffCount: 3,
+    isOpen: true,
+    hours: '09:00 - 21:00',
+    rating: 4.9,
+    reviewCount: 88,
+    todayServedCount: 36,
+    todayRevenue: 3560,
+    color: '#00A86B',
+    description: '專為口試展示預設，可由任何 demo 角色或 AI 助理立即下單',
+  },
   {
     id: 'merchant_cafe_a',
     name: '靜宜中餐部',
@@ -242,6 +279,8 @@ export interface DemoMerchantOrder {
   id: string;
   merchantId: string;
   studentName: string;
+  /** demo 展示用：學生 / 老師 / 校友 / 訪客等下單身份 */
+  studentRole?: string;
   /** 學生 uid（用於 emit 推播） */
   studentUid?: string;
   items: string;
@@ -257,6 +296,11 @@ export interface DemoMerchantOrder {
 const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
 
 export const DEMO_MERCHANT_ORDERS: DemoMerchantOrder[] = [
+  // ── 口試 Demo 便當店（保證可下單，供口試展示）──────────────────
+  { id: 'o_exam_1', merchantId: DEMO_EXAM_BENTO_MERCHANT_ID, studentName: '顧晉瑋', studentRole: 'student', studentUid: 'demo_student_kuchih', items: '口試招牌雞腿便當 ×1', total: 95, status: 'pending', orderedAt: minutesAgo(1), pickupMethod: 'walk_in' },
+  { id: 'o_exam_2', merchantId: DEMO_EXAM_BENTO_MERCHANT_ID, studentName: '張怡君', studentRole: 'teacher', studentUid: 'demo_teacher_chang', items: '教授能量排骨便當 ×1', total: 105, status: 'processing', orderedAt: minutesAgo(6), note: '少飯' },
+  { id: 'o_exam_3', merchantId: DEMO_EXAM_BENTO_MERCHANT_ID, studentName: '訪客', studentRole: 'guest', studentUid: 'demo_guest', items: '快速示範素食餐 ×1', total: 85, status: 'ready', orderedAt: minutesAgo(10) },
+
   // ── 中餐部 (餐點多元、訂單最多) ──────────────────────────
   { id: 'o_cafe_1', merchantId: 'merchant_cafe_a', studentName: '阿明', studentUid: 'student_aming', items: '日式炸雞便當 ×1', total: 80, status: 'pending', orderedAt: minutesAgo(5), pickupMethod: 'walk_in' },
   { id: 'o_cafe_2', merchantId: 'merchant_cafe_a', studentName: '小華', studentUid: 'student_xiaohua', items: '素食套餐', total: 75, status: 'processing', orderedAt: minutesAgo(12), note: '不要香菜' },
@@ -320,6 +364,10 @@ export interface DemoMerchantPopular {
 }
 
 export const DEMO_MERCHANT_POPULAR: DemoMerchantPopular[] = [
+  // 口試 Demo 便當店
+  { merchantId: DEMO_EXAM_BENTO_MERCHANT_ID, name: '口試招牌雞腿便當', count: 18, revenue: 1710, trend: 'up' },
+  { merchantId: DEMO_EXAM_BENTO_MERCHANT_ID, name: '教授能量排骨便當', count: 11, revenue: 1155, trend: 'up' },
+  { merchantId: DEMO_EXAM_BENTO_MERCHANT_ID, name: '快速示範素食餐', count: 7, revenue: 595, trend: 'flat' },
   // 中餐部
   { merchantId: 'merchant_cafe_a', name: '日式炸雞便當', count: 38, revenue: 3040, trend: 'up' },
   { merchantId: 'merchant_cafe_a', name: '滷肉飯', count: 24, revenue: 1440, trend: 'flat' },
@@ -371,6 +419,10 @@ export interface DemoMerchantStaff {
 }
 
 export const DEMO_MERCHANT_STAFF: DemoMerchantStaff[] = [
+  // 口試 Demo 便當店
+  { id: 's_exam_1', merchantId: DEMO_EXAM_BENTO_MERCHANT_ID, name: '阿英', role: 'manager', onShiftToday: true, monthsServed: 36 },
+  { id: 's_exam_2', merchantId: DEMO_EXAM_BENTO_MERCHANT_ID, name: '小琪', role: 'staff', onShiftToday: true, monthsServed: 8 },
+  { id: 's_exam_3', merchantId: DEMO_EXAM_BENTO_MERCHANT_ID, name: '陳老闆', role: 'owner', onShiftToday: true, monthsServed: 84 },
   // 中餐部
   { id: 's_cafe_1', merchantId: 'merchant_cafe_a', name: '陳老闆', role: 'owner', onShiftToday: true, monthsServed: 84 },
   { id: 's_cafe_2', merchantId: 'merchant_cafe_a', name: '阿英', role: 'manager', onShiftToday: true, monthsServed: 36 },
@@ -416,6 +468,11 @@ export interface DemoMenuItem {
 }
 
 export const DEMO_MENU: DemoMenuItem[] = [
+  // 口試 Demo 便當店
+  { id: 'm_exam_bento_1', merchantId: DEMO_EXAM_BENTO_MERCHANT_ID, name: '口試招牌雞腿便當', price: 95, category: '便當', soldOut: false, vegetarian: false, tags: ['口試demo', '保證可訂', '熱賣'] },
+  { id: 'm_exam_bento_2', merchantId: DEMO_EXAM_BENTO_MERCHANT_ID, name: '教授能量排骨便當', price: 105, category: '便當', soldOut: false, vegetarian: false, tags: ['口試demo', '高蛋白'] },
+  { id: 'm_exam_bento_3', merchantId: DEMO_EXAM_BENTO_MERCHANT_ID, name: '快速示範素食餐', price: 85, category: '便當', soldOut: false, vegetarian: true, tags: ['口試demo', '素食'] },
+  { id: 'm_exam_bento_4', merchantId: DEMO_EXAM_BENTO_MERCHANT_ID, name: 'AI 助理加點紅茶', price: 25, category: '飲品', soldOut: false, vegetarian: true, tags: ['口試demo', '加點'] },
   // 中餐部
   { id: 'm_cafe_1', merchantId: 'merchant_cafe_a', name: '日式炸雞便當', price: 80, category: '便當', soldOut: false, vegetarian: false, tags: ['熱賣', '高蛋白'] },
   { id: 'm_cafe_2', merchantId: 'merchant_cafe_a', name: '排骨便當', price: 85, category: '便當', soldOut: false, vegetarian: false, tags: ['熱賣'] },
@@ -493,8 +550,12 @@ export function recommendMerchantsForStudent(opts: {
     let score = 60;
     let reason = '';
 
+    if (m.id === DEMO_EXAM_BENTO_MERCHANT_ID) {
+      score += 35;
+      reason = '口試 demo 店，保證可下單';
+    }
     // 時段匹配
-    if (opts.hour >= 6 && opts.hour < 10 && m.category === 'breakfast') {
+    else if (opts.hour >= 6 && opts.hour < 10 && m.category === 'breakfast') {
       score += 30;
       reason = '早餐尖峰時段，最佳選擇';
     } else if (opts.hour >= 11 && opts.hour < 14 && (m.category === 'cafeteria' || m.category === 'noodle' || m.category === 'buffet')) {

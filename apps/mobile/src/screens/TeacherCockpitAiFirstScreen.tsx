@@ -13,20 +13,20 @@ import {
   AICard,
   AIRow,
   AIButton,
-  AILegacyLink,
   aiTokens,
 } from '../ui/aiFirst';
 import { useDemoRole } from '../state/demoRole';
 import { publishAnnouncement } from '../services/demoStore';
+import { safeNavigate } from '../utils/safeNavigate';
 
 export default function TeacherCockpitAiFirstScreen(props: any) {
   const navigation = props?.navigation;
   const { role, definition } = useDemoRole();
   const go = useCallback(
     (screen: string, params?: any) => () => {
-      try {
-        navigation?.navigate?.(screen as never, params as never);
-      } catch {}
+      safeNavigate(navigation, screen, params, {
+        fallbackMessage: `「${screen}」目前無法直接開啟，demo 已保留此入口。`,
+      });
     },
     [navigation],
   );
@@ -135,7 +135,7 @@ export default function TeacherCockpitAiFirstScreen(props: any) {
 
       <AISection title="待批改" subtitle="13 件">
         <AIRow icon="📝" title="Lab 3 — 排程實作" subtitle="48 份 · 已批 35 / 48" tag="今晚" tagTone="warning" onPress={go('TeacherGrading', { assignment: 'lab-3' })} />
-        <AIRow icon="📝" title="第二次小考" subtitle="48 份 · 已批 48 / 48" tag="完成" tagTone="success" />
+        <AIRow icon="📝" title="第二次小考" subtitle="48 份 · 已批 48 / 48" tag="完成" tagTone="success" onPress={() => Alert.alert('第二次小考', '已完成批改，48 份成績皆已發布。')} />
       </AISection>
 
       <AISection title="助教">
@@ -145,7 +145,7 @@ export default function TeacherCockpitAiFirstScreen(props: any) {
       <AISection title="快速入口">
         <AIRow icon="📊" title="教學分析" subtitle="出席、成績、互動" onPress={go('AcademicInsights')} />
         <AIRow icon="📅" title="教學週報" subtitle="AI 自動產生" tag="AI" tagTone="ai" onPress={() => Alert.alert('週報生成中', 'AI 正在彙整本週教學資料...')} />
-        <AIRow icon="🎓" title="期末成績登錄" subtitle="6/15 截止" tag="未開始" tagTone="muted" />
+        <AIRow icon="🎓" title="期末成績登錄" subtitle="6/15 截止" tag="未開始" tagTone="muted" onPress={go('CourseGradebook', { courseId: 'CS301' })} />
       </AISection>
 
       <AISection title="🎬 示範工具" subtitle="口試 / 演示專用：示範跨角色公告審核流">
@@ -158,8 +158,6 @@ export default function TeacherCockpitAiFirstScreen(props: any) {
           onPress={sendDemoAnnouncement}
         />
       </AISection>
-
-      <AILegacyLink label="完整教師後台" onPress={() => navigation?.navigate?.('TeacherCockpitLegacy' as never)} />
     </AIDetailScreen>
   );
 }

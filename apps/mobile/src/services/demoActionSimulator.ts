@@ -171,6 +171,7 @@ export async function simulateStudentOrderFood(input: {
   merchantName: string;
   items: string;
   total: number;
+  buyerRole?: string;
   /** 可選：對齊到 mockSource.createOrder 回傳的 id，方便雙向追蹤狀態 */
   orderId?: string;
 }) {
@@ -190,6 +191,7 @@ export async function simulateStudentOrderFood(input: {
       items: input.items,
       total: input.total,
       studentName: input.studentName,
+      buyerRole: input.buyerRole,
     },
   });
   return { orderId };

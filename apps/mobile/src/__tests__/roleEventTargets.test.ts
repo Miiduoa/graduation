@@ -116,16 +116,19 @@ describe('roleEventTargets — 角色路由不會送給自己', () => {
   });
 
   describe('下單', () => {
-    test('🚨 餐廳員工不能對自己餐廳下單', () => {
-      expect(canPlaceOrder('vendor')).toBe(false);
+    test('所有 demo 角色都能在校園 app 內下單', () => {
+      expect(canPlaceOrder('student')).toBe(true);
+      expect(canPlaceOrder('teacher')).toBe(true);
+      expect(canPlaceOrder('ta')).toBe(true);
+      expect(canPlaceOrder('club_officer')).toBe(true);
+      expect(canPlaceOrder('department_head')).toBe(true);
+      expect(canPlaceOrder('admin')).toBe(true);
+      expect(canPlaceOrder('vendor')).toBe(true);
+      expect(canPlaceOrder('alumni')).toBe(true);
+      expect(canPlaceOrder('guest')).toBe(true);
     });
 
-    test('校友 / 訪客不能在校園 app 內下單（demo 隔離）', () => {
-      expect(canPlaceOrder('alumni')).toBe(false);
-      expect(canPlaceOrder('guest')).toBe(false);
-    });
-
-    test('學生下單 → 商家，不含自己', () => {
+    test('使用者下單 → 商家，不含自己', () => {
       const t = getOrderPlacedTargets('demo_student_kuchih', 'demo_cafeteria');
       expect(t).toEqual(['demo_cafeteria']);
     });

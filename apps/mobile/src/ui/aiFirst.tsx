@@ -297,6 +297,8 @@ export function AIRow({
   tagTone = 'muted',
   right,
   onPress,
+  static: isStatic = false,
+  disabled = false,
 }: {
   icon?: string;
   title: string;
@@ -305,6 +307,8 @@ export function AIRow({
   tagTone?: 'ai' | 'success' | 'warning' | 'danger' | 'muted';
   right?: React.ReactNode;
   onPress?: () => void;
+  static?: boolean;
+  disabled?: boolean;
 }) {
   const tagMap = {
     ai: { bg: aiTokens.aiSoft, color: aiTokens.ai },
@@ -315,12 +319,12 @@ export function AIRow({
   };
   const tagStyle = tagMap[tagTone];
 
-  // 若呼叫端忘了傳 onPress，至少不要假裝可點 — 開發環境直接出 warn 方便定位
-  if (!onPress && __DEV__) {
-    // eslint-disable-next-line no-console
+  // 若呼叫端忘了傳 onPress，至少不要假裝可點 — 開發環境直接出 warn 方便定位。
+  // static/disabled 是刻意的非互動狀態，不提示。
+  if (!onPress && !isStatic && !disabled && __DEV__) {
     console.warn(`[AIRow] "${title}" 缺少 onPress，會顯示但點擊無反應`);
   }
-  const interactive = typeof onPress === 'function';
+  const interactive = !isStatic && !disabled && typeof onPress === 'function';
   const sectionCtx = React.useContext(AISectionContext);
 
   // 在 AISection 容器內：iOS insetGrouped 樣式 — 無邊框、hairline 分隔、首末圓角
@@ -340,11 +344,11 @@ export function AIRow({
   return (
     <TouchableOpacity
       activeOpacity={interactive ? 0.6 : 1}
-      onPress={onPress}
+      onPress={interactive ? onPress : undefined}
       disabled={!interactive}
       accessibilityRole={interactive ? 'button' : undefined}
-      accessibilityState={interactive ? undefined : { disabled: true }}
-      style={[styles.row, groupedStyle, !interactive && { opacity: 0.55 }]}
+      accessibilityState={disabled ? { disabled: true } : undefined}
+      style={[styles.row, groupedStyle, disabled && { opacity: 0.55 }]}
     >
       {icon ? <Text style={{ fontSize: 20, marginRight: 12 }}>{icon}</Text> : null}
       <View style={{ flex: 1, minWidth: 0 }}>
@@ -381,6 +385,8 @@ export function AIButton({
   size = 'md',
   icon,
   style,
+  static: isStatic = false,
+  disabled = false,
 }: {
   label: string;
   onPress?: () => void;
@@ -388,6 +394,8 @@ export function AIButton({
   size?: 'sm' | 'md' | 'lg';
   icon?: string;
   style?: ViewStyle;
+  static?: boolean;
+  disabled?: boolean;
 }) {
   const variantMap = {
     // iOS Filled
@@ -405,18 +413,17 @@ export function AIButton({
       : size === 'lg'
         ? { paddingV: 14, paddingH: 20, fs: 17 }
         : { paddingV: 12, paddingH: 18, fs: 15 };
-  if (!onPress && __DEV__) {
-    // eslint-disable-next-line no-console
+  if (!onPress && !isStatic && !disabled && __DEV__) {
     console.warn(`[AIButton] "${label}" 缺少 onPress，已自動 disable`);
   }
-  const interactive = typeof onPress === 'function';
+  const interactive = !isStatic && !disabled && typeof onPress === 'function';
   return (
     <TouchableOpacity
       activeOpacity={interactive ? 0.8 : 1}
-      onPress={onPress}
+      onPress={interactive ? onPress : undefined}
       disabled={!interactive}
       accessibilityRole="button"
-      accessibilityState={interactive ? undefined : { disabled: true }}
+      accessibilityState={!interactive ? { disabled: true } : undefined}
       style={[
         {
           backgroundColor: v.bg,
@@ -429,7 +436,7 @@ export function AIButton({
           alignItems: 'center',
           gap: 4,
           alignSelf: 'flex-start',
-          opacity: interactive ? 1 : 0.5,
+          opacity: interactive ? 1 : isStatic ? 0.75 : 0.5,
         },
         style,
       ]}

@@ -10,7 +10,6 @@ import {
   AICard,
   AIRow,
   AIButton,
-  AILegacyLink,
   aiTokens,
 } from '../ui/aiFirst';
 
@@ -18,6 +17,15 @@ export default function MenuDetailAiFirstScreen(props: any) {
   const navigation = props?.navigation;
   const params = props?.route?.params ?? {};
   const restaurantName = params.name || '主餐廳';
+  const openOrder = (itemName: string, price: number) => {
+    navigation?.navigate?.('Ordering' as never, {
+      cafeteria: restaurantName,
+      cafeteriaId: params.cafeteriaId,
+      itemName,
+      quantity: 1,
+      price,
+    } as never);
+  };
 
   return (
     <AIDetailScreen
@@ -79,8 +87,8 @@ export default function MenuDetailAiFirstScreen(props: any) {
             湯頭濃郁、牛肉軟嫩。你週三常點。
           </Text>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-            <AIButton label="加入訂單" icon="🛒" />
-            <AIButton label="今日預訂" variant="ghost" />
+            <AIButton label="加入訂單" icon="🛒" onPress={() => openOrder('紅燒牛肉麵', 95)} />
+            <AIButton label="今日預訂" variant="ghost" onPress={() => openOrder('紅燒牛肉麵', 95)} />
           </View>
         </AICard>
 
@@ -99,13 +107,13 @@ export default function MenuDetailAiFirstScreen(props: any) {
 
       {/* 完整菜單 */}
       <AISection title="完整菜單" subtitle="12 個品項">
-        <AIRow icon="🍜" title="紅燒牛肉麵" subtitle="650 kcal" tag="$95" tagTone="ai" />
-        <AIRow icon="🍱" title="日式咖哩飯" subtitle="720 kcal" tag="$85" tagTone="ai" />
-        <AIRow icon="🐟" title="鮭魚定食" subtitle="580 kcal" tag="$120" tagTone="ai" />
-        <AIRow icon="🍝" title="奶油義大利麵" subtitle="780 kcal" tag="$100" tagTone="ai" />
-        <AIRow icon="🥗" title="凱薩沙拉" subtitle="280 kcal" tag="$75" tagTone="ai" />
-        <AIRow icon="🍛" title="豬排咖哩" subtitle="850 kcal" tag="$110" tagTone="ai" />
-        <AIRow icon="🍤" title="海鮮炒飯" subtitle="690 kcal" tag="$95" tagTone="ai" />
+        <AIRow icon="🍜" title="紅燒牛肉麵" subtitle="650 kcal" tag="$95" tagTone="ai" onPress={() => openOrder('紅燒牛肉麵', 95)} />
+        <AIRow icon="🍱" title="日式咖哩飯" subtitle="720 kcal" tag="$85" tagTone="ai" onPress={() => openOrder('日式咖哩飯', 85)} />
+        <AIRow icon="🐟" title="鮭魚定食" subtitle="580 kcal" tag="$120" tagTone="ai" onPress={() => openOrder('鮭魚定食', 120)} />
+        <AIRow icon="🍝" title="奶油義大利麵" subtitle="780 kcal" tag="$100" tagTone="ai" onPress={() => openOrder('奶油義大利麵', 100)} />
+        <AIRow icon="🥗" title="凱薩沙拉" subtitle="280 kcal" tag="$75" tagTone="ai" onPress={() => openOrder('凱薩沙拉', 75)} />
+        <AIRow icon="🍛" title="豬排咖哩" subtitle="850 kcal" tag="$110" tagTone="ai" onPress={() => openOrder('豬排咖哩', 110)} />
+        <AIRow icon="🍤" title="海鮮炒飯" subtitle="690 kcal" tag="$95" tagTone="ai" onPress={() => openOrder('海鮮炒飯', 95)} />
       </AISection>
 
       {/* 評論 */}
@@ -113,11 +121,6 @@ export default function MenuDetailAiFirstScreen(props: any) {
         <Review name="陳同學" stars="⭐⭐⭐⭐⭐" body="牛肉麵真的很好吃，份量很多" />
         <Review name="林同學" stars="⭐⭐⭐⭐" body="鮭魚很新鮮，但飯有點冷" />
       </AISection>
-
-      <AILegacyLink
-        label="完整餐廳資訊（含庫存、預訂、評論完整）"
-        onPress={() => navigation?.navigate?.('MenuDetailLegacy' as never, params as never)}
-      />
     </AIDetailScreen>
   );
 }

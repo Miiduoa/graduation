@@ -59,57 +59,16 @@ import {
   aiPreReviewGrade,
 } from '../services/aiOrchestrator';
 import { AIMissionControl } from '../components/AIMissionControl';
+import {
+  buildFlaggedTeacherCockpitStudents,
+  buildHomeworkSubmissionStats,
+  getMissingStudentsForHomework,
+  getTeacherCockpitStudents,
+  selectFeedbackStudentForHomework,
+} from '../services/teacherCockpitActions';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
-}
-
-// 🔗 demo 學生主角是「顧晉瑋」(uid: demo_student_kuchih)
-// 每門課都把他放在第一位，這樣老師在任一課對學生 #1 動作時，
-// 都會以 demo 學生為對象 → 學生登入後在 Today「📥 來自老師」立刻看到。
-const STUDENT_PRIMARY = {
-  uid: 'demo_student_kuchih',
-  displayName: '顧晉瑋',
-  email: 'demo.student@pu.edu.tw',
-};
-
-const DEMO_STUDENTS: Record<number, Array<{ uid: string; displayName: string; email: string }>> = {
-  71378: [
-    STUDENT_PRIMARY,
-    { uid: 'u1', displayName: '林佳玲', email: 'jia@example.edu' },
-    { uid: 'u2', displayName: '王冠宇', email: 'kuan@example.edu' },
-    { uid: 'u3', displayName: '陳柏翰', email: 'po@example.edu' },
-    { uid: 'u4', displayName: '楊涵真', email: 'han@example.edu' },
-    { uid: 'u5', displayName: '張瑞祥', email: 'rui@example.edu' },
-    { uid: 'u6', displayName: '李宜珊', email: 'yi@example.edu' },
-  ],
-  71282: [
-    STUDENT_PRIMARY,
-    { uid: 'u11', displayName: '吳子翔', email: 'tzu@example.edu' },
-    { uid: 'u12', displayName: '黃詩涵', email: 'shi@example.edu' },
-  ],
-  71240: [
-    STUDENT_PRIMARY,
-    { uid: 'u21', displayName: '蔡明哲', email: 'min@example.edu' },
-  ],
-  71393: [
-    STUDENT_PRIMARY,
-    { uid: 'u31', displayName: '林依靜', email: 'yj@example.edu' },
-    { uid: 'u32', displayName: '周冠廷', email: 'zh@example.edu' },
-    { uid: 'u33', displayName: '阮品逸', email: 'pp@example.edu' },
-  ],
-  77418: [
-    STUDENT_PRIMARY,
-    { uid: 'u41', displayName: '謝芷涵', email: 'zh4@example.edu' },
-  ],
-};
-
-function fakeSubmittedSet(hwId: number, studentCount: number): Set<string> {
-  const submitted = new Set<string>();
-  for (let i = 0; i < studentCount; i++) {
-    if ((hwId + i) % 3 !== 0) submitted.add(`u${i}`);
-  }
-  return submitted;
 }
 
 export default function TeacherCockpitScreen() {
@@ -145,16 +104,11 @@ export default function TeacherCockpitScreen() {
     teacherCourses[0] ??
     DEMO_COURSES[0];
   const homeworks = useMemo(() => getDemoHomeworksByCourse(courseId), [courseId]);
-  const students = DEMO_STUDENTS[courseId] ?? [];
+  const students = useMemo(() => getTeacherCockpitStudents(courseId), [courseId]);
 
   const homeworkStats = useMemo(
-    () =>
-      homeworks.map((hw) => {
-        const submitted = fakeSubmittedSet(hw.id, students.length);
-        const missing = students.length - submitted.size;
-        return { hw, submittedCount: submitted.size, missing, total: students.length };
-      }),
-    [homeworks, students.length],
+    () => buildHomeworkSubmissionStats(homeworks, students),
+    [homeworks, students],
   );
 
   const pendingGradeCount = useMemo(
@@ -313,20 +267,8 @@ export default function TeacherCockpitScreen() {
   }, [auth.user?.uid, auth.profile?.displayName]);
 
   const flagged = useMemo(() => {
-    const out: Array<{ student: typeof students[number]; reason: string; severity: 'high' | 'medium' }> = [];
-    students.forEach((s, i) => {
-      const missing = homeworkStats.filter((hs) => {
-        const submitted = fakeSubmittedSet(hs.hw.id, students.length);
-        return !submitted.has(`u${i}`);
-      }).length;
-      if (missing >= 3) {
-        out.push({ student: s, reason: `已 ${missing} 份作業未繳`, severity: 'high' });
-      } else if (missing === 2) {
-        out.push({ student: s, reason: '已 2 份作業未繳', severity: 'medium' });
-      }
-    });
-    return out;
-  }, [students, homeworkStats]);
+    return buildFlaggedTeacherCockpitStudents(homeworks, students);
+  }, [students, homeworks]);
 
   const [aiPreview, setAiPreview] = useState<ReturnType<typeof aiPreReviewGrade> | null>(null);
 
@@ -360,8 +302,7 @@ export default function TeacherCockpitScreen() {
 
   const openBulkReminderFor = useCallback(
     (hw: MockHomework) => {
-      const submitted = fakeSubmittedSet(hw.id, students.length);
-      const missing = students.filter((_, i) => !submitted.has(`u${i}`));
+      const missing = getMissingStudentsForHomework(hw, students);
 
       // 🤖 AI 預測：先告訴老師發了會有多少人補交
       const hoursUntilDue = Math.max(0, (new Date(hw.dueAt).getTime() - Date.now()) / 3_600_000);
@@ -741,8 +682,8 @@ export default function TeacherCockpitScreen() {
             open={openSection === 'homeworks'}
             onToggle={() => toggle('homeworks')}
           >
-            {homeworkStats.map(({ hw, missing, total }) => {
-              const submittedCount = total - missing;
+            {homeworkStats.map(({ hw, missing, total, submittedCount }) => {
+              const feedbackTarget = selectFeedbackStudentForHomework(hw, students);
               return (
                 <View
                   key={hw.id}
@@ -767,9 +708,9 @@ export default function TeacherCockpitScreen() {
                     截止 {new Date(hw.dueAt).toLocaleDateString('zh-TW')} · 已交 {submittedCount}/{total}
                   </Text>
                   <View style={{ flexDirection: 'row', gap: theme.space.xs + 2, marginTop: theme.space.xs + 4 }}>
-                    {submittedCount > 0 && (
+                    {submittedCount > 0 && feedbackTarget && (
                       <Pressable
-                        onPress={() => openDraftFor(hw, students[0] ?? { uid: 'demo', displayName: '示範學生' })}
+                        onPress={() => openDraftFor(hw, feedbackTarget)}
                         style={({ pressed }) => ({
                           flex: 1,
                           paddingVertical: theme.space.xs + 4,

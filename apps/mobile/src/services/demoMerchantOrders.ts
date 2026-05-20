@@ -82,6 +82,8 @@ function mapDemoMerchantOrder(o: DemoMerchantOrder): Order {
   return {
     id: o.id,
     userId: o.studentUid ?? 'demo_student_kuchih',
+    customerName: o.studentName,
+    customerRole: o.studentRole,
     items: [
       {
         menuItemId: `${o.merchantId}-line`,

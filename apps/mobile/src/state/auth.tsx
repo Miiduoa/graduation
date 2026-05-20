@@ -45,6 +45,7 @@ import { clearTCSession, purgeLegacyTCSensitiveStorage, type TCCourse } from '..
 
 import type { UserRole as DataUserRole } from '../data/types';
 import type { MerchantAssignment } from '../data/types';
+import { DEMO_EXAM_BENTO_MERCHANT_ID } from '../data/demoMerchants';
 import { getRoleGroup, type RoleGroup } from '../services/permissions';
 
 export type UserRole = DataUserRole;
@@ -321,10 +322,25 @@ function toMockUserProfile(session: {
   const r = session.role;
   if (r === 'vendor') {
     serviceRoles.push('merchant');
-    // 對齊 DEMO_MERCHANTS（merchant_cafe_a / merchant_coffee_b / merchant_noodle_f），
+    // 對齊 DEMO_MERCHANTS，且把口試 Demo 店家排第一，方便現場展示接單。
     // 這樣 MerchantHubScreen / VendorDashboardScreen / 學生 OrderingScreen
     // 三邊使用同一組 merchant id，避免「我送單和接單到底能不能運作」這條鏈斷掉。
     merchantAssignments = [
+      {
+        schoolId: session.schoolId,
+        schoolName: '靜宜大學',
+        cafeteriaId: DEMO_EXAM_BENTO_MERCHANT_ID,
+        cafeteriaName: '口試 Demo 便當店',
+        merchantId: DEMO_EXAM_BENTO_MERCHANT_ID,
+        brandKey: 'demo_exam_bento',
+        operatorRole: 'manager',
+        status: 'active',
+        orderingEnabled: true,
+        pilotStatus: 'live',
+        displayName: session.displayName,
+        email: session.email,
+        lastActiveAt: new Date().toISOString(),
+      },
       {
         schoolId: session.schoolId,
         schoolName: '靜宜大學',
