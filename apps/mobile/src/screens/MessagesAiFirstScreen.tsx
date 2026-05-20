@@ -9,7 +9,7 @@
  *  - 訊息詳情含 CrossRoleActionPanel：依 relatedXxxId 自動顯示
  *    審核 / 派工 / 訂單推進 / 求助回覆 / 社員審核 / 作業批改 deep-link
  */
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, View, Text, TextInput, Pressable } from 'react-native';
 import {
   AIScreen,
@@ -61,7 +61,13 @@ export default function MessagesAiFirstScreen(props: any) {
     [demoRole, store, filter],
   );
   const unread = useMemo(() => getUnreadCount(demoRole, store), [demoRole, store]);
-  const selected = useMemo(() => store.dynamicMessages.find((m) => m.id === selectedId) ?? null, [store, selectedId]);
+  const selected = useMemo(() => messages.find((m) => m.id === selectedId) ?? null, [messages, selectedId]);
+
+  useEffect(() => {
+    if (selectedId && !messages.some((m) => m.id === selectedId)) {
+      setSelectedId(null);
+    }
+  }, [messages, selectedId]);
 
   function open(msg: StoreDynamicMessage) {
     setSelectedId(msg.id);
@@ -280,7 +286,7 @@ function CrossRoleActionPanel({
     );
   }
 
-  if (msg.relatedOrderId && demoRole === 'admin') {
+  if (msg.relatedOrderId && demoRole === 'vendor') {
     return (
       <ActionCard title="🍱 訂單推進" helper="推進訂單狀態後學生收到對應通知">
         <AIButton

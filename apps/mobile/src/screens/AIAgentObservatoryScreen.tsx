@@ -81,7 +81,7 @@ import {
   loadAuditLog,
   type AuditLogEntry,
 } from '../services/aiSkillApplicator';
-import { loadRoleEventInbox, type RoleEvent } from '../services/roleEventBus';
+import { loadVisibleRoleEventInbox, type RoleEvent } from '../services/roleEventBus';
 
 import {
   DEMO_COURSES,
@@ -232,11 +232,11 @@ export default function AIAgentObservatoryScreen() {
     // 同步載入 audit log + 跨角色事件流
     const [log, events] = await Promise.all([
       loadAuditLog(uid).catch(() => [] as AuditLogEntry[]),
-      loadRoleEventInbox(uid).catch(() => [] as RoleEvent<unknown>[]),
+      loadVisibleRoleEventInbox({ uid, role: profile?.role }).catch(() => [] as RoleEvent<unknown>[]),
     ]);
     setAuditLog(log.slice(0, 20));
     setRecentEvents(events.slice(0, 15));
-  }, [uid]);
+  }, [profile?.role, uid]);
 
   useEffect(() => {
     runThinking();

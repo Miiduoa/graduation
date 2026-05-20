@@ -440,78 +440,83 @@ export function getTodayTimeline(
   const nowHHmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   const before = (t: string) => t <= nowHHmm;
 
+  // 統一 timeline 連結策略：
+  //   - 每個 link.screen 必須對應到實際註冊在 Navigator 的路由名（HomeStack/LearnStack/MapStack/CafeteriaStack/MessagesStack）。
+  //   - 若沒有合適的 target，就不要設 link（點下去不會跳，但也不會出錯）。
+  //   - 課程相關用 CourseHubV2（已驗證註冊在 LearnStack），courseId 用實際 DEMO_COURSES 的 id。
+  //   - 「我的訂單」用 'Ordering' route (CafeteriaStack 內)。
   if (story.role === 'student') {
     items.push(
-      { id: 'wake', hhmm: '07:00', category: 'wake', icon: 'sunny-outline', title: '起床', detail: `${story.dorm?.building ?? '宿舍'} ${story.dorm?.room ?? ''}` },
-      { id: 'breakfast', hhmm: '07:45', category: 'food', icon: 'cafe-outline', title: '早餐：靜園餐廳', detail: '預訂的鮪魚三明治 + 大冰拿', link: { screen: 'OrderHistory' } },
+      { id: 'wake', hhmm: '07:00', category: 'wake', icon: 'sunny-outline', title: '起床', detail: `${story.dorm?.building ?? '宜真樓'} ${story.dorm?.room ?? 'A215'}` },
+      { id: 'breakfast', hhmm: '07:45', category: 'food', icon: 'cafe-outline', title: '早餐：靜園餐廳', detail: '預訂的鮪魚三明治 + 大冰拿', link: { screen: 'Ordering' } },
       { id: 'busA', hhmm: '08:40', category: 'bus', icon: 'bus-outline', title: '搭校園 A 線', detail: '宿舍 → 任垣樓 · 約 5 分鐘', link: { screen: 'BusV2' } },
-      { id: 'class1', hhmm: '09:10', category: 'class', icon: 'school-outline', title: '資料庫管理系統', detail: '任垣樓 R301 · 張怡君老師', link: { screen: 'CourseDetail', params: { courseId: 101 } } },
-      { id: 'lunch', hhmm: '12:10', category: 'food', icon: 'restaurant-outline', title: '午餐 ready', detail: '靜宜中餐部 · 日式炸雞便當', link: { screen: 'OrderDetail', params: { orderId: 'o_cafe_5' } } },
-      { id: 'lib', hhmm: '13:00', category: 'study', icon: 'library-outline', title: '圖書館自習', detail: `蓋夏圖書館 4F · 24 小時自習室 · 借的「統計學概論」${'2'} 天後到期`, link: { screen: 'IndoorFloorMap', params: { buildingId: 'lib' } } },
-      { id: 'class2', hhmm: '13:10', category: 'class', icon: 'school-outline', title: '統計學', detail: '主顧樓 PH-101', link: { screen: 'CourseDetail', params: { courseId: 102 } } },
-      { id: 'gym', hhmm: '17:00', category: 'health', icon: 'fitness-outline', title: '羽球場練球', detail: '羽球場 #2 · 與資管學會社員', link: { screen: 'Fitness' } },
-      { id: 'dinner', hhmm: '18:30', category: 'food', icon: 'restaurant-outline', title: '晚餐：至善廣場', detail: '韓式拌飯', link: { screen: '餐廳總覽' } },
+      { id: 'class1', hhmm: '09:10', category: 'class', icon: 'school-outline', title: '機器學習', detail: '任垣樓 R301 · 張怡君老師', link: { screen: 'CourseHubV2', params: { courseId: 71378 } } },
+      { id: 'lunch', hhmm: '12:10', category: 'food', icon: 'restaurant-outline', title: '午餐 ready', detail: '靜宜中餐部 · 日式炸雞便當', link: { screen: 'Ordering' } },
+      { id: 'lib', hhmm: '13:00', category: 'study', icon: 'library-outline', title: '圖書館自習', detail: '蓋夏圖書館 4F · 24 小時自習室 · 借的「統計學概論」2 天後到期', link: { screen: 'IndoorFloorMap', params: { buildingId: 'lib' } } },
+      { id: 'class2', hhmm: '13:10', category: 'class', icon: 'school-outline', title: '計算機概論(二)', detail: '主顧樓 PH-101 · 王孝熙老師', link: { screen: 'CourseHubV2', params: { courseId: 71282 } } },
+      { id: 'gym', hhmm: '17:00', category: 'health', icon: 'fitness-outline', title: '羽球場練球', detail: '羽球場 #2 · 與資管學會社員', link: { screen: 'Health' } },
+      { id: 'dinner', hhmm: '18:30', category: 'food', icon: 'restaurant-outline', title: '晚餐：至善廣場', detail: '韓式拌飯', link: { screen: 'Cafeteria' } },
       { id: 'home', hhmm: '21:30', category: 'home', icon: 'home-outline', title: '回宿舍', detail: '宜真樓 A215 · 室友夜聊' },
     );
   } else if (story.role === 'teacher') {
     items.push(
-      { id: 'drive', hhmm: '08:30', category: 'bus', icon: 'car-outline', title: '開車到校', detail: `主顧樓教職員停車場 · ${story.office?.vehicle?.plate}` },
-      { id: 'office', hhmm: '08:50', category: 'office', icon: 'briefcase-outline', title: '辦公室準備', detail: `${story.office?.building} ${story.office?.room} · 課前準備`, link: { screen: 'TeacherCockpit' } },
-      { id: 'class1', hhmm: '09:10', category: 'class', icon: 'school-outline', title: '資料庫管理系統', detail: '任垣樓 R301 · 32 位學生簽到完成', link: { screen: 'TeacherCockpit' } },
+      { id: 'drive', hhmm: '08:30', category: 'bus', icon: 'car-outline', title: '開車到校', detail: `主顧樓教職員停車場 · ${story.office?.vehicle?.plate ?? ''}` },
+      { id: 'office', hhmm: '08:50', category: 'office', icon: 'briefcase-outline', title: '辦公室準備', detail: `${story.office?.building ?? '主顧樓'} ${story.office?.room ?? 'P-308'} · 課前準備`, link: { screen: 'TeacherCockpit' } },
+      { id: 'class1', hhmm: '09:10', category: 'class', icon: 'school-outline', title: '機器學習 (上課)', detail: '任垣樓 R301 · 32 位學生簽到完成', link: { screen: 'CourseHubV2', params: { courseId: 71378 } } },
       { id: 'grade', hhmm: '12:30', category: 'work', icon: 'create-outline', title: '批改 HW3', detail: '6 份新繳交 · AI 已起草評語', link: { screen: 'TeacherGrading' } },
-      { id: 'office2', hhmm: '14:00', category: 'office', icon: 'people-outline', title: 'Office Hours', detail: `${story.office?.officeHours[0].day} ${story.office?.officeHours[0].from} 已有 2 位學生預約` },
+      { id: 'office2', hhmm: '14:00', category: 'office', icon: 'people-outline', title: 'Office Hours', detail: `${story.office?.officeHours?.[0]?.day ?? '週四'} ${story.office?.officeHours?.[0]?.from ?? '14:00'} 已有 2 位學生預約`, link: { screen: 'TeacherCockpit' } },
       { id: 'admin', hhmm: '15:30', category: 'work', icon: 'document-text-outline', title: '系務會議', detail: '行政大樓 A301 · 黃主任' },
       { id: 'home', hhmm: '18:00', category: 'home', icon: 'home-outline', title: '下班', detail: '開車離校' },
     );
   } else if (story.role === 'ta') {
     items.push(
-      { id: 'arrive', hhmm: '13:00', category: 'office', icon: 'briefcase-outline', title: '到實驗室', detail: '主顧樓 RB-201 資料庫實驗室' },
-      { id: 'office', hhmm: '13:00', category: 'office', icon: 'people-outline', title: 'TA 辦公時間', detail: '已有 4 位學生報名' },
-      { id: 'grade', hhmm: '15:00', category: 'work', icon: 'create-outline', title: '協助批改 HW3', detail: '張怡君老師指派 · 12 份' },
+      { id: 'arrive', hhmm: '13:00', category: 'office', icon: 'briefcase-outline', title: '到實驗室', detail: '主顧樓 RB-201 資料庫實驗室', link: { screen: 'TeacherCockpit' } },
+      { id: 'office', hhmm: '13:00', category: 'office', icon: 'people-outline', title: 'TA 辦公時間', detail: '已有 4 位學生報名', link: { screen: 'TeacherCockpit' } },
+      { id: 'grade', hhmm: '15:00', category: 'work', icon: 'create-outline', title: '協助批改 HW3', detail: '張怡君老師指派 · 12 份', link: { screen: 'TeacherGrading' } },
       { id: 'class', hhmm: '17:00', category: 'class', icon: 'school-outline', title: '碩士論文研討', detail: '思源樓 R401' },
     );
   } else if (story.role === 'admin') {
     items.push(
-      { id: 'arrive', hhmm: '08:00', category: 'office', icon: 'briefcase-outline', title: '到系辦', detail: '主顧樓 RB-401', link: { screen: 'DepartmentDashboard' } },
-      { id: 'review', hhmm: '09:00', category: 'work', icon: 'analytics-outline', title: '檢視系所儀表板', detail: '3 位學生 risk 標記為紅', link: { screen: 'DepartmentDashboard' } },
-      { id: 'meeting', hhmm: '10:00', category: 'work', icon: 'people-circle-outline', title: '系務會議', detail: '行政大樓 A301', link: { screen: 'DepartmentDashboard' } },
-      { id: 'lunch', hhmm: '12:00', category: 'food', icon: 'restaurant-outline', title: '午餐：教職員餐廳', detail: '至善廣場 1F · 教職員套餐' },
-      { id: 'student-talk', hhmm: '14:00', category: 'work', icon: 'chatbubbles-outline', title: 'risk 學生輔導', detail: '與 1 位學生面談' },
+      { id: 'arrive', hhmm: '08:00', category: 'office', icon: 'briefcase-outline', title: '到系辦', detail: '主顧樓 RB-401', link: { screen: 'AdminDashboard' } },
+      { id: 'review', hhmm: '09:00', category: 'work', icon: 'analytics-outline', title: '檢視系所儀表板', detail: '3 位學生 risk 標記為紅', link: { screen: 'AdminDashboard' } },
+      { id: 'meeting', hhmm: '10:00', category: 'work', icon: 'people-circle-outline', title: '系務會議', detail: '行政大樓 A301' },
+      { id: 'lunch', hhmm: '12:00', category: 'food', icon: 'restaurant-outline', title: '午餐：教職員餐廳', detail: '至善廣場 1F · 教職員套餐', link: { screen: 'Cafeteria' } },
+      { id: 'student-talk', hhmm: '14:00', category: 'work', icon: 'chatbubbles-outline', title: 'risk 學生輔導', detail: '與 1 位學生面談', link: { screen: 'Dms' } },
       { id: 'class', hhmm: '15:30', category: 'class', icon: 'school-outline', title: '校務發展課', detail: '行政大樓 A301' },
     );
   } else if (story.role === 'vendor') {
     items.push(
-      { id: 'open', hhmm: '08:00', category: 'work', icon: 'storefront-outline', title: '開店準備', detail: '靜宜中餐部 · 進貨上架', link: { screen: 'VendorDashboard' } },
-      { id: 'lunch-rush', hhmm: '11:30', category: 'work', icon: 'flame-outline', title: '午餐尖峰', detail: '預估 80 單 · 已準備 3 位人手', link: { screen: 'VendorDashboard' } },
+      { id: 'open', hhmm: '08:00', category: 'work', icon: 'storefront-outline', title: '開店準備', detail: '靜宜中餐部 · 進貨上架', link: { screen: 'MerchantHub' } },
+      { id: 'lunch-rush', hhmm: '11:30', category: 'work', icon: 'flame-outline', title: '午餐尖峰', detail: '預估 80 單 · 已準備 3 位人手', link: { screen: 'MerchantHub' } },
       { id: 'menu', hhmm: '14:00', category: 'work', icon: 'create-outline', title: '更新明日菜單', detail: '推播給 142 位訂閱者', link: { screen: 'MenuSubscription' } },
-      { id: 'finance', hhmm: '17:00', category: 'work', icon: 'cash-outline', title: '日結對帳', detail: '今日營收 $4,820 · 學生悠遊卡占 78%' },
+      { id: 'finance', hhmm: '17:00', category: 'work', icon: 'cash-outline', title: '日結對帳', detail: '今日營收 $4,820 · 學生悠遊卡占 78%', link: { screen: 'MerchantHub' } },
       { id: 'close', hhmm: '19:30', category: 'work', icon: 'lock-closed-outline', title: '收店', detail: '盤點 + 清潔' },
     );
   } else if (story.role === 'club_officer') {
     items.push(
-      { id: 'class', hhmm: '13:10', category: 'class', icon: 'school-outline', title: '機器學習', detail: '任垣樓 R305', link: { screen: 'CourseDetail' } },
-      { id: 'club-prep', hhmm: '17:30', category: 'work', icon: 'megaphone-outline', title: '社課準備', detail: '黑客松報名審核 32 件', link: { screen: 'ClubOfficerDashboard' } },
-      { id: 'club-event', hhmm: '19:00', category: 'social', icon: 'people-outline', title: '社課：Web3 入門', detail: '社團辦 C-12 · 42 位報名', link: { screen: 'ClubOfficerDashboard' } },
+      { id: 'class', hhmm: '13:10', category: 'class', icon: 'school-outline', title: '機器學習', detail: '任垣樓 R305', link: { screen: 'CourseHubV2', params: { courseId: 71378 } } },
+      { id: 'club-prep', hhmm: '17:30', category: 'work', icon: 'megaphone-outline', title: '社課準備', detail: '黑客松報名審核 32 件', link: { screen: 'Groups' } },
+      { id: 'club-event', hhmm: '19:00', category: 'social', icon: 'people-outline', title: '社課：Web3 入門', detail: '社團辦 C-12 · 42 位報名', link: { screen: 'Groups' } },
       { id: 'home', hhmm: '21:30', category: 'home', icon: 'home-outline', title: '回宿舍', detail: '宜真樓 B302' },
     );
   } else if (story.role === 'department_head') {
     items.push(
-      { id: 'arrive', hhmm: '08:00', category: 'office', icon: 'briefcase-outline', title: '到系辦', detail: '主顧樓 RB-401', link: { screen: 'DepartmentDashboard' } },
-      { id: 'review', hhmm: '09:00', category: 'work', icon: 'analytics-outline', title: '檢視系所儀表板', detail: '3 位學生 risk 標記為紅', link: { screen: 'DepartmentDashboard' } },
+      { id: 'arrive', hhmm: '08:00', category: 'office', icon: 'briefcase-outline', title: '到系辦', detail: '主顧樓 RB-401', link: { screen: 'DepartmentHub' } },
+      { id: 'review', hhmm: '09:00', category: 'work', icon: 'analytics-outline', title: '檢視系所儀表板', detail: '3 位學生 risk 標記為紅', link: { screen: 'DepartmentHub' } },
       { id: 'meeting', hhmm: '10:00', category: 'work', icon: 'people-circle-outline', title: '系務會議', detail: '行政大樓 A301' },
-      { id: 'lunch', hhmm: '12:00', category: 'food', icon: 'restaurant-outline', title: '午餐：教職員餐廳', detail: '至善廣場 1F' },
-      { id: 'student-talk', hhmm: '14:00', category: 'work', icon: 'chatbubbles-outline', title: 'risk 學生輔導', detail: '與 1 位學生面談' },
+      { id: 'lunch', hhmm: '12:00', category: 'food', icon: 'restaurant-outline', title: '午餐：教職員餐廳', detail: '至善廣場 1F', link: { screen: 'Cafeteria' } },
+      { id: 'student-talk', hhmm: '14:00', category: 'work', icon: 'chatbubbles-outline', title: 'risk 學生輔導', detail: '與 1 位學生面談', link: { screen: 'Dms' } },
     );
   } else if (story.role === 'alumni') {
     items.push(
       { id: 'wake', hhmm: '07:30', category: 'wake', icon: 'sunny-outline', title: '出門上班', detail: '台北市信義區' },
       { id: 'work', hhmm: '09:00', category: 'work', icon: 'laptop-outline', title: '進公司', detail: '某科技公司 後端工程師' },
-      { id: 'alumni-feed', hhmm: '12:30', category: 'social', icon: 'newspaper-outline', title: '逛校友動態', detail: '校友會新增「109 屆十週年聚會」', link: { screen: 'AlumniHome' } },
-      { id: 'job', hhmm: '20:00', category: 'work', icon: 'briefcase-outline', title: '校友徵才回覆', detail: '回覆 2 位學弟妹履歷', link: { screen: 'AlumniHome' } },
+      { id: 'alumni-feed', hhmm: '12:30', category: 'social', icon: 'newspaper-outline', title: '逛校友動態', detail: '校友會新增「109 屆十週年聚會」', link: { screen: '公告總覽' } },
+      { id: 'job', hhmm: '20:00', category: 'work', icon: 'briefcase-outline', title: '校友徵才回覆', detail: '回覆 2 位學弟妹履歷', link: { screen: 'Dms' } },
     );
   } else if (story.role === 'guest') {
     items.push(
-      { id: 'browse', hhmm: '10:00', category: 'social', icon: 'globe-outline', title: '瀏覽公開公告', detail: '查看校園活動', link: { screen: 'Announcements' } },
+      { id: 'browse', hhmm: '10:00', category: 'social', icon: 'globe-outline', title: '瀏覽公開公告', detail: '查看校園活動', link: { screen: '公告總覽' } },
       { id: 'map', hhmm: '11:00', category: 'social', icon: 'map-outline', title: '查看校園地圖', detail: '了解校區動線', link: { screen: 'Map' } },
       { id: 'food', hhmm: '12:00', category: 'food', icon: 'restaurant-outline', title: '查看餐廳菜單', detail: '逛靜園、至善', link: { screen: 'Cafeteria' } },
       { id: 'bus', hhmm: '14:00', category: 'bus', icon: 'bus-outline', title: '查校園公車', detail: '路線與發車時間', link: { screen: 'BusV2' } },

@@ -42,7 +42,7 @@ import {
 import { simulateVendorAdvanceOrder } from '../services/demoActionSimulator';
 import {
   subscribeRoleEvent,
-  loadRoleEventInbox,
+  loadVisibleRoleEventInbox,
   type OrderPlacedPayload,
   type RoleEvent,
 } from '../services/roleEventBus';
@@ -77,7 +77,7 @@ export default function VendorDashboardScreen() {
   const [orders, setOrders] = useState<DemoMerchantOrder[]>(initialOrders);
 
   // 切換 merchant 時 reset 訂單 + 載入歷史事件 inbox
-  // ── 關鍵：學生在切換到 vendor demo 帳號之前下的單在 __all__ broadcast inbox 裡，
+  // ── 關鍵：學生在切換到 vendor demo 帳號之前下的單在 vendor 可見 inbox 裡，
   //   必須 mount 時讀進來，否則 vendor 看不到。
   useEffect(() => {
     const merchantId = merchantCtx.current?.merchant.id;
@@ -87,9 +87,12 @@ export default function VendorDashboardScreen() {
     }
     let cancelled = false;
     const loadOrders = async () => {
-      // 1. 從 inbox 讀「之前」的 order_placed events（broadcast）
+      // 1. 從 inbox 讀「之前」的 order_placed events
       const vendorUid = auth.user?.uid ?? 'demo_cafeteria';
-      const inboxEvents = await loadRoleEventInbox(vendorUid).catch(() => [] as RoleEvent<unknown>[]);
+      const inboxEvents = await loadVisibleRoleEventInbox({
+        uid: vendorUid,
+        role: auth.profile?.role ?? 'vendor',
+      }).catch(() => [] as RoleEvent<unknown>[]);
       const inboxOrders: DemoMerchantOrder[] = [];
       for (const event of inboxEvents) {
         if (event.kind !== 'order_placed') continue;
@@ -156,7 +159,7 @@ export default function VendorDashboardScreen() {
       cancelled = true;
       unsubStore();
     };
-  }, [merchantCtx.current?.merchant.id, initialOrders, auth.user?.uid]);
+  }, [merchantCtx.current?.merchant.id, initialOrders, auth.profile?.role, auth.user?.uid]);
 
   // 學生下單 → 即時 push 進訂單佇列（in-memory listener 給「同一 session 中」即時聯動）
   useEffect(() => {

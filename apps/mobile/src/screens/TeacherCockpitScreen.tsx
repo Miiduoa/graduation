@@ -47,8 +47,9 @@ import {
   emitBulkReminder,
   emitFeedbackDrafted,
   emitLeaveDecision,
+  isRoleEventVisibleToViewer,
   subscribeRoleEvent,
-  loadRoleEventInbox,
+  loadVisibleRoleEventInbox,
   type HomeworkSubmittedPayload,
   type DiscussionPostedPayload,
   type LeaveRequestedPayload,
@@ -186,7 +187,10 @@ export default function TeacherCockpitScreen() {
 
     // 1. 載入歷史 — 從 inbox 拉所有 homework_submitted / discussion_posted / leave_requested
     (async () => {
-      const events = await loadRoleEventInbox(teacherUid).catch(() => []);
+      const events = await loadVisibleRoleEventInbox({
+        uid: teacherUid,
+        role: auth.profile?.role ?? 'teacher',
+      }).catch(() => []);
       if (cancelled) return;
       const submits: typeof liveSubmits = [];
       const discussions: typeof liveDiscussions = [];
@@ -230,6 +234,7 @@ export default function TeacherCockpitScreen() {
 
     // 2. 訂閱即時（同 session 中其他動作觸發）
     const unsubSubmit = subscribeRoleEvent<HomeworkSubmittedPayload>('homework_submitted', (event) => {
+      if (!isRoleEventVisibleToViewer(event, { uid: teacherUid, role: auth.profile?.role ?? 'teacher' })) return;
       setLiveSubmits((prev) => {
         if (prev.find((s) => s.id === event.id)) return prev;
         return [
@@ -239,6 +244,7 @@ export default function TeacherCockpitScreen() {
       });
     });
     const unsubDiscussion = subscribeRoleEvent<DiscussionPostedPayload>('discussion_posted', (event) => {
+      if (!isRoleEventVisibleToViewer(event, { uid: teacherUid, role: auth.profile?.role ?? 'teacher' })) return;
       setLiveDiscussions((prev) => {
         if (prev.find((d) => d.id === event.id)) return prev;
         return [
@@ -248,6 +254,7 @@ export default function TeacherCockpitScreen() {
       });
     });
     const unsubLeave = subscribeRoleEvent<LeaveRequestedPayload>('leave_requested', (event) => {
+      if (!isRoleEventVisibleToViewer(event, { uid: teacherUid, role: auth.profile?.role ?? 'teacher' })) return;
       setLiveLeaves((prev) => {
         if (prev.find((l) => l.id === event.id)) return prev;
         return [
@@ -272,7 +279,7 @@ export default function TeacherCockpitScreen() {
       unsubDiscussion();
       unsubLeave();
     };
-  }, [auth.user?.uid]);
+  }, [auth.profile?.role, auth.user?.uid]);
 
   // 處理請假審核
   const handleLeaveDecision = useCallback(async (

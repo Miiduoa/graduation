@@ -35,7 +35,7 @@ import {
   getDemoAttendanceByCourse,
 } from '../data/demoCoursesMock';
 import { getScopedStorageKey } from './scopedStorage';
-import { loadRoleEventInbox } from './roleEventBus';
+import { loadVisibleRoleEventInbox } from './roleEventBus';
 import {
   aiSummarizeStudentInbox,
   aiVendorNextAction,
@@ -260,7 +260,7 @@ async function scanForStudent(input: ProactiveScanInput): Promise<ProactiveSugge
 
   // 5. 來自老師的 inbox 摘要
   try {
-    const events = await loadRoleEventInbox(input.uid);
+    const events = await loadVisibleRoleEventInbox({ uid: input.uid, role: input.role });
     const inboxSummary = aiSummarizeStudentInbox(events);
     if (inboxSummary.recommendedAction) {
       out.push({
