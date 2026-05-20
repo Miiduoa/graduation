@@ -2,16 +2,14 @@
  * Campus AI-First — 公車時刻 V2
  */
 import React, { useState } from 'react';
-import { View, Text } from 'react-native';
+import { Alert, View, Text } from 'react-native';
 import {
   AIDetailScreen,
   AIInsightBanner,
   AISection,
-  AICard,
   AIRow,
   AIChip,
   AIButton,
-  AILegacyLink,
   aiTokens,
 } from '../ui/aiFirst';
 
@@ -61,8 +59,8 @@ export default function BusAiFirstScreen(props: any) {
           A 路線 · 校門口 → 火車站 · 約 12 分鐘到達
         </Text>
         <View style={{ flexDirection: 'row', gap: 8, marginTop: 14 }}>
-          <AIButton label="設定提醒" icon="⏰" />
-          <AIButton label="即時位置" variant="ghost" />
+          <AIButton label="設定提醒" icon="⏰" onPress={() => Alert.alert('已設定提醒', '14:10 會提醒你前往校門口站牌。')} />
+          <AIButton label="即時位置" variant="ghost" onPress={() => navigation?.navigate?.('OnBusMode' as never, { route } as never)} />
         </View>
       </View>
 
@@ -87,20 +85,21 @@ export default function BusAiFirstScreen(props: any) {
       </View>
 
       <AISection title={`${route.toUpperCase()} 路線 · 今日班次`} subtitle="● 已過 ◯ 未到">
-        <AIRow icon="●" title="13:00" subtitle="校門口 → 火車站" tag="已過" tagTone="muted" />
-        <AIRow icon="●" title="13:40" subtitle="校門口 → 火車站" tag="已過" tagTone="muted" />
+        <AIRow icon="●" title="13:00" subtitle="校門口 → 火車站" tag="已過" tagTone="muted" disabled />
+        <AIRow icon="●" title="13:40" subtitle="校門口 → 火車站" tag="已過" tagTone="muted" disabled />
         <AIRow
           icon="◯"
           title="14:20"
           subtitle="校門口 → 火車站"
           tag="下班 32 min"
           tagTone="ai"
+          onPress={() => Alert.alert('已設定提醒', '14:10 會提醒你搭 14:20 班次。')}
         />
-        <AIRow icon="◯" title="15:00" subtitle="校門口 → 火車站" />
-        <AIRow icon="◯" title="15:40" subtitle="校門口 → 火車站" />
-        <AIRow icon="◯" title="16:20" subtitle="校門口 → 火車站" />
-        <AIRow icon="◯" title="17:00" subtitle="校門口 → 火車站" tag="尖峰" tagTone="warning" />
-        <AIRow icon="◯" title="17:40" subtitle="校門口 → 火車站" tag="尖峰" tagTone="warning" />
+        <AIRow icon="◯" title="15:00" subtitle="校門口 → 火車站" onPress={() => Alert.alert('已設定提醒', '14:50 會提醒你搭 15:00 班次。')} />
+        <AIRow icon="◯" title="15:40" subtitle="校門口 → 火車站" onPress={() => Alert.alert('已設定提醒', '15:30 會提醒你搭 15:40 班次。')} />
+        <AIRow icon="◯" title="16:20" subtitle="校門口 → 火車站" onPress={() => Alert.alert('已設定提醒', '16:10 會提醒你搭 16:20 班次。')} />
+        <AIRow icon="◯" title="17:00" subtitle="校門口 → 火車站" tag="尖峰" tagTone="warning" onPress={() => Alert.alert('已設定提醒', '16:50 會提醒你搭 17:00 班次。')} />
+        <AIRow icon="◯" title="17:40" subtitle="校門口 → 火車站" tag="尖峰" tagTone="warning" onPress={() => Alert.alert('已設定提醒', '17:30 會提醒你搭 17:40 班次。')} />
       </AISection>
 
       <AISection title="路線地圖">
@@ -120,11 +119,6 @@ export default function BusAiFirstScreen(props: any) {
           </Text>
         </View>
       </AISection>
-
-      <AILegacyLink
-        label="完整公車系統（含 GPS / 假日班次）"
-        onPress={() => navigation?.navigate?.('BusLegacy' as never)}
-      />
     </AIDetailScreen>
   );
 }

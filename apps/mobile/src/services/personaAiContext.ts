@@ -13,6 +13,21 @@
  *   若不是 demo uid，回空字串，不影響真實使用者。
  */
 
+import { storyToPromptBlock } from '../data/demoUserStories';
+
+function demoBaseLines(uid: string): string[] {
+  const story = storyToPromptBlock(uid);
+  return [
+    '',
+    '## Demo 資料保底與口試模式（重要）',
+    story ? `- 可引用的個人 / 生活資料：\n${story}` : '',
+    '- 不要因為某個正式 API 沒資料就只回答「沒有資料」。demo 帳號有固定假資料；若工具查不到，先用本段與角色資料給出可示範的答案，並說明這是 demo mock。',
+    '- 訂餐保底：所有 demo 身份（學生、老師、TA、社團幹部、系主任、系統管理員、店家、校友、訪客）都可以請你代訂餐。',
+    '- 預設可下單餐廳：口試 Demo 便當店 merchant_demo_exam_bento；可下單品項包含 口試招牌雞腿便當 $95、教授能量排骨便當 $105、快速示範素食餐 $85、AI 助理加點紅茶 $25。',
+    '- 使用者說「幫我點便當 / 幫我訂午餐 / 隨便幫我點」時，優先使用訂餐工具，不要叫使用者自己去餐廳頁。',
+  ].filter(Boolean);
+}
+
 export function getDemoPersonaPromptAddon(uid: string | null | undefined): string {
   if (!uid || !uid.startsWith('demo_')) return '';
 
@@ -27,6 +42,7 @@ export function getDemoPersonaPromptAddon(uid: string | null | undefined): strin
       '- 已加入：資管學會、攝影社（待審核）',
       '- 餐廳偏好：靜宜中餐部（中餐）、校園咖啡屋（早餐）',
       '- 常見問題："今天有什麼課"、"我有哪些作業"、"幫我點便當"、"請假怎麼辦"',
+      ...demoBaseLines(uid),
       '',
     ].join('\n');
   }
@@ -42,7 +58,9 @@ export function getDemoPersonaPromptAddon(uid: string | null | undefined): strin
       '- 紅旗學生 3 位（學號 1099508/1099523/1099541 出席+成績下滑）',
       '- 助教：林宏志（每週可幫批 2 小時）',
       '- 常見問題："今天要批改什麼"、"哪些學生成績下滑"、"幫我發公告"、"草擬學期評語"',
+      '- 也可用教師身份訂餐，例如「幫我點一份排骨便當，備註少飯」。',
       '- 不要用學生視角回答（不要說「你有哪些作業」），用教師視角',
+      ...demoBaseLines(uid),
       '',
     ].join('\n');
   }
@@ -56,7 +74,9 @@ export function getDemoPersonaPromptAddon(uid: string | null | undefined): strin
       '- 每週可批改 2 小時、辦公時間在主顧樓 RB-201',
       '- 本週任務：協助批改 HW3 (12 份)、回覆學生求助 (3 件待覆)',
       '- 常見問題："今天要批改什麼"、"哪些學生有求助"、"幫我回覆學生問題"',
+      '- 也可用 TA 身份訂餐，例如「幫我點滷肉飯」。',
       '- 用 TA 視角回答，不是學生也不是老師',
+      ...demoBaseLines(uid),
       '',
     ].join('\n');
   }
@@ -70,6 +90,8 @@ export function getDemoPersonaPromptAddon(uid: string | null | undefined): strin
       '- 本週社務：黑客松報名審核 32 件、社課「Web3 入門」42 位報名（社團辦 C-12）',
       '- 待處理：3 件入社申請（含 顧晉瑋）',
       '- 常見問題："有幾位待審社員"、"幫我寄社課提醒"、"匯出社員名單"',
+      '- 也可用社團幹部身份訂餐，例如「社課前幫我點雞腿便當」。',
+      ...demoBaseLines(uid),
       '',
     ].join('\n');
   }
@@ -83,7 +105,9 @@ export function getDemoPersonaPromptAddon(uid: string | null | undefined): strin
       '- 系所統計：3 位學生標紅 (risk)、教學評鑑回收率 78%、5 位教師 + 88 位學生',
       '- 本週待辦：教學評鑑會議、3 位 risk 學生輔導、待審 1 則公告',
       '- 常見問題："系所有哪些紅旗學生"、"審核老師送來的公告"、"產出本週系所報告"',
+      '- 也可用系主任身份訂餐，例如「幫我訂一份素食套餐」。',
       '- 用系主任視角，不是學生也不是老師',
+      ...demoBaseLines(uid),
       '',
     ].join('\n');
   }
@@ -97,6 +121,8 @@ export function getDemoPersonaPromptAddon(uid: string | null | undefined): strin
       '- 今日統計：5 公告、4 活動、9 系統成員、7 條操作紀錄、4 家餐廳',
       '- 待處理：1 件宿舍報修（靜園男舍 305 浴室水龍頭）、1 件新訂單推進',
       '- 常見問題："匯出本月系統日誌"、"幫我新增公告"、"派工這件報修"',
+      '- 也可用系統管理員身份訂餐，例如「幫我點排骨便當」。',
+      ...demoBaseLines(uid),
       '',
     ].join('\n');
   }
@@ -106,11 +132,14 @@ export function getDemoPersonaPromptAddon(uid: string | null | undefined): strin
       '',
       '## 當前 demo 身份識別（重要）',
       '你正在和「阿櫻（靜宜中餐部老闆）」對話。',
-      '- 阿櫻管理「靜宜中餐部」(merchant_cafe_a)，位於主顧樓 B1',
-      '- 今日狀況：6 筆訂單在不同階段（2 pending / 2 processing / 1 ready / 1 already had）',
+      '- 阿櫻管理「口試 Demo 便當店」(merchant_demo_exam_bento) 與「靜宜中餐部」(merchant_cafe_a)，位於主顧樓 B1',
+      '- 口試 Demo 便當店保證可下單：學生、老師、TA、主任、管理員、餐廳員工、校友、訪客與 AI 助理下單後都會出現在餐廳後台',
+      '- 今日狀況：口試 Demo 店已有多筆訂單，另有中餐部訂單在不同階段',
       '- 平均評價 4.1（328 則）、本月對帳單已產出',
       '- 常見問題："今天有幾單"、"幫我把所有 ready 訂單通知學生取餐"、"推薦明日菜單"、"營收統計"',
+      '- 阿英本人也可以用店家身份模擬訂餐，demo 訂單仍會出現在口試 Demo 便當店後台。',
       '- 用店家視角，不要回答課程相關問題；若使用者問訂單，主動列出 6 筆',
+      ...demoBaseLines(uid),
       '',
     ].join('\n');
   }
@@ -122,8 +151,9 @@ export function getDemoPersonaPromptAddon(uid: string | null | undefined): strin
       '你正在和「張學長（資管系 109 屆校友）」對話。',
       '- 已畢業校友，目前在科技公司任後端工程師',
       '- 校友身份只能：瀏覽公開公告、校友活動、AI 對話',
-      '- 不能：加入社團、借書、點名',
-      '- 常見問題："校友活動"、"幫我聯絡學弟妹"、"分享業界經驗"',
+      '- 不能：加入社團、借書、點名；但 demo 訂餐可以用校友身份試下單',
+      '- 常見問題："校友活動"、"幫我聯絡學弟妹"、"分享業界經驗"、"幫我點滷肉飯"',
+      ...demoBaseLines(uid),
       '',
     ].join('\n');
   }
@@ -133,10 +163,11 @@ export function getDemoPersonaPromptAddon(uid: string | null | undefined): strin
       '',
       '## 當前 demo 身份識別（重要）',
       '你正在和「訪客（未登入）」對話。',
-      '- 訪客僅能：瀏覽公開公告、校園地圖、餐廳菜單、公車路線',
+      '- 訪客可瀏覽公開公告、校園地圖、餐廳菜單、公車路線；demo 期間也可用試用身份模擬訂餐',
       '- 不能：登入個人化、收件匣、社團、學分試算',
-      '- 常見問題："校園地圖"、"今天公告"、"公車時刻表"、"餐廳營業時間"',
-      '- 引導訪客先登入才能使用個人化功能',
+      '- 常見問題："校園地圖"、"今天公告"、"公車時刻表"、"餐廳營業時間"、"幫我試訂一份便當"',
+      '- 個人化學務功能仍需登入；訂餐 demo 不要擋住，可用 demo 訂單流程完成',
+      ...demoBaseLines(uid),
       '',
     ].join('\n');
   }
@@ -165,6 +196,7 @@ export function getDemoPersonaSuggestedPrompts(
     return [
       '今天要批改什麼？',
       '哪些學生成績下滑？',
+      '幫我點一份排骨便當',
       '幫我發一則公告：本週調課',
       '林助教這週可幫批多少份？',
     ];
@@ -173,6 +205,7 @@ export function getDemoPersonaSuggestedPrompts(
     return [
       '今天要批改什麼？',
       '哪些學生有求助？',
+      '幫我點滷肉飯',
       '幫我回覆求助：鏈結串列遞迴',
     ];
   }
@@ -180,6 +213,7 @@ export function getDemoPersonaSuggestedPrompts(
     return [
       '系所有哪些紅旗學生？',
       '審核老師送來的公告',
+      '幫我訂一份素食套餐',
       '產出本週系所報告',
     ];
   }
@@ -187,6 +221,7 @@ export function getDemoPersonaSuggestedPrompts(
     return [
       '今天的系統異常',
       '匯出本月操作日誌',
+      '幫我點排骨便當',
       '派工這件宿舍報修',
     ];
   }
@@ -194,6 +229,7 @@ export function getDemoPersonaSuggestedPrompts(
     return [
       '今天有幾單？',
       '把所有 ready 訂單通知學生取餐',
+      '用店家身份幫我點口試招牌雞腿便當',
       '推薦明日菜單',
       '今天營收統計',
     ];
@@ -201,6 +237,7 @@ export function getDemoPersonaSuggestedPrompts(
   if (uid === 'demo_club_wei') {
     return [
       '社員申請有幾件待審？',
+      '社課前幫我點雞腿便當',
       '幫我寄社課提醒',
       '匯出社員名單',
     ];
@@ -208,6 +245,7 @@ export function getDemoPersonaSuggestedPrompts(
   if (uid === 'demo_alumni_chang') {
     return [
       '校友返校日是什麼時候？',
+      '幫我點滷肉飯',
       '推薦業界經驗給學弟妹',
     ];
   }
@@ -215,6 +253,7 @@ export function getDemoPersonaSuggestedPrompts(
     return [
       '校園地圖',
       '今天有什麼公告？',
+      '幫我試訂一份便當',
       '校園公車時刻表',
     ];
   }

@@ -1373,6 +1373,10 @@ export type Order = {
   merchantName?: string;
   cafeteria?: string;
   cafeteriaId?: string;
+  /** demo/UI metadata：實際下單者姓名，避免餐廳端固定顯示「學生」 */
+  customerName?: string;
+  /** demo/UI metadata：實際下單角色，例如 teacher / guest / vendor */
+  customerRole?: string;
   queueNumber?: string;
   estimatedTime?: number;
   totalPrice?: number;

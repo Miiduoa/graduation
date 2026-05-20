@@ -23,8 +23,8 @@
  *       student → 送給授課老師
  *       其他角色 → 無此流程
  *   - 下單（order_placed）
- *       student → 送給該餐廳的 vendor
- *       其他角色 → 無此流程
+ *       所有 demo 角色 → 送給該餐廳的 vendor
+ *       角色本人只看得到自己的 order_placed，不會漏到其他同角色帳號
  *
  * 所有 helper 都會自動把 actor 自己從目標排除（雙保險：roleEventBus 也有同樣的過濾）
  */
@@ -152,7 +152,8 @@ export function getAttendanceCheckInTargets(actorUid: string): string[] {
 
 /** 該角色能否在校園 APP 下餐 */
 export function canPlaceOrder(role: UserRole | string | null | undefined): boolean {
-  // 餐廳員工不該對自己餐廳下單；訪客 / 校友也不該（demo 隔離）
+  // demo 口試需要每個角色都能走完整點餐鏈；是否真的能接單由 demoOrdering
+  // 統一落到口試 Demo 便當店並保留 actor role，避免通知送到錯誤收件匣。
   return (
     role === 'student' ||
     role === 'teacher' ||
@@ -160,8 +161,12 @@ export function canPlaceOrder(role: UserRole | string | null | undefined): boole
     role === 'ta' ||
     role === 'club_officer' ||
     role === 'department_head' ||
+    role === 'principal' ||
     role === 'admin' ||
-    role === 'staff'
+    role === 'staff' ||
+    role === 'vendor' ||
+    role === 'alumni' ||
+    role === 'guest'
   );
 }
 

@@ -308,8 +308,15 @@ export function isRoleEventVisibleToViewer(
   if (
     uid &&
     event.kind === 'order_placed' &&
-    event.actorUid === uid &&
-    STUDENT_VISIBLE_ROLES.has(role)
+    event.actorUid === uid
+  ) {
+    return true;
+  }
+
+  if (
+    uid &&
+    event.kind === 'order_status_changed' &&
+    event.targetUids?.includes(uid)
   ) {
     return true;
   }
@@ -472,6 +479,8 @@ export interface OrderPlacedPayload {
   items: string;
   total: number;
   studentName: string;
+  /** demo 展示用：實際下單身份，保留 studentName 相容舊 UI */
+  buyerRole?: string;
 }
 
 export const emitOrderPlaced = (

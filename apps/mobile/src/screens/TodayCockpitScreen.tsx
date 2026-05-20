@@ -62,7 +62,7 @@ const STUDENT_TEACHER_INBOX_KINDS = new Set([
 ]);
 import { safeNavigate } from '../utils/safeNavigate';
 import { recommendMerchantsForStudent } from '../data/demoMerchants';
-import { simulateStudentOrderFood } from '../services/demoActionSimulator';
+import { createDemoDiningOrder } from '../services/demoOrdering';
 import { getStudentLifeQuickFacts } from '../data/demoUserStories';
 import {
   CockpitHero,
@@ -461,15 +461,18 @@ export default function TodayCockpitScreen() {
                           onPress: async () => {
                             if (!auth.user) return;
                             try {
-                              await simulateStudentOrderFood({
-                                studentUid: auth.user.uid,
-                                studentName: auth.profile?.displayName ?? '我',
+                              const demo = await createDemoDiningOrder({
+                                userId: auth.user.uid,
+                                userName: auth.profile?.displayName ?? '我',
+                                role: auth.profile?.role ?? null,
+                                schoolId: auth.profile?.schoolId ?? 'pu',
                                 merchantId: rec.merchantId,
                                 merchantName: rec.merchantName,
-                                items: 'demo 套餐 ×1',
-                                total: 80,
+                                itemName: '口試招牌雞腿便當',
+                                quantity: 1,
+                                source: 'today_cockpit',
                               });
-                              Alert.alert('✅ 訂單已送出', `${rec.merchantName} 已收到訂單，可去餐廳 cockpit 看推進`);
+                              Alert.alert('✅ 訂單已送出', `${demo.merchant.name} 已收到 ${demo.item.name}，可去餐廳 cockpit 看推進`);
                             } catch (e) {
                               Alert.alert('下訂失敗', String((e as Error)?.message ?? e));
                             }

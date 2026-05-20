@@ -160,6 +160,38 @@ describe('動作鏈 3：訂餐 student → vendor → student', () => {
     expect(stuMsgs[0].subject).toContain('已備好可取餐');
     expect(stuMsgs[0].type).toBe('action');
   });
+
+  test('非學生角色下單 → 訂單確認不會漏到 student inbox', () => {
+    const order = placeOrder({
+      studentId: 'demo_teacher_chang',
+      studentName: '張怡君',
+      actorRole: 'teacher',
+      vendorName: '靜宜中餐部',
+      items: [{ name: '排骨便當', qty: 1, price: 85 }],
+    });
+
+    expect(getMessagesForRole('student')).toHaveLength(0);
+    expect(getMessagesForRole('teacher')).toHaveLength(1);
+    expect(getMessagesForRole('vendor')).toHaveLength(1);
+
+    updateOrderStatus(order.id, 'ready');
+    const teacherMsgs = getMessagesForRole('teacher');
+    expect(teacherMsgs).toHaveLength(2);
+    expect(teacherMsgs[0].subject).toContain('已備好可取餐');
+  });
+
+  test('guest 被明確作為買家時，只收到自己的訂餐訊息', () => {
+    placeOrder({
+      studentId: 'demo_guest',
+      studentName: '訪客',
+      actorRole: 'guest',
+      vendorName: '靜宜中餐部',
+      items: [{ name: '滷肉飯', qty: 1, price: 60 }],
+    });
+
+    expect(getMessagesForRole('guest')).toHaveLength(1);
+    expect(getMessagesForRole('student')).toHaveLength(0);
+  });
 });
 
 describe('動作鏈 4：求助 student → ta/teacher → student', () => {
@@ -306,8 +338,8 @@ describe('動作鏈 7：公告審核 teacher → department_head → all', () =>
   });
 });
 
-describe('動作鏈 8：guest 永遠不收訊息', () => {
-  test('guest 看不到任何 dynamic message', () => {
+describe('動作鏈 8：guest 只看明確發給自己的訊息', () => {
+  test('seedDemoQueues 不會把校內角色訊息廣播給 guest', () => {
     seedDemoQueues();
     expect(getMessagesForRole('guest')).toHaveLength(0);
   });
