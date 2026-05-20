@@ -45,6 +45,11 @@ import type { DataSource } from '../data/source';
 import type { AIContext } from './ai';
 import type { ProactiveAIReport } from './proactiveAI';
 import { getInMemoryPostLoginContext } from './postLoginContextHolder';
+import {
+  buildDemoAIAppDataRecords,
+  buildDemoAIContextInputPatch,
+  enrichDemoAIAppRuntimeData,
+} from './demoAiContext';
 
 type AnyAssignment = {
   id: string;
@@ -738,8 +743,46 @@ function mergeWithPostLoginContext(raw: AIAppContextInput): AIAppContextInput {
   };
 }
 
+function mergeUniqueById<T>(
+  current: T[] | undefined,
+  fallback: T[] | undefined,
+): T[] | undefined {
+  const merged = [...(current ?? []), ...(fallback ?? [])];
+  if (merged.length === 0) return current;
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const item of merged) {
+    const record = item as { id?: unknown; key?: unknown };
+    const id = String(record.id ?? record.key ?? JSON.stringify(item));
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(item);
+  }
+  return out;
+}
+
+function mergeWithDemoAIContext(raw: AIAppContextInput): AIAppContextInput {
+  const uid = raw.userId;
+  const patch = buildDemoAIContextInputPatch(uid);
+  if (Object.keys(patch).length === 0) return raw;
+
+  return {
+    ...raw,
+    userName: raw.userName || patch.userName,
+    role: raw.role ?? patch.role,
+    courses: raw.courses?.length ? raw.courses : patch.courses,
+    pendingAssignments: raw.pendingAssignments?.length
+      ? raw.pendingAssignments
+      : patch.pendingAssignments,
+    announcements: mergeUniqueById(raw.announcements, patch.announcements),
+    events: mergeUniqueById(raw.events, patch.events),
+    cafeterias: mergeUniqueById(raw.cafeterias, patch.cafeterias),
+    menus: mergeUniqueById(raw.menus, patch.menus),
+  };
+}
+
 export function buildAIAppContext(raw: AIAppContextInput): AIContext {
-  const input = mergeWithPostLoginContext(raw);
+  const input = mergeWithDemoAIContext(mergeWithPostLoginContext(raw));
   const data = runtime(input.runtimeData);
   const pendingAssignments = derivePendingAssignmentsFromRuntime(input, data);
   const contextInput =
@@ -917,7 +960,10 @@ export function buildAIAppContext(raw: AIAppContextInput): AIContext {
       : undefined,
     appPulseSummary,
     appDataCoverage: buildCoverage(contextInput, data),
-    appDataRecords: buildAppDataRecords(contextInput, data),
+    appDataRecords: mergeUniqueById(
+      buildDemoAIAppDataRecords(input.userId),
+      buildAppDataRecords(contextInput, data),
+    ),
     contextSummary: dialogSummary,
   };
 }
@@ -1232,7 +1278,7 @@ export async function loadAIAppRuntimeData(params: {
     ),
   ]);
 
-  return {
+  const loaded: AIAppRuntimeData = {
     nextBestActions,
     riskSnapshots,
     pulseAggregates,
@@ -1268,6 +1314,8 @@ export async function loadAIAppRuntimeData(params: {
     washingMachines,
     loadIssues,
   };
+
+  return enrichDemoAIAppRuntimeData(loaded, userId);
 }
 
 // ════════════════════════════════════════════════════════════

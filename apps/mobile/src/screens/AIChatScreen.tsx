@@ -1737,6 +1737,9 @@ export function AIChatScreen(props: any) {
   const scrollRef = useRef<ScrollView>(null);
   const scheduleState = useSchedule();
   const { courses } = scheduleState;
+  const effectiveUserId = auth.profile?.uid ?? auth.user?.uid ?? null;
+  const effectiveDisplayName = auth.profile?.displayName ?? auth.user?.displayName ?? null;
+  const effectiveShortName = effectiveDisplayName?.split('（')[0]?.split(' ')[0]?.trim() || '同學';
 
   // ── State ──
   const [messages, setMessages] = useState<Message[]>([]);
@@ -1774,7 +1777,7 @@ export function AIChatScreen(props: any) {
   );
   const [agentContext, setAgentContext] = useState<ConversationContext>(() => getInitialContext());
   const [agentMemory, setAgentMemory] = useState<AgentMemory>(() =>
-    getDefaultMemory(auth.user?.uid ?? 'guest'),
+    getDefaultMemory(effectiveUserId ?? 'guest'),
   );
   const [learningState, setLearningState] = useState<ActiveLearningState>(() =>
     getDefaultLearningState(),
@@ -1822,7 +1825,7 @@ export function AIChatScreen(props: any) {
     ): Promise<AIAppRuntimeData> => {
       const snapshot = await refreshAIAmbientAwareness({
         dataSource: ds,
-        userId: auth.user?.uid ?? null,
+        userId: effectiveUserId ?? null,
         schoolId: school.id,
         reason,
         force: options?.force,
@@ -1830,7 +1833,7 @@ export function AIChatScreen(props: any) {
       applyAwarenessSnapshot(snapshot);
       return snapshot.runtimeData;
     },
-    [applyAwarenessSnapshot, auth.user?.uid, ds, school.id],
+    [applyAwarenessSnapshot, effectiveUserId, ds, school.id],
   );
   const aiModeMeta = useMemo(() => {
     if (isOfflineAI) {
@@ -1886,13 +1889,13 @@ export function AIChatScreen(props: any) {
   );
 
   const memoryStorageKey = useMemo(
-    () => getMemoryStorageKey(auth.user?.uid ?? 'guest'),
-    [auth.user?.uid],
+    () => getMemoryStorageKey(effectiveUserId ?? 'guest'),
+    [effectiveUserId],
   );
 
   const chatHistoryKey = useMemo(
-    () => getAIChatHistoryStorageKey(auth.user?.uid ?? null, school.id),
-    [auth.user?.uid, school.id],
+    () => getAIChatHistoryStorageKey(effectiveUserId ?? null, school.id),
+    [effectiveUserId, school.id],
   );
 
   useEffect(() => {
@@ -1906,7 +1909,7 @@ export function AIChatScreen(props: any) {
       try {
         const restored = await loadPersistedValue<AgentMemory>({
           storageKey: memoryStorageKey,
-          fallback: getDefaultMemory(auth.user?.uid ?? 'guest'),
+          fallback: getDefaultMemory(effectiveUserId ?? 'guest'),
         });
         if (!cancelled) setAgentMemory(restored);
       } catch (e) {
@@ -1917,7 +1920,7 @@ export function AIChatScreen(props: any) {
     return () => {
       cancelled = true;
     };
-  }, [memoryStorageKey, auth.user?.uid]);
+  }, [memoryStorageKey, effectiveUserId]);
 
   const saveMemoryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
@@ -1936,8 +1939,8 @@ export function AIChatScreen(props: any) {
 
   // ── Training DB persistence (自動訓練資料庫) ──
   const trainingDBKey = useMemo(
-    () => getTrainingDBStorageKey(auth.user?.uid ?? 'guest'),
-    [auth.user?.uid],
+    () => getTrainingDBStorageKey(effectiveUserId ?? 'guest'),
+    [effectiveUserId],
   );
 
   useEffect(() => {
@@ -1976,8 +1979,8 @@ export function AIChatScreen(props: any) {
 
   // ── AI Brain persistence (GPT 級大腦持久化) ──
   const brainStorageKey = useMemo(
-    () => `${AI_BRAIN_STORAGE_KEY}_${auth.user?.uid ?? 'guest'}`,
-    [auth.user?.uid],
+    () => `${AI_BRAIN_STORAGE_KEY}_${effectiveUserId ?? 'guest'}`,
+    [effectiveUserId],
   );
 
   useEffect(() => {
@@ -2021,23 +2024,23 @@ export function AIChatScreen(props: any) {
   // ── Data Sources ──
   const { items: announcements } = useAsyncList(
     () => ds.listAnnouncements(school.id),
-    [auth.user?.uid, ds, school.id],
+    [effectiveUserId, ds, school.id],
   );
   const { items: events } = useAsyncList(
     () => ds.listEvents(school.id),
-    [auth.user?.uid, ds, school.id],
+    [effectiveUserId, ds, school.id],
   );
   const { items: cafeterias } = useAsyncList(
     () => ds.listCafeterias(school.id),
-    [auth.user?.uid, ds, school.id],
+    [effectiveUserId, ds, school.id],
   );
   const { items: menus } = useAsyncList(
     () => ds.listMenus(school.id),
-    [auth.user?.uid, ds, school.id],
+    [effectiveUserId, ds, school.id],
   );
   const { items: pois } = useAsyncList(
     () => ds.listPois(school.id),
-    [auth.user?.uid, ds, school.id],
+    [effectiveUserId, ds, school.id],
   );
   const officialPuCafeterias = useMemo<Cafeteria[]>(
     () => (isProvidenceDiningSchoolId(school.id) ? getPuDiningCafeterias(school.id) : []),
@@ -2143,6 +2146,8 @@ export function AIChatScreen(props: any) {
             return { ...m, id };
           });
           setMessages(deduped);
+        } else if (!cancelled) {
+          setMessages((prev) => prev.filter((message) => message.id === 'greeting'));
         }
       } catch (e) {
         console.warn('[AIChat] load fail:', e);
@@ -2195,7 +2200,7 @@ export function AIChatScreen(props: any) {
     async function loadReports() {
       try {
         const reports = await loadProactiveAIReports({
-          userId: auth.user?.uid ?? null,
+          userId: effectiveUserId ?? null,
           schoolId: school.id,
         });
         if (!cancelled) setLatestProactiveReports(reports.slice(0, 12));
@@ -2220,7 +2225,7 @@ export function AIChatScreen(props: any) {
         });
 
         await markProactiveAIReportsSeen({
-          userId: auth.user?.uid ?? null,
+          userId: effectiveUserId ?? null,
           schoolId: school.id,
           reportIds: ordered.map((report) => report.id),
         });
@@ -2232,7 +2237,7 @@ export function AIChatScreen(props: any) {
     return () => {
       cancelled = true;
     };
-  }, [auth.user?.uid, school.id, routeProactiveReportId]);
+  }, [effectiveUserId, school.id, routeProactiveReportId]);
 
   // ── AI Context ──
   const buildLiveAIContext = useCallback(
@@ -2243,8 +2248,8 @@ export function AIChatScreen(props: any) {
     ): AIContext =>
       buildAIAppContext({
         schoolId: school.id,
-        userId: auth.user?.uid ?? null,
-        userName: auth.profile?.displayName ?? null,
+        userId: effectiveUserId ?? null,
+        userName: effectiveShortName,
         role: userRole,
         isOnline: isEffectivelyOnline(),
         courses: coursesOverride ?? courses ?? [],
@@ -2267,8 +2272,8 @@ export function AIChatScreen(props: any) {
       }),
     [
       school.id,
-      auth.user?.uid,
-      auth.profile?.displayName,
+      effectiveUserId,
+      effectiveShortName,
       userRole,
       announcements,
       events,
@@ -2306,7 +2311,7 @@ export function AIChatScreen(props: any) {
     // ── Demo / 訪客種子：未登入帳號 → backend prefetch 會跳過全部 tool，
     //    這裡把 demoCoursesMock 種子塞進 context，配合 runtime.js 的後備邏輯
     //    讓 AI 在 demo 模式仍能回答「我這週有什麼作業 / 公告」。
-    if (!auth.user?.uid) {
+    if (!effectiveUserId) {
       const courseNameById = new Map(DEMO_COURSES.map((c) => [c.id, c.name]));
       const seededAssignments = (enriched.pendingAssignments?.length ?? 0) > 0
         ? enriched.pendingAssignments
@@ -2332,19 +2337,18 @@ export function AIChatScreen(props: any) {
     return campusAssistantSessionId
       ? { ...enriched, campusAssistantSessionId }
       : enriched;
-  }, [buildLiveAIContext, appRuntimeData, campusAssistantSessionId, messages, auth.user?.uid]);
+  }, [buildLiveAIContext, appRuntimeData, campusAssistantSessionId, messages, effectiveUserId]);
 
   useEffect(() => {
     setCampusAssistantSessionId(undefined);
-  }, [auth.user?.uid]);
+  }, [effectiveUserId]);
 
   // ── Greeting ──
   useEffect(() => {
-    const name = auth.profile?.displayName?.split(' ')[0] ?? '同學';
     const greeting: Message = {
       id: 'greeting',
       role: 'assistant',
-      content: buildGreetingContent(name),
+      content: buildGreetingContent(effectiveShortName),
       timestamp: new Date(),
       agentType: 'capability_card',
       suggestions: isOfflineAI
@@ -2358,7 +2362,7 @@ export function AIChatScreen(props: any) {
       }
       return [greeting, ...prev];
     });
-  }, [auth.user?.uid, (courses ?? []).length, buildGreetingContent, isOfflineAI]);
+  }, [effectiveUserId, effectiveShortName, (courses ?? []).length, buildGreetingContent, isOfflineAI]);
 
   // ═══════════════════════════════════════════════════
   // Semantic Intent Engine v2 — Context-Aware
@@ -3990,7 +3994,6 @@ export function AIChatScreen(props: any) {
       if (domain === 'greeting' && lowerMsg.length < 10) {
         const hour = new Date().getHours();
         const timeGreet = hour < 12 ? '早安' : hour < 18 ? '午安' : '晚安';
-        const name = auth.profile?.displayName?.split(' ')[0] ?? '同學';
         // Use memory to personalize
         const recentTopics = _agentMemory.recentActions.slice(-3);
         let personalized = '';
@@ -4000,7 +4003,7 @@ export function AIChatScreen(props: any) {
         return {
           id: uid(),
           role: 'assistant',
-          content: `${timeGreet}，${name}！有什麼我可以幫你的嗎？${personalized}`,
+          content: `${timeGreet}，${effectiveShortName}！有什麼我可以幫你的嗎？${personalized}`,
           timestamp: new Date(),
           agentType: 'text',
           suggestions: ['幫我推薦午餐', '查作業截止', '今天有什麼課'],
@@ -4432,7 +4435,7 @@ export function AIChatScreen(props: any) {
     return executeAgentToolAction({
       tool,
       params,
-      userId: auth.user?.uid,
+      userId: effectiveUserId,
       schoolId: school.id,
       role: userRole,
       dataSource: ds,
@@ -5104,7 +5107,7 @@ export function AIChatScreen(props: any) {
       diningMenus,
       diningCafeterias,
       userRole,
-      auth.user?.uid,
+      effectiveUserId,
       school.id,
       ds,
       courses,
@@ -5981,7 +5984,7 @@ export function AIChatScreen(props: any) {
           };
           // 使用 Reflexion 版本：失敗後自動反思重試 + 探索式學習（務必帶入 lastChoiceMenu，否則「第一個」無法接續訂餐）
           const agentCtx = {
-            userId: auth.user?.uid,
+            userId: effectiveUserId,
             schoolId: school.id,
             role: userRole as any,
             isOnline: true,
@@ -7435,7 +7438,7 @@ export function AIChatScreen(props: any) {
         userMessage: previousUserMsg?.content ?? '',
         assistantResponse: targetMsg.content,
         rating,
-        userId: auth.user?.uid,
+        userId: effectiveUserId,
       });
 
       // ✅ 自動訓練：thumbs up/down 直接更新 QA 品質
@@ -7503,7 +7506,7 @@ export function AIChatScreen(props: any) {
         })();
       }
     },
-    [messages, auth.user?.uid, trainingDB.pairs, nav],
+    [messages, effectiveUserId, trainingDB.pairs, nav],
   );
 
   const handleClearHistory = useCallback(() => {
@@ -7518,11 +7521,10 @@ export function AIChatScreen(props: any) {
           } catch (e) {
             console.warn('[AIChat] clear fail:', e);
           }
-          const name = auth.profile?.displayName?.split(' ')[0] ?? '同學';
           const greeting: Message = {
             id: 'greeting',
             role: 'assistant',
-            content: buildGreetingContent(name),
+            content: buildGreetingContent(effectiveShortName),
             timestamp: new Date(),
             agentType: 'capability_card',
             suggestions: isOfflineAI
@@ -7537,7 +7539,7 @@ export function AIChatScreen(props: any) {
         },
       },
     ]);
-  }, [auth.profile?.displayName, buildGreetingContent, chatHistoryKey, isOfflineAI]);
+  }, [effectiveShortName, buildGreetingContent, chatHistoryKey, isOfflineAI]);
 
   // ═══════════════════════════════════════════════════
   // Render
@@ -7821,7 +7823,7 @@ export function AIChatScreen(props: any) {
         visible={csatAiVisible}
         context="ai_tool_success"
         schoolId={school.id}
-        uid={auth.user?.uid ?? null}
+        uid={effectiveUserId ?? null}
         onClose={() => setCsatAiVisible(false)}
       />
     </Screen>

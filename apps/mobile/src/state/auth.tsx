@@ -680,6 +680,32 @@ export function AuthProvider(props: { children: React.ReactNode }) {
 
       const currentRequestId = ++requestIdRef.current;
 
+      // mock/demo session 是 mobile demo 的主登入來源。即使 Firebase 還殘留
+      // currentUser，也要先採用 mockAuth，避免 demo 角色被判成未登入或舊帳號。
+      try {
+        const mockSession = await loadMockAuthSession();
+        if (!isCancelled && requestIdRef.current === currentRequestId && mockSession) {
+          setUser(toMockFirebaseUser(mockSession));
+          setProfile(toMockUserProfile(mockSession));
+          setError(null);
+          setTokenError(null);
+          setTokenExpired(false);
+          setLoading(false);
+          setProfileLoading(false);
+          if (mockSession.uid?.startsWith('demo_')) {
+            try {
+              const seeder = await import('../services/demoInboxSeeder');
+              await seeder.seedDemoInboxIfNeeded(mockSession.uid).catch(() => undefined);
+            } catch {
+              /* swallow */
+            }
+          }
+          return;
+        }
+      } catch {
+        // Ignore and continue with Firebase Auth below.
+      }
+
       // Firebase Auth 沒有登入使用者 → 檢查 mock auth session（hybrid login 用的）
       if (!u) {
         try {
