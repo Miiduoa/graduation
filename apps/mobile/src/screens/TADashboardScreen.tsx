@@ -9,7 +9,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   subscribeRoleEvent,
   emitFeedbackDrafted,
-  loadRoleEventInbox,
+  isRoleEventVisibleToViewer,
+  loadVisibleRoleEventInbox,
   type HelpRequestedPayload,
   type HomeworkSubmittedPayload,
   type DiscussionPostedPayload,
@@ -119,7 +120,10 @@ export default function TADashboardScreen() {
 
     // 1. 載入歷史 — 從 inbox 拉所有相關事件
     (async () => {
-      const events = await loadRoleEventInbox(taUid).catch(() => []);
+      const events = await loadVisibleRoleEventInbox({
+        uid: taUid,
+        role: auth.profile?.role ?? 'ta',
+      }).catch(() => []);
       if (cancelled) return;
       const helps: typeof liveHelp = [];
       const discussions: typeof liveDiscussions = [];
@@ -168,6 +172,7 @@ export default function TADashboardScreen() {
 
     // 2. 訂閱即時（同 session 中其他動作）
     const unsubHelp = subscribeRoleEvent<HelpRequestedPayload>('help_requested', (event) => {
+      if (!isRoleEventVisibleToViewer(event, { uid: taUid, role: auth.profile?.role ?? 'ta' })) return;
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setLiveHelp((prev) => {
         if (prev.find((h) => h.id === event.id)) return prev;
@@ -189,6 +194,7 @@ export default function TADashboardScreen() {
       setOpenSection('help');
     });
     const unsubDiscussion = subscribeRoleEvent<DiscussionPostedPayload>('discussion_posted', (event) => {
+      if (!isRoleEventVisibleToViewer(event, { uid: taUid, role: auth.profile?.role ?? 'ta' })) return;
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setLiveDiscussions((prev) => {
         if (prev.find((d) => d.id === event.id)) return prev;
@@ -207,6 +213,7 @@ export default function TADashboardScreen() {
       });
     });
     const unsubSubmit = subscribeRoleEvent<HomeworkSubmittedPayload>('homework_submitted', (event) => {
+      if (!isRoleEventVisibleToViewer(event, { uid: taUid, role: auth.profile?.role ?? 'ta' })) return;
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setLiveSubmits((prev) => {
         if (prev.find((s) => s.id === event.id)) return prev;
@@ -228,7 +235,7 @@ export default function TADashboardScreen() {
       unsubDiscussion();
       unsubSubmit();
     };
-  }, [auth.user?.uid]);
+  }, [auth.profile?.role, auth.user?.uid]);
 
   const ta = useMemo(() => {
     const gradingTasks: Array<{ courseId: number; courseName: string; hwTitle: string; count: number }> = [];

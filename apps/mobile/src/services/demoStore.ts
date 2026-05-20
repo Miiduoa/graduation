@@ -421,7 +421,7 @@ export function placeOrder(params: {
     placedAt: new Date().toISOString(),
   };
   updateStore((s) => ({ ...s, orders: [order, ...s.orders] }));
-  // ① 給學生：訂單確認（發訊者是商家，senderRole 必須是 admin，因為 vendor 不在 DemoRole 型別內 → fallback admin）
+  // ① 給學生：訂單確認（發訊者是商家）
   sendMessage({
     fromName: params.vendorName,
     fromAvatar: '🍱',
@@ -431,10 +431,10 @@ export function placeOrder(params: {
     isRead: false,
     type: 'success',
     relatedOrderId: order.id,
-    senderRole: 'admin',
+    senderRole: 'vendor',
     recipientRoles: ['student'],
   });
-  // ② 給商家（demo 用 admin 角色接收，DemoRolePill 切到 vendor 會 fallback 成 admin）
+  // ② 給商家
   sendMessage({
     fromName: `${params.studentName}（新訂單）`,
     fromAvatar: '🛎️',
@@ -445,7 +445,7 @@ export function placeOrder(params: {
     type: 'action',
     relatedOrderId: order.id,
     senderRole: 'student',
-    recipientRoles: ['admin'],
+    recipientRoles: ['vendor'],
   });
   return order;
 }
@@ -481,7 +481,7 @@ export function updateOrderStatus(orderId: string, status: OrderStatus): void {
       sentAt: '剛剛',
       isRead: false,
       type: status === 'ready' ? 'action' : 'info',
-      senderRole: 'admin',
+      senderRole: 'vendor',
       recipientRoles: ['student'],
     });
   }

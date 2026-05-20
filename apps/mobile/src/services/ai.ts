@@ -93,6 +93,7 @@ import {
   MAX_REFLEXIONS_PER_GEMINI_TRIAL,
   rememberReflexion,
 } from './aiReflexion';
+import { getDemoPersonaPromptAddon } from './personaAiContext';
 
 export type AIProvider = 'offline' | 'cloud' | 'mock' | 'local-llm' | 'gemini';
 
@@ -724,11 +725,15 @@ function buildSystemPrompt(context: AIContext): string {
   const hour = now.getHours();
   const mealTime = hour < 10 ? '早餐' : hour < 14 ? '午餐' : hour < 17 ? '下午茶' : '晚餐';
   const config = getConfig();
+  // demo 模式：注入 persona 身份背景，讓 AI 知道現在面對的是哪個角色，
+  //   避免對 teacher/admin/vendor 用「學生視角」答題或回「我沒有資料」。
+  const personaAddon = getDemoPersonaPromptAddon(context.userId);
   const parts = [
     '# 你是「小靜」— 靜宜大學最聰明的 AI 校園助理',
     '',
     '你的目標是用 App 真實資料、工具執行器、動作草稿與多步驟推理，提供接近通用助理的校園代理體驗。',
     '不要宣稱自己和 ChatGPT、Claude、Codex 或任何雲端模型有相同參數量；使用者問模型參數時要誠實說明限制與可提升的能力面。',
+    personaAddon,
     '',
     buildAssistantCapabilityPrompt({
       role: context.role,
@@ -3810,10 +3815,13 @@ function buildAgentSystemPrompt(context: AIContext): string {
   const now = new Date();
   const hour = now.getHours();
   const DAY = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'];
+  // demo persona context — 同 buildSystemPrompt 的處理
+  const personaAddon = getDemoPersonaPromptAddon(context.userId);
 
   return [
     '# 你是「小靜」— 靜宜大學 AI 校園全能代理',
     '',
+    personaAddon,
     '## 核心身份',
     '你是一個能自主行動的 AI 代理，不只是回答問題，更能主動查詢資料、分析數據、代替使用者執行操作。',
     '',

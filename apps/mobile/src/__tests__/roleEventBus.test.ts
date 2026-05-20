@@ -8,11 +8,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   subscribeRoleEvent,
   subscribeAllRoleEvents,
-  emitRoleEvent,
   emitGradePublished,
   emitBulkReminder,
   emitFeedbackDrafted,
+  emitDepartmentBroadcast,
+  emitHomeworkSubmitted,
+  emitOrderPlaced,
   loadRoleEventInbox,
+  loadVisibleRoleEventInbox,
   clearRoleEventInbox,
 } from '../services/roleEventBus';
 
@@ -126,5 +129,66 @@ describe('roleEventBus', () => {
     }
     const inbox = await loadRoleEventInbox('stu_overflow');
     expect(inbox.length).toBeLessThanOrEqual(100);
+  });
+
+  it('visible inbox 會依 viewer role 擋掉不屬於學生的事件', async () => {
+    await emitHomeworkSubmitted({
+      actorUid: 'stu_bob',
+      actorName: 'Bob',
+      targetUids: ['stu_alice'],
+      courseId: 'c1',
+      courseName: 'ML',
+      payload: {
+        homeworkId: 'hw1',
+        homeworkTitle: 'HW1',
+        studentName: 'Bob',
+        isLate: false,
+        submittedAt: '2026-05-20T00:00:00Z',
+      },
+    });
+
+    expect(await loadRoleEventInbox('stu_alice')).toHaveLength(1);
+    expect(await loadVisibleRoleEventInbox({ uid: 'stu_alice', role: 'student' })).toHaveLength(0);
+    expect(await loadVisibleRoleEventInbox({ uid: 'stu_alice', role: 'teacher' })).toHaveLength(1);
+  });
+
+  it('order_placed 廣播只給 vendor 與下單本人看，不會漏到其他學生', async () => {
+    await emitOrderPlaced({
+      actorUid: 'stu_order_owner',
+      actorName: 'Owner',
+      targetUids: undefined,
+      courseId: 'merchant_cafe_a',
+      courseName: '靜宜中餐部',
+      payload: {
+        orderId: 'o1',
+        merchantId: 'merchant_cafe_a',
+        merchantName: '靜宜中餐部',
+        items: '便當 ×1',
+        total: 80,
+        studentName: 'Owner',
+      },
+    });
+
+    expect(await loadVisibleRoleEventInbox({ uid: 'demo_cafeteria', role: 'vendor' })).toHaveLength(1);
+    expect(await loadVisibleRoleEventInbox({ uid: 'stu_order_owner', role: 'student' })).toHaveLength(1);
+    expect(await loadVisibleRoleEventInbox({ uid: 'stu_other', role: 'student' })).toHaveLength(0);
+  });
+
+  it('department_broadcast audience=teachers 不會出現在學生 visible inbox', async () => {
+    await emitDepartmentBroadcast({
+      actorUid: 'demo_admin_huang',
+      actorName: '黃主任',
+      targetUids: undefined,
+      courseId: 'department',
+      courseName: '系所公告',
+      payload: {
+        title: '教師會議',
+        body: '教師限定',
+        audience: 'teachers',
+      },
+    });
+
+    expect(await loadVisibleRoleEventInbox({ uid: 'stu_alice', role: 'student' })).toHaveLength(0);
+    expect(await loadVisibleRoleEventInbox({ uid: 'demo_teacher_chang', role: 'teacher' })).toHaveLength(1);
   });
 });

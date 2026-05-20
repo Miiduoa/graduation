@@ -39,6 +39,14 @@ import {
   upsertSchoolEvent,
 } from '../services/admin';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
+import {
+  isDemoUid,
+  DEMO_ADMIN_ANNOUNCEMENTS,
+  DEMO_ADMIN_EVENTS,
+  DEMO_ADMIN_MEMBERS,
+  DEMO_ADMIN_LOGS,
+  DEMO_ADMIN_CAFETERIAS,
+} from '../services/demoAdminMock';
 import { formatDateTime } from '../utils/format';
 import { AIMissionControl } from '../components/AIMissionControl';
 
@@ -300,11 +308,16 @@ export function AdminDashboardScreen(props: any) {
   const [operatorRole, setOperatorRole] = useState<'owner' | 'manager' | 'staff'>('staff');
   const [operatorStatus, setOperatorStatus] = useState<'active' | 'inactive'>('active');
 
+  // demo 模式 short-circuit：demo_admin_* uid 過不了 Firestore security rules，
+  //   每條 useAsyncList 開頭都先檢查；是 demo uid 就回傳 mock，避免畫面整片空白。
+  const demoMode = isDemoUid(auth.user?.uid);
+
   const {
     items: announcements,
     loading: annLoading,
     reload: reloadAnn,
   } = useAsyncList<Announcement>(async () => {
+    if (demoMode) return DEMO_ADMIN_ANNOUNCEMENTS as Announcement[];
     const qy = query(
       collection(db, 'schools', school.id, 'announcements'),
       orderBy('publishedAt', 'desc'),
@@ -312,13 +325,14 @@ export function AdminDashboardScreen(props: any) {
     );
     const snap = await getDocs(qy);
     return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-  }, [db, school.id]);
+  }, [db, school.id, demoMode]);
 
   const {
     items: events,
     loading: evtLoading,
     reload: reloadEvt,
   } = useAsyncList<ClubEvent>(async () => {
+    if (demoMode) return DEMO_ADMIN_EVENTS as ClubEvent[];
     const qy = query(
       collection(db, 'schools', school.id, 'clubEvents'),
       orderBy('startsAt', 'desc'),
@@ -326,13 +340,14 @@ export function AdminDashboardScreen(props: any) {
     );
     const snap = await getDocs(qy);
     return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-  }, [db, school.id]);
+  }, [db, school.id, demoMode]);
 
   const {
     items: members,
     loading: memLoading,
     reload: reloadMem,
   } = useAsyncList<SchoolMember>(async () => {
+    if (demoMode) return DEMO_ADMIN_MEMBERS as SchoolMember[];
     const qy = query(collection(db, 'schools', school.id, 'members'), limit(100));
     const snap = await getDocs(qy);
     const directoryProfiles = await fetchSchoolDirectoryProfiles(
@@ -356,13 +371,14 @@ export function AdminDashboardScreen(props: any) {
         joinedAt: data.joinedAt,
       } satisfies SchoolMember;
     });
-  }, [db, school.id]);
+  }, [db, school.id, demoMode]);
 
   const {
     items: adminLogs,
     loading: logsLoading,
     reload: reloadLogs,
   } = useAsyncList<AdminLog>(async () => {
+    if (demoMode) return DEMO_ADMIN_LOGS as AdminLog[];
     const qy = query(
       collection(db, 'schools', school.id, 'adminLogs'),
       orderBy('createdAt', 'desc'),
@@ -370,13 +386,14 @@ export function AdminDashboardScreen(props: any) {
     );
     const snap = await getDocs(qy);
     return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-  }, [db, school.id]);
+  }, [db, school.id, demoMode]);
 
   const {
     items: cafeterias,
     loading: cafeteriaLoading,
     reload: reloadCafeterias,
   } = useAsyncList<SchoolCafeteria>(async () => {
+    if (demoMode) return DEMO_ADMIN_CAFETERIAS as SchoolCafeteria[];
     const qy = query(
       collection(db, 'schools', school.id, 'cafeterias'),
       orderBy('name', 'asc'),

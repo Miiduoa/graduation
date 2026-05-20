@@ -120,8 +120,7 @@ const ROLE_PRESETS: RolePreset[] = [
     department: '校園服務',
     icon: 'restaurant-outline',
     shortLabel: '餐廳',
-    // demo 內 DemoRole 型別未含 vendor，訊息收件匣與 admin 共用（toDemoRole fallback）。
-    hint: '訂單、菜單、營運（訊息共用 admin 收件匣）',
+    hint: '訂單、菜單、營運',
     color: '#C95F28',
   },
   {
@@ -155,12 +154,11 @@ function resolveCurrentPreset(uid: string | null | undefined): RolePreset {
   return ROLE_PRESETS.find((p) => p.uid === uid) ?? ROLE_PRESETS[0];
 }
 
-/** 把 auth UserRole 對應到 DemoRole context 所認識的 role。
- *  vendor 在 DemoRole 型別中不存在，fallback 到 admin（最接近的管理類角色）。 */
+/** 把 auth UserRole 對應到 DemoRole context 所認識的 role。 */
 function toDemoRole(r: UserRole): DemoRole {
   const known: DemoRole[] = [
     'student', 'teacher', 'ta', 'club_officer',
-    'department_head', 'admin', 'alumni', 'guest',
+    'department_head', 'admin', 'vendor', 'alumni', 'guest',
   ];
   return (known as string[]).includes(r as string) ? (r as DemoRole) : 'admin';
 }

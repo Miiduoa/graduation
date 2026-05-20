@@ -13,6 +13,7 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import {
+  Alert,
   ScrollView,
   View,
   Text,
@@ -27,6 +28,34 @@ import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme, softShadowStyle } from '../ui/theme';
 import { analytics } from '../services/analytics';
 import { usePersonaContext, type TimelineEvent } from '../services/personaContext';
+import { rootNavigateNested, type RootTabName } from '../app/rootNavigation';
+
+// 每個 timeline link 的 route 名稱 → root tab 對照（跨 stack 導頁用）
+const ROUTE_TO_TAB: Record<string, RootTabName> = {
+  // HomeStack (Today tab)
+  TodayHome: 'Today', SmartDashboard: 'Today', AIChat: 'Today',
+  CampusSocialScreen: 'Today', CampusGame: 'Today',
+  公告總覽: 'Today', 公告詳情: 'Today', 活動總覽: 'Today', 活動詳情: 'Today',
+  // LearnStack (學習 tab)
+  LearnHome: '學習', CoursesHome: '學習',
+  CourseHubV2: '學習', CourseHub: '學習',
+  CourseAssignmentsV2: '學習', CourseAssignmentDetailV2: '學習',
+  CourseGradesV2: '學習', CourseQuizzesV2: '學習',
+  CourseMaterialsV2: '學習', CourseForumV2: '學習',
+  CourseAnnouncementsV2: '學習', CourseAIAssistantV2: '學習',
+  TeacherCockpit: '學習', TeacherGrading: '學習',
+  TeachingHub: '學習', StaffHub: '學習',
+  DepartmentHub: '學習', AdminDashboard: '學習',
+  MerchantHub: '學習', AcademicInsights: '學習', Calendar: '學習',
+  // MapStack (校園 tab)
+  Map: '校園', MapV2: '校園', BusV2: '校園',
+  Cafeteria: '校園', Ordering: '校園',
+  MenuSubscription: '校園', Health: '校園',
+  Dormitory: '校園', IndoorFloorMap: '校園',
+  // MessagesStack (訊息 tab)
+  Dms: '訊息', Groups: '訊息', GroupDetail: '訊息',
+  FriendsManage: '訊息', FriendSearch: '訊息', Chat: '訊息',
+};
 
 const CATEGORY_COLOR: Record<TimelineEvent['category'], string> = {
   wake: '#FF9500',
@@ -81,12 +110,32 @@ export function DemoStoryScreen(_props: Record<string, unknown>) {
 
   const handleEventPress = useCallback(
     (e: TimelineEvent) => {
-      if (!e.link) return;
+      if (!e.link) {
+        // 沒設 link 的事件（起床 / 回家 / 下班）：給 demo viewer 一個提示，不讓他覺得是 bug
+        Alert.alert(
+          e.title,
+          (e.detail ?? '') + '\n\n（這是 demo 純展示用，沒有對應子畫面）',
+          [{ text: '了解' }],
+        );
+        return;
+      }
       analytics.logEvent('demostory_event_tap', { eventId: e.id, screen: e.link.screen });
+      const targetTab = ROUTE_TO_TAB[e.link.screen];
       try {
-        nav.navigate(e.link.screen, e.link.params);
+        if (targetTab) {
+          // 跨 stack 用 rootNavigateNested（確保切到正確的 root tab + 子 screen）
+          rootNavigateNested(targetTab, e.link.screen, e.link.params);
+        } else {
+          // 沒登錄的就 fall back 到 useNavigation 直接 navigate
+          nav.navigate(e.link.screen, e.link.params);
+        }
       } catch (err) {
         console.warn('[DemoStory] navigate failed', err);
+        Alert.alert(
+          '此區段尚在開發',
+          `「${e.title}」對應的「${e.link.screen}」畫面尚未完成，請繼續看下一個事件。`,
+          [{ text: '了解' }],
+        );
       }
     },
     [nav],
@@ -224,7 +273,7 @@ export function DemoStoryScreen(_props: Record<string, unknown>) {
                 title="去下節課"
                 subtitle={`${persona.nextClass.startHHmm} · ${persona.nextClass.poi.name} ${persona.nextClass.roomCode}`}
                 onPress={() =>
-                  nav.navigate('TripPlanner', {
+                  rootNavigateNested('校園', 'TripPlanner', {
                     toPoiId: persona.nextClass!.poi.id,
                     toName: persona.nextClass!.poi.name,
                   })
@@ -238,7 +287,7 @@ export function DemoStoryScreen(_props: Record<string, unknown>) {
                 title="即時公車"
                 subtitle={`常搭 ${persona.subscribedRoutes[0].shortName}`}
                 onPress={() =>
-                  nav.navigate('BusV2', { initialRouteId: persona.subscribedRoutes[0].id })
+                  rootNavigateNested('校園', 'BusV2', { initialRouteId: persona.subscribedRoutes[0].id })
                 }
               />
             )}
@@ -249,7 +298,7 @@ export function DemoStoryScreen(_props: Record<string, unknown>) {
                 title="教室平面圖"
                 subtitle={`找 ${persona.nextClass.roomCode}`}
                 onPress={() =>
-                  nav.navigate('IndoorFloorMap', {
+                  rootNavigateNested('校園', 'IndoorFloorMap', {
                     poiId: persona.nextClass!.poi.id,
                     roomCode: persona.nextClass!.roomCode,
                   })
@@ -261,7 +310,23 @@ export function DemoStoryScreen(_props: Record<string, unknown>) {
               color="#FF9500"
               title="校園地圖"
               subtitle="多圖層 · POI · AR"
-              onPress={() => nav.navigate('MapV2')}
+              onPress={() => rootNavigateNested('校園', 'MapV2')}
+            />
+            {/* 額外快捷：訊息收件匣（每個角色都可以看跨角色動作） */}
+            <PersonaShortcut
+              icon="chatbox-ellipses-outline"
+              color="#FF2D55"
+              title="訊息收件匣"
+              subtitle="跨角色動作"
+              onPress={() => rootNavigateNested('訊息', 'MessagesHome')}
+            />
+            {/* AI 助理 */}
+            <PersonaShortcut
+              icon="sparkles-outline"
+              color="#5856D6"
+              title="校園 AI 助理"
+              subtitle="可代下單 / 查課表"
+              onPress={() => rootNavigateNested('Today', 'AIChat')}
             />
           </ScrollView>
         </View>

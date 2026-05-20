@@ -1,12 +1,41 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAuth } from './auth';
 
 /**
  * Demo 角色管理（mobile）— 對齊 apps/web/src/lib/demoRole.ts
  *
  * 跨平台用同一套角色定義，避免 web / mobile 上 demo 行為不一致。
  * 持久化：AsyncStorage（key: 'campus.demoRole.v1'）
+ *
+ * **同步機制**：DemoRoleProvider 監聽 auth.user.uid 變化，自動從 uid 推斷 demoRole。
+ *   這避免 LoginLanding 登入後 demoRole context 還停留在上一個角色的 stale state，
+ *   導致 MessagesAiFirstScreen 等用 useDemoRole() 的螢幕篩出別人的訊息。
  */
+
+/** 從 demo auth uid 推斷 DemoRole（uid prefix matching） */
+export function inferDemoRoleFromUid(uid: string | null | undefined): DemoRole | null {
+  if (!uid) return null;
+  if (uid === 'demo_guest') return 'guest';
+  if (uid === 'demo_alumni_chang' || uid.startsWith('demo_alumni')) return 'alumni';
+  if (uid === 'demo_admin_sys') return 'admin';
+  if (uid === 'demo_cafeteria' || uid.startsWith('demo_vendor')) return 'vendor';
+  if (uid === 'demo_admin_huang' || uid.startsWith('demo_dept')) return 'department_head';
+  if (uid === 'demo_club_wei' || uid.startsWith('demo_club')) return 'club_officer';
+  if (uid === 'demo_ta_lin' || uid.startsWith('demo_ta')) return 'ta';
+  if (uid === 'demo_teacher_chang' || uid.startsWith('demo_teacher')) return 'teacher';
+  if (uid === 'demo_student_kuchih' || uid.startsWith('demo_student')) return 'student';
+  return null;
+}
+
+function inferDemoRoleFromAuthRole(role: string | null | undefined): DemoRole | null {
+  if (!role) return null;
+  if (isRole(role)) return role;
+  if (role === 'professor') return 'teacher';
+  if (role === 'principal') return 'department_head';
+  if (role === 'staff') return 'admin';
+  return null;
+}
 
 export type DemoRole =
   | 'student'
@@ -329,13 +358,30 @@ function isRole(x: unknown): x is DemoRole {
 }
 
 export function DemoRoleProvider(props: { children: React.ReactNode }) {
+  const auth = useAuth();
   const [role, setRoleState] = useState<DemoRole>('guest');
   const [, setLoaded] = useState(false);
 
+  // 目前登入者是最高優先來源；只有沒有 auth role 時才讀取舊設定。
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
+        const inferred = inferDemoRoleFromUid(auth.user?.uid) ?? inferDemoRoleFromAuthRole(auth.profile?.role);
+        if (inferred) {
+          if (!cancelled) {
+            setRoleState(inferred);
+            AsyncStorage.setItem(STORAGE_KEY, inferred).catch(() => undefined);
+          }
+          return;
+        }
+        if (!auth.user?.uid) {
+          if (!cancelled) {
+            setRoleState('guest');
+            AsyncStorage.setItem(STORAGE_KEY, 'guest').catch(() => undefined);
+          }
+          return;
+        }
         const raw = await AsyncStorage.getItem(STORAGE_KEY);
         if (!cancelled && isRole(raw)) {
           setRoleState(raw);
@@ -349,7 +395,23 @@ export function DemoRoleProvider(props: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [auth.profile?.role, auth.user?.uid]);
+
+  // 同步：auth.user.uid 變化時，自動從 uid 推斷 demoRole。
+  // 沒這個 effect 的話，學生用 LoginLanding 登入會看到上次角色的 stale role
+  // → MessagesAiFirstScreen 篩出別人的訊息（嚴重 demo bug）。
+  useEffect(() => {
+    const uid = auth.user?.uid;
+    const inferred = inferDemoRoleFromUid(uid) ?? inferDemoRoleFromAuthRole(auth.profile?.role);
+    if (inferred && inferred !== role) {
+      setRoleState(inferred);
+      AsyncStorage.setItem(STORAGE_KEY, inferred).catch(() => undefined);
+    } else if (!uid && role !== 'guest') {
+      // 登出：回到訪客身份
+      setRoleState('guest');
+      AsyncStorage.setItem(STORAGE_KEY, 'guest').catch(() => undefined);
+    }
+  }, [auth.profile?.role, auth.user?.uid, role]);
 
   const setRole = (next: DemoRole) => {
     setRoleState(next);

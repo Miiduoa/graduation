@@ -34,13 +34,14 @@ import {
 } from '../ui/cockpitShell';
 import { useAuth } from '../state/auth';
 import {
-  loadRoleEventInbox,
+  loadVisibleRoleEventInbox,
   subscribeRoleEvent,
   type RoleEvent,
   type OrderPlacedPayload,
   type OrderStatusChangedPayload,
 } from '../services/roleEventBus';
-import { DEMO_MERCHANTS } from '../data/demoMerchants';
+import { DEMO_MERCHANTS, DEMO_MERCHANT_ORDERS } from '../data/demoMerchants';
+import { listDemoOrdersForStudent, subscribeDemoOrders } from '../services/demoMerchantOrders';
 
 interface AggregatedOrder {
   orderId: string;
@@ -123,9 +124,12 @@ export default function StudentOrdersScreen() {
 
   const reload = useCallback(async () => {
     if (!auth.user?.uid) return;
-    const e = await loadRoleEventInbox(auth.user.uid);
+    const e = await loadVisibleRoleEventInbox({
+      uid: auth.user.uid,
+      role: auth.profile?.role,
+    });
     setEvents(e);
-  }, [auth.user?.uid]);
+  }, [auth.profile?.role, auth.user?.uid]);
 
   useEffect(() => { reload(); }, [reload]);
 
@@ -136,7 +140,70 @@ export default function StudentOrdersScreen() {
     return () => { unsub1(); unsub2(); };
   }, [reload]);
 
-  const orders = useMemo(() => aggregateOrders(events), [events]);
+  // demo 模式：把 demoMerchantOrders 內的 live + 靜態訂單一起 push 進畫面
+  // 這樣 AI 助理代下單、或從 Cafeteria 下單後，學生「我的訂單」立刻看得到。
+  const [demoOrders, setDemoOrders] = useState<AggregatedOrder[]>([]);
+  useEffect(() => {
+    if (!auth.user?.uid?.startsWith('demo_')) return;
+    const refreshDemo = () => {
+      const uid = auth.user!.uid!;
+      const live = listDemoOrdersForStudent(uid);
+      // 也把靜態 DEMO_MERCHANT_ORDERS 中 studentUid 是當前學生的訂單帶進來
+      const studentStatic = DEMO_MERCHANT_ORDERS.filter((o) => o.studentUid === uid);
+      const aggregated: AggregatedOrder[] = [
+        ...live.map((o) => {
+          const merchant = DEMO_MERCHANTS.find((m) => m.id === o.merchantId);
+          return {
+            orderId: o.id,
+            merchantId: o.merchantId ?? 'unknown',
+            merchantName: merchant?.name ?? o.merchantId ?? '校園商家',
+            emoji: merchant?.emoji ?? '🍱',
+            items: o.items.map((it: any) => `${it.name} ×${it.quantity}`).join('、'),
+            total: o.total ?? 0,
+            status: ((o.status ?? 'pending') === 'preparing'
+              ? 'processing'
+              : (o.status ?? 'pending')) as AggregatedOrder['status'],
+            placedAt: String(o.createdAt ?? new Date().toISOString()),
+            events: [
+              { status: 'pending', message: '已下訂', at: String(o.createdAt ?? new Date().toISOString()) },
+            ],
+          };
+        }),
+        ...studentStatic.map((o) => {
+          const merchant = DEMO_MERCHANTS.find((m) => m.id === o.merchantId);
+          const st = (o.status === 'processing'
+            ? 'processing'
+            : (o.status as AggregatedOrder['status']));
+          return {
+            orderId: o.id,
+            merchantId: o.merchantId,
+            merchantName: merchant?.name ?? o.merchantId,
+            emoji: merchant?.emoji ?? '🍱',
+            items: o.items,
+            total: o.total,
+            status: st,
+            placedAt: o.orderedAt,
+            events: [{ status: st, message: '訂單建立', at: o.orderedAt }],
+          };
+        }),
+      ];
+      setDemoOrders(aggregated);
+    };
+    refreshDemo();
+    const unsub = subscribeDemoOrders(refreshDemo);
+    return () => unsub();
+  }, [auth.user?.uid]);
+
+  const aggregated = useMemo(() => aggregateOrders(events), [events]);
+  const orders = useMemo(() => {
+    // 用 orderId 去重，demoOrders 優先
+    const map = new Map<string, AggregatedOrder>();
+    for (const o of aggregated) map.set(o.orderId, o);
+    for (const o of demoOrders) if (!map.has(o.orderId)) map.set(o.orderId, o);
+    return Array.from(map.values()).sort(
+      (a, b) => new Date(b.placedAt).getTime() - new Date(a.placedAt).getTime(),
+    );
+  }, [aggregated, demoOrders]);
   const active = orders.filter((o) => o.status !== 'completed');
   const done = orders.filter((o) => o.status === 'completed');
 
