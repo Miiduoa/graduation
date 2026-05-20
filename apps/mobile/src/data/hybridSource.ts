@@ -117,6 +117,7 @@ const CRITICAL_NO_MOCK_FALLBACK_METHODS = new Set([
   'listInboxTasks',
   'listQuizzes',
 ]);
+const EXPECTED_OPTIONAL_MOCK_FALLBACK_METHODS = new Set(['listBusRoutes']);
 
 function getErrorCode(error: unknown): string | undefined {
   if (!error || typeof error !== 'object') return undefined;
@@ -212,7 +213,10 @@ async function fetchWithFallback<T>(
 
     const method = (adapter as any)[apiMethod];
     if (typeof method !== 'function') {
-      console.warn(`[HybridSource] Adapter doesn't support ${apiMethod}, using mock`);
+      const logger = EXPECTED_OPTIONAL_MOCK_FALLBACK_METHODS.has(apiMethod)
+        ? console.debug
+        : console.warn;
+      logger(`[HybridSource] Adapter doesn't support ${apiMethod}, using mock`);
       return mockMethod();
     }
 
