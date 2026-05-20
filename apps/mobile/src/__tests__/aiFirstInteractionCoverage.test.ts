@@ -9,6 +9,7 @@ const DEMO_CRITICAL_SCREENS = [
   'CafeteriaAiFirstScreen.tsx',
   'MenuDetailAiFirstScreen.tsx',
   'BusAiFirstScreen.tsx',
+  'CourseHubAiFirstScreen.tsx',
   'LearnAiFirstScreen.tsx',
   'TeacherCockpitAiFirstScreen.tsx',
 ];

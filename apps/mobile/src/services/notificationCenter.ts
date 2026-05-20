@@ -9,6 +9,7 @@ import {
   doc,
 } from 'firebase/firestore';
 import { getDb } from '../firebase';
+import { shouldUseLiveFirestoreListeners } from './liveFirestoreGate';
 
 export type InAppNotification = {
   id: string;
@@ -29,7 +30,10 @@ export function subscribeInAppNotifications(
   cb: (rows: InAppNotification[]) => void,
   max = 50,
 ): () => void {
-  const db = getDb();
+  if (!shouldUseLiveFirestoreListeners({ uid })) {
+    cb([]);
+    return () => {};
+  }
   const q = query(notifCollection(uid), orderBy('createdAt', 'desc'), limit(max));
   return onSnapshot(
     q,

@@ -18,12 +18,13 @@ import {
   Timestamp,
   type Unsubscribe,
 } from 'firebase/firestore';
-import { getDb, hasUsableFirebaseConfig } from '../firebase';
+import { getDb } from '../firebase';
 import type { DataSource } from '../data/source';
 import {
   refreshAIAmbientAwareness,
   type AIAmbientAwarenessReason,
 } from './aiAppContext';
+import { shouldUseLiveFirestoreListeners } from './liveFirestoreGate';
 
 export type RealtimeEventKind =
   | 'notification'
@@ -125,7 +126,7 @@ export function startRealtimeSync(params: StartRealtimeSyncParams): () => void {
     }, 600);
   };
 
-  if (hasUsableFirebaseConfig()) {
+  if (shouldUseLiveFirestoreListeners({ uid: params.userId })) {
     try {
       const db = getDb();
 
