@@ -1,8 +1,7 @@
 /**
  * demoStoreCrossRole.test.ts
  *
- * 端到端驗證：5 個 demo 角色 (student/teacher/ta/admin/department_head/club_officer/vendor→admin fallback)
- * 在 demoStore 的 8 條動作鏈中互相收發訊息是否正確。
+ * 端到端驗證：demo 角色在 demoStore 的 8 條動作鏈中互相收發訊息是否正確。
  *
  * 對應口試 Demo 的「訊息功能 + 角色間動作關聯」驗證 checklist。
  */
@@ -29,7 +28,6 @@ import {
   approveAnnouncement,
   rejectAnnouncementWithReason,
   seedDemoQueues,
-  sendMessage,
 } from '../services/demoStore';
 
 const STUDENT = { id: 'stu-001', name: '王小明' };
@@ -116,8 +114,8 @@ describe('動作鏈 2：宿舍報修 student → admin → student', () => {
   });
 });
 
-describe('動作鏈 3：訂餐 student → admin/vendor → student', () => {
-  test('下單 → 學生收到訂單成立(success)；admin/vendor 收到新訂單(action)', () => {
+describe('動作鏈 3：訂餐 student → vendor → student', () => {
+  test('下單 → 學生收到訂單成立(success)；vendor 收到新訂單(action)', () => {
     placeOrder({
       studentId: STUDENT.id,
       studentName: STUDENT.name,
@@ -129,13 +127,14 @@ describe('動作鏈 3：訂餐 student → admin/vendor → student', () => {
     expect(stuMsgs[0].type).toBe('success');
     expect(stuMsgs[0].subject).toContain('訂單成立');
 
-    const adminMsgs = getMessagesForRole('admin');
-    expect(adminMsgs).toHaveLength(1);
-    expect(adminMsgs[0].type).toBe('action');
-    expect(adminMsgs[0].relatedOrderId).toBeDefined();
+    const vendorMsgs = getMessagesForRole('vendor');
+    expect(vendorMsgs).toHaveLength(1);
+    expect(vendorMsgs[0].type).toBe('action');
+    expect(vendorMsgs[0].relatedOrderId).toBeDefined();
+    expect(getMessagesForRole('admin')).toHaveLength(0);
   });
 
-  test('訂單成立給學生的訊息 senderRole 必須是 admin（已修復的 bug）', () => {
+  test('訂單成立給學生的訊息 senderRole 必須是 vendor', () => {
     placeOrder({
       studentId: STUDENT.id,
       studentName: STUDENT.name,
@@ -143,11 +142,10 @@ describe('動作鏈 3：訂餐 student → admin/vendor → student', () => {
       items: [{ name: 'A', qty: 1, price: 50 }],
     });
     const orderConfirm = getMessagesForRole('student')[0];
-    // bug fix verification: senderRole 應該是商家 (admin)，不應該再是 'student'
-    expect(orderConfirm.senderRole).toBe('admin');
+    expect(orderConfirm.senderRole).toBe('vendor');
   });
 
-  test('admin 推進狀態 → 學生收到對應通知', () => {
+  test('vendor 推進狀態 → 學生收到對應通知', () => {
     const order = placeOrder({
       studentId: STUDENT.id,
       studentName: STUDENT.name,
@@ -322,7 +320,8 @@ describe('未讀計數與已讀標記', () => {
     expect(getUnreadCount('student')).toBeGreaterThanOrEqual(1); // 學生會收到訂單確認
     expect(getUnreadCount('teacher')).toBeGreaterThanOrEqual(3); // 請假 + 求助 + 作業
     expect(getUnreadCount('department_head')).toBeGreaterThanOrEqual(2); // 請假 + 公告
-    expect(getUnreadCount('admin')).toBeGreaterThanOrEqual(2); // 報修 + 訂單
+    expect(getUnreadCount('admin')).toBeGreaterThanOrEqual(1); // 報修
+    expect(getUnreadCount('vendor')).toBeGreaterThanOrEqual(1); // 訂單
     expect(getUnreadCount('club_officer')).toBeGreaterThanOrEqual(1); // 入社
     expect(getUnreadCount('ta')).toBeGreaterThanOrEqual(2); // 求助 + 作業
   });
@@ -353,6 +352,7 @@ describe('角色權限隔離（reset 不洩漏）', () => {
       'club_officer',
       'department_head',
       'admin',
+      'vendor',
       'alumni',
     ] as const;
     for (const r of roles) {

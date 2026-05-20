@@ -45,11 +45,21 @@ import { useAuth } from '../state/auth';
 import { getScopedStorageKey } from '../services/scopedStorage';
 import { loadPersistedValue } from '../services/persistedStorage';
 import {
-  loadRoleEventInbox,
+  loadVisibleRoleEventInbox,
   subscribeAllRoleEvents,
   type RoleEvent,
 } from '../services/roleEventBus';
 import { aiSummarizeStudentInbox } from '../services/aiOrchestrator';
+
+const STUDENT_TEACHER_INBOX_KINDS = new Set([
+  'grade_published',
+  'bulk_reminder_sent',
+  'feedback_drafted',
+  'attendance_session_opened',
+  'announcement_posted',
+  'homework_published',
+  'peer_review_assigned',
+]);
 import { safeNavigate } from '../utils/safeNavigate';
 import { recommendMerchantsForStudent } from '../data/demoMerchants';
 import { simulateStudentOrderFood } from '../services/demoActionSimulator';
@@ -157,12 +167,16 @@ export default function TodayCockpitScreen() {
   useEffect(() => {
     if (!auth.user?.uid) return;
     let mounted = true;
-    loadRoleEventInbox(auth.user.uid).then((e) => { if (mounted) setRoleEvents(e); });
+    loadVisibleRoleEventInbox({ uid: auth.user.uid, role: auth.profile?.role }).then((e) => {
+      if (mounted) setRoleEvents(e);
+    });
     const unsub = subscribeAllRoleEvents(() => {
-      loadRoleEventInbox(auth.user!.uid).then((e) => { if (mounted) setRoleEvents(e); });
+      loadVisibleRoleEventInbox({ uid: auth.user!.uid, role: auth.profile?.role }).then((e) => {
+        if (mounted) setRoleEvents(e);
+      });
     });
     return () => { mounted = false; unsub(); };
-  }, [auth.user?.uid]);
+  }, [auth.profile?.role, auth.user?.uid]);
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
@@ -185,7 +199,8 @@ export default function TodayCockpitScreen() {
   }
 
   const atRiskCount = grades.filter((g) => g.likely !== null && g.likely < 70).length;
-  const unreadFromTeacher = roleEvents.length;
+  const teacherRoleEvents = roleEvents.filter((event) => STUDENT_TEACHER_INBOX_KINDS.has(event.kind));
+  const unreadFromTeacher = teacherRoleEvents.length;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.bg }} edges={['top']}>
@@ -208,7 +223,7 @@ export default function TodayCockpitScreen() {
                 : '今天沒事，好好休息'
           }
           summary={(() => {
-            const inboxSummary = aiSummarizeStudentInbox(roleEvents);
+            const inboxSummary = aiSummarizeStudentInbox(teacherRoleEvents);
             if (inboxSummary.recommendedAction) {
               return `🤖 ${inboxSummary.recommendedAction}。${studyPlan.summary}`;
             }
@@ -475,7 +490,7 @@ export default function TodayCockpitScreen() {
               open={openSection === 'fromTeacher'}
               onToggle={() => toggle('fromTeacher')}
             >
-              {roleEvents.slice(0, 5).map((evt) => {
+              {teacherRoleEvents.slice(0, 5).map((evt) => {
                 const meta = (() => {
                   switch (evt.kind) {
                     case 'grade_published': return { emoji: '📊', label: '新成績' };

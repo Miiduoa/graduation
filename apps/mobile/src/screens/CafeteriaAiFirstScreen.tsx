@@ -2,7 +2,7 @@
  * Campus AI-First — 餐廳列表 V2
  *
  * 接 demoStore：點餐按鈕 → placeOrder（寫 orders + 通知學生 + 通知商家收件匣）
- * → 切換到「餐廳 / admin」角色可在「訊息」收件匣看到 + 推進訂單狀態；
+ * → 切換到「餐廳」角色可在「訊息」收件匣看到 + 推進訂單狀態；
  *   VendorManagement 後台則由 cafeteriaData.getOrders 提供（非 demoStore 路徑）。
  */
 import React, { useState } from 'react';
@@ -21,31 +21,50 @@ import {
 import { useDemoRole } from '../state/demoRole';
 import { useDemoStore } from '../state/demoStore';
 import { placeOrder } from '../services/demoStore';
+import { useAuth } from '../state/auth';
+import { addDemoOrder } from '../services/demoMerchantOrders';
 
 export default function CafeteriaAiFirstScreen(props: any) {
   const navigation = props?.navigation;
   const [filter, setFilter] = useState<string>('all');
   const { role, definition } = useDemoRole();
+  const auth = useAuth();
   const store = useDemoStore();
-  const myOrderCount = store.orders.filter((o) => o.studentId === 'stu-001').length;
+  const myUid = auth.user?.uid ?? 'demo_student_kuchih';
+  const myName = auth.profile?.displayName ?? '訪客';
+  const myOrderCount = store.orders.filter((o) => o.studentId === myUid).length;
 
+  // 訂餐開放給所有角色 — 教師、系主任、管理員、商家、校友、訪客都會吃午餐。
+  // 唯一例外：guest 訪客若想下單，引導他先登入（demo 期間也允許，只是文案不同）。
   function handleOrder(vendor: string, item: string, price: number) {
-    if (role !== 'student') {
-      Alert.alert(
-        '需切換成學生角色',
-        `目前是「${definition.label}」，請至「我的 → 切換角色」改成學生再點餐。`,
-      );
-      return;
-    }
-    placeOrder({
-      studentId: 'stu-001',
-      studentName: '王小明',
+    const order = placeOrder({
+      studentId: myUid,
+      studentName: myName,
       vendorName: vendor,
       items: [{ name: item, qty: 1, price }],
     });
+    // 同步寫入 demoMerchantOrders，讓阿櫻 (vendor) 的 Dashboard 看得到
+    try {
+      addDemoOrder({
+        id: order.id,
+        userId: myUid,
+        items: [{ menuItemId: `${vendor}-line`, name: item, quantity: 1, price }],
+        total: price,
+        totalAmount: price,
+        totalPrice: price,
+        status: 'pending',
+        paymentStatus: 'paid',
+        merchantId: 'merchant_cafe_a',
+        cafeteria: 'merchant_cafe_a',
+        cafeteriaId: 'merchant_cafe_a',
+        createdAt: order.placedAt,
+      } as any);
+    } catch {
+      /* swallow */
+    }
     Alert.alert(
       '訂單已成立',
-      `${vendor} 已收到你的訂單《${item}》NT$${price}。\n切換成「餐廳 / 系統管理員」角色 → 訊息收件匣可推進訂單狀態。`,
+      `${vendor} 已收到 ${definition.icon} ${myName} 的訂單《${item}》NT$${price}。\n切到「餐廳 阿櫻」可看到訂單；訊息收件匣可看到訂單成立通知。`,
     );
   }
   const hour = new Date().getHours();

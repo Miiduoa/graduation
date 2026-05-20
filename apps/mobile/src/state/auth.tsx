@@ -568,6 +568,16 @@ export function AuthProvider(props: { children: React.ReactNode }) {
       setError(null);
       setLoading(false);
       setProfileLoading(false);
+      // 確保 demo 模式下 demoStore + roleEventBus inbox 都有資料；
+      //   無論使用者是從 LoginLanding 還是 DemoRolePill 進來都會跑。
+      if (mockSession.uid?.startsWith('demo_')) {
+        try {
+          const seeder = await import('../services/demoInboxSeeder');
+          await seeder.seedDemoInboxIfNeeded(mockSession.uid).catch(() => undefined);
+        } catch {
+          /* swallow */
+        }
+      }
       return;
     }
 

@@ -217,6 +217,119 @@ export async function loadRoleEventInbox(uid: string): Promise<RoleEvent<unknown
   }
 }
 
+export type RoleEventViewerRole =
+  | 'student'
+  | 'teacher'
+  | 'professor'
+  | 'ta'
+  | 'club_officer'
+  | 'department_head'
+  | 'department'
+  | 'principal'
+  | 'admin'
+  | 'staff'
+  | 'vendor'
+  | 'alumni'
+  | 'guest'
+  | string
+  | null
+  | undefined;
+
+export type RoleEventViewer = {
+  uid: string | null | undefined;
+  role: RoleEventViewerRole;
+};
+
+function normalizeViewerRole(role: RoleEventViewerRole): string {
+  if (!role) return 'guest';
+  if (role === 'professor') return 'teacher';
+  if (role === 'principal' || role === 'department') return 'department_head';
+  if (role === 'staff') return 'admin';
+  return String(role);
+}
+
+const STUDENT_VISIBLE_ROLES = new Set(['student', 'ta', 'club_officer']);
+const TEACHING_VISIBLE_ROLES = new Set(['teacher', 'ta']);
+const COURSE_STAFF_VISIBLE_ROLES = new Set(['teacher', 'ta', 'department_head', 'admin']);
+const ADMIN_VISIBLE_ROLES = new Set(['department_head', 'admin']);
+const VENDOR_VISIBLE_ROLES = new Set(['vendor']);
+
+function departmentBroadcastRoles(event: RoleEvent<unknown>): Set<string> {
+  const audience = String((event.payload as { audience?: unknown } | null)?.audience ?? 'all');
+  if (audience === 'students') return STUDENT_VISIBLE_ROLES;
+  if (audience === 'teachers') return new Set(['teacher', 'ta', 'department_head', 'admin']);
+  return new Set(['student', 'ta', 'club_officer', 'teacher', 'department_head', 'admin', 'vendor', 'alumni', 'guest']);
+}
+
+function roleAudienceForEvent(event: RoleEvent<unknown>): Set<string> {
+  switch (event.kind) {
+    case 'grade_published':
+    case 'bulk_reminder_sent':
+    case 'feedback_drafted':
+    case 'attendance_session_opened':
+    case 'announcement_posted':
+    case 'homework_published':
+    case 'peer_review_assigned':
+    case 'leave_decision':
+    case 'order_status_changed':
+      return STUDENT_VISIBLE_ROLES;
+    case 'homework_submitted':
+    case 'help_requested':
+      return TEACHING_VISIBLE_ROLES;
+    case 'discussion_posted':
+      return new Set(['student', 'ta', 'club_officer', 'teacher']);
+    case 'attendance_checked_in':
+      return COURSE_STAFF_VISIBLE_ROLES;
+    case 'leave_requested':
+      return COURSE_STAFF_VISIBLE_ROLES;
+    case 'dorm_repair_requested':
+      return ADMIN_VISIBLE_ROLES;
+    case 'order_placed':
+      return VENDOR_VISIBLE_ROLES;
+    case 'department_broadcast':
+      return departmentBroadcastRoles(event);
+    default:
+      return new Set();
+  }
+}
+
+export function isRoleEventVisibleToViewer(
+  event: RoleEvent<unknown>,
+  viewer: RoleEventViewer,
+): boolean {
+  const uid = viewer.uid ? String(viewer.uid) : null;
+  const role = normalizeViewerRole(viewer.role);
+
+  if (event.targetUids) {
+    if (event.targetUids.length === 0) return false;
+    if (!uid || !event.targetUids.includes(uid)) return false;
+  }
+
+  if (
+    uid &&
+    event.kind === 'order_placed' &&
+    event.actorUid === uid &&
+    STUDENT_VISIBLE_ROLES.has(role)
+  ) {
+    return true;
+  }
+
+  return roleAudienceForEvent(event).has(role);
+}
+
+export function filterRoleEventsForViewer(
+  events: RoleEvent<unknown>[],
+  viewer: RoleEventViewer,
+): RoleEvent<unknown>[] {
+  return events.filter((event) => isRoleEventVisibleToViewer(event, viewer));
+}
+
+export async function loadVisibleRoleEventInbox(viewer: RoleEventViewer): Promise<RoleEvent<unknown>[]> {
+  if (!viewer.uid) return [];
+  const events = await loadRoleEventInbox(String(viewer.uid));
+  return filterRoleEventsForViewer(events, viewer);
+}
+
 export async function clearRoleEventInbox(uid: string): Promise<void> {
   try {
     const key = getScopedStorageKey(ROLE_EVENT_LOG_BASE, { uid, schoolId: null });

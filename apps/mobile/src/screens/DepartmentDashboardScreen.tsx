@@ -9,7 +9,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { simulateDepartmentBroadcast } from '../services/demoActionSimulator';
 import {
   subscribeAllRoleEvents,
-  loadRoleEventInbox,
+  isRoleEventVisibleToViewer,
+  loadVisibleRoleEventInbox,
   type RoleEvent,
 } from '../services/roleEventBus';
 
@@ -58,7 +59,10 @@ export default function DepartmentDashboardScreen() {
 
     // 1. 載入歷史 inbox（學生 / 老師之前發生的 events，主任登入時要看得到）
     (async () => {
-      const events = await loadRoleEventInbox(adminUid).catch(() => []);
+      const events = await loadVisibleRoleEventInbox({
+        uid: adminUid,
+        role: auth.profile?.role ?? 'department_head',
+      }).catch(() => []);
       if (cancelled) return;
       const filtered = events.filter((event) => {
         if (event.kind === 'order_placed' || event.kind === 'order_status_changed') return false;
@@ -70,6 +74,9 @@ export default function DepartmentDashboardScreen() {
 
     // 2. 訂閱即時
     const unsub = subscribeAllRoleEvents((event) => {
+      if (!isRoleEventVisibleToViewer(event, { uid: adminUid, role: auth.profile?.role ?? 'department_head' })) {
+        return;
+      }
       if (event.kind === 'order_placed' || event.kind === 'order_status_changed') return;
       if (event.kind === 'department_broadcast' && event.actorUid === auth.user?.uid) return;
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -82,7 +89,7 @@ export default function DepartmentDashboardScreen() {
       cancelled = true;
       unsub();
     };
-  }, [auth.user?.uid]);
+  }, [auth.profile?.role, auth.user?.uid]);
 
   const courseStats = useMemo(() => {
     return DEMO_COURSES.map((c) => {

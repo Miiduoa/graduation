@@ -568,6 +568,64 @@ async function orderFoodHandler(
   const quantity = Math.max(1, asInt(args.quantity, 1));
   const note = asString(args.note);
 
+  // demo 模式：uid 以 demo_ 開頭時走 demoStore + demoMerchantOrders，
+  // 避免打 Firebase Functions（demo 帳號過不了 security rules）。
+  if (typeof ctx.userId === 'string' && ctx.userId.startsWith('demo_')) {
+    try {
+      const itemName = asString(args.itemName) || asString(args.name) || itemId || '推薦套餐';
+      const unitPrice = Math.max(0, asInt(args.price, 90));
+      const vendorName = asString(args.vendorName) || vendorId || '校園小棧';
+      // 動態 import 避免循環引用
+      const demoStore = await import('./demoStore');
+      const demoMerchant = await import('./demoMerchantOrders');
+      const order = demoStore.placeOrder({
+        studentId: ctx.userId!,
+        studentName: asString(args.studentName) || '顧晉瑋',
+        vendorName,
+        items: [{ name: itemName, qty: quantity, price: unitPrice }],
+      });
+      // 同步寫入 merchant orders，讓阿櫻 (vendor) 的 VendorDashboard 也看得到
+      demoMerchant.addDemoOrder({
+        id: order.id,
+        userId: ctx.userId!,
+        items: [
+          {
+            menuItemId: itemId || `${vendorId || 'demo'}-line`,
+            name: itemName,
+            quantity,
+            price: unitPrice,
+          },
+        ],
+        total: order.total,
+        totalAmount: order.total,
+        totalPrice: order.total,
+        status: 'pending',
+        paymentStatus: 'paid',
+        merchantId: vendorId || 'merchant_cafe_a',
+        cafeteria: vendorId || 'merchant_cafe_a',
+        cafeteriaId: vendorId || 'merchant_cafe_a',
+        note,
+        createdAt: order.placedAt,
+      } as any);
+      return {
+        success: true,
+        toolName: 'order_food',
+        summary: `已為你向「${vendorName}」訂購「${itemName}」${quantity} 份，訂單編號 ${order.id}。切到「餐廳 阿櫻」角色或訊息收件匣可看到訂單。`,
+        data: { orderNo: order.id, vendorName, itemName, quantity, total: order.total },
+        isWrite: true,
+        isDraft: false,
+        recordId: order.id,
+      };
+    } catch (e: any) {
+      return makeFailure(
+        'order_food',
+        'execution_failed',
+        'demo 模式下單失敗：' + String(e?.message ?? e ?? ''),
+        { isWrite: true, error: String(e?.message ?? e ?? '') },
+      );
+    }
+  }
+
   try {
     const functions = getFunctionsInstance();
     const callable = httpsCallable<

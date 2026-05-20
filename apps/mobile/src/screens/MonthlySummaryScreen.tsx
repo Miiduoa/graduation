@@ -32,7 +32,7 @@ import {
   getDemoScoreItemsByCourse,
 } from '../data/demoCoursesMock';
 import { loadInteractionHistory, computePreferenceProfile, selfReflect } from '../services/aiLearning';
-import { loadRoleEventInbox, type RoleEvent } from '../services/roleEventBus';
+import { loadVisibleRoleEventInbox, type RoleEvent } from '../services/roleEventBus';
 import { predictCurrent, type PredictorItem } from '@campus/shared';
 
 export default function MonthlySummaryScreen() {
@@ -56,11 +56,11 @@ export default function MonthlySummaryScreen() {
       const reflect = selfReflect(hist);
       setAiSelfAdjustment(reflect.selfAdjustment);
 
-      const inbox = await loadRoleEventInbox(uid).catch(() => []);
+      const inbox = await loadVisibleRoleEventInbox({ uid, role: auth.profile?.role }).catch(() => []);
       setOrderEvents(inbox.filter((e) => e.kind === 'order_placed' || e.kind === 'order_status_changed'));
       setFeedbackEvents(inbox.filter((e) => e.kind === 'feedback_drafted' || e.kind === 'grade_published'));
     })();
-  }, [uid]);
+  }, [auth.profile?.role, uid]);
 
   // 出席 + 作業統計
   const summary = useMemo(() => {

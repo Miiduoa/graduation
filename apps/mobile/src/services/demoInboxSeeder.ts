@@ -26,7 +26,8 @@ import {
   emitAttendanceCheckedIn,
 } from './roleEventBus';
 
-const SEED_FLAG_BASE = 'demo_inbox_seeded_v2';
+// v3 = 在原本 roleEventBus seed 之外，加上 demoStore.seedDemoQueues + 1 筆 placeOrder
+const SEED_FLAG_BASE = 'demo_inbox_seeded_v3';
 
 /**
  * Demo seed 包含 5 種角色各自會收到的歷史事件。
@@ -379,6 +380,35 @@ export async function seedDemoInboxIfNeeded(uid: string): Promise<{ seeded: numb
       },
     });
     count++;
+  }
+
+  // ────────────────────────────────────────────────
+  // 跨角色 demoStore：學生對全 demo 通用的待處理動作
+  //   只在學生 / 教師 / TA / dept_head / club_officer / admin / vendor 都看得到
+  //   產生「請假、報修、訂餐、求助、作業、入社、公告」7 條跨角色動作，
+  //   讓任何角色切過去 inbox 都有 action 訊息可審核。
+  //   ※ idempotent — 只在 demoStore.dynamicMessages 為空時才補。
+  // ────────────────────────────────────────────────
+  try {
+    const demoStore = await import('./demoStore');
+    await demoStore.hydrateDemoStore();
+    const snapshot = demoStore.getDemoStore();
+    if (snapshot.dynamicMessages.length === 0 && snapshot.orders.length === 0) {
+      demoStore.seedDemoQueues();
+      // 額外加一條訂單給「靜園自助餐 / 校園小棧」走 placeOrder，產生 vendor 通知
+      demoStore.placeOrder({
+        studentId: 'demo_student_kuchih',
+        studentName: '顧晉瑋',
+        vendorName: '靜園自助餐',
+        items: [
+          { name: '三菜一飯', qty: 1, price: 55 },
+          { name: '紅茶', qty: 1, price: 20 },
+        ],
+      });
+      count += 7;
+    }
+  } catch {
+    /* swallow — seed demoStore 是 best effort */
   }
 
   // 標記已 seed

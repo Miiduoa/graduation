@@ -32,7 +32,7 @@ import {
   CockpitMetricChip,
 } from '../ui/cockpitShell';
 import {
-  loadRoleEventInbox,
+  loadVisibleRoleEventInbox,
   clearRoleEventInbox,
   subscribeAllRoleEvents,
   type RoleEvent,
@@ -68,9 +68,12 @@ export default function StudentInboxScreen() {
 
   const reload = useCallback(async () => {
     if (!auth.user?.uid) return;
-    const e = await loadRoleEventInbox(auth.user.uid);
+    const e = await loadVisibleRoleEventInbox({
+      uid: auth.user.uid,
+      role: auth.profile?.role,
+    });
     setEvents(e);
-  }, [auth.user?.uid]);
+  }, [auth.profile?.role, auth.user?.uid]);
 
   useEffect(() => {
     reload();
@@ -93,7 +96,6 @@ export default function StudentInboxScreen() {
   const handleClear = async () => {
     if (!auth.user?.uid) return;
     await clearRoleEventInbox(auth.user.uid);
-    await clearRoleEventInbox('__all__');
     setEvents([]);
   };
 
