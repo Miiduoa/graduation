@@ -293,6 +293,18 @@ export const DEMO_ADMIN_LOGS: DemoAdminLog[] = [
 
 export const DEMO_ADMIN_CAFETERIAS: DemoAdminCafeteria[] = [
   {
+    id: 'merchant_demo_exam_bento',
+    name: '口試 Demo 便當店',
+    merchantId: 'merchant_demo_exam_bento',
+    brandKey: 'demo_exam_bento',
+    location: '主顧樓 B1 口試展示區',
+    openingHours: '09:00–21:00',
+    pilotStatus: 'live',
+    orderingEnabled: true,
+    activeOperatorCount: 3,
+    updatedAt: daysAgo(0),
+  },
+  {
     id: 'merchant_cafe_a',
     name: '靜宜中餐部',
     merchantId: 'merchant_cafe_a',

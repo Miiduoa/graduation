@@ -55,6 +55,11 @@ import {
 } from './recommendLunch';
 import { understand, rankMenuCandidates, type SemanticFrame } from './aiSemanticReasoner';
 import { recordUnknownConcept, lookupLearnedConcept, linkConceptToMeaning } from './aiActiveLearning';
+import {
+  createDemoDiningOrder,
+  getDemoDiningCafeterias,
+  getDemoDiningMenuItems,
+} from './demoOrdering';
 
 /** 與 AIChatScreen 訂餐選單一致：itemId@@vendorId */
 const DINING_CHOICE_ID_SEP = '@@';
@@ -177,6 +182,38 @@ async function placeOrderWith(
     typeof rawPrice === 'number' && Number.isFinite(rawPrice) ? rawPrice : 0;
   // totalAmount = 0 時，下游 OrderSuccessCard 會顯示「金額待店家報價」而不是 $0
   const totalAmount = price * qty;
+
+  if (ctx.userId?.startsWith('demo_')) {
+    const demo = await createDemoDiningOrder({
+      userId: ctx.userId,
+      schoolId: ctx.schoolId,
+      role: ctx.role,
+      merchantId: vendorId,
+      merchantName: cafeteria?.name ?? matched.cafeteria,
+      cafeteriaId: cafeteria?.id ?? cafeteriaId,
+      itemId,
+      itemName: matched.name,
+      quantity: qty,
+      price,
+      note: args.note,
+      source: 'ai_agent',
+    });
+    const suffix = demo.substituted ? '（原指定品項不可用，已改用 demo 可下單品項）' : '';
+    return {
+      success: true,
+      isWrite: true,
+      data: demo.order,
+      summary: [
+        '✅ 已送出 demo 訂單。',
+        `身份：${demo.actor.name}（${demo.actor.role}）`,
+        `餐點：${demo.item.name} x ${demo.quantity}${suffix}`,
+        `餐廳：${demo.merchant.name}`,
+        price ? `金額：$${demo.total}` : '',
+        `訂單編號：${demo.order.id}`,
+        '狀態：待店家確認',
+      ].filter(Boolean).join('\n'),
+    };
+  }
 
   if (!hasDataSource()) {
     return {
@@ -2717,6 +2754,13 @@ const TOOL_EXECUTORS: Record<
           if (firestoreMenus?.length) allMenus.push(...firestoreMenus);
         } catch { /* Firestore 查詢失敗也不影響 */ }
       }
+      if (ctx.userId.startsWith('demo_')) {
+        const demoMenus = getDemoDiningMenuItems(ctx.schoolId);
+        const existingIds = new Set(allMenus.map((m: any) => String(m.id ?? '')));
+        for (const dm of demoMenus) {
+          if (!existingIds.has(String(dm.id))) allMenus.push(dm);
+        }
+      }
       // 加入靜宜大學本地菜單目錄（永遠可用）
       if (isProvidenceDiningSchoolId(ctx.schoolId)) {
         const localMenus = getPuDiningMenuItems(ctx.schoolId);
@@ -2740,6 +2784,13 @@ const TOOL_EXECUTORS: Record<
           cafeteriasForMenus = await getDataSource().listCafeterias(ctx.schoolId);
         } catch {
           /* ignore */
+        }
+      }
+      if (ctx.userId.startsWith('demo_')) {
+        const demoCafs = getDemoDiningCafeterias(ctx.schoolId);
+        const existingIds = new Set(cafeteriasForMenus.map((c: any) => c.id));
+        for (const dc of demoCafs) {
+          if (!existingIds.has(dc.id)) cafeteriasForMenus.push(dc);
         }
       }
       if (isProvidenceDiningSchoolId(ctx.schoolId)) {
@@ -2950,31 +3001,39 @@ const TOOL_EXECUTORS: Record<
       // ── 2D. 一般匹配（含學習過的別名）──
       const itemName = frame.slots.item ?? rawItemName;
       const normalize = (s: string) => s.toLowerCase().replace(/[\s｜|／/,，、\-—_()（）]/g, '');
-      const keyword = normalize(itemName);
+      const itemNameCandidates = Array.from(new Set([
+        itemName,
+        rawItemName,
+        itemName.replace(/^(?:幫我|我要|我想|點|訂|買|來|一份|1份|一個|1個|一碗|1碗|一杯|1杯)+/g, ''),
+        itemName.replace(/(?:一份|1份|一個|1個|一碗|1碗|一杯|1杯)/g, ''),
+      ].map((s) => s.trim()).filter(Boolean)));
 
       const findMatches = (): any[] => {
-        // 0. 學習過的概念別名
-        const learned = lookupLearnedConcept(itemName);
-        if (learned?.itemName) {
-          const byLearned = allMenus.filter((m) => normalize(m.name) === normalize(learned.itemName!));
-          if (byLearned.length > 0) return byLearned;
+        for (const candidate of itemNameCandidates) {
+          const keyword = normalize(candidate);
+          // 0. 學習過的概念別名
+          const learned = lookupLearnedConcept(candidate);
+          if (learned?.itemName) {
+            const byLearned = allMenus.filter((m) => normalize(m.name) === normalize(learned.itemName!));
+            if (byLearned.length > 0) return byLearned;
+          }
+          // 1. 完全匹配
+          const exact = allMenus.filter(m => normalize(m.name) === keyword);
+          if (exact.length > 0) return exact;
+          // 2. 名稱包含關鍵字
+          const includes = allMenus.filter(m => normalize(m.name).includes(keyword));
+          if (includes.length > 0) return includes;
+          // 3. 關鍵字包含名稱
+          const reverse = allMenus.filter(m => keyword.includes(normalize(m.name)));
+          if (reverse.length > 0) return reverse;
+          // 4. 拆字匹配（≥60% 字元命中）
+          const chars = [...keyword];
+          const fuzzy = allMenus.filter(m => {
+            const n = normalize(m.name);
+            return chars.filter(c => n.includes(c)).length >= Math.ceil(chars.length * 0.6);
+          });
+          if (fuzzy.length > 0) return fuzzy;
         }
-        // 1. 完全匹配
-        const exact = allMenus.filter(m => normalize(m.name) === keyword);
-        if (exact.length > 0) return exact;
-        // 2. 名稱包含關鍵字
-        const includes = allMenus.filter(m => normalize(m.name).includes(keyword));
-        if (includes.length > 0) return includes;
-        // 3. 關鍵字包含名稱
-        const reverse = allMenus.filter(m => keyword.includes(normalize(m.name)));
-        if (reverse.length > 0) return reverse;
-        // 4. 拆字匹配（≥60% 字元命中）
-        const chars = [...keyword];
-        const fuzzy = allMenus.filter(m => {
-          const n = normalize(m.name);
-          return chars.filter(c => n.includes(c)).length >= Math.ceil(chars.length * 0.6);
-        });
-        if (fuzzy.length > 0) return fuzzy;
         return [];
       };
 
@@ -3074,6 +3133,36 @@ const TOOL_EXECUTORS: Record<
       const totalAmount = price * quantity;
 
       // 建立訂單
+      if (ctx.userId?.startsWith('demo_')) {
+        const demo = await createDemoDiningOrder({
+          userId: ctx.userId,
+          schoolId: ctx.schoolId,
+          role: ctx.role,
+          merchantId: vendorId,
+          merchantName: cafeteria?.name ?? matched.cafeteria,
+          cafeteriaId: cafeteria?.id ?? cafeteriaId,
+          itemId,
+          itemName: matched.name,
+          quantity,
+          price,
+          note: args.note,
+          source: 'ai_agent',
+        });
+        const suffix = demo.substituted ? '（原指定品項不可用，已改用 demo 可下單品項）' : '';
+        return {
+          success: true, isWrite: true, data: demo.order,
+          summary: [
+            `✅ 已送出 demo 訂單。`,
+            `身份：${demo.actor.name}（${demo.actor.role}）`,
+            `餐點：${demo.item.name} x ${demo.quantity}${suffix}`,
+            `餐廳：${demo.merchant.name}`,
+            price ? `金額：$${demo.total}` : '',
+            `訂單編號：${demo.order.id}`,
+            `狀態：待店家確認`,
+          ].filter(Boolean).join('\n'),
+        };
+      }
+
       if (!hasDataSource()) {
         // 沒有 DataSource 但有菜單 → 回報結果但無法寫入
         return {

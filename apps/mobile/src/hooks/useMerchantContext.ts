@@ -14,6 +14,7 @@ import { useAuth } from '../state/auth';
 import {
   DEMO_MERCHANTS,
   MERCHANT_ROLES,
+  getDemoMerchantAssignmentsForUid,
   type DemoMerchant,
   type MerchantRole,
 } from '../data/demoMerchants';
@@ -35,16 +36,6 @@ export interface MerchantContext {
   available: ResolvedMerchant[];
   switchTo: (merchantId: string) => Promise<void>;
 }
-
-/** demo 帳號的預設 assignment（若 auth.profile 沒給就用這） */
-const DEMO_FALLBACK_ASSIGNMENTS: Record<string, Array<{ merchantId: string; role: 'owner' | 'manager' | 'staff' }>> = {
-  // 阿英：中餐部店長 + 咖啡屋兼差 staff + 麵食館 manager（demo 演示多店家切換）
-  demo_cafeteria: [
-    { merchantId: 'merchant_cafe_a', role: 'manager' },
-    { merchantId: 'merchant_coffee_b', role: 'staff' },
-    { merchantId: 'merchant_noodle_f', role: 'manager' },
-  ],
-};
 
 export function useMerchantContext(): MerchantContext {
   const auth = useAuth();
@@ -70,8 +61,8 @@ export function useMerchantContext(): MerchantContext {
       })).filter((a) => a.merchantId);
 
     // demo fallback
-    if (assignments.length === 0 && uid && DEMO_FALLBACK_ASSIGNMENTS[uid]) {
-      assignments = DEMO_FALLBACK_ASSIGNMENTS[uid];
+    if (assignments.length === 0 && uid) {
+      assignments = getDemoMerchantAssignmentsForUid(uid);
     }
 
     return assignments

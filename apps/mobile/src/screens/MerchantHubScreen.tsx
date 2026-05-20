@@ -12,6 +12,7 @@ import {
   updateDemoOrderStatus,
   subscribeDemoOrders,
 } from '../services/demoMerchantOrders';
+import { updateOrderStatus as updateDemoStoreOrderStatus } from '../services/demoStore';
 import { Screen, AnimatedCard, Button, Pill, Spinner } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
@@ -161,6 +162,10 @@ export function MerchantHubScreen() {
         // demo：直接寫進 in-memory store + 推 cross-role event 給學生 inbox
         updateDemoOrderStatus(order.id, nextStatus as Order['status']);
         if (nextStatus === 'preparing' || nextStatus === 'ready' || nextStatus === 'completed') {
+          updateDemoStoreOrderStatus(
+            order.id,
+            nextStatus === 'preparing' ? 'processing' : nextStatus,
+          );
           try {
             const { simulateVendorAdvanceOrder } = await import(
               '../services/demoActionSimulator'
@@ -337,6 +342,8 @@ export function MerchantHubScreen() {
           ) : (
             filteredOrders.map((order, index) => {
               const nextAction = getNextOrderAction(order.status);
+              const customerLabel = order.customerName ?? order.userId;
+              const customerRole = order.customerRole ? ` · ${order.customerRole}` : '';
               return (
                 <AnimatedCard key={order.id} delay={index * 40}>
                   <View style={{ gap: 12 }}>
@@ -352,7 +359,7 @@ export function MerchantHubScreen() {
                           {order.cafeteria ?? selectedAssignment?.cafeteriaName ?? '餐廳訂單'}
                         </Text>
                         <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-                          訂單 #{order.id.slice(0, 8)} · 使用者 {order.userId.slice(0, 8)}
+                          訂單 #{order.id.slice(0, 8)} · {customerLabel}{customerRole}
                         </Text>
                       </View>
                       <Pill

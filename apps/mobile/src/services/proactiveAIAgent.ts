@@ -396,12 +396,12 @@ async function scanForDepartment(input: ProactiveScanInput): Promise<ProactiveSu
 
 async function scanForVendor(input: ProactiveScanInput): Promise<ProactiveSuggestion[]> {
   // 依該 vendor 員工綁定的每個店家分別 scan，再聚合 top suggestions
-  const { DEMO_MERCHANTS, DEMO_MERCHANT_ORDERS, getDemoOrdersByMerchant } = await import('../data/demoMerchants');
+  const { DEMO_EXAM_BENTO_MERCHANT_ID, DEMO_MERCHANTS, DEMO_MERCHANT_ORDERS, getDemoOrdersByMerchant } = await import('../data/demoMerchants');
   const out: ProactiveSuggestion[] = [];
 
-  // demo: demo_cafeteria 員工 → 3 個店家
+  // demo: demo_cafeteria 員工 → 口試 Demo 店家 + 常用店家
   const merchantIds = input.uid === 'demo_cafeteria'
-    ? ['merchant_cafe_a', 'merchant_coffee_b', 'merchant_noodle_f']
+    ? [DEMO_EXAM_BENTO_MERCHANT_ID, 'merchant_cafe_a', 'merchant_coffee_b', 'merchant_noodle_f']
     : DEMO_MERCHANTS.slice(0, 2).map((m) => m.id);
 
   for (const merchantId of merchantIds) {

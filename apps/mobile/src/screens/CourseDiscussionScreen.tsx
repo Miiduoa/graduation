@@ -33,6 +33,7 @@ import { EmptyState } from '../ui/components';
 import { useAuth } from '../state/auth';
 import { emitDiscussionPosted, emitHelpRequested } from '../services/roleEventBus';
 import {
+  canRequestHelp,
   getDiscussionTargets,
   getHelpRequestTargets,
 } from '../services/roleEventTargets';
@@ -163,7 +164,7 @@ export default function CourseDiscussionScreen(props: RouteProps) {
           // 標題含問號 / 「為什麼」/「怎麼」/ HELP 標記 → 升級為 help_requested
           // 注意：教師 / TA 自己提問不會走 help_requested（targets 會排除自己）
           const looksLikeHelp = /[?？]|為什麼|怎麼|不會|不懂|help|HELP/i.test(newTitle + ' ' + newBody);
-          if (looksLikeHelp) {
+          if (looksLikeHelp && canRequestHelp(actorRole)) {
             const helpTargets = getHelpRequestTargets(actorUid);
             if (helpTargets.length > 0) {
               await emitHelpRequested({

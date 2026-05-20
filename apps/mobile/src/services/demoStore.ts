@@ -86,6 +86,7 @@ export interface StoreOrder {
   id: string;
   studentId: string;
   studentName: string;
+  actorRole?: DemoUserRole;
   vendorName: string;
   items: { name: string; qty: number; price: number }[];
   total: number;
@@ -248,7 +249,6 @@ export function markDynamicMessageRead(msgId: string): void {
 }
 
 export function getMessagesForRole(role: DemoUserRole, store: DemoStore = cached): StoreDynamicMessage[] {
-  if (role === 'guest') return [];
   return store.dynamicMessages.filter((m) => m.recipientRoles.includes(role));
 }
 
@@ -406,14 +406,17 @@ export function setDormRepairStatus(repairId: string, status: StoreDormRepair['s
 export function placeOrder(params: {
   studentId: string;
   studentName: string;
+  actorRole?: DemoUserRole;
   vendorName: string;
   items: { name: string; qty: number; price: number }[];
 }): StoreOrder {
   const total = params.items.reduce((sum, i) => sum + i.qty * i.price, 0);
+  const actorRole = params.actorRole ?? 'student';
   const order: StoreOrder = {
     id: `ord-${Date.now()}`,
     studentId: params.studentId,
     studentName: params.studentName,
+    actorRole,
     vendorName: params.vendorName,
     items: params.items,
     total,
@@ -432,7 +435,7 @@ export function placeOrder(params: {
     type: 'success',
     relatedOrderId: order.id,
     senderRole: 'vendor',
-    recipientRoles: ['student'],
+    recipientRoles: [actorRole],
   });
   // ② 給商家
   sendMessage({
@@ -444,7 +447,7 @@ export function placeOrder(params: {
     isRead: false,
     type: 'action',
     relatedOrderId: order.id,
-    senderRole: 'student',
+    senderRole: actorRole,
     recipientRoles: ['vendor'],
   });
   return order;
@@ -482,7 +485,7 @@ export function updateOrderStatus(orderId: string, status: OrderStatus): void {
       isRead: false,
       type: status === 'ready' ? 'action' : 'info',
       senderRole: 'vendor',
-      recipientRoles: ['student'],
+      recipientRoles: [target.actorRole ?? 'student'],
     });
   }
 }

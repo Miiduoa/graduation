@@ -22,6 +22,7 @@ import { getDataSource, hasDataSource } from '../data/source';
 import { isEffectivelyOnline, addToOfflineQueue } from '../services/offline';
 import { analytics } from '../services/analytics';
 import { aiBrain } from '../services/aiBrain';
+import { createDemoDiningOrder } from '../services/demoOrdering';
 import type {
   Cafeteria as DataCafeteria,
   MenuItem as DataMenuItem,
@@ -642,7 +643,28 @@ export function OrderingScreen(props: any) {
               status: 'pending' as const,
             };
 
-            const createdOrder = await ds.createOrder(orderData);
+            const isDemoUser = auth.user!.uid.startsWith('demo_');
+            const createdOrder = isDemoUser
+              ? (await createDemoDiningOrder({
+                  userId: auth.user!.uid,
+                  userName: auth.profile?.displayName ?? 'Demo 使用者',
+                  role: auth.profile?.role ?? null,
+                  schoolId: school.id,
+                  merchantId: selectedCafeteria.merchantId ?? selectedCafeteria.id,
+                  merchantName: selectedCafeteria.name,
+                  cafeteriaId: selectedCafeteria.id,
+                  cafeteriaName: selectedCafeteria.name,
+                  items: cart.map((c) => ({
+                    itemId: c.menuItem.id,
+                    itemName: c.menuItem.name,
+                    quantity: c.quantity,
+                    price: c.menuItem.price,
+                    note: c.notes,
+                  })),
+                  note: cart.map((c) => c.notes).filter(Boolean).join('；') || undefined,
+                  source: 'ordering_screen',
+                })).order
+              : await ds.createOrder(orderData);
 
             analytics.logEvent('place_order', {
               order_id: createdOrder?.id,
@@ -663,24 +685,26 @@ export function OrderingScreen(props: any) {
               /* optional bus */
             }
 
-            // demo 跨角色聯動：店家 VendorDashboard / MerchantHub 訂閱 order_placed，
-            // 不 emit 這個的話，店家側怎麼樣都看不到學生剛下的單。
-            try {
-              const { simulateStudentOrderFood } = await import('../services/demoActionSimulator');
-              const itemsLabel = cart
-                .map((c) => `${c.menuItem.name} ×${c.quantity}`)
-                .join('、');
-              await simulateStudentOrderFood({
-                studentUid: auth.user!.uid,
-                studentName: auth.profile?.displayName ?? '學生',
-                merchantId: selectedCafeteria.merchantId ?? selectedCafeteria.id,
-                merchantName: selectedCafeteria.name,
-                items: itemsLabel,
-                total: cartTotal,
-                orderId: createdOrder?.id,
-              });
-            } catch (busError) {
-              console.warn('[OrderingScreen] simulateStudentOrderFood failed:', busError);
+            // 非 demo 保留舊的跨角色事件；demo 已由 createDemoDiningOrder 寫入同一份資料源。
+            if (!isDemoUser) {
+              try {
+                const { simulateStudentOrderFood } = await import('../services/demoActionSimulator');
+                const itemsLabel = cart
+                  .map((c) => `${c.menuItem.name} ×${c.quantity}`)
+                  .join('、');
+                await simulateStudentOrderFood({
+                  studentUid: auth.user!.uid,
+                  studentName: auth.profile?.displayName ?? '學生',
+                  merchantId: selectedCafeteria.merchantId ?? selectedCafeteria.id,
+                  merchantName: selectedCafeteria.name,
+                  items: itemsLabel,
+                  total: cartTotal,
+                  orderId: createdOrder?.id,
+                  buyerRole: auth.profile?.role ?? undefined,
+                });
+              } catch (busError) {
+                console.warn('[OrderingScreen] simulateStudentOrderFood failed:', busError);
+              }
             }
 
             try {
@@ -1609,7 +1633,7 @@ export function OrderingScreen(props: any) {
           }}
         >
           <Pressable
-            onPress={() => {}}
+            onPress={(event) => event.stopPropagation()}
             style={{
               width: '100%',
               maxWidth: 360,

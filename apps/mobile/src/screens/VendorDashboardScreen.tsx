@@ -51,6 +51,7 @@ import {
   listDemoMerchantOrders,
   subscribeDemoOrders,
 } from '../services/demoMerchantOrders';
+import { updateOrderStatus as updateDemoStoreOrderStatus } from '../services/demoStore';
 import { AgentSummaryBanner } from '../components/AgentSummaryBanner';
 import { AIMissionControl } from '../components/AIMissionControl';
 
@@ -103,6 +104,7 @@ export default function VendorDashboardScreen() {
           merchantId: payload.merchantId,
           studentUid: event.actorUid,
           studentName: payload.studentName,
+          studentRole: payload.buyerRole,
           items: payload.items,
           total: payload.total,
           status: 'pending',
@@ -118,7 +120,8 @@ export default function VendorDashboardScreen() {
           id: o.id,
           merchantId,
           studentUid: o.userId,
-          studentName: '學生',
+          studentName: o.customerName ?? o.userId,
+          studentRole: o.customerRole,
           items: o.items
             .map((it) => `${it.name} ×${it.quantity}`)
             .join('、'),
@@ -126,6 +129,8 @@ export default function VendorDashboardScreen() {
           status:
             o.status === 'preparing'
               ? 'processing'
+              : o.status === 'confirmed'
+                ? 'pending'
               : o.status === 'pending'
                 ? 'pending'
                 : o.status === 'ready'
@@ -175,6 +180,7 @@ export default function VendorDashboardScreen() {
           merchantId: event.payload.merchantId,
           studentUid: event.actorUid,
           studentName: event.payload.studentName,
+          studentRole: event.payload.buyerRole,
           items: event.payload.items,
           total: event.payload.total,
           status: 'pending',
@@ -217,6 +223,7 @@ export default function VendorDashboardScreen() {
     const storeStatus: 'pending' | 'preparing' | 'ready' | 'completed' =
       next === 'processing' ? 'preparing' : next;
     updateDemoOrderStatus(id, storeStatus);
+    updateDemoStoreOrderStatus(id, next as 'processing' | 'ready' | 'completed');
 
     // 2. emit cross-role event 讓學生 inbox 收到
     if (target.studentUid && merchantCtx.current && auth.user) {
@@ -383,7 +390,7 @@ export default function VendorDashboardScreen() {
               activeOrders.map((order) => (
                 <View key={order.id} style={{ paddingVertical: theme.space.xs }}>
                   <CockpitRow
-                    title={`${order.studentName} · $${order.total}`}
+                    title={`${order.studentName}${order.studentRole ? ` (${order.studentRole})` : ''} · $${order.total}`}
                     subtitle={`${order.items} · ${new Date(order.orderedAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })}`}
                     tone={order.status === 'pending' ? 'warn' : order.status === 'ready' ? 'success' : undefined}
                     rightSlot={
