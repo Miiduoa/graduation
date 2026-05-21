@@ -20,7 +20,8 @@ import {
 import { useDemoRole } from '../state/demoRole';
 import { useDemoStore } from '../state/demoStore';
 import { useAuth } from '../state/auth';
-import { createDemoDiningOrder } from '../services/demoOrdering';
+import { createDemoDiningOrder, type DemoPaymentMethod } from '../services/demoOrdering';
+import { resolveEffectiveDemoAIUser } from '../services/demoAiContext';
 
 export default function CafeteriaAiFirstScreen(props: any) {
   const navigation = props?.navigation;
@@ -28,26 +29,35 @@ export default function CafeteriaAiFirstScreen(props: any) {
   const { role, definition } = useDemoRole();
   const auth = useAuth();
   const store = useDemoStore();
-  const myUid = auth.user?.uid ?? 'demo_student_kuchih';
-  const myName = auth.profile?.displayName ?? '訪客';
+  const effectiveUser = resolveEffectiveDemoAIUser({
+    profile: auth.profile as any,
+    user: auth.user,
+    demoRole: role,
+  });
+  const myUid = effectiveUser.uid ?? 'demo_guest';
+  const myName = effectiveUser.displayName ?? definition.label;
+  const mySchoolId = effectiveUser.schoolId ?? auth.profile?.schoolId ?? 'pu';
+  const myRole = effectiveUser.role ?? role;
   const myOrderCount = store.orders.filter((o) => o.studentId === myUid).length;
 
   // 訂餐開放給所有 demo 角色 — 教師、系主任、管理員、商家、校友、訪客都會吃午餐。
-  async function handleOrder(vendor: string, item: string, price: number) {
+  async function handleOrder(vendor: string, item: string, price: number, paymentMethod: DemoPaymentMethod) {
     let orderId = '';
     let merchantLabel = vendor;
     let itemLabel = item;
     let total = price;
+    const paymentLabel = paymentMethod === 'onsite' ? '到店付款' : '線上付款';
     try {
       const result = await createDemoDiningOrder({
         userId: myUid,
         userName: myName,
-        role,
-        schoolId: auth.profile?.schoolId ?? 'pu',
+        role: myRole,
+        schoolId: mySchoolId,
         merchantName: vendor,
         itemName: item,
         quantity: 1,
         price,
+        paymentMethod,
         source: 'cafeteria_ai_first',
       });
       orderId = result.order.id;
@@ -60,8 +70,15 @@ export default function CafeteriaAiFirstScreen(props: any) {
     }
     Alert.alert(
       '訂單已成立',
-      `${merchantLabel} 已收到 ${definition.icon} ${myName} 的訂單《${itemLabel}》NT$${total}。\n訂單編號：${orderId}\n切到「餐廳 阿英」可看到訂單；目前角色的訊息 / 訂單頁也會看到紀錄。`,
+      `${merchantLabel} 已收到 ${definition.icon} ${myName} 的訂單《${itemLabel}》NT$${total}。\n付款方式：${paymentLabel}\n訂單編號：${orderId}\n切到「餐廳 阿英」可看到訂單；目前角色的訊息 / 訂單頁也會看到紀錄。`,
     );
+  }
+  function choosePaymentAndOrder(vendor: string, item: string, price: number) {
+    Alert.alert('選擇付款方式', `${item} · NT$${price}`, [
+      { text: '取消', style: 'cancel' },
+      { text: '到店付款', onPress: () => void handleOrder(vendor, item, price, 'onsite') },
+      { text: '線上付款', onPress: () => void handleOrder(vendor, item, price, 'online') },
+    ]);
   }
   const hour = new Date().getHours();
   const isLunch = hour >= 11 && hour < 14;
@@ -102,8 +119,8 @@ export default function CafeteriaAiFirstScreen(props: any) {
             切到「餐廳 阿英」即可看到新訂單並推進狀態。
           </Text>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-            <AIButton label="線上點餐" onPress={() => handleOrder('口試 Demo 便當店', '口試招牌雞腿便當', 95)} />
-            <AIButton label="素食示範" variant="ghost" onPress={() => handleOrder('口試 Demo 便當店', '快速示範素食餐', 85)} />
+            <AIButton label="線上付款" onPress={() => handleOrder('口試 Demo 便當店', '口試招牌雞腿便當', 95, 'online')} />
+            <AIButton label="到店付款" variant="ghost" onPress={() => handleOrder('口試 Demo 便當店', '口試招牌雞腿便當', 95, 'onsite')} />
           </View>
         </AICard>
 
@@ -121,7 +138,7 @@ export default function CafeteriaAiFirstScreen(props: any) {
             營養：650 kcal · 蛋白質 32g
           </Text>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-            <AIButton label="線上點餐" onPress={() => handleOrder('主餐廳', '紅燒牛肉麵', 95)} />
+            <AIButton label="立即點餐" onPress={() => choosePaymentAndOrder('主餐廳', '紅燒牛肉麵', 95)} />
             <AIButton label="🧭 導航" variant="ghost" onPress={() => navigation?.navigate?.('MapV2' as never, { destination: '主餐廳' } as never)} />
             <AIButton label="查看菜單" variant="ghost" onPress={() => navigation?.navigate?.('MenuDetail' as never, { name: '主餐廳' } as never)} />
           </View>
@@ -184,7 +201,7 @@ export default function CafeteriaAiFirstScreen(props: any) {
           subtitle="口試展示 / AI 可代理下單 / 餐廳員工可接單"
           tag="保證可訂"
           tagTone="ai"
-          onPress={() => handleOrder('口試 Demo 便當店', '口試招牌雞腿便當', 95)}
+          onPress={() => choosePaymentAndOrder('口試 Demo 便當店', '口試招牌雞腿便當', 95)}
         />
         <AIRow
           icon="🍜"
@@ -192,7 +209,7 @@ export default function CafeteriaAiFirstScreen(props: any) {
           subtitle="麵點 / 便當 / 飲料 · 步行 8 min"
           tag="尖峰"
           tagTone="warning"
-          onPress={() => handleOrder('主餐廳', '招牌麵點便當', 90)}
+          onPress={() => choosePaymentAndOrder('主餐廳', '招牌麵點便當', 90)}
         />
         <AIRow
           icon="🍱"
@@ -200,7 +217,7 @@ export default function CafeteriaAiFirstScreen(props: any) {
           subtitle="便當 / 自助餐 · 步行 5 min"
           tag="營業中"
           tagTone="success"
-          onPress={() => handleOrder('學生餐廳', '雞腿便當', 65)}
+          onPress={() => choosePaymentAndOrder('學生餐廳', '雞腿便當', 65)}
         />
         <AIRow
           icon="🥗"
@@ -208,7 +225,7 @@ export default function CafeteriaAiFirstScreen(props: any) {
           subtitle="沙拉 / 三明治 · 步行 6 min"
           tag="營業中"
           tagTone="success"
-          onPress={() => handleOrder('輕食吧', '凱薩沙拉', 75)}
+          onPress={() => choosePaymentAndOrder('輕食吧', '凱薩沙拉', 75)}
         />
         <AIRow
           icon="☕"
@@ -216,11 +233,11 @@ export default function CafeteriaAiFirstScreen(props: any) {
           subtitle="飲料 / 點心 · 步行 3 min"
           tag="營業中"
           tagTone="success"
-          onPress={() => handleOrder('咖啡角落', '拿鐵 + 司康', 110)}
+          onPress={() => choosePaymentAndOrder('咖啡角落', '拿鐵 + 司康', 110)}
         />
         <AIRow icon="🍔" title="速食吧" subtitle="漢堡 / 薯條 · 步行 10 min" tag="休息" tagTone="muted" disabled />
         <AIRow icon="🍕" title="義式廚房" subtitle="披薩 / 義大利麵 · 步行 12 min" tag="休息" tagTone="muted" disabled />
-        <AIRow icon="🏪" title="7-11 校區店" subtitle="便利商店 · 步行 2 min" tag="24h" tagTone="ai" onPress={() => handleOrder('7-11 校區店', '御飯糰套餐', 45)} />
+        <AIRow icon="🏪" title="7-11 校區店" subtitle="便利商店 · 步行 2 min" tag="24h" tagTone="ai" onPress={() => choosePaymentAndOrder('7-11 校區店', '御飯糰套餐', 45)} />
       </AISection>
     </AIDetailScreen>
   );

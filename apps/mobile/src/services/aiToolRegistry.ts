@@ -40,7 +40,14 @@ import {
   type ExecutorContext as LegacyExecutorContext,
   type ToolCallResult,
 } from './aiAgentTools';
-import { createDemoDiningOrder } from './demoOrdering';
+import {
+  createDemoDiningOrder,
+  getDemoPaymentLabel,
+  inferDemoPaymentMethod,
+} from './demoOrdering';
+import { reviewDemoLeaveRequest } from './demoLeaveReview';
+import { getDemoUserStory } from '../data/demoUserStories';
+import { sendDemoMessageAsAgent } from './demoMessageAgent';
 
 // ════════════════════════════════════════════════════════════
 // Stage 1：標準化型別契約
@@ -233,6 +240,53 @@ function parseOrdinalIndex(text?: string): number | null {
   return null;
 }
 
+type RegistryPendingPaymentOrder = {
+  vendorId?: string;
+  vendorName?: string;
+  itemId?: string;
+  itemName?: string;
+  quantity?: number;
+  price?: unknown;
+  note?: string;
+};
+
+function encodeRegistryPaymentChoice(method: 'online' | 'onsite', pending?: RegistryPendingPaymentOrder): string {
+  if (!pending) return `payment:${method}`;
+  return `payment:${method}:${encodeURIComponent(JSON.stringify(pending))}`;
+}
+
+function decodeRegistryPaymentChoice(id: string): { method: 'online' | 'onsite'; pending?: RegistryPendingPaymentOrder } | null {
+  const match = id.match(/^payment:(online|onsite)(?::(.+))?$/);
+  if (!match) return null;
+  const method = match[1] as 'online' | 'onsite';
+  if (!match[2]) return { method };
+  try {
+    return { method, pending: JSON.parse(decodeURIComponent(match[2])) as RegistryPendingPaymentOrder };
+  } catch {
+    return { method };
+  }
+}
+
+function buildRegistryPaymentChoiceMenu(pending?: RegistryPendingPaymentOrder): AssistantChoiceMenu {
+  return {
+    title: '選擇付款方式',
+    prompt: '選好付款方式後再送出訂單。',
+    producedByTool: 'create_order',
+    options: [
+      {
+        id: encodeRegistryPaymentChoice('online', pending),
+        label: '線上付款',
+        sendAsUser: pending?.itemName ? `用線上付款下單 ${pending.itemName}` : '用線上付款下單',
+      },
+      {
+        id: encodeRegistryPaymentChoice('onsite', pending),
+        label: '到店付款',
+        sendAsUser: pending?.itemName ? `用到店付款下單 ${pending.itemName}` : '用到店付款下單',
+      },
+    ],
+  };
+}
+
 /**
  * 把 args.selectedIndex / args.index 或 lastUserMessage「第 N 個」解析成
  * lastChoiceMenu 的 option id，攤平到 args 後給 handler 用。
@@ -255,14 +309,25 @@ function applyChoiceMenuResolution(
     idx = parseOrdinalIndex(ctx.lastUserMessage);
   }
 
-  if (idx == null) return out;
-
   const menu = ctx.lastChoiceMenu;
-  const opt = menu?.options?.[idx - 1];
+  let opt = idx != null ? menu?.options?.[idx - 1] : undefined;
+  if (!opt && ctx.lastUserMessage) {
+    const paymentMethod = inferDemoPaymentMethod(ctx.lastUserMessage);
+    if (paymentMethod) {
+      opt = menu?.options?.find((option) => String(option.id ?? '').startsWith(`payment:${paymentMethod}`));
+    }
+  }
   if (!opt) return out;
 
   out._resolvedChoiceOptionId = opt.id;
   out._resolvedChoiceLabel = opt.label;
+
+  const paymentChoice = decodeRegistryPaymentChoice(String(opt.id ?? ''));
+  if (paymentChoice) {
+    out.paymentMethod = paymentChoice.method;
+    if (paymentChoice.pending) Object.assign(out, paymentChoice.pending);
+    return out;
+  }
 
   // 解析 option.id 為 (itemId, vendorId)。支援兩種既有格式：
   //   1. canonical：`itemId@@vendorId`
@@ -568,10 +633,38 @@ async function orderFoodHandler(
   const vendorId = asString(args.vendorId);
   const quantity = Math.max(1, asInt(args.quantity, 1));
   const note = asString(args.note);
+  const paymentMethod = inferDemoPaymentMethod(args.paymentMethod, ctx.lastUserMessage);
 
   // demo 模式：uid 以 demo_ 開頭時走 demoStore + demoMerchantOrders，
   // 避免打 Firebase Functions（demo 帳號過不了 security rules）。
   if (typeof ctx.userId === 'string' && ctx.userId.startsWith('demo_')) {
+    if (!paymentMethod) {
+      return {
+        success: false,
+        toolName: 'order_food',
+        summary: '下單前還需要選付款方式：要用「線上付款」還是「到店付款」？',
+        errorCode: 'missing_info',
+        isWrite: false,
+        isDraft: true,
+        missingInfo: [
+          {
+            field: 'paymentMethod',
+            prompt: '請選擇線上付款或到店付款。',
+            type: 'enum',
+            example: '線上付款',
+          },
+        ],
+        choiceMenu: buildRegistryPaymentChoiceMenu({
+          vendorId,
+          vendorName: asString(args.vendorName),
+          itemId,
+          itemName: asString(args.itemName) || asString(args.name),
+          quantity,
+          price: args.price,
+          note,
+        }),
+      };
+    }
     try {
       const demo = await createDemoDiningOrder({
         userId: ctx.userId,
@@ -585,13 +678,14 @@ async function orderFoodHandler(
         quantity,
         price: args.price as any,
         note,
+        paymentMethod,
         source: 'ai_agent',
       });
       const suffix = demo.substituted ? `（原指定品項不可用，已改用 demo 可下單品項）` : '';
       return {
         success: true,
         toolName: 'order_food',
-        summary: `已為你向「${demo.merchant.name}」訂購「${demo.item.name}」${demo.quantity} 份${suffix}，訂單編號 ${demo.order.id}。切到「餐廳 阿英」角色或訊息收件匣可看到訂單。`,
+        summary: `已為你向「${demo.merchant.name}」訂購「${demo.item.name}」${demo.quantity} 份${suffix}，付款方式：${getDemoPaymentLabel(paymentMethod)}，訂單編號 ${demo.order.id}。切到「餐廳 阿英」角色或訊息收件匣可看到訂單。`,
         data: {
           orderNo: demo.order.id,
           vendorName: demo.merchant.name,
@@ -599,6 +693,7 @@ async function orderFoodHandler(
           quantity: demo.quantity,
           total: demo.total,
           actorRole: demo.actor.role,
+          paymentMethod,
         },
         isWrite: true,
         isDraft: false,
@@ -859,6 +954,33 @@ async function requestLeaveHandler(
   return wrapLegacyResult('request_leave', result, /*kind*/ 'cross_role_write');
 }
 
+async function reviewLeaveHandler(
+  args: Record<string, unknown>,
+  ctx: ToolExecutionContext,
+): Promise<StandardToolResult> {
+  const result = await reviewDemoLeaveRequest({
+    reviewerUid: ctx.userId,
+    reviewerRole: ctx.role,
+    reviewerName: ctx.userId ? getDemoUserStory(ctx.userId)?.fullName ?? ctx.userId : null,
+    message: ctx.lastUserMessage ?? '',
+    leaveId: args.leaveId,
+    decision: args.decision,
+    studentName: args.studentName,
+    note: args.note,
+  });
+  return {
+    success: result.success,
+    toolName: 'review_leave',
+    summary: result.summary,
+    data: result.data,
+    isWrite: result.isWrite,
+    isDraft: false,
+    choiceMenu: result.choiceMenu,
+    errorCode: result.success ? undefined : 'precondition_failed',
+    error: result.success ? undefined : result.summary,
+  };
+}
+
 // ── create_reminder（行事曆事件）
 async function createReminderHandler(
   args: Record<string, unknown>,
@@ -918,6 +1040,28 @@ async function sendMessageHandler(
   args: Record<string, unknown>,
   ctx: ToolExecutionContext,
 ): Promise<StandardToolResult> {
+  if (ctx.userId?.startsWith('demo_')) {
+    const demo = sendDemoMessageAsAgent({
+      senderUid: ctx.userId,
+      senderName: getDemoUserStory(ctx.userId)?.fullName,
+      senderRole: ctx.role,
+      peerId: args.targets ?? args.peerId ?? args.recipientId ?? args.userId,
+      text: args.text,
+      content: args.content,
+      message: ctx.lastUserMessage,
+    });
+    return {
+      success: demo.success,
+      toolName: 'send_message',
+      summary: demo.summary,
+      data: demo.data,
+      error: demo.error,
+      choiceMenu: demo.choiceMenu,
+      isWrite: demo.isWrite,
+      isDraft: !demo.success && !demo.isWrite,
+      recordId: demo.data?.id,
+    };
+  }
   if (!hasDataSource()) {
     return makeFailure('send_message', 'offline', '目前無法送出訊息。', { isWrite: true });
   }
@@ -1088,6 +1232,11 @@ const ORDER_FOOD_PARAMETERS: ToolParametersSpec = {
       type: 'string',
       description: '備註，例如不要香菜、少冰等；可省略。',
     },
+    paymentMethod: {
+      type: 'string',
+      description: 'demo 訂單付款方式：online=線上付款，onsite=到店付款。',
+      enum: ['online', 'onsite'],
+    },
   },
   required: ['vendorId', 'itemId'],
 };
@@ -1130,6 +1279,12 @@ const TOOL_SPECS: readonly ToolSpec[] = [
         default: 1,
       },
       { name: 'note', description: '備註（如：不要香菜）', type: 'string' },
+      {
+        name: 'paymentMethod',
+        description: '付款方式（online=線上付款，onsite=到店付款）',
+        type: 'enum',
+        enum: ['online', 'onsite'],
+      },
     ],
     handler: orderFoodHandler,
   },
@@ -1231,7 +1386,7 @@ const TOOL_SPECS: readonly ToolSpec[] = [
     name: 'request_leave',
     description: '針對指定課程/日期建立請假申請。',
     kind: 'cross_role_write',
-    allowedRoles: ['student', 'teacher'],
+    allowedRoles: ['student', 'teacher', 'department_head', 'admin'],
     fields: [
       {
         name: 'courseId',
@@ -1260,6 +1415,36 @@ const TOOL_SPECS: readonly ToolSpec[] = [
       },
     ],
     handler: requestLeaveHandler,
+  },
+  {
+    name: 'review_leave',
+    description: '教師、系主任或管理員審核待處理請假單，可核准或退回。',
+    kind: 'cross_role_write',
+    allowedRoles: ['teacher', 'department_head', 'admin', 'school'],
+    fields: [
+      {
+        name: 'leaveId',
+        description: '請假單 ID；只有一張待審時可省略',
+        type: 'string',
+      },
+      {
+        name: 'decision',
+        description: '審核結果',
+        type: 'enum',
+        enum: ['approved', 'rejected'],
+      },
+      {
+        name: 'studentName',
+        description: '申請人姓名；多張待審假單時用於比對',
+        type: 'string',
+      },
+      {
+        name: 'note',
+        description: '審核附註',
+        type: 'string',
+      },
+    ],
+    handler: reviewLeaveHandler,
   },
 
   // ── 行事曆 / 提醒（canonical：title + time + source；
@@ -1299,7 +1484,7 @@ const TOOL_SPECS: readonly ToolSpec[] = [
     name: 'send_message',
     description: '發送私訊到指定 conversationId 或建立新對話送給 targets。',
     kind: 'cross_role_write',
-    allowedRoles: ['student', 'teacher', 'staff', 'department_head', 'admin'],
+    allowedRoles: ALL_ROLES,
     fields: [
       {
         name: 'conversationId',

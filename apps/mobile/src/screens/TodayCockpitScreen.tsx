@@ -62,7 +62,8 @@ const STUDENT_TEACHER_INBOX_KINDS = new Set([
 ]);
 import { safeNavigate } from '../utils/safeNavigate';
 import { recommendMerchantsForStudent } from '../data/demoMerchants';
-import { createDemoDiningOrder } from '../services/demoOrdering';
+import { createDemoDiningOrder, type DemoPaymentMethod } from '../services/demoOrdering';
+import { resolveEffectiveDemoAIUser } from '../services/demoAiContext';
 import { getStudentLifeQuickFacts } from '../data/demoUserStories';
 import {
   CockpitHero,
@@ -93,6 +94,14 @@ function urgencyLabel(u: PrioritizedTask['urgency']): string {
 export default function TodayCockpitScreen() {
   const navigation = useNavigation<any>();
   const auth = useAuth();
+  const effectiveUser = useMemo(
+    () => resolveEffectiveDemoAIUser({
+      profile: auth.profile as any,
+      user: auth.user,
+      demoRole: auth.profile?.role ?? 'student',
+    }),
+    [auth.profile, auth.user],
+  );
   const tabBarBottomPad = useTabBarContentBottomPadding();
   const mistakeStorageKey = useMemo(
     () => getScopedStorageKey(MISTAKE_STORAGE_KEY_BASE, { uid: auth.user?.uid ?? 'demo', schoolId: auth.profile?.schoolId ?? null }),
@@ -451,34 +460,36 @@ export default function TodayCockpitScreen() {
                   subtitle={`${rec.reason} · 約等 ${rec.estimatedWaitMinutes} 分`}
                   tone={rec.score >= 80 ? 'success' : rec.estimatedWaitMinutes > 15 ? 'warn' : undefined}
                   onPress={() => {
+                    const placeDemoOrder = async (paymentMethod: DemoPaymentMethod) => {
+                      const uid = effectiveUser.uid ?? 'demo_student_kuchih';
+                      try {
+                        const demo = await createDemoDiningOrder({
+                          userId: uid,
+                          userName: effectiveUser.displayName ?? auth.profile?.displayName ?? '我',
+                          role: effectiveUser.role ?? auth.profile?.role ?? 'student',
+                          schoolId: effectiveUser.schoolId ?? auth.profile?.schoolId ?? 'pu',
+                          merchantId: rec.merchantId,
+                          merchantName: rec.merchantName,
+                          itemName: '口試招牌雞腿便當',
+                          quantity: 1,
+                          paymentMethod,
+                          source: 'today_cockpit',
+                        });
+                        Alert.alert(
+                          '✅ 訂單已送出',
+                          `${demo.merchant.name} 已收到 ${demo.item.name}\n付款方式：${paymentMethod === 'onsite' ? '到店付款' : '線上付款'}\n可去餐廳 cockpit 看推進`,
+                        );
+                      } catch (e) {
+                        Alert.alert('下訂失敗', String((e as Error)?.message ?? e));
+                      }
+                    };
                     Alert.alert(
                       `${rec.emoji} ${rec.merchantName}`,
                       `AI 推薦分數：${rec.score}/100\n${rec.reason}\n預估等候：${rec.estimatedWaitMinutes} 分鐘\n\n要一鍵示範下訂單嗎？\n（demo：會通知餐廳端）`,
                       [
                         { text: '看菜單', onPress: () => safeNavigate(navigation, '校園生活', { tab: 'cafeteria' } as any, { fallbackMessage: '校園生活即將開放' }) },
-                        {
-                          text: '下訂 demo',
-                          onPress: async () => {
-                            if (!auth.user) return;
-                            try {
-                              const demo = await createDemoDiningOrder({
-                                userId: auth.user.uid,
-                                userName: auth.profile?.displayName ?? '我',
-                                role: auth.profile?.role ?? null,
-                                schoolId: auth.profile?.schoolId ?? 'pu',
-                                merchantId: rec.merchantId,
-                                merchantName: rec.merchantName,
-                                itemName: '口試招牌雞腿便當',
-                                quantity: 1,
-                                source: 'today_cockpit',
-                              });
-                              Alert.alert('✅ 訂單已送出', `${demo.merchant.name} 已收到 ${demo.item.name}，可去餐廳 cockpit 看推進`);
-                            } catch (e) {
-                              Alert.alert('下訂失敗', String((e as Error)?.message ?? e));
-                            }
-                          },
-                        },
-                        { text: '取消', style: 'cancel' },
+                        { text: '到店付款', onPress: () => void placeDemoOrder('onsite') },
+                        { text: '線上付款', onPress: () => void placeDemoOrder('online') },
                       ],
                     );
                   }}

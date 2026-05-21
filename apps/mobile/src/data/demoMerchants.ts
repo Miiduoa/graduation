@@ -289,6 +289,8 @@ export interface DemoMerchantOrder {
   orderedAt: string;
   /** 取餐方式：來店取 / 外送（外送 staff 需指派） */
   pickupMethod?: 'walk_in' | 'delivery';
+  /** demo 付款方式 */
+  paymentMethod?: 'online' | 'onsite';
   /** 備註（過敏、不要香菜等） */
   note?: string;
 }
@@ -297,9 +299,9 @@ const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString(
 
 export const DEMO_MERCHANT_ORDERS: DemoMerchantOrder[] = [
   // ── 口試 Demo 便當店（保證可下單，供口試展示）──────────────────
-  { id: 'o_exam_1', merchantId: DEMO_EXAM_BENTO_MERCHANT_ID, studentName: '顧晉瑋', studentRole: 'student', studentUid: 'demo_student_kuchih', items: '口試招牌雞腿便當 ×1', total: 95, status: 'pending', orderedAt: minutesAgo(1), pickupMethod: 'walk_in' },
-  { id: 'o_exam_2', merchantId: DEMO_EXAM_BENTO_MERCHANT_ID, studentName: '張怡君', studentRole: 'teacher', studentUid: 'demo_teacher_chang', items: '教授能量排骨便當 ×1', total: 105, status: 'processing', orderedAt: minutesAgo(6), note: '少飯' },
-  { id: 'o_exam_3', merchantId: DEMO_EXAM_BENTO_MERCHANT_ID, studentName: '訪客', studentRole: 'guest', studentUid: 'demo_guest', items: '快速示範素食餐 ×1', total: 85, status: 'ready', orderedAt: minutesAgo(10) },
+  { id: 'o_exam_1', merchantId: DEMO_EXAM_BENTO_MERCHANT_ID, studentName: '顧晉瑋', studentRole: 'student', studentUid: 'demo_student_kuchih', items: '口試招牌雞腿便當 ×1', total: 95, status: 'pending', orderedAt: minutesAgo(1), pickupMethod: 'walk_in', paymentMethod: 'online' },
+  { id: 'o_exam_2', merchantId: DEMO_EXAM_BENTO_MERCHANT_ID, studentName: '張怡君', studentRole: 'teacher', studentUid: 'demo_teacher_chang', items: '教授能量排骨便當 ×1', total: 105, status: 'processing', orderedAt: minutesAgo(6), note: '少飯', paymentMethod: 'onsite' },
+  { id: 'o_exam_3', merchantId: DEMO_EXAM_BENTO_MERCHANT_ID, studentName: '訪客', studentRole: 'guest', studentUid: 'demo_guest', items: '快速示範素食餐 ×1', total: 85, status: 'ready', orderedAt: minutesAgo(10), paymentMethod: 'online' },
 
   // ── 中餐部 (餐點多元、訂單最多) ──────────────────────────
   { id: 'o_cafe_1', merchantId: 'merchant_cafe_a', studentName: '阿明', studentUid: 'student_aming', items: '日式炸雞便當 ×1', total: 80, status: 'pending', orderedAt: minutesAgo(5), pickupMethod: 'walk_in' },

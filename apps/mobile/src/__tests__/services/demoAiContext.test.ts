@@ -3,6 +3,7 @@ import { buildAIAppContext, emptyAIAppRuntimeData } from '../../services/aiAppCo
 import {
   buildDemoAIAppDataRecords,
   enrichDemoAIAppRuntimeData,
+  resolveEffectiveDemoAIUser,
 } from '../../services/demoAiContext';
 
 const DEMO_UIDS = [
@@ -82,5 +83,53 @@ describe('demo AI role context', () => {
     expect(orderText).toContain('顧晉瑋');
     expect(data.notifications.length).toBeGreaterThan(0);
     expect(data.conversations.length).toBeGreaterThan(0);
+  });
+
+  it('resolves demo role identities even without a Firebase auth user', () => {
+    const teacher = resolveEffectiveDemoAIUser({ demoRole: 'teacher' });
+    expect(teacher.uid).toBe('demo_teacher_chang');
+    expect(teacher.signedInForAI).toBe(true);
+    expect(teacher.agentRole).toBe('faculty');
+    expect(teacher.campusRole).toBe('teacher');
+    expect(teacher.appContextRole).toBe('faculty');
+
+    const ta = resolveEffectiveDemoAIUser({ demoRole: 'ta' });
+    expect(ta.uid).toBe('demo_ta_lin');
+    expect(ta.agentRole).toBe('faculty');
+    expect(ta.campusRole).toBe('teacher');
+
+    const vendor = resolveEffectiveDemoAIUser({ demoRole: 'vendor' });
+    expect(vendor.uid).toBe('demo_cafeteria');
+    expect(vendor.agentRole).toBe('vendor');
+    expect(vendor.campusRole).toBe('vendor');
+    expect(vendor.appContextRole).toBe('vendor');
+
+    const guest = resolveEffectiveDemoAIUser({ demoRole: 'guest' });
+    expect(guest.uid).toBe('demo_guest');
+    expect(guest.signedInForAI).toBe(true);
+    expect(guest.agentRole).toBe('guest');
+    expect(guest.appContextRole).toBe('guest');
+
+    const alumni = resolveEffectiveDemoAIUser({ demoRole: 'alumni' });
+    expect(alumni.uid).toBe('demo_alumni_chang');
+    expect(alumni.agentRole).toBe('alumni');
+    expect(alumni.appContextRole).toBe('guest');
+  });
+
+  it('does not replace a real authenticated user with the stored demo role fallback', () => {
+    const real = resolveEffectiveDemoAIUser({
+      profile: {
+        uid: 'real-user-1',
+        role: 'student',
+        displayName: '真實學生',
+        schoolId: 'pu',
+      },
+      demoRole: 'guest',
+    });
+
+    expect(real.uid).toBe('real-user-1');
+    expect(real.displayName).toBe('真實學生');
+    expect(real.isDemo).toBe(false);
+    expect(real.appContextRole).toBe('student');
   });
 });

@@ -109,6 +109,7 @@ export default function VendorDashboardScreen() {
           total: payload.total,
           status: 'pending',
           orderedAt: event.occurredAt,
+          paymentMethod: 'online',
         });
       }
 
@@ -126,6 +127,7 @@ export default function VendorDashboardScreen() {
             .map((it) => `${it.name} ×${it.quantity}`)
             .join('、'),
           total: o.totalAmount ?? o.total ?? 0,
+          paymentMethod: o.paymentMethod,
           status:
             o.status === 'preparing'
               ? 'processing'
@@ -185,6 +187,7 @@ export default function VendorDashboardScreen() {
           total: event.payload.total,
           status: 'pending',
           orderedAt: event.occurredAt,
+          paymentMethod: 'online',
         };
         // 開啟 pending section 讓老闆立刻看見
         setOpenSection('pending');
@@ -391,7 +394,7 @@ export default function VendorDashboardScreen() {
                 <View key={order.id} style={{ paddingVertical: theme.space.xs }}>
                   <CockpitRow
                     title={`${order.studentName}${order.studentRole ? ` (${order.studentRole})` : ''} · $${order.total}`}
-                    subtitle={`${order.items} · ${new Date(order.orderedAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })}`}
+                    subtitle={`${order.items} · ${order.paymentMethod === 'onsite' ? '到店付款' : '線上付款'} · ${new Date(order.orderedAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })}`}
                     tone={order.status === 'pending' ? 'warn' : order.status === 'ready' ? 'success' : undefined}
                     rightSlot={
                       merchantCtx.current?.role.canHandleOrders ? (

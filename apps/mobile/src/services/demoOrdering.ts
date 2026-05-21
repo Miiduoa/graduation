@@ -41,6 +41,8 @@ export type DemoDiningOrderLine = {
   note?: string | null;
 };
 
+export type DemoPaymentMethod = 'online' | 'onsite';
+
 export type DemoDiningOrderInput = {
   userId: string;
   schoolId?: string;
@@ -56,6 +58,7 @@ export type DemoDiningOrderInput = {
   price?: number | string | null;
   note?: string | null;
   items?: DemoDiningOrderLine[];
+  paymentMethod?: DemoPaymentMethod | string | null;
   source?: string;
 };
 
@@ -87,6 +90,25 @@ function toPositiveInt(value: unknown, fallback = 1): number {
   const n = Number.parseInt(String(value ?? '').trim(), 10);
   if (!Number.isFinite(n) || n < 1) return fallback;
   return Math.min(Math.floor(n), 20);
+}
+
+export function inferDemoPaymentMethod(...values: unknown[]): DemoPaymentMethod | null {
+  const text = values
+    .map((value) => String(value ?? ''))
+    .join(' ')
+    .toLowerCase();
+  if (!text.trim()) return null;
+  if (/到店|現場|實體|取餐付|取餐再付|現金|cash|onsite|offline|pay\s*later/.test(text)) {
+    return 'onsite';
+  }
+  if (/線上|線上付款|手機支付|行動支付|信用卡|刷卡|學生證|校園卡|悠遊卡|一卡通|mobile[_\s-]?pay|credit|campus[_\s-]?card|online/.test(text)) {
+    return 'online';
+  }
+  return null;
+}
+
+export function getDemoPaymentLabel(method: DemoPaymentMethod | null | undefined): string {
+  return method === 'onsite' ? '到店付款' : '線上付款';
 }
 
 function toDemoUserRole(role: string | null | undefined): DemoUserRole {
@@ -240,6 +262,8 @@ export async function createDemoDiningOrder(
   input: DemoDiningOrderInput,
 ): Promise<DemoDiningOrderResult> {
   const actor = resolveDemoOrderActor(input);
+  const paymentMethod = inferDemoPaymentMethod(input.paymentMethod) ?? 'online';
+  const paymentLabel = getDemoPaymentLabel(paymentMethod);
   const requestedMerchant = resolveDemoMerchant(input);
   const rawLines: DemoDiningOrderLine[] = input.items?.length
     ? input.items
@@ -289,6 +313,8 @@ export async function createDemoDiningOrder(
     actorRole: actor.role,
     vendorName: merchant.name,
     items: storeItems,
+    paymentMethod,
+    paymentLabel,
   });
 
   const order: Order = {
@@ -307,7 +333,9 @@ export async function createDemoDiningOrder(
     totalAmount: total,
     totalPrice: total,
     status: 'pending',
-    paymentStatus: 'paid',
+    paymentStatus: paymentMethod === 'online' ? 'paid' : 'unpaid',
+    paymentMethod,
+    paymentLabel,
     merchantId: merchant.id,
     merchantName: merchant.name,
     cafeteria: merchant.name,

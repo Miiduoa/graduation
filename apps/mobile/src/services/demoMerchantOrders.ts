@@ -79,6 +79,7 @@ function staticDemoMerchantOrdersAsOrders(merchantId: string): Order[] {
 function mapDemoMerchantOrder(o: DemoMerchantOrder): Order {
   const override = statusOverrides.get(o.id);
   const status = override ?? mapStatus(o.status);
+  const paymentMethod = o.paymentMethod ?? 'online';
   return {
     id: o.id,
     userId: o.studentUid ?? 'demo_student_kuchih',
@@ -96,7 +97,9 @@ function mapDemoMerchantOrder(o: DemoMerchantOrder): Order {
     totalAmount: o.total,
     totalPrice: o.total,
     status,
-    paymentStatus: 'paid',
+    paymentStatus: paymentMethod === 'online' ? 'paid' : 'unpaid',
+    paymentMethod,
+    paymentLabel: paymentMethod === 'onsite' ? '到店付款' : '線上付款',
     merchantId: o.merchantId,
     cafeteria: o.merchantId,
     cafeteriaId: o.merchantId,
