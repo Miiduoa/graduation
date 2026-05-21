@@ -1369,6 +1369,10 @@ export type Order = {
   totalAmount?: number;
   status: OrderStatus;
   paymentStatus: 'pending' | 'paid' | 'refunded' | 'unpaid';
+  /** demo/UI metadata：線上付款或到店付款 */
+  paymentMethod?: 'online' | 'onsite';
+  /** demo/UI metadata：付款方式顯示文字 */
+  paymentLabel?: string;
   merchantId?: string;
   merchantName?: string;
   cafeteria?: string;

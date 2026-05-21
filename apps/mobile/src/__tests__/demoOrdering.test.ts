@@ -15,6 +15,8 @@ import { resetDemoStore, getMessagesForRole, type DemoUserRole } from '../servic
 import { listDemoMerchantOrders, listDemoOrdersForStudent, resetDemoOrderStore } from '../services/demoMerchantOrders';
 import { clearRoleEventInbox, loadVisibleRoleEventInbox } from '../services/roleEventBus';
 import { executeTool } from '../services/aiAgentTools';
+import { executeToolStandard } from '../services/aiToolRegistry';
+import { autonomousQuery } from '../services/aiLocalAgent';
 
 jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
@@ -23,6 +25,7 @@ jest.mock('@react-native-async-storage/async-storage', () =>
 jest.mock('../firebase', () => ({
   getFirebaseApp: jest.fn(() => ({})),
   getFunctionsInstance: jest.fn(() => ({})),
+  getCloudFunctionRegion: jest.fn(() => 'asia-east1'),
   hasUsableFirebaseConfig: jest.fn(() => false),
 }));
 
@@ -59,6 +62,7 @@ describe('demoOrdering', () => {
       merchantName: '口試 Demo 便當店',
       itemName: '口試招牌雞腿便當',
       quantity: 1,
+      paymentMethod: 'online',
       source: 'test',
     });
 
@@ -67,6 +71,8 @@ describe('demoOrdering', () => {
     expect(result.order.userId).toBe(uid);
     expect(result.order.customerName).toBe(name);
     expect(result.order.customerRole).toBe(role);
+    expect(result.order.paymentMethod).toBe('online');
+    expect(result.order.paymentStatus).toBe('paid');
     expect(listDemoOrdersForStudent(uid).some((order) => order.id === result.order.id)).toBe(true);
     expect(listDemoMerchantOrders(DEMO_EXAM_BENTO_MERCHANT_ID).some((order) => order.id === result.order.id)).toBe(true);
 
@@ -89,6 +95,7 @@ describe('demoOrdering', () => {
         { itemId: 'm_exam_bento_1', quantity: 2 },
         { itemId: 'm_exam_bento_4', quantity: 2 },
       ],
+      paymentMethod: 'onsite',
       source: 'ordering_screen',
     });
 
@@ -97,6 +104,8 @@ describe('demoOrdering', () => {
     expect(result.order.items).toHaveLength(2);
     expect(result.total).toBe(240);
     expect(result.order.totalAmount).toBe(240);
+    expect(result.order.paymentMethod).toBe('onsite');
+    expect(result.order.paymentStatus).toBe('unpaid');
     const vendorOrder = listDemoMerchantOrders(DEMO_EXAM_BENTO_MERCHANT_ID)
       .find((order) => order.id === result.order.id);
     expect(vendorOrder?.customerName).toBe('顧晉瑋');
@@ -109,12 +118,12 @@ describe('demoOrdering', () => {
   test('AI create_order 對 demo teacher 直接送出可被 vendor 看到的訂單', async () => {
     const result = await executeTool(
       'create_order',
-      { itemName: '口試招牌雞腿便當', quantity: '1' },
+      { itemName: '口試招牌雞腿便當', quantity: '1', paymentMethod: 'online' },
       {
         userId: 'demo_teacher_chang',
         schoolId: 'pu',
         role: 'teacher',
-        lastUserMessage: '幫我點一份口試招牌雞腿便當',
+        lastUserMessage: '幫我點一份口試招牌雞腿便當，線上付款',
       },
     );
 
@@ -132,6 +141,104 @@ describe('demoOrdering', () => {
       role: 'vendor',
     });
     expect(vendorInbox.some((event) => event.kind === 'order_placed')).toBe(true);
+  });
+
+  test('AI create_order 對 demo 下單缺付款方式時會先追問', async () => {
+    const result = await executeTool(
+      'create_order',
+      { itemName: '口試招牌雞腿便當', quantity: '1' },
+      {
+        userId: 'demo_student_kuchih',
+        schoolId: 'pu',
+        role: 'student',
+        lastUserMessage: '幫我點一份口試招牌雞腿便當',
+      },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.isWrite).toBe(false);
+    expect(result.summary).toContain('付款方式');
+    expect(result.choiceMenu?.options.map((option) => option.label)).toEqual(['線上付款', '到店付款']);
+    expect(listDemoOrdersForStudent('demo_student_kuchih')).toHaveLength(0);
+
+    const followUp = await executeTool(
+      'create_order',
+      {},
+      {
+        userId: 'demo_student_kuchih',
+        schoolId: 'pu',
+        role: 'student',
+        lastUserMessage: '線上付款',
+        lastChoiceMenu: result.choiceMenu,
+      },
+    );
+
+    expect(followUp.success).toBe(true);
+    expect(followUp.isWrite).toBe(true);
+    expect(listDemoOrdersForStudent('demo_student_kuchih')).toHaveLength(1);
+  });
+
+  test('canonical order_food 缺付款方式後可續接同一筆 demo 餐點', async () => {
+    const first = await executeToolStandard(
+      'order_food',
+      { vendorId: DEMO_EXAM_BENTO_MERCHANT_ID, itemId: 'm_exam_bento_1', itemName: '口試招牌雞腿便當' },
+      {
+        userId: 'demo_student_kuchih',
+        schoolId: 'pu',
+        role: 'student',
+        lastUserMessage: '幫我點口試招牌雞腿便當',
+      },
+    );
+
+    expect(first.success).toBe(false);
+    expect(first.summary).toContain('付款方式');
+    expect(first.choiceMenu?.producedByTool).toBe('create_order');
+
+    const second = await executeToolStandard(
+      'order_food',
+      {},
+      {
+        userId: 'demo_student_kuchih',
+        schoolId: 'pu',
+        role: 'student',
+        lastUserMessage: '到店付款',
+        lastChoiceMenu: first.choiceMenu,
+      },
+    );
+
+    expect(second.success).toBe(true);
+    expect(second.isWrite).toBe(true);
+    expect(second.summary).toContain('到店付款');
+    const order = listDemoOrdersForStudent('demo_student_kuchih')[0];
+    expect(order?.paymentMethod).toBe('onsite');
+    expect(order?.items[0]?.name).toBe('口試招牌雞腿便當');
+  });
+
+  test('AI 多輪訂餐只回答付款方式也會保留原餐點並送到餐廳', async () => {
+    const first = await autonomousQuery('幫我點一份口試招牌雞腿便當', {
+      userId: 'demo_student_kuchih',
+      schoolId: 'pu',
+      role: 'student',
+      isOnline: true,
+    });
+
+    expect(first.choiceMenu?.producedByTool).toBe('create_order');
+    expect(first.choiceMenu?.options.map((option) => option.label)).toEqual(['線上付款', '到店付款']);
+    expect(listDemoOrdersForStudent('demo_student_kuchih')).toHaveLength(0);
+
+    const second = await autonomousQuery('到店付款', {
+      userId: 'demo_student_kuchih',
+      schoolId: 'pu',
+      role: 'student',
+      isOnline: true,
+      lastChoiceMenu: first.choiceMenu,
+    });
+
+    expect(second.executedActions.some((action) => action.tool === 'create_order' && action.result.success)).toBe(true);
+    const order = listDemoOrdersForStudent('demo_student_kuchih')[0];
+    expect(order?.items[0]?.name).toBe('口試招牌雞腿便當');
+    expect(order?.paymentMethod).toBe('onsite');
+    expect(listDemoMerchantOrders(DEMO_EXAM_BENTO_MERCHANT_ID).some((vendorOrder) => vendorOrder.id === order?.id)).toBe(true);
   });
 
   test('餐廳員工 demo 帳號第一個指派店家是口試 Demo 便當店', () => {

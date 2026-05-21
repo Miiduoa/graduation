@@ -111,6 +111,7 @@ function isRoleAllowed(tool: AgentTool, role: AgentRole): boolean {
 function toCampusActorRole(role: AgentRole): CampusActorRole {
   if (role === 'faculty') return 'teacher';
   if (role === 'vendor') return 'staff';
+  if (role === 'alumni' || role === 'guest') return 'student';
   return role;
 }
 

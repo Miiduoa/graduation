@@ -28,6 +28,10 @@ import type { AssistantChoiceMenu, CampusActorRole } from '../data';
 import { understand as semanticUnderstand } from './aiSemanticReasoner';
 import { linkConceptToMeaning } from './aiActiveLearning';
 import { detectCapabilityGap, recordAgentProcessTraining } from './aiDynamicTraining';
+import {
+  detectLeaveReviewDecision,
+  isLeaveReviewIntent,
+} from './demoLeaveReview';
 
 // ════════════════════════════════════════════════════════════
 // 0. 對話上下文指代解析 (Anaphora Resolution)
@@ -255,7 +259,7 @@ export type DetectedIntent = {
 };
 
 const GENERATED_WRITE_REQUIRED_ARGS: Record<string, string[]> = {
-  send_message: ['peerId', 'content'],
+  send_message: ['content'],
   create_calendar_event: ['title', 'startAt'],
   register_event: [],
   reserve_library_seat: [],
@@ -287,6 +291,7 @@ const GENERATED_WRITE_REQUIRED_ARGS: Record<string, string[]> = {
   create_assignment: ['groupId', 'title'],
   grade_submission: ['submissionId', 'grade'],
   create_announcement: ['title', 'body'],
+  review_leave: [],
 };
 
 function isWriteToolName(toolName: string): boolean {
@@ -299,7 +304,8 @@ function isWriteToolName(toolName: string): boolean {
     || toolName === 'request_leave' || toolName.startsWith('check_in')
     || toolName.startsWith('start_') || toolName.startsWith('return_')
     || toolName.startsWith('renew_') || toolName.startsWith('confirm_')
-    || toolName.startsWith('join_') || toolName.startsWith('unregister_');
+    || toolName.startsWith('join_') || toolName.startsWith('unregister_')
+    || toolName === 'review_leave';
 }
 
 function requiredArgsForGeneratedWrite(toolName: string, declarationRequired: string[] = []): string[] {
@@ -829,7 +835,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({
       tool: 'send_message', isWrite: true, priority: 12,
       args: { peerId: peerName, content: messageContent },
-      requiredArgs: ['peerId', 'content'],
+      requiredArgs: ['content'],
       resolvedRequiredArgs: ['peerId'],
       reason: `發送訊息給 ${peerName || '(待確認)'}`,
       prereqRead: { tool: 'query_conversations', args: {} },
@@ -1822,6 +1828,7 @@ export async function autonomousQuery(
     }
     return null;
   })();
+  let trustedChoiceMenuFollowUp = false;
   if (followUpToolFromMenu) {
     console.log(`[AI Agent] 短回應路由：${followUpToolFromMenu}（透過 lastChoiceMenu.producedByTool）`);
   }
@@ -1845,20 +1852,47 @@ export async function autonomousQuery(
   }
 
   let intents = analyzeIntents(resolvedMessage);
+  if (isLeaveReviewIntent(resolvedMessage)) {
+    const decision = detectLeaveReviewDecision(resolvedMessage);
+    const leaveId = resolvedMessage.match(/\b(?:lv|leave|evt)[-_a-z0-9]+\b/i)?.[0];
+    intents = intents.filter((intent) => intent.tool !== 'request_leave' && intent.tool !== 'query_attendance');
+    intents.unshift({
+      tool: 'review_leave',
+      args: {
+        ...(decision ? { decision } : {}),
+        ...(leaveId ? { leaveId } : {}),
+      },
+      requiredArgs: [],
+      isWrite: Boolean(decision),
+      priority: 19,
+      reason: decision === 'approved'
+        ? '核准請假單'
+        : decision === 'rejected'
+          ? '退回請假單'
+          : '查詢待審請假單',
+    });
+  }
 
   // 短選單跟進：語意層常把「隨便」誤判成 create_order，導致擋掉 borrow_book 的 unshift
   if (followUpToolFromMenu) {
     const m = resolvedMessage.trim();
+    const matchesChoiceLabel = effectiveLastChoiceMenu?.options?.some((o) => o.label && m.includes(o.label.slice(0, 4))) ?? false;
+    const matchesPaymentChoice =
+      followUpToolFromMenu === 'create_order' &&
+      /線上付款|到店付款|現場付款|實體付款|取餐付|取餐再付|現金|刷卡|信用卡|校園卡|學生證/.test(m);
     const menuShortFollow =
       m.length <= 36 &&
       (/第\s*[一二两兩三四五六七八九十百千\d]+(?:[個个]|(?:份|杯|碗|本|項|道))|最(?:後|后)[一那]?(?:[個个]|(?:本|份|杯|碗))/.test(m) ||
         /^(?:對+|好[的啊]?|可以|沒問題|ok|OK|嗯+|恩+|是[的啊]?|就[這那]個|就好|就[那這]個就好|就那個|就這個|行|好啊|要這個|買這個|就它|👍|👌|✅)$/.test(m) ||
         /^(?:對|好){1,4}(?:就[那這]個|就好|啊|啦|耶|喔|哦)?$/.test(m) ||
         /^(?:對對對|好好好|沒錯|對啊).*(?:就[那這]?個|就好)?$/.test(m) ||
+        matchesChoiceLabel ||
+        matchesPaymentChoice ||
         (/隨便|随便|都可以|任一/.test(m) && /^(?:borrow_book|create_order)$/.test(followUpToolFromMenu)) ||
         (followUpToolFromMenu === 'register_event' &&
           /不去了|不想去|不參加|取消報名|取消.*活動|還是不去|算了.*不去/.test(m)));
     if (menuShortFollow) {
+      trustedChoiceMenuFollowUp = true;
       intents = intents.filter((i) => !i.isWrite || i.tool === followUpToolFromMenu);
     }
   }
@@ -1943,7 +1977,9 @@ export async function autonomousQuery(
   if (isLostFoundBoundaryMetaMessage(resolvedMessage)) {
     intents = intents.filter((intent) => intent.tool !== 'create_lost_found');
   }
-  intents = filterCapabilityGapMisfires(resolvedMessage, intents);
+  if (!trustedChoiceMenuFollowUp) {
+    intents = filterCapabilityGapMisfires(resolvedMessage, intents);
+  }
 
   if (intents.length === 0) {
     return finishAgentResult({
@@ -2032,7 +2068,9 @@ export async function autonomousQuery(
         .filter(([_, v]) => v === '' || v === undefined || v === null)
         .map(([k]) => k);
     }
-    if (Array.isArray(wi.resolvedRequiredArgs)) {
+    const allowDemoMessageAliasResolution =
+      wi.tool === 'send_message' && typeof toolCtx.userId === 'string' && toolCtx.userId.startsWith('demo_');
+    if (Array.isArray(wi.resolvedRequiredArgs) && !allowDemoMessageAliasResolution) {
       for (const key of wi.resolvedRequiredArgs) {
         if (!resolvedKeys.has(key) && !missingRequired.includes(key)) {
           missingRequired.push(key);

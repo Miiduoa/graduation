@@ -75,6 +75,15 @@ import {
   type AIAmbientAwarenessSnapshot,
 } from '../services/aiAmbientAwareness';
 import { formatAIToolLayerForPrompt, runAIToolLayer } from '../services/aiToolLayer';
+import {
+  shouldUseInstantToolLayerAnswer,
+  withDeepDiveSuggestion,
+  type AIResponseMode,
+} from '../services/aiResponsePolicy';
+import {
+  resolveEffectiveDemoAIUser,
+} from '../services/demoAiContext';
+import { reviewDemoLeaveRequest } from '../services/demoLeaveReview';
 import { shouldUseWebSearch } from '../services/webSearch';
 import { executeAgentWrite } from '../services/agentWrite';
 import { buildNavigationTarget, navigateToTarget } from '../utils/courseNavigation';
@@ -89,6 +98,7 @@ import {
   isProvidenceDiningSchoolId,
 } from '../data/puDiningCatalog';
 import type { Cafeteria, Course, MenuItem } from '../data/types';
+import { useDemoRole } from '../state/demoRole';
 import {
   createAIBrain,
   understandQuery,
@@ -343,6 +353,8 @@ type Message = {
   paramCollect?: { tool: AgentTool; collected: Record<string, any>; nextParam: ToolParameter };
   proactiveTrigger?: ProactiveTrigger;
   thinkingSteps?: ThinkingStepUI[];
+  /** Auto/instant/thinking response policy used for this message. */
+  responseMode?: AIResponseMode;
   /** 雲端助理本輪實際呼叫的工具（後端回傳） */
   assistantToolsUsed?: string[];
   /** askCampusAssistant 本輪 runId（對應 Firestore agentRuns） */
@@ -1733,13 +1745,24 @@ export function AIChatScreen(props: any) {
   const nav = props?.navigation;
   const { school } = useSchool();
   const auth = useAuth();
+  const demoRole = useDemoRole();
   const ds = useDataSource();
   const scrollRef = useRef<ScrollView>(null);
   const scheduleState = useSchedule();
   const { courses } = scheduleState;
-  const effectiveUserId = auth.profile?.uid ?? auth.user?.uid ?? null;
-  const effectiveDisplayName = auth.profile?.displayName ?? auth.user?.displayName ?? null;
+  const effectiveAIUser = useMemo(
+    () =>
+      resolveEffectiveDemoAIUser({
+        profile: auth.profile,
+        user: auth.user,
+        demoRole: demoRole.role,
+      }),
+    [auth.profile, auth.user, demoRole.role],
+  );
+  const effectiveUserId = effectiveAIUser.uid;
+  const effectiveDisplayName = effectiveAIUser.displayName;
   const effectiveShortName = effectiveDisplayName?.split('（')[0]?.split(' ')[0]?.trim() || '同學';
+  const aiResponseMode: AIResponseMode = 'auto';
 
   // ── State ──
   const [messages, setMessages] = useState<Message[]>([]);
@@ -1792,10 +1815,8 @@ export function AIChatScreen(props: any) {
   const [aiBrain, setAiBrain] = useState<LocalAIBrain>(() => createAIBrain());
   const lastStrategyRef = useRef<ResponseStrategy>('direct_answer');
   const lastIntentRef = useRef<IntentLabel>('general');
-  const userRole: AgentRole = useMemo(
-    () => resolveAgentRoleFromProfile(auth.profile),
-    [auth.profile?.role, auth.profile?.serviceRoles, auth.profile?.merchantAssignments],
-  );
+  const userRole: AgentRole = effectiveAIUser.agentRole;
+  const campusActorRole = effectiveAIUser.campusRole;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -2250,7 +2271,7 @@ export function AIChatScreen(props: any) {
         schoolId: school.id,
         userId: effectiveUserId ?? null,
         userName: effectiveShortName,
-        role: userRole,
+        role: effectiveAIUser.appContextRole,
         isOnline: isEffectivelyOnline(),
         courses: coursesOverride ?? courses ?? [],
         pendingAssignments: pendingAssignments ?? [],
@@ -2274,7 +2295,7 @@ export function AIChatScreen(props: any) {
       school.id,
       effectiveUserId,
       effectiveShortName,
-      userRole,
+      effectiveAIUser.appContextRole,
       announcements,
       events,
       diningCafeterias,
@@ -5890,6 +5911,99 @@ export function AIChatScreen(props: any) {
       if (newSkill) {
         setTrainingDB(trainingDbForThisTurn);
       }
+      const leaveReviewResult = await reviewDemoLeaveRequest({
+        reviewerUid: effectiveUserId,
+        reviewerRole: effectiveAIUser.role,
+        reviewerName: effectiveDisplayName,
+        message: userMsg.content,
+      });
+      if (leaveReviewResult.handled) {
+        const reviewMsg: Message = {
+          id: genMsgId(),
+          role: 'assistant',
+          content: leaveReviewResult.summary,
+          timestamp: new Date(),
+          agentType: leaveReviewResult.isWrite ? 'tool_result' : 'text',
+          responseMode: 'instant',
+          choiceMenu: leaveReviewResult.choiceMenu,
+          suggestions: leaveReviewResult.isWrite
+            ? ['查看教師收件匣', '查看請假紀錄', '還有什麼待審？']
+            : ['核准第 1 張請假單', '退回第 1 張請假單', '查看教師工作台'],
+          thinkingSteps: [
+            {
+              step: '快答路由',
+              detail: '已辨識為教師/系主任審核請假，不走學生請假申請',
+              status: 'done',
+            },
+          ],
+        };
+        setIsTyping(false);
+        setMessages((prev) => [...prev, reviewMsg]);
+        setTrainingDB((prev) => {
+          const updated = addTrainingPair(prev, userMsg.content, reviewMsg.content, 'local');
+          lastQAPairIdRef.current = updated.pairs[updated.pairs.length - 1]?.id ?? null;
+          return updated;
+        });
+        setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+        return;
+      }
+
+      const instantAIContextForTools = buildLiveAIContext(appRuntimeDataRef.current, undefined, {
+        lastUserMessage: userMsg.content,
+      });
+      const instantToolLayerResult = runAIToolLayer({
+        message: userMsg.content,
+        context: instantAIContextForTools,
+      });
+      const instantToolLayerThinkingSteps: ThinkingStepUI[] =
+        instantToolLayerResult.steps.map((step) => ({
+          step: step.step,
+          detail: step.detail,
+          status: step.status,
+        }));
+      if (
+        shouldUseInstantToolLayerAnswer({
+          mode: aiResponseMode,
+          message: userMsg.content,
+          result: instantToolLayerResult,
+          context: instantAIContextForTools,
+        })
+      ) {
+        const instantMsg: Message = {
+          id: genMsgId(),
+          role: 'assistant',
+          content: instantToolLayerResult.answer ?? '',
+          timestamp: new Date(),
+          agentType: 'text',
+          responseMode: 'instant',
+          thinkingSteps: [
+            {
+              step: 'Auto 快答',
+              detail: '已用目前 demo 角色資料與本地工具直接回答',
+              status: 'done',
+            },
+            ...instantToolLayerThinkingSteps.slice(0, 3),
+          ],
+          actions: instantToolLayerResult.actions,
+          suggestions: withDeepDiveSuggestion(
+            instantToolLayerResult.intent === 'schedule_lookup'
+              ? ['設定上課提醒', '查作業截止', '查明天行程']
+              : instantToolLayerResult.intent === 'dining_lookup'
+                ? ['幫我點第一個', '換便宜一點', '開啟點餐']
+                : ['查我的資料總覽', '查通知', '還有什麼待辦'],
+          ),
+        };
+        setIsTyping(false);
+        setMessages((prev) => [...prev, instantMsg]);
+        setTrainingDB((prev) => {
+          const updated = addTrainingPair(prev, userMsg.content, instantMsg.content, 'local');
+          lastQAPairIdRef.current = updated.pairs[updated.pairs.length - 1]?.id ?? null;
+          return updated;
+        });
+        setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+        return;
+      }
+
       const syncedRuntimeDataForTools = await refreshAIAppAwareness('manual', { force: true });
       let refreshedCoursesForTools: Course[] | undefined;
       if (/課表|上課|有課|什麼課|幾點|請假|作業|成績|課程|學分/.test(userMsg.content)) {
@@ -5986,7 +6100,7 @@ export function AIChatScreen(props: any) {
           const agentCtx = {
             userId: effectiveUserId,
             schoolId: school.id,
-            role: userRole as any,
+            role: campusActorRole,
             isOnline: true,
             ...(lastChoiceMenuForAgent ? { lastChoiceMenu: lastChoiceMenuForAgent } : {}),
           };

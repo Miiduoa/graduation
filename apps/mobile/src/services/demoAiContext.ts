@@ -35,6 +35,7 @@ import {
 } from '../data/demoPersona';
 import type { AIContext } from './ai';
 import type { AIAppContextInput, AIAppRuntimeData } from './aiAppContext';
+import type { AgentRole } from '../data/puAIAgentData';
 import { listDemoMerchantOrders, listDemoOrdersForStudent } from './demoMerchantOrders';
 import { loadVisibleRoleEventInbox } from './roleEventBus';
 
@@ -42,6 +43,172 @@ type AppDataRecord = NonNullable<AIContext['appDataRecords']>[number];
 
 function isDemoUid(uid?: string | null): uid is string {
   return typeof uid === 'string' && uid.startsWith('demo_');
+}
+
+const DEMO_UID_BY_ROLE: Record<string, string> = {
+  student: 'demo_student_kuchih',
+  teacher: 'demo_teacher_chang',
+  professor: 'demo_teacher_chang',
+  ta: 'demo_ta_lin',
+  club_officer: 'demo_club_wei',
+  department_head: 'demo_admin_huang',
+  principal: 'demo_admin_huang',
+  admin: 'demo_admin_sys',
+  staff: 'demo_admin_sys',
+  vendor: 'demo_cafeteria',
+  alumni: 'demo_alumni_chang',
+  guest: 'demo_guest',
+};
+
+export type EffectiveDemoAIUser = {
+  uid: string | null;
+  displayName: string | null;
+  schoolId: string | null;
+  role: string | null;
+  isDemo: boolean;
+  signedInForAI: boolean;
+  agentRole: AgentRole;
+  campusRole?: AIContext['role'];
+  appContextRole?: AIAppContextInput['role'];
+};
+
+export function getDemoUidForRole(role?: string | null): string | null {
+  if (!role) return null;
+  return DEMO_UID_BY_ROLE[String(role)] ?? null;
+}
+
+export function roleToAgentRole(role?: string | null): AgentRole {
+  switch (role) {
+    case 'vendor':
+      return 'vendor';
+    case 'admin':
+    case 'department_head':
+    case 'principal':
+    case 'department':
+      return 'admin';
+    case 'teacher':
+    case 'professor':
+    case 'ta':
+      return 'faculty';
+    case 'staff':
+      return 'staff';
+    case 'alumni':
+      return 'alumni';
+    case 'guest':
+      return 'guest';
+    default:
+      return 'student';
+  }
+}
+
+export function roleToCampusRole(role?: string | null): AIContext['role'] | undefined {
+  switch (role) {
+    case 'teacher':
+    case 'professor':
+    case 'ta':
+      return 'teacher';
+    case 'department_head':
+    case 'principal':
+    case 'department':
+      return 'department_head';
+    case 'admin':
+      return 'admin';
+    case 'staff':
+      return 'staff';
+    case 'vendor':
+      return 'vendor';
+    case 'student':
+    case 'club_officer':
+      return 'student';
+    default:
+      return undefined;
+  }
+}
+
+export function roleToAIAppContextRole(role?: string | null): AIAppContextInput['role'] {
+  switch (role) {
+    case 'teacher':
+    case 'professor':
+    case 'ta':
+      return 'faculty';
+    case 'department_head':
+    case 'principal':
+    case 'department':
+      return 'department_head';
+    case 'admin':
+      return 'admin';
+    case 'staff':
+      return 'staff';
+    case 'vendor':
+      return 'vendor';
+    case 'student':
+    case 'club_officer':
+      return 'student';
+    case 'alumni':
+    case 'guest':
+      return 'guest';
+    default:
+      return undefined;
+  }
+}
+
+export function resolveEffectiveDemoAIUser(params: {
+  profile?: {
+    uid?: string | null;
+    role?: string | null;
+    displayName?: string | null;
+    schoolId?: string | null;
+    primarySchoolId?: string | null;
+    serviceRoles?: string[] | null;
+    merchantAssignments?: unknown[] | null;
+  } | null;
+  user?: {
+    uid?: string | null;
+    displayName?: string | null;
+    email?: string | null;
+  } | null;
+  demoRole?: string | null;
+}): EffectiveDemoAIUser {
+  const authUid = params.profile?.uid ?? params.user?.uid ?? null;
+  const demoUid = isDemoUid(authUid)
+    ? authUid
+    : authUid
+      ? null
+      : getDemoUidForRole(params.demoRole ?? params.profile?.role ?? null);
+  const uid = authUid ?? demoUid;
+  const story = getDemoUserStory(uid ?? undefined);
+  const role = params.profile?.role ?? story?.role ?? params.demoRole ?? null;
+  const displayName =
+    params.profile?.displayName ??
+    params.user?.displayName ??
+    story?.fullName ??
+    null;
+  const schoolId =
+    params.profile?.schoolId ??
+    params.profile?.primarySchoolId ??
+    story?.schoolId ??
+    null;
+  const effectiveUid = uid ?? story?.uid ?? null;
+  const isDemo = Boolean(story) || isDemoUid(effectiveUid);
+  const serviceRoles = params.profile?.serviceRoles ?? [];
+  const agentRole =
+    Array.isArray(params.profile?.merchantAssignments) && params.profile!.merchantAssignments!.length > 0
+      ? 'vendor'
+      : serviceRoles.includes('vendor') || serviceRoles.includes('merchant')
+        ? 'vendor'
+        : roleToAgentRole(role);
+
+  return {
+    uid: effectiveUid,
+    displayName,
+    schoolId,
+    role,
+    isDemo,
+    signedInForAI: Boolean(effectiveUid) || isDemo,
+    agentRole,
+    campusRole: roleToCampusRole(role),
+    appContextRole: roleToAIAppContextRole(role),
+  };
 }
 
 function compactJson(value: unknown, maxChars = 900): string {
@@ -55,13 +222,7 @@ function compactJson(value: unknown, maxChars = 900): string {
 
 function roleForAIInput(story: DemoUserStory | null): AIAppContextInput['role'] {
   if (!story) return undefined;
-  if (story.role === 'vendor') return 'vendor';
-  if (story.role === 'guest') return 'guest';
-  if (story.role === 'alumni') return 'guest';
-  if (story.role === 'department_head') return 'department_head';
-  if (story.role === 'ta') return 'student';
-  if (story.role === 'club_officer') return 'student';
-  return story.role;
+  return roleToAIAppContextRole(story.role);
 }
 
 function courseName(courseId: number): string {

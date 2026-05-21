@@ -1606,7 +1606,9 @@ export type AgentRole =
   | 'faculty' // 教師
   | 'staff' // 職員
   | 'admin' // 管理員
-  | 'vendor'; // 餐廳商家
+  | 'vendor' // 餐廳商家
+  | 'alumni' // 校友 demo
+  | 'guest'; // 訪客 demo
 
 export interface AgentRoleConfig {
   role: AgentRole;
@@ -1674,6 +1676,24 @@ export const AGENT_ROLE_CONFIG: AgentRoleConfig[] = [
     toolCategories: ['cafeteria', 'calendar', 'social'],
     proactiveCapabilities: [],
     description: '營運輔助代理：訂單管理/庫存提醒/營業報表',
+  },
+  {
+    role: 'alumni',
+    label: '校友',
+    icon: 'ribbon-outline',
+    color: '#8E8E93',
+    toolCategories: ['cafeteria', 'transport', 'calendar', 'social'],
+    proactiveCapabilities: ['lunch_time', 'rain_alert'],
+    description: '校友 demo 助理：回答公開校園、餐廳、活動與校友資料，不使用學生課務權限',
+  },
+  {
+    role: 'guest',
+    label: '訪客',
+    icon: 'eye-outline',
+    color: '#6E6E73',
+    toolCategories: ['cafeteria', 'transport', 'calendar'],
+    proactiveCapabilities: ['rain_alert'],
+    description: '訪客 demo 助理：回答公開公告、地圖、交通、餐廳與導覽資料',
   },
   {
     role: 'admin',
