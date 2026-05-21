@@ -227,7 +227,7 @@ function isWithinHours(value: unknown, now: Date, hours: number): boolean {
 
 function normalizeRole(role: AIAppContextInput['role']): AIContext['role'] {
   if (role === 'faculty') return 'teacher';
-  if (role === 'vendor') return 'staff';
+  if (role === 'vendor') return 'vendor';
   if (role === 'guest' || !role) return undefined;
   if (
     role === 'student' ||

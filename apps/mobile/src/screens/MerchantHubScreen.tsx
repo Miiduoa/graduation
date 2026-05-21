@@ -402,6 +402,8 @@ export function MerchantHubScreen() {
                     >
                       <Text style={{ color: theme.colors.muted }}>
                         總額 ${order.totalAmount ?? order.total ?? 0}
+                        {' · '}
+                        {order.paymentLabel ?? (order.paymentMethod === 'onsite' ? '到店付款' : '線上付款')}
                       </Text>
                       {order.note ? (
                         <View

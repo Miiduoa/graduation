@@ -59,7 +59,17 @@ import {
   createDemoDiningOrder,
   getDemoDiningCafeterias,
   getDemoDiningMenuItems,
+  getDemoPaymentLabel,
+  inferDemoPaymentMethod,
+  type DemoPaymentMethod,
 } from './demoOrdering';
+import { getDemoCoursesForUid } from '../data/demoCoursesMock';
+import { getDemoUserStory } from '../data/demoUserStories';
+import { getLeaveRequestTargets } from './roleEventTargets';
+import { requestLeave as requestDemoStoreLeave } from './demoStore';
+import { emitLeaveRequested } from './roleEventBus';
+import { reviewDemoLeaveRequest } from './demoLeaveReview';
+import { sendDemoMessageAsAgent } from './demoMessageAgent';
 
 /** 與 AIChatScreen 訂餐選單一致：itemId@@vendorId */
 const DINING_CHOICE_ID_SEP = '@@';
@@ -142,6 +152,125 @@ function buildDiningChoiceMenu(
   };
 }
 
+type PendingDemoPaymentOrder = {
+  vendorId?: string;
+  vendorName?: string;
+  cafeteriaId?: string;
+  cafeteriaName?: string;
+  itemId?: string;
+  itemName?: string;
+  quantity?: number;
+  price?: number;
+  note?: string;
+};
+
+function encodePendingPaymentOrder(method: DemoPaymentMethod, pending?: PendingDemoPaymentOrder): string {
+  if (!pending) return `payment:${method}`;
+  return `payment:${method}:${encodeURIComponent(JSON.stringify(pending))}`;
+}
+
+function decodePendingPaymentOrder(id: string): { method: DemoPaymentMethod; pending?: PendingDemoPaymentOrder } | null {
+  const match = id.match(/^payment:(online|onsite)(?::(.+))?$/);
+  if (!match) return null;
+  const method = match[1] as DemoPaymentMethod;
+  if (!match[2]) return { method };
+  try {
+    return { method, pending: JSON.parse(decodeURIComponent(match[2])) as PendingDemoPaymentOrder };
+  } catch {
+    return { method };
+  }
+}
+
+function buildDemoPaymentChoiceMenu(pending?: PendingDemoPaymentOrder): AssistantChoiceMenu {
+  return {
+    title: '選擇付款方式',
+    prompt: '訂餐前請先選付款方式。',
+    producedByTool: 'create_order',
+    options: [
+      {
+        id: encodePendingPaymentOrder('online', pending),
+        label: '線上付款',
+        subtitle: 'demo 會標記為已付款',
+        sendAsUser: pending?.itemName ? `用線上付款下單 ${pending.itemName}` : '用線上付款下單',
+      },
+      {
+        id: encodePendingPaymentOrder('onsite', pending),
+        label: '到店付款',
+        subtitle: '取餐時現場付款',
+        sendAsUser: pending?.itemName ? `用到店付款下單 ${pending.itemName}` : '用到店付款下單',
+      },
+    ],
+  };
+}
+
+function resolveDemoPaymentMethodFromContext(args: Record<string, unknown>, ctx: ExecutorContext): DemoPaymentMethod | null {
+  return inferDemoPaymentMethod(args.paymentMethod, args.payment, args.payBy, ctx.lastUserMessage);
+}
+
+function missingDemoPaymentMethodResult(pending?: PendingDemoPaymentOrder): ToolCallResult {
+  return {
+    success: false,
+    isWrite: false,
+    summary: '下單前還需要選付款方式：要用「線上付款」還是「到店付款」？回我其中一個，我就幫你送出訂單。',
+    choiceMenu: buildDemoPaymentChoiceMenu(pending),
+  };
+}
+
+function resolvePendingPaymentChoice(ctx: ExecutorContext): { method: DemoPaymentMethod; pending?: PendingDemoPaymentOrder } | null {
+  const menu = ctx.lastChoiceMenu;
+  if (!menu?.options?.length || menu.producedByTool !== 'create_order') return null;
+  const message = ctx.lastUserMessage ?? '';
+  const method = inferDemoPaymentMethod(message);
+  const ordinal = parseOrdinalFromMessage(message);
+  const option =
+    method
+      ? menu.options.find((opt) => String(opt.id ?? '').startsWith(`payment:${method}`))
+      : ordinal != null
+        ? menu.options[ordinal - 1]
+        : null;
+  if (!option) return null;
+  return decodePendingPaymentOrder(String(option.id ?? ''));
+}
+
+async function submitPendingDemoPaymentOrder(
+  payment: { method: DemoPaymentMethod; pending?: PendingDemoPaymentOrder },
+  ctx: ExecutorContext,
+): Promise<ToolCallResult> {
+  if (!ctx.userId?.startsWith('demo_') || !payment.pending) return missingDemoPaymentMethodResult();
+  const demo = await createDemoDiningOrder({
+    userId: ctx.userId,
+    schoolId: ctx.schoolId,
+    role: ctx.role,
+    merchantId: payment.pending.vendorId,
+    merchantName: payment.pending.vendorName,
+    cafeteriaId: payment.pending.cafeteriaId,
+    cafeteriaName: payment.pending.cafeteriaName,
+    itemId: payment.pending.itemId,
+    itemName: payment.pending.itemName,
+    quantity: payment.pending.quantity,
+    price: payment.pending.price,
+    note: payment.pending.note,
+    paymentMethod: payment.method,
+    source: 'ai_agent',
+  });
+  const suffix = demo.substituted ? '（原指定品項不可用，已改用 demo 可下單品項）' : '';
+  return {
+    success: true,
+    isWrite: true,
+    data: demo.order,
+    summary: [
+      '✅ 已送出 demo 訂單。',
+      `身份：${demo.actor.name}（${demo.actor.role}）`,
+      `餐點：${demo.item.name} x ${demo.quantity}${suffix}`,
+      `餐廳：${demo.merchant.name}`,
+      `金額：$${demo.total}`,
+      `付款方式：${getDemoPaymentLabel(payment.method)}`,
+      `訂單編號：${demo.order.id}`,
+      '狀態：待店家確認',
+    ].join('\n'),
+  };
+}
+
 /** 共用下單流程；matches.length === 1 與 ordinal-resolved 都會走這裡 */
 async function placeOrderWith(
   matched: any,
@@ -184,6 +313,20 @@ async function placeOrderWith(
   const totalAmount = price * qty;
 
   if (ctx.userId?.startsWith('demo_')) {
+    const paymentMethod = resolveDemoPaymentMethodFromContext(args, ctx);
+    if (!paymentMethod) {
+      return missingDemoPaymentMethodResult({
+        vendorId,
+        vendorName: cafeteria?.name ?? matched.cafeteria,
+        cafeteriaId: cafeteria?.id ?? cafeteriaId,
+        cafeteriaName: cafeteria?.name ?? matched.cafeteria,
+        itemId,
+        itemName: matched.name,
+        quantity: qty,
+        price,
+        note: args.note,
+      });
+    }
     const demo = await createDemoDiningOrder({
       userId: ctx.userId,
       schoolId: ctx.schoolId,
@@ -196,6 +339,7 @@ async function placeOrderWith(
       quantity: qty,
       price,
       note: args.note,
+      paymentMethod,
       source: 'ai_agent',
     });
     const suffix = demo.substituted ? '（原指定品項不可用，已改用 demo 可下單品項）' : '';
@@ -209,6 +353,7 @@ async function placeOrderWith(
         `餐點：${demo.item.name} x ${demo.quantity}${suffix}`,
         `餐廳：${demo.merchant.name}`,
         price ? `金額：$${demo.total}` : '',
+        `付款方式：${getDemoPaymentLabel(paymentMethod)}`,
         `訂單編號：${demo.order.id}`,
         '狀態：待店家確認',
       ].filter(Boolean).join('\n'),
@@ -817,6 +962,7 @@ export function getToolDeclarations(role?: CampusActorRole): GeminiToolDeclarati
           cafeteria: { type: 'string', description: '指定餐廳名稱（選填，用於多品項時縮小範圍）' },
           quantity: { type: 'string', description: '數量（預設 1）' },
           note: { type: 'string', description: '備註（如：不要香菜）' },
+          paymentMethod: { type: 'string', description: 'demo 付款方式：online=線上付款，onsite=到店付款', enum: ['online', 'onsite'] },
         },
         required: ['itemName'],
       },
@@ -1033,6 +1179,19 @@ export function getToolDeclarations(role?: CampusActorRole): GeminiToolDeclarati
       },
     },
     {
+      name: 'review_leave',
+      description: '教師/系主任專用：審核學生或教師送出的請假單，可核准或退回。',
+      parameters: {
+        type: 'object',
+        properties: {
+          leaveId: { type: 'string', description: '請假單 ID（可選，若只有一張待審可省略）' },
+          decision: { type: 'string', description: '審核結果', enum: ['approved', 'rejected'] },
+          studentName: { type: 'string', description: '學生或申請人姓名（多張假單時用來比對）' },
+          note: { type: 'string', description: '給申請人的審核附註' },
+        },
+      },
+    },
+    {
       name: 'create_announcement',
       description: '教師/管理者專用：發布校園公告。',
       parameters: {
@@ -1050,7 +1209,7 @@ export function getToolDeclarations(role?: CampusActorRole): GeminiToolDeclarati
   const tools = [...readTools, ...writeTools];
 
   // 加入教師/管理者專用工具
-  if (role === 'teacher' || role === 'admin' || role === 'staff') {
+  if (role === 'teacher' || role === 'department_head' || role === 'admin' || role === 'staff') {
     tools.push(...teacherTools);
   }
 
@@ -1965,6 +2124,17 @@ const TOOL_EXECUTORS: Record<
   // ─────── 寫入工具 ───────
 
   send_message: async (args, ctx) => {
+    if (ctx.userId?.startsWith('demo_')) {
+      return sendDemoMessageAsAgent({
+        senderUid: ctx.userId,
+        senderName: getDemoUserStory(ctx.userId)?.fullName,
+        senderRole: ctx.role,
+        peerId: args.peerId ?? args.recipientId ?? args.target ?? args.targets,
+        text: args.text,
+        content: args.content,
+        message: ctx.lastUserMessage,
+      });
+    }
     if (!hasDataSource() || !ctx.userId) return { success: false, error: '未登入', summary: '需要登入才能發送訊息。', isWrite: true };
     if (!args.peerId || !args.content) {
       return { success: false, isWrite: false, summary: '請告訴我要傳給誰，以及要傳什麼內容。' };
@@ -2610,12 +2780,27 @@ const TOOL_EXECUTORS: Record<
       const dateStr = `${targetDate.getFullYear()}/${targetDate.getMonth() + 1}/${targetDate.getDate()}`;
       const dayNames = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'];
 
+      const demoStory = ctx.userId.startsWith('demo_') ? getDemoUserStory(ctx.userId) : null;
+
       // 2. 查找當天課程
       let courses: any[] = [];
+      if (ctx.userId.startsWith('demo_')) {
+        courses = getDemoCoursesForUid(ctx.userId).map((course) => ({
+          id: course.id,
+          name: course.name,
+          teacher: course.instructor,
+          dayOfWeek: (course as any).dayOfWeek,
+          schedule: (course as any).schedule,
+          startTime: (course as any).startTime,
+          endTime: (course as any).endTime,
+        }));
+      }
       try {
-        const cached = await getCachedCourses();
-        if (cached && Array.isArray((cached as any).courses)) courses = (cached as any).courses;
-        else if (Array.isArray(cached)) courses = cached;
+        if (courses.length === 0) {
+          const cached = await getCachedCourses();
+          if (cached && Array.isArray((cached as any).courses)) courses = (cached as any).courses;
+          else if (Array.isArray(cached)) courses = cached;
+        }
       } catch { /* ignore cache errors */ }
       if (courses.length === 0 && hasDataSource()) {
         try { courses = await getDataSource().listCourses(ctx.schoolId); } catch { /* ignore */ }
@@ -2644,7 +2829,13 @@ const TOOL_EXECUTORS: Record<
       const leaveType = args.leaveType || 'personal';
       const leaveTypeLabel = leaveType === 'sick' ? '病假' : leaveType === 'official' ? '公假' : '事假';
 
-      if (targetCourses.length === 0 && todayCourses.length === 0) {
+      const actorRole = demoStory?.role ?? ctx.role;
+      const demoLeaveTargets = ctx.userId.startsWith('demo_')
+        ? getLeaveRequestTargets(actorRole, ctx.userId)
+        : [];
+      const shouldCreateGeneralLeave = ctx.userId.startsWith('demo_') && demoLeaveTargets.length > 0;
+
+      if (targetCourses.length === 0 && todayCourses.length === 0 && !shouldCreateGeneralLeave) {
         return {
           success: true, isWrite: false,
           summary: [
@@ -2676,6 +2867,9 @@ const TOOL_EXECUTORS: Record<
       }
 
       // 4. 執行請假
+      if (targetCourses.length === 0 && shouldCreateGeneralLeave) {
+        targetCourses = [{ id: 'general-leave', name: '一般請假' }];
+      }
       const courseNames = targetCourses.map((c: any) => c.name).join('、');
 
       if (hasDataSource()) {
@@ -2708,6 +2902,52 @@ const TOOL_EXECUTORS: Record<
         }
       }
 
+      if (ctx.userId.startsWith('demo_')) {
+        const targets = demoLeaveTargets;
+        if (targets.length === 0) {
+          return {
+            success: false,
+            isWrite: true,
+            summary: '目前 demo 角色不適用請假流程；學生、TA、社團幹部、教師與系主任才可送出請假申請。',
+          };
+        }
+        const actorName = demoStory?.fullName ?? 'Demo 使用者';
+        const category = leaveType === 'sick'
+          ? 'sick'
+          : leaveType === 'official'
+            ? 'official'
+            : leaveType === 'bereavement'
+              ? 'bereavement'
+              : 'personal';
+        const leaveId =
+          demoStory?.role === 'student' || demoStory?.role === 'ta' || demoStory?.role === 'club_officer'
+            ? requestDemoStoreLeave({
+                courseId: String(targetCourses[0]?.id ?? ''),
+                courseName: String(targetCourses[0]?.name ?? '一般請假'),
+                studentId: ctx.userId,
+                studentName: actorName,
+                reason,
+                dateFrom: targetDate.toISOString().split('T')[0],
+                dateTo: targetDate.toISOString().split('T')[0],
+              }).id
+            : `lv-${Date.now()}`;
+        await emitLeaveRequested({
+          actorUid: ctx.userId,
+          actorName,
+          targetUids: targets,
+          courseId: targetCourses[0]?.id ?? 'general-leave',
+          courseName: String(targetCourses[0]?.name ?? '一般請假'),
+          payload: {
+            leaveId,
+            studentName: actorName,
+            category,
+            fromDate: targetDate.toISOString().split('T')[0],
+            toDate: targetDate.toISOString().split('T')[0],
+            reason,
+          },
+        });
+      }
+
       return {
         success: true, isWrite: true,
         summary: [
@@ -2724,6 +2964,26 @@ const TOOL_EXECUTORS: Record<
     }
   },
 
+  review_leave: async (args, ctx) => {
+    const result = await reviewDemoLeaveRequest({
+      reviewerUid: ctx.userId,
+      reviewerRole: ctx.role,
+      reviewerName: ctx.userId ? getDemoUserStory(ctx.userId)?.fullName ?? ctx.userId : null,
+      message: ctx.lastUserMessage ?? '',
+      leaveId: args.leaveId,
+      decision: args.decision,
+      studentName: args.studentName,
+      note: args.note,
+    });
+    return {
+      success: result.success,
+      isWrite: result.isWrite,
+      summary: result.summary,
+      data: result.data,
+      choiceMenu: result.choiceMenu,
+    };
+  },
+
   create_order: async (args, ctx) => {
     if (!ctx.userId) {
       return { success: false, isWrite: true, summary: '請先登入才能訂餐哦！' };
@@ -2736,6 +2996,11 @@ const TOOL_EXECUTORS: Record<
       const frame = understand(userMsg, {
         lastChoiceMenu: ctx.lastChoiceMenu,
       });
+
+      const pendingPayment = resolvePendingPaymentChoice(ctx);
+      if (pendingPayment?.pending && ctx.userId.startsWith('demo_')) {
+        return await submitPendingDemoPaymentOrder(pendingPayment, ctx);
+      }
 
       if (hasInvalidDiningQuantityRequest(userMsg) || hasInvalidDiningQuantityValue(args.quantity)) {
         return {
@@ -3134,6 +3399,20 @@ const TOOL_EXECUTORS: Record<
 
       // 建立訂單
       if (ctx.userId?.startsWith('demo_')) {
+        const paymentMethod = resolveDemoPaymentMethodFromContext(args, ctx);
+        if (!paymentMethod) {
+          return missingDemoPaymentMethodResult({
+            vendorId,
+            vendorName: cafeteria?.name ?? matched.cafeteria,
+            cafeteriaId: cafeteria?.id ?? cafeteriaId,
+            cafeteriaName: cafeteria?.name ?? matched.cafeteria,
+            itemId,
+            itemName: matched.name,
+            quantity,
+            price,
+            note: args.note,
+          });
+        }
         const demo = await createDemoDiningOrder({
           userId: ctx.userId,
           schoolId: ctx.schoolId,
@@ -3146,6 +3425,7 @@ const TOOL_EXECUTORS: Record<
           quantity,
           price,
           note: args.note,
+          paymentMethod,
           source: 'ai_agent',
         });
         const suffix = demo.substituted ? '（原指定品項不可用，已改用 demo 可下單品項）' : '';
@@ -3157,6 +3437,7 @@ const TOOL_EXECUTORS: Record<
             `餐點：${demo.item.name} x ${demo.quantity}${suffix}`,
             `餐廳：${demo.merchant.name}`,
             price ? `金額：$${demo.total}` : '',
+            `付款方式：${getDemoPaymentLabel(paymentMethod)}`,
             `訂單編號：${demo.order.id}`,
             `狀態：待店家確認`,
           ].filter(Boolean).join('\n'),

@@ -90,6 +90,8 @@ export interface StoreOrder {
   vendorName: string;
   items: { name: string; qty: number; price: number }[];
   total: number;
+  paymentMethod?: 'online' | 'onsite';
+  paymentLabel?: string;
   status: OrderStatus;
   placedAt: string;
 }
@@ -409,9 +411,12 @@ export function placeOrder(params: {
   actorRole?: DemoUserRole;
   vendorName: string;
   items: { name: string; qty: number; price: number }[];
+  paymentMethod?: 'online' | 'onsite';
+  paymentLabel?: string;
 }): StoreOrder {
   const total = params.items.reduce((sum, i) => sum + i.qty * i.price, 0);
   const actorRole = params.actorRole ?? 'student';
+  const paymentLabel = params.paymentLabel ?? (params.paymentMethod === 'onsite' ? '到店付款' : '線上付款');
   const order: StoreOrder = {
     id: `ord-${Date.now()}`,
     studentId: params.studentId,
@@ -420,6 +425,8 @@ export function placeOrder(params: {
     vendorName: params.vendorName,
     items: params.items,
     total,
+    paymentMethod: params.paymentMethod ?? 'online',
+    paymentLabel,
     status: 'placed',
     placedAt: new Date().toISOString(),
   };
@@ -429,7 +436,7 @@ export function placeOrder(params: {
     fromName: params.vendorName,
     fromAvatar: '🍱',
     subject: `【訂單成立】${params.vendorName}`,
-    body: `已收到你的訂單：\n${params.items.map((i) => `· ${i.name} × ${i.qty}`).join('\n')}\n\n總計 NT$${total}。我們會盡快備餐。`,
+    body: `已收到你的訂單：\n${params.items.map((i) => `· ${i.name} × ${i.qty}`).join('\n')}\n\n總計 NT$${total}。\n付款方式：${paymentLabel}。\n我們會盡快備餐。`,
     sentAt: '剛剛',
     isRead: false,
     type: 'success',
@@ -442,7 +449,7 @@ export function placeOrder(params: {
     fromName: `${params.studentName}（新訂單）`,
     fromAvatar: '🛎️',
     subject: `【新訂單】${params.vendorName} ${params.items.length} 項`,
-    body: `${params.studentName} 在 ${params.vendorName} 下了新訂單：\n\n${params.items.map((i) => `· ${i.name} × ${i.qty}`).join('\n')}\n\n總計 NT$${total}。請於收件匣推進訂單狀態。`,
+    body: `${params.studentName} 在 ${params.vendorName} 下了新訂單：\n\n${params.items.map((i) => `· ${i.name} × ${i.qty}`).join('\n')}\n\n總計 NT$${total}。\n付款方式：${paymentLabel}。請於收件匣推進訂單狀態。`,
     sentAt: '剛剛',
     isRead: false,
     type: 'action',

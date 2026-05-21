@@ -22,7 +22,7 @@ import { getDataSource, hasDataSource } from '../data/source';
 import { isEffectivelyOnline, addToOfflineQueue } from '../services/offline';
 import { analytics } from '../services/analytics';
 import { aiBrain } from '../services/aiBrain';
-import { createDemoDiningOrder } from '../services/demoOrdering';
+import { createDemoDiningOrder, type DemoPaymentMethod } from '../services/demoOrdering';
 import type {
   Cafeteria as DataCafeteria,
   MenuItem as DataMenuItem,
@@ -619,192 +619,198 @@ export function OrderingScreen(props: any) {
   };
 
   const confirmAndPlaceOrder = () => {
-    Alert.alert('確認訂單', `共 ${cartCount} 項商品，總計 $${cartTotal}`, [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '確認下單',
-        onPress: async () => {
-          setSubmittingOrder(true);
-          try {
-            const orderData = {
+    const submitOrder = async (paymentMethod: DemoPaymentMethod) => {
+      setSubmittingOrder(true);
+      try {
+        const paymentLabel = paymentMethod === 'onsite' ? '到店付款' : '線上付款';
+        const orderData = {
+          userId: auth.user!.uid,
+          schoolId: school.id,
+          cafeteriaId: selectedCafeteria.id,
+          merchantId: selectedCafeteria.merchantId ?? selectedCafeteria.id,
+          cafeteria: selectedCafeteria.name,
+          items: cart.map((c) => ({
+            menuItemId: c.menuItem.id,
+            name: c.menuItem.name,
+            price: c.menuItem.price,
+            quantity: c.quantity,
+            notes: c.notes,
+          })),
+          totalAmount: cartTotal,
+          status: 'pending' as const,
+          paymentMethod,
+          paymentLabel,
+        };
+
+        const isDemoUser = auth.user!.uid.startsWith('demo_');
+        const createdOrder = isDemoUser
+          ? (await createDemoDiningOrder({
               userId: auth.user!.uid,
+              userName: auth.profile?.displayName ?? 'Demo 使用者',
+              role: auth.profile?.role ?? null,
               schoolId: school.id,
-              cafeteriaId: selectedCafeteria.id,
               merchantId: selectedCafeteria.merchantId ?? selectedCafeteria.id,
-              cafeteria: selectedCafeteria.name,
+              merchantName: selectedCafeteria.name,
+              cafeteriaId: selectedCafeteria.id,
+              cafeteriaName: selectedCafeteria.name,
               items: cart.map((c) => ({
-                menuItemId: c.menuItem.id,
-                name: c.menuItem.name,
-                price: c.menuItem.price,
+                itemId: c.menuItem.id,
+                itemName: c.menuItem.name,
                 quantity: c.quantity,
-                notes: c.notes,
+                price: c.menuItem.price,
+                note: c.notes,
               })),
-              totalAmount: cartTotal,
-              status: 'pending' as const,
-            };
+              note: cart.map((c) => c.notes).filter(Boolean).join('；') || undefined,
+              paymentMethod,
+              source: 'ordering_screen',
+            })).order
+          : await ds.createOrder(orderData as any);
 
-            const isDemoUser = auth.user!.uid.startsWith('demo_');
-            const createdOrder = isDemoUser
-              ? (await createDemoDiningOrder({
-                  userId: auth.user!.uid,
-                  userName: auth.profile?.displayName ?? 'Demo 使用者',
-                  role: auth.profile?.role ?? null,
-                  schoolId: school.id,
-                  merchantId: selectedCafeteria.merchantId ?? selectedCafeteria.id,
-                  merchantName: selectedCafeteria.name,
-                  cafeteriaId: selectedCafeteria.id,
-                  cafeteriaName: selectedCafeteria.name,
-                  items: cart.map((c) => ({
-                    itemId: c.menuItem.id,
-                    itemName: c.menuItem.name,
-                    quantity: c.quantity,
-                    price: c.menuItem.price,
-                    note: c.notes,
-                  })),
-                  note: cart.map((c) => c.notes).filter(Boolean).join('；') || undefined,
-                  source: 'ordering_screen',
-                })).order
-              : await ds.createOrder(orderData);
+        analytics.logEvent('place_order', {
+          order_id: createdOrder?.id,
+          total_amount: cartTotal,
+          item_count: cartCount,
+          cafeteria: selectedCafeteria.name,
+          cafeteria_id: selectedCafeteria.id,
+          payment_method: paymentMethod,
+        });
 
-            analytics.logEvent('place_order', {
-              order_id: createdOrder?.id,
-              total_amount: cartTotal,
-              item_count: cartCount,
-              cafeteria: selectedCafeteria.name,
-              cafeteria_id: selectedCafeteria.id,
+        try {
+          const { emitCafeteriaOrderPlaced } = await import('../services/campusEventBus');
+          emitCafeteriaOrderPlaced({
+            userId: auth.user!.uid,
+            vendorId: selectedCafeteria.merchantId ?? selectedCafeteria.id,
+            total: cartTotal,
+          });
+        } catch {
+          /* optional bus */
+        }
+
+        // 非 demo 保留舊的跨角色事件；demo 已由 createDemoDiningOrder 寫入同一份資料源。
+        if (!isDemoUser) {
+          try {
+            const { simulateStudentOrderFood } = await import('../services/demoActionSimulator');
+            const itemsLabel = cart
+              .map((c) => `${c.menuItem.name} ×${c.quantity}`)
+              .join('、');
+            await simulateStudentOrderFood({
+              studentUid: auth.user!.uid,
+              studentName: auth.profile?.displayName ?? '學生',
+              merchantId: selectedCafeteria.merchantId ?? selectedCafeteria.id,
+              merchantName: selectedCafeteria.name,
+              items: itemsLabel,
+              total: cartTotal,
+              orderId: createdOrder?.id,
+              buyerRole: auth.profile?.role ?? undefined,
             });
-
-            try {
-              const { emitCafeteriaOrderPlaced } = await import('../services/campusEventBus');
-              emitCafeteriaOrderPlaced({
-                userId: auth.user!.uid,
-                vendorId: selectedCafeteria.merchantId ?? selectedCafeteria.id,
-                total: cartTotal,
-              });
-            } catch {
-              /* optional bus */
-            }
-
-            // 非 demo 保留舊的跨角色事件；demo 已由 createDemoDiningOrder 寫入同一份資料源。
-            if (!isDemoUser) {
-              try {
-                const { simulateStudentOrderFood } = await import('../services/demoActionSimulator');
-                const itemsLabel = cart
-                  .map((c) => `${c.menuItem.name} ×${c.quantity}`)
-                  .join('、');
-                await simulateStudentOrderFood({
-                  studentUid: auth.user!.uid,
-                  studentName: auth.profile?.displayName ?? '學生',
-                  merchantId: selectedCafeteria.merchantId ?? selectedCafeteria.id,
-                  merchantName: selectedCafeteria.name,
-                  items: itemsLabel,
-                  total: cartTotal,
-                  orderId: createdOrder?.id,
-                  buyerRole: auth.profile?.role ?? undefined,
-                });
-              } catch (busError) {
-                console.warn('[OrderingScreen] simulateStudentOrderFood failed:', busError);
-              }
-            }
-
-            try {
-              aiBrain.reportToolOutcome(
-                'order_meal',
-                {
-                  cafeteria: selectedCafeteria.name,
-                  cafeteriaId: selectedCafeteria.id,
-                  itemCount: cartCount,
-                  totalAmount: cartTotal,
-                  itemNames: cart.map((c) => c.menuItem.name).slice(0, 5).join('、'),
-                },
-                'success',
-                undefined,
-                `在「${selectedCafeteria.name}」訂購 ${cartCount} 項餐點`,
-              );
-              for (const item of cart) {
-                aiBrain.observe({
-                  kind: 'observation',
-                  tool: 'order_meal',
-                  args: {
-                    cafeteria: selectedCafeteria.name,
-                    itemName: item.menuItem.name,
-                    keyword: item.menuItem.name,
-                    quantity: item.quantity,
-                  },
-                  outcome: 'success',
-                  summary: `偏好菜色：${item.menuItem.name}（${selectedCafeteria.name}）`,
-                  tags: ['cafeteria', 'order_meal'],
-                });
-              }
-            } catch (brainError) {
-              console.warn('[OrderingScreen] brain.observe failed:', brainError);
-            }
-
-            // 號碼牌：優先用 Cloud Function 取得，否則退回時間戳序號（不再用 Math.random）
-            let queueNumber: number = (createdOrder as any)?.queueNumber ?? 0;
-            if (!queueNumber) {
-              try {
-                const { httpsCallable } = await import('firebase/functions');
-                const { getFunctionsInstance } = await import('../firebase');
-                const fn = httpsCallable<
-                  { schoolId: string; vendorId: string },
-                  { ok?: boolean; serial?: number }
-                >(getFunctionsInstance(), 'assignQueueNumber');
-                const result = await fn({
-                  schoolId: school.id,
-                  vendorId: selectedCafeteria.id,
-                });
-                if (result.data?.serial) queueNumber = result.data.serial;
-              } catch {
-                // fallback：每分鐘一號（demo 用，跨日不會衝突）
-                const t = new Date();
-                queueNumber = Math.max(1, t.getHours() * 60 + t.getMinutes() - 7 * 60);
-              }
-            }
-            const estimatedTime = Math.max(...cart.map((c) => c.menuItem.waitTime));
-
-            const newOrder: Order = {
-              id: createdOrder?.id ?? `o${Date.now()}`,
-              queueNumber,
-              items: cart,
-              status: 'pending',
-              totalPrice: cartTotal,
-              estimatedTime,
-              createdAt: new Date(),
-              cafeteria: selectedCafeteria.name,
-            };
-
-            setOrders([newOrder, ...orders]);
-            setCart([]);
-            setSelectedTab(2);
-
-            Alert.alert(
-              '訂單已送出',
-              `您的號碼是 ${queueNumber}，預計等待 ${estimatedTime} 分鐘\n\n餐點準備好時會通知您。`,
-            );
-          } catch (error: any) {
-            console.error('Failed to place order:', error);
-            try {
-              aiBrain.reportToolOutcome(
-                'order_meal',
-                {
-                  cafeteria: selectedCafeteria.name,
-                  cafeteriaId: selectedCafeteria.id,
-                  itemCount: cartCount,
-                },
-                'failure',
-                error?.message,
-                `在「${selectedCafeteria.name}」嘗試訂購 ${cartCount} 項餐點`,
-              );
-            } catch (brainError) {
-              console.warn('[OrderingScreen] brain.observe failed:', brainError);
-            }
-            Alert.alert('下單失敗', error?.message ?? '請稍後再試或聯繫店家。', [{ text: '確定' }]);
-          } finally {
-            setSubmittingOrder(false);
+          } catch (busError) {
+            console.warn('[OrderingScreen] simulateStudentOrderFood failed:', busError);
           }
-        },
-      },
+        }
+
+        try {
+          aiBrain.reportToolOutcome(
+            'order_meal',
+            {
+              cafeteria: selectedCafeteria.name,
+              cafeteriaId: selectedCafeteria.id,
+              itemCount: cartCount,
+              totalAmount: cartTotal,
+              itemNames: cart.map((c) => c.menuItem.name).slice(0, 5).join('、'),
+              paymentMethod,
+            },
+            'success',
+            undefined,
+            `在「${selectedCafeteria.name}」訂購 ${cartCount} 項餐點`,
+          );
+          for (const item of cart) {
+            aiBrain.observe({
+              kind: 'observation',
+              tool: 'order_meal',
+              args: {
+                cafeteria: selectedCafeteria.name,
+                itemName: item.menuItem.name,
+                keyword: item.menuItem.name,
+                quantity: item.quantity,
+              },
+              outcome: 'success',
+              summary: `偏好菜色：${item.menuItem.name}（${selectedCafeteria.name}）`,
+              tags: ['cafeteria', 'order_meal'],
+            });
+          }
+        } catch (brainError) {
+          console.warn('[OrderingScreen] brain.observe failed:', brainError);
+        }
+
+        // 號碼牌：優先用 Cloud Function 取得，否則退回時間戳序號（不再用 Math.random）
+        let queueNumber: number = (createdOrder as any)?.queueNumber ?? 0;
+        if (!queueNumber) {
+          try {
+            const { httpsCallable } = await import('firebase/functions');
+            const { getFunctionsInstance } = await import('../firebase');
+            const fn = httpsCallable<
+              { schoolId: string; vendorId: string },
+              { ok?: boolean; serial?: number }
+            >(getFunctionsInstance(), 'assignQueueNumber');
+            const result = await fn({
+              schoolId: school.id,
+              vendorId: selectedCafeteria.id,
+            });
+            if (result.data?.serial) queueNumber = result.data.serial;
+          } catch {
+            // fallback：每分鐘一號（demo 用，跨日不會衝突）
+            const t = new Date();
+            queueNumber = Math.max(1, t.getHours() * 60 + t.getMinutes() - 7 * 60);
+          }
+        }
+        const estimatedTime = Math.max(...cart.map((c) => c.menuItem.waitTime));
+
+        const newOrder: Order = {
+          id: createdOrder?.id ?? `o${Date.now()}`,
+          queueNumber,
+          items: cart,
+          status: 'pending',
+          totalPrice: cartTotal,
+          estimatedTime,
+          createdAt: new Date(),
+          cafeteria: selectedCafeteria.name,
+        };
+
+        setOrders([newOrder, ...orders]);
+        setCart([]);
+        setSelectedTab(2);
+
+        Alert.alert(
+          '訂單已送出',
+          `您的號碼是 ${queueNumber}，預計等待 ${estimatedTime} 分鐘\n付款方式：${paymentLabel}\n\n餐點準備好時會通知您。`,
+        );
+      } catch (error: any) {
+        console.error('Failed to place order:', error);
+        try {
+          aiBrain.reportToolOutcome(
+            'order_meal',
+            {
+              cafeteria: selectedCafeteria.name,
+              cafeteriaId: selectedCafeteria.id,
+              itemCount: cartCount,
+            },
+            'failure',
+            error?.message,
+            `在「${selectedCafeteria.name}」嘗試訂購 ${cartCount} 項餐點`,
+          );
+        } catch (brainError) {
+          console.warn('[OrderingScreen] brain.observe failed:', brainError);
+        }
+        Alert.alert('下單失敗', error?.message ?? '請稍後再試或聯繫店家。', [{ text: '確定' }]);
+      } finally {
+        setSubmittingOrder(false);
+      }
+    };
+
+    Alert.alert('確認訂單', `共 ${cartCount} 項商品，總計 $${cartTotal}\n\n請選擇付款方式`, [
+      { text: '取消', style: 'cancel' },
+      { text: '到店付款', onPress: () => void submitOrder('onsite') },
+      { text: '線上付款', onPress: () => void submitOrder('online') },
     ]);
   };
 
