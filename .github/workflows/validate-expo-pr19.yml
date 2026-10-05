@@ -1,0 +1,39 @@
+name: Validate Expo toolchain
+
+on:
+  push:
+    branches:
+      - ci/align-node22-eas
+    paths:
+      - apps/mobile/package.json
+      - apps/mobile/eas.json
+      - pnpm-lock.yaml
+      - .nvmrc
+      - .github/workflows/validate-expo-pr19.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ci/align-node22-eas
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - name: Expo Doctor
+        working-directory: apps/mobile
+        run: npx expo-doctor
+      - name: Validate EAS preview config
+        working-directory: apps/mobile
+        run: npx eas-cli config --json --profile preview --platform android
