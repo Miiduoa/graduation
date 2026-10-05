@@ -162,6 +162,8 @@ pnpm test:rules
 
 Mobile 另外包含 Jest 與 Maestro E2E flows；Web 使用 Vitest。
 
+一般 CI 會驗證 Expo Doctor、公開 app config 與 `eas.json` build profile，但**不需要 `EXPO_TOKEN`、也不會提交 EAS Cloud build**。真正的 iOS / Android 雲端建置放在手動的 `EAS Build` / `Release` workflow，只有執行雲端建置時才需要 Expo 帳號憑證。
+
 GitHub Actions：  
 https://github.com/Miiduoa/graduation/actions
 
