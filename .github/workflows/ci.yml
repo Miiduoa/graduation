@@ -206,9 +206,11 @@ jobs:
         run: pnpm test:rules
 
   build-mobile:
-    name: Build Mobile
+    name: Mobile Build Preflight
     runs-on: ubuntu-latest
     needs: [security-gates, lint-and-typecheck, test-mobile, test-functions, test-rules]
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -225,30 +227,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Setup EAS
-        uses: expo/expo-github-action@v8
-        with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
-
       - name: Run Expo Doctor
         working-directory: apps/mobile
         run: npx expo-doctor
 
       - name: Validate EAS configuration
+        if: env.EXPO_TOKEN != ''
         working-directory: apps/mobile
-        # eas-cli 18+ 在 --non-interactive 下仍會 prompt 選 profile 與 platform；
-        # 明確指定 --profile preview --platform android 才能在 CI（無 TTY）跑通。
-        # --json 隱含 non-interactive，輸出走 stdout 方便 grep。
         run: npx eas-cli config --json --profile preview --platform android
 
-      - name: Verify preview Android build submission
-        working-directory: apps/mobile
-        run: npx eas-cli build --platform android --profile preview --non-interactive --no-wait
-
-      - name: Verify preview iOS build submission
-        working-directory: apps/mobile
-        run: npx eas-cli build --platform ios --profile preview --non-interactive --no-wait
+      - name: Explain skipped EAS validation
+        if: env.EXPO_TOKEN == ''
+        run: echo "EXPO_TOKEN is not configured; authenticated EAS validation is handled by the manual EAS Build workflow."
 
   build-web:
     name: Build Web
@@ -344,5 +334,5 @@ jobs:
           echo "| Web Tests | ${{ needs.test-web.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Functions Tests | ${{ needs.test-functions.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Rules Tests | ${{ needs.test-rules.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Build Mobile | ${{ needs.build-mobile.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Mobile Build Preflight | ${{ needs.build-mobile.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Build Web | ${{ needs.build-web.result }} |" >> $GITHUB_STEP_SUMMARY
