@@ -1,5 +1,7 @@
 # Campus One
 
+[![CI](https://github.com/Miiduoa/graduation/actions/workflows/ci.yml/badge.svg)](https://github.com/Miiduoa/graduation/actions/workflows/ci.yml)
+
 **校園資訊與行動助手原型**  
 Mobile + Web + Backend 的 monorepo，目標是把分散的課程、校務、訊息、地圖與學習資訊整理成「現在下一步要做什麼」。
 
