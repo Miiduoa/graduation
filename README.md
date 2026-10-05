@@ -118,7 +118,7 @@ AI 功能只負責整理、推理與提供下一步建議；課程、訊息、�
 
 需求：
 
-- Node.js 20
+- Node.js 22（CI / Expo 工具鏈基準；package engines 仍保留 Node 20.19.4+ 相容範圍）
 - pnpm 10
 
 安裝：
