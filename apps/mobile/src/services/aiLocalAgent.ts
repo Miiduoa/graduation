@@ -29,6 +29,7 @@ import { understand as semanticUnderstand } from './aiSemanticReasoner';
 import { linkConceptToMeaning } from './aiActiveLearning';
 import { detectCapabilityGap, recordAgentProcessTraining } from './aiDynamicTraining';
 import {
+  canReviewLeave,
   detectLeaveReviewDecision,
   isLeaveReviewIntent,
 } from './demoLeaveReview';
@@ -1852,7 +1853,7 @@ export async function autonomousQuery(
   }
 
   let intents = analyzeIntents(resolvedMessage);
-  if (isLeaveReviewIntent(resolvedMessage)) {
+  if (isLeaveReviewIntent(resolvedMessage) && canReviewLeave(ctx.role)) {
     const decision = detectLeaveReviewDecision(resolvedMessage);
     const leaveId = resolvedMessage.match(/\b(?:lv|leave|evt)[-_a-z0-9]+\b/i)?.[0];
     intents = intents.filter((intent) => intent.tool !== 'request_leave' && intent.tool !== 'query_attendance');
