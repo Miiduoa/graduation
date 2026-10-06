@@ -12,6 +12,29 @@ Mobile + Web + Backend 的 monorepo，目標是把分散的課程、校務、訊
   <img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white" alt="TypeScript">
 </p>
 
+## 30 秒看這個專案
+
+Campus One 的重點不是「做很多校園功能」，而是把 **Mobile、Web、Backend、角色權限、導航與測試** 接成同一套產品流程。
+
+| 想確認什麼 | 直接看 |
+|---|---|
+| App 實際介面 | [Mobile demo 說明](apps/mobile/DEMO.md) |
+| 跨角色與資料流 | [APP_ROLE_DATA_FLOW_ARCHITECTURE](docs/APP_ROLE_DATA_FLOW_ARCHITECTURE.md) |
+| AI 怎麼被限制在產品流程內 | [AI_ASSISTANT_ARCHITECTURE](docs/AI_ASSISTANT_ARCHITECTURE.md) |
+| API 與後端邊界 | [API](docs/API.md) |
+| 自動化驗證 | [CI workflow](.github/workflows/ci.yml) · [Maestro E2E](.github/workflows/maestro-e2e.yml) |
+
+### Mobile snapshot
+
+<p>
+  <img src="apps/mobile/ai_first_tabs.png" alt="Campus One mobile tabs" width="48%">
+  <img src="apps/mobile/ai_overlay_optional.png" alt="Campus One optional AI overlay" width="48%">
+</p>
+
+這兩張圖直接來自 repo 內的 Mobile 實作；README 不放概念 mockup 取代實際畫面。
+
+
+
 ## Why
 
 學生每天需要在課表、LMS、公告、群組訊息、交通與校園服務之間切換。  
