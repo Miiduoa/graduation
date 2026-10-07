@@ -13,7 +13,7 @@ Campus One 保留主要介面與操作流程；沿用 Nuni 的網域、既有帳
 | [Nuni / nuni-v2](https://github.com/Miiduoa/nuni-v2/tree/caa4cd313678c9b450f1932682f003fe281f748d) | main `caa4cd313678c9b450f1932682f003fe281f748d` | 新版方向；README 明確沿用 nuni.tw、api.nuni.tw、Cloudflare、Fly 及商店帳號 |
 | [Nolu / web](https://github.com/Miiduoa/web/tree/a8e6804ef971de9eb68074a4499924c823fab733) | main `a8e6804ef971de9eb68074a4499924c823fab733` | 快取與身份切換隔離；備援文件及測試參考 |
 
-這些是 GitHub 分支版本，不能用來推定正式站正在執行的版本。
+這些是整合開始時核對的 GitHub 分支版本，不能用來推定正式站正在執行的版本。後續候選已合併 main `70675dd` 的架構文件與 GitHub Actions 更新，保留已測過的依賴修補，並採用主分支的 shell-quote 1.12.0。
 
 ## 沿用與轉接
 
