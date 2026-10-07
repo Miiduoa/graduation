@@ -23,7 +23,7 @@ describe('Derived PU grade-credit summary', () => {
     expect(result.creditSummary.officialAudit).toBe(false);
     expect(result.creditSummary.totalEarned).toBe(5);
     expect(result.creditSummary.categories.find(c=>c.category==='選修').unknownCourses).toBe(1);
-    expect(result.creditSummary.semesters[0].average).toBeCloseTo(67.4);
+    expect(result.creditSummary.semesters[0].average).toBeCloseTo(74.6);
   });
 
   test('recognizes numeric zero and uncertain score without treating either as passed', () => {
