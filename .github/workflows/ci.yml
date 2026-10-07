@@ -37,9 +37,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Production dependency audit
-        # 報告仍以 moderate 階段產生供審查；CI 阻擋條件設為 critical。
-        # 已知 transitive (protobufjs via firebase) 的 high 漏洞無法在不
-        # 改動 firebase 版本下解決，且非本 PR 引入；保留報告但不阻擋 PR。
+        # 保留 moderate 以上完整報告；自動阻擋門檻目前為 critical。
+        # 通過此步驟不代表 high 已修復；可達性與處置記錄見 CAMPUS_ONE_INTEGRATION.md。
         run: |
           pnpm audit --prod --audit-level moderate --json > audit-report.json || true
           pnpm audit --prod --audit-level critical
