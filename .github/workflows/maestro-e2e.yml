@@ -130,6 +130,24 @@ jobs:
           cat "$RUNNER_TEMP/campus-metro.log"
           exit 1
 
+      - name: Prepare iOS JavaScript Bundle
+        run: |
+          set -euo pipefail
+          # Match AppDelegate's virtual entry and RCTBundleURLProvider's Debug options.
+          # /status only confirms Metro is listening; a cold bundle can outlast the UI assertion.
+          BUNDLE_URL="http://localhost:8081/.expo/.virtual-metro-entry.bundle?platform=ios&dev=true&lazy=true&minify=false&inlineSourceMap=false&modulesOnly=false&runModule=true&excludeSource=true&sourcePaths=url-server&app=$APP_ID"
+          if ! curl --fail --show-error --silent --connect-timeout 10 --max-time 600 \
+            --dump-header "$RUNNER_TEMP/campus-metro-bundle.headers" \
+            --output "$RUNNER_TEMP/campus-metro-ios.bundle" \
+            --write-out 'http_code=%{http_code}\nsize_download=%{size_download}\ntime_total=%{time_total}\n' \
+            "$BUNDLE_URL" > "$RUNNER_TEMP/campus-metro-bundle.txt"; then
+            tail -n 80 "$RUNNER_TEMP/campus-metro.log"
+            exit 1
+          fi
+          test -s "$RUNNER_TEMP/campus-metro-ios.bundle"
+          grep -qi '^content-type: application/javascript' "$RUNNER_TEMP/campus-metro-bundle.headers"
+          cat "$RUNNER_TEMP/campus-metro-bundle.txt"
+
       - name: Run Smoke Tests
         if: github.event.inputs.test_suite == 'smoke' || github.event.inputs.test_suite == ''
         working-directory: apps/mobile
@@ -208,6 +226,8 @@ jobs:
             apps/mobile/.maestro/results/
             apps/mobile/.maestro/screenshots/
             ${{ runner.temp }}/campus-metro.log
+            ${{ runner.temp }}/campus-metro-bundle.headers
+            ${{ runner.temp }}/campus-metro-bundle.txt
           retention-days: 30
 
       - name: Upload Test Screenshots
