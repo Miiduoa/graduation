@@ -25,6 +25,8 @@ const {
   toPublicSsoConfig,
 } = require('./sso/providerRegistry');
 const { createNotificationService } = require('./lib/notificationService');
+const { createLiveSessionHandlers } = require('./attendanceSessions');
+const { readRealtimeBusCache } = require('./busArrivals');
 const {
   decryptSecretConfig,
   encryptSecretConfig,
@@ -5544,16 +5546,14 @@ exports.getBusArrivals = onCall(
     }
 
     const cacheRef = db.collection('busArrivals').doc(`${schoolId}_${stopId}`);
-    const CACHE_TTL_MS = 60 * 1000; // 60 秒 Cache
 
     // 讀取 Firestore Cache
     const cached = await cacheRef.get().catch(() => null);
     if (cached && cached.exists) {
-      const cacheData = cached.data();
-      const cacheAge = Date.now() - (cacheData.cachedAt?.toMillis() ?? 0);
-      if (cacheAge < CACHE_TTL_MS) {
+      const realtimeCache = readRealtimeBusCache(cached.data());
+      if (realtimeCache) {
         console.log(`[getBusArrivals] Cache hit for ${stopId}`);
-        return { arrivals: cacheData.arrivals, fromCache: true };
+        return realtimeCache;
       }
     }
 
@@ -5575,6 +5575,8 @@ exports.getBusArrivals = onCall(
         arrivals: staticSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
         fromCache: false,
         noApiKey: true,
+        source: 'static',
+        isRealtime: false,
       };
     }
 
@@ -5586,19 +5588,19 @@ exports.getBusArrivals = onCall(
         : `/api/basic/v3/Bus/EstimatedTimeOfArrival/City/${cityCode}?%24filter=StopUID%20eq%20'${encodeURIComponent(stopId)}'&%24format=JSON&%24top=20`;
 
       const tdxData = await fetchTdxApi(apiPath, accessToken);
-      const arrivals = Array.isArray(tdxData)
-        ? tdxData.map((item) => ({
-            routeId: item.RouteID ?? routeId,
-            routeName: item.RouteName?.Zh_tw ?? item.RouteUID ?? '—',
-            stopId: item.StopUID ?? stopId,
-            stopName: item.StopName?.Zh_tw ?? '—',
-            estimatedArrival: item.EstimateTime != null ? item.EstimateTime : null, // 秒數
-            plateNo: item.PlateNumb ?? null,
-            status: item.StopStatus ?? 0,
-            direction: item.Direction ?? 0,
-            fetchedAt: new Date().toISOString(),
-          }))
-        : [];
+      if (!Array.isArray(tdxData)) throw new Error('Invalid TDX arrivals response');
+      const fetchedAt = new Date().toISOString();
+      const arrivals = tdxData.map((item) => ({
+        routeId: item.RouteID ?? routeId,
+        routeName: item.RouteName?.Zh_tw ?? item.RouteUID ?? '—',
+        stopId: item.StopUID ?? stopId,
+        stopName: item.StopName?.Zh_tw ?? '—',
+        estimatedArrival: item.EstimateTime != null ? item.EstimateTime : null, // 秒數
+        plateNo: item.PlateNumb ?? null,
+        status: item.StopStatus ?? 0,
+        direction: item.Direction ?? 0,
+        fetchedAt,
+      }));
 
       // 寫入 Firestore Cache
       await cacheRef
@@ -5606,12 +5608,15 @@ exports.getBusArrivals = onCall(
           schoolId,
           stopId,
           arrivals,
+          source: 'tdx',
+          isRealtime: true,
+          fetchedAt,
           cachedAt: FieldValue.serverTimestamp(),
         })
         .catch((e) => console.warn('[getBusArrivals] Cache write failed:', e));
 
       console.log(`[getBusArrivals] TDX fetch OK: ${arrivals.length} arrivals for ${stopId}`);
-      return { arrivals, fromCache: false };
+      return { arrivals, fromCache: false, source: 'tdx', isRealtime: true, fetchedAt };
     } catch (err) {
       console.error('[getBusArrivals] TDX API error:', err);
       // 回傳 Firestore 靜態資料作為 fallback
@@ -5626,6 +5631,8 @@ exports.getBusArrivals = onCall(
         arrivals: staticSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
         fromCache: false,
         error: 'TDX API unavailable, using static data',
+        source: 'static',
+        isRealtime: false,
       };
     }
   },
@@ -6357,116 +6364,30 @@ exports.trackAchievement = onCall({ region: REGION }, async (request) => {
 // 課堂互動 - Live Session
 // =====================================================
 
-exports.startLiveSession = onCall({ region: REGION }, async (request) => {
-  const uid = request.auth?.uid;
-  if (!uid) throw new HttpsError('unauthenticated', 'Must be logged in');
-
-  const { groupId, classroomLat, classroomLng, qrExpiryMinutes = 5 } = request.data;
-  if (!groupId) throw new HttpsError('invalid-argument', 'Missing groupId');
-
-  const memberRef = db.collection('groups').doc(groupId).collection('members').doc(uid);
-  const member = await memberRef.get();
-  if (!member.exists || !['owner', 'instructor'].includes(member.data()?.role)) {
-    throw new HttpsError('permission-denied', 'Only instructors can start a live session');
-  }
-
-  const sessionId = `${new Date().toISOString().slice(0, 10)}_${Date.now()}`;
-  const qrToken = `${groupId}_${sessionId}_${nodeCrypto.randomBytes(12).toString('base64url')}`;
-  const qrExpiresAt = new Date(Date.now() + qrExpiryMinutes * 60 * 1000);
-
-  const liveSessionRef = db
-    .collection('groups')
-    .doc(groupId)
-    .collection('liveSessions')
-    .doc(sessionId);
-  const attendanceSessionRef = db
-    .collection('groups')
-    .doc(groupId)
-    .collection('attendanceSessions')
-    .doc(sessionId);
-  const sessionPayload = {
-    sessionId,
-    teacherId: uid,
-    startedAt: FieldValue.serverTimestamp(),
-    endedAt: null,
-    active: true,
-    qrToken,
-    qrExpiresAt: Timestamp.fromDate(qrExpiresAt),
-    ...(classroomLat && classroomLng
-      ? { location: { lat: classroomLat, lng: classroomLng, radiusM: 100 } }
-      : {}),
-    reactions: { understood: 0, partial: 0, confused: 0 },
-    attendeeCount: 0,
-  };
-
-  await Promise.all([
-    liveSessionRef.set(sessionPayload),
-    attendanceSessionRef.set({
-      sessionId,
-      liveSessionId: sessionId,
-      groupId,
-      teacherId: uid,
-      startedAt: FieldValue.serverTimestamp(),
-      endedAt: null,
-      active: true,
-      attendeeCount: 0,
-      attendanceMode: 'qr',
-      source: 'live_session',
-      qrEnabled: true,
-      ...(classroomLat && classroomLng
-        ? { location: { lat: classroomLat, lng: classroomLng, radiusM: 100 } }
-        : {}),
-    }),
-  ]);
-
-  // 推播通知給群組成員
-  const membersSnap = await db.collection('groups').doc(groupId).collection('members').get();
-  const studentUids = membersSnap.docs
-    .filter((d) => d.id !== uid && !['instructor', 'owner'].includes(d.data()?.role))
-    .map((d) => d.id);
-
-  const groupDoc = await db.collection('groups').doc(groupId).get();
-  const groupName = groupDoc.data()?.name ?? '課堂';
-
-  const tokens = (await Promise.all(studentUids.map(getUserPushTokens))).flat().filter(Boolean);
-  if (tokens.length > 0) {
-    await messaging.sendEachForMulticast({
-      tokens,
-      notification: { title: `${groupName} 課堂開始`, body: '老師已開啟即時課堂互動，快進入！' },
-      data: { type: 'live_session', groupId, sessionId, click_action: 'OPEN_CLASSROOM' },
-    });
-  }
-
-  return { success: true, sessionId, qrToken, qrExpiresAt: qrExpiresAt.toISOString() };
+const liveSessionHandlers = createLiveSessionHandlers({
+  db,
+  async notifyStarted({ groupId, sessionId, uid }) {
+    const groupRef = db.collection('groups').doc(groupId);
+    const [members, group] = await Promise.all([
+      groupRef.collection('members').where('status', '==', 'active').get(),
+      groupRef.get(),
+    ]);
+    const studentUids = members.docs
+      .filter((member) => member.id !== uid && !['instructor', 'owner'].includes(member.data().role))
+      .map((member) => member.id);
+    const tokens = [...new Set((await Promise.all(studentUids.map(getUserPushTokens))).flat().filter(Boolean))];
+    for (let offset = 0; offset < tokens.length; offset += 500) {
+      await messaging.sendEachForMulticast({
+        tokens: tokens.slice(offset, offset + 500),
+        notification: { title: `${group.data()?.name ?? '課堂'} 開始點名`, body: '請進入課堂，掃描老師提供的 QR Code 完成簽到。' },
+        data: { type: 'live_session', groupId, sessionId, click_action: 'OPEN_CLASSROOM' },
+      });
+    }
+  },
 });
 
-exports.endLiveSession = onCall({ region: REGION }, async (request) => {
-  const uid = request.auth?.uid;
-  if (!uid) throw new HttpsError('unauthenticated', 'Must be logged in');
-
-  const { groupId, sessionId } = request.data;
-  if (!groupId || !sessionId)
-    throw new HttpsError('invalid-argument', 'Missing groupId or sessionId');
-
-  const sessionRef = db.collection('groups').doc(groupId).collection('liveSessions').doc(sessionId);
-  const session = await sessionRef.get();
-
-  if (!session.exists || session.data()?.teacherId !== uid) {
-    throw new HttpsError('permission-denied', 'Not authorized to end this session');
-  }
-
-  await Promise.all([
-    sessionRef.update({ active: false, endedAt: FieldValue.serverTimestamp() }),
-    db.collection('groups').doc(groupId).collection('attendanceSessions').doc(sessionId).set(
-      {
-        active: false,
-        endedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    ),
-  ]);
-  return { success: true };
-});
+exports.startLiveSession = onCall({ region: REGION }, liveSessionHandlers.startLiveSession);
+exports.endLiveSession = onCall({ region: REGION }, liveSessionHandlers.endLiveSession);
 
 exports.submitPollResponse = onCall({ region: REGION }, async (request) => {
   const uid = request.auth?.uid;
@@ -6489,87 +6410,7 @@ exports.submitPollResponse = onCall({ region: REGION }, async (request) => {
   return { success: true };
 });
 
-exports.joinLiveSession = onCall({ region: REGION }, async (request) => {
-  const uid = request.auth?.uid;
-  if (!uid) throw new HttpsError('unauthenticated', 'Must be logged in');
-
-  const { groupId, sessionId, qrToken } = request.data;
-  if (!groupId || !sessionId) throw new HttpsError('invalid-argument', 'Missing required fields');
-
-  const sessionRef = db.collection('groups').doc(groupId).collection('liveSessions').doc(sessionId);
-  const session = await sessionRef.get();
-
-  if (!session.exists || !session.data()?.active) {
-    throw new HttpsError('not-found', 'Session not found or not active');
-  }
-
-  if (qrToken) {
-    const sessionData = session.data();
-    if (sessionData.qrToken !== qrToken) {
-      throw new HttpsError('permission-denied', 'Invalid QR token');
-    }
-    if (sessionData.qrExpiresAt && sessionData.qrExpiresAt.toDate() < new Date()) {
-      throw new HttpsError('deadline-exceeded', 'QR code has expired');
-    }
-  }
-
-  const attendanceSessionRef = db
-    .collection('groups')
-    .doc(groupId)
-    .collection('attendanceSessions')
-    .doc(sessionId);
-
-  await db.runTransaction(async (transaction) => {
-    const latestSession = await transaction.get(sessionRef);
-    if (!latestSession.exists || !latestSession.data()?.active) {
-      throw new HttpsError('not-found', 'Session not found or not active');
-    }
-
-    const latestSessionData = latestSession.data();
-    const alreadyJoined = !!latestSessionData?.attendees?.[uid];
-    const sessionUpdates = {
-      [`attendees.${uid}`]: FieldValue.serverTimestamp(),
-    };
-
-    if (!alreadyJoined) {
-      sessionUpdates.attendeeCount = FieldValue.increment(1);
-    }
-
-    transaction.update(sessionRef, sessionUpdates);
-    transaction.set(
-      attendanceSessionRef,
-      {
-        sessionId,
-        liveSessionId: sessionId,
-        groupId,
-        teacherId: latestSessionData.teacherId,
-        startedAt: latestSessionData.startedAt || FieldValue.serverTimestamp(),
-        active: latestSessionData.active,
-        attendanceMode: 'qr',
-        source: 'live_session',
-        ...(qrToken ? { qrEnabled: true } : {}),
-        ...(latestSessionData.location ? { location: latestSessionData.location } : {}),
-        [`attendees.${uid}`]: FieldValue.serverTimestamp(),
-        ...(alreadyJoined ? {} : { attendeeCount: FieldValue.increment(1) }),
-      },
-      { merge: true },
-    );
-    transaction.set(
-      attendanceSessionRef.collection('attendanceRecords').doc(uid),
-      {
-        uid,
-        status: 'present',
-        source: qrToken ? 'qr' : 'tap',
-        checkedInAt: FieldValue.serverTimestamp(),
-        sessionId,
-        groupId,
-      },
-      { merge: true },
-    );
-  });
-
-  return { success: true };
-});
+exports.joinLiveSession = onCall({ region: REGION }, liveSessionHandlers.joinLiveSession);
 
 exports.submitReaction = onCall({ region: REGION }, async (request) => {
   const uid = request.auth?.uid;

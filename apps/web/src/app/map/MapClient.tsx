@@ -110,14 +110,14 @@ const DEMO_LOCATIONS: Location[] = [
 ];
 
 const CATEGORY_COLORS: Record<string, string> = {
-  教學: '#5856D6',
-  學習: '#34C759',
-  餐廳: '#FF9500',
-  運動: '#5856D6',
+  教學: 'var(--brand)',
+  學習: 'var(--success)',
+  餐廳: 'var(--warning)',
+  運動: 'var(--brand)',
   交通: '#32ADE6',
   行政: '#BF5AF2',
   住宿: '#FF6B35',
-  醫療: '#FF3B30',
+  醫療: 'var(--danger)',
 };
 
 function poiToLocation(p: Poi, idx: number): Location {
@@ -259,7 +259,7 @@ export default function MapClient({
     });
 
     filtered.forEach((loc) => {
-      const color = CATEGORY_COLORS[loc.category] ?? '#5856D6';
+      const color = CATEGORY_COLORS[loc.category] ?? 'var(--brand)';
       const iconHtml = `<div style="background:${color};width:28px;height:28px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.3)"></div>`;
       const icon = L.divIcon({
         html: iconHtml,
@@ -368,7 +368,7 @@ export default function MapClient({
     setSavedIds(newSaved);
   };
 
-  const color = selected ? (CATEGORY_COLORS[selected.category] ?? '#5856D6') : '#5856D6';
+  const color = selected ? (CATEGORY_COLORS[selected.category] ?? 'var(--brand)') : 'var(--brand)';
 
   return (
     <div className="pageStack">
@@ -449,7 +449,7 @@ export default function MapClient({
                   fontSize: 10,
                   padding: '2px 8px',
                   borderRadius: '999px',
-                  background: `${color}14`,
+                  background: `color-mix(in srgb, ${color} 7.84%, transparent)`,
                   color,
                   fontWeight: 700,
                 }}
@@ -550,7 +550,7 @@ export default function MapClient({
         </div>
         <div className="insetGroup">
           {filtered.map((loc, i) => {
-            const locColor = CATEGORY_COLORS[loc.category] ?? '#5856D6';
+            const locColor = CATEGORY_COLORS[loc.category] ?? 'var(--brand)';
             const isSelected = selected?.id === loc.id;
             return (
               <div
@@ -559,20 +559,20 @@ export default function MapClient({
                 style={{
                   borderTop: i === 0 ? 'none' : undefined,
                   cursor: 'pointer',
-                  background: isSelected ? `${locColor}08` : undefined,
+                  background: isSelected ? `color-mix(in srgb, ${locColor} 3.14%, transparent)` : undefined,
                 }}
                 onClick={() => handleSelectLocation(loc)}
               >
                 <div
                   className="insetGroupRowIcon"
                   style={{
-                    background: `${locColor}14`,
+                    background: `color-mix(in srgb, ${locColor} 7.84%, transparent)`,
                     color: locColor,
                     fontSize: 18,
                     width: 38,
                     height: 38,
                     borderRadius: 10,
-                    border: `1px solid ${locColor}30`,
+                    border: `1px solid color-mix(in srgb, ${locColor} 18.82%, transparent)`,
                   }}
                 >
                   {loc.category === '教學'

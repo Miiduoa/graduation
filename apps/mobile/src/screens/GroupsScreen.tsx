@@ -88,7 +88,7 @@ function getDemoCourseMetaForIds(ids: string[]): Group[] {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-const AVATAR_COLORS_G = ['#5856D6', '#34C759', '#FF9500', '#5856D6', '#BF5AF2'];
+const AVATAR_COLORS_G = [theme.colors.accent, '#34C759', '#FF9500', theme.colors.accent, '#BF5AF2'];
 const AVATAR_EMOJIS_G = ['🧑‍💻', '👩‍🎓', '👨‍🎓', '🙋', '👩‍💻'];
 
 function hashCodeG(str: string) {

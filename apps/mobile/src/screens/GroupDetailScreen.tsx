@@ -1068,13 +1068,13 @@ export function GroupDetailScreen(props: any) {
                               paddingHorizontal: 14,
                               paddingVertical: 8,
                               borderRadius: theme.radius.full,
-                              backgroundColor: 'rgba(88,86,214,0.1)',
+                              backgroundColor: theme.colors.accentSoft,
                               borderWidth: 1,
-                              borderColor: '#5856D6',
+                              borderColor: theme.colors.accent,
                               opacity: pressed ? 0.7 : 1,
                             })}
                           >
-                            <Text style={{ color: '#5856D6', fontSize: 13, fontWeight: '700' }}>
+                            <Text style={{ color: theme.colors.accent, fontSize: 13, fontWeight: '700' }}>
                               📚 歸入知識庫
                             </Text>
                           </Pressable>

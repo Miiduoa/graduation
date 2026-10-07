@@ -605,9 +605,9 @@ function ThinkingBubble(props: { steps: ThinkingStepUI[]; collapsed?: boolean })
   const [isExpanded, setIsExpanded] = useState(false);
   const statusIcon: Record<string, { icon: string; color: string }> = {
     done: { icon: 'checkmark-circle', color: '#34C759' },
-    checking: { icon: 'sync-outline', color: '#5856D6' },
+    checking: { icon: 'sync-outline', color: theme.colors.accent },
     warning: { icon: 'alert-circle', color: '#FF9500' },
-    info: { icon: 'information-circle', color: '#5856D6' },
+    info: { icon: 'information-circle', color: theme.colors.accent },
   };
 
   return (
@@ -800,8 +800,8 @@ function ToolStatusCard(props: { execution: ToolExecution; tool: AgentTool | und
   const statusConfig: Record<ToolExecutionStatus, { icon: string; color: string; label: string }> =
     {
       pending: { icon: 'hourglass-outline', color: '#FF9500', label: '等待中' },
-      confirming: { icon: 'help-circle-outline', color: '#5856D6', label: '待確認' },
-      executing: { icon: 'sync-outline', color: '#5856D6', label: '執行中' },
+      confirming: { icon: 'help-circle-outline', color: theme.colors.accent, label: '待確認' },
+      executing: { icon: 'sync-outline', color: theme.colors.accent, label: '執行中' },
       success: { icon: 'checkmark-circle', color: '#34C759', label: '完成' },
       failed: { icon: 'close-circle', color: '#FF3B30', label: '失敗' },
       cancelled: { icon: 'ban-outline', color: '#8E8E93', label: '已取消' },
@@ -1487,15 +1487,15 @@ function MessageBubble(props: {
               width: 22,
               height: 22,
               borderRadius: 11,
-              backgroundColor: '#5856D6',
+              backgroundColor: theme.colors.accent,
               alignItems: 'center',
               justifyContent: 'center',
             }}
           >
-            <Ionicons name="flash" size={12} color="#fff" />
+            <Ionicons name="chatbubble-outline" size={12} color={theme.colors.onAccent} />
           </View>
           <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: '600' }}>
-            AI Agent
+            校園助理
           </Text>
           {message.choiceMenu && message.choiceMenu.options.length > 0 && (
             <View
@@ -1515,10 +1515,10 @@ function MessageBubble(props: {
                 paddingHorizontal: 6,
                 paddingVertical: 1,
                 borderRadius: 4,
-                backgroundColor: '#5856D615',
+                backgroundColor: theme.colors.accentSoft,
               }}
             >
-              <Text style={{ color: '#5856D6', fontSize: 9, fontWeight: '600' }}>
+              <Text style={{ color: theme.colors.accent, fontSize: 9, fontWeight: '600' }}>
                 {message.agentType === 'tool_confirm'
                   ? '確認'
                   : message.agentType === 'tool_executing'
@@ -1876,7 +1876,7 @@ export function AIChatScreen(props: any) {
           ? '使用已下載的 AI 模型在裝置上推理'
           : '連線到你設定的本機 LLM server',
         icon: 'hardware-chip-outline' as const,
-        color: aiStatus.localModelReady ? '#AF52DE' : '#5856D6',
+        color: aiStatus.localModelReady ? '#AF52DE' : theme.colors.accent,
       };
     }
     return {
@@ -7796,12 +7796,12 @@ export function AIChatScreen(props: any) {
                       width: 22,
                       height: 22,
                       borderRadius: 11,
-                      backgroundColor: '#5856D6',
+                      backgroundColor: theme.colors.accent,
                       alignItems: 'center',
                       justifyContent: 'center',
                     }}
                   >
-                    <Ionicons name="flash" size={12} color="#fff" />
+                    <Ionicons name="chatbubble-outline" size={12} color={theme.colors.onAccent} />
                   </View>
                   <Text style={{ color: theme.colors.muted, fontSize: 11 }}>思考中...</Text>
                 </View>
@@ -7857,7 +7857,7 @@ export function AIChatScreen(props: any) {
                       : agentContext.state === 'confirming' ||
                           agentContext.state === 'waiting_chain_confirm'
                         ? '#FF9500'
-                        : '#5856D6',
+                        : theme.colors.accent,
                 }}
               />
               <Text style={{ color: theme.colors.muted, fontSize: 11 }}>
@@ -7922,13 +7922,13 @@ export function AIChatScreen(props: any) {
                 width: 40,
                 height: 40,
                 borderRadius: 20,
-                backgroundColor: input.trim() ? '#5856D6' : theme.colors.surface2,
+                backgroundColor: input.trim() ? theme.colors.accent : theme.colors.surface2,
                 alignItems: 'center',
                 justifyContent: 'center',
                 opacity: pressed ? 0.8 : 1,
               })}
             >
-              <Ionicons name="send" size={18} color={input.trim() ? '#fff' : theme.colors.muted} />
+              <Ionicons name="send" size={18} color={input.trim() ? theme.colors.onAccent : theme.colors.muted} />
             </Pressable>
           </View>
         </View>

@@ -6,7 +6,7 @@
  * 對應引擎：packages/shared/src/lms/rubricScoring
  */
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { use, useMemo, useState } from 'react';
 
 import { SiteShell } from '@/components/SiteShell';
 import { evaluateRubric, type Rubric, type RubricCriterion } from '@campus/shared';
@@ -50,7 +50,9 @@ const SAMPLE: Rubric = {
   ],
 };
 
-export default function TeacherRubricsPage({ params, searchParams }: { params: { courseId: string }; searchParams?: { school?: string; schoolId?: string } }) {
+export default function TeacherRubricsPage({ params: paramsPromise, searchParams: searchParamsPromise }: { params: Promise<{ courseId: string }>; searchParams?: Promise<{ school?: string; schoolId?: string }> }) {
+  const params = use(paramsPromise);
+  const searchParams = searchParamsPromise ? use(searchParamsPromise) : undefined;
   const { schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
   const [demoRole] = useDemoRole();
   const caps = getCapabilities(demoRole);
@@ -154,7 +156,7 @@ export default function TeacherRubricsPage({ params, searchParams }: { params: {
           </button>
         </div>
 
-        <div style={{ marginBottom: 12, color: totalWeight === 100 ? '#34C759' : '#FF3B30' }}>
+        <div style={{ marginBottom: 12, color: totalWeight === 100 ? 'var(--success)' : 'var(--danger)' }}>
           目前權重總和：{totalWeight}（會自動正規化到 100）
         </div>
 
@@ -266,8 +268,8 @@ export default function TeacherRubricsPage({ params, searchParams }: { params: {
             marginTop: 20,
             padding: '14px 18px',
             borderRadius: 12,
-            background: 'rgba(88,86,214,0.08)',
-            border: '1px solid #5856D6',
+            background: 'var(--accent-soft)',
+            border: '1px solid var(--brand)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -276,7 +278,7 @@ export default function TeacherRubricsPage({ params, searchParams }: { params: {
           }}
         >
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#5856D6', marginBottom: 3 }}>🤖 AI Rubric 助理</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand)', marginBottom: 3 }}>🤖 AI Rubric 助理</div>
             <div style={{ fontSize: 13, color: 'var(--text)' }}>
               {canEdit
                 ? '讓 AI 幫你設計符合課程目標的評分標準，或建議各評分項的等級描述與權重分配。'
@@ -315,8 +317,8 @@ const dangerBtn = {
   padding: '6px 10px',
   borderRadius: 6,
   background: 'transparent',
-  color: '#FF3B30',
-  border: '1px solid #FF3B30',
+  color: 'var(--danger)',
+  border: '1px solid var(--danger)',
   cursor: 'pointer',
   fontSize: 12,
 };

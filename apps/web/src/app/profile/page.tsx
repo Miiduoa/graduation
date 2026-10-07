@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { use, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { onAuthStateChanged, type User } from "firebase/auth";
 
 import { SiteShell } from "@/components/SiteShell";
@@ -127,9 +127,10 @@ function recentGrades(grades: Grade[]) {
 }
 
 export default function ProfilePage(props: {
-  searchParams?: { school?: string; schoolId?: string };
+  searchParams?: Promise<{ school?: string; schoolId?: string }>;
 }) {
-  const { schoolId, schoolName, schoolSearch } = resolveSchoolPageContext(props.searchParams);
+  const searchParams = props.searchParams ? use(props.searchParams) : undefined;
+  const { schoolId, schoolName, schoolSearch } = resolveSchoolPageContext(searchParams);
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -267,30 +268,30 @@ export default function ProfilePage(props: {
           <div
             className="card"
             style={{
-              background: "linear-gradient(135deg, var(--brand) 0%, var(--brand2) 100%)",
-              border: "none",
-              color: "#fff",
+              background: "var(--surface)",
+              border: "1px solid var(--border)",
+              color: "var(--text)",
               display: "grid",
               gap: 16,
             }}
           >
-            <span className="pill" style={{ background: "rgba(255,255,255,0.18)", borderColor: "rgba(255,255,255,0.24)", color: "#fff" }}>
+            <span className="pill" style={{ background: "var(--accent-soft)", borderColor: "var(--border)", color: "var(--brand)" }}>
               個人中心
             </span>
             <div>
               <h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, letterSpacing: "-0.05em" }}>
-                Profile 不再顯示假資料
+                登入查看個人資訊
               </h1>
               <p style={{ margin: "10px 0 0", fontSize: 14, lineHeight: 1.8, opacity: 0.86 }}>
-                目前頁面已改成真實個人中心。登入後會直接讀取 Firebase 的個人資料、課表、成績、收藏與圖書館借閱資訊。
+                集中查看你的課表、成績、收藏與借閱紀錄。
               </p>
             </div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <Link href={`/login${schoolSearch}`} className="btn" style={{ background: "rgba(255,255,255,0.15)", color: "#fff", borderColor: "rgba(255,255,255,0.24)" }}>
+              <Link href={`/login${schoolSearch}`} className="btn" style={{ background: "var(--brand)", color: "var(--on-brand)", borderColor: "var(--brand)" }}>
                 前往登入
               </Link>
-              <Link href={`/settings${schoolSearch}`} className="btn" style={{ background: "rgba(255,255,255,0.08)", color: "#fff", borderColor: "rgba(255,255,255,0.18)" }}>
-                先看設定
+              <Link href={`/settings${schoolSearch}`} className="btn" style={{ background: "var(--surface)", color: "var(--text)", borderColor: "var(--border)" }}>
+                偏好設定
               </Link>
             </div>
           </div>
@@ -305,10 +306,10 @@ export default function ProfilePage(props: {
         <div
           className="card"
           style={{
-            background: "linear-gradient(135deg, var(--brand) 0%, var(--brand2) 100%)",
-            border: "none",
-            color: "#fff",
-            boxShadow: "6px 6px 16px rgba(37,99,235,0.28), -3px -3px 8px rgba(255,255,255,0.7)",
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            color: "var(--text)",
+            boxShadow: "var(--shadow-sm)",
           }}
         >
           <div style={{ display: "flex", alignItems: "flex-start", gap: 20, flexWrap: "wrap" }}>
@@ -317,8 +318,9 @@ export default function ProfilePage(props: {
                 width: 80,
                 height: 80,
                 borderRadius: "50%",
-                background: "rgba(255,255,255,0.22)",
-                border: "3px solid rgba(255,255,255,0.4)",
+                background: "var(--brand)",
+                color: "var(--on-brand)",
+                border: "3px solid var(--border)",
                 display: "grid",
                 placeItems: "center",
                 fontSize: 34,
@@ -330,11 +332,11 @@ export default function ProfilePage(props: {
             </div>
             <div style={{ flex: 1, minWidth: 220 }}>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-                <span className="pill" style={{ background: "rgba(255,255,255,0.16)", borderColor: "rgba(255,255,255,0.22)", color: "#fff" }}>
-                  {isFirebaseConfigured() ? "Firebase 已連線" : "本機預覽"}
+                <span className="pill" style={{ background: "var(--accent-soft)", borderColor: "var(--border)", color: "var(--brand)" }}>
+                  個人中心
                 </span>
                 {profileBundle.profile?.studentId ? (
-                  <span className="pill" style={{ background: "rgba(255,255,255,0.1)", borderColor: "rgba(255,255,255,0.18)", color: "#fff" }}>
+                  <span className="pill" style={{ background: "var(--panel)", borderColor: "var(--border)", color: "var(--text)" }}>
                     {profileBundle.profile.studentId}
                   </span>
                 ) : null}
@@ -346,16 +348,16 @@ export default function ProfilePage(props: {
                 {profileBundle.profile?.department ?? "尚未填寫系所"} · {profileBundle.profile?.grade ?? "尚未填寫年級"} · {user.email ?? "無 Email"}
               </p>
               <p style={{ margin: "14px 0 0", fontSize: 14, lineHeight: 1.8, opacity: 0.86 }}>
-                {profileBundle.profile?.bio?.trim() || "尚未填寫自我介紹。你可以在設定頁補上個人資料，讓 Profile 變成真正可用的學生個人中心。"}
+                {profileBundle.profile?.bio?.trim() || "尚未填寫自我介紹，可前往設定補充。"}
               </p>
             </div>
             <Link
               href={`/settings${schoolSearch}`}
               className="btn"
               style={{
-                background: "rgba(255,255,255,0.18)",
-                color: "#fff",
-                borderColor: "rgba(255,255,255,0.24)",
+                background: "var(--brand)",
+                color: "var(--on-brand)",
+                borderColor: "var(--brand)",
                 whiteSpace: "nowrap",
               }}
             >
@@ -372,18 +374,18 @@ export default function ProfilePage(props: {
             </div>
             <div className="metricLabel">累計 GPA</div>
           </div>
-          <div className="metricCard" style={{ "--tone": "#34C759" } as CSSProperties}>
+          <div className="metricCard" style={{ "--tone": "var(--success)" } as CSSProperties}>
             <div className="metricIcon">📚</div>
             <div className="metricValue">{sortedCourses.length}</div>
             <div className="metricLabel">已同步課程</div>
             <div className="metricMeta">{totalCredits} 學分</div>
           </div>
-          <div className="metricCard" style={{ "--tone": "#FF9500" } as CSSProperties}>
+          <div className="metricCard" style={{ "--tone": "var(--warning)" } as CSSProperties}>
             <div className="metricIcon">⭐</div>
             <div className="metricValue">{profileBundle.favoritesCount}</div>
             <div className="metricLabel">收藏項目</div>
           </div>
-          <div className="metricCard" style={{ "--tone": "#007AFF" } as CSSProperties}>
+          <div className="metricCard" style={{ "--tone": "var(--info)" } as CSSProperties}>
             <div className="metricIcon">📖</div>
             <div className="metricValue">{activeLoans.length}</div>
             <div className="metricLabel">借閱中</div>
@@ -395,7 +397,7 @@ export default function ProfilePage(props: {
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
               <div>
                 <div className="sectionTitle">下一堂課</div>
-                <div className="sectionText">用目前已同步的 `users/{'{uid}'}/courses` 推算最近課程。</div>
+                <div className="sectionText">依照你的課表，顯示今天下一堂課。</div>
               </div>
               {loading ? <span className="pill subtle">整理中…</span> : null}
             </div>
@@ -405,7 +407,7 @@ export default function ProfilePage(props: {
                   padding: 16,
                   borderRadius: "var(--radius)",
                   background: "var(--accent-soft)",
-                  border: "1px solid rgba(37,99,235,0.16)",
+                  border: "1px solid var(--border)",
                 }}
               >
                 <div style={{ fontSize: 18, fontWeight: 800 }}>{nextCourse.name}</div>
@@ -428,7 +430,7 @@ export default function ProfilePage(props: {
           <div className="card" style={{ display: "grid", gap: 12 }}>
             <div>
               <div className="sectionTitle">借閱提醒</div>
-              <div className="sectionText">直接讀取目前帳號的有效借閱紀錄。</div>
+              <div className="sectionText">查看借閱中的書籍與到期日。</div>
             </div>
             {activeLoans.length > 0 ? (
               activeLoans.slice(0, 3).map((loan) => (
@@ -559,7 +561,7 @@ export default function ProfilePage(props: {
             <div className="card" style={{ display: "grid", gap: 14 }}>
               <div>
                 <div className="sectionTitle">GPA 走勢</div>
-                <div className="sectionText">根據目前 `semesterGpas` 快照整理最近學期表現。</div>
+                <div className="sectionText">查看最近幾個學期的 GPA。</div>
               </div>
               {profileBundle.gpa?.semesters?.length ? (
                 <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
@@ -576,7 +578,7 @@ export default function ProfilePage(props: {
                             borderRadius: "var(--radius-xs)",
                             background:
                               index === all.length - 1
-                                ? "linear-gradient(180deg, var(--brand) 0%, var(--brand2) 100%)"
+                                ? "var(--brand)"
                                 : "var(--panel2)",
                           }}
                         />
@@ -591,15 +593,15 @@ export default function ProfilePage(props: {
                 <div className="emptyState">
                   <div className="emptyIcon">📉</div>
                   <h3 className="emptyTitle">尚無 GPA 歷程</h3>
-                  <p className="emptyBody">GPA 資料建立後，這裡會自動改成學期趨勢圖。</p>
+                  <p className="emptyBody">有成績資料後，就能查看各學期的 GPA。</p>
                 </div>
               )}
             </div>
 
             <div className="card" style={{ display: "grid", gap: 14 }}>
               <div>
-                <div className="sectionTitle">同步狀態</div>
-                <div className="sectionText">快速檢查目前個人中心已接到哪些資料來源。</div>
+                <div className="sectionTitle">資料摘要</div>
+                <div className="sectionText">查看課務與校園服務的紀錄數量。</div>
               </div>
               {[
                 { label: "個人資料", value: profileBundle.profile ? "已同步" : "待補" },

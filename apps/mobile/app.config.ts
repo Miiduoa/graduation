@@ -201,7 +201,7 @@ export default ({ config }: any) => {
     [
       'expo-notifications',
       {
-        color: '#007AFF',
+        color: '#314D40',
         sounds: ['./assets/sounds/notification.wav'],
       },
     ],

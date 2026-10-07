@@ -395,7 +395,7 @@ export function GlobalSearchScreen(props: any) {
       case 'event':
         return theme.colors.success;
       case 'course':
-        return '#5856D6';
+        return theme.colors.accent;
       case 'poi':
         return '#FF9500';
       case 'menu':

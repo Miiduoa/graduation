@@ -730,8 +730,10 @@ service cloud.firestore {
       }
 
       match /liveSessions/{sessionId} {
-        allow read: if isActiveGroupMember(groupId);
-        allow create, update, delete: if canManageGroup(groupId);
+        // Version 1 documents contain public QR secrets and attendance rosters.
+        // Clients must query schemaVersion == 2; legacy sessions require migration.
+        allow read: if isActiveGroupMember(groupId) && resource.data.schemaVersion == 2;
+        allow write: if false;
 
         match /questions/{questionId} {
           allow read: if isActiveGroupMember(groupId);
@@ -753,14 +755,20 @@ service cloud.firestore {
         }
       }
 
+      match /liveSessionSecrets/{sessionId} {
+        allow read: if isActiveGroupMember(groupId)
+          && get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role in ['owner', 'instructor'];
+        allow write: if false;
+      }
+
       match /attendanceSessions/{sessionId} {
-        allow read: if isActiveGroupMember(groupId);
-        allow create, update, delete: if canManageGroup(groupId);
+        allow read: if isActiveGroupMember(groupId) && resource.data.schemaVersion == 2;
+        allow write: if false;
 
         match /attendanceRecords/{recordId} {
-          allow read: if isActiveGroupMember(groupId);
-          allow create, update: if canManageGroup(groupId);
-          allow delete: if false;
+          allow read: if canManageGroup(groupId)
+            || (isActiveGroupMember(groupId) && recordId == request.auth.uid);
+          allow write: if false;
         }
       }
     }

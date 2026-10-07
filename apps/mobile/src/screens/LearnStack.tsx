@@ -28,7 +28,7 @@ import CourseHubAiFirstScreen from './CourseHubAiFirstScreen';
 import AcademicOverviewAiFirstScreen from './AcademicOverviewAiFirstScreen';
 import QuizCenterAiFirstScreen from './QuizCenterAiFirstScreen';
 import AddCourseAiFirstScreen from './AddCourseAiFirstScreen';
-import TeacherCockpitAiFirstScreen from './TeacherCockpitAiFirstScreen';
+import TeacherTodayScreen from './TeacherTodayScreen';
 import { TeachingHubScreen } from './TeachingHubScreen';
 import { StaffHubScreen } from './StaffHubScreen';
 import { DepartmentHubScreen } from './DepartmentHubScreen';
@@ -39,6 +39,7 @@ import { CreditAuditStack } from './CreditAuditStack';
 import { UnifiedCalendarScreen } from './UnifiedCalendarScreen';
 import { AICourseAdvisorScreen } from './AICourseAdvisorScreen';
 import { CourseHubScreen } from './CourseHubScreen';
+import { CourseGradebookScreen } from './CourseGradebookScreen';
 import { CourseCatalogScreen } from './CourseCatalogScreen';
 import { CourseModulesScreen } from './CourseModulesScreen';
 import { QuizCenterScreen } from './QuizCenterScreen';
@@ -160,6 +161,24 @@ function GuardedGradebook(props: any) {
   return <AcademicScreen {...props} route={{ ...props.route, params: mergedParams }} />;
 }
 
+function GradebookRoute(props: any) {
+  const auth = useAuth();
+  if (props.route?.params?.sourceSystem === 'workspace') {
+    const scope = JSON.stringify([
+      auth.user?.uid,
+      auth.profile?.schoolId,
+      auth.profile?.role,
+      props.route?.params?.groupId,
+    ]);
+    return (
+      <RouteGuard requires="courses.view">
+        <CourseGradebookScreen key={scope} {...props} />
+      </RouteGuard>
+    );
+  }
+  return isLmsV2Enabled() ? <CourseGradesV2Screen {...props} /> : <GuardedGradebook {...props} />;
+}
+
 function GuardedLearningAnalytics(props: any) {
   const mergedParams = { ...(props.route?.params ?? {}), initialTab: 'analytics' as const };
   return (
@@ -213,30 +232,30 @@ function CreditAuditBlockedScreen({ roleLabel, navigation }: { roleLabel: string
   const { Ionicons } = require('@expo/vector-icons');
   const { theme } = require('../ui/theme');
   return (
-    <ScrollView contentContainerStyle={{ padding: 20, alignItems: 'center', backgroundColor: theme.bg }}>
+    <ScrollView contentContainerStyle={{ padding: 20, alignItems: 'center', backgroundColor: theme.colors.bg }}>
       <View style={{ marginTop: 60, padding: 24, alignItems: 'center', maxWidth: 420 }}>
         <View style={{
           width: 80, height: 80, borderRadius: 24,
-          backgroundColor: 'rgba(88,86,214,0.10)',
+          backgroundColor: theme.colors.accentSoft,
           alignItems: 'center', justifyContent: 'center', marginBottom: 16,
         }}>
-          <Ionicons name="school-outline" size={48} color="#5856D6" />
+          <Ionicons name="school-outline" size={48} color={theme.colors.accent} />
         </View>
-        <Text style={{ fontSize: 20, fontWeight: '700', color: theme.text, marginBottom: 8, textAlign: 'center' }}>
+        <Text style={{ fontSize: 20, fontWeight: '700', color: theme.colors.text, marginBottom: 8, textAlign: 'center' }}>
           學分試算僅限在校學生使用
         </Text>
-        <Text style={{ fontSize: 14, color: theme.muted, lineHeight: 22, textAlign: 'center', marginBottom: 24 }}>
-          目前身份為 <Text style={{ fontWeight: '700', color: theme.text }}>{roleLabel}</Text>。
+        <Text style={{ fontSize: 14, color: theme.colors.muted, lineHeight: 22, textAlign: 'center', marginBottom: 24 }}>
+          目前身份為 <Text style={{ fontWeight: '700', color: theme.colors.text }}>{roleLabel}</Text>。
           學分試算是學生個人選課與畢業進度規劃工具,屬學生專屬功能 — 教師/職員可由「教學工作台」管理課程,系主任/管理員可由「管理後台」查看全系統計。
         </Text>
         <Pressable
           onPress={() => navigation?.goBack?.()}
           style={{
             paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12,
-            backgroundColor: '#5856D6',
+            backgroundColor: theme.colors.accent,
           }}
         >
-          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>← 返回</Text>
+          <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 14 }}>← 返回</Text>
         </Pressable>
       </View>
     </ScrollView>
@@ -305,7 +324,7 @@ function LearnHomeDispatcher(props: any) {
     return <DepartmentHubScreen {...props} />;
   }
   if (isTeacher) {
-    return <TeachingHubScreen {...props} />;
+    return <TeacherTodayScreen />;
   }
   if (isStaff && hasMerchant) {
     return <MerchantHubScreen {...props} />;
@@ -315,6 +334,16 @@ function LearnHomeDispatcher(props: any) {
   }
   // 學生 / 校友 / 訪客 → 預設課程首頁
   return <CoursesHomeScreen {...props} />;
+}
+
+function LearnLanding() {
+  const auth = useAuth();
+  const role = resolveDashboardRole({
+    uid: auth.user?.uid,
+    roleGroup: auth.profile?.roleGroup,
+    role: auth.profile?.role,
+  });
+  return role === 'teacher' ? <TeacherTodayScreen /> : <LearnAiFirstScreen />;
 }
 
 export function LearnStack() {
@@ -342,18 +371,18 @@ export function LearnStack() {
       {/* AI-First v1：landing 唯一入口 */}
       <Stack.Screen
         name="LearnHome"
-        component={LearnAiFirstScreen}
+        component={LearnLanding}
         options={{ title: '學習', headerShown: false }}
       />
       {/* 保留舊路由名稱作為別名（向後相容 deep link），全部導向新版 landing */}
       <Stack.Screen
         name="CoursesHome"
-        component={LearnAiFirstScreen}
+        component={LearnLanding}
         options={{ title: '學習', headerShown: false }}
       />
       <Stack.Screen
         name="TeachingHub"
-        component={LearnAiFirstScreen}
+        component={LearnLanding}
         options={{ title: '學習', headerShown: false }}
       />
       <Stack.Screen
@@ -429,7 +458,7 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="CourseGradebook"
-        component={isLmsV2Enabled() ? CourseGradesV2Screen : GuardedGradebook}
+        component={GradebookRoute}
         options={{ title: '成績', headerShown: false }}
       />
       <Stack.Screen
@@ -580,8 +609,8 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="TeacherCockpit"
-        component={TeacherCockpitAiFirstScreen}
-        options={{ title: '👨‍🏫 教師駕駛艙' }}
+        component={TeacherTodayScreen}
+        options={{ title: '教學工作', headerShown: false }}
       />
       <Stack.Screen
         name="PomodoroSession"

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback, type CSSProperties } from 'react';
+import { use, useState, useMemo, useCallback, type CSSProperties } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
@@ -23,9 +23,10 @@ interface Group {
 }
 
 export default function GroupsPage(props: {
-  searchParams?: { school?: string; schoolId?: string };
+  searchParams?: Promise<{ school?: string; schoolId?: string }>;
 }) {
-  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const searchParams = props.searchParams ? use(props.searchParams) : undefined;
+  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
   const [filter, setFilter] = useState<'all' | 'course' | 'club'>('all');
   const [search, setSearch] = useState('');
   const [demoRole] = useDemoRole();
@@ -168,13 +169,13 @@ export default function GroupsPage(props: {
           </div>
           <div
             className="metricCard"
-            style={{ '--tone': totalUnread > 0 ? '#FF3B30' : '#34C759' } as CSSProperties}
+            style={{ '--tone': totalUnread > 0 ? 'var(--danger)' : 'var(--success)' } as CSSProperties}
           >
             <div className="metricIcon">{totalUnread > 0 ? '🔴' : '✅'}</div>
             <div className="metricValue">{totalUnread}</div>
             <div className="metricLabel">未讀訊息</div>
           </div>
-          <div className="metricCard" style={{ '--tone': '#5856D6' } as CSSProperties}>
+          <div className="metricCard" style={{ '--tone': 'var(--brand)' } as CSSProperties}>
             <div className="metricIcon">📚</div>
             <div className="metricValue">
               {groups.filter((g) => g.type === 'course').length}
@@ -230,7 +231,7 @@ export default function GroupsPage(props: {
                 className="insetGroupRowIcon"
                 style={{
                   fontSize: 22,
-                  background: `${g.color}14`,
+                  background: `color-mix(in srgb, ${g.color} 7.84%, transparent)`,
                   color: g.color,
                   width: 44,
                   height: 44,
@@ -264,15 +265,15 @@ export default function GroupsPage(props: {
                         borderRadius: '999px',
                         background:
                           g.myRole === '授課' || g.myRole === '社長'
-                            ? 'rgba(255,149,0,0.18)'
+                            ? 'var(--warning-soft)'
                             : g.myRole === '助教'
-                              ? 'rgba(124,58,237,0.16)'
-                              : 'rgba(88,86,214,0.12)',
+                              ? 'var(--accent-soft)'
+                              : 'var(--accent-soft)',
                         color:
                           g.myRole === '授課' || g.myRole === '社長'
                             ? '#B45309'
                             : g.myRole === '助教'
-                              ? '#5856D6'
+                              ? 'var(--brand)'
                               : 'var(--brand)',
                         fontWeight: 700,
                         whiteSpace: 'nowrap',
