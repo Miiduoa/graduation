@@ -31,10 +31,10 @@ jobs:
     name: Maestro E2E Tests
     runs-on: macos-latest
     timeout-minutes: 60
-    # iOS native prebuild + pod install + xcodebuild 在 macOS runner 上
-    # 因 React Native 原生模組相容性問題（與本 PR 無關）長期 fail。
-    # 設為 non-blocking 直到 native 端做完 SDK 升級。
-    continue-on-error: true
+    env:
+      APP_ENV: development
+      EXPO_PUBLIC_ALLOW_LOCAL_MOCK_AUTH: 'false'
+      EXPO_PUBLIC_ENABLE_UNIVERSAL_DEV_ACCOUNTS: 'false'
 
     strategy:
       fail-fast: false
@@ -70,65 +70,77 @@ jobs:
       - name: Verify Maestro Installation
         run: maestro --version
 
-      - name: Setup Expo
-        uses: expo/expo-github-action@v8
-        with:
-          expo-version: latest
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
-
       - name: Setup iOS Simulator
         if: matrix.platform == 'ios'
+        env:
+          PREFERRED_DEVICE: ${{ matrix.device }}
         run: |
-          # List available simulators
-          xcrun simctl list devices available
+          set -euo pipefail
+          xcrun simctl list devices available --json > "$RUNNER_TEMP/simulators.json"
+          python3 - <<'PYTHON'
+          import json, os, subprocess
+          with open(os.environ['RUNNER_TEMP'] + '/simulators.json') as source:
+              available = json.load(source)['devices']
+          phones = [device for devices in available.values() for device in devices
+                    if device.get('isAvailable') and device['name'].startswith('iPhone')]
+          if not phones:
+              raise SystemExit('No available iPhone simulator is installed')
+          device = next((item for item in phones if item['name'] == os.environ['PREFERRED_DEVICE']), phones[0])
+          if device['state'] != 'Booted':
+              subprocess.run(['xcrun', 'simctl', 'boot', device['udid']], check=True)
+          subprocess.run(['xcrun', 'simctl', 'bootstatus', device['udid'], '-b'], check=True)
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write('SIMULATOR_UDID=' + device['udid'] + '\n')
+          print('Using simulator:', device['name'], device['udid'])
+          PYTHON
 
-          # Boot the simulator
-          SIMULATOR_ID=$(xcrun simctl list devices available | grep "${{ matrix.device }}" | head -1 | grep -oE '\([A-F0-9-]+\)' | tr -d '()')
-          if [ -n "$SIMULATOR_ID" ]; then
-            xcrun simctl boot "$SIMULATOR_ID" || true
-            echo "SIMULATOR_UDID=$SIMULATOR_ID" >> $GITHUB_ENV
-          fi
-
-      - name: Build Expo Development Client
+      - name: Build iOS Test App
         working-directory: apps/mobile
         run: |
-          # Export for iOS Simulator
-          npx expo prebuild --platform ios --clean
-          xcodebuild -workspace ios/*.xcworkspace \
+          set -euo pipefail
+          # The committed native project contains Firebase and llama-rn integration settings.
+          # A clean prebuild discards those settings, so install its declared Pods directly.
+          pod install --project-directory=ios
+          test -d ios/mobile.xcworkspace
+          xcodebuild -workspace ios/mobile.xcworkspace \
             -scheme mobile \
             -configuration Debug \
-            -destination "platform=iOS Simulator,name=${{ matrix.device }}" \
-            -derivedDataPath build \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -derivedDataPath "$RUNNER_TEMP/campus-ios-build" \
+            CODE_SIGNING_ALLOWED=NO \
             build
+          APP_PATH="$RUNNER_TEMP/campus-ios-build/Build/Products/Debug-iphonesimulator/mobile.app"
+          test -d "$APP_PATH"
+          APP_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist")
+          echo "APP_ID=$APP_ID" >> "$GITHUB_ENV"
+          xcrun simctl install "$SIMULATOR_UDID" "$APP_PATH"
 
       - name: Start Metro Bundler
         working-directory: apps/mobile
         run: |
-          npx expo start --ios --no-dev --minify &
-          METRO_PID=$!
-          echo "METRO_PID=$METRO_PID" >> $GITHUB_ENV
-
-          # Wait for Metro to be ready
-          echo "Waiting for Metro bundler..."
-          sleep 45
-
-          # Check if Metro is running
-          curl -s http://localhost:8081/status || echo "Metro status check failed"
+          set -euo pipefail
+          nohup pnpm exec expo start --localhost --port 8081 > "$RUNNER_TEMP/campus-metro.log" 2>&1 &
+          echo "METRO_PID=$!" >> "$GITHUB_ENV"
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8081/status | grep -q 'packager-status:running'; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/campus-metro.log"
+          exit 1
 
       - name: Run Smoke Tests
         if: github.event.inputs.test_suite == 'smoke' || github.event.inputs.test_suite == ''
         working-directory: apps/mobile
         run: |
           mkdir -p .maestro/results
-          maestro test .maestro/flows/01_onboarding.yaml \
+          maestro --device "$SIMULATOR_UDID" test .maestro/flows/01_onboarding.yaml \
+            --test-output-dir .maestro/screenshots \
+            --debug-output .maestro/results/debug \
             --format junit \
             --output .maestro/results/smoke-onboarding.xml \
-            --env APP_ID=com.campus.app
-          maestro test .maestro/flows/11_navigation_ai_first.yaml \
-            --format junit \
-            --output .maestro/results/smoke-ai-first.xml \
-            --env APP_ID=com.campus.app
+            --env APP_ID="$APP_ID"
 
       - name: Run Full Test Suite
         if: github.event.inputs.test_suite == 'full'
@@ -141,10 +153,12 @@ jobs:
             flow_name=$(basename "$flow" .yaml)
             echo "Running: $flow_name"
             
-            maestro test "$flow" \
+            maestro --device "$SIMULATOR_UDID" test "$flow" \
+              --test-output-dir ".maestro/screenshots/$flow_name" \
+              --debug-output ".maestro/results/debug/$flow_name" \
               --format junit \
               --output ".maestro/results/${flow_name}-results.xml" \
-              --env APP_ID=com.campus.app
+              --env APP_ID="$APP_ID"
             
             # Small delay between tests
             sleep 5
@@ -161,10 +175,12 @@ jobs:
 
           if [ -n "$FLOW_FILE" ]; then
             echo "Running: $FLOW_FILE"
-            maestro test "$FLOW_FILE" \
+            maestro --device "$SIMULATOR_UDID" test "$FLOW_FILE" \
+              --test-output-dir .maestro/screenshots \
+              --debug-output .maestro/results/debug \
               --format junit \
               --output .maestro/results/${{ github.event.inputs.test_suite }}-results.xml \
-              --env APP_ID=com.campus.app
+              --env APP_ID="$APP_ID"
           else
             echo "No flow found for: ${{ github.event.inputs.test_suite }}"
             exit 1
@@ -191,6 +207,7 @@ jobs:
           path: |
             apps/mobile/.maestro/results/
             apps/mobile/.maestro/screenshots/
+            ${{ runner.temp }}/campus-metro.log
           retention-days: 30
 
       - name: Upload Test Screenshots
