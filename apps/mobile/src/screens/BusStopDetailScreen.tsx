@@ -235,7 +235,7 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
 
         {/* Routes section */}
         <View style={{ paddingHorizontal: 12, gap: 10 }}>
-          <Text style={SECTION_HEADER}>經過此站的路線</Text>
+          <Text style={{ ...SECTION_HEADER }}>經過此站的路線</Text>
           {routesAtStop.length === 0 && (
             <Text style={{ color: theme.colors.muted, textAlign: 'center', paddingVertical: 20 }}>
               暫時沒有路線資料
@@ -383,7 +383,7 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
         {/* Transfer routes */}
         {stop.transferRoutes && stop.transferRoutes.length > 0 && (
           <View style={{ paddingHorizontal: 12 }}>
-            <Text style={SECTION_HEADER}>可在此站轉乘</Text>
+            <Text style={{ ...SECTION_HEADER }}>可在此站轉乘</Text>
             <View
               style={{
                 padding: 14,
@@ -420,7 +420,7 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
         {/* Nearby POIs */}
         {nearbyPois.length > 0 && (
           <View style={{ paddingHorizontal: 12 }}>
-            <Text style={SECTION_HEADER}>步行 5 分鐘內</Text>
+            <Text style={{ ...SECTION_HEADER }}>步行 5 分鐘內</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
               {nearbyPois.map((poi) => {
                 const d = haversineMeters(stop.lat, stop.lng, poi.lat, poi.lng);
