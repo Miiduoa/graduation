@@ -2,8 +2,8 @@
 
 import { use, useMemo, useState, type CSSProperties } from 'react';
 import Link from 'next/link';
-import { mockMenus } from '@campus/shared/src/mockData';
 import { SiteShell } from '@/components/SiteShell';
+import { useAuth } from '@/components/AuthGuard';
 import {
   fetchCafeterias,
   fetchMenus,
@@ -17,24 +17,6 @@ import { useSchoolCollectionData } from '@/lib/useSchoolCollectionData';
 
 const ALL_CAFETERIAS_KEY = 'all';
 
-const DEMO_MENUS: MenuItem[] = mockMenus.map((menu) => ({
-  ...menu,
-  available: true,
-  soldOut: false,
-}));
-
-const DEMO_CAFETERIAS: Cafeteria[] = Array.from(
-  new Map(
-    DEMO_MENUS.map((menu) => [
-      menu.cafeteria,
-      {
-        id: `demo-${menu.cafeteria}`,
-        name: menu.cafeteria,
-      } satisfies Cafeteria,
-    ]),
-  ).values(),
-).sort((a, b) => a.name.localeCompare(b.name, 'zh-TW'));
-
 function getCafeteriaKey(input: {
   id?: string | null;
   cafeteriaId?: string | null;
@@ -42,6 +24,12 @@ function getCafeteriaKey(input: {
   name?: string | null;
 }) {
   return input.id || input.cafeteriaId || input.name || input.cafeteria || '';
+}
+
+function getMenuCafeteriaKey(menu: MenuItem, cafeterias: Cafeteria[]) {
+  if (menu.cafeteriaId) return menu.cafeteriaId;
+  const matching = cafeterias.filter((row) => row.name === menu.cafeteria);
+  return matching.length === 1 ? matching[0].id : menu.cafeteria || '';
 }
 
 function toSearchText(parts: Array<string | null | undefined>) {
@@ -108,24 +96,53 @@ export default function CafeteriaPage(props: {
   searchParams?: Promise<{ school?: string; schoolId?: string }>;
 }) {
   const searchParams = props.searchParams ? use(props.searchParams) : undefined;
-  const { schoolId, schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
+  const context = resolveSchoolPageContext(searchParams);
+  const { user, loading: authLoading } = useAuth();
+  const scopeKey = JSON.stringify([user?.uid ?? null, authLoading]);
+  return (
+    <CafeteriaContent
+      key={JSON.stringify([context.schoolId, scopeKey])}
+      {...context}
+      scopeKey={scopeKey}
+      authLoading={authLoading}
+    />
+  );
+}
+
+function CafeteriaContent({
+  schoolId,
+  schoolName,
+  schoolSearch: q,
+  scopeKey,
+  authLoading,
+}: {
+  schoolId: string;
+  schoolName: string;
+  schoolSearch: string;
+  scopeKey: string;
+  authLoading: boolean;
+}) {
   const [selectedCafeteria, setSelectedCafeteria] = useState(ALL_CAFETERIAS_KEY);
   const [search, setSearch] = useState('');
 
   const {
     data: cafeteriaRows,
     loading: cafeteriaLoading,
-    sourceMode: cafeteriaSourceMode,
-  } = useSchoolCollectionData<Cafeteria>(schoolId, fetchCafeterias, DEMO_CAFETERIAS, {
+    error: cafeteriaError,
+    retry: retryCafeterias,
+  } = useSchoolCollectionData<Cafeteria>(schoolId, fetchCafeterias, {
     subscribeLive: subscribeCafeterias,
+    scopeKey,
   });
 
   const {
     data: menuRows,
     loading: menuLoading,
-    sourceMode: menuSourceMode,
-  } = useSchoolCollectionData<MenuItem>(schoolId, fetchMenus, DEMO_MENUS, {
+    error: menuError,
+    retry: retryMenus,
+  } = useSchoolCollectionData<MenuItem>(schoolId, fetchMenus, {
     subscribeLive: subscribeMenus,
+    scopeKey,
   });
 
   const loading = cafeteriaLoading || menuLoading;
@@ -144,7 +161,7 @@ export default function CafeteriaPage(props: {
     });
 
     menuRows.forEach((menu) => {
-      const key = getCafeteriaKey(menu);
+      const key = getMenuCafeteriaKey(menu, cafeteriaRows);
       if (!key || merged.has(key)) return;
 
       merged.set(key, {
@@ -160,7 +177,7 @@ export default function CafeteriaPage(props: {
     const grouped = new Map<string, MenuItem[]>();
 
     menuRows.forEach((menu) => {
-      const key = getCafeteriaKey(menu);
+      const key = getMenuCafeteriaKey(menu, cafeteriaRows);
       if (!key) return;
 
       const bucket = grouped.get(key) ?? [];
@@ -183,7 +200,7 @@ export default function CafeteriaPage(props: {
     });
 
     return grouped;
-  }, [menuRows]);
+  }, [menuRows, cafeteriaRows]);
 
   const sections = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -262,17 +279,36 @@ export default function CafeteriaPage(props: {
     return new Date(Math.max(...timestamps)).toISOString();
   }, [cafeterias, menuRows]);
 
-  const sourceLabel =
-    cafeteriaSourceMode === 'firebase' && menuSourceMode === 'firebase'
-      ? '即時資料'
-      : cafeteriaSourceMode === 'demo' && menuSourceMode === 'demo'
-        ? '示範資料'
-        : '部分示範資料';
+  const sourceLabel = '餐廳資料';
+  if (authLoading || loading || cafeteriaError || menuError) {
+    const failed = !authLoading && (cafeteriaError || menuError);
+    return (
+      <SiteShell title="餐廳" subtitle="查看校內餐廳與菜單" schoolName={schoolName}>
+        <section className="card" role={failed ? 'alert' : 'status'}>
+          <h2>{failed ? '暫時無法讀取餐廳資料' : '正在讀取餐廳與菜單…'}</h2>
+          {failed && (
+            <>
+              <p>這次沒有取得完整資料，請稍後重試。餐點供應仍以店家現場資訊為準。</p>
+              <button
+                className="btn primary"
+                onClick={() => {
+                  retryCafeterias();
+                  retryMenus();
+                }}
+              >
+                重新讀取
+              </button>
+            </>
+          )}
+        </section>
+      </SiteShell>
+    );
+  }
 
   return (
-    <SiteShell title="餐廳" subtitle="即時同步目前校內餐廳與菜單" schoolName={schoolName}>
+    <SiteShell title="餐廳" subtitle="查看校內餐廳與菜單" schoolName={schoolName}>
       <div className="pageStack">
-        {/* AI 推薦卡 */}
+        {/* 用餐協助 */}
         <Link
           href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('今天午餐建議？要熱量低一點的')}`}
           className="card"
@@ -293,10 +329,10 @@ export default function CafeteriaPage(props: {
               今日用餐
             </div>
             <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>
-              不知道吃什麼？讓 AI 幫你推薦適合的菜色（含熱量、口味偏好）。
+              說說想吃什麼，請校園助理協助整理選擇。
             </div>
           </div>
-          <span style={{ fontSize: 12, color: 'var(--brand)', fontWeight: 600 }}>問 AI →</span>
+          <span style={{ fontSize: 12, color: 'var(--brand)', fontWeight: 600 }}>用餐建議 →</span>
         </Link>
 
         <div
@@ -305,15 +341,13 @@ export default function CafeteriaPage(props: {
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <span className={`pill${sourceLabel === '即時資料' ? ' brand' : ' subtle'}`}>
-                {sourceLabel}
-              </span>
+              <span className="pill brand">{sourceLabel}</span>
               <span style={{ fontSize: 13, color: 'var(--muted)' }}>
-                最後同步：{formatLastUpdated(lastUpdatedAt)}
+                資料更新：{formatLastUpdated(lastUpdatedAt)}
               </span>
             </div>
             <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)' }}>
-              餐廳新增、下架或菜單異動會直接反映在這裡。
+              依店家提供的資料顯示；實際營業與餐點供應請向店家確認。
             </p>
           </div>
           {loading ? <span className="pill subtle">同步中…</span> : null}
@@ -596,35 +630,6 @@ export default function CafeteriaPage(props: {
             目前共有 {stats.soldOutMenus} 項菜色標記為售完，若店家更新供應狀態，頁面會自動刷新。
           </div>
         ) : null}
-
-        {/* ── AI 餐廳推薦入口 ── */}
-        <div
-          style={{
-            padding: '14px 18px',
-            borderRadius: 'var(--radius)',
-            background: 'linear-gradient(135deg, var(--success-soft) 0%, var(--success-soft) 100%)',
-            border: '1px solid var(--success-soft)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 14,
-            flexWrap: 'wrap',
-          }}
-        >
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#1F7A2E', marginBottom: 3 }}>🤖 AI 餐廳助理</div>
-            <div style={{ fontSize: 13, color: 'var(--text)' }}>
-              想吃什麼卻沒靈感？讓 AI 根據今日菜單幫你推薦適合的餐點。
-            </div>
-          </div>
-          <a
-            href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('根據今日學生餐廳菜單，幫我推薦一套均衡的午餐組合（不超過 120 元），以及適合下午課前的點心。')}`}
-            className="btn"
-            style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
-          >
-            問 AI →
-          </a>
-        </div>
       </div>
     </SiteShell>
   );

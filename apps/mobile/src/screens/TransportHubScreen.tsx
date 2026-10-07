@@ -1069,14 +1069,14 @@ export function TransportHubScreen(props: any) {
                           justifyContent: 'center',
                           paddingVertical: 10,
                           gap: 6,
-                          backgroundColor: '#34C759',
+                          backgroundColor: theme.colors.accent,
                           borderRadius: theme.radius.lg,
                           opacity: pressed ? 0.7 : 1,
                         })}
                       >
-                        <Ionicons name="navigate" size={16} color="#fff" />
-                        <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>
-                          AI 智慧導航
+                        <Ionicons name="navigate" size={16} color={theme.colors.onAccent} />
+                        <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 13 }}>
+                          開始導航
                         </Text>
                       </Pressable>
                     )}

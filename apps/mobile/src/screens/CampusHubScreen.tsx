@@ -211,6 +211,8 @@ function SearchBar(props: {
       </View>
       <Pressable
         onPress={props.onAIPress}
+        accessibilityRole="button"
+        accessibilityLabel="校園助理"
         style={({ pressed }) => ({
           width: 42,
           height: 42,
@@ -441,7 +443,7 @@ export function CampusHubScreen(props: Record<string, unknown>) {
           {
             icon: 'ic_bus',
             label: '校園公車',
-            subtitle: '即時 · AI · 搭車中',
+            subtitle: '路線與站牌',
             tint: theme.colors.info,
             screen: 'BusV2',
             keywords: ['公車', '校車', '搭車', '到站', 'AI 搭車', '搭車中'],
@@ -676,7 +678,7 @@ export function CampusHubScreen(props: Record<string, unknown>) {
                       subtitle={item.subtitle}
                       tint={item.tint}
                       testID={item.label === '餐廳' ? 'e2e-campus-open-cafeteria' : undefined}
-                      highlight={section.title === '快捷入口' && item.label === 'AI 助理'}
+                      highlight={section.title === '快捷入口' && item.label === '校園助理'}
                       onPress={() => handleServicePress(item)}
                     />
                   ))}
@@ -694,8 +696,8 @@ export function CampusHubScreen(props: Record<string, unknown>) {
           <EmptyState
             variant="search"
             title={`找不到「${searchQuery}」相關的服務`}
-            subtitle="試試其他關鍵字，或請 AI 助理協助。"
-            actionText="問問 AI 助理"
+            subtitle="試試其他關鍵字，或請 校園助理協助。"
+            actionText="問問 校園助理"
             onAction={handleAIPress}
           />
         ) : null}
