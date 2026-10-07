@@ -556,3 +556,37 @@
   color: #8b361d;
   border-radius: 4px;
 }
+
+.menu {
+  position: relative;
+}
+.menu summary {
+  color: var(--soft);
+  cursor: pointer;
+  padding: 8px 0;
+}
+.menu summary:focus-visible {
+  outline: 3px solid #bd581f;
+  outline-offset: 4px;
+}
+.menuPanel {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 10;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  width: 260px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  box-shadow: 0 6px 16px #243b3514;
+}
+.menuPanel a {
+  padding: 10px;
+  color: var(--ink);
+}
+.menuPanel a:hover {
+  background: #e6ece5;
+}

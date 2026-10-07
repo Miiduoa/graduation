@@ -65,6 +65,32 @@ export default function HomePage() {
           </Link>
           <Link href={user ? '#courses' : '/login'}>課程</Link>
           <Link href="/map">校園</Link>
+          <details className={styles.menu}>
+            <summary>所有服務</summary>
+            <div className={styles.menuPanel}>
+              {[
+                ['/announcements', '公告'],
+                ['/timetable', '課表'],
+                ['/grades', '成績'],
+                ['/credit-planner', '學分規劃'],
+                ['/groups', '課程與群組'],
+                ['/clubs', '社團活動'],
+                ['/community', '校園交流'],
+                ['/messages', '通知'],
+                ['/dms', '私訊'],
+                ['/map', '校園地圖'],
+                ['/bus', '公車'],
+                ['/cafeteria', '餐廳'],
+                ['/library', '圖書館'],
+                ['/profile', '個人資料'],
+                ['/settings', '設定'],
+              ].map(([href, label]) => (
+                <Link key={href} href={href}>
+                  {label}
+                </Link>
+              ))}
+            </div>
+          </details>
         </nav>
         <div className={styles.account}>
           {user ? (
