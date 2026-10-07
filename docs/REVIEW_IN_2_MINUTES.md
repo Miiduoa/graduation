@@ -108,10 +108,12 @@ Repo 內的做法包含 mock / Firebase / hybrid DataSource、cache、部分離�
 
 依序打開：
 
-1. [README](../README.md)
-2. [Mobile demo](../apps/mobile/DEMO.md)
-3. [Role + data flow](APP_ROLE_DATA_FLOW_ARCHITECTURE.md)
-4. [CI workflow](../.github/workflows/ci.yml)
-5. [AI boundary](AI_ASSISTANT_ARCHITECTURE.md)
+1. [README](../README.md) — 先看產品問題與 30 秒入口
+2. [Architecture overview](ARCHITECTURE_OVERVIEW.md) — 看 Mobile / Web / Backend / data boundary
+3. [Architecture Decision Records](adr/README.md) — 看 monorepo、權限與 AI 邊界為什麼這樣選
+4. [Mobile demo](../apps/mobile/DEMO.md) — 確認實際 UI，不用概念稿代替成品
+5. [Testing evidence](TESTING_EVIDENCE.md) — 看實際測試數字、security gate 與尚未清掉的驗證債務
 
-這五個位置足以判斷 Campus One 的產品方向、跨端範圍、權限模型、驗證面與限制，不需要先讀完整 repo。
+如果還要往下追，再看 [Role + data flow](APP_ROLE_DATA_FLOW_ARCHITECTURE.md)、[AI boundary](AI_ASSISTANT_ARCHITECTURE.md) 與 [CI workflow](../.github/workflows/ci.yml)。
+
+這條路徑足以判斷 Campus One 的產品方向、跨端範圍、架構理由、權限模型、驗證面與限制，不需要先讀完整 repo。
