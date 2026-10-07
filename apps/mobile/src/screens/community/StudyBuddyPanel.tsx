@@ -36,6 +36,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../../ui/theme';
+import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../../ui/navigationTheme';
 import {
   getStudyBuddyMatches,
@@ -94,6 +95,7 @@ function formatStudyStyle(style: StudyProfile['studyStyle']): string {
 // ============================================================================
 
 const BuddyMatchCard: React.FC<{ match: BuddyMatch }> = ({ match }) => {
+  const s = useThemeStyleSheet(createStyles);
   const scale = useRef(new Animated.Value(1)).current;
   const matchColor = scoreColor(match.matchScore);
 
@@ -118,8 +120,8 @@ const BuddyMatchCard: React.FC<{ match: BuddyMatch }> = ({ match }) => {
       <TouchableOpacity onPress={press} activeOpacity={0.85}>
         <View style={s.matchHeader}>
           <View style={[s.scoreCircle, { borderColor: matchColor }]}>
-            <View style={[s.scoreInner, { backgroundColor: matchColor }]}>
-              <Text style={s.scoreTxt}>{match.matchScore}</Text>
+            <View style={[s.scoreInner, { backgroundColor: `${matchColor}22` }]}>
+              <Text style={[s.scoreTxt, { color: matchColor }]}>{match.matchScore}</Text>
             </View>
           </View>
           <View style={{ flex: 1 }}>
@@ -194,14 +196,16 @@ const STYLE_LABEL: Record<StudyGroup['style'], string> = {
   practice: '練習式',
 };
 
-const STYLE_COLOR: Record<StudyGroup['style'], string> = {
+const getStyleColors = (): Record<StudyGroup['style'], string> => ({
   collaborative: theme.colors.social,
   tutorial: theme.colors.accent,
   discussion: theme.colors.success,
   practice: theme.colors.warning,
-};
+});
 
 const StudyGroupCard: React.FC<{ group: StudyGroup; onJoin: (g: StudyGroup) => void }> = ({ group, onJoin }) => {
+  const s = useThemeStyleSheet(createStyles);
+  const styleColor = getStyleColors()[group.style];
   const pct = Math.min(100, (group.members.length / group.maxMembers) * 100);
   return (
     <View style={[s.groupCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
@@ -210,8 +214,8 @@ const StudyGroupCard: React.FC<{ group: StudyGroup; onJoin: (g: StudyGroup) => v
           <Text style={s.groupName}>{group.name}</Text>
           <Text style={s.groupCourse}>{group.courseName}</Text>
         </View>
-        <View style={[s.styleBadge, { backgroundColor: `${STYLE_COLOR[group.style]}22` }]}>
-          <Text style={[s.styleBadgeTxt, { color: STYLE_COLOR[group.style] }]}>{STYLE_LABEL[group.style]}</Text>
+        <View style={[s.styleBadge, { backgroundColor: `${styleColor}22` }]}>
+          <Text style={[s.styleBadgeTxt, { color: styleColor }]}>{STYLE_LABEL[group.style]}</Text>
         </View>
       </View>
 
@@ -227,7 +231,7 @@ const StudyGroupCard: React.FC<{ group: StudyGroup; onJoin: (g: StudyGroup) => v
         </View>
       ) : null}
 
-      <TouchableOpacity style={[s.primaryBtn, { marginTop: theme.space.md, backgroundColor: theme.colors.success }]} onPress={() => onJoin(group)}>
+      <TouchableOpacity style={[s.primaryBtn, { marginTop: theme.space.md }]} onPress={() => onJoin(group)}>
         <Ionicons name="people-outline" size={16} color={theme.colors.onAccent} />
         <Text style={s.primaryBtnTxt}>申請加入</Text>
       </TouchableOpacity>
@@ -240,6 +244,7 @@ const StudyGroupCard: React.FC<{ group: StudyGroup; onJoin: (g: StudyGroup) => v
 // ============================================================================
 
 export function StudyBuddyPanel() {
+  const s = useThemeStyleSheet(createStyles);
   const insets = useSafeAreaInsets();
   const auth = useAuth();
   const { school } = useSchool();
@@ -530,6 +535,7 @@ const EmptyHint: React.FC<{ icon: keyof typeof Ionicons.glyphMap; title: string;
 );
 
 const ReviewSummary: React.FC<{ agg: CourseReviewAggregate }> = ({ agg }) => {
+  const s = useThemeStyleSheet(createStyles);
   const total = agg.totalCount;
   const sentTotal = Math.max(1, agg.sentiment.positive + agg.sentiment.neutral + agg.sentiment.negative);
   const pct = (n: number) => Math.round((n / sentTotal) * 100);
@@ -568,18 +574,22 @@ const ReviewSummary: React.FC<{ agg: CourseReviewAggregate }> = ({ agg }) => {
   );
 };
 
-const StatPill: React.FC<{ label: string; value: string }> = ({ label, value }) => (
-  <View style={s.statPill}>
-    <Text style={s.statPillLabel}>{label}</Text>
-    <Text style={s.statPillValue}>{value}</Text>
-  </View>
-);
+const StatPill: React.FC<{ label: string; value: string }> = ({ label, value }) => {
+  const s = useThemeStyleSheet(createStyles);
+  return (
+    <View style={s.statPill}>
+      <Text style={s.statPillLabel}>{label}</Text>
+      <Text style={s.statPillValue}>{value}</Text>
+    </View>
+  );
+};
 
 const ReviewCard: React.FC<{
   review: CourseReviewDoc;
   myUid?: string;
   onHelpful: () => void | Promise<void>;
 }> = ({ review, myUid, onHelpful }) => {
+  const s = useThemeStyleSheet(createStyles);
   const helpedByMe = !!(myUid && Array.isArray(review.helpfulBy) && review.helpfulBy.includes(myUid));
   const sentimentColor =
     review.sentiment === 'positive'
@@ -650,6 +660,7 @@ const ReviewModal: React.FC<{
   onDismiss: () => void;
   onSubmitted: () => void;
 }> = ({ visible, onDismiss, onSubmitted }) => {
+  const s = useThemeStyleSheet(createStyles);
   const auth = useAuth();
   const { school } = useSchool();
   const [courseName, setCourseName] = useState('');
@@ -817,6 +828,7 @@ const CreateGroupModal: React.FC<{
     endHour: number;
   }) => Promise<void>;
 }> = ({ visible, onDismiss, onCreated }) => {
+  const s = useThemeStyleSheet(createStyles);
   const [name, setName] = useState('');
   const [courseName, setCourseName] = useState('');
   const [courseCode, setCourseCode] = useState('');
@@ -934,6 +946,7 @@ const CreateGroupModal: React.FC<{
 };
 
 const HourPicker: React.FC<{ hour: number; onChange: (h: number) => void }> = ({ hour, onChange }) => {
+  const s = useThemeStyleSheet(createStyles);
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
       <Pressable onPress={() => onChange(Math.max(7, hour - 1))} style={s.hourBtn}>
@@ -961,7 +974,7 @@ const StarRow: React.FC<{ rating: number; onChange: (r: number) => void; size?: 
 
 // ─── Styles ──────────────────────────────────────────────
 
-const s = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.bg },
   header: { paddingHorizontal: theme.space.lg, paddingTop: theme.space.md, paddingBottom: theme.space.sm },
   headerTitle: { fontSize: 22, fontWeight: '700', color: theme.colors.text },
@@ -1017,7 +1030,7 @@ const s = StyleSheet.create({
   matchHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
   scoreCircle: { width: 56, height: 56, borderRadius: 28, borderWidth: 2, padding: 3, alignItems: 'center', justifyContent: 'center' },
   scoreInner: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
-  scoreTxt: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  scoreTxt: { fontSize: 16, fontWeight: '700' },
   matchName: { fontSize: 15, fontWeight: '700', color: theme.colors.text },
   matchDept: { fontSize: 12, color: theme.colors.textSecondary, marginTop: 2 },
   compatBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },

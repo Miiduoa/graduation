@@ -22,6 +22,7 @@ import {
 } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
+import { useThemeMode } from '../state/theme';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { getDataSource, hasDataSource } from '../data';
@@ -37,12 +38,12 @@ type ItemCategory =
   | 'other';
 
 const CATEGORY_INFO: Record<ItemCategory, { label: string; icon: string; color: string }> = {
-  electronics: { label: '電子產品', icon: 'phone-portrait', color: theme.colors.accent },
+  electronics: { label: '電子產品', icon: 'phone-portrait', get color() { return theme.colors.accent; } },
   cards: { label: '證件/卡片', icon: 'card', color: '#AF52DE' },
   clothing: { label: '衣物', icon: 'shirt', color: '#FF2D55' },
   accessories: { label: '配件', icon: 'glasses', color: '#FF9500' },
   books: { label: '書籍', icon: 'book', color: '#34C759' },
-  keys: { label: '鑰匙', icon: 'key', color: theme.colors.accent },
+  keys: { label: '鑰匙', icon: 'key', get color() { return theme.colors.accent; } },
   other: { label: '其他', icon: 'help-circle', color: '#8E8E93' },
 };
 
@@ -78,6 +79,7 @@ function InputField({
   required?: boolean;
   hint?: string;
 }) {
+  useThemeMode();
   return (
     <View style={{ marginBottom: 16 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
@@ -117,6 +119,7 @@ function InputField({
 }
 
 export function LostFoundPostScreen(props: any) {
+  useThemeMode();
   const nav = props?.navigation;
   const route = props?.route;
   const editId = route?.params?.id;

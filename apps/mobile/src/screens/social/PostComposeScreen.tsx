@@ -32,6 +32,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../state/auth';
 import { useSchool } from '../../state/school';
 import { theme } from '../../ui/theme';
+import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../../ui/navigationTheme';
 import { isFirebaseMockMode } from '../../firebase';
 import { createCampusPost } from '../../services/feed';
@@ -60,6 +61,7 @@ type LocalDraft = {
 };
 
 export function PostComposeScreen(props: any) {
+  const styles = useThemeStyleSheet(createStyles);
   const auth = useAuth();
   const { school } = useSchool();
   const routeBoardId = props?.route?.params?.boardId as string | undefined;
@@ -334,7 +336,7 @@ export function PostComposeScreen(props: any) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   label: { fontSize: 13, fontWeight: '700', color: theme.colors.text, marginTop: 14, marginBottom: 6 },
   hintMuted: { fontSize: 12, color: theme.colors.textSecondary, marginBottom: 8 },
   counter: { textAlign: 'right', fontSize: 10, color: theme.colors.muted, marginTop: 4 },

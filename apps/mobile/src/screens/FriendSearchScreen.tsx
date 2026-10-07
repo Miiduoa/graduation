@@ -14,6 +14,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Screen } from '../ui/components';
 import { theme } from '../ui/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { useAuth } from '../state/auth';
 import { shouldBlockForNoLogin, isDemoUid } from '../services/demoSession';
@@ -38,6 +39,7 @@ type RowProps = {
 };
 
 function FriendshipRow(props: RowProps) {
+  const styles = useThemeStyleSheet(createStyles);
   const { profile, friendship, myUid, loadingRel, navigation: navigationProp, onFriendshipChange } =
     props;
 
@@ -68,6 +70,7 @@ function FriendshipRow(props: RowProps) {
 }
 
 export function FriendSearchScreen(props: any) {
+  const styles = useThemeStyleSheet(createStyles);
   const nav = props?.navigation;
   const presetUid = props?.route?.params?.presetUid as string | undefined;
   const auth = useAuth();
@@ -217,7 +220,7 @@ export function FriendSearchScreen(props: any) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   searchWrap: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 10 },
   searchBox: {
     flexDirection: 'row',

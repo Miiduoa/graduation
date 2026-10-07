@@ -30,6 +30,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../state/auth';
 import { useSchool } from '../../state/school';
 import { theme } from '../../ui/theme';
+import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../../ui/navigationTheme';
 import { getDb, isFirebaseMockMode } from '../../firebase';
 import {
@@ -68,6 +69,7 @@ const POI_CAT_ICON: Record<SocialPoiCategory, keyof typeof Ionicons.glyphMap> = 
 };
 
 export function RealtimeSocialScreen() {
+  const styles = useThemeStyleSheet(createStyles);
   const injected = useCampusSocialStackNav();
   const fb = useNavigation<any>();
   const nav = injected ?? fb;
@@ -382,6 +384,7 @@ function StoryViewerModal(props: {
   onClose: () => void;
   onAdvance: (delta: number) => void;
 }) {
+  const styles = useThemeStyleSheet(createStyles);
   const { state, onClose, onAdvance } = props;
   if (!state) return null;
   const story = state.group.stories[state.index];
@@ -453,7 +456,7 @@ function StoryViewerModal(props: {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   root: { flex: 1, backgroundColor: theme.colors.bg, paddingTop: theme.space.sm },
 
   section: {

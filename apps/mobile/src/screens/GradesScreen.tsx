@@ -16,6 +16,7 @@ import {
 } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
+import { useThemeMode } from '../state/theme';
 import { useAuth } from '../state/auth';
 import { shouldBlockForNoLogin, isDemoUid } from '../services/demoSession';
 import { useSchool } from '../state/school';
@@ -135,8 +136,8 @@ const GRADE_COLORS: Record<string, string> = {
   'A+': '#22C55E',
   A: '#22C55E',
   'A-': '#4ADE80',
-  'B+': theme.colors.info,
-  B: theme.colors.info,
+  get 'B+'() { return theme.colors.info; },
+  get B() { return theme.colors.info; },
   'B-': '#60A5FA',
   'C+': '#FF9500',
   C: '#FF9500',
@@ -159,13 +160,14 @@ function inferCategory(courseCode?: string, courseName?: string): Grade['categor
 }
 
 const CATEGORY_LABELS: Record<string, { label: string; color: string }> = {
-  required: { label: '必修', color: theme.colors.accent },
+  required: { label: '必修', get color() { return theme.colors.accent; } },
   elective: { label: '選修', color: '#AF52DE' },
   general: { label: '通識', color: '#34C759' },
   english: { label: '英文', color: '#FF9500' },
 };
 
 function GradeCard({ course }: { course: Grade }) {
+  useThemeMode();
   const categoryInfo = CATEGORY_LABELS[course.category];
   const gradeColor = course.grade
     ? (GRADE_COLORS[course.grade] ?? theme.colors.muted)
@@ -253,6 +255,7 @@ function GradeCard({ course }: { course: Grade }) {
 }
 
 export function GradesScreen(props: Record<string, unknown>) {
+  useThemeMode();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const nav = props?.navigation as any;
   const auth = useAuth();

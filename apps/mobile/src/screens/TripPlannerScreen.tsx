@@ -25,6 +25,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { Screen, SegmentedControl } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
+import { useThemeMode } from '../state/theme';
 import { analytics } from '../services/analytics';
 import { useGeolocation } from '../hooks/useGeolocation';
 import { useSavedPlaces, type SavedPlace } from '../services/savedPlaces';
@@ -94,7 +95,7 @@ type PlanStep = {
 
 const MODE_CONFIG: Record<TravelMode, { icon: string; label: string; color: string; mPerMin: number }> = {
   walk: { icon: 'walk-outline', label: '走路', color: '#34C759', mPerMin: 75 },
-  bus: { icon: 'bus-outline', label: '公車', color: theme.colors.accent, mPerMin: 350 },
+  bus: { icon: 'bus-outline', label: '公車', get color() { return theme.colors.accent; }, mPerMin: 350 },
   bike: { icon: 'bicycle-outline', label: '騎車', color: '#FF9500', mPerMin: 250 },
   drive: { icon: 'car-outline', label: '開車', color: '#AF52DE', mPerMin: 500 },
 };
@@ -124,6 +125,7 @@ function EndpointPicker({
   active: boolean;
   onActive: () => void;
 }) {
+  useThemeMode();
   const [q, setQ] = useState('');
   const searchResults = useMemo(
     () => (q.trim() ? searchCampusPois(q.trim()).slice(0, 6) : []),
@@ -342,6 +344,7 @@ function EndpointPicker({
 // ═════════════════════════════════════════════════════
 
 export function TripPlannerScreen(_props: Record<string, unknown>) {
+  useThemeMode();
   const nav = useNavigation<any>();
   const route = useRoute<any>();
   const params = route.params ?? {};

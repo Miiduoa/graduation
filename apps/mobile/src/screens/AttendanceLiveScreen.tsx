@@ -27,6 +27,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { theme } from '../ui/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { useAuth } from '../state/auth';
 import { PureQRCode } from '../ui/PureQRCode';
@@ -64,6 +65,7 @@ interface AttendanceLiveScreenProps {
 // ============================================================================
 
 function RotatingQRDisplay({ sessionId, secret }: { sessionId: string; secret: string }) {
+  const s = useThemeStyleSheet(createStyles);
   const [qrValue, setQrValue] = useState(() => generateRotatingQR(sessionId, secret));
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const [countdown, setCountdown] = useState(3);
@@ -94,7 +96,7 @@ function RotatingQRDisplay({ sessionId, secret }: { sessionId: string; secret: s
       </Animated.View>
       <View style={s.qrBadgeRow}>
         <View style={s.qrBadge}>
-          <Ionicons name={'shield-checkmark' as any} size={14} color="#FFFFFF" />
+          <Ionicons name={'shield-checkmark' as any} size={14} color={theme.colors.success} />
           <Text style={s.qrBadgeText}>定時更新</Text>
         </View>
         <View
@@ -120,6 +122,7 @@ function RotatingQRDisplay({ sessionId, secret }: { sessionId: string; secret: s
 // ============================================================================
 
 function NumberCodeDisplay({ code }: { code: string }) {
+  const s = useThemeStyleSheet(createStyles);
   const digits = code.split('');
 
   return (
@@ -150,6 +153,7 @@ function StudentRecordItem({
   isTeacher: boolean;
   onStatusChange?: (studentId: string, status: AttendanceStatus) => void;
 }) {
+  const s = useThemeStyleSheet(createStyles);
   const statusColor = getStatusColor(record.status);
   const statusLabel = getStatusLabel(record.status);
 
@@ -189,6 +193,7 @@ function StudentRecordItem({
 // ============================================================================
 
 export default function AttendanceLiveScreen({ route, navigation }: AttendanceLiveScreenProps) {
+  const s = useThemeStyleSheet(createStyles);
   const insets = useSafeAreaInsets();
   const auth = useAuth();
   const { sessionId, isTeacher } = route.params;
@@ -620,7 +625,7 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
                       onPress={handleNumberSubmit}
                       disabled={submitting || numberInput.length !== 6}
                     >
-                      <Ionicons name={'checkmark-circle' as any} size={20} color="#FFFFFF" />
+                      <Ionicons name={'checkmark-circle' as any} size={20} color={theme.colors.onAccent} />
                       <Text style={s.checkInBtnText}>確認簽到</Text>
                     </TouchableOpacity>
                   </View>
@@ -636,7 +641,7 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
                       <Text style={s.scanHint}>掃描教師端的 QR 碼</Text>
                     </View>
                     <TouchableOpacity style={s.checkInBtn} onPress={openScanner} disabled={submitting}>
-                      <Ionicons name={'camera-outline' as any} size={20} color="#FFFFFF" />
+                      <Ionicons name={'camera-outline' as any} size={20} color={theme.colors.onAccent} />
                       <Text style={s.checkInBtnText}>開啟掃描器</Text>
                     </TouchableOpacity>
                     <Text style={s.orText}>— 或 —</Text>
@@ -671,7 +676,7 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
                       <TouchableOpacity
                         style={[
                           s.checkInBtn,
-                          { marginTop: 12, backgroundColor: theme.colors.success },
+                          { marginTop: 12 },
                         ]}
                         onPress={handleNumberSubmit}
                         disabled={submitting}
@@ -711,7 +716,7 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
 // STYLES
 // ============================================================================
 
-const s = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.background },
 
   // Loading
@@ -742,12 +747,12 @@ const s = StyleSheet.create({
   liveActive: { backgroundColor: '#34C759' },
   headerSubtitle: { fontSize: 12, color: theme.colors.muted },
   endBtn: {
-    backgroundColor: theme.colors.danger,
+    backgroundColor: theme.colors.dangerSoft,
     paddingHorizontal: 14,
     paddingVertical: 7,
     borderRadius: 8,
   },
-  endBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 13 },
+  endBtnText: { color: theme.colors.danger, fontWeight: '700', fontSize: 13 },
 
   scrollContent: { flex: 1 },
 
@@ -781,13 +786,13 @@ const s = StyleSheet.create({
   qrBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: theme.colors.success,
+    backgroundColor: theme.colors.successSoft,
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 20,
     gap: 4,
   },
-  qrBadgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '600' },
+  qrBadgeText: { color: theme.colors.success, fontSize: 11, fontWeight: '600' },
 
   // Number Code
   codeSection: { alignItems: 'center', paddingVertical: 32 },
@@ -849,7 +854,7 @@ const s = StyleSheet.create({
   },
   filterTabActive: { backgroundColor: theme.colors.accent },
   filterTabText: { fontSize: 11, color: theme.colors.text, fontWeight: '600' },
-  filterTabTextActive: { color: '#FFFFFF' },
+  filterTabTextActive: { color: theme.colors.onAccent },
 
   // Record Item
   recordItem: {
@@ -962,7 +967,7 @@ const s = StyleSheet.create({
     minWidth: 200,
   },
   checkInBtnDisabled: { opacity: 0.4 },
-  checkInBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  checkInBtnText: { color: theme.colors.onAccent, fontSize: 16, fontWeight: '700' },
 
   // Student QR scan
   studentQRSection: { alignItems: 'center', paddingTop: 16, paddingHorizontal: 16 },

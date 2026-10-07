@@ -28,6 +28,7 @@ import * as Notifications from 'expo-notifications';
 import { Screen } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
+import { useThemeMode } from '../state/theme';
 import { analytics } from '../services/analytics';
 import { scheduleLocalNotification } from '../services/notifications';
 import { upsertSavedPlace } from '../services/savedPlaces';
@@ -50,6 +51,7 @@ type ParamShape = {
 };
 
 export function BusStopDetailScreen(_props: Record<string, unknown>) {
+  useThemeMode();
   const nav = useNavigation<any>();
   const route = useRoute<any>();
   const params = (route.params ?? {}) as Partial<ParamShape>;
@@ -453,6 +455,7 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
 }
 
 function FeatureChip({ text }: { text: string }) {
+  useThemeMode();
   return (
     <View
       style={{
@@ -468,6 +471,7 @@ function FeatureChip({ text }: { text: string }) {
 }
 
 function CtaBtn({ icon, label, onPress }: { icon: any; label: string; onPress: () => void }) {
+  useThemeMode();
   return (
     <Pressable
       onPress={onPress}
@@ -489,6 +493,7 @@ function CtaBtn({ icon, label, onPress }: { icon: any; label: string; onPress: (
 }
 
 function MiniTag({ text, color }: { text: string; color?: string }) {
+  useThemeMode();
   return (
     <View
       style={{
@@ -506,7 +511,7 @@ function MiniTag({ text, color }: { text: string; color?: string }) {
 }
 
 const SECTION_HEADER = {
-  color: theme.colors.muted,
+  get color() { return theme.colors.muted; },
   fontSize: 11,
   fontWeight: '700' as const,
   letterSpacing: 2,

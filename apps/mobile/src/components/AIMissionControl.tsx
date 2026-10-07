@@ -27,6 +27,7 @@ import React, { useCallback, useMemo } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../ui/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { rootNavigateNested } from '../app/rootNavigation';
 import { getPersonaMissions, getPersona, type PersonaMission } from '../data/demoPersona';
 
@@ -62,6 +63,7 @@ export interface AIMissionControlProps {
 }
 
 export function AIMissionControl(props: AIMissionControlProps) {
+  const styles = useThemeStyleSheet(createStyles);
   const { uid, maxVisible = 3, hideWhenEmpty = false } = props;
   const persona = useMemo(() => getPersona(uid), [uid]);
   const missions = useMemo(() => getPersonaMissions(uid).slice(0, maxVisible), [uid, maxVisible]);
@@ -160,7 +162,7 @@ export function AIMissionControl(props: AIMissionControlProps) {
               <View style={styles.actionRow}>
                 <View style={[styles.primaryBtn, { backgroundColor: sev.color }]}>
                   <Text style={styles.primaryBtnText}>{mission.primaryActionLabel}</Text>
-                  <Ionicons name="arrow-forward" size={14} color="#fff" />
+                  <Ionicons name="arrow-forward" size={14} color={theme.colors.onAccent} />
                 </View>
                 {mission.secondaryActionLabel && (
                   <Text style={styles.secondaryText}>{mission.secondaryActionLabel}</Text>
@@ -174,7 +176,7 @@ export function AIMissionControl(props: AIMissionControlProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   container: {
     backgroundColor: theme.colors.surface,
     borderRadius: theme.radius.xl,
