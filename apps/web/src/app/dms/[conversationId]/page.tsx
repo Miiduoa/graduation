@@ -277,7 +277,7 @@ export default function DmChatPage(props: {
                         padding: '10px 14px',
                         borderRadius: 14,
                         background: mine ? 'var(--brand)' : 'var(--panel)',
-                        color: mine ? '#fff' : 'var(--text)',
+                        color: mine ? 'var(--on-brand)' : 'var(--text)',
                         border: mine ? 'none' : '1px solid var(--border)',
                       }}
                     >
@@ -344,8 +344,8 @@ export default function DmChatPage(props: {
               padding: '0 20px',
               borderRadius: 6,
               border: 'none',
-              background: composeText.trim() ? 'var(--brand)' : 'var(--muted)',
-              color: '#fff',
+              background: composeText.trim() ? 'var(--brand)' : 'var(--panel)',
+              color: composeText.trim() ? 'var(--on-brand)' : 'var(--muted)',
               fontWeight: 700,
               cursor: composeText.trim() ? 'pointer' : 'not-allowed',
               opacity: composeText.trim() ? 1 : 0.5,
