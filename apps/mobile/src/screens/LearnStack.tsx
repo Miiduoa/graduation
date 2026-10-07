@@ -433,7 +433,7 @@ export function LearnStack() {
       <Stack.Screen name="CourseForumTopicV2" component={CourseForumTopicV2Screen} options={{ title: '討論', headerShown: false }} />
       <Stack.Screen name="CourseAnnouncementsV2" component={CourseAnnouncementsV2Screen} options={{ title: '公告', headerShown: false }} />
       <Stack.Screen name="CourseGradesV2" component={CourseGradesV2Screen} options={{ title: '成績', headerShown: false }} />
-      <Stack.Screen name="CourseAIAssistantV2" component={CourseAIAssistantV2Screen} options={{ title: 'AI 助教', headerShown: false }} />
+      <Stack.Screen name="CourseAIAssistantV2" component={CourseAIAssistantV2Screen} options={{ title: '課程助理', headerShown: false }} />
       <Stack.Screen name="CourseQuestionBankV2" component={CourseQuestionBankV2Screen} options={{ title: '題庫', headerShown: false }} />
       <Stack.Screen name="CourseLiveV2" component={CourseLiveV2Screen} options={{ title: '直播', headerShown: false }} />
       <Stack.Screen
@@ -449,7 +449,7 @@ export function LearnStack() {
       <Stack.Screen
         name="Attendance"
         component={isLmsV2Enabled() ? CourseLiveV2Screen : GuardedAttendance}
-        options={{ title: '智慧點名', headerShown: false }}
+        options={{ title: '課程點名', headerShown: false }}
       />
       <Stack.Screen
         name="AcademicOverview"
@@ -475,7 +475,7 @@ export function LearnStack() {
       <Stack.Screen
         name="AcademicInsights"
         component={GuardedAcademicInsights}
-        options={{ title: '學業 AI 分析', headerShown: false }}
+        options={{ title: '學業分析', headerShown: false }}
       />
       <Stack.Screen
         name="LearningAnalytics"
@@ -495,7 +495,7 @@ export function LearnStack() {
       <Stack.Screen
         name="AICourseAdvisor"
         component={GuardedAICourseAdvisor}
-        options={{ title: 'AI 選課助理' }}
+        options={{ title: '選課助理' }}
       />
       <Stack.Screen
         name="QuizTaking"
@@ -570,7 +570,7 @@ export function LearnStack() {
       <Stack.Screen
         name="AttendanceMultiMethod"
         component={isLmsV2Enabled() ? CourseLiveV2Screen : guardCourseView(AttendanceMultiMethodScreen)}
-        options={{ title: '智慧簽到', headerShown: false }}
+        options={{ title: '課程簽到', headerShown: false }}
       />
       <Stack.Screen
         name="MyQuizScores"
@@ -620,12 +620,12 @@ export function LearnStack() {
       <Stack.Screen
         name="AIAgentObservatory"
         component={AIAgentObservatoryScreen}
-        options={{ title: '🤖 AI 觀察台' }}
+        options={{ title: '助理活動紀錄' }}
       />
       <Stack.Screen
         name="AIAgentConsole"
         component={AIAgentConsoleScreen}
-        options={{ title: '🤖 AI Agent 駕駛室' }}
+        options={{ title: '助理工作紀錄' }}
       />
       <Stack.Screen
         name="StudentInbox"
@@ -670,12 +670,12 @@ export function LearnStack() {
       <Stack.Screen
         name="AITrustCard"
         component={AITrustCardScreen}
-        options={{ title: '🛡 AI 信任卡' }}
+        options={{ title: '助理權限與資料' }}
       />
       <Stack.Screen
         name="AIStudyBuddy"
         component={AIStudyBuddyScreen}
-        options={{ title: '🤝 AI 學伴' }}
+        options={{ title: '學習夥伴' }}
       />
       <Stack.Screen
         name="LifeRequests"

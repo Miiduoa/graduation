@@ -146,7 +146,7 @@ describe('firestore security rules', () => {
     );
   });
 
-  test("allow matching cafeteria operator to read and update that cafeteria's orders", async () => {
+  test("allow matching cafeteria operator to read orders but require callable writes", async () => {
     await seedFirestore(async (db) => {
       await db
         .collection('schools')
@@ -181,14 +181,14 @@ describe('firestore security rules', () => {
     await assertSucceeds(
       db.collection('schools').doc('tw-demo-uni').collection('orders').doc('order-1').get(),
     );
-    await assertSucceeds(
+    await assertFails(
       db.collection('schools').doc('tw-demo-uni').collection('orders').doc('order-1').update({
         status: 'ready',
       }),
     );
   });
 
-  test("deny cafeteria operators from accessing another cafeteria's orders while admin override still works", async () => {
+  test("deny other cafeteria reads and require server writes even for administrators", async () => {
     await seedFirestore(async (db) => {
       await db.collection('schools').doc('tw-demo-uni').collection('members').doc('admin-1').set({
         role: 'admin',
@@ -239,11 +239,34 @@ describe('firestore security rules', () => {
     );
 
     const adminDb = testEnv.authenticatedContext('admin-1').firestore();
-    await assertSucceeds(
+    await assertSucceeds(adminDb.collection('schools').doc('tw-demo-uni').collection('orders').doc('order-2').get());
+    await assertFails(
       adminDb.collection('schools').doc('tw-demo-uni').collection('orders').doc('order-2').update({
         status: 'confirmed',
       }),
     );
+  });
+
+  test('prevent owners from forging canonical or mirrored order receipts, including cancellation writes', async () => {
+    const canonical = 'schools/tw-demo-uni/orders/receipt';
+    const mirror = 'users/alice/schools/tw-demo-uni/orders/receipt';
+    const receipt = { userId: 'alice', schoolId: 'tw-demo-uni', cafeteriaId: 'cafe', requestId: 'attempt', total: 100, paymentStatus: 'pending', status: 'pending' };
+    await seedFirestore(async (db) => {
+      await db.doc(canonical).set(receipt);
+      await db.doc(mirror).set(receipt);
+    });
+    const db = testEnv.authenticatedContext('alice').firestore();
+    await assertSucceeds(db.doc(canonical).get());
+    await assertSucceeds(db.doc(mirror).get());
+    for (const path of [canonical, mirror]) {
+      await assertFails(db.doc(path).update({ status: 'cancelled', total: 0, paymentStatus: 'paid' }));
+      await assertFails(db.doc(path).update({ status: 'cancelled' }));
+      await assertFails(db.doc(path).update({ requestId: 'new-attempt' }));
+      await assertFails(db.doc(path).delete());
+    }
+    await assertFails(db.doc('users/alice/schools/tw-demo-uni/orders/forged').set(receipt));
+    await assertFails(db.doc('_orderRequests/forged').set(receipt));
+    await assertFails(testEnv.authenticatedContext('bob').firestore().doc(mirror).get());
   });
 
   test('deny group post impersonation on create', async () => {

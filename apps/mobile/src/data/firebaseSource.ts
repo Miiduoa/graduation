@@ -1,5 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import type { DataSource } from './source';
+import { lostFoundSource } from './lostFoundSource';
+import { createOrderThroughServer } from './orderSource';
 import type {
   Announcement,
   ActionQueueItem,
@@ -2121,52 +2123,7 @@ export const firebaseSource: DataSource = {
   },
 
   // ===== 失物招領 =====
-  async listLostFoundItems(schoolId, options) {
-    const resolvedSchoolId = schoolId || DEFAULT_SCHOOL_ID;
-
-    if (schoolId) {
-      try {
-        const canonicalRows = await fetchCollectionAtPath<LostFoundItem>(
-          buildSchoolCollectionPath(schoolId, 'lostFound'),
-          [orderBy('createdAt', 'desc')],
-          options,
-        );
-        if (canonicalRows.length > 0) return canonicalRows;
-      } catch (error) {
-        logFirebaseReadFailure(`schools/${schoolId}/lostFound`, error);
-      }
-    }
-
-    const fallbackRows = await fetchCollection<LostFoundItem>(
-      'lostFoundItems',
-      [bySchool(resolvedSchoolId)],
-      resolvedSchoolId,
-      optionsWithoutFirestoreSort(options),
-    );
-    return limitRows(sortByCreatedAtDesc(fallbackRows), options);
-  },
-
-  async getLostFoundItem(id) {
-    return fetchDocument<LostFoundItem>('lostFoundItems', id);
-  },
-
-  async createLostFoundItem(data) {
-    return createDocument<LostFoundItem>('lostFoundItems', {
-      ...data,
-      status: 'open',
-    } as Omit<LostFoundItem, 'id'>);
-  },
-
-  async updateLostFoundItem(id, data) {
-    return updateDocument<LostFoundItem>('lostFoundItems', id, data);
-  },
-
-  async resolveLostFoundItem(id) {
-    await updateDocument<LostFoundItem>('lostFoundItems', id, {
-      status: 'resolved',
-      resolvedAt: new Date().toISOString(),
-    });
-  },
+  ...lostFoundSource,
 
   // ===== 圖書館 =====
   async searchBooks(searchQuery, schoolId, options) {
@@ -2654,59 +2611,7 @@ export const firebaseSource: DataSource = {
     return fetchDocument<Order>('orders', id);
   },
 
-  async createOrder(data) {
-    const resolvedSchoolId = await resolveUserSchoolId(data.userId, (data as any).schoolId);
-    if (!resolvedSchoolId) {
-      throw new Error('缺少 schoolId，無法建立訂單');
-    }
-    const createOrder = httpsCallable<
-      {
-        schoolId: string;
-        cafeteriaId: string;
-        merchantId?: string;
-        cafeteria?: string;
-        items: Array<Record<string, unknown>>;
-        pickupTime?: string;
-        note?: string;
-        paymentMethod?: string;
-        source?: string;
-      },
-      { orderId?: string; total?: number }
-    >(getFunctionsInstance(), 'createOrder');
-    const cafeteriaId = (data as Record<string, unknown>).cafeteriaId as string | undefined;
-    if (!cafeteriaId) {
-      throw new Error('缺少 cafeteriaId，無法建立訂單');
-    }
-    const result = await createOrder({
-      schoolId: resolvedSchoolId,
-      cafeteriaId,
-      merchantId: (data as Record<string, unknown>).merchantId as string | undefined,
-      cafeteria: (data as Record<string, unknown>).cafeteria as string | undefined,
-      items: data.items as Array<Record<string, unknown>>,
-      pickupTime: (data as Record<string, unknown>).pickupTime as string | undefined,
-      note: (data as Record<string, unknown>).note as string | undefined,
-      paymentMethod: (data as Record<string, unknown>).paymentMethod as string | undefined,
-      ...((data as Record<string, unknown>).source === 'ai_agent'
-        ? { source: 'ai_agent' as const }
-        : {}),
-    });
-    const orderId = result.data?.orderId;
-    if (!orderId) {
-      throw new Error('建立訂單失敗');
-    }
-
-    const order = await fetchCanonicalUserSchoolDocument<Order>({
-      uid: data.userId,
-      schoolId: resolvedSchoolId,
-      canonicalCollection: 'orders',
-      docId: orderId,
-      fallbackRootCollection: 'orders',
-    });
-    if (!order) {
-      throw new Error('建立訂單後找不到訂單資料');
-    }
-    return order;
-  },
+  createOrder: (data) => createOrderThroughServer(data, resolveUserSchoolId),
 
   async updateOrderStatus(id, status, userId = undefined, schoolId = undefined) {
     const resolvedSchoolId = userId

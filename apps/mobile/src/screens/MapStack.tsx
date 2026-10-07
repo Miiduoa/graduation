@@ -123,7 +123,7 @@ export function MapStack() {
         component={MenuDetailAiFirstScreen}
         options={{ title: '餐點詳情' }}
       />
-      <Stack.Screen name="Ordering" component={OrderingScreen} options={{ title: '線上點餐' }} />
+      <Stack.Screen name="Ordering" component={OrderingScreen} options={{ title: '餐廳訂單' }} />
       <Stack.Screen
         name="MenuSubscription"
         component={MenuSubscriptionScreen}

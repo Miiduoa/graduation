@@ -1,658 +1,202 @@
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { ScrollView, Text, View, Pressable, Alert, Share } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import {
-  Screen,
-  AnimatedCard,
-  Card,
-  Button,
-  Pill,
-  SectionTitle,
-  ListItem,
-  Skeleton,
-} from '../ui/components';
+import React, { useCallback, useRef, useState } from 'react';
+import { ScrollView, Text, View, Alert, Share, Image } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
+import { Screen, AnimatedCard, Button, Pill } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useThemeMode } from '../state/theme';
-import { useAuth } from '../state/auth';
-import { useSchool } from '../state/school';
-import { getDataSource, hasDataSource } from '../data';
-import { formatDateTime, formatRelativeTime } from '../utils/format';
+import { formatDateTime } from '../utils/format';
+import {
+  categoryLabel,
+  statusLabel,
+  lostFoundDataSource,
+  useLostFoundScope,
+  useLostFoundLoad,
+} from '../features/lostFound';
 
-type ItemType = 'lost' | 'found';
-type ItemStatus = 'open' | 'claimed' | 'returned' | 'expired';
-type ItemCategory =
-  | 'electronics'
-  | 'cards'
-  | 'clothing'
-  | 'accessories'
-  | 'books'
-  | 'keys'
-  | 'other';
-
-type LostFoundItem = {
-  id: string;
-  type: ItemType;
-  status: ItemStatus;
-  title: string;
-  description: string;
-  category: ItemCategory;
-  location: string;
-  date: Date;
-  createdAt: Date;
-  imageUrl?: string;
-  contactInfo?: string;
-  authorId: string;
-  authorName: string;
-  authorDepartment?: string;
-  claimedBy?: string;
-  claimedAt?: Date;
-  characteristics?: string[];
+type Props = {
+  navigation?: { navigate: (screen: string, params?: object) => void; goBack?: () => void };
+  route?: { params?: { id?: string } };
 };
-
-const CATEGORY_INFO: Record<ItemCategory, { label: string; icon: string; color: string }> = {
-  electronics: { label: '電子產品', icon: 'phone-portrait', get color() { return theme.colors.accent; } },
-  cards: { label: '證件/卡片', icon: 'card', color: '#AF52DE' },
-  clothing: { label: '衣物', icon: 'shirt', color: '#FF2D55' },
-  accessories: { label: '配件', icon: 'glasses', color: '#FF9500' },
-  books: { label: '書籍', icon: 'book', color: '#34C759' },
-  keys: { label: '鑰匙', icon: 'key', get color() { return theme.colors.accent; } },
-  other: { label: '其他', icon: 'help-circle', color: '#8E8E93' },
-};
-
-const STATUS_INFO: Record<ItemStatus, { label: string; color: string; icon: string }> = {
-  open: { label: '尋找中', get color() { return theme.colors.accent; }, icon: 'search' },
-  claimed: { label: '已認領', color: '#FF9500', icon: 'hand-left' },
-  returned: { label: '已歸還', get color() { return theme.colors.success; }, icon: 'checkmark-circle' },
-  expired: { label: '已過期', get color() { return theme.colors.muted; }, icon: 'time' },
-};
-
-const MOCK_ITEM: LostFoundItem = {
-  id: 'lf1',
-  type: 'lost',
-  status: 'open',
-  title: '黑色 AirPods Pro 耳機盒',
-  description:
-    '在圖書館 2F 自習區遺失，盒子上有貼紙裝飾（粉色獨角獸貼紙）。\n\n大約是下午兩點左右離開座位時忘記帶走，發現時已經不見了。\n\n如果有好心人撿到，拜託聯繫我，非常感謝！可以請你喝飲料作為感謝 🙏',
-  category: 'electronics',
-  location: '圖書館 2F 自習區 A',
-  date: new Date('2026-02-28'),
-  createdAt: new Date('2026-02-28T14:30:00'),
-  authorId: 'u1',
-  authorName: '王小明',
-  authorDepartment: '資訊工程學系',
-  contactInfo: 'LINE: xiaoming123',
-  characteristics: ['黑色', '有粉色獨角獸貼紙', 'Apple AirPods Pro', '附充電盒'],
-};
-
-export function LostFoundDetailScreen(props: any) {
+export function LostFoundDetailScreen({ navigation, route }: Props) {
   useThemeMode();
-  const nav = props?.navigation;
-  const route = props?.route;
-  const itemId = route?.params?.id;
-  const auth = useAuth();
-  const { school } = useSchool();
-
-  const [loading, setLoading] = useState(true);
-  const [item, setItem] = useState<LostFoundItem | null>(null);
-
-  const loadItem = useCallback(async () => {
-    setLoading(true);
+  const id = route?.params?.id ?? '';
+  const { uid, schoolId, scope, isCurrent } = useLostFoundScope(id);
+  const loader = useCallback(async () => {
+    if (!id) return null;
+    const item = await lostFoundDataSource().getLostFoundItem(id, schoolId);
+    if (item && (item.id !== id || item.schoolId !== schoolId)) throw new Error('物品範圍不符');
+    return item;
+  }, [id, schoolId]);
+  const { state, refresh } = useLostFoundLoad(scope, loader, isCurrent);
+  const item = state.data;
+  const isOwner = !!uid && uid === item?.reporterId;
+  const lock = useRef<{ scope: string; token: symbol } | null>(null);
+  const [busyScope, setBusyScope] = useState<string | null>(null);
+  const busy = busyScope === scope;
+  const copy = async () => {
+    if (!uid || !item?.contactInfo || !isCurrent() || lock.current?.scope === scope) return;
+    const token = Symbol();
+    lock.current = { scope, token };
     try {
-      if (itemId && hasDataSource()) {
-        const ds = getDataSource();
-        const serverItem = await ds.getLostFoundItem(itemId);
-        if (serverItem) {
-          setItem({
-            id: serverItem.id,
-            type: serverItem.type as ItemType,
-            status:
-              serverItem.status === 'active'
-                ? 'open'
-                : serverItem.status === 'resolved'
-                  ? 'returned'
-                  : (serverItem.status as ItemStatus),
-            title: serverItem.title,
-            description: serverItem.description,
-            category: serverItem.category as ItemCategory,
-            location: serverItem.location,
-            date: new Date(serverItem.date),
-            createdAt: new Date(serverItem.createdAt),
-            imageUrl: serverItem.imageUrls?.[0],
-            contactInfo: serverItem.contactInfo,
-            authorId: serverItem.reporterId,
-            authorName: serverItem.reporter?.displayName ?? '匿名用戶',
-            characteristics: [],
-          });
-          setLoading(false);
-          return;
-        }
-      }
-    } catch (e) {
-      console.warn('[LostFoundDetail] Failed to load item from server:', e);
+      const copied = await Clipboard.setStringAsync(item.contactInfo);
+      if (isCurrent())
+        Alert.alert(
+          copied ? '已複製' : '無法複製',
+          copied ? '聯絡資訊已複製到剪貼簿。' : '請自行選用發布者提供的聯絡方式。',
+        );
+    } catch {
+      if (isCurrent()) Alert.alert('無法複製', '請稍後再試。');
+    } finally {
+      if (lock.current?.token === token) lock.current = null;
     }
-    // 若無法從伺服器載入，使用示範資料
-    setItem(MOCK_ITEM);
-    setLoading(false);
-  }, [itemId]);
-
-  useEffect(() => {
-    loadItem();
-  }, [loadItem]);
-
-  const categoryInfo = item ? CATEGORY_INFO[item.category] : null;
-  const statusInfo = item ? STATUS_INFO[item.status] : null;
-  const isOwner = auth.user?.uid === item?.authorId;
-
-  const handleContact = () => {
-    if (!auth.user) {
-      Alert.alert('請先登入', '登入後才能查看聯絡資訊', [
-        { text: '取消', style: 'cancel' },
-        { text: '前往登入', onPress: () => nav?.navigate?.('MeHome') },
-      ]);
+  };
+  const contact = () => {
+    if (!isCurrent()) return;
+    if (!uid) {
+      Alert.alert('請先登入', '登入後才能查看聯絡資訊。');
       return;
     }
-
     if (!item?.contactInfo) {
-      Alert.alert('無聯絡資訊', '發布者未提供聯絡方式');
+      Alert.alert('未提供聯絡資訊', '發布者尚未填寫聯絡方式。');
       return;
     }
-
-    Alert.alert('聯絡發布者', `聯絡方式：${item.contactInfo}\n\n請文明禮貌地聯繫對方`, [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '複製',
-        onPress: () => {
-          Alert.alert('已複製', '聯絡資訊已複製到剪貼簿');
-        },
-      },
+    Alert.alert('聯絡發布者', item.contactInfo, [
+      { text: '關閉', style: 'cancel' },
+      { text: '複製', onPress: () => void copy() },
     ]);
   };
-
-  const handleClaim = () => {
-    if (!auth.user) {
-      Alert.alert('請先登入', '登入後才能認領物品', [
-        { text: '取消', style: 'cancel' },
-        { text: '前往登入', onPress: () => nav?.navigate?.('MeHome') },
-      ]);
-      return;
-    }
-
-    Alert.alert(
-      '確認認領',
-      item?.type === 'lost' ? '您確定要表示您找到了這個物品嗎？' : '您確定這是您遺失的物品嗎？',
-      [
-        { text: '取消', style: 'cancel' },
-        {
-          text: '確認',
-          onPress: async () => {
-            // 更新本地狀態
-            setItem((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    status: 'claimed',
-                    claimedBy: auth.profile?.displayName ?? '匿名用戶',
-                    claimedAt: new Date(),
-                  }
-                : null,
-            );
-            // 同步寫入後端
-            if (item?.id && hasDataSource()) {
-              try {
-                const ds = getDataSource();
-                await ds.updateLostFoundItem(item.id, { status: 'claimed' as any });
-              } catch (e) {
-                console.warn('[LostFoundDetail] Failed to update claim status:', e);
-              }
-            }
-            Alert.alert(
-              '認領成功',
-              item?.type === 'lost'
-                ? '請儘快聯繫發布者安排歸還事宜！'
-                : '請聯繫發布者確認身份並取回物品！',
-            );
-          },
-        },
-      ],
-    );
-  };
-
-  const handleMarkReturned = () => {
-    Alert.alert('確認歸還', '確定物品已成功歸還給原主人嗎？', [
+  const resolve = () => {
+    if (!isOwner || !item || !isCurrent() || lock.current?.scope === scope) return;
+    Alert.alert('確認結案', '確認物品已找回或完成歸還後，再將刊登資訊結案。', [
       { text: '取消', style: 'cancel' },
       {
-        text: '確認',
+        text: '確認結案',
         onPress: async () => {
-          setItem((prev) => (prev ? { ...prev, status: 'returned' } : null));
-          if (item?.id && hasDataSource()) {
-            try {
-              const ds = getDataSource();
-              await ds.resolveLostFoundItem(item.id);
-            } catch (e) {
-              console.warn('[LostFoundDetail] Failed to resolve item:', e);
-            }
+          if (!isCurrent() || lock.current?.scope === scope) return;
+          const token = Symbol();
+          lock.current = { scope, token };
+          setBusyScope(scope);
+          try {
+            await lostFoundDataSource().resolveLostFoundItem(item.id, schoolId);
+            if (!isCurrent()) return;
+            const updated = await lostFoundDataSource().getLostFoundItem(item.id, schoolId);
+            if (!isCurrent()) return;
+            if (
+              !updated ||
+              updated.reporterId !== uid ||
+              updated.schoolId !== schoolId ||
+              !['resolved', 'returned'].includes(updated.status)
+            )
+              throw new Error('未確認結案');
+            await refresh();
+            if (isCurrent()) Alert.alert('已結案', '已更新這則物品的刊登狀態。');
+          } catch {
+            if (isCurrent()) Alert.alert('無法確認結案', '請重新整理確認最新狀態，再試一次。');
+          } finally {
+            if (lock.current?.token === token) lock.current = null;
+            if (isCurrent()) setBusyScope(null);
           }
-          Alert.alert('太棒了！', '感謝您的幫助，物品已標記為已歸還 🎉');
         },
       },
     ]);
   };
-
-  const handleShare = async () => {
-    if (!item) return;
+  const share = async () => {
+    if (!item || !isCurrent()) return;
     try {
       await Share.share({
-        message: `【${item.type === 'lost' ? '失物' : '招領'}】${item.title}\n\n地點：${item.location}\n時間：${formatDateTime(item.date)}\n\n${item.description}\n\n#校園失物招領`,
         title: item.title,
+        message: `【${item.type === 'lost' ? '遺失' : '拾獲'}】${item.title}\n地點：${item.location}\n日期：${formatDateTime(item.date)}\n\n${item.description}`,
       });
-    } catch (error) {
-      console.error('Share error:', error);
+    } catch {
+      if (isCurrent()) Alert.alert('無法開啟分享', '請稍後再試。');
     }
   };
-
-  const handleEdit = () => {
-    nav?.navigate?.('LostFoundPost', { id: item?.id, type: item?.type });
-  };
-
-  const handleDelete = () => {
-    Alert.alert('確認刪除', '確定要刪除這則失物招領嗎？此操作無法復原。', [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '刪除',
-        style: 'destructive',
-        onPress: () => {
-          Alert.alert('已刪除', '失物招領資訊已刪除');
-          nav?.goBack?.();
-        },
-      },
-    ]);
-  };
-
-  if (loading) {
+  if (state.status === 'loading')
     return (
       <Screen>
-        <View style={{ gap: 16, paddingTop: 8 }}>
-          <Skeleton height={200} borderRadius={theme.radius.lg} />
-          <Skeleton height={150} borderRadius={theme.radius.lg} />
-          <Skeleton height={100} borderRadius={theme.radius.lg} />
-        </View>
+        <AnimatedCard title="正在讀取物品資訊" />
       </Screen>
     );
-  }
-
-  if (!item) {
+  if (state.status === 'error')
     return (
       <Screen>
-        <AnimatedCard title="找不到物品" subtitle="此物品可能已被刪除">
-          <Button text="返回列表" onPress={() => nav?.goBack?.()} />
+        <AnimatedCard title="暫時無法讀取物品" subtitle="請確認網路與服務連線，再試一次。">
+          <Button text="重新讀取" onPress={refresh} />
         </AnimatedCard>
       </Screen>
     );
-  }
-
+  if (!item)
+    return (
+      <Screen>
+        <AnimatedCard title="找不到物品" subtitle="這則刊登可能已移除，或不屬於目前學校。">
+          <Button text="返回列表" onPress={() => navigation?.goBack?.()} />
+        </AnimatedCard>
+      </Screen>
+    );
+  const imageUrl = item.imageUrls?.[0] ?? item.imageUrl;
   return (
     <Screen>
       <ScrollView
-        style={{ flex: 1 }}
         contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
       >
-        <AnimatedCard title="" subtitle="">
-          <View style={{ alignItems: 'center', paddingVertical: 12 }}>
-            <View
-              style={{
-                width: 80,
-                height: 80,
-                borderRadius: 20,
-                backgroundColor: `${categoryInfo?.color}20`,
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: 16,
-              }}
-            >
-              <Ionicons name={categoryInfo?.icon as any} size={40} color={categoryInfo?.color} />
-            </View>
-
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-              <View
-                style={{
-                  paddingHorizontal: 12,
-                  paddingVertical: 5,
-                  borderRadius: 6,
-                  backgroundColor:
-                    item.type === 'lost' ? `${theme.colors.danger}20` : `${theme.colors.success}20`,
-                }}
-              >
-                <Text
-                  style={{
-                    color: item.type === 'lost' ? theme.colors.danger : theme.colors.success,
-                    fontSize: 13,
-                    fontWeight: '700',
-                  }}
-                >
-                  {item.type === 'lost' ? '🔍 遺失物品' : '📦 拾獲物品'}
-                </Text>
-              </View>
-
-              <View
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  paddingHorizontal: 12,
-                  paddingVertical: 5,
-                  borderRadius: 6,
-                  backgroundColor: `${statusInfo?.color}20`,
-                  gap: 4,
-                }}
-              >
-                <Ionicons name={statusInfo?.icon as any} size={14} color={statusInfo?.color} />
-                <Text style={{ color: statusInfo?.color, fontSize: 13, fontWeight: '600' }}>
-                  {statusInfo?.label}
-                </Text>
-              </View>
-            </View>
-
-            <Text
-              style={{
-                color: theme.colors.text,
-                fontWeight: '700',
-                fontSize: 22,
-                textAlign: 'center',
-                marginBottom: 8,
-              }}
-            >
-              {item.title}
+        <AnimatedCard title={item.title}>
+          <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+            <Pill text={item.type === 'lost' ? '遺失' : '拾獲'} />
+            <Pill text={categoryLabel(item.category)} />
+            <Pill text={statusLabel(item.status)} />
+          </View>
+          {imageUrl?.startsWith('https://') && (
+            <Image
+              source={{ uri: imageUrl }}
+              accessibilityLabel="發布者提供的物品照片"
+              style={{ height: 220, borderRadius: theme.radius.md, marginTop: 12 }}
+              resizeMode="contain"
+            />
+          )}
+        </AnimatedCard>
+        <AnimatedCard title="物品資訊">
+          <View style={{ gap: 10 }}>
+            <Text style={{ color: theme.colors.text }}>地點：{item.location}</Text>
+            <Text style={{ color: theme.colors.text }}>日期：{formatDateTime(item.date)}</Text>
+            <Text style={{ color: theme.colors.muted }}>
+              發布：{formatDateTime(item.createdAt)}
             </Text>
-
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-              <Pill text={categoryInfo?.label ?? ''} />
-            </View>
+            <Text style={{ color: theme.colors.text, lineHeight: 23 }}>{item.description}</Text>
           </View>
         </AnimatedCard>
-
-        <AnimatedCard title="詳細資訊" delay={100}>
-          <View style={{ gap: 14 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
-              <View
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: 10,
-                  backgroundColor: theme.colors.accentSoft,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <Ionicons name="location" size={18} color={theme.colors.accent} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-                  {item.type === 'lost' ? '遺失地點' : '拾獲地點'}
-                </Text>
-                <Text style={{ color: theme.colors.text, fontWeight: '600', marginTop: 2 }}>
-                  {item.location}
-                </Text>
-              </View>
-            </View>
-
-            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
-              <View
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: 10,
-                  backgroundColor: theme.colors.accentSoft,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <Ionicons name="calendar" size={18} color={theme.colors.accent} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-                  {item.type === 'lost' ? '遺失日期' : '拾獲日期'}
-                </Text>
-                <Text style={{ color: theme.colors.text, fontWeight: '600', marginTop: 2 }}>
-                  {formatDateTime(item.date)}
-                </Text>
-              </View>
-            </View>
-
-            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
-              <View
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: 10,
-                  backgroundColor: theme.colors.accentSoft,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <Ionicons name="time" size={18} color={theme.colors.accent} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: theme.colors.muted, fontSize: 12 }}>發布時間</Text>
-                <Text style={{ color: theme.colors.text, fontWeight: '600', marginTop: 2 }}>
-                  {formatDateTime(item.createdAt)} ({formatRelativeTime(item.createdAt)})
-                </Text>
-              </View>
-            </View>
-          </View>
+        <AnimatedCard
+          title="聯絡與交接"
+          subtitle={
+            item.reporter?.displayName
+              ? `發布者：${item.reporter.displayName}`
+              : '發布者未提供顯示名稱。'
+          }
+        >
+          <Text style={{ color: theme.colors.muted, marginBottom: 12 }}>
+            請先聯絡發布者核對物品特徵，再約定於公共場所交接。刊登狀態由發布者更新。
+          </Text>
+          <Button text="聯絡發布者" onPress={contact} />
         </AnimatedCard>
-
-        <AnimatedCard title="物品描述" delay={150}>
-          <Text style={{ color: theme.colors.text, lineHeight: 22 }}>{item.description}</Text>
-
-          {item.characteristics && item.characteristics.length > 0 && (
-            <View style={{ marginTop: 14 }}>
-              <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 8 }}>
-                物品特徵
-              </Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                {item.characteristics.map((char, idx) => (
-                  <View
-                    key={idx}
-                    style={{
-                      paddingHorizontal: 12,
-                      paddingVertical: 6,
-                      borderRadius: 999,
-                      backgroundColor: theme.colors.surface2,
-                      borderWidth: 1,
-                      borderColor: theme.colors.border,
-                    }}
-                  >
-                    <Text style={{ color: theme.colors.text, fontSize: 13 }}>{char}</Text>
-                  </View>
-                ))}
-              </View>
-            </View>
-          )}
-        </AnimatedCard>
-
-        <AnimatedCard title="發布者資訊" delay={200}>
-          <Pressable
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              padding: 12,
-              borderRadius: theme.radius.md,
-              backgroundColor: theme.colors.surface2,
-              borderWidth: 1,
-              borderColor: theme.colors.border,
-              gap: 12,
-            }}
-          >
-            <View
-              style={{
-                width: 48,
-                height: 48,
-                borderRadius: 24,
-                backgroundColor: theme.colors.accentSoft,
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 18 }}>
-                {item.authorName?.[0] ?? '?'}
-              </Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: theme.colors.text, fontWeight: '700' }}>{item.authorName}</Text>
-              {item.authorDepartment && (
-                <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
-                  {item.authorDepartment}
-                </Text>
-              )}
-            </View>
-            {auth.user && item.contactInfo && (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <Ionicons name="chatbubble-ellipses" size={16} color={theme.colors.accent} />
-                <Text style={{ color: theme.colors.accent, fontSize: 13, fontWeight: '600' }}>
-                  聯繫
-                </Text>
-              </View>
-            )}
-          </Pressable>
-
-          {!auth.user && (
-            <View
-              style={{
-                marginTop: 12,
-                padding: 12,
-                borderRadius: theme.radius.md,
-                backgroundColor: `${theme.colors.accent}10`,
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 10,
-              }}
-            >
-              <Ionicons name="lock-closed" size={18} color={theme.colors.accent} />
-              <Text style={{ color: theme.colors.text, fontSize: 13, flex: 1 }}>
-                登入後才能查看聯絡資訊
-              </Text>
-            </View>
-          )}
-        </AnimatedCard>
-
-        {item.status === 'claimed' && item.claimedBy && (
-          <AnimatedCard title="認領資訊" delay={250}>
-            <View
-              style={{
-                padding: 14,
-                borderRadius: theme.radius.md,
-                backgroundColor: `${STATUS_INFO.claimed.color}15`,
-                borderWidth: 1,
-                borderColor: `${STATUS_INFO.claimed.color}30`,
-              }}
-            >
-              <View
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 }}
-              >
-                <Ionicons name="hand-left" size={20} color={STATUS_INFO.claimed.color} />
-                <Text style={{ color: STATUS_INFO.claimed.color, fontWeight: '700' }}>
-                  已有人認領
-                </Text>
-              </View>
-              <Text style={{ color: theme.colors.text }}>認領者：{item.claimedBy}</Text>
-              {item.claimedAt && (
-                <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>
-                  認領時間：{formatDateTime(item.claimedAt)}
-                </Text>
+        {isOwner && (
+          <AnimatedCard title="管理刊登">
+            <View style={{ gap: 10 }}>
+              <Button
+                text="編輯資訊"
+                disabled={busy}
+                onPress={() => {
+                  if (isCurrent())
+                    navigation?.navigate('LostFoundPost', { id: item.id, type: item.type });
+                }}
+              />
+              {!['resolved', 'returned', 'expired'].includes(item.status) && (
+                <Button text="標記為已結案" loading={busy} onPress={resolve} />
               )}
             </View>
           </AnimatedCard>
         )}
-
-        {item.status === 'returned' && (
-          <AnimatedCard title="歸還狀態" delay={250}>
-            <View
-              style={{
-                padding: 14,
-                borderRadius: theme.radius.md,
-                backgroundColor: `${theme.colors.success}15`,
-                borderWidth: 1,
-                borderColor: `${theme.colors.success}30`,
-                alignItems: 'center',
-              }}
-            >
-              <Ionicons name="checkmark-circle" size={48} color={theme.colors.success} />
-              <Text
-                style={{
-                  color: theme.colors.success,
-                  fontWeight: '700',
-                  fontSize: 16,
-                  marginTop: 8,
-                }}
-              >
-                物品已成功歸還！🎉
-              </Text>
-              <Text
-                style={{
-                  color: theme.colors.muted,
-                  fontSize: 13,
-                  marginTop: 4,
-                  textAlign: 'center',
-                }}
-              >
-                感謝所有幫助找回物品的好心人
-              </Text>
-            </View>
-          </AnimatedCard>
-        )}
-
-        <View style={{ gap: 12, marginTop: 8 }}>
-          {item.status === 'open' && !isOwner && (
-            <Button
-              text={item.type === 'lost' ? '我找到這個物品' : '這是我的物品'}
-              kind="primary"
-              onPress={handleClaim}
-            />
-          )}
-
-          {item.status === 'open' && <Button text="聯繫發布者" onPress={handleContact} />}
-
-          {item.status === 'claimed' && isOwner && (
-            <Button text="標記為已歸還" kind="primary" onPress={handleMarkReturned} />
-          )}
-
-          <View style={{ flexDirection: 'row', gap: 12 }}>
-            <View style={{ flex: 1 }}>
-              <Button text="分享" onPress={handleShare} />
-            </View>
-            {isOwner && (
-              <>
-                <View style={{ flex: 1 }}>
-                  <Button text="編輯" onPress={handleEdit} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Button text="刪除" onPress={handleDelete} />
-                </View>
-              </>
-            )}
-          </View>
-        </View>
-
-        <AnimatedCard title="提醒事項" subtitle="領取物品時請注意" delay={300}>
-          <View style={{ gap: 8 }}>
-            <ListItem
-              icon="shield-checkmark-outline"
-              title="驗證身份"
-              subtitle="領取前請確認物品確實屬於您"
-            />
-            <ListItem
-              icon="document-text-outline"
-              title="保留記錄"
-              subtitle="建議拍照或截圖保存交易記錄"
-            />
-            <ListItem
-              icon="people-outline"
-              title="公共場所"
-              subtitle="建議在校園公共區域進行交接"
-            />
-          </View>
-        </AnimatedCard>
+        <Button text="分享物品資訊" onPress={share} />
+        <Button text="重新整理" disabled={busy} onPress={refresh} />
       </ScrollView>
     </Screen>
   );

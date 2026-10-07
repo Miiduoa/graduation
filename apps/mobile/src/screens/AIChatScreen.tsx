@@ -4004,7 +4004,7 @@ export function AIChatScreen(props: any) {
         return {
           id: uid(),
           role: 'assistant',
-          content: `我是你的校園全能 AI 助理，可以幫你規劃並執行已串接的校園操作：\n\n${caps.join('\n')}\n\n餐廳已開通線上接單時，我會送到餐廳點餐 API；沒有正式 API 的項目，我會建立請假信或報修草稿，不會假裝已送出。\n試試說「幫我訂午餐」或「我想請假」。`,
+          content: `我是你的校園助理，可以幫你規劃並執行已串接的校園操作：\n\n${caps.join('\n')}\n\n餐廳已開通線上接單時，我會送到餐廳點餐 API；沒有正式 API 的項目，我會建立請假信或報修草稿，不會假裝已送出。\n試試說「幫我訂午餐」或「我想請假」。`,
           timestamp: new Date(),
           agentType: 'text',
           suggestions: ['幫我訂午餐', '我頭有點痛', '幫我查成績'],
@@ -7133,14 +7133,14 @@ export function AIChatScreen(props: any) {
         if (!emergencyContent) {
           if (/你好|嗨|哈囉|hello|hi|hey|早安|午安|晚安/.test(_userText)) {
             emergencyContent =
-              '你好！我是靜宜校園 AI 助理 🎓\n\n可以問我交通資訊、校園設施、課程問題等，我會盡力幫你解答！';
+              '你好！我是校園助理\n\n可以問我交通資訊、校園設施、課程問題等，我會盡力幫你解答！';
             emergencySuggestions = ['怎麼去台中車站', '圖書館開放時間', '今天有什麼課'];
           } else if (/謝謝|感謝|thx|thanks/.test(_userText)) {
             emergencyContent = '不客氣！有其他問題隨時問我 😊';
             emergencySuggestions = ['還有其他問題', '查課表', '查交通'];
           } else if (/你是誰|你叫什麼|自我介紹/.test(_userText)) {
             emergencyContent =
-              '我是靜宜大學校園 AI 助理！\n\n我可以幫你：\n- 🚌 查交通路線（怎麼去台中車站、高鐵等）\n- 📚 查課程和作業資訊\n- 🏫 校園設施位置與開放時間\n- 🍽️ 餐廳和用餐資訊\n- 📋 請假、選課等學務問題\n\n有什麼想問的，儘管說！';
+              '我是靜宜大學校園助理！\n\n我可以幫你：\n- 🚌 查交通路線（怎麼去台中車站、高鐵等）\n- 📚 查課程和作業資訊\n- 🏫 校園設施位置與開放時間\n- 🍽️ 餐廳和用餐資訊\n- 📋 請假、選課等學務問題\n\n有什麼想問的，儘管說！';
             emergencySuggestions = ['怎麼去台中車站', '圖書館在哪', '今天吃什麼'];
           }
         }

@@ -1,24 +1,37 @@
-"use client";
+'use client';
 
-import Link from "next/link";
-import { use, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
-import { onAuthStateChanged, type User } from "firebase/auth";
-import { defaultNotificationPreferences } from "@campus/shared/src";
-
-import { SiteShell } from "@/components/SiteShell";
-import { useToast } from "@/components/ui";
-import { resolveSchoolPageContext } from "@/lib/pageContext";
+import Link from 'next/link';
 import {
-  fetchNotificationPreferences,
-  fetchUserProfile,
+  use,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
+import { type User } from 'firebase/auth';
+import { doc, getDocFromServer } from 'firebase/firestore';
+import { useAuth } from '@/components/AuthGuard';
+import {
+  defaultNotificationPreferences,
+  normalizeNotificationPreferences,
+} from '@campus/shared/src';
+
+import { SiteShell } from '@/components/SiteShell';
+import { useToast } from '@/components/ui';
+import { resolveSchoolPageContext } from '@/lib/pageContext';
+import {
   getAuth,
+  getDb,
   isFirebaseConfigured,
   saveNotificationPreferences,
   signOut,
   type NotificationPreferences,
   type UserProfile,
   updateUserProfile,
-} from "@/lib/firebase";
+} from '@/lib/firebase';
 import {
   applyWebAppearancePreferences,
   defaultThemeColor,
@@ -28,17 +41,16 @@ import {
   type FontSizePreference,
   type StoredWebPreferences,
   type ThemePreference,
-} from "@/lib/webPreferences";
-import { resetDemoStore, seedDemoQueues } from "@/lib/demoStore";
+} from '@/lib/webPreferences';
 
-type Section = "general" | "notifications" | "appearance" | "privacy" | "account" | "demo";
+type Section = 'general' | 'notifications' | 'appearance' | 'privacy' | 'account';
 type NotificationToggleKey =
-  | "announcements"
-  | "events"
-  | "groups"
-  | "assignments"
-  | "grades"
-  | "messages";
+  | 'announcements'
+  | 'events'
+  | 'groups'
+  | 'assignments'
+  | 'grades'
+  | 'messages';
 
 type ProfileFormState = {
   displayName: string;
@@ -50,30 +62,31 @@ type ProfileFormState = {
 };
 
 const SECTIONS: { id: Section; label: string; icon: string }[] = [
-  { id: "general", label: "一般", icon: "⚙️" },
-  { id: "notifications", label: "通知", icon: "🔔" },
-  { id: "appearance", label: "外觀", icon: "🎨" },
-  { id: "privacy", label: "隱私", icon: "🔒" },
-  { id: "account", label: "帳號", icon: "👤" },
-  { id: "demo", label: "示範工具", icon: "🎬" },
+  { id: 'general', label: '一般', icon: '⚙️' },
+  { id: 'notifications', label: '通知', icon: '🔔' },
+  { id: 'appearance', label: '外觀', icon: '🎨' },
+  { id: 'privacy', label: '隱私', icon: '🔒' },
+  { id: 'account', label: '帳號', icon: '👤' },
 ];
 
 const THEME_COLORS = [
-  "#314D40",
-  "#007AFF",
-  "#386146",
-  "#8B631E",
-  "#FF6B35",
-  "#BF5AF2",
-  "#983F32",
-  "#32ADE6",
+  '#314D40',
+  '#007AFF',
+  '#386146',
+  '#8B631E',
+  '#FF6B35',
+  '#BF5AF2',
+  '#983F32',
+  '#32ADE6',
 ];
 
 function Toggle({
+  label,
   value,
   onChange,
   disabled,
 }: {
+  label: string;
   value: boolean;
   onChange: (v: boolean) => void;
   disabled?: boolean;
@@ -82,16 +95,21 @@ function Toggle({
     <button
       type="button"
       role="switch"
+      aria-label={label}
       aria-checked={value}
       aria-disabled={disabled}
       disabled={disabled}
       onClick={() => onChange(!value)}
-      className={`toggle${value ? " on" : ""}`}
-      style={{ flexShrink: 0, opacity: disabled ? 0.5 : 1, cursor: disabled ? "not-allowed" : "pointer" }}
+      className={`toggle${value ? ' on' : ''}`}
+      style={{
+        flexShrink: 0,
+        opacity: disabled ? 0.5 : 1,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+      }}
     >
       <span
         className="toggleThumb"
-        style={{ "--toggle-left": value ? "26px" : "3px" } as CSSProperties}
+        style={{ '--toggle-left': value ? '26px' : '3px' } as CSSProperties}
       />
     </button>
   );
@@ -118,12 +136,12 @@ function SettingRow({
     <div
       className="insetGroupRow"
       onClick={onClick}
-      style={{ cursor: onClick ? "pointer" : "default" }}
+      style={{ cursor: onClick ? 'pointer' : 'default' }}
     >
       <div
         className="insetGroupRowIcon"
         style={{
-          background: iconBg ?? "var(--accent-soft)",
+          background: iconBg ?? 'var(--accent-soft)',
           fontSize: 17,
           width: 34,
           height: 34,
@@ -136,7 +154,7 @@ function SettingRow({
       <div className="insetGroupRowContent">
         <div
           className="insetGroupRowTitle"
-          style={{ color: danger ? "var(--danger)" : "var(--text)" }}
+          style={{ color: danger ? 'var(--danger)' : 'var(--text)' }}
         >
           {title}
         </div>
@@ -149,22 +167,22 @@ function SettingRow({
 
 function emptyProfileForm(user: User | null, profile?: UserProfile | null): ProfileFormState {
   return {
-    displayName: profile?.displayName ?? user?.displayName ?? "",
-    studentId: profile?.studentId ?? "",
-    department: profile?.department ?? "",
-    grade: profile?.grade ?? "",
-    phone: profile?.phone ?? "",
-    bio: profile?.bio ?? "",
+    displayName: profile?.displayName ?? user?.displayName ?? '',
+    studentId: profile?.studentId ?? '',
+    department: profile?.department ?? '',
+    grade: profile?.grade ?? '',
+    phone: profile?.phone ?? '',
+    bio: profile?.bio ?? '',
   };
 }
 
 function profileDisplayName(user: User | null, form: ProfileFormState): string {
-  const fallback = user?.displayName ?? user?.email?.split("@")[0] ?? "未登入使用者";
+  const fallback = user?.displayName ?? user?.email?.split('@')[0] ?? '未登入使用者';
   return form.displayName.trim() || fallback;
 }
 
 function saveLocalPreferences(prefs: StoredWebPreferences) {
-  if (typeof window === "undefined") {
+  if (typeof window === 'undefined') {
     return;
   }
 
@@ -176,9 +194,49 @@ export default function SettingsPage(props: {
 }) {
   const searchParams = props.searchParams ? use(props.searchParams) : undefined;
   const { schoolName, schoolSearch } = resolveSchoolPageContext(searchParams);
+  const { user, loading } = useAuth();
+  if (loading)
+    return (
+      <SiteShell title="設定" schoolName={schoolName}>
+        <p role="status">確認帳號…</p>
+      </SiteShell>
+    );
+  return (
+    <SettingsContent
+      key={user?.uid ?? 'guest'}
+      user={user}
+      schoolName={schoolName}
+      schoolSearch={schoolSearch}
+    />
+  );
+}
+
+function SettingsContent({
+  user,
+  schoolName,
+  schoolSearch,
+}: {
+  user: User | null;
+  schoolName: string;
+  schoolSearch: string;
+}) {
+  const mounted = useRef(true);
+  const profileLock = useRef(false);
+  const notificationLock = useRef(false);
+  const [profileLoadError, setProfileLoadError] = useState('');
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const isCurrent = useCallback(
+    () => mounted.current && !!user && getAuth()?.currentUser?.uid === user.uid,
+    [user],
+  );
   const { success, error, info } = useToast();
-  const [activeSection, setActiveSection] = useState<Section>("general");
-  const [user, setUser] = useState<User | null>(null);
+  const [activeSection, setActiveSection] = useState<Section>('general');
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [savingProfile, setSavingProfile] = useState(false);
   const [savingNotifications, setSavingNotifications] = useState(false);
@@ -187,12 +245,12 @@ export default function SettingsPage(props: {
   const [appearancePrefs, setAppearancePrefs] = useState(defaultWebPreferences.appearance);
   const [privacyPrefs, setPrivacyPrefs] = useState(defaultWebPreferences.privacy);
   const [notificationPrefs, setNotificationPrefs] = useState<NotificationPreferences>(
-    defaultNotificationPreferences
+    defaultNotificationPreferences,
   );
   const [localPrefsReady, setLocalPrefsReady] = useState(false);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (typeof window === 'undefined') {
       return;
     }
 
@@ -205,7 +263,7 @@ export default function SettingsPage(props: {
   }, []);
 
   useEffect(() => {
-    if (typeof document === "undefined") {
+    if (typeof document === 'undefined') {
       return;
     }
 
@@ -225,20 +283,6 @@ export default function SettingsPage(props: {
   }, [appearancePrefs, generalPrefs, localPrefsReady, privacyPrefs]);
 
   useEffect(() => {
-    const auth = getAuth();
-    if (!auth) {
-      setLoadingProfile(false);
-      return;
-    }
-
-    const unsubscribe = onAuthStateChanged(auth, (nextUser) => {
-      setUser(nextUser);
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  useEffect(() => {
     let active = true;
 
     async function load() {
@@ -254,27 +298,29 @@ export default function SettingsPage(props: {
       }
 
       setLoadingProfile(true);
+      setProfileLoadError('');
 
       try {
-        const [profile, prefs] = await Promise.all([
-          isFirebaseConfigured() ? fetchUserProfile(user.uid) : Promise.resolve(null),
-          isFirebaseConfigured()
-            ? fetchNotificationPreferences(user.uid)
-            : Promise.resolve(defaultNotificationPreferences),
+        if (!isFirebaseConfigured()) throw new Error('Account service is unavailable');
+        const [profileDoc, prefsDoc] = await Promise.all([
+          getDocFromServer(doc(getDb(), 'users', user.uid)),
+          getDocFromServer(doc(getDb(), 'users', user.uid, 'settings', 'notifications')),
         ]);
-
-        if (!active) {
-          return;
-        }
-
-        setProfileForm(emptyProfileForm(user, profile));
-        setNotificationPrefs(prefs);
+        if (!active || !isCurrent()) return;
+        if (!profileDoc.exists()) throw new Error('Account profile is missing');
+        setProfileForm(emptyProfileForm(user, profileDoc.data() as UserProfile));
+        setNotificationPrefs(
+          normalizeNotificationPreferences(
+            prefsDoc.exists() ? prefsDoc.data() : defaultNotificationPreferences,
+          ),
+        );
       } catch (loadError) {
         if (!active) {
           return;
         }
 
-        console.error("Failed to load settings data:", loadError);
+        console.error('Failed to load settings data:', loadError);
+        setProfileLoadError('暫時無法讀取帳號設定。重新讀取成功後才能儲存變更。');
         setProfileForm(emptyProfileForm(user));
         setNotificationPrefs(defaultNotificationPreferences);
       } finally {
@@ -289,10 +335,14 @@ export default function SettingsPage(props: {
     return () => {
       active = false;
     };
-  }, [user]);
+  }, [user, loadAttempt, isCurrent]);
 
-  const currentDisplayName = useMemo(() => profileDisplayName(user, profileForm), [profileForm, user]);
-  const cloudEnabled = Boolean(user) && isFirebaseConfigured();
+  const currentDisplayName = useMemo(
+    () => profileDisplayName(user, profileForm),
+    [profileForm, user],
+  );
+  const cloudEnabled =
+    Boolean(user) && isFirebaseConfigured() && !loadingProfile && !profileLoadError;
 
   const updateProfileField = (field: keyof ProfileFormState, value: string) => {
     setProfileForm((prev) => ({ ...prev, [field]: value }));
@@ -300,91 +350,128 @@ export default function SettingsPage(props: {
 
   const updateAppearance = <K extends keyof typeof appearancePrefs>(
     key: K,
-    value: (typeof appearancePrefs)[K]
+    value: (typeof appearancePrefs)[K],
   ) => {
     setAppearancePrefs((prev) => ({ ...prev, [key]: value }));
   };
 
   const handleSaveNotifications = async () => {
     if (!user) {
-      info("請先登入後再儲存通知設定");
+      info('請先登入後再儲存通知設定');
       return;
     }
 
     if (!isFirebaseConfigured()) {
-      info("目前為本機預覽模式，通知設定尚未同步到 Firebase");
+      info('目前無法連線帳號服務，通知設定尚未儲存');
       return;
     }
 
+    if (!isCurrent() || loadingProfile || profileLoadError || notificationLock.current) return;
+    notificationLock.current = true;
+    const expected = notificationPrefs;
     setSavingNotifications(true);
 
     try {
-      await saveNotificationPreferences(user.uid, notificationPrefs);
-      success("通知設定已同步");
+      await saveNotificationPreferences(user.uid, expected);
+      if (!isCurrent()) return;
+      const saved = await getDocFromServer(
+        doc(getDb(), 'users', user.uid, 'settings', 'notifications'),
+      );
+      if (!isCurrent()) return;
+      const actual = saved.exists() ? normalizeNotificationPreferences(saved.data()) : null;
+      if (
+        !actual ||
+        JSON.stringify(actual) !== JSON.stringify(normalizeNotificationPreferences(expected))
+      )
+        throw new Error('Notification settings were not confirmed');
+      success('通知設定已同步');
     } catch (saveError) {
-      console.error("Failed to save notification settings:", saveError);
-      error("通知設定同步失敗", "請稍後再試一次");
+      console.error('Failed to save notification settings:', saveError);
+      if (isCurrent()) {
+        setProfileLoadError('通知設定的儲存結果尚未確認。請重新讀取後檢查。');
+        error('通知設定尚未確認', '請重新讀取後檢查，不會自動重送');
+      }
     } finally {
-      setSavingNotifications(false);
+      notificationLock.current = false;
+      if (isCurrent()) setSavingNotifications(false);
     }
   };
 
   const handleSaveProfile = async () => {
     if (!user) {
-      info("請先登入後再儲存個人資料");
+      info('請先登入後再儲存個人資料');
       return;
     }
 
     if (!isFirebaseConfigured()) {
-      info("目前為本機預覽模式，無法寫入雲端個人資料");
+      info('目前無法連線帳號服務，個人資料尚未儲存');
       return;
     }
 
+    if (!isCurrent() || loadingProfile || profileLoadError || profileLock.current) return;
+    profileLock.current = true;
+    const expected = Object.fromEntries(
+      Object.entries(profileForm).map(([key, value]) => [key, value.trim()]),
+    ) as ProfileFormState;
     setSavingProfile(true);
 
     try {
-      const result = await updateUserProfile(user.uid, {
-        displayName: profileForm.displayName.trim() || undefined,
-        studentId: profileForm.studentId.trim() || undefined,
-        department: profileForm.department.trim() || undefined,
-        grade: profileForm.grade.trim() || undefined,
-        phone: profileForm.phone.trim() || undefined,
-        bio: profileForm.bio.trim() || undefined,
-      });
+      const result = await updateUserProfile(user.uid, expected);
+      if (!isCurrent()) return;
 
       if (!result.success) {
-        throw new Error(result.error ?? "Unknown profile update error");
+        throw new Error(result.error ?? 'Unknown profile update error');
       }
 
-      success("個人資料已更新");
+      const saved = await getDocFromServer(doc(getDb(), 'users', user.uid));
+      if (!isCurrent()) return;
+      if (
+        !saved.exists() ||
+        Object.entries(expected).some(([key, value]) => saved.data()[key] !== value)
+      )
+        throw new Error('Profile changes were not confirmed');
+      setProfileForm(emptyProfileForm(user, saved.data() as UserProfile));
+      success('個人資料已更新');
     } catch (saveError) {
-      console.error("Failed to save profile:", saveError);
-      error("個人資料更新失敗", "請確認欄位內容後再試一次");
+      console.error('Failed to save profile:', saveError);
+      if (isCurrent()) {
+        setProfileLoadError('個人資料的儲存結果尚未確認。請重新讀取後檢查。');
+        error('個人資料尚未確認', '請重新讀取後檢查，不會自動重送');
+      }
     } finally {
-      setSavingProfile(false);
+      profileLock.current = false;
+      if (isCurrent()) setSavingProfile(false);
     }
   };
 
   const handleSignOut = async () => {
     try {
       await signOut();
-      success("已登出帳號");
+      success('已登出帳號');
     } catch (signOutError) {
-      console.error("Failed to sign out:", signOutError);
-      error("登出失敗", "請稍後再試一次");
+      console.error('Failed to sign out:', signOutError);
+      error('登出失敗', '請稍後再試一次');
     }
   };
 
   function renderGeneral() {
     return (
       <div className="pageStack">
-        <div className="card" style={{ display: "grid", gap: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div className="card" style={{ display: 'grid', gap: 12 }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              flexWrap: 'wrap',
+            }}
+          >
             <div>
               <div className="sectionTitle">裝置偏好</div>
-              <div className="sectionText">一般、外觀與隱私偏好會自動儲存在目前這台裝置。</div>
+              <div className="sectionText">外觀設定會自動儲存在目前這台裝置。</div>
             </div>
-            <span className="pill subtle">{localPrefsReady ? "已啟用自動儲存" : "載入中…"}</span>
+            <span className="pill subtle">{localPrefsReady ? '已啟用自動儲存' : '載入中…'}</span>
           </div>
         </div>
 
@@ -395,49 +482,18 @@ export default function SettingsPage(props: {
               icon="🏫"
               iconBg="#E8F4FD"
               title="目前校園"
-              subtitle={schoolName || "靜宜大學"}
-              right={<span className="pill subtle" style={{ fontSize: 11 }}>PU</span>}
-            />
-            <SettingRow
-              icon="🔄"
-              iconBg="#E8FFF2"
-              title="自動同步"
-              subtitle={generalPrefs.autoSync ? "啟用背景自動更新" : "僅在手動整理時更新"}
+              subtitle={schoolName || '靜宜大學'}
               right={
-                <Toggle
-                  value={generalPrefs.autoSync}
-                  onChange={(value) => setGeneralPrefs((prev) => ({ ...prev, autoSync: value }))}
-                />
+                <span className="pill subtle" style={{ fontSize: 11 }}>
+                  PU
+                </span>
               }
             />
             <SettingRow
               icon="🌐"
-              iconBg="#FFF3E8"
-              title="語言"
-              subtitle="目前僅提供繁中完整文案"
-              right={
-                <div className="segmentedGroup" style={{ padding: 3, gap: 3 }}>
-                  {[
-                    { value: "zh-TW", label: "繁中" },
-                    { value: "en-US", label: "EN" },
-                  ].map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      className={generalPrefs.language === option.value ? "active" : ""}
-                      onClick={() =>
-                        setGeneralPrefs((prev) => ({
-                          ...prev,
-                          language: option.value as "zh-TW" | "en-US",
-                        }))
-                      }
-                      style={{ padding: "4px 10px", fontSize: 12 }}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-              }
+              title="介面語言"
+              subtitle="繁體中文"
+              right={<span className="pill subtle">目前提供</span>}
             />
           </div>
         </div>
@@ -446,10 +502,20 @@ export default function SettingsPage(props: {
           <div className="insetGroupHeader">法務與支援</div>
           <div className="insetGroup">
             <Link href={`/terms${schoolSearch}`}>
-              <SettingRow icon="📄" iconBg="#F3F0FF" title="服務條款" subtitle="查看目前 Web 版條款說明" />
+              <SettingRow
+                icon="📄"
+                iconBg="#F3F0FF"
+                title="服務條款"
+                subtitle="查看目前 Web 版條款說明"
+              />
             </Link>
             <Link href={`/privacy${schoolSearch}`}>
-              <SettingRow icon="🔐" iconBg="#E8FFF2" title="隱私政策" subtitle="檢查資料蒐集與使用方式" />
+              <SettingRow
+                icon="🔐"
+                iconBg="#E8FFF2"
+                title="隱私政策"
+                subtitle="檢查資料蒐集與使用方式"
+              />
             </Link>
           </div>
         </div>
@@ -465,22 +531,58 @@ export default function SettingsPage(props: {
       title: string;
       subtitle?: string;
     }> = [
-      { key: "announcements", icon: "📢", iconBg: "#FFF3E8", title: "公告", subtitle: "校方公告與課務更新" },
-      { key: "events", icon: "🎉", iconBg: "var(--success-soft)", title: "活動", subtitle: "校園活動與社團行程" },
-      { key: "groups", icon: "💬", iconBg: "var(--info-soft)", title: "群組", subtitle: "課程與社群互動通知" },
-      { key: "assignments", icon: "📝", iconBg: "var(--warning-soft)", title: "作業", subtitle: "截止提醒與繳交更新" },
-      { key: "grades", icon: "📊", iconBg: "var(--danger-soft)", title: "成績", subtitle: "分數公布與成績異動" },
-      { key: "messages", icon: "📨", iconBg: "#F3F0FF", title: "訊息", subtitle: "私訊與服務通知" },
+      {
+        key: 'announcements',
+        icon: '📢',
+        iconBg: '#FFF3E8',
+        title: '公告',
+        subtitle: '校方公告與課務更新',
+      },
+      {
+        key: 'events',
+        icon: '🎉',
+        iconBg: 'var(--success-soft)',
+        title: '活動',
+        subtitle: '校園活動與社團行程',
+      },
+      {
+        key: 'groups',
+        icon: '💬',
+        iconBg: 'var(--info-soft)',
+        title: '群組',
+        subtitle: '課程與社群互動通知',
+      },
+      {
+        key: 'assignments',
+        icon: '📝',
+        iconBg: 'var(--warning-soft)',
+        title: '作業',
+        subtitle: '截止提醒與繳交更新',
+      },
+      {
+        key: 'grades',
+        icon: '📊',
+        iconBg: 'var(--danger-soft)',
+        title: '成績',
+        subtitle: '分數公布與成績異動',
+      },
+      { key: 'messages', icon: '📨', iconBg: '#F3F0FF', title: '訊息', subtitle: '私訊與服務通知' },
     ];
 
     return (
       <div className="pageStack">
         {!user && (
-          <div className="card" style={{ display: "grid", gap: 10, background: "var(--warning-soft)", borderColor: "var(--warning)" }}>
+          <div
+            className="card"
+            style={{
+              display: 'grid',
+              gap: 10,
+              background: 'var(--warning-soft)',
+              borderColor: 'var(--warning)',
+            }}
+          >
             <div className="sectionTitle">通知同步需要登入</div>
-            <div className="sectionText">
-              登入後即可把通知偏好同步到 <code>users/{'{'}uid{'}'}/settings/notifications</code>。
-            </div>
+            <div className="sectionText">登入後即可把通知偏好儲存到你的帳號。</div>
             <div>
               <Link href={`/login${schoolSearch}`} className="btn primary">
                 前往登入
@@ -490,9 +592,17 @@ export default function SettingsPage(props: {
         )}
 
         {user && !isFirebaseConfigured() && (
-          <div className="card" style={{ display: "grid", gap: 10, background: "var(--warning-soft)", borderColor: "var(--warning)" }}>
-            <div className="sectionTitle">目前是本機預覽模式</div>
-            <div className="sectionText">通知欄位已可編輯，但此環境尚未連上 Firebase，因此不會寫入雲端。</div>
+          <div
+            className="card"
+            style={{
+              display: 'grid',
+              gap: 10,
+              background: 'var(--warning-soft)',
+              borderColor: 'var(--warning)',
+            }}
+          >
+            <div className="sectionTitle">目前無法連線帳號服務</div>
+            <div className="sectionText">連線恢復後才能讀取與儲存通知設定。</div>
           </div>
         )}
 
@@ -501,11 +611,13 @@ export default function SettingsPage(props: {
           <div className="insetGroup">
             <SettingRow
               icon="🔔"
-              iconBg={notificationPrefs.enabled ? "rgba(37,99,235,0.12)" : "var(--panel)"}
+              iconBg={notificationPrefs.enabled ? 'rgba(37,99,235,0.12)' : 'var(--panel)'}
               title="推播通知"
-              subtitle={notificationPrefs.enabled ? "接收校園系統通知" : "目前已停用所有通知"}
+              subtitle={notificationPrefs.enabled ? '接收校園系統通知' : '目前已停用所有通知'}
               right={
                 <Toggle
+                  label="推播通知"
+                  disabled={!cloudEnabled || savingNotifications}
                   value={notificationPrefs.enabled}
                   onChange={(value) =>
                     setNotificationPrefs((prev) => ({
@@ -533,6 +645,8 @@ export default function SettingsPage(props: {
                     subtitle={row.subtitle}
                     right={
                       <Toggle
+                        label={row.title}
+                        disabled={!cloudEnabled || savingNotifications}
                         value={notificationPrefs[row.key] as boolean}
                         onChange={(value) =>
                           setNotificationPrefs((prev) => ({
@@ -547,13 +661,23 @@ export default function SettingsPage(props: {
               </div>
             </div>
 
-            <div className="card" style={{ display: "grid", gap: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+            <div className="card" style={{ display: 'grid', gap: 16 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                }}
+              >
                 <div>
                   <div className="sectionTitle">勿擾時段</div>
                   <div className="sectionText">在指定時段內靜音通知，但仍保留資料同步。</div>
                 </div>
                 <Toggle
+                  label="勿擾時段"
+                  disabled={!cloudEnabled || savingNotifications}
                   value={notificationPrefs.quietHoursEnabled}
                   onChange={(value) =>
                     setNotificationPrefs((prev) => ({
@@ -565,13 +689,15 @@ export default function SettingsPage(props: {
               </div>
 
               <div className="grid-2">
-                <label style={{ display: "grid", gap: 8 }}>
-                  <span style={{ fontSize: 13, color: "var(--muted)" }}>開始時間</span>
+                <label style={{ display: 'grid', gap: 8 }}>
+                  <span style={{ fontSize: 13, color: 'var(--muted)' }}>開始時間</span>
                   <input
                     className="input"
                     type="time"
                     value={notificationPrefs.quietHoursStart}
-                    disabled={!notificationPrefs.quietHoursEnabled}
+                    disabled={
+                      !cloudEnabled || savingNotifications || !notificationPrefs.quietHoursEnabled
+                    }
                     onChange={(event) =>
                       setNotificationPrefs((prev) => ({
                         ...prev,
@@ -580,13 +706,15 @@ export default function SettingsPage(props: {
                     }
                   />
                 </label>
-                <label style={{ display: "grid", gap: 8 }}>
-                  <span style={{ fontSize: 13, color: "var(--muted)" }}>結束時間</span>
+                <label style={{ display: 'grid', gap: 8 }}>
+                  <span style={{ fontSize: 13, color: 'var(--muted)' }}>結束時間</span>
                   <input
                     className="input"
                     type="time"
                     value={notificationPrefs.quietHoursEnd}
-                    disabled={!notificationPrefs.quietHoursEnabled}
+                    disabled={
+                      !cloudEnabled || savingNotifications || !notificationPrefs.quietHoursEnabled
+                    }
                     onChange={(event) =>
                       setNotificationPrefs((prev) => ({
                         ...prev,
@@ -600,14 +728,14 @@ export default function SettingsPage(props: {
           </>
         ) : null}
 
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <button
             type="button"
             className="btn primary"
-            disabled={!user || savingNotifications}
+            disabled={!cloudEnabled || savingNotifications}
             onClick={handleSaveNotifications}
           >
-            {savingNotifications ? "同步中..." : "儲存通知設定"}
+            {savingNotifications ? '同步中...' : '儲存通知設定'}
           </button>
         </div>
       </div>
@@ -617,8 +745,16 @@ export default function SettingsPage(props: {
   function renderAppearance() {
     return (
       <div className="pageStack">
-        <div className="card" style={{ display: "grid", gap: 12 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <div className="card" style={{ display: 'grid', gap: 12 }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              gap: 12,
+              alignItems: 'center',
+              flexWrap: 'wrap',
+            }}
+          >
             <div>
               <div className="sectionTitle">即時套用</div>
               <div className="sectionText">外觀設定會立即反映在這個瀏覽器，並持久保存在本機。</div>
@@ -638,34 +774,36 @@ export default function SettingsPage(props: {
           <div className="insetGroup">
             <SettingRow
               icon={
-                appearancePrefs.theme === "system"
-                  ? "🖥️"
-                  : appearancePrefs.theme === "dark"
-                    ? "🌙"
-                    : "☀️"
+                appearancePrefs.theme === 'system'
+                  ? '🖥️'
+                  : appearancePrefs.theme === 'dark'
+                    ? '🌙'
+                    : '☀️'
               }
-              iconBg={appearancePrefs.theme === "dark" ? "#2C2C2E" : "#FFF8E8"}
+              iconBg={appearancePrefs.theme === 'dark' ? '#2C2C2E' : '#FFF8E8'}
               title="色彩模式"
               subtitle={
-                appearancePrefs.theme === "system"
-                  ? "跟隨系統"
-                  : appearancePrefs.theme === "dark"
-                    ? "固定深色"
-                    : "固定淺色"
+                appearancePrefs.theme === 'system'
+                  ? '跟隨系統'
+                  : appearancePrefs.theme === 'dark'
+                    ? '固定深色'
+                    : '固定淺色'
               }
               right={
                 <div className="segmentedGroup" style={{ padding: 3, gap: 3 }}>
-                  {([
-                    { value: "system", label: "系統" },
-                    { value: "light", label: "淺色" },
-                    { value: "dark", label: "深色" },
-                  ] as Array<{ value: ThemePreference; label: string }>).map((option) => (
+                  {(
+                    [
+                      { value: 'system', label: '系統' },
+                      { value: 'light', label: '淺色' },
+                      { value: 'dark', label: '深色' },
+                    ] as Array<{ value: ThemePreference; label: string }>
+                  ).map((option) => (
                     <button
                       key={option.value}
                       type="button"
-                      className={appearancePrefs.theme === option.value ? "active" : ""}
-                      onClick={() => updateAppearance("theme", option.value)}
-                      style={{ padding: "4px 10px", fontSize: 12 }}
+                      className={appearancePrefs.theme === option.value ? 'active' : ''}
+                      onClick={() => updateAppearance('theme', option.value)}
+                      style={{ padding: '4px 10px', fontSize: 12 }}
                     >
                       {option.label}
                     </button>
@@ -680,17 +818,19 @@ export default function SettingsPage(props: {
               subtitle="同步調整主要標題與內文尺寸"
               right={
                 <div className="segmentedGroup" style={{ padding: 3, gap: 3 }}>
-                  {([
-                    { value: "small", label: "小" },
-                    { value: "medium", label: "中" },
-                    { value: "large", label: "大" },
-                  ] as Array<{ value: FontSizePreference; label: string }>).map((option) => (
+                  {(
+                    [
+                      { value: 'small', label: '小' },
+                      { value: 'medium', label: '中' },
+                      { value: 'large', label: '大' },
+                    ] as Array<{ value: FontSizePreference; label: string }>
+                  ).map((option) => (
                     <button
                       key={option.value}
                       type="button"
-                      className={appearancePrefs.fontSize === option.value ? "active" : ""}
-                      onClick={() => updateAppearance("fontSize", option.value)}
-                      style={{ padding: "4px 10px", fontSize: 12 }}
+                      className={appearancePrefs.fontSize === option.value ? 'active' : ''}
+                      onClick={() => updateAppearance('fontSize', option.value)}
+                      style={{ padding: '4px 10px', fontSize: 12 }}
                     >
                       {option.label}
                     </button>
@@ -705,8 +845,9 @@ export default function SettingsPage(props: {
               subtitle="縮小頁面間距與卡片留白"
               right={
                 <Toggle
+                  label="緊湊模式"
                   value={appearancePrefs.compactMode}
-                  onChange={(value) => updateAppearance("compactMode", value)}
+                  onChange={(value) => updateAppearance('compactMode', value)}
                 />
               }
             />
@@ -714,11 +855,12 @@ export default function SettingsPage(props: {
               icon="✨"
               iconBg="#FFF0F5"
               title="動畫效果"
-              subtitle="關閉後會套用 reduced motion"
+              subtitle="減少介面移動與轉場"
               right={
                 <Toggle
+                  label="動畫效果"
                   value={appearancePrefs.animations}
-                  onChange={(value) => updateAppearance("animations", value)}
+                  onChange={(value) => updateAppearance('animations', value)}
                 />
               }
             />
@@ -727,47 +869,63 @@ export default function SettingsPage(props: {
 
         <div>
           <div className="insetGroupHeader">品牌主色</div>
-          <div className="card" style={{ padding: "16px 18px" }}>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <div className="card" style={{ padding: '16px 18px' }}>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               {THEME_COLORS.map((color) => (
                 <button
                   key={color}
                   type="button"
-                  onClick={() => updateAppearance("themeColor", color)}
+                  onClick={() => updateAppearance('themeColor', color)}
                   style={{
                     width: 36,
                     height: 36,
-                    borderRadius: "50%",
+                    borderRadius: '50%',
                     background: color,
                     border:
                       appearancePrefs.themeColor === color
-                        ? "3px solid var(--text)"
-                        : "3px solid transparent",
+                        ? '3px solid var(--text)'
+                        : '3px solid transparent',
                     boxShadow:
-                      appearancePrefs.themeColor === color ? "var(--shadow-md)" : "var(--shadow-sm)",
-                    cursor: "pointer",
-                    transition: "box-shadow 0.2s ease, transform 0.15s ease",
-                    transform:
-                      appearancePrefs.themeColor === color ? "scale(1.15)" : "scale(1)",
+                      appearancePrefs.themeColor === color
+                        ? 'var(--shadow-md)'
+                        : 'var(--shadow-sm)',
+                    cursor: 'pointer',
+                    transition: 'box-shadow 0.2s ease, transform 0.15s ease',
+                    transform: appearancePrefs.themeColor === color ? 'scale(1.15)' : 'scale(1)',
                   }}
                   title={color}
                 />
               ))}
             </div>
             <div className="grid-2" style={{ marginTop: 16 }}>
-              <label style={{ display: "grid", gap: 8 }}>
-                <span style={{ fontSize: 13, color: "var(--muted)" }}>自訂主色</span>
+              <label style={{ display: 'grid', gap: 8 }}>
+                <span style={{ fontSize: 13, color: 'var(--muted)' }}>自訂主色</span>
                 <input
                   className="input"
                   value={appearancePrefs.themeColor}
-                  onChange={(event) => updateAppearance("themeColor", event.target.value.toUpperCase() || defaultThemeColor)}
+                  onChange={(event) =>
+                    updateAppearance(
+                      'themeColor',
+                      event.target.value.toUpperCase() || defaultThemeColor,
+                    )
+                  }
                   placeholder={defaultThemeColor}
                 />
               </label>
-              <div className="card" style={{ padding: 16, background: "linear-gradient(135deg, var(--brand) 0%, var(--brand2) 100%)", border: "none", color: "#fff" }}>
+              <div
+                className="card"
+                style={{
+                  padding: 16,
+                  background: 'linear-gradient(135deg, var(--brand) 0%, var(--brand2) 100%)',
+                  border: 'none',
+                  color: '#fff',
+                }}
+              >
                 <div style={{ fontSize: 12, opacity: 0.8 }}>即時預覽</div>
                 <div style={{ fontSize: 22, fontWeight: 700, marginTop: 8 }}>Campus One</div>
-                <div style={{ fontSize: 13, opacity: 0.86, marginTop: 4 }}>主色與字級已立即套用</div>
+                <div style={{ fontSize: 13, opacity: 0.86, marginTop: 4 }}>
+                  主色與字級已立即套用
+                </div>
               </div>
             </div>
           </div>
@@ -778,60 +936,15 @@ export default function SettingsPage(props: {
 
   function renderPrivacy() {
     return (
-      <div className="pageStack">
-        <div className="card" style={{ display: "grid", gap: 12 }}>
-          <div className="sectionTitle">本機隱私偏好</div>
-          <div className="sectionText">這些設定目前只影響 Web 體驗，不會覆寫後端權限模型。</div>
-        </div>
-
-        <div>
-          <div className="insetGroupHeader">個人頁可見性</div>
-          <div className="insetGroup">
-            <SettingRow
-              icon="👤"
-              iconBg="var(--accent-soft)"
-              title="公開個人頁面"
-              subtitle="允許其他同學在前端看見你的公開資訊"
-              right={
-                <Toggle
-                  value={privacyPrefs.showProfile}
-                  onChange={(value) =>
-                    setPrivacyPrefs((prev) => ({ ...prev, showProfile: value }))
-                  }
-                />
-              }
-            />
-            <SettingRow
-              icon="📋"
-              iconBg="var(--info-soft)"
-              title="顯示近期活動"
-              subtitle="在個人頁呈現近期課程與學習動態"
-              right={
-                <Toggle
-                  value={privacyPrefs.showActivity}
-                  onChange={(value) =>
-                    setPrivacyPrefs((prev) => ({ ...prev, showActivity: value }))
-                  }
-                />
-              }
-            />
-            <SettingRow
-              icon="📈"
-              iconBg="var(--success-soft)"
-              title="使用分析"
-              subtitle="允許本機記錄操作偏好，用於頁面微調"
-              right={
-                <Toggle
-                  value={privacyPrefs.analytics}
-                  onChange={(value) =>
-                    setPrivacyPrefs((prev) => ({ ...prev, analytics: value }))
-                  }
-                />
-              }
-            />
-          </div>
-        </div>
-      </div>
+      <section className="card" style={{ padding: 24 }}>
+        <h2>隱私與個人資料</h2>
+        <p className="sectionText">
+          目前尚未提供個人頁公開範圍的調整。課程與訊息的存取權限依帳號及成員資格決定。
+        </p>
+        <Link className="btn" href={`/privacy${schoolSearch}`}>
+          查看隱私政策
+        </Link>
+      </section>
     );
   }
 
@@ -841,44 +954,44 @@ export default function SettingsPage(props: {
         <div
           className="card"
           style={{
-            display: "flex",
-            alignItems: "center",
+            display: 'flex',
+            alignItems: 'center',
             gap: 16,
-            padding: "18px 20px",
+            padding: '18px 20px',
           }}
         >
           <div
             style={{
               width: 56,
               height: 56,
-              borderRadius: "50%",
-              background: "linear-gradient(135deg, var(--brand) 0%, var(--brand2) 100%)",
-              color: "#fff",
-              display: "grid",
-              placeItems: "center",
+              borderRadius: '50%',
+              background: 'linear-gradient(135deg, var(--brand) 0%, var(--brand2) 100%)',
+              color: '#fff',
+              display: 'grid',
+              placeItems: 'center',
               fontSize: 24,
               fontWeight: 700,
               flexShrink: 0,
-              boxShadow: "var(--shadow-sm)",
+              boxShadow: 'var(--shadow-sm)',
             }}
           >
             {currentDisplayName.slice(0, 1)}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 16, fontWeight: 700 }}>{currentDisplayName}</div>
-            <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 2 }}>
-              {user?.email ?? "尚未登入"} · {schoolName || "靜宜大學"}
+            <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 2 }}>
+              {user?.email ?? '尚未登入'} · {schoolName || '靜宜大學'}
             </div>
           </div>
-          <span className={`pill ${cloudEnabled ? "success" : "subtle"}`} style={{ fontSize: 11 }}>
-            {cloudEnabled ? "雲端同步可用" : "本機預覽"}
+          <span className={`pill ${cloudEnabled ? 'success' : 'subtle'}`} style={{ fontSize: 11 }}>
+            {cloudEnabled ? '帳號資料已讀取' : user ? '等待確認帳號資料' : '尚未登入'}
           </span>
         </div>
 
         {!user ? (
-          <div className="card" style={{ display: "grid", gap: 10 }}>
+          <div className="card" style={{ display: 'grid', gap: 10 }}>
             <div className="sectionTitle">登入後可編輯個人資料</div>
-            <div className="sectionText">目前仍可調整裝置偏好，但帳號資料與通知同步需要先建立登入會話。</div>
+            <div className="sectionText">你可以先調整外觀；登入後再編輯個人資料與通知設定。</div>
             <div>
               <Link href={`/login${schoolSearch}`} className="btn primary">
                 前往登入
@@ -894,103 +1007,117 @@ export default function SettingsPage(props: {
               icon="🪪"
               iconBg="#E8F4FD"
               title="PU 學號登入"
-              subtitle="使用靜宜 e 校園帳號密碼"
-              right={<span className="pill success" style={{ fontSize: 11 }}>啟用中</span>}
+              subtitle="前往學校登入頁連結帳號"
+              right={
+                <span className="pill success" style={{ fontSize: 11 }}>
+                  學校登入
+                </span>
+              }
             />
             <SettingRow
               icon="🔥"
               iconBg="var(--success-soft)"
-              title="Firebase 會話"
-              subtitle={cloudEnabled ? "目前已建立，可讀寫個人資料" : "尚未建立或未配置 Firebase"}
-              right={<span className="pill subtle" style={{ fontSize: 11 }}>{cloudEnabled ? "可用" : "受限"}</span>}
+              title="校園帳號"
+              subtitle={cloudEnabled ? '目前可讀寫個人資料' : '尚未確認帳號連線'}
+              right={
+                <span className="pill subtle" style={{ fontSize: 11 }}>
+                  {cloudEnabled ? '可用' : '受限'}
+                </span>
+              }
             />
           </div>
         </div>
 
-        <div className="card" style={{ display: "grid", gap: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <div className="card" style={{ display: 'grid', gap: 16 }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              gap: 12,
+              alignItems: 'center',
+              flexWrap: 'wrap',
+            }}
+          >
             <div>
               <div className="sectionTitle">個人資料</div>
-              <div className="sectionText">
-                更新後會寫入 <code>users/{'{'}uid{'}'}</code> 並同步 Firebase Auth 顯示名稱。
-              </div>
+              <div className="sectionText">儲存後會重新讀取帳號資料，確認更新結果。</div>
             </div>
             <button
               type="button"
               className="btn primary"
-              disabled={!user || savingProfile || loadingProfile}
+              disabled={!cloudEnabled || savingProfile}
               onClick={handleSaveProfile}
             >
-              {savingProfile ? "儲存中..." : "儲存資料"}
+              {savingProfile ? '儲存中...' : '儲存資料'}
             </button>
           </div>
 
           <div className="grid-2">
-            <label style={{ display: "grid", gap: 8 }}>
-              <span style={{ fontSize: 13, color: "var(--muted)" }}>姓名</span>
+            <label style={{ display: 'grid', gap: 8 }}>
+              <span style={{ fontSize: 13, color: 'var(--muted)' }}>姓名</span>
               <input
                 className="input"
                 value={profileForm.displayName}
-                onChange={(event) => updateProfileField("displayName", event.target.value)}
-                disabled={!user || loadingProfile}
+                onChange={(event) => updateProfileField('displayName', event.target.value)}
+                disabled={!cloudEnabled || savingProfile}
                 placeholder="輸入你的姓名"
               />
             </label>
-            <label style={{ display: "grid", gap: 8 }}>
-              <span style={{ fontSize: 13, color: "var(--muted)" }}>學號</span>
+            <label style={{ display: 'grid', gap: 8 }}>
+              <span style={{ fontSize: 13, color: 'var(--muted)' }}>學號</span>
               <input
                 className="input"
                 value={profileForm.studentId}
-                onChange={(event) => updateProfileField("studentId", event.target.value)}
-                disabled={!user || loadingProfile}
+                onChange={(event) => updateProfileField('studentId', event.target.value)}
+                disabled={!cloudEnabled || savingProfile}
                 placeholder="例如：B11201234"
               />
             </label>
-            <label style={{ display: "grid", gap: 8 }}>
-              <span style={{ fontSize: 13, color: "var(--muted)" }}>系所</span>
+            <label style={{ display: 'grid', gap: 8 }}>
+              <span style={{ fontSize: 13, color: 'var(--muted)' }}>系所</span>
               <input
                 className="input"
                 value={profileForm.department}
-                onChange={(event) => updateProfileField("department", event.target.value)}
-                disabled={!user || loadingProfile}
+                onChange={(event) => updateProfileField('department', event.target.value)}
+                disabled={!cloudEnabled || savingProfile}
                 placeholder="例如：資訊工程學系"
               />
             </label>
-            <label style={{ display: "grid", gap: 8 }}>
-              <span style={{ fontSize: 13, color: "var(--muted)" }}>年級</span>
+            <label style={{ display: 'grid', gap: 8 }}>
+              <span style={{ fontSize: 13, color: 'var(--muted)' }}>年級</span>
               <input
                 className="input"
                 value={profileForm.grade}
-                onChange={(event) => updateProfileField("grade", event.target.value)}
-                disabled={!user || loadingProfile}
+                onChange={(event) => updateProfileField('grade', event.target.value)}
+                disabled={!cloudEnabled || savingProfile}
                 placeholder="例如：大三"
               />
             </label>
-            <label style={{ display: "grid", gap: 8 }}>
-              <span style={{ fontSize: 13, color: "var(--muted)" }}>電話</span>
+            <label style={{ display: 'grid', gap: 8 }}>
+              <span style={{ fontSize: 13, color: 'var(--muted)' }}>電話</span>
               <input
                 className="input"
                 value={profileForm.phone}
-                onChange={(event) => updateProfileField("phone", event.target.value)}
-                disabled={!user || loadingProfile}
+                onChange={(event) => updateProfileField('phone', event.target.value)}
+                disabled={!cloudEnabled || savingProfile}
                 placeholder="例如：0912-345-678"
               />
             </label>
-            <label style={{ display: "grid", gap: 8 }}>
-              <span style={{ fontSize: 13, color: "var(--muted)" }}>Email</span>
-              <input className="input" value={user?.email ?? ""} disabled />
+            <label style={{ display: 'grid', gap: 8 }}>
+              <span style={{ fontSize: 13, color: 'var(--muted)' }}>Email</span>
+              <input className="input" value={user?.email ?? ''} disabled />
             </label>
           </div>
 
-          <label style={{ display: "grid", gap: 8 }}>
-            <span style={{ fontSize: 13, color: "var(--muted)" }}>自我介紹</span>
+          <label style={{ display: 'grid', gap: 8 }}>
+            <span style={{ fontSize: 13, color: 'var(--muted)' }}>自我介紹</span>
             <textarea
               className="input"
               value={profileForm.bio}
-              onChange={(event) => updateProfileField("bio", event.target.value)}
-              disabled={!user || loadingProfile}
+              onChange={(event) => updateProfileField('bio', event.target.value)}
+              disabled={!cloudEnabled || savingProfile}
               placeholder="介紹你的研究方向、興趣或目前專案"
-              style={{ minHeight: 120, paddingTop: 14, paddingBottom: 14, resize: "vertical" }}
+              style={{ minHeight: 120, paddingTop: 14, paddingBottom: 14, resize: 'vertical' }}
             />
           </label>
         </div>
@@ -1013,84 +1140,24 @@ export default function SettingsPage(props: {
     );
   }
 
-  function renderDemo() {
-    return (
-      <div className="settingsContent">
-        <div className="settingsSectionHeader">
-          <h2>🎬 示範工具</h2>
-          <p className="settingsSectionSubtitle">
-            口試 / 演示專用：一鍵產生跨角色待處理事項，或清空所有 demo 資料重新開始。
-          </p>
-        </div>
-        <div className="insetGroup">
-          <SettingRow
-            icon="🌱"
-            iconBg="var(--success-soft)"
-            title="一鍵 seed 示範佇列"
-            subtitle="以王小明名義產生 5 件待處理：請假 / 報修 / 訂單 / 求助 / 作業繳交"
-            onClick={() => {
-              seedDemoQueues();
-              success(
-                "🌱 已產生 5 件示範事項",
-                "切換到教師 / TA / admin / 系主任的訊息收件匣即可看到對應佇列",
-              );
-            }}
-          />
-          <SettingRow
-            icon="♻️"
-            iconBg="rgba(94,106,210,0.18)"
-            title="一鍵重置 demo 資料"
-            subtitle="清除所有跨角色寫入（訊息、繳交、訂單、報修…），不影響登入身份"
-            onClick={() => {
-              if (typeof window === "undefined") return;
-              const confirmed = window.confirm(
-                "⚠️ 確定要重置 demo 資料嗎？\n\n會清除：所有動態訊息、繳交、社團申請、訂單、報修、請假…\n保留：當前登入身份。",
-              );
-              if (!confirmed) return;
-              resetDemoStore();
-              info("♻️ Demo 資料已重置");
-            }}
-          />
-          <SettingRow
-            icon="🧨"
-            iconBg="var(--danger-soft)"
-            title="清空全部本機資料（含登入身份）"
-            subtitle="登出並清空 localStorage。適合 demo 開始前歸零。"
-            danger
-            onClick={() => {
-              if (typeof window === "undefined") return;
-              const confirmed = window.confirm(
-                "⚠️ 將清空 localStorage 全部內容並登出。確定？",
-              );
-              if (!confirmed) return;
-              try {
-                window.localStorage.clear();
-              } catch {
-                /* ignore */
-              }
-              window.location.href = "/login";
-            }}
-          />
-        </div>
-      </div>
-    );
-  }
-
   const contentMap: Record<Section, () => ReactNode> = {
     general: renderGeneral,
     notifications: renderNotifications,
     appearance: renderAppearance,
     privacy: renderPrivacy,
     account: renderAccount,
-    demo: renderDemo,
   };
 
   return (
-    <SiteShell
-      title="設定"
-      subtitle="把 Web 端設定從展示畫面補齊成真實可保存的個人中心"
-      schoolName={schoolName}
-    >
+    <SiteShell title="設定" subtitle="調整外觀、通知與個人資料。" schoolName={schoolName}>
+      {profileLoadError && (
+        <section className="card" role="alert">
+          <p>{profileLoadError}</p>
+          <button className="btn" onClick={() => setLoadAttempt((value) => value + 1)}>
+            重新讀取帳號設定
+          </button>
+        </section>
+      )}
       <div className="settingsLayout">
         <aside className="settingsSidebar">
           <div className="sidebarMenu">
@@ -1098,7 +1165,7 @@ export default function SettingsPage(props: {
               <button
                 key={section.id}
                 type="button"
-                className={`sidebarMenuButton${activeSection === section.id ? " active" : ""}`}
+                className={`sidebarMenuButton${activeSection === section.id ? ' active' : ''}`}
                 onClick={() => setActiveSection(section.id)}
               >
                 <span style={{ fontSize: 18 }}>{section.icon}</span>
