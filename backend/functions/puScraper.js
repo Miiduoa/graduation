@@ -510,14 +510,8 @@ async function puFetchGrades(cookies, semester) {
   try {
     if (!cookies || !Object.keys(cookies).length) throw new Error('No session cookies');
 
-    // 優先用 alcat（和登入同 domain，cookie 確定能用），
-    // 若失敗或內容太短再試 mypu（不同 domain，cookie 可能無法共享）。
-    let res = await getFollowRedirect(ALCAT_HOST, '/stu_query/score_all.php', cookies);
-    if (res.status !== 200 || res.data.length < 200) {
-      console.log('[puFetchGrades] alcat fallback to mypu…');
-      res = await getFollowRedirect(MYPU_HOST, GRADE_PATH, cookies);
-    }
-
+    // Try the PU SSO bridge first, then the mypu grade page.
+    // Do not fail the entire fetch on a redundant preflight request.
     // ── Step 1: Establish mypu session (fallback) ──
     // alcat and mypu are on different subdomains of pu.edu.tw.
     // We try multiple approaches to establish a valid mypu session:
@@ -536,9 +530,10 @@ async function puFetchGrades(cookies, semester) {
 
     // Approach B: Try SSO bridge URLs from alcat → mypu
     const bridgePaths = [
-      '/score_query/score_all.php',          // alcat might proxy to mypu
-      '/index_menu.php',                      // menu page might set cross-domain session
+      '/score_query/score_all.php', // alcat might proxy to mypu
+      '/index_menu.php', // menu page might set cross-domain session
     ];
+    let usableBridge = null;
     for (const bp of bridgePaths) {
       try {
         const bridgeRes = await getFollowRedirect(ALCAT_HOST, bp, cookies);
@@ -549,9 +544,10 @@ async function puFetchGrades(cookies, semester) {
         // If alcat's score page actually returns grade data directly, use it
         if (bp.includes('score') && bridgeRes.status === 200) {
           const bridgeParsed = parsePuGradeDocument(bridgeRes.data, semester);
-          if (bridgeParsed.success && bridgeParsed.allSemesters.length > 1) {
-            // The bridge already returned a recognized multi-semester document.
-            return bridgeParsed;
+          if (bridgeParsed.success) {
+            usableBridge = bridgeParsed;
+            // Prefer the bridge if it contains multiple semesters.
+            if (bridgeParsed.allSemesters.length > 1) return bridgeParsed;
           }
         }
       } catch (e) {
@@ -560,16 +556,20 @@ async function puFetchGrades(cookies, semester) {
     }
 
     // ── Step 2: Fetch the grade page ──
-    // 改名為 gradeRes 避開 function 上方 L658 已有的 `let res`（同 scope 重複宣告 → parse error）
-    const gradeRes = await getFollowRedirect(MYPU_HOST, GRADE_PATH, mypuCookies);
-    if (gradeRes.status !== 200) throw new Error(`HTTP ${gradeRes.status}`);
-
-    const html = gradeRes.data;
-    if (looksLikePuLoginPage(html)) {
-      return { success: false, grades: [], error: 'E校園 session 已失效，請重新登入' };
+    // Keep a valid single-semester bridge result if mypu is unavailable.
+    try {
+      const gradeRes = await getFollowRedirect(MYPU_HOST, GRADE_PATH, mypuCookies);
+      if (gradeRes.status !== 200) throw new Error(`HTTP ${gradeRes.status}`);
+      if (looksLikePuLoginPage(gradeRes.data)) {
+        if (usableBridge) return usableBridge;
+        return { success: false, grades: [], error: 'E校園 session 已失效，請重新登入' };
+      }
+      const parsed = parsePuGradeDocument(gradeRes.data, semester);
+      return parsed.success ? parsed : (usableBridge || parsed);
+    } catch (error) {
+      if (usableBridge) return usableBridge;
+      throw error;
     }
-
-    return parsePuGradeDocument(html, semester);
   } catch (err) {
     console.error('[puFetchGrades] Error:', err);
     return { success: false, grades: [], error: err.message };
