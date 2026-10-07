@@ -21,11 +21,13 @@ Campus One 的重點不是「做很多校園功能」，而是把 **Mobile、Web
 | 想確認什麼 | 直接看 |
 |---|---|
 | 兩分鐘審查路徑 | [REVIEW_IN_2_MINUTES](docs/REVIEW_IN_2_MINUTES.md) |
+| 系統怎麼接起來 | [ARCHITECTURE_OVERVIEW](docs/ARCHITECTURE_OVERVIEW.md) |
+| 為什麼這樣設計 | [Architecture Decision Records](docs/adr/README.md) |
 | App 實際介面 | [Mobile demo 說明](apps/mobile/DEMO.md) |
 | 跨角色與資料流 | [APP_ROLE_DATA_FLOW_ARCHITECTURE](docs/APP_ROLE_DATA_FLOW_ARCHITECTURE.md) |
 | AI 怎麼被限制在產品流程內 | [AI_ASSISTANT_ARCHITECTURE](docs/AI_ASSISTANT_ARCHITECTURE.md) |
+| 測試到底驗了什麼 | [TESTING_EVIDENCE](docs/TESTING_EVIDENCE.md) |
 | API 與後端邊界 | [API](docs/API.md) |
-| 自動化驗證 | [CI workflow](.github/workflows/ci.yml) · [Maestro E2E](.github/workflows/maestro-e2e.yml) |
 
 ### Mobile snapshot
 
@@ -106,6 +108,8 @@ graduation/
 ├── scripts/             # verification and workflow scripts
 └── package.json         # pnpm workspace entry
 ```
+
+完整系統邊界與資料方向：[Architecture overview](docs/ARCHITECTURE_OVERVIEW.md) · [ADRs](docs/adr/README.md)
 
 ### Current stack
 
@@ -190,6 +194,8 @@ pnpm test:rules
 
 Mobile 另外包含 Jest 與 Maestro E2E flows；Web 使用 Vitest。
 
+最近一個完整驗證成功的 baseline：Mobile **1212 tests**、Web **43 tests**、Functions **124 tests**、Firestore Rules **28/28**，Expo Doctor **16/16**。這些數字與已知驗證債務都記在 [TESTING_EVIDENCE](docs/TESTING_EVIDENCE.md)，不在 README 假裝成 coverage 證明。
+
 一般 CI 會驗證 Expo Doctor、公開 app config 與 `eas.json` build profile，但**不需要 `EXPO_TOKEN`、也不會提交 EAS Cloud build**。真正的 iOS / Android 雲端建置放在手動的 `EAS Build` / `Release` workflow，只有執行雲端建置時才需要 Expo 帳號憑證。
 
 GitHub Actions：  
@@ -201,10 +207,12 @@ https://github.com/Miiduoa/graduation/actions
 
 `docs/` 保留較完整的架構、資料流與驗證紀錄。比較值得先看的文件：
 
+- [Architecture overview](docs/ARCHITECTURE_OVERVIEW.md)
+- [Architecture Decision Records](docs/adr/README.md)
+- [Testing evidence](docs/TESTING_EVIDENCE.md)
 - `docs/APP_ROLE_DATA_FLOW_ARCHITECTURE.md`
 - `docs/CROSS_ROLE_DATA_FLOW.md`
 - `docs/AI_ASSISTANT_ARCHITECTURE.md`
-- `docs/DEMO_NARRATIVE.md`
 - `docs/REMAINING_BUGS_AUDIT.md`
 
 README 刻意不把所有內部函式與每次更新紀錄搬上來；細節放在文件與程式碼裡，首頁只保留能快速理解專案的資訊。
