@@ -3,6 +3,7 @@
 /* Campus One shared theme. */
 
 :root {
+  color-scheme: light;
   --on-brand: #ffffff;
   /* ── Backgrounds ── */
   --bg: #f8f7f3;
@@ -277,6 +278,19 @@ textarea {
 
 button {
   color: inherit;
+}
+
+:where(button) {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 10px 14px;
+  cursor: pointer;
+}
+
+:where(button:disabled) {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 ::selection {
@@ -653,7 +667,7 @@ button {
     transform 0.15s ease;
 }
 
-:root[data-theme='dark'] .btn {
+:where(:root[data-theme='dark']) .btn {
   background: var(--surface-strong);
 }
 
