@@ -69,10 +69,16 @@ Nolu 已讀取的具體來源是 [`pu-plan/guest-privacy.js`](https://github.com
 
 Web 與 Mobile 共用紙白／墨綠主色、語意狀態色、字級層次及深色模式。Web 頁首、服務選單、頁尾、登入回呼、條款與錯誤頁使用共同框架；Mobile 的今日、課程、個人、交通與 LMS 畫面沿用共同元件及 tokens。這是程式與本機畫面的驗收，尚未完成所有角色的實機逐頁驗收。
 
-- 自動檢查：Web 133 項、Mobile 1,302 項、Functions 165 項與 Firestore／Storage rules 46 項測試通過；Web／Mobile 各保留 1 項既有跳過測試。Workspace TypeScript 與 Web production build 通過；Mobile 以 development 設定完成 iOS／Android export，並未產生簽署安裝包。
+- 自動檢查：Web 133 項、Mobile 1,307 項、Functions 165 項與 Firestore／Storage rules 46 項測試通過；Web／Mobile 各保留 1 項既有跳過測試。Workspace TypeScript 與 Web production build 通過；Mobile 以 development 設定完成 iOS／Android export，並未產生簽署安裝包。
 - Web：55 個路由的未登入狀態均回應 200，390px 寬度沒有橫向溢出或未處理的頁面錯誤；另複查個人、登入回呼、教學管理、助理、公車、條款與隱私頁的深／淺模式共 14 種狀態。使用占位 ID 的詳情頁只驗證登入／不存在狀態，不能替代有資料的功能驗收。
 - 公車只接受來源為 TDX 且仍在有效時間內的即時結果；尚未設定學校路線、站牌與正式服務憑證時不顯示預估時間。Mobile 尚無可驗證的車輛追蹤服務，因此不提供模擬位置、到站震動或假位置分享。
 - Mobile 個人資料使用實際寫入及回讀確認；舊成績／學業總覽／成就／教師評分路由已移除固定 GPA、比較排名、假徽章、示範學生及假儲存完成。成績只呈現本人目前學校已發布資料，教師入口先核對授課關係及課程 ID；缺資料顯示空或錯誤狀態。
 - 校園助理僅呈現實際 callable 回覆，失敗保留草稿；對話不送出訂單或顯示未經確認的交易成功。登入、課程切換與清除對話會隔離舊回應。
 - iOS／Android export 驗證 JavaScript 與資產可打包；不等於原生簽署、TestFlight、Play internal、真機或商店通過。Expo Doctor 依目前專案設定通過 16 項檢查；既有排除項仍須在正式發布前核對。
 - 正式依賴稽核仍有 4 high、13 moderate、3 low、0 critical；完整 lint 無 error，但仍有既有 warning。這些問題與登入資料轉接、點名歷史遷移、真實資料驗收及簽署發布共同列入發布阻塞，不能只以本機編譯成功宣稱產品已上架。
+
+## 原生 iOS 建置修正
+
+主要 [CI 37652160901](https://github.com/Miiduoa/graduation/actions/runs/37652160901) 在 `0c21fa0` 通過；獨立 [Maestro run 37652160826](https://github.com/Miiduoa/graduation/actions/runs/37652160826) 的原生階段則因 `prebuild --clean` 覆蓋已提交的 Podfile 設定，在 FirebaseCoreInternal／GoogleUtilities 模組整合時失敗，未執行 UI 測試。後續修正改為直接安裝、編譯已提交的 iOS 專案，保留 static frameworks 及 llama-rn／RNFirebase hooks；已在暫存副本成功安裝 118 個 Pods，確認 workspace、scheme 與原生設定。
+
+Workflow 改成選擇已安裝且可用的 iPhone simulator、等待啟動、編譯後讀取實際 bundle ID 並安裝 App，確認 Metro 可用才執行測試。失敗不再由 continue-on-error 隱藏。預設 smoke 驗證全新安裝的未登入首頁與登入入口；登入後角色流程需要另外準備正式測試帳號，不可用未登入測試替代。完整原生 build／UI 結果仍須以後續對應 commit 的 workflow 為準。

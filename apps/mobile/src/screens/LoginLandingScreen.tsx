@@ -3,11 +3,14 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { safeNavigate } from '../utils/safeNavigate';
+import { theme } from '../ui/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 
 export default function LoginLandingScreen() {
   const navigation = useNavigation();
+  const s = useThemeStyleSheet(createStyles);
   return (
-    <SafeAreaView style={s.page}>
+    <SafeAreaView testID="login-landing" style={s.page}>
       <ScrollView contentContainerStyle={s.content}>
         <Text style={s.brand}>CAMPUS ONE</Text>
         <View style={s.intro}>
@@ -19,6 +22,7 @@ export default function LoginLandingScreen() {
           <Text style={s.title}>登入你的校園帳號</Text>
           <Text style={s.body}>使用學校帳號登入，查看個人課程與通知。</Text>
           <Pressable
+            testID="login-start"
             accessibilityRole="button"
             style={s.button}
             onPress={() => safeNavigate(navigation, 'SSOLogin')}
@@ -31,23 +35,41 @@ export default function LoginLandingScreen() {
     </SafeAreaView>
   );
 }
-const s = StyleSheet.create({
-  page: { flex: 1, backgroundColor: '#f8f7f3' },
-  content: { padding: 28, flexGrow: 1 },
-  brand: { color: '#243b35', letterSpacing: 2, fontWeight: '700', fontSize: 14, marginTop: 16 },
-  intro: { paddingVertical: 65 },
-  school: { color: '#526750', fontSize: 13, marginBottom: 18 },
-  heading: { color: '#243b35', fontSize: 36, fontWeight: '600', lineHeight: 49, letterSpacing: -1 },
-  body: { color: '#626e67', fontSize: 14, lineHeight: 25, marginTop: 16 },
-  panel: {
-    padding: 24,
-    backgroundColor: '#e6ece5',
-    borderColor: '#d4ded3',
-    borderWidth: 1,
-    borderRadius: 8,
-  },
-  title: { color: '#243b35', fontSize: 19, fontWeight: '600' },
-  button: { backgroundColor: '#28483b', padding: 15, borderRadius: 4, marginTop: 24 },
-  buttonText: { color: '#fff', textAlign: 'center', fontSize: 15, fontWeight: '600' },
-  footer: { color: '#626e67', fontSize: 11, paddingVertical: 40 },
-});
+const createStyles = () =>
+  StyleSheet.create({
+    page: { flex: 1, backgroundColor: theme.colors.bg },
+    content: { padding: 28, flexGrow: 1 },
+    brand: {
+      color: theme.colors.text,
+      letterSpacing: 2,
+      fontWeight: '700',
+      fontSize: 14,
+      marginTop: 16,
+    },
+    intro: { paddingVertical: 65 },
+    school: { color: theme.colors.textSecondary, fontSize: 13, marginBottom: 18 },
+    heading: {
+      color: theme.colors.text,
+      fontSize: 36,
+      fontWeight: '600',
+      lineHeight: 49,
+      letterSpacing: -1,
+    },
+    body: { color: theme.colors.muted, fontSize: 14, lineHeight: 25, marginTop: 16 },
+    panel: {
+      padding: 24,
+      backgroundColor: theme.colors.focusSurface,
+      borderColor: theme.colors.border,
+      borderWidth: 1,
+      borderRadius: 8,
+    },
+    title: { color: theme.colors.text, fontSize: 19, fontWeight: '600' },
+    button: { backgroundColor: theme.colors.accent, padding: 15, borderRadius: 4, marginTop: 24 },
+    buttonText: {
+      color: theme.colors.onAccent,
+      textAlign: 'center',
+      fontSize: 15,
+      fontWeight: '600',
+    },
+    footer: { color: theme.colors.muted, fontSize: 11, paddingVertical: 40 },
+  });
