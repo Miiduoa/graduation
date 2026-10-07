@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from './theme';
+import { useThemeStyleSheet } from './useThemeStyleSheet';
 
 // ===== TextInput =====
 
@@ -38,6 +39,7 @@ export function Input({
   style,
   ...props
 }: InputProps) {
+  const styles = useThemeStyleSheet(createStyles);
   const [isFocused, setIsFocused] = useState(false);
   const borderColor = error
     ? theme.colors.danger
@@ -126,6 +128,7 @@ type TextAreaProps = InputProps & {
 };
 
 export function TextArea({ rows = 4, maxLength, showCount, value, ...props }: TextAreaProps) {
+  const styles = useThemeStyleSheet(createStyles);
   const charCount = value?.length ?? 0;
 
   return (
@@ -167,6 +170,7 @@ export function Checkbox({
   disabled,
   error,
 }: CheckboxProps) {
+  const styles = useThemeStyleSheet(createStyles);
   return (
     <View style={styles.checkboxContainer}>
       <Pressable
@@ -190,7 +194,7 @@ export function Checkbox({
               disabled && styles.checkboxDisabled,
             ]}
           >
-            {checked && <Ionicons name="checkmark" size={16} color="#fff" />}
+            {checked && <Ionicons name="checkmark" size={16} color={theme.colors.onAccent} />}
           </View>
         </View>
 
@@ -237,6 +241,7 @@ export function RadioGroup<T>({
   error,
   horizontal,
 }: RadioGroupProps<T>) {
+  const styles = useThemeStyleSheet(createStyles);
   return (
     <View style={styles.radioGroupContainer}>
       {label && <Text style={styles.radioGroupLabel}>{label}</Text>}
@@ -320,6 +325,7 @@ export function Select<T>({
   disabled,
   onPress,
 }: SelectProps<T>) {
+  const styles = useThemeStyleSheet(createStyles);
   const selectedOption = options.find((opt) => opt.value === value);
 
   return (
@@ -372,6 +378,7 @@ export function Slider({
   formatValue = (v) => String(v),
   disabled,
 }: SliderProps) {
+  const styles = useThemeStyleSheet(createStyles);
   const percentage = ((value - min) / (max - min)) * 100;
 
   const handlePress = useCallback(
@@ -414,6 +421,7 @@ type FormSectionProps = {
 };
 
 export function FormSection({ title, description, children }: FormSectionProps) {
+  const styles = useThemeStyleSheet(createStyles);
   return (
     <View style={styles.formSection}>
       {title && <Text style={styles.formSectionTitle}>{title}</Text>}
@@ -431,6 +439,7 @@ type FormActionsProps = {
 };
 
 export function FormActions({ children, align = 'right' }: FormActionsProps) {
+  const styles = useThemeStyleSheet(createStyles);
   const justifyContent = {
     left: 'flex-start',
     center: 'center',
@@ -452,7 +461,7 @@ export function FormActions({ children, align = 'right' }: FormActionsProps) {
 
 // ===== Styles =====
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   // Input
   inputContainer: {
     marginBottom: 16,

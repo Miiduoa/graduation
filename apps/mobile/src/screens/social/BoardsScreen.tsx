@@ -31,6 +31,7 @@ import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme } from '../../ui/theme';
+import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../../ui/navigationTheme';
 import { useSchool } from '../../state/school';
 import { useAuth } from '../../state/auth';
@@ -60,6 +61,7 @@ const TYPE_ICON: Record<CampusBoardType, keyof typeof import('@expo/vector-icons
 };
 
 export function BoardsScreen() {
+  const styles = useThemeStyleSheet(createStyles);
   const injectedNav = useCampusSocialStackNav();
   const fb = useNavigation<any>();
   const nav = injectedNav ?? fb;
@@ -297,6 +299,7 @@ export function BoardsScreen() {
 // ─── CreateBoardModal ──────────────────────────────────────
 
 function CreateBoardModal(props: { visible: boolean; onDismiss: () => void; onCreated: () => void }) {
+  const styles = useThemeStyleSheet(createStyles);
   const auth = useAuth();
   const { school } = useSchool();
   const [name, setName] = useState('');
@@ -427,7 +430,7 @@ function CreateBoardModal(props: { visible: boolean; onDismiss: () => void; onCr
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   root: { flex: 1, backgroundColor: theme.colors.bg, paddingHorizontal: 14 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 

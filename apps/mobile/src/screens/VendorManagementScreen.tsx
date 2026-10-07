@@ -25,6 +25,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Card, Screen, SectionTitle, Pill } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { useAuth } from '../state/auth';
 import {
   getVendors,
@@ -1209,6 +1210,7 @@ function OrderCard(props: {
 // ══════════════════════════════════════════════════
 
 function MenuTab(props: { vendorId: string; menuItems: MenuItem[]; onRefresh: () => void }) {
+  const editorInputStyle = useThemeStyleSheet(createEditorInputStyle);
   const { vendorId, menuItems, onRefresh } = props;
 
   const groupedByCategory = useMemo(() => {
@@ -1899,7 +1901,7 @@ function MenuTab(props: { vendorId: string; menuItems: MenuItem[]; onRefresh: ()
   );
 }
 
-const editorInputStyle = {
+const createEditorInputStyle = () => ({
   borderWidth: 1,
   borderColor: theme.colors.border,
   borderRadius: 10,
@@ -1907,7 +1909,7 @@ const editorInputStyle = {
   color: theme.colors.text,
   fontSize: 14,
   backgroundColor: theme.colors.surface2,
-} as const;
+} as const);
 
 // ══════════════════════════════════════════════════
 // 評價檢視分頁
