@@ -82,9 +82,9 @@ export default ({ config }: any) => {
     widgets: parseBoolean(process.env.EXPO_PUBLIC_FEATURE_WIDGETS, !isReleaseLike),
     deeplinks: parseBoolean(process.env.EXPO_PUBLIC_FEATURE_DEEPLINKS, !isReleaseLike),
   };
-  const enableUniversalDevAccounts = parseBoolean(
+  const enableUniversalDevAccounts = !isProduction && parseBoolean(
     process.env.EXPO_PUBLIC_ENABLE_UNIVERSAL_DEV_ACCOUNTS,
-    appEnv !== 'production',
+    true,
   );
   const allowLocalMockAuth =
     appEnv === 'development' && process.env.EXPO_PUBLIC_ALLOW_LOCAL_MOCK_AUTH === 'true';

@@ -1,29 +1,8 @@
-/**
- * Role-Aware Today — 每個角色看到不同的「Today」入口
- *
- * 8 條 dispatcher 路徑：
- *  - student         → TodayCockpitScreen（學生駕駛艙）
- *  - teacher         → TeacherCockpitScreen（老師駕駛艙）
- *  - ta              → TADashboardScreen（助教）
- *  - club_officer    → ClubOfficerDashboardScreen（社團幹部）
- *  - department      → DepartmentDashboardScreen（系主任 / 行政）
- *  - admin           → AdminDashboardScreen（系統管理員）
- *  - vendor          → VendorDashboardScreen（餐廳店家）
- *  - alumni          → AlumniHomeScreen（校友）
- *  - guest           → GuestHomeScreen（訪客）
- *
- * 判斷依據：
- *  1. auth.profile.roleGroup（最權威）
- *  2. auth.profile.role
- *  3. demo 帳號 uid 前綴（demo_teacher_* 等）
- *  4. fallback → student
- */
 import React from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-// 學生角色走新版 AI-First 介面（舊 TodayCockpitScreen 已停用）
-import TodayAiFirstScreen from './TodayAiFirstScreen';
+import StudentTodayScreen from './StudentTodayScreen';
 import TeacherCockpitScreen from './TeacherCockpitScreen';
 import TADashboardScreen from './TADashboardScreen';
 import DepartmentDashboardScreen from './DepartmentDashboardScreen';
@@ -35,6 +14,7 @@ import GuestHomeScreen from './GuestHomeScreen';
 import { useAuth } from '../state/auth';
 import { theme } from '../ui/theme';
 import DemoRolePill from '../components/DemoRolePill';
+import { areUniversalDevAccountsEnabled } from '../services/release';
 
 export type ResolvedDashboardRole =
   | 'student'
@@ -112,7 +92,7 @@ function renderDashboard(role: ResolvedDashboardRole): React.ReactNode {
       return <GuestHomeScreen />;
     case 'student':
     default:
-      return <TodayAiFirstScreen />;
+      return <StudentTodayScreen />;
   }
 }
 
@@ -155,7 +135,7 @@ export default function RoleAwareTodayScreen() {
           zIndex: 50,
         }}
       >
-        <DemoRolePill />
+        {areUniversalDevAccountsEnabled() && <DemoRolePill />}
       </View>
     </View>
   );

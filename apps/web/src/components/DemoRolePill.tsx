@@ -8,6 +8,7 @@ import {
   useDemoRole,
   type DemoRole,
 } from '@/lib/demoRole';
+import { areUniversalDevAccountsEnabled } from '@/lib/runtime';
 import { getDemoUser } from '@/lib/demoData';
 
 /**
@@ -42,7 +43,7 @@ export function DemoRolePill() {
     return () => window.removeEventListener('mousedown', handler);
   }, [open]);
 
-  if (!mounted) {
+  if (!mounted || !areUniversalDevAccountsEnabled()) {
     // SSR / pre-hydration 不顯示，避免閃爍
     return null;
   }

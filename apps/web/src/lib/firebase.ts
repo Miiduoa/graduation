@@ -138,7 +138,7 @@ export function getDb(): Firestore {
 }
 
 export function getAuth(): Auth | null {
-  if (typeof window === 'undefined') return null;
+  if (typeof window === 'undefined' || !isFirebaseConfigured()) return null;
   if (!auth) {
     try {
       auth = firebaseGetAuth(getApp());

@@ -187,17 +187,40 @@ service cloud.firestore {
     }
 
     function submissionOwnerId(data, submissionId) {
-      return data.userId != null
-        ? data.userId
-        : data.uid != null
-          ? data.uid
-          : data.studentId != null
-            ? data.studentId
-            : submissionId;
+      return data.get('userId', data.get('uid', data.get('studentId', submissionId)));
     }
 
     function isSubmissionOwner(data, submissionId) {
       return isSignedIn() && request.auth.uid == submissionOwnerId(data, submissionId);
+    }
+
+    function acceptsStudentSubmission(groupId, assignmentId) {
+      let assignment = get(/databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)).data;
+      let due = assignment.get('dueAt', null);
+      return assignment.get('published', true) != false
+        && !(assignment.get('status', '') in ['draft', 'closed'])
+        && (due == null || assignment.get('allowLateSubmission', false) == true
+          || (due is timestamp && request.time <= due)
+          || (due is string && request.time <= timestamp.value(due)));
+    }
+
+    function validStudentSubmission(groupId, assignmentId, submissionId) {
+      let data = request.resource.data;
+      return isActiveGroupMember(groupId)
+        && submissionId == request.auth.uid
+        && data.userId == request.auth.uid
+        && data.groupId == groupId
+        && data.assignmentId == assignmentId
+        && data.status == 'submitted'
+        && data.content is string && data.content.size() <= 20000
+        && (data.content.size() > 0 || data.get('attachments', []).size() > 0 || data.get('answers', {}).size() > 0)
+        && data.get('answers', {}) is map
+        && data.get('answers', {}).size() <= 100
+        && data.get('attachments', []) is list
+        && data.get('attachments', []).size() <= 20
+        && data.submittedAt == request.time
+        && data.updatedAt == request.time
+        && acceptsStudentSubmission(groupId, assignmentId);
     }
 
     function isAssignedReviewer(groupId, assignmentId, submissionId, data) {
@@ -660,9 +683,20 @@ service cloud.firestore {
         allow create, update, delete: if canManageGroup(groupId);
 
         match /submissions/{submissionId} {
-          allow read: if canReadSubmissionDoc(groupId, assignmentId, submissionId, resource.data);
-          allow create: if isActiveGroupMember(groupId) && isSubmissionOwner(request.resource.data, submissionId);
-          allow update: if canManageGroup(groupId) || isSubmissionOwner(resource.data, submissionId);
+          allow read: if (isActiveGroupMember(groupId) && submissionId == request.auth.uid)
+            || canReadSubmissionDoc(groupId, assignmentId, submissionId, resource.data);
+          allow create: if validStudentSubmission(groupId, assignmentId, submissionId)
+            && request.resource.data.keys().hasOnly([
+              'userId', 'groupId', 'assignmentId', 'content', 'attachments', 'answers', 'status', 'submittedAt', 'updatedAt'
+            ]);
+          allow update: if canManageGroup(groupId) || (
+            validStudentSubmission(groupId, assignmentId, submissionId)
+            && isSubmissionOwner(resource.data, submissionId)
+            && resource.data.get('submittedAt', null) == null
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'userId', 'groupId', 'assignmentId', 'content', 'attachments', 'answers', 'status', 'submittedAt', 'updatedAt'
+            ])
+          );
           allow delete: if false;
         }
 
