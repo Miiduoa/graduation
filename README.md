@@ -2,8 +2,10 @@
 
 [![CI](https://github.com/Miiduoa/graduation/actions/workflows/ci.yml/badge.svg)](https://github.com/Miiduoa/graduation/actions/workflows/ci.yml)
 
-**校園資訊與行動助手原型**  
-Mobile + Web + Backend 的 monorepo，目標是把分散的課程、校務、訊息、地圖與學習資訊整理成「現在下一步要做什麼」。
+**Flagship project · 校園資訊與行動助手原型**  
+Mobile + Web + Backend 的 monorepo。目標不是再做一個校園入口，而是把分散的課程、校務、訊息、地圖與學習資訊整理成「現在下一步要做什麼」。
+
+**第一次看這個 repo：** [2-minute reviewer path](docs/REVIEW_IN_2_MINUTES.md) · [Portfolio case study](https://miiduoa.github.io/case-studies/campus-one/)
 
 <p>
   <img src="https://img.shields.io/badge/Expo-54-000000?logo=expo" alt="Expo 54">
@@ -18,6 +20,7 @@ Campus One 的重點不是「做很多校園功能」，而是把 **Mobile、Web
 
 | 想確認什麼 | 直接看 |
 |---|---|
+| 兩分鐘審查路徑 | [REVIEW_IN_2_MINUTES](docs/REVIEW_IN_2_MINUTES.md) |
 | App 實際介面 | [Mobile demo 說明](apps/mobile/DEMO.md) |
 | 跨角色與資料流 | [APP_ROLE_DATA_FLOW_ARCHITECTURE](docs/APP_ROLE_DATA_FLOW_ARCHITECTURE.md) |
 | AI 怎麼被限制在產品流程內 | [AI_ASSISTANT_ARCHITECTURE](docs/AI_ASSISTANT_ARCHITECTURE.md) |
