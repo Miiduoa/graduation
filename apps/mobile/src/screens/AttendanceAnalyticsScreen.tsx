@@ -295,7 +295,7 @@ export default function AttendanceAnalyticsScreen({ route, navigation }: Props) 
                   <Text style={s.summaryLabel}>連續天數</Text>
                 </View>
                 <View style={s.summaryItem}>
-                  <Ionicons name={'trophy' as any} size={16} color="#5856D6" />
+                  <Ionicons name={'trophy' as any} size={16} color={theme.colors.achievement} />
                   <Text style={s.summaryNum}>{studentData.streak.best}</Text>
                   <Text style={s.summaryLabel}>最佳紀錄</Text>
                 </View>

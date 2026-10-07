@@ -7,7 +7,7 @@
  * 與 apps/mobile/src/firebase.ts 對齊（避免 region 不一致與 emulator 重複 wire）。
  */
 import { httpsCallable } from 'firebase/functions';
-import { getFunctionsInstance, isFirebaseConfigured } from './firebase';
+import { getAuth, getFunctionsInstance, isFirebaseConfigured } from './firebase';
 
 export type AgentCardKind =
   | 'route_card'
@@ -38,28 +38,36 @@ export interface CampusAssistantEnvelope {
 }
 
 export interface CallCampusAssistantInput {
+  userId: string;
   messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>;
   schoolId?: string;
+  groupId?: string;
   sessionId?: string | null;
   screen?: string;
 }
 
-/**
- * Call the deployed askCampusAssistant Cloud Function.
- * Returns null if Firebase config is not available (Web falls back to local
- * demo reply in that case).
- */
+export class CampusAssistantError extends Error {
+  constructor(public readonly code: 'unavailable' | 'session-changed' | 'invalid-response') {
+    super(code);
+    this.name = 'CampusAssistantError';
+  }
+}
+
+/** Only accept a response for the account that started the request. */
 export async function callCampusAssistant(
   input: CallCampusAssistantInput,
   signal?: AbortSignal,
-): Promise<CampusAssistantEnvelope | null> {
+): Promise<CampusAssistantEnvelope> {
   if (!isFirebaseConfigured()) {
-    console.warn(
-      '[campusAssistantClient] Firebase Web config missing. Set NEXT_PUBLIC_FIREBASE_* env vars.',
-    );
-    return null;
+    throw new CampusAssistantError('unavailable');
   }
-  if (signal?.aborted) return null;
+  const assertCurrentSession = () => {
+    if (signal?.aborted) throw new DOMException('Request aborted', 'AbortError');
+    if (!input.userId || getAuth()?.currentUser?.uid !== input.userId) {
+      throw new CampusAssistantError('session-changed');
+    }
+  };
+  assertCurrentSession();
 
   try {
     const callable = httpsCallable<
@@ -77,15 +85,20 @@ export async function callCampusAssistant(
         screen: input.screen || 'web/ai-assistant',
         locale: 'zh-TW',
         timezone: 'Asia/Taipei',
+        ...(input.groupId ? { groupId: input.groupId } : {}),
         ...(input.sessionId ? { sessionId: input.sessionId } : {}),
       },
     });
 
-    return result.data as CampusAssistantEnvelope;
+    assertCurrentSession();
+    const data = result.data;
+    if (!data || data.error || data.run?.status === 'failed' || typeof data.content !== 'string' || !data.content.trim()) {
+      throw new CampusAssistantError('invalid-response');
+    }
+    return data;
   } catch (e) {
-    const err = e as { code?: string; message?: string };
-    console.warn('[campusAssistantClient] callable failed:', err?.code, err?.message);
-    return null;
+    assertCurrentSession();
+    throw e;
   }
 }
 

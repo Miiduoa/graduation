@@ -1,18 +1,6 @@
-/**
- * Campus AI-First — Mobile Shared UI Primitives
- * -----------------------------------------------
- * 所有新版 AI-First Tab landing + 子畫面共用此檔元件，保證視覺一致。
- *
- * 設計總綱：docs/design/AI_FIRST_REDESIGN.md
- * 視覺原型：docs/design/prototype.html
- *
- * 包含：AIScreen / AIDetailScreen / AIHero / AISection / AICard /
- *      AIRow / AIButton / AIChip / AIMark / AIInsightBanner / AIEmptyState
- */
-import React, { useEffect, useRef } from 'react';
+/** Shared screen primitives. Existing export names remain compatible with screen imports. */
+import React, { useMemo, useSyncExternalStore } from 'react';
 import {
-  Animated,
-  Easing,
   ScrollView,
   StyleSheet,
   Text,
@@ -24,75 +12,114 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTabBarContentBottomPadding } from './navigationTheme';
+import { getThemeVersion, subscribeToTheme, theme } from './theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-// ── Tokens (Apple HIG iOS systemBackground / label / Indigo accent) ──
 export const aiTokens = {
-  // iOS systemGroupedBackground
-  bg: '#F2F2F7',
-  surface: '#FFFFFF',
-  panel: '#F2F2F7',
-  // iOS label / secondaryLabel / tertiaryLabel
-  text: '#1C1C1E',
-  textSecondary: '#3C3C43',
-  muted: '#8E8E93',
-  // iOS separator
-  border: '#E5E5EA',
-  // iOS Indigo accent — 與 mobile theme.ts DEFAULT_ACCENT 對齊
-  ai: '#5856D6',
-  aiStrong: '#3634A3',
-  aiSoft: 'rgba(88,86,214,0.10)',
-  aiSurface: '#FAFBFF',
-  aiGradientStart: '#EEF2FF',
-  aiGradientEnd: '#FCE7F3',
-  // iOS System Colors
-  success: '#34C759',
-  successSoft: 'rgba(52,199,89,0.12)',
-  warning: '#FF9500',
-  warningSoft: 'rgba(255,149,0,0.12)',
-  danger: '#FF3B30',
-  dangerSoft: 'rgba(255,59,48,0.12)',
-  radius: { sm: 10, md: 14, lg: 20, pill: 999 },
-  space: { xs: 4, sm: 8, md: 16, lg: 24, xl: 32 },
+  get bg() {
+    return theme.colors.bg;
+  },
+  get surface() {
+    return theme.colors.surface;
+  },
+  get panel() {
+    return theme.colors.surface2;
+  },
+  get text() {
+    return theme.colors.text;
+  },
+  get textSecondary() {
+    return theme.colors.textSecondary;
+  },
+  get muted() {
+    return theme.colors.muted;
+  },
+  get border() {
+    return theme.colors.border;
+  },
+  get ai() {
+    return theme.colors.accent;
+  },
+  get aiStrong() {
+    return theme.colors.accentStrong;
+  },
+  get aiSoft() {
+    return theme.colors.accentSoft;
+  },
+  get aiSurface() {
+    return theme.colors.surfaceMuted;
+  },
+  get aiGradientStart() {
+    return theme.colors.focusSurface;
+  },
+  get aiGradientEnd() {
+    return theme.colors.bg;
+  },
+  get success() {
+    return theme.colors.success;
+  },
+  get successSoft() {
+    return theme.colors.successSoft;
+  },
+  get warning() {
+    return theme.colors.warning;
+  },
+  get warningSoft() {
+    return theme.colors.warningSoft;
+  },
+  get danger() {
+    return theme.colors.danger;
+  },
+  get dangerSoft() {
+    return theme.colors.dangerSoft;
+  },
+  get radius() {
+    return {
+      sm: theme.radius.sm,
+      md: theme.radius.md,
+      lg: theme.radius.lg,
+      pill: theme.radius.full,
+    };
+  },
+  get space() {
+    return {
+      xs: theme.space.xs,
+      sm: 8,
+      md: theme.layout.screenHorizontalPadding,
+      lg: theme.space.lg,
+      xl: theme.space.xl,
+    };
+  },
 };
+
+function useVisualTheme() {
+  return useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
+}
+
+function useVisualStyles() {
+  const version = useVisualTheme();
+  return useMemo(createStyles, [version]);
+}
 
 // ──────────────────────────────────────────────
 // AI Mark — breath animation
 // ──────────────────────────────────────────────
 export function AIMark({ size = 28 }: { size?: number }) {
-  const scale = useRef(new Animated.Value(1)).current;
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(scale, {
-          toValue: 1.04,
-          duration: 800,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(scale, {
-          toValue: 1,
-          duration: 800,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ]),
-    ).start();
-  }, [scale]);
+  useVisualTheme();
   return (
-    <Animated.View
+    <View
+      accessibilityElementsHidden
       style={{
         width: size,
         height: size,
-        borderRadius: size / 2,
-        backgroundColor: aiTokens.ai,
-        transform: [{ scale }],
-        shadowColor: aiTokens.ai,
-        shadowOpacity: 0.4,
-        shadowRadius: 8,
-        shadowOffset: { width: 0, height: 4 },
-        elevation: 6,
+        borderRadius: aiTokens.radius.sm,
+        backgroundColor: aiTokens.aiSoft,
+        alignItems: 'center',
+        justifyContent: 'center',
       }}
-    />
+    >
+      <Ionicons name="chatbubble-outline" size={Math.round(size * 0.55)} color={aiTokens.ai} />
+    </View>
   );
 }
 
@@ -102,19 +129,25 @@ export function AIMark({ size = 28 }: { size?: number }) {
 export function AIScreen({
   children,
   bottomPadding,
+  contentContainerStyle,
   ...rest
 }: {
   children: React.ReactNode;
   bottomPadding?: number;
 } & ScrollViewProps) {
+  useVisualTheme();
   const defaultPadding = useTabBarContentBottomPadding();
+  const insets = useSafeAreaInsets();
   return (
     <View style={{ flex: 1, backgroundColor: aiTokens.bg }}>
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: bottomPadding ?? defaultPadding }}
         showsVerticalScrollIndicator={false}
         {...rest}
+        contentContainerStyle={[
+          { paddingTop: insets.top, paddingBottom: bottomPadding ?? defaultPadding },
+          contentContainerStyle,
+        ]}
       >
         {children}
       </ScrollView>
@@ -134,10 +167,9 @@ export function AIHero({
   title: string | React.ReactNode;
   subtitle?: string;
 }) {
+  const styles = useVisualStyles();
   return (
     <View style={styles.hero}>
-      {/* 漸層球 */}
-      <View pointerEvents="none" style={styles.heroBlob} />
       {eyebrow ? <Text style={styles.heroEyebrow}>{eyebrow}</Text> : null}
       <Text style={styles.heroTitle}>{title}</Text>
       {subtitle ? <Text style={styles.heroSub}>{subtitle}</Text> : null}
@@ -176,6 +208,7 @@ export function AISection({
   children: React.ReactNode;
   style?: ViewStyle;
 }) {
+  const styles = useVisualStyles();
   // 把 children 轉成 array 以便插入 first/last 標記
   const items = React.Children.toArray(children);
   return (
@@ -210,11 +243,11 @@ export function AICard({
   badge,
   badgeTone = 'ai',
   source,
-  confidence,
+  confidence: _confidence,
   children,
   onPress,
   onPin,
-  aiGenerated = false,
+  aiGenerated: _aiGenerated = false,
   style,
 }: {
   title?: string;
@@ -229,15 +262,9 @@ export function AICard({
   aiGenerated?: boolean;
   style?: ViewStyle;
 }) {
-  const Container: any = onPress ? TouchableOpacity : View;
+  const styles = useVisualStyles();
+  const Container = onPress ? TouchableOpacity : View;
   const containerProps = onPress ? { activeOpacity: 0.85, onPress } : {};
-
-  const confMap = {
-    high: { color: aiTokens.success, label: '已驗證 ✓' },
-    mid: { color: aiTokens.warning, label: '中信心 ●' },
-    low: { color: aiTokens.danger, label: '建議找真人 ⚠' },
-  };
-  const conf = confidence ? confMap[confidence] : null;
 
   const badgeMap = {
     ai: { bg: aiTokens.aiSoft, color: aiTokens.ai },
@@ -250,7 +277,6 @@ export function AICard({
 
   return (
     <Container {...containerProps} style={[styles.card, style]}>
-      {aiGenerated && <View style={styles.cardAiTop} />}
       {(title || icon || badge || onPin) && (
         <View style={styles.cardHeader}>
           {icon ? (
@@ -272,14 +298,9 @@ export function AICard({
         </View>
       )}
       <View style={styles.cardBody}>{children}</View>
-      {(source || conf) && (
+      {source && (
         <View style={styles.cardFooter}>
-          {source ? <Text style={styles.cardSource}>📡 {source}</Text> : <View />}
-          {conf && (
-            <View style={[styles.cardConf, { backgroundColor: conf.color + '20' }]}>
-              <Text style={[styles.cardConfText, { color: conf.color }]}>{conf.label}</Text>
-            </View>
-          )}
+          <Text style={styles.cardSource}>{source}</Text>
         </View>
       )}
     </Container>
@@ -310,6 +331,7 @@ export function AIRow({
   static?: boolean;
   disabled?: boolean;
 }) {
+  const styles = useVisualStyles();
   const tagMap = {
     ai: { bg: aiTokens.aiSoft, color: aiTokens.ai },
     success: { bg: aiTokens.successSoft, color: aiTokens.success },
@@ -397,9 +419,10 @@ export function AIButton({
   static?: boolean;
   disabled?: boolean;
 }) {
+  useVisualTheme();
   const variantMap = {
     // iOS Filled
-    primary: { bg: aiTokens.ai, fg: '#fff', border: aiTokens.ai },
+    primary: { bg: aiTokens.ai, fg: theme.colors.onAccent, border: aiTokens.ai },
     // iOS Bordered Plain
     ghost: { bg: aiTokens.surface, fg: aiTokens.text, border: aiTokens.border },
     // iOS Bordered Destructive
@@ -431,6 +454,7 @@ export function AIButton({
           borderWidth: 1,
           paddingHorizontal: sizing.paddingH,
           paddingVertical: sizing.paddingV,
+          minHeight: 44,
           borderRadius: aiTokens.radius.sm,
           flexDirection: 'row',
           alignItems: 'center',
@@ -459,6 +483,7 @@ export function AIChip({
   onPress?: () => void;
   active?: boolean;
 }) {
+  useVisualTheme();
   const chipInteractive = typeof onPress === 'function';
   return (
     <TouchableOpacity
@@ -510,181 +535,161 @@ export function AIChip({
 // ──────────────────────────────────────────────
 // Styles
 // ──────────────────────────────────────────────
-const styles = StyleSheet.create({
-  hero: {
-    margin: aiTokens.space.md,
-    marginTop: aiTokens.space.xl + 16,
-    padding: aiTokens.space.lg,
-    backgroundColor: aiTokens.aiGradientStart,
-    borderRadius: aiTokens.radius.lg,
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  heroBlob: {
-    position: 'absolute',
-    top: -40,
-    right: -40,
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    backgroundColor: aiTokens.ai,
-    opacity: 0.08,
-  },
-  heroEyebrow: {
-    fontSize: 11,
-    color: aiTokens.ai,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  } as TextStyle,
-  heroTitle: {
-    // iOS Large Title：34pt / 700 / letter-spacing -0.4
-    fontSize: 34,
-    fontWeight: '700',
-    color: aiTokens.text,
-    letterSpacing: -0.4,
-    marginTop: 6,
-    lineHeight: 41,
-  } as TextStyle,
-  heroSub: {
-    // iOS subhead：15pt / 20 line-height
-    fontSize: 15,
-    color: aiTokens.muted,
-    marginTop: 8,
-    lineHeight: 20,
-  },
+const createStyles = () =>
+  StyleSheet.create({
+    hero: {
+      margin: aiTokens.space.md,
+      marginTop: aiTokens.space.lg,
+      paddingVertical: aiTokens.space.md,
+      backgroundColor: aiTokens.bg,
+      borderRadius: aiTokens.radius.lg,
+      overflow: 'hidden',
+      position: 'relative',
+    },
+    heroEyebrow: {
+      fontSize: 11,
+      color: aiTokens.ai,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+      textTransform: 'uppercase',
+    } as TextStyle,
+    heroTitle: {
+      fontSize: theme.typography.hero.fontSize,
+      fontWeight: '600',
+      color: aiTokens.text,
+      letterSpacing: -0.4,
+      marginTop: 6,
+      lineHeight: theme.typography.hero.lineHeight,
+    } as TextStyle,
+    heroSub: {
+      // iOS subhead：15pt / 20 line-height
+      fontSize: 15,
+      color: aiTokens.muted,
+      marginTop: 8,
+      lineHeight: 20,
+    },
 
-  sectionHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: aiTokens.space.sm,
-    paddingHorizontal: aiTokens.space.xs,
-  },
-  sectionTitle: {
-    // iOS insetGrouped section header：13pt / 600 / uppercase / secondaryLabel
-    fontSize: 13,
-    fontWeight: '600',
-    color: aiTokens.textSecondary,
-    letterSpacing: 0.06,
-    textTransform: 'uppercase',
-  } as TextStyle,
-  sectionSub: {
-    fontSize: 13,
-    color: aiTokens.muted,
-    marginTop: 2,
-  },
-  // iOS insetGrouped 群組容器：圓角白底 + overflow hidden 把 row 分隔線切齊
-  sectionGroup: {
-    backgroundColor: aiTokens.surface,
-    borderRadius: aiTokens.radius.md,
-    overflow: 'hidden',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: aiTokens.border,
-  },
+    sectionHead: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: aiTokens.space.sm,
+      paddingHorizontal: aiTokens.space.xs,
+    },
+    sectionTitle: {
+      fontSize: 18,
+      fontWeight: '600',
+      color: aiTokens.text,
+      letterSpacing: 0,
+    } as TextStyle,
+    sectionSub: {
+      fontSize: 13,
+      color: aiTokens.muted,
+      marginTop: 2,
+    },
+    // iOS insetGrouped 群組容器：圓角白底 + overflow hidden 把 row 分隔線切齊
+    sectionGroup: {
+      backgroundColor: aiTokens.surface,
+      borderRadius: aiTokens.radius.md,
+      overflow: 'hidden',
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: aiTokens.border,
+    },
 
-  card: {
-    backgroundColor: aiTokens.surface,
-    borderRadius: aiTokens.radius.lg,
-    borderWidth: 1,
-    borderColor: aiTokens.border,
-    marginHorizontal: aiTokens.space.md,
-    marginBottom: aiTokens.space.sm,
-    padding: aiTokens.space.md,
-    overflow: 'hidden',
-  },
-  cardAiTop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 3,
-    backgroundColor: aiTokens.ai,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-    marginTop: 2,
-  },
-  cardIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    backgroundColor: aiTokens.aiSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 10,
-  },
-  cardTitle: {
-    flex: 1,
-    fontSize: 15,
-    fontWeight: '600',
-    color: aiTokens.text,
-  },
-  cardBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: aiTokens.radius.pill,
-  },
-  cardBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  cardBody: { gap: 4 },
-  cardFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 10,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: aiTokens.border,
-    borderStyle: 'dashed',
-  },
-  cardSource: { fontSize: 11, color: aiTokens.muted },
-  cardConf: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: aiTokens.radius.pill,
-  },
-  cardConfText: { fontSize: 10, fontWeight: '700' },
+    card: {
+      backgroundColor: aiTokens.surface,
+      borderRadius: aiTokens.radius.lg,
+      borderWidth: 1,
+      borderColor: aiTokens.border,
+      marginHorizontal: aiTokens.space.md,
+      marginBottom: aiTokens.space.sm,
+      padding: aiTokens.space.md,
+      overflow: 'hidden',
+    },
+    cardHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 10,
+      marginTop: 2,
+    },
+    cardIcon: {
+      width: 32,
+      height: 32,
+      borderRadius: 10,
+      backgroundColor: aiTokens.aiSoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 10,
+    },
+    cardTitle: {
+      flex: 1,
+      fontSize: 15,
+      fontWeight: '600',
+      color: aiTokens.text,
+    },
+    cardBadge: {
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: aiTokens.radius.pill,
+    },
+    cardBadgeText: {
+      fontSize: 11,
+      fontWeight: '700',
+    },
+    cardBody: { gap: 4 },
+    cardFooter: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginTop: 10,
+      paddingTop: 10,
+      borderTopWidth: 1,
+      borderTopColor: aiTokens.border,
+      borderStyle: 'solid',
+    },
+    cardSource: { fontSize: 11, color: aiTokens.muted },
+    cardConf: {
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: aiTokens.radius.pill,
+    },
+    cardConfText: { fontSize: 10, fontWeight: '700' },
 
-  row: {
-    // iOS Inset Cell：白底 + 圓角 + 細邊；卡與卡間距小（接近 insetGrouped 視覺）
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: aiTokens.space.md,
-    paddingVertical: 14,
-    minHeight: 44, // iOS HIG 觸控目標
-    backgroundColor: aiTokens.surface,
-    marginHorizontal: aiTokens.space.md,
-    borderRadius: aiTokens.radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: aiTokens.border,
-    marginBottom: 6,
-  },
-  rowTitle: {
-    // iOS body：15pt / 500 / label
-    fontSize: 15,
-    fontWeight: '500',
-    color: aiTokens.text,
-  },
-  rowSub: {
-    fontSize: 12,
-    color: aiTokens.muted,
-    marginTop: 2,
-  },
-  rowTag: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: aiTokens.radius.pill,
-    marginLeft: 8,
-  },
-  rowTagText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-});
+    row: {
+      // iOS Inset Cell：白底 + 圓角 + 細邊；卡與卡間距小（接近 insetGrouped 視覺）
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: aiTokens.space.md,
+      paddingVertical: 14,
+      minHeight: 44, // iOS HIG 觸控目標
+      backgroundColor: aiTokens.surface,
+      marginHorizontal: aiTokens.space.md,
+      borderRadius: aiTokens.radius.md,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: aiTokens.border,
+      marginBottom: 6,
+    },
+    rowTitle: {
+      // iOS body：15pt / 500 / label
+      fontSize: 15,
+      fontWeight: '500',
+      color: aiTokens.text,
+    },
+    rowSub: {
+      fontSize: 12,
+      color: aiTokens.muted,
+      marginTop: 2,
+    },
+    rowTag: {
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: aiTokens.radius.pill,
+      marginLeft: 8,
+    },
+    rowTagText: {
+      fontSize: 11,
+      fontWeight: '700',
+    },
+  });
 
 // ──────────────────────────────────────────────
 // AIDetailHeader — 子畫面頂部（返回 + 標題 + 右側）
@@ -700,8 +705,11 @@ export function AIDetailHeader({
   onBack?: () => void;
   rightAction?: React.ReactNode;
 }) {
+  const version = useVisualTheme();
+  const detailStyles = useMemo(createDetailStyles, [version]);
+  const insets = useSafeAreaInsets();
   return (
-    <View style={detailStyles.header}>
+    <View style={[detailStyles.header, { paddingTop: insets.top + 12 }]}>
       {onBack ? (
         // iOS Nav Bar Back Button：chevron-back + tint accent
         <TouchableOpacity
@@ -749,15 +757,11 @@ export function AIDetailScreen({
   children: React.ReactNode;
   bottomPadding?: number;
 }) {
+  useVisualTheme();
   const defaultPadding = useTabBarContentBottomPadding();
   return (
     <View style={{ flex: 1, backgroundColor: aiTokens.bg }}>
-      <AIDetailHeader
-        title={title}
-        subtitle={subtitle}
-        onBack={onBack}
-        rightAction={rightAction}
-      />
+      <AIDetailHeader title={title} subtitle={subtitle} onBack={onBack} rightAction={rightAction} />
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: bottomPadding ?? defaultPadding }}
@@ -775,18 +779,13 @@ export function AIDetailScreen({
 export function AIInsightBanner({
   text,
   source,
-  confidence = 'high',
+  confidence: _confidence,
 }: {
   text: string;
   source?: string;
   confidence?: 'high' | 'mid' | 'low';
 }) {
-  const confMap = {
-    high: { color: aiTokens.success, label: '高信心 ✓' },
-    mid: { color: aiTokens.warning, label: '中信心 ●' },
-    low: { color: aiTokens.danger, label: '低信心 ⚠' },
-  };
-  const c = confMap[confidence];
+  useVisualTheme();
   return (
     <View
       style={{
@@ -804,25 +803,13 @@ export function AIInsightBanner({
       <AIMark size={28} />
       <View style={{ flex: 1 }}>
         <Text style={{ fontSize: 11, color: aiTokens.ai, fontWeight: '700', letterSpacing: 0.4 }}>
-          AI 摘要
+          摘要
         </Text>
         <Text style={{ fontSize: 13, color: aiTokens.text, marginTop: 4, lineHeight: 19 }}>
           {text}
         </Text>
         <View style={{ flexDirection: 'row', marginTop: 8, alignItems: 'center', gap: 8 }}>
-          {source ? (
-            <Text style={{ fontSize: 10, color: aiTokens.muted }}>📡 {source}</Text>
-          ) : null}
-          <View
-            style={{
-              paddingHorizontal: 6,
-              paddingVertical: 2,
-              borderRadius: aiTokens.radius.pill,
-              backgroundColor: c.color + '20',
-            }}
-          >
-            <Text style={{ fontSize: 9, color: c.color, fontWeight: '700' }}>{c.label}</Text>
-          </View>
+          {source ? <Text style={{ fontSize: 11, color: aiTokens.muted }}>{source}</Text> : null}
         </View>
       </View>
     </View>
@@ -843,6 +830,7 @@ export function AIEmptyState({
   subtitle?: string;
   action?: React.ReactNode;
 }) {
+  useVisualTheme();
   return (
     <View
       style={{
@@ -891,34 +879,34 @@ export function AILegacyLink(_props: { label?: string; onPress?: () => void }) {
   return null;
 }
 
-const detailStyles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: aiTokens.space.sm,
-    paddingTop: 56, // safe area for notch
-    paddingBottom: 12,
-    backgroundColor: aiTokens.bg,
-    borderBottomWidth: 1,
-    borderBottomColor: aiTokens.border,
-  },
-  backBtn: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  title: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: aiTokens.text,
-    letterSpacing: -0.2,
-    textAlign: 'center',
-  } as TextStyle,
-  subtitle: {
-    fontSize: 11,
-    color: aiTokens.muted,
-    textAlign: 'center',
-    marginTop: 2,
-  },
-});
+const createDetailStyles = () =>
+  StyleSheet.create({
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: aiTokens.space.sm,
+      paddingBottom: 12,
+      backgroundColor: aiTokens.bg,
+      borderBottomWidth: 1,
+      borderBottomColor: aiTokens.border,
+    },
+    backBtn: {
+      width: 44,
+      height: 44,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    title: {
+      fontSize: 17,
+      fontWeight: '600',
+      color: aiTokens.text,
+      letterSpacing: -0.2,
+      textAlign: 'center',
+    } as TextStyle,
+    subtitle: {
+      fontSize: 11,
+      color: aiTokens.muted,
+      textAlign: 'center',
+      marginTop: 2,
+    },
+  });

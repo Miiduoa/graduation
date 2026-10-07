@@ -15,8 +15,11 @@ import { loadStudentHome } from '../data/studentHome';
 import type { CourseSpace, InboxTask } from '../data/types';
 import { safeNavigate } from '../utils/safeNavigate';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
+import { theme } from '../ui/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 
 export default function StudentTodayScreen() {
+  const s = useThemeStyleSheet(createStyles);
   const auth = useAuth();
   const navigation = useNavigation();
   const bottom = useTabBarContentBottomPadding();
@@ -59,7 +62,7 @@ export default function StudentTodayScreen() {
       <ScrollView
         contentContainerStyle={{ padding: 22, paddingBottom: bottom + 24 }}
         refreshControl={
-          <RefreshControl refreshing={loading} onRefresh={load} tintColor="#28483b" />
+          <RefreshControl refreshing={loading} onRefresh={load} tintColor={theme.colors.accent} />
         }
       >
         <Text style={s.brand}>CAMPUS ONE</Text>
@@ -74,7 +77,7 @@ export default function StudentTodayScreen() {
           </View>
         )}
         {loading && !data ? (
-          <ActivityIndicator color="#28483b" style={{ marginVertical: 36 }} />
+          <ActivityIndicator color={theme.colors.accent} style={{ marginVertical: 36 }} />
         ) : (
           <>
             <View style={s.focus}>
@@ -170,69 +173,87 @@ export default function StudentTodayScreen() {
     </SafeAreaView>
   );
 }
-const s = StyleSheet.create({
-  page: { flex: 1, backgroundColor: '#f8f7f3' },
-  brand: { fontSize: 12, fontWeight: '700', letterSpacing: 2, color: '#526750', marginBottom: 28 },
-  heading: { color: '#243b35', fontSize: 28, fontWeight: '600', letterSpacing: -1 },
-  caption: { color: '#626e67', fontSize: 13, marginTop: 10, marginBottom: 26 },
-  focus: {
-    backgroundColor: '#e6ece5',
-    borderColor: '#d4ded3',
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 24,
-  },
-  label: { color: '#526750', fontSize: 11, letterSpacing: 1 },
-  focusTitle: { color: '#243b35', fontSize: 25, fontWeight: '600', marginVertical: 14 },
-  focusBody: { color: '#526750', fontSize: 13, lineHeight: 22 },
-  primary: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#28483b',
-    borderRadius: 4,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    marginTop: 22,
-  },
-  primaryText: { color: '#fff', fontSize: 13, fontWeight: '600' },
-  sectionTitle: {
-    color: '#243b35',
-    fontSize: 18,
-    fontWeight: '600',
-    marginTop: 32,
-    marginBottom: 12,
-  },
-  task: {
-    flexDirection: 'row',
-    gap: 12,
-    alignItems: 'center',
-    paddingVertical: 18,
-    borderBottomWidth: 1,
-    borderBottomColor: '#dddeda',
-  },
-  square: { width: 16, height: 16, borderWidth: 1, borderColor: '#a8b5a7', borderRadius: 3 },
-  taskTitle: { fontSize: 14, fontWeight: '600', color: '#243b35', lineHeight: 22 },
-  taskMeta: { fontSize: 12, color: '#626e67', marginTop: 5 },
-  arrow: { color: '#626e67', fontSize: 19 },
-  course: {
-    backgroundColor: '#fffefa',
-    borderWidth: 1,
-    borderColor: '#dddeda',
-    borderRadius: 6,
-    padding: 20,
-    marginBottom: 10,
-  },
-  courseTitle: { color: '#243b35', fontWeight: '600', fontSize: 17, marginTop: 9 },
-  empty: { color: '#626e67', fontSize: 13, lineHeight: 23, paddingVertical: 16 },
-  tools: { borderTopWidth: 1, borderTopColor: '#dddeda', marginTop: 30 },
-  tool: {
-    paddingVertical: 18,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    borderBottomWidth: 1,
-    borderBottomColor: '#dddeda',
-  },
-  toolText: { color: '#243b35', fontSize: 14 },
-  error: { padding: 16, backgroundColor: '#fff0e7', marginBottom: 18, borderRadius: 4 },
-  errorText: { color: '#8b361d', fontSize: 13, lineHeight: 22 },
-  link: { color: '#28483b', marginTop: 10, fontWeight: '600' },
-});
+const createStyles = () =>
+  StyleSheet.create({
+    page: { flex: 1, backgroundColor: theme.colors.bg },
+    brand: {
+      fontSize: 12,
+      fontWeight: '700',
+      letterSpacing: 2,
+      color: theme.colors.textSecondary,
+      marginBottom: 28,
+    },
+    heading: { color: theme.colors.text, fontSize: 28, fontWeight: '600', letterSpacing: -1 },
+    caption: { color: theme.colors.muted, fontSize: 13, marginTop: 10, marginBottom: 26 },
+    focus: {
+      backgroundColor: theme.colors.focusSurface,
+      borderColor: theme.colors.border,
+      borderWidth: 1,
+      borderRadius: 8,
+      padding: 24,
+    },
+    label: { color: theme.colors.textSecondary, fontSize: 11, letterSpacing: 1 },
+    focusTitle: { color: theme.colors.text, fontSize: 25, fontWeight: '600', marginVertical: 14 },
+    focusBody: { color: theme.colors.textSecondary, fontSize: 13, lineHeight: 22 },
+    primary: {
+      alignSelf: 'flex-start',
+      backgroundColor: theme.colors.accent,
+      borderRadius: 4,
+      paddingHorizontal: 18,
+      paddingVertical: 12,
+      marginTop: 22,
+    },
+    primaryText: { color: theme.colors.onAccent, fontSize: 13, fontWeight: '600' },
+    sectionTitle: {
+      color: theme.colors.text,
+      fontSize: 18,
+      fontWeight: '600',
+      marginTop: 32,
+      marginBottom: 12,
+    },
+    task: {
+      flexDirection: 'row',
+      gap: 12,
+      alignItems: 'center',
+      paddingVertical: 18,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    square: {
+      width: 16,
+      height: 16,
+      borderWidth: 1,
+      borderColor: theme.colors.muted,
+      borderRadius: 3,
+    },
+    taskTitle: { fontSize: 14, fontWeight: '600', color: theme.colors.text, lineHeight: 22 },
+    taskMeta: { fontSize: 12, color: theme.colors.muted, marginTop: 5 },
+    arrow: { color: theme.colors.muted, fontSize: 19 },
+    course: {
+      backgroundColor: theme.colors.surface,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: 6,
+      padding: 20,
+      marginBottom: 10,
+    },
+    courseTitle: { color: theme.colors.text, fontWeight: '600', fontSize: 17, marginTop: 9 },
+    empty: { color: theme.colors.muted, fontSize: 13, lineHeight: 23, paddingVertical: 16 },
+    tools: { borderTopWidth: 1, borderTopColor: theme.colors.border, marginTop: 30 },
+    tool: {
+      paddingVertical: 18,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    toolText: { color: theme.colors.text, fontSize: 14 },
+    error: {
+      padding: 16,
+      backgroundColor: theme.colors.dangerSoft,
+      marginBottom: 18,
+      borderRadius: 4,
+    },
+    errorText: { color: theme.colors.text, fontSize: 13, lineHeight: 22 },
+    link: { color: theme.colors.accent, marginTop: 10, fontWeight: '600' },
+  });

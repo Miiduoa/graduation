@@ -170,7 +170,7 @@ function getFileColor(name: string): string {
   if (lower.endsWith('.pdf')) return '#D70015';
   if (lower.endsWith('.pptx') || lower.endsWith('.ppt')) return '#FF9500';
   if (lower.endsWith('.mp4') || lower.endsWith('.mov')) return '#AF52DE';
-  if (lower.endsWith('.docx') || lower.endsWith('.doc')) return '#5856D6';
+  if (lower.endsWith('.docx') || lower.endsWith('.doc')) return theme.colors.info;
   if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) return '#34C759';
   if (
     lower.endsWith('.jpg') ||
@@ -379,7 +379,7 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
     statusText = `${score} 分`;
     statusIcon = 'checkmark-circle';
   } else if (isSubmitted) {
-    statusColor = '#5856D6';
+    statusColor = theme.colors.success;
     statusText = '已交卷';
     statusIcon = 'checkmark-done-outline';
   } else if (isEnded) {

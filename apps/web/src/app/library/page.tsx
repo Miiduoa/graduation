@@ -1,7 +1,7 @@
 // @ts-nocheck — pre-existing type breakage from main; mobile demoStore PR 範圍外
 'use client';
 
-import { useState, useMemo, type CSSProperties } from 'react';
+import { use, useState, useMemo, type CSSProperties } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { useToast, Modal } from '@/components/ui';
@@ -50,7 +50,7 @@ function daysFromToday(n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-// 與 AI 助理 context 連動：書名與到期日為 demo 固定資料（日期動態計算）
+// 與 校園助理 context 連動：書名與到期日為 demo 固定資料（日期動態計算）
 const DEFAULT_BORROWED: BorrowedBook[] = [
   {
     id: '1',
@@ -220,7 +220,7 @@ function SearchTab({
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
                     <Link
                       href={`/ai-assistant${schoolQ ? schoolQ + '&' : '?'}q=${encodeURIComponent(`幫我推薦類似《${book.title}》的書`)}`}
-                      title="問 AI 推薦類似書籍"
+                      title="查詢類似書籍"
                       style={{
                         padding: '6px 8px',
                         fontSize: 14,
@@ -264,9 +264,10 @@ function SearchTab({
 }
 
 export default function LibraryPage(props: {
-  searchParams?: { school?: string; schoolId?: string };
+  searchParams?: Promise<{ school?: string; schoolId?: string }>;
 }) {
-  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const searchParams = props.searchParams ? use(props.searchParams) : undefined;
+  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
   const [activeTab, setActiveTab] = useState<Tab>('borrow');
   const [searchQuery, setSearchQuery] = useState('');
   const { success, info } = useToast();
@@ -316,12 +317,12 @@ export default function LibraryPage(props: {
             <div className="metricValue">{caps.canBorrowBooks ? urgentBooks : 0}</div>
             <div className="metricLabel">即將到期</div>
           </div>
-          <div className="metricCard" style={{ '--tone': '#34C759' } as CSSProperties}>
+          <div className="metricCard" style={{ '--tone': 'var(--success)' } as CSSProperties}>
             <div className="metricIcon">🪑</div>
             <div className="metricValue">{totalAvailable}</div>
             <div className="metricLabel">可用座位</div>
           </div>
-          <div className="metricCard" style={{ '--tone': '#5856D6' } as CSSProperties}>
+          <div className="metricCard" style={{ '--tone': 'var(--brand)' } as CSSProperties}>
             <div className="metricIcon">🕐</div>
             <div className="metricValue">22:00</div>
             <div className="metricLabel">今日關閉</div>
@@ -334,8 +335,8 @@ export default function LibraryPage(props: {
             className="card"
             style={{
               padding: '14px 18px',
-              background: 'linear-gradient(135deg, rgba(255,59,48,0.08) 0%, rgba(255,149,0,0.06) 100%)',
-              border: '1px solid rgba(255,59,48,0.25)',
+              background: 'linear-gradient(135deg, var(--danger-soft) 0%, var(--warning-soft) 100%)',
+              border: '1px solid var(--danger-soft)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
@@ -406,10 +407,10 @@ export default function LibraryPage(props: {
           <div className="pageStack">
             {/* 非學生角色：提示這是示範學生的借閱視角 */}
             {demoRole !== 'student' && (
-              <div className="card" style={{ padding: '12px 16px', background: 'rgba(88,86,214,0.08)', border: '1px solid rgba(88,86,214,0.25)', fontSize: 13 }}>
+              <div className="card" style={{ padding: '12px 16px', background: 'var(--accent-soft)', border: '1px solid var(--accent-soft)', fontSize: 13 }}>
                 📋 <strong>{roleDef.label}視角</strong> · 以下顯示示範學生（王小明）的借閱紀錄，正式版將連結個人圖書館帳號。
                 <Link href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('幫我推薦一份適合教學參考的書單')}`} style={{ marginLeft: 10, color: 'var(--brand)' }}>
-                  問 AI 推薦書單 →
+                  查詢推薦書單 →
                 </Link>
               </div>
             )}
@@ -419,7 +420,7 @@ export default function LibraryPage(props: {
                   padding: '14px 16px',
                   borderRadius: 'var(--radius-sm)',
                   background: 'var(--danger-soft)',
-                  border: '1px solid rgba(255,59,48,0.18)',
+                  border: '1px solid var(--danger-soft)',
                   display: 'flex',
                   alignItems: 'center',
                   gap: 10,

@@ -65,7 +65,7 @@ export function createTabScreenOptions(_routeName: string): BottomTabNavigationO
       paddingHorizontal: 6,
       borderWidth: 1,
       borderColor: theme.colors.chromeTabBorder,
-      ...shadowStyle(theme.shadows.lg),
+      ...shadowStyle(theme.shadows.sm),
     },
     tabBarLabelStyle: {
       fontSize: 10,

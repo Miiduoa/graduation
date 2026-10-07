@@ -222,7 +222,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
               justifyContent: 'center',
               background: 'var(--surface)',
               fontSize: 24,
-              color: 'var(--brand, #5856D6)',
+              color: 'var(--brand, var(--brand))',
               fontWeight: 700,
             }}
           >
@@ -259,12 +259,12 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
                     width: 60,
                     height: 60,
                     borderRadius: '50%',
-                    border: '2px solid var(--brand, #5856D6)',
+                    border: '2px solid var(--brand, var(--brand))',
                     padding: 3,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    background: av ? '#fff' : 'var(--brand, #5856D6)',
+                    background: av ? '#fff' : 'var(--brand, var(--brand))',
                     color: '#fff',
                     overflow: 'hidden',
                     fontSize: 20,
@@ -310,8 +310,8 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
                 gap: 5,
                 padding: '7px 14px',
                 borderRadius: 999,
-                border: active ? '1px solid var(--brand, #5856D6)' : '1px solid var(--border)',
-                background: active ? 'var(--brand, #5856D6)' : 'var(--surface)',
+                border: active ? '1px solid var(--brand, var(--brand))' : '1px solid var(--border)',
+                background: active ? 'var(--brand, var(--brand))' : 'var(--surface)',
                 color: active ? '#fff' : 'var(--text)',
                 cursor: 'pointer',
                 fontSize: 13,
@@ -385,7 +385,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
                       width: 38,
                       height: 38,
                       borderRadius: '50%',
-                      background: item.anonymous ? 'var(--panel2, #F2F2F7)' : 'var(--brand, #5856D6)',
+                      background: item.anonymous ? 'var(--panel2, #F2F2F7)' : 'var(--brand, var(--brand))',
                       color: '#fff',
                       display: 'flex',
                       alignItems: 'center',
@@ -409,7 +409,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
                     </div>
                     <Link
                       href={`/community/board/${item.boardId}`}
-                      style={{ fontSize: 12, color: 'var(--brand, #5856D6)', fontWeight: 700, textDecoration: 'none' }}
+                      style={{ fontSize: 12, color: 'var(--brand, var(--brand))', fontWeight: 700, textDecoration: 'none' }}
                     >
                       ＃{board}
                     </Link>
@@ -446,8 +446,8 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
                         key={t}
                         style={{
                           fontSize: 11,
-                          color: 'var(--brand, #5856D6)',
-                          background: 'rgba(88,86,214,0.10)',
+                          color: 'var(--brand, var(--brand))',
+                          background: 'var(--accent-soft)',
                           padding: '2px 8px',
                           borderRadius: 999,
                           fontWeight: 700,
@@ -485,7 +485,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
                       gap: 5,
                       fontSize: 13,
                       fontWeight: 700,
-                      color: liked ? 'var(--danger, #FF3B30)' : 'var(--muted)',
+                      color: liked ? 'var(--danger, var(--danger))' : 'var(--muted)',
                     }}
                   >
                     {liked ? '❤️' : '🤍'} {likesOf(item)}

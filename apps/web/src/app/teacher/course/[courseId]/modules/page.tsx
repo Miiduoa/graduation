@@ -8,7 +8,7 @@
  * 全部走本地 state 即可，demo 不需 backend。
  */
 import Link from 'next/link';
-import { useState } from 'react';
+import { use, useState } from 'react';
 
 import { SiteShell } from '@/components/SiteShell';
 import { Modal, useToast } from '@/components/ui';
@@ -60,7 +60,9 @@ const MOCK: ModuleRow[] = [
   },
 ];
 
-export default function TeacherModulesPage({ params, searchParams }: { params: { courseId: string }; searchParams?: { school?: string; schoolId?: string } }) {
+export default function TeacherModulesPage({ params: paramsPromise, searchParams: searchParamsPromise }: { params: Promise<{ courseId: string }>; searchParams?: Promise<{ school?: string; schoolId?: string }> }) {
+  const params = use(paramsPromise);
+  const searchParams = searchParamsPromise ? use(searchParamsPromise) : undefined;
   const { schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
   const [demoRole] = useDemoRole();
   const caps = getCapabilities(demoRole);
@@ -183,9 +185,9 @@ export default function TeacherModulesPage({ params, searchParams }: { params: {
           <div
             style={{
               padding: '10px 14px', borderRadius: 8, fontSize: 13, marginBottom: 20,
-              background: isTaView ? 'rgba(124,58,237,0.10)' : 'rgba(255,149,0,0.10)',
-              border: `1px solid ${isTaView ? '#AF52DE' : '#FF9500'}`,
-              color: isTaView ? '#5856D6' : '#92400E',
+              background: isTaView ? 'var(--accent-soft)' : 'var(--warning-soft)',
+              border: `1px solid ${isTaView ? 'var(--brand)' : 'var(--warning)'}`,
+              color: isTaView ? 'var(--brand)' : '#92400E',
             }}
           >
             {isTaView
@@ -272,8 +274,8 @@ export default function TeacherModulesPage({ params, searchParams }: { params: {
             marginTop: 20,
             padding: '14px 18px',
             borderRadius: 12,
-            background: 'rgba(88,86,214,0.08)',
-            border: '1px solid #5856D6',
+            background: 'var(--accent-soft)',
+            border: '1px solid var(--brand)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -282,7 +284,7 @@ export default function TeacherModulesPage({ params, searchParams }: { params: {
           }}
         >
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#5856D6', marginBottom: 3 }}>🤖 AI 教材助理</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand)', marginBottom: 3 }}>🤖 AI 教材助理</div>
             <div style={{ fontSize: 13, color: '#3C3C43' }}>
               讓 AI 幫你生成本週課程簡介、學習目標，或根據大綱草擬教材結構。
             </div>

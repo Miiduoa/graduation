@@ -171,7 +171,7 @@ function getCategoryColor(category: Transaction['category']): string {
     case 'meal':
       return '#FF9500';
     case 'print':
-      return '#5856D6';
+      return theme.colors.accent;
     case 'laundry':
       return '#06B6D4';
     case 'vending':

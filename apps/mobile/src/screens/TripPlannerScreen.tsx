@@ -94,7 +94,7 @@ type PlanStep = {
 
 const MODE_CONFIG: Record<TravelMode, { icon: string; label: string; color: string; mPerMin: number }> = {
   walk: { icon: 'walk-outline', label: '走路', color: '#34C759', mPerMin: 75 },
-  bus: { icon: 'bus-outline', label: '公車', color: '#5856D6', mPerMin: 350 },
+  bus: { icon: 'bus-outline', label: '公車', color: theme.colors.accent, mPerMin: 350 },
   bike: { icon: 'bicycle-outline', label: '騎車', color: '#FF9500', mPerMin: 250 },
   drive: { icon: 'car-outline', label: '開車', color: '#AF52DE', mPerMin: 500 },
 };
@@ -234,12 +234,12 @@ function EndpointPicker({
                   width: 28,
                   height: 28,
                   borderRadius: 14,
-                  backgroundColor: '#5856D622',
+                  backgroundColor: theme.colors.accentSoft,
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}
               >
-                <Ionicons name="locate" size={15} color="#5856D6" />
+                <Ionicons name="locate" size={15} color={theme.colors.accent} />
               </View>
               <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: '600' }}>
                 我的位置

@@ -926,3 +926,195 @@ describe('course assignment submissions', () => {
     await assertSucceeds(ref.set(answer({ content: '', attachments: [{ url: 'https://example.test/answer.pdf' }] })));
   });
 });
+
+describe('protected attendance records', () => {
+  async function seedAttendance() {
+    await seedFirestore(async (db) => {
+      const group = db.collection('groups').doc('attendance-class');
+      await group.set({ schoolId: 'tw-demo-uni' });
+      for (const [uid, role, status = 'active'] of [
+        ['alice', 'student'], ['bob', 'student'], ['teacher', 'instructor'],
+        ['owner', 'owner'], ['admin', 'admin'], ['removed', 'instructor', 'inactive'],
+      ]) {
+        await group.collection('members').doc(uid).set({ role, status });
+      }
+      for (const collection of ['liveSessions', 'attendanceSessions']) {
+        await group.collection(collection).doc('current').set({
+          schemaVersion: 2, teacherId: 'teacher', active: true, attendeeCount: 1,
+          startedAt: new Date(), qrExpiresAt: new Date(Date.now() + 300_000),
+        });
+        await group.collection(collection).doc('legacy').set({
+          teacherId: 'teacher', active: true, qrToken: 'previously-public-token', attendees: { alice: new Date() },
+        });
+      }
+      await group.collection('liveSessionSecrets').doc('current').set({ teacherId: 'teacher', qrToken: 'private-token', qrExpiresAt: new Date(Date.now() + 300_000) });
+      await group.collection('attendanceSessions').doc('current').collection('attendanceRecords').doc('alice').set({
+        uid: 'alice', status: 'present', checkedInAt: new Date(),
+      });
+      await group.collection('attendanceSessions').doc('current').collection('attendanceRecords').doc('bob').set({
+        uid: 'bob', status: 'present', checkedInAt: new Date(),
+      });
+    });
+  }
+  const group = (uid) => testEnv.authenticatedContext(uid).firestore().collection('groups').doc('attendance-class');
+
+  test('students read only safe metadata and their own attendance', async () => {
+    await seedAttendance();
+    await assertSucceeds(group('alice').collection('liveSessions').doc('current').get());
+    await assertSucceeds(group('alice').collection('attendanceSessions').doc('current').get());
+    const records = group('alice').collection('attendanceSessions').doc('current').collection('attendanceRecords');
+    await assertSucceeds(records.doc('alice').get());
+    await assertFails(records.doc('bob').get());
+    await assertFails(records.get());
+    await assertFails(group('alice').collection('liveSessionSecrets').doc('current').get());
+    await assertFails(group('alice').collection('liveSessionSecrets').get());
+    await assertFails(group('outsider').collection('liveSessions').doc('current').get());
+    await assertFails(group('removed').collection('liveSessions').doc('current').get());
+    await assertFails(group('removed').collection('attendanceSessions').doc('current').collection('attendanceRecords').doc('removed').get());
+  });
+
+  test('metadata queries must select the safe version; legacy secrets remain unreadable', async () => {
+    await seedAttendance();
+    for (const collection of ['liveSessions', 'attendanceSessions']) {
+      await assertSucceeds(group('alice').collection(collection).where('schemaVersion', '==', 2).orderBy('startedAt', 'desc').limit(50).get());
+      await assertFails(group('alice').collection(collection).get());
+      await assertFails(group('alice').collection(collection).doc('legacy').get());
+      await assertFails(group('teacher').collection(collection).doc('legacy').get());
+    }
+  });
+
+  test('active instructors can read secrets and managers can read the roster', async () => {
+    await seedAttendance();
+    for (const uid of ['teacher', 'owner']) {
+      await assertSucceeds(group(uid).collection('liveSessionSecrets').doc('current').get());
+    }
+    for (const uid of ['teacher', 'owner', 'admin']) {
+      await assertSucceeds(group(uid).collection('attendanceSessions').doc('current').collection('attendanceRecords').get());
+    }
+    await assertFails(group('admin').collection('liveSessionSecrets').doc('current').get());
+    await assertFails(group('removed').collection('liveSessionSecrets').doc('current').get());
+  });
+
+  test('even instructors cannot create, rewrite or delete canonical attendance documents', async () => {
+    await seedAttendance();
+    for (const uid of ['alice', 'teacher', 'owner', 'admin']) {
+      for (const collection of ['liveSessions', 'attendanceSessions', 'liveSessionSecrets']) {
+        const sessions = group(uid).collection(collection);
+        await assertFails(sessions.doc('forged').set({ schemaVersion: 2, teacherId: uid, active: true }));
+        await assertFails(sessions.doc('current').update({ active: false }));
+        await assertFails(sessions.doc('current').delete());
+      }
+      const records = group(uid).collection('attendanceSessions').doc('current').collection('attendanceRecords');
+      await assertFails(records.doc('new-student').set({ uid: 'new-student', status: 'present' }));
+      await assertFails(records.doc('alice').update({ checkedInAt: new Date(0) }));
+      await assertFails(records.doc('alice').delete());
+    }
+  });
+
+  test('live questions and teacher polls remain available to existing clients', async () => {
+    await seedAttendance();
+    const studentSession = group('alice').collection('liveSessions').doc('current');
+    await assertSucceeds(studentSession.collection('questions').doc('q1').set({ authorId: 'alice', text: '請再說明一次', answered: false }));
+    await assertSucceeds(group('teacher').collection('liveSessions').doc('current').collection('polls').doc('p1').set({ title: '選擇答案', options: ['甲', '乙'] }));
+    await assertSucceeds(studentSession.collection('polls').doc('p1').get());
+  });
+});
+
+describe('attendance transactions on Firestore', () => {
+  const assert = require('node:assert/strict');
+  const requireFunctions = require('node:module').createRequire(path.resolve(__dirname, '../functions/package.json'));
+  const { initializeApp, deleteApp } = requireFunctions('firebase-admin/app');
+  const { getFirestore } = requireFunctions('firebase-admin/firestore');
+  const { createLiveSessionHandlers } = require('../functions/attendanceSessions');
+  let app;
+  let db;
+  let handlers;
+  let currentTime;
+  let notifications;
+  const startRequest = (data = {}) => ({ auth: { uid: 'teacher' }, data: { groupId: 'transaction-class', requestId: 'start-1', ...data } });
+  const request = (session, uid = 'alice') => ({ auth: { uid }, data: { groupId: 'transaction-class', sessionId: session.sessionId, qrToken: session.qrToken } });
+  const base = 'groups/transaction-class';
+  const sessionDoc = (session, collection) => db.doc(`${base}/${collection}/${session.sessionId}`);
+
+  before(() => {
+    // These Admin SDK tests must never fall through to a real Firebase project.
+    if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error('FIRESTORE_EMULATOR_HOST is required');
+    app = initializeApp({ projectId }, 'attendance-transaction-tests');
+    db = getFirestore(app);
+  });
+  beforeEach(async () => {
+    currentTime = Date.now();
+    notifications = 0;
+    handlers = createLiveSessionHandlers({ db, now: () => currentTime, notifyStarted: async () => { notifications++; } });
+    await db.doc(base).set({ name: '交易測試課程' });
+    await db.doc(`${base}/members/teacher`).set({ role: 'instructor', status: 'active' });
+    for (const uid of ['alice', 'bob', 'carol']) await db.doc(`${base}/members/${uid}`).set({ role: 'student', status: 'active', displayName: uid });
+  });
+  after(async () => { if (app) await deleteApp(app); });
+
+  test('parallel starts with the same key create one synchronized session', async () => {
+    const starts = await Promise.all(Array.from({ length: 4 }, () => handlers.startLiveSession(startRequest())));
+    assert.equal(new Set(starts.map((session) => session.sessionId)).size, 1);
+    assert.equal(starts.filter((session) => !session.reused).length, 1);
+    assert.equal(notifications, 1);
+    const [live, attendance, secrets] = await Promise.all(['liveSessions', 'attendanceSessions', 'liveSessionSecrets'].map((collection) => db.collection(`${base}/${collection}`).get()));
+    assert.equal(live.size, 1);
+    assert.equal(attendance.size, 1);
+    assert.equal(secrets.size, 1);
+    assert.equal(live.docs[0].data().startedAt.toMillis(), attendance.docs[0].data().startedAt.toMillis());
+    assert.equal(live.docs[0].data().qrToken, undefined);
+    assert.equal(attendance.docs[0].data().qrToken, undefined);
+  });
+
+  test('concurrent retrying students each increment both counters once and keep their first check-in', async () => {
+    const session = await handlers.startLiveSession(startRequest());
+    const initial = await handlers.joinLiveSession(request(session));
+    currentTime += 1000;
+    const joins = await Promise.all(['alice', 'alice', 'bob', 'bob', 'carol'].map((uid) => handlers.joinLiveSession(request(session, uid))));
+    assert.equal(joins[0].checkedInAt, initial.checkedInAt);
+    assert.equal(joins[1].checkedInAt, initial.checkedInAt);
+    const live = (await sessionDoc(session, 'liveSessions').get()).data();
+    const attendance = (await sessionDoc(session, 'attendanceSessions').get()).data();
+    const records = await sessionDoc(session, 'attendanceSessions').collection('attendanceRecords').get();
+    assert.equal(live.attendeeCount, 3);
+    assert.equal(attendance.attendeeCount, 3);
+    assert.equal(records.size, 3);
+    assert.equal(live.attendees, undefined);
+    assert.equal(attendance.attendees, undefined);
+    assert.equal(records.docs.find((doc) => doc.id === 'alice').data().checkedInAt.toDate().toISOString(), initial.checkedInAt);
+  });
+
+  test('closing races with a join without splitting status, counts or attendance records', async () => {
+    const session = await handlers.startLiveSession(startRequest());
+    const [join, end] = await Promise.allSettled([
+      handlers.joinLiveSession(request(session)),
+      handlers.endLiveSession(request(session, 'teacher')),
+    ]);
+    assert.equal(end.status, 'fulfilled');
+    if (join.status === 'rejected') assert.equal(join.reason.code, 'failed-precondition');
+    const live = (await sessionDoc(session, 'liveSessions').get()).data();
+    const attendance = (await sessionDoc(session, 'attendanceSessions').get()).data();
+    const records = await sessionDoc(session, 'attendanceSessions').collection('attendanceRecords').get();
+    assert.equal(live.active, false);
+    assert.equal(attendance.active, false);
+    assert.equal(live.endedAt.toMillis(), attendance.endedAt.toMillis());
+    assert.equal(live.attendeeCount, records.size);
+    assert.equal(attendance.attendeeCount, records.size);
+    await assert.rejects(handlers.joinLiveSession(request(session, 'bob')), { code: 'failed-precondition' });
+    const retry = await handlers.startLiveSession(startRequest());
+    assert.equal(retry.active, false);
+    assert.equal(retry.reused, true);
+  });
+
+  test('revocation and token expiry are checked before any new attendance write', async () => {
+    const session = await handlers.startLiveSession(startRequest());
+    await db.doc(`${base}/members/alice`).update({ status: 'inactive' });
+    await assert.rejects(handlers.joinLiveSession(request(session)), { code: 'permission-denied' });
+    currentTime += 300_000;
+    await assert.rejects(handlers.joinLiveSession(request(session, 'bob')), { code: 'deadline-exceeded' });
+    await db.doc(`${base}/members/teacher`).update({ status: 'inactive' });
+    await assert.rejects(handlers.endLiveSession(request(session, 'teacher')), { code: 'permission-denied' });
+    assert.equal((await sessionDoc(session, 'attendanceSessions').collection('attendanceRecords').get()).size, 0);
+    assert.equal((await sessionDoc(session, 'liveSessions').get()).data().attendeeCount, 0);
+  });
+});

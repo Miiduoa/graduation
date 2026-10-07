@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { use, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
 import { useToast, Modal } from '@/components/ui';
@@ -41,12 +41,12 @@ interface Club {
 }
 
 const CLUB_COLORS = [
-  '#5856D6',
+  'var(--brand)',
   '#BF5AF2',
-  '#34C759',
-  '#FF9500',
-  '#FF3B30',
-  '#5856D6',
+  'var(--success)',
+  'var(--warning)',
+  'var(--danger)',
+  'var(--brand)',
   '#32ADE6',
   '#FF6B35',
 ];
@@ -87,9 +87,10 @@ function mapGroupToClub(g: Group, idx: number, joinedIds: Set<string>): Club {
 }
 
 export default function ClubsPage(props: {
-  searchParams?: { school?: string; schoolId?: string };
+  searchParams?: Promise<{ school?: string; schoolId?: string }>;
 }) {
-  const { schoolId, schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const searchParams = props.searchParams ? use(props.searchParams) : undefined;
+  const { schoolId, schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
   const router = useRouter();
   const [demoRole] = useDemoRole();
   const caps = getCapabilities(demoRole);
@@ -235,8 +236,8 @@ export default function ClubsPage(props: {
             className="card"
             style={{
               padding: '14px 18px',
-              background: 'rgba(52,199,89,0.10)',
-              border: '1px solid #34C759',
+              background: 'var(--success-soft)',
+              border: '1px solid var(--success)',
             }}
           >
             <div
@@ -293,7 +294,7 @@ export default function ClubsPage(props: {
 
         {/* 社長：待審核成員列表（有申請時才顯示，club_officer 專用） */}
         {demoRole === 'club_officer' && pendingClubMembers.length > 0 && (
-          <div id="pending-applicants" className="card" style={{ padding: '14px 18px', border: '1px solid #FF9500', background: 'rgba(255,149,0,0.08)' }}>
+          <div id="pending-applicants" className="card" style={{ padding: '14px 18px', border: '1px solid var(--warning)', background: 'var(--warning-soft)' }}>
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10 }}>
               📥 待審核入社申請（{pendingClubMembers.length} 筆）
             </div>
@@ -339,7 +340,7 @@ export default function ClubsPage(props: {
           );
           if (pendingClubs.length === 0) return null;
           return (
-            <div className="card" style={{ padding: '10px 14px', border: '1px solid #FF9500', background: 'rgba(255,149,0,0.08)', fontSize: 13 }}>
+            <div className="card" style={{ padding: '10px 14px', border: '1px solid var(--warning)', background: 'var(--warning-soft)', fontSize: 13 }}>
               ⏳ <strong>{pendingClubs.map((c) => c.name).join('、')} 申請審核中</strong>，社長核准後你會收到通知。
             </div>
           );
@@ -373,8 +374,8 @@ export default function ClubsPage(props: {
               className="card"
               style={{
                 padding: '14px 18px',
-                background: 'linear-gradient(135deg, rgba(52,199,89,0.10) 0%, rgba(0,200,100,0.06) 100%)',
-                border: '1px solid rgba(52,199,89,0.30)',
+                background: 'linear-gradient(135deg, var(--success-soft) 0%, rgba(0,200,100,0.06) 100%)',
+                border: '1px solid var(--success-soft)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
@@ -485,7 +486,7 @@ export default function ClubsPage(props: {
                     fontSize: 10,
                     padding: '3px 9px',
                     borderRadius: '999px',
-                    background: `${c.color}14`,
+                    background: `color-mix(in srgb, ${c.color} 7.84%, transparent)`,
                     color: c.color,
                     fontWeight: 700,
                     letterSpacing: '0.06em',
@@ -528,9 +529,9 @@ export default function ClubsPage(props: {
                       style={{
                         padding: '6px 8px',
                         borderRadius: 'var(--radius-sm)',
-                        border: '1px solid rgba(88,86,214,0.30)',
-                        background: 'rgba(88,86,214,0.10)',
-                        color: '#5856D6',
+                        border: '1px solid var(--accent-soft)',
+                        background: 'var(--accent-soft)',
+                        color: 'var(--brand)',
                         fontSize: 12,
                         fontWeight: 700,
                         textDecoration: 'none',
@@ -556,8 +557,8 @@ export default function ClubsPage(props: {
                           padding: '6px 14px',
                           borderRadius: 'var(--radius-sm)',
                           border: '1px solid',
-                          borderColor: !caps.canJoinClubs ? 'var(--border)' : isPending ? 'rgba(255,149,0,0.5)' : c.isJoined ? 'var(--border)' : c.color,
-                          background: !caps.canJoinClubs ? 'var(--panel)' : isPending ? 'rgba(255,149,0,0.1)' : c.isJoined ? 'var(--panel)' : `${c.color}14`,
+                          borderColor: !caps.canJoinClubs ? 'var(--border)' : isPending ? 'var(--warning-soft)' : c.isJoined ? 'var(--border)' : c.color,
+                          background: !caps.canJoinClubs ? 'var(--panel)' : isPending ? 'var(--warning-soft)' : c.isJoined ? 'var(--panel)' : `color-mix(in srgb, ${c.color} 7.84%, transparent)`,
                           color: !caps.canJoinClubs ? 'var(--muted)' : isPending ? '#B45309' : c.isJoined ? 'var(--muted)' : c.color,
                           fontSize: 12,
                           fontWeight: 700,

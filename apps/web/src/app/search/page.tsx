@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { use, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
@@ -53,7 +53,7 @@ const QUICK_LINKS_BY_ROLE: Record<string, { label: string; href: string; icon: s
     { label: '課表', href: '/timetable', icon: '📅' },
     { label: '成績', href: '/grades', icon: '📊' },
     { label: '學分規劃', href: '/credit-planner', icon: '🎯' },
-    { label: 'AI 助理', href: '/ai-assistant', icon: '🤖' },
+    { label: '校園助理', href: '/ai-assistant', icon: '🤖' },
     { label: '公告', href: '/announcements', icon: '📢' },
     { label: '圖書館', href: '/library', icon: '📚' },
   ],
@@ -103,9 +103,10 @@ const QUICK_LINKS_BY_ROLE: Record<string, { label: string; href: string; icon: s
 };
 
 export default function SearchPage(props: {
-  searchParams?: { school?: string; schoolId?: string };
+  searchParams?: Promise<{ school?: string; schoolId?: string }>;
 }) {
-  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const searchParams = props.searchParams ? use(props.searchParams) : undefined;
+  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
   const [demoRole] = useDemoRole();
   const [query, setQuery] = useState('');
   const normalizedQuery = query.trim().toLowerCase();

@@ -507,7 +507,7 @@ function NavigateCard({ payload }: { payload: NavigatePayload }) {
         <style jsx>{`
           .nav { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: white; border: 1px solid #c7d2fe; border-radius: 10px; color: #3730a3; text-decoration: none; font-size: 14px; }
           .nav:hover { background: #eef2ff; }
-          .chev { margin-left: auto; color: #818cf8; font-size: 18px; }
+          .chev { margin-left: auto; color: var(--brand2); font-size: 18px; }
         `}</style>
       </Link>
     );

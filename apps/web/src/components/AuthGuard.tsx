@@ -4,6 +4,7 @@ import { useEffect, useState, ReactNode, createContext, useContext, useCallback 
 import { onAuthStateChanged, User, signOut } from 'firebase/auth';
 import { getAuth } from '@/features/auth/client';
 import Link from 'next/link';
+import { getSupabaseClient } from '@/lib/supabaseClient';
 
 interface AuthState {
   user: User | null;
@@ -30,6 +31,13 @@ interface AuthProviderProps {
   children: ReactNode;
 }
 
+async function clearTeachingSession() {
+  const client = getSupabaseClient();
+  if (!client) return;
+  const result = await client.auth.signOut({ scope: 'local' });
+  if (result.error) throw result.error;
+}
+
 export function AuthProvider({ children }: AuthProviderProps) {
   const [state, setState] = useState<AuthState>({
     user: null,
@@ -40,17 +48,31 @@ export function AuthProvider({ children }: AuthProviderProps) {
   useEffect(() => {
     const auth = getAuth();
     if (!auth) {
+      void clearTeachingSession().catch(() =>
+        console.warn('Could not clear the separate teaching session'),
+      );
       setState({ user: null, loading: false, error: null });
       return;
     }
 
+    let previousUid: string | null | undefined;
     const unsubscribe = onAuthStateChanged(
       auth,
       (user) => {
+        const uid = user?.uid ?? null;
+        if (previousUid !== uid) {
+          previousUid = uid;
+          void clearTeachingSession().catch(() =>
+            console.warn('Could not clear the separate teaching session'),
+          );
+        }
         setState({ user, loading: false, error: null });
       },
       (error) => {
         console.error('Auth state change error:', error);
+        void clearTeachingSession().catch(() =>
+          console.warn('Could not clear the separate teaching session'),
+        );
         setState({ user: null, loading: false, error });
       },
     );
@@ -60,14 +82,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const signOutUser = useCallback(async () => {
     const auth = getAuth();
-    if (!auth) return;
-
-    try {
-      await signOut(auth);
-      setState({ user: null, loading: false, error: null });
-    } catch (error) {
-      console.error('Sign out error:', error);
-      throw error;
+    // Hide user-scoped readers immediately, including when a network logout later fails.
+    setState({ user: null, loading: false, error: null });
+    const results = await Promise.allSettled([
+      auth ? signOut(auth) : Promise.resolve(),
+      clearTeachingSession(),
+    ]);
+    const failure = results.find((result) => result.status === 'rejected');
+    if (failure?.status === 'rejected') {
+      console.error('Sign out error:', failure.reason);
+      throw failure.reason;
     }
   }, []);
 

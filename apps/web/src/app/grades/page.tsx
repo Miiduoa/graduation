@@ -1,7 +1,7 @@
 'use client';
 
 import { SiteShell } from '@/components/SiteShell';
-import { useState, useMemo, useEffect, type CSSProperties } from 'react';
+import { use, useState, useMemo, useEffect, type CSSProperties } from 'react';
 import Link from 'next/link';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import { getAuth, fetchGrades, fetchGPA, isFirebaseConfigured, type Grade } from '@/lib/firebase';
@@ -98,7 +98,7 @@ function gradeColor(grade: string): string {
   if (grade.startsWith('A')) return 'var(--success)';
   if (grade.startsWith('B')) return 'var(--info)';
   if (grade.startsWith('C')) return 'var(--warning)';
-  if (grade.startsWith('D')) return '#FF9500';
+  if (grade.startsWith('D')) return 'var(--warning)';
   return 'var(--danger)';
 }
 
@@ -112,9 +112,10 @@ function gradeBackground(grade: string): string {
 const SEMESTERS = generateSemesters();
 
 export default function GradesPage(props: {
-  searchParams?: { school?: string; schoolId?: string };
+  searchParams?: Promise<{ school?: string; schoolId?: string }>;
 }) {
-  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const searchParams = props.searchParams ? use(props.searchParams) : undefined;
+  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
   const [demoRole] = useDemoRole();
   const store = useDemoStore();
   const [selectedSemester, setSelectedSemester] = useState(SEMESTERS[0]);
@@ -243,7 +244,7 @@ export default function GradesPage(props: {
     return (
       <SiteShell title="成績" schoolName={schoolName}>
         <div className="pageStack">
-          <div className="card" style={{ padding: '32px 24px', textAlign: 'center', background: 'rgba(88,86,214,0.06)', border: '1px solid #5856D6' }}>
+          <div className="card" style={{ padding: '32px 24px', textAlign: 'center', background: 'var(--accent-soft)', border: '1px solid var(--brand)' }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
             <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>需要登入</div>
             <div style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 20 }}>成績為個人隱私資料，訪客無法查看。請先登入。</div>
@@ -264,10 +265,10 @@ export default function GradesPage(props: {
       >
         <div className="pageStack">
           {/* 角色說明 */}
-          <div className="card" style={{ padding: '14px 16px', background: 'rgba(88,86,214,0.10)', border: '1px solid #5856D6' }}>
+          <div className="card" style={{ padding: '14px 16px', background: 'var(--accent-soft)', border: '1px solid var(--brand)' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
               <div>
-                <div style={{ fontWeight: 700, color: '#5856D6', marginBottom: 4 }}>
+                <div style={{ fontWeight: 700, color: 'var(--brand)', marginBottom: 4 }}>
                   {demoRole === 'ta' ? '🧑‍💻 助教視角' : '🧑‍🏫 教師視角'} · 資料結構（CS301）
                 </div>
                 <div style={{ fontSize: 13, color: 'var(--text)' }}>
@@ -285,10 +286,10 @@ export default function GradesPage(props: {
           {/* 班級成績統計卡 */}
           <div className="metricGrid">
             {[
-              { label: '班級平均', val: `${classAvg} 分`, tone: '#5856D6' },
-              { label: '最高分', val: `${classMax} 分`, tone: '#34C759' },
-              { label: '最低分', val: `${classMin} 分`, tone: '#FF3B30' },
-              { label: '通過率', val: `${classPassRate}%`, tone: '#FF9500' },
+              { label: '班級平均', val: `${classAvg} 分`, tone: 'var(--brand)' },
+              { label: '最高分', val: `${classMax} 分`, tone: 'var(--success)' },
+              { label: '最低分', val: `${classMin} 分`, tone: 'var(--danger)' },
+              { label: '通過率', val: `${classPassRate}%`, tone: 'var(--warning)' },
             ].map((m) => (
               <div key={m.label} className="metricCard" style={{ '--tone': m.tone } as CSSProperties}>
                 <div className="metricValue" style={{ color: m.tone }}>{m.val}</div>
@@ -305,7 +306,7 @@ export default function GradesPage(props: {
                 { label: 'A（90-100）', count: classScores.filter((s) => s >= 90).length, color: 'var(--success)' },
                 { label: 'B（80-89）', count: classScores.filter((s) => s >= 80 && s < 90).length, color: 'var(--info)' },
                 { label: 'C（70-79）', count: classScores.filter((s) => s >= 70 && s < 80).length, color: 'var(--warning)' },
-                { label: 'D（60-69）', count: classScores.filter((s) => s >= 60 && s < 70).length, color: '#FF9500' },
+                { label: 'D（60-69）', count: classScores.filter((s) => s >= 60 && s < 70).length, color: 'var(--warning)' },
                 { label: '不及格（< 60）', count: classScores.filter((s) => s < 60).length, color: 'var(--danger)' },
               ].map((row) => (
                 <div key={row.label}>
@@ -314,7 +315,7 @@ export default function GradesPage(props: {
                     <span style={{ fontSize: 13, fontWeight: 700, color: row.color }}>{row.count} 人</span>
                   </div>
                   <div className="progressTrack">
-                    <div className="progressFill" style={{ '--progress-width': `${(row.count / DEMO_STUDENTS.length) * 100}%`, '--progress': `linear-gradient(90deg, ${row.color} 0%, ${row.color}80 100%)` } as CSSProperties} />
+                    <div className="progressFill" style={{ '--progress-width': `${(row.count / DEMO_STUDENTS.length) * 100}%`, '--progress': `linear-gradient(90deg, ${row.color} 0%, color-mix(in srgb, ${row.color} 50.2%, transparent) 100%)` } as CSSProperties} />
                   </div>
                 </div>
               ))}
@@ -376,9 +377,9 @@ export default function GradesPage(props: {
           </div>
 
           {/* AI 班級分析入口 */}
-          <div className="card" style={{ padding: '14px 18px', background: 'linear-gradient(135deg, rgba(88,86,214,0.10) 0%, rgba(0,200,200,0.06) 100%)', border: '1px solid rgba(88,86,214,0.28)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
+          <div className="card" style={{ padding: '14px 18px', background: 'linear-gradient(135deg, var(--accent-soft) 0%, rgba(0,200,200,0.06) 100%)', border: '1px solid var(--accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#5856D6', marginBottom: 3 }}>🤖 AI 班級分析</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand)', marginBottom: 3 }}>🤖 AI 班級分析</div>
               <div style={{ fontSize: 13, color: 'var(--text)' }}>班級平均 {classAvg} 分，{classScores.filter((s) => s < 70).length} 位學生需要關注。讓 AI 分析成績趨勢？</div>
             </div>
             <Link href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('幫我分析資料結構班上成績，找出需要關注的學生')}`} className="btn" style={{ fontSize: 12 }}>問 AI →</Link>
@@ -393,18 +394,18 @@ export default function GradesPage(props: {
     return (
       <SiteShell title="全系成績統計" subtitle="資訊管理系 · 本學期課程成績概覽" schoolName={schoolName}>
         <div className="pageStack">
-          <div className="card" style={{ padding: '14px 16px', background: 'rgba(255,149,0,0.10)', border: '1px solid #FF9500' }}>
-            <div style={{ fontWeight: 700, color: '#FF9500', marginBottom: 4 }}>🏛️ 系主任視角</div>
+          <div className="card" style={{ padding: '14px 16px', background: 'var(--warning-soft)', border: '1px solid var(--warning)' }}>
+            <div style={{ fontWeight: 700, color: 'var(--warning)', marginBottom: 4 }}>🏛️ 系主任視角</div>
             <div style={{ fontSize: 13, color: 'var(--text)' }}>你可以查看全系各課程的成績統計，但不會看到個別學生的成績（須保護個人隱私）。</div>
           </div>
 
           {/* 全系統計卡 */}
           <div className="metricGrid">
             {[
-              { label: '本學期課程', val: `${DEMO_COURSES.length + 8} 門`, tone: '#5856D6' },
-              { label: '在學學生', val: '312 人', tone: '#5856D6' },
-              { label: '全系平均分', val: '83.2 分', tone: '#34C759' },
-              { label: '不及格率', val: '3.8%', tone: '#FF9500' },
+              { label: '本學期課程', val: `${DEMO_COURSES.length + 8} 門`, tone: 'var(--brand)' },
+              { label: '在學學生', val: '312 人', tone: 'var(--brand)' },
+              { label: '全系平均分', val: '83.2 分', tone: 'var(--success)' },
+              { label: '不及格率', val: '3.8%', tone: 'var(--warning)' },
             ].map((m) => (
               <div key={m.label} className="metricCard" style={{ '--tone': m.tone } as CSSProperties}>
                 <div className="metricValue" style={{ color: m.tone }}>{m.val}</div>
@@ -422,7 +423,7 @@ export default function GradesPage(props: {
             <div className="insetGroup">
               {deptCourseStats.map((c, i) => (
                 <Link key={c.id} href={`/teacher/course/${c.id}${q}`} className="insetGroupRow" style={{ borderTop: i === 0 ? 'none' : undefined, color: 'inherit', textDecoration: 'none' }}>
-                  <div className="insetGroupRowIcon" style={{ background: `${c.color}20`, fontSize: 18, width: 38, height: 38, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{c.icon}</div>
+                  <div className="insetGroupRowIcon" style={{ background: `color-mix(in srgb, ${c.color} 12.55%, transparent)`, fontSize: 18, width: 38, height: 38, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{c.icon}</div>
                   <div className="insetGroupRowContent">
                     <div className="insetGroupRowTitle">{c.name}</div>
                     <div className="insetGroupRowMeta">{c.code} · {c.instructor} · {c.members} 人</div>
@@ -437,9 +438,9 @@ export default function GradesPage(props: {
           </div>
 
           {/* AI 系所分析 */}
-          <div className="card" style={{ padding: '14px 18px', background: 'linear-gradient(135deg, rgba(255,149,0,0.10) 0%, rgba(255,200,0,0.06) 100%)', border: '1px solid rgba(255,149,0,0.28)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
+          <div className="card" style={{ padding: '14px 18px', background: 'linear-gradient(135deg, var(--warning-soft) 0%, rgba(255,200,0,0.06) 100%)', border: '1px solid var(--warning-soft)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#FF9500', marginBottom: 3 }}>🤖 AI 系所分析</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--warning)', marginBottom: 3 }}>🤖 AI 系所分析</div>
               <div style={{ fontSize: 13, color: 'var(--text)' }}>讓 AI 分析本學期各課程成績趨勢，找出需要關注的課程？</div>
             </div>
             <Link href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('本學期各課程平均分數？哪些課程分數偏低需要關注？')}`} className="btn" style={{ fontSize: 12 }}>問 AI →</Link>
@@ -454,7 +455,7 @@ export default function GradesPage(props: {
     return (
       <SiteShell title="成績" schoolName={schoolName}>
         <div className="pageStack">
-          <div className="card" style={{ padding: '32px 24px', textAlign: 'center', background: 'rgba(255,59,48,0.08)', border: '1px solid #FF3B30' }}>
+          <div className="card" style={{ padding: '32px 24px', textAlign: 'center', background: 'var(--danger-soft)', border: '1px solid var(--danger)' }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>🛡️</div>
             <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>系統管理員不適用個人成績頁</div>
             <div style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 20 }}>
@@ -501,7 +502,7 @@ export default function GradesPage(props: {
             style={{
               padding: '14px 18px',
               background: 'rgba(22,163,74,0.10)',
-              border: '1px solid #34C759',
+              border: '1px solid var(--success)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
@@ -510,7 +511,7 @@ export default function GradesPage(props: {
             }}
           >
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#34C759', marginBottom: 3 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--success)', marginBottom: 3 }}>
                 🎓 成績已更新！
               </div>
               <div style={{ fontSize: 13, color: 'var(--text)' }}>
@@ -521,7 +522,7 @@ export default function GradesPage(props: {
             <Link
               href={`/messages${q}`}
               className="btn"
-              style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0, background: '#34C759', color: '#fff', border: 'none' }}
+              style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0, background: 'var(--success)', color: '#fff', border: 'none' }}
             >
               查看訊息通知 →
             </Link>
@@ -595,8 +596,8 @@ export default function GradesPage(props: {
             className="card"
             style={{
               padding: '14px 18px',
-              background: 'linear-gradient(135deg, rgba(88,86,214,0.10) 0%, rgba(90,200,250,0.07) 100%)',
-              border: '1px solid rgba(88,86,214,0.22)',
+              background: 'linear-gradient(135deg, var(--accent-soft) 0%, rgba(90,200,250,0.07) 100%)',
+              border: '1px solid var(--accent-soft)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
@@ -793,9 +794,9 @@ export default function GradesPage(props: {
                         style={{
                           padding: '6px 10px',
                           borderRadius: 8,
-                          border: '1px solid rgba(88,86,214,0.30)',
-                          background: 'rgba(88,86,214,0.10)',
-                          color: '#5856D6',
+                          border: '1px solid var(--accent-soft)',
+                          background: 'var(--accent-soft)',
+                          color: 'var(--brand)',
                           fontSize: 12,
                           fontWeight: 700,
                           textDecoration: 'none',
@@ -850,7 +851,7 @@ export default function GradesPage(props: {
               {
                 label: 'D（60–69）',
                 count: grades.filter((g) => g.score >= 60 && g.score < 70).length,
-                color: '#FF9500',
+                color: 'var(--warning)',
               },
             ].map((row) => (
               <div key={row.label}>
@@ -867,7 +868,7 @@ export default function GradesPage(props: {
                       {
                         '--progress-width':
                           grades.length > 0 ? `${(row.count / grades.length) * 100}%` : '0%',
-                        '--progress': `linear-gradient(90deg, ${row.color} 0%, ${row.color}80 100%)`,
+                        '--progress': `linear-gradient(90deg, ${row.color} 0%, color-mix(in srgb, ${row.color} 50.2%, transparent) 100%)`,
                       } as CSSProperties
                     }
                   />

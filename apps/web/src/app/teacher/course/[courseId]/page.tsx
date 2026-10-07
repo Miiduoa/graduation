@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { use, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useToast } from '@/components/ui';
 import { addAssignment, useDemoStore, getDynamicAssignmentsForCourse } from '@/lib/demoStore';
 import { getDemoCourseById as _getCourse, getDemoUser } from '@/lib/demoData';
@@ -30,10 +30,12 @@ const EMPTY_WORKSPACE: CourseWorkspace = {
 };
 
 export default function TeacherCoursePage(props: {
-  params: { courseId: string };
-  searchParams?: { school?: string; schoolId?: string };
+  params: Promise<{ courseId: string }>;
+  searchParams?: Promise<{ school?: string; schoolId?: string }>;
 }) {
-  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const params = use(props.params);
+  const searchParams = props.searchParams ? use(props.searchParams) : undefined;
+  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
   const [workspace, setWorkspace] = useState<CourseWorkspace>(EMPTY_WORKSPACE);
   const [loading, setLoading] = useState(true);
   const [authReady, setAuthReady] = useState(false);
@@ -48,12 +50,12 @@ export default function TeacherCoursePage(props: {
   const isDeptHeadView = demoRole === 'department_head';
   const { success, info } = useToast();
   const store = useDemoStore();
-  const dynAssignments = getDynamicAssignmentsForCourse(props.params.courseId, store);
+  const dynAssignments = getDynamicAssignmentsForCourse(params.courseId, store);
   const [showAddHw, setShowAddHw] = useState(false);
   const [hwTitle, setHwTitle] = useState('');
   const [hwDue, setHwDue] = useState('');
   const [hwPoints, setHwPoints] = useState('100');
-  const courseInfo = _getCourse(props.params.courseId);
+  const courseInfo = _getCourse(params.courseId);
 
   useEffect(() => {
     if (!isFirebaseConfigured()) {
@@ -89,7 +91,7 @@ export default function TeacherCoursePage(props: {
       }
 
       try {
-        const membership = await checkGroupMembership(props.params.courseId, user.uid);
+        const membership = await checkGroupMembership(params.courseId, user.uid);
         const role = membership.role ?? '';
         const allowed = membership.isMember && ['owner', 'instructor', 'moderator'].includes(role);
         setCanView(allowed);
@@ -106,7 +108,7 @@ export default function TeacherCoursePage(props: {
 
     return () => unsubscribe();
   // demoRole 加入 deps：角色切換時立即重新評估權限
-  }, [props.params.courseId, demoRole]);
+  }, [params.courseId, demoRole]);
 
   useEffect(() => {
     let active = true;
@@ -120,11 +122,11 @@ export default function TeacherCoursePage(props: {
       }
       setLoading(true);
       try {
-        const next = await fetchCourseWorkspace(props.params.courseId);
+        const next = await fetchCourseWorkspace(params.courseId);
         if (!active) return;
         // demo fallback：Firebase 抓不到時用 demoData，讓教師端 demo 一定有畫面
         if (!next.course) {
-          const demo = getDemoCourseWorkspace(props.params.courseId);
+          const demo = getDemoCourseWorkspace(params.courseId);
           if (demo) {
             setWorkspace(demo);
             return;
@@ -143,7 +145,7 @@ export default function TeacherCoursePage(props: {
     return () => {
       active = false;
     };
-  }, [authReady, canView, props.params.courseId]);
+  }, [authReady, canView, params.courseId]);
 
   const summary = useMemo(
     () => ({
@@ -198,7 +200,7 @@ export default function TeacherCoursePage(props: {
           <>
             {/* TA 角色提示 */}
             {isTaView ? (
-              <div className="card" style={{ padding: '12px 16px', background: 'rgba(124,58,237,0.10)', border: '1px solid #AF52DE', fontSize: 13, color: '#5856D6' }}>
+              <div className="card" style={{ padding: '12px 16px', background: 'var(--accent-soft)', border: '1px solid var(--brand)', fontSize: 13, color: 'var(--brand)' }}>
                 🧑‍💻 <strong>助教 TA 視角</strong> ·
                 你可以批改作業、查看出席與成績，但教材結構、題庫編輯、成績發布屬於授課教師的權限，相關按鈕會以灰色顯示。
               </div>
@@ -206,7 +208,7 @@ export default function TeacherCoursePage(props: {
 
             {/* 系主任唯讀提示 */}
             {isDeptHeadView ? (
-              <div className="card" style={{ padding: '12px 16px', background: 'rgba(255,149,0,0.10)', border: '1px solid #FF9500', fontSize: 13, color: '#92400E' }}>
+              <div className="card" style={{ padding: '12px 16px', background: 'var(--warning-soft)', border: '1px solid var(--warning)', fontSize: 13, color: '#92400E' }}>
                 🏛️ <strong>系主任唯讀視角</strong> ·
                 你可以查看課程的教材、作業、出席與成績概況，但無法編輯教材、批改作業或發布成績。如需操作，請洽授課教師。
               </div>
@@ -218,7 +220,7 @@ export default function TeacherCoursePage(props: {
                 <div className="metricValue">{workspace.modules.length}</div>
                 <div className="metricLabel">教材模組</div>
               </div>
-              <div className="metricCard" style={{ '--tone': '#FF9500' } as CSSProperties}>
+              <div className="metricCard" style={{ '--tone': 'var(--warning)' } as CSSProperties}>
                 <div className="metricIcon">📝</div>
                 <div className="metricValue">{workspace.assignments.length}</div>
                 <div className="metricLabel">作業 / 評量</div>
@@ -227,7 +229,7 @@ export default function TeacherCoursePage(props: {
                 className="metricCard"
                 style={
                   {
-                    '--tone': summary.pendingPublishing > 0 ? '#FF3B30' : '#34C759',
+                    '--tone': summary.pendingPublishing > 0 ? 'var(--danger)' : 'var(--success)',
                   } as CSSProperties
                 }
               >
@@ -251,7 +253,7 @@ export default function TeacherCoursePage(props: {
               </div>
               {/* 系主任已被 auto-redirect 回教師端，無法瀏覽學生視角，故隱藏此按鈕 */}
               {!isDeptHeadView && (
-                <Link href={`/course/${props.params.courseId}${q}`} className="btn">
+                <Link href={`/course/${params.courseId}${q}`} className="btn">
                   學生視角
                 </Link>
               )}
@@ -265,7 +267,7 @@ export default function TeacherCoursePage(props: {
             >
               {/* 教材單元：TA 不能編輯結構，只能看 */}
               {caps.canEditModules ? (
-                <Link href={`/teacher/course/${props.params.courseId}/modules${q}`} className="btn">
+                <Link href={`/teacher/course/${params.courseId}/modules${q}`} className="btn">
                   📚 教材單元
                 </Link>
               ) : (
@@ -278,13 +280,13 @@ export default function TeacherCoursePage(props: {
                 </span>
               )}
               {/* 測驗：TA 可看，不可建 */}
-              <Link href={`/teacher/course/${props.params.courseId}/quizzes${q}`} className="btn">
+              <Link href={`/teacher/course/${params.courseId}/quizzes${q}`} className="btn">
                 📝 測驗 / 考試{isTaView ? '（檢視）' : ''}
               </Link>
               {/* 題庫：教師專用 */}
               {caps.canEditQuestionBank ? (
                 <Link
-                  href={`/teacher/course/${props.params.courseId}/question-banks${q}`}
+                  href={`/teacher/course/${params.courseId}/question-banks${q}`}
                   className="btn"
                 >
                   🗂️ 題庫
@@ -298,13 +300,13 @@ export default function TeacherCoursePage(props: {
                   🗂️ 題庫（教師專用）
                 </span>
               )}
-              <Link href={`/teacher/course/${props.params.courseId}/rubrics${q}`} className="btn">
+              <Link href={`/teacher/course/${params.courseId}/rubrics${q}`} className="btn">
                 📐 Rubric
               </Link>
-              <Link href={`/teacher/course/${props.params.courseId}/attendance${q}`} className="btn">
+              <Link href={`/teacher/course/${params.courseId}/attendance${q}`} className="btn">
                 ✅ 點名
               </Link>
-              <Link href={`/teacher/course/${props.params.courseId}/gradebook${q}`} className="btn">
+              <Link href={`/teacher/course/${params.courseId}/gradebook${q}`} className="btn">
                 📊 成績簿{isTaView ? '（批改）' : ''}
               </Link>
             </nav>
@@ -396,14 +398,14 @@ export default function TeacherCoursePage(props: {
                             onClick={() => {
                               if (!hwTitle.trim() || !hwDue) return;
                               // Guard：教師只能在自己授課的課程發布作業（避免假冒其他教師）
-                              const course = _getCourse(props.params.courseId);
+                              const course = _getCourse(params.courseId);
                               const demoUser = getDemoUser(demoRole);
                               if (course && course.instructorId !== demoUser?.uid && demoRole !== 'admin') {
                                 info('你不是這門課的授課教師，無法新增作業');
                                 return;
                               }
                               addAssignment({
-                                courseId: props.params.courseId,
+                                courseId: params.courseId,
                                 courseName: courseInfo?.name ?? '課程',
                                 title: hwTitle.trim(),
                                 due: hwDue,
@@ -430,7 +432,7 @@ export default function TeacherCoursePage(props: {
                     <div
                       key={assignment.id}
                       className="insetGroupRow"
-                      style={{ borderTop: index === 0 ? 'none' : undefined, background: 'rgba(88,86,214,0.06)' }}
+                      style={{ borderTop: index === 0 ? 'none' : undefined, background: 'var(--accent-soft)' }}
                     >
                       <div className="insetGroupRowContent">
                         <div className="insetGroupRowTitle">
@@ -546,9 +548,9 @@ export default function TeacherCoursePage(props: {
             style={{
               padding: '14px 18px',
               background: isTaView
-                ? 'linear-gradient(135deg, rgba(124,58,237,0.10) 0%, rgba(167,139,250,0.06) 100%)'
-                : 'linear-gradient(135deg, rgba(88,86,214,0.10) 0%, rgba(0,200,200,0.06) 100%)',
-              border: `1px solid ${isTaView ? 'rgba(124,58,237,0.28)' : 'rgba(88,86,214,0.28)'}`,
+                ? 'linear-gradient(135deg, var(--accent-soft) 0%, rgba(167,139,250,0.06) 100%)'
+                : 'linear-gradient(135deg, var(--accent-soft) 0%, rgba(0,200,200,0.06) 100%)',
+              border: `1px solid ${isTaView ? 'var(--accent-soft)' : 'var(--accent-soft)'}`,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
@@ -557,8 +559,8 @@ export default function TeacherCoursePage(props: {
             }}
           >
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: isTaView ? '#AF52DE' : '#5856D6', marginBottom: 3 }}>
-                🤖 {isTaView ? 'AI 批改助理' : 'AI 教學助理'}
+              <div style={{ fontSize: 12, fontWeight: 700, color: isTaView ? 'var(--brand)' : 'var(--brand)', marginBottom: 3 }}>
+                {isTaView ? '批改協助' : '教學協助'}
               </div>
               <div style={{ fontSize: 13, color: 'var(--text)' }}>
                 {isTaView
@@ -581,7 +583,7 @@ export default function TeacherCoursePage(props: {
           </>
         ) : (
           <div className="toolbarPanel" style={{ justifyContent: 'flex-end' }}>
-            <Link href={`/course/${props.params.courseId}${q}`} className="btn">
+            <Link href={`/course/${params.courseId}${q}`} className="btn">
               返回學生視角
             </Link>
           </div>

@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
+import { AppHeader } from '@/components/AppHeader';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/components/AuthGuard';
 import { isFirebaseConfigured, signInWithPuStudentId } from '@/features/auth/client';
@@ -47,11 +48,7 @@ function LoginForm() {
   }
   return (
     <div className={styles.page}>
-      <header className={styles.header}>
-        <Link href="/" className={styles.brand}>
-          Campus One
-        </Link>
-      </header>
+      <AppHeader />
       <main className={styles.main} style={{ maxWidth: 550 }}>
         <p className={styles.eyebrow}>靜宜大學</p>
         <div className={styles.heading}>
