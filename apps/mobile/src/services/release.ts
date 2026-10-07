@@ -36,6 +36,7 @@ export function getReleaseConfig(): RuntimeReleaseConfig {
 }
 
 export function areUniversalDevAccountsEnabled(): boolean {
+  if (getReleaseConfig().appEnv === 'production') return false;
   const extra = getExtra();
   if (typeof extra.enableUniversalDevAccounts === 'boolean') {
     return extra.enableUniversalDevAccounts;

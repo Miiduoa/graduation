@@ -850,3 +850,79 @@ describe('storage security rules', () => {
     );
   });
 });
+
+describe('course assignment submissions', () => {
+  const { serverTimestamp, Timestamp } = require('firebase/firestore');
+  const pathTo = (db, uid = 'alice') => db.doc(`groups/course-1/assignments/work-1/submissions/${uid}`);
+  const answer = (overrides = {}) => ({
+    userId: 'alice', groupId: 'course-1', assignmentId: 'work-1', content: 'My answer',
+    status: 'submitted', submittedAt: serverTimestamp(), updatedAt: serverTimestamp(), ...overrides,
+  });
+  async function seedAssignment(overrides = {}) {
+    await seedFirestore(async (db) => {
+      await db.doc('groups/course-1').set({ name: 'Course', schoolId: 'school-1' });
+      await db.doc('groups/course-1/members/alice').set({ role: 'member', status: 'active' });
+      await db.doc('groups/course-1/members/teacher').set({ role: 'instructor', status: 'active' });
+      await db.doc('groups/course-1/assignments/work-1').set({ title: 'Work', published: true, ...overrides });
+    });
+  }
+  test('student reads an empty own submission and submits using server timestamps', async () => {
+    await seedAssignment();
+    const ref = pathTo(testEnv.authenticatedContext('alice').firestore());
+    await assertSucceeds(ref.get());
+    await assertSucceeds(ref.set(answer()));
+    const saved = await ref.get();
+    if (saved.data().content !== 'My answer') throw new Error('submission was not persisted');
+  });
+  test('student cannot forge grades when creating or updating a submission', async () => {
+    await seedAssignment();
+    const ref = pathTo(testEnv.authenticatedContext('alice').firestore());
+    await assertFails(ref.set(answer({ grade: 100 })));
+    await assertSucceeds(ref.set(answer()));
+    await assertFails(ref.update({ grade: 100, gradedBy: 'teacher' }));
+    await assertFails(ref.update({ feedback: 'Excellent' }));
+    await assertFails(ref.update({ content: 'replacement', userId: 'bob' }));
+  });
+  test('student cannot submit as another user or overwrite a confirmed answer', async () => {
+    await seedAssignment();
+    const db = testEnv.authenticatedContext('alice').firestore();
+    await assertFails(pathTo(db, 'bob').set(answer({ userId: 'bob' })));
+    await assertSucceeds(pathTo(db).set(answer()));
+    await assertFails(pathTo(db).set(answer({ content: 'replacement' })));
+  });
+  test('quiz answers can be submitted but client scores cannot', async () => {
+    await seedAssignment({ type: 'quiz' });
+    const ref = pathTo(testEnv.authenticatedContext('alice').firestore());
+    await assertFails(ref.set(answer({ content: '', answers: { q1: 'b' }, autoScore: { percentage: 100 } })));
+    await assertSucceeds(ref.set(answer({ content: '', answers: { q1: 'b' } })));
+    await assertFails(ref.update({ answers: { q1: 'a' } }));
+  });
+  test('teacher can grade a submitted answer', async () => {
+    await seedAssignment();
+    await assertSucceeds(pathTo(testEnv.authenticatedContext('alice').firestore()).set(answer()));
+    await assertSucceeds(pathTo(testEnv.authenticatedContext('teacher').firestore()).update({ grade: 90, feedback: 'Reviewed' }));
+  });
+  test('removed members cannot submit or alter previous work', async () => {
+    await seedAssignment();
+    await seedFirestore((db) => db.doc('groups/course-1/members/alice').update({ status: 'removed' }));
+    await assertFails(pathTo(testEnv.authenticatedContext('alice').firestore()).set(answer()));
+  });
+  test('unpublished, closed and overdue assignments reject submissions', async () => {
+    for (const overrides of [{ published: false }, { status: 'draft' }, { status: 'closed' }, { dueAt: Timestamp.fromMillis(0) }, { dueAt: '2000-01-01T00:00:00Z' }]) {
+      await seedAssignment(overrides);
+      await assertFails(pathTo(testEnv.authenticatedContext('alice').firestore()).set(answer()));
+    }
+  });
+  test('explicit late allowance accepts an overdue submission', async () => {
+    await seedAssignment({ dueAt: Timestamp.fromMillis(0), allowLateSubmission: true });
+    await assertSucceeds(pathTo(testEnv.authenticatedContext('alice').firestore()).set(answer()));
+  });
+  test('empty content, oversized text and client supplied timestamps are rejected', async () => {
+    await seedAssignment();
+    const ref = pathTo(testEnv.authenticatedContext('alice').firestore());
+    await assertFails(ref.set(answer({ content: '' })));
+    await assertFails(ref.set(answer({ content: 'a'.repeat(20001) })));
+    await assertFails(ref.set(answer({ submittedAt: '2026-10-07T00:00:00Z' })));
+    await assertSucceeds(ref.set(answer({ content: '', attachments: [{ url: 'https://example.test/answer.pdf' }] })));
+  });
+});

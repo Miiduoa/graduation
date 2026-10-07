@@ -59,6 +59,7 @@ import {
   query,
   QueryConstraint,
   serverTimestamp,
+  runTransaction,
   setDoc,
   Timestamp,
   updateDoc,
@@ -1929,23 +1930,28 @@ export const firebaseSource: DataSource = {
       'submissions',
       data.userId,
     );
-    await setDoc(
-      docFromSegments(db, submissionPath),
-      {
-        ...data,
+    const content = data.content?.trim() ?? '';
+    const attachments = data.attachments ?? [];
+    if ((!content && attachments.length === 0) || content.length > 20000 || attachments.length > 20) {
+      throw new Error('請填寫作業內容或附加檔案，文字上限為 20,000 字。');
+    }
+    await runTransaction(db, async (transaction) => {
+      const ref = docFromSegments(db, submissionPath);
+      const existing = await transaction.get(ref);
+      if (existing.exists() && existing.data().submittedAt) {
+        throw new Error('這份作業已有繳交紀錄，請重新整理確認。');
+      }
+      transaction.set(ref, {
+        userId: data.userId,
+        groupId,
+        assignmentId: data.assignmentId,
+        content,
+        attachments,
         status: 'submitted',
-        submittedAt: new Date().toISOString(),
+        submittedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      },
-      { merge: true },
-    );
-
-    await updateDoc(
-      docFromSegments(db, buildGroupCollectionPath(groupId, 'assignments', data.assignmentId)),
-      {
-        submissionCount: increment(1),
-      },
-    );
+      }, { merge: true });
+    });
 
     return (await fetchDocumentAtPath<Submission>(submissionPath)) as Submission;
   },

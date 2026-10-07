@@ -10,10 +10,11 @@ function parseBoolean(value: string | undefined): boolean | null {
 }
 
 export function getWebAppEnv(): WebAppEnv {
-  return normalizeAppEnvironment(process.env.NEXT_PUBLIC_APP_ENV) as WebAppEnv;
+  return normalizeAppEnvironment(process.env.NEXT_PUBLIC_APP_ENV || process.env.NODE_ENV) as WebAppEnv;
 }
 
 export function areUniversalDevAccountsEnabled(): boolean {
+  if (getWebAppEnv() === 'production') return false;
   const override = parseBoolean(process.env.NEXT_PUBLIC_ENABLE_UNIVERSAL_DEV_ACCOUNTS);
   if (override != null) return override;
   return getWebAppEnv() !== 'production';

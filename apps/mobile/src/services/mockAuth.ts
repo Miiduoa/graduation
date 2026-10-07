@@ -1,5 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { getReleaseConfig } from './release';
+
 import type { UserRole } from '../state/auth';
 
 export type MockAuthSession = {
@@ -17,6 +19,7 @@ export type MockAuthSession = {
 const STORAGE_KEY = 'campus.mockAuthSession.v1';
 
 export async function loadMockAuthSession(): Promise<MockAuthSession | null> {
+  if (getReleaseConfig().appEnv === 'production') return null;
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
@@ -42,6 +45,7 @@ export async function loadMockAuthSession(): Promise<MockAuthSession | null> {
 }
 
 export async function saveMockAuthSession(session: MockAuthSession): Promise<void> {
+  if (getReleaseConfig().appEnv === 'production') throw new Error('正式環境不支援測試帳號');
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(session));
 }
 

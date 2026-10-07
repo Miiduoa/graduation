@@ -9,7 +9,9 @@ function toUrl(path: string): URL {
 
 export function sanitizeInternalPath(value?: string | null, fallback: string = '/'): string {
   if (!value) return fallback;
-  if (!value.startsWith('/') || value.startsWith('//')) return fallback;
+  if (!value.startsWith('/') || value.startsWith('//') || /[\\\u0000-\u001f\u007f]/.test(value))
+    return fallback;
+  if (toUrl(value).origin !== 'https://campus.local') return fallback;
   return value;
 }
 
