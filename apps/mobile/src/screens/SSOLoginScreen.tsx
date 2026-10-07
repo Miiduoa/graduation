@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useSyncExternalStore } from 'react';
 import { ActivityIndicator, Alert, ScrollView, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
@@ -17,7 +17,7 @@ import { signInWithStudentId, type LoginProgress } from '../services/studentIdAu
 import { getAuthInstance } from '../firebase';
 import { Screen, Button, AnimatedCard, Card, Pill } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
-import { theme } from '../ui/theme';
+import { theme, getThemeVersion, subscribeToTheme } from '../ui/theme';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -37,6 +37,7 @@ type SSOLoginScreenProps = {
 };
 
 export function SSOLoginScreen(props: SSOLoginScreenProps) {
+  useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const nav = props?.navigation;
   const auth = useAuth();
   const { school } = useSchool();
@@ -44,7 +45,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
   const [studentIdInput, setStudentIdInput] = useState('');
   const [studentPwInput, setStudentPwInput] = useState('');
   const [step, setStep] = useState<LoginStep>('idle');
-  const [stageDetail, setStageDetail] = useState('驗證靜宜帳密');
+  const [stageDetail, setStageDetail] = useState('確認學校帳號');
   const [error, setError] = useState<string | null>(null);
   const [isRetryable, setIsRetryable] = useState(false);
   const [googleBusy, setGoogleBusy] = useState(false);
@@ -79,10 +80,10 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
 
   const stepLabels: Record<LoginStep, string> = {
     idle: '等待登入',
-    authenticating: '驗證靜宜帳密',
+    authenticating: '確認學校帳號',
     syncingCampus: '同步 E 校園資料',
-    syncingTronClass: '同步 TronClass 課程',
-    linking: '建立 Campus One 帳號',
+    syncingTronClass: '同步課程資料',
+    linking: '準備你的校園帳號',
     success: '登入完成',
     error: '登入失敗',
   };
@@ -91,11 +92,11 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
     setError(null);
     setIsRetryable(false);
     setStep('authenticating');
-    setStageDetail('驗證靜宜帳密');
+    setStageDetail('確認學校帳號');
 
-    const onProgress = (progressStep: LoginProgress, detail?: string) => {
+    const onProgress = (progressStep: LoginProgress) => {
       setStep(progressStep);
-      if (detail) setStageDetail(detail);
+      setStageDetail(stepLabels[progressStep]);
     };
 
     try {
@@ -128,7 +129,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
       }, 250);
     } catch (loginError) {
       console.warn('Student ID login error:', loginError);
-      setError(loginError instanceof Error ? loginError.message : '學號登入失敗');
+      setError('學校帳號登入未完成，請確認帳號密碼與網路連線後重試。');
       setIsRetryable(true);
       setStep('error');
     }
@@ -136,17 +137,14 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
 
   const handleRetry = () => {
     setStep('idle');
-    setStageDetail('驗證靜宜帳密');
+    setStageDetail('確認學校帳號');
     setError(null);
     setIsRetryable(false);
   };
 
   const handleGoogleLogin = async () => {
     if (!googleIds.web) {
-      Alert.alert(
-        '無法使用 Google 登入',
-        '請在環境變數設定 EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID（Firebase Console「專案設定」→ 一般 → Web 應用程式用戶端 ID），並確定已啟用 Google 登入提供者。',
-      );
+      Alert.alert('無法使用 Google 登入', '目前暫時無法使用 Google 登入，請改用下方的學校帳號。');
       return;
     }
 
@@ -185,7 +183,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
       }, 250);
     } catch (loginError) {
       console.warn('Google login error:', loginError);
-      setError(loginError instanceof Error ? loginError.message : 'Google 登入失敗');
+      setError('Google 登入未完成，請稍後重試或改用學校帳號。');
       setIsRetryable(true);
       setStep('error');
     } finally {
@@ -208,7 +206,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
         contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
       >
         {/* ── 學校資訊卡片 ── */}
-        <AnimatedCard title="選擇學校" subtitle="使用靜宜大學帳號登入">
+        <AnimatedCard title="登入學校帳號" subtitle="使用靜宜大學帳號登入">
           <View
             style={{
               padding: 16,
@@ -225,12 +223,12 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
                   width: 48,
                   height: 48,
                   borderRadius: 24,
-                  backgroundColor: school.themeColor ?? theme.colors.accentSoft,
+                  backgroundColor: theme.colors.accent,
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}
               >
-                <Ionicons name="school" size={24} color="#fff" />
+                <Ionicons name="school" size={24} color={theme.colors.onAccent} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={{ color: theme.colors.text, fontSize: 17, fontWeight: '700' }}>
@@ -244,13 +242,13 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
               <Pill text={PROVIDENCE_UNIVERSITY_SCHOOL_CODE} kind="accent" />
             </View>
             <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
-              建議優先使用 Google 登入；校方 E 校園帳號為進階選項。若已關閉 LMS，仍可使用下方 Demo／校園流程。
+              選擇 Google 或學校帳號登入。需要同步課程資料時，請使用學校帳號。
             </Text>
           </View>
         </AnimatedCard>
 
         {/* ── Google 登入（主路） ── */}
-        <AnimatedCard title="Google 登入" subtitle="Gmail／Google 帳號（Firebase）">
+        <AnimatedCard title="Google 登入" subtitle="使用你的 Google 帳號">
           <View style={{ gap: 14 }}>
             <Button
               text={
@@ -258,21 +256,22 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
                   ? 'Google 登入處理中…'
                   : googleIds.web
                     ? '使用 Google 繼續'
-                    : '使用 Google 繼續（尚未設定 Client ID）'
+                    : 'Google 登入暫時無法使用'
               }
               kind="primary"
               onPress={() => void handleGoogleLogin()}
               disabled={googleBusy || !googleIds.web}
             />
             <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
-              以 Google 身分註冊或登入後，將與 Firebase Auth 連動；Firestore 無 `users` 文件時仍會暫時以 Firebase
-              顯示名稱與頭像顯示。正式上線請在 Firebase／Google Cloud 設定 OAuth 與 iOS/Android 反向 URL。
+              {googleIds.web
+                ? '選擇要使用的 Google 帳號後，即可繼續登入。'
+                : '目前暫時無法使用 Google 登入，請改用下方的學校帳號。'}
             </Text>
           </View>
         </AnimatedCard>
 
         {/* ── 校方帳號（進階） ── */}
-        <AnimatedCard title="校方進階登入" subtitle="靜宜 E 校園帳號與密碼（選用）">
+        <AnimatedCard title="學校帳號登入" subtitle="使用靜宜 E 校園帳號與密碼">
           <View style={{ gap: 14 }}>
             <View
               style={{
@@ -337,7 +336,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
             />
 
             <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
-              需同步課表／成績時使用。若建置開關關閉 TronClass，登入仍可略過 LMS 並走 Demo／E 校園可及資料。
+              登入後可讀取學校目前提供的個人資料、課程與成績。
             </Text>
           </View>
         </AnimatedCard>
@@ -349,8 +348,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
               <ActivityIndicator color={theme.colors.accent} size="large" />
               <Text style={{ color: theme.colors.text, fontWeight: '700' }}>{stageDetail}</Text>
               <Text style={{ color: theme.colors.muted, textAlign: 'center', lineHeight: 20 }}>
-                這會依序驗證帳密、同步 E 校園核心資料、同步 TronClass 課程，最後才建立 Campus One
-                內部登入狀態。
+                正在確認帳號並讀取學校資料，請保持網路連線。
               </Text>
               <View style={{ width: '100%', gap: 8, marginTop: 4 }}>
                 {bootstrapStepOrder.map((candidate, index) => {
@@ -390,11 +388,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
                   );
                 })}
               </View>
-              <Button
-                text="取消登入"
-                kind="secondary"
-                onPress={handleRetry}
-              />
+              <Button text="返回登入表單" kind="secondary" onPress={handleRetry} />
             </View>
           </AnimatedCard>
         ) : null}
@@ -445,7 +439,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
 
         {/* ── 關於學校帳號登入（說明卡片）── */}
         {step === 'idle' ? (
-          <Card title="關於學校帳號登入" subtitle="安全、快速、自動同步">
+          <Card title="關於學校帳號登入" subtitle="使用現有帳號，連接校園資料">
             <View style={{ gap: 12 }}>
               <View style={{ flexDirection: 'row', gap: 12 }}>
                 <View
@@ -461,7 +455,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
                   <Ionicons name="shield-checkmark" size={18} color={theme.colors.accent} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: theme.colors.text, fontWeight: '700' }}>安全可靠</Text>
+                  <Text style={{ color: theme.colors.text, fontWeight: '700' }}>學校身分驗證</Text>
                   <Text
                     style={{
                       color: theme.colors.muted,
@@ -470,7 +464,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
                       lineHeight: 18,
                     }}
                   >
-                    透過學校 E 校園認證系統驗證身份，密碼僅用於本次登入驗證
+                    請使用學校帳號與密碼完成身分驗證
                   </Text>
                 </View>
               </View>
@@ -498,7 +492,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
                       lineHeight: 18,
                     }}
                   >
-                    使用現有學校帳號，無需另外註冊，登入後自動建立 Campus One 帳號
+                    使用現有學校帳號，無需另外註冊，登入後自動準備你的校園帳號
                   </Text>
                 </View>
               </View>
@@ -526,7 +520,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
                       lineHeight: 18,
                     }}
                   >
-                    自動同步您的姓名、學號、系所、課表、成績與 TronClass 課程資訊
+                    可同步的資料依學校提供內容而定，請以登入後顯示的結果為準
                   </Text>
                 </View>
               </View>
@@ -554,47 +548,9 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
                       lineHeight: 18,
                     }}
                   >
-                    課表與成績會快取在本機，下次開啟不用重新抓取，定期自動更新
+                    已同步的資料可在離線時查看；取得最新內容仍需連線更新
                   </Text>
                 </View>
-              </View>
-            </View>
-          </Card>
-        ) : null}
-
-        {/* ── 技術資訊 ── */}
-        {step === 'idle' ? (
-          <Card title="技術資訊" subtitle="開發者參考">
-            <View style={{ gap: 8 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Text style={{ color: theme.colors.muted }}>認證方式</Text>
-                <Text style={{ color: theme.colors.text, fontWeight: '600' }}>
-                  E 校園 + TronClass
-                </Text>
-              </View>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Text style={{ color: theme.colors.muted }}>E 校園端點</Text>
-                <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 11 }}>
-                  alcat.pu.edu.tw
-                </Text>
-              </View>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Text style={{ color: theme.colors.muted }}>TronClass 端點</Text>
-                <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 11 }}>
-                  tronclass.pu.edu.tw
-                </Text>
-              </View>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Text style={{ color: theme.colors.muted }}>資料快取</Text>
-                <Text style={{ color: theme.colors.text, fontWeight: '600' }}>
-                  AsyncStorage + TTL
-                </Text>
-              </View>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Text style={{ color: theme.colors.muted }}>登入策略</Text>
-                <Text style={{ color: theme.colors.text, fontWeight: '600' }}>
-                  後端優先 + 手機直連降級
-                </Text>
               </View>
             </View>
           </Card>
