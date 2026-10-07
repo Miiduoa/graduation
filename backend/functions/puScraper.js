@@ -649,6 +649,19 @@ function extractAvailableSemesters(html) {
   return semesters;
 }
 
+/** Preserve source order while deduplicating semester headers from PU grade HTML. */
+function parseGradeSemesterCodes(html) {
+  if (typeof html !== 'string') return [];
+  const codes = [];
+  const regex = /學期別\(Semester\)[：:]\s*(\d+)\s*\[\s*(\d+)\s*\]/g;
+  let match;
+  while ((match = regex.exec(html)) !== null) {
+    const code = `${match[1]}${match[2]}`;
+    if (!codes.includes(code)) codes.push(code);
+  }
+  return codes;
+}
+
 async function puFetchGrades(cookies, semester) {
   try {
     if (!cookies || !Object.keys(cookies).length) throw new Error('No session cookies');
@@ -729,13 +742,8 @@ async function puFetchGrades(cookies, semester) {
     const grades = [];
     const summary = {};
 
-    // 1. Extract semester codes from <p> headers
-    const semRegex = /學期別\(Semester\)[：:]\s*(\d+)\s*\[\s*(\d+)\s*\]/g;
-    const semesterCodes = [];
-    let semMatch;
-    while ((semMatch = semRegex.exec(html)) !== null) {
-      semesterCodes.push(`${semMatch[1]}${semMatch[2]}`);
-    }
+    // 1. Extract all available semesters before filtering grade rows.
+    const semesterCodes = parseGradeSemesterCodes(html);
 
     // 2. Find all 5-column grade tables (contain "Score" or "成績" AND "Course" or "科目")
     const tableRegex = /<table[^>]*>[\s\S]*?<\/table>/gi;
@@ -804,7 +812,7 @@ async function puFetchGrades(cookies, semester) {
     return {
       success: true,
       grades: filteredGrades,
-      allSemesters,
+      allSemesters: semesterCodes,
       summary,
     };
   } catch (err) {
@@ -1280,4 +1288,5 @@ module.exports = {
   puFetchStudentInfo,
   puFetchAbsence,
   puFetchCreditSummary,
+  parseGradeSemesterCodes,
 };
