@@ -102,6 +102,7 @@ const {
   tcFetchCourseFullData,
 } = require('./tronClassScraper');
 const { runFinalizePostLogin } = require('./postLogin/finalizePostLogin');
+const { buildPuSignInAcademicFields } = require('./lib/puSignInAcademicFields');
 
 // TDX API 金鑰（透過 firebase functions:secrets:set 設定）
 const TDX_CLIENT_ID = defineSecret('TDX_CLIENT_ID');
@@ -2226,14 +2227,7 @@ exports.signInPuStudentId = onRequest(
               totalCredits: coursesResult.totalCredits ?? 0,
             }
           : null,
-        grades: finalGradesResult.success
-          ? {
-              grades: finalGradesResult.grades || [],
-              allSemesters: finalGradesResult.allSemesters || [],
-              summary: finalGradesResult.summary || {},
-            }
-          : null,
-        creditAudit: finalCreditAuditResult,
+        ...buildPuSignInAcademicFields(gradesResult),
         announcements: announcementsResult.success ? announcementsResult.announcements || [] : null,
       });
     } catch (error) {
