@@ -1,9 +1,18 @@
-import React, { useMemo, useState, useSyncExternalStore } from 'react';
-import { ActivityIndicator, Alert, ScrollView, Text, TextInput, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Platform,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import * as WebBrowser from 'expo-web-browser';
-import { useIdTokenAuthRequest } from 'expo-auth-session/providers/google';
+import { exchangeCodeAsync } from 'expo-auth-session';
+import { discovery, useIdTokenAuthRequest } from 'expo-auth-session/providers/google';
 import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
 
 import {
@@ -36,6 +45,87 @@ type SSOLoginScreenProps = {
   };
 };
 
+type GoogleClientIds = { web: string; ios: string; android: string };
+
+function ConfiguredGoogleLoginButton({
+  clientIds,
+  busy,
+  disabled,
+  onStart,
+  onCancel,
+  onError,
+  onIdToken,
+}: {
+  clientIds: GoogleClientIds;
+  busy: boolean;
+  disabled: boolean;
+  onStart: () => void;
+  onCancel: () => void;
+  onError: () => void;
+  onIdToken: (idToken: string) => Promise<void>;
+}) {
+  const [request, , promptAsync] = useIdTokenAuthRequest({
+    webClientId: clientIds.web || undefined,
+    iosClientId: clientIds.ios || undefined,
+    androidClientId: clientIds.android || undefined,
+    shouldAutoExchangeCode: false,
+  });
+  const pending = useRef(false);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  async function start() {
+    if (!request || busy || disabled || pending.current) return;
+    pending.current = true;
+    onStart();
+    try {
+      const result = await promptAsync();
+      if (!mounted.current) return;
+      if (result.type === 'cancel' || result.type === 'dismiss') {
+        onCancel();
+        return;
+      }
+      if (result.type !== 'success') throw new Error('Google authorization did not complete');
+
+      let idToken = result.params.id_token;
+      if (!idToken && result.params.code) {
+        if (!request.codeVerifier) throw new Error('Missing Google authorization verifier');
+        const authentication = await exchangeCodeAsync(
+          {
+            clientId: request.clientId,
+            code: result.params.code,
+            redirectUri: request.redirectUri,
+            extraParams: { code_verifier: request.codeVerifier },
+          },
+          discovery,
+        );
+        idToken = authentication.idToken ?? '';
+      }
+      if (typeof idToken !== 'string' || !idToken) throw new Error('Missing Google ID token');
+      if (mounted.current) await onIdToken(idToken);
+    } catch {
+      if (mounted.current) onError();
+    } finally {
+      pending.current = false;
+    }
+  }
+
+  return (
+    <Button
+      text={busy ? 'Google 登入處理中…' : request ? '使用 Google 繼續' : '正在準備 Google 登入…'}
+      kind="primary"
+      onPress={() => void start()}
+      disabled={busy || disabled || !request}
+    />
+  );
+}
+
 export function SSOLoginScreen(props: SSOLoginScreenProps) {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const nav = props?.navigation;
@@ -60,10 +150,10 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
     };
   }, []);
 
-  const [, , googlePromptAsync] = useIdTokenAuthRequest({
-    webClientId: googleIds.web || '000000000000-not-configured.apps.googleusercontent.com',
-    iosClientId: googleIds.ios || undefined,
-    androidClientId: googleIds.android || undefined,
+  const googleClientId = Platform.select({
+    ios: googleIds.ios,
+    android: googleIds.android,
+    default: googleIds.web,
   });
 
   const schoolName = useMemo(
@@ -142,27 +232,21 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
     setIsRetryable(false);
   };
 
-  const handleGoogleLogin = async () => {
-    if (!googleIds.web) {
-      Alert.alert('無法使用 Google 登入', '目前暫時無法使用 Google 登入，請改用下方的學校帳號。');
-      return;
-    }
-
+  const handleGoogleStart = () => {
     setError(null);
     setIsRetryable(false);
     setGoogleBusy(true);
+  };
 
+  const handleGoogleError = () => {
+    setError('Google 登入未完成，請稍後重試或改用學校帳號。');
+    setIsRetryable(true);
+    setStep('error');
+    setGoogleBusy(false);
+  };
+
+  const handleGoogleLogin = async (idToken: string) => {
     try {
-      const result = await googlePromptAsync();
-      if (result.type === 'dismiss' || result.type === 'cancel') return;
-      if (result.type !== 'success') {
-        throw new Error('Google 登入未完成');
-      }
-      const idToken = result.params.id_token;
-      if (!idToken || typeof idToken !== 'string') {
-        throw new Error('未取得 id_token');
-      }
-
       const cred = GoogleAuthProvider.credential(idToken);
       await signInWithCredential(getAuthInstance(), cred);
       await auth.refreshProfile();
@@ -183,9 +267,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
       }, 250);
     } catch (loginError) {
       console.warn('Google login error:', loginError);
-      setError('Google 登入未完成，請稍後重試或改用學校帳號。');
-      setIsRetryable(true);
-      setStep('error');
+      handleGoogleError();
     } finally {
       setGoogleBusy(false);
     }
@@ -250,20 +332,22 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
         {/* ── Google 登入（主路） ── */}
         <AnimatedCard title="Google 登入" subtitle="使用你的 Google 帳號">
           <View style={{ gap: 14 }}>
-            <Button
-              text={
-                googleBusy
-                  ? 'Google 登入處理中…'
-                  : googleIds.web
-                    ? '使用 Google 繼續'
-                    : 'Google 登入暫時無法使用'
-              }
-              kind="primary"
-              onPress={() => void handleGoogleLogin()}
-              disabled={googleBusy || !googleIds.web}
-            />
+            {googleClientId ? (
+              <ConfiguredGoogleLoginButton
+                key={googleClientId}
+                clientIds={googleIds}
+                busy={googleBusy}
+                disabled={isBusy}
+                onStart={handleGoogleStart}
+                onCancel={() => setGoogleBusy(false)}
+                onError={handleGoogleError}
+                onIdToken={handleGoogleLogin}
+              />
+            ) : (
+              <Button text="Google 登入暫時無法使用" kind="primary" disabled />
+            )}
             <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
-              {googleIds.web
+              {googleClientId
                 ? '選擇要使用的 Google 帳號後，即可繼續登入。'
                 : '目前暫時無法使用 Google 登入，請改用下方的學校帳號。'}
             </Text>
