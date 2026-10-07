@@ -69,7 +69,7 @@ Nolu 已讀取的具體來源是 [`pu-plan/guest-privacy.js`](https://github.com
 
 Web 與 Mobile 共用紙白／墨綠主色、語意狀態色、字級層次及深色模式。Web 頁首、服務選單、頁尾、登入回呼、條款與錯誤頁使用共同框架；Mobile 的今日、課程、個人、交通與 LMS 畫面沿用共同元件及 tokens。補查後將社群、好友、私訊、點名、商家輸入欄位、通知與共用表單的靜態顏色改為隨主題更新；品牌底文字使用對應前景色，避免深色模式白字配淺綠底。這是程式與本機畫面的驗收，尚未完成所有角色的實機逐頁驗收。
 
-- 自動檢查：Web 133 項、Mobile 1,307 項、Functions 165 項與 Firestore／Storage rules 46 項測試通過；Web／Mobile 各保留 1 項既有跳過測試。Workspace TypeScript 與 Web production build 通過；Mobile 以 development 設定完成 iOS／Android export，並未產生簽署安裝包。
+- 自動檢查：Web 133 項、Mobile 1,319 項、Functions 165 項與 Firestore／Storage rules 46 項測試通過；Web／Mobile 各保留 1 項既有跳過測試。Workspace TypeScript 與 Web production build 通過；Mobile 以 development 設定完成 iOS／Android export，並未產生簽署安裝包。
 - Web：55 個路由的未登入狀態均回應 200，390px 寬度沒有橫向溢出或未處理的頁面錯誤；另複查個人、登入回呼、教學管理、助理、公車、條款與隱私頁的深／淺模式共 14 種狀態。使用占位 ID 的詳情頁只驗證登入／不存在狀態，不能替代有資料的功能驗收。
 - 公車只接受來源為 TDX 且仍在有效時間內的即時結果；尚未設定學校路線、站牌與正式服務憑證時不顯示預估時間。Mobile 尚無可驗證的車輛追蹤服務，因此不提供模擬位置、到站震動或假位置分享。
 - Mobile 個人資料使用實際寫入及回讀確認；舊成績／學業總覽／成就／教師評分路由已移除固定 GPA、比較排名、假徽章、示範學生及假儲存完成。成績只呈現本人目前學校已發布資料，教師入口先核對授課關係及課程 ID；缺資料顯示空或錯誤狀態。
@@ -84,6 +84,8 @@ Web 與 Mobile 共用紙白／墨綠主色、語意狀態色、字級層次及�
 Workflow 選擇已安裝且可用的 iPhone simulator、等待啟動、編譯後讀取實際 bundle ID 並安裝 App；失敗不再由 continue-on-error 隱藏。[Maestro 37653836784](https://github.com/Miiduoa/graduation/actions/runs/37653836784) 在 `654a60b` 已完成原生編譯、App 安裝與 Metro 啟動，但首次程式打包超過畫面等待時間；失敗截圖顯示 Bundling 67%，尚未通過登入畫面驗收。
 
 後續 workflow 在測試前，以 AppDelegate／RCTBundleURLProvider 相同入口與參數取得實際 iOS bundle，要求 HTTP 成功、JavaScript content type 及非空內容，設 600 秒上限；只等待 `/status` 不再視作畫面可啟動。獨立本機 Metro 驗證 HTTP 200、24,963,236 bytes，首次 6.745 秒、暖快取 0.082 秒，未更動畫面等待條件。預設 smoke 只驗證全新安裝的未登入首頁與登入入口；登入後角色流程需要另外準備測試帳號，不可用未登入測試替代。完整 UI 結果仍須以後續對應 commit 的 workflow 為準。
+
+[Maestro 37657286564](https://github.com/Miiduoa/graduation/actions/runs/37657286564) 在 `ba66daa` 已取得 HTTP 200、24,943,461 bytes 的 iOS bundle，並通過未登入首頁檢查。進入學校登入頁時，Google provider 因缺少 `iosClientId` 在 render 階段丟出例外。後續修正讓 Google 登入僅在目前平台有設定時初始化，未設定時保留學校帳密表單；原生授權碼以 PKCE 交換憑證，取消或交換失敗會解除表單等待，不能顯示登入成功。17 項登入回歸測試保留實際 Google provider 的平台檢查與回應型態；模擬底層授權／交換成功、失敗與重試。修正後的完整 UI 結果仍以對應 commit 的 workflow 為準。Debug 截圖僅作驗證證據，不作商店素材。
 
 ## 依賴稽核的可達性
 
