@@ -22,6 +22,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Screen, ErrorState } from '../ui/components';
 import { theme } from '../ui/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { useAuth } from '../state/auth';
 import { shouldBlockForNoLogin, isDemoUid } from '../services/demoSession';
 import { useSchool } from '../state/school';
@@ -112,6 +113,7 @@ function shouldShowDateHeader(current: Msg, previous: Msg | undefined): boolean 
 // ═══════ Main Component ═══════
 
 export function ChatScreen(props: any) {
+  const s = useThemeStyleSheet(createStyles);
   const peerParam = props?.route?.params?.peerId as string | undefined;
   const conversationIdParam = props?.route?.params?.conversationId as string | undefined;
   const refPostId = props?.route?.params?.refPostId as string | undefined;
@@ -242,7 +244,7 @@ export function ChatScreen(props: any) {
         ),
       });
     }
-  }, [peerName, peerOnline, peerTyping, props?.navigation]);
+  }, [peerName, peerOnline, peerTyping, props?.navigation, s]);
 
   // ── Demo persona 模式：嚴格按身分隔離載入訊息 ──
   useEffect(() => {
@@ -735,12 +737,12 @@ export function ChatScreen(props: any) {
             ]}
           >
             {sending ? (
-              <ActivityIndicator size="small" color="#fff" />
+              <ActivityIndicator size="small" color={theme.colors.onAccent} />
             ) : (
               <Ionicons
                 name="send"
                 size={20}
-                color={text.trim() ? '#fff' : theme.colors.muted}
+                color={text.trim() ? theme.colors.onAccent : theme.colors.muted}
               />
             )}
           </Pressable>
@@ -788,7 +790,7 @@ function TypingDot({ delay }: { delay: number }) {
 
 // ═══════ Styles ═══════
 
-const s = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 },
   loadingText: { color: theme.colors.muted, marginTop: 12 },
   emptyText: { color: theme.colors.muted, marginTop: 16, fontSize: 14 },
@@ -818,7 +820,7 @@ const s = StyleSheet.create({
     borderBottomLeftRadius: 4,
   },
   msgText: { fontSize: 15, lineHeight: 21 },
-  msgTextMine: { color: '#fff' },
+  msgTextMine: { color: theme.colors.onAccent },
   msgTextPeer: { color: theme.colors.text },
   metaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2, paddingHorizontal: 6, gap: 6 },
   timeText: { color: theme.colors.muted, fontSize: 10 },

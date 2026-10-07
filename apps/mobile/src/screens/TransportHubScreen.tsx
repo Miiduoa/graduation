@@ -27,6 +27,7 @@ import { PuWebView } from '../ui/PuWebView';
 import { Screen, Card, Pill, Button } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
+import { useThemeMode } from '../state/theme';
 import {
   searchPlaces,
   reverseGeocode,
@@ -190,7 +191,7 @@ const MODE_CONFIG: Record<string, { icon: string; color: string; label: string }
   driving: { icon: 'car-outline', color: '#AF52DE', label: '開車' },
   cycling: { icon: 'bicycle-outline', color: '#FF9500', label: '騎車' },
   walking: { icon: 'walk-outline', color: '#34C759', label: '步行' },
-  transit: { icon: 'bus-outline', color: theme.colors.accent, label: '大眾運輸' },
+  transit: { icon: 'bus-outline', get color() { return theme.colors.accent; }, label: '大眾運輸' },
 };
 
 const CONGESTION_COLORS = {
@@ -206,6 +207,7 @@ type QuickTab = 'none' | 'bus' | 'train' | 'hsr' | 'bike';
 // ─── Main Component ─────────────────────────────────────
 
 export function TransportHubScreen(props: any) {
+  const themeMode = useThemeMode();
   // GPS 定位
   const geo = useGeolocation({ enableHighAccuracy: true, autoStart: false });
   const [locationReady, setLocationReady] = useState(false);
@@ -428,7 +430,7 @@ export function TransportHubScreen(props: any) {
       if (congestionLevel === 'moderate') return CONGESTION_COLORS.moderate;
     }
     return MODE_CONFIG[activeRoute.mode]?.color ?? theme.colors.accent;
-  }, [activeRoute, navMode, congestionLevel]);
+  }, [activeRoute, navMode, congestionLevel, themeMode]);
 
   // 大眾運輸各段資訊
   const transitSegments = useMemo(() => {
@@ -1348,6 +1350,7 @@ export function TransportHubScreen(props: any) {
 // ═══════════════════════════════════════════════════════
 
 function QuickBusPanel() {
+  useThemeMode();
   const [searchText, setSearchText] = useState('');
   const [results, setResults] = useState<TDXBusRoute[]>([]);
   const [searching, setSearching] = useState(false);
@@ -1635,6 +1638,7 @@ function QuickBusPanel() {
 }
 
 function QuickTrainPanel() {
+  useThemeMode();
   const [station, setStation] = useState(PU_NEARBY_TRAIN_STATIONS[0].id);
   const [data, setData] = useState<TDXTrainTimetable[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1750,6 +1754,7 @@ function QuickTrainPanel() {
 }
 
 function QuickHSRPanel() {
+  useThemeMode();
   const [data, setData] = useState<TDXHSRTimetable[]>([]);
   const [loading, setLoading] = useState(true);
   const [dir, setDir] = useState<number | null>(null);
@@ -1873,6 +1878,7 @@ function QuickHSRPanel() {
 }
 
 function QuickBikePanel() {
+  useThemeMode();
   const [stations, setStations] = useState<BikeStationWithAvailability[]>([]);
   const [loading, setLoading] = useState(true);
 

@@ -2,6 +2,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, Text, ActivityIndicator, StyleSheet, Alert } from 'react-native';
 import { theme } from '../ui/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { useSchool } from '../state/school';
 import { followUser, unfollowUser, isFollowing } from '../services/follows';
 import { isFirebaseMockMode } from '../firebase';
@@ -13,6 +14,7 @@ type Props = {
 };
 
 export function PeerFollowButton(props: Props) {
+  const styles = useThemeStyleSheet(createStyles);
   const { myUid, peerUid, compact } = props;
   const { school } = useSchool();
   const sid = school?.id;
@@ -79,7 +81,7 @@ export function PeerFollowButton(props: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   btn: {
     alignSelf: 'flex-start',
     marginTop: 8,
