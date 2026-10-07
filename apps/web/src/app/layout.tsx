@@ -39,8 +39,8 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#F2F2F7' },
-    { media: '(prefers-color-scheme: dark)', color: '#000000' },
+    { media: '(prefers-color-scheme: light)', color: '#f8f7f3' },
+    { media: '(prefers-color-scheme: dark)', color: '#171f1b' },
   ],
   width: 'device-width',
   initialScale: 1,
@@ -60,7 +60,7 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="Campus One" />
         <meta name="mobile-web-app-capable" content="yes" />
-        <meta name="msapplication-TileColor" content="#F2F2F7" />
+        <meta name="msapplication-TileColor" content="#f8f7f3" />
         <meta name="msapplication-tap-highlight" content="no" />
       </head>
       <body>

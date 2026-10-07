@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { use, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
@@ -27,9 +27,10 @@ import {
 } from '@/lib/demoStore';
 
 export default function AdminPage(props: {
-  searchParams?: { school?: string; schoolId?: string };
+  searchParams?: Promise<{ school?: string; schoolId?: string }>;
 }) {
-  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const searchParams = props.searchParams ? use(props.searchParams) : undefined;
+  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
   const router = useRouter();
   const [role] = useDemoRole();
   const caps = getCapabilities(role);
@@ -208,12 +209,12 @@ export default function AdminPage(props: {
             <div className="metricValue">{stats.totalUsers}</div>
             <div className="metricLabel">總使用者</div>
           </div>
-          <div className="metricCard" style={{ '--tone': '#5856D6' } as CSSProperties}>
+          <div className="metricCard" style={{ '--tone': 'var(--brand)' } as CSSProperties}>
             <div className="metricIcon">🧑‍🏫</div>
             <div className="metricValue">{stats.teacherCount}</div>
             <div className="metricLabel">教師人數</div>
           </div>
-          <div className="metricCard" style={{ '--tone': '#5856D6' } as CSSProperties}>
+          <div className="metricCard" style={{ '--tone': 'var(--brand)' } as CSSProperties}>
             <div className="metricIcon">📚</div>
             <div className="metricValue">{stats.totalCourses}</div>
             <div className="metricLabel">開設課程</div>
@@ -222,7 +223,7 @@ export default function AdminPage(props: {
             className="metricCard"
             style={
               {
-                '--tone': stats.pendingApprovals > 0 ? '#FF9500' : '#34C759',
+                '--tone': stats.pendingApprovals > 0 ? 'var(--warning)' : 'var(--success)',
               } as CSSProperties
             }
           >
@@ -266,8 +267,8 @@ export default function AdminPage(props: {
                       onClick={() => approvePending(p.id)}
                       style={{
                         padding: '6px 12px', borderRadius: 8,
-                        border: '1px solid #34C759',
-                        background: 'rgba(52,199,89,0.12)',
+                        border: '1px solid var(--success)',
+                        background: 'var(--success-soft)',
                         color: '#1F7A2E', fontWeight: 700, fontSize: 12, cursor: 'pointer',
                       }}
                     >
@@ -321,7 +322,7 @@ export default function AdminPage(props: {
                     >
                       <div
                         className="insetGroupRowIcon"
-                        style={{ background: `${c.color}14`, color: c.color }}
+                        style={{ background: `color-mix(in srgb, ${c.color} 7.84%, transparent)`, color: c.color }}
                       >
                         {c.icon}
                       </div>
@@ -376,7 +377,7 @@ export default function AdminPage(props: {
                                 {u.role}
                               </span>
                               {disabled && (
-                                <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 6, background: 'rgba(255,59,48,0.12)', color: '#C0392B' }}>
+                                <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 6, background: 'var(--danger-soft)', color: '#C0392B' }}>
                                   已停用
                                 </span>
                               )}
@@ -397,8 +398,8 @@ export default function AdminPage(props: {
                               }}
                               style={{
                                 padding: '4px 10px', fontSize: 11, borderRadius: 6, cursor: 'pointer',
-                                background: disabled ? 'rgba(52,199,89,0.12)' : 'rgba(255,59,48,0.10)',
-                                border: `1px solid ${disabled ? '#34C759' : '#FF3B30'}`,
+                                background: disabled ? 'var(--success-soft)' : 'var(--danger-soft)',
+                                border: `1px solid ${disabled ? 'var(--success)' : 'var(--danger)'}`,
                                 color: disabled ? '#1F7A2E' : '#C0392B',
                                 fontWeight: 700,
                               }}
@@ -444,9 +445,9 @@ export default function AdminPage(props: {
                         <div
                           className="insetGroupRowIcon"
                           style={{
-                            background: log.level === 'high' ? 'rgba(255,59,48,0.12)'
-                              : log.level === 'medium' ? 'rgba(255,149,0,0.12)'
-                              : log.level === 'ok' ? 'rgba(52,199,89,0.12)'
+                            background: log.level === 'high' ? 'var(--danger-soft)'
+                              : log.level === 'medium' ? 'var(--warning-soft)'
+                              : log.level === 'ok' ? 'var(--success-soft)'
                               : 'var(--panel)',
                             color: log.level === 'high' ? '#C0392B' : log.level === 'medium' ? '#C17A00' : log.level === 'ok' ? '#1F7A2E' : 'var(--muted)',
                             fontSize: 14,
@@ -524,8 +525,8 @@ export default function AdminPage(props: {
                         }}
                         style={{
                           padding: '6px 12px', fontSize: 12, borderRadius: 8, cursor: 'pointer',
-                          background: maintenanceMode ? 'rgba(255,149,0,0.12)' : 'var(--panel)',
-                          border: `1px solid ${maintenanceMode ? '#FF9500' : 'var(--border)'}`,
+                          background: maintenanceMode ? 'var(--warning-soft)' : 'var(--panel)',
+                          border: `1px solid ${maintenanceMode ? 'var(--warning)' : 'var(--border)'}`,
                           color: maintenanceMode ? '#C17A00' : 'var(--muted)', fontWeight: 700,
                         }}
                       >
@@ -659,9 +660,9 @@ export default function AdminPage(props: {
           style={{
             padding: '14px 18px',
             background: isAdmin
-              ? 'linear-gradient(135deg, rgba(255,59,48,0.10) 0%, rgba(255,59,48,0.05) 100%)'
-              : 'linear-gradient(135deg, rgba(255,149,0,0.10) 0%, rgba(255,200,0,0.06) 100%)',
-            border: `1px solid ${isAdmin ? 'rgba(255,59,48,0.28)' : 'rgba(255,149,0,0.28)'}`,
+              ? 'linear-gradient(135deg, var(--danger-soft) 0%, var(--danger-soft) 100%)'
+              : 'linear-gradient(135deg, var(--warning-soft) 0%, rgba(255,200,0,0.06) 100%)',
+            border: `1px solid ${isAdmin ? 'var(--danger-soft)' : 'var(--warning-soft)'}`,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',

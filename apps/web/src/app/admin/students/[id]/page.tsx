@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { use, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
@@ -43,10 +43,12 @@ const MOCK_STUDENTS: StudentInfo[] = DEMO_STUDENTS.map((s) => {
 });
 
 export default function StudentDetailPage(props: {
-  params: { id: string };
-  searchParams?: { school?: string; schoolId?: string };
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<{ school?: string; schoolId?: string }>;
 }) {
-  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const params = use(props.params);
+  const searchParams = props.searchParams ? use(props.searchParams) : undefined;
+  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
   const router = useRouter();
   const [demoRole] = useDemoRole();
   const caps = getCapabilities(demoRole);
@@ -60,8 +62,8 @@ export default function StudentDetailPage(props: {
   const canView = caps.canViewTeacherDashboard || caps.canViewAdminDashboard;
 
   const student = useMemo(
-    () => MOCK_STUDENTS.find((s) => s.uid === props.params.id || s.studentId === props.params.id),
-    [props.params.id],
+    () => MOCK_STUDENTS.find((s) => s.uid === params.id || s.studentId === params.id),
+    [params.id],
   );
 
   const isAccountDisabled = student ? isUserDisabled(student.uid, store) : false;
@@ -101,7 +103,7 @@ export default function StudentDetailPage(props: {
             <div style={{ fontSize: 56, marginBottom: 12 }}>👤</div>
             <h2 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 800 }}>找不到此學生</h2>
             <p style={{ margin: '0 0 20px', color: 'var(--muted)' }}>
-              學號 / UID「{props.params.id}」不存在於示範資料中。
+              學號 / UID「{params.id}」不存在於示範資料中。
             </p>
             <Link href={`/search${q}`} className="btn primary">
               ← 回搜尋
@@ -188,7 +190,7 @@ export default function StudentDetailPage(props: {
                 >
                   <div
                     className="insetGroupRowIcon"
-                    style={{ background: `${c.color}14`, color: c.color }}
+                    style={{ background: `color-mix(in srgb, ${c.color} 7.84%, transparent)`, color: c.color }}
                   >
                     {c.icon}
                   </div>
@@ -220,11 +222,11 @@ export default function StudentDetailPage(props: {
           style={{
             padding: '14px 18px',
             background: student.riskLevel === 'high'
-              ? 'linear-gradient(135deg, rgba(255,59,48,0.10) 0%, rgba(255,59,48,0.04) 100%)'
+              ? 'linear-gradient(135deg, var(--danger-soft) 0%, var(--danger-soft) 100%)'
               : student.riskLevel === 'mid'
-              ? 'linear-gradient(135deg, rgba(255,149,0,0.10) 0%, rgba(255,149,0,0.04) 100%)'
-              : 'linear-gradient(135deg, rgba(52,199,89,0.10) 0%, rgba(52,199,89,0.04) 100%)',
-            border: `1px solid ${student.riskLevel === 'high' ? '#FF3B30' : student.riskLevel === 'mid' ? '#FF9500' : '#34C759'}`,
+              ? 'linear-gradient(135deg, var(--warning-soft) 0%, var(--warning-soft) 100%)'
+              : 'linear-gradient(135deg, var(--success-soft) 0%, var(--success-soft) 100%)',
+            border: `1px solid ${student.riskLevel === 'high' ? 'var(--danger)' : student.riskLevel === 'mid' ? 'var(--warning)' : 'var(--success)'}`,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -371,7 +373,7 @@ export default function StudentDetailPage(props: {
             />
           </label>
           <div style={{ padding: 10, background: 'var(--accent-soft)', borderRadius: 8, fontSize: 12, color: 'var(--brand)' }}>
-            🤖 <strong>AI 提示</strong>：可請 AI 助理為「{student.riskLevel === 'high' ? '需關注學生' : '一般學生'}」起草溫和有建設性的關心信。
+            🤖 <strong>AI 提示</strong>：可請 校園助理為「{student.riskLevel === 'high' ? '需關注學生' : '一般學生'}」起草溫和有建設性的關心信。
           </div>
         </div>
       </Modal>

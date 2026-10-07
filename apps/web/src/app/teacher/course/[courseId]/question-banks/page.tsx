@@ -6,7 +6,7 @@
  * 對應引擎：packages/shared/src/lms/questionBank
  */
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { use, useMemo, useState } from 'react';
 
 import { SiteShell } from '@/components/SiteShell';
 import { useDemoRole, getCapabilities } from '@/lib/demoRole';
@@ -44,7 +44,9 @@ const SAMPLE: QuestionBank = {
 // 固定難度分佈，不需要動態修改（移除 setDrawDist 避免 ESLint unused-vars 警告）
 const DEFAULT_DRAW_DIST = { 1: 0.34, 2: 0.33, 3: 0.33 };
 
-export default function QuestionBanksPage({ params, searchParams }: { params: { courseId: string }; searchParams?: { school?: string; schoolId?: string } }) {
+export default function QuestionBanksPage({ params: paramsPromise, searchParams: searchParamsPromise }: { params: Promise<{ courseId: string }>; searchParams?: Promise<{ school?: string; schoolId?: string }> }) {
+  const params = use(paramsPromise);
+  const searchParams = searchParamsPromise ? use(searchParamsPromise) : undefined;
   const { schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
   const [demoRole] = useDemoRole();
   const caps = getCapabilities(demoRole);
@@ -127,9 +129,9 @@ export default function QuestionBanksPage({ params, searchParams }: { params: { 
           <div
             style={{
               padding: '10px 14px', borderRadius: 8, fontSize: 13, marginBottom: 16,
-              background: isTaView ? 'rgba(124,58,237,0.10)' : 'rgba(255,149,0,0.10)',
-              border: `1px solid ${isTaView ? '#AF52DE' : '#FF9500'}`,
-              color: isTaView ? '#5856D6' : '#92400E',
+              background: isTaView ? 'var(--accent-soft)' : 'var(--warning-soft)',
+              border: `1px solid ${isTaView ? 'var(--brand)' : 'var(--warning)'}`,
+              color: isTaView ? 'var(--brand)' : '#92400E',
             }}
           >
             {isTaView
@@ -267,8 +269,8 @@ export default function QuestionBanksPage({ params, searchParams }: { params: { 
             marginTop: 20,
             padding: '14px 18px',
             borderRadius: 12,
-            background: 'rgba(88,86,214,0.08)',
-            border: '1px solid #5856D6',
+            background: 'var(--accent-soft)',
+            border: '1px solid var(--brand)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -277,7 +279,7 @@ export default function QuestionBanksPage({ params, searchParams }: { params: { 
           }}
         >
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#5856D6', marginBottom: 3 }}>🤖 AI 題庫助理</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand)', marginBottom: 3 }}>🤖 AI 題庫助理</div>
             <div style={{ fontSize: 13, color: 'var(--text)' }}>
               讓 AI 根據課程主題批量生成題目，或分析現有題庫的難度分布是否平衡。
             </div>
@@ -311,8 +313,8 @@ const dangerBtn = {
   padding: '6px 10px',
   borderRadius: 6,
   background: 'transparent',
-  color: '#FF3B30',
-  border: '1px solid #FF3B30',
+  color: 'var(--danger)',
+  border: '1px solid var(--danger)',
   cursor: 'pointer',
   fontSize: 12,
 };

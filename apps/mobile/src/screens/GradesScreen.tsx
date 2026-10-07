@@ -135,8 +135,8 @@ const GRADE_COLORS: Record<string, string> = {
   'A+': '#22C55E',
   A: '#22C55E',
   'A-': '#4ADE80',
-  'B+': '#5856D6',
-  B: '#5856D6',
+  'B+': theme.colors.info,
+  B: theme.colors.info,
   'B-': '#60A5FA',
   'C+': '#FF9500',
   C: '#FF9500',
@@ -159,7 +159,7 @@ function inferCategory(courseCode?: string, courseName?: string): Grade['categor
 }
 
 const CATEGORY_LABELS: Record<string, { label: string; color: string }> = {
-  required: { label: '必修', color: '#5856D6' },
+  required: { label: '必修', color: theme.colors.accent },
   elective: { label: '選修', color: '#AF52DE' },
   general: { label: '通識', color: '#34C759' },
   english: { label: '英文', color: '#FF9500' },
@@ -689,7 +689,7 @@ export function GradesScreen(props: Record<string, unknown>) {
                       alignItems: 'center',
                     }}
                   >
-                    <Text style={{ color: '#5856D6', fontWeight: '700', fontSize: 24 }}>
+                    <Text style={{ color: theme.colors.info, fontWeight: '700', fontSize: 24 }}>
                       {
                         semesters.filter((s) => s.courses.some((c) => c.status === 'completed'))
                           .length
@@ -709,7 +709,7 @@ export function GradesScreen(props: Record<string, unknown>) {
                       label === 'A系列'
                         ? '#22C55E'
                         : label === 'B系列'
-                          ? '#5856D6'
+                          ? theme.colors.info
                           : label === 'C系列'
                             ? '#FF9500'
                             : theme.colors.muted;

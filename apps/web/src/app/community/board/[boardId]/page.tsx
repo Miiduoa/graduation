@@ -31,9 +31,11 @@ async function checkIsSubscribed(uid: string, schoolId: string, boardId: string)
 }
 
 export default function BoardDetailPage() {
+  const { user, loading } = useAuth();
+  const route = useParams<{ boardId: string }>();
   return (
     <SiteShell title="看板" subtitle="校園社群">
-      <BoardDetailInner />
+      {loading ? <p role="status">確認登入狀態…</p> : user ? <BoardDetailInner key={`${user.uid}:${route?.boardId}`} /> : <div className="card" style={{padding:24}}><h2>登入後查看看板</h2><p>校園社群內容僅提供給具備學校資格的成員。</p><Link href="/login" className="btn primary">登入帳號</Link></div>}
     </SiteShell>
   );
 }
@@ -48,6 +50,7 @@ function BoardDetailInner() {
   const [posts, setPosts] = useState<CampusPostDoc[]>([]);
   const [subscribed, setSubscribed] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   const reload = useCallback(async () => {
     if (!boardId || !schoolId) return;
@@ -64,8 +67,8 @@ function BoardDetailInner() {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      await reload();
-      setLoading(false);
+      try { await reload(); } catch { setError('無法讀取看板，請確認連線與學校資格後重試。'); }
+      finally { setLoading(false); }
     })();
   }, [reload]);
 
@@ -86,6 +89,8 @@ function BoardDetailInner() {
   if (!boardId) {
     return <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>無看板 ID</div>;
   }
+
+  if (error) return <div role="alert" className="card" style={{padding:24}}><p>{error}</p><button className="btn" onClick={() => { setError(''); setLoading(true); void reload().catch(() => setError('無法讀取看板，請稍後重試。')).finally(() => setLoading(false)); }}>重試</button></div>;
 
   if (loading) {
     return <div className="card" style={{ padding: 24 }}>載入中…</div>;
@@ -129,9 +134,9 @@ function BoardDetailInner() {
               gap: 5,
               padding: '6px 12px',
               borderRadius: 999,
-              border: '1px solid var(--brand, #5856D6)',
-              background: subscribed ? 'var(--brand, #5856D6)' : 'transparent',
-              color: subscribed ? '#fff' : 'var(--brand, #5856D6)',
+              border: '1px solid var(--brand, var(--brand))',
+              background: subscribed ? 'var(--brand, var(--brand))' : 'transparent',
+              color: subscribed ? '#fff' : 'var(--brand, var(--brand))',
               cursor: 'pointer',
               fontSize: 12,
               fontWeight: 700,
@@ -188,8 +193,8 @@ function BoardDetailInner() {
                   <span
                     style={{
                       fontSize: 11,
-                      color: 'var(--brand, #5856D6)',
-                      background: 'rgba(88,86,214,0.10)',
+                      color: 'var(--brand, var(--brand))',
+                      background: 'var(--accent-soft)',
                       padding: '2px 8px',
                       borderRadius: 999,
                       fontWeight: 700,

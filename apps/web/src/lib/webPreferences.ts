@@ -28,7 +28,7 @@ export type StoredWebPreferences = {
 };
 
 export const webPreferencesStorageKey = "campus-web-preferences";
-export const defaultThemeColor = "#2563EB";
+export const defaultThemeColor = "#314D40";
 
 export const defaultWebPreferences: StoredWebPreferences = {
   general: {

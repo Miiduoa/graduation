@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { AppHeader } from '@/components/AppHeader';
 import { useAuth } from '@/components/AuthGuard';
 import { loadHomeData, type HomeData } from '@/lib/homeOverview';
 import styles from './home.module.css';
 
 export default function HomePage() {
-  const { user, loading: authLoading, signOutUser } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const uid = user?.uid;
   const [result, setResult] = useState<{ uid: string; data: HomeData } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -52,59 +53,7 @@ export default function HomePage() {
       <a href="#today-content" className={styles.skip}>
         跳到主要內容
       </a>
-      <header className={styles.header}>
-        <Link href="/" className={styles.brand}>
-          <span className={styles.mark}>
-            C<span>1</span>
-          </span>{' '}
-          Campus One
-        </Link>
-        <nav aria-label="主要導覽" className={styles.nav}>
-          <Link href="/" aria-current="page">
-            今日
-          </Link>
-          <Link href={user ? '#courses' : '/login'}>課程</Link>
-          <Link href="/map">校園</Link>
-          <details className={styles.menu}>
-            <summary>所有服務</summary>
-            <div className={styles.menuPanel}>
-              {[
-                ['/announcements', '公告'],
-                ['/timetable', '課表'],
-                ['/grades', '成績'],
-                ['/credit-planner', '學分規劃'],
-                ['/groups', '課程與群組'],
-                ['/clubs', '社團活動'],
-                ['/community', '校園交流'],
-                ['/messages', '通知'],
-                ['/dms', '私訊'],
-                ['/map', '校園地圖'],
-                ['/bus', '公車'],
-                ['/cafeteria', '餐廳'],
-                ['/library', '圖書館'],
-                ['/profile', '個人資料'],
-                ['/settings', '設定'],
-              ].map(([href, label]) => (
-                <Link key={href} href={href}>
-                  {label}
-                </Link>
-              ))}
-            </div>
-          </details>
-        </nav>
-        <div className={styles.account}>
-          {user ? (
-            <button
-              type="button"
-              onClick={() => void signOutUser().catch(() => setError('登出失敗，請重試。'))}
-            >
-              登出
-            </button>
-          ) : (
-            <Link href="/login">登入</Link>
-          )}
-        </div>
-      </header>
+      <AppHeader />
       <main id="today-content" className={styles.main}>
         <div className={styles.heading}>
           <div>

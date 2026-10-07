@@ -17,7 +17,7 @@
  */
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { use, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
@@ -85,10 +85,11 @@ function parseConvoId(convoId: string): [string, string] | null {
 }
 
 export default function DmChatPage(props: {
-  params: { conversationId: string };
-  searchParams?: { school?: string; schoolId?: string };
+  params: Promise<{ conversationId: string }>;
+  searchParams?: Promise<{ school?: string; schoolId?: string }>;
 }) {
-  const { schoolName } = resolveSchoolPageContext(props.searchParams);
+  const searchParams = props.searchParams ? use(props.searchParams) : undefined;
+  const { schoolName } = resolveSchoolPageContext(searchParams);
   const [demoRole] = useDemoRole();
   const roleDef = getDemoRoleDefinition(demoRole);
   const store = useDemoStore();
@@ -98,7 +99,7 @@ export default function DmChatPage(props: {
 
   const selfUser = getDemoUser(demoRole);
   const selfUid = selfUser?.uid ?? '';
-  const convoId = props.params.conversationId;
+  const { conversationId: convoId } = use(props.params);
 
   const memberPair = useMemo(() => parseConvoId(convoId), [convoId]);
   const memberIds = memberPair ?? [];
@@ -173,8 +174,8 @@ export default function DmChatPage(props: {
             maxWidth: 480,
             padding: 24,
             textAlign: 'center',
-            background: 'rgba(255,59,48,0.08)',
-            border: '1px solid rgba(255,59,48,0.30)',
+            background: 'var(--danger-soft)',
+            border: '1px solid var(--danger-soft)',
             borderRadius: 12,
           }}
         >

@@ -5,7 +5,7 @@
  * TronClass parity 「測驗管理」頁。
  */
 import Link from 'next/link';
-import { useState } from 'react';
+import { use, useState } from 'react';
 
 import { SiteShell } from '@/components/SiteShell';
 import { useToast, Modal } from '@/components/ui';
@@ -27,7 +27,9 @@ const MOCK: QuizRow[] = [
   { id: 'q2', title: '期中考', type: 'exam', dueAt: '2026-06-10', submitted: 0, total: 42, gradesPublished: false },
 ];
 
-export default function TeacherQuizzesPage({ params, searchParams }: { params: { courseId: string }; searchParams?: { school?: string; schoolId?: string } }) {
+export default function TeacherQuizzesPage({ params: paramsPromise, searchParams: searchParamsPromise }: { params: Promise<{ courseId: string }>; searchParams?: Promise<{ school?: string; schoolId?: string }> }) {
+  const params = use(paramsPromise);
+  const searchParams = searchParamsPromise ? use(searchParamsPromise) : undefined;
   const { schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
   const [demoRole] = useDemoRole();
   const caps = getCapabilities(demoRole);
@@ -85,9 +87,9 @@ export default function TeacherQuizzesPage({ params, searchParams }: { params: {
           <div
             style={{
               padding: '10px 14px', borderRadius: 8, fontSize: 13, marginBottom: 20,
-              background: isTaView ? 'rgba(124,58,237,0.10)' : 'rgba(255,149,0,0.10)',
-              border: `1px solid ${isTaView ? '#AF52DE' : '#FF9500'}`,
-              color: isTaView ? '#5856D6' : '#92400E',
+              background: isTaView ? 'var(--accent-soft)' : 'var(--warning-soft)',
+              border: `1px solid ${isTaView ? 'var(--brand)' : 'var(--warning)'}`,
+              color: isTaView ? 'var(--brand)' : '#92400E',
             }}
           >
             {isTaView
@@ -163,8 +165,8 @@ export default function TeacherQuizzesPage({ params, searchParams }: { params: {
             marginTop: 20,
             padding: '14px 18px',
             borderRadius: 12,
-            background: 'rgba(88,86,214,0.08)',
-            border: '1px solid #5856D6',
+            background: 'var(--accent-soft)',
+            border: '1px solid var(--brand)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -173,7 +175,7 @@ export default function TeacherQuizzesPage({ params, searchParams }: { params: {
           }}
         >
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#5856D6', marginBottom: 3 }}>🤖 AI 出題助理</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand)', marginBottom: 3 }}>🤖 AI 出題助理</div>
             <div style={{ fontSize: 13, color: 'var(--text)' }}>
               讓 AI 根據課程大綱生成選擇題、是非題或程式題，並附上答案與解析。
             </div>
@@ -270,7 +272,7 @@ export default function TeacherQuizzesPage({ params, searchParams }: { params: {
               <div style={{ color: 'var(--muted)', fontSize: 12, marginTop: 8 }}>… 其餘 7 題已收摺於題庫頁，可前往「編輯題目」查看完整答案。</div>
             </div>
             <div style={{ marginTop: 16, padding: 12, background: 'var(--accent-soft)', borderRadius: 8, fontSize: 12, color: 'var(--brand)' }}>
-              🤖 <strong>AI 提示</strong>：可請 AI 助理為「{viewingAnswerOf.title}」生成詳細解析與評分標準。
+              🤖 <strong>AI 提示</strong>：可請 校園助理為「{viewingAnswerOf.title}」生成詳細解析與評分標準。
             </div>
           </div>
         ) : null}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { use, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
@@ -15,10 +15,12 @@ import { useDemoRole, getCapabilities } from '@/lib/demoRole';
 import { useDemoStore, takedownAnnouncement, isAnnouncementTakenDown, editAnnouncementDraft, getAnnouncementEdit } from '@/lib/demoStore';
 
 export default function AnnouncementDetailPage(props: {
-  params: { id: string };
-  searchParams?: { school?: string; schoolId?: string };
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<{ school?: string; schoolId?: string }>;
 }) {
-  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const params = use(props.params);
+  const searchParams = props.searchParams ? use(props.searchParams) : undefined;
+  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
   const router = useRouter();
   const [demoRole] = useDemoRole();
   const caps = getCapabilities(demoRole);
@@ -26,8 +28,8 @@ export default function AnnouncementDetailPage(props: {
   const store = useDemoStore();
 
   const baseAnnouncement = useMemo(
-    () => DEMO_ANNOUNCEMENTS.find((a) => a.id === props.params.id),
-    [props.params.id],
+    () => DEMO_ANNOUNCEMENTS.find((a) => a.id === params.id),
+    [params.id],
   );
   const edit = baseAnnouncement ? getAnnouncementEdit(baseAnnouncement.id, store) : undefined;
   const announcement = baseAnnouncement ? {
@@ -309,7 +311,7 @@ export default function AnnouncementDetailPage(props: {
             />
           </label>
           <div style={{ padding: 10, background: 'var(--accent-soft)', borderRadius: 8, fontSize: 12, color: 'var(--brand)' }}>
-            🤖 <strong>AI 提示</strong>：可在儲存後讓 AI 助理校對。重大修改建議重新送審。
+            🤖 <strong>AI 提示</strong>：可在儲存後讓 校園助理校對。重大修改建議重新送審。
           </div>
         </div>
       </Modal>

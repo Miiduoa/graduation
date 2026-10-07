@@ -1,144 +1,117 @@
-/**
- * Campus AI-First — 成就 V2
- */
-import React from 'react';
-import { View, Text } from 'react-native';
-import {
-  AIDetailScreen,
-  AIInsightBanner,
-  AISection,
-  AICard,
-  AIRow,
-  aiTokens,
-} from '../ui/aiFirst';
+import React, { useCallback, useRef, useState, useSyncExternalStore } from 'react';
+import { ActivityIndicator, Text, View } from 'react-native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { AIDetailScreen, AISection, AIRow, AIButton, aiTokens } from '../ui/aiFirst';
+import { useAuth } from '../state/auth';
+import { getThemeVersion, subscribeToTheme } from '../ui/theme';
+import { firebaseSource } from '../data/firebaseSource';
+import { safeNavigate } from '../utils/safeNavigate';
 
-type Badge = {
-  icon: string;
-  name: string;
-  desc: string;
-  unlocked: boolean;
-  progress?: { current: number; total: number };
-};
+type AchievementRecord = { id: string; name: string; description?: string; completed: boolean };
 
-const BADGES: Badge[] = [
-  { icon: '🏆', name: '初登入', desc: '第一次打開校園 AI', unlocked: true },
-  { icon: '⭐', name: '七日連登', desc: '連續 7 天打開 App', unlocked: true },
-  { icon: '📚', name: '勤奮學徒', desc: '完成 10 份作業', unlocked: true, progress: { current: 10, total: 10 } },
-  { icon: '🎯', name: 'A 等學霸', desc: '一學期 GPA 達 3.8+', unlocked: false, progress: { current: 363, total: 380 } },
-  { icon: '🌟', name: '社交達人', desc: '加入 3 個社團', unlocked: false, progress: { current: 2, total: 3 } },
-  { icon: '🏛', name: '校園探索者', desc: '簽到 20 個 POI', unlocked: false, progress: { current: 12, total: 20 } },
-  { icon: '💬', name: '熱心助教', desc: '回答 5 個討論', unlocked: false, progress: { current: 1, total: 5 } },
-  { icon: '🌍', name: '永續校園', desc: '使用環保餐具 30 次', unlocked: false, progress: { current: 5, total: 30 } },
-];
-
-export default function AchievementsAiFirstScreen(props: any) {
-  const navigation = props?.navigation;
-  const unlocked = BADGES.filter((b) => b.unlocked).length;
+export default function AchievementsAiFirstScreen() {
+  useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
+  const navigation = useNavigation();
+  const auth = useAuth();
+  const uid = auth.user?.uid;
+  const schoolId = auth.profile?.uid === uid ? auth.profile?.schoolId : null;
+  const scope = JSON.stringify([uid, schoolId]);
+  const currentScope = useRef(scope);
+  currentScope.current = scope;
+  const generation = useRef(0);
+  const [state, setState] = useState<{
+    scope: string;
+    rows: AchievementRecord[];
+    loading: boolean;
+    error: boolean;
+  } | null>(null);
+  const visible = state?.scope === scope ? state : null;
+  const load = useCallback(async () => {
+    const request = ++generation.current;
+    setState({ scope, rows: [], loading: true, error: false });
+    try {
+      if (!uid || !schoolId || uid.startsWith('demo_')) throw new Error('missing-account');
+      const [records, catalog] = await Promise.all([
+        firebaseSource.getUserAchievements(uid, schoolId),
+        firebaseSource.listAchievements(),
+      ]);
+      const rows: AchievementRecord[] = [];
+      for (const record of records) {
+        if ((record.userId && record.userId !== uid) || record.schoolId !== schoolId) continue;
+        const definition = catalog.find((item) => item.id === (record.achievementId || record.id));
+        const name =
+          record.achievement?.name ||
+          record.name ||
+          definition?.name ||
+          definition?.achievement?.name;
+        if (!name?.trim()) continue;
+        const unlocked = record.unlockedAt ? Date.parse(record.unlockedAt) : Number.NaN;
+        rows.push({
+          id: record.id,
+          name,
+          description:
+            record.achievement?.description || record.description || definition?.description,
+          completed:
+            record.completed === true || (Number.isFinite(unlocked) && unlocked <= Date.now()),
+        });
+      }
+      if (currentScope.current === scope && generation.current === request) {
+        setState({ scope, rows, loading: false, error: false });
+      }
+    } catch {
+      if (currentScope.current === scope && generation.current === request) {
+        setState({ scope, rows: [], loading: false, error: true });
+      }
+    }
+  }, [uid, schoolId, scope]);
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+      return () => {
+        generation.current += 1;
+      };
+    }, [load]),
+  );
 
   return (
     <AIDetailScreen
-      title="成就 & 徽章"
-      subtitle={`已解鎖 ${unlocked} / ${BADGES.length}`}
-      onBack={() => navigation?.goBack?.()}
+      title="成就紀錄"
+      subtitle="查看目前帳號已記錄的成就"
+      onBack={() => navigation.goBack()}
     >
-      <AIInsightBanner
-        text="你最接近的兩個成就：A 等學霸（差 1.7 分）、社交達人（再加 1 個社團）"
-        source="AI · 成就引擎"
-        confidence="high"
-      />
-
-      {/* XP 卡 */}
-      <View
-        style={{
-          marginHorizontal: aiTokens.space.md,
-          marginTop: aiTokens.space.sm,
-          padding: aiTokens.space.lg,
-          backgroundColor: aiTokens.aiGradientStart,
-          borderRadius: aiTokens.radius.lg,
-          overflow: 'hidden',
-          position: 'relative',
-        }}
-      >
-        <View
-          pointerEvents="none"
-          style={{
-            position: 'absolute',
-            top: -40,
-            right: -40,
-            width: 160,
-            height: 160,
-            borderRadius: 80,
-            backgroundColor: aiTokens.ai,
-            opacity: 0.1,
-          }}
-        />
-        <Text style={{ fontSize: 11, color: aiTokens.ai, fontWeight: '700', letterSpacing: 0.4 }}>
-          Level 12 學者 · 1,240 XP
-        </Text>
-        <Text style={{ fontSize: 13, color: aiTokens.muted, marginTop: 6 }}>
-          再 360 XP 升到 Level 13 · 解鎖「A 等學霸」徽章獲 +200 XP
-        </Text>
-        <View
-          style={{
-            marginTop: 14,
-            height: 8,
-            backgroundColor: 'rgba(255,255,255,0.5)',
-            borderRadius: 4,
-            overflow: 'hidden',
-          }}
-        >
-          <View
-            style={{
-              width: '78%',
-              height: '100%',
-              backgroundColor: aiTokens.ai,
-            }}
-          />
-        </View>
-      </View>
-
-      <AISection title="已解鎖" subtitle={`${unlocked} 個`}>
-        {BADGES.filter((b) => b.unlocked).map((b) => (
-          <AIRow
-            key={b.name}
-            icon={b.icon}
-            title={b.name}
-            subtitle={b.desc}
-            tag="已解鎖"
-            tagTone="success"
-          />
-        ))}
-      </AISection>
-
-      <AISection title="進行中" subtitle={`${BADGES.length - unlocked} 個`}>
-        {BADGES.filter((b) => !b.unlocked).map((b) => (
-          <View key={b.name}>
-            <AIRow
-              icon={b.icon}
-              title={b.name}
-              subtitle={`${b.desc}${
-                b.progress ? ` · ${b.progress.current} / ${b.progress.total}` : ''
-              }`}
-              tag={b.progress ? `${Math.round((b.progress.current / b.progress.total) * 100)}%` : '未解鎖'}
-              tagTone="muted"
-            />
+      <AISection title="我的成就">
+        {!visible || visible.loading ? (
+          <ActivityIndicator accessibilityLabel="讀取成就" color={aiTokens.ai} />
+        ) : visible.error ? (
+          <View accessibilityRole="alert" style={{ padding: 16, gap: 12 }}>
+            <Text style={{ color: aiTokens.text }}>
+              無法讀取成就紀錄，請確認登入狀態與網路後重試。
+            </Text>
+            <AIButton label="重新讀取" onPress={() => void load()} />
           </View>
-        ))}
-      </AISection>
-
-      <AISection title="今日 AI 鼓勵">
-        <AICard
-          aiGenerated
-          icon="💪"
-          title="你比 73% 同學進度好"
-          source="AI · 同班比較"
-          confidence="mid"
-        >
-          <Text style={{ fontSize: 13, color: aiTokens.text, lineHeight: 19 }}>
-            這學期已完成 10/12 份作業，平均分 88.4。{'\n'}
-            如果保持節奏，期末成績有機會破自己最高紀錄。
+        ) : visible.rows.length ? (
+          visible.rows.map((record) => (
+            <AIRow
+              static
+              key={record.id}
+              title={record.name}
+              subtitle={record.description}
+              tag={record.completed ? '已完成' : '已記錄'}
+              tagTone={record.completed ? 'success' : 'muted'}
+            />
+          ))
+        ) : (
+          <Text style={{ color: aiTokens.muted, padding: 16, lineHeight: 22 }}>
+            目前沒有可顯示的成就紀錄。課程與待辦仍可正常使用。
           </Text>
-        </AICard>
+        )}
+      </AISection>
+      <AISection title="繼續學習">
+        <AIRow
+          title="課程與待辦"
+          subtitle="查看已加入的課程與近期課務"
+          onPress={() => safeNavigate(navigation, 'LearnHome')}
+        />
       </AISection>
     </AIDetailScreen>
   );

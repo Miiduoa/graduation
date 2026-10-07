@@ -11,6 +11,7 @@ import { shouldBlockForNoLogin, isDemoUid } from '../services/demoSession';
 import { useSchool } from '../state/school';
 import { useAsyncList } from '../hooks/useAsyncList';
 import { useDataSource } from '../hooks/useDataSource';
+import { listCourseSpaces, getCourseGradebook } from '../data/courseSpaceSource';
 import { canManageCourse, formatDateTime } from '../services/courseWorkspace';
 import { navigateToCourseScreen } from '../utils/courseNavigation';
 
@@ -23,6 +24,8 @@ export function CourseGradebookScreen(props: any) {
   const auth = useAuth();
   const { school } = useSchool();
   const ds = useDataSource();
+  const workspaceSource = props?.route?.params?.sourceSystem === 'workspace';
+  const schoolId = auth.profile?.schoolId ?? school.id;
 
   const {
     items: memberships,
@@ -30,8 +33,9 @@ export function CourseGradebookScreen(props: any) {
     error: membershipsError,
   } = useAsyncList<CourseSpace>(async () => {
     if (!auth.user) return [];
+    if (workspaceSource) return listCourseSpaces(auth.user.uid, schoolId);
     return ds.listCourseSpaces(auth.user.uid, school.id);
-  }, [ds, auth.user?.uid, school.id]);
+  }, [ds, auth.user?.uid, school.id, schoolId, workspaceSource]);
 
   const {
     items: gradebookRows,
@@ -40,9 +44,11 @@ export function CourseGradebookScreen(props: any) {
     reload: reloadGradebook,
   } = useAsyncList<CourseGradebookData>(async () => {
     if (!routeGroupId) return [];
-    const gradebook = await ds.getCourseGradebook(routeGroupId);
+    const gradebook = await (workspaceSource
+      ? getCourseGradebook(routeGroupId)
+      : ds.getCourseGradebook(routeGroupId));
     return gradebook ? [gradebook] : [];
-  }, [ds, routeGroupId]);
+  }, [ds, routeGroupId, workspaceSource]);
 
   const selectedMembership =
     memberships.find((membership) => membership.groupId === routeGroupId) ?? null;

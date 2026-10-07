@@ -65,7 +65,7 @@ function buildCsvContent(courses: SavedCourse[]): string {
 
 const legacyCategories: Array<{ key: CreditCategory; label: string; color: string }> = [
   { key: 'required', label: '必修', color: '#FF3B30' },
-  { key: 'elective', label: '選修', color: '#5856D6' },
+  { key: 'elective', label: '選修', color: theme.colors.accent },
   { key: 'general', label: '通識', color: '#34C759' },
   { key: 'english', label: '英文', color: '#AF52DE' },
   { key: 'other', label: '其他', color: '#FF9500' },
@@ -650,7 +650,7 @@ export function CreditAuditInputScreen(props: any) {
                 {detailedTemplate.categories.map((cat) => {
                   const isMainSelected = detailedCatKey === cat.key && !detailedSubKey;
                   const hasSubs = cat.subCategories && cat.subCategories.length > 0;
-                  const catColor = cat.color || '#5856D6';
+                  const catColor = cat.color || theme.colors.accent;
                   return (
                     <View key={cat.key}>
                       <Pressable
@@ -868,7 +868,7 @@ export function CreditAuditInputScreen(props: any) {
                 <View style={{ gap: 6 }}>
                   {detailedAudit.byCategory.map((cat) => {
                     const catDef = detailedTemplate.categories.find((c) => c.key === cat.key);
-                    const catColor = catDef?.color || '#5856D6';
+                    const catColor = catDef?.color || theme.colors.accent;
                     const pct =
                       cat.required > 0
                         ? Math.min((cat.earned / cat.required) * 100, 100)
@@ -998,7 +998,7 @@ export function CreditAuditInputScreen(props: any) {
             {/* 各分類詳細進度 */}
             {detailedAudit.byCategory.map((cat, idx) => {
               const catDef = detailedTemplate.categories.find((c) => c.key === cat.key);
-              const catColor = catDef?.color || '#5856D6';
+              const catColor = catDef?.color || theme.colors.accent;
               const pct =
                 cat.required > 0
                   ? Math.min((cat.earned / cat.required) * 100, 100)

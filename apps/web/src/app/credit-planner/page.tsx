@@ -1,7 +1,7 @@
 'use client';
 
 import { SiteShell } from '@/components/SiteShell';
-import { useState, useMemo } from 'react';
+import { use, useState, useMemo } from 'react';
 import Link from 'next/link';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import { useDemoRole } from '@/lib/demoRole';
@@ -17,18 +17,18 @@ import {
 
 // ── 顏色映射 ──────────────────────────────────────────────────
 const CATEGORY_COLORS: Record<CreditCategory, string> = {
-  required: '#5856D6',
-  elective: '#34C759',
-  general: '#FF9500',
-  pe: '#FF3B30',
+  required: 'var(--brand)',
+  elective: 'var(--success)',
+  general: 'var(--warning)',
+  pe: 'var(--danger)',
   other: '#8E8E93',
 };
 
 const CATEGORY_BG: Record<CreditCategory, string> = {
-  required: 'rgba(88,86,214,0.12)',
-  elective: 'rgba(52,199,89,0.12)',
-  general: 'rgba(255,149,0,0.12)',
-  pe: 'rgba(255,59,48,0.12)',
+  required: 'var(--accent-soft)',
+  elective: 'var(--success-soft)',
+  general: 'var(--warning-soft)',
+  pe: 'var(--danger-soft)',
   other: 'rgba(142,142,147,0.12)',
 };
 
@@ -75,7 +75,7 @@ function ProgressBar({
       <div
         style={{
           width: `${inPct}%`,
-          background: `${color}55`,
+          background: `color-mix(in srgb, ${color} 33.33%, transparent)`,
           transition: 'width 0.5s ease',
         }}
       />
@@ -84,9 +84,10 @@ function ProgressBar({
 }
 
 export default function CreditPlannerPage(props: {
-  searchParams?: { school?: string; schoolId?: string };
+  searchParams?: Promise<{ school?: string; schoolId?: string }>;
 }) {
-  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const searchParams = props.searchParams ? use(props.searchParams) : undefined;
+  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
   const [demoRole] = useDemoRole();
 
   // 角色守衛：只有「學生型」角色（在校學生本人 + 社團幹部）可以使用學分試算。
@@ -201,8 +202,8 @@ export default function CreditPlannerPage(props: {
             style={{
               padding: '32px 28px',
               textAlign: 'center',
-              background: 'rgba(88,86,214,0.06)',
-              border: '1px solid #5856D6',
+              background: 'var(--accent-soft)',
+              border: '1px solid var(--brand)',
               maxWidth: 560,
               margin: '32px auto',
             }}
@@ -252,8 +253,8 @@ export default function CreditPlannerPage(props: {
             className="card"
             style={{
               padding: '12px 16px',
-              background: 'rgba(52,199,89,0.10)',
-              border: '1px solid #34C759',
+              background: 'var(--success-soft)',
+              border: '1px solid var(--success)',
               fontSize: 13,
             }}
           >
@@ -268,7 +269,7 @@ export default function CreditPlannerPage(props: {
             background: 'linear-gradient(135deg, var(--brand) 0%, #8EA5FF 100%)',
             border: 'none',
             color: '#fff',
-            boxShadow: '6px 6px 16px rgba(88,86,214,0.36)',
+            boxShadow: '6px 6px 16px var(--accent-soft)',
           }}
         >
           <div
@@ -476,7 +477,7 @@ export default function CreditPlannerPage(props: {
                     }}
                   >
                     <span>已修 {done}</span>
-                    {current > 0 && <span style={{ color: `${color}99` }}>修習中 {current}</span>}
+                    {current > 0 && <span style={{ color: `color-mix(in srgb, ${color} 60.0%, transparent)` }}>修習中 {current}</span>}
                     {sim > 0 && (
                       <span style={{ color: color, fontWeight: 600 }}>模擬 +{sim}</span>
                     )}
@@ -625,12 +626,12 @@ export default function CreditPlannerPage(props: {
                             fontSize: 10,
                             padding: '1px 6px',
                             borderRadius: 99,
-                            background: 'rgba(88,86,214,0.15)',
+                            background: 'var(--accent-soft)',
                             color: 'var(--brand)',
                             fontWeight: 700,
                           }}
                         >
-                          ⭐ AI 推薦
+                          選課建議
                         </span>
                       )}
                       {isConflict && (
@@ -925,11 +926,11 @@ export default function CreditPlannerPage(props: {
           </div>
         </div>
 
-        {/* ── AI 助理入口 ── */}
+        {/* ── 校園助理入口 ── */}
         <div
           className="card"
           style={{
-            background: 'linear-gradient(135deg, #5856D6 0%, #8EA5FF 100%)',
+            background: 'linear-gradient(135deg, var(--brand) 0%, #8EA5FF 100%)',
             border: 'none',
             color: '#fff',
             cursor: 'pointer',

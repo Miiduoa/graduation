@@ -6,7 +6,7 @@
  * 使用 demoData.ts 的 DEMO_STUDENTS 確保學生名單與點名頁一致。
  */
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { use, useMemo, useState } from 'react';
 
 import { SiteShell } from '@/components/SiteShell';
 import { useToast } from '@/components/ui';
@@ -26,7 +26,9 @@ const ITEMS: GradeItem[] = [
   { id: 'final', title: '期末考',           weight: 40 },
 ];
 
-export default function TeacherGradebookPage({ params, searchParams }: { params: { courseId: string }; searchParams?: { school?: string; schoolId?: string } }) {
+export default function TeacherGradebookPage({ params: paramsPromise, searchParams: searchParamsPromise }: { params: Promise<{ courseId: string }>; searchParams?: Promise<{ school?: string; schoolId?: string }> }) {
+  const params = use(paramsPromise);
+  const searchParams = searchParamsPromise ? use(searchParamsPromise) : undefined;
   const { schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
   const [demoRole] = useDemoRole();
   const caps = getCapabilities(demoRole);
@@ -102,10 +104,10 @@ export default function TeacherGradebookPage({ params, searchParams }: { params:
             style={{
               padding: '10px 14px',
               borderRadius: 8,
-              background: 'rgba(124,58,237,0.10)',
-              border: '1px solid #AF52DE',
+              background: 'var(--accent-soft)',
+              border: '1px solid var(--brand)',
               fontSize: 13,
-              color: '#5856D6',
+              color: 'var(--brand)',
               marginBottom: 16,
             }}
           >
@@ -117,10 +119,10 @@ export default function TeacherGradebookPage({ params, searchParams }: { params:
         {/* 快速統計卡 */}
         <div style={{ display: 'flex', gap: 16, marginBottom: 20, flexWrap: 'wrap' }}>
           {[
-            { label: '學生總數', value: courseStudents.length,                                            color: '#5856D6' },
-            { label: '班級平均', value: classAvg,                                                          color: '#34C759' },
-            { label: '通過率',   value: `${passRate}%`,                                                    color: '#FF9500' },
-            { label: 'A 以上',   value: computed.rows.filter((r) => (r.finalScore ?? 0) >= 90).length,     color: '#5856D6' },
+            { label: '學生總數', value: courseStudents.length,                                            color: 'var(--brand)' },
+            { label: '班級平均', value: classAvg,                                                          color: 'var(--success)' },
+            { label: '通過率',   value: `${passRate}%`,                                                    color: 'var(--warning)' },
+            { label: 'A 以上',   value: computed.rows.filter((r) => (r.finalScore ?? 0) >= 90).length,     color: 'var(--brand)' },
           ].map((s) => (
             <div
               key={s.label}
@@ -138,7 +140,7 @@ export default function TeacherGradebookPage({ params, searchParams }: { params:
 
         {/* 待批改繳交提醒 */}
         {pendingSubmissions.length > 0 && (
-          <div style={{ padding: '10px 14px', borderRadius: 8, background: 'rgba(255,149,0,0.10)', border: '1px solid #FF9500', fontSize: 13, marginBottom: 12 }}>
+          <div style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--warning-soft)', border: '1px solid var(--warning)', fontSize: 13, marginBottom: 12 }}>
             📬 <strong>有 {pendingSubmissions.length} 份新繳交待批改：</strong>
             {pendingSubmissions.slice(0, 3).map((s) => s.studentName).join('、')}
             {pendingSubmissions.length > 3 ? ` 等 ${pendingSubmissions.length} 人` : ''}
@@ -150,7 +152,7 @@ export default function TeacherGradebookPage({ params, searchParams }: { params:
           <button
             style={{
               padding: '10px 16px', borderRadius: 8, marginBottom: 16,
-              background: published ? '#FF3B30' : '#34C759',
+              background: published ? 'var(--danger)' : 'var(--success)',
               color: '#fff', border: 'none', cursor: 'pointer',
               fontSize: 14, fontWeight: 600,
             }}
@@ -238,9 +240,9 @@ export default function TeacherGradebookPage({ params, searchParams }: { params:
                   score >= 65 ? 'B-' :
                   score >= 60 ? 'C'  : 'F';
                 const gradeColor =
-                  grade.startsWith('A') ? '#34C759' :
-                  grade.startsWith('B') ? '#5856D6' :
-                  grade === 'C'         ? '#FF9500' : '#FF3B30';
+                  grade.startsWith('A') ? 'var(--success)' :
+                  grade.startsWith('B') ? 'var(--brand)' :
+                  grade === 'C'         ? 'var(--warning)' : 'var(--danger)';
                 const isDemoUser = row.uid === 'stu-001';
 
                 return (
@@ -248,13 +250,13 @@ export default function TeacherGradebookPage({ params, searchParams }: { params:
                     key={row.uid}
                     style={{
                       borderBottom: '1px solid var(--border)',
-                      background: isDemoUser ? 'rgba(88,86,214,0.07)' : undefined,
+                      background: isDemoUser ? 'var(--accent-soft)' : undefined,
                     }}
                   >
                     <td style={{ ...td, fontWeight: isDemoUser ? 700 : 400 }}>
                       {row.displayName}
                       {isDemoUser && (
-                        <span style={{ marginLeft: 6, fontSize: 11, color: '#5856D6', fontWeight: 600 }}>
+                        <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--brand)', fontWeight: 600 }}>
                           ★ demo
                         </span>
                       )}
@@ -269,9 +271,9 @@ export default function TeacherGradebookPage({ params, searchParams }: { params:
                     <td style={{ ...td, fontWeight: 700, color: gradeColor }}>{grade}</td>
                     <td style={td}>
                       {row.passed ? (
-                        <span style={{ color: '#34C759', fontWeight: 600 }}>✅ 通過</span>
+                        <span style={{ color: 'var(--success)', fontWeight: 600 }}>✅ 通過</span>
                       ) : (
-                        <span style={{ color: '#FF3B30', fontWeight: 600 }}>⚠️ 未通過</span>
+                        <span style={{ color: 'var(--danger)', fontWeight: 600 }}>⚠️ 未通過</span>
                       )}
                     </td>
                   </tr>
@@ -294,8 +296,8 @@ export default function TeacherGradebookPage({ params, searchParams }: { params:
             marginTop: 20,
             padding: '14px 18px',
             borderRadius: 12,
-            background: 'rgba(88,86,214,0.08)',
-            border: '1px solid #5856D6',
+            background: 'var(--accent-soft)',
+            border: '1px solid var(--brand)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -304,7 +306,7 @@ export default function TeacherGradebookPage({ params, searchParams }: { params:
           }}
         >
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#5856D6', marginBottom: 3 }}>🤖 AI 成績分析</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand)', marginBottom: 3 }}>🤖 AI 成績分析</div>
             <div style={{ fontSize: 13, color: 'var(--text)' }}>
               讓 AI 找出成績偏低的學生，分析作業與考試的相關性，並生成成績摘要報告。
             </div>

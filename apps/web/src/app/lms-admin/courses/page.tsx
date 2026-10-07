@@ -32,7 +32,7 @@ export default function AdminCoursesPage() {
   return (
     <RequireAdmin>
       <h1 style={{ marginTop: 0 }}>課程列表</h1>
-      {error ? <p style={{ color: '#FF3B30' }}>{error}</p> : null}
+      {error ? <p style={{ color: 'var(--danger)' }}>{error}</p> : null}
       <table style={{ width: '100%', borderCollapse: 'collapse', background: '#fff', borderRadius: 12, overflow: 'hidden' }}>
         <thead style={{ background: '#F2F2F7', textAlign: 'left' }}>
           <tr>

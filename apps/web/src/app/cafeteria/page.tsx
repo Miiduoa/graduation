@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, type CSSProperties } from 'react';
+import { use, useMemo, useState, type CSSProperties } from 'react';
 import Link from 'next/link';
 import { mockMenus } from '@campus/shared/src/mockData';
 import { SiteShell } from '@/components/SiteShell';
@@ -105,9 +105,10 @@ function getCafeteriaStatus(cafeteria: Cafeteria) {
 }
 
 export default function CafeteriaPage(props: {
-  searchParams?: { school?: string; schoolId?: string };
+  searchParams?: Promise<{ school?: string; schoolId?: string }>;
 }) {
-  const { schoolId, schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const searchParams = props.searchParams ? use(props.searchParams) : undefined;
+  const { schoolId, schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
   const [selectedCafeteria, setSelectedCafeteria] = useState(ALL_CAFETERIAS_KEY);
   const [search, setSearch] = useState('');
 
@@ -277,8 +278,8 @@ export default function CafeteriaPage(props: {
           className="card"
           style={{
             padding: '14px 18px',
-            background: 'linear-gradient(135deg, rgba(88,86,214,0.10) 0%, rgba(52,199,89,0.06) 100%)',
-            border: '1px solid rgba(88,86,214,0.28)',
+            background: 'linear-gradient(135deg, var(--accent-soft) 0%, var(--success-soft) 100%)',
+            border: '1px solid var(--accent-soft)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -288,14 +289,14 @@ export default function CafeteriaPage(props: {
           }}
         >
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#5856D6', marginBottom: 3 }}>
-              🤖 AI 推薦 · 今日午餐
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand)', marginBottom: 3 }}>
+              今日用餐
             </div>
             <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>
               不知道吃什麼？讓 AI 幫你推薦適合的菜色（含熱量、口味偏好）。
             </div>
           </div>
-          <span style={{ fontSize: 12, color: '#5856D6', fontWeight: 600 }}>問 AI →</span>
+          <span style={{ fontSize: 12, color: 'var(--brand)', fontWeight: 600 }}>問 AI →</span>
         </Link>
 
         <div
@@ -601,8 +602,8 @@ export default function CafeteriaPage(props: {
           style={{
             padding: '14px 18px',
             borderRadius: 'var(--radius)',
-            background: 'linear-gradient(135deg, rgba(52,199,89,0.10) 0%, rgba(52,199,89,0.04) 100%)',
-            border: '1px solid rgba(52,199,89,0.28)',
+            background: 'linear-gradient(135deg, var(--success-soft) 0%, var(--success-soft) 100%)',
+            border: '1px solid var(--success-soft)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',

@@ -98,7 +98,7 @@ function CommunityPageInner() {
                 fontWeight: active ? 700 : 600,
                 fontSize: 13,
                 color: active ? '#fff' : 'var(--muted)',
-                background: active ? 'var(--brand, #5856D6)' : 'transparent',
+                background: active ? 'var(--brand, var(--brand))' : 'transparent',
                 transition: 'all 0.18s',
               }}
               title={tab.desc}

@@ -37,12 +37,12 @@ type ItemCategory =
   | 'other';
 
 const CATEGORY_INFO: Record<ItemCategory, { label: string; icon: string; color: string }> = {
-  electronics: { label: '電子產品', icon: 'phone-portrait', color: '#5856D6' },
+  electronics: { label: '電子產品', icon: 'phone-portrait', color: theme.colors.accent },
   cards: { label: '證件/卡片', icon: 'card', color: '#AF52DE' },
   clothing: { label: '衣物', icon: 'shirt', color: '#FF2D55' },
   accessories: { label: '配件', icon: 'glasses', color: '#FF9500' },
   books: { label: '書籍', icon: 'book', color: '#34C759' },
-  keys: { label: '鑰匙', icon: 'key', color: '#5856D6' },
+  keys: { label: '鑰匙', icon: 'key', color: theme.colors.accent },
   other: { label: '其他', icon: 'help-circle', color: '#8E8E93' },
 };
 

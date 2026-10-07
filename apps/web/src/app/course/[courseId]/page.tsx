@@ -2,6 +2,7 @@
 
 import { use, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { AppHeader } from '@/components/AppHeader';
 import { useAuth } from '@/components/AuthGuard';
 import {
   loadCourseWork,
@@ -146,12 +147,7 @@ export default function CoursePage({ params }: { params: Promise<{ courseId: str
   }, [load]);
   return (
     <div className={styles.page}>
-      <header className={styles.header}>
-        <Link href="/" className={styles.brand}>
-          Campus One
-        </Link>
-        <Link href="/">← 返回首頁</Link>
-      </header>
+      <AppHeader />
       <main className={styles.main}>
         {authLoading ? (
           <p role="status">確認登入狀態…</p>
@@ -184,6 +180,9 @@ export default function CoursePage({ params }: { params: Promise<{ courseId: str
                     重新整理
                   </button>
                 </div>
+                <Link href={`/course/${encodeURIComponent(courseId)}/attendance`} className={styles.secondary}>
+                  {course.canTeach ? '管理課堂點名' : '簽到與出席紀錄'}
+                </Link>
                 <section className={styles.section}>
                   <h2>課程單元</h2>
                   {course.modules.length ? (

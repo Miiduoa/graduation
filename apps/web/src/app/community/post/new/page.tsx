@@ -184,8 +184,8 @@ function PostComposeInner() {
                 style={{
                   padding: '6px 12px',
                   borderRadius: 999,
-                  border: on ? '1px solid var(--brand, #5856D6)' : '1px solid var(--border)',
-                  background: on ? 'var(--brand, #5856D6)' : 'var(--surface)',
+                  border: on ? '1px solid var(--brand, var(--brand))' : '1px solid var(--border)',
+                  background: on ? 'var(--brand, var(--brand))' : 'var(--surface)',
                   color: on ? '#fff' : 'var(--text)',
                   cursor: 'pointer',
                   fontSize: 12,
@@ -213,9 +213,9 @@ function PostComposeInner() {
             marginTop: 6,
             display: 'inline-block',
             padding: '4px 10px',
-            background: 'rgba(88,86,214,0.12)',
+            background: 'var(--accent-soft)',
             borderRadius: 6,
-            color: 'var(--brand, #5856D6)',
+            color: 'var(--brand, var(--brand))',
             fontSize: 11,
             fontWeight: 700,
           }}

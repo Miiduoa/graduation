@@ -1,4 +1,6 @@
 import React from 'react';
+import { theme } from '../../ui/theme';
+import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 import { View, Text, StyleSheet } from 'react-native';
 import { getSupabaseClient } from '../../services/supabaseClient';
 import {
@@ -9,6 +11,7 @@ import {
 } from './_courseV2Shell';
 
 export default function CourseAnnouncementsV2Screen() {
+  const styles = useThemeStyleSheet(createStyles);
   const { courseId, courseName } = useCourseV2Params();
   const loadable = useLoadable(async () => {
     const sb = getSupabaseClient();
@@ -27,7 +30,7 @@ export default function CourseAnnouncementsV2Screen() {
   });
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#F2F2F7' }}>
+    <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       <CourseV2Header title="公告" subtitle={courseName} />
       <CourseV2List
         loadable={loadable}
@@ -52,17 +55,17 @@ export default function CourseAnnouncementsV2Screen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   card: {
     marginHorizontal: 12,
     marginVertical: 6,
     padding: 14,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: theme.colors.surface,
     borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E5E5EA',
+    borderColor: theme.colors.border,
   },
-  title: { fontSize: 16, fontWeight: '700' },
-  body: { fontSize: 14, color: '#3C3C43', marginTop: 6, lineHeight: 20 },
-  time: { fontSize: 11, color: '#AEAEB2', marginTop: 8 },
+  title: { color: theme.colors.text, fontSize: 16, fontWeight: '700' },
+  body: { fontSize: 14, color: theme.colors.textSecondary, marginTop: 6, lineHeight: 20 },
+  time: { fontSize: 11, color: theme.colors.muted, marginTop: 8 },
 });

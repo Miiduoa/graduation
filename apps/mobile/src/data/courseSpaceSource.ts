@@ -10,9 +10,8 @@ import {
   setDoc,
   where,
 } from 'firebase/firestore';
-import { getFunctions, httpsCallable } from 'firebase/functions';
-
-import { getDb, isFirebaseMockMode } from '../firebase';
+import { getDb, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
+import { joinClassroomAttendance } from '../services/liveAttendance';
 import {
   buildCourseSummaries,
   createCourseModule as createWorkspaceModule,
@@ -359,12 +358,21 @@ export async function listAttendanceSessions(
 
 export async function startAttendanceSession(input: {
   courseSpaceId: string;
+  requestId?: string;
   classroomLat?: number;
   classroomLng?: number;
   qrExpiryMinutes?: number;
-}): Promise<{ success: boolean; sessionId: string; qrToken?: string; qrExpiresAt?: string }> {
-  return startWorkspaceAttendanceSession(getFunctions(), {
+}): Promise<{
+  success: boolean;
+  sessionId: string;
+  qrToken?: string;
+  qrExpiresAt?: string;
+  active?: boolean;
+  reused?: boolean;
+}> {
+  return startWorkspaceAttendanceSession(getFunctionsInstance(), {
     groupId: input.courseSpaceId,
+    requestId: input.requestId,
     classroomLat: input.classroomLat,
     classroomLng: input.classroomLng,
     qrExpiryMinutes: input.qrExpiryMinutes,
@@ -374,22 +382,17 @@ export async function startAttendanceSession(input: {
 export async function checkInAttendance(input: {
   courseSpaceId: string;
   sessionId: string;
-  qrToken?: string;
+  qrToken: string;
   uid?: string;
 }): Promise<{ success: boolean }> {
-  const joinLiveSession = httpsCallable<
-    { groupId: string; sessionId: string; qrToken?: string },
-    { success: boolean }
-  >(getFunctions(), 'joinLiveSession');
-
-  const result = await joinLiveSession({
+  const result = await joinClassroomAttendance(getFunctionsInstance(), {
     groupId: input.courseSpaceId,
     sessionId: input.sessionId,
     qrToken: input.qrToken,
   });
 
   // ── Campus Companion 信號：成功簽到 → onAttendanceCheckin ──
-  if (result.data?.success) {
+  if (result.success) {
     try {
       const { onAttendanceCheckin } = await import('../services/companionHooks');
       onAttendanceCheckin({
@@ -402,18 +405,26 @@ export async function checkInAttendance(input: {
     }
   }
 
-  return result.data;
+  return result;
 }
 
 export async function getAttendanceSummary(courseSpaceId: string): Promise<AttendanceSummary> {
   const db = getDb();
   const attendanceSnap = await getDocs(
-    collection(db, 'groups', courseSpaceId, 'attendanceSessions'),
-  ).catch(() => null);
+    query(
+      collection(db, 'groups', courseSpaceId, 'attendanceSessions'),
+      where('schemaVersion', '==', 2),
+    ),
+  );
   const liveSnap =
     attendanceSnap && attendanceSnap.size > 0
       ? null
-      : await getDocs(collection(db, 'groups', courseSpaceId, 'liveSessions')).catch(() => null);
+      : await getDocs(
+          query(
+            collection(db, 'groups', courseSpaceId, 'liveSessions'),
+            where('schemaVersion', '==', 2),
+          ),
+        );
 
   const docs = attendanceSnap?.docs ?? liveSnap?.docs ?? [];
   const sessions = docs.map((docSnap) => {
@@ -467,11 +478,7 @@ async function listActionQueueInboxTasks(userId: string): Promise<InboxTask[]> {
       groupName: '校園助理',
       title,
       subtitle:
-        action === 'review_ai_suggestion'
-          ? '請確認助理建議'
-          : sourceRunId
-            ? '等待你確認'
-            : '待辦',
+        action === 'review_ai_suggestion' ? '請確認助理建議' : sourceRunId ? '等待你確認' : '待辦',
       priority,
       dueAt: data.dueAt ? toDate(data.dueAt as any) : null,
       preferredIntent: 'verify',
@@ -525,6 +532,7 @@ export async function listInboxTasks(userId: string, schoolId?: string): Promise
       const attendanceActiveSnap = await getDocs(
         query(
           collection(db, 'groups', membership.groupId, 'attendanceSessions'),
+          where('schemaVersion', '==', 2),
           where('active', '==', true),
           limit(1),
         ),
@@ -535,6 +543,7 @@ export async function listInboxTasks(userId: string, schoolId?: string): Promise
           : await getDocs(
               query(
                 collection(db, 'groups', membership.groupId, 'liveSessions'),
+                where('schemaVersion', '==', 2),
                 where('active', '==', true),
                 limit(1),
               ),
@@ -646,7 +655,17 @@ export async function listInboxTasks(userId: string, schoolId?: string): Promise
           continue;
         }
 
-        const ownSubmission = await getDoc(doc(db, 'groups', membership.groupId, 'assignments', assignment.id, 'submissions', userId));
+        const ownSubmission = await getDoc(
+          doc(
+            db,
+            'groups',
+            membership.groupId,
+            'assignments',
+            assignment.id,
+            'submissions',
+            userId,
+          ),
+        );
         if (ownSubmission.exists() && ownSubmission.data().submittedAt) continue;
         if (!dueAt) continue;
         const diff = dueAt.getTime() - now;

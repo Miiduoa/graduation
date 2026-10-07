@@ -74,30 +74,30 @@ function CreditAuditMeBlockedScreen({ roleLabel, navigation }: { roleLabel: stri
   const { Ionicons } = require('@expo/vector-icons');
   const { theme } = require('../ui/theme');
   return (
-    <ScrollView contentContainerStyle={{ padding: 20, alignItems: 'center', backgroundColor: theme.bg }}>
+    <ScrollView contentContainerStyle={{ padding: 20, alignItems: 'center', backgroundColor: theme.colors.bg }}>
       <View style={{ marginTop: 60, padding: 24, alignItems: 'center', maxWidth: 420 }}>
         <View style={{
           width: 80, height: 80, borderRadius: 24,
-          backgroundColor: 'rgba(88,86,214,0.10)',
+          backgroundColor: theme.colors.accentSoft,
           alignItems: 'center', justifyContent: 'center', marginBottom: 16,
         }}>
-          <Ionicons name="school-outline" size={48} color="#5856D6" />
+          <Ionicons name="school-outline" size={48} color={theme.colors.accent} />
         </View>
-        <Text style={{ fontSize: 20, fontWeight: '700', color: theme.text, marginBottom: 8, textAlign: 'center' }}>
+        <Text style={{ fontSize: 20, fontWeight: '700', color: theme.colors.text, marginBottom: 8, textAlign: 'center' }}>
           學分試算僅限在校學生使用
         </Text>
-        <Text style={{ fontSize: 14, color: theme.muted, lineHeight: 22, textAlign: 'center', marginBottom: 24 }}>
-          目前身份為 <Text style={{ fontWeight: '700', color: theme.text }}>{roleLabel}</Text>。
+        <Text style={{ fontSize: 14, color: theme.colors.muted, lineHeight: 22, textAlign: 'center', marginBottom: 24 }}>
+          目前身份為 <Text style={{ fontWeight: '700', color: theme.colors.text }}>{roleLabel}</Text>。
           學分試算是學生個人選課與畢業進度規劃工具 — 教師/職員請使用「教學工作台」,系主任/管理員請使用「管理後台」。
         </Text>
         <Pressable
           onPress={() => navigation?.goBack?.()}
           style={{
             paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12,
-            backgroundColor: '#5856D6',
+            backgroundColor: theme.colors.accent,
           }}
         >
-          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>← 返回</Text>
+          <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 14 }}>← 返回</Text>
         </Pressable>
       </View>
     </ScrollView>

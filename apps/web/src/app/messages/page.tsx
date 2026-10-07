@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { use, useState, useMemo, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { useToast } from '@/components/ui';
@@ -133,10 +133,10 @@ function formatTime(iso: string): string {
 // Inbox 系統通知（保留原本行為）
 // ──────────────────────────────────────────────────────────────
 const TYPE_COLOR: Record<DemoMessage['type'], string> = {
-  info: '#5856D6',
-  warning: '#FF9500',
-  action: '#FF3B30',
-  success: '#34C759',
+  info: 'var(--brand)',
+  warning: 'var(--warning)',
+  action: 'var(--danger)',
+  success: 'var(--success)',
 };
 
 const TYPE_LABEL: Record<DemoMessage['type'], string> = {
@@ -150,9 +150,10 @@ const TYPE_LABEL: Record<DemoMessage['type'], string> = {
 // Main page
 // ──────────────────────────────────────────────────────────────
 export default function MessagesPage(props: {
-  searchParams?: { school?: string; schoolId?: string };
+  searchParams?: Promise<{ school?: string; schoolId?: string }>;
 }) {
-  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const searchParams = props.searchParams ? use(props.searchParams) : undefined;
+  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
   const [demoRole] = useDemoRole();
   const roleDef = getDemoRoleDefinition(demoRole);
   const caps = getCapabilities(demoRole);
@@ -300,8 +301,8 @@ export default function MessagesPage(props: {
             style={{
               padding: '32px 24px',
               textAlign: 'center',
-              background: 'rgba(88,86,214,0.06)',
-              border: '1px solid #5856D6',
+              background: 'var(--accent-soft)',
+              border: '1px solid var(--brand)',
             }}
           >
             <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
@@ -359,7 +360,7 @@ export default function MessagesPage(props: {
                   style={{
                     marginLeft: 8,
                     padding: '1px 7px',
-                    background: tab === t.key ? '#fff' : '#FF3B30',
+                    background: tab === t.key ? '#fff' : 'var(--danger)',
                     color: tab === t.key ? 'var(--brand)' : '#fff',
                     borderRadius: 99,
                     fontSize: 11,
@@ -562,9 +563,9 @@ function DmTab(props: {
                     borderRadius: 'var(--radius)',
                     border: `1px solid ${isSel ? 'var(--brand)' : 'var(--border)'}`,
                     background: isSel
-                      ? 'rgba(88,86,214,0.08)'
+                      ? 'var(--accent-soft)'
                       : unread > 0
-                        ? 'rgba(88,86,214,0.04)'
+                        ? 'var(--accent-soft)'
                         : 'var(--surface)',
                     cursor: 'pointer',
                     display: 'flex',
@@ -579,7 +580,7 @@ function DmTab(props: {
                       width: 36,
                       height: 36,
                       borderRadius: 12,
-                      background: 'rgba(88,86,214,0.10)',
+                      background: 'var(--accent-soft)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -637,7 +638,7 @@ function DmTab(props: {
                   {unread > 0 && (
                     <span
                       style={{
-                        background: '#FF3B30',
+                        background: 'var(--danger)',
                         color: '#fff',
                         borderRadius: 99,
                         padding: '1px 7px',
@@ -751,7 +752,7 @@ function DmTab(props: {
                         width: 36,
                         height: 36,
                         borderRadius: 12,
-                        background: 'rgba(88,86,214,0.10)',
+                        background: 'var(--accent-soft)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -810,7 +811,7 @@ function DmTab(props: {
                           width: 28,
                           height: 28,
                           borderRadius: 10,
-                          background: 'rgba(88,86,214,0.10)',
+                          background: 'var(--accent-soft)',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
@@ -825,7 +826,7 @@ function DmTab(props: {
                     <div
                       style={{
                         maxWidth: '70%',
-                        background: isMe ? '#5856D6' : 'var(--panel)',
+                        background: isMe ? 'var(--brand)' : 'var(--panel)',
                         color: isMe ? '#fff' : 'var(--text)',
                         padding: '8px 12px',
                         borderRadius: 14,
@@ -964,7 +965,7 @@ function FriendsTab(props: {
         className="card"
         style={{
           padding: 16,
-          background: 'linear-gradient(135deg, rgba(88,86,214,0.06) 0%, rgba(90,200,250,0.04) 100%)',
+          background: 'linear-gradient(135deg, var(--accent-soft) 0%, rgba(90,200,250,0.04) 100%)',
         }}
       >
         <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>🔍 加好友</div>
@@ -1007,7 +1008,7 @@ function FriendsTab(props: {
                       width: 36,
                       height: 36,
                       borderRadius: 12,
-                      background: 'rgba(88,86,214,0.10)',
+                      background: 'var(--accent-soft)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -1103,7 +1104,7 @@ function FriendsTab(props: {
                       width: 36,
                       height: 36,
                       borderRadius: 12,
-                      background: 'rgba(88,86,214,0.10)',
+                      background: 'var(--accent-soft)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -1194,7 +1195,7 @@ function FriendsTab(props: {
                       width: 40,
                       height: 40,
                       borderRadius: 12,
-                      background: 'rgba(88,86,214,0.10)',
+                      background: 'var(--accent-soft)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -1237,7 +1238,7 @@ function FriendsTab(props: {
                           padding: '4px 8px',
                           borderRadius: 8,
                           border: '1px solid var(--brand)',
-                          background: 'rgba(88,86,214,0.10)',
+                          background: 'var(--accent-soft)',
                           color: 'var(--brand)',
                           fontSize: 11,
                           fontWeight: 700,
@@ -1329,8 +1330,8 @@ function InboxTab(props: {
           style={{
             padding: '12px 16px',
             background:
-              'linear-gradient(135deg, rgba(88,86,214,0.10) 0%, rgba(90,200,250,0.07) 100%)',
-            border: '1px solid rgba(88,86,214,0.22)',
+              'linear-gradient(135deg, var(--accent-soft) 0%, rgba(90,200,250,0.07) 100%)',
+            border: '1px solid var(--accent-soft)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -1424,9 +1425,9 @@ function InboxTab(props: {
                     borderRadius: 'var(--radius)',
                     border: `1px solid ${isSel ? 'var(--brand)' : 'var(--border)'}`,
                     background: isSel
-                      ? 'rgba(88,86,214,0.08)'
+                      ? 'var(--accent-soft)'
                       : isUnread
-                        ? 'var(--accent-soft, rgba(88,86,214,0.05))'
+                        ? 'var(--accent-soft, var(--accent-soft))'
                         : 'var(--surface)',
                     cursor: 'pointer',
                     display: 'flex',
@@ -1439,7 +1440,7 @@ function InboxTab(props: {
                       width: 40,
                       height: 40,
                       borderRadius: 12,
-                      background: `${TYPE_COLOR[msg.type]}20`,
+                      background: `color-mix(in srgb, ${TYPE_COLOR[msg.type]} 12.55%, transparent)`,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -1515,7 +1516,7 @@ function InboxTab(props: {
                     style={{
                       padding: '2px 7px',
                       borderRadius: 99,
-                      background: `${TYPE_COLOR[msg.type]}20`,
+                      background: `color-mix(in srgb, ${TYPE_COLOR[msg.type]} 12.55%, transparent)`,
                       color: TYPE_COLOR[msg.type],
                       fontSize: 10,
                       fontWeight: 700,
@@ -1546,7 +1547,7 @@ function InboxTab(props: {
                   style={{
                     padding: '3px 9px',
                     borderRadius: 99,
-                    background: `${TYPE_COLOR[selected.type]}20`,
+                    background: `color-mix(in srgb, ${TYPE_COLOR[selected.type]} 12.55%, transparent)`,
                     color: TYPE_COLOR[selected.type],
                     fontSize: 11,
                     fontWeight: 700,
@@ -2000,7 +2001,7 @@ function ActionPanel({
             style={{
               fontSize: 13,
               ...(b.kind === 'danger'
-                ? { background: 'rgba(255,59,48,0.12)', color: '#FF3B30', borderColor: '#FF3B30' }
+                ? { background: 'var(--danger-soft)', color: 'var(--danger)', borderColor: 'var(--danger)' }
                 : {}),
             }}
           >

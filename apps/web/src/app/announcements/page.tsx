@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type MouseEvent } from 'react';
+import { use, useEffect, useMemo, useState, type MouseEvent } from 'react';
 import Link from 'next/link';
 import { resolveSchool } from '@campus/shared/src/schools';
 import { SiteShell } from '@/components/SiteShell';
@@ -139,13 +139,14 @@ const DEMO_FALLBACK: Announcement[] = DEMO_ANNOUNCEMENTS.map(
 );
 
 export default function AnnouncementsPage(props: {
-  searchParams?: { school?: string; schoolId?: string };
+  searchParams?: Promise<{ school?: string; schoolId?: string }>;
 }) {
+  const searchParams = props.searchParams ? use(props.searchParams) : undefined;
   const school = resolveSchool({
-    school: props.searchParams?.school,
-    schoolId: props.searchParams?.schoolId,
+    school: searchParams?.school,
+    schoolId: searchParams?.schoolId,
   });
-  const { schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const { schoolSearch: q } = resolveSchoolPageContext(searchParams);
   const [demoRole] = useDemoRole();
   const caps = getCapabilities(demoRole);
   const [searchQuery, setSearchQuery] = useState('');
@@ -478,8 +479,8 @@ export default function AnnouncementsPage(props: {
             className="card"
             style={{
               padding: '12px 16px',
-              background: 'linear-gradient(135deg, rgba(88,86,214,0.10) 0%, rgba(90,200,250,0.07) 100%)',
-              border: '1px solid rgba(88,86,214,0.22)',
+              background: 'linear-gradient(135deg, var(--accent-soft) 0%, rgba(90,200,250,0.07) 100%)',
+              border: '1px solid var(--accent-soft)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',

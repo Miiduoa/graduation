@@ -136,7 +136,7 @@ export default function DashboardPage() {
         </select>
       </label>
 
-      {error ? <p style={{ color: '#FF3B30' }}>{error}</p> : null}
+      {error ? <p style={{ color: 'var(--danger)' }}>{error}</p> : null}
 
       {/* Widget 1: 課程整體儀表板摘要 */}
       <section style={{ marginTop: 20 }}>
@@ -195,7 +195,7 @@ export default function DashboardPage() {
                         style={{
                           padding: '2px 8px',
                           borderRadius: 999,
-                          background: r.risk_level === 'critical' ? '#FF3B30' : '#FF9500',
+                          background: r.risk_level === 'critical' ? 'var(--danger)' : 'var(--warning)',
                           color: '#fff',
                           fontSize: 11,
                           fontWeight: 700,
@@ -260,8 +260,8 @@ const selectStyle: React.CSSProperties = {
   padding: '10px 12px', borderRadius: 10, border: '1px solid #d1d5db', fontSize: 14,
 };
 const btnStyle: React.CSSProperties = {
-  padding: '10px 14px', borderRadius: 10, border: '1px solid #5856D6',
-  background: '#5856D6', color: '#fff', fontWeight: 700, cursor: 'pointer',
+  padding: '10px 14px', borderRadius: 10, border: '1px solid var(--brand)',
+  background: 'var(--brand)', color: '#fff', fontWeight: 700, cursor: 'pointer',
 };
 const tableStyle: React.CSSProperties = { width: '100%', borderCollapse: 'collapse', fontSize: 13 };
 const cellStyle: React.CSSProperties = { padding: 8, border: '1px solid #E5E5EA', textAlign: 'left' };

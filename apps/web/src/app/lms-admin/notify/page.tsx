@@ -91,7 +91,7 @@ export default function AdminNotifyPage() {
               padding: '8px 16px',
               borderRadius: 8,
               border: '1px solid #d1d5db',
-              background: mode === m ? '#5856D6' : '#fff',
+              background: mode === m ? 'var(--brand)' : '#fff',
               color: mode === m ? '#fff' : '#1C1C1E',
               fontWeight: 700,
               cursor: 'pointer',
@@ -154,7 +154,7 @@ export default function AdminNotifyPage() {
           </label>
         )}
 
-        {error ? <p style={{ color: '#FF3B30', margin: 0 }}>{error}</p> : null}
+        {error ? <p style={{ color: 'var(--danger)', margin: 0 }}>{error}</p> : null}
         {msg ? <p style={{ color: '#047857', margin: 0 }}>{msg}</p> : null}
         <button type="submit" disabled={busy} style={submitBtn}>
           {busy ? '送出中…' : '送出'}

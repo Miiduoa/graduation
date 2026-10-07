@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { theme } from '../../ui/theme';
+import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 import { View, Text, TextInput, Pressable, ScrollView, Alert, StyleSheet } from 'react-native';
 import { getSupabaseClient } from '../../services/supabaseClient';
 import {
@@ -16,6 +18,7 @@ import {
 } from './_courseV2Shell';
 
 export default function CourseQuizTakingV2Screen() {
+  const styles = useThemeStyleSheet(createStyles);
   const { courseId, quizId, courseName } = useCourseV2Params();
   const nav = useCourseV2Nav();
   const [attemptId, setAttemptId] = useState<string | null>(null);
@@ -67,7 +70,7 @@ export default function CourseQuizTakingV2Screen() {
   const { quiz, questions } = loadable.data!;
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#F2F2F7' }}>
+    <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       <CourseV2Header title={quiz?.title ?? '測驗'} subtitle={courseName} />
       <ScrollView contentContainerStyle={{ padding: 16, gap: 16 }}>
         {questions.map((q: any, idx: number) => (
@@ -99,30 +102,32 @@ export default function CourseQuizTakingV2Screen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   qBox: {
     padding: 14,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: theme.colors.surface,
     borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E5E5EA',
+    borderColor: theme.colors.border,
     gap: 8,
   },
-  qIndex: { fontSize: 12, color: '#8E8E93', fontWeight: '600' },
-  qPrompt: { fontSize: 15, lineHeight: 22 },
+  qIndex: { fontSize: 12, color: theme.colors.muted, fontWeight: '600' },
+  qPrompt: { color: theme.colors.text, fontSize: 15, lineHeight: 22 },
   input: {
+    color: theme.colors.text,
     minHeight: 80,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E5E5EA',
+    borderColor: theme.colors.border,
     borderRadius: 6,
     padding: 8,
     textAlignVertical: 'top',
   },
   submitBtn: {
+    minHeight: 44,
     paddingVertical: 12,
-    backgroundColor: '#5856D6',
+    backgroundColor: theme.colors.accent,
     borderRadius: 8,
     alignItems: 'center',
   },
-  submitLabel: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  submitLabel: { color: theme.colors.onAccent, fontSize: 16, fontWeight: '700' },
 });

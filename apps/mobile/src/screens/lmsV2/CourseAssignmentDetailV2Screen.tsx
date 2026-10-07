@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { theme } from '../../ui/theme';
+import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 import { View, Text, TextInput, Pressable, ScrollView, Alert, StyleSheet } from 'react-native';
 import { getSupabaseClient } from '../../services/supabaseClient';
 import {
@@ -15,6 +17,7 @@ import {
 } from './_courseV2Shell';
 
 export default function CourseAssignmentDetailV2Screen() {
+  const styles = useThemeStyleSheet(createStyles);
   const { courseId, assignmentId, courseName } = useCourseV2Params();
   const nav = useCourseV2Nav();
   const [content, setContent] = useState('');
@@ -60,7 +63,7 @@ export default function CourseAssignmentDetailV2Screen() {
   const sub = loadable.data?.ownSub;
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#F2F2F7' }}>
+    <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       <CourseV2Header
         title={a?.title ?? '作業'}
         subtitle={courseName}
@@ -85,14 +88,14 @@ export default function CourseAssignmentDetailV2Screen() {
         />
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <Pressable
-            style={[styles.btn, { backgroundColor: '#AEAEB2' }]}
+            style={[styles.btn, { backgroundColor: theme.colors.surface2 }]}
             disabled={submitting}
             onPress={() => handleSubmit(false)}
           >
-            <Text style={styles.btnLabel}>存草稿</Text>
+            <Text style={[styles.btnLabel, { color: theme.colors.text }]}>存草稿</Text>
           </Pressable>
           <Pressable
-            style={[styles.btn, { backgroundColor: '#5856D6' }]}
+            style={[styles.btn, { backgroundColor: theme.colors.accent }]}
             disabled={submitting}
             onPress={() => handleSubmit(true)}
           >
@@ -104,32 +107,35 @@ export default function CourseAssignmentDetailV2Screen() {
   );
 }
 
-const styles = StyleSheet.create({
-  body: { fontSize: 14, lineHeight: 20, color: '#3C3C43' },
-  label: { fontSize: 13, fontWeight: '600', color: '#3C3C43' },
+const createStyles = () => StyleSheet.create({
+  body: { fontSize: 14, lineHeight: 20, color: theme.colors.textSecondary },
+  label: { fontSize: 13, fontWeight: '600', color: theme.colors.textSecondary },
   input: {
+    color: theme.colors.text,
     minHeight: 160,
     borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E5E5EA',
+    borderColor: theme.colors.border,
     padding: 12,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: theme.colors.surface,
     textAlignVertical: 'top',
   },
   btn: {
+    minHeight: 44,
+    justifyContent: 'center',
     flex: 1,
     paddingVertical: 10,
     borderRadius: 8,
     alignItems: 'center',
   },
-  btnLabel: { color: '#FFFFFF', fontWeight: '600' },
+  btnLabel: { color: theme.colors.onAccent, fontWeight: '600' },
   scoreBox: {
     padding: 12,
-    backgroundColor: '#ECFDF5',
+    backgroundColor: theme.colors.successSoft,
     borderRadius: 8,
-    borderColor: '#34C759',
+    borderColor: theme.colors.success,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  score: { fontSize: 18, fontWeight: '700', color: '#065F46' },
-  feedback: { marginTop: 4, color: '#065F46', fontSize: 13 },
+  score: { fontSize: 18, fontWeight: '700', color: theme.colors.text },
+  feedback: { marginTop: 4, color: theme.colors.text, fontSize: 13 },
 });

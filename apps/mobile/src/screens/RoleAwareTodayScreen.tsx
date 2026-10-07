@@ -3,7 +3,7 @@ import { View, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import StudentTodayScreen from './StudentTodayScreen';
-import TeacherCockpitScreen from './TeacherCockpitScreen';
+import TeacherTodayScreen from './TeacherTodayScreen';
 import TADashboardScreen from './TADashboardScreen';
 import DepartmentDashboardScreen from './DepartmentDashboardScreen';
 import VendorDashboardScreen from './VendorDashboardScreen';
@@ -75,7 +75,7 @@ export function resolveDashboardRole(profile: {
 function renderDashboard(role: ResolvedDashboardRole): React.ReactNode {
   switch (role) {
     case 'teacher':
-      return <TeacherCockpitScreen />;
+      return <TeacherTodayScreen />;
     case 'ta':
       return <TADashboardScreen />;
     case 'club_officer':

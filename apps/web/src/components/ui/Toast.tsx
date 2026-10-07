@@ -166,8 +166,8 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
       icon: '✕',
     },
     warning: {
-      bg: 'rgba(255,149,0, 0.15)',
-      border: 'rgba(255,149,0, 0.3)',
+      bg: 'var(--warning-soft)',
+      border: 'var(--warning-soft)',
       icon: '⚠',
     },
     info: {

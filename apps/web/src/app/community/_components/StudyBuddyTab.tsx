@@ -93,8 +93,8 @@ export function StudyBuddyTab(props: { schoolId: string }) {
                 padding: '10px 16px',
                 background: 'transparent',
                 border: 'none',
-                borderBottom: on ? '3px solid var(--brand, #5856D6)' : '3px solid transparent',
-                color: on ? 'var(--brand, #5856D6)' : 'var(--muted)',
+                borderBottom: on ? '3px solid var(--brand, var(--brand))' : '3px solid transparent',
+                color: on ? 'var(--brand, var(--brand))' : 'var(--muted)',
                 fontWeight: 700,
                 cursor: 'pointer',
                 fontSize: 14,
@@ -238,7 +238,7 @@ function ReviewSummary({ agg }: { agg: CourseReviewAggregate }) {
   return (
     <div className="card" style={{ padding: 16, marginBottom: 14 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-        <span style={{ fontSize: 36, fontWeight: 700, color: 'var(--brand, #5856D6)' }}>
+        <span style={{ fontSize: 36, fontWeight: 700, color: 'var(--brand, var(--brand))' }}>
           {agg.avgRating.toFixed(1)}
         </span>
         <span style={{ color: 'var(--muted)', fontSize: 12 }}>/ 5 · {agg.totalCount} 則</span>
@@ -258,14 +258,14 @@ function ReviewSummary({ agg }: { agg: CourseReviewAggregate }) {
           background: 'var(--panel2, #F2F2F7)',
         }}
       >
-        <div style={{ flex: agg.sentiment.positive || 0, background: '#34C759' }} />
+        <div style={{ flex: agg.sentiment.positive || 0, background: 'var(--success)' }} />
         <div style={{ flex: agg.sentiment.neutral || 0, background: 'var(--muted)' }} />
-        <div style={{ flex: agg.sentiment.negative || 0, background: '#FF9500' }} />
+        <div style={{ flex: agg.sentiment.negative || 0, background: 'var(--warning)' }} />
       </div>
       <div style={{ display: 'flex', gap: 12, fontSize: 11, fontWeight: 700, marginTop: 6 }}>
-        <span style={{ color: '#34C759' }}>正面 {pct(agg.sentiment.positive)}%</span>
+        <span style={{ color: 'var(--success)' }}>正面 {pct(agg.sentiment.positive)}%</span>
         <span style={{ color: 'var(--muted)' }}>中立 {pct(agg.sentiment.neutral)}%</span>
-        <span style={{ color: '#FF9500' }}>負面 {pct(agg.sentiment.negative)}%</span>
+        <span style={{ color: 'var(--warning)' }}>負面 {pct(agg.sentiment.negative)}%</span>
       </div>
       {agg.topTags.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
@@ -274,8 +274,8 @@ function ReviewSummary({ agg }: { agg: CourseReviewAggregate }) {
               key={t.tag}
               style={{
                 fontSize: 11,
-                color: 'var(--brand, #5856D6)',
-                background: 'rgba(88,86,214,0.15)',
+                color: 'var(--brand, var(--brand))',
+                background: 'var(--accent-soft)',
                 padding: '2px 8px',
                 borderRadius: 999,
                 fontWeight: 700,
@@ -321,7 +321,7 @@ function ReviewCard({
 }) {
   const helpedByMe = !!(myUid && Array.isArray(review.helpfulBy) && review.helpfulBy.includes(myUid));
   const sentColor =
-    review.sentiment === 'positive' ? '#34C759' : review.sentiment === 'negative' ? '#FF9500' : 'var(--muted)';
+    review.sentiment === 'positive' ? 'var(--success)' : review.sentiment === 'negative' ? 'var(--warning)' : 'var(--muted)';
 
   return (
     <div className="card" style={{ padding: 14 }}>
@@ -335,7 +335,7 @@ function ReviewCard({
             fontSize: 10,
             fontWeight: 700,
             color: sentColor,
-            background: `${sentColor}22`,
+            background: `color-mix(in srgb, ${sentColor} 13.33%, transparent)`,
             padding: '2px 8px',
             borderRadius: 999,
           }}
@@ -345,7 +345,7 @@ function ReviewCard({
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 6 }}>
         {[1, 2, 3, 4, 5].map((n) => (
-          <span key={n} style={{ color: '#FF9500', fontSize: 13 }}>
+          <span key={n} style={{ color: 'var(--warning)', fontSize: 13 }}>
             {n <= Math.round(review.rating) ? '★' : '☆'}
           </span>
         ))}
@@ -361,8 +361,8 @@ function ReviewCard({
               key={t}
               style={{
                 fontSize: 11,
-                color: 'var(--brand, #5856D6)',
-                background: 'rgba(88,86,214,0.10)',
+                color: 'var(--brand, var(--brand))',
+                background: 'var(--accent-soft)',
                 padding: '2px 8px',
                 borderRadius: 999,
                 fontWeight: 700,
@@ -380,8 +380,8 @@ function ReviewCard({
           marginTop: 10,
           padding: '6px 12px',
           borderRadius: 999,
-          border: helpedByMe ? '1px solid var(--brand, #5856D6)' : '1px solid var(--border)',
-          background: helpedByMe ? 'var(--brand, #5856D6)' : 'var(--surface)',
+          border: helpedByMe ? '1px solid var(--brand, var(--brand))' : '1px solid var(--border)',
+          background: helpedByMe ? 'var(--brand, var(--brand))' : 'var(--surface)',
           color: helpedByMe ? '#fff' : 'var(--muted)',
           cursor: 'pointer',
           fontSize: 11,
@@ -551,7 +551,7 @@ function StarRow({ rating, onChange, size = 24 }: { rating: number; onChange: (r
             background: 'transparent',
             border: 'none',
             cursor: 'pointer',
-            color: '#FF9500',
+            color: 'var(--warning)',
             fontSize: size,
             padding: 0,
           }}
@@ -672,8 +672,8 @@ function StudyGroupSection(props: { schoolId: string; myUid: string | null; myNa
                     style={{
                       fontSize: 10,
                       fontWeight: 700,
-                      color: 'var(--brand, #5856D6)',
-                      background: 'rgba(88,86,214,0.15)',
+                      color: 'var(--brand, var(--brand))',
+                      background: 'var(--accent-soft)',
                       padding: '2px 8px',
                       borderRadius: 999,
                     }}
@@ -686,7 +686,7 @@ function StudyGroupSection(props: { schoolId: string; myUid: string | null; myNa
                     style={{
                       width: `${(g.members.length / g.maxMembers) * 100}%`,
                       height: '100%',
-                      background: 'var(--brand, #5856D6)',
+                      background: 'var(--brand, var(--brand))',
                     }}
                   />
                 </div>
@@ -703,7 +703,7 @@ function StudyGroupSection(props: { schoolId: string; myUid: string | null; myNa
                     marginTop: 10,
                     width: '100%',
                     fontSize: 13,
-                    background: isMember ? '#34C759' : isFull ? 'var(--muted)' : 'var(--brand, #5856D6)',
+                    background: isMember ? 'var(--success)' : isFull ? 'var(--muted)' : 'var(--brand, var(--brand))',
                   }}
                 >
                   {isMember ? '✓ 已加入' : isFull ? '已滿員' : '申請加入'}
@@ -842,8 +842,8 @@ function CreateGroupModal(props: {
                 style={{
                   padding: '6px 12px',
                   borderRadius: 999,
-                  border: on ? '1px solid var(--brand, #5856D6)' : '1px solid var(--border)',
-                  background: on ? 'var(--brand, #5856D6)' : 'var(--surface)',
+                  border: on ? '1px solid var(--brand, var(--brand))' : '1px solid var(--border)',
+                  background: on ? 'var(--brand, var(--brand))' : 'var(--surface)',
                   color: on ? '#fff' : 'var(--text)',
                   cursor: 'pointer',
                   fontSize: 12,
@@ -868,8 +868,8 @@ function CreateGroupModal(props: {
                 style={{
                   padding: '6px 12px',
                   borderRadius: 999,
-                  border: on ? '1px solid var(--brand, #5856D6)' : '1px solid var(--border)',
-                  background: on ? 'var(--brand, #5856D6)' : 'var(--surface)',
+                  border: on ? '1px solid var(--brand, var(--brand))' : '1px solid var(--border)',
+                  background: on ? 'var(--brand, var(--brand))' : 'var(--surface)',
                   color: on ? '#fff' : 'var(--text)',
                   cursor: 'pointer',
                   fontSize: 12,

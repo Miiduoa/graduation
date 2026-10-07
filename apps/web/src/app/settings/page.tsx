@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { use, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { defaultNotificationPreferences } from "@campus/shared/src";
 
@@ -59,13 +59,13 @@ const SECTIONS: { id: Section; label: string; icon: string }[] = [
 ];
 
 const THEME_COLORS = [
-  "#2563EB",
+  "#314D40",
   "#007AFF",
-  "#34C759",
-  "#FF9500",
+  "#386146",
+  "#8B631E",
   "#FF6B35",
   "#BF5AF2",
-  "#FF3B30",
+  "#983F32",
   "#32ADE6",
 ];
 
@@ -172,9 +172,10 @@ function saveLocalPreferences(prefs: StoredWebPreferences) {
 }
 
 export default function SettingsPage(props: {
-  searchParams?: { school?: string; schoolId?: string };
+  searchParams?: Promise<{ school?: string; schoolId?: string }>;
 }) {
-  const { schoolName, schoolSearch } = resolveSchoolPageContext(props.searchParams);
+  const searchParams = props.searchParams ? use(props.searchParams) : undefined;
+  const { schoolName, schoolSearch } = resolveSchoolPageContext(searchParams);
   const { success, error, info } = useToast();
   const [activeSection, setActiveSection] = useState<Section>("general");
   const [user, setUser] = useState<User | null>(null);
@@ -1024,7 +1025,7 @@ export default function SettingsPage(props: {
         <div className="insetGroup">
           <SettingRow
             icon="🌱"
-            iconBg="rgba(52,199,89,0.18)"
+            iconBg="var(--success-soft)"
             title="一鍵 seed 示範佇列"
             subtitle="以王小明名義產生 5 件待處理：請假 / 報修 / 訂單 / 求助 / 作業繳交"
             onClick={() => {

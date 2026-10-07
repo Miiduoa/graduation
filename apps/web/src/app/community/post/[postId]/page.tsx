@@ -33,9 +33,11 @@ import {
 } from '@/lib/community/firestore';
 
 export default function PostDetailPage() {
+  const { user, loading } = useAuth();
+  const route = useParams<{ postId: string }>();
   return (
     <SiteShell title="貼文" subtitle="校園社群">
-      <PostDetailInner />
+      {loading ? <p role="status">確認登入狀態…</p> : user ? <PostDetailInner key={`${user.uid}:${route?.postId}`} /> : <div className="card" style={{padding:24}}><h2>登入後查看貼文</h2><p>校園社群內容僅提供給具備學校資格的成員。</p><Link href="/login" className="btn primary">登入帳號</Link></div>}
     </SiteShell>
   );
 }
@@ -52,6 +54,7 @@ function PostDetailInner() {
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [replyText, setReplyText] = useState('');
   const [replyAnonymous, setReplyAnonymous] = useState(true);
   const [replyParentId, setReplyParentId] = useState<string | null>(null);
@@ -97,13 +100,13 @@ function PostDetailInner() {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      await Promise.all([loadPost(), loadReplies()]);
-      setLoading(false);
+      try { await Promise.all([loadPost(), loadReplies()]); } catch { setLoadError('無法讀取貼文，請確認連線與學校資格後重試。'); }
+      finally { setLoading(false); }
     })();
   }, [loadPost, loadReplies]);
 
   useEffect(() => {
-    void hydrateProfiles();
+    void hydrateProfiles().catch(() => { setNameByUid({}); setAvatarByUid({}); });
   }, [hydrateProfiles]);
 
   const threaded = useMemo(() => flattenCampusRepliesThread(replies), [replies]);
@@ -223,6 +226,8 @@ function PostDetailInner() {
     }
   };
 
+  if (loadError) return <div role="alert" className="card" style={{padding:24}}><p>{loadError}</p><button className="btn" onClick={() => { setLoadError(''); setLoading(true); void Promise.all([loadPost(),loadReplies()]).catch(() => setLoadError('無法讀取貼文，請稍後重試。')).finally(() => setLoading(false)); }}>重試</button></div>;
+
   if (loading) {
     return <div className="card" style={{ padding: 24 }}>載入中…</div>;
   }
@@ -258,7 +263,7 @@ function PostDetailInner() {
               width: 36,
               height: 36,
               borderRadius: '50%',
-              background: post.anonymous ? 'var(--panel2, #F2F2F7)' : 'var(--brand, #5856D6)',
+              background: post.anonymous ? 'var(--panel2, #F2F2F7)' : 'var(--brand, var(--brand))',
               color: '#fff',
               display: 'flex',
               alignItems: 'center',
@@ -287,13 +292,13 @@ function PostDetailInner() {
                 <button
                   type="button"
                   onClick={onDeletePost}
-                  style={{ ...btnGhost, color: 'var(--danger, #FF3B30)' }}
+                  style={{ ...btnGhost, color: 'var(--danger, var(--danger))' }}
                 >
                   🗑 刪除
                 </button>
               </>
             ) : (
-              <button type="button" onClick={onReport} style={{ ...btnGhost, color: 'var(--danger, #FF3B30)' }}>
+              <button type="button" onClick={onReport} style={{ ...btnGhost, color: 'var(--danger, var(--danger))' }}>
                 檢舉
               </button>
             )}
@@ -343,8 +348,8 @@ function PostDetailInner() {
                 key={t}
                 style={{
                   fontSize: 12,
-                  color: 'var(--brand, #5856D6)',
-                  background: 'rgba(88,86,214,0.12)',
+                  color: 'var(--brand, var(--brand))',
+                  background: 'var(--accent-soft)',
                   padding: '3px 10px',
                   borderRadius: 999,
                   fontWeight: 700,
@@ -358,10 +363,10 @@ function PostDetailInner() {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
           <button type="button" onClick={onToggleLike} disabled={likeBusy} style={statChip}>
-            <span style={{ color: liked ? 'var(--danger, #FF3B30)' : 'var(--muted)' }}>
+            <span style={{ color: liked ? 'var(--danger, var(--danger))' : 'var(--muted)' }}>
               {liked ? '❤️' : '🤍'}
             </span>
-            <span style={{ fontWeight: 700, color: liked ? 'var(--danger, #FF3B30)' : 'var(--muted)' }}>{likes}</span>
+            <span style={{ fontWeight: 700, color: liked ? 'var(--danger, var(--danger))' : 'var(--muted)' }}>{likes}</span>
           </button>
           <div style={statChip}>
             <span>💬</span>
@@ -411,7 +416,7 @@ function PostDetailInner() {
                           <button
                             type="button"
                             onClick={() => onDeleteReply(r)}
-                            style={{ ...btnGhost, color: 'var(--danger, #FF3B30)' }}
+                            style={{ ...btnGhost, color: 'var(--danger, var(--danger))' }}
                           >
                             刪除
                           </button>
@@ -572,7 +577,7 @@ const btnGhost: React.CSSProperties = {
   cursor: 'pointer',
   fontSize: 12,
   fontWeight: 700,
-  color: 'var(--brand, #5856D6)',
+  color: 'var(--brand, var(--brand))',
   padding: '4px 6px',
 };
 

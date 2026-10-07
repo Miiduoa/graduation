@@ -182,8 +182,8 @@ export function RealtimeTab(props: { schoolId: string }) {
                 gap: 5,
                 padding: '7px 12px',
                 borderRadius: 999,
-                border: active ? '1px solid var(--brand, #5856D6)' : '1px solid var(--border)',
-                background: active ? 'var(--brand, #5856D6)' : 'var(--surface)',
+                border: active ? '1px solid var(--brand, var(--brand))' : '1px solid var(--border)',
+                background: active ? 'var(--brand, var(--brand))' : 'var(--surface)',
                 color: active ? '#fff' : 'var(--text)',
                 cursor: 'pointer',
                 fontSize: 12,
@@ -193,7 +193,7 @@ export function RealtimeTab(props: { schoolId: string }) {
             >
               <span>{POI_ICON[poi.category]}</span>
               {poi.name}
-              {checked && <span style={{ width: 6, height: 6, borderRadius: 3, background: '#34C759', marginLeft: 4 }} />}
+              {checked && <span style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--success)', marginLeft: 4 }} />}
             </button>
           );
         })}
@@ -224,7 +224,7 @@ export function RealtimeTab(props: { schoolId: string }) {
           className="btn primary"
           onClick={tapHeart}
           style={{
-            background: heartbeatSession ? '#34C759' : 'var(--brand, #5856D6)',
+            background: heartbeatSession ? 'var(--success)' : 'var(--brand, var(--brand))',
             fontSize: 13,
           }}
         >
@@ -259,7 +259,7 @@ export function RealtimeTab(props: { schoolId: string }) {
                   width: 48,
                   height: 48,
                   borderRadius: '50%',
-                  background: p.avatarUrl ? '#fff' : 'var(--brand, #5856D6)',
+                  background: p.avatarUrl ? '#fff' : 'var(--brand, var(--brand))',
                   color: '#fff',
                   display: 'flex',
                   alignItems: 'center',
@@ -359,7 +359,7 @@ export function RealtimeTab(props: { schoolId: string }) {
                       width: 22,
                       height: 22,
                       borderRadius: '50%',
-                      background: avatarByUid[g.authorUid] ? '#fff' : 'var(--brand, #5856D6)',
+                      background: avatarByUid[g.authorUid] ? '#fff' : 'var(--brand, var(--brand))',
                       color: '#fff',
                       display: 'flex',
                       alignItems: 'center',

@@ -1594,7 +1594,7 @@ const TOOL_SPECS: readonly ToolSpec[] = [
     fields: [
       { name: 'courseSpaceId', description: '課程空間 ID', type: 'string', required: true, promptIfMissing: '請給我課程空間 ID。' },
       { name: 'sessionId', description: '點名場次 ID', type: 'string', required: true, promptIfMissing: '請給我點名場次 ID。' },
-      { name: 'qrToken', description: 'QR Token（選填）', type: 'string' },
+      { name: 'qrToken', description: '老師提供的簽到碼', type: 'string', required: true, promptIfMissing: '請掃描老師的 QR Code，或輸入老師提供的簽到碼。' },
     ],
     handler: makeLegacyHandler('check_in_attendance', 'cross_role_write'),
   },

@@ -1,8 +1,9 @@
 import type { Metadata } from 'next';
+import { SiteShell } from '@/components/SiteShell';
 
 export const metadata: Metadata = {
-  title: '隱私政策 | 校園助手',
-  description: '校園助手正式版隱私政策',
+  title: '隱私政策 | Campus One',
+  description: 'Campus One隱私政策',
 };
 
 const sections = [
@@ -20,35 +21,21 @@ const sections = [
   },
   {
     title: '聯絡方式',
-    body: '若你對資料處理有疑問，請來信 support@campus-app.com，我們會在合理期間內回覆並協助處理。',
+    body: '服務聯絡方式尚待確認，將於正式開放前公布。',
   },
 ];
 
 export default function PrivacyPage() {
   return (
-    <main
-      className="pageStack"
-      style={{ maxWidth: 880, margin: '0 auto', padding: '32px 20px 72px' }}
-    >
-      <section className="card" style={{ display: 'grid', gap: 16 }}>
-        <span className="pill brand">Privacy Policy</span>
-        <div>
-          <h1 className="h1" style={{ marginBottom: 10 }}>
-            校園助手隱私政策
-          </h1>
-          <p className="sub" style={{ margin: 0 }}>
-            本頁適用於校園助手 iOS、Android 與 Web
-            正式版。若你的學校另有個別資料處理規範，會以該校公告為優先。
-          </p>
-        </div>
-      </section>
-
-      {sections.map((section) => (
-        <section key={section.title} className="card" style={{ display: 'grid', gap: 10 }}>
-          <h2 style={{ margin: 0, fontSize: 22 }}>{section.title}</h2>
-          <p style={{ margin: 0, lineHeight: 1.8 }}>{section.body}</p>
-        </section>
-      ))}
-    </main>
+    <SiteShell title="隱私政策" subtitle="Campus One 服務資訊">
+      <div className="pageStack" style={{ maxWidth: 880 }}>
+        {sections.map((section) => (
+          <section key={section.title} className="card" style={{ display: 'grid', gap: 10 }}>
+            <h2 style={{ margin: 0, fontSize: 22 }}>{section.title}</h2>
+            <p style={{ margin: 0, lineHeight: 1.8 }}>{section.body}</p>
+          </section>
+        ))}
+      </div>
+    </SiteShell>
   );
 }

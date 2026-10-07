@@ -9,7 +9,7 @@
  */
 'use client';
 
-import { useMemo, useState, type CSSProperties } from 'react';
+import { use, useMemo, useState, type CSSProperties } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
@@ -52,9 +52,10 @@ function fmtRelative(iso: string): string {
 }
 
 export default function DmsListPage(props: {
-  searchParams?: { school?: string; schoolId?: string };
+  searchParams?: Promise<{ school?: string; schoolId?: string }>;
 }) {
-  const { schoolName } = resolveSchoolPageContext(props.searchParams);
+  const searchParams = props.searchParams ? use(props.searchParams) : undefined;
+  const { schoolName } = resolveSchoolPageContext(searchParams);
   const [demoRole] = useDemoRole();
   const roleDef = getDemoRoleDefinition(demoRole);
   const store = useDemoStore();

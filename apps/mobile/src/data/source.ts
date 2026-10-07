@@ -197,14 +197,15 @@ export type DataSource = {
   ) => Promise<AttendanceSession[]>;
   startAttendanceSession: (input: {
     courseSpaceId: string;
+    requestId?: string;
     classroomLat?: number;
     classroomLng?: number;
     qrExpiryMinutes?: number;
-  }) => Promise<{ success: boolean; sessionId: string; qrToken?: string; qrExpiresAt?: string }>;
+  }) => Promise<{ success: boolean; sessionId: string; qrToken?: string; qrExpiresAt?: string; active?: boolean; reused?: boolean }>;
   checkInAttendance: (input: {
     courseSpaceId: string;
     sessionId: string;
-    qrToken?: string;
+    qrToken: string;
   }) => Promise<{ success: boolean }>;
   getAttendanceSummary: (courseSpaceId: string) => Promise<AttendanceSummary>;
   listInboxTasks: (userId: string, schoolId?: string) => Promise<InboxTask[]>;

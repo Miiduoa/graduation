@@ -87,7 +87,7 @@ export function DemoRolePill() {
     padding: '6px 12px',
     borderRadius: 999,
     background: def.toneSoft,
-    border: `1px solid ${def.tone}40`,
+    border: `1px solid color-mix(in srgb, ${def.tone} 25.1%, transparent)`,
     color: def.tone,
     fontSize: 12,
     fontWeight: 700,

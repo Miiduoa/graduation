@@ -1,11 +1,14 @@
 'use client';
 
+import { use } from 'react';
+
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 
-export default function JoinPage(props: { searchParams?: { school?: string; schoolId?: string } }) {
-  const { schoolName, schoolSearch } = resolveSchoolPageContext(props.searchParams);
+export default function JoinPage(props: { searchParams?: Promise<{ school?: string; schoolId?: string }> }) {
+  const searchParams = props.searchParams ? use(props.searchParams) : undefined;
+  const { schoolName, schoolSearch } = resolveSchoolPageContext(searchParams);
 
   return (
     <SiteShell schoolName={schoolName}>
@@ -19,7 +22,7 @@ export default function JoinPage(props: { searchParams?: { school?: string; scho
               color: '#fff',
               textAlign: 'center',
               padding: '32px 24px',
-              boxShadow: '6px 6px 16px rgba(88,86,214,0.36), -3px -3px 8px rgba(255,255,255,0.7)',
+              boxShadow: '6px 6px 16px var(--accent-soft), -3px -3px 8px rgba(255,255,255,0.7)',
             }}
           >
             <div style={{ fontSize: 52, marginBottom: 12 }}>🏫</div>
