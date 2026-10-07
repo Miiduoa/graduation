@@ -81,7 +81,9 @@ Web 與 Mobile 共用紙白／墨綠主色、語意狀態色、字級層次及�
 
 主要 [CI 37652160901](https://github.com/Miiduoa/graduation/actions/runs/37652160901) 在 `0c21fa0` 通過；獨立 [Maestro run 37652160826](https://github.com/Miiduoa/graduation/actions/runs/37652160826) 的原生階段則因 `prebuild --clean` 覆蓋已提交的 Podfile 設定，在 FirebaseCoreInternal／GoogleUtilities 模組整合時失敗，未執行 UI 測試。後續修正改為直接安裝、編譯已提交的 iOS 專案，保留 static frameworks 及 llama-rn／RNFirebase hooks；已在暫存副本成功安裝 118 個 Pods，確認 workspace、scheme 與原生設定。
 
-Workflow 改成選擇已安裝且可用的 iPhone simulator、等待啟動、編譯後讀取實際 bundle ID 並安裝 App，確認 Metro 可用才執行測試。失敗不再由 continue-on-error 隱藏。預設 smoke 驗證全新安裝的未登入首頁與登入入口；登入後角色流程需要另外準備正式測試帳號，不可用未登入測試替代。完整原生 build／UI 結果仍須以後續對應 commit 的 workflow 為準。
+Workflow 選擇已安裝且可用的 iPhone simulator、等待啟動、編譯後讀取實際 bundle ID 並安裝 App；失敗不再由 continue-on-error 隱藏。[Maestro 37653836784](https://github.com/Miiduoa/graduation/actions/runs/37653836784) 在 `654a60b` 已完成原生編譯、App 安裝與 Metro 啟動，但首次程式打包超過畫面等待時間；失敗截圖顯示 Bundling 67%，尚未通過登入畫面驗收。
+
+後續 workflow 在測試前，以 AppDelegate／RCTBundleURLProvider 相同入口與參數取得實際 iOS bundle，要求 HTTP 成功、JavaScript content type 及非空內容，設 600 秒上限；只等待 `/status` 不再視作畫面可啟動。獨立本機 Metro 驗證 HTTP 200、24,963,236 bytes，首次 6.745 秒、暖快取 0.082 秒，未更動畫面等待條件。預設 smoke 只驗證全新安裝的未登入首頁與登入入口；登入後角色流程需要另外準備測試帳號，不可用未登入測試替代。完整 UI 結果仍須以後續對應 commit 的 workflow 為準。
 
 ## 依賴稽核的可達性
 
