@@ -37,7 +37,7 @@
       "brace-expansion@^2.0.0": "2.1.6",
       "react": "19.1.0",
       "react-dom": "19.1.0",
-      "shell-quote": "1.11.0",
+      "shell-quote": "1.12.0",
       "websocket-driver": "0.7.5",
       "proxy-addr": "2.0.8",
       "@grpc/grpc-js": "1.14.5",
