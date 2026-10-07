@@ -101,35 +101,52 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run mobile tests
-        # mobile test script already runs jest with --runInBand; combining with
-        # --maxWorkers=2 is rejected by jest. --coverage 在 CI 下因 minimatch
-        # 版本解析問題拋 "minimatch is not a function"，本地 1005/1005 全綠
-        # 但 CI 環境不能跑 coverage；先移除 --coverage 解 unblock。
+      - name: Run mobile tests and produce a real report
+        # The mobile test script already supplies --runInBand.
+        # Coverage is intentionally not claimed: the CI Jest coverage path
+        # still needs a separate dependency-resolution fix.
         env:
-          # proactiveAI 等 mobile 測試對時區敏感（schedule 用 local 08:40 解析
-          # 但 now 為 UTC 時間），CI 預設 UTC 會讓 class_soon 計算 30 分鐘變
-          # 510 分鐘。本地（Asia/Taipei）測試 1005/1005 全綠，CI 對齊同一 TZ。
           TZ: Asia/Taipei
-        run: pnpm --filter mobile test --ci
+        run: pnpm --filter mobile test --ci --json --outputFile=jest-results.json
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        if: always()
-        with:
-          files: ./apps/mobile/coverage/lcov.info
-          flags: mobile
-          fail_ci_if_error: false
+      - name: Verify report and publish test counts
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const path = 'apps/mobile/jest-results.json';
+          if (!fs.existsSync(path)) throw new Error('Jest result file was not generated');
+          const report = JSON.parse(fs.readFileSync(path, 'utf8'));
+          if (!Number.isInteger(report.numTotalTests) || report.numTotalTests === 0) {
+            throw new Error('Jest result file has no tests');
+          }
+          if (report.numFailedTests > 0 || report.success === false) {
+            throw new Error('Jest JSON report contains failures');
+          }
+          const summary = [
+            '## Mobile Jest test report',
+            '',
+            '| Result | Count |',
+            '|---|---:|',
+            '| Passed | ' + report.numPassedTests + ' |',
+            '| Failed | ' + report.numFailedTests + ' |',
+            '| Skipped | ' + report.numPendingTests + ' |',
+            '| Total | ' + report.numTotalTests + ' |',
+            '',
+            'Report artifact: mobile-jest-results. Coverage is not collected by this job.',
+            ''
+          ].join('\\n');
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
+          console.log('Validated Jest report:', path);
+          NODE
 
-      - name: Upload Test Results
+      - name: Upload Jest test results
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: mobile-test-results
-          path: |
-            apps/mobile/coverage/
-            apps/mobile/jest-results.json
-          retention-days: 7
+          name: mobile-jest-results
+          path: apps/mobile/jest-results.json
+          if-no-files-found: error
+          retention-days: 14
 
   test-web:
     name: Web Tests
