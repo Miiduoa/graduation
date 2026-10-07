@@ -82,3 +82,13 @@ Web 與 Mobile 共用紙白／墨綠主色、語意狀態色、字級層次及�
 主要 [CI 37652160901](https://github.com/Miiduoa/graduation/actions/runs/37652160901) 在 `0c21fa0` 通過；獨立 [Maestro run 37652160826](https://github.com/Miiduoa/graduation/actions/runs/37652160826) 的原生階段則因 `prebuild --clean` 覆蓋已提交的 Podfile 設定，在 FirebaseCoreInternal／GoogleUtilities 模組整合時失敗，未執行 UI 測試。後續修正改為直接安裝、編譯已提交的 iOS 專案，保留 static frameworks 及 llama-rn／RNFirebase hooks；已在暫存副本成功安裝 118 個 Pods，確認 workspace、scheme 與原生設定。
 
 Workflow 改成選擇已安裝且可用的 iPhone simulator、等待啟動、編譯後讀取實際 bundle ID 並安裝 App，確認 Metro 可用才執行測試。失敗不再由 continue-on-error 隱藏。預設 smoke 驗證全新安裝的未登入首頁與登入入口；登入後角色流程需要另外準備正式測試帳號，不可用未登入測試替代。完整原生 build／UI 結果仍須以後續對應 commit 的 workflow 為準。
+
+## 依賴稽核的可達性
+
+2026-10-08 核對 audit report、lockfile 及呼叫位置後，4 項 high 來自 3 個套件，不能直接等同正式站有 4 個遠端可利用入口：
+
+- `image-size@1.2.1` 的 [JXL／HEIF](https://github.com/advisories/GHSA-5p2g-fcmc-qvqq) 與 [ICNS](https://github.com/advisories/GHSA-w3rx-r6r6-pgpr) DoS 影響 Metro 素材解析；惡意圖片進入本機或 CI 建置輸入時可達，未找到使用者上傳接到此解析器的流程。修正版為 2.0.3 以上，但 Metro 0.83.3 仍使用 v1 同步檔案路徑 API，不能直接 override 2.x。待相容修補、惡意／正常素材回歸及 Mobile export 驗證。
+- `node-forge@1.4.0` 的 [RSA 簽章公告](https://github.com/advisories/GHSA-86w9-cpqp-85rv) 尚無已發布修正版。它也存在於 Functions 的 firebase-admin 依賴；已核對 Admin 呼叫點為 service-account 私鑰解析，JWT 驗證走 jsonwebtoken，未發現外部簽章進入 forge verify 的現有路徑。Expo CLI 的使用限本機簽署／憑證設定，App 未設定 codeSigningCertificate。這是可達性核對，未執行漏洞 payload。
+- `braces@3.0.3` 的 [遞迴 DoS 公告](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm) 尚無修正版；目前經 Expo／Jest／Metro 工具鏈引入，未找到外部輸入作為 pattern 的 runtime 入口。若增加外部 pattern、憑證驗證或素材建置入口，必須重新核對。
+
+上述條件仍須在發布前處置或留下明確風險決定；目前只阻擋 critical 的 CI 綠燈不能替代這些項目的安全驗收。

@@ -347,7 +347,7 @@ export default function MessagesPage(props: {
                 borderRadius: 99,
                 border: '1px solid var(--border)',
                 background: tab === t.key ? 'var(--brand)' : 'var(--panel)',
-                color: tab === t.key ? '#fff' : 'var(--text)',
+                color: tab === t.key ? 'var(--on-brand)' : 'var(--text)',
                 fontSize: 13,
                 fontWeight: tab === t.key ? 700 : 500,
                 cursor: 'pointer',
@@ -360,8 +360,8 @@ export default function MessagesPage(props: {
                   style={{
                     marginLeft: 8,
                     padding: '1px 7px',
-                    background: tab === t.key ? '#fff' : 'var(--danger)',
-                    color: tab === t.key ? 'var(--brand)' : '#fff',
+                    background: tab === t.key ? 'var(--on-brand)' : 'var(--danger-soft)',
+                    color: tab === t.key ? 'var(--brand)' : 'var(--danger)',
                     borderRadius: 99,
                     fontSize: 11,
                     fontWeight: 700,
@@ -638,8 +638,8 @@ function DmTab(props: {
                   {unread > 0 && (
                     <span
                       style={{
-                        background: 'var(--danger)',
-                        color: '#fff',
+                        background: 'var(--danger-soft)',
+                        color: 'var(--danger)',
                         borderRadius: 99,
                         padding: '1px 7px',
                         fontSize: 11,
@@ -827,7 +827,7 @@ function DmTab(props: {
                       style={{
                         maxWidth: '70%',
                         background: isMe ? 'var(--brand)' : 'var(--panel)',
-                        color: isMe ? '#fff' : 'var(--text)',
+                        color: isMe ? 'var(--on-brand)' : 'var(--text)',
                         padding: '8px 12px',
                         borderRadius: 14,
                         borderTopLeftRadius: !isMe && !showAvatar ? 4 : 14,
@@ -1370,7 +1370,7 @@ function InboxTab(props: {
               borderRadius: 99,
               border: '1px solid var(--border)',
               background: filter === f.key ? 'var(--brand)' : 'var(--panel)',
-              color: filter === f.key ? '#fff' : 'var(--text)',
+              color: filter === f.key ? 'var(--on-brand)' : 'var(--text)',
               fontSize: 13,
               cursor: 'pointer',
               fontWeight: filter === f.key ? 700 : 400,

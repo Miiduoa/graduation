@@ -27,6 +27,7 @@ import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme, shadowStyle } from '../../ui/theme';
+import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 import { EmptyState } from '../../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../../ui/navigationTheme';
 import { useAuth } from '../../state/auth';
@@ -85,6 +86,7 @@ function mediaUrlsOf(p: CampusPostDoc): string[] {
 }
 
 export function HomeFeedScreen() {
+  const styles = useThemeStyleSheet(createStyles);
   const injectedNav = useCampusSocialStackNav();
   const fallbackNav = useNavigation<any>();
   const nav = injectedNav ?? fallbackNav;
@@ -415,6 +417,7 @@ function FeedHeader(props: {
   onComposeStory: () => void;
   onComposePost: () => void;
 }) {
+  const styles = useThemeStyleSheet(createStyles);
   const { stories, avatarByUid, nameByUid, myUid, filter, onSelectFilter, onOpenStoryGroup, onComposeStory } = props;
 
   const myGroup = stories.find((g) => g.authorUid === myUid) ?? null;
@@ -500,6 +503,7 @@ function FeedHeader(props: {
 // ─── Media Grid（1~4 張） ───────────────────────────────────
 
 function MediaGrid({ uris }: { uris: string[] }) {
+  const styles = useThemeStyleSheet(createStyles);
   const w = Dimensions.get('window').width - 28; // root padding 14*2
   const inner = w - 24; // card padding 12*2
   if (uris.length === 1) {
@@ -533,7 +537,7 @@ function openStoryGroup(grp: StoryAuthorGroup, nav: any) {
   ]);
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: theme.colors.bg,
