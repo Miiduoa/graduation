@@ -19,6 +19,7 @@
 const https = require('https');
 const { parsePuGradeDocument, parseGradeSemesterCodes } = require('./lib/puGradeDocument');
 const { buildDerivedCreditSummary } = require('./lib/puCreditSummary');
+const { parsePuCourseTime } = require('./lib/puCourseTime');
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -29,41 +30,6 @@ const MYPU_HOST = 'mypu.pu.edu.tw';
 const LOGIN_PATH = '/index_check.php';
 const COURSE_RESULT_PATH = '/stu_query/query_course.html';
 const GRADE_PATH = '/score_query/score_all.php';
-/** 靜宜大學節次 → 時間對照表 (verified from official schedule) */
-const PERIOD_TIME_MAP = {
-  1: { start: '08:10', end: '09:00' },
-  2: { start: '09:10', end: '10:00' },
-  3: { start: '10:10', end: '11:00' },
-  4: { start: '11:10', end: '12:00' },
-  5: { start: '13:10', end: '14:00' },
-  6: { start: '14:10', end: '15:00' },
-  7: { start: '15:10', end: '16:00' },
-  8: { start: '16:10', end: '17:00' },
-  9: { start: '17:10', end: '18:00' },
-  10: { start: '18:30', end: '19:20' },
-  11: { start: '19:25', end: '20:15' },
-  12: { start: '20:20', end: '21:10' },
-  13: { start: '21:15', end: '22:05' },
-};
-
-/** 中文星期 → dayOfWeek number */
-const DAY_MAP = {
-  一: 1,
-  二: 2,
-  三: 3,
-  四: 4,
-  五: 5,
-  六: 6,
-  日: 7,
-  Mon: 1,
-  Tue: 2,
-  Wed: 3,
-  Thu: 4,
-  Fri: 5,
-  Sat: 6,
-  Sun: 7,
-};
-
 // ---------------------------------------------------------------------------
 // HTTP helpers
 // ---------------------------------------------------------------------------
@@ -241,43 +207,6 @@ function pushUniqueAnnouncement(target, seen, announcement) {
   target.push(announcement);
 }
 
-// ---------------------------------------------------------------------------
-// Time / Place parser
-// ---------------------------------------------------------------------------
-
-/**
- * Parse PU time-place string like "二(Tue)  3, 4:PH303"
- * Returns { dayOfWeek, periods, location, startTime, endTime }
- */
-function parseTimePlace(raw) {
-  if (!raw || !raw.trim()) return null;
-  const s = raw.replace(/\u3000/g, ' ').trim(); // replace fullwidth space
-
-  // Match pattern: 星期(Day) periods:location
-  // e.g. "一(Mon) 2, 3, 4:PH217" or "五(Fri) 2, 3, 4:PH320" or "六(Sat) 4:"
-  const match = s.match(/^([一二三四五六日])\((\w+)\)\s*([\d,\s]+):?(.*)$/);
-  if (!match) return null;
-
-  const chineseDay = match[1];
-  const dayOfWeek = DAY_MAP[chineseDay] || 1;
-
-  const periodsStr = match[3];
-  const periods = periodsStr
-    .split(',')
-    .map((p) => parseInt(p.trim(), 10))
-    .filter((n) => !isNaN(n));
-
-  const location = match[4] ? match[4].trim() : '';
-
-  // Derive start/end times from first and last period
-  const firstPeriod = Math.min(...periods);
-  const lastPeriod = Math.max(...periods);
-  const startTime = PERIOD_TIME_MAP[firstPeriod]?.start || '08:10';
-  const endTime = PERIOD_TIME_MAP[lastPeriod]?.end || '09:00';
-
-  return { dayOfWeek, periods, location, startTime, endTime };
-}
-
 /**
  * Parse course name: "計算機概論(二)INTRODUCTION TO COMPUTER SCIENCE(2)"
  * Returns { zhName, enName }
@@ -431,7 +360,7 @@ async function puFetchCourses(cookies, semester) {
 
     const html = res.data;
     if (looksLikePuLoginPage(html) || !hasPuStudentContext(html)) {
-      return { success: false, courses: [], error: 'E校園 session 已失效，請重新登入' };
+      return { success: false, code: 'session-expired', courses: [], error: 'E校園 session 已失效，請重新登入' };
     }
 
     // ---- Extract student info ----
@@ -468,7 +397,7 @@ async function puFetchCourses(cookies, semester) {
       const teacherEmail = cells[6];
 
       const { zhName, enName } = parseCourseTitle(titleRaw);
-      const tp = parseTimePlace(timePlaceRaw);
+      const tp = parsePuCourseTime(timePlaceRaw);
       const teacherName = extractTeacherName(teacherEmail);
 
       courses.push({
@@ -566,7 +495,7 @@ async function puFetchGrades(cookies, semester) {
 
     const html = gradeRes.data;
     if (looksLikePuLoginPage(html)) {
-      return { success: false, grades: [], error: 'E校園 session 已失效，請重新登入' };
+      return { success: false, code: 'session-expired', grades: [], error: 'E校園 session 已失效，請重新登入' };
     }
 
     return parsePuGradeDocument(html, semester);
