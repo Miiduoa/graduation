@@ -245,6 +245,15 @@ jobs:
         working-directory: apps/mobile
         run: npx expo-doctor
 
+      - name: Bundle mobile JavaScript
+        working-directory: apps/mobile
+        env:
+          APP_ENV: development
+          EXPO_PUBLIC_APP_ENV: development
+        run: |
+          pnpm exec expo export --platform ios --output-dir /tmp/campus-ios-export
+          pnpm exec expo export --platform android --output-dir /tmp/campus-android-export
+
       - name: Validate Expo app config
         working-directory: apps/mobile
         run: npx expo config --type public --json > /tmp/expo-config.json
@@ -315,7 +324,17 @@ jobs:
   deploy-functions:
     name: Deploy Firebase Functions
     runs-on: ubuntu-latest
-    needs: [security-gates, lint-and-typecheck, test-functions, test-rules]
+    needs:
+      [
+        security-gates,
+        lint-and-typecheck,
+        test-mobile,
+        test-web,
+        test-functions,
+        test-rules,
+        build-mobile,
+        build-web,
+      ]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment: production
     steps:
@@ -351,6 +370,7 @@ jobs:
             echo "::error::FIREBASE_PROJECT_ID must be an explicit Firebase project ID, not a local alias."
             exit 1
           fi
+          pnpm -w firebase deploy --only firestore:indexes --project "$FIREBASE_PROJECT_ID" --non-interactive
           pnpm -w firebase deploy --only functions --project "$FIREBASE_PROJECT_ID" --non-interactive
 
   summary:
