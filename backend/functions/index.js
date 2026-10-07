@@ -27,6 +27,7 @@ const {
 const { createNotificationService } = require('./lib/notificationService');
 const { createLiveSessionHandlers } = require('./attendanceSessions');
 const { readRealtimeBusCache } = require('./busArrivals');
+const { createPuCampusDataHandler, createGetMyAcademicRecords } = require('./academicRecords');
 const {
   decryptSecretConfig,
   encryptSecretConfig,
@@ -1584,7 +1585,9 @@ exports.enqueueAssistantAction = onCall(
     const sourceRunId =
       request.data?.sourceRunId != null ? String(request.data.sourceRunId).trim() : '';
     const urgencyRaw = request.data?.urgency != null ? String(request.data.urgency).trim() : '';
-    const urgency = ['low', 'medium', 'high', 'critical'].includes(urgencyRaw) ? urgencyRaw : undefined;
+    const urgency = ['low', 'medium', 'high', 'critical'].includes(urgencyRaw)
+      ? urgencyRaw
+      : undefined;
 
     const payload = {
       userId: uid,
@@ -5135,73 +5138,13 @@ exports.cancelWashingReservation = onCall(
 // 列印服務 API
 // =====================================================
 
-exports.submitPrintJob = onCall(
-  {
-    region: REGION,
-  },
-  async (request) => {
-    const uid = request.auth?.uid;
-    if (!uid) {
-      throw new HttpsError('unauthenticated', 'Must be logged in');
-    }
-
-    const { schoolId, printerId, fileName, fileUrl, copies, color, duplex, pages } = request.data;
-
-    if (!schoolId || !printerId || !fileName || !fileUrl) {
-      throw new HttpsError('invalid-argument', 'Missing required fields');
-    }
-
-    await assertActiveSchoolMember(schoolId, uid);
-
-    const printerRef = db.collection('schools').doc(schoolId).collection('printers').doc(printerId);
-    const printerDoc = await printerRef.get();
-    const printerData = printerDoc.exists ? printerDoc.data() : null;
-
-    const pageCount = pages || 1;
-    const copyCount = copies || 1;
-    const isColor = color || false;
-    const isDuplex = duplex || false;
-
-    const pricePerPage = isColor
-      ? Number(printerData?.pricePerPage?.color ?? 5)
-      : Number(printerData?.pricePerPage?.bw ?? 1);
-    const totalPages = pageCount * copyCount;
-    const cost = totalPages * pricePerPage;
-
-    const jobRef = db.collection('schools').doc(schoolId).collection('printJobs').doc();
-    await db.runTransaction(async (transaction) => {
-      transaction.set(jobRef, {
-        userId: uid,
-        schoolId,
-        printerId,
-        fileName,
-        fileUrl,
-        copies: copyCount,
-        color: isColor,
-        duplex: isDuplex,
-        pages: pageCount,
-        totalPages,
-        cost,
-        status: 'pending',
-        createdAt: FieldValue.serverTimestamp(),
-      });
-
-      if (printerDoc.exists) {
-        transaction.update(printerRef, {
-          queueLength: FieldValue.increment(1),
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-      }
-    });
-
-    return {
-      success: true,
-      jobId: jobRef.id,
-      cost,
-      estimatedTime: Math.ceil(totalPages / 10),
-    };
-  },
-);
+exports.submitPrintJob = onCall({ region: REGION }, async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError('unauthenticated', 'Must be logged in');
+  }
+  // Remote printer delivery is not implemented. Do not create a payable queue entry.
+  throw new HttpsError('failed-precondition', '遠端校園列印尚未開放，請使用裝置的列印或分享功能。');
+});
 
 exports.updatePrintJobStatus = onCall(
   {
@@ -5960,6 +5903,12 @@ exports.createPaymentIntent = onCall(
       throw new HttpsError('unauthenticated', 'Must be logged in');
     }
 
+    const merchantId = String(request.data?.merchantId || '').trim();
+    // Transfers require a recipient ledger entry and are not merchant payments.
+    if (/^transfer:/i.test(merchantId)) {
+      throw new HttpsError('failed-precondition', '帳號間轉帳尚未開放。');
+    }
+
     enforceRateLimit({
       scope: 'create-payment-intent',
       key: uid,
@@ -5970,7 +5919,6 @@ exports.createPaymentIntent = onCall(
     const amount = Number(request.data?.amount);
     const schoolId = await resolveUserSchoolId(uid, request.data?.schoolId || null);
     const paymentMethod = normalizePaymentMethod(request.data?.paymentMethod);
-    const merchantId = String(request.data?.merchantId || '').trim();
     const description = String(request.data?.description || '').trim();
 
     assertValidAmount(amount, { min: 1, max: 100000 });
@@ -6367,13 +6315,20 @@ const liveSessionHandlers = createLiveSessionHandlers({
       groupRef.get(),
     ]);
     const studentUids = members.docs
-      .filter((member) => member.id !== uid && !['instructor', 'owner'].includes(member.data().role))
+      .filter(
+        (member) => member.id !== uid && !['instructor', 'owner'].includes(member.data().role),
+      )
       .map((member) => member.id);
-    const tokens = [...new Set((await Promise.all(studentUids.map(getUserPushTokens))).flat().filter(Boolean))];
+    const tokens = [
+      ...new Set((await Promise.all(studentUids.map(getUserPushTokens))).flat().filter(Boolean)),
+    ];
     for (let offset = 0; offset < tokens.length; offset += 500) {
       await messaging.sendEachForMulticast({
         tokens: tokens.slice(offset, offset + 500),
-        notification: { title: `${group.data()?.name ?? '課堂'} 開始點名`, body: '請進入課堂，掃描老師提供的 QR Code 完成簽到。' },
+        notification: {
+          title: `${group.data()?.name ?? '課堂'} 開始點名`,
+          body: '請進入課堂，掃描老師提供的 QR Code 完成簽到。',
+        },
         data: { type: 'live_session', groupId, sessionId, click_action: 'OPEN_CLASSROOM' },
       });
     }
@@ -6776,110 +6731,28 @@ exports.puFetchData = onCall(
   },
 );
 
+exports.getMyAcademicRecords = onCall(
+  { region: REGION },
+  createGetMyAcademicRecords({
+    db,
+    assertActiveSchoolMember,
+    fetchers: { courses: puFetchCourses, grades: puFetchGrades },
+  }),
+);
+
 exports.puFetchCampusData = onRequest(
-  {
-    region: REGION,
-    cors: STRICT_CORS,
-  },
-  async (req, res) => {
-    try {
-      assertTrustedOrigin(req);
-      requirePostJson(req);
-      const authUser = await verifyRequestFirebaseUser(req);
-
-      const sessionId = String(req.body?.sessionId || '').trim();
-      const dataType = String(req.body?.dataType || '').trim();
-      const semester = String(req.body?.semester || '').trim();
-      const allowedTypes = [
-        'courses',
-        'grades',
-        'announcements',
-        'studentInfo',
-        'absence',
-        'creditSummary',
-      ];
-
-      if (!sessionId || !dataType) {
-        res.status(400).json({ error: 'Missing required fields: sessionId, dataType' });
-        return;
-      }
-
-      if (!allowedTypes.includes(dataType)) {
-        res.status(400).json({ error: `Invalid dataType: ${dataType}` });
-        return;
-      }
-
-      enforceRateLimit({
-        scope: 'pu-campus-fetch-data',
-        key: `${sessionId}:${dataType}`,
-        limit: 60,
-        windowMs: 5 * 60 * 1000,
-      });
-
-      // Try Firestore first, then in-memory fallback
-      let sessionData = null;
-      try {
-        const sessionRef = db.collection('_puSessions').doc(sessionId);
-        const sessionDoc = await sessionRef.get();
-        if (sessionDoc.exists) {
-          sessionData = sessionDoc.data();
-          const expiresAt = sessionData?.expiresAt?.toDate?.() ?? null;
-          if (!sessionData?.cookies || Object.keys(sessionData.cookies).length === 0 || !expiresAt || expiresAt < new Date()) {
-            await sessionRef.delete().catch(() => null);
-            sessionData = null;
-          }
-        }
-      } catch (err) {
-        // Firestore unavailable — try in-memory
-        console.warn('[puFetchCampusData] Firestore unavailable, trying in-memory:', err.message);
-      }
-
-      // 上方 try/catch 已把 sessionData 設好（或 null）；這裡只做最終驗證
-      if (!sessionData) {
-        res.status(401).json({ error: 'Invalid or expired PU session' });
-        return;
-      }
-
-      let result;
-      switch (dataType) {
-        case 'courses':
-          result = await puFetchCourses(sessionData.cookies, semester || '');
-          break;
-        case 'grades':
-          result = await puFetchGrades(sessionData.cookies, semester || '');
-          break;
-        case 'announcements':
-          result = await puFetchAnnouncements(sessionData.cookies);
-          break;
-        case 'studentInfo':
-          result = await puFetchStudentInfo(sessionData.cookies);
-          break;
-        case 'absence':
-          result = await puFetchAbsence(sessionData.cookies);
-          break;
-        case 'creditSummary':
-          result = await puFetchCreditSummary(sessionData.cookies);
-          break;
-        default:
-          res.status(400).json({ error: `Unknown dataType: ${dataType}` });
-          return;
-      }
-
-      if (!result?.success) {
-        res.status(503).json({ error: result?.error || `Failed to fetch ${dataType}` });
-        return;
-      }
-
-      res.set('Cache-Control', 'no-store');
-      res.json({
-        success: true,
-        result,
-      });
-    } catch (error) {
-      console.error('puFetchCampusData error:', error);
-      writeHttpError(res, error, 'Failed to fetch PU campus data');
-    }
-  },
+  { region: REGION, cors: STRICT_CORS },
+  createPuCampusDataHandler({
+    db,
+    fetchers: {
+      courses: puFetchCourses,
+      grades: puFetchGrades,
+      announcements: puFetchAnnouncements,
+      studentInfo: puFetchStudentInfo,
+      absence: puFetchAbsence,
+      creditSummary: puFetchCreditSummary,
+    },
+  }),
 );
 
 exports.puRefreshTronClassSession = onRequest(

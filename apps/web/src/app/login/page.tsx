@@ -13,6 +13,7 @@ function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const { user } = useAuth();
+  const reconnect = params.get('reconnect') === 'school';
   const destination = sanitizeInternalPath(
     params.get('redirect') || params.get('returnUrl') || '/',
   );
@@ -22,8 +23,8 @@ function LoginForm() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   useEffect(() => {
-    if (user) router.replace(destination);
-  }, [user, router, destination]);
+    if (user && !reconnect) router.replace(destination);
+  }, [user, router, destination, reconnect]);
   async function login(event: FormEvent) {
     event.preventDefault();
     if (busyRef.current) return;
@@ -52,7 +53,7 @@ function LoginForm() {
       <main className={styles.main} style={{ maxWidth: 550 }}>
         <p className={styles.eyebrow}>靜宜大學</p>
         <div className={styles.heading}>
-          <h1>登入你的校園帳號。</h1>
+          <h1>{reconnect ? '重新連線學校帳號' : '登入你的校園帳號'}</h1>
         </div>
         <p className={styles.intro}>使用 e 校園學號與密碼，繼續查看課程與待辦。</p>
         <form onSubmit={login} style={{ display: 'grid', gap: 18, marginTop: 30 }}>
@@ -70,7 +71,7 @@ function LoginForm() {
                 width: '100%',
                 padding: 14,
                 marginTop: 6,
-                border: '1px solid #b2bcb1',
+                border: '1px solid var(--border-strong)',
                 borderRadius: 4,
                 font: 'inherit',
               }}
@@ -90,7 +91,7 @@ function LoginForm() {
                 width: '100%',
                 padding: 14,
                 marginTop: 6,
-                border: '1px solid #b2bcb1',
+                border: '1px solid var(--border-strong)',
                 borderRadius: 4,
                 font: 'inherit',
               }}
