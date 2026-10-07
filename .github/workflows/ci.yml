@@ -134,7 +134,7 @@ jobs:
             '',
             'Report artifact: mobile-jest-results. Coverage is not collected by this job.',
             ''
-          ].join('\\n');
+          ].join('\n');
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
           console.log('Validated Jest report:', path);
           NODE
