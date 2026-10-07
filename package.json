@@ -78,7 +78,7 @@
     "format": "prettier . --write",
     "format:check": "prettier . --check",
     "firebase": "firebase",
-    "test:rules": "if [ -d /opt/homebrew/opt/openjdk@21/bin ]; then export PATH=\"/opt/homebrew/opt/openjdk@21/bin:$PATH\"; export JAVA_HOME=\"/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home\"; elif [ -d /usr/local/opt/openjdk@21/bin ]; then export PATH=\"/usr/local/opt/openjdk@21/bin:$PATH\"; export JAVA_HOME=\"/usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home\"; fi; firebase emulators:exec --only firestore,storage \"node --test backend/tests/security-rules.test.js\"",
+    "test:rules": "if [ -d /opt/homebrew/opt/openjdk@21/bin ]; then export PATH=\"/opt/homebrew/opt/openjdk@21/bin:$PATH\"; export JAVA_HOME=\"/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home\"; elif [ -d /usr/local/opt/openjdk@21/bin ]; then export PATH=\"/usr/local/opt/openjdk@21/bin:$PATH\"; export JAVA_HOME=\"/usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home\"; fi; firebase emulators:exec --only firestore,storage \"node --test backend/tests/security-rules.test.js backend/functions/transactionalWrites.emulator.cjs\"",
     "version:patch": "node ./scripts/bump-version.mjs patch",
     "version:minor": "node ./scripts/bump-version.mjs minor",
     "version:major": "node ./scripts/bump-version.mjs major",

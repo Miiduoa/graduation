@@ -26,6 +26,8 @@ const {
 } = require('./sso/providerRegistry');
 const { createNotificationService } = require('./lib/notificationService');
 const { createLiveSessionHandlers } = require('./attendanceSessions');
+const { createGroupMembershipHandlers } = require('./groupMembership');
+const { createOrderHandler } = require('./createOrder');
 const { readRealtimeBusCache } = require('./busArrivals');
 const { createPuCampusDataHandler, createGetMyAcademicRecords } = require('./academicRecords');
 const {
@@ -51,7 +53,7 @@ const {
   isLocalMockAuthAllowed,
   verifyRequestFirebaseUser,
 } = require('./sessionSecurity');
-const { normalizeCafeteriaPilotStatus, resolveCafeteriaOrderingMetadata } = require('./cafeterias');
+const { normalizeCafeteriaPilotStatus } = require('./cafeterias');
 const { toJsDate, formatAssistantDate } = require('./lib/assistantFormat');
 const {
   fetchAssistantPendingAssignments,
@@ -1126,16 +1128,6 @@ async function syncCafeteriaOperatorCount(schoolId, cafeteriaId) {
   );
 
   return activeOperatorCount;
-}
-
-async function cafeteriaHasActiveOperator(schoolId, cafeteriaId) {
-  const activeOperatorsSnap = await getCafeteriaRef(schoolId, cafeteriaId)
-    .collection('operators')
-    .where('status', '==', 'active')
-    .limit(1)
-    .get();
-
-  return !activeOperatorsSnap.empty;
 }
 
 function generateGroupJoinCode(length = 8) {
@@ -3577,145 +3569,9 @@ exports.createGroup = onCall(
   },
 );
 
-exports.joinGroupByCode = onCall(
-  {
-    region: REGION,
-  },
-  async (request) => {
-    const uid = request.auth?.uid;
-    if (!uid) {
-      throw new HttpsError('unauthenticated', 'Must be logged in');
-    }
-
-    const { joinCode, schoolId } = request.data;
-
-    if (!joinCode || !schoolId) {
-      throw new HttpsError('invalid-argument', 'Missing join code or schoolId');
-    }
-
-    await assertActiveSchoolMember(schoolId, uid);
-
-    const groupsSnap = await db
-      .collection('groups')
-      .where('joinCode', '==', String(joinCode).trim().toUpperCase())
-      .limit(1)
-      .get();
-
-    if (groupsSnap.empty) {
-      throw new HttpsError('not-found', 'Invalid join code');
-    }
-
-    const groupDoc = groupsSnap.docs[0];
-    const groupId = groupDoc.id;
-    const groupData = groupDoc.data();
-
-    if (groupData.schoolId !== schoolId) {
-      throw new HttpsError('permission-denied', 'Join code belongs to a different school');
-    }
-
-    // 檢查是否已經是成員
-    const memberDoc = await db
-      .collection('groups')
-      .doc(groupId)
-      .collection('members')
-      .doc(uid)
-      .get();
-    if (memberDoc.exists && memberDoc.data().status === 'active') {
-      throw new HttpsError('already-exists', 'Already a member of this group');
-    }
-
-    const batch = db.batch();
-
-    // 加入群組
-    batch.set(db.collection('groups').doc(groupId).collection('members').doc(uid), {
-      uid,
-      role: 'member',
-      status: 'active',
-      joinedAt: FieldValue.serverTimestamp(),
-    });
-
-    // 更新成員數
-    batch.update(db.collection('groups').doc(groupId), {
-      memberCount: FieldValue.increment(1),
-    });
-
-    // 記錄到使用者的群組列表
-    batch.set(db.collection('users').doc(uid).collection('groups').doc(groupId), {
-      groupId,
-      schoolId: groupData.schoolId,
-      type: groupData.type || null,
-      name: groupData.name || null,
-      joinCode: groupData.joinCode || null,
-      status: 'active',
-      role: 'member',
-      joinedAt: FieldValue.serverTimestamp(),
-    });
-
-    await batch.commit();
-
-    return {
-      success: true,
-      groupId,
-      groupName: groupData.name,
-    };
-  },
-);
-
-exports.leaveGroup = onCall(
-  {
-    region: REGION,
-  },
-  async (request) => {
-    const uid = request.auth?.uid;
-    if (!uid) {
-      throw new HttpsError('unauthenticated', 'Must be logged in');
-    }
-
-    const { groupId } = request.data;
-
-    if (!groupId) {
-      throw new HttpsError('invalid-argument', 'Missing groupId');
-    }
-
-    const memberDoc = await db
-      .collection('groups')
-      .doc(groupId)
-      .collection('members')
-      .doc(uid)
-      .get();
-
-    if (!memberDoc.exists || memberDoc.data().status !== 'active') {
-      throw new HttpsError('not-found', 'Not a member of this group');
-    }
-
-    if (memberDoc.data().role === 'owner') {
-      throw new HttpsError(
-        'failed-precondition',
-        'Owner cannot leave the group. Transfer ownership first.',
-      );
-    }
-
-    const batch = db.batch();
-
-    batch.update(db.collection('groups').doc(groupId).collection('members').doc(uid), {
-      status: 'left',
-      leftAt: FieldValue.serverTimestamp(),
-    });
-
-    batch.update(db.collection('groups').doc(groupId), {
-      memberCount: FieldValue.increment(-1),
-    });
-
-    batch.update(db.collection('users').doc(uid).collection('groups').doc(groupId), {
-      status: 'left',
-      leftAt: FieldValue.serverTimestamp(),
-    });
-
-    await batch.commit();
-
-    return { success: true };
-  },
-);
+const groupMembershipHandlers = createGroupMembershipHandlers({ db });
+exports.joinGroupByCode = onCall({ region: REGION }, groupMembershipHandlers.joinGroupByCode);
+exports.leaveGroup = onCall({ region: REGION }, groupMembershipHandlers.leaveGroup);
 
 // =====================================================
 // 圖書館 API
@@ -4562,85 +4418,7 @@ exports.deleteUserAccount = onCall(
 // 餐廳訂餐 API
 // =====================================================
 
-exports.createOrder = onCall(
-  {
-    region: REGION,
-  },
-  async (request) => {
-    const uid = request.auth?.uid;
-    if (!uid) {
-      throw new HttpsError('unauthenticated', 'Must be logged in');
-    }
-
-    const schoolId = trimString(request.data?.schoolId, 120);
-    const cafeteriaId = trimString(request.data?.cafeteriaId, 160);
-    const items = Array.isArray(request.data?.items) ? request.data.items : [];
-    const pickupTime = request.data?.pickupTime;
-    const note = request.data?.note;
-    const paymentMethod = request.data?.paymentMethod;
-    const source = request.data?.source === 'ai_agent' ? 'ai_agent' : undefined;
-
-    if (!schoolId || !cafeteriaId || items.length === 0) {
-      throw new HttpsError('invalid-argument', 'Missing required fields');
-    }
-
-    await assertActiveSchoolMember(schoolId, uid);
-    const cafeteriaDoc = await getCafeteriaRef(schoolId, cafeteriaId).get();
-    if (!cafeteriaDoc.exists) {
-      throw new HttpsError('not-found', 'Cafeteria not found');
-    }
-
-    const cafeteriaData = cafeteriaDoc.data() || {};
-    const hasActiveOperator = await cafeteriaHasActiveOperator(schoolId, cafeteriaId);
-    const { merchantId, cafeteriaName: cafeteria } = resolveCafeteriaOrderingMetadata(
-      cafeteriaData,
-      {
-        cafeteriaId,
-        fallbackName: request.data?.cafeteria,
-        hasActiveOperator,
-        HttpsError,
-      },
-    );
-
-    const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-    const tax = Math.round(subtotal * 0.05);
-    const total = subtotal + tax;
-
-    const orderPayload = {
-      userId: uid,
-      schoolId,
-      cafeteriaId,
-      merchantId,
-      cafeteria,
-      items,
-      subtotal,
-      tax,
-      total,
-      totalAmount: total,
-      pickupTime: pickupTime || null,
-      note: note || null,
-      paymentMethod: paymentMethod || 'campus_card',
-      status: 'pending',
-      paymentStatus: 'pending',
-      createdAt: FieldValue.serverTimestamp(),
-      ...(source ? { source } : {}),
-    };
-
-    const orderRef = db.collection('schools').doc(schoolId).collection('orders').doc();
-    const userOrderRef = getUserSchoolDoc(uid, schoolId, 'orders', orderRef.id);
-
-    await db.runTransaction(async (transaction) => {
-      transaction.set(orderRef, orderPayload);
-      transaction.set(userOrderRef, orderPayload);
-    });
-
-    return {
-      success: true,
-      orderId: orderRef.id,
-      total,
-    };
-  },
-);
+exports.createOrder = onCall({ region: REGION }, createOrderHandler({ db }));
 
 exports.updateOrderStatus = onCall(
   {

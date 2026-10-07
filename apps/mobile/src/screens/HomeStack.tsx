@@ -87,7 +87,7 @@ export function HomeStack() {
       <Stack.Screen
         name="SmartDashboard"
         component={SmartDashboardScreen}
-        options={{ title: '智慧儀表板（學生）', headerShown: false }}
+        options={{ title: '學習總覽', headerShown: false }}
       />
       <Stack.Screen name="公告總覽" component={AnnouncementsListAiFirstScreen} options={{ title: '公告', headerShown: false }} />
       <Stack.Screen
@@ -96,7 +96,7 @@ export function HomeStack() {
         options={{ title: '公告詳情', headerShown: false }}
       />
       <Stack.Screen name="活動總覽" component={EventsListAiFirstScreen} options={{ title: '活動', headerShown: false }} />
-      <Stack.Screen name="AIChat" component={AIChatScreen} options={{ title: '校園 AI', headerShown: false }} />
+      <Stack.Screen name="AIChat" component={AIChatScreen} options={{ title: '校園助理', headerShown: false }} />
       <Stack.Screen name="活動詳情" component={EventDetailAiFirstScreen} options={{ title: '活動詳情', headerShown: false }} />
       <Stack.Screen
         name="CampusSocialScreen"
@@ -116,7 +116,7 @@ export function HomeStack() {
       <Stack.Screen
         name="AIAgentConsole"
         component={AIAgentConsoleScreen}
-        options={{ title: '🤖 AI Agent 駕駛室' }}
+        options={{ title: '助理工作紀錄' }}
       />
     </Stack.Navigator>
   );

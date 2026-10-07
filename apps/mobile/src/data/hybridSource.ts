@@ -1,6 +1,7 @@
 /* eslint-disable */
 import { PROVIDENCE_UNIVERSITY_SCHOOL_ID } from '@campus/shared/src';
 import type { DataSource } from './source';
+import { assertOrderRequest } from './orderSource';
 import type {
   Announcement,
   Cafeteria,
@@ -784,16 +785,9 @@ export const hybridSource: DataSource = {
       return mockSource.getOrder(id, userId, schoolId);
     }
   },
-  createOrder: async (data: any) => {
-    try {
-      return await firebaseSource.createOrder(data);
-    } catch (error) {
-      console.warn(
-        '[HybridSource] createOrder failed; not falling back to mock because orders must reach the restaurant ordering backend:',
-        error,
-      );
-      throw error;
-    }
+  createOrder: async (data) => {
+    assertOrderRequest(data);
+    return firebaseSource.createOrder(data);
   },
   updateOrderStatus: async (
     id: string,

@@ -249,7 +249,7 @@ export default ({ config }: any) => {
 
   return {
     ...config,
-    name: config.name ?? '校園助手',
+    name: config.name ?? 'Campus One',
     slug: config.slug ?? 'campus-app',
     version: config.version ?? '1.0.0',
     orientation: 'portrait',
