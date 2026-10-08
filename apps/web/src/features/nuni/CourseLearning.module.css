@@ -1,0 +1,128 @@
+.heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+}
+.heading h2,
+.heading h3,
+.heading h4 {
+  margin: 0;
+}
+.heading h4 {
+  font-size: 16px;
+}
+.heading > div {
+  min-width: 0;
+}
+.heading :is(h2, h3, h4),
+.body {
+  overflow-wrap: anywhere;
+}
+.body a {
+  color: var(--brand);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.7;
+  margin-bottom: 10px;
+}
+.materials > li {
+  padding: 24px 0;
+}
+.materials > li:last-child {
+  padding-bottom: 0;
+}
+.note {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.8;
+}
+.compose {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+.compose summary {
+  font-size: 15px;
+  min-height: 32px;
+}
+.badge {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 24px;
+}
+.submissions > li {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+}
+.feedback {
+  padding: 18px;
+  margin-top: 20px;
+  background: var(--panel);
+  border-left: 2px solid var(--border-strong);
+}
+.feedback h4,
+.feedback h5 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+.closeArea {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+}
+.confirmation {
+  padding: 20px;
+  background: var(--warning-soft);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  line-height: 1.75;
+}
+.confirmation h4 {
+  margin: 0 0 12px;
+  font-size: 17px;
+}
+.confirmation .checkbox {
+  display: flex;
+  flex-direction: row;
+  align-items: start;
+  gap: 10px;
+}
+.checkbox input {
+  width: 20px;
+  height: 20px;
+  margin: 2px 0 0;
+  flex: 0 0 20px;
+  accent-color: var(--brand);
+}
+@media (max-width: 540px) {
+  .heading {
+    align-items: start;
+  }
+  .metadata {
+    margin-bottom: 6px;
+  }
+  .feedback,
+  .confirmation {
+    padding: 16px;
+  }
+}

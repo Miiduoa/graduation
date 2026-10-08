@@ -2,27 +2,21 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useRef, useState, type ReactNode, type FormEvent } from 'react';
+import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  createNuniClasses,
   NuniError,
   nuniErrorMessage,
   type NuniAssignment,
-  type NuniSubmission,
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
-import { GuestAuthProvider } from '@/components/AuthGuard';
+import { CampusServiceMenu } from '@/components/CampusServiceMenu';
 import { browserRequest, NuniSessionProvider, useNuniSession } from './Session';
+import { CourseAccessBoundary, MutationForm, useClasses } from './CourseUI';
+import { AssignmentCard } from './AssignmentCard';
+import { CourseMaterials } from './CourseMaterials';
+import { CourseQuizzes } from './CourseQuizzes';
 import home from '@/app/home.module.css';
 import styles from './NuniApp.module.css';
-
-function useClasses() {
-  const { session } = useNuniSession();
-  return createNuniClasses((path, input) => {
-    if (!session) return Promise.reject(new NuniError(401, 'SIGN_IN_REQUIRED'));
-    return browserRequest(path, session.context, input);
-  });
-}
 
 export function NuniHeader() {
   const { session, loading, logout, pendingLogout } = useNuniSession();
@@ -40,99 +34,33 @@ export function NuniHeader() {
           今日
         </Link>
         <Link
-          href="/groups"
+          href="/classroom"
           aria-current={
-            pathname === '/groups' || pathname?.startsWith('/course/') ? 'page' : undefined
+            pathname === '/classroom' || pathname?.startsWith('/classroom/course/')
+              ? 'page'
+              : undefined
           }
         >
-          課程
+          課程空間
         </Link>
-        <Link href="/profile" aria-current={pathname === '/profile' ? 'page' : undefined}>
-          帳號
+        <Link
+          href="/classroom/account"
+          aria-current={pathname === '/classroom/account' ? 'page' : undefined}
+        >
+          課程帳號
         </Link>
+        <CampusServiceMenu />
       </nav>
       <div className={home.account}>
         {session || pendingLogout ? (
           <button disabled={loading} onClick={() => void logout()}>
-            {pendingLogout ? '重試登出' : '登出'}
+            {pendingLogout ? '重試登出' : '登出課程空間'}
           </button>
         ) : (
-          <Link href="/login">登入</Link>
+          <Link href="/classroom/login">登入課程空間</Link>
         )}
       </div>
     </header>
-  );
-}
-
-function MutationForm({
-  label,
-  children,
-  submit,
-  success,
-}: {
-  label: string;
-  children: ReactNode;
-  submit: (data: FormData, key: string) => Promise<void>;
-  success?: string;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const [done, setDone] = useState(false);
-  const [uncertain, setUncertain] = useState(false);
-  const attempt = useRef<{ data: FormData; key: string } | null>(null);
-  const running = useRef(false);
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (running.current) return;
-    const form = event.currentTarget;
-    if (!attempt.current) attempt.current = { data: new FormData(form), key: crypto.randomUUID() };
-    running.current = true;
-    setBusy(true);
-    setError('');
-    setDone(false);
-    try {
-      await submit(attempt.current.data, attempt.current.key);
-      if (!mounted.current) return;
-      attempt.current = null;
-      setUncertain(false);
-      setDone(true);
-      form.reset();
-    } catch (failure) {
-      if (!mounted.current) return;
-      const unknown = !(failure instanceof NuniError) || failure.status >= 500;
-      setUncertain(unknown);
-      if (!unknown) attempt.current = null;
-      setError(nuniErrorMessage(failure));
-    } finally {
-      running.current = false;
-      if (mounted.current) setBusy(false);
-    }
-  }
-  return (
-    <form className={styles.form} onSubmit={onSubmit}>
-      <fieldset disabled={busy || uncertain}>{children}</fieldset>
-      {error && (
-        <p role="alert">
-          {error}
-          {uncertain && ' 重試會確認同一筆送出結果，不會另建一筆。'}
-        </p>
-      )}
-      {done && success && (
-        <p role="status" className={styles.receipt}>
-          {success}
-        </p>
-      )}
-      <button className={styles.button} disabled={busy} type="submit">
-        {busy ? '處理中…' : uncertain ? '確認送出結果' : label}
-      </button>
-    </form>
   );
 }
 
@@ -168,7 +96,7 @@ function Login() {
         </p>
       )}
       {session ? (
-        <Link className={styles.button} href="/groups">
+        <Link className={styles.button} href="/classroom">
           查看我的課程
         </Link>
       ) : googleAvailable ? (
@@ -235,7 +163,7 @@ function WorkspaceList() {
     // This view is keyed by the authenticated session in NuniContent.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [epoch]);
-  const open = (workspace: NuniWorkspace) => router.push(`/course/${workspace.id}`);
+  const open = (workspace: NuniWorkspace) => router.push(`/classroom/course/${workspace.id}`);
   return (
     <>
       <div className={styles.heading}>
@@ -268,7 +196,7 @@ function WorkspaceList() {
               <ul className={styles.list}>
                 {items.map((item) => (
                   <li key={item.id}>
-                    <Link className={styles.row} href={`/course/${item.id}`}>
+                    <Link className={styles.row} href={`/classroom/course/${item.id}`}>
                       <span>
                         <strong>{item.title}</strong>
                         <small>
@@ -344,114 +272,8 @@ function WorkspaceList() {
   );
 }
 
-function Assignment({
-  item,
-  workspace,
-  reload,
-}: {
-  item: NuniAssignment;
-  workspace: NuniWorkspace;
-  reload: () => void;
-}) {
-  const classes = useClasses();
-  const [submissions, setSubmissions] = useState<NuniSubmission[] | null>(null);
-  const [error, setError] = useState('');
-  const [reading, setReading] = useState(false);
-  const request = useRef(0);
-  useEffect(
-    () => () => {
-      ++request.current;
-    },
-    [],
-  );
-  const student = workspace.memberRole === 'student';
-  return (
-    <article className={styles.panel} id={`assignment-${item.id}`}>
-      <h3>{item.title}</h3>
-      <p className={styles.muted}>
-        {item.state === 'closed' ? '已停止收件' : '開放繳交'} ·{' '}
-        {item.dueAt ? `截止：${new Date(item.dueAt).toLocaleString('zh-TW')}` : '未設定截止時間'}
-      </p>
-      <p className={styles.prose}>{item.instructions}</p>
-      {item.mySubmission && (
-        <div className={styles.receipt}>
-          <strong>已繳交</strong>
-          <p>{new Date(item.mySubmission.submittedAt).toLocaleString('zh-TW')}</p>
-          <p className={styles.prose}>{item.mySubmission.body}</p>
-          {item.mySubmission.teacherFeedback && (
-            <p className={styles.prose}>老師回饋：{item.mySubmission.teacherFeedback}</p>
-          )}
-        </div>
-      )}
-      {student && workspace.state === 'active' && item.state === 'open' && !item.mySubmission && (
-        <MutationForm
-          label="繳交作業"
-          submit={async (data, key) => {
-            await classes.submit(workspace.id, item.id, String(data.get('body')), key);
-            reload();
-          }}
-        >
-          <label>
-            作業內容
-            <textarea
-              name="body"
-              required
-              maxLength={8000}
-              placeholder="填寫內容，或附上作品連結。"
-            />
-          </label>
-        </MutationForm>
-      )}
-      {!student && (
-        <>
-          <div className={styles.actions}>
-            <span className={styles.muted}>{item.submissionCount} 份繳交</span>
-            <button
-              className={`${styles.button} ${styles.secondary}`}
-              disabled={reading}
-              onClick={async () => {
-                const run = ++request.current;
-                setError('');
-                setReading(true);
-                setSubmissions(null);
-                try {
-                  const result = await classes.submissions(workspace.id, item.id);
-                  if (run === request.current) setSubmissions(result);
-                } catch (failure) {
-                  if (run === request.current) setError(nuniErrorMessage(failure));
-                } finally {
-                  if (run === request.current) setReading(false);
-                }
-              }}
-            >
-              {reading ? '讀取中…' : '查看繳交內容'}
-            </button>
-          </div>
-          {error && <p role="alert">{error}</p>}
-          {submissions &&
-            (submissions.length ? (
-              <ul className={styles.list}>
-                {submissions.map((entry) => (
-                  <li key={entry.platformAccountId}>
-                    <p>
-                      <strong>{entry.displayName || '課程成員'}</strong> ·{' '}
-                      {new Date(entry.submittedAt).toLocaleString('zh-TW')}
-                    </p>
-                    <p className={styles.prose}>{entry.body}</p>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className={styles.muted}>尚未收到作業。</p>
-            ))}
-        </>
-      )}
-    </article>
-  );
-}
-
 function Workspace({ id }: { id: string }) {
-  const classes = useClasses();
+  const classes = useClasses(beginCourseRequest);
   const { refresh } = useNuniSession();
   const [data, setData] = useState<{
     workspace: NuniWorkspace;
@@ -460,30 +282,51 @@ function Workspace({ id }: { id: string }) {
   const [error, setError] = useState('');
   const [epoch, setEpoch] = useState(0);
   const [code, setCode] = useState('');
-  const reload = () => setEpoch((value) => value + 1);
+  const [tab, setTab] = useState<'materials' | 'assignments' | 'quizzes'>('assignments');
+  const [refreshing, setRefreshing] = useState(false);
+  const generation = useRef(0);
+  const reload = () => setEpoch(++generation.current);
+  function beginCourseRequest() {
+    const started = generation.current;
+    return () => {
+      if (generation.current !== started) return;
+      ++generation.current;
+      setData(null);
+      setCode('');
+      setRefreshing(false);
+      setError('目前無法存取這門課程，請重新確認課程權限。');
+    };
+  }
   useEffect(() => {
     let active = true;
-    setData(null);
+    setRefreshing(true);
     setError('');
     void Promise.all([classes.get(id), classes.assignments(id)])
       .then(([workspace, assignments]) => {
-        if (active) setData({ workspace, assignments });
+        if (active && generation.current === epoch) setData({ workspace, assignments });
       })
       .catch((failure) => {
-        if (!active) return;
+        if (!active || generation.current !== epoch) return;
         setError(nuniErrorMessage(failure));
+        if (failure instanceof NuniError && [401, 403, 404].includes(failure.status)) {
+          setData(null);
+          setCode('');
+        }
         if (
           failure instanceof NuniError &&
           (failure.status === 401 || failure.code === 'SESSION_CHANGED')
         )
           void refresh();
+      })
+      .finally(() => {
+        if (active && generation.current === epoch) setRefreshing(false);
       });
     return () => {
       active = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, epoch]);
-  if (error)
+  if (error && !data)
     return (
       <div role="alert" className={styles.notice}>
         {error}{' '}
@@ -496,117 +339,197 @@ function Workspace({ id }: { id: string }) {
   const teacher = data.workspace.memberRole !== 'student';
   return (
     <>
-      <Link href="/groups" className={styles.muted}>
+      <Link href="/classroom" className={styles.muted}>
         ← 我的課程
       </Link>
       <div className={styles.heading}>
         <div>
           <p className={styles.eyebrow}>{teacher ? '授課老師' : '學生'}</p>
           <h1>{data.workspace.title}</h1>
-          <p className={styles.muted}>課程作業與繳交紀錄</p>
+          <p className={styles.muted}>教材、作業與課堂測驗</p>
         </div>
-        <button className={`${styles.button} ${styles.secondary}`} onClick={reload}>
-          更新內容
+        <button
+          className={`${styles.button} ${styles.secondary}`}
+          onClick={reload}
+          disabled={refreshing}
+        >
+          {refreshing ? '更新中…' : '更新內容'}
         </button>
       </div>
-      <div className={styles.grid}>
-        <section aria-label="課程作業">
-          {data.assignments.length ? (
-            data.assignments.map((item) => (
-              <Assignment key={item.id} item={item} workspace={data.workspace} reload={reload} />
-            ))
-          ) : (
-            <div className={styles.panel}>
-              <h2>作業</h2>
-              <p className={styles.muted}>老師還沒有發布作業。</p>
-            </div>
-          )}
-        </section>
-        <aside>
-          {teacher && data.workspace.state === 'active' && (
-            <>
-              <details className={`${styles.panel} ${styles.compose}`}>
-                <summary>發布作業</summary>
-                <MutationForm
-                  label="發布作業"
-                  submit={async (form, key) => {
-                    const due = String(form.get('dueAt') || '');
-                    await classes.createAssignment(id, {
-                      title: String(form.get('title')),
-                      instructions: String(form.get('instructions')),
-                      dueAt: due ? new Date(due).toISOString() : null,
-                      idempotencyKey: key,
-                    });
-                    reload();
-                  }}
-                >
-                  <label>
-                    作業名稱
-                    <input name="title" required maxLength={160} />
-                  </label>
-                  <label>
-                    作業說明
-                    <textarea name="instructions" required maxLength={8000} />
-                  </label>
-                  <label>
-                    截止時間（選填）
-                    <input name="dueAt" type="datetime-local" />
-                  </label>
-                </MutationForm>
-              </details>
-              <section className={styles.panel}>
-                <h2>邀請學生</h2>
-                <p className={styles.muted}>產生可供 30 人使用的邀請碼。</p>
-                <MutationForm
-                  label="產生邀請碼"
-                  submit={async (_, key) => setCode((await classes.invite(id, key)).code)}
-                >
-                  {null}
-                </MutationForm>
-                {code && (
-                  <p className={styles.code} role="status">
-                    {code}
-                  </p>
-                )}
-              </section>
-            </>
-          )}
-          <p className={styles.note}>這裡保留課程內的作業與回饋，正式成績請以學校紀錄為準。</p>
-        </aside>
+      {error && (
+        <p role="alert" className={styles.notice}>
+          {error} 已保留目前內容，可再次更新。
+        </p>
+      )}
+      <div className={styles.courseTabs} role="tablist" aria-label="課程內容">
+        {(
+          [
+            ['materials', '教材'],
+            ['assignments', '作業'],
+            ['quizzes', '測驗'],
+          ] as const
+        ).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            role="tab"
+            id={`tab-${value}`}
+            aria-selected={tab === value}
+            aria-controls={`panel-${value}`}
+            tabIndex={tab === value ? 0 : -1}
+            onClick={() => setTab(value)}
+            onKeyDown={(event) => {
+              const keys = ['materials', 'assignments', 'quizzes'] as const;
+              const index = keys.indexOf(value);
+              const next =
+                event.key === 'ArrowRight'
+                  ? (index + 1) % 3
+                  : event.key === 'ArrowLeft'
+                    ? (index + 2) % 3
+                    : event.key === 'Home'
+                      ? 0
+                      : event.key === 'End'
+                        ? 2
+                        : null;
+              if (next !== null) {
+                event.preventDefault();
+                setTab(keys[next]);
+                document.getElementById(`tab-${keys[next]}`)?.focus();
+              }
+            }}
+          >
+            {label}
+          </button>
+        ))}
       </div>
+      <CourseAccessBoundary beginRequest={beginCourseRequest}>
+        <section
+          role="tabpanel"
+          id="panel-materials"
+          aria-labelledby="tab-materials"
+          hidden={tab !== 'materials'}
+        >
+          <CourseMaterials workspace={data.workspace} />
+        </section>
+        <section
+          role="tabpanel"
+          id="panel-quizzes"
+          aria-labelledby="tab-quizzes"
+          hidden={tab !== 'quizzes'}
+        >
+          <CourseQuizzes workspace={data.workspace} />
+        </section>
+        <section
+          role="tabpanel"
+          id="panel-assignments"
+          aria-labelledby="tab-assignments"
+          hidden={tab !== 'assignments'}
+        >
+          <div className={styles.grid}>
+            <section aria-label="課程作業">
+              {data.assignments.length ? (
+                data.assignments.map((item) => (
+                  <AssignmentCard
+                    key={item.id}
+                    item={item}
+                    workspace={data.workspace}
+                    reload={reload}
+                  />
+                ))
+              ) : (
+                <div className={styles.panel}>
+                  <h2>作業</h2>
+                  <p className={styles.muted}>老師還沒有發布作業。</p>
+                </div>
+              )}
+            </section>
+            <aside>
+              {teacher && data.workspace.state === 'active' && (
+                <>
+                  <details className={`${styles.panel} ${styles.compose}`}>
+                    <summary>發布作業</summary>
+                    <MutationForm
+                      label="發布作業"
+                      submit={async (form, key) => {
+                        const due = String(form.get('dueAt') || '');
+                        await classes.createAssignment(id, {
+                          title: String(form.get('title')),
+                          instructions: String(form.get('instructions')),
+                          dueAt: due ? new Date(due).toISOString() : null,
+                          idempotencyKey: key,
+                        });
+                        reload();
+                      }}
+                    >
+                      <label>
+                        作業名稱
+                        <input name="title" required maxLength={160} />
+                      </label>
+                      <label>
+                        作業說明
+                        <textarea name="instructions" required maxLength={8000} />
+                      </label>
+                      <label>
+                        參考期限（選填）
+                        <input name="dueAt" type="datetime-local" />
+                      </label>
+                    </MutationForm>
+                  </details>
+                  {data.workspace.memberRole === 'owner-teacher' && (
+                    <section className={styles.panel}>
+                      <h2>邀請學生</h2>
+                      <p className={styles.muted}>產生可供 30 人使用的邀請碼。</p>
+                      <MutationForm
+                        label="產生邀請碼"
+                        submit={async (_, key) => setCode((await classes.invite(id, key)).code)}
+                      >
+                        {null}
+                      </MutationForm>
+                      {code && (
+                        <p className={styles.code} role="status">
+                          {code}
+                        </p>
+                      )}
+                    </section>
+                  )}
+                </>
+              )}
+              <p className={styles.note}>這裡保留課程內的作業與回饋，正式成績請以學校紀錄為準。</p>
+            </aside>
+          </div>
+        </section>
+      </CourseAccessBoundary>
     </>
   );
 }
 
-function NuniContent({ children }: { children: ReactNode }) {
+function NuniContent() {
   const pathname = usePathname() || '/';
   const { session, loading, error, refresh, pendingLogout, logout } = useNuniSession();
-  if (['/privacy', '/terms'].includes(pathname))
-    return <GuestAuthProvider>{children}</GuestAuthProvider>;
   let content: ReactNode;
   if (loading && !session) content = <p role="status">正在確認登入狀態…</p>;
-  else if (!session || pathname === '/login') content = <Login />;
-  else if (pathname === '/profile')
+  else if (!session || pathname === '/classroom/login') content = <Login />;
+  else if (pathname === '/classroom/account')
     content = (
       <section className={styles.panel}>
-        <h1>我的帳號</h1>
-        <p className={styles.muted}>你目前使用 Nuni 帳號登入。</p>
+        <h1>課程空間帳號</h1>
+        <p className={styles.muted}>你目前使用 Nuni 帳號登入課程空間。</p>
+        <p>校園個人資料與設定仍可從「所有服務」開啟，這裡的登出只會結束課程空間登入。</p>
         <p>課程身分由各課程管理；學校權限由學校核發。</p>
-        <Link className={styles.button} href="/groups">
+        <Link className={styles.button} href="/classroom">
           前往我的課程
         </Link>
       </section>
     );
-  else if (pathname === '/' || pathname === '/groups' || pathname === '/join')
-    content = <WorkspaceList key={session.context} />;
-  else if (/^\/course\/cw_[0-9a-f-]{36}$/.test(pathname))
-    content = <Workspace key={`${session.context}:${pathname}`} id={pathname.split('/')[2]} />;
+  else if (pathname === '/classroom') content = <WorkspaceList key={session.context} />;
+  else if (/^\/classroom\/course\/cw_[0-9a-f-]{36}$/.test(pathname))
+    content = <Workspace key={`${session.context}:${pathname}`} id={pathname.split('/')[3]} />;
   else
     content = (
       <section className={styles.panel}>
-        <h1>這項服務尚未開放</h1>
-        <p className={styles.muted}>你仍可以使用課程空間、發布與繳交作業。</p>
-        <Link className={styles.button} href="/groups">
+        <h1>找不到這個課程空間</h1>
+        <p className={styles.muted}>請回到課程空間確認網址，或從「所有服務」前往其他校園功能。</p>
+        <Link className={styles.button} href="/classroom">
           回到我的課程
         </Link>
       </section>
@@ -643,11 +566,11 @@ function NuniContent({ children }: { children: ReactNode }) {
   );
 }
 
-export function NuniApp({ children }: { children: ReactNode }) {
+export function NuniApp() {
   return (
     <NuniSessionProvider>
       <Suspense fallback={<p role="status">載入中…</p>}>
-        <NuniContent>{children}</NuniContent>
+        <NuniContent />
       </Suspense>
     </NuniSessionProvider>
   );

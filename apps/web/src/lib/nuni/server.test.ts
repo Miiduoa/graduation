@@ -10,6 +10,7 @@ import {
   SESSION_COOKIE,
   boundedJson,
   openCookie,
+  nuniEnabled,
   publicOrigin,
   sealCookie,
   sessionContext,
@@ -42,7 +43,8 @@ function request(
 }
 
 beforeEach(() => {
-  vi.stubEnv('CAMPUS_BACKEND', 'nuni');
+  vi.stubEnv('NUNI_CLASSROOM_ENABLED', 'true');
+  vi.stubEnv('CAMPUS_BACKEND', '');
   vi.stubEnv('WEB_PUBLIC_ORIGIN', 'https://nuni.tw');
   vi.stubEnv('BFF_SESSION_SECRET', 'test-session-secret-longer-than-32-characters');
   vi.stubEnv('PLATFORM_GOOGLE_LOGIN_ENABLED', 'true');
@@ -53,6 +55,56 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+});
+
+describe('Nuni additive classroom configuration', () => {
+  it.each([
+    ['true', '', true],
+    ['true', 'firebase', true],
+    ['', 'nuni', true],
+    ['', 'firebase', false],
+    ['', '', false],
+    ['false', '', false],
+    ['1', '', false],
+  ])('gates only Nuni access with classroom=%s and legacy=%s', (flag, legacy, expected) => {
+    vi.stubEnv('NUNI_CLASSROOM_ENABLED', flag);
+    vi.stubEnv('CAMPUS_BACKEND', legacy);
+    expect(nuniEnabled()).toBe(expected);
+  });
+
+  it('serves the Nuni API with the additive flag while Campus One uses Firebase', async () => {
+    vi.stubEnv('CAMPUS_BACKEND', 'firebase');
+    const value = session();
+    fetcher.mockResolvedValue(response({ workspaces: [workspace] }));
+    const result = await handleNuni(
+      request('api/nuni/class-workspaces', {
+        cookie: `${SESSION_COOKIE}=${sealCookie(SESSION_COOKIE, value)}`,
+        context: sessionContext(value),
+      }),
+      ['class-workspaces'],
+    );
+    expect(result.status).toBe(200);
+    expect(await result.json()).toEqual({ workspaces: [workspace] });
+  });
+
+  it('keeps the legacy flag as an API-only compatibility gate', async () => {
+    vi.stubEnv('NUNI_CLASSROOM_ENABLED', '');
+    vi.stubEnv('CAMPUS_BACKEND', 'nuni');
+    const result = await handleNuni(request('api/nuni/session'), ['session']);
+    expect(result.status).toBe(200);
+    expect(await result.json()).toEqual({ authenticated: false });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('keeps disabled classroom APIs closed and directs OAuth errors to the classroom login', async () => {
+    vi.stubEnv('NUNI_CLASSROOM_ENABLED', 'false');
+    expect((await handleNuni(request('api/nuni/session'), ['session'])).status).toBe(404);
+    const started = await startGoogle(request('auth/platform/start', { post: {} }));
+    expect(started.headers.get('location')).toBe(
+      'https://nuni.tw/classroom/login?issue=unavailable',
+    );
+    expect(fetcher).not.toHaveBeenCalled();
+  });
 });
 
 describe('Nuni browser session boundary', () => {
@@ -294,7 +346,9 @@ describe('Nuni Google authorization code flow', () => {
   it('rejects a malicious token endpoint returned by the upstream', async () => {
     fetcher.mockResolvedValue(response({ ...tx(), tokenEndpoint: 'https://attacker.example' }));
     const result = await startGoogle(request('auth/platform/start', { post: {} }));
-    expect(result.headers.get('location')).toBe('https://nuni.tw/login?issue=unavailable');
+    expect(result.headers.get('location')).toBe(
+      'https://nuni.tw/classroom/login?issue=unavailable',
+    );
     expect(result.cookies.has(LOGIN_COOKIE)).toBe(false);
   });
   it('rejects mismatched state before any token exchange', async () => {
@@ -310,7 +364,7 @@ describe('Nuni Google authorization code flow', () => {
         cookie: `${LOGIN_COOKIE}=${sealCookie(LOGIN_COOKIE, login)}`,
       }),
     );
-    expect(result.headers.get('location')).toBe('https://nuni.tw/login?issue=expired');
+    expect(result.headers.get('location')).toBe('https://nuni.tw/classroom/login?issue=expired');
     expect(fetcher).not.toHaveBeenCalled();
   });
   it('exchanges only at Google and stores only the returned platform handle in an HttpOnly cookie', async () => {
@@ -331,7 +385,7 @@ describe('Nuni Google authorization code flow', () => {
         cookie: `${LOGIN_COOKIE}=${sealCookie(LOGIN_COOKIE, login)}`,
       }),
     );
-    expect(result.headers.get('location')).toBe('https://nuni.tw/');
+    expect(result.headers.get('location')).toBe('https://nuni.tw/classroom');
     expect(
       openCookie(SESSION_COOKIE, result.cookies.get(SESSION_COOKIE)?.value)?.sessionHandle,
     ).toBe(session().sessionHandle);
@@ -371,6 +425,10 @@ describe('Nuni coursework contracts', () => {
           title: '作業',
           instructions: '內容',
           state: 'open',
+          createdAt: new Date().toISOString(),
+          closedAt: null,
+          unitId: null,
+          unitTitle: null,
           dueAt: null,
           submissionCount: 0,
           mySubmission: null,
@@ -386,6 +444,10 @@ describe('Nuni coursework contracts', () => {
       title: '作業',
       instructions: '內容',
       state: 'open',
+      createdAt: new Date().toISOString(),
+      closedAt: null,
+      unitId: null,
+      unitTitle: null,
       dueAt: null,
       submissionCount: 1,
       mySubmission: {
@@ -396,10 +458,11 @@ describe('Nuni coursework contracts', () => {
         state: 'submitted',
         submittedAt: new Date().toISOString(),
         teacherFeedback: null,
+        reviewedAt: null,
       },
     };
     const transport = vi.fn(async () => assignment);
-    const result = await createNuniClasses(transport).submit(
+    const result = await createNuniClasses(transport, account).submit(
       id,
       assignmentId,
       '答案',

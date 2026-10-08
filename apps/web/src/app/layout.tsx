@@ -4,8 +4,6 @@ import { AuthProvider } from '@/components/AuthGuard';
 import { ToastProvider } from '@/components/ui';
 import { AppearancePreferences } from '@/components/AppearancePreferences';
 import { appearanceBootstrap } from '@/lib/appearanceBootstrap';
-import { NuniApp } from '@/features/nuni/NuniApp';
-import { nuniEnabled } from '@/lib/nuni/server';
 import './globals.css';
 
 export const dynamic = 'force-dynamic';
@@ -73,13 +71,9 @@ export default function RootLayout({
       <body>
         <AppearancePreferences />
         <ServiceWorkerRegistration />
-        {nuniEnabled() ? (
-          <NuniApp>{children}</NuniApp>
-        ) : (
-          <AuthProvider>
-            <ToastProvider position="top-center">{children}</ToastProvider>
-          </AuthProvider>
-        )}
+        <AuthProvider>
+          <ToastProvider position="top-center">{children}</ToastProvider>
+        </AuthProvider>
       </body>
     </html>
   );

@@ -45,6 +45,13 @@ const SERVICES = [
     category: 'study',
   },
   {
+    name: '課程空間',
+    text: '使用 Nuni 帳號閱讀教材、繳交作業與課堂作答',
+    href: '/classroom',
+    keywords: 'nuni 課程 教材 作業 測驗 classroom',
+    category: 'study',
+  },
+  {
     name: '公告',
     text: '查詢校園公開公告',
     href: '/announcements',
