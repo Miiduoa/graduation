@@ -284,6 +284,7 @@ function CampusMapContent({
                   key={`${theme.mode}-${mapAttempt}`}
                   ref={webRef}
                   source={{ html }}
+                  applicationNameForUserAgent="CampusOne/1.0 (+https://nuni.tw)"
                   testID="campus-map-webview"
                   accessibilityLabel="校區地圖；下方也提供地點清單"
                   style={{ flex: 1, backgroundColor: theme.colors.surfaceMuted }}
