@@ -4,7 +4,11 @@ const { timingSafeEqual } = require('node:crypto');
 
 function isDocumentId(value, maximum = 200) {
   return typeof value === 'string' && value.length > 0 && value.length <= maximum
-    && value === value.trim() && !/[\x00-\x1f\x7f/]/.test(value)
+    && value === value.trim() && !value.includes('/')
+    && Array.from(value).every((character) => {
+      const code = character.charCodeAt(0);
+      return code > 31 && code !== 127;
+    })
     && value !== '.' && value !== '..' && !/^__.*__$/.test(value);
 }
 
