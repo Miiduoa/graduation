@@ -1,17 +1,21 @@
 {
   "repository": "https://github.com/Miiduoa/nuni-prod.git",
   "baseCommit": "9de47b4b3492325e430562c37bcad552867162db",
-  "candidateCommit": "946e29f46115073dc67ae15eed2c0e319e980c10",
-  "candidateTree": "f1d5b3c2a348d2db1046f155e3f13eb5636ec456",
-  "runtimeSourceCommit": "84890808a8c2526d95ee640d8ab06233f2ca81dc",
+  "candidateCommit": "e72b1c4c6529dc3d4062d71906e4381e25b09e3f",
+  "candidateTree": "6da787c1bcb9b5207a83581a2bf6722fbb858539",
+  "runtimeSourceCommit": "e72b1c4c6529dc3d4062d71906e4381e25b09e3f",
   "patches": [
     {
-      "file": "0001-.patch",
+      "file": "0001-platform-admin-and-public-social.patch",
       "sha256": "7052662ed26f24493dfbc589319dc1229d5f503b73cc1197aefd1f98639ae309"
     },
     {
-      "file": "0002-.patch",
+      "file": "0002-runtime-grant-inventory.patch",
       "sha256": "ff5b6f74550bc512847ecbe6819701a13a6d8024bb5a8907e38d5b07cd19aaf3"
+    },
+    {
+      "file": "0003-social-schema-installation.patch",
+      "sha256": "d545513e32e09c61b10eff40e4c8148cec421283ab2a6d2f5819b2e7cd74452c"
     }
   ]
 }
