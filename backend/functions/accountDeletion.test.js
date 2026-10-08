@@ -298,6 +298,7 @@ test.each([
   ['schools/pu/orders/o', { userId: 'alice', status: 'pending', paymentStatus: 'pending' }],
   ['refundRequests/r', { userId: 'alice', status: 'pending' }],
   ['schools/pu/refunds/r', { userId: 'alice', status: 'needs_review' }],
+  ['schools/pu/refunds/r', { studentUid: 'alice', status: 'needs_review' }],
 ])('does not delete unsettled financial data at %s', async (path, data) => {
   const state = store([
     [path, data],

@@ -192,6 +192,7 @@ test('deployment declares group indexes required by export and account closure q
     ['orders', 'userId'],
     ['refundRequests', 'userId'],
     ['refunds', 'userId'],
+    ['refunds', 'studentUid'],
   ]) {
     expect(fieldOverrides).toContainEqual(
       expect.objectContaining({

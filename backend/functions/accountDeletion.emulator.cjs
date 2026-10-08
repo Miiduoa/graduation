@@ -152,6 +152,39 @@ test('recursive cleanup includes orphan descendants while preserving financial r
   assert.deepEqual(deletedAuthUsers, ['alice']);
 });
 
+test('inspection refunds block closure until settled and retain both owners refund history', async () => {
+  const refund = {
+    studentUid: 'alice',
+    orderId: 'paid-order',
+    amount: 75,
+    status: 'needs_review',
+    reason: 'inspection_rejected',
+  };
+  const otherRefund = { ...refund, studentUid: 'bob' };
+  await seed([
+    ['users/alice', { displayName: 'Alice' }],
+    ['users/alice/settings/private', { keepUntilClosure: true }],
+    ['schools/pu/refunds/alice-refund', refund],
+    ['schools/pu/refunds/bob-refund', otherRefund],
+  ]);
+  await assert.rejects(handler()(request()), (error) => {
+    assert.equal(error.code, 'failed-precondition');
+    assert.equal(error.details.reason, 'financial-records');
+    return true;
+  });
+  assert.deepEqual(deletedAuthUsers, []);
+  assert.deepEqual((await db.doc('users/alice').get()).data(), { displayName: 'Alice' });
+  assert.equal(await exists('users/alice/settings/private'), true);
+  await db.doc('schools/pu/refunds/alice-refund').update({ status: 'refunded' });
+  assert.equal((await handler()(request())).success, true);
+  assert.deepEqual((await db.doc('schools/pu/refunds/alice-refund').get()).data(), {
+    ...refund,
+    status: 'refunded',
+  });
+  assert.deepEqual((await db.doc('schools/pu/refunds/bob-refund').get()).data(), otherRefund);
+  assert.deepEqual(deletedAuthUsers, ['alice']);
+});
+
 test('failed cleanup leaves Auth untouched and a retry does not decrement committed membership or event counts twice', async () => {
   const event = 'schools/pu/clubEvents/event';
   await seed([

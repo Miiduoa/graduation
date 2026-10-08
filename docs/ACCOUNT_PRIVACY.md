@@ -14,7 +14,7 @@ App 匯出只接受明確選取的類別。`expectedUserId` 必須與 callable �
 
 `deleteUserAccount` 需要同一 `expectedUserId`、明確確認及十分鐘內的有效登入時間；不接受非數字、未來或失效的登入時間。回傳成功必須同時包含 `success: true` 與本人 `userId`，App 才會結束流程。這個操作不刪除學校或 Nuni 帳號。
 
-開始前檢查未結款項、群組及店家所有權；需要處理的資料以明確 reason 拒絕。已取消、現場付款且 paymentStatus 為 pending 的未付款訂單，依既有取消契約可以通過；信用卡、不明付款方式及未結退款不適用這項例外。
+開始前檢查未結款項、群組及店家所有權；需要處理的資料以明確 reason 拒絕。退款同時核對一般來源的 userId 與稽查退款的 studentUid，避免漏掉待人工處理的款項。已取消、現場付款且 paymentStatus 為 pending 的未付款訂單，依既有取消契約可以通過；信用卡、不明付款方式及未結退款不適用這項例外。
 
 清理使用完整文件路徑分頁，不以單獨 UID 查詢 collection-group 文件 ID，也不在 200 筆後停止。群組人數及受控活動名額以交易調整；重試不會再次扣減。讀取、清理、交易及 Auth 刪除錯誤均不回報成功。最後以最小 tombstone 取代個人檔案，確認清理後才刪除 Firebase Auth。失敗時保留刪除中標記及可重試的 Auth 帳號。
 

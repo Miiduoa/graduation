@@ -51,3 +51,14 @@ jobs:
 
       - name: Check Firestore and Storage rules
         run: pnpm test:rules
+
+      - name: Preserve failed emulator diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: firestore-rules-failure-logs
+          path: |
+            firestore-debug.log
+            storage-debug.log
+          if-no-files-found: ignore
+          retention-days: 7
