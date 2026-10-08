@@ -8,7 +8,6 @@ import React, { useCallback } from 'react';
 import { Alert, View, Text } from 'react-native';
 import {
   AIDetailScreen,
-  AIInsightBanner,
   AISection,
   AICard,
   AIRow,
@@ -57,11 +56,20 @@ export default function TeacherCockpitAiFirstScreen(props: any) {
       subtitle="本機示範資料 · 未連結正式校務系統"
       onBack={() => navigation?.goBack?.()}
     >
-      <AIInsightBanner
-        text="本頁課程、分數與學生資訊均為範例。示範批改只會建立本機通知，不會同步正式成績。"
-        source="本機範例資料"
-        confidence="high"
-      />
+      <View
+        style={{
+          margin: aiTokens.space.md,
+          padding: aiTokens.space.md,
+          backgroundColor: aiTokens.surface,
+          borderRadius: aiTokens.radius.md,
+          borderWidth: 1,
+          borderColor: aiTokens.border,
+        }}
+      >
+        <Text style={{ fontSize: 13, color: aiTokens.text, lineHeight: 19 }}>
+          本頁課程、分數與學生資訊均為範例。示範批改只會建立本機通知，不會同步正式成績。
+        </Text>
+      </View>
 
       {/* Quick stats */}
       <View
@@ -81,30 +89,26 @@ export default function TeacherCockpitAiFirstScreen(props: any) {
       {/* AI 給教師的洞察 */}
       <AISection title="教學資訊（範例）">
         <AICard
-          aiGenerated
           icon="⚠️"
           title="學生關懷情境"
-          badge="高優先"
-          badgeTone="danger"
+          badge="範例"
+          badgeTone="muted"
           source="非真實學籍資料"
-          confidence="mid"
         >
           <Text style={{ fontSize: 13, color: aiTokens.text, lineHeight: 19 }}>
             這是輔導流程的介面範例，未讀取學生的實際成績或出席資料。
             正式輔導判斷必須以校務系統的授權資料為準。
           </Text>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-            <AIButton label="檢視學生風險" onPress={go('StudentRisk')} />
+            <AIButton label="查看示範流程" onPress={go('StudentRisk')} />
             <AIButton label="檢視範例說明" variant="ghost" onPress={() => Alert.alert('範例資料', '此頁沒有執行真實的學生風險判斷或訊息草擬。')} />
           </View>
         </AICard>
 
         <AICard
-          aiGenerated
           icon="📊"
           title="班級分數分布（範例）"
           source="靜態範例，未比對歷年資料"
-          confidence="high"
         >
           <Text style={{ fontSize: 13, color: aiTokens.text, lineHeight: 19 }}>
             範例平均 76.5 分；示範資料顯示第二題有較多錯誤。{'\n'}
@@ -119,16 +123,16 @@ export default function TeacherCockpitAiFirstScreen(props: any) {
       <AISection title="我的課程">
         <AIRow
           icon="📐"
-          title="資料結構 CS301"
-          subtitle="48 位學生 · 今天 09:10 第 1 堂"
+          title="資料結構 CS301（範例）"
+          subtitle="示範課程 · 非即時資料"
           tag="今日課"
           tagTone="ai"
           onPress={go('CourseHub', { courseId: 'CS301' })}
         />
         <AIRow
           icon="💾"
-          title="進階演算法 CS401"
-          subtitle="40 位學生 · 週三 14:10"
+          title="進階演算法 CS401（範例）"
+          subtitle="示範課程 · 非即時資料"
           onPress={go('CourseHub', { courseId: 'CS401' })}
         />
       </AISection>
