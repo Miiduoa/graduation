@@ -1,12 +1,12 @@
 import {
   collection,
   doc,
-  getDoc,
-  getDocs,
+  getDocFromServer,
+  getDocsFromServer,
   runTransaction,
   serverTimestamp,
 } from 'firebase/firestore';
-import { getDb, isFirebaseConfigured } from './firebase';
+import { getAuth, getDb, isFirebaseConfigured } from './firebase';
 
 export interface CourseAssignment {
   id: string;
@@ -42,20 +42,30 @@ function iso(value: unknown): string | null {
   const date = typeof stamp.toDate === 'function' ? stamp.toDate() : new Date(String(value));
   return Number.isFinite(date.getTime()) ? date.toISOString() : null;
 }
+function assertCurrentUser(uid: string) {
+  if (!uid || getAuth()?.currentUser?.uid !== uid) {
+    throw new Error('登入身分已變更，請重新開啟課程。');
+  }
+}
+
 export async function loadCourseWork(courseId: string, uid: string): Promise<CourseWork> {
-  if (!isFirebaseConfigured() || !uid) throw new Error('請先登入。');
+  if (!isFirebaseConfigured()) throw new Error('請先登入。');
+  assertCurrentUser(uid);
   const db = getDb();
   const [course, member] = await Promise.all([
-    getDoc(doc(db, 'groups', courseId)),
-    getDoc(doc(db, 'groups', courseId, 'members', uid)),
+    getDocFromServer(doc(db, 'groups', courseId)),
+    getDocFromServer(doc(db, 'groups', courseId, 'members', uid)),
   ]);
-  if (!course.exists() || !member.exists() || member.data().status !== 'active')
+  assertCurrentUser(uid);
+  if (!course.exists() || course.data().type !== 'course' ||
+      !member.exists() || member.data().status !== 'active')
     throw new Error('找不到課程，或你尚未加入這門課。');
   const canTeach = ['owner', 'instructor', 'moderator'].includes(member.data().role);
   const [snap, moduleSnap] = await Promise.all([
-    getDocs(collection(db, 'groups', courseId, 'assignments')),
-    getDocs(collection(db, 'groups', courseId, 'modules')),
+    getDocsFromServer(collection(db, 'groups', courseId, 'assignments')),
+    getDocsFromServer(collection(db, 'groups', courseId, 'modules')),
   ]);
+  assertCurrentUser(uid);
   const modules = moduleSnap.docs
     .filter((entry) => entry.data().published !== false)
     .map((entry) => {
@@ -84,7 +94,7 @@ export async function loadCourseWork(courseId: string, uid: string): Promise<Cou
         const assignment = entry.data();
         const submission = canTeach
           ? null
-          : await getDoc(doc(db, 'groups', courseId, 'assignments', entry.id, 'submissions', uid));
+          : await getDocFromServer(doc(db, 'groups', courseId, 'assignments', entry.id, 'submissions', uid));
         return {
           id: entry.id,
           type: String(assignment.type ?? 'assignment'),
@@ -115,6 +125,7 @@ export async function loadCourseWork(courseId: string, uid: string): Promise<Cou
         };
       }),
   );
+  assertCurrentUser(uid);
   return {
     id: courseId,
     name: String(course.data().name ?? '課程'),
@@ -135,6 +146,7 @@ export async function submitCourseText(
   if (!uid || !answer || answer.length > 20000)
     throw new Error('請輸入 1 至 20,000 字的作業內容。');
   if (!isFirebaseConfigured()) throw new Error('無法連線，請稍後重試。');
+  assertCurrentUser(uid);
   const db = getDb();
   await runTransaction(db, async (transaction) => {
     const assignment = await transaction.get(
@@ -152,6 +164,7 @@ export async function submitCourseText(
     const existing = await transaction.get(ref);
     if (existing.exists() && existing.data().submittedAt)
       throw new Error('這份作業已有繳交紀錄，請重新整理確認。');
+    assertCurrentUser(uid);
     transaction.set(
       ref,
       {

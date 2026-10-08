@@ -146,6 +146,8 @@ export default function CoursePage({ params }: { params: Promise<{ courseId: str
   const course = result?.uid === user?.uid && result?.course.id === courseId ? result.course : null;
   const load = useCallback(async () => {
     const request = ++generation.current;
+    // A refresh must not leave previously authorized student records on screen.
+    setResult(null);
     if (!uid) return;
     setError('');
     try {
