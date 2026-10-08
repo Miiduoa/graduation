@@ -21,6 +21,8 @@ vi.mock('@/lib/teacherAssignments', () => ({
   loadGradeRevisions: vi.fn(),
   loadEditableTeacherAssignment: vi.fn(),
   updateTeacherAssignment: vi.fn(),
+  toTaipeiDateTimeInput: vi.fn((iso: string) =>
+    new Date(new Date(iso).getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 16)),
   newGradeRevisionId: vi.fn(() => 'revision-1234567890'),
   reviseSubmissionGrade: vi.fn(),
   newTeacherAssignmentId: vi.fn(() => 'reserved-work'),
