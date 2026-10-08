@@ -169,6 +169,7 @@ export default function TeacherGradingScreen(props: RouteProps) {
     try {
       const delivery = prepareGradingDelivery({
         actorUid: auth.user?.uid,
+        actorRole: auth.profile?.role,
         studentUid: sub.studentUid,
         studentName: sub.studentName,
         courseId,
