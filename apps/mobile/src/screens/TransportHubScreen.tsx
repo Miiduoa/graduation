@@ -388,7 +388,7 @@ export function TransportHubScreen(props: any) {
   // 產生 Leaflet HTML
   const mapHtml = useMemo(() => {
     return buildLeafletHtml({
-      center: origin ?? PU_LOCATION,
+        center: origin ?? destination ?? PU_LOCATION,
       zoom: destination ? 13 : 15,
       origin: origin ?? undefined,
       destination: destination ?? undefined,
