@@ -1,9 +1,9 @@
 # nuni.tw Web 發布
 
-2026-10-09 00:23（Asia/Taipei），Campus One `28cc0e19dd3c9f32c8c966ee9e7804df8746f0f4` 已部署至 https://nuni.tw，Fly release 32。
+2026-10-09 00:32（Asia/Taipei），Campus One `ddbbed104b444cb95b85c82681fbc0cb85385e54` 已部署至 https://nuni.tw，Fly release 33。
 
-- 映像索引：`registry.fly.io/nuni-web@sha256:5babf06534d47fc4aa9ef9155d96757a4795b0a4b7c0b293e0b4069c2d9a67a2`
-- amd64 映像：`sha256:528b4f6b7daf214b09f05042d11f591fb92fdd9aa456d1d91bd3f088079bdadc`
+- 映像索引：`registry.fly.io/nuni-web@sha256:3fa29f4d816dfca7b16e3070b5d1dad7bc3269309c3e85d2459e4a277e34ffe1`
+- amd64 映像：`sha256:b02402cfe2da2a32910e32ea5e607cb9377c90755628c7e93eda9e48172c187f`
 - 兩台既有 nrt 主機均回傳同一 revision，健康檢查通過。維持每台 512 MB／shared CPU 1。
 - 原有 Nuni API、資料庫、網域、登入 secrets 保留；沒有啟用付款或遷移帳號。
 
@@ -19,18 +19,19 @@
 
 ```sh
 fly deploy -a nuni-web -c deploy/web/fly.nuni.toml \
-  --image registry.fly.io/nuni-web@sha256:5babf06534d47fc4aa9ef9155d96757a4795b0a4b7c0b293e0b4069c2d9a67a2 \
+  --image registry.fly.io/nuni-web@sha256:3fa29f4d816dfca7b16e3070b5d1dad7bc3269309c3e85d2459e4a277e34ffe1 \
   --strategy rolling --max-concurrent 1 --wait-timeout 180s
 ```
 
 ## 驗證紀錄
 
-- production Docker build 通過；路由與登入服務專項 52 項、readiness 6 項、程序管理 9 項通過。
-- 真實容器 HTTP smoke 50/50：32 個新舊 JS／CSS、原帳號回應、公開頁面、合法與錯誤 Origin 的空登入 POST。
+- production Docker build 通過；路由與登入服務專項 52 項、readiness 6 項、程序管理 16 項通過。
+- 真實容器 HTTP smoke 59/59：41 個新舊 JS／CSS、原帳號回應、公開頁面、合法與錯誤 Origin 的空登入 POST。
 - 新舊 callback state 分流實測通過；未匹配的舊登入仍交給舊處理器。
-- 本機 120 個請求、20 個並行連線全成功；512 MB 限額內記憶體峰值 324,005,888 bytes，OOM 0。
+- 本機 120 個請求、20 個並行連線全成功；512 MB 限額內記憶體峰值 344,772,608 bytes，OOM 0。
 - 公開正式站 33/33：新版首頁、主要入口、舊帳號／法務路由、匿名 session、Nuni API，以及 Google 起始轉址的正式 callback 和安全 cookie。
 - 正式瀏覽器已呈現新版，首頁 console error 0。
+- 已修正 Next.js 收到 SIGTERM／SIGINT 後的 143／130 正常結束碼判定；新版完整容器經 docker stop 正常退出 0。非預期退出及其他錯誤仍使容器失敗。相關 16 項程序測試已加入 CI。
 
 未使用使用者憑證完成 Google 授權、登入後的所有角色操作或原生商店上架。這些驗收仍在 `STORE_RELEASE.md` 追蹤。
 
