@@ -93,7 +93,7 @@ describe('timetable calendar export', () => {
       ],
       THURSDAY_IN_TAIWAN,
     );
-    expect(result.content.match(/BEGIN:VEVENT/g)).toHaveLength(4);
+    expect(result.content.match(/(?:^|\r\n)BEGIN:VEVENT\r\n/g)).toHaveLength(4);
     expect(result.content).not.toContain('\r\nDTSTART:19990101');
     expect(result.content).toContain('\\nBEGIN:VEVENT\\nSUMMARY:偽造活動\\,\\;\\\\');
     expect(result.content).toContain('LOCATION:教室\\,1\\;2\\nDTSTART:19990101T000000Z');

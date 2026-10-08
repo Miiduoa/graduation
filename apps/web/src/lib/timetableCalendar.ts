@@ -99,6 +99,7 @@ function foldLine(value: string): string {
 
 function eventUid(course: AcademicCourse, day: Date): string {
   const key = [
+    course.id,
     course.code,
     course.name,
     course.dayOfWeek,
