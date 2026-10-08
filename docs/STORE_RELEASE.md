@@ -1,6 +1,6 @@
 # Campus One 與 nuni.tw 發布紀錄
 
-正式 Web 已於 2026-10-09 00:23（Asia/Taipei）部署至 [nuni.tw](https://nuni.tw)，版本 `28cc0e19dd3c9f32c8c966ee9e7804df8746f0f4`，Fly release 32。兩台既有 nrt 主機的 readiness 都回傳同一版本；公開站 33 項檢查通過。商店上架與原生驗收仍分開追蹤。
+正式 Web 已於 2026-10-09 00:32（Asia/Taipei）部署至 [nuni.tw](https://nuni.tw)，版本 `ddbbed104b444cb95b85c82681fbc0cb85385e54`，Fly release 33。兩台既有 nrt 主機的 readiness 都回傳同一版本；公開站 33 項檢查通過。商店上架與原生驗收仍分開追蹤。
 
 更新：2026-10-09（Asia/Taipei）。目標包含 Campus One 的商店上架與 nuni.tw 正式 Web；兩邊都保留完整功能及既有資料，不能用其中一邊的驗證代替另一邊。
 
@@ -27,8 +27,8 @@ preview/production 的 manifest 不再包含開發用 Gemini key；用戶端程�
 ## 本次 Web 部署驗證
 
 - production 容器建置通過，使用實際 Firebase 公開設定，沒有放入私密金鑰。
-- 本機容器 HTTP smoke 50/50 通過，包含 32 個新舊 JS／CSS 資產與舊登入來源驗證。
-- 新舊 callback state 分流實測通過；120 個請求、20 個並行連線皆成功，512 MB 限額內峰值約 309 MB，無 OOM。
+- 本機容器 HTTP smoke 59/59 通過，包含 41 個新舊 JS／CSS 資產與舊登入來源驗證。
+- 新舊 callback state 分流實測通過；120 個請求、20 個並行連線皆成功，512 MB 限額內峰值約 329 MB，無 OOM。
 - 正式站 33/33 檢查通過：新版首頁、既有公開路由、未登入 session、Google 登入起始轉址及 Nuni API。
 - 正式瀏覽器呈現新版 Campus One，首頁沒有 console error。
 
