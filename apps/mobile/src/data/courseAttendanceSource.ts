@@ -6,6 +6,7 @@ import {
   parseLiveAttendanceConfirmation,
   type ConfirmedLiveAttendance,
 } from '../services/attendanceConfirmation';
+import { onAttendanceCheckin } from '../services/companionHooks';
 import {
   startAttendanceSession as startWorkspaceAttendanceSession,
   toDate,
@@ -61,7 +62,6 @@ export async function checkInAttendance(input: {
   }
 
   try {
-    const { onAttendanceCheckin } = await import('../services/companionHooks');
     await onAttendanceCheckin({ uid: input.uid, sessionId, courseSpaceId: groupId });
   } catch {
     // Optional companion feedback cannot undo an acknowledged check-in.
