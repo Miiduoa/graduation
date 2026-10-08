@@ -10,8 +10,9 @@ import {
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
 import { CampusServiceMenu } from '@/components/CampusServiceMenu';
+import { SchoolSelector } from '@/components/SchoolSelector';
 import { SiteShell } from '@/components/SiteShell';
-import { browserRequest, NuniSessionProvider, useNuniSession } from './Session';
+import { browserRequest, useNuniSession } from './Session';
 import { CourseAccessBoundary, MutationForm, useClasses } from './CourseUI';
 import { AssignmentCard } from './AssignmentCard';
 import { CourseMaterials } from './CourseMaterials';
@@ -53,6 +54,8 @@ export function NuniHeader() {
         <CampusServiceMenu />
       </nav>
       <div className={home.account}>
+        <SchoolSelector compact />
+        {session?.isPlatformOperator && <Link href="/admin">平台管理</Link>}
         {session || pendingLogout ? (
           <button disabled={loading} onClick={() => void logout()}>
             {pendingLogout ? '重試登出' : '登出課程空間'}
@@ -558,10 +561,8 @@ function NuniContent() {
 
 export function NuniApp() {
   return (
-    <NuniSessionProvider>
-      <Suspense fallback={<p role="status">載入中…</p>}>
-        <NuniContent />
-      </Suspense>
-    </NuniSessionProvider>
+    <Suspense fallback={<p role="status">載入中…</p>}>
+      <NuniContent />
+    </Suspense>
   );
 }
