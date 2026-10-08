@@ -140,7 +140,15 @@ Mobile 與 Web 不各自重寫所有邏輯，能共用的資料結構與規則�
 
 部分校園服務不是永遠可用，因此部分流程設計成示範資料、快取或離線能力可以獨立運作，而不是整個 App 一斷線就失效。
 
-### 4. AI is a layer, not the product
+### 4. Grade notifications use explicit recipients
+
+The teacher grading screen is still a local demo, not a TronClass grade writer. It only publishes a local grade event after checking the teacher account, explicit student UID, assignment IDs and score. It does not infer a recipient from a name or student number.
+
+- [Grading screen](apps/mobile/src/screens/TeacherGradingScreen.tsx)
+- [Delivery checks](apps/mobile/src/services/prepareGradingDelivery.ts)
+- [Recipient isolation tests](apps/mobile/src/__tests__/prepareGradingDelivery.test.ts)
+
+### 5. AI is a layer, not the product
 
 AI 功能只負責整理、推理與提供下一步建議；課程、訊息、導航等核心流程本身仍有一般程式邏輯與護欄。
 
