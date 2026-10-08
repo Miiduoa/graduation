@@ -37,12 +37,32 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Production dependency audit
-        # 報告仍以 moderate 階段產生供審查；CI 阻擋條件設為 critical。
-        # 已知 transitive (protobufjs via firebase) 的 high 漏洞無法在不
-        # 改動 firebase 版本下解決，且非本 PR 引入；保留報告但不阻擋 PR。
+        # 保留 moderate 以上完整報告；自動阻擋門檻目前為 critical。
+        # 通過此步驟不代表 high 已修復；可達性與處置記錄見 CAMPUS_ONE_INTEGRATION.md。
         run: |
           pnpm audit --prod --audit-level moderate --json > audit-report.json || true
           pnpm audit --prod --audit-level critical
+
+      - name: Build toolchain dependency audit
+        run: |
+          pnpm audit --json > toolchain-audit-report.json || true
+          pnpm audit --audit-level critical
+
+      - name: Verify isolated Functions deployment package
+        run: node scripts/verify-functions-package.cjs
+
+      - name: Test deployment readiness gates
+        env:
+          EAS_JSON_PACKAGE_ROOT: ${{ runner.temp }}/eas-config-schema/node_modules/@expo/eas-json
+        run: |
+          npm install --prefix "$RUNNER_TEMP/eas-config-schema" --ignore-scripts --no-audit --no-fund @expo/eas-json@24.9.0
+          node --test scripts/wait-for-firestore-indexes.test.cjs scripts/firebase-release-preflight.test.cjs scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs scripts/prepare-eas-build.test.mjs scripts/verify-nuni-integration.test.mjs
+
+      - name: Audit Functions deployment dependencies
+        working-directory: backend/functions
+        run: |
+          npm audit --omit=dev --json > ../../functions-deploy-audit.json || true
+          npm audit --omit=dev --audit-level=critical
 
       - name: Secret scan
         uses: gitleaks/gitleaks-action@v2
@@ -54,7 +74,10 @@ jobs:
         if: always()
         with:
           name: audit-report
-          path: audit-report.json
+          path: |
+            audit-report.json
+            toolchain-audit-report.json
+            functions-deploy-audit.json
           retention-days: 7
 
   lint-and-typecheck:
@@ -219,8 +242,19 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run security rules tests
+      - name: Run security and transaction tests
         run: pnpm test:rules
+
+      - name: Preserve failed emulator diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-failure-logs
+          path: |
+            firestore-debug.log
+            storage-debug.log
+          if-no-files-found: ignore
+          retention-days: 7
 
   build-mobile:
     name: Build Mobile
@@ -245,6 +279,15 @@ jobs:
       - name: Run Expo Doctor
         working-directory: apps/mobile
         run: npx expo-doctor
+
+      - name: Bundle mobile JavaScript
+        working-directory: apps/mobile
+        env:
+          APP_ENV: development
+          EXPO_PUBLIC_APP_ENV: development
+        run: |
+          pnpm exec expo export --platform ios --output-dir /tmp/campus-ios-export
+          pnpm exec expo export --platform android --output-dir /tmp/campus-android-export
 
       - name: Validate Expo app config
         working-directory: apps/mobile
@@ -310,13 +353,45 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: web-build
-          path: apps/web/.next/
+          include-hidden-files: true
+          path: |
+            apps/web/.next/
+            !apps/web/.next/cache/**
+          if-no-files-found: error
           retention-days: 7
+
+      - name: Verify standalone Web runtime
+        run: |
+          set -euo pipefail
+          docker build -f deploy/web/Dockerfile -t campus-one-web:ci \
+            --build-arg NEXT_PUBLIC_FIREBASE_API_KEY=mock-api-key \
+            --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=mock.firebaseapp.com \
+            --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID=mock-project \
+            --build-arg NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=mock-project.firebasestorage.app \
+            --build-arg NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=123456789 \
+            --build-arg NEXT_PUBLIC_FIREBASE_APP_ID=1:123456789:web:test .
+          docker run -d --name campus-one-web-ci -p 127.0.0.1:8080:8080 campus-one-web:ci
+          trap 'docker logs campus-one-web-ci; docker rm -f campus-one-web-ci' EXIT
+          curl --fail --retry 10 --retry-all-errors --retry-delay 2 --connect-timeout 2 --max-time 5 http://127.0.0.1:8080/health/live
+          curl --fail --silent http://127.0.0.1:8080/search > /tmp/campus-service-directory.html
+          test -s /tmp/campus-service-directory.html
+          test "$(docker exec campus-one-web-ci id -u)" != "0"
+          test -z "$(docker exec campus-one-web-ci find /app -name '.env' -o -name '.env.*' -o -name '*serviceAccount*.json' -o -name '*.pem' -o -name '*.key')"
 
   deploy-functions:
     name: Deploy Firebase Functions
     runs-on: ubuntu-latest
-    needs: [security-gates, lint-and-typecheck]
+    needs:
+      [
+        security-gates,
+        lint-and-typecheck,
+        test-mobile,
+        test-web,
+        test-functions,
+        test-rules,
+        build-mobile,
+        build-web,
+      ]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment: production
     steps:
@@ -336,14 +411,31 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Deploy to Firebase
+        timeout-minutes: 30
         env:
+          FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
         run: |
-          if [ -z "$FIREBASE_TOKEN" ]; then
-            echo "Skipping Firebase deploy: FIREBASE_TOKEN is not set."
-            exit 0
+          if [ -z "$FIREBASE_PROJECT_ID" ]; then
+            echo "::error::Set FIREBASE_PROJECT_ID in the production environment variables."
+            exit 1
           fi
-          pnpm -w firebase deploy --only functions
+          if [ -z "$FIREBASE_TOKEN" ]; then
+            echo "::error::Set FIREBASE_TOKEN in the production environment secrets."
+            exit 1
+          fi
+          if [[ ! "$FIREBASE_PROJECT_ID" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ ]] || [ "$FIREBASE_PROJECT_ID" = "default" ]; then
+            echo "::error::FIREBASE_PROJECT_ID must be an explicit Firebase project ID, not a local alias."
+            exit 1
+          fi
+          if [ "$FIREBASE_PROJECT_ID" != "campus-one-tw" ]; then
+            echo "::error::The approved production target is campus-one-tw. Update the release configuration before changing projects."
+            exit 1
+          fi
+          node scripts/firebase-release-preflight.cjs --project "$FIREBASE_PROJECT_ID" --storage-bucket campus-one-tw.firebasestorage.app --auth-domain nuni.tw --database-location nam5 --output firebase-preflight.json
+          pnpm -w firebase deploy --only firestore:rules,storage,firestore:indexes --project "$FIREBASE_PROJECT_ID" --non-interactive
+          node scripts/wait-for-firestore-indexes.cjs --project "$FIREBASE_PROJECT_ID" --timeout-seconds 1200
+          pnpm -w firebase deploy --only functions --project "$FIREBASE_PROJECT_ID" --non-interactive
 
   summary:
     name: CI Summary

@@ -53,8 +53,9 @@ backend/.firebase/
 # 它包含 agent runtime / tools 依賴的 source modules
 # (assistantFormat / assistantFetchers / notificationService / assistantQueue)
 
-# Generated CJS for Cloud Functions (built by `pnpm --filter @campus/shared run build:cjs`, see firebase.json predeploy)
+# Generated shared CJS (Functions copy is built by firebase.json predeploy)
 packages/shared/dist-cjs/
+backend/functions/generated/
 
 # Python
 __pycache__/

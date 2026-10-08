@@ -1,414 +1,336 @@
-/* eslint-disable */
-import React, { useState } from 'react';
-import { ScrollView, Text, View, TextInput, Alert, ActivityIndicator } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { ActivityIndicator, Text, TextInput, View } from 'react-native';
 import { reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
-
-import { Screen, Card, Button, Pill, AnimatedCard, SectionTitle } from '../ui/components';
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
-import { theme } from '../ui/theme';
+import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
+import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useSchool } from '../state/school';
 import { useAuth } from '../state/auth';
 import { getAuthInstance } from '../firebase';
 import { deleteUserAccount } from '../services/privacy';
 
-type DeletionStep = 'warning' | 'confirm' | 'password' | 'deleting' | 'done';
+type Props = { navigation?: { goBack?: () => void; navigate?: (screen: string) => void } };
+const confirmation = '刪除我的帳號';
 
-export function AccountDeletionScreen(props: any) {
-  const nav = props?.navigation;
-  const { school } = useSchool();
+export function AccountDeletionScreen({ navigation }: Props) {
+  useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const auth = useAuth();
+  const { school } = useSchool();
+  const scope = JSON.stringify([auth.user?.uid, school.id]);
+  const active = useRef(scope);
+  active.current = scope;
+  const [completed, setCompleted] = useState<{ uid: string; logoutError: boolean } | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
-  const [step, setStep] = useState<DeletionStep>('warning');
-  const [password, setPassword] = useState('');
-  const [confirmText, setConfirmText] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [progress, setProgress] = useState<string>('');
-  const [deletionComplete, setDeletionComplete] = useState(false);
-
-  const CONFIRM_TEXT = '刪除我的帳號';
-
-  const handleProceedToConfirm = () => {
-    setStep('confirm');
-  };
-
-  const handleProceedToPassword = () => {
-    if (confirmText !== CONFIRM_TEXT) {
-      Alert.alert('錯誤', `請輸入「${CONFIRM_TEXT}」以確認`);
+  const finish = async (uid: string) => {
+    if (!mounted.current || active.current !== scope || getAuthInstance().currentUser?.uid !== uid)
       return;
-    }
-    setStep('password');
-  };
-
-  const handleDeleteAccount = async () => {
-    if (!auth.user) {
-      Alert.alert('錯誤', '請先登入');
-      return;
-    }
-
-    setError(null);
-    setStep('deleting');
-
+    setCompleted({ uid, logoutError: false });
     try {
-      const firebaseAuth = getAuthInstance();
-      const currentUser = firebaseAuth.currentUser;
-
-      if (!currentUser) {
-        throw new Error('無法取得當前用戶');
-      }
-
-      if (password) {
-        setProgress('驗證身份...');
-        const credential = EmailAuthProvider.credential(currentUser.email || '', password);
-        await reauthenticateWithCredential(currentUser, credential);
-        await currentUser.getIdToken(true);
-      }
-
-      setProgress('刪除帳號與個人資料...');
-      await deleteUserAccount({
-        confirmation: 'DELETE_MY_ACCOUNT',
-        schoolId: school.id,
-      });
-      await auth.signOut().catch(() => undefined);
-
-      setDeletionComplete(true);
-      setStep('done');
-    } catch (error: any) {
-      console.error('Account deletion error:', error);
-
-      if (error.code === 'auth/wrong-password') {
-        setError('密碼錯誤，請重新輸入');
-        setStep('password');
-      } else if (
-        error.code === 'auth/requires-recent-login' ||
-        error.code === 'functions/failed-precondition'
-      ) {
-        setError('需要重新登入後才能刪除帳號');
-        setStep('password');
-      } else {
-        setError(error?.message || '刪除失敗，請稍後再試');
-        setStep('warning');
-      }
+      await auth.signOut(uid);
+    } catch {
+      if (mounted.current && active.current === scope) setCompleted({ uid, logoutError: true });
     }
   };
 
+  if (completed && (!auth.user || auth.user.uid === completed.uid)) {
+    return (
+      <AIDetailScreen title="刪除帳號">
+        <AICard title="Campus One 帳號已刪除">
+          <View style={{ gap: 16 }}>
+            <Text style={{ color: aiTokens.muted, lineHeight: 23 }}>
+              伺服器已確認 Campus One 帳號刪除。學校與 Nuni 帳號不受影響。
+            </Text>
+            {completed.logoutError ? (
+              <>
+                <Text accessibilityRole="alert" style={{ color: aiTokens.danger, lineHeight: 22 }}>
+                  帳號已刪除，但這台裝置尚未完成登出。請重試。
+                </Text>
+                <AIButton label="完成登出" onPress={() => void finish(completed.uid)} />
+              </>
+            ) : (
+              <Text style={{ color: aiTokens.muted }}>正在返回登入畫面…</Text>
+            )}
+          </View>
+        </AICard>
+      </AIDetailScreen>
+    );
+  }
   if (!auth.user) {
     return (
-      <Screen>
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
-        >
-          <Card title="刪除帳號" subtitle="需要登入">
-            <Pill text="請先登入" />
-            <Text style={{ color: theme.colors.muted, marginTop: 10 }}>
-              您需要登入才能刪除帳號。
-            </Text>
-          </Card>
-        </ScrollView>
-      </Screen>
+      <AIDetailScreen title="刪除帳號" onBack={() => navigation?.goBack?.()}>
+        <AICard title="請先登入">
+          <View style={{ gap: 16 }}>
+            <Text style={{ color: aiTokens.muted }}>登入後才能確認要刪除的帳號。</Text>
+            <AIButton label="學校登入" onPress={() => navigation?.navigate?.('SSOLogin')} />
+          </View>
+        </AICard>
+      </AIDetailScreen>
     );
   }
-
-  if (step === 'done') {
-    return (
-      <Screen>
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
-        >
-          <AnimatedCard title="" subtitle="">
-            <View style={{ alignItems: 'center', paddingVertical: 40 }}>
-              <View
-                style={{
-                  width: 80,
-                  height: 80,
-                  borderRadius: 40,
-                  backgroundColor: theme.colors.success + '20',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  marginBottom: 16,
-                }}
-              >
-                <Ionicons name="checkmark-circle" size={48} color={theme.colors.success} />
-              </View>
-              <Text style={{ color: theme.colors.text, fontSize: 20, fontWeight: '700' }}>
-                帳號已刪除
-              </Text>
-              <Text
-                style={{
-                  color: theme.colors.muted,
-                  textAlign: 'center',
-                  marginTop: 12,
-                  lineHeight: 22,
-                }}
-              >
-                您的帳號和所有相關資料已被永久刪除。{'\n'}
-                感謝您曾經使用我們的服務。
-              </Text>
-            </View>
-          </AnimatedCard>
-
-          <Button
-            text="關閉 App"
-            kind="primary"
-            onPress={() => {
-              Alert.alert('再見', '感謝您的使用，祝您一切順利！');
-            }}
-          />
-        </ScrollView>
-      </Screen>
-    );
-  }
-
-  if (step === 'deleting') {
-    return (
-      <Screen>
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
-        >
-          <AnimatedCard title="正在刪除帳號..." subtitle="">
-            <View style={{ alignItems: 'center', paddingVertical: 40 }}>
-              <ActivityIndicator size="large" color={theme.colors.accent} />
-              <Text style={{ color: theme.colors.muted, marginTop: 16 }}>{progress}</Text>
-              <Text
-                style={{
-                  color: theme.colors.muted,
-                  fontSize: 12,
-                  marginTop: 8,
-                  textAlign: 'center',
-                }}
-              >
-                請勿關閉 App，此過程可能需要幾秒鐘...
-              </Text>
-            </View>
-          </AnimatedCard>
-        </ScrollView>
-      </Screen>
-    );
-  }
-
   return (
-    <Screen>
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
-      >
-        {step === 'warning' && (
-          <>
-            <AnimatedCard title="" subtitle="">
-              <View style={{ alignItems: 'center', paddingVertical: 20 }}>
-                <View
-                  style={{
-                    width: 70,
-                    height: 70,
-                    borderRadius: 35,
-                    backgroundColor: theme.colors.error + '20',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    marginBottom: 12,
-                  }}
-                >
-                  <Ionicons name="warning" size={36} color={theme.colors.error} />
-                </View>
-                <Text style={{ color: theme.colors.error, fontSize: 18, fontWeight: '700' }}>
-                  刪除帳號
-                </Text>
-                <Text
-                  style={{
-                    color: theme.colors.muted,
-                    textAlign: 'center',
-                    marginTop: 8,
-                    lineHeight: 20,
-                  }}
-                >
-                  此操作無法復原，請謹慎考慮
-                </Text>
-              </View>
-            </AnimatedCard>
+    <DeletionEditor
+      key={scope}
+      uid={auth.user.uid}
+      email={auth.user.email}
+      schoolId={school.id}
+      passwordProvider={auth.user.providerData.some(
+        (provider) => provider.providerId === 'password',
+      )}
+      navigation={navigation}
+      isScopeCurrent={() => active.current === scope}
+      onComplete={() => finish(auth.user!.uid)}
+    />
+  );
+}
 
-            {error && (
-              <Card title="">
-                <Pill text={error} />
-              </Card>
-            )}
+function DeletionEditor({
+  uid,
+  email,
+  schoolId,
+  passwordProvider,
+  navigation,
+  isScopeCurrent,
+  onComplete,
+}: Props & {
+  uid: string;
+  email: string | null;
+  schoolId: string;
+  passwordProvider: boolean;
+  isScopeCurrent: () => boolean;
+  onComplete: () => Promise<void>;
+}) {
+  const [step, setStep] = useState<'details' | 'confirm'>('details');
+  const [confirmText, setConfirmText] = useState('');
+  const [password, setPassword] = useState('');
+  const [progress, setProgress] = useState('');
+  const [error, setError] = useState('');
+  const [needsLogin, setNeedsLogin] = useState(false);
+  const locked = useRef(false);
+  const mounted = useRef(true);
+  const current = () =>
+    mounted.current && isScopeCurrent() && getAuthInstance().currentUser?.uid === uid;
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
-            <Card title="刪除後將失去：">
-              <View style={{ gap: 12 }}>
-                {[
-                  { icon: 'person', text: '個人資料（姓名、學號、系所）' },
-                  { icon: 'heart', text: '所有收藏的項目' },
-                  { icon: 'people', text: '群組成員資格' },
-                  { icon: 'document-text', text: '發布的貼文和留言' },
-                  { icon: 'calendar', text: '活動報名紀錄' },
-                  { icon: 'school', text: '作業繳交和成績紀錄' },
-                  { icon: 'chatbubbles', text: '私訊對話記錄' },
-                  { icon: 'notifications', text: '通知設定和偏好' },
-                ].map((item, i) => (
-                  <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                    <Ionicons name={item.icon as any} size={20} color={theme.colors.error} />
-                    <Text style={{ color: theme.colors.text, flex: 1 }}>{item.text}</Text>
-                  </View>
-                ))}
-              </View>
-            </Card>
-
-            <Card title="替代方案">
-              <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
-                如果您只是想暫時停用帳號，可以考慮：
+  const removeAccount = async () => {
+    if (locked.current || confirmText !== confirmation || (passwordProvider && !password)) return;
+    setError('');
+    setNeedsLogin(false);
+    if (!current()) {
+      setError('登入狀態已變更，請重新登入後再操作。');
+      setNeedsLogin(true);
+      return;
+    }
+    locked.current = true;
+    setProgress('正在確認身分…');
+    try {
+      const user = getAuthInstance().currentUser!;
+      if (passwordProvider) {
+        if (
+          !user.email ||
+          !user.providerData.some((provider) => provider.providerId === 'password')
+        )
+          throw new Error('Provider changed');
+        await reauthenticateWithCredential(
+          user,
+          EmailAuthProvider.credential(user.email, password),
+        );
+        if (!current()) return;
+        setPassword('');
+      }
+      await user.getIdToken(true);
+      if (!current()) return;
+      setProgress('正在刪除 Campus One 帳號…');
+      const response = await deleteUserAccount({
+        expectedUserId: uid,
+        confirmation: 'DELETE_MY_ACCOUNT',
+        schoolId,
+      });
+      if (!current()) return;
+      if (response.success !== true || response.userId !== uid)
+        throw new Error('Deletion not confirmed');
+      await onComplete();
+    } catch (cause) {
+      if (!current()) return;
+      const failure = cause as { code?: string; details?: { reason?: string } };
+      const code = failure?.code;
+      if (failure?.details?.reason === 'group-ownership') {
+        setError('你仍是群組擁有者。請先在訊息中的群組頁面轉移擁有權，再回來刪除帳號。');
+      } else if (failure?.details?.reason === 'merchant-ownership') {
+        setError('你仍持有店家管理權。請先完成管理權轉移，再回來刪除帳號。');
+      } else if (failure?.details?.reason === 'financial-records') {
+        setError(
+          '帳號仍有餘額、未結束的訂單或待確認款項。請先完成訂單、退款與餘額處理，再回來刪除帳號。',
+        );
+      } else if (failure?.details?.reason === 'event-registration') {
+        setError('目前無法完成活動報名紀錄的處理。請聯絡活動主辦人或管理員協助，再回來刪除帳號。');
+      } else if (failure?.details?.reason === 'group-membership') {
+        setError('目前無法完成群組成員資料的處理。請聯絡群組管理員協助，再回來刪除帳號。');
+      } else if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+        setError('密碼不正確，請重新輸入。');
+      } else if (
+        code === 'auth/requires-recent-login' ||
+        failure?.details?.reason === 'recent-login' ||
+        code === 'functions/unauthenticated'
+      ) {
+        setError('需要重新登入確認身分。登入後請回到此頁，再次確認刪除。');
+        setNeedsLogin(true);
+        setConfirmText('');
+      } else {
+        setError('尚未確認刪除完成，請稍後重試。若持續無法操作，請透過設定中的意見回饋聯絡我們。');
+      }
+      setPassword('');
+    } finally {
+      locked.current = false;
+      if (mounted.current && isScopeCurrent()) setProgress('');
+    }
+  };
+  const busy = Boolean(progress);
+  const inputStyle = {
+    borderWidth: 1,
+    borderColor: aiTokens.border,
+    borderRadius: aiTokens.radius.md,
+    backgroundColor: aiTokens.panel,
+    color: aiTokens.text,
+    padding: 14,
+    fontSize: 16,
+  };
+  return (
+    <AIDetailScreen
+      title="刪除帳號"
+      subtitle="先了解影響，再決定是否繼續。"
+      onBack={busy ? undefined : () => navigation?.goBack?.()}
+    >
+      <AICard title="刪除 Campus One 帳號">
+        <View style={{ gap: 12 }}>
+          <Text style={{ color: aiTokens.text, fontSize: 16, fontWeight: '600' }}>
+            {email || '目前登入的帳號'}
+          </Text>
+          <Text style={{ color: aiTokens.muted, lineHeight: 23 }}>
+            刪除後，將無法再使用這個 Campus One
+            帳號，相關個人資料將依隱私政策處理。這項操作無法復原。
+          </Text>
+          <Text style={{ color: aiTokens.muted, lineHeight: 23 }}>
+            學校與 Nuni 帳號不會因此刪除。校方課務與學籍資料不受影響。
+          </Text>
+          <Text style={{ color: aiTokens.muted, lineHeight: 23 }}>
+            作業與評閱、訊息與公開貼文、訂單與稽核紀錄、上傳檔案與舊版活動報名紀錄仍會保留；帳號中的私人資料副本與存取權限會移除。
+          </Text>
+        </View>
+      </AICard>
+      {step === 'details' ? (
+        <>
+          <AICard title="先保留需要的資料">
+            <View style={{ gap: 16 }}>
+              <Text style={{ color: aiTokens.muted, lineHeight: 23 }}>
+                需要保存個人資料時，可以先匯出，再回來完成刪除。
               </Text>
-              <View style={{ gap: 10, marginTop: 12 }}>
-                <Button text="登出帳號" onPress={() => auth.signOut()} />
-                <Button
-                  text="關閉推播通知"
-                  onPress={() => nav?.navigate?.('NotificationSettings')}
-                />
-                <Button text="匯出我的資料" onPress={() => nav?.navigate?.('DataExport')} />
-              </View>
-            </Card>
-
-            <View style={{ gap: 10 }}>
-              <Button text="我仍要刪除帳號" kind="primary" onPress={handleProceedToConfirm} />
-              <Button text="取消" onPress={() => nav?.goBack?.()} />
-            </View>
-          </>
-        )}
-
-        {step === 'confirm' && (
-          <>
-            <AnimatedCard title="確認刪除" subtitle="請輸入以下文字確認">
-              <View style={{ alignItems: 'center', paddingVertical: 16 }}>
-                <View
-                  style={{
-                    padding: 16,
-                    borderRadius: theme.radius.md,
-                    backgroundColor: theme.colors.error + '15',
-                    marginBottom: 16,
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: theme.colors.error,
-                      fontSize: 18,
-                      fontWeight: '700',
-                      textAlign: 'center',
-                    }}
-                  >
-                    {CONFIRM_TEXT}
-                  </Text>
-                </View>
-
-                <Text style={{ color: theme.colors.muted, marginBottom: 12 }}>
-                  請在下方輸入上述文字
-                </Text>
-
-                <TextInput
-                  value={confirmText}
-                  onChangeText={setConfirmText}
-                  placeholder={CONFIRM_TEXT}
-                  placeholderTextColor={theme.colors.muted}
-                  style={{
-                    width: '100%',
-                    paddingVertical: 14,
-                    paddingHorizontal: 16,
-                    borderRadius: theme.radius.md,
-                    borderWidth: 2,
-                    borderColor:
-                      confirmText === CONFIRM_TEXT ? theme.colors.error : theme.colors.border,
-                    backgroundColor: theme.colors.surface2,
-                    color: theme.colors.text,
-                    textAlign: 'center',
-                    fontSize: 16,
-                  }}
-                />
-              </View>
-            </AnimatedCard>
-
-            <View style={{ gap: 10 }}>
-              <Button
-                text="下一步"
-                kind="primary"
-                onPress={handleProceedToPassword}
-                disabled={confirmText !== CONFIRM_TEXT}
+              <AIButton
+                label="匯出我的資料"
+                variant="ghost"
+                onPress={() => navigation?.navigate?.('DataExport')}
               />
-              <Button text="返回" onPress={() => setStep('warning')} />
             </View>
-          </>
-        )}
-
-        {step === 'password' && (
-          <>
-            <AnimatedCard title="驗證身份" subtitle="請輸入密碼以確認是本人操作">
-              {error && (
-                <View style={{ marginBottom: 12 }}>
-                  <Pill text={error} />
-                </View>
-              )}
-
-              <View style={{ alignItems: 'center', paddingVertical: 16 }}>
-                <View
-                  style={{
-                    width: 60,
-                    height: 60,
-                    borderRadius: 30,
-                    backgroundColor: theme.colors.accentSoft,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    marginBottom: 16,
-                  }}
-                >
-                  <Ionicons name="lock-closed" size={28} color={theme.colors.accent} />
-                </View>
-
-                <Text style={{ color: theme.colors.muted, marginBottom: 16 }}>
-                  帳號：{auth.user?.email}
-                </Text>
-
+          </AICard>
+          <AICard>
+            <View style={{ gap: 12 }}>
+              <AIButton label="繼續刪除帳號" variant="danger" onPress={() => setStep('confirm')} />
+              <AIButton label="保留帳號" variant="ghost" onPress={() => navigation?.goBack?.()} />
+            </View>
+          </AICard>
+        </>
+      ) : (
+        <AICard title="最後確認">
+          <View style={{ gap: 16 }}>
+            <Text style={{ color: aiTokens.muted, lineHeight: 23 }}>
+              請輸入「{confirmation}」以確認這項操作。
+            </Text>
+            <TextInput
+              accessibilityLabel="刪除確認文字"
+              value={confirmText}
+              onChangeText={setConfirmText}
+              editable={!busy}
+              placeholder={confirmation}
+              placeholderTextColor={aiTokens.muted}
+              autoCorrect={false}
+              style={inputStyle}
+            />
+            {passwordProvider ? (
+              <>
+                <Text style={{ color: aiTokens.muted }}>輸入此帳號的密碼，確認由本人操作。</Text>
                 <TextInput
+                  accessibilityLabel="帳號密碼"
                   value={password}
                   onChangeText={setPassword}
-                  placeholder="輸入密碼"
-                  placeholderTextColor={theme.colors.muted}
+                  editable={!busy}
+                  placeholder="帳號密碼"
+                  placeholderTextColor={aiTokens.muted}
                   secureTextEntry
-                  style={{
-                    width: '100%',
-                    paddingVertical: 14,
-                    paddingHorizontal: 16,
-                    borderRadius: theme.radius.md,
-                    borderWidth: 1,
-                    borderColor: theme.colors.border,
-                    backgroundColor: theme.colors.surface2,
-                    color: theme.colors.text,
-                    fontSize: 16,
-                  }}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={inputStyle}
                 />
-
-                <Text
-                  style={{
-                    color: theme.colors.muted,
-                    fontSize: 12,
-                    marginTop: 12,
-                    textAlign: 'center',
-                  }}
-                >
-                  如果您使用 SSO 登入，請先設定密碼或聯繫管理員
+              </>
+            ) : (
+              <Text style={{ color: aiTokens.muted, lineHeight: 23 }}>
+                系統會確認最近的登入紀錄；若登入時間已超過安全期限，需要先重新登入。
+              </Text>
+            )}
+            {busy ? (
+              <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+                <ActivityIndicator color={aiTokens.ai} />
+                <Text accessibilityLiveRegion="polite" style={{ color: aiTokens.muted, flex: 1 }}>
+                  {progress}
                 </Text>
               </View>
-            </AnimatedCard>
-
-            <View style={{ gap: 10 }}>
-              <Button
-                text="永久刪除我的帳號"
-                kind="primary"
-                onPress={handleDeleteAccount}
-                disabled={!password}
+            ) : null}
+            {error ? (
+              <Text accessibilityRole="alert" style={{ color: aiTokens.danger, lineHeight: 22 }}>
+                {error}
+              </Text>
+            ) : null}
+            {needsLogin ? (
+              <AIButton
+                label="重新登入"
+                disabled={busy}
+                onPress={() => {
+                  setConfirmText('');
+                  setPassword('');
+                  navigation?.navigate?.('SSOLogin');
+                }}
               />
-              <Button text="返回" onPress={() => setStep('confirm')} />
-            </View>
-          </>
-        )}
-      </ScrollView>
-    </Screen>
+            ) : null}
+            <AIButton
+              label={busy ? '正在處理…' : '確認刪除帳號'}
+              variant="danger"
+              disabled={busy || confirmText !== confirmation || (passwordProvider && !password)}
+              onPress={() => void removeAccount()}
+            />
+            <AIButton
+              label="返回說明"
+              variant="ghost"
+              disabled={busy}
+              onPress={() => {
+                setStep('details');
+                setPassword('');
+                setConfirmText('');
+                setError('');
+                setNeedsLogin(false);
+              }}
+            />
+          </View>
+        </AICard>
+      )}
+    </AIDetailScreen>
   );
 }

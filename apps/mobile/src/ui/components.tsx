@@ -1,5 +1,5 @@
 /* eslint-disable */
-import React, { Component, ErrorInfo, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Component, ErrorInfo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   Animated,
   Pressable,
@@ -24,7 +24,11 @@ function useSafeInsetsOrDefault() {
   const value = React.useContext(SafeAreaInsetsContext);
   return value ?? { top: 0, right: 0, bottom: 0, left: 0 };
 }
-import { theme, shadowStyle, softShadowStyle } from './theme';
+import { theme, shadowStyle, softShadowStyle, getThemeVersion, subscribeToTheme } from './theme';
+
+function useVisualTheme() {
+  useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
+}
 
 /** 本地 ComfyUI／Flux 極簡留白 master，供 EmptyState 等復用（單檔、不重複匯入多圖） */
 const CALM_WHITESPACE_HERO = require('../../assets/empty_whitespace_hero.png');
@@ -47,6 +51,7 @@ export function Spinner({
 
 /** 全螢幕載入（App 根層、導覽 fallback 等共用，維持品牌色與字型階梯一致） */
 export function FullScreenLoader(props: { message?: string }) {
+  useVisualTheme();
   return (
     <View
       style={{
@@ -85,6 +90,7 @@ export function Screen(props: {
   noPadding?: boolean;
   headerRight?: React.ReactNode;
 }) {
+  useVisualTheme();
   const insets = useSafeInsetsOrDefault();
   const tabBarBottomPad = useTabBarContentBottomPadding();
   return (
@@ -155,11 +161,12 @@ export function Card(props: {
   icon?: string;
   iconColor?: string;
 }) {
+  useVisualTheme();
   const variant = props.variant ?? 'default';
 
   const variantStyles = {
     default: {
-      shell: shadowStyle(theme.mode === 'light' ? theme.shadows.md : theme.shadows.sm),
+      shell: {},
       surface: {
         backgroundColor: theme.colors.surface,
         borderWidth: 1,
@@ -298,6 +305,7 @@ export function Pill(props: {
   selected?: boolean;
   style?: StyleProp<ViewStyle>;
 }) {
+  useVisualTheme();
   const kind = props.selected ? 'accent' : (props.kind ?? 'default');
   const size = props.size ?? 'md';
   const contentText = props.text ?? props.label ?? '';
@@ -387,7 +395,7 @@ export function Button(props: {
   const pressedBg: Record<string, string> = {
     primary: theme.colors.accentHover,
     secondary: theme.colors.surface2,
-    danger: theme.colors.dangerSoft,
+    danger: theme.colors.danger,
     ghost: theme.colors.surface2,
     'accent-ghost': theme.colors.accentSoft,
     outline: theme.colors.surface2,
@@ -450,7 +458,6 @@ export function Button(props: {
           alignSelf: props.fullWidth ? 'stretch' : 'flex-start',
           minHeight: 44,
           transform: [{ scale: pressed && !disabled ? 0.97 : 1 }],
-          ...(!disabled && kind === 'primary' ? shadowStyle(theme.shadows.sm) : {}),
         },
         props.style,
       ]}

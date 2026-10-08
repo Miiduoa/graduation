@@ -28,6 +28,7 @@ import * as Notifications from 'expo-notifications';
 import { Screen } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
+import { useThemeMode } from '../state/theme';
 import { analytics } from '../services/analytics';
 import { scheduleLocalNotification } from '../services/notifications';
 import { upsertSavedPlace } from '../services/savedPlaces';
@@ -50,6 +51,7 @@ type ParamShape = {
 };
 
 export function BusStopDetailScreen(_props: Record<string, unknown>) {
+  useThemeMode();
   const nav = useNavigation<any>();
   const route = useRoute<any>();
   const params = (route.params ?? {}) as Partial<ParamShape>;
@@ -233,7 +235,7 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
 
         {/* Routes section */}
         <View style={{ paddingHorizontal: 12, gap: 10 }}>
-          <Text style={SECTION_HEADER}>經過此站的路線</Text>
+          <Text style={{ ...SECTION_HEADER }}>經過此站的路線</Text>
           {routesAtStop.length === 0 && (
             <Text style={{ color: theme.colors.muted, textAlign: 'center', paddingVertical: 20 }}>
               暫時沒有路線資料
@@ -381,7 +383,7 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
         {/* Transfer routes */}
         {stop.transferRoutes && stop.transferRoutes.length > 0 && (
           <View style={{ paddingHorizontal: 12 }}>
-            <Text style={SECTION_HEADER}>可在此站轉乘</Text>
+            <Text style={{ ...SECTION_HEADER }}>可在此站轉乘</Text>
             <View
               style={{
                 padding: 14,
@@ -418,7 +420,7 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
         {/* Nearby POIs */}
         {nearbyPois.length > 0 && (
           <View style={{ paddingHorizontal: 12 }}>
-            <Text style={SECTION_HEADER}>步行 5 分鐘內</Text>
+            <Text style={{ ...SECTION_HEADER }}>步行 5 分鐘內</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
               {nearbyPois.map((poi) => {
                 const d = haversineMeters(stop.lat, stop.lng, poi.lat, poi.lng);
@@ -453,6 +455,7 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
 }
 
 function FeatureChip({ text }: { text: string }) {
+  useThemeMode();
   return (
     <View
       style={{
@@ -468,6 +471,7 @@ function FeatureChip({ text }: { text: string }) {
 }
 
 function CtaBtn({ icon, label, onPress }: { icon: any; label: string; onPress: () => void }) {
+  useThemeMode();
   return (
     <Pressable
       onPress={onPress}
@@ -489,6 +493,7 @@ function CtaBtn({ icon, label, onPress }: { icon: any; label: string; onPress: (
 }
 
 function MiniTag({ text, color }: { text: string; color?: string }) {
+  useThemeMode();
   return (
     <View
       style={{
@@ -506,7 +511,7 @@ function MiniTag({ text, color }: { text: string; color?: string }) {
 }
 
 const SECTION_HEADER = {
-  color: theme.colors.muted,
+  get color() { return theme.colors.muted; },
   fontSize: 11,
   fontWeight: '700' as const,
   letterSpacing: 2,

@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { CommunityLoadError, useCommunityLoad } from './useCommunityLoad';
 import { useAuth } from '@/components/AuthGuard';
 import {
   listBoards,
@@ -37,7 +38,6 @@ export function BoardsTab(props: { schoolId: string; schoolSearch: string }) {
   const [boards, setBoards] = useState<CampusBoard[]>([]);
   const [subscribed, setSubscribed] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState('');
-  const [loading, setLoading] = useState(true);
   const [composeOpen, setComposeOpen] = useState(false);
 
   const load = useCallback(async () => {
@@ -54,19 +54,18 @@ export function BoardsTab(props: { schoolId: string; schoolSearch: string }) {
     setSubscribed(new Set(subs));
   }, [schoolId, user]);
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      await load();
-      setLoading(false);
-    })();
-  }, [load]);
+  const { loading, error, refresh } = useCommunityLoad(
+    load,
+    '暫時無法讀取看板，請確認連線後重試。',
+  );
 
   const q = filter.trim().toLowerCase();
   const filtered = useMemo(
     () =>
       q
-        ? boards.filter((b) => `${b.name} ${b.slug ?? ''} ${b.rules ?? ''}`.toLowerCase().includes(q))
+        ? boards.filter((b) =>
+            `${b.name} ${b.slug ?? ''} ${b.rules ?? ''}`.toLowerCase().includes(q),
+          )
         : boards,
     [boards, q],
   );
@@ -88,8 +87,8 @@ export function BoardsTab(props: { schoolId: string; schoolSearch: string }) {
     try {
       if (wasSub) await unsubscribeFromBoard(user.uid, schoolId, b.id);
       else await subscribeToBoard(user.uid, schoolId, b.id);
-    } catch (e: any) {
-      alert(`訂閱失敗：${e?.message ?? String(e)}`);
+    } catch {
+      alert('這次未能訂閱，請稍後再試。');
       setSubscribed((prev) => {
         const next = new Set(prev);
         if (wasSub) next.add(b.id);
@@ -99,16 +98,26 @@ export function BoardsTab(props: { schoolId: string; schoolSearch: string }) {
     }
   };
 
+  if (error) return <CommunityLoadError message={error} retry={refresh} />;
+
   return (
     <div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'center' }}>
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 8,
+          marginBottom: 14,
+          alignItems: 'center',
+        }}
+      >
         <input
           type="search"
           className="input"
           placeholder="搜尋看板"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          style={{ flex: 1, maxWidth: 420 }}
+          style={{ flex: '1 1 160px', minWidth: 0, maxWidth: 420 }}
         />
         <button
           type="button"
@@ -128,7 +137,7 @@ export function BoardsTab(props: { schoolId: string; schoolSearch: string }) {
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>
           <div style={{ fontSize: 32, marginBottom: 8 }}>🗂</div>
           <div style={{ fontWeight: 700, color: 'var(--text)' }}>尚無任何看板</div>
-          <div style={{ marginTop: 6, fontSize: 12 }}>點右上「建立看板」開出第一個版面</div>
+          <div style={{ marginTop: 6, fontSize: 12 }}>建立看板，開始一個校園話題。</div>
         </div>
       ) : (
         (['department', 'course', 'topic', 'anon'] as CampusBoardType[]).map((t) => {
@@ -151,7 +160,13 @@ export function BoardsTab(props: { schoolId: string; schoolSearch: string }) {
                 <span>{TYPE_ICON[t]}</span>
                 {CAMPUS_BOARD_TYPE_LABEL[t]}
               </h3>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))', gap: 10 }}>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill,minmax(min(100%, 280px),1fr))',
+                  gap: 10,
+                }}
+              >
                 {arr.map((b) => {
                   const isSub = subscribed.has(b.id);
                   return (
@@ -165,7 +180,7 @@ export function BoardsTab(props: { schoolId: string; schoolSearch: string }) {
                           width: 48,
                           height: 48,
                           borderRadius: 8,
-                          background: 'var(--panel2, #F2F2F7)',
+                          background: 'var(--panel2)',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
@@ -177,7 +192,12 @@ export function BoardsTab(props: { schoolId: string; schoolSearch: string }) {
                       </div>
                       <Link
                         href={`/community/board/${b.id}`}
-                        style={{ flex: 1, minWidth: 0, color: 'var(--text)', textDecoration: 'none' }}
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          color: 'var(--text)',
+                          textDecoration: 'none',
+                        }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <span style={{ fontSize: 14, fontWeight: 700 }}>{b.name}</span>
@@ -186,7 +206,7 @@ export function BoardsTab(props: { schoolId: string; schoolSearch: string }) {
                               style={{
                                 fontSize: 10,
                                 color: 'var(--muted)',
-                                background: 'var(--panel2, #F2F2F7)',
+                                background: 'var(--panel2)',
                                 padding: '1px 6px',
                                 borderRadius: 999,
                                 border: '1px solid var(--border)',
@@ -227,9 +247,9 @@ export function BoardsTab(props: { schoolId: string; schoolSearch: string }) {
                           gap: 4,
                           padding: '6px 10px',
                           borderRadius: 999,
-                          border: '1px solid var(--brand, #5856D6)',
-                          background: isSub ? 'var(--brand, #5856D6)' : 'transparent',
-                          color: isSub ? '#fff' : 'var(--brand, #5856D6)',
+                          border: '1px solid var(--brand)',
+                          background: isSub ? 'var(--brand)' : 'transparent',
+                          color: isSub ? 'var(--on-brand)' : 'var(--brand)',
                           fontSize: 11,
                           fontWeight: 700,
                           cursor: 'pointer',
@@ -253,7 +273,7 @@ export function BoardsTab(props: { schoolId: string; schoolSearch: string }) {
           onClose={() => setComposeOpen(false)}
           onCreated={async () => {
             setComposeOpen(false);
-            await load();
+            await refresh();
           }}
         />
       )}
@@ -261,11 +281,7 @@ export function BoardsTab(props: { schoolId: string; schoolSearch: string }) {
   );
 }
 
-function CreateBoardModal(props: {
-  schoolId: string;
-  onClose: () => void;
-  onCreated: () => void;
-}) {
+function CreateBoardModal(props: { schoolId: string; onClose: () => void; onCreated: () => void }) {
   const { user } = useAuth();
   const [name, setName] = useState('');
   const [type, setType] = useState<CampusBoardType>('topic');
@@ -297,8 +313,8 @@ function CreateBoardModal(props: {
         createdBy: user.uid,
       });
       props.onCreated();
-    } catch (e: any) {
-      alert(`建立失敗：${e?.message ?? String(e)}`);
+    } catch {
+      alert('這次未能建立，請稍後再試。');
     } finally {
       setBusy(false);
     }
@@ -330,13 +346,27 @@ function CreateBoardModal(props: {
           <button
             type="button"
             onClick={props.onClose}
-            style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--muted)' }}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: 18,
+              color: 'var(--muted)',
+            }}
           >
             ×
           </button>
         </div>
 
-        <label style={{ display: 'block', fontSize: 13, fontWeight: 700, marginTop: 16, marginBottom: 6 }}>
+        <label
+          style={{
+            display: 'block',
+            fontSize: 13,
+            fontWeight: 700,
+            marginTop: 16,
+            marginBottom: 6,
+          }}
+        >
           看板名稱
         </label>
         <input
@@ -348,7 +378,17 @@ function CreateBoardModal(props: {
           style={{ width: '100%', boxSizing: 'border-box' }}
         />
 
-        <label style={{ display: 'block', fontSize: 13, fontWeight: 700, marginTop: 14, marginBottom: 6 }}>類型</label>
+        <label
+          style={{
+            display: 'block',
+            fontSize: 13,
+            fontWeight: 700,
+            marginTop: 14,
+            marginBottom: 6,
+          }}
+        >
+          類型
+        </label>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {(['department', 'course', 'topic', 'anon'] as CampusBoardType[]).map((k) => {
             const on = type === k;
@@ -363,9 +403,9 @@ function CreateBoardModal(props: {
                   gap: 4,
                   padding: '6px 12px',
                   borderRadius: 999,
-                  border: on ? '1px solid var(--brand, #5856D6)' : '1px solid var(--border)',
-                  background: on ? 'var(--brand, #5856D6)' : 'var(--surface)',
-                  color: on ? '#fff' : 'var(--text)',
+                  border: on ? '1px solid var(--brand)' : '1px solid var(--border)',
+                  background: on ? 'var(--brand)' : 'var(--surface)',
+                  color: on ? 'var(--on-brand)' : 'var(--text)',
                   cursor: 'pointer',
                   fontSize: 12,
                   fontWeight: 700,
@@ -377,12 +417,29 @@ function CreateBoardModal(props: {
           })}
         </div>
 
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, marginTop: 14, cursor: 'pointer' }}>
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            fontSize: 13,
+            marginTop: 14,
+            cursor: 'pointer',
+          }}
+        >
           <input type="checkbox" checked={anon} onChange={(e) => setAnon(e.target.checked)} />
           預設匿名發文
         </label>
 
-        <label style={{ display: 'block', fontSize: 13, fontWeight: 700, marginTop: 14, marginBottom: 6 }}>
+        <label
+          style={{
+            display: 'block',
+            fontSize: 13,
+            fontWeight: 700,
+            marginTop: 14,
+            marginBottom: 6,
+          }}
+        >
           看板規則（選填）
         </label>
         <textarea
@@ -392,17 +449,19 @@ function CreateBoardModal(props: {
           rows={4}
           placeholder="例：請以友善與尊重為原則，請勿張貼商業廣告。"
           maxLength={400}
-          style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit' }}
+          style={{
+            width: '100%',
+            boxSizing: 'border-box',
+            resize: 'vertical',
+            fontFamily: 'inherit',
+          }}
         />
 
         <div style={{ display: 'flex', gap: 8, marginTop: 20, justifyContent: 'flex-end' }}>
-          <button type="button" className="btn" onClick={props.onClose}>取消</button>
-          <button
-            type="button"
-            className="btn primary"
-            disabled={busy}
-            onClick={submit}
-          >
+          <button type="button" className="btn" onClick={props.onClose}>
+            取消
+          </button>
+          <button type="button" className="btn primary" disabled={busy} onClick={submit}>
             {busy ? '建立中…' : '建立'}
           </button>
         </div>

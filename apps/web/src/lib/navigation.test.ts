@@ -51,3 +51,18 @@ describe('navigation school context helpers', () => {
     });
   });
 });
+
+it.each([
+  'https://outside.test',
+  '//outside.test',
+  '/\\outside.test',
+  '/\n/outside.test',
+  'javascript:alert(1)',
+])('rejects an external or ambiguous login destination %j', (path) => {
+  expect(sanitizeInternalPath(path)).toBe('/');
+});
+it('preserves a course destination and its query and fragment', () => {
+  expect(sanitizeInternalPath('/course/one?tab=work#assignment-two')).toBe(
+    '/course/one?tab=work#assignment-two',
+  );
+});

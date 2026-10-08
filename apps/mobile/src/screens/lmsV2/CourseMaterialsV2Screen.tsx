@@ -1,4 +1,6 @@
 import React from 'react';
+import { theme } from '../../ui/theme';
+import { useThemeMode } from '../../state/theme';
 import { View, Linking } from 'react-native';
 import { getSupabaseClient } from '../../services/supabaseClient';
 import {
@@ -10,6 +12,7 @@ import {
 } from './_courseV2Shell';
 
 export default function CourseMaterialsV2Screen() {
+  useThemeMode();
   const { courseId, courseName } = useCourseV2Params();
   const loadable = useLoadable(async () => {
     const sb = getSupabaseClient();
@@ -25,7 +28,7 @@ export default function CourseMaterialsV2Screen() {
   });
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#F2F2F7' }}>
+    <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       <CourseV2Header title="教材" subtitle={courseName} />
       <CourseV2List
         loadable={loadable}

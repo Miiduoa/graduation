@@ -35,28 +35,26 @@ export function UpdateBanner() {
 
   return (
     <div className="updateBanner">
-      <div style={{ fontSize: 24 }}>🔄</div>
-
       <div style={{ flex: 1 }}>
-        <div style={{ fontWeight: 600, marginBottom: 2, color: 'var(--text, #fff)' }}>
-          有新版本可用
+        <div style={{ fontWeight: 600, marginBottom: 2, color: 'var(--text)' }}>有新版本可用</div>
+        <div style={{ fontSize: 13, color: 'var(--muted)' }}>
+          儲存正在編輯的內容後，再重新載入。
         </div>
-        <div style={{ fontSize: 13, color: 'var(--muted, #AEAEB2)' }}>重新載入以取得最新功能</div>
       </div>
 
       <button
         onClick={handleRefresh}
         style={{
-          background: 'var(--brand, #5856D6)',
-          color: '#fff',
+          background: 'var(--brand)',
+          color: 'var(--on-brand)',
           border: 'none',
           padding: '10px 16px',
-          borderRadius: 8,
+          borderRadius: 'var(--radius-sm)',
           fontWeight: 600,
           cursor: 'pointer',
         }}
       >
-        更新
+        重新載入
       </button>
     </div>
   );

@@ -4,7 +4,7 @@ const { z } = require('zod');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const {
   checkQuestionBankHealth,
-} = require('../../../../packages/shared/dist-cjs/lms/questionBank');
+} = require('../../generated/shared/lms/questionBank');
 
 /**
  * upsertQuestionBank — 教師建立 / 更新題庫，自動跑健康檢查並回傳警告。

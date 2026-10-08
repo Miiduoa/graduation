@@ -14,12 +14,17 @@ interface Props {
 export function AgentCardList({ cards, schoolId = 'pu', onOrderConfirmed }: Props) {
   if (!cards || cards.length === 0) return null;
   return (
-    <div className="ai-card-list">
+    <div className="assistant-card-list">
       {cards.map((card, i) => (
-        <AgentCardItem key={`${card.kind}-${i}`} card={card} schoolId={schoolId} onOrderConfirmed={onOrderConfirmed} />
+        <AgentCardItem
+          key={`${card.kind}-${i}`}
+          card={card}
+          schoolId={schoolId}
+          onOrderConfirmed={onOrderConfirmed}
+        />
       ))}
       <style jsx>{`
-        .ai-card-list {
+        .assistant-card-list {
           display: flex;
           flex-direction: column;
           gap: 10px;
@@ -40,6 +45,8 @@ function AgentCardItem({
   onOrderConfirmed?: Props['onOrderConfirmed'];
 }) {
   switch (card.kind) {
+    case 'directions_card':
+      return <DirectionsCard payload={card.payload as DirectionsPayload} />;
     case 'route_card':
       return <RouteCard payload={card.payload as RoutePayload} />;
     case 'poi_card':
@@ -77,6 +84,53 @@ type RoutePayload = {
   deepLink?: { web?: string; mobile?: { screen: string; params: Record<string, unknown> } };
 };
 
+type DirectionsPayload = {
+  from: { name: string };
+  to: { name: string };
+  navigationUrl: string;
+};
+
+function DirectionsCard({ payload }: { payload: DirectionsPayload }) {
+  return (
+    <section className="card directions" aria-label="步行導航">
+      <h3>
+        {payload.from.name} → {payload.to.name}
+      </h3>
+      <p>由 Google 地圖提供可通行的路線與步行時間。</p>
+      <a href={payload.navigationUrl} target="_blank" rel="noopener noreferrer" className="cta">
+        開啟 Google 步行導航 ↗
+      </a>
+      <style jsx>{`
+        .directions {
+          padding: 18px;
+          border: 1px solid var(--border);
+          border-radius: var(--radius);
+          background: var(--surface);
+          color: var(--text);
+        }
+        h3 {
+          margin: 0 0 8px;
+          font-size: 16px;
+          overflow-wrap: anywhere;
+        }
+        p {
+          color: var(--muted);
+          line-height: 1.6;
+        }
+        .cta {
+          display: inline-flex;
+          padding: 10px 14px;
+          border-radius: var(--radius-sm);
+          background: var(--brand);
+          color: var(--on-brand);
+          text-decoration: none;
+          overflow-wrap: anywhere;
+        }
+      `}</style>
+    </section>
+  );
+}
+
 type PoiPayload = {
   query: string;
   pois: Array<{
@@ -93,6 +147,7 @@ type PoiPayload = {
     closeTime?: string;
     openNow?: boolean | null;
     cafeteriaId?: string | null;
+    navigationAvailable?: boolean;
   }>;
 };
 
@@ -102,6 +157,7 @@ type CafeteriaListPayload = {
     name: string;
     openTime?: string;
     closeTime?: string;
+    openingHours?: string;
     seats?: number;
     openNow?: boolean | null;
     orderingEnabled?: boolean;
@@ -126,7 +182,13 @@ type MenuPayload = {
 type OrderDraftPayload = {
   cafeteriaId: string;
   cafeteriaName: string;
-  items: Array<{ menuItemId: string; name: string; price: number; quantity: number; note?: string }>;
+  items: Array<{
+    menuItemId: string;
+    name: string;
+    price: number;
+    quantity: number;
+    note?: string;
+  }>;
   subtotal: number;
   tax: number;
   total: number;
@@ -140,7 +202,13 @@ type OrderDraftPayload = {
     functionName: string;
     input: {
       cafeteriaId: string;
-      items: Array<{ menuItemId: string; name: string; price: number; quantity: number; note?: string }>;
+      items: Array<{
+        menuItemId: string;
+        name: string;
+        price: number;
+        quantity: number;
+        note?: string;
+      }>;
       pickupTime?: string | null;
       paymentMethod?: string;
       note?: string | null;
@@ -168,7 +236,6 @@ function RouteCard({ payload }: { payload: RoutePayload }) {
   return (
     <div className="card route">
       <div className="card-head">
-        <span className="icon">🗺️</span>
         <span className="title">校園路線</span>
         <span className="meta">
           {payload.walkMinutes} 分鐘 · {payload.distanceMeters} m
@@ -198,21 +265,85 @@ function RouteCard({ payload }: { payload: RoutePayload }) {
         在地圖開啟路線 →
       </Link>
       <style jsx>{`
-        .card.route { background: linear-gradient(135deg, #eff6ff, #f0fdf4); border: 1px solid #bfdbfe; border-radius: 14px; padding: 14px; color: #0f172a; }
-        .card-head { display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 8px; }
-        .icon { font-size: 18px; }
-        .title { flex: 1; }
-        .meta { font-size: 12px; color: #0f766e; background: #ccfbf1; padding: 2px 8px; border-radius: 999px; font-weight: 500; }
-        .endpoints { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; }
-        .ep { display: flex; align-items: center; gap: 8px; font-size: 14px; }
-        .dot { width: 8px; height: 8px; border-radius: 50%; }
-        .dot.start { background: #22c55e; }
-        .dot.end { background: #ef4444; }
-        .floor { font-style: normal; color: #64748b; font-size: 12px; }
-        .steps { margin: 6px 0 10px; padding-left: 18px; font-size: 13px; color: #475569; }
-        .steps li { margin: 2px 0; }
-        .cta { display: inline-block; background: #2563eb; color: white; padding: 7px 14px; border-radius: 10px; font-size: 13px; font-weight: 600; text-decoration: none; }
-        .cta:hover { background: #1d4ed8; }
+        .card.route {
+          background: var(--surface);
+          border: 1px solid var(--border);
+          border-radius: var(--radius);
+          padding: 18px;
+          color: var(--text);
+        }
+        .card-head {
+          display: flex;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 8px;
+          font-weight: 600;
+          margin-bottom: 8px;
+        }
+        .title {
+          flex: 1;
+          min-width: 0;
+          overflow-wrap: anywhere;
+        }
+        .meta {
+          font-size: 12px;
+          color: var(--brand);
+          background: var(--accent-soft);
+          padding: 2px 8px;
+          border-radius: var(--radius-pill);
+          font-weight: 500;
+        }
+        .endpoints {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          padding: 8px 0;
+        }
+        .ep {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 14px;
+        }
+        .dot {
+          flex-shrink: 0;
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+        }
+        .dot.start {
+          background: var(--success);
+        }
+        .dot.end {
+          background: var(--danger);
+        }
+        .floor {
+          font-style: normal;
+          color: var(--muted);
+          font-size: 12px;
+        }
+        .steps {
+          margin: 6px 0 10px;
+          padding-left: 18px;
+          font-size: 13px;
+          color: var(--muted);
+        }
+        .steps li {
+          margin: 2px 0;
+        }
+        .cta {
+          display: inline-block;
+          background: var(--brand);
+          color: var(--on-brand);
+          padding: 10px 14px;
+          border-radius: var(--radius-sm);
+          font-size: 13px;
+          font-weight: 600;
+          text-decoration: none;
+        }
+        .cta:hover {
+          background: var(--brand2);
+        }
       `}</style>
     </div>
   );
@@ -224,32 +355,87 @@ function PoiCard({ payload }: { payload: PoiPayload }) {
   return (
     <div className="card poi">
       <div className="head">
-        <span className="icon">📍</span>
         <span className="title">找到 {payload.pois.length} 個地點</span>
       </div>
       <div className="list">
-        {payload.pois.slice(0, 4).map((p) => (
-          <Link key={p.id} href={`/map?focus=${p.id}`} className="row">
-            <div className="row-main">
-              <span className="name">{p.name}</span>
-              {p.code ? <em className="code">{p.code}</em> : null}
+        {payload.pois.slice(0, 4).map((p) => {
+          const content = (
+            <>
+              <div className="row-main">
+                <span className="name">{p.name}</span>
+                {p.code ? <em className="code">{p.code}</em> : null}
+              </div>
+              <div className="row-meta">
+                {p.floor || ''} {p.openTime && p.closeTime ? `· ${p.openTime}–${p.closeTime}` : ''}
+                {p.openNow === false ? ' · 目前未營業' : p.openNow === true ? ' · 營業中' : ''}
+              </div>
+            </>
+          );
+          return p.navigationAvailable === false ? (
+            <div key={p.id} className="row">
+              {content}
+              <span className="row-meta">尚未提供座標，暫時無法導航。</span>
             </div>
-            <div className="row-meta">
-              {p.floor || ''} {p.openTime && p.closeTime ? `· ${p.openTime}–${p.closeTime}` : ''}
-              {p.openNow === false ? ' · 目前未營業' : p.openNow === true ? ' · 營業中' : ''}
-            </div>
-          </Link>
-        ))}
+          ) : (
+            <Link key={p.id} href={`/map?focus=${p.id}`} className="row">
+              {content}
+            </Link>
+          );
+        })}
       </div>
       <style jsx>{`
-        .card.poi { background: #fefce8; border: 1px solid #fde68a; border-radius: 14px; padding: 14px; }
-        .head { display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 8px; color: #713f12; }
-        .list { display: flex; flex-direction: column; gap: 6px; }
-        .row { background: white; border: 1px solid #fde68a; border-radius: 10px; padding: 8px 10px; text-decoration: none; color: #0f172a; }
-        .row:hover { border-color: #f59e0b; }
-        .row-main { display: flex; align-items: center; gap: 6px; font-weight: 500; font-size: 14px; }
-        .code { font-style: normal; font-size: 11px; color: #92400e; background: #fef3c7; padding: 1px 6px; border-radius: 4px; }
-        .row-meta { font-size: 12px; color: #78716c; margin-top: 2px; }
+        .card.poi {
+          background: var(--surface);
+          border: 1px solid var(--border);
+          border-radius: var(--radius);
+          padding: 18px;
+        }
+        .head {
+          display: flex;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 8px;
+          font-weight: 600;
+          margin-bottom: 8px;
+          color: var(--text);
+        }
+        .list {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .row {
+          background: var(--surface);
+          border: 1px solid var(--border);
+          border-radius: var(--radius-sm);
+          padding: 10px 12px;
+          text-decoration: none;
+          color: var(--text);
+          overflow-wrap: anywhere;
+        }
+        .row:hover {
+          border-color: var(--brand);
+        }
+        .row-main {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-weight: 500;
+          font-size: 14px;
+        }
+        .code {
+          font-style: normal;
+          font-size: 11px;
+          color: var(--brand);
+          background: var(--accent-soft);
+          padding: 1px 6px;
+          border-radius: 4px;
+        }
+        .row-meta {
+          font-size: 12px;
+          color: var(--muted);
+          margin-top: 2px;
+        }
       `}</style>
     </div>
   );
@@ -261,7 +447,6 @@ function CafeteriaListCard({ payload }: { payload: CafeteriaListPayload }) {
   return (
     <div className="card cafs">
       <div className="head">
-        <span className="icon">🍱</span>
         <span className="title">校園餐廳（{payload.cafeterias.length}）</span>
       </div>
       <div className="list">
@@ -269,7 +454,7 @@ function CafeteriaListCard({ payload }: { payload: CafeteriaListPayload }) {
           <div key={c.id} className="row">
             <div className="name">{c.name}</div>
             <div className="meta">
-              {c.openTime && c.closeTime ? `${c.openTime}–${c.closeTime}` : ''}
+              {c.openingHours || (c.openTime && c.closeTime ? `${c.openTime}–${c.closeTime}` : '')}
               {c.seats ? ` · ${c.seats} 座位` : ''}
               {c.openNow === false ? ' · 未營業' : c.openNow === true ? ' · 營業中' : ''}
             </div>
@@ -277,12 +462,45 @@ function CafeteriaListCard({ payload }: { payload: CafeteriaListPayload }) {
         ))}
       </div>
       <style jsx>{`
-        .card.cafs { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 14px; padding: 14px; }
-        .head { display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 8px; color: #14532d; }
-        .list { display: flex; flex-direction: column; gap: 6px; }
-        .row { background: white; border: 1px solid #bbf7d0; border-radius: 10px; padding: 8px 10px; }
-        .name { font-weight: 500; font-size: 14px; color: #0f172a; }
-        .meta { font-size: 12px; color: #166534; margin-top: 2px; }
+        .card.cafs {
+          background: var(--surface);
+          border: 1px solid var(--border);
+          border-radius: var(--radius);
+          padding: 18px;
+        }
+        .head {
+          display: flex;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 8px;
+          font-weight: 600;
+          margin-bottom: 8px;
+          color: var(--text);
+        }
+        .list {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .row {
+          background: var(--surface);
+          border: 1px solid var(--border);
+          border-radius: var(--radius-sm);
+          padding: 10px 12px;
+          overflow-wrap: anywhere;
+        }
+        .name {
+          font-weight: 500;
+          font-size: 14px;
+          color: var(--text);
+          gap: 12px;
+          overflow-wrap: anywhere;
+        }
+        .meta {
+          font-size: 12px;
+          color: var(--muted);
+          margin-top: 2px;
+        }
       `}</style>
     </div>
   );
@@ -294,7 +512,6 @@ function MenuCard({ payload }: { payload: MenuPayload }) {
   return (
     <div className="card menu">
       <div className="head">
-        <span className="icon">📜</span>
         <span className="title">{payload.cafeteriaName} 菜單</span>
         <span className="meta">{payload.items.length} 項</span>
       </div>
@@ -311,18 +528,73 @@ function MenuCard({ payload }: { payload: MenuPayload }) {
         ))}
       </div>
       <style jsx>{`
-        .card.menu { background: #fff7ed; border: 1px solid #fed7aa; border-radius: 14px; padding: 14px; }
-        .head { display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 10px; color: #9a3412; }
-        .icon { font-size: 18px; }
-        .title { flex: 1; }
-        .meta { font-size: 12px; color: #9a3412; background: #ffedd5; padding: 2px 8px; border-radius: 999px; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
-        .item { background: white; border: 1px solid #fed7aa; border-radius: 10px; padding: 8px 10px; }
-        .row1 { display: flex; justify-content: space-between; font-size: 14px; }
-        .name { font-weight: 500; color: #0f172a; }
-        .price { color: #c2410c; font-weight: 600; }
-        .desc { font-size: 12px; color: #78716c; margin-top: 2px; }
-        .tag { display: inline-block; font-size: 11px; color: #92400e; background: #fef3c7; padding: 1px 6px; border-radius: 4px; margin-top: 4px; }
+        .card.menu {
+          background: var(--surface);
+          border: 1px solid var(--border);
+          border-radius: var(--radius);
+          padding: 18px;
+        }
+        .head {
+          display: flex;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 8px;
+          font-weight: 600;
+          margin-bottom: 10px;
+          color: var(--text);
+        }
+        .title {
+          flex: 1;
+          min-width: 0;
+          overflow-wrap: anywhere;
+        }
+        .meta {
+          font-size: 12px;
+          color: var(--muted);
+          background: var(--accent-soft);
+          padding: 2px 8px;
+          border-radius: var(--radius-pill);
+        }
+        .grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+          gap: 8px;
+        }
+        .item {
+          background: var(--surface);
+          border: 1px solid var(--border);
+          border-radius: var(--radius-sm);
+          padding: 10px 12px;
+          overflow-wrap: anywhere;
+        }
+        .row1 {
+          display: flex;
+          justify-content: space-between;
+          font-size: 14px;
+          gap: 12px;
+        }
+        .name {
+          font-weight: 500;
+          color: var(--text);
+        }
+        .price {
+          color: var(--brand);
+          font-weight: 600;
+        }
+        .desc {
+          font-size: 12px;
+          color: var(--muted);
+          margin-top: 2px;
+        }
+        .tag {
+          display: inline-block;
+          font-size: 11px;
+          color: var(--brand);
+          background: var(--accent-soft);
+          padding: 1px 6px;
+          border-radius: 4px;
+          margin-top: 4px;
+        }
       `}</style>
     </div>
   );
@@ -341,13 +613,15 @@ function OrderDraftCard({
 }) {
   const [paymentMethod, setPaymentMethod] = useState(payload.paymentMethod || 'campus_card');
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; message: string; orderId?: string } | null>(null);
+  const [result, setResult] = useState<{ ok: boolean; message: string; orderId?: string } | null>(
+    null,
+  );
 
   const handleConfirm = async () => {
     if (paymentMethod === 'tappay' || paymentMethod === 'linepay') {
       setResult({
         ok: false,
-        message: `${paymentMethod === 'tappay' ? 'TapPay' : 'Line Pay'} sandbox 待商家審核中（本 demo 暫不串接金流）。請改用「校園卡 / 取餐付款」。`,
+        message: `${paymentMethod === 'tappay' ? 'TapPay' : 'LINE Pay'} 尚未開放。請選擇取餐時付款。`,
       });
       return;
     }
@@ -362,8 +636,12 @@ function OrderDraftCard({
     });
     setSubmitting(false);
     if (res.success && res.orderId) {
-      setResult({ ok: true, message: `訂單建立成功！訂單號 ${res.orderId}`, orderId: res.orderId });
-      onConfirmed?.({ orderId: res.orderId, cafeteria: res.cafeteria || payload.cafeteriaName, total: res.total || payload.total });
+      setResult({ ok: true, message: `訂單已建立，訂單號 ${res.orderId}`, orderId: res.orderId });
+      onConfirmed?.({
+        orderId: res.orderId,
+        cafeteria: res.cafeteria || payload.cafeteriaName,
+        total: res.total || payload.total,
+      });
     } else {
       setResult({ ok: false, message: res.errorMessage || '下單失敗，請稍後再試' });
     }
@@ -372,9 +650,8 @@ function OrderDraftCard({
   return (
     <div className="card draft">
       <div className="head">
-        <span className="icon">📝</span>
         <span className="title">{payload.cafeteriaName} 訂單草稿</span>
-        <span className="meta">確認後寫入</span>
+        <span className="meta">確認後送出</span>
       </div>
       <div className="items">
         {payload.items.map((it, i) => (
@@ -416,54 +693,162 @@ function OrderDraftCard({
             className={paymentMethod === 'tappay' ? 'sel' : ''}
             onClick={() => setPaymentMethod('tappay')}
             disabled={submitting || Boolean(result?.ok)}
-            title="TapPay sandbox 待商家審核"
+            title="TapPay 尚未開放"
           >
-            TapPay <em>（sandbox 待審）</em>
+            TapPay <em>（尚未開放）</em>
           </button>
           <button
             type="button"
             className={paymentMethod === 'linepay' ? 'sel' : ''}
             onClick={() => setPaymentMethod('linepay')}
             disabled={submitting || Boolean(result?.ok)}
-            title="Line Pay sandbox 待商家審核"
+            title="LINE Pay 尚未開放"
           >
-            Line Pay <em>（sandbox 待審）</em>
+            LINE Pay <em>（尚未開放）</em>
           </button>
         </div>
       </div>
       {result ? (
-        <div className={result.ok ? 'note ok' : 'note err'}>
-          {result.ok ? '✓ ' : '⚠️ '}
-          {result.message}
-        </div>
+        <div className={result.ok ? 'note ok' : 'note err'}>{result.message}</div>
       ) : (
         <button type="button" className="confirm" onClick={handleConfirm} disabled={submitting}>
-          {submitting ? '下單中…' : '✅ 確認下單'}
+          {submitting ? '下單中…' : '確認下單'}
         </button>
       )}
       <style jsx>{`
-        .card.draft { background: #faf5ff; border: 1px solid #d8b4fe; border-radius: 14px; padding: 14px; }
-        .head { display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 10px; color: #581c87; }
-        .icon { font-size: 18px; }
-        .title { flex: 1; }
-        .meta { font-size: 11px; color: #6b21a8; background: #f3e8ff; padding: 2px 8px; border-radius: 999px; }
-        .items { display: flex; flex-direction: column; gap: 4px; padding: 8px; background: white; border-radius: 10px; border: 1px solid #e9d5ff; }
-        .row { display: flex; justify-content: space-between; font-size: 14px; color: #0f172a; }
-        .totals { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #d8b4fe; display: flex; flex-direction: column; gap: 2px; font-size: 13px; color: #4a044e; }
-        .totals .total { font-size: 15px; font-weight: 700; color: #6b21a8; margin-top: 2px; }
-        .payment { margin-top: 10px; }
-        .payment-label { display: block; font-size: 12px; color: #6b21a8; margin-bottom: 4px; font-weight: 500; }
-        .payment-options { display: flex; flex-wrap: wrap; gap: 6px; }
-        .payment-options button { font-size: 12px; padding: 5px 10px; border: 1px solid #d8b4fe; background: white; color: #581c87; border-radius: 999px; cursor: pointer; }
-        .payment-options button.sel { background: #6b21a8; color: white; border-color: #6b21a8; }
-        .payment-options button:disabled { opacity: 0.5; cursor: not-allowed; }
-        .payment-options em { font-style: normal; font-size: 10px; opacity: 0.7; }
-        .confirm { margin-top: 12px; width: 100%; background: #16a34a; color: white; padding: 10px 16px; border: none; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; }
-        .confirm:hover { background: #15803d; }
-        .confirm:disabled { background: #94a3b8; cursor: not-allowed; }
-        .note { margin-top: 12px; padding: 10px 12px; border-radius: 10px; font-size: 13px; }
-        .note.ok { background: #d1fae5; color: #065f46; }
-        .note.err { background: #fee2e2; color: #991b1b; }
+        .card.draft {
+          background: var(--surface);
+          border: 1px solid var(--border);
+          border-radius: var(--radius);
+          padding: 18px;
+        }
+        .head {
+          display: flex;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 8px;
+          font-weight: 600;
+          margin-bottom: 10px;
+          color: var(--text);
+        }
+        .title {
+          flex: 1;
+          min-width: 0;
+          overflow-wrap: anywhere;
+        }
+        .meta {
+          font-size: 11px;
+          color: var(--brand);
+          background: var(--accent-soft);
+          padding: 2px 8px;
+          border-radius: var(--radius-pill);
+        }
+        .items {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          padding: 8px;
+          background: var(--surface);
+          border-radius: var(--radius-sm);
+          border: 1px solid var(--border);
+        }
+        .row {
+          display: flex;
+          justify-content: space-between;
+          font-size: 14px;
+          color: var(--text);
+          gap: 12px;
+          overflow-wrap: anywhere;
+        }
+        .totals {
+          margin-top: 8px;
+          padding-top: 8px;
+          border-top: 1px dashed var(--border);
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          font-size: 13px;
+          color: var(--text);
+        }
+        .totals .total {
+          font-size: 15px;
+          font-weight: 700;
+          color: var(--brand);
+          margin-top: 2px;
+        }
+        .payment {
+          margin-top: 10px;
+        }
+        .payment-label {
+          display: block;
+          font-size: 12px;
+          color: var(--brand);
+          margin-bottom: 4px;
+          font-weight: 500;
+        }
+        .payment-options {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+        }
+        .payment-options button {
+          font-size: 12px;
+          min-height: 44px;
+          padding: 10px 12px;
+          border: 1px solid var(--border);
+          background: var(--surface);
+          color: var(--text);
+          border-radius: var(--radius-pill);
+          cursor: pointer;
+        }
+        .payment-options button.sel {
+          background: var(--brand);
+          color: var(--on-brand);
+          border-color: var(--brand);
+        }
+        .payment-options button:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+        .payment-options em {
+          font-style: normal;
+          font-size: 10px;
+          opacity: 0.7;
+        }
+        .confirm {
+          margin-top: 12px;
+          width: 100%;
+          background: var(--brand);
+          color: var(--on-brand);
+          padding: 10px 16px;
+          border: none;
+          border-radius: var(--radius-sm);
+          font-size: 14px;
+          font-weight: 600;
+          cursor: pointer;
+        }
+        .confirm:hover {
+          background: var(--brand2);
+        }
+        .confirm:disabled {
+          background: var(--disabled-bg);
+          color: var(--muted);
+          cursor: not-allowed;
+        }
+        .note {
+          margin-top: 12px;
+          padding: 10px 12px;
+          border-radius: var(--radius-sm);
+          font-size: 13px;
+        }
+        .note.ok {
+          background: var(--success-soft);
+          color: var(--success);
+        }
+        .note.err {
+          background: var(--danger-soft);
+          color: var(--danger);
+        }
       `}</style>
     </div>
   );
@@ -473,19 +858,38 @@ function OrderSubmittedCard({ payload }: { payload: OrderSubmittedPayload }) {
   return (
     <div className="card submitted">
       <div className="head">
-        <span className="icon">✅</span>
         <span className="title">訂單已建立：{payload.cafeteria}</span>
       </div>
       <div className="body">
         訂單號 <code>{payload.orderId}</code>
-        <br />
-        共 {payload.itemCount} 項 / 總計 ${payload.total}
+        <br />共 {payload.itemCount} 項 / 總計 ${payload.total}
       </div>
       <style jsx>{`
-        .card.submitted { background: #ecfdf5; border: 1px solid #6ee7b7; border-radius: 14px; padding: 14px; color: #065f46; }
-        .head { display: flex; align-items: center; gap: 8px; font-weight: 600; }
-        .body { font-size: 13px; margin-top: 6px; }
-        code { background: white; padding: 2px 6px; border-radius: 4px; font-family: monospace; }
+        .card.submitted {
+          background: var(--success-soft);
+          border: 1px solid var(--border);
+          border-radius: var(--radius);
+          padding: 18px;
+          color: var(--success);
+        }
+        .head {
+          display: flex;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 8px;
+          font-weight: 600;
+        }
+        .body {
+          font-size: 13px;
+          margin-top: 6px;
+          overflow-wrap: anywhere;
+        }
+        code {
+          background: var(--surface);
+          padding: 2px 6px;
+          border-radius: 4px;
+          font-family: monospace;
+        }
       `}</style>
     </div>
   );
@@ -501,13 +905,29 @@ function NavigateCard({ payload }: { payload: NavigatePayload }) {
     const url = `/map?route=${from},${to}`;
     return (
       <Link href={url} className="nav">
-        <span>🗺️</span>
         <span>{payload.reason || '在地圖開啟'}</span>
         <span className="chev">›</span>
         <style jsx>{`
-          .nav { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: white; border: 1px solid #c7d2fe; border-radius: 10px; color: #3730a3; text-decoration: none; font-size: 14px; }
-          .nav:hover { background: #eef2ff; }
-          .chev { margin-left: auto; color: #818cf8; font-size: 18px; }
+          .nav {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 12px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--brand);
+            text-decoration: none;
+            font-size: 14px;
+          }
+          .nav:hover {
+            background: var(--accent-soft);
+          }
+          .chev {
+            margin-left: auto;
+            color: var(--brand2);
+            font-size: 18px;
+          }
         `}</style>
       </Link>
     );

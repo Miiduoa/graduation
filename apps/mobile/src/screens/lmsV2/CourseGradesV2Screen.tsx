@@ -1,4 +1,6 @@
 import React from 'react';
+import { theme } from '../../ui/theme';
+import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 import { View, Text, StyleSheet } from 'react-native';
 import { getSupabaseClient } from '../../services/supabaseClient';
 import {
@@ -9,6 +11,7 @@ import {
 } from './_courseV2Shell';
 
 export default function CourseGradesV2Screen() {
+  const styles = useThemeStyleSheet(createStyles);
   const { courseId, courseName } = useCourseV2Params();
   const loadable = useLoadable(async () => {
     const sb = getSupabaseClient();
@@ -28,7 +31,7 @@ export default function CourseGradesV2Screen() {
   });
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#F2F2F7' }}>
+    <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       <CourseV2Header title="成績" subtitle={courseName} />
       {loadable.data?.rollup ? (
         <View style={styles.summary}>
@@ -67,30 +70,30 @@ export default function CourseGradesV2Screen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     marginHorizontal: 12,
     marginVertical: 6,
     padding: 14,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: theme.colors.surface,
     borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E5E5EA',
+    borderColor: theme.colors.border,
   },
-  title: { fontSize: 15, fontWeight: '600' },
-  meta: { fontSize: 12, color: '#8E8E93', marginTop: 2 },
+  title: { color: theme.colors.text, fontSize: 15, fontWeight: '600' },
+  meta: { fontSize: 12, color: theme.colors.muted, marginTop: 2 },
   scoreBox: { alignItems: 'flex-end' },
-  score: { fontSize: 22, fontWeight: '700', color: '#5856D6' },
-  max: { fontSize: 12, color: '#AEAEB2', fontWeight: '400' },
+  score: { fontSize: 22, fontWeight: '700', color: theme.colors.accent },
+  max: { fontSize: 12, color: theme.colors.muted, fontWeight: '400' },
   summary: {
     margin: 12,
     padding: 14,
-    backgroundColor: '#EFF6FF',
+    backgroundColor: theme.colors.accentSoft,
     borderRadius: 10,
     alignItems: 'center',
   },
-  summaryLabel: { fontSize: 13, color: '#1E40AF' },
-  summaryValue: { fontSize: 32, fontWeight: '700', color: '#1E3A8A', marginTop: 4 },
+  summaryLabel: { fontSize: 13, color: theme.colors.accent },
+  summaryValue: { fontSize: 32, fontWeight: '700', color: theme.colors.accent, marginTop: 4 },
 });

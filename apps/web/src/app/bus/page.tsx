@@ -1,381 +1,288 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import Link from 'next/link';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
+import {
+  BUS_FRESHNESS_MS,
+  TAICHUNG_BUS_URL,
+  loadBusArrivals,
+  loadBusRoutes,
+  type BusArrivals,
+  type CampusBusRoute,
+} from '@/lib/bus';
+import styles from '@/app/home.module.css';
 
-type RouteDisplay = {
-  id: string;
-  name: string;
-  color: string;
-  stops: string[];
-  interval: string;
-  firstBus: string;
-  lastBus: string;
-};
-
-type UpcomingBus = {
-  route: string;
-  stop: string;
-  arrival: string;
-  minutesAway: number;
-  color: string;
-};
-
-const DEFAULT_ROUTES: RouteDisplay[] = [
-  {
-    id: '1',
-    name: '校園環線',
-    color: '#5856D6',
-    stops: ['校門口', '體育館', '圖書館', '工學院', '宿舍', '校門口'],
-    interval: '10–15 分',
-    firstBus: '07:00',
-    lastBus: '22:00',
-  },
-  {
-    id: '2',
-    name: '捷運接駁線',
-    color: '#34C759',
-    stops: ['校門口', '捷運站'],
-    interval: '20 分',
-    firstBus: '07:30',
-    lastBus: '22:30',
-  },
-  {
-    id: '3',
-    name: '宿舍快線',
-    color: '#FF9500',
-    stops: ['校門口', '男宿', '女宿', '研究生宿舍'],
-    interval: '15 分',
-    firstBus: '08:00',
-    lastBus: '23:00',
-  },
-  {
-    id: '4',
-    name: '夜間安心線',
-    color: '#FF3B30',
-    stops: ['圖書館', '女宿', '男宿', '校門口'],
-    interval: '30 分',
-    firstBus: '22:00',
-    lastBus: '01:00',
-  },
-];
-
-const DEFAULT_UPCOMING: UpcomingBus[] = [
-  { route: '校園環線', stop: '校門口', arrival: '8 分鐘', minutesAway: 8, color: '#5856D6' },
-  { route: '捷運接駁線', stop: '校門口', arrival: '12 分鐘', minutesAway: 12, color: '#34C759' },
-  { route: '宿舍快線', stop: '校門口', arrival: '18 分鐘', minutesAway: 18, color: '#FF9500' },
-  { route: '校園環線', stop: '校門口', arrival: '23 分鐘', minutesAway: 23, color: '#5856D6' },
-];
-
-export default function BusPage(props: { searchParams?: { school?: string; schoolId?: string } }) {
-  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
-  const [selectedRoute, setSelectedRoute] = useState<string>('all');
-  const [now, setNow] = useState(new Date());
+function Arrivals({
+  schoolId,
+  stopId,
+  stopName,
+  city,
+}: {
+  schoolId: string;
+  stopId: string;
+  stopName: string;
+  city: string;
+}) {
+  const [data, setData] = useState<BusArrivals | null>(null);
+  const [loading, setLoading] = useState(true);
+  const generation = useRef(0);
+  const cancelRequests = useCallback(() => {
+    generation.current += 1;
+  }, []);
+  const refresh = useCallback(async () => {
+    const current = ++generation.current;
+    const next = await loadBusArrivals({ schoolId, stopId, city });
+    if (current !== generation.current) return;
+    setData(next);
+    setLoading(false);
+  }, [schoolId, stopId, city]);
 
   useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 30000);
-    return () => clearInterval(t);
-  }, []);
-
-  const timeStr = now.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
-  const nextBus = DEFAULT_UPCOMING[0];
+    void refresh();
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') void refresh();
+    }, 30_000);
+    const visible = () => {
+      if (document.visibilityState === 'visible') void refresh();
+    };
+    document.addEventListener('visibilitychange', visible);
+    return () => {
+      cancelRequests();
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', visible);
+    };
+  }, [refresh, cancelRequests]);
+  useEffect(() => {
+    if (data?.status !== 'ready') return;
+    const delay = Math.max(0, Date.parse(data.fetchedAt) + BUS_FRESHNESS_MS - Date.now());
+    const timer = setTimeout(
+      () => setData({ status: 'unavailable', arrivals: [], fetchedAt: null }),
+      delay,
+    );
+    return () => clearTimeout(timer);
+  }, [data]);
 
   return (
-    <SiteShell title="公車" subtitle="校園接駁即時資訊" schoolName={schoolName}>
-      <div className="pageStack">
-        {/* AI 推薦卡 */}
-        <Link
-          href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('今天最近的公車到逢甲商圈幾點？')}`}
-          className="card"
-          style={{
-            padding: '14px 18px',
-            background: 'linear-gradient(135deg, rgba(88,86,214,0.10) 0%, rgba(88,86,214,0.06) 100%)',
-            border: '1px solid rgba(88,86,214,0.28)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 14,
-            textDecoration: 'none',
-            color: 'inherit',
+    <section className={styles.section} aria-labelledby="arrival-heading" aria-busy={loading}>
+      <div className={styles.sectionHeading}>
+        <h2 id="arrival-heading">{stopName} 到站資訊</h2>
+        <button
+          className={styles.secondary}
+          disabled={loading}
+          onClick={() => {
+            setLoading(true);
+            void refresh();
           }}
         >
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#5856D6', marginBottom: 3 }}>
-              🤖 AI 助手 · 路線推薦
-            </div>
-            <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>
-              想知道下一班幾點到哪裡？問 AI 規劃最快的接駁路線。
-            </div>
-          </div>
-          <span style={{ fontSize: 12, color: '#5856D6', fontWeight: 600 }}>問 AI →</span>
-        </Link>
+          {loading ? '正在查詢…' : '更新到站資訊'}
+        </button>
+      </div>
+      {loading && !data && (
+        <p role="status" className={styles.empty}>
+          正在向交通資料服務查詢。
+        </p>
+      )}
+      {data?.status === 'error' && (
+        <p role="alert" className={styles.notice}>
+          無法連線取得到站資訊，請重新查詢或使用官方公車網站。
+        </p>
+      )}
+      {data?.status === 'unavailable' && (
+        <p role="status" className={styles.empty}>
+          目前沒有可確認的即時到站資訊，請使用官方查詢確認班次。
+        </p>
+      )}
+      {data?.status === 'ready' && (
+        <>
+          <p className={styles.sectionNote}>
+            交通部 TDX 資料 · 取得於{' '}
+            {new Date(data.fetchedAt).toLocaleTimeString('zh-TW', {
+              timeZone: 'Asia/Taipei',
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+            })}
+            。到站時間為預估，請留意現場車況。
+          </p>
+          {data.arrivals.length ? (
+            <ul className={styles.list}>
+              {data.arrivals.map((arrival, index) => (
+                <li
+                  className={styles.task}
+                  key={`${arrival.routeName}:${arrival.direction}:${index}`}
+                >
+                  <div className={styles.taskContent}>
+                    <strong>{arrival.routeName}</strong>
+                    <span>{arrival.direction || stopName}</span>
+                  </div>
+                  <span className={styles.deadline}>{arrival.label}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className={styles.empty}>交通資料服務目前沒有提供這一站的到站預估。</p>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
 
-        {/* ── Next Bus Hero ── */}
-        <div
-          className="card"
-          style={{
-            background: `linear-gradient(135deg, ${nextBus.color} 0%, ${nextBus.color}AA 100%)`,
-            border: 'none',
-            color: '#fff',
-            boxShadow: `6px 6px 16px ${nextBus.color}40, -3px -3px 8px rgba(255,255,255,0.7)`,
-            padding: '24px 28px',
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 16,
-              flexWrap: 'wrap',
+function SchoolBus({ schoolId }: { schoolId: string }) {
+  const [routes, setRoutes] = useState<CampusBusRoute[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [routeId, setRouteId] = useState('');
+  const [stopId, setStopId] = useState('');
+  const generation = useRef(0);
+  const cancelRequests = useCallback(() => {
+    generation.current += 1;
+  }, []);
+  const refresh = useCallback(() => {
+    const current = ++generation.current;
+    return loadBusRoutes(schoolId)
+      .then(
+        (next) => {
+          if (current === generation.current) {
+            setRoutes(next);
+            setFailed(false);
+          }
+        },
+        () => {
+          if (current === generation.current) {
+            setRoutes(null);
+            setFailed(true);
+          }
+        },
+      )
+      .finally(() => {
+        if (current === generation.current) setLoading(false);
+      });
+  }, [schoolId]);
+  useEffect(() => {
+    void refresh();
+    return () => {
+      cancelRequests();
+    };
+  }, [refresh, cancelRequests]);
+  const route = routes?.find((route) => route.id === routeId) ?? routes?.[0];
+  const stop = route?.stops.find((stop) => stop.id === stopId) ?? route?.stops[0];
+  return (
+    <>
+      <section className={styles.focus}>
+        <p className={styles.focusLabel}>出發前確認班次</p>
+        <h2>先選路線，再選候車站牌</h2>
+        <p>查詢校園周邊已登錄的公車站點；尚未取得的班次會清楚標示。</p>
+        <div className={styles.focusActions}>
+          {schoolId === 'pu' && (
+            <a
+              className={styles.primary}
+              href={TAICHUNG_BUS_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              臺中市官方公車查詢 <span aria-hidden="true">↗</span>
+            </a>
+          )}
+          <button
+            className={styles.secondary}
+            disabled={loading}
+            onClick={() => {
+              setLoading(true);
+              void refresh();
             }}
           >
-            <div>
-              <p
-                style={{
-                  margin: '0 0 4px',
-                  fontSize: 11,
-                  letterSpacing: '0.2em',
-                  textTransform: 'uppercase',
-                  opacity: 0.75,
-                  fontWeight: 600,
-                }}
-              >
-                下一班 · {timeStr}
-              </p>
-              <div
-                style={{ fontSize: 64, fontWeight: 700, letterSpacing: '-0.06em', lineHeight: 1 }}
-              >
-                {nextBus.minutesAway}
-                <span style={{ fontSize: 28, fontWeight: 700, marginLeft: 4 }}>分</span>
-              </div>
-              <p style={{ margin: '8px 0 0', fontSize: 15, opacity: 0.88 }}>
-                {nextBus.route} · {nextBus.stop}
-              </p>
-            </div>
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              {DEFAULT_UPCOMING.slice(1, 3).map((b, i) => (
-                <div
-                  key={i}
-                  style={{
-                    textAlign: 'center',
-                    background: 'rgba(255,255,255,0.18)',
-                    padding: '12px 18px',
-                    borderRadius: 'var(--radius-sm)',
-                    border: '1px solid rgba(255,255,255,0.25)',
-                  }}
-                >
-                  <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.05em' }}>
-                    {b.minutesAway}
-                    <span style={{ fontSize: 14 }}>分</span>
-                  </div>
-                  <div style={{ fontSize: 11, opacity: 0.8, marginTop: 2 }}>
-                    {b.route.slice(0, 5)}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+            {loading ? '讀取路線中…' : '重新讀取路線'}
+          </button>
         </div>
-
-        {/* ── Upcoming Buses ── */}
-        <div className="sectionCard">
-          <h3 className="sectionTitle">🚌 即將到站</h3>
-          <div className="insetGroup">
-            {DEFAULT_UPCOMING.map((b, i) => (
-              <div
-                key={i}
-                className="insetGroupRow"
-                style={{ borderTop: i === 0 ? 'none' : undefined }}
-              >
-                <div
-                  className="insetGroupRowIcon"
-                  style={{ background: `${b.color}18`, fontSize: 20 }}
-                >
-                  🚌
-                </div>
-                <div className="insetGroupRowContent">
-                  <div className="insetGroupRowTitle">{b.route}</div>
-                  <div className="insetGroupRowMeta">{b.stop}</div>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div
-                    style={{
-                      fontSize: 20,
-                      fontWeight: 700,
-                      color: b.color,
-                      letterSpacing: '-0.04em',
-                    }}
-                  >
-                    {b.minutesAway}
-                    <span style={{ fontSize: 12, fontWeight: 600 }}> 分</span>
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>後到站</div>
-                </div>
-              </div>
-            ))}
-          </div>
+      </section>
+      {failed && (
+        <p role="alert" className={styles.notice}>
+          目前無法取得校園路線資料，請重新讀取或使用官方查詢。
+        </p>
+      )}
+      {!loading && !failed && !routes?.length && (
+        <div className={styles.empty}>
+          <h2>目前沒有可查詢的校園站點</h2>
+          <p>你仍可使用官方公車網站選擇路線與候車站牌。</p>
         </div>
-
-        {/* ── Route Selector ── */}
-        <div className="toolbarPanel">
-          <div className="segmentedGroup" style={{ width: '100%' }}>
-            <button
-              className={selectedRoute === 'all' ? 'active' : ''}
-              onClick={() => setSelectedRoute('all')}
-            >
-              全部路線
-            </button>
-            {DEFAULT_ROUTES.map((r) => (
-              <button
-                key={r.id}
-                className={selectedRoute === r.id ? 'active' : ''}
-                onClick={() => setSelectedRoute(r.id)}
-              >
-                {r.name}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* ── Routes ── */}
-        <div className="pageStack">
-          {DEFAULT_ROUTES.filter((r) => selectedRoute === 'all' || r.id === selectedRoute).map(
-            (route) => (
-              <div
-                key={route.id}
-                className="card"
-                style={{ borderLeft: `4px solid ${route.color}` }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    justifyContent: 'space-between',
-                    gap: 12,
-                    marginBottom: 14,
+      )}
+      {route && stop && (
+        <>
+          <section className={styles.section} aria-label="選擇候車站點">
+            <div className={styles.courses}>
+              <label className={styles.course}>
+                公車路線
+                <select
+                  value={route.id}
+                  onChange={(event) => {
+                    setRouteId(event.target.value);
+                    setStopId('');
                   }}
+                  style={{ display: 'block', width: '100%', padding: 12, marginTop: 8 }}
                 >
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div
-                        style={{
-                          width: 12,
-                          height: 12,
-                          borderRadius: '50%',
-                          background: route.color,
-                          flexShrink: 0,
-                        }}
-                      />
-                      <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>{route.name}</h3>
-                    </div>
-                    <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>
-                      每 {route.interval} · {route.firstBus}–{route.lastBus}
-                    </div>
-                  </div>
-                  <span
-                    className="pill"
-                    style={{
-                      background: `${route.color}14`,
-                      color: route.color,
-                      borderColor: `${route.color}20`,
-                    }}
-                  >
-                    {route.interval}
-                  </span>
-                </div>
-
-                {/* Stop timeline */}
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 0,
-                    overflowX: 'auto',
-                    padding: '4px 0',
-                  }}
-                >
-                  {route.stops.map((stop, i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-                      <div
-                        style={{
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'center',
-                          gap: 4,
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: 10,
-                            height: 10,
-                            borderRadius: '50%',
-                            background: route.color,
-                            border: i === 0 ? '3px solid white' : '2px solid ' + route.color,
-                            boxShadow: 'var(--shadow-sm)',
-                          }}
-                        />
-                        <span
-                          style={{
-                            fontSize: 10,
-                            color: 'var(--muted)',
-                            whiteSpace: 'nowrap',
-                            fontWeight: 600,
-                          }}
-                        >
-                          {stop}
-                        </span>
-                      </div>
-                      {i < route.stops.length - 1 && (
-                        <div
-                          style={{
-                            width: 28,
-                            height: 2,
-                            background: `${route.color}40`,
-                            flexShrink: 0,
-                            margin: '-8px 0 0',
-                          }}
-                        />
-                      )}
-                    </div>
+                  {routes?.map((entry) => (
+                    <option key={entry.id} value={entry.id}>
+                      {entry.name}
+                    </option>
                   ))}
-                </div>
-              </div>
-            ),
-          )}
-        </div>
-
-        {/* ── AI 公車查詢入口 ── */}
-        <div
-          style={{
-            padding: '14px 18px',
-            borderRadius: 'var(--radius)',
-            background: 'linear-gradient(135deg, rgba(88,86,214,0.10) 0%, rgba(90,200,250,0.07) 100%)',
-            border: '1px solid rgba(88,86,214,0.22)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 14,
-            flexWrap: 'wrap',
-          }}
-        >
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand)', marginBottom: 3 }}>🤖 AI 公車助理</div>
-            <div style={{ fontSize: 13, color: 'var(--text)' }}>
-              想知道下一班到宿舍或圖書館的公車幾分鐘後到？讓 AI 幫你查詢。
+                </select>
+              </label>
+              <label className={styles.course}>
+                候車站牌
+                <select
+                  value={stop.id}
+                  onChange={(event) => setStopId(event.target.value)}
+                  style={{ display: 'block', width: '100%', padding: 12, marginTop: 8 }}
+                >
+                  {route.stops.map((entry) => (
+                    <option key={entry.id} value={entry.id}>
+                      {entry.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
-          </div>
-          <a
-            href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('現在最近一班到圖書館的校園公車是幾分鐘後到？途中要在哪一站換車？')}`}
-            className="btn"
-            style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
-          >
-            問 AI →
-          </a>
-        </div>
-      </div>
+            {route.description && <p className={styles.sectionNote}>{route.description}</p>}
+          </section>
+          <Arrivals
+            key={`${schoolId}:${route.city}:${stop.id}`}
+            schoolId={schoolId}
+            city={route.city}
+            stopId={stop.id}
+            stopName={stop.name}
+          />
+        </>
+      )}
+    </>
+  );
+}
+
+function BusContext() {
+  const search = useSearchParams();
+  const { schoolId, schoolName } = resolveSchoolPageContext({
+    school: search.get('school') ?? undefined,
+    schoolId: search.get('schoolId') ?? undefined,
+  });
+  return (
+    <SiteShell title="公車與交通" subtitle="查看候車站牌，確認到站資訊。" schoolName={schoolName}>
+      <SchoolBus key={schoolId} schoolId={schoolId} />
     </SiteShell>
+  );
+}
+
+export default function BusPage() {
+  return (
+    <Suspense
+      fallback={
+        <SiteShell title="公車與交通">
+          <p role="status">讀取校園交通資料…</p>
+        </SiteShell>
+      }
+    >
+      <BusContext />
+    </Suspense>
   );
 }

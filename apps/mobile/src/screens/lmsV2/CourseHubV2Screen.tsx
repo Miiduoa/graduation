@@ -4,6 +4,8 @@
  * 邏輯:取課程資訊 + 顯示 8 個 chip:教材/作業/測驗/討論/公告/成績/AI 助教/直播
  */
 import React from 'react';
+import { theme } from '../../ui/theme';
+import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native';
 import { getSupabaseClient } from '../../services/supabaseClient';
 import {
@@ -24,11 +26,12 @@ const CHIPS: Chip[] = [
   { key: 'forum', label: '討論', emoji: '💬', route: 'CourseForumV2' },
   { key: 'announcements', label: '公告', emoji: '📢', route: 'CourseAnnouncementsV2' },
   { key: 'grades', label: '成績', emoji: '💯', route: 'CourseGradesV2' },
-  { key: 'ai', label: 'AI 助教', emoji: '🤖', route: 'CourseAIAssistantV2' },
+  { key: 'ai', label: '課程助理', emoji: '💬', route: 'CourseAIAssistantV2' },
   { key: 'live', label: '直播', emoji: '🎥', route: 'CourseLiveV2' },
 ];
 
 export default function CourseHubV2Screen() {
+  const styles = useThemeStyleSheet(createStyles);
   const { courseId, courseName } = useCourseV2Params();
   const nav = useCourseV2Nav();
   const loadable = useLoadable(async () => {
@@ -47,7 +50,7 @@ export default function CourseHubV2Screen() {
   const course = loadable.data!;
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#F2F2F7' }}>
+    <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       <CourseV2Header
         title={course.title}
         subtitle={course.catalog_summary || (course.credit_hours ? `${course.credit_hours} 學分` : String(courseId))}
@@ -68,19 +71,19 @@ export default function CourseHubV2Screen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap', padding: 12, gap: 12 },
   chip: {
     width: '46%',
     aspectRatio: 1.4,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: theme.colors.surface,
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E5E5EA',
+    borderColor: theme.colors.border,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
   },
   chipEmoji: { fontSize: 36 },
-  chipLabel: { fontSize: 14, fontWeight: '600' },
+  chipLabel: { color: theme.colors.text, fontSize: 14, fontWeight: '600' },
 });

@@ -71,6 +71,7 @@ export type {
 } from '@campus/shared/src';
 import { collectionFromSegments, docFromSegments } from './firestorePath';
 import { areUniversalDevAccountsEnabled } from './runtime';
+import { subscribePreferredCollection } from './preferredCollection';
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -138,7 +139,7 @@ export function getDb(): Firestore {
 }
 
 export function getAuth(): Auth | null {
-  if (typeof window === 'undefined') return null;
+  if (typeof window === 'undefined' || !isFirebaseConfigured()) return null;
   if (!auth) {
     try {
       auth = firebaseGetAuth(getApp());
@@ -677,7 +678,12 @@ function subscribeCollectionAtPath<T extends { id: string }>(
 
   return onSnapshot(
     q,
+    { includeMetadataChanges: true },
     (snap) => {
+      if (snap.metadata.fromCache || snap.metadata.hasPendingWrites) {
+        onError(new Error('Waiting for confirmed school data'));
+        return;
+      }
       onData(
         snap.docs
           .map((d) => parseDocument<T>({ id: d.id, data: () => d.data() }))
@@ -699,7 +705,12 @@ function subscribeRootCollection<T extends { id: string }>(
 
   return onSnapshot(
     q,
+    { includeMetadataChanges: true },
     (snap) => {
+      if (snap.metadata.fromCache || snap.metadata.hasPendingWrites) {
+        onError(new Error('Waiting for confirmed school data'));
+        return;
+      }
       onData(
         snap.docs
           .map((d) => parseDocument<T>({ id: d.id, data: () => d.data() }))
@@ -708,56 +719,6 @@ function subscribeRootCollection<T extends { id: string }>(
     },
     onError,
   );
-}
-
-function subscribePreferredCollection<T>(
-  sources: Array<{
-    key: string;
-    subscribe: (onData: (rows: T[]) => void, onError: (error: unknown) => void) => Unsubscribe;
-  }>,
-  onData: (rows: T[]) => void,
-  onError: (error: unknown) => void,
-): Unsubscribe {
-  const snapshots = new Map<string, T[]>();
-  let failedSources = 0;
-
-  const emitPreferred = () => {
-    for (const source of sources) {
-      const rows = snapshots.get(source.key);
-      if (rows && rows.length > 0) {
-        onData(rows);
-        return;
-      }
-    }
-
-    for (const source of sources) {
-      if (snapshots.has(source.key)) {
-        onData(snapshots.get(source.key) ?? []);
-        return;
-      }
-    }
-  };
-
-  const unsubs = sources.map((source) =>
-    source.subscribe(
-      (rows) => {
-        snapshots.set(source.key, rows);
-        emitPreferred();
-      },
-      (error) => {
-        failedSources += 1;
-        console.warn(`[Firebase] Live subscription failed for ${source.key}:`, error);
-
-        if (failedSources >= sources.length) {
-          onError(error);
-        }
-      },
-    ),
-  );
-
-  return () => {
-    unsubs.forEach((unsubscribe) => unsubscribe());
-  };
 }
 
 export async function fetchSchoolSSOConfig(schoolId: string): Promise<SchoolSSOConfig | null> {
@@ -2323,19 +2284,22 @@ export async function updateUserProfile(
   }
 
   try {
+    const authInstance = getAuth();
+    const owner = authInstance?.currentUser;
+    if (!owner || owner.uid !== userId) return { success: false, error: 'Account changed' };
     const firestore = getDb();
     const userRef = doc(firestore, 'users', userId);
 
     await updateDoc(userRef, {
-      ...updates,
+      ...Object.fromEntries(Object.entries(updates).filter(([, value]) => value !== undefined)),
       updatedAt: serverTimestamp(),
     });
 
-    const authInstance = getAuth();
-    if (authInstance?.currentUser && updates.displayName) {
-      await updateProfile(authInstance.currentUser, { displayName: updates.displayName });
+    if (authInstance.currentUser !== owner) return { success: false, error: 'Account changed' };
+    if (updates.displayName !== undefined) {
+      await updateProfile(owner, { displayName: updates.displayName });
     }
-
+    if (authInstance.currentUser !== owner) return { success: false, error: 'Account changed' };
     return { success: true };
   } catch (error) {
     console.error('[Firebase] Failed to update user profile:', error);

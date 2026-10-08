@@ -1,6 +1,11 @@
 'use strict';
 
-const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { onCall: firebaseOnCall, HttpsError } = require('firebase-functions/v2/https');
+const { createAccountGuardedOnCall } = require('../../accountLifecycle');
+const onCall = createAccountGuardedOnCall({
+  onCall: firebaseOnCall,
+  getDb: () => require('firebase-admin/firestore').getFirestore(),
+});
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { createAuthzHelpers } = require('../../authz');
 const { fetchAssistantUserProfile } = require('../../lib/assistantFetchers');
@@ -79,7 +84,8 @@ module.exports = onCall(
 
     await assertActiveSchoolMember(schoolId, uid);
 
-    const reqCtx = request.data?.context && typeof request.data.context === 'object' ? request.data.context : {};
+    const reqCtx =
+      request.data?.context && typeof request.data.context === 'object' ? request.data.context : {};
     const toolCtx = {
       uid,
       schoolId,
@@ -88,7 +94,8 @@ module.exports = onCall(
       prefetched: {},
     };
 
-    const rawInput = request.data?.input && typeof request.data.input === 'object' ? request.data.input : {};
+    const rawInput =
+      request.data?.input && typeof request.data.input === 'object' ? request.data.input : {};
     const agentRunId =
       request.data?.agentRunId != null && String(request.data.agentRunId).trim()
         ? String(request.data.agentRunId).trim()

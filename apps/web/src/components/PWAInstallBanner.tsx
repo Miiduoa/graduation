@@ -75,19 +75,9 @@ export function PWAInstallBanner() {
 
   return (
     <div className="pwaInstallBanner">
-      <div
-        style={{
-          maxWidth: 600,
-          margin: '0 auto',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 16,
-        }}
-      >
-        <div style={{ fontSize: 32 }}>📲</div>
-
-        <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 700, marginBottom: 4 }}>安裝校園助手 App</div>
+      <div className="pwaInstallContent">
+        <div style={{ flex: '1 1 200px' }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>把 Campus One 加入主畫面</div>
           <div style={{ fontSize: 13, opacity: 0.9 }}>
             {isIOS ? (
               <>
@@ -95,7 +85,7 @@ export function PWAInstallBanner() {
                 <span style={{ fontWeight: 600 }}>加入主畫面</span>
               </>
             ) : (
-              '快速存取校園資訊，支援離線瀏覽'
+              '下次從主畫面直接開啟。課程與個人資料仍需網路連線。'
             )}
           </div>
         </div>
@@ -105,11 +95,11 @@ export function PWAInstallBanner() {
             <button
               onClick={handleInstall}
               style={{
-                background: '#fff',
-                color: '#5856D6',
-                border: 'none',
+                background: 'var(--brand)',
+                color: 'var(--on-brand)',
+                border: '1px solid transparent',
                 padding: '10px 20px',
-                borderRadius: 8,
+                borderRadius: 'var(--radius-sm)',
                 fontWeight: 600,
                 cursor: 'pointer',
               }}
@@ -119,12 +109,13 @@ export function PWAInstallBanner() {
           )}
           <button
             onClick={handleDismiss}
+            aria-label="關閉加入主畫面提示"
             style={{
-              background: 'rgba(255,255,255,0.2)',
-              color: '#fff',
-              border: 'none',
+              background: 'var(--surface)',
+              color: 'var(--text)',
+              border: '1px solid var(--border)',
               padding: '10px 16px',
-              borderRadius: 8,
+              borderRadius: 'var(--radius-sm)',
               cursor: 'pointer',
             }}
           >
