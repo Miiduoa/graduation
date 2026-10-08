@@ -1,0 +1,82 @@
+.content {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.content input,
+.content select,
+.content textarea {
+  min-width: 0;
+  max-width: 100%;
+}
+.content button:focus-visible,
+.content input:focus-visible,
+.content textarea:focus-visible,
+.content select:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+.status {
+  padding: 24px;
+  margin-bottom: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.status h2 {
+  margin-top: 0;
+  font-size: 20px;
+}
+.status p {
+  color: var(--muted);
+}
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.tabs button {
+  padding: 10px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+}
+.tabs button[aria-pressed='true'] {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: var(--on-brand);
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.toolbar input {
+  flex: 1 1 160px;
+}
+.boardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  gap: 12px;
+}
+@media (max-width: 480px) {
+  .tabs button {
+    flex: 1 1 calc(50% - 6px);
+    padding: 10px;
+  }
+}
+.content [role='dialog'] > div {
+  min-width: 0;
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+}
+
+.toolbar button,
+.toolbar a { flex-shrink: 0; white-space: nowrap; }

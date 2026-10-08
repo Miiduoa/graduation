@@ -656,17 +656,17 @@ export function LearnStack() {
       <Stack.Screen
         name="DemoStory"
         component={UnavailableFeatureScreen}
-        options={{ title: '今天的故事' }}
+        options={{ title: '今天的故事', headerShown: false }}
       />
       <Stack.Screen
         name="GradeWhatIf"
         component={UnavailableFeatureScreen}
-        options={{ title: '📊 成績試算' }}
+        options={{ title: '📊 成績試算', headerShown: false }}
       />
       <Stack.Screen
         name="MistakeRepertoire"
         component={UnavailableFeatureScreen}
-        options={{ title: '🧠 錯題本' }}
+        options={{ title: '🧠 錯題本', headerShown: false }}
       />
       <Stack.Screen
         name="TeacherCockpit"
@@ -691,57 +691,57 @@ export function LearnStack() {
       <Stack.Screen
         name="StudentInbox"
         component={UnavailableFeatureScreen}
-        options={{ title: '📥 我的 Inbox' }}
+        options={{ title: '📥 我的 Inbox', headerShown: false }}
       />
       <Stack.Screen
         name="MonthlySummary"
         component={UnavailableFeatureScreen}
-        options={{ title: '📅 本月學習回顧' }}
+        options={{ title: '📅 本月學習回顧', headerShown: false }}
       />
       <Stack.Screen
         name="StudentOrders"
         component={UnavailableFeatureScreen}
-        options={{ title: '🛒 我的訂單' }}
+        options={{ title: '🛒 我的訂單', headerShown: false }}
       />
       <Stack.Screen
         name="VendorRevenueReport"
         component={UnavailableFeatureScreen}
-        options={{ title: '📊 月度報表' }}
+        options={{ title: '📊 月度報表', headerShown: false }}
       />
       <Stack.Screen
         name="VendorLoyaltyPush"
         component={UnavailableFeatureScreen}
-        options={{ title: '📣 Loyalty 推播' }}
+        options={{ title: '📣 Loyalty 推播', headerShown: false }}
       />
       <Stack.Screen
         name="VendorMenuManage"
         component={UnavailableFeatureScreen}
-        options={{ title: '🍽 菜單管理' }}
+        options={{ title: '🍽 菜單管理', headerShown: false }}
       />
       <Stack.Screen
         name="StudentRisk"
         component={UnavailableFeatureScreen}
-        options={{ title: '🏛 學生風險' }}
+        options={{ title: '🏛 學生風險', headerShown: false }}
       />
       <Stack.Screen
         name="TeachingEvaluation"
         component={UnavailableFeatureScreen}
-        options={{ title: '🏛 教學評鑑' }}
+        options={{ title: '🏛 教學評鑑', headerShown: false }}
       />
       <Stack.Screen
         name="AITrustCard"
         component={UnavailableFeatureScreen}
-        options={{ title: '助理權限與資料' }}
+        options={{ title: '助理權限與資料', headerShown: false }}
       />
       <Stack.Screen
         name="AIStudyBuddy"
         component={UnavailableFeatureScreen}
-        options={{ title: '學習夥伴' }}
+        options={{ title: '學習夥伴', headerShown: false }}
       />
       <Stack.Screen
         name="LifeRequests"
         component={UnavailableFeatureScreen}
-        options={{ title: '📝 請假 / 報修' }}
+        options={{ title: '📝 請假 / 報修', headerShown: false }}
       />
     </Stack.Navigator>
   );
