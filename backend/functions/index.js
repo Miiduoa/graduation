@@ -4,7 +4,9 @@ const {
   onDocumentWritten,
 } = require('firebase-functions/v2/firestore');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
-const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
+const { onCall: firebaseOnCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
+const { createAccountGuardedOnCall } = require('./accountLifecycle');
+const onCall = createAccountGuardedOnCall({ onCall: firebaseOnCall, getDb: () => db });
 const { defineSecret } = require('firebase-functions/params');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, FieldPath, FieldValue, Timestamp } = require('firebase-admin/firestore');
@@ -25,7 +27,18 @@ const {
   toPublicSsoConfig,
 } = require('./sso/providerRegistry');
 const { createNotificationService } = require('./lib/notificationService');
-const { evaluateLiveSessionJoin } = require('./lib/liveSessionJoinPolicy');
+const { createLiveSessionHandlers } = require('./attendanceSessions');
+const { createGroupMembershipHandlers } = require('./groupMembership');
+const { createOrderHandler } = require('./createOrder');
+const { createOrderStatusHandlers } = require('./orderTransitions');
+const { createSubmitProductFeedback } = require('./productFeedback');
+const { createEventRegistrationHandlers, prepareRegistrationPolicy } = require('./eventRegistration');
+const { readRealtimeBusCache } = require('./busArrivals');
+const { createPuCampusDataHandler, createGetMyAcademicRecords } = require('./academicRecords');
+const { createCalendarSubscriptionHandler } = require('./calendarSubscription');
+const { createExportUserDataHandler } = require('./userDataExport');
+const { createDeleteUserAccountHandler } = require('./accountDeletion');
+const { getAuth: getAdminAuth } = require('firebase-admin/auth');
 const {
   decryptSecretConfig,
   encryptSecretConfig,
@@ -49,7 +62,7 @@ const {
   isLocalMockAuthAllowed,
   verifyRequestFirebaseUser,
 } = require('./sessionSecurity');
-const { normalizeCafeteriaPilotStatus, resolveCafeteriaOrderingMetadata } = require('./cafeterias');
+const { normalizeCafeteriaPilotStatus } = require('./cafeterias');
 const { toJsDate, formatAssistantDate } = require('./lib/assistantFormat');
 const {
   fetchAssistantPendingAssignments,
@@ -178,13 +191,12 @@ initializeApp();
 
 const db = getFirestore();
 const messaging = getMessaging();
-const { getUserPushTokens, sendPushToUser, sendPushToMultipleUsers } = createNotificationService({
+const { sendPushToUser, sendPushToMultipleUsers } = createNotificationService({
   db,
   messaging,
 });
 const {
   assertActiveSchoolMember,
-  assertCafeteriaOperator,
   assertSchoolAdminOrEditor,
   assertServiceRole,
   getActiveSchoolMembership,
@@ -1126,16 +1138,6 @@ async function syncCafeteriaOperatorCount(schoolId, cafeteriaId) {
   return activeOperatorCount;
 }
 
-async function cafeteriaHasActiveOperator(schoolId, cafeteriaId) {
-  const activeOperatorsSnap = await getCafeteriaRef(schoolId, cafeteriaId)
-    .collection('operators')
-    .where('status', '==', 'active')
-    .limit(1)
-    .get();
-
-  return !activeOperatorsSnap.empty;
-}
-
 function generateGroupJoinCode(length = 8) {
   return nodeCrypto
     .randomBytes(length)
@@ -1394,7 +1396,10 @@ exports.getStudentRiskSnapshots = onCall(
       };
     }
 
-    const pendingAssignments = await fetchAssistantPendingAssignments(uid);
+    if (!schoolId) {
+      throw new HttpsError('failed-precondition', '請先選擇學校，再查詢課務摘要。');
+    }
+    const pendingAssignments = await fetchAssistantPendingAssignments(uid, schoolId);
     const highPressure = pendingAssignments.filter((assignment) => {
       const due = toJsDate(assignment.dueAt)?.getTime();
       return due && due - Date.now() <= 72 * 60 * 60 * 1000;
@@ -1583,7 +1588,9 @@ exports.enqueueAssistantAction = onCall(
     const sourceRunId =
       request.data?.sourceRunId != null ? String(request.data.sourceRunId).trim() : '';
     const urgencyRaw = request.data?.urgency != null ? String(request.data.urgency).trim() : '';
-    const urgency = ['low', 'medium', 'high', 'critical'].includes(urgencyRaw) ? urgencyRaw : undefined;
+    const urgency = ['low', 'medium', 'high', 'critical'].includes(urgencyRaw)
+      ? urgencyRaw
+      : undefined;
 
     const payload = {
       userId: uid,
@@ -1753,222 +1760,12 @@ exports.assignmentDueReminder = onSchedule(
 // iCal 訂閱 API
 // =====================================================
 
-function formatICalDate(date, allDay = false) {
-  const d = date instanceof Date ? date : date.toDate();
-  if (allDay) {
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}${month}${day}`;
-  }
-  return d
-    .toISOString()
-    .replace(/[-:]/g, '')
-    .replace(/\.\d{3}/, '');
-}
-
-function escapeICalText(text) {
-  if (!text) return '';
-  return text
-    .replace(/\\/g, '\\\\')
-    .replace(/;/g, '\\;')
-    .replace(/,/g, '\\,')
-    .replace(/\n/g, '\\n');
-}
-
-function generateICalFeed(events, calendarName = '校園行事曆') {
-  let ical = [
-    'BEGIN:VCALENDAR',
-    'VERSION:2.0',
-    'PRODID:-//Campus App//TW',
-    'CALSCALE:GREGORIAN',
-    'METHOD:PUBLISH',
-    `X-WR-CALNAME:${escapeICalText(calendarName)}`,
-    'X-WR-TIMEZONE:Asia/Taipei',
-    '',
-    'BEGIN:VTIMEZONE',
-    'TZID:Asia/Taipei',
-    'BEGIN:STANDARD',
-    'DTSTART:19700101T000000',
-    'TZOFFSETFROM:+0800',
-    'TZOFFSETTO:+0800',
-    'END:STANDARD',
-    'END:VTIMEZONE',
-  ];
-
-  for (const event of events) {
-    const uid = `${event.id}@campus-app.tw`;
-    const dtstamp = formatICalDate(new Date());
-
-    ical.push('BEGIN:VEVENT');
-    ical.push(`UID:${uid}`);
-    ical.push(`DTSTAMP:${dtstamp}`);
-
-    if (event.allDay) {
-      ical.push(`DTSTART;VALUE=DATE:${formatICalDate(event.startsAt, true)}`);
-      if (event.endsAt) {
-        ical.push(`DTEND;VALUE=DATE:${formatICalDate(event.endsAt, true)}`);
-      }
-    } else {
-      ical.push(`DTSTART;TZID=Asia/Taipei:${formatICalDate(event.startsAt)}`);
-      if (event.endsAt) {
-        ical.push(`DTEND;TZID=Asia/Taipei:${formatICalDate(event.endsAt)}`);
-      }
-    }
-
-    ical.push(`SUMMARY:${escapeICalText(event.title)}`);
-
-    if (event.description) {
-      ical.push(`DESCRIPTION:${escapeICalText(event.description)}`);
-    }
-    if (event.location) {
-      ical.push(`LOCATION:${escapeICalText(event.location)}`);
-    }
-    if (event.url) {
-      ical.push(`URL:${event.url}`);
-    }
-    if (event.categories && event.categories.length > 0) {
-      ical.push(`CATEGORIES:${event.categories.map(escapeICalText).join(',')}`);
-    }
-
-    ical.push('END:VEVENT');
-  }
-
-  ical.push('END:VCALENDAR');
-  return ical.join('\r\n');
-}
-
 exports.calendarSubscribe = onRequest(
   {
     region: REGION,
     cors: true,
   },
-  async (req, res) => {
-    const { schoolId, userId, type } = req.query;
-
-    if (!schoolId) {
-      res.status(400).send('Missing schoolId parameter');
-      return;
-    }
-
-    try {
-      const events = [];
-
-      const schoolDoc = await db.collection('schools').doc(schoolId).get();
-      const schoolName = schoolDoc.data()?.name || schoolId;
-
-      if (!type || type === 'all' || type === 'events') {
-        const eventsSnap = await db
-          .collection('schools')
-          .doc(schoolId)
-          .collection('clubEvents')
-          .orderBy('startsAt', 'desc')
-          .limit(100)
-          .get();
-
-        for (const doc of eventsSnap.docs) {
-          const data = doc.data();
-          events.push({
-            id: `event-${doc.id}`,
-            title: data.title || '(無標題)',
-            description: data.description,
-            location: data.location,
-            startsAt: data.startsAt?.toDate() || new Date(),
-            endsAt: data.endsAt?.toDate(),
-            categories: ['活動'],
-            url: data.link,
-          });
-        }
-      }
-
-      if (userId && (!type || type === 'all' || type === 'assignments')) {
-        const userGroupsSnap = await db
-          .collection('users')
-          .doc(userId)
-          .collection('groups')
-          .where('schoolId', '==', schoolId)
-          .where('status', '==', 'active')
-          .get();
-
-        for (const groupRef of userGroupsSnap.docs) {
-          const groupId = groupRef.data().groupId;
-          if (!groupId) continue;
-
-          const groupDoc = await db.collection('groups').doc(groupId).get();
-          const groupName = groupDoc.data()?.name || '課程';
-
-          const assignmentsSnap = await db
-            .collection('groups')
-            .doc(groupId)
-            .collection('assignments')
-            .orderBy('dueAt', 'desc')
-            .limit(50)
-            .get();
-
-          for (const doc of assignmentsSnap.docs) {
-            const data = doc.data();
-            if (!data.dueAt) continue;
-
-            events.push({
-              id: `assignment-${groupId}-${doc.id}`,
-              title: `[作業] ${data.title || '(無標題)'} - ${groupName}`,
-              description: data.description,
-              startsAt: data.dueAt.toDate(),
-              allDay: true,
-              categories: ['作業', groupName],
-            });
-          }
-        }
-      }
-
-      if (userId && (!type || type === 'all' || type === 'registered')) {
-        const registrationsSnap = await db
-          .collection('schools')
-          .doc(schoolId)
-          .collection('registrations')
-          .where('userId', '==', userId)
-          .get();
-
-        const registeredEventIds = new Set(registrationsSnap.docs.map((d) => d.data().eventId));
-
-        for (const eventId of registeredEventIds) {
-          const eventDoc = await db
-            .collection('schools')
-            .doc(schoolId)
-            .collection('clubEvents')
-            .doc(eventId)
-            .get();
-
-          if (eventDoc.exists) {
-            const existingEvent = events.find((e) => e.id === `event-${eventId}`);
-            if (existingEvent) {
-              existingEvent.categories = [...(existingEvent.categories || []), '已報名'];
-            }
-          }
-        }
-      }
-
-      events.sort((a, b) => {
-        const aTime = a.startsAt instanceof Date ? a.startsAt.getTime() : 0;
-        const bTime = b.startsAt instanceof Date ? b.startsAt.getTime() : 0;
-        return aTime - bTime;
-      });
-
-      let calendarName = `${schoolName} 行事曆`;
-      if (type === 'events') calendarName = `${schoolName} 活動`;
-      if (type === 'assignments') calendarName = `${schoolName} 作業`;
-
-      const icalContent = generateICalFeed(events, calendarName);
-
-      res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
-      res.setHeader('Content-Disposition', `attachment; filename="${schoolId}-calendar.ics"`);
-      res.setHeader('Cache-Control', 'public, max-age=300');
-      res.send(icalContent);
-    } catch (error) {
-      console.error('Calendar subscribe error:', error);
-      res.status(500).send('Internal server error');
-    }
-  },
+  createCalendarSubscriptionHandler({ db }),
 );
 
 exports.calendarWebhook = onRequest(
@@ -3045,6 +2842,12 @@ exports.bulkUpdateSchoolAnnouncements = onCall(
   },
 );
 
+exports.submitProductFeedback = onCall({ region: REGION }, createSubmitProductFeedback({ db }));
+const eventRegistrationHandlers = createEventRegistrationHandlers({ db });
+exports.getEventRegistrations = onCall({ region: REGION }, eventRegistrationHandlers.getEventRegistrations);
+exports.registerCampusEvent = onCall({ region: REGION }, eventRegistrationHandlers.registerCampusEvent);
+exports.cancelCampusEventRegistration = onCall({ region: REGION }, eventRegistrationHandlers.cancelCampusEventRegistration);
+
 exports.upsertSchoolEvent = onCall(
   {
     region: REGION,
@@ -3067,45 +2870,54 @@ exports.upsertSchoolEvent = onCall(
     const events = db.collection('schools').doc(schoolId).collection('clubEvents');
     const targetRef = eventId ? events.doc(eventId) : events.doc();
 
-    if (eventId) {
-      const existing = await targetRef.get();
-      if (!existing.exists) {
-        throw new HttpsError('not-found', 'Event not found');
+    await db.runTransaction(async (transaction) => {
+      const membership = await transaction.get(db.collection('schools').doc(schoolId).collection('members').doc(uid));
+      if (!membership.exists || membership.data().status !== 'active' || !['admin', 'editor'].includes(membership.data().role)) throw new HttpsError('permission-denied', 'School editor permission required');
+      if (eventId) {
+        const existing = await transaction.get(targetRef);
+        if (!existing.exists) {
+          throw new HttpsError('not-found', 'Event not found');
+        }
+        const previous = existing.data();
+        // Validate the combined interval again on retries; omitted dates retain their value.
+        normalizeSchoolEventInput({
+          ...request.data,
+          startsAt:
+            request.data.startsAt === undefined ? previous.startsAt : request.data.startsAt,
+          endsAt: request.data.endsAt === undefined ? previous.endsAt : request.data.endsAt,
+        });
+        const registration = await prepareRegistrationPolicy({ db, transaction, schoolId, eventId: targetRef.id, previous, input: request.data.registrationPolicy, startsAt: request.data.startsAt === undefined ? previous.startsAt : normalized.startsAt, capacity: request.data.capacity === undefined ? previous.capacity : normalized.capacity });
+        transaction.update(targetRef, {
+          ...registration,
+          title: normalized.title,
+          description: normalized.description,
+          location: normalized.location,
+          updatedAt: FieldValue.serverTimestamp(),
+          updatedBy: uid,
+          updatedByEmail: actorEmail || null,
+          ...(request.data.startsAt === undefined ? {} : { startsAt: normalized.startsAt }),
+          ...(request.data.endsAt === undefined ? {} : { endsAt: normalized.endsAt }),
+          ...(request.data.capacity === undefined
+            ? {}
+            : { capacity: normalized.capacity == null ? FieldValue.delete() : normalized.capacity }),
+        });
+      } else {
+        const registration = await prepareRegistrationPolicy({ db, transaction, schoolId, eventId: targetRef.id, input: request.data.registrationPolicy, startsAt: normalized.startsAt, capacity: normalized.capacity });
+        transaction.create(targetRef, {
+          ...registration,
+          title: normalized.title,
+          description: normalized.description,
+          location: normalized.location,
+          schoolId,
+          createdBy: uid,
+          createdByEmail: actorEmail || null,
+          ...(normalized.startsAt instanceof Timestamp ? { startsAt: normalized.startsAt } : {}),
+          ...(normalized.endsAt instanceof Timestamp ? { endsAt: normalized.endsAt } : {}),
+          ...(normalized.capacity == null ? {} : { capacity: normalized.capacity }),
+          registeredCount: 0,
+        });
       }
-    }
-
-    if (eventId) {
-      const payload = {
-        title: normalized.title,
-        description: normalized.description,
-        location: normalized.location,
-        updatedAt: FieldValue.serverTimestamp(),
-        updatedBy: uid,
-        updatedByEmail: actorEmail || null,
-        startsAt:
-          normalized.startsAt instanceof Timestamp ? normalized.startsAt : FieldValue.delete(),
-        endsAt: normalized.endsAt,
-        capacity: normalized.capacity == null ? FieldValue.delete() : normalized.capacity,
-      };
-
-      await targetRef.set(payload, { merge: true });
-    } else {
-      await targetRef.set({
-        title: normalized.title,
-        description: normalized.description,
-        location: normalized.location,
-        schoolId,
-        createdBy: uid,
-        createdByEmail: actorEmail || null,
-        startsAt:
-          normalized.startsAt instanceof Timestamp
-            ? normalized.startsAt
-            : Timestamp.fromDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)),
-        ...(normalized.endsAt instanceof Timestamp ? { endsAt: normalized.endsAt } : {}),
-        ...(normalized.capacity == null ? {} : { capacity: normalized.capacity }),
-        registeredCount: 0,
-      });
-    }
+    });
 
     await logAdminAction({
       schoolId,
@@ -3121,6 +2933,19 @@ exports.upsertSchoolEvent = onCall(
     };
   },
 );
+
+async function deleteUnregisteredSchoolEvents(schoolId, uid, eventIds) {
+  const refs = eventIds.map((id) => db.collection('schools').doc(schoolId).collection('clubEvents').doc(id));
+  await db.runTransaction(async (transaction) => {
+    const [membership, ...events] = await transaction.getAll(db.collection('schools').doc(schoolId).collection('members').doc(uid), ...refs);
+    if (!membership.exists || membership.data().status !== 'active' || !['admin', 'editor'].includes(membership.data().role)) throw new HttpsError('permission-denied', 'School editor permission required');
+    for (const event of events) {
+      const data = event.data();
+      if (data && (data.appRegistrationCount > 0 || data.registeredCount > 0)) throw new HttpsError('failed-precondition', '仍有參加者的活動不可刪除，請先聯繫參加者處理名單。');
+    }
+    refs.forEach((ref) => transaction.delete(ref));
+  });
+}
 
 exports.deleteSchoolEvent = onCall(
   {
@@ -3140,7 +2965,7 @@ exports.deleteSchoolEvent = onCall(
 
     await assertSchoolAdminOrEditor(schoolId, uid);
     const actorEmail = trimString(request.auth?.token?.email, 320);
-    await db.collection('schools').doc(schoolId).collection('clubEvents').doc(eventId).delete();
+    await deleteUnregisteredSchoolEvents(schoolId, uid, [eventId]);
 
     await logAdminAction({
       schoolId,
@@ -3185,13 +3010,7 @@ exports.bulkDeleteSchoolEvents = onCall(
     await assertSchoolAdminOrEditor(schoolId, uid);
     const actorEmail = trimString(request.auth?.token?.email, 320);
 
-    for (const chunk of chunkItems(eventIds)) {
-      const batch = db.batch();
-      for (const eventId of chunk) {
-        batch.delete(db.collection('schools').doc(schoolId).collection('clubEvents').doc(eventId));
-      }
-      await batch.commit();
-    }
+    await deleteUnregisteredSchoolEvents(schoolId, uid, eventIds);
 
     await logAdminAction({
       schoolId,
@@ -3573,145 +3392,9 @@ exports.createGroup = onCall(
   },
 );
 
-exports.joinGroupByCode = onCall(
-  {
-    region: REGION,
-  },
-  async (request) => {
-    const uid = request.auth?.uid;
-    if (!uid) {
-      throw new HttpsError('unauthenticated', 'Must be logged in');
-    }
-
-    const { joinCode, schoolId } = request.data;
-
-    if (!joinCode || !schoolId) {
-      throw new HttpsError('invalid-argument', 'Missing join code or schoolId');
-    }
-
-    await assertActiveSchoolMember(schoolId, uid);
-
-    const groupsSnap = await db
-      .collection('groups')
-      .where('joinCode', '==', String(joinCode).trim().toUpperCase())
-      .limit(1)
-      .get();
-
-    if (groupsSnap.empty) {
-      throw new HttpsError('not-found', 'Invalid join code');
-    }
-
-    const groupDoc = groupsSnap.docs[0];
-    const groupId = groupDoc.id;
-    const groupData = groupDoc.data();
-
-    if (groupData.schoolId !== schoolId) {
-      throw new HttpsError('permission-denied', 'Join code belongs to a different school');
-    }
-
-    // 檢查是否已經是成員
-    const memberDoc = await db
-      .collection('groups')
-      .doc(groupId)
-      .collection('members')
-      .doc(uid)
-      .get();
-    if (memberDoc.exists && memberDoc.data().status === 'active') {
-      throw new HttpsError('already-exists', 'Already a member of this group');
-    }
-
-    const batch = db.batch();
-
-    // 加入群組
-    batch.set(db.collection('groups').doc(groupId).collection('members').doc(uid), {
-      uid,
-      role: 'member',
-      status: 'active',
-      joinedAt: FieldValue.serverTimestamp(),
-    });
-
-    // 更新成員數
-    batch.update(db.collection('groups').doc(groupId), {
-      memberCount: FieldValue.increment(1),
-    });
-
-    // 記錄到使用者的群組列表
-    batch.set(db.collection('users').doc(uid).collection('groups').doc(groupId), {
-      groupId,
-      schoolId: groupData.schoolId,
-      type: groupData.type || null,
-      name: groupData.name || null,
-      joinCode: groupData.joinCode || null,
-      status: 'active',
-      role: 'member',
-      joinedAt: FieldValue.serverTimestamp(),
-    });
-
-    await batch.commit();
-
-    return {
-      success: true,
-      groupId,
-      groupName: groupData.name,
-    };
-  },
-);
-
-exports.leaveGroup = onCall(
-  {
-    region: REGION,
-  },
-  async (request) => {
-    const uid = request.auth?.uid;
-    if (!uid) {
-      throw new HttpsError('unauthenticated', 'Must be logged in');
-    }
-
-    const { groupId } = request.data;
-
-    if (!groupId) {
-      throw new HttpsError('invalid-argument', 'Missing groupId');
-    }
-
-    const memberDoc = await db
-      .collection('groups')
-      .doc(groupId)
-      .collection('members')
-      .doc(uid)
-      .get();
-
-    if (!memberDoc.exists || memberDoc.data().status !== 'active') {
-      throw new HttpsError('not-found', 'Not a member of this group');
-    }
-
-    if (memberDoc.data().role === 'owner') {
-      throw new HttpsError(
-        'failed-precondition',
-        'Owner cannot leave the group. Transfer ownership first.',
-      );
-    }
-
-    const batch = db.batch();
-
-    batch.update(db.collection('groups').doc(groupId).collection('members').doc(uid), {
-      status: 'left',
-      leftAt: FieldValue.serverTimestamp(),
-    });
-
-    batch.update(db.collection('groups').doc(groupId), {
-      memberCount: FieldValue.increment(-1),
-    });
-
-    batch.update(db.collection('users').doc(uid).collection('groups').doc(groupId), {
-      status: 'left',
-      leftAt: FieldValue.serverTimestamp(),
-    });
-
-    await batch.commit();
-
-    return { success: true };
-  },
-);
+const groupMembershipHandlers = createGroupMembershipHandlers({ db });
+exports.joinGroupByCode = onCall({ region: REGION }, groupMembershipHandlers.joinGroupByCode);
+exports.leaveGroup = onCall({ region: REGION }, groupMembershipHandlers.leaveGroup);
 
 // =====================================================
 // 圖書館 API
@@ -4177,600 +3860,28 @@ exports.getFavorites = onCall(
 );
 
 // =====================================================
-// 資料匯出 (GDPR 合規)
+// 個人資料匯出與帳號刪除
 // =====================================================
 
-function hasRequestedCategory(selectedCategories, category) {
-  return selectedCategories.size === 0 || selectedCategories.has(category);
-}
-
-function mapSnapshotDocs(snapshot) {
-  return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-}
-
-function getRecentLoginAgeMs(request) {
-  const authTime = request.auth?.token?.auth_time;
-  if (typeof authTime !== 'number') {
-    return Number.POSITIVE_INFINITY;
-  }
-
-  return Date.now() - authTime * 1000;
-}
-
-async function deleteSnapshotDocs(snapshot) {
-  for (const doc of snapshot.docs) {
-    await doc.ref.delete();
-  }
-}
-
 exports.exportUserData = onCall(
-  {
-    region: REGION,
-  },
-  async (request) => {
-    const uid = request.auth?.uid;
-    if (!uid) {
-      throw new HttpsError('unauthenticated', 'Must be logged in');
-    }
-
-    try {
-      const requestedCategories = new Set(
-        Array.isArray(request.data?.categories)
-          ? request.data.categories.filter((value) => typeof value === 'string')
-          : [],
-      );
-      const schoolId = await resolveUserSchoolId(uid, request.data?.schoolId || null);
-      const userDoc = await db.collection('users').doc(uid).get();
-      const exportData = {
-        exportedAt: new Date().toISOString(),
-        schoolId,
-        userId: uid,
-      };
-
-      if (hasRequestedCategory(requestedCategories, 'profile')) {
-        exportData.profile = userDoc.exists ? { id: uid, ...userDoc.data() } : null;
-      }
-
-      if (schoolId) {
-        const [
-          schoolScopeDoc,
-          enrollmentsSnap,
-          gradesSnap,
-          calendarEventsSnap,
-          libraryLoansSnap,
-          seatReservationsSnap,
-          ordersSnap,
-          transactionsSnap,
-          achievementsSnap,
-          dailyBriefsSnap,
-          weeklyReportsSnap,
-          walletDoc,
-        ] = await Promise.all([
-          getUserSchoolScope(uid, schoolId).get(),
-          getUserSchoolCollection(uid, schoolId, 'enrollments').limit(200).get(),
-          getUserSchoolCollection(uid, schoolId, 'grades').limit(200).get(),
-          getUserSchoolCollection(uid, schoolId, 'calendarEvents').limit(200).get(),
-          getUserSchoolCollection(uid, schoolId, 'libraryLoans').limit(200).get(),
-          getUserSchoolCollection(uid, schoolId, 'seatReservations').limit(200).get(),
-          getUserSchoolCollection(uid, schoolId, 'orders').limit(200).get(),
-          getUserSchoolCollection(uid, schoolId, 'transactions').limit(200).get(),
-          getUserSchoolCollection(uid, schoolId, 'achievements').limit(200).get(),
-          getUserSchoolCollection(uid, schoolId, 'dailyBriefs').limit(100).get(),
-          getUserSchoolCollection(uid, schoolId, 'weeklyReports').limit(100).get(),
-          getUserSchoolDoc(uid, schoolId, 'wallet', 'balance').get(),
-        ]);
-
-        exportData.schoolScoped = {
-          context: schoolScopeDoc.exists ? schoolScopeDoc.data() : null,
-          enrollments: mapSnapshotDocs(enrollmentsSnap),
-          grades: mapSnapshotDocs(gradesSnap),
-          calendarEvents: mapSnapshotDocs(calendarEventsSnap),
-          libraryLoans: mapSnapshotDocs(libraryLoansSnap),
-          seatReservations: mapSnapshotDocs(seatReservationsSnap),
-          orders: mapSnapshotDocs(ordersSnap),
-          transactions: mapSnapshotDocs(transactionsSnap),
-          achievements: mapSnapshotDocs(achievementsSnap),
-          dailyBriefs: mapSnapshotDocs(dailyBriefsSnap),
-          weeklyReports: mapSnapshotDocs(weeklyReportsSnap),
-          wallet: walletDoc.exists ? walletDoc.data() : null,
-        };
-      }
-
-      if (hasRequestedCategory(requestedCategories, 'favorites')) {
-        const [legacyFavorites, scopedFavorites] = await Promise.all([
-          db.collection('users').doc(uid).collection('favorites').limit(200).get(),
-          schoolId
-            ? getUserSchoolCollection(uid, schoolId, 'favorites').limit(200).get()
-            : Promise.resolve({ docs: [] }),
-        ]);
-
-        exportData.favorites =
-          scopedFavorites.docs.length > 0
-            ? mapSnapshotDocs(scopedFavorites)
-            : mapSnapshotDocs(legacyFavorites);
-      }
-
-      if (hasRequestedCategory(requestedCategories, 'groups')) {
-        const [groupsSnap, postsSnap] = await Promise.all([
-          db.collection('users').doc(uid).collection('groups').limit(200).get(),
-          db.collectionGroup('posts').where('authorId', '==', uid).limit(200).get(),
-        ]);
-
-        exportData.groups = mapSnapshotDocs(groupsSnap);
-        exportData.posts = postsSnap.docs.map((doc) => ({
-          id: doc.id,
-          groupId: doc.ref.parent.parent?.id || null,
-          ...doc.data(),
-        }));
-      }
-
-      if (hasRequestedCategory(requestedCategories, 'assignments')) {
-        const [studentSubmissions, ownedSubmissions] = await Promise.all([
-          db.collectionGroup('submissions').where('studentId', '==', uid).limit(200).get(),
-          db.collectionGroup('submissions').where('userId', '==', uid).limit(200).get(),
-        ]);
-        const submissionMap = new Map();
-        for (const doc of [...studentSubmissions.docs, ...ownedSubmissions.docs]) {
-          submissionMap.set(doc.ref.path, { id: doc.id, ...doc.data() });
-        }
-        exportData.submissions = [...submissionMap.values()];
-      }
-
-      if (hasRequestedCategory(requestedCategories, 'registrations')) {
-        const registrationsSnap = await db
-          .collectionGroup('registrations')
-          .where('userId', '==', uid)
-          .limit(200)
-          .get();
-        exportData.registrations = registrationsSnap.docs
-          .map((doc) => ({ id: doc.id, ...doc.data() }))
-          .filter((row) => !schoolId || row.schoolId === schoolId || row.eventId);
-      }
-
-      if (hasRequestedCategory(requestedCategories, 'messages')) {
-        const conversationsSnap = await db
-          .collection('conversations')
-          .where('memberIds', 'array-contains', uid)
-          .limit(50)
-          .get();
-        const conversations = [];
-        for (const conversationDoc of conversationsSnap.docs) {
-          if (
-            schoolId &&
-            conversationDoc.data()?.schoolId &&
-            conversationDoc.data().schoolId !== schoolId
-          ) {
-            continue;
-          }
-          const messagesSnap = await conversationDoc.ref
-            .collection('messages')
-            .orderBy('createdAt', 'asc')
-            .limit(200)
-            .get();
-          const conversationData = conversationDoc.data();
-          conversations.push({
-            id: conversationDoc.id,
-            ...conversationData,
-            memberIds: Array.isArray(conversationData.memberIds)
-              ? conversationData.memberIds
-              : Array.isArray(conversationData.participants)
-                ? conversationData.participants
-                : [],
-            messages: mapSnapshotDocs(messagesSnap),
-          });
-        }
-        exportData.conversations = conversations;
-      }
-
-      if (hasRequestedCategory(requestedCategories, 'notifications')) {
-        const [preferencesSnap, pushTokensSnap, notificationsSnap] = await Promise.all([
-          db.collection('users').doc(uid).collection('settings').doc('notifications').get(),
-          db.collection('users').doc(uid).collection('pushTokens').limit(50).get(),
-          db.collection('notifications').where('userId', '==', uid).limit(100).get(),
-        ]);
-
-        exportData.notificationPreferences = preferencesSnap.exists ? preferencesSnap.data() : null;
-        exportData.pushTokens = mapSnapshotDocs(pushTokensSnap);
-        exportData.notifications = mapSnapshotDocs(notificationsSnap);
-      }
-
-      if (hasRequestedCategory(requestedCategories, 'lostfound') && schoolId) {
-        const lostFoundSnap = await db
-          .collection('schools')
-          .doc(schoolId)
-          .collection('lostFound')
-          .where('userId', '==', uid)
-          .limit(100)
-          .get();
-        exportData.lostFound = mapSnapshotDocs(lostFoundSnap);
-      }
-
-      return exportData;
-    } catch (error) {
-      console.error('Export user data error:', error);
-      throw new HttpsError('internal', 'Failed to export user data');
-    }
-  },
+  { region: REGION },
+  createExportUserDataHandler({ db, resolveUserSchoolId }),
 );
 
 exports.deleteUserAccount = onCall(
-  {
-    region: REGION,
-  },
-  async (request) => {
-    const uid = request.auth?.uid;
-    if (!uid) {
-      throw new HttpsError('unauthenticated', 'Must be logged in');
-    }
-
-    const { confirmation } = request.data;
-
-    if (confirmation !== 'DELETE_MY_ACCOUNT') {
-      throw new HttpsError('invalid-argument', 'Invalid confirmation');
-    }
-
-    if (getRecentLoginAgeMs(request) > 10 * 60 * 1000) {
-      throw new HttpsError('failed-precondition', 'Recent login required before account deletion');
-    }
-
-    try {
-      const schoolId = await resolveUserSchoolId(uid, request.data?.schoolId || null);
-      const userRef = db.collection('users').doc(uid);
-      const userSchoolsSnap = await userRef.collection('schools').get();
-
-      for (const subcol of ['favorites', 'groups', 'pushTokens', 'settings', 'busAlerts']) {
-        await deleteSnapshotDocs(await userRef.collection(subcol).get());
-      }
-
-      for (const schoolDoc of userSchoolsSnap.docs) {
-        for (const nestedSubcol of [
-          'favorites',
-          'enrollments',
-          'grades',
-          'calendarEvents',
-          'libraryLoans',
-          'seatReservations',
-          'transactions',
-          'orders',
-          'achievements',
-          'dailyBriefs',
-          'weeklyReports',
-          'wallet',
-        ]) {
-          await deleteSnapshotDocs(await schoolDoc.ref.collection(nestedSubcol).get());
-        }
-
-        await db
-          .collection('schools')
-          .doc(schoolDoc.id)
-          .collection('members')
-          .doc(uid)
-          .delete()
-          .catch(() => null);
-        await schoolDoc.ref.delete().catch(() => null);
-      }
-
-      if (schoolId) {
-        await db
-          .collection('schools')
-          .doc(schoolId)
-          .collection('members')
-          .doc(uid)
-          .delete()
-          .catch(() => null);
-      }
-
-      await deleteSnapshotDocs(
-        await db.collection('notifications').where('userId', '==', uid).limit(200).get(),
-      );
-      await deleteSnapshotDocs(
-        await db.collection('ssoLinks').where('firebaseUid', '==', uid).limit(50).get(),
-      );
-      await deleteSnapshotDocs(
-        await db.collectionGroup('registrations').where('userId', '==', uid).limit(200).get(),
-      );
-      await deleteSnapshotDocs(
-        (await db
-          .collectionGroup('members')
-          .where(FieldPath.documentId(), '==', uid)
-          .get()
-          .catch(() => null)) || { docs: [] },
-      );
-      await deleteSnapshotDocs(
-        (await db
-          .collectionGroup('directory')
-          .where(FieldPath.documentId(), '==', uid)
-          .get()
-          .catch(() => null)) || { docs: [] },
-      );
-      await deleteSnapshotDocs(
-        (await db
-          .collectionGroup('serviceRoles')
-          .where(FieldPath.documentId(), '==', uid)
-          .get()
-          .catch(() => null)) || { docs: [] },
-      );
-      await deleteSnapshotDocs(
-        (await db
-          .collectionGroup('operators')
-          .where(FieldPath.documentId(), '==', uid)
-          .get()
-          .catch(() => null)) || { docs: [] },
-      );
-      await deleteSnapshotDocs(
-        (await db
-          .collectionGroup('submissions')
-          .where('userId', '==', uid)
-          .limit(200)
-          .get()
-          .catch(() => null)) || { docs: [] },
-      );
-      await deleteSnapshotDocs(
-        (await db
-          .collectionGroup('peerReviews')
-          .where('reviewerId', '==', uid)
-          .limit(200)
-          .get()
-          .catch(() => null)) || { docs: [] },
-      );
-      await deleteSnapshotDocs(
-        (await db
-          .collectionGroup('peerReviews')
-          .where('submissionOwnerId', '==', uid)
-          .limit(200)
-          .get()
-          .catch(() => null)) || { docs: [] },
-      );
-
-      await userRef.set(
-        {
-          displayName: '已刪除使用者',
-          email: `deleted_${uid}@deleted.local`,
-          photoURL: null,
-          avatarUrl: null,
-          studentId: null,
-          department: null,
-          bio: null,
-          phone: null,
-          primarySchoolId: null,
-          schoolId: null,
-          pushToken: null,
-          isPublicProfile: false,
-          deletedAt: FieldValue.serverTimestamp(),
-          status: 'deleted',
-        },
-        { merge: true },
-      );
-
-      // 刪除 Firebase Auth 帳號
-      const { getAuth } = require('firebase-admin/auth');
-      await getAuth().deleteUser(uid);
-
-      return { success: true };
-    } catch (error) {
-      console.error('Delete user account error:', error);
-      throw new HttpsError('internal', 'Failed to delete account');
-    }
-  },
+  { region: REGION, allowClosingAccount: true, timeoutSeconds: 540 },
+  createDeleteUserAccountHandler({ db, auth: { deleteUser: (uid) => getAdminAuth().deleteUser(uid) } }),
 );
 
 // =====================================================
 // 餐廳訂餐 API
 // =====================================================
 
-exports.createOrder = onCall(
-  {
-    region: REGION,
-  },
-  async (request) => {
-    const uid = request.auth?.uid;
-    if (!uid) {
-      throw new HttpsError('unauthenticated', 'Must be logged in');
-    }
+exports.createOrder = onCall({ region: REGION }, createOrderHandler({ db }));
 
-    const schoolId = trimString(request.data?.schoolId, 120);
-    const cafeteriaId = trimString(request.data?.cafeteriaId, 160);
-    const items = Array.isArray(request.data?.items) ? request.data.items : [];
-    const pickupTime = request.data?.pickupTime;
-    const note = request.data?.note;
-    const paymentMethod = request.data?.paymentMethod;
-    const source = request.data?.source === 'ai_agent' ? 'ai_agent' : undefined;
-
-    if (!schoolId || !cafeteriaId || items.length === 0) {
-      throw new HttpsError('invalid-argument', 'Missing required fields');
-    }
-
-    await assertActiveSchoolMember(schoolId, uid);
-    const cafeteriaDoc = await getCafeteriaRef(schoolId, cafeteriaId).get();
-    if (!cafeteriaDoc.exists) {
-      throw new HttpsError('not-found', 'Cafeteria not found');
-    }
-
-    const cafeteriaData = cafeteriaDoc.data() || {};
-    const hasActiveOperator = await cafeteriaHasActiveOperator(schoolId, cafeteriaId);
-    const { merchantId, cafeteriaName: cafeteria } = resolveCafeteriaOrderingMetadata(
-      cafeteriaData,
-      {
-        cafeteriaId,
-        fallbackName: request.data?.cafeteria,
-        hasActiveOperator,
-        HttpsError,
-      },
-    );
-
-    const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-    const tax = Math.round(subtotal * 0.05);
-    const total = subtotal + tax;
-
-    const orderPayload = {
-      userId: uid,
-      schoolId,
-      cafeteriaId,
-      merchantId,
-      cafeteria,
-      items,
-      subtotal,
-      tax,
-      total,
-      totalAmount: total,
-      pickupTime: pickupTime || null,
-      note: note || null,
-      paymentMethod: paymentMethod || 'campus_card',
-      status: 'pending',
-      paymentStatus: 'pending',
-      createdAt: FieldValue.serverTimestamp(),
-      ...(source ? { source } : {}),
-    };
-
-    const orderRef = db.collection('schools').doc(schoolId).collection('orders').doc();
-    const userOrderRef = getUserSchoolDoc(uid, schoolId, 'orders', orderRef.id);
-
-    await db.runTransaction(async (transaction) => {
-      transaction.set(orderRef, orderPayload);
-      transaction.set(userOrderRef, orderPayload);
-    });
-
-    return {
-      success: true,
-      orderId: orderRef.id,
-      total,
-    };
-  },
-);
-
-exports.updateOrderStatus = onCall(
-  {
-    region: REGION,
-  },
-  async (request) => {
-    const uid = request.auth?.uid;
-    if (!uid) {
-      throw new HttpsError('unauthenticated', 'Must be logged in');
-    }
-
-    const { schoolId, orderId, status } = request.data;
-
-    if (!schoolId || !orderId || !status) {
-      throw new HttpsError('invalid-argument', 'Missing required fields');
-    }
-
-    const validStatuses = ['confirmed', 'preparing', 'ready', 'completed', 'cancelled'];
-    if (!validStatuses.includes(status)) {
-      throw new HttpsError('invalid-argument', 'Invalid status');
-    }
-
-    const orderRef = db.collection('schools').doc(schoolId).collection('orders').doc(orderId);
-    const orderDoc = await orderRef.get();
-
-    if (!orderDoc.exists) {
-      throw new HttpsError('not-found', 'Order not found');
-    }
-
-    const order = orderDoc.data();
-    const membership = await getActiveSchoolMembership(schoolId, uid);
-    const hasSchoolOverride = ['admin', 'editor'].includes(membership?.role ?? '');
-
-    if (!hasSchoolOverride) {
-      const cafeteriaId = trimString(order?.cafeteriaId, 160);
-      if (!cafeteriaId) {
-        throw new HttpsError(
-          'permission-denied',
-          'Legacy orders without cafeteriaId are read-only',
-        );
-      }
-      await assertCafeteriaOperator(schoolId, cafeteriaId, uid);
-    }
-
-    if (order.status === 'cancelled' || order.status === 'completed') {
-      throw new HttpsError('failed-precondition', 'Cannot update completed or cancelled orders');
-    }
-
-    await orderRef.update({
-      status,
-      [`${status}At`]: FieldValue.serverTimestamp(),
-    });
-    await getUserSchoolDoc(order.userId, schoolId, 'orders', orderId).set(
-      {
-        status,
-        [`${status}At`]: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
-
-    if (['ready', 'cancelled'].includes(status)) {
-      await sendPushToUser(
-        order.userId,
-        {
-          title: status === 'ready' ? '🍽️ 餐點已備妥' : '❌ 訂單已取消',
-          body: status === 'ready' ? '您的餐點已準備完成，請前往取餐' : '您的訂單已被取消',
-        },
-        {
-          type: 'order',
-          orderId,
-          schoolId,
-          channel: 'orders',
-        },
-      );
-    }
-
-    return { success: true };
-  },
-);
-
-exports.cancelOrder = onCall(
-  {
-    region: REGION,
-  },
-  async (request) => {
-    const uid = request.auth?.uid;
-    if (!uid) {
-      throw new HttpsError('unauthenticated', 'Must be logged in');
-    }
-
-    const { schoolId, orderId, reason } = request.data;
-
-    if (!schoolId || !orderId) {
-      throw new HttpsError('invalid-argument', 'Missing required fields');
-    }
-
-    await assertActiveSchoolMember(schoolId, uid);
-
-    const orderRef = db.collection('schools').doc(schoolId).collection('orders').doc(orderId);
-    const orderDoc = await orderRef.get();
-
-    if (!orderDoc.exists) {
-      throw new HttpsError('not-found', 'Order not found');
-    }
-
-    const order = orderDoc.data();
-
-    if (order.userId !== uid) {
-      throw new HttpsError('permission-denied', 'This is not your order');
-    }
-
-    if (['preparing', 'ready', 'completed'].includes(order.status)) {
-      throw new HttpsError('failed-precondition', 'Cannot cancel order in this status');
-    }
-
-    await orderRef.update({
-      status: 'cancelled',
-      cancelledAt: FieldValue.serverTimestamp(),
-      cancelReason: reason || 'User cancelled',
-    });
-    await getUserSchoolDoc(uid, schoolId, 'orders', orderId).set(
-      {
-        status: 'cancelled',
-        cancelledAt: FieldValue.serverTimestamp(),
-        cancelReason: reason || 'User cancelled',
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
-
-    return { success: true };
-  },
-);
+const orderStatusHandlers = createOrderStatusHandlers({ db, sendPushToUser });
+exports.updateOrderStatus = onCall({ region: REGION }, orderStatusHandlers.updateOrderStatus);
+exports.cancelOrder = onCall({ region: REGION }, orderStatusHandlers.cancelOrder);
 
 // =====================================================
 // 宿舍服務 API
@@ -5134,73 +4245,13 @@ exports.cancelWashingReservation = onCall(
 // 列印服務 API
 // =====================================================
 
-exports.submitPrintJob = onCall(
-  {
-    region: REGION,
-  },
-  async (request) => {
-    const uid = request.auth?.uid;
-    if (!uid) {
-      throw new HttpsError('unauthenticated', 'Must be logged in');
-    }
-
-    const { schoolId, printerId, fileName, fileUrl, copies, color, duplex, pages } = request.data;
-
-    if (!schoolId || !printerId || !fileName || !fileUrl) {
-      throw new HttpsError('invalid-argument', 'Missing required fields');
-    }
-
-    await assertActiveSchoolMember(schoolId, uid);
-
-    const printerRef = db.collection('schools').doc(schoolId).collection('printers').doc(printerId);
-    const printerDoc = await printerRef.get();
-    const printerData = printerDoc.exists ? printerDoc.data() : null;
-
-    const pageCount = pages || 1;
-    const copyCount = copies || 1;
-    const isColor = color || false;
-    const isDuplex = duplex || false;
-
-    const pricePerPage = isColor
-      ? Number(printerData?.pricePerPage?.color ?? 5)
-      : Number(printerData?.pricePerPage?.bw ?? 1);
-    const totalPages = pageCount * copyCount;
-    const cost = totalPages * pricePerPage;
-
-    const jobRef = db.collection('schools').doc(schoolId).collection('printJobs').doc();
-    await db.runTransaction(async (transaction) => {
-      transaction.set(jobRef, {
-        userId: uid,
-        schoolId,
-        printerId,
-        fileName,
-        fileUrl,
-        copies: copyCount,
-        color: isColor,
-        duplex: isDuplex,
-        pages: pageCount,
-        totalPages,
-        cost,
-        status: 'pending',
-        createdAt: FieldValue.serverTimestamp(),
-      });
-
-      if (printerDoc.exists) {
-        transaction.update(printerRef, {
-          queueLength: FieldValue.increment(1),
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-      }
-    });
-
-    return {
-      success: true,
-      jobId: jobRef.id,
-      cost,
-      estimatedTime: Math.ceil(totalPages / 10),
-    };
-  },
-);
+exports.submitPrintJob = onCall({ region: REGION }, async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError('unauthenticated', 'Must be logged in');
+  }
+  // Remote printer delivery is not implemented. Do not create a payable queue entry.
+  throw new HttpsError('failed-precondition', '遠端校園列印尚未開放，請使用裝置的列印或分享功能。');
+});
 
 exports.updatePrintJobStatus = onCall(
   {
@@ -5539,16 +4590,14 @@ exports.getBusArrivals = onCall(
     }
 
     const cacheRef = db.collection('busArrivals').doc(`${schoolId}_${stopId}`);
-    const CACHE_TTL_MS = 60 * 1000; // 60 秒 Cache
 
     // 讀取 Firestore Cache
     const cached = await cacheRef.get().catch(() => null);
     if (cached && cached.exists) {
-      const cacheData = cached.data();
-      const cacheAge = Date.now() - (cacheData.cachedAt?.toMillis() ?? 0);
-      if (cacheAge < CACHE_TTL_MS) {
+      const realtimeCache = readRealtimeBusCache(cached.data());
+      if (realtimeCache) {
         console.log(`[getBusArrivals] Cache hit for ${stopId}`);
-        return { arrivals: cacheData.arrivals, fromCache: true };
+        return realtimeCache;
       }
     }
 
@@ -5570,6 +4619,8 @@ exports.getBusArrivals = onCall(
         arrivals: staticSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
         fromCache: false,
         noApiKey: true,
+        source: 'static',
+        isRealtime: false,
       };
     }
 
@@ -5581,19 +4632,19 @@ exports.getBusArrivals = onCall(
         : `/api/basic/v3/Bus/EstimatedTimeOfArrival/City/${cityCode}?%24filter=StopUID%20eq%20'${encodeURIComponent(stopId)}'&%24format=JSON&%24top=20`;
 
       const tdxData = await fetchTdxApi(apiPath, accessToken);
-      const arrivals = Array.isArray(tdxData)
-        ? tdxData.map((item) => ({
-            routeId: item.RouteID ?? routeId,
-            routeName: item.RouteName?.Zh_tw ?? item.RouteUID ?? '—',
-            stopId: item.StopUID ?? stopId,
-            stopName: item.StopName?.Zh_tw ?? '—',
-            estimatedArrival: item.EstimateTime != null ? item.EstimateTime : null, // 秒數
-            plateNo: item.PlateNumb ?? null,
-            status: item.StopStatus ?? 0,
-            direction: item.Direction ?? 0,
-            fetchedAt: new Date().toISOString(),
-          }))
-        : [];
+      if (!Array.isArray(tdxData)) throw new Error('Invalid TDX arrivals response');
+      const fetchedAt = new Date().toISOString();
+      const arrivals = tdxData.map((item) => ({
+        routeId: item.RouteID ?? routeId,
+        routeName: item.RouteName?.Zh_tw ?? item.RouteUID ?? '—',
+        stopId: item.StopUID ?? stopId,
+        stopName: item.StopName?.Zh_tw ?? '—',
+        estimatedArrival: item.EstimateTime != null ? item.EstimateTime : null, // 秒數
+        plateNo: item.PlateNumb ?? null,
+        status: item.StopStatus ?? 0,
+        direction: item.Direction ?? 0,
+        fetchedAt,
+      }));
 
       // 寫入 Firestore Cache
       await cacheRef
@@ -5601,12 +4652,15 @@ exports.getBusArrivals = onCall(
           schoolId,
           stopId,
           arrivals,
+          source: 'tdx',
+          isRealtime: true,
+          fetchedAt,
           cachedAt: FieldValue.serverTimestamp(),
         })
         .catch((e) => console.warn('[getBusArrivals] Cache write failed:', e));
 
       console.log(`[getBusArrivals] TDX fetch OK: ${arrivals.length} arrivals for ${stopId}`);
-      return { arrivals, fromCache: false };
+      return { arrivals, fromCache: false, source: 'tdx', isRealtime: true, fetchedAt };
     } catch (err) {
       console.error('[getBusArrivals] TDX API error:', err);
       // 回傳 Firestore 靜態資料作為 fallback
@@ -5621,6 +4675,8 @@ exports.getBusArrivals = onCall(
         arrivals: staticSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
         fromCache: false,
         error: 'TDX API unavailable, using static data',
+        source: 'static',
+        isRealtime: false,
       };
     }
   },
@@ -5954,6 +5010,12 @@ exports.createPaymentIntent = onCall(
       throw new HttpsError('unauthenticated', 'Must be logged in');
     }
 
+    const merchantId = String(request.data?.merchantId || '').trim();
+    // Transfers require a recipient ledger entry and are not merchant payments.
+    if (/^transfer:/i.test(merchantId)) {
+      throw new HttpsError('failed-precondition', '帳號間轉帳尚未開放。');
+    }
+
     enforceRateLimit({
       scope: 'create-payment-intent',
       key: uid,
@@ -5964,7 +5026,6 @@ exports.createPaymentIntent = onCall(
     const amount = Number(request.data?.amount);
     const schoolId = await resolveUserSchoolId(uid, request.data?.schoolId || null);
     const paymentMethod = normalizePaymentMethod(request.data?.paymentMethod);
-    const merchantId = String(request.data?.merchantId || '').trim();
     const description = String(request.data?.description || '').trim();
 
     assertValidAmount(amount, { min: 1, max: 100000 });
@@ -6352,116 +5413,28 @@ exports.trackAchievement = onCall({ region: REGION }, async (request) => {
 // 課堂互動 - Live Session
 // =====================================================
 
-exports.startLiveSession = onCall({ region: REGION }, async (request) => {
-  const uid = request.auth?.uid;
-  if (!uid) throw new HttpsError('unauthenticated', 'Must be logged in');
-
-  const { groupId, classroomLat, classroomLng, qrExpiryMinutes = 5 } = request.data;
-  if (!groupId) throw new HttpsError('invalid-argument', 'Missing groupId');
-
-  const memberRef = db.collection('groups').doc(groupId).collection('members').doc(uid);
-  const member = await memberRef.get();
-  if (!member.exists || !['owner', 'instructor'].includes(member.data()?.role)) {
-    throw new HttpsError('permission-denied', 'Only instructors can start a live session');
-  }
-
-  const sessionId = `${new Date().toISOString().slice(0, 10)}_${Date.now()}`;
-  const qrToken = `${groupId}_${sessionId}_${nodeCrypto.randomBytes(12).toString('base64url')}`;
-  const qrExpiresAt = new Date(Date.now() + qrExpiryMinutes * 60 * 1000);
-
-  const liveSessionRef = db
-    .collection('groups')
-    .doc(groupId)
-    .collection('liveSessions')
-    .doc(sessionId);
-  const attendanceSessionRef = db
-    .collection('groups')
-    .doc(groupId)
-    .collection('attendanceSessions')
-    .doc(sessionId);
-  const sessionPayload = {
-    sessionId,
-    teacherId: uid,
-    startedAt: FieldValue.serverTimestamp(),
-    endedAt: null,
-    active: true,
-    qrToken,
-    qrExpiresAt: Timestamp.fromDate(qrExpiresAt),
-    ...(classroomLat && classroomLng
-      ? { location: { lat: classroomLat, lng: classroomLng, radiusM: 100 } }
-      : {}),
-    reactions: { understood: 0, partial: 0, confused: 0 },
-    attendeeCount: 0,
-  };
-
-  await Promise.all([
-    liveSessionRef.set(sessionPayload),
-    attendanceSessionRef.set({
-      sessionId,
-      liveSessionId: sessionId,
-      groupId,
-      teacherId: uid,
-      startedAt: FieldValue.serverTimestamp(),
-      endedAt: null,
-      active: true,
-      attendeeCount: 0,
-      attendanceMode: 'qr',
-      source: 'live_session',
-      qrEnabled: true,
-      ...(classroomLat && classroomLng
-        ? { location: { lat: classroomLat, lng: classroomLng, radiusM: 100 } }
-        : {}),
-    }),
-  ]);
-
-  // 推播通知給群組成員
-  const membersSnap = await db.collection('groups').doc(groupId).collection('members').get();
-  const studentUids = membersSnap.docs
-    .filter((d) => d.id !== uid && !['instructor', 'owner'].includes(d.data()?.role))
-    .map((d) => d.id);
-
-  const groupDoc = await db.collection('groups').doc(groupId).get();
-  const groupName = groupDoc.data()?.name ?? '課堂';
-
-  const tokens = (await Promise.all(studentUids.map(getUserPushTokens))).flat().filter(Boolean);
-  if (tokens.length > 0) {
-    await messaging.sendEachForMulticast({
-      tokens,
-      notification: { title: `${groupName} 課堂開始`, body: '老師已開啟即時課堂互動，快進入！' },
-      data: { type: 'live_session', groupId, sessionId, click_action: 'OPEN_CLASSROOM' },
-    });
-  }
-
-  return { success: true, sessionId, qrToken, qrExpiresAt: qrExpiresAt.toISOString() };
+const liveSessionHandlers = createLiveSessionHandlers({
+  db,
+  async notifyStarted({ groupId, sessionId, uid }) {
+    const groupRef = db.collection('groups').doc(groupId);
+    const [members, group] = await Promise.all([
+      groupRef.collection('members').where('status', '==', 'active').get(),
+      groupRef.get(),
+    ]);
+    const studentUids = members.docs
+      .filter(
+        (member) => member.id !== uid && !['instructor', 'owner'].includes(member.data().role),
+      )
+      .map((member) => member.id);
+    await sendPushToMultipleUsers(studentUids, {
+      title: `${group.data()?.name ?? '課堂'} 開始點名`,
+      body: '請進入課堂，掃描老師提供的 QR Code 完成簽到。',
+    }, { type: 'live_session', groupId, sessionId, click_action: 'OPEN_CLASSROOM' }, 'groups');
+  },
 });
 
-exports.endLiveSession = onCall({ region: REGION }, async (request) => {
-  const uid = request.auth?.uid;
-  if (!uid) throw new HttpsError('unauthenticated', 'Must be logged in');
-
-  const { groupId, sessionId } = request.data;
-  if (!groupId || !sessionId)
-    throw new HttpsError('invalid-argument', 'Missing groupId or sessionId');
-
-  const sessionRef = db.collection('groups').doc(groupId).collection('liveSessions').doc(sessionId);
-  const session = await sessionRef.get();
-
-  if (!session.exists || session.data()?.teacherId !== uid) {
-    throw new HttpsError('permission-denied', 'Not authorized to end this session');
-  }
-
-  await Promise.all([
-    sessionRef.update({ active: false, endedAt: FieldValue.serverTimestamp() }),
-    db.collection('groups').doc(groupId).collection('attendanceSessions').doc(sessionId).set(
-      {
-        active: false,
-        endedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    ),
-  ]);
-  return { success: true };
-});
+exports.startLiveSession = onCall({ region: REGION }, liveSessionHandlers.startLiveSession);
+exports.endLiveSession = onCall({ region: REGION }, liveSessionHandlers.endLiveSession);
 
 exports.submitPollResponse = onCall({ region: REGION }, async (request) => {
   const uid = request.auth?.uid;
@@ -6484,93 +5457,7 @@ exports.submitPollResponse = onCall({ region: REGION }, async (request) => {
   return { success: true };
 });
 
-exports.joinLiveSession = onCall({ region: REGION }, async (request) => {
-  const uid = request.auth?.uid;
-  if (!uid) throw new HttpsError('unauthenticated', 'Must be logged in');
-
-  const { groupId, sessionId, qrToken } = request.data ?? {};
-  if (!groupId || !sessionId) {
-    throw new HttpsError('invalid-argument', 'Missing groupId or sessionId');
-  }
-
-  const groupRef = db.collection('groups').doc(groupId);
-  const sessionRef = groupRef.collection('liveSessions').doc(sessionId);
-  const memberRef = groupRef.collection('members').doc(uid);
-  const attendanceSessionRef = groupRef.collection('attendanceSessions').doc(sessionId);
-  const attendanceRecordRef = attendanceSessionRef.collection('attendanceRecords').doc(uid);
-
-  let attendanceRecorded = false;
-  await db.runTransaction(async (transaction) => {
-    // Check membership and session state inside the transaction so revocation,
-    // closure and duplicate QR check-ins cannot race our writes.
-    const session = await transaction.get(sessionRef);
-    const member = await transaction.get(memberRef);
-    const sessionData = session.exists ? session.data() : null;
-    const expiryMs = sessionData?.qrExpiresAt?.toDate?.()?.getTime();
-
-    const decision = evaluateLiveSessionJoin({
-      memberExists: member.exists,
-      memberStatus: member.data()?.status,
-      sessionActive: Boolean(sessionData?.active),
-      expectedQrToken: sessionData?.qrToken,
-      qrExpiresAtMs: expiryMs,
-      providedQrToken: qrToken,
-      nowMs: Date.now(),
-    });
-    if (!decision.ok) {
-      throw new HttpsError(decision.code, decision.message);
-    }
-
-    // Read before writing: Firestore requires all transaction reads first.
-    const previousAttendance = decision.recordAttendance
-      ? await transaction.get(attendanceRecordRef)
-      : null;
-    const alreadyJoined = Boolean(sessionData?.attendees?.[uid]);
-
-    transaction.update(sessionRef, {
-      [`attendees.${uid}`]: FieldValue.serverTimestamp(),
-      ...(alreadyJoined ? {} : { attendeeCount: FieldValue.increment(1) }),
-    });
-
-    if (decision.recordAttendance) {
-      // Joining the live room without QR is not the same as signing attendance.
-      // Use the actual attendance record for count idempotency, not room-join state.
-      transaction.set(
-        attendanceSessionRef,
-        {
-          sessionId,
-          liveSessionId: sessionId,
-          groupId,
-          teacherId: sessionData.teacherId,
-          startedAt: sessionData.startedAt || FieldValue.serverTimestamp(),
-          active: sessionData.active,
-          attendanceMode: 'qr',
-          source: 'live_session',
-          qrEnabled: true,
-          ...(sessionData.location ? { location: sessionData.location } : {}),
-          [`attendees.${uid}`]: FieldValue.serverTimestamp(),
-          ...(previousAttendance?.exists ? {} : { attendeeCount: FieldValue.increment(1) }),
-        },
-        { merge: true },
-      );
-      transaction.set(
-        attendanceRecordRef,
-        {
-          uid,
-          status: 'present',
-          source: 'qr',
-          checkedInAt: FieldValue.serverTimestamp(),
-          sessionId,
-          groupId,
-        },
-        { merge: true },
-      );
-    }
-    attendanceRecorded = decision.recordAttendance;
-  });
-
-  return { success: true, attendanceRecorded };
-});
+exports.joinLiveSession = onCall({ region: REGION }, liveSessionHandlers.joinLiveSession);
 
 exports.submitReaction = onCall({ region: REGION }, async (request) => {
   const uid = request.auth?.uid;
@@ -6763,19 +5650,10 @@ exports.generateWeeklyReport = onSchedule(
           });
 
           // 推播通知
-          const tokens = await getUserPushTokens(uid);
-          if (tokens.length > 0) {
-            await messaging
-              .sendEachForMulticast({
-                tokens,
-                notification: {
-                  title: '📊 本週學習報告出爐了！',
-                  body: summary,
-                },
-                data: { type: 'weekly_report', weekId },
-              })
-              .catch(() => {});
-          }
+          await sendPushToUser(uid, {
+            title: '本週學習報告已更新', body: summary,
+          }, { type: 'weekly_report', weekId }, 'assignments')
+            .catch(() => console.warn('[generateWeeklyReport] Notification request failed'));
         }),
       );
 
@@ -6942,110 +5820,28 @@ exports.puFetchData = onCall(
   },
 );
 
+exports.getMyAcademicRecords = onCall(
+  { region: REGION },
+  createGetMyAcademicRecords({
+    db,
+    assertActiveSchoolMember,
+    fetchers: { courses: puFetchCourses, grades: puFetchGrades },
+  }),
+);
+
 exports.puFetchCampusData = onRequest(
-  {
-    region: REGION,
-    cors: STRICT_CORS,
-  },
-  async (req, res) => {
-    try {
-      assertTrustedOrigin(req);
-      requirePostJson(req);
-      const authUser = await verifyRequestFirebaseUser(req);
-
-      const sessionId = String(req.body?.sessionId || '').trim();
-      const dataType = String(req.body?.dataType || '').trim();
-      const semester = String(req.body?.semester || '').trim();
-      const allowedTypes = [
-        'courses',
-        'grades',
-        'announcements',
-        'studentInfo',
-        'absence',
-        'creditSummary',
-      ];
-
-      if (!sessionId || !dataType) {
-        res.status(400).json({ error: 'Missing required fields: sessionId, dataType' });
-        return;
-      }
-
-      if (!allowedTypes.includes(dataType)) {
-        res.status(400).json({ error: `Invalid dataType: ${dataType}` });
-        return;
-      }
-
-      enforceRateLimit({
-        scope: 'pu-campus-fetch-data',
-        key: `${sessionId}:${dataType}`,
-        limit: 60,
-        windowMs: 5 * 60 * 1000,
-      });
-
-      // Try Firestore first, then in-memory fallback
-      let sessionData = null;
-      try {
-        const sessionRef = db.collection('_puSessions').doc(sessionId);
-        const sessionDoc = await sessionRef.get();
-        if (sessionDoc.exists) {
-          sessionData = sessionDoc.data();
-          const expiresAt = sessionData?.expiresAt?.toDate?.() ?? null;
-          if (!sessionData?.cookies || Object.keys(sessionData.cookies).length === 0 || !expiresAt || expiresAt < new Date()) {
-            await sessionRef.delete().catch(() => null);
-            sessionData = null;
-          }
-        }
-      } catch (err) {
-        // Firestore unavailable — try in-memory
-        console.warn('[puFetchCampusData] Firestore unavailable, trying in-memory:', err.message);
-      }
-
-      // 上方 try/catch 已把 sessionData 設好（或 null）；這裡只做最終驗證
-      if (!sessionData) {
-        res.status(401).json({ error: 'Invalid or expired PU session' });
-        return;
-      }
-
-      let result;
-      switch (dataType) {
-        case 'courses':
-          result = await puFetchCourses(sessionData.cookies, semester || '');
-          break;
-        case 'grades':
-          result = await puFetchGrades(sessionData.cookies, semester || '');
-          break;
-        case 'announcements':
-          result = await puFetchAnnouncements(sessionData.cookies);
-          break;
-        case 'studentInfo':
-          result = await puFetchStudentInfo(sessionData.cookies);
-          break;
-        case 'absence':
-          result = await puFetchAbsence(sessionData.cookies);
-          break;
-        case 'creditSummary':
-          result = await puFetchCreditSummary(sessionData.cookies);
-          break;
-        default:
-          res.status(400).json({ error: `Unknown dataType: ${dataType}` });
-          return;
-      }
-
-      if (!result?.success) {
-        res.status(503).json({ error: result?.error || `Failed to fetch ${dataType}` });
-        return;
-      }
-
-      res.set('Cache-Control', 'no-store');
-      res.json({
-        success: true,
-        result,
-      });
-    } catch (error) {
-      console.error('puFetchCampusData error:', error);
-      writeHttpError(res, error, 'Failed to fetch PU campus data');
-    }
-  },
+  { region: REGION, cors: STRICT_CORS },
+  createPuCampusDataHandler({
+    db,
+    fetchers: {
+      courses: puFetchCourses,
+      grades: puFetchGrades,
+      announcements: puFetchAnnouncements,
+      studentInfo: puFetchStudentInfo,
+      absence: puFetchAbsence,
+      creditSummary: puFetchCreditSummary,
+    },
+  }),
 );
 
 exports.puRefreshTronClassSession = onRequest(
@@ -7505,5 +6301,7 @@ exports.puFetchTronClassData = onRequest(
     }
   },
 );
+
+exports.scheduledPushReceiptSweep = require('./pushReceiptSweep').scheduledPushReceiptSweep;
 
 console.log('Firebase Cloud Functions loaded successfully');

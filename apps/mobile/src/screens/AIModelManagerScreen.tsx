@@ -29,8 +29,7 @@ import {
 } from '../services/localLLMInference';
 import { localAssistant } from '../services/localAssistant';
 import { theme } from '../ui/theme';
-
-const COLORS = theme.colors;
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 
 // ═══════════════════════════════════════════════
 // Model Metadata — 使用者友善的模型資訊
@@ -124,6 +123,7 @@ const MODEL_INFO: ModelInfo[] = [
 // ═══════════════════════════════════════════════
 
 export default function AIModelManagerScreen({ navigation }: any) {
+  const styles = useThemeStyleSheet(createStyles);
   const [llmState, setLlmState] = useState<LLMState>(localLLM.getState());
   const [downloadProgress, setDownloadProgress] = useState<Record<string, ModelDownloadProgress>>(
     {},
@@ -355,7 +355,7 @@ export default function AIModelManagerScreen({ navigation }: any) {
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
-        <ActivityIndicator size="large" color={COLORS.accent} style={{ marginTop: 40 }} />
+        <ActivityIndicator size="large" color={theme.colors.accent} style={{ marginTop: 40 }} />
       </SafeAreaView>
     );
   }
@@ -366,7 +366,7 @@ export default function AIModelManagerScreen({ navigation }: any) {
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerIcon}>
-            <Ionicons name="hardware-chip-outline" size={28} color="#fff" />
+            <Ionicons name="hardware-chip-outline" size={28} color={theme.colors.onAccent} />
           </View>
           <Text style={styles.headerTitle}>本地 AI 模型</Text>
           <Text style={styles.headerSub}>
@@ -380,20 +380,20 @@ export default function AIModelManagerScreen({ navigation }: any) {
             <Ionicons
               name={isWifi ? 'wifi' : 'cellular'}
               size={16}
-              color={isWifi ? '#34C759' : '#FF9500'}
+              color={isWifi ? theme.colors.success : theme.colors.warning}
             />
             <Text style={styles.statusText}>{isWifi ? 'Wi-Fi 已連線' : '行動數據'}</Text>
           </View>
           {diskSpace !== null && (
             <View style={styles.statusItem}>
-              <Ionicons name="folder-outline" size={16} color={COLORS.textSecondary} />
+              <Ionicons name="folder-outline" size={16} color={theme.colors.textSecondary} />
               <Text style={styles.statusText}>可用空間：{formatBytes(diskSpace)}</Text>
             </View>
           )}
           {activeModel && (
             <View style={styles.statusItem}>
-              <Ionicons name="checkmark-circle" size={16} color="#34C759" />
-              <Text style={[styles.statusText, { color: '#34C759' }]}>
+              <Ionicons name="checkmark-circle" size={16} color={theme.colors.success} />
+              <Text style={[styles.statusText, { color: theme.colors.success }]}>
                 已啟用：{MODEL_INFO.find((m) => m.id === activeModel)?.name ?? activeModel}
               </Text>
             </View>
@@ -402,7 +402,7 @@ export default function AIModelManagerScreen({ navigation }: any) {
 
         {!runtimeAvailability.available && (
           <View style={styles.runtimeNotice}>
-            <Ionicons name="construct-outline" size={18} color="#FF9500" />
+            <Ionicons name="construct-outline" size={18} color={theme.colors.warning} />
             <Text style={styles.runtimeNoticeText}>
               {runtimeAvailability.reason ?? '本地 AI 推理引擎尚未就緒。'}
             </Text>
@@ -437,7 +437,7 @@ export default function AIModelManagerScreen({ navigation }: any) {
                     model.recommended ? styles.badgeRecommended : styles.badgeNormal,
                   ]}
                 >
-                  <Text style={styles.badgeText}>{model.badge}</Text>
+                  <Text style={[styles.badgeText, !model.recommended && { color: theme.colors.textSecondary }]}>{model.badge}</Text>
                 </View>
               )}
 
@@ -472,7 +472,7 @@ export default function AIModelManagerScreen({ navigation }: any) {
                         key={`s${i}`}
                         name={i < model.speedStars ? 'flash' : 'flash-outline'}
                         size={14}
-                        color={i < model.speedStars ? '#FF9500' : '#D1D5DB'}
+                        color={i < model.speedStars ? theme.colors.warning : '#D1D5DB'}
                       />
                     ))}
                   </View>
@@ -497,12 +497,12 @@ export default function AIModelManagerScreen({ navigation }: any) {
                     gap: 6,
                     marginBottom: 10,
                     padding: 10,
-                    backgroundColor: '#FF3B3010',
+                    backgroundColor: theme.colors.dangerSoft,
                     borderRadius: 8,
                   }}
                 >
-                  <Ionicons name="alert-circle" size={16} color="#FF3B30" />
-                  <Text style={{ color: '#FF3B30', fontSize: 12, flex: 1 }} numberOfLines={3}>
+                  <Ionicons name="alert-circle" size={16} color={theme.colors.danger} />
+                  <Text style={{ color: theme.colors.danger, fontSize: 12, flex: 1 }} numberOfLines={3}>
                     {llmState.error ?? '發生錯誤，請稍後重試'}
                   </Text>
                   <TouchableOpacity
@@ -512,11 +512,11 @@ export default function AIModelManagerScreen({ navigation }: any) {
                     style={{
                       paddingHorizontal: 10,
                       paddingVertical: 4,
-                      backgroundColor: COLORS.accent,
+                      backgroundColor: theme.colors.accent,
                       borderRadius: 6,
                     }}
                   >
-                    <Text style={{ color: '#fff', fontSize: 11, fontWeight: '600' }}>重試</Text>
+                    <Text style={{ color: theme.colors.onAccent, fontSize: 11, fontWeight: '600' }}>重試</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -549,7 +549,7 @@ export default function AIModelManagerScreen({ navigation }: any) {
                     <Ionicons
                       name={canDownload ? 'cloud-download-outline' : 'construct-outline'}
                       size={18}
-                      color={canDownload ? '#fff' : COLORS.textSecondary}
+                      color={canDownload ? theme.colors.onAccent : theme.colors.textSecondary}
                     />
                     <Text
                       style={[styles.actionBtnText, !canDownload && styles.actionBtnTextDisabled]}
@@ -573,7 +573,7 @@ export default function AIModelManagerScreen({ navigation }: any) {
                       <Ionicons
                         name="power-outline"
                         size={18}
-                        color={canActivate ? '#fff' : COLORS.textSecondary}
+                        color={canActivate ? theme.colors.onAccent : theme.colors.textSecondary}
                       />
                       <Text
                         style={[styles.actionBtnText, !canActivate && styles.actionBtnTextDisabled]}
@@ -585,14 +585,14 @@ export default function AIModelManagerScreen({ navigation }: any) {
                       style={[styles.actionBtn, styles.deleteBtn]}
                       onPress={() => handleDelete(model.id)}
                     >
-                      <Ionicons name="trash-outline" size={18} color="#FF3B30" />
+                      <Ionicons name="trash-outline" size={18} color={theme.colors.danger} />
                     </TouchableOpacity>
                   </>
                 )}
 
                 {isActive && (
                   <View style={styles.activeIndicator}>
-                    <Ionicons name="checkmark-circle" size={20} color="#34C759" />
+                    <Ionicons name="checkmark-circle" size={20} color={theme.colors.success} />
                     <Text style={styles.activeText}>使用中</Text>
                   </View>
                 )}
@@ -602,8 +602,8 @@ export default function AIModelManagerScreen({ navigation }: any) {
                     style={[styles.actionBtn, styles.cancelBtn]}
                     onPress={() => localLLM.abort()}
                   >
-                    <Ionicons name="close-circle-outline" size={18} color="#FF3B30" />
-                    <Text style={[styles.actionBtnText, { color: '#FF3B30' }]}>取消</Text>
+                    <Ionicons name="close-circle-outline" size={18} color={theme.colors.danger} />
+                    <Text style={[styles.actionBtnText, { color: theme.colors.danger }]}>取消</Text>
                   </TouchableOpacity>
                 )}
               </View>
@@ -615,26 +615,26 @@ export default function AIModelManagerScreen({ navigation }: any) {
         <View style={styles.infoSection}>
           <Text style={styles.infoTitle}>關於本地 AI</Text>
           <View style={styles.infoItem}>
-            <Ionicons name="lock-closed-outline" size={18} color={COLORS.textSecondary} />
+            <Ionicons name="lock-closed-outline" size={18} color={theme.colors.textSecondary} />
             <Text style={styles.infoText}>所有對話完全在你的手機上處理，不會上傳到任何伺服器</Text>
           </View>
           <View style={styles.infoItem}>
-            <Ionicons name="cloud-offline-outline" size={18} color={COLORS.textSecondary} />
+            <Ionicons name="cloud-offline-outline" size={18} color={theme.colors.textSecondary} />
             <Text style={styles.infoText}>下載模型後可離線使用 AI 助理（網路搜尋功能除外）</Text>
           </View>
           <View style={styles.infoItem}>
-            <Ionicons name="battery-half-outline" size={18} color={COLORS.textSecondary} />
+            <Ionicons name="battery-half-outline" size={18} color={theme.colors.textSecondary} />
             <Text style={styles.infoText}>使用本地 AI 時手機可能會稍微發熱，這是正常現象。7B 進階模型需要 6GB 以上 RAM 的裝置</Text>
           </View>
           <View style={styles.infoItem}>
-            <Ionicons name="trash-bin-outline" size={18} color={COLORS.textSecondary} />
+            <Ionicons name="trash-bin-outline" size={18} color={theme.colors.textSecondary} />
             <Text style={styles.infoText}>隨時可以刪除模型釋放空間，不影響其他功能</Text>
           </View>
         </View>
 
         {/* Without Model Notice */}
         <View style={styles.fallbackNotice}>
-          <Ionicons name="information-circle-outline" size={20} color={COLORS.accent} />
+          <Ionicons name="information-circle-outline" size={20} color={theme.colors.accent} />
           <Text style={styles.fallbackText}>
             即使不下載模型，AI
             助理仍可使用基本問答功能（校園資訊、課表查詢等），只是無法進行深度推理和自然對話。
@@ -662,10 +662,10 @@ function formatBytes(bytes: number): string {
 // Styles
 // ═══════════════════════════════════════════════
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: theme.colors.background,
   },
   scroll: {
     padding: 16,
@@ -681,7 +681,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: COLORS.accent,
+    backgroundColor: theme.colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 12,
@@ -689,12 +689,12 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 22,
     fontWeight: '700',
-    color: COLORS.text,
+    color: theme.colors.text,
     marginBottom: 8,
   },
   headerSub: {
     fontSize: 14,
-    color: COLORS.textSecondary,
+    color: theme.colors.textSecondary,
     textAlign: 'center',
     lineHeight: 20,
     paddingHorizontal: 20,
@@ -715,12 +715,12 @@ const styles = StyleSheet.create({
   },
   statusText: {
     fontSize: 12,
-    color: COLORS.textSecondary,
+    color: theme.colors.textSecondary,
   },
   runtimeNotice: {
     flexDirection: 'row',
     gap: 8,
-    backgroundColor: '#FF950015',
+    backgroundColor: theme.colors.warningSoft,
     borderRadius: 12,
     padding: 12,
     marginBottom: 16,
@@ -728,24 +728,24 @@ const styles = StyleSheet.create({
   },
   runtimeNoticeText: {
     fontSize: 12,
-    color: COLORS.text,
+    color: theme.colors.text,
     flex: 1,
     lineHeight: 18,
   },
 
   // Model Card
   modelCard: {
-    backgroundColor: COLORS.surface,
+    backgroundColor: theme.colors.surface,
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: theme.colors.border,
     position: 'relative',
     overflow: 'hidden',
   },
   modelCardActive: {
-    borderColor: '#34C759',
+    borderColor: theme.colors.success,
     borderWidth: 2,
   },
   badge: {
@@ -757,15 +757,15 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   badgeRecommended: {
-    backgroundColor: COLORS.accent,
+    backgroundColor: theme.colors.accent,
   },
   badgeNormal: {
-    backgroundColor: COLORS.textSecondary + '30',
+    backgroundColor: theme.colors.surface2,
   },
   badgeText: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#fff',
+    color: theme.colors.onAccent,
   },
   modelHeader: {
     flexDirection: 'row',
@@ -777,16 +777,16 @@ const styles = StyleSheet.create({
   modelName: {
     fontSize: 17,
     fontWeight: '700',
-    color: COLORS.text,
+    color: theme.colors.text,
   },
   modelSize: {
     fontSize: 13,
-    color: COLORS.textSecondary,
+    color: theme.colors.textSecondary,
     fontWeight: '500',
   },
   modelDesc: {
     fontSize: 13,
-    color: COLORS.textSecondary,
+    color: theme.colors.textSecondary,
     marginBottom: 12,
     lineHeight: 18,
   },
@@ -804,7 +804,7 @@ const styles = StyleSheet.create({
   },
   statLabel: {
     fontSize: 12,
-    color: COLORS.textSecondary,
+    color: theme.colors.textSecondary,
     fontWeight: '500',
   },
   starRow: {
@@ -820,14 +820,14 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   featureChip: {
-    backgroundColor: COLORS.accent + '15',
+    backgroundColor: theme.colors.accentSoft,
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
   },
   featureText: {
     fontSize: 11,
-    color: COLORS.accent,
+    color: theme.colors.accent,
     fontWeight: '500',
   },
 
@@ -837,19 +837,19 @@ const styles = StyleSheet.create({
   },
   progressBarBg: {
     height: 6,
-    backgroundColor: COLORS.border,
+    backgroundColor: theme.colors.border,
     borderRadius: 3,
     overflow: 'hidden',
     marginBottom: 4,
   },
   progressBarFill: {
     height: '100%',
-    backgroundColor: COLORS.accent,
+    backgroundColor: theme.colors.accent,
     borderRadius: 3,
   },
   progressText: {
     fontSize: 11,
-    color: COLORS.textSecondary,
+    color: theme.colors.textSecondary,
     textAlign: 'center',
   },
 
@@ -868,34 +868,34 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   downloadBtn: {
-    backgroundColor: COLORS.accent,
+    backgroundColor: theme.colors.accent,
     flex: 1,
     justifyContent: 'center',
   },
   activateBtn: {
-    backgroundColor: '#34C759',
+    backgroundColor: theme.colors.accent,
     flex: 1,
     justifyContent: 'center',
   },
   deleteBtn: {
-    backgroundColor: '#FF3B3015',
+    backgroundColor: theme.colors.dangerSoft,
     paddingHorizontal: 12,
   },
   cancelBtn: {
-    backgroundColor: '#FF3B3015',
+    backgroundColor: theme.colors.dangerSoft,
     flex: 1,
     justifyContent: 'center',
   },
   actionBtnDisabled: {
-    backgroundColor: COLORS.border,
+    backgroundColor: theme.colors.border,
   },
   actionBtnText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#fff',
+    color: theme.colors.onAccent,
   },
   actionBtnTextDisabled: {
-    color: COLORS.textSecondary,
+    color: theme.colors.textSecondary,
   },
   activeIndicator: {
     flexDirection: 'row',
@@ -906,12 +906,12 @@ const styles = StyleSheet.create({
   activeText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#34C759',
+    color: theme.colors.success,
   },
 
   // Info
   infoSection: {
-    backgroundColor: COLORS.surface,
+    backgroundColor: theme.colors.surface,
     borderRadius: 16,
     padding: 16,
     marginTop: 8,
@@ -920,7 +920,7 @@ const styles = StyleSheet.create({
   infoTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: COLORS.text,
+    color: theme.colors.text,
     marginBottom: 12,
   },
   infoItem: {
@@ -931,7 +931,7 @@ const styles = StyleSheet.create({
   },
   infoText: {
     fontSize: 13,
-    color: COLORS.textSecondary,
+    color: theme.colors.textSecondary,
     flex: 1,
     lineHeight: 18,
   },
@@ -940,14 +940,14 @@ const styles = StyleSheet.create({
   fallbackNotice: {
     flexDirection: 'row',
     gap: 8,
-    backgroundColor: COLORS.accent + '10',
+    backgroundColor: theme.colors.accentSoft,
     borderRadius: 12,
     padding: 14,
     alignItems: 'flex-start',
   },
   fallbackText: {
     fontSize: 12,
-    color: COLORS.text,
+    color: theme.colors.text,
     flex: 1,
     lineHeight: 18,
   },

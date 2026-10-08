@@ -3,7 +3,10 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     function isSignedIn() {
-      return request.auth != null;
+      return request.auth != null
+        && (!exists(/databases/$(database)/documents/users/$(request.auth.uid))
+          || (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('accountDeletionInProgress', false) != true
+            && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('status', '') != 'deleted'));
     }
 
     function isSelf(uid) {
@@ -187,17 +190,40 @@ service cloud.firestore {
     }
 
     function submissionOwnerId(data, submissionId) {
-      return data.userId != null
-        ? data.userId
-        : data.uid != null
-          ? data.uid
-          : data.studentId != null
-            ? data.studentId
-            : submissionId;
+      return data.get('userId', data.get('uid', data.get('studentId', submissionId)));
     }
 
     function isSubmissionOwner(data, submissionId) {
       return isSignedIn() && request.auth.uid == submissionOwnerId(data, submissionId);
+    }
+
+    function acceptsStudentSubmission(groupId, assignmentId) {
+      let assignment = get(/databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)).data;
+      let due = assignment.get('dueAt', null);
+      return assignment.get('published', true) != false
+        && !(assignment.get('status', '') in ['draft', 'closed'])
+        && (due == null || assignment.get('allowLateSubmission', false) == true
+          || (due is timestamp && request.time <= due)
+          || (due is string && request.time <= timestamp.value(due)));
+    }
+
+    function validStudentSubmission(groupId, assignmentId, submissionId) {
+      let data = request.resource.data;
+      return isActiveGroupMember(groupId)
+        && submissionId == request.auth.uid
+        && data.userId == request.auth.uid
+        && data.groupId == groupId
+        && data.assignmentId == assignmentId
+        && data.status == 'submitted'
+        && data.content is string && data.content.size() <= 20000
+        && (data.content.size() > 0 || data.get('attachments', []).size() > 0 || data.get('answers', {}).size() > 0)
+        && data.get('answers', {}) is map
+        && data.get('answers', {}).size() <= 100
+        && data.get('attachments', []) is list
+        && data.get('attachments', []).size() <= 20
+        && data.submittedAt == request.time
+        && data.updatedAt == request.time
+        && acceptsStudentSubmission(groupId, assignmentId);
     }
 
     function isAssignedReviewer(groupId, assignmentId, submissionId, data) {
@@ -211,6 +237,139 @@ service cloud.firestore {
       return canManageGroup(groupId)
         || isSubmissionOwner(data, submissionId)
         || isAssignedReviewer(groupId, assignmentId, submissionId, data);
+    }
+
+
+    // Course answers remain immutable after submission. Teachers may change grades,
+    // but never a student's response, owner, or submission timestamp.
+    function validFirstPublishedGrade(groupId, assignmentId, studentId) {
+      let group = get(/databases/$(database)/documents/groups/$(groupId)).data;
+      let assignment = get(/databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)).data;
+      let before = resource.data;
+      let after = request.resource.data;
+      return group.get('type', '') == 'course'
+        && isSchoolMember(group.get('schoolId', ''))
+        && assignment.get('type', '') == 'assignment'
+        && assignment.get('points', 0) is number
+        && assignment.get('points', 0) > 0
+        && before.get('userId', '') == studentId
+        && before.get('submittedAt', null) != null
+        && before.get('gradePublished', false) != true
+        && after.diff(before).affectedKeys().hasOnly([
+          'gradeScore', 'gradeFeedback', 'gradePublished',
+          'gradePublishedBy', 'gradePublishedAt'
+        ])
+        && after.get('gradePublished', false) == true
+        && after.get('gradeScore', -1) is number
+        && after.gradeScore >= 0
+        && after.gradeScore <= assignment.points
+        && after.get('gradeFeedback', '') is string
+        && after.get('gradeFeedback', '').size() <= 4000
+        && after.get('gradePublishedBy', '') == request.auth.uid
+        && after.get('gradePublishedAt', null) == request.time;
+    }
+
+    // Earlier clients write a provisional grade/feedback pair. Keep the first
+    // write compatible while disallowing silent revisions and answer edits.
+    function validFirstLegacyGrade(groupId, assignmentId, studentId) {
+      let group = get(/databases/$(database)/documents/groups/$(groupId)).data;
+      let assignment = get(/databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)).data;
+      let before = resource.data;
+      let after = request.resource.data;
+      return (group.get('type', '') != 'course'
+          || isSchoolMember(group.get('schoolId', '')))
+        && before.get('userId', '') == studentId
+        && before.get('submittedAt', null) != null
+        && before.get('gradePublished', false) != true
+        && before.get('grade', null) == null
+        && after.diff(before).affectedKeys().hasOnly(['grade', 'feedback'])
+        && after.get('grade', -1) is number
+        && after.grade >= 0
+        && after.grade <= 1000
+        && (assignment.get('points', null) == null
+          || (assignment.get('points', null) is number && after.grade <= assignment.points))
+        && after.get('feedback', '') is string
+        && after.get('feedback', '').size() <= 4000;
+    }
+
+    function changesPublishedGrade() {
+      return resource.data.get('gradePublished', false) == true
+        && request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'gradeScore', 'gradeFeedback', 'gradePublished', 'gradePublishedBy',
+          'gradePublishedAt', 'gradeRevisionId', 'gradeRevisionCount',
+          'gradeRevisedAt', 'gradeRevisionReason'
+        ]);
+    }
+
+    function validGradeCorrection(groupId, assignmentId, studentId) {
+      let group = get(/databases/$(database)/documents/groups/$(groupId)).data;
+      let before = resource.data;
+      let after = request.resource.data;
+      let revisionId = after.get('gradeRevisionId', '');
+      let revisionPath = /databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)/submissions/$(studentId)/gradeRevisions/$(revisionId);
+      return group.get('type', '') == 'course'
+        && isSchoolMember(group.get('schoolId', ''))
+        && revisionId is string && revisionId.size() >= 10 && revisionId.size() <= 150
+        && revisionId != before.get('gradeRevisionId', '')
+        && after.diff(before).affectedKeys().hasOnly([
+          'gradeScore', 'gradeFeedback', 'gradePublishedBy', 'gradePublishedAt',
+          'gradeRevisionId', 'gradeRevisionCount', 'gradeRevisedAt', 'gradeRevisionReason'
+        ])
+        && after.gradePublished == true
+        && after.gradeScore is number && after.gradeScore >= 0
+        && after.gradeFeedback is string && after.gradeFeedback.size() <= 4000
+        && after.gradePublishedBy == request.auth.uid
+        && after.gradePublishedAt == request.time
+        && after.gradeRevisedAt == request.time
+        && after.gradeRevisionCount == before.get('gradeRevisionCount', 0) + 1
+        && after.gradeRevisionReason is string
+        && after.gradeRevisionReason.size() >= 5
+        && after.gradeRevisionReason.size() <= 500
+        && (after.gradeScore != before.get('gradeScore', null)
+          || after.gradeFeedback != before.get('gradeFeedback', ''))
+        && existsAfter(revisionPath)
+        && getAfter(revisionPath).data.changedBy == request.auth.uid
+        && getAfter(revisionPath).data.changedAt == request.time
+        && getAfter(revisionPath).data.beforeScore == before.get('gradeScore', null)
+        && getAfter(revisionPath).data.afterScore == after.gradeScore
+        && getAfter(revisionPath).data.beforeFeedback == before.get('gradeFeedback', '')
+        && getAfter(revisionPath).data.afterFeedback == after.gradeFeedback
+        && getAfter(revisionPath).data.reason == after.gradeRevisionReason
+        && getAfter(revisionPath).data.revision == after.gradeRevisionCount;
+    }
+
+    function validGradeRevisionLog(groupId, assignmentId, studentId, revisionId) {
+      let group = get(/databases/$(database)/documents/groups/$(groupId)).data;
+      let previous = get(/databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)/submissions/$(studentId)).data;
+      let after = getAfter(/databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)/submissions/$(studentId)).data;
+      let change = request.resource.data;
+      return group.get('type', '') == 'course'
+        && isSchoolMember(group.get('schoolId', ''))
+        && previous.get('gradePublished', false) == true
+        && after.get('gradePublished', false) == true
+        && change.keys().hasAll([
+          'beforeScore', 'afterScore', 'beforeFeedback', 'afterFeedback',
+          'reason', 'changedBy', 'changedAt', 'revision'
+        ])
+        && change.keys().hasOnly([
+          'beforeScore', 'afterScore', 'beforeFeedback', 'afterFeedback',
+          'reason', 'changedBy', 'changedAt', 'revision'
+        ])
+        && change.changedBy == request.auth.uid
+        && change.changedAt == request.time
+        && change.reason is string && change.reason.size() >= 5
+        && change.reason.size() <= 500
+        && change.beforeScore == previous.get('gradeScore', null)
+        && change.afterScore == after.get('gradeScore', null)
+        && change.beforeFeedback == previous.get('gradeFeedback', '')
+        && change.afterFeedback == after.get('gradeFeedback', '')
+        && after.get('gradeRevisionId', '') == revisionId
+        && after.get('gradeRevisionReason', '') == change.reason
+        && after.get('gradeRevisedAt', null) == request.time
+        && after.get('gradePublishedAt', null) == request.time
+        && after.get('gradePublishedBy', '') == request.auth.uid
+        && after.get('gradeRevisionCount', 0) == change.revision
+        && change.revision == previous.get('gradeRevisionCount', 0) + 1;
     }
 
     function canReadPeerReviewDoc(groupId, assignmentId, reviewerId, data) {
@@ -307,13 +466,7 @@ service cloud.firestore {
               registrationId == request.auth.uid
               || resource.data.userId == request.auth.uid
             ));
-          allow create: if isSignedIn()
-            && registrationId == request.auth.uid
-            && request.resource.data.userId == request.auth.uid;
-          allow update: if false;
-          allow delete: if isSignedIn()
-            && registrationId == request.auth.uid
-            && resource.data.userId == request.auth.uid;
+          allow create, update, delete: if false;
         }
 
         match /reviews/{reviewId} {
@@ -329,6 +482,10 @@ service cloud.firestore {
       match /clubEvents/{docId} {
         allow read: if true;
         allow create, update, delete: if false;
+        match /registrations/{uid} {
+          allow read: if hasEditorRole(schoolId) || (isSchoolMember(schoolId) && isSelf(uid));
+          allow create, update, delete: if false;
+        }
       }
 
       match /menus/{docId} {
@@ -388,17 +545,9 @@ service cloud.firestore {
         allow read: if hasEditorRole(schoolId)
           || requesterIsCafeteriaOperator(schoolId, resource.data.cafeteriaId)
           || (isSignedIn() && resource.data.userId == request.auth.uid);
-        allow create: if false;
-        allow update: if hasEditorRole(schoolId)
-          || requesterIsCafeteriaOperator(schoolId, resource.data.cafeteriaId)
-          || (
-            isSignedIn()
-            && resource.data.userId == request.auth.uid
-            && request.resource.data.userId == resource.data.userId
-            && request.resource.data.schoolId == resource.data.schoolId
-            && request.resource.data.status == 'cancelled'
-          );
-        allow delete: if false;
+        // Order creation and status changes use authenticated callables so the
+        // canonical receipt and user mirror cannot diverge through client writes.
+        allow create, update, delete: if false;
       }
 
       match /settings/{docId} {
@@ -632,7 +781,28 @@ service cloud.firestore {
 
       match /knowledgeBase/{entryId} {
         allow read: if isActiveGroupMember(groupId);
-        allow create, update, delete: if canManageGroup(groupId);
+        allow create: if canManageGroup(groupId);
+        allow delete: if false;
+        allow update: if canManageGroup(groupId) && (
+          resource.data.get('type', '') != 'assignment'
+          || (
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'title', 'description', 'dueAt', 'allowLateSubmission', 'updatedAt', 'lastEditedBy'
+            ])
+            && resource.data.get('createdBy', '') == request.auth.uid
+            && resource.data.get('published', false) == true
+            && resource.data.get('status', '') != 'closed'
+            && request.resource.data.title is string
+            && request.resource.data.title.size() >= 1
+            && request.resource.data.title.size() <= 120
+            && request.resource.data.description is string
+            && request.resource.data.description.size() <= 10000
+            && (request.resource.data.dueAt == null || request.resource.data.dueAt is string)
+            && request.resource.data.allowLateSubmission is bool
+            && request.resource.data.lastEditedBy == request.auth.uid
+            && request.resource.data.updatedAt == request.time
+          )
+        );
       }
 
       match /aiKnowledge/{chunkId} {
@@ -657,13 +827,73 @@ service cloud.firestore {
 
       match /assignments/{assignmentId} {
         allow read: if isActiveGroupMember(groupId);
-        allow create, update, delete: if canManageGroup(groupId);
+        allow create: if canManageGroup(groupId);
+        // Published text assignments can only be edited by their author.
+        // Another course manager must not alter points, identity, or publication state.
+        allow update: if canManageGroup(groupId)
+          && (
+            (
+              resource.data.get('type', '') != 'assignment'
+              && request.resource.data.get('type', '') != 'assignment'
+            ) || (
+              resource.data.get('type', '') == 'assignment'
+              && resource.data.get('createdBy', '') == request.auth.uid
+              && resource.data.get('published', false) == true
+              && resource.data.get('status', '') == 'published'
+              && get(/databases/$(database)/documents/groups/$(groupId)).data.get('type', '') == 'course'
+              && isSchoolMember(get(/databases/$(database)/documents/groups/$(groupId)).data.get('schoolId', ''))
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'title', 'description', 'dueAt', 'allowLateSubmission', 'updatedAt', 'lastEditedBy'
+              ])
+              && request.resource.data.get('title', '') is string
+              && request.resource.data.get('title', '').size() > 0
+              && request.resource.data.get('title', '').size() <= 120
+              && request.resource.data.get('description', '') is string
+              && request.resource.data.get('description', '').size() <= 10000
+              && request.resource.data.get('allowLateSubmission', false) is bool
+              && (
+                request.resource.data.get('dueAt', null) == null
+                || (request.resource.data.get('dueAt', null) is string
+                    && request.resource.data.get('dueAt', '').size() <= 35)
+              )
+              && request.resource.data.get('lastEditedBy', '') == request.auth.uid
+              && request.resource.data.get('updatedAt', null) == request.time
+            )
+          );
+        allow delete: if canManageGroup(groupId)
+          && resource.data.get('type', '') != 'assignment';
 
         match /submissions/{submissionId} {
-          allow read: if canReadSubmissionDoc(groupId, assignmentId, submissionId, resource.data);
-          allow create: if isActiveGroupMember(groupId) && isSubmissionOwner(request.resource.data, submissionId);
-          allow update: if canManageGroup(groupId) || isSubmissionOwner(resource.data, submissionId);
+          allow read: if (isActiveGroupMember(groupId) && submissionId == request.auth.uid)
+            || canReadSubmissionDoc(groupId, assignmentId, submissionId, resource.data);
+          allow create: if validStudentSubmission(groupId, assignmentId, submissionId)
+            && request.resource.data.keys().hasOnly([
+              'userId', 'groupId', 'assignmentId', 'content', 'attachments', 'answers', 'status', 'submittedAt', 'updatedAt'
+            ]);
+          allow update: if (
+            canManageGroup(groupId)
+            && (
+              validFirstPublishedGrade(groupId, assignmentId, submissionId)
+              || validFirstLegacyGrade(groupId, assignmentId, submissionId)
+              || (changesPublishedGrade()
+                && validGradeCorrection(groupId, assignmentId, submissionId))
+            )
+          ) || (
+            validStudentSubmission(groupId, assignmentId, submissionId)
+            && isSubmissionOwner(resource.data, submissionId)
+            && resource.data.get('submittedAt', null) == null
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'userId', 'groupId', 'assignmentId', 'content', 'attachments', 'answers', 'status', 'submittedAt', 'updatedAt'
+            ])
+          );
           allow delete: if false;
+
+          match /gradeRevisions/{revisionId} {
+            allow read: if canManageGroup(groupId);
+            allow create: if canManageGroup(groupId)
+              && validGradeRevisionLog(groupId, assignmentId, submissionId, revisionId);
+            allow update, delete: if false;
+          }
         }
 
         match /peerReviews/{reviewerId} {
@@ -696,8 +926,10 @@ service cloud.firestore {
       }
 
       match /liveSessions/{sessionId} {
-        allow read: if isActiveGroupMember(groupId);
-        allow create, update, delete: if canManageGroup(groupId);
+        // Version 1 documents contain public QR secrets and attendance rosters.
+        // Clients must query schemaVersion == 2; legacy sessions require migration.
+        allow read: if isActiveGroupMember(groupId) && resource.data.schemaVersion == 2;
+        allow write: if false;
 
         match /questions/{questionId} {
           allow read: if isActiveGroupMember(groupId);
@@ -719,14 +951,20 @@ service cloud.firestore {
         }
       }
 
+      match /liveSessionSecrets/{sessionId} {
+        allow read: if isActiveGroupMember(groupId)
+          && get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role in ['owner', 'instructor'];
+        allow write: if false;
+      }
+
       match /attendanceSessions/{sessionId} {
-        allow read: if isActiveGroupMember(groupId);
-        allow create, update, delete: if canManageGroup(groupId);
+        allow read: if isActiveGroupMember(groupId) && resource.data.schemaVersion == 2;
+        allow write: if false;
 
         match /attendanceRecords/{recordId} {
-          allow read: if isActiveGroupMember(groupId);
-          allow create, update: if canManageGroup(groupId);
-          allow delete: if false;
+          allow read: if canManageGroup(groupId)
+            || (isActiveGroupMember(groupId) && recordId == request.auth.uid);
+          allow write: if false;
         }
       }
     }
@@ -742,6 +980,8 @@ service cloud.firestore {
         && request.resource.data.balance == resource.data.balance
         && request.resource.data.schoolId == resource.data.schoolId
         && request.resource.data.primarySchoolId == resource.data.primarySchoolId
+        && request.resource.data.get('notificationDeliveryDisabled', false) == resource.data.get('notificationDeliveryDisabled', false)
+        && request.resource.data.get('accountDeletionInProgress', false) == resource.data.get('accountDeletionInProgress', false)
         && request.resource.data.createdAt == resource.data.createdAt;
       allow delete: if false;
 
@@ -804,8 +1044,7 @@ service cloud.firestore {
 
         match /orders/{orderId} {
           allow read: if isSelf(uid);
-          allow create, update: if isSelf(uid) && request.resource.data.userId == request.auth.uid;
-          allow delete: if false;
+          allow write: if false;
         }
 
         match /transactions/{transactionId} {

@@ -47,7 +47,7 @@ export default function AuditLogsPage() {
       <p style={{ color: '#3C3C43', fontSize: 14 }}>
         敏感資料僅記錄摘要（forum_posts、grade_scores）。僅 platform admin 可讀。
       </p>
-      {error ? <p style={{ color: '#FF3B30' }}>{error}</p> : null}
+      {error ? <p style={{ color: 'var(--danger)' }}>{error}</p> : null}
       <div style={{ overflowX: 'auto', marginTop: 16 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>

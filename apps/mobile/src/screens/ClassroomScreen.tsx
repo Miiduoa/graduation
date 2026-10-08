@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import QRCodeSvg from 'react-native-qrcode-svg';
 import {
   Screen,
   Card,
@@ -24,8 +25,14 @@ import {
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme, softShadowStyle } from '../ui/theme';
 import { useAuth } from '../state/auth';
-import { getDb, isFirebaseMockMode } from '../firebase';
-import { getFunctions, httpsCallable } from 'firebase/functions';
+import { getDb, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
+import { httpsCallable } from 'firebase/functions';
+import {
+  joinClassroomAttendance,
+  readAttendanceQr,
+  subscribeClassroomAttendance,
+} from '../services/liveAttendance';
+import { toDate } from '../services/courseWorkspace';
 import {
   doc,
   collection,
@@ -39,24 +46,10 @@ import {
   limit,
 } from 'firebase/firestore';
 
-let QRCodeSvg: React.ComponentType<{
-  value: string;
-  size?: number;
-  color?: string;
-  backgroundColor?: string;
-}> | null = null;
-
-try {
-  QRCodeSvg = require('react-native-qrcode-svg').default;
-} catch {
-  QRCodeSvg = null;
-}
-
 type LiveSession = {
   sessionId: string;
   teacherId: string;
   active: boolean;
-  qrToken?: string;
   qrExpiresAt?: any;
   reactions: { understood: number; partial: number; confused: number };
   attendeeCount: number;
@@ -79,25 +72,6 @@ type Poll = {
   active: boolean;
   createdAt?: any;
 };
-
-// Demo student names for random selection
-const DEMO_STUDENTS = [
-  '李明軒',
-  '王思齊',
-  '陳怡安',
-  '黃郁涵',
-  '張子萌',
-  '劉昱辰',
-  '林佳柔',
-  '吳凱琪',
-  '鄭亞寧',
-  '楊承恩',
-  '何宇哲',
-  '賴昱臻',
-  '邱意涵',
-  '曾聖傑',
-  '蔣予晴',
-];
 
 const REACTION_CONFIG = {
   understood: { icon: 'checkmark-circle' as const, color: '#34C759', label: '懂了' },
@@ -301,13 +275,22 @@ export function ClassroomScreen(props: any) {
   const nav = props?.navigation;
   const groupId: string | undefined = props?.route?.params?.groupId;
   const sessionId: string | undefined = props?.route?.params?.sessionId;
-  const isTeacher: boolean = props?.route?.params?.isTeacher ?? false;
 
   const auth = useAuth();
   const db = getDb();
-  const functions = getFunctions();
+  const functions = getFunctionsInstance();
 
   const [session, setSession] = useState<LiveSession | null>(null);
+  const [teacherAccess, setIsTeacher] = useState(false);
+  const [activeMembership, setActiveMembership] = useState(false);
+  const [privateQrToken, setQrToken] = useState<string | null>(null);
+  const [accessIdentity, setAccessIdentity] = useState<string | null>(null);
+  const [attendanceCode, setAttendanceCode] = useState('');
+  const [joining, setJoining] = useState(false);
+  const [attendanceError, setAttendanceError] = useState<string | null>(null);
+  const identityKey = `${auth.user?.uid ?? ''}:${groupId ?? ''}:${sessionId ?? ''}`;
+  const identityRef = useRef(identityKey);
+  identityRef.current = identityKey;
   const [questions, setQuestions] = useState<AnonQuestion[]>([]);
   const [polls, setPolls] = useState<Poll[]>([]);
   const [loading, setLoading] = useState(true);
@@ -316,7 +299,11 @@ export function ClassroomScreen(props: any) {
   const [userReaction, setUserReaction] = useState<ReactionKey | null>(null);
   const [myPollAnswers, setMyPollAnswers] = useState<Record<string, number>>({});
   const [refreshing, setRefreshing] = useState(false);
-  const [joined, setJoined] = useState(false);
+  const [confirmedJoined, setJoined] = useState(false);
+  const isTeacher = accessIdentity === identityKey && teacherAccess;
+  const qrToken = accessIdentity === identityKey ? privateQrToken : null;
+  const joined = accessIdentity === identityKey && confirmedJoined;
+  const canAttend = accessIdentity === identityKey && activeMembership;
   const [showQRScanner, setShowQRScanner] = useState(false);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const scanLockRef = useRef(false);
@@ -324,11 +311,6 @@ export function ClassroomScreen(props: any) {
   // 教師：新增投票
   const [newPollQuestion, setNewPollQuestion] = useState('');
   const [newPollOptions, setNewPollOptions] = useState(['', '']);
-
-  // 隨機選人
-  const [selectedStudent, setSelectedStudent] = useState<string | null>(null);
-  const [isSpinning, setIsSpinning] = useState(false);
-  const spinIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // 搶答
   const [quickAnswerActive, setQuickAnswerActive] = useState(false);
@@ -348,20 +330,61 @@ export function ClassroomScreen(props: any) {
 
   // 訂閱 Session 狀態
   useEffect(() => {
+    setSession(null);
+    setLoading(true);
+    setAttendanceError(null);
     if (isFirebaseMockMode()) {
       setLoading(false);
       return;
     }
-    if (!groupId || !sessionId) return;
-    const ref = doc(db, 'groups', groupId, 'liveSessions', sessionId);
-    const unsub = onSnapshot(ref, (snap) => {
-      if (snap.exists()) {
-        setSession({ sessionId, ...(snap.data() as any) });
-      }
+    if (!groupId || !sessionId || !auth.user?.uid) {
       setLoading(false);
-    });
-    return () => unsub();
-  }, [groupId, sessionId]);
+      return;
+    }
+    let active = true;
+    const ref = doc(db, 'groups', groupId, 'liveSessions', sessionId);
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (!active) return;
+        setSession(snap.exists() ? { sessionId, ...(snap.data() as any) } : null);
+        setLoading(false);
+      },
+      () => {
+        if (!active) return;
+        setSession(null);
+        setLoading(false);
+        setAttendanceError('無法讀取這場課堂，請確認課程權限並重新進入。');
+      },
+    );
+    return () => {
+      active = false;
+      unsub();
+    };
+  }, [db, groupId, sessionId, auth.user?.uid]);
+
+  useEffect(() => {
+    setAccessIdentity(identityKey);
+    setIsTeacher(false);
+    setActiveMembership(false);
+    setQrToken(null);
+    setJoined(false);
+    setAttendanceCode('');
+    setJoining(false);
+    setShowQRScanner(false);
+    if (isFirebaseMockMode() || !groupId || !sessionId || !auth.user?.uid) return;
+    return subscribeClassroomAttendance(
+      db,
+      { groupId, sessionId, userId: auth.user.uid },
+      {
+        onActive: setActiveMembership,
+        onTeacher: setIsTeacher,
+        onToken: setQrToken,
+        onJoined: setJoined,
+        onError: setAttendanceError,
+      },
+    );
+  }, [db, groupId, sessionId, auth.user?.uid]);
 
   // 訂閱問答
   useEffect(() => {
@@ -389,23 +412,30 @@ export function ClassroomScreen(props: any) {
   // 清理計時器
   useEffect(() => {
     return () => {
-      if (spinIntervalRef.current) clearInterval(spinIntervalRef.current);
       if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
       if (quizTimerRef.current) clearInterval(quizTimerRef.current);
     };
   }, []);
 
-  // 學生加入課堂（一般加入）
-  const handleJoin = useCallback(async () => {
-    if (!groupId || !sessionId || !auth.user) return;
-    try {
-      const joinSession = httpsCallable(functions, 'joinLiveSession');
-      await joinSession({ groupId, sessionId });
-      setJoined(true);
-    } catch (e: any) {
-      Alert.alert('加入失敗', e.message ?? '無法加入課堂');
-    }
-  }, [groupId, sessionId, auth.user]);
+  const handleJoin = useCallback(
+    async (token: string) => {
+      if (!groupId || !sessionId || !auth.user || !session?.active || !canAttend || joining) return;
+      const requestIdentity = identityKey;
+      setJoining(true);
+      setAttendanceError(null);
+      try {
+        await joinClassroomAttendance(functions, { groupId, sessionId, qrToken: token });
+        if (identityRef.current !== requestIdentity) return;
+        setAttendanceCode('');
+      } catch (e: any) {
+        if (identityRef.current === requestIdentity)
+          setAttendanceError(e.message ?? '無法完成簽到，請稍後再試。');
+      } finally {
+        if (identityRef.current === requestIdentity) setJoining(false);
+      }
+    },
+    [groupId, sessionId, auth.user, functions, identityKey, joining, session?.active, canAttend],
+  );
 
   // 學生：開啟 QR 掃描器簽到
   const handleOpenQRScanner = useCallback(async () => {
@@ -428,25 +458,13 @@ export function ClassroomScreen(props: any) {
       setShowQRScanner(false);
 
       try {
-        const url = new URL(data);
-        const token = url.searchParams.get('token');
-        const scannedGroupId = url.searchParams.get('groupId');
-        const scannedSessionId = url.searchParams.get('sessionId');
-
-        if (!token || scannedGroupId !== groupId || scannedSessionId !== sessionId) {
-          Alert.alert('QR Code 無效', '請掃描老師目前課堂的 QR Code');
-          return;
-        }
-
-        const joinSession = httpsCallable(functions, 'joinLiveSession');
-        await joinSession({ groupId, sessionId, qrToken: token });
-        setJoined(true);
-        Alert.alert('簽到成功', '出席已記錄！');
+        if (!groupId || !sessionId) return;
+        await handleJoin(readAttendanceQr(data, groupId, sessionId));
       } catch (e: any) {
         Alert.alert('簽到失敗', e.message ?? '無法完成簽到，請稍後再試');
       }
     },
-    [groupId, sessionId, functions],
+    [groupId, sessionId, handleJoin],
   );
 
   // 提交匿名問題
@@ -548,6 +566,7 @@ export function ClassroomScreen(props: any) {
 
   // 結束課堂（教師）
   const handleEndSession = useCallback(async () => {
+    if (!isTeacher || !session?.active || session.teacherId !== auth.user?.uid) return;
     Alert.alert('結束課堂', '確定要結束今天的課堂互動？', [
       { text: '取消', style: 'cancel' },
       {
@@ -564,24 +583,7 @@ export function ClassroomScreen(props: any) {
         },
       },
     ]);
-  }, [groupId, sessionId]);
-
-  // ===== 隨機選人 (Random Student Selection) =====
-  const handleStartRandomSelection = useCallback(() => {
-    setSelectedStudent(null);
-    setIsSpinning(true);
-    let spinCount = 0;
-    const maxSpins = 30;
-
-    spinIntervalRef.current = setInterval(() => {
-      spinCount++;
-      setSelectedStudent(DEMO_STUDENTS[Math.floor(Math.random() * DEMO_STUDENTS.length)]);
-      if (spinCount >= maxSpins) {
-        setIsSpinning(false);
-        if (spinIntervalRef.current) clearInterval(spinIntervalRef.current);
-      }
-    }, 100);
-  }, []);
+  }, [groupId, sessionId, isTeacher, session?.active, session?.teacherId, auth.user?.uid]);
 
   // ===== 搶答 (Quick Answer Race) =====
   const handleStartQuickAnswer = useCallback(() => {
@@ -668,7 +670,13 @@ export function ClassroomScreen(props: any) {
     return <ErrorState title="課堂" subtitle="缺少課堂資訊" hint="請從群組頁面進入課堂" />;
   if (loading) return <LoadingState title="課堂" subtitle="連線中..." rows={3} />;
   if (!session)
-    return <ErrorState title="課堂" subtitle="找不到課堂" hint="課堂可能已結束或不存在" />;
+    return (
+      <ErrorState
+        title="課堂"
+        subtitle="找不到課堂"
+        hint={attendanceError ?? '課堂可能已結束或不存在'}
+      />
+    );
 
   return (
     <Screen>
@@ -706,8 +714,8 @@ export function ClassroomScreen(props: any) {
           <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16, flex: 1 }}>
             {session.active ? '課堂進行中' : '課堂已結束'}
           </Text>
-          <Pill text={`${session.attendeeCount} 人在線`} kind="accent" />
-          {isTeacher && session.active && (
+          <Pill text={`${session.attendeeCount} 人已簽到`} kind="accent" />
+          {isTeacher && session.active && session.teacherId === auth.user.uid && (
             <Pressable
               onPress={handleEndSession}
               style={{
@@ -722,69 +730,69 @@ export function ClassroomScreen(props: any) {
         </View>
 
         <View style={{ padding: 16, gap: 16 }}>
+          {isTeacher && session.active && session.teacherId !== auth.user.uid && (
+            <Text style={{ color: theme.colors.muted }}>這場課堂由另一位老師開始，請由該老師結束點名。</Text>
+          )}
+          {attendanceError && (
+            <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>
+              {attendanceError}
+            </Text>
+          )}
+          {!isTeacher && joined && <Pill text="已完成簽到" kind="success" />}
           {/* 學生：尚未加入時顯示加入按鈕 */}
-          {!isTeacher && !joined && session.active && (
-            <Card title="加入課堂" subtitle="點擊加入今天的即時互動">
+          {!isTeacher && canAttend && !joined && session.active && (
+            <Card title="課堂簽到" subtitle="掃描老師顯示的 QR Code，或輸入簽到碼。">
               <View style={{ gap: 10 }}>
-                <Button text="立即加入課堂" kind="primary" onPress={handleJoin} />
-                {session.qrToken && (
-                  <Button
-                    text="掃描 QR Code 簽到"
-                    kind="ghost"
-                    icon="qr-code-outline"
-                    onPress={handleOpenQRScanner}
-                  />
-                )}
+                <Button
+                  text="掃描 QR Code"
+                  kind="primary"
+                  icon="qr-code-outline"
+                  onPress={handleOpenQRScanner}
+                  disabled={joining}
+                />
+                <TextInput
+                  value={attendanceCode}
+                  onChangeText={setAttendanceCode}
+                  placeholder="老師提供的簽到碼"
+                  accessibilityLabel="簽到碼"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={{
+                    color: theme.colors.text,
+                    padding: 12,
+                    borderWidth: 1,
+                    borderColor: theme.colors.border,
+                    borderRadius: theme.radius.md,
+                  }}
+                />
+                <Button
+                  text={joining ? '正在確認…' : '確認簽到'}
+                  kind="ghost"
+                  onPress={() => handleJoin(attendanceCode)}
+                  disabled={joining || !attendanceCode.trim()}
+                />
               </View>
             </Card>
           )}
 
           {/* 教師：QR Code 出席打卡 */}
-          {isTeacher && session.qrToken && session.active && (
+          {isTeacher && qrToken && session.active && (
             <AnimatedCard title="出席打卡 QR Code" subtitle="學生掃碼即可記錄出席">
               <View style={{ alignItems: 'center', padding: 16, gap: 12 }}>
-                {QRCodeSvg ? (
-                  <QRCodeSvg
-                    value={`campusone://classroom/join?groupId=${groupId}&sessionId=${sessionId}&token=${session.qrToken}`}
-                    size={180}
-                    color={theme.colors.text}
-                    backgroundColor="transparent"
-                  />
-                ) : (
-                  <View
-                    style={{
-                      width: 180,
-                      height: 180,
-                      borderRadius: 24,
-                      borderWidth: 1,
-                      borderColor: theme.colors.border,
-                      backgroundColor: theme.colors.surface2,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      padding: 18,
-                      gap: 8,
-                    }}
-                  >
-                    <Ionicons name="qr-code-outline" size={36} color={theme.colors.accent} />
-                    <Text
-                      style={{ color: theme.colors.text, fontWeight: '700', textAlign: 'center' }}
-                    >
-                      QR 套件尚未安裝
-                    </Text>
-                    <Text
-                      style={{
-                        color: theme.colors.muted,
-                        fontSize: 12,
-                        textAlign: 'center',
-                        lineHeight: 18,
-                      }}
-                    >
-                      目前先保留課堂流程，安裝 `react-native-qrcode-svg` 後即可顯示正式 QR Code。
-                    </Text>
-                  </View>
-                )}
+                <QRCodeSvg
+                  value={`campusone://classroom/join?groupId=${encodeURIComponent(groupId)}&sessionId=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(qrToken)}`}
+                  size={180}
+                  color="#132D23"
+                  backgroundColor="#FFFFFF"
+                  quietZone={12}
+                />
+                <Text selectable style={{ color: theme.colors.text, fontWeight: '700' }}>
+                  簽到碼：{qrToken}
+                </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 12, textAlign: 'center' }}>
-                  此 QR Code 每 5 分鐘更新一次以防代掃
+                  {toDate(session.qrExpiresAt)
+                    ? `有效至 ${toDate(session.qrExpiresAt)!.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })}；逾時請結束後重新開始點名。`
+                    : '簽到碼的有效期限由老師設定。'}
                 </Text>
               </View>
             </AnimatedCard>
@@ -811,81 +819,6 @@ export function ClassroomScreen(props: any) {
                 userReaction={null}
                 onReact={() => {}}
               />
-            </Card>
-          )}
-
-          {/* 隨機選人 (Random Student Selection) - 教師 */}
-          {isTeacher && session.active && (
-            <Card title="隨機選人" subtitle="選中幸運學生進行提問或互動">
-              <View style={{ alignItems: 'center', gap: 16 }}>
-                {selectedStudent && (
-                  <View
-                    style={{
-                      width: '100%',
-                      paddingVertical: 24,
-                      paddingHorizontal: 16,
-                      borderRadius: theme.radius.lg,
-                      backgroundColor: theme.colors.accentSoft,
-                      alignItems: 'center',
-                      borderWidth: 2,
-                      borderColor: theme.colors.accent,
-                    }}
-                  >
-                    <Text style={{ color: theme.colors.muted, fontSize: 13, marginBottom: 8 }}>
-                      {isSpinning ? '轉動中...' : '選中學生'}
-                    </Text>
-                    <Text
-                      style={{
-                        color: theme.colors.accent,
-                        fontSize: 36,
-                        fontWeight: '700',
-                        opacity: isSpinning ? 0.7 : 1,
-                      }}
-                    >
-                      {selectedStudent}
-                    </Text>
-                  </View>
-                )}
-                <View style={{ flexDirection: 'row', gap: 10, width: '100%' }}>
-                  <Pressable
-                    onPress={handleStartRandomSelection}
-                    disabled={isSpinning}
-                    style={({ pressed }) => ({
-                      flex: 1,
-                      paddingVertical: 12,
-                      paddingHorizontal: 16,
-                      borderRadius: theme.radius.md,
-                      backgroundColor: theme.colors.accent,
-                      alignItems: 'center',
-                      opacity: pressed ? 0.8 : isSpinning ? 0.6 : 1,
-                    })}
-                  >
-                    <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16 }}>
-                      {isSpinning ? '轉動中...' : '選人'}
-                    </Text>
-                  </Pressable>
-                  {selectedStudent && !isSpinning && (
-                    <Pressable
-                      onPress={handleStartRandomSelection}
-                      style={({ pressed }) => ({
-                        flex: 1,
-                        paddingVertical: 12,
-                        paddingHorizontal: 16,
-                        borderRadius: theme.radius.md,
-                        backgroundColor: theme.colors.surface2,
-                        borderWidth: 1,
-                        borderColor: theme.colors.border,
-                        alignItems: 'center',
-                        opacity: pressed ? 0.8 : 1,
-                      })}
-                    >
-                      <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>
-                        再選一位
-                      </Text>
-                    </Pressable>
-                  )}
-                </View>
-              </View>
             </Card>
           )}
 

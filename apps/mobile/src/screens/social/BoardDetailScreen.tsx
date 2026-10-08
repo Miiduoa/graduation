@@ -13,6 +13,7 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../../ui/theme';
+import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../../ui/navigationTheme';
 import { useSchool } from '../../state/school';
 import { useAuth } from '../../state/auth';
@@ -36,6 +37,7 @@ function engagementLine(p: CampusPostDoc) {
 }
 
 export function BoardDetailScreen(props: any) {
+  const styles = useThemeStyleSheet(createStyles);
   const injected = useCampusSocialStackNav();
   const fb = useNavigation<any>();
   const nav = injected ?? fb;
@@ -138,9 +140,9 @@ export function BoardDetailScreen(props: any) {
             <Ionicons
               name={subscribed ? 'notifications' : 'notifications-outline'}
               size={16}
-              color={subscribed ? '#fff' : theme.colors.accent}
+              color={subscribed ? theme.colors.onAccent : theme.colors.accent}
             />
-            <Text style={[styles.subTxt, subscribed && { color: '#fff' }]}>
+            <Text style={[styles.subTxt, subscribed && { color: theme.colors.onAccent }]}>
               {subscribed ? '已訂閱看板' : '訂閱看板'}
             </Text>
           </Pressable>
@@ -150,7 +152,7 @@ export function BoardDetailScreen(props: any) {
               nav?.navigate?.('PostCompose' as never, { boardId, defaultAnonymous: defaultAnon })
             }
           >
-            <Ionicons name="add-circle" size={20} color="#fff" />
+            <Ionicons name="add-circle" size={20} color={theme.colors.onAccent} />
             <Text style={styles.composeText}>發文</Text>
           </Pressable>
         </View>
@@ -212,7 +214,7 @@ export function BoardDetailScreen(props: any) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   boardMeta: { marginBottom: theme.space.sm },
   root: { flex: 1, backgroundColor: theme.colors.bg, paddingHorizontal: theme.layout.screenPadding },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
@@ -245,7 +247,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: theme.radius.md,
   },
-  composeText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  composeText: { color: theme.colors.onAccent, fontWeight: '700', fontSize: 14 },
   ruleBlock: {
     fontSize: 13,
     lineHeight: 19,

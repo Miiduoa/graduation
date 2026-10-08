@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { View, Text, Pressable, ActivityIndicator, Alert, StyleSheet, type ViewStyle } from 'react-native';
 import { theme } from '../ui/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import {
   sendFriendRequest,
   acceptFriendRequest,
@@ -26,6 +27,7 @@ export type RelationshipButtonsProps = {
 };
 
 export function RelationshipButtons(props: RelationshipButtonsProps) {
+  const styles = useThemeStyleSheet(createStyles);
   const {
     profileUid,
     myUid,
@@ -191,7 +193,7 @@ export function RelationshipButtons(props: RelationshipButtonsProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   inline: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   btn: { paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10 },
@@ -202,7 +204,7 @@ const styles = StyleSheet.create({
   },
   btnOutlineText: { color: theme.colors.accent, fontWeight: '700', fontSize: 13 },
   btnPrimary: { backgroundColor: theme.colors.accent },
-  btnPrimaryText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  btnPrimaryText: { color: theme.colors.onAccent, fontWeight: '700', fontSize: 13 },
   btnGhost: { backgroundColor: theme.colors.surface2 },
   btnGhostText: { color: theme.colors.text, fontWeight: '700', fontSize: 13 },
   meta: { color: theme.colors.muted, fontSize: 13 },

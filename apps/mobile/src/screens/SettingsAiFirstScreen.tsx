@@ -1,255 +1,195 @@
-/**
- * Campus AI-First — 設定 V2
- */
-import React, { useCallback } from 'react';
-import { Alert, View, Text } from 'react-native';
-import {
-  AIDetailScreen,
-  AISection,
-  AIRow,
-  AILegacyLink,
-  AIMark,
-  aiTokens,
-} from '../ui/aiFirst';
+import React, { useEffect, useRef, useState } from 'react';
+import { Alert, Linking, Text, View } from 'react-native';
+import Constants from 'expo-constants';
+import { AIDetailScreen, AISection, AIRow, AICard, AIButton, aiTokens } from '../ui/aiFirst';
+import { useAuth } from '../state/auth';
+import { useThemeMode } from '../state/theme';
+import { getLegalUrl } from '../services/release';
 
-export default function SettingsAiFirstScreen(props: any) {
-  const navigation = props?.navigation;
+type Navigation = { goBack?: () => void; navigate?: (screen: string) => void };
 
-  const go = useCallback(
-    (screen: string, params?: Record<string, unknown>) => () => {
-      try {
-        navigation?.navigate?.(screen as never, params as never);
-      } catch (err) {
-        console.warn('[SettingsAiFirst] navigate failed', screen, err);
+export default function SettingsAiFirstScreen({ navigation }: { navigation?: Navigation }) {
+  const auth = useAuth();
+  const { mode, setMode } = useThemeMode();
+  const uid = auth.user?.uid;
+  const profile = auth.profile?.uid === uid ? auth.profile : null;
+  const currentUid = useRef(uid);
+  currentUid.current = uid;
+  const mounted = useRef(true);
+  const signingOut = useRef(false);
+  const [busyUid, setBusyUid] = useState<string | null>(null);
+  const [error, setError] = useState<{ uid: string | undefined; message: string } | null>(null);
+  const busy = Boolean(uid && busyUid === uid);
+  const version = Constants.expoConfig?.version;
+  const privacyUrl = getLegalUrl('privacy');
+  const termsUrl = getLegalUrl('terms');
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  const go = (screen: string) => () => navigation?.navigate?.(screen);
+  const openLegal = async (url: string | null) => {
+    if (!url) return;
+    const requestedUid = uid;
+    setError(null);
+    try {
+      await Linking.openURL(url);
+    } catch {
+      if (mounted.current && currentUid.current === requestedUid) {
+        setError({ uid: requestedUid, message: '無法開啟網頁，請確認網路連線後重試。' });
       }
-    },
-    [navigation],
-  );
+    }
+  };
 
-  const todo = useCallback(
-    (label: string, desc?: string) => () => {
-      Alert.alert(label, desc ?? '此功能規格已定，後端串接中。');
-    },
-    [],
-  );
-
-  const confirmDestructive = useCallback(
-    (label: string, msg: string, after?: () => void) => () => {
-      Alert.alert(label, msg, [
-        { text: '取消', style: 'cancel' },
-        {
-          text: label,
-          style: 'destructive',
-          onPress: after ?? (() => {}),
+  const confirmLogout = () => {
+    if (!uid || signingOut.current) return;
+    const requestedUid = uid;
+    Alert.alert('登出', '確定要登出這個帳號嗎？', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '登出',
+        style: 'destructive',
+        onPress: async () => {
+          if (!mounted.current || currentUid.current !== requestedUid || signingOut.current) return;
+          signingOut.current = true;
+          setBusyUid(requestedUid);
+          setError(null);
+          try {
+            await auth.signOutWithWarning();
+          } catch {
+            if (mounted.current && currentUid.current === requestedUid) {
+              setError({ uid: requestedUid, message: '無法登出，請稍後重試。' });
+            }
+          } finally {
+            signingOut.current = false;
+            if (mounted.current) setBusyUid((value) => (value === requestedUid ? null : value));
+          }
         },
-      ]);
-    },
-    [],
-  );
+      },
+    ]);
+  };
 
   return (
-    <AIDetailScreen title="設定" onBack={() => navigation?.goBack?.()}>
-      {/* AI 控制特別凸出 */}
-      <View
-        style={{
-          margin: aiTokens.space.md,
-          padding: aiTokens.space.lg,
-          backgroundColor: aiTokens.aiSurface,
-          borderRadius: aiTokens.radius.lg,
-          borderWidth: 1,
-          borderColor: aiTokens.aiSoft,
-          flexDirection: 'row',
-          gap: 14,
-          alignItems: 'center',
-        }}
-      >
-        <AIMark size={40} />
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 11, color: aiTokens.ai, fontWeight: '700', letterSpacing: 0.4 }}>
-            AI 控制中心
+    <AIDetailScreen
+      title="設定"
+      subtitle="管理帳號與調整閱讀方式。"
+      onBack={() => navigation?.goBack?.()}
+    >
+      <AICard title={uid ? '目前登入帳號' : '尚未登入'}>
+        <View style={{ gap: 8 }}>
+          <Text style={{ color: aiTokens.text, fontSize: 17, fontWeight: '600' }}>
+            {uid
+              ? profile?.displayName?.trim() || auth.user?.displayName?.trim() || '我的帳號'
+              : '登入後管理個人資料'}
           </Text>
-          <Text style={{ fontSize: 15, fontWeight: '700', color: aiTokens.text, marginTop: 4 }}>
-            你的資料，你做主
-          </Text>
-          <Text style={{ fontSize: 12, color: aiTokens.muted, marginTop: 4 }}>
-            選擇 AI 能看哪些資料，能做哪些事
-          </Text>
+          {uid ? (
+            <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
+              {auth.user?.email || profile?.email || '尚未提供電子郵件'}
+            </Text>
+          ) : (
+            <AIButton label="學校登入" onPress={go('SSOLogin')} />
+          )}
         </View>
-      </View>
+      </AICard>
 
-      {/* AI & 隱私 */}
-      <AISection title="AI & 隱私">
+      <AISection title="外觀與閱讀">
+        <AICard title="介面主題">
+          <View style={{ gap: 12 }}>
+            <Text style={{ color: aiTokens.muted }}>
+              目前使用{mode === 'dark' ? '深色' : '淺色'}模式。
+            </Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              <AIButton
+                label="淺色"
+                variant={mode === 'light' ? 'primary' : 'ghost'}
+                onPress={() => setMode('light')}
+              />
+              <AIButton
+                label="深色"
+                variant={mode === 'dark' ? 'primary' : 'ghost'}
+                onPress={() => setMode('dark')}
+              />
+            </View>
+          </View>
+        </AICard>
         <AIRow
-          icon="🤖"
-          title="AI 可使用的資料"
-          subtitle="課表、成績、訊息、地點…"
-          tag="開啟中"
-          tagTone="ai"
-          onPress={todo('AI 可使用的資料', '在此切換 AI 對課表、成績、訊息等資料的存取權。')}
-        />
-        <AIRow
-          icon="🛡"
-          title="AI 自動執行"
-          subtitle="預設關閉 · 任何動作都先問你"
-          tag="關閉"
-          tagTone="muted"
-          onPress={todo('AI 自動執行', '預設關閉。開啟後 AI 才會在你授權的範圍內自動執行動作。')}
-        />
-        <AIRow
-          icon="💾"
-          title="清空 AI 對話歷史"
-          subtitle="不可逆"
-          onPress={confirmDestructive('清空 AI 對話歷史', '所有 AI 對話將被永久刪除，這個動作無法復原。')}
-        />
-        <AIRow
-          icon="📤"
-          title="匯出我的 AI 資料"
-          subtitle="GDPR 合規"
-          onPress={go('DataExport')}
-        />
-      </AISection>
-
-      {/* 通知 */}
-      <AISection title="通知">
-        <AIRow
-          icon="🔔"
-          title="推播通知"
-          tag="開啟"
-          tagTone="success"
-          onPress={go('NotificationSettings')}
-        />
-        <AIRow
-          icon="⏰"
-          title="上課前提醒"
-          subtitle="10 分鐘前"
-          onPress={go('NotificationSettings', { focus: 'class' })}
-        />
-        <AIRow
-          icon="📅"
-          title="作業截止提醒"
-          subtitle="6 小時前"
-          onPress={go('NotificationSettings', { focus: 'assignment' })}
-        />
-        <AIRow
-          icon="🌙"
-          title="勿擾時段"
-          subtitle="23:00 – 07:00"
-          onPress={go('NotificationSettings', { focus: 'dnd' })}
-        />
-      </AISection>
-
-      {/* 外觀 */}
-      <AISection title="外觀">
-        <AIRow
-          icon="🎨"
-          title="主題"
-          subtitle="跟隨系統"
-          onPress={go('ThemePreview')}
-        />
-        <AIRow
-          icon="🔠"
-          title="字體大小"
-          subtitle="標準"
+          title="無障礙設定"
+          subtitle="查看裝置輔助功能與閱讀設定"
           onPress={go('AccessibilitySettings')}
         />
         <AIRow
-          icon="🌐"
-          title="語言"
-          subtitle="繁體中文"
+          title="介面語言"
+          subtitle="選擇已提供翻譯的介面語言"
           onPress={go('LanguageSettings')}
         />
-        <AIRow
-          icon="♿"
-          title="無障礙"
-          subtitle="動畫減量、高對比"
-          onPress={go('AccessibilitySettings')}
-        />
       </AISection>
 
-      {/* 帳號 */}
-      <AISection title="帳號">
-        <AIRow icon="👤" title="個人資料" onPress={go('ProfileEdit')} />
+      {uid ? (
+        <>
+          <AISection title="通知與個人資料">
+            <AIRow
+              title="通知設定"
+              subtitle="管理通知類型與免打擾時段"
+              onPress={go('NotificationSettings')}
+            />
+            <AIRow
+              title="個人資料"
+              subtitle="修改顯示名稱、簡介與電話"
+              onPress={go('ProfileEdit')}
+            />
+            <AIRow
+              title="匯出我的資料"
+              subtitle="選擇要匯出的資料範圍"
+              onPress={go('DataExport')}
+            />
+          </AISection>
+          <AICard title="學校帳號與密碼">
+            <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
+              學校帳號的密碼由校方管理。如需變更或重設，請使用學校帳號服務。
+            </Text>
+          </AICard>
+        </>
+      ) : null}
+
+      <AISection title="關於 Campus One">
+        {version ? <AIRow title="版本" subtitle={version} static /> : null}
         <AIRow
-          icon="🔑"
-          title="變更密碼"
-          onPress={todo('變更密碼', '請至 SSO 入口或學校系統變更。')}
+          title="服務條款"
+          subtitle={termsUrl ? '查看適用條款' : '目前無法提供條款連結'}
+          disabled={!termsUrl}
+          onPress={() => void openLegal(termsUrl)}
         />
         <AIRow
-          icon="📱"
-          title="綁定裝置"
-          subtitle="2 台"
-          onPress={todo('綁定裝置', '查看 / 移除已綁定的裝置。')}
+          title="隱私政策"
+          subtitle={privacyUrl ? '了解資料使用與保存方式' : '目前無法提供隱私政策連結'}
+          disabled={!privacyUrl}
+          onPress={() => void openLegal(privacyUrl)}
         />
-        <AIRow
-          icon="🔗"
-          title="社交帳號"
-          subtitle="Google · 已連結"
-          onPress={todo('社交帳號', '管理 Google / Apple 等社交帳號的連結。')}
-        />
+        <AIRow title="意見回饋" onPress={go('Feedback')} />
       </AISection>
 
-      {/* 資料 */}
-      <AISection title="資料">
-        <AIRow
-          icon="🔄"
-          title="同步"
-          subtitle="自動 · 上次 09:43"
-          onPress={todo('資料同步', '已開啟自動同步，最近一次同步：09:43。')}
-        />
-        <AIRow
-          icon="🗑"
-          title="清除快取"
-          subtitle="32 MB"
-          onPress={confirmDestructive(
-            '清除快取',
-            '會釋放約 32 MB 空間，下次開啟需重新載入。',
-          )}
-        />
-        <AIRow
-          icon="📦"
-          title="離線資料"
-          subtitle="課表、地圖、菜單"
-          onPress={todo('離線資料', '管理可離線使用的資料範圍。')}
-        />
-      </AISection>
-
-      {/* 關於 */}
-      <AISection title="關於">
-        <AIRow
-          icon="ℹ️"
-          title="關於校園 AI"
-          subtitle="v1.0 · build 2026.05"
-          onPress={go('Help')}
-        />
-        <AIRow icon="📄" title="服務條款" onPress={go('Help', { tab: 'terms' })} />
-        <AIRow icon="🔒" title="隱私政策" onPress={go('Help', { tab: 'privacy' })} />
-        <AIRow icon="✉️" title="意見回饋" onPress={go('Feedback')} />
-      </AISection>
-
-      {/* 危險區 */}
-      <AISection title="危險區" subtitle="這些動作影響重大">
-        <AIRow
-          icon="🚪"
-          title="登出"
-          onPress={confirmDestructive('登出', '確定要登出嗎？', () => {
-            try {
-              navigation?.navigate?.('SSOLogin' as never);
-            } catch {
-              // ignore
-            }
-          })}
-        />
-        <AIRow
-          icon="❌"
-          title="刪除帳號"
-          subtitle="不可逆"
-          tag="慎用"
-          tagTone="danger"
-          onPress={go('AccountDeletion')}
-        />
-      </AISection>
-
-      <AILegacyLink label="開發者選項 / 進階" onPress={() => navigation?.navigate?.('SettingsLegacy' as never)} />
+      {uid ? (
+        <AISection title="帳號管理">
+          <AIRow title={busy ? '正在登出…' : '登出'} disabled={busy} onPress={confirmLogout} />
+          <AIRow
+            title="刪除帳號"
+            subtitle="先查看刪除範圍與確認步驟"
+            disabled={busy}
+            onPress={go('AccountDeletion')}
+          />
+        </AISection>
+      ) : null}
+      {error && error.uid === uid ? (
+        <AICard>
+          <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>
+            {error.message}
+          </Text>
+        </AICard>
+      ) : null}
     </AIDetailScreen>
   );
 }

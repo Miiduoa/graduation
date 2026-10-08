@@ -1,5 +1,5 @@
 /* eslint-disable */
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useSyncExternalStore } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { theme } from './theme';
+import { getThemeVersion, subscribeToTheme, theme } from './theme';
+import { useThemeStyleSheet } from './useThemeStyleSheet';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { getOfflineQueueLength } from '../services/offline';
 
@@ -38,6 +39,7 @@ function BannerView({
   message?: string;
   onDismiss?: () => void;
 }) {
+  useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const getConfig = () => {
     switch (type) {
       case 'offline':
@@ -99,6 +101,7 @@ export function OfflineBanner({
 }
 
 export function NetworkStatusBanner() {
+  const styles = useThemeStyleSheet(createStyles);
   const { isConnected, isOnline, showReconnectedBanner, dismissReconnectedBanner, wasOffline } =
     useNetworkStatus();
   const [pendingCount, setPendingCount] = useState(0);
@@ -188,7 +191,7 @@ export function NetworkStatusBanner() {
   return null;
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   tipsContainer: {
     backgroundColor: theme.colors.surface2,
     paddingHorizontal: 16,
@@ -251,6 +254,7 @@ export function OfflineIndicator() {
 }
 
 export function OfflineDataNotice({ cachedAt }: { cachedAt?: number }) {
+  useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   if (!cachedAt) return null;
 
   const now = Date.now();

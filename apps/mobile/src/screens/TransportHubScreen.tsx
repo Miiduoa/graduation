@@ -1,15 +1,5 @@
 /* eslint-disable */
-/**
- * 交通導航中心 — 媲美 Google Maps
- *
- * 功能：
- *   1. 搜尋目的地（OSM Nominatim 免費地理編碼）
- *   2. 多模式路線規劃（步行 / 騎車 / 開車 / 大眾運輸）
- *   3. 互動式地圖 + 路線 Polyline 繪製
- *   4. GPS 即時追蹤、導航時鏡頭跟隨
- *   5. AI 智慧改道 + 擁擠偵測
- *   6. 即時公車/台鐵/高鐵/YouBike 查詢
- */
+/** 交通查詢、道路路線與官方服務入口。 */
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   ScrollView,
@@ -19,6 +9,7 @@ import {
   TextInput,
   ActivityIndicator,
   Dimensions,
+  useWindowDimensions,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
@@ -27,12 +18,11 @@ import { PuWebView } from '../ui/PuWebView';
 import { Screen, Card, Pill, Button } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
+import { useThemeMode } from '../state/theme';
 import {
   searchPlaces,
   reverseGeocode,
   planRoutes,
-  checkForBetterRoute,
-  calculateLiveETA,
   formatDistance,
   formatDuration,
   PU_LOCATION,
@@ -47,7 +37,6 @@ import {
   getBusEstimates,
   getTrainSchedule,
   getHSRSchedule,
-  getNearbyBikesWithAvailability,
   PU_COMMON_BUS_ROUTES,
   PU_NEARBY_TRAIN_STATIONS,
   HSR_TAICHUNG_STATION_ID,
@@ -56,11 +45,10 @@ import {
   type TDXBusEstimate,
   type TDXTrainTimetable,
   type TDXHSRTimetable,
-  type BikeStationWithAvailability,
 } from '../services/tdxApi';
 import { useGeolocation } from '../hooks/useGeolocation';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const MAP_HEIGHT = SCREEN_HEIGHT * 0.32;
 
 // ─── Leaflet 互動地圖 HTML ──────────────────────────────
@@ -86,18 +74,14 @@ function buildLeafletHtml(opts: {
     origin,
     destination,
     routeGeometry,
-    routeColor = '#5856D6',
+    routeColor = theme.colors.accent,
     transitSegments,
     userLocation,
     isDark,
   } = opts;
 
-  const tileUrl = isDark
-    ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-    : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
-  const tileAttr = isDark
-    ? '&copy; <a href="https://carto.com/">CARTO</a>'
-    : '&copy; <a href="https://openstreetmap.org">OSM</a>';
+  const tileUrl = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+  const tileAttr = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
 
   // 將路線座標轉為 Leaflet 格式 [lat, lng]
   const routeLatLngs = (routeGeometry ?? []).map(([lng, lat]) => `[${lat},${lng}]`).join(',');
@@ -118,16 +102,19 @@ function buildLeafletHtml(opts: {
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>
 <style>
 *{margin:0;padding:0}
-html,body,#map{width:100%;height:100%}
+html,body,#map{width:100%;height:100%;background:${theme.colors.surface2}}
+.leaflet-tile-pane{filter:${isDark ? 'invert(90%) hue-rotate(180deg) brightness(85%)' : 'none'}}
+.leaflet-control-attribution{background:${theme.colors.surface}!important;color:${theme.colors.muted}}
+.leaflet-control-attribution a{color:${theme.colors.accent}}
 .user-dot{width:16px;height:16px;border-radius:50%;background:#4285f4;border:3px solid #fff;box-shadow:0 0 8px rgba(66,133,244,.6)}
-.origin-dot{width:14px;height:14px;border-radius:50%;background:#5856D6;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.3)}
+.origin-dot{width:14px;height:14px;border-radius:50%;background:${theme.colors.accent};border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.3)}
 .dest-pin{font-size:28px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.3))}
 </style>
 </head>
 <body>
 <div id="map"></div>
 <script>
-var map=L.map('map',{zoomControl:false,attributionControl:false}).setView([${center.lat},${center.lng}],${zoom});
+var map=L.map('map',{zoomControl:false,attributionControl:true}).setView([${center.lat},${center.lng}],${zoom});
 L.tileLayer('${tileUrl}',{maxZoom:19,attribution:'${tileAttr}'}).addTo(map);
 
 ${origin ? `L.marker([${origin.lat},${origin.lng}],{icon:L.divIcon({className:'',html:'<div class="origin-dot"></div>',iconSize:[20,20],iconAnchor:[10,10]})}).addTo(map);` : ''}
@@ -160,7 +147,7 @@ document.addEventListener('message',function(e){
       map.eachLayer(function(l){if(l instanceof L.Polyline)map.removeLayer(l)});
       if(d.coords&&d.coords.length>1){
         var bg=L.polyline(d.coords,{color:'#fff',weight:8,opacity:1,lineCap:'round',lineJoin:'round'}).addTo(map);
-        L.polyline(d.coords,{color:d.color||'#5856D6',weight:5,opacity:0.9,lineCap:'round',lineJoin:'round'}).addTo(map);
+        L.polyline(d.coords,{color:d.color||'${theme.colors.accent}',weight:5,opacity:0.9,lineCap:'round',lineJoin:'round'}).addTo(map);
         map.fitBounds(bg.getBounds().pad(0.12));
       }
     }
@@ -172,31 +159,48 @@ window.addEventListener('message',function(e){document.dispatchEvent(new Message
 </html>`;
 }
 
-/** 打開外部地圖 App 進行導航 */
-function openExternalMap(from: LatLng, to: LatLng, destName: string, mode: string = 'walking') {
-  const scheme = Platform.select({
-    ios: `maps://app?saddr=${from.lat},${from.lng}&daddr=${to.lat},${to.lng}&dirflg=${mode === 'transit' ? 'r' : mode === 'cycling' ? 'b' : 'w'}`,
-    default: `https://www.google.com/maps/dir/?api=1&origin=${from.lat},${from.lng}&destination=${to.lat},${to.lng}&travelmode=${mode === 'cycling' ? 'bicycling' : mode}`,
+/** 未確認起點時省略 origin，讓使用者在地圖服務中選擇。 */
+function openExternalMap(from: LatLng | null, to: LatLng, mode = 'walking') {
+  const params = new URLSearchParams({
+    api: '1',
+    destination: `${to.lat},${to.lng}`,
+    travelmode: mode === 'cycling' ? 'bicycling' : mode,
   });
-  const fallback = `https://www.google.com/maps/dir/?api=1&origin=${from.lat},${from.lng}&destination=${to.lat},${to.lng}&travelmode=${mode === 'cycling' ? 'bicycling' : mode}`;
-  void linkingOpenWithPuTronClassGate(scheme).then((ok) => {
-    if (!ok && scheme !== fallback) void linkingOpenWithPuTronClassGate(fallback);
-  });
+  if (from) params.set('origin', `${from.lat},${from.lng}`);
+  return linkingOpenWithPuTronClassGate(`https://www.google.com/maps/dir/?${params}`);
 }
 
 // ─── Mode 圖示/顏色 ────────────────────────────────────
 
 const MODE_CONFIG: Record<string, { icon: string; color: string; label: string }> = {
-  driving: { icon: 'car-outline', color: '#AF52DE', label: '開車' },
-  cycling: { icon: 'bicycle-outline', color: '#FF9500', label: '騎車' },
-  walking: { icon: 'walk-outline', color: '#34C759', label: '步行' },
-  transit: { icon: 'bus-outline', color: '#5856D6', label: '大眾運輸' },
-};
-
-const CONGESTION_COLORS = {
-  smooth: '#34C759',
-  moderate: '#FF9500',
-  heavy: '#f43f5e',
+  driving: {
+    icon: 'car-outline',
+    get color() {
+      return theme.colors.accent;
+    },
+    label: '開車',
+  },
+  cycling: {
+    icon: 'bicycle-outline',
+    get color() {
+      return theme.colors.accent;
+    },
+    label: '騎車',
+  },
+  walking: {
+    icon: 'walk-outline',
+    get color() {
+      return theme.colors.accent;
+    },
+    label: '步行',
+  },
+  transit: {
+    icon: 'bus-outline',
+    get color() {
+      return theme.colors.accent;
+    },
+    label: '大眾運輸',
+  },
 };
 
 // ─── Quick Access Tab ──────────────────────────────────
@@ -206,9 +210,14 @@ type QuickTab = 'none' | 'bus' | 'train' | 'hsr' | 'bike';
 // ─── Main Component ─────────────────────────────────────
 
 export function TransportHubScreen(props: any) {
+  const themeMode = useThemeMode();
+  const { width: screenWidth } = useWindowDimensions();
+  const searchRequest = useRef(0);
   // GPS 定位
   const geo = useGeolocation({ enableHighAccuracy: true, autoStart: false });
-  const [locationReady, setLocationReady] = useState(false);
+  const [locationError, setLocationError] = useState('');
+  const locationRequest = useRef(0);
+  const [mapOpenError, setMapOpenError] = useState('');
 
   // 搜尋狀態
   const [searchText, setSearchText] = useState('');
@@ -217,7 +226,7 @@ export function TransportHubScreen(props: any) {
   const [showResults, setShowResults] = useState(false);
 
   // 導航狀態
-  const [origin, setOrigin] = useState<LatLng>(PU_LOCATION);
+  const [origin, setOrigin] = useState<LatLng | null>(null);
   const [originName, setOriginName] = useState('定位中...');
   const [destination, setDestination] = useState<LatLng | null>(null);
   const [destName, setDestName] = useState('');
@@ -227,13 +236,6 @@ export function TransportHubScreen(props: any) {
   const [planError, setPlanError] = useState(false);
   const [showSteps, setShowSteps] = useState(false);
 
-  // 即時導航模式
-  const [navMode, setNavMode] = useState(false);
-  const [liveETA, setLiveETA] = useState('');
-  const [congestionLevel, setCongestionLevel] = useState<'smooth' | 'moderate' | 'heavy'>('smooth');
-  const [rerouteMsg, setRerouteMsg] = useState<string | null>(null);
-  const navIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
   // 快速查詢 Tab
   const [quickTab, setQuickTab] = useState<QuickTab>('none');
 
@@ -242,100 +244,107 @@ export function TransportHubScreen(props: any) {
     return lat >= 21.8 && lat <= 25.4 && lng >= 119.3 && lng <= 122.1;
   }, []);
 
-  // 取得使用者位置
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
+  const locateOrigin = useCallback(async () => {
+    const request = ++locationRequest.current;
+    setOrigin(null);
+    setOriginName('定位中…');
+    setLocationError('');
+    try {
       const pos = await geo.getCurrentPosition();
-      if (cancelled) return;
-      if (pos?.latitude && pos?.longitude && isInTaiwan(pos.latitude, pos.longitude)) {
-        const userLoc: LatLng = { lat: pos.latitude, lng: pos.longitude };
-        setOrigin(userLoc);
-        setLocationReady(true);
-        try {
-          const name = await reverseGeocode(pos.latitude, pos.longitude);
-          if (!cancelled) setOriginName(name.split(',').slice(0, 2).join(', '));
-        } catch {
-          if (!cancelled) setOriginName('目前位置');
-        }
+      if (request !== locationRequest.current) return;
+      if (pos && isInTaiwan(pos.latitude, pos.longitude)) {
+        setOrigin({ lat: pos.latitude, lng: pos.longitude });
+        setOriginName('目前位置');
+        const name = await reverseGeocode(pos.latitude, pos.longitude);
+        if (request === locationRequest.current)
+          setOriginName(name.split(',').slice(0, 2).join(', '));
       } else {
-        // 定位失敗或不在台灣 → fallback 靜宜大學
-        console.log(
-          `[Nav] GPS not in Taiwan (${pos?.latitude},${pos?.longitude}), using PU default`,
-        );
-        setOrigin(PU_LOCATION);
-        setOriginName('靜宜大學（預設位置）');
-        setLocationReady(true);
+        setOriginName('尚未確認起點');
+        setLocationError('無法取得目前位置。請重新定位、選擇校園起點，或到地圖服務確認起點。');
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // GPS 更新時同步 origin（限台灣範圍）
-  useEffect(() => {
-    if (geo.latitude && geo.longitude && locationReady && isInTaiwan(geo.latitude, geo.longitude)) {
-      setOrigin({ lat: geo.latitude, lng: geo.longitude });
+    } catch {
+      if (request === locationRequest.current) {
+        setOrigin(null);
+        setOriginName('尚未確認起點');
+        setLocationError('無法取得目前位置。請重新定位、選擇校園起點，或到地圖服務確認起點。');
+      }
     }
-  }, [geo.latitude, geo.longitude, locationReady]);
+  }, [geo.getCurrentPosition, isInTaiwan]);
+
+  useEffect(() => {
+    void locateOrigin();
+    return () => {
+      locationRequest.current += 1;
+      searchRequest.current += 1;
+    };
+  }, [locateOrigin]);
+
+  const chooseCampusOrigin = () => {
+    locationRequest.current += 1;
+    setOrigin(PU_LOCATION);
+    setOriginName('靜宜大學（已選起點）');
+    setLocationError('');
+  };
 
   // 搜尋目的地
   const handleSearch = useCallback(async () => {
     const q = searchText.trim();
     if (!q) return;
+    const request = ++searchRequest.current;
     setSearching(true);
     setShowResults(true);
     try {
-      const results = await searchPlaces(q, origin);
-      setSearchResults(results);
+      const results = await searchPlaces(q, origin ?? undefined);
+      if (request === searchRequest.current) setSearchResults(results);
     } catch {
-      setSearchResults([]);
+      if (request === searchRequest.current) setSearchResults([]);
     } finally {
-      setSearching(false);
+      if (request === searchRequest.current) setSearching(false);
     }
   }, [searchText, origin]);
 
-  // 選擇目的地 → 規劃路線
-  const selectDestination = useCallback(
-    async (result: SearchResult) => {
-      const dest: LatLng = { lat: result.lat, lng: result.lng };
-      setDestination(dest);
-      setDestName(result.shortName || result.displayName.split(',')[0]);
-      setSearchText(result.shortName || result.displayName.split(',')[0]);
-      setShowResults(false);
-      setPlanning(true);
-      setPlanError(false);
-      setRoutes([]);
-      setSelectedRoute(null);
-      setShowSteps(false);
-      setQuickTab('none');
-      setNavMode(false);
+  const selectDestination = useCallback((result: SearchResult) => {
+    searchRequest.current += 1;
+    setSearching(false);
+    setDestination({ lat: result.lat, lng: result.lng });
+    setDestName(result.shortName || result.displayName.split(',')[0]);
+    setSearchText(result.shortName || result.displayName.split(',')[0]);
+    setShowResults(false);
+    setShowSteps(false);
+    setQuickTab('none');
+    setMapOpenError('');
+  }, []);
 
-      try {
-        console.log(
-          `[Nav] Planning route: origin=(${origin.lat},${origin.lng}) → dest=(${dest.lat},${dest.lng})`,
-        );
-        const routeOptions = await planRoutes(origin, dest);
-        console.log(`[Nav] Got ${routeOptions.length} route options`);
-        setRoutes(routeOptions);
-        if (routeOptions.length > 0) {
-          setSelectedRoute(routeOptions[0].id);
-        } else {
-          setPlanError(true);
-        }
-      } catch (err) {
-        console.warn('Route planning failed:', err);
-        setPlanError(true);
-      } finally {
-        setPlanning(false);
-      }
-    },
-    [origin],
-  );
+  useEffect(() => {
+    let current = true;
+    setRoutes([]);
+    setSelectedRoute(null);
+    setPlanError(false);
+    setPlanning(false);
+    if (!origin || !destination) return;
+    setPlanning(true);
+    planRoutes(origin, destination)
+      .then((options) => {
+        if (!current) return;
+        setRoutes(options);
+        setSelectedRoute(options[0]?.id ?? null);
+        setPlanError(options.length === 0);
+      })
+      .catch(() => {
+        if (current) setPlanError(true);
+      })
+      .finally(() => {
+        if (current) setPlanning(false);
+      });
+    return () => {
+      current = false;
+    };
+  }, [origin, destination]);
 
   // 清除導航
   const clearNavigation = useCallback(() => {
+    searchRequest.current += 1;
+    setSearching(false);
     setDestination(null);
     setDestName('');
     setSearchText('');
@@ -343,13 +352,7 @@ export function TransportHubScreen(props: any) {
     setSelectedRoute(null);
     setShowSteps(false);
     setShowResults(false);
-    setNavMode(false);
     setPlanError(false);
-    setRerouteMsg(null);
-    if (navIntervalRef.current) {
-      clearInterval(navIntervalRef.current);
-      navIntervalRef.current = null;
-    }
   }, []);
 
   // 當前選中的路線
@@ -357,78 +360,18 @@ export function TransportHubScreen(props: any) {
     return routes.find((r) => r.id === selectedRoute) ?? null;
   }, [routes, selectedRoute]);
 
-  // ─── 智慧導航模式 ─────────────────────────────
-  const startNavigation = useCallback(() => {
-    if (!activeRoute || !destination) return;
-    setNavMode(true);
-    setShowSteps(true);
-    setRerouteMsg(null);
-
-    // 啟動 GPS 追蹤
-    geo.startWatching();
-
-    // 定期檢查路線 + 更新 ETA
-    navIntervalRef.current = setInterval(async () => {
-      const currentPos =
-        geo.latitude && geo.longitude ? { lat: geo.latitude, lng: geo.longitude } : origin;
-
-      // 更新即時 ETA
-      if (activeRoute) {
-        const eta = calculateLiveETA(currentPos, destination, activeRoute, geo.speed);
-        setLiveETA(eta.etaText);
-        setCongestionLevel(eta.congestionLevel);
-      }
-
-      // AI 智慧改道檢查
-      if (activeRoute) {
-        const result = await checkForBetterRoute(currentPos, destination, activeRoute);
-        if (result.shouldReroute && result.newRoute) {
-          setRerouteMsg(result.reason);
-          // 自動套用新路線
-          setRoutes((prev) => {
-            const filtered = prev.filter((r) => r.id !== activeRoute.id);
-            return [result.newRoute!, ...filtered];
-          });
-          setSelectedRoute(result.newRoute.id);
-        }
-      }
-    }, 10000); // 每 10 秒
-
-    return () => {
-      if (navIntervalRef.current) clearInterval(navIntervalRef.current);
-    };
-  }, [activeRoute, destination, origin, geo]);
-
-  const stopNavigation = useCallback(() => {
-    setNavMode(false);
-    setRerouteMsg(null);
-    geo.stopWatching();
-    if (navIntervalRef.current) {
-      clearInterval(navIntervalRef.current);
-      navIntervalRef.current = null;
+  const confirmRouteInMaps = useCallback(async () => {
+    if (!destination) return;
+    setMapOpenError('');
+    try {
+      const opened = await openExternalMap(origin, destination, activeRoute?.mode ?? 'walking');
+      if (!opened) setMapOpenError('無法開啟地圖服務，請稍後重試。');
+    } catch {
+      setMapOpenError('無法開啟地圖服務，請稍後重試。');
     }
-  }, [geo]);
+  }, [origin, destination, activeRoute]);
 
-  // 離開頁面時清理
-  useEffect(() => {
-    return () => {
-      if (navIntervalRef.current) clearInterval(navIntervalRef.current);
-      geo.stopWatching();
-    };
-  }, []);
-
-  // WebView ref — 用於發送訊息更新地圖
-  const webRef = useRef<React.ComponentRef<typeof PuWebView>>(null);
-
-  // 路線顏色
-  const routeColor = useMemo(() => {
-    if (!activeRoute) return '#5856D6';
-    if (navMode) {
-      if (congestionLevel === 'heavy') return CONGESTION_COLORS.heavy;
-      if (congestionLevel === 'moderate') return CONGESTION_COLORS.moderate;
-    }
-    return MODE_CONFIG[activeRoute.mode]?.color ?? '#5856D6';
-  }, [activeRoute, navMode, congestionLevel]);
+  const routeColor = theme.colors.accent;
 
   // 大眾運輸各段資訊
   const transitSegments = useMemo(() => {
@@ -437,49 +380,24 @@ export function TransportHubScreen(props: any) {
       .filter((td) => td.coordinates && td.coordinates.length >= 2)
       .map((td) => ({
         coords: td.coordinates!,
-        color: td.type === 'bus' ? '#5856D6' : td.type === 'train' ? '#AF52DE' : '#34C759',
+        color: theme.colors.accent,
         dash: td.type === 'walk',
       }));
   }, [activeRoute]);
 
   // 產生 Leaflet HTML
   const mapHtml = useMemo(() => {
-    const userLoc =
-      geo.latitude && geo.longitude ? { lat: geo.latitude, lng: geo.longitude } : undefined;
     return buildLeafletHtml({
-      center: origin,
+        center: origin ?? destination ?? PU_LOCATION,
       zoom: destination ? 13 : 15,
-      origin,
+      origin: origin ?? undefined,
       destination: destination ?? undefined,
       routeGeometry: activeRoute?.routeGeometry,
       routeColor,
       transitSegments,
-      userLocation: userLoc,
       isDark: theme.mode === 'dark',
     });
-  }, [
-    origin,
-    destination,
-    activeRoute?.id,
-    routeColor,
-    transitSegments,
-    geo.latitude,
-    geo.longitude,
-  ]);
-
-  // 導航模式下傳送位置更新給 WebView
-  useEffect(() => {
-    if (navMode && geo.latitude && geo.longitude && webRef.current) {
-      webRef.current.postMessage(
-        JSON.stringify({
-          type: 'updateLocation',
-          lat: geo.latitude,
-          lng: geo.longitude,
-          follow: true,
-        }),
-      );
-    }
-  }, [navMode, geo.latitude, geo.longitude]);
+  }, [origin, destination, activeRoute, routeColor, transitSegments, themeMode]);
 
   return (
     <Screen>
@@ -491,7 +409,7 @@ export function TransportHubScreen(props: any) {
           {/* ═══ 互動式地圖（Leaflet via WebView） ═══ */}
           <View style={{ height: MAP_HEIGHT, backgroundColor: theme.colors.surface2 }}>
             <PuWebView
-              ref={webRef}
+              applicationNameForUserAgent="CampusOne/1.0 (+https://nuni.tw)"
               originWhitelist={['*']}
               source={{ html: mapHtml }}
               style={{ flex: 1 }}
@@ -505,18 +423,9 @@ export function TransportHubScreen(props: any) {
 
             {/* ── 定位按鈕 ── */}
             <Pressable
-              onPress={() => {
-                if (webRef.current && geo.latitude && geo.longitude) {
-                  webRef.current.postMessage(
-                    JSON.stringify({
-                      type: 'updateLocation',
-                      lat: geo.latitude,
-                      lng: geo.longitude,
-                      follow: true,
-                    }),
-                  );
-                }
-              }}
+              accessibilityRole="button"
+              accessibilityLabel="重新定位"
+              onPress={locateOrigin}
               style={({ pressed }) => ({
                 position: 'absolute',
                 bottom: 10,
@@ -539,136 +448,6 @@ export function TransportHubScreen(props: any) {
             >
               <Ionicons name="locate" size={18} color={theme.colors.accent} />
             </Pressable>
-
-            {/* 即時導航 HUD */}
-            {navMode && activeRoute && (
-              <View
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  backgroundColor: CONGESTION_COLORS[congestionLevel] + 'E8',
-                  paddingVertical: 10,
-                  paddingHorizontal: 16,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                }}
-              >
-                <View>
-                  <Text style={{ color: '#fff', fontWeight: '700', fontSize: 22 }}>
-                    {liveETA || formatDuration(activeRoute.totalDuration)}
-                  </Text>
-                  <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 11 }}>
-                    {congestionLevel === 'heavy'
-                      ? '路況壅塞'
-                      : congestionLevel === 'moderate'
-                        ? '路況尚可'
-                        : '路況順暢'}{' '}
-                    · {formatDistance(activeRoute.totalDistance)}
-                  </Text>
-                </View>
-                <Pressable
-                  onPress={stopNavigation}
-                  style={{
-                    backgroundColor: 'rgba(255,255,255,0.25)',
-                    paddingHorizontal: 12,
-                    paddingVertical: 6,
-                    borderRadius: 20,
-                  }}
-                >
-                  <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>結束導航</Text>
-                </Pressable>
-              </View>
-            )}
-
-            {/* 改道建議 Banner */}
-            {rerouteMsg && (
-              <View
-                style={{
-                  position: 'absolute',
-                  bottom: 50,
-                  left: 12,
-                  right: 12,
-                  backgroundColor: '#5856D6F0',
-                  borderRadius: theme.radius.lg,
-                  padding: 12,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 10,
-                }}
-              >
-                <Ionicons name="flash" size={20} color="#fff" />
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>
-                    AI 智慧改道
-                  </Text>
-                  <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 11 }}>
-                    {rerouteMsg}
-                  </Text>
-                </View>
-                <Pressable onPress={() => setRerouteMsg(null)}>
-                  <Ionicons name="close-circle" size={20} color="rgba(255,255,255,0.7)" />
-                </Pressable>
-              </View>
-            )}
-
-            {/* 開啟外部地圖 / 開始導航 按鈕 */}
-            {destination && activeRoute && !navMode && (
-              <View
-                style={{
-                  position: 'absolute',
-                  bottom: 10,
-                  right: 12,
-                  flexDirection: 'row',
-                  gap: 8,
-                }}
-              >
-                <Pressable
-                  onPress={startNavigation}
-                  style={({ pressed }) => ({
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 6,
-                    backgroundColor: '#34C759',
-                    paddingHorizontal: 14,
-                    paddingVertical: 8,
-                    borderRadius: theme.radius.xl,
-                    opacity: pressed ? 0.8 : 1,
-                    shadowColor: '#000',
-                    shadowOpacity: 0.2,
-                    shadowRadius: 6,
-                    shadowOffset: { width: 0, height: 2 },
-                    elevation: 4,
-                  })}
-                >
-                  <Ionicons name="navigate" size={16} color="#fff" />
-                  <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>開始導航</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => openExternalMap(origin, destination, destName, activeRoute.mode)}
-                  style={({ pressed }) => ({
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 6,
-                    backgroundColor: theme.colors.accent,
-                    paddingHorizontal: 14,
-                    paddingVertical: 8,
-                    borderRadius: theme.radius.xl,
-                    opacity: pressed ? 0.8 : 1,
-                    shadowColor: '#000',
-                    shadowOpacity: 0.2,
-                    shadowRadius: 6,
-                    shadowOffset: { width: 0, height: 2 },
-                    elevation: 4,
-                  })}
-                >
-                  <Ionicons name="open-outline" size={16} color="#fff" />
-                  <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>外部地圖</Text>
-                </Pressable>
-              </View>
-            )}
 
             {/* 搜尋框浮在地圖上方 */}
             <View
@@ -708,8 +487,11 @@ export function TransportHubScreen(props: any) {
                 <TextInput
                   value={searchText}
                   onChangeText={(t) => {
+                    searchRequest.current += 1;
                     setSearchText(t);
-                    if (!t.trim()) setShowResults(false);
+                    setSearchResults([]);
+                    setShowResults(false);
+                    setSearching(false);
                   }}
                   placeholder="搜尋目的地..."
                   placeholderTextColor={theme.colors.muted}
@@ -725,7 +507,10 @@ export function TransportHubScreen(props: any) {
                 {searchText.length > 0 && (
                   <Pressable
                     onPress={() => {
+                      searchRequest.current += 1;
                       setSearchText('');
+                      setSearchResults([]);
+                      setSearching(false);
                       setShowResults(false);
                     }}
                   >
@@ -811,13 +596,49 @@ export function TransportHubScreen(props: any) {
             contentContainerStyle={{ paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
             keyboardShouldPersistTaps="handled"
           >
+            {!origin && (
+              <View style={{ padding: 16, gap: 10 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: '700' }}>請確認出發地點</Text>
+                <Text style={{ color: theme.colors.muted }}>
+                  {locationError || '正在確認位置。你也可以自行選擇起點。'}
+                </Text>
+                <Button text="以靜宜大學為起點" onPress={chooseCampusOrigin} />
+                {destination && (
+                  <Button text="在地圖選擇起點" kind="primary" onPress={confirmRouteInMaps} />
+                )}
+              </View>
+            )}
+            {mapOpenError ? (
+              <Text accessibilityRole="alert" style={{ color: theme.colors.danger, padding: 16 }}>
+                {mapOpenError}
+              </Text>
+            ) : null}
+            {destination && origin && (
+              <View style={{ padding: 16, gap: 8 }}>
+                <Text style={{ color: theme.colors.muted }}>
+                  預估時間，請留意現場路況。大眾運輸行程可在地圖服務中確認。
+                </Text>
+                <Button
+                  text="在地圖確認大眾運輸"
+                  onPress={async () => {
+                    setMapOpenError('');
+                    try {
+                      if (!(await openExternalMap(origin, destination, 'transit')))
+                        setMapOpenError('無法開啟地圖服務，請稍後重試。');
+                    } catch {
+                      setMapOpenError('無法開啟地圖服務，請稍後重試。');
+                    }
+                  }}
+                />
+              </View>
+            )}
             {/* ── 路線規劃中 ── */}
             {planning && (
               <View style={{ padding: 20, alignItems: 'center', gap: 8 }}>
                 <ActivityIndicator color={theme.colors.accent} size="large" />
                 <Text style={{ color: theme.colors.text, fontWeight: '700' }}>規劃路線中...</Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-                  同時計算開車、騎車、步行、大眾運輸方案
+                  正在查詢步行、騎車與開車路線
                 </Text>
               </View>
             )}
@@ -830,7 +651,7 @@ export function TransportHubScreen(props: any) {
                   無法規劃路線
                 </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 12, textAlign: 'center' }}>
-                  找不到從目前位置到 {destName} 的路線{'\n'}請確認目的地或嘗試其他地點
+                  目前無法確認到 {destName} 的路線{'\n'}請確認目的地或嘗試其他地點
                 </Text>
                 <View style={{ flexDirection: 'row', gap: 10 }}>
                   <Button
@@ -908,7 +729,7 @@ export function TransportHubScreen(props: any) {
                         <Ionicons
                           name={config.icon as any}
                           size={22}
-                          color={isActive ? '#fff' : theme.colors.muted}
+                          color={isActive ? theme.colors.onAccent : theme.colors.muted}
                         />
                       </View>
 
@@ -921,39 +742,6 @@ export function TransportHubScreen(props: any) {
                             {formatDuration(route.totalDuration)}
                           </Text>
                           <Pill text={config.label} kind={isActive ? 'accent' : 'default'} />
-                          {route.congestionScore !== undefined && route.congestionScore > 0.2 && (
-                            <View
-                              style={{
-                                flexDirection: 'row',
-                                alignItems: 'center',
-                                gap: 3,
-                                backgroundColor:
-                                  route.congestionScore > 0.5 ? '#f43f5e20' : '#FF950020',
-                                paddingHorizontal: 6,
-                                paddingVertical: 2,
-                                borderRadius: 4,
-                              }}
-                            >
-                              <View
-                                style={{
-                                  width: 6,
-                                  height: 6,
-                                  borderRadius: 3,
-                                  backgroundColor:
-                                    route.congestionScore > 0.5 ? '#f43f5e' : '#FF9500',
-                                }}
-                              />
-                              <Text
-                                style={{
-                                  color: route.congestionScore > 0.5 ? '#f43f5e' : '#FF9500',
-                                  fontSize: 10,
-                                  fontWeight: '700',
-                                }}
-                              >
-                                {route.congestionScore > 0.5 ? '壅塞' : '略塞'}
-                              </Text>
-                            </View>
-                          )}
                         </View>
                         <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 3 }}>
                           {route.summary}
@@ -998,20 +786,24 @@ export function TransportHubScreen(props: any) {
                                       flexDirection: 'row',
                                       alignItems: 'center',
                                       gap: 4,
-                                      backgroundColor: '#5856D620',
+                                      backgroundColor: theme.colors.accentSoft,
                                       paddingHorizontal: 6,
                                       paddingVertical: 2,
                                       borderRadius: 4,
                                     }}
                                   >
-                                    <Ionicons name="bus" size={12} color="#5856D6" />
+                                    <Ionicons name="bus" size={12} color={theme.colors.accent} />
                                     <Text
-                                      style={{ color: '#5856D6', fontSize: 11, fontWeight: '700' }}
+                                      style={{
+                                        color: theme.colors.accent,
+                                        fontSize: 11,
+                                        fontWeight: '700',
+                                      }}
                                     >
                                       {td.routeName}
                                     </Text>
                                     {td.estimateMinutes !== undefined && (
-                                      <Text style={{ color: '#5856D6', fontSize: 10 }}>
+                                      <Text style={{ color: theme.colors.accent, fontSize: 10 }}>
                                         ({td.estimateMinutes}分到)
                                       </Text>
                                     )}
@@ -1054,12 +846,12 @@ export function TransportHubScreen(props: any) {
                         color={theme.colors.accent}
                       />
                       <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 13 }}>
-                        {showSteps ? '收合步驟' : '導航步驟'}
+                        {showSteps ? '收合步驟' : '路線說明'}
                       </Text>
                     </Pressable>
-                    {!navMode && (
+                    {destination && (
                       <Pressable
-                        onPress={startNavigation}
+                        onPress={confirmRouteInMaps}
                         style={({ pressed }) => ({
                           flex: 1,
                           flexDirection: 'row',
@@ -1067,14 +859,16 @@ export function TransportHubScreen(props: any) {
                           justifyContent: 'center',
                           paddingVertical: 10,
                           gap: 6,
-                          backgroundColor: '#34C759',
+                          backgroundColor: theme.colors.accent,
                           borderRadius: theme.radius.lg,
                           opacity: pressed ? 0.7 : 1,
                         })}
                       >
-                        <Ionicons name="navigate" size={16} color="#fff" />
-                        <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>
-                          AI 智慧導航
+                        <Ionicons name="navigate" size={16} color={theme.colors.onAccent} />
+                        <Text
+                          style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 13 }}
+                        >
+                          在地圖確認路線
                         </Text>
                       </Pressable>
                     )}
@@ -1131,7 +925,7 @@ export function TransportHubScreen(props: any) {
                                   isFirst || isLast
                                     ? theme.colors.accent
                                     : step.maneuver === 'notification'
-                                      ? '#5856D6'
+                                      ? theme.colors.accent
                                       : theme.colors.surface2,
                                 alignItems: 'center',
                                 justifyContent: 'center',
@@ -1142,7 +936,7 @@ export function TransportHubScreen(props: any) {
                                 size={14}
                                 color={
                                   isFirst || isLast || step.maneuver === 'notification'
-                                    ? '#fff'
+                                    ? theme.colors.onAccent
                                     : theme.colors.text
                                 }
                               />
@@ -1182,26 +976,9 @@ export function TransportHubScreen(props: any) {
               <View style={{ padding: 12, gap: 12 }}>
                 {/* 出發地提示 */}
                 <Pressable
-                  onPress={async () => {
-                    setOriginName('重新定位中...');
-                    const pos = await geo.getCurrentPosition();
-                    if (
-                      pos?.latitude &&
-                      pos?.longitude &&
-                      isInTaiwan(pos.latitude, pos.longitude)
-                    ) {
-                      setOrigin({ lat: pos.latitude, lng: pos.longitude });
-                      try {
-                        const name = await reverseGeocode(pos.latitude, pos.longitude);
-                        setOriginName(name.split(',').slice(0, 2).join(', '));
-                      } catch {
-                        setOriginName('目前位置');
-                      }
-                    } else {
-                      setOriginName('靜宜大學（預設位置）');
-                      setOrigin(PU_LOCATION);
-                    }
-                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="重新定位起點"
+                  onPress={locateOrigin}
                   style={({ pressed }) => ({
                     flexDirection: 'row',
                     alignItems: 'center',
@@ -1215,14 +992,14 @@ export function TransportHubScreen(props: any) {
                   })}
                 >
                   {geo.loading ? (
-                    <ActivityIndicator size="small" color="#5856D6" />
+                    <ActivityIndicator size="small" color={theme.colors.accent} />
                   ) : (
                     <View
                       style={{
                         width: 10,
                         height: 10,
                         borderRadius: 5,
-                        backgroundColor: geo.latitude ? '#34C759' : '#FF9500',
+                        backgroundColor: origin ? theme.colors.accent : theme.colors.warning,
                       }}
                     />
                   )}
@@ -1236,7 +1013,7 @@ export function TransportHubScreen(props: any) {
                 </Pressable>
 
                 {/* 快速查詢 Tabs */}
-                <View style={{ flexDirection: 'row', gap: 8 }}>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                   {[
                     { id: 'bus' as QuickTab, icon: 'bus-outline', label: '公車' },
                     { id: 'train' as QuickTab, icon: 'train-outline', label: '台鐵' },
@@ -1247,9 +1024,12 @@ export function TransportHubScreen(props: any) {
                     return (
                       <Pressable
                         key={tab.id}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: isActive }}
                         onPress={() => setQuickTab(isActive ? 'none' : tab.id)}
                         style={({ pressed }) => ({
-                          flex: 1,
+                          flexGrow: 1,
+                          flexBasis: screenWidth < 360 ? '46%' : '20%',
                           flexDirection: 'row',
                           alignItems: 'center',
                           justifyContent: 'center',
@@ -1265,11 +1045,11 @@ export function TransportHubScreen(props: any) {
                         <Ionicons
                           name={tab.icon as any}
                           size={15}
-                          color={isActive ? '#fff' : theme.colors.muted}
+                          color={isActive ? theme.colors.onAccent : theme.colors.muted}
                         />
                         <Text
                           style={{
-                            color: isActive ? '#fff' : theme.colors.text,
+                            color: isActive ? theme.colors.onAccent : theme.colors.text,
                             fontSize: 12,
                             fontWeight: isActive ? '700' : '500',
                           }}
@@ -1347,10 +1127,45 @@ export function TransportHubScreen(props: any) {
 // 快速查詢面板
 // ═══════════════════════════════════════════════════════
 
+const OFFICIAL_TRANSPORT = {
+  bus: { label: '到台中公車查詢', url: 'https://citybus.taichung.gov.tw/' },
+  train: { label: '到台鐵查詢', url: 'https://www.railway.gov.tw/tra-tip-web/tip' },
+  hsr: { label: '到台灣高鐵查詢', url: 'https://www.thsrc.com.tw/' },
+  bike: { label: '到 YouBike 查詢', url: 'https://www.youbike.com.tw/region/main/stations/' },
+};
+
+function OfficialTransportLink({ kind }: { kind: keyof typeof OFFICIAL_TRANSPORT }) {
+  const [error, setError] = useState(false);
+  const target = OFFICIAL_TRANSPORT[kind];
+  return (
+    <View style={{ gap: 8, marginVertical: 8 }}>
+      <Button
+        text={target.label}
+        kind="outline"
+        onPress={async () => {
+          setError(false);
+          try {
+            setError(!(await linkingOpenWithPuTronClassGate(target.url)));
+          } catch {
+            setError(true);
+          }
+        }}
+      />
+      {error && (
+        <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>
+          無法開啟官方查詢，請稍後重試。
+        </Text>
+      )}
+    </View>
+  );
+}
+
 function QuickBusPanel() {
+  useThemeMode();
   const [searchText, setSearchText] = useState('');
   const [results, setResults] = useState<TDXBusRoute[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searched, setSearched] = useState(false);
   const [selectedRoute, setSelectedRoute] = useState<string | null>(null);
   const [stops, setStops] = useState<TDXBusStopOfRoute[]>([]);
   const [estimates, setEstimates] = useState<TDXBusEstimate[]>([]);
@@ -1360,6 +1175,7 @@ function QuickBusPanel() {
   const handleSearch = useCallback(async () => {
     if (!searchText.trim()) return;
     setSearching(true);
+    setSearched(true);
     try {
       setResults(await searchBusRoutes(searchText.trim()));
     } catch {
@@ -1369,30 +1185,45 @@ function QuickBusPanel() {
     }
   }, [searchText]);
 
-  const selectRoute = useCallback(async (routeId: string) => {
+  const selectRoute = useCallback((routeId: string) => {
     setSelectedRoute(routeId);
-    setLoadingStops(true);
-    try {
-      const [s, e] = await Promise.all([getBusStopsOfRoute(routeId), getBusEstimates(routeId)]);
-      setStops(s);
-      setEstimates(e);
-      setDirection(0);
-    } catch {
-      setStops([]);
-      setEstimates([]);
-    } finally {
-      setLoadingStops(false);
-    }
+    setStops([]);
+    setEstimates([]);
+    setDirection(0);
   }, []);
 
   useEffect(() => {
     if (!selectedRoute) return;
+    let current = true;
+    setLoadingStops(true);
+    Promise.all([getBusStopsOfRoute(selectedRoute), getBusEstimates(selectedRoute)])
+      .then(([s, e]) => {
+        if (current) {
+          setStops(s);
+          setEstimates(e);
+        }
+      })
+      .catch(() => {
+        if (current) {
+          setStops([]);
+          setEstimates([]);
+        }
+      })
+      .finally(() => {
+        if (current) setLoadingStops(false);
+      });
     const iv = setInterval(async () => {
       try {
-        setEstimates(await getBusEstimates(selectedRoute));
-      } catch {}
+        const next = await getBusEstimates(selectedRoute);
+        if (current) setEstimates(next);
+      } catch {
+        if (current) setEstimates([]);
+      }
     }, 30000);
-    return () => clearInterval(iv);
+    return () => {
+      current = false;
+      clearInterval(iv);
+    };
   }, [selectedRoute]);
 
   const currentStops = useMemo(
@@ -1406,7 +1237,18 @@ function QuickBusPanel() {
   }, [estimates, direction]);
 
   return (
-    <Card title="公車即時到站">
+    <Card title="公車到站查詢">
+      <OfficialTransportLink kind="bus" />
+      {searched && !searching && results.length === 0 && !selectedRoute && (
+        <Text style={{ color: theme.colors.muted, marginBottom: 10 }}>
+          無法確認路線資訊，請調整關鍵字或到官方查詢。
+        </Text>
+      )}
+      {selectedRoute && !loadingStops && (stops.length === 0 || estimates.length === 0) && (
+        <Text style={{ color: theme.colors.muted, marginBottom: 10 }}>
+          無法確認到站資訊，請到官方查詢。
+        </Text>
+      )}
       <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
         <View
           style={{
@@ -1461,13 +1303,15 @@ function QuickBusPanel() {
                   width: 40,
                   height: 24,
                   borderRadius: 4,
-                  backgroundColor: '#5856D6',
+                  backgroundColor: theme.colors.accent,
                   alignItems: 'center',
                   justifyContent: 'center',
                   marginRight: 8,
                 }}
               >
-                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 11 }}>{r.name}</Text>
+                <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 11 }}>
+                  {r.name}
+                </Text>
               </View>
               <Text style={{ color: theme.colors.text, fontSize: 11, flex: 1 }} numberOfLines={1}>
                 {r.desc}
@@ -1504,7 +1348,7 @@ function QuickBusPanel() {
                   marginRight: 8,
                 }}
               >
-                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 11 }}>
+                <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 11 }}>
                   {r.RouteName.Zh_tw}
                 </Text>
               </View>
@@ -1536,7 +1380,7 @@ function QuickBusPanel() {
                 >
                   <Text
                     style={{
-                      color: direction === d.Direction ? '#fff' : theme.colors.text,
+                      color: direction === d.Direction ? theme.colors.onAccent : theme.colors.text,
                       fontWeight: '600',
                       fontSize: 11,
                     }}
@@ -1579,7 +1423,7 @@ function QuickBusPanel() {
                     >
                       <Text
                         style={{
-                          color: hasETA ? '#fff' : theme.colors.muted,
+                          color: hasETA ? theme.colors.onAccent : theme.colors.muted,
                           fontSize: 8,
                           fontWeight: '700',
                         }}
@@ -1594,7 +1438,7 @@ function QuickBusPanel() {
                       style={{
                         color: hasETA
                           ? (eta?.EstimateTime ?? 0) < 180
-                            ? '#f43f5e'
+                            ? theme.colors.danger
                             : theme.colors.accent
                           : theme.colors.muted,
                         fontWeight: '700',
@@ -1609,7 +1453,7 @@ function QuickBusPanel() {
                           : `${Math.ceil(eta!.EstimateTime! / 60)} 分`
                         : eta?.StopStatus === 3
                           ? '末班已過'
-                          : '—'}
+                          : '無法確認'}
                     </Text>
                   </View>
                 );
@@ -1635,16 +1479,28 @@ function QuickBusPanel() {
 }
 
 function QuickTrainPanel() {
+  useThemeMode();
   const [station, setStation] = useState(PU_NEARBY_TRAIN_STATIONS[0].id);
   const [data, setData] = useState<TDXTrainTimetable[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let current = true;
     setLoading(true);
+    setData([]);
     getTrainSchedule(station)
-      .then(setData)
-      .catch(() => setData([]))
-      .finally(() => setLoading(false));
+      .then((next) => {
+        if (current) setData(next);
+      })
+      .catch(() => {
+        if (current) setData([]);
+      })
+      .finally(() => {
+        if (current) setLoading(false);
+      });
+    return () => {
+      current = false;
+    };
   }, [station]);
 
   const now = new Date();
@@ -1667,6 +1523,7 @@ function QuickTrainPanel() {
 
   return (
     <Card title="台鐵時刻表">
+      <OfficialTransportLink kind="train" />
       <View style={{ flexDirection: 'row', gap: 6, marginBottom: 10 }}>
         {PU_NEARBY_TRAIN_STATIONS.map((s) => (
           <Pressable
@@ -1682,7 +1539,7 @@ function QuickTrainPanel() {
           >
             <Text
               style={{
-                color: station === s.id ? '#fff' : theme.colors.text,
+                color: station === s.id ? theme.colors.onAccent : theme.colors.text,
                 fontWeight: '700',
                 fontSize: 12,
               }}
@@ -1704,7 +1561,7 @@ function QuickTrainPanel() {
         <ActivityIndicator color={theme.colors.accent} />
       ) : upcoming.length === 0 ? (
         <Text style={{ color: theme.colors.muted, textAlign: 'center', padding: 12 }}>
-          今日無更多班次
+          無法確認後續班次，請到官方查詢。
         </Text>
       ) : (
         <View style={{ gap: 2 }}>
@@ -1750,16 +1607,27 @@ function QuickTrainPanel() {
 }
 
 function QuickHSRPanel() {
+  useThemeMode();
   const [data, setData] = useState<TDXHSRTimetable[]>([]);
   const [loading, setLoading] = useState(true);
   const [dir, setDir] = useState<number | null>(null);
 
   useEffect(() => {
+    let current = true;
     setLoading(true);
     getHSRSchedule()
-      .then(setData)
-      .catch(() => setData([]))
-      .finally(() => setLoading(false));
+      .then((next) => {
+        if (current) setData(next);
+      })
+      .catch(() => {
+        if (current) setData([]);
+      })
+      .finally(() => {
+        if (current) setLoading(false);
+      });
+    return () => {
+      current = false;
+    };
   }, []);
 
   const now = new Date();
@@ -1785,6 +1653,7 @@ function QuickHSRPanel() {
 
   return (
     <Card title="高鐵台中站">
+      <OfficialTransportLink kind="hsr" />
       <View style={{ flexDirection: 'row', gap: 6, marginBottom: 10 }}>
         {[
           { v: null, l: '全部' },
@@ -1804,7 +1673,7 @@ function QuickHSRPanel() {
           >
             <Text
               style={{
-                color: dir === o.v ? '#fff' : theme.colors.text,
+                color: dir === o.v ? theme.colors.onAccent : theme.colors.text,
                 fontWeight: '600',
                 fontSize: 12,
               }}
@@ -1818,7 +1687,7 @@ function QuickHSRPanel() {
         <ActivityIndicator color={theme.colors.accent} />
       ) : upcoming.length === 0 ? (
         <Text style={{ color: theme.colors.muted, textAlign: 'center', padding: 12 }}>
-          今日無更多班次
+          無法確認後續班次，請到官方查詢。
         </Text>
       ) : (
         <View style={{ gap: 2 }}>
@@ -1845,7 +1714,7 @@ function QuickHSRPanel() {
                 <View style={{ width: 36, alignItems: 'center' }}>
                   <Text
                     style={{
-                      color: isSouth ? '#5856D6' : '#FF9500',
+                      color: isSouth ? theme.colors.accent : theme.colors.warning,
                       fontSize: 10,
                       fontWeight: '700',
                     }}
@@ -1873,103 +1742,13 @@ function QuickHSRPanel() {
 }
 
 function QuickBikePanel() {
-  const [stations, setStations] = useState<BikeStationWithAvailability[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setLoading(true);
-    getNearbyBikesWithAvailability()
-      .then(setStations)
-      .catch(() => setStations([]))
-      .finally(() => setLoading(false));
-  }, []);
-
-  const total = stations.reduce((s, st) => s + st.availableRent, 0);
-
+  useThemeMode();
   return (
-    <Card title="YouBike 站點" subtitle="靜宜 2km 內">
-      <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
-        <View
-          style={{
-            flex: 1,
-            padding: 10,
-            borderRadius: theme.radius.md,
-            backgroundColor: theme.colors.accentSoft,
-            alignItems: 'center',
-          }}
-        >
-          <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 20 }}>
-            {total}
-          </Text>
-          <Text style={{ color: theme.colors.muted, fontSize: 10 }}>可借車輛</Text>
-        </View>
-        <View
-          style={{
-            flex: 1,
-            padding: 10,
-            borderRadius: theme.radius.md,
-            backgroundColor: theme.colors.surface2,
-            alignItems: 'center',
-          }}
-        >
-          <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 20 }}>
-            {stations.length}
-          </Text>
-          <Text style={{ color: theme.colors.muted, fontSize: 10 }}>站點數</Text>
-        </View>
-      </View>
-      {loading ? (
-        <ActivityIndicator color={theme.colors.accent} />
-      ) : (
-        <View style={{ gap: 4 }}>
-          {stations.slice(0, 10).map((st) => (
-            <View
-              key={st.StationUID}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                paddingVertical: 6,
-                borderBottomWidth: 1,
-                borderBottomColor: theme.colors.surface2,
-              }}
-            >
-              <View
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 16,
-                  backgroundColor: st.availableRent === 0 ? '#f43f5e20' : theme.colors.accentSoft,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  marginRight: 8,
-                }}
-              >
-                <Text
-                  style={{
-                    color: st.availableRent === 0 ? '#f43f5e' : theme.colors.accent,
-                    fontWeight: '700',
-                    fontSize: 13,
-                  }}
-                >
-                  {st.availableRent}
-                </Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text
-                  style={{ color: theme.colors.text, fontSize: 12, fontWeight: '600' }}
-                  numberOfLines={1}
-                >
-                  {st.StationName.Zh_tw}
-                </Text>
-                <Text style={{ color: theme.colors.muted, fontSize: 10 }}>
-                  可借 {st.availableRent} · 可還 {st.availableReturn}
-                  {st.hasElectric ? ` · 電輔 ${st.electricBikes}` : ''}
-                </Text>
-              </View>
-            </View>
-          ))}
-        </View>
-      )}
+    <Card title="YouBike 站點">
+      <Text style={{ color: theme.colors.muted, marginBottom: 12 }}>
+        目前無法在這裡確認車輛與空位數量，請到官方站點查詢。
+      </Text>
+      <OfficialTransportLink kind="bike" />
     </Card>
   );
 }

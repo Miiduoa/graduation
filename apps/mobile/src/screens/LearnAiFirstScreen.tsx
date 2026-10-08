@@ -1,195 +1,157 @@
-/**
- * Campus AI-First — 學習 Tab Landing
- *
- * 設計：AI 主動把今天的學習任務排好給你（不只是課表清單）
- * 設計規範：docs/design/AI_FIRST_REDESIGN.md §4 Slot Cards
- */
-import React from 'react';
-import { Alert, View, Text } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import {
-  AIScreen,
-  AIHero,
-  AIHero as _AIH,
-  AISection,
-  AICard,
-  AIRow,
-  AIButton,
-  AIChip,
-  AIMark,
-  aiTokens,
-} from '../ui/aiFirst';
+import React, { useCallback, useRef, useState } from 'react';
+import { ActivityIndicator, Text, View } from 'react-native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { AIScreen, AIHero, AISection, AICard, AIRow, AIButton, aiTokens } from '../ui/aiFirst';
+import { useAuth } from '../state/auth';
+import { loadStudentHome } from '../data/studentHome';
+import type { InboxTask } from '../data/types';
 import { safeNavigate } from '../utils/safeNavigate';
-import { DEMO_COURSES } from '../data/demoCoursesMock';
+
+type LearningData = Awaited<ReturnType<typeof loadStudentHome>>;
 
 export default function LearnAiFirstScreen() {
-  const navigation = useNavigation<any>();
-  // 第一門 demo 課當預設目標，所有 mock AIRow 點下去都進這門課的 CourseHub，
-  // 避免「按了沒反應」（demo 用 mock 文案，實際路由統一到第一門課的工作區）。
-  const fallbackCourseId = DEMO_COURSES[0]?.id ?? 71378;
-  const openCourseHub = (courseId: number = fallbackCourseId) =>
-    safeNavigate(navigation, 'CourseHub', { courseId, groupId: String(courseId) });
-  const openAssignments = () =>
-    safeNavigate(navigation, 'CourseHub', {
-      courseId: fallbackCourseId,
-      groupId: String(fallbackCourseId),
-      initialTab: 'assignments',
-    });
-  const openAICourseAdvisor = () => safeNavigate(navigation, 'AICourseAdvisor');
+  const navigation = useNavigation();
+  const auth = useAuth();
+  const uid = auth.user?.uid;
+  const schoolId = auth.profile?.uid === uid ? auth.profile?.schoolId : undefined;
+  const scope = JSON.stringify([uid, schoolId, auth.profile?.role]);
+  const currentScope = useRef(scope);
+  currentScope.current = scope;
+  const generation = useRef(0);
+  const [state, setState] = useState<{
+    scope: string;
+    data: LearningData | null;
+    loading: boolean;
+    error: string | null;
+  } | null>(null);
+  const visible = state?.scope === scope ? state : null;
+
+  const load = useCallback(async () => {
+    const request = ++generation.current;
+    setState({ scope, data: null, loading: true, error: null });
+    try {
+      if (!uid || !schoolId) throw new Error('missing-session');
+      const data = await loadStudentHome(uid, schoolId);
+      const courseIds = new Set(data.courses.map((course) => course.groupId));
+      const tasks = data.tasks.filter(
+        (task) => task.kind !== 'assistant_queue' && courseIds.has(task.groupId),
+      );
+      if (generation.current === request && currentScope.current === scope) {
+        setState({ scope, data: { courses: data.courses, tasks }, loading: false, error: null });
+      }
+    } catch {
+      if (generation.current === request && currentScope.current === scope) {
+        setState({
+          scope,
+          data: null,
+          loading: false,
+          error: '無法讀取課程與待辦，請確認登入狀態與網路後重試。',
+        });
+      }
+    }
+  }, [uid, schoolId, scope]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+      return () => {
+        generation.current += 1;
+      };
+    }, [load]),
+  );
+
+  const openTask = (task: InboxTask) => {
+    if (task.kind === 'live' && task.sessionId) {
+      safeNavigate(navigation, 'Classroom', {
+        groupId: task.groupId,
+        groupName: task.groupName,
+        sessionId: task.sessionId,
+      });
+    } else {
+      safeNavigate(navigation, 'GroupDetail', { groupId: task.groupId });
+    }
+  };
 
   return (
     <AIScreen>
       <AIHero
-        eyebrow="LEARN · 學習中心"
-        title={'今天 3 堂課\n2 份作業要繳'}
-        subtitle="AI 已幫你按截止日排好優先順序"
+        eyebrow="CAMPUS ONE"
+        title="課程與學習"
+        subtitle="查看已加入的課程、成績與近期課務。"
       />
-
-      {/* AI 主動建議 */}
-      <AISection title="AI 為你準備" subtitle="基於你的進度、習慣、截止時間">
-        <AICard
-          aiGenerated
-          icon="🎯"
-          title="今日專注建議：先做 Lab 3"
-          badge="高優先"
-          badgeTone="danger"
-          source="AI · 即時運算"
-          confidence="high"
-        >
-          <Text style={{ fontSize: 13, color: aiTokens.text, lineHeight: 19 }}>
-            作業系統 Lab 3 週三 23:59 截止，進度 <Text style={{ fontWeight: '700' }}>0%</Text>。
-            預估需 4 小時，建議今晚 19:00–23:00 完成。
-          </Text>
-          <View style={{ flexDirection: 'row', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-            <AIButton label="進入作業" icon="📖" onPress={openAssignments} />
-            <AIButton label="排到行事曆" variant="ghost" onPress={() => safeNavigate(navigation, 'Calendar')} />
-            <AIButton label="找同學討論" variant="ghost" onPress={() => safeNavigate(navigation, 'CourseDiscussion', { courseId: fallbackCourseId })} />
+      <AISection title="常用工具">
+        <AIRow
+          title="行事曆"
+          subtitle="查看課程時間與自己的安排"
+          onPress={() => safeNavigate(navigation, 'Calendar')}
+        />
+        <AIRow
+          title="課綱查詢"
+          subtitle="搜尋課程內容與授課資訊"
+          onPress={() => safeNavigate(navigation, 'CourseCatalog')}
+        />
+      </AISection>
+      {!visible || visible.loading ? (
+        <ActivityIndicator accessibilityLabel="讀取課程" color={aiTokens.ai} />
+      ) : visible.error ? (
+        <AISection title="課程資料">
+          <View accessibilityRole="alert" style={{ padding: 16, gap: 12 }}>
+            <Text style={{ color: aiTokens.text }}>{visible.error}</Text>
+            <AIButton label="重新讀取" onPress={() => void load()} />
           </View>
-        </AICard>
-
-        <AICard
-          aiGenerated
-          icon="💡"
-          title="複習：上週資料結構 — 雜湊表"
-          source="AI · 從你筆記分析"
-          confidence="mid"
-        >
-          <Text style={{ fontSize: 13, color: aiTokens.text, lineHeight: 19 }}>
-            你週四小考會考雜湊。我把上週四節課的重點整理成 5 分鐘速覽。
-          </Text>
-          <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-            <AIButton label="開始 5 分鐘速覽" icon="⚡" onPress={() => openCourseHub()} />
-            <AIButton label="跳過" variant="ghost" onPress={() => Alert.alert('已跳過', 'AI 已把這張複習卡移到稍後提醒。')} />
-          </View>
-        </AICard>
-      </AISection>
-
-      {/* 今日課程 */}
-      <AISection title="今日課程" subtitle="週一 · 共 3 堂">
-        <AIRow
-          icon="📐"
-          title="資料結構"
-          subtitle="09:10–10:50 · 工程館 302 · 王大明"
-          tag="下節"
-          tagTone="ai"
-          onPress={() => openCourseHub()}
-        />
-        <AIRow
-          icon="🗄"
-          title="資料庫系統"
-          subtitle="13:10–14:50 · 工程館 305 · 陳老師"
-          tag="13:10"
-          tagTone="muted"
-          onPress={() => openCourseHub(DEMO_COURSES[1]?.id ?? fallbackCourseId)}
-        />
-        <AIRow
-          icon="📊"
-          title="統計學"
-          subtitle="15:10–16:50 · 商學館 401"
-          tag="15:10"
-          tagTone="muted"
-          onPress={() => openCourseHub(DEMO_COURSES[2]?.id ?? fallbackCourseId)}
-        />
-      </AISection>
-
-      {/* 作業 */}
-      <AISection
-        title="作業 & 截止"
-        subtitle="本週共 4 件"
-        action={
-          <AIButton label="全部" variant="ghost" size="sm" onPress={openAssignments} />
-        }
-      >
-        <AIRow
-          icon="📝"
-          title="作業系統 Lab 3"
-          subtitle="週三 23:59 · 進度 0%"
-          tag="未開始"
-          tagTone="warning"
-          onPress={openAssignments}
-        />
-        <AIRow
-          icon="📝"
-          title="專題期中報告"
-          subtitle="週五 14:00 · 進度 60%"
-          tag="進行中"
-          tagTone="ai"
-          onPress={openAssignments}
-        />
-        <AIRow
-          icon="✍️"
-          title="英文週記"
-          subtitle="週日 23:59"
-          tag="待開始"
-          tagTone="muted"
-          onPress={openAssignments}
-        />
-        <AIRow
-          icon="📝"
-          title="資料庫小考準備"
-          subtitle="週四 09:00"
-          tag="已準備"
-          tagTone="success"
-          onPress={() => safeNavigate(navigation, 'QuizCenter', { courseId: fallbackCourseId })}
-        />
-      </AISection>
-
-      {/* AI 工具入口 */}
-      <AISection title="AI 學習工具">
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: aiTokens.space.md }}>
-          <AIChip label="AI 課程顧問" onPress={openAICourseAdvisor} />
-          <AIChip label="共讀夥伴" onPress={() => safeNavigate(navigation, 'AIStudyBuddy')} />
-          <AIChip label="筆記摘要" onPress={() => safeNavigate(navigation, 'CourseNotes', { courseId: fallbackCourseId })} />
-          <AIChip label="考前重點生成" onPress={() => safeNavigate(navigation, 'AICourseAdvisor')} />
-          <AIChip label="作業解題引導" onPress={() => safeNavigate(navigation, 'AIStudyBuddy')} />
-        </View>
-      </AISection>
-
-      {/* 行動進入點 */}
-      <View
-        style={{
-          marginHorizontal: aiTokens.space.md,
-          marginTop: aiTokens.space.lg,
-          padding: aiTokens.space.md,
-          backgroundColor: aiTokens.aiSurface,
-          borderRadius: aiTokens.radius.md,
-          borderWidth: 1,
-          borderColor: aiTokens.aiSoft,
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 12,
-        }}
-      >
-        <AIMark size={32} />
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 13, fontWeight: '700', color: aiTokens.text }}>
-            想找特定資料？
-          </Text>
-          <Text style={{ fontSize: 12, color: aiTokens.muted, marginTop: 2 }}>
-            點下方 ✨ AI 球用講的：「期中考範圍」「老師上週說過什麼」
-          </Text>
-        </View>
-      </View>
+        </AISection>
+      ) : visible.data ? (
+        <>
+          <AISection title="近期課務" subtitle="依目前課程資料列出">
+            {visible.data.tasks.length ? (
+              visible.data.tasks.map((task) => (
+                <AIRow
+                  key={task.id}
+                  title={task.title}
+                  subtitle={task.groupName}
+                  tag={task.kind === 'live' ? '進行中' : undefined}
+                  onPress={() => openTask(task)}
+                />
+              ))
+            ) : (
+              <Text style={{ color: aiTokens.muted, padding: 16 }}>
+                目前沒有可列出的近期課務，仍可從課程查看最新內容。
+              </Text>
+            )}
+          </AISection>
+          <AISection title="我的課程">
+            {visible.data.courses.length ? (
+              visible.data.courses.map((course) => (
+                <AICard key={course.groupId} title={course.name}>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                    <AIButton
+                      label="課程動態"
+                      onPress={() =>
+                        safeNavigate(navigation, 'GroupDetail', { groupId: course.groupId })
+                      }
+                    />
+                    <AIButton
+                      label="課程成績"
+                      variant="ghost"
+                      onPress={() =>
+                        safeNavigate(navigation, 'CourseGradebook', {
+                          groupId: course.groupId,
+                          groupName: course.name,
+                          sourceSystem: 'workspace',
+                        })
+                      }
+                    />
+                  </View>
+                </AICard>
+              ))
+            ) : (
+              <Text style={{ color: aiTokens.muted, padding: 16 }}>
+                尚未加入課程。若已選課，請向授課教師確認成員名單。
+              </Text>
+            )}
+          </AISection>
+        </>
+      ) : null}
     </AIScreen>
   );
 }

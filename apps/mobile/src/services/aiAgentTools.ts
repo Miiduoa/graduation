@@ -856,9 +856,9 @@ export function getToolDeclarations(role?: CampusActorRole): GeminiToolDeclarati
         properties: {
           courseSpaceId: { type: 'string', description: '課程空間 ID' },
           sessionId: { type: 'string', description: '點名場次 ID' },
-          qrToken: { type: 'string', description: 'QR code token（選填）' },
+          qrToken: { type: 'string', description: '老師提供的簽到碼或掃碼取得的 token' },
         },
-        required: ['courseSpaceId', 'sessionId'],
+        required: ['courseSpaceId', 'sessionId', 'qrToken'],
       },
     },
     {
@@ -2596,7 +2596,7 @@ const TOOL_EXECUTORS: Record<
       return { success: false, isWrite: true, summary: '無法簽到：資料來源未連接。' };
     }
     const courseSpaceId = (args.courseSpaceId ?? '').trim();
-    if (!courseSpaceId) {
+    if (!courseSpaceId || !args.sessionId?.trim() || !args.qrToken?.trim()) {
       return {
         success: false,
         isWrite: false,

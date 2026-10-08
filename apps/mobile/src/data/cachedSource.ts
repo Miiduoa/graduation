@@ -565,6 +565,11 @@ export function createCachedSource(
         return originalMethod;
       }
 
+      // Lost-and-found updates require a fresh read, including after returning from the editor.
+      if (prop === 'listLostFoundItems' || prop === 'getLostFoundItem') {
+        return originalMethod.bind(target);
+      }
+
       const expiryMs = getCacheExpiry(prop);
 
       if (CACHEABLE_LIST_METHODS[prop]) {

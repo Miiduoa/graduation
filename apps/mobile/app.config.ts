@@ -82,9 +82,9 @@ export default ({ config }: any) => {
     widgets: parseBoolean(process.env.EXPO_PUBLIC_FEATURE_WIDGETS, !isReleaseLike),
     deeplinks: parseBoolean(process.env.EXPO_PUBLIC_FEATURE_DEEPLINKS, !isReleaseLike),
   };
-  const enableUniversalDevAccounts = parseBoolean(
+  const enableUniversalDevAccounts = !isProduction && parseBoolean(
     process.env.EXPO_PUBLIC_ENABLE_UNIVERSAL_DEV_ACCOUNTS,
-    appEnv !== 'production',
+    true,
   );
   const allowLocalMockAuth =
     appEnv === 'development' && process.env.EXPO_PUBLIC_ALLOW_LOCAL_MOCK_AUTH === 'true';
@@ -201,7 +201,7 @@ export default ({ config }: any) => {
     [
       'expo-notifications',
       {
-        color: '#007AFF',
+        color: '#314D40',
         sounds: ['./assets/sounds/notification.wav'],
       },
     ],
@@ -249,7 +249,7 @@ export default ({ config }: any) => {
 
   return {
     ...config,
-    name: config.name ?? '校園助手',
+    name: config.name ?? 'Campus One',
     slug: config.slug ?? 'campus-app',
     version: config.version ?? '1.0.0',
     orientation: 'portrait',

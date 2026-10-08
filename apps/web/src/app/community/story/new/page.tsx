@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * 校園社群 — 發 Story（Web）
+ * 校園社群 — 發布限時動態（Web）
  *
  * 對應 mobile/StoryComposeScreen：文字 / 圖片兩種，背景色 palette，可帶入 POI。
  */
@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { CommunityAccess } from '../../_components/CommunityAccess';
 import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
@@ -16,14 +17,16 @@ import { findSocialPoi } from '@/lib/community/pois';
 import { publishStory, type StoryKind } from '@/lib/community/firestore';
 import { uploadCampusMedia } from '@/lib/community/media';
 
-const BG_COLORS = ['#0f172a', '#7c5dfa', '#0ea5e9', '#10b981', '#f97316', '#ef4444'];
+const BG_COLORS = ['#243b35', '#3e5169', '#67513d', '#554661', '#6f4039', '#303b42'];
 const TTL_24H = 24 * 3600 * 1000;
 const MAX_TEXT = 220;
 
 export default function StoryComposePage() {
   return (
-    <SiteShell title="發 Story" subtitle="24 小時校園即時動態">
-      <StoryComposeInner />
+    <SiteShell title="發布限時動態" subtitle="分享此刻的校園生活，動態保留 24 小時。">
+      <CommunityAccess>
+        <StoryComposeInner />
+      </CommunityAccess>
     </SiteShell>
   );
 }
@@ -101,23 +104,29 @@ function StoryComposeInner() {
         poiName,
         expiresAtMs: Date.now() + TTL_24H,
       });
-      alert('Story 已發佈，24 小時後自動下架');
+      alert('限時動態已發布，24 小時後不再顯示。');
       router.push('/community?tab=realtime');
-    } catch (e: any) {
-      alert(`發佈失敗：${e?.message ?? String(e)}`);
+    } catch {
+      alert('這次未能發佈，請稍後再試。');
     } finally {
       setBusy(false);
     }
   };
 
   if (authLoading) {
-    return <div className="card" style={{ padding: 24 }}>載入中…</div>;
+    return (
+      <div className="card" style={{ padding: 24 }}>
+        載入中…
+      </div>
+    );
   }
   if (!user) {
     return (
       <div className="card" style={{ padding: 32, textAlign: 'center' }}>
-        <p style={{ color: 'var(--muted)' }}>請先登入後再發 Story</p>
-        <Link href="/login" className="btn primary">前往登入</Link>
+        <p style={{ color: 'var(--muted)' }}>請先登入後再發布限時動態</p>
+        <Link href="/login" className="btn primary">
+          前往登入
+        </Link>
       </div>
     );
   }
@@ -125,7 +134,9 @@ function StoryComposeInner() {
   return (
     <div className="card" style={{ padding: 18, maxWidth: 540 }}>
       {/* Preview */}
-      <label style={{ display: 'block', fontSize: 13, fontWeight: 700, marginBottom: 6 }}>預覽</label>
+      <label style={{ display: 'block', fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
+        預覽
+      </label>
       <div
         style={{
           aspectRatio: '9 / 16',
@@ -141,7 +152,17 @@ function StoryComposeInner() {
         }}
       >
         {kind === 'image' && preview && (
-          <img src={preview} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' }} />
+          <img
+            src={preview}
+            alt=""
+            style={{
+              position: 'absolute',
+              inset: 0,
+              width: '100%',
+              height: '100%',
+              objectFit: 'contain',
+            }}
+          />
         )}
         {body.trim().length > 0 ? (
           <span
@@ -158,7 +179,15 @@ function StoryComposeInner() {
             {body.trim()}
           </span>
         ) : (
-          <div style={{ color: 'rgba(255,255,255,0.85)', fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div
+            style={{
+              color: 'rgba(255,255,255,0.85)',
+              fontSize: 14,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+          >
             💡 內容會即時顯示在這裡
           </div>
         )}
@@ -193,9 +222,9 @@ function StoryComposeInner() {
             gap: 5,
             padding: '7px 12px',
             borderRadius: 999,
-            border: kind === 'text' ? '1px solid var(--brand, #5856D6)' : '1px solid var(--border)',
-            background: kind === 'text' ? 'var(--brand, #5856D6)' : 'var(--surface)',
-            color: kind === 'text' ? '#fff' : 'var(--text)',
+            border: kind === 'text' ? '1px solid var(--brand)' : '1px solid var(--border)',
+            background: kind === 'text' ? 'var(--brand)' : 'var(--surface)',
+            color: kind === 'text' ? 'var(--on-brand)' : 'var(--text)',
             cursor: 'pointer',
             fontSize: 13,
             fontWeight: 700,
@@ -212,9 +241,9 @@ function StoryComposeInner() {
             gap: 5,
             padding: '7px 12px',
             borderRadius: 999,
-            border: kind === 'image' ? '1px solid var(--brand, #5856D6)' : '1px solid var(--border)',
-            background: kind === 'image' ? 'var(--brand, #5856D6)' : 'var(--surface)',
-            color: kind === 'image' ? '#fff' : 'var(--text)',
+            border: kind === 'image' ? '1px solid var(--brand)' : '1px solid var(--border)',
+            background: kind === 'image' ? 'var(--brand)' : 'var(--surface)',
+            color: kind === 'image' ? 'var(--on-brand)' : 'var(--text)',
             cursor: 'pointer',
             fontSize: 13,
             fontWeight: 700,
@@ -231,7 +260,7 @@ function StoryComposeInner() {
               borderRadius: 999,
               border: '1px solid var(--border)',
               background: 'var(--surface)',
-              color: 'var(--danger, #FF3B30)',
+              color: 'var(--danger, var(--danger))',
               cursor: 'pointer',
               fontSize: 12,
               fontWeight: 700,
@@ -245,7 +274,17 @@ function StoryComposeInner() {
 
       {kind === 'text' && (
         <>
-          <label style={{ display: 'block', fontSize: 13, fontWeight: 700, marginTop: 14, marginBottom: 6 }}>背景色</label>
+          <label
+            style={{
+              display: 'block',
+              fontSize: 13,
+              fontWeight: 700,
+              marginTop: 14,
+              marginBottom: 6,
+            }}
+          >
+            背景色
+          </label>
           <div style={{ display: 'flex', gap: 8 }}>
             {BG_COLORS.map((c) => {
               const on = bgColor === c;
@@ -260,7 +299,7 @@ function StoryComposeInner() {
                     height: 32,
                     borderRadius: 16,
                     background: c,
-                    border: on ? '3px solid var(--brand, #5856D6)' : '1px solid rgba(0,0,0,0.15)',
+                    border: on ? '3px solid var(--brand)' : '1px solid rgba(0,0,0,0.15)',
                     cursor: 'pointer',
                   }}
                 />
@@ -270,16 +309,27 @@ function StoryComposeInner() {
         </>
       )}
 
-      <label style={{ display: 'block', fontSize: 13, fontWeight: 700, marginTop: 14, marginBottom: 6 }}>文字內容</label>
+      <label
+        style={{ display: 'block', fontSize: 13, fontWeight: 700, marginTop: 14, marginBottom: 6 }}
+      >
+        文字內容
+      </label>
       <textarea
         className="input"
         value={body}
         onChange={(e) => setBody(e.target.value.slice(0, MAX_TEXT))}
         rows={4}
         placeholder={kind === 'image' ? '為這張圖加上一句話（選填）' : '跟大家分享此刻⋯'}
-        style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit' }}
+        style={{
+          width: '100%',
+          boxSizing: 'border-box',
+          resize: 'vertical',
+          fontFamily: 'inherit',
+        }}
       />
-      <div style={{ textAlign: 'right', fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>{body.length} / {MAX_TEXT}</div>
+      <div style={{ textAlign: 'right', fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
+        {body.length} / {MAX_TEXT}
+      </div>
 
       {poiId && (
         <div
@@ -288,9 +338,9 @@ function StoryComposeInner() {
             alignItems: 'center',
             gap: 4,
             padding: '4px 10px',
-            background: 'rgba(88,86,214,0.10)',
+            background: 'var(--accent-soft)',
             borderRadius: 999,
-            color: 'var(--brand, #5856D6)',
+            color: 'var(--brand)',
             fontSize: 12,
             fontWeight: 700,
             marginTop: 8,
@@ -303,7 +353,13 @@ function StoryComposeInner() {
               setPoiId(null);
               setPoiName(null);
             }}
-            style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 14 }}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              color: 'var(--muted)',
+              fontSize: 14,
+            }}
             aria-label="清除位置"
           >
             ×
@@ -312,13 +368,15 @@ function StoryComposeInner() {
       )}
 
       <div style={{ marginTop: 20, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-        <Link href="/community?tab=realtime" className="btn">取消</Link>
+        <Link href="/community?tab=realtime" className="btn">
+          取消
+        </Link>
         <button type="button" className="btn primary" disabled={busy} onClick={publish}>
-          {busy ? '發佈中…' : '發布 Story'}
+          {busy ? '發佈中…' : '發布限時動態'}
         </button>
       </div>
       <div style={{ marginTop: 10, fontSize: 11, color: 'var(--muted)', textAlign: 'center' }}>
-        Story 24 小時後自動下架；會出現在「即時」分頁與動態頁頂端 Story 列。
+        限時動態會顯示在「即時」與「動態」頁面，保留 24 小時。
       </div>
     </div>
   );

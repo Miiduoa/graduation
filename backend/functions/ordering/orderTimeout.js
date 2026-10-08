@@ -13,147 +13,20 @@
  */
 
 const { onSchedule } = require('firebase-functions/v2/scheduler');
-const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+const { getFirestore } = require('firebase-admin/firestore');
 const { getMessaging } = require('firebase-admin/messaging');
 
 const REGION = 'asia-east1';
 
-const PENDING_TIMEOUT_MIN = 10;
-const PREPARING_NOTIFY_MIN = 30;
-const READY_NO_SHOW_MIN = 20;
-
-function ageMinutes(timestamp) {
-  if (!timestamp) return 0;
-  let ms;
-  if (typeof timestamp.toMillis === 'function') {
-    ms = timestamp.toMillis();
-  } else if (typeof timestamp.toDate === 'function') {
-    ms = timestamp.toDate().getTime();
-  } else if (timestamp.seconds) {
-    ms = timestamp.seconds * 1000;
-  } else if (typeof timestamp === 'string') {
-    ms = new Date(timestamp).getTime();
-  } else {
-    return 0;
-  }
-  return (Date.now() - ms) / 60000;
-}
-
-async function pushToUser(uid, title, body, data = {}) {
-  if (!uid) return;
-  try {
-    const db = getFirestore();
-    const tokensSnap = await db
-      .collection('users')
-      .doc(uid)
-      .collection('pushTokens')
-      .limit(5)
-      .get();
-    const tokens = tokensSnap.docs.map((d) => d.data()?.token).filter(Boolean);
-    if (tokens.length === 0) return;
-    await getMessaging().sendEachForMulticast({
-      tokens,
-      notification: { title, body },
-      data,
-    });
-  } catch (err) {
-    console.warn('[orderTimeout] push failed:', err);
-  }
-}
+const { createOrderTimeoutSweep } = require('./orderTimeoutOperations');
+const { createNotificationService } = require('../lib/notificationService');
 
 module.exports.scheduledOrderTimeoutSweep = onSchedule(
-  {
-    schedule: 'every 5 minutes',
-    region: REGION,
-    timeZone: 'Asia/Taipei',
-  },
+  { schedule: 'every 5 minutes', region: REGION, timeZone: 'Asia/Taipei' },
   async () => {
     const db = getFirestore();
-    const schoolsSnap = await db.collection('schools').get();
-    let stats = { pendingCancelled: 0, preparingNotified: 0, readyNoShow: 0 };
-
-    for (const schoolDoc of schoolsSnap.docs) {
-      const ordersRef = schoolDoc.ref.collection('orders');
-
-      // pending → 自動取消
-      const pendingSnap = await ordersRef
-        .where('status', '==', 'pending')
-        .limit(100)
-        .get();
-      for (const docSnap of pendingSnap.docs) {
-        const order = docSnap.data();
-        if (ageMinutes(order.createdAt) <= PENDING_TIMEOUT_MIN) continue;
-        try {
-          await docSnap.ref.update({
-            status: 'cancelled',
-            cancelledAt: FieldValue.serverTimestamp(),
-            cancelReason: 'system_timeout',
-            cancelReasonText: '店家逾時未接單',
-          });
-          await pushToUser(
-            order.userId || order.studentUid,
-            '訂單已自動取消',
-            '店家逾時未接單，您的訂單已自動取消並退款。',
-            { type: 'order', orderId: docSnap.id, channel: 'orders' },
-          );
-          stats.pendingCancelled += 1;
-        } catch (err) {
-          console.warn('[orderTimeout] cancel pending failed:', err);
-        }
-      }
-
-      // preparing → 通知（不取消）
-      const preparingSnap = await ordersRef
-        .where('status', '==', 'preparing')
-        .limit(100)
-        .get();
-      for (const docSnap of preparingSnap.docs) {
-        const order = docSnap.data();
-        if (ageMinutes(order.preparingAt || order.confirmedAt || order.createdAt) <= PREPARING_NOTIFY_MIN) continue;
-        if (order.timeoutNotified) continue;
-        try {
-          await docSnap.ref.update({ timeoutNotified: true });
-          await pushToUser(
-            order.userId || order.studentUid,
-            '訂單製作時間較長',
-            '您的餐點已製作超過 30 分鐘，如有問題可聯繫店家。',
-            { type: 'order', orderId: docSnap.id, channel: 'orders' },
-          );
-          stats.preparingNotified += 1;
-        } catch (err) {
-          console.warn('[orderTimeout] notify preparing failed:', err);
-        }
-      }
-
-      // ready → NoShow
-      const readySnap = await ordersRef
-        .where('status', '==', 'ready')
-        .limit(100)
-        .get();
-      for (const docSnap of readySnap.docs) {
-        const order = docSnap.data();
-        if (ageMinutes(order.readyAt || order.completedAt || order.createdAt) <= READY_NO_SHOW_MIN) continue;
-        try {
-          await docSnap.ref.update({
-            status: 'cancelled',
-            cancelledAt: FieldValue.serverTimestamp(),
-            cancelReason: 'system_no_show',
-            cancelReasonText: '學生未於時限內取餐',
-          });
-          await pushToUser(
-            order.userId || order.studentUid,
-            '訂單已標記為未取餐',
-            '您的餐點已標記為 NoShow，如有疑問請聯繫店家或客服。',
-            { type: 'order', orderId: docSnap.id, channel: 'orders' },
-          );
-          stats.readyNoShow += 1;
-        } catch (err) {
-          console.warn('[orderTimeout] no-show failed:', err);
-        }
-      }
-    }
-
-    console.info('[orderTimeout] sweep done', stats);
+    const { sendPushToUser } = createNotificationService({ db, messaging: getMessaging() });
+    await createOrderTimeoutSweep({ db, sendPushToUser })();
     return null;
   },
 );

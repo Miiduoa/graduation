@@ -27,6 +27,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { theme } from '../ui/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 import {
   CockpitHero,
@@ -49,6 +50,7 @@ interface DraftItem {
 }
 
 export default function VendorMenuManageScreen() {
+  const inputStyle = useThemeStyleSheet(createInputStyle);
   const bottomPad = useTabBarContentBottomPadding();
   const merchantCtx = useMerchantContext();
   const merchantId =
@@ -408,7 +410,7 @@ export default function VendorMenuManageScreen() {
   );
 }
 
-const inputStyle = {
+const createInputStyle = () => ({
   borderWidth: StyleSheet.hairlineWidth,
   borderColor: theme.colors.border,
   borderRadius: theme.radius.md,
@@ -416,7 +418,7 @@ const inputStyle = {
   paddingVertical: theme.space.sm,
   fontSize: 14,
   color: theme.colors.text,
-};
+});
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
