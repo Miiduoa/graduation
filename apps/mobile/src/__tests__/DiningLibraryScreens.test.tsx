@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { Linking } from 'react-native';
 import CafeteriaAiFirstScreen from '../screens/CafeteriaAiFirstScreen';
+import MenuDetailAiFirstScreen from '../screens/MenuDetailAiFirstScreen';
 import LibraryAiFirstScreen from '../screens/LibraryAiFirstScreen';
 import {
   loadDiningCatalog,
@@ -88,6 +89,16 @@ test('shows real menu prices, an explicit taxed quote, and only onsite ordering'
   await act(async () => fireEvent.press(view.getByText('送出訂單，到店付款')));
   expect(view.getByText('等待店家確認')).toBeTruthy();
   expect(view.queryByText('已付款')).toBeNull();
+});
+test('legacy menu links load the current catalog without static recommendations or reviews', async () => {
+  const view = render(<MenuDetailAiFirstScreen />);
+  await act(async () => {});
+  expect(loadDiningCatalog).toHaveBeenCalledWith(
+    { userId: 'student-a', schoolId: 'pu' },
+    expect.any(Function),
+  );
+  expect(view.getByText('今日餐點')).toBeTruthy();
+  expect(view.queryByText(/350 評論|AI 為你推薦|你週三常點|650 kcal|紅燒牛肉麵/)).toBeNull();
 });
 test('double tapping confirmation sends only one request', async () => {
   const pending = deferred<DiningReceipt>();

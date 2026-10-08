@@ -9,15 +9,15 @@
  *  - Story grid 可點開全螢幕 viewer，含進度條與左右切換
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { CommunityLoadError, useCommunityLoad } from './useCommunityLoad';
 import { useAuth } from '@/components/AuthGuard';
 import {
   SOCIAL_POIS,
   defaultSocialPoiId,
   findSocialPoi,
   SOCIAL_POI_CATEGORY_LABEL,
-  type SocialPoi,
   type SocialPoiCategory,
 } from '@/lib/community/pois';
 import {
@@ -47,10 +47,16 @@ export function RealtimeTab(props: { schoolId: string }) {
   const { user } = useAuth();
   const [selectedPoi, setSelectedPoi] = useState<string>(defaultSocialPoiId());
   const [storyGroups, setStoryGroups] = useState<StoryAuthorGroup[]>([]);
-  const [storiesLoading, setStoriesLoading] = useState(true);
-  const [peers, setPeers] = useState<Peer[]>([]);
-  const [heartbeatSession, setHeartbeatSession] = useState<string | null>(null);
-  const [viewerState, setViewerState] = useState<{ group: StoryAuthorGroup; index: number } | null>(null);
+  const [peerResult, setPeerResult] = useState<{ poiId: string; items: Peer[] } | null>(null);
+  const peers = peerResult?.poiId === selectedPoi ? peerResult.items : [];
+  const peersGeneration = useRef(0);
+  const [heartbeatSession, setHeartbeatSession] = useState<{ id: string; poiId: string } | null>(null);
+  const [checkingIn, setCheckingIn] = useState(false);
+  const checkInFlight = useRef(false);
+  const checkedInHere = heartbeatSession?.poiId === selectedPoi;
+  const [viewerState, setViewerState] = useState<{ group: StoryAuthorGroup; index: number } | null>(
+    null,
+  );
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
 
@@ -64,43 +70,26 @@ export function RealtimeTab(props: { schoolId: string }) {
   }, [schoolId, user]);
 
   const refreshPeers = useCallback(async () => {
-    if (!schoolId) {
-      setPeers([]);
-      return;
-    }
+    const request = ++peersGeneration.current;
+    if (!schoolId) return;
     const raw = await peersAtPoi(schoolId, selectedPoi);
-    const unique = [
-      ...new Set(raw.map((r) => r.uid).filter((u): u is string => !!u)),
-    ].filter((u) => u !== user?.uid);
-    if (unique.length === 0) {
-      setPeers([]);
-      return;
-    }
-    const profiles = await fetchSchoolDirectoryProfiles(schoolId, unique);
-    setPeers(
-      unique.map((uid) => {
-        const p = profiles.find((q) => q.uid === uid);
-        return {
-          uid,
-          name: p?.displayName ?? uid.slice(0, 6),
-          avatarUrl: p?.avatarUrl ?? null,
-          department: p?.department ?? null,
-        };
-      }),
-    );
+    const unique = [...new Set(raw.map((row) => row.uid).filter(Boolean))].filter((uid) => uid !== user?.uid);
+    const profiles = unique.length ? await fetchSchoolDirectoryProfiles(schoolId, unique) : [];
+    if (request !== peersGeneration.current) return;
+    setPeerResult({ poiId: selectedPoi, items: unique.map((uid) => {
+      const profile = profiles.find((row) => row.uid === uid);
+      return { uid, name: profile?.displayName ?? '同學', avatarUrl: profile?.avatarUrl ?? null, department: profile?.department ?? null };
+    }) });
   }, [schoolId, selectedPoi, user]);
 
-  useEffect(() => {
-    (async () => {
-      setStoriesLoading(true);
-      await refreshStories();
-      setStoriesLoading(false);
-    })();
-  }, [refreshStories]);
-
-  useEffect(() => {
-    void refreshPeers();
-  }, [refreshPeers]);
+  const load = useCallback(async () => {
+    await Promise.all([refreshStories(), refreshPeers()]);
+  }, [refreshStories, refreshPeers]);
+  const {
+    loading: storiesLoading,
+    error,
+    refresh,
+  } = useCommunityLoad(load, '暫時無法讀取校園動態，請確認連線後重試。');
 
   useEffect(() => {
     (async () => {
@@ -124,19 +113,24 @@ export function RealtimeTab(props: { schoolId: string }) {
   }, [storyGroups, schoolId]);
 
   const tapHeart = async () => {
-    if (!user?.uid || !schoolId) {
-      alert('請先登入');
-      return;
-    }
+    if (!user?.uid || !schoolId || checkInFlight.current) return;
+    checkInFlight.current = true;
+    setCheckingIn(true);
     try {
       if (heartbeatSession) {
-        await clearPresence(schoolId, heartbeatSession);
+        await clearPresence(schoolId, heartbeatSession.id);
+        setHeartbeatSession(null);
       }
-      const sid = await heartbeatCheckIn(user.uid, schoolId, selectedPoi);
-      setHeartbeatSession(sid);
-      await refreshPeers();
-    } catch (e: any) {
-      alert(`打卡失敗：${e?.message ?? String(e)}`);
+      if (!checkedInHere) {
+        const id = await heartbeatCheckIn(user.uid, schoolId, selectedPoi);
+        setHeartbeatSession({ id, poiId: selectedPoi });
+      }
+      await refresh();
+    } catch {
+      alert('這次未能更新打卡，請稍後再試。');
+    } finally {
+      checkInFlight.current = false;
+      setCheckingIn(false);
     }
   };
 
@@ -157,9 +151,13 @@ export function RealtimeTab(props: { schoolId: string }) {
     });
   };
 
+  if (error) return <CommunityLoadError message={error} retry={refresh} />;
+
   return (
     <div>
-      <h3 style={{ margin: '4px 0 8px', fontSize: 13, color: 'var(--muted)', fontWeight: 700 }}>我在哪</h3>
+      <h3 style={{ margin: '4px 0 8px', fontSize: 13, color: 'var(--muted)', fontWeight: 700 }}>
+        我在哪
+      </h3>
       <div
         style={{
           display: 'flex',
@@ -170,11 +168,12 @@ export function RealtimeTab(props: { schoolId: string }) {
       >
         {SOCIAL_POIS.map((poi) => {
           const active = poi.id === selectedPoi;
-          const checked = active && heartbeatSession != null;
+          const checked = heartbeatSession?.poiId === poi.id;
           return (
             <button
               key={poi.id}
               type="button"
+              disabled={checkingIn}
               onClick={() => setSelectedPoi(poi.id)}
               style={{
                 display: 'flex',
@@ -182,9 +181,9 @@ export function RealtimeTab(props: { schoolId: string }) {
                 gap: 5,
                 padding: '7px 12px',
                 borderRadius: 999,
-                border: active ? '1px solid var(--brand, var(--brand))' : '1px solid var(--border)',
-                background: active ? 'var(--brand, var(--brand))' : 'var(--surface)',
-                color: active ? '#fff' : 'var(--text)',
+                border: active ? '1px solid var(--brand)' : '1px solid var(--border)',
+                background: active ? 'var(--brand)' : 'var(--surface)',
+                color: active ? 'var(--on-brand)' : 'var(--text)',
                 cursor: 'pointer',
                 fontSize: 12,
                 fontWeight: 700,
@@ -193,7 +192,17 @@ export function RealtimeTab(props: { schoolId: string }) {
             >
               <span>{POI_ICON[poi.category]}</span>
               {poi.name}
-              {checked && <span style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--success)', marginLeft: 4 }} />}
+              {checked && (
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: 3,
+                    background: 'var(--success)',
+                    marginLeft: 4,
+                  }}
+                />
+              )}
             </button>
           );
         })}
@@ -223,21 +232,26 @@ export function RealtimeTab(props: { schoolId: string }) {
           type="button"
           className="btn primary"
           onClick={tapHeart}
+          disabled={checkingIn}
           style={{
-            background: heartbeatSession ? 'var(--success)' : 'var(--brand, var(--brand))',
+            background: checkedInHere ? 'var(--success)' : 'var(--brand)',
             fontSize: 13,
           }}
         >
-          {heartbeatSession ? '✓ 已打卡' : '📍 我在這裡'}
+          {checkingIn ? '更新中…' : checkedInHere ? '取消打卡' : '我在這裡'}
         </button>
       </div>
 
+      {checkedInHere && <p role="status" style={{ color: 'var(--success)' }}>已在這個地點打卡。你可以隨時取消。</p>}
       <h3 style={{ margin: '0 0 10px', fontSize: 13, color: 'var(--muted)', fontWeight: 700 }}>
-        同點位 · {peers.length}
+        附近同學{!storiesLoading && peerResult?.poiId === selectedPoi ? ` · ${peers.length}` : ''}
       </h3>
-      {peers.length === 0 ? (
-        <div className="card" style={{ padding: 18, color: 'var(--muted)', fontSize: 13, textAlign: 'center' }}>
-          暫無同點對象，按「我在這裡」加入清單。
+      {storiesLoading || peerResult?.poiId !== selectedPoi ? <p role="status">正在讀取附近同學…</p> : peers.length === 0 ? (
+        <div
+          className="card"
+          style={{ padding: 18, color: 'var(--muted)', fontSize: 13, textAlign: 'center' }}
+        >
+          這個地點目前沒有其他同學打卡。
         </div>
       ) : (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
@@ -259,8 +273,8 @@ export function RealtimeTab(props: { schoolId: string }) {
                   width: 48,
                   height: 48,
                   borderRadius: '50%',
-                  background: p.avatarUrl ? '#fff' : 'var(--brand, var(--brand))',
-                  color: '#fff',
+                  background: p.avatarUrl ? '#fff' : 'var(--brand)',
+                  color: 'var(--on-brand)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -269,14 +283,24 @@ export function RealtimeTab(props: { schoolId: string }) {
                 }}
               >
                 {p.avatarUrl ? (
-                  <img src={p.avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  <img
+                    src={p.avatarUrl}
+                    alt=""
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  />
                 ) : (
                   (p.name ?? '?').slice(0, 1)
                 )}
               </div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', textAlign: 'center' }}>{p.name}</div>
+              <div
+                style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', textAlign: 'center' }}
+              >
+                {p.name}
+              </div>
               {p.department && (
-                <div style={{ fontSize: 10, color: 'var(--muted)', textAlign: 'center' }}>{p.department}</div>
+                <div style={{ fontSize: 10, color: 'var(--muted)', textAlign: 'center' }}>
+                  {p.department}
+                </div>
               )}
             </div>
           ))}
@@ -284,24 +308,38 @@ export function RealtimeTab(props: { schoolId: string }) {
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 18 }}>
-        <h3 style={{ margin: 0, fontSize: 13, color: 'var(--muted)', fontWeight: 700, flex: 1 }}>校園 Story</h3>
+        <h3 style={{ margin: 0, fontSize: 13, color: 'var(--muted)', fontWeight: 700, flex: 1 }}>
+          限時動態
+        </h3>
         <Link
           href={`/community/story/new?poiId=${encodeURIComponent(selectedPoi)}`}
           className="btn primary"
           style={{ fontSize: 12, padding: '6px 12px' }}
         >
-          ＋ 發 Story
+          ＋ 發布限時動態
         </Link>
       </div>
 
       {storiesLoading ? (
-        <div className="card" style={{ padding: 18, textAlign: 'center', color: 'var(--muted)' }}>載入中…</div>
+        <div className="card" style={{ padding: 18, textAlign: 'center', color: 'var(--muted)' }}>
+          載入中…
+        </div>
       ) : storyGroups.length === 0 ? (
-        <div className="card" style={{ padding: 18, color: 'var(--muted)', fontSize: 13, textAlign: 'center' }}>
-          目前沒有未過期的 Story，點上方「＋ 發 Story」分享此刻。
+        <div
+          className="card"
+          style={{ padding: 18, color: 'var(--muted)', fontSize: 13, textAlign: 'center' }}
+        >
+          目前還沒有限時動態。分享一張照片或寫下此刻的心情。
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: 10, marginTop: 10 }}>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))',
+            gap: 10,
+            marginTop: 10,
+          }}
+        >
           {storyGroups.map((g) => {
             const latest = g.stories[g.stories.length - 1] ?? g.stories[0];
             const isImage = latest?.kind === 'image' && latest.mediaUrl;
@@ -320,10 +358,14 @@ export function RealtimeTab(props: { schoolId: string }) {
                   cursor: 'pointer',
                   padding: 0,
                 }}
-                aria-label={`查看 ${g.isMine ? '我的' : nameByUid[g.authorUid] ?? '同學'} 的 Story`}
+                aria-label={`查看 ${g.isMine ? '我的' : (nameByUid[g.authorUid] ?? '同學')} 的限時動態`}
               >
                 {isImage ? (
-                  <img src={latest!.mediaUrl as string} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  <img
+                    src={latest!.mediaUrl as string}
+                    alt=""
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  />
                 ) : (
                   <div
                     style={{
@@ -336,7 +378,15 @@ export function RealtimeTab(props: { schoolId: string }) {
                       boxSizing: 'border-box',
                     }}
                   >
-                    <span style={{ color: '#fff', fontSize: 14, fontWeight: 600, textAlign: 'center', lineHeight: 1.5 }}>
+                    <span
+                      style={{
+                        color: '#fff',
+                        fontSize: 14,
+                        fontWeight: 600,
+                        textAlign: 'center',
+                        lineHeight: 1.5,
+                      }}
+                    >
                       {latest?.text || '（媒體）'}
                     </span>
                   </div>
@@ -359,8 +409,8 @@ export function RealtimeTab(props: { schoolId: string }) {
                       width: 22,
                       height: 22,
                       borderRadius: '50%',
-                      background: avatarByUid[g.authorUid] ? '#fff' : 'var(--brand, var(--brand))',
-                      color: '#fff',
+                      background: avatarByUid[g.authorUid] ? '#fff' : 'var(--brand)',
+                      color: 'var(--on-brand)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -370,7 +420,11 @@ export function RealtimeTab(props: { schoolId: string }) {
                     }}
                   >
                     {avatarByUid[g.authorUid] ? (
-                      <img src={avatarByUid[g.authorUid]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      <img
+                        src={avatarByUid[g.authorUid]}
+                        alt=""
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
                     ) : (
                       (nameByUid[g.authorUid] ?? '?').slice(0, 1)
                     )}
@@ -386,10 +440,12 @@ export function RealtimeTab(props: { schoolId: string }) {
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    {g.isMine ? '我的 Story' : nameByUid[g.authorUid] ?? g.authorUid.slice(0, 6)}
+                    {g.isMine ? '我的動態' : (nameByUid[g.authorUid] ?? g.authorUid.slice(0, 6))}
                   </span>
                   {g.stories.length > 1 && (
-                    <span style={{ color: '#fff', fontSize: 11, opacity: 0.85 }}>· {g.stories.length}</span>
+                    <span style={{ color: '#fff', fontSize: 11, opacity: 0.85 }}>
+                      · {g.stories.length}
+                    </span>
                   )}
                 </div>
               </button>
@@ -399,11 +455,7 @@ export function RealtimeTab(props: { schoolId: string }) {
       )}
 
       {viewerState && (
-        <StoryViewer
-          state={viewerState}
-          onClose={() => setViewerState(null)}
-          onAdvance={advance}
-        />
+        <StoryViewer state={viewerState} onClose={() => setViewerState(null)} onAdvance={advance} />
       )}
     </div>
   );
@@ -466,7 +518,12 @@ function StoryViewer(props: {
                 flex: 1,
                 height: 3,
                 borderRadius: 2,
-                background: i < state.index ? '#fff' : i === state.index ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.25)',
+                background:
+                  i < state.index
+                    ? '#fff'
+                    : i === state.index
+                      ? 'rgba(255,255,255,0.7)'
+                      : 'rgba(255,255,255,0.25)',
               }}
             />
           ))}
@@ -474,7 +531,11 @@ function StoryViewer(props: {
 
         {/* content */}
         {story.kind === 'image' && story.mediaUrl ? (
-          <img src={story.mediaUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+          <img
+            src={story.mediaUrl}
+            alt=""
+            style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+          />
         ) : (
           <div
             style={{
@@ -487,7 +548,15 @@ function StoryViewer(props: {
               boxSizing: 'border-box',
             }}
           >
-            <span style={{ color: '#fff', fontSize: 22, lineHeight: 1.5, fontWeight: 700, textAlign: 'center' }}>
+            <span
+              style={{
+                color: '#fff',
+                fontSize: 22,
+                lineHeight: 1.5,
+                fontWeight: 700,
+                textAlign: 'center',
+              }}
+            >
               {story.text || '（無內容）'}
             </span>
           </div>

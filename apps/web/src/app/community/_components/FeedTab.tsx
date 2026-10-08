@@ -4,13 +4,15 @@
  * 校園社群 — 動態（Web）
  *
  * 對應 mobile/HomeFeedScreen.tsx：
- *  - 頂部 Story 列（橫向卷軸；點 + 我的 Story 跳到 /community/story/new）
+ *  - 頂部 Story 列（橫向卷軸；點 + 我的動態 跳到 /community/story/new）
  *  - 篩選 chip：全部 / 我訂閱 / 圖文
  *  - 貼文卡片：作者頭像、看板 chip、圖片 grid、點讚、留言、跳 /community/post/[id]
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import styles from '../community.module.css';
+import { CommunityLoadError, useCommunityLoad } from './useCommunityLoad';
 import Image from 'next/image';
 import { useAuth } from '@/components/AuthGuard';
 import {
@@ -36,7 +38,12 @@ const FILTERS: { key: FilterKey; label: string; icon: string }[] = [
 ];
 
 function formatTs(t: unknown): string {
-  const d = t instanceof Date ? t : typeof (t as any)?.toMillis === 'function' ? new Date((t as any).toMillis()) : null;
+  const d =
+    t instanceof Date
+      ? t
+      : typeof (t as any)?.toMillis === 'function'
+        ? new Date((t as any).toMillis())
+        : null;
   if (!d || Number.isNaN(d.getTime())) return '';
   const diff = Date.now() - d.getTime();
   const m = Math.floor(diff / 60000);
@@ -50,7 +57,9 @@ function likesOf(p: CampusPostDoc) {
   return typeof p.likes === 'number' ? p.likes : Array.isArray(p.likedBy) ? p.likedBy.length : 0;
 }
 function mediaOf(p: CampusPostDoc): string[] {
-  return Array.isArray(p.mediaUrls) ? p.mediaUrls.filter((u) => typeof u === 'string' && u.length > 0) : [];
+  return Array.isArray(p.mediaUrls)
+    ? p.mediaUrls.filter((u) => typeof u === 'string' && u.length > 0)
+    : [];
 }
 
 export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
@@ -63,7 +72,6 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
   const [filter, setFilter] = useState<FilterKey>('all');
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const likeFlightRef = useRef(false);
 
@@ -87,14 +95,10 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
     setStories(groupStoriesByAuthor(storyRows, user.uid));
   }, [schoolId, user]);
 
-  useEffect(() => {
-    if (authLoading) return;
-    (async () => {
-      setLoading(true);
-      await load();
-      setLoading(false);
-    })();
-  }, [authLoading, load]);
+  const { loading, error, refresh } = useCommunityLoad(
+    load,
+    '暫時無法讀取校園動態，請確認連線後重試。',
+  );
 
   // hydrate display names for post authors + story authors
   useEffect(() => {
@@ -157,17 +161,17 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
         await toggleCampusPostLike(schoolId, row.id, user.uid);
       } catch (e) {
         console.warn(e);
-        await load();
+        await refresh();
       } finally {
         likeFlightRef.current = false;
       }
     },
-    [user, schoolId, load],
+    [user, schoolId, refresh],
   );
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await load();
+    await refresh();
     setRefreshing(false);
   };
 
@@ -185,6 +189,8 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
     );
   }
 
+  if (error) return <CommunityLoadError message={error} retry={refresh} />;
+
   return (
     <div>
       {/* ── Story strip ── */}
@@ -200,7 +206,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
       >
         <Link
           href="/community/story/new"
-          aria-label="發布我的 Story"
+          aria-label="發布限時動態"
           style={{
             display: 'flex',
             flexDirection: 'column',
@@ -222,7 +228,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
               justifyContent: 'center',
               background: 'var(--surface)',
               fontSize: 24,
-              color: 'var(--brand, var(--brand))',
+              color: 'var(--brand)',
               fontWeight: 700,
             }}
           >
@@ -252,27 +258,34 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
                   cursor: 'pointer',
                   minWidth: 68,
                 }}
-                aria-label={`查看 ${nameByUid[g.authorUid] ?? g.authorUid.slice(0, 6)} 的 Story`}
+                aria-label={`查看 ${nameByUid[g.authorUid] ?? g.authorUid.slice(0, 6)} 的限時動態`}
               >
                 <div
                   style={{
                     width: 60,
                     height: 60,
                     borderRadius: '50%',
-                    border: '2px solid var(--brand, var(--brand))',
+                    border: '2px solid var(--brand)',
                     padding: 3,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    background: av ? '#fff' : 'var(--brand, var(--brand))',
-                    color: '#fff',
+                    background: av ? '#fff' : 'var(--brand)',
+                    color: 'var(--on-brand)',
                     overflow: 'hidden',
                     fontSize: 20,
                     fontWeight: 700,
                   }}
                 >
                   {av ? (
-                    <Image src={av} alt="" width={52} height={52} style={{ borderRadius: '50%' }} unoptimized />
+                    <Image
+                      src={av}
+                      alt=""
+                      width={52}
+                      height={52}
+                      style={{ borderRadius: '50%' }}
+                      unoptimized
+                    />
                   ) : (
                     (nameByUid[g.authorUid] ?? '?').slice(0, 1)
                   )}
@@ -296,7 +309,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
       </div>
 
       {/* ── Filter chips ── */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+      <div className={styles.toolbar}>
         {FILTERS.map((f) => {
           const active = filter === f.key;
           return (
@@ -309,16 +322,15 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
                 alignItems: 'center',
                 gap: 5,
                 padding: '7px 14px',
-                borderRadius: 999,
-                border: active ? '1px solid var(--brand, var(--brand))' : '1px solid var(--border)',
-                background: active ? 'var(--brand, var(--brand))' : 'var(--surface)',
-                color: active ? '#fff' : 'var(--text)',
+                borderRadius: 'var(--radius)',
+                border: active ? '1px solid var(--brand)' : '1px solid var(--border)',
+                background: active ? 'var(--brand)' : 'var(--surface)',
+                color: active ? 'var(--on-brand)' : 'var(--text)',
                 cursor: 'pointer',
                 fontSize: 13,
                 fontWeight: 600,
               }}
             >
-              <span>{f.icon}</span>
               <span>{f.label}</span>
             </button>
           );
@@ -330,7 +342,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
           disabled={refreshing}
           style={{
             padding: '7px 14px',
-            borderRadius: 999,
+            borderRadius: 'var(--radius)',
             border: '1px solid var(--border)',
             background: 'var(--surface)',
             color: 'var(--muted)',
@@ -338,12 +350,12 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
             fontSize: 12,
           }}
         >
-          {refreshing ? '更新中…' : '🔄 重新整理'}
+          {refreshing ? '更新中…' : '重新整理'}
         </button>
         <Link
           href="/community/post/new"
           className="btn primary"
-          style={{ fontSize: 13, padding: '7px 14px', borderRadius: 999 }}
+          style={{ fontSize: 13, padding: '7px 14px', borderRadius: 'var(--radius)' }}
         >
           ＋ 發文
         </Link>
@@ -355,10 +367,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
           載入中…
         </div>
       ) : visible.length === 0 ? (
-        <div
-          className="card"
-          style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}
-        >
+        <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>
           {filter === 'subscribed' ? '尚無已訂閱看板的新貼文' : '尚無校園貼文'}
           <div style={{ marginTop: 10 }}>
             <Link href="/community/post/new" className="btn primary">
@@ -369,24 +378,32 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {visible.map((item) => {
-            const liked = !!(user && Array.isArray(item.likedBy) && item.likedBy.includes(user.uid));
+            const liked = !!(
+              user &&
+              Array.isArray(item.likedBy) &&
+              item.likedBy.includes(user.uid)
+            );
             const media = mediaOf(item);
             const board = boardNameById[item.boardId] ?? item.boardId;
             const av = !item.anonymous && item.authorUid ? avatarByUid[item.authorUid] : undefined;
             return (
-              <article
-                key={item.id}
-                className="card"
-                style={{ padding: 16, cursor: 'pointer' }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <article key={item.id} className="card" style={{ padding: 16, cursor: 'pointer' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    alignItems: 'center',
+                    gap: 10,
+                    marginBottom: 10,
+                  }}
+                >
                   <div
                     style={{
                       width: 38,
                       height: 38,
                       borderRadius: '50%',
-                      background: item.anonymous ? 'var(--panel2, #F2F2F7)' : 'var(--brand, var(--brand))',
-                      color: '#fff',
+                      background: item.anonymous ? 'var(--panel2)' : 'var(--brand)',
+                      color: 'var(--on-brand)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -394,8 +411,17 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
                       overflow: 'hidden',
                     }}
                   >
-                    {item.anonymous ? '🎭' : av ? (
-                      <Image src={av} alt="" width={38} height={38} style={{ borderRadius: '50%' }} unoptimized />
+                    {item.anonymous ? (
+                      '🎭'
+                    ) : av ? (
+                      <Image
+                        src={av}
+                        alt=""
+                        width={38}
+                        height={38}
+                        style={{ borderRadius: '50%' }}
+                        unoptimized
+                      />
                     ) : (
                       authorLine(item).slice(0, 1)
                     )}
@@ -409,7 +435,12 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
                     </div>
                     <Link
                       href={`/community/board/${item.boardId}`}
-                      style={{ fontSize: 12, color: 'var(--brand, var(--brand))', fontWeight: 700, textDecoration: 'none' }}
+                      style={{
+                        fontSize: 12,
+                        color: 'var(--brand)',
+                        fontWeight: 700,
+                        textDecoration: 'none',
+                      }}
                     >
                       ＃{board}
                     </Link>
@@ -446,7 +477,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
                         key={t}
                         style={{
                           fontSize: 11,
-                          color: 'var(--brand, var(--brand))',
+                          color: 'var(--brand)',
                           background: 'var(--accent-soft)',
                           padding: '2px 8px',
                           borderRadius: 999,
@@ -519,12 +550,24 @@ function MediaGrid({ uris, postId }: { uris: string[]; postId: string }) {
     return (
       <Link
         href={`/community/post/${postId}`}
-        style={{ display: 'block', marginTop: 10, borderRadius: 12, overflow: 'hidden', position: 'relative' }}
+        style={{
+          display: 'block',
+          marginTop: 10,
+          borderRadius: 12,
+          overflow: 'hidden',
+          position: 'relative',
+        }}
       >
         <img
           src={uris[0]}
           alt=""
-          style={{ width: '100%', height: 'auto', maxHeight: 480, objectFit: 'cover', display: 'block' }}
+          style={{
+            width: '100%',
+            height: 'auto',
+            maxHeight: 480,
+            objectFit: 'cover',
+            display: 'block',
+          }}
         />
       </Link>
     );

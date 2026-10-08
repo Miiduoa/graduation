@@ -118,10 +118,14 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
         </AICard>
         <AIRow
           title="無障礙設定"
-          subtitle="調整字體與動態效果"
+          subtitle="查看裝置輔助功能與閱讀設定"
           onPress={go('AccessibilitySettings')}
         />
-        <AIRow title="介面語言" subtitle="繁體中文" static />
+        <AIRow
+          title="介面語言"
+          subtitle="選擇已提供翻譯的介面語言"
+          onPress={go('LanguageSettings')}
+        />
       </AISection>
 
       {uid ? (

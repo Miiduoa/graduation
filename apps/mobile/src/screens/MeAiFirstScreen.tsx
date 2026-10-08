@@ -1,12 +1,14 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState, useSyncExternalStore } from 'react';
 import { Alert, Text } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { AIScreen, AIHero, AISection, AICard, AIRow, aiTokens } from '../ui/aiFirst';
+import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { usePermissions } from '../hooks/usePermissions';
 import { safeNavigate } from '../utils/safeNavigate';
 
 export default function MeAiFirstScreen() {
+  useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const navigation = useNavigation();
   const auth = useAuth();
   const { signOutWithWarning } = auth;

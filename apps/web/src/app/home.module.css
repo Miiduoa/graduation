@@ -7,11 +7,16 @@
   background: var(--paper);
   color: var(--ink);
   font-family: Arial, 'Noto Sans TC', sans-serif;
-  font-size: 14px;
+  font-size: var(--font-body-size);
   line-height: 1.6;
 }
 .page * {
   box-sizing: border-box;
+}
+
+:global([data-density='compact']) .main {
+  padding-top: 24px;
+  padding-bottom: 24px;
 }
 .page a {
   text-decoration: none;

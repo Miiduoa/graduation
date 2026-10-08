@@ -247,6 +247,7 @@ html {
 
 body {
   margin: 0;
+  font-size: var(--font-body-size);
   color: var(--text);
   background: var(--bg);
   font-family:
@@ -262,6 +263,27 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+}
+
+:root[data-reduced-motion='true'] *,
+:root[data-reduced-motion='true'] *::before,
+:root[data-reduced-motion='true'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+:root[data-reduced-motion='true'] {
+  scroll-behavior: auto;
+}
+
+:root[data-density='compact'] .pageStack {
+  gap: var(--space-md);
+}
+
+:root[data-density='compact'] .insetGroupRow {
+  padding-block: 8px;
 }
 
 a {

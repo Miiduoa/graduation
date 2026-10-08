@@ -181,19 +181,19 @@ export function MeStack() {
       <Stack.Screen
         name="NotificationSettings"
         component={NotificationSettingsScreen}
-        options={{ title: '通知設定' }}
+        options={{ title: '通知設定', headerShown: false }}
       />
       <Stack.Screen name="QRCode" component={QRCodeScreen} options={{ title: 'QR 碼' }} />
       <Stack.Screen
         name="MerchantHub"
         component={UnavailableFeatureScreen}
-        options={{ title: '商家接單' }}
+        options={{ title: '商家接單', headerShown: false }}
       />
 
       <Stack.Screen
         name="Achievements"
         component={GuardedAchievementsAiFirst}
-        options={{ title: '成就與積分' }}
+        options={{ title: '成就與積分', headerShown: false }}
       />
       <Stack.Screen
         name="CampusGarden"
@@ -245,26 +245,34 @@ export function MeStack() {
       <Stack.Screen
         name="LanguageSettings"
         component={LanguageSettingsScreen}
-        options={{ title: '語言設定' }}
+        options={{ title: '語言設定', headerShown: false }}
       />
       <Stack.Screen
         name="AccessibilitySettings"
         component={AccessibilitySettingsScreen}
-        options={{ title: '無障礙設定' }}
+        options={{ title: '無障礙設定', headerShown: false }}
       />
       <Stack.Screen
         name="ThemePreview"
         component={ThemePreviewScreen}
-        options={{ title: '主題預覽' }}
+        options={{ title: '外觀', headerShown: false }}
       />
 
-      <Stack.Screen name="Help" component={HelpScreen} options={{ title: '幫助中心' }} />
+      <Stack.Screen
+        name="Help"
+        component={HelpScreen}
+        options={{ title: '幫助與回饋', headerShown: false }}
+      />
       <Stack.Screen
         name="PostLoginDebug"
         component={PostLoginDebugScreen}
         options={{ title: 'Post-login 除錯' }}
       />
-      <Stack.Screen name="Feedback" component={FeedbackScreen} options={{ title: '意見回饋' }} />
+      <Stack.Screen
+        name="Feedback"
+        component={FeedbackScreen}
+        options={{ title: '意見回饋', headerShown: false }}
+      />
       <Stack.Screen name="BugReport" component={BugReportScreen} options={{ title: '回報問題' }} />
 
       <Stack.Screen

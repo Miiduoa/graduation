@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from 'next';
 import { ServiceWorkerRegistration } from '@/components/ServiceWorkerRegistration';
 import { AuthProvider } from '@/components/AuthGuard';
 import { ToastProvider } from '@/components/ui';
+import { AppearancePreferences } from '@/components/AppearancePreferences';
+import { appearanceBootstrap } from '@/lib/appearanceBootstrap';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -53,8 +55,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-Hant" data-scroll-behavior="smooth">
+    <html lang="zh-Hant" data-scroll-behavior="smooth" suppressHydrationWarning>
       <head>
+        <script dangerouslySetInnerHTML={{ __html: appearanceBootstrap }} />
         <link rel="apple-touch-icon" href="/icons/icon-180x180.png" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -64,6 +67,7 @@ export default function RootLayout({
         <meta name="msapplication-tap-highlight" content="no" />
       </head>
       <body>
+        <AppearancePreferences />
         <ServiceWorkerRegistration />
         <AuthProvider>
           <ToastProvider position="top-center">{children}</ToastProvider>
