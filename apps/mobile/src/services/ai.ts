@@ -3562,7 +3562,7 @@ export async function generateSummary(text: string, maxLength = 100): Promise<st
 
 function getGeminiApiKey(): string | null {
   const extra = (Constants.expoConfig as any)?.extra ?? (Constants as any)?.manifest?.extra ?? {};
-  return extra.geminiApiKey ?? process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? null;
+  return extra.geminiApiKey || null;
 }
 
 function learnedSkillsFromExecutedActions(

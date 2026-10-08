@@ -82,10 +82,8 @@ export default ({ config }: any) => {
     widgets: parseBoolean(process.env.EXPO_PUBLIC_FEATURE_WIDGETS, !isReleaseLike),
     deeplinks: parseBoolean(process.env.EXPO_PUBLIC_FEATURE_DEEPLINKS, !isReleaseLike),
   };
-  const enableUniversalDevAccounts = !isProduction && parseBoolean(
-    process.env.EXPO_PUBLIC_ENABLE_UNIVERSAL_DEV_ACCOUNTS,
-    true,
-  );
+  const enableUniversalDevAccounts =
+    !isProduction && parseBoolean(process.env.EXPO_PUBLIC_ENABLE_UNIVERSAL_DEV_ACCOUNTS, true);
   const allowLocalMockAuth =
     appEnv === 'development' && process.env.EXPO_PUBLIC_ALLOW_LOCAL_MOCK_AUTH === 'true';
 
@@ -268,6 +266,7 @@ export default ({ config }: any) => {
       bundleIdentifier,
       buildNumber,
       infoPlist: {
+        ...(config.ios?.infoPlist ?? {}),
         NSCameraUsageDescription: '需要相機權限以掃描 QR 碼和拍照',
         NSPhotoLibraryUsageDescription: '需要相簿權限以選擇照片',
         NSLocationWhenInUseUsageDescription: '需要位置權限以提供校園導航',
@@ -328,7 +327,7 @@ export default ({ config }: any) => {
       aiServerBaseUrl: process.env.EXPO_PUBLIC_AI_SERVER_URL ?? '',
       /** Cloudflare Worker OPAC proxy base URL (no trailing slash); empty → device direct fetch only */
       libraryOpacProxyUrl: process.env.EXPO_PUBLIC_LIBRARY_OPAC_PROXY_URL ?? '',
-      geminiApiKey: process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? '',
+      geminiApiKey: isReleaseLike ? '' : (process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? ''),
       /** 預設 GGUF：`qwen2.5-7b`（與 MLX 微調基底對齊）；可改 `qwen2.5-3b` 等 `MODEL_REGISTRY` 鍵 */
       localLlmDefaultModelId: process.env.EXPO_PUBLIC_LOCAL_LLM_MODEL ?? 'qwen2.5-7b',
       /** true：預設關閉網搜／預抓學習（完全離線優先）；仍可用對應 EXPO_PUBLIC_AI_* =true 強制開啟 */

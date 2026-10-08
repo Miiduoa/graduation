@@ -1,6 +1,6 @@
 # Campus One Web image
 
-The image builds the Next.js application from source inside Linux. The runtime is a standalone server on port 8080, runs as the unprivileged `node` user, and checks `/health/live`. The health endpoint only confirms the Web process is alive; it does not certify Firebase, login or school services.
+The image builds the Next.js application from source inside Linux. The runtime is a standalone server on port 8080 by default, runs as the unprivileged `node` user, and checks `/health/live` on the configured `PORT`. Set `PORT=3000` when using the existing `nuni-web` Fly service, whose internal port is 3000. The health endpoint only confirms the Web process is alive; it does not certify Firebase, login or school services.
 
 The approved Firebase project is `campus-one-tw`; the intended public domain remains `nuni.tw`. Obtain the six public browser values from that project's registered Web app. Export the following values in the build environment, then build from the repository root:
 
