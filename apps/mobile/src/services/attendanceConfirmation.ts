@@ -15,6 +15,18 @@ export function parseAttendanceConfirmation(payload: unknown): ConfirmedAttendan
   return { status: data.status };
 }
 
+export type ConfirmedLiveAttendance = { success: true; attendanceRecorded: true };
+
+export function parseLiveAttendanceConfirmation(payload: unknown): ConfirmedLiveAttendance | null {
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return null;
+
+  const data = payload as Record<string, unknown>;
+  // joinLiveSession also succeeds for classroom access without a QR check-in.
+  if (data.success !== true || data.attendanceRecorded !== true) return null;
+
+  return { success: true, attendanceRecorded: true };
+}
+
 /**
  * This screen only provides QR, numeric code and location inputs. In particular,
  * taking a photo is not evidence of face identity or liveness.
