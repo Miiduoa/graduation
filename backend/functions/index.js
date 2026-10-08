@@ -25,6 +25,7 @@ const {
   toPublicSsoConfig,
 } = require('./sso/providerRegistry');
 const { createNotificationService } = require('./lib/notificationService');
+const { evaluateLiveSessionJoin } = require('./lib/liveSessionJoinPolicy');
 const {
   decryptSecretConfig,
   encryptSecretConfig,
@@ -6487,82 +6488,88 @@ exports.joinLiveSession = onCall({ region: REGION }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Must be logged in');
 
-  const { groupId, sessionId, qrToken } = request.data;
-  if (!groupId || !sessionId) throw new HttpsError('invalid-argument', 'Missing required fields');
-
-  const sessionRef = db.collection('groups').doc(groupId).collection('liveSessions').doc(sessionId);
-  const session = await sessionRef.get();
-
-  if (!session.exists || !session.data()?.active) {
-    throw new HttpsError('not-found', 'Session not found or not active');
+  const { groupId, sessionId, qrToken } = request.data ?? {};
+  if (!groupId || !sessionId) {
+    throw new HttpsError('invalid-argument', 'Missing groupId or sessionId');
   }
 
-  if (qrToken) {
-    const sessionData = session.data();
-    if (sessionData.qrToken !== qrToken) {
-      throw new HttpsError('permission-denied', 'Invalid QR token');
-    }
-    if (sessionData.qrExpiresAt && sessionData.qrExpiresAt.toDate() < new Date()) {
-      throw new HttpsError('deadline-exceeded', 'QR code has expired');
-    }
-  }
+  const groupRef = db.collection('groups').doc(groupId);
+  const sessionRef = groupRef.collection('liveSessions').doc(sessionId);
+  const memberRef = groupRef.collection('members').doc(uid);
+  const attendanceSessionRef = groupRef.collection('attendanceSessions').doc(sessionId);
+  const attendanceRecordRef = attendanceSessionRef.collection('attendanceRecords').doc(uid);
 
-  const attendanceSessionRef = db
-    .collection('groups')
-    .doc(groupId)
-    .collection('attendanceSessions')
-    .doc(sessionId);
-
+  let attendanceRecorded = false;
   await db.runTransaction(async (transaction) => {
-    const latestSession = await transaction.get(sessionRef);
-    if (!latestSession.exists || !latestSession.data()?.active) {
-      throw new HttpsError('not-found', 'Session not found or not active');
+    // Check membership and session state inside the transaction so revocation,
+    // closure and duplicate QR check-ins cannot race our writes.
+    const session = await transaction.get(sessionRef);
+    const member = await transaction.get(memberRef);
+    const sessionData = session.exists ? session.data() : null;
+    const expiryMs = sessionData?.qrExpiresAt?.toDate?.()?.getTime();
+
+    const decision = evaluateLiveSessionJoin({
+      memberExists: member.exists,
+      memberStatus: member.data()?.status,
+      sessionActive: Boolean(sessionData?.active),
+      expectedQrToken: sessionData?.qrToken,
+      qrExpiresAtMs: expiryMs,
+      providedQrToken: qrToken,
+      nowMs: Date.now(),
+    });
+    if (!decision.ok) {
+      throw new HttpsError(decision.code, decision.message);
     }
 
-    const latestSessionData = latestSession.data();
-    const alreadyJoined = !!latestSessionData?.attendees?.[uid];
-    const sessionUpdates = {
+    // Read before writing: Firestore requires all transaction reads first.
+    const previousAttendance = decision.recordAttendance
+      ? await transaction.get(attendanceRecordRef)
+      : null;
+    const alreadyJoined = Boolean(sessionData?.attendees?.[uid]);
+
+    transaction.update(sessionRef, {
       [`attendees.${uid}`]: FieldValue.serverTimestamp(),
-    };
+      ...(alreadyJoined ? {} : { attendeeCount: FieldValue.increment(1) }),
+    });
 
-    if (!alreadyJoined) {
-      sessionUpdates.attendeeCount = FieldValue.increment(1);
+    if (decision.recordAttendance) {
+      // Joining the live room without QR is not the same as signing attendance.
+      // Use the actual attendance record for count idempotency, not room-join state.
+      transaction.set(
+        attendanceSessionRef,
+        {
+          sessionId,
+          liveSessionId: sessionId,
+          groupId,
+          teacherId: sessionData.teacherId,
+          startedAt: sessionData.startedAt || FieldValue.serverTimestamp(),
+          active: sessionData.active,
+          attendanceMode: 'qr',
+          source: 'live_session',
+          qrEnabled: true,
+          ...(sessionData.location ? { location: sessionData.location } : {}),
+          [`attendees.${uid}`]: FieldValue.serverTimestamp(),
+          ...(previousAttendance?.exists ? {} : { attendeeCount: FieldValue.increment(1) }),
+        },
+        { merge: true },
+      );
+      transaction.set(
+        attendanceRecordRef,
+        {
+          uid,
+          status: 'present',
+          source: 'qr',
+          checkedInAt: FieldValue.serverTimestamp(),
+          sessionId,
+          groupId,
+        },
+        { merge: true },
+      );
     }
-
-    transaction.update(sessionRef, sessionUpdates);
-    transaction.set(
-      attendanceSessionRef,
-      {
-        sessionId,
-        liveSessionId: sessionId,
-        groupId,
-        teacherId: latestSessionData.teacherId,
-        startedAt: latestSessionData.startedAt || FieldValue.serverTimestamp(),
-        active: latestSessionData.active,
-        attendanceMode: 'qr',
-        source: 'live_session',
-        ...(qrToken ? { qrEnabled: true } : {}),
-        ...(latestSessionData.location ? { location: latestSessionData.location } : {}),
-        [`attendees.${uid}`]: FieldValue.serverTimestamp(),
-        ...(alreadyJoined ? {} : { attendeeCount: FieldValue.increment(1) }),
-      },
-      { merge: true },
-    );
-    transaction.set(
-      attendanceSessionRef.collection('attendanceRecords').doc(uid),
-      {
-        uid,
-        status: 'present',
-        source: qrToken ? 'qr' : 'tap',
-        checkedInAt: FieldValue.serverTimestamp(),
-        sessionId,
-        groupId,
-      },
-      { merge: true },
-    );
+    attendanceRecorded = decision.recordAttendance;
   });
 
-  return { success: true };
+  return { success: true, attendanceRecorded };
 });
 
 exports.submitReaction = onCall({ region: REGION }, async (request) => {
