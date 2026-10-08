@@ -194,7 +194,7 @@ pnpm test:rules
 
 Mobile 另外包含 Jest 與 Maestro E2E flows；Web 使用 Vitest。
 
-最近一個完整驗證成功的 baseline：Mobile **1319 tests**、Web **133 tests**、Functions **165 tests**、Firestore Rules **46/46**，Expo Doctor **16/16**。這些數字與已知驗證債務都記在 [TESTING_EVIDENCE](docs/TESTING_EVIDENCE.md)，不在 README 假裝成 coverage 證明。
+各項測試數字與安全稽核結果會隨版本改變，不在首頁維護可能過時的統計。請查看 [可追溯的 CI 測試紀錄](docs/TESTING_EVIDENCE.md) 與 [依賴風險清單](docs/DEPENDENCY_RISK_REGISTER.md)；主要 CI 的成功不代表原生 Maestro E2E 或全部安全警示皆已通過。
 
 一般 CI 會驗證 Expo Doctor、公開 app config 與 `eas.json` build profile，但**不需要 `EXPO_TOKEN`、也不會提交 EAS Cloud build**。真正的 iOS / Android 雲端建置放在手動的 `EAS Build` / `Release` workflow，只有執行雲端建置時才需要 Expo 帳號憑證。
 
