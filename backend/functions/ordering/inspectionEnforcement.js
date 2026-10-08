@@ -2,6 +2,7 @@ const { createHash } = require('node:crypto');
 const { FieldValue, FieldPath } = require('firebase-admin/firestore');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { identifier, OPEN_STATUSES, writeOrderTransition } = require('../orderTransitions');
+const { runInspectionTransaction } = require('./inspectionTransaction');
 
 function deriveAction(score) {
   if (score >= 90) return 'no_action';
@@ -35,7 +36,7 @@ function createInspectionEnforcement({ db, now = Date.now }) {
     const school = db.collection('schools').doc(schoolId);
     const inspectionRef = school.collection('inspections').doc(inspectionId);
     const enforcementRef = school.collection('inspectionEnforcements').doc(inspectionId);
-    const enforcement = await db.runTransaction(async (transaction) => {
+    const enforcement = await runInspectionTransaction(db, async (transaction) => {
       const [inspection, previous] = await transaction.getAll(inspectionRef, enforcementRef);
       // Firestore events may be retried or delivered out of order. Never enforce an old score.
       if (!matchesVersion(inspection, version)) return null;
@@ -92,7 +93,7 @@ function createInspectionEnforcement({ db, now = Date.now }) {
       for (const candidate of candidates.docs) {
         const refundId = `inspection_${createHash('sha256').update(`${schoolId}\0${candidate.id}`).digest('hex')}`;
         const refundRef = school.collection('refunds').doc(refundId);
-        await db.runTransaction(async (transaction) => {
+        await runInspectionTransaction(db, async (transaction) => {
           const [inspection, orderSnapshot, receipt, refund] = await transaction.getAll(
             inspectionRef,
             candidate.ref,
