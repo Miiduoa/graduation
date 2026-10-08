@@ -13,6 +13,10 @@ import {
 } from '@/lib/courseAttendance';
 
 const auth = vi.hoisted(() => ({ uid: 'student' as string | null }));
+vi.mock('@/components/SchoolSelector', () => ({ SchoolSelector: () => null }));
+vi.mock('@/features/nuni/Session', () => ({
+  useNuniSession: () => ({ session: null, loading: false, pendingLogout: false, logout: vi.fn() }),
+}));
 vi.mock('./AuthGuard', () => ({
   useAuth: () => ({ user: auth.uid ? { uid: auth.uid } : null, loading: false }),
 }));

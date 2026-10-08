@@ -3,6 +3,10 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import HomePage from './page';
 import { loadHomeData, type HomeData } from '@/lib/homeOverview';
 const state = vi.hoisted(() => ({ uid: 'alice' as string | null }));
+vi.mock('@/components/SchoolSelector', () => ({ SchoolSelector: () => null }));
+vi.mock('@/features/nuni/Session', () => ({
+  useNuniSession: () => ({ session: null, loading: false, pendingLogout: false, logout: vi.fn() }),
+}));
 vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({
     user: state.uid ? { uid: state.uid } : null,

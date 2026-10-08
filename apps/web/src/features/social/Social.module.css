@@ -1,0 +1,124 @@
+.stack {
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+}
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 320px);
+  gap: 32px;
+  align-items: start;
+}
+.panel {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: clamp(20px, 3vw, 30px);
+  border-radius: var(--radius);
+  min-width: 0;
+}
+.panel h2 {
+  font-size: 21px;
+  font-weight: 600;
+  line-height: 1.4;
+  margin: 0 0 16px;
+}
+.panel h3 {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.4;
+  margin: 0;
+}
+.panel p {
+  line-height: 1.75;
+  margin: 0;
+}
+.muted {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.75;
+}
+.tabs,
+.actions,
+.metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: center;
+}
+.tabs {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 20px;
+}
+.actions {
+  margin-top: 16px;
+}
+.metadata {
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.post {
+  display: grid;
+  gap: 16px;
+}
+.postText {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.link {
+  color: var(--brand);
+  text-underline-offset: 4px;
+}
+.error {
+  color: var(--danger);
+  padding: 16px;
+  background: var(--danger-soft);
+  border-radius: var(--radius-sm);
+  line-height: 1.7;
+}
+.success {
+  color: var(--success);
+  padding: 16px;
+  background: var(--success-soft);
+  border-radius: var(--radius-sm);
+  line-height: 1.7;
+}
+.form {
+  display: grid;
+  gap: 16px;
+}
+.notice {
+  padding: 16px 0;
+  border-top: 1px solid var(--border);
+}
+.list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  display: grid;
+  gap: 16px;
+}
+.list li {
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.panel :is(button, a, select, textarea):focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 3px;
+}
+@media (max-width: 800px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sidebar {
+    order: -1;
+  }
+}
+@media (max-width: 420px) {
+  .actions > button {
+    flex: 1 1 auto;
+  }
+  .tabs > button {
+    flex: 1 1 auto;
+  }
+}
