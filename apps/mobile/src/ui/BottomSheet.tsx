@@ -14,6 +14,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from './navigationTheme';
 import { theme, softShadowStyle } from './theme';
+import { useThemeVersion } from './useThemeStyleSheet';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 
 function useSafeInsets() {
@@ -48,6 +49,7 @@ export function BottomSheet({
   closeOnBackdrop = true,
   footer,
 }: BottomSheetProps) {
+  useThemeVersion();
   const insets = useSafeInsets();
   const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
@@ -277,6 +279,7 @@ export function ActionSheet({
   actions,
   cancelText = '取消',
 }: ActionSheetProps) {
+  useThemeVersion();
   return (
     <BottomSheet visible={visible} onClose={onClose} snapPoints={[0.35]} enableDrag showHandle>
       <View>
@@ -406,6 +409,7 @@ export function BottomPicker<T>({
   multiple = false,
   selectedValues = [],
 }: BottomPickerProps<T>) {
+  useThemeVersion();
   const handleSelect = (v: T) => {
     onSelect(v);
     if (!multiple) onClose();

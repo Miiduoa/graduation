@@ -318,7 +318,7 @@ export function SmartCalendarPanel({
                 >
                   <Text
                     style={{
-                      color: activeTab === tab.key ? theme.colors.accent : '#fff',
+                      color: activeTab === tab.key ? theme.colors.accent : theme.colors.onDanger,
                       fontSize: 10,
                       fontWeight: '700',
                     }}
@@ -801,7 +801,7 @@ function PomodoroSection({
             opacity: pressed ? 0.7 : 1,
           })}
         >
-          <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>
+          <Text style={{ color: active ? theme.colors.onDanger : theme.colors.onAccent, fontSize: 16, fontWeight: '700' }}>
             {active ? '停止' : '開始專注 25 分鐘'}
           </Text>
         </Pressable>

@@ -105,7 +105,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
         tint={theme.mode === 'dark' ? 'dark' : 'light'}
         style={{
           backgroundColor:
-            theme.mode === 'dark' ? 'rgba(28,28,30,0.65)' : 'rgba(255,255,255,0.75)',
+            theme.colors.chromeTabBar,
           borderWidth: StyleSheet.hairlineWidth,
           borderColor: theme.colors.border,
           borderLeftWidth: 3,

@@ -2,8 +2,10 @@ import React, { useEffect, useMemo } from 'react';
 import { Animated, Easing, Text, View } from 'react-native';
 import { useAnimatedValue } from '../../hooks/useAnimatedValue';
 import { softShadowStyle, theme } from '../theme';
+import { useThemeVersion } from '../useThemeStyleSheet';
 
 export function LoadingOverlay(props: { visible: boolean; message?: string }) {
+  useThemeVersion();
   const spinAnim = useAnimatedValue(0);
 
   useEffect(() => {

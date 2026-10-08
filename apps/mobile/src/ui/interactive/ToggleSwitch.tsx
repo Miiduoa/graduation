@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { Animated, Pressable } from 'react-native';
 import { useAnimatedValue } from '../../hooks/useAnimatedValue';
 import { softShadowStyle, theme } from '../theme';
+import { useThemeVersion } from '../useThemeStyleSheet';
 
 export function ToggleSwitch(props: {
   value: boolean;
@@ -10,6 +11,7 @@ export function ToggleSwitch(props: {
   disabled?: boolean;
   size?: 'default' | 'small';
 }) {
+  useThemeVersion();
   const handlePress = () => {
     if (props.disabled) return;
     const newValue = !props.value;
@@ -52,7 +54,7 @@ export function ToggleSwitch(props: {
           width: thumbSize,
           height: thumbSize,
           borderRadius: thumbSize / 2,
-          backgroundColor: '#fff',
+          backgroundColor: props.value ? theme.colors.onAccent : theme.colors.textSecondary,
           transform: [{ translateX }],
           ...softShadowStyle(theme.shadows.soft),
         }}

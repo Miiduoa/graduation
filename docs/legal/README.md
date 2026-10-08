@@ -371,27 +371,9 @@ Apple's App Privacy Details framework. Maps all data practices to Apple's privac
 
 ## Contact Information
 
-For questions about these legal documents:
+支援、隱私請求與安全問題：[demohan513@gmail.com](mailto:demohan513@gmail.com)。
 
-**Privacy Team:**
-
-- Email: privacy@campushelper.app
-- Response Time: 7-14 business days
-
-**Legal Team:**
-
-- Email: legal@campushelper.app
-- For: Legal document questions, contracts, disputes
-
-**Support:**
-
-- Email: support@campushelper.app
-- For: User privacy questions, data requests
-
-**Security:**
-
-- Email: security@campushelper.app
-- For: Vulnerability reports, security concerns
+此地址由專案負責人確認使用。舊文件中的 `campushelper.app` 信箱與分工是早期規劃，沒有作為正式聯絡管道。此更新不代表其他法律文件中的服務承諾已完成驗證。
 
 ---
 

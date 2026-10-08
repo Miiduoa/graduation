@@ -7,6 +7,7 @@ import { View, Text, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { theme } from './theme';
+import { useThemeVersion } from './useThemeStyleSheet';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from './navigationTheme';
 import { Spinner, Skeleton } from './components';
 
@@ -20,12 +21,13 @@ export function courseChipScrollContentStyle(withBottomInset = true) {
   };
 }
 
-/** 全螢幕載入：中央訊息 + 列表骨架，Demo 口述時体感較接近「資料已就位」 */
+/** 全螢幕載入狀態：中央訊息與列表骨架 */
 export function CourseChipLoading(props: {
   title: string;
   subtitle?: string;
   accessibilityHint?: string;
 }) {
+  useThemeVersion();
   return (
     <View
       style={{ flex: 1, backgroundColor: theme.colors.surfaceMuted }}
@@ -82,6 +84,7 @@ export function CourseChipHeader(props: {
   title: string;
   meta?: string;
 }) {
+  useThemeVersion();
   return (
     <View style={{ gap: theme.space.xs, marginBottom: theme.space.md }} accessibilityRole="header">
       <Text
@@ -114,6 +117,7 @@ export function CourseChipHeader(props: {
 
 /** Demo 課程專用標章 — 置於課程 chip 進階頁頂部一隅 */
 export function CourseDemoDataRibbon() {
+  useThemeVersion();
   return (
     <View
       style={{
@@ -128,7 +132,9 @@ export function CourseDemoDataRibbon() {
       accessibilityRole="text"
       accessibilityLabel="Demo 資料"
     >
-      <Text style={{ fontSize: 12, fontWeight: '700', color: theme.colors.primary }}>Demo 資料</Text>
+      <Text style={{ fontSize: 12, fontWeight: '700', color: theme.colors.primary }}>
+        Demo 資料
+      </Text>
     </View>
   );
 }
@@ -140,6 +146,7 @@ export function CourseChipEmpty(props: {
   primaryLabel?: string;
   onPrimary?: () => void;
 }) {
+  useThemeVersion();
   return (
     <View
       style={{
@@ -153,8 +160,12 @@ export function CourseChipEmpty(props: {
       }}
       accessibilityRole="summary"
     >
-      <Text style={{ color: theme.colors.text, fontSize: 16, fontWeight: '700' }}>{props.title}</Text>
-      <Text style={{ color: theme.colors.textSecondary, fontSize: 14, lineHeight: 21 }}>{props.body}</Text>
+      <Text style={{ color: theme.colors.text, fontSize: 16, fontWeight: '700' }}>
+        {props.title}
+      </Text>
+      <Text style={{ color: theme.colors.textSecondary, fontSize: 14, lineHeight: 21 }}>
+        {props.body}
+      </Text>
       {props.primaryLabel && props.onPrimary ? (
         <Pressable
           accessibilityRole="button"
@@ -171,7 +182,9 @@ export function CourseChipEmpty(props: {
             opacity: pressed ? 0.85 : 1,
           })}
         >
-          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>{props.primaryLabel}</Text>
+          <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 14 }}>
+            {props.primaryLabel}
+          </Text>
         </Pressable>
       ) : null}
     </View>
@@ -179,6 +192,7 @@ export function CourseChipEmpty(props: {
 }
 
 export function CourseChipErrorBanner(props: { message: string; onRetry?: () => void }) {
+  useThemeVersion();
   return (
     <View
       style={{
@@ -195,7 +209,15 @@ export function CourseChipErrorBanner(props: { message: string; onRetry?: () => 
     >
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: theme.space.sm }}>
         <Ionicons name="alert-circle" size={22} color={theme.colors.danger} />
-        <Text style={{ flex: 1, color: theme.colors.danger, fontSize: 14, lineHeight: 21, fontWeight: '500' }}>
+        <Text
+          style={{
+            flex: 1,
+            color: theme.colors.danger,
+            fontSize: 14,
+            lineHeight: 21,
+            fontWeight: '500',
+          }}
+        >
           {props.message}
         </Text>
       </View>
