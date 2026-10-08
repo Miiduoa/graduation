@@ -12,7 +12,7 @@ function isObject(value) {
 
 function validDocumentId(value) {
   return typeof value === 'string' && value.length > 0 && value.trim() === value &&
-    Buffer.byteLength(value, 'utf8') <= 128 && !/[\/\u0000-\u001f\u007f]/u.test(value) &&
+    Buffer.byteLength(value, 'utf8') <= 128 && Array.from(value).every((char) => char !== '/' && char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127) &&
     value !== '.' && value !== '..' && !/^__.*__$/u.test(value);
 }
 

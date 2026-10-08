@@ -35,7 +35,7 @@ export function parseLiveAttendanceReceipt(
 function validPathSegment(value: string): boolean {
   // Server repeats validation with a UTF-8 byte limit. No LMS prefixes are removed here.
   return value.length > 0 && value.length <= 128 && value.trim() === value &&
-    !/[\/\u0000-\u001f\u007f]/u.test(value) && value !== '.' && value !== '..' && !/^__.*__$/u.test(value);
+    Array.from(value).every((char) => char !== '/' && char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127) && value !== '.' && value !== '..' && !/^__.*__$/u.test(value);
 }
 
 export function buildLiveAttendanceRequest(
