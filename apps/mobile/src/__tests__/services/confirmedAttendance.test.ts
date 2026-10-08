@@ -1,23 +1,18 @@
-import assert from 'node:assert/strict';
-import { test as nativeTest } from 'node:test';
 import { confirmQrAttendance } from '../../services/confirmedAttendance';
 
-const run = typeof test === 'undefined' ? nativeTest : test;
 const input = { courseSpaceId: 'course-1', sessionId: 'class-1', qrToken: 'server-token', uid: 'student-1' };
 const valid = { valid: true, attendanceRecorded: true, status: 'present', uid: 'student-1',
   courseId: 'course-1', sessionId: 'class-1', checkedInAt: '2026-10-08T06:30:00.000Z', alreadyRecorded: false };
 
-run('calls the verification endpoint with the actual QR token and account', async () => {
-  let notified = 0;
-  const result = await confirmQrAttendance(input, {
-    invoke: async (payload) => {
-      assert.deepEqual(payload, { courseId: 'course-1', sessionId: 'class-1', claim: { token: 'server-token', uid: 'student-1' } });
-      return valid;
-    },
-    onConfirmed: () => { notified++; },
-  });
-  assert.equal(result.success, true);
-  assert.equal(notified, 1);
+test('calls the verification endpoint with the actual QR token and account', async () => {
+  const invoke = jest.fn().mockResolvedValue(valid);
+  const onConfirmed = jest.fn();
+  const result = await confirmQrAttendance(input, { invoke, onConfirmed });
+  expect(invoke).toHaveBeenCalledWith({ courseId: 'course-1', sessionId: 'class-1',
+    claim: { token: 'server-token', uid: 'student-1' } });
+  expect(result.success).toBe(true);
+  expect(onConfirmed).toHaveBeenCalledTimes(1);
+  expect(onConfirmed).toHaveBeenCalledWith(result);
 });
 
 const rejected: unknown[] = [null, [], {}, { success: true, attendanceRecorded: false },
@@ -26,43 +21,44 @@ const rejected: unknown[] = [null, [], {}, { success: true, attendanceRecorded: 
   { ...valid, sessionId: 'another-class' }, { ...valid, checkedInAt: 'not-a-date' },
   { ...valid, alreadyRecorded: undefined }];
 for (let i = 0; i < rejected.length; i++) {
-  run(`does not notify or report success for an unconfirmed/mismatched receipt (${i + 1})`, async () => {
-    let notified = 0;
-    await assert.rejects(() => confirmQrAttendance(input, {
-      invoke: async () => rejected[i], onConfirmed: () => { notified++; },
-    }));
-    assert.equal(notified, 0);
+  test(`does not notify or report success for an unconfirmed/mismatched receipt (${i + 1})`, async () => {
+    const onConfirmed = jest.fn();
+    await expect(confirmQrAttendance(input, {
+      invoke: jest.fn().mockResolvedValue(rejected[i]), onConfirmed,
+    })).rejects.toThrow();
+    expect(onConfirmed).not.toHaveBeenCalled();
   });
 }
 
-run('does not call the backend when a QR code is missing', async () => {
-  let called = false;
-  await assert.rejects(() => confirmQrAttendance({ ...input, qrToken: '' }, {
-    invoke: async () => { called = true; return valid; }, onConfirmed: () => undefined,
-  }));
-  assert.equal(called, false);
+test('does not call the backend when a QR code is missing', async () => {
+  const invoke = jest.fn().mockResolvedValue(valid);
+  const onConfirmed = jest.fn();
+  await expect(confirmQrAttendance({ ...input, qrToken: '' }, { invoke, onConfirmed })).rejects.toThrow();
+  expect(invoke).not.toHaveBeenCalled();
+  expect(onConfirmed).not.toHaveBeenCalled();
 });
 
-run('network failure remains a failure and does not emit attendance', async () => {
-  let notified = false;
-  await assert.rejects(() => confirmQrAttendance(input, {
-    invoke: async () => { throw new Error('unavailable'); }, onConfirmed: () => { notified = true; },
-  }), /unavailable/);
-  assert.equal(notified, false);
+test('network failure remains a failure and does not emit attendance', async () => {
+  const onConfirmed = jest.fn();
+  await expect(confirmQrAttendance(input, {
+    invoke: jest.fn().mockRejectedValue(new Error('unavailable')), onConfirmed,
+  })).rejects.toThrow('unavailable');
+  expect(onConfirmed).not.toHaveBeenCalled();
 });
 
-run('a retry receipt does not repeat companion side effects', async () => {
-  let notified = 0;
+test('a retry receipt does not repeat companion side effects', async () => {
+  const onConfirmed = jest.fn();
   const result = await confirmQrAttendance(input, {
-    invoke: async () => ({ ...valid, alreadyRecorded: true }), onConfirmed: () => { notified++; },
+    invoke: jest.fn().mockResolvedValue({ ...valid, alreadyRecorded: true }), onConfirmed,
   });
-  assert.equal(result.success, true);
-  assert.equal(notified, 0);
+  expect(result.success).toBe(true);
+  expect(onConfirmed).not.toHaveBeenCalled();
 });
 
-run('a failed optional companion hint cannot undo a committed attendance', async () => {
+test('a failed optional companion hint cannot undo a committed attendance', async () => {
   const result = await confirmQrAttendance(input, {
-    invoke: async () => valid, onConfirmed: async () => { throw new Error('hint failed'); },
+    invoke: jest.fn().mockResolvedValue(valid),
+    onConfirmed: jest.fn().mockRejectedValue(new Error('hint failed')),
   });
-  assert.equal(result.success, true);
+  expect(result.success).toBe(true);
 });
