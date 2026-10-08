@@ -236,6 +236,87 @@ service cloud.firestore {
         || isAssignedReviewer(groupId, assignmentId, submissionId, data);
     }
 
+
+    function changesPublishedGrade() {
+      return resource.data.get('gradePublished', false) == true
+        && request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'gradeScore', 'gradeFeedback', 'gradePublished', 'gradePublishedBy',
+          'gradePublishedAt', 'gradeRevisionId', 'gradeRevisionCount',
+          'gradeRevisedAt', 'gradeRevisionReason'
+        ]);
+    }
+
+    function validGradeCorrection(groupId, assignmentId, studentId) {
+      let group = get(/databases/$(database)/documents/groups/$(groupId)).data;
+      let before = resource.data;
+      let after = request.resource.data;
+      let revisionId = after.get('gradeRevisionId', '');
+      let revisionPath = /databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)/submissions/$(studentId)/gradeRevisions/$(revisionId);
+      return group.get('type', '') == 'course'
+        && isSchoolMember(group.get('schoolId', ''))
+        && revisionId is string && revisionId.size() >= 10 && revisionId.size() <= 150
+        && revisionId != before.get('gradeRevisionId', '')
+        && after.diff(before).affectedKeys().hasOnly([
+          'gradeScore', 'gradeFeedback', 'gradePublishedBy', 'gradePublishedAt',
+          'gradeRevisionId', 'gradeRevisionCount', 'gradeRevisedAt', 'gradeRevisionReason'
+        ])
+        && after.gradePublished == true
+        && after.gradeScore is number && after.gradeScore >= 0
+        && after.gradeFeedback is string && after.gradeFeedback.size() <= 4000
+        && after.gradePublishedBy == request.auth.uid
+        && after.gradePublishedAt == request.time
+        && after.gradeRevisedAt == request.time
+        && after.gradeRevisionCount == before.get('gradeRevisionCount', 0) + 1
+        && after.gradeRevisionReason is string
+        && after.gradeRevisionReason.size() >= 5
+        && after.gradeRevisionReason.size() <= 500
+        && (after.gradeScore != before.get('gradeScore', null)
+          || after.gradeFeedback != before.get('gradeFeedback', ''))
+        && existsAfter(revisionPath)
+        && getAfter(revisionPath).data.changedBy == request.auth.uid
+        && getAfter(revisionPath).data.changedAt == request.time
+        && getAfter(revisionPath).data.beforeScore == before.get('gradeScore', null)
+        && getAfter(revisionPath).data.afterScore == after.gradeScore
+        && getAfter(revisionPath).data.beforeFeedback == before.get('gradeFeedback', '')
+        && getAfter(revisionPath).data.afterFeedback == after.gradeFeedback
+        && getAfter(revisionPath).data.reason == after.gradeRevisionReason
+        && getAfter(revisionPath).data.revision == after.gradeRevisionCount;
+    }
+
+    function validGradeRevisionLog(groupId, assignmentId, studentId, revisionId) {
+      let group = get(/databases/$(database)/documents/groups/$(groupId)).data;
+      let previous = get(/databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)/submissions/$(studentId)).data;
+      let after = getAfter(/databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)/submissions/$(studentId)).data;
+      let change = request.resource.data;
+      return group.get('type', '') == 'course'
+        && isSchoolMember(group.get('schoolId', ''))
+        && previous.get('gradePublished', false) == true
+        && after.get('gradePublished', false) == true
+        && change.keys().hasAll([
+          'beforeScore', 'afterScore', 'beforeFeedback', 'afterFeedback',
+          'reason', 'changedBy', 'changedAt', 'revision'
+        ])
+        && change.keys().hasOnly([
+          'beforeScore', 'afterScore', 'beforeFeedback', 'afterFeedback',
+          'reason', 'changedBy', 'changedAt', 'revision'
+        ])
+        && change.changedBy == request.auth.uid
+        && change.changedAt == request.time
+        && change.reason is string && change.reason.size() >= 5
+        && change.reason.size() <= 500
+        && change.beforeScore == previous.get('gradeScore', null)
+        && change.afterScore == after.get('gradeScore', null)
+        && change.beforeFeedback == previous.get('gradeFeedback', '')
+        && change.afterFeedback == after.get('gradeFeedback', '')
+        && after.get('gradeRevisionId', '') == revisionId
+        && after.get('gradeRevisionReason', '') == change.reason
+        && after.get('gradeRevisedAt', null) == request.time
+        && after.get('gradePublishedAt', null) == request.time
+        && after.get('gradePublishedBy', '') == request.auth.uid
+        && after.get('gradeRevisionCount', 0) == change.revision
+        && change.revision == previous.get('gradeRevisionCount', 0) + 1;
+    }
+
     function canReadPeerReviewDoc(groupId, assignmentId, reviewerId, data) {
       return canManageGroup(groupId)
         || (isSignedIn() && reviewerId == request.auth.uid)
@@ -679,7 +760,10 @@ service cloud.firestore {
             && request.resource.data.keys().hasOnly([
               'userId', 'groupId', 'assignmentId', 'content', 'attachments', 'answers', 'status', 'submittedAt', 'updatedAt'
             ]);
-          allow update: if canManageGroup(groupId) || (
+          allow update: if (
+            canManageGroup(groupId)
+            && (!changesPublishedGrade() || validGradeCorrection(groupId, assignmentId, submissionId))
+          ) || (
             validStudentSubmission(groupId, assignmentId, submissionId)
             && isSubmissionOwner(resource.data, submissionId)
             && resource.data.get('submittedAt', null) == null
@@ -688,6 +772,13 @@ service cloud.firestore {
             ])
           );
           allow delete: if false;
+
+          match /gradeRevisions/{revisionId} {
+            allow read: if canManageGroup(groupId);
+            allow create: if canManageGroup(groupId)
+              && validGradeRevisionLog(groupId, assignmentId, submissionId, revisionId);
+            allow update, delete: if false;
+          }
         }
 
         match /peerReviews/{reviewerId} {

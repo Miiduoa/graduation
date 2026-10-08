@@ -19,7 +19,7 @@ export interface CourseAssignment {
   submittedText: string | null;
   submittedAt: string | null;
   points: number | null;
-  grade: { score: number; feedback: string; publishedAt: string | null } | null;
+  grade: { score: number; feedback: string; publishedAt: string | null; revisionCount: number } | null;
 }
 export interface CourseWork {
   id: string;
@@ -107,6 +107,9 @@ export async function loadCourseWork(courseId: string, uid: string): Promise<Cou
                 feedback: typeof submission.data().gradeFeedback === 'string'
                   ? submission.data().gradeFeedback : '',
                 publishedAt: iso(submission.data().gradePublishedAt),
+                revisionCount: Number.isInteger(submission.data().gradeRevisionCount) &&
+                  submission.data().gradeRevisionCount >= 0
+                  ? submission.data().gradeRevisionCount : 0,
               }
             : null,
         };

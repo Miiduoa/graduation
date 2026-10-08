@@ -29,7 +29,21 @@ export type ReviewedSubmission = {
   score: number | null;
   feedback: string;
   gradedAt: string | null;
+  revisionCount: number;
 };
+
+export type GradeRevision = {
+  id: string;
+  beforeScore: number;
+  afterScore: number;
+  beforeFeedback: string;
+  afterFeedback: string;
+  reason: string;
+  changedBy: string;
+  changedAt: string | null;
+};
+
+export type GradeExpectation = { score: number; feedback: string; gradedAt: string | null };
 
 export type AssignmentReview = {
   title: string;
@@ -169,6 +183,8 @@ export async function loadTeacherSubmissions(
           feedback: row.gradePublished === true && typeof row.gradeFeedback === 'string'
             ? row.gradeFeedback : '',
           gradedAt: row.gradePublished === true ? toIso(row.gradePublishedAt) : null,
+          revisionCount: Number.isInteger(row.gradeRevisionCount) && row.gradeRevisionCount >= 0
+            ? row.gradeRevisionCount : 0,
         };
       })
       .sort((a, b) => (b.submittedAt ?? '').localeCompare(a.submittedAt ?? '')),
@@ -233,4 +249,142 @@ export async function publishSubmissionGrade(
       confirmed.data().gradePublishedBy !== scope.uid) {
     throw new TeacherCourseError('尚未確認評分已發布，請重新讀取繳交紀錄。');
   }
+}
+
+
+export function newGradeRevisionId(courseId: string, assignmentId: string, studentUid: string) {
+  if (![courseId, assignmentId, studentUid].every(validId)) {
+    throw new TeacherCourseError('無效的作業或學生編號。');
+  }
+  return doc(collection(getDb(), 'groups', courseId, 'assignments', assignmentId,
+    'submissions', studentUid, 'gradeRevisions')).id;
+}
+
+export async function reviseSubmissionGrade(
+  scope: TeacherScope,
+  assignmentId: string,
+  studentUid: string,
+  revisionId: string,
+  expected: GradeExpectation,
+  score: number,
+  feedback: string,
+  reason: string,
+): Promise<void> {
+  if (![assignmentId, studentUid, revisionId].every(validId)) {
+    throw new TeacherCourseError('無效的成績更正編號。');
+  }
+  const comment = feedback.trim();
+  const explanation = reason.trim();
+  if (!Number.isFinite(score) || score < 0 ||
+      Math.abs(score * 100 - Math.round(score * 100)) > 0.0000001 ||
+      comment.length > 4000 || explanation.length < 5 || explanation.length > 500) {
+    throw new TeacherCourseError('分數限兩位小數；更正原因請寫 5–500 字，評語最多 4,000 字。');
+  }
+  if (score === expected.score && comment === expected.feedback) {
+    throw new TeacherCourseError('新分數與評語均未改變，不需要建立更正紀錄。');
+  }
+  await authorizeTeacherCourse(scope);
+  requireCurrentTeacher(scope);
+  const db = getDb();
+  const assignmentRef = doc(db, 'groups', scope.courseId, 'assignments', assignmentId);
+  const submissionRef = doc(assignmentRef, 'submissions', studentUid);
+  const revisionRef = doc(submissionRef, 'gradeRevisions', revisionId);
+  await runTransaction(db, async (transaction) => {
+    await checkWriteAccess(scope, transaction);
+    const [assignment, submission, recorded] = await Promise.all([
+      transaction.get(assignmentRef),
+      transaction.get(submissionRef),
+      transaction.get(revisionRef),
+    ]);
+    requireCurrentTeacher(scope);
+    if (!assignment.exists() || assignment.data().type !== 'assignment') {
+      throw new TeacherCourseError('作業不存在，或不是文字作業。');
+    }
+    const points = assignment.data().points;
+    if (typeof points !== 'number' || !Number.isFinite(points) || points <= 0 || score > points) {
+      throw new TeacherCourseError('新成績超過作業配分，或此作業沒有有效配分。');
+    }
+    if (!submission.exists() || submission.data().userId !== studentUid ||
+        !submission.data().submittedAt || submission.data().gradePublished !== true) {
+      throw new TeacherCourseError('尚未找到已發布的學生繳交成績。');
+    }
+    const row = submission.data();
+    if (recorded.exists()) {
+      const history = recorded.data();
+      if (history.changedBy === scope.uid && history.beforeScore === expected.score &&
+          history.afterScore === score && history.beforeFeedback === expected.feedback &&
+          history.afterFeedback === comment && history.reason === explanation &&
+          row.gradeRevisionId === revisionId && row.gradeScore === score &&
+          row.gradeFeedback === comment) return;
+      throw new TeacherCourseError('這次更正編號已有不同紀錄，請重新讀取成績。');
+    }
+    if (row.gradeScore !== expected.score ||
+        row.gradeFeedback !== expected.feedback ||
+        toIso(row.gradePublishedAt) !== expected.gradedAt) {
+      throw new TeacherCourseError('成績已被其他教師更新，請重新讀取後再更正。');
+    }
+    const nextVersion = (Number.isInteger(row.gradeRevisionCount) &&
+      row.gradeRevisionCount >= 0 ? row.gradeRevisionCount : 0) + 1;
+    transaction.update(submissionRef, {
+      gradeScore: score,
+      gradeFeedback: comment,
+      gradePublishedBy: scope.uid,
+      gradePublishedAt: serverTimestamp(),
+      gradeRevisionId: revisionId,
+      gradeRevisionCount: nextVersion,
+      gradeRevisedAt: serverTimestamp(),
+      gradeRevisionReason: explanation,
+    });
+    transaction.set(revisionRef, {
+      beforeScore: expected.score,
+      afterScore: score,
+      beforeFeedback: expected.feedback,
+      afterFeedback: comment,
+      reason: explanation,
+      changedBy: scope.uid,
+      changedAt: serverTimestamp(),
+      revision: nextVersion,
+    });
+  });
+  requireCurrentTeacher(scope);
+  const [confirmed, history] = await Promise.all([
+    getDocFromServer(submissionRef),
+    getDocFromServer(revisionRef),
+  ]);
+  if (!confirmed.exists() || !history.exists() ||
+      confirmed.data().gradeRevisionId !== revisionId ||
+      confirmed.data().gradeScore !== score ||
+      history.data().afterScore !== score ||
+      history.data().changedBy !== scope.uid) {
+    throw new TeacherCourseError('無法確認更正紀錄與最新成績一致，請重新讀取。');
+  }
+}
+
+export async function loadGradeRevisions(
+  scope: TeacherScope,
+  assignmentId: string,
+  studentUid: string,
+): Promise<GradeRevision[]> {
+  if (![assignmentId, studentUid].every(validId)) {
+    throw new TeacherCourseError('無效的作業或學生編號。');
+  }
+  await authorizeTeacherCourse(scope);
+  const db = getDb();
+  const revisions = await getDocsFromServer(collection(db, 'groups', scope.courseId,
+    'assignments', assignmentId, 'submissions', studentUid, 'gradeRevisions'));
+  await authorizeTeacherCourse(scope);
+  requireCurrentTeacher(scope);
+  return revisions.docs.map((entry) => {
+    const row = entry.data();
+    return {
+      id: entry.id,
+      beforeScore: typeof row.beforeScore === 'number' ? row.beforeScore : 0,
+      afterScore: typeof row.afterScore === 'number' ? row.afterScore : 0,
+      beforeFeedback: typeof row.beforeFeedback === 'string' ? row.beforeFeedback : '',
+      afterFeedback: typeof row.afterFeedback === 'string' ? row.afterFeedback : '',
+      reason: typeof row.reason === 'string' ? row.reason : '',
+      changedBy: typeof row.changedBy === 'string' ? row.changedBy : '',
+      changedAt: toIso(row.changedAt),
+    };
+  }).sort((a, b) => (b.changedAt ?? '').localeCompare(a.changedAt ?? ''));
 }
