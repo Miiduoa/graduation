@@ -1,144 +1,53 @@
-# Maestro E2E 測試
+# iOS 端到端測試
 
-本專案使用 [Maestro](https://maestro.mobile.dev/) 進行端到端測試。
+Maestro 從 iOS Simulator 操作實際安裝的 App。它與 Jest、TypeScript 檢查是不同的驗證層級；單元測試通過，不代表原生 App 已能啟動。
 
-## 安裝 Maestro
+## CI 如何執行
+
+工作流程：[`maestro-e2e.yml`](../../../.github/workflows/maestro-e2e.yml)
+
+1. 在 macOS runner 啟動可用的 iPhone Simulator。
+2. 使用版本庫既有的 `ios/` 原生專案執行 `pod install` 與 Debug simulator build；不以 `expo prebuild --clean` 覆蓋既有原生設定。
+3. 安裝編譯出的 `.app`，從 `Info.plist` 取得 **實際 bundle identifier**，避免腳本和安裝版本不一致。
+4. 啟動 Metro，確認 `/status` 正常，再請求 iOS JavaScript bundle，避免冷編譯與第一個 UI 斷言競速。
+5. 以指定的 simulator UDID 執行 Maestro，保留 JUnit 結果、除錯記錄與截圖。任何流程失敗，都應讓 E2E job 失敗。
+
+### 自動執行的 smoke flows
+
+- `01_onboarding.yaml`：App 冷啟動與主要 Tab 是否出現。
+- `11_navigation_ai_first.yaml`：主頁、頭像抽屜及 AI-First 導航殼層。
+
+預設 PR／每週排程只跑這兩支。其餘 `flows/` 保留為手動 `full` 回歸測試，**不能**因 smoke 通過，就宣稱登入、公告或所有校務流程都通過實機驗收。
+
+GitHub Actions 的 `workflow_dispatch` 提供 `smoke`、`full`、`onboarding`、`authentication`、`announcements`。實際執行結果以該次 workflow run 與 artifact 為準。
+
+## 本機重現
+
+需要 macOS、Xcode、iOS Simulator、Node 22、pnpm 10、CocoaPods 與 Maestro。從專案根目錄執行：
 
 ```bash
-# macOS / Linux
-curl -Ls "https://get.maestro.mobile.dev" | bash
-
-# 或使用 Homebrew
-brew tap mobile-dev-inc/tap
-brew install maestro
-```
-
-## 執行測試
-
-### 執行所有測試
-
-```bash
+pnpm install --frozen-lockfile
 cd apps/mobile
-maestro test .maestro/flows/
+pod install --project-directory=ios
+# 以 Xcode 開啟 ios/mobile.xcworkspace，建置並安裝 Debug App
+pnpm exec expo start --localhost --port 8081
 ```
 
-### 執行單一測試
+在另一個終端機，確認模擬器有已安裝的 App，並以實際 Bundle ID 執行：
 
 ```bash
-maestro test .maestro/flows/01_onboarding.yaml
+xcrun simctl list devices booted
+maestro --device "<SIMULATOR_UDID>" test .maestro/flows/01_onboarding.yaml --env APP_ID="<INSTALLED_BUNDLE_ID>"
+maestro --device "<SIMULATOR_UDID>" test .maestro/flows/11_navigation_ai_first.yaml --env APP_ID="<INSTALLED_BUNDLE_ID>"
 ```
 
-### 執行特定標籤的測試
+腳本中的 `APP_ID` 必須與模擬器上安裝的版本一致；不能只看 `app.config.ts` 的預設值。請勿對需要 Metro 的 Debug App 隨意使用 `clearState`，否則可能清掉原本已建立的 JS 連線狀態。
 
-```bash
-# 執行 smoke 測試
-maestro test --tags smoke .maestro/flows/
+## 測試邊界
 
-# 執行 auth 相關測試
-maestro test --tags auth .maestro/flows/
-```
+- Smoke **不會**用真實學校帳號登入，也不驗證學校 SSO、成績正確性或正式後端授權。
+- 編譯／Metro 失敗和 UI 元素缺失必須分開看，不以空白截圖或測試 skipped 代替成功。
+- 某些流程包含 `optional: true`，代表那個步驟沒有嚴格斷言；不能把這些可選檢查計入已驗收功能。
+- 若要對外宣稱實機完整可用，必須另附對應的成功 workflow、截圖與有效的測試環境紀錄。
 
-### 在特定裝置上執行
-
-```bash
-# iOS 模擬器
-maestro test --device ios .maestro/flows/
-
-# Android 模擬器
-maestro test --device android .maestro/flows/
-
-# 指定特定裝置
-maestro test --device "iPhone 15 Pro" .maestro/flows/
-```
-
-## 測試流程
-
-| 檔案                        | 說明             | 標籤                    |
-| --------------------------- | ---------------- | ----------------------- |
-| `01_onboarding.yaml`        | 首次使用引導流程 | smoke, onboarding       |
-| `02_authentication.yaml`    | 登入註冊流程     | smoke, auth             |
-| `03_announcements.yaml`     | 公告列表與詳情   | smoke, announcements    |
-| `04_events.yaml`            | 活動列表與報名   | smoke, events           |
-| `05_map.yaml`               | 地圖與 POI       | smoke, map              |
-| `06_cafeteria.yaml`         | 餐廳菜單         | smoke, cafeteria        |
-| `07_me_features.yaml`       | 我的頁面功能     | smoke, me               |
-| `08_settings.yaml`          | 設定功能         | smoke, settings         |
-| `09_messages.yaml`          | 訊息與群組       | smoke, messages, groups |
-| `10_full_user_journey.yaml` | 完整使用者流程   | regression, journey     |
-
-## 測試環境變數
-
-在 `.maestro/config.yaml` 中設定：
-
-```yaml
-env:
-  TEST_EMAIL: test@example.com
-  TEST_PASSWORD: testpassword123
-  SCHOOL_CODE: NCHU
-```
-
-## 截圖輸出
-
-測試截圖會儲存在 `.maestro/screenshots/` 目錄中。
-
-## CI/CD 整合
-
-### GitHub Actions
-
-```yaml
-- name: Run Maestro Tests
-  uses: mobile-dev-inc/action-maestro@v1
-  with:
-    app-file: app.apk
-    flow: .maestro/flows/
-```
-
-### 產生測試報告
-
-```bash
-maestro test --format junit --output test-results.xml .maestro/flows/
-```
-
-## 除錯技巧
-
-### 使用 Maestro Studio
-
-```bash
-maestro studio
-```
-
-這會開啟互動式介面，可以：
-
-- 即時預覽畫面元素
-- 測試單一指令
-- 產生測試腳本
-
-### 增加日誌輸出
-
-```bash
-maestro test --debug .maestro/flows/01_onboarding.yaml
-```
-
-### 錄製測試
-
-```bash
-maestro record .maestro/flows/new_test.yaml
-```
-
-## 常見問題
-
-### 元素找不到
-
-1. 確認元素有正確的 `accessibilityLabel` 或 `testID`
-2. 使用 `maestro studio` 檢查元素結構
-3. 增加 `timeout` 等待時間
-
-### 測試不穩定
-
-1. 使用 `extendedWaitUntil` 取代固定等待
-2. 增加重試次數 (`retry.maxAttempts`)
-3. 確保測試資料的一致性
-
-### 截圖失敗
-
-確認 `.maestro/screenshots/` 目錄存在且有寫入權限。
+失敗時先查看 GitHub Actions 的 `maestro-results-ios` artifact、Metro log 和該支 flow 的 JUnit XML。iOS 原生編譯錯誤應先排除，再調整 UI 等待條件；不要只為了讓測試變綠而跳過斷言。
