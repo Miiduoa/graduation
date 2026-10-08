@@ -330,13 +330,7 @@ service cloud.firestore {
               registrationId == request.auth.uid
               || resource.data.userId == request.auth.uid
             ));
-          allow create: if isSignedIn()
-            && registrationId == request.auth.uid
-            && request.resource.data.userId == request.auth.uid;
-          allow update: if false;
-          allow delete: if isSignedIn()
-            && registrationId == request.auth.uid
-            && resource.data.userId == request.auth.uid;
+          allow create, update, delete: if false;
         }
 
         match /reviews/{reviewId} {
@@ -352,6 +346,10 @@ service cloud.firestore {
       match /clubEvents/{docId} {
         allow read: if true;
         allow create, update, delete: if false;
+        match /registrations/{uid} {
+          allow read: if hasEditorRole(schoolId) || (isSchoolMember(schoolId) && isSelf(uid));
+          allow create, update, delete: if false;
+        }
       }
 
       match /menus/{docId} {
@@ -776,6 +774,8 @@ service cloud.firestore {
         && request.resource.data.balance == resource.data.balance
         && request.resource.data.schoolId == resource.data.schoolId
         && request.resource.data.primarySchoolId == resource.data.primarySchoolId
+        && request.resource.data.get('notificationDeliveryDisabled', false) == resource.data.get('notificationDeliveryDisabled', false)
+        && request.resource.data.get('accountDeletionInProgress', false) == resource.data.get('accountDeletionInProgress', false)
         && request.resource.data.createdAt == resource.data.createdAt;
       allow delete: if false;
 

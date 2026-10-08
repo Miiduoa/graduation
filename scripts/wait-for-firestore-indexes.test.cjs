@@ -5,7 +5,12 @@ const path = require('node:path');
 const http = require('node:http');
 const { spawnSync } = require('node:child_process');
 const { test } = require('node:test');
-const { indexKey, loadDeployment, waitForIndexes } = require('./wait-for-firestore-indexes.cjs');
+const {
+  indexKey,
+  fieldRequirements,
+  loadDeployment,
+  waitForIndexes,
+} = require('./wait-for-firestore-indexes.cjs');
 
 const project = 'campus-index-test';
 const spec = {
@@ -261,7 +266,7 @@ test('reads the same database and index file as Firebase deploy', () => {
   for (const index of actual.indexes) assert.ok(indexKey(index, index.collectionGroup, true));
 });
 
-test('rejects unsupported multiple databases or field overrides instead of silently skipping them', (t) => {
+test('rejects unsupported multiple databases and malformed field overrides', (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'campus-index-gate-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const configPath = path.join(directory, 'firebase.json');
@@ -272,7 +277,10 @@ test('rejects unsupported multiple databases or field overrides instead of silen
     path.join(directory, 'indexes.json'),
     JSON.stringify({ indexes: [spec], fieldOverrides: [{}] }),
   );
-  assert.throws(() => loadDeployment(configPath), /without field overrides/);
+  assert.throws(
+    () => loadDeployment(configPath),
+    /Invalid or unsupported Firestore field override/,
+  );
 });
 
 test('CLI exits nonzero on missing credentials without leaking environment values', () => {
@@ -289,4 +297,281 @@ test('CLI exits nonzero on missing credentials without leaking environment value
   );
   assert.equal(result.status, 1);
   assert.match(result.stderr, /FIREBASE_TOKEN.*required/);
+});
+
+const override = {
+  collectionGroup: 'registrations',
+  fieldPath: 'userId',
+  indexes: [
+    { queryScope: 'COLLECTION', order: 'ASCENDING' },
+    { queryScope: 'COLLECTION', order: 'DESCENDING' },
+    { queryScope: 'COLLECTION', arrayConfig: 'CONTAINS' },
+    { queryScope: 'COLLECTION_GROUP', order: 'ASCENDING' },
+  ],
+};
+const fieldParent = `projects/${project}/databases/(default)/collectionGroups/`;
+const fieldName = `${fieldParent}registrations/fields/userId`;
+function remoteField(state = 'READY', config = {}, name = fieldName) {
+  return {
+    name,
+    indexConfig: {
+      indexes: override.indexes.map((index) => ({
+        queryScope: index.queryScope,
+        fields: [{ fieldPath: 'userId', order: index.order, arrayConfig: index.arrayConfig }],
+        state,
+      })),
+      ...config,
+    },
+  };
+}
+function fieldFixture(respond) {
+  const f = fixture([]);
+  const exchange = f.options.fetchImpl;
+  const requests = [];
+  f.options.fieldOverrides = [override];
+  f.options.timeoutMs = 80;
+  f.options.fetchImpl = async (url, options) => {
+    const request = { url: new URL(url), options };
+    if (request.url.hostname === 'oauth2.googleapis.com') return exchange(url, options);
+    assert.equal(request.url.hostname, 'firestore.googleapis.com');
+    assert.equal(options.headers.Authorization, 'Bearer private-access-token');
+    assert.equal(options.redirect, 'error');
+    if (request.url.pathname.endsWith('/indexes')) return reply({ indexes: [remote()] });
+    requests.push(request);
+    return respond(request, requests.length);
+  };
+  return { ...f, fieldRequests: requests };
+}
+
+test('requires all four declared registration single-field indexes, including collection-group scope', async () => {
+  const f = fieldFixture((request) => {
+    assert.equal(request.url.pathname, `/v1/${fieldParent}-/fields`);
+    assert.equal(
+      request.url.searchParams.get('filter'),
+      'indexConfig.usesAncestorConfig=false OR ttlConfig:*',
+    );
+    return reply({ fields: [remoteField()] });
+  });
+  await waitForIndexes(f.options);
+  assert.equal(f.fieldRequests.length, 1);
+  assert.match(f.logs.at(-1), /1 required indexes and 1 field configurations/);
+  assert.doesNotMatch(f.logs.join(' '), /private-/);
+});
+
+test('supports field-only deployments and protobuf-omitted single-field paths without appending __name__', async () => {
+  const field = remoteField();
+  field.indexConfig.indexes.forEach((index) => {
+    delete index.fields[0].fieldPath;
+  });
+  const f = fieldFixture(() => reply({ fields: [field] }));
+  f.options.indexes = [];
+  await waitForIndexes(f.options);
+  assert.match(f.logs.at(-1), /0 required indexes and 1 field configurations/);
+});
+
+test('consumes every field page before checking a required field', async () => {
+  const f = fieldFixture((request) =>
+    request.url.searchParams.get('pageToken') === 'fields-next'
+      ? reply({ fields: [remoteField()] })
+      : reply({ fields: [], nextPageToken: 'fields-next' }),
+  );
+  await waitForIndexes(f.options);
+  assert.equal(f.fieldRequests.length, 2);
+});
+
+test('field readiness polls missing shapes and creating state without treating composite READY as sufficient', async () => {
+  const f = fieldFixture((_request, count) => {
+    const field = remoteField(count === 2 ? 'CREATING' : 'READY');
+    if (count === 1) field.indexConfig.indexes.pop();
+    return reply({ fields: [field] });
+  });
+  await waitForIndexes(f.options);
+  assert.equal(f.fieldRequests.length, 3);
+  assert.match(f.logs[0], /MISSING.*registrations.userId.*COLLECTION_GROUP/);
+  assert.match(f.logs[1], /CREATING/);
+});
+
+for (const state of ['CREATING', 'NEEDS_REPAIR', 'STATE_UNSPECIFIED', 'ERROR', undefined]) {
+  test(`a required single-field index in ${state} cannot pass`, async () => {
+    const field = remoteField();
+    field.indexConfig.indexes[3].state = state;
+    const f = fieldFixture(() => reply({ fields: [field] }));
+    await assert.rejects(
+      waitForIndexes(f.options),
+      state === 'CREATING' ? /timed out.*CREATING/ : /Required Firestore field index is/,
+    );
+    assert.doesNotMatch(f.logs.join(' '), /indexes READY/);
+  });
+}
+
+test('an absent collection-group index cannot be replaced by an unrelated or differently configured READY index', async () => {
+  for (const patch of [
+    { queryScope: 'COLLECTION' },
+    { apiScope: 'MONGODB_COMPATIBLE_API' },
+    { density: 'DENSE' },
+    { multikey: true },
+    { unique: true },
+  ]) {
+    const field = remoteField();
+    if (patch.queryScope) field.indexConfig.indexes = field.indexConfig.indexes.slice(0, 3);
+    else Object.assign(field.indexConfig.indexes[3], patch);
+    const f = fieldFixture(() => reply({ fields: [field] }));
+    await assert.rejects(waitForIndexes(f.options), /timed out.*MISSING/);
+  }
+});
+
+test('inherited fields omitted by listing resolve their ancestor configuration through authenticated GETs', async () => {
+  const ancestor = `${fieldParent}__default__/fields/*`;
+  const f = fieldFixture((request) => {
+    if (request.url.pathname.endsWith('/-/fields')) return reply({});
+    if (request.url.pathname.endsWith('/registrations/fields/userId'))
+      return reply(
+        remoteField('READY', { indexes: [], usesAncestorConfig: true, ancestorField: ancestor }),
+      );
+    assert.equal(request.url.pathname, `/v1/${ancestor}`);
+    const field = remoteField('READY', {}, ancestor);
+    field.indexConfig.indexes.forEach((index) => {
+      index.fields[0].fieldPath = '*';
+    });
+    return reply(field);
+  });
+  await waitForIndexes(f.options);
+  assert.equal(f.fieldRequests.length, 3);
+});
+
+test('a field own CREATING or reverting state cannot be hidden by READY inherited defaults', async () => {
+  for (const config of [
+    { usesAncestorConfig: true, ancestorField: `${fieldParent}__default__/fields/*` },
+    { reverting: true },
+  ]) {
+    const f = fieldFixture(() => reply({ fields: [remoteField('CREATING', config)] }));
+    await assert.rejects(waitForIndexes(f.options), /timed out.*(CREATING|REVERTING)/);
+    assert.ok(f.fieldRequests.every((request) => request.url.pathname.endsWith('/-/fields')));
+  }
+});
+
+test('explicit empty indexes are verified as disabled, never silently skipped', async () => {
+  const f = fieldFixture(() => reply({ fields: [remoteField('READY', { indexes: [] })] }));
+  f.options.fieldOverrides = [{ ...override, indexes: [] }];
+  await waitForIndexes(f.options);
+  for (const config of [
+    undefined,
+    { indexes: [], usesAncestorConfig: true, ancestorField: `${fieldParent}__default__/fields/*` },
+  ]) {
+    const invalid = fieldFixture(() => reply({ fields: [remoteField('READY', config)] }));
+    invalid.options.fieldOverrides = [{ ...override, indexes: [] }];
+    await assert.rejects(waitForIndexes(invalid.options), /timed out.*MISSING.*disabled override/);
+  }
+});
+
+test('no indexes on a required field cannot pass its nonempty declaration', async () => {
+  for (const config of [{ indexes: [] }, {}]) {
+    const f = fieldFixture(() => reply({ fields: [{ name: fieldName, indexConfig: config }] }));
+    await assert.rejects(waitForIndexes(f.options), /timed out.*MISSING/);
+  }
+});
+
+test('field inheritance cannot cross database boundaries or contain cycles', async () => {
+  for (const ancestorField of [
+    fieldName,
+    'projects/other-project/databases/(default)/collectionGroups/registrations/fields/userId',
+  ]) {
+    const f = fieldFixture(() =>
+      reply({
+        fields: [remoteField('READY', { indexes: [], usesAncestorConfig: true, ancestorField })],
+      }),
+    );
+    await assert.rejects(
+      waitForIndexes(f.options),
+      /inheritance chain|outside the requested project/,
+    );
+    assert.equal(f.fieldRequests.length, 1);
+  }
+});
+
+test('malformed field metadata and pagination fail closed', async () => {
+  for (const body of [
+    { fields: {} },
+    { fields: [null] },
+    { fields: [{ name: fieldName }] },
+    { fields: [remoteField(), remoteField()] },
+    { fields: [remoteField('READY', { indexes: {} })] },
+    { fields: [remoteField('READY', { usesAncestorConfig: 'false' })] },
+    { fields: [remoteField('READY', { indexes: [], usesAncestorConfig: true })] },
+    {
+      fields: [
+        remoteField('READY', {
+          indexes: [
+            {
+              queryScope: 'COLLECTION',
+              fields: [{ fieldPath: 'other', order: 'ASCENDING' }],
+              state: 'READY',
+            },
+          ],
+        }),
+      ],
+    },
+    { fields: [], nextPageToken: 'repeated' },
+    { fields: [], nextPageToken: 7 },
+  ]) {
+    const f = fieldFixture(() => reply(body));
+    await assert.rejects(
+      waitForIndexes(f.options),
+      /invalid|Invalid|duplicate|inheritance|pagination|outside/,
+    );
+  }
+});
+
+for (const status of [401, 403, 404, 429, 500, 503]) {
+  test(`field listing and inherited lookup HTTP ${status} block release without exposing response bodies`, async () => {
+    for (const lookup of [false, true]) {
+      const f = fieldFixture((request) =>
+        lookup && request.url.pathname.endsWith('/-/fields')
+          ? reply({})
+          : reply({ error: 'private-response' }, status),
+      );
+      await assert.rejects(waitForIndexes(f.options), (error) => {
+        assert.match(
+          error.message,
+          new RegExp(`Firestore field ${lookup ? 'lookup' : 'listing'} returned HTTP ${status}`),
+        );
+        assert.doesNotMatch(error.message, /private-/);
+        return true;
+      });
+    }
+  });
+}
+
+test('invalid checked-in overrides fail before network access', async () => {
+  for (const fieldOverrides of [
+    {},
+    [{}],
+    [{ ...override, indexes: undefined }],
+    [{ ...override, ttl: true }],
+    [
+      {
+        ...override,
+        indexes: [{ order: 'ASCENDING', arrayConfig: 'CONTAINS', queryScope: 'COLLECTION' }],
+      },
+    ],
+    [override, override],
+  ]) {
+    const f = fieldFixture(() => {
+      throw new Error('must not request');
+    });
+    await assert.rejects(waitForIndexes({ ...f.options, fieldOverrides }));
+    assert.equal(f.requests.length, 0);
+    assert.equal(f.fieldRequests.length, 0);
+  }
+});
+
+test('the deployed activity deletion override is loaded and validated rather than documentary only', () => {
+  const actual = loadDeployment(path.resolve(__dirname, '../firebase.json'));
+  assert.deepEqual(
+    actual.fieldOverrides.find(
+      (field) => field.collectionGroup === 'registrations' && field.fieldPath === 'userId',
+    ),
+    override,
+  );
+  assert.equal(fieldRequirements(actual.fieldOverrides)[0].keys.length, 4);
 });

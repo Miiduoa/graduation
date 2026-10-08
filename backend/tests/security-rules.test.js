@@ -1162,3 +1162,27 @@ describe('attendance transactions on Firestore', () => {
     assert.equal((await sessionDoc(session, 'liveSessions').get()).data().attendeeCount, 0);
   });
 });
+
+test('owners cannot clear notification/account deletion guards while normal profile updates still work', async () => {
+  const profile = { role: 'student', balance: 0, schoolId: 'pu', primarySchoolId: 'pu', createdAt: '2026-10-08', notificationDeliveryDisabled: true, accountDeletionInProgress: true, displayName: 'Alice' };
+  await seedFirestore(async (db) => db.doc('users/alice').set(profile));
+  const ref = testEnv.authenticatedContext('alice').firestore().doc('users/alice');
+  await assertSucceeds(ref.update({ displayName: 'Updated' }));
+  for (const field of ['notificationDeliveryDisabled', 'accountDeletionInProgress']) {
+    await assertFails(ref.update({ [field]: false }));
+    const replacement = { ...profile }; delete replacement[field];
+    await assertFails(ref.set(replacement));
+  }
+});
+
+test('push provider receipts are server-only even for the recipient', async () => {
+  for (const name of ['pendingPushReceipts', 'pushReceiptResults']) {
+    await seedFirestore(async (db) => db.collection(name).doc('one').set({ uid: 'alice' }));
+    for (const context of [testEnv.authenticatedContext('alice'), testEnv.authenticatedContext('bob'), testEnv.unauthenticatedContext()]) {
+      const ref = context.firestore().collection(name).doc('one');
+      await assertFails(ref.get());
+      await assertFails(ref.set({ uid: 'alice' }));
+      await assertFails(ref.delete());
+    }
+  }
+});
