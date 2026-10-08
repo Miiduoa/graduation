@@ -46,6 +46,27 @@ after(async () => {
 });
 
 describe('firestore security rules', () => {
+  test('feedback is private and can only be written by the server', async () => {
+    await seedFirestore(async (db) => {
+      await db
+        .collection('feedback')
+        .doc('receipt')
+        .set({ submittedBy: 'alice', title: 'Private' });
+    });
+    for (const context of [
+      testEnv.authenticatedContext('alice'),
+      testEnv.authenticatedContext('bob'),
+      testEnv.unauthenticatedContext(),
+    ]) {
+      const collection = context.firestore().collection('feedback');
+      await assertFails(collection.doc('receipt').get());
+      await assertFails(collection.get());
+      await assertFails(collection.doc('new').set({ submittedBy: 'alice' }));
+      await assertFails(collection.doc('receipt').update({ status: 'reviewed' }));
+      await assertFails(collection.doc('receipt').delete());
+    }
+  });
+
   test("deny reading another user's private profile", async () => {
     await seedFirestore(async (db) => {
       await db.collection('users').doc('alice').set({

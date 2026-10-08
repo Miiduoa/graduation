@@ -10,7 +10,7 @@ import EventScreen from '../screens/EventDetailAiFirstScreen';
 import {
   loadCampusAnnouncements,
   loadCampusAnnouncement,
-  loadCampusEvents,
+  loadCampusEventPage,
   loadCampusEvent,
 } from '../services/publicCampusContent';
 import { exportAndShareICalFile } from '../services/ical';
@@ -26,7 +26,7 @@ jest.mock('../state/school', () => ({ useSchool: () => ({ school: mockSchool }) 
 jest.mock('../services/publicCampusContent', () => ({
   loadCampusAnnouncements: jest.fn(),
   loadCampusAnnouncement: jest.fn(),
-  loadCampusEvents: jest.fn(),
+  loadCampusEventPage: jest.fn(),
   loadCampusEvent: jest.fn(),
 }));
 jest.mock('../services/ical', () => ({ exportAndShareICalFile: jest.fn() }));
@@ -48,6 +48,7 @@ const event = {
   startsAt: '2030-10-08T00:00:00Z',
   schoolId: 'pu',
   location: '大禮堂',
+  source: 'school-club-events' as const,
 };
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -64,7 +65,9 @@ beforeEach(() => {
   mockSchool = { id: 'pu' };
   jest.mocked(loadCampusAnnouncements).mockResolvedValue([announcement]);
   jest.mocked(loadCampusAnnouncement).mockResolvedValue(announcement);
-  jest.mocked(loadCampusEvents).mockResolvedValue([event]);
+  jest
+    .mocked(loadCampusEventPage)
+    .mockResolvedValue({ items: [event], source: event.source, nextCursor: null });
   jest.mocked(loadCampusEvent).mockResolvedValue(event);
   jest.mocked(exportAndShareICalFile).mockResolvedValue(undefined);
 });
@@ -139,17 +142,24 @@ test('real announcement attachments open and failures are visible', async () => 
 
 test('event date filters work and list navigation uses the actual event ID', async () => {
   jest
-    .mocked(loadCampusEvents)
-    .mockResolvedValue([
-      event,
-      { ...event, id: 'old', title: '已結束的活動', startsAt: '2020-01-01T00:00:00Z' },
-    ]);
+    .mocked(loadCampusEventPage)
+    .mockResolvedValue({
+      items: [
+        event,
+        { ...event, id: 'old', title: '已結束的活動', startsAt: '2020-01-01T00:00:00Z' },
+      ],
+      source: event.source,
+      nextCursor: null,
+    });
   const view = render(<EventsScreen navigation={navigation} />);
   await view.findByText('校方的新活動');
   fireEvent.press(view.getByText('未來活動'));
   expect(view.queryByText('已結束的活動')).toBeNull();
   fireEvent.press(view.getByText('校方的新活動'));
-  expect(safeNavigate).toHaveBeenCalledWith(navigation, '活動詳情', { id: 'e1' });
+  expect(safeNavigate).toHaveBeenCalledWith(navigation, '活動詳情', {
+    id: 'e1',
+    source: event.source,
+  });
   expect(view.queryByText(/黑客松|32\/50|AI 為你推薦|我報名的/)).toBeNull();
 });
 
@@ -165,7 +175,7 @@ test('event actions share real content and export valid calendar data without cl
   expect(exportAndShareICalFile).toHaveBeenCalledWith(
     [
       expect.objectContaining({
-        id: 'campus-event-pu-e1',
+        id: 'campus-event-pu-school-club-events-e1',
         title: '校方的新活動',
         startDate: new Date(event.startsAt),
         location: '大禮堂',
@@ -222,4 +232,102 @@ test('mounted read errors follow theme changes without reloading or remounting',
   expect(StyleSheet.flatten(view.getByText(errorText).props.style).color).toBe(aiTokens.danger);
   expect(loadCampusAnnouncements).toHaveBeenCalledTimes(1);
   act(() => applyTheme('light'));
+});
+
+const eventCursor = { schoolId: 'pu', source: event.source, document: {} as never };
+const eventPage = (items = [event], nextCursor: typeof eventCursor | null = null) => ({
+  items,
+  source: event.source,
+  nextCursor,
+});
+
+test('load more remains reachable with an empty filter and preserves the current page when it fails', async () => {
+  const undated = { ...event, id: 'undated', title: '待公布時間的活動', startsAt: '' };
+  jest
+    .mocked(loadCampusEventPage)
+    .mockResolvedValueOnce(eventPage([undated], eventCursor))
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockResolvedValueOnce(eventPage());
+  const view = render(<EventsScreen navigation={navigation} />);
+  await view.findByText('待公布時間的活動');
+  fireEvent.press(view.getByText('未來活動'));
+  expect(view.getByText('已載入的活動中沒有符合項目')).toBeTruthy();
+  await act(async () => fireEvent.press(view.getByText('載入更多活動')));
+  expect(view.getByText('無法載入更多活動，已載入的資料仍保留。')).toBeTruthy();
+  fireEvent.press(view.getByText('全部'));
+  expect(view.getByText('待公布時間的活動')).toBeTruthy();
+  await act(async () => fireEvent.press(view.getByText('重試載入')));
+  expect(loadCampusEventPage).toHaveBeenLastCalledWith('pu', eventCursor);
+  expect(view.getByText('校方的新活動')).toBeTruthy();
+  expect(view.getByText('待公布時間的活動')).toBeTruthy();
+  expect(view.queryByText('載入更多活動')).toBeNull();
+});
+
+test('refresh failures retain loaded activity data until an authoritative replacement succeeds', async () => {
+  jest
+    .mocked(loadCampusEventPage)
+    .mockResolvedValueOnce(eventPage())
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockResolvedValueOnce(eventPage([{ ...event, title: '更新後的活動' }]));
+  const view = render(<EventsScreen navigation={navigation} />);
+  await view.findByText('校方的新活動');
+  await act(async () => fireEvent.press(view.getByText('更新活動')));
+  expect(view.getByText('校方的新活動')).toBeTruthy();
+  expect(view.getByText('無法更新活動，請確認網路連線後重試。')).toBeTruthy();
+  await act(async () => fireEvent.press(view.getByText('重試載入')));
+  expect(view.getByText('更新後的活動')).toBeTruthy();
+  expect(view.queryByText('校方的新活動')).toBeNull();
+});
+
+test('switching school and account clears previous pages and ignores their in-flight next page', async () => {
+  const late = deferred<ReturnType<typeof eventPage>>();
+  jest
+    .mocked(loadCampusEventPage)
+    .mockResolvedValueOnce(eventPage([event], eventCursor))
+    .mockReturnValueOnce(late.promise)
+    .mockResolvedValueOnce(eventPage([{ ...event, schoolId: 'other', title: '新學校活動' }]));
+  const view = render(<EventsScreen navigation={navigation} />);
+  await view.findByText('校方的新活動');
+  fireEvent.press(view.getByText('載入更多活動'));
+  mockUid = 'student-b';
+  mockSchool = { id: 'other' };
+  view.rerender(<EventsScreen navigation={navigation} />);
+  expect(view.queryByText('校方的新活動')).toBeNull();
+  await view.findByText('新學校活動');
+  await act(async () => late.resolve(eventPage([{ ...event, title: '舊請求活動' }])));
+  expect(view.queryByText('舊請求活動')).toBeNull();
+  expect(loadCampusEventPage).toHaveBeenLastCalledWith('other', null);
+});
+
+test('a repeated load-more press starts only one request and duplicate document IDs do not duplicate rows', async () => {
+  const next = deferred<ReturnType<typeof eventPage>>();
+  jest
+    .mocked(loadCampusEventPage)
+    .mockResolvedValueOnce(eventPage([event], eventCursor))
+    .mockReturnValueOnce(next.promise);
+  const view = render(<EventsScreen navigation={navigation} />);
+  await view.findByText('校方的新活動');
+  const button = view.getByText('載入更多活動');
+  act(() => {
+    fireEvent.press(button);
+    fireEvent.press(button);
+  });
+  expect(loadCampusEventPage).toHaveBeenCalledTimes(2);
+  await act(async () =>
+    next.resolve(eventPage([event, { ...event, id: 'e2', title: '下一頁活動' }])),
+  );
+  expect(view.getAllByText('校方的新活動')).toHaveLength(1);
+  expect(view.getByText('下一頁活動')).toBeTruthy();
+});
+
+test('changing detail source clears same-ID content synchronously and sends the explicit source', async () => {
+  const view = render(
+    <EventScreen route={{ params: { id: 'e1', source: 'school-club-events' } }} />,
+  );
+  await view.findByText('校方的新活動');
+  jest.mocked(loadCampusEvent).mockResolvedValueOnce(null);
+  view.rerender(<EventScreen route={{ params: { id: 'e1', source: 'legacy-events' } }} />);
+  expect(view.queryByText('校方的新活動')).toBeNull();
+  await view.findByText('找不到這場活動，可能已移除或不屬於目前學校。');
+  expect(loadCampusEvent).toHaveBeenLastCalledWith('pu', 'e1', 'legacy-events');
 });

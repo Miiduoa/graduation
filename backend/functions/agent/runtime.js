@@ -7,7 +7,7 @@ const {
   fetchAssistantUserProfile,
   fetchAssistantDailyBrief,
 } = require('../lib/assistantFetchers');
-const { getLastUserMessage, isDormRepairStatusQueryMessage } = require('../lib/assistantFormat');
+const { getLastUserMessage, normalizeAssistantText, isDormRepairStatusQueryMessage } = require('../lib/assistantFormat');
 const { writeReviewAiSuggestionQueueItem } = require('../lib/assistantQueue');
 const { classifyIntent } = require('./classifyIntent');
 const { evaluateAnswer } = require('./evaluateAnswer');
@@ -135,8 +135,8 @@ async function runCampusAssistantWithAgentRuntime(request) {
     context.sessionId = sessionId;
   }
   const timeZone = context.timezone || 'Asia/Taipei';
-  const lastUserMessage = getLastUserMessage(rawMessages);
-  const rawLastUserMessage = getLastUserMessage(incomingMessages);
+  const lastUserMessage = normalizeAssistantText(getLastUserMessage(rawMessages));
+  const rawLastUserMessage = normalizeAssistantText(getLastUserMessage(incomingMessages));
   if (isPromptInjectionAttempt(rawLastUserMessage)) {
     return buildSafetyEnvelope({
       runId,
@@ -217,7 +217,7 @@ async function runCampusAssistantWithAgentRuntime(request) {
       .catch((e) => console.warn('[agentRuns] init failed:', e?.message || e));
   }
 
-  let prefetched = {};
+  let prefetched = { scope: { uid, schoolId } };
   if (uid && schoolId) {
     const toolCtx = {
       uid,
@@ -229,16 +229,19 @@ async function runCampusAssistantWithAgentRuntime(request) {
     try {
       const t0 = Date.now();
       const todaySchedule = await runTool('getTodaySchedule', toolCtx, {});
+      prefetched.todaySchedule = todaySchedule;
       await recordStep('getTodaySchedule', {}, todaySchedule, Date.now() - t0);
 
       const t1 = Date.now();
       const assignments = await runTool('getAssignments', toolCtx, {
         preferredGroupId: context.groupId,
       });
+      prefetched.assignments = assignments;
       await recordStep('getAssignments', { groupId: context.groupId }, { count: assignments.length }, Date.now() - t1);
 
       const t2 = Date.now();
       const announcements = await runTool('getAnnouncements', toolCtx, { schoolId });
+      prefetched.announcements = announcements;
       await recordStep('getAnnouncements', { schoolId }, { count: announcements.length }, Date.now() - t2);
 
       const t3 = Date.now();
@@ -246,10 +249,10 @@ async function runCampusAssistantWithAgentRuntime(request) {
       await recordStep('getPrioritySummary', {}, prioritySummary, Date.now() - t3);
 
       const t4 = Date.now();
-      const dailyBrief = await fetchAssistantDailyBrief(uid);
+      const dailyBrief = await fetchAssistantDailyBrief(uid, schoolId);
       await recordStep('fetchAssistantDailyBrief', {}, { hasBrief: Boolean(dailyBrief?.summary) }, Date.now() - t4);
 
-      prefetched = { todaySchedule, assignments, announcements, dailyBrief, prioritySummary };
+      prefetched = { scope: { uid, schoolId }, todaySchedule, assignments, announcements, dailyBrief, prioritySummary };
     } catch (e) {
       await recordStep('prefetch_error', {}, { error: String(e?.message || e) }, 0);
     }
@@ -308,20 +311,6 @@ async function runCampusAssistantWithAgentRuntime(request) {
         }
       }
     }
-  }
-
-  // 後備：當 prefetch 失敗或在未登入/未綁定學校（demo/guest）狀態下，
-  // 改用 client 端 context 攜帶的資料作為 prefetched 來源。
-  // 行動端 buildLiveAIContext / demo 種子層會把 pendingAssignments、announcements
-  // 等欄位填好；這裡負責讓 backend agent 在沒有 Firestore 真實資料時也能看到。
-  const ctxArr = (v) => (Array.isArray(v) ? v : null);
-  if (!ctxArr(prefetched.assignments)) {
-    const fromCtx = ctxArr(context.pendingAssignments);
-    if (fromCtx) prefetched.assignments = fromCtx;
-  }
-  if (!ctxArr(prefetched.announcements)) {
-    const fromCtx = ctxArr(context.announcements);
-    if (fromCtx) prefetched.announcements = fromCtx;
   }
 
   const requestForCore = {

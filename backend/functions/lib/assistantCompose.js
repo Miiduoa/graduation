@@ -33,7 +33,7 @@ function buildAuthorizedAssistantContext({
   events = [],
   menus = [],
   pois = [],
-  pendingAssignments = [],
+  pendingAssignments = null,
   weeklyReport = null,
   todaySchedule = null,
   dailyBrief = null,
@@ -47,15 +47,20 @@ function buildAuthorizedAssistantContext({
     events: compactAssistantItems(events, ['title', 'location', 'startsAt'], 5),
     menus: compactAssistantItems(menus, ['name', 'title', 'price', 'cafeteria'], 6),
     pois: compactAssistantItems(pois, ['name', 'category', 'description', 'openingHours'], 8),
-    pendingAssignments: compactAssistantItems(
-      pendingAssignments,
-      ['title', 'groupId', 'groupName', 'dueAt'],
-      6,
-    ),
+    pendingAssignments: Array.isArray(pendingAssignments)
+      ? compactAssistantItems(pendingAssignments, ['title', 'groupId', 'groupName', 'dueAt'], 6)
+      : null,
+    pendingAssignmentsStatus: Array.isArray(pendingAssignments) ? 'available' : 'unavailable',
+    ...(!Array.isArray(pendingAssignments) && {
+      pendingAssignmentsNote: '尚未取得本人待繳作業資料，不能據此判定沒有作業。',
+    }),
     weeklyReport: weeklyReport?.summary ? { summary: weeklyReport.summary } : null,
   };
 
-  if (todaySchedule && Array.isArray(todaySchedule.slots)) {
+  if (todaySchedule?.status === 'unavailable') {
+    base.todayScheduleStatus = 'unavailable';
+    base.todayScheduleNote = todaySchedule.message;
+  } else if (todaySchedule && Array.isArray(todaySchedule.slots)) {
     base.todaySchedule = todaySchedule.slots.slice(0, 12).map((s) => ({
       name: s.name,
       startTime: s.startTime,

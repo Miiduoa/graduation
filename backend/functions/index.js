@@ -28,8 +28,10 @@ const { createNotificationService } = require('./lib/notificationService');
 const { createLiveSessionHandlers } = require('./attendanceSessions');
 const { createGroupMembershipHandlers } = require('./groupMembership');
 const { createOrderHandler } = require('./createOrder');
+const { createSubmitProductFeedback } = require('./productFeedback');
 const { readRealtimeBusCache } = require('./busArrivals');
 const { createPuCampusDataHandler, createGetMyAcademicRecords } = require('./academicRecords');
+const { createCalendarSubscriptionHandler } = require('./calendarSubscription');
 const {
   decryptSecretConfig,
   encryptSecretConfig,
@@ -1388,7 +1390,10 @@ exports.getStudentRiskSnapshots = onCall(
       };
     }
 
-    const pendingAssignments = await fetchAssistantPendingAssignments(uid);
+    if (!schoolId) {
+      throw new HttpsError('failed-precondition', '請先選擇學校，再查詢課務摘要。');
+    }
+    const pendingAssignments = await fetchAssistantPendingAssignments(uid, schoolId);
     const highPressure = pendingAssignments.filter((assignment) => {
       const due = toJsDate(assignment.dueAt)?.getTime();
       return due && due - Date.now() <= 72 * 60 * 60 * 1000;
@@ -1749,222 +1754,12 @@ exports.assignmentDueReminder = onSchedule(
 // iCal 訂閱 API
 // =====================================================
 
-function formatICalDate(date, allDay = false) {
-  const d = date instanceof Date ? date : date.toDate();
-  if (allDay) {
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}${month}${day}`;
-  }
-  return d
-    .toISOString()
-    .replace(/[-:]/g, '')
-    .replace(/\.\d{3}/, '');
-}
-
-function escapeICalText(text) {
-  if (!text) return '';
-  return text
-    .replace(/\\/g, '\\\\')
-    .replace(/;/g, '\\;')
-    .replace(/,/g, '\\,')
-    .replace(/\n/g, '\\n');
-}
-
-function generateICalFeed(events, calendarName = '校園行事曆') {
-  let ical = [
-    'BEGIN:VCALENDAR',
-    'VERSION:2.0',
-    'PRODID:-//Campus App//TW',
-    'CALSCALE:GREGORIAN',
-    'METHOD:PUBLISH',
-    `X-WR-CALNAME:${escapeICalText(calendarName)}`,
-    'X-WR-TIMEZONE:Asia/Taipei',
-    '',
-    'BEGIN:VTIMEZONE',
-    'TZID:Asia/Taipei',
-    'BEGIN:STANDARD',
-    'DTSTART:19700101T000000',
-    'TZOFFSETFROM:+0800',
-    'TZOFFSETTO:+0800',
-    'END:STANDARD',
-    'END:VTIMEZONE',
-  ];
-
-  for (const event of events) {
-    const uid = `${event.id}@campus-app.tw`;
-    const dtstamp = formatICalDate(new Date());
-
-    ical.push('BEGIN:VEVENT');
-    ical.push(`UID:${uid}`);
-    ical.push(`DTSTAMP:${dtstamp}`);
-
-    if (event.allDay) {
-      ical.push(`DTSTART;VALUE=DATE:${formatICalDate(event.startsAt, true)}`);
-      if (event.endsAt) {
-        ical.push(`DTEND;VALUE=DATE:${formatICalDate(event.endsAt, true)}`);
-      }
-    } else {
-      ical.push(`DTSTART;TZID=Asia/Taipei:${formatICalDate(event.startsAt)}`);
-      if (event.endsAt) {
-        ical.push(`DTEND;TZID=Asia/Taipei:${formatICalDate(event.endsAt)}`);
-      }
-    }
-
-    ical.push(`SUMMARY:${escapeICalText(event.title)}`);
-
-    if (event.description) {
-      ical.push(`DESCRIPTION:${escapeICalText(event.description)}`);
-    }
-    if (event.location) {
-      ical.push(`LOCATION:${escapeICalText(event.location)}`);
-    }
-    if (event.url) {
-      ical.push(`URL:${event.url}`);
-    }
-    if (event.categories && event.categories.length > 0) {
-      ical.push(`CATEGORIES:${event.categories.map(escapeICalText).join(',')}`);
-    }
-
-    ical.push('END:VEVENT');
-  }
-
-  ical.push('END:VCALENDAR');
-  return ical.join('\r\n');
-}
-
 exports.calendarSubscribe = onRequest(
   {
     region: REGION,
     cors: true,
   },
-  async (req, res) => {
-    const { schoolId, userId, type } = req.query;
-
-    if (!schoolId) {
-      res.status(400).send('Missing schoolId parameter');
-      return;
-    }
-
-    try {
-      const events = [];
-
-      const schoolDoc = await db.collection('schools').doc(schoolId).get();
-      const schoolName = schoolDoc.data()?.name || schoolId;
-
-      if (!type || type === 'all' || type === 'events') {
-        const eventsSnap = await db
-          .collection('schools')
-          .doc(schoolId)
-          .collection('clubEvents')
-          .orderBy('startsAt', 'desc')
-          .limit(100)
-          .get();
-
-        for (const doc of eventsSnap.docs) {
-          const data = doc.data();
-          events.push({
-            id: `event-${doc.id}`,
-            title: data.title || '(無標題)',
-            description: data.description,
-            location: data.location,
-            startsAt: data.startsAt?.toDate() || new Date(),
-            endsAt: data.endsAt?.toDate(),
-            categories: ['活動'],
-            url: data.link,
-          });
-        }
-      }
-
-      if (userId && (!type || type === 'all' || type === 'assignments')) {
-        const userGroupsSnap = await db
-          .collection('users')
-          .doc(userId)
-          .collection('groups')
-          .where('schoolId', '==', schoolId)
-          .where('status', '==', 'active')
-          .get();
-
-        for (const groupRef of userGroupsSnap.docs) {
-          const groupId = groupRef.data().groupId;
-          if (!groupId) continue;
-
-          const groupDoc = await db.collection('groups').doc(groupId).get();
-          const groupName = groupDoc.data()?.name || '課程';
-
-          const assignmentsSnap = await db
-            .collection('groups')
-            .doc(groupId)
-            .collection('assignments')
-            .orderBy('dueAt', 'desc')
-            .limit(50)
-            .get();
-
-          for (const doc of assignmentsSnap.docs) {
-            const data = doc.data();
-            if (!data.dueAt) continue;
-
-            events.push({
-              id: `assignment-${groupId}-${doc.id}`,
-              title: `[作業] ${data.title || '(無標題)'} - ${groupName}`,
-              description: data.description,
-              startsAt: data.dueAt.toDate(),
-              allDay: true,
-              categories: ['作業', groupName],
-            });
-          }
-        }
-      }
-
-      if (userId && (!type || type === 'all' || type === 'registered')) {
-        const registrationsSnap = await db
-          .collection('schools')
-          .doc(schoolId)
-          .collection('registrations')
-          .where('userId', '==', userId)
-          .get();
-
-        const registeredEventIds = new Set(registrationsSnap.docs.map((d) => d.data().eventId));
-
-        for (const eventId of registeredEventIds) {
-          const eventDoc = await db
-            .collection('schools')
-            .doc(schoolId)
-            .collection('clubEvents')
-            .doc(eventId)
-            .get();
-
-          if (eventDoc.exists) {
-            const existingEvent = events.find((e) => e.id === `event-${eventId}`);
-            if (existingEvent) {
-              existingEvent.categories = [...(existingEvent.categories || []), '已報名'];
-            }
-          }
-        }
-      }
-
-      events.sort((a, b) => {
-        const aTime = a.startsAt instanceof Date ? a.startsAt.getTime() : 0;
-        const bTime = b.startsAt instanceof Date ? b.startsAt.getTime() : 0;
-        return aTime - bTime;
-      });
-
-      let calendarName = `${schoolName} 行事曆`;
-      if (type === 'events') calendarName = `${schoolName} 活動`;
-      if (type === 'assignments') calendarName = `${schoolName} 作業`;
-
-      const icalContent = generateICalFeed(events, calendarName);
-
-      res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
-      res.setHeader('Content-Disposition', `attachment; filename="${schoolId}-calendar.ics"`);
-      res.setHeader('Cache-Control', 'public, max-age=300');
-      res.send(icalContent);
-    } catch (error) {
-      console.error('Calendar subscribe error:', error);
-      res.status(500).send('Internal server error');
-    }
-  },
+  createCalendarSubscriptionHandler({ db }),
 );
 
 exports.calendarWebhook = onRequest(
@@ -3041,6 +2836,8 @@ exports.bulkUpdateSchoolAnnouncements = onCall(
   },
 );
 
+exports.submitProductFeedback = onCall({ region: REGION }, createSubmitProductFeedback({ db }));
+
 exports.upsertSchoolEvent = onCall(
   {
     region: REGION,
@@ -3063,45 +2860,48 @@ exports.upsertSchoolEvent = onCall(
     const events = db.collection('schools').doc(schoolId).collection('clubEvents');
     const targetRef = eventId ? events.doc(eventId) : events.doc();
 
-    if (eventId) {
-      const existing = await targetRef.get();
-      if (!existing.exists) {
-        throw new HttpsError('not-found', 'Event not found');
+    await db.runTransaction(async (transaction) => {
+      if (eventId) {
+        const existing = await transaction.get(targetRef);
+        if (!existing.exists) {
+          throw new HttpsError('not-found', 'Event not found');
+        }
+        const previous = existing.data();
+        // Validate the combined interval again on retries; omitted dates retain their value.
+        normalizeSchoolEventInput({
+          ...request.data,
+          startsAt:
+            request.data.startsAt === undefined ? previous.startsAt : request.data.startsAt,
+          endsAt: request.data.endsAt === undefined ? previous.endsAt : request.data.endsAt,
+        });
+        transaction.update(targetRef, {
+          title: normalized.title,
+          description: normalized.description,
+          location: normalized.location,
+          updatedAt: FieldValue.serverTimestamp(),
+          updatedBy: uid,
+          updatedByEmail: actorEmail || null,
+          ...(request.data.startsAt === undefined ? {} : { startsAt: normalized.startsAt }),
+          ...(request.data.endsAt === undefined ? {} : { endsAt: normalized.endsAt }),
+          ...(request.data.capacity === undefined
+            ? {}
+            : { capacity: normalized.capacity == null ? FieldValue.delete() : normalized.capacity }),
+        });
+      } else {
+        transaction.create(targetRef, {
+          title: normalized.title,
+          description: normalized.description,
+          location: normalized.location,
+          schoolId,
+          createdBy: uid,
+          createdByEmail: actorEmail || null,
+          ...(normalized.startsAt instanceof Timestamp ? { startsAt: normalized.startsAt } : {}),
+          ...(normalized.endsAt instanceof Timestamp ? { endsAt: normalized.endsAt } : {}),
+          ...(normalized.capacity == null ? {} : { capacity: normalized.capacity }),
+          registeredCount: 0,
+        });
       }
-    }
-
-    if (eventId) {
-      const payload = {
-        title: normalized.title,
-        description: normalized.description,
-        location: normalized.location,
-        updatedAt: FieldValue.serverTimestamp(),
-        updatedBy: uid,
-        updatedByEmail: actorEmail || null,
-        startsAt:
-          normalized.startsAt instanceof Timestamp ? normalized.startsAt : FieldValue.delete(),
-        endsAt: normalized.endsAt,
-        capacity: normalized.capacity == null ? FieldValue.delete() : normalized.capacity,
-      };
-
-      await targetRef.set(payload, { merge: true });
-    } else {
-      await targetRef.set({
-        title: normalized.title,
-        description: normalized.description,
-        location: normalized.location,
-        schoolId,
-        createdBy: uid,
-        createdByEmail: actorEmail || null,
-        startsAt:
-          normalized.startsAt instanceof Timestamp
-            ? normalized.startsAt
-            : Timestamp.fromDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)),
-        ...(normalized.endsAt instanceof Timestamp ? { endsAt: normalized.endsAt } : {}),
-        ...(normalized.capacity == null ? {} : { capacity: normalized.capacity }),
-        registeredCount: 0,
-      });
-    }
+    });
 
     await logAdminAction({
       schoolId,

@@ -28,6 +28,7 @@ import {
   exportAndShareICalFile,
   convertAppEventsToICalEvents,
   convertAssignmentsToICalEvents,
+  generateSubscriptionUrl,
   type ICalEvent,
   type ParsedCalendar,
 } from '../../services/ical';
@@ -96,7 +97,9 @@ const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
 const CALENDAR_API_BASE_URL =
   process.env.EXPO_PUBLIC_FIREBASE_FUNCTIONS_URL ??
-  `https://asia-east1-${process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID ?? 'YOUR_PROJECT_ID'}.cloudfunctions.net`;
+  (process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID
+    ? `https://asia-east1-${process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID}.cloudfunctions.net`
+    : null);
 
 type SubscribeButtonProps = {
   icon: string;
@@ -136,7 +139,7 @@ function SubscribeButton({ icon, label, description, subscribeUrl }: SubscribeBu
   const handleShare = async () => {
     try {
       await Share.share({
-        message: `訂閱校園行事曆：${subscribeUrl}`,
+        message: `訂閱校園公開活動：${subscribeUrl}`,
         url: subscribeUrl,
       });
     } catch (error) {
@@ -367,16 +370,14 @@ export function CalendarPanel(props: any) {
     setImportedCalendarName(null);
   };
 
-  const getSubscribeUrl = (type: 'events' | 'assignments' | 'all') => {
-    const params = new URLSearchParams({
-      schoolId: school.id,
-      type,
-    });
-    if (auth.user && (type === 'assignments' || type === 'all')) {
-      params.append('userId', auth.user.uid);
+  const publicSubscriptionUrl = useMemo(() => {
+    if (!CALENDAR_API_BASE_URL) return null;
+    try {
+      return generateSubscriptionUrl(CALENDAR_API_BASE_URL, school.id);
+    } catch {
+      return null;
     }
-    return `${CALENDAR_API_BASE_URL}/calendarSubscribe?${params.toString()}`;
-  };
+  }, [school.id]);
 
   const monthDays = useMemo(
     () => getMonthDays(currentMonth.getFullYear(), currentMonth.getMonth()),
@@ -834,7 +835,7 @@ export function CalendarPanel(props: any) {
             <Divider spacing={0} />
 
             <View>
-              <SectionTitle text="訂閱行事曆" />
+              <SectionTitle text="訂閱公開活動" />
               <Text
                 style={{
                   color: theme.colors.textSecondary,
@@ -844,33 +845,21 @@ export function CalendarPanel(props: any) {
                   marginBottom: 14,
                 }}
               >
-                訂閱後，校園行事曆會自動同步到你的 iOS/Android/Google 日曆。
+                將校方發布、已排定時間的公開活動同步到系統日曆。個人作業可使用上方「匯出行事曆」儲存，不會包含在訂閱連結中。
               </Text>
 
               <View style={{ gap: 10 }}>
-                <SubscribeButton
-                  icon="calendar"
-                  label="訂閱所有活動"
-                  description="包含所有校園活動"
-                  subscribeUrl={getSubscribeUrl('events')}
-                />
-
-                {auth.user && (
+                {publicSubscriptionUrl ? (
                   <SubscribeButton
-                    icon="document-text"
-                    label="訂閱我的作業"
-                    description="包含課程作業截止日"
-                    subscribeUrl={getSubscribeUrl('assignments')}
+                    icon="calendar"
+                    label="訂閱公開活動"
+                    description="校園公開活動，隨日曆服務更新"
+                    subscribeUrl={publicSubscriptionUrl}
                   />
-                )}
-
-                {auth.user && (
-                  <SubscribeButton
-                    icon="apps"
-                    label="訂閱全部"
-                    description="活動 + 作業 + 已報名活動"
-                    subscribeUrl={getSubscribeUrl('all')}
-                  />
+                ) : (
+                  <Text style={{ color: theme.colors.textSecondary, fontSize: 13 }}>
+                    公開活動訂閱尚未開放。
+                  </Text>
                 )}
               </View>
 

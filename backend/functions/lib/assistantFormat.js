@@ -1,14 +1,4 @@
-/**
- * assistantFormat — Campus Assistant 的訊息/日期格式化工具
- *
- * 此檔在 main 上被多個 agent 模組與測試 import 但實作未被 commit。
- * 本檔為最小實作以滿足契約：
- *   - toJsDate(value): 將 Firestore Timestamp / ISO 字串 / Date / number 轉為 Date
- *   - formatAssistantDate(date, locale?): 格式化為使用者友善字串
- *   - getLastUserMessage(messages): 從訊息陣列取最後一則 user 訊息
- *   - isDormRepairStatusQueryMessage(text): 啟發式偵測「報修狀態查詢」意圖
- *   - detectCampusAssistantIntent(text): 啟發式 intent 分類，回傳 {intent, confidence}
- */
+/** Shared message and date formatting for the campus assistant. */
 
 'use strict';
 
@@ -64,6 +54,11 @@ function getLastUserMessage(messages) {
   return null;
 }
 
+function normalizeAssistantText(value) {
+  const text = typeof value === 'string' ? value : value?.content;
+  return typeof text === 'string' ? text.trim() : '';
+}
+
 function isDormRepairStatusQueryMessage(input) {
   const text = typeof input === 'string' ? input : input && input.content;
   if (!text || typeof text !== 'string') return false;
@@ -100,6 +95,7 @@ module.exports = {
   toJsDate,
   formatAssistantDate,
   getLastUserMessage,
+  normalizeAssistantText,
   isDormRepairStatusQueryMessage,
   detectCampusAssistantIntent,
 };
