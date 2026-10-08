@@ -66,7 +66,7 @@ async function fetchAssistantMenus(schoolId, deps = {}) {
 }
 
 async function fetchAssistantPois(schoolId, deps = {}) {
-  return readSchoolRows(schoolId, ['pois', 'pois'], { limit: 100, requiredField: 'name', deps });
+  return readSchoolRows(schoolId, ['pois', 'pois'], { requiredField: 'name', deps });
 }
 
 async function fetchAssistantSummary(uid, schoolId, collectionName, deps = {}) {

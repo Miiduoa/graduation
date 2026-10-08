@@ -6,6 +6,7 @@ const {
 } = require('../assistantAgent');
 
 const CAMPUS_ASSISTANT_MESSAGE_WINDOW = 20;
+const CAMPUS_ASSISTANT_MESSAGE_CHARS = 4000;
 const { tools } = require('../agent/tools/registry');
 const agentCases = require('../agent/cases.json');
 const { normalizeAssistantText } = require('./assistantFormat');
@@ -142,7 +143,7 @@ async function buildModelBackedAssistantResponse({
   });
 
   const norm = (s) => String(s || '').trim();
-  const userSlice = normalizeAssistantText(lastUserMessage).slice(0, 1600);
+  const userSlice = normalizeAssistantText(lastUserMessage).slice(0, CAMPUS_ASSISTANT_MESSAGE_CHARS);
 
   let history = [];
 
@@ -152,7 +153,7 @@ async function buildModelBackedAssistantResponse({
       history = prior.map((m) => {
         const row = {
           role: m.role,
-          content: m.content != null ? String(m.content).slice(0, 1600) : '',
+          content: m.content != null ? String(m.content).slice(0, CAMPUS_ASSISTANT_MESSAGE_CHARS) : '',
         };
         if (Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
           row.tool_calls = m.tool_calls;
@@ -175,7 +176,7 @@ async function buildModelBackedAssistantResponse({
       .filter((message) => message?.role === 'user' || message?.role === 'assistant')
       .map((message) => ({
         role: message.role,
-        content: normalizeAssistantText(message.content).slice(0, 1600),
+        content: normalizeAssistantText(message.content).slice(0, CAMPUS_ASSISTANT_MESSAGE_CHARS),
       }));
     if (history.length === 0 || history[history.length - 1].role !== 'user') {
       history.push({ role: 'user', content: userSlice });

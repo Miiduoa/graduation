@@ -40,6 +40,8 @@ function AgentCardItem({
   onOrderConfirmed?: Props['onOrderConfirmed'];
 }) {
   switch (card.kind) {
+    case 'directions_card':
+      return <DirectionsCard payload={card.payload as DirectionsPayload} />;
     case 'route_card':
       return <RouteCard payload={card.payload as RoutePayload} />;
     case 'poi_card':
@@ -77,6 +79,30 @@ type RoutePayload = {
   deepLink?: { web?: string; mobile?: { screen: string; params: Record<string, unknown> } };
 };
 
+type DirectionsPayload = {
+  from: { name: string };
+  to: { name: string };
+  navigationUrl: string;
+};
+
+function DirectionsCard({ payload }: { payload: DirectionsPayload }) {
+  return (
+    <section className="card directions" aria-label="步行導航">
+      <h3>{payload.from.name} → {payload.to.name}</h3>
+      <p>由 Google 地圖提供可通行的路線與步行時間。</p>
+      <a href={payload.navigationUrl} target="_blank" rel="noopener noreferrer" className="cta">
+        開啟 Google 步行導航 ↗
+      </a>
+      <style jsx>{`
+        .directions { padding: 18px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); }
+        h3 { margin: 0 0 8px; font-size: 16px; overflow-wrap: anywhere; }
+        p { color: var(--muted); line-height: 1.6; }
+        .cta { display: inline-flex; padding: 10px 14px; border-radius: var(--radius-sm); background: var(--brand); color: var(--on-brand); text-decoration: none; overflow-wrap: anywhere; }
+      `}</style>
+    </section>
+  );
+}
+
 type PoiPayload = {
   query: string;
   pois: Array<{
@@ -93,6 +119,7 @@ type PoiPayload = {
     closeTime?: string;
     openNow?: boolean | null;
     cafeteriaId?: string | null;
+    navigationAvailable?: boolean;
   }>;
 };
 
@@ -102,6 +129,7 @@ type CafeteriaListPayload = {
     name: string;
     openTime?: string;
     closeTime?: string;
+    openingHours?: string;
     seats?: number;
     openNow?: boolean | null;
     orderingEnabled?: boolean;
@@ -228,8 +256,8 @@ function PoiCard({ payload }: { payload: PoiPayload }) {
         <span className="title">找到 {payload.pois.length} 個地點</span>
       </div>
       <div className="list">
-        {payload.pois.slice(0, 4).map((p) => (
-          <Link key={p.id} href={`/map?focus=${p.id}`} className="row">
+        {payload.pois.slice(0, 4).map((p) => {
+          const content = <>
             <div className="row-main">
               <span className="name">{p.name}</span>
               {p.code ? <em className="code">{p.code}</em> : null}
@@ -238,18 +266,21 @@ function PoiCard({ payload }: { payload: PoiPayload }) {
               {p.floor || ''} {p.openTime && p.closeTime ? `· ${p.openTime}–${p.closeTime}` : ''}
               {p.openNow === false ? ' · 目前未營業' : p.openNow === true ? ' · 營業中' : ''}
             </div>
-          </Link>
-        ))}
+          </>;
+          return p.navigationAvailable === false
+            ? <div key={p.id} className="row">{content}<span className="row-meta">尚未提供座標，暫時無法導航。</span></div>
+            : <Link key={p.id} href={`/map?focus=${p.id}`} className="row">{content}</Link>;
+        })}
       </div>
       <style jsx>{`
-        .card.poi { background: #fefce8; border: 1px solid #fde68a; border-radius: 14px; padding: 14px; }
-        .head { display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 8px; color: #713f12; }
+        .card.poi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; }
+        .head { display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 8px; color: var(--text); }
         .list { display: flex; flex-direction: column; gap: 6px; }
-        .row { background: white; border: 1px solid #fde68a; border-radius: 10px; padding: 8px 10px; text-decoration: none; color: #0f172a; }
-        .row:hover { border-color: #f59e0b; }
+        .row { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; text-decoration: none; color: var(--text); overflow-wrap: anywhere; }
+        .row:hover { border-color: var(--brand); }
         .row-main { display: flex; align-items: center; gap: 6px; font-weight: 500; font-size: 14px; }
-        .code { font-style: normal; font-size: 11px; color: #92400e; background: #fef3c7; padding: 1px 6px; border-radius: 4px; }
-        .row-meta { font-size: 12px; color: #78716c; margin-top: 2px; }
+        .code { font-style: normal; font-size: 11px; color: var(--brand); background: var(--accent-soft); padding: 1px 6px; border-radius: 4px; }
+        .row-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
       `}</style>
     </div>
   );
@@ -269,7 +300,7 @@ function CafeteriaListCard({ payload }: { payload: CafeteriaListPayload }) {
           <div key={c.id} className="row">
             <div className="name">{c.name}</div>
             <div className="meta">
-              {c.openTime && c.closeTime ? `${c.openTime}–${c.closeTime}` : ''}
+              {c.openingHours || (c.openTime && c.closeTime ? `${c.openTime}–${c.closeTime}` : '')}
               {c.seats ? ` · ${c.seats} 座位` : ''}
               {c.openNow === false ? ' · 未營業' : c.openNow === true ? ' · 營業中' : ''}
             </div>
@@ -277,12 +308,12 @@ function CafeteriaListCard({ payload }: { payload: CafeteriaListPayload }) {
         ))}
       </div>
       <style jsx>{`
-        .card.cafs { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 14px; padding: 14px; }
-        .head { display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 8px; color: #14532d; }
+        .card.cafs { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; }
+        .head { display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 8px; color: var(--text); }
         .list { display: flex; flex-direction: column; gap: 6px; }
-        .row { background: white; border: 1px solid #bbf7d0; border-radius: 10px; padding: 8px 10px; }
-        .name { font-weight: 500; font-size: 14px; color: #0f172a; }
-        .meta { font-size: 12px; color: #166534; margin-top: 2px; }
+        .row { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; overflow-wrap: anywhere; }
+        .name { font-weight: 500; font-size: 14px; color: var(--text); }
+        .meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
       `}</style>
     </div>
   );
@@ -311,18 +342,18 @@ function MenuCard({ payload }: { payload: MenuPayload }) {
         ))}
       </div>
       <style jsx>{`
-        .card.menu { background: #fff7ed; border: 1px solid #fed7aa; border-radius: 14px; padding: 14px; }
-        .head { display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 10px; color: #9a3412; }
+        .card.menu { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; }
+        .head { display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 10px; color: var(--text); }
         .icon { font-size: 18px; }
         .title { flex: 1; }
-        .meta { font-size: 12px; color: #9a3412; background: #ffedd5; padding: 2px 8px; border-radius: 999px; }
+        .meta { font-size: 12px; color: var(--muted); background: var(--accent-soft); padding: 2px 8px; border-radius: 999px; }
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
-        .item { background: white; border: 1px solid #fed7aa; border-radius: 10px; padding: 8px 10px; }
+        .item { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; overflow-wrap: anywhere; }
         .row1 { display: flex; justify-content: space-between; font-size: 14px; }
-        .name { font-weight: 500; color: #0f172a; }
-        .price { color: #c2410c; font-weight: 600; }
-        .desc { font-size: 12px; color: #78716c; margin-top: 2px; }
-        .tag { display: inline-block; font-size: 11px; color: #92400e; background: #fef3c7; padding: 1px 6px; border-radius: 4px; margin-top: 4px; }
+        .name { font-weight: 500; color: var(--text); }
+        .price { color: var(--brand); font-weight: 600; }
+        .desc { font-size: 12px; color: var(--muted); margin-top: 2px; }
+        .tag { display: inline-block; font-size: 11px; color: var(--brand); background: var(--accent-soft); padding: 1px 6px; border-radius: 4px; margin-top: 4px; }
       `}</style>
     </div>
   );

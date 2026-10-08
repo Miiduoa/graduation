@@ -2,7 +2,11 @@
 
 const { z } = require('zod');
 const { getFirestore } = require('firebase-admin/firestore');
-const { getPoiById, isPoiOpenNow } = require('../data/campusPois');
+const { hasCoordinates } = require('../../lib/assistantPois');
+
+const text = (value) => typeof value === 'string' ? value.trim() : '';
+const time = (value) => /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(text(value)) ? text(value) : null;
+const count = (value) => Number.isSafeInteger(value) && value >= 0 ? value : null;
 
 const inputSchema = z.object({
   onlyOpenNow: z.boolean().optional(),
@@ -19,37 +23,39 @@ async function execute(ctx, rawInput) {
     const db = getFirestore();
     const snap = await db.collection('schools').doc(schoolId).collection('cafeterias').get();
 
-    const now = new Date();
-    let cafeterias = snap.docs.map((doc) => {
+    const cafeterias = snap.docs.map((doc) => {
       const data = doc.data() || {};
-      // Match POI by cafeteriaId to enrich with lat/lng/floor
-      const poi =
-        (data.poiId && getPoiById(data.poiId)) ||
-        (data.poiId == null
-          ? undefined
-          : null) ||
-        // fall back: try direct id match
-        getPoiById(`pu-${doc.id}`);
+      if (data.schoolId != null && data.schoolId !== schoolId) {
+        throw new Error('Cafeteria school does not match the requested school');
+      }
       return {
         id: doc.id,
-        name: data.name || (poi && poi.name) || doc.id,
-        description: data.description || (poi && poi.description) || '',
-        lat: poi?.lat ?? data.lat ?? null,
-        lng: poi?.lng ?? data.lng ?? null,
-        openTime: data.openTime || poi?.openTime || null,
-        closeTime: data.closeTime || poi?.closeTime || null,
-        orderingEnabled: data.orderingEnabled !== false,
-        openNow: poi ? isPoiOpenNow(poi, now) : null,
-        seats: data.seats ?? null,
-        menuPreviewCount: data.menuPreviewCount ?? null,
+        schoolId,
+        name: text(data.name) || doc.id,
+        description: text(data.description),
+        location: text(data.location),
+        openingHours: text(data.openingHours),
+        lat: hasCoordinates(data) ? data.lat : null,
+        lng: hasCoordinates(data) ? data.lng : null,
+        openTime: time(data.openTime),
+        closeTime: time(data.closeTime),
+        orderingEnabled: data.orderingEnabled === true,
+        // The cafeteria producer has no authoritative live opening-status field.
+        openNow: null,
+        seats: count(data.seats),
+        menuPreviewCount: count(data.menuPreviewCount),
       };
     });
 
-    if (input.onlyOpenNow) {
-      cafeterias = cafeterias.filter((c) => c.openNow !== false && c.orderingEnabled);
+    if (input.onlyOpenNow && cafeterias.length) {
+      return {
+        success: false,
+        errorCode: 'opening_status_unavailable',
+        errorMessage: '目前無法確認餐廳的即時營業狀態，請查看餐廳公布的營業時間。',
+      };
     }
 
-    return { success: true, count: cafeterias.length, cafeterias };
+    return { success: true, schoolId, count: cafeterias.length, cafeterias };
   } catch (e) {
     return {
       success: false,
@@ -62,7 +68,7 @@ async function execute(ctx, rawInput) {
 module.exports = {
   name: 'listCafeterias',
   description:
-    '列出校園內可下單的餐廳（含營業狀態、座位）。當使用者問「哪裡可以吃」「現在有開的餐廳」「想點外送」優先呼叫。',
+    '查詢目前學校正式餐廳資料與已公布營業時間。未提供即時營業狀態時會明確回報無法確認；不可將餐廳列表視為可下單或營業中的保證。',
   inputSchema,
   execute,
 };

@@ -40,7 +40,7 @@ Nolu 的實際專案是 `Miiduoa/web`，原始碼主要位於 `pu-plan/`，公�
 - Nolu 公開頁 HTTP 200，主要校務函式入口對 GET 回應 405，只能證明該入口可達，不能替代帶本人 session 的校務查詢。
 - 尚缺正式部署映像與來源 SHA 的對應、目標資料庫及帳號轉接的完整驗收。需完成備份還原、身份 adapter、真實資料閉環與可回復發布後，才切換 Campus One 正式流量。
 
-本輪以已登入的 EAS CLI 唯讀確認 Nuni 的既有專案為 `@miiduoa/campus-one`，project ID `8955b97c-802c-463c-bd1d-d5f02e30a966`。已核對的 Nuni production 原始設定使用 iOS／Android `com.nuni.app`，staging 使用 `com.miiduoa.campusone`；這是來源設定與 EAS 專案存在的證據，尚非 App Store Connect／Google Play 上已註冊識別碼與簽署資產的證明。沒有建立新 EAS 專案或覆寫 Campus One 的建置設定。
+本輪以已登入的 EAS CLI 唯讀確認 Nuni 的既有專案為 `@miiduoa/campus-one`，project ID `8955b97c-802c-463c-bd1d-d5f02e30a966`。2026-10-08 另從已登入的官方 Google Play Console 確認既有 Nuni Android App 的 package 為 `com.nuni.app`，目前是草稿／內部測試，並非公開上架。Nuni 原始 production 設定的 iOS 值也寫作 `com.nuni.app`，但 Apple 帳戶尚未登入核對，不能把來源設定或 Android 識別碼當成 iOS 商店證據。沒有建立新 EAS 專案、修改原生識別碼或送出商店版本。
 
 本輪沒有變更 DNS、正式部署、付款開關或帳號資料。前一版曾讀取的 Fly release 是 Web v31／API v17（均為 2026-09-29），但當時 metadata 沒有來源 SHA；這些 release 編號不是本輪重新確認的最新版本。前一版亦曾確認本機 Firebase／EAS 登入、Firebase 專案清單，以及 GitHub repository／production environment 當時沒有 secrets／variables；這些設定會變動，發布前須重查，不據此推定目前仍為空，也不重複索取已有的憑證。
 
@@ -71,7 +71,15 @@ Nolu 的實際專案是 `Miiduoa/web`，原始碼主要位於 `pu-plan/`，公�
 
 仍待正式環境驗收：本人收藏、校園地點正確性、公告／活動實際資料及實機分享。活動報名尚缺統一的伺服器交易、權限、容量與期限契約；其實作可在 repo 內完成，正式啟用再核對主辦政策、既有資料及部署，不能把行事曆匯出當作報名成功。Nuni 身份映射、帳本轉接、線上金流、資料遷移、商店識別碼／簽署及正式部署仍未完成。
 
-本次唯讀查到 Nuni 的 EAS 專案確為 `@miiduoa/campus-one`（`8955b97c-802c-463c-bd1d-d5f02e30a966`），已將 Campus One 的 Expo slug／owner 對齊。最近的 Android build metadata 中 appIdentifier 是 Gradle 運算式，不能視作實際安裝包或商店登記 ID；原生識別碼仍需以正式產物與商店帳戶核對。GitHub repo 與 production environment 當時皆未配置 secrets／variables，發布 workflow 尚不能據此執行正式建置或部署。
+本次唯讀查到 Nuni 的 EAS 專案確為 `@miiduoa/campus-one`（`8955b97c-802c-463c-bd1d-d5f02e30a966`），已將 Campus One 的 Expo slug／owner 對齊。舊 Android build metadata 的 appIdentifier 是 Gradle 運算式，不能作為產物識別證據；目前 package 的依據改為官方 Google Play Console 核對。GitHub `production` environment 已設定並讀回 `ANDROID_PACKAGE_NAME=com.nuni.app`、`EAS_PROJECT_ID=8955b97c-802c-463c-bd1d-d5f02e30a966` 兩項非機密變數，iOS 目標與發布 secrets 仍未設定。新增的發布 preparation 在 CI 暫存設定中傳遞識別碼，並核對 EAS 真正解析結果與 worker prebuild 後 native ID；仍保留追蹤 iOS `.dev` 設定時的阻擋，不據此宣稱已建置或部署。詳見 [發布流程](RELEASE_PIPELINE.md)。
+
+## 正式入口補查與未完成的交易
+
+後續逐一核對 Stack 與角色首頁，發現舊版路由仍能直接進入固定課程、模擬加選、角色示範資料與本機助理執行紀錄。這些入口不能因已有新版首頁就視為隔離完成。本輪將有真實來源的功能接回正式頁，尚缺服務的入口改為共用的未開放狀態及可用服務連結；舊路由名保留相容性，不再藉角色或 UID 字首展示示範成果。這項修正消除誤導，不代表原本未實作的教學、商務或校務功能已完成。
+
+商戶接單尚有程式層級阻塞：現有 `updateOrderStatus` 與 `cancelOrder` 在交易外讀取狀態，之後分別寫入學校正式訂單與使用者副本；並行取消／完成可能倒退狀態或使副本不一致。正式商戶工作台保持未開放，需先選定權威帳本，完成狀態轉移、權限、冪等與副本的同一交易及實際並行回歸，再啟用。這不是僅補憑證即可解決的問題，也不能以學生端已能建立到店付款訂單替代商戶履約驗收。
+
+助理查詢的完整問題與檢索預算分開處理，避免 Web 合法的長問題在較短的搜尋 schema 驗證失敗。地點與導航改用目前學校的正式集合；缺少座標或名稱不明確時不產生導航。外部導航連結使用 Google 地圖的起終點座標，不再以固定校園資料或直線距離生成步行時間。舊的未標示學校的 POI 卡、未驗證路線卡與跨校卡不再呈現。餐廳營業狀態沒有即時資料時維持未知，不把預設值當作可下單或正在營業。
 
 ## 歷史檢查點：00914c6 之前的整合實作與驗收
 
