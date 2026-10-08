@@ -40,7 +40,6 @@ import {
 } from '../services/admin';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
 import {
-  isDemoUid,
   DEMO_ADMIN_ANNOUNCEMENTS,
   DEMO_ADMIN_EVENTS,
   DEMO_ADMIN_MEMBERS,
@@ -48,6 +47,7 @@ import {
   DEMO_ADMIN_CAFETERIAS,
 } from '../services/demoAdminMock';
 import { formatDateTime } from '../utils/format';
+import { isDevelopmentDemoSession } from '../services/release';
 import { AIMissionControl } from '../components/AIMissionControl';
 
 type AdminTab = 'overview' | 'announcements' | 'events' | 'members' | 'settings';
@@ -308,9 +308,7 @@ export function AdminDashboardScreen(props: any) {
   const [operatorRole, setOperatorRole] = useState<'owner' | 'manager' | 'staff'>('staff');
   const [operatorStatus, setOperatorStatus] = useState<'active' | 'inactive'>('active');
 
-  // demo 模式 short-circuit：demo_admin_* uid 過不了 Firestore security rules，
-  //   每條 useAsyncList 開頭都先檢查；是 demo uid 就回傳 mock，避免畫面整片空白。
-  const demoMode = isDemoUid(auth.user?.uid);
+  const demoMode = isDevelopmentDemoSession(auth.user?.uid);
 
   const {
     items: announcements,
@@ -419,7 +417,7 @@ export function AdminDashboardScreen(props: any) {
         updatedAt: data.updatedAt,
       } satisfies SchoolCafeteria;
     });
-  }, [db, school.id]);
+  }, [db, school.id, demoMode]);
 
   const {
     items: cafeteriaOperators,
@@ -1103,12 +1101,9 @@ export function AdminDashboardScreen(props: any) {
 
         {tab === 'overview' && (
           <>
-            {/* AI 任務指揮 — 管理員專屬下一步 */}
-            <AIMissionControl
-              uid={auth.user?.uid ?? 'demo_admin_sys'}
-              maxVisible={3}
-              hideWhenEmpty
-            />
+            {demoMode && (
+              <AIMissionControl uid={auth.user?.uid ?? ''} maxVisible={3} hideWhenEmpty />
+            )}
 
             <AnimatedCard title="管理員總覽" subtitle={`${school.name}（${school.code}）`}>
               <View

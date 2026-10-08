@@ -36,4 +36,13 @@ describe('searchCampusDocs tool', () => {
     expect(out.webFallback?.content).toBe('公開摘要');
     expect(mockWebSearch).toHaveBeenCalledWith('診斷書');
   });
+
+  test('bounds only the retrieval query while accepting a long conversation question', async () => {
+    mockFetchChunks.mockResolvedValue([]);
+    mockWebSearch.mockResolvedValue(null);
+    const query = `請查公告${'完整背景。'.repeat(700)}`;
+    await expect(searchCampusDocs.execute({ schoolId: 'pu' }, { query })).resolves.toEqual({ campusChunks: [], webFallback: null });
+    expect(mockFetchChunks).toHaveBeenCalledWith(expect.objectContaining({ queryText: query.slice(0, 500) }));
+    expect(mockWebSearch).toHaveBeenCalledWith(query.slice(0, 500));
+  });
 });

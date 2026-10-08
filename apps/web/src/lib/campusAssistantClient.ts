@@ -10,6 +10,7 @@ import { httpsCallable } from 'firebase/functions';
 import { getAuth, getFunctionsInstance, isFirebaseConfigured } from './firebase';
 
 export type AgentCardKind =
+  | 'directions_card'
   | 'route_card'
   | 'poi_card'
   | 'menu_card'

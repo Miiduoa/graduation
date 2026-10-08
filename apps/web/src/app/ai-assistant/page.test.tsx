@@ -84,7 +84,7 @@ it('retains read cards while keeping order writes and claimed receipts out of th
   vi.mocked(callCampusAssistant).mockResolvedValue({ content: '找到餐廳資訊', cards: [
     { kind: 'order_submitted', payload: { orderId: 'unverified' } },
     { kind: 'order_draft_card', payload: {} },
-    { kind: 'poi_card', payload: { pois: [{ id: 'cafeteria', name: '餐廳' }] } },
+    { kind: 'poi_card', payload: { schoolId: 'pu', pois: [{ id: 'cafeteria', name: '餐廳', schoolId: 'pu' }] } },
   ] });
   render(<AssistantPage />); ask();
   await waitFor(() => expect(screen.getByText('poi_card')).toBeTruthy());
