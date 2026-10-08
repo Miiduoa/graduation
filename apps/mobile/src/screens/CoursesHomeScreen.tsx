@@ -954,8 +954,8 @@ function CourseListView(props: { courses: TCCourse[]; nav: any; onRefresh: () =>
             onPress={() => {
               if (fromTronClass) {
                 props.nav?.navigate?.('CourseHub', {
-                  groupId: String(course.id),
-                  groupName: course.name,
+                  source: 'tronclass',
+                  courseId: course.id,
                 });
               } else {
                 props.nav?.navigate?.('CourseSchedule');

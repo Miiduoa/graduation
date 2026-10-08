@@ -245,6 +245,17 @@ jobs:
       - name: Run security and transaction tests
         run: pnpm test:rules
 
+      - name: Preserve failed emulator diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-failure-logs
+          path: |
+            firestore-debug.log
+            storage-debug.log
+          if-no-files-found: ignore
+          retention-days: 7
+
   build-mobile:
     name: Build Mobile
     runs-on: ubuntu-latest

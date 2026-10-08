@@ -559,7 +559,7 @@ export function LearnStack() {
       <Stack.Screen
         name="QuizTaking"
         component={lmsV2Enabled ? CourseQuizTakingV2Screen : guardCourseView(QuizTakingScreen)}
-        options={{ title: '作答中', headerShown: false }}
+        options={{ title: '測驗資訊', headerShown: false }}
       />
       <Stack.Screen
         name="PeerReview"

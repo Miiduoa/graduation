@@ -190,8 +190,8 @@ export function TeachingHubScreen(props: any) {
         const first = courseStats[0];
         if (first) {
           nav?.navigate?.('CourseHub', {
-            groupId: String(first.course.id),
-            groupName: first.course.name,
+            source: 'tronclass',
+            courseId: first.course.id,
           });
           return;
         }

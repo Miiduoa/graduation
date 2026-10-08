@@ -183,7 +183,11 @@ export function MeStack() {
         component={NotificationSettingsScreen}
         options={{ title: '通知設定', headerShown: false }}
       />
-      <Stack.Screen name="QRCode" component={QRCodeScreen} options={{ title: 'QR 碼' }} />
+      <Stack.Screen
+        name="QRCode"
+        component={QRCodeScreen}
+        options={{ title: 'QR 碼', headerShown: false }}
+      />
       <Stack.Screen
         name="MerchantHub"
         component={UnavailableFeatureScreen}

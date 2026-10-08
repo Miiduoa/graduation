@@ -972,7 +972,13 @@ function AppNavigation() {
   // 沒有登入 session → Landing + 可進入正式學校登入（SSOLoginScreen）
   if (!auth.user && !auth.profile) {
     return (
-      <NavigationContainer ref={rootNavigationRef} theme={navTheme}>
+      <NavigationContainer
+        ref={rootNavigationRef}
+        theme={navTheme}
+        onStateChange={(state) => {
+          if (__DEV__) console.info('[navigation] signed-out route', state?.routes[state.index]?.name);
+        }}
+      >
         <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
           <PreAuthStack />
         </View>
@@ -988,8 +994,7 @@ function AppNavigation() {
       onReady={flushPendingMessagingDeepLink}
       fallback={<FullScreenLoader />}
       onUnhandledAction={(action) => {
-        // demo 期間最後一道防線：若任何 navigate('X') 找不到 route
-        // （safeNavigate 漏網的）→ 跳明確 Alert，並提供「回到主畫面」 fallback
+        // Keep unhandled links recoverable without exposing internal route names.
         try {
           const payload = (action as any)?.payload;
           const targetName = payload?.name ?? '未知頁面';
@@ -1038,18 +1043,17 @@ function AppNavigation() {
             SmartCalendarScreen: 'Today',
           };
           const hint = TAB_HINTS[targetName];
-          // eslint-disable-next-line @typescript-eslint/no-var-requires
           const { Alert } = require('react-native');
           Alert.alert(
-            'AI 找不到該畫面的連結',
+            '目前無法開啟頁面',
             hint
-              ? `「${targetName}」需要從「${hint}」分頁進入。\n\n要我帶你過去嗎？`
-              : `「${targetName}」目前還沒接上路由。\n\n回到主畫面以繼續。`,
+              ? '請從對應分頁重新開啟這項服務。'
+              : '這個連結目前無法使用，請回到首頁後重新開啟。',
             [
               { text: '取消', style: 'cancel' },
               hint
                 ? {
-                    text: `前往「${hint}」`,
+                    text: `前往${hint === 'Today' ? '首頁' : hint}`,
                     onPress: () => {
                       try {
                         rootNavigateNested(hint as any, targetName);
