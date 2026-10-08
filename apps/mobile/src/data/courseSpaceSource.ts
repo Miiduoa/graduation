@@ -11,7 +11,8 @@ import {
 } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 
-import { getDb, isFirebaseMockMode } from '../firebase';
+import { getDb, getFirebaseApp, getCloudFunctionRegion, isFirebaseMockMode } from '../firebase';
+import { confirmQrAttendance, type AttendanceReceipt } from '../services/confirmedAttendance';
 import {
   buildCourseSummaries,
   createCourseModule as createWorkspaceModule,
@@ -361,7 +362,7 @@ export async function startAttendanceSession(input: {
   classroomLng?: number;
   qrExpiryMinutes?: number;
 }): Promise<{ success: boolean; sessionId: string; qrToken?: string; qrExpiresAt?: string }> {
-  return startWorkspaceAttendanceSession(getFunctions(), {
+  return startWorkspaceAttendanceSession(getFunctions(getFirebaseApp(), getCloudFunctionRegion()), {
     groupId: input.courseSpaceId,
     classroomLat: input.classroomLat,
     classroomLng: input.classroomLng,
@@ -374,33 +375,23 @@ export async function checkInAttendance(input: {
   sessionId: string;
   qrToken?: string;
   uid?: string;
-}): Promise<{ success: boolean }> {
-  const joinLiveSession = httpsCallable<
-    { groupId: string; sessionId: string; qrToken?: string },
-    { success: boolean }
-  >(getFunctions(), 'joinLiveSession');
+}): Promise<AttendanceReceipt> {
+  const verifyAttendanceClaim = httpsCallable<
+    { courseId: string; sessionId: string; claim: { token: string; uid?: string } },
+    unknown
+  >(getFunctions(getFirebaseApp(), getCloudFunctionRegion()), 'verifyAttendanceClaim');
 
-  const result = await joinLiveSession({
-    groupId: input.courseSpaceId,
-    sessionId: input.sessionId,
-    qrToken: input.qrToken,
-  });
-
-  // ── Campus Companion 信號：成功簽到 → onAttendanceCheckin ──
-  if (result.data?.success) {
-    try {
+  return confirmQrAttendance(input, {
+    invoke: async (payload) => (await verifyAttendanceClaim(payload)).data,
+    onConfirmed: async (receipt) => {
       const { onAttendanceCheckin } = await import('../services/companionHooks');
-      onAttendanceCheckin({
-        uid: input.uid,
-        sessionId: input.sessionId,
-        courseSpaceId: input.courseSpaceId,
+      await onAttendanceCheckin({
+        uid: receipt.uid,
+        sessionId: receipt.sessionId,
+        courseSpaceId: receipt.courseId,
       });
-    } catch {
-      /* swallow — 不影響主流程 */
-    }
-  }
-
-  return result.data;
+    },
+  });
 }
 
 export async function getAttendanceSummary(courseSpaceId: string): Promise<AttendanceSummary> {
