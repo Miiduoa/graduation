@@ -1,7 +1,7 @@
 {
   "name": "functions",
   "private": true,
-  "main": "index.js",
+  "main": "entry.js",
   "engines": {
     "node": "20"
   },

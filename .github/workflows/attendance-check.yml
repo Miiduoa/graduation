@@ -1,0 +1,34 @@
+name: Attendance focused checks
+on:
+  pull_request:
+    paths:
+      - 'backend/functions/**'
+      - 'apps/mobile/src/services/*Attendance*'
+      - 'apps/mobile/src/services/attendanceQr.ts'
+      - 'apps/mobile/src/services/teacherAttendance.ts'
+      - 'apps/mobile/src/components/TeacherAttendancePanel.tsx'
+      - 'apps/mobile/src/screens/AttendanceMultiMethodScreen.tsx'
+      - 'apps/mobile/src/__tests__/*Attendance*'
+      - '.github/workflows/attendance-check.yml'
+permissions:
+  contents: read
+jobs:
+  protocol:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.16.0'
+      - name: Verify attendance lifecycle without cloud credentials
+        env:
+          ATTENDANCE_CLIENT_DIR: ${{ github.workspace }}/apps/mobile/src/services
+          ATTENDANCE_CLIENT_EXT: .ts
+          ATTENDANCE_RECEIPT_MODULE: ${{ github.workspace }}/apps/mobile/src/services/liveAttendanceReceipt.ts
+        run: >-
+          node --experimental-strip-types --test
+          backend/functions/lib/liveAttendance.test.js
+          backend/functions/lib/legacyAttendanceClose.test.js
+          backend/functions/lib/attendanceFlow.test.js
+          apps/mobile/src/__tests__/liveAttendanceReceipt.test.ts
+          apps/mobile/src/__tests__/teacherAttendance.test.ts
