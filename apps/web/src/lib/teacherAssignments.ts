@@ -14,6 +14,26 @@ import {
   type TeacherScope,
 } from './teacherCourse';
 
+// Campus One deadlines follow the school calendar (Asia/Taipei), not the browser timezone.
+const TAIPEI_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+export function toTaipeiDateTimeInput(iso: string): string {
+  const instant = new Date(iso).getTime();
+  return Number.isFinite(instant)
+    ? new Date(instant + TAIPEI_OFFSET_MS).toISOString().slice(0, 16)
+    : '';
+}
+
+function parseTaipeiDeadline(input: string): Date | null {
+  const value = input.trim();
+  if (!value) return null;
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) return new Date(NaN);
+  const parsed = new Date(`${value}:00+08:00`);
+  // Reject invalid calendar values that Date would otherwise normalize silently.
+  return Number.isFinite(parsed.getTime()) &&
+    toTaipeiDateTimeInput(parsed.toISOString()) === value ? parsed : new Date(NaN);
+}
+
 export type AssignmentDraft = {
   title: string;
   description: string;
@@ -101,7 +121,7 @@ export async function publishTeacherAssignment(
   if (!validId(assignmentId)) throw new TeacherCourseError('無效的作業編號。');
   const title = draft.title.trim();
   const description = draft.description.trim();
-  const due = draft.dueAt.trim() ? new Date(draft.dueAt) : null;
+  const due = parseTaipeiDeadline(draft.dueAt);
   if (!title || title.length > 120 || description.length > 10000) {
     throw new TeacherCourseError('標題限 1–120 字，作業說明最多 10,000 字。');
   }
@@ -406,7 +426,7 @@ export async function updateTeacherAssignment(
   if (!validId(assignmentId)) throw new TeacherCourseError('無效的作業編號。');
   const title = changes.title.trim();
   const description = changes.description.trim();
-  const due = changes.dueAt.trim() ? new Date(changes.dueAt) : null;
+  const due = parseTaipeiDeadline(changes.dueAt);
   if (!title || title.length > 120 || description.length > 10000 ||
       (due && !Number.isFinite(due.getTime()))) {
     throw new TeacherCourseError('請確認標題、說明及截止時間格式。');
@@ -423,11 +443,11 @@ export async function updateTeacherAssignment(
       throw new TeacherCourseError('只有原建立教師可以修改這份文字作業。');
     }
     const data = current.data();
-    if (toIso(data.updatedAt) !== expectedUpdatedAt) {
-      throw new TeacherCourseError('作業已由其他操作更新，請重新讀取後再編輯。');
-    }
     if (data.status === 'closed' || data.published !== true) {
       throw new TeacherCourseError('這份作業目前不可編輯。');
+    }
+    if (toIso(data.updatedAt) !== expectedUpdatedAt) {
+      throw new TeacherCourseError('作業已由其他操作更新，請重新讀取後再編輯。');
     }
     transaction.update(ref, {
       title, description, dueAt: due ? due.toISOString() : null,
