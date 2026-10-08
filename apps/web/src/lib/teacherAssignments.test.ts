@@ -10,6 +10,8 @@ import {
   publishTeacherAssignment,
   reviseSubmissionGrade,
   loadGradeRevisions,
+  loadEditableTeacherAssignment,
+  updateTeacherAssignment,
 } from './teacherAssignments';
 
 const auth = vi.hoisted(() => ({ uid: 'teacher' }));
@@ -299,4 +301,71 @@ it('reads grade revisions only through a permission-checked teacher scope', asyn
   expect(getDocsFromServer).toHaveBeenCalledWith(
     'groups/course/assignments/work/submissions/student/gradeRevisions',
   );
+});
+
+
+const editable = {
+  title: '新版練習', description: '補充說明', dueAt: '',
+  allowLateSubmission: true,
+};
+
+it('loads an assignment only for its original author', async () => {
+  records['groups/course/assignments/work'] = {
+    type: 'assignment', createdBy: 'teacher', title: '原作業',
+    description: '說明', updatedAt: '2026-10-08T01:00:00Z',
+  };
+  const result = await loadEditableTeacherAssignment(scope, 'work');
+  expect(result.title).toBe('原作業');
+  records['groups/course/assignments/work'] = {
+    ...records['groups/course/assignments/work'], createdBy: 'another',
+  };
+  await expect(loadEditableTeacherAssignment(scope, 'work')).rejects.toThrow('沒有權限');
+});
+
+it('updates only editable assignment fields with optimistic concurrency', async () => {
+  records['groups/course/assignments/work'] = {
+    type: 'assignment', createdBy: 'teacher', published: true,
+    status: 'published', updatedAt: '2026-10-08T01:00:00Z',
+  };
+  await updateTeacherAssignment(scope, 'work', '2026-10-08T01:00:00.000Z', editable);
+  expect(transaction.update).toHaveBeenCalledWith(
+    'groups/course/assignments/work',
+    {
+      title: '新版練習', description: '補充說明', dueAt: null,
+      allowLateSubmission: true, updatedAt: 'server-time', lastEditedBy: 'teacher',
+    },
+  );
+});
+
+it('rejects stale assignment edits without any write', async () => {
+  records['groups/course/assignments/work'] = {
+    type: 'assignment', createdBy: 'teacher', published: true,
+    status: 'published', updatedAt: '2026-10-08T02:00:00Z',
+  };
+  await expect(updateTeacherAssignment(scope, 'work', '2026-10-08T01:00:00Z', editable))
+    .rejects.toThrow('其他操作更新');
+  expect(transaction.update).not.toHaveBeenCalled();
+});
+
+it('rejects editing assignments authored by another teacher or already closed', async () => {
+  records['groups/course/assignments/work'] = {
+    type: 'assignment', createdBy: 'other', published: true,
+    status: 'published', updatedAt: '2026-10-08T01:00:00Z',
+  };
+  await expect(updateTeacherAssignment(scope, 'work', '2026-10-08T01:00:00Z', editable))
+    .rejects.toThrow('原建立教師');
+  records['groups/course/assignments/work'] = {
+    ...records['groups/course/assignments/work'], createdBy: 'teacher', status: 'closed',
+  };
+  await expect(updateTeacherAssignment(scope, 'work', '2026-10-08T01:00:00Z', editable))
+    .rejects.toThrow('不可編輯');
+  expect(transaction.update).not.toHaveBeenCalled();
+});
+
+it('validates edited assignment fields before a database transaction', async () => {
+  await expect(updateTeacherAssignment(scope, 'work', null, { ...editable, title: ' ' }))
+    .rejects.toThrow('標題');
+  await expect(updateTeacherAssignment(scope, 'work', null, { ...editable, dueAt: 'not-a-date' }))
+    .rejects.toThrow('截止時間');
+  expect(runTransaction).not.toHaveBeenCalled();
 });
