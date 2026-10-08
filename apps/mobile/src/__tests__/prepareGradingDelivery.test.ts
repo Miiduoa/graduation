@@ -105,7 +105,7 @@ describe('demo grade notification isolation', () => {
 
   it('delivers a grade to the selected student, not another student', async () => {
     const prepared = prepareGradingDelivery(valid);
-    if (!prepared.ok) throw new Error('Valid grading fixture was rejected');
+    if ('reason' in prepared) throw new Error('Valid grading fixture was rejected');
 
     await simulateTeacherGrade({
       teacherUid: prepared.actorUid,
