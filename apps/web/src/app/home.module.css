@@ -595,6 +595,17 @@
 .menuPanel a:hover {
   background: var(--accent-soft);
 }
+.menuPanel .menuOverview {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 6px;
+  padding-bottom: 14px;
+  font-weight: 600;
+}
 
 .account button {
   border: 1px solid var(--border-strong);

@@ -1,5 +1,11 @@
 @import 'leaflet/dist/leaflet.css';
 
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
 /* Campus One shared theme. */
 
 :root {

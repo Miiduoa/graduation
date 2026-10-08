@@ -100,9 +100,11 @@ function StateNotice({ status, retry }: { status: string; retry: () => void }) {
 }
 export function MessagingShell({
   title,
+  section = 'conversations',
   children,
 }: {
   title: string;
+  section?: 'conversations' | 'notifications';
   children: (session: MessagingSession) => ReactNode;
 }) {
   const { user, loading } = useAuth();
@@ -119,21 +121,32 @@ export function MessagingShell({
   return (
     <SiteShell
       title={title}
-      subtitle="校園中的對話與通知。"
+      subtitle={
+        section === 'notifications'
+          ? '課程、活動與服務的新消息，都在這裡。'
+          : '接著上次的話題，與校園裡的人保持聯繫。'
+      }
       schoolName={session ? findSchoolById(session.schoolId)?.name : undefined}
     >
       <div className={styles.stack}>
         <nav className={styles.tabs} aria-label="訊息導覽">
-          <Link href="/dms">私人對話</Link>
-          <Link href="/messages">通知</Link>
+          <Link href="/dms" aria-current={section === 'conversations' ? 'page' : undefined}>
+            私人對話
+          </Link>
+          <Link href="/messages" aria-current={section === 'notifications' ? 'page' : undefined}>
+            通知
+          </Link>
         </nav>
         {loading ? (
           <StateNotice status="loading" retry={retry} />
         ) : !uid ? (
           <section className={styles.notice}>
             <h2>登入後查看訊息</h2>
-            <p>請使用自己的校園帳號。</p>
-            <Link className={styles.button} href="/login">
+            <p>登入校園帳號後，就能查看你的對話與通知。</p>
+            <Link
+              className={styles.primary}
+              href={`/login?returnUrl=${section === 'notifications' ? '%2Fmessages' : '%2Fdms'}`}
+            >
               前往登入
             </Link>
           </section>
@@ -189,6 +202,7 @@ export function PrivateConversationList({ session }: { session: MessagingSession
         <label className={styles.field}>
           搜尋對話
           <input
+            type="search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="搜尋姓名或最近訊息"
@@ -198,7 +212,7 @@ export function PrivateConversationList({ session }: { session: MessagingSession
           更新對話
         </button>
       </div>
-      <p className={styles.muted}>開啟你已加入的本校私人對話。顯示最近更新的 100 個對話。</p>
+      <p className={styles.muted}>最近更新的 100 個校內對話會顯示在這裡。</p>
       <StateNotice status={state.status} retry={retry} />
       {state.status === 'ready' &&
         (rows.length ? (
@@ -226,7 +240,9 @@ export function PrivateConversationList({ session }: { session: MessagingSession
                     </div>
                     <p>{row.preview || '尚無訊息內容'}</p>
                   </div>
-                  <time className={styles.muted}>{time(row.lastMessageAt)}</time>
+                  <time className={styles.muted} dateTime={row.lastMessageAt ?? undefined}>
+                    {time(row.lastMessageAt)}
+                  </time>
                 </Link>
               );
             })}
@@ -235,6 +251,11 @@ export function PrivateConversationList({ session }: { session: MessagingSession
           <section className={styles.notice}>
             <h2>{search.trim() ? '沒有符合的對話' : '目前沒有私人對話'}</h2>
             <p>{search.trim() ? '試著調整搜尋文字。' : '已有的本校私人對話會顯示在這裡。'}</p>
+            {search.trim() && (
+              <button className={styles.button} type="button" onClick={() => setSearch('')}>
+                清除搜尋
+              </button>
+            )}
           </section>
         ))}
     </div>
@@ -342,7 +363,7 @@ export function PrivateConversationView({
                         ? row.content
                         : '此類型訊息請在 App 中查看。'}
                   </p>
-                  <time>{time(row.createdAt)}</time>
+                  <time dateTime={row.createdAt ?? undefined}>{time(row.createdAt)}</time>
                 </li>
               ))
             ) : (
@@ -435,7 +456,7 @@ export function PrivateNotifications({ session }: { session: MessagingSession })
         </button>
       </div>
       <p className={styles.muted}>
-        顯示本人帳號與目前學校的通知，各來源最多 50 筆。相關操作請在對應功能完成。
+        查看目前學校與你的帳號收到的近期通知。開啟通知中的連結，可以前往處理。
       </p>
       <StateNotice status={state.status} retry={retry} />
       {error && (
@@ -454,13 +475,19 @@ export function PrivateNotifications({ session }: { session: MessagingSession })
                 const target = notificationDestination(notification);
                 const id = `${notification.source}:${notification.id}`;
                 return (
-                  <article key={id} className={styles.notification}>
+                  <article
+                    key={id}
+                    className={styles.notification}
+                    data-unread={!notification.read}
+                  >
                     <div className={styles.row}>
                       <h2>{notification.title || '通知'}</h2>
                       {!notification.read && <span className={styles.badge}>未讀</span>}
                     </div>
                     <p>{notification.body}</p>
-                    <time className={styles.muted}>{time(notification.createdAt)}</time>
+                    <time className={styles.muted} dateTime={notification.createdAt ?? undefined}>
+                      {time(notification.createdAt)}
+                    </time>
                     <div className={styles.actions}>
                       {target && (
                         <Link className={styles.button} href={target.href}>
@@ -485,6 +512,20 @@ export function PrivateNotifications({ session }: { session: MessagingSession })
           ) : (
             <section className={styles.notice}>
               <h2>{onlyUnread ? '目前沒有未讀通知' : '目前沒有本校通知'}</h2>
+              <p>
+                {onlyUnread
+                  ? '你可以切回全部通知，查看之前收到的消息。'
+                  : '收到課程、活動或服務的新消息時，會顯示在這裡。'}
+              </p>
+              {onlyUnread && (
+                <button
+                  className={styles.button}
+                  type="button"
+                  onClick={() => setOnlyUnread(false)}
+                >
+                  查看全部通知
+                </button>
+              )}
             </section>
           )}
         </>
