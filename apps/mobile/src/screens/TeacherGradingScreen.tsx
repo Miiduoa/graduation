@@ -1,7 +1,7 @@
 /**
  * Teacher Grading Screen — 教師端 mobile 批改作業
  *
- * 用 Rubric 或自由打分；可一次處理多份；同步寫 TronClass。
+ * 用 Rubric 批改示範繳交資料；只發本機事件，不寫入校務成績系統。
  */
 import React, { useState, useMemo } from 'react';
 import {
@@ -24,6 +24,7 @@ import { evaluateRubric, type Rubric, type RubricScore } from '@campus/shared';
 import { useAuth } from '../state/auth';
 import { simulateTeacherGrade } from '../services/demoActionSimulator';
 import { emitFeedbackDrafted } from '../services/roleEventBus';
+import { prepareGradingDelivery } from '../services/prepareGradingDelivery';
 
 interface Submission {
   id: string;
@@ -55,8 +56,8 @@ type RouteProps = {
 const SAMPLE_SUBMISSIONS: Submission[] = [
   {
     id: 's1',
-    studentName: '阿明',
-    studentId: 'U11401001',
+    studentName: '顧晉瑋',
+    studentId: 'DEMO-001',
     studentUid: 'demo_student_kuchih',
     submittedAt: '2026-05-12T22:30:00+08:00',
     isLate: false,
@@ -66,8 +67,9 @@ const SAMPLE_SUBMISSIONS: Submission[] = [
   },
   {
     id: 's2',
-    studentName: '小華',
-    studentId: 'U11401023',
+    studentName: '林佳玲',
+    studentId: 'DEMO-002',
+    studentUid: 'u1',
     submittedAt: '2026-05-13T09:00:00+08:00',
     isLate: true,
     content: '這是小華繳交的內容範例⋯⋯',
@@ -76,8 +78,9 @@ const SAMPLE_SUBMISSIONS: Submission[] = [
   },
   {
     id: 's3',
-    studentName: '小芳',
-    studentId: 'U11408102',
+    studentName: '王冠宇',
+    studentId: 'DEMO-003',
+    studentUid: 'u2',
     submittedAt: '2026-05-11T18:00:00+08:00',
     isLate: false,
     content: '這是小芳繳交的內容範例⋯⋯',
@@ -126,12 +129,13 @@ export default function TeacherGradingScreen(props: RouteProps) {
   const navigation = useNavigation<any>();
   const auth = useAuth();
   const assignmentTitle = props.route?.params?.assignmentTitle ?? '作業批改';
-  const assignmentId = props.route?.params?.assignmentId ?? '1';
-  const courseId = props.route?.params?.courseId ?? '101';
+  const assignmentId = String(props.route?.params?.assignmentId ?? '1');
+  const courseId = String(props.route?.params?.courseId ?? '71378');
   const courseName = props.route?.params?.courseName ?? '';
   const passingScore = props.route?.params?.passingScore ?? 60;
   const rubric = props.route?.params?.rubric ?? SAMPLE_RUBRIC;
-  const initialSubs = props.route?.params?.submissions ?? SAMPLE_SUBMISSIONS;
+  const initialSubs =
+    props.route?.params?.submissions ?? (courseId === '71378' ? SAMPLE_SUBMISSIONS : []);
 
   const [submissions, setSubmissions] = useState(initialSubs);
   const [activeIdx, setActiveIdx] = useState(0);
@@ -163,34 +167,41 @@ export default function TeacherGradingScreen(props: RouteProps) {
     }
     setSaving(true);
     try {
-      // ── Demo：emit cross-role events 給該學生 ──
-      const numericCourseId = Number(courseId) || 0;
-      const numericHwId = Number(assignmentId) || 1;
-      // Only route feedback when the submission has an explicit recipient.
-      // Never infer an account from the student's display name.
-      const studentTargetUid = sub.studentUid?.trim();
-      if (!studentTargetUid) {
-        Alert.alert('無法確認收件學生', '這份繳交資料沒有學生帳號識別碼，為避免將成績傳給其他人，已停止送出。');
+      const delivery = prepareGradingDelivery({
+        actorUid: auth.user?.uid,
+        studentUid: sub.studentUid,
+        studentName: sub.studentName,
+        courseId,
+        assignmentId,
+        score: evaluation.totalScore,
+      });
+      if (!delivery.ok) {
+        Alert.alert(
+          '無法發佈示範成績',
+          delivery.reason === 'student_missing'
+            ? '缺少學生帳號識別碼，請回到繳交清單確認資料，不能依姓名猜測收件人。'
+            : '教師身分或作業資料不完整，沒有發送任何成績事件。',
+        );
         return;
       }
       await simulateTeacherGrade({
-        teacherUid: auth.user?.uid ?? 'demo_teacher_chang',
-        teacherName: auth.profile?.displayName ?? '張怡君',
-        studentUid: studentTargetUid,
-        studentName: sub.studentName,
-        courseId: numericCourseId,
+        teacherUid: delivery.actorUid,
+        teacherName: auth.profile?.displayName ?? '示範教師',
+        studentUid: delivery.studentUid,
+        studentName: delivery.studentName,
+        courseId: delivery.courseId,
         courseName: courseName || assignmentTitle.split(' ')[0],
-        homeworkId: numericHwId,
+        homeworkId: delivery.assignmentId,
         homeworkTitle: assignmentTitle,
-        score: evaluation.totalScore,
+        score: delivery.score,
         totalScore: 100,
       });
       if (feedback.trim()) {
         await emitFeedbackDrafted({
-          actorUid: auth.user?.uid ?? 'demo_teacher_chang',
-          actorName: auth.profile?.displayName ?? '張怡君',
-          targetUids: [studentTargetUid],
-          courseId: numericCourseId,
+          actorUid: delivery.actorUid,
+          actorName: auth.profile?.displayName ?? '示範教師',
+          targetUids: [delivery.studentUid],
+          courseId: delivery.courseId,
           courseName: courseName || assignmentTitle.split(' ')[0],
           payload: {
             studentName: sub.studentName,
@@ -203,7 +214,7 @@ export default function TeacherGradingScreen(props: RouteProps) {
       // Demo-only local update; no real grade API is called.
       setSubmissions((ss) =>
         ss.map((s, i) =>
-          i === activeIdx
+          s.id === sub.id
             ? { ...s, currentGrade: evaluation.totalScore, currentFeedback: feedback }
             : s,
         ),
@@ -213,11 +224,13 @@ export default function TeacherGradingScreen(props: RouteProps) {
       setComments({});
       setFeedback('');
       // 跳到下一份
-      const next = submissions.findIndex((s, i) => i > activeIdx && s.currentGrade === null);
+      const nextAfter = submissions.findIndex((s, i) => i > activeIdx && s.currentGrade === null);
+      const nextBefore = submissions.findIndex((s, i) => i < activeIdx && s.currentGrade === null);
+      const next = nextAfter >= 0 ? nextAfter : nextBefore;
       if (next >= 0) {
         setActiveIdx(next);
       } else {
-        Alert.alert('🎉 全部批改完成', `${assignmentTitle} 所有繳交都已給分。`, [
+        Alert.alert('示範批改完成', `${assignmentTitle} 已處理所有待批改的示範繳交。`, [
           { text: '完成', onPress: () => navigation.goBack() },
         ]);
       }
@@ -227,6 +240,17 @@ export default function TeacherGradingScreen(props: RouteProps) {
       setSaving(false);
     }
   };
+
+  if (submissions.length === 0) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', padding: 24 }}>
+        <Text style={{ fontSize: 16, fontWeight: '600' }}>沒有可批改的繳交資料</Text>
+        <Text style={{ marginTop: 8, color: '#666' }}>
+          此頁不會為其他課程自動產生學生或成績，請從作業清單開啟實際繳交資料。
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
@@ -261,11 +285,17 @@ export default function TeacherGradingScreen(props: RouteProps) {
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 80 }}>
+        <View style={{ padding: 12, backgroundColor: '#FFF4D6', borderRadius: 8 }}>
+          <Text style={{ fontSize: 12, color: '#6C4B00', lineHeight: 18 }}>
+            示範批改：僅在本機建立成績與回饋通知，不會寫入 TronClass 或正式成績紀錄。
+          </Text>
+        </View>
         {/* 學生 tabs */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           {submissions.map((s, i) => (
             <Pressable
               key={s.id}
+              disabled={saving}
               onPress={() => {
                 setActiveIdx(i);
                 setScores({});
@@ -479,7 +509,7 @@ export default function TeacherGradingScreen(props: RouteProps) {
             <ActivityIndicator color="#fff" />
           ) : (
             <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>
-              {allComplete ? '儲存並批改下一份' : '請完成所有評分項'}
+              {allComplete ? '發佈示範成績並繼續' : '請完成所有評分項'}
             </Text>
           )}
         </Pressable>
