@@ -39,6 +39,10 @@ import {
 import { useAuth } from '../state/auth';
 import { emitAttendanceCheckedIn } from '../services/roleEventBus';
 import {
+  isAttendanceMethodSupported,
+  parseAttendanceConfirmation,
+} from '../services/attendanceConfirmation';
+import {
   canCheckInAttendance,
   getAttendanceCheckInTargets,
 } from '../services/roleEventTargets';
@@ -94,8 +98,8 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
   const [token, setToken] = useState('');
   const [code, setCode] = useState('');
   const [location, setLocation] = useState<{ lat: number; lng: number; accuracyMeters?: number } | null>(null);
-  const [selfieSimilarity, setSelfieSimilarity] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [serverConfirmed, setServerConfirmed] = useState(false);
   const [result, setResult] = useState<{ status: string; flags: string[]; valid: boolean; reason?: string } | null>(
     null,
   );
@@ -194,31 +198,6 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
     }
   }, []);
 
-  const handleTakeSelfie = useCallback(async () => {
-    try {
-      const ImagePicker = await import('expo-image-picker').catch(() => null);
-      if (!ImagePicker) {
-        Alert.alert('需要相機', '請安裝 expo-image-picker');
-        return;
-      }
-      const perm = await ImagePicker.requestCameraPermissionsAsync();
-      if (perm.status !== 'granted') {
-        Alert.alert('無法使用相機', '請開啟相機權限');
-        return;
-      }
-      const res = await ImagePicker.launchCameraAsync({
-        cameraType: ImagePicker.CameraType.Front,
-        quality: 0.5,
-      });
-      if (res.canceled) return;
-      // 實際應該把照片送雲端做臉部比對。這裡 demo 用隨機高相似度。
-      const mockSimilarity = 0.7 + Math.random() * 0.25;
-      setSelfieSimilarity(Math.round(mockSimilarity * 100) / 100);
-    } catch (e) {
-      Alert.alert('拍照失敗', String((e as Error)?.message ?? e));
-    }
-  }, []);
-
   const handleScanQr = useCallback(() => {
     Alert.alert('QR 掃描', 'demo 模式：請手動輸入老師螢幕上的 6 位 token', [
       {
@@ -228,109 +207,125 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
   }, []);
 
   const submitAttendance = useCallback(async () => {
+    if (submitting) return;
+    if (!isAttendanceMethodSupported(cfg.method, cfg.multiFactorMethods)) {
+      Alert.alert('無法使用此簽到方式', '此畫面沒有實作可信的自拍活體辨識或指定的多因素組合，請聯絡授課老師。');
+      return;
+    }
+
+    const actorUid = auth.user?.uid?.trim();
+    if (!actorUid || !canCheckInAttendance(auth.profile?.role)) {
+      Alert.alert('無法簽到', '請以已登入的學生身分操作。');
+      return;
+    }
+
     setSubmitting(true);
+    setServerConfirmed(false);
     setResult(null);
     try {
       const claim: AttendanceClaim = {
-        uid: 'me',
+        uid: actorUid,
         claimedAt: new Date().toISOString(),
         token: token || undefined,
         code: code || undefined,
         location: location ?? undefined,
-        selfieSimilarity: selfieSimilarity ?? undefined,
       };
 
-      // ── 本地預檢（純函式，不需網路）──
+      // Local validation is a preflight only; it must never publish attendance.
       const localResult = verifyAttendance(claim, cfg);
       setResult(localResult);
-
       if (!localResult.valid) {
         Alert.alert('簽到未通過', localResult.reason ?? '請檢查輸入');
         return;
       }
 
-      // ── 通過本地預檢 → 呼後端再驗一次（防 client 繞過）──
       try {
         const { httpsCallable, getFunctions } = await import('firebase/functions');
         const { getFirebaseApp, getCloudFunctionRegion } = await import('../firebase');
         const app = getFirebaseApp();
-        const functions = getFunctions(app, getCloudFunctionRegion());
-        const callable = httpsCallable(functions, 'verifyAttendanceClaim');
-        await callable({ courseId, sessionId, claim });
+        const callable = httpsCallable(
+          getFunctions(app, getCloudFunctionRegion()),
+          'verifyAttendanceClaim',
+        );
+        const response = await callable({ courseId, sessionId, claim });
+        const confirmation = parseAttendanceConfirmation(response.data);
+        if (!confirmation) {
+          throw new Error('Attendance was not confirmed by the server');
+        }
+
+        setServerConfirmed(true);
+        setResult({ ...localResult, status: confirmation.status });
 
         try {
           const { onAttendanceCheckin } = await import('../services/companionHooks');
           onAttendanceCheckin({ sessionId: sessionId ?? '', courseSpaceId: courseId });
         } catch {
-          /* swallow */
+          // Companion hints do not affect the verified attendance result.
         }
 
-        // ── Demo 跨角色：emit 給老師（AttendanceLive / TeacherCockpit 即時看到簽到）──
-        // 只有學生身分才會真正 emit；老師本人簽到不會送給自己
-        try {
-          const actorUid = auth.user?.uid ?? 'demo_student_kuchih';
-          const actorRole = auth.profile?.role ?? null;
-          const targets = getAttendanceCheckInTargets(actorUid);
-          if (canCheckInAttendance(actorRole) && targets.length > 0) {
-            const numericCourseId = Number(String(courseId).replace(/^tc:/, '')) || 0;
-            const courseName = DEMO_COURSES.find((c) => c.id === numericCourseId)?.name ?? '課程';
-            await emitAttendanceCheckedIn({
-              actorUid,
-              actorName: auth.profile?.displayName ?? '學生',
-              targetUids: targets,
-              courseId: numericCourseId,
-              courseName,
-              payload: {
-                sessionId: sessionId ?? '',
-                studentName: auth.profile?.displayName ?? '學生',
-                status: localResult.status === 'late' ? 'late' : 'present',
-                method: cfg.method,
-              },
-            });
+        // Local demo inbox notification only; never target a demo teacher for real courses.
+        if (isDemoCourseId(toDemoCourseId(courseId))) {
+          try {
+            const targets = getAttendanceCheckInTargets(actorUid);
+            if (targets.length > 0) {
+              const numericCourseId = Number(String(courseId).replace(/^tc:/, '')) || 0;
+              const courseName = DEMO_COURSES.find((c) => c.id === numericCourseId)?.name ?? '課程';
+              await emitAttendanceCheckedIn({
+                actorUid,
+                actorName: auth.profile?.displayName ?? '學生',
+                targetUids: targets,
+                courseId: numericCourseId,
+                courseName,
+                payload: {
+                  sessionId: sessionId ?? '',
+                  studentName: auth.profile?.displayName ?? '學生',
+                  status: confirmation.status,
+                  method: cfg.method,
+                },
+              });
+            }
+          } catch {
+            // A local demo notification failure must not undo the server result.
           }
-        } catch {
-          /* swallow */
         }
 
-        Alert.alert('✅ 簽到完成', `狀態：${localResult.status === 'late' ? '遲到' : '準時'}`, [
+        Alert.alert('簽到完成', `伺服器已確認：${confirmation.status === 'late' ? '遲到' : '出席'}`, [
           { text: '完成', onPress: () => navigation.goBack() },
         ]);
       } catch {
-        // 後端失敗 → 仍視為本地簽到成功，會在連線時補（仍 emit 給老師）
-        try {
-          const actorUid = auth.user?.uid ?? 'demo_student_kuchih';
-          const actorRole = auth.profile?.role ?? null;
-          const targets = getAttendanceCheckInTargets(actorUid);
-          if (canCheckInAttendance(actorRole) && targets.length > 0) {
-            const numericCourseId = Number(String(courseId).replace(/^tc:/, '')) || 0;
-            const courseName = DEMO_COURSES.find((c) => c.id === numericCourseId)?.name ?? '課程';
-            await emitAttendanceCheckedIn({
-              actorUid,
-              actorName: auth.profile?.displayName ?? '學生',
-              targetUids: targets,
-              courseId: numericCourseId,
-              courseName,
-              payload: {
-                sessionId: sessionId ?? '',
-                studentName: auth.profile?.displayName ?? '學生',
-                status: localResult.status === 'late' ? 'late' : 'present',
-                method: cfg.method,
-              },
-            });
-          }
-        } catch {
-          /* swallow */
-        }
-        Alert.alert('✅ 本地簽到', '網路恢復後會自動同步');
+        setServerConfirmed(false);
+        setResult({
+          ...localResult,
+          valid: false,
+          reason: 'server_not_confirmed',
+          flags: [...localResult.flags, 'server_not_confirmed'],
+        });
+        Alert.alert(
+          '尚未完成簽到',
+          '本機檢查通過，但伺服器沒有確認出席紀錄。沒有自動補傳機制，請重試或聯絡授課老師。',
+        );
       }
     } catch (e) {
       Alert.alert('簽到失敗', String((e as Error)?.message ?? e));
     } finally {
       setSubmitting(false);
     }
-  }, [token, code, location, selfieSimilarity, cfg, courseId, sessionId, navigation]);
+  }, [
+    token,
+    code,
+    location,
+    cfg,
+    courseId,
+    sessionId,
+    navigation,
+    submitting,
+    auth.user?.uid,
+    auth.profile?.role,
+    auth.profile?.displayName,
+  ]);
 
   const ready = useMemo(() => {
+    if (!isAttendanceMethodSupported(cfg.method, cfg.multiFactorMethods)) return false;
     switch (cfg.method) {
       case 'rotating_qr':
         return !!token;
@@ -338,15 +333,13 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
         return !!code;
       case 'geofence':
         return !!location;
-      case 'selfie_liveness':
-        return selfieSimilarity !== null;
       case 'multi_factor':
         // 至少要 token + location（demo）
         return !!token && !!location;
       default:
         return false;
     }
-  }, [cfg.method, token, code, location, selfieSimilarity]);
+  }, [cfg.method, cfg.multiFactorMethods, token, code, location]);
 
   const demoCourse = isDemoCourseId(toDemoCourseId(courseId));
 
@@ -594,31 +587,10 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
         )}
 
         {cfg.method === 'selfie_liveness' && (
-          <View>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: theme.colors.text }}>🤳 自拍驗證</Text>
-            <Pressable
-              onPress={handleTakeSelfie}
-              style={{
-                marginTop: 6,
-                padding: 12,
-                borderRadius: theme.radius.md,
-                backgroundColor: selfieSimilarity !== null ? theme.colors.successSoft : theme.colors.primary,
-                alignItems: 'center',
-                minHeight: 48,
-                justifyContent: 'center',
-              }}
-            >
-              <Text
-                style={{
-                  color: selfieSimilarity !== null ? theme.colors.success : theme.colors.onAccent,
-                  fontWeight: '600',
-                }}
-              >
-                {selfieSimilarity !== null
-                  ? `✓ 比對通過（相似度 ${selfieSimilarity}）`
-                  : '拍自拍驗證身份'}
-              </Text>
-            </Pressable>
+          <View style={{ padding: 12, backgroundColor: theme.colors.gentleWarnSoft, borderRadius: theme.radius.md }}>
+            <Text style={{ color: theme.colors.text, lineHeight: 20 }}>
+              自拍活體驗證尚未接入可信的身分辨識服務，這裡不會使用隨機分數判定通過。請改用授課老師提供的其他簽到方式。
+            </Text>
           </View>
         )}
 
@@ -672,7 +644,7 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
               fontWeight: '500',
             }}
           >
-            結果：{result.status}
+            {serverConfirmed ? '伺服器已確認簽到' : result.valid ? '本機預檢通過，仍待伺服器確認' : '簽到未完成'}：{result.status}
             {result.flags.length > 0 ? ` ・ 旗標：${result.flags.join(', ')}` : ''}
           </Text>
         </View>

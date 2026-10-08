@@ -140,7 +140,15 @@ Mobile 與 Web 不各自重寫所有邏輯，能共用的資料結構與規則�
 
 部分校園服務不是永遠可用，因此部分流程設計成示範資料、快取或離線能力可以獨立運作，而不是整個 App 一斷線就失效。
 
-### 4. AI is a layer, not the product
+### 4. Grade notifications use explicit recipients
+
+The teacher grading screen is still a local demo, not a TronClass grade writer. It only publishes a local grade event after checking the teacher account and teaching role, explicit student UID, assignment IDs and score. It does not infer a recipient from a name or student number.
+
+- [Grading screen](apps/mobile/src/screens/TeacherGradingScreen.tsx)
+- [Delivery checks](apps/mobile/src/services/prepareGradingDelivery.ts)
+- [Recipient isolation tests](apps/mobile/src/__tests__/prepareGradingDelivery.test.ts)
+
+### 5. AI is a layer, not the product
 
 AI 功能只負責整理、推理與提供下一步建議；課程、訊息、導航等核心流程本身仍有一般程式邏輯與護欄。
 
@@ -194,7 +202,7 @@ pnpm test:rules
 
 Mobile 另外包含 Jest 與 Maestro E2E flows；Web 使用 Vitest。
 
-最近一個完整驗證成功的 baseline：Mobile **1319 tests**、Web **133 tests**、Functions **165 tests**、Firestore Rules **46/46**，Expo Doctor **16/16**。這些數字與已知驗證債務都記在 [TESTING_EVIDENCE](docs/TESTING_EVIDENCE.md)，不在 README 假裝成 coverage 證明。
+各項測試數字與安全稽核結果會隨版本改變，不在首頁維護可能過時的統計。請查看 [可追溯的 CI 測試紀錄](docs/TESTING_EVIDENCE.md) 與 [依賴風險清單](docs/DEPENDENCY_RISK_REGISTER.md)；主要 CI 的成功不代表原生 Maestro E2E 或全部安全警示皆已通過。
 
 一般 CI 會驗證 Expo Doctor、公開 app config 與 `eas.json` build profile，但**不需要 `EXPO_TOKEN`、也不會提交 EAS Cloud build**。真正的 iOS / Android 雲端建置放在手動的 `EAS Build` / `Release` workflow，只有執行雲端建置時才需要 Expo 帳號憑證。
 
@@ -210,6 +218,7 @@ https://github.com/Miiduoa/graduation/actions
 - [Architecture overview](docs/ARCHITECTURE_OVERVIEW.md)
 - [Architecture Decision Records](docs/adr/README.md)
 - [Testing evidence](docs/TESTING_EVIDENCE.md)
+- [Attendance verification boundary](docs/ATTENDANCE_VERIFICATION.md) — server confirmation requirements and current limitations
 - `docs/APP_ROLE_DATA_FLOW_ARCHITECTURE.md`
 - `docs/CROSS_ROLE_DATA_FLOW.md`
 - `docs/AI_ASSISTANT_ARCHITECTURE.md`
