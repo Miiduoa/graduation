@@ -11,7 +11,6 @@ import { BusStopDetailScreen } from './BusStopDetailScreen';
 import { TripPlannerScreen } from './TripPlannerScreen';
 import { IndoorFloorMapScreen } from './IndoorFloorMapScreen';
 import { TransportHubScreen } from './TransportHubScreen';
-// AI-First v1（已是主入口；舊版檔案已刪除）
 import CafeteriaAiFirstScreen from './CafeteriaAiFirstScreen';
 import PoiDetailAiFirstScreen from './PoiDetailAiFirstScreen';
 import BusAiFirstScreen from './BusAiFirstScreen';
@@ -45,8 +44,7 @@ export function MapStack() {
         component={CampusHubScreen}
         options={{ title: '校園', headerShown: false }}
       />
-      {/* 校園地圖 — Map 與 MapV2 為同一個新版實作（GoogleMapsLikeScreen）；
-          'Map' 保留只是為了相容舊 deep link / AI agent 路由；新代碼一律用 'MapV2'。 */}
+      {/* Map 保留為舊連結的相容入口。 */}
       <Stack.Screen
         name="Map"
         component={GoogleMapsLikeScreen}
@@ -70,7 +68,7 @@ export function MapStack() {
       <Stack.Screen
         name="AccessibleRoute"
         component={AccessibleRouteScreen}
-        options={{ title: '無障礙路線' }}
+        options={{ title: '無障礙設施', headerShown: false }}
       />
       <Stack.Screen
         name="BusSchedule"
