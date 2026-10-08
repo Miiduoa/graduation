@@ -1,0 +1,253 @@
+.page {
+  min-height: 100dvh;
+  background: var(--paper, var(--bg));
+  color: var(--text);
+}
+.main {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 56px 32px 80px;
+}
+.heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 36px;
+}
+.heading h1 {
+  overflow-wrap: anywhere;
+  font-size: clamp(30px, 4vw, 44px);
+  line-height: 1.25;
+  letter-spacing: -0.04em;
+  margin: 8px 0 14px;
+}
+.eyebrow {
+  color: var(--muted);
+  font-size: 13px;
+  letter-spacing: 0.12em;
+}
+.muted {
+  color: var(--muted);
+  line-height: 1.7;
+}
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 32px;
+  align-items: start;
+}
+.focus {
+  background: var(--brand);
+  color: var(--on-brand);
+  padding: 36px;
+  border-radius: 6px;
+  margin-bottom: 32px;
+}
+.focus h2 {
+  margin: 10px 0 14px;
+  font-size: 30px;
+  font-weight: 500;
+}
+.focus p {
+  line-height: 1.8;
+  opacity: 0.86;
+}
+.focus a {
+  color: inherit;
+  text-underline-offset: 6px;
+}
+.panel {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 28px;
+  border-radius: 6px;
+  margin-bottom: 24px;
+  min-width: 0;
+}
+.panel h2 {
+  margin: 0 0 20px;
+  font-size: 21px;
+  font-weight: 600;
+}
+.panel h3 {
+  margin: 0 0 12px;
+  font-size: 18px;
+}
+.compose summary {
+  cursor: pointer;
+  font-size: 20px;
+  font-weight: 600;
+}
+.compose[open] summary {
+  margin-bottom: 24px;
+}
+.list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.list li + li {
+  border-top: 1px solid var(--border);
+}
+.row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 0;
+  text-decoration: none;
+  color: inherit;
+}
+.row strong {
+  display: block;
+  margin-bottom: 8px;
+  overflow-wrap: anywhere;
+}
+.row small {
+  color: var(--muted);
+}
+.row:hover strong {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.form {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+.form fieldset {
+  display: grid;
+  gap: 18px;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.form label {
+  display: grid;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.form input,
+.form textarea {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  padding: 12px;
+  font: inherit;
+}
+.form textarea {
+  min-height: 140px;
+  resize: vertical;
+}
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  border: 1px solid var(--brand);
+  border-radius: 4px;
+  background: var(--brand);
+  color: var(--on-brand);
+  padding: 10px 18px;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  text-decoration: none;
+  gap: 12px;
+}
+.button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.secondary {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+.notice {
+  border-left: 3px solid var(--danger);
+  background: var(--danger-soft);
+  padding: 16px 20px;
+  margin-bottom: 24px;
+  line-height: 1.7;
+}
+.notice button {
+  margin-left: 14px;
+}
+.note {
+  background: var(--panel);
+  padding: 20px;
+  border-radius: 4px;
+  font-size: 14px;
+  line-height: 1.8;
+}
+.prose {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.85;
+}
+.receipt {
+  background: var(--success-soft);
+  padding: 18px;
+  border-left: 3px solid var(--success);
+  margin: 20px 0;
+}
+.login {
+  max-width: 480px;
+  margin: 40px auto;
+}
+.code {
+  font-size: 28px;
+  font-family: monospace;
+  letter-spacing: 0.16em;
+  overflow-wrap: anywhere;
+}
+.footer {
+  max-width: 1120px;
+  margin: auto;
+  border-top: 1px solid var(--border);
+  padding: 24px 32px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.footer a {
+  color: inherit;
+}
+.page :focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 4px;
+}
+@media (max-width: 760px) {
+  .main {
+    padding: 32px 20px 56px;
+  }
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+  .heading {
+    align-items: start;
+    flex-direction: column;
+  }
+  .panel,
+  .focus {
+    padding: 24px;
+  }
+  .login {
+    margin-top: 0;
+  }
+}
