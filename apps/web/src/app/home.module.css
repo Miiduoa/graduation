@@ -37,6 +37,7 @@
   top: 8px;
 }
 .header {
+  position: relative;
   max-width: 1360px;
   margin: auto;
   padding: 24px 48px;
@@ -416,18 +417,32 @@
 }
 .footer {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
   gap: 18px;
   border-top: 1px solid var(--line);
   margin-top: 48px;
   padding-top: 20px;
   color: var(--soft);
-  font-size: 11px;
+  font-size: 12px;
 }
 .footer > span:first-child {
   font-weight: 700;
 }
+.footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
 .footer a {
-  margin-left: auto;
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+}
+.footer a:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
 }
 @media (max-width: 1050px) {
   .header {
@@ -516,7 +531,7 @@
   }
   .footer {
     flex-wrap: wrap;
-    font-size: 10px;
+    font-size: 12px;
     gap: 10px;
   }
   .course {
@@ -576,20 +591,21 @@
 }
 .menuPanel {
   position: absolute;
-  right: 0;
+  left: 0;
   top: 100%;
   z-index: 10;
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  width: 260px;
-  padding: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 24px;
+  width: 480px;
+  padding: 20px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--paper);
   box-shadow: 0 6px 16px color-mix(in srgb, var(--text) 8%, transparent);
 }
 .menuPanel a {
-  padding: 10px;
+  padding: 10px 8px;
   color: var(--ink);
 }
 .menuPanel a:hover {
@@ -602,9 +618,55 @@
   justify-content: space-between;
   gap: 12px;
   border-bottom: 1px solid var(--border);
-  margin-bottom: 6px;
+  margin-bottom: 0;
   padding-bottom: 14px;
   font-weight: 600;
+}
+
+.menuGroup {
+  min-width: 0;
+}
+.menuGroup h2 {
+  margin: 0 8px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--soft);
+  letter-spacing: 0.06em;
+}
+.menuGroup a {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  border-radius: var(--radius-xs);
+  font-size: 14px;
+}
+.menuGroup a span {
+  color: var(--soft);
+  font-size: 12px;
+}
+.menuGroup a[aria-current] {
+  border-bottom: 0;
+  background: var(--accent-soft);
+}
+@media (max-width: 1050px) {
+  .menu {
+    position: static;
+  }
+  .menuPanel {
+    left: auto;
+    right: 28px;
+  }
+}
+@media (max-width: 760px) {
+  .menuPanel {
+    left: auto;
+    right: 20px;
+    width: min(480px, calc(100vw - 40px));
+    padding: 16px;
+    gap: 16px 12px;
+  }
 }
 
 .account button {

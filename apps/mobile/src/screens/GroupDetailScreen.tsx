@@ -1,5 +1,5 @@
 /* eslint-disable */
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useSyncExternalStore } from 'react';
 import { ScrollView, Text, TextInput, View, Pressable, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -14,7 +14,7 @@ import {
 } from '../ui/components';
 import { generateJoinCode } from '../utils/joinCode';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
-import { theme, softShadowStyle } from '../ui/theme';
+import { theme, softShadowStyle, getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useSchool } from '../state/school';
 import { useAuth } from '../state/auth';
 import { useAsyncList } from '../hooks/useAsyncList';
@@ -78,36 +78,162 @@ type Comment = {
   isAI?: boolean;
 };
 
-
 // ─── Demo data ─────────────────────────────────────────────────────────────
 const DEMO_GROUPS_META: Record<string, Group> = {
-  'grp-db-sys': { id: 'grp-db-sys', schoolId: 'demo', type: 'course', name: '資料庫系統', joinCode: 'DBSYS001', isPublished: true, verification: { status: 'verified_teacher' } },
-  'grp-prog2':  { id: 'grp-prog2',  schoolId: 'demo', type: 'course', name: '程式設計二',   joinCode: 'PROG0002', isPublished: true, verification: { status: 'verified_teacher' } },
-  'grp-algo':   { id: 'grp-algo',   schoolId: 'demo', type: 'course', name: '演算法導論',   joinCode: 'ALGO0003', isPublished: true, verification: { status: 'unverified' } },
-  'grp-web':    { id: 'grp-web',    schoolId: 'demo', type: 'course', name: 'Web 程式設計', joinCode: 'WEBP0004', isPublished: true, verification: { status: 'verified_teacher' } },
-  'grp-club-im':    { id: 'grp-club-im',    schoolId: 'demo', type: 'club',  name: '資管學會',       joinCode: 'IMCLUB1X', isPublished: true },
-  'grp-admin-dept': { id: 'grp-admin-dept', schoolId: 'demo', type: 'admin', name: '資管系行政群組', joinCode: 'ADMIN001', isPublished: false },
+  'grp-db-sys': {
+    id: 'grp-db-sys',
+    schoolId: 'demo',
+    type: 'course',
+    name: '資料庫系統',
+    joinCode: 'DBSYS001',
+    isPublished: true,
+    verification: { status: 'verified_teacher' },
+  },
+  'grp-prog2': {
+    id: 'grp-prog2',
+    schoolId: 'demo',
+    type: 'course',
+    name: '程式設計二',
+    joinCode: 'PROG0002',
+    isPublished: true,
+    verification: { status: 'verified_teacher' },
+  },
+  'grp-algo': {
+    id: 'grp-algo',
+    schoolId: 'demo',
+    type: 'course',
+    name: '演算法導論',
+    joinCode: 'ALGO0003',
+    isPublished: true,
+    verification: { status: 'unverified' },
+  },
+  'grp-web': {
+    id: 'grp-web',
+    schoolId: 'demo',
+    type: 'course',
+    name: 'Web 程式設計',
+    joinCode: 'WEBP0004',
+    isPublished: true,
+    verification: { status: 'verified_teacher' },
+  },
+  'grp-club-im': {
+    id: 'grp-club-im',
+    schoolId: 'demo',
+    type: 'club',
+    name: '資管學會',
+    joinCode: 'IMCLUB1X',
+    isPublished: true,
+  },
+  'grp-admin-dept': {
+    id: 'grp-admin-dept',
+    schoolId: 'demo',
+    type: 'admin',
+    name: '資管系行政群組',
+    joinCode: 'ADMIN001',
+    isPublished: false,
+  },
 };
 
 const DEMO_POSTS_FOR_GROUP: Record<string, Post[]> = {
   'grp-db-sys': [
-    { id: 'post-db-1', kind: 'announcement', title: '期中考範圍公告', body: '期中考範圍為第1章至第5章，重點包含 ER Model、正規化（1NF~3NF）、SQL 基礎。', authorId: 'demo_teacher_chen', authorName: '陳雅君老師', pinned: true, likes: 8 },
-    { id: 'post-db-2', kind: 'question', title: '請問 3NF 和 BCNF 有什麼差異？', body: '課本看起來有點模糊，可以請老師或同學解釋一下嗎？', authorId: 'demo_student_ku', authorName: '顧晉瑋', solved: false, likes: 3, commentCount: 2 },
-    { id: 'post-db-3', kind: 'post', title: '期末專題分組討論', body: '大家好，我想找 2~3 位同學一起做期末專題，有意願的同學請私訊我！', authorId: 'demo_student_peer', authorName: '林宏志', likes: 5 },
+    {
+      id: 'post-db-1',
+      kind: 'announcement',
+      title: '期中考範圍公告',
+      body: '期中考範圍為第1章至第5章，重點包含 ER Model、正規化（1NF~3NF）、SQL 基礎。',
+      authorId: 'demo_teacher_chen',
+      authorName: '陳雅君老師',
+      pinned: true,
+      likes: 8,
+    },
+    {
+      id: 'post-db-2',
+      kind: 'question',
+      title: '請問 3NF 和 BCNF 有什麼差異？',
+      body: '課本看起來有點模糊，可以請老師或同學解釋一下嗎？',
+      authorId: 'demo_student_ku',
+      authorName: '顧晉瑋',
+      solved: false,
+      likes: 3,
+      commentCount: 2,
+    },
+    {
+      id: 'post-db-3',
+      kind: 'post',
+      title: '期末專題分組討論',
+      body: '大家好，我想找 2~3 位同學一起做期末專題，有意願的同學請私訊我！',
+      authorId: 'demo_student_peer',
+      authorName: '林宏志',
+      likes: 5,
+    },
   ],
   'grp-prog2': [
-    { id: 'post-p2-1', kind: 'announcement', title: '作業二繳交期限提醒', body: '作業二（遞迴與排序演算法）請於本週五 23:59 前上傳至 Moodle，遲交扣 20%。', authorId: 'demo_teacher_chen', authorName: '陳雅君老師', pinned: true, likes: 6 },
-    { id: 'post-p2-2', kind: 'question', title: 'Quick Sort 為何最壞是 O(n²)？', body: '上課說平均是 O(n log n)，但最壞是 O(n²)，這種情況什麼時候會發生？', authorId: 'demo_student_ku', authorName: '顧晉瑋', solved: true, likes: 7, commentCount: 3 },
+    {
+      id: 'post-p2-1',
+      kind: 'announcement',
+      title: '作業二繳交期限提醒',
+      body: '作業二（遞迴與排序演算法）請於本週五 23:59 前上傳至 Moodle，遲交扣 20%。',
+      authorId: 'demo_teacher_chen',
+      authorName: '陳雅君老師',
+      pinned: true,
+      likes: 6,
+    },
+    {
+      id: 'post-p2-2',
+      kind: 'question',
+      title: 'Quick Sort 為何最壞是 O(n²)？',
+      body: '上課說平均是 O(n log n)，但最壞是 O(n²)，這種情況什麼時候會發生？',
+      authorId: 'demo_student_ku',
+      authorName: '顧晉瑋',
+      solved: true,
+      likes: 7,
+      commentCount: 3,
+    },
   ],
   'grp-web': [
-    { id: 'post-web-1', kind: 'announcement', title: '本週課程：React Hooks 複習', body: '本週將複習 useState / useEffect，請預習教材第 8 章。', authorId: 'demo_teacher_chen', authorName: '陳雅君老師', pinned: true, likes: 4 },
+    {
+      id: 'post-web-1',
+      kind: 'announcement',
+      title: '本週課程：React Hooks 複習',
+      body: '本週將複習 useState / useEffect，請預習教材第 8 章。',
+      authorId: 'demo_teacher_chen',
+      authorName: '陳雅君老師',
+      pinned: true,
+      likes: 4,
+    },
   ],
   'grp-club-im': [
-    { id: 'post-club-1', kind: 'announcement', title: '資管之夜 2026 籌備公告', body: '資管之夜預計於 2026/06/20 舉行，目前正在招募工作人員！', authorId: 'demo_club_wei', authorName: '李威廷（學會長）', pinned: true, likes: 15 },
-    { id: 'post-club-2', kind: 'post', title: '學會幹部聚會通知', body: '下週二 17:00 請各幹部到系辦集合討論活動細節，請準時出席。', authorId: 'demo_club_wei', authorName: '李威廷（學會長）', likes: 4 },
+    {
+      id: 'post-club-1',
+      kind: 'announcement',
+      title: '資管之夜 2026 籌備公告',
+      body: '資管之夜預計於 2026/06/20 舉行，目前正在招募工作人員！',
+      authorId: 'demo_club_wei',
+      authorName: '李威廷（學會長）',
+      pinned: true,
+      likes: 15,
+    },
+    {
+      id: 'post-club-2',
+      kind: 'post',
+      title: '學會幹部聚會通知',
+      body: '下週二 17:00 請各幹部到系辦集合討論活動細節，請準時出席。',
+      authorId: 'demo_club_wei',
+      authorName: '李威廷（學會長）',
+      likes: 4,
+    },
   ],
   'grp-admin-dept': [
-    { id: 'post-admin-1', kind: 'announcement', title: '本學期課程審查進度更新', body: '請各位老師於本週五前完成課程大綱送審。', authorId: 'demo_admin_huang', authorName: '黃系主任', pinned: true, likes: 2 },
+    {
+      id: 'post-admin-1',
+      kind: 'announcement',
+      title: '本學期課程審查進度更新',
+      body: '請各位老師於本週五前完成課程大綱送審。',
+      authorId: 'demo_admin_huang',
+      authorName: '黃系主任',
+      pinned: true,
+      likes: 2,
+    },
   ],
 };
 
@@ -119,6 +245,7 @@ function getDemoMemberRole(role: string | undefined, groupId: string): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function GroupDetailScreen(props: any) {
+  useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const nav = props?.navigation;
   const groupId: string | undefined = props?.route?.params?.groupId;
   const { school } = useSchool();
@@ -202,7 +329,8 @@ export function GroupDetailScreen(props: any) {
     comment: Comment | null;
     commentCount: number;
   }>(async () => {
-    if (isFirebaseMockMode()) return posts.map((p) => ({ postId: p.id, comment: null, commentCount: p.commentCount ?? 0 }));
+    if (isFirebaseMockMode())
+      return posts.map((p) => ({ postId: p.id, comment: null, commentCount: p.commentCount ?? 0 }));
     if (!groupId || posts.length === 0) return [];
 
     // Batch fetch: limit concurrent requests to avoid overwhelming Firestore
@@ -527,7 +655,10 @@ export function GroupDetailScreen(props: any) {
         style={{ flex: 1 }}
         contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
       >
-        <Card title="群組資訊" subtitle={`${group?.type ?? 'group'}｜${group?.name ?? ''}`}>
+        <Card
+          title="群組資訊"
+          subtitle={`${group?.type === 'course' ? '課程' : group?.type === 'club' ? '社團' : '群組'} · ${group?.name ?? ''}`}
+        >
           <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
             {group?.type === 'course' ? (
               <Pill
@@ -573,8 +704,7 @@ export function GroupDetailScreen(props: any) {
           </View>
 
           <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-            <Pill text="公告 / Q&A / 貼文" kind="accent" />
-            <Pill text="私訊老師（Sprint 2）" />
+            <Pill text="公告、問答與貼文" kind="accent" />
           </View>
 
           {err ? (
@@ -585,7 +715,16 @@ export function GroupDetailScreen(props: any) {
         </Card>
 
         {canManageCourse ? (
-          <Card title="課程管理（教師）" subtitle={`你的角色：${String(myRole ?? '-')}`}>
+          <Card
+            title="課程管理（教師）"
+            subtitle={
+              myRole === 'owner'
+                ? '群組建立者'
+                : myRole === 'instructor'
+                  ? '授課教師'
+                  : '群組管理員'
+            }
+          >
             <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
               <Button
                 text={group?.isPublished ? '設為未發布' : '設為已發布'}
@@ -605,7 +744,7 @@ export function GroupDetailScreen(props: any) {
             value={q}
             onChangeText={setQ}
             placeholder="搜尋（標題/內容/作者）"
-            placeholderTextColor="rgba(168,176,194,0.6)"
+            placeholderTextColor={theme.colors.muted}
             style={{
               marginTop: 10,
               paddingVertical: 12,
@@ -620,11 +759,11 @@ export function GroupDetailScreen(props: any) {
         </Card>
 
         <Card
-          title="發文 / 發問題"
+          title="發布內容"
           subtitle={
             canCreateAnnouncement
-              ? '(MVP) 先做文字貼文，之後加公告置頂與已解決。'
-              : '(MVP) 一般成員可發貼文與問題；課程公告僅教師或管理者可發。'
+              ? '發布課程公告、提出問題，或與群組成員分享資訊。'
+              : '提出問題或分享資訊。課程公告由教師與管理員發布。'
           }
         >
           <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
@@ -650,7 +789,7 @@ export function GroupDetailScreen(props: any) {
             value={title}
             onChangeText={setTitle}
             placeholder="標題"
-            placeholderTextColor="rgba(168,176,194,0.6)"
+            placeholderTextColor={theme.colors.muted}
             style={{
               marginTop: 10,
               paddingVertical: 12,
@@ -666,7 +805,7 @@ export function GroupDetailScreen(props: any) {
             value={body}
             onChangeText={setBody}
             placeholder={composeKind === 'announcement' ? '公告內容' : '內容'}
-            placeholderTextColor="rgba(168,176,194,0.6)"
+            placeholderTextColor={theme.colors.muted}
             multiline
             style={{
               marginTop: 10,
@@ -690,10 +829,14 @@ export function GroupDetailScreen(props: any) {
               {(['課程討論', '作業問題', '考試準備', '資源分享', '其他'] as Topic[]).map((t) => (
                 <Pressable
                   key={t}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: topic === t }}
                   onPress={() => setTopic(t)}
                   style={({ pressed }) => ({
                     paddingHorizontal: 12,
-                    paddingVertical: 6,
+                    minHeight: 44,
+                    justifyContent: 'center',
+                    paddingVertical: 10,
                     borderRadius: theme.radius.full,
                     backgroundColor: topic === t ? theme.colors.accent : theme.colors.surface2,
                     borderWidth: 1,
@@ -703,7 +846,7 @@ export function GroupDetailScreen(props: any) {
                 >
                   <Text
                     style={{
-                      color: topic === t ? '#fff' : theme.colors.text,
+                      color: topic === t ? theme.colors.onAccent : theme.colors.text,
                       fontSize: 12,
                       fontWeight: '600',
                     }}
@@ -742,14 +885,18 @@ export function GroupDetailScreen(props: any) {
             onAction={reloadPosts}
           />
         ) : (
-          <Card title="公告 / Q&A" subtitle="最新 50 則">
+          <Card title="公告與討論" subtitle="最新 50 則">
             <SectionTitle text="篩選主題" />
             <View style={{ marginTop: 10, flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
               <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ selected: selectedTopicFilter === null }}
                 onPress={() => setSelectedTopicFilter(null)}
                 style={({ pressed }) => ({
                   paddingHorizontal: 12,
-                  paddingVertical: 6,
+                  minHeight: 44,
+                  justifyContent: 'center',
+                  paddingVertical: 10,
                   borderRadius: theme.radius.full,
                   backgroundColor:
                     selectedTopicFilter === null ? theme.colors.accent : theme.colors.surface2,
@@ -761,7 +908,7 @@ export function GroupDetailScreen(props: any) {
               >
                 <Text
                   style={{
-                    color: selectedTopicFilter === null ? '#fff' : theme.colors.text,
+                    color: selectedTopicFilter === null ? theme.colors.onAccent : theme.colors.text,
                     fontSize: 12,
                     fontWeight: '600',
                   }}
@@ -772,10 +919,14 @@ export function GroupDetailScreen(props: any) {
               {(['課程討論', '作業問題', '考試準備', '資源分享', '其他'] as Topic[]).map((t) => (
                 <Pressable
                   key={t}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: selectedTopicFilter === t }}
                   onPress={() => setSelectedTopicFilter(selectedTopicFilter === t ? null : t)}
                   style={({ pressed }) => ({
                     paddingHorizontal: 12,
-                    paddingVertical: 6,
+                    minHeight: 44,
+                    justifyContent: 'center',
+                    paddingVertical: 10,
                     borderRadius: theme.radius.full,
                     backgroundColor:
                       selectedTopicFilter === t ? theme.colors.accent : theme.colors.surface2,
@@ -787,7 +938,7 @@ export function GroupDetailScreen(props: any) {
                 >
                   <Text
                     style={{
-                      color: selectedTopicFilter === t ? '#fff' : theme.colors.text,
+                      color: selectedTopicFilter === t ? theme.colors.onAccent : theme.colors.text,
                       fontSize: 12,
                       fontWeight: '600',
                     }}
@@ -815,7 +966,7 @@ export function GroupDetailScreen(props: any) {
                       backgroundColor: theme.colors.surface,
                       borderWidth: 1,
                       borderColor: p.pinned
-                        ? '#FF9500'
+                        ? theme.colors.accent
                         : isQuestion && p.solved
                           ? theme.colors.success
                           : theme.colors.border,
@@ -839,13 +990,19 @@ export function GroupDetailScreen(props: any) {
                           {p.pinned && (
                             <View
                               style={{
-                                backgroundColor: '#FF9500',
+                                backgroundColor: theme.colors.accentSoft,
                                 paddingHorizontal: 8,
                                 paddingVertical: 4,
                                 borderRadius: theme.radius.full,
                               }}
                             >
-                              <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>
+                              <Text
+                                style={{
+                                  color: theme.colors.accent,
+                                  fontSize: 11,
+                                  fontWeight: '700',
+                                }}
+                              >
                                 📌 置頂
                               </Text>
                             </View>
@@ -901,7 +1058,7 @@ export function GroupDetailScreen(props: any) {
                           padding: 10,
                           borderRadius: theme.radius.md,
                           backgroundColor: lastComment.isAI
-                            ? 'rgba(139,92,246,0.08)'
+                            ? theme.colors.accentSoft
                             : lastComment.isBestAnswer
                               ? theme.colors.successSoft
                               : theme.colors.surface2,
@@ -909,7 +1066,7 @@ export function GroupDetailScreen(props: any) {
                           borderColor: lastComment.isBestAnswer
                             ? theme.colors.success
                             : lastComment.isAI
-                              ? '#AF52DE'
+                              ? theme.colors.accent
                               : theme.colors.border,
                         }}
                       >
@@ -922,7 +1079,11 @@ export function GroupDetailScreen(props: any) {
                           }}
                         >
                           {lastComment.isAI && (
-                            <Ionicons name="sparkles" size={12} color="#AF52DE" />
+                            <Ionicons
+                              name="chatbubble-outline"
+                              size={12}
+                              color={theme.colors.accent}
+                            />
                           )}
                           {lastComment.isBestAnswer && (
                             <Ionicons
@@ -933,7 +1094,7 @@ export function GroupDetailScreen(props: any) {
                           )}
                           <Text
                             style={{
-                              color: lastComment.isAI ? '#AF52DE' : theme.colors.muted,
+                              color: lastComment.isAI ? theme.colors.accent : theme.colors.muted,
                               fontSize: 11,
                               fontWeight: '700',
                             }}
@@ -941,7 +1102,7 @@ export function GroupDetailScreen(props: any) {
                             {lastComment.isBestAnswer
                               ? '最佳解答'
                               : lastComment.isAI
-                                ? 'AI 初步回答'
+                                ? '校園助理（自動回覆）'
                                 : `留言：${lastComment.authorName ?? lastComment.authorId ?? ''}`}
                           </Text>
                         </View>
@@ -975,13 +1136,17 @@ export function GroupDetailScreen(props: any) {
                           name={reactionStates[p.id] || p.userLiked ? 'heart' : 'heart-outline'}
                           size={14}
                           color={
-                            reactionStates[p.id] || p.userLiked ? '#FF3B30' : theme.colors.muted
+                            reactionStates[p.id] || p.userLiked
+                              ? theme.colors.danger
+                              : theme.colors.muted
                           }
                         />
                         <Text
                           style={{
                             color:
-                              reactionStates[p.id] || p.userLiked ? '#FF3B30' : theme.colors.muted,
+                              reactionStates[p.id] || p.userLiked
+                                ? theme.colors.danger
+                                : theme.colors.muted,
                             fontSize: 12,
                             fontWeight: reactionStates[p.id] || p.userLiked ? '600' : '400',
                           }}
@@ -994,15 +1159,20 @@ export function GroupDetailScreen(props: any) {
                     {/* 操作按鈕 */}
                     <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
                       <Pressable
+                        accessibilityRole="button"
                         onPress={() => nav?.navigate?.('GroupPost', { groupId, postId: p.id })}
                         style={({ pressed }) => ({
                           paddingHorizontal: 14,
-                          paddingVertical: 8,
+                          minHeight: 44,
+                          justifyContent: 'center',
+                          paddingVertical: 10,
                           borderRadius: theme.radius.full,
-                          backgroundColor: pressed ? theme.colors.accentSoft : theme.colors.accent,
+                          backgroundColor: pressed ? theme.colors.accentHover : theme.colors.accent,
                         })}
                       >
-                        <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>
+                        <Text
+                          style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 13 }}
+                        >
                           查看 / 留言
                         </Text>
                       </Pressable>
@@ -1018,7 +1188,9 @@ export function GroupDetailScreen(props: any) {
                           }
                           style={({ pressed }) => ({
                             paddingHorizontal: 14,
-                            paddingVertical: 8,
+                            minHeight: 44,
+                            justifyContent: 'center',
+                            paddingVertical: 10,
                             borderRadius: theme.radius.full,
                             backgroundColor: theme.colors.surface2,
                             borderWidth: 1,
@@ -1041,7 +1213,9 @@ export function GroupDetailScreen(props: any) {
                           }
                           style={({ pressed }) => ({
                             paddingHorizontal: 14,
-                            paddingVertical: 8,
+                            minHeight: 44,
+                            justifyContent: 'center',
+                            paddingVertical: 10,
                             borderRadius: theme.radius.full,
                             backgroundColor: pressed
                               ? theme.colors.successSoft
@@ -1066,7 +1240,9 @@ export function GroupDetailScreen(props: any) {
                             onPress={() => onArchiveToKnowledgeBase(p.id, p.title, p.body)}
                             style={({ pressed }) => ({
                               paddingHorizontal: 14,
-                              paddingVertical: 8,
+                              minHeight: 44,
+                              justifyContent: 'center',
+                              paddingVertical: 10,
                               borderRadius: theme.radius.full,
                               backgroundColor: theme.colors.accentSoft,
                               borderWidth: 1,
@@ -1074,7 +1250,13 @@ export function GroupDetailScreen(props: any) {
                               opacity: pressed ? 0.7 : 1,
                             })}
                           >
-                            <Text style={{ color: theme.colors.accent, fontSize: 13, fontWeight: '700' }}>
+                            <Text
+                              style={{
+                                color: theme.colors.accent,
+                                fontSize: 13,
+                                fontWeight: '700',
+                              }}
+                            >
                               📚 歸入知識庫
                             </Text>
                           </Pressable>

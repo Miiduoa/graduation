@@ -1,11 +1,11 @@
 'use client';
 
-import Link from 'next/link';
 import { Suspense } from 'react';
 import { AppHeader } from './AppHeader';
 import { OfflineBanner } from './OfflineBanner';
 import { PWAInstallBanner } from './PWAInstallBanner';
 import { UpdateBanner } from './UpdateBanner';
+import { SiteFooter } from './SiteFooter';
 import styles from '@/app/home.module.css';
 
 export function SiteShell(props: {
@@ -33,14 +33,8 @@ export function SiteShell(props: {
           </div>
         )}
         <Suspense fallback={<p role="status">載入中…</p>}>{props.children}</Suspense>
+        <SiteFooter />
       </main>
-      <footer className="footer">
-        <div className="shellActions">
-          <span>Campus One</span>
-          <Link href="/terms">服務條款</Link>
-          <Link href="/privacy">隱私政策</Link>
-        </div>
-      </footer>
       <PWAInstallBanner />
       <UpdateBanner />
     </div>

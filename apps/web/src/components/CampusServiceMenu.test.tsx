@@ -80,3 +80,52 @@ it('keeps the Campus One header and original school login around the complete sh
   );
   expect(screen.getByRole('link', { name: '今日' }).getAttribute('href')).toBe('/?schoolId=tw-pu');
 });
+
+it('closes on Escape and returns keyboard focus to the service control', () => {
+  render(<CampusServiceMenu />);
+  const summary = screen.getByText('所有服務');
+  const menu = summary.closest('details')!;
+  menu.open = true;
+  const link = screen.getByRole('link', { name: '課表' });
+  link.focus();
+  fireEvent.keyDown(link, { key: 'Escape' });
+  expect(menu.open).toBe(false);
+  expect(document.activeElement).toBe(summary);
+});
+
+it('closes on outside interaction without dismissing interactions within the menu', () => {
+  render(<CampusServiceMenu />);
+  const menu = screen.getByText('所有服務').closest('details')!;
+  menu.open = true;
+  fireEvent.pointerDown(screen.getByRole('heading', { name: '學習與課務' }));
+  expect(menu.open).toBe(true);
+  fireEvent.pointerDown(document.body);
+  expect(menu.open).toBe(false);
+});
+
+it('closes after choosing the current service and when keyboard focus leaves', () => {
+  render(
+    <>
+      <CampusServiceMenu />
+      <button type="button">下一個控制項</button>
+    </>,
+  );
+  const menu = screen.getByText('所有服務').closest('details')!;
+  menu.open = true;
+  fireEvent.click(screen.getByRole('link', { name: '校園地圖' }));
+  expect(menu.open).toBe(false);
+  menu.open = true;
+  fireEvent.blur(menu, { relatedTarget: screen.getByRole('button') });
+  expect(menu.open).toBe(false);
+});
+
+it('identifies a nested service without selecting a route with only a matching prefix', () => {
+  navigation.pathname = '/announcements/a1';
+  const { rerender } = render(<CampusServiceMenu />);
+  screen.getByText('所有服務').closest('details')!.open = true;
+  expect(screen.getByRole('link', { name: '公告' }).getAttribute('aria-current')).toBe('page');
+  navigation.pathname = '/announcements-old';
+  rerender(<CampusServiceMenu />);
+  screen.getByText('所有服務').closest('details')!.open = true;
+  expect(screen.getByRole('link', { name: '公告' }).getAttribute('aria-current')).toBeNull();
+});

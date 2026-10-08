@@ -82,7 +82,10 @@ function Assignment({
           </p>
           <p style={{ whiteSpace: 'pre-wrap' }}>{assignment.submittedText ?? text}</p>
           {assignment.grade ? (
-            <div aria-label="作業評分" style={{ borderTop: '1px solid var(--border)', marginTop: 18, paddingTop: 16 }}>
+            <div
+              aria-label="作業評分"
+              style={{ borderTop: '1px solid var(--border)', marginTop: 18, paddingTop: 16 }}
+            >
               <strong>
                 教師已評分：{assignment.grade.score}
                 {assignment.points !== null ? ` / ${assignment.points}` : ''} 分
@@ -94,7 +97,12 @@ function Assignment({
                 <p style={{ whiteSpace: 'pre-wrap' }}>{assignment.grade.feedback}</p>
               ) : null}
               {assignment.grade.publishedAt ? (
-                <p>發布時間：{new Date(assignment.grade.publishedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}</p>
+                <p>
+                  發布時間：
+                  {new Date(assignment.grade.publishedAt).toLocaleString('zh-TW', {
+                    timeZone: 'Asia/Taipei',
+                  })}
+                </p>
               ) : null}
             </div>
           ) : null}
@@ -122,8 +130,10 @@ function Assignment({
               margin: '12px 0',
               padding: 14,
               font: 'inherit',
-              border: '1px solid #b2bcb1',
-              borderRadius: 4,
+              border: '1px solid var(--border-strong)',
+              borderRadius: 'var(--radius-sm)',
+              background: 'var(--surface)',
+              color: 'var(--text)',
             }}
           />
           {error && <p role="alert">{error}</p>}
@@ -199,7 +209,10 @@ export default function CoursePage({ params }: { params: Promise<{ courseId: str
                     重新整理
                   </button>
                 </div>
-                <Link href={`/course/${encodeURIComponent(courseId)}/attendance`} className={styles.secondary}>
+                <Link
+                  href={`/course/${encodeURIComponent(courseId)}/attendance`}
+                  className={styles.secondary}
+                >
                   {course.canTeach ? '管理課堂點名' : '簽到與出席紀錄'}
                 </Link>
                 <section className={styles.section}>

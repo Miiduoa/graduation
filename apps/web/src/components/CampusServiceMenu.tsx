@@ -2,31 +2,24 @@
 
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
+import { useEffect, useRef } from 'react';
+import { CAMPUS_SERVICES, SERVICE_CATEGORIES } from '@/lib/campusServices';
 import styles from '@/app/home.module.css';
-
-const services = [
-  ['/announcements', '公告'],
-  ['/timetable', '課表'],
-  ['/grades', '成績'],
-  ['/credit-planner', '學分規劃'],
-  ['/groups', '課程與群組'],
-  ['/classroom', '課程空間'],
-  ['/clubs', '社團活動'],
-  ['/community', '校園交流'],
-  ['/messages', '通知'],
-  ['/dms', '私訊'],
-  ['/map', '校園地圖'],
-  ['/bus', '公車'],
-  ['/cafeteria', '餐廳'],
-  ['/library', '圖書館'],
-  ['/ai-assistant', '校園助理'],
-  ['/profile', '個人資料'],
-  ['/settings', '設定'],
-] as const;
 
 export function CampusServiceMenu() {
   const pathname = usePathname();
   const params = useSearchParams();
+  const menu = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    function dismiss(event: PointerEvent) {
+      const element = menu.current;
+      if (element?.open && event.target instanceof Node && !element.contains(event.target)) {
+        element.open = false;
+      }
+    }
+    document.addEventListener('pointerdown', dismiss);
+    return () => document.removeEventListener('pointerdown', dismiss);
+  }, []);
   const context = new URLSearchParams();
   for (const key of ['school', 'schoolId']) {
     const value = params?.get(key);
@@ -34,7 +27,26 @@ export function CampusServiceMenu() {
   }
   const href = (path: string) => `${path}${context.size ? `?${context}` : ''}`;
   return (
-    <details className={styles.menu} key={pathname}>
+    <details
+      ref={menu}
+      className={styles.menu}
+      key={pathname}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && event.currentTarget.open) {
+          event.preventDefault();
+          event.currentTarget.open = false;
+          event.currentTarget.querySelector('summary')?.focus();
+        }
+      }}
+      onBlur={(event) => {
+        if (
+          event.relatedTarget instanceof Node &&
+          !event.currentTarget.contains(event.relatedTarget)
+        ) {
+          event.currentTarget.open = false;
+        }
+      }}
+    >
       <summary>所有服務</summary>
       <div className={styles.menuPanel}>
         <Link
@@ -44,18 +56,29 @@ export function CampusServiceMenu() {
         >
           尋找校園服務 <span aria-hidden="true">→</span>
         </Link>
-        {services.map(([path, label]) => (
-          <Link
-            href={href(path)}
-            key={path}
-            aria-current={
-              pathname === path || (path === '/classroom' && pathname?.startsWith('/classroom/'))
-                ? 'page'
-                : undefined
-            }
-          >
-            {label}
-          </Link>
+        {SERVICE_CATEGORIES.map((category) => (
+          <section key={category.id} className={styles.menuGroup} aria-label={category.label}>
+            <h2>{category.label}</h2>
+            {CAMPUS_SERVICES.filter((service) => service.category === category.id).map(
+              (service) => (
+                <Link
+                  href={href(service.href)}
+                  key={service.href}
+                  aria-current={
+                    pathname === service.href || pathname?.startsWith(`${service.href}/`)
+                      ? 'page'
+                      : undefined
+                  }
+                  onClick={() => {
+                    if (menu.current) menu.current.open = false;
+                  }}
+                >
+                  {service.name}
+                  <span aria-hidden="true">↗</span>
+                </Link>
+              ),
+            )}
+          </section>
         ))}
       </div>
     </details>
