@@ -149,6 +149,27 @@ test('rejects every missing or invalid target before changing any file', (t) => 
   assert.equal(existsSync(join(project, '.release-build-target.json')), false);
 });
 
+test('release manifests omit development provider credentials and preserve export compliance', (t) => {
+  const project = fixture(t);
+  const key = 'development-only-provider-key';
+  for (const appEnv of ['preview', 'production']) {
+    const config = actualExpoConfig(project, {
+      ...identityEnvironment(target),
+      APP_ENV: appEnv,
+      EXPO_PUBLIC_GEMINI_API_KEY: key,
+    });
+    assert.equal(config.extra.geminiApiKey, '');
+    assert.equal(JSON.stringify(config).includes(key), false);
+    assert.equal(config.ios.infoPlist.ITSAppUsesNonExemptEncryption, false);
+    assert.ok(config.ios.infoPlist.NSCameraUsageDescription);
+  }
+  const development = actualExpoConfig(project, {
+    APP_ENV: 'development',
+    EXPO_PUBLIC_GEMINI_API_KEY: key,
+  });
+  assert.equal(development.extra.geminiApiKey, key);
+});
+
 test('local conflicting env and inherited malformed profile values fail closed', (t) => {
   const project = fixture(t);
   assert.equal(
