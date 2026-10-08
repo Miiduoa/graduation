@@ -161,7 +161,10 @@ export function socialError(error: unknown) {
       return '你已檢舉這則貼文，可在「我的檢舉」查看處理狀態。';
     if (error.code === 'PLATFORM_SOCIAL_MEMBERSHIP_REQUIRED')
       return '這個看板需要成員資格才能發表，請選擇其他公開看板。';
-    if (error.code === 'SOCIAL_PARTICIPATION_RESTRICTED')
+    if (
+      error.code === 'SOCIAL_PARTICIPATION_TEMPORARILY_RESTRICTED' ||
+      error.code === 'SOCIAL_PARTICIPATION_SUSPENDED'
+    )
       return '目前帳號暫時無法發表，請查看原社群的帳號狀態。';
     if (error.status === 403) return '目前帳號沒有這項操作的權限。';
     if (error.status === 404) return '這則公開內容已無法使用，請更新動態。';
