@@ -95,7 +95,7 @@ export async function startGoogle(request: NextRequest): Promise<NextResponse> {
       code_challenge_method: 'S256',
       prompt: 'select_account',
     }).toString();
-    const response = redirect('/login');
+    const response = redirect('/classroom/login');
     response.headers.set('Location', url.href);
     setCookie(response, SESSION_COOKIE, null);
     setCookie(
@@ -115,7 +115,7 @@ export async function startGoogle(request: NextRequest): Promise<NextResponse> {
     return response;
   } catch {
     try {
-      return redirect('/login?issue=unavailable');
+      return redirect('/classroom/login?issue=unavailable');
     } catch (error) {
       return errorResponse(error);
     }
@@ -186,13 +186,13 @@ export async function finishGoogle(request: NextRequest): Promise<NextResponse> 
       sessionHandle: result.sessionHandle,
       expiresAt: Date.now() + result.expiresInSeconds * 1000,
     };
-    const response = redirect('/');
+    const response = redirect('/classroom');
     setCookie(response, SESSION_COOKIE, session, session.expiresAt);
     setCookie(response, LOGIN_COOKIE, null);
     return response;
   } catch {
     try {
-      const response = redirect('/login?issue=expired');
+      const response = redirect('/classroom/login?issue=expired');
       setCookie(response, LOGIN_COOKIE, null);
       return response;
     } catch (error) {
