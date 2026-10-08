@@ -9,7 +9,9 @@ const inputSchema = z.object({
 
 async function execute(ctx, rawInput) {
   const input = inputSchema.parse(rawInput ?? {});
-  return fetchAssistantPendingAssignments(ctx.uid, input.preferredGroupId || ctx.groupId);
+  return fetchAssistantPendingAssignments(ctx.uid, ctx.schoolId, {
+    preferredGroupId: input.preferredGroupId || ctx.groupId,
+  });
 }
 
 module.exports = {

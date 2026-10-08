@@ -1,6 +1,7 @@
 'use strict';
 
 const { z } = require('zod');
+const { HttpsError } = require('firebase-functions/v2/https');
 const { fetchAssistantAnnouncements } = require('../../lib/assistantFetchers');
 
 const inputSchema = z.object({
@@ -9,8 +10,10 @@ const inputSchema = z.object({
 
 async function execute(ctx, rawInput) {
   const input = inputSchema.parse(rawInput ?? {});
-  const sid = input.schoolId || ctx.schoolId;
-  return fetchAssistantAnnouncements(sid);
+  if (!ctx.schoolId || (input.schoolId && input.schoolId !== ctx.schoolId)) {
+    throw new HttpsError('permission-denied', 'Announcement school must match the current context');
+  }
+  return fetchAssistantAnnouncements(ctx.schoolId);
 }
 
 module.exports = {
