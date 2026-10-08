@@ -25,7 +25,7 @@ export async function startAttendanceSession(input: {
   classroomLat?: number;
   classroomLng?: number;
   qrExpiryMinutes?: number;
-}): Promise<{ success: boolean; sessionId: string; qrToken?: string; qrExpiresAt?: string }> {
+}): ReturnType<typeof startWorkspaceAttendanceSession> {
   const groupId = requireDocumentId(input.courseSpaceId);
   return startWorkspaceAttendanceSession(
     getFunctions(getFirebaseApp(), getCloudFunctionRegion()),
@@ -97,10 +97,9 @@ export async function getAttendanceSummary(courseSpaceId: string): Promise<Atten
     )[0] ?? null;
 
   return {
-    groupId,
-    totalSessions: sessions.length,
-    activeSessions: sessions.filter((session) => session.active).length,
-    totalAttendees: sessions.reduce((sum, session) => sum + (session.attendeeCount ?? 0), 0),
+    courseSpaceId: groupId,
+    totalSessionCount: sessions.length,
+    activeSessionCount: sessions.filter((session) => session.active).length,
     latestSession,
   };
 }
