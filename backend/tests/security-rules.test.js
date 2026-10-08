@@ -911,6 +911,39 @@ describe('course assignment submissions', () => {
       await db.doc('groups/course-1/assignments/work-1').set({ title: 'Work', published: true, ...overrides });
     });
   }
+  test('author can edit descriptive fields but not points, identity or published status', async () => {
+    await seedAssignment({
+      type: 'assignment', createdBy: 'teacher', status: 'published',
+      description: 'Original', points: 100, allowLateSubmission: false,
+    });
+    const teacher = testEnv.authenticatedContext('teacher').firestore();
+    const ref = teacher.doc('groups/course-1/assignments/work-1');
+    await assertSucceeds(ref.update({
+      title: 'Updated', description: 'Revised', allowLateSubmission: true,
+      lastEditedBy: 'teacher', updatedAt: serverTimestamp(),
+    }));
+    await assertFails(ref.update({ points: 999 }));
+    await assertFails(ref.update({ published: false }));
+    await assertFails(ref.delete());
+    await assertFails(ref.update({ createdBy: 'alice' }));
+  });
+  test('students and other instructors cannot change the original author assignment', async () => {
+    await seedAssignment({
+      type: 'assignment', createdBy: 'teacher', status: 'published',
+      description: 'Original', points: 100, allowLateSubmission: false,
+    });
+    const student = testEnv.authenticatedContext('alice').firestore();
+    await assertFails(student.doc('groups/course-1/assignments/work-1').update({
+      title: 'Tampered', lastEditedBy: 'alice', updatedAt: serverTimestamp(),
+    }));
+    await seedFirestore(async (db) => db.doc('groups/course-1/members/bob').set({
+      role: 'instructor', status: 'active',
+    }));
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    await assertFails(bob.doc('groups/course-1/assignments/work-1').update({
+      title: 'Tampered', lastEditedBy: 'bob', updatedAt: serverTimestamp(),
+    }));
+  });
   test('student reads an empty own submission and submits using server timestamps', async () => {
     await seedAssignment();
     const ref = pathTo(testEnv.authenticatedContext('alice').firestore());

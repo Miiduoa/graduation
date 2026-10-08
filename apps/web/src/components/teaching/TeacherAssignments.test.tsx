@@ -4,6 +4,8 @@ import { TeacherAssignments } from './TeacherAssignments';
 import {
   loadTeacherSubmissions,
   loadGradeRevisions,
+  loadEditableTeacherAssignment,
+  updateTeacherAssignment,
   newGradeRevisionId,
   reviseSubmissionGrade,
   newTeacherAssignmentId,
@@ -17,6 +19,8 @@ vi.mock('@/components/AuthGuard', () => ({
 vi.mock('@/lib/teacherAssignments', () => ({
   loadTeacherSubmissions: vi.fn(),
   loadGradeRevisions: vi.fn(),
+  loadEditableTeacherAssignment: vi.fn(),
+  updateTeacherAssignment: vi.fn(),
   newGradeRevisionId: vi.fn(() => 'revision-1234567890'),
   reviseSubmissionGrade: vi.fn(),
   newTeacherAssignmentId: vi.fn(() => 'reserved-work'),
@@ -147,4 +151,40 @@ it('requires a reason for grade correction and shows the immutable revision hist
   fireEvent.click(screen.getByRole('button', { name: '查看更正紀錄' }));
   await waitFor(() => expect(screen.getByText('原因：核對配分後修正')).toBeTruthy());
   expect(screen.getByText('60 → 80 分')).toBeTruthy();
+});
+
+
+it('edits a published assignment without changing points or existing grades', async () => {
+  vi.mocked(loadEditableTeacherAssignment).mockResolvedValue({
+    title: '練習一', description: '原始說明', dueAt: '',
+    allowLateSubmission: false, updatedAt: '2026-10-08T01:00:00Z',
+  });
+  render(<TeacherAssignments {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: '編輯作業' }));
+  await waitFor(() => expect(screen.getByDisplayValue('原始說明')).toBeTruthy());
+  fireEvent.change(screen.getByRole('textbox', { name: '標題' }), {
+    target: { value: '修訂後練習' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '儲存作業修改' }));
+  await waitFor(() => expect(updateTeacherAssignment).toHaveBeenCalledWith(
+    { uid: 'teacher', schoolId: 'pu', courseId: 'course' },
+    'work', '2026-10-08T01:00:00Z',
+    { title: '修訂後練習', description: '原始說明', dueAt: '', allowLateSubmission: false },
+  ));
+  expect(props.refresh).toHaveBeenCalledOnce();
+});
+
+it('keeps assignment edit values available after a failed save', async () => {
+  vi.mocked(loadEditableTeacherAssignment).mockResolvedValue({
+    title: '練習一', description: '原始說明', dueAt: '',
+    allowLateSubmission: false, updatedAt: '2026-10-08T01:00:00Z',
+  });
+  vi.mocked(updateTeacherAssignment).mockRejectedValue(new Error('作業已由其他操作更新'));
+  render(<TeacherAssignments {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: '編輯作業' }));
+  await waitFor(() => expect(screen.getByDisplayValue('原始說明')).toBeTruthy());
+  fireEvent.click(screen.getByRole('button', { name: '儲存作業修改' }));
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('其他操作更新'));
+  expect(screen.getByDisplayValue('原始說明')).toBeTruthy();
+  expect(props.refresh).not.toHaveBeenCalled();
 });
