@@ -81,7 +81,7 @@ it('loads published modules, rejects unsafe links, and keeps the current student
     .mockResolvedValueOnce(document({ name: 'Course' }) as never)
     .mockResolvedValueOnce(document({ role: 'member', status: 'active' }) as never)
     .mockResolvedValueOnce(
-      document({ content: 'Saved answer', submittedAt: '2026-10-07T00:00:00Z' }) as never,
+      document({ content: 'Saved answer', submittedAt: '2026-10-07T00:00:00Z', gradePublished: true, gradeScore: 0, gradeFeedback: '請修正', gradePublishedAt: '2026-10-08T02:00:00Z' }) as never,
     );
   const entry = (id: string, data: Record<string, unknown>) => ({ id, data: () => data });
   vi.mocked(getDocs)
@@ -102,6 +102,7 @@ it('loads published modules, rejects unsafe links, and keeps the current student
   ]);
   expect(result.assignments).toHaveLength(1);
   expect(result.assignments[0].submittedText).toBe('Saved answer');
+  expect(result.assignments[0].grade).toMatchObject({ score: 0, feedback: '請修正' });
   expect(getDoc).toHaveBeenLastCalledWith('groups/course/assignments/work/submissions/alice');
 });
 

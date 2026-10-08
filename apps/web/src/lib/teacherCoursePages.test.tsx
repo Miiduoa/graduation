@@ -4,6 +4,9 @@ import TeacherCoursePage from '@/app/teacher/course/[courseId]/page';
 import TeacherGradebookPage from '@/app/teacher/course/[courseId]/gradebook/page';
 import { useTeacherCourse } from './useTeacherCourse';
 vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>Campus One</header> }));
+vi.mock('@/components/teaching/TeacherAssignments', () => ({
+  TeacherAssignments: () => <div>教師作業管理</div>,
+}));
 vi.mock('./useTeacherCourse', () => ({ useTeacherCourse: vi.fn() }));
 vi.mock('./pageContext', () => ({
   resolveSchoolPageContext: () => ({
@@ -65,7 +68,7 @@ it('keeps missing and zero grades distinct without offering a fake publish actio
   expect(screen.getByRole('cell', { name: '0' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: /發布|撤回/ })).toBeNull();
 });
-it('shows source course content and working destinations without local assignment creation', async () => {
+it('shows source course content and working destinations with a dedicated permission-scoped assignment editor', async () => {
   vi.mocked(useTeacherCourse).mockReturnValue({
     state: {
       scope: 'a',
@@ -100,7 +103,7 @@ it('shows source course content and working destinations without local assignmen
   expect(screen.getByRole('link', { name: '課堂點名' }).getAttribute('href')).toContain(
     '/teacher/course/course-a/attendance',
   );
-  expect(screen.queryByRole('button', { name: /新增作業|發布/ })).toBeNull();
+  expect(screen.getByText('教師作業管理')).toBeTruthy();
 });
 it('does not render records or tool links while access is denied', async () => {
   vi.mocked(useTeacherCourse).mockReturnValue({

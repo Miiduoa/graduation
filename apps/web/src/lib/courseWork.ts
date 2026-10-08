@@ -18,6 +18,8 @@ export interface CourseAssignment {
   closed: boolean;
   submittedText: string | null;
   submittedAt: string | null;
+  points: number | null;
+  grade: { score: number; feedback: string; publishedAt: string | null } | null;
 }
 export interface CourseWork {
   id: string;
@@ -95,6 +97,18 @@ export async function loadCourseWork(courseId: string, uid: string): Promise<Cou
             ? String(submission.data().content ?? submission.data().text ?? '')
             : null,
           submittedAt: submission?.exists() ? iso(submission.data().submittedAt) : null,
+          points: typeof assignment.points === 'number' && Number.isFinite(assignment.points)
+            ? assignment.points : null,
+          grade: submission?.exists() && submission.data().gradePublished === true &&
+            typeof submission.data().gradeScore === 'number' &&
+            Number.isFinite(submission.data().gradeScore)
+            ? {
+                score: submission.data().gradeScore,
+                feedback: typeof submission.data().gradeFeedback === 'string'
+                  ? submission.data().gradeFeedback : '',
+                publishedAt: iso(submission.data().gradePublishedAt),
+              }
+            : null,
         };
       }),
   );
