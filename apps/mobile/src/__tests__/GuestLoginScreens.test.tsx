@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
-import { Platform } from 'react-native';
+import { Alert, Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { AccessTokenRequest, TokenResponse } from 'expo-auth-session/build/TokenRequest';
 import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
@@ -9,9 +9,11 @@ import { SSOLoginScreen } from '../screens/SSOLoginScreen';
 import { signInWithStudentId } from '../services/studentIdAuth';
 import { safeNavigate } from '../utils/safeNavigate';
 import { applyTheme, createLightTheme, createDarkTheme, clearSchoolTheme } from '../ui/theme';
+import { Button } from '../ui/components';
 
 const mockNavigation = { navigate: jest.fn() };
 const mockGooglePrompt = jest.fn();
+const mockRefreshProfile = jest.fn();
 const mockLoadedRequest = {
   url: 'https://accounts.google.com/test',
   codeVerifier: 'test-verifier',
@@ -21,7 +23,7 @@ const mockLoadedRequest = {
 const mockUseLoadedAuthRequest = jest.fn((): typeof mockLoadedRequest | null => mockLoadedRequest);
 jest.mock('@react-navigation/native', () => ({ useNavigation: () => mockNavigation }));
 jest.mock('../utils/safeNavigate', () => ({ safeNavigate: jest.fn() }));
-jest.mock('../state/auth', () => ({ useAuth: () => ({ refreshProfile: jest.fn() }) }));
+jest.mock('../state/auth', () => ({ useAuth: () => ({ refreshProfile: mockRefreshProfile }) }));
 jest.mock('../state/school', () => ({
   useSchool: () => ({ school: { id: 'pu', name: '靜宜大學', shortName: '靜宜' } }),
 }));
@@ -60,6 +62,12 @@ jest.mock('../ui/navigationTheme', () => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
+  jest.mocked(signInWithStudentId).mockReset();
+  jest.mocked(signInWithCredential).mockReset();
+  mockGooglePrompt.mockReset();
+  mockRefreshProfile.mockReset();
+  mockRefreshProfile.mockResolvedValue(undefined);
+  jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
   mockUseLoadedAuthRequest.mockReturnValue(mockLoadedRequest);
   jest.replaceProperty(Platform, 'OS', 'ios');
   jest.spyOn(Platform, 'select').mockImplementation((specifics) => {
@@ -74,6 +82,7 @@ beforeEach(() => {
   jest.spyOn(console, 'warn').mockImplementation(() => undefined);
 });
 afterEach(() => {
+  jest.useRealTimers();
   jest.restoreAllMocks();
   act(() => applyTheme('light'));
 });
@@ -115,6 +124,15 @@ test('an unconfigured Google provider is honestly unavailable without exposing i
     color: createDarkTheme().colors.text,
   });
   expect(mockGooglePrompt).not.toHaveBeenCalled();
+});
+
+test('school credentials retain explicit accessible names and password autofill semantics', () => {
+  const view = render(<SSOLoginScreen />);
+  expect(view.getByLabelText('學號')).toBe(view.getByTestId('student-id-input'));
+  expect(view.getByLabelText('密碼')).toBe(view.getByTestId('student-password-input'));
+  expect(view.getByLabelText('學號').props.autoComplete).toBe('username');
+  expect(view.getByLabelText('密碼').props.autoComplete).toBe('current-password');
+  expect(view.getByLabelText('密碼').props.secureTextEntry).toBe(true);
 });
 
 test('a configured Google provider still invokes the existing sign-in request', async () => {
@@ -287,6 +305,25 @@ test('school sign-in progress keeps the same stage and form locking without disp
   expect(view.getByTestId('student-password-input').props.secureTextEntry).toBe(true);
 });
 
+test('a pending school request cannot reopen the form or start another provider', () => {
+  Constants.expoConfig!.extra = { googleIosClientId: 'configured-ios-client' };
+  jest.mocked(signInWithStudentId).mockImplementation(() => new Promise(() => undefined));
+  const view = render(<SSOLoginScreen />);
+  enterSchoolCredentials(view);
+  fireEvent.press(view.getByText('使用學號登入'));
+  expect(view.getByRole('progressbar', { name: '登入處理中，確認學校帳號' })).toBeTruthy();
+  expect(view.queryByRole('button', { name: '返回登入表單' })).toBeNull();
+  expect(view.queryByRole('button', { name: '重新嘗試' })).toBeNull();
+  const schoolButton = view.getByRole('button', { name: '登入中…' });
+  const googleButton = view.getByRole('button', { name: '使用 Google 繼續' });
+  expect(schoolButton).toBeDisabled();
+  expect(googleButton).toBeDisabled();
+  fireEvent.press(schoolButton);
+  fireEvent.press(googleButton);
+  expect(signInWithStudentId).toHaveBeenCalledTimes(1);
+  expect(mockGooglePrompt).not.toHaveBeenCalled();
+});
+
 test('school login errors remain failures with a human-readable retry state', async () => {
   jest
     .mocked(signInWithStudentId)
@@ -295,6 +332,138 @@ test('school login errors remain failures with a human-readable retry state', as
   enterSchoolCredentials(view);
   fireEvent.press(view.getByText('使用學號登入'));
   await view.findByText('學校帳號登入未完成，請確認帳號密碼與網路連線後重試。');
+  expect(view.getByRole('alert')).toHaveTextContent(/學校帳號登入未完成/);
   expect(view.queryByText(/Firebase|Firestore|Client ID|登入成功/)).toBeNull();
   expect(view.getByText('重新嘗試')).toBeTruthy();
+});
+
+test.each(['school', 'google'] as const)(
+  '%s takes the shared lock before captured same-tick handlers can start another login',
+  (firstProvider) => {
+    Constants.expoConfig!.extra = { googleIosClientId: 'configured-ios-client' };
+    jest.mocked(signInWithStudentId).mockImplementation(() => new Promise(() => undefined));
+    mockGooglePrompt.mockImplementation(() => new Promise(() => undefined));
+    const view = render(<SSOLoginScreen />);
+    enterSchoolCredentials(view);
+    const buttons = view.UNSAFE_getAllByType(Button);
+    const schoolPress = buttons.find((button) => button.props.text === '使用學號登入')!.props
+      .onPress;
+    const googlePress = buttons.find((button) => button.props.text === '使用 Google 繼續')!.props
+      .onPress;
+    act(() => {
+      if (firstProvider === 'school') {
+        void schoolPress();
+        void schoolPress();
+        googlePress();
+      } else {
+        googlePress();
+        googlePress();
+        void schoolPress();
+      }
+    });
+    expect(signInWithStudentId).toHaveBeenCalledTimes(firstProvider === 'school' ? 1 : 0);
+    expect(mockGooglePrompt).toHaveBeenCalledTimes(firstProvider === 'google' ? 1 : 0);
+  },
+);
+
+const schoolResult = {
+  displayName: '同學',
+  department: '資訊系',
+} as Awaited<ReturnType<typeof signInWithStudentId>>;
+
+test('a school service completion after unmount cannot refresh the screen or show a dialog', async () => {
+  let finish!: (result: typeof schoolResult) => void;
+  jest.mocked(signInWithStudentId).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const goBack = jest.fn();
+  const view = render(<SSOLoginScreen navigation={{ goBack }} />);
+  enterSchoolCredentials(view);
+  fireEvent.press(view.getByText('使用學號登入'));
+  const progress = jest.mocked(signInWithStudentId).mock.calls[0][0].onProgress;
+  view.unmount();
+  await act(async () => {
+    progress?.('linking');
+    finish(schoolResult);
+  });
+  expect(mockRefreshProfile).not.toHaveBeenCalled();
+  expect(Alert.alert).not.toHaveBeenCalled();
+  expect(goBack).not.toHaveBeenCalled();
+});
+
+test('a Google credential completion after unmount does not start profile work or a dialog', async () => {
+  Constants.expoConfig!.extra = { googleIosClientId: 'configured-ios-client' };
+  mockGooglePrompt.mockResolvedValueOnce({ type: 'success', params: { id_token: 'test-token' } });
+  let finish!: () => void;
+  jest.mocked(signInWithCredential).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = () => resolve({} as Awaited<ReturnType<typeof signInWithCredential>>);
+      }),
+  );
+  const goBack = jest.fn();
+  const view = render(<SSOLoginScreen navigation={{ goBack }} />);
+  await act(async () => fireEvent.press(view.getByText('使用 Google 繼續')));
+  expect(signInWithCredential).toHaveBeenCalledTimes(1);
+  view.unmount();
+  await act(async () => finish());
+  expect(mockRefreshProfile).not.toHaveBeenCalled();
+  expect(Alert.alert).not.toHaveBeenCalled();
+  expect(goBack).not.toHaveBeenCalled();
+});
+
+test.each(['school', 'google'] as const)(
+  '%s success keeps both providers locked and clears its pending dialog on unmount',
+  async (provider) => {
+    jest.useFakeTimers();
+    try {
+      Constants.expoConfig!.extra = { googleIosClientId: 'configured-ios-client' };
+      jest.mocked(signInWithStudentId).mockResolvedValueOnce(schoolResult);
+      jest
+        .mocked(signInWithCredential)
+        .mockResolvedValueOnce({} as Awaited<ReturnType<typeof signInWithCredential>>);
+      mockGooglePrompt.mockResolvedValueOnce({
+        type: 'success',
+        params: { id_token: 'test-token' },
+      });
+      const view = render(<SSOLoginScreen />);
+      enterSchoolCredentials(view);
+      await act(async () =>
+        fireEvent.press(
+          view.getByText(provider === 'school' ? '使用學號登入' : '使用 Google 繼續'),
+        ),
+      );
+      expect(view.getByText('登入完成')).toBeTruthy();
+      expect(view.getByTestId('student-id-input').props.editable).toBe(false);
+      expect(view.getByRole('button', { name: '使用學號登入' })).toBeDisabled();
+      expect(view.getByRole('button', { name: '使用 Google 繼續' })).toBeDisabled();
+      view.unmount();
+      act(() => jest.advanceTimersByTime(250));
+      expect(Alert.alert).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  },
+);
+
+test('an already displayed success dialog cannot navigate after its screen unmounts', async () => {
+  jest.useFakeTimers();
+  try {
+    jest.mocked(signInWithStudentId).mockResolvedValueOnce(schoolResult);
+    const goBack = jest.fn();
+    const view = render(<SSOLoginScreen navigation={{ goBack }} />);
+    enterSchoolCredentials(view);
+    await act(async () => fireEvent.press(view.getByText('使用學號登入')));
+    act(() => jest.advanceTimersByTime(250));
+    expect(Alert.alert).toHaveBeenCalledTimes(1);
+    const confirm = jest.mocked(Alert.alert).mock.calls[0][2]?.[0].onPress;
+    view.unmount();
+    act(() => confirm?.());
+    expect(goBack).not.toHaveBeenCalled();
+  } finally {
+    jest.useRealTimers();
+  }
 });

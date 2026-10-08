@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { CourseAttendance } from './CourseAttendance';
+import { resolveSchoolPageContext } from '@/lib/pageContext';
 import {
   joinCourseAttendance,
   loadAttendanceCode,
@@ -15,6 +16,7 @@ const auth = vi.hoisted(() => ({ uid: 'student' as string | null }));
 vi.mock('./AuthGuard', () => ({
   useAuth: () => ({ user: auth.uid ? { uid: auth.uid } : null, loading: false }),
 }));
+vi.mock('./PWAInstallBanner', () => ({ PWAInstallBanner: () => null }));
 vi.mock('qrcode', () => ({
   default: { toDataURL: vi.fn().mockResolvedValue('data:image/png;base64,a') },
 }));
@@ -165,4 +167,18 @@ it('lets an instructor open a session when another instructor left one active', 
   expect((await screen.findByRole('button', { name: '開啟點名' })).hasAttribute('disabled')).toBe(
     false,
   );
+});
+
+it('keeps the teacher route and school context when returning to the course or signing in', () => {
+  auth.uid = null;
+  const school = { school: 'PU', schoolId: 'providence-university' };
+  const { schoolSearch } = resolveSchoolPageContext(school);
+  render(<CourseAttendance courseId="course/id" audience="teacher" searchParams={school} />);
+  expect(screen.getByRole('link', { name: '回課程工作台' }).getAttribute('href')).toBe(
+    `/teacher/course/course%2Fid${schoolSearch}`,
+  );
+  expect(screen.getByRole('link', { name: '登入帳號' }).getAttribute('href')).toBe(
+    `/login?redirect=${encodeURIComponent(`/teacher/course/course%2Fid/attendance${schoolSearch}`)}`,
+  );
+  expect(screen.getByRole('main').id).toBe('page-content');
 });

@@ -1,0 +1,81 @@
+.notices {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  max-width: var(--page-width);
+  margin-inline: auto;
+  padding: 20px var(--page-padding-inline) 0;
+}
+
+.notices:empty {
+  display: none;
+}
+
+.notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px 24px;
+  min-width: 0;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.content {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.title {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+.description {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.error {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--danger);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.offline {
+  padding: 12px var(--page-padding-inline);
+  background: var(--warning-soft);
+  color: var(--warning);
+  border-bottom: 1px solid var(--border);
+  text-align: center;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+@media (max-width: 380px) {
+  .notice {
+    padding: 16px;
+  }
+  .actions {
+    width: 100%;
+  }
+  .actions > button {
+    flex: 1;
+  }
+}

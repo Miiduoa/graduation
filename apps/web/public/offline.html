@@ -3,63 +3,125 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#234c39" />
+    <meta name="theme-color" content="#314d40" />
     <title>離線 · Campus One</title>
+    <script>
+      try {
+        var preferences = JSON.parse(localStorage.getItem('campus-web-preferences') || 'null');
+        var selectedTheme = preferences && preferences.appearance && preferences.appearance.theme;
+        if (selectedTheme === 'light' || selectedTheme === 'dark') {
+          document.documentElement.setAttribute('data-theme', selectedTheme);
+        }
+      } catch (error) {
+        // The offline page remains usable when browser storage is unavailable.
+      }
+    </script>
     <style>
+      :root {
+        color-scheme: light;
+        --bg: #f8f7f3;
+        --surface: #ffffff;
+        --text: #243b35;
+        --muted: #626e67;
+        --border: #dddeda;
+        --brand: #314d40;
+        --on-brand: #ffffff;
+        --focus-ring: #bd581f;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme='light']) {
+          color-scheme: dark;
+          --bg: #171f1b;
+          --surface: #202b24;
+          --text: #e5eee3;
+          --muted: #a5b5a6;
+          --border: #37463b;
+          --brand: #a9c6a3;
+          --on-brand: #17291d;
+          --focus-ring: #d6b16a;
+        }
+      }
+      :root[data-theme='dark'] {
+        color-scheme: dark;
+        --bg: #171f1b;
+        --surface: #202b24;
+        --text: #e5eee3;
+        --muted: #a5b5a6;
+        --border: #37463b;
+        --brand: #a9c6a3;
+        --on-brand: #17291d;
+        --focus-ring: #d6b16a;
+      }
       * {
         box-sizing: border-box;
       }
       body {
         margin: 0;
-        min-height: 100vh;
+        min-height: 100svh;
         display: grid;
         place-items: center;
-        padding: 28px;
-        background: #f8f7f3;
-        color: #243b35;
+        padding: 24px 20px;
+        background: var(--bg);
+        color: var(--text);
         font-family: system-ui, sans-serif;
         line-height: 1.7;
       }
       main {
-        max-width: 440px;
+        width: 100%;
+        max-width: 560px;
       }
       .brand {
-        font-size: 13px;
+        margin-bottom: 24px;
+        font-size: 19px;
         font-weight: 700;
-        letter-spacing: 2px;
+        letter-spacing: -0.6px;
+      }
+      section {
+        padding: clamp(22px, 5vw, 36px);
+        border: 1px solid var(--border);
+        border-top: 3px solid var(--brand);
+        border-radius: 8px;
+        background: var(--surface);
       }
       h1 {
-        font-size: 30px;
+        font-size: clamp(24px, 5vw, 30px);
         font-weight: 600;
-        margin-top: 40px;
+        line-height: 1.4;
+        margin: 0 0 16px;
       }
       p {
-        color: #626e67;
+        margin: 0;
+        color: var(--muted);
+        overflow-wrap: anywhere;
       }
       button {
-        margin-top: 20px;
-        padding: 12px 24px;
+        margin-top: 24px;
+        min-height: 44px;
+        padding: 10px 20px;
         border: 0;
-        border-radius: 4px;
-        background: #28483b;
-        color: white;
+        border-radius: 6px;
+        background: var(--brand);
+        color: var(--on-brand);
         font: inherit;
+        font-weight: 600;
         cursor: pointer;
       }
       button:focus-visible {
-        outline: 3px solid #bd581f;
+        outline: 3px solid var(--focus-ring);
         outline-offset: 4px;
       }
     </style>
   </head>
   <body>
     <main>
-      <div class="brand">CAMPUS ONE</div>
-      <h1>目前沒有網路連線。</h1>
-      <p>
-        請確認 Wi-Fi 或行動網路，再重新載入頁面。若剛才正在繳交作業，請在恢復連線後確認繳交紀錄。
-      </p>
-      <button type="button" onclick="window.location.reload()">重新載入</button>
+      <div class="brand">Campus One</div>
+      <section aria-labelledby="offline-title">
+        <h1 id="offline-title">目前沒有網路連線。</h1>
+        <p>
+          請確認 Wi-Fi 或行動網路，再重新載入頁面。若剛才正在繳交作業，請在恢復連線後確認繳交紀錄。
+        </p>
+        <button type="button" onclick="window.location.reload()">重新載入</button>
+      </section>
     </main>
   </body>
 </html>
