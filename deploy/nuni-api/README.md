@@ -2,7 +2,7 @@
 
 Campus One uses the existing `api.nuni.tw` database and API. The running API's source repository, `Miiduoa/nuni-prod`, is archived; `Miiduoa/nuni-v2` is a separate rewrite and is not the source currently running in production.
 
-This directory preserves the exact base and reviewed changes used by Campus One, without changing the archived repository or replacing the rewrite. `source.json` binds the base commit, patch checksums, final Git tree, and runtime implementation commit. The second patch updates the derived runtime grant inventory. The third adds a scoped installer for the 30 built-in social event contracts, with enforce-mode regression coverage.
+This directory preserves the exact base and reviewed changes used by Campus One, without changing the archived repository or replacing the rewrite. `source.json` binds the base commit, patch checksums, final Git tree, and runtime implementation commit. The second patch updates the derived runtime grant inventory. The third adds a scoped installer for the 30 built-in social event contracts, with enforce-mode regression coverage. The fourth preserves existing account-to-person mappings and serializes first-time persona creation, so legacy accounts can publish and read their public posts without creating a second identity.
 
 Build from the repository root:
 
