@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import CafeteriaPage from './page';
 const state = vi.hoisted(() => ({
@@ -96,6 +96,46 @@ it('does not interpret an empty source as an unavailable service', () => {
   expect(screen.queryByRole('alert')).toBeNull();
   expect(screen.getByText('餐廳資料')).toBeTruthy();
   expect(screen.queryByText(/示範資料/)).toBeNull();
+});
+it('distinguishes unknown availability, paused supply and sold-out meals without claiming ordering is available', () => {
+  render(<CafeteriaPage />);
+  act(() => {
+    state.cafeterias[0].next([
+      { id: 'stall', name: '校內咖啡店', orderingEnabled: true, pilotStatus: 'live' },
+    ]);
+    state.menus[0].next([
+      { id: 'unknown', cafeteriaId: 'stall', name: '未知供應餐點' },
+      { id: 'paused', cafeteriaId: 'stall', name: '暫停餐點', available: false },
+      { id: 'sold-out', cafeteriaId: 'stall', name: '售完餐點', available: true, soldOut: true },
+      { id: 'available', cafeteriaId: 'stall', name: '現有餐點', available: true },
+    ]);
+  });
+  const restaurant = within(screen.getByRole('region', { name: '校內咖啡店' }));
+  expect(restaurant.getByText('4 道餐點 · 1 道標記供應中')).toBeTruthy();
+  expect(restaurant.getByText('供應狀態未確認')).toBeTruthy();
+  expect(restaurant.getByText('暫停供應')).toBeTruthy();
+  expect(restaurant.getByText('已售完')).toBeTruthy();
+  expect(restaurant.getAllByText('供應中')).toHaveLength(1);
+  expect(screen.getByText(/尚未開放線上點餐/)).toBeTruthy();
+  expect(screen.queryByText('可點餐餐廳')).toBeNull();
+});
+it('exposes the selected restaurant and restores menus when clearing an empty search', () => {
+  render(<CafeteriaPage />);
+  receive();
+  fireEvent.click(screen.getByRole('button', { name: '校內咖啡店' }));
+  expect(screen.getByRole('button', { name: '校內咖啡店' }).getAttribute('aria-pressed')).toBe(
+    'true',
+  );
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜尋餐點或餐廳' }), {
+    target: { value: '不存在的餐點' },
+  });
+  expect(screen.queryByText('蔬菜吐司')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
+  expect(screen.getByText('蔬菜吐司')).toBeTruthy();
+  expect(screen.getByRole('button', { name: '全部餐廳' }).getAttribute('aria-pressed')).toBe(
+    'true',
+  );
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
 });
 it.each(['school', 'uid'] as const)(
   'clears loaded menus and rejects old listeners after changing %s',

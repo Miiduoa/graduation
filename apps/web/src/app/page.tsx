@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { AppHeader } from '@/components/AppHeader';
+import { SiteFooter } from '@/components/SiteFooter';
 import { useAuth } from '@/components/AuthGuard';
 import { loadHomeData, type HomeData } from '@/lib/homeOverview';
 import styles from './home.module.css';
@@ -54,7 +55,7 @@ export default function HomePage() {
         跳到主要內容
       </a>
       <AppHeader />
-      <main id="today-content" className={styles.main}>
+      <main id="today-content" className={styles.main} tabIndex={-1}>
         <div className={styles.heading}>
           <div>
             <p className={styles.eyebrow}>你的校園日常</p>
@@ -240,11 +241,7 @@ export default function HomePage() {
             </aside>
           </div>
         )}
-        <footer className={styles.footer}>
-          <span>Campus One</span>
-          <span>課程與校園生活</span>
-          <Link href="/settings">設定</Link>
-        </footer>
+        <SiteFooter />
       </main>
     </div>
   );
