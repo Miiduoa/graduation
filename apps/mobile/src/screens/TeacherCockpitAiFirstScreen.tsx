@@ -53,13 +53,13 @@ export default function TeacherCockpitAiFirstScreen(props: any) {
 
   return (
     <AIDetailScreen
-      title="教師工作台"
-      subtitle="王大明老師 · 2 門課 · 88 位學生"
+      title="教師工作台 · 範例"
+      subtitle="本機示範資料 · 未連結正式校務系統"
       onBack={() => navigation?.goBack?.()}
     >
       <AIInsightBanner
-        text="今天 5 份 Lab 3 待批改 · 3 位學生分數異常下滑（AI 風險評估）· 助教林同學本週可幫批 2 小時"
-        source="AI · 教學 dashboard"
+        text="本頁課程、分數與學生資訊均為範例。示範批改只會建立本機通知，不會同步正式成績。"
+        source="本機範例資料"
         confidence="high"
       />
 
@@ -72,46 +72,46 @@ export default function TeacherCockpitAiFirstScreen(props: any) {
           marginTop: aiTokens.space.md,
         }}
       >
-        <QuickStat label="今日課" value="2" sub="堂" />
-        <QuickStat label="待批改" value="13" tone="warn" />
-        <QuickStat label="風險生" value="3" tone="danger" />
-        <QuickStat label="出席率" value="93%" tone="success" />
+        <QuickStat label="今日課" value="—" sub="未串接" />
+        <QuickStat label="待批改" value="2" tone="warn" />
+        <QuickStat label="風險生" value="—" tone="danger" />
+        <QuickStat label="出席率" value="—" tone="success" />
       </View>
 
       {/* AI 給教師的洞察 */}
-      <AISection title="AI 教學洞察">
+      <AISection title="教學資訊（範例）">
         <AICard
           aiGenerated
           icon="⚠️"
-          title="3 位學生需要你關心"
+          title="學生關懷情境"
           badge="高優先"
           badgeTone="danger"
-          source="AI · 出席 + 成績 + 互動"
+          source="非真實學籍資料"
           confidence="mid"
         >
           <Text style={{ fontSize: 13, color: aiTokens.text, lineHeight: 19 }}>
-            學號 1099508、1099523、1099541 近 2 週成績明顯下滑、出席率低。
-            建議單獨找一次。
+            這是輔導流程的介面範例，未讀取學生的實際成績或出席資料。
+            正式輔導判斷必須以校務系統的授權資料為準。
           </Text>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
             <AIButton label="檢視學生風險" onPress={go('StudentRisk')} />
-            <AIButton label="AI 起草訊息" variant="ghost" onPress={() => Alert.alert('AI 起草', '已草擬 3 份關心訊息')} />
+            <AIButton label="檢視範例說明" variant="ghost" onPress={() => Alert.alert('範例資料', '此頁沒有執行真實的學生風險判斷或訊息草擬。')} />
           </View>
         </AICard>
 
         <AICard
           aiGenerated
           icon="📊"
-          title="Lab 3 班級表現分布"
-          source="AI · 自動分析"
+          title="班級分數分布（範例）"
+          source="靜態範例，未比對歷年資料"
           confidence="high"
         >
           <Text style={{ fontSize: 13, color: aiTokens.text, lineHeight: 19 }}>
-            平均 76.5（去年 81.2）· 第二題 65% 學生卡關{'\n'}
-            建議：下次課堂回顧該題；AI 已生成補充教材
+            範例平均 76.5 分；示範資料顯示第二題有較多錯誤。{'\n'}
+            這些數字不用於正式教學決策。
           </Text>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-            <AIButton label="使用補充教材" onPress={() => Alert.alert('已加入', '5/22 課堂播放清單')} />
+            <AIButton label="查看資料說明" onPress={() => Alert.alert('範例資料', '這些指標不是即時課堂分析結果。')} />
           </View>
         </AICard>
       </AISection>
@@ -133,9 +133,21 @@ export default function TeacherCockpitAiFirstScreen(props: any) {
         />
       </AISection>
 
-      <AISection title="待批改" subtitle="13 件">
-        <AIRow icon="📝" title="Lab 3 — 排程實作" subtitle="48 份 · 已批 35 / 48" tag="今晚" tagTone="warning" onPress={go('TeacherGrading', { assignment: 'lab-3' })} />
-        <AIRow icon="📝" title="第二次小考" subtitle="48 份 · 已批 48 / 48" tag="完成" tagTone="success" onPress={() => Alert.alert('第二次小考', '已完成批改，48 份成績皆已發布。')} />
+      <AISection title="示範批改" subtitle="2 份待處理；3 份範例">
+        <AIRow
+          icon="📝"
+          title="機器學習 · 作業批改練習"
+          subtitle="3 份範例繳交 · 2 份未批改 · 僅本機通知"
+          tag="示範"
+          tagTone="muted"
+          onPress={go('TeacherGrading', {
+            assignmentId: '1',
+            assignmentTitle: '作業批改練習',
+            courseId: '71378',
+            courseName: '機器學習',
+          })}
+        />
+        <AIRow icon="📝" title="第二次小考（範例）" subtitle="尚未連接正式成績資料" tag="範例" tagTone="muted" onPress={() => Alert.alert('範例入口', '目前沒有已發布的真實小考成績可供查詢。')} />
       </AISection>
 
       <AISection title="助教">
@@ -144,8 +156,8 @@ export default function TeacherCockpitAiFirstScreen(props: any) {
 
       <AISection title="快速入口">
         <AIRow icon="📊" title="教學分析" subtitle="出席、成績、互動" onPress={go('AcademicInsights')} />
-        <AIRow icon="📅" title="教學週報" subtitle="AI 自動產生" tag="AI" tagTone="ai" onPress={() => Alert.alert('週報生成中', 'AI 正在彙整本週教學資料...')} />
-        <AIRow icon="🎓" title="期末成績登錄" subtitle="6/15 截止" tag="未開始" tagTone="muted" onPress={go('CourseGradebook', { courseId: 'CS301' })} />
+        <AIRow icon="📅" title="教學週報" subtitle="尚未串接正式教學資料" tag="範例" tagTone="muted" onPress={() => Alert.alert('尚未開放', '此頁尚未串接正式教學資料，無法產出有效週報。')} />
+        <AIRow icon="🎓" title="成績登錄（範例）" subtitle="請以校務系統公告為準" tag="範例" tagTone="muted" onPress={go('CourseGradebook', { courseId: 'CS301' })} />
       </AISection>
 
       <AISection title="🎬 示範工具" subtitle="口試 / 演示專用：示範跨角色公告審核流">
