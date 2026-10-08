@@ -104,8 +104,13 @@ async function checkFinancialRecords(db, userRef, uid) {
     )
       precondition('financial-records', '仍有未結束或付款狀態待確認的訂單，請先完成處理。');
   });
-  for (const collection of ['refundRequests', 'refunds']) {
-    await scanPages(db.collectionGroup(collection).where('userId', '==', uid), async (doc) => {
+  // Inspection refunds use studentUid; older refund sources use userId.
+  for (const [collection, ownerField] of [
+    ['refundRequests', 'userId'],
+    ['refunds', 'userId'],
+    ['refunds', 'studentUid'],
+  ]) {
+    await scanPages(db.collectionGroup(collection).where(ownerField, '==', uid), async (doc) => {
       if (!['completed', 'rejected', 'cancelled', 'refunded'].includes(doc.data().status))
         precondition('financial-records', '仍有待處理的退款，請先完成處理。');
     });
