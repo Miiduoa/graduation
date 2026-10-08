@@ -5,6 +5,7 @@ const { initializeApp, deleteApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
 const { createGroupMembershipHandlers } = require('./groupMembership');
 const { createOrderHandler } = require('./createOrder');
+const { createSubmitProductFeedback } = require('./productFeedback');
 
 const emulatorHost = /^(?:127\.0\.0\.1|localhost|0\.0\.0\.0):([0-9]{1,5})$/.exec(
   process.env.FIRESTORE_EMULATOR_HOST || '',
@@ -39,6 +40,19 @@ const order = (uid = 'alice', change = {}) =>
     },
   });
 const read = async (path) => (await db.doc(path).get()).data();
+const feedback = (uid = 'alice', change = {}) =>
+  createSubmitProductFeedback({ db })({
+    auth: { uid },
+    data: {
+      requestId: 'feedback-request-0001',
+      schoolId: 'pu',
+      kind: 'general',
+      feedbackType: 'bug',
+      title: '公告無法載入',
+      description: '切換學校後的畫面沒有更新。',
+      ...change,
+    },
+  });
 beforeEach(async () => {
   const response = await fetch(
     `http://${host}/emulator/v1/projects/${projectId}/databases/(default)/documents`,
@@ -77,6 +91,38 @@ beforeEach(async () => {
 after(async () => {
   await db.terminate();
   await deleteApp(app);
+});
+
+test('concurrent feedback retries persist one receipt with a server timestamp', async () => {
+  const results = await Promise.all(Array.from({ length: 4 }, () => feedback()));
+  assert.equal(results.filter((result) => !result.reused).length, 1);
+  assert.equal(new Set(results.map((result) => result.feedbackId)).size, 1);
+  const documents = await db.collection('feedback').get();
+  assert.equal(documents.size, 1);
+  assert.equal(documents.docs[0].data().submittedBy, 'alice');
+  assert.ok(documents.docs[0].data().createdAt.toMillis() > 0);
+});
+
+test('concurrent changed feedback with one key commits one intent', async () => {
+  const results = await Promise.allSettled([
+    feedback(),
+    feedback('alice', { title: '另一個問題' }),
+  ]);
+  assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+  assert.equal(
+    results.find((result) => result.status === 'rejected').reason.code,
+    'already-exists',
+  );
+  assert.equal((await db.collection('feedback').get()).size, 1);
+});
+
+test('feedback accounts remain separate and revoked members cannot reuse a receipt', async () => {
+  const [alice, bob] = await Promise.all([feedback(), feedback('bob')]);
+  assert.notEqual(alice.feedbackId, bob.feedbackId);
+  assert.equal((await db.collection('feedback').get()).size, 2);
+  await db.doc('schools/pu/members/alice').update({ status: 'inactive' });
+  await assert.rejects(feedback(), { code: 'permission-denied' });
+  assert.equal((await db.collection('feedback').get()).size, 2);
 });
 
 test('concurrent joins and leaves from fresh sessions change count once and preserve mirrors', async () => {

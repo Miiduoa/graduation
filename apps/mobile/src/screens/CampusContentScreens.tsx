@@ -12,10 +12,10 @@ import {
 import { useAuth } from '../state/auth';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useSchool } from '../state/school';
+import { useCampusEvents } from '../hooks/useCampusEvents';
 import {
   loadCampusAnnouncements,
   loadCampusAnnouncement,
-  loadCampusEvents,
   loadCampusEvent,
 } from '../services/publicCampusContent';
 import { safeNavigate } from '../utils/safeNavigate';
@@ -27,14 +27,14 @@ type Props = {
     goBack?: () => void;
     navigate?: (screen: string, params?: Record<string, unknown>) => void;
   };
-  route?: { params?: { id?: string; announcementId?: string; eventId?: string } };
+  route?: { params?: { id?: string; announcementId?: string; eventId?: string; source?: string } };
 };
 
-function useContent<T>(loader: (schoolId: string, id: string) => Promise<T>, id = '') {
+function useContent<T>(loader: (schoolId: string, id: string) => Promise<T>, id = '', source = '') {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const { user } = useAuth();
   const { school } = useSchool();
-  const scope = JSON.stringify([user?.uid, school.id, id]);
+  const scope = JSON.stringify([user?.uid, school.id, id, source]);
   const activeScope = useRef(scope);
   activeScope.current = scope;
   const generation = useRef(0);
@@ -250,26 +250,41 @@ export function CampusAnnouncementDetailScreen({ navigation, route }: Props) {
 }
 
 export function CampusEventsScreen({ navigation }: Props) {
-  const content = useContent(loadCampusEvents);
-  const [period, setPeriod] = useState<'all' | 'upcoming' | 'past'>('all');
-  const rows = content.value ?? [];
+  const content = useCampusEvents();
+  const [period, setPeriod] = useState<'all' | 'upcoming' | 'past' | 'undated'>('all');
   const now = Date.now();
-  const visible = rows.filter(
-    (row) =>
-      period === 'all' ||
-      (row.startsAt &&
+  const visible = content.items
+    .filter((row) => {
+      if (period === 'all') return true;
+      if (period === 'undated') return !row.startsAt;
+      return (
+        row.startsAt &&
         (period === 'upcoming'
           ? new Date(row.startsAt).getTime() >= now
-          : new Date(row.startsAt).getTime() < now)),
-  );
+          : new Date(row.startsAt).getTime() < now)
+      );
+    })
+    .sort((a, b) => {
+      if (!a.startsAt || !b.startsAt)
+        return a.startsAt ? -1 : b.startsAt ? 1 : a.id.localeCompare(b.id);
+      const aTime = new Date(a.startsAt).getTime();
+      const bTime = new Date(b.startsAt).getTime();
+      if (aTime >= now !== bTime >= now) return aTime >= now ? -1 : 1;
+      return (aTime >= now ? aTime - bTime : bTime - aTime) || a.id.localeCompare(b.id);
+    });
   return (
     <AIDetailScreen
       title="活動"
       subtitle="查看時間、地點與主辦單位資訊。"
       onBack={() => navigation?.goBack?.()}
     >
-      {content.loading || content.error || !rows.length ? (
-        <ReadState {...content} empty="目前沒有活動資訊" />
+      {!content.loaded && !content.items.length ? (
+        <ReadState
+          loading={content.loading}
+          error={content.error}
+          reload={content.reload}
+          empty="目前沒有活動資訊"
+        />
       ) : (
         <>
           <View
@@ -282,29 +297,65 @@ export function CampusEventsScreen({ navigation }: Props) {
               onPress={() => setPeriod('upcoming')}
             />
             <AIChip label="過往活動" active={period === 'past'} onPress={() => setPeriod('past')} />
+            <AIChip
+              label="時間待公告"
+              active={period === 'undated'}
+              onPress={() => setPeriod('undated')}
+            />
           </View>
-          <AISection title="學校活動" subtitle="最多顯示 100 場活動">
+          <AISection
+            title="學校活動"
+            subtitle={`已載入 ${content.items.length} 場；篩選與日期排序僅適用已載入的活動。`}
+          >
             {visible.length ? (
               visible.map((row) => (
                 <AIRow
-                  key={row.id}
+                  key={`${row.source}:${row.id}`}
                   title={row.title}
                   subtitle={[dateLabel(row.startsAt), row.location].filter(Boolean).join(' · ')}
                   onPress={() => {
-                    if (content.current()) safeNavigate(navigation, '活動詳情', { id: row.id });
+                    if (content.current())
+                      safeNavigate(navigation, '活動詳情', { id: row.id, source: row.source });
                   }}
                 />
               ))
             ) : (
-              <AICard title="這個時段目前沒有活動">{null}</AICard>
+              <AICard
+                title={content.items.length ? '已載入的活動中沒有符合項目' : '目前沒有活動資訊'}
+              >
+                {null}
+              </AICard>
             )}
           </AISection>
-          <AIButton
-            label="更新活動"
-            variant="ghost"
-            style={{ margin: aiTokens.space.md }}
-            onPress={() => void content.reload()}
-          />
+          {content.error ? (
+            <AICard>
+              <View style={{ gap: 12 }}>
+                <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>
+                  {content.error}
+                </Text>
+                <AIButton
+                  label="重試載入"
+                  disabled={content.loading}
+                  onPress={() => void content.retry()}
+                />
+              </View>
+            </AICard>
+          ) : null}
+          <View style={{ gap: 12, margin: aiTokens.space.md }}>
+            {content.cursor ? (
+              <AIButton
+                label={content.loading ? '正在載入…' : '載入更多活動'}
+                disabled={content.loading}
+                onPress={() => void content.loadMore()}
+              />
+            ) : null}
+            <AIButton
+              label={content.loading && !content.cursor ? '正在更新…' : '更新活動'}
+              variant="ghost"
+              disabled={content.loading}
+              onPress={() => void content.reload()}
+            />
+          </View>
         </>
       )}
     </AIDetailScreen>
@@ -313,7 +364,12 @@ export function CampusEventsScreen({ navigation }: Props) {
 
 export function CampusEventDetailScreen({ navigation, route }: Props) {
   const id = route?.params?.id ?? route?.params?.eventId ?? '';
-  const content = useContent(loadCampusEvent, id);
+  const source = route?.params?.source;
+  const loader = useCallback(
+    (schoolId: string, eventId: string) => loadCampusEvent(schoolId, eventId, source),
+    [source],
+  );
+  const content = useContent(loader, id, source);
   const event = content.value;
   const actionLock = useRef(false);
   const [busyScope, setBusyScope] = useState<string | null>(null);
@@ -345,7 +401,7 @@ export function CampusEventDetailScreen({ navigation, route }: Props) {
         await exportAndShareICalFile(
           [
             {
-              id: `campus-event-${event.schoolId}-${event.id}`,
+              id: `campus-event-${event.schoolId}-${event.source}-${event.id}`,
               title: event.title,
               description: event.description,
               location: event.location,
