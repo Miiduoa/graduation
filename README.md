@@ -218,6 +218,7 @@ https://github.com/Miiduoa/graduation/actions
 - [Architecture overview](docs/ARCHITECTURE_OVERVIEW.md)
 - [Architecture Decision Records](docs/adr/README.md)
 - [Testing evidence](docs/TESTING_EVIDENCE.md)
+- [Attendance verification boundary](docs/ATTENDANCE_VERIFICATION.md) — server confirmation requirements and current limitations
 - `docs/APP_ROLE_DATA_FLOW_ARCHITECTURE.md`
 - `docs/CROSS_ROLE_DATA_FLOW.md`
 - `docs/AI_ASSISTANT_ARCHITECTURE.md`
