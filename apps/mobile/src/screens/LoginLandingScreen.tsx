@@ -25,7 +25,15 @@ export default function LoginLandingScreen() {
             testID="login-start"
             accessibilityRole="button"
             style={s.button}
-            onPress={() => safeNavigate(navigation, 'SSOLogin')}
+            onPress={() => {
+              if (__DEV__) console.info('[navigation] school login pressed');
+              const requested = safeNavigate(navigation, 'SSOLogin');
+              if (__DEV__)
+                console.info('[navigation] school login requested', {
+                  requested,
+                  routes: navigation.getState?.()?.routeNames,
+                });
+            }}
           >
             <Text style={s.buttonText}>前往登入 ↗</Text>
           </Pressable>
