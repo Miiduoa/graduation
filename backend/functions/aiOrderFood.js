@@ -1,6 +1,11 @@
 'use strict';
 
-const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { onCall: firebaseOnCall, HttpsError } = require('firebase-functions/v2/https');
+const { createAccountGuardedOnCall } = require('./accountLifecycle');
+const onCall = createAccountGuardedOnCall({
+  onCall: firebaseOnCall,
+  getDb: () => require('firebase-admin/firestore').getFirestore(),
+});
 const { getFirestore } = require('firebase-admin/firestore');
 const { createOrderHandler } = require('./createOrder');
 

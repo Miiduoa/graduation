@@ -8,7 +8,7 @@ function transactionStore(seed = []) {
   const docs = new Map(seed);
   let failCommit = false;
   function ref(path) {
-    return { path, id: path.split('/').pop(), collection: (name) => collection(`${path}/${name}`) };
+    return { path, id: path.split('/').pop(), collection: (name) => collection(`${path}/${name}`), get: async () => snap(ref(path)) };
   }
   function collection(path, filters = [], maximum = Infinity) {
     return {

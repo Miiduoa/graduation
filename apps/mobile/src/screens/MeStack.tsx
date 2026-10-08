@@ -282,12 +282,12 @@ export function MeStack() {
       <Stack.Screen
         name="DataExport"
         component={DataExportScreen}
-        options={{ title: '資料匯出' }}
+        options={{ title: '資料匯出', headerShown: false }}
       />
       <Stack.Screen
         name="AccountDeletion"
         component={AccountDeletionScreen}
-        options={{ title: '刪除帳號' }}
+        options={{ title: '刪除帳號', headerShown: false }}
       />
 
       {/* 🔒 Route-guarded — 非授權使用者即使 deep-link 也會看到拒絕畫面 */}
