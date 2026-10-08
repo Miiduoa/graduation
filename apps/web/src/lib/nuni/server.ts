@@ -192,7 +192,7 @@ export async function boundedJson(
   }
 }
 
-function apiOrigin(): string {
+export function apiOrigin(): string {
   const url = new URL(process.env.NUNI_API_BASE_URL || 'https://api.nuni.tw');
   const local =
     process.env.NODE_ENV !== 'production' &&
@@ -234,9 +234,11 @@ export function platformRequest(
   path: string,
   session?: PlatformSession,
   input?: Record<string, unknown>,
+  query?: Record<string, string>,
 ): Promise<unknown> {
   if (!/^[a-zA-Z0-9/_-]+$/.test(path)) throw new NuniError(400, 'INVALID_PATH');
-  return fetchJson(`${apiOrigin()}/v1/auth/platform/${path}`, {
+  const search = new URLSearchParams(query);
+  return fetchJson(`${apiOrigin()}/v1/auth/platform/${path}${search.size ? `?${search}` : ''}`, {
     method: input ? 'POST' : 'GET',
     headers: {
       Accept: 'application/json',

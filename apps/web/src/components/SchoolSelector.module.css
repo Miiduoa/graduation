@@ -1,0 +1,64 @@
+.panel,
+.popover {
+  min-width: 0;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+}
+.panel h2 {
+  margin: 0 0 16px;
+  font-size: 18px;
+  font-weight: 600;
+}
+.content {
+  display: grid;
+  gap: 16px;
+}
+.description,
+.state {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.state p {
+  margin: 0 0 12px;
+}
+.compact {
+  position: relative;
+  min-width: 0;
+}
+.compact summary {
+  min-height: 44px;
+  padding-block: 10px;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.compact summary:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+.popover {
+  position: absolute;
+  z-index: 210;
+  right: 0;
+  width: min(340px, calc(100vw - 40px));
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--text) 8%, transparent);
+}
+@media (max-width: 760px) {
+  .panel,
+  .popover {
+    padding: 20px;
+  }
+  .compact {
+    position: static;
+  }
+  .popover {
+    right: 20px;
+  }
+}
