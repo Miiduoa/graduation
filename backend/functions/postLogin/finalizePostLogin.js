@@ -10,7 +10,7 @@ const { enforceRateLimit } = require('../securityUtils');
 const { puFetchCourses } = require('../puScraper');
 const { tcFetchCourses, tcFetchProfile, tcFetchCourseMembers } = require('../tronClassScraper');
 const { normalizeServiceRoleRecord } = require('../authz');
-const { resolveUserRoles } = require('../../../packages/shared/dist-cjs/postLoginRoles');
+const { resolveUserRoles } = require('../generated/shared/postLoginRoles');
 
 const MAX_MEMBER_COURSES = 10;
 const MAX_EMAIL_LOOKUPS = 40;

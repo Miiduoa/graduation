@@ -1,4 +1,4 @@
-const { resolveUserRoles } = require('../../packages/shared/dist-cjs/postLoginRoles');
+const { resolveUserRoles } = require('./generated/shared/postLoginRoles');
 
 describe('resolveUserRoles', () => {
   test('respects non-student authoritative user role', () => {

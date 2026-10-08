@@ -4,7 +4,7 @@ const { z } = require('zod');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const {
   drawQuestionsForQuiz,
-} = require('../../../../packages/shared/dist-cjs/lms/questionBank');
+} = require('../../generated/shared/lms/questionBank');
 
 /**
  * draftQuizFromBank — 教師從題庫抽題建立一份 quiz draft。

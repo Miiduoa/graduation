@@ -22,7 +22,7 @@
 - production 設定要求 Firebase 真實資料，關閉本機假登入與資料失敗後的假資料回退。Preview／production 還需要 Firebase、EAS、法律頁面、錯誤回報、地圖金鑰及已開放學校等必要設定；檔案存在不代表正式環境已備齊。
 - SSO、課程、成績、付款、widget 與 deep link 在 release 類型建置預設關閉，須逐項明確設定。審查說明必須依實際啟用的功能填寫。
 - `eas.json` 的 Android submit 目標目前是 `internal`、`draft` 且 `changesNotSentForReview: true`，不能宣稱公開上架。Apple／Google 帳號、簽署、商店 App 紀錄與提交結果尚需證據。
-- 已有 iOS Development 模擬器訪客登入導覽通過的基準：[GitHub Actions 37701508054](https://github.com/Miiduoa/graduation/actions/runs/37701508054)，對應 commit `5a67fdbd6f20b0808ec68423020364ff9993469f`。這只驗證啟動、登入入口及前往學校登入畫面；不涵蓋後續程式修改、真正登入、已登入功能、簽署正式版本或商店審查。
+- 已有 iOS Development 模擬器訪客登入導覽通過的基準：[GitHub Actions 37705225138](https://github.com/Miiduoa/graduation/actions/runs/37705225138)，對應 commit `28bd6dd0806150a2fb5acee8a4bff8a9c2a4667a`。這只驗證啟動、登入入口及前往學校登入畫面；不涵蓋後續程式修改、真正登入、已登入功能、簽署正式版本或商店審查。
 
 ## iOS production 識別碼阻塞
 
@@ -37,6 +37,8 @@
 5. `.github/workflows/eas-build.yml:55` 直接執行所選 profile 的 `eas build`；專案沒有 `.easignore` 排除 iOS，且 iOS 目錄已追蹤。`.github/workflows/maestro-e2e.yml:101` 另記錄 native 專案含 Firebase／llama-rn 整合設定，不能為了改識別碼直接清空重建。
 
 本次僅修正可見名稱，保留 Xcode target／scheme、bundle identifier、Apple team、Android package 與服務憑證。`PRODUCT_NAME=mobile` 仍用於編譯產物；`CFBundleDisplayName`／`CFBundleName` 及原生權限提示中的產品名稱已使用 Campus One。
+
+已以 EAS CLI 唯讀確認可沿用的 Nuni 專案為 `@miiduoa/campus-one`（project ID `8955b97c-802c-463c-bd1d-d5f02e30a966`）。Nuni 原始碼的 production 設定使用 `com.nuni.app`，但未取得商店端註冊及簽署資產證據，因此尚未把它套入此專案。
 
 **尚缺輸入：** 需要核對 Nuni 既有 App Store Connect App／Apple Team／bundle identifier、Google Play package 與對應簽署資產。不能由 Nuni 品牌或網域推導 `com.nuni.*`，也不能把目前 Expo production 預設 `com.campus.app` 當成已存在的商店身分。
 
