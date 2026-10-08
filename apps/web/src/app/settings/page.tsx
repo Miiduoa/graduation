@@ -34,10 +34,10 @@ import {
 } from '@/lib/firebase';
 import {
   applyWebAppearancePreferences,
-  defaultThemeColor,
   defaultWebPreferences,
   readStoredWebPreferences,
   writeStoredWebPreferences,
+  webPreferencesStorageKey,
   type FontSizePreference,
   type StoredWebPreferences,
   type ThemePreference,
@@ -182,11 +182,15 @@ function profileDisplayName(user: User | null, form: ProfileFormState): string {
 }
 
 function saveLocalPreferences(prefs: StoredWebPreferences) {
-  if (typeof window === 'undefined') {
-    return;
+  try {
+    const raw = JSON.stringify(prefs);
+    if (window.localStorage.getItem(webPreferencesStorageKey) !== raw) {
+      writeStoredWebPreferences(window.localStorage, prefs);
+    }
+    return true;
+  } catch {
+    return false;
   }
-
-  writeStoredWebPreferences(window.localStorage, prefs);
 }
 
 export default function SettingsPage(props: {
@@ -248,38 +252,53 @@ function SettingsContent({
     defaultNotificationPreferences,
   );
   const [localPrefsReady, setLocalPrefsReady] = useState(false);
+  const [localPrefsSaved, setLocalPrefsSaved] = useState(true);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }
 
-    const stored = readStoredWebPreferences(window.localStorage);
-    setGeneralPrefs(stored.general);
-    setAppearancePrefs(stored.appearance);
-    setPrivacyPrefs(stored.privacy);
-    applyWebAppearancePreferences(document, stored.appearance);
-    setLocalPrefsReady(true);
+    const load = () => {
+      let stored = defaultWebPreferences;
+      try {
+        stored = readStoredWebPreferences(window.localStorage);
+      } catch {
+        setLocalPrefsSaved(false);
+      }
+      setGeneralPrefs(stored.general);
+      setAppearancePrefs(stored.appearance);
+      setPrivacyPrefs(stored.privacy);
+      setLocalPrefsReady(true);
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === null || event.key === webPreferencesStorageKey) load();
+    };
+    load();
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, []);
-
-  useEffect(() => {
-    if (typeof document === 'undefined') {
-      return;
-    }
-
-    applyWebAppearancePreferences(document, appearancePrefs);
-  }, [appearancePrefs]);
 
   useEffect(() => {
     if (!localPrefsReady) {
       return;
     }
 
-    saveLocalPreferences({
-      general: generalPrefs,
-      appearance: appearancePrefs,
-      privacy: privacyPrefs,
-    });
+    applyWebAppearancePreferences(document, appearancePrefs);
+  }, [appearancePrefs, localPrefsReady]);
+
+  useEffect(() => {
+    if (!localPrefsReady) {
+      return;
+    }
+
+    setLocalPrefsSaved(
+      saveLocalPreferences({
+        general: generalPrefs,
+        appearance: appearancePrefs,
+        privacy: privacyPrefs,
+      }),
+    );
   }, [appearancePrefs, generalPrefs, localPrefsReady, privacyPrefs]);
 
   useEffect(() => {
@@ -757,7 +776,7 @@ function SettingsContent({
           >
             <div>
               <div className="sectionTitle">即時套用</div>
-              <div className="sectionText">外觀設定會立即反映在這個瀏覽器，並持久保存在本機。</div>
+              <div className="sectionText">套用到所有頁面，下次開啟時也會保留。</div>
             </div>
             <button
               type="button"
@@ -780,7 +799,7 @@ function SettingsContent({
                     ? '🌙'
                     : '☀️'
               }
-              iconBg={appearancePrefs.theme === 'dark' ? '#2C2C2E' : '#FFF8E8'}
+              iconBg="var(--accent-soft)"
               title="色彩模式"
               subtitle={
                 appearancePrefs.theme === 'system'
@@ -802,6 +821,7 @@ function SettingsContent({
                       key={option.value}
                       type="button"
                       className={appearancePrefs.theme === option.value ? 'active' : ''}
+                      aria-pressed={appearancePrefs.theme === option.value}
                       onClick={() => updateAppearance('theme', option.value)}
                       style={{ padding: '4px 10px', fontSize: 12 }}
                     >
@@ -813,7 +833,7 @@ function SettingsContent({
             />
             <SettingRow
               icon="📏"
-              iconBg="#F3F0FF"
+              iconBg="var(--accent-soft)"
               title="字級"
               subtitle="同步調整主要標題與內文尺寸"
               right={
@@ -829,6 +849,7 @@ function SettingsContent({
                       key={option.value}
                       type="button"
                       className={appearancePrefs.fontSize === option.value ? 'active' : ''}
+                      aria-pressed={appearancePrefs.fontSize === option.value}
                       onClick={() => updateAppearance('fontSize', option.value)}
                       style={{ padding: '4px 10px', fontSize: 12 }}
                     >
@@ -840,7 +861,7 @@ function SettingsContent({
             />
             <SettingRow
               icon="▤"
-              iconBg="#FFF8E8"
+              iconBg="var(--accent-soft)"
               title="緊湊模式"
               subtitle="縮小頁面間距與卡片留白"
               right={
@@ -853,9 +874,9 @@ function SettingsContent({
             />
             <SettingRow
               icon="✨"
-              iconBg="#FFF0F5"
+              iconBg="var(--accent-soft)"
               title="動畫效果"
-              subtitle="減少介面移動與轉場"
+              subtitle="關閉後減少介面移動與轉場"
               right={
                 <Toggle
                   label="動畫效果"
@@ -868,13 +889,15 @@ function SettingsContent({
         </div>
 
         <div>
-          <div className="insetGroupHeader">品牌主色</div>
+          <div className="insetGroupHeader">重點色彩</div>
           <div className="card" style={{ padding: '16px 18px' }}>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               {THEME_COLORS.map((color) => (
                 <button
                   key={color}
                   type="button"
+                  aria-label={`選擇色彩 ${color}`}
+                  aria-pressed={appearancePrefs.themeColor === color}
                   onClick={() => updateAppearance('themeColor', color)}
                   style={{
                     width: 36,
@@ -899,17 +922,15 @@ function SettingsContent({
             </div>
             <div className="grid-2" style={{ marginTop: 16 }}>
               <label style={{ display: 'grid', gap: 8 }}>
-                <span style={{ fontSize: 13, color: 'var(--muted)' }}>自訂主色</span>
+                <span style={{ fontSize: 13, color: 'var(--muted)' }}>自訂色彩</span>
                 <input
                   className="input"
+                  type="color"
                   value={appearancePrefs.themeColor}
                   onChange={(event) =>
-                    updateAppearance(
-                      'themeColor',
-                      event.target.value.toUpperCase() || defaultThemeColor,
-                    )
+                    updateAppearance('themeColor', event.target.value.toUpperCase())
                   }
-                  placeholder={defaultThemeColor}
+                  style={{ width: '100%', minHeight: 48, cursor: 'pointer' }}
                 />
               </label>
               <div
@@ -918,13 +939,13 @@ function SettingsContent({
                   padding: 16,
                   background: 'linear-gradient(135deg, var(--brand) 0%, var(--brand2) 100%)',
                   border: 'none',
-                  color: '#fff',
+                  color: 'var(--on-brand)',
                 }}
               >
                 <div style={{ fontSize: 12, opacity: 0.8 }}>即時預覽</div>
                 <div style={{ fontSize: 22, fontWeight: 700, marginTop: 8 }}>Campus One</div>
                 <div style={{ fontSize: 13, opacity: 0.86, marginTop: 4 }}>
-                  主色與字級已立即套用
+                  色彩會依明暗模式調整，讓文字保持清楚。
                 </div>
               </div>
             </div>
@@ -1150,6 +1171,11 @@ function SettingsContent({
 
   return (
     <SiteShell title="設定" subtitle="調整外觀、通知與個人資料。" schoolName={schoolName}>
+      {!localPrefsSaved && (
+        <p role="alert" className="card">
+          此瀏覽器無法儲存外觀設定，這次調整只會保留到關閉頁面。
+        </p>
+      )}
       {profileLoadError && (
         <section className="card" role="alert">
           <p>{profileLoadError}</p>

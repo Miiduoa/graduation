@@ -50,7 +50,7 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       // iOS Filled — 主要動作
       primary: {
         background: 'var(--brand)',
-        color: '#fff',
+        color: 'var(--on-brand)',
         borderColor: 'transparent',
         boxShadow: 'none',
       },

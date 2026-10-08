@@ -1,0 +1,118 @@
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 36px;
+  align-items: start;
+}
+.panel {
+  min-width: 0;
+  padding: clamp(20px, 3vw, 32px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow-wrap: anywhere;
+}
+.panel h2,
+.services h2 {
+  font-size: var(--font-h2-size);
+  margin: 0 0 12px;
+}
+.panel p {
+  color: var(--muted);
+  line-height: 1.7;
+}
+.identity {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+}
+.identity > div {
+  flex: 1;
+  min-width: 120px;
+}
+.identity h2 {
+  margin: 4px 0 0;
+}
+.label {
+  font-size: var(--font-label-size);
+  margin: 0;
+}
+.avatar {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  flex: 0 0 52px;
+  background: var(--accent-soft);
+  color: var(--brand);
+  border-radius: var(--radius);
+  font-size: 24px;
+}
+.details {
+  margin: 12px 0 0;
+}
+.details > div {
+  display: grid;
+  grid-template-columns: minmax(70px, 1fr) minmax(0, 3fr);
+  gap: 20px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+}
+.details dt,
+.note {
+  color: var(--muted);
+  font-size: var(--font-body-sm-size);
+}
+.details dd {
+  margin: 0;
+}
+.bio h3 {
+  font-size: var(--font-h3-size);
+  margin-bottom: 0;
+}
+.bio p {
+  white-space: pre-wrap;
+}
+.note {
+  margin: 24px 0 0;
+}
+.services {
+  min-width: 0;
+}
+.links {
+  border-top: 1px solid var(--border);
+}
+.service {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.service:hover strong,
+.settings:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.description {
+  display: block;
+  color: var(--muted);
+  font-size: var(--font-body-sm-size);
+  margin-top: 6px;
+}
+.settings {
+  display: inline-block;
+  margin-top: 24px;
+  color: var(--brand);
+}
+@media (max-width: 760px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 28px;
+  }
+}

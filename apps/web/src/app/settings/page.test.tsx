@@ -185,3 +185,19 @@ it('locks profile fields while a save is pending so readback cannot erase a newe
     expect((screen.getByLabelText(label) as HTMLInputElement).disabled).toBe(true);
   }
 });
+
+it('uses a complete native color value and does not echo a synchronized selection', async () => {
+  render(<SettingsPage />);
+  await waitFor(() => expect(state.read).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole('button', { name: /^🎨\s*外觀$/ }));
+  const picker = screen.getByLabelText('自訂色彩') as HTMLInputElement;
+  expect(picker.type).toBe('color');
+  fireEvent.change(picker, { target: { value: '#ff6b35' } });
+  const raw = localStorage.getItem('campus-web-preferences')!;
+  expect(JSON.parse(raw).appearance.themeColor).toBe('#FF6B35');
+  await act(async () =>
+    window.dispatchEvent(new StorageEvent('storage', { key: 'campus-web-preferences' })),
+  );
+  expect(picker.value).toBe('#ff6b35');
+  expect(localStorage.getItem('campus-web-preferences')).toBe(raw);
+});

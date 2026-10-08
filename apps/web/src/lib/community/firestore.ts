@@ -82,7 +82,8 @@ export async function fetchRecentCampusPosts(
     const snap = await getDocs(qb);
     return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<CampusPostDoc, 'id'>) }));
   } catch {
-    const snap = await getDocs(query(postsCol(db, schoolId), limit(Math.min(lim, 25))));
+    const filters = boardId ? [where('boardId', '==', boardId)] : [];
+    const snap = await getDocs(query(postsCol(db, schoolId), ...filters, limit(Math.min(lim, 25))));
     return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<CampusPostDoc, 'id'>) }));
   }
 }
@@ -383,20 +384,12 @@ export async function unsubscribeFromBoard(uid: string, schoolId: string, boardI
 
 export async function listSubscribedBoardIds(uid: string, schoolId: string): Promise<string[]> {
   const db = getDb();
-  try {
-    const snap = await getDocs(
-      query(
-        collection(db, 'schools', schoolId, 'boardSubs'),
-        where('userId', '==', uid),
-        limit(100),
-      ),
-    );
-    return snap.docs
-      .map((d) => (d.data() as { boardId?: string }).boardId)
-      .filter((x): x is string => !!x);
-  } catch {
-    return [];
-  }
+  const snap = await getDocs(
+    query(collection(db, 'schools', schoolId, 'boardSubs'), where('userId', '==', uid), limit(100)),
+  );
+  return snap.docs
+    .map((d) => (d.data() as { boardId?: string }).boardId)
+    .filter((x): x is string => !!x);
 }
 
 export async function createBoard(input: {
@@ -524,16 +517,12 @@ export async function listActiveStoriesForSchool(
       .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
       .filter((s) => (typeof s.expiresAt === 'number' ? s.expiresAt > now : true));
   } catch {
-    try {
-      const snap = await getDocs(
-        query(storiesCol(db), where('schoolId', '==', schoolId), limit(lim)),
-      );
-      return snap.docs
-        .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
-        .filter((s) => (typeof s.expiresAt === 'number' ? s.expiresAt > now : true));
-    } catch {
-      return [];
-    }
+    const snap = await getDocs(
+      query(storiesCol(db), where('schoolId', '==', schoolId), limit(lim)),
+    );
+    return snap.docs
+      .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
+      .filter((s) => (typeof s.expiresAt === 'number' ? s.expiresAt > now : true));
   }
 }
 
@@ -696,24 +685,20 @@ export async function clearPresence(schoolId: string, sessionId: string) {
 
 export async function peersAtPoi(schoolId: string, poiId: string): Promise<{ uid: string }[]> {
   const db = getDb();
-  try {
-    const snap = await getDocs(
-      query(
-        collection(db, 'schools', schoolId, 'lbsPresence'),
-        where('poiId', '==', poiId),
-        limit(80),
-      ),
-    );
-    const seen = new Set<string>();
-    const now = Date.now();
-    for (const d of snap.docs) {
-      const x = d.data() as { uid?: string; expiresAt?: number };
-      if (x.uid && (!x.expiresAt || x.expiresAt > now)) seen.add(x.uid);
-    }
-    return [...seen].map((uid) => ({ uid }));
-  } catch {
-    return [];
+  const snap = await getDocs(
+    query(
+      collection(db, 'schools', schoolId, 'lbsPresence'),
+      where('poiId', '==', poiId),
+      limit(80),
+    ),
+  );
+  const seen = new Set<string>();
+  const now = Date.now();
+  for (const d of snap.docs) {
+    const x = d.data() as { uid?: string; expiresAt?: number };
+    if (x.uid && (!x.expiresAt || x.expiresAt > now)) seen.add(x.uid);
   }
+  return [...seen].map((uid) => ({ uid }));
 }
 
 export async function submitCampusReport(payload: {
