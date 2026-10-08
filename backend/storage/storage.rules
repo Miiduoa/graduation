@@ -7,12 +7,19 @@ service firebase.storage {
       return request.auth != null;
     }
 
+    function isActiveAccount() {
+      return isAuthenticated()
+        && (!firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+          || (firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('accountDeletionInProgress', false) != true
+            && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('status', '') != 'deleted'));
+    }
+
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
     function isAdmin() {
-      return isAuthenticated() && request.auth.token.role == 'admin';
+      return isActiveAccount() && request.auth.token.role == 'admin';
     }
 
     function isValidImage() {
@@ -25,6 +32,19 @@ service firebase.storage {
 
     function isValidAudio() {
       return request.resource.contentType.matches('audio/.*');
+    }
+
+    function isValidDocument() {
+      return request.resource.contentType in [
+        'application/pdf',
+        'text/plain',
+        'application/msword',
+        'application/vnd.ms-excel',
+        'application/vnd.ms-powerpoint',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+      ];
     }
 
     function isSchoolMemberStorage(schoolId) {
@@ -75,7 +95,7 @@ service firebase.storage {
     }
 
     function conversationMember(conversationId) {
-      return isAuthenticated()
+      return isActiveAccount()
         && firestore.exists(/databases/(default)/documents/conversations/$(conversationId))
         && request.auth.uid in firestore.get(/databases/(default)/documents/conversations/$(conversationId)).data.memberIds;
     }
@@ -125,7 +145,7 @@ service firebase.storage {
 
     match /avatars/{fileName} {
       allow read: if true;
-      allow write: if isAuthenticated()
+      allow write: if isActiveAccount()
         && fileName.matches('^' + request.auth.uid + '\\.[A-Za-z0-9]+$')
         && isValidImage()
         && maxSize(5);
@@ -151,12 +171,12 @@ service firebase.storage {
 
     match /lostfound/{itemId}/{fileName} {
       allow read: if true;
-      allow write: if isAuthenticated() && isValidImage() && maxSize(10);
+      allow write: if isActiveAccount() && isValidImage() && maxSize(10);
     }
 
     match /printjobs/{userId}/{jobId}/{fileName} {
-      allow read: if isOwner(userId) || isAdmin();
-      allow write: if isOwner(userId) && isValidDocument() && maxSize(100);
+      allow read: if isActiveAccount() && (isOwner(userId) || isAdmin());
+      allow write: if isActiveAccount() && isOwner(userId) && isValidDocument() && maxSize(100);
     }
 
     match /announcements/{announcementId}/{fileName} {
@@ -197,22 +217,22 @@ service firebase.storage {
 
     match /bugreports/{reportId}/{fileName} {
       allow read: if isAdmin();
-      allow write: if isAuthenticated() && isValidImage() && maxSize(10);
+      allow write: if isActiveAccount() && isValidImage() && maxSize(10);
     }
 
     match /repairs/{requestId}/{fileName} {
-      allow read: if canAccessRepairRequest(requestId);
-      allow write: if canAccessRepairRequest(requestId) && isValidImage() && maxSize(10);
+      allow read: if isActiveAccount() && canAccessRepairRequest(requestId);
+      allow write: if isActiveAccount() && canAccessRepairRequest(requestId) && isValidImage() && maxSize(10);
     }
 
     match /health/{userId}/{recordId}/{fileName} {
-      allow read: if isOwner(userId) || isAdmin();
-      allow write: if (isOwner(userId) || isAdmin()) && isAllowedUpload() && maxSize(20);
+      allow read: if isActiveAccount() && (isOwner(userId) || isAdmin());
+      allow write: if isActiveAccount() && (isOwner(userId) || isAdmin()) && isAllowedUpload() && maxSize(20);
     }
 
     match /temp/{userId}/{fileName} {
-      allow read: if isOwner(userId);
-      allow write: if isOwner(userId) && maxSize(50);
+      allow read: if isActiveAccount() && isOwner(userId);
+      allow write: if isActiveAccount() && isOwner(userId) && maxSize(50);
     }
 
     match /schools/{schoolId}/campusPosts/{postId}/{fileName} {

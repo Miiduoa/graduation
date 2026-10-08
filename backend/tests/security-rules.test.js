@@ -46,6 +46,25 @@ after(async () => {
 });
 
 describe('firestore security rules', () => {
+  for (const accountState of [{ accountDeletionInProgress: true }, { status: 'deleted' }]) {
+    test(`deny new reads and writes for closing accounts ${JSON.stringify(accountState)}`, async () => {
+      await seedFirestore(async (db) => {
+        await db.doc('users/alice').set({ ...accountState, displayName: 'Alice' });
+        await db.doc('users/alice/settings/notifications').set({ enabled: true });
+        await db.doc('schools/pu/members/alice').set({ status: 'active', role: 'admin' });
+        await db.doc('groups/course/members/alice').set({ status: 'active', role: 'owner' });
+        await db.doc('groups/course').set({ name: 'Course' });
+      });
+      const db = testEnv.authenticatedContext('alice', { role: 'admin' }).firestore();
+      await assertFails(db.doc('users/alice').get());
+      await assertFails(db.doc('users/alice').update({ accountDeletionInProgress: false, status: 'active' }));
+      await assertFails(db.doc('users/alice/settings/notifications').set({ enabled: false }));
+      await assertFails(db.doc('users/alice/pushTokens/new').set({ token: 'new-token' }));
+      await assertFails(db.doc('groups/course').get());
+      await assertFails(db.doc('schools/pu/announcements/new').set({ title: 'Cannot publish' }));
+    });
+  }
+
   test('feedback is private and can only be written by the server', async () => {
     await seedFirestore(async (db) => {
       await db
@@ -850,6 +869,35 @@ describe('firestore security rules', () => {
 });
 
 describe('storage security rules', () => {
+  test('closing and deleted accounts cannot reuse issued tokens for private files or uploads', async () => {
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ displayName: 'Alice' });
+      await db.doc('conversations/private').set({ memberIds: ['alice', 'bob'] });
+      await db.doc('repairRequests/one').set({ userId: 'alice' });
+    });
+    const storage = testEnv.authenticatedContext('alice', { role: 'admin' }).storage();
+    const privatePaths = [
+      'temp/alice/export.json', 'health/alice/one/file.pdf',
+      'printjobs/alice/one/file.pdf', 'conversations/private/messages/one/file.pdf',
+      'conversations/private/media/one/file.pdf', 'repairs/one/photo.jpg',
+    ];
+    for (const file of privatePaths) {
+      await assertSucceeds(uploadString(storage.ref(file), 'fixture', file.endsWith('.jpg') ? 'image/jpeg' : 'application/pdf'));
+    }
+    await assertFails(uploadString(storage.ref('health/alice/one/program.exe'), 'fixture', 'application/x-msdownload'));
+    for (const state of [{ accountDeletionInProgress: true }, { status: 'deleted' }]) {
+      await seedFirestore(async (db) => db.doc('users/alice').set(state));
+      for (const file of privatePaths) {
+        await assertFails(storage.ref(file).getMetadata());
+        await assertFails(uploadString(storage.ref(file), 'new fixture', file.endsWith('.jpg') ? 'image/jpeg' : 'application/pdf'));
+      }
+      await assertFails(uploadString(storage.ref('avatars/alice.jpg'), 'image', 'image/jpeg'));
+      await assertFails(uploadString(storage.ref('lostfound/one/photo.jpg'), 'image', 'image/jpeg'));
+      await assertFails(uploadString(storage.ref('bugreports/one/photo.jpg'), 'image', 'image/jpeg'));
+    }
+    await assertSucceeds(testEnv.authenticatedContext('bob').storage().ref('conversations/private/messages/one/file.pdf').getMetadata());
+  });
+
   test('deny print uploads for another user', async () => {
     const storage = testEnv.authenticatedContext('alice').storage();
 
@@ -1319,16 +1367,19 @@ describe('attendance transactions on Firestore', () => {
   });
 });
 
-test('owners cannot clear notification/account deletion guards while normal profile updates still work', async () => {
+test('owners cannot write during deletion or clear its guards, while active profiles remain editable', async () => {
   const profile = { role: 'student', balance: 0, schoolId: 'pu', primarySchoolId: 'pu', createdAt: '2026-10-08', notificationDeliveryDisabled: true, accountDeletionInProgress: true, displayName: 'Alice' };
   await seedFirestore(async (db) => db.doc('users/alice').set(profile));
   const ref = testEnv.authenticatedContext('alice').firestore().doc('users/alice');
-  await assertSucceeds(ref.update({ displayName: 'Updated' }));
+  await assertFails(ref.update({ displayName: 'Updated' }));
   for (const field of ['notificationDeliveryDisabled', 'accountDeletionInProgress']) {
     await assertFails(ref.update({ [field]: false }));
     const replacement = { ...profile }; delete replacement[field];
     await assertFails(ref.set(replacement));
   }
+  await seedFirestore(async (db) => db.doc('users/alice').update({ accountDeletionInProgress: false }));
+  await assertSucceeds(ref.update({ displayName: 'Updated' }));
+  await assertFails(ref.update({ notificationDeliveryDisabled: false }));
 });
 
 test('push provider receipts are server-only even for the recipient', async () => {
