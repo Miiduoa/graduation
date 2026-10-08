@@ -577,7 +577,7 @@ export function VendorManagementScreen(props: any) {
                     alignItems: 'center',
                   }}
                 >
-                  <Text style={{ color: '#fff', fontWeight: '600' }}>確認取消並退款</Text>
+                  <Text style={{ color: theme.colors.onDanger, fontWeight: '600' }}>確認取消並退款</Text>
                 </Pressable>
               </View>
             </View>

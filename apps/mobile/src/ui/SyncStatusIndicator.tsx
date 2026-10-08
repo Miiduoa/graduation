@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, Pressable, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from './theme';
+import { useThemeVersion } from './useThemeStyleSheet';
 import {
   getOfflineQueue,
   getFailedActions,
@@ -18,6 +19,7 @@ type SyncStatusIndicatorProps = {
 };
 
 export function SyncStatusIndicator({ onPress, compact = false }: SyncStatusIndicatorProps) {
+  useThemeVersion();
   const { isConnected } = useNetworkStatus();
   const [pendingCount, setPendingCount] = useState(0);
   const [failedCount, setFailedCount] = useState(0);
@@ -112,8 +114,8 @@ export function SyncStatusIndicator({ onPress, compact = false }: SyncStatusIndi
     if (!isConnected) {
       return {
         icon: 'cloud-offline' as const,
-        color: '#FF9500',
-        bgColor: '#FF950015',
+        color: theme.colors.warning,
+        bgColor: theme.colors.warningSoft,
         text: `離線 · ${totalPending} 筆待同步`,
       };
     }
@@ -122,7 +124,7 @@ export function SyncStatusIndicator({ onPress, compact = false }: SyncStatusIndi
       return {
         icon: 'alert-circle' as const,
         color: theme.colors.error,
-        bgColor: theme.colors.error + '15',
+        bgColor: theme.colors.dangerSoft,
         text: `${failedCount} 筆同步失敗`,
       };
     }
@@ -130,8 +132,8 @@ export function SyncStatusIndicator({ onPress, compact = false }: SyncStatusIndi
     if (pendingCount > 0) {
       return {
         icon: 'time' as const,
-        color: '#FF9500',
-        bgColor: '#FF950015',
+        color: theme.colors.warning,
+        bgColor: theme.colors.warningSoft,
         text: `${pendingCount} 筆待同步`,
       };
     }

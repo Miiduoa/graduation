@@ -20,7 +20,7 @@ export type ThemeColors = {
   accentSoft: string;
   accentHover: string;
   accentStrong: string;
-  /** 靜宜金 — 用於獎勵、高亮、CTA 輔色 */
+  /** 用於獎勵與重點標示 */
   gold: string;
   goldSoft: string;
   gradientStart: string;
@@ -41,27 +41,27 @@ export type ThemeColors = {
   disabledText: string;
   cardShadow: string;
   shimmer: string;
-  /** 心理學情緒色盤 — Psychological Emotional Palette */
-  /** 成就/獎勵（靜宜金）— Variable Reward + Competence */
+  /** 狀態、進度與提醒 */
+  /** 成就／獎勵 */
   achievement: string;
   achievementSoft: string;
-  /** 連續打卡 Streak（活力橘紅）— Habit Loop + Loss Aversion */
+  /** 連續打卡 */
   streak: string;
   streakSoft: string;
-  /** 成長/完成（翡翠綠）— Growth Mindset + Competence */
+  /** 成長／完成 */
   growth: string;
   growthSoft: string;
-  /** 情感安撫（天空藍）— Anxiety Reduction，用於截止日期提醒 */
+  /** 一般提醒 */
   calm: string;
   calmSoft: string;
-  /** 輕度警示（暖黃）— Framing Effect，取代部分紅色場景 */
+  /** 非緊急警示 */
   gentleWarn: string;
   gentleWarnSoft: string;
   urgent: string;
   urgentSoft: string;
   fresh: string;
   freshSoft: string;
-  /** 社交互動（靜宜紫）— Creativity + Social Connection */
+  /** 社交互動 */
   social: string;
   socialSoft: string;
   confidenceHigh: string;
@@ -85,6 +85,9 @@ export type ThemeColors = {
   card: string;
   /** 鋪滿主色／accent 按鈕上的文字與圖示（維持對比） */
   onAccent: string;
+  /** 實心狀態標籤上的文字與圖示 */
+  onDanger: string;
+  onSuccess: string;
   /** 底部導覽列半透明底 */
   chromeTabBar: string;
   chromeTabBorder: string;
@@ -99,10 +102,7 @@ export type ThemeShadow = {
   elevation: number;
 };
 
-/**
- * Calm Clarity: 單向 elevation 陰影（移除 Neumorphic 雙向陰影）
- * 心理學：明確的物件感知 (Object Perception)，減少認知負荷
- */
+/** 共用陰影，保留舊元件支援的屬性。 */
 export type SoftShadow = {
   shadowColor?: string;
   shadowOpacity?: number;
@@ -145,7 +145,7 @@ export type ThemeSpace = {
   xl: number;
   xxl: number;
   xxxl: number;
-  /** 區塊間分隔 — 心理分離感 */
+  /** 區塊間分隔 */
   section: number;
 };
 
@@ -360,7 +360,8 @@ const sharedAnimation: ThemeAnimation = {
 // Product controls share one palette; school identity remains available as brand metadata.
 const DEFAULT_ACCENT = '#314D40';
 const DEFAULT_ACCENT_DARK = '#A9C6A3';
-const DEFAULT_GOLD = '#C79532';
+const DEFAULT_GOLD = '#8B631E';
+const DEFAULT_GOLD_DARK = '#DEC080';
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
@@ -397,7 +398,7 @@ export function createDarkTheme(
   schoolId?: string,
   brand?: SchoolBrand,
 ): Theme {
-  const gold = brand?.secondary ?? DEFAULT_GOLD;
+  const gold = brand?.secondary ?? DEFAULT_GOLD_DARK;
   const orbLilac = lighten(accent, 0.42);
   const orbPeri = lighten(accent, 0.12);
   return {
@@ -426,16 +427,16 @@ export function createDarkTheme(
       gradientStart: '#273229',
       gradientMid: '#202B24',
       gradientEnd: '#171F1B',
-      // iOS Dark system colors
-      success: '#30D158',
-      successSoft: 'rgba(48,209,88,0.16)',
-      danger: '#FF453A',
-      error: '#FF453A',
-      dangerSoft: 'rgba(255,69,58,0.18)',
-      warning: '#FF9F0A',
-      warningSoft: 'rgba(255,159,10,0.16)',
-      info: '#5AC8FA',
-      infoSoft: 'rgba(90,200,250,0.16)',
+      // Status labels
+      success: '#A6CA9E',
+      successSoft: 'rgba(166,202,158,0.16)',
+      danger: '#EFAC9A',
+      error: '#EFAC9A',
+      dangerSoft: 'rgba(239,172,154,0.16)',
+      warning: '#DEC080',
+      warningSoft: 'rgba(222,192,128,0.16)',
+      info: '#A7C7CA',
+      infoSoft: 'rgba(167,199,202,0.16)',
       focusRing: rgba(accent, 0.45),
       overlay: 'rgba(0,0,0,0.6)',
       disabledBg: 'rgba(255,255,255,0.07)',
@@ -444,27 +445,27 @@ export function createDarkTheme(
       shimmer: 'rgba(255,255,255,0.05)',
       achievement: gold,
       achievementSoft: rgba(gold, 0.2),
-      streak: '#FF9F0A',
-      streakSoft: 'rgba(255,159,10,0.18)',
-      growth: '#30D158',
-      growthSoft: 'rgba(48,209,88,0.16)',
-      calm: '#5AC8FA',
-      calmSoft: 'rgba(90,200,250,0.16)',
-      gentleWarn: '#FFD60A',
-      gentleWarnSoft: 'rgba(255,214,10,0.16)',
-      urgent: '#FF453A',
-      urgentSoft: 'rgba(255,69,58,0.16)',
-      fresh: '#5AC8FA',
-      freshSoft: 'rgba(90,200,250,0.16)',
-      // iOS System Purple
-      social: '#BF5AF2',
-      socialSoft: 'rgba(191,90,242,0.16)',
-      confidenceHigh: '#30D158',
-      confidenceHighSoft: 'rgba(48,209,88,0.16)',
-      confidenceMedium: '#FF9F0A',
-      confidenceMediumSoft: 'rgba(255,159,10,0.16)',
-      confidenceLow: '#FF453A',
-      confidenceLowSoft: 'rgba(255,69,58,0.16)',
+      streak: '#DEC080',
+      streakSoft: 'rgba(222,192,128,0.16)',
+      growth: '#A6CA9E',
+      growthSoft: 'rgba(166,202,158,0.16)',
+      calm: '#A7C7CA',
+      calmSoft: 'rgba(167,199,202,0.16)',
+      gentleWarn: '#DEC080',
+      gentleWarnSoft: 'rgba(222,192,128,0.16)',
+      urgent: '#EFAC9A',
+      urgentSoft: 'rgba(239,172,154,0.16)',
+      fresh: '#A7C7CA',
+      freshSoft: 'rgba(167,199,202,0.16)',
+      // Social labels
+      social: '#CFB5C9',
+      socialSoft: 'rgba(207,181,201,0.16)',
+      confidenceHigh: '#A6CA9E',
+      confidenceHighSoft: 'rgba(166,202,158,0.16)',
+      confidenceMedium: '#DEC080',
+      confidenceMediumSoft: 'rgba(222,192,128,0.16)',
+      confidenceLow: '#EFAC9A',
+      confidenceLowSoft: 'rgba(239,172,154,0.16)',
       roleStudent: accent,
       roleStudentSoft: createAccentSoft(accent, 0.2),
       roleTeacher: accent,
@@ -476,6 +477,8 @@ export function createDarkTheme(
       secondary: gold,
       card: '#202B24',
       onAccent: '#17251C',
+      onDanger: '#17251C',
+      onSuccess: '#17251C',
       // iOS Tab Bar：blur + translucent
       // iOS Tab Bar：半透明使 BlurView 玻璃磨砂可見（與 expo-blur intensity 配合）
       chromeTabBar: 'rgba(32,43,36,0.96)',
@@ -513,7 +516,7 @@ export function createDarkTheme(
       profileHero: ['#273229', '#202B24', '#171F1B'] as const,
       avatar: [lighten(accent, 0.22), accent] as const,
       aiOrbNormal: [orbLilac, lighten(accent, 0.12), orbPeri] as const,
-      aiOrbUrgent: ['#FF6961', '#FF453A', '#D70015'] as const,
+      aiOrbUrgent: ['#FF6961', '#EFAC9A', '#D70015'] as const,
     },
     schoolId,
     brand,
@@ -559,16 +562,16 @@ export function createLightTheme(
       gradientStart: '#E6ECE5',
       gradientMid: '#F0F1EB',
       gradientEnd: '#F8F7F3',
-      // iOS System Colors (Light)
-      success: '#34C759',
-      successSoft: 'rgba(52,199,89,0.12)',
-      danger: '#FF3B30',
-      error: '#FF3B30',
-      dangerSoft: 'rgba(255,59,48,0.12)',
-      warning: '#FF9500',
-      warningSoft: 'rgba(255,149,0,0.12)',
-      info: '#5AC8FA',
-      infoSoft: 'rgba(90,200,250,0.12)',
+      // Status labels
+      success: '#386146',
+      successSoft: '#E6EEE4',
+      danger: '#983F32',
+      error: '#983F32',
+      dangerSoft: '#F7E9E3',
+      warning: '#8B631E',
+      warningSoft: '#F6EEDA',
+      info: '#41646A',
+      infoSoft: '#E6EEEE',
       focusRing: rgba(accent, 0.28),
       overlay: 'rgba(0,0,0,0.36)',
       disabledBg: 'rgba(142,142,147,0.12)',
@@ -577,27 +580,27 @@ export function createLightTheme(
       shimmer: 'rgba(255,255,255,0.9)',
       achievement: gold,
       achievementSoft: rgba(gold, 0.14),
-      streak: '#FF6B35',
-      streakSoft: 'rgba(255,107,53,0.12)',
-      growth: '#34C759',
-      growthSoft: 'rgba(52,199,89,0.12)',
-      calm: '#5AC8FA',
-      calmSoft: 'rgba(90,200,250,0.12)',
-      gentleWarn: '#FFCC00',
-      gentleWarnSoft: 'rgba(255,204,0,0.16)',
-      urgent: '#FF3B30',
-      urgentSoft: 'rgba(255,59,48,0.12)',
-      fresh: '#5AC8FA',
-      freshSoft: 'rgba(90,200,250,0.12)',
-      // iOS System Purple (Light)
-      social: '#AF52DE',
-      socialSoft: 'rgba(175,82,222,0.12)',
-      confidenceHigh: '#34C759',
-      confidenceHighSoft: 'rgba(52,199,89,0.12)',
-      confidenceMedium: '#FF9500',
-      confidenceMediumSoft: 'rgba(255,149,0,0.12)',
-      confidenceLow: '#FF3B30',
-      confidenceLowSoft: 'rgba(255,59,48,0.12)',
+      streak: '#A54C2B',
+      streakSoft: '#F7E9E3',
+      growth: '#386146',
+      growthSoft: '#E6EEE4',
+      calm: '#41646A',
+      calmSoft: '#E6EEEE',
+      gentleWarn: '#8B631E',
+      gentleWarnSoft: '#F6EEDA',
+      urgent: '#983F32',
+      urgentSoft: '#F7E9E3',
+      fresh: '#41646A',
+      freshSoft: '#E6EEEE',
+      // Social labels
+      social: '#765B72',
+      socialSoft: '#F0E9EE',
+      confidenceHigh: '#386146',
+      confidenceHighSoft: '#E6EEE4',
+      confidenceMedium: '#8B631E',
+      confidenceMediumSoft: '#F6EEDA',
+      confidenceLow: '#983F32',
+      confidenceLowSoft: '#F7E9E3',
       roleStudent: accent,
       roleStudentSoft: createAccentSoft(accent, 0.12),
       roleTeacher: accent,
@@ -609,6 +612,8 @@ export function createLightTheme(
       secondary: gold,
       card: '#FFFFFF',
       onAccent: '#FFFFFF',
+      onDanger: '#FFFFFF',
+      onSuccess: '#FFFFFF',
       // iOS Tab Bar：blur + translucent white
       // iOS Tab Bar：半透明使 BlurView 玻璃磨砂可見（與 expo-blur intensity 配合）
       chromeTabBar: 'rgba(255,255,255,0.96)',
@@ -646,7 +651,7 @@ export function createLightTheme(
       profileHero: ['#E6ECE5', '#F0F1EB', '#F8F7F3'] as const,
       avatar: [lighten(accent, 0.12), accent] as const,
       aiOrbNormal: [orbTint, orbMid, accent] as const,
-      aiOrbUrgent: ['#FFD2D0', '#FF6961', '#FF3B30'] as const,
+      aiOrbUrgent: ['#FFD2D0', '#FF6961', '#983F32'] as const,
     },
     schoolId,
     brand,

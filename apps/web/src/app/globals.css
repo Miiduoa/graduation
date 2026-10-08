@@ -11,6 +11,10 @@ textarea::placeholder {
 :root {
   color-scheme: light;
   --on-brand: #ffffff;
+  --page-width: 1264px;
+  --page-padding-inline: 48px;
+  --page-padding-block: 46px;
+  --page-title-size: clamp(25px, 3vw, 38px);
   /* ── Backgrounds ── */
   --bg: #f8f7f3;
   --bg-soft: #f1f2ed;
@@ -3246,45 +3250,33 @@ select.input option {
    Leaflet Map
    ============================ */
 
-/* ════════════════════════════════════════════════════
-   AI-First Tokens v1 (附加於 Campus Soft v3.0 之後)
-   詳見：docs/design/AI_FIRST_REDESIGN.md
-   ════════════════════════════════════════════════════ */
+/* Assistant components use the same palette as the rest of Campus One. */
 :root {
-  /* AI 主色：Indigo → Purple → Pink 漸層體系 */
-  --ai: #6366f1;
-  --ai-strong: #4f46e5;
-  --ai-soft: rgba(88, 86, 214, 0.1);
-  --ai-halo: rgba(88, 86, 214, 0.2);
-  --ai-surface: #fafbff;
-  --ai-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%);
-  --ai-gradient-soft: linear-gradient(180deg, #eef2ff 0%, #fce7f3 100%);
-
-  /* 信心度 */
-  --confidence-high: #34c759;
-  --confidence-mid: #ff9500;
-  --confidence-low: #ff3b30;
-  --confidence-high-soft: rgba(52, 199, 89, 0.12);
-  --confidence-mid-soft: rgba(255, 149, 0, 0.12);
-  --confidence-low-soft: rgba(255, 59, 48, 0.12);
-
-  /* AI 元件陰影 */
-  --shadow-ai: 0 0 0 3px rgba(88, 86, 214, 0.18), 0 8px 24px rgba(88, 86, 214, 0.12);
-  --shadow-ai-strong: 0 0 0 4px rgba(88, 86, 214, 0.25), 0 12px 32px rgba(139, 92, 246, 0.2);
-
-  /* AI 元件層級 */
+  --ai: var(--brand);
+  --ai-strong: var(--brand2);
+  --ai-soft: var(--accent-soft);
+  --ai-halo: color-mix(in srgb, var(--brand) 20%, transparent);
+  --ai-surface: var(--surface);
+  --ai-gradient: linear-gradient(135deg, var(--brand), var(--brand2));
+  --ai-gradient-soft: linear-gradient(180deg, var(--accent-soft), var(--surface));
+  --confidence-high: var(--success);
+  --confidence-mid: var(--warning);
+  --confidence-low: var(--danger);
+  --confidence-high-soft: var(--success-soft);
+  --confidence-mid-soft: var(--warning-soft);
+  --confidence-low-soft: var(--danger-soft);
+  --shadow-ai: var(--shadow-sm);
+  --shadow-ai-strong: var(--shadow-md);
   --z-ai-drawer: 200;
   --z-ai-command: 300;
   --z-ai-takeover: 700;
-
-  /* 動效 */
   --ai-breath-duration: 1600ms;
   --ai-card-enter-duration: 220ms;
   --ai-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
   --ai-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* AI 簽名動畫 */
+/* Assistant feedback motion. */
 @keyframes aiBreath {
   0%,
   100% {
@@ -3314,15 +3306,6 @@ select.input option {
   40% {
     opacity: 1;
     transform: translateY(-3px);
-  }
-}
-
-/* 暗黑模式 AI tokens */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --ai-surface: #1a1b2e;
-    --ai-soft: rgba(139, 92, 246, 0.18);
-    --ai-halo: rgba(139, 92, 246, 0.32);
   }
 }
 
@@ -3381,4 +3364,31 @@ textarea {
 .btn.primary,
 .btn-primary {
   color: var(--on-brand);
+}
+
+@media (max-width: 1050px) {
+  :root {
+    --page-padding-inline: 28px;
+    --page-padding-block: 34px;
+  }
+}
+@media (max-width: 760px) {
+  :root {
+    --page-padding-inline: 20px;
+    --page-padding-block: 28px;
+    --page-title-size: 27px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
