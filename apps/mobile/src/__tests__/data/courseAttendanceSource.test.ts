@@ -64,7 +64,7 @@ describe('live attendance acknowledgement', () => {
     { success: false, attendanceRecorded: true },
     { success: 'true', attendanceRecorded: true },
     { success: true, attendanceRecorded: 'true' },
-  ])('does not accept an unconfirmed response: %p', (payload) => {
+  ].map((payload) => ({ payload })))('does not accept an unconfirmed response: $payload', ({ payload }) => {
     expect(parseLiveAttendanceConfirmation(payload)).toBeNull();
   });
 
@@ -164,7 +164,7 @@ describe('getAttendanceSummary', () => {
   it('does not substitute live-room participants when attendance is empty', async () => {
     jest.mocked(getDocs).mockResolvedValue({ docs: [] } as unknown as Awaited<ReturnType<typeof getDocs>>);
     await expect(getAttendanceSummary('course-1')).resolves.toEqual({
-      groupId: 'course-1', totalSessions: 0, activeSessions: 0, totalAttendees: 0, latestSession: null,
+      courseSpaceId: 'course-1', totalSessionCount: 0, activeSessionCount: 0, latestSession: null,
     });
     expect(collection).toHaveBeenCalledTimes(1);
     expect(collection).toHaveBeenCalledWith(db, 'groups', 'course-1', 'attendanceSessions');
@@ -179,8 +179,8 @@ describe('getAttendanceSummary', () => {
       sessionDoc('newer', { active: true, attendeeCount: 3, startedAt: newer, attendanceMode: 'qr' }),
     ] } as unknown as Awaited<ReturnType<typeof getDocs>>);
     const summary = await getAttendanceSummary('course-1');
-    expect(summary).toMatchObject({ totalSessions: 2, activeSessions: 1, totalAttendees: 5 });
-    expect(summary.latestSession).toMatchObject({ id: 'newer', source: 'attendance', startedAt: newer });
+    expect(summary).toMatchObject({ courseSpaceId: 'course-1', totalSessionCount: 2, activeSessionCount: 1 });
+    expect(summary.latestSession).toMatchObject({ id: 'newer', source: 'attendance', startedAt: newer, attendeeCount: 3 });
   });
 
   it('does not turn malformed counts or truthy strings into attendance', async () => {
@@ -188,8 +188,9 @@ describe('getAttendanceSummary', () => {
       sessionDoc(String(index), { attendeeCount: count, active: 'true' }),
     ) } as unknown as Awaited<ReturnType<typeof getDocs>>);
     const summary = await getAttendanceSummary('course-1');
-    expect(summary.totalAttendees).toBe(0);
-    expect(summary.activeSessions).toBe(0);
+    expect(summary.latestSession?.attendeeCount).toBe(0);
+    expect(summary.totalSessionCount).toBe(6);
+    expect(summary.activeSessionCount).toBe(0);
   });
 
   it('reports a failed read instead of returning an empty successful summary', async () => {
