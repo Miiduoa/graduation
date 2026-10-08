@@ -10,6 +10,7 @@ import {
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
 import { CampusServiceMenu } from '@/components/CampusServiceMenu';
+import { SiteShell } from '@/components/SiteShell';
 import { browserRequest, NuniSessionProvider, useNuniSession } from './Session';
 import { CourseAccessBoundary, MutationForm, useClasses } from './CourseUI';
 import { AssignmentCard } from './AssignmentCard';
@@ -535,34 +536,23 @@ function NuniContent() {
       </section>
     );
   return (
-    <div className={styles.page}>
-      <a className={home.skip} href="#nuni-content">
-        跳到主要內容
-      </a>
-      <NuniHeader />
-      <main className={styles.main} id="nuni-content">
-        {error && (
-          <div role="alert" className={styles.notice}>
-            {error}
-            <button
-              className={`${styles.button} ${styles.secondary}`}
-              onClick={() => void (pendingLogout ? logout() : refresh())}
-            >
-              重試
-            </button>
-          </div>
-        )}
-        {loading && session && <p role="status">正在確認登入狀態…</p>}
-        <div hidden={loading && !!session} inert={loading && !!session}>
-          {content}
+    <SiteShell header={<NuniHeader />}>
+      {error && (
+        <div role="alert" className={styles.notice}>
+          {error}
+          <button
+            className={`${styles.button} ${styles.secondary}`}
+            onClick={() => void (pendingLogout ? logout() : refresh())}
+          >
+            重試
+          </button>
         </div>
-      </main>
-      <footer className={styles.footer}>
-        <span>Campus One</span>
-        <Link href="/privacy">隱私權政策</Link>
-        <Link href="/terms">服務條款</Link>
-      </footer>
-    </div>
+      )}
+      {loading && session && <p role="status">正在確認登入狀態…</p>}
+      <div hidden={loading && !!session} inert={loading && !!session}>
+        {content}
+      </div>
+    </SiteShell>
   );
 }
 

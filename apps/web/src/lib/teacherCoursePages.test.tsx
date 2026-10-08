@@ -4,6 +4,7 @@ import TeacherCoursePage from '@/app/teacher/course/[courseId]/page';
 import TeacherGradebookPage from '@/app/teacher/course/[courseId]/gradebook/page';
 import { useTeacherCourse } from './useTeacherCourse';
 vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>Campus One</header> }));
+vi.mock('@/components/PWAInstallBanner', () => ({ PWAInstallBanner: () => null }));
 vi.mock('@/components/teaching/TeacherAssignments', () => ({
   TeacherAssignments: () => <div>教師作業管理</div>,
 }));

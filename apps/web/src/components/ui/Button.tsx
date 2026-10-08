@@ -32,9 +32,9 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     },
     ref,
   ) => {
-    // Apple HIG: 觸控目標 ≥44pt，緊湊型 34pt，超大型 52pt
+    // Keep every size usable as a touch target.
     const sizeStyles: Record<ButtonSize, React.CSSProperties> = {
-      sm: { padding: '0 14px', minHeight: '34px', fontSize: '14px' },
+      sm: { padding: '0 14px', minHeight: '44px', fontSize: '14px' },
       md: { padding: '0 18px', minHeight: '44px', fontSize: '15px' },
       lg: { padding: '0 24px', minHeight: '52px', fontSize: '17px' },
     };
@@ -84,7 +84,6 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       },
     };
 
-    // iOS button radius：10–12pt 視按鈕高度而定；以 radius-sm（12px）為基準
     const baseStyles: React.CSSProperties = {
       display: 'inline-flex',
       alignItems: 'center',
@@ -106,6 +105,7 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     return (
       <button
         ref={ref}
+        aria-busy={loading || undefined}
         disabled={disabled || loading}
         className={`btn${className ? ` ${className}` : ''}`}
         style={baseStyles}

@@ -628,7 +628,7 @@ function DrawerRow({
             justifyContent: 'center',
           }}
         >
-          <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>
+          <Text style={{ color: theme.colors.onDanger, fontSize: 10, fontWeight: '700' }}>
             {badge}
           </Text>
         </View>

@@ -9,6 +9,7 @@ import { SiteFooter } from './SiteFooter';
 import styles from '@/app/home.module.css';
 
 export function SiteShell(props: {
+  header?: React.ReactNode;
   title?: string;
   subtitle?: string;
   schoolName?: string;
@@ -21,7 +22,7 @@ export function SiteShell(props: {
         跳到主要內容
       </a>
       <OfflineBanner />
-      <AppHeader />
+      {props.header ?? <AppHeader />}
       <main id="page-content" className={styles.main} tabIndex={-1}>
         {props.title && (
           <div className={styles.heading}>

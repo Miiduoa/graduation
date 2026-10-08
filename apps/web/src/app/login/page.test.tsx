@@ -11,6 +11,7 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => state.params,
 }));
 vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>Campus One</header> }));
+vi.mock('@/components/PWAInstallBanner', () => ({ PWAInstallBanner: () => null }));
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => ({ user: { uid: 'one' } }) }));
 vi.mock('@/features/auth/client', () => ({
   isFirebaseConfigured: () => true,

@@ -2,7 +2,7 @@
 
 import { use, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { AppHeader } from '@/components/AppHeader';
+import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
 import {
   loadCourseWork,
@@ -174,92 +174,94 @@ export default function CoursePage({ params }: { params: Promise<{ courseId: str
       generation.current += 1;
     };
   }, [load]);
+  const visibleCourse = authLoading ? null : course;
   return (
-    <div className={styles.page}>
-      <AppHeader />
-      <main className={styles.main}>
-        {authLoading ? (
-          <p role="status">確認登入狀態…</p>
-        ) : !user ? (
-          <p>
-            請
-            <Link href={`/login?redirect=${encodeURIComponent(`/course/${courseId}`)}`}>登入</Link>
-            後查看課程。
-          </p>
-        ) : (
-          <>
-            {error && (
-              <div role="alert">
-                {error}
-                <button type="button" onClick={load}>
-                  重試
-                </button>
-              </div>
-            )}
-            {!course && !error && <p role="status">讀取課程…</p>}
-            {course && (
-              <>
-                <div className={styles.heading}>
-                  <div>
-                    <p className={styles.eyebrow}>{course.canTeach ? '教學課程' : '修習課程'}</p>
-                    <h1>{course.name}</h1>
-                    <p>{course.description}</p>
-                  </div>
-                  <button type="button" onClick={load}>
-                    重新整理
-                  </button>
-                </div>
+    <SiteShell
+      title={visibleCourse?.name ?? '課程內容'}
+      subtitle={visibleCourse?.description || '查看課程教材、作業與出席紀錄。'}
+      schoolName={visibleCourse ? (visibleCourse.canTeach ? '教學課程' : '修習課程') : undefined}
+    >
+      {authLoading ? (
+        <p role="status">確認登入狀態…</p>
+      ) : !user ? (
+        <section className={styles.section}>
+          <h2>登入後查看課程</h2>
+          <p>使用這門課的校園帳號登入，即可查看教材與繳交作業。</p>
+          <Link
+            className={styles.primary}
+            href={`/login?redirect=${encodeURIComponent(`/course/${courseId}`)}`}
+          >
+            登入帳號
+          </Link>
+        </section>
+      ) : (
+        <>
+          {error && (
+            <div role="alert">
+              {error}
+              <button type="button" onClick={load}>
+                重試
+              </button>
+            </div>
+          )}
+          {!course && !error && <p role="status">讀取課程…</p>}
+          {course && (
+            <>
+              <div className={styles.heading}>
                 <Link
                   href={`/course/${encodeURIComponent(courseId)}/attendance`}
                   className={styles.secondary}
                 >
                   {course.canTeach ? '管理課堂點名' : '簽到與出席紀錄'}
                 </Link>
-                <section className={styles.section}>
-                  <h2>課程單元</h2>
-                  {course.modules.length ? (
-                    course.modules.map((module) => (
-                      <article key={module.id} className={styles.section}>
-                        <h3>{module.title}</h3>
-                        <p style={{ whiteSpace: 'pre-wrap' }}>{module.description}</p>
-                        {module.resourceUrl && (
-                          <a
-                            href={module.resourceUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className={styles.secondary}
-                          >
-                            {module.resourceLabel} ↗
-                          </a>
-                        )}
-                      </article>
-                    ))
-                  ) : (
-                    <p>尚未發布課程單元。</p>
-                  )}
-                </section>
-                <h2 id="assignments" className={styles.section}>
-                  作業與評量
-                </h2>
-                {course.assignments.length ? (
-                  course.assignments.map((assignment) => (
-                    <Assignment
-                      key={`${user.uid}-${courseId}-${assignment.id}`}
-                      assignment={assignment}
-                      courseId={courseId}
-                      uid={user.uid}
-                      canTeach={course.canTeach}
-                      onSaved={() => void load()}
-                    />
+                <button type="button" className={styles.secondary} onClick={load}>
+                  重新整理
+                </button>
+              </div>
+              <section className={styles.section}>
+                <h2>課程單元</h2>
+                {course.modules.length ? (
+                  course.modules.map((module) => (
+                    <article key={module.id} className={styles.section}>
+                      <h3>{module.title}</h3>
+                      <p style={{ whiteSpace: 'pre-wrap' }}>{module.description}</p>
+                      {module.resourceUrl && (
+                        <a
+                          href={module.resourceUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={styles.secondary}
+                        >
+                          {module.resourceLabel} ↗
+                        </a>
+                      )}
+                    </article>
                   ))
                 ) : (
-                  <p>尚未發布作業。</p>
+                  <p>尚未發布課程單元。</p>
                 )}
-              </>
-            )}
-          </>
-        )}
-      </main>
-    </div>
+              </section>
+              <h2 id="assignments" className={styles.section}>
+                作業與評量
+              </h2>
+              {course.assignments.length ? (
+                course.assignments.map((assignment) => (
+                  <Assignment
+                    key={`${user.uid}-${courseId}-${assignment.id}`}
+                    assignment={assignment}
+                    courseId={courseId}
+                    uid={user.uid}
+                    canTeach={course.canTeach}
+                    onSaved={() => void load()}
+                  />
+                ))
+              ) : (
+                <p>尚未發布作業。</p>
+              )}
+            </>
+          )}
+        </>
+      )}
+    </SiteShell>
   );
 }

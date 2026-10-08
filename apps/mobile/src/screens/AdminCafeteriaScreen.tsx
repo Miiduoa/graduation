@@ -1155,7 +1155,7 @@ function VendorManagementCard(props: {
                 alignItems: 'center',
               }}
             >
-              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>
+              <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 13 }}>
                 解除店家停權
               </Text>
             </Pressable>

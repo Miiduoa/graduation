@@ -3,6 +3,7 @@ import React, { memo, useCallback } from 'react';
 import { View, Text, Pressable, Platform, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { getCurrentTheme, softShadowStyle } from './theme';
+import { useThemeVersion } from './useThemeStyleSheet';
 import { Pill, StatusBadge } from './components';
 import { formatDateTime, formatRelativeTime, toDate } from '../utils/format';
 
@@ -24,6 +25,7 @@ export const AnnouncementItem = memo(
     publishedAt,
     onPress,
   }: AnnouncementItemProps) {
+    useThemeVersion();
     const theme = getCurrentTheme();
     const handlePress = useCallback(() => onPress(id), [id, onPress]);
 
@@ -138,6 +140,7 @@ export const EventItem = memo(
     viewMode = 'list',
     onPress,
   }: EventItemProps) {
+    useThemeVersion();
     const theme = getCurrentTheme();
     const startDate = toDate(startsAt);
     const range = `${formatDateTime(startsAt)} ~ ${formatDateTime(endsAt)}`;
@@ -198,7 +201,9 @@ export const EventItem = memo(
                   backgroundColor: theme.colors.success,
                 }}
               >
-                <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>進行中</Text>
+                <Text style={{ color: theme.colors.onSuccess, fontSize: 11, fontWeight: '700' }}>
+                  進行中
+                </Text>
               </View>
             )}
             {isFavorite && (
@@ -357,6 +362,7 @@ export const MenuItem = memo(
     isAvailable = true,
     onPress,
   }: MenuItemProps) {
+    useThemeVersion();
     const theme = getCurrentTheme();
     const handlePress = useCallback(() => onPress?.(id), [id, onPress]);
 
