@@ -9,7 +9,6 @@ import {
   setDoc,
   where,
 } from 'firebase/firestore';
-import { getFunctions, httpsCallable } from 'firebase/functions';
 
 import { getDb, isFirebaseMockMode } from '../firebase';
 import {
@@ -21,13 +20,11 @@ import {
   listCourseMemberships,
   listCourseModules as listWorkspaceCourseModules,
   listCourseQuizzes as listWorkspaceCourseQuizzes,
-  startAttendanceSession as startWorkspaceAttendanceSession,
   toDate,
   type CourseMembership,
 } from '../services/courseWorkspace';
 import type {
   AttendanceSession,
-  AttendanceSummary,
   CourseGradebookData,
   CourseMaterial,
   CourseModule,
@@ -36,6 +33,12 @@ import type {
   Quiz,
   Submission,
 } from './types';
+
+export {
+  checkInAttendance,
+  getAttendanceSummary,
+  startAttendanceSession,
+} from './courseAttendanceSource';
 
 function toCourseSpace(
   membership: CourseMembership,
@@ -353,94 +356,6 @@ export async function listAttendanceSessions(
   const db = getDb();
   const memberships = await listCourseMemberships(db, userId, schoolId);
   return listWorkspaceAttendanceSessions(db, memberships, courseSpaceId);
-}
-
-export async function startAttendanceSession(input: {
-  courseSpaceId: string;
-  classroomLat?: number;
-  classroomLng?: number;
-  qrExpiryMinutes?: number;
-}): Promise<{ success: boolean; sessionId: string; qrToken?: string; qrExpiresAt?: string }> {
-  return startWorkspaceAttendanceSession(getFunctions(), {
-    groupId: input.courseSpaceId,
-    classroomLat: input.classroomLat,
-    classroomLng: input.classroomLng,
-    qrExpiryMinutes: input.qrExpiryMinutes,
-  });
-}
-
-export async function checkInAttendance(input: {
-  courseSpaceId: string;
-  sessionId: string;
-  qrToken?: string;
-  uid?: string;
-}): Promise<{ success: boolean }> {
-  const joinLiveSession = httpsCallable<
-    { groupId: string; sessionId: string; qrToken?: string },
-    { success: boolean }
-  >(getFunctions(), 'joinLiveSession');
-
-  const result = await joinLiveSession({
-    groupId: input.courseSpaceId,
-    sessionId: input.sessionId,
-    qrToken: input.qrToken,
-  });
-
-  // ── Campus Companion 信號：成功簽到 → onAttendanceCheckin ──
-  if (result.data?.success) {
-    try {
-      const { onAttendanceCheckin } = await import('../services/companionHooks');
-      onAttendanceCheckin({
-        uid: input.uid,
-        sessionId: input.sessionId,
-        courseSpaceId: input.courseSpaceId,
-      });
-    } catch {
-      /* swallow — 不影響主流程 */
-    }
-  }
-
-  return result.data;
-}
-
-export async function getAttendanceSummary(courseSpaceId: string): Promise<AttendanceSummary> {
-  const db = getDb();
-  const attendanceSnap = await getDocs(
-    collection(db, 'groups', courseSpaceId, 'attendanceSessions'),
-  ).catch(() => null);
-  const liveSnap =
-    attendanceSnap && attendanceSnap.size > 0
-      ? null
-      : await getDocs(collection(db, 'groups', courseSpaceId, 'liveSessions')).catch(() => null);
-
-  const docs = attendanceSnap?.docs ?? liveSnap?.docs ?? [];
-  const sessions = docs.map((docSnap) => {
-    const data = docSnap.data() as Record<string, unknown>;
-    return {
-      id: docSnap.id,
-      groupId: courseSpaceId,
-      groupName: '',
-      active: Boolean(data.active),
-      attendeeCount: typeof data.attendeeCount === 'number' ? data.attendeeCount : 0,
-      startedAt: toDate(data.startedAt),
-      endedAt: toDate(data.endedAt),
-      source: attendanceSnap && attendanceSnap.size > 0 ? 'attendance' : 'live',
-      attendanceMode: (data.attendanceMode as string | undefined) ?? null,
-    } satisfies AttendanceSession;
-  });
-
-  const latestSession =
-    [...sessions].sort(
-      (left, right) => (right.startedAt?.getTime() ?? 0) - (left.startedAt?.getTime() ?? 0),
-    )[0] ?? null;
-
-  return {
-    groupId: courseSpaceId,
-    totalSessions: sessions.length,
-    activeSessions: sessions.filter((session) => session.active).length,
-    totalAttendees: sessions.reduce((sum, session) => sum + (session.attendeeCount ?? 0), 0),
-    latestSession,
-  };
 }
 
 async function listActionQueueInboxTasks(userId: string): Promise<InboxTask[]> {
