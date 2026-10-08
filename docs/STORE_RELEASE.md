@@ -1,5 +1,9 @@
 # Campus One 與 nuni.tw 發布紀錄
 
+最新正式 Web／API 已部署平台管理員、選校與跨校公開社群：Web release 34（`6868053`）、API release 20（`cb57e78`），指定管理員實際登入、共用 session、看板與登出驗收通過。見 [平台發布紀錄](PLATFORM_RELEASE.md)。本次沒有提交新的 App Store／Google Play 版本；下列原生接軌、簽署、實機與商店事項仍需完成。
+
+## 先前 Web 批次與商店準備紀錄
+
 正式 Web 已於 2026-10-09 00:32（Asia/Taipei）部署至 [nuni.tw](https://nuni.tw)，版本 `ddbbed104b444cb95b85c82681fbc0cb85385e54`，Fly release 33。兩台既有 nrt 主機的 readiness 都回傳同一版本；公開站 33 項檢查通過。商店上架與原生驗收仍分開追蹤。
 
 更新：2026-10-09（Asia/Taipei）。目標包含 Campus One 的商店上架與 nuni.tw 正式 Web；兩邊都保留完整功能及既有資料，不能用其中一邊的驗證代替另一邊。

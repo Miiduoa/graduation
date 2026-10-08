@@ -1,5 +1,9 @@
 # nuni.tw Web 發布
 
+最新正式版本為 Web release 34（`6868053`）及 API release 20（`cb57e78`），已包含平台管理員、138 校選單和跨校公開看板。完整驗收、來源封存及相容回復方式見 [平台發布紀錄](PLATFORM_RELEASE.md)。
+
+## 先前批次：00:32 / Web release 33
+
 2026-10-09 00:32（Asia/Taipei），Campus One `ddbbed104b444cb95b85c82681fbc0cb85385e54` 已部署至 https://nuni.tw，Fly release 33。
 
 - 映像索引：`registry.fly.io/nuni-web@sha256:3fa29f4d816dfca7b16e3070b5d1dad7bc3269309c3e85d2459e4a277e34ffe1`
