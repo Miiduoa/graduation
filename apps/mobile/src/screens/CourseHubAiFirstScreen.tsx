@@ -1,270 +1,275 @@
-/**
- * Campus AI-First — 課程 Hub V2 (LMS 課程主頁)
- */
-import React from 'react';
-import { Alert, View, Text } from 'react-native';
-import {
-  AIDetailScreen,
-  AIInsightBanner,
-  AISection,
-  AICard,
-  AIRow,
-  AIButton,
-  AIChip,
-  aiTokens,
-} from '../ui/aiFirst';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Text, View } from 'react-native';
+import { useAuth } from '../state/auth';
+import { useSchool } from '../state/school';
+import { useTheme } from '../state/theme';
+import { AIDetailScreen, AICard, AIButton } from '../ui/aiFirst';
 import { safeNavigate } from '../utils/safeNavigate';
+import { resolveCourseHubTarget, type CourseHubTarget } from '../utils/courseHubRoute';
+import { loadCourseHub, type CourseHubData, type CourseHubScope } from '../features/courseHub';
+import { webBrowserOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 
-export default function CourseHubAiFirstScreen(props: any) {
-  const navigation = props?.navigation;
-  const params = props?.route?.params ?? {};
-  const courseId = params.courseId || 'CS302';
-  const courseName = params.name || '資料庫系統';
-  const groupId = String(params.groupId ?? params.courseSpaceId ?? courseId);
-
-  const go = (screen: string, nextParams?: Record<string, unknown>) =>
-    safeNavigate(navigation, screen, nextParams, {
-      fallbackMessage: `已保留「${screen}」入口，demo 可先回到課程中心。`,
-      fallbackRoute: 'CourseHub',
-      fallbackParams: { courseId, groupId, name: courseName },
-    });
-
-  const openAIAssistant = () => {
-    go('AIStudyBuddy', {
-      courseId,
-      groupId,
-      courseName,
-      initialPrompt: `我是${courseName}課程助理，可以回答期末範圍、補考申請、上週課程重點與 SQL JOIN 練習。`,
-    });
-  };
-
-  const openAssignment = () => {
-    go('HomeworkSubmit', {
-      courseId,
-      groupId,
-      homeworkId: 'demo-sql-join-lab-4',
-      title: 'Lab 4：SQL JOIN 練習',
-    });
-  };
-
-  const openQuiz = () => {
-    go('QuizCenter', {
-      courseId,
-      groupId,
-      quizId: 'demo-db-quiz-3',
-    });
-  };
-
-  const openMaterial = (title: string, materialId: string, type: 'pdf' | 'video' = 'pdf') => {
-    if (type === 'video') {
-      Alert.alert('影片摘要已開啟', '老師上週影片回放已整理成 5 段重點，可在教材檢視器查看。');
-    }
-    go('CourseMaterialViewer', {
-      courseId,
-      groupId,
-      materialId,
-      title,
-      type,
-    });
-  };
-
-  const openDiscussion = (threadTitle: string) => {
-    go('CourseDiscussion', {
-      courseId,
-      groupId,
-      focusThreadTitle: threadTitle,
-    });
-  };
-
+type Props = {
+  navigation?: Parameters<typeof safeNavigate>[0] & { goBack?: () => void };
+  route?: { params?: Record<string, unknown> };
+};
+export default function CourseHubAiFirstScreen({ navigation, route }: Props) {
+  const { user } = useAuth();
+  const { school } = useSchool();
+  const target = resolveCourseHubTarget(route?.params);
+  const scopeKey = JSON.stringify([user?.uid, school.id, target]);
+  const activeScope = useRef(scopeKey);
+  activeScope.current = scopeKey;
   return (
-    <AIDetailScreen
-      title={courseName}
-      subtitle={`${courseId} · 陳老師`}
-      onBack={() => navigation?.goBack?.()}
-    >
-      {/* 課程 hero */}
-      <View
-        style={{
-          marginHorizontal: aiTokens.space.md,
-          marginTop: aiTokens.space.md,
-          padding: aiTokens.space.lg,
-          backgroundColor: aiTokens.aiGradientStart,
-          borderRadius: aiTokens.radius.lg,
-          overflow: 'hidden',
-          position: 'relative',
-        }}
-      >
-        <View
-          pointerEvents="none"
-          style={{
-            position: 'absolute',
-            top: -40,
-            right: -40,
-            width: 160,
-            height: 160,
-            borderRadius: 80,
-            backgroundColor: aiTokens.ai,
-            opacity: 0.1,
-          }}
-        />
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-          <View
-            style={{
-              width: 56,
-              height: 56,
-              borderRadius: 14,
-              backgroundColor: aiTokens.ai,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Text style={{ fontSize: 28 }}>🗄</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 11, color: aiTokens.ai, fontWeight: '700', letterSpacing: 0.4 }}>
-              {courseId} · 3 學分
-            </Text>
-            <Text
-              style={{ fontSize: 18, fontWeight: '700', color: aiTokens.text, marginTop: 4 }}
-            >
-              {courseName}
-            </Text>
-            <Text style={{ fontSize: 12, color: aiTokens.muted, marginTop: 2 }}>
-              陳老師 · 週一/三 13:10–14:50 · 工程館 305
-            </Text>
-          </View>
-        </View>
-
-        <View style={{ flexDirection: 'row', marginTop: 16, gap: 24 }}>
-          <Stat label="出席" value="13/15" />
-          <Stat label="作業" value="6/7" />
-          <Stat label="目前成績" value="88" tone="ai" />
-        </View>
-      </View>
-
-      <AIInsightBanner
-        text="下週四小考 · AI 已幫你準備 5 分鐘速覽 · 你目前 88 分，期末考拿 85 即可保 A-"
-        source="AI · 課程資料 + 你的成績"
-        confidence="high"
-      />
-
-      {/* 功能 chip */}
-      <View
-        style={{
-          flexDirection: 'row',
-          flexWrap: 'wrap',
-          gap: 8,
-          paddingHorizontal: aiTokens.space.md,
-          marginTop: aiTokens.space.md,
-        }}
-      >
-        <AIChip label="📚 教材" onPress={() => openMaterial('第 10 章 · 索引與優化', 'demo-db-index-ch10')} />
-        <AIChip label="📝 作業" onPress={openAssignment} />
-        <AIChip label="📊 測驗" onPress={openQuiz} />
-        <AIChip label="💬 討論" onPress={() => openDiscussion('期末範圍會包含預存程序嗎？')} />
-        <AIChip label="📅 課表" onPress={() => go('Calendar', { courseId, groupId })} />
-        <AIChip label="📈 成績" onPress={() => go('CourseScores', { courseId, groupId })} />
-      </View>
-
-      {/* AI 課程助理 */}
-      <AISection title="✨ AI 課程助理">
-        <AICard aiGenerated icon="🎓" title="關於這門課，問我任何事" source="AI · 課程資料 + 你的歷史">
-          <Text style={{ fontSize: 13, color: aiTokens.text, lineHeight: 19 }}>
-            「老師上週說了什麼」「期末範圍」「補考怎麼申請」
-          </Text>
-          <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-            <AIButton label="開始對話" icon="✨" onPress={openAIAssistant} />
-          </View>
-        </AICard>
-      </AISection>
-
-      {/* 待辦 */}
-      <AISection title="本週待辦" subtitle="2 件">
-        <AIRow
-          icon="📝"
-          title="Lab 4：SQL JOIN 練習"
-          subtitle="週五 23:59 · 進度 0%"
-          tag="未開始"
-          tagTone="warning"
-          onPress={openAssignment}
-        />
-        <AIRow
-          icon="📊"
-          title="第三次小考"
-          subtitle="週四 09:00 · 範圍：第 9-10 章"
-          tag="已準備"
-          tagTone="success"
-          onPress={openQuiz}
-        />
-      </AISection>
-
-      {/* 最近教材 */}
-      <AISection title="最近教材">
-        <AIRow
-          icon="📄"
-          title="第 10 章 · 索引與優化"
-          subtitle="PDF · 5/17"
-          onPress={() => openMaterial('第 10 章 · 索引與優化', 'demo-db-index-ch10')}
-        />
-        <AIRow
-          icon="🎥"
-          title="老師上週影片回放"
-          subtitle="50:32 · AI 已切重點"
-          tag="AI 摘要"
-          tagTone="ai"
-          onPress={() => openMaterial('老師上週影片回放', 'demo-db-week-video', 'video')}
-        />
-        <AIRow
-          icon="📄"
-          title="JOIN 範例集"
-          subtitle="PDF · 5/15"
-          onPress={() => openMaterial('JOIN 範例集', 'demo-db-join-examples')}
-        />
-      </AISection>
-
-      {/* 討論區 */}
-      <AISection title="課程討論" subtitle="3 個熱議">
-        <AIRow
-          icon="💬"
-          title="期末範圍會包含預存程序嗎？"
-          subtitle="林同學 · 12 回應"
-          onPress={() => openDiscussion('期末範圍會包含預存程序嗎？')}
-        />
-        <AIRow
-          icon="💬"
-          title="Lab 3 第二題的索引怎麼建？"
-          subtitle="王同學 · 8 回應"
-          tag="未解"
-          tagTone="warning"
-          onPress={() => openDiscussion('Lab 3 第二題的索引怎麼建？')}
-        />
-        <AIRow
-          icon="💬"
-          title="期中考分數有人比想的高很多嗎"
-          subtitle="陳同學 · 24 回應"
-          tag="熱門"
-          tagTone="ai"
-          onPress={() => openDiscussion('期中考分數有人比想的高很多嗎')}
-        />
-      </AISection>
-    </AIDetailScreen>
+    <CourseContent
+      key={scopeKey}
+      uid={user?.uid ?? ''}
+      schoolId={school.id}
+      target={target}
+      navigation={navigation}
+      scopeKey={scopeKey}
+      activeScope={activeScope}
+    />
   );
 }
-
-function Stat({ label, value, tone }: { label: string; value: string; tone?: 'ai' }) {
+function CourseContent({
+  uid,
+  schoolId,
+  target,
+  navigation,
+  scopeKey,
+  activeScope,
+}: {
+  uid: string;
+  schoolId: string;
+  target: CourseHubTarget | null;
+  navigation: Props['navigation'];
+  scopeKey: string;
+  activeScope: React.MutableRefObject<string>;
+}) {
+  const theme = useTheme();
+  const mounted = useRef(true);
+  const generation = useRef(0);
+  const pending = useRef(false);
+  const [data, setData] = useState<CourseHubData | null>(null);
+  const [loading, setLoading] = useState(Boolean(target && uid));
+  const [error, setError] = useState('');
+  const [linkError, setLinkError] = useState('');
+  const [opening, setOpening] = useState(false);
+  const isCurrent = useCallback(
+    () => mounted.current && activeScope.current === scopeKey,
+    [activeScope, scopeKey],
+  );
+  const targetKey = JSON.stringify(target);
+  const load = useCallback(async () => {
+    const currentTarget = JSON.parse(targetKey) as CourseHubTarget | null;
+    if (!currentTarget || !uid || !isCurrent()) return;
+    const request = ++generation.current;
+    setLoading(true);
+    setError('');
+    setData(null);
+    setLinkError('');
+    try {
+      const result = await loadCourseHub(
+        { uid, schoolId, target: currentTarget } satisfies CourseHubScope,
+        () => isCurrent() && request === generation.current,
+      );
+      if (isCurrent() && request === generation.current) setData(result);
+    } catch (reason) {
+      if (isCurrent() && request === generation.current)
+        setError(reason instanceof Error ? reason.message : '目前無法讀取課程。');
+    } finally {
+      if (isCurrent() && request === generation.current) setLoading(false);
+    }
+  }, [uid, schoolId, targetKey, isCurrent]);
+  useEffect(() => {
+    mounted.current = true;
+    void load();
+    return () => {
+      mounted.current = false;
+      generation.current += 1;
+    };
+  }, [load]);
+  const open = async (url: string) => {
+    if (!isCurrent() || pending.current || !data) return;
+    pending.current = true;
+    setOpening(true);
+    setLinkError('');
+    try {
+      const opened = await webBrowserOpenWithPuTronClassGate(url);
+      if (isCurrent() && !opened) setLinkError('目前無法開啟連結，請稍後再試。');
+    } catch {
+      if (isCurrent()) setLinkError('目前無法開啟連結，請稍後再試。');
+    } finally {
+      if (isCurrent()) setOpening(false);
+      pending.current = false;
+    }
+  };
+  const go = (screen: string) => {
+    if (isCurrent() && data && target?.source === 'group')
+      safeNavigate(navigation, screen, { groupId: target.groupId, groupName: data.name });
+  };
+  const body = { ...theme.typography.body, color: theme.colors.muted };
+  const gap = { gap: theme.space.md };
   return (
-    <View>
-      <Text style={{ fontSize: 11, color: aiTokens.muted, fontWeight: '600' }}>{label}</Text>
-      <Text
-        style={{
-          fontSize: 20,
-          fontWeight: '700',
-          color: tone === 'ai' ? aiTokens.ai : aiTokens.text,
-          marginTop: 2,
-        }}
-      >
-        {value}
-      </Text>
-    </View>
+    <AIDetailScreen
+      title={data?.name ?? '課程總覽'}
+      subtitle={target?.source === 'tronclass' ? '校方 TronClass 課程' : 'Campus One 課程'}
+      onBack={() => navigation?.goBack?.()}
+    >
+      {!target || !uid ? (
+        <AICard title={!uid ? '登入後查看課程' : '請先選擇課程'}>
+          <View style={gap}>
+            <Text style={body}>
+              {!uid
+                ? '請使用學校帳號登入，再從課程列表開啟。'
+                : '這個連結沒有提供可辨識的課程，請回到列表重新選擇。'}
+            </Text>
+            <AIButton label="回到課程列表" onPress={() => safeNavigate(navigation, 'LearnHome')} />
+          </View>
+        </AICard>
+      ) : loading ? (
+        <AICard>
+          <ActivityIndicator accessibilityLabel="讀取課程資料" color={theme.colors.accent} />
+        </AICard>
+      ) : error ? (
+        <AICard title="目前無法讀取課程">
+          <View style={gap}>
+            <Text accessibilityRole="alert" style={body}>
+              {error}
+            </Text>
+            <AIButton label="重新讀取課程" onPress={() => void load()} />
+          </View>
+        </AICard>
+      ) : data ? (
+        <>
+          <AICard title="課程資訊">
+            <View style={gap}>
+              {data.details.length ? <Text style={body}>{data.details.join(' · ')}</Text> : null}
+              <Text style={body}>
+                {data.description ||
+                  (target.source === 'tronclass'
+                    ? '課程說明請見校方課程頁面。'
+                    : '尚未提供課程說明。')}
+              </Text>
+              <AIButton label="更新課程資料" variant="ghost" onPress={() => void load()} />
+            </View>
+          </AICard>
+          {target.source === 'tronclass' ? (
+            <AICard title="校方課程內容">
+              <View style={gap}>
+                <Text style={body}>
+                  教材、作業繳交、測驗與成績請在這門課的校方頁面查看；開啟後可能需要重新登入學校帳號。
+                </Text>
+                <AIButton
+                  label="開啟校方課程"
+                  disabled={opening}
+                  onPress={() =>
+                    void open(`https://tronclass.pu.edu.tw/course/${target.courseId}/content`)
+                  }
+                />
+              </View>
+            </AICard>
+          ) : (
+            <>
+              <AICard title="課程入口">
+                <View style={gap}>
+                  <AIButton
+                    label="課程群組與公告"
+                    variant="ghost"
+                    onPress={() => go('GroupDetail')}
+                  />
+                  <AIButton label="測驗通知" variant="ghost" onPress={() => go('QuizCenter')} />
+                  <AIButton
+                    label="課程顧問"
+                    variant="ghost"
+                    onPress={() => go('AICourseAdvisor')}
+                  />
+                </View>
+              </AICard>
+              <AICard title="教材與單元">
+                <View style={gap}>
+                  {data.materials.status === 'error' ? (
+                    <Text accessibilityRole="alert" style={body}>
+                      教材讀取失敗，請更新課程資料後重試。
+                    </Text>
+                  ) : data.materials.items.length === 0 ? (
+                    <Text style={body}>尚未發布教材或單元。</Text>
+                  ) : (
+                    data.materials.items.map((item) => (
+                      <View key={item.id} style={gap}>
+                        <Text
+                          style={{
+                            ...theme.typography.body,
+                            color: theme.colors.text,
+                            fontWeight: '700',
+                          }}
+                        >
+                          {item.title}
+                        </Text>
+                        {item.description ? <Text style={body}>{item.description}</Text> : null}
+                        {item.url ? (
+                          <AIButton
+                            label={`開啟教材：${item.title}`}
+                            variant="ghost"
+                            disabled={opening}
+                            onPress={() => void open(item.url!)}
+                          />
+                        ) : (
+                          <Text style={body}>這個單元未附教材連結。</Text>
+                        )}
+                      </View>
+                    ))
+                  )}
+                </View>
+              </AICard>
+              <AICard title="作業公告">
+                <View style={gap}>
+                  {data.assignments.status === 'error' ? (
+                    <Text accessibilityRole="alert" style={body}>
+                      作業讀取失敗，請更新課程資料後重試。
+                    </Text>
+                  ) : data.assignments.items.length === 0 ? (
+                    <Text style={body}>尚未發布作業。</Text>
+                  ) : (
+                    <>
+                      <Text style={body}>此處提供作業說明；繳交方式請依老師公告辦理。</Text>
+                      {data.assignments.items.map((item) => (
+                        <View key={item.id} style={gap}>
+                          <Text
+                            style={{
+                              ...theme.typography.body,
+                              color: theme.colors.text,
+                              fontWeight: '700',
+                            }}
+                          >
+                            {item.title}
+                          </Text>
+                          {item.description ? <Text style={body}>{item.description}</Text> : null}
+                          <Text style={body}>
+                            {item.closed
+                              ? '已關閉'
+                              : item.dueAt
+                                ? `截止：${new Date(item.dueAt).toLocaleString('zh-TW')}`
+                                : '未提供截止時間'}
+                          </Text>
+                        </View>
+                      ))}
+                    </>
+                  )}
+                </View>
+              </AICard>
+            </>
+          )}
+          {linkError ? (
+            <AICard>
+              <Text accessibilityRole="alert" style={body}>
+                {linkError}
+              </Text>
+            </AICard>
+          ) : null}
+        </>
+      ) : null}
+    </AIDetailScreen>
   );
 }

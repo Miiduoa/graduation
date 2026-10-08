@@ -1,4 +1,5 @@
 import type { UserRole } from '../data/types';
+import { resolveCourseHubTarget } from './courseHubRoute';
 
 export type CourseNavigationRole = UserRole | 'guest' | 'department' | null | undefined;
 
@@ -66,7 +67,8 @@ export function buildCourseNavigationTarget(
   screen?: string | null,
   params?: Record<string, unknown>,
 ): NavigationTarget {
-  const targetScreen = screen === 'CourseHub' && !params?.groupId ? undefined : screen;
+  const targetScreen =
+    screen === 'CourseHub' && !resolveCourseHubTarget(params) ? undefined : screen;
   return {
     tab: '學習',
     screen: normalizeCourseScreen(role, targetScreen),
@@ -161,5 +163,10 @@ export function navigateToCourseWorkspace(
   role: CourseNavigationRole,
   params?: Record<string, unknown>,
 ): void {
-  navigateToCourseScreen(navigation, role, params?.groupId ? 'CourseHub' : undefined, params);
+  navigateToCourseScreen(
+    navigation,
+    role,
+    resolveCourseHubTarget(params) ? 'CourseHub' : undefined,
+    params,
+  );
 }
