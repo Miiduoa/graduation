@@ -31,10 +31,11 @@ jobs:
     name: Maestro E2E Tests
     runs-on: macos-latest
     timeout-minutes: 60
-    # iOS native prebuild + pod install + xcodebuild 在 macOS runner 上
-    # 因 React Native 原生模組相容性問題（與本 PR 無關）長期 fail。
-    # 設為 non-blocking 直到 native 端做完 SDK 升級。
-    continue-on-error: true
+    # E2E failures must be reported, even if the independent JS CI passes.
+    env:
+      CI: '1'
+      IOS_BUNDLE_IDENTIFIER: com.campus.app.dev
+      APP_ID: com.campus.app.dev
 
     strategy:
       fail-fast: false
@@ -70,51 +71,67 @@ jobs:
       - name: Verify Maestro Installation
         run: maestro --version
 
-      - name: Setup Expo
-        uses: expo/expo-github-action@v8
-        with:
-          expo-version: latest
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
-
       - name: Setup iOS Simulator
         if: matrix.platform == 'ios'
+        shell: bash
         run: |
-          # List available simulators
+          set -euo pipefail
           xcrun simctl list devices available
-
-          # Boot the simulator
-          SIMULATOR_ID=$(xcrun simctl list devices available | grep "${{ matrix.device }}" | head -1 | grep -oE '\([A-F0-9-]+\)' | tr -d '()')
-          if [ -n "$SIMULATOR_ID" ]; then
-            xcrun simctl boot "$SIMULATOR_ID" || true
-            echo "SIMULATOR_UDID=$SIMULATOR_ID" >> $GITHUB_ENV
+          SIMULATOR_ID=$(xcrun simctl list devices available | sed -nE 's/.*iPhone 15.*\(([0-9A-F-]{36})\).*/\1/p' | head -1)
+          if [ -z "$SIMULATOR_ID" ]; then
+            SIMULATOR_ID=$(xcrun simctl list devices available | sed -nE 's/.*iPhone.*\(([0-9A-F-]{36})\).*/\1/p' | head -1)
           fi
+          if [ -z "$SIMULATOR_ID" ]; then
+            echo "::error::No usable iPhone simulator is available"
+            exit 1
+          fi
+          echo "SIMULATOR_UDID=$SIMULATOR_ID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$SIMULATOR_ID"
+          xcrun simctl bootstatus "$SIMULATOR_ID" -b
 
-      - name: Build Expo Development Client
+      - name: Build and install iOS development client
+        if: matrix.platform == 'ios'
         working-directory: apps/mobile
+        shell: bash
         run: |
-          # Export for iOS Simulator
+          set -euo pipefail
           npx expo prebuild --platform ios --clean
           xcodebuild -workspace ios/*.xcworkspace \
             -scheme mobile \
             -configuration Debug \
-            -destination "platform=iOS Simulator,name=${{ matrix.device }}" \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
             -derivedDataPath build \
             build
+          APP_PATH=$(find build/Build/Products/Debug-iphonesimulator -maxdepth 1 -type d -name '*.app' -print -quit)
+          if [ -z "$APP_PATH" ]; then
+            echo "::error::xcodebuild produced no simulator .app"
+            exit 1
+          fi
+          xcrun simctl install "$SIMULATOR_UDID" "$APP_PATH"
+          xcrun simctl get_app_container "$SIMULATOR_UDID" "$APP_ID" app
 
-      - name: Start Metro Bundler
+      - name: Start Metro and open development client
+        if: matrix.platform == 'ios'
         working-directory: apps/mobile
+        shell: bash
         run: |
-          npx expo start --ios --no-dev --minify &
+          set -euo pipefail
+          npx expo start --ios --dev-client --localhost > /tmp/campus-one-metro.log 2>&1 &
           METRO_PID=$!
-          echo "METRO_PID=$METRO_PID" >> $GITHUB_ENV
-
-          # Wait for Metro to be ready
-          echo "Waiting for Metro bundler..."
-          sleep 45
-
-          # Check if Metro is running
-          curl -s http://localhost:8081/status || echo "Metro status check failed"
+          echo "METRO_PID=$METRO_PID" >> "$GITHUB_ENV"
+          ready=0
+          for attempt in {1..40}; do
+            if curl -fsS http://127.0.0.1:8081/status | grep -q 'packager-status:running'; then
+              ready=1
+              break
+            fi
+            sleep 3
+          done
+          if [ "$ready" -ne 1 ]; then
+            cat /tmp/campus-one-metro.log
+            echo "::error::Metro did not become ready"
+            exit 1
+          fi
 
       - name: Run Smoke Tests
         if: github.event.inputs.test_suite == 'smoke' || github.event.inputs.test_suite == ''
@@ -124,11 +141,11 @@ jobs:
           maestro test .maestro/flows/01_onboarding.yaml \
             --format junit \
             --output .maestro/results/smoke-onboarding.xml \
-            --env APP_ID=com.campus.app
+            --env APP_ID="$APP_ID"
           maestro test .maestro/flows/11_navigation_ai_first.yaml \
             --format junit \
             --output .maestro/results/smoke-ai-first.xml \
-            --env APP_ID=com.campus.app
+            --env APP_ID="$APP_ID"
 
       - name: Run Full Test Suite
         if: github.event.inputs.test_suite == 'full'
@@ -144,7 +161,7 @@ jobs:
             maestro test "$flow" \
               --format junit \
               --output ".maestro/results/${flow_name}-results.xml" \
-              --env APP_ID=com.campus.app
+              --env APP_ID="$APP_ID"
             
             # Small delay between tests
             sleep 5
@@ -164,7 +181,7 @@ jobs:
             maestro test "$FLOW_FILE" \
               --format junit \
               --output .maestro/results/${{ github.event.inputs.test_suite }}-results.xml \
-              --env APP_ID=com.campus.app
+              --env APP_ID="$APP_ID"
           else
             echo "No flow found for: ${{ github.event.inputs.test_suite }}"
             exit 1
@@ -174,12 +191,12 @@ jobs:
         if: always()
         run: |
           # Kill Metro bundler
-          if [ -n "$METRO_PID" ]; then
-            kill $METRO_PID || true
+          if [ -n "${METRO_PID:-}" ]; then
+            kill "$METRO_PID" || true
           fi
 
           # Shutdown simulator
-          if [ -n "$SIMULATOR_UDID" ]; then
+          if [ -n "${SIMULATOR_UDID:-}" ]; then
             xcrun simctl shutdown "$SIMULATOR_UDID" || true
           fi
 
@@ -218,9 +235,8 @@ jobs:
     steps:
       - name: Check Test Results
         run: |
-          if [ "${{ needs.e2e-tests.result }}" == "failure" ]; then
-            echo "E2E tests failed!"
-            # Add Slack/Discord/Email notification here
-          else
-            echo "E2E tests passed!"
+          if [ "${{ needs.e2e-tests.result }}" != "success" ]; then
+            echo "::error::Scheduled E2E failed or did not complete"
+            exit 1
           fi
+          echo "Scheduled E2E passed."
