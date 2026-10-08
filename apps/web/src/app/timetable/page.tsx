@@ -9,6 +9,7 @@ import {
   type AcademicCourseResponse,
 } from '@/lib/academicRecords';
 import styles from '@/components/academic/academic.module.css';
+import { buildUpcomingTimetableCalendar } from '@/lib/timetableCalendar';
 
 const DAYS = ['一', '二', '三', '四', '五', '六', '日'];
 function courseTime(course: AcademicCourse) {
@@ -64,6 +65,24 @@ function Timetable({ records }: { records: AcademicCourseResponse }) {
   );
   const conflicts = useMemo(() => findScheduleConflicts(records.courses), [records]);
   const unknown = records.courses.filter((course) => course.scheduleWarning || !course.dayOfWeek);
+  const calendarPreview = useMemo(
+    () => buildUpcomingTimetableCalendar(records.courses),
+    [records.courses],
+  );
+
+  const downloadCalendar = () => {
+    const calendar = buildUpcomingTimetableCalendar(records.courses);
+    if (calendar.eventCount === 0) return;
+    const blobUrl = URL.createObjectURL(new Blob([calendar.content], { type: 'text/calendar;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = 'campus-one-timetable.ics';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+  };
+
   return (
     <>
       <div className={styles.overview}>
@@ -100,6 +119,29 @@ function Timetable({ records }: { records: AcademicCourseResponse }) {
         <p className={styles.note}>
           有 {unknown.length} 門課的上課時間尚待確認；請查看原始上課資訊，避免漏掉跨日或分段課程。
         </p>
+      )}
+      {records.courses.length > 0 && (
+        <section className={styles.calendarExport} aria-label="課表行事曆匯出">
+          <div>
+            <strong>把課表放進行事曆</strong>
+            <p>
+              依已確認的上課時間，匯出未來四週（{calendarPreview.firstDate} 至{' '}
+              {calendarPreview.lastDate}）。{calendarPreview.includedCourses} 門可匯出
+              {calendarPreview.skippedCourses > 0 &&
+                '，另有 ' + calendarPreview.skippedCourses + ' 門時間不完整或為分段課程，未納入'}
+              。
+            </p>
+            <p>僅為一次性快照，不會自動同步；停課、國定假日與課程異動請以學校公告為準。</p>
+          </div>
+          <button
+            type="button"
+            className="btn"
+            disabled={calendarPreview.eventCount === 0}
+            onClick={downloadCalendar}
+          >
+            下載課表 (.ics)
+          </button>
+        </section>
       )}
       <div className={styles.toolbar}>
         <div className={styles.segment} aria-label="課表顯示方式">
