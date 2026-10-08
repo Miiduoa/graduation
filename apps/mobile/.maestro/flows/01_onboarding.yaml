@@ -20,5 +20,9 @@ tags:
 - extendedWaitUntil:
     visible: '學校登入'
     timeout: 20000
-- assertVisible: '登入學校帳號'
+- assertVisible:
+    id: student-id-input
+- assertVisible:
+    id: student-password-input
+- assertVisible: '使用學號登入'
 - takeScreenshot: school_login
