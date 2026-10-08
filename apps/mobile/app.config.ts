@@ -221,12 +221,13 @@ export default ({ config }: any) => {
   ];
   const configuredAiProvider = process.env.EXPO_PUBLIC_AI_PROVIDER ?? 'gemini';
   const releaseAiProviderOverride = process.env.EXPO_PUBLIC_RELEASE_AI_PROVIDER?.trim();
-  const releaseAiProvider =
-    isReleaseLike && releaseAiProviderOverride
-      ? releaseAiProviderOverride
-      : isReleaseLike
-        ? 'cloud'
-        : configuredAiProvider;
+  if (isReleaseLike && releaseAiProviderOverride && releaseAiProviderOverride !== 'cloud') {
+    throw new Error('[app.config] Release AI provider must be cloud');
+  }
+  if (isReleaseLike && process.env.EXPO_PUBLIC_GEMINI_API_KEY?.trim()) {
+    throw new Error('[app.config] Remove EXPO_PUBLIC_GEMINI_API_KEY from release builds');
+  }
+  const releaseAiProvider = isReleaseLike ? 'cloud' : configuredAiProvider;
   const aiOfflineFirstBuild = parseBoolean(process.env.EXPO_PUBLIC_AI_OFFLINE_FIRST, false);
 
   const androidIntentFilters = [
@@ -328,7 +329,7 @@ export default ({ config }: any) => {
       aiServerBaseUrl: process.env.EXPO_PUBLIC_AI_SERVER_URL ?? '',
       /** Cloudflare Worker OPAC proxy base URL (no trailing slash); empty → device direct fetch only */
       libraryOpacProxyUrl: process.env.EXPO_PUBLIC_LIBRARY_OPAC_PROXY_URL ?? '',
-      geminiApiKey: process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? '',
+      geminiApiKey: isReleaseLike ? '' : (process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? ''),
       /** 預設 GGUF：`qwen2.5-7b`（與 MLX 微調基底對齊）；可改 `qwen2.5-3b` 等 `MODEL_REGISTRY` 鍵 */
       localLlmDefaultModelId: process.env.EXPO_PUBLIC_LOCAL_LLM_MODEL ?? 'qwen2.5-7b',
       /** true：預設關閉網搜／預抓學習（完全離線優先）；仍可用對應 EXPO_PUBLIC_AI_* =true 強制開啟 */
