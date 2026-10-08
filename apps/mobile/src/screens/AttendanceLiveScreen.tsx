@@ -20,11 +20,14 @@ import {
   Alert,
   TextInput,
   Vibration,
+  Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { theme } from '../ui/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { useAuth } from '../state/auth';
 import { PureQRCode } from '../ui/PureQRCode';
@@ -37,12 +40,11 @@ import {
   checkIn,
   endSession,
   generateRotatingQR,
-  validateRotatingQR,
+  subscribeToSession,
   updateStudentStatus,
   getStatusColor,
   getStatusLabel,
 } from '../services/smartAttendanceEngine';
-import { simulateStudentCheckIn } from '../services/demoActionSimulator';
 
 // ============================================================================
 // TYPES
@@ -63,6 +65,7 @@ interface AttendanceLiveScreenProps {
 // ============================================================================
 
 function RotatingQRDisplay({ sessionId, secret }: { sessionId: string; secret: string }) {
+  const s = useThemeStyleSheet(createStyles);
   const [qrValue, setQrValue] = useState(() => generateRotatingQR(sessionId, secret));
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const [countdown, setCountdown] = useState(3);
@@ -93,8 +96,8 @@ function RotatingQRDisplay({ sessionId, secret }: { sessionId: string; secret: s
       </Animated.View>
       <View style={s.qrBadgeRow}>
         <View style={s.qrBadge}>
-          <Ionicons name={'shield-checkmark' as any} size={14} color="#FFFFFF" />
-          <Text style={s.qrBadgeText}>動態防截圖</Text>
+          <Ionicons name={'shield-checkmark' as any} size={14} color={theme.colors.success} />
+          <Text style={s.qrBadgeText}>定時更新</Text>
         </View>
         <View
           style={[
@@ -119,6 +122,7 @@ function RotatingQRDisplay({ sessionId, secret }: { sessionId: string; secret: s
 // ============================================================================
 
 function NumberCodeDisplay({ code }: { code: string }) {
+  const s = useThemeStyleSheet(createStyles);
   const digits = code.split('');
 
   return (
@@ -149,6 +153,7 @@ function StudentRecordItem({
   isTeacher: boolean;
   onStatusChange?: (studentId: string, status: AttendanceStatus) => void;
 }) {
+  const s = useThemeStyleSheet(createStyles);
   const statusColor = getStatusColor(record.status);
   const statusLabel = getStatusLabel(record.status);
 
@@ -188,9 +193,17 @@ function StudentRecordItem({
 // ============================================================================
 
 export default function AttendanceLiveScreen({ route, navigation }: AttendanceLiveScreenProps) {
+  const s = useThemeStyleSheet(createStyles);
   const insets = useSafeAreaInsets();
   const auth = useAuth();
   const { sessionId, isTeacher } = route.params;
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [scanning, setScanning] = useState(false);
+  const scanHandled = useRef(false);
+  const submittingRef = useRef(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   // State
   const [session, setSession] = useState<AttendanceSession | null>(null);
@@ -201,32 +214,52 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
   const [numberInput, setNumberInput] = useState('');
   const [studentFilter, setStudentFilter] = useState<'all' | 'present' | 'late' | 'absent'>('all');
 
-  // ─── Load session ─────────────────────────────────────────
+  // Load historical records and subscribe for both student and teacher views.
+  const applySession = useCallback((sess: AttendanceSession | null) => {
+    setSession(sess);
+    setLoading(false);
+    const myRecord = !isTeacher && auth.user?.uid
+      ? sess?.records.find((record) => record.studentId === auth.user.uid)
+      : undefined;
+    const attended = myRecord?.status === 'present' || myRecord?.status === 'late';
+    setCheckedIn(attended);
+    setCheckInMessage(attended ? getStatusLabel(myRecord.status) : '');
+    if (!sess || sess.status !== 'active') setScanning(false);
+  }, [isTeacher, auth.user?.uid]);
+
   const loadSession = useCallback(async () => {
-    const sess = await getSessionById(sessionId);
-    if (sess) {
-      setSession(sess);
-      // Check if student already checked in
-      if (!isTeacher && auth.user?.uid) {
-        const myRecord = sess.records.find((r) => r.studentId === auth.user?.uid);
-        if (myRecord && myRecord.checkInTime) {
-          setCheckedIn(true);
-          setCheckInMessage(myRecord.status === 'present' ? '準時簽到' : '遲到簽到');
-        }
-      }
+    try {
+      applySession(await getSessionById(sessionId));
+      setLoadError(false);
+    } catch {
+      setLoadError(true);
+      setLoading(false);
     }
-  }, [sessionId, isTeacher, auth.user?.uid]);
+  }, [sessionId, applySession]);
 
   useEffect(() => {
-    loadSession();
-  }, [loadSession]);
-
-  // Auto-refresh (every 5 sec for teacher)
-  useEffect(() => {
-    if (!isTeacher) return;
-    const interval = setInterval(loadSession, 5000);
-    return () => clearInterval(interval);
-  }, [isTeacher, loadSession]);
+    let active = true;
+    let receivedUpdate = false;
+    setLoading(true);
+    setLoadError(false);
+    setSession(null);
+    setScanning(false);
+    getSessionById(sessionId).then((sess) => {
+      if (active && !receivedUpdate) applySession(sess);
+    }).catch(() => {
+      if (active && !receivedUpdate) {
+        setLoadError(true);
+        setLoading(false);
+      }
+    });
+    const unsubscribe = subscribeToSession(sessionId, (sess) => {
+      if (!active) return;
+      receivedUpdate = true;
+      setLoadError(false);
+      applySession(sess);
+    });
+    return () => { active = false; unsubscribe(); };
+  }, [sessionId, applySession]);
 
   // Elapsed timer
   useEffect(() => {
@@ -240,40 +273,34 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
   // ─── Actions ──────────────────────────────────────────────
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadSession();
-    setRefreshing(false);
+    try { await loadSession(); } finally { setRefreshing(false); }
   }, [loadSession]);
 
-  const handleCheckIn = useCallback(async () => {
+  const handleCheckIn = useCallback(async (proof: { method: 'number_code' | 'rotating_qr'; code: string }) => {
+    if (submittingRef.current) return;
+    if (!auth.user?.uid) {
+      Alert.alert('請先登入', '請登入學生帳號後再簽到。');
+      return;
+    }
+    submittingRef.current = true;
+    setSubmitting(true);
     try {
-      const studentId = auth.user?.uid || 'S_ANON';
-      const studentName = auth.user?.displayName || auth.profile?.displayName || '學生';
-      const result = await checkIn(sessionId, studentId, studentName);
+      const studentName = auth.user.displayName || auth.profile?.displayName || '學生';
+      const result = await checkIn(sessionId, auth.user.uid, studentName, proof);
       if (result.success) {
         await earnXP('attend_class').catch(() => {});
         setCheckedIn(true);
         setCheckInMessage(result.message);
         Vibration.vibrate([0, 200, 100, 200]);
         await loadSession();
-        // ── Demo：emit cross-role event 給老師 ──
-        try {
-          const sess = await getSessionById(sessionId);
-          await simulateStudentCheckIn({
-            studentUid: studentId,
-            studentName,
-            teacherUid: 'demo_teacher_chang',
-            courseId: Number(sess?.courseId ?? 0) || 0,
-            courseName: sess?.courseName ?? '課程',
-            sessionId,
-            method: (((sess as any)?.method ?? 'rotating_qr')) as 'rotating_qr' | 'number_code' | 'geofence' | 'selfie_liveness' | 'multi_factor',
-            status: result.message.includes('遲') ? 'late' : 'present',
-          });
-        } catch { /* swallow demo emit failures */ }
       } else {
         Alert.alert('簽到失敗', result.message);
       }
     } catch (error) {
       Alert.alert('簽到失敗', String(error));
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
     }
   }, [auth.user, auth.profile, sessionId, loadSession]);
 
@@ -282,16 +309,31 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
       Alert.alert('無效代碼', '請輸入 6 位數字密碼');
       return;
     }
-    if (!session) return;
-    // Validate: either matches rotating QR or the static number code
-    if (numberInput === session.numberCode) {
-      await handleCheckIn();
-      setNumberInput('');
-    } else {
-      Alert.alert('密碼錯誤', '請重新輸入或詢問教師');
-      setNumberInput('');
+    await handleCheckIn({ method: 'number_code', code: numberInput });
+    setNumberInput('');
+  }, [numberInput, handleCheckIn]);
+
+  const openScanner = useCallback(async () => {
+    try {
+      const permission = cameraPermission?.granted
+        ? cameraPermission : await requestCameraPermission();
+      if (!permission.granted) {
+        Alert.alert('需要相機權限', '請在設定中允許相機，或輸入教師提供的 6 位簽到密碼。');
+        return;
+      }
+      scanHandled.current = false;
+      setScanning(true);
+    } catch {
+      Alert.alert('無法開啟相機', '請改用教師提供的 6 位簽到密碼。');
     }
-  }, [numberInput, session, handleCheckIn]);
+  }, [cameraPermission, requestCameraPermission]);
+
+  const handleQRScanned = useCallback(({ data }: { data: string }) => {
+    if (scanHandled.current) return;
+    scanHandled.current = true;
+    setScanning(false);
+    void handleCheckIn({ method: 'rotating_qr', code: data });
+  }, [handleCheckIn]);
 
   const handleEndSession = useCallback(() => {
     if (!session) return;
@@ -353,7 +395,11 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
       <View style={[s.container, { paddingTop: insets.top }]}>
         <View style={s.loadingContainer}>
           <Ionicons name={'hourglass-outline' as any} size={48} color={theme.colors.muted} />
-          <Text style={s.loadingText}>載入點名資料...</Text>
+          <Text style={s.loadingText}>
+            {loading ? '載入點名資料...' : loadError ? '無法載入點名資料' : '找不到此點名場次'}
+          </Text>
+          {!loading && <TouchableOpacity onPress={loadSession}><Text>重試</Text></TouchableOpacity>}
+          <TouchableOpacity onPress={() => navigation.goBack()}><Text>返回</Text></TouchableOpacity>
         </View>
       </View>
     );
@@ -422,7 +468,10 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
             {/* Mode Display */}
             <View style={s.modeDisplayCard}>
               {session.mode === 'rotating_qr' ? (
-                <RotatingQRDisplay sessionId={sessionId} secret={session.qrSecret} />
+                <View>
+                  <RotatingQRDisplay sessionId={sessionId} secret={session.qrSecret} />
+                  <Text style={s.codeHint}>無法掃描時，可輸入密碼：{session.numberCode}</Text>
+                </View>
               ) : session.mode === 'number_code' ? (
                 <NumberCodeDisplay code={session.numberCode} />
               ) : (
@@ -527,6 +576,10 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
                   </View>
                 </View>
               </View>
+            ) : session.status !== 'active' ? (
+              <Text style={s.manualModeText}>點名已結束，無法再簽到</Text>
+            ) : session.mode === 'manual' ? (
+              <Text style={s.manualModeText}>此場次由教師手動點名，請向教師確認出席狀態。</Text>
             ) : (
               /* ── Check-in form ── */
               <>
@@ -544,7 +597,7 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
                 </View>
 
                 {/* Mode-specific UI */}
-                {session.mode === 'number_code' || session.mode === 'manual' ? (
+                {session.mode === 'number_code' ? (
                   <View style={s.studentInputSection}>
                     <Text style={s.studentInputLabel}>輸入 6 位簽到密碼</Text>
                     <View style={s.studentDigitsRow}>
@@ -570,14 +623,14 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
                     <TouchableOpacity
                       style={[s.checkInBtn, numberInput.length !== 6 && s.checkInBtnDisabled]}
                       onPress={handleNumberSubmit}
-                      disabled={numberInput.length !== 6}
+                      disabled={submitting || numberInput.length !== 6}
                     >
-                      <Ionicons name={'checkmark-circle' as any} size={20} color="#FFFFFF" />
+                      <Ionicons name={'checkmark-circle' as any} size={20} color={theme.colors.onAccent} />
                       <Text style={s.checkInBtnText}>確認簽到</Text>
                     </TouchableOpacity>
                   </View>
                 ) : (
-                  /* QR mode — in real app would open camera scanner */
+                  /* QR mode */
                   <View style={s.studentQRSection}>
                     <View style={s.scanPlaceholder}>
                       <Ionicons
@@ -587,8 +640,8 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
                       />
                       <Text style={s.scanHint}>掃描教師端的 QR 碼</Text>
                     </View>
-                    <TouchableOpacity style={s.checkInBtn} onPress={handleCheckIn}>
-                      <Ionicons name={'camera-outline' as any} size={20} color="#FFFFFF" />
+                    <TouchableOpacity style={s.checkInBtn} onPress={openScanner} disabled={submitting}>
+                      <Ionicons name={'camera-outline' as any} size={20} color={theme.colors.onAccent} />
                       <Text style={s.checkInBtnText}>開啟掃描器</Text>
                     </TouchableOpacity>
                     <Text style={s.orText}>— 或 —</Text>
@@ -623,9 +676,10 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
                       <TouchableOpacity
                         style={[
                           s.checkInBtn,
-                          { marginTop: 12, backgroundColor: theme.colors.success },
+                          { marginTop: 12 },
                         ]}
                         onPress={handleNumberSubmit}
+                        disabled={submitting}
                       >
                         <Text style={s.checkInBtnText}>密碼簽到</Text>
                       </TouchableOpacity>
@@ -637,6 +691,23 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
           </>
         )}
       </ScrollView>
+      <Modal visible={scanning} animationType="slide" onRequestClose={() => setScanning(false)}>
+        <View style={{ flex: 1, backgroundColor: '#000', paddingTop: insets.top }}>
+          {scanning && <CameraView
+            style={{ flex: 1 }}
+            facing="back"
+            barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+            onBarcodeScanned={handleQRScanned}
+          />}
+          <TouchableOpacity
+            accessibilityRole="button"
+            onPress={() => setScanning(false)}
+            style={{ padding: 24, paddingBottom: insets.bottom + 24 }}
+          >
+            <Text style={{ color: '#fff', textAlign: 'center' }}>取消掃描</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -645,7 +716,7 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
 // STYLES
 // ============================================================================
 
-const s = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.background },
 
   // Loading
@@ -676,12 +747,12 @@ const s = StyleSheet.create({
   liveActive: { backgroundColor: '#34C759' },
   headerSubtitle: { fontSize: 12, color: theme.colors.muted },
   endBtn: {
-    backgroundColor: theme.colors.danger,
+    backgroundColor: theme.colors.dangerSoft,
     paddingHorizontal: 14,
     paddingVertical: 7,
     borderRadius: 8,
   },
-  endBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 13 },
+  endBtnText: { color: theme.colors.danger, fontWeight: '700', fontSize: 13 },
 
   scrollContent: { flex: 1 },
 
@@ -715,13 +786,13 @@ const s = StyleSheet.create({
   qrBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: theme.colors.success,
+    backgroundColor: theme.colors.successSoft,
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 20,
     gap: 4,
   },
-  qrBadgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '600' },
+  qrBadgeText: { color: theme.colors.success, fontSize: 11, fontWeight: '600' },
 
   // Number Code
   codeSection: { alignItems: 'center', paddingVertical: 32 },
@@ -783,7 +854,7 @@ const s = StyleSheet.create({
   },
   filterTabActive: { backgroundColor: theme.colors.accent },
   filterTabText: { fontSize: 11, color: theme.colors.text, fontWeight: '600' },
-  filterTabTextActive: { color: '#FFFFFF' },
+  filterTabTextActive: { color: theme.colors.onAccent },
 
   // Record Item
   recordItem: {
@@ -896,7 +967,7 @@ const s = StyleSheet.create({
     minWidth: 200,
   },
   checkInBtnDisabled: { opacity: 0.4 },
-  checkInBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  checkInBtnText: { color: theme.colors.onAccent, fontSize: 16, fontWeight: '700' },
 
   // Student QR scan
   studentQRSection: { alignItems: 'center', paddingTop: 16, paddingHorizontal: 16 },

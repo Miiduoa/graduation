@@ -3,117 +3,78 @@
 import { useEffect, useState } from 'react';
 import { isFirebaseConfigured } from './firebase';
 
-export type SchoolCollectionSource = 'demo' | 'firebase';
-
+export type SchoolCollectionSource = 'firebase' | 'unavailable';
 type SubscribeLiveCollection<T> = (
   schoolId: string,
   onData: (data: T[]) => void,
   onError: (error: unknown) => void,
 ) => () => void;
 
+type CollectionState<T> = {
+  scope: string;
+  attempt: number;
+  data: T[];
+  loading: boolean;
+  error: unknown | null;
+};
+
 export function useSchoolCollectionData<T>(
   schoolId: string,
   loadLive: ((schoolId: string) => Promise<T[]>) | undefined,
-  demoData: readonly T[],
-  options?: {
-    subscribeLive?: SubscribeLiveCollection<T>;
-  },
+  options?: { subscribeLive?: SubscribeLiveCollection<T>; scopeKey?: string },
 ) {
-  const [data, setData] = useState<T[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [sourceMode, setSourceMode] = useState<SchoolCollectionSource>(
-    isFirebaseConfigured() ? 'firebase' : 'demo',
-  );
+  const scope = JSON.stringify([schoolId, options?.scopeKey ?? 'public']);
+  const [attempt, setAttempt] = useState(0);
+  const [state, setState] = useState<CollectionState<T> | null>(null);
   const subscribeLive = options?.subscribeLive;
+  const configured = isFirebaseConfigured();
 
   useEffect(() => {
     let active = true;
     let unsubscribe: (() => void) | undefined;
-
-    async function load() {
-      setLoading(true);
-
-      if (!isFirebaseConfigured()) {
-        if (active) {
-          setData([...demoData]);
-          setSourceMode('demo');
-          setLoading(false);
-        }
-        return;
+    const fail = (error: unknown) => {
+      if (active) setState({ scope, attempt, data: [], loading: false, error });
+    };
+    const receive = (data: T[]) => {
+      if (!Array.isArray(data)) {
+        fail(new Error('Invalid collection response'));
+      } else if (active) {
+        setState({ scope, attempt, data, loading: false, error: null });
       }
-
-      if (subscribeLive) {
-        try {
-          unsubscribe = subscribeLive(
-            schoolId,
-            (liveData) => {
-              if (!active) return;
-
-              setData(liveData);
-              setSourceMode('firebase');
-              setLoading(false);
-            },
-            (error) => {
-              console.error('[SchoolCollectionData] Failed to subscribe to live data:', error);
-              if (!active) return;
-
-              setData([...demoData]);
-              setSourceMode('demo');
-              setLoading(false);
-            },
-          );
-        } catch (error) {
-          console.error('[SchoolCollectionData] Failed to initialize live subscription:', error);
-          if (!active) return;
-
-          setData([...demoData]);
-          setSourceMode('demo');
-          setLoading(false);
-        }
-        return;
-      }
-
-      if (!loadLive) {
-        if (active) {
-          setData([...demoData]);
-          setSourceMode('demo');
-          setLoading(false);
-        }
-        return;
-      }
-
+    };
+    setState({ scope, attempt, data: [], loading: true, error: null });
+    if (!configured || !schoolId) {
+      fail(new Error('School data is not configured'));
+    } else if (subscribeLive) {
       try {
-        const liveData = await loadLive(schoolId);
-        if (!active) return;
-
-        setData(liveData);
-        setSourceMode('firebase');
+        unsubscribe = subscribeLive(schoolId, receive, fail);
       } catch (error) {
-        console.error('[SchoolCollectionData] Failed to load live data:', error);
-        if (!active) return;
-
-        setData([...demoData]);
-        setSourceMode('demo');
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
+        fail(error);
       }
+    } else if (loadLive) {
+      try {
+        void loadLive(schoolId).then(receive, fail);
+      } catch (error) {
+        fail(error);
+      }
+    } else {
+      fail(new Error('School data source is unavailable'));
     }
-
-    load();
-
     return () => {
       active = false;
       unsubscribe?.();
     };
-  }, [demoData, loadLive, schoolId, subscribeLive]);
+  }, [attempt, configured, loadLive, schoolId, scope, subscribeLive]);
 
+  const current = state?.scope === scope && state.attempt === attempt ? state : null;
   return {
-    data,
-    loading,
-    sourceMode,
-    usingDemo: sourceMode === 'demo',
-    firebaseEnabled: isFirebaseConfigured(),
+    data: current?.data ?? [],
+    loading: current?.loading ?? true,
+    error: current?.error ?? null,
+    sourceMode: (current && !current.loading && !current.error
+      ? 'firebase'
+      : 'unavailable') as SchoolCollectionSource,
+    firebaseEnabled: configured,
+    retry: () => setAttempt((value) => value + 1),
   };
 }

@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { theme } from '../ui/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { usePermissions } from '../hooks/usePermissions';
 import {
@@ -127,6 +128,7 @@ function BarChart({
 
 /** 分組卡片 */
 function Card({ children, style }: { children: React.ReactNode; style?: any }) {
+  const s = useThemeStyleSheet(createStyles);
   return <View style={[s.card, style]}>{children}</View>;
 }
 
@@ -140,6 +142,7 @@ interface Props {
 }
 
 export default function AttendanceAnalyticsScreen({ route, navigation }: Props) {
+  const s = useThemeStyleSheet(createStyles);
   const insets = useSafeAreaInsets();
   const { isTeacher: permIsTeacher } = usePermissions();
   const isTeacher = route?.params?.isTeacher ?? permIsTeacher;
@@ -190,7 +193,7 @@ export default function AttendanceAnalyticsScreen({ route, navigation }: Props) 
     <View style={[s.container, { paddingTop: insets.top }]}>
       {/* Header */}
       <LinearGradient
-        colors={['#6C5CE7', '#A29BFE']}
+        colors={theme.gradients.drawerHeader}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={s.header}
@@ -295,7 +298,7 @@ export default function AttendanceAnalyticsScreen({ route, navigation }: Props) 
                   <Text style={s.summaryLabel}>連續天數</Text>
                 </View>
                 <View style={s.summaryItem}>
-                  <Ionicons name={'trophy' as any} size={16} color="#5856D6" />
+                  <Ionicons name={'trophy' as any} size={16} color={theme.colors.achievement} />
                   <Text style={s.summaryNum}>{studentData.streak.best}</Text>
                   <Text style={s.summaryLabel}>最佳紀錄</Text>
                 </View>
@@ -389,7 +392,7 @@ export default function AttendanceAnalyticsScreen({ route, navigation }: Props) 
 // STYLES
 // ============================================================================
 
-const s = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.background },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingText: { fontSize: 16, color: theme.colors.muted, marginTop: 12 },
@@ -403,8 +406,8 @@ const s = StyleSheet.create({
     borderBottomRightRadius: 20,
   },
   headerContent: {},
-  headerTitle: { fontSize: 24, fontWeight: '700', color: '#FFFFFF' },
-  headerSubtitle: { fontSize: 13, color: 'rgba(255,255,255,0.8)', marginTop: 4 },
+  headerTitle: { fontSize: 24, fontWeight: '700', color: theme.colors.text },
+  headerSubtitle: { fontSize: 13, color: theme.colors.textSecondary, marginTop: 4 },
 
   scroll: { flex: 1 },
 

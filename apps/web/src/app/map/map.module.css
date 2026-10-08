@@ -1,0 +1,236 @@
+.page {
+  min-width: 0;
+}
+.state h2,
+.route h2,
+.detail h2,
+.listHeader h2 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.state p,
+.route p,
+.detail p {
+  color: var(--muted);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.route,
+.detail {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+.route > div,
+.detail > div {
+  min-width: 0;
+}
+.route > a {
+  flex-shrink: 0;
+}
+.route .eyebrow,
+.detail .eyebrow {
+  margin: 0 0 4px;
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 700;
+}
+.toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.search {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-weight: 600;
+}
+.categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.categories button,
+.favorite,
+.close {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+.categories .active,
+.favorite[aria-pressed='true'] {
+  background: var(--accent-soft);
+  border-color: var(--brand);
+  color: var(--brand);
+}
+.close {
+  flex-shrink: 0;
+  font-size: 22px;
+}
+.mapFrame {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--panel);
+}
+.map {
+  height: 380px;
+  width: 100%;
+  z-index: 1;
+  background: var(--panel);
+}
+.pin {
+  display: block;
+  width: 28px;
+  height: 28px;
+  background: var(--brand);
+  border: 3px solid var(--surface);
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  box-shadow: var(--shadow-md);
+}
+.map :global(.leaflet-control-zoom a),
+.map :global(.leaflet-control-attribution),
+.map :global(.leaflet-tooltip) {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+}
+.map :global(.leaflet-control-zoom a) {
+  width: 44px;
+  height: 44px;
+  line-height: 44px;
+}
+.map :global(.leaflet-control-attribution a) {
+  color: var(--brand);
+}
+.map :global(.leaflet-tooltip-top:before) {
+  border-top-color: var(--surface);
+}
+.mapNotice,
+.notice {
+  padding: 16px;
+  background: var(--warning-soft);
+  color: var(--warning);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.mapNotice {
+  border-radius: 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+.mapNotice p,
+.notice p {
+  margin: 0 0 10px;
+}
+.directory {
+  min-width: 0;
+}
+.listHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.listHeader h2 span,
+.listHeader a {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
+}
+.listHeader a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.list li {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.list li:last-child {
+  border-bottom: 0;
+}
+.list .selected {
+  background: var(--accent-soft);
+}
+.location {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 0;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.locationName {
+  font-weight: 600;
+}
+.description {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.note {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.favorite {
+  flex-shrink: 0;
+  font-size: 13px;
+}
+.favorite:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.empty {
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+@media (max-width: 600px) {
+  .route {
+    flex-direction: column;
+  }
+  .map {
+    height: 300px;
+  }
+  .list li {
+    gap: 10px;
+    padding: 14px;
+  }
+  .favorite {
+    padding: 8px 10px;
+  }
+}

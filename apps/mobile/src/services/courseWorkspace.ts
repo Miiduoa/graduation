@@ -88,7 +88,7 @@ export type AttendanceSession = {
   endedAt: Date | null;
   source: 'attendance' | 'live';
   attendanceMode?: string | null;
-  sourceSystem?: "workspace" | "tronclass";
+  sourceSystem?: 'workspace' | 'tronclass';
 };
 
 export type CourseGradebookAssignment = {
@@ -291,17 +291,19 @@ export async function buildCourseSummaries(db: Firestore, memberships: CourseMem
         getDocs(
           query(
             collection(db, 'groups', membership.groupId, 'attendanceSessions'),
+            where('schemaVersion', '==', 2),
             where('active', '==', true),
             limit(1),
           ),
-        ).catch(() => null),
+        ),
         getDocs(
           query(
             collection(db, 'groups', membership.groupId, 'liveSessions'),
+            where('schemaVersion', '==', 2),
             where('active', '==', true),
             limit(1),
           ),
-        ).catch(() => null),
+        ),
       ]);
 
       const assignments =
@@ -637,8 +639,11 @@ export async function listAttendanceSessions(
   const rows = await Promise.all(
     targetGroups.map(async (membership) => {
       const attendanceSnap = await getDocs(
-        collection(db, 'groups', membership.groupId, 'attendanceSessions'),
-      ).catch(() => null);
+        query(
+          collection(db, 'groups', membership.groupId, 'attendanceSessions'),
+          where('schemaVersion', '==', 2),
+        ),
+      );
       const sourceDocs =
         attendanceSnap && attendanceSnap.size > 0
           ? { source: 'attendance' as const, docs: attendanceSnap.docs }
@@ -646,8 +651,11 @@ export async function listAttendanceSessions(
               source: 'live' as const,
               docs:
                 (
-                  await getDocs(collection(db, 'groups', membership.groupId, 'liveSessions')).catch(
-                    () => null,
+                  await getDocs(
+                    query(
+                      collection(db, 'groups', membership.groupId, 'liveSessions'),
+                      where('schemaVersion', '==', 2),
+                    ),
                   )
                 )?.docs ?? [],
             };
@@ -676,6 +684,7 @@ export async function startAttendanceSession(
   functions: Functions,
   input: {
     groupId: string;
+    requestId?: string;
     classroomLat?: number;
     classroomLng?: number;
     qrExpiryMinutes?: number;
@@ -684,6 +693,7 @@ export async function startAttendanceSession(
   const startLiveSession = httpsCallable<
     {
       groupId: string;
+      requestId?: string;
       classroomLat?: number;
       classroomLng?: number;
       qrExpiryMinutes?: number;
@@ -693,6 +703,8 @@ export async function startAttendanceSession(
       sessionId: string;
       qrToken?: string;
       qrExpiresAt?: string;
+      active?: boolean;
+      reused?: boolean;
     }
   >(functions, 'startLiveSession');
 

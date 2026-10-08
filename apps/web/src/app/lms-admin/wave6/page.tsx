@@ -182,8 +182,8 @@ export default function Wave6Page() {
       <p style={{ color: '#3C3C43', lineHeight: 1.6 }}>
         LTI 1.3／Rubric／會議整合／直播課程／教師工作量；對應 migration 20260520140000–140200。
       </p>
-      {error ? <p style={{ color: '#FF3B30' }}>{error}</p> : null}
-      {info ? <p style={{ color: '#34C759' }}>{info}</p> : null}
+      {error ? <p style={{ color: 'var(--danger)' }}>{error}</p> : null}
+      {info ? <p style={{ color: 'var(--success)' }}>{info}</p> : null}
 
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -199,7 +199,7 @@ export default function Wave6Page() {
               key={t}
               type="button"
               onClick={() => setTab(t)}
-              style={{ ...tabBtn, background: tab === t ? '#5856D6' : '#fff', color: tab === t ? '#fff' : '#1C1C1E' }}>
+              style={{ ...tabBtn, background: tab === t ? 'var(--brand)' : '#fff', color: tab === t ? '#fff' : '#1C1C1E' }}>
               {labelOf(t)}
             </button>
           ))}
@@ -308,6 +308,6 @@ function labelOf(t: Tab): string {
 
 const selectStyle: React.CSSProperties = { padding: '10px 12px', borderRadius: 10, border: '1px solid #d1d5db', fontSize: 14, minWidth: 220 };
 const tabBtn: React.CSSProperties = { padding: '8px 14px', borderRadius: 8, border: '1px solid #d1d5db', fontWeight: 700, cursor: 'pointer' };
-const primaryBtn: React.CSSProperties = { padding: '10px 14px', borderRadius: 10, border: '1px solid #5856D6', background: '#5856D6', color: '#fff', fontWeight: 700, cursor: 'pointer' };
+const primaryBtn: React.CSSProperties = { padding: '10px 14px', borderRadius: 10, border: '1px solid var(--brand)', background: 'var(--brand)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const listItem: React.CSSProperties = { padding: 12, border: '1px solid #E5E5EA', borderRadius: 8, marginBottom: 8 };
 const cellStyle: React.CSSProperties = { padding: 8, border: '1px solid #E5E5EA', textAlign: 'left' };

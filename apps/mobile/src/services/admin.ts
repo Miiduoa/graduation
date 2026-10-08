@@ -1,3 +1,4 @@
+import type { RegistrationPolicyInput } from '../components/EventRegistrationPolicyFields';
 import { httpsCallable } from 'firebase/functions';
 
 import { getFunctionsInstance } from '../firebase';
@@ -46,6 +47,7 @@ export async function bulkUpdateSchoolAnnouncements(input: {
 }
 
 export async function upsertSchoolEvent(input: {
+  registrationPolicy?: RegistrationPolicyInput;
   schoolId: string;
   eventId?: string | null;
   title: string;

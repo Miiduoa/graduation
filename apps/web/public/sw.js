@@ -1,192 +1,64 @@
-/**
- * Service Worker for Campus App PWA
- * 提供離線支援、快取策略、推播通知
- */
-
-const CACHE_VERSION = 'v1.0.0';
-const STATIC_CACHE = `campus-static-${CACHE_VERSION}`;
-const DYNAMIC_CACHE = `campus-dynamic-${CACHE_VERSION}`;
-const API_CACHE = `campus-api-${CACHE_VERSION}`;
-
-// Static assets to cache immediately
-const STATIC_ASSETS = [
-  '/',
-  '/announcements',
-  '/cafeteria',
-  '/map',
-  '/timetable',
-  '/grades',
-  '/library',
-  '/bus',
-  '/groups',
-  '/login',
+const STATIC_CACHE = 'campus-static-v2';
+const PUBLIC_ASSETS = [
   '/offline.html',
   '/manifest.json',
+  '/icons/icon-192x192.png',
+  '/icons/icon-512x512.png',
 ];
 
-// Install event - cache static assets
 self.addEventListener('install', (event) => {
-  console.log('[SW] Installing service worker...');
-
   event.waitUntil(
     caches
       .open(STATIC_CACHE)
-      .then((cache) => {
-        console.log('[SW] Caching static assets');
-        return cache.addAll(STATIC_ASSETS);
-      })
+      .then((cache) => cache.addAll(PUBLIC_ASSETS))
       .then(() => self.skipWaiting()),
   );
 });
 
-// Activate event - clean up old caches
 self.addEventListener('activate', (event) => {
-  console.log('[SW] Activating service worker...');
-
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => {
-        return Promise.all(
+      .then((keys) =>
+        Promise.all(
           keys
-            .filter(
-              (key) =>
-                key.startsWith('campus-') &&
-                key !== STATIC_CACHE &&
-                key !== DYNAMIC_CACHE &&
-                key !== API_CACHE,
-            )
-            .map((key) => {
-              console.log('[SW] Deleting old cache:', key);
-              return caches.delete(key);
-            }),
-        );
-      })
+            .filter((key) => key.startsWith('campus-') && key !== STATIC_CACHE)
+            .map((key) => caches.delete(key)),
+        ),
+      )
       .then(() => self.clients.claim()),
   );
 });
 
-// Fetch event - implement caching strategies
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
-
-  // Skip non-GET requests
-  if (request.method !== 'GET') return;
-
-  // Skip cross-origin requests
-  if (url.origin !== location.origin) return;
-
-  // API requests - Network first, fallback to cache
-  if (url.pathname.startsWith('/api/')) {
-    event.respondWith(networkFirst(request, API_CACHE));
-    return;
+  if (request.method !== 'GET' || url.origin !== self.location.origin) return;
+  // Only public assets enter persistent storage. Account pages and API data stay on the network.
+  if (PUBLIC_ASSETS.includes(url.pathname) && !url.search) {
+    event.respondWith(
+      caches
+        .open(STATIC_CACHE)
+        .then(async (cache) => (await cache.match(request)) || fetch(request)),
+    );
+  } else if (request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request).catch(async () => {
+        const cache = await caches.open(STATIC_CACHE);
+        return (
+          (await cache.match('/offline.html')) ||
+          new Response('目前沒有網路連線。', {
+            status: 503,
+            headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+          })
+        );
+      }),
+    );
   }
-
-  // Static assets - Cache first, fallback to network
-  if (isStaticAsset(url.pathname)) {
-    event.respondWith(cacheFirst(request, STATIC_CACHE));
-    return;
-  }
-
-  // Pages - Stale while revalidate
-  event.respondWith(staleWhileRevalidate(request, DYNAMIC_CACHE));
 });
 
-// Cache first strategy
-async function cacheFirst(request, cacheName) {
-  const cache = await caches.open(cacheName);
-  const cached = await cache.match(request);
-
-  if (cached) {
-    return cached;
-  }
-
-  try {
-    const response = await fetch(request);
-    if (response.ok) {
-      cache.put(request, response.clone());
-    }
-    return response;
-  } catch {
-    return getOfflinePage();
-  }
-}
-
-// Network first strategy
-async function networkFirst(request, cacheName) {
-  const cache = await caches.open(cacheName);
-
-  try {
-    const response = await fetch(request);
-    if (response.ok) {
-      cache.put(request, response.clone());
-    }
-    return response;
-  } catch {
-    const cached = await cache.match(request);
-    if (cached) {
-      return cached;
-    }
-    return new Response(JSON.stringify({ error: 'Offline' }), {
-      status: 503,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-}
-
-// Stale while revalidate strategy
-async function staleWhileRevalidate(request, cacheName) {
-  const cache = await caches.open(cacheName);
-  const cached = await cache.match(request);
-
-  const networkPromise = fetch(request)
-    .then((response) => {
-      if (response.ok) {
-        cache.put(request, response.clone());
-      }
-      return response;
-    })
-    .catch(() => null);
-
-  return cached || networkPromise || getOfflinePage();
-}
-
-// Check if path is a static asset
-function isStaticAsset(pathname) {
-  const staticExtensions = [
-    '.js',
-    '.css',
-    '.png',
-    '.jpg',
-    '.jpeg',
-    '.gif',
-    '.svg',
-    '.ico',
-    '.woff',
-    '.woff2',
-  ];
-  return staticExtensions.some((ext) => pathname.endsWith(ext));
-}
-
-// Get offline page
-async function getOfflinePage() {
-  const cache = await caches.open(STATIC_CACHE);
-  return cache.match('/offline.html') || new Response('Offline', { status: 503 });
-}
-
-// Push notification event
 self.addEventListener('push', (event) => {
-  console.log('[SW] Push notification received');
-
-  let data = {
-    title: '校園助手',
-    body: '您有新的通知',
-    icon: '/icons/icon-192x192.png',
-    badge: '/icons/badge-72x72.png',
-    tag: 'campus-notification',
-  };
-
+  let data = { title: 'Campus One', body: '你有新的通知' };
   if (event.data) {
     try {
       data = { ...data, ...event.data.json() };
@@ -194,93 +66,51 @@ self.addEventListener('push', (event) => {
       data.body = event.data.text();
     }
   }
-
   event.waitUntil(
     self.registration.showNotification(data.title, {
       body: data.body,
-      icon: data.icon,
-      badge: data.badge,
-      tag: data.tag,
+      icon: '/icons/icon-192x192.png',
+      tag: data.tag || 'campus-notification',
       data: data.data,
-      actions: data.actions || [],
-      vibrate: [100, 50, 100],
-      requireInteraction: data.requireInteraction || false,
     }),
   );
 });
 
-// Notification click event
 self.addEventListener('notificationclick', (event) => {
-  console.log('[SW] Notification clicked');
-
   event.notification.close();
-
-  const data = event.notification.data;
-  let url = '/';
-
-  if (data) {
-    switch (data.type) {
-      case 'announcement':
-        url = `/announcements/${data.id}`;
-        break;
-      case 'event':
-        url = `/clubs?eventId=${data.id}`;
-        break;
-      case 'grade':
-        url = '/grades';
-        break;
-      case 'message':
-        url = `/groups?messageId=${data.id}`;
-        break;
-      default:
-        url = data.url || '/';
-    }
+  const data = event.notification.data || {};
+  let path = '/';
+  switch (data.type) {
+    case 'announcement':
+      path = `/announcements/${encodeURIComponent(data.id)}`;
+      break;
+    case 'event':
+      path = `/clubs?eventId=${encodeURIComponent(data.id)}`;
+      break;
+    case 'grade':
+      path = '/grades';
+      break;
+    case 'message':
+      path = `/groups?messageId=${encodeURIComponent(data.id)}`;
+      break;
+    default:
+      path = data.url || '/';
   }
-
+  let destination = new URL('/', self.location.origin);
+  try {
+    const candidate = new URL(path, self.location.origin);
+    if (candidate.origin === self.location.origin) destination = candidate;
+  } catch {
+    /* Open the home page when the notification has an invalid destination. */
+  }
   event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
-      // Check if there's already an open window
-      for (const client of windowClients) {
-        if (client.url === url && 'focus' in client) {
-          return client.focus();
-        }
-      }
-      // Open a new window
-      if (clients.openWindow) {
-        return clients.openWindow(url);
-      }
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
+      const existing = windows.find((client) => client.url === destination.href);
+      return existing ? existing.focus() : self.clients.openWindow(destination.href);
     }),
   );
 });
 
-// Background sync event
-self.addEventListener('sync', (event) => {
-  console.log('[SW] Background sync:', event.tag);
-
-  if (event.tag === 'sync-offline-data') {
-    event.waitUntil(syncOfflineData());
-  }
-});
-
-// Sync offline data
-async function syncOfflineData() {
-  // Implementation would sync any offline-queued data
-  console.log('[SW] Syncing offline data...');
-}
-
-// Message event - for communication with main thread
 self.addEventListener('message', (event) => {
-  console.log('[SW] Message received:', event.data);
-
-  if (event.data.type === 'SKIP_WAITING') {
-    self.skipWaiting();
-  }
-
-  if (event.data.type === 'CACHE_URLS') {
-    event.waitUntil(
-      caches.open(DYNAMIC_CACHE).then((cache) => {
-        return cache.addAll(event.data.urls);
-      }),
-    );
-  }
+  if (event.data?.type === 'SKIP_WAITING') event.waitUntil(self.skipWaiting());
 });

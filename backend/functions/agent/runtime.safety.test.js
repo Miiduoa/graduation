@@ -32,11 +32,7 @@ jest.mock('../lib/assistantFetchers', () => ({
 }));
 
 jest.mock('../lib/assistantFormat', () => ({
-  getLastUserMessage: jest.fn((messages) => {
-    if (!Array.isArray(messages)) return '';
-    const last = [...messages].reverse().find((message) => message?.role === 'user');
-    return typeof last?.content === 'string' ? last.content : '';
-  }),
+  ...jest.requireActual('../lib/assistantFormat'),
   isDormRepairStatusQueryMessage: jest.fn(() => false),
 }));
 

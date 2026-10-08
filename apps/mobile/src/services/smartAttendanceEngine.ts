@@ -11,6 +11,8 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { campusEventBus } from './campusEventBus';
+import { emitAttendanceCheckedIn } from './roleEventBus';
+import { getReleaseConfig } from './release';
 import {
   tcFetchCourses,
   tcFetchAttendance,
@@ -185,6 +187,12 @@ const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 const FIRESTORE_COLLECTION = 'attendanceSessions';
 const FIRESTORE_LEAVES_COLLECTION = 'attendanceLeaves';
 
+function requireLocalAttendanceEnvironment(): void {
+  if (getReleaseConfig().appEnv === 'production') {
+    throw new Error('此點名方式尚未開放。請使用課程內的課堂點名，或聯絡授課教師確認紀錄。');
+  }
+}
+
 /** 將本地 session 寫入 Firestore（教師建立/更新時呼叫） */
 async function syncSessionToFirestore(session: AttendanceSession): Promise<void> {
   if (isFirebaseMockMode()) return;
@@ -230,17 +238,31 @@ export function subscribeToSession(
   sessionId: string,
   callback: (session: AttendanceSession | null) => void,
 ): Unsubscribe {
-  if (isFirebaseMockMode()) {
-    // fallback：每 3 秒輪詢本地
-    const interval = setInterval(async () => {
-      const s = await getSessionById(sessionId);
-      callback(s);
+  let disposed = false;
+  let reading = false;
+  let interval: ReturnType<typeof setInterval> | undefined;
+  const startLocalPolling = () => {
+    if (disposed || interval) return;
+    interval = setInterval(async () => {
+      if (reading) return;
+      reading = true;
+      try {
+        const session = await getSessionById(sessionId);
+        if (!disposed) callback(session);
+      } catch (error) {
+        console.warn('[Attendance] Local session refresh failed:', error);
+      } finally {
+        reading = false;
+      }
     }, 3000);
-    return () => clearInterval(interval);
-  }
+  };
+  let unsubscribe: Unsubscribe | undefined;
+  if (isFirebaseMockMode()) startLocalPolling();
+  else {
   const db = getDb();
   const ref = doc(collection(db, FIRESTORE_COLLECTION), sessionId);
-  return onSnapshot(ref, (snap) => {
+  unsubscribe = onSnapshot(ref, (snap) => {
+    if (disposed) return;
     if (snap.exists()) {
       callback({ ...(snap.data() as AttendanceSession), id: snap.id });
     } else {
@@ -248,7 +270,14 @@ export function subscribeToSession(
     }
   }, (err) => {
     console.warn('[Attendance] onSnapshot error:', err);
+    startLocalPolling();
   });
+  }
+  return () => {
+    disposed = true;
+    if (interval) clearInterval(interval);
+    unsubscribe?.();
+  };
 }
 
 /** 即時監聽學生可見的進行中場次 */
@@ -522,6 +551,7 @@ export async function createSession(config: {
   location?: string;
   lateThresholdMinutes?: number;
 }): Promise<AttendanceSession> {
+  requireLocalAttendanceEnvironment();
   const now = Date.now();
   const id = `sess_${now}`;
   const students = await getCourseStudents(config.tcCourseId);
@@ -581,6 +611,7 @@ export async function createSession(config: {
 
 /** 取得所有場次 */
 export async function getAllSessions(courseId?: string): Promise<AttendanceSession[]> {
+  if (getReleaseConfig().appEnv === 'production') return [];
   const data = await AsyncStorage.getItem(STORAGE.SESSIONS);
   let sessions: AttendanceSession[] = data ? JSON.parse(data) : [];
   if (courseId) sessions = sessions.filter((s) => s.courseId === courseId);
@@ -652,6 +683,7 @@ export async function getActiveSessionsForStudent(
 
 /** 結束點名場次 */
 export async function endSession(sessionId: string): Promise<void> {
+  requireLocalAttendanceEnvironment();
   const sessions = await getAllSessions();
   const session = sessions.find((s) => s.id === sessionId);
   if (!session) return;
@@ -699,13 +731,25 @@ export async function checkIn(
   sessionId: string,
   studentId: string,
   studentName: string,
+  proof: { method: 'number_code' | 'rotating_qr'; code: string },
 ): Promise<{ success: boolean; status: AttendanceStatus; message: string }> {
+  requireLocalAttendanceEnvironment();
   const sessions = await getAllSessions();
   const session = sessions.find((s) => s.id === sessionId);
 
   if (!session) return { success: false, status: 'absent', message: '點名場次不存在' };
   if (session.status !== 'active')
     return { success: false, status: 'absent', message: '點名已結束' };
+  if (!studentId || studentId === session.teacherId)
+    return { success: false, status: 'absent', message: '請以學生帳號簽到' };
+  if (session.mode === 'manual')
+    return { success: false, status: 'absent', message: '此場次由教師手動點名' };
+  const validProof = proof?.method === 'number_code'
+    ? /^\d{6}$/.test(proof.code) && proof.code === session.numberCode
+    : proof?.method === 'rotating_qr' && session.mode === 'rotating_qr'
+      && validateRotatingQR(session.id, session.qrSecret, proof.code);
+  if (!validProof)
+    return { success: false, status: 'absent', message: '簽到碼錯誤或已過期，請重新輸入或掃描' };
 
   const elapsed = (Date.now() - session.startTime) / 60000;
   const isLate = elapsed > session.lateThresholdMinutes;
@@ -751,6 +795,18 @@ export async function checkIn(
     status,
   });
 
+  // 持久化成功後才通知建立場次的教師，保留原始課程 ID。
+  if (session.teacherId) {
+    await emitAttendanceCheckedIn({
+      actorUid: studentId,
+      actorName: studentName,
+      targetUids: [session.teacherId],
+      courseId: session.courseId,
+      courseName: session.courseName,
+      payload: { sessionId, method: proof.method, status, studentName },
+    }).catch((error) => console.warn('[Attendance] Teacher notification failed:', error));
+  }
+
   return {
     success: true,
     status,
@@ -768,6 +824,7 @@ export async function updateStudentStatus(
   newStatus: AttendanceStatus,
   note?: string,
 ): Promise<void> {
+  requireLocalAttendanceEnvironment();
   const sessions = await getAllSessions();
   const session = sessions.find((s) => s.id === sessionId);
   if (!session) return;
@@ -804,6 +861,7 @@ export async function submitLeaveRequest(req: {
   reason: string;
   category: LeaveCategory;
 }): Promise<LeaveRequest> {
+  requireLocalAttendanceEnvironment();
   const requests = await getLeaveRequests();
   const newReq: LeaveRequest = {
     ...req,
@@ -825,6 +883,7 @@ export async function reviewLeaveRequest(
   approved: boolean,
   note?: string,
 ): Promise<void> {
+  requireLocalAttendanceEnvironment();
   const requests = await getLeaveRequests();
   const req = requests.find((r) => r.id === requestId);
   if (req) {

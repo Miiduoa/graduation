@@ -23,16 +23,15 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SmartDashboardScreen } from './SmartDashboardScreen';
-// AI-First v1 新版 Today（學生角色用）；其他角色靠 RoleAwareTodayScreen dispatch
-import TodayAiFirstScreen from './TodayAiFirstScreen';
+import StudentTodayScreen from './StudentTodayScreen';
 import RoleAwareTodayScreen from './RoleAwareTodayScreen';
-// AI-First v1：公告 / 活動主入口；舊 AnnouncementsScreen / AnnouncementDetailScreen /
+// 公告與活動入口；舊 AnnouncementsScreen / AnnouncementDetailScreen /
 // EventsScreen / EventDetailScreen 已下架
 import AnnouncementDetailAiFirstScreen from './AnnouncementDetailAiFirstScreen';
 import AnnouncementsListAiFirstScreen from './AnnouncementsListAiFirstScreen';
 import EventDetailAiFirstScreen from './EventDetailAiFirstScreen';
 import EventsListAiFirstScreen from './EventsListAiFirstScreen';
-import { AIChatScreen } from './AIChatScreen';
+import { CampusAssistantScreen } from './CampusAssistantScreen';
 import { CommunityScreen } from './CommunityScreen';
 import { BoardDetailScreen } from './social/BoardDetailScreen';
 import { PostComposeScreen } from './social/PostComposeScreen';
@@ -40,7 +39,7 @@ import { PostDetailScreen } from './social/PostDetailScreen';
 import { StoryComposeScreen } from './social/StoryComposeScreen';
 import { UnifiedCalendarScreen } from './UnifiedCalendarScreen';
 import { CampusGameScreen } from './CampusGameScreen';
-import AIAgentConsoleScreen from './AIAgentConsoleScreen';
+
 import { useThemeMode } from '../state/theme';
 import { createStackScreenOptions } from '../ui/navigationTheme';
 import type { CampusActorRole } from '../data';
@@ -75,42 +74,63 @@ export function HomeStack() {
       initialRouteName="TodayHome"
       screenOptions={createStackScreenOptions()}
     >
-      {/* Today 主入口：用 RoleAwareTodayScreen 依角色 dispatch（student→TodayAiFirstScreen,
-          teacher→TeacherCockpit, ta→TADashboard, ...）。同時在右上角浮出 DemoRolePill。 */}
       <Stack.Screen
         name="TodayHome"
         component={RoleAwareTodayScreen}
         options={{ title: 'Today', headerShown: false }}
       />
-      {/* 直接進舊 student-only AI-First Today（debug 用） */}
       <Stack.Screen
-        name="TodayAiFirstDirect"
-        component={TodayAiFirstScreen}
-        options={{ title: 'Today (學生原型)', headerShown: false }}
+        name="StudentToday"
+        component={StudentTodayScreen}
+        options={{ title: '今日課程', headerShown: false }}
       />
       <Stack.Screen
         name="SmartDashboard"
         component={SmartDashboardScreen}
-        options={{ title: '智慧儀表板（學生）', headerShown: false }}
+        options={{ title: '學習總覽', headerShown: false }}
       />
-      <Stack.Screen name="公告總覽" component={AnnouncementsListAiFirstScreen} options={{ title: '公告', headerShown: false }} />
+      <Stack.Screen
+        name="公告總覽"
+        component={AnnouncementsListAiFirstScreen}
+        options={{ title: '公告', headerShown: false }}
+      />
       <Stack.Screen
         name="公告詳情"
         component={AnnouncementDetailAiFirstScreen}
         options={{ title: '公告詳情', headerShown: false }}
       />
-      <Stack.Screen name="活動總覽" component={EventsListAiFirstScreen} options={{ title: '活動', headerShown: false }} />
-      <Stack.Screen name="AIChat" component={AIChatScreen} options={{ title: '校園 AI', headerShown: false }} />
-      <Stack.Screen name="活動詳情" component={EventDetailAiFirstScreen} options={{ title: '活動詳情', headerShown: false }} />
+      <Stack.Screen
+        name="活動總覽"
+        component={EventsListAiFirstScreen}
+        options={{ title: '活動', headerShown: false }}
+      />
+      <Stack.Screen
+        name="AIChat"
+        component={CampusAssistantScreen}
+        options={{ title: '校園助理', headerShown: false }}
+      />
+      <Stack.Screen
+        name="活動詳情"
+        component={EventDetailAiFirstScreen}
+        options={{ title: '活動詳情', headerShown: false }}
+      />
       <Stack.Screen
         name="CampusSocialScreen"
         component={CommunityScreen}
         options={{ title: '校園社群', headerShown: false }}
       />
-      <Stack.Screen name="CampusGame" component={CampusGameScreen} options={{ title: '校園漫步' }} />
+      <Stack.Screen
+        name="CampusGame"
+        component={CampusGameScreen}
+        options={{ title: '校園漫步' }}
+      />
       <Stack.Screen name="BoardDetail" component={BoardDetailScreen} options={{ title: '看板' }} />
       <Stack.Screen name="PostCompose" component={PostComposeScreen} options={{ title: '發文' }} />
-      <Stack.Screen name="StoryCompose" component={StoryComposeScreen} options={{ title: '發 Story' }} />
+      <Stack.Screen
+        name="StoryCompose"
+        component={StoryComposeScreen}
+        options={{ title: '發 Story' }}
+      />
       <Stack.Screen name="PostDetail" component={PostDetailScreen} options={{ title: '貼文' }} />
       <Stack.Screen
         name="SmartCalendarScreen"
@@ -119,8 +139,8 @@ export function HomeStack() {
       />
       <Stack.Screen
         name="AIAgentConsole"
-        component={AIAgentConsoleScreen}
-        options={{ title: '🤖 AI Agent 駕駛室' }}
+        component={CampusAssistantScreen}
+        options={{ title: '校園助理', headerShown: false }}
       />
     </Stack.Navigator>
   );

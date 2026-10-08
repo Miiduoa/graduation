@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { CommunityAccess } from '../../_components/CommunityAccess';
 import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
@@ -34,8 +35,10 @@ import {
 
 export default function PostDetailPage() {
   return (
-    <SiteShell title="貼文" subtitle="校園社群">
-      <PostDetailInner />
+    <SiteShell title="貼文" subtitle="校園交流">
+      <CommunityAccess>
+        <PostDetailInner />
+      </CommunityAccess>
     </SiteShell>
   );
 }
@@ -52,6 +55,7 @@ function PostDetailInner() {
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [replyText, setReplyText] = useState('');
   const [replyAnonymous, setReplyAnonymous] = useState(true);
   const [replyParentId, setReplyParentId] = useState<string | null>(null);
@@ -97,13 +101,21 @@ function PostDetailInner() {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      await Promise.all([loadPost(), loadReplies()]);
-      setLoading(false);
+      try {
+        await Promise.all([loadPost(), loadReplies()]);
+      } catch {
+        setLoadError('無法讀取貼文，請確認連線與學校資格後重試。');
+      } finally {
+        setLoading(false);
+      }
     })();
   }, [loadPost, loadReplies]);
 
   useEffect(() => {
-    void hydrateProfiles();
+    void hydrateProfiles().catch(() => {
+      setNameByUid({});
+      setAvatarByUid({});
+    });
   }, [hydrateProfiles]);
 
   const threaded = useMemo(() => flattenCampusRepliesThread(replies), [replies]);
@@ -137,8 +149,8 @@ function PostDetailInner() {
       setReplyText('');
       setReplyParentId(null);
       await Promise.all([loadReplies(), loadPost()]);
-    } catch (e: any) {
-      alert(`送出失敗：${e?.message ?? String(e)}`);
+    } catch {
+      alert('這次未能送出，請稍後再試。');
     } finally {
       setSendingReply(false);
     }
@@ -150,8 +162,8 @@ function PostDetailInner() {
     try {
       await toggleCampusPostLike(schoolId, postId, user.uid);
       await loadPost();
-    } catch (e: any) {
-      alert(`按讚失敗：${e?.message ?? String(e)}`);
+    } catch {
+      alert('這次未能按讚，請稍後再試。');
     } finally {
       setLikeBusy(false);
     }
@@ -165,8 +177,8 @@ function PostDetailInner() {
         await deleteCampusPost(schoolId, postId);
         alert('已刪除');
         router.push('/community');
-      } catch (e: any) {
-        alert(`刪除失敗：${e?.message ?? String(e)}`);
+      } catch {
+        alert('這次未能刪除，請稍後再試。');
       }
     })();
   };
@@ -185,8 +197,8 @@ function PostDetailInner() {
           reason,
         });
         alert('已送出檢舉');
-      } catch (e: any) {
-        alert(`檢舉失敗：${e?.message ?? String(e)}`);
+      } catch {
+        alert('這次未能檢舉，請稍後再試。');
       }
     })();
   };
@@ -198,8 +210,8 @@ function PostDetailInner() {
       try {
         await softDeleteCampusReply(schoolId, postId, r.id);
         await Promise.all([loadReplies(), loadPost()]);
-      } catch (e: any) {
-        alert(`刪除失敗：${e?.message ?? String(e)}`);
+      } catch {
+        alert('這次未能刪除，請稍後再試。');
       }
     })();
   };
@@ -223,30 +235,59 @@ function PostDetailInner() {
     }
   };
 
+  if (loadError)
+    return (
+      <div role="alert" className="card" style={{ padding: 24 }}>
+        <p>{loadError}</p>
+        <button
+          className="btn"
+          onClick={() => {
+            setLoadError('');
+            setLoading(true);
+            void Promise.all([loadPost(), loadReplies()])
+              .catch(() => setLoadError('無法讀取貼文，請稍後重試。'))
+              .finally(() => setLoading(false));
+          }}
+        >
+          重試
+        </button>
+      </div>
+    );
+
   if (loading) {
-    return <div className="card" style={{ padding: 24 }}>載入中…</div>;
+    return (
+      <div className="card" style={{ padding: 24 }}>
+        載入中…
+      </div>
+    );
   }
   if (!post) {
     return (
       <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>
         找不到貼文，可能已被刪除。
         <div style={{ marginTop: 10 }}>
-          <Link href="/community" className="btn">返回動態</Link>
+          <Link href="/community" className="btn">
+            返回動態
+          </Link>
         </div>
       </div>
     );
   }
 
   const likes =
-    typeof post.likes === 'number' ? post.likes : Array.isArray(post.likedBy) ? post.likedBy.length : 0;
+    typeof post.likes === 'number'
+      ? post.likes
+      : Array.isArray(post.likedBy)
+        ? post.likedBy.length
+        : 0;
   const cc = typeof post.commentCount === 'number' ? post.commentCount : replies.length;
   const liked = !!(user && Array.isArray(post.likedBy) && post.likedBy.includes(user.uid));
   const media = Array.isArray(post.mediaUrls) ? post.mediaUrls : [];
   const av = !post.anonymous && post.authorUid ? avatarByUid[post.authorUid] : undefined;
   const authorName = post.anonymous
-    ? post.aliasSnapshot ?? '匿名貼文'
+    ? (post.aliasSnapshot ?? '匿名貼文')
     : post.authorUid
-      ? nameByUid[post.authorUid] ?? '載入中…'
+      ? (nameByUid[post.authorUid] ?? '載入中…')
       : '成員';
 
   return (
@@ -258,8 +299,8 @@ function PostDetailInner() {
               width: 36,
               height: 36,
               borderRadius: '50%',
-              background: post.anonymous ? 'var(--panel2, #F2F2F7)' : 'var(--brand, #5856D6)',
-              color: '#fff',
+              background: post.anonymous ? 'var(--panel2)' : 'var(--brand)',
+              color: post.anonymous ? 'var(--text)' : 'var(--on-brand)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -267,33 +308,37 @@ function PostDetailInner() {
               overflow: 'hidden',
             }}
           >
-            {post.anonymous ? '🎭' : av ? (
+            {post.anonymous ? (
+              '🎭'
+            ) : av ? (
               <img src={av} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             ) : (
               authorName.slice(0, 1)
             )}
           </div>
-          <div style={{ flex: 1, fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{authorName}</div>
+          <div style={{ flex: 1, fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+            {authorName}
+          </div>
           <div style={{ display: 'flex', gap: 6 }}>
             {isMine ? (
               <>
-                <button
-                  type="button"
-                  onClick={() => setEditOpen(true)}
-                  style={btnGhost}
-                >
+                <button type="button" onClick={() => setEditOpen(true)} style={btnGhost}>
                   ✏️ 編輯
                 </button>
                 <button
                   type="button"
                   onClick={onDeletePost}
-                  style={{ ...btnGhost, color: 'var(--danger, #FF3B30)' }}
+                  style={{ ...btnGhost, color: 'var(--danger, var(--danger))' }}
                 >
                   🗑 刪除
                 </button>
               </>
             ) : (
-              <button type="button" onClick={onReport} style={{ ...btnGhost, color: 'var(--danger, #FF3B30)' }}>
+              <button
+                type="button"
+                onClick={onReport}
+                style={{ ...btnGhost, color: 'var(--danger, var(--danger))' }}
+              >
                 檢舉
               </button>
             )}
@@ -302,7 +347,15 @@ function PostDetailInner() {
 
         <h1 style={{ margin: '12px 0 4px', fontSize: 22, fontWeight: 700 }}>{post.title}</h1>
         {post.content && (
-          <p style={{ margin: '8px 0 0', fontSize: 16, lineHeight: 1.6, color: 'var(--text)', whiteSpace: 'pre-wrap' }}>
+          <p
+            style={{
+              margin: '8px 0 0',
+              fontSize: 16,
+              lineHeight: 1.6,
+              color: 'var(--text)',
+              whiteSpace: 'pre-wrap',
+            }}
+          >
             {post.content}
           </p>
         )}
@@ -343,8 +396,8 @@ function PostDetailInner() {
                 key={t}
                 style={{
                   fontSize: 12,
-                  color: 'var(--brand, #5856D6)',
-                  background: 'rgba(88,86,214,0.12)',
+                  color: 'var(--brand)',
+                  background: 'var(--accent-soft)',
                   padding: '3px 10px',
                   borderRadius: 999,
                   fontWeight: 700,
@@ -356,12 +409,28 @@ function PostDetailInner() {
           </div>
         )}
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 14,
+            marginTop: 16,
+            paddingTop: 12,
+            borderTop: '1px solid var(--border)',
+          }}
+        >
           <button type="button" onClick={onToggleLike} disabled={likeBusy} style={statChip}>
-            <span style={{ color: liked ? 'var(--danger, #FF3B30)' : 'var(--muted)' }}>
+            <span style={{ color: liked ? 'var(--danger, var(--danger))' : 'var(--muted)' }}>
               {liked ? '❤️' : '🤍'}
             </span>
-            <span style={{ fontWeight: 700, color: liked ? 'var(--danger, #FF3B30)' : 'var(--muted)' }}>{likes}</span>
+            <span
+              style={{
+                fontWeight: 700,
+                color: liked ? 'var(--danger, var(--danger))' : 'var(--muted)',
+              }}
+            >
+              {likes}
+            </span>
           </button>
           <div style={statChip}>
             <span>💬</span>
@@ -377,7 +446,9 @@ function PostDetailInner() {
 
       {/* Replies */}
       <div style={{ marginTop: 18 }}>
-        <h2 style={{ margin: '0 0 10px', fontSize: 15, fontWeight: 700 }}>討論串 · {threaded.length}</h2>
+        <h2 style={{ margin: '0 0 10px', fontSize: 15, fontWeight: 700 }}>
+          討論串 · {threaded.length}
+        </h2>
         {threaded.length === 0 ? (
           <div style={{ color: 'var(--muted)', fontSize: 13 }}>尚無留言，當第一人吧。</div>
         ) : (
@@ -386,9 +457,9 @@ function PostDetailInner() {
               const isMyReply = !r.anonymous && r.authorUid === user?.uid;
               const deleted = r.deleted === true;
               const who = r.anonymous
-                ? r.aliasSnapshot ?? '匿名'
+                ? (r.aliasSnapshot ?? '匿名')
                 : r.authorUid
-                  ? nameByUid[r.authorUid] ?? r.authorUid.slice(0, 8)
+                  ? (nameByUid[r.authorUid] ?? r.authorUid.slice(0, 8))
                   : '成員';
               return (
                 <div
@@ -401,17 +472,23 @@ function PostDetailInner() {
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div style={{ flex: 1, fontSize: 12, color: 'var(--muted)', fontWeight: 700 }}>{who}</div>
+                    <div style={{ flex: 1, fontSize: 12, color: 'var(--muted)', fontWeight: 700 }}>
+                      {who}
+                    </div>
                     {!deleted && (
                       <>
-                        <button type="button" onClick={() => setReplyParentId(r.id)} style={btnGhost}>
+                        <button
+                          type="button"
+                          onClick={() => setReplyParentId(r.id)}
+                          style={btnGhost}
+                        >
                           回覆
                         </button>
                         {isMyReply && (
                           <button
                             type="button"
                             onClick={() => onDeleteReply(r)}
-                            style={{ ...btnGhost, color: 'var(--danger, #FF3B30)' }}
+                            style={{ ...btnGhost, color: 'var(--danger, var(--danger))' }}
                           >
                             刪除
                           </button>
@@ -419,7 +496,15 @@ function PostDetailInner() {
                       </>
                     )}
                   </div>
-                  <div style={{ fontSize: 14, color: 'var(--text)', marginTop: 6, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+                  <div
+                    style={{
+                      fontSize: 14,
+                      color: 'var(--text)',
+                      marginTop: 6,
+                      lineHeight: 1.5,
+                      whiteSpace: 'pre-wrap',
+                    }}
+                  >
                     {r.content}
                   </div>
                 </div>
@@ -439,8 +524,21 @@ function PostDetailInner() {
               </button>
             </div>
           )}
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, marginBottom: 8, cursor: 'pointer' }}>
-            <input type="checkbox" checked={replyAnonymous} onChange={(e) => setReplyAnonymous(e.target.checked)} />
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 13,
+              marginBottom: 8,
+              cursor: 'pointer',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={replyAnonymous}
+              onChange={(e) => setReplyAnonymous(e.target.checked)}
+            />
             匿名留言
           </label>
           <textarea
@@ -449,7 +547,12 @@ function PostDetailInner() {
             onChange={(e) => setReplyText(e.target.value)}
             rows={3}
             placeholder="輸入留言⋯"
-            style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit' }}
+            style={{
+              width: '100%',
+              boxSizing: 'border-box',
+              resize: 'vertical',
+              fontFamily: 'inherit',
+            }}
           />
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
             <button
@@ -466,7 +569,11 @@ function PostDetailInner() {
 
       {editOpen && (
         <EditPostModal
-          initial={{ title: post.title, content: post.content, tagsRaw: (post.tags ?? []).join(', ') }}
+          initial={{
+            title: post.title,
+            content: post.content,
+            tagsRaw: (post.tags ?? []).join(', '),
+          }}
           onClose={() => setEditOpen(false)}
           onSubmit={async (patch) => {
             if (!schoolId || !postId) return;
@@ -515,34 +622,91 @@ function EditPostModal(props: {
       }}
       onClick={props.onClose}
     >
-      <div className="card" style={{ padding: 24, width: '100%', maxWidth: 540 }} onClick={(e) => e.stopPropagation()}>
+      <div
+        className="card"
+        style={{ padding: 24, width: '100%', maxWidth: 540 }}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>編輯貼文</h2>
           <button
             type="button"
             onClick={props.onClose}
-            style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--muted)' }}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: 18,
+              color: 'var(--muted)',
+            }}
           >
             ×
           </button>
         </div>
-        <label style={{ display: 'block', fontSize: 13, fontWeight: 700, marginTop: 14, marginBottom: 6 }}>標題</label>
-        <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} style={{ width: '100%' }} />
+        <label
+          style={{
+            display: 'block',
+            fontSize: 13,
+            fontWeight: 700,
+            marginTop: 14,
+            marginBottom: 6,
+          }}
+        >
+          標題
+        </label>
+        <input
+          className="input"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          style={{ width: '100%' }}
+        />
 
-        <label style={{ display: 'block', fontSize: 13, fontWeight: 700, marginTop: 14, marginBottom: 6 }}>內文</label>
+        <label
+          style={{
+            display: 'block',
+            fontSize: 13,
+            fontWeight: 700,
+            marginTop: 14,
+            marginBottom: 6,
+          }}
+        >
+          內文
+        </label>
         <textarea
           className="input"
           value={content}
           onChange={(e) => setContent(e.target.value)}
           rows={6}
-          style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit' }}
+          style={{
+            width: '100%',
+            boxSizing: 'border-box',
+            resize: 'vertical',
+            fontFamily: 'inherit',
+          }}
         />
 
-        <label style={{ display: 'block', fontSize: 13, fontWeight: 700, marginTop: 14, marginBottom: 6 }}>標籤（逗號分隔）</label>
-        <input className="input" value={tagsRaw} onChange={(e) => setTagsRaw(e.target.value)} style={{ width: '100%' }} />
+        <label
+          style={{
+            display: 'block',
+            fontSize: 13,
+            fontWeight: 700,
+            marginTop: 14,
+            marginBottom: 6,
+          }}
+        >
+          標籤（逗號分隔）
+        </label>
+        <input
+          className="input"
+          value={tagsRaw}
+          onChange={(e) => setTagsRaw(e.target.value)}
+          style={{ width: '100%' }}
+        />
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 20 }}>
-          <button type="button" className="btn" onClick={props.onClose}>取消</button>
+          <button type="button" className="btn" onClick={props.onClose}>
+            取消
+          </button>
           <button
             type="button"
             className="btn primary"
@@ -551,8 +715,8 @@ function EditPostModal(props: {
               setBusy(true);
               try {
                 await props.onSubmit({ title, content, tagsRaw });
-              } catch (e: any) {
-                alert(`儲存失敗：${e?.message ?? String(e)}`);
+              } catch {
+                alert('這次未能儲存，請稍後再試。');
               } finally {
                 setBusy(false);
               }
@@ -572,7 +736,7 @@ const btnGhost: React.CSSProperties = {
   cursor: 'pointer',
   fontSize: 12,
   fontWeight: 700,
-  color: 'var(--brand, #5856D6)',
+  color: 'var(--brand)',
   padding: '4px 6px',
 };
 

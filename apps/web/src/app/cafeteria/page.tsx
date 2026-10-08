@@ -1,9 +1,9 @@
 'use client';
 
-import { useMemo, useState, type CSSProperties } from 'react';
+import { use, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { mockMenus } from '@campus/shared/src/mockData';
 import { SiteShell } from '@/components/SiteShell';
+import { useAuth } from '@/components/AuthGuard';
 import {
   fetchCafeterias,
   fetchMenus,
@@ -14,26 +14,9 @@ import {
 } from '@/lib/firebase';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import { useSchoolCollectionData } from '@/lib/useSchoolCollectionData';
+import styles from './cafeteria.module.css';
 
 const ALL_CAFETERIAS_KEY = 'all';
-
-const DEMO_MENUS: MenuItem[] = mockMenus.map((menu) => ({
-  ...menu,
-  available: true,
-  soldOut: false,
-}));
-
-const DEMO_CAFETERIAS: Cafeteria[] = Array.from(
-  new Map(
-    DEMO_MENUS.map((menu) => [
-      menu.cafeteria,
-      {
-        id: `demo-${menu.cafeteria}`,
-        name: menu.cafeteria,
-      } satisfies Cafeteria,
-    ]),
-  ).values(),
-).sort((a, b) => a.name.localeCompare(b.name, 'zh-TW'));
 
 function getCafeteriaKey(input: {
   id?: string | null;
@@ -42,6 +25,12 @@ function getCafeteriaKey(input: {
   name?: string | null;
 }) {
   return input.id || input.cafeteriaId || input.name || input.cafeteria || '';
+}
+
+function getMenuCafeteriaKey(menu: MenuItem, cafeterias: Cafeteria[]) {
+  if (menu.cafeteriaId) return menu.cafeteriaId;
+  const matching = cafeterias.filter((row) => row.name === menu.cafeteria);
+  return matching.length === 1 ? matching[0].id : menu.cafeteria || '';
 }
 
 function toSearchText(parts: Array<string | null | undefined>) {
@@ -53,12 +42,12 @@ function toSearchText(parts: Array<string | null | undefined>) {
 
 function formatLastUpdated(value?: string) {
   if (!value) {
-    return '等待同步';
+    return '尚未提供更新時間';
   }
 
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return '等待同步';
+    return '尚未提供更新時間';
   }
 
   return date.toLocaleString('zh-TW', {
@@ -69,62 +58,64 @@ function formatLastUpdated(value?: string) {
   });
 }
 
-function getMenuIcon(category?: string) {
-  if (!category) return '🍽️';
-  if (category.includes('飯') || category.includes('便當') || category.includes('主餐'))
-    return '🍱';
-  if (category.includes('麵')) return '🍜';
-  if (category.includes('素')) return '🥗';
-  if (category.includes('飲')) return '🥤';
-  if (category.includes('點心') || category.includes('輕食')) return '🥪';
-  return '🍽️';
-}
-
-function getCafeteriaStatus(cafeteria: Cafeteria) {
-  if (cafeteria.orderingEnabled && cafeteria.pilotStatus === 'live') {
-    return {
-      label: '營運中',
-      color: 'var(--success)',
-      background: 'var(--success-soft)',
-    };
-  }
-
-  if (cafeteria.orderingEnabled && cafeteria.pilotStatus === 'pilot') {
-    return {
-      label: '試營運',
-      color: 'var(--warning)',
-      background: 'var(--warning-soft)',
-    };
-  }
-
-  return {
-    label: '資訊展示',
-    color: 'var(--muted)',
-    background: 'var(--panel)',
-  };
+function getMenuAvailability(item: MenuItem) {
+  if (item.soldOut === true) return { label: '已售完', tone: 'unavailable' };
+  if (item.available === false) return { label: '暫停供應', tone: 'unavailable' };
+  if (item.available === true) return { label: '供應中', tone: 'available' };
+  return { label: '供應狀態未確認', tone: 'unknown' };
 }
 
 export default function CafeteriaPage(props: {
-  searchParams?: { school?: string; schoolId?: string };
+  searchParams?: Promise<{ school?: string; schoolId?: string }>;
 }) {
-  const { schoolId, schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const searchParams = props.searchParams ? use(props.searchParams) : undefined;
+  const context = resolveSchoolPageContext(searchParams);
+  const { user, loading: authLoading } = useAuth();
+  const scopeKey = JSON.stringify([user?.uid ?? null, authLoading]);
+  return (
+    <CafeteriaContent
+      key={JSON.stringify([context.schoolId, scopeKey])}
+      {...context}
+      scopeKey={scopeKey}
+      authLoading={authLoading}
+    />
+  );
+}
+
+function CafeteriaContent({
+  schoolId,
+  schoolName,
+  schoolSearch: q,
+  scopeKey,
+  authLoading,
+}: {
+  schoolId: string;
+  schoolName: string;
+  schoolSearch: string;
+  scopeKey: string;
+  authLoading: boolean;
+}) {
   const [selectedCafeteria, setSelectedCafeteria] = useState(ALL_CAFETERIAS_KEY);
   const [search, setSearch] = useState('');
 
   const {
     data: cafeteriaRows,
     loading: cafeteriaLoading,
-    sourceMode: cafeteriaSourceMode,
-  } = useSchoolCollectionData<Cafeteria>(schoolId, fetchCafeterias, DEMO_CAFETERIAS, {
+    error: cafeteriaError,
+    retry: retryCafeterias,
+  } = useSchoolCollectionData<Cafeteria>(schoolId, fetchCafeterias, {
     subscribeLive: subscribeCafeterias,
+    scopeKey,
   });
 
   const {
     data: menuRows,
     loading: menuLoading,
-    sourceMode: menuSourceMode,
-  } = useSchoolCollectionData<MenuItem>(schoolId, fetchMenus, DEMO_MENUS, {
+    error: menuError,
+    retry: retryMenus,
+  } = useSchoolCollectionData<MenuItem>(schoolId, fetchMenus, {
     subscribeLive: subscribeMenus,
+    scopeKey,
   });
 
   const loading = cafeteriaLoading || menuLoading;
@@ -143,7 +134,7 @@ export default function CafeteriaPage(props: {
     });
 
     menuRows.forEach((menu) => {
-      const key = getCafeteriaKey(menu);
+      const key = getMenuCafeteriaKey(menu, cafeteriaRows);
       if (!key || merged.has(key)) return;
 
       merged.set(key, {
@@ -159,7 +150,7 @@ export default function CafeteriaPage(props: {
     const grouped = new Map<string, MenuItem[]>();
 
     menuRows.forEach((menu) => {
-      const key = getCafeteriaKey(menu);
+      const key = getMenuCafeteriaKey(menu, cafeteriaRows);
       if (!key) return;
 
       const bucket = grouped.get(key) ?? [];
@@ -182,7 +173,7 @@ export default function CafeteriaPage(props: {
     });
 
     return grouped;
-  }, [menuRows]);
+  }, [menuRows, cafeteriaRows]);
 
   const sections = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -219,7 +210,7 @@ export default function CafeteriaPage(props: {
           items,
           totalCount: allItems.length,
           availableCount: allItems.filter(
-            (item) => item.available !== false && item.soldOut !== true,
+            (item) => item.available === true && item.soldOut !== true,
           ).length,
         };
       })
@@ -227,21 +218,11 @@ export default function CafeteriaPage(props: {
   }, [cafeterias, menusByCafeteria, search, selectedCafeteria]);
 
   const stats = useMemo(() => {
-    const liveOrdering = cafeterias.filter(
-      (cafeteria) => cafeteria.orderingEnabled && cafeteria.pilotStatus !== 'inactive',
-    ).length;
-    const availableMenus = menuRows.filter(
-      (menu) => menu.available !== false && menu.soldOut !== true,
-    ).length;
-    const soldOutMenus = menuRows.filter(
-      (menu) => menu.available === false || menu.soldOut === true,
-    ).length;
+    const soldOutMenus = menuRows.filter((menu) => menu.soldOut === true).length;
 
     return {
       cafeterias: cafeterias.length,
       menuItems: menuRows.length,
-      liveOrdering,
-      availableMenus,
       soldOutMenus,
     };
   }, [cafeterias, menuRows]);
@@ -261,117 +242,68 @@ export default function CafeteriaPage(props: {
     return new Date(Math.max(...timestamps)).toISOString();
   }, [cafeterias, menuRows]);
 
-  const sourceLabel =
-    cafeteriaSourceMode === 'firebase' && menuSourceMode === 'firebase'
-      ? '即時資料'
-      : cafeteriaSourceMode === 'demo' && menuSourceMode === 'demo'
-        ? '示範資料'
-        : '部分示範資料';
-
-  return (
-    <SiteShell title="餐廳" subtitle="即時同步目前校內餐廳與菜單" schoolName={schoolName}>
-      <div className="pageStack">
-        {/* AI 推薦卡 */}
-        <Link
-          href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('今天午餐建議？要熱量低一點的')}`}
-          className="card"
-          style={{
-            padding: '14px 18px',
-            background: 'linear-gradient(135deg, rgba(88,86,214,0.10) 0%, rgba(52,199,89,0.06) 100%)',
-            border: '1px solid rgba(88,86,214,0.28)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 14,
-            textDecoration: 'none',
-            color: 'inherit',
-          }}
-        >
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#5856D6', marginBottom: 3 }}>
-              🤖 AI 推薦 · 今日午餐
-            </div>
-            <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>
-              不知道吃什麼？讓 AI 幫你推薦適合的菜色（含熱量、口味偏好）。
-            </div>
-          </div>
-          <span style={{ fontSize: 12, color: '#5856D6', fontWeight: 600 }}>問 AI →</span>
-        </Link>
-
-        <div
-          className="toolbarPanel"
-          style={{ alignItems: 'center', justifyContent: 'space-between', gap: 16 }}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <span className={`pill${sourceLabel === '即時資料' ? ' brand' : ' subtle'}`}>
-                {sourceLabel}
-              </span>
-              <span style={{ fontSize: 13, color: 'var(--muted)' }}>
-                最後同步：{formatLastUpdated(lastUpdatedAt)}
-              </span>
-            </div>
-            <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)' }}>
-              餐廳新增、下架或菜單異動會直接反映在這裡。
-            </p>
-          </div>
-          {loading ? <span className="pill subtle">同步中…</span> : null}
-        </div>
-
-        <div className="metricGrid">
-          <div className="metricCard" style={{ '--tone': 'var(--brand)' } as CSSProperties}>
-            <div className="metricIcon">🏫</div>
-            <div className="metricValue">{stats.cafeterias}</div>
-            <div className="metricLabel">校內餐廳</div>
-          </div>
-          <div className="metricCard" style={{ '--tone': 'var(--success)' } as CSSProperties}>
-            <div className="metricIcon">🍽️</div>
-            <div className="metricValue">{stats.availableMenus}</div>
-            <div className="metricLabel">供應中菜色</div>
-          </div>
-          <div className="metricCard" style={{ '--tone': 'var(--warning)' } as CSSProperties}>
-            <div className="metricIcon">🧾</div>
-            <div className="metricValue">{stats.menuItems}</div>
-            <div className="metricLabel">菜單總數</div>
-          </div>
-          <div className="metricCard" style={{ '--tone': 'var(--info)' } as CSSProperties}>
-            <div className="metricIcon">🛒</div>
-            <div className="metricValue">{stats.liveOrdering}</div>
-            <div className="metricLabel">可點餐餐廳</div>
-          </div>
-        </div>
-
-        <div className="toolbarPanel">
-          <div className="toolbarGrow">
-            <div style={{ position: 'relative' }}>
-              <span
-                style={{
-                  position: 'absolute',
-                  left: 12,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  fontSize: 16,
-                  pointerEvents: 'none',
+  const sourceLabel = '餐廳資料';
+  if (authLoading || loading || cafeteriaError || menuError) {
+    const failed = !authLoading && (cafeteriaError || menuError);
+    return (
+      <SiteShell title="餐廳" subtitle="查看校內餐廳與菜單" schoolName={schoolName}>
+        <section className="card" role={failed ? 'alert' : 'status'}>
+          <h2>{failed ? '暫時無法讀取餐廳資料' : '正在讀取餐廳與菜單…'}</h2>
+          {failed && (
+            <>
+              <p>這次沒有取得完整資料，請稍後重試。餐點供應仍以店家現場資訊為準。</p>
+              <button
+                className="btn primary"
+                onClick={() => {
+                  retryCafeterias();
+                  retryMenus();
                 }}
               >
-                🔍
-              </span>
-              <input
-                className="input"
-                type="search"
-                placeholder="搜尋菜名、類別或餐廳…"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                style={{ paddingLeft: 38, minHeight: 42 }}
-              />
-            </div>
+                重新讀取
+              </button>
+            </>
+          )}
+        </section>
+      </SiteShell>
+    );
+  }
+
+  return (
+    <SiteShell title="餐廳" subtitle="查看校內餐廳與菜單" schoolName={schoolName}>
+      <div className={styles.page}>
+        <div className={styles.source}>
+          <div>
+            <p>
+              <span>{sourceLabel}</span> · {stats.cafeterias} 間餐廳 · {stats.menuItems} 道餐點
+            </p>
+            <span>資料更新：{formatLastUpdated(lastUpdatedAt)}</span>
           </div>
-          <div className="toolbarActions" style={{ gap: 6, flexWrap: 'wrap' }}>
+          <Link
+            href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('請幫我整理校內餐廳與菜單選擇')}`}
+            className={styles.assistantLink}
+          >
+            請助理整理用餐選擇 <span aria-hidden="true">↗</span>
+          </Link>
+        </div>
+        <p className={styles.notice}>
+          依店家提供的資料顯示；實際營業與餐點供應請向店家確認。本頁提供菜單查詢，尚未開放線上點餐。
+        </p>
+
+        <section className={styles.toolbar} aria-label="尋找餐點">
+          <label className={styles.search}>
+            搜尋餐點或餐廳
+            <input
+              type="search"
+              placeholder="菜名、類別或餐廳名稱"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </label>
+          <div className={styles.filters} role="group" aria-label="篩選餐廳">
             <button
               type="button"
               onClick={() => setSelectedCafeteria(ALL_CAFETERIAS_KEY)}
-              className={`pill${selectedCafeteria === ALL_CAFETERIAS_KEY ? ' brand' : ' subtle'}`}
-              style={{ cursor: 'pointer', border: 'none', background: undefined }}
+              aria-pressed={selectedCafeteria === ALL_CAFETERIAS_KEY}
             >
               全部餐廳
             </button>
@@ -382,248 +314,118 @@ export default function CafeteriaPage(props: {
                   key={key}
                   type="button"
                   onClick={() => setSelectedCafeteria(key)}
-                  className={`pill${selectedCafeteria === key ? ' brand' : ' subtle'}`}
-                  style={{ cursor: 'pointer', border: 'none', background: undefined }}
+                  aria-pressed={selectedCafeteria === key}
                 >
                   {cafeteria.name}
                 </button>
               );
             })}
           </div>
-        </div>
+        </section>
 
         {sections.length === 0 ? (
-          <div className="emptyState">
-            <div className="emptyIcon">🍽️</div>
-            <h3 className="emptyTitle">
+          <section className={styles.empty} role="status">
+            <h2>
               {search.trim() || selectedCafeteria !== ALL_CAFETERIAS_KEY
                 ? '找不到符合的餐廳或菜單'
                 : '目前沒有餐廳資料'}
-            </h3>
-            <p className="emptyBody">
+            </h2>
+            <p>
               {search.trim() || selectedCafeteria !== ALL_CAFETERIAS_KEY
-                ? '請調整搜尋關鍵字或切換其他餐廳。'
-                : '餐廳與菜單同步完成後會自動顯示在這裡。'}
+                ? '試試其他菜名，或清除篩選查看全部餐廳。'
+                : '店家提供餐廳與菜單資料後，會顯示在這裡。'}
             </p>
-          </div>
+            {(search.trim() || selectedCafeteria !== ALL_CAFETERIAS_KEY) && (
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setSearch('');
+                  setSelectedCafeteria(ALL_CAFETERIAS_KEY);
+                }}
+              >
+                清除篩選
+              </button>
+            )}
+          </section>
         ) : (
-          sections.map(({ key, cafeteria, items, availableCount, totalCount }) => {
-            const status = getCafeteriaStatus(cafeteria);
-
-            return (
-              <div key={key} className="sectionCard">
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    justifyContent: 'space-between',
-                    gap: 16,
-                    flexWrap: 'wrap',
-                  }}
-                >
-                  <div style={{ display: 'grid', gap: 8 }}>
-                    <div
-                      style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}
-                    >
-                      <h3 style={{ margin: 0, fontSize: 22 }}>{cafeteria.name}</h3>
-                      <span
-                        className="pill"
-                        style={{
-                          background: status.background,
-                          color: status.color,
-                          border: 'none',
-                          boxShadow: 'none',
-                        }}
-                      >
-                        {status.label}
-                      </span>
-                      {cafeteria.brandKey ? (
-                        <span className="pill subtle">{cafeteria.brandKey}</span>
-                      ) : null}
-                    </div>
-                    <div
-                      style={{
-                        display: 'flex',
-                        gap: 10,
-                        flexWrap: 'wrap',
-                        color: 'var(--muted)',
-                        fontSize: 13,
-                      }}
-                    >
-                      {cafeteria.location ? <span>📍 {cafeteria.location}</span> : null}
-                      {cafeteria.openingHours ? <span>🕒 {cafeteria.openingHours}</span> : null}
-                      {typeof cafeteria.currentOccupancy === 'number' ? (
-                        <span>👥 目前約 {cafeteria.currentOccupancy} 人</span>
-                      ) : null}
-                    </div>
-                  </div>
-                  <div style={{ textAlign: 'right', minWidth: 120 }}>
-                    <div style={{ fontSize: 13, color: 'var(--muted)' }}>供應中 / 菜單總數</div>
-                    <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: '-0.04em' }}>
-                      {availableCount} / {totalCount}
-                    </div>
-                    {typeof cafeteria.rating === 'number' ? (
-                      <div style={{ fontSize: 13, color: 'var(--muted)' }}>
-                        ★ {cafeteria.rating.toFixed(1)}
+          sections.map(({ key, cafeteria, items, availableCount, totalCount }) => (
+            <section key={key} className={styles.restaurant} aria-label={cafeteria.name}>
+              <header className={styles.restaurantHeader}>
+                <div>
+                  <h2>{cafeteria.name}</h2>
+                  <div className={styles.details}>
+                    {cafeteria.location && <span>位置：{cafeteria.location}</span>}
+                    {cafeteria.openingHours && <span>營業時間：{cafeteria.openingHours}</span>}
+                    {typeof cafeteria.currentOccupancy === 'number' && (
+                      <span>店家回報人數：約 {cafeteria.currentOccupancy} 人</span>
+                    )}
+                    {typeof cafeteria.rating === 'number' && (
+                      <span>
+                        評分 {cafeteria.rating.toFixed(1)}
                         {typeof cafeteria.reviewCount === 'number'
                           ? ` · ${cafeteria.reviewCount} 則評價`
                           : ''}
-                      </div>
-                    ) : null}
+                      </span>
+                    )}
                   </div>
                 </div>
+                <p className={styles.count}>
+                  {totalCount} 道餐點 · {availableCount} 道標記供應中
+                </p>
+              </header>
 
-                <div className="insetGroup">
-                  {items.length === 0 ? (
-                    <div className="insetGroupRow" style={{ borderTop: 'none' }}>
-                      <div
-                        className="insetGroupRowIcon"
-                        style={{ fontSize: 22, background: 'var(--panel)', borderRadius: 10 }}
-                      >
-                        📭
-                      </div>
-                      <div className="insetGroupRowContent">
-                        <div className="insetGroupRowTitle">目前尚未上架菜單</div>
-                        <div className="insetGroupRowMeta">
-                          這間餐廳已在校內名單中，菜單同步後會即時顯示。
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    items.map((item, index) => (
-                      <div
-                        key={item.id}
-                        className="insetGroupRow"
-                        style={{
-                          borderTop: index === 0 ? 'none' : undefined,
-                          opacity: item.available === false || item.soldOut === true ? 0.6 : 1,
-                        }}
-                      >
-                        <div
-                          className="insetGroupRowIcon"
-                          style={{ fontSize: 22, background: 'var(--panel)', borderRadius: 10 }}
-                        >
-                          {getMenuIcon(item.category)}
-                        </div>
-                        <div className="insetGroupRowContent">
-                          <div
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 6,
-                              flexWrap: 'wrap',
-                            }}
-                          >
-                            <span className="insetGroupRowTitle">{item.name}</span>
-                            {item.category ? (
-                              <span className="pill subtle">{item.category}</span>
-                            ) : null}
-                            <span
-                              className="pill"
-                              style={{
-                                background:
-                                  item.available === false || item.soldOut === true
-                                    ? 'var(--danger-soft)'
-                                    : 'var(--success-soft)',
-                                color:
-                                  item.available === false || item.soldOut === true
-                                    ? 'var(--danger)'
-                                    : 'var(--success)',
-                                border: 'none',
-                                boxShadow: 'none',
-                              }}
-                            >
-                              {item.available === false || item.soldOut === true
-                                ? '已售完'
-                                : '供應中'}
+              {items.length === 0 ? (
+                <p className={styles.menuEmpty}>店家尚未提供菜單，請至現場確認餐點。</p>
+              ) : (
+                <ul className={styles.menu}>
+                  {items.map((item) => {
+                    const availability = getMenuAvailability(item);
+                    return (
+                      <li key={item.id} className={styles.menuItem}>
+                        <div className={styles.menuContent}>
+                          <div className={styles.menuHeading}>
+                            <h3>{item.name}</h3>
+                            <span className={styles.status} data-tone={availability.tone}>
+                              {availability.label}
                             </span>
+                          </div>
+                          {item.description && (
+                            <p className={styles.description}>{item.description}</p>
+                          )}
+                          <div className={styles.details}>
+                            {item.category && <span>{item.category}</span>}
                             {item.tags?.map((tag) => (
-                              <span
-                                key={tag}
-                                className="pill"
-                                style={{
-                                  fontSize: 10,
-                                  padding: '2px 7px',
-                                  background: 'var(--warning-soft)',
-                                  color: 'var(--warning)',
-                                  border: 'none',
-                                  boxShadow: 'none',
-                                }}
-                              >
-                                {tag}
-                              </span>
+                              <span key={tag}>{tag}</span>
                             ))}
-                          </div>
-                          <div className="insetGroupRowMeta">
-                            {typeof item.rating === 'number'
-                              ? `★ ${item.rating.toFixed(1)} · `
-                              : ''}
-                            {typeof item.calories === 'number' ? `${item.calories} kcal · ` : ''}
-                            {item.updatedAt || item.availableOn
-                              ? `更新於 ${formatLastUpdated(item.updatedAt ?? item.availableOn)}`
-                              : '等待同步'}
-                          </div>
-                          {item.description ? (
-                            <div style={{ marginTop: 4, fontSize: 13, color: 'var(--muted)' }}>
-                              {item.description}
-                            </div>
-                          ) : null}
-                        </div>
-                        <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                          <div
-                            style={{
-                              fontSize: 20,
-                              fontWeight: 700,
-                              color: 'var(--brand)',
-                              letterSpacing: '-0.04em',
-                            }}
-                          >
-                            {typeof item.price === 'number' ? `NT$${item.price}` : '未標價'}
+                            {typeof item.rating === 'number' && (
+                              <span>評分 {item.rating.toFixed(1)}</span>
+                            )}
+                            {typeof item.calories === 'number' && <span>{item.calories} kcal</span>}
+                            <span>
+                              {item.updatedAt || item.availableOn
+                                ? `更新於 ${formatLastUpdated(item.updatedAt ?? item.availableOn)}`
+                                : '尚未提供更新時間'}
+                            </span>
                           </div>
                         </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            );
-          })
+                        <p className={styles.price}>
+                          {typeof item.price === 'number' ? `NT$${item.price}` : '未標價'}
+                        </p>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
+          ))
         )}
 
-        {stats.soldOutMenus > 0 ? (
-          <div className="card" style={{ color: 'var(--muted)', fontSize: 13 }}>
-            目前共有 {stats.soldOutMenus} 項菜色標記為售完，若店家更新供應狀態，頁面會自動刷新。
-          </div>
-        ) : null}
-
-        {/* ── AI 餐廳推薦入口 ── */}
-        <div
-          style={{
-            padding: '14px 18px',
-            borderRadius: 'var(--radius)',
-            background: 'linear-gradient(135deg, rgba(52,199,89,0.10) 0%, rgba(52,199,89,0.04) 100%)',
-            border: '1px solid rgba(52,199,89,0.28)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 14,
-            flexWrap: 'wrap',
-          }}
-        >
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#1F7A2E', marginBottom: 3 }}>🤖 AI 餐廳助理</div>
-            <div style={{ fontSize: 13, color: 'var(--text)' }}>
-              想吃什麼卻沒靈感？讓 AI 根據今日菜單幫你推薦適合的餐點。
-            </div>
-          </div>
-          <a
-            href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('根據今日學生餐廳菜單，幫我推薦一套均衡的午餐組合（不超過 120 元），以及適合下午課前的點心。')}`}
-            className="btn"
-            style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
-          >
-            問 AI →
-          </a>
-        </div>
+        {stats.soldOutMenus > 0 && (
+          <p className={styles.notice}>
+            店家目前將 {stats.soldOutMenus} 道餐點標記為售完，供應狀態有更新時會顯示在這裡。
+          </p>
+        )}
       </div>
     </SiteShell>
   );

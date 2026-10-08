@@ -12,6 +12,7 @@ import { Animated, Pressable, StyleSheet, Text, View, Dimensions } from 'react-n
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { theme, softShadowStyle } from './theme';
+import { useThemeMode } from '../state/theme';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 
 type ToastType = 'success' | 'error' | 'warning' | 'info';
@@ -46,13 +47,14 @@ export function useToast(): ToastContextType {
 }
 
 const TYPE_CONFIG: Record<ToastType, { color: string; icon: string }> = {
-  success: { color: theme.colors.success, icon: 'checkmark-circle' },
-  error: { color: theme.colors.danger, icon: 'close-circle' },
-  warning: { color: theme.colors.warning, icon: 'warning' },
-  info: { color: theme.colors.accent, icon: 'information-circle' },
+  success: { get color() { return theme.colors.success; }, icon: 'checkmark-circle' },
+  error: { get color() { return theme.colors.danger; }, icon: 'close-circle' },
+  warning: { get color() { return theme.colors.warning; }, icon: 'warning' },
+  info: { get color() { return theme.colors.accent; }, icon: 'information-circle' },
 };
 
 function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string) => void }) {
+  useThemeMode();
   const translateY = useRef(new Animated.Value(-80)).current;
   const opacity = useRef(new Animated.Value(0)).current;
   const scale = useRef(new Animated.Value(0.9)).current;
@@ -175,6 +177,7 @@ export function ToastProvider({
   children: React.ReactNode;
   maxToasts?: number;
 }) {
+  useThemeMode();
   const insets = useSafeInsets();
   const [toasts, setToasts] = useState<Toast[]>([]);
   const idCounter = useRef(0);
@@ -258,6 +261,7 @@ export function useSnackbar(): SnackbarContextType {
 }
 
 export function SnackbarProvider({ children }: { children: React.ReactNode }) {
+  useThemeMode();
   const insets = useSafeInsets();
   const [config, setConfig] = useState<SnackbarConfig | null>(null);
   const [visible, setVisible] = useState(false);

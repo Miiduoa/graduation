@@ -5,7 +5,12 @@ jest.mock('../../app/useAIOverlay', () => ({
   },
 }));
 
-import { buildCourseNavigationTarget, buildNavigationTarget, migrateTabName, navigateToTarget } from '../../utils/courseNavigation';
+import {
+  buildCourseNavigationTarget,
+  buildNavigationTarget,
+  migrateTabName,
+  navigateToTarget,
+} from '../../utils/courseNavigation';
 import { aiOverlay } from '../../app/useAIOverlay';
 
 describe('courseNavigation utilities (4+1 AI-First nav)', () => {
@@ -63,11 +68,14 @@ describe('courseNavigation utilities (4+1 AI-First nav)', () => {
 
   it('navigateToTarget opens AI overlay with proactiveReportId', () => {
     const navigate = jest.fn();
-    navigateToTarget({ navigate }, {
-      tab: 'Today',
-      screen: 'AIChat',
-      params: { proactiveReportId: 'report-xyz' },
-    });
+    navigateToTarget(
+      { navigate },
+      {
+        tab: 'Today',
+        screen: 'AIChat',
+        params: { proactiveReportId: 'report-xyz' },
+      },
+    );
     expect(aiOverlay.open).toHaveBeenCalledWith(
       expect.objectContaining({
         mode: 'chat',
@@ -99,4 +107,20 @@ describe('courseNavigation utilities (4+1 AI-First nav)', () => {
       expect(migrateTabName('我的')).toBe('我的');
     });
   });
+});
+
+it('preserves explicit TronClass and legacy course-space provenance through cross-tab routing', () => {
+  expect(
+    buildCourseNavigationTarget('student', 'CourseHub', { source: 'tronclass', courseId: 321 }),
+  ).toEqual({
+    tab: '學習',
+    screen: 'CourseHub',
+    params: { source: 'tronclass', courseId: 321 },
+  });
+  expect(
+    buildCourseNavigationTarget('student', 'CourseHub', { courseSpaceId: 'course-1' }).screen,
+  ).toBe('CourseHub');
+  expect(buildCourseNavigationTarget('student', 'CourseHub', { courseId: 'CS302' }).screen).toBe(
+    'LearnHome',
+  );
 });

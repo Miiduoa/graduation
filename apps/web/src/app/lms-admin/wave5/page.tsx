@@ -168,8 +168,8 @@ export default function Wave5Page() {
       <p style={{ color: '#3C3C43', lineHeight: 1.6 }}>
         行事曆／問卷／分組／徽章；對應 migration 20260520130000–130200。請先選課程。
       </p>
-      {error ? <p style={{ color: '#FF3B30' }}>{error}</p> : null}
-      {info ? <p style={{ color: '#34C759' }}>{info}</p> : null}
+      {error ? <p style={{ color: 'var(--danger)' }}>{error}</p> : null}
+      {info ? <p style={{ color: 'var(--success)' }}>{info}</p> : null}
 
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -193,7 +193,7 @@ export default function Wave5Page() {
               onClick={() => setTab(t)}
               style={{
                 ...tabBtn,
-                background: tab === t ? '#5856D6' : '#fff',
+                background: tab === t ? 'var(--brand)' : '#fff',
                 color: tab === t ? '#fff' : '#1C1C1E',
               }}>
               {labelOf(t)}
@@ -311,8 +311,8 @@ const tabBtn: React.CSSProperties = {
 const primaryBtn: React.CSSProperties = {
   padding: '10px 14px',
   borderRadius: 10,
-  border: '1px solid #5856D6',
-  background: '#5856D6',
+  border: '1px solid var(--brand)',
+  background: 'var(--brand)',
   color: '#fff',
   fontWeight: 700,
   cursor: 'pointer',

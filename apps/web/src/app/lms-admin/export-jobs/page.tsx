@@ -61,8 +61,8 @@ export default function ExportJobsPage() {
           marginTop: 12,
           padding: '8px 14px',
           borderRadius: 8,
-          border: '1px solid #5856D6',
-          background: '#5856D6',
+          border: '1px solid var(--brand)',
+          background: 'var(--brand)',
           color: '#fff',
           fontWeight: 700,
           cursor: 'pointer',
@@ -70,7 +70,7 @@ export default function ExportJobsPage() {
         手動重整
       </button>
 
-      {error ? <p style={{ color: '#FF3B30' }}>{error}</p> : null}
+      {error ? <p style={{ color: 'var(--danger)' }}>{error}</p> : null}
 
       <div style={{ overflowX: 'auto', marginTop: 16, background: '#fff', border: '1px solid #E5E5EA', borderRadius: 12 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>

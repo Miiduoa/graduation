@@ -14,6 +14,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen } from '../ui/components';
 import { theme } from '../ui/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { useAuth } from '../state/auth';
 import { shouldBlockForNoLogin, isDemoUid } from '../services/demoSession';
@@ -41,6 +42,7 @@ function getDemoFollowData(myUid: string) {
 }
 
 export function FollowingListsScreen(props: any) {
+  const styles = useThemeStyleSheet(createStyles);
   const nav = props?.navigation;
   const auth = useAuth();
   const { school } = useSchool();
@@ -191,7 +193,7 @@ export function FollowingListsScreen(props: any) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   muted: { color: theme.colors.muted, fontSize: 14 },
   tabs: { flexDirection: 'row', marginHorizontal: 16, marginTop: 8, gap: 10 },

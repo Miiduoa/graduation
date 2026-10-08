@@ -12,7 +12,7 @@ import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../ui/theme';
-import { useThemeMode } from '../state/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 
 import { HomeFeedScreen } from './social/HomeFeedScreen';
 import { BoardsScreen } from './social/BoardsScreen';
@@ -35,7 +35,7 @@ const LEGACY_TAB: Record<string, TabKey> = {
 };
 
 export function CommunityScreen(props: Record<string, unknown>) {
-  useThemeMode();
+  const styles = useThemeStyleSheet(createStyles);
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<TabKey>('feed');
   const stackNav = (props as any)?.navigation;
@@ -112,7 +112,7 @@ export function CommunityScreen(props: Record<string, unknown>) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'center', marginBottom: theme.space.md },
   heading: { fontSize: 22, fontWeight: '700', color: theme.colors.text },
   headingSub: { fontSize: 11, color: theme.colors.textSecondary, marginTop: 2, letterSpacing: 0.4 },

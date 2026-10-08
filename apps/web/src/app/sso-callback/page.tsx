@@ -9,6 +9,8 @@ import {
 
 import { completeWebSSOCallback, signInWithCustomAuthToken } from '@/features/auth/client';
 import { appendSchoolContext, sanitizeInternalPath } from '@/lib/navigation';
+import { SiteShell } from '@/components/SiteShell';
+import home from '../home.module.css';
 import {
   buildCurrentSsoRedirectUri,
   clearPendingWebSsoTransaction,
@@ -24,7 +26,7 @@ function SSOCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [status, setStatus] = useState<CallbackStatus>('loading');
-  const [message, setMessage] = useState('正在驗證身份…');
+  const [message, setMessage] = useState('正在確認登入資訊…');
 
   useEffect(() => {
     let cancelled = false;
@@ -57,7 +59,7 @@ function SSOCallbackContent() {
       }
 
       try {
-        setMessage('驗證學校身份中…');
+        setMessage('正在確認學校帳號…');
         const pendingTransaction = consumePendingWebSsoTransaction(transactionState);
         if (!pendingTransaction?.transactionId) {
           throw new Error('登入交易已失效，請重新發起學校登入');
@@ -84,13 +86,13 @@ function SSOCallbackContent() {
           samlResponse: samlResponse ?? undefined,
         });
 
-        setMessage('登入 Campus One…');
+        setMessage('正在完成登入…');
         await signInWithCustomAuthToken(result.customToken);
 
         if (cancelled) return;
 
         setStatus('success');
-        setMessage('登入成功！即將跳轉…');
+        setMessage('已登入，正在返回原本瀏覽的頁面…');
 
         const target = appendSchoolContext(returnUrl, { code: school, id: schoolId });
 
@@ -114,17 +116,6 @@ function SSOCallbackContent() {
     };
   }, [router, searchParams]);
 
-  const iconMap: Record<CallbackStatus, string> = {
-    loading: '⏳',
-    success: '✅',
-    error: '❌',
-  };
-
-  const bgMap: Record<CallbackStatus, string> = {
-    loading: 'linear-gradient(135deg, var(--brand) 0%, var(--brand2) 100%)',
-    success: 'linear-gradient(135deg, var(--success) 0%, #5EE076 100%)',
-    error: 'linear-gradient(135deg, var(--danger) 0%, #FF6B6B 100%)',
-  };
   const loginQuery = new URLSearchParams();
   const returnUrl = searchParams.get('returnUrl');
 
@@ -134,160 +125,33 @@ function SSOCallbackContent() {
   const loginQueryString = loginQuery.toString();
 
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        background: 'var(--bg)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 20,
-        fontFamily: '"SF Pro Text", "PingFang TC", sans-serif',
-      }}
+    <section
+      className="card"
+      aria-labelledby="callback-status"
+      style={{ maxWidth: 560, margin: '0 auto', background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}
     >
-      <div
-        style={{
-          width: '100%',
-          maxWidth: 420,
-          background: 'var(--surface)',
-          borderRadius: 'var(--radius-lg)',
-          border: '1px solid var(--border)',
-          boxShadow: 'var(--shadow-lg)',
-          overflow: 'hidden',
-        }}
-      >
-        <div
-          style={{
-            background: bgMap[status],
-            padding: '36px 28px',
-            textAlign: 'center',
-            color: '#fff',
-            transition: 'background 0.4s ease',
-          }}
-        >
-          <div
-            style={{
-              fontSize: 56,
-              marginBottom: 12,
-              animation: status === 'loading' ? 'spin 1s linear infinite' : 'none',
-            }}
-          >
-            {status === 'loading' ? '🔄' : iconMap[status]}
-          </div>
-          <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
-          <h1
-            style={{
-              margin: '0 0 8px',
-              fontSize: 22,
-              fontWeight: 700,
-              letterSpacing: '-0.04em',
-            }}
-          >
-            {status === 'loading' ? '正在登入' : status === 'success' ? '登入成功' : '登入失敗'}
-          </h1>
-          <p style={{ margin: 0, fontSize: 14, opacity: 0.88, lineHeight: 1.6 }}>{message}</p>
-        </div>
-
-        <div style={{ padding: '24px 28px' }}>
-          {status === 'loading' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {['驗證學校身份', '交換 Firebase 令牌', '同步登入狀態'].map((step, index) => (
-                <div
-                  key={step}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 12,
-                    padding: '12px 14px',
-                    borderRadius: 'var(--radius-sm)',
-                    background: index === 0 ? 'var(--accent-soft)' : 'var(--panel)',
-                    border: '1px solid',
-                    borderColor: index === 0 ? 'rgba(88,86,214,0.2)' : 'var(--border)',
-                    opacity: index === 0 ? 1 : 0.5,
-                  }}
-                >
-                  <span style={{ fontSize: 16 }}>{index === 0 ? '⏳' : '○'}</span>
-                  <span
-                    style={{
-                      fontSize: 14,
-                      fontWeight: index === 0 ? 700 : 500,
-                      color: index === 0 ? 'var(--brand)' : 'var(--muted)',
-                    }}
-                  >
-                    {step}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {status === 'error' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div
-                style={{
-                  padding: '14px 16px',
-                  borderRadius: 'var(--radius-sm)',
-                  background: 'var(--danger-soft)',
-                  border: '1px solid rgba(255,59,48,0.18)',
-                  fontSize: 13,
-                  color: 'var(--danger)',
-                  lineHeight: 1.6,
-                }}
-              >
-                {message}
-              </div>
-              <button
-                className="btn primary"
-                style={{ width: '100%', minHeight: 48 }}
-                onClick={() =>
-                  router.push(`/login${loginQueryString ? `?${loginQueryString}` : ''}`)
-                }
-              >
-                返回登入頁
-              </button>
-            </div>
-          )}
-
-          {status === 'success' && (
-            <div
-              style={{
-                padding: '14px 16px',
-                borderRadius: 'var(--radius-sm)',
-                background: 'var(--success-soft)',
-                border: '1px solid rgba(52,199,89,0.2)',
-                fontSize: 13,
-                color: 'var(--success)',
-                textAlign: 'center',
-                fontWeight: 600,
-              }}
-            >
-              即將跳轉至頁面…
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
+      <h2 id="callback-status" style={{ margin: '0 0 12px', fontSize: 22 }}>
+        {status === 'loading' ? '正在確認學校帳號' : status === 'success' ? '已完成登入' : '無法完成登入'}
+      </h2>
+      <p role={status === 'error' ? 'alert' : 'status'} style={{ margin: 0, lineHeight: 1.8, overflowWrap: 'anywhere', color: status === 'error' ? 'var(--danger)' : 'var(--muted)' }}>
+        {message}
+      </p>
+      {status === 'loading' && <p className={home.intro} style={{ marginTop: 18 }}>確認完成後，會自動返回你原本瀏覽的頁面。</p>}
+      {status === 'error' && <button
+        className={home.primary}
+        style={{ marginTop: 24, border: 0, cursor: 'pointer', font: 'inherit' }}
+        onClick={() => router.push(`/login${loginQueryString ? `?${loginQueryString}` : ''}`)}
+      >返回登入頁</button>}
+    </section>
   );
 }
 
 export default function SSOCallbackPage() {
   return (
-    <Suspense
-      fallback={
-        <div
-          style={{
-            minHeight: '100vh',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: 'var(--bg)',
-          }}
-        >
-          <div style={{ fontSize: 48 }}>⏳</div>
-        </div>
-      }
-    >
-      <SSOCallbackContent />
-    </Suspense>
+    <SiteShell title="學校帳號登入" subtitle="確認你的身分後，繼續使用校園服務。">
+      <Suspense fallback={<p role="status">正在載入登入資訊…</p>}>
+        <SSOCallbackContent />
+      </Suspense>
+    </SiteShell>
   );
 }

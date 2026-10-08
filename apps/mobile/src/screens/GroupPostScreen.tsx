@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { useMemo, useState, useRef, useEffect } from 'react';
+import React, { useMemo, useState, useRef, useEffect, useSyncExternalStore } from 'react';
 import {
   ScrollView,
   Text,
@@ -21,7 +21,7 @@ import {
   StatusBadge,
 } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
-import { theme } from '../ui/theme';
+import { theme, getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { getDb, isFirebaseMockMode } from '../firebase';
@@ -91,6 +91,7 @@ type UserProfile = {
 };
 
 export function GroupPostScreen(props: any) {
+  useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const nav = props?.navigation;
   const groupId: string | undefined = props?.route?.params?.groupId;
   const postId: string | undefined = props?.route?.params?.postId;
@@ -432,7 +433,7 @@ export function GroupPostScreen(props: any) {
   const getKindColor = (kind: PostKind) => {
     switch (kind) {
       case 'announcement':
-        return '#FF9500';
+        return theme.colors.warning;
       case 'question':
         return theme.colors.accent;
       default:
@@ -606,7 +607,7 @@ export function GroupPostScreen(props: any) {
                     value={editPostTitle}
                     onChangeText={setEditPostTitle}
                     placeholder="標題"
-                    placeholderTextColor="rgba(168,176,194,0.6)"
+                    placeholderTextColor={theme.colors.muted}
                     style={{
                       paddingVertical: 12,
                       paddingHorizontal: 14,
@@ -623,7 +624,7 @@ export function GroupPostScreen(props: any) {
                     value={editPostBody}
                     onChangeText={setEditPostBody}
                     placeholder="內容"
-                    placeholderTextColor="rgba(168,176,194,0.6)"
+                    placeholderTextColor={theme.colors.muted}
                     multiline
                     style={{
                       minHeight: 100,
@@ -855,7 +856,7 @@ export function GroupPostScreen(props: any) {
                               value={editCommentText}
                               onChangeText={setEditCommentText}
                               placeholder="編輯留言..."
-                              placeholderTextColor="rgba(168,176,194,0.6)"
+                              placeholderTextColor={theme.colors.muted}
                               multiline
                               autoFocus
                               style={{
@@ -880,7 +881,9 @@ export function GroupPostScreen(props: any) {
                                   borderRadius: theme.radius.sm,
                                 }}
                               >
-                                <Text style={{ color: '#fff', fontWeight: '600' }}>儲存</Text>
+                                <Text style={{ color: theme.colors.onAccent, fontWeight: '600' }}>
+                                  儲存
+                                </Text>
                               </Pressable>
                               <Pressable
                                 onPress={() => {
@@ -1068,7 +1071,7 @@ export function GroupPostScreen(props: any) {
               value={commentText}
               onChangeText={setCommentText}
               placeholder={auth.user ? '輸入留言...' : '請先登入'}
-              placeholderTextColor="rgba(168,176,194,0.6)"
+              placeholderTextColor={theme.colors.muted}
               multiline
               editable={!!auth.user}
               style={{
@@ -1084,6 +1087,12 @@ export function GroupPostScreen(props: any) {
               }}
             />
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={sending ? '正在送出留言' : '送出留言'}
+              accessibilityState={{
+                disabled: !auth.user || sending || !commentText.trim(),
+                busy: sending,
+              }}
               onPress={onSend}
               disabled={!auth.user || sending || !commentText.trim()}
               style={{
@@ -1101,7 +1110,11 @@ export function GroupPostScreen(props: any) {
               <Ionicons
                 name={sending ? 'hourglass' : 'send'}
                 size={20}
-                color={!auth.user || sending || !commentText.trim() ? theme.colors.muted : '#fff'}
+                color={
+                  !auth.user || sending || !commentText.trim()
+                    ? theme.colors.disabledText
+                    : theme.colors.onAccent
+                }
               />
             </Pressable>
           </View>

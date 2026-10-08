@@ -6,7 +6,7 @@
  * client-side card components.
  *
  * Supported kinds:
- *  - route_card        : 路線規劃結果（步行距離、時間、polyline、turn-by-turn）
+ *  - directions_card   : 由正式地點座標建立的外部步行導航連結
  *  - menu_card         : 餐廳菜單（可勾選 → 進入 proposeOrder）
  *  - poi_card          : POI 搜尋結果（含位置、樓層、營業狀態）
  *  - order_draft_card  : 訂單草稿（按下「確認下單」才會真的 createOrder）
@@ -34,29 +34,16 @@ function toolCallToCard(call) {
 
   switch (name) {
     case 'planCampusRoute':
-      return [
-        {
-          kind: 'route_card',
-          payload: {
-            from: output.from,
-            to: output.to,
-            distanceMeters: output.distanceMeters,
-            walkMinutes: output.walkMinutes,
-            polyline: output.polyline,
-            steps: output.steps,
-            deepLink: output.deepLink,
-          },
+      if (!output.schoolId || !output.navigationUrl || !output.from || !output.to) return null;
+      return {
+        kind: 'directions_card',
+        payload: {
+          schoolId: output.schoolId,
+          from: output.from,
+          to: output.to,
+          navigationUrl: output.navigationUrl,
         },
-        // Companion navigate card for one-tap-to-map (Mobile)
-        {
-          kind: 'navigate',
-          payload: {
-            screen: 'GoogleMapsLike',
-            params: { fromPoiId: output.from?.id, toPoiId: output.to?.id },
-            reason: `${output.from?.name} → ${output.to?.name}（${output.walkMinutes} 分鐘 / ${output.distanceMeters} 公尺）`,
-          },
-        },
-      ];
+      };
 
     case 'findCampusPoi':
       if (!Array.isArray(output.pois) || output.pois.length === 0) return null;
@@ -64,8 +51,10 @@ function toolCallToCard(call) {
         kind: 'poi_card',
         payload: {
           query: output.query,
+          schoolId: output.schoolId,
           pois: output.pois.map((p) => ({
             id: p.id,
+            schoolId: p.schoolId,
             name: p.name,
             code: p.code,
             category: p.category,
@@ -86,7 +75,7 @@ function toolCallToCard(call) {
       if (!Array.isArray(output.cafeterias) || output.cafeterias.length === 0) return null;
       return {
         kind: 'cafeteria_list_card',
-        payload: { cafeterias: output.cafeterias },
+        payload: { schoolId: output.schoolId, cafeterias: output.cafeterias },
       };
 
     case 'getCafeteriaMenu':
@@ -155,6 +144,8 @@ function identityKey(card) {
   switch (card.kind) {
     case 'route_card':
       return `${p.from?.id}->${p.to?.id}`;
+    case 'directions_card':
+      return `${p.schoolId}:${p.from?.id}->${p.to?.id}`;
     case 'navigate':
       return `${p.screen}:${p.params?.fromPoiId || ''}->${p.params?.toPoiId || ''}`;
     case 'poi_card':

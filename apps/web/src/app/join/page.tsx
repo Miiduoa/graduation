@@ -1,53 +1,50 @@
 'use client';
 
+import { use } from 'react';
+
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
+import styles from './join.module.css';
 
-export default function JoinPage(props: { searchParams?: { school?: string; schoolId?: string } }) {
-  const { schoolName, schoolSearch } = resolveSchoolPageContext(props.searchParams);
+export default function JoinPage(props: {
+  searchParams?: Promise<{ school?: string; schoolId?: string }>;
+}) {
+  const searchParams = props.searchParams ? use(props.searchParams) : undefined;
+  const { schoolName, schoolSearch } = resolveSchoolPageContext(searchParams);
 
   return (
-    <SiteShell schoolName={schoolName}>
-      <div style={{ maxWidth: 560, margin: '0 auto' }}>
-        <div className="pageStack">
-          <div
-            className="card"
-            style={{
-              background: 'linear-gradient(135deg, var(--brand) 0%, var(--brand2) 100%)',
-              border: 'none',
-              color: '#fff',
-              textAlign: 'center',
-              padding: '32px 24px',
-              boxShadow: '6px 6px 16px rgba(88,86,214,0.36), -3px -3px 8px rgba(255,255,255,0.7)',
-            }}
-          >
-            <div style={{ fontSize: 52, marginBottom: 12 }}>🏫</div>
-            <h1
-              style={{ margin: '0 0 8px', fontSize: 24, fontWeight: 700, letterSpacing: '-0.04em' }}
-            >
-              {schoolName} 已開通
-            </h1>
-            <p style={{ margin: 0, fontSize: 14, opacity: 0.82 }}>
-              Campus One 目前聚焦在靜宜大學版本，已不再提供多校切換入口。
-            </p>
+    <SiteShell
+      title="開始你的校園日常"
+      subtitle="查課表、找教室，接收校園裡的新消息。"
+      schoolName={schoolName}
+    >
+      <div className={styles.options}>
+        <section className={`card ${styles.option}`}>
+          <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>我是{schoolName}學生</h2>
+          <p style={{ margin: 0, color: 'var(--muted)', lineHeight: 1.8 }}>
+            使用學號與 e 校園密碼登入，查看自己的課程、成績與通知。
+          </p>
+          <div>
+            <Link href={`/login${schoolSearch}`} className="btn primary">
+              登入校園帳號
+            </Link>
           </div>
-
-          <div className="card" style={{ display: 'grid', gap: 14 }}>
-            <p style={{ margin: 0, color: 'var(--muted)', lineHeight: 1.8 }}>
-              如果你是靜宜學生，請直接使用學號與 e
-              校園密碼登入。若只是想先看看內容，可以先回首頁或查看公告等公開頁面。
-            </p>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <Link href={`/login${schoolSearch}`} className="btn primary">
-                前往登入
-              </Link>
-              <Link href={`/announcements${schoolSearch}`} className="btn">
-                查看公告
-              </Link>
-            </div>
+        </section>
+        <section className={`card ${styles.option}`}>
+          <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>先看看校園</h2>
+          <p style={{ margin: 0, color: 'var(--muted)', lineHeight: 1.8 }}>
+            公開公告與服務入口不用登入也能瀏覽。需要個人資料時，再登入即可。
+          </p>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <Link href={`/announcements${schoolSearch}`} className="btn">
+              查看公告
+            </Link>
+            <Link href={`/search${schoolSearch}`} className="btn">
+              瀏覽所有服務
+            </Link>
           </div>
-        </div>
+        </section>
       </div>
     </SiteShell>
   );

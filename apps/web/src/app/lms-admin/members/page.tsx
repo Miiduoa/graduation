@@ -39,7 +39,7 @@ export default function AdminMembersPage() {
     <RequireAdmin>
       <h1 style={{ marginTop: 0 }}>課程成員（快照）</h1>
       <p style={{ color: '#8E8E93' }}>上限 300 筆；如需完整報表請在 SQL／BI 工具處理。</p>
-      {error ? <p style={{ color: '#FF3B30' }}>{error}</p> : null}
+      {error ? <p style={{ color: 'var(--danger)' }}>{error}</p> : null}
       <div style={{ overflowX: 'auto', background: '#fff', borderRadius: 12, border: '1px solid #E5E5EA' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
           <thead style={{ background: '#F2F2F7', textAlign: 'left' }}>

@@ -25,6 +25,7 @@ import {
 } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { useAuth } from '../state/auth';
 import { shouldBlockForNoLogin, isDemoUid } from '../services/demoSession';
 import { useSchool } from '../state/school';
@@ -85,6 +86,7 @@ function formatLastTime(ts: any): string {
 // ═══════ Main Component ═══════
 
 export function DmsScreen(props: any) {
+  const s = useThemeStyleSheet(createStyles);
   const nav = props?.navigation;
   const auth = useAuth();
   const { school } = useSchool();
@@ -387,7 +389,7 @@ export function DmsScreen(props: any) {
 
 // ═══════ Styles ═══════
 
-const s = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   searchBar: {
     paddingHorizontal: 16,
     paddingVertical: 8,

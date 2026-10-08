@@ -83,7 +83,7 @@ type AuthContextValue = {
   isAdmin: boolean;
   isEditor: boolean;
   refreshProfile: () => Promise<void>;
-  signOut: () => Promise<void>;
+  signOut: (expectedUid?: string) => Promise<void>;
   signOutWithWarning: () => Promise<boolean>;
   clearTokenError: () => void;
 };
@@ -514,6 +514,8 @@ export function AuthProvider(props: { children: React.ReactNode }) {
 
   const requestIdRef = useRef(0);
   const isSigningOutRef = useRef(false);
+  const currentUserRef = useRef(user);
+  currentUserRef.current = user;
 
   const isAdmin = useMemo(() => {
     const role = profile?.role;
@@ -798,11 +800,22 @@ export function AuthProvider(props: { children: React.ReactNode }) {
     return () => clearInterval(interval);
   }, []);
 
-  const handleSignOut = useCallback(async (): Promise<{
+  const handleSignOut = useCallback(async (expectedUid?: string): Promise<{
     success: boolean;
     hadCleanupErrors: boolean;
   }> => {
+    const assertExpectedAccount = (allowSignedOut = false) => {
+      if (!expectedUid) return;
+      const currentUid = hasUsableFirebaseConfig()
+        ? getAuthInstance().currentUser?.uid
+        : currentUserRef.current?.uid;
+      if (currentUid !== expectedUid && !(allowSignedOut && !currentUid)) {
+        throw new Error('The account changed before sign out completed');
+      }
+    };
+    assertExpectedAccount();
     if (isSigningOutRef.current) {
+      if (expectedUid) throw new Error('Sign out is already in progress');
       console.log('[auth] Sign out already in progress');
       return { success: false, hadCleanupErrors: false };
     }
@@ -872,14 +885,17 @@ export function AuthProvider(props: { children: React.ReactNode }) {
     }
 
     try {
+      assertExpectedAccount();
       if (hasUsableFirebaseConfig()) {
         const auth = getAuthInstance();
         await signOut(auth);
       }
+      assertExpectedAccount(true);
       // 即使 Firebase 已 signOut，若使用者原本是 mockAuth 登入，
       // onAuthStateChanged 不會 fire（沒有 Firebase user 變化），
       // 所以這裡必須**主動清空 React state**，否則 App.tsx 不會跳回 LoginLanding。
       await clearMockAuthSession();
+      assertExpectedAccount(true);
       setUser(null);
       setProfile(null);
 
@@ -887,7 +903,9 @@ export function AuthProvider(props: { children: React.ReactNode }) {
       clearPUSession();
       setInMemoryPostLoginContext(null);
       await clearPUCache().catch(() => {});
+      assertExpectedAccount(true);
       await puCacheClearAll().catch(() => {});
+      assertExpectedAccount(true);
 
       setTokenError(null);
       setTokenExpired(false);
@@ -965,8 +983,8 @@ export function AuthProvider(props: { children: React.ReactNode }) {
       isAdmin,
       isEditor,
       refreshProfile,
-      signOut: async () => {
-        await handleSignOut();
+      signOut: async (expectedUid?: string) => {
+        await handleSignOut(expectedUid);
       },
       signOutWithWarning: handleSignOutWithWarning,
       clearTokenError,

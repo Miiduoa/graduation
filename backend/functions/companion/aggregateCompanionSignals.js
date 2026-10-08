@@ -3,10 +3,10 @@
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const {
   aggregateCompanionEvents,
-} = require('../../../packages/shared/dist-cjs/companion/signalAggregator');
+} = require('../generated/shared/companion/signalAggregator');
 const {
   evaluateAchievements,
-} = require('../../../packages/shared/dist-cjs/companion/achievements');
+} = require('../generated/shared/companion/achievements');
 
 /**
  * aggregateCompanionSignals — 每晚 cron，每位使用者跑一次。

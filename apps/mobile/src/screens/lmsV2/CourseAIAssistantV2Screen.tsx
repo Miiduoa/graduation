@@ -7,11 +7,14 @@
  * 這就是「LMS 內嵌對話 = 舊 AI 助理」的關鍵橋接。
  */
 import React, { useEffect } from 'react';
+import { theme } from '../../ui/theme';
+import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { useCourseV2Params, useCourseV2Nav } from './_courseV2Shell';
 import { buildPerCourseAIContext, buildPerCourseSystemHint } from '../../services/perCourseAIContext';
 
 export default function CourseAIAssistantV2Screen() {
+  const styles = useThemeStyleSheet(createStyles);
   const { courseId, courseName } = useCourseV2Params();
   const nav = useCourseV2Nav();
 
@@ -27,7 +30,7 @@ export default function CourseAIAssistantV2Screen() {
         seedContext: ctx,
         systemPromptPrefix: hint,
         courseId,
-        title: `${courseName ?? '課程'} · AI 助教`,
+        title: `${courseName ?? '課程'} · 課程助理`,
       };
       if (typeof nav.replace === 'function') {
         nav.replace('AIChat', args);
@@ -40,12 +43,12 @@ export default function CourseAIAssistantV2Screen() {
   return (
     <View style={styles.container}>
       <ActivityIndicator />
-      <Text style={styles.label}>連接到舊版 AI 助理…</Text>
+      <Text style={styles.label}>正在開啟課程助理…</Text>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
-  label: { color: '#8E8E93' },
+const createStyles = () => StyleSheet.create({
+  container: { flex: 1, backgroundColor: theme.colors.bg, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  label: { color: theme.colors.muted },
 });

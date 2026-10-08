@@ -9,7 +9,7 @@
   "functions": [
     {
       "source": "backend/functions",
-      "predeploy": ["pnpm --filter @campus/shared run build:cjs"]
+      "predeploy": ["pnpm --filter functions run build:shared"]
     }
   ],
   "emulators": {

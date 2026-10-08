@@ -9,6 +9,7 @@ const {
 } = require('../assistantAgent');
 const {
   getLastUserMessage,
+  normalizeAssistantText,
   detectCampusAssistantIntent,
   toJsDate,
   formatAssistantDate,
@@ -137,7 +138,7 @@ async function executeCampusAssistantCore({
   const context =
     request.data?.context && typeof request.data.context === 'object' ? request.data.context : {};
   const timeZone = context.timezone || 'Asia/Taipei';
-  const lastUserMessage = getLastUserMessage(rawMessages);
+  const lastUserMessage = normalizeAssistantText(getLastUserMessage(rawMessages));
   const intent =
     typeof routingIntent === 'string' && routingIntent.trim()
       ? routingIntent.trim()
@@ -186,6 +187,11 @@ async function executeCampusAssistantCore({
 
   if (uid) {
     await assertActiveSchoolMember(schoolId, uid);
+  }
+  // The profile may change between runtime prefetch and core execution.
+  // Never attach data collected for another account or school to this response.
+  if (prefetched.scope?.uid !== uid || prefetched.scope?.schoolId !== schoolId) {
+    prefetched = {};
   }
 
   const response = {
@@ -306,6 +312,7 @@ async function executeCampusAssistantCore({
       events,
       menus,
       pois,
+      pendingAssignments: Array.isArray(prefetched.assignments) ? prefetched.assignments : null,
       todaySchedule: prefetched.todaySchedule || null,
       dailyBrief: prefetched.dailyBrief || null,
     });
@@ -818,7 +825,7 @@ async function executeCampusAssistantCore({
 
     const pendingAssignments = Array.isArray(prefetched.assignments)
       ? prefetched.assignments
-      : await fetchAssistantPendingAssignments(uid, context.groupId);
+      : await fetchAssistantPendingAssignments(uid, schoolId, { preferredGroupId: context.groupId });
     response.debug.sourcesUsed = pendingAssignments.length;
     const target = pendingAssignments[0];
 
@@ -875,9 +882,9 @@ async function executeCampusAssistantCore({
 
     const pendingAssignments = Array.isArray(prefetched.assignments)
       ? prefetched.assignments
-      : await fetchAssistantPendingAssignments(uid, context.groupId);
+      : await fetchAssistantPendingAssignments(uid, schoolId, { preferredGroupId: context.groupId });
     const [weeklyReport, announcements] = await Promise.all([
-      fetchAssistantWeeklyReport(uid),
+      fetchAssistantWeeklyReport(uid, schoolId),
       Array.isArray(prefetched.announcements)
         ? Promise.resolve(prefetched.announcements)
         : fetchAssistantAnnouncements(schoolId),
@@ -940,6 +947,10 @@ async function executeCampusAssistantCore({
       lines.push(`${displayName}，這是你目前最值得先關注的重點：`);
     } else {
       lines.push('這是你目前最值得先關注的重點：');
+    }
+
+    if (prefetched.todaySchedule?.status === 'unavailable') {
+      lines.push(prefetched.todaySchedule.message);
     }
 
     if (pendingAssignments.length > 0) {

@@ -1,705 +1,351 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
-import React, { useMemo, useState, useCallback } from 'react';
-import {
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-  LayoutAnimation,
-  Platform,
-  UIManager,
-} from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { Pressable, Text, TextInput, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { AIScreen, AIHero, AICard, AISection, AIEmptyState } from '../ui/aiFirst';
 import { AppActionIcon } from '../ui/AppActionIcon';
 import type { GeneratedButtonIconId } from '../ui/generatedButtonIcons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
-import type { BusRoute, MenuItem, Poi } from '../data';
-import { useAsyncList } from '../hooks/useAsyncList';
-import { useDataSource } from '../hooks/useDataSource';
-import { isFeatureEnabled } from '../services/release';
-import { useAuth } from '../state/auth';
+import { useTheme } from '../state/theme';
 import { useSchool } from '../state/school';
-import { useAmbientCues } from '../features/engagement';
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
-import { AmbientCueCard } from '../ui/campusOs';
-import { shadowStyle, theme } from '../ui/theme';
-import { EmptyState } from '../ui/components';
-import { navigateToCourseScreen, migrateTabName } from '../utils/courseNavigation';
 import { safeNavigate } from '../utils/safeNavigate';
 import { aiOverlay } from '../app/useAIOverlay';
 import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
-import { getCampusPoi } from '../data/puCampusData';
 
-// Enable LayoutAnimation on Android
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
-
-// ═══════════════════════════════════════════════════════════
-// Service tile types
-// ═══════════════════════════════════════════════════════════
-
-interface ServiceItem {
+type ServiceItem = {
   icon: GeneratedButtonIconId;
   label: string;
-  /** 語意輔助（高密度網格內較抽象的項目） */
-  subtitle?: string;
-  tint: string;
-  /** Same-stack screen name, OR cross-tab navigation config */
-  screen?: string;
-  /** For cross-tab navigation: { tab: 'Today', screen: 'AIChat' } */
-  crossTab?: { tab: string; screen: string };
-  /** Search keywords (for filtering) */
-  keywords?: string[];
+  description: string;
+  screen: string;
+  keywords: string[];
+};
+const sections: Array<{ title: string; items: ServiceItem[] }> = [
+  {
+    title: '課餘生活',
+    items: [
+      {
+        icon: 'ic_people_community',
+        label: '校園社群',
+        description: '看板與近況',
+        screen: 'CampusSocialScreen',
+        keywords: ['社群', '看板', '動態', '發文', '學伴'],
+      },
+      {
+        icon: 'ic_tab_today',
+        label: '行事曆',
+        description: '課程與安排',
+        screen: 'SmartCalendarScreen',
+        keywords: ['今天', '時間', '行程', '日曆'],
+      },
+      {
+        icon: 'ic_tab_today',
+        label: '校園活動',
+        description: '找活動與報名',
+        screen: '活動總覽',
+        keywords: ['活動', '報名', '社團'],
+      },
+    ],
+  },
+  {
+    title: '校園服務',
+    items: [
+      {
+        icon: 'ic_restaurant',
+        label: '餐廳',
+        description: '菜單與訂餐',
+        screen: '餐廳總覽',
+        keywords: ['吃', '食堂', '餐飲', '菜單', '點餐'],
+      },
+      {
+        icon: 'ic_library',
+        label: '圖書館',
+        description: '館藏與借閱',
+        screen: 'Library',
+        keywords: ['借書', '還書', '自習', '蓋夏'],
+      },
+      {
+        icon: 'ic_dorm',
+        label: '宿舍',
+        description: '住宿服務',
+        screen: 'Dormitory',
+        keywords: ['住宿', '寢室', '報修'],
+      },
+      {
+        icon: 'ic_bus',
+        label: '校園公車',
+        description: '路線與站牌',
+        screen: 'BusV2',
+        keywords: ['公車', '校車', '搭車', '到站'],
+      },
+      {
+        icon: 'ic_navigate_pin',
+        label: '校園地圖',
+        description: '大樓與設施',
+        screen: 'MapV2',
+        keywords: ['地圖', '導航', '系所', '路線'],
+      },
+      {
+        icon: 'ic_navigate_pin',
+        label: '路線規劃',
+        description: '步行與轉乘',
+        screen: 'TripPlanner',
+        keywords: ['導航', '怎麼去', 'directions'],
+      },
+      {
+        icon: 'ic_bus',
+        label: '台中交通',
+        description: '高鐵與火車',
+        screen: 'TransportHub',
+        keywords: ['交通', '車站', '高鐵', '台鐵', 'youbike'],
+      },
+      {
+        icon: 'ic_print',
+        label: '列印',
+        description: '準備列印文件',
+        screen: 'PrintService',
+        keywords: ['印表機', '影印', '掃描', '文件'],
+      },
+      {
+        icon: 'ic_health_heart',
+        label: '健康',
+        description: '校園健康服務',
+        screen: 'Health',
+        keywords: ['醫療', '診所', '保健'],
+      },
+      {
+        icon: 'ic_lost_found',
+        label: '失物招領',
+        description: '找回遺失物品',
+        screen: 'LostFound',
+        keywords: ['失物', '招領', '撿到', '遺失'],
+      },
+      {
+        icon: 'ic_accessibility',
+        label: '無障礙設施',
+        description: '電梯與坡道',
+        screen: 'AccessibleRoute',
+        keywords: ['輪椅', '電梯', '坡道'],
+      },
+      {
+        icon: 'ic_payment_card',
+        label: '校園錢包',
+        description: '餘額與交易紀錄',
+        screen: 'Payment',
+        keywords: ['付款', '支付', '繳費', '儲值'],
+      },
+    ],
+  },
+];
+
+type Navigation = Parameters<typeof safeNavigate>[0];
+export function CampusHubScreen({ navigation }: { navigation?: Navigation }) {
+  const { school } = useSchool();
+  return <CampusDirectory key={school.id} schoolName={school.name} navigation={navigation} />;
 }
 
-interface ServiceSection {
-  title: string;
-  emoji: string;
-  items: ServiceItem[];
-}
-
-// ═══════════════════════════════════════════════════════════
-// Service Tile Component
-// ═══════════════════════════════════════════════════════════
-
-function ServiceTile(props: {
-  icon: GeneratedButtonIconId;
-  label: string;
-  subtitle?: string;
-  tint: string;
-  highlight?: boolean;
-  testID?: string;
-  onPress: () => void;
+function CampusDirectory({
+  schoolName,
+  navigation,
+}: {
+  schoolName: string;
+  navigation?: Navigation;
 }) {
+  const theme = useTheme();
+  const [query, setQuery] = useState('');
+  const filtered = useMemo(() => {
+    const keyword = query.trim().toLowerCase();
+    return sections
+      .map((section) => ({
+        ...section,
+        items: section.items.filter((item) =>
+          [item.label, item.description, ...item.keywords].some((text) =>
+            text.toLowerCase().includes(keyword),
+          ),
+        ),
+      }))
+      .filter((section) => section.items.length > 0);
+  }, [query]);
+  const openAssistant = () => aiOverlay.open({ mode: 'chat', source: 'campus_hub' });
+  const openService = (item: ServiceItem) => {
+    safeNavigate(navigation, item.screen, undefined, {
+      fallbackMessage: `「${item.label}」目前無法開啟。`,
+    });
+  };
+
   return (
-    <Pressable
-      testID={props.testID}
-      onPress={props.onPress}
-      style={({ pressed }) => ({
-        flex: 1,
-        paddingVertical: theme.space.md,
-        paddingHorizontal: theme.space.xs,
-        borderRadius: theme.radius.lg,
-        backgroundColor: props.highlight ? `${props.tint}12` : theme.colors.surface,
-        borderWidth: 1,
-        borderColor: props.highlight ? `${props.tint}30` : theme.colors.border,
-        alignItems: 'center',
-        gap: props.subtitle ? theme.space.xs : theme.space.sm,
-        minWidth: 72,
-        opacity: pressed ? 0.82 : 1,
-        transform: [{ scale: pressed ? 0.96 : 1 }],
-        ...shadowStyle(theme.shadows.sm),
-      })}
-    >
+    <AIScreen keyboardShouldPersistTaps="handled">
       <View
         style={{
-          width: 40,
-          height: 40,
-          borderRadius: theme.radius.md,
-          backgroundColor: `${props.tint}18`,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <AppActionIcon name={props.icon} size={22} fallback="ionicon" color={props.tint} />
-      </View>
-      <Text
-        style={{
-          color: props.highlight ? props.tint : theme.colors.text,
-          fontSize: 12,
-          fontWeight: props.highlight ? '800' : '600',
-          textAlign: 'center',
-        }}
-        numberOfLines={2}
-      >
-        {props.label}
-      </Text>
-      {props.subtitle ? (
-        <Text
-          style={{
-            color: theme.colors.muted,
-            fontSize: 10,
-            fontWeight: '500',
-            textAlign: 'center',
-            lineHeight: 13,
-          }}
-          numberOfLines={2}
-        >
-          {props.subtitle}
-        </Text>
-      ) : null}
-    </Pressable>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════
-// Section Header Component
-// ═══════════════════════════════════════════════════════════
-
-function SectionHeader(props: { emoji: string; title: string }) {
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: theme.space.sm,
-        marginBottom: theme.space.sm,
-      }}
-    >
-      <Text style={{ fontSize: 15 }}>{props.emoji}</Text>
-      <Text
-        style={{
-          color: theme.colors.text,
-          fontSize: 15,
-          fontWeight: '700',
-          letterSpacing: 0.3,
-        }}
-      >
-        {props.title}
-      </Text>
-    </View>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════
-// Search Bar Component
-// ═══════════════════════════════════════════════════════════
-
-function SearchBar(props: {
-  value: string;
-  onChangeText: (t: string) => void;
-  onAIPress: () => void;
-}) {
-  return (
-    <View style={{ flexDirection: 'row', gap: theme.space.sm, alignItems: 'center' }}>
-      <View
-        style={{
-          flex: 1,
+          paddingHorizontal: theme.layout.screenPadding,
+          paddingTop: theme.space.md,
           flexDirection: 'row',
           alignItems: 'center',
-          backgroundColor: theme.colors.surface,
-          borderRadius: theme.radius.lg,
-          borderWidth: 1,
-          borderColor: theme.colors.border,
-          paddingHorizontal: theme.space.md,
-          height: 42,
-          gap: theme.space.sm,
-        }}
-      >
-        <AppActionIcon name="ic_search" size={18} fallback="ionicon" color={theme.colors.muted} />
-        <TextInput
-          value={props.value}
-          onChangeText={props.onChangeText}
-          placeholder="搜尋服務、地點、功能..."
-          placeholderTextColor={theme.colors.muted}
-          style={{
-            flex: 1,
-            color: theme.colors.text,
-            fontSize: 14,
-            paddingVertical: 0,
-          }}
-          returnKeyType="search"
-        />
-        {props.value.length > 0 && (
-          <Pressable onPress={() => props.onChangeText('')}>
-            <AppActionIcon name="ic_clear_circle" size={18} fallback="ionicon" color={theme.colors.muted} />
-          </Pressable>
-        )}
-      </View>
-      <Pressable
-        onPress={props.onAIPress}
-        style={({ pressed }) => ({
-          width: 42,
-          height: 42,
-          borderRadius: theme.radius.lg,
-          backgroundColor: theme.colors.accent,
-          alignItems: 'center',
-          justifyContent: 'center',
-          opacity: pressed ? 0.8 : 1,
-          transform: [{ scale: pressed ? 0.94 : 1 }],
-          ...shadowStyle(theme.shadows.md),
-        })}
-      >
-        <AppActionIcon name="ic_ai_sparkles" size={22} fallback="ionicon" color={theme.colors.onAccent} />
-      </Pressable>
-    </View>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════
-// Map Card (compact version)
-// ═══════════════════════════════════════════════════════════
-
-function CompactMapCard(props: { onPress: () => void; onARPress: () => void }) {
-  return (
-    <Pressable
-      testID="e2e-campus-open-map"
-      onPress={props.onPress}
-      style={({ pressed }) => ({
-        borderRadius: theme.radius.xl,
-        overflow: 'hidden',
-        opacity: pressed ? 0.9 : 1,
-        ...shadowStyle(theme.shadows.md),
-      })}
-    >
-      <View
-        style={{
-          height: 100,
-          backgroundColor:
-            theme.mode === 'dark' ? theme.colors.surface3 : theme.colors.infoSoft,
-          justifyContent: 'center',
-          alignItems: 'center',
-          borderWidth: 1,
-          borderColor: theme.colors.border,
-          borderRadius: theme.radius.xl,
-          flexDirection: 'row',
           gap: theme.space.md,
         }}
       >
-        <View style={{ flexDirection: 'row', gap: 12, opacity: 0.25 }}>
-          {[0, 1, 2].map((i) => (
-            <View
-              key={i}
-              style={{
-                width: 40 + i * 14,
-                height: 28 + i * 8,
-                borderRadius: 6,
-                backgroundColor: theme.colors.accent,
-              }}
-            />
-          ))}
-        </View>
-        <View style={{ alignItems: 'center', gap: 4 }}>
+        <HeaderAvatarButton />
+        <Text style={{ ...theme.typography.bodySmall, color: theme.colors.muted }}>
+          {schoolName}
+        </Text>
+      </View>
+      <AIHero title="校園" subtitle="找地點、查服務，安排課餘生活。" />
+      <AICard>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.sm }}>
           <View
             style={{
-              width: 36,
-              height: 36,
-              borderRadius: 18,
+              flex: 1,
+              minHeight: 48,
+              borderWidth: 1,
+              borderColor: theme.colors.border,
+              borderRadius: theme.radius.md,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: theme.space.sm,
+              paddingHorizontal: theme.space.sm,
+            }}
+          >
+            <Ionicons name="search-outline" size={18} color={theme.colors.muted} />
+            <TextInput
+              accessibilityLabel="搜尋校園服務"
+              value={query}
+              onChangeText={setQuery}
+              placeholder="搜尋地點或服務"
+              placeholderTextColor={theme.colors.muted}
+              maxLength={120}
+              returnKeyType="search"
+              style={{
+                flex: 1,
+                minHeight: 48,
+                ...theme.typography.bodySmall,
+                color: theme.colors.text,
+              }}
+            />
+            {query ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="清除搜尋"
+                onPress={() => setQuery('')}
+                style={{
+                  minWidth: 44,
+                  minHeight: 44,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                }}
+              >
+                <Ionicons name="close-circle-outline" size={20} color={theme.colors.muted} />
+              </Pressable>
+            ) : null}
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="詢問校園助理"
+            onPress={openAssistant}
+            style={({ pressed }) => ({
+              width: 48,
+              height: 48,
+              borderRadius: theme.radius.md,
               backgroundColor: theme.colors.accent,
               alignItems: 'center',
               justifyContent: 'center',
-            }}
-          >
-            <AppActionIcon
-              name="ic_navigate_pin"
-              size={20}
-              fallback="ionicon"
-              color={theme.colors.onAccent}
-            />
-          </View>
-          <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: '700' }}>
-            校園地圖
-          </Text>
-        </View>
-      </View>
-
-      <Pressable
-        onPress={props.onARPress}
-        style={({ pressed }) => ({
-          position: 'absolute',
-          bottom: theme.space.sm,
-          right: theme.space.sm,
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: theme.space.xs,
-          paddingHorizontal: theme.space.sm,
-          paddingVertical: 5,
-          borderRadius: theme.radius.full,
-          backgroundColor: theme.colors.surface,
-          borderWidth: 1,
-          borderColor: theme.colors.border,
-          opacity: pressed ? 0.8 : 1,
-          ...shadowStyle(theme.shadows.sm),
-        })}
-      >
-        <AppActionIcon name="ic_ar_glasses" size={16} fallback="ionicon" color={theme.colors.accent} />
-        <Text style={{ color: theme.colors.accent, fontSize: 11, fontWeight: '700' }}>AR</Text>
-      </Pressable>
-    </Pressable>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════
-// Main Screen
-// ═══════════════════════════════════════════════════════════
-
-export function CampusHubScreen(props: Record<string, unknown>) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const nav = props?.navigation as any;
-  const insets = useSafeAreaInsets();
-  const auth = useAuth();
-  const { school } = useSchool();
-  const ds = useDataSource();
-  const paymentsEnabled = isFeatureEnabled('payments');
-
-  const [searchQuery, setSearchQuery] = useState('');
-
-  const {
-    items: pois,
-    refreshing,
-    refresh,
-  } = useAsyncList<Poi>(async () => (await ds.listPois(school.id)).slice(0, 5), [ds, school.id]);
-
-  const { items: routes } = useAsyncList<BusRoute>(
-    async () => ds.listBusRoutes(school.id),
-    [ds, school.id],
-  );
-
-  const { items: menus } = useAsyncList<MenuItem>(
-    async () => (await ds.listMenus(school.id)).slice(0, 3),
-    [ds, school.id],
-  );
-
-  const {
-    cue: ambientCue,
-    dismissCue: dismissAmbientCue,
-    openCue: openAmbientCue,
-  } = useAmbientCues({
-    schoolId: school.id,
-    uid: auth.user?.uid ?? null,
-    role: 'student',
-    surface: 'campus',
-    limit: 1,
-  });
-
-  // ═══════════════════════════════════════════════════════
-  // 9 個實體校園服務磚（精簡版，3x3 格）
-  // 設計原則：只放「實體位置/物理服務」；抽象功能交給 AI 球
-  // ═══════════════════════════════════════════════════════
-
-  const serviceSections: ServiceSection[] = useMemo(() => {
-    const paymentOrAr: ServiceItem = paymentsEnabled
-      ? {
-          icon: 'ic_payment_card',
-          label: '校園支付',
-          subtitle: '付款與繳費',
-          tint: theme.colors.streak,
-          screen: 'Payment',
-          keywords: ['付款', '支付', '繳費', '儲值'],
-        }
-      : {
-          icon: 'ic_ar_nav_badge',
-          label: 'AR 導航',
-          subtitle: '實景路徑',
-          tint: theme.colors.accent,
-          screen: 'ARNavigation',
-          keywords: ['ar', '導航', '擴增實境'],
-        };
-
-    return [
-      {
-        title: '師生連結',
-        emoji: '💬',
-        items: [
-          {
-            icon: 'ic_people_community',
-            label: '校園社群',
-            subtitle: '看板・動態',
-            tint: theme.colors.social,
-            crossTab: { tab: 'Today', screen: 'CampusSocialScreen' },
-            keywords: ['社群', '看板', '動態', '匿名', '學伴', '即時', 'story', '發文'],
-          },
-          {
-            icon: 'ic_tab_today',
-            label: '今天的故事',
-            subtitle: '一日完整動線',
-            tint: theme.colors.accent,
-            // DemoStory 註冊在 LearnStack（不是 HomeStack），所以要走「學習」tab
-            crossTab: { tab: '學習', screen: 'DemoStory' },
-            keywords: ['今天', '一天', '故事', 'timeline', '行程', '時程'],
-          },
-        ],
-      },
-      {
-        title: '校園服務',
-        emoji: '🏫',
-        items: [
-          {
-            icon: 'ic_restaurant',
-            label: '餐廳',
-            tint: theme.colors.achievement,
-            screen: '餐廳總覽',
-            keywords: ['餐廳', '吃', '食堂', '餐飲', '菜單', '點餐'],
-          },
-          {
-            icon: 'ic_library',
-            label: '圖書館',
-            tint: theme.colors.calm,
-            screen: 'Library',
-            keywords: ['圖書館', '借書', '還書', '自習', '蓋夏'],
-          },
-          {
-            icon: 'ic_dorm',
-            label: '宿舍',
-            tint: theme.colors.growth,
-            screen: 'Dormitory',
-            keywords: ['宿舍', '住宿', '寢室', '報修'],
-          },
-          {
-            icon: 'ic_bus',
-            label: '校園公車',
-            subtitle: '即時 · AI · 搭車中',
-            tint: theme.colors.info,
-            screen: 'BusV2',
-            keywords: ['公車', '校車', '搭車', '到站', 'AI 搭車', '搭車中'],
-          },
-          {
-            icon: 'ic_navigate_pin',
-            label: '校園地圖 V2',
-            subtitle: 'Google Maps 級',
-            tint: theme.colors.accent,
-            screen: 'MapV2',
-            keywords: ['地圖', '導航', 'turn by turn', '路線'],
-          },
-          {
-            icon: 'ic_navigate_pin',
-            label: '路線規劃',
-            subtitle: '走路 / 公車組合',
-            tint: theme.colors.success,
-            screen: 'TripPlanner',
-            keywords: ['路線', '導航', '規劃', 'directions', '怎麼去'],
-          },
-          {
-            icon: 'ic_bus',
-            label: '台中交通',
-            subtitle: '高鐵 / 火車',
-            tint: theme.colors.info,
-            screen: 'TransportHub',
-            keywords: ['交通', '車站', '高鐵', '台鐵', 'YouBike'],
-          },
-          {
-            icon: 'ic_print',
-            label: '列印',
-            tint: theme.colors.social,
-            screen: 'PrintService',
-            keywords: ['列印', '印表機', '影印', '掃描'],
-          },
-          {
-            icon: 'ic_health_heart',
-            label: '健康',
-            tint: theme.colors.danger,
-            screen: 'Health',
-            keywords: ['健康', '醫療', '診所', '保健'],
-          },
-          {
-            icon: 'ic_lost_found',
-            label: '失物招領',
-            tint: theme.colors.warning,
-            screen: 'LostFound',
-            keywords: ['失物', '招領', '撿到', '遺失'],
-          },
-          {
-            icon: 'ic_accessibility',
-            label: '無障礙路線',
-            subtitle: '電梯・坡道',
-            tint: theme.colors.fresh,
-            screen: 'AccessibleRoute',
-            keywords: ['無障礙', '輪椅', '電梯', '坡道'],
-          },
-          paymentOrAr,
-        ],
-      },
-    ];
-  }, [paymentsEnabled]);
-
-  // ═══════════════════════════════════════════════════════
-  // Search filter
-  // ═══════════════════════════════════════════════════════
-
-  const filteredSections = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return serviceSections;
-
-    const result: ServiceSection[] = [];
-    for (const section of serviceSections) {
-      const matchedItems = section.items.filter(
-        (item) =>
-          item.label.toLowerCase().includes(q) ||
-          (item.subtitle?.toLowerCase().includes(q) ?? false) ||
-          (item.keywords ?? []).some((k) => k.includes(q)),
-      );
-      if (matchedItems.length > 0) {
-        result.push({ ...section, items: matchedItems });
-      }
-    }
-    return result;
-  }, [searchQuery, serviceSections]);
-
-  // ═══════════════════════════════════════════════════════
-  // Navigation handler
-  // ═══════════════════════════════════════════════════════
-
-  const handleServicePress = useCallback(
-    (item: ServiceItem) => {
-      if (item.crossTab) {
-        if (
-          item.crossTab.tab === '課程' ||
-          item.crossTab.tab === '教學' ||
-          item.crossTab.tab === '學習'
-        ) {
-          navigateToCourseScreen(nav, auth.profile?.role, item.crossTab.screen);
-          return;
-        }
-        // 自動將舊 Tab 名稱遷移到新導航
-        const tab = migrateTabName(item.crossTab.tab);
-        // safeNavigate 會處理「當前 stack 沒有此 route」的 cross-tab bubbling，
-        // 並在完全找不到時跳 Alert 而不是 silent no-op（原本是 nav.navigate raw call，
-        // 路由不對就讓使用者覺得「點了沒反應」）
-        safeNavigate(nav, item.crossTab.screen, undefined, {
-          fallbackRoute: tab,
-        });
-      } else if (item.screen) {
-        safeNavigate(nav, item.screen, undefined, {
-          fallbackMessage: `「${item.label}」目前無法開啟。`,
-        });
-      }
-    },
-    [auth.profile?.role, nav],
-  );
-
-  const handleAIPress = useCallback(() => {
-    aiOverlay.open({ mode: 'chat', source: 'campus_hub' });
-  }, []);
-
-  // ═══════════════════════════════════════════════════════
-  // Render
-  // ═══════════════════════════════════════════════════════
-
-  return (
-    <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
-      <ScrollView
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={refresh}
-            tintColor={theme.colors.accent}
-            colors={[theme.colors.accent]}
-          />
-        }
-        contentContainerStyle={{
-          paddingTop: insets.top + theme.space.lg,
-          paddingHorizontal: theme.layout.screenPadding,
-          paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + theme.space.lg,
-          gap: theme.space.lg,
-        }}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        {/* ── Header ── */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.md }}>
-          <HeaderAvatarButton />
-          <View style={{ flex: 1, gap: theme.space.xs }}>
-            <Text
-              style={{
-                color: theme.colors.muted,
-                fontSize: theme.typography.overline.fontSize,
-                fontWeight: theme.typography.overline.fontWeight ?? '700',
-                letterSpacing: theme.typography.overline.letterSpacing ?? 1.5,
-                textTransform: 'uppercase',
-              }}
-            >
-              {school.name}
-            </Text>
-            <Text
-              style={{
-                color: theme.colors.text,
-                fontSize: theme.typography.display.fontSize,
-                fontWeight: theme.typography.display.fontWeight ?? '800',
-                letterSpacing: theme.typography.display.letterSpacing,
-              }}
-            >
-              校園
-            </Text>
-          </View>
-        </View>
-
-        {/* ── Search Bar + AI Button ── */}
-        <SearchBar
-          value={searchQuery}
-          onChangeText={(t) => {
-            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-            setSearchQuery(t);
-          }}
-          onAIPress={handleAIPress}
-        />
-
-        {/* ── Ambient Cue (活動通知) ── */}
-        {ambientCue && !searchQuery ? (
-          <AmbientCueCard
-            signalType={ambientCue.signalType}
-            headline={ambientCue.headline}
-            body={ambientCue.body}
-            metric={ambientCue.metric}
-            actionLabel={ambientCue.ctaLabel}
-            onPress={() => openAmbientCue(ambientCue, nav)}
-            onDismiss={() => {
-              void dismissAmbientCue(ambientCue);
-            }}
-          />
-        ) : null}
-
-        {/* ── Map Card (hide when searching) ── */}
-        {!searchQuery ? (
-          <CompactMapCard
-            onPress={() => safeNavigate(nav, 'MapV2')}
-            onARPress={() => {
-              const gate = getCampusPoi('pu-gate-main');
-              safeNavigate(nav, 'ARNavigation', {
-                destination: gate?.name ?? '正門（臺灣大道）',
-                destinationId: 'pu-gate-main',
-                destinationLat: gate?.lat,
-                destinationLng: gate?.lng,
-              });
-            }}
-          />
-        ) : null}
-
-        {/* ── Service Sections ── */}
-        {filteredSections.map((section) => (
-          <View key={section.title} style={{ gap: theme.space.md }}>
-            <SectionHeader emoji={section.emoji} title={section.title} />
-            {/* Render rows of 4 */}
-            {Array.from({ length: Math.ceil(section.items.length / 4) }, (_, rowIdx) => {
-              const rowItems = section.items.slice(rowIdx * 4, rowIdx * 4 + 4);
-              const fillerCount = 4 - rowItems.length;
-
-              return (
-                <View key={rowIdx} style={{ flexDirection: 'row', gap: theme.space.sm }}>
-                  {rowItems.map((item) => (
-                    <ServiceTile
-                      key={item.label}
-                      icon={item.icon}
-                      label={item.label}
-                      subtitle={item.subtitle}
-                      tint={item.tint}
-                      testID={item.label === '餐廳' ? 'e2e-campus-open-cafeteria' : undefined}
-                      highlight={section.title === '快捷入口' && item.label === 'AI 助理'}
-                      onPress={() => handleServicePress(item)}
-                    />
-                  ))}
-                  {Array.from({ length: fillerCount }, (_, i) => (
-                    <View key={`empty-${i}`} style={{ flex: 1, minWidth: 72 }} />
-                  ))}
-                </View>
-              );
+              opacity: pressed ? 0.75 : 1,
             })}
+          >
+            <Ionicons name="chatbubble-outline" size={21} color={theme.colors.onAccent} />
+          </Pressable>
+        </View>
+      </AICard>
+      {!query.trim() ? (
+        <AICard title="先找到要去的地方">
+          <Pressable
+            testID="e2e-campus-open-map"
+            accessibilityRole="button"
+            accessibilityLabel="開啟校園地圖"
+            onPress={() => safeNavigate(navigation, 'MapV2')}
+            style={({ pressed }) => ({
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: theme.space.md,
+              minHeight: 64,
+              opacity: pressed ? 0.75 : 1,
+            })}
+          >
+            <View
+              style={{
+                width: 48,
+                height: 48,
+                backgroundColor: theme.colors.accentSoft,
+                borderRadius: theme.radius.md,
+                justifyContent: 'center',
+                alignItems: 'center',
+              }}
+            >
+              <Ionicons name="map-outline" size={24} color={theme.colors.accent} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ ...theme.typography.h3, color: theme.colors.text }}>校園地圖</Text>
+              <Text style={{ ...theme.typography.bodySmall, color: theme.colors.muted }}>
+                搜尋大樓、系所與設施，查看步行路線。
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={theme.colors.muted} />
+          </Pressable>
+        </AICard>
+      ) : null}
+      {filtered.map((section) => (
+        <AISection key={section.title} title={section.title}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+            {section.items.map((item) => (
+              <Pressable
+                key={item.label}
+                accessibilityRole="button"
+                accessibilityLabel={`${item.label}，${item.description}`}
+                testID={item.label === '餐廳' ? 'e2e-campus-open-cafeteria' : undefined}
+                onPress={() => openService(item)}
+                style={({ pressed }) => ({
+                  width: '33.333%',
+                  minHeight: 116,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: theme.space.xs,
+                  paddingHorizontal: theme.space.xs,
+                  paddingVertical: theme.space.md,
+                  backgroundColor: pressed ? theme.colors.surfaceMuted : theme.colors.surface,
+                })}
+              >
+                <AppActionIcon
+                  name={item.icon}
+                  size={24}
+                  fallback="ionicon"
+                  color={theme.colors.accent}
+                />
+                <Text
+                  style={{
+                    ...theme.typography.label,
+                    color: theme.colors.text,
+                    textAlign: 'center',
+                    marginTop: theme.space.xs,
+                  }}
+                >
+                  {item.label}
+                </Text>
+                <Text
+                  style={{
+                    ...theme.typography.caption,
+                    color: theme.colors.muted,
+                    textAlign: 'center',
+                  }}
+                >
+                  {item.description}
+                </Text>
+              </Pressable>
+            ))}
           </View>
-        ))}
-
-        {/* ── Empty search state ── */}
-        {searchQuery.length > 0 && filteredSections.length === 0 ? (
-          <EmptyState
-            variant="search"
-            title={`找不到「${searchQuery}」相關的服務`}
-            subtitle="試試其他關鍵字，或請 AI 助理協助。"
-            actionText="問問 AI 助理"
-            onAction={handleAIPress}
-          />
-        ) : null}
-      </ScrollView>
-    </View>
+        </AISection>
+      ))}
+      {filtered.length === 0 ? (
+        <AIEmptyState
+          title={`找不到「${query.trim()}」相關的服務`}
+          subtitle="試試其他關鍵字，或詢問校園助理。"
+        />
+      ) : null}
+    </AIScreen>
   );
 }

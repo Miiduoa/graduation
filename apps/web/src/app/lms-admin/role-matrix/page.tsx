@@ -122,8 +122,8 @@ export default function RoleMatrixPage() {
           style={{
             padding: '8px 14px',
             borderRadius: 8,
-            border: '1px solid #5856D6',
-            background: '#5856D6',
+            border: '1px solid var(--brand)',
+            background: 'var(--brand)',
             color: '#fff',
             fontWeight: 700,
             cursor: 'pointer',
@@ -131,10 +131,10 @@ export default function RoleMatrixPage() {
           onClick={() => void addSlugFromPrompt()}>
           新增能力 slug
         </button>
-        {info ? <p style={{ color: '#34C759', margin: 0 }}>{info}</p> : null}
+        {info ? <p style={{ color: 'var(--success)', margin: 0 }}>{info}</p> : null}
       </div>
 
-      {error ? <p style={{ color: '#FF3B30' }}>{error}</p> : null}
+      {error ? <p style={{ color: 'var(--danger)' }}>{error}</p> : null}
 
       <div style={{ overflowX: 'auto', marginTop: 16, background: '#fff', border: '1px solid #E5E5EA', borderRadius: 12 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>

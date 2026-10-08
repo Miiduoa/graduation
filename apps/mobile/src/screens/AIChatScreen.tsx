@@ -605,9 +605,9 @@ function ThinkingBubble(props: { steps: ThinkingStepUI[]; collapsed?: boolean })
   const [isExpanded, setIsExpanded] = useState(false);
   const statusIcon: Record<string, { icon: string; color: string }> = {
     done: { icon: 'checkmark-circle', color: '#34C759' },
-    checking: { icon: 'sync-outline', color: '#5856D6' },
+    checking: { icon: 'sync-outline', color: theme.colors.accent },
     warning: { icon: 'alert-circle', color: '#FF9500' },
-    info: { icon: 'information-circle', color: '#5856D6' },
+    info: { icon: 'information-circle', color: theme.colors.accent },
   };
 
   return (
@@ -800,8 +800,8 @@ function ToolStatusCard(props: { execution: ToolExecution; tool: AgentTool | und
   const statusConfig: Record<ToolExecutionStatus, { icon: string; color: string; label: string }> =
     {
       pending: { icon: 'hourglass-outline', color: '#FF9500', label: '等待中' },
-      confirming: { icon: 'help-circle-outline', color: '#5856D6', label: '待確認' },
-      executing: { icon: 'sync-outline', color: '#5856D6', label: '執行中' },
+      confirming: { icon: 'help-circle-outline', color: theme.colors.accent, label: '待確認' },
+      executing: { icon: 'sync-outline', color: theme.colors.accent, label: '執行中' },
       success: { icon: 'checkmark-circle', color: '#34C759', label: '完成' },
       failed: { icon: 'close-circle', color: '#FF3B30', label: '失敗' },
       cancelled: { icon: 'ban-outline', color: '#8E8E93', label: '已取消' },
@@ -1487,15 +1487,15 @@ function MessageBubble(props: {
               width: 22,
               height: 22,
               borderRadius: 11,
-              backgroundColor: '#5856D6',
+              backgroundColor: theme.colors.accent,
               alignItems: 'center',
               justifyContent: 'center',
             }}
           >
-            <Ionicons name="flash" size={12} color="#fff" />
+            <Ionicons name="chatbubble-outline" size={12} color={theme.colors.onAccent} />
           </View>
           <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: '600' }}>
-            AI Agent
+            校園助理
           </Text>
           {message.choiceMenu && message.choiceMenu.options.length > 0 && (
             <View
@@ -1515,10 +1515,10 @@ function MessageBubble(props: {
                 paddingHorizontal: 6,
                 paddingVertical: 1,
                 borderRadius: 4,
-                backgroundColor: '#5856D615',
+                backgroundColor: theme.colors.accentSoft,
               }}
             >
-              <Text style={{ color: '#5856D6', fontSize: 9, fontWeight: '600' }}>
+              <Text style={{ color: theme.colors.accent, fontSize: 9, fontWeight: '600' }}>
                 {message.agentType === 'tool_confirm'
                   ? '確認'
                   : message.agentType === 'tool_executing'
@@ -1876,7 +1876,7 @@ export function AIChatScreen(props: any) {
           ? '使用已下載的 AI 模型在裝置上推理'
           : '連線到你設定的本機 LLM server',
         icon: 'hardware-chip-outline' as const,
-        color: aiStatus.localModelReady ? '#AF52DE' : '#5856D6',
+        color: aiStatus.localModelReady ? '#AF52DE' : theme.colors.accent,
       };
     }
     return {
@@ -4004,7 +4004,7 @@ export function AIChatScreen(props: any) {
         return {
           id: uid(),
           role: 'assistant',
-          content: `我是你的校園全能 AI 助理，可以幫你規劃並執行已串接的校園操作：\n\n${caps.join('\n')}\n\n餐廳已開通線上接單時，我會送到餐廳點餐 API；沒有正式 API 的項目，我會建立請假信或報修草稿，不會假裝已送出。\n試試說「幫我訂午餐」或「我想請假」。`,
+          content: `我是你的校園助理，可以幫你規劃並執行已串接的校園操作：\n\n${caps.join('\n')}\n\n餐廳已開通線上接單時，我會送到餐廳點餐 API；沒有正式 API 的項目，我會建立請假信或報修草稿，不會假裝已送出。\n試試說「幫我訂午餐」或「我想請假」。`,
           timestamp: new Date(),
           agentType: 'text',
           suggestions: ['幫我訂午餐', '我頭有點痛', '幫我查成績'],
@@ -7133,14 +7133,14 @@ export function AIChatScreen(props: any) {
         if (!emergencyContent) {
           if (/你好|嗨|哈囉|hello|hi|hey|早安|午安|晚安/.test(_userText)) {
             emergencyContent =
-              '你好！我是靜宜校園 AI 助理 🎓\n\n可以問我交通資訊、校園設施、課程問題等，我會盡力幫你解答！';
+              '你好！我是校園助理\n\n可以問我交通資訊、校園設施、課程問題等，我會盡力幫你解答！';
             emergencySuggestions = ['怎麼去台中車站', '圖書館開放時間', '今天有什麼課'];
           } else if (/謝謝|感謝|thx|thanks/.test(_userText)) {
             emergencyContent = '不客氣！有其他問題隨時問我 😊';
             emergencySuggestions = ['還有其他問題', '查課表', '查交通'];
           } else if (/你是誰|你叫什麼|自我介紹/.test(_userText)) {
             emergencyContent =
-              '我是靜宜大學校園 AI 助理！\n\n我可以幫你：\n- 🚌 查交通路線（怎麼去台中車站、高鐵等）\n- 📚 查課程和作業資訊\n- 🏫 校園設施位置與開放時間\n- 🍽️ 餐廳和用餐資訊\n- 📋 請假、選課等學務問題\n\n有什麼想問的，儘管說！';
+              '我是靜宜大學校園助理！\n\n我可以幫你：\n- 🚌 查交通路線（怎麼去台中車站、高鐵等）\n- 📚 查課程和作業資訊\n- 🏫 校園設施位置與開放時間\n- 🍽️ 餐廳和用餐資訊\n- 📋 請假、選課等學務問題\n\n有什麼想問的，儘管說！';
             emergencySuggestions = ['怎麼去台中車站', '圖書館在哪', '今天吃什麼'];
           }
         }
@@ -7796,12 +7796,12 @@ export function AIChatScreen(props: any) {
                       width: 22,
                       height: 22,
                       borderRadius: 11,
-                      backgroundColor: '#5856D6',
+                      backgroundColor: theme.colors.accent,
                       alignItems: 'center',
                       justifyContent: 'center',
                     }}
                   >
-                    <Ionicons name="flash" size={12} color="#fff" />
+                    <Ionicons name="chatbubble-outline" size={12} color={theme.colors.onAccent} />
                   </View>
                   <Text style={{ color: theme.colors.muted, fontSize: 11 }}>思考中...</Text>
                 </View>
@@ -7857,7 +7857,7 @@ export function AIChatScreen(props: any) {
                       : agentContext.state === 'confirming' ||
                           agentContext.state === 'waiting_chain_confirm'
                         ? '#FF9500'
-                        : '#5856D6',
+                        : theme.colors.accent,
                 }}
               />
               <Text style={{ color: theme.colors.muted, fontSize: 11 }}>
@@ -7922,13 +7922,13 @@ export function AIChatScreen(props: any) {
                 width: 40,
                 height: 40,
                 borderRadius: 20,
-                backgroundColor: input.trim() ? '#5856D6' : theme.colors.surface2,
+                backgroundColor: input.trim() ? theme.colors.accent : theme.colors.surface2,
                 alignItems: 'center',
                 justifyContent: 'center',
                 opacity: pressed ? 0.8 : 1,
               })}
             >
-              <Ionicons name="send" size={18} color={input.trim() ? '#fff' : theme.colors.muted} />
+              <Ionicons name="send" size={18} color={input.trim() ? theme.colors.onAccent : theme.colors.muted} />
             </Pressable>
           </View>
         </View>

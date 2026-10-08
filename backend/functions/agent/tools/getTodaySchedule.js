@@ -9,7 +9,7 @@ const inputSchema = z.object({
 
 async function execute(ctx, rawInput) {
   const input = inputSchema.parse(rawInput ?? {});
-  return fetchAssistantTodaySchedule(ctx.uid, {
+  return fetchAssistantTodaySchedule(ctx.uid, ctx.schoolId, {
     timeZone: input.timeZone || ctx.timeZone || 'Asia/Taipei',
   });
 }

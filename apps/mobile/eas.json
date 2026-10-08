@@ -39,7 +39,13 @@
       "channel": "production",
       "autoIncrement": true,
       "env": {
-        "APP_ENV": "production"
+        "APP_ENV": "production",
+        "EXPO_PUBLIC_API_ENV": "production",
+        "EXPO_PUBLIC_DATA_SOURCE_MODE": "firebase",
+        "EXPO_PUBLIC_FORCE_REAL_DATA": "true",
+        "EXPO_PUBLIC_HYBRID_FALLBACK_TO_MOCK": "false",
+        "EXPO_PUBLIC_ENABLE_UNIVERSAL_DEV_ACCOUNTS": "false",
+        "EXPO_PUBLIC_ALLOW_LOCAL_MOCK_AUTH": "false"
       },
       "ios": {
         "resourceClass": "m-medium"
@@ -52,13 +58,9 @@
   "submit": {
     "production": {
       "ios": {
-        "appleId": "${APPLE_ID}",
-        "ascAppId": "${ASC_APP_ID}",
-        "appleTeamId": "${APPLE_TEAM_ID}",
         "language": "zh-Hant"
       },
       "android": {
-        "serviceAccountKeyPath": "${GOOGLE_SERVICE_ACCOUNT_KEY_PATH}",
         "track": "internal",
         "releaseStatus": "draft",
         "changesNotSentForReview": true

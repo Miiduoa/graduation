@@ -66,9 +66,9 @@ const COURSE_COLORS = [
   '#FF2D55',
   '#FF9500',
   '#34C759',
-  '#5856D6',
+  theme.colors.accent,
   '#FF3B30',
-  '#5856D6',
+  theme.colors.accent,
   '#14B8A6',
 ];
 

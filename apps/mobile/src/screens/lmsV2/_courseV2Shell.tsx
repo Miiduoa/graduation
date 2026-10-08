@@ -5,6 +5,8 @@
  * 以及 useCourseRouteParams() 抓 courseId,讓每個 V2 Screen 只專注 fetch + render。
  */
 import React, { useEffect, useState, useCallback } from 'react';
+import { theme } from '../../ui/theme';
+import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 import { View, Text, ActivityIndicator, ScrollView, StyleSheet, Pressable, RefreshControl } from 'react-native';
 import { useRoute, useNavigation, type RouteProp } from '@react-navigation/native';
 
@@ -37,6 +39,7 @@ export function CourseV2Header({
   subtitle?: string;
   rightAction?: { label: string; onPress: () => void };
 }) {
+  const styles = useThemeStyleSheet(createStyles);
   return (
     <View style={styles.header}>
       <View style={{ flex: 1 }}>
@@ -46,7 +49,7 @@ export function CourseV2Header({
         {subtitle ? <Text style={styles.headerSubtitle}>{subtitle}</Text> : null}
       </View>
       {rightAction ? (
-        <Pressable style={styles.headerBtn} onPress={rightAction.onPress}>
+        <Pressable accessibilityRole="button" style={styles.headerBtn} onPress={rightAction.onPress}>
           <Text style={styles.headerBtnLabel}>{rightAction.label}</Text>
         </Pressable>
       ) : null}
@@ -55,6 +58,7 @@ export function CourseV2Header({
 }
 
 export function CourseV2Loading({ label = '載入中…' }: { label?: string }) {
+  const styles = useThemeStyleSheet(createStyles);
   return (
     <View style={styles.center}>
       <ActivityIndicator />
@@ -64,6 +68,7 @@ export function CourseV2Loading({ label = '載入中…' }: { label?: string }) 
 }
 
 export function CourseV2Empty({ label = '目前沒有資料' }: { label?: string }) {
+  const styles = useThemeStyleSheet(createStyles);
   return (
     <View style={styles.center}>
       <Text style={styles.muted}>{label}</Text>
@@ -78,11 +83,12 @@ export function CourseV2Error({
   error: string;
   onRetry?: () => void;
 }) {
+  const styles = useThemeStyleSheet(createStyles);
   return (
     <View style={styles.center}>
       <Text style={styles.error}>{error}</Text>
       {onRetry ? (
-        <Pressable style={styles.btn} onPress={onRetry}>
+        <Pressable accessibilityRole="button" style={styles.btn} onPress={onRetry}>
           <Text style={styles.btnLabel}>重試</Text>
         </Pressable>
       ) : null}
@@ -129,13 +135,14 @@ export function CourseV2List<T>({
   renderItem: (item: T, idx: number) => React.ReactNode;
   emptyLabel?: string;
 }) {
+  const styles = useThemeStyleSheet(createStyles);
   if (loadable.loading && !loadable.data) return <CourseV2Loading />;
   if (loadable.error) return <CourseV2Error error={loadable.error} onRetry={loadable.refresh} />;
   const items = loadable.data ?? [];
   if (items.length === 0) return <CourseV2Empty label={emptyLabel} />;
   return (
     <ScrollView
-      style={{ flex: 1 }}
+      style={styles.list}
       refreshControl={<RefreshControl refreshing={loadable.loading} onRefresh={loadable.refresh} />}
     >
       {items.map((it, i) => (
@@ -157,8 +164,9 @@ export function CourseV2Card({
   badge?: string;
   onPress?: () => void;
 }) {
+  const styles = useThemeStyleSheet(createStyles);
   return (
-    <Pressable style={styles.card} onPress={onPress} disabled={!onPress}>
+    <Pressable accessibilityRole={onPress ? 'button' : undefined} style={styles.card} onPress={onPress} disabled={!onPress}>
       <View style={{ flex: 1 }}>
         <Text style={styles.cardTitle} numberOfLines={2}>
           {title}
@@ -174,60 +182,67 @@ export function CourseV2Card({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
+  list: { flex: 1, backgroundColor: theme.colors.bg },
   header: {
-    paddingHorizontal: 16,
+    paddingHorizontal: theme.layout.screenPadding,
     paddingVertical: 12,
+    backgroundColor: theme.colors.surface,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#E5E5EA',
+    borderBottomColor: theme.colors.border,
     flexDirection: 'row',
     alignItems: 'center',
   },
-  headerTitle: { fontSize: 18, fontWeight: '600' },
-  headerSubtitle: { fontSize: 12, color: '#8E8E93', marginTop: 2 },
+  headerTitle: { color: theme.colors.text, fontSize: 18, fontWeight: '600' },
+  headerSubtitle: { fontSize: 12, color: theme.colors.muted, marginTop: 2 },
   headerBtn: {
+    minHeight: 44,
+    justifyContent: 'center',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
-    backgroundColor: '#5856D6',
+    backgroundColor: theme.colors.accent,
   },
-  headerBtnLabel: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
+  headerBtnLabel: { color: theme.colors.onAccent, fontSize: 13, fontWeight: '600' },
   center: {
+    backgroundColor: theme.colors.bg,
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
     gap: 8,
   },
-  muted: { color: '#8E8E93', fontSize: 14 },
-  error: { color: '#D70015', fontSize: 14, textAlign: 'center' },
+  muted: { color: theme.colors.muted, fontSize: 14 },
+  error: { color: theme.colors.danger, fontSize: 14, textAlign: 'center' },
   btn: {
+    minHeight: 44,
+    justifyContent: 'center',
     marginTop: 12,
     paddingHorizontal: 16,
     paddingVertical: 8,
-    backgroundColor: '#5856D6',
+    backgroundColor: theme.colors.accent,
     borderRadius: 8,
   },
-  btnLabel: { color: '#FFFFFF', fontWeight: '600' },
+  btnLabel: { color: theme.colors.onAccent, fontWeight: '600' },
   card: {
-    marginHorizontal: 12,
+    marginHorizontal: theme.layout.screenPadding,
     marginVertical: 6,
     padding: 14,
-    borderRadius: 10,
-    backgroundColor: '#FFFFFF',
+    borderRadius: theme.radius.lg,
+    backgroundColor: theme.colors.surface,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E5E5EA',
+    borderColor: theme.colors.border,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
   },
-  cardTitle: { fontSize: 15, fontWeight: '600' },
-  cardSubtitle: { fontSize: 12, color: '#8E8E93', marginTop: 2 },
+  cardTitle: { color: theme.colors.text, fontSize: 15, fontWeight: '600' },
+  cardSubtitle: { fontSize: 12, color: theme.colors.muted, marginTop: 2 },
   badge: {
     paddingHorizontal: 8,
     paddingVertical: 4,
-    backgroundColor: '#FEF3C7',
+    backgroundColor: theme.colors.accentSoft,
     borderRadius: 6,
   },
-  badgeLabel: { fontSize: 11, color: '#92400E', fontWeight: '600' },
+  badgeLabel: { fontSize: 11, color: theme.colors.accent, fontWeight: '600' },
 });

@@ -66,9 +66,13 @@ jobs:
         run: pnpm typecheck
 
       - name: Run tests
+        env:
+          EAS_JSON_PACKAGE_ROOT: ${{ runner.temp }}/eas-config-schema/node_modules/@expo/eas-json
         run: |
-          pnpm --filter mobile test --ci --maxWorkers=2
-          pnpm --filter web test --ci
+          npm install --prefix "$RUNNER_TEMP/eas-config-schema" --ignore-scripts --no-audit --no-fund @expo/eas-json@24.9.0
+          node --test scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs scripts/prepare-eas-build.test.mjs
+          pnpm --filter mobile test --ci
+          pnpm --filter web test
           pnpm --filter functions test --runInBand
 
       - name: Extract version
@@ -83,6 +87,14 @@ jobs:
     runs-on: ubuntu-latest
     needs: preflight
     if: inputs.platform == 'all' || inputs.platform == 'ios'
+    environment: ${{ inputs.profile }}
+    env:
+      BUILD_PLATFORM: ios
+      BUILD_PROFILE: ${{ inputs.profile }}
+      EXPECTED_EAS_PROJECT_ID: ${{ vars.EAS_PROJECT_ID }}
+      EXPO_PUBLIC_EAS_PROJECT_ID: ${{ vars.EAS_PROJECT_ID }}
+      EXPECTED_APP_IDENTIFIER: ${{ vars.IOS_BUNDLE_IDENTIFIER }}
+      IOS_BUNDLE_IDENTIFIER: ${{ vars.IOS_BUNDLE_IDENTIFIER }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -103,29 +115,58 @@ jobs:
         uses: expo/expo-github-action@v8
         with:
           expo-version: latest
-          eas-version: latest
+          eas-version: 24.12.0
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Build iOS
         working-directory: apps/mobile
-        run: npx eas-cli build --platform ios --profile ${{ inputs.profile }} --non-interactive
+        run: |
+          node ../../scripts/prepare-eas-build.mjs --prepare .
+          trap 'rm -f "$RUNNER_TEMP/eas-config-ios.json"' EXIT
+          eas config --platform ios --profile "$BUILD_PROFILE" --non-interactive --json > "$RUNNER_TEMP/eas-config-ios.json"
+          node ../../scripts/prepare-eas-build.mjs --verify-config "$RUNNER_TEMP/eas-config-ios.json" .release-build-target.json
+          eas build --platform ios --profile "$BUILD_PROFILE" --non-interactive --wait --json > "$RUNNER_TEMP/eas-build-ios.json"
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Verify the completed iOS artifact
+        id: artifact
+        run: node scripts/verify-eas-build.mjs "$RUNNER_TEMP/eas-build-ios.json"
+
+      - name: Preserve iOS build receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eas-build-ios
+          path: ${{ runner.temp }}/eas-build-ios.json
+          if-no-files-found: warn
 
       - name: Submit to App Store
         if: inputs.submit && inputs.profile == 'production'
         working-directory: apps/mobile
-        run: npx eas-cli submit --platform ios --latest --non-interactive
+        run: |
+          node ../../scripts/prepare-eas-submit.mjs eas.json
+          eas submit --platform ios --profile production --id "$RELEASE_BUILD_ID" --wait --non-interactive
         env:
+          RELEASE_BUILD_ID: ${{ steps.artifact.outputs.build_id }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           EXPO_APPLE_ID: ${{ secrets.APPLE_ID }}
-          EXPO_ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
-          EXPO_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
   build-android:
     name: Build Android
     runs-on: ubuntu-latest
     needs: preflight
     if: inputs.platform == 'all' || inputs.platform == 'android'
+    environment: ${{ inputs.profile }}
+    env:
+      BUILD_PLATFORM: android
+      BUILD_PROFILE: ${{ inputs.profile }}
+      EXPECTED_EAS_PROJECT_ID: ${{ vars.EAS_PROJECT_ID }}
+      EXPO_PUBLIC_EAS_PROJECT_ID: ${{ vars.EAS_PROJECT_ID }}
+      EXPECTED_APP_IDENTIFIER: ${{ vars.ANDROID_PACKAGE_NAME }}
+      ANDROID_PACKAGE_NAME: ${{ vars.ANDROID_PACKAGE_NAME }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -146,23 +187,47 @@ jobs:
         uses: expo/expo-github-action@v8
         with:
           expo-version: latest
-          eas-version: latest
+          eas-version: 24.12.0
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Build Android
         working-directory: apps/mobile
-        run: npx eas-cli build --platform android --profile ${{ inputs.profile }} --non-interactive
+        run: |
+          node ../../scripts/prepare-eas-build.mjs --prepare .
+          trap 'rm -f "$RUNNER_TEMP/eas-config-android.json"' EXIT
+          eas config --platform android --profile "$BUILD_PROFILE" --non-interactive --json > "$RUNNER_TEMP/eas-config-android.json"
+          node ../../scripts/prepare-eas-build.mjs --verify-config "$RUNNER_TEMP/eas-config-android.json" .release-build-target.json
+          eas build --platform android --profile "$BUILD_PROFILE" --non-interactive --wait --json > "$RUNNER_TEMP/eas-build-android.json"
+
+      - name: Verify the completed Android artifact
+        id: artifact
+        run: node scripts/verify-eas-build.mjs "$RUNNER_TEMP/eas-build-android.json"
+
+      - name: Preserve Android build receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eas-build-android
+          path: ${{ runner.temp }}/eas-build-android.json
+          if-no-files-found: warn
 
       - name: Submit to Google Play
         if: inputs.submit && inputs.profile == 'production'
         working-directory: apps/mobile
-        run: npx eas-cli submit --platform android --latest --non-interactive
+        run: |
+          node ../../scripts/prepare-eas-submit.mjs eas.json
+          eas submit --platform android --profile production --id "$RELEASE_BUILD_ID" --wait --non-interactive
+        env:
+          RELEASE_BUILD_ID: ${{ steps.artifact.outputs.build_id }}
 
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
     needs: [preflight, build-ios, build-android]
-    if: always() && inputs.profile == 'production' && (needs.build-ios.result == 'success' || needs.build-android.result == 'success')
+    if: >-
+      always() && inputs.profile == 'production' && needs.preflight.result == 'success' &&
+      (inputs.platform == 'android' || needs.build-ios.result == 'success') &&
+      (inputs.platform == 'ios' || needs.build-android.result == 'success')
     permissions:
       contents: write
     steps:
@@ -172,6 +237,7 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
+          target_commitish: ${{ github.sha }}
           tag_name: v${{ needs.preflight.outputs.version }}-${{ needs.preflight.outputs.build_number }}
           name: v${{ needs.preflight.outputs.version }}
           body: |

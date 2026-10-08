@@ -65,6 +65,12 @@ import type {
 
 export type { QueryOptions } from './types';
 
+export type CreateOrderInput = Omit<Order, 'id' | 'createdAt' | 'status' | 'paymentStatus'> & {
+  /** Required at runtime. Persist the same key until the server confirms the outcome. */
+  requestId?: string;
+  expectedTotal?: number;
+};
+
 // ===== DataSource 介面定義 =====
 export type DataSourceEvidence = {
   mode: 'mock' | 'firebase' | 'hybrid';
@@ -197,14 +203,15 @@ export type DataSource = {
   ) => Promise<AttendanceSession[]>;
   startAttendanceSession: (input: {
     courseSpaceId: string;
+    requestId?: string;
     classroomLat?: number;
     classroomLng?: number;
     qrExpiryMinutes?: number;
-  }) => Promise<{ success: boolean; sessionId: string; qrToken?: string; qrExpiresAt?: string }>;
+  }) => Promise<{ success: boolean; sessionId: string; qrToken?: string; qrExpiresAt?: string; active?: boolean; reused?: boolean }>;
   checkInAttendance: (input: {
     courseSpaceId: string;
     sessionId: string;
-    qrToken?: string;
+    qrToken: string;
   }) => Promise<{ success: boolean }>;
   getAttendanceSummary: (courseSpaceId: string) => Promise<AttendanceSummary>;
   listInboxTasks: (userId: string, schoolId?: string) => Promise<InboxTask[]>;
@@ -335,12 +342,16 @@ export type DataSource = {
 
   // 失物招領
   listLostFoundItems: (schoolId?: string, options?: QueryOptions) => Promise<LostFoundItem[]>;
-  getLostFoundItem: (id: string) => Promise<LostFoundItem | null>;
+  getLostFoundItem: (id: string, schoolId?: string) => Promise<LostFoundItem | null>;
   createLostFoundItem: (
     data: Omit<LostFoundItem, 'id' | 'createdAt' | 'status'>,
   ) => Promise<LostFoundItem>;
-  updateLostFoundItem: (id: string, data: Partial<LostFoundItem>) => Promise<LostFoundItem>;
-  resolveLostFoundItem: (id: string) => Promise<void>;
+  updateLostFoundItem: (
+    id: string,
+    data: Partial<LostFoundItem>,
+    schoolId?: string,
+  ) => Promise<LostFoundItem>;
+  resolveLostFoundItem: (id: string, schoolId?: string) => Promise<void>;
 
   // 圖書館
   searchBooks: (query: string, schoolId?: string, options?: QueryOptions) => Promise<LibraryBook[]>;
@@ -394,9 +405,7 @@ export type DataSource = {
   // 訂單與支付
   listOrders: (userId: string, options?: QueryOptions, schoolId?: string) => Promise<Order[]>;
   getOrder: (id: string, userId?: string, schoolId?: string) => Promise<Order | null>;
-  createOrder: (
-    data: Omit<Order, 'id' | 'createdAt' | 'status' | 'paymentStatus'>,
-  ) => Promise<Order>;
+  createOrder: (data: CreateOrderInput) => Promise<Order>;
   updateOrderStatus: (
     id: string,
     status: Order['status'],

@@ -36,6 +36,7 @@ export function getReleaseConfig(): RuntimeReleaseConfig {
 }
 
 export function areUniversalDevAccountsEnabled(): boolean {
+  if (getReleaseConfig().appEnv === 'production') return false;
   const extra = getExtra();
   if (typeof extra.enableUniversalDevAccounts === 'boolean') {
     return extra.enableUniversalDevAccounts;
@@ -79,4 +80,18 @@ export function isSchoolVisibleInDirectory(
   input?: Partial<SchoolIntegrationStatus> | null,
 ): boolean {
   return getSchoolIntegrationStatus(schoolId, input).enabled;
+}
+
+/** Explicit local demos are never enabled by production or preview configuration. */
+export function isDevelopmentDemoSession(uid?: string | null): boolean {
+  const config = getReleaseConfig();
+  return (
+    typeof __DEV__ !== 'undefined' &&
+    __DEV__ &&
+    config.appEnv === 'development' &&
+    !config.isReleaseLike &&
+    getExtra().enableUniversalDevAccounts === true &&
+    typeof uid === 'string' &&
+    uid.startsWith('demo_')
+  );
 }

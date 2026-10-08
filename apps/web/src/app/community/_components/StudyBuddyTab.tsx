@@ -11,7 +11,8 @@
  *  - 配對 (buddy match)：web 端不做，導向到 mobile 設定課表後再啟用。
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { CommunityLoadError, useCommunityLoad } from './useCommunityLoad';
 import { useAuth } from '@/components/AuthGuard';
 import {
   submitCourseReview,
@@ -93,8 +94,8 @@ export function StudyBuddyTab(props: { schoolId: string }) {
                 padding: '10px 16px',
                 background: 'transparent',
                 border: 'none',
-                borderBottom: on ? '3px solid var(--brand, #5856D6)' : '3px solid transparent',
-                color: on ? 'var(--brand, #5856D6)' : 'var(--muted)',
+                borderBottom: on ? '3px solid var(--brand)' : '3px solid transparent',
+                color: on ? 'var(--brand)' : 'var(--muted)',
                 fontWeight: 700,
                 cursor: 'pointer',
                 fontSize: 14,
@@ -109,22 +110,16 @@ export function StudyBuddyTab(props: { schoolId: string }) {
       {subTab === 'review' ? (
         <CourseReviewSection schoolId={schoolId} myUid={user?.uid ?? null} />
       ) : (
-        <StudyGroupSection schoolId={schoolId} myUid={user?.uid ?? null} myName={user?.displayName ?? null} />
+        <StudyGroupSection
+          schoolId={schoolId}
+          myUid={user?.uid ?? null}
+          myName={user?.displayName ?? null}
+        />
       )}
 
-      <div
-        className="card"
-        style={{
-          marginTop: 24,
-          padding: 14,
-          fontSize: 12,
-          color: 'var(--muted)',
-          background: 'var(--panel2, #F2F2F7)',
-        }}
-      >
-        💡 學伴自動配對（依課表互補 / 共同空堂）目前僅在 <strong>mobile App</strong> 提供，
-        因 web 端尚未串 TronClass 課表。已建立的讀書會與課程評價會在兩端同步顯示。
-      </div>
+      <p style={{ marginTop: 24, color: 'var(--muted)', fontSize: 13 }}>
+        找找修過同一門課的同學心得，或建立讀書會一起準備。
+      </p>
     </div>
   );
 }
@@ -134,7 +129,6 @@ export function StudyBuddyTab(props: { schoolId: string }) {
 function CourseReviewSection(props: { schoolId: string; myUid: string | null }) {
   const { schoolId, myUid } = props;
   const [reviews, setReviews] = useState<CourseReviewDoc[]>([]);
-  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('');
   const [showModal, setShowModal] = useState(false);
 
@@ -147,13 +141,10 @@ function CourseReviewSection(props: { schoolId: string; myUid: string | null }) 
     setReviews(rows);
   }, [schoolId]);
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      await load();
-      setLoading(false);
-    })();
-  }, [load]);
+  const { loading, error, refresh } = useCommunityLoad(
+    load,
+    '暫時無法讀取課程評價，請確認連線後重試。',
+  );
 
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -162,16 +153,26 @@ function CourseReviewSection(props: { schoolId: string; myUid: string | null }) 
   }, [reviews, filter]);
   const agg = useMemo(() => aggregateReviews(filtered), [filtered]);
 
+  if (error) return <CommunityLoadError message={error} retry={refresh} />;
+
   return (
     <div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'center' }}>
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 8,
+          marginBottom: 14,
+          alignItems: 'center',
+        }}
+      >
         <input
           type="search"
           className="input"
           placeholder="篩選課程名稱／代碼"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          style={{ flex: 1, maxWidth: 420 }}
+          style={{ flex: '1 1 160px', minWidth: 0, maxWidth: 420 }}
         />
         <button
           type="button"
@@ -186,7 +187,9 @@ function CourseReviewSection(props: { schoolId: string; myUid: string | null }) 
       {agg.totalCount > 0 && <ReviewSummary agg={agg} />}
 
       {loading ? (
-        <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>載入中…</div>
+        <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>
+          載入中…
+        </div>
       ) : filtered.length === 0 ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>
           <div style={{ fontSize: 32, marginBottom: 8 }}>💬</div>
@@ -207,9 +210,9 @@ function CourseReviewSection(props: { schoolId: string; myUid: string | null }) 
                 }
                 try {
                   await toggleReviewHelpful(schoolId, r.id, myUid);
-                  await load();
-                } catch (e: any) {
-                  alert(`操作失敗：${e?.message ?? String(e)}`);
+                  await refresh();
+                } catch {
+                  alert('這次未能操作，請稍後再試。');
                 }
               }}
             />
@@ -224,7 +227,7 @@ function CourseReviewSection(props: { schoolId: string; myUid: string | null }) 
           onClose={() => setShowModal(false)}
           onSubmitted={async () => {
             setShowModal(false);
-            await load();
+            await refresh();
           }}
         />
       )}
@@ -233,12 +236,15 @@ function CourseReviewSection(props: { schoolId: string; myUid: string | null }) 
 }
 
 function ReviewSummary({ agg }: { agg: CourseReviewAggregate }) {
-  const sentTotal = Math.max(1, agg.sentiment.positive + agg.sentiment.neutral + agg.sentiment.negative);
+  const sentTotal = Math.max(
+    1,
+    agg.sentiment.positive + agg.sentiment.neutral + agg.sentiment.negative,
+  );
   const pct = (n: number) => Math.round((n / sentTotal) * 100);
   return (
     <div className="card" style={{ padding: 16, marginBottom: 14 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-        <span style={{ fontSize: 36, fontWeight: 700, color: 'var(--brand, #5856D6)' }}>
+        <span style={{ fontSize: 36, fontWeight: 700, color: 'var(--brand)' }}>
           {agg.avgRating.toFixed(1)}
         </span>
         <span style={{ color: 'var(--muted)', fontSize: 12 }}>/ 5 · {agg.totalCount} 則</span>
@@ -255,17 +261,17 @@ function ReviewSummary({ agg }: { agg: CourseReviewAggregate }) {
           height: 8,
           borderRadius: 4,
           overflow: 'hidden',
-          background: 'var(--panel2, #F2F2F7)',
+          background: 'var(--panel2)',
         }}
       >
-        <div style={{ flex: agg.sentiment.positive || 0, background: '#34C759' }} />
+        <div style={{ flex: agg.sentiment.positive || 0, background: 'var(--success)' }} />
         <div style={{ flex: agg.sentiment.neutral || 0, background: 'var(--muted)' }} />
-        <div style={{ flex: agg.sentiment.negative || 0, background: '#FF9500' }} />
+        <div style={{ flex: agg.sentiment.negative || 0, background: 'var(--warning)' }} />
       </div>
       <div style={{ display: 'flex', gap: 12, fontSize: 11, fontWeight: 700, marginTop: 6 }}>
-        <span style={{ color: '#34C759' }}>正面 {pct(agg.sentiment.positive)}%</span>
+        <span style={{ color: 'var(--success)' }}>正面 {pct(agg.sentiment.positive)}%</span>
         <span style={{ color: 'var(--muted)' }}>中立 {pct(agg.sentiment.neutral)}%</span>
-        <span style={{ color: '#FF9500' }}>負面 {pct(agg.sentiment.negative)}%</span>
+        <span style={{ color: 'var(--warning)' }}>負面 {pct(agg.sentiment.negative)}%</span>
       </div>
       {agg.topTags.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
@@ -274,8 +280,8 @@ function ReviewSummary({ agg }: { agg: CourseReviewAggregate }) {
               key={t.tag}
               style={{
                 fontSize: 11,
-                color: 'var(--brand, #5856D6)',
-                background: 'rgba(88,86,214,0.15)',
+                color: 'var(--brand)',
+                background: 'var(--accent-soft)',
                 padding: '2px 8px',
                 borderRadius: 999,
                 fontWeight: 700,
@@ -298,7 +304,7 @@ function StatPill({ label, value }: { label: string; value: string }) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        background: 'var(--panel2, #F2F2F7)',
+        background: 'var(--panel2)',
         padding: '6px 10px',
         borderRadius: 6,
         border: '1px solid var(--border)',
@@ -319,15 +325,25 @@ function ReviewCard({
   myUid: string | null;
   onHelpful: () => void | Promise<void>;
 }) {
-  const helpedByMe = !!(myUid && Array.isArray(review.helpfulBy) && review.helpfulBy.includes(myUid));
+  const helpedByMe = !!(
+    myUid &&
+    Array.isArray(review.helpfulBy) &&
+    review.helpfulBy.includes(myUid)
+  );
   const sentColor =
-    review.sentiment === 'positive' ? '#34C759' : review.sentiment === 'negative' ? '#FF9500' : 'var(--muted)';
+    review.sentiment === 'positive'
+      ? 'var(--success)'
+      : review.sentiment === 'negative'
+        ? 'var(--warning)'
+        : 'var(--muted)';
 
   return (
     <div className="card" style={{ padding: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>{review.courseName}</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>
+            {review.courseName}
+          </div>
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>{review.courseCode}</div>
         </div>
         <span
@@ -335,25 +351,33 @@ function ReviewCard({
             fontSize: 10,
             fontWeight: 700,
             color: sentColor,
-            background: `${sentColor}22`,
+            background: `color-mix(in srgb, ${sentColor} 13.33%, transparent)`,
             padding: '2px 8px',
             borderRadius: 999,
           }}
         >
-          {review.sentiment === 'positive' ? '正面' : review.sentiment === 'negative' ? '負面' : '中立'}
+          {review.sentiment === 'positive'
+            ? '正面'
+            : review.sentiment === 'negative'
+              ? '負面'
+              : '中立'}
         </span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 6 }}>
         {[1, 2, 3, 4, 5].map((n) => (
-          <span key={n} style={{ color: '#FF9500', fontSize: 13 }}>
+          <span key={n} style={{ color: 'var(--warning)', fontSize: 13 }}>
             {n <= Math.round(review.rating) ? '★' : '☆'}
           </span>
         ))}
         <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 4 }}>
-          {review.anonymous ? review.aliasSnapshot ?? '匿名同學' : review.authorUid?.slice(0, 8) ?? '成員'}
+          {review.anonymous
+            ? (review.aliasSnapshot ?? '匿名同學')
+            : (review.authorUid?.slice(0, 8) ?? '成員')}
         </span>
       </div>
-      <p style={{ margin: '8px 0 0', fontSize: 13, color: 'var(--text)', lineHeight: 1.5 }}>{review.comment}</p>
+      <p style={{ margin: '8px 0 0', fontSize: 13, color: 'var(--text)', lineHeight: 1.5 }}>
+        {review.comment}
+      </p>
       {review.tags?.length ? (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
           {review.tags.map((t) => (
@@ -361,8 +385,8 @@ function ReviewCard({
               key={t}
               style={{
                 fontSize: 11,
-                color: 'var(--brand, #5856D6)',
-                background: 'rgba(88,86,214,0.10)',
+                color: 'var(--brand)',
+                background: 'var(--accent-soft)',
                 padding: '2px 8px',
                 borderRadius: 999,
                 fontWeight: 700,
@@ -380,9 +404,9 @@ function ReviewCard({
           marginTop: 10,
           padding: '6px 12px',
           borderRadius: 999,
-          border: helpedByMe ? '1px solid var(--brand, #5856D6)' : '1px solid var(--border)',
-          background: helpedByMe ? 'var(--brand, #5856D6)' : 'var(--surface)',
-          color: helpedByMe ? '#fff' : 'var(--muted)',
+          border: helpedByMe ? '1px solid var(--brand)' : '1px solid var(--border)',
+          background: helpedByMe ? 'var(--brand)' : 'var(--surface)',
+          color: helpedByMe ? 'var(--on-brand)' : 'var(--muted)',
           cursor: 'pointer',
           fontSize: 11,
           fontWeight: 700,
@@ -435,14 +459,17 @@ function ReviewModal(props: {
         workload,
         usefulness,
         comment: comment.trim(),
-        tags: tagsRaw.split(/[,，、\s]+/).map((t) => t.trim()).filter(Boolean),
+        tags: tagsRaw
+          .split(/[,，、\s]+/)
+          .map((t) => t.trim())
+          .filter(Boolean),
         anonymous,
         authorUid: anonymous ? null : props.myUid,
         aliasSnapshot: anonymous ? '匿名同學' : undefined,
       });
       props.onSubmitted();
-    } catch (e: any) {
-      alert(`送出失敗：${e?.message ?? String(e)}`);
+    } catch {
+      alert('這次未能送出，請稍後再試。');
     } finally {
       setBusy(false);
     }
@@ -474,17 +501,35 @@ function ReviewModal(props: {
           <button
             type="button"
             onClick={props.onClose}
-            style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--muted)' }}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: 18,
+              color: 'var(--muted)',
+            }}
           >
             ×
           </button>
         </div>
 
         <Label>課程名稱 *</Label>
-        <input className="input" value={courseName} onChange={(e) => setCourseName(e.target.value)} placeholder="例：程式設計（一）" style={{ width: '100%' }} />
+        <input
+          className="input"
+          value={courseName}
+          onChange={(e) => setCourseName(e.target.value)}
+          placeholder="例：程式設計（一）"
+          style={{ width: '100%' }}
+        />
 
         <Label>課程代碼（可選）</Label>
-        <input className="input" value={courseCode} onChange={(e) => setCourseCode(e.target.value)} placeholder="例：CSIE1001" style={{ width: '100%' }} />
+        <input
+          className="input"
+          value={courseCode}
+          onChange={(e) => setCourseCode(e.target.value)}
+          placeholder="例：CSIE1001"
+          style={{ width: '100%' }}
+        />
 
         <Label>整體評分 *</Label>
         <StarRow rating={rating} onChange={setRating} size={26} />
@@ -505,7 +550,12 @@ function ReviewModal(props: {
           onChange={(e) => setComment(e.target.value)}
           rows={4}
           placeholder="分享給學弟妹這門課的真實感受⋯"
-          style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit' }}
+          style={{
+            width: '100%',
+            boxSizing: 'border-box',
+            resize: 'vertical',
+            fontFamily: 'inherit',
+          }}
         />
 
         <Label>標籤（逗號分隔，最多 6 個）</Label>
@@ -517,13 +567,28 @@ function ReviewModal(props: {
           style={{ width: '100%' }}
         />
 
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, marginTop: 14, cursor: 'pointer' }}>
-          <input type="checkbox" checked={anonymous} onChange={(e) => setAnonymous(e.target.checked)} />
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            fontSize: 13,
+            marginTop: 14,
+            cursor: 'pointer',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={anonymous}
+            onChange={(e) => setAnonymous(e.target.checked)}
+          />
           匿名評價
         </label>
 
         <div style={{ display: 'flex', gap: 8, marginTop: 20, justifyContent: 'flex-end' }}>
-          <button type="button" className="btn" onClick={props.onClose}>取消</button>
+          <button type="button" className="btn" onClick={props.onClose}>
+            取消
+          </button>
           <button type="button" className="btn primary" disabled={busy} onClick={submit}>
             {busy ? '送出中…' : '送出評價'}
           </button>
@@ -535,11 +600,23 @@ function ReviewModal(props: {
 
 function Label({ children }: { children: React.ReactNode }) {
   return (
-    <label style={{ display: 'block', fontSize: 13, fontWeight: 700, marginTop: 14, marginBottom: 6 }}>{children}</label>
+    <label
+      style={{ display: 'block', fontSize: 13, fontWeight: 700, marginTop: 14, marginBottom: 6 }}
+    >
+      {children}
+    </label>
   );
 }
 
-function StarRow({ rating, onChange, size = 24 }: { rating: number; onChange: (r: number) => void; size?: number }) {
+function StarRow({
+  rating,
+  onChange,
+  size = 24,
+}: {
+  rating: number;
+  onChange: (r: number) => void;
+  size?: number;
+}) {
   return (
     <div style={{ display: 'flex', gap: 6 }}>
       {[1, 2, 3, 4, 5].map((n) => (
@@ -551,7 +628,7 @@ function StarRow({ rating, onChange, size = 24 }: { rating: number; onChange: (r
             background: 'transparent',
             border: 'none',
             cursor: 'pointer',
-            color: '#FF9500',
+            color: 'var(--warning)',
             fontSize: size,
             padding: 0,
           }}
@@ -566,10 +643,13 @@ function StarRow({ rating, onChange, size = 24 }: { rating: number; onChange: (r
 
 // ─── Study Groups ───────────────────────────────────────
 
-function StudyGroupSection(props: { schoolId: string; myUid: string | null; myName: string | null }) {
+function StudyGroupSection(props: {
+  schoolId: string;
+  myUid: string | null;
+  myName: string | null;
+}) {
   const { schoolId, myUid, myName } = props;
   const [groups, setGroups] = useState<WebStudyGroup[]>([]);
-  const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
 
   const load = useCallback(async () => {
@@ -588,22 +668,17 @@ function StudyGroupSection(props: { schoolId: string; myUid: string | null; myNa
       );
       setGroups(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<WebStudyGroup, 'id'>) })));
     } catch {
-      try {
-        const snap = await getDocs(query(collection(db, 'schools', schoolId, 'studyGroups'), limit(60)));
-        setGroups(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<WebStudyGroup, 'id'>) })));
-      } catch {
-        setGroups([]);
-      }
+      const snap = await getDocs(
+        query(collection(db, 'schools', schoolId, 'studyGroups'), limit(60)),
+      );
+      setGroups(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<WebStudyGroup, 'id'>) })));
     }
   }, [schoolId]);
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      await load();
-      setLoading(false);
-    })();
-  }, [load]);
+  const { loading, error, refresh } = useCommunityLoad(
+    load,
+    '暫時無法讀取讀書會，請確認連線後重試。',
+  );
 
   const onJoin = async (g: WebStudyGroup) => {
     if (!myUid) {
@@ -624,15 +699,25 @@ function StudyGroupSection(props: { schoolId: string; myUid: string | null; myNa
         members: arrayUnion(myUid),
         updatedAt: serverTimestamp(),
       });
-      await load();
-    } catch (e: any) {
-      alert(`加入失敗：${e?.message ?? String(e)}`);
+      await refresh();
+    } catch {
+      alert('這次未能加入，請稍後再試。');
     }
   };
 
+  if (error) return <CommunityLoadError message={error} retry={refresh} />;
+
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 14,
+        }}
+      >
         <div style={{ flex: 1, fontSize: 13, color: 'var(--muted)' }}>
           跨平台讀書會列表，點下方按鈕建立新讀書會（資料寫入 schools/{schoolId}/studyGroups）
         </div>
@@ -647,7 +732,9 @@ function StudyGroupSection(props: { schoolId: string; myUid: string | null; myNa
       </div>
 
       {loading ? (
-        <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>載入中…</div>
+        <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>
+          載入中…
+        </div>
       ) : groups.length === 0 ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>
           <div style={{ fontSize: 32, marginBottom: 8 }}>👥</div>
@@ -655,7 +742,13 @@ function StudyGroupSection(props: { schoolId: string; myUid: string | null; myNa
           <div style={{ fontSize: 12, marginTop: 6 }}>建立第一場讀書會，等同學報名</div>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 10 }}>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))',
+            gap: 10,
+          }}
+        >
           {groups.map((g) => {
             const isMember = !!(myUid && g.members.includes(myUid));
             const isFull = g.members.length >= g.maxMembers;
@@ -663,7 +756,9 @@ function StudyGroupSection(props: { schoolId: string; myUid: string | null; myNa
               <div key={g.id} className="card" style={{ padding: 14 }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{g.name}</div>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>
+                      {g.name}
+                    </div>
                     <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
                       {g.courseName} · {g.courseCode}
                     </div>
@@ -672,8 +767,8 @@ function StudyGroupSection(props: { schoolId: string; myUid: string | null; myNa
                     style={{
                       fontSize: 10,
                       fontWeight: 700,
-                      color: 'var(--brand, #5856D6)',
-                      background: 'rgba(88,86,214,0.15)',
+                      color: 'var(--brand)',
+                      background: 'var(--accent-soft)',
                       padding: '2px 8px',
                       borderRadius: 999,
                     }}
@@ -681,17 +776,26 @@ function StudyGroupSection(props: { schoolId: string; myUid: string | null; myNa
                     {STYLE_LABEL[g.style]}
                   </span>
                 </div>
-                <div style={{ height: 6, borderRadius: 3, overflow: 'hidden', background: 'var(--panel2, #F2F2F7)', marginTop: 10 }}>
+                <div
+                  style={{
+                    height: 6,
+                    borderRadius: 3,
+                    overflow: 'hidden',
+                    background: 'var(--panel2)',
+                    marginTop: 10,
+                  }}
+                >
                   <div
                     style={{
                       width: `${(g.members.length / g.maxMembers) * 100}%`,
                       height: '100%',
-                      background: 'var(--brand, #5856D6)',
+                      background: 'var(--brand)',
                     }}
                   />
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-                  {g.members.length} / {g.maxMembers} 成員 · {DAY_LABELS[g.dayOfWeek]} {String(g.startHour).padStart(2, '0')}:00–
+                  {g.members.length} / {g.maxMembers} 成員 · {DAY_LABELS[g.dayOfWeek]}{' '}
+                  {String(g.startHour).padStart(2, '0')}:00–
                   {String(g.endHour).padStart(2, '0')}:00 · 📍 {g.location}
                 </div>
                 <button
@@ -703,7 +807,11 @@ function StudyGroupSection(props: { schoolId: string; myUid: string | null; myNa
                     marginTop: 10,
                     width: '100%',
                     fontSize: 13,
-                    background: isMember ? '#34C759' : isFull ? 'var(--muted)' : 'var(--brand, #5856D6)',
+                    background: isMember
+                      ? 'var(--success)'
+                      : isFull
+                        ? 'var(--muted)'
+                        : 'var(--brand)',
                   }}
                 >
                   {isMember ? '✓ 已加入' : isFull ? '已滿員' : '申請加入'}
@@ -722,7 +830,7 @@ function StudyGroupSection(props: { schoolId: string; myUid: string | null; myNa
           onClose={() => setShowModal(false)}
           onCreated={async () => {
             setShowModal(false);
-            await load();
+            await refresh();
           }}
         />
       )}
@@ -757,7 +865,7 @@ function CreateGroupModal(props: {
       return;
     }
     if (endHour <= startHour) {
-      alert('結束時間需大於開始時間');
+      alert('結束時間要晚於開始時間。');
       return;
     }
     setBusy(true);
@@ -779,8 +887,8 @@ function CreateGroupModal(props: {
         createdAt: serverTimestamp(),
       });
       props.onCreated();
-    } catch (e: any) {
-      alert(`建立失敗：${e?.message ?? String(e)}`);
+    } catch {
+      alert('這次未能建立，請稍後再試。');
     } finally {
       setBusy(false);
     }
@@ -812,27 +920,58 @@ function CreateGroupModal(props: {
           <button
             type="button"
             onClick={props.onClose}
-            style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--muted)' }}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: 18,
+              color: 'var(--muted)',
+            }}
           >
             ×
           </button>
         </div>
 
         <Label>讀書會名稱 *</Label>
-        <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="例：演算法戰隊" style={{ width: '100%' }} />
+        <input
+          className="input"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="例：演算法戰隊"
+          style={{ width: '100%' }}
+        />
 
         <Label>課程名稱 *</Label>
-        <input className="input" value={courseName} onChange={(e) => setCourseName(e.target.value)} placeholder="例：演算法" style={{ width: '100%' }} />
+        <input
+          className="input"
+          value={courseName}
+          onChange={(e) => setCourseName(e.target.value)}
+          placeholder="例：演算法"
+          style={{ width: '100%' }}
+        />
 
         <Label>課程代碼（可選）</Label>
-        <input className="input" value={courseCode} onChange={(e) => setCourseCode(e.target.value)} placeholder="例：CSIE2001" style={{ width: '100%' }} />
+        <input
+          className="input"
+          value={courseCode}
+          onChange={(e) => setCourseCode(e.target.value)}
+          placeholder="例：CSIE2001"
+          style={{ width: '100%' }}
+        />
 
         <Label>地點</Label>
-        <input className="input" value={location} onChange={(e) => setLocation(e.target.value)} style={{ width: '100%' }} />
+        <input
+          className="input"
+          value={location}
+          onChange={(e) => setLocation(e.target.value)}
+          style={{ width: '100%' }}
+        />
 
         <Label>風格</Label>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {(['collaborative', 'tutorial', 'discussion', 'practice'] as WebStudyGroup['style'][]).map((k) => {
+          {(
+            ['collaborative', 'tutorial', 'discussion', 'practice'] as WebStudyGroup['style'][]
+          ).map((k) => {
             const on = style === k;
             return (
               <button
@@ -842,9 +981,9 @@ function CreateGroupModal(props: {
                 style={{
                   padding: '6px 12px',
                   borderRadius: 999,
-                  border: on ? '1px solid var(--brand, #5856D6)' : '1px solid var(--border)',
-                  background: on ? 'var(--brand, #5856D6)' : 'var(--surface)',
-                  color: on ? '#fff' : 'var(--text)',
+                  border: on ? '1px solid var(--brand)' : '1px solid var(--border)',
+                  background: on ? 'var(--brand)' : 'var(--surface)',
+                  color: on ? 'var(--on-brand)' : 'var(--text)',
                   cursor: 'pointer',
                   fontSize: 12,
                   fontWeight: 700,
@@ -868,9 +1007,9 @@ function CreateGroupModal(props: {
                 style={{
                   padding: '6px 12px',
                   borderRadius: 999,
-                  border: on ? '1px solid var(--brand, #5856D6)' : '1px solid var(--border)',
-                  background: on ? 'var(--brand, #5856D6)' : 'var(--surface)',
-                  color: on ? '#fff' : 'var(--text)',
+                  border: on ? '1px solid var(--brand)' : '1px solid var(--border)',
+                  background: on ? 'var(--brand)' : 'var(--surface)',
+                  color: on ? 'var(--on-brand)' : 'var(--text)',
                   cursor: 'pointer',
                   fontSize: 12,
                   fontWeight: 700,
@@ -894,7 +1033,9 @@ function CreateGroupModal(props: {
         </div>
 
         <div style={{ display: 'flex', gap: 8, marginTop: 20, justifyContent: 'flex-end' }}>
-          <button type="button" className="btn" onClick={props.onClose}>取消</button>
+          <button type="button" className="btn" onClick={props.onClose}>
+            取消
+          </button>
           <button type="button" className="btn primary" disabled={busy} onClick={submit}>
             {busy ? '建立中…' : '建立讀書會'}
           </button>

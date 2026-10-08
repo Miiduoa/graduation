@@ -6,6 +6,7 @@ import { useNavigation } from '@react-navigation/native';
 import { usePermissions } from '../hooks/usePermissions';
 import type { Permission } from '../services/permissions';
 import { theme } from './theme';
+import { useThemeStyleSheet } from './useThemeStyleSheet';
 
 type RouteGuardProps = {
   /** Required permission(s). If array, user needs ANY of them. */
@@ -21,6 +22,7 @@ type RouteGuardProps = {
  * shows an access denied screen instead.
  */
 export function RouteGuard({ requires, fallback, children }: RouteGuardProps) {
+  const styles = useThemeStyleSheet(createStyles);
   const { can, canAny, displayName } = usePermissions();
   const navigation = useNavigation();
 
@@ -109,7 +111,7 @@ export function withPermission(requires: Permission | Permission[]) {
   };
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: 'center',

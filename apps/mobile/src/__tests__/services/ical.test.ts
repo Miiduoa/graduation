@@ -211,17 +211,34 @@ END:VCALENDAR`;
   });
 
   describe('generateSubscriptionUrl', () => {
-    it('should generate URL with schoolId', () => {
+    it('uses the public function endpoint with an explicit events scope', () => {
       const url = generateSubscriptionUrl('https://api.example.com', 'school123');
 
-      expect(url).toBe('https://api.example.com/api/calendar/subscribe?schoolId=school123');
+      expect(url).toBe('https://api.example.com/calendarSubscribe?schoolId=school123&type=events');
     });
 
-    it('should include userId when provided', () => {
-      const url = generateSubscriptionUrl('https://api.example.com', 'school123', 'user456');
+    it('never includes a UID even if an outdated caller supplies one', () => {
+      const url = Reflect.apply(generateSubscriptionUrl, null, [
+        'https://api.example.com/',
+        'school123',
+        'user456',
+      ]);
 
-      expect(url).toContain('schoolId=school123');
-      expect(url).toContain('userId=user456');
+      expect(url).toBe('https://api.example.com/calendarSubscribe?schoolId=school123&type=events');
+      expect(url).not.toContain('user456');
+    });
+
+    it.each([
+      'https://api.example.com?token=private',
+      'https://api.example.com#private',
+      'https://user:password@api.example.com',
+      'http://api.example.com',
+    ])('rejects unsafe subscription configuration: %s', (baseUrl) => {
+      expect(() => generateSubscriptionUrl(baseUrl, 'school123')).toThrow();
+    });
+
+    it.each(['', ' ', '../pu', 'pu\n', '..'])('rejects an invalid school ID: %s', (schoolId) => {
+      expect(() => generateSubscriptionUrl('https://api.example.com', schoolId)).toThrow();
     });
 
     it('should encode special characters', () => {

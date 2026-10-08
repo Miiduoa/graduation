@@ -174,16 +174,23 @@ export async function saveICalToFile(
   return file.uri;
 }
 
-export function generateSubscriptionUrl(
-  baseUrl: string,
-  schoolId: string,
-  userId?: string,
-): string {
-  const params = new URLSearchParams({ schoolId });
-  if (userId) {
-    params.append('userId', userId);
+export function generateSubscriptionUrl(baseUrl: string, schoolId: string): string {
+  const base = new URL(baseUrl);
+  if (base.protocol !== 'https:' || base.username || base.password || base.search || base.hash) {
+    throw new Error('公開活動訂閱網址設定有誤');
   }
-  return `${baseUrl}/api/calendar/subscribe?${params.toString()}`;
+  if (
+    !schoolId.trim() ||
+    schoolId !== schoolId.trim() ||
+    schoolId.length > 120 ||
+    /[/\r\n\0]/.test(schoolId) ||
+    schoolId === '.' ||
+    schoolId === '..'
+  ) {
+    throw new Error('學校資料無法用於訂閱');
+  }
+  const params = new URLSearchParams({ schoolId, type: 'events' });
+  return `${base.href.replace(/\/+$/, '')}/calendarSubscribe?${params.toString()}`;
 }
 
 export function convertAppEventsToICalEvents(

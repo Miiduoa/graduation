@@ -18,6 +18,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen } from '../ui/components';
 import { theme } from '../ui/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { useAuth } from '../state/auth';
 import { shouldBlockForNoLogin, isDemoUid } from '../services/demoSession';
@@ -42,6 +43,7 @@ import {
 } from '../data/demoPersona';
 
 export function FriendsManageScreen(props: any) {
+  const styles = useThemeStyleSheet(createStyles);
   const nav = props?.navigation;
   const auth = useAuth();
   const { school } = useSchool();
@@ -297,7 +299,7 @@ export function FriendsManageScreen(props: any) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 },
   help: { color: theme.colors.muted, textAlign: 'center', fontSize: 14 },
   headerBlock: {

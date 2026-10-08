@@ -4,7 +4,7 @@ const { z } = require('zod');
 const { fetchAssistantKnowledgeChunks } = require('../../lib/assistantFetchers');
 
 const inputSchema = z.object({
-  query: z.string().min(1).max(500),
+  query: z.string().trim().min(1),
 });
 
 /**
@@ -13,11 +13,13 @@ const inputSchema = z.object({
  */
 async function execute(ctx, rawInput) {
   const input = inputSchema.parse(rawInput ?? {});
+  // Search has a smaller budget than the conversation; retain the user's full message.
+  const query = input.query.slice(0, 500);
   const campusChunks = await fetchAssistantKnowledgeChunks({
     uid: ctx.uid,
     schoolId: ctx.schoolId,
     groupId: ctx.groupId,
-    queryText: input.query,
+    queryText: query,
   });
 
   if (campusChunks.length > 0) {
@@ -25,7 +27,7 @@ async function execute(ctx, rawInput) {
   }
 
   const { answerWithServerWebSearch } = require('../../assistantAgent');
-  const webAnswer = await answerWithServerWebSearch(input.query).catch(() => null);
+  const webAnswer = await answerWithServerWebSearch(query).catch(() => null);
   if (!webAnswer || !webAnswer.content) {
     return { campusChunks: [], webFallback: null };
   }

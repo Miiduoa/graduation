@@ -1,3 +1,4 @@
+import { isDevelopmentDemoSession } from '../services/release';
 import { useCallback, useEffect, useRef } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
@@ -10,12 +11,14 @@ const ACTIVE_REFRESH_INTERVAL_MS = 30_000;
 
 export function useAIAmbientAwareness() {
   const auth = useAuth();
+  const demoEnabled = isDevelopmentDemoSession(auth.user?.uid);
   const { school } = useSchool();
   const dataSource = useDataSource();
   const appStateRef = useRef(AppState.currentState);
 
   const refresh = useCallback(
     async (reason: string, force = false) => {
+      if (!demoEnabled) return;
       await refreshAIAmbientAwareness({
         dataSource,
         userId: auth.user?.uid ?? null,
@@ -24,10 +27,11 @@ export function useAIAmbientAwareness() {
         force,
       });
     },
-    [auth.user?.uid, dataSource, school?.id],
+    [demoEnabled, auth.user?.uid, dataSource, school?.id],
   );
 
   useEffect(() => {
+    if (!demoEnabled) return;
     const startup = setTimeout(() => {
       void refresh('startup', true);
     }, 1000);
@@ -53,5 +57,5 @@ export function useAIAmbientAwareness() {
       appStateSubscription.remove();
       clearInterval(interval);
     };
-  }, [refresh]);
+  }, [demoEnabled, refresh]);
 }

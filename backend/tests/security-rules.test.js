@@ -46,6 +46,46 @@ after(async () => {
 });
 
 describe('firestore security rules', () => {
+  for (const accountState of [{ accountDeletionInProgress: true }, { status: 'deleted' }]) {
+    test(`deny new reads and writes for closing accounts ${JSON.stringify(accountState)}`, async () => {
+      await seedFirestore(async (db) => {
+        await db.doc('users/alice').set({ ...accountState, displayName: 'Alice' });
+        await db.doc('users/alice/settings/notifications').set({ enabled: true });
+        await db.doc('schools/pu/members/alice').set({ status: 'active', role: 'admin' });
+        await db.doc('groups/course/members/alice').set({ status: 'active', role: 'owner' });
+        await db.doc('groups/course').set({ name: 'Course' });
+      });
+      const db = testEnv.authenticatedContext('alice', { role: 'admin' }).firestore();
+      await assertFails(db.doc('users/alice').get());
+      await assertFails(db.doc('users/alice').update({ accountDeletionInProgress: false, status: 'active' }));
+      await assertFails(db.doc('users/alice/settings/notifications').set({ enabled: false }));
+      await assertFails(db.doc('users/alice/pushTokens/new').set({ token: 'new-token' }));
+      await assertFails(db.doc('groups/course').get());
+      await assertFails(db.doc('schools/pu/announcements/new').set({ title: 'Cannot publish' }));
+    });
+  }
+
+  test('feedback is private and can only be written by the server', async () => {
+    await seedFirestore(async (db) => {
+      await db
+        .collection('feedback')
+        .doc('receipt')
+        .set({ submittedBy: 'alice', title: 'Private' });
+    });
+    for (const context of [
+      testEnv.authenticatedContext('alice'),
+      testEnv.authenticatedContext('bob'),
+      testEnv.unauthenticatedContext(),
+    ]) {
+      const collection = context.firestore().collection('feedback');
+      await assertFails(collection.doc('receipt').get());
+      await assertFails(collection.get());
+      await assertFails(collection.doc('new').set({ submittedBy: 'alice' }));
+      await assertFails(collection.doc('receipt').update({ status: 'reviewed' }));
+      await assertFails(collection.doc('receipt').delete());
+    }
+  });
+
   test("deny reading another user's private profile", async () => {
     await seedFirestore(async (db) => {
       await db.collection('users').doc('alice').set({
@@ -146,7 +186,7 @@ describe('firestore security rules', () => {
     );
   });
 
-  test("allow matching cafeteria operator to read and update that cafeteria's orders", async () => {
+  test("allow matching cafeteria operator to read orders but require callable writes", async () => {
     await seedFirestore(async (db) => {
       await db
         .collection('schools')
@@ -181,14 +221,14 @@ describe('firestore security rules', () => {
     await assertSucceeds(
       db.collection('schools').doc('tw-demo-uni').collection('orders').doc('order-1').get(),
     );
-    await assertSucceeds(
+    await assertFails(
       db.collection('schools').doc('tw-demo-uni').collection('orders').doc('order-1').update({
         status: 'ready',
       }),
     );
   });
 
-  test("deny cafeteria operators from accessing another cafeteria's orders while admin override still works", async () => {
+  test("deny other cafeteria reads and require server writes even for administrators", async () => {
     await seedFirestore(async (db) => {
       await db.collection('schools').doc('tw-demo-uni').collection('members').doc('admin-1').set({
         role: 'admin',
@@ -239,11 +279,34 @@ describe('firestore security rules', () => {
     );
 
     const adminDb = testEnv.authenticatedContext('admin-1').firestore();
-    await assertSucceeds(
+    await assertSucceeds(adminDb.collection('schools').doc('tw-demo-uni').collection('orders').doc('order-2').get());
+    await assertFails(
       adminDb.collection('schools').doc('tw-demo-uni').collection('orders').doc('order-2').update({
         status: 'confirmed',
       }),
     );
+  });
+
+  test('prevent owners from forging canonical or mirrored order receipts, including cancellation writes', async () => {
+    const canonical = 'schools/tw-demo-uni/orders/receipt';
+    const mirror = 'users/alice/schools/tw-demo-uni/orders/receipt';
+    const receipt = { userId: 'alice', schoolId: 'tw-demo-uni', cafeteriaId: 'cafe', requestId: 'attempt', total: 100, paymentStatus: 'pending', status: 'pending' };
+    await seedFirestore(async (db) => {
+      await db.doc(canonical).set(receipt);
+      await db.doc(mirror).set(receipt);
+    });
+    const db = testEnv.authenticatedContext('alice').firestore();
+    await assertSucceeds(db.doc(canonical).get());
+    await assertSucceeds(db.doc(mirror).get());
+    for (const path of [canonical, mirror]) {
+      await assertFails(db.doc(path).update({ status: 'cancelled', total: 0, paymentStatus: 'paid' }));
+      await assertFails(db.doc(path).update({ status: 'cancelled' }));
+      await assertFails(db.doc(path).update({ requestId: 'new-attempt' }));
+      await assertFails(db.doc(path).delete());
+    }
+    await assertFails(db.doc('users/alice/schools/tw-demo-uni/orders/forged').set(receipt));
+    await assertFails(db.doc('_orderRequests/forged').set(receipt));
+    await assertFails(testEnv.authenticatedContext('bob').firestore().doc(mirror).get());
   });
 
   test('deny group post impersonation on create', async () => {
@@ -806,6 +869,35 @@ describe('firestore security rules', () => {
 });
 
 describe('storage security rules', () => {
+  test('closing and deleted accounts cannot reuse issued tokens for private files or uploads', async () => {
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ displayName: 'Alice' });
+      await db.doc('conversations/private').set({ memberIds: ['alice', 'bob'] });
+      await db.doc('repairRequests/one').set({ userId: 'alice' });
+    });
+    const storage = testEnv.authenticatedContext('alice', { role: 'admin' }).storage();
+    const privatePaths = [
+      'temp/alice/export.json', 'health/alice/one/file.pdf',
+      'printjobs/alice/one/file.pdf', 'conversations/private/messages/one/file.pdf',
+      'conversations/private/media/one/file.pdf', 'repairs/one/photo.jpg',
+    ];
+    for (const file of privatePaths) {
+      await assertSucceeds(uploadString(storage.ref(file), 'fixture', file.endsWith('.jpg') ? 'image/jpeg' : 'application/pdf'));
+    }
+    await assertFails(uploadString(storage.ref('health/alice/one/program.exe'), 'fixture', 'application/x-msdownload'));
+    for (const state of [{ accountDeletionInProgress: true }, { status: 'deleted' }]) {
+      await seedFirestore(async (db) => db.doc('users/alice').set(state));
+      for (const file of privatePaths) {
+        await assertFails(storage.ref(file).getMetadata());
+        await assertFails(uploadString(storage.ref(file), 'new fixture', file.endsWith('.jpg') ? 'image/jpeg' : 'application/pdf'));
+      }
+      await assertFails(uploadString(storage.ref('avatars/alice.jpg'), 'image', 'image/jpeg'));
+      await assertFails(uploadString(storage.ref('lostfound/one/photo.jpg'), 'image', 'image/jpeg'));
+      await assertFails(uploadString(storage.ref('bugreports/one/photo.jpg'), 'image', 'image/jpeg'));
+    }
+    await assertSucceeds(testEnv.authenticatedContext('bob').storage().ref('conversations/private/messages/one/file.pdf').getMetadata());
+  });
+
   test('deny print uploads for another user', async () => {
     const storage = testEnv.authenticatedContext('alice').storage();
 
@@ -849,4 +941,455 @@ describe('storage security rules', () => {
       uploadString(storage.ref('avatars/alice.jpg'), 'fake image', 'image/jpeg'),
     );
   });
+});
+
+describe('course assignment submissions', () => {
+  const { serverTimestamp, Timestamp } = require('firebase/firestore');
+  const pathTo = (db, uid = 'alice') => db.doc(`groups/course-1/assignments/work-1/submissions/${uid}`);
+  const answer = (overrides = {}) => ({
+    userId: 'alice', groupId: 'course-1', assignmentId: 'work-1', content: 'My answer',
+    status: 'submitted', submittedAt: serverTimestamp(), updatedAt: serverTimestamp(), ...overrides,
+  });
+  async function seedAssignment(overrides = {}) {
+    await seedFirestore(async (db) => {
+      await db.doc('groups/course-1').set({ name: 'Course', schoolId: 'school-1', type: 'course' });
+      await db.doc('schools/school-1/members/teacher').set({ role: 'faculty', status: 'active' });
+      await db.doc('groups/course-1/members/alice').set({ role: 'member', status: 'active' });
+      await db.doc('groups/course-1/members/teacher').set({ role: 'instructor', status: 'active' });
+      await db.doc('groups/course-1/assignments/work-1').set({ title: 'Work', published: true, ...overrides });
+    });
+  }
+  test('author can edit descriptive fields but not points, identity or published status', async () => {
+    await seedAssignment({
+      type: 'assignment', createdBy: 'teacher', status: 'published',
+      description: 'Original', points: 100, allowLateSubmission: false,
+    });
+    const teacher = testEnv.authenticatedContext('teacher').firestore();
+    const ref = teacher.doc('groups/course-1/assignments/work-1');
+    await assertSucceeds(ref.update({
+      title: 'Updated', description: 'Revised', allowLateSubmission: true,
+      lastEditedBy: 'teacher', updatedAt: serverTimestamp(),
+    }));
+    await assertFails(ref.update({ points: 999 }));
+    await assertFails(ref.update({ published: false }));
+    await assertFails(ref.delete());
+    await assertFails(ref.update({ createdBy: 'alice' }));
+  });
+  test('students and other instructors cannot change the original author assignment', async () => {
+    await seedAssignment({
+      type: 'assignment', createdBy: 'teacher', status: 'published',
+      description: 'Original', points: 100, allowLateSubmission: false,
+    });
+    const student = testEnv.authenticatedContext('alice').firestore();
+    await assertFails(student.doc('groups/course-1/assignments/work-1').update({
+      title: 'Tampered', lastEditedBy: 'alice', updatedAt: serverTimestamp(),
+    }));
+    await seedFirestore(async (db) => db.doc('groups/course-1/members/bob').set({
+      role: 'instructor', status: 'active',
+    }));
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    await assertFails(bob.doc('groups/course-1/assignments/work-1').update({
+      title: 'Tampered', lastEditedBy: 'bob', updatedAt: serverTimestamp(),
+    }));
+  });
+  test('student reads an empty own submission and submits using server timestamps', async () => {
+    await seedAssignment();
+    const ref = pathTo(testEnv.authenticatedContext('alice').firestore());
+    await assertSucceeds(ref.get());
+    await assertSucceeds(ref.set(answer()));
+    const saved = await ref.get();
+    if (saved.data().content !== 'My answer') throw new Error('submission was not persisted');
+  });
+  test('student cannot forge grades when creating or updating a submission', async () => {
+    await seedAssignment();
+    const ref = pathTo(testEnv.authenticatedContext('alice').firestore());
+    await assertFails(ref.set(answer({ grade: 100 })));
+    await assertSucceeds(ref.set(answer()));
+    await assertFails(ref.update({ grade: 100, gradedBy: 'teacher' }));
+    await assertFails(ref.update({ feedback: 'Excellent' }));
+    await assertFails(ref.update({ content: 'replacement', userId: 'bob' }));
+  });
+  test('student cannot submit as another user or overwrite a confirmed answer', async () => {
+    await seedAssignment();
+    const db = testEnv.authenticatedContext('alice').firestore();
+    await assertFails(pathTo(db, 'bob').set(answer({ userId: 'bob' })));
+    await assertSucceeds(pathTo(db).set(answer()));
+    await assertFails(pathTo(db).set(answer({ content: 'replacement' })));
+  });
+  test('quiz answers can be submitted but client scores cannot', async () => {
+    await seedAssignment({ type: 'quiz' });
+    const ref = pathTo(testEnv.authenticatedContext('alice').firestore());
+    await assertFails(ref.set(answer({ content: '', answers: { q1: 'b' }, autoScore: { percentage: 100 } })));
+    await assertSucceeds(ref.set(answer({ content: '', answers: { q1: 'b' } })));
+    await assertFails(ref.update({ answers: { q1: 'a' } }));
+  });
+  test('teacher can grade a submitted answer', async () => {
+    await seedAssignment();
+    await assertSucceeds(pathTo(testEnv.authenticatedContext('alice').firestore()).set(answer()));
+    await assertSucceeds(pathTo(testEnv.authenticatedContext('teacher').firestore()).update({ grade: 90, feedback: 'Reviewed' }));
+  });
+  test('teacher cannot alter a submitted answer, its owner or its timestamps', async () => {
+    await seedAssignment({ type: 'assignment', points: 100 });
+    await assertSucceeds(pathTo(testEnv.authenticatedContext('alice').firestore()).set(answer()));
+    const ref = pathTo(testEnv.authenticatedContext('teacher').firestore());
+    await assertFails(ref.update({ content: 'Changed by teacher' }));
+    await assertFails(ref.update({ userId: 'teacher' }));
+    await assertFails(ref.update({ submittedAt: serverTimestamp() }));
+    await assertFails(ref.update({ status: 'draft' }));
+    await assertFails(ref.update({ gradeScore: 50, content: 'Changed by teacher' }));
+    const saved = await ref.get();
+    if (saved.data().content !== 'My answer' || saved.data().userId !== 'alice') {
+      throw new Error('The original student answer was modified');
+    }
+  });
+  test('published grading validates score, author and server time', async () => {
+    await seedAssignment({ type: 'assignment', points: 100 });
+    await assertSucceeds(pathTo(testEnv.authenticatedContext('alice').firestore()).set(answer()));
+    const ref = pathTo(testEnv.authenticatedContext('teacher').firestore());
+    const publish = (overrides = {}) => ({
+      gradeScore: 0, gradeFeedback: '重新檢查答案', gradePublished: true,
+      gradePublishedBy: 'teacher', gradePublishedAt: serverTimestamp(), ...overrides,
+    });
+    await assertFails(ref.update(publish({ gradeScore: 101 })));
+    await assertFails(ref.update(publish({ gradeScore: -1 })));
+    await assertFails(ref.update(publish({ gradePublishedBy: 'alice' })));
+    await assertFails(ref.update(publish({ gradePublishedAt: new Date() })));
+    await assertFails(ref.update(publish({ gradeFeedback: 'x'.repeat(4001) })));
+    await assertFails(ref.update(publish({ submittedAt: serverTimestamp() })));
+    await assertSucceeds(ref.update(publish()));
+    const saved = await ref.get();
+    if (saved.data().gradeScore !== 0 || saved.data().gradePublished !== true) {
+      throw new Error('Initial grade was not published');
+    }
+    await assertFails(ref.update({ gradeScore: 100 }));
+    await assertFails(ref.update({ content: 'Quiet rewrite' }));
+    await assertFails(ref.update({ grade: 100, feedback: 'Overwrite via old fields' }));
+  });
+  test('legacy grading accepts the first grade but not an unaudited overwrite', async () => {
+    await seedAssignment({ type: 'assignment', points: 100 });
+    await assertSucceeds(pathTo(testEnv.authenticatedContext('alice').firestore()).set(answer()));
+    const ref = pathTo(testEnv.authenticatedContext('teacher').firestore());
+    await assertFails(ref.update({ grade: 110, feedback: 'Over maximum' }));
+    await assertFails(ref.update({ grade: -1 }));
+    await assertSucceeds(ref.update({ grade: 70, feedback: 'Original review' }));
+    await assertFails(ref.update({ grade: 90, feedback: 'Silent rewrite' }));
+    await assertFails(ref.update({ feedback: 'Silent rewrite' }));
+  });
+  test('removed members cannot submit or alter previous work', async () => {
+    await seedAssignment();
+    await seedFirestore((db) => db.doc('groups/course-1/members/alice').update({ status: 'removed' }));
+    await assertFails(pathTo(testEnv.authenticatedContext('alice').firestore()).set(answer()));
+  });
+  test('unpublished, closed and overdue assignments reject submissions', async () => {
+    for (const overrides of [{ published: false }, { status: 'draft' }, { status: 'closed' }, { dueAt: Timestamp.fromMillis(0) }, { dueAt: '2000-01-01T00:00:00Z' }]) {
+      await seedAssignment(overrides);
+      await assertFails(pathTo(testEnv.authenticatedContext('alice').firestore()).set(answer()));
+    }
+  });
+  test('explicit late allowance accepts an overdue submission', async () => {
+    await seedAssignment({ dueAt: Timestamp.fromMillis(0), allowLateSubmission: true });
+    await assertSucceeds(pathTo(testEnv.authenticatedContext('alice').firestore()).set(answer()));
+  });
+  test('empty content, oversized text and client supplied timestamps are rejected', async () => {
+    await seedAssignment();
+    const ref = pathTo(testEnv.authenticatedContext('alice').firestore());
+    await assertFails(ref.set(answer({ content: '' })));
+    await assertFails(ref.set(answer({ content: 'a'.repeat(20001) })));
+    await assertFails(ref.set(answer({ submittedAt: '2026-10-07T00:00:00Z' })));
+    await assertSucceeds(ref.set(answer({ content: '', attachments: [{ url: 'https://example.test/answer.pdf' }] })));
+  });
+
+  async function seedPublishedGrade() {
+    await seedAssignment({ type: 'assignment', points: 100 });
+    await assertSucceeds(pathTo(testEnv.authenticatedContext('alice').firestore()).set(answer()));
+    await seedFirestore(async (db) => {
+      await db.doc('groups/course-1/assignments/work-1/submissions/alice').update({
+        gradeScore: 60, gradeFeedback: '初次評分',
+        gradePublished: true, gradePublishedBy: 'teacher',
+        gradePublishedAt: Timestamp.fromDate(new Date('2026-10-08T01:00:00Z')),
+      });
+    });
+  }
+  function correctionBatch(db, overrides = {}, change = {}) {
+    const submission = pathTo(db);
+    const revision = submission.collection('gradeRevisions').doc('revision-1234567890');
+    const batch = db.batch();
+    batch.update(submission, {
+      gradeScore: 80, gradeFeedback: '依評分規準調整',
+      gradePublishedBy: 'teacher', gradePublishedAt: serverTimestamp(),
+      gradeRevisionId: 'revision-1234567890', gradeRevisionCount: 1,
+      gradeRevisedAt: serverTimestamp(), gradeRevisionReason: '核對配分後修正',
+      ...change,
+    });
+    batch.set(revision, {
+      beforeScore: 60, afterScore: 80, beforeFeedback: '初次評分',
+      afterFeedback: '依評分規準調整', reason: '核對配分後修正',
+      changedBy: 'teacher', changedAt: serverTimestamp(), revision: 1,
+      ...overrides,
+    });
+    return { batch, revision };
+  }
+  test('teacher grade changes require an atomic immutable audit trail', async () => {
+    await seedPublishedGrade();
+    const teacher = testEnv.authenticatedContext('teacher').firestore();
+    const submission = pathTo(teacher);
+    await assertFails(submission.update({
+      gradeScore: 80, gradeFeedback: '依評分規準調整',
+    }));
+    const { batch, revision } = correctionBatch(teacher);
+    await assertSucceeds(batch.commit());
+    const saved = await submission.get();
+    if (saved.data().gradeScore !== 80 || saved.data().gradeRevisionCount !== 1) {
+      throw new Error('The audited correction was not committed');
+    }
+    await assertSucceeds(revision.get());
+    await assertFails(revision.update({ reason: '已修改紀錄' }));
+    await assertFails(revision.delete());
+    await assertFails(testEnv.authenticatedContext('alice').firestore()
+      .doc(revision.path).get());
+  });
+  test('an audit record alone or with falsified before/after values is rejected', async () => {
+    await seedPublishedGrade();
+    const teacher = testEnv.authenticatedContext('teacher').firestore();
+    const { revision } = correctionBatch(teacher);
+    await assertFails(revision.set({
+      beforeScore: 60, afterScore: 80, beforeFeedback: '初次評分',
+      afterFeedback: '依評分規準調整', reason: '核對配分後修正',
+      changedBy: 'teacher', changedAt: serverTimestamp(), revision: 1,
+    }));
+    const { batch } = correctionBatch(teacher, { beforeScore: 10 });
+    await assertFails(batch.commit());
+  });
+  test('student and revoked teacher cannot rewrite published grades or create revision logs', async () => {
+    await seedPublishedGrade();
+    const student = testEnv.authenticatedContext('alice').firestore();
+    await assertFails(pathTo(student).update({ gradeScore: 99 }));
+    const submission = pathTo(student);
+    await assertFails(submission.collection('gradeRevisions').doc('revision-1234567890')
+      .set({ reason: '自行更正' }));
+    await seedFirestore((db) =>
+      db.doc('groups/course-1/members/teacher').update({ status: 'removed' }));
+    const { batch } = correctionBatch(testEnv.authenticatedContext('teacher').firestore());
+    await assertFails(batch.commit());
+  });
+
+});
+
+describe('protected attendance records', () => {
+  async function seedAttendance() {
+    await seedFirestore(async (db) => {
+      const group = db.collection('groups').doc('attendance-class');
+      await group.set({ schoolId: 'tw-demo-uni' });
+      for (const [uid, role, status = 'active'] of [
+        ['alice', 'student'], ['bob', 'student'], ['teacher', 'instructor'],
+        ['owner', 'owner'], ['admin', 'admin'], ['removed', 'instructor', 'inactive'],
+      ]) {
+        await group.collection('members').doc(uid).set({ role, status });
+      }
+      for (const collection of ['liveSessions', 'attendanceSessions']) {
+        await group.collection(collection).doc('current').set({
+          schemaVersion: 2, teacherId: 'teacher', active: true, attendeeCount: 1,
+          startedAt: new Date(), qrExpiresAt: new Date(Date.now() + 300_000),
+        });
+        await group.collection(collection).doc('legacy').set({
+          teacherId: 'teacher', active: true, qrToken: 'previously-public-token', attendees: { alice: new Date() },
+        });
+      }
+      await group.collection('liveSessionSecrets').doc('current').set({ teacherId: 'teacher', qrToken: 'private-token', qrExpiresAt: new Date(Date.now() + 300_000) });
+      await group.collection('attendanceSessions').doc('current').collection('attendanceRecords').doc('alice').set({
+        uid: 'alice', status: 'present', checkedInAt: new Date(),
+      });
+      await group.collection('attendanceSessions').doc('current').collection('attendanceRecords').doc('bob').set({
+        uid: 'bob', status: 'present', checkedInAt: new Date(),
+      });
+    });
+  }
+  const group = (uid) => testEnv.authenticatedContext(uid).firestore().collection('groups').doc('attendance-class');
+
+  test('students read only safe metadata and their own attendance', async () => {
+    await seedAttendance();
+    await assertSucceeds(group('alice').collection('liveSessions').doc('current').get());
+    await assertSucceeds(group('alice').collection('attendanceSessions').doc('current').get());
+    const records = group('alice').collection('attendanceSessions').doc('current').collection('attendanceRecords');
+    await assertSucceeds(records.doc('alice').get());
+    await assertFails(records.doc('bob').get());
+    await assertFails(records.get());
+    await assertFails(group('alice').collection('liveSessionSecrets').doc('current').get());
+    await assertFails(group('alice').collection('liveSessionSecrets').get());
+    await assertFails(group('outsider').collection('liveSessions').doc('current').get());
+    await assertFails(group('removed').collection('liveSessions').doc('current').get());
+    await assertFails(group('removed').collection('attendanceSessions').doc('current').collection('attendanceRecords').doc('removed').get());
+  });
+
+  test('metadata queries must select the safe version; legacy secrets remain unreadable', async () => {
+    await seedAttendance();
+    for (const collection of ['liveSessions', 'attendanceSessions']) {
+      await assertSucceeds(group('alice').collection(collection).where('schemaVersion', '==', 2).orderBy('startedAt', 'desc').limit(50).get());
+      await assertFails(group('alice').collection(collection).get());
+      await assertFails(group('alice').collection(collection).doc('legacy').get());
+      await assertFails(group('teacher').collection(collection).doc('legacy').get());
+    }
+  });
+
+  test('active instructors can read secrets and managers can read the roster', async () => {
+    await seedAttendance();
+    for (const uid of ['teacher', 'owner']) {
+      await assertSucceeds(group(uid).collection('liveSessionSecrets').doc('current').get());
+    }
+    for (const uid of ['teacher', 'owner', 'admin']) {
+      await assertSucceeds(group(uid).collection('attendanceSessions').doc('current').collection('attendanceRecords').get());
+    }
+    await assertFails(group('admin').collection('liveSessionSecrets').doc('current').get());
+    await assertFails(group('removed').collection('liveSessionSecrets').doc('current').get());
+  });
+
+  test('even instructors cannot create, rewrite or delete canonical attendance documents', async () => {
+    await seedAttendance();
+    for (const uid of ['alice', 'teacher', 'owner', 'admin']) {
+      for (const collection of ['liveSessions', 'attendanceSessions', 'liveSessionSecrets']) {
+        const sessions = group(uid).collection(collection);
+        await assertFails(sessions.doc('forged').set({ schemaVersion: 2, teacherId: uid, active: true }));
+        await assertFails(sessions.doc('current').update({ active: false }));
+        await assertFails(sessions.doc('current').delete());
+      }
+      const records = group(uid).collection('attendanceSessions').doc('current').collection('attendanceRecords');
+      await assertFails(records.doc('new-student').set({ uid: 'new-student', status: 'present' }));
+      await assertFails(records.doc('alice').update({ checkedInAt: new Date(0) }));
+      await assertFails(records.doc('alice').delete());
+    }
+  });
+
+  test('live questions and teacher polls remain available to existing clients', async () => {
+    await seedAttendance();
+    const studentSession = group('alice').collection('liveSessions').doc('current');
+    await assertSucceeds(studentSession.collection('questions').doc('q1').set({ authorId: 'alice', text: '請再說明一次', answered: false }));
+    await assertSucceeds(group('teacher').collection('liveSessions').doc('current').collection('polls').doc('p1').set({ title: '選擇答案', options: ['甲', '乙'] }));
+    await assertSucceeds(studentSession.collection('polls').doc('p1').get());
+  });
+});
+
+describe('attendance transactions on Firestore', () => {
+  const assert = require('node:assert/strict');
+  const requireFunctions = require('node:module').createRequire(path.resolve(__dirname, '../functions/package.json'));
+  const { initializeApp, deleteApp } = requireFunctions('firebase-admin/app');
+  const { getFirestore } = requireFunctions('firebase-admin/firestore');
+  const { createLiveSessionHandlers } = require('../functions/attendanceSessions');
+  let app;
+  let db;
+  let handlers;
+  let currentTime;
+  let notifications;
+  const startRequest = (data = {}) => ({ auth: { uid: 'teacher' }, data: { groupId: 'transaction-class', requestId: 'start-1', ...data } });
+  const request = (session, uid = 'alice') => ({ auth: { uid }, data: { groupId: 'transaction-class', sessionId: session.sessionId, qrToken: session.qrToken } });
+  const base = 'groups/transaction-class';
+  const sessionDoc = (session, collection) => db.doc(`${base}/${collection}/${session.sessionId}`);
+
+  before(() => {
+    // These Admin SDK tests must never fall through to a real Firebase project.
+    if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error('FIRESTORE_EMULATOR_HOST is required');
+    app = initializeApp({ projectId }, 'attendance-transaction-tests');
+    db = getFirestore(app);
+  });
+  beforeEach(async () => {
+    currentTime = Date.now();
+    notifications = 0;
+    handlers = createLiveSessionHandlers({ db, now: () => currentTime, notifyStarted: async () => { notifications++; } });
+    await db.doc(base).set({ name: '交易測試課程' });
+    await db.doc(`${base}/members/teacher`).set({ role: 'instructor', status: 'active' });
+    for (const uid of ['alice', 'bob', 'carol']) await db.doc(`${base}/members/${uid}`).set({ role: 'student', status: 'active', displayName: uid });
+  });
+  after(async () => { if (app) await deleteApp(app); });
+
+  test('parallel starts with the same key create one synchronized session', async () => {
+    const starts = await Promise.all(Array.from({ length: 4 }, () => handlers.startLiveSession(startRequest())));
+    assert.equal(new Set(starts.map((session) => session.sessionId)).size, 1);
+    assert.equal(starts.filter((session) => !session.reused).length, 1);
+    assert.equal(notifications, 1);
+    const [live, attendance, secrets] = await Promise.all(['liveSessions', 'attendanceSessions', 'liveSessionSecrets'].map((collection) => db.collection(`${base}/${collection}`).get()));
+    assert.equal(live.size, 1);
+    assert.equal(attendance.size, 1);
+    assert.equal(secrets.size, 1);
+    assert.equal(live.docs[0].data().startedAt.toMillis(), attendance.docs[0].data().startedAt.toMillis());
+    assert.equal(live.docs[0].data().qrToken, undefined);
+    assert.equal(attendance.docs[0].data().qrToken, undefined);
+  });
+
+  test('concurrent retrying students each increment both counters once and keep their first check-in', async () => {
+    const session = await handlers.startLiveSession(startRequest());
+    const initial = await handlers.joinLiveSession(request(session));
+    currentTime += 1000;
+    const joins = await Promise.all(['alice', 'alice', 'bob', 'bob', 'carol'].map((uid) => handlers.joinLiveSession(request(session, uid))));
+    assert.equal(joins[0].checkedInAt, initial.checkedInAt);
+    assert.equal(joins[1].checkedInAt, initial.checkedInAt);
+    const live = (await sessionDoc(session, 'liveSessions').get()).data();
+    const attendance = (await sessionDoc(session, 'attendanceSessions').get()).data();
+    const records = await sessionDoc(session, 'attendanceSessions').collection('attendanceRecords').get();
+    assert.equal(live.attendeeCount, 3);
+    assert.equal(attendance.attendeeCount, 3);
+    assert.equal(records.size, 3);
+    assert.equal(live.attendees, undefined);
+    assert.equal(attendance.attendees, undefined);
+    assert.equal(records.docs.find((doc) => doc.id === 'alice').data().checkedInAt.toDate().toISOString(), initial.checkedInAt);
+  });
+
+  test('closing races with a join without splitting status, counts or attendance records', async () => {
+    const session = await handlers.startLiveSession(startRequest());
+    const [join, end] = await Promise.allSettled([
+      handlers.joinLiveSession(request(session)),
+      handlers.endLiveSession(request(session, 'teacher')),
+    ]);
+    assert.equal(end.status, 'fulfilled');
+    if (join.status === 'rejected') assert.equal(join.reason.code, 'failed-precondition');
+    const live = (await sessionDoc(session, 'liveSessions').get()).data();
+    const attendance = (await sessionDoc(session, 'attendanceSessions').get()).data();
+    const records = await sessionDoc(session, 'attendanceSessions').collection('attendanceRecords').get();
+    assert.equal(live.active, false);
+    assert.equal(attendance.active, false);
+    assert.equal(live.endedAt.toMillis(), attendance.endedAt.toMillis());
+    assert.equal(live.attendeeCount, records.size);
+    assert.equal(attendance.attendeeCount, records.size);
+    await assert.rejects(handlers.joinLiveSession(request(session, 'bob')), { code: 'failed-precondition' });
+    const retry = await handlers.startLiveSession(startRequest());
+    assert.equal(retry.active, false);
+    assert.equal(retry.reused, true);
+  });
+
+  test('revocation and token expiry are checked before any new attendance write', async () => {
+    const session = await handlers.startLiveSession(startRequest());
+    await db.doc(`${base}/members/alice`).update({ status: 'inactive' });
+    await assert.rejects(handlers.joinLiveSession(request(session)), { code: 'permission-denied' });
+    currentTime += 300_000;
+    await assert.rejects(handlers.joinLiveSession(request(session, 'bob')), { code: 'deadline-exceeded' });
+    await db.doc(`${base}/members/teacher`).update({ status: 'inactive' });
+    await assert.rejects(handlers.endLiveSession(request(session, 'teacher')), { code: 'permission-denied' });
+    assert.equal((await sessionDoc(session, 'attendanceSessions').collection('attendanceRecords').get()).size, 0);
+    assert.equal((await sessionDoc(session, 'liveSessions').get()).data().attendeeCount, 0);
+  });
+});
+
+test('owners cannot write during deletion or clear its guards, while active profiles remain editable', async () => {
+  const profile = { role: 'student', balance: 0, schoolId: 'pu', primarySchoolId: 'pu', createdAt: '2026-10-08', notificationDeliveryDisabled: true, accountDeletionInProgress: true, displayName: 'Alice' };
+  await seedFirestore(async (db) => db.doc('users/alice').set(profile));
+  const ref = testEnv.authenticatedContext('alice').firestore().doc('users/alice');
+  await assertFails(ref.update({ displayName: 'Updated' }));
+  for (const field of ['notificationDeliveryDisabled', 'accountDeletionInProgress']) {
+    await assertFails(ref.update({ [field]: false }));
+    const replacement = { ...profile }; delete replacement[field];
+    await assertFails(ref.set(replacement));
+  }
+  await seedFirestore(async (db) => db.doc('users/alice').update({ accountDeletionInProgress: false }));
+  await assertSucceeds(ref.update({ displayName: 'Updated' }));
+  await assertFails(ref.update({ notificationDeliveryDisabled: false }));
+});
+
+test('push provider receipts are server-only even for the recipient', async () => {
+  for (const name of ['pendingPushReceipts', 'pushReceiptResults']) {
+    await seedFirestore(async (db) => db.collection(name).doc('one').set({ uid: 'alice' }));
+    for (const context of [testEnv.authenticatedContext('alice'), testEnv.authenticatedContext('bob'), testEnv.unauthenticatedContext()]) {
+      const ref = context.firestore().collection(name).doc('one');
+      await assertFails(ref.get());
+      await assertFails(ref.set({ uid: 'alice' }));
+      await assertFails(ref.delete());
+    }
+  }
 });

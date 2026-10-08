@@ -23,7 +23,7 @@ export function LibraryCatalogScreen(props: { navigation?: any; route?: any }) {
   return (
     <Screen
       title="館藏查詢"
-      subtitle="與 webpacx.lib.pu.edu.tw 相同資料來源 · GraphQL + 原生列表（複本／登入以瀏覽器為準）"
+      subtitle="依書名、作者或 ISBN 找書。借閱與預約請前往圖書館網站確認。"
       noPadding
     >
       <View style={{ flex: 1, paddingHorizontal: theme.layout.screenHorizontalPadding }}>

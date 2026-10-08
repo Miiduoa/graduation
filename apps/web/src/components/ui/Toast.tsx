@@ -1,6 +1,13 @@
 'use client';
 
-import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useSyncExternalStore,
+  ReactNode,
+} from 'react';
 import { createPortal } from 'react-dom';
 
 type ToastType = 'success' | 'error' | 'warning' | 'info';
@@ -22,6 +29,10 @@ interface ToastContextType {
   dismiss: (id: string) => void;
   dismissAll: () => void;
 }
+
+const subscribeToHydration = () => () => {};
+const clientSnapshot = () => true;
+const serverSnapshot = () => false;
 
 const ToastContext = createContext<ToastContextType | null>(null);
 
@@ -50,6 +61,7 @@ export function ToastProvider({
   position = 'top-right',
   maxToasts = 5,
 }: ToastProviderProps) {
+  const mounted = useSyncExternalStore(subscribeToHydration, clientSnapshot, serverSnapshot);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const dismiss = useCallback((id: string) => {
@@ -113,7 +125,7 @@ export function ToastProvider({
       value={{ showToast, success, error, warning, info, dismiss, dismissAll }}
     >
       {children}
-      {typeof window !== 'undefined' &&
+      {mounted &&
         createPortal(
           <div
             style={{
@@ -154,8 +166,8 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
       icon: '✕',
     },
     warning: {
-      bg: 'rgba(255,149,0, 0.15)',
-      border: 'rgba(255,149,0, 0.3)',
+      bg: 'var(--warning-soft)',
+      border: 'var(--warning-soft)',
       icon: '⚠',
     },
     info: {

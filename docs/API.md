@@ -795,19 +795,39 @@ Authorization: Bearer <firebase_id_token>
 
 ---
 
+## 產品回饋
+
+### submitProductFeedback (Callable)
+
+登入者須為指定學校的有效成員。`requestId` 使用同一份草稿的固定隨機 ID；網路失敗重試保留 ID，修改內容後換新 ID。
+
+| 參數         | 類型          | 必填 | 說明                                     |
+| ------------ | ------------- | ---- | ---------------------------------------- |
+| requestId    | string        | 是   | 16–128 個英數、連字號或底線              |
+| schoolId     | string        | 是   | 學校 ID                                  |
+| kind         | string        | 是   | `general`                                |
+| feedbackType | string        | 是   | `bug`、`feature`、`improvement`、`other` |
+| title        | string        | 是   | 1–160 字                                 |
+| description  | string        | 是   | 1–8000 字                                |
+| rating       | number        | 否   | 0–5 整數；0 表示未評分                   |
+| contactEmail | string / null | 否   | 可回覆的電子郵件                         |
+
+回傳 `{ "ok": true, "feedbackId": "...", "reused": false }` 表示交易已提交；相同登入者、ID 與內容重試回同一筆並設 `reused: true`。同 ID 換內容回 `already-exists`。送出者由伺服器驗證的登入身分決定；客戶端不能指定或讀寫 `feedback` 集合，回饋內容不公開。學校權限被撤銷後，重試亦拒絕。
+
 ## iCal 訂閱
 
 ### GET /calendarSubscribe
 
-取得 iCal 格式行事曆。
+取得學校公開活動的 iCal 行事曆；尚未公告開始時間的活動不會加入訂閱。
 
 **Query 參數**
 
-| 參數     | 類型   | 必填 | 說明                                     |
-| -------- | ------ | ---- | ---------------------------------------- |
-| schoolId | string | 是   | 學校 ID                                  |
-| userId   | string | 否   | 使用者 UID（取得個人化內容）             |
-| type     | string | 否   | 類型 (all/events/assignments/registered) |
+| 參數     | 類型   | 必填 | 說明                            |
+| -------- | ------ | ---- | ------------------------------- |
+| schoolId | string | 是   | 學校 ID                         |
+| type     | string | 否   | 僅接受 events；省略亦為公開活動 |
+
+帶 `userId` 或 `all`／`assignments`／`registered` 類型的舊網址回應 `410` 與 `Cache-Control: no-store`，不讀取個人作業、成員關係或報名紀錄。私人行事曆可在登入後由 App 匯出 `.ics` 檔案；此公開端點不提供個人自動訂閱。
 
 **回應**
 

@@ -1,355 +1,255 @@
-/* eslint-disable */
-import React, { useState, useEffect } from 'react';
-import {
-  ScrollView,
-  Text,
-  View,
-  TextInput,
-  Pressable,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-} from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import {
-  Screen,
-  AnimatedCard,
-  Button,
-  Pill,
-  SegmentedControl,
-  FeatureHighlight,
-} from '../ui/components';
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Text, TextInput, View } from 'react-native';
+import { randomUUID } from 'expo-crypto';
+import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
+import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
-import { submitProductFeedback } from '../services/productFeedback';
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
-import { theme } from '../ui/theme';
+import { submitGeneralFeedback, type GeneralFeedbackInput } from '../services/generalFeedback';
 
-type FeedbackType = 'bug' | 'feature' | 'improvement' | 'other';
-
-const FEEDBACK_TYPES = [
-  { key: 'bug', label: 'Bug 回報', icon: 'bug-outline', color: theme.colors.danger },
-  { key: 'feature', label: '功能建議', icon: 'bulb-outline', color: '#FF9500' },
-  {
-    key: 'improvement',
-    label: '改善建議',
-    icon: 'trending-up-outline',
-    color: theme.colors.success,
-  },
-  { key: 'other', label: '其他', icon: 'chatbubble-outline', color: theme.colors.accent },
+type FeedbackType = GeneralFeedbackInput['feedbackType'];
+type Prefill = {
+  title?: string;
+  description?: string;
+  feedbackType?: FeedbackType;
+  source?: string;
+};
+type Props = { navigation?: { goBack?: () => void }; route?: { params?: { prefill?: Prefill } } };
+const feedbackTypes: Array<{ key: FeedbackType; label: string }> = [
+  { key: 'bug', label: '問題回報' },
+  { key: 'feature', label: '功能建議' },
+  { key: 'improvement', label: '改善建議' },
+  { key: 'other', label: '其他' },
 ];
 
-const RATING_LABELS = ['很差', '不好', '普通', '很好', '超棒'];
-
-export function FeedbackScreen(props: any) {
-  const nav = props?.navigation;
-  const auth = useAuth();
+export function FeedbackScreen({ navigation, route }: Props) {
+  useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
+  const { user } = useAuth();
   const { school } = useSchool();
+  const scope = JSON.stringify([user?.uid, school.id]);
+  const currentScope = useRef(scope);
+  currentScope.current = scope;
+  const initialScope = useRef(scope);
+  if (!user)
+    return (
+      <AIDetailScreen title="意見回饋" onBack={() => navigation?.goBack?.()}>
+        <AICard title="請先登入">
+          <Text style={{ color: aiTokens.muted }}>登入後即可送出回饋。</Text>
+        </AICard>
+      </AIDetailScreen>
+    );
+  return (
+    <FeedbackEditor
+      key={scope}
+      uid={user.uid}
+      email={user.email ?? ''}
+      schoolId={school.id}
+      isScopeCurrent={() => currentScope.current === scope}
+      prefill={initialScope.current === scope ? route?.params?.prefill : undefined}
+      navigation={navigation}
+    />
+  );
+}
 
-  const [feedbackType, setFeedbackType] = useState<FeedbackType>('feature');
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
+function FeedbackEditor({
+  uid,
+  email,
+  schoolId,
+  isScopeCurrent,
+  prefill,
+  navigation,
+}: {
+  uid: string;
+  email: string;
+  schoolId: string;
+  isScopeCurrent: () => boolean;
+  prefill?: Prefill;
+  navigation?: Props['navigation'];
+}) {
+  const [feedbackType, setFeedbackType] = useState<FeedbackType>(
+    prefill?.feedbackType && feedbackTypes.some((item) => item.key === prefill.feedbackType)
+      ? prefill.feedbackType
+      : 'feature',
+  );
+  const [title, setTitle] = useState(prefill?.title ?? '');
+  const [description, setDescription] = useState(prefill?.description ?? '');
+  const [contactEmail, setContactEmail] = useState(email);
   const [rating, setRating] = useState(0);
-  const [contactEmail, setContactEmail] = useState(auth.user?.email ?? '');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
-
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [receipt, setReceipt] = useState<string | null>(null);
+  const requestId = useRef<{ id: string; fingerprint: string } | null>(null);
+  const lock = useRef(false);
+  const mounted = useRef(true);
   useEffect(() => {
-    const p = props?.route?.params?.prefill as
-      | { title?: string; description?: string; feedbackType?: FeedbackType; source?: string }
-      | undefined;
-    if (!p) return;
-    if (typeof p.title === 'string' && p.title.trim()) setTitle(p.title.trim());
-    if (typeof p.description === 'string' && p.description.trim())
-      setDescription(p.description.trim());
-    if (p.feedbackType && FEEDBACK_TYPES.some((t) => t.key === p.feedbackType)) {
-      setFeedbackType(p.feedbackType as FeedbackType);
-    }
-  }, [props?.route?.params?.prefill]);
-
-  const canSubmit = title.trim().length > 0 && description.trim().length > 0;
-
-  const handleSubmit = async () => {
-    if (!canSubmit) {
-      Alert.alert('請填寫完整', '請輸入標題和詳細描述');
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const current = () => mounted.current && isScopeCurrent();
+  const change = (update: () => void) => {
+    if (lock.current || !current()) return;
+    setError('');
+    update();
+  };
+  const submit = async () => {
+    if (lock.current || !current() || !title.trim() || !description.trim()) return;
+    if (contactEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail.trim())) {
+      setError('請填寫有效的聯絡電子郵件，或留空。');
       return;
     }
-
-    setIsSubmitting(true);
+    lock.current = true;
+    setBusy(true);
+    setError('');
     try {
-      await submitProductFeedback({
+      const draft: Omit<GeneralFeedbackInput, 'requestId'> = {
+        schoolId,
         kind: 'general',
         feedbackType,
         title: title.trim(),
         description: description.trim(),
         rating,
         contactEmail: contactEmail.trim() || null,
-        submittedBy: auth.user?.uid ?? null,
-        schoolId: school.id,
-      });
-    } catch (e) {
-      console.warn('[FeedbackScreen] Submit feedback failed:', e);
+      };
+      const fingerprint = JSON.stringify(draft);
+      if (requestId.current?.fingerprint !== fingerprint) {
+        requestId.current = { id: randomUUID(), fingerprint };
+      }
+      const result = await submitGeneralFeedback(
+        { ...draft, requestId: requestId.current.id },
+        uid,
+        current,
+      );
+      if (current()) setReceipt(result.feedbackId);
+    } catch {
+      if (current()) setError('尚未確認回饋已送出，內容已保留。請確認網路後重試。');
+    } finally {
+      lock.current = false;
+      if (current()) setBusy(false);
     }
-    setIsSubmitting(false);
-    setSubmitted(true);
-
-    Alert.alert('感謝你的回饋！', '我們已收到你的意見，會盡快處理。', [
-      { text: '好的', onPress: () => nav?.goBack?.() },
-    ]);
   };
-
-  const handleReset = () => {
-    setTitle('');
-    setDescription('');
-    setRating(0);
-    setFeedbackType('feature');
-    setSubmitted(false);
+  const inputStyle = {
+    color: aiTokens.text,
+    backgroundColor: aiTokens.surface,
+    borderColor: aiTokens.border,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    minHeight: 48,
   };
-
-  if (submitted) {
+  if (receipt)
     return (
-      <Screen>
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 }}>
-          <View
-            style={{
-              width: 80,
-              height: 80,
-              borderRadius: 40,
-              backgroundColor: `${theme.colors.success}20`,
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginBottom: 20,
-            }}
-          >
-            <Ionicons name="checkmark-circle" size={50} color={theme.colors.success} />
-          </View>
-          <Text
-            style={{
-              color: theme.colors.text,
-              fontWeight: '700',
-              fontSize: 22,
-              textAlign: 'center',
-            }}
-          >
-            感謝你的回饋！
-          </Text>
-          <Text
-            style={{
-              color: theme.colors.muted,
-              fontSize: 15,
-              textAlign: 'center',
-              marginTop: 12,
-              lineHeight: 22,
-            }}
-          >
-            我們會認真閱讀每一則回饋，並努力改善 App 的體驗。
-          </Text>
-          <View style={{ marginTop: 24, gap: 12 }}>
-            <Button text="提交另一則回饋" kind="primary" onPress={handleReset} />
-            <Button text="返回" onPress={() => nav?.goBack?.()} />
-          </View>
-        </View>
-      </Screen>
-    );
-  }
-
-  return (
-    <Screen>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={{ flex: 1 }}
-      >
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
-        >
-          <AnimatedCard title="意見回饋" subtitle="幫助我們改善 App">
-            <Text style={{ color: theme.colors.muted, lineHeight: 20 }}>
-              你的每一則回饋對我們都很重要！無論是 Bug 回報、功能建議或任何想法，都歡迎告訴我們。
+      <AIDetailScreen title="意見回饋" onBack={() => navigation?.goBack?.()}>
+        <AICard title="回饋已送出">
+          <View style={{ gap: 12 }}>
+            <Text style={{ color: aiTokens.text, lineHeight: 22 }}>
+              已確認收到這則回饋。謝謝你告訴我們使用時遇到的問題。
             </Text>
-            {props?.route?.params?.prefill?.source ? (
-              <Text style={{ color: theme.colors.accent, fontSize: 12, marginTop: 8 }}>
-                來源：{String(props.route.params.prefill.source)}
-              </Text>
-            ) : null}
-          </AnimatedCard>
-
-          <AnimatedCard title="回饋類型" subtitle="選擇你的回饋類型" delay={100}>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-              {FEEDBACK_TYPES.map((type) => (
-                <Pressable
-                  key={type.key}
-                  onPress={() => setFeedbackType(type.key as FeedbackType)}
-                  style={({ pressed }) => ({
-                    flex: 1,
-                    minWidth: '45%',
-                    padding: 14,
-                    borderRadius: theme.radius.lg,
-                    borderWidth: 2,
-                    borderColor: feedbackType === type.key ? type.color : theme.colors.border,
-                    backgroundColor:
-                      feedbackType === type.key
-                        ? `${type.color}15`
-                        : pressed
-                          ? theme.colors.surface2
-                          : 'transparent',
-                    alignItems: 'center',
-                    gap: 8,
-                  })}
-                >
-                  <Ionicons
-                    name={type.icon as any}
-                    size={24}
-                    color={feedbackType === type.key ? type.color : theme.colors.muted}
-                  />
-                  <Text
-                    style={{
-                      color: feedbackType === type.key ? type.color : theme.colors.text,
-                      fontWeight: '600',
-                      fontSize: 13,
-                    }}
-                  >
-                    {type.label}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          </AnimatedCard>
-
-          <AnimatedCard title="詳細內容" subtitle="描述你的問題或建議" delay={200}>
-            <View style={{ gap: 14 }}>
-              <View>
-                <Text style={{ color: theme.colors.muted, fontSize: 13, marginBottom: 6 }}>
-                  標題 *
-                </Text>
-                <TextInput
-                  value={title}
-                  onChangeText={setTitle}
-                  placeholder="簡短描述你的回饋"
-                  placeholderTextColor={theme.colors.muted}
-                  style={{
-                    padding: 14,
-                    borderRadius: theme.radius.md,
-                    borderWidth: 1,
-                    borderColor: theme.colors.border,
-                    backgroundColor: theme.colors.surface2,
-                    color: theme.colors.text,
-                    fontSize: 15,
-                  }}
-                />
-              </View>
-
-              <View>
-                <Text style={{ color: theme.colors.muted, fontSize: 13, marginBottom: 6 }}>
-                  詳細描述 *
-                </Text>
-                <TextInput
-                  value={description}
-                  onChangeText={setDescription}
-                  placeholder={
-                    feedbackType === 'bug'
-                      ? '請描述問題發生的步驟、預期行為和實際行為...'
-                      : '請詳細描述你的想法...'
-                  }
-                  placeholderTextColor={theme.colors.muted}
-                  multiline
-                  style={{
-                    padding: 14,
-                    minHeight: 120,
-                    borderRadius: theme.radius.md,
-                    borderWidth: 1,
-                    borderColor: theme.colors.border,
-                    backgroundColor: theme.colors.surface2,
-                    color: theme.colors.text,
-                    fontSize: 15,
-                    textAlignVertical: 'top',
-                  }}
-                />
-              </View>
-
-              <View>
-                <Text style={{ color: theme.colors.muted, fontSize: 13, marginBottom: 6 }}>
-                  聯絡 Email（選填）
-                </Text>
-                <TextInput
-                  value={contactEmail}
-                  onChangeText={setContactEmail}
-                  placeholder="方便我們回覆你"
-                  placeholderTextColor={theme.colors.muted}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  style={{
-                    padding: 14,
-                    borderRadius: theme.radius.md,
-                    borderWidth: 1,
-                    borderColor: theme.colors.border,
-                    backgroundColor: theme.colors.surface2,
-                    color: theme.colors.text,
-                    fontSize: 15,
-                  }}
-                />
-              </View>
-            </View>
-          </AnimatedCard>
-
-          <AnimatedCard title="整體評價" subtitle="你對 App 的滿意度如何？" delay={300}>
-            <View style={{ alignItems: 'center', padding: 12 }}>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <Pressable key={star} onPress={() => setRating(star)}>
-                    <Ionicons
-                      name={star <= rating ? 'star' : 'star-outline'}
-                      size={36}
-                      color="#FF9500"
-                    />
-                  </Pressable>
-                ))}
-              </View>
-              {rating > 0 && (
-                <Text style={{ color: theme.colors.text, fontWeight: '600', marginTop: 12 }}>
-                  {RATING_LABELS[rating - 1]}
-                </Text>
-              )}
-            </View>
-          </AnimatedCard>
-
-          <AnimatedCard title="" subtitle="" delay={400}>
-            <Button
-              text={isSubmitting ? '提交中...' : '提交回饋'}
-              kind="primary"
-              disabled={!canSubmit || isSubmitting}
-              onPress={handleSubmit}
-            />
-            <Text
-              style={{
-                color: theme.colors.muted,
-                fontSize: 12,
-                textAlign: 'center',
-                marginTop: 12,
+            <Text selectable style={{ color: aiTokens.muted }}>
+              回饋編號：{receipt}
+            </Text>
+            <AIButton label="返回" onPress={() => navigation?.goBack?.()} />
+            <AIButton
+              label="提交另一則回饋"
+              variant="ghost"
+              onPress={() => {
+                requestId.current = null;
+                setReceipt(null);
+                setTitle('');
+                setDescription('');
+                setRating(0);
+                setFeedbackType('feature');
               }}
-            >
-              提交即表示你同意我們使用這些資訊來改善 App
+            />
+          </View>
+        </AICard>
+      </AIDetailScreen>
+    );
+  return (
+    <AIDetailScreen title="意見回饋" onBack={() => navigation?.goBack?.()}>
+      <AICard title="意見回饋">
+        <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
+          描述遇到的問題或想改善的地方。若希望收到回覆，可以留下聯絡電子郵件。
+        </Text>
+      </AICard>
+      <AICard title="回饋類型">
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          {feedbackTypes.map((item) => (
+            <AIButton
+              key={item.key}
+              label={item.label}
+              disabled={busy}
+              variant={feedbackType === item.key ? 'primary' : 'ghost'}
+              onPress={() => change(() => setFeedbackType(item.key))}
+            />
+          ))}
+        </View>
+      </AICard>
+      <AICard title="詳細內容">
+        <View style={{ gap: 12 }}>
+          <TextInput
+            accessibilityLabel="回饋標題"
+            placeholder="簡短描述你的回饋"
+            placeholderTextColor={aiTokens.muted}
+            value={title}
+            maxLength={160}
+            editable={!busy}
+            onChangeText={(value) => change(() => setTitle(value))}
+            style={inputStyle}
+          />
+          <TextInput
+            accessibilityLabel="回饋詳細內容"
+            placeholder="描述發生的情況或你的想法"
+            placeholderTextColor={aiTokens.muted}
+            value={description}
+            maxLength={4000}
+            editable={!busy}
+            multiline
+            onChangeText={(value) => change(() => setDescription(value))}
+            style={{ ...inputStyle, minHeight: 140, textAlignVertical: 'top' }}
+          />
+          <TextInput
+            accessibilityLabel="聯絡電子郵件"
+            placeholder="聯絡電子郵件（選填）"
+            placeholderTextColor={aiTokens.muted}
+            value={contactEmail}
+            maxLength={320}
+            editable={!busy}
+            autoCapitalize="none"
+            keyboardType="email-address"
+            onChangeText={(value) => change(() => setContactEmail(value))}
+            style={inputStyle}
+          />
+        </View>
+      </AICard>
+      <AICard title="整體評價（選填）">
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          {[1, 2, 3, 4, 5].map((value) => (
+            <AIButton
+              key={value}
+              label={`${value} 分`}
+              variant={rating === value ? 'primary' : 'ghost'}
+              disabled={busy}
+              onPress={() => change(() => setRating(rating === value ? 0 : value))}
+            />
+          ))}
+        </View>
+      </AICard>
+      <AICard>
+        <View style={{ gap: 12 }}>
+          {error ? (
+            <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>
+              {error}
             </Text>
-          </AnimatedCard>
-
-          <AnimatedCard title="其他聯絡方式" subtitle="也可以透過以下方式聯繫我們" delay={500}>
-            <View style={{ gap: 10 }}>
-              <FeatureHighlight
-                icon="mail-outline"
-                title="Email"
-                description="support@campus-app.com"
-                color={theme.colors.accent}
-              />
-              <FeatureHighlight
-                icon="logo-github"
-                title="GitHub"
-                description="回報 Issue 或提交 PR"
-                color="#333"
-              />
-            </View>
-          </AnimatedCard>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </Screen>
+          ) : null}
+          <AIButton
+            label={busy ? '正在提交…' : error ? '重試提交' : '提交回饋'}
+            disabled={busy || !title.trim() || !description.trim()}
+            onPress={() => void submit()}
+          />
+        </View>
+      </AICard>
+    </AIDetailScreen>
   );
 }

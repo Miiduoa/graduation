@@ -1,3 +1,4 @@
+import { isDevelopmentDemoSession } from '../services/release';
 /**
  * useAIBrain — React Hook for AI Brain Hub
  * ═══════════════════════════════════════════════════════════════════════
@@ -16,12 +17,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  aiBrain,
-  type AskOptions,
-  type AskResult,
-  type BrainSnapshot,
-} from '../services/aiBrain';
+import { aiBrain, type AskOptions, type AskResult, type BrainSnapshot } from '../services/aiBrain';
 import type {
   ActionExecutionReport,
   ActionPlan,
@@ -91,17 +87,24 @@ function normalizeRole(role: unknown): CampusActorRole | undefined {
 
 export function useAIBrain(): UseAIBrainResult {
   const auth = useAuth();
+  const demoEnabled = isDevelopmentDemoSession(auth.user?.uid);
   const { school } = useSchool();
   const dataSource = useDataSource();
   const [snapshot, setSnapshot] = useState<BrainSnapshot>(() => aiBrain.getSnapshot());
 
   useEffect(() => {
+    if (!demoEnabled) return;
     const unsubscribe = aiBrain.subscribe((next) => setSnapshot(next));
     return unsubscribe;
-  }, []);
+  }, [demoEnabled]);
 
   // 啟動 / 同步 context
   useEffect(() => {
+    if (!demoEnabled) {
+      void aiBrain.stop();
+      return;
+    }
+    let disposed = false;
     const role = normalizeRole(auth.profile?.role);
     const ctx = {
       userId: auth.user?.uid ?? null,
@@ -109,8 +112,14 @@ export function useAIBrain(): UseAIBrainResult {
       role,
       dataSource,
     };
-    void aiBrain.start(ctx);
-  }, [auth.user?.uid, auth.profile?.role, school?.id, dataSource]);
+    void aiBrain.start(ctx).then(() => {
+      if (disposed) void aiBrain.stop();
+    });
+    return () => {
+      disposed = true;
+      void aiBrain.stop();
+    };
+  }, [demoEnabled, auth.user?.uid, auth.profile?.role, school?.id, dataSource]);
 
   // 登出時停止
   useEffect(() => {
@@ -119,22 +128,19 @@ export function useAIBrain(): UseAIBrainResult {
     };
   }, []);
 
-  const ready = useMemo(() => Boolean(snapshot.context.userId), [snapshot.context.userId]);
+  const ready = useMemo(
+    () => demoEnabled && Boolean(snapshot.context.userId),
+    [demoEnabled, snapshot.context.userId],
+  );
 
   const describe = useCallback(() => aiBrain.describeUnderstanding(), []);
-  const ask = useCallback(
-    (message: string, opts?: AskOptions) => aiBrain.ask(message, opts),
-    [],
-  );
+  const ask = useCallback((message: string, opts?: AskOptions) => aiBrain.ask(message, opts), []);
   const proposePlan = useCallback(
     (input: { goal: string; steps: Omit<ActionStep, 'id' | 'risk'>[]; userMessage?: string }) =>
       aiBrain.proposePlan(input),
     [],
   );
-  const confirmPendingPlan = useCallback(
-    (id: string) => aiBrain.confirmPendingPlan(id),
-    [],
-  );
+  const confirmPendingPlan = useCallback((id: string) => aiBrain.confirmPendingPlan(id), []);
   const runPlan = useCallback(
     (plan: ActionPlan, opts?: { userConfirmed?: boolean }) => aiBrain.runPlan(plan, opts),
     [],
@@ -147,10 +153,7 @@ export function useAIBrain(): UseAIBrainResult {
     [],
   );
   const feedback = useCallback((payload: FeedbackPayload) => aiBrain.feedback(payload), []);
-  const classifyToolRisk = useCallback(
-    (tool: string) => aiBrain.classifyToolRisk(tool),
-    [],
-  );
+  const classifyToolRisk = useCallback((tool: string) => aiBrain.classifyToolRisk(tool), []);
 
   return {
     snapshot,
@@ -180,16 +183,25 @@ export function usePendingActionPlans(): {
   confirm: (planId: string) => Promise<unknown>;
   dismiss: (planId: string) => void;
 } {
+  const auth = useAuth();
+  const demoEnabled = isDevelopmentDemoSession(auth.user?.uid);
   const [pendingPlans, setPendingPlans] = useState<ActionPlan[]>(() =>
-    aiBrain.listPendingPlans(),
+    demoEnabled ? aiBrain.listPendingPlans() : [],
   );
   useEffect(() => {
+    if (!demoEnabled) {
+      setPendingPlans([]);
+      return;
+    }
     const unsubscribe = aiBrain.subscribePendingPlans(setPendingPlans);
     return unsubscribe;
-  }, []);
-  const confirm = useCallback((id: string) => aiBrain.confirmPendingPlan(id), []);
+  }, [demoEnabled]);
+  const confirm = useCallback(
+    (id: string) => (demoEnabled ? aiBrain.confirmPendingPlan(id) : Promise.resolve(null)),
+    [demoEnabled],
+  );
   const dismiss = useCallback((id: string) => aiBrain.dismissPendingPlan(id), []);
-  return { pendingPlans, confirm, dismiss };
+  return { pendingPlans: demoEnabled ? pendingPlans : [], confirm, dismiss };
 }
 
 /**

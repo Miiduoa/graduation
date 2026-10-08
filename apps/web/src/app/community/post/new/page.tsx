@@ -10,12 +10,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { CommunityLoadError, useCommunityLoad } from '../../_components/useCommunityLoad';
+import { CommunityAccess } from '../../_components/CommunityAccess';
 import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import {
   createCampusPost,
   listBoards,
+  getBoardById,
   getOrCreateBoardAlias,
   CAMPUS_BOARD_TYPE_LABEL,
   type CampusBoard,
@@ -31,7 +34,9 @@ const MAX_TAGS = 5;
 export default function PostComposePage() {
   return (
     <SiteShell title="發文" subtitle="撰寫校園社群貼文">
-      <PostComposeInner />
+      <CommunityAccess>
+        <PostComposeInner />
+      </CommunityAccess>
     </SiteShell>
   );
 }
@@ -54,17 +59,19 @@ function PostComposeInner() {
   const [sending, setSending] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  useEffect(() => {
-    if (!schoolId) return;
-    void (async () => {
-      try {
-        const rows = await listBoards(schoolId, 80);
-        setBoards(rows);
-      } catch {
-        /* ignore */
-      }
-    })();
-  }, [schoolId]);
+  const loadBoards = useCallback(async () => {
+    const rows = await listBoards(schoolId, 80);
+    if (routeBoardId && !rows.some((board) => board.id === routeBoardId)) {
+      const selected = await getBoardById(schoolId, routeBoardId);
+      if (selected) rows.push(selected);
+    }
+    setBoards(rows);
+  }, [schoolId, routeBoardId]);
+  const {
+    loading: boardsLoading,
+    error: boardsError,
+    refresh: refreshBoards,
+  } = useCommunityLoad(loadBoards, '暫時無法讀取看板，請確認連線後重試。');
 
   const selectedBoard = useMemo(() => boards.find((b) => b.id === boardId), [boards, boardId]);
 
@@ -99,8 +106,8 @@ function PostComposeInner() {
       return;
     }
     const bid = boardId.trim();
-    if (!bid) {
-      alert('請選擇看板或輸入看板 ID');
+    if (!bid || !selectedBoard) {
+      alert('請先選擇要發布的看板。');
       return;
     }
     if (!title.trim()) {
@@ -122,9 +129,7 @@ function PostComposeInner() {
       let mediaUrls: string[] = [];
       if (files.length > 0) {
         const uploaded = await Promise.all(
-          files.map((f) =>
-            uploadCampusMedia({ scope: 'posts', schoolId, uid: user.uid, file: f }),
-          ),
+          files.map((f) => uploadCampusMedia({ scope: 'posts', schoolId, uid: user.uid, file: f })),
         );
         mediaUrls = uploaded.map((u) => u.url);
       }
@@ -150,72 +155,75 @@ function PostComposeInner() {
       });
       alert('已發佈');
       router.push(`/community/post/${postId}`);
-    } catch (e: any) {
-      alert(`發佈失敗：${e?.message ?? String(e)}`);
+    } catch {
+      alert('這次未能發佈，請稍後再試。');
     } finally {
       setSending(false);
     }
-  }, [user, schoolId, boardId, title, content, anonymous, tagsRaw, files, router]);
+  }, [user, schoolId, boardId, selectedBoard, title, content, anonymous, tagsRaw, files, router]);
 
   if (authLoading) {
-    return <div className="card" style={{ padding: 24 }}>載入中…</div>;
+    return (
+      <div className="card" style={{ padding: 24 }}>
+        載入中…
+      </div>
+    );
   }
   if (!user) {
     return (
       <div className="card" style={{ padding: 32, textAlign: 'center' }}>
         <p style={{ color: 'var(--muted)' }}>請先登入後再發文</p>
-        <Link href="/login" className="btn primary">前往登入</Link>
+        <Link href="/login" className="btn primary">
+          前往登入
+        </Link>
       </div>
     );
   }
 
   return (
     <div className="card" style={{ padding: 18, maxWidth: 720 }}>
-      <Label>看板</Label>
-      {!routeBoardId && boards.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-          {boards.map((b) => {
-            const on = boardId === b.id;
-            return (
-              <button
-                key={b.id}
-                type="button"
-                onClick={() => setBoardId(b.id)}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: 999,
-                  border: on ? '1px solid var(--brand, #5856D6)' : '1px solid var(--border)',
-                  background: on ? 'var(--brand, #5856D6)' : 'var(--surface)',
-                  color: on ? '#fff' : 'var(--text)',
-                  cursor: 'pointer',
-                  fontSize: 12,
-                  fontWeight: 700,
-                }}
-              >
-                {b.name}
-              </button>
-            );
-          })}
-        </div>
+      <label htmlFor="post-board" style={{ display: 'block', marginBottom: 8, fontWeight: 700 }}>
+        發布看板
+      </label>
+      {boardsError ? (
+        <CommunityLoadError message={boardsError} retry={refreshBoards} />
+      ) : boardsLoading ? (
+        <p role="status">正在讀取看板…</p>
+      ) : boards.length === 0 ? (
+        <p>
+          目前沒有可發布的看板。<Link href="/community?tab=boards">前往建立看板</Link>
+        </p>
+      ) : (
+        <select
+          id="post-board"
+          className="input"
+          value={boardId}
+          disabled={!!routeBoardId}
+          onChange={(event) => setBoardId(event.target.value)}
+          style={{ width: '100%' }}
+        >
+          <option value="">選擇看板</option>
+          {boards.map((board) => (
+            <option key={board.id} value={board.id}>
+              {board.name}
+            </option>
+          ))}
+        </select>
       )}
-      <Hint>{routeBoardId ? '已鎖定看板' : '從上方點選或直接輸入看板 ID'}</Hint>
-      <input
-        className="input"
-        value={boardId}
-        readOnly={!!routeBoardId}
-        onChange={(e) => setBoardId(e.target.value)}
-        placeholder="看板編號（例：general）"
-        style={{ width: '100%' }}
-      />
+      {!boardsLoading && !boardsError && routeBoardId && !selectedBoard && (
+        <p role="alert">
+          這個看板已不存在或無法使用。<Link href="/community?tab=boards">選擇其他看板</Link>
+        </p>
+      )}
       {selectedBoard && (
         <div
           style={{
             marginTop: 6,
             display: 'inline-block',
             padding: '4px 10px',
-            background: 'rgba(88,86,214,0.12)',
+            background: 'var(--accent-soft)',
             borderRadius: 6,
-            color: 'var(--brand, #5856D6)',
+            color: 'var(--brand)',
             fontSize: 11,
             fontWeight: 700,
           }}
@@ -225,8 +233,22 @@ function PostComposeInner() {
         </div>
       )}
 
-      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 700, marginTop: 16, cursor: 'pointer' }}>
-        <input type="checkbox" checked={anonymous} onChange={(e) => setAnonymous(e.target.checked)} />
+      <label
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          fontSize: 13,
+          fontWeight: 700,
+          marginTop: 16,
+          cursor: 'pointer',
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={anonymous}
+          onChange={(e) => setAnonymous(e.target.checked)}
+        />
         匿名貼文
       </label>
 
@@ -247,7 +269,12 @@ function PostComposeInner() {
         onChange={(e) => setContent(e.target.value.slice(0, MAX_BODY))}
         rows={8}
         placeholder="想分享什麼？"
-        style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit' }}
+        style={{
+          width: '100%',
+          boxSizing: 'border-box',
+          resize: 'vertical',
+          fontFamily: 'inherit',
+        }}
       />
       <Counter current={content.length} max={MAX_BODY} />
 
@@ -262,7 +289,17 @@ function PostComposeInner() {
       />
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {previews.map((src, i) => (
-          <div key={src} style={{ width: 84, height: 84, position: 'relative', borderRadius: 8, overflow: 'hidden', background: 'var(--panel2)' }}>
+          <div
+            key={src}
+            style={{
+              width: 84,
+              height: 84,
+              position: 'relative',
+              borderRadius: 8,
+              overflow: 'hidden',
+              background: 'var(--panel2)',
+            }}
+          >
             <img src={src} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             <button
               type="button"
@@ -323,8 +360,15 @@ function PostComposeInner() {
       />
 
       <div style={{ marginTop: 20, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-        <Link href="/community" className="btn">取消</Link>
-        <button type="button" className="btn primary" disabled={sending} onClick={submit}>
+        <Link href="/community" className="btn">
+          取消
+        </Link>
+        <button
+          type="button"
+          className="btn primary"
+          disabled={sending || boardsLoading || !!boardsError || !selectedBoard}
+          onClick={submit}
+        >
           {sending ? '發佈中…' : '發布'}
         </button>
       </div>
@@ -333,11 +377,19 @@ function PostComposeInner() {
 }
 
 function Label({ children }: { children: React.ReactNode }) {
-  return <label style={{ display: 'block', fontSize: 13, fontWeight: 700, marginTop: 14, marginBottom: 6 }}>{children}</label>;
+  return (
+    <label
+      style={{ display: 'block', fontSize: 13, fontWeight: 700, marginTop: 14, marginBottom: 6 }}
+    >
+      {children}
+    </label>
+  );
 }
-function Hint({ children }: { children: React.ReactNode }) {
-  return <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>{children}</div>;
-}
+
 function Counter({ current, max }: { current: number; max: number }) {
-  return <div style={{ textAlign: 'right', fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>{current} / {max}</div>;
+  return (
+    <div style={{ textAlign: 'right', fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
+      {current} / {max}
+    </div>
+  );
 }
