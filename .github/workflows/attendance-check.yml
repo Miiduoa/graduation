@@ -1,0 +1,45 @@
+name: Attendance transactions
+
+on:
+  push:
+    branches: ['fix/attendance-qr-confirmation']
+  pull_request:
+    paths:
+      - 'backend/functions/attendance/**'
+      - 'backend/functions/entrypoint*'
+      - 'backend/functions/package.json'
+      - 'apps/mobile/src/services/confirmedAttendance.ts'
+      - 'apps/mobile/src/data/courseSpaceSource.ts'
+      - 'apps/mobile/src/__tests__/services/confirmedAttendance.test.ts'
+      - '.github/workflows/attendance-check.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: attendance-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  transaction-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: pnpm install --frozen-lockfile
+      - name: Handler regression tests
+        run: node --test backend/functions/attendance/verifyClaim.test.js
+      - name: Firestore transaction integration
+        run: >-
+          pnpm -w firebase emulators:exec --only firestore
+          --project demo-campus-attendance
+          "node --test backend/functions/attendance/verifyClaim.emulator.cjs"
