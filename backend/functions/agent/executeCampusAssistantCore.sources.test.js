@@ -316,7 +316,9 @@ test('a school change between runtime and core discards prefetched private data 
   ]);
   let profileReads = 0;
   mockReadHook = (path) => {
-    if (path === 'users/alice' && ++profileReads === 2) {
+    // Admission reads the lifecycle marker first; switch after runtime prefetch
+    // and before the core refresh, preserving the original race being tested.
+    if (path === 'users/alice' && ++profileReads === 3) {
       mockDocuments.set('users/alice', { schoolId: 'nthu', role: 'student' });
     }
   };

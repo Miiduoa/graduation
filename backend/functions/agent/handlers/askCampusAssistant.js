@@ -1,6 +1,11 @@
 'use strict';
 
-const { onCall } = require('firebase-functions/v2/https');
+const { onCall: firebaseOnCall } = require('firebase-functions/v2/https');
+const { createAccountGuardedOnCall } = require('../../accountLifecycle');
+const onCall = createAccountGuardedOnCall({
+  onCall: firebaseOnCall,
+  getDb: () => require('firebase-admin/firestore').getFirestore(),
+});
 const { runCampusAssistantWithAgentRuntime } = require('../runtime');
 
 const REGION = 'asia-east1';

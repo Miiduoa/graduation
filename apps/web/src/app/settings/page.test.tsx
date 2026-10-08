@@ -2,11 +2,17 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import SettingsPage from './page';
 const state = vi.hoisted(() => ({
-  user: { uid: 'a', displayName: 'Account A', email: 'a@example.test' },
+  user: { uid: 'a', displayName: 'Account A', email: 'a@example.test' } as {
+    uid: string;
+    displayName: string;
+    email: string;
+    providerData?: { providerId: string }[];
+  } | null,
   profiles: {} as Record<string, Record<string, string>>,
   read: vi.fn(),
   saveProfile: vi.fn(),
   saveNotifications: vi.fn(),
+  signOut: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
   info: vi.fn(),
@@ -29,7 +35,7 @@ vi.mock('@/lib/firebase', () => ({
   isFirebaseConfigured: () => true,
   saveNotificationPreferences: state.saveNotifications,
   updateUserProfile: state.saveProfile,
-  signOut: vi.fn(),
+  signOut: state.signOut,
 }));
 vi.mock('firebase/firestore', () => ({
   doc: (_: unknown, ...path: string[]) => path.join('/'),
@@ -65,7 +71,7 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 async function openProfile() {
-  fireEvent.click(screen.getByRole('button', { name: /^👤\s*帳號$/ }));
+  fireEvent.click(screen.getByRole('button', { name: '帳號' }));
   await waitFor(() =>
     expect((screen.getByLabelText('姓名') as HTMLInputElement).disabled).toBe(false),
   );
@@ -90,7 +96,7 @@ it('clears old profile fields immediately on account switch and waits for the ne
   );
   state.user = { uid: 'b', displayName: 'Account B', email: 'b@example.test' };
   rerender(<SettingsPage />);
-  fireEvent.click(screen.getByRole('button', { name: /^👤\s*帳號$/ }));
+  fireEvent.click(screen.getByRole('button', { name: '帳號' }));
   expect(screen.queryByDisplayValue('A private name')).toBeNull();
   expect((screen.getByLabelText('姓名') as HTMLInputElement).disabled).toBe(true);
   await act(async () => finish({ exists: () => true, data: () => state.profiles.b }));
@@ -122,7 +128,7 @@ it('disables account writes when the initial server read fails', async () => {
   state.read.mockRejectedValue(new Error('offline'));
   render(<SettingsPage />);
   await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
-  fireEvent.click(screen.getByRole('button', { name: /^👤\s*帳號$/ }));
+  fireEvent.click(screen.getByRole('button', { name: '帳號' }));
   expect((screen.getByRole('button', { name: '儲存資料' }) as HTMLButtonElement).disabled).toBe(
     true,
   );
@@ -147,7 +153,7 @@ it('does not show an old save result after switching accounts', async () => {
 });
 it('requires reloading after an unconfirmed notification save and then verifies the saved values', async () => {
   render(<SettingsPage />);
-  fireEvent.click(screen.getByRole('button', { name: /^🔔\s*通知$/ }));
+  fireEvent.click(screen.getByRole('button', { name: '通知' }));
   const save = screen.getByRole('button', { name: '儲存通知設定' }) as HTMLButtonElement;
   await waitFor(() => expect(save.disabled).toBe(false));
   fireEvent.click(save);
@@ -172,7 +178,7 @@ it('requires reloading after an unconfirmed notification save and then verifies 
 it('does not offer ineffective privacy or background-sync switches', async () => {
   render(<SettingsPage />);
   expect(screen.queryByText('自動同步')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: /^🔒\s*隱私$/ }));
+  fireEvent.click(screen.getByRole('button', { name: '隱私' }));
   expect(screen.queryByRole('switch')).toBeNull();
   expect(screen.getByRole('link', { name: '查看隱私政策' })).toBeTruthy();
 });
@@ -189,7 +195,7 @@ it('locks profile fields while a save is pending so readback cannot erase a newe
 it('uses a complete native color value and does not echo a synchronized selection', async () => {
   render(<SettingsPage />);
   await waitFor(() => expect(state.read).toHaveBeenCalled());
-  fireEvent.click(screen.getByRole('button', { name: /^🎨\s*外觀$/ }));
+  fireEvent.click(screen.getByRole('button', { name: '外觀' }));
   const picker = screen.getByLabelText('自訂色彩') as HTMLInputElement;
   expect(picker.type).toBe('color');
   fireEvent.change(picker, { target: { value: '#ff6b35' } });
@@ -200,4 +206,70 @@ it('uses a complete native color value and does not echo a synchronized selectio
   );
   expect(picker.value).toBe('#ff6b35');
   expect(localStorage.getItem('campus-web-preferences')).toBe(raw);
+});
+
+it('shows the authenticated provider instead of implying a school login is connected', async () => {
+  state.user = { ...state.user!, providerData: [{ providerId: 'google.com' }] };
+  render(<SettingsPage />);
+  await openProfile();
+  expect(screen.getByText('Google 帳號')).toBeTruthy();
+  expect(screen.queryByText('PU 學號登入')).toBeNull();
+  expect(screen.queryByText('學校登入')).toBeNull();
+});
+
+it('provides an accessible sign-out button and prevents duplicate requests while pending', async () => {
+  let finish!: () => void;
+  state.signOut.mockImplementation(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  render(<SettingsPage />);
+  await openProfile();
+  const signOut = screen.getByRole('button', { name: '登出帳號' }) as HTMLButtonElement;
+  expect(signOut.type).toBe('button');
+  fireEvent.click(signOut);
+  expect(signOut.disabled).toBe(true);
+  expect((screen.getByRole('button', { name: '儲存資料' }) as HTMLButtonElement).disabled).toBe(
+    true,
+  );
+  fireEvent.click(signOut);
+  expect(state.signOut).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    state.user = null;
+    finish();
+  });
+  expect(state.success).toHaveBeenCalledWith('已登出帳號');
+});
+
+it('keeps the account available after a failed sign-out and allows retry', async () => {
+  state.signOut.mockRejectedValue(new Error('offline'));
+  render(<SettingsPage />);
+  await openProfile();
+  fireEvent.click(screen.getByRole('button', { name: '登出帳號' }));
+  await waitFor(() => expect(state.error).toHaveBeenCalledWith('登出失敗', '請稍後再試一次'));
+  expect((screen.getByRole('button', { name: '登出帳號' }) as HTMLButtonElement).disabled).toBe(
+    false,
+  );
+  expect(state.success).not.toHaveBeenCalled();
+});
+
+it('keeps account writes and sign-out unavailable to guests', async () => {
+  state.user = null;
+  render(<SettingsPage />);
+  fireEvent.click(screen.getByRole('button', { name: '帳號' }));
+  expect((screen.getByRole('button', { name: '儲存資料' }) as HTMLButtonElement).disabled).toBe(
+    true,
+  );
+  expect(screen.queryByRole('button', { name: '登出帳號' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '通知' }));
+  expect((screen.getByRole('switch', { name: '推播通知' }) as HTMLButtonElement).disabled).toBe(
+    true,
+  );
+  expect((screen.getByRole('button', { name: '儲存通知設定' }) as HTMLButtonElement).disabled).toBe(
+    true,
+  );
+  expect(state.saveProfile).not.toHaveBeenCalled();
+  expect(state.saveNotifications).not.toHaveBeenCalled();
 });

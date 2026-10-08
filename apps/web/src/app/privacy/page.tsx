@@ -3,7 +3,7 @@ import { SiteShell } from '@/components/SiteShell';
 
 export const metadata: Metadata = {
   title: '隱私政策 | Campus One',
-  description: 'Campus One隱私政策',
+  description: 'Campus One 隱私政策',
 };
 
 const sections = [
@@ -17,7 +17,7 @@ const sections = [
   },
   {
     title: '資料保存與刪除',
-    body: '你可以在 App 內申請資料匯出與刪除。依法必須保留的支付、交易或稽核資料會做匿名化處理，其餘資料會依服務性質刪除。',
+    body: '手機版「我的」頁面提供資料匯出與帳號刪除入口。匯出內容依所選項目與結果中的範圍說明為準。刪除 Campus One 帳號不會刪除學校帳號、校方保存的資料或其他服務帳號；已傳送的訊息與共同內容可能仍會保留。操作前請先閱讀頁面列出的處理範圍。',
   },
   {
     title: '聯絡方式',
