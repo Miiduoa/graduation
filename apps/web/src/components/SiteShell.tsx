@@ -22,7 +22,7 @@ export function SiteShell(props: {
       </a>
       <OfflineBanner />
       <AppHeader />
-      <div id="page-content" className={styles.main}>
+      <main id="page-content" className={styles.main} tabIndex={-1}>
         {props.title && (
           <div className={styles.heading}>
             <div>
@@ -33,7 +33,7 @@ export function SiteShell(props: {
           </div>
         )}
         <Suspense fallback={<p role="status">載入中…</p>}>{props.children}</Suspense>
-      </div>
+      </main>
       <footer className="footer">
         <div className="shellActions">
           <span>Campus One</span>
