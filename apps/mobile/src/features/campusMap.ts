@@ -107,13 +107,11 @@ export function buildCampusMapHtml(
 ): string {
   // The bridge receives POI names as text, never as executable HTML.
   const colors = JSON.stringify(palette).replace(/</g, '\\u003c');
-  const tile = dark
-    ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-    : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
+  const tile = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
   return `<!doctype html><html><head>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<style>html,body,#map{height:100%;margin:0;background:${palette.background}}.leaflet-tooltip{font-family:system-ui;font-size:13px}</style>
+<style>html,body,#map{height:100%;margin:0;background:${palette.background}}.leaflet-tooltip{font-family:system-ui;font-size:13px}${dark ? '.leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.8) contrast(.85)}' : ''}</style>
 </head><body><div id="map" role="img" aria-label="校園地點"></div>
 <script>
 function send(data){if(window.ReactNativeWebView)window.ReactNativeWebView.postMessage(JSON.stringify(data));}
@@ -124,7 +122,7 @@ window.onerror=function(){send({type:'error'});};
 if(typeof L!=='undefined'){
 var colors=${colors};
 var map=L.map('map').setView([${center.lat},${center.lng}],16);
-var tileLayer=L.tileLayer('${tile}',{maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'}).addTo(map);
+var tileLayer=L.tileLayer('${tile}',{maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'}).addTo(map);
 tileLayer.on('tileerror',function(){send({type:'error'});});
 var markers=L.layerGroup().addTo(map),userMarker=null;
 document.addEventListener('message',function(event){

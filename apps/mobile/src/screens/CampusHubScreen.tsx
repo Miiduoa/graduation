@@ -119,7 +119,7 @@ const sections: Array<{ title: string; items: ServiceItem[] }> = [
       },
       {
         icon: 'ic_accessibility',
-        label: '無障礙路線',
+        label: '無障礙設施',
         description: '電梯與坡道',
         screen: 'AccessibleRoute',
         keywords: ['輪椅', '電梯', '坡道'],
