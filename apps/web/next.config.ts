@@ -1,4 +1,5 @@
 import type { NextConfig } from 'next';
+import { legacyEnabled, legacyRewrites } from './src/lib/legacy-routing';
 
 const contentSecurityPolicy = [
   "default-src 'self'",
@@ -27,6 +28,9 @@ const nextConfig: NextConfig = {
   output: 'standalone',
   poweredByHeader: false,
   agentRules: false,
+  async rewrites() {
+    return legacyRewrites(legacyEnabled());
+  },
   async headers() {
     return [
       {
