@@ -39,3 +39,8 @@
 .answer { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
 .published { border-left: 3px solid #17634c; padding-left: 12px; }
 @media (max-width: 700px) { .fields { grid-template-columns: minmax(0, 1fr); } .form { padding: 16px; } }
+
+.history { margin: 14px 0 0; padding: 0 0 0 24px; }
+.history li { padding: 12px 0; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
+.history li p { margin: 6px 0; white-space: pre-wrap; }
+.published .form { margin: 16px 0; }

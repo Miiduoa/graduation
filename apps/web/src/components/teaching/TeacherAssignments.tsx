@@ -4,6 +4,11 @@ import { useRef, useState, type FormEvent } from 'react';
 import { useAuth } from '@/components/AuthGuard';
 import {
   loadTeacherSubmissions,
+  loadGradeRevisions,
+  newGradeRevisionId,
+  reviseSubmissionGrade,
+  type ReviewedSubmission,
+  type GradeRevision,
   newTeacherAssignmentId,
   publishSubmissionGrade,
   publishTeacherAssignment,
@@ -49,6 +54,15 @@ export function TeacherAssignments({ schoolId, courseId, assignments, refresh }:
   const [gradingUid, setGradingUid] = useState<string | null>(null);
   const [gradeError, setGradeError] = useState('');
   const reviewGeneration = useRef(0);
+  const [editingUid, setEditingUid] = useState<string | null>(null);
+  const [revisionReason, setRevisionReason] = useState('');
+  const [revising, setRevising] = useState(false);
+  const revisingRef = useRef(false);
+  const revisionToken = useRef<string | null>(null);
+  const [gradeHistory, setGradeHistory] = useState<{ uid: string; rows: GradeRevision[] } | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState('');
+  const historyGeneration = useRef(0);
   const scope: TeacherScope = { uid: user?.uid ?? '', schoolId, courseId };
 
   async function publish(event: FormEvent) {
@@ -96,6 +110,12 @@ export function TeacherAssignments({ schoolId, courseId, assignments, refresh }:
     setReviewError('');
     setGradeError('');
     setGradeValues({});
+    setEditingUid(null);
+    setRevisionReason('');
+    revisionToken.current = null;
+    historyGeneration.current += 1;
+    setGradeHistory(null);
+    setHistoryError('');
     setLoadingReview(true);
     try {
       const data = await loadTeacherSubmissions(scope, id);
@@ -131,12 +151,85 @@ export function TeacherAssignments({ schoolId, courseId, assignments, refresh }:
     }
   }
 
+  function startRevision(submission: ReviewedSubmission) {
+    setEditingUid(submission.uid);
+    setRevisionReason('');
+    setGradeError('');
+    revisionToken.current = null;
+    setGradeValues((values) => ({
+      ...values,
+      [submission.uid]: {
+        score: String(submission.score),
+        feedback: submission.feedback,
+      },
+    }));
+  }
+
+  async function revise(event: FormEvent, submission: ReviewedSubmission) {
+    event.preventDefault();
+    if (revisingRef.current || !user || !reviewId || submission.score === null) return;
+    const input = gradeValues[submission.uid];
+    if (!input?.score.trim()) {
+      setGradeError('請輸入更正後的分數。');
+      return;
+    }
+    const generation = reviewGeneration.current;
+    revisingRef.current = true;
+    setRevising(true);
+    setGradeError('');
+    try {
+      revisionToken.current ??= newGradeRevisionId(courseId, reviewId, submission.uid);
+      await reviseSubmissionGrade(
+        scope, reviewId, submission.uid, revisionToken.current,
+        { score: submission.score, feedback: submission.feedback, gradedAt: submission.gradedAt },
+        Number(input.score), input.feedback, revisionReason,
+      );
+      const updated = await loadTeacherSubmissions(scope, reviewId);
+      if (generation === reviewGeneration.current) {
+        setReview(updated);
+        setEditingUid(null);
+        setRevisionReason('');
+        revisionToken.current = null;
+        setGradeHistory(null);
+      }
+    } catch (error) {
+      if (generation === reviewGeneration.current)
+        setGradeError(message(error, '無法確認成績更正，請重新讀取紀錄。'));
+    } finally {
+      revisingRef.current = false;
+      setRevising(false);
+    }
+  }
+
+  async function showHistory(studentUid: string) {
+    if (!reviewId) return;
+    if (gradeHistory?.uid === studentUid) {
+      historyGeneration.current += 1;
+      setGradeHistory(null);
+      return;
+    }
+    const generation = ++historyGeneration.current;
+    setHistoryLoading(true);
+    setHistoryError('');
+    setGradeHistory(null);
+    try {
+      const rows = await loadGradeRevisions(scope, reviewId, studentUid);
+      if (historyGeneration.current === generation)
+        setGradeHistory({ uid: studentUid, rows });
+    } catch (error) {
+      if (historyGeneration.current === generation)
+        setHistoryError(message(error, '無法讀取更正紀錄。'));
+    } finally {
+      if (historyGeneration.current === generation) setHistoryLoading(false);
+    }
+  }
+
   return (
     <section className={styles.panel} aria-label="作業管理">
       <header className={styles.heading}>
         <div>
           <h2>作業管理</h2>
-          <p>教師發布文字作業、查看繳交並個別評分。評分結果與學期總成績分開記錄。</p>
+          <p>發布文字作業、查看繳交、個別評分與更正紀錄。作業分數不會自動寫入學期總成績。</p>
         </div>
       </header>
       <details className={styles.compose}>
@@ -215,7 +308,88 @@ export function TeacherAssignments({ schoolId, courseId, assignments, refresh }:
                               <div className={styles.published}>
                                 <strong>已發布：{submission.score} / {review.points} 分</strong>
                                 {submission.feedback ? <p>{submission.feedback}</p> : null}
-                                <p className={styles.note}>{timeLabel(submission.gradedAt)}</p>
+                                <p className={styles.note}>
+                                  {timeLabel(submission.gradedAt)}
+                                  {submission.revisionCount > 0 ? ' · 已更正 ' + submission.revisionCount + ' 次' : ''}
+                                </p>
+                                {editingUid === submission.uid ? (
+                                  <form className={styles.form} onSubmit={(event) => void revise(event, submission)}>
+                                    <label>
+                                      更正後分數（滿分 {review.points} 分）
+                                      <input type="number" min={0} max={review.points} step={0.01}
+                                        required value={input.score} disabled={revising}
+                                        onChange={(event) => {
+                                          revisionToken.current = null;
+                                          setGradeValues((values) => ({
+                                            ...values,
+                                            [submission.uid]: { ...input, score: event.target.value },
+                                          }));
+                                        }} />
+                                    </label>
+                                    <label>
+                                      更正後評語
+                                      <textarea rows={3} maxLength={4000} value={input.feedback}
+                                        disabled={revising}
+                                        onChange={(event) => {
+                                          revisionToken.current = null;
+                                          setGradeValues((values) => ({
+                                            ...values,
+                                            [submission.uid]: { ...input, feedback: event.target.value },
+                                          }));
+                                        }} />
+                                    </label>
+                                    <label>
+                                      更正原因（必填，5–500 字）
+                                      <textarea rows={3} minLength={5} maxLength={500} required
+                                        value={revisionReason} disabled={revising}
+                                        onChange={(event) => {
+                                          revisionToken.current = null;
+                                          setRevisionReason(event.target.value);
+                                        }} />
+                                    </label>
+                                    <div className={styles.reviewHeading}>
+                                      <button className={styles.action} type="submit" disabled={revising}>
+                                        {revising ? '確認中…' : '確認更正並保留紀錄'}
+                                      </button>
+                                      <button className={styles.secondary} type="button" disabled={revising}
+                                        onClick={() => { setEditingUid(null); revisionToken.current = null; }}>
+                                        取消
+                                      </button>
+                                    </div>
+                                  </form>
+                                ) : (
+                                  <div className={styles.reviewHeading}>
+                                    <button className={styles.secondary} type="button"
+                                      disabled={revising || gradingUid !== null}
+                                      onClick={() => startRevision(submission)}>
+                                      更正成績
+                                    </button>
+                                    {submission.revisionCount > 0 ? (
+                                      <button className={styles.secondary} type="button"
+                                        onClick={() => void showHistory(submission.uid)}>
+                                        {gradeHistory?.uid === submission.uid ? '收起更正紀錄' : '查看更正紀錄'}
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                )}
+                                {historyLoading && !gradeHistory ? <p role="status">讀取更正紀錄…</p> : null}
+                                {historyError ? <p role="alert">{historyError}</p> : null}
+                                {gradeHistory?.uid === submission.uid ? (
+                                  <ol className={styles.history}>
+                                    {gradeHistory.rows.map((record) => (
+                                      <li key={record.id}>
+                                        <strong>{record.beforeScore} → {record.afterScore} 分</strong>
+                                        <p>原因：{record.reason}</p>
+                                        {record.beforeFeedback !== record.afterFeedback ? (
+                                          <p>評語：{record.beforeFeedback || '無'} → {record.afterFeedback || '無'}</p>
+                                        ) : null}
+                                        <p className={styles.note}>
+                                          {timeLabel(record.changedAt)} · 操作者：{record.changedBy}
+                                        </p>
+                                      </li>
+                                    ))}
+                                  </ol>
+                                ) : null}
                               </div>
                             ) : review.points <= 0 ? (
                               <p className={styles.note}>此作業未設定有效配分，暫時無法評分。</p>

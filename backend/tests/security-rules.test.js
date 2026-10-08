@@ -904,7 +904,8 @@ describe('course assignment submissions', () => {
   });
   async function seedAssignment(overrides = {}) {
     await seedFirestore(async (db) => {
-      await db.doc('groups/course-1').set({ name: 'Course', schoolId: 'school-1' });
+      await db.doc('groups/course-1').set({ name: 'Course', schoolId: 'school-1', type: 'course' });
+      await db.doc('schools/school-1/members/teacher').set({ role: 'faculty', status: 'active' });
       await db.doc('groups/course-1/members/alice').set({ role: 'member', status: 'active' });
       await db.doc('groups/course-1/members/teacher').set({ role: 'instructor', status: 'active' });
       await db.doc('groups/course-1/assignments/work-1').set({ title: 'Work', published: true, ...overrides });
@@ -969,6 +970,81 @@ describe('course assignment submissions', () => {
     await assertFails(ref.set(answer({ submittedAt: '2026-10-07T00:00:00Z' })));
     await assertSucceeds(ref.set(answer({ content: '', attachments: [{ url: 'https://example.test/answer.pdf' }] })));
   });
+
+  async function seedPublishedGrade() {
+    await seedAssignment({ type: 'assignment', points: 100 });
+    await assertSucceeds(pathTo(testEnv.authenticatedContext('alice').firestore()).set(answer()));
+    await seedFirestore(async (db) => {
+      await db.doc('groups/course-1/assignments/work-1/submissions/alice').update({
+        gradeScore: 60, gradeFeedback: '初次評分',
+        gradePublished: true, gradePublishedBy: 'teacher',
+        gradePublishedAt: Timestamp.fromDate(new Date('2026-10-08T01:00:00Z')),
+      });
+    });
+  }
+  function correctionBatch(db, overrides = {}, change = {}) {
+    const submission = pathTo(db);
+    const revision = submission.collection('gradeRevisions').doc('revision-1234567890');
+    const batch = db.batch();
+    batch.update(submission, {
+      gradeScore: 80, gradeFeedback: '依評分規準調整',
+      gradePublishedBy: 'teacher', gradePublishedAt: serverTimestamp(),
+      gradeRevisionId: 'revision-1234567890', gradeRevisionCount: 1,
+      gradeRevisedAt: serverTimestamp(), gradeRevisionReason: '核對配分後修正',
+      ...change,
+    });
+    batch.set(revision, {
+      beforeScore: 60, afterScore: 80, beforeFeedback: '初次評分',
+      afterFeedback: '依評分規準調整', reason: '核對配分後修正',
+      changedBy: 'teacher', changedAt: serverTimestamp(), revision: 1,
+      ...overrides,
+    });
+    return { batch, revision };
+  }
+  test('teacher grade changes require an atomic immutable audit trail', async () => {
+    await seedPublishedGrade();
+    const teacher = testEnv.authenticatedContext('teacher').firestore();
+    const submission = pathTo(teacher);
+    await assertFails(submission.update({
+      gradeScore: 80, gradeFeedback: '依評分規準調整',
+    }));
+    const { batch, revision } = correctionBatch(teacher);
+    await assertSucceeds(batch.commit());
+    const saved = await submission.get();
+    if (saved.data().gradeScore !== 80 || saved.data().gradeRevisionCount !== 1) {
+      throw new Error('The audited correction was not committed');
+    }
+    await assertSucceeds(revision.get());
+    await assertFails(revision.update({ reason: '已修改紀錄' }));
+    await assertFails(revision.delete());
+    await assertFails(testEnv.authenticatedContext('alice').firestore()
+      .doc(revision.path).get());
+  });
+  test('an audit record alone or with falsified before/after values is rejected', async () => {
+    await seedPublishedGrade();
+    const teacher = testEnv.authenticatedContext('teacher').firestore();
+    const { revision } = correctionBatch(teacher);
+    await assertFails(revision.set({
+      beforeScore: 60, afterScore: 80, beforeFeedback: '初次評分',
+      afterFeedback: '依評分規準調整', reason: '核對配分後修正',
+      changedBy: 'teacher', changedAt: serverTimestamp(), revision: 1,
+    }));
+    const { batch } = correctionBatch(teacher, { beforeScore: 10 });
+    await assertFails(batch.commit());
+  });
+  test('student and revoked teacher cannot rewrite published grades or create revision logs', async () => {
+    await seedPublishedGrade();
+    const student = testEnv.authenticatedContext('alice').firestore();
+    await assertFails(pathTo(student).update({ gradeScore: 99 }));
+    const submission = pathTo(student);
+    await assertFails(submission.collection('gradeRevisions').doc('revision-1234567890')
+      .set({ reason: '自行更正' }));
+    await seedFirestore((db) =>
+      db.doc('groups/course-1/members/teacher').update({ status: 'removed' }));
+    const { batch } = correctionBatch(testEnv.authenticatedContext('teacher').firestore());
+    await assertFails(batch.commit());
+  });
+
 });
 
 describe('protected attendance records', () => {
