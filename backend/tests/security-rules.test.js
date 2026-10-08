@@ -980,6 +980,53 @@ describe('course assignment submissions', () => {
     await assertSucceeds(pathTo(testEnv.authenticatedContext('alice').firestore()).set(answer()));
     await assertSucceeds(pathTo(testEnv.authenticatedContext('teacher').firestore()).update({ grade: 90, feedback: 'Reviewed' }));
   });
+  test('teacher cannot alter a submitted answer, its owner or its timestamps', async () => {
+    await seedAssignment({ type: 'assignment', points: 100 });
+    await assertSucceeds(pathTo(testEnv.authenticatedContext('alice').firestore()).set(answer()));
+    const ref = pathTo(testEnv.authenticatedContext('teacher').firestore());
+    await assertFails(ref.update({ content: 'Changed by teacher' }));
+    await assertFails(ref.update({ userId: 'teacher' }));
+    await assertFails(ref.update({ submittedAt: serverTimestamp() }));
+    await assertFails(ref.update({ status: 'draft' }));
+    await assertFails(ref.update({ gradeScore: 50, content: 'Changed by teacher' }));
+    const saved = await ref.get();
+    if (saved.data().content !== 'My answer' || saved.data().userId !== 'alice') {
+      throw new Error('The original student answer was modified');
+    }
+  });
+  test('published grading validates score, author and server time', async () => {
+    await seedAssignment({ type: 'assignment', points: 100 });
+    await assertSucceeds(pathTo(testEnv.authenticatedContext('alice').firestore()).set(answer()));
+    const ref = pathTo(testEnv.authenticatedContext('teacher').firestore());
+    const publish = (overrides = {}) => ({
+      gradeScore: 0, gradeFeedback: '重新檢查答案', gradePublished: true,
+      gradePublishedBy: 'teacher', gradePublishedAt: serverTimestamp(), ...overrides,
+    });
+    await assertFails(ref.update(publish({ gradeScore: 101 })));
+    await assertFails(ref.update(publish({ gradeScore: -1 })));
+    await assertFails(ref.update(publish({ gradePublishedBy: 'alice' })));
+    await assertFails(ref.update(publish({ gradePublishedAt: new Date() })));
+    await assertFails(ref.update(publish({ gradeFeedback: 'x'.repeat(4001) })));
+    await assertFails(ref.update(publish({ submittedAt: serverTimestamp() })));
+    await assertSucceeds(ref.update(publish()));
+    const saved = await ref.get();
+    if (saved.data().gradeScore !== 0 || saved.data().gradePublished !== true) {
+      throw new Error('Initial grade was not published');
+    }
+    await assertFails(ref.update({ gradeScore: 100 }));
+    await assertFails(ref.update({ content: 'Quiet rewrite' }));
+    await assertFails(ref.update({ grade: 100, feedback: 'Overwrite via old fields' }));
+  });
+  test('legacy grading accepts the first grade but not an unaudited overwrite', async () => {
+    await seedAssignment({ type: 'assignment', points: 100 });
+    await assertSucceeds(pathTo(testEnv.authenticatedContext('alice').firestore()).set(answer()));
+    const ref = pathTo(testEnv.authenticatedContext('teacher').firestore());
+    await assertFails(ref.update({ grade: 110, feedback: 'Over maximum' }));
+    await assertFails(ref.update({ grade: -1 }));
+    await assertSucceeds(ref.update({ grade: 70, feedback: 'Original review' }));
+    await assertFails(ref.update({ grade: 90, feedback: 'Silent rewrite' }));
+    await assertFails(ref.update({ feedback: 'Silent rewrite' }));
+  });
   test('removed members cannot submit or alter previous work', async () => {
     await seedAssignment();
     await seedFirestore((db) => db.doc('groups/course-1/members/alice').update({ status: 'removed' }));
