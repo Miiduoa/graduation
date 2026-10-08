@@ -64,6 +64,7 @@ function main() {
 
   const children = new Set();
   let stopping = false;
+  let shutdownSignal;
   let exitCode = 0;
   let shutdownTimer;
   let forceExitTimer;
@@ -89,6 +90,7 @@ function main() {
     if (code !== 0) exitCode = 1;
     if (stopping) return;
     stopping = true;
+    shutdownSignal = signal;
     signalChildren(signal);
     shutdownTimer = setTimeout(() => {
       exitCode = 1;
@@ -120,12 +122,14 @@ function main() {
     });
     child.once('exit', (code, signal) => {
       children.delete(child);
+      // Next handles termination itself and exits with 128 + the received signal.
+      const shutdownCode = shutdownSignal === 'SIGTERM' ? 143 : 130;
       if (!stopping) {
         console.error(`${server.name} web server exited unexpectedly (${signal ?? code}).`);
         stop(1);
       } else if (
-        (code !== null && code !== 0) ||
-        (signal && !['SIGTERM', 'SIGINT'].includes(signal))
+        (code !== null && code !== 0 && code !== shutdownCode) ||
+        (signal && signal !== shutdownSignal)
       ) {
         exitCode = 1;
       }
