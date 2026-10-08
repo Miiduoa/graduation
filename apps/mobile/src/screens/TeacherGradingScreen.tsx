@@ -175,7 +175,7 @@ export default function TeacherGradingScreen(props: RouteProps) {
         assignmentId,
         score: evaluation.totalScore,
       });
-      if (!delivery.ok) {
+      if ('reason' in delivery) {
         Alert.alert(
           '無法發佈示範成績',
           delivery.reason === 'student_missing'
