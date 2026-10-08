@@ -17,7 +17,8 @@ const originalEnv = process.env;
 
 beforeEach(() => {
   jest.clearAllMocks();
-  firestore.collection.mockImplementation(() => {
+  firestore.collection.mockImplementation((name) => {
+    if (name === 'users') return { doc: () => ({ get: async () => ({ exists: false }) }) };
     throw new Error('Unexpected database access for an unavailable service');
   });
 });
@@ -26,7 +27,9 @@ afterEach(() => {
 });
 
 function expectNoDatabaseActivity() {
-  expect(firestore.collection).not.toHaveBeenCalled();
+  // The callable admission check can read the account lifecycle marker, but
+  // unavailable services must never touch the ledger or create jobs.
+  expect(firestore.collection.mock.calls.every(([name]) => name === 'users')).toBe(true);
   expect(firestore.runTransaction).not.toHaveBeenCalled();
   expect(firestore.batch).not.toHaveBeenCalled();
 }
@@ -120,7 +123,7 @@ describe('unavailable account transfers', () => {
         data: { merchantId: 'library-transfer-supplies', amount: 0, paymentMethod: 'campus_card' },
       }),
     ).rejects.toMatchObject({ code: 'invalid-argument', message: 'Invalid amount' });
-    expect(profileRead).toHaveBeenCalledTimes(1);
+    expect(profileRead).toHaveBeenCalledTimes(2);
     expect(firestore.runTransaction).not.toHaveBeenCalled();
   });
 });
