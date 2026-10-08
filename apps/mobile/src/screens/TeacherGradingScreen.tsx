@@ -29,6 +29,7 @@ interface Submission {
   id: string;
   studentName: string;
   studentId: string;
+  studentUid?: string;
   submittedAt: string;
   isLate: boolean;
   content: string;
@@ -56,6 +57,7 @@ const SAMPLE_SUBMISSIONS: Submission[] = [
     id: 's1',
     studentName: '阿明',
     studentId: 'U11401001',
+    studentUid: 'demo_student_kuchih',
     submittedAt: '2026-05-12T22:30:00+08:00',
     isLate: false,
     content: '這是阿明繳交的內容範例⋯⋯',
@@ -164,10 +166,13 @@ export default function TeacherGradingScreen(props: RouteProps) {
       // ── Demo：emit cross-role events 給該學生 ──
       const numericCourseId = Number(courseId) || 0;
       const numericHwId = Number(assignmentId) || 1;
-      // demo 學生 mapping：阿明/小華/小芳 一律 emit 給 demo_student_kuchih（讓 demo 角色看得到）
-      const studentTargetUid = sub.studentName === '顧晉瑋'
-        ? 'demo_student_kuchih'
-        : 'demo_student_kuchih';
+      // Only route feedback when the submission has an explicit recipient.
+      // Never infer an account from the student's display name.
+      const studentTargetUid = sub.studentUid?.trim();
+      if (!studentTargetUid) {
+        Alert.alert('無法確認收件學生', '這份繳交資料沒有學生帳號識別碼，為避免將成績傳給其他人，已停止送出。');
+        return;
+      }
       await simulateTeacherGrade({
         teacherUid: auth.user?.uid ?? 'demo_teacher_chang',
         teacherName: auth.profile?.displayName ?? '張怡君',
@@ -195,7 +200,7 @@ export default function TeacherGradingScreen(props: RouteProps) {
         });
       }
 
-      // 更新本機 state（真實實作會 PATCH /submissions/{id}）
+      // Demo-only local update; no real grade API is called.
       setSubmissions((ss) =>
         ss.map((s, i) =>
           i === activeIdx
