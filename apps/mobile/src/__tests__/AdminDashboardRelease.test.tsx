@@ -18,6 +18,8 @@ jest.mock('../firebase', () => ({ getDb: () => mockDb, getFunctionsInstance: () 
 jest.mock('firebase/firestore', () => ({
   collection: (_: unknown, ...path: string[]) => path.join('/'),
   query: (path: string) => path,
+  documentId: () => '__name__',
+  startAfter: jest.fn(),
   orderBy: jest.fn(),
   limit: jest.fn(),
   getDocs: jest.fn().mockResolvedValue({ docs: [] }),

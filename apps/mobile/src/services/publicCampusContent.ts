@@ -118,6 +118,10 @@ function event(document: SourceDocument, schoolId: string): ClubEvent {
     registeredCount: nonnegativeNumber(data.registeredCount),
     registrationDeadline: dateString(data.registrationDeadline) || undefined,
     fee: nonnegativeNumber(data.fee),
+    appRegistrationConfigured:
+      (data.registrationPolicy as { version?: unknown } | undefined)?.version === 1 &&
+      Number.isSafeInteger(data.appRegistrationCount) &&
+      (data.appRegistrationCount as number) >= 0,
   };
 }
 

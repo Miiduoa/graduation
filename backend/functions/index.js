@@ -28,7 +28,9 @@ const { createNotificationService } = require('./lib/notificationService');
 const { createLiveSessionHandlers } = require('./attendanceSessions');
 const { createGroupMembershipHandlers } = require('./groupMembership');
 const { createOrderHandler } = require('./createOrder');
+const { createOrderStatusHandlers } = require('./orderTransitions');
 const { createSubmitProductFeedback } = require('./productFeedback');
+const { createEventRegistrationHandlers, prepareRegistrationPolicy, releaseDeletedUserEventRegistration } = require('./eventRegistration');
 const { readRealtimeBusCache } = require('./busArrivals');
 const { createPuCampusDataHandler, createGetMyAcademicRecords } = require('./academicRecords');
 const { createCalendarSubscriptionHandler } = require('./calendarSubscription');
@@ -184,13 +186,12 @@ initializeApp();
 
 const db = getFirestore();
 const messaging = getMessaging();
-const { getUserPushTokens, sendPushToUser, sendPushToMultipleUsers } = createNotificationService({
+const { sendPushToUser, sendPushToMultipleUsers } = createNotificationService({
   db,
   messaging,
 });
 const {
   assertActiveSchoolMember,
-  assertCafeteriaOperator,
   assertSchoolAdminOrEditor,
   assertServiceRole,
   getActiveSchoolMembership,
@@ -2837,6 +2838,10 @@ exports.bulkUpdateSchoolAnnouncements = onCall(
 );
 
 exports.submitProductFeedback = onCall({ region: REGION }, createSubmitProductFeedback({ db }));
+const eventRegistrationHandlers = createEventRegistrationHandlers({ db });
+exports.getEventRegistrations = onCall({ region: REGION }, eventRegistrationHandlers.getEventRegistrations);
+exports.registerCampusEvent = onCall({ region: REGION }, eventRegistrationHandlers.registerCampusEvent);
+exports.cancelCampusEventRegistration = onCall({ region: REGION }, eventRegistrationHandlers.cancelCampusEventRegistration);
 
 exports.upsertSchoolEvent = onCall(
   {
@@ -2861,6 +2866,8 @@ exports.upsertSchoolEvent = onCall(
     const targetRef = eventId ? events.doc(eventId) : events.doc();
 
     await db.runTransaction(async (transaction) => {
+      const membership = await transaction.get(db.collection('schools').doc(schoolId).collection('members').doc(uid));
+      if (!membership.exists || membership.data().status !== 'active' || !['admin', 'editor'].includes(membership.data().role)) throw new HttpsError('permission-denied', 'School editor permission required');
       if (eventId) {
         const existing = await transaction.get(targetRef);
         if (!existing.exists) {
@@ -2874,7 +2881,9 @@ exports.upsertSchoolEvent = onCall(
             request.data.startsAt === undefined ? previous.startsAt : request.data.startsAt,
           endsAt: request.data.endsAt === undefined ? previous.endsAt : request.data.endsAt,
         });
+        const registration = await prepareRegistrationPolicy({ db, transaction, schoolId, eventId: targetRef.id, previous, input: request.data.registrationPolicy, startsAt: request.data.startsAt === undefined ? previous.startsAt : normalized.startsAt, capacity: request.data.capacity === undefined ? previous.capacity : normalized.capacity });
         transaction.update(targetRef, {
+          ...registration,
           title: normalized.title,
           description: normalized.description,
           location: normalized.location,
@@ -2888,7 +2897,9 @@ exports.upsertSchoolEvent = onCall(
             : { capacity: normalized.capacity == null ? FieldValue.delete() : normalized.capacity }),
         });
       } else {
+        const registration = await prepareRegistrationPolicy({ db, transaction, schoolId, eventId: targetRef.id, input: request.data.registrationPolicy, startsAt: normalized.startsAt, capacity: normalized.capacity });
         transaction.create(targetRef, {
+          ...registration,
           title: normalized.title,
           description: normalized.description,
           location: normalized.location,
@@ -2918,6 +2929,19 @@ exports.upsertSchoolEvent = onCall(
   },
 );
 
+async function deleteUnregisteredSchoolEvents(schoolId, uid, eventIds) {
+  const refs = eventIds.map((id) => db.collection('schools').doc(schoolId).collection('clubEvents').doc(id));
+  await db.runTransaction(async (transaction) => {
+    const [membership, ...events] = await transaction.getAll(db.collection('schools').doc(schoolId).collection('members').doc(uid), ...refs);
+    if (!membership.exists || membership.data().status !== 'active' || !['admin', 'editor'].includes(membership.data().role)) throw new HttpsError('permission-denied', 'School editor permission required');
+    for (const event of events) {
+      const data = event.data();
+      if (data && (data.appRegistrationCount > 0 || data.registeredCount > 0)) throw new HttpsError('failed-precondition', '仍有參加者的活動不可刪除，請先聯繫參加者處理名單。');
+    }
+    refs.forEach((ref) => transaction.delete(ref));
+  });
+}
+
 exports.deleteSchoolEvent = onCall(
   {
     region: REGION,
@@ -2936,7 +2960,7 @@ exports.deleteSchoolEvent = onCall(
 
     await assertSchoolAdminOrEditor(schoolId, uid);
     const actorEmail = trimString(request.auth?.token?.email, 320);
-    await db.collection('schools').doc(schoolId).collection('clubEvents').doc(eventId).delete();
+    await deleteUnregisteredSchoolEvents(schoolId, uid, [eventId]);
 
     await logAdminAction({
       schoolId,
@@ -2981,13 +3005,7 @@ exports.bulkDeleteSchoolEvents = onCall(
     await assertSchoolAdminOrEditor(schoolId, uid);
     const actorEmail = trimString(request.auth?.token?.email, 320);
 
-    for (const chunk of chunkItems(eventIds)) {
-      const batch = db.batch();
-      for (const eventId of chunk) {
-        batch.delete(db.collection('schools').doc(schoolId).collection('clubEvents').doc(eventId));
-      }
-      await batch.commit();
-    }
+    await deleteUnregisteredSchoolEvents(schoolId, uid, eventIds);
 
     await logAdminAction({
       schoolId,
@@ -4076,6 +4094,7 @@ exports.deleteUserAccount = onCall(
     try {
       const schoolId = await resolveUserSchoolId(uid, request.data?.schoolId || null);
       const userRef = db.collection('users').doc(uid);
+      await userRef.set({ notificationDeliveryDisabled: true, accountDeletionInProgress: true }, { merge: true });
       const userSchoolsSnap = await userRef.collection('schools').get();
 
       for (const subcol of ['favorites', 'groups', 'pushTokens', 'settings', 'busAlerts']) {
@@ -4123,12 +4142,30 @@ exports.deleteUserAccount = onCall(
       await deleteSnapshotDocs(
         await db.collection('notifications').where('userId', '==', uid).limit(200).get(),
       );
+      for (const collection of ['pendingPushReceipts', 'pushReceiptResults']) {
+        while (true) {
+          const receipts = await db.collection(collection).where('uid', '==', uid).limit(200).get();
+          if (receipts.empty) break;
+          await deleteSnapshotDocs(receipts);
+        }
+      }
       await deleteSnapshotDocs(
         await db.collection('ssoLinks').where('firebaseUid', '==', uid).limit(50).get(),
       );
-      await deleteSnapshotDocs(
-        await db.collectionGroup('registrations').where('userId', '==', uid).limit(200).get(),
-      );
+      // Release controlled event seats transactionally before removing private registrations.
+      while (true) {
+        const registrations = await db.collectionGroup('registrations').where('userId', '==', uid).limit(200).get();
+        if (registrations.empty) break;
+        for (const registration of registrations.docs) {
+          const handled = await releaseDeletedUserEventRegistration({ db, registrationRef: registration.ref, uid });
+          if (!handled) await registration.ref.delete();
+        }
+      }
+      while (true) {
+        const receipts = await db.collection('eventRegistrationRequests').where('userId', '==', uid).limit(200).get();
+        if (receipts.empty) break;
+        await deleteSnapshotDocs(receipts);
+      }
       await deleteSnapshotDocs(
         (await db
           .collectionGroup('members')
@@ -4220,139 +4257,9 @@ exports.deleteUserAccount = onCall(
 
 exports.createOrder = onCall({ region: REGION }, createOrderHandler({ db }));
 
-exports.updateOrderStatus = onCall(
-  {
-    region: REGION,
-  },
-  async (request) => {
-    const uid = request.auth?.uid;
-    if (!uid) {
-      throw new HttpsError('unauthenticated', 'Must be logged in');
-    }
-
-    const { schoolId, orderId, status } = request.data;
-
-    if (!schoolId || !orderId || !status) {
-      throw new HttpsError('invalid-argument', 'Missing required fields');
-    }
-
-    const validStatuses = ['confirmed', 'preparing', 'ready', 'completed', 'cancelled'];
-    if (!validStatuses.includes(status)) {
-      throw new HttpsError('invalid-argument', 'Invalid status');
-    }
-
-    const orderRef = db.collection('schools').doc(schoolId).collection('orders').doc(orderId);
-    const orderDoc = await orderRef.get();
-
-    if (!orderDoc.exists) {
-      throw new HttpsError('not-found', 'Order not found');
-    }
-
-    const order = orderDoc.data();
-    const membership = await getActiveSchoolMembership(schoolId, uid);
-    const hasSchoolOverride = ['admin', 'editor'].includes(membership?.role ?? '');
-
-    if (!hasSchoolOverride) {
-      const cafeteriaId = trimString(order?.cafeteriaId, 160);
-      if (!cafeteriaId) {
-        throw new HttpsError(
-          'permission-denied',
-          'Legacy orders without cafeteriaId are read-only',
-        );
-      }
-      await assertCafeteriaOperator(schoolId, cafeteriaId, uid);
-    }
-
-    if (order.status === 'cancelled' || order.status === 'completed') {
-      throw new HttpsError('failed-precondition', 'Cannot update completed or cancelled orders');
-    }
-
-    await orderRef.update({
-      status,
-      [`${status}At`]: FieldValue.serverTimestamp(),
-    });
-    await getUserSchoolDoc(order.userId, schoolId, 'orders', orderId).set(
-      {
-        status,
-        [`${status}At`]: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
-
-    if (['ready', 'cancelled'].includes(status)) {
-      await sendPushToUser(
-        order.userId,
-        {
-          title: status === 'ready' ? '🍽️ 餐點已備妥' : '❌ 訂單已取消',
-          body: status === 'ready' ? '您的餐點已準備完成，請前往取餐' : '您的訂單已被取消',
-        },
-        {
-          type: 'order',
-          orderId,
-          schoolId,
-          channel: 'orders',
-        },
-      );
-    }
-
-    return { success: true };
-  },
-);
-
-exports.cancelOrder = onCall(
-  {
-    region: REGION,
-  },
-  async (request) => {
-    const uid = request.auth?.uid;
-    if (!uid) {
-      throw new HttpsError('unauthenticated', 'Must be logged in');
-    }
-
-    const { schoolId, orderId, reason } = request.data;
-
-    if (!schoolId || !orderId) {
-      throw new HttpsError('invalid-argument', 'Missing required fields');
-    }
-
-    await assertActiveSchoolMember(schoolId, uid);
-
-    const orderRef = db.collection('schools').doc(schoolId).collection('orders').doc(orderId);
-    const orderDoc = await orderRef.get();
-
-    if (!orderDoc.exists) {
-      throw new HttpsError('not-found', 'Order not found');
-    }
-
-    const order = orderDoc.data();
-
-    if (order.userId !== uid) {
-      throw new HttpsError('permission-denied', 'This is not your order');
-    }
-
-    if (['preparing', 'ready', 'completed'].includes(order.status)) {
-      throw new HttpsError('failed-precondition', 'Cannot cancel order in this status');
-    }
-
-    await orderRef.update({
-      status: 'cancelled',
-      cancelledAt: FieldValue.serverTimestamp(),
-      cancelReason: reason || 'User cancelled',
-    });
-    await getUserSchoolDoc(uid, schoolId, 'orders', orderId).set(
-      {
-        status: 'cancelled',
-        cancelledAt: FieldValue.serverTimestamp(),
-        cancelReason: reason || 'User cancelled',
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
-
-    return { success: true };
-  },
-);
+const orderStatusHandlers = createOrderStatusHandlers({ db, sendPushToUser });
+exports.updateOrderStatus = onCall({ region: REGION }, orderStatusHandlers.updateOrderStatus);
+exports.cancelOrder = onCall({ region: REGION }, orderStatusHandlers.cancelOrder);
 
 // =====================================================
 // 宿舍服務 API
@@ -5897,19 +5804,10 @@ const liveSessionHandlers = createLiveSessionHandlers({
         (member) => member.id !== uid && !['instructor', 'owner'].includes(member.data().role),
       )
       .map((member) => member.id);
-    const tokens = [
-      ...new Set((await Promise.all(studentUids.map(getUserPushTokens))).flat().filter(Boolean)),
-    ];
-    for (let offset = 0; offset < tokens.length; offset += 500) {
-      await messaging.sendEachForMulticast({
-        tokens: tokens.slice(offset, offset + 500),
-        notification: {
-          title: `${group.data()?.name ?? '課堂'} 開始點名`,
-          body: '請進入課堂，掃描老師提供的 QR Code 完成簽到。',
-        },
-        data: { type: 'live_session', groupId, sessionId, click_action: 'OPEN_CLASSROOM' },
-      });
-    }
+    await sendPushToMultipleUsers(studentUids, {
+      title: `${group.data()?.name ?? '課堂'} 開始點名`,
+      body: '請進入課堂，掃描老師提供的 QR Code 完成簽到。',
+    }, { type: 'live_session', groupId, sessionId, click_action: 'OPEN_CLASSROOM' }, 'groups');
   },
 });
 
@@ -6130,19 +6028,10 @@ exports.generateWeeklyReport = onSchedule(
           });
 
           // 推播通知
-          const tokens = await getUserPushTokens(uid);
-          if (tokens.length > 0) {
-            await messaging
-              .sendEachForMulticast({
-                tokens,
-                notification: {
-                  title: '📊 本週學習報告出爐了！',
-                  body: summary,
-                },
-                data: { type: 'weekly_report', weekId },
-              })
-              .catch(() => {});
-          }
+          await sendPushToUser(uid, {
+            title: '本週學習報告已更新', body: summary,
+          }, { type: 'weekly_report', weekId }, 'assignments')
+            .catch(() => console.warn('[generateWeeklyReport] Notification request failed'));
         }),
       );
 
@@ -6790,5 +6679,7 @@ exports.puFetchTronClassData = onRequest(
     }
   },
 );
+
+exports.scheduledPushReceiptSweep = require('./pushReceiptSweep').scheduledPushReceiptSweep;
 
 console.log('Firebase Cloud Functions loaded successfully');

@@ -1,3 +1,6 @@
+import { EventRegistrationPanel } from '../components/EventRegistrationPanel';
+import { useEventRegistrations } from '../hooks/useEventRegistrations';
+import { eventRegistrationLabel } from '../services/eventRegistration';
 import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Linking, Share, Text, View } from 'react-native';
 import {
@@ -251,6 +254,11 @@ export function CampusAnnouncementDetailScreen({ navigation, route }: Props) {
 
 export function CampusEventsScreen({ navigation }: Props) {
   const content = useCampusEvents();
+  const registrations = useEventRegistrations(
+    content.items
+      .filter((event) => event.source === 'school-club-events' && event.appRegistrationConfigured)
+      .map((event) => event.id),
+  );
   const [period, setPeriod] = useState<'all' | 'upcoming' | 'past' | 'undated'>('all');
   const now = Date.now();
   const visible = content.items
@@ -311,6 +319,15 @@ export function CampusEventsScreen({ navigation }: Props) {
               visible.map((row) => (
                 <AIRow
                   key={`${row.source}:${row.id}`}
+                  tag={
+                    row.source === 'school-club-events' && row.appRegistrationConfigured
+                      ? registrations.uid
+                        ? eventRegistrationLabel(
+                            registrations.states.find((state) => state.eventId === row.id),
+                          )
+                        : '登入確認報名'
+                      : undefined
+                  }
                   title={row.title}
                   subtitle={[dateLabel(row.startsAt), row.location].filter(Boolean).join(' · ')}
                   onPress={() => {
@@ -339,6 +356,12 @@ export function CampusEventsScreen({ navigation }: Props) {
                   onPress={() => void content.retry()}
                 />
               </View>
+            </AICard>
+          ) : null}
+          {registrations.error ? (
+            <AICard>
+              <Text style={{ color: aiTokens.danger }}>無法確認目前的報名狀態。</Text>
+              <AIButton label="重試報名狀態" onPress={() => void registrations.reload()} />
             </AICard>
           ) : null}
           <View style={{ gap: 12, margin: aiTokens.space.md }}>
@@ -453,18 +476,22 @@ export function CampusEventDetailScreen({ navigation, route }: Props) {
               {event.description || '主辦單位尚未提供活動介紹。'}
             </Text>
           </AICard>
-          <AICard title="報名方式">
-            <View style={{ gap: 8 }}>
-              {event.registrationDeadline ? (
-                <Text style={{ color: aiTokens.text }}>
-                  報名截止：{dateLabel(event.registrationDeadline)}
+          {event.source === 'school-club-events' && event.appRegistrationConfigured ? (
+            <EventRegistrationPanel eventId={event.id} />
+          ) : (
+            <AICard title="報名方式">
+              <View style={{ gap: 8 }}>
+                {event.registrationDeadline ? (
+                  <Text style={{ color: aiTokens.text }}>
+                    報名截止：{dateLabel(event.registrationDeadline)}
+                  </Text>
+                ) : null}
+                <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
+                  請依活動介紹中的方式向主辦單位報名。目前此頁提供活動資訊，不受理報名或付款。
                 </Text>
-              ) : null}
-              <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
-                請依活動介紹中的方式向主辦單位報名。目前此頁提供活動資訊，不受理報名或付款。
-              </Text>
-            </View>
-          </AICard>
+              </View>
+            </AICard>
+          )}
           <AICard title="安排參加">
             <View style={{ gap: 12 }}>
               <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>

@@ -56,3 +56,7 @@ pnpm --filter mobile test --ci
 ```
 
 建置與提交設定提供 EAS 真實 schema 整合測試。將 `EAS_JSON_PACKAGE_ROOT` 設為隔離安裝的 `@expo/eas-json@24.9.0` 絕對路徑後執行上述 node tests。這是 EAS CLI 24.12.0 使用的版本；本機未設定時兩項 schema 測試會明確跳過，不能把它們列為通過。CI 與 Release preflight 會隔離安裝此版本並設定該路徑，實際執行 resolver/schema 測試，不修改 workspace 鎖檔。測試同時執行 repo 的真正 `app.config.ts`，驗證繼承 profile 的 override、本機／worker 設定、原生不一致及 iOS `.dev` 阻擋。這些是本機證據，不證明遠端已建置、憑證有效或商店已接受產物。
+
+### 單欄位 collection-group 索引
+
+活動報名的刪帳清理需要 `registrations.userId` 的 `COLLECTION_GROUP` 單欄位索引，已由 `firestore.indexes.json` 的 `fieldOverrides` 宣告。相同 readiness gate 會驗證各欄位設定的每一種 scope／排序皆已 READY；REST 欄位列表有分頁，繼承的設定會在同專案、同資料庫內讀取並驗證。建立中、回復繼承中、遺漏或無法確認的狀態都不能繼續部署 Functions。測試使用合成 REST 回應，尚未對正式專案執行此 gate。
