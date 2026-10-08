@@ -14,14 +14,25 @@ const MapClient = dynamic(() => import('./MapClient'), {
   loading: () => <PageLoadingCard message="地圖載入中..." />,
 });
 
-export default function MapPage(props: { searchParams?: Promise<{ school?: string; schoolId?: string; route?: string | string[]; focus?: string | string[] }> }) {
+export default function MapPage(props: {
+  searchParams?: Promise<{
+    school?: string;
+    schoolId?: string;
+    route?: string | string[];
+    focus?: string | string[];
+  }>;
+}) {
   const searchParams = props.searchParams ? use(props.searchParams) : undefined;
   const { schoolId, schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
   const route = Array.isArray(searchParams?.route) ? searchParams.route[0] : searchParams?.route;
   const focus = Array.isArray(searchParams?.focus) ? searchParams.focus[0] : searchParams?.focus;
 
   return (
-    <SiteShell title="校園地圖" subtitle="互動地圖 · 探索校園各設施" schoolName={schoolName}>
+    <SiteShell
+      title="校園地圖"
+      subtitle="找教室、查設施，規劃前往目的地的路線"
+      schoolName={schoolName}
+    >
       <MapClient school={schoolId} route={route} focus={focus} />
 
       <div
@@ -39,17 +50,19 @@ export default function MapPage(props: { searchParams?: Promise<{ school?: strin
         }}
       >
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand)', marginBottom: 3 }}>校園導航</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand)', marginBottom: 3 }}>
+            找校園地點
+          </div>
           <div style={{ fontSize: 13, color: 'var(--text)' }}>
-            不確定怎麼走？提供起點與目的地，查詢校園路線與沿途地標。
+            找不到建築或設施？告訴校園助理你想前往哪裡。
           </div>
         </div>
         <Link
-          href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('工程館 302 要怎麼從校門口走過去？大概要幾分鐘？中途有什麼地標可以參考？')}`}
+          href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('我想查詢校園地點，請先問我想前往哪棟建築或設施。')}`}
           className="btn"
           style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
         >
-          詢問路線 →
+          詢問地點 →
         </Link>
       </div>
     </SiteShell>

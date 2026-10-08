@@ -94,8 +94,8 @@
     "version:major": "node ./scripts/bump-version.mjs major",
     "release:preview": "pnpm --filter mobile exec eas build --profile preview --platform all --non-interactive",
     "release:production": "pnpm --filter mobile exec eas build --profile production --platform all --non-interactive",
-    "submit:ios": "pnpm --filter mobile exec eas submit --platform ios --latest --non-interactive",
-    "submit:android": "pnpm --filter mobile exec eas submit --platform android --latest --non-interactive"
+    "submit:ios": "pnpm --filter mobile exec eas submit --platform ios --profile production --id \"${EAS_BUILD_ID:?Set EAS_BUILD_ID to the verified iOS build ID}\" --wait --non-interactive",
+    "submit:android": "pnpm --filter mobile exec eas submit --platform android --profile production --id \"${EAS_BUILD_ID:?Set EAS_BUILD_ID to the verified Android build ID}\" --wait --non-interactive"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",

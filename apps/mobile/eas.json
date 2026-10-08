@@ -58,13 +58,9 @@
   "submit": {
     "production": {
       "ios": {
-        "appleId": "${APPLE_ID}",
-        "ascAppId": "${ASC_APP_ID}",
-        "appleTeamId": "${APPLE_TEAM_ID}",
         "language": "zh-Hant"
       },
       "android": {
-        "serviceAccountKeyPath": "${GOOGLE_SERVICE_ACCOUNT_KEY_PATH}",
         "track": "internal",
         "releaseStatus": "draft",
         "changesNotSentForReview": true

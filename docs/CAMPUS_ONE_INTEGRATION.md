@@ -6,12 +6,12 @@ Campus One 保留主要介面與操作流程；整合目標是沿用 Nuni 的網
 
 ## 來源版本
 
-| 來源                                                                                                   | 已核對的遠端版本                                                                                         | 用途                                                                                |
-| ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| 來源                                                                                                   | 已核對的遠端版本                                                                                         | 用途                                                                                                                                       |
+| ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | [Campus One / graduation](https://github.com/Miiduoa/graduation)                                       | main `621dc7f98e5ead4dd717a754fe7d468dd7214487`；本輪 PR 起點 `c79b757754ea1afa4a461fd7a44038fc0de5f045` | 主要功能實作為 `5e609faeedc19153a5055aa9b755d2b3c08afc99`，已納入所列 main 的變更；後續提交另修正教師工作台換行、部署依賴與 Functions 封裝 |
-| [Nuni / nuni-prod](https://github.com/Miiduoa/nuni-prod/tree/9de47b4b3492325e430562c37bcad552867162db) | main `9de47b4b3492325e430562c37bcad552867162db`                                                          | 既有 API、PostgreSQL、身份及部署契約的參考來源                                      |
-| [Nuni / nuni-v2](https://github.com/Miiduoa/nuni-v2/tree/caa4cd313678c9b450f1932682f003fe281f748d)     | main `caa4cd313678c9b450f1932682f003fe281f748d`                                                          | 新版方向；README 明確沿用 nuni.tw、api.nuni.tw、Cloudflare、Fly 及商店帳號          |
-| [Nolu / web](https://github.com/Miiduoa/web/tree/a8e6804ef971de9eb68074a4499924c823fab733)             | main `a8e6804ef971de9eb68074a4499924c823fab733`                                                          | 課表匯入、重複／衝堂判定、快取隔離及備援契約的參考來源                              |
+| [Nuni / nuni-prod](https://github.com/Miiduoa/nuni-prod/tree/9de47b4b3492325e430562c37bcad552867162db) | main `9de47b4b3492325e430562c37bcad552867162db`                                                          | 既有 API、PostgreSQL、身份及部署契約的參考來源                                                                                             |
+| [Nuni / nuni-v2](https://github.com/Miiduoa/nuni-v2/tree/caa4cd313678c9b450f1932682f003fe281f748d)     | main `caa4cd313678c9b450f1932682f003fe281f748d`                                                          | 新版方向；README 明確沿用 nuni.tw、api.nuni.tw、Cloudflare、Fly 及商店帳號                                                                 |
+| [Nolu / web](https://github.com/Miiduoa/web/tree/a8e6804ef971de9eb68074a4499924c823fab733)             | main `a8e6804ef971de9eb68074a4499924c823fab733`                                                          | 課表匯入、重複／衝堂判定、快取隔離及備援契約的參考來源                                                                                     |
 
 這些是本輪核對的來源版本，不能用來推定正式站正在執行的版本。主要功能實作已提交為 `5e609faeedc19153a5055aa9b755d2b3c08afc99`；下列完整驗證對應這批程式碼，後續版面、依賴與封裝修正另記錄對應驗證。原生顯示名稱另以 plist 與 development Expo config 驗證；尚未產生同版本的正式簽署產物。發布時仍須對應最終提交、建置產物與實際部署版本。
 
@@ -46,9 +46,24 @@ Nolu 的實際專案是 `Miiduoa/web`，原始碼主要位於 `pu-plan/`，公�
 
 本輪 CI 與 Functions runtime 使用 Node.js 22；`backend/functions/package.json` 已宣告 `engines.node: "22"`。Firebase 官方文件列出 [Node.js 22 與 runtime 設定方式](https://firebase.google.com/docs/functions/manage-functions#set_nodejs_version)。本 repo 的 `.firebaserc` 預設指向 demo，正式發布必須明確指定已核對的 project ID；CI 缺少 production variable `FIREBASE_PROJECT_ID` 或 secret `FIREBASE_TOKEN` 會失敗，不沿用歷史 [CI 37393275660](https://github.com/Miiduoa/graduation/actions/runs/37393275660) 跳過部署仍成功的語意。
 
-新的本人 session 查詢依賴 `_puSessions` 的 `ownerUid ASC`／`expiresAt DESC` 複合索引。發布順序必須先建立索引、確認目標專案該索引為 `READY`，再發布依賴它的 Functions 與 Web；索引建立包含非同步回填，送出部署不等於可查詢，參見 [Firestore 索引建置文件](https://firebase.google.com/docs/firestore/query-data/indexing#index_build_time)。目前 CI 先部署 indexes 再部署 Functions，尚未實作等待 `READY` 的 gate，這是正式發布前仍須補齊的條件。該 job 已包含 Firestore／Storage rules 與 indexes，再部署 Functions；不部署 Web 或 Mobile。完整發布仍須核對各部分版本與相容性。
+新的本人 session 查詢依賴 `_puSessions` 的 `ownerUid ASC`／`expiresAt DESC` 複合索引。發布順序必須先建立索引、確認目標專案該索引為 `READY`，再發布依賴它的 Functions 與 Web；索引建立包含非同步回填，送出部署不等於可查詢，參見 [Firestore 索引建置文件](https://firebase.google.com/docs/firestore/query-data/indexing#index_build_time)。CI 現在以 `scripts/wait-for-firestore-indexes.cjs` 查詢目標 Firestore Admin REST，包含分頁與隱含的 `__name__` 排序；全部必要索引 `READY` 才繼續。缺少或仍在建立的索引最多等待 20 分鐘，維修狀態、權限錯誤及無法確認的回應會阻擋發布。這個 gate 已完成本機回歸，尚未以正式專案執行。該 job 已包含 Firestore／Storage rules 與 indexes，再部署 Functions；不部署 Web 或 Mobile。完整發布仍須核對各部分版本與相容性。
 
-## 最新候選實作與驗收
+## 2026-10-08：地圖、校園資訊與發布流程
+
+以 PR #21 的 `00914c6457ae3ca5d2fd0359346110a237f679a1` 為起點，延續既有紙白／墨綠設計。
+
+- **Web 地圖**：只讀伺服器校園地點，移除台北示範座標、營業時間及直線步行估時；以地點座標開啟 Google 步行導航。修正 Leaflet 延遲載入、地點更新及名稱被解讀為 HTML 的問題。收藏使用本人／學校範圍的交易，寫入失敗不顯示已收藏，換帳號清除舊狀態。
+- **App 設定**：顯示真實帳號與版本，主題即時切換；登出執行身份與快取清理流程。移除虛構裝置數、同步時間與無作用操作。法律連結沿用正式環境設定。
+- **App 公告與活動**：列表與詳情改讀校園來源；只在正式集合成功且空時才查舊集合，讀取失敗保留重試。附件僅開啟有效 HTTPS 網址，活動支援分享及行事曆匯出。換帳號、學校或詳情即隔離舊回應。已掛載頁面切換主題時，內文與錯誤文字同步更新。
+- **發布**：補齊公告／活動的舊集合複合索引，以及索引 READY gate。修正 Release workflow 的 Jest／Vitest 無效參數；固定 EAS CLI 24.12.0，核對本次產物的來源提交、專案、平台、profile、原生識別碼與完成狀態，再以確切 build ID 提交。Apple 提交值經驗證後只寫入 CI 暫存 checkout，不使用 EAS 不支援的字串插值。所有指定平台成功才建立 GitHub draft release。詳見 [發布流程](RELEASE_PIPELINE.md)。
+
+本機已執行完整 Web／Mobile 測試、workspace typecheck／lint、Web production build 與 iOS／Android development export。地圖新增 22 項測試；Mobile 新增設定、來源讀取、公告／活動操作及已掛載主題切換回歸。地圖另在只替換來源的隔離 fixture 檢查 390／1365px × 深／淺色 × 有資料／錯誤／空資料共 12 個版面狀態，搜尋、分類、標記選擇、重試及導航網址均已操作；沒有水平溢位或頁面例外。fixture 明確使用合成資料，未寫入正式來源。完整套件數與最終 SHA 以 PR 對應 CI 為準；下節的測試數保留原版本範圍。
+
+仍待正式環境驗收：本人收藏、校園地點正確性、公告／活動實際資料及實機分享。活動列表目前取 startsAt 降序前 100 筆，尚無完整分頁；活動報名需要伺服器交易與權限契約，不能把行事曆匯出當作報名成功。Nuni 身份映射、帳本轉接、線上金流、資料遷移、商店識別碼／簽署及正式部署仍未完成。
+
+本次唯讀查到 Nuni 的 EAS 專案確為 `@miiduoa/campus-one`（`8955b97c-802c-463c-bd1d-d5f02e30a966`），已將 Campus One 的 Expo slug／owner 對齊。最近的 Android build metadata 中 appIdentifier 是 Gradle 運算式，不能視作實際安裝包或商店登記 ID；原生識別碼仍需以正式產物與商店帳戶核對。GitHub repo 與 production environment 當時皆未配置 secrets／variables，發布 workflow 尚不能據此執行正式建置或部署。
+
+## 歷史檢查點：00914c6 之前的整合實作與驗收
 
 主要功能版本：`5e609faeedc19153a5055aa9b755d2b3c08afc99`；後續提交另修正教師工作台換行、部署依賴與 Functions 封裝。尚未部署正式環境、切換 Nuni 網域、提交或通過商店審查。
 

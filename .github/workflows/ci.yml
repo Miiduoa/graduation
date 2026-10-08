@@ -51,6 +51,9 @@ jobs:
       - name: Verify isolated Functions deployment package
         run: node scripts/verify-functions-package.cjs
 
+      - name: Test deployment readiness gates
+        run: node --test scripts/wait-for-firestore-indexes.test.cjs scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs
+
       - name: Audit Functions deployment dependencies
         working-directory: backend/functions
         run: |
@@ -375,6 +378,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Deploy to Firebase
+        timeout-minutes: 30
         env:
           FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
@@ -392,6 +396,7 @@ jobs:
             exit 1
           fi
           pnpm -w firebase deploy --only firestore:rules,storage,firestore:indexes --project "$FIREBASE_PROJECT_ID" --non-interactive
+          node scripts/wait-for-firestore-indexes.cjs --project "$FIREBASE_PROJECT_ID" --timeout-seconds 1200
           pnpm -w firebase deploy --only functions --project "$FIREBASE_PROJECT_ID" --non-interactive
 
   summary:
