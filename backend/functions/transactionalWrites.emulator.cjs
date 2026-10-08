@@ -460,6 +460,31 @@ test('inspection never cancels a collected order from a stale candidate query', 
   assert.deepEqual((await read('schools/pu/inspectionEnforcements/review')).affectedOrderIds, []);
 });
 
+test('a closed transaction response after commit reuses the inspection and cancellation receipts', async () => {
+  const id = await setupOrder('ready');
+  const event = await inspectionEvent();
+  let attempts = 0;
+  const database = {
+    collection: db.collection.bind(db),
+    runTransaction: async (callback) => {
+      const result = await db.runTransaction(callback);
+      attempts += 1;
+      if (attempts === 1 || attempts === 3) {
+        const failure = new Error('3 INVALID_ARGUMENT: Transaction is invalid or closed.');
+        failure.code = 3;
+        throw failure;
+      }
+      return result;
+    },
+  };
+  await createInspectionEnforcement({ db: database })(event);
+  assert.equal(attempts, 4);
+  assert.equal((await assertReceipts(id)).status, 'cancelled');
+  assert.deepEqual((await read('schools/pu/inspectionEnforcements/review')).affectedOrderIds, [id]);
+  assert.equal((await db.collection('schools/pu/refunds').get()).size, 0);
+  assert.equal((await read('schools/pu/cafeterias/cafe')).orderingEnabled, false);
+});
+
 test('a replaced inspection score prevents stale enforcement before and during order processing', async () => {
   const id = await setupOrder();
   const event = await inspectionEvent();
