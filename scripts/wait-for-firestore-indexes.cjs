@@ -18,12 +18,10 @@ function loadDeployment(configPath) {
   const spec = JSON.parse(
     fs.readFileSync(path.resolve(path.dirname(configPath), config.firestore.indexes), 'utf8'),
   );
-  if (!Array.isArray(spec.indexes) || (spec.fieldOverrides || []).length) {
-    throw new Error(
-      'Expected composite indexes without field overrides; extend the gate before adding overrides.',
-    );
-  }
-  return { database, indexes: spec.indexes };
+  if (!Array.isArray(spec.indexes)) throw new Error('Expected a Firestore indexes array.');
+  const fieldOverrides = spec.fieldOverrides ?? [];
+  fieldRequirements(fieldOverrides);
+  return { database, indexes: spec.indexes, fieldOverrides };
 }
 
 function indexKey(index, collectionGroup = index.collectionGroup, appendName = false) {
@@ -57,6 +55,202 @@ function indexKey(index, collectionGroup = index.collectionGroup, appendName = f
     unique: index.unique ?? false,
     fields,
   });
+}
+
+function validPathPart(value) {
+  return (
+    typeof value === 'string' &&
+    value.trim() === value &&
+    value.length > 0 &&
+    !['.', '..'].includes(value) &&
+    ![...value].some((character) => character.charCodeAt(0) < 32)
+  );
+}
+
+function fieldRequirements(overrides) {
+  if (!Array.isArray(overrides)) throw new Error('Expected a Firestore fieldOverrides array.');
+  const seen = new Set();
+  return overrides.map((field) => {
+    if (
+      !field ||
+      !validPathPart(field.collectionGroup) ||
+      field.collectionGroup.includes('/') ||
+      field.collectionGroup === '-' ||
+      !validPathPart(field.fieldPath) ||
+      !Array.isArray(field.indexes) ||
+      Object.keys(field).some((key) => !['collectionGroup', 'fieldPath', 'indexes'].includes(key))
+    ) {
+      throw new Error('Invalid or unsupported Firestore field override.');
+    }
+    const key = JSON.stringify([field.collectionGroup, field.fieldPath]);
+    if (seen.has(key)) throw new Error('Duplicate Firestore field override.');
+    seen.add(key);
+    const keys = field.indexes.map((index) => {
+      if (
+        !index ||
+        Object.keys(index).some(
+          (key) =>
+            ![
+              'order',
+              'arrayConfig',
+              'queryScope',
+              'apiScope',
+              'density',
+              'multikey',
+              'unique',
+            ].includes(key),
+        )
+      ) {
+        throw new Error('Invalid or unsupported Firestore field index.');
+      }
+      return indexKey(
+        {
+          ...index,
+          fields: [
+            { fieldPath: field.fieldPath, order: index.order, arrayConfig: index.arrayConfig },
+          ],
+        },
+        field.collectionGroup,
+      );
+    });
+    if (new Set(keys).size !== keys.length) throw new Error('Duplicate Firestore field index.');
+    return { ...field, keys, label: `${field.collectionGroup}.${field.fieldPath}` };
+  });
+}
+
+function parseFieldName(name, parent) {
+  if (typeof name !== 'string' || !name.startsWith(parent))
+    throw new Error('Firestore returned a field outside the requested project/database.');
+  const match = /^([^/]+)\/fields\/(.+)$/.exec(name.slice(parent.length));
+  if (!match || !validPathPart(match[1]) || match[1] === '-' || !validPathPart(match[2]))
+    throw new Error('Firestore returned an invalid field resource name.');
+  return { collectionGroup: match[1], fieldPath: match[2] };
+}
+
+async function listFields({ project, database, accessToken, fetchImpl, signal }) {
+  const parent = `projects/${project}/databases/${database}/collectionGroups/`;
+  const url = new URL(`https://firestore.googleapis.com/v1/${parent}-/fields`);
+  // ListFields only supports explicit index overrides or TTL configurations.
+  url.searchParams.set('filter', 'indexConfig.usesAncestorConfig=false OR ttlConfig:*');
+  url.searchParams.set('pageSize', '1000');
+  const fields = new Map();
+  const seenPages = new Set();
+  while (true) {
+    const page = await requestJson(
+      fetchImpl,
+      url,
+      { headers: { Authorization: `Bearer ${accessToken}` }, signal },
+      'Firestore field listing',
+    );
+    if (
+      !page ||
+      typeof page !== 'object' ||
+      Array.isArray(page) ||
+      (page.fields !== undefined && !Array.isArray(page.fields))
+    )
+      throw new Error('Firestore field listing returned an invalid field list.');
+    for (const field of page.fields || []) {
+      parseFieldName(field?.name, parent);
+      if (fields.has(field.name)) throw new Error('Firestore returned a duplicate field resource.');
+      fields.set(field.name, field);
+    }
+    if (!page.nextPageToken) return fields;
+    if (typeof page.nextPageToken !== 'string' || seenPages.has(page.nextPageToken))
+      throw new Error('Firestore returned an invalid or repeated field pagination token.');
+    seenPages.add(page.nextPageToken);
+    url.searchParams.set('pageToken', page.nextPageToken);
+  }
+}
+
+async function fieldIndexStates({
+  expected,
+  fields,
+  project,
+  database,
+  accessToken,
+  fetchImpl,
+  signal,
+}) {
+  const parent = `projects/${project}/databases/${database}/collectionGroups/`;
+  const originalName = `${parent}${expected.collectionGroup}/fields/${expected.fieldPath}`;
+  const visited = new Set();
+  let name = originalName;
+  while (true) {
+    if (visited.has(name) || visited.size >= 16)
+      throw new Error('Invalid Firestore field index inheritance chain.');
+    visited.add(name);
+    const identity = parseFieldName(name, parent);
+    let field = fields.get(name);
+    if (!field) {
+      // Inherited fields are absent from ListFields and must be resolved explicitly.
+      const url = `https://firestore.googleapis.com/v1/${parent}${encodeURIComponent(identity.collectionGroup)}/fields/${encodeURIComponent(identity.fieldPath)}`;
+      field = await requestJson(
+        fetchImpl,
+        url,
+        { headers: { Authorization: `Bearer ${accessToken}` }, signal },
+        'Firestore field lookup',
+      );
+      if (field?.name !== name)
+        throw new Error('Firestore field lookup returned a different resource.');
+      fields.set(name, field);
+    }
+    const config = field.indexConfig;
+    if (
+      !config ||
+      typeof config !== 'object' ||
+      Array.isArray(config) ||
+      (config.indexes !== undefined && !Array.isArray(config.indexes)) ||
+      ['usesAncestorConfig', 'reverting'].some(
+        (key) => config[key] !== undefined && typeof config[key] !== 'boolean',
+      )
+    )
+      throw new Error('Firestore returned an invalid field index configuration.');
+    if (config.reverting) return [`REVERTING: ${expected.label}`];
+    if (config.usesAncestorConfig) {
+      if (!config.ancestorField)
+        throw new Error('Firestore field index inheritance is missing its ancestor.');
+      parseFieldName(config.ancestorField, parent);
+      // A declared empty override must be explicitly disabled, not merely inherit today's defaults.
+      if (!expected.keys.length) return [`MISSING explicit disabled override: ${expected.label}`];
+      // Prefer states returned for this field; an ancestor's READY must never hide its CREATING.
+      if (!config.indexes?.length) {
+        name = config.ancestorField;
+        continue;
+      }
+    }
+    const actual = new Map();
+    for (const index of config.indexes || []) {
+      if (
+        !index ||
+        !Array.isArray(index.fields) ||
+        index.fields.length !== 1 ||
+        !index.fields[0] ||
+        (index.fields[0].fieldPath !== undefined &&
+          index.fields[0].fieldPath !== '' &&
+          index.fields[0].fieldPath !== identity.fieldPath)
+      )
+        throw new Error('Firestore returned an invalid single-field index.');
+      // Single-field indexes have one field (possibly omitted in REST); no implicit __name__.
+      const key = indexKey(
+        { ...index, fields: [{ ...index.fields[0], fieldPath: expected.fieldPath }] },
+        expected.collectionGroup,
+      );
+      if (actual.has(key)) throw new Error('Firestore returned a duplicate single-field index.');
+      actual.set(key, index.state || 'STATE_UNSPECIFIED');
+    }
+    if (!expected.keys.length)
+      return actual.size ? [`MISSING disabled override: ${expected.label}`] : [];
+    return expected.keys.flatMap((key) => {
+      const state = actual.get(key) || 'MISSING';
+      if (state === 'READY') return [];
+      if (!['CREATING', 'MISSING'].includes(state))
+        throw new Error(`Required Firestore field index is ${state}: ${expected.label}.`);
+      const shape = JSON.parse(key);
+      return [
+        `${state}: ${expected.label} (${shape.queryScope}, ${shape.fields[0].order || shape.fields[0].arrayConfig})`,
+      ];
+    });
+  }
 }
 
 async function requestJson(fetchImpl, url, options, label) {
@@ -145,6 +339,7 @@ async function waitForIndexes({
   project,
   database = '(default)',
   indexes,
+  fieldOverrides = [],
   firebaseToken,
   timeoutMs = 1_200_000,
   pollMs = 10_000,
@@ -175,7 +370,9 @@ async function waitForIndexes({
     key: indexKey(index, index.collectionGroup, true),
     label: `${index.collectionGroup} (${index.fields.map((field) => field.fieldPath).join(', ')})`,
   }));
-  if (!required.length) throw new Error('No required Firestore indexes found.');
+  const requiredFields = fieldRequirements(fieldOverrides);
+  if (!required.length && !requiredFields.length)
+    throw new Error('No required Firestore indexes found.');
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const signal = controller.signal;
@@ -184,7 +381,11 @@ async function waitForIndexes({
   try {
     const accessToken = await getAccessToken({ firebaseToken, oauthClient, fetchImpl, signal });
     while (true) {
-      const remote = await listIndexes({ project, database, accessToken, fetchImpl, signal });
+      const request = { project, database, accessToken, fetchImpl, signal };
+      const [remote, fields] = await Promise.all([
+        required.length ? listIndexes(request) : [],
+        requiredFields.length ? listFields(request) : new Map(),
+      ]);
       const byKey = new Map();
       for (const index of remote) {
         try {
@@ -204,10 +405,12 @@ async function waitForIndexes({
         }
         pending.push(`${state}: ${expected.label}`);
       }
+      for (const expected of requiredFields)
+        pending.push(...(await fieldIndexStates({ ...request, expected, fields })));
       if (signal.aborted) throw new Error('Index readiness deadline exceeded.');
       if (!pending.length) {
         log(
-          `Firestore indexes READY: ${required.length} required indexes in ${project}/${database}.`,
+          `Firestore indexes READY: ${required.length} required indexes and ${requiredFields.length} field configurations in ${project}/${database}.`,
         );
         return;
       }
@@ -224,6 +427,7 @@ async function waitForIndexes({
     }
     throw error;
   } finally {
+    controller.abort();
     clearTimeout(timeout);
   }
 }
@@ -251,4 +455,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { indexKey, loadDeployment, waitForIndexes };
+module.exports = { indexKey, fieldRequirements, loadDeployment, waitForIndexes };

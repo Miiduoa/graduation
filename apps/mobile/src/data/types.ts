@@ -16,6 +16,7 @@ export type Announcement = {
 export type AnnouncementCategory = 'general' | 'academic' | 'event' | 'emergency' | 'system';
 
 export type ClubEvent = {
+  appRegistrationConfigured?: boolean;
   id: string;
   title: string;
   description: string;
