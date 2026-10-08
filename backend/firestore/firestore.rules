@@ -726,7 +726,28 @@ service cloud.firestore {
 
       match /knowledgeBase/{entryId} {
         allow read: if isActiveGroupMember(groupId);
-        allow create, update, delete: if canManageGroup(groupId);
+        allow create: if canManageGroup(groupId);
+        allow delete: if false;
+        allow update: if canManageGroup(groupId) && (
+          resource.data.get('type', '') != 'assignment'
+          || (
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'title', 'description', 'dueAt', 'allowLateSubmission', 'updatedAt', 'lastEditedBy'
+            ])
+            && resource.data.get('createdBy', '') == request.auth.uid
+            && resource.data.get('published', false) == true
+            && resource.data.get('status', '') != 'closed'
+            && request.resource.data.title is string
+            && request.resource.data.title.size() >= 1
+            && request.resource.data.title.size() <= 120
+            && request.resource.data.description is string
+            && request.resource.data.description.size() <= 10000
+            && (request.resource.data.dueAt == null || request.resource.data.dueAt is string)
+            && request.resource.data.allowLateSubmission is bool
+            && request.resource.data.lastEditedBy == request.auth.uid
+            && request.resource.data.updatedAt == request.time
+          )
+        );
       }
 
       match /aiKnowledge/{chunkId} {

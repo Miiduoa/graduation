@@ -388,3 +388,73 @@ export async function loadGradeRevisions(
     };
   }).sort((a, b) => (b.changedAt ?? '').localeCompare(a.changedAt ?? ''));
 }
+
+
+export type AssignmentEdit = {
+  title: string;
+  description: string;
+  dueAt: string;
+  allowLateSubmission: boolean;
+};
+
+export async function updateTeacherAssignment(
+  scope: TeacherScope,
+  assignmentId: string,
+  expectedUpdatedAt: string | null,
+  changes: AssignmentEdit,
+): Promise<void> {
+  if (!validId(assignmentId)) throw new TeacherCourseError('無效的作業編號。');
+  const title = changes.title.trim();
+  const description = changes.description.trim();
+  const due = changes.dueAt.trim() ? new Date(changes.dueAt) : null;
+  if (!title || title.length > 120 || description.length > 10000 ||
+      (due && !Number.isFinite(due.getTime()))) {
+    throw new TeacherCourseError('請確認標題、說明及截止時間格式。');
+  }
+  await authorizeTeacherCourse(scope);
+  requireCurrentTeacher(scope);
+  const ref = doc(getDb(), 'groups', scope.courseId, 'assignments', assignmentId);
+  await runTransaction(getDb(), async (transaction) => {
+    await checkWriteAccess(scope, transaction);
+    const current = await transaction.get(ref);
+    requireCurrentTeacher(scope);
+    if (!current.exists() || current.data().type !== 'assignment' ||
+        current.data().createdBy !== scope.uid) {
+      throw new TeacherCourseError('只有原建立教師可以修改這份文字作業。');
+    }
+    const data = current.data();
+    if (toIso(data.updatedAt) !== expectedUpdatedAt) {
+      throw new TeacherCourseError('作業已由其他操作更新，請重新讀取後再編輯。');
+    }
+    if (data.status === 'closed' || data.published !== true) {
+      throw new TeacherCourseError('這份作業目前不可編輯。');
+    }
+    transaction.update(ref, {
+      title, description, dueAt: due ? due.toISOString() : null,
+      allowLateSubmission: changes.allowLateSubmission,
+      updatedAt: serverTimestamp(),
+      lastEditedBy: scope.uid,
+    });
+  });
+  requireCurrentTeacher(scope);
+}
+
+export async function loadEditableTeacherAssignment(scope: TeacherScope, assignmentId: string) {
+  if (!validId(assignmentId)) throw new TeacherCourseError('無效的作業編號。');
+  await authorizeTeacherCourse(scope);
+  const snapshot = await getDocFromServer(doc(getDb(), 'groups', scope.courseId, 'assignments', assignmentId));
+  await authorizeTeacherCourse(scope);
+  requireCurrentTeacher(scope);
+  if (!snapshot.exists() || snapshot.data().type !== 'assignment' ||
+      snapshot.data().createdBy !== scope.uid) {
+    throw new TeacherCourseError('沒有權限編輯這份作業。');
+  }
+  const row = snapshot.data();
+  return {
+    title: typeof row.title === 'string' ? row.title : '',
+    description: typeof row.description === 'string' ? row.description : '',
+    dueAt: toIso(row.dueAt) ?? '',
+    allowLateSubmission: row.allowLateSubmission === true,
+    updatedAt: toIso(row.updatedAt),
+  };
+}
