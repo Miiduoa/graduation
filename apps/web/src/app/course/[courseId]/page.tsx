@@ -81,6 +81,20 @@ function Assignment({
               : ''}
           </p>
           <p style={{ whiteSpace: 'pre-wrap' }}>{assignment.submittedText ?? text}</p>
+          {assignment.grade ? (
+            <div aria-label="作業評分" style={{ borderTop: '1px solid var(--border)', marginTop: 18, paddingTop: 16 }}>
+              <strong>
+                教師已評分：{assignment.grade.score}
+                {assignment.points !== null ? ` / ${assignment.points}` : ''} 分
+              </strong>
+              {assignment.grade.feedback ? (
+                <p style={{ whiteSpace: 'pre-wrap' }}>{assignment.grade.feedback}</p>
+              ) : null}
+              {assignment.grade.publishedAt ? (
+                <p>發布時間：{new Date(assignment.grade.publishedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}</p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : canTeach ? (
         <p>此為教師檢視。</p>

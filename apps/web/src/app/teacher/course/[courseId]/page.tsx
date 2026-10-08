@@ -5,6 +5,7 @@ import { use } from 'react';
 import { AppHeader } from '@/components/AppHeader';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import { useTeacherCourse } from '@/lib/useTeacherCourse';
+import { TeacherAssignments } from '@/components/teaching/TeacherAssignments';
 import styles from '../../../home.module.css';
 import local from './teacherCourse.module.css';
 
@@ -137,7 +138,14 @@ export default function TeacherCoursePage(props: {
                 )}
               </section>
             </div>
-            <p className={local.muted}>此頁提供課程資料查閱。新增作業與發布成績尚未開放。</p>
+            <TeacherAssignments
+              key={schoolId + ':' + courseId}
+              schoolId={schoolId}
+              courseId={courseId}
+              assignments={workspace.assignments}
+              refresh={refresh}
+            />
+            <p className={local.muted}>作業評分屬於單筆繳交紀錄；學期總成績仍請以課程成績簿為準。</p>
           </>
         )}
       </main>

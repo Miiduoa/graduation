@@ -74,7 +74,7 @@ function assertCurrent(scope: TeacherScope, isCurrent: () => boolean) {
     throw new TeacherCourseError('課程連結不完整，請回到課程列表重新選擇。');
   }
 }
-async function authorize(scope: TeacherScope, isCurrent: () => boolean): Promise<TeacherCourse> {
+export async function authorizeTeacherCourse(scope: TeacherScope, isCurrent: () => boolean = () => true): Promise<TeacherCourse> {
   assertCurrent(scope, isCurrent);
   const db = getDb();
   const [school, member, course] = await Promise.all([
@@ -110,13 +110,13 @@ export async function loadTeacherWorkspace(
   scope: TeacherScope,
   isCurrent = () => true,
 ): Promise<TeacherWorkspace> {
-  const course = await authorize(scope, isCurrent);
+  const course = await authorizeTeacherCourse(scope, isCurrent);
   const db = getDb();
   const [moduleSnap, assignmentSnap] = await Promise.all([
     getDocsFromServer(collection(db, 'groups', scope.courseId, 'modules')),
     getDocsFromServer(collection(db, 'groups', scope.courseId, 'assignments')),
   ]);
-  await authorize(scope, isCurrent);
+  await authorizeTeacherCourse(scope, isCurrent);
   return {
     course,
     modules: moduleSnap.docs
@@ -153,11 +153,11 @@ export async function loadTeacherGradebook(
   scope: TeacherScope,
   isCurrent = () => true,
 ): Promise<TeacherGradebook> {
-  const course = await authorize(scope, isCurrent);
+  const course = await authorizeTeacherCourse(scope, isCurrent);
   const snapshot = await getDocsFromServer(
     collection(getDb(), 'groups', scope.courseId, 'gradebook'),
   );
-  await authorize(scope, isCurrent);
+  await authorizeTeacherCourse(scope, isCurrent);
   return {
     course,
     rows: snapshot.docs.map((entry) => {
