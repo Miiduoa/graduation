@@ -80,6 +80,35 @@
   color: var(--muted);
   font-size: 12px;
 }
+.calendarExport {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 20px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.calendarExport > div {
+  flex: 1 1 340px;
+  min-width: 0;
+}
+.calendarExport strong {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.calendarExport p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+  margin: 4px 0;
+}
+.calendarExport button {
+  min-height: 44px;
+}
 .toolbar {
   display: flex;
   justify-content: space-between;
