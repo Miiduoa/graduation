@@ -12,6 +12,7 @@ import {
   loadGradeRevisions,
   loadEditableTeacherAssignment,
   updateTeacherAssignment,
+  toTaipeiDateTimeInput,
 } from './teacherAssignments';
 
 const auth = vi.hoisted(() => ({ uid: 'teacher' }));
@@ -368,4 +369,42 @@ it('validates edited assignment fields before a database transaction', async () 
   await expect(updateTeacherAssignment(scope, 'work', null, { ...editable, dueAt: 'not-a-date' }))
     .rejects.toThrow('截止時間');
   expect(runTransaction).not.toHaveBeenCalled();
+});
+
+
+it('uses Taiwan school time for deadlines instead of the browser local timezone', async () => {
+  expect(toTaipeiDateTimeInput('2026-10-08T01:30:00.000Z')).toBe('2026-10-08T09:30');
+  expect(toTaipeiDateTimeInput('not-a-date')).toBe('');
+  vi.mocked(getDocFromServer).mockResolvedValueOnce(document({ createdBy: 'teacher' }) as never);
+  await publishTeacherAssignment(scope, 'work', {
+    ...draft, dueAt: '2099-06-01T10:45',
+  });
+  expect(transaction.set).toHaveBeenCalledWith(
+    'groups/course/assignments/work',
+    expect.objectContaining({ dueAt: '2099-06-01T02:45:00.000Z' }),
+  );
+});
+
+it('refuses invalid calendar dates rather than silently shifting deadlines', async () => {
+  await expect(publishTeacherAssignment(scope, 'work', {
+    ...draft, dueAt: '2099-02-30T12:00',
+  })).rejects.toThrow('截止時間');
+  await expect(updateTeacherAssignment(scope, 'work', null, {
+    ...editable, dueAt: '2099-02-30T12:00',
+  })).rejects.toThrow('截止時間');
+  expect(runTransaction).not.toHaveBeenCalled();
+});
+
+it('converts a Taipei-local edit back to the matching UTC instant', async () => {
+  records['groups/course/assignments/work'] = {
+    type: 'assignment', createdBy: 'teacher', published: true,
+    status: 'published', updatedAt: '2026-10-08T01:00:00Z',
+  };
+  await updateTeacherAssignment(scope, 'work', '2026-10-08T01:00:00.000Z', {
+    ...editable, dueAt: '2099-06-01T10:45',
+  });
+  expect(transaction.update).toHaveBeenCalledWith(
+    'groups/course/assignments/work',
+    expect.objectContaining({ dueAt: '2099-06-01T02:45:00.000Z' }),
+  );
 });

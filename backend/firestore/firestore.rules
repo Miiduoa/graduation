@@ -772,7 +772,41 @@ service cloud.firestore {
 
       match /assignments/{assignmentId} {
         allow read: if isActiveGroupMember(groupId);
-        allow create, update, delete: if canManageGroup(groupId);
+        allow create: if canManageGroup(groupId);
+        // Published text assignments can only be edited by their author.
+        // Another course manager must not alter points, identity, or publication state.
+        allow update: if canManageGroup(groupId)
+          && (
+            (
+              resource.data.get('type', '') != 'assignment'
+              && request.resource.data.get('type', '') != 'assignment'
+            ) || (
+              resource.data.get('type', '') == 'assignment'
+              && resource.data.get('createdBy', '') == request.auth.uid
+              && resource.data.get('published', false) == true
+              && resource.data.get('status', '') == 'published'
+              && get(/databases/$(database)/documents/groups/$(groupId)).data.get('type', '') == 'course'
+              && isSchoolMember(get(/databases/$(database)/documents/groups/$(groupId)).data.get('schoolId', ''))
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'title', 'description', 'dueAt', 'allowLateSubmission', 'updatedAt', 'lastEditedBy'
+              ])
+              && request.resource.data.get('title', '') is string
+              && request.resource.data.get('title', '').size() > 0
+              && request.resource.data.get('title', '').size() <= 120
+              && request.resource.data.get('description', '') is string
+              && request.resource.data.get('description', '').size() <= 10000
+              && request.resource.data.get('allowLateSubmission', false) is bool
+              && (
+                request.resource.data.get('dueAt', null) == null
+                || (request.resource.data.get('dueAt', null) is string
+                    && request.resource.data.get('dueAt', '').size() <= 35)
+              )
+              && request.resource.data.get('lastEditedBy', '') == request.auth.uid
+              && request.resource.data.get('updatedAt', null) == request.time
+            )
+          );
+        allow delete: if canManageGroup(groupId)
+          && resource.data.get('type', '') != 'assignment';
 
         match /submissions/{submissionId} {
           allow read: if (isActiveGroupMember(groupId) && submissionId == request.auth.uid)

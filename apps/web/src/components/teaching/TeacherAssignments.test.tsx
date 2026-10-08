@@ -188,3 +188,26 @@ it('keeps assignment edit values available after a failed save', async () => {
   expect(screen.getByDisplayValue('原始說明')).toBeTruthy();
   expect(props.refresh).not.toHaveBeenCalled();
 });
+
+it('preserves the original Taipei deadline when a teacher edits only the title', async () => {
+  vi.mocked(loadEditableTeacherAssignment).mockResolvedValue({
+    title: '練習一', description: '原始說明', dueAt: '2026-10-08T01:30:00.000Z',
+    allowLateSubmission: false, updatedAt: '2026-10-08T01:00:00.000Z',
+  });
+  render(<TeacherAssignments {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: '編輯作業' }));
+  const deadline = await screen.findByDisplayValue('2026-10-08T09:30');
+  expect(deadline).toBeTruthy();
+  fireEvent.change(screen.getByRole('textbox', { name: '標題' }), {
+    target: { value: '練習一（補充）' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '儲存作業修改' }));
+  await waitFor(() => expect(updateTeacherAssignment).toHaveBeenCalledWith(
+    { uid: 'teacher', schoolId: 'pu', courseId: 'course' },
+    'work', '2026-10-08T01:00:00.000Z',
+    {
+      title: '練習一（補充）', description: '原始說明',
+      dueAt: '2026-10-08T09:30', allowLateSubmission: false,
+    },
+  ));
+});

@@ -6,6 +6,7 @@ import {
   loadTeacherSubmissions,
   loadGradeRevisions,
   loadEditableTeacherAssignment,
+  toTaipeiDateTimeInput,
   updateTeacherAssignment,
   newGradeRevisionId,
   reviseSubmissionGrade,
@@ -236,7 +237,7 @@ export function TeacherAssignments({ schoolId, courseId, assignments, refresh }:
     setEditBusy(true);
     try {
       const draft = await loadEditableTeacherAssignment(scope, id);
-      setEditDraft({ ...draft, dueAt: draft.dueAt ? draft.dueAt.slice(0, 16) : '' });
+      setEditDraft({ ...draft, dueAt: draft.dueAt ? toTaipeiDateTimeInput(draft.dueAt) : '' });
       setEditingAssignment(id);
     } catch (error) {
       setEditError(message(error, '無法讀取作業設定。'));
@@ -294,7 +295,7 @@ export function TeacherAssignments({ schoolId, courseId, assignments, refresh }:
                 disabled={saving} />
             </label>
             <label>
-              截止時間（可留空）
+              截止時間（台灣時間，可留空）
               <input type="datetime-local" value={dueAt}
                 onChange={(event) => setDueAt(event.target.value)} disabled={saving} />
             </label>
@@ -338,7 +339,7 @@ export function TeacherAssignments({ schoolId, courseId, assignments, refresh }:
                   onChange={(event) => setEditDraft((d) => ({ ...d, title: event.target.value }))} /></label>
                 <label>說明<textarea rows={4} maxLength={10000} value={editDraft.description}
                   onChange={(event) => setEditDraft((d) => ({ ...d, description: event.target.value }))} /></label>
-                <label>截止時間<input type="datetime-local" value={editDraft.dueAt}
+                <label>截止時間（台灣時間）<input type="datetime-local" value={editDraft.dueAt}
                   onChange={(event) => setEditDraft((d) => ({ ...d, dueAt: event.target.value }))} /></label>
                 <label className={styles.check}><input type="checkbox" checked={editDraft.allowLateSubmission}
                   onChange={(event) => setEditDraft((d) => ({ ...d, allowLateSubmission: event.target.checked }))} />
