@@ -81,3 +81,17 @@ export function isSchoolVisibleInDirectory(
 ): boolean {
   return getSchoolIntegrationStatus(schoolId, input).enabled;
 }
+
+/** Explicit local demos are never enabled by production or preview configuration. */
+export function isDevelopmentDemoSession(uid?: string | null): boolean {
+  const config = getReleaseConfig();
+  return (
+    typeof __DEV__ !== 'undefined' &&
+    __DEV__ &&
+    config.appEnv === 'development' &&
+    !config.isReleaseLike &&
+    getExtra().enableUniversalDevAccounts === true &&
+    typeof uid === 'string' &&
+    uid.startsWith('demo_')
+  );
+}

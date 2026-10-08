@@ -66,8 +66,11 @@ jobs:
         run: pnpm typecheck
 
       - name: Run tests
+        env:
+          EAS_JSON_PACKAGE_ROOT: ${{ runner.temp }}/eas-config-schema/node_modules/@expo/eas-json
         run: |
-          node --test scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs
+          npm install --prefix "$RUNNER_TEMP/eas-config-schema" --ignore-scripts --no-audit --no-fund @expo/eas-json@24.9.0
+          node --test scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs scripts/prepare-eas-build.test.mjs
           pnpm --filter mobile test --ci
           pnpm --filter web test
           pnpm --filter functions test --runInBand
@@ -91,6 +94,7 @@ jobs:
       EXPECTED_EAS_PROJECT_ID: ${{ vars.EAS_PROJECT_ID }}
       EXPO_PUBLIC_EAS_PROJECT_ID: ${{ vars.EAS_PROJECT_ID }}
       EXPECTED_APP_IDENTIFIER: ${{ vars.IOS_BUNDLE_IDENTIFIER }}
+      IOS_BUNDLE_IDENTIFIER: ${{ vars.IOS_BUNDLE_IDENTIFIER }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -117,7 +121,10 @@ jobs:
       - name: Build iOS
         working-directory: apps/mobile
         run: |
-          node ../../scripts/verify-eas-build.mjs --preflight
+          node ../../scripts/prepare-eas-build.mjs --prepare .
+          trap 'rm -f "$RUNNER_TEMP/eas-config-ios.json"' EXIT
+          eas config --platform ios --profile "$BUILD_PROFILE" --non-interactive --json > "$RUNNER_TEMP/eas-config-ios.json"
+          node ../../scripts/prepare-eas-build.mjs --verify-config "$RUNNER_TEMP/eas-config-ios.json" .release-build-target.json
           eas build --platform ios --profile "$BUILD_PROFILE" --non-interactive --wait --json > "$RUNNER_TEMP/eas-build-ios.json"
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -159,6 +166,7 @@ jobs:
       EXPECTED_EAS_PROJECT_ID: ${{ vars.EAS_PROJECT_ID }}
       EXPO_PUBLIC_EAS_PROJECT_ID: ${{ vars.EAS_PROJECT_ID }}
       EXPECTED_APP_IDENTIFIER: ${{ vars.ANDROID_PACKAGE_NAME }}
+      ANDROID_PACKAGE_NAME: ${{ vars.ANDROID_PACKAGE_NAME }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -185,7 +193,10 @@ jobs:
       - name: Build Android
         working-directory: apps/mobile
         run: |
-          node ../../scripts/verify-eas-build.mjs --preflight
+          node ../../scripts/prepare-eas-build.mjs --prepare .
+          trap 'rm -f "$RUNNER_TEMP/eas-config-android.json"' EXIT
+          eas config --platform android --profile "$BUILD_PROFILE" --non-interactive --json > "$RUNNER_TEMP/eas-config-android.json"
+          node ../../scripts/prepare-eas-build.mjs --verify-config "$RUNNER_TEMP/eas-config-android.json" .release-build-target.json
           eas build --platform android --profile "$BUILD_PROFILE" --non-interactive --wait --json > "$RUNNER_TEMP/eas-build-android.json"
 
       - name: Verify the completed Android artifact

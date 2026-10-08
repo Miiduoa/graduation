@@ -31,7 +31,7 @@ import AnnouncementDetailAiFirstScreen from './AnnouncementDetailAiFirstScreen';
 import AnnouncementsListAiFirstScreen from './AnnouncementsListAiFirstScreen';
 import EventDetailAiFirstScreen from './EventDetailAiFirstScreen';
 import EventsListAiFirstScreen from './EventsListAiFirstScreen';
-import { AIChatScreen } from './AIChatScreen';
+import { CampusAssistantScreen } from './CampusAssistantScreen';
 import { CommunityScreen } from './CommunityScreen';
 import { BoardDetailScreen } from './social/BoardDetailScreen';
 import { PostComposeScreen } from './social/PostComposeScreen';
@@ -39,7 +39,7 @@ import { PostDetailScreen } from './social/PostDetailScreen';
 import { StoryComposeScreen } from './social/StoryComposeScreen';
 import { UnifiedCalendarScreen } from './UnifiedCalendarScreen';
 import { CampusGameScreen } from './CampusGameScreen';
-import AIAgentConsoleScreen from './AIAgentConsoleScreen';
+
 import { useThemeMode } from '../state/theme';
 import { createStackScreenOptions } from '../ui/navigationTheme';
 import type { CampusActorRole } from '../data';
@@ -89,24 +89,48 @@ export function HomeStack() {
         component={SmartDashboardScreen}
         options={{ title: '學習總覽', headerShown: false }}
       />
-      <Stack.Screen name="公告總覽" component={AnnouncementsListAiFirstScreen} options={{ title: '公告', headerShown: false }} />
+      <Stack.Screen
+        name="公告總覽"
+        component={AnnouncementsListAiFirstScreen}
+        options={{ title: '公告', headerShown: false }}
+      />
       <Stack.Screen
         name="公告詳情"
         component={AnnouncementDetailAiFirstScreen}
         options={{ title: '公告詳情', headerShown: false }}
       />
-      <Stack.Screen name="活動總覽" component={EventsListAiFirstScreen} options={{ title: '活動', headerShown: false }} />
-      <Stack.Screen name="AIChat" component={AIChatScreen} options={{ title: '校園助理', headerShown: false }} />
-      <Stack.Screen name="活動詳情" component={EventDetailAiFirstScreen} options={{ title: '活動詳情', headerShown: false }} />
+      <Stack.Screen
+        name="活動總覽"
+        component={EventsListAiFirstScreen}
+        options={{ title: '活動', headerShown: false }}
+      />
+      <Stack.Screen
+        name="AIChat"
+        component={CampusAssistantScreen}
+        options={{ title: '校園助理', headerShown: false }}
+      />
+      <Stack.Screen
+        name="活動詳情"
+        component={EventDetailAiFirstScreen}
+        options={{ title: '活動詳情', headerShown: false }}
+      />
       <Stack.Screen
         name="CampusSocialScreen"
         component={CommunityScreen}
         options={{ title: '校園社群', headerShown: false }}
       />
-      <Stack.Screen name="CampusGame" component={CampusGameScreen} options={{ title: '校園漫步' }} />
+      <Stack.Screen
+        name="CampusGame"
+        component={CampusGameScreen}
+        options={{ title: '校園漫步' }}
+      />
       <Stack.Screen name="BoardDetail" component={BoardDetailScreen} options={{ title: '看板' }} />
       <Stack.Screen name="PostCompose" component={PostComposeScreen} options={{ title: '發文' }} />
-      <Stack.Screen name="StoryCompose" component={StoryComposeScreen} options={{ title: '發 Story' }} />
+      <Stack.Screen
+        name="StoryCompose"
+        component={StoryComposeScreen}
+        options={{ title: '發 Story' }}
+      />
       <Stack.Screen name="PostDetail" component={PostDetailScreen} options={{ title: '貼文' }} />
       <Stack.Screen
         name="SmartCalendarScreen"
@@ -115,8 +139,8 @@ export function HomeStack() {
       />
       <Stack.Screen
         name="AIAgentConsole"
-        component={AIAgentConsoleScreen}
-        options={{ title: '助理工作紀錄' }}
+        component={CampusAssistantScreen}
+        options={{ title: '校園助理', headerShown: false }}
       />
     </Stack.Navigator>
   );

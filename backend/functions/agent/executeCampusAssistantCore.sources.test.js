@@ -331,3 +331,17 @@ test('a school change between runtime and core discards prefetched private data 
   expect(modelInput.messages[0].content).not.toContain('先前學校的私人摘要');
   expect(modelInput.toolCtx.prefetched).toEqual({});
 });
+
+test('the actual callable accepts the 4000-character Web question and preserves its tail for the model', async () => {
+  const suffix = '最後條件：請依公告原文回答。';
+  const content = ('請查詢校園公告。' + '以下是補充背景。'.repeat(600)).slice(0, 4000 - suffix.length) + suffix;
+  mockModel.mockResolvedValue({ provider: 'test-model', content: '已根據公告資料整理回覆。', errors: [], cards: [] });
+  const result = await askCampusAssistant.run({
+    data: { messages: [{ role: 'user', content }], context: { schoolId: 'pu' } },
+    rawRequest: { ip: 'long-question-test' },
+  });
+  expect(content).toHaveLength(4000);
+  expect(result.run.status).toBe('completed');
+  expect(mockModel.mock.calls[0][0].messages.at(-1)).toEqual({ role: 'user', content });
+  expect(mockWebSearch).toHaveBeenCalledWith(content.slice(0, 500));
+});

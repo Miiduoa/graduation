@@ -9,7 +9,6 @@ import MeAiFirstScreen from './MeAiFirstScreen';
 import ProfileEditAiFirstScreen from './ProfileEditAiFirstScreen';
 import AchievementsAiFirstScreen from './AchievementsAiFirstScreen';
 import SettingsAiFirstScreen from './SettingsAiFirstScreen';
-import NotificationsAiFirstScreen from './NotificationsAiFirstScreen';
 import { NotificationSettingsScreen } from './NotificationSettingsScreen';
 import { QRCodeScreen } from './QRCodeScreen';
 import { GlobalSearchScreen } from './GlobalSearchScreen';
@@ -20,6 +19,7 @@ import CompanionCollectionScreen from './CompanionCollectionScreen';
 import ConstellationScreen from './ConstellationScreen';
 import DataFlowDebugScreen from './DataFlowDebugScreen';
 import { AdminDashboardScreen } from './AdminDashboardScreen';
+import { UnavailableFeatureScreen } from './UnavailableFeatureScreen';
 import { AdminCourseVerifyScreen } from './AdminCourseVerifyScreen';
 import { SSOLoginScreen } from './SSOLoginScreen';
 import { DataExportScreen } from './DataExportScreen';
@@ -31,7 +31,6 @@ import { ThemePreviewScreen } from './ThemePreviewScreen';
 import { FeedbackScreen } from './FeedbackScreen';
 import { HelpScreen } from './HelpScreen';
 import { PostLoginDebugScreen } from './PostLoginDebugScreen';
-import { MerchantHubScreen } from './MerchantHubScreen';
 import { CreditAuditStack } from './CreditAuditStack';
 import AIModelManagerScreen from './AIModelManagerScreen';
 import { useThemeMode } from '../state/theme';
@@ -69,35 +68,75 @@ function GuardedCreditAuditStack(props: any) {
   return <CreditAuditMeBlockedScreen roleLabel={displayName} navigation={props.navigation} />;
 }
 
-function CreditAuditMeBlockedScreen({ roleLabel, navigation }: { roleLabel: string; navigation: any }) {
+function CreditAuditMeBlockedScreen({
+  roleLabel,
+  navigation,
+}: {
+  roleLabel: string;
+  navigation: any;
+}) {
   const { View, Text, Pressable, ScrollView } = require('react-native');
   const { Ionicons } = require('@expo/vector-icons');
   const { theme } = require('../ui/theme');
   return (
-    <ScrollView contentContainerStyle={{ padding: 20, alignItems: 'center', backgroundColor: theme.colors.bg }}>
+    <ScrollView
+      contentContainerStyle={{
+        padding: 20,
+        alignItems: 'center',
+        backgroundColor: theme.colors.bg,
+      }}
+    >
       <View style={{ marginTop: 60, padding: 24, alignItems: 'center', maxWidth: 420 }}>
-        <View style={{
-          width: 80, height: 80, borderRadius: 24,
-          backgroundColor: theme.colors.accentSoft,
-          alignItems: 'center', justifyContent: 'center', marginBottom: 16,
-        }}>
+        <View
+          style={{
+            width: 80,
+            height: 80,
+            borderRadius: 24,
+            backgroundColor: theme.colors.accentSoft,
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: 16,
+          }}
+        >
           <Ionicons name="school-outline" size={48} color={theme.colors.accent} />
         </View>
-        <Text style={{ fontSize: 20, fontWeight: '700', color: theme.colors.text, marginBottom: 8, textAlign: 'center' }}>
+        <Text
+          style={{
+            fontSize: 20,
+            fontWeight: '700',
+            color: theme.colors.text,
+            marginBottom: 8,
+            textAlign: 'center',
+          }}
+        >
           學分試算僅限在校學生使用
         </Text>
-        <Text style={{ fontSize: 14, color: theme.colors.muted, lineHeight: 22, textAlign: 'center', marginBottom: 24 }}>
-          目前身份為 <Text style={{ fontWeight: '700', color: theme.colors.text }}>{roleLabel}</Text>。
-          學分試算是學生個人選課與畢業進度規劃工具 — 教師/職員請使用「教學工作台」,系主任/管理員請使用「管理後台」。
+        <Text
+          style={{
+            fontSize: 14,
+            color: theme.colors.muted,
+            lineHeight: 22,
+            textAlign: 'center',
+            marginBottom: 24,
+          }}
+        >
+          目前身份為{' '}
+          <Text style={{ fontWeight: '700', color: theme.colors.text }}>{roleLabel}</Text>。
+          學分試算是學生個人選課與畢業進度規劃工具 —
+          教師/職員請使用「教學工作台」,系主任/管理員請使用「管理後台」。
         </Text>
         <Pressable
           onPress={() => navigation?.goBack?.()}
           style={{
-            paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12,
+            paddingHorizontal: 20,
+            paddingVertical: 12,
+            borderRadius: 12,
             backgroundColor: theme.colors.accent,
           }}
         >
-          <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 14 }}>← 返回</Text>
+          <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 14 }}>
+            ← 返回
+          </Text>
         </Pressable>
       </View>
     </ScrollView>
@@ -136,7 +175,7 @@ export function MeStack() {
       <Stack.Screen name="SSOLogin" component={SSOLoginScreen} options={{ title: '學校登入' }} />
       <Stack.Screen
         name="Notifications"
-        component={NotificationsAiFirstScreen}
+        component={UnavailableFeatureScreen}
         options={{ title: '通知', headerShown: false }}
       />
       <Stack.Screen
@@ -147,7 +186,7 @@ export function MeStack() {
       <Stack.Screen name="QRCode" component={QRCodeScreen} options={{ title: 'QR 碼' }} />
       <Stack.Screen
         name="MerchantHub"
-        component={MerchantHubScreen}
+        component={UnavailableFeatureScreen}
         options={{ title: '商家接單' }}
       />
 
@@ -161,11 +200,7 @@ export function MeStack() {
         component={CampusGardenScreen}
         options={{ title: '校園園地' }}
       />
-      <Stack.Screen
-        name="Companion"
-        component={CompanionScreen}
-        options={{ title: '校園精靈' }}
-      />
+      <Stack.Screen name="Companion" component={CompanionScreen} options={{ title: '校園精靈' }} />
       <Stack.Screen
         name="CompanionCollection"
         component={CompanionCollectionScreen}
@@ -202,7 +237,11 @@ export function MeStack() {
         component={AIModelManagerScreen}
         options={{ title: 'AI 模型管理' }}
       />
-      <Stack.Screen name="Settings" component={SettingsAiFirstScreen} options={{ title: '設定', headerShown: false }} />
+      <Stack.Screen
+        name="Settings"
+        component={SettingsAiFirstScreen}
+        options={{ title: '設定', headerShown: false }}
+      />
       <Stack.Screen
         name="LanguageSettings"
         component={LanguageSettingsScreen}

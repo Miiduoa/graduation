@@ -1,3 +1,4 @@
+import { isDevelopmentDemoSession } from '../services/release';
 /**
  * useProactiveAIAgentLoop — 啟動主動式 AI Agent 後台掃描
  *
@@ -11,9 +12,15 @@
 import { useEffect } from 'react';
 
 import { useAuth } from '../state/auth';
-import { startProactiveBackgroundLoop, type ProactiveScanInput } from '../services/proactiveAIAgent';
+import {
+  startProactiveBackgroundLoop,
+  type ProactiveScanInput,
+} from '../services/proactiveAIAgent';
 
-function resolveAgentRole(profile: ReturnType<typeof useAuth>['profile'], uid: string): ProactiveScanInput['role'] {
+function resolveAgentRole(
+  profile: ReturnType<typeof useAuth>['profile'],
+  uid: string,
+): ProactiveScanInput['role'] {
   if (!profile) return 'student';
   // demo uid prefix 優先
   if (uid.startsWith('demo_teacher')) return 'teacher';
@@ -22,8 +29,10 @@ function resolveAgentRole(profile: ReturnType<typeof useAuth>['profile'], uid: s
   if (uid.startsWith('demo_ta')) return 'ta';
   // 再看 role
   switch (profile.role) {
-    case 'teacher': return 'teacher';
-    case 'admin': return 'department';
+    case 'teacher':
+      return 'teacher';
+    case 'admin':
+      return 'department';
     case 'staff':
       return uid.startsWith('demo_cafeteria') ? 'vendor' : 'ta';
     default:
@@ -33,12 +42,13 @@ function resolveAgentRole(profile: ReturnType<typeof useAuth>['profile'], uid: s
 
 export function useProactiveAIAgentLoop() {
   const auth = useAuth();
+  const demoEnabled = isDevelopmentDemoSession(auth.user?.uid);
   const uid = auth.user?.uid ?? null;
   const role = auth.profile?.role;
   const schoolId = auth.profile?.schoolId ?? null;
 
   useEffect(() => {
-    if (!uid) return;
+    if (!demoEnabled || !uid) return;
     const agentRole = resolveAgentRole(auth.profile, uid);
     const stop = startProactiveBackgroundLoop({
       uid,
@@ -48,13 +58,16 @@ export function useProactiveAIAgentLoop() {
       intervalMinutes: 5,
       onSuggestion: (s) => {
         // 留 hook 給未來 push notification；目前 demo 只在 AIAgentObservatory 顯示
-        // eslint-disable-next-line no-console
         console.log('[proactiveAIAgent] new suggestion:', s.id, s.title);
       },
     });
     return () => {
-      try { stop(); } catch { /* noop */ }
+      try {
+        stop();
+      } catch {
+        /* noop */
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uid, role, schoolId]);
+  }, [demoEnabled, uid, role, schoolId]);
 }

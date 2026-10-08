@@ -52,7 +52,11 @@ jobs:
         run: node scripts/verify-functions-package.cjs
 
       - name: Test deployment readiness gates
-        run: node --test scripts/wait-for-firestore-indexes.test.cjs scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs
+        env:
+          EAS_JSON_PACKAGE_ROOT: ${{ runner.temp }}/eas-config-schema/node_modules/@expo/eas-json
+        run: |
+          npm install --prefix "$RUNNER_TEMP/eas-config-schema" --ignore-scripts --no-audit --no-fund @expo/eas-json@24.9.0
+          node --test scripts/wait-for-firestore-indexes.test.cjs scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs scripts/prepare-eas-build.test.mjs
 
       - name: Audit Functions deployment dependencies
         working-directory: backend/functions

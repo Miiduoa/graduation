@@ -1,3 +1,4 @@
+import { isDevelopmentDemoSession } from '../services/release';
 import { useCallback, useEffect, useRef } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
@@ -13,18 +14,33 @@ const BACKGROUND_SYNC_INTERVAL_MS = 15 * 60_000;
 
 export function useProactiveAIReporter() {
   const auth = useAuth();
+  const demoEnabled = isDevelopmentDemoSession(auth.user?.uid);
   const { school } = useSchool();
   const ds = useDataSource();
   const { courses, loading } = useSchedule();
   const appStateRef = useRef(AppState.currentState);
   const lastSyncAtRef = useRef(0);
   const runningRef = useRef(false);
+  const scope = JSON.stringify([demoEnabled, auth.user?.uid, school?.id]);
+  const activeScope = useRef({ scope });
+  if (activeScope.current.scope !== scope) {
+    activeScope.current = { scope };
+    lastSyncAtRef.current = 0;
+    runningRef.current = false;
+  }
+  useEffect(
+    () => () => {
+      activeScope.current = { scope: '' };
+    },
+    [],
+  );
 
   const syncReports = useCallback(
     async (reason: string, force = false) => {
       const uid = auth.user?.uid;
       const schoolId = school?.id;
-      if (!uid || !schoolId || runningRef.current) return;
+      if (!demoEnabled || !uid || !schoolId || runningRef.current) return;
+      const requestScope = activeScope.current;
 
       const nowMs = Date.now();
       if (!force && nowMs - lastSyncAtRef.current < MIN_SYNC_INTERVAL_MS) return;
@@ -40,7 +56,7 @@ export function useProactiveAIReporter() {
           })),
           ds.listAnnouncements(schoolId).catch(() => []),
         ]);
-
+        if (activeScope.current !== requestScope) return;
         await syncProactiveAIReports(
           {
             userId: uid,
@@ -57,21 +73,22 @@ export function useProactiveAIReporter() {
       } catch (error) {
         console.warn(`[ProactiveAI] sync failed (${reason}):`, error);
       } finally {
-        runningRef.current = false;
+        if (activeScope.current === requestScope) runningRef.current = false;
       }
     },
-    [auth.user?.uid, school?.id, ds, courses],
+    [demoEnabled, auth.user?.uid, school?.id, ds, courses],
   );
 
   useEffect(() => {
-    if (!auth.user?.uid || loading) return;
+    if (!demoEnabled || !auth.user?.uid || loading) return;
     const timeout = setTimeout(() => {
       void syncReports('startup', true);
     }, 1500);
     return () => clearTimeout(timeout);
-  }, [auth.user?.uid, loading, syncReports]);
+  }, [demoEnabled, auth.user?.uid, loading, syncReports]);
 
   useEffect(() => {
+    if (!demoEnabled) return;
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
       if (appStateRef.current.match(/inactive|background/) && nextAppState === 'active') {
         void syncReports('foreground', true);
@@ -90,5 +107,5 @@ export function useProactiveAIReporter() {
       appStateSubscription.remove();
       clearInterval(interval);
     };
-  }, [syncReports]);
+  }, [demoEnabled, syncReports]);
 }

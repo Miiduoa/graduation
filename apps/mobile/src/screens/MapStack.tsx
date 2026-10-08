@@ -1,3 +1,4 @@
+import { UnavailableFeatureScreen } from './UnavailableFeatureScreen';
 /* eslint-disable */
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -16,12 +17,10 @@ import PoiDetailAiFirstScreen from './PoiDetailAiFirstScreen';
 import BusAiFirstScreen from './BusAiFirstScreen';
 import MenuDetailAiFirstScreen from './MenuDetailAiFirstScreen';
 import LibraryAiFirstScreen from './LibraryAiFirstScreen';
-import ClubsAiFirstScreen from './ClubsAiFirstScreen';
 import { OrderingScreen } from './OrderingScreen';
 import { MenuSubscriptionScreen } from './MenuSubscriptionScreen';
 import { LibraryCatalogScreen } from './LibraryCatalogScreen';
 import { HealthScreen } from './HealthScreen';
-import { DormitoryScreen } from './DormitoryScreen';
 import { PrintServiceScreen } from './PrintServiceScreen';
 import { LostFoundScreen } from './LostFoundScreen';
 import { LostFoundDetailScreen } from './LostFoundDetailScreen';
@@ -136,7 +135,7 @@ export function MapStack() {
       />
       <Stack.Screen
         name="Clubs"
-        component={ClubsAiFirstScreen}
+        component={UnavailableFeatureScreen}
         options={{ title: '社團', headerShown: false }}
       />
       <Stack.Screen
@@ -145,7 +144,11 @@ export function MapStack() {
         options={{ title: '館藏查詢', headerShown: false }}
       />
       <Stack.Screen name="Health" component={HealthScreen} options={{ title: '校園健康' }} />
-      <Stack.Screen name="Dormitory" component={DormitoryScreen} options={{ title: '宿舍服務' }} />
+      <Stack.Screen
+        name="Dormitory"
+        component={UnavailableFeatureScreen}
+        options={{ title: '宿舍服務' }}
+      />
       <Stack.Screen
         name="PrintService"
         component={PrintServiceScreen}

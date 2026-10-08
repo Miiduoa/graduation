@@ -1,3 +1,4 @@
+import { AdminDashboardScreen } from './AdminDashboardScreen';
 /* eslint-disable */
 /**
  * LearnStack — 統一的「學習」Tab
@@ -18,9 +19,8 @@
  *
  * 心理學：Tab 統一名字 = 一致心智模型；內容感知角色 = 個人化體驗。
  */
-import React, { useMemo } from 'react';
+import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { CoursesHomeScreen } from './CoursesHomeScreen';
 // AI-First v1：學習 Tab 主入口換新版
 import LearnAiFirstScreen from './LearnAiFirstScreen';
 import GradesAiFirstScreen from './GradesAiFirstScreen';
@@ -29,10 +29,6 @@ import AcademicOverviewAiFirstScreen from './AcademicOverviewAiFirstScreen';
 import QuizCenterAiFirstScreen from './QuizCenterAiFirstScreen';
 import AddCourseAiFirstScreen from './AddCourseAiFirstScreen';
 import TeacherTodayScreen from './TeacherTodayScreen';
-import { TeachingHubScreen } from './TeachingHubScreen';
-import { StaffHubScreen } from './StaffHubScreen';
-import { DepartmentHubScreen } from './DepartmentHubScreen';
-import { AdminDashboardScreen } from './AdminDashboardScreen';
 import { AddCourseScreen } from './AddCourseScreen';
 import { AcademicScreen } from './AcademicScreen';
 import { CreditAuditStack } from './CreditAuditStack';
@@ -50,11 +46,9 @@ import { PeerReviewScreen } from './PeerReviewScreen';
 import AttendanceLiveScreen from './AttendanceLiveScreen';
 import AttendanceAnalyticsScreen from './AttendanceAnalyticsScreen';
 import { AdminCourseVerifyScreen } from './AdminCourseVerifyScreen';
-import { MerchantHubScreen } from './MerchantHubScreen';
 import CourseDiscussionScreen from './CourseDiscussionScreen';
 import DiscussionThreadDetailScreen from './DiscussionThreadDetailScreen';
 import CourseMaterialViewerScreen from './CourseMaterialViewerScreen';
-import HomeworkSubmitScreen from './HomeworkSubmitScreen';
 import VideoMaterialScreen from './VideoMaterialScreen';
 import SurveyScreen from './SurveyScreen';
 import PeerReviewSubmitScreen from './PeerReviewSubmitScreen';
@@ -64,28 +58,7 @@ import AttendanceMultiMethodScreen from './AttendanceMultiMethodScreen';
 import MyQuizScoresScreen from './MyQuizScoresScreen';
 import MyAttendanceHistoryScreen from './MyAttendanceHistoryScreen';
 import CourseScoresScreen from './CourseScoresScreen';
-import TodayCockpitScreen from './TodayCockpitScreen';
-import { DemoStoryScreen } from './DemoStoryScreen';
-import GradeWhatIfScreen from './GradeWhatIfScreen';
-import MistakeRepertoireScreen from './MistakeRepertoireScreen';
 import PomodoroSessionScreen from './PomodoroSessionScreen';
-import AIAgentObservatoryScreen from './AIAgentObservatoryScreen';
-import AIAgentConsoleScreen from './AIAgentConsoleScreen';
-import StudentInboxScreen from './StudentInboxScreen';
-import MonthlySummaryScreen from './MonthlySummaryScreen';
-import StudentOrdersScreen from './StudentOrdersScreen';
-import LifeRequestsScreen from './LifeRequestsScreen';
-import TeacherCockpitScreen from './TeacherCockpitScreen';
-import TADashboardScreen from './TADashboardScreen';
-import DepartmentDashboardScreen from './DepartmentDashboardScreen';
-import VendorDashboardScreen from './VendorDashboardScreen';
-import VendorRevenueReportScreen from './VendorRevenueReportScreen';
-import VendorLoyaltyPushScreen from './VendorLoyaltyPushScreen';
-import VendorMenuManageScreen from './VendorMenuManageScreen';
-import StudentRiskScreen from './StudentRiskScreen';
-import TeachingEvaluationScreen from './TeachingEvaluationScreen';
-import AITrustCardScreen from './AITrustCardScreen';
-import AIStudyBuddyScreen from './AIStudyBuddyScreen';
 // LMS v2 — 新版課程子頁 (取代舊 Course*Screen 系列)
 import CourseHubV2Screen from './lmsV2/CourseHubV2Screen';
 import CourseMaterialsV2Screen from './lmsV2/CourseMaterialsV2Screen';
@@ -107,7 +80,13 @@ import { createStackScreenOptions } from '../ui/navigationTheme';
 import { RouteGuard } from '../ui/RouteGuard';
 import { usePermissions } from '../hooks/usePermissions';
 import { useAuth } from '../state/auth';
-import { resolveDashboardRole } from './RoleAwareTodayScreen';
+import RoleAwareTodayScreen, {
+  resolveDashboardRole,
+  RoleWorkspaceScreen,
+} from './RoleAwareTodayScreen';
+import { UnavailableFeatureScreen } from './UnavailableFeatureScreen';
+import { CampusAssistantScreen } from './CampusAssistantScreen';
+import { isDevelopmentDemoSession } from '../services/release';
 
 const Stack = createNativeStackNavigator<any, undefined>();
 
@@ -138,6 +117,14 @@ function GuardedAttendance(props: any) {
   return (
     <RouteGuard requires={['courses.view', 'courses.attendance']}>
       <AttendanceScreen {...props} />
+    </RouteGuard>
+  );
+}
+
+function GuardedAdminDashboard(props: any) {
+  return (
+    <RouteGuard requires="admin.dashboard">
+      <AdminDashboardScreen {...props} />
     </RouteGuard>
   );
 }
@@ -176,7 +163,11 @@ function GradebookRoute(props: any) {
       </RouteGuard>
     );
   }
-  return isLmsV2Enabled() ? <CourseGradesV2Screen {...props} /> : <GuardedGradebook {...props} />;
+  return isDevelopmentDemoSession(auth.user?.uid) && isLmsV2Enabled() ? (
+    <CourseGradesV2Screen {...props} />
+  ) : (
+    <GuardedGradebook {...props} />
+  );
 }
 
 function GuardedLearningAnalytics(props: any) {
@@ -226,36 +217,76 @@ function GuardedCreditAuditLearn(props: any) {
   return <CreditAuditBlockedScreen roleLabel={displayName} navigation={props.navigation} />;
 }
 
-function CreditAuditBlockedScreen({ roleLabel, navigation }: { roleLabel: string; navigation: any }) {
+function CreditAuditBlockedScreen({
+  roleLabel,
+  navigation,
+}: {
+  roleLabel: string;
+  navigation: any;
+}) {
   // 動態 import 避免在 LearnStack 頂端拉一堆 RN UI module(只在阻擋時才用)
   const { View, Text, Pressable, ScrollView } = require('react-native');
   const { Ionicons } = require('@expo/vector-icons');
   const { theme } = require('../ui/theme');
   return (
-    <ScrollView contentContainerStyle={{ padding: 20, alignItems: 'center', backgroundColor: theme.colors.bg }}>
+    <ScrollView
+      contentContainerStyle={{
+        padding: 20,
+        alignItems: 'center',
+        backgroundColor: theme.colors.bg,
+      }}
+    >
       <View style={{ marginTop: 60, padding: 24, alignItems: 'center', maxWidth: 420 }}>
-        <View style={{
-          width: 80, height: 80, borderRadius: 24,
-          backgroundColor: theme.colors.accentSoft,
-          alignItems: 'center', justifyContent: 'center', marginBottom: 16,
-        }}>
+        <View
+          style={{
+            width: 80,
+            height: 80,
+            borderRadius: 24,
+            backgroundColor: theme.colors.accentSoft,
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: 16,
+          }}
+        >
           <Ionicons name="school-outline" size={48} color={theme.colors.accent} />
         </View>
-        <Text style={{ fontSize: 20, fontWeight: '700', color: theme.colors.text, marginBottom: 8, textAlign: 'center' }}>
+        <Text
+          style={{
+            fontSize: 20,
+            fontWeight: '700',
+            color: theme.colors.text,
+            marginBottom: 8,
+            textAlign: 'center',
+          }}
+        >
           學分試算僅限在校學生使用
         </Text>
-        <Text style={{ fontSize: 14, color: theme.colors.muted, lineHeight: 22, textAlign: 'center', marginBottom: 24 }}>
-          目前身份為 <Text style={{ fontWeight: '700', color: theme.colors.text }}>{roleLabel}</Text>。
-          學分試算是學生個人選課與畢業進度規劃工具,屬學生專屬功能 — 教師/職員可由「教學工作台」管理課程,系主任/管理員可由「管理後台」查看全系統計。
+        <Text
+          style={{
+            fontSize: 14,
+            color: theme.colors.muted,
+            lineHeight: 22,
+            textAlign: 'center',
+            marginBottom: 24,
+          }}
+        >
+          目前身份為{' '}
+          <Text style={{ fontWeight: '700', color: theme.colors.text }}>{roleLabel}</Text>。
+          學分試算是學生個人選課與畢業進度規劃工具,屬學生專屬功能 —
+          教師/職員可由「教學工作台」管理課程,系主任/管理員可由「管理後台」查看全系統計。
         </Text>
         <Pressable
           onPress={() => navigation?.goBack?.()}
           style={{
-            paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12,
+            paddingHorizontal: 20,
+            paddingVertical: 12,
+            borderRadius: 12,
             backgroundColor: theme.colors.accent,
           }}
         >
-          <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 14 }}>← 返回</Text>
+          <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 14 }}>
+            ← 返回
+          </Text>
         </Pressable>
       </View>
     </ScrollView>
@@ -290,77 +321,49 @@ function GuardedTeacherGrading(props: any) {
   );
 }
 
-/**
- * 根據角色選擇主畫面。內部用 alias，所有角色都映射到 'LearnHome' 路由。
- */
-function LearnHomeDispatcher(props: any) {
-  const { isStudent, isTeacher, isStaff, isDepartmentHead, isAdmin } = usePermissions();
+function LearnLanding(props: any) {
   const auth = useAuth();
-
-  const hasMerchant = useMemo(
-    () =>
-      (auth.profile?.merchantAssignments ?? []).some((a) => a.status === 'active'),
-    [auth.profile?.merchantAssignments],
-  );
-
-  // 1. demo 帳號 uid 優先判斷（最精準）
-  const demoResolved = resolveDashboardRole({
-    uid: auth.user?.uid ?? null,
-    roleGroup: auth.profile?.roleGroup ?? null,
-    role: auth.profile?.role ?? null,
-  });
-  if (demoResolved === 'vendor') {
-    return <VendorDashboardScreen {...props} />;
-  }
-  if (demoResolved === 'ta') {
-    return <TADashboardScreen {...props} />;
-  }
-
-  // 2. 一般 roleGroup 判斷
-  if (isAdmin) {
-    return <AdminDashboardScreen {...props} />;
-  }
-  if (isDepartmentHead) {
-    return <DepartmentHubScreen {...props} />;
-  }
-  if (isTeacher) {
-    return <TeacherTodayScreen />;
-  }
-  if (isStaff && hasMerchant) {
-    return <MerchantHubScreen {...props} />;
-  }
-  if (isStaff) {
-    return <StaffHubScreen {...props} />;
-  }
-  // 學生 / 校友 / 訪客 → 預設課程首頁
-  return <CoursesHomeScreen {...props} />;
+  if (auth.loading || auth.profileLoading || (auth.user && auth.profile?.uid !== auth.user.uid))
+    return <RoleAwareTodayScreen {...props} />;
+  const role = resolveDashboardRole(auth.user ? auth.profile : null);
+  if (role === 'teacher') return <TeacherTodayScreen />;
+  if (role === 'student') return <LearnAiFirstScreen />;
+  return <RoleWorkspaceScreen {...props} role={role} />;
 }
 
-function LearnLanding() {
-  const auth = useAuth();
-  const role = resolveDashboardRole({
-    uid: auth.user?.uid,
-    roleGroup: auth.profile?.roleGroup,
-    role: auth.profile?.role,
-  });
-  return role === 'teacher' ? <TeacherTodayScreen /> : <LearnAiFirstScreen />;
+function developmentLmsRoute(Component: React.ComponentType<any>) {
+  return function DevelopmentLmsRoute(props: any) {
+    const auth = useAuth();
+    return isDevelopmentDemoSession(auth.user?.uid) && isLmsV2Enabled() ? (
+      <Component {...props} />
+    ) : (
+      <UnavailableFeatureScreen
+        {...props}
+        title="課程功能"
+        description="這項課程功能尚未開放。你可以回到課程頁查看目前可用的內容。"
+        actions={[{ label: '查看我的課程', route: 'LearnHome' }]}
+      />
+    );
+  };
 }
 
 export function LearnStack() {
   useThemeMode();
+  const auth = useAuth();
+  const developmentDemo = isDevelopmentDemoSession(auth.user?.uid);
+  const lmsV2Enabled = developmentDemo && isLmsV2Enabled();
 
   // LMS v2:首次進入學習 Tab 時,自動用 demo 帳號登入 Supabase
   // (Production 改用 lmsAuthBridge)
   React.useEffect(() => {
-    if (isLmsV2Enabled()) {
-      ensureLmsV2DemoSignIn('student').then(r => {
+    if (lmsV2Enabled) {
+      ensureLmsV2DemoSignIn('student').then((r) => {
         if (typeof __DEV__ !== 'undefined' && __DEV__) {
-          // eslint-disable-next-line no-console
           console.log('[LMS v2] demo sign-in:', r);
         }
       });
     }
-  }, []);
+  }, [lmsV2Enabled]);
 
   return (
     <Stack.Navigator
@@ -387,17 +390,17 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="StaffHub"
-        component={LearnAiFirstScreen}
+        component={UnavailableFeatureScreen}
         options={{ title: '服務', headerShown: false }}
       />
       <Stack.Screen
         name="DepartmentHub"
-        component={LearnAiFirstScreen}
+        component={UnavailableFeatureScreen}
         options={{ title: '審核', headerShown: false }}
       />
       <Stack.Screen
         name="AdminDashboard"
-        component={LearnAiFirstScreen}
+        component={GuardedAdminDashboard}
         options={{ title: '管理', headerShown: false }}
       />
 
@@ -406,7 +409,11 @@ export function LearnStack() {
         component={UnifiedCalendarScreen}
         options={{ title: '行事曆', headerShown: false }}
       />
-      <Stack.Screen name="AddCourse" component={AddCourseAiFirstScreen} options={{ title: '新增課程', headerShown: false }} />
+      <Stack.Screen
+        name="AddCourse"
+        component={AddCourseAiFirstScreen}
+        options={{ title: '新增課程', headerShown: false }}
+      />
       {/* ═══════════════════════════════════════════════════════════
           LMS v2 整批接管:Supabase 連上時,舊路由名沿用但 component 改 V2
           (保留路由名 = CoursesHomeScreen/TodayCockpit 不用改;component 換掉 = 看到新 UI)
@@ -419,23 +426,75 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="CourseModules"
-        component={isLmsV2Enabled() ? CourseHubV2Screen : guardCourseView(CourseModulesScreen)}
+        component={lmsV2Enabled ? CourseHubV2Screen : guardCourseView(CourseModulesScreen)}
         options={{ title: '課程', headerShown: false }}
       />
       {/* LMS v2 課程子頁(13 個)*/}
-      <Stack.Screen name="CourseHubV2" component={CourseHubV2Screen} options={{ title: '課程中樞', headerShown: false }} />
-      <Stack.Screen name="CourseMaterialsV2" component={CourseMaterialsV2Screen} options={{ title: '教材', headerShown: false }} />
-      <Stack.Screen name="CourseAssignmentsV2" component={CourseAssignmentsV2Screen} options={{ title: '作業', headerShown: false }} />
-      <Stack.Screen name="CourseAssignmentDetailV2" component={CourseAssignmentDetailV2Screen} options={{ title: '作業', headerShown: false }} />
-      <Stack.Screen name="CourseQuizzesV2" component={CourseQuizzesV2Screen} options={{ title: '測驗', headerShown: false }} />
-      <Stack.Screen name="CourseQuizTakingV2" component={CourseQuizTakingV2Screen} options={{ title: '作答', headerShown: false }} />
-      <Stack.Screen name="CourseForumV2" component={CourseForumV2Screen} options={{ title: '討論', headerShown: false }} />
-      <Stack.Screen name="CourseForumTopicV2" component={CourseForumTopicV2Screen} options={{ title: '討論', headerShown: false }} />
-      <Stack.Screen name="CourseAnnouncementsV2" component={CourseAnnouncementsV2Screen} options={{ title: '公告', headerShown: false }} />
-      <Stack.Screen name="CourseGradesV2" component={CourseGradesV2Screen} options={{ title: '成績', headerShown: false }} />
-      <Stack.Screen name="CourseAIAssistantV2" component={CourseAIAssistantV2Screen} options={{ title: '課程助理', headerShown: false }} />
-      <Stack.Screen name="CourseQuestionBankV2" component={CourseQuestionBankV2Screen} options={{ title: '題庫', headerShown: false }} />
-      <Stack.Screen name="CourseLiveV2" component={CourseLiveV2Screen} options={{ title: '直播', headerShown: false }} />
+      <Stack.Screen
+        name="CourseHubV2"
+        component={developmentLmsRoute(CourseHubV2Screen)}
+        options={{ title: '課程中樞', headerShown: false }}
+      />
+      <Stack.Screen
+        name="CourseMaterialsV2"
+        component={developmentLmsRoute(CourseMaterialsV2Screen)}
+        options={{ title: '教材', headerShown: false }}
+      />
+      <Stack.Screen
+        name="CourseAssignmentsV2"
+        component={developmentLmsRoute(CourseAssignmentsV2Screen)}
+        options={{ title: '作業', headerShown: false }}
+      />
+      <Stack.Screen
+        name="CourseAssignmentDetailV2"
+        component={developmentLmsRoute(CourseAssignmentDetailV2Screen)}
+        options={{ title: '作業', headerShown: false }}
+      />
+      <Stack.Screen
+        name="CourseQuizzesV2"
+        component={developmentLmsRoute(CourseQuizzesV2Screen)}
+        options={{ title: '測驗', headerShown: false }}
+      />
+      <Stack.Screen
+        name="CourseQuizTakingV2"
+        component={developmentLmsRoute(CourseQuizTakingV2Screen)}
+        options={{ title: '作答', headerShown: false }}
+      />
+      <Stack.Screen
+        name="CourseForumV2"
+        component={developmentLmsRoute(CourseForumV2Screen)}
+        options={{ title: '討論', headerShown: false }}
+      />
+      <Stack.Screen
+        name="CourseForumTopicV2"
+        component={developmentLmsRoute(CourseForumTopicV2Screen)}
+        options={{ title: '討論', headerShown: false }}
+      />
+      <Stack.Screen
+        name="CourseAnnouncementsV2"
+        component={developmentLmsRoute(CourseAnnouncementsV2Screen)}
+        options={{ title: '公告', headerShown: false }}
+      />
+      <Stack.Screen
+        name="CourseGradesV2"
+        component={developmentLmsRoute(CourseGradesV2Screen)}
+        options={{ title: '成績', headerShown: false }}
+      />
+      <Stack.Screen
+        name="CourseAIAssistantV2"
+        component={developmentLmsRoute(CourseAIAssistantV2Screen)}
+        options={{ title: '課程助理', headerShown: false }}
+      />
+      <Stack.Screen
+        name="CourseQuestionBankV2"
+        component={developmentLmsRoute(CourseQuestionBankV2Screen)}
+        options={{ title: '題庫', headerShown: false }}
+      />
+      <Stack.Screen
+        name="CourseLiveV2"
+        component={developmentLmsRoute(CourseLiveV2Screen)}
+        options={{ title: '直播', headerShown: false }}
+      />
       <Stack.Screen
         name="CourseCatalog"
         component={CourseCatalogScreen}
@@ -448,7 +507,7 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="Attendance"
-        component={isLmsV2Enabled() ? CourseLiveV2Screen : GuardedAttendance}
+        component={lmsV2Enabled ? CourseLiveV2Screen : GuardedAttendance}
         options={{ title: '課程點名', headerShown: false }}
       />
       <Stack.Screen
@@ -499,7 +558,7 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="QuizTaking"
-        component={isLmsV2Enabled() ? CourseQuizTakingV2Screen : guardCourseView(QuizTakingScreen)}
+        component={lmsV2Enabled ? CourseQuizTakingV2Screen : guardCourseView(QuizTakingScreen)}
         options={{ title: '作答中', headerShown: false }}
       />
       <Stack.Screen
@@ -524,12 +583,14 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="CourseDiscussion"
-        component={isLmsV2Enabled() ? CourseForumV2Screen : guardCourseView(CourseDiscussionScreen)}
+        component={lmsV2Enabled ? CourseForumV2Screen : guardCourseView(CourseDiscussionScreen)}
         options={{ title: '課程討論', headerShown: false }}
       />
       <Stack.Screen
         name="DiscussionThreadDetail"
-        component={isLmsV2Enabled() ? CourseForumTopicV2Screen : guardCourseView(DiscussionThreadDetailScreen)}
+        component={
+          lmsV2Enabled ? CourseForumTopicV2Screen : guardCourseView(DiscussionThreadDetailScreen)
+        }
         options={{ title: '討論串', headerShown: false }}
       />
       <Stack.Screen
@@ -539,7 +600,7 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="HomeworkSubmit"
-        component={isLmsV2Enabled() ? CourseAssignmentDetailV2Screen : guardCourseView(HomeworkSubmitScreen)}
+        component={UnavailableFeatureScreen}
         options={{ title: '繳交作業', headerShown: false }}
       />
       <Stack.Screen
@@ -569,7 +630,7 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="AttendanceMultiMethod"
-        component={isLmsV2Enabled() ? CourseLiveV2Screen : guardCourseView(AttendanceMultiMethodScreen)}
+        component={lmsV2Enabled ? CourseLiveV2Screen : guardCourseView(AttendanceMultiMethodScreen)}
         options={{ title: '課程簽到', headerShown: false }}
       />
       <Stack.Screen
@@ -584,27 +645,27 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="CourseScores"
-        component={isLmsV2Enabled() ? CourseGradesV2Screen : guardCourseView(CourseScoresScreen)}
+        component={lmsV2Enabled ? CourseGradesV2Screen : guardCourseView(CourseScoresScreen)}
         options={{ title: '課內成績', headerShown: false }}
       />
       <Stack.Screen
         name="TodayCockpit"
-        component={TodayCockpitScreen}
-        options={{ title: '🚀 今日駕駛艙' }}
+        component={RoleAwareTodayScreen}
+        options={{ title: '今日', headerShown: false }}
       />
       <Stack.Screen
         name="DemoStory"
-        component={DemoStoryScreen}
+        component={UnavailableFeatureScreen}
         options={{ title: '今天的故事' }}
       />
       <Stack.Screen
         name="GradeWhatIf"
-        component={GradeWhatIfScreen}
+        component={UnavailableFeatureScreen}
         options={{ title: '📊 成績試算' }}
       />
       <Stack.Screen
         name="MistakeRepertoire"
-        component={MistakeRepertoireScreen}
+        component={UnavailableFeatureScreen}
         options={{ title: '🧠 錯題本' }}
       />
       <Stack.Screen
@@ -619,67 +680,67 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="AIAgentObservatory"
-        component={AIAgentObservatoryScreen}
-        options={{ title: '助理活動紀錄' }}
+        component={CampusAssistantScreen}
+        options={{ title: '校園助理', headerShown: false }}
       />
       <Stack.Screen
         name="AIAgentConsole"
-        component={AIAgentConsoleScreen}
-        options={{ title: '助理工作紀錄' }}
+        component={CampusAssistantScreen}
+        options={{ title: '校園助理', headerShown: false }}
       />
       <Stack.Screen
         name="StudentInbox"
-        component={StudentInboxScreen}
+        component={UnavailableFeatureScreen}
         options={{ title: '📥 我的 Inbox' }}
       />
       <Stack.Screen
         name="MonthlySummary"
-        component={MonthlySummaryScreen}
+        component={UnavailableFeatureScreen}
         options={{ title: '📅 本月學習回顧' }}
       />
       <Stack.Screen
         name="StudentOrders"
-        component={StudentOrdersScreen}
+        component={UnavailableFeatureScreen}
         options={{ title: '🛒 我的訂單' }}
       />
       <Stack.Screen
         name="VendorRevenueReport"
-        component={VendorRevenueReportScreen}
+        component={UnavailableFeatureScreen}
         options={{ title: '📊 月度報表' }}
       />
       <Stack.Screen
         name="VendorLoyaltyPush"
-        component={VendorLoyaltyPushScreen}
+        component={UnavailableFeatureScreen}
         options={{ title: '📣 Loyalty 推播' }}
       />
       <Stack.Screen
         name="VendorMenuManage"
-        component={VendorMenuManageScreen}
+        component={UnavailableFeatureScreen}
         options={{ title: '🍽 菜單管理' }}
       />
       <Stack.Screen
         name="StudentRisk"
-        component={StudentRiskScreen}
+        component={UnavailableFeatureScreen}
         options={{ title: '🏛 學生風險' }}
       />
       <Stack.Screen
         name="TeachingEvaluation"
-        component={TeachingEvaluationScreen}
+        component={UnavailableFeatureScreen}
         options={{ title: '🏛 教學評鑑' }}
       />
       <Stack.Screen
         name="AITrustCard"
-        component={AITrustCardScreen}
+        component={UnavailableFeatureScreen}
         options={{ title: '助理權限與資料' }}
       />
       <Stack.Screen
         name="AIStudyBuddy"
-        component={AIStudyBuddyScreen}
+        component={UnavailableFeatureScreen}
         options={{ title: '學習夥伴' }}
       />
       <Stack.Screen
         name="LifeRequests"
-        component={LifeRequestsScreen}
+        component={UnavailableFeatureScreen}
         options={{ title: '📝 請假 / 報修' }}
       />
     </Stack.Navigator>

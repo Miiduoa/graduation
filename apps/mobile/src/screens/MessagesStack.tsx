@@ -1,3 +1,5 @@
+import { UnavailableFeatureScreen } from './UnavailableFeatureScreen';
+import { MessagesLandingScreen } from './MessagesLandingScreen';
 /* eslint-disable */
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -5,14 +7,11 @@ import { useThemeMode } from '../state/theme';
 import { createStackScreenOptions } from '../ui/navigationTheme';
 // AI-First v1：訊息 Tab 主入口（舊版 InboxScreen / MessagesHomeScreen /
 // AssignmentDetailScreen 已下架）
-import MessagesAiFirstScreen from './MessagesAiFirstScreen';
-import MessagesHomeAiFirstScreen from './MessagesHomeAiFirstScreen';
 import { GroupsScreen } from './GroupsScreen';
 import { GroupDetailScreen } from './GroupDetailScreen';
 import { GroupMembersScreen } from './GroupMembersScreen';
 import { GroupPostScreen } from './GroupPostScreen';
 import { GroupAssignmentsScreen } from './GroupAssignmentsScreen';
-import AssignmentDetailAiFirstScreen from './AssignmentDetailAiFirstScreen';
 import { DmsScreen } from './DmsScreen';
 import { FriendSearchScreen } from './FriendSearchScreen';
 import { FriendsManageScreen } from './FriendsManageScreen';
@@ -43,12 +42,12 @@ export function MessagesStack() {
       {/* AI-First v1：landing 換新版 */}
       <Stack.Screen
         name="Inbox"
-        component={MessagesAiFirstScreen}
+        component={MessagesLandingScreen}
         options={{ title: '訊息', headerShown: false }}
       />
       <Stack.Screen
         name="MessagesHome"
-        component={MessagesHomeAiFirstScreen}
+        component={MessagesLandingScreen}
         options={{ title: '訊息', headerShown: false }}
       />
       <Stack.Screen name="Groups" component={GroupsScreen} options={{ title: '群組' }} />
@@ -66,7 +65,7 @@ export function MessagesStack() {
       />
       <Stack.Screen
         name="AssignmentDetail"
-        component={AssignmentDetailAiFirstScreen}
+        component={UnavailableFeatureScreen}
         options={{ title: '作業' }}
       />
       <Stack.Screen
@@ -75,9 +74,21 @@ export function MessagesStack() {
         options={{ title: '課程認證' }}
       />
       <Stack.Screen name="Dms" component={DmsScreen} options={{ title: '私訊' }} />
-      <Stack.Screen name="FriendsManage" component={FriendsManageScreen} options={{ title: '好友與邀請' }} />
-      <Stack.Screen name="FriendSearch" component={FriendSearchScreen} options={{ title: '搜尋／加好友' }} />
-      <Stack.Screen name="FollowingLists" component={FollowingListsScreen} options={{ title: '追蹤與粉絲' }} />
+      <Stack.Screen
+        name="FriendsManage"
+        component={FriendsManageScreen}
+        options={{ title: '好友與邀請' }}
+      />
+      <Stack.Screen
+        name="FriendSearch"
+        component={FriendSearchScreen}
+        options={{ title: '搜尋／加好友' }}
+      />
+      <Stack.Screen
+        name="FollowingLists"
+        component={FollowingListsScreen}
+        options={{ title: '追蹤與粉絲' }}
+      />
       <Stack.Screen name="Chat" component={ChatScreen} options={{ title: '對話' }} />
     </Stack.Navigator>
   );
