@@ -4,6 +4,7 @@
  */
 export type GradingDeliveryInput = {
   actorUid?: string | null;
+  actorRole?: string | null;
   studentUid?: string | null;
   studentName: string;
   courseId: string;
@@ -13,6 +14,7 @@ export type GradingDeliveryInput = {
 
 type GradingDeliveryError =
   | 'teacher_missing'
+  | 'teacher_role_invalid'
   | 'student_missing'
   | 'self_recipient'
   | 'student_name_missing'
@@ -42,6 +44,9 @@ function positiveIntegerId(value: string): number | null {
 export function prepareGradingDelivery(input: GradingDeliveryInput): GradingDeliveryResult {
   const actorUid = input.actorUid?.trim();
   if (!actorUid) return { ok: false, reason: 'teacher_missing' };
+  if (!['teacher', 'professor', 'ta'].includes(input.actorRole ?? '')) {
+    return { ok: false, reason: 'teacher_role_invalid' };
+  }
 
   const studentUid = input.studentUid?.trim();
   if (!studentUid) return { ok: false, reason: 'student_missing' };
