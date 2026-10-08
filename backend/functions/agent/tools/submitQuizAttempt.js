@@ -2,7 +2,7 @@
 
 const { z } = require('zod');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
-const { scoreQuizAttempt } = require('../../../../packages/shared/dist-cjs/lms/quizScoring');
+const { scoreQuizAttempt } = require('../../generated/shared/lms/quizScoring');
 
 /**
  * submitQuizAttempt — 學生提交測驗作答後：

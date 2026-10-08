@@ -12,10 +12,11 @@
     "logs": "firebase functions:log",
     "lint": "eslint .",
     "backfill:canonical": "node backfillCanonicalData.js",
-    "test": "pnpm --filter @campus/shared run build:cjs && jest"
+    "build:shared": "node ../../scripts/build-functions-shared.cjs",
+    "test": "pnpm run build:shared && jest"
   },
   "dependencies": {
-    "firebase-admin": "^13.0.0",
+    "firebase-admin": "13.10.0",
     "firebase-functions": "^6.0.0",
     "jose": "^6.2.3",
     "node-fetch": "^3.3.2",
@@ -30,5 +31,18 @@
     "firebase-functions-test": "^3.2.0",
     "globals": "^17.4.0",
     "jest": "^29.7.0"
+  },
+  "overrides": {
+    "proxy-addr": "2.0.8",
+    "websocket-driver": "0.7.5",
+    "@fastify/busboy": "3.2.2",
+    "@grpc/grpc-js": "1.14.5",
+    "@xmldom/xmldom": "0.8.15",
+    "fast-xml-builder": "1.1.9",
+    "form-data": "2.5.6",
+    "protobufjs": "7.6.6",
+    "xmlbuilder2": {
+      "js-yaml": "3.15.2"
+    }
   }
 }

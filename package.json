@@ -49,7 +49,17 @@
       "browserslist": "4.28.7",
       "@fastify/busboy@^3.0.0": "3.2.1",
       "source-map-js": "1.2.2",
-      "compression": "1.8.2"
+      "compression": "1.8.2",
+      "firebase-admin@13.10.0>@fastify/busboy": "3.2.2",
+      "firebase-functions@6.6.0>protobufjs": "7.6.6",
+      "@google-cloud/firestore@7.11.6>protobufjs": "7.6.6",
+      "@grpc/proto-loader>protobufjs": "7.6.6",
+      "google-gax@4.6.1>protobufjs": "7.6.6",
+      "proto3-json-serializer@2.0.2>protobufjs": "7.6.6",
+      "fast-xml-parser@5.7.0>fast-xml-builder": "1.1.9",
+      "xmlbuilder2@2.4.1>js-yaml": "3.15.2",
+      "firebase-tools@15.4.0>minimatch": "3.1.5",
+      "get-uri@6.0.5>basic-ftp": "5.3.1"
     }
   },
   "scripts": {

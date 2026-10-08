@@ -17,6 +17,7 @@
   font-size: 17px;
   font-weight: 600;
   margin: 0 0 8px;
+  overflow-wrap: anywhere;
 }
 .description {
   white-space: pre-wrap;
@@ -31,6 +32,7 @@
   color: var(--brand) !important;
   text-decoration: underline !important;
   text-underline-offset: 4px;
+  overflow-wrap: anywhere;
 }
 .tableWrap {
   overflow-x: auto;
@@ -64,7 +66,7 @@
 }
 @media (max-width: 760px) {
   .columns {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 12px;
   }
   .table {
