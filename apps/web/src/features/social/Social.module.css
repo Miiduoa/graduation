@@ -110,9 +110,6 @@
   .layout {
     grid-template-columns: minmax(0, 1fr);
   }
-  .sidebar {
-    order: -1;
-  }
 }
 @media (max-width: 420px) {
   .actions > button {

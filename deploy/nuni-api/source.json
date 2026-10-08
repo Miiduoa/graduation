@@ -1,0 +1,17 @@
+{
+  "repository": "https://github.com/Miiduoa/nuni-prod.git",
+  "baseCommit": "9de47b4b3492325e430562c37bcad552867162db",
+  "candidateCommit": "946e29f46115073dc67ae15eed2c0e319e980c10",
+  "candidateTree": "f1d5b3c2a348d2db1046f155e3f13eb5636ec456",
+  "runtimeSourceCommit": "84890808a8c2526d95ee640d8ab06233f2ca81dc",
+  "patches": [
+    {
+      "file": "0001-.patch",
+      "sha256": "7052662ed26f24493dfbc589319dc1229d5f503b73cc1197aefd1f98639ae309"
+    },
+    {
+      "file": "0002-.patch",
+      "sha256": "ff5b6f74550bc512847ecbe6819701a13a6d8024bb5a8907e38d5b07cd19aaf3"
+    }
+  ]
+}

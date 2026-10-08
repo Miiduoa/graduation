@@ -57,7 +57,7 @@ export function SocialWorkspace() {
       ) : (
         <section className={styles.panel}>
           <h2>登入後參與公開交流</h2>
-          <p>{auth.error || '使用 Campus One 課程帳號，閱讀與發表跨校公開貼文。'}</p>
+          <p>{auth.error || '使用 Campus One 帳號，閱讀與發表跨校公開貼文。'}</p>
           <div className={styles.actions}>
             <Link className={styles.link} href="/classroom/login">
               登入帳號
@@ -139,7 +139,7 @@ function Workspace({ context, suspended }: { context: string; suspended: boolean
                 onChanged={() => setRevision((value) => value + 1)}
               />
             </div>
-            <aside className={`${styles.sidebar} ${styles.stack}`}>
+            <aside className={styles.stack}>
               <section className={styles.panel}>
                 <h2>看看其他校園</h2>
                 <SchoolSelector />
@@ -151,7 +151,7 @@ function Workspace({ context, suspended }: { context: string; suspended: boolean
                   這裡的內容可由不同校園的帳號閱讀。不要分享學號、電話或他人的私人資料。
                 </p>
                 <p className={styles.muted}>
-                  校內交流仍保留原本的學校權限。私人對話和好友功能不在這個公開動態中。
+                  這裡分享你主動公開的貼文。校內交流仍保留原本的學校權限。
                 </p>
               </section>
             </aside>
