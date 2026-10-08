@@ -19,7 +19,8 @@ export const HANDLE = /^ps_[A-Za-z0-9_-]{43}$/;
 export type PlatformSession = { sessionHandle: string; expiresAt: number; pendingLogout?: true };
 
 export function nuniEnabled() {
-  return process.env.CAMPUS_BACKEND === 'nuni';
+  // The legacy flag remains an API compatibility gate; it never selects the application shell.
+  return process.env.NUNI_CLASSROOM_ENABLED === 'true' || process.env.CAMPUS_BACKEND === 'nuni';
 }
 
 export function publicOrigin(): string {

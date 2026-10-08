@@ -3,6 +3,31 @@
   background: var(--paper, var(--bg));
   color: var(--text);
 }
+.courseTabs {
+  display: flex;
+  gap: 24px;
+  margin: 0 0 28px;
+  border-bottom: 1px solid var(--border);
+}
+.courseTabs button {
+  border: 0;
+  border-bottom: 3px solid transparent;
+  padding: 14px 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  min-height: 48px;
+}
+.courseTabs button[aria-selected='true'] {
+  border-bottom-color: var(--brand);
+  color: var(--text);
+  font-weight: 600;
+}
+.courseTabs button:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 3px;
+}
 .main {
   max-width: 1120px;
   margin: 0 auto;

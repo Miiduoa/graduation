@@ -4,26 +4,8 @@ import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
 import { useAuth } from './AuthGuard';
+import { CampusServiceMenu } from './CampusServiceMenu';
 import styles from '@/app/home.module.css';
-
-const services = [
-  ['/announcements', '公告'],
-  ['/timetable', '課表'],
-  ['/grades', '成績'],
-  ['/credit-planner', '學分規劃'],
-  ['/groups', '課程與群組'],
-  ['/clubs', '社團活動'],
-  ['/community', '校園交流'],
-  ['/messages', '通知'],
-  ['/dms', '私訊'],
-  ['/map', '校園地圖'],
-  ['/bus', '公車'],
-  ['/cafeteria', '餐廳'],
-  ['/library', '圖書館'],
-  ['/ai-assistant', '校園助理'],
-  ['/profile', '個人資料'],
-  ['/settings', '設定'],
-];
 
 function Header() {
   const pathname = usePathname();
@@ -62,27 +44,7 @@ function Header() {
           <Link href={href('/map')} aria-current={pathname === '/map' ? 'page' : undefined}>
             校園
           </Link>
-          <details className={styles.menu} key={pathname}>
-            <summary>所有服務</summary>
-            <div className={styles.menuPanel}>
-              <Link
-                href={href('/search')}
-                className={styles.menuOverview}
-                aria-current={pathname === '/search' ? 'page' : undefined}
-              >
-                尋找校園服務 <span aria-hidden="true">→</span>
-              </Link>
-              {services.map(([path, label]) => (
-                <Link
-                  href={href(path)}
-                  key={path}
-                  aria-current={pathname === path ? 'page' : undefined}
-                >
-                  {label}
-                </Link>
-              ))}
-            </div>
-          </details>
+          <CampusServiceMenu />
         </nav>
         <div className={styles.account}>
           {user ? (
