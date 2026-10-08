@@ -19,6 +19,22 @@ interface AuthContextType extends AuthState {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+export function GuestAuthProvider({ children }: { children: ReactNode }) {
+  return (
+    <AuthContext.Provider
+      value={{
+        user: null,
+        loading: false,
+        error: null,
+        signOutUser: async () => {},
+        refreshUser: async () => {},
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
 export function useAuth() {
   const context = useContext(AuthContext);
   if (!context) {
