@@ -1,0 +1,41 @@
+name: Web feature check
+
+on:
+  push:
+    branches:
+      - 'feature/**'
+    paths:
+      - 'apps/web/**'
+      - 'packages/shared/**'
+      - 'pnpm-lock.yaml'
+      - 'package.json'
+      - '.github/workflows/web-feature.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-feature-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Web tests
+        run: pnpm --filter web test
+      - name: Typecheck
+        run: pnpm --filter web typecheck
+      - name: Lint
+        run: pnpm --filter web lint
+      - name: Production build
+        run: pnpm --filter web build
