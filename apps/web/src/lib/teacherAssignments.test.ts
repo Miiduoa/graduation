@@ -8,6 +8,8 @@ import {
   loadTeacherSubmissions,
   publishSubmissionGrade,
   publishTeacherAssignment,
+  reviseSubmissionGrade,
+  loadGradeRevisions,
 } from './teacherAssignments';
 
 const auth = vi.hoisted(() => ({ uid: 'teacher' }));
@@ -186,4 +188,115 @@ it('loads only confirmed submissions and does not show unpublished grades', asyn
   expect(result.submissions).toHaveLength(1);
   expect(result.submissions[0].score).toBeNull();
   expect(result.submissions[0].content).toBe('答案');
+});
+
+
+const previousGrade = {
+  score: 60,
+  feedback: '原評語',
+  gradedAt: '2026-10-08T01:00:00.000Z',
+};
+
+function seedPublishedGrade() {
+  records['groups/course/assignments/work'] = {
+    type: 'assignment', points: 100,
+  };
+  records['groups/course/assignments/work/submissions/student'] = {
+    userId: 'student', submittedAt: '2026-10-08T00:00:00Z',
+    gradePublished: true, gradeScore: 60, gradeFeedback: '原評語',
+    gradePublishedAt: previousGrade.gradedAt,
+  };
+}
+
+it('changes a published grade and writes its history atomically', async () => {
+  seedPublishedGrade();
+  vi.mocked(getDocFromServer).mockImplementation(async (path) =>
+    document(String(path).endsWith('/gradeRevisions/revision-1234567890')
+      ? { afterScore: 80, changedBy: 'teacher' }
+      : { gradePublished: true, gradeRevisionId: 'revision-1234567890', gradeScore: 80 }
+    ) as never);
+  await reviseSubmissionGrade(scope, 'work', 'student', 'revision-1234567890',
+    previousGrade, 80, '調整後評語', '重新核對評分規準');
+  expect(transaction.update).toHaveBeenCalledWith(
+    'groups/course/assignments/work/submissions/student',
+    expect.objectContaining({
+      gradeScore: 80, gradeFeedback: '調整後評語',
+      gradeRevisionId: 'revision-1234567890', gradeRevisionCount: 1,
+      gradePublishedAt: 'server-time', gradeRevisedAt: 'server-time',
+      gradeRevisionReason: '重新核對評分規準',
+    }),
+  );
+  expect(transaction.set).toHaveBeenCalledWith(
+    'groups/course/assignments/work/submissions/student/gradeRevisions/revision-1234567890',
+    {
+      beforeScore: 60, afterScore: 80, beforeFeedback: '原評語',
+      afterFeedback: '調整後評語', reason: '重新核對評分規準',
+      changedBy: 'teacher', changedAt: 'server-time', revision: 1,
+    },
+  );
+});
+
+it('rejects stale grades, preventing one teacher from overwriting another', async () => {
+  seedPublishedGrade();
+  records['groups/course/assignments/work/submissions/student'] = {
+    ...(records['groups/course/assignments/work/submissions/student'] ?? {}),
+    gradeScore: 75,
+  };
+  await expect(reviseSubmissionGrade(scope, 'work', 'student', 'revision-1234567890',
+    previousGrade, 80, '新評語', '重新核對配分')).rejects.toThrow('其他教師');
+  expect(transaction.update).not.toHaveBeenCalled();
+  expect(transaction.set).not.toHaveBeenCalled();
+});
+
+it('requires a meaningful reason and a valid score before any transaction', async () => {
+  await expect(reviseSubmissionGrade(scope, 'work', 'student', 'revision-1234567890',
+    previousGrade, 70, '新評語', '錯')).rejects.toThrow('更正原因');
+  await expect(reviseSubmissionGrade(scope, 'work', 'student', 'revision-1234567890',
+    previousGrade, 60, '原評語', '重新核對配分')).rejects.toThrow('均未改變');
+  await expect(reviseSubmissionGrade(scope, 'work', 'student', 'revision-1234567890',
+    previousGrade, 70.1234, '新評語', '重新核對配分')).rejects.toThrow('兩位小數');
+  expect(runTransaction).not.toHaveBeenCalled();
+});
+
+it('rejects an attempt to correct a grade beyond assignment points', async () => {
+  seedPublishedGrade();
+  await expect(reviseSubmissionGrade(scope, 'work', 'student', 'revision-1234567890',
+    previousGrade, 101, '', '重新核對配分')).rejects.toThrow('超過作業配分');
+  expect(transaction.update).not.toHaveBeenCalled();
+  expect(transaction.set).not.toHaveBeenCalled();
+});
+
+it('allows safe replay of the same correction without a second audit record', async () => {
+  seedPublishedGrade();
+  records['groups/course/assignments/work/submissions/student'] = {
+    ...(records['groups/course/assignments/work/submissions/student'] ?? {}),
+    gradeRevisionId: 'revision-1234567890', gradeScore: 80,
+    gradeFeedback: '新評語',
+  };
+  records['groups/course/assignments/work/submissions/student/gradeRevisions/revision-1234567890'] = {
+    beforeScore: 60, afterScore: 80, beforeFeedback: '原評語',
+    afterFeedback: '新評語', changedBy: 'teacher', reason: '重新核對配分',
+  };
+  vi.mocked(getDocFromServer).mockImplementation(async (path) =>
+    document(records[String(path)] ?? null) as never);
+  await reviseSubmissionGrade(scope, 'work', 'student', 'revision-1234567890',
+    previousGrade, 80, '新評語', '重新核對配分');
+  expect(transaction.update).not.toHaveBeenCalled();
+  expect(transaction.set).not.toHaveBeenCalled();
+});
+
+it('reads grade revisions only through a permission-checked teacher scope', async () => {
+  vi.mocked(getDocsFromServer).mockResolvedValue({
+    docs: [{ id: 'r1', data: () => ({
+      beforeScore: 50, afterScore: 60,
+      beforeFeedback: '', afterFeedback: '重新檢查',
+      reason: '配分修正', changedBy: 'teacher', changedAt: '2026-10-08',
+    }) }],
+  } as never);
+  const rows = await loadGradeRevisions(scope, 'work', 'student');
+  expect(rows).toHaveLength(1);
+  expect(rows[0].beforeScore).toBe(50);
+  expect(getDocsFromServer).toHaveBeenCalledWith(
+    'groups/course/assignments/work/submissions/student/gradeRevisions',
+  );
 });

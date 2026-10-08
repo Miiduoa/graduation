@@ -87,6 +87,9 @@ function Assignment({
                 教師已評分：{assignment.grade.score}
                 {assignment.points !== null ? ` / ${assignment.points}` : ''} 分
               </strong>
+              {assignment.grade.revisionCount > 0 ? (
+                <p>此筆評分已更正 {assignment.grade.revisionCount} 次，顯示目前已發布的結果。</p>
+              ) : null}
               {assignment.grade.feedback ? (
                 <p style={{ whiteSpace: 'pre-wrap' }}>{assignment.grade.feedback}</p>
               ) : null}
