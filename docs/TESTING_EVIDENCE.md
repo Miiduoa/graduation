@@ -1,82 +1,70 @@
 # Testing evidence
 
-這份頁面記錄可從 GitHub Actions 重查的驗證結果。它不是 coverage 百分比宣傳頁，也不把 non-blocking warning 當作已解決。
+這頁記錄 **2026-10-08（台灣時間）** 可從 GitHub Actions 重新核對的結果。測試數量會隨程式重構改變；請以 workflow run 為準，不要拿不同 commit 的數字互相比較。
 
-## Last fully verified baseline
+## Last fully verified CI baseline
 
-Workflow run: [37661634021](https://github.com/Miiduoa/graduation/actions/runs/37661634021)
+主分支最近一次已完成、各主要 job 成功的基準：[CI run 37737598320](https://github.com/Miiduoa/graduation/actions/runs/37737598320)，commit `16fd78a608e7ed54ba555013403163beed530ad7`。這是當次執行的結果，不代表往後所有 commit 都通過。
 
-該 run 的主要 jobs 全部成功：
+| Gate | 這次實際紀錄 |
+| --- | --- |
+| Mobile Jest | 93 suites passed、1 suite skipped；**1212 tests passed、1 skipped** |
+| Web Vitest | 8 files passed、1 skipped；**43 tests passed、1 skipped**；產出 V8 coverage report |
+| Functions Jest | 30 suites passed；**138 tests passed** |
+| Firestore Rules / emulator | **28 tests passed、0 failed** |
+| Expo Doctor | **16/16 checks passed** |
+| EAS build profiles | development / preview / production 設定結構驗證通過 |
+| Web production build | 成功 |
+| Lint and Type Check | 工作成功，但不代表沒有 warning |
+| Security gates | Gitleaks job 成功；production dependency audit 在 critical 門檻下成功 |
+| Mobile test report | `mobile-jest-results` artifact 已產生並由 CI 驗證；**不是 coverage report** |
 
-| Gate | Evidence |
-|---|---|
-| Mobile Tests | 105 test suites passed；1319 tests passed；1 suite / 1 test skipped |
-| Web Tests | 23 files passed；133 tests passed；1 file / 1 test skipped |
-| Functions Tests | 28 suites passed；165 tests passed |
-| Firestore Rules Tests | 46 passed；0 failed |
-| Expo Doctor | 16 / 16 checks passed |
-| EAS profile validation | development / preview / production profile structure passed |
-| Web production build | Next.js production build passed |
-| Lint + Typecheck | job passed across Mobile / Web / Functions / Shared |
-| Security Gates | critical dependency audit gate passed；secret scan job passed |
+[全部 workflow jobs](https://github.com/Miiduoa/graduation/actions/runs/37737598320) · [Mobile result artifact](https://github.com/Miiduoa/graduation/actions/runs/37737598320#artifacts)
 
-## What the numbers prove
+### 這些通過結果能證明什麼
 
-它們可以證明：
+能重跑 Mobile／Web／Functions 的自動測試、Firestore 規則檢查、Web 建置與 Expo 設定檢查。Mobile 的 JSON 報告由 CI 驗證有非零測試量且失敗數為零，再作為 artifact 保存。
 
-- 大量 Mobile domain / service / architecture behavior 有 regression tests；
-- Web 與 backend functions 有獨立 test boundary；
-- Firestore / Storage authorization rules 不是只靠人工閱讀；
-- Mobile build configuration 至少通過 Expo Doctor 與 EAS profile structural checks；
-- Web 可以做 production build；
-- critical dependency audit 會阻擋 CI。
+**它們不能證明**原生 iOS / Android 二進位已能建置與安裝、所有 UI flow 都已實測、外部校務或支付服務已正式整合，也不能當成上線環境沒有資安問題的證明。
 
-它們不能證明：
+## Security audit: not a clean bill of health
 
-- 正式 production traffic 下沒有 bug；
-- 所有 UI flow 都被 E2E 覆蓋；
-- coverage 很高；
-- 外部校務、交通、支付或 AI provider 已完成正式 integration；
-- 所有 security finding 都已清零。
+同一個 CI 執行 `pnpm audit --prod --audit-level critical`；該 run 的報告顯示 **97 筆 vulnerability findings：10 low、33 moderate、54 high、0 critical**。因 blocking threshold 是 `critical`，job 成功 **不等於沒有弱點**。
 
-## Known verification debt
+此數字反映 2026-10-08 當下的 advisory database、lockfile 和 workspace 依賴解析；不同日期重新執行可能不同。完整原始 JSON 放在該 run 的 `audit-report` artifact（保存期限有限）。
 
-### Mobile test artifact and coverage
+優先查核路徑記於 [Dependency risk register](DEPENDENCY_RISK_REGISTER.md)。尤其 `firebase-admin → @google-cloud/firestore → google-gax → @grpc/grpc-js` 與 `firebase → @firebase/firestore → @grpc/proto-loader → protobufjs`。即使多數是 transitive dependencies，也不能因未直接 import 就當成已修復。
 
-最近成功的 baseline run 只執行 Jest 測試，**沒有產生 `lcov.info` 或 Jest JSON 結果檔**。當時 Codecov tokenless upload 失敗、原本的 test artifact 也找不到檔案，不能把綠色 CI 當成 coverage 證據。
+## Native E2E is separate and not yet verified
 
-目前 main 分支已改成使用 Jest `--json --outputFile=jest-results.json`，並由 CI 驗證通過數、失敗數與實際結果檔，再上傳 `mobile-jest-results` artifact；這個流程是否成功，以修改後的 workflow run 為準。
+Maestro 是獨立的 macOS simulator workflow，不包含在上述 CI Summary 的八個成功 gate 中。
 
-Codecov 步驟已移除，避免重複發生未產出報告卻宣稱上傳的情況。**尚未收集有效 coverage，也尚未設定 coverage threshold**；未來若要加入，應先修復 Jest coverage 依賴與驗證產物，再設明確 gate。
+[Maestro run 37736759823](https://github.com/Miiduoa/graduation/actions/runs/37736759823) 是舊版 workflow，當時檢查仍在 native build 階段，**不能標示為 E2E passed**。
 
-### Lint warnings
+後續 [workflow 修正 commit 61af487](https://github.com/Miiduoa/graduation/commit/61af48701c63d0b8fae585037716d1125d97e54d) 已將測試 App ID 改為 development bundle ID、建置後要求 simulator 安裝、確認 Metro readiness，並取消 `continue-on-error`。這些修改仍需要一次新的 macOS runner 執行才能確認；流程寫對不等於已跑通。
 
-`Lint & Type Check` job 成功，但 log 仍有 warning，例如 `no-explicit-any`、unused eslint directives / variables，以及部分 backend `no-undef` warning。
+## Remaining verification debt
 
-目前 eslint configuration 沒有把所有 warning 升級成 error，所以「job success」不等於「0 warning」。此外，近期 CI 的 backend `index.js` 曾在學生登入 response 引用未定義的變數；目前已改用獨立 academic response builder 並新增回歸測試。`puScraper.js` 仍有未完成的非匯出 credit-audit 舊路徑，不能把整個 scraper 宣稱為零警告。
+- **Mobile coverage**：雖已有 Jest JSON 結果，仍未產出可用的 lcov 或 coverage threshold。Web 有 V8 coverage report，不應拿來冒充 Mobile coverage。
+- **Runtime / engines**：CI 以 Node 22 執行，但 `backend/functions` 仍宣告 Node 20，安裝會出現 `Unsupported engine` warning；Firebase Functions 的正式執行階段也需依部署環境確認。
+- **Warnings**：CI 的成功狀態不表示 ESLint 警告、Node deprecation warnings 或所有 high-severity security findings 都已清除。
+- **E2E**：直到新版 Maestro 確認完成 iOS binary build、安裝、Metro 啟動和 UI flow，不應聲稱可在乾淨的 macOS runner 跑完流程。
+- **資料與環境**：部分功能使用合成資料或示範環境；測試只驗證對應邊界，不代表正式校務介接已開通。
 
-### Dependency audit
-
-Security gate 已通過 critical threshold。先前兩個 critical transitive findings 已透過 override 與 refreshed lockfile 修補。
-
-該 baseline run 仍報告 **20 個 dependency findings**（未超過 critical 阻擋門檻），因此不能描述成「0 vulnerabilities」。完整 JSON audit report 由 CI artifact 保存。
-
-### E2E
-
-Maestro workflow 獨立存在，避免把 emulator / UI flow 與 unit tests 混在同一個 job。它不是每個 domain rule 的唯一證據，unit / rules / backend tests 仍各自保留。
-
-## Reproduce locally
+## Reproduce
 
 ```bash
+pnpm install --frozen-lockfile
 pnpm lint
 pnpm typecheck
-pnpm --filter mobile test --ci
-pnpm --filter web exec vitest run
+pnpm --filter mobile test --ci --json --outputFile=jest-results.json
+pnpm --filter web exec vitest run --coverage
 pnpm --filter functions test --runInBand
 pnpm test:rules
+pnpm audit --prod --audit-level moderate
 ```
 
-Mobile build configuration：
+Expo configuration only（非 iOS / Android 原生建置）：
 
 ```bash
 cd apps/mobile
@@ -86,4 +74,4 @@ npx expo config --type public --json
 
 ## Evidence policy
 
-README 或備審若引用測試數字，應附 workflow run 或可重現指令。數字改變時更新這一頁，不在多份文件手動複製不同版本。
+每次更新測試數、弱點數或已知限制，應同時附上對應的 CI run 和 commit。若最新版測試正在執行或失敗，維持可確認的 baseline，清楚註明差異；不要把「上一版成功」寫成「目前全部成功」。
