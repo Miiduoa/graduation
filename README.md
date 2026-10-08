@@ -142,7 +142,7 @@ Mobile 與 Web 不各自重寫所有邏輯，能共用的資料結構與規則�
 
 ### 4. Grade notifications use explicit recipients
 
-The teacher grading screen is still a local demo, not a TronClass grade writer. It only publishes a local grade event after checking the teacher account, explicit student UID, assignment IDs and score. It does not infer a recipient from a name or student number.
+The teacher grading screen is still a local demo, not a TronClass grade writer. It only publishes a local grade event after checking the teacher account and teaching role, explicit student UID, assignment IDs and score. It does not infer a recipient from a name or student number.
 
 - [Grading screen](apps/mobile/src/screens/TeacherGradingScreen.tsx)
 - [Delivery checks](apps/mobile/src/services/prepareGradingDelivery.ts)
