@@ -56,7 +56,7 @@ jobs:
           EAS_JSON_PACKAGE_ROOT: ${{ runner.temp }}/eas-config-schema/node_modules/@expo/eas-json
         run: |
           npm install --prefix "$RUNNER_TEMP/eas-config-schema" --ignore-scripts --no-audit --no-fund @expo/eas-json@24.9.0
-          node --test scripts/wait-for-firestore-indexes.test.cjs scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs scripts/prepare-eas-build.test.mjs scripts/verify-nuni-integration.test.mjs
+          node --test scripts/wait-for-firestore-indexes.test.cjs scripts/firebase-release-preflight.test.cjs scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs scripts/prepare-eas-build.test.mjs scripts/verify-nuni-integration.test.mjs
 
       - name: Audit Functions deployment dependencies
         working-directory: backend/functions
@@ -349,6 +349,24 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Verify standalone Web runtime
+        run: |
+          set -euo pipefail
+          docker build -f deploy/web/Dockerfile -t campus-one-web:ci \
+            --build-arg NEXT_PUBLIC_FIREBASE_API_KEY=mock-api-key \
+            --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=mock.firebaseapp.com \
+            --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID=mock-project \
+            --build-arg NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=mock-project.firebasestorage.app \
+            --build-arg NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=123456789 \
+            --build-arg NEXT_PUBLIC_FIREBASE_APP_ID=1:123456789:web:test .
+          docker run -d --name campus-one-web-ci -p 127.0.0.1:8080:8080 campus-one-web:ci
+          trap 'docker logs campus-one-web-ci; docker rm -f campus-one-web-ci' EXIT
+          curl --fail --retry 10 --retry-connrefused --retry-delay 2 http://127.0.0.1:8080/health/live
+          curl --fail --silent http://127.0.0.1:8080/search > /tmp/campus-service-directory.html
+          test -s /tmp/campus-service-directory.html
+          test "$(docker exec campus-one-web-ci id -u)" != "0"
+          test -z "$(docker exec campus-one-web-ci find /app -name '.env' -o -name '.env.*' -o -name '*serviceAccount*.json' -o -name '*.pem' -o -name '*.key')"
+
   deploy-functions:
     name: Deploy Firebase Functions
     runs-on: ubuntu-latest
@@ -399,6 +417,11 @@ jobs:
             echo "::error::FIREBASE_PROJECT_ID must be an explicit Firebase project ID, not a local alias."
             exit 1
           fi
+          if [ "$FIREBASE_PROJECT_ID" != "campus-one-tw" ]; then
+            echo "::error::The approved production target is campus-one-tw. Update the release configuration before changing projects."
+            exit 1
+          fi
+          node scripts/firebase-release-preflight.cjs --project "$FIREBASE_PROJECT_ID" --storage-bucket campus-one-tw.firebasestorage.app --auth-domain nuni.tw --database-location nam5 --output firebase-preflight.json
           pnpm -w firebase deploy --only firestore:rules,storage,firestore:indexes --project "$FIREBASE_PROJECT_ID" --non-interactive
           node scripts/wait-for-firestore-indexes.cjs --project "$FIREBASE_PROJECT_ID" --timeout-seconds 1200
           pnpm -w firebase deploy --only functions --project "$FIREBASE_PROJECT_ID" --non-interactive

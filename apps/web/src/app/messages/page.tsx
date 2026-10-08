@@ -4,7 +4,7 @@ import { MessagingShell, PrivateNotifications } from '@/components/messaging/Mes
 
 export default function MessagesPage() {
   return (
-    <MessagingShell title="通知">
+    <MessagingShell title="通知" section="notifications">
       {(session) => <PrivateNotifications session={session} />}
     </MessagingShell>
   );

@@ -163,6 +163,40 @@ it('logged-out visitors do not subscribe to private data', async () => {
   await screen.findByText('登入後查看訊息');
   expect(watchMessagingSession).not.toHaveBeenCalled();
   expect(watchAccountNotifications).not.toHaveBeenCalled();
+  expect(screen.getByRole('link', { name: '通知' }).getAttribute('aria-current')).toBe('page');
+  expect(screen.getByRole('link', { name: '私人對話' }).getAttribute('aria-current')).toBeNull();
+  expect(screen.getByRole('link', { name: '前往登入' }).getAttribute('href')).toBe(
+    '/login?returnUrl=%2Fmessages',
+  );
+});
+
+it('keeps the current section clear and allows recovery from an empty conversation search', async () => {
+  render(<DmsListPage />);
+  await screen.findByText('真實目錄姓名');
+  expect(screen.getByRole('link', { name: '私人對話' }).getAttribute('aria-current')).toBe('page');
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜尋對話' }), {
+    target: { value: '不存在的對話' },
+  });
+  expect(screen.queryByText('真實目錄姓名')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '清除搜尋' }));
+  expect(screen.getByText('真實目錄姓名')).toBeTruthy();
+});
+
+it('allows returning to all notifications when the unread filter has no results', async () => {
+  vi.mocked(watchAccountNotifications).mockImplementation((_session, receive) => {
+    receive({
+      notifications: notifications().notifications.map((row) => ({ ...row, read: true })),
+      unscopedCount: 0,
+    });
+    return vi.fn();
+  });
+  render(<MessagesPage />);
+  await screen.findByText('成績已公布');
+  fireEvent.click(screen.getByRole('checkbox', { name: '只看未讀' }));
+  expect(screen.queryByText('成績已公布')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '查看全部通知' }));
+  expect(screen.getByText('成績已公布')).toBeTruthy();
+  expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
 });
 it('successful empty conversations stay empty and an error remains distinct', async () => {
   vi.mocked(watchPrivateConversations).mockImplementationOnce((_session, receive) => {

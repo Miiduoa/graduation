@@ -65,6 +65,13 @@ function Header() {
           <details className={styles.menu} key={pathname}>
             <summary>所有服務</summary>
             <div className={styles.menuPanel}>
+              <Link
+                href={href('/search')}
+                className={styles.menuOverview}
+                aria-current={pathname === '/search' ? 'page' : undefined}
+              >
+                尋找校園服務 <span aria-hidden="true">→</span>
+              </Link>
               {services.map(([path, label]) => (
                 <Link
                   href={href(path)}

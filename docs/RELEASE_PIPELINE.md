@@ -4,6 +4,20 @@ Web、Firebase 與商店產物分別驗證。GitHub CI 通過不代表正式站�
 
 ## Firebase
 
+2026-10-08 已由產品方指定 `campus-one-tw`，對外網域沿用 `nuni.tw`。GitHub production 的 `FIREBASE_PROJECT_ID` 已設定並讀回核對；`.firebaserc` 提供 `production` 別名。預設 demo 專案保留給舊開發流程，正式命令必須傳入 `--project campus-one-tw`。
+
+發布前先執行唯讀基礎設施檢查：
+
+```sh
+node scripts/firebase-release-preflight.cjs --project campus-one-tw \
+  --storage-bucket campus-one-tw.firebasestorage.app \
+  --auth-domain nuni.tw --database-location nam5 --output firebase-preflight.json
+```
+
+可使用本機 Firebase CLI 登入或 CI 的 `FIREBASE_TOKEN`。報告不包含憑證或服務錯誤本文，會記錄來源提交、工作目錄是否有修改、時間及阻塞項；失敗回傳非零 exit code。檢查計費、必要 API、Auth 初始化及網域、Firestore 資料庫和實際 Storage bucket 歸屬。這只驗證部署前提，不代替索引 READY、登入供應商、金流或學校帳號驗收。
+
+2026-10-08 本次唯讀結果：Firestore `(default)` 位於 `nam5`；Blaze 計費未啟用，Auth 尚未初始化，實際 Storage bucket 未建立，七個必要 API 未啟用。需先由帳單持有人啟用 Blaze，再完成必要資源初始化；不能將 SDK config 中的 bucket 字串當作實際資源已存在。
+
 `main` 的 CI 使用 GitHub `production` environment：
 
 - Variable `FIREBASE_PROJECT_ID`：明確的目標專案 ID。
@@ -12,6 +26,12 @@ Web、Firebase 與商店產物分別驗證。GitHub CI 通過不代表正式站�
 先部署 Firestore／Storage rules 與索引，再由 `wait-for-firestore-indexes.cjs` 查詢目標資料庫的實際索引狀態。全部必要索引 READY 才部署 Functions；20 分鐘仍未完成就停止。此版本使用 refresh token 換取短效 access token，不接受把原始 access token 當作 refresh token。憑證及服務錯誤的回應內容不寫入日誌。
 
 此流程不部署 Web、不遷移歷史資料，也不切換 Nuni 網域。舊點名、失物、訂單與帳號資料須先完成對應遷移及還原驗證。
+
+## Web
+
+`apps/web` 產生 Next.js standalone 產物。`deploy/web/Dockerfile` 從來源在 Linux 建置，固定 Node image digest 與 pnpm 版本，驗證原生圖片依賴；最終映像以非 root 帳號執行，排除環境檔與私鑰。CI 實際啟動映像並檢查健康端點、服務頁與檔案隔離。建置方式見 [Web image](../deploy/web/README.md)。
+
+本次容器在本機獨立運行已通過；尚未取代 Nuni 的 Fly app 或切換網域。只有確認 Firebase 與登入、資料契約、回復路徑後才發布正式流量。
 
 ## App
 
@@ -48,7 +68,7 @@ Firebase、學校、法律頁與功能開關等 build profile 所需設定仍須
 使用 Node 22：
 
 ```sh
-node --test scripts/wait-for-firestore-indexes.test.cjs scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs scripts/prepare-eas-build.test.mjs
+node --test scripts/wait-for-firestore-indexes.test.cjs scripts/firebase-release-preflight.test.cjs scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs scripts/prepare-eas-build.test.mjs scripts/verify-nuni-integration.test.mjs
 pnpm typecheck
 pnpm lint
 pnpm --filter web test

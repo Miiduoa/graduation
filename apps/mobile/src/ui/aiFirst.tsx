@@ -749,6 +749,7 @@ export function AIDetailScreen({
   rightAction,
   children,
   bottomPadding,
+  scrollRef,
 }: {
   title: string;
   subtitle?: string;
@@ -756,6 +757,7 @@ export function AIDetailScreen({
   rightAction?: React.ReactNode;
   children: React.ReactNode;
   bottomPadding?: number;
+  scrollRef?: React.Ref<ScrollView>;
 }) {
   useVisualTheme();
   const defaultPadding = useTabBarContentBottomPadding();
@@ -763,6 +765,7 @@ export function AIDetailScreen({
     <View style={{ flex: 1, backgroundColor: aiTokens.bg }}>
       <AIDetailHeader title={title} subtitle={subtitle} onBack={onBack} rightAction={rightAction} />
       <ScrollView
+        ref={scrollRef}
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: bottomPadding ?? defaultPadding }}
         showsVerticalScrollIndicator={false}

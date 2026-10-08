@@ -143,7 +143,7 @@ export function MapStack() {
         component={LibraryCatalogScreen}
         options={{ title: '館藏查詢', headerShown: false }}
       />
-      <Stack.Screen name="Health" component={HealthScreen} options={{ title: '校園健康' }} />
+      <Stack.Screen name="Health" component={HealthScreen} options={{ title: '校園健康', headerShown: false }} />
       <Stack.Screen
         name="Dormitory"
         component={UnavailableFeatureScreen}
