@@ -1,3 +1,11 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { simulateTeacherGrade } from '../services/demoActionSimulator';
+import { loadVisibleRoleEventInbox } from '../services/roleEventBus';
+
+jest.mock('@react-native-async-storage/async-storage', () =>
+  require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
+);
+
 import { prepareGradingDelivery } from '../services/prepareGradingDelivery';
 
 const valid = {
@@ -87,5 +95,54 @@ describe('prepareGradingDelivery', () => {
 
   it.each([0, 100, 89.5])('accepts valid boundary and fractional scores (%s)', (score) => {
     expect(prepareGradingDelivery({ ...valid, score })).toMatchObject({ ok: true, score });
+  });
+});
+
+describe('demo grade notification isolation', () => {
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+  });
+
+  it('delivers a grade to the selected student, not another student', async () => {
+    const prepared = prepareGradingDelivery(valid);
+    if (!prepared.ok) throw new Error('Valid grading fixture was rejected');
+
+    await simulateTeacherGrade({
+      teacherUid: prepared.actorUid,
+      teacherName: '示範教師',
+      studentUid: prepared.studentUid,
+      studentName: prepared.studentName,
+      courseId: prepared.courseId,
+      courseName: '機器學習',
+      homeworkId: prepared.assignmentId,
+      homeworkTitle: 'HW1',
+      score: prepared.score,
+      totalScore: 100,
+    });
+
+    const recipientInbox = await loadVisibleRoleEventInbox({
+      uid: 'demo_student_kuchih',
+      role: 'student',
+    });
+    const otherInbox = await loadVisibleRoleEventInbox({ uid: 'u1', role: 'student' });
+    const teacherInbox = await loadVisibleRoleEventInbox({
+      uid: 'demo_teacher_chang',
+      role: 'teacher',
+    });
+
+    expect(recipientInbox).toHaveLength(1);
+    expect(recipientInbox[0].kind).toBe('grade_published');
+    expect(recipientInbox[0].targetUids).toEqual(['demo_student_kuchih']);
+    expect(otherInbox).toHaveLength(0);
+    expect(teacherInbox).toHaveLength(0);
+  });
+
+  it('does not publish when no recipient account exists', async () => {
+    const prepared = prepareGradingDelivery({ ...valid, studentUid: undefined });
+    expect(prepared).toEqual({ ok: false, reason: 'student_missing' });
+
+    expect(
+      await loadVisibleRoleEventInbox({ uid: 'demo_student_kuchih', role: 'student' }),
+    ).toHaveLength(0);
   });
 });
