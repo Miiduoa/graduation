@@ -14,7 +14,12 @@
  * 注意：client 端版本 (pickupCode.ts) 也能跑（fallback），但雲端版才是權威。
  */
 
-const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { onCall: firebaseOnCall, HttpsError } = require('firebase-functions/v2/https');
+const { createAccountGuardedOnCall } = require('../accountLifecycle');
+const onCall = createAccountGuardedOnCall({
+  onCall: firebaseOnCall,
+  getDb: () => require('firebase-admin/firestore').getFirestore(),
+});
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const nodeCrypto = require('crypto');
 
@@ -42,7 +47,11 @@ module.exports.verifyPickupCode = onCall({ region: REGION }, async (request) => 
   }
 
   const db = getFirestore();
-  const codeRef = db.collection('schools').doc(schoolId).collection('pickupCodes').doc(`pc-${orderId}`);
+  const codeRef = db
+    .collection('schools')
+    .doc(schoolId)
+    .collection('pickupCodes')
+    .doc(`pc-${orderId}`);
 
   try {
     const result = await db.runTransaction(async (tx) => {
