@@ -10,6 +10,7 @@ import { prepareGradingDelivery } from '../services/prepareGradingDelivery';
 
 const valid = {
   actorUid: 'demo_teacher_chang',
+  actorRole: 'teacher',
   studentUid: 'demo_student_kuchih',
   studentName: '顧晉瑋',
   courseId: '71378',
@@ -47,6 +48,13 @@ describe('prepareGradingDelivery', () => {
     expect(
       prepareGradingDelivery({ ...valid, studentName: '顧晉瑋', studentUid: undefined }),
     ).toMatchObject({ ok: false, reason: 'student_missing' });
+  });
+
+  it.each(['student', 'guest', 'admin', undefined])('rejects unauthorized grading roles (%s)', (actorRole) => {
+    expect(prepareGradingDelivery({ ...valid, actorRole })).toEqual({
+      ok: false,
+      reason: 'teacher_role_invalid',
+    });
   });
 
   it('rejects an absent actor', () => {
