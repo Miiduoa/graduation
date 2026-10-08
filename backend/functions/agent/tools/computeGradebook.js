@@ -2,7 +2,7 @@
 
 const { z } = require('zod');
 const { getFirestore } = require('firebase-admin/firestore');
-const { computeGradebook } = require('../../../../packages/shared/dist-cjs/lms/gradebookCompute');
+const { computeGradebook } = require('../../generated/shared/lms/gradebookCompute');
 
 /**
  * computeGradebook (read) — 教師 / 學生查看某課程成績簿。

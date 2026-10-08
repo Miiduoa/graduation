@@ -4,10 +4,10 @@ const { z } = require('zod');
 const { getFirestore } = require('firebase-admin/firestore');
 const {
   computeSpriteState,
-} = require('../../../../packages/shared/dist-cjs/companion/spriteEngine');
+} = require('../../generated/shared/companion/spriteEngine');
 const {
   computeGarden,
-} = require('../../../../packages/shared/dist-cjs/companion/gardenEngine');
+} = require('../../generated/shared/companion/gardenEngine');
 
 /**
  * computeCompanionState — Campus Companion 狀態總成

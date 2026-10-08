@@ -8,12 +8,12 @@ Campus One 保留主要介面與操作流程；整合目標是沿用 Nuni 的網
 
 | 來源                                                                                                   | 已核對的遠端版本                                                                                         | 用途                                                                                |
 | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| [Campus One / graduation](https://github.com/Miiduoa/graduation)                                       | main `621dc7f98e5ead4dd717a754fe7d468dd7214487`；本輪 PR 起點 `c79b757754ea1afa4a461fd7a44038fc0de5f045` | 最新程式碼候選為 `5e609faeedc19153a5055aa9b755d2b3c08afc99`，已納入所列 main 的變更 |
+| [Campus One / graduation](https://github.com/Miiduoa/graduation)                                       | main `621dc7f98e5ead4dd717a754fe7d468dd7214487`；本輪 PR 起點 `c79b757754ea1afa4a461fd7a44038fc0de5f045` | 主要功能實作為 `5e609faeedc19153a5055aa9b755d2b3c08afc99`，已納入所列 main 的變更；後續提交另修正教師工作台換行、部署依賴與 Functions 封裝 |
 | [Nuni / nuni-prod](https://github.com/Miiduoa/nuni-prod/tree/9de47b4b3492325e430562c37bcad552867162db) | main `9de47b4b3492325e430562c37bcad552867162db`                                                          | 既有 API、PostgreSQL、身份及部署契約的參考來源                                      |
 | [Nuni / nuni-v2](https://github.com/Miiduoa/nuni-v2/tree/caa4cd313678c9b450f1932682f003fe281f748d)     | main `caa4cd313678c9b450f1932682f003fe281f748d`                                                          | 新版方向；README 明確沿用 nuni.tw、api.nuni.tw、Cloudflare、Fly 及商店帳號          |
 | [Nolu / web](https://github.com/Miiduoa/web/tree/a8e6804ef971de9eb68074a4499924c823fab733)             | main `a8e6804ef971de9eb68074a4499924c823fab733`                                                          | 課表匯入、重複／衝堂判定、快取隔離及備援契約的參考來源                              |
 
-這些是本輪核對的來源版本，不能用來推定正式站正在執行的版本。最新程式碼候選已提交為 `5e609faeedc19153a5055aa9b755d2b3c08afc99`；下列完整驗證對應這批程式碼。原生顯示名稱另以 plist 與 development Expo config 驗證；尚未產生同版本的正式簽署產物。發布時仍須對應最終提交、建置產物與實際部署版本。
+這些是本輪核對的來源版本，不能用來推定正式站正在執行的版本。主要功能實作已提交為 `5e609faeedc19153a5055aa9b755d2b3c08afc99`；下列完整驗證對應這批程式碼，後續版面、依賴與封裝修正另記錄對應驗證。原生顯示名稱另以 plist 與 development Expo config 驗證；尚未產生同版本的正式簽署產物。發布時仍須對應最終提交、建置產物與實際部署版本。
 
 ## 沿用與轉接
 
@@ -40,15 +40,17 @@ Nolu 的實際專案是 `Miiduoa/web`，原始碼主要位於 `pu-plan/`，公�
 - Nolu 公開頁 HTTP 200，主要校務函式入口對 GET 回應 405，只能證明該入口可達，不能替代帶本人 session 的校務查詢。
 - 尚缺正式部署映像與來源 SHA 的對應、目標資料庫及帳號轉接的完整驗收。需完成備份還原、身份 adapter、真實資料閉環與可回復發布後，才切換 Campus One 正式流量。
 
+本輪以已登入的 EAS CLI 唯讀確認 Nuni 的既有專案為 `@miiduoa/campus-one`，project ID `8955b97c-802c-463c-bd1d-d5f02e30a966`。已核對的 Nuni production 原始設定使用 iOS／Android `com.nuni.app`，staging 使用 `com.miiduoa.campusone`；這是來源設定與 EAS 專案存在的證據，尚非 App Store Connect／Google Play 上已註冊識別碼與簽署資產的證明。沒有建立新 EAS 專案或覆寫 Campus One 的建置設定。
+
 本輪沒有變更 DNS、正式部署、付款開關或帳號資料。前一版曾讀取的 Fly release 是 Web v31／API v17（均為 2026-09-29），但當時 metadata 沒有來源 SHA；這些 release 編號不是本輪重新確認的最新版本。前一版亦曾確認本機 Firebase／EAS 登入、Firebase 專案清單，以及 GitHub repository／production environment 當時沒有 secrets／variables；這些設定會變動，發布前須重查，不據此推定目前仍為空，也不重複索取已有的憑證。
 
 本輪 CI 與 Functions runtime 使用 Node.js 22；`backend/functions/package.json` 已宣告 `engines.node: "22"`。Firebase 官方文件列出 [Node.js 22 與 runtime 設定方式](https://firebase.google.com/docs/functions/manage-functions#set_nodejs_version)。本 repo 的 `.firebaserc` 預設指向 demo，正式發布必須明確指定已核對的 project ID；CI 缺少 production variable `FIREBASE_PROJECT_ID` 或 secret `FIREBASE_TOKEN` 會失敗，不沿用歷史 [CI 37393275660](https://github.com/Miiduoa/graduation/actions/runs/37393275660) 跳過部署仍成功的語意。
 
-新的本人 session 查詢依賴 `_puSessions` 的 `ownerUid ASC`／`expiresAt DESC` 複合索引。發布順序必須先建立索引、確認目標專案該索引為 `READY`，再發布依賴它的 Functions 與 Web；索引建立包含非同步回填，送出部署不等於可查詢，參見 [Firestore 索引建置文件](https://firebase.google.com/docs/firestore/query-data/indexing#index_build_time)。目前 CI 先部署 indexes 再部署 Functions，尚未實作等待 `READY` 的 gate，這是正式發布前仍須補齊的條件。該 job 不部署 Web、Mobile 或 Firestore／Storage rules；完整發布仍須核對各部分版本與相容性。
+新的本人 session 查詢依賴 `_puSessions` 的 `ownerUid ASC`／`expiresAt DESC` 複合索引。發布順序必須先建立索引、確認目標專案該索引為 `READY`，再發布依賴它的 Functions 與 Web；索引建立包含非同步回填，送出部署不等於可查詢，參見 [Firestore 索引建置文件](https://firebase.google.com/docs/firestore/query-data/indexing#index_build_time)。目前 CI 先部署 indexes 再部署 Functions，尚未實作等待 `READY` 的 gate，這是正式發布前仍須補齊的條件。該 job 已包含 Firestore／Storage rules 與 indexes，再部署 Functions；不部署 Web 或 Mobile。完整發布仍須核對各部分版本與相容性。
 
 ## 最新候選實作與驗收
 
-程式碼版本：`5e609faeedc19153a5055aa9b755d2b3c08afc99`。尚未部署正式環境、切換 Nuni 網域、提交或通過商店審查。
+主要功能版本：`5e609faeedc19153a5055aa9b755d2b3c08afc99`；後續提交另修正教師工作台換行、部署依賴與 Functions 封裝。尚未部署正式環境、切換 Nuni 網域、提交或通過商店審查。
 
 ### 已實作的真實流程
 
@@ -73,9 +75,19 @@ Nolu 的實際專案是 `Miiduoa/web`，原始碼主要位於 `pu-plan/`，公�
 | 瀏覽器                 | 19 個更新路由 × 390／1365px × 深／淺色，共 76 未登入狀態，無頁面例外、HTTP error 或水平溢位；搜尋「借書」命中正式圖書館入口 | placeholder 詳情只驗證登入／不存在／未開放狀態；另有私訊 12 個合成資料版面狀態檢查，非真實傳訊 |
 | iOS / Android export   | development 設定 JavaScript 與資產打包通過，各約 13 MB                                                                      | 未簽署；原生名稱變更另通過 plist、development Expo config 驗證，ID 未修改                      |
 
-共 2,216 項通過、2 項既有跳過。GitHub 狀態必須查對 PR 當前 SHA，不能把先前 CI 綠燈套到此候選。`5a67fdb` 的 [CI 37701507991](https://github.com/Miiduoa/graduation/actions/runs/37701507991) 與 [iOS smoke 37701508054](https://github.com/Miiduoa/graduation/actions/runs/37701508054) 已通過；iOS 僅證明該舊版本的 development 模擬器（iPhone 17 Pro／iOS 26.4）由訪客登入頁進入學校登入，1 項測試通過，不涵蓋本次新增已登入流程。
+共 2,216 項通過、2 項既有跳過。已核對 [CI 37705225149](https://github.com/Miiduoa/graduation/actions/runs/37705225149) 在 `28bd6dd0806150a2fb5acee8a4bff8a9c2a4667a` 全部九個驗證 job 通過，部署 job 跳過；下載 Web artifact 確認包含 1,268 個建置檔案及 manifests，沒有 cache。該提交僅在主要功能版本後更新文件，尚不包含後續版面、依賴與封裝修正。PR 後續狀態仍須查對當前 SHA，不能把先前 CI 綠燈套到新提交。[iOS smoke 37705225138](https://github.com/Miiduoa/graduation/actions/runs/37705225138) 亦在同一 `28bd6dd` 提交完成原生建置、JavaScript bundle 及訪客登入導覽測試，完整／指定功能 suites 依 workflow 條件跳過。這不涵蓋真正登入、已登入流程、簽署商店版本，以及之後的 Web／後端部署修正。
 
-本次 lockfile 未變，最近一次依賴稽核仍為 4 high／13 moderate／3 low／0 critical；CI 只阻擋 critical，不能當作所有依賴風險已排除。詳細可達性記錄保留於文件末尾。
+後續教師工作台版面修正另以合成資料保留真實頁面、hook 與 CSS，重驗教師／成績簿／群組三頁的 390／1365px 與深／淺色，共 12 種狀態。修正長標題與教材連結換行後，各頁 `scrollWidth` 均等於視窗；長文字完整保留。成績簿的寬表只在表格容器內橫向捲動，零分與未登錄維持不同狀態。教師頁原有三項行為測試也通過。此驗證不是正式教師帳號或真實資料 E2E。
+
+後續發布依賴修正將 Firebase Admin 固定到 [`13.10.0`](https://firebase.google.com/support/release-notes/admin/node)，從正式 Functions 依賴移除 `node-forge`，並同步 pnpm 與 Functions 獨立 npm 鎖檔。部署目錄的舊 npm 鎖檔另有 2 critical，先前 workspace audit 未涵蓋；本輪採相容版本修補 proxy-addr、websocket-driver、busboy、grpc-js、xmldom、fast-xml-builder、form-data 及 protobufjs，並讓 xmlbuilder2 使用保留 `safeLoad` 的已修補 [js-yaml 3.15.2](https://github.com/nodeca/js-yaml/security/advisories/GHSA-2883-xcg3-v3hh)，避免全域 4.x override 破壞既有 API。
+
+修正後重新稽核：Functions 正式 npm 依賴為 **0 critical／0 high／14 moderate／2 low**；workspace 為 **0 critical／4 high／11 moderate／3 low**。兩種報告範圍不同，不能用其中一份代替另一份。Functions 的完整 337 項測試及使用新版 Admin 的 56 項 rules／實際 Firestore 並行測試均通過。CI Security Gates 新增 Functions 部署套件的隔離驗證與獨立 npm audit，保留兩份稽核報告且阻擋 critical；隔離驗證包含 `npm ci --omit=dev --ignore-scripts`，不等於已執行雲端部署或 install lifecycle。
+
+隔離部署驗證曾實際發現 Functions 從 source 目錄外載入 `packages/shared/dist-cjs` 的失敗。本輪讓部署前與測試前使用同一 TypeScript 編譯流程，產物位於 `backend/functions/generated/shared`，八個 runtime 消費檔改用部署目錄內的路徑。驗證腳本使用 Firebase CLI 真正的 archive packer，解壓到獨立目錄、執行正式 npm 乾淨安裝，再載入入口與所有共用模組消費者；實測成功載入 107 個 exports，所有檔案模組均位於封裝目錄內，並於完成後清理暫存。另修正 Firebase CLI 所需 minimatch 函式 API 被全域 9.x override 破壞的問題，針對該 CLI 固定到已修補且相容的 3.1.5。此驗證已接入 CI，不依賴 monorepo 旁邊的共用資料夾，也沒有呼叫正式 Firebase 服務。
+
+建置工具亦另行稽核：針對 get-uri 6.0.5 原本允許的 5.x 範圍，將 basic-ftp 固定到 5.3.1，清除 CLI 依賴的 critical 與三項 high；未強制升到 6.x。含 dev 的完整 workspace 稽核為 **0 critical／31 high／68 moderate／8 low**，CI 另保存這份報告並阻擋 critical。basic-ftp 的另項 high 及其他工具鏈風險仍存在，不得把 Functions 正式套件的零 high 延伸為整個 repo 零 high。
+
+workspace 剩餘 high 包含 Metro 圖片解析、Expo 工具鏈的 node-forge 與 braces；本輪未以跨 major override 改動 Expo／Metro。仍須處理剩餘 moderate／low 與工具鏈風險，不能以零 critical 宣稱所有依賴風險已排除。文件末尾的可達性核對保留為歷史紀錄；其中「Functions 存在 node-forge」已由此次 Admin 升級解除。
 
 ### 仍需完成的發布關卡
 
@@ -176,7 +188,7 @@ Workflow 選擇已安裝且可用的 iPhone simulator、等待啟動、編譯後
 
 ## 歷史紀錄：上一版依賴可達性核對
 
-以下為 2026-10-08 上一版針對 audit report、lockfile 與呼叫位置的核對。本輪重新取得相同嚴重度計數，但未重做以下所有公告、修正版與可達性分析；發布前須重新核對套件與公告現況。當時 4 項 high 來自 3 個套件，不能直接等同正式站有 4 個遠端可利用入口：
+以下為 2026-10-08 上一版針對 audit report、lockfile 與呼叫位置的核對。該段保留歷史判斷；最新稽核與 Functions 修補以「最新候選實作與驗收」為準，不能把下列舊依賴鏈當作當前狀態。當時 4 項 high 來自 3 個套件，不能直接等同正式站有 4 個遠端可利用入口：
 
 - `image-size@1.2.1` 的 [JXL／HEIF](https://github.com/advisories/GHSA-5p2g-fcmc-qvqq) 與 [ICNS](https://github.com/advisories/GHSA-w3rx-r6r6-pgpr) DoS 影響 Metro 素材解析；惡意圖片進入本機或 CI 建置輸入時可達，未找到使用者上傳接到此解析器的流程。修正版為 2.0.3 以上，但 Metro 0.83.3 仍使用 v1 同步檔案路徑 API，不能直接 override 2.x。待相容修補、惡意／正常素材回歸及 Mobile export 驗證。
 - `node-forge@1.4.0` 的 [RSA 簽章公告](https://github.com/advisories/GHSA-86w9-cpqp-85rv) 在上一版核對時尚無已發布修正版。它也存在於 Functions 的 firebase-admin 依賴；當時核對 Admin 呼叫點為 service-account 私鑰解析，JWT 驗證走 jsonwebtoken，未發現外部簽章進入 forge verify 的現有路徑。Expo CLI 的使用限本機簽署／憑證設定，App 未設定 codeSigningCertificate。這是當時的可達性核對，未執行漏洞 payload。
