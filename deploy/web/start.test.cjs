@@ -22,7 +22,7 @@ const server = http.createServer((request, response) => {
 for (const signal of ['SIGTERM', 'SIGINT']) {
   process.on(signal, () => {
     fs.writeFileSync('signal.txt', signal);
-    if (!settings.ignoreSignals) server.close(() => process.exit(0));
+    if (!settings.ignoreSignals) server.close(() => process.exit(settings.signalExitCodes?.[signal] ?? 0));
   });
 }
 server.listen(Number(process.env.PORT), process.env.HOSTNAME, () => {
@@ -171,6 +171,44 @@ test('supports one current server and forwards SIGINT', async (t) => {
   assert.equal(await readFile(join(run.directories.current, 'signal.txt'), 'utf8'), 'SIGINT');
   assert.equal(alive(current.pid), false);
 });
+
+for (const [signal, exitCode] of [
+  ['SIGTERM', 143],
+  ['SIGINT', 130],
+]) {
+  test(`accepts a child exit code ${exitCode} only after forwarding ${signal}`, async (t) => {
+    const run = await launch(t, { legacySettings: { signalExitCodes: { [signal]: exitCode } } });
+    await run.ready('current');
+    const legacy = await run.ready('legacy');
+    run.child.kill(signal);
+    assert.deepEqual(await run.waitForExit(), { code: 0, signal: null });
+    assert.equal(await readFile(join(run.directories.legacy, 'signal.txt'), 'utf8'), signal);
+    assert.equal(alive(legacy.pid), false);
+  });
+
+  test(`an unexpected exit code ${exitCode} still fails the container`, async (t) => {
+    const run = await launch(t, { legacySettings: { exitCode } });
+    const current = await run.ready('current');
+    const legacy = await run.ready('legacy');
+    await fetch(`http://127.0.0.1:${legacy.port}/exit`);
+    assert.deepEqual(await run.waitForExit(), { code: 1, signal: null });
+    assert.equal(alive(current.pid), false);
+  });
+}
+
+for (const [signal, exitCode] of [
+  ['SIGTERM', 130],
+  ['SIGINT', 143],
+  ['SIGTERM', 23],
+]) {
+  test(`rejects unrelated exit code ${exitCode} during ${signal} shutdown`, async (t) => {
+    const run = await launch(t, { legacySettings: { signalExitCodes: { [signal]: exitCode } } });
+    await run.ready('current');
+    await run.ready('legacy');
+    run.child.kill(signal);
+    assert.deepEqual(await run.waitForExit(), { code: 1, signal: null });
+  });
+}
 
 test('an unexpected successful current-server exit still fails the container and stops legacy', async (t) => {
   const run = await launch(t);
