@@ -5,6 +5,8 @@ import { useAuth } from '@/components/AuthGuard';
 import {
   loadTeacherSubmissions,
   loadGradeRevisions,
+  loadEditableTeacherAssignment,
+  updateTeacherAssignment,
   newGradeRevisionId,
   reviseSubmissionGrade,
   type ReviewedSubmission,
@@ -63,6 +65,10 @@ export function TeacherAssignments({ schoolId, courseId, assignments, refresh }:
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState('');
   const historyGeneration = useRef(0);
+  const [editingAssignment, setEditingAssignment] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState({ title: '', description: '', dueAt: '', allowLateSubmission: false, updatedAt: null as string | null });
+  const [editError, setEditError] = useState('');
+  const [editBusy, setEditBusy] = useState(false);
   const scope: TeacherScope = { uid: user?.uid ?? '', schoolId, courseId };
 
   async function publish(event: FormEvent) {
@@ -224,6 +230,40 @@ export function TeacherAssignments({ schoolId, courseId, assignments, refresh }:
     }
   }
 
+  async function openAssignmentEditor(id: string) {
+    if (editingAssignment === id) { setEditingAssignment(null); return; }
+    setEditError('');
+    setEditBusy(true);
+    try {
+      const draft = await loadEditableTeacherAssignment(scope, id);
+      setEditDraft({ ...draft, dueAt: draft.dueAt ? draft.dueAt.slice(0, 16) : '' });
+      setEditingAssignment(id);
+    } catch (error) {
+      setEditError(message(error, '無法讀取作業設定。'));
+    } finally {
+      setEditBusy(false);
+    }
+  }
+
+  async function saveAssignmentEdit(event: FormEvent) {
+    event.preventDefault();
+    if (!editingAssignment || editBusy) return;
+    setEditBusy(true);
+    setEditError('');
+    try {
+      await updateTeacherAssignment(scope, editingAssignment, editDraft.updatedAt, {
+        title: editDraft.title, description: editDraft.description,
+        dueAt: editDraft.dueAt, allowLateSubmission: editDraft.allowLateSubmission,
+      });
+      setEditingAssignment(null);
+      refresh();
+    } catch (error) {
+      setEditError(message(error, '無法儲存作業變更。'));
+    } finally {
+      setEditBusy(false);
+    }
+  }
+
   return (
     <section className={styles.panel} aria-label="作業管理">
       <header className={styles.heading}>
@@ -273,6 +313,7 @@ export function TeacherAssignments({ schoolId, courseId, assignments, refresh }:
       </details>
       {saveError && <p role="alert" className={styles.error}>{saveError}</p>}
       {saveSuccess && <p role="status" className={styles.success}>{saveSuccess}</p>}
+      {editError ? <p role="alert" className={styles.error}>{editError}</p> : null}
       <div className={styles.reviews}>
         <h3>繳交與評分</h3>
         {assignments.length === 0 ? (
@@ -281,11 +322,30 @@ export function TeacherAssignments({ schoolId, courseId, assignments, refresh }:
           <div key={assignment.id} className={styles.reviewItem}>
             <div className={styles.reviewHeading}>
               <span>{assignment.title}</span>
+              <button type="button" className={styles.secondary} disabled={editBusy}
+                onClick={() => void openAssignmentEditor(assignment.id)}>
+                {editingAssignment === assignment.id ? '取消編輯' : '編輯作業'}
+              </button>
               <button type="button" className={styles.secondary}
                 onClick={() => void openReview(assignment.id)}>
                 {reviewId === assignment.id ? '收起' : '查看繳交'}
               </button>
             </div>
+            {editingAssignment === assignment.id ? (
+              <form className={styles.form} onSubmit={(event) => void saveAssignmentEdit(event)}>
+                <p className={styles.note}>可修正說明、標題及截止設定；配分與已繳交的答案不會變動。</p>
+                <label>標題<input required maxLength={120} value={editDraft.title}
+                  onChange={(event) => setEditDraft((d) => ({ ...d, title: event.target.value }))} /></label>
+                <label>說明<textarea rows={4} maxLength={10000} value={editDraft.description}
+                  onChange={(event) => setEditDraft((d) => ({ ...d, description: event.target.value }))} /></label>
+                <label>截止時間<input type="datetime-local" value={editDraft.dueAt}
+                  onChange={(event) => setEditDraft((d) => ({ ...d, dueAt: event.target.value }))} /></label>
+                <label className={styles.check}><input type="checkbox" checked={editDraft.allowLateSubmission}
+                  onChange={(event) => setEditDraft((d) => ({ ...d, allowLateSubmission: event.target.checked }))} />
+                  允許逾期繳交</label>
+                <button className={styles.action} type="submit" disabled={editBusy}>儲存作業修改</button>
+              </form>
+            ) : null}
             {reviewId === assignment.id && (
               <div className={styles.submissions}>
                 {loadingReview ? <p role="status">讀取繳交紀錄…</p> : null}
