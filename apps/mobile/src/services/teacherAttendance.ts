@@ -14,7 +14,7 @@ const empty = (): TeacherState => ({ phase: 'idle', sessionId: '', token: '', ex
 const object = (v: unknown): Record<string, unknown> | null =>
   v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null;
 const pathId = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= 128 &&
-  v.trim() === v && !/[\/\u0000-\u001f\u007f]/u.test(v) && v !== '.' && v !== '..' && !/^__.*__$/u.test(v);
+  v.trim() === v && Array.from(v).every((char) => char !== '/' && char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127) && v !== '.' && v !== '..' && !/^__.*__$/u.test(v);
 const canonicalDate = (v: unknown): v is string => typeof v === 'string' &&
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(v) &&
   Number.isFinite(Date.parse(v)) && new Date(v).toISOString() === v;
