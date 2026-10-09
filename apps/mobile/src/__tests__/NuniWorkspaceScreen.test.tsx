@@ -17,9 +17,9 @@ jest.mock('../services/nuniGoogle', () => ({
 }));
 jest.mock('../screens/nuni/NuniCourses', () => ({
   NuniCourses: () => {
-    const React = require('react');
     const { TextInput } = require('react-native');
-    const [draft, setDraft] = React.useState('');
+    const { useNuniDraftState } = jest.requireActual('../state/nuniDrafts');
+    const [draft, setDraft] = useNuniDraftState('test:course-draft', '');
     return <TextInput testID="course-draft" value={draft} onChangeText={setDraft} />;
   },
 }));
@@ -255,4 +255,96 @@ test('membership lookup in progress disables applications without discarding an 
   expect(view.getByRole('button', { name: '申請學校資格' })).toBeDisabled();
   await act(async () => finish({ memberships: [] }));
   expect(view.getByLabelText('學校配發信箱').props.editable).toBe(true);
+});
+
+test('retains only same-account drafts across a masked revalidation with a new request context', async () => {
+  mockAuth.session = principal;
+  const view = render(<NuniWorkspaceScreen />);
+  fireEvent.changeText(view.getByTestId('course-draft'), '暫時切出去查資料');
+  fireEvent.press(view.getByRole('tab', { name: '帳號' }));
+  await view.findByText(/目前沒有學校資格紀錄/);
+  fireEvent.changeText(view.getByLabelText('學校配發信箱'), 'me@school.edu.tw');
+  Object.assign(mockAuth, { session: null, loading: true });
+  view.rerender(<NuniWorkspaceScreen />);
+  expect(view.queryByTestId('course-draft')).toBeNull();
+  expect(view.queryByLabelText('學校配發信箱')).toBeNull();
+  Object.assign(mockAuth, {
+    session: { ...principal, context: 'account-a-rechecked' },
+    loading: false,
+  });
+  view.rerender(<NuniWorkspaceScreen />);
+  await view.findByText(/目前沒有學校資格紀錄/);
+  expect(view.getByLabelText('學校配發信箱').props.value).toBe('me@school.edu.tw');
+  expect(mockAuth.request).toHaveBeenCalledWith('memberships', 'account-a-rechecked');
+  fireEvent.press(view.getByRole('tab', { name: '課程' }));
+  expect(view.getByTestId('course-draft').props.value).toBe('暫時切出去查資料');
+});
+
+test('keeps the Web recovery entry usable when native session validation repeatedly fails', async () => {
+  mockAuth.error = '無法確認登入狀態，請重新連線後再試。';
+  mockCapability.mockReturnValue({ available: false, reason: 'unsupported-platform' });
+  const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+  const view = render(<NuniWorkspaceScreen />);
+  await act(async () => fireEvent.press(view.getByText('重新確認登入狀態')));
+  await act(async () => fireEvent.press(view.getByText('開啟網頁版登入')));
+  expect(open).toHaveBeenCalledWith('https://nuni.tw/login');
+  expect(mockAuth.signIn).not.toHaveBeenCalled();
+});
+
+test('a pending school application keeps its exact email after same-account revalidation', async () => {
+  mockAuth.session = principal;
+  mockAuth.request.mockImplementation(async (_path, _context, input) => {
+    if (input) throw new Error('unknown receipt');
+    return { memberships: [] };
+  });
+  const view = render(<NuniWorkspaceScreen />);
+  fireEvent.press(view.getByRole('tab', { name: '帳號' }));
+  await view.findByText(/目前沒有學校資格紀錄/);
+  fireEvent.changeText(view.getByLabelText('學校配發信箱'), ' Original@School.edu.tw ');
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '申請學校資格' })));
+  Object.assign(mockAuth, { session: null, loading: true });
+  view.rerender(<NuniWorkspaceScreen />);
+  Object.assign(mockAuth, { session: { ...principal, context: 'rechecked' }, loading: false });
+  view.rerender(<NuniWorkspaceScreen />);
+  await view.findByText(/目前沒有學校資格紀錄/);
+  expect(view.getByLabelText('學校配發信箱').props.editable).toBe(false);
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '重試確認申請' })));
+  const writes = mockAuth.request.mock.calls.filter((call) => call[2]);
+  expect(writes).toHaveLength(2);
+  expect(writes[1][2]).toEqual(writes[0][2]);
+  expect(writes[1][1]).toBe('rechecked');
+});
+
+test('an uncertain school application cannot be edited after a later rejected retry', async () => {
+  mockAuth.session = principal;
+  let submitted = 0;
+  mockAuth.request.mockImplementation(async (_path, _context, input) => {
+    if (input) throw new NuniError(++submitted === 1 ? 503 : 404, 'UNAVAILABLE');
+    return { memberships: [] };
+  });
+  const view = render(<NuniWorkspaceScreen />);
+  fireEvent.press(view.getByRole('tab', { name: '帳號' }));
+  await view.findByText(/目前沒有學校資格紀錄/);
+  fireEvent.changeText(view.getByLabelText('學校配發信箱'), 'original@school.edu.tw');
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '申請學校資格' })));
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '重試確認申請' })));
+  expect(view.getByLabelText('學校配發信箱').props.editable).toBe(false);
+  expect(view.getByRole('button', { name: '重試確認申請' })).toBeTruthy();
+  const writes = mockAuth.request.mock.calls.filter((call) => call[2]);
+  expect(writes[1][2]).toEqual(writes[0][2]);
+});
+
+test('explicit logout drops same-account drafts before that account signs in again', async () => {
+  mockAuth.session = principal;
+  const view = render(<NuniWorkspaceScreen />);
+  fireEvent.changeText(view.getByTestId('course-draft'), '登出前的草稿');
+  fireEvent.press(view.getByRole('tab', { name: '帳號' }));
+  await view.findByText('登出 Campus One 帳號');
+  mockAuth.logout.mockImplementation(async () => {
+    Object.assign(mockAuth, { session: null, loading: false });
+  });
+  await act(async () => fireEvent.press(view.getByText('登出 Campus One 帳號')));
+  mockAuth.session = { ...principal, context: 'same-account-new-login' };
+  view.rerender(<NuniWorkspaceScreen />);
+  expect(view.getByTestId('course-draft').props.value).toBe('');
 });

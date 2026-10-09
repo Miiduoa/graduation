@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
 import { beforeEach, expect, it, vi } from 'vitest';
-import { AuthProvider, useAuth } from './AuthGuard';
+import { AuthGuard, AuthProvider, GuestAuthProvider, useAuth } from './AuthGuard';
 import { getAuth } from '@/features/auth/client';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 const teachingSignOut = vi.hoisted(() => vi.fn());
@@ -39,6 +39,41 @@ it('leaves loading when the service is unavailable without inventing an account'
   );
   await waitFor(() => expect(screen.getByText('Signed out')).toBeTruthy());
   expect(onAuthStateChanged).not.toHaveBeenCalled();
+});
+
+it('preserves the school timetable query and section when redirecting a guest to login', () => {
+  const location = {
+    pathname: '/timetable',
+    search: '?week=2026-10-05',
+    hash: '#today',
+    href: '',
+  };
+  vi.stubGlobal(
+    'window',
+    new Proxy(window, {
+      get(target, property) {
+        return property === 'location' ? location : Reflect.get(target, property);
+      },
+    }),
+  );
+  try {
+    const view = render(
+      <GuestAuthProvider>
+        <AuthGuard>
+          <p>私人課表</p>
+        </AuthGuard>
+      </GuestAuthProvider>,
+    );
+    const destination = new URL(location.href, 'https://campus.test');
+    expect(destination.pathname).toBe('/login');
+    expect(destination.searchParams.get('returnUrl')).toBe(
+      '/timetable?week=2026-10-05#today',
+    );
+    expect(screen.queryByText('私人課表')).toBeNull();
+    view.unmount();
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
 
 it('invalidates the separate teaching session on initial identity, account switch, and cross-tab logout', async () => {

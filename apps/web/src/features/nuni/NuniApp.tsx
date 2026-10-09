@@ -12,6 +12,7 @@ import {
 import { AppHeader } from '@/components/AppHeader';
 import { NuniSignIn } from '@/components/NuniSignIn';
 import { SiteShell } from '@/components/SiteShell';
+import { useLocationHash } from '@/lib/useLocationHash';
 import { useNuniSession } from './Session';
 import { CourseAccessBoundary, MutationForm, useClasses } from './CourseUI';
 import { CourseAssignments } from './CourseAssignments';
@@ -28,9 +29,12 @@ export function NuniHeader() {
 function Login() {
   const params = useSearchParams();
   const pathname = usePathname();
+  const hash = useLocationHash();
+  const query = params.toString();
+  const currentPath = `${pathname || '/classroom'}${query ? `?${query}` : ''}${hash}`;
   return (
     <NuniSignIn
-      returnUrl={params.get('returnUrl') || pathname || '/classroom'}
+      returnUrl={params.get('returnUrl') || currentPath}
       issue={params.has('issue')}
     />
   );

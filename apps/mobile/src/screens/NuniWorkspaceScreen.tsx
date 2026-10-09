@@ -20,6 +20,7 @@ import {
 } from '@campus/shared/src/nuniAccount';
 import { NuniError } from '@campus/shared/src/nuni';
 import { useNuniSession } from '../state/nuniSession';
+import { NuniDraftProvider, useNuniDraftState, type NuniDraftCache } from '../state/nuniDrafts';
 import { getGoogleCredentialCapability } from '../services/nuniGoogle';
 import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
@@ -61,12 +62,16 @@ function MembershipRequest({
   const auth = useNuniSession();
   const context = auth.session!.context;
   const s = useThemeStyleSheet(createStyles);
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useNuniDraftState('membership-request:email', '');
+  const [savedPending, setSavedPending] = useNuniDraftState<NuniMembershipRequest | null>(
+    'membership-request:pending',
+    null,
+  );
   const [busy, setBusy] = useState(false);
-  const [retry, setRetry] = useState(false);
+  const [retry, setRetry] = useState(!!savedPending);
   const [error, setError] = useState('');
   const [receipt, setReceipt] = useState('');
-  const pending = useRef<NuniMembershipRequest | null>(null);
+  const pending = useRef<NuniMembershipRequest | null>(savedPending);
   const sending = useRef(false);
   const mounted = useRef(true);
   const allowed = useRef(!disabled);
@@ -89,6 +94,7 @@ function MembershipRequest({
       }
     }
     pending.current = input;
+    setSavedPending(input);
     sending.current = true;
     setBusy(true);
     setError('');
@@ -99,6 +105,7 @@ function MembershipRequest({
       );
       if (!mounted.current) return;
       pending.current = null;
+      setSavedPending(null);
       setRetry(false);
       setEmail('');
       setReceipt(membershipReceiptMessage(result));
@@ -106,6 +113,7 @@ function MembershipRequest({
     } catch (failure) {
       if (!mounted.current) return;
       if (
+        !retry &&
         failure instanceof NuniError &&
         failure.status >= 400 &&
         failure.status < 500 &&
@@ -113,6 +121,7 @@ function MembershipRequest({
         failure.code !== 'SESSION_CHANGED'
       ) {
         pending.current = null;
+        setSavedPending(null);
         setRetry(false);
         setError(
           failure.code === 'MEMBERSHIP_CLAIM_INVALID'
@@ -268,7 +277,7 @@ function Account({ onLogout }: { onLogout: () => void }) {
 
 function SignedInWorkspace({ onLogout }: { onLogout: () => void }) {
   const s = useThemeStyleSheet(createStyles);
-  const [tab, setTab] = useState<Tab>('courses');
+  const [tab, setTab] = useNuniDraftState<Tab>('workspace:tab', 'courses');
   return (
     <View style={s.page}>
       <View accessibilityRole="tablist" style={s.tabs}>
@@ -323,6 +332,14 @@ export function NuniWorkspaceScreen() {
   const [actionError, setActionError] = useState('');
   const active = useRef(false);
   const mounted = useRef(true);
+  const drafts = useRef<{ accountId: string; cache: NuniDraftCache } | null>(null);
+  // Revalidation keeps only user input in memory. The actual workspace still unmounts,
+  // so all server data and permissions must be loaded again with the new request context.
+  if (auth.pendingLogout || (!auth.session && !auth.loading && !auth.error)) drafts.current = null;
+  if (auth.session && !auth.loading && !auth.pendingLogout && !auth.error) {
+    if (drafts.current?.accountId !== auth.session.platformAccountId)
+      drafts.current = { accountId: auth.session.platformAccountId, cache: new Map() };
+  }
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -343,7 +360,11 @@ export function NuniWorkspaceScreen() {
       if (mounted.current) setAction('');
     }
   };
-  const logout = () => void run('正在登出…', auth.logout);
+  const logout = () => {
+    drafts.current = null;
+    void run('正在登出…', auth.logout);
+  };
+  const openWeb = () => void run('正在開啟網頁…', () => Linking.openURL('https://nuni.tw/login'));
   if (auth.loading || action)
     return (
       <View
@@ -368,9 +389,19 @@ export function NuniWorkspaceScreen() {
           label={auth.pendingLogout ? '重試登出' : '重新確認登入狀態'}
           onPress={auth.pendingLogout ? logout : () => void run('正在確認…', auth.refresh)}
         />
+        <Text style={s.note}>也可以使用網頁版；網頁會另外確認瀏覽器的登入狀態。</Text>
+        <Action label="開啟網頁版登入" onPress={openWeb} />
       </View>
     );
-  if (auth.session) return <SignedInWorkspace key={auth.session.context} onLogout={logout} />;
+  if (auth.session)
+    return (
+      <NuniDraftProvider cache={drafts.current!.cache}>
+        <SignedInWorkspace
+          key={`${auth.session.platformAccountId}:${auth.session.context}`}
+          onLogout={logout}
+        />
+      </NuniDraftProvider>
+    );
   const capability = getGoogleCredentialCapability();
   return (
     <ScrollView contentContainerStyle={s.content}>
@@ -394,12 +425,7 @@ export function NuniWorkspaceScreen() {
             <Text style={s.body}>
               這個 App 版本目前無法使用 Google 登入，請更新 App 或使用網頁版。
             </Text>
-            <Action
-              label="開啟網頁版登入"
-              onPress={() =>
-                void run('正在開啟網頁…', () => Linking.openURL('https://nuni.tw/login'))
-              }
-            />
+            <Action label="開啟網頁版登入" onPress={openWeb} />
           </>
         )}
       </View>

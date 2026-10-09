@@ -293,6 +293,17 @@ it('keeps existing non-operator sessions intact until explicit logout', () => {
   expect(fetcher).not.toHaveBeenCalled();
 });
 
+it('routes administrator Google sign-in through the shared flow and preserves the admin task', () => {
+  mocks.auth.session = null;
+  render(<AdminLogin />);
+  const login = new URL(
+    (screen.getByRole('link', { name: '使用 Google 登入' }) as HTMLAnchorElement).href,
+  );
+  expect(login.pathname).toBe('/classroom/login');
+  expect(login.searchParams.get('returnUrl')).toBe('/admin');
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
 it('submits blank-default login once and refreshes before navigating', async () => {
   mocks.auth.session = null;
   const login = deferred<Response>(),

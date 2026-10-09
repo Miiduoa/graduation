@@ -8,11 +8,13 @@ import { CampusServiceMenu } from './CampusServiceMenu';
 import styles from '@/app/home.module.css';
 import { SchoolSelector } from './SchoolSelector';
 import { useNuniSession } from '@/features/nuni/Session';
+import { useLocationHash } from '@/lib/useLocationHash';
 import headerStyles from './AppHeader.module.css';
 
 function Header() {
   const pathname = usePathname();
   const params = useSearchParams();
+  const hash = useLocationHash();
   const { user, loading, signOutUser } = useAuth();
   const nuni = useNuniSession();
   const [error, setError] = useState('');
@@ -23,9 +25,9 @@ function Header() {
     if (value) context.set(key, value);
   }
   const href = (path: string) => `${path}${context.size ? `?${context}` : ''}`;
-  const currentPage = `${pathname || '/'}${params?.size ? `?${params}` : ''}`;
-  const loginHref =
-    pathname === '/login' ? '/login' : `/login?returnUrl=${encodeURIComponent(currentPage)}`;
+  const currentPage = `${pathname || '/'}${params?.size ? `?${params}` : ''}${hash}`;
+  const loginPage = ['/login', '/classroom/login', '/admin/login'].includes(pathname || '');
+  const loginHref = `/login?returnUrl=${encodeURIComponent(currentPage)}`;
   const checking = loading || nuni.loading;
   const courseHref = nuni.session || !user ? href('/classroom') : `${href('/')}#courses`;
   return (
@@ -87,9 +89,9 @@ function Header() {
             </button>
           ) : checking ? (
             <span role="status">確認帳號中…</span>
-          ) : (
+          ) : !loginPage ? (
             <Link href={loginHref}>登入</Link>
-          )}
+          ) : null}
         </div>
       </header>
       {error && (

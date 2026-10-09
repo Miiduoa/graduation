@@ -23,6 +23,9 @@ beforeEach(() => {
 
 jest.unmock('@react-navigation/native');
 jest.mock('../state/theme', () => ({ useThemeMode: () => ({ themeMode: 'light' }) }));
+jest.mock('../state/nuniSession', () => ({
+  useNuniSession: () => ({ session: null, loading: false, error: '', pendingLogout: false }),
+}));
 jest.mock('../screens/NuniWorkspaceScreen', () => ({
   NuniWorkspaceScreen: () => {
     const { Text } = require('react-native');
@@ -79,6 +82,11 @@ test.each([
   );
   await view.findByTestId(target);
   expect(navigation.getCurrentRoute()?.name).toBe(route);
+  expect(navigation.canGoBack()).toBe(true);
+  act(() => navigation.goBack());
+  await view.findByTestId('login-landing');
+  fireEvent.press(view.getByTestId('school-login-start'));
+  await view.findByTestId('school-login-form');
 });
 
 test('a warm platform link works in the school-signed-out stack and cleans up its subscription', async () => {

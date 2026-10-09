@@ -6,6 +6,7 @@ import type { PreAuthStackParamList } from '../screens/preAuthTypes';
 export const preAuthLinking: LinkingOptions<PreAuthStackParamList> = {
   prefixes: [Linking.createURL('/'), 'campus://'],
   config: {
+    initialRouteName: 'LoginLanding',
     screens: {
       LoginLanding: '',
       NuniWorkspace: 'campus-one',

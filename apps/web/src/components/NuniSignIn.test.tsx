@@ -114,3 +114,26 @@ it('switches accounts only after the prior logout has completed', async () => {
     '/auth/platform/start?returnUrl=%2Fsocial%3Fcampus%3Dpu',
   );
 });
+
+it('starts one OAuth transaction and enables retry after browser back', async () => {
+  const onStart = vi.fn(() => true);
+  render(<NuniSignIn returnUrl="/merchant" onStart={onStart} />);
+  const button = await screen.findByRole('button', { name: '使用 Google 帳號繼續' });
+  const form = button.closest('form')!;
+  expect(fireEvent.submit(form)).toBe(true);
+  expect(fireEvent.submit(form)).toBe(false);
+  expect(onStart).toHaveBeenCalledOnce();
+  expect(
+    (screen.getByRole('button', { name: '正在前往 Google…' }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+  fireEvent(window, new Event('pageshow'));
+  expect(fireEvent.submit(form)).toBe(true);
+  expect(onStart).toHaveBeenCalledTimes(2);
+});
+it('does not start OAuth while another credential flow owns the login form', async () => {
+  const onStart = vi.fn(() => false);
+  render(<NuniSignIn onStart={onStart} />);
+  const button = await screen.findByRole('button', { name: '使用 Google 帳號繼續' });
+  expect(fireEvent.submit(button.closest('form')!)).toBe(false);
+  expect((button as HTMLButtonElement).disabled).toBe(false);
+});

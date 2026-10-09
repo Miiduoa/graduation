@@ -1,6 +1,7 @@
 import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { NuniMerchant } from '../screens/nuni/NuniMerchant';
+import { NuniDraftProvider } from '../state/nuniDrafts';
 import { NuniError } from '@campus/shared/src/nuni';
 
 const mockRequest = jest.fn();
@@ -200,4 +201,47 @@ test('a later 404 cannot prove that an earlier uncertain application was never r
   expect(mockRequest.mock.calls.filter((call) => call[2])[1][2]).toEqual(
     mockRequest.mock.calls.filter((call) => call[2])[0][2],
   );
+});
+
+test('restores a same-account merchant draft and retries an interrupted request with the original key', async () => {
+  const cache = new Map<string, unknown>();
+  const ui = () => (
+    <NuniDraftProvider cache={cache}>
+      <NuniMerchant />
+    </NuniDraftProvider>
+  );
+  let writes = 0;
+  let accept!: (value: unknown) => void;
+  mockRequest.mockImplementation((path, _context, input) => {
+    if (input)
+      return ++writes === 1
+        ? new Promise((resolve) => {
+            accept = resolve;
+          })
+        : Promise.resolve(receipt);
+    return Promise.resolve(data(path));
+  });
+  const view = render(ui());
+  await fill(view);
+  fireEvent.press(view.getByRole('button', { name: '送出進駐申請' }));
+  const original = mockRequest.mock.calls.find((call) => call[2])![2];
+  mockAuth = { ...mockAuth, session: null, loading: true };
+  view.rerender(ui());
+  expect(view.queryByLabelText('品牌名稱')).toBeNull();
+  mockAuth = {
+    ...mockAuth,
+    session: { ...initialSession(), context: 'revalidated' },
+    loading: false,
+  };
+  view.rerender(ui());
+  await view.findByRole('button', { name: '重試同一份申請' });
+  expect(view.getByLabelText('品牌名稱').props.value).toBe('餐坊');
+  expect(view.getByLabelText('品牌名稱').props.editable).toBe(false);
+  fireEvent.press(view.getByRole('button', { name: '重試同一份申請' }));
+  await view.findByText(/申請已收件/);
+  const calls = mockRequest.mock.calls.filter((call) => call[2]);
+  expect(calls).toHaveLength(2);
+  expect(calls[1][1]).toBe('revalidated');
+  expect(calls[1][2]).toEqual(original);
+  await act(async () => accept(receipt));
 });

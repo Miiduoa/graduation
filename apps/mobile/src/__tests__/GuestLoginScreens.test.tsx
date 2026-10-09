@@ -11,6 +11,12 @@ import { Button } from '../ui/components';
 
 const mockNavigation = { navigate: jest.fn() };
 const mockRefreshProfile = jest.fn();
+let mockPlatformAuth = {
+  session: null as { platformAccountId: string } | null,
+  loading: false,
+  error: '',
+  pendingLogout: false,
+};
 let mockFocus: (() => void) | undefined;
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => mockNavigation,
@@ -21,6 +27,7 @@ jest.mock('@react-navigation/native', () => ({
 }));
 jest.mock('../utils/safeNavigate', () => ({ safeNavigate: jest.fn() }));
 jest.mock('../state/auth', () => ({ useAuth: () => ({ refreshProfile: mockRefreshProfile }) }));
+jest.mock('../state/nuniSession', () => ({ useNuniSession: () => mockPlatformAuth }));
 jest.mock('../state/school', () => ({
   useSchool: () => ({ school: { id: 'pu', name: '靜宜大學', shortName: '靜宜' } }),
 }));
@@ -36,6 +43,7 @@ jest.mock('../ui/navigationTheme', () => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockPlatformAuth = { session: null, loading: false, error: '', pendingLogout: false };
   jest.mocked(signInWithStudentId).mockReset();
   mockRefreshProfile.mockReset();
   mockRefreshProfile.mockResolvedValue(undefined);
@@ -255,4 +263,20 @@ test('an already displayed success dialog cannot navigate after its screen unmou
   } finally {
     jest.useRealTimers();
   }
+});
+
+test('a restored platform account has a return entry rather than another registration prompt', () => {
+  mockPlatformAuth.session = { platformAccountId: 'pa-restored' };
+  const view = render(<LoginLandingScreen />);
+  expect(view.getByRole('button', { name: '回到我的 Campus One' })).toBeTruthy();
+  expect(view.queryByText('登入或建立帳號')).toBeNull();
+  fireEvent.press(view.getByTestId('login-start'));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace');
+});
+
+test('an unknown platform account state remains an explicit recovery entry', () => {
+  mockPlatformAuth.error = 'could not verify';
+  const view = render(<LoginLandingScreen />);
+  expect(view.getByRole('button', { name: '繼續確認帳號狀態' })).toBeTruthy();
+  expect(view.queryByText('回到我的 Campus One')).toBeNull();
 });
