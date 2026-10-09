@@ -54,6 +54,11 @@ function fixture(t, native = false) {
   t.after(() => rmSync(project, { recursive: true, force: true }));
   for (const name of ['app.json', 'app.config.ts', 'package.json', 'eas.json'])
     copyFileSync(join(mobile, name), join(project, name));
+  mkdirSync(join(project, 'scripts'), { recursive: true });
+  copyFileSync(
+    join(mobile, 'scripts/configure-nuni-google.cjs'),
+    join(project, 'scripts/configure-nuni-google.cjs'),
+  );
   symlinkSync(join(root, 'node_modules'), join(project, 'node_modules'), 'dir');
   if (native) {
     mkdirSync(join(project, 'ios/mobile.xcodeproj'), { recursive: true });
@@ -192,6 +197,11 @@ test('the generated monorepo hook executes the existing hook and the worker guar
   mkdirSync(project, { recursive: true });
   for (const name of ['app.json', 'app.config.ts', 'package.json', 'eas.json'])
     copyFileSync(join(mobile, name), join(project, name));
+  mkdirSync(join(project, 'scripts'), { recursive: true });
+  copyFileSync(
+    join(mobile, 'scripts/configure-nuni-google.cjs'),
+    join(project, 'scripts/configure-nuni-google.cjs'),
+  );
   symlinkSync(join(root, 'node_modules'), join(checkout, 'node_modules'), 'dir');
   mkdirSync(join(checkout, 'scripts'));
   for (const name of ['prepare-eas-build.mjs', 'verify-eas-build.mjs'])

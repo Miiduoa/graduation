@@ -4,6 +4,9 @@ import { platformDestination } from './accountDestination';
 it.each([
   '/profile',
   '/settings',
+  '/merchant',
+  '/merchant/apply',
+  '/merchant/workspace',
   '/social?campus=tw-pu',
   '/classroom/course/cw_11111111-1111-4111-8111-111111111111#assignments',
 ])('returns to platform task %s', (path) => {

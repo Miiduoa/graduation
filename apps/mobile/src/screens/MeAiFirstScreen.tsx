@@ -29,10 +29,10 @@ export default function MeAiFirstScreen() {
   const confirmLogout = useCallback(() => {
     if (!uid || signingOut.current) return;
     const requestedUid = uid;
-    Alert.alert('登出', '確定要登出這個帳號嗎？', [
+    Alert.alert('登出學校帳號', '確定要登出學校帳號嗎？Campus One 平台帳號會保留登入。', [
       { text: '取消', style: 'cancel' },
       {
-        text: '登出',
+        text: '登出學校帳號',
         style: 'destructive',
         onPress: async () => {
           if (currentUid.current !== requestedUid || signingOut.current) return;
@@ -58,7 +58,14 @@ export default function MeAiFirstScreen() {
         title={displayName}
         subtitle={details || '管理帳號、學習資料與個人設定。'}
       />
-      <AISection title="帳號資料">
+      <AISection title="Campus One 帳號">
+        <AIRow
+          title="課程、店家與平台帳號"
+          subtitle="和網頁版共用的課程、學校資格與店家權限"
+          onPress={go('NuniWorkspace')}
+        />
+      </AISection>
+      <AISection title="學校帳號資料">
         <AICard title={auth.profileLoading ? '正在讀取帳號資料' : '目前登入帳號'}>
           <Text style={{ color: aiTokens.textSecondary, lineHeight: 22 }}>
             {auth.user?.email || profile?.email || '尚未提供電子郵件'}
@@ -97,7 +104,10 @@ export default function MeAiFirstScreen() {
         <AIRow title="外觀" subtitle="調整淺色與深色模式" onPress={go('ThemePreview')} />
         <AIRow title="無障礙設定" onPress={go('AccessibilitySettings')} />
         <AIRow title="幫助與回饋" onPress={go('Help')} />
-        <AIRow title={busy ? '正在登出…' : '登出'} onPress={busy ? undefined : confirmLogout} />
+        <AIRow
+          title={busy ? '正在登出…' : '登出學校帳號'}
+          onPress={busy ? undefined : confirmLogout}
+        />
       </AISection>
     </AIScreen>
   );
