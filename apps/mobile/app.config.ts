@@ -156,6 +156,16 @@ export default ({ config }: any) => {
     process.env.ANDROID_PACKAGE_NAME?.trim() ||
     config.android?.package ||
     (isProduction ? 'com.campus.app' : 'com.campus.app.dev');
+  const googleIosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID?.trim();
+  if (
+    googleIosClientId ===
+      '1096741064465-b8ue803rbqdpcq75t1g03o5t49vi0s4q.apps.googleusercontent.com' &&
+    bundleIdentifier !== 'com.nuni.app'
+  ) {
+    throw new Error(
+      '[app.config] The registered production Google iOS client requires com.nuni.app.',
+    );
+  }
   const buildNumber =
     requireReleaseValue(
       'IOS_BUILD_NUMBER',
@@ -267,10 +277,7 @@ export default ({ config }: any) => {
       bundleIdentifier,
       buildNumber,
       infoPlist: {
-        ...googleIosInfoPlist(
-          config.ios?.infoPlist ?? {},
-          process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
-        ),
+        ...googleIosInfoPlist(config.ios?.infoPlist ?? {}, googleIosClientId),
         NSCameraUsageDescription: '需要相機權限以掃描 QR 碼和拍照',
         NSPhotoLibraryUsageDescription: '需要相簿權限以選擇照片',
         NSLocationWhenInUseUsageDescription: '需要位置權限以提供校園導航',
@@ -373,8 +380,7 @@ export default ({ config }: any) => {
           url: `https://u.expo.dev/${easProjectId}`,
         }
       : undefined,
-    runtimeVersion: {
-      policy: 'sdkVersion',
-    },
+    // A new native Google module needs a new binary/runtime before any OTA update.
+    runtimeVersion: isProduction ? 'campus-one-native-google-1' : { policy: 'sdkVersion' },
   };
 };
