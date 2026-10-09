@@ -116,7 +116,10 @@ test('prepares both shared and platform env without changing unrelated profiles 
   }
   assert.equal(prepared.build.production.environment, 'production');
   assert.equal(prepared.build.production.android.environment, 'production');
-  assert.ok(!Object.hasOwn(prepared.build.production.env, 'IOS_BUNDLE_IDENTIFIER'));
+  assert.equal(
+    prepared.build.production.env.IOS_BUNDLE_IDENTIFIER,
+    base.build.production.env.IOS_BUNDLE_IDENTIFIER,
+  );
 });
 
 test('actual dynamic Expo config reproduces the original gap and receives the prepared identity', (t) => {
@@ -385,3 +388,27 @@ test(
     }
   },
 );
+
+test('production Google client is bound to its verified iOS bundle and a new native runtime', (t) => {
+  const project = fixture(t);
+  const config = actualExpoConfig(project, base.build.production.env);
+  assert.equal(config.ios.bundleIdentifier, 'com.nuni.app');
+  assert.equal(config.android.package, 'com.nuni.app');
+  assert.equal(config.extra.eas.projectId, '8955b97c-802c-463c-bd1d-d5f02e30a966');
+  assert.equal(config.runtimeVersion, 'campus-one-native-google-1');
+  assert.equal(
+    config.ios.infoPlist.GIDClientID,
+    base.build.production.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+  );
+  assert.throws(
+    () =>
+      actualExpoConfig(project, {
+        ...base.build.production.env,
+        IOS_BUNDLE_IDENTIFIER: 'com.campus.app.dev',
+      }),
+    /requires com.nuni.app/,
+  );
+  const development = actualExpoConfig(project, { APP_ENV: 'development' });
+  assert.equal(development.ios.bundleIdentifier, 'com.campus.app.dev');
+  assert.equal(development.ios.infoPlist.GIDClientID, undefined);
+});
