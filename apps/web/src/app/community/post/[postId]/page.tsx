@@ -34,8 +34,9 @@ import {
 } from '@/lib/community/firestore';
 
 export default function PostDetailPage() {
+  const { schoolName } = resolveSchoolPageContext({});
   return (
-    <SiteShell title="貼文" subtitle="校園交流">
+    <SiteShell title="貼文" subtitle="校園交流" schoolName={schoolName}>
       <CommunityAccess>
         <PostDetailInner />
       </CommunityAccess>

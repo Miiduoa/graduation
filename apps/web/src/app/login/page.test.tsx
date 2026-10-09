@@ -11,6 +11,7 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => state.params,
 }));
 vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>Campus One</header> }));
+vi.mock('@/components/NuniSignIn', () => ({ NuniSignIn: () => <section>課程與跨校交流</section> }));
 vi.mock('@/components/PWAInstallBanner', () => ({ PWAInstallBanner: () => null }));
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => ({ user: { uid: 'one' } }) }));
 vi.mock('@/features/auth/client', () => ({
@@ -36,6 +37,12 @@ it('allows a signed-in user to reconnect to school before returning', async () =
   await waitFor(() => expect(signIn).toHaveBeenCalledWith('A1234567', 'test-only-password'));
   await waitFor(() => expect(replace).toHaveBeenCalledWith('/grades'));
   expect((screen.getByLabelText('密碼') as HTMLInputElement).value).toBe('');
+});
+it('lets a school-only user choose the platform account for a social or classroom task', () => {
+  state.params = new URLSearchParams('returnUrl=%2Fsocial');
+  render(<LoginPage />);
+  expect(replace).not.toHaveBeenCalled();
+  expect(screen.getByText('課程與跨校交流')).toBeTruthy();
 });
 it('retains the reconnection form after a rejected school login', async () => {
   state.params.set('reconnect', 'school');

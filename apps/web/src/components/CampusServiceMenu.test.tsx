@@ -4,9 +4,15 @@ import { CampusServiceMenu } from './CampusServiceMenu';
 import { AppHeader } from './AppHeader';
 
 const navigation = vi.hoisted(() => ({ pathname: '/map', search: '' }));
+const auth = vi.hoisted(() => ({
+  session: null as null | { platformAccountId: string; isPlatformOperator: boolean },
+  loading: false,
+  pendingLogout: false,
+  logout: vi.fn(),
+}));
 vi.mock('./SchoolSelector', () => ({ SchoolSelector: () => null }));
 vi.mock('@/features/nuni/Session', () => ({
-  useNuniSession: () => ({ session: null, loading: false, pendingLogout: false, logout: vi.fn() }),
+  useNuniSession: () => auth,
 }));
 vi.mock('next/navigation', () => ({
   usePathname: () => navigation.pathname,
@@ -38,6 +44,9 @@ const originalServices = [
 beforeEach(() => {
   navigation.pathname = '/map';
   navigation.search = '';
+  auth.session = null;
+  auth.loading = false;
+  auth.pendingLogout = false;
 });
 
 it('retains all existing services and search while adding a separate classroom entry', () => {
@@ -53,7 +62,8 @@ it('retains all existing services and search while adding a separate classroom e
 });
 
 it('preserves school context without copying unrelated session or return parameters', () => {
-  navigation.search = 'school=pu&schoolId=tw-pu&returnUrl=%2Fsettings&session=other';
+  navigation.search =
+    'school=pu&schoolId=tw-pu&campus=other-campus&returnUrl=%2Fsettings&session=other';
   render(<CampusServiceMenu />);
   fireEvent.click(screen.getByText('所有服務'));
   for (const link of screen.getAllByRole('link')) {
@@ -61,8 +71,22 @@ it('preserves school context without copying unrelated session or return paramet
     expect([...target.searchParams.entries()]).toEqual([
       ['school', 'pu'],
       ['schoolId', 'tw-pu'],
+      ['campus', 'other-campus'],
     ]);
   }
+});
+
+it('routes the Nuni account to its courses and hides operator links during revalidation', () => {
+  auth.session = { platformAccountId: 'a', isPlatformOperator: true };
+  const view = render(<AppHeader />);
+  expect(screen.getByRole('link', { name: '課程' }).getAttribute('href')).toBe('/classroom');
+  expect(screen.getByRole('link', { name: '我的帳號' }).getAttribute('href')).toBe('/profile');
+  expect(screen.getByRole('link', { name: '平台管理' })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '登入' })).toBeNull();
+  auth.loading = true;
+  view.rerender(<AppHeader />);
+  expect(screen.queryByRole('link', { name: '平台管理' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '我的帳號' })).toBeNull();
 });
 
 it('marks classroom children as part of the added service without selecting existing groups', () => {

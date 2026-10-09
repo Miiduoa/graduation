@@ -62,12 +62,18 @@ function dueDate(input: Record<string, unknown>): string | null {
 
 export async function handleNuni(request: NextRequest, segments: string[]): Promise<NextResponse> {
   try {
-    if (!nuniEnabled()) throw new NuniError(404, 'NOT_FOUND');
+    const path = segments.join('/');
+    if (!nuniEnabled() && path !== 'session' && path !== 'logout') {
+      // Existing sessions still need verification and revocation when courses are disabled.
+      if (request.method === 'GET' && !request.nextUrl.search) {
+        if (path === 'sign-in-options') return jsonResponse({ google: false });
+      }
+      throw new NuniError(404, 'NOT_FOUND');
+    }
     const method = request.method;
     if (method !== 'GET' && method !== 'POST') throw new NuniError(405, 'METHOD_NOT_ALLOWED');
     if (request.nextUrl.search) throw new NuniError(400, 'INVALID_INPUT');
     if (method === 'POST') requireSameOrigin(request);
-    const path = segments.join('/');
     if (method === 'GET' && path === 'sign-in-options') {
       publicOrigin();
       if (
