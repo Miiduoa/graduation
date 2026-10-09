@@ -8,11 +8,12 @@ import { CampusServiceMenu } from './CampusServiceMenu';
 import styles from '@/app/home.module.css';
 import { SchoolSelector } from './SchoolSelector';
 import { useNuniSession } from '@/features/nuni/Session';
+import headerStyles from './AppHeader.module.css';
 
 function Header() {
   const pathname = usePathname();
   const params = useSearchParams();
-  const { user, signOutUser } = useAuth();
+  const { user, loading, signOutUser } = useAuth();
   const nuni = useNuniSession();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -25,6 +26,8 @@ function Header() {
   const currentPage = `${pathname || '/'}${params?.size ? `?${params}` : ''}`;
   const loginHref =
     pathname === '/login' ? '/login' : `/login?returnUrl=${encodeURIComponent(currentPage)}`;
+  const checking = loading || nuni.loading;
+  const courseHref = nuni.session || !user ? href('/classroom') : `${href('/')}#courses`;
   return (
     <>
       <header className={styles.header}>
@@ -39,8 +42,15 @@ function Header() {
             今日
           </Link>
           <Link
-            href={user ? `${href('/')}#courses` : '/login'}
-            aria-current={pathname?.startsWith('/course/') ? 'page' : undefined}
+            href={courseHref}
+            aria-current={
+              pathname === '/classroom' ||
+              pathname?.startsWith('/classroom/course/') ||
+              pathname?.startsWith('/course/') ||
+              pathname?.startsWith('/teacher/course/')
+                ? 'page'
+                : undefined
+            }
           >
             課程
           </Link>
@@ -49,13 +59,14 @@ function Header() {
           </Link>
           <CampusServiceMenu />
         </nav>
-        <div className={styles.account}>
+        <div className={`${styles.account} ${headerStyles.account}`}>
           <SchoolSelector compact />
-          {nuni.session?.isPlatformOperator && <Link href="/admin">平台管理</Link>}
+          {!checking && nuni.session?.isPlatformOperator && <Link href="/admin">平台管理</Link>}
+          {!checking && (user || nuni.session) && <Link href="/profile">我的帳號</Link>}
           {user || nuni.session || nuni.pendingLogout ? (
             <button
               type="button"
-              disabled={busy}
+              disabled={busy || checking}
               onClick={async () => {
                 if (busy) return;
                 setBusy(true);
@@ -74,6 +85,8 @@ function Header() {
             >
               {busy ? '登出中…' : nuni.pendingLogout ? '重試登出' : '登出'}
             </button>
+          ) : checking ? (
+            <span role="status">確認帳號中…</span>
           ) : (
             <Link href={loginHref}>登入</Link>
           )}

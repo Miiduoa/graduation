@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { NuniError, nuniRecord } from '@campus/shared/src/nuni';
+import { platformDestination } from '../accountDestination';
 import {
   HANDLE,
   LOGIN_COOKIE,
@@ -42,6 +43,7 @@ export async function startGoogle(request: NextRequest): Promise<NextResponse> {
   try {
     enabled();
     requireSameOrigin(request);
+    const returnUrl = platformDestination(request.nextUrl.searchParams.get('returnUrl'));
     // Account changes must finish revoking the previous handle before another login starts.
     const previous = readSession(request);
     if (previous) {
@@ -108,6 +110,7 @@ export async function startGoogle(request: NextRequest): Promise<NextResponse> {
         state,
         verifier,
         callback,
+        returnUrl,
         expiresAt,
       },
       expiresAt,
@@ -186,7 +189,9 @@ export async function finishGoogle(request: NextRequest): Promise<NextResponse> 
       sessionHandle: result.sessionHandle,
       expiresAt: Date.now() + result.expiresInSeconds * 1000,
     };
-    const response = redirect('/classroom');
+    const response = redirect(
+      platformDestination(typeof tx.returnUrl === 'string' ? tx.returnUrl : null),
+    );
     setCookie(response, SESSION_COOKIE, session, session.expiresAt);
     setCookie(response, LOGIN_COOKIE, null);
     return response;

@@ -14,6 +14,7 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 vi.mock('@/components/AuthGuard', () => ({
+  useAuth: () => ({ user: null, loading: false, signOutUser: vi.fn() }),
   GuestAuthProvider: ({ children }: { children: unknown }) => children,
 }));
 vi.mock('./Session', () => ({
