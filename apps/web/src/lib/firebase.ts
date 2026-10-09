@@ -4,7 +4,7 @@
  * 提供與 Firebase Firestore 和 Auth 的連接
  */
 
-import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
+import { initializeApp, deleteApp, getApps, FirebaseApp } from 'firebase/app';
 import {
   getFirestore,
   collection,
@@ -31,6 +31,9 @@ import {
 } from 'firebase/firestore';
 import {
   getAuth as firebaseGetAuth,
+  initializeAuth,
+  inMemoryPersistence,
+  updateCurrentUser,
   Auth,
   onAuthStateChanged,
   signInWithEmailAndPassword,
@@ -238,10 +241,19 @@ async function signInWithUniversalDevAccount(params: {
   return signInWithCustomAuthToken(data.customToken);
 }
 
+let schoolLoginAttempt = 0;
+let schoolLoginCommit: Promise<void> = Promise.resolve();
+let lastSchoolUser: User | null = null;
+
 export async function signInWithPuStudentId(
   studentId: string,
   password: string,
+  signal?: AbortSignal,
 ): Promise<User | null> {
+  const attempt = ++schoolLoginAttempt;
+  const mainAuth = getAuth();
+  if (!mainAuth) return null;
+  const previousUser = mainAuth.currentUser;
   const response = await fetch(getCloudFunctionUrl('signInPuStudentId'), {
     method: 'POST',
     headers: {
@@ -251,6 +263,7 @@ export async function signInWithPuStudentId(
       studentId,
       password,
     }),
+    signal,
   });
 
   const data = (await parseFunctionJsonResponse(
@@ -264,7 +277,40 @@ export async function signInWithPuStudentId(
     );
   }
 
-  return signInWithCustomAuthToken(data.customToken);
+  // Firebase's network exchange cannot be cancelled. Keep it off the shared Auth
+  // instance so leaving this task cannot later replace another signed-in user.
+  signal?.throwIfAborted();
+  const stagingApp = initializeApp(getApp().options, `school-login-${attempt}`);
+  try {
+    const stagingAuth = initializeAuth(stagingApp, { persistence: inMemoryPersistence });
+    if (USE_FIREBASE_EMULATOR) {
+      connectAuthEmulator(stagingAuth, `http://${EMULATOR_HOST}:${EMULATOR_AUTH_PORT}`, {
+        disableWarnings: true,
+      });
+    }
+    const credential = await firebaseSignInWithCustomToken(stagingAuth, data.customToken);
+    const commit = schoolLoginCommit.then(async () => {
+      signal?.throwIfAborted();
+      if (
+        attempt !== schoolLoginAttempt ||
+        (mainAuth.currentUser !== previousUser &&
+          (!lastSchoolUser || mainAuth.currentUser !== lastSchoolUser))
+      )
+        throw new Error('登入狀態已變更，請重新確認。');
+      // This local commit is the cancellation boundary; never roll it back by
+      // signing out the shared Auth, which could clear a newer user's session.
+      await updateCurrentUser(mainAuth, credential.user);
+      lastSchoolUser = mainAuth.currentUser;
+      return mainAuth.currentUser;
+    });
+    schoolLoginCommit = commit.then(
+      () => undefined,
+      () => undefined,
+    );
+    return await commit;
+  } finally {
+    await deleteApp(stagingApp);
+  }
 }
 
 export async function signIn(

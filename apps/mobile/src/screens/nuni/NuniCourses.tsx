@@ -14,6 +14,7 @@ import {
 } from '@campus/shared/src/nuni';
 import { courseRoleLabels, matchesAssignmentFilter } from '@campus/shared/src/nuniCourseTasks';
 import { useNuniSession } from '../../state/nuniSession';
+import { useNuniDraftState } from '../../state/nuniDrafts';
 import { useTheme } from '../../state/theme';
 import type { NativeNuniSession } from '../../services/nuniSessionController';
 
@@ -98,10 +99,12 @@ function Section({ children }: { children: ReactNode }) {
 
 /** Retry preserves the submitted payload and key until the server confirms the outcome. */
 function MutationForm({
+  draftKey,
   fields,
   label,
   submit,
 }: {
+  draftKey: string;
   fields: Field[];
   label: string;
   submit(
@@ -111,15 +114,20 @@ function MutationForm({
   ): Promise<string | void>;
 }) {
   const theme = useTheme();
-  const [values, setValues] = useState<Record<string, string>>({});
+  const [values, setValues] = useNuniDraftState<Record<string, string>>(`${draftKey}:values`, {});
+  const [storedIntent, setStoredIntent] = useNuniDraftState<{
+    values: Record<string, string>;
+    signature: string;
+    key: string;
+  } | null>(`${draftKey}:intent`, null);
   const [busy, setBusy] = useState(false);
-  const [uncertain, setUncertain] = useState(false);
+  const [uncertain, setUncertain] = useState(!!storedIntent);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const mounted = useRef(true);
   const lock = useRef(false);
   const intent = useRef<{ values: Record<string, string>; signature: string; key: string } | null>(
-    null,
+    storedIntent,
   );
   useEffect(() => {
     mounted.current = true;
@@ -145,6 +153,7 @@ function MutationForm({
     const signature = JSON.stringify(payload);
     if (!intent.current || (!uncertain && intent.current.signature !== signature))
       intent.current = { values: payload, signature, key: randomUUID() };
+    setStoredIntent(intent.current);
     lock.current = true;
     setBusy(true);
     setError('');
@@ -157,13 +166,23 @@ function MutationForm({
       );
       if (mounted.current) {
         intent.current = null;
+        setStoredIntent(null);
         setUncertain(false);
         setNotice(typeof confirmed === 'string' ? confirmed : '已確認儲存。');
       }
     } catch (failure) {
       if (mounted.current) {
         const unknown =
-          !(failure instanceof NuniError) || failure.status === 0 || failure.status >= 500;
+          uncertain ||
+          !(failure instanceof NuniError) ||
+          failure.status === 0 ||
+          failure.status === 408 ||
+          failure.status >= 500 ||
+          failure.code === 'SESSION_CHANGED';
+        if (!unknown) {
+          intent.current = null;
+          setStoredIntent(null);
+        }
         setUncertain(unknown);
         setError(
           unknown
@@ -293,7 +312,7 @@ function CourseScope({
       ),
     [request, session.context, session.platformAccountId],
   );
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useNuniDraftState<string | null>('courses:selected', null);
   return (
     <ScrollView
       keyboardShouldPersistTaps="handled"
@@ -317,7 +336,7 @@ function CourseScope({
 function CourseList({ classes, open }: { classes: Classes; open(id: string): void }) {
   const load = useCallback(() => classes.list(), [classes]);
   const result = useLoad(load);
-  const [action, setAction] = useState<'join' | 'create' | null>(null);
+  const [action, setAction] = useNuniDraftState<'join' | 'create' | null>('courses:entry', null);
   return (
     <>
       <Copy title>我的課程</Copy>
@@ -329,6 +348,7 @@ function CourseList({ classes, open }: { classes: Classes; open(id: string): voi
       </View>
       <View style={{ display: action === 'join' ? 'flex' : 'none' }}>
         <MutationForm
+          draftKey="courses:join"
           fields={[{ name: 'code', label: '老師提供的邀請碼', max: 24, min: 6 }]}
           label="確認加入"
           submit={async ({ code }, key, active) => {
@@ -339,6 +359,7 @@ function CourseList({ classes, open }: { classes: Classes; open(id: string): voi
       </View>
       <View style={{ display: action === 'create' ? 'flex' : 'none' }}>
         <MutationForm
+          draftKey="courses:create"
           fields={[{ name: 'title', label: '課程名稱', max: 120, min: 2 }]}
           label="確認建立"
           submit={async ({ title }, key, active) => {
@@ -412,7 +433,10 @@ function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; o
     return { course, materials, assignments, quizzes };
   }, [classes, id]);
   const result = useLoad(load);
-  const [tab, setTab] = useState<'assignments' | 'materials' | 'quizzes'>('assignments');
+  const [tab, setTab] = useNuniDraftState<'assignments' | 'materials' | 'quizzes'>(
+    `course:${id}:tab`,
+    'assignments',
+  );
   const data = result.data;
   const saveActivity = (item: Activity) =>
     result.commit(
@@ -537,6 +561,7 @@ function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; o
               <Copy title>邀請修課學生</Copy>
               <Copy>邀請碼只會加入修課身分，不會取得共同授課或校方權限。</Copy>
               <MutationForm
+                draftKey={`course:${id}:owner-teacher:active:invite`}
                 fields={[]}
                 label="產生學生邀請碼"
                 submit={async (_values, key) => {
@@ -595,6 +620,7 @@ function ActivityCard({
       ) : null}
       {canSubmit ? (
         <MutationForm
+          draftKey={`course:${course.id}:${course.memberRole}:${course.state}:${assignment ? 'assignment' : 'quiz'}:${item.id}:${item.state}`}
           fields={[
             {
               name: 'body',
@@ -668,6 +694,7 @@ function TeacherReceipts({
             )}
             {course.state === 'active' ? (
               <MutationForm
+                draftKey={`course:${course.id}:${course.memberRole}:${course.state}:${assignment ? 'assignment' : 'quiz'}:${item.id}:feedback:${receipt.platformAccountId}`}
                 fields={[
                   {
                     name: 'feedback',
@@ -724,7 +751,10 @@ function CoursePublishing({
   tab: 'materials' | 'assignments' | 'quizzes';
   created(item: Activity | NuniMaterial): void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useNuniDraftState(
+    `course:${course.id}:${course.memberRole}:${course.state}:publishing-open`,
+    false,
+  );
   const kind = tab === 'materials' ? '教材' : tab === 'assignments' ? '作業' : '測驗';
   return (
     <Section>
@@ -737,6 +767,7 @@ function CoursePublishing({
           return (
             <View key={target} style={{ display: target === tab ? 'flex' : 'none' }}>
               <MutationForm
+                draftKey={`course:${course.id}:${course.memberRole}:${course.state}:publish:${target}`}
                 fields={[
                   { name: 'title', label: `${title}標題`, max: 160 },
                   {

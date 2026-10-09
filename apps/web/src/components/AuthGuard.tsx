@@ -150,7 +150,8 @@ export function AuthGuard({
 
   useEffect(() => {
     if (!loading && requireAuth && !user) {
-      const currentPath = window.location.pathname + window.location.search;
+      const currentPath =
+        window.location.pathname + window.location.search + window.location.hash;
       const loginUrl = `${redirectTo}?returnUrl=${encodeURIComponent(currentPath)}`;
       window.location.href = loginUrl;
     }

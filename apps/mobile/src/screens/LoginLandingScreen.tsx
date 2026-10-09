@@ -5,9 +5,11 @@ import { useNavigation } from '@react-navigation/native';
 import { safeNavigate } from '../utils/safeNavigate';
 import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
+import { useNuniSession } from '../state/nuniSession';
 
 export default function LoginLandingScreen() {
   const navigation = useNavigation();
+  const auth = useNuniSession();
   const s = useThemeStyleSheet(createStyles);
   return (
     <SafeAreaView testID="login-landing" style={s.page}>
@@ -27,7 +29,15 @@ export default function LoginLandingScreen() {
             style={s.button}
             onPress={() => safeNavigate(navigation, 'NuniWorkspace')}
           >
-            <Text style={s.buttonText}>登入或建立帳號</Text>
+            <Text style={s.buttonText}>
+              {auth.session && !auth.loading && !auth.error && !auth.pendingLogout
+                ? '回到我的 Campus One'
+                : auth.loading
+                  ? '確認 Campus One 帳號'
+                  : auth.error || auth.pendingLogout
+                    ? '繼續確認帳號狀態'
+                    : '登入或建立帳號'}
+            </Text>
           </Pressable>
         </View>
         <View style={s.schoolPanel}>

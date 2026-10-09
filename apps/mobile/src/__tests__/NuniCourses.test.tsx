@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { NuniError, type NuniWorkspace } from '@campus/shared/src/nuni';
 import { NuniCourses } from '../screens/nuni/NuniCourses';
+import { NuniDraftProvider } from '../state/nuniDrafts';
 
 const courseId = 'cw_11111111-1111-4111-8111-111111111111';
 const assignmentId = 'cwa_22222222-2222-4222-8222-222222222222';
@@ -433,4 +434,97 @@ it('does not restore teacher receipts when an old feedback response races a newe
   await view.findByText('你目前沒有這項操作的權限。');
   expect(view.queryByText('測試學生')).toBeNull();
   expect(view.queryByText('已回饋：稍後完成的回饋')).toBeNull();
+});
+
+it('revalidates course access while restoring same-account input and an in-flight retry intent', async () => {
+  const cache = new Map<string, unknown>();
+  const ui = () => (
+    <NuniDraftProvider cache={cache}>
+      <NuniCourses />
+    </NuniDraftProvider>
+  );
+  const view = render(ui());
+  fireEvent.press(await view.findByRole('button', { name: '服務設計課程' }));
+  fireEvent.changeText(await view.findByLabelText('作業內容：校園訪談'), '跨回前景仍保留內容');
+  const firstWrite = deferred<unknown>();
+  const authority = deferred<unknown>();
+  let writes = 0;
+  let checking = false;
+  mockRequest.mockImplementation((path, context, input) => {
+    if (path.endsWith('/submit') && ++writes === 1) return firstWrite.promise;
+    if (path === `class-workspaces/${courseId}` && checking) return authority.promise;
+    return response(path, context, input);
+  });
+  fireEvent.press(view.getByRole('button', { name: '繳交作業' }));
+  const original = mockRequest.mock.calls.find(([path]) => path.endsWith('/submit'))![2];
+  checking = true;
+  mockSession = { ...mockSession, context: 'context-revalidated' };
+  view.rerender(ui());
+  expect(view.queryByLabelText('作業內容：校園訪談')).toBeNull();
+  await act(async () => authority.resolve(course));
+  expect(view.getByLabelText('作業內容：校園訪談').props.value).toBe('跨回前景仍保留內容');
+  expect(view.getByLabelText('作業內容：校園訪談').props.editable).toBe(false);
+  fireEvent.press(view.getByRole('button', { name: '重試確認這次送出' }));
+  await view.findByText('已收到伺服器繳交紀錄。');
+  const calls = mockRequest.mock.calls.filter(([path]) => path.endsWith('/submit'));
+  expect(calls).toHaveLength(2);
+  expect(calls[1][1]).toBe('context-revalidated');
+  expect(calls[1][2]).toEqual(original);
+  await act(async () => firstWrite.resolve(assignment));
+});
+
+it.each(['student', 'archived'] as const)(
+  'does not restore a teacher publishing form after revalidation changes access to %s',
+  async (change) => {
+    course = { ...course, memberRole: 'owner-teacher' };
+    const cache = new Map<string, unknown>();
+    const ui = () => (
+      <NuniDraftProvider cache={cache}>
+        <NuniCourses />
+      </NuniDraftProvider>
+    );
+    const view = render(ui());
+    fireEvent.press(await view.findByRole('button', { name: '服務設計課程' }));
+    fireEvent.press(await view.findByRole('button', { name: '新增作業' }));
+    fireEvent.changeText(view.getByLabelText('作業標題'), '老師尚未發布的內容');
+    course =
+      change === 'student'
+        ? { ...course, memberRole: 'student' }
+        : { ...course, state: 'archived' };
+    mockSession = { ...mockSession, context: 'context-revalidated' };
+    view.rerender(ui());
+    await view.findByText('校園訪談');
+    expect(view.queryByLabelText('作業標題')).toBeNull();
+    expect(view.queryByDisplayValue('老師尚未發布的內容')).toBeNull();
+    expect(view.queryByRole('button', { name: '產生學生邀請碼' })).toBeNull();
+    if (change === 'student')
+      expect(view.getByLabelText('作業內容：校園訪談').props.value).toBe('');
+  },
+);
+
+it('does not unlock an earlier uncertain intent when a revalidated retry returns 404', async () => {
+  const cache = new Map<string, unknown>();
+  const ui = () => (
+    <NuniDraftProvider cache={cache}>
+      <NuniCourses />
+    </NuniDraftProvider>
+  );
+  const view = render(ui());
+  fireEvent.press(await view.findByRole('button', { name: '服務設計課程' }));
+  fireEvent.changeText(await view.findByLabelText('作業內容：校園訪談'), '未知收件的內容');
+  let writes = 0;
+  mockRequest.mockImplementation((path, context, input) =>
+    path.endsWith('/submit')
+      ? Promise.reject(new NuniError(++writes === 1 ? 503 : 404, 'UNAVAILABLE'))
+      : response(path, context, input),
+  );
+  fireEvent.press(view.getByRole('button', { name: '繳交作業' }));
+  await view.findByRole('button', { name: '重試確認這次送出' });
+  mockSession = { ...mockSession, context: 'context-revalidated' };
+  view.rerender(ui());
+  fireEvent.press(await view.findByRole('button', { name: '重試確認這次送出' }));
+  await view.findByText(/尚未確認這次送出結果/);
+  expect(view.getByLabelText('作業內容：校園訪談').props.editable).toBe(false);
+  const calls = mockRequest.mock.calls.filter(([path]) => path.endsWith('/submit'));
+  expect(calls[1][2]).toEqual(calls[0][2]);
 });
