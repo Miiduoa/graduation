@@ -16,9 +16,22 @@ const state = vi.hoisted(() => ({
   success: vi.fn(),
   error: vi.fn(),
   info: vi.fn(),
+  nuni: {
+    session: null as {
+      platformAccountId: string;
+      context: string;
+      isPlatformOperator: boolean;
+    } | null,
+    loading: false,
+    pendingLogout: false,
+    error: '',
+    refresh: vi.fn(),
+    logout: vi.fn(),
+  },
 }));
+vi.mock('@/features/nuni/Session', () => ({ useNuniSession: () => state.nuni }));
 vi.mock('@/components/AuthGuard', () => ({
-  useAuth: () => ({ user: state.user, loading: false }),
+  useAuth: () => ({ user: state.user, loading: false, signOutUser: state.signOut }),
 }));
 vi.mock('@/components/SiteShell', () => ({
   SiteShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main>,
@@ -45,6 +58,12 @@ beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   state.user = { uid: 'a', displayName: 'Account A', email: 'a@example.test' };
+  state.nuni.session = null;
+  state.nuni.loading = false;
+  state.nuni.pendingLogout = false;
+  state.nuni.error = '';
+  state.nuni.logout.mockResolvedValue(undefined);
+  state.signOut.mockResolvedValue(undefined);
   state.profiles = {
     a: {
       displayName: 'A private name',
@@ -230,10 +249,9 @@ it('provides an accessible sign-out button and prevents duplicate requests while
   const signOut = screen.getByRole('button', { name: '登出帳號' }) as HTMLButtonElement;
   expect(signOut.type).toBe('button');
   fireEvent.click(signOut);
-  expect(signOut.disabled).toBe(true);
-  expect((screen.getByRole('button', { name: '儲存資料' }) as HTMLButtonElement).disabled).toBe(
-    true,
-  );
+  expect(screen.getByRole('status').textContent).toContain('正在登出帳號');
+  expect(screen.queryByRole('button', { name: '儲存資料' })).toBeNull();
+  expect(screen.queryByDisplayValue('A private name')).toBeNull();
   fireEvent.click(signOut);
   expect(state.signOut).toHaveBeenCalledTimes(1);
   await act(async () => {
@@ -259,17 +277,127 @@ it('keeps account writes and sign-out unavailable to guests', async () => {
   state.user = null;
   render(<SettingsPage />);
   fireEvent.click(screen.getByRole('button', { name: '帳號' }));
-  expect((screen.getByRole('button', { name: '儲存資料' }) as HTMLButtonElement).disabled).toBe(
-    true,
-  );
+  expect(screen.queryByRole('button', { name: '儲存資料' })).toBeNull();
   expect(screen.queryByRole('button', { name: '登出帳號' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '通知' }));
-  expect((screen.getByRole('switch', { name: '推播通知' }) as HTMLButtonElement).disabled).toBe(
-    true,
-  );
-  expect((screen.getByRole('button', { name: '儲存通知設定' }) as HTMLButtonElement).disabled).toBe(
-    true,
-  );
+  expect(screen.queryByRole('switch', { name: '推播通知' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '儲存通知設定' })).toBeNull();
   expect(state.saveProfile).not.toHaveBeenCalled();
   expect(state.saveNotifications).not.toHaveBeenCalled();
+});
+
+it('offers useful account and notification next steps for a course-only account', () => {
+  state.user = null;
+  state.nuni.session = { platformAccountId: 'pa_a', context: 'a', isPlatformOperator: false };
+  render(<SettingsPage />);
+  expect(screen.getByRole('heading', { name: '校園服務資料來源' })).toBeTruthy();
+  expect(screen.getByText(/靜宜大學。.*不代表你的帳號學籍或所屬學校/)).toBeTruthy();
+  expect(screen.queryByText('目前校園')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '帳號' }));
+  expect(screen.getByText('課程帳號已登入')).toBeTruthy();
+  expect(screen.getByRole('link', { name: '課程帳號' }).getAttribute('href')).toBe(
+    '/classroom/account',
+  );
+  expect(screen.queryByText('訪客')).toBeNull();
+  expect(screen.queryByLabelText('姓名')).toBeNull();
+  expect(screen.queryByRole('button', { name: '儲存資料' })).toBeNull();
+  expect(screen.getByRole('button', { name: '登出帳號' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '通知' }));
+  expect(screen.getByText('課程通知尚未提供偏好設定')).toBeTruthy();
+  expect(screen.getByRole('link', { name: '前往課程查看更新' }).getAttribute('href')).toBe(
+    '/classroom',
+  );
+  expect(screen.queryByRole('switch', { name: '推播通知' })).toBeNull();
+  expect(screen.queryByText('登入後查看通知')).toBeNull();
+  expect(state.read).not.toHaveBeenCalled();
+});
+
+it('preserves browser appearance controls for guests and course-only accounts', () => {
+  state.user = null;
+  const { rerender } = render(<SettingsPage />);
+  fireEvent.click(screen.getByRole('button', { name: '外觀' }));
+  const picker = screen.getByLabelText('自訂色彩');
+  fireEvent.change(picker, { target: { value: '#41646a' } });
+  state.nuni.session = { platformAccountId: 'pa_a', context: 'a', isPlatformOperator: false };
+  rerender(<SettingsPage />);
+  expect((screen.getByLabelText('自訂色彩') as HTMLInputElement).value).toBe('#41646a');
+  expect(state.saveProfile).not.toHaveBeenCalled();
+});
+
+it('ends both mixed-account sessions and hides data before either logout finishes', async () => {
+  state.nuni.session = { platformAccountId: 'pa_a', context: 'a', isPlatformOperator: true };
+  let finishSchool!: () => void;
+  let finishCourse!: () => void;
+  state.signOut.mockImplementation(
+    () =>
+      new Promise<void>((resolve) => {
+        finishSchool = resolve;
+      }),
+  );
+  state.nuni.logout.mockImplementation(
+    () =>
+      new Promise<void>((resolve) => {
+        finishCourse = resolve;
+      }),
+  );
+  const { rerender } = render(<SettingsPage />);
+  await openProfile();
+  expect(screen.getByRole('link', { name: /平台管理/ })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '登出帳號' }));
+  expect(state.signOut).toHaveBeenCalledTimes(1);
+  expect(state.nuni.logout).toHaveBeenCalledTimes(1);
+  expect(screen.queryByDisplayValue('A private name')).toBeNull();
+  expect(screen.queryByRole('link', { name: /平台管理/ })).toBeNull();
+  await act(async () => finishSchool());
+  expect(screen.getByRole('status').textContent).toContain('正在登出帳號');
+  await act(async () => {
+    state.user = null;
+    state.nuni.session = null;
+    finishCourse();
+  });
+  rerender(<SettingsPage />);
+  fireEvent.click(screen.getByRole('button', { name: '帳號' }));
+  expect(screen.queryByText('課程帳號已登入')).toBeNull();
+  expect(screen.queryByDisplayValue('A private name')).toBeNull();
+  expect(state.success).not.toHaveBeenCalled();
+});
+
+it('does not claim course logout succeeded when the session reports an unconfirmed result', async () => {
+  state.user = null;
+  state.nuni.session = { platformAccountId: 'pa_a', context: 'a', isPlatformOperator: true };
+  state.nuni.logout.mockImplementation(async () => {
+    state.nuni.session = null;
+    state.nuni.pendingLogout = true;
+    state.nuni.error = '登出尚未完成，請重試以結束這次登入。';
+  });
+  render(<SettingsPage />);
+  fireEvent.click(screen.getByRole('button', { name: '帳號' }));
+  fireEvent.click(screen.getByRole('button', { name: '登出帳號' }));
+  await screen.findByText('課程帳號正在登出');
+  expect(screen.queryByRole('link', { name: /平台管理/ })).toBeNull();
+  expect(screen.queryByText('課程帳號已登入')).toBeNull();
+  expect(state.success).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '重試登出課程帳號' }));
+  expect(state.nuni.logout).toHaveBeenCalledTimes(2);
+  expect(state.signOut).not.toHaveBeenCalled();
+});
+
+it('hides course permissions on refresh and supplies recovery without account-edit placeholders', () => {
+  state.user = null;
+  state.nuni.session = { platformAccountId: 'pa_a', context: 'a', isPlatformOperator: true };
+  const { rerender } = render(<SettingsPage />);
+  fireEvent.click(screen.getByRole('button', { name: '帳號' }));
+  expect(screen.getByRole('link', { name: /平台管理/ })).toBeTruthy();
+  state.nuni.loading = true;
+  rerender(<SettingsPage />);
+  expect(screen.queryByRole('link', { name: /平台管理/ })).toBeNull();
+  expect(screen.queryByText('課程帳號已登入')).toBeNull();
+  state.nuni.loading = false;
+  state.nuni.session = null;
+  state.nuni.error = '無法確認登入狀態';
+  rerender(<SettingsPage />);
+  expect(screen.queryByLabelText('姓名')).toBeNull();
+  expect(screen.queryByRole('link', { name: '登入課程空間' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重新確認課程帳號' }));
+  expect(state.nuni.refresh).toHaveBeenCalledTimes(1);
 });

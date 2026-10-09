@@ -182,3 +182,7 @@ export function useSelectedSchool() {
   if (!context) throw new Error('useSelectedSchool must be used within SelectedSchoolProvider');
   return context;
 }
+
+export function useOptionalSelectedSchool() {
+  return useContext(SelectedSchoolContext);
+}

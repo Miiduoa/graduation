@@ -1,0 +1,39 @@
+.panel {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  padding: clamp(20px, 3vw, 32px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.panel h2 {
+  margin: 0;
+  font-size: var(--font-h2-size);
+}
+.panel p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.label {
+  font-size: var(--font-label-size);
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+}
+.permission {
+  width: 100%;
+  display: grid;
+  gap: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.permission a {
+  color: var(--brand);
+}

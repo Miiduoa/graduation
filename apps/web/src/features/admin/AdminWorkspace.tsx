@@ -18,6 +18,7 @@ import {
 import { useAdminMutation, useAdminResource } from './hooks';
 import { AdminReports } from './AdminReports';
 import { AdminBoards } from './AdminBoards';
+import { AdminOverview } from './AdminOverview';
 import common from '@/app/servicePages.module.css';
 import styles from './Admin.module.css';
 
@@ -74,7 +75,9 @@ export function AdminWorkspace() {
 }
 
 function Workspace({ context, suspended }: { context: string; suspended: boolean }) {
-  const [tab, setTab] = useState<'schools' | 'boards' | 'reports' | 'audit'>('schools');
+  const [tab, setTab] = useState<'overview' | 'schools' | 'boards' | 'reports' | 'audit'>(
+    'overview',
+  );
   return (
     <>
       {suspended && (
@@ -93,13 +96,17 @@ function Workspace({ context, suspended }: { context: string; suspended: boolean
               <a className={styles.link} href="/auth/platform/ops">
                 開啟完整管理台
               </a>
-              <Link className={styles.link} href="/lms-admin">
-                課程系統管理
-              </Link>
             </div>
           </div>
           <p className={styles.muted}>人員、店家與課班掛靠可在完整管理台繼續操作。</p>
           <nav className={styles.tabs} aria-label="管理項目">
+            <Button
+              variant={tab === 'overview' ? 'primary' : 'default'}
+              aria-pressed={tab === 'overview'}
+              onClick={() => setTab('overview')}
+            >
+              權責與待辦
+            </Button>
             <Button
               variant={tab === 'schools' ? 'primary' : 'default'}
               aria-pressed={tab === 'schools'}
@@ -129,7 +136,9 @@ function Workspace({ context, suspended }: { context: string; suspended: boolean
               操作紀錄
             </Button>
           </nav>
-          {tab === 'schools' ? (
+          {tab === 'overview' ? (
+            <AdminOverview context={context} suspended={suspended} onNavigate={setTab} />
+          ) : tab === 'schools' ? (
             <Schools context={context} suspended={suspended} />
           ) : tab === 'boards' ? (
             <AdminBoards context={context} suspended={suspended} />
