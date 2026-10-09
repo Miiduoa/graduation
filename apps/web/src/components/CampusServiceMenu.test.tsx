@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { CampusServiceMenu } from './CampusServiceMenu';
 import { AppHeader } from './AppHeader';
@@ -44,6 +44,7 @@ const originalServices = [
 beforeEach(() => {
   navigation.pathname = '/map';
   navigation.search = '';
+  window.history.replaceState({}, '', '/map');
   auth.session = null;
   auth.loading = false;
   auth.pendingLogout = false;
@@ -109,6 +110,35 @@ it('keeps the Campus One header and original school login around the complete sh
     '/login?returnUrl=%2Fmap%3FschoolId%3Dtw-pu',
   );
   expect(screen.getByRole('link', { name: '今日' }).getAttribute('href')).toBe('/?schoolId=tw-pu');
+});
+
+it.each(['/login', '/classroom/login', '/admin/login'])(
+  'does not offer a second guest login from %s that would replace the existing destination',
+  (pathname) => {
+    navigation.pathname = pathname;
+    navigation.search = 'returnUrl=%2Fadmin&issue=cancelled';
+    render(<AppHeader />);
+    expect(screen.queryByRole('link', { name: '登入' })).toBeNull();
+    expect(screen.getByRole('navigation', { name: '主要導覽' })).toBeTruthy();
+  },
+);
+
+it('keeps the linked course assignment and query when using the header login', () => {
+  navigation.pathname = '/classroom/course/cw_11111111-1111-4111-8111-111111111111';
+  navigation.search = 'view=assignments';
+  const destination = `${navigation.pathname}?${navigation.search}#assignment-cwa_22222222-2222-4222-8222-222222222222`;
+  window.history.replaceState({}, '', destination);
+  render(<AppHeader />);
+  const login = screen.getByRole('link', { name: '登入' }) as HTMLAnchorElement;
+  expect(new URL(login.href).pathname).toBe('/login');
+  expect(new URL(login.href).searchParams.get('returnUrl')).toBe(destination);
+
+  const nextDestination = `${navigation.pathname}?${navigation.search}#assignment-cwa_33333333-3333-4333-8333-333333333333`;
+  act(() => {
+    window.history.replaceState({}, '', nextDestination);
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  expect(new URL(login.href).searchParams.get('returnUrl')).toBe(nextDestination);
 });
 
 it('closes on Escape and returns keyboard focus to the service control', () => {

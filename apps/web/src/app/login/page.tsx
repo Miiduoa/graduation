@@ -31,42 +31,84 @@ function loginDestination(value: string | null): string {
   }
 }
 
-function LoginForm() {
+function LoginForm({
+  destination,
+  reconnect,
+  issue,
+}: {
+  destination: string;
+  reconnect: boolean;
+  issue: boolean;
+}) {
   const router = useRouter();
-  const params = useSearchParams();
-  const { user } = useAuth();
-  const reconnect = params.get('reconnect') === 'school';
-  const destination = loginDestination(params.get('redirect') || params.get('returnUrl'));
+  const { user, loading: schoolLoading } = useAuth();
   const [studentId, setStudentId] = useState('');
   const [password, setPassword] = useState('');
-  const busyRef = useRef(false);
+  const busyRef = useRef<'school' | 'platform' | null>(null);
+  const returning = useRef(false);
+  const request = useRef<AbortController | null>(null);
   const [busy, setBusy] = useState(false);
+  const [platformBusy, setPlatformBusy] = useState(false);
   const [error, setError] = useState('');
   const schoolRequired = reconnect || platformDestination(destination) !== destination;
   const schoolAvailable = isFirebaseConfigured();
   useEffect(() => {
-    if (user && schoolRequired && !reconnect) router.replace(destination);
-  }, [user, router, destination, reconnect, schoolRequired]);
+    const restore = () => {
+      if (busyRef.current === 'platform') {
+        busyRef.current = null;
+        setPlatformBusy(false);
+      }
+    };
+    window.addEventListener('pageshow', restore);
+    return () => {
+      request.current?.abort();
+      window.removeEventListener('pageshow', restore);
+    };
+  }, []);
+  useEffect(() => {
+    if (
+      !schoolLoading &&
+      !busyRef.current &&
+      !returning.current &&
+      user &&
+      schoolRequired &&
+      !reconnect
+    ) {
+      returning.current = true;
+      router.replace(destination);
+    }
+  }, [user, schoolLoading, router, destination, reconnect, schoolRequired]);
   async function login(event: FormEvent) {
     event.preventDefault();
-    if (busyRef.current) return;
+    if (busyRef.current || returning.current || schoolLoading) return;
     setError('');
     if (!isFirebaseConfigured()) {
       setError('登入服務尚未連線，請稍後再試。');
       return;
     }
-    busyRef.current = true;
+    busyRef.current = 'school';
+    const controller = new AbortController();
+    request.current = controller;
     setBusy(true);
     try {
-      const authenticated = await signInWithPuStudentId(studentId.trim().toUpperCase(), password);
+      const authenticated = await signInWithPuStudentId(
+        studentId.trim().toUpperCase(),
+        password,
+        controller.signal,
+      );
+      if (controller.signal.aborted) return;
       if (!authenticated) throw new Error('登入服務尚未連線。');
       setPassword('');
+      returning.current = true;
       router.replace(destination);
     } catch {
+      if (controller.signal.aborted) return;
       setError('登入失敗。請確認學號與密碼，或稍後再試。');
     } finally {
-      busyRef.current = false;
-      setBusy(false);
+      if (!controller.signal.aborted) {
+        busyRef.current = null;
+        setBusy(false);
+      }
     }
   }
   return (
@@ -79,7 +121,19 @@ function LoginForm() {
       }
     >
       <div className={styles.loginLayout}>
-        {!schoolRequired && <NuniSignIn returnUrl={destination} issue={params.has('issue')} />}
+        {!schoolRequired && (
+          <NuniSignIn
+            returnUrl={destination}
+            issue={issue}
+            disabled={busy}
+            onStart={() => {
+              if (busyRef.current) return false;
+              busyRef.current = 'platform';
+              setPlatformBusy(true);
+              return true;
+            }}
+          />
+        )}
         <section className={styles.loginHelp} aria-label="學校校務登入">
           <h2>學校校務資料</h2>
           <p>查看學校提供的課表、成績與個人校務紀錄。目前支援靜宜大學 e 校園帳號。</p>
@@ -98,7 +152,7 @@ function LoginForm() {
                   autoComplete="username"
                   autoCapitalize="characters"
                   spellCheck={false}
-                  disabled={busy}
+                  disabled={busy || platformBusy || schoolLoading}
                 />
                 <Input
                   id="password"
@@ -109,7 +163,7 @@ function LoginForm() {
                   onChange={(e) => setPassword(e.target.value)}
                   required
                   autoComplete="current-password"
-                  disabled={busy}
+                  disabled={busy || platformBusy || schoolLoading}
                 />
                 {error && (
                   <p role="alert" className={styles.errorNotice}>
@@ -121,9 +175,9 @@ function LoginForm() {
                   type="submit"
                   fullWidth
                   loading={busy}
-                  disabled={busy || !studentId.trim() || !password}
+                  disabled={busy || platformBusy || schoolLoading || !studentId.trim() || !password}
                 >
-                  {busy ? '連線中…' : '連線學校帳號'}
+                  {schoolLoading ? '正在確認學校帳號…' : busy ? '連線中…' : '連線學校帳號'}
                 </Button>
               </form>
             </details>
@@ -132,7 +186,9 @@ function LoginForm() {
               學校登入服務尚未開通。你仍可使用課程空間與公開交流；校務資料請先由學校原有服務查詢。
             </p>
           )}
-          <p>請輸入你登入 e 校園時使用的資料。若忘記密碼，請透過學校的帳號服務處理。</p>
+          {schoolAvailable && (
+            <p>請輸入你登入 e 校園時使用的資料。若忘記密碼，請透過學校的帳號服務處理。</p>
+          )}
           <div className={styles.helpLinks}>
             <Link href="/privacy">
               了解資料使用方式 <span aria-hidden="true">↗</span>
@@ -154,6 +210,19 @@ function LoginForm() {
     </SiteShell>
   );
 }
+function LoginRoute() {
+  const params = useSearchParams();
+  const destination = loginDestination(params.get('redirect') || params.get('returnUrl'));
+  const reconnect = params.get('reconnect') === 'school';
+  return (
+    <LoginForm
+      key={`${destination}:${reconnect}`}
+      destination={destination}
+      reconnect={reconnect}
+      issue={params.has('issue')}
+    />
+  );
+}
 export default function LoginPage() {
   return (
     <Suspense
@@ -165,7 +234,7 @@ export default function LoginPage() {
         </SiteShell>
       }
     >
-      <LoginForm />
+      <LoginRoute />
     </Suspense>
   );
 }

@@ -11,6 +11,7 @@ import {
   type NuniMerchantApplicationInput,
 } from '@campus/shared/src/nuniMerchant';
 import { useNuniSession } from '../../state/nuniSession';
+import { useNuniDraftState } from '../../state/nuniDrafts';
 import { theme } from '../../ui/theme';
 import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 
@@ -113,8 +114,11 @@ function MerchantAccount({ context }: { context: string }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [invalidSession, setInvalidSession] = useState(false);
-  const [draft, setDraft] = useState<Draft>(emptyDraft);
-  const [pending, setPending] = useState<NuniMerchantApplicationInput | null>(null);
+  const [draft, setDraft] = useNuniDraftState<Draft>('merchant-application:draft', emptyDraft);
+  const [pending, setPending] = useNuniDraftState<NuniMerchantApplicationInput | null>(
+    'merchant-application:pending',
+    null,
+  );
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [submitError, setSubmitError] = useState('');
@@ -126,8 +130,6 @@ function MerchantAccount({ context }: { context: string }) {
     ++generation.current;
     setInvalidSession(true);
     setOverview(null);
-    setDraft(emptyDraft());
-    setPending(null);
     void refresh();
   }, [refresh]);
   const load = useCallback(async () => {
