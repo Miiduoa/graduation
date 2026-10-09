@@ -29,7 +29,10 @@ const state = vi.hoisted(() => ({
     logout: vi.fn(),
   },
 }));
-vi.mock('@/features/nuni/Session', () => ({ useNuniSession: () => state.nuni }));
+vi.mock('@/features/nuni/Session', () => ({
+  useNuniSession: () => state.nuni,
+  browserRequest: vi.fn(async () => ({ memberships: [] })),
+}));
 vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({ user: state.user, loading: false, signOutUser: state.signOut }),
 }));
@@ -294,8 +297,8 @@ it('offers useful account and notification next steps for a course-only account'
   expect(screen.getByText(/靜宜大學。.*不代表你的帳號學籍或所屬學校/)).toBeTruthy();
   expect(screen.queryByText('目前校園')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '帳號' }));
-  expect(screen.getByText('課程帳號已登入')).toBeTruthy();
-  expect(screen.getByRole('link', { name: '課程帳號' }).getAttribute('href')).toBe(
+  expect(screen.getByText('Campus One 帳號已登入')).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Campus One 帳號' }).getAttribute('href')).toBe(
     '/classroom/account',
   );
   expect(screen.queryByText('訪客')).toBeNull();
@@ -357,7 +360,7 @@ it('ends both mixed-account sessions and hides data before either logout finishe
   });
   rerender(<SettingsPage />);
   fireEvent.click(screen.getByRole('button', { name: '帳號' }));
-  expect(screen.queryByText('課程帳號已登入')).toBeNull();
+  expect(screen.queryByText('Campus One 帳號已登入')).toBeNull();
   expect(screen.queryByDisplayValue('A private name')).toBeNull();
   expect(state.success).not.toHaveBeenCalled();
 });
@@ -373,11 +376,11 @@ it('does not claim course logout succeeded when the session reports an unconfirm
   render(<SettingsPage />);
   fireEvent.click(screen.getByRole('button', { name: '帳號' }));
   fireEvent.click(screen.getByRole('button', { name: '登出帳號' }));
-  await screen.findByText('課程帳號正在登出');
+  await screen.findByText('Campus One 帳號正在登出');
   expect(screen.queryByRole('link', { name: /平台管理/ })).toBeNull();
-  expect(screen.queryByText('課程帳號已登入')).toBeNull();
+  expect(screen.queryByText('Campus One 帳號已登入')).toBeNull();
   expect(state.success).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: '重試登出課程帳號' }));
+  fireEvent.click(screen.getByRole('button', { name: '重試登出 Campus One 帳號' }));
   expect(state.nuni.logout).toHaveBeenCalledTimes(2);
   expect(state.signOut).not.toHaveBeenCalled();
 });
@@ -391,13 +394,13 @@ it('hides course permissions on refresh and supplies recovery without account-ed
   state.nuni.loading = true;
   rerender(<SettingsPage />);
   expect(screen.queryByRole('link', { name: /平台管理/ })).toBeNull();
-  expect(screen.queryByText('課程帳號已登入')).toBeNull();
+  expect(screen.queryByText('Campus One 帳號已登入')).toBeNull();
   state.nuni.loading = false;
   state.nuni.session = null;
   state.nuni.error = '無法確認登入狀態';
   rerender(<SettingsPage />);
   expect(screen.queryByLabelText('姓名')).toBeNull();
   expect(screen.queryByRole('link', { name: '登入課程空間' })).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '重新確認課程帳號' }));
+  fireEvent.click(screen.getByRole('button', { name: '重新確認 Campus One 帳號' }));
   expect(state.nuni.refresh).toHaveBeenCalledTimes(1);
 });

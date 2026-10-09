@@ -4,7 +4,7 @@
 
 課程、作業與校園生活。學生從待辦回到課程，老師查看繳交並留下回饋；平台管理員處理學校接入與公開交流。
 
-[開啟網站](https://nuni.tw) · [角色與使用流程](docs/ROLE_WORKFLOWS.md) · [部署版本紀錄](docs/PLATFORM_RELEASE.md) · [原生版本發布條件](docs/STORE_RELEASE.md)
+[開啟網站](https://nuni.tw) · [角色與使用流程](docs/ROLE_WORKFLOWS.md) · [帳號與學校資格](docs/ACCOUNT_AND_SCHOOL_ACCESS.md) · [部署版本紀錄](docs/PLATFORM_RELEASE.md) · [原生版本發布條件](docs/STORE_RELEASE.md)
 
 ## 使用流程
 
@@ -19,7 +19,7 @@
 
 ## 帳號與資料來源
 
-- **Nuni 帳號**：課程空間、公開跨校交流、平台管理。課程權限依各課成員資格判定；平台管理員也不會自動加入私人課程。
+- **Campus One 帳號**：App／Web 共用的平台登入，用於課程空間、公開跨校交流、各校資格申請與店家合作。課程權限依各課成員資格判定；平台管理員也不會自動加入私人課程。
 - **學校帳號**：學校提供的課表、成績及校務紀錄。與課程空間的資料分開；尚未接通的服務會明確提示。
 - **訪客**：可瀏覽公開服務並調整本機外觀。登入後返回原本要處理的工作。
 
@@ -29,7 +29,7 @@
 
 Web 已有正式站；每次部署的來源版本與驗收範圍記錄在 [PLATFORM_RELEASE](docs/PLATFORM_RELEASE.md)。分支內的新功能需要另外驗收與部署，不能從網站可開啟或本機測試通過推定已上線。
 
-原生 App、學校資料整合與課程空間並非全部使用同一套帳號後端。原生 Nuni session、正式學校權限接軌、實機驗證與商店簽署仍須依 [STORE_RELEASE](docs/STORE_RELEASE.md) 完成。課程交接、共同授課指派等治理工作另見 [角色流程與缺口](docs/ROLE_WORKFLOWS.md)。
+App 與 Web 的 Campus One 帳號已接入同一個 Nuni session 契約；校務連線仍保留各自後端。原生 Google 正式配置、正式學校權限接軌、實機驗證與商店簽署仍須依 [STORE_RELEASE](docs/STORE_RELEASE.md) 完成。課程交接、共同授課指派等治理工作另見 [角色流程與缺口](docs/ROLE_WORKFLOWS.md)。
 
 ## 專案結構
 

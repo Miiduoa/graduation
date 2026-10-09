@@ -12,7 +12,7 @@ export function NuniSignIn({ returnUrl, issue = false }: { returnUrl?: string; i
   const [attempt, setAttempt] = useState(0);
   const destination = platformDestination(returnUrl);
   useEffect(() => {
-    if (auth.session || auth.pendingLogout || auth.loading) return;
+    if (auth.session || auth.pendingLogout || auth.loading || auth.error) return;
     let active = true;
     void browserRequest('sign-in-options')
       .then((value) => {
@@ -27,12 +27,16 @@ export function NuniSignIn({ returnUrl, issue = false }: { returnUrl?: string; i
     return () => {
       active = false;
     };
-  }, [auth.session, auth.pendingLogout, auth.loading, attempt]);
+  }, [auth.session, auth.pendingLogout, auth.loading, auth.error, attempt]);
 
   return (
     <section className={styles.loginHelp} aria-labelledby="platform-sign-in-title">
-      <h2 id="platform-sign-in-title">課程與跨校交流</h2>
-      <p>使用你的 Nuni 帳號，繼續課程、作業與公開看板。</p>
+      <h2 id="platform-sign-in-title">登入或建立 Campus One 帳號</h2>
+      <p>使用 Campus One 帳號，繼續課程、作業與公開看板。</p>
+      <p>
+        第一次使用？透過 Google 繼續即可建立帳號，不必另外設定密碼。之後請使用同一個 Google
+        帳號登入。
+      </p>
       {issue && <p role="alert">這次登入沒有完成，請重新登入。</p>}
       {auth.loading ? (
         <p role="status">正在確認帳號…</p>
@@ -43,12 +47,22 @@ export function NuniSignIn({ returnUrl, issue = false }: { returnUrl?: string; i
             重試登出
           </button>
         </div>
+      ) : auth.error ? (
+        <div role="alert">
+          <p>{auth.error}</p>
+          <button className="btn" onClick={() => void auth.refresh()}>
+            重新確認帳號
+          </button>
+        </div>
       ) : auth.session ? (
         <>
-          <p>你已登入 Nuni 帳號。</p>
+          <p>你已登入 Campus One 帳號。</p>
           <Link className="btn primary" href={destination}>
             繼續使用
           </Link>
+          <button className="btn" onClick={() => void auth.logout()}>
+            登出並切換帳號
+          </button>
         </>
       ) : available ? (
         <form
@@ -56,7 +70,7 @@ export function NuniSignIn({ returnUrl, issue = false }: { returnUrl?: string; i
           method="post"
         >
           <button className="btn primary" type="submit">
-            使用 Google 帳號登入
+            使用 Google 帳號繼續
           </button>
         </form>
       ) : available === null ? (
@@ -75,7 +89,10 @@ export function NuniSignIn({ returnUrl, issue = false }: { returnUrl?: string; i
           </button>
         </div>
       )}
-      <p>課程身分依每門課的成員資格決定；校務資料需要學校另行確認。</p>
+      <p>
+        學生、教師與店家共用這個帳號入口。店家身分須另行申請及審核；課程身分依每門課的成員資格決定。Google
+        登入不會自動取得校籍或管理權限。
+      </p>
       <p>
         <Link href="/privacy">隱私政策</Link> · <Link href="/terms">服務條款</Link>
       </p>

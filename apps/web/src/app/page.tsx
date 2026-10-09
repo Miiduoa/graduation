@@ -166,7 +166,7 @@ export default function HomePage() {
             {blocked ? (
               <section className={styles.focus} aria-labelledby="session-title">
                 <h2 id="session-title">
-                  {nuni.pendingLogout ? '登出尚未完成' : '暫時無法確認課程帳號'}
+                  {nuni.pendingLogout ? '登出尚未完成' : '暫時無法確認 Campus One 帳號'}
                 </h2>
                 <p role="alert">{nuni.error || '請重試登出，再切換帳號。'}</p>
                 <div className={styles.focusActions}>
@@ -234,7 +234,7 @@ export default function HomePage() {
                           : context
                             ? '向老師取得邀請碼後加入課程；授課者也可以建立課程。'
                             : '前往課程空間加入課程，或查看學校課表。'
-                      : '使用課程帳號登入，查看老師的教材、作業與回饋。'}
+                      : '使用 Campus One 帳號登入，查看老師的教材、作業與回饋。'}
                   </p>
                 )}
                 <div className={styles.focusActions}>
@@ -260,7 +260,7 @@ export default function HomePage() {
                           ? context || !data?.courses.length
                             ? '進入課程空間'
                             : '查看我的課程'
-                          : '登入課程帳號'}{' '}
+                          : '登入 Campus One 帳號'}{' '}
                     <span aria-hidden>→</span>
                   </Link>
                   <Link className={styles.secondary} href="/timetable">

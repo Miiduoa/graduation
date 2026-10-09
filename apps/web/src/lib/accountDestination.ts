@@ -13,6 +13,9 @@ export function platformDestination(value?: string | null): string {
       '/classroom',
       '/classroom/account',
       '/admin',
+      '/merchant',
+      '/merchant/apply',
+      '/merchant/workspace',
     ].includes(path) ||
     /^\/classroom\/course\/cw_[0-9a-f-]{36}$/.test(path)
   )

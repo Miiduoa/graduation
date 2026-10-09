@@ -150,7 +150,7 @@ export default function ProfilePage() {
               </h2>
               <p>
                 {hasCourseAccount
-                  ? '課程帳號已登入。若要查看學校提供的課表、成績與校園個人資料，請另外連線校園帳號。'
+                  ? 'Campus One 帳號已登入。若要查看學校提供的課表、成績與校園個人資料，請另外連線校園帳號。'
                   : '使用你的學校帳號，查看個人資料與校務紀錄。'}
               </p>
               <Link className="btn primary" href="/login?reconnect=school&returnUrl=%2Fprofile">
