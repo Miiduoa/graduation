@@ -294,8 +294,8 @@ function NuniContent() {
   else if (pathname === '/classroom/account')
     content = (
       <section className={styles.panel}>
-        <h1>課程空間帳號</h1>
-        <p className={styles.muted}>你目前使用 Nuni 帳號登入課程空間。</p>
+        <h1>Campus One 帳號</h1>
+        <p className={styles.muted}>你目前使用 Campus One 帳號登入課程空間。</p>
         <p>校園個人資料與設定仍可從「所有服務」開啟，可在帳號設定查看各項登入狀態。</p>
         <p>課程身分由各課程管理；學校權限由學校核發。</p>
         <Link className={styles.button} href="/classroom">

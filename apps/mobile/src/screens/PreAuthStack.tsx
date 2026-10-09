@@ -3,6 +3,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import LoginLandingScreen from './LoginLandingScreen';
 import { SSOLoginScreen } from './SSOLoginScreen';
+import { NuniWorkspaceScreen } from './NuniWorkspaceScreen';
 import type { PreAuthStackParamList } from './preAuthTypes';
 import { createStackScreenOptions } from '../ui/navigationTheme';
 import { useThemeMode } from '../state/theme';
@@ -10,7 +11,7 @@ import { useThemeMode } from '../state/theme';
 const Stack = createNativeStackNavigator<PreAuthStackParamList, undefined>();
 
 /**
- * 未登入時的根導航：Landing → 正式學校登入（與 MeStack 內 SSOLogin 同一元件）
+ * 平台帳號與學校帳號各自驗證，與 MeStack 共用同一入口。
  */
 export function PreAuthStack() {
   useThemeMode();
@@ -27,6 +28,11 @@ export function PreAuthStack() {
         options={{ headerShown: false }}
       />
       <Stack.Screen name="SSOLogin" component={SSOLoginScreen} options={{ title: '學校登入' }} />
+      <Stack.Screen
+        name="NuniWorkspace"
+        component={NuniWorkspaceScreen}
+        options={{ title: 'Campus One' }}
+      />
     </Stack.Navigator>
   );
 }

@@ -1,8 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,24 +9,17 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import Constants from 'expo-constants';
-import * as WebBrowser from 'expo-web-browser';
-import { exchangeCodeAsync } from 'expo-auth-session';
-import { discovery, useIdTokenAuthRequest } from 'expo-auth-session/providers/google';
-import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
+import { useFocusEffect, useNavigation, type NavigationProp } from '@react-navigation/native';
 
 import { PROVIDENCE_UNIVERSITY_SCHOOL_ID } from '@campus/shared/src';
 
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { signInWithStudentId, type LoginProgress } from '../services/studentIdAuth';
-import { getAuthInstance } from '../firebase';
 import { Screen, Button, AnimatedCard } from '../ui/components';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
-
-WebBrowser.maybeCompleteAuthSession();
 
 type LoginStep =
   | 'idle'
@@ -41,96 +33,18 @@ type LoginStep =
 type SSOLoginScreenProps = {
   navigation?: {
     goBack?: () => void;
+    navigate?: (screen: 'NuniWorkspace') => void;
   };
 };
 
-type GoogleClientIds = { web: string; ios: string; android: string };
-type LoginAttempt = { provider: 'school' | 'google' };
-
-function ConfiguredGoogleLoginButton({
-  clientIds,
-  busy,
-  disabled,
-  onStart,
-  onCancel,
-  onError,
-  onIdToken,
-}: {
-  clientIds: GoogleClientIds;
-  busy: boolean;
-  disabled: boolean;
-  onStart: () => boolean;
-  onCancel: () => void;
-  onError: () => void;
-  onIdToken: (idToken: string) => Promise<void>;
-}) {
-  const [request, , promptAsync] = useIdTokenAuthRequest({
-    webClientId: clientIds.web || undefined,
-    iosClientId: clientIds.ios || undefined,
-    androidClientId: clientIds.android || undefined,
-    shouldAutoExchangeCode: false,
-  });
-  const pending = useRef(false);
-  const mounted = useRef(true);
-
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
-
-  async function start() {
-    if (!mounted.current || !request || busy || disabled || pending.current) return;
-    if (!onStart()) return;
-    pending.current = true;
-    try {
-      const result = await promptAsync();
-      if (!mounted.current) return;
-      if (result.type === 'cancel' || result.type === 'dismiss') {
-        onCancel();
-        return;
-      }
-      if (result.type !== 'success') throw new Error('Google authorization did not complete');
-
-      let idToken = result.params.id_token;
-      if (!idToken && result.params.code) {
-        if (!request.codeVerifier) throw new Error('Missing Google authorization verifier');
-        const authentication = await exchangeCodeAsync(
-          {
-            clientId: request.clientId,
-            code: result.params.code,
-            redirectUri: request.redirectUri,
-            extraParams: { code_verifier: request.codeVerifier },
-          },
-          discovery,
-        );
-        idToken = authentication.idToken ?? '';
-      }
-      if (typeof idToken !== 'string' || !idToken) throw new Error('Missing Google ID token');
-      if (mounted.current) await onIdToken(idToken);
-    } catch {
-      if (mounted.current) onError();
-    } finally {
-      pending.current = false;
-    }
-  }
-
-  return (
-    <Button
-      text={busy ? 'Google 登入處理中…' : request ? '使用 Google 繼續' : '正在準備 Google 登入…'}
-      kind="secondary"
-      onPress={() => void start()}
-      disabled={busy || disabled || !request}
-    />
-  );
-}
+type LoginAttempt = { provider: 'school' | 'platform' };
 
 export function SSOLoginScreen(props: SSOLoginScreenProps) {
   const styles = useThemeStyleSheet(createStyles);
   const bottomPadding = useTabBarContentBottomPadding();
   const passwordInput = useRef<TextInput>(null);
-  const nav = props?.navigation;
+  const routeNavigation = useNavigation<NavigationProp<Record<string, undefined>>>();
+  const nav = props?.navigation ?? routeNavigation;
   const auth = useAuth();
   const { school } = useSchool();
 
@@ -140,7 +54,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
   const [stageDetail, setStageDetail] = useState('確認學校帳號');
   const [error, setError] = useState<string | null>(null);
   const [isRetryable, setIsRetryable] = useState(false);
-  const [googleBusy, setGoogleBusy] = useState(false);
+  const [leavingForPlatform, setLeavingForPlatform] = useState(false);
   const mounted = useRef(true);
   const activeAttempt = useRef<LoginAttempt | null>(null);
   const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -183,21 +97,20 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
     }, 250);
   }
 
-  const googleIds = useMemo(() => {
-    const extra = (Constants.expoConfig?.extra ?? {}) as Record<string, unknown>;
-    return {
-      web: typeof extra.googleWebClientId === 'string' ? extra.googleWebClientId.trim() : '',
-      ios: typeof extra.googleIosClientId === 'string' ? extra.googleIosClientId.trim() : '',
-      android:
-        typeof extra.googleAndroidClientId === 'string' ? extra.googleAndroidClientId.trim() : '',
-    };
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      if (activeAttempt.current?.provider === 'platform') {
+        activeAttempt.current = null;
+        setLeavingForPlatform(false);
+      }
+    }, []),
+  );
 
-  const googleClientId = Platform.select({
-    ios: googleIds.ios,
-    android: googleIds.android,
-    default: googleIds.web,
-  });
+  const openPlatformAccount = () => {
+    if (!nav.navigate || !beginAttempt('platform')) return;
+    setLeavingForPlatform(true);
+    nav.navigate('NuniWorkspace');
+  };
 
   const schoolName = useMemo(
     () => (school.id === PROVIDENCE_UNIVERSITY_SCHOOL_ID ? school.name : '靜宜大學'),
@@ -269,59 +182,13 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
     setIsRetryable(false);
   };
 
-  const handleGoogleStart = () => {
-    if (!beginAttempt('google')) return false;
-    setError(null);
-    setIsRetryable(false);
-    setGoogleBusy(true);
-    return true;
-  };
-
-  const handleGoogleCancel = () => {
-    if (!mounted.current || activeAttempt.current?.provider !== 'google') return;
-    activeAttempt.current = null;
-    setGoogleBusy(false);
-  };
-
-  const handleGoogleError = () => {
-    if (!mounted.current || activeAttempt.current?.provider !== 'google') return;
-    activeAttempt.current = null;
-    setError('Google 登入未完成，請稍後重試或改用學校帳號。');
-    setIsRetryable(true);
-    setStep('error');
-    setGoogleBusy(false);
-  };
-
-  const handleGoogleLogin = async (idToken: string) => {
-    const attempt = activeAttempt.current;
-    if (!attempt || attempt.provider !== 'google' || !isCurrent(attempt)) return;
-    try {
-      const cred = GoogleAuthProvider.credential(idToken);
-      await signInWithCredential(getAuthInstance(), cred);
-      if (!isCurrent(attempt)) return;
-      await auth.refreshProfile();
-      if (!isCurrent(attempt)) return;
-      void import('../services/companionEngine')
-        .then((m) => m.recordCompanionFeatureSignal('sso_login'))
-        .catch(() => undefined);
-      setStep('success');
-      showSuccess(attempt, '已使用 Google 帳號登入');
-    } catch (loginError) {
-      if (!isCurrent(attempt)) return;
-      console.warn('Google login error:', loginError);
-      handleGoogleError();
-    } finally {
-      if (isCurrent(attempt)) setGoogleBusy(false);
-    }
-  };
-
   const isBusy =
     step === 'authenticating' ||
     step === 'syncingCampus' ||
     step === 'syncingTronClass' ||
     step === 'linking';
 
-  const formLocked = isBusy || googleBusy || step === 'success';
+  const formLocked = isBusy || leavingForPlatform || step === 'success';
 
   return (
     <Screen noPadding>
@@ -431,25 +298,15 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
           </View>
         ) : null}
 
-        <AnimatedCard title="Google 登入" subtitle="使用 Google 帳號進入 Campus One">
-          {googleClientId ? (
-            <ConfiguredGoogleLoginButton
-              key={googleClientId}
-              clientIds={googleIds}
-              busy={googleBusy}
-              disabled={isBusy || step === 'success'}
-              onStart={handleGoogleStart}
-              onCancel={handleGoogleCancel}
-              onError={handleGoogleError}
-              onIdToken={handleGoogleLogin}
-            />
-          ) : (
-            <Button text="Google 登入暫時無法使用" kind="secondary" disabled />
-          )}
+        <AnimatedCard title="Campus One 帳號" subtitle="和網頁版使用同一個帳號">
+          <Button
+            text="前往 Campus One 帳號"
+            kind="secondary"
+            onPress={openPlatformAccount}
+            disabled={formLocked}
+          />
           <Text style={styles.note}>
-            {googleClientId
-              ? 'Google 登入不會同步學校課程；需要查看課程時，請使用學校帳號。'
-              : '目前暫時無法使用 Google 登入，請使用上方的學校帳號。'}
+            用於加入課程、繳交作業與校園社群。學校課表與成績仍需連線學校帳號。
           </Text>
         </AnimatedCard>
         <Text style={styles.note}>已同步的資料可離線查看，更新內容時仍需網路連線。</Text>

@@ -29,6 +29,7 @@ import { DemoProvider } from './src/state/demo';
 import { DemoRoleProvider } from './src/state/demoRole';
 import { DemoStoreProvider } from './src/state/demoStore';
 import { AuthProvider, useAuth } from './src/state/auth';
+import { NuniSessionProvider } from './src/state/nuniSession';
 import { ThemeProvider, useThemeMode } from './src/state/theme';
 import { NotificationsProvider } from './src/state/notifications';
 import { SearchHistoryProvider } from './src/state/searchHistory';
@@ -60,6 +61,7 @@ import { MessagesStack } from './src/screens/MessagesStack';
 import { MeStack } from './src/screens/MeStack';
 import { OnboardingScreen, hasSeenOnboarding } from './src/screens/OnboardingScreen';
 import { PreAuthStack } from './src/screens/PreAuthStack';
+import { preAuthLinking } from './src/app/preAuthLinking';
 import { usePushNotifications } from './src/app/usePushNotifications';
 import { useAIAmbientAwareness } from './src/app/useAIAmbientAwareness';
 import { useAIBrainLifecycle } from './src/app/useAIBrain';
@@ -227,6 +229,7 @@ const linkingBase: LinkingOptions<RootTabParamList> = {
           DataExport: 'data-export',
           AccountDeletion: 'account-deletion',
           SSOLogin: 'sso-login',
+          NuniWorkspace: 'campus-one',
         },
       },
     },
@@ -969,12 +972,12 @@ function AppNavigation() {
     return <FullScreenLoader />;
   }
 
-  // 沒有登入 session → Landing + 可進入正式學校登入（SSOLoginScreen）
+  // 平台帳號可從 PreAuth 的 NuniWorkspace 使用；校務頁仍由學校帳號驗證。
   if (!auth.user && !auth.profile) {
     return (
       <NavigationContainer
-        ref={rootNavigationRef}
         theme={navTheme}
+        linking={preAuthLinking}
         onStateChange={(state) => {
           if (__DEV__) console.info('[navigation] signed-out route', state?.routes[state.index]?.name);
         }}
@@ -1150,21 +1153,23 @@ function AppInner() {
 
   return (
     <SchoolProvider>
-      <AuthProvider>
-        <NotificationsProvider>
-          <ToastProvider>
-            <AuthAwareStateProviders>
-              <DemoProvider>
-                <DemoRoleProvider>
-                  <DemoStoreProvider>
-                    <AppNavigation />
-                  </DemoStoreProvider>
-                </DemoRoleProvider>
-              </DemoProvider>
-            </AuthAwareStateProviders>
-          </ToastProvider>
-        </NotificationsProvider>
-      </AuthProvider>
+      <NuniSessionProvider>
+        <AuthProvider>
+          <NotificationsProvider>
+            <ToastProvider>
+              <AuthAwareStateProviders>
+                <DemoProvider>
+                  <DemoRoleProvider>
+                    <DemoStoreProvider>
+                      <AppNavigation />
+                    </DemoStoreProvider>
+                  </DemoRoleProvider>
+                </DemoProvider>
+              </AuthAwareStateProviders>
+            </ToastProvider>
+          </NotificationsProvider>
+        </AuthProvider>
+      </NuniSessionProvider>
     </SchoolProvider>
   );
 }

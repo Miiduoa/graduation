@@ -1,0 +1,10 @@
+{
+  "platforms": ["ios", "android"],
+  "ios": {
+    "modules": ["CampusGoogleCredentialModule"],
+    "appDelegateSubscribers": ["CampusGoogleCredentialAppDelegateSubscriber"]
+  },
+  "android": {
+    "modules": ["app.campus.googlecredential.CampusGoogleCredentialModule"]
+  }
+}

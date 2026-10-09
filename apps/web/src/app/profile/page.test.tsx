@@ -23,7 +23,10 @@ const state = vi.hoisted(() => ({
     logout: vi.fn(),
   },
 }));
-vi.mock('@/features/nuni/Session', () => ({ useNuniSession: () => state.nuni }));
+vi.mock('@/features/nuni/Session', () => ({
+  useNuniSession: () => state.nuni,
+  browserRequest: vi.fn(async () => ({ memberships: [] })),
+}));
 vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({ user: state.user, loading: state.loading, error: null }),
 }));
@@ -107,11 +110,11 @@ it('recognizes a course-only account without inventing school records or a globa
   state.user = null;
   state.nuni.session = { platformAccountId: 'pa_a', context: 'a', isPlatformOperator: false };
   render(<ProfilePage />);
-  expect(screen.getByText('課程帳號已登入')).toBeTruthy();
+  expect(screen.getByText('Campus One 帳號已登入')).toBeTruthy();
   expect(screen.getByRole('link', { name: '查看我的課程' }).getAttribute('href')).toBe(
     '/classroom',
   );
-  expect(screen.getByRole('link', { name: '課程帳號' }).getAttribute('href')).toBe(
+  expect(screen.getByRole('link', { name: 'Campus One 帳號' }).getAttribute('href')).toBe(
     '/classroom/account',
   );
   expect(screen.getByRole('link', { name: '連線校園帳號' }).getAttribute('href')).toContain(
@@ -127,7 +130,7 @@ it('keeps mixed account records separate from course membership', async () => {
   state.nuni.session = { platformAccountId: 'pa_a', context: 'a', isPlatformOperator: false };
   render(<ProfilePage />);
   await screen.findByText('私人資料 A');
-  expect(screen.getByText('課程帳號已登入')).toBeTruthy();
+  expect(screen.getByText('Campus One 帳號已登入')).toBeTruthy();
   expect(screen.getByText('校園帳號個人資料')).toBeTruthy();
   expect(screen.getByText(/老師、協同教師或學生身分依各課程的成員資格決定/)).toBeTruthy();
   expect(state.read).toHaveBeenCalledWith('users/a');
@@ -141,7 +144,7 @@ it('hides course permissions synchronously during refresh, logout, and account s
   state.nuni.loading = true;
   rerender(<ProfilePage />);
   expect(screen.queryByRole('link', { name: /前往平台管理/ })).toBeNull();
-  expect(screen.queryByText('課程帳號已登入')).toBeNull();
+  expect(screen.queryByText('Campus One 帳號已登入')).toBeNull();
   state.nuni.loading = false;
   state.nuni.session = { platformAccountId: 'pa_b', context: 'b', isPlatformOperator: false };
   rerender(<ProfilePage />);
@@ -149,8 +152,8 @@ it('hides course permissions synchronously during refresh, logout, and account s
   state.nuni.pendingLogout = true;
   state.nuni.error = '登出尚未完成';
   rerender(<ProfilePage />);
-  expect(screen.queryByText('課程帳號已登入')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '重試登出課程帳號' }));
+  expect(screen.queryByText('Campus One 帳號已登入')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重試登出 Campus One 帳號' }));
   expect(state.nuni.logout).toHaveBeenCalledTimes(1);
 });
 
@@ -159,7 +162,7 @@ it('offers recovery when course authentication cannot be confirmed', () => {
   state.nuni.error = '無法確認登入狀態';
   render(<ProfilePage />);
   expect(screen.getByRole('alert').textContent).toContain('無法確認登入狀態');
-  expect(screen.queryByText('課程帳號已登入')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '重新確認課程帳號' }));
+  expect(screen.queryByText('Campus One 帳號已登入')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重新確認 Campus One 帳號' }));
   expect(state.nuni.refresh).toHaveBeenCalledTimes(1);
 });

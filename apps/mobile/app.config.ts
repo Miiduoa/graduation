@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { googleIosInfoPlist } from './scripts/configure-nuni-google.cjs';
 
 type AppEnvironment = 'development' | 'preview' | 'production';
 
@@ -266,7 +267,10 @@ export default ({ config }: any) => {
       bundleIdentifier,
       buildNumber,
       infoPlist: {
-        ...(config.ios?.infoPlist ?? {}),
+        ...googleIosInfoPlist(
+          config.ios?.infoPlist ?? {},
+          process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+        ),
         NSCameraUsageDescription: '需要相機權限以掃描 QR 碼和拍照',
         NSPhotoLibraryUsageDescription: '需要相簿權限以選擇照片',
         NSLocationWhenInUseUsageDescription: '需要位置權限以提供校園導航',

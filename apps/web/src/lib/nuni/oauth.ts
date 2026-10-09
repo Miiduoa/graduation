@@ -40,10 +40,10 @@ function redirect(path: string): NextResponse {
 }
 
 export async function startGoogle(request: NextRequest): Promise<NextResponse> {
+  const returnUrl = platformDestination(request.nextUrl.searchParams.get('returnUrl'));
   try {
     enabled();
     requireSameOrigin(request);
-    const returnUrl = platformDestination(request.nextUrl.searchParams.get('returnUrl'));
     // Account changes must finish revoking the previous handle before another login starts.
     const previous = readSession(request);
     if (previous) {
@@ -118,7 +118,9 @@ export async function startGoogle(request: NextRequest): Promise<NextResponse> {
     return response;
   } catch {
     try {
-      return redirect('/classroom/login?issue=unavailable');
+      return redirect(
+        `/classroom/login?issue=unavailable${returnUrl === '/classroom' ? '' : `&returnUrl=${encodeURIComponent(returnUrl)}`}`,
+      );
     } catch (error) {
       return errorResponse(error);
     }
@@ -126,9 +128,11 @@ export async function startGoogle(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function finishGoogle(request: NextRequest): Promise<NextResponse> {
+  let returnUrl = '/classroom';
   try {
     enabled();
     const tx = openCookie(LOGIN_COOKIE, request.cookies.get(LOGIN_COOKIE)?.value);
+    if (tx && typeof tx.returnUrl === 'string') returnUrl = platformDestination(tx.returnUrl);
     const params = request.nextUrl.searchParams;
     if (
       !tx ||
@@ -197,7 +201,9 @@ export async function finishGoogle(request: NextRequest): Promise<NextResponse> 
     return response;
   } catch {
     try {
-      const response = redirect('/classroom/login?issue=expired');
+      const response = redirect(
+        `/classroom/login?issue=expired${returnUrl === '/classroom' ? '' : `&returnUrl=${encodeURIComponent(returnUrl)}`}`,
+      );
       setCookie(response, LOGIN_COOKIE, null);
       return response;
     } catch (error) {
