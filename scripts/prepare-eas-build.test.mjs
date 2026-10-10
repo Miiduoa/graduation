@@ -364,9 +364,14 @@ test(
       env: { ANDROID_PACKAGE_NAME: 'com.other.dev', APP_ENV: 'development' },
     };
     inherited.build.base.ios = { env: { IOS_BUNDLE_IDENTIFIER: 'com.other.dev' } };
+    const registeredTarget = {
+      ...target,
+      appIdentifier: base.build.production.env.IOS_BUNDLE_IDENTIFIER,
+      projectId: base.build.production.env.EXPO_PUBLIC_EAS_PROJECT_ID,
+    };
     for (const platform of ['android', 'ios']) {
       for (const profile of ['production', 'preview']) {
-        const expected = { ...target, platform, profile };
+        const expected = { ...registeredTarget, platform, profile };
         const prepared = prepareBuildConfig(inherited, expected);
         assert.equal(
           BuildProfileSchema.validate(prepared.build[profile], { abortEarly: false }).error,
