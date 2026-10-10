@@ -22,11 +22,11 @@
 .action, .secondary {
   border-radius: 7px; padding: 10px 16px; font: inherit; cursor: pointer;
 }
-.action { color: #fff; background: #17634c; border: 1px solid #17634c; justify-self: start; }
+.action { color: var(--on-brand); background: var(--brand); border: 1px solid var(--brand); justify-self: start; }
 .secondary { background: transparent; border: 1px solid var(--border); color: inherit; }
 .action:disabled, .secondary:disabled { opacity: .55; cursor: not-allowed; }
-.error { color: #bd342b; white-space: pre-wrap; }
-.success { color: #267252; }
+.error { color: var(--danger); white-space: pre-wrap; }
+.success { color: var(--success); }
 .reviews { margin-top: 24px; }
 .reviews h3 { font-size: 19px; }
 .reviewItem { border-top: 1px solid var(--border); padding: 14px 0; }
@@ -37,7 +37,7 @@
 .submission { padding: 16px; border: 1px solid var(--border); border-radius: 9px; min-width: 0; }
 .submission .form { padding: 0; }
 .answer { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
-.published { border-left: 3px solid #17634c; padding-left: 12px; }
+.published { border-left: 3px solid var(--brand); padding-left: 12px; }
 @media (max-width: 700px) { .fields { grid-template-columns: minmax(0, 1fr); } .form { padding: 16px; } }
 
 .history { margin: 14px 0 0; padding: 0 0 0 24px; }

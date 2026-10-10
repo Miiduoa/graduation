@@ -3,6 +3,11 @@ import type { ReactNode } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import RootLayout from './layout';
 
+vi.mock('@/components/CampusProviders', () => ({
+  CampusProviders: ({ children }: { children: ReactNode }) => (
+    <div data-provider="campus-platform">{children}</div>
+  ),
+}));
 vi.mock('@/components/ServiceWorkerRegistration', () => ({
   ServiceWorkerRegistration: () => null,
 }));
@@ -39,6 +44,7 @@ it.each(['nuni', 'firebase', ''])(
     const child = document.querySelector('[data-route="existing-campus-service"]');
     expect(child?.textContent).toBe('原有校園服務');
     expect(child?.closest('[data-provider="toast"]')).toBeTruthy();
+    expect(child?.closest('[data-provider="campus-platform"]')).toBeTruthy();
     expect(child?.closest('[data-provider="campus-auth"]')).toBeTruthy();
     expect(document.documentElement.lang).toBe('zh-Hant');
   },

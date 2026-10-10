@@ -2,12 +2,14 @@
 
 import { Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
-import { AppHeader } from '@/components/AppHeader';
+import { SiteShell } from '@/components/SiteShell';
+import { Input } from '@/components/ui/Input';
+import { Button } from '@/components/ui/Button';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/components/AuthGuard';
 import { isFirebaseConfigured, signInWithPuStudentId } from '@/features/auth/client';
 import { sanitizeInternalPath } from '@/lib/navigation';
-import styles from '../home.module.css';
+import styles from '../servicePages.module.css';
 
 function LoginForm() {
   const router = useRouter();
@@ -48,78 +50,81 @@ function LoginForm() {
     }
   }
   return (
-    <div className={styles.page}>
-      <AppHeader />
-      <main className={styles.main} style={{ maxWidth: 550 }}>
-        <p className={styles.eyebrow}>靜宜大學</p>
-        <div className={styles.heading}>
-          <h1>{reconnect ? '重新連線學校帳號' : '登入你的校園帳號'}</h1>
-        </div>
-        <p className={styles.intro}>使用 e 校園學號與密碼，繼續查看課程與待辦。</p>
-        <form onSubmit={login} style={{ display: 'grid', gap: 18, marginTop: 30 }}>
-          <label>
-            學號
-            <input
-              value={studentId}
-              onChange={(e) => setStudentId(e.target.value)}
-              required
-              autoComplete="username"
-              autoCapitalize="characters"
-              disabled={busy}
-              style={{
-                display: 'block',
-                width: '100%',
-                padding: 14,
-                marginTop: 6,
-                border: '1px solid var(--border-strong)',
-                borderRadius: 4,
-                font: 'inherit',
-              }}
-            />
-          </label>
-          <label>
-            密碼
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              autoComplete="current-password"
-              disabled={busy}
-              style={{
-                display: 'block',
-                width: '100%',
-                padding: 14,
-                marginTop: 6,
-                border: '1px solid var(--border-strong)',
-                borderRadius: 4,
-                font: 'inherit',
-              }}
-            />
-          </label>
+    <SiteShell
+      title={reconnect ? '重新連線學校帳號' : '登入你的校園帳號'}
+      subtitle="使用 e 校園學號與密碼，繼續查看課程與待辦。"
+      schoolName="靜宜大學"
+    >
+      <div className={styles.loginLayout}>
+        <form className={styles.loginForm} onSubmit={login} aria-busy={busy}>
+          <Input
+            id="student-id"
+            name="studentId"
+            label="學號"
+            value={studentId}
+            onChange={(e) => setStudentId(e.target.value)}
+            required
+            autoComplete="username"
+            autoCapitalize="characters"
+            spellCheck={false}
+            disabled={busy}
+          />
+          <Input
+            id="password"
+            name="password"
+            label="密碼"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            autoComplete="current-password"
+            disabled={busy}
+          />
           {error && (
-            <p role="alert" className={styles.notice}>
+            <p role="alert" className={styles.errorNotice}>
               {error}
             </p>
           )}
-          <button
-            className={styles.primary}
+          <Button
+            variant="primary"
             type="submit"
+            fullWidth
+            loading={busy}
             disabled={busy || !studentId.trim() || !password}
           >
             {busy ? '登入中…' : '登入'}
-          </button>
+          </Button>
         </form>
-        <p style={{ marginTop: 26 }}>
-          <Link href="/">← 返回首頁</Link>
-        </p>
-      </main>
-    </div>
+        <aside className={styles.loginHelp} aria-label="帳號與資料說明">
+          <h2>使用學校原有的帳號</h2>
+          <p>請輸入你登入 e 校園時使用的資料。若忘記密碼，請透過學校的帳號服務處理。</p>
+          <div className={styles.helpLinks}>
+            <Link href="/privacy">
+              了解資料使用方式 <span aria-hidden="true">↗</span>
+            </Link>
+            <Link href="/terms">
+              閱讀使用條款 <span aria-hidden="true">↗</span>
+            </Link>
+          </div>
+          <Link href="/" className={styles.backLink}>
+            ← 返回首頁
+          </Link>
+        </aside>
+      </div>
+    </SiteShell>
   );
 }
 export default function LoginPage() {
   return (
-    <Suspense fallback={<p>載入中…</p>}>
+    <Suspense
+      fallback={
+        <SiteShell title="登入校園帳號">
+          <p role="status" className={styles.loading}>
+            正在載入登入表單…
+          </p>
+        </SiteShell>
+      }
+    >
       <LoginForm />
     </Suspense>
   );

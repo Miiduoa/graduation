@@ -6,15 +6,18 @@ import { Suspense, useState } from 'react';
 import { useAuth } from './AuthGuard';
 import { CampusServiceMenu } from './CampusServiceMenu';
 import styles from '@/app/home.module.css';
+import { SchoolSelector } from './SchoolSelector';
+import { useNuniSession } from '@/features/nuni/Session';
 
 function Header() {
   const pathname = usePathname();
   const params = useSearchParams();
   const { user, signOutUser } = useAuth();
+  const nuni = useNuniSession();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const context = new URLSearchParams();
-  for (const key of ['school', 'schoolId']) {
+  for (const key of ['school', 'schoolId', 'campus']) {
     const value = params?.get(key);
     if (value) context.set(key, value);
   }
@@ -47,7 +50,9 @@ function Header() {
           <CampusServiceMenu />
         </nav>
         <div className={styles.account}>
-          {user ? (
+          <SchoolSelector compact />
+          {nuni.session?.isPlatformOperator && <Link href="/admin">平台管理</Link>}
+          {user || nuni.session || nuni.pendingLogout ? (
             <button
               type="button"
               disabled={busy}
@@ -56,7 +61,10 @@ function Header() {
                 setBusy(true);
                 setError('');
                 try {
-                  await signOutUser();
+                  await Promise.all([
+                    ...(user ? [signOutUser()] : []),
+                    ...(nuni.session || nuni.pendingLogout ? [nuni.logout()] : []),
+                  ]);
                 } catch {
                   setError('登出失敗，請稍後重試。');
                 } finally {
@@ -64,7 +72,7 @@ function Header() {
                 }
               }}
             >
-              {busy ? '登出中…' : '登出'}
+              {busy ? '登出中…' : nuni.pendingLogout ? '重試登出' : '登出'}
             </button>
           ) : (
             <Link href={loginHref}>登入</Link>
