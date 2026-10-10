@@ -6,6 +6,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 const source = readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8');
 let handlers: Record<string, (event: Record<string, unknown>) => void>;
 let fetchMock: ReturnType<typeof vi.fn>;
+let skipWaiting: ReturnType<typeof vi.fn>;
 let cache: { match: ReturnType<typeof vi.fn>; addAll: ReturnType<typeof vi.fn> };
 let cachesMock: {
   open: ReturnType<typeof vi.fn>;
@@ -15,6 +16,7 @@ let cachesMock: {
 beforeEach(() => {
   handlers = {};
   fetchMock = vi.fn();
+  skipWaiting = vi.fn().mockResolvedValue(undefined);
   cache = { match: vi.fn(), addAll: vi.fn().mockResolvedValue(undefined) };
   cachesMock = {
     open: vi.fn().mockResolvedValue(cache),
@@ -31,7 +33,7 @@ beforeEach(() => {
       addEventListener: (name: string, handler: (typeof handlers)[string]) => {
         handlers[name] = handler;
       },
-      skipWaiting: vi.fn(),
+      skipWaiting,
       clients: { claim: vi.fn() },
     },
   });
@@ -89,10 +91,17 @@ it('preloads only existing public files and ignores arbitrary cache requests', a
   const waitUntil = vi.fn();
   handlers.install({ waitUntil });
   await waitUntil.mock.calls[0][0];
+  expect(skipWaiting).not.toHaveBeenCalled();
   const paths: string[] = cache.addAll.mock.calls[0][0];
   for (const path of paths)
     expect(readFileSync(new URL(`../../public${path}`, import.meta.url)).length).toBeGreaterThan(0);
   cache.addAll.mockClear();
   handlers.message({ data: { type: 'CACHE_URLS', urls: ['/api/me'] }, waitUntil });
   expect(cache.addAll).not.toHaveBeenCalled();
+});
+it('activates a waiting update only after an explicit update message', async () => {
+  const waitUntil = vi.fn();
+  handlers.message({ data: { type: 'SKIP_WAITING' }, waitUntil });
+  await waitUntil.mock.calls[0][0];
+  expect(skipWaiting).toHaveBeenCalledOnce();
 });

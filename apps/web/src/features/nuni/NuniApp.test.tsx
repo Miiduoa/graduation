@@ -1,3 +1,5 @@
+vi.mock('@/components/SchoolSelector', () => ({ SchoolSelector: () => null }));
+vi.mock('@/components/PWAInstallBanner', () => ({ PWAInstallBanner: () => null }));
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';

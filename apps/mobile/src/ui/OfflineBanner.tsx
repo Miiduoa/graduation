@@ -45,15 +45,15 @@ function BannerView({
       case 'offline':
         return {
           icon: 'cloud-offline' as const,
-          color: '#FF9500',
-          bgColor: '#FF950015',
+          color: theme.colors.warning,
+          bgColor: theme.colors.warningSoft,
           text: message || '目前處於離線模式',
         };
       case 'reconnected':
         return {
           icon: 'cloud-done' as const,
-          color: '#22C55E',
-          bgColor: '#22C55E15',
+          color: theme.colors.success,
+          bgColor: theme.colors.successSoft,
           text: message || '已重新連線',
         };
       case 'syncing':
@@ -82,7 +82,12 @@ function BannerView({
         {config.text}
       </Text>
       {onDismiss && (
-        <Pressable onPress={onDismiss} hitSlop={10}>
+        <Pressable
+          onPress={onDismiss}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="關閉網路狀態提示"
+        >
           <Ionicons name="close" size={18} color={config.color} />
         </Pressable>
       )}
@@ -157,15 +162,15 @@ export function NetworkStatusBanner() {
               </Pressable>
             </View>
             <View style={styles.tipItem}>
-              <Ionicons name="checkmark-circle" size={16} color="#22C55E" />
+              <Ionicons name="checkmark-circle" size={16} color={theme.colors.success} />
               <Text style={styles.tipText}>可以瀏覽已快取的公告、活動、地圖</Text>
             </View>
             <View style={styles.tipItem}>
-              <Ionicons name="checkmark-circle" size={16} color="#22C55E" />
+              <Ionicons name="checkmark-circle" size={16} color={theme.colors.success} />
               <Text style={styles.tipText}>可以查看已下載的課表</Text>
             </View>
             <View style={styles.tipItem}>
-              <Ionicons name="time" size={16} color="#FF9500" />
+              <Ionicons name="time" size={16} color={theme.colors.warning} />
               <Text style={styles.tipText}>新的操作會在連線後自動同步</Text>
             </View>
             <View style={styles.tipItem}>
@@ -191,43 +196,45 @@ export function NetworkStatusBanner() {
   return null;
 }
 
-const createStyles = () => StyleSheet.create({
-  tipsContainer: {
-    backgroundColor: theme.colors.surface2,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border,
-  },
-  tipsHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  tipsTitle: {
-    color: theme.colors.text,
-    fontWeight: '700',
-    fontSize: 13,
-  },
-  tipsClose: {
-    color: theme.colors.muted,
-    fontSize: 12,
-  },
-  tipItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 6,
-  },
-  tipText: {
-    color: theme.colors.muted,
-    fontSize: 12,
-    flex: 1,
-  },
-});
+const createStyles = () =>
+  StyleSheet.create({
+    tipsContainer: {
+      backgroundColor: theme.colors.surface2,
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    tipsHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 10,
+    },
+    tipsTitle: {
+      color: theme.colors.text,
+      fontWeight: '700',
+      fontSize: 13,
+    },
+    tipsClose: {
+      color: theme.colors.muted,
+      fontSize: 12,
+    },
+    tipItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginBottom: 6,
+    },
+    tipText: {
+      color: theme.colors.muted,
+      fontSize: 12,
+      flex: 1,
+    },
+  });
 
 export function OfflineIndicator() {
+  useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const { isConnected } = useNetworkStatus();
 
   if (isConnected) return null;
@@ -238,7 +245,7 @@ export function OfflineIndicator() {
         position: 'absolute',
         top: 8,
         right: 8,
-        backgroundColor: '#FF9500',
+        backgroundColor: theme.colors.warningSoft,
         paddingHorizontal: 8,
         paddingVertical: 4,
         borderRadius: 12,
@@ -247,8 +254,8 @@ export function OfflineIndicator() {
         gap: 4,
       }}
     >
-      <Ionicons name="cloud-offline" size={12} color="#fff" />
-      <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>離線</Text>
+      <Ionicons name="cloud-offline" size={12} color={theme.colors.warning} />
+      <Text style={{ color: theme.colors.warning, fontSize: 10, fontWeight: '700' }}>離線</Text>
     </View>
   );
 }

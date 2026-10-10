@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { SiteShell } from '@/components/SiteShell';
+import styles from '../servicePages.module.css';
 
 export const metadata: Metadata = {
   title: '隱私政策 | Campus One',
@@ -21,20 +22,44 @@ const sections = [
   },
   {
     title: '聯絡方式',
-    body: '服務聯絡方式尚待確認，將於正式開放前公布。',
+    body: (
+      <>
+        服務使用與隱私相關問題，請來信{' '}
+        <a href="mailto:demohan513@gmail.com">demohan513@gmail.com</a>。
+      </>
+    ),
   },
 ];
 
 export default function PrivacyPage() {
   return (
-    <SiteShell title="隱私政策" subtitle="Campus One 服務資訊">
-      <div className="pageStack" style={{ maxWidth: 880 }}>
-        {sections.map((section) => (
-          <section key={section.title} className="card" style={{ display: 'grid', gap: 10 }}>
-            <h2 style={{ margin: 0, fontSize: 22 }}>{section.title}</h2>
-            <p style={{ margin: 0, lineHeight: 1.8 }}>{section.body}</p>
-          </section>
-        ))}
+    <SiteShell title="隱私政策" subtitle="了解 Campus One 使用哪些資料，以及你可以如何管理。">
+      <div className={styles.documentLayout}>
+        <nav className={styles.contents} aria-label="隱私政策章節">
+          <p>本頁內容</p>
+          <ol>
+            {sections.map((section, index) => (
+              <li key={section.title}>
+                <a href={`#privacy-${index + 1}`}>
+                  <span aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
+                  {section.title}
+                </a>
+              </li>
+            ))}
+          </ol>
+        </nav>
+        <article className={styles.document} aria-label="隱私政策內容">
+          {sections.map((section, index) => (
+            <section
+              key={section.title}
+              id={`privacy-${index + 1}`}
+              aria-labelledby={`privacy-title-${index + 1}`}
+            >
+              <h2 id={`privacy-title-${index + 1}`}>{section.title}</h2>
+              <p>{section.body}</p>
+            </section>
+          ))}
+        </article>
       </div>
     </SiteShell>
   );

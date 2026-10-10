@@ -10,7 +10,9 @@ import {
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
 import { CampusServiceMenu } from '@/components/CampusServiceMenu';
-import { browserRequest, NuniSessionProvider, useNuniSession } from './Session';
+import { SchoolSelector } from '@/components/SchoolSelector';
+import { SiteShell } from '@/components/SiteShell';
+import { browserRequest, useNuniSession } from './Session';
 import { CourseAccessBoundary, MutationForm, useClasses } from './CourseUI';
 import { AssignmentCard } from './AssignmentCard';
 import { CourseMaterials } from './CourseMaterials';
@@ -52,6 +54,8 @@ export function NuniHeader() {
         <CampusServiceMenu />
       </nav>
       <div className={home.account}>
+        <SchoolSelector compact />
+        {session?.isPlatformOperator && <Link href="/admin">平台管理</Link>}
         {session || pendingLogout ? (
           <button disabled={loading} onClick={() => void logout()}>
             {pendingLogout ? '重試登出' : '登出課程空間'}
@@ -535,43 +539,30 @@ function NuniContent() {
       </section>
     );
   return (
-    <div className={styles.page}>
-      <a className={home.skip} href="#nuni-content">
-        跳到主要內容
-      </a>
-      <NuniHeader />
-      <main className={styles.main} id="nuni-content">
-        {error && (
-          <div role="alert" className={styles.notice}>
-            {error}
-            <button
-              className={`${styles.button} ${styles.secondary}`}
-              onClick={() => void (pendingLogout ? logout() : refresh())}
-            >
-              重試
-            </button>
-          </div>
-        )}
-        {loading && session && <p role="status">正在確認登入狀態…</p>}
-        <div hidden={loading && !!session} inert={loading && !!session}>
-          {content}
+    <SiteShell header={<NuniHeader />}>
+      {error && (
+        <div role="alert" className={styles.notice}>
+          {error}
+          <button
+            className={`${styles.button} ${styles.secondary}`}
+            onClick={() => void (pendingLogout ? logout() : refresh())}
+          >
+            重試
+          </button>
         </div>
-      </main>
-      <footer className={styles.footer}>
-        <span>Campus One</span>
-        <Link href="/privacy">隱私權政策</Link>
-        <Link href="/terms">服務條款</Link>
-      </footer>
-    </div>
+      )}
+      {loading && session && <p role="status">正在確認登入狀態…</p>}
+      <div hidden={loading && !!session} inert={loading && !!session}>
+        {content}
+      </div>
+    </SiteShell>
   );
 }
 
 export function NuniApp() {
   return (
-    <NuniSessionProvider>
-      <Suspense fallback={<p role="status">載入中…</p>}>
-        <NuniContent />
-      </Suspense>
-    </NuniSessionProvider>
+    <Suspense fallback={<p role="status">載入中…</p>}>
+      <NuniContent />
+    </Suspense>
   );
 }

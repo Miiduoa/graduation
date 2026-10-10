@@ -1,0 +1,219 @@
+.loginLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 520px) minmax(0, 300px);
+  gap: 48px;
+  align-items: start;
+}
+
+.loginForm,
+.document,
+.stateCard {
+  min-width: 0;
+  padding: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.loginForm {
+  display: grid;
+  gap: 24px;
+}
+
+.loginHelp {
+  padding-block: 8px;
+  min-width: 0;
+}
+
+.loginHelp h2,
+.document h2,
+.stateCard h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.loginHelp p,
+.stateCard p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.helpLinks {
+  display: grid;
+  margin-top: 22px;
+}
+
+.helpLinks a,
+.backLink {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 44px;
+  font-size: 13px;
+}
+
+.helpLinks a {
+  border-bottom: 1px solid var(--border);
+}
+
+.helpLinks a:hover,
+.backLink:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.backLink {
+  margin-top: 20px;
+  width: fit-content;
+}
+
+.errorNotice {
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--border));
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.documentLayout {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 760px);
+  align-items: start;
+  gap: 40px;
+}
+
+.contents {
+  min-width: 0;
+}
+
+.contents p {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.contents ol {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.contents a {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.contents a span {
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.contents a:hover {
+  color: var(--brand);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.document section {
+  scroll-margin-top: 24px;
+}
+
+.document section + section {
+  margin-top: 28px;
+  padding-top: 28px;
+  border-top: 1px solid var(--border);
+}
+
+.document p {
+  margin: 0;
+  line-height: 1.9;
+  overflow-wrap: anywhere;
+}
+
+.document p a {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.stateCard {
+  max-width: 680px;
+  border-top: 3px solid var(--brand);
+}
+
+.stateCode {
+  display: block;
+  margin-bottom: 24px;
+  color: var(--muted);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 26px;
+}
+
+.loading {
+  margin: 0;
+  padding: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  background: var(--surface);
+  max-width: 520px;
+}
+
+@media (max-width: 760px) {
+  .loginLayout,
+  .documentLayout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 28px;
+  }
+
+  .loginForm,
+  .document,
+  .stateCard {
+    padding: 22px;
+  }
+
+  .loginHelp {
+    padding: 0;
+  }
+
+  .contents ol {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 20px;
+  }
+
+  .contents a {
+    gap: 8px;
+  }
+}
+
+@media (max-width: 380px) {
+  .contents ol {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .actions > * {
+    width: 100%;
+    justify-content: center;
+  }
+}

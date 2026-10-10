@@ -4,7 +4,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import QRCode from 'qrcode';
 import { useAuth } from './AuthGuard';
-import { AppHeader } from './AppHeader';
+import { SiteShell } from './SiteShell';
+import { Button } from './ui/Button';
+import { Input } from './ui/Input';
+import { resolveSchoolPageContext, type SchoolSearchParams } from '@/lib/pageContext';
 import {
   attendanceCsv,
   attendanceError,
@@ -20,6 +23,7 @@ import {
   type CourseAttendance as AttendanceData,
 } from '@/lib/courseAttendance';
 import home from '@/app/home.module.css';
+import service from '@/app/servicePages.module.css';
 import styles from './course-attendance.module.css';
 
 function date(value: string | null) {
@@ -138,9 +142,10 @@ function Session({
               });
             }}
           >
-            <label htmlFor={`code-${session.id}`}>教師提供的簽到碼</label>
-            <input
+            <Input
               id={`code-${session.id}`}
+              label="教師提供的簽到碼"
+              hint="也可以在手機版課堂頁掃描教師的 QR Code。"
               value={token}
               onChange={(event) => setToken(event.target.value)}
               required
@@ -150,23 +155,21 @@ function Session({
               maxLength={512}
               disabled={busy}
             />
-            <button type="submit" className={home.primary} disabled={busy || !token.trim()}>
+            <Button type="submit" variant="primary" disabled={busy || !token.trim()}>
               {busy ? '確認中…' : '確認簽到'}
-            </button>
-            <p className={styles.detail}>也可以在手機版課堂頁掃描教師的 QR Code。</p>
+            </Button>
           </form>
         ) : (
           <p className={styles.detail}>沒有你的簽到紀錄。如需更正，請聯絡授課教師。</p>
         ))}
       <div className={styles.actions}>
         {canStart && session.active && (
-          <button className={home.secondary} disabled={busy} onClick={() => void run(showCode)}>
+          <Button variant="outline" disabled={busy} onClick={() => void run(showCode)}>
             顯示簽到碼
-          </button>
+          </Button>
         )}
         {canReadRoster && (
-          <button
-            className={home.secondary}
+          <Button
             disabled={busy}
             onClick={() =>
               void run(async () => {
@@ -176,11 +179,11 @@ function Session({
             }
           >
             {records ? '更新簽到名單' : '查看簽到名單'}
-          </button>
+          </Button>
         )}
         {canStart && session.active && session.teacherId === uid && (
-          <button
-            className={styles.end}
+          <Button
+            variant="danger"
             disabled={busy}
             onClick={() =>
               void run(async () => {
@@ -194,7 +197,7 @@ function Session({
             }
           >
             結束點名
-          </button>
+          </Button>
         )}
       </div>
       {teacherCode && session.active && (
@@ -204,8 +207,8 @@ function Session({
           <div>
             <p>請向這堂課的學生出示。</p>
             <code>{teacherCode}</code>
-            <button
-              className={home.secondary}
+            <Button
+              variant="outline"
               onClick={() =>
                 void run(async () => {
                   await navigator.clipboard.writeText(teacherCode);
@@ -214,7 +217,7 @@ function Session({
               }
             >
               複製簽到碼
-            </button>
+            </Button>
             <p className={styles.detail}>簽到碼過期後，請結束本次點名，再開啟新的點名。</p>
           </div>
         </div>
@@ -223,9 +226,9 @@ function Session({
         <div className={styles.roster}>
           <div className={styles.sessionHeading}>
             <h4>已確認的簽到紀錄</h4>
-            <button className={home.secondary} disabled={!records.length} onClick={download}>
+            <Button disabled={!records.length} onClick={download}>
               下載這份名單
-            </button>
+            </Button>
           </div>
           {records.length ? (
             <>
@@ -250,11 +253,15 @@ function Session({
         </div>
       )}
       {error && (
-        <p role="alert" className={styles.error}>
+        <p role="alert" className={service.errorNotice}>
           {error}
         </p>
       )}
-      {notice && <p role="status">{notice}</p>}
+      {notice && (
+        <p role="status" className={styles.confirmed}>
+          {notice}
+        </p>
+      )}
     </article>
   );
 }
@@ -340,14 +347,11 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
   }
   return (
     <>
-      <div className={home.heading}>
+      <div className={styles.workspaceHeading}>
         <div>
-          <p className={home.eyebrow}>課堂出席</p>
-          <h1>{data?.courseName ?? '點名與簽到'}</h1>
-          <p className={home.intro}>查看課堂簽到與已保存的出席紀錄。</p>
+          <h2>{data?.courseName ?? '課堂出席'}</h2>
         </div>
-        <button
-          className={home.secondary}
+        <Button
           disabled={loading || starting}
           onClick={() => {
             if (permission.current) void reload();
@@ -355,15 +359,23 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
           }}
         >
           {loading ? '讀取中…' : '更新紀錄'}
-        </button>
+        </Button>
       </div>
       {error && (
-        <p role="alert" className={styles.error}>
+        <p role="alert" className={service.errorNotice}>
           {error}
         </p>
       )}
-      {notice && <p role="status">{notice}</p>}
-      {loading && !data && <p role="status">讀取點名紀錄…</p>}
+      {notice && (
+        <p role="status" className={styles.confirmed}>
+          {notice}
+        </p>
+      )}
+      {loading && !data && (
+        <p role="status" className={service.loading}>
+          讀取點名紀錄…
+        </p>
+      )}
       {data && (
         <>
           {data.canStart && (
@@ -372,8 +384,8 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
                 <h2>開啟這堂課的點名</h2>
                 <p>學生掃碼或輸入簽到碼後，才會列入出席名單。簽到碼有效 10 分鐘。</p>
               </div>
-              <button
-                className={home.primary}
+              <Button
+                variant="primary"
                 disabled={
                   starting ||
                   loading ||
@@ -382,7 +394,7 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
                 onClick={() => void start()}
               >
                 {starting ? '開啟中…' : '開啟點名'}
-              </button>
+              </Button>
               {data.sessions.some((session) => session.active && session.teacherId === uid) && (
                 <p className={styles.detail}>請先結束你開啟的點名，再開啟下一次。</p>
               )}
@@ -417,32 +429,52 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
     </>
   );
 }
-export function CourseAttendance({ courseId }: { courseId: string }) {
+export function CourseAttendance({
+  courseId,
+  audience = 'student',
+  searchParams,
+}: {
+  courseId: string;
+  audience?: 'student' | 'teacher';
+  searchParams?: SchoolSearchParams;
+}) {
   const { user, loading } = useAuth();
+  const { schoolName, schoolSearch } = resolveSchoolPageContext(searchParams);
+  const path = `${audience === 'teacher' ? '/teacher' : ''}/course/${encodeURIComponent(courseId)}`;
   return (
-    <div className={home.page}>
-      <a href="#attendance-content" className={home.skip}>
-        跳到主要內容
-      </a>
-      <AppHeader />
-      <main id="attendance-content" className={`${home.main} ${styles.main}`}>
+    <SiteShell
+      title="點名與簽到"
+      subtitle="查看課堂簽到與已保存的出席紀錄。"
+      schoolName={audience === 'teacher' ? `${schoolName} · 教學工作台` : schoolName}
+    >
+      <nav className={styles.navigation} aria-label="課程導覽">
+        <Link href={`${path}${schoolSearch}`}>
+          <span aria-hidden="true">←</span>
+          {audience === 'teacher' ? '回課程工作台' : '回課程內容'}
+        </Link>
+      </nav>
+      <div className={styles.workspace}>
         {loading ? (
-          <p role="status">確認登入狀態…</p>
+          <p role="status" className={service.loading}>
+            確認登入狀態…
+          </p>
         ) : user ? (
           <Workspace key={`${user.uid}:${courseId}`} uid={user.uid} courseId={courseId} />
         ) : (
-          <div className={styles.empty}>
-            <h1>登入後查看課堂出席</h1>
+          <section className={service.stateCard}>
+            <h2>登入後查看課堂出席</h2>
             <p>使用這門課的學校帳號登入，即可簽到或查看紀錄。</p>
-            <Link
-              className={home.primary}
-              href={`/login?redirect=${encodeURIComponent(`/course/${courseId}/attendance`)}`}
-            >
-              登入帳號
-            </Link>
-          </div>
+            <div className={service.actions}>
+              <Link
+                className={home.primary}
+                href={`/login?redirect=${encodeURIComponent(`${path}/attendance${schoolSearch}`)}`}
+              >
+                登入帳號
+              </Link>
+            </div>
+          </section>
         )}
-      </main>
-    </div>
+      </div>
+    </SiteShell>
   );
 }

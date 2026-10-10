@@ -7,8 +7,10 @@ import { PWAInstallBanner } from './PWAInstallBanner';
 import { UpdateBanner } from './UpdateBanner';
 import { SiteFooter } from './SiteFooter';
 import styles from '@/app/home.module.css';
+import notices from './SystemNotice.module.css';
 
 export function SiteShell(props: {
+  header?: React.ReactNode;
   title?: string;
   subtitle?: string;
   schoolName?: string;
@@ -21,7 +23,11 @@ export function SiteShell(props: {
         跳到主要內容
       </a>
       <OfflineBanner />
-      <AppHeader />
+      {props.header ?? <AppHeader />}
+      <div className={notices.notices}>
+        <UpdateBanner />
+        <PWAInstallBanner />
+      </div>
       <main id="page-content" className={styles.main} tabIndex={-1}>
         {props.title && (
           <div className={styles.heading}>
@@ -35,8 +41,6 @@ export function SiteShell(props: {
         <Suspense fallback={<p role="status">載入中…</p>}>{props.children}</Suspense>
         <SiteFooter />
       </main>
-      <PWAInstallBanner />
-      <UpdateBanner />
     </div>
   );
 }

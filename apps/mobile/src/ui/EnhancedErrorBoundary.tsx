@@ -11,7 +11,8 @@ import {
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
-import { theme } from './theme';
+import { subscribeToTheme, theme } from './theme';
+import { useThemeVersion } from './useThemeStyleSheet';
 import { ErrorUtils } from 'react-native';
 
 export type ErrorSeverity = 'low' | 'medium' | 'high' | 'critical';
@@ -58,6 +59,18 @@ export class EnhancedErrorBoundary extends Component<
       isRecovering: false,
       recoveryAttempts: 0,
     };
+  }
+
+  private unsubscribeTheme?: () => void;
+
+  componentDidMount(): void {
+    this.unsubscribeTheme = subscribeToTheme(() => {
+      if (this.state.hasError) this.forceUpdate();
+    });
+  }
+
+  componentWillUnmount(): void {
+    this.unsubscribeTheme?.();
   }
 
   static getDerivedStateFromError(error: Error): Partial<EnhancedErrorBoundaryState> {
@@ -185,13 +198,13 @@ export class EnhancedErrorBoundary extends Component<
     const severityConfig = {
       low: {
         icon: 'information-circle',
-        color: '#5856D6',
+        color: theme.colors.info,
         title: '發生小問題',
         description: '這個區塊暫時無法顯示',
       },
       medium: {
         icon: 'warning',
-        color: '#FF9500',
+        color: theme.colors.warning,
         title: '發生錯誤',
         description: '這個功能暫時無法使用',
       },
@@ -281,8 +294,8 @@ export class EnhancedErrorBoundary extends Component<
                   gap: 8,
                 }}
               >
-                <Ionicons name="refresh" size={18} color="#fff" />
-                <Text style={{ color: '#fff', fontWeight: '700' }}>
+                <Ionicons name="refresh" size={18} color={theme.colors.onAccent} />
+                <Text style={{ color: theme.colors.onAccent, fontWeight: '700' }}>
                   重新載入{' '}
                   {recoveryAttempts > 0
                     ? `(${recoveryAttempts}/${MAX_AUTO_RECOVERY_ATTEMPTS})`
@@ -421,6 +434,7 @@ export function AsyncErrorBoundary({
   fallback?: React.ReactNode;
   onError?: (error: Error) => void;
 }) {
+  useThemeVersion();
   const [error, setError] = useState<Error | null>(null);
   const previousHandlerRef = useRef<((error: Error, isFatal?: boolean) => void) | null>(null);
 

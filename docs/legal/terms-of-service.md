@@ -1,8 +1,9 @@
 # 服務條款 (Terms of Service)
+> 早期規劃草稿，尚未逐項對照目前產品行為。內文的團隊、專責職務、服務承諾及 `campushelper.app` 網址不可視為已設立或已提供。目前頁面內容以 `apps/web/src/app/privacy/page.tsx`、`apps/web/src/app/terms/page.tsx` 為準。支援與隱私請求請寄至 [demohan513@gmail.com](mailto:demohan513@gmail.com)。
 
 **校園助手 (Campus Helper)**
 
-**生效日期 (Effective Date): 2026年3月20日**
+**草稿記錄日期：2026年3月20日；尚未生效。**
 
 ---
 

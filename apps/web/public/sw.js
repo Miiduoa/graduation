@@ -7,12 +7,7 @@ const PUBLIC_ASSETS = [
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches
-      .open(STATIC_CACHE)
-      .then((cache) => cache.addAll(PUBLIC_ASSETS))
-      .then(() => self.skipWaiting()),
-  );
+  event.waitUntil(caches.open(STATIC_CACHE).then((cache) => cache.addAll(PUBLIC_ASSETS)));
 });
 
 self.addEventListener('activate', (event) => {

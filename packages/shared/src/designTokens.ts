@@ -1,12 +1,6 @@
 /**
- * Campus AI-First Design Tokens
- * ---
- * 跨端共用設計變數（Web / Mobile / Admin）
- * 與 apps/web/src/app/globals.css 的 CSS 變數一一對應
- *
- * 使用方式：
- *   Web:    直接用 globals.css 的 var(--xxx)
- *   Mobile: import { tokens } from '@campus/shared/designTokens'
+ * Campus One design tokens for shared surfaces and controls.
+ * Keep assistant aliases compatible with existing imports; they use the product palette.
  */
 
 export const tokens = {
@@ -14,67 +8,75 @@ export const tokens = {
   // 色彩系統（Color System）
   // ─────────────────────────────────────────────────
   color: {
-    // ── 基底 (繼承 v3.0 Campus Soft) ──
-    bg: '#F8F9FC',
-    bgSoft: '#FAFBFC',
+    bg: '#F8F7F3',
+    bgSoft: '#F1F2ED',
     surface: '#FFFFFF',
     surfaceTint: 'rgba(255,255,255,0.6)',
-    panel: '#F2F2F7',
-    panel2: '#E8E8ED',
-
-    text: '#1C1C1E',
-    muted: '#8E8E93',
-    mutedLight: '#AEAEB2',
-
-    border: '#E5E5EA',
-    borderStrong: '#D1D1D6',
-
-    // ── 品牌（Apple HIG · AI-First Indigo）──
-    brand: '#5856D6',
-    brand2: '#818CF8',
-    accentSoft: 'rgba(88,86,214,0.10)',
-
-    // ── 狀態（iOS System Colors）──
-    success: '#34C759',
-    successSoft: 'rgba(52,199,89,0.12)',
-    warning: '#FF9500',
-    warningSoft: 'rgba(255,149,0,0.12)',
-    danger: '#FF3B30',
-    dangerSoft: 'rgba(255,59,48,0.12)',
-    info: '#5AC8FA',
-    infoSoft: 'rgba(90,200,250,0.12)',
-
-    // ── AI 專屬色（新增）──
-    // AI 是介面本身，需要與其他狀態色明顯區隔
-    ai: '#6366F1',                   // Indigo 500 — AI 主色
-    aiStrong: '#4F46E5',             // Indigo 600 — hover/pressed
-    aiSoft: 'rgba(99,102,241,0.10)', // AI 卡背景
-    aiHalo: 'rgba(99,102,241,0.20)', // AI focus halo
-    aiSurface: '#FAFBFF',            // AI 卡的純色 fallback
-
-    // AI 漸層（Web 用 CSS gradient，Mobile 用 expo-linear-gradient）
-    aiGradient: ['#6366F1', '#8B5CF6', '#EC4899'] as const, // Indigo → Purple → Pink
-    aiGradientSoft: ['#EEF2FF', '#FAF5FF', '#FCE7F3'] as const,
-
-    // ── 信心度（Confidence）──
-    confidenceHigh: '#34C759',  // 綠 — 已驗證
-    confidenceMid:  '#FF9500',  // 琥珀 — 請再確認
-    confidenceLow:  '#FF3B30',  // 紅 — 風險高，建議找真人
+    panel: '#EEEFEA',
+    panel2: '#E6ECE5',
+    text: '#243B35',
+    muted: '#626E67',
+    mutedLight: '#727B74',
+    border: '#DDDEDA',
+    borderStrong: '#B2BCB1',
+    brand: '#314D40',
+    brand2: '#4B6957',
+    onBrand: '#FFFFFF',
+    accentSoft: '#E6ECE5',
+    success: '#386146',
+    successSoft: '#E6EEE4',
+    warning: '#8B631E',
+    warningSoft: '#F6EEDA',
+    danger: '#983F32',
+    dangerSoft: '#F7E9E3',
+    info: '#41646A',
+    infoSoft: '#E6EEEE',
+    ai: '#314D40',
+    aiStrong: '#4B6957',
+    aiSoft: '#E6ECE5',
+    aiHalo: 'rgba(49,77,64,0.20)',
+    aiSurface: '#F0F1EB',
+    aiGradient: ['#314D40', '#4B6957', '#526750'] as const,
+    aiGradientSoft: ['#E6ECE5', '#F0F1EB', '#F8F7F3'] as const,
+    confidenceHigh: '#386146',
+    confidenceMid: '#8B631E',
+    confidenceLow: '#983F32',
   },
 
-  // ─────────────────────────────────────────────────
-  // 暗黑模式（Dark Mode）
-  // ─────────────────────────────────────────────────
   colorDark: {
-    bg: '#0D1420',
-    surface: '#1A1F2E',
-    panel: '#222838',
-    text: '#F2F4FA',
-    muted: '#9CA3B5',
-    border: '#2A3142',
-    ai: '#818CF8',
-    aiSurface: '#1A1B2E',
-    aiHalo: 'rgba(139,92,246,0.32)',
+    bg: '#171F1B',
+    bgSoft: '#1D2721',
+    surface: '#202B24',
+    surfaceTint: 'rgba(255,255,255,0.06)',
+    panel: '#202B24',
+    panel2: '#37463B',
+    text: '#E5EEE3',
+    muted: '#A5B5A6',
+    mutedLight: '#A1B09E',
+    border: '#37463B',
+    borderStrong: '#53654F',
+    brand: '#A9C6A3',
+    brand2: '#A9C6A3',
+    onBrand: '#17291D',
+    accentSoft: 'rgba(169,198,163,0.16)',
+    success: '#A6CA9E',
+    successSoft: 'rgba(166,202,158,0.16)',
+    warning: '#DEC080',
+    warningSoft: 'rgba(222,192,128,0.16)',
+    danger: '#EFAC9A',
+    dangerSoft: 'rgba(239,172,154,0.16)',
+    info: '#A7C7CA',
+    infoSoft: 'rgba(167,199,202,0.16)',
+    ai: '#A9C6A3',
+    aiStrong: '#C1D6BC',
+    aiSoft: 'rgba(169,198,163,0.16)',
+    aiSurface: '#273229',
+    aiHalo: 'rgba(169,198,163,0.24)',
+    aiGradient: ['#A9C6A3', '#B4CEAE', '#C1D6BC'] as const,
+    aiGradientSoft: ['#273229', '#202B24', '#171F1B'] as const,
+    confidenceHigh: '#A6CA9E',
+    confidenceMid: '#DEC080',
+    confidenceLow: '#EFAC9A',
   },
 
   // ─────────────────────────────────────────────────
@@ -91,13 +93,13 @@ export const tokens = {
   },
 
   // ─────────────────────────────────────────────────
-  // 圓角（Radius）— iOS 風格
+  // 圓角（Radius）
   // ─────────────────────────────────────────────────
   radius: {
-    xs: 8,
-    sm: 12,
-    md: 18,
-    lg: 22,
+    xs: 4,
+    sm: 6,
+    md: 8,
+    lg: 12,
     pill: 999,
   },
 
@@ -149,12 +151,12 @@ export const tokens = {
   // 陰影（Shadow）— Soft / Layered
   // ─────────────────────────────────────────────────
   shadow: {
-    sm: '0 2px 10px rgba(17,25,60,0.08)',
-    md: '0 6px 18px rgba(17,25,60,0.10)',
-    lg: '0 10px 28px rgba(17,25,60,0.14)',
-    // AI 元件專屬：紫色微光
-    ai: '0 0 0 3px rgba(99,102,241,0.18), 0 8px 24px rgba(99,102,241,0.12)',
-    aiStrong: '0 0 0 4px rgba(99,102,241,0.25), 0 12px 32px rgba(139,92,246,0.20)',
+    sm: '0 2px 8px rgba(36,59,53,0.04)',
+    md: '0 4px 16px rgba(36,59,53,0.07)',
+    lg: '0 8px 24px rgba(36,59,53,0.10)',
+    // Assistant aliases share the same focus treatment.
+    ai: '0 0 0 3px rgba(49,77,64,0.18), 0 8px 24px rgba(49,77,64,0.12)',
+    aiStrong: '0 0 0 4px rgba(49,77,64,0.25), 0 12px 32px rgba(49,77,64,0.20)',
   },
 
   // ─────────────────────────────────────────────────
@@ -166,13 +168,13 @@ export const tokens = {
       fast: 120,
       base: 220,
       slow: 280,
-      breath: 1600, // AI 呼吸動畫
+      breath: 1600, // 循環提示動畫
     },
     easing: {
-      out: 'cubic-bezier(0.16, 1, 0.3, 1)',         // 標準退場
-      in: 'cubic-bezier(0.4, 0, 1, 1)',              // 標準進場
-      inOut: 'cubic-bezier(0.4, 0, 0.2, 1)',         // 標準雙向
-      spring: 'cubic-bezier(0.34, 1.56, 0.64, 1)',   // 彈性（AI 浮現用）
+      out: 'cubic-bezier(0.16, 1, 0.3, 1)', // 標準退場
+      in: 'cubic-bezier(0.4, 0, 1, 1)', // 標準進場
+      inOut: 'cubic-bezier(0.4, 0, 0.2, 1)', // 標準雙向
+      spring: 'cubic-bezier(0.34, 1.56, 0.64, 1)', // 彈性
     },
   },
 
@@ -182,13 +184,13 @@ export const tokens = {
   z: {
     base: 0,
     raised: 10,
-    sticky: 100,           // sticky header
-    drawer: 200,           // AI side drawer
-    commandBar: 300,       // 全屏 Command Bar
-    overlay: 400,          // 模態背景
-    modal: 500,            // 模態本體
-    toast: 600,            // toast / 浮島提醒
-    takeover: 700,         // 緊急廣播（Alarm 級主動式 AI）
+    sticky: 100, // sticky header
+    drawer: 200, // side drawer
+    commandBar: 300, // 全屏 Command Bar
+    overlay: 400, // 模態背景
+    modal: 500, // 模態本體
+    toast: 600, // toast / 浮島提醒
+    takeover: 700, // 緊急廣播
   },
 
   // ─────────────────────────────────────────────────
@@ -202,17 +204,17 @@ export const tokens = {
   },
 
   // ─────────────────────────────────────────────────
-  // AI 介面專屬常數
+  // 助理介面尺寸與更新間隔
   // ─────────────────────────────────────────────────
   ai: {
-    commandBarHeight: 56,        // Desktop / Tablet
-    commandPillHeight: 56,       // Mobile 底部浮島
+    commandBarHeight: 56, // Desktop / Tablet
+    commandPillHeight: 56, // Mobile 底部浮島
     commandSheetMaxHeight: 0.75, // 占螢幕比例
-    drawerWidth: 380,            // Desktop AI Drawer
+    drawerWidth: 380, // Desktop drawer
     slotCardMaxWidth: 720,
     typingDotCount: 3,
-    typingDotInterval: 1200,     // ms
-    breathPeriod: 1600,          // ms
+    typingDotInterval: 1200, // ms
+    breathPeriod: 1600, // ms
     sourceStampMaxAge: 24 * 3600 * 1000, // 24h 後標示「資料可能過舊」
   },
 } as const;
@@ -222,10 +224,11 @@ export type DesignTokens = typeof tokens;
 // ─────────────────────────────────────────────────
 // Helper: 把 tokens 轉成 CSS 變數字串（給 Web 用）
 // ─────────────────────────────────────────────────
-export function tokensToCssVariables(): string {
-  const lines: string[] = [':root {'];
+export function tokensToCssVariables(mode: 'light' | 'dark' = 'light'): string {
+  const lines: string[] = [mode === 'dark' ? ":root[data-theme='dark'] {" : ':root {'];
+  const colors = mode === 'dark' ? tokens.colorDark : tokens.color;
   // Color
-  for (const [k, v] of Object.entries(tokens.color)) {
+  for (const [k, v] of Object.entries(colors)) {
     if (typeof v === 'string') {
       lines.push(`  --c-${kebab(k)}: ${v};`);
     }

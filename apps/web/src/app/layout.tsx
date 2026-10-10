@@ -4,13 +4,14 @@ import { AuthProvider } from '@/components/AuthGuard';
 import { ToastProvider } from '@/components/ui';
 import { AppearancePreferences } from '@/components/AppearancePreferences';
 import { appearanceBootstrap } from '@/lib/appearanceBootstrap';
+import { CampusProviders } from '@/components/CampusProviders';
 import './globals.css';
 
 export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: 'Campus One｜課程與校園生活',
-  description: '靜宜大學校園資訊平台，整合公告、活動、地圖、餐廳、課表與成績查詢',
+  description: '課程、校園資訊與跨校交流，接續每天的學習與生活',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
@@ -25,7 +26,7 @@ export const metadata: Metadata = {
     locale: 'zh_TW',
     siteName: 'Campus One',
     title: 'Campus One｜課程與校園生活',
-    description: '靜宜大學校園資訊平台，整合公告、活動、地圖、餐廳、課表與成績查詢',
+    description: '課程、校園資訊與跨校交流，接續每天的學習與生活',
   },
   twitter: {
     card: 'summary_large_image',
@@ -72,7 +73,9 @@ export default function RootLayout({
         <AppearancePreferences />
         <ServiceWorkerRegistration />
         <AuthProvider>
-          <ToastProvider position="top-center">{children}</ToastProvider>
+          <ToastProvider position="top-center">
+            <CampusProviders>{children}</CampusProviders>
+          </ToastProvider>
         </AuthProvider>
       </body>
     </html>

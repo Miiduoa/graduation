@@ -3031,7 +3031,7 @@ export function SmartDashboardScreen(props: any) {
                     paddingVertical: 2,
                   }}
                 >
-                  <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>
+                  <Text style={{ color: theme.colors.onDanger, fontSize: 10, fontWeight: '700' }}>
                     {pendingTodos}
                   </Text>
                 </View>

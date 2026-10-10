@@ -430,7 +430,7 @@ export function AttendanceScreen(props: any) {
                 borderRadius: 100,
               }}
             >
-              <Text style={{ color: '#fff', fontSize: 11, fontWeight: '600' }}>
+              <Text style={{ color: isTeacher ? theme.colors.onAccent : theme.colors.onSuccess, fontSize: 11, fontWeight: '600' }}>
                 {isTeacher ? '教師' : '學生'} · {myCourses.length} 門課
               </Text>
             </View>
@@ -570,7 +570,7 @@ export function AttendanceScreen(props: any) {
                       borderRadius: 10,
                     }}
                   >
-                    <Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' }}>
+                    <Text style={{ color: theme.colors.onDanger, fontSize: 13, fontWeight: '700' }}>
                       {isTeacher ? '管理' : '簽到'}
                     </Text>
                   </View>
@@ -745,7 +745,7 @@ export function AttendanceScreen(props: any) {
                                 alignItems: 'center',
                               }}
                             >
-                              <Ionicons name="checkmark" size={20} color="#fff" />
+                              <Ionicons name="checkmark" size={20} color={theme.colors.onSuccess} />
                             </Pressable>
                             <Pressable
                               onPress={() => handleReviewLeave(req.id, false)}
@@ -758,7 +758,7 @@ export function AttendanceScreen(props: any) {
                                 alignItems: 'center',
                               }}
                             >
-                              <Ionicons name="close" size={20} color="#fff" />
+                              <Ionicons name="close" size={20} color={theme.colors.onDanger} />
                             </Pressable>
                           </View>
                         ) : (
