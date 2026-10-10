@@ -9,6 +9,13 @@ export type ServiceCategory = (typeof SERVICE_CATEGORIES)[number]['id'];
 
 export const CAMPUS_SERVICES = [
   {
+    name: '跨校交流',
+    text: '在公開看板分享近況，認識其他校園的人',
+    href: '/social',
+    keywords: '社交 跨校 公開 看板 social',
+    category: 'connect',
+  },
+  {
     name: '課表',
     text: '查看本人的課程時間與教室',
     href: '/timetable',

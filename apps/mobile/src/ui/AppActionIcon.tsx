@@ -3,6 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { generatedButtonIcons, type GeneratedButtonIconId } from './generatedButtonIcons';
 import { GENERATED_ICON_IONICON } from './generatedButtonIonicons';
 import { theme } from './theme';
+import { useThemeVersion } from './useThemeStyleSheet';
 
 export function AppActionIcon(props: {
   name: GeneratedButtonIconId;
@@ -13,6 +14,7 @@ export function AppActionIcon(props: {
   /** 僅在 fallback === 'ionicon' 時生效；預設跟隨主題主文字色 */
   color?: string;
 }) {
+  useThemeVersion();
   const fallback = props.fallback ?? 'image';
   if (fallback === 'ionicon') {
     const ionName = GENERATED_ICON_IONICON[props.name];

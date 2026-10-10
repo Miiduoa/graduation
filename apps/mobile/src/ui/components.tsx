@@ -1,5 +1,13 @@
 /* eslint-disable */
-import React, { Component, ErrorInfo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, {
+  Component,
+  ErrorInfo,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import {
   Animated,
   Pressable,
@@ -46,6 +54,7 @@ export function Spinner({
   size?: number;
   color?: string;
 }) {
+  useVisualTheme();
   return <ActivityIndicator size={size} color={color} />;
 }
 
@@ -372,6 +381,7 @@ export function Button(props: {
   fullWidth?: boolean;
   style?: StyleProp<ViewStyle>;
 }) {
+  useVisualTheme();
   const kind = props.kind ?? 'secondary';
   const disabled = !!props.disabled || !!props.loading;
   const size = props.size ?? 'default';
@@ -387,7 +397,7 @@ export function Button(props: {
   const textColors: Record<string, string> = {
     primary: theme.colors.onAccent,
     secondary: theme.colors.text,
-    danger: theme.colors.onAccent,
+    danger: theme.colors.onDanger,
     ghost: theme.colors.text,
     'accent-ghost': theme.colors.accent,
     outline: theme.colors.text,
@@ -491,6 +501,7 @@ export function LoadingState(props: {
   hint?: string;
   rows?: number;
 }) {
+  useVisualTheme();
   const rows = props.rows ?? 3;
   return (
     <View style={{ gap: theme.space.md, paddingVertical: theme.space.xl }}>
@@ -521,6 +532,7 @@ export function EmptyState(props: {
   /** 於「一般」空狀態顯示極簡留白插畫（不適用 error／搜尋／篩選 variant） */
   showCalmHero?: boolean;
 }) {
+  useVisualTheme();
   const getIconAndColor = () => {
     switch (props.variant) {
       case 'search':
@@ -536,7 +548,10 @@ export function EmptyState(props: {
 
   const { icon, color } = getIconAndColor();
   const useHero =
-    props.showCalmHero === true && props.variant !== 'search' && props.variant !== 'filter' && props.variant !== 'error';
+    props.showCalmHero === true &&
+    props.variant !== 'search' &&
+    props.variant !== 'filter' &&
+    props.variant !== 'error';
   const heroMaxW = Math.min(300, SCREEN_WIDTH - theme.layout.screenHorizontalPadding * 2);
   const heroH = Math.round((heroMaxW * 576) / 1024);
 
@@ -683,6 +698,7 @@ export function ErrorState(props: {
   errorCode?: string;
   showDetails?: boolean;
 }) {
+  useVisualTheme();
   const errorType = props.errorType ?? props.type ?? 'unknown';
   const config = ERROR_CONFIGS[errorType];
 
@@ -767,6 +783,7 @@ export function ErrorState(props: {
 }
 
 export function SectionTitle(props: { text: string }) {
+  useVisualTheme();
   return (
     <Text
       style={{
@@ -790,6 +807,7 @@ export function SearchBar(props: {
   onFocus?: () => void;
   onSubmit?: () => void;
 }) {
+  useVisualTheme();
   const [isFocused, setIsFocused] = useState(false);
   const handleChange = props.onChangeText ?? props.onChange ?? (() => {});
 
@@ -853,6 +871,7 @@ export function SearchBar(props: {
 }
 
 export function CountdownTimer(props: { targetDate: Date; label?: string; onExpire?: () => void }) {
+  useVisualTheme();
   const [countdown, setCountdown] = useState(formatCountdown(props.targetDate));
 
   useEffect(() => {
@@ -943,6 +962,7 @@ export function ProgressRing(props: {
   color?: string;
   showLabel?: boolean;
 }) {
+  useVisualTheme();
   const size = props.size ?? 60;
   const strokeWidth = props.strokeWidth ?? 5;
   const color = props.color ?? theme.colors.accent;
@@ -986,6 +1006,7 @@ export function ProgressRing(props: {
 }
 
 export function StatusBadge(props: { status: string; text?: string; label?: string }) {
+  useVisualTheme();
   const configs: Record<string, { color: string; icon: any; defaultText: string }> = {
     open: { color: theme.colors.success, icon: 'checkmark-circle' as const, defaultText: '營業中' },
     closed: { color: theme.colors.danger, icon: 'close-circle' as const, defaultText: '已打烊' },
@@ -1026,6 +1047,7 @@ export function RatingStars(props: {
   interactive?: boolean;
   onChange?: (rating: number) => void;
 }) {
+  useVisualTheme();
   const maxRating = props.maxRating ?? 5;
   const size = props.size ?? 18;
   const minTouchSize = Math.max(size, 44);
@@ -1058,7 +1080,7 @@ export function RatingStars(props: {
             <Ionicons
               name={filled ? 'star' : half ? 'star-half' : 'star-outline'}
               size={size}
-              color="#FF9500"
+              color={theme.colors.warning}
             />
           </Pressable>
         );
@@ -1084,6 +1106,7 @@ export function AnimatedCard(props: {
   delay?: number;
   variant?: 'default' | 'elevated';
 }) {
+  useVisualTheme();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(16)).current;
 
@@ -1145,6 +1168,7 @@ export function QuickAction(props: {
   disabled?: boolean;
   color?: string;
 }) {
+  useVisualTheme();
   const badgeText =
     props.badge && props.badge > 0 ? (props.badge > 99 ? '99+' : String(props.badge)) : null;
   const color = props.color ?? theme.colors.accent;
@@ -1209,7 +1233,9 @@ export function QuickAction(props: {
             paddingHorizontal: 4,
           }}
         >
-          <Text style={{ fontSize: 10, fontWeight: '700', color: '#fff' }}>{badgeText}</Text>
+          <Text style={{ fontSize: 10, fontWeight: '700', color: theme.colors.onDanger }}>
+            {badgeText}
+          </Text>
         </View>
       ) : null}
     </Pressable>
@@ -1222,6 +1248,7 @@ export function InfoRow(props: {
   direction?: 'horizontal' | 'vertical';
   icon?: string;
 }) {
+  useVisualTheme();
   const isVertical = props.direction === 'vertical';
 
   return (
@@ -1251,6 +1278,7 @@ export function Skeleton(props: {
   height?: number;
   borderRadius?: number;
 }) {
+  useVisualTheme();
   const styleObj: any = {
     height: props.height ?? 20,
     borderRadius: props.borderRadius ?? theme.radius.md,
@@ -1266,6 +1294,7 @@ export function Skeleton(props: {
 }
 
 export function Divider(props: { text?: string; spacing?: number }) {
+  useVisualTheme();
   const spacing = props.spacing ?? theme.layout.listSeparatorGap;
 
   if (props.text) {
@@ -1298,6 +1327,7 @@ export function FeatureHighlight(props: {
   description: string;
   color?: string;
 }) {
+  useVisualTheme();
   const color = props.color ?? theme.colors.accent;
 
   return (
@@ -1314,9 +1344,7 @@ export function FeatureHighlight(props: {
       >
         <Ionicons name={props.icon as any} size={20} color={color} />
       </View>
-      <Text
-        style={{ fontSize: 15, fontWeight: '700', color: theme.colors.text, letterSpacing: 0 }}
-      >
+      <Text style={{ fontSize: 15, fontWeight: '700', color: theme.colors.text, letterSpacing: 0 }}>
         {props.title}
       </Text>
       <Text style={{ fontSize: 13, color: theme.colors.muted, lineHeight: 20 }}>
@@ -1334,6 +1362,7 @@ export function FilterChips(props: {
   multi?: boolean;
   multiple?: boolean;
 }) {
+  useVisualTheme();
   const selected = props.selected ?? [];
   const isMulti = props.multi || props.multiple;
   const handleChange = props.onSelect || props.onChange || (() => {});
@@ -1368,10 +1397,17 @@ export function FilterChips(props: {
 }
 
 export function FilterChip(props: { label: string; selected?: boolean; onPress?: () => void }) {
+  useVisualTheme();
   return (
     <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={props.label}
+      accessibilityState={{ selected: !!props.selected, disabled: !props.onPress }}
+      disabled={!props.onPress}
       onPress={props.onPress}
       style={({ pressed }) => ({
+        minHeight: 44,
+        justifyContent: 'center',
         paddingHorizontal: theme.space.md,
         paddingVertical: theme.space.sm,
         borderRadius: theme.radius.full,
@@ -1385,7 +1421,7 @@ export function FilterChip(props: { label: string; selected?: boolean; onPress?:
         style={{
           fontSize: 13,
           fontWeight: '600',
-          color: props.selected ? '#fff' : theme.colors.text,
+          color: props.selected ? theme.colors.onAccent : theme.colors.text,
         }}
       >
         {props.label}
@@ -1400,6 +1436,7 @@ export function SegmentedControl(props: {
   onSelect?: (id: any) => void;
   onChange?: (id: any) => void;
 }) {
+  useVisualTheme();
   const getOptionId = (opt: any) => (typeof opt === 'object' ? (opt.id ?? opt.key) : opt);
   const getOptionLabel = (opt: any) => (typeof opt === 'object' ? opt.label : opt);
   const selected = props.selected ?? getOptionId(props.options[0]);
@@ -1456,6 +1493,7 @@ export function SortButton(props: {
   onChange?: (id: any) => void;
   label?: string;
 }) {
+  useVisualTheme();
   const [visible, setVisible] = useState(false);
   const getOptionId = (opt: any) => (typeof opt === 'object' ? (opt.id ?? opt.key) : opt);
   const getOptionLabel = (opt: any) => (typeof opt === 'object' ? opt.label : opt);
@@ -1546,6 +1584,7 @@ export function StatCard(props: {
   color?: string;
   onPress?: () => void;
 }) {
+  useVisualTheme();
   const color = props.color ?? theme.colors.accent;
   const valueStr = String(props.value);
 
@@ -1650,6 +1689,7 @@ export function PriceRangeSlider(props: {
   onMaxChange?: (value: number) => void;
   step?: number;
 }) {
+  useVisualTheme();
   const step = props.step ?? 1;
   const range = props.max - props.min;
 
@@ -1685,6 +1725,7 @@ export function PriceRangeSlider(props: {
 }
 
 export function Avatar(props: { name?: string; size?: number; imageUrl?: string; color?: string }) {
+  useVisualTheme();
   const size = props.size ?? 40;
   const color = props.color ?? theme.colors.accent;
   const initials =
@@ -1716,6 +1757,7 @@ export function Avatar(props: { name?: string; size?: number; imageUrl?: string;
 }
 
 export function Badge(props: { count?: number; max?: number; dot?: boolean; text?: string }) {
+  useVisualTheme();
   if (props.dot) {
     return (
       <View
@@ -1749,7 +1791,7 @@ export function Badge(props: { count?: number; max?: number; dot?: boolean; text
         paddingHorizontal: 6,
       }}
     >
-      <Text style={{ fontSize: 11, fontWeight: '700', color: '#fff' }}>{text}</Text>
+      <Text style={{ fontSize: 11, fontWeight: '700', color: theme.colors.onDanger }}>{text}</Text>
     </View>
   );
 }
@@ -1767,6 +1809,7 @@ export function ListItem(props: {
   iconColor?: string;
   iconBg?: string;
 }) {
+  useVisualTheme();
   const textColor = props.danger
     ? theme.colors.danger
     : props.disabled
@@ -1859,6 +1902,7 @@ export function ListItem(props: {
 }
 
 export function SectionHeader(props: { title: string; action?: string; onAction?: () => void }) {
+  useVisualTheme();
   return (
     <View
       style={{
@@ -1901,6 +1945,7 @@ export function EmptyListPlaceholder(props: {
   actionLabel?: string;
   onAction?: () => void;
 }) {
+  useVisualTheme();
   const desc = props.description ?? props.subtitle ?? '暫無相關資料';
   return (
     <View
@@ -1994,6 +2039,7 @@ export function AuthGuard(props: {
   title?: string;
   description?: string;
 }) {
+  useVisualTheme();
   const isAuth = props.isAuthenticated ?? !!props.user;
   if (!isAuth) {
     return (
@@ -2018,6 +2064,7 @@ export function ConfirmDialog(props: {
   onCancel?: () => void;
   isDangerous?: boolean;
 }) {
+  useVisualTheme();
   if (!props.visible) return null;
 
   return (

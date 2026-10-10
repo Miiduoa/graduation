@@ -488,7 +488,7 @@ const createStyles = () => StyleSheet.create({
     overflow: 'hidden',
   },
   inputDisabled: {
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    backgroundColor: theme.colors.disabledBg,
     opacity: 0.6,
   },
   input: {
@@ -508,7 +508,7 @@ const createStyles = () => StyleSheet.create({
     padding: 12,
   },
   inputRightIconPressed: {
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: theme.colors.surfaceInteractiveStrong,
   },
   hint: {
     fontSize: 12,
