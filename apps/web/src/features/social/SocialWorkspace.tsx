@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useCallback, useState } from 'react';
 import { SiteShell } from '@/components/SiteShell';
 import { SchoolSelector } from '@/components/SchoolSelector';
@@ -44,6 +45,15 @@ function parseAction(value: unknown) {
 
 export function SocialWorkspace() {
   const auth = useNuniSession();
+  const params = useSearchParams();
+  const schools = useSelectedSchool();
+  const campus = params.get('campus') ?? schools.selectedSchoolId;
+  const browseQuery = new URLSearchParams();
+  if (campus && (campus === 'all' || /^[a-z0-9][a-z0-9-]{0,78}[a-z0-9]$/.test(campus)))
+    browseQuery.set('campus', campus);
+  // Only this page and its browsing preference survive sign-in; URL return targets are ignored.
+  const returnUrl = `/social${browseQuery.size ? `?${browseQuery}` : ''}`;
+  const loginHref = `/classroom/login?returnUrl=${encodeURIComponent(returnUrl)}`;
   return (
     <SiteShell title="跨校公開交流" subtitle="從一個想法、一個問題，開始和不同校園的人交流。">
       {auth.session ? (
@@ -51,6 +61,7 @@ export function SocialWorkspace() {
           key={`${auth.session.platformAccountId}:${auth.session.context}`}
           context={auth.session.context}
           suspended={auth.loading || auth.pendingLogout}
+          loginHref={loginHref}
         />
       ) : auth.loading ? (
         <p role="status">正在確認登入狀態…</p>
@@ -59,7 +70,7 @@ export function SocialWorkspace() {
           <h2>登入後參與公開交流</h2>
           <p>{auth.error || '使用 Campus One 帳號，閱讀與發表跨校公開貼文。'}</p>
           <div className={styles.actions}>
-            <Link className={styles.link} href="/classroom/login">
+            <Link className={styles.link} href={loginHref}>
               登入帳號
             </Link>
             <Link className={styles.link} href="/community">
@@ -73,7 +84,15 @@ export function SocialWorkspace() {
   );
 }
 
-function Workspace({ context, suspended }: { context: string; suspended: boolean }) {
+function Workspace({
+  context,
+  suspended,
+  loginHref,
+}: {
+  context: string;
+  suspended: boolean;
+  loginHref: string;
+}) {
   const [expired, setExpired] = useState(false);
   const onExpired = useCallback(() => setExpired(true), []);
   const client = { context, enabled: !suspended && !expired, onExpired };
@@ -90,7 +109,7 @@ function Workspace({ context, suspended }: { context: string; suspended: boolean
       <section className={styles.panel}>
         <h2>請重新確認登入</h2>
         <p role="alert">登入已失效或帳號已變更，這個頁面的資料已清除。</p>
-        <Link className={styles.link} href="/classroom/login">
+        <Link className={styles.link} href={loginHref}>
           回到登入頁
         </Link>
       </section>

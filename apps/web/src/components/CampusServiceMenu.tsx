@@ -21,7 +21,7 @@ export function CampusServiceMenu() {
     return () => document.removeEventListener('pointerdown', dismiss);
   }, []);
   const context = new URLSearchParams();
-  for (const key of ['school', 'schoolId']) {
+  for (const key of ['school', 'schoolId', 'campus']) {
     const value = params?.get(key);
     if (value) context.set(key, value);
   }

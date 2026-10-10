@@ -1,12 +1,18 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { CampusServiceMenu } from './CampusServiceMenu';
 import { AppHeader } from './AppHeader';
 
 const navigation = vi.hoisted(() => ({ pathname: '/map', search: '' }));
+const auth = vi.hoisted(() => ({
+  session: null as null | { platformAccountId: string; isPlatformOperator: boolean },
+  loading: false,
+  pendingLogout: false,
+  logout: vi.fn(),
+}));
 vi.mock('./SchoolSelector', () => ({ SchoolSelector: () => null }));
 vi.mock('@/features/nuni/Session', () => ({
-  useNuniSession: () => ({ session: null, loading: false, pendingLogout: false, logout: vi.fn() }),
+  useNuniSession: () => auth,
 }));
 vi.mock('next/navigation', () => ({
   usePathname: () => navigation.pathname,
@@ -38,6 +44,10 @@ const originalServices = [
 beforeEach(() => {
   navigation.pathname = '/map';
   navigation.search = '';
+  window.history.replaceState({}, '', '/map');
+  auth.session = null;
+  auth.loading = false;
+  auth.pendingLogout = false;
 });
 
 it('retains all existing services and search while adding a separate classroom entry', () => {
@@ -49,11 +59,13 @@ it('retains all existing services and search while adding a separate classroom e
   expect(screen.getByRole('link', { name: /尋找校園服務/ }).getAttribute('href')).toBe('/search');
   expect(screen.getByRole('link', { name: '課程空間' }).getAttribute('href')).toBe('/classroom');
   expect(screen.getByRole('link', { name: '跨校交流' }).getAttribute('href')).toBe('/social');
-  expect(screen.getAllByRole('link')).toHaveLength(19);
+  expect(screen.getByRole('link', { name: '店家合作' }).getAttribute('href')).toBe('/merchant');
+  expect(screen.getAllByRole('link')).toHaveLength(20);
 });
 
 it('preserves school context without copying unrelated session or return parameters', () => {
-  navigation.search = 'school=pu&schoolId=tw-pu&returnUrl=%2Fsettings&session=other';
+  navigation.search =
+    'school=pu&schoolId=tw-pu&campus=other-campus&returnUrl=%2Fsettings&session=other';
   render(<CampusServiceMenu />);
   fireEvent.click(screen.getByText('所有服務'));
   for (const link of screen.getAllByRole('link')) {
@@ -61,8 +73,22 @@ it('preserves school context without copying unrelated session or return paramet
     expect([...target.searchParams.entries()]).toEqual([
       ['school', 'pu'],
       ['schoolId', 'tw-pu'],
+      ['campus', 'other-campus'],
     ]);
   }
+});
+
+it('routes the Nuni account to its courses and hides operator links during revalidation', () => {
+  auth.session = { platformAccountId: 'a', isPlatformOperator: true };
+  const view = render(<AppHeader />);
+  expect(screen.getByRole('link', { name: '課程' }).getAttribute('href')).toBe('/classroom');
+  expect(screen.getByRole('link', { name: '我的帳號' }).getAttribute('href')).toBe('/profile');
+  expect(screen.getByRole('link', { name: '平台管理' })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '登入' })).toBeNull();
+  auth.loading = true;
+  view.rerender(<AppHeader />);
+  expect(screen.queryByRole('link', { name: '平台管理' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '我的帳號' })).toBeNull();
 });
 
 it('marks classroom children as part of the added service without selecting existing groups', () => {
@@ -84,6 +110,35 @@ it('keeps the Campus One header and original school login around the complete sh
     '/login?returnUrl=%2Fmap%3FschoolId%3Dtw-pu',
   );
   expect(screen.getByRole('link', { name: '今日' }).getAttribute('href')).toBe('/?schoolId=tw-pu');
+});
+
+it.each(['/login', '/classroom/login', '/admin/login'])(
+  'does not offer a second guest login from %s that would replace the existing destination',
+  (pathname) => {
+    navigation.pathname = pathname;
+    navigation.search = 'returnUrl=%2Fadmin&issue=cancelled';
+    render(<AppHeader />);
+    expect(screen.queryByRole('link', { name: '登入' })).toBeNull();
+    expect(screen.getByRole('navigation', { name: '主要導覽' })).toBeTruthy();
+  },
+);
+
+it('keeps the linked course assignment and query when using the header login', () => {
+  navigation.pathname = '/classroom/course/cw_11111111-1111-4111-8111-111111111111';
+  navigation.search = 'view=assignments';
+  const destination = `${navigation.pathname}?${navigation.search}#assignment-cwa_22222222-2222-4222-8222-222222222222`;
+  window.history.replaceState({}, '', destination);
+  render(<AppHeader />);
+  const login = screen.getByRole('link', { name: '登入' }) as HTMLAnchorElement;
+  expect(new URL(login.href).pathname).toBe('/login');
+  expect(new URL(login.href).searchParams.get('returnUrl')).toBe(destination);
+
+  const nextDestination = `${navigation.pathname}?${navigation.search}#assignment-cwa_33333333-3333-4333-8333-333333333333`;
+  act(() => {
+    window.history.replaceState({}, '', nextDestination);
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  expect(new URL(login.href).searchParams.get('returnUrl')).toBe(nextDestination);
 });
 
 it('closes on Escape and returns keyboard focus to the service control', () => {

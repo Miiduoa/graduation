@@ -4,7 +4,7 @@
 
 ## 正式 Web
 
-https://nuni.tw 的 Web 已部署，Fly release 34，執行版本 `6868053756701ed0716439d8e3575d6461a5a0d0`。後續來源封存和發布文件的 Git 提交不改變此 Web 執行版本。
+https://nuni.tw 的 Web 已於 2026-10-09 11:56（Asia/Taipei）核對完成，Fly release 35，執行版本 `9a77ed2e2ebc1c6edc87da1e43d800b25d2f01b4`。本批更新平台／學校登入分流、登入原頁返回、多校資格、店家申請及課程操作；App 程式與 Web 部署狀態分開追蹤。
 
 - 平台管理員入口：https://nuni.tw/admin/login。使用者指定的既有帳號已完成正式密碼登入設定；密碼、雜湊、session 和 cookie 不寫入來源或發布文件。
 - 管理台：https://nuni.tw/admin。可管理學校狀態、功能模組、限時代理、公開看板、社群檢舉和操作紀錄，並保留原 Nuni 完整管理與教學入口。
@@ -14,16 +14,16 @@ https://nuni.tw 的 Web 已部署，Fly release 34，執行版本 `6868053756701
 
 ## 正式 API 與映像
 
-API Fly release 20 執行 `cb57e78aa5f09155ec045ea4b5c130827cdf4fad`；Web 維持 release 34。兩個服務各有兩台既有 nrt 主機，全部健康檢查通過。
+API Fly release 20 執行 `cb57e78aa5f09155ec045ea4b5c130827cdf4fad`；Web 為 release 35。兩個服務各有兩台既有 nrt 主機，全部健康檢查通過。
 
 | 服務 | 映像索引 | amd64 映像 |
 | --- | --- | --- |
-| Web | `bdfa896cdaa15bd7bdf83bf4b385affa8856f7dcbbf6b46817165236884da641` | `0b69ce818258337a4d070bc058483e6912afca4eda7e06d8c3f5a24d3ccb897f` |
+| Web | `31eb9925eb1cf68582b80735ae4186feb7e0daa5b4181dc40c6aac3f352b3a48` | `830c204240bec42b0b915cd6e438f145336e54589f545b3ebc41c0aae22972de` |
 | API | `e63321d1b7afd8fb19200d44b557799e25fdb153a2f5349552a0d755cd8f47b7` | `445f5da3125041f093604fb5dc575a20a89c9abed8350bad311a5cfe96029813` |
 
 值皆為 SHA-256，位於原有 `registry.fly.io/nuni-web`／`registry.fly.io/nuni-api`。API release 18 已執行 275／276 migration；19 增加 scoped installer、20 修正既有 persona，兩者沒有新 SQL，因此沿用已驗證 schema，不重跑 release migration。
 
-回復程式可使用 API 相容索引 `2d520ef52b111315c52dcc93599b4f6ad31cfa3ca27efd9149838dbcb18f273d`（amd64 `08c7935e3cf6fe23dac61cb55fe46f17e30803c52b3eeccdc248beeeae4421d8`）。Web 前一版 release 33 索引 `3fa29f4d816dfca7b16e3070b5d1dad7bc3269309c3e85d2459e4a277e34ffe1`。回復會停用本批新功能；必須再驗證登入、健康與舊路由。
+回復程式可使用 API 相容索引 `2d520ef52b111315c52dcc93599b4f6ad31cfa3ca27efd9149838dbcb18f273d`（amd64 `08c7935e3cf6fe23dac61cb55fe46f17e30803c52b3eeccdc248beeeae4421d8`）。Web 前一版 release 34 amd64 映像為 `registry.fly.io/nuni-web@sha256:0b69ce818258337a4d070bc058483e6912afca4eda7e06d8c3f5a24d3ccb897f`；回復使用現行 `deploy/web/fly.nuni.toml` 及 rolling/update-only，不改 API 或資料庫。回復會停用本批新功能；必須再驗證登入、健康與舊路由。
 
 ## 正式社群初始化
 
@@ -33,7 +33,14 @@ CLI 執行前，缺少正式契約的建板請求回 503 並拒絕發布；修�
 
 2026-10-09 02:15 已建立正式「跨校交流」看板，歸屬真實開放的靜宜大學 tenant，登入者可跨校參與；在「所有校園」範圍可看到此看板，指定其他學校只顯示該校資料。BFF 重送相同 idempotency key 回到同一看板，公開看板總數為 1、貼文為 0。登入／新舊 session／管理資料／選校／看板／封鎖與檢舉／登出隔離共 21 項檢查通過。沒有送出正式測試貼文。
 
-## 已執行驗證
+## Release 35 驗證
+
+- 從 `9a77ed2` 的乾淨 git archive 建置 Linux amd64 映像，兩台 nrt 主機 rolling 更新成功、readiness 回報相同完整 SHA。
+- 正式站 16/16 公開路由、49/49 HTML 實際引用同源資源通過；Google options 回傳 `true`。
+- Web 測試 907 通過、1 略過，Web／App 型別檢查與 Web production build 通過；Web lint 0 errors、72 warnings。App 相關 11 suites／179 tests 通過，仍不代表正式 binary 或實機驗收。
+- 本次未改 API 映像、secrets、資料庫或 DNS。HTTP 驗證不代表真人 Google 授權與全部登入後角色流程已驗收。
+
+## Release 34 與先前 API 驗證
 
 - Campus One Web 746 passed、1 skipped；型別、production Docker build、lint 無 error。71 項既有 lint warnings 保留。
 - 本機真實 Web 容器 60 項 HTTP 檢查；正式站 34 項公開路由、資產、readiness、登入起始與原 Nuni 相容性檢查通過。
@@ -62,4 +69,4 @@ API 舊映像本身不能在 migration manifest 已前進後直接重啟；相�
 
 ## 版本與持續整合
 
-Campus One 功能執行版本 `6868053` 的 CI 與 Maestro E2E 成功；封存最終 API patches 的 `92bf7c6` CI 亦成功。E2E 是 CI 環境檢查，不代表商店或真實裝置驗收。後續僅發布文件提交，不替換正式 Web 映像。
+Campus One 功能執行版本 `6868053` 的 CI 與 Maestro E2E 成功；封存最終 API patches 的 `92bf7c6` CI 亦成功。E2E 是 CI 環境檢查，不代表商店或真實裝置驗收。本批 `9a77ed2` 直接發布 Fly release 35；PR #29 仍為 stack base，因此沒有觸發既有 GitHub CI，不能沿用先前提交的 CI 當作本批證據。

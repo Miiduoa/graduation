@@ -28,8 +28,13 @@ const TABS: { key: TabKey; label: string; icon: string; desc: string }[] = [
 ];
 
 export default function CommunityPage() {
+  const { schoolName } = resolveSchoolPageContext({});
   return (
-    <SiteShell title="校園交流" subtitle="分享校園消息，找到一起上課與讀書的同學。">
+    <SiteShell
+      title="校園交流"
+      subtitle="分享校園消息，找到一起上課與讀書的同學。"
+      schoolName={schoolName}
+    >
       <CommunityAccess>
         <CommunityPageInner />
       </CommunityAccess>

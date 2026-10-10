@@ -12,6 +12,11 @@
   background: var(--surface);
   overflow-wrap: anywhere;
 }
+.accountStack {
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+}
 .panel h2,
 .services h2 {
   font-size: var(--font-h2-size);

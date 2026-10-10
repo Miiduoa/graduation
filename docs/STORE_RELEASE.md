@@ -1,6 +1,14 @@
 # Campus One 與 nuni.tw 發布紀錄
 
-最新正式 Web／API 已部署平台管理員、選校與跨校公開社群：Web release 34（`6868053`）、API release 20（`cb57e78`），指定管理員實際登入、共用 session、看板與登出驗收通過。見 [平台發布紀錄](PLATFORM_RELEASE.md)。本次沒有提交新的 App Store／Google Play 版本；下列原生接軌、簽署、實機與商店事項仍需完成。
+最新正式 Web 已部署帳號、學校資格、店家與登入返回修正：Web release 35（`9a77ed2`），API 沿用 release 20（`cb57e78`）。正式 16 條公開路由與 49 個同源資源檢查通過；先前管理員／社群真人驗收屬 release 34，尚未重跑本批全部登入後流程。見 [平台發布紀錄](PLATFORM_RELEASE.md)。本次沒有提交新的 App Store／Google Play 版本；下列原生接軌、簽署、實機與商店事項仍需完成。
+
+## 2026-10-09 Google 與原生候選補充
+
+Google Console 已新增 `campus-one-android-play`，綁定 `com.nuni.app` 與 Play app signing SHA-1 `04:8E:5F:F0:A1:0D:68:08:DE:CF:1C:E3:D7:04:EC:4F:5E:CC:77:23`，公開 client ID `1096741064465-39b13khidhmohvo1go3nlmomgk3p07d4.apps.googleusercontent.com`。原 `nuni-android-prod` F7:ED 指紋是 upload certificate，保留供原流程使用。iOS 既有 `nuni-ios-prod` 已由 Console 確認為 `com.nuni.app`。
+
+Google 專案目前 Testing，品牌尚未完成；基本 `openid email profile` 登入符合 Google 的測試名單例外，但仍未完成真人／實機授權驗收。不得把 Console 設定成功描述成 App 已發版。
+
+正式候選新增獨立 `campus-one-native-google-1` runtime，避免舊 native binary 收到新增原生模組的 OTA。EAS production 尚缺此 repo 必填公開服務設定；Firebase 公開值有 Hosting 來源，法務頁在 nuni.tw，其餘 endpoint、Maps 與 released school IDs 尚需依實際服務驗收，未填造假值或關閉 gate。iOS 的簽署、entitlements、商店目標與最終 artifact 身分另行驗收。
 
 ## 先前 Web 批次與商店準備紀錄
 

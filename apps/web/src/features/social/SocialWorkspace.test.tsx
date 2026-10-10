@@ -11,7 +11,9 @@ const mocks = vi.hoisted(() => ({
   account: 'account-a',
   school: null as string | null,
   authenticated: true,
+  params: new URLSearchParams(),
 }));
+vi.mock('next/navigation', () => ({ useSearchParams: () => mocks.params }));
 vi.mock('@/components/SiteShell', () => ({
   SiteShell: ({ children }: { children: ReactNode }) => <main>{children}</main>,
 }));
@@ -58,6 +60,7 @@ beforeEach(() => {
   mocks.account = 'account-a';
   mocks.school = null;
   mocks.authenticated = true;
+  mocks.params = new URLSearchParams();
   mocks.refresh.mockReset();
   mocks.request.mockReset().mockImplementation(async (path: string) => {
     if (path === 'boards') return { items: [board] };
@@ -72,6 +75,42 @@ it('requires the real platform session and shows no invented public feed for gue
   render(<SocialWorkspace />);
   expect(screen.getByRole('heading', { name: '登入後參與公開交流' })).toBeTruthy();
   expect(mocks.request).not.toHaveBeenCalled();
+});
+
+it('returns a guest to public exchange with the selected school after signing in', () => {
+  mocks.authenticated = false;
+  mocks.school = 'school-a';
+  render(<SocialWorkspace />);
+  const href = screen.getByRole('link', { name: '登入帳號' }).getAttribute('href')!;
+  expect(href).toBe('/classroom/login?returnUrl=%2Fsocial%3Fcampus%3Dschool-a');
+  expect(mocks.request).not.toHaveBeenCalled();
+});
+
+it('preserves an explicit all-campus URL instead of restoring a saved school', () => {
+  mocks.authenticated = false;
+  mocks.school = 'school-a';
+  mocks.params = new URLSearchParams(
+    'campus=all&returnUrl=https%3A%2F%2Fattacker.example&redirect=%2Fadmin',
+  );
+  render(<SocialWorkspace />);
+  const href = screen.getByRole('link', { name: '登入帳號' }).getAttribute('href')!;
+  expect(new URL(href, 'https://campus.local').searchParams.get('returnUrl')).toBe(
+    '/social?campus=all',
+  );
+});
+
+it.each([
+  'https://attacker.example',
+  'school-a&returnUrl=//attacker.example',
+  '../admin',
+  'a'.repeat(81),
+])('does not let a malformed campus contaminate the return path: %s', (campus) => {
+  mocks.authenticated = false;
+  mocks.params = new URLSearchParams({ campus, returnUrl: '//attacker.example' });
+  render(<SocialWorkspace />);
+  expect(screen.getByRole('link', { name: '登入帳號' }).getAttribute('href')).toBe(
+    '/classroom/login?returnUrl=%2Fsocial',
+  );
 });
 
 it('filters by selected school without granting membership or retaining the old feed while a response is pending', async () => {
@@ -184,6 +223,7 @@ it('records a report only after confirmation from the server and shows persisten
 });
 
 it('removes public data and draft after the server rejects the session', async () => {
+  mocks.school = 'school-a';
   render(<SocialWorkspace />);
   await screen.findByText(post.text);
   fireEvent.change(screen.getByLabelText('貼文內容'), { target: { value: '未送出的草稿' } });
@@ -193,4 +233,7 @@ it('removes public data and draft after the server rejects the session', async (
   expect(screen.queryByText(post.text)).toBeNull();
   expect(screen.queryByDisplayValue('未送出的草稿')).toBeNull();
   await waitFor(() => expect(screen.queryByRole('button', { name: '公開發表' })).toBeNull());
+  expect(screen.getByRole('link', { name: '回到登入頁' }).getAttribute('href')).toBe(
+    '/classroom/login?returnUrl=%2Fsocial%3Fcampus%3Dschool-a',
+  );
 });

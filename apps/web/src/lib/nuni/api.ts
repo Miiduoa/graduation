@@ -6,6 +6,17 @@ import {
   parseNuniPrincipal,
 } from '@campus/shared/src/nuni';
 import {
+  parseMerchantApplication,
+  parseMerchantOverview,
+  parseMerchantWorkspaces,
+  validateMerchantApplicationInput,
+} from '@campus/shared/src/nuniMerchant';
+import {
+  parseNuniMemberships,
+  parseMembershipRequestReceipt,
+  validateMembershipRequestInput,
+} from '@campus/shared/src/nuniAccount';
+import {
   SESSION_COOKIE,
   boundedJson,
   equalSecret,
@@ -62,12 +73,18 @@ function dueDate(input: Record<string, unknown>): string | null {
 
 export async function handleNuni(request: NextRequest, segments: string[]): Promise<NextResponse> {
   try {
-    if (!nuniEnabled()) throw new NuniError(404, 'NOT_FOUND');
+    const path = segments.join('/');
+    if (!nuniEnabled() && path !== 'session' && path !== 'logout') {
+      // Existing sessions still need verification and revocation when courses are disabled.
+      if (request.method === 'GET' && !request.nextUrl.search) {
+        if (path === 'sign-in-options') return jsonResponse({ google: false });
+      }
+      throw new NuniError(404, 'NOT_FOUND');
+    }
     const method = request.method;
     if (method !== 'GET' && method !== 'POST') throw new NuniError(405, 'METHOD_NOT_ALLOWED');
     if (request.nextUrl.search) throw new NuniError(400, 'INVALID_INPUT');
     if (method === 'POST') requireSameOrigin(request);
-    const path = segments.join('/');
     if (method === 'GET' && path === 'sign-in-options') {
       publicOrigin();
       if (
@@ -118,6 +135,48 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
       const response = jsonResponse({ authenticated: false });
       setCookie(response, SESSION_COOKIE, null);
       return response;
+    }
+    if (path === 'memberships') {
+      const session = requireSession(request);
+      if (method === 'POST') {
+        const input = validateMembershipRequestInput(await boundedJson(request, 2048));
+        const receipt = parseMembershipRequestReceipt(
+          await platformRequest('memberships', session, input),
+        );
+        return jsonResponse(receipt, receipt.created ? 201 : 200);
+      }
+      return jsonResponse({
+        memberships: parseNuniMemberships(await platformRequest('memberships', session)),
+      });
+    }
+    if (
+      ['merchant-onboarding-programs', 'merchant-applications', 'merchant-workspaces'].includes(
+        path,
+      )
+    ) {
+      const session = requireSession(request);
+      if (method === 'GET') {
+        const result = await platformRequest(path, session);
+        if (path === 'merchant-workspaces')
+          return jsonResponse({ workspaces: parseMerchantWorkspaces(result) });
+        if (path === 'merchant-onboarding-programs')
+          return jsonResponse({
+            programs: parseMerchantOverview({ ...nuniRecord(result), applications: [] }).programs,
+          });
+        return jsonResponse({
+          applications: parseMerchantOverview({ ...nuniRecord(result), programs: [] }).applications,
+        });
+      }
+      if (path !== 'merchant-applications') throw new NuniError(405, 'METHOD_NOT_ALLOWED');
+      const input = validateMerchantApplicationInput(await boundedJson(request, 16 * 1024));
+      const result = parseMerchantApplication(await platformRequest(path, session, input));
+      if (
+        result.tenantId !== input.tenantId ||
+        result.brandName !== input.brandName ||
+        result.locationName !== input.locationName
+      )
+        throw new NuniError(502, 'INVALID_RESPONSE');
+      return jsonResponse(result, 201);
     }
     if (segments[0] !== 'class-workspaces') throw new NuniError(404, 'NOT_FOUND');
     const session = requireSession(request);

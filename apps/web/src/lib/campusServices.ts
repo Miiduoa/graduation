@@ -45,7 +45,7 @@ export const CAMPUS_SERVICES = [
   },
   {
     name: '課程空間',
-    text: '使用 Nuni 帳號閱讀教材、繳交作業與課堂作答',
+    text: '使用 Campus One 帳號閱讀教材、繳交作業與課堂作答',
     href: '/classroom',
     keywords: 'nuni 課程 教材 作業 測驗 classroom',
     category: 'study',
@@ -99,6 +99,13 @@ export const CAMPUS_SERVICES = [
     href: '/cafeteria',
     keywords: '午餐 晚餐 餐點 food',
     category: 'campus',
+  },
+  {
+    name: '店家合作',
+    text: '申請進駐，查看審核進度與授權門市',
+    href: '/merchant',
+    keywords: '店家 商家 進駐 申請 審核 merchant',
+    category: 'account',
   },
   {
     name: '圖書館',

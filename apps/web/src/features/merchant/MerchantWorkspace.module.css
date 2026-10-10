@@ -1,0 +1,121 @@
+.stack {
+  display: grid;
+  gap: 24px;
+}
+.intro {
+  border-left: 3px solid var(--brand);
+  padding: 4px 0 4px 22px;
+}
+.intro h2,
+.toolbar h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+}
+.intro p,
+.panel p {
+  line-height: 1.8;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.intro ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 32px;
+  padding-left: 20px;
+  line-height: 1.8;
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: center;
+}
+.panel {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 28px;
+}
+.panel h3 {
+  margin: 0 0 16px;
+  font-size: 19px;
+  font-weight: 600;
+}
+.list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.list li {
+  padding: 16px 0;
+}
+.list li + li {
+  border-top: 1px solid var(--border);
+}
+.list h4 {
+  margin: 0 0 8px;
+  font-size: 17px;
+  overflow-wrap: anywhere;
+}
+.list p {
+  margin: 6px 0;
+}
+.form {
+  display: grid;
+  gap: 22px;
+}
+.form fieldset {
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  display: grid;
+  gap: 14px;
+}
+.form legend {
+  padding: 0;
+  margin-bottom: 14px;
+  font-weight: 600;
+}
+.fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.checks {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.checks label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 44px;
+}
+.checks input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--brand);
+}
+.form > button {
+  justify-self: start;
+}
+.stack[hidden] {
+  display: none;
+}
+@media (max-width: 600px) {
+  .panel {
+    padding: 20px;
+  }
+  .fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .intro ol {
+    display: grid;
+    gap: 8px;
+  }
+}

@@ -6,6 +6,8 @@ import type { User } from 'firebase/auth';
 import { doc, getDocFromServer } from 'firebase/firestore';
 import { useAuth } from '@/components/AuthGuard';
 import { SiteShell } from '@/components/SiteShell';
+import { NuniAccountPanel } from '@/components/NuniAccountPanel';
+import { useNuniSession } from '@/features/nuni/Session';
 import { getAuth, getDb } from '@/lib/firebase';
 import styles from './profile.module.css';
 
@@ -82,7 +84,7 @@ function PersonalProfile({ user }: { user: User }) {
           {Array.from(displayName)[0]}
         </span>
         <div>
-          <p className={styles.label}>Campus One 帳號</p>
+          <p className={styles.label}>校園帳號個人資料</p>
           <h2>{displayName}</h2>
         </div>
         <Link href="/settings" className="btn">
@@ -124,24 +126,39 @@ const services = [
 
 export default function ProfilePage() {
   const { user, loading, error } = useAuth();
+  const nuni = useNuniSession();
+  const hasCourseAccount = !nuni.loading && !nuni.pendingLogout && !nuni.error && !!nuni.session;
   return (
     <SiteShell title="個人資料" subtitle="管理你的帳號，接著處理課務與校園生活。">
       <div className={styles.layout}>
-        {loading ? (
-          <div className={styles.panel} role="status">
-            正在確認帳號…
-          </div>
-        ) : user ? (
-          <PersonalProfile key={user.uid} user={user} />
-        ) : (
-          <section className={styles.panel}>
-            <h2>{error ? '暫時無法確認帳號' : '登入後，查看你的資料'}</h2>
-            <p>使用你的學校帳號，查看個人資料與校務紀錄。</p>
-            <Link className="btn primary" href="/login?returnUrl=%2Fprofile">
-              登入帳號
-            </Link>
-          </section>
-        )}
+        <div className={styles.accountStack}>
+          <NuniAccountPanel />
+          {loading ? (
+            <div className={styles.panel} role="status">
+              正在確認帳號…
+            </div>
+          ) : user ? (
+            <PersonalProfile key={user.uid} user={user} />
+          ) : (
+            <section className={styles.panel}>
+              <h2>
+                {error
+                  ? '暫時無法確認校園帳號'
+                  : hasCourseAccount
+                    ? '連線校園帳號，查看學校資料'
+                    : '登入後，查看你的資料'}
+              </h2>
+              <p>
+                {hasCourseAccount
+                  ? 'Campus One 帳號已登入。若要查看學校提供的課表、成績與校園個人資料，請另外連線校園帳號。'
+                  : '使用你的學校帳號，查看個人資料與校務紀錄。'}
+              </p>
+              <Link className="btn primary" href="/login?reconnect=school&returnUrl=%2Fprofile">
+                {hasCourseAccount ? '連線校園帳號' : '登入帳號'}
+              </Link>
+            </section>
+          )}
+        </div>
         <section className={styles.services} aria-labelledby="personal-services">
           <h2 id="personal-services">我的校園生活</h2>
           <div className={styles.links}>

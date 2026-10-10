@@ -22,8 +22,13 @@ const TTL_24H = 24 * 3600 * 1000;
 const MAX_TEXT = 220;
 
 export default function StoryComposePage() {
+  const { schoolName } = resolveSchoolPageContext({});
   return (
-    <SiteShell title="發布限時動態" subtitle="分享此刻的校園生活，動態保留 24 小時。">
+    <SiteShell
+      title="發布限時動態"
+      subtitle="分享此刻的校園生活，動態保留 24 小時。"
+      schoolName={schoolName}
+    >
       <CommunityAccess>
         <StoryComposeInner />
       </CommunityAccess>
