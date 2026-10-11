@@ -52,6 +52,7 @@ const {
   resolveFoodOrderInput,
 } = require('../lib/campusWriteIntentResolve');
 const searchCampusDocs = require('./tools/searchCampusDocs');
+const { relevantItems } = require('../lib/assistantRelevance');
 const { runTool } = require('./tools/registry');
 
 const db = getFirestore();
@@ -916,7 +917,7 @@ async function executeCampusAssistantCore({
       return await finalizeResponse();
     }
 
-    const pendingAssignments = Array.isArray(prefetched.assignments)
+    let pendingAssignments = Array.isArray(prefetched.assignments)
       ? prefetched.assignments
       : await fetchAssistantPendingAssignments(uid, schoolId, { preferredGroupId: context.groupId });
     const [weeklyReport, announcements] = await Promise.all([
@@ -930,6 +931,12 @@ async function executeCampusAssistantCore({
       pendingAssignments.length + (weeklyReport ? 1 : 0) + announcements.length;
 
     if (intent === 'assignment_status') {
+      if (modelUnavailable) {
+        // 沒有模型時：對得上問題的作業才列；一份都對不上（或讀不到）就照實說沒辦法回答
+        const related = relevantItems(lastUserMessage, pendingAssignments, (item) => `${item.title || ''} ${item.groupName || ''}`);
+        if (related.length === 0) return await answerUnavailable();
+        pendingAssignments = related;
+      }
       if (pendingAssignments.length === 0) {
         response.content =
           '目前沒有快到期的待繳作業。你可以改問我近期公告、活動，或請我幫你規劃今天的學習重點。';
@@ -1033,9 +1040,14 @@ async function executeCampusAssistantCore({
   }
 
   if (intent === 'announcements') {
-    const announcements = Array.isArray(prefetched.announcements)
+    let announcements = Array.isArray(prefetched.announcements)
       ? prefetched.announcements
       : await fetchAssistantAnnouncements(schoolId);
+    if (modelUnavailable) {
+      // 沒有模型時只拿對得上問題的公告；對不上就照實說沒辦法回答
+      announcements = relevantItems(lastUserMessage, announcements, (item) => `${item.title || ''} ${item.body || item.content || ''}`);
+      if (announcements.length === 0) return await answerUnavailable();
+    }
     response.debug.sourcesUsed = announcements.length;
 
     if (announcements.length === 0) {
@@ -1076,12 +1088,16 @@ async function executeCampusAssistantCore({
   }
 
   if (intent === 'events') {
-    const events = (await fetchAssistantEvents(schoolId))
+    let events = (await fetchAssistantEvents(schoolId))
       .filter((event) => {
         const start = toJsDate(event.startsAt);
         return !start || start >= new Date(Date.now() - 60 * 60 * 1000);
       })
       .slice(0, 4);
+    if (modelUnavailable) {
+      events = relevantItems(lastUserMessage, events, (item) => `${item.title || ''} ${item.description || ''} ${item.location || ''}`);
+      if (events.length === 0) return await answerUnavailable();
+    }
 
     response.debug.sourcesUsed = events.length;
 
@@ -1120,7 +1136,11 @@ async function executeCampusAssistantCore({
   }
 
   if (intent === 'menus') {
-    const menus = (await fetchAssistantMenus(schoolId)).slice(0, 5);
+    let menus = (await fetchAssistantMenus(schoolId)).slice(0, 5);
+    if (modelUnavailable) {
+      menus = relevantItems(lastUserMessage, menus, (item) => `${item.name || ''} ${item.cafeteria || item.cafeteriaName || ''} ${item.description || ''}`);
+      if (menus.length === 0) return await answerUnavailable();
+    }
     response.debug.sourcesUsed = menus.length;
 
     if (menus.length === 0) {
@@ -1159,7 +1179,12 @@ async function executeCampusAssistantCore({
 
   if (intent === 'pois') {
     const pois = await fetchAssistantPois(schoolId);
-    const poi = buildPoiResponse(lastUserMessage, pois);
+    let poi = buildPoiResponse(lastUserMessage, pois);
+    if (poi) {
+      // 地點不經過模型：找到的地點也要真的對得上問題，不然就當作沒找到
+      const related = relevantItems(lastUserMessage, [poi], (item) => `${item.name || ''} ${item.category || ''} ${item.description || ''}`);
+      poi = related[0] || null;
+    }
     response.debug.sourcesUsed = pois.length > 0 ? 1 : 0;
 
     if (!poi) {
