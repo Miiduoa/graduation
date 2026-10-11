@@ -115,6 +115,11 @@ export function getFirebaseApp() {
     });
   }
 
+  if (USE_FIREBASE_EMULATOR && !String(cfg.projectId || '').startsWith('demo-')) {
+    // 模擬器模式只能接 demo- 專案，避免測試資料寫進正式專案
+    throw new Error(`模擬器模式只能用 demo- 開頭的專案，現在是「${cfg.projectId}」。`);
+  }
+
   return initializeApp({
     apiKey: cfg.apiKey,
     authDomain: cfg.authDomain,

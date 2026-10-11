@@ -73,3 +73,4 @@ backend/ai-server/data/
 *.tsbuildinfo
 outputs/
 tmp/
+.test-env/

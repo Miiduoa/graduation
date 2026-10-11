@@ -1,6 +1,14 @@
 import type { NextConfig } from 'next';
 import { legacyEnabled, legacyRewrites } from './src/lib/legacy-routing';
 
+// 本機測試環境（Firebase 模擬器、demo- 專案）才放行 127.0.0.1／localhost，正式建置不會加。
+const emulatorTestEnv =
+  ['1', 'true'].includes(process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR || '') &&
+  (process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || '').startsWith('demo-');
+const emulatorConnectSrc = emulatorTestEnv
+  ? ' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*'
+  : '';
+
 const contentSecurityPolicy = [
   "default-src 'self'",
   "base-uri 'self'",
@@ -12,7 +20,7 @@ const contentSecurityPolicy = [
   "style-src 'self' 'unsafe-inline' https:",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net",
   "worker-src 'self' blob:",
-  "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net https://*.web.app https://*.firebaseapp.com https://cdn.jsdelivr.net https://*.jsdelivr.net wss:",
+  "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net https://*.web.app https://*.firebaseapp.com https://cdn.jsdelivr.net https://*.jsdelivr.net wss:" + emulatorConnectSrc,
 ].join('; ');
 
 const securityHeaders = [
