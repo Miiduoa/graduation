@@ -54,22 +54,23 @@ beforeEach(() => {
   mockUpdate.mockReset();
 });
 
-test('店家工作台：沒號碼的訂單寫「取餐號碼：待確認」和下單時間，按「給號碼」走伺服器，換成真的號碼', async () => {
+test('店家工作台：沒號碼的訂單寫「取餐號碼：待給號碼」和下單時間，按「給號碼並接單」走伺服器，換成真的號碼', async () => {
   mockList.mockResolvedValueOnce([pendingOrder]).mockResolvedValue([
     { ...pendingOrder, status: 'confirmed', queueNumber: '12' },
   ]);
   mockGive.mockResolvedValue({ queueNumber: 12, status: 'confirmed' });
   const view = render(<MerchantHubScreen />);
-  await waitFor(() => expect(view.getByText('給號碼')).toBeTruthy());
-  expect(view.getByText('取餐號碼：待確認・下單 10 月 13 日（二）12:05')).toBeTruthy();
-  // 沒號碼時不給「確認接單」，免得接了單學生還是沒號碼；「給號碼」會一併接單
+  await waitFor(() => expect(view.getByText('給號碼並接單')).toBeTruthy());
+  expect(view.getByText('取餐號碼：待給號碼・下單 10 月 13 日（二）12:05')).toBeTruthy();
+  // 沒號碼時不給「確認接單」，免得接了單學生還是沒號碼；「給號碼並接單」會一併接單
   expect(view.queryByText('確認接單')).toBeNull();
-  await act(async () => fireEvent.press(view.getByText('給號碼')));
+  expect(view.getByText('拒單')).toBeTruthy();
+  await act(async () => fireEvent.press(view.getByText('給號碼並接單')));
   expect(mockGive).toHaveBeenCalledTimes(1);
   expect(mockGive).toHaveBeenCalledWith({ schoolId: 'pu', orderId: 'co_order_abcd', cafeteriaId: 'cafe' });
   await waitFor(() => expect(view.getByText('取餐號碼 12')).toBeTruthy());
-  expect(view.queryByText('給號碼')).toBeNull();
-  expect(view.queryByText(/待確認・下單/)).toBeNull();
+  expect(view.queryByText(/^給號碼/)).toBeNull();
+  expect(view.queryByText(/待給號碼・下單/)).toBeNull();
   expect(view.getByText('開始製作')).toBeTruthy();
 });
 
@@ -78,10 +79,14 @@ test('店家工作台：給號碼被擋（例如不是這家店的帳號）照�
   mockList.mockResolvedValue([pendingOrder]);
   mockGive.mockRejectedValue(new Error('Only the buyer or this store can get a number'));
   const view = render(<MerchantHubScreen />);
-  await waitFor(() => expect(view.getByText('給號碼')).toBeTruthy());
-  await act(async () => fireEvent.press(view.getByText('給號碼')));
-  expect(alert).toHaveBeenCalledWith('號碼還沒給出去', 'Only the buyer or this store can get a number');
-  expect(view.getByText(/取餐號碼：待確認/)).toBeTruthy();
+  await waitFor(() => expect(view.getByText('給號碼並接單')).toBeTruthy());
+  await act(async () => fireEvent.press(view.getByText('給號碼並接單')));
+  expect(alert).toHaveBeenCalledWith(
+    '號碼還沒給出去',
+    'Only the buyer or this store can get a number\n不接這張單可以按「拒單」。',
+  );
+  expect(view.getByText(/取餐號碼：待給號碼/)).toBeTruthy();
+  expect(view.getByText('拒單')).toBeTruthy();
   expect(view.queryByText(/取餐號碼 \d/)).toBeNull();
   alert.mockRestore();
 });

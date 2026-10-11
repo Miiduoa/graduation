@@ -814,7 +814,7 @@ function DashboardTab(props: {
               {orderStats.pending + orderStats.confirmed}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 10, marginTop: 2 }}>
-              {orderStats.pending} 待確認
+              {orderStats.pending} 待接單
             </Text>
           </View>
         </View>
@@ -929,11 +929,11 @@ function OrdersTab(props: {
 
   return (
     <View style={{ paddingVertical: 16 }}>
-      {/* 待確認訂單 - 優先顯示 */}
+      {/* 待接單 - 優先顯示 */}
       {groupedOrders.pending.length > 0 && (
         <View style={{ paddingHorizontal: 16, marginBottom: 16 }}>
           <View style={{ marginBottom: 10 }}>
-            <SectionTitle text={`待確認訂單 (${groupedOrders.pending.length})`} />
+            <SectionTitle text={`待接單 (${groupedOrders.pending.length})`} />
           </View>
           <View style={{ gap: 8 }}>
             {groupedOrders.pending.map((order) => (

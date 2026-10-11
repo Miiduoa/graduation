@@ -8,7 +8,7 @@
  *   3. Wallet hold (wallet.holdWallet)
  *   4. 建立訂單 (cafeteriaData.createOrder)
  *   5. 取得號碼牌：訂單建好之後用 orderId 跟伺服器拿（Cloud Function `assignQueueNumber`）。
- *      拿不到不算下單失敗，訂單照樣成立，標「待確認」，畫面顯示「號碼還沒拿到，請到櫃台確認。」，
+ *      拿不到不算下單失敗，訂單照樣成立，標「待給號碼」，畫面顯示「號碼還沒拿到，請到櫃台確認。」，
  *      店家可以按「給號碼」補發。手機不自己算號碼。
  *   6. 產生取餐碼 (pickupCode.issuePickupCode)
  *
@@ -221,7 +221,7 @@ export async function placeOrderAtomic(
     });
   });
 
-  // 5. 號碼牌：綁這筆訂單跟伺服器拿；拿不到就留「待確認」，不給假號碼
+  // 5. 號碼牌：綁這筆訂單跟伺服器拿；拿不到就留「待給號碼」，不給假號碼
   let queueNumber: number | null = isRealQueueNumber(order.queueNumber) ? order.queueNumber : null;
   if (queueNumber == null) {
     try {

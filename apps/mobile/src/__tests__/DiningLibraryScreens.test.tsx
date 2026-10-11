@@ -115,7 +115,7 @@ test('沒拿到號碼：寫「號碼還沒拿到，請到櫃台確認。」和�
   await act(async () => fireEvent.press(view.getByText('送出訂單，到店付款')));
   expect(view.getByText('號碼還沒拿到，請到櫃台確認。')).toBeTruthy();
   expect(view.getByText('10 月 13 日（二）12:05・雞腿飯 ×1')).toBeTruthy();
-  expect(view.getByText('狀態：待確認')).toBeTruthy();
+  expect(view.getByText('狀態：待給號碼')).toBeTruthy();
   expect(view.queryByText(/取餐號碼 \d/)).toBeNull();
   expect(watchDiningReceipt).toHaveBeenCalledWith(
     expect.objectContaining({ userId: 'student-a', schoolId: 'pu', orderId: intent.orderId }),
