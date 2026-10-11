@@ -57,6 +57,22 @@ const { runTool } = require('./tools/registry');
 const db = getFirestore();
 
 /** 這些意圖走結構化寫入草稿（含確認卡），略過 LLM 主路徑以免搶答成一般聊天 */
+const ASSISTANT_UNAVAILABLE_COPY = '助理暫時沒辦法回答，請稍後再試。';
+
+function modelTimeoutMs() {
+  const value = Number(process.env.ASSISTANT_MODEL_TIMEOUT_MS);
+  return Number.isFinite(value) && value > 0 ? value : 45000;
+}
+
+/** 模型太久沒回就當作失敗。 */
+function withModelTimeout(promise) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('model-timeout')), modelTimeoutMs());
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 const INTENTS_SKIP_LLM = new Set([
   'reserve_seat',
   'borrow_book',
@@ -267,6 +283,17 @@ async function executeCampusAssistantCore({
     }
   }
 
+  let modelUnavailable = false;
+  const answerUnavailable = async () => {
+    response.content = ASSISTANT_UNAVAILABLE_COPY;
+    response.suggestions = [];
+    response.actions = [];
+    response.citations = [];
+    response.unavailable = true;
+    response.debug.route = 'model_unavailable';
+    return await finalizeResponse();
+  };
+
   if (!INTENTS_SKIP_LLM.has(intent) && lastUserMessage) {
     const tFetch = Date.now();
     const [announcements, events, menus, pois] = await Promise.all([
@@ -316,7 +343,9 @@ async function executeCampusAssistantCore({
       todaySchedule: prefetched.todaySchedule || null,
       dailyBrief: prefetched.dailyBrief || null,
     });
-    const modelBacked = await buildModelBackedAssistantResponse({
+    let modelBacked = { modelResult: null, response: null };
+    try {
+      modelBacked = await withModelTimeout(buildModelBackedAssistantResponse({
       rawMessages,
       lastUserMessage,
       schoolId,
@@ -335,7 +364,11 @@ async function executeCampusAssistantCore({
       },
       uid,
       sessionId: context.sessionId != null && String(context.sessionId).trim() ? String(context.sessionId).trim() : null,
-    });
+    }));
+    } catch (error) {
+      console.warn('[AI] model call failed:', error?.message || error);
+      modelBacked = { modelResult: { provider: 'none', errors: [{ message: error?.message || String(error) }] }, response: null };
+    }
     modelTrace = {
       provider: modelBacked.modelResult?.provider || 'none',
       model: modelBacked.modelResult?.model || null,
@@ -369,6 +402,9 @@ async function executeCampusAssistantCore({
         (ragWebAnswer?.sources?.length || 0);
       return await finalizeResponse();
     }
+    // 沒有金鑰、模型出錯或逾時：下面查得到實際資料的問題（公告、活動、作業…）照樣用資料回答；
+    // 一般問題不拿校園摘要充當答案，改成照實說沒辦法回答
+    modelUnavailable = true;
   }
 
   if (intent === 'leave_status') {
@@ -942,6 +978,7 @@ async function executeCampusAssistantCore({
       return await finalizeResponse();
     }
 
+    if (modelUnavailable) return await answerUnavailable();
     const lines = [];
     if (displayName) {
       lines.push(`${displayName}，這是你目前最值得先關注的重點：`);
@@ -1186,6 +1223,7 @@ async function executeCampusAssistantCore({
     return await finalizeResponse();
   }
 
+  if (modelUnavailable) return await answerUnavailable();
   const [announcements, events] = await Promise.all([
     fetchAssistantAnnouncements(schoolId),
     fetchAssistantEvents(schoolId),
@@ -1206,4 +1244,4 @@ async function executeCampusAssistantCore({
   return await finalizeResponse();
 }
 
-module.exports = { executeCampusAssistantCore };
+module.exports = { executeCampusAssistantCore, ASSISTANT_UNAVAILABLE_COPY };

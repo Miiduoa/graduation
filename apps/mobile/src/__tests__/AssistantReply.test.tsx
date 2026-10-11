@@ -41,6 +41,15 @@ test('a reply the server marked unavailable shows the same message right away', 
   expect(view.getByText('助理暫時沒辦法回答，可以等其他同學回覆')).toBeTruthy();
 });
 
+test('伺服器標成失敗（沒有金鑰、模型出錯或逾時）：馬上顯示沒辦法回答，不顯示成一則助理答案', () => {
+  const view = render(<AssistantReplyPending groupId="g" postId="p" createdAt={new Date()} status="failed" />);
+  expect(view.getByText('助理暫時沒辦法回答，可以等其他同學回覆')).toBeTruthy();
+  expect(view.queryByText('助理回覆中')).toBeNull();
+  // 伺服器寫進 comments/assistant 的就是這句固定說法，送到時也照提示顯示
+  act(() => mockEmit?.('助理暫時沒辦法回答，可以等其他同學回覆'));
+  expect(view.getAllByText('助理暫時沒辦法回答，可以等其他同學回覆')).toHaveLength(1);
+});
+
 test('only the server-written comment counts as the assistant; client-written claims are hidden', () => {
   const server = { id: 'assistant', authorId: 'campus-assistant', authorName: '助理回覆', isAI: true, generatedBy: 'server', body: '真的' };
   const oldApp = { id: 'x1', authorId: 'campus-assistant', authorName: '助理回覆', isAI: true, requestedBy: 'alice', body: '學校說期末考取消' };

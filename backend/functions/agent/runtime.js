@@ -174,10 +174,25 @@ async function runCampusAssistantWithAgentRuntime(request) {
   const db = getFirestore();
   const steps = [];
 
+  // Firestore 不收 undefined：沒有值的欄位直接拿掉（例如網頁版沒有群組）
+  function dropEmpty(value) {
+    if (value === undefined) return undefined;
+    if (value === null || typeof value !== 'object') return value;
+    if (Array.isArray(value)) return value.map(dropEmpty).filter((item) => item !== undefined);
+    // Date、Timestamp、FieldValue 之類的特殊物件原樣保留
+    if (Object.getPrototypeOf(value) !== Object.prototype) return value;
+    const out = {};
+    for (const [key, item] of Object.entries(value)) {
+      const cleaned = dropEmpty(item);
+      if (cleaned !== undefined) out[key] = cleaned;
+    }
+    return out;
+  }
+
   async function recordStep(tool, input, output, durationMs) {
     steps.push({
       tool,
-      input: input && typeof input === 'object' ? input : { value: input },
+      input: input && typeof input === 'object' ? dropEmpty(input) : input === undefined ? {} : { value: input },
       output: sanitizeStepOutput(output),
       durationMs,
       at: Date.now(),
@@ -237,7 +252,12 @@ async function runCampusAssistantWithAgentRuntime(request) {
         preferredGroupId: context.groupId,
       });
       prefetched.assignments = assignments;
-      await recordStep('getAssignments', { groupId: context.groupId }, { count: assignments.length }, Date.now() - t1);
+      await recordStep(
+        'getAssignments',
+        context.groupId ? { groupId: context.groupId } : {},
+        { count: assignments.length },
+        Date.now() - t1,
+      );
 
       const t2 = Date.now();
       const announcements = await runTool('getAnnouncements', toolCtx, { schoolId });
@@ -434,7 +454,7 @@ async function runCampusAssistantWithAgentRuntime(request) {
       .collection('agentRuns')
       .doc(runId)
       .set(
-        {
+        dropEmpty({
           runId,
           userId: uid,
           schoolId,
@@ -449,7 +469,7 @@ async function runCampusAssistantWithAgentRuntime(request) {
           modelProvider: modelTrace?.provider,
           model: modelTrace?.model,
           updatedAt: FieldValue.serverTimestamp(),
-        },
+        }),
         { merge: true },
       )
       .catch((e) => console.warn('[agentRuns] finalize failed:', e?.message || e));
