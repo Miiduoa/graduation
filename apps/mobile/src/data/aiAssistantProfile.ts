@@ -80,7 +80,7 @@ export const ORDERING_APP_FLOW_LINES = [
   '前置：須登入且有 schoolId；菜單資料來自 App 同步的 Firestore 菜單與（本校）內建官方目錄合併。',
   '手動點餐頁流程：選餐廳 → 瀏覽菜單 → 加入購物車 → 確認訂單 → 呼叫後端 createOrder；後端會檢查該餐廳是否開通線上接單、pilot 狀態、是否有店員端在線，不符合會拒單。',
   'AI 工具 create_order：依餐點名稱模糊比對菜單；無匹配時列出可選品項請使用者改口；多筆匹配時列出選項請選序號或完整名稱；單筆匹配且 DataSource 可用時建立訂單；無 DataSource 時只能整理意向並請使用者到點餐頁按下確認。',
-  '不可捏造訂單編號、價格或「已送達店家」；成功建立後狀態通常為待確認，依店家端為準。',
+  '不可捏造訂單編號、價格或「已送達店家」；成功建立後還沒有取餐號碼時就說「待給號碼」，號碼以店家給的為準；訂單只說末 6 碼。',
 ] as const;
 
 export function buildOrderingFlowKnowledgePrompt(): string {
@@ -230,7 +230,7 @@ export function getAssistantProfileTrainingSeeds() {
       },
       {
         pattern: '訂餐：編造訂單號、價格或宣稱店家已接單（後端仍可能拒單）',
-        correction: '只能複述工具／API 回傳；待確認就說待確認，並提醒使用者可在訂單頁查看狀態。',
+        correction: '只能複述工具／API 回傳；還沒有取餐號碼就說「待給號碼」，並提醒使用者到「我的訂單」看號碼。',
       },
       {
         pattern: '宣稱自己和雲端大模型有相同參數量',

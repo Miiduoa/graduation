@@ -27,6 +27,7 @@ jest.mock('../features/dining', () => ({
   submitDiningIntent: jest.fn(),
   watchDiningReceipt: jest.fn(() => null),
   ORDER_NOT_SENT_TEXT: '訂單沒送出去，請再試一次。',
+  ORDER_CHECKING_TEXT: '還在確認訂單有沒有送出，請到『我的訂單』看。',
   diningTotal: (price: number) => ({
     subtotal: price,
     tax: Math.round(price * 0.05),
@@ -336,4 +337,28 @@ test('library account switches clear the previous keyword', () => {
   mockUser = { uid: 'student-b' };
   view.rerender(<LibraryAiFirstScreen />);
   expect(view.getByLabelText('館藏關鍵字').props.value).toBe('');
+});
+
+test('餐廳頁頂端有「我的訂單」，按了開我的訂單', async () => {
+  const navigate = jest.fn();
+  const view = render(<CafeteriaAiFirstScreen navigation={{ navigate }} />);
+  await act(async () => {});
+  fireEvent.press(view.getByText('我的訂單'));
+  expect(navigate).toHaveBeenCalledWith('StudentOrders');
+});
+test('斷線後連查都查不出結果：寫「還在確認訂單有沒有送出，請到『我的訂單』看。」，給「我的訂單」不給再試一次', async () => {
+  const navigate = jest.fn();
+  jest
+    .mocked(submitDiningIntent)
+    .mockRejectedValueOnce(new DiningError('還在確認訂單有沒有送出，請到『我的訂單』看。', 'checking'));
+  const view = render(<CafeteriaAiFirstScreen navigation={{ navigate }} />);
+  await act(async () => {});
+  fireEvent.press(view.getByText('選擇今日餐點'));
+  await act(async () => fireEvent.press(view.getByText('送出訂單，到店付款')));
+  expect(view.getByText('還在確認訂單')).toBeTruthy();
+  expect(view.getByText('還在確認訂單有沒有送出，請到『我的訂單』看。')).toBeTruthy();
+  expect(view.queryByText('再試一次')).toBeNull();
+  const buttons = view.getAllByText('我的訂單');
+  fireEvent.press(buttons[buttons.length - 1]);
+  expect(navigate).toHaveBeenCalledWith('StudentOrders');
 });

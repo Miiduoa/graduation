@@ -13,6 +13,7 @@ import {
   diningTotal,
   DiningError,
   ORDER_NOT_SENT_TEXT,
+  ORDER_CHECKING_TEXT,
   type DiningScope,
   type DiningCatalog,
   type DiningIntent,
@@ -183,6 +184,15 @@ function DiningContent({
         </AICard>
       ) : (
         <>
+          {navigation?.navigate ? (
+            <View style={{ alignItems: 'flex-start' }}>
+              <AIButton
+                label="我的訂單"
+                variant="ghost"
+                onPress={() => navigation.navigate?.('StudentOrders')}
+              />
+            </View>
+          ) : null}
           {receipt ? (
             <AICard title={statuses[receipt.status] ?? '訂單紀錄'}>
               <Text style={{ color: aiTokens.text }}>
@@ -225,7 +235,7 @@ function DiningContent({
             </AICard>
           ) : null}
           {pending ? (
-            <AICard title={busy ? '訂單送出中' : '訂單沒送出去'}>
+            <AICard title={busy ? '訂單送出中' : error === ORDER_CHECKING_TEXT ? '還在確認訂單' : '訂單沒送出去'}>
               <View style={{ gap: 12 }}>
                 {busy ? null : (
                   <Text accessibilityRole="alert" style={{ color: aiTokens.text, fontWeight: '700' }}>
@@ -238,11 +248,20 @@ function DiningContent({
                 <Text style={{ color: aiTokens.muted }}>
                   再試一次會沿用同一個訂單編號，不會重複下單。
                 </Text>
-                <AIButton
-                  label={busy ? '送出中' : '再試一次'}
-                  disabled={busy}
-                  onPress={() => void submit()}
-                />
+                {!busy && error === ORDER_CHECKING_TEXT ? (
+                  navigation?.navigate ? (
+                    <AIButton
+                      label="我的訂單"
+                      onPress={() => navigation.navigate?.('StudentOrders')}
+                    />
+                  ) : null
+                ) : (
+                  <AIButton
+                    label={busy ? '送出中' : '再試一次'}
+                    disabled={busy}
+                    onPress={() => void submit()}
+                  />
+                )}
               </View>
             </AICard>
           ) : null}
