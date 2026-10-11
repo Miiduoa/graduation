@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Campus AI-First — AppShell (新版三層導航殼)
+ * AppShell（三層導航殼）
  * --------------------------------------------
  * 取代舊 SiteShell。Layer 0: Command Bar(在頁面內)、Layer 1: 三大時空軸 (Today/Hub/Me)、Layer 2: 子內容。
  *

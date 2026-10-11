@@ -56,7 +56,6 @@ Deep link、訊息 action、AI suggestion 都可能把使用者帶到不存在�
 
 高敏感 AI action 不應直接寫入；設計上先進 action queue，再由使用者確認。
 
-完整設計看 [AI_ASSISTANT_ARCHITECTURE](AI_ASSISTANT_ARCHITECTURE.md)。
 
 ### C. Degraded / offline path
 
@@ -114,6 +113,6 @@ Repo 內的做法包含 mock / Firebase / hybrid DataSource、cache、部分離�
 4. [Mobile demo](../apps/mobile/DEMO.md) — 確認實際 UI，不用概念稿代替成品
 5. [Testing evidence](TESTING_EVIDENCE.md) — 看實際測試數字、security gate 與尚未清掉的驗證債務
 
-如果還要往下追，再看 [Role + data flow](APP_ROLE_DATA_FLOW_ARCHITECTURE.md)、[AI boundary](AI_ASSISTANT_ARCHITECTURE.md) 與 [CI workflow](../.github/workflows/ci.yml)。
+如果還要往下追，再看 [Role + data flow](APP_ROLE_DATA_FLOW_ARCHITECTURE.md) 與 [CI workflow](../.github/workflows/ci.yml)。
 
 這條路徑足以判斷 Campus One 的產品方向、跨端範圍、架構理由、權限模型、驗證面與限制，不需要先讀完整 repo。
