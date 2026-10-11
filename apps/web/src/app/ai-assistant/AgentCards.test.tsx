@@ -57,7 +57,7 @@ it('沒拿到號碼：寫「號碼還沒拿到，請到櫃台確認。」和台�
   expect(typeof mocks.confirm.mock.calls[0][0].requestId).toBe('string');
   expect(screen.getByText('號碼還沒拿到，請到櫃台確認。')).toBeTruthy();
   expect(screen.getByText('10 月 13 日（二）12:05・雞腿飯 ×1')).toBeTruthy();
-  expect(screen.getByText('狀態：待確認')).toBeTruthy();
+  expect(screen.getByText('狀態：待給號碼')).toBeTruthy();
   expect(mocks.watch).toHaveBeenCalledWith('pu', 'co_1', expect.any(Function));
   await act(async () => push!(8));
   expect(screen.getByText('取餐號碼 8')).toBeTruthy();

@@ -156,7 +156,7 @@ export type Order = {
   cancelReason: string | null;
   /** 取餐號碼，只認伺服器發的；沒拿到是 null */
   queueNumber: number | null;
-  /** 'pending_confirmation' = 號碼還沒拿到（待確認），店家可以按「給號碼」 */
+  /** 'pending_confirmation' = 號碼還沒拿到（待給號碼），店家可以按「給號碼」 */
   queueStatus?: OrderQueueStatus;
 };
 
@@ -180,7 +180,7 @@ export type OrderStatus =
   | 'cancelled'; // 已取消
 
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
-  pending: '等待確認',
+  pending: '等店家接單',
   confirmed: '已接單',
   preparing: '製作中',
   ready: '可取餐',

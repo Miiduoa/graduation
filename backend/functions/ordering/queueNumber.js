@@ -160,6 +160,13 @@ async function assignNumberForOrder(
     else if (await isOperator()) role = 'merchant';
     else throw new HttpsError('permission-denied', 'Only the buyer or this store can get a number');
     if (typeof order.queueNumber === 'number' && order.queueNumber > 0) {
+      // 已經有號碼：回同一個號碼。店家按「給號碼並接單」時，還沒接的單照樣接下來
+      if (role === 'merchant' && order.status === 'pending') {
+        writeOrderTransition(tx, db, orderRef, schoolId, orderId, order, 'confirmed', {
+          queueStatus: 'assigned',
+        });
+        return { queueNumber: order.queueNumber, queueStatus: 'assigned', reused: true, status: 'confirmed' };
+      }
       if (order.queueStatus !== 'assigned') {
         writeOrderPatch(tx, db, orderRef, schoolId, orderId, order, { queueStatus: 'assigned' });
       }

@@ -98,6 +98,16 @@ describe('assignQueueNumber 綁訂單發號', () => {
     expect(store.docs.get('users/alice/schools/pu/orders/o1')).toMatchObject({ queueNumber: 1, status: 'confirmed' });
   });
 
+  test('學生已經拿到號碼、單還沒接：店家按「給號碼並接單」回同一個號碼，單照樣接下來', async () => {
+    await call('alice', { orderId: 'o1' });
+    expect(store.docs.get('schools/pu/orders/o1').status).toBe('pending');
+    const result = await call('cafe-staff', { orderId: 'o1', as: 'merchant' });
+    expect(result).toMatchObject({ queueNumber: 1, reused: true, status: 'confirmed' });
+    expect(store.docs.get('schools/pu/orders/o1')).toMatchObject({ queueNumber: 1, status: 'confirmed' });
+    expect(store.docs.get('users/alice/schools/pu/orders/o1')).toMatchObject({ queueNumber: 1, status: 'confirmed' });
+    expect(counter()).toBe(1);
+  });
+
   test('店家給號碼和學生自己拿號共用同一個計數器', async () => {
     await call('alice', { orderId: 'o1' });
     store.docs.set(...order('o3', { userId: 'dave' }));

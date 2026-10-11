@@ -189,6 +189,10 @@ function DiningContent({
                 >
                   {pickup.text}
                 </Text>
+              ) : pickup?.state === 'cancelled' ? (
+                <Text style={{ color: aiTokens.danger, fontWeight: '700', marginTop: 8 }}>
+                  {pickup.text}
+                </Text>
               ) : pickup ? (
                 <View style={{ marginTop: 8, gap: 4 }}>
                   <Text style={{ color: aiTokens.text, fontWeight: '700' }}>{pickup.text}</Text>
