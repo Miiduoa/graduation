@@ -54,7 +54,7 @@ export default function ShopDockScreen() {
         <View style={{ padding: 16 }}>
           <Text style={{ color: theme.colors.text, fontWeight: '700', marginBottom: 8 }}>這間店還沒接到訂單系統</Text>
           <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
-            沒有商家綁定時，這裡不會假裝有待接單。菜單與營業時間也還沒開放給這支帳號改。
+            這間店還沒接上訂單系統，所以沒有待接單。菜單與營業時間也還沒開放給這支帳號改。
           </Text>
         </View>
       ) : tab === 'pending' || tab === 'kitchen' ? (

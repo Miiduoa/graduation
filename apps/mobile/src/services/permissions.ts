@@ -341,8 +341,11 @@ export const UNIFIED_TABS: TabConfig[] = [
   { key: '我的', label: '我', icon: 'ic_profile' },
 ];
 
-export function getTabsForRole(_role: AppRole): TabConfig[] {
-  // 統一回傳同樣的 4 個 Tab，角色差異移到 Tab 內部處理
+export function getTabsForRole(role: AppRole): TabConfig[] {
+  // 四個入口一樣，角色差異在 Tab 內部處理；店家的第二格是店務，不叫課務
+  if (role === 'vendor') {
+    return UNIFIED_TABS.map((tab) => (tab.key === '學習' ? { ...tab, label: '店家' } : tab));
+  }
   return UNIFIED_TABS;
 }
 
