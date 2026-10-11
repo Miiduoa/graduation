@@ -61,10 +61,12 @@ function isoOf(value: unknown): string | null {
 }
 /** 伺服器沒確認建單時給學生看的話；「再試一次」沿用同一個訂單編號，不會重複下單 */
 export const ORDER_NOT_SENT_TEXT = '訂單沒送出去，請再試一次。';
+/** 斷線、逾時後用同一個訂單編號查也查不出結果時給學生看的話，旁邊放「我的訂單」 */
+export const ORDER_CHECKING_TEXT = '還在確認訂單有沒有送出，請到『我的訂單』看。';
 export class DiningError extends Error {
   constructor(
     message: string,
-    readonly kind: 'unavailable' | 'not-sent' | 'unknown' = 'unavailable',
+    readonly kind: 'unavailable' | 'not-sent' | 'unknown' | 'checking' = 'unavailable',
   ) {
     super(message);
   }
@@ -405,7 +407,20 @@ export async function submitDiningIntent(
         'not-sent',
       );
     }
-    if (error instanceof DiningError) throw error;
+    if (error instanceof DiningError && error.kind !== 'unknown') throw error;
+    // 結果不明（斷線、逾時、回執還沒讀到）：先用同一個訂單編號查一次
+    let found: DiningReceipt | null;
+    try {
+      found = await readDiningReceipt(intent, isCurrent);
+    } catch (lookupError) {
+      if (lookupError instanceof DiningError && lookupError.kind !== 'unknown') throw lookupError;
+      throw new DiningError(ORDER_CHECKING_TEXT, 'checking');
+    }
+    if (found) {
+      await clearDiningIntent(intent);
+      return found;
+    }
+    // 伺服器確定沒有這張單：請學生再試一次，沿用同一個編號
     throw new DiningError(ORDER_NOT_SENT_TEXT, 'unknown');
   }
 }

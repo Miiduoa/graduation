@@ -1,5 +1,8 @@
 /* eslint-disable */
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { safeNavigate } from '../utils/safeNavigate';
+import { describePickupNumber, formatShortOrderCode } from '@campus/shared/src/ordering/pickupNumber';
+import { resolveUnknownOrderOutcome } from '../services/orderLookup';
 import {
   ScrollView,
   Text,
@@ -227,7 +230,9 @@ type OrderSuccessSummary = {
   itemName: string;
   quantity: number;
   total?: number;
-  statusHint?: string;
+  queueNumber?: unknown;
+  createdAt?: unknown;
+  status?: unknown;
 };
 
 function extractCreateOrderSuccess(
@@ -250,27 +255,16 @@ function extractCreateOrderSuccess(
       : 1;
   const merchantLabel = String(d.merchantName ?? d.cafeteria ?? '餐廳');
   const total = typeof d.totalAmount === 'number' ? d.totalAmount : undefined;
-  return { orderId, merchantLabel, itemName, quantity, total, statusHint: '待店家確認' };
-}
-
-/**
- * 把內部 mock id 轉成使用者友善的短代號：
- *   mock_1778928670157_lazdpl4 → #LAZDPL4
- *   normal-id-XYZ-9            → #XYZ-9
- * 不適合顯示給使用者的內部前綴會被剝掉。
- */
-function friendlyOrderCode(rawId: string | undefined): string {
-  const id = String(rawId ?? '').trim();
-  if (!id) return '#—';
-  if (id.startsWith('mock_')) {
-    const parts = id.split('_');
-    const tail = parts[parts.length - 1];
-    if (tail) return `#${tail.toUpperCase()}`;
-  }
-  // 一般情況：取後 8 碼大寫
-  const compact = id.replace(/[^A-Za-z0-9-]/g, '');
-  const tail = compact.length > 8 ? compact.slice(-8) : compact;
-  return `#${tail.toUpperCase()}`;
+  return {
+    orderId,
+    merchantLabel,
+    itemName,
+    quantity,
+    total,
+    queueNumber: d.queueNumber,
+    createdAt: d.createdAt,
+    status: d.status,
+  };
 }
 
 function OrderSuccessCard(props: { summary: OrderSuccessSummary }) {
@@ -301,10 +295,26 @@ function OrderSuccessCard(props: { summary: OrderSuccessSummary }) {
         {summary.itemName} × {summary.quantity}
       </Text>
 
-      {/* 下一步指引 */}
-      <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 6 }}>
-        可到「校園 → 點餐 → 我的訂單」追蹤進度。
-      </Text>
+      {/* 取餐號碼：有號碼寫號碼；沒號碼寫待給號碼兩行（下單時間・品項） */}
+      {(() => {
+        const pickup = describePickupNumber({
+          queueNumber: summary.queueNumber,
+          createdAt: summary.createdAt,
+          status: summary.status,
+          items: [{ name: summary.itemName, quantity: summary.quantity }],
+        });
+        return (
+          <View style={{ marginTop: 6, gap: 2 }}>
+            <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: '700' }}>{pickup.text}</Text>
+            {pickup.state === 'pending' && pickup.detail ? (
+              <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{pickup.detail}</Text>
+            ) : null}
+            {pickup.state === 'pending' ? (
+              <Text style={{ color: theme.colors.muted, fontSize: 12 }}>狀態：{pickup.label}</Text>
+            ) : null}
+          </View>
+        );
+      })()}
 
       {/* 訂單代號 + 金額 — 同一行；金額未確認時顯示「店家未報價」*/}
       <View
@@ -320,17 +330,11 @@ function OrderSuccessCard(props: { summary: OrderSuccessSummary }) {
         }}
       >
         <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-          訂單代號：
-          <Text style={{ fontFamily: 'monospace', color: theme.colors.text }}>
-            {friendlyOrderCode(summary.orderId)}
-          </Text>
+          {formatShortOrderCode(summary.orderId)}
         </Text>
         <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
           {hasPrice ? `金額約 $${summary.total}` : '金額待店家報價'}
         </Text>
-        {summary.statusHint ? (
-          <Text style={{ color: theme.colors.muted, fontSize: 12 }}>· {summary.statusHint}</Text>
-        ) : null}
       </View>
     </View>
   );
@@ -4195,17 +4199,6 @@ export function AIChatScreen(props: any) {
     };
   }
 
-  function buildDiningOrderViewParams(
-    params: Record<string, any>,
-    userMessage = '',
-  ): Record<string, unknown> {
-    return {
-      ...buildDiningOrderParams(params, userMessage),
-      aiPrefill: false,
-      initialTab: 2,
-    };
-  }
-
   function getRestaurantOrderingBlock(cafeteria?: Cafeteria): string | null {
     if (!cafeteria) return '找不到這間餐廳的點餐設定。';
     if (cafeteria.orderingEnabled !== true) return '這間餐廳尚未開通 APP 線上接單。';
@@ -4434,7 +4427,7 @@ export function AIChatScreen(props: any) {
         {
           label: '查看我的訂單',
           action: 'navigate',
-          params: buildDiningOrderViewParams(params, userMessage),
+          params: { screen: 'StudentOrders' },
           sensitivity: 'low',
           status: 'confirmed',
         },
@@ -7360,11 +7353,11 @@ export function AIChatScreen(props: any) {
               text: '確認下單',
               onPress: () => {
                 void (async () => {
-                  const renderOrderFailure = () => {
+                  const renderOrderFailure = (message: string = ORDER_FAIL_COPY) => {
                     pushAssistantMessage({
                       id: genMsgId('order-fail'),
                       role: 'assistant',
-                      content: ORDER_FAIL_COPY,
+                      content: message,
                       timestamp: new Date(),
                       agentType: 'tool_result',
                       suggestions: ['前往點餐頁面', '查看我的訂單'],
@@ -7382,7 +7375,12 @@ export function AIChatScreen(props: any) {
                         ? result.orderId
                         : undefined;
                     if (result.success !== true || !oid) {
-                      renderOrderFailure();
+                      // 伺服器明確說不成立（菜單或金額變了、還不能線上點餐）就照實轉述
+                      renderOrderFailure(
+                        result.orderOutcome === 'not_created' && typeof result.errorMessage === 'string' && result.errorMessage
+                          ? result.errorMessage
+                          : ORDER_FAIL_COPY,
+                      );
                       return;
                     }
                     const totalText =
@@ -7397,10 +7395,9 @@ export function AIChatScreen(props: any) {
                       content: [
                         '✅ 下單成功。',
                         '',
-                        `訂單編號：${oid}${cafeteriaText}${totalText}`,
+                        `${formatShortOrderCode(oid)}${cafeteriaText}${totalText}`,
+                        describePickupNumber({ queueNumber: result.queueNumber, createdAt: result.createdAt, status: result.status }).text,
                         `品項數：${itemCount}`,
-                        '',
-                        '可到「校園 → 點餐」查看訂單狀態。',
                       ].join('\n'),
                       timestamp: new Date(),
                       agentType: 'tool_result',
@@ -7409,14 +7406,48 @@ export function AIChatScreen(props: any) {
                         {
                           label: '查看我的訂單',
                           action: 'navigate',
-                          params: { screen: '校園', nested: 'Ordering', initialTab: 2 },
+                          params: { screen: 'StudentOrders' },
                           requiresConfirmation: false,
                           sensitivity: 'low',
                         },
                       ],
                     });
-                  } catch {
-                    renderOrderFailure();
+                  } catch (error: any) {
+                    if (error?.details?.orderOutcome === 'not_created') {
+                      renderOrderFailure(typeof error?.message === 'string' && error.message ? error.message : ORDER_FAIL_COPY);
+                      return;
+                    }
+                    const requestId = typeof input.requestId === 'string' ? input.requestId : '';
+                    if (!requestId) {
+                      renderOrderFailure();
+                      return;
+                    }
+                    // 結果不明（斷線、逾時）：先用同一個送出編號查一次
+                    const outcome = await resolveUnknownOrderOutcome(school.id, requestId);
+                    if (outcome.kind === 'found') {
+                      pushAssistantMessage({
+                        id: genMsgId('order-ok'),
+                        role: 'assistant',
+                        content: [
+                          '✅ 下單成功。',
+                          '',
+                          formatShortOrderCode(outcome.order.orderId),
+                          describePickupNumber(outcome.order).text,
+                        ].join('\n'),
+                        timestamp: new Date(),
+                        agentType: 'tool_result',
+                        suggestions: ['查看我的訂單'],
+                      });
+                      return;
+                    }
+                    pushAssistantMessage({
+                      id: genMsgId('order-unknown'),
+                      role: 'assistant',
+                      content: outcome.message,
+                      timestamp: new Date(),
+                      agentType: 'tool_result',
+                      suggestions: outcome.kind === 'checking' ? ['查看我的訂單'] : [],
+                    });
                   }
                 })();
               },
@@ -7505,6 +7536,11 @@ export function AIChatScreen(props: any) {
         }
       }
 
+      if (screen === 'StudentOrders') {
+        safeNavigate(nav, 'StudentOrders');
+        return;
+      }
+
       const nestedParams = { ...params };
       delete nestedParams.screen;
       delete nestedParams.nested;
@@ -7536,6 +7572,11 @@ export function AIChatScreen(props: any) {
     // 點擊建議選項 = 正面訊號（表示 AI 的引導有用）
     if (lastQAPairIdRef.current) {
       setTrainingDB((prev) => updatePairQuality(prev, lastQAPairIdRef.current!, +1, true));
+    }
+    // 「查看我的訂單」直接開我的訂單，不再丟回對話（以前會帶到菜單頁）
+    if (text === '查看我的訂單') {
+      safeNavigate(nav, 'StudentOrders');
+      return;
     }
     void handleSend(text);
   };

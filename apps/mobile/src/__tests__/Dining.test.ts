@@ -183,15 +183,35 @@ test('ambiguous network outcome preserves the request across a remount and retri
   await submitDiningIntent(recovered!, () => true);
   expect(call.mock.calls.map(([input]) => input.requestId)).toEqual(['uuid-a', 'uuid-a']);
 });
-test('a lost response followed by a stored receipt does not create a second order on retry', async () => {
+test('逾時但伺服器其實建好單：用同一個訂單編號查到那張單，直接顯示，不再送第二次', async () => {
   await prepareDiningIntent(scope, menu, () => true);
   call.mockImplementationOnce(async () => {
-    jest.mocked(getDocFromServer).mockResolvedValue(document(receipt) as never);
-    throw new Error('response lost');
+    jest.mocked(getDocFromServer).mockResolvedValue(document({ ...receipt, queueNumber: 8 }) as never);
+    throw Object.assign(new Error('deadline'), { code: 'functions/deadline-exceeded' });
   });
-  await expect(submitDiningIntent(intent, () => true)).rejects.toMatchObject({ kind: 'unknown' });
-  await submitDiningIntent((await loadDiningIntent(scope, () => true))!, () => true);
+  await expect(submitDiningIntent(intent, () => true)).resolves.toMatchObject({ id: intent.orderId, queueNumber: 8 });
   expect(call).toHaveBeenCalledTimes(1);
+  expect(jest.mocked(getDocFromServer).mock.calls.at(-1)?.[0]).toBe('users/student-a/schools/pu/orders/co_hash-a');
+  expect(await loadDiningIntent(scope, () => true)).toBeNull();
+});
+test('逾時而且伺服器確定沒有這張單：寫「訂單沒送出去，請再試一次。」，再試沿用同一個編號', async () => {
+  await prepareDiningIntent(scope, menu, () => true);
+  call.mockRejectedValueOnce(Object.assign(new Error('deadline'), { code: 'functions/deadline-exceeded' }));
+  await expect(submitDiningIntent(intent, () => true)).rejects.toMatchObject({ kind: 'unknown', message: '訂單沒送出去，請再試一次。' });
+  await submitDiningIntent((await loadDiningIntent(scope, () => true))!, () => true);
+  expect(call.mock.calls.map(([input]) => input.requestId)).toEqual(['uuid-a', 'uuid-a']);
+});
+test('逾時後連查都查不到結果：寫「還在確認訂單有沒有送出，請到『我的訂單』看。」，保留這筆', async () => {
+  await prepareDiningIntent(scope, menu, () => true);
+  call.mockImplementationOnce(async () => {
+    jest.mocked(getDocFromServer).mockRejectedValue({ code: 'unavailable' });
+    throw Object.assign(new Error('deadline'), { code: 'functions/deadline-exceeded' });
+  });
+  await expect(submitDiningIntent(intent, () => true)).rejects.toMatchObject({
+    kind: 'checking',
+    message: '還在確認訂單有沒有送出，請到『我的訂單』看。',
+  });
+  expect(await loadDiningIntent(scope, () => true)).toEqual(intent);
 });
 test.each([
   { userId: 'other' },
