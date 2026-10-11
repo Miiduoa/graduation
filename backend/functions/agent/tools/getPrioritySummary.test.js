@@ -15,4 +15,12 @@ describe('getPrioritySummary tool', () => {
     expect(out.classCount).toBe(1);
     expect(out.topAnnouncementTitle).toBe('期末考');
   });
+
+  test('最近一份作業的截止時間用台灣時間', async () => {
+    const out = await getPrioritySummary.execute(
+      { prefetched: { assignments: [{ title: 'HW2', dueAt: new Date('2026-10-12T18:35:00Z') }] } },
+      {},
+    );
+    expect(out.nextAssignmentDue).toBe('10 月 13 日 02:35');
+  });
 });

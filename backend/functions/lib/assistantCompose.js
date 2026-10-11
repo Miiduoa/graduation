@@ -9,17 +9,26 @@ const CAMPUS_ASSISTANT_MESSAGE_WINDOW = 20;
 const CAMPUS_ASSISTANT_MESSAGE_CHARS = 4000;
 const { tools } = require('../agent/tools/registry');
 const agentCases = require('../agent/cases.json');
-const { normalizeAssistantText } = require('./assistantFormat');
+const { normalizeAssistantText, formatAssistantDate } = require('./assistantFormat');
 const {
   loadConversationMessages,
   saveConversationMessages,
 } = require('./assistantConversationStore');
 
+// 給模型看的時間先換成台灣時間的字，免得模型照 UTC 念給使用者
+const ASSISTANT_DATE_FIELDS = new Set(['publishedAt', 'startsAt', 'endsAt', 'dueAt']);
+
 function compactAssistantItems(items, fields, limit = 5) {
   return (items || []).slice(0, limit).map((item) => {
     const row = { id: item.id };
     fields.forEach((field) => {
-      if (item[field] != null) row[field] = item[field];
+      if (item[field] == null) return;
+      if (ASSISTANT_DATE_FIELDS.has(field)) {
+        const text = formatAssistantDate(item[field]);
+        if (text) row[field] = text;
+        return;
+      }
+      row[field] = item[field];
     });
     return row;
   });

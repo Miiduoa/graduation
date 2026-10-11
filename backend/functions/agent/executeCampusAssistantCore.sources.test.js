@@ -347,10 +347,64 @@ describe('校園助理（/ai-assistant）沒有模型可用時照實說沒辦法
     expect(result.content).not.toContain('宿舍週末停水');
   });
 
-  test('問地點但找到的地點對不上：不硬塞那個地點', async () => {
+  test('問地點但找到的地點對不上：不硬塞那個地點，回統一的失敗句', async () => {
     const result = await ask('體育館怎麼走');
     expect(result.content).not.toContain('找到「校園地點」');
-    expect(result.content).toContain('找不到符合的校園地點');
+    expect(result.content).toBe('助理暫時沒辦法回答，請稍後再試。');
+    expect(result.content).not.toContain('找不到符合的校園地點');
+    expect(result.actions || []).toEqual([]);
+  });
+
+  test('活動時間用台灣時間：UTC 前一天 18:35 要寫成隔天 02:35', async () => {
+    mockDocuments.set('schools/pu/clubEvents', [
+      row('fair', {
+        title: '社團博覽會',
+        schoolId: 'pu',
+        location: '主顧廣場',
+        startsAt: new Date('2099-10-12T18:35:00Z'),
+      }),
+    ]);
+    const result = await ask('近期有什麼活動');
+    expect(result.content).toContain('社團博覽會（主顧廣場），10 月 13 日 02:35');
+    expect(result.content).not.toContain('10/12/2099');
+    expect(result.content).not.toContain('18:35');
+  });
+
+  test('公告時間也用台灣時間', async () => {
+    mockDocuments.set('schools/pu/announcements', [
+      row('net', {
+        title: '宿舍網路 10/14 凌晨維修',
+        schoolId: 'pu',
+        publishedAt: new Date('2026-10-11T17:20:00Z'),
+      }),
+    ]);
+    const result = await ask('最新公告有哪些');
+    expect(result.content).toContain('宿舍網路 10/14 凌晨維修（10 月 12 日 01:20）');
+  });
+
+  test('問宿舍網路什麼時候維修：有對得上的維修公告就用公告回答，不整理報修草稿', async () => {
+    mockDocuments.set('schools/pu/announcements', [
+      row('net', {
+        title: '宿舍網路 10/14 凌晨維修',
+        body: '10 月 14 日凌晨 1 點到 5 點宿舍網路維修，期間無法連線。',
+        schoolId: 'pu',
+        publishedAt: new Date('2026-10-11T17:20:00Z'),
+      }),
+      row('lib', { title: '期中考週圖書館延長開放至晚上 11 點', schoolId: 'pu', publishedAt: new Date('2026-10-10T02:00:00Z') }),
+    ]);
+    const result = await ask('宿舍網路什麼時候維修');
+    expect(result.content).toContain('宿舍網路 10/14 凌晨維修');
+    expect(result.content).not.toContain('圖書館延長開放');
+    expect(result.content).not.toContain('報修草稿');
+    expect(JSON.stringify(result.actions || [])).not.toContain('createDormRepairRequest');
+    expect(mockWrites.some((write) => write.path.includes('assistantActionQueue') || write.path.includes('repair'))).toBe(false);
+  });
+
+  test('問宿舍網路什麼時候維修，但沒有維修公告：照實說沒辦法回答', async () => {
+    const result = await ask('宿舍網路什麼時候維修');
+    expect(result.content).toBe('助理暫時沒辦法回答，請稍後再試。');
+    expect(result.content).not.toContain('報修草稿');
+    expect(result.content).not.toContain('校方發布的公告');
   });
 
   test('只問「有什麼公告」：列出公告', async () => {

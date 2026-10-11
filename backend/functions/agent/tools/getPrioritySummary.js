@@ -19,7 +19,7 @@ function executeSync(ctx, rawInput) {
     scheduleStatus: Array.isArray(sched?.slots) ? 'available' : 'unavailable',
     assignmentsStatus: Array.isArray(assignments) ? 'available' : 'unavailable',
     nextAssignmentTitle: top?.title ?? null,
-    nextAssignmentDue: top?.dueAt ? formatAssistantDate(top.dueAt, true) : null,
+    nextAssignmentDue: top?.dueAt ? formatAssistantDate(top.dueAt) : null,
     topAnnouncementTitle: ann?.title ?? null,
   };
 }
