@@ -157,15 +157,17 @@ test('rejects every missing or invalid target before changing any file', (t) => 
   assert.equal(existsSync(join(project, '.release-build-target.json')), false);
 });
 
-test('release manifests omit development provider credentials and preserve export compliance', (t) => {
+test('release manifests use the backend and preserve export compliance', (t) => {
   const project = fixture(t);
   const key = 'development-only-provider-key';
   for (const appEnv of ['preview', 'production']) {
     const config = actualExpoConfig(project, {
       ...identityEnvironment(target),
       APP_ENV: appEnv,
-      EXPO_PUBLIC_GEMINI_API_KEY: key,
+      EXPO_PUBLIC_AI_PROVIDER: 'gemini',
     });
+    assert.equal(config.extra.aiProvider, 'cloud');
+    assert.equal(config.extra.aiRuntimeMode, 'production-backend');
     assert.equal(config.extra.geminiApiKey, '');
     assert.equal(JSON.stringify(config).includes(key), false);
     assert.equal(config.ios.infoPlist.ITSAppUsesNonExemptEncryption, false);
@@ -173,9 +175,49 @@ test('release manifests omit development provider credentials and preserve expor
   }
   const development = actualExpoConfig(project, {
     APP_ENV: 'development',
+    EXPO_PUBLIC_AI_PROVIDER: 'gemini',
     EXPO_PUBLIC_GEMINI_API_KEY: key,
   });
+  assert.equal(development.extra.aiProvider, 'gemini');
   assert.equal(development.extra.geminiApiKey, key);
+});
+
+test('the Expo resolver rejects public provider credentials in every release profile', (t) => {
+  const project = fixture(t);
+  for (const appEnv of ['preview', 'production']) {
+    assert.throws(
+      () => actualExpoConfig(project, {
+        ...identityEnvironment(target),
+        APP_ENV: appEnv,
+        EXPO_PUBLIC_GEMINI_API_KEY: 'development-only-provider-key',
+      }),
+      /Remove EXPO_PUBLIC_GEMINI_API_KEY from release builds/,
+    );
+  }
+});
+
+test('the Expo resolver refuses release provider overrides except the backend', (t) => {
+  const project = fixture(t);
+  for (const appEnv of ['preview', 'production']) {
+    for (const provider of ['gemini', 'offline', 'unknown']) {
+      assert.throws(
+        () => actualExpoConfig(project, {
+          ...identityEnvironment(target),
+          APP_ENV: appEnv,
+          EXPO_PUBLIC_RELEASE_AI_PROVIDER: provider,
+        }),
+        /Release AI provider must be cloud/,
+      );
+    }
+    for (const provider of ['', '  ', ' cloud ']) {
+      const config = actualExpoConfig(project, {
+        ...identityEnvironment(target),
+        APP_ENV: appEnv,
+        EXPO_PUBLIC_RELEASE_AI_PROVIDER: provider,
+      });
+      assert.equal(config.extra.aiProvider, 'cloud');
+    }
+  }
 });
 
 test('local conflicting env and inherited malformed profile values fail closed', (t) => {

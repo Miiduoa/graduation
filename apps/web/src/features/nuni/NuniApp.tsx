@@ -33,14 +33,12 @@ function Login() {
   const query = params.toString();
   const currentPath = `${pathname || '/classroom'}${query ? `?${query}` : ''}${hash}`;
   return (
-    <NuniSignIn
-      returnUrl={params.get('returnUrl') || currentPath}
-      issue={params.has('issue')}
-    />
+    <NuniSignIn returnUrl={params.get('returnUrl') || currentPath} issue={params.has('issue')} />
   );
 }
 
 function Workspace({ id }: { id: string }) {
+  const hash = useLocationHash();
   const classes = useClasses(beginCourseRequest);
   const { refresh } = useNuniSession();
   const [data, setData] = useState<{
@@ -51,6 +49,11 @@ function Workspace({ id }: { id: string }) {
   const [epoch, setEpoch] = useState(0);
   const [code, setCode] = useState('');
   const [tab, setTab] = useState<'materials' | 'assignments' | 'quizzes'>('assignments');
+  useEffect(() => {
+    // A task link must open its panel, including browser back/forward in the same course.
+    if (hash.startsWith('#quiz-')) setTab('quizzes');
+    else if (hash.startsWith('#assignment-')) setTab('assignments');
+  }, [hash]);
   const [refreshing, setRefreshing] = useState(false);
   const generation = useRef(0);
   const reload = () => setEpoch(++generation.current);

@@ -129,6 +129,7 @@ function Assignment({ item, workspace, reload, onConfirmed }: Props) {
     <article
       className={shared.panel}
       id={`assignment-${item.id}`}
+      tabIndex={-1}
       aria-labelledby={`assignment-title-${item.id}`}
     >
       <div className={styles.heading}>

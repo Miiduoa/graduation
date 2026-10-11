@@ -146,7 +146,7 @@ it('groups real roles and opens the same platform course contract using captured
   expect(view.getByText('授課與協作 · 0')).toBeTruthy();
   expect(mockRequest).toHaveBeenCalledWith('class-workspaces', 'context-first', undefined);
   fireEvent.press(view.getByRole('button', { name: '服務設計課程' }));
-  await view.findByText('1 份待繳作業');
+  await view.findByText('待繳作業 1 · 待答測驗 1');
   expect(view.queryByRole('button', { name: '產生學生邀請碼' })).toBeNull();
 });
 it('adds a server-confirmed receipt and removes the assignment from pending work', async () => {
@@ -154,7 +154,7 @@ it('adds a server-confirmed receipt and removes the assignment from pending work
   fireEvent.changeText(view.getByLabelText('作業內容：校園訪談'), '我的訪談內容');
   fireEvent.press(view.getByRole('button', { name: '繳交作業' }));
   await view.findByText('已收到伺服器繳交紀錄。');
-  expect(view.getByText('0 份待繳作業')).toBeTruthy();
+  expect(view.getByText('待繳作業 0 · 待答測驗 1')).toBeTruthy();
   expect(view.getByText('已繳交')).toBeTruthy();
   expect(view.getByText('我的訪談內容')).toBeTruthy();
 });
@@ -270,7 +270,7 @@ it('does not turn a denied submission into success or remove pending work', asyn
   fireEvent.press(view.getByRole('button', { name: '繳交作業' }));
   await view.findByText('你目前沒有這項操作的權限。');
   expect(view.queryByText('已繳交')).toBeNull();
-  expect(view.getByText('1 份待繳作業')).toBeTruthy();
+  expect(view.getByText('待繳作業 1 · 待答測驗 1')).toBeTruthy();
   expect(view.getByLabelText('作業內容：校園訪談').props.value).toBe('保留未確認的內容');
 });
 it('ignores the previous account course list when its slow response arrives late', async () => {
@@ -527,4 +527,95 @@ it('does not unlock an earlier uncertain intent when a revalidated retry returns
   expect(view.getByLabelText('作業內容：校園訪談').props.editable).toBe(false);
   const calls = mockRequest.mock.calls.filter(([path]) => path.endsWith('/submit'));
   expect(calls[1][2]).toEqual(calls[0][2]);
+});
+
+it('retains the student draft when filtering and moves a confirmed submission out of pending work', async () => {
+  const view = await openCourse();
+  fireEvent.changeText(view.getByLabelText('作業內容：校園訪談'), '切換篩選也要保留');
+  fireEvent.press(view.getByRole('button', { name: '已繳交 0' }));
+  expect(view.queryByLabelText('作業內容：校園訪談')).toBeNull();
+  expect(view.getByText('尚無已繳交的作業紀錄。')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '待完成 1' }));
+  expect(view.getByLabelText('作業內容：校園訪談').props.value).toBe('切換篩選也要保留');
+  fireEvent.press(view.getByRole('button', { name: '繳交作業' }));
+  await view.findByText('已收到伺服器繳交紀錄。');
+  expect(view.getByText('待繳作業 0 · 待答測驗 1')).toBeTruthy();
+  expect(view.getByText('切換篩選也要保留')).toBeTruthy();
+  expect(view.getByRole('button', { name: '已繳交 1' })).toHaveAccessibilityState({
+    selected: true,
+  });
+});
+
+it('counts a pending quiz separately and confirms it through the same activity filters', async () => {
+  assignment = { ...assignment, mySubmission: receipt(), submissionCount: 1 };
+  const view = await openCourse();
+  expect(view.getByText('待繳作業 0 · 待答測驗 1')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '測驗 1' }));
+  fireEvent.press(view.getByRole('button', { name: '待完成 1' }));
+  fireEvent.changeText(view.getByLabelText('測驗內容：需求練習'), '測驗也要計入待辦');
+  fireEvent.press(view.getByRole('button', { name: '繳交測驗' }));
+  await view.findByText('待繳作業 0 · 待答測驗 0');
+  expect(view.getByText('已收到伺服器繳交紀錄。')).toBeTruthy();
+  expect(view.getByText('測驗也要計入待辦')).toBeTruthy();
+  expect(view.getByRole('button', { name: '已繳交 1' })).toHaveAccessibilityState({
+    selected: true,
+  });
+});
+
+it('prioritizes the earliest open unsubmitted assignment and leaves closed or submitted work visible in all', async () => {
+  const fixtures = [
+    {
+      ...assignment,
+      id: 'cwa_11111111-1111-4111-8111-111111111111',
+      title: '已完成',
+      mySubmission: { ...receipt(), assignmentId: 'cwa_11111111-1111-4111-8111-111111111111' },
+      submissionCount: 1,
+    },
+    { ...assignment, id: 'cwa_33333333-3333-4333-8333-333333333333', title: '尚無期限' },
+    {
+      ...assignment,
+      id: 'cwa_44444444-4444-4444-8444-444444444444',
+      title: '已結束',
+      state: 'closed',
+      closedAt: date,
+    },
+    { ...assignment, title: '校園訪談', dueAt: '2026-10-15T03:00:00.000Z' },
+    {
+      ...assignment,
+      id: 'cwa_55555555-5555-4555-8555-555555555555',
+      title: '優先補交',
+      dueAt: '2026-10-01T03:00:00.000Z',
+    },
+  ];
+  mockRequest.mockImplementation((path, context, input) =>
+    path.endsWith('/assignments') && !input
+      ? { assignments: fixtures }
+      : response(path, context, input),
+  );
+  const view = await openCourse();
+  const titles = view.getAllByRole('header').map((node) => node.props.children);
+  expect(titles.indexOf('優先補交')).toBeLessThan(titles.indexOf('校園訪談'));
+  expect(titles.indexOf('校園訪談')).toBeLessThan(titles.indexOf('尚無期限'));
+  expect(titles.indexOf('尚無期限')).toBeLessThan(titles.indexOf('已完成'));
+  fireEvent.press(view.getByRole('button', { name: '待完成 3' }));
+  expect(view.queryByText('已結束')).toBeNull();
+  expect(view.queryByText('已完成')).toBeNull();
+  expect(view.getByLabelText('作業內容：優先補交')).toBeTruthy();
+});
+
+it('does not treat an archived course as pending and retains all receipt records', async () => {
+  course = { ...course, state: 'archived' };
+  assignment = { ...assignment, mySubmission: receipt(), submissionCount: 1 };
+  const view = await openCourse();
+  expect(view.getByText('待繳作業 0 · 待答測驗 0')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '已繳交 1' }));
+  expect(view.getByText('我的訪談內容')).toBeTruthy();
+  expect(view.queryByRole('button', { name: '更新作業繳交' })).toBeNull();
+});
+
+it('does not show a student pending filter to a course teacher', async () => {
+  course = { ...course, memberRole: 'co-teacher' };
+  const view = await openCourse();
+  expect(view.queryByRole('button', { name: /待完成/ })).toBeNull();
+  expect(view.getByRole('button', { name: '查看收件：校園訪談' })).toBeTruthy();
 });

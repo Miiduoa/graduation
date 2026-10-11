@@ -8,7 +8,10 @@ import {
   type NuniQuizResponse,
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
+import { useLocationHash } from '@/lib/useLocationHash';
 import { MutationForm, useClasses } from './CourseUI';
+import { CourseText } from './CourseMaterials';
+import { matchesQuizFilter, quizStatus, type QuizFilter } from './courseTasks';
 import { useNuniSession } from './Session';
 import styles from './NuniApp.module.css';
 import quizStyles from './CourseQuizzes.module.css';
@@ -39,10 +42,51 @@ function QuizList({ workspace, accountId }: { workspace: NuniWorkspace; accountI
   const [error, setError] = useState('');
   const [epoch, setEpoch] = useState(0);
   const [now, setNow] = useState(() => Date.now());
+  const [filter, setFilter] = useState<QuizFilter>('all');
+  const hash = useLocationHash();
+  const revealed = useRef('');
   const mounted = useRef(true);
   const readGeneration = useRef(0);
   const teacher = workspace.memberRole === 'owner-teacher' || workspace.memberRole === 'co-teacher';
   const writable = workspace.state === 'active';
+  const filters: [QuizFilter, string][] = teacher
+    ? [
+        ['all', '全部'],
+        ['received', '已收到作答'],
+        ['open', '開放作答'],
+      ]
+    : [
+        ['all', '全部'],
+        ['pending', '待作答'],
+        ['answered', '已作答'],
+        ['feedback', '老師回饋'],
+      ];
+  const shown = items?.filter((item) => matchesQuizFilter(item, workspace, filter));
+  useEffect(() => {
+    const revealLinkedQuiz = () => {
+      if (window.location.hash.startsWith('#quiz-')) setFilter('all');
+    };
+    window.addEventListener('hashchange', revealLinkedQuiz);
+    return () => window.removeEventListener('hashchange', revealLinkedQuiz);
+  }, []);
+  useEffect(() => {
+    const target = hash.slice(1);
+    if (
+      filter !== 'all' ||
+      revealed.current === target ||
+      !items?.some((item) => `quiz-${item.id}` === target)
+    )
+      return;
+    const frame = window.requestAnimationFrame(() => {
+      const element = document.getElementById(target);
+      if (element) {
+        element.scrollIntoView?.({ block: 'start' });
+        element.focus({ preventScroll: true });
+        revealed.current = target;
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [filter, hash, items]);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -101,6 +145,8 @@ function QuizList({ workspace, accountId }: { workspace: NuniWorkspace; accountI
     ++readGeneration.current;
     setReading(false);
     setError('');
+    if (!teacher && item.myResponse && filter === 'pending') setFilter('answered');
+    if (teacher && !items?.some((entry) => entry.id === item.id)) setFilter('all');
     setItems((previous) =>
       previous?.some((entry) => entry.id === item.id)
         ? previous.map((entry) => (entry.id === item.id ? item : entry))
@@ -115,8 +161,8 @@ function QuizList({ workspace, accountId }: { workspace: NuniWorkspace; accountI
           <h2 id={headingId}>測驗</h2>
           <p className={styles.muted}>
             {teacher
-              ? '發布文字題目，查看學生作答並留下回饋。'
-              : '閱讀題目、整理想法，送出後在這裡查看老師回饋。'}
+              ? '查看學生作答與回饋。作答份數包含已回饋的內容。'
+              : '選擇待作答的測驗；送出後可查看回答與老師回饋。'}
           </p>
         </div>
         <button
@@ -143,6 +189,36 @@ function QuizList({ workspace, accountId }: { workspace: NuniWorkspace; accountI
         </div>
       )}
       {reading && <p role="status">正在讀取測驗…</p>}
+      {items !== null && items.length > 0 && (
+        <div className={styles.taskSummary}>
+          <div className={styles.filters} role="group" aria-label="篩選測驗">
+            {filters.map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={filter === value}
+                onClick={() => setFilter(value)}
+              >
+                {label} {items.filter((item) => matchesQuizFilter(item, workspace, value)).length}
+              </button>
+            ))}
+          </div>
+          {shown && shown.length > 0 ? (
+            <nav aria-label="跳到測驗" className={styles.assignmentIndex}>
+              {shown.map((item) => (
+                <a key={item.id} href={`#quiz-${item.id}`}>
+                  <span>{item.title}</span>
+                  <small>{quizStatus(item, workspace)}</small>
+                </a>
+              ))}
+            </nav>
+          ) : (
+            <p role="status" className={styles.note}>
+              這個分類目前沒有測驗。選擇「全部」可查看其他內容。
+            </p>
+          )}
+        </div>
+      )}
       {items?.length === 0 && (
         <div className={styles.panel}>
           <p className={styles.muted}>
@@ -151,7 +227,10 @@ function QuizList({ workspace, accountId }: { workspace: NuniWorkspace; accountI
         </div>
       )}
       {items?.map((item) => (
-        <Quiz key={item.id} item={item} workspace={workspace} acceptQuiz={acceptQuiz} now={now} />
+        // Keep drafts and uncertain submissions mounted when switching task filters.
+        <div key={item.id} hidden={!matchesQuizFilter(item, workspace, filter)}>
+          <Quiz item={item} workspace={workspace} acceptQuiz={acceptQuiz} now={now} />
+        </div>
       ))}
       {teacher && writable && items !== null && (
         <details className={`${styles.panel} ${styles.compose}`}>
@@ -268,10 +347,17 @@ function Quiz({
   };
 
   return (
-    <article className={styles.panel} aria-label={`測驗：${item.title}`}>
+    <article
+      className={styles.panel}
+      id={`quiz-${item.id}`}
+      tabIndex={-1}
+      aria-label={`測驗：${item.title}`}
+    >
       <div className={quizStyles.title}>
         <h3>{item.title}</h3>
-        <span className={quizStyles.state}>{item.state === 'closed' ? '已結束' : '開放作答'}</span>
+        <span className={quizStyles.state}>
+          {!writable ? '課程已封存' : item.state === 'closed' ? '已結束' : '開放作答'}
+        </span>
       </div>
       {item.unitTitle && <p className={styles.muted}>章節：{item.unitTitle}</p>}
       <p className={styles.muted}>
@@ -284,7 +370,7 @@ function Quiz({
           '未設定建議完成時間'
         )}
       </p>
-      <p className={styles.prose}>{item.prompt}</p>
+      <CourseText text={item.prompt} />
       {student && item.myResponse && (
         <div className={styles.receipt}>
           <strong>已送出作答</strong>
@@ -293,11 +379,11 @@ function Quiz({
               {dateLabel(item.myResponse.submittedAt)}
             </time>
           </p>
-          <p className={styles.prose}>{item.myResponse.answer}</p>
+          <CourseText text={item.myResponse.answer} />
           {item.myResponse.teacherFeedback ? (
             <>
               <h4>老師回饋</h4>
-              <p className={styles.prose}>{item.myResponse.teacherFeedback}</p>
+              <CourseText text={item.myResponse.teacherFeedback} />
               {item.myResponse.reviewedAt && (
                 <p className={styles.muted}>
                   回饋時間：
@@ -339,7 +425,7 @@ function Quiz({
             </label>
             <label className={quizStyles.confirmation}>
               <input name="confirm" type="checkbox" value="yes" required />
-              <span>我已檢查回答，確認送出。送出後此頁會保留紀錄，不再提供編輯。</span>
+              <span>我已檢查回答。送出後無法修改。</span>
             </label>
           </MutationForm>
         </>
@@ -347,7 +433,7 @@ function Quiz({
       {teacher && (
         <>
           <div className={styles.actions}>
-            <span className={styles.muted}>{item.responseCount} 份作答</span>
+            <span className={styles.muted}>{responses?.length ?? item.responseCount} 份作答</span>
             {writable && (
               <button
                 className={`${styles.button} ${styles.secondary}`}
@@ -462,11 +548,11 @@ function QuizFeedbackRow({
         <strong>{entry.displayName || '課程成員'}</strong> ·{' '}
         <time dateTime={entry.submittedAt}>{dateLabel(entry.submittedAt)}</time>
       </p>
-      <p className={styles.prose}>{entry.answer}</p>
+      <CourseText text={entry.answer} />
       {entry.teacherFeedback && (
         <div className={styles.receipt}>
           <strong>已儲存的回饋</strong>
-          <p className={styles.prose}>{entry.teacherFeedback}</p>
+          <CourseText text={entry.teacherFeedback} />
         </div>
       )}
       {notice && (

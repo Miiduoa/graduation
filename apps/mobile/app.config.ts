@@ -230,12 +230,13 @@ export default ({ config }: any) => {
   ];
   const configuredAiProvider = process.env.EXPO_PUBLIC_AI_PROVIDER ?? 'gemini';
   const releaseAiProviderOverride = process.env.EXPO_PUBLIC_RELEASE_AI_PROVIDER?.trim();
-  const releaseAiProvider =
-    isReleaseLike && releaseAiProviderOverride
-      ? releaseAiProviderOverride
-      : isReleaseLike
-        ? 'cloud'
-        : configuredAiProvider;
+  if (isReleaseLike && releaseAiProviderOverride && releaseAiProviderOverride !== 'cloud') {
+    throw new Error('[app.config] Release AI provider must be cloud');
+  }
+  if (isReleaseLike && process.env.EXPO_PUBLIC_GEMINI_API_KEY?.trim()) {
+    throw new Error('[app.config] Remove EXPO_PUBLIC_GEMINI_API_KEY from release builds');
+  }
+  const releaseAiProvider = isReleaseLike ? 'cloud' : configuredAiProvider;
   const aiOfflineFirstBuild = parseBoolean(process.env.EXPO_PUBLIC_AI_OFFLINE_FIRST, false);
 
   const androidIntentFilters = [

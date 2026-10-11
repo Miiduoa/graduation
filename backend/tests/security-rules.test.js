@@ -1332,6 +1332,59 @@ describe('attendance transactions on Firestore', () => {
     assert.equal(records.docs.find((doc) => doc.id === 'alice').data().checkedInAt.toDate().toISOString(), initial.checkedInAt);
   });
 
+  test('parallel lost-response retries after expiry and closure return the original receipt without writes', async () => {
+    const session = await handlers.startLiveSession(startRequest());
+    const initial = await handlers.joinLiveSession(request(session));
+    await handlers.endLiveSession(request(session, 'teacher'));
+    currentTime += 300_000;
+    const references = [
+      sessionDoc(session, 'liveSessions'),
+      sessionDoc(session, 'attendanceSessions'),
+      sessionDoc(session, 'attendanceSessions').collection('attendanceRecords').doc('alice'),
+    ];
+    const before = await db.getAll(...references);
+    const retries = await Promise.all(Array.from({ length: 4 }, () => handlers.joinLiveSession(request(session))));
+    for (const receipt of retries) assert.deepEqual(receipt, { ...initial, alreadyJoined: true });
+    const after = await db.getAll(...references);
+    for (let index = 0; index < before.length; index++) {
+      assert.deepEqual(after[index].data(), before[index].data());
+      assert.equal(after[index].updateTime.isEqual(before[index].updateTime), true);
+    }
+    await assert.rejects(handlers.joinLiveSession(request(session, 'bob')), { code: 'failed-precondition' });
+    assert.equal((await sessionDoc(session, 'attendanceSessions').collection('attendanceRecords').get()).size, 1);
+  });
+
+  test('expired receipts still require the original private token, own identity and active membership', async () => {
+    const session = await handlers.startLiveSession(startRequest());
+    await handlers.joinLiveSession(request(session));
+    currentTime += 300_000;
+    const wrongToken = request(session);
+    wrongToken.data.qrToken = 'wrong-token-long-enough';
+    await assert.rejects(handlers.joinLiveSession(wrongToken), { code: 'permission-denied' });
+    const anotherAccount = request(session, 'bob');
+    anotherAccount.data.uid = 'alice';
+    await assert.rejects(handlers.joinLiveSession(anotherAccount), { code: 'deadline-exceeded' });
+    await db.doc(`${base}/members/alice`).update({ status: 'inactive' });
+    await assert.rejects(handlers.joinLiveSession(request(session)), { code: 'permission-denied' });
+    await db.doc(`${base}/members/alice`).delete();
+    await assert.rejects(handlers.joinLiveSession(request(session)), { code: 'permission-denied' });
+    assert.equal((await sessionDoc(session, 'attendanceSessions').get()).data().attendeeCount, 1);
+    assert.equal((await sessionDoc(session, 'attendanceSessions').collection('attendanceRecords').get()).size, 1);
+  });
+
+  test('receipt recovery never overwrites a teacher correction after expiry', async () => {
+    const session = await handlers.startLiveSession(startRequest());
+    await handlers.joinLiveSession(request(session));
+    const record = sessionDoc(session, 'attendanceSessions').collection('attendanceRecords').doc('alice');
+    await record.update({ status: 'absent', reviewedBy: 'teacher', reviewNote: '更正出席紀錄' });
+    const corrected = await record.get();
+    currentTime += 300_000;
+    await assert.rejects(handlers.joinLiveSession(request(session)), { code: 'failed-precondition' });
+    const after = await record.get();
+    assert.deepEqual(after.data(), corrected.data());
+    assert.equal(after.updateTime.isEqual(corrected.updateTime), true);
+  });
+
   test('closing races with a join without splitting status, counts or attendance records', async () => {
     const session = await handlers.startLiveSession(startRequest());
     const [join, end] = await Promise.allSettled([
