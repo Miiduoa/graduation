@@ -73,6 +73,15 @@ describe('文字匯入與分享碼', () => {
     expect(courses[1]).toMatchObject({ name: '英文', day: 3, start: 1, end: 1 });
   });
 
+  it('教室號碼不會被當成節次吃掉', () => {
+    const courses = parseTimetableText(
+      '星期一 第3-4節 資料庫 / 王老師 / 主顧303\n星期二 第5節 統計 / 李老師 / 任垣201\n星期四 6-7節 網路概論 / 陳老師 / 伯鐸 12',
+    );
+    expect(courses[0]).toMatchObject({ name: '資料庫', start: 3, end: 4, room: '主顧303' });
+    expect(courses[1]).toMatchObject({ name: '統計', day: 2, start: 5, end: 5, room: '任垣201' });
+    expect(courses[2]).toMatchObject({ name: '網路概論', day: 4, start: 6, end: 7, room: '伯鐸 12' });
+  });
+
   it('分享碼可以來回', () => {
     const payload = {
       v: 1 as const,
