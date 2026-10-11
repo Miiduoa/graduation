@@ -6,7 +6,16 @@ const mockList = jest.fn();
 const mockGive = jest.fn();
 const mockUpdate = jest.fn();
 jest.mock('../services/merchant', () => ({
-  listMerchantOrders: (...args: unknown[]) => mockList(...args),
+  // 每次接上監聽就讀一次伺服器的資料（按完按鈕會重新接一次）
+  watchMerchantOrders: (input: unknown, onOrders: (orders: unknown[]) => void) => {
+    let live = true;
+    void Promise.resolve(mockList(input)).then((orders) => {
+      if (live) onOrders(orders as unknown[]);
+    });
+    return () => {
+      live = false;
+    };
+  },
   giveMerchantQueueNumber: (...args: unknown[]) => mockGive(...args),
   updateMerchantOrderStatus: (...args: unknown[]) => mockUpdate(...args),
 }));
