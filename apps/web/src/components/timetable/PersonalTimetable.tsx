@@ -11,7 +11,12 @@ import {
   analyzeImportDrafts,
   applyImport,
   cleanCourse,
-  commonFree,
+  meetupLabel,
+  meetupStartOptions,
+  meetupWindowLabel,
+  meetupWindows,
+  minutesLabel,
+  type MeetupWindow,
   courseTimeLabel,
   findCourseConflicts,
   parseTimetableText,
@@ -26,6 +31,8 @@ import styles from '@/components/academic/academic.module.css';
 import {
   createMeetup,
   createServerShare,
+  listMyMeetups,
+  respondMeetup,
   loadFriendTimetable,
   loadPersonalTimetable,
   savePersonalTimetable,
@@ -73,6 +80,7 @@ export function PersonalTimetable() {
   const [studyHours, setStudyHours] = useState(2);
   const [friends, setFriends] = useState<Array<PlannerFriend & { username?: string }>>([]);
   const [selectedFriend, setSelectedFriend] = useState<string | null>(null);
+  const [meetupBusy, setMeetupBusy] = useState(false);
   const [shareUrl, setShareUrl] = useState('');
   const schoolRecords = useAcademicRecords('courses');
 
@@ -114,6 +122,29 @@ export function PersonalTimetable() {
       .catch(() => setFriends([]));
   }, [uid, schoolId]);
 
+  // 別人約我、還沒回覆的邀約，在課表頁也看得到
+  const [invites, setInvites] = useState<
+    Array<{ id: string; creatorUid: string; kind: 'meal' | 'study'; day: number; startMinute?: number; startPeriod?: number; endPeriod?: number }>
+  >([]);
+  const loadInvites = useCallback(async () => {
+    const rows = uid ? ((await listMyMeetups(schoolId, uid).catch(() => [])) as Array<Record<string, unknown>>) : [];
+    setInvites(
+      rows.filter((row) => row.inviteeUid === uid && row.status === 'pending') as unknown as typeof invites,
+    );
+  }, [uid, schoolId]);
+  useEffect(() => {
+    void Promise.resolve().then(loadInvites);
+  }, [loadInvites]);
+  const answerInvite = async (id: string, status: 'accepted' | 'declined') => {
+    try {
+      await respondMeetup(id, status);
+      setNotice(status === 'accepted' ? '已答應，對方會看到。' : '已婉拒。');
+    } catch {
+      setNotice('這次沒有回覆成功，請稍後再試。');
+    }
+    await loadInvites();
+  };
+
   const persist = async (next: StoredTimetable, message: string) => {
     setBusy(true);
     try {
@@ -137,7 +168,32 @@ export function PersonalTimetable() {
 
   const conflicts = findCourseConflicts(timetable.courses);
   const selected = friends.find((friend) => friend.id === selectedFriend);
-  const common = selected ? commonFree(timetable.courses, selected.courses) : [];
+  const windows = selected ? meetupWindows(timetable.courses, selected.courses) : [];
+  const sendMeetup = async (kind: 'meal' | 'study', day: number, startMinute: number) => {
+    if (!uid || !selected || meetupBusy) return;
+    setMeetupBusy(true);
+    const label = meetupLabel({ day, kind, startMinute });
+    try {
+      const result = await createMeetup({
+        schoolId,
+        creatorUid: uid,
+        inviteeUid: selected.id,
+        kind,
+        day,
+        startMinute,
+        note: kind === 'meal' ? '約吃飯' : '約讀書',
+      });
+      setNotice(
+        result === 'already'
+          ? `「${label}」之前就約過了，不會再送一次。`
+          : `已送出邀請：${label}。對方會在「找人」和「我的課表」看到。`,
+      );
+    } catch {
+      setNotice('邀請沒有送出，請稍後再試。');
+    } finally {
+      setMeetupBusy(false);
+    }
+  };
   const analyzed = analyzeImportDrafts(timetable.courses, drafts, importMode);
 
   const saveCourse = async (course: PersonalCourse) => {
@@ -243,6 +299,28 @@ export function PersonalTimetable() {
 
   return (
     <>
+      {invites.length > 0 && (
+        <section className={styles.panel} aria-label="邀約">
+          <h2>有人約你</h2>
+          <ul className={styles.list}>
+            {invites.map((item) => (
+              <li key={item.id}>
+                <p>
+                  {friends.find((friend) => friend.id === item.creatorUid)?.name || '同學'} 約你：{meetupLabel(item)}
+                </p>
+                <div className={styles.toolbar}>
+                  <button type="button" className="btn primary" onClick={() => void answerInvite(item.id, 'accepted')}>
+                    答應
+                  </button>
+                  <button type="button" className="btn" onClick={() => void answerInvite(item.id, 'declined')}>
+                    婉拒
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       <p className={styles.notice}>
         {uid
           ? '這份課表存在你的 Campus One 帳號。學校選課紀錄要經過確認才會覆蓋。'
@@ -533,61 +611,60 @@ export function PersonalTimetable() {
                 ))}
               </select>
             </label>
-            {selected && selected.courses.length > 0 && common.length === 0 && (
-              <p className={styles.notice}>這週找不到兩個人都沒課的時段。</p>
+            {selected && selected.courses.length > 0 && windows.length === 0 && (
+              <p className={styles.notice}>這週找不到兩個人都沒課、有一小時的時段。</p>
             )}
             {selected && !selected.courses.length && (
               <p className={styles.notice}>這位朋友還沒有開放課表，或課表仍是空的。</p>
             )}
-            {common.slice(0, 6).map((block) => (
-              <p key={`${block.day}-${block.start}`}>
-                {WEEKDAY_LABELS[block.day - 1]} {periodRangeLabel(block.start, block.end)}
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() =>
-                    void createMeetup({
-                      schoolId,
-                      creatorUid: uid,
-                      inviteeUid: selected!.id,
-                      kind: 'meal',
-                      day: block.day,
-                      startPeriod: block.start,
-                      endPeriod: block.end,
-                      note: '約吃飯',
-                    })
-                      .then(() => setNotice('已送出吃飯邀請，對方會在「找人」看到。'))
-                      .catch(() => setNotice('邀請沒有送出，請稍後再試。'))
-                  }
-                >
-                  約吃飯
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() =>
-                    void createMeetup({
-                      schoolId,
-                      creatorUid: uid,
-                      inviteeUid: selected!.id,
-                      kind: 'study',
-                      day: block.day,
-                      startPeriod: block.start,
-                      endPeriod: block.end,
-                      note: '約讀書',
-                    })
-                      .then(() => setNotice('已送出讀書邀請，對方會在「找人」看到。'))
-                      .catch(() => setNotice('邀請沒有送出，請稍後再試。'))
-                  }
-                >
-                  約讀書
-                </button>
-              </p>
-            ))}
+            {selected &&
+              windows.slice(0, 8).map((window) => (
+                <MeetupWindowRow
+                  key={`${window.day}-${window.start}`}
+                  window={window}
+                  busy={meetupBusy}
+                  onSend={(kind, startMinute) => void sendMeetup(kind, window.day, startMinute)}
+                />
+              ))}
           </>
         )}
       </section>
     </>
+  );
+}
+
+function MeetupWindowRow({
+  window,
+  busy,
+  onSend,
+}: {
+  window: MeetupWindow;
+  busy: boolean;
+  onSend: (kind: 'meal' | 'study', startMinute: number) => void;
+}) {
+  const options = meetupStartOptions(window);
+  const [start, setStart] = useState(options[0] ?? window.start);
+  return (
+    <div className={styles.toolbar}>
+      <span>{meetupWindowLabel(window)}</span>
+      <label className={styles.field}>
+        開始
+        <select value={start} onChange={(event) => setStart(Number(event.target.value))}>
+          {options.map((at) => (
+            <option value={at} key={at}>
+              {minutesLabel(at)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <span>1 小時</span>
+      <button type="button" className="btn" disabled={busy} onClick={() => onSend('meal', start)}>
+        約吃飯
+      </button>
+      <button type="button" className="btn" disabled={busy} onClick={() => onSend('study', start)}>
+        約讀書
+      </button>
+    </div>
   );
 }
 

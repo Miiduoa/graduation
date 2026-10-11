@@ -28,6 +28,8 @@ export type Friendship = {
   createdAt?: any;
   acceptedAt?: any;
   declinedAt?: any;
+  fromName?: string;
+  toName?: string;
 };
 
 export function friendshipDeclinedAtMs(f: Friendship | null | undefined): number {

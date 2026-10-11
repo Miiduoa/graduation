@@ -162,3 +162,26 @@ describe('share copy', () => {
     expect(shareCopiedCopy(expiresAt)).not.toMatch(/撤回|七天/);
   });
 });
+
+describe('meetups', () => {
+  it('lists lunch first with a 12:00 default start and gives one id per time and kind', async () => {
+    const { meetupWindows, meetupStartOptions, meetupDocId, meetupLabel } = await import('@campus/shared');
+    const mine = [{ id: 'a', name: '資料庫', day: 1, start: 3, end: 4, teacher: '', room: '', color: 'blue' as const }];
+    const theirs = [{ id: 'b', name: '英文', day: 1, start: 5, end: 6, teacher: '', room: '', color: 'blue' as const }];
+    const windows = meetupWindows(mine, theirs);
+    expect(windows[0]).toMatchObject({ day: 1, meal: 'lunch', start: 12 * 60, end: 13 * 60 + 10 });
+    expect(meetupStartOptions(windows[0])[0]).toBe(12 * 60);
+    expect(meetupLabel({ day: 1, kind: 'meal', startMinute: 12 * 60 })).toBe('星期一 12:00 吃飯（1 小時）');
+    expect(meetupDocId('a', 'b', 1, 720, 'meal')).toBe(meetupDocId('a', 'b', 1, 720, 'meal'));
+    expect(meetupDocId('a', 'b', 1, 720, 'meal')).not.toBe(meetupDocId('a', 'b', 1, 720, 'study'));
+  });
+
+  it('describes the next class with clock time, room and hours left', async () => {
+    const { describeNext } = await import('@campus/shared');
+    const course = { id: 'a', name: '資料庫', day: 1, start: 3, end: 4, teacher: '', room: '主顧303', color: 'blue' as const };
+    expect(describeNext({ kind: 'next', course, minutes: 591 })).toBe('下一堂：今天 10:10 資料庫，主顧303（還有 9 小時 51 分）');
+    expect(describeNext({ kind: 'future', course: { ...course, day: 3, start: 1, name: '英文', room: '任垣201' } })).toBe(
+      '下一堂：星期三 08:10 英文，任垣201',
+    );
+  });
+});
