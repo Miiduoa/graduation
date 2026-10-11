@@ -75,6 +75,15 @@ describe('personal timetable share', () => {
     await createGetTimetableShareHandler({ db })({ method: 'GET', query: { token: created.token } }, res);
     expect(res.statusCode).toBe(200);
     expect(res.body.courses[0].name).toBe('資料庫');
+    expect(res.body.courses[0].room).toBe('PH303');
+    expect(res.body.courses[0].teacher).toBe('');
+    const stored = [...docs.entries()].find(([key]) => key.startsWith('timetableShares/'))[1];
+    expect(stored.ownerUid).toBeUndefined();
+    expect(JSON.stringify(stored)).not.toContain('alice');
+    expect(JSON.stringify(stored)).not.toContain('王');
+    await expect(
+      createRevokeTimetableShareHandler({ db })({ auth: { uid: 'mallory' }, data: { token: created.token } }),
+    ).rejects.toThrow();
 
     await createRevokeTimetableShareHandler({ db })({
       auth: { uid: 'alice' },
