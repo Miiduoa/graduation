@@ -64,6 +64,7 @@ const {
 } = require('./sessionSecurity');
 const { normalizeCafeteriaPilotStatus } = require('./cafeterias');
 const { toJsDate, formatAssistantDate } = require('./lib/assistantFormat');
+const { taipeiDateKey, shiftDateKey } = require('./lib/taipeiDay');
 const {
   fetchAssistantPendingAssignments,
   fetchAssistantUserProfile,
@@ -1238,7 +1239,7 @@ function normalizePulseCategory(value) {
 }
 
 function hashPulseReporter(uid, schoolId) {
-  const day = new Date().toISOString().slice(0, 10);
+  const day = taipeiDateKey();
   return nodeCrypto
     .createHash('sha256')
     .update(`${schoolId}:${uid}:${day}`)
@@ -5533,7 +5534,8 @@ exports.submitReaction = onCall({ region: REGION }, async (request) => {
 exports.generateDailyBrief = onSchedule(
   { schedule: '30 7 * * *', region: REGION, timeZone: 'Asia/Taipei' },
   async () => {
-    const today = new Date().toISOString().slice(0, 10);
+    // 07:30 台灣時間跑，這時 UTC 還是前一天，要用台灣日期當鍵
+    const today = taipeiDateKey();
     console.log(`[generateDailyBrief] Running for ${today}`);
 
     try {
@@ -5613,9 +5615,9 @@ exports.generateWeeklyReport = onSchedule(
   { schedule: '0 22 * * 0', region: REGION, timeZone: 'Asia/Taipei' },
   async () => {
     const now = new Date();
-    const weekStart = new Date(now);
-    weekStart.setDate(now.getDate() - 6);
-    const weekId = `${weekStart.toISOString().slice(0, 10)}_${now.toISOString().slice(0, 10)}`;
+    const weekStart = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000);
+    const today = taipeiDateKey(now);
+    const weekId = `${shiftDateKey(today, -6)}_${today}`;
 
     console.log(`[generateWeeklyReport] Running for week ${weekId}`);
 

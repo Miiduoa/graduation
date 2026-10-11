@@ -13,6 +13,8 @@ const {
   detectCampusAssistantIntent,
   toJsDate,
   formatAssistantDate,
+  isScheduleQuestionMessage,
+  extractScheduleSnippet,
 } = require('../lib/assistantFormat');
 
 function extractRepairIdFromMessage(text) {
@@ -1057,15 +1059,20 @@ async function executeCampusAssistantCore({
       return await finalizeResponse();
     }
 
+    // 問「什麼時候、幾點」時，把公告內文裡講時段的那一句帶出來，不只給標題和發布時間
+    const asksSchedule = isScheduleQuestionMessage(lastUserMessage);
     response.content = [
       `目前先幫你整理 ${Math.min(announcements.length, 3)} 則最新公告：`,
       '',
       announcements
         .slice(0, 3)
-        .map(
-          (announcement, index) =>
-            `${index + 1}. ${announcement.title ?? '未命名公告'}${announcement.publishedAt ? `（${formatAssistantDate(announcement.publishedAt)}）` : ''}`,
-        )
+        .map((announcement, index) => {
+          const line = `${index + 1}. ${announcement.title ?? '未命名公告'}${announcement.publishedAt ? `（${formatAssistantDate(announcement.publishedAt)}）` : ''}`;
+          const timeNote = asksSchedule
+            ? extractScheduleSnippet(String(announcement.body || announcement.content || ''))
+            : '';
+          return timeNote ? `${line}\n   時段：${timeNote}` : line;
+        })
         .join('\n'),
     ].join('\n');
     response.suggestions = ['查看詳情', '近期活動', '推薦餐點'];

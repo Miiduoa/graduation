@@ -81,8 +81,13 @@ export interface CompanionEvent {
 // 內部 helpers
 // ─────────────────────────────────────────────────────────
 
+// 每日訊號用台灣日期分天（台灣沒有日光節約，固定 +8 小時）；伺服器跑在 UTC，直接切字串會在早上 8 點才換日
+const TAIPEI_OFFSET_MS = 8 * 60 * 60 * 1000;
+
 function dateOf(iso: string): string {
-  return iso.slice(0, 10);
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return iso.slice(0, 10);
+  return new Date(ms + TAIPEI_OFFSET_MS).toISOString().slice(0, 10);
 }
 
 function emptyDay(date: string): DailyActivitySignal {

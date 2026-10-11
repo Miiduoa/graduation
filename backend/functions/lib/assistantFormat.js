@@ -28,12 +28,15 @@ function toJsDate(value) {
   return null;
 }
 
-// 伺服器跑在 UTC，給使用者看的時間一律換成台灣時間，寫成「10 月 13 日 02:35」
+// 伺服器跑在 UTC，給使用者看的時間一律換成台灣時間，寫成「10 月 13 日（二）02:35」。
+// 回覆會存下來之後再讀，所以只寫絕對日期，不寫今天、明天這種相對的字。
 const ASSISTANT_TIME_ZONE = 'Asia/Taipei';
+const WEEKDAY_ZH = { Sun: '日', Mon: '一', Tue: '二', Wed: '三', Thu: '四', Fri: '五', Sat: '六' };
 const assistantDateParts = new Intl.DateTimeFormat('en-US', {
   timeZone: ASSISTANT_TIME_ZONE,
   month: 'numeric',
   day: 'numeric',
+  weekday: 'short',
   hour: '2-digit',
   minute: '2-digit',
   hourCycle: 'h23',
@@ -44,7 +47,7 @@ function formatAssistantDate(date) {
   if (!d) return '';
   const parts = {};
   for (const part of assistantDateParts.formatToParts(d)) parts[part.type] = part.value;
-  return `${Number(parts.month)} 月 ${Number(parts.day)} 日 ${parts.hour}:${parts.minute}`;
+  return `${Number(parts.month)} 月 ${Number(parts.day)} 日（${WEEKDAY_ZH[parts.weekday]}）${parts.hour}:${parts.minute}`;
 }
 
 function getLastUserMessage(messages) {
@@ -72,7 +75,7 @@ function isDormRepairStatusQueryMessage(input) {
 }
 
 // 問的是「什麼時候、幾點、哪天」這類時間，不是要送報修
-const SCHEDULE_QUESTION_RE = /(什麼時候|甚麼時候|啥時|何時|幾點|哪天|哪一天|哪幾天|幾號|幾月|星期幾|禮拜幾|週幾|周幾|什麼時間|多久|\bwhen\b)/i;
+const SCHEDULE_QUESTION_RE = /(什麼時候|甚麼時候|啥時|何時|幾點|哪天|哪一天|哪幾天|幾號|幾月|星期幾|禮拜幾|週幾|周幾|什麼時間|時段|多久|\bwhen\b)/i;
 // 講到自己送出的報修單才算查報修進度
 const OWN_REPAIR_TICKET_RE = /(報修|維修單|工單|單號|進度|狀態)/;
 
@@ -86,6 +89,22 @@ function mentionsOwnRepairTicket(input) {
   const text = typeof input === 'string' ? input : input && input.content;
   if (!text || typeof text !== 'string') return false;
   return OWN_REPAIR_TICKET_RE.test(text);
+}
+
+// 公告內文裡講時段的那一句，例如「10 月 14 日（三）01:00–05:00 宿舍網路維修」
+const TIME_MENTION_RE = /(\d{1,2}\s*[:：]\s*\d{2}|\d{1,2}\s*點|凌晨|上午|下午|中午|晚上|傍晚)/;
+const RELATIVE_DAY_RE = /(今天|明天|後天|昨天|今日|明日|今晚|明晚)/;
+
+function extractScheduleSnippet(text, maxLength = 80) {
+  if (!text || typeof text !== 'string') return '';
+  const sentences = text
+    .split(/[。！？!?\n]+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+  // 回覆會存下來之後再看，寫「明天」的句子日後會指錯天，不拿來用
+  const hit = sentences.find((sentence) => TIME_MENTION_RE.test(sentence) && !RELATIVE_DAY_RE.test(sentence));
+  if (!hit) return '';
+  return hit.length > maxLength ? `${hit.slice(0, maxLength)}…` : hit;
 }
 
 /**
@@ -119,5 +138,6 @@ module.exports = {
   isDormRepairStatusQueryMessage,
   isScheduleQuestionMessage,
   mentionsOwnRepairTicket,
+  extractScheduleSnippet,
   detectCampusAssistantIntent,
 };
