@@ -45,7 +45,7 @@ tags:
 - waitForAnimationToEnd:
     timeout: 2500
 
-- takeScreenshot: ai_first_tabs
+- takeScreenshot: navigation_tabs
 
 - waitForAnimationToEnd:
     timeout: 2500
