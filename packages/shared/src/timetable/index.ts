@@ -5,3 +5,4 @@ export * from './planner';
 export * from './shareCodec';
 export * from './textImport';
 export * from './appeals';
+export * from './friendResend';
