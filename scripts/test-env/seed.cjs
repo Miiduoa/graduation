@@ -17,7 +17,7 @@ admin.initializeApp({ projectId });
 const db = admin.firestore();
 const auth = admin.auth();
 
-const PASSWORD = 'campus-test-1234';
+const PASSWORD = 'campus-test-1234'; // gitleaks:allow 只在本機模擬器用的公開測試密碼
 const SCHOOL_ID = 'pu';
 const users = [
   { uid: 'test-student-a', login: 'S0000001', name: '測試學生甲', username: 'test_a', role: 'student' },
