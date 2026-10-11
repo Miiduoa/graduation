@@ -1340,6 +1340,11 @@ service cloud.firestore {
       allow list, write: if false;
     }
 
+    // 分享連結的擁有者只給伺服器用
+    match /timetableShareOwners/{token} {
+      allow read, write: if false;
+    }
+
     match /meetups/{meetupId} {
       allow read: if isSignedIn()
         && (resource.data.creatorUid == request.auth.uid || resource.data.inviteeUid == request.auth.uid)
