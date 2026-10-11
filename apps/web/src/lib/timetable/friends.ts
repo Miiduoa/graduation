@@ -130,7 +130,8 @@ export async function publishHandle(schoolId: string, uid: string, raw: string, 
   const previous = await loadMyHandle(uid);
   await setDoc(doc(getDb(), 'schools', schoolId, 'handles', handle), {
     uid,
-    name: name.trim().slice(0, 40) || '同學',
+    // 規則要求跟自己個人資料上的名字一樣
+    name,
     handle,
     updatedAt: serverTimestamp(),
   });
@@ -169,22 +170,21 @@ export async function sendFriendRequest(
       await deleteDoc(ref);
     } else throw new Error('blocked');
   }
-  await setDoc(ref, {
-    schoolId,
-    fromUid,
-    toUid,
-    fromName: fromName.trim().slice(0, 40),
-    toName: toName.trim().slice(0, 40),
-    status: 'pending',
-    createdAt: serverTimestamp(),
-  });
+  // 名字只能用雙方個人資料上的名字；對方改過名就先留空，等對方接受時補上
+  const payload = { schoolId, fromUid, toUid, fromName, status: 'pending', createdAt: serverTimestamp() };
+  try {
+    await setDoc(ref, { ...payload, toName });
+  } catch (error) {
+    if (!toName) throw error;
+    await setDoc(ref, { ...payload, toName: '' });
+  }
   return 'sent';
 }
 
 export async function acceptFriendRequest(id: string, myName = '') {
   await updateDoc(doc(getDb(), 'friendships', id), {
     status: 'accepted',
-    toName: myName.trim().slice(0, 40),
+    toName: myName,
     acceptedAt: serverTimestamp(),
   });
 }

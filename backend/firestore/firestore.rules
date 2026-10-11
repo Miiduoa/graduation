@@ -86,6 +86,13 @@ service cloud.firestore {
         && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds;
     }
 
+    // 使用者自己個人資料上的名字；邀請和找人代號顯示的名字只能用這個，不能自己填
+    function profileName(uid) {
+      return exists(/databases/$(database)/documents/users/$(uid))
+        ? get(/databases/$(database)/documents/users/$(uid)).data.get('displayName', '')
+        : '';
+    }
+
     function friendshipInvolves(authUid) {
       return resource.data.fromUid == authUid || resource.data.toUid == authUid;
     }
@@ -1286,6 +1293,8 @@ service cloud.firestore {
         && friendshipId == 'req_' + request.resource.data.schoolId + '_' + request.auth.uid + '_' + request.resource.data.toUid
         && request.resource.data.status == 'pending'
         && request.resource.data.schoolId != null
+        && request.resource.data.get('fromName', profileName(request.auth.uid)) == profileName(request.auth.uid)
+        && request.resource.data.get('toName', '') in ['', profileName(request.resource.data.toUid)]
         && isSchoolMember(request.resource.data.schoolId);
       // 只有被邀請的人能接受或婉拒；送出邀請的人不能自己改成 accepted。
       // 任一方都能封鎖；其他欄位（名字以外）不能動。
@@ -1300,6 +1309,7 @@ service cloud.firestore {
             request.auth.uid == resource.data.toUid
             && resource.data.status == 'pending'
             && request.resource.data.status == 'accepted'
+            && request.resource.data.get('toName', '') in [resource.data.get('toName', ''), profileName(request.auth.uid)]
           )
           || (
             // 婉拒時記下時間，送出邀請的人七天內不能再送
@@ -1307,10 +1317,12 @@ service cloud.firestore {
             && resource.data.status == 'pending'
             && request.resource.data.status == 'declined'
             && request.resource.data.declinedAt == request.time
+            && request.resource.data.get('toName', '') == resource.data.get('toName', '')
           )
           || (
             request.resource.data.status == 'blocked'
             && resource.data.status != 'blocked'
+            && request.resource.data.get('toName', '') == resource.data.get('toName', '')
           )
         );
       allow delete: if isSignedIn()
@@ -1337,16 +1349,14 @@ service cloud.firestore {
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.keys().hasOnly(['uid', 'name', 'handle', 'updatedAt'])
         && request.resource.data.handle == handle
-        && request.resource.data.name is string
-        && request.resource.data.name.size() <= 40
+        && request.resource.data.name == profileName(request.auth.uid)
         && handle.matches('^[a-z0-9_.-]{3,32}$');
       allow update: if isSchoolMember(schoolId)
         && resource.data.uid == request.auth.uid
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.keys().hasOnly(['uid', 'name', 'handle', 'updatedAt'])
         && request.resource.data.handle == handle
-        && request.resource.data.name is string
-        && request.resource.data.name.size() <= 40;
+        && request.resource.data.name == profileName(request.auth.uid);
       allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
     }
 
