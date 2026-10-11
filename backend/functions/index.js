@@ -1426,7 +1426,7 @@ exports.getStudentRiskSnapshots = onCall(
         type: highPressure.includes(assignment) ? 'workload_spike' : 'positive_momentum',
         severity: Math.max(0.2, 0.9 - index * 0.2),
         title: assignment.title || '作業',
-        description: `截止：${formatAssistantDate(assignment.dueAt, true) || '未設定'}`,
+        description: `截止：${formatAssistantDate(assignment.dueAt) || '未設定'}`,
         groupId: assignment.groupId,
         evidenceRefs: [
           { type: 'assignment', id: assignment.id, label: assignment.title || '作業' },
