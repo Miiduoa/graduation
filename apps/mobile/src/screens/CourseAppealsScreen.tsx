@@ -71,6 +71,16 @@ export default function CourseAppealsScreen() {
       setNotice('主旨至少四個字、說明至少八個字。');
       return;
     }
+    const duplicate = items.some(
+      (item) =>
+        item.courseId === picked.id &&
+        item.title.trim() === title.trim() &&
+        (item.status === 'pending' || item.status === 'reviewing'),
+    );
+    if (duplicate) {
+      setNotice('這門課已經有一樣主旨的申訴在等老師看了。');
+      return;
+    }
     setBusy(true);
     try {
       await createCourseAppeal(
