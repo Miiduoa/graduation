@@ -376,6 +376,45 @@ describe('firestore security rules', () => {
     await assertFails(testEnv.authenticatedContext('bob').firestore().doc(mirror).get());
   });
 
+  test('店家即時監聽：只放行查自己這家店的單，別家、不帶店別、停用的店員、學生都查不到', async () => {
+    const school = 'schools/tw-demo-uni';
+    await seedFirestore(async (db) => {
+      await db.doc(`${school}/cafeterias/cafe-a`).set({ name: 'A' });
+      await db.doc(`${school}/cafeterias/cafe-b`).set({ name: 'B' });
+      await db.doc(`${school}/cafeterias/cafe-a/operators/staff-a`).set({ status: 'active', role: 'staff' });
+      await db.doc(`${school}/cafeterias/cafe-a/operators/staff-off`).set({ status: 'inactive', role: 'staff' });
+      await db.doc(`${school}/cafeterias/cafe-b/operators/staff-b`).set({ status: 'active', role: 'staff' });
+      await db.doc(`${school}/orders/a1`).set({ userId: 'alice', cafeteriaId: 'cafe-a', status: 'pending' });
+      await db.doc(`${school}/orders/a2`).set({ userId: 'bob', cafeteriaId: 'cafe-a', status: 'preparing' });
+      await db.doc(`${school}/orders/b1`).set({ userId: 'alice', cafeteriaId: 'cafe-b', status: 'pending' });
+    });
+    const open = ['pending', 'confirmed', 'preparing', 'ready'];
+    const listen = (uid, cafeteriaId) =>
+      testEnv
+        .authenticatedContext(uid)
+        .firestore()
+        .collection(`${school}/orders`)
+        .where('cafeteriaId', '==', cafeteriaId)
+        .where('status', 'in', open)
+        .limit(100)
+        .get();
+
+    const mine = await assertSucceeds(listen('staff-a', 'cafe-a'));
+    if (mine.docs.map((d) => d.id).sort().join() !== 'a1,a2') {
+      throw new Error(`unexpected docs ${mine.docs.map((d) => d.id)}`);
+    }
+    await assertSucceeds(
+      testEnv.authenticatedContext('staff-a').firestore().collection(`${school}/orders`).where('cafeteriaId', '==', 'cafe-a').limit(100).get(),
+    );
+    await assertFails(listen('staff-a', 'cafe-b'));
+    await assertFails(listen('staff-b', 'cafe-a'));
+    await assertFails(listen('staff-off', 'cafe-a'));
+    await assertFails(listen('alice', 'cafe-a'));
+    await assertFails(testEnv.unauthenticatedContext().firestore().collection(`${school}/orders`).where('cafeteriaId', '==', 'cafe-a').get());
+    await assertFails(testEnv.authenticatedContext('staff-a').firestore().collection(`${school}/orders`).limit(100).get());
+    await assertFails(testEnv.authenticatedContext('staff-a').firestore().doc(`${school}/orders/b1`).get());
+  });
+
   test('deny group post impersonation on create', async () => {
     await seedFirestore(async (db) => {
       await db.collection('groups').doc('group-1').set({ schoolId: 'tw-demo-uni' });

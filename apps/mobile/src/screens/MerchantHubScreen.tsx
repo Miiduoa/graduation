@@ -5,10 +5,10 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useAuth } from '../state/auth';
 import { shouldBlockForNoLogin, isDemoUid } from '../services/demoSession';
-import { useAsyncList } from '../hooks/useAsyncList';
+import { useMerchantOrders } from '../hooks/useMerchantOrders';
+import { ordersForView, type MerchantOrderView } from '../features/merchantOrderViews';
 import {
   giveMerchantQueueNumber,
-  listMerchantOrders,
   updateMerchantOrderStatus,
 } from '../services/merchant';
 import {
@@ -16,11 +16,7 @@ import {
   formatShortOrderCode,
   formatTaipeiOrderTime,
 } from '@campus/shared/src/ordering/pickupNumber';
-import {
-  listDemoMerchantOrders,
-  updateDemoOrderStatus,
-  subscribeDemoOrders,
-} from '../services/demoMerchantOrders';
+import { updateDemoOrderStatus } from '../services/demoMerchantOrders';
 import { updateOrderStatus as updateDemoStoreOrderStatus } from '../services/demoStore';
 import { Screen, AnimatedCard, Button, Pill, Spinner } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
@@ -81,18 +77,16 @@ function getNextOrderAction(status: Order['status']) {
   }
 }
 
-/** 待接單：還沒接的單（含待給號碼）；出餐：接了、還沒取餐的單。同一張單只會在其中一邊 */
-export type MerchantOrderView = 'pending' | 'kitchen';
-const VIEW_STATUSES: Record<MerchantOrderView, ReadonlyArray<Order['status']>> = {
-  pending: ['pending'],
-  kitchen: ['confirmed', 'preparing', 'ready'],
-};
+export { ordersForView, type MerchantOrderView } from '../features/merchantOrderViews';
 
-export function ordersForView(orders: ReadonlyArray<Order>, view: MerchantOrderView): Order[] {
-  return orders.filter((order) => VIEW_STATUSES[view].includes(order.status));
-}
-
-export function MerchantHubScreen({ view }: { view?: MerchantOrderView } = {}) {
+export function MerchantHubScreen({
+  view,
+  onAssignmentChange,
+}: {
+  view?: MerchantOrderView;
+  /** 讓外層（店家工作台）知道現在看哪家店，分頁標題的數字才會對同一家店 */
+  onAssignmentChange?: (cafeteriaId: string | null) => void;
+} = {}) {
   const auth = useAuth();
   const assignments = useMemo(
     () =>
@@ -120,44 +114,16 @@ export function MerchantHubScreen({ view }: { view?: MerchantOrderView } = {}) {
 
   const isDemoSession = isDemoUid(auth.user?.uid);
 
-  const {
-    items: orders,
-    loading,
-    refreshing,
-    error,
-    refresh,
-  } = useAsyncList<Order>(
-    () => {
-      if (!selectedAssignment) return Promise.resolve([]);
-      // demo 模式直接讀本地 store + 預塞訂單，避免 Firestore 404 + 跨 id 對不上
-      if (isDemoSession) {
-        const merchantKey =
-          selectedAssignment.merchantId ?? selectedAssignment.cafeteriaId;
-        return Promise.resolve(listDemoMerchantOrders(merchantKey));
-      }
-      return listMerchantOrders({
-        schoolId: selectedAssignment.schoolId,
-        cafeteriaId: selectedAssignment.cafeteriaId,
-        max: 80,
-      });
-    },
-    [
-      selectedAssignment?.schoolId,
-      selectedAssignment?.cafeteriaId,
-      selectedAssignment?.merchantId,
-      isDemoSession,
-    ],
-    { keepPreviousData: true },
-  );
-
-  // demo 模式：學生剛下的單會走 demoMerchantOrders store。
-  // 訂閱它的變化，店家畫面就能即時刷新「新訂單」
   useEffect(() => {
-    if (!isDemoSession) return undefined;
-    return subscribeDemoOrders(() => {
-      void refresh();
-    });
-  }, [isDemoSession, refresh]);
+    onAssignmentChange?.(selectedAssignment?.cafeteriaId ?? null);
+  }, [onAssignmentChange, selectedAssignment?.cafeteriaId]);
+
+  // 即時監聽這家店的訂單，新單進來不用下拉；換店或離開畫面就關掉監聽
+  const { orders, loading, refreshing, error, refresh } = useMerchantOrders({
+    assignment: selectedAssignment,
+    isDemo: isDemoSession,
+    includeClosed: !view && showAllOrders,
+  });
 
   const filteredOrders = useMemo(() => {
     if (view) return ordersForView(orders, view);

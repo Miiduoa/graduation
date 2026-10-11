@@ -4,6 +4,9 @@ import { Screen, Button } from '../ui/components';
 import { theme } from '../ui/theme';
 import { MerchantHubScreen } from './MerchantHubScreen';
 import { useAuth } from '../state/auth';
+import { isDemoUid } from '../services/demoSession';
+import { useMerchantOrders } from '../hooks/useMerchantOrders';
+import { countOrdersByView, merchantTabLabel } from '../features/merchantOrderViews';
 import {
   deleteShopMenuItem,
   loadShopHours,
@@ -29,6 +32,13 @@ export default function ShopDockScreen() {
   const [tab, setTab] = useState<(typeof TABS)[number]['key']>('pending');
   const assignments = (auth.profile?.merchantAssignments ?? []).filter((item) => item.status === 'active');
   const shop = assignments[0] ?? null;
+  const [hubCafeteriaId, setHubCafeteriaId] = useState<string | null>(null);
+  const countShop = assignments.find((item) => item.cafeteriaId === hubCafeteriaId) ?? shop;
+  // 分頁標題的數字也是即時監聽同一家店，在菜單／營業分頁時新單進來也看得到
+  const live = useMerchantOrders({ assignment: countShop, isDemo: isDemoUid(auth.user?.uid) });
+  const counts = live.loading || live.error ? null : countOrdersByView(live.orders);
+  const tabLabel = (key: (typeof TABS)[number]['key'], label: string) =>
+    key === 'pending' || key === 'kitchen' ? merchantTabLabel(key, counts ? counts[key] : null) : label;
 
   return (
     <Screen title="店家工作台" subtitle="菜單與營業時間寫進本店資料。金流還沒接到，這裡不會收款。">
@@ -45,7 +55,7 @@ export default function ShopDockScreen() {
             }}
           >
             <Text style={{ color: tab === item.key ? theme.colors.text : theme.colors.muted, fontWeight: '700' }}>
-              {item.label}
+              {tabLabel(item.key, item.label)}
             </Text>
           </Pressable>
         ))}
@@ -58,8 +68,8 @@ export default function ShopDockScreen() {
           </Text>
         </View>
       ) : tab === 'pending' || tab === 'kitchen' ? (
-        // 兩個分頁各自重新讀一次訂單：待接單只列還沒接的，出餐只列接了還沒取的
-        <MerchantHubScreen key={tab} view={tab} />
+        // 待接單只列還沒接的，出餐只列接了還沒取的；兩邊都是即時監聽，同一張單只會在一邊
+        <MerchantHubScreen view={tab} onAssignmentChange={setHubCafeteriaId} />
       ) : tab === 'menu' && shop ? (
         <ShopMenuPanel
           schoolId={shop.schoolId}
