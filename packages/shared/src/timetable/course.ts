@@ -138,3 +138,20 @@ export function findCourseConflicts(courses: PersonalCourse[]): ScheduleConflict
   }
   return conflicts;
 }
+
+/**
+ * 開課代號：同一門課、同一位老師算同一個（同名但不同老師的課分得開）。
+ * 老師工作台用它對到 schools/{schoolId}/courseTeachers/{代號}。
+ */
+export function courseOfferingId(course: { name: string; teacher?: string }): string {
+  const clean = (value: string) => String(value || '').trim().replace(/\//g, '／').replace(/\s+/g, ' ');
+  return `${clean(course.name)}｜${clean(course.teacher || '') || '老師未填'}`;
+}
+
+/** 存課表時一起寫的索引，送申訴時規則用它確認是自己課表裡的課。 */
+export function timetableIndex(courses: Array<{ id: string; name: string; teacher?: string }>) {
+  return {
+    courseIds: courses.map((course) => course.id),
+    offeringIds: [...new Set(courses.map((course) => courseOfferingId(course)))],
+  };
+}

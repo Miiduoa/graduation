@@ -19,7 +19,9 @@ import {
   listCourseAppeals,
   loadPersonalTimetable,
   withdrawCourseAppeal,
+  appealOfferingId,
 } from '../services/personalTimetable';
+import { rootNavigateNested } from '../app/rootNavigation';
 
 function newRequestId() {
   return `appeal-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -46,7 +48,10 @@ export default function CourseAppealsScreen() {
       loadPersonalTimetable(uid, schoolId),
     ]);
     const list = rows as CourseAppeal[];
-    list.sort((a, b) => appealTimeValue(b.updatedAt || b.createdAt) - appealTimeValue(a.updatedAt || a.createdAt));
+    list.sort(
+      (a, b) =>
+        appealTimeValue(b.updatedAt || b.createdAt) - appealTimeValue(a.updatedAt || a.createdAt),
+    );
     setItems(list);
     setCourses(timetable.courses.filter((course) => course.name.trim()));
   }, [uid, schoolId]);
@@ -89,34 +94,48 @@ export default function CourseAppealsScreen() {
           studentUid: uid,
           courseId: picked.id,
           courseName: picked.name,
+          offeringId: appealOfferingId(picked),
           title: title.trim(),
           body: body.trim(),
         },
         requestId.current,
+        courses || undefined,
       );
       requestId.current = newRequestId();
       setNotice('已送出，等老師看。');
       setTitle('');
       setBody('');
       setCourseId('');
-      await load();
     } catch {
       setNotice('這次沒有送出，請稍後再試。');
-    } finally {
       setBusy(false);
+      return;
     }
+    // 重新整理清單失敗不影響已經送出的結果
+    await load().catch(() => undefined);
+    setBusy(false);
   };
 
   return (
     <Screen title="課程申訴" subtitle="送出後可以在這裡看老師處理到哪。">
       <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 80 }}>
-        <Text style={{ fontSize: 18, fontWeight: '700', color: theme.colors.text }}>{top.title}</Text>
+        <Text style={{ fontSize: 18, fontWeight: '700', color: theme.colors.text }}>
+          {top.title}
+        </Text>
         <Text style={{ color: theme.colors.muted }}>{top.body}</Text>
         {notice ? <Text>{notice}</Text> : null}
         {!uid ? (
           <Text style={{ color: theme.colors.muted }}>請先登入再送出申訴。</Text>
         ) : noCourses ? (
-          <Text style={{ color: theme.colors.muted }}>{APPEAL_NEED_COURSE_COPY}</Text>
+          <View style={{ gap: 8 }}>
+            <Text style={{ color: theme.colors.muted }}>{APPEAL_NEED_COURSE_COPY}</Text>
+            <Button
+              text="去我的課表"
+              onPress={() => {
+                rootNavigateNested('學習', 'PersonalTimetable');
+              }}
+            />
+          </View>
         ) : (
           <View style={{ gap: 8 }}>
             <Text style={{ fontWeight: '700', color: theme.colors.text }}>選一門課</Text>
@@ -152,18 +171,32 @@ export default function CourseAppealsScreen() {
               multiline
               style={[field, { minHeight: 90 }]}
             />
-            <Button text={busy ? '送出中…' : '送出'} disabled={busy || !courseId} onPress={() => void submit()} />
+            <Button
+              text={busy ? '送出中…' : '送出'}
+              disabled={busy || !courseId}
+              onPress={() => void submit()}
+            />
           </View>
         )}
         {items.map((item) => {
           const copy = APPEAL_STATUS_COPY[(item.status as AppealStatus) || 'pending'];
           return (
-            <View key={item.id} style={{ padding: 12, borderWidth: 1, borderColor: theme.colors.separator, borderRadius: 12 }}>
+            <View
+              key={item.id}
+              style={{
+                padding: 12,
+                borderWidth: 1,
+                borderColor: theme.colors.separator,
+                borderRadius: 12,
+              }}
+            >
               <Text style={{ fontWeight: '700', color: theme.colors.text }}>
                 {item.courseName} · {copy.label}
               </Text>
               <Text style={{ color: theme.colors.muted }}>{copy.detail}</Text>
-              {item.teacherNote ? <Text style={{ color: theme.colors.muted }}>老師說：{item.teacherNote}</Text> : null}
+              {item.teacherNote ? (
+                <Text style={{ color: theme.colors.muted }}>老師說：{item.teacherNote}</Text>
+              ) : null}
               {item.status === 'pending' ? (
                 <Button
                   text="撤回"

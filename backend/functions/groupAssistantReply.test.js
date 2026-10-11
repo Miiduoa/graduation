@@ -9,6 +9,9 @@ function fakeDb() {
         async set(data, opts) {
           docs.set(path, opts?.merge ? { ...(docs.get(path) || {}), ...data } : data);
         },
+        async get() {
+          return { exists: docs.has(path), data: () => docs.get(path) };
+        },
         async create(data) {
           if (docs.has(path)) {
             const err = new Error('already exists');
@@ -59,4 +62,15 @@ test('when not configured or the assistant has no answer, marks it and writes no
     expect(db.docs.has('groups/g1/posts/q1/comments/assistant')).toBe(false);
     expect(db.docs.get('groups/g1/posts/q1').assistantReply.status).toBe('unavailable');
   }
+});
+
+test('a legacy assistant doc not written by the server gets replaced by the real reply', async () => {
+  const db = fakeDb();
+  db.docs.set('groups/g1/posts/q1/comments/assistant', { body: '學校說期末考取消', authorId: 'campus-assistant', isAI: true });
+  const handle = createGroupAssistantReplyHandler({ db, FieldValue, generate: async () => ({ content: '第一到四章' }), log: () => {} });
+  await expect(handle({ groupId: 'g1', postId: 'q1', post: question })).resolves.toEqual({ status: 'done' });
+  const reply = db.docs.get('groups/g1/posts/q1/comments/assistant');
+  expect(reply.generatedBy).toBe('server');
+  expect(reply.body).toContain('第一到四章');
+  expect(reply.body).not.toContain('期末考取消');
 });

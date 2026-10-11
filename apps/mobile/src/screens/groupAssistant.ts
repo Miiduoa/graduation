@@ -14,24 +14,18 @@ type CommentLike = {
   generatedBy?: string | null;
 };
 
-/** 只有伺服器寫在 comments/assistant 的那一則才算助理回覆。 */
+/**
+ * 只看是誰寫的：伺服器寫在 comments/assistant、標了 generatedBy: server 的那一則才算助理回覆。
+ * （規則不讓用戶端寫這一格，也不讓用戶端寫 generatedBy。）
+ */
 export function isAssistantComment(comment: CommentLike): boolean {
-  return (
-    comment.id === ASSISTANT_COMMENT_ID &&
-    comment.authorId === ASSISTANT_AUTHOR_ID &&
-    comment.generatedBy === 'server'
-  );
+  return comment.id === ASSISTANT_COMMENT_ID && comment.generatedBy === 'server';
 }
 
-/** 自稱是助理、但不是伺服器寫的（例如舊版 App 自己寫的那則），不顯示。 */
+/** 不是伺服器寫、卻標成助理或掛在助理帳號下的留言（例如舊版 App 自己寫的那則），不顯示。 */
 export function isFakeAssistantComment(comment: CommentLike): boolean {
   if (isAssistantComment(comment)) return false;
-  return (
-    comment.isAI === true ||
-    comment.authorId === ASSISTANT_AUTHOR_ID ||
-    comment.authorId === 'ai-assistant' ||
-    comment.authorName === ASSISTANT_AUTHOR_NAME
-  );
+  return comment.isAI === true || comment.authorId === ASSISTANT_AUTHOR_ID || comment.authorId === 'ai-assistant';
 }
 
 export function visibleComments<T extends CommentLike>(comments: T[]): T[] {

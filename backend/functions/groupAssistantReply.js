@@ -55,20 +55,26 @@ function createGroupAssistantReplyHandler(deps) {
       return { status: 'unavailable', reason: 'no-answer' };
     }
 
+    const replyRef = deps.db.doc(`groups/${groupId}/posts/${postId}/comments/${ASSISTANT_COMMENT_ID}`);
+    const reply = {
+      body: `${content.slice(0, 6000)}${REPLY_NOTE}`,
+      createdAt: deps.FieldValue.serverTimestamp(),
+      authorId: ASSISTANT_AUTHOR_ID,
+      authorName: ASSISTANT_AUTHOR_NAME,
+      requestedBy: post.authorId,
+      isAI: true,
+      generatedBy: 'server',
+    };
     try {
       // 固定的文件編號：同一則提問重跑也只會有一則助理回覆
-      await deps.db.doc(`groups/${groupId}/posts/${postId}/comments/${ASSISTANT_COMMENT_ID}`).create({
-        body: `${content.slice(0, 6000)}${REPLY_NOTE}`,
-        createdAt: deps.FieldValue.serverTimestamp(),
-        authorId: ASSISTANT_AUTHOR_ID,
-        authorName: ASSISTANT_AUTHOR_NAME,
-        requestedBy: post.authorId,
-        isAI: true,
-        generatedBy: 'server',
-      });
+      await replyRef.create(reply);
     } catch (error) {
-      if (error?.code === 6 || /already exists/i.test(String(error?.message))) return { status: 'done', duplicate: true };
-      throw error;
+      if (!(error?.code === 6 || /already exists/i.test(String(error?.message)))) throw error;
+      const existing = await replyRef.get();
+      if (existing.exists && existing.data()?.generatedBy === 'server') return { status: 'done', duplicate: true };
+      // 不是伺服器寫的（例如舊規則下用戶端先佔位），用伺服器的回覆蓋掉
+      await replyRef.set(reply);
+      log('[groupAssistantReply] replaced a non-server assistant doc', groupId, postId);
     }
     await markStatus('done');
     return { status: 'done' };
