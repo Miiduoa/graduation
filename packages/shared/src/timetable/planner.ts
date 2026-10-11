@@ -87,6 +87,23 @@ export function freeBlocks(courses: PersonalCourse[], day: number | null = null,
   return out;
 }
 
+function minutesToTime(total: number): string {
+  const hours = Math.floor(total / 60);
+  const minutes = total % 60;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+}
+
+/** 在某一天的空堂裡找放得下指定時數的時段，從空堂開始時間往後排。 */
+export function studySlots(courses: PersonalCourse[], day: number, hours: number): string[] {
+  const need = Math.max(1, Math.round(hours * 60));
+  return freeBlocks(courses, day, 1)
+    .filter((block) => blockMinutes(block) >= need)
+    .map((block) => {
+      const start = timeToMinutes(periodStart(block.start));
+      return `${weekdayLabel(block.day)} ${minutesToTime(start)}–${minutesToTime(start + need)}`;
+    });
+}
+
 export function commonFree(
   mine: PersonalCourse[],
   theirs: PersonalCourse[],

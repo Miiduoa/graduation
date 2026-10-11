@@ -16,6 +16,7 @@ import {
   PERIOD_TIMES,
   SchedulePlanner,
   WEEKDAY_LABELS,
+  studySlots,
   applyImport,
   cleanCourse,
   commonFree,
@@ -52,8 +53,12 @@ export default function PersonalTimetableScreen() {
   });
   const [editing, setEditing] = useState<PersonalCourse | null>(null);
   const [paste, setPaste] = useState('');
-  const [ask, setAsk] = useState('');
-  const [answer, setAnswer] = useState('');
+  const [answer, setAnswer] = useState<string[]>([]);
+  const [studyDay, setStudyDay] = useState(() => {
+    const today = new Date().getDay();
+    return today >= 1 && today <= 5 ? today : 1;
+  });
+  const [studyHours, setStudyHours] = useState(2);
   const [notice, setNotice] = useState('');
   const [friends, setFriends] = useState<Array<{ uid: string; name: string }>>([]);
   const [friendId, setFriendId] = useState<string | null>(null);
@@ -334,20 +339,52 @@ export default function PersonalTimetableScreen() {
         />
 
         <Text style={{ fontWeight: '700', color: theme.colors.text }}>幫我安排</Text>
-        <TextInput
-          value={ask}
-          onChangeText={setAsk}
-          placeholder="下一堂在哪、星期五幫我排兩小時讀書"
-          style={inputStyle}
-        />
-        <Button
-          text="送出"
-          onPress={() => {
-            setAnswer(planner.ask(ask));
-            setAsk('');
-          }}
-        />
-        {answer ? <Text style={{ color: theme.colors.text }}>{answer}</Text> : null}
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <Button text="下一堂" onPress={() => setAnswer([planner.ask('下一堂') || '課表上還沒有排課。'])} />
+          <Button
+            text="今天空堂"
+            onPress={() => {
+              const today = new Date().getDay();
+              setAnswer(
+                today >= 1 && today <= 5
+                  ? [planner.ask('今天空堂') || '今天沒有空堂。']
+                  : ['今天是週末，課表上沒有排課。'],
+              );
+            }}
+          />
+        </View>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          {WEEKDAY_LABELS.map((label, index) => (
+            <Button
+              key={label}
+              text={label.replace('星期', '週')}
+              kind={studyDay === index + 1 ? 'primary' : 'outline'}
+              onPress={() => setStudyDay(index + 1)}
+            />
+          ))}
+        </View>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          {[1, 2, 3].map((hours) => (
+            <Button
+              key={hours}
+              text={`${hours} 小時`}
+              kind={studyHours === hours ? 'primary' : 'outline'}
+              onPress={() => setStudyHours(hours)}
+            />
+          ))}
+          <Button
+            text="排讀書時間"
+            onPress={() => {
+              const slots = studySlots(timetable.courses, studyDay, studyHours);
+              setAnswer(slots.length ? slots : ['這天的空堂都不夠長，換一天或少排一點。']);
+            }}
+          />
+        </View>
+        {answer.map((line) => (
+          <Text key={line} style={{ color: theme.colors.text }}>
+            {line}
+          </Text>
+        ))}
 
         <Text style={{ fontWeight: '700', color: theme.colors.text }}>分享</Text>
         <Button

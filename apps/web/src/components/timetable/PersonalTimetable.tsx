@@ -6,6 +6,7 @@ import {
   IMPORT_NOT_APPLIED_COPY,
   PERIOD_TIMES,
   SchedulePlanner,
+  studySlots,
   WEEKDAY_LABELS,
   analyzeImportDrafts,
   applyImport,
@@ -65,9 +66,12 @@ export function PersonalTimetable() {
   const [importText, setImportText] = useState('');
   const [importMode, setImportMode] = useState<ImportMode>('replace');
   const [drafts, setDrafts] = useState<ImportDraft[]>([]);
-  const [plannerInput, setPlannerInput] = useState('');
-  const [plannerLog, setPlannerLog] = useState<string[]>([]);
-  const [advanced, setAdvanced] = useState(false);
+  const [planResult, setPlanResult] = useState<{ title: string; lines: string[] } | null>(null);
+  const [studyDay, setStudyDay] = useState(() => {
+    const today = new Date().getDay();
+    return today >= 1 && today <= 5 ? today : 1;
+  });
+  const [studyHours, setStudyHours] = useState(2);
   const [friends, setFriends] = useState<Array<PlannerFriend & { username?: string }>>([]);
   const [selectedFriend, setSelectedFriend] = useState<string | null>(null);
   const [shareUrl, setShareUrl] = useState('');
@@ -175,12 +179,24 @@ export function PersonalTimetable() {
     }
   };
 
-  const askPlanner = () => {
-    planner.setAdvanced(advanced);
-    const answer = planner.ask(plannerInput);
-    if (!answer) return;
-    setPlannerLog((log) => [...log, `你：${plannerInput}`, answer]);
-    setPlannerInput('');
+  const runPlan = (title: string, query: string) => {
+    const answer = planner.ask(query) || '這份課表算不出結果，先確認課有排上星期和節次。';
+    setPlanResult({
+      title,
+      lines: answer
+        .split(/\n|；/)
+        .map((line) => line.trim())
+        .filter(Boolean),
+    });
+  };
+
+  const todayFree = () => {
+    const today = new Date().getDay();
+    if (today < 1 || today > 5) {
+      setPlanResult({ title: '今天空堂', lines: ['今天是週末，課表上沒有排課。'] });
+      return;
+    }
+    runPlan('今天空堂', '今天空堂');
   };
 
   const bringSchool = async () => {
@@ -440,36 +456,60 @@ export function PersonalTimetable() {
 
       <section className={styles.panel} aria-label="幫我安排">
         <h2>幫我安排</h2>
-        <p className={styles.notice}>依你現在這份課表直接算下一堂、空堂，或把讀書時間塞進空檔。不是另外一套對話服務。</p>
-        <div className={styles.chat}>
-          {plannerLog.map((line, index) => (
-            <div className={styles.bubble} key={`${index}-${line.slice(0, 12)}`}>
-              {line}
-            </div>
-          ))}
-        </div>
-        <label className={styles.field}>
-          想問什麼
-          <input
-            value={plannerInput}
-            onChange={(event) => setPlannerInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                askPlanner();
-              }
-            }}
-            placeholder="星期三有什麼課、下一堂在哪、星期五幫我排兩小時讀書"
-          />
-        </label>
+        <p className={styles.notice}>用你現在這份課表算。</p>
         <div className={styles.toolbar}>
-          <button type="button" className="btn" onClick={askPlanner}>
-            送出
+          <button type="button" className="btn" onClick={() => runPlan('下一堂', '下一堂')}>
+            下一堂
           </button>
-          <button type="button" className="btn" aria-pressed={advanced} onClick={() => setAdvanced((value) => !value)}>
-            {advanced ? '進階安排已開' : '進階安排'}
+          <button type="button" className="btn" onClick={todayFree}>
+            今天空堂
           </button>
         </div>
+        <div className={styles.toolbar}>
+          <label className={styles.field}>
+            星期
+            <select value={studyDay} onChange={(event) => setStudyDay(Number(event.target.value))}>
+              {WEEKDAY_LABELS.map((label, index) => (
+                <option key={label} value={index + 1}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className={styles.field}>
+            時數
+            <select value={studyHours} onChange={(event) => setStudyHours(Number(event.target.value))}>
+              {[1, 2, 3, 4].map((hours) => (
+                <option key={hours} value={hours}>
+                  {hours} 小時
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              const slots = studySlots(timetable?.courses || [], studyDay, studyHours);
+              setPlanResult({
+                title: `${WEEKDAY_LABELS[studyDay - 1]}排 ${studyHours} 小時讀書`,
+                lines: slots.length ? slots : ['這天的空堂都不夠長，換一天或少排一點。'],
+              });
+            }}
+          >
+            排讀書時間
+          </button>
+        </div>
+        {planResult && (
+          <div aria-live="polite">
+            <h3>{planResult.title}</h3>
+            <ul>
+              {planResult.lines.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </div>
+        )}
       </section>
 
       <section className={styles.panel} aria-label="共同空堂">
