@@ -248,6 +248,27 @@ export function appealOfferingId(course: PersonalCourse) {
   return courseOfferingId(course);
 }
 
+/**
+ * 自己課表裡的課有沒有對應老師（只拿到 true/false）。伺服器還沒提供或讀不到時，一律當作還沒對應，
+ * 畫面就照實說「暫時只有學校看得到」，不會說成老師會看。
+ */
+export async function loadAppealTeacherStatus(
+  schoolId: string,
+  offeringIds: string[],
+): Promise<Record<string, boolean>> {
+  if (!offeringIds.length) return {};
+  try {
+    const call = httpsCallable<
+      { schoolId: string; offeringIds: string[] },
+      { assigned: Record<string, boolean> }
+    >(getFunctionsInstance(), 'appealTeacherStatus');
+    const { data } = await call({ schoolId, offeringIds });
+    return data?.assigned || {};
+  } catch {
+    return {};
+  }
+}
+
 export async function createCourseAppeal(
   input: {
     schoolId: string;

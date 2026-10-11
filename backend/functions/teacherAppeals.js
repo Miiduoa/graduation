@@ -96,4 +96,45 @@ function createListTeacherAppealsHandler({ db }) {
   };
 }
 
-module.exports = { createListTeacherAppealsHandler, studentNumberOf };
+/**
+ * 學生端：自己課表裡的課有沒有對應老師。只回 true/false，不回老師是誰；
+ * 只查得到自己課表（offeringIds）裡、或自己申訴過的開課，其他代號一律當作沒有。
+ */
+function createAppealTeacherStatusHandler({ db }) {
+  return async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) throw new HttpsError('unauthenticated', '請先登入。');
+    const schoolId = String((request.data && request.data.schoolId) || '').trim();
+    if (!schoolId || schoolId.includes('/') || schoolId.length > 80) {
+      throw new HttpsError('invalid-argument', '缺少學校。');
+    }
+    const asked = Array.isArray(request.data && request.data.offeringIds) ? request.data.offeringIds : [];
+    const member = await db.doc(`schools/${schoolId}/members/${uid}`).get();
+    if (!member.exists || (member.data().status || 'active') !== 'active') {
+      throw new HttpsError('permission-denied', '不是這間學校的成員。');
+    }
+    const timetable = await db.doc(`users/${uid}/personalTimetable/current`).get();
+    const own = new Set((timetable.exists && timetable.data().offeringIds) || []);
+    // 自己送過的申訴（課後來從課表拿掉了）也查得到
+    const mine = await db
+      .collection('courseAppeals')
+      .where('schoolId', '==', schoolId)
+      .where('studentUid', '==', uid)
+      .get();
+    for (const item of mine.docs) if (item.data().offeringId) own.add(item.data().offeringId);
+    const ids = [...new Set(asked.map((id) => String(id || '')))]
+      .filter((id) => id && !id.includes('/') && id.length <= 200 && own.has(id))
+      .slice(0, 80);
+    const assigned = {};
+    await Promise.all(
+      ids.map(async (id) => {
+        const snap = await db.doc(`schools/${schoolId}/courseTeachers/${id}`).get();
+        const teachers = snap.exists ? snap.data().teacherUids : null;
+        assigned[id] = Array.isArray(teachers) && teachers.length > 0;
+      }),
+    );
+    return { assigned };
+  };
+}
+
+module.exports = { createListTeacherAppealsHandler, createAppealTeacherStatusHandler, studentNumberOf };

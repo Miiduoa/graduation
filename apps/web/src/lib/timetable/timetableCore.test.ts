@@ -136,10 +136,21 @@ describe('申訴頂卡', () => {
     expect(card.title).toBe('目前沒有申訴');
   });
 
-  it('送出後是「已送出，等老師看。」，核准後換成「老師已核准。」', () => {
-    const pending = { ...base, id: '1', status: 'pending' as const, createdAt: '2026-10-01', updatedAt: '2026-10-01' };
-    expect(appealTopCard([pending]).body).toBe('已送出，等老師看。');
+  it('有對應老師才說「已送出，等老師看。」；沒有對應（含舊申訴）說只有學校看得到；核准是「老師已核准。」', async () => {
+    const { APPEAL_NO_TEACHER_COPY, appealStatusDetail, appealSubmittedCopy } = await import('@campus/shared');
+    const pending = { ...base, id: '1', status: 'pending' as const, createdAt: '2026-10-01', updatedAt: '2026-10-01', offeringId: '資料庫｜王老師' };
+    const mapped = { '資料庫｜王老師': true };
+    expect(appealTopCard([pending], mapped).body).toBe('已送出，等老師看。');
+    expect(appealTopCard([pending], {}).body).toBe('這門課還沒對應老師，申訴暫時只有學校看得到。');
+    expect(appealTopCard([pending]).body).toBe(APPEAL_NO_TEACHER_COPY);
+    expect(appealTopCard([pending], { '資料庫｜王老師': false }).body).toBe(APPEAL_NO_TEACHER_COPY);
+    const legacy = { ...pending, offeringId: undefined };
+    expect(appealStatusDetail(legacy, mapped)).toBe(APPEAL_NO_TEACHER_COPY);
+    expect(appealSubmittedCopy('資料庫｜王老師', mapped)).toBe('已送出，等老師看。');
+    expect(appealSubmittedCopy('資料庫｜王老師', {})).toBe(APPEAL_NO_TEACHER_COPY);
+    expect(APPEAL_NO_TEACHER_COPY).not.toMatch(/通知/);
     const approved = { ...pending, status: 'approved' as const, updatedAt: '2026-10-03' };
+    expect(appealTopCard([approved], {}).body).toBe('老師已核准。');
     const older = { ...base, id: '2', status: 'pending' as const, createdAt: '2026-10-02', updatedAt: '2026-10-02' };
     const card = appealTopCard([older, approved]);
     expect(card.body).toBe('老師已核准。');

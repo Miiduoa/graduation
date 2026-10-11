@@ -1662,6 +1662,8 @@ test('course appeals need a course from the student own timetable and only its t
   const { offeringId, ...noOffering } = appeal;
   void offeringId;
   await assertFails(stu.doc('courseAppeals/free3').set(noOffering));
+  // 學生直接讀不到老師對應（有沒有對應只能透過伺服器拿到 true/false，看不到老師是誰）
+  await assertFails(stu.doc('schools/pu/courseTeachers/資料庫｜王老師').get());
   await assertSucceeds(stu.doc('courseAppeals/a1').set(appeal));
   // 同一個編號再送一次不會多一筆
   await assertFails(stu.doc('courseAppeals/a1').set(appeal));
@@ -1685,6 +1687,8 @@ test('course appeals need a course from the student own timetable and only its t
   await assertFails(teach.doc('courseAppeals/a1').update({ status: 'approved', title: '改主旨' }));
   await assertSucceeds(teach.doc('courseAppeals/a1').update({ status: 'approved', teacherNote: '好' }));
   await assertSucceeds(stu.doc('courseAppeals/a1').get());
+  await assertFails(stu.doc('schools/pu/courseTeachers/資料庫｜王老師').get());
+  await assertFails(stu.collection('schools/pu/courseTeachers').get());
   // 學生撤回也不能順便改內容
   await assertSucceeds(stu.doc('courseAppeals/a2').set({ ...appeal, title: '第二件事情' }));
   await assertFails(stu.doc('courseAppeals/a2').update({ status: 'withdrawn', body: '偷偷改掉說明內容' }));
