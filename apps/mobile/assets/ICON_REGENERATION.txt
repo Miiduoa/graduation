@@ -11,7 +11,7 @@
      source .venv/bin/activate
   2) 若未開服，可執行：python main.py --listen 127.0.0.1 --port 8188
   3) 於專案根目錄執行：
-     /Users/miiduoa/Desktop/AI圖像本地引擎/.venv/bin/python scripts/generate-campus-app-icon-comfyui.py \
+     "$COMFYUI_DIR/.venv/bin/python" scripts/generate-campus-app-icon-comfyui.py \
        --out apps/mobile/assets/icon_master_comfyui_1024.png --seed 20260513
      （可改 --seed、--steps、或用 --positive「完整自訂英文 prompt」）
   4) 將新 master 複製到 icon.png / adaptive-icon.png / splash-icon.png，

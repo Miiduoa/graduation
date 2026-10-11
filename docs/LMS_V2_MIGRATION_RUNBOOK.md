@@ -83,7 +83,7 @@
 ### 步驟 1:把 Supabase keys 貼進 .env
 
 ```bash
-# 在 /Users/miiduoa/Desktop/畢業專題 根目錄
+# 在 repo 根目錄
 cp .env.lms-v2.example .env.local
 # 編輯 .env.local 填入真實 keys (你說已經建好 Supabase 專案)
 ```
@@ -102,7 +102,7 @@ cp .env.lms-v2.example .env.local
 brew install supabase/tap/supabase
 
 # 連結到你的 Supabase 專案
-cd /Users/miiduoa/Desktop/畢業專題
+cd "$(git rev-parse --show-toplevel)"
 supabase link --project-ref YOUR-PROJECT-REF
 
 # 推送 migrations (33 個按順序)

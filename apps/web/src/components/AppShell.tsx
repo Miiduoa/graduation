@@ -5,8 +5,6 @@
  * --------------------------------------------
  * 取代舊 SiteShell。Layer 0: Command Bar(在頁面內)、Layer 1: 三大時空軸 (Today/Hub/Me)、Layer 2: 子內容。
  *
- * 設計規範對應：docs/design/AI_FIRST_REDESIGN.md §2-3
- *
  * 注意：本檔不取代 SiteShell；它與 SiteShell 共存。
  *   - 新頁面（如新版 /today, /hub, /me）使用 AppShell
  *   - 舊頁面（/grades, /lms-admin, /timetable...）繼續用 SiteShell

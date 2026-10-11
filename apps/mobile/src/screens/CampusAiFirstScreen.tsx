@@ -2,7 +2,6 @@
  * 校園 Tab Landing
  *
  * 設計：把校園當「場域」，根據時間 / 位置 / 偏好給建議
- * 設計規範：docs/design/AI_FIRST_REDESIGN.md
  */
 import React from 'react';
 import { Alert, View, Text } from 'react-native';
