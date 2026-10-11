@@ -104,7 +104,7 @@ export default function AiCompliancePage() {
 
   return (
     <RequireAdmin>
-      <h1 style={{ marginTop: 0 }}>AI 合規組態（保留期／PII／跨境）</h1>
+      <h1 style={{ marginTop: 0 }}>資料處理設定（保留期／個資／跨境）</h1>
       <p style={{ color: '#3C3C43', lineHeight: 1.6 }}>
         對應 <code>ai_compliance_policies</code>；Edge function <code>material-ai-pipeline</code>／<code>ai-course-assistant</code>{' '}
         會根據此組態套用 quota 與保留期。修改後請通知 SRE／法務 留底。
