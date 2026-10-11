@@ -44,6 +44,7 @@ import {
 import { useAsyncList } from '../hooks/useAsyncList';
 import { Ionicons } from '@expo/vector-icons';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
+import { ASSISTANT_AUTHOR_NAME, isAssistantComment } from './groupAssistant';
 
 type PostKind = 'announcement' | 'question' | 'post';
 
@@ -73,6 +74,8 @@ type Comment = {
   id: string;
   body: string;
   authorId: string;
+  isAI?: boolean;
+  requestedBy?: string;
   authorName?: string | null;
   authorAvatarUrl?: string | null;
   createdAt?: any;
@@ -704,10 +707,14 @@ export function GroupPostScreen(props: any) {
             ) : (
               <View style={{ gap: 12 }}>
                 {comments.map((c, idx) => {
-                  const commentAuthor = profilesById[c.authorId];
-                  const commentAuthorName =
-                    commentAuthor?.displayName || c.authorName || c.authorId.slice(0, 8) || '用戶';
-                  const isMyComment = auth.user && c.authorId === auth.user.uid;
+                  const fromAssistant = isAssistantComment(c);
+                  const commentAuthor = fromAssistant ? undefined : profilesById[c.authorId];
+                  const commentAuthorName = fromAssistant
+                    ? ASSISTANT_AUTHOR_NAME
+                    : commentAuthor?.displayName || c.authorName || c.authorId.slice(0, 8) || '用戶';
+                  const isMyComment =
+                    auth.user &&
+                    (fromAssistant ? c.requestedBy === auth.user.uid : c.authorId === auth.user.uid);
                   const alreadyLiked = auth.user && c.likedBy?.includes(auth.user.uid);
                   const isEditing = editingCommentId === c.id;
 
