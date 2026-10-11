@@ -64,13 +64,51 @@ const reload = vi.fn();
 beforeEach(() => {
   vi.clearAllMocks();
   state.context = 'session-a';
-  state.request.mockResolvedValue({ submissions: [submission] });
+  state.request.mockReset().mockResolvedValue({ submissions: [submission] });
 });
 async function openSubmissions() {
   fireEvent.click(screen.getByRole('button', { name: '查看繳交內容' }));
   await screen.findByRole('article', { name: '林同學的繳交' });
   return screen.getByLabelText('給林同學的回饋') as HTMLTextAreaElement;
 }
+
+it.each(['student', 'owner-teacher'] as const)(
+  'marks earlier assignment feedback after resubmission for %s',
+  async (role) => {
+    const revised = { ...reviewed(), body: '新繳交內容', submittedAt: '2026-10-08T10:00:00.000Z' };
+    state.request.mockResolvedValueOnce({ submissions: [revised] });
+    render(
+      <AssignmentCard
+        item={{ ...assignment, mySubmission: role === 'student' ? revised : null }}
+        workspace={{ ...workspace, memberRole: role }}
+        reload={reload}
+      />,
+    );
+    if (role === 'owner-teacher') await openSubmissions();
+    expect(screen.getByText('這則回饋早於最近一次繳交，請老師確認是否仍適用。')).toBeTruthy();
+  },
+);
+
+it('requires a teacher decision when a student updates the answer under a dirty feedback draft', async () => {
+  const original = reviewed();
+  state.request
+    .mockResolvedValueOnce({ submissions: [original] })
+    .mockResolvedValueOnce({
+      submissions: [{ ...original, body: '學生新稿', submittedAt: '2026-10-08T10:00:00.000Z' }],
+    });
+  render(<AssignmentCard item={assignment} workspace={workspace} reload={reload} />);
+  const editor = await openSubmissions();
+  fireEvent.change(editor, { target: { value: '尚未儲存的舊稿回饋' } });
+  fireEvent.click(screen.getByRole('button', { name: '更新繳交內容' }));
+  await screen.findByText('學生新稿');
+  expect(screen.getByRole('region', { name: '回饋內容已更新' })).toBeTruthy();
+  fireEvent.submit(editor.closest('form')!);
+  await waitFor(() => expect(screen.getAllByRole('alert').length).toBeGreaterThan(0));
+  expect(
+    state.request.mock.calls.filter((call) => String(call[0]).endsWith('/feedback')),
+  ).toHaveLength(0);
+  expect(editor.value).toBe('尚未儲存的舊稿回饋');
+});
 function confirmClose() {
   fireEvent.click(screen.getByRole('button', { name: '停止收件' }));
   fireEvent.click(screen.getByRole('checkbox', { name: '我了解學生將無法再繳交或修改作業' }));

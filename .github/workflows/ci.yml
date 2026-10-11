@@ -9,7 +9,8 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A newer main run must not interrupt a partially applied production deployment.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   NODE_VERSION: '22'
@@ -57,7 +58,7 @@ jobs:
           EAS_JSON_PACKAGE_ROOT: ${{ runner.temp }}/eas-config-schema/node_modules/@expo/eas-json
         run: |
           npm install --prefix "$RUNNER_TEMP/eas-config-schema" --ignore-scripts --no-audit --no-fund @expo/eas-json@24.9.0
-          node --test scripts/wait-for-firestore-indexes.test.cjs scripts/firebase-release-preflight.test.cjs scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs scripts/prepare-eas-build.test.mjs scripts/verify-nuni-integration.test.mjs
+          node --test scripts/firebase-ci-workflow.test.cjs scripts/wait-for-firestore-indexes.test.cjs scripts/firebase-release-preflight.test.cjs scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs scripts/prepare-eas-build.test.mjs scripts/verify-nuni-integration.test.mjs
 
       - name: Audit Functions deployment dependencies
         working-directory: backend/functions
@@ -383,7 +384,7 @@ jobs:
           test -z "$(docker exec campus-one-web-ci find /app -name '.env' -o -name '.env.*' -o -name '*serviceAccount*.json' -o -name '*.pem' -o -name '*.key')"
 
   deploy-functions:
-    name: Deploy Firebase Functions
+    name: Deploy Firebase backend
     runs-on: ubuntu-latest
     needs:
       [
@@ -415,6 +416,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Deploy to Firebase
+        id: firebase_deploy
         timeout-minutes: 30
         env:
           FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
@@ -440,6 +442,39 @@ jobs:
           pnpm -w firebase deploy --only firestore:rules,storage,firestore:indexes --project "$FIREBASE_PROJECT_ID" --non-interactive
           node scripts/wait-for-firestore-indexes.cjs --project "$FIREBASE_PROJECT_ID" --timeout-seconds 1200
           pnpm -w firebase deploy --only functions --project "$FIREBASE_PROJECT_ID" --non-interactive
+
+      - name: Record Firebase deployment outcome
+        if: always()
+        env:
+          FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+          DEPLOYMENT_OUTCOME: ${{ steps.firebase_deploy.outcome }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const receipt = {
+            schemaVersion: 1,
+            recordedAt: new Date().toISOString(),
+            sourceCommit: process.env.GITHUB_SHA,
+            runUrl: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+            runAttempt: process.env.GITHUB_RUN_ATTEMPT,
+            project: process.env.FIREBASE_PROJECT_ID || null,
+            deploymentStepOutcome: process.env.DEPLOYMENT_OUTCOME || 'not-run',
+            preflightReceiptAvailable: fs.existsSync('firebase-preflight.json'),
+            scope: 'Firebase deployment attempt only; application flows require separate verification.',
+          };
+          fs.writeFileSync('firebase-deployment-outcome.json', `${JSON.stringify(receipt, null, 2)}\n`);
+          NODE
+
+      - name: Preserve Firebase release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: firebase-release-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            firebase-preflight.json
+            firebase-deployment-outcome.json
+          if-no-files-found: error
+          retention-days: 14
 
   summary:
     name: CI Summary

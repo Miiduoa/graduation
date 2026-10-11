@@ -42,6 +42,18 @@ function receipt(body = '我的訪談內容') {
     reviewedAt: null,
   };
 }
+function quizReceipt(answer = '我原本的回答') {
+  return {
+    quizId,
+    platformAccountId: accountId,
+    displayName: '測試學生',
+    answer,
+    state: 'submitted',
+    submittedAt: date,
+    teacherFeedback: null,
+    reviewedAt: null,
+  };
+}
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => {
@@ -82,16 +94,7 @@ async function response(
     quiz = {
       ...quiz,
       responseCount: 1,
-      myResponse: {
-        quizId,
-        platformAccountId: accountId,
-        displayName: '測試學生',
-        answer: input!.answer,
-        state: 'submitted',
-        submittedAt: date,
-        teacherFeedback: null,
-        reviewedAt: null,
-      },
+      myResponse: quizReceipt(input!.answer as string),
     };
     return quiz;
   }
@@ -195,6 +198,227 @@ it('keeps a draft when switching activity tabs and submits a quiz via its own en
   );
   fireEvent.press(view.getByRole('button', { name: '作業 1' }));
   expect(view.getByLabelText('作業內容：校園訪談').props.value).toBe('尚未送出的草稿');
+});
+it('accepts a 2000-character quiz answer and shows the confirmed editable receipt', async () => {
+  const answer = '答'.repeat(2000);
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '測驗 1' }));
+  const input = view.getByLabelText('測驗內容：需求練習');
+  expect(input.props.maxLength).toBe(2000);
+  fireEvent.changeText(input, answer);
+  fireEvent.press(view.getByRole('button', { name: '繳交測驗' }));
+  await view.findByText('已收到伺服器繳交紀錄。');
+  expect(view.getByText(answer)).toBeTruthy();
+  expect(view.getByLabelText('測驗內容：需求練習').props.value).toBe(answer);
+  expect(view.getByRole('button', { name: '更新測驗繳交' })).toBeTruthy();
+  expect(mockRequest).toHaveBeenCalledWith(
+    `class-workspaces/${courseId}/quizzes/${quizId}/submit`,
+    'context-first',
+    expect.objectContaining({ answer }),
+  );
+});
+it('rejects an over-limit quiz answer before sending and retains it for correction', async () => {
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '測驗 1' }));
+  const answer = '答'.repeat(2001);
+  // Also validate programmatically restored drafts, not only native maxLength enforcement.
+  fireEvent.changeText(view.getByLabelText('測驗內容：需求練習'), answer);
+  fireEvent.press(view.getByRole('button', { name: '繳交測驗' }));
+  expect(view.getByText('測驗內容：需求練習最多 2000 字，請縮短內容後再送出。')).toBeTruthy();
+  expect(mockRequest.mock.calls.some(([path]) => path.endsWith('/submit'))).toBe(false);
+  expect(view.getByLabelText('測驗內容：需求練習').props.value).toBe(answer);
+  expect(view.queryByText('已繳交')).toBeNull();
+});
+it.each(['assignment', 'quiz'] as const)(
+  'hydrates a saved %s before editing and replaces it only with a confirmed receipt',
+  async (kind) => {
+    assignment = { ...assignment, mySubmission: receipt('已交作業'), submissionCount: 1 };
+    quiz = { ...quiz, myResponse: quizReceipt('已交測驗'), responseCount: 1 };
+    const view = await openCourse();
+    if (kind === 'quiz') fireEvent.press(view.getByRole('button', { name: '測驗 1' }));
+    const label = kind === 'assignment' ? '作業內容：校園訪談' : '測驗內容：需求練習';
+    const original = kind === 'assignment' ? '已交作業' : '已交測驗';
+    expect(view.getByLabelText(label).props.value).toBe(original);
+    fireEvent.changeText(view.getByLabelText(label), `${original}，補上例子`);
+    fireEvent.press(
+      view.getByRole('button', { name: kind === 'assignment' ? '更新作業繳交' : '更新測驗繳交' }),
+    );
+    await view.findByText('已收到伺服器繳交紀錄。');
+    expect(view.getByText(`${original}，補上例子`)).toBeTruthy();
+    expect(view.getByLabelText(label).props.value).toBe(`${original}，補上例子`);
+    expect(view.queryByText(/這份內容已有更新/)).toBeNull();
+  },
+);
+it('updates an untouched editor but requires a choice before overwriting a newer submission', async () => {
+  assignment = { ...assignment, mySubmission: receipt('原始繳交'), submissionCount: 1 };
+  const view = await openCourse();
+  assignment = { ...assignment, mySubmission: receipt('網頁剛更新') };
+  fireEvent.press(view.getByRole('button', { name: '更新內容' }));
+  await waitFor(() =>
+    expect(view.getByLabelText('作業內容：校園訪談').props.value).toBe('網頁剛更新'),
+  );
+  fireEvent.changeText(view.getByLabelText('作業內容：校園訪談'), '我的手機草稿');
+  assignment = { ...assignment, mySubmission: receipt('另一份較新的內容') };
+  fireEvent.press(view.getByRole('button', { name: '更新內容' }));
+  await view.findByText(/這份內容已有更新/);
+  expect(view.getByLabelText('作業內容：校園訪談').props.value).toBe('我的手機草稿');
+  fireEvent.press(view.getByRole('button', { name: '更新作業繳交' }));
+  expect(mockRequest.mock.calls.some(([path]) => path.endsWith('/submit'))).toBe(false);
+  fireEvent.press(view.getByRole('button', { name: '保留草稿，儲存時覆寫' }));
+  fireEvent.press(view.getByRole('button', { name: '更新作業繳交' }));
+  await view.findByText('已收到伺服器繳交紀錄。');
+  expect(view.getByText('我的手機草稿')).toBeTruthy();
+  expect(view.queryByText(/這份內容已有更新/)).toBeNull();
+});
+it('preserves the draft comparison across account revalidation and can adopt the newer content', async () => {
+  const cache = new Map<string, unknown>();
+  const ui = () => (
+    <NuniDraftProvider cache={cache}>
+      <NuniCourses />
+    </NuniDraftProvider>
+  );
+  assignment = { ...assignment, mySubmission: receipt('先前繳交'), submissionCount: 1 };
+  const view = render(ui());
+  fireEvent.press(await view.findByRole('button', { name: '服務設計課程' }));
+  fireEvent.changeText(await view.findByLabelText('作業內容：校園訪談'), '還沒送出的修改');
+  assignment = { ...assignment, mySubmission: receipt('回前景時讀到的新內容') };
+  mockSession = { ...mockSession, context: 'context-revalidated' };
+  view.rerender(ui());
+  await view.findByText(/這份內容已有更新/);
+  expect(view.getByLabelText('作業內容：校園訪談').props.value).toBe('還沒送出的修改');
+  fireEvent.press(view.getByRole('button', { name: '改用目前內容' }));
+  expect(view.getByLabelText('作業內容：校園訪談').props.value).toBe('回前景時讀到的新內容');
+  expect(view.queryByText(/這份內容已有更新/)).toBeNull();
+  expect(mockRequest.mock.calls.some(([path]) => path.endsWith('/submit'))).toBe(false);
+});
+it('prefills teacher feedback and prevents a refreshed response from being overwritten silently', async () => {
+  course = { ...course, memberRole: 'owner-teacher' };
+  let entry = { ...receipt(), teacherFeedback: '請補例子', reviewedAt: date };
+  mockRequest.mockImplementation((path, context, input) =>
+    path.endsWith('/submissions') ? { submissions: [entry] } : response(path, context, input),
+  );
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '查看收件：校園訪談' }));
+  const input = await view.findByLabelText('給 測試學生 的回饋');
+  expect(input.props.value).toBe('請補例子');
+  fireEvent.changeText(input, '請補具體例子和訪談時間');
+  entry = { ...entry, teacherFeedback: '共同授課老師的新回饋' };
+  fireEvent.press(view.getByRole('button', { name: '查看收件：校園訪談' }));
+  await view.findByText(/這份內容已有更新/);
+  fireEvent.press(view.getByRole('button', { name: '儲存老師回饋' }));
+  expect(mockRequest.mock.calls.some(([path]) => path.endsWith('/feedback'))).toBe(false);
+  fireEvent.press(view.getByRole('button', { name: '保留草稿，儲存時覆寫' }));
+  fireEvent.press(view.getByRole('button', { name: '儲存老師回饋' }));
+  await view.findByText('已回饋：請補具體例子和訪談時間');
+  expect(view.getByLabelText('給 測試學生 的回饋').props.value).toBe('請補具體例子和訪談時間');
+  expect(view.queryByText(/這份內容已有更新/)).toBeNull();
+});
+it.each(['assignment', 'quiz'] as const)(
+  'labels retained feedback as older after the server confirms a revised %s',
+  async (kind) => {
+    const previous = {
+      teacherFeedback: '原本內容的回饋',
+      reviewedAt: date,
+      submittedAt: '2026-10-09T02:00:00.000Z',
+    };
+    assignment = { ...assignment, mySubmission: { ...receipt(), ...previous }, submissionCount: 1 };
+    quiz = { ...quiz, myResponse: { ...quizReceipt(), ...previous }, responseCount: 1 };
+    mockRequest.mockImplementation((path, context, input) => {
+      if (path.endsWith('/submit')) {
+        const updated = { ...previous, submittedAt: '2026-10-09T04:00:00.000Z' };
+        return path.includes('/assignments/')
+          ? { ...assignment, mySubmission: { ...receipt(input!.body as string), ...updated } }
+          : { ...quiz, myResponse: { ...quizReceipt(input!.answer as string), ...updated } };
+      }
+      return response(path, context, input);
+    });
+    const view = await openCourse();
+    if (kind === 'quiz') fireEvent.press(view.getByRole('button', { name: '測驗 1' }));
+    expect(view.queryByText(/這則回饋早於最近一次繳交/)).toBeNull();
+    fireEvent.changeText(
+      view.getByLabelText(kind === 'assignment' ? '作業內容：校園訪談' : '測驗內容：需求練習'),
+      '依照回饋修改的內容',
+    );
+    fireEvent.press(
+      view.getByRole('button', { name: kind === 'assignment' ? '更新作業繳交' : '更新測驗繳交' }),
+    );
+    await view.findByText('這則回饋早於最近一次繳交，可請老師確認是否仍適用。');
+    expect(view.getByText('老師回饋：原本內容的回饋')).toBeTruthy();
+    expect(view.getByText('依照回饋修改的內容')).toBeTruthy();
+    expect(view.getByText(/回饋時間：/)).toBeTruthy();
+  },
+);
+it('tells teachers when a student revised the work after feedback and clears the note after a new review', async () => {
+  course = { ...course, memberRole: 'owner-teacher' };
+  const entry = {
+    ...receipt('學生後來修改的內容'),
+    teacherFeedback: '先前的回饋',
+    submittedAt: '2026-10-09T04:00:00.000Z',
+    reviewedAt: date,
+  };
+  mockRequest.mockImplementation((path, context, input) => {
+    if (path.endsWith('/submissions')) return { submissions: [entry] };
+    if (path.endsWith('/feedback'))
+      return { ...entry, teacherFeedback: input!.feedback, reviewedAt: '2026-10-09T05:00:00.000Z' };
+    return response(path, context, input);
+  });
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '查看收件：校園訪談' }));
+  await view.findByText('學生在這則回饋之後更新了繳交內容，請確認回饋是否仍適用。');
+  fireEvent.changeText(view.getByLabelText('給 測試學生 的回饋'), '已看過修改，請再補例子');
+  fireEvent.press(view.getByRole('button', { name: '儲存老師回饋' }));
+  await view.findByText('已回饋：已看過修改，請再補例子');
+  expect(view.queryByText(/學生在這則回饋之後更新了/)).toBeNull();
+});
+it('requires a teacher to reconsider an unsaved review when the student changes the reviewed work', async () => {
+  course = { ...course, memberRole: 'owner-teacher' };
+  let entry = { ...receipt('老師正在看的原稿'), teacherFeedback: '先前回饋', reviewedAt: date };
+  mockRequest.mockImplementation((path, context, input) =>
+    path.endsWith('/submissions') ? { submissions: [entry] } : response(path, context, input),
+  );
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '查看收件：校園訪談' }));
+  fireEvent.changeText(await view.findByLabelText('給 測試學生 的回饋'), '針對原稿寫到一半的回饋');
+  entry = { ...entry, body: '學生已經補上例子的新版', submittedAt: '2026-10-09T04:00:00.000Z' };
+  fireEvent.press(view.getByRole('button', { name: '查看收件：校園訪談' }));
+  await view.findByText('學生已經補上例子的新版');
+  expect(view.getByText(/這份內容已有更新/)).toBeTruthy();
+  expect(view.getByLabelText('給 測試學生 的回饋').props.value).toBe('針對原稿寫到一半的回饋');
+  fireEvent.press(view.getByRole('button', { name: '儲存老師回饋' }));
+  expect(mockRequest.mock.calls.some(([path]) => path.endsWith('/feedback'))).toBe(false);
+  fireEvent.press(view.getByRole('button', { name: '改用目前內容' }));
+  expect(view.getByLabelText('給 測試學生 的回饋').props.value).toBe('先前回饋');
+});
+it('retries an uncertain quiz update with its original intent even after a newer receipt was read', async () => {
+  quiz = { ...quiz, myResponse: quizReceipt('原始回答'), responseCount: 1 };
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '測驗 1' }));
+  fireEvent.changeText(view.getByLabelText('測驗內容：需求練習'), '手機修改');
+  let attempts = 0;
+  mockRequest.mockImplementation((path, context, input) => {
+    if (path.endsWith(`/quizzes/${quizId}/submit`)) {
+      if (++attempts === 1) return Promise.reject(new NuniError(0, 'NETWORK_ERROR'));
+      // The provider replays the key by returning its current receipt without overwriting it.
+      return quiz;
+    }
+    return response(path, context, input);
+  });
+  fireEvent.press(view.getByRole('button', { name: '更新測驗繳交' }));
+  await view.findByRole('button', { name: '重試確認這次送出' });
+  quiz = { ...quiz, myResponse: quizReceipt('網頁較新的回答') };
+  fireEvent.press(view.getByRole('button', { name: '更新內容' }));
+  await view.findByText('網頁較新的回答');
+  expect(view.getByLabelText('測驗內容：需求練習').props.editable).toBe(false);
+  expect(view.queryByRole('button', { name: '保留草稿，儲存時覆寫' })).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '重試確認這次送出' }));
+  await view.findByText('已收到伺服器繳交紀錄。');
+  const writes = mockRequest.mock.calls.filter(([path]) =>
+    path.endsWith(`/quizzes/${quizId}/submit`),
+  );
+  expect(writes).toHaveLength(2);
+  expect(writes[1][2]).toEqual(writes[0][2]);
+  expect(view.getByLabelText('測驗內容：需求練習').props.value).toBe('網頁較新的回答');
+  expect(view.queryByText(/這份內容已有更新/)).toBeNull();
 });
 it('does not expose forms for archived or closed activities', async () => {
   course = { ...course, state: 'archived' };

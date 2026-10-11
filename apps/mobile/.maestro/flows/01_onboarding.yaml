@@ -11,10 +11,16 @@ tags:
     visible:
       id: login-landing
     timeout: 90000
-- assertVisible: 'Campus One 帳號'
+- assertVisible:
+    id: public-Map
 - assertNotVisible:
     id: tab-Today
 - takeScreenshot: guest_startup
+- scrollUntilVisible:
+    element:
+      id: school-login-start
+    direction: DOWN
+- assertVisible: 'Campus One 帳號'
 - tapOn:
     id: school-login-start
 - extendedWaitUntil:

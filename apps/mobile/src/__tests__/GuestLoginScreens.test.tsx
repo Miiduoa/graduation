@@ -277,9 +277,21 @@ test('a restored platform account has a return entry rather than another registr
 });
 
 test('an unknown platform account state remains an explicit recovery entry', () => {
-  mockPlatformAuth.error = 'could not verify';
+  mockPlatformAuth.error = '無法確認登入狀態，請重新連線後再試。';
   const view = render(<LoginLandingScreen />);
-  expect(view.getByRole('button', { name: '繼續確認帳號狀態' })).toBeTruthy();
+  expect(view.getByRole('alert')).toHaveTextContent(mockPlatformAuth.error);
+  fireEvent.press(view.getByRole('button', { name: '查看登入問題' }));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace');
+  expect(view.queryByText('回到我的 Campus One')).toBeNull();
+});
+
+test('pending logout explains the next step without presenting a restored account', () => {
+  mockPlatformAuth.session = { platformAccountId: 'pa-restored' };
+  mockPlatformAuth.pendingLogout = true;
+  const view = render(<LoginLandingScreen />);
+  expect(view.getByRole('alert')).toHaveTextContent(/上次登出還沒完成/);
+  fireEvent.press(view.getByRole('button', { name: '處理未完成的登出' }));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace');
   expect(view.queryByText('回到我的 Campus One')).toBeNull();
 });
 

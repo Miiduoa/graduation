@@ -46,6 +46,11 @@ export default function LoginLandingScreen() {
         <View style={s.panel}>
           <Text style={s.title}>Campus One 帳號</Text>
           <Text style={s.body}>和網頁版使用同一個帳號，加入課程、繳交作業或管理店家。</Text>
+          {auth.pendingLogout || auth.error ? (
+            <Text accessibilityRole="alert" style={s.body}>
+              {auth.pendingLogout ? '上次登出還沒完成，請先完成登出再使用其他帳號。' : auth.error}
+            </Text>
+          ) : null}
           <Pressable
             testID="login-start"
             accessibilityRole="button"
@@ -57,9 +62,11 @@ export default function LoginLandingScreen() {
                 ? '回到我的 Campus One'
                 : auth.loading
                   ? '確認 Campus One 帳號'
-                  : auth.error || auth.pendingLogout
-                    ? '繼續確認帳號狀態'
-                    : '登入或建立帳號'}
+                  : auth.pendingLogout
+                    ? '處理未完成的登出'
+                    : auth.error
+                      ? '查看登入問題'
+                      : '登入或建立帳號'}
             </Text>
           </Pressable>
         </View>
