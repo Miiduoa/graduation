@@ -30,6 +30,7 @@ const { createNotificationService } = require('./lib/notificationService');
 const { createLiveSessionHandlers } = require('./attendanceSessions');
 const { createGroupMembershipHandlers } = require('./groupMembership');
 const { createOrderHandler } = require('./createOrder');
+const { assertOnlineOrderingEnabled, isOrderAssistantAction } = require('./lib/onlineOrdering');
 const { createOrderStatusHandlers } = require('./orderTransitions');
 const { createSubmitProductFeedback } = require('./productFeedback');
 const { createEventRegistrationHandlers, prepareRegistrationPolicy } = require('./eventRegistration');
@@ -1556,6 +1557,7 @@ exports.enqueueAssistantAction = onCall(
     if (!enqueueActionAllowlist.has(action)) {
       throw new HttpsError('invalid-argument', 'Unsupported assistant action');
     }
+    if (isOrderAssistantAction(request.data)) assertOnlineOrderingEnabled();
 
     const sensitiveActions = new Set([
       'submit_draft',

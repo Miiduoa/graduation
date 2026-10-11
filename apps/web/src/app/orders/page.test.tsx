@@ -67,3 +67,11 @@ it('沒登入：請先登入，不讀訂單', () => {
   expect(screen.getByRole('link', { name: '登入' }).getAttribute('href')).toBe('/login?returnUrl=%2Forders');
   expect(state.paths).toEqual([]);
 });
+
+it('沒有訂單、線上點餐還沒開：只寫「目前還不能線上點餐」，不叫學生去點餐', () => {
+  state.rows = [];
+  render(<OrdersPage />);
+  expect(screen.getByRole('heading', { name: '目前還不能線上點餐' })).toBeTruthy();
+  expect(screen.queryByText(/還沒有訂單|要點餐|餐廳/)).toBeNull();
+  expect(screen.queryByRole('link')).toBeNull();
+});

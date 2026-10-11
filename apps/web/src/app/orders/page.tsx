@@ -7,6 +7,7 @@ import { useAuth } from '@/components/AuthGuard';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import { watchMyOrders, type MyOrder } from '@/lib/myOrders';
 import { describePickupNumber, formatShortOrderCode } from '@campus/shared/src/ordering/pickupNumber';
+import { isWebOnlineOrderingEnabled, ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
 import home from '../home.module.css';
 
 const school = resolveSchoolPageContext();
@@ -48,7 +49,10 @@ function OrdersList({ uid }: { uid: string }) {
   }, [uid]);
   if (failed) return <p role="alert">目前讀不到訂單，請確認連線後重新整理。</p>;
   if (orders === null) return <p role="status">正在讀取訂單…</p>;
-  if (orders.length === 0) return <div><h2>還沒有訂單</h2><p>網頁還不能點餐。要點餐，請用 Campus One App 的「餐廳」，訂單和取餐號碼會出現在這裡。</p></div>;
+  if (orders.length === 0) {
+    if (!isWebOnlineOrderingEnabled()) return <div><h2>{ONLINE_ORDERING_OFF_TEXT}</h2></div>;
+    return <div><h2>還沒有訂單</h2><p>網頁還不能點餐。要點餐，請用 Campus One App 的「餐廳」，訂單和取餐號碼會出現在這裡。</p></div>;
+  }
   return <section aria-label="訂單列表" style={{ display: 'grid', gap: 12 }}>{orders.map(order => <OrderCard key={order.id} order={order} />)}</section>;
 }
 

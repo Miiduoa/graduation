@@ -10,6 +10,7 @@ const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { createAuthzHelpers } = require('../../authz');
 const { fetchAssistantUserProfile } = require('../../lib/assistantFetchers');
 const { runTool, byName } = require('../tools/registry');
+const { assertOnlineOrderingEnabled } = require('../../lib/onlineOrdering');
 
 const REGION = 'asia-east1';
 
@@ -75,6 +76,7 @@ module.exports = onCall(
     if (!ALLOWED_TOOLS.has(toolName)) {
       throw new HttpsError('invalid-argument', 'Unsupported tool');
     }
+    if (toolName === 'createOrder') assertOnlineOrderingEnabled();
 
     const userProfile = await fetchAssistantUserProfile(uid);
     const schoolId = userProfile?.schoolId ?? null;
