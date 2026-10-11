@@ -1379,6 +1379,10 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && request.resource.data.studentUid == request.auth.uid
         && request.resource.data.status == 'pending'
+        && request.resource.data.courseId is string
+        && request.resource.data.courseId.size() > 0
+        && request.resource.data.courseName is string
+        && request.resource.data.courseName.size() > 0
         && request.resource.data.title is string
         && request.resource.data.title.size() >= 4
         && request.resource.data.body is string

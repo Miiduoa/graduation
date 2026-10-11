@@ -183,19 +183,40 @@ export async function listCourseAppeals(schoolId: string, uid: string) {
   return snap.docs.map((item) => ({ id: item.id, ...item.data() }));
 }
 
-export async function createCourseAppeal(input: {
-  schoolId: string;
-  studentUid: string;
-  courseId: string;
-  courseName: string;
-  title: string;
-  body: string;
-}) {
-  await addDoc(collection(getDb(), 'courseAppeals'), {
+export async function createCourseAppeal(
+  input: {
+    schoolId: string;
+    studentUid: string;
+    courseId: string;
+    courseName: string;
+    title: string;
+    body: string;
+  },
+  requestId?: string,
+) {
+  // 同一次填寫用同一個編號，連按送出也只會有一筆
+  const ref = requestId
+    ? doc(getDb(), 'courseAppeals', requestId)
+    : doc(collection(getDb(), 'courseAppeals'));
+  await setDoc(ref, {
     ...input,
     teacherNote: '',
     status: 'pending',
     createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  return ref.id;
+}
+
+export async function listSchoolAppeals(schoolId: string) {
+  const snap = await getDocs(query(collection(getDb(), 'courseAppeals'), where('schoolId', '==', schoolId)));
+  return snap.docs.map((item) => ({ id: item.id, ...item.data() }));
+}
+
+export async function decideCourseAppeal(id: string, status: 'approved' | 'rejected', teacherNote: string) {
+  await updateDoc(doc(getDb(), 'courseAppeals', id), {
+    status,
+    teacherNote: teacherNote.trim().slice(0, 500),
     updatedAt: serverTimestamp(),
   });
 }

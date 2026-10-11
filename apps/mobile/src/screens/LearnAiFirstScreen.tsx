@@ -92,7 +92,7 @@ export default function LearnAiFirstScreen() {
         />
         <AIRow
           title="課程申訴"
-          subtitle="頂卡跟著真實案件走"
+          subtitle="看申訴處理到哪"
           onPress={() => safeNavigate(navigation, 'CourseAppeals')}
         />
         <AIRow
