@@ -9,6 +9,7 @@ import { useTheme } from '../state/theme';
 import { useSchool } from '../state/school';
 import { safeNavigate } from '../utils/safeNavigate';
 import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
+import { OpenOrderCard } from '../components/OpenOrderCard';
 
 type ServiceItem = {
   icon: GeneratedButtonIconId;
@@ -193,6 +194,9 @@ function CampusDirectory({
         </Text>
       </View>
       <AIHero title="生活" subtitle="找地點、查服務，安排課餘生活。" />
+      <View style={{ paddingHorizontal: theme.layout.screenPadding }}>
+        <OpenOrderCard navigation={navigation} />
+      </View>
       <AICard>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.sm }}>
           <View

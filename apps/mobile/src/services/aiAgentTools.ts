@@ -12,6 +12,7 @@
  * 4. 角色感知 (學生/教師/管理者 各有不同可用工具)
  */
 
+import { describePickupNumber, formatShortOrderCode } from '@campus/shared/src/ordering/pickupNumber';
 import { getDataSource, hasDataSource, type DataSource } from '../data/source';
 // LMS v2: 改 import 自 supabaseLmsCache facade。
 // flag OFF 時:facade 自動委派回 puDataCache (TronClass),行為與舊版完全相同。
@@ -265,8 +266,8 @@ async function submitPendingDemoPaymentOrder(
       `餐廳：${demo.merchant.name}`,
       `金額：$${demo.total}`,
       `付款方式：${getDemoPaymentLabel(payment.method)}`,
-      `訂單編號：${demo.order.id}`,
-      '狀態：待店家確認',
+      formatShortOrderCode(demo.order.id),
+      describePickupNumber(demo.order as never).text,
     ].join('\n'),
   };
 }
@@ -354,8 +355,8 @@ async function placeOrderWith(
         `餐廳：${demo.merchant.name}`,
         price ? `金額：$${demo.total}` : '',
         `付款方式：${getDemoPaymentLabel(paymentMethod)}`,
-        `訂單編號：${demo.order.id}`,
-        '狀態：待店家確認',
+        formatShortOrderCode(demo.order.id),
+        describePickupNumber(demo.order as never).text,
       ].filter(Boolean).join('\n'),
     };
   }
@@ -415,8 +416,8 @@ async function placeOrderWith(
       `餐點：${matched.name} x ${qty}`,
       cafeteria?.name ? `餐廳：${cafeteria.name}` : matched.cafeteria ? `餐廳：${matched.cafeteria}` : '',
       price ? `金額：$${totalAmount}` : '',
-      `訂單編號：${order.id}`,
-      '狀態：待店家確認',
+      formatShortOrderCode(order.id),
+      describePickupNumber(order as never).text,
     ]
       .filter(Boolean)
       .join('\n'),
@@ -3438,8 +3439,8 @@ const TOOL_EXECUTORS: Record<
             `餐廳：${demo.merchant.name}`,
             price ? `金額：$${demo.total}` : '',
             `付款方式：${getDemoPaymentLabel(paymentMethod)}`,
-            `訂單編號：${demo.order.id}`,
-            `狀態：待店家確認`,
+            formatShortOrderCode(demo.order.id),
+            describePickupNumber(demo.order as never).text,
           ].filter(Boolean).join('\n'),
         };
       }
@@ -3515,8 +3516,8 @@ const TOOL_EXECUTORS: Record<
           `餐點：${matched.name} x ${quantity}`,
           cafeteria?.name ? `餐廳：${cafeteria.name}` : (matched.cafeteria ? `餐廳：${matched.cafeteria}` : ''),
           price ? `金額：$${totalAmount}` : '',
-          `訂單編號：${order.id}`,
-          `狀態：待店家確認`,
+          formatShortOrderCode(order.id),
+          describePickupNumber(order as never).text,
         ].filter(Boolean).join('\n'),
       };
     } catch (e: unknown) {

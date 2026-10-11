@@ -14,6 +14,7 @@ import { useAuth } from '../state/auth';
 import { loadStudentHome } from '../data/studentHome';
 import type { CourseSpace, InboxTask } from '../data/types';
 import { safeNavigate } from '../utils/safeNavigate';
+import { OpenOrderCard } from '../components/OpenOrderCard';
 import { rootNavigateNested } from '../app/rootNavigation';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
@@ -69,6 +70,7 @@ export default function StudentTodayScreen() {
         <Text style={s.brand}>CAMPUS ONE</Text>
         <Text style={s.heading}>今天的課程與待辦</Text>
         <Text style={s.caption}>查看作業期限與課程最新動態。</Text>
+        <OpenOrderCard navigation={navigation} />
         {!!error && (
           <View accessibilityRole="alert" style={s.error}>
             <Text style={s.errorText}>{error}</Text>
