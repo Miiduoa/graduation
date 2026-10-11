@@ -5,7 +5,6 @@ import {
   IMPORT_CONFIRM_COPY,
   IMPORT_NOT_APPLIED_COPY,
   PERIOD_TIMES,
-  SHARE_SNAPSHOT_NOTICE,
   SchedulePlanner,
   WEEKDAY_LABELS,
   analyzeImportDrafts,
@@ -13,7 +12,6 @@ import {
   cleanCourse,
   commonFree,
   courseTimeLabel,
-  encodeTimetableShare,
   findCourseConflicts,
   parseTimetableText,
   periodRangeLabel,
@@ -36,22 +34,6 @@ import {
 import { listAcceptedFriends } from '@/lib/timetable/friends';
 import { useAcademicRecords } from '@/lib/useAcademicRecords';
 import type { AcademicCourse } from '@/lib/academicRecords';
-
-const LOCAL_ID_KEY = 'campus-one-timetable-id';
-
-function ownerId() {
-  let id = '';
-  try {
-    id = localStorage.getItem(LOCAL_ID_KEY) || '';
-    if (!id) {
-      id = crypto.randomUUID();
-      localStorage.setItem(LOCAL_ID_KEY, id);
-    }
-  } catch {
-    id = 'local';
-  }
-  return id;
-}
 
 function fromSchoolCourse(course: AcademicCourse): PersonalCourse {
   const start = course.periods[0] || 0;
@@ -179,25 +161,16 @@ export function PersonalTimetable() {
   };
 
   const copyShare = async () => {
-    const snapshot = encodeTimetableShare({
-      v: 1,
-      id: uid || ownerId(),
-      name: timetable.meta.title || '我的課表',
-      t: Date.now(),
-      courses: timetable.courses,
-      meta: timetable.meta,
-    });
-    const snapshotUrl = `${window.location.origin}/timetable#share=${encodeURIComponent(snapshot)}`;
+    if (!uid) return;
     try {
       const server = await createServerShare(schoolId, timetable.meta.title || '我的課表');
       const url = `${window.location.origin}${server.path}`;
-      await navigator.clipboard.writeText(url);
+      await navigator.clipboard.writeText(url).catch(() => undefined);
       setShareUrl(url);
-      setNotice(`分享連結已複製，七天內有效。`);
+      setNotice('分享連結已複製，七天內有效，隨時可以撤回。');
     } catch {
-      await navigator.clipboard.writeText(snapshotUrl).catch(() => undefined);
-      setShareUrl(snapshotUrl);
-      setNotice(SHARE_SNAPSHOT_NOTICE);
+      setShareUrl('');
+      setNotice('現在產生不了分享連結，登入並連上網路後再試。');
     }
   };
 
@@ -309,10 +282,16 @@ export function PersonalTimetable() {
         <button type="button" className="btn" onClick={() => setEditing(cleanCourse({ day, start: 1, end: 1 }))}>
           新增課程
         </button>
-        <button type="button" className="btn" onClick={() => void copyShare()} disabled={busy || !timetable.courses.length}>
+        <button
+          type="button"
+          className="btn"
+          onClick={() => void copyShare()}
+          disabled={busy || !uid || !timetable.courses.length}
+        >
           複製分享連結
         </button>
       </div>
+      {!uid && <p className={styles.notice}>登入後才能產生七天內有效、可撤回的連結。</p>}
       {shareUrl && <p className={styles.notice}>{shareUrl}</p>}
 
       {view === 'grid' ? (
