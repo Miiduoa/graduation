@@ -55,9 +55,7 @@ export default function SharedTimetablePage({ params }: { params: Promise<{ toke
       )}
       {state.status === 'ready' && (
         <>
-          <p className={styles.notice}>
-            {state.name}
-          </p>
+          <h2>同學分享的課表</h2>
           <div className={styles.week}>
             {WEEKDAY_LABELS.map((label, index) => {
               const entries = state.courses.filter((course) => course.day === index + 1);
