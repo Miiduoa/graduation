@@ -101,11 +101,12 @@ export function PersonalTimetable() {
           loaded.push({
             id: row.uid,
             name: row.name || '好友',
-            username: row.username,
             courses: theirs?.courses || [],
           });
         }
         setFriends(loaded);
+        const wanted = new URLSearchParams(window.location.search).get('friend');
+        if (wanted && loaded.some((friend) => friend.id === wanted)) setSelectedFriend(wanted);
       })
       .catch(() => setFriends([]));
   }, [uid, schoolId]);
@@ -471,8 +472,8 @@ export function PersonalTimetable() {
         </div>
       </section>
 
-      <section className={styles.panel} aria-label="好友空堂">
-        <h2>好友空堂</h2>
+      <section className={styles.panel} aria-label="共同空堂">
+        <h2>共同空堂</h2>
         {!uid ? (
           <p className={styles.notice}>登入並加好友後，才能看對方課表。沒加好友不會露出任何人的時間。</p>
         ) : friends.length === 0 ? (
@@ -493,6 +494,9 @@ export function PersonalTimetable() {
                 ))}
               </select>
             </label>
+            {selected && selected.courses.length > 0 && common.length === 0 && (
+              <p className={styles.notice}>這週找不到兩個人都沒課的時段。</p>
+            )}
             {selected && !selected.courses.length && (
               <p className={styles.notice}>這位朋友還沒有開放課表，或課表仍是空的。</p>
             )}
@@ -511,8 +515,10 @@ export function PersonalTimetable() {
                       day: block.day,
                       startPeriod: block.start,
                       endPeriod: block.end,
-                      note: '有空就碰面，吃飯',
-                    }).then(() => setNotice('已送出吃飯邀請。'))
+                      note: '約吃飯',
+                    })
+                      .then(() => setNotice('已送出吃飯邀請，對方會在「找人」看到。'))
+                      .catch(() => setNotice('邀請沒有送出，請稍後再試。'))
                   }
                 >
                   約吃飯
@@ -529,8 +535,10 @@ export function PersonalTimetable() {
                       day: block.day,
                       startPeriod: block.start,
                       endPeriod: block.end,
-                      note: '有空就碰面，讀書',
-                    }).then(() => setNotice('已送出讀書邀請。'))
+                      note: '約讀書',
+                    })
+                      .then(() => setNotice('已送出讀書邀請，對方會在「找人」看到。'))
+                      .catch(() => setNotice('邀請沒有送出，請稍後再試。'))
                   }
                 >
                   約讀書
