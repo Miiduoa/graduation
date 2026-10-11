@@ -139,6 +139,8 @@ export interface CreateOrderResult {
   items?: Array<{ name: string; quantity: number }>;
   errorCode?: string;
   errorMessage?: string;
+  /** 伺服器明確說這張單不成立（菜單或金額變了）；要換新的送出編號重新確認 */
+  notCreated?: boolean;
 }
 
 export async function confirmCreateOrder(input: CreateOrderInput): Promise<CreateOrderResult> {
@@ -153,11 +155,12 @@ export async function confirmCreateOrder(input: CreateOrderInput): Promise<Creat
     const result = await callable(input);
     return result.data;
   } catch (e) {
-    const err = e as { code?: string; message?: string };
+    const err = e as { code?: string; message?: string; details?: { orderOutcome?: string } };
     return {
       success: false,
       errorCode: err?.code || 'callable_failed',
       errorMessage: err?.message || '下單失敗',
+      notCreated: err?.details?.orderOutcome === 'not_created',
     };
   }
 }

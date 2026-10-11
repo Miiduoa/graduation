@@ -6,6 +6,8 @@ import type { AgentCard } from '@/lib/campusAssistantClient';
 import { confirmCreateOrder, watchOrderQueueNumber } from '@/lib/campusAssistantClient';
 import { describePickupNumber, type PickupNumberView } from '@campus/shared/src/ordering/pickupNumber';
 
+const ORDER_NOT_SENT_TEXT = '訂單沒送出去，請再試一次。';
+
 interface Props {
   cards: AgentCard[];
   schoolId?: string;
@@ -620,6 +622,8 @@ function OrderDraftCard({
   const [pickup, setPickup] = useState<PickupNumberView | null>(null);
   // 同一張草稿重按沿用同一個送出編號，伺服器不會建出第二筆
   const requestIdRef = useRef<string | null>(null);
+  // 連點時第二下還沒等到按鈕變灰就進來了，用 ref 擋住，同時只會有一個請求在路上
+  const inFlightRef = useRef(false);
   const pendingOrderId = pickup?.state === 'pending' ? result?.orderId : undefined;
   useEffect(() => {
     if (!pendingOrderId) return;
@@ -637,6 +641,8 @@ function OrderDraftCard({
       });
       return;
     }
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     setSubmitting(true);
     requestIdRef.current ??=
       typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -651,6 +657,7 @@ function OrderDraftCard({
       paymentMethod,
       note: payload.note,
     });
+    inFlightRef.current = false;
     setSubmitting(false);
     if (res.success && res.orderId) {
       setResult({ ok: true, message: `訂單已建立，訂單號 ${res.orderId}`, orderId: res.orderId });
@@ -669,7 +676,12 @@ function OrderDraftCard({
         total: res.total || payload.total,
       });
     } else {
-      setResult({ ok: false, message: res.errorMessage || '下單失敗，請稍後再試' });
+      // 伺服器明確說不成立（菜單或金額變了）才照實轉述並換新編號；其他一律用同一個編號再試一次
+      if (res.notCreated) requestIdRef.current = null;
+      setResult({
+        ok: false,
+        message: res.notCreated && res.errorMessage ? res.errorMessage : ORDER_NOT_SENT_TEXT,
+      });
     }
   };
 
@@ -750,9 +762,10 @@ function OrderDraftCard({
             </div>
           ) : null}
         </div>
-      ) : (
+      ) : null}
+      {result?.ok ? null : (
         <button type="button" className="confirm" onClick={handleConfirm} disabled={submitting}>
-          {submitting ? '下單中…' : '確認下單'}
+          {submitting ? '下單中…' : result ? '再試一次' : '確認下單'}
         </button>
       )}
       <style jsx>{`
