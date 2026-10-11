@@ -4,8 +4,12 @@ import { useFocusEffect } from '@react-navigation/native';
 import {
   APPEAL_NEED_COURSE_COPY,
   APPEAL_STATUS_COPY,
+  appealStatusDetail,
+  appealSubmittedCopy,
   appealTimeValue,
   appealTopCard,
+  courseOfferingId,
+  type AppealTeacherMap,
   type AppealStatus,
   type CourseAppeal,
   type PersonalCourse,
@@ -17,6 +21,7 @@ import { useSchool } from '../state/school';
 import {
   createCourseAppeal,
   listCourseAppeals,
+  loadAppealTeacherStatus,
   loadPersonalTimetable,
   withdrawCourseAppeal,
   appealOfferingId,
@@ -35,6 +40,7 @@ export default function CourseAppealsScreen() {
   const [items, setItems] = useState<CourseAppeal[]>([]);
   const [courses, setCourses] = useState<PersonalCourse[] | null>(null);
   const [courseId, setCourseId] = useState('');
+  const [assigned, setAssigned] = useState<AppealTeacherMap>({});
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [notice, setNotice] = useState('');
@@ -52,8 +58,18 @@ export default function CourseAppealsScreen() {
       (a, b) =>
         appealTimeValue(b.updatedAt || b.createdAt) - appealTimeValue(a.updatedAt || a.createdAt),
     );
+    const usable = timetable.courses.filter((course) => course.name.trim());
+    const offeringIds = [
+      ...new Set([
+        ...usable.map((course) => courseOfferingId(course)),
+        ...list.map((item) => item.offeringId || '').filter(Boolean),
+      ]),
+    ];
+    const status = await loadAppealTeacherStatus(schoolId, offeringIds);
     setItems(list);
-    setCourses(timetable.courses.filter((course) => course.name.trim()));
+    setCourses(usable);
+    setAssigned(status);
+    return status;
   }, [uid, schoolId]);
 
   useFocusEffect(
@@ -62,7 +78,7 @@ export default function CourseAppealsScreen() {
     }, [load]),
   );
 
-  const top = appealTopCard(items);
+  const top = appealTopCard(items, assigned);
   const noCourses = courses !== null && courses.length === 0;
   const picked = courses?.find((course) => course.id === courseId);
 
@@ -83,7 +99,7 @@ export default function CourseAppealsScreen() {
         (item.status === 'pending' || item.status === 'reviewing'),
     );
     if (duplicate) {
-      setNotice('這門課已經有一樣主旨的申訴在等老師看了。');
+      setNotice('這門課已經有一樣主旨的申訴還沒處理完。');
       return;
     }
     setBusy(true);
@@ -102,7 +118,6 @@ export default function CourseAppealsScreen() {
         courses || undefined,
       );
       requestId.current = newRequestId();
-      setNotice('已送出，等老師看。');
       setTitle('');
       setBody('');
       setCourseId('');
@@ -111,8 +126,10 @@ export default function CourseAppealsScreen() {
       setBusy(false);
       return;
     }
-    // 重新整理清單失敗不影響已經送出的結果
-    await load().catch(() => undefined);
+    // 送出成功（包括連按時第一下已經送到）：看這門課有沒有對應老師再決定怎麼說
+    const offeringId = appealOfferingId(picked);
+    const latest = await load().catch(() => null);
+    setNotice(appealSubmittedCopy(offeringId, latest || assigned));
     setBusy(false);
   };
 
@@ -193,7 +210,9 @@ export default function CourseAppealsScreen() {
               <Text style={{ fontWeight: '700', color: theme.colors.text }}>
                 {item.courseName} · {copy.label}
               </Text>
-              <Text style={{ color: theme.colors.muted }}>{copy.detail}</Text>
+              <Text style={{ color: theme.colors.muted }}>
+                {appealStatusDetail(item, assigned)}
+              </Text>
               {item.teacherNote ? (
                 <Text style={{ color: theme.colors.muted }}>老師說：{item.teacherNote}</Text>
               ) : null}
