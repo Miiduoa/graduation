@@ -26,6 +26,7 @@
 - 全工作區 typecheck、lint 通過；仍有既有 lint warnings，沒有宣稱零警告。Web production build 與 16 項 standalone server lifecycle 測試通過；實際 standalone `/health/live`、`/search` 都回傳 200。
 - 修正快速恢復登入狀態在延後載入頁面造成的 SSR hydration mismatch：三個回歸測試在舊實作重現、新實作通過；正式建置的 28 個公開入口皆 200、手機寬度無橫向溢位、無 pageerror。為避免重複整頁載入觸發上游目錄限流，這組頁面巡檢使用瀏覽器端校園目錄 fixture；不構成正式帳號或校務 API 驗收。
 - 瀏覽器課程流程使用本機測試回應驗證首頁測驗連結、正確分頁與焦點、送出後回執；fixture 未寫入正式系統。這是畫面與 API 合約的互動驗證，真實跨端提交仍待驗收。
+- 修正淺色介面的輔助文字對比，避免首頁及提交回執低於 4.5:1。28 個公開入口在淺色／深色共 56 次 axe WCAG 2 A/AA、2.1 A/AA 自動檢查沒有違規；部分色彩對比仍被工具列為需人工判定，未宣稱通過完整讀屏或無障礙認證。
 - 搜尋第二輪獨立瀏覽器驗證：搜尋「公車」後登入返回網址含查詢字串；切換靜宜仍保留查詢並顯示公車結果；助理入口標示學校帳號需求。
 - 點名 handler 測試 43/43；真實 Firestore emulator 交易測試 7/7，包含到期／結束後重查、無重複寫入、token 與身分不符、撤權、教師更正不被覆寫。
 - 發布前置檢查完整覆跑：CI 的 6 個 readiness scripts 加上 `prepare-native-release.test.cjs`，139/139 通過、0 跳過；已載入隔離安裝的 `@expo/eas-json@24.9.0`，包含先前跳過的 schema 檢查。`verify-functions-package.cjs` 以 Firebase CLI 封裝並隔離載入 112 個 exports 通過。這些結果只證明本機發布檢查，不證明雲端已更新。
