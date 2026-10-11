@@ -182,3 +182,18 @@ describe('手機下單不再自己算號碼', () => {
     expect(retried).toMatchObject({ ok: true, orderId: 'o1', queueNumber: 6 });
   });
 });
+
+describe('取消的單給學生看的那一句', () => {
+  const cancelled = (extra: Record<string, unknown>) => describePickupNumber({ status: 'cancelled', queueNumber: null, ...extra });
+  it('店家拒單或取消：這張單店家取消了', () => {
+    expect(cancelled({ cancelledBy: 'merchant' }).text).toBe('這張單店家取消了');
+  });
+  it('超過取餐時間：不寫 NoShow', () => {
+    expect(cancelled({ cancelReason: 'system_no_show' }).text).toBe('超過取餐時間沒取，這張單取消了');
+  });
+  it('稽查停權取消：寫暫停營業，不說店家取消', () => {
+    const view = cancelled({ cancelReason: 'admin_vendor_suspended' });
+    expect(view.text).toBe('這家店暫停營業，這張單已取消。');
+    expect(view.text).not.toContain('店家取消');
+  });
+});

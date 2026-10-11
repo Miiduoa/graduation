@@ -50,8 +50,8 @@ function createTimeoutOrderProcessor({ db, sendPushToUser, now = Date.now, logge
         : expectedStatus === 'preparing'
           ? { title: '訂單製作時間較長', body: '您的餐點已製作超過 30 分鐘，如有問題可聯繫店家。' }
           : {
-              title: '訂單已標記為未取餐',
-              body: '您的餐點已標記為 NoShow，如有疑問請聯繫店家或客服。',
+              title: '這張單取消了',
+              body: '這張單超過取餐時間，已經取消了。',
             };
     let notification;
     try {
