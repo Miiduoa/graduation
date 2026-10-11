@@ -1,44 +1,24 @@
-/* eslint-disable */
 /**
- * 📅 統一行事曆 — Unified Calendar Screen
+ * 行事曆
  *
- * 整合三個頁面為一：課表 | 行事曆 | 智慧助手（截止日 + 番茄鐘）
- * 用頂部 segmented tab 切換，底層直接渲染原本三個畫面元件。
+ * 課表統一看「我的課表」（PersonalTimetable），這裡只放行事曆，
+ * 免得兩份課表資料對不起來。
  */
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../ui/theme';
 import { useThemeMode } from '../state/theme';
+import { rootNavigateNested } from '../app/rootNavigation';
 
-import { CourseSchedulePanel } from './unifiedCalendar/CourseSchedulePanel';
 import { CalendarPanel } from './unifiedCalendar/CalendarPanel';
-
-type TabKey = 'schedule' | 'calendar';
-
-const TABS: { key: TabKey; label: string; icon: string }[] = [
-  { key: 'schedule', label: '課表', icon: 'grid-outline' },
-  { key: 'calendar', label: '行事曆', icon: 'calendar-outline' },
-];
 
 export function UnifiedCalendarScreen(props: Record<string, unknown>) {
   useThemeMode();
   const insets = useSafeAreaInsets();
-  const [activeTab, setActiveTab] = useState<TabKey>('schedule');
-
-  // 支援從 route.params.initialTab 指定初始 tab
-  const route = (props as any)?.route;
-  const initialTab = route?.params?.initialTab as TabKey | undefined;
-  useEffect(() => {
-    if (initialTab && TABS.some((t) => t.key === initialTab)) {
-      setActiveTab(initialTab);
-    }
-  }, [initialTab]);
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
-      {/* ─── Top Segment Tabs ─── */}
       <View
         style={{
           paddingTop: insets.top + 4,
@@ -54,59 +34,22 @@ export function UnifiedCalendarScreen(props: Record<string, unknown>) {
             fontSize: 22,
             fontWeight: '700',
             color: theme.colors.text,
-            marginBottom: 10,
+            marginBottom: 6,
           }}
         >
           行事曆
         </Text>
-        <View style={{ flexDirection: 'row', gap: 6 }}>
-          {TABS.map((tab) => {
-            const active = activeTab === tab.key;
-            return (
-              <Pressable
-                key={tab.key}
-                onPress={() => setActiveTab(tab.key)}
-                style={{
-                  flex: 1,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 5,
-                  paddingVertical: 9,
-                  borderRadius: theme.radius.md,
-                  backgroundColor: active ? theme.colors.accent : theme.colors.surface,
-                  borderWidth: active ? 0 : 1,
-                  borderColor: theme.colors.border,
-                }}
-              >
-                <Ionicons
-                  name={tab.icon as any}
-                  size={15}
-                  color={active ? '#fff' : theme.colors.textSecondary}
-                />
-                <Text
-                  style={{
-                    fontSize: 13,
-                    fontWeight: active ? '700' : '500',
-                    color: active ? '#fff' : theme.colors.textSecondary,
-                  }}
-                >
-                  {tab.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => rootNavigateNested('學習', 'PersonalTimetable')}
+          style={{ paddingVertical: 6 }}
+        >
+          <Text style={{ fontSize: 13, color: theme.colors.accent }}>課表請看「我的課表」 →</Text>
+        </Pressable>
       </View>
 
-      {/* ─── Content — 只渲染當前 tab ─── */}
       <View style={{ flex: 1 }}>
-        {activeTab === 'schedule' && (
-          <CourseSchedulePanel {...props} />
-        )}
-        {activeTab === 'calendar' && (
-          <CalendarPanel {...props} />
-        )}
+        <CalendarPanel {...props} />
       </View>
     </View>
   );

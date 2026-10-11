@@ -87,7 +87,7 @@ export default function LearnAiFirstScreen() {
         />
         <AIRow
           title="行事曆"
-          subtitle="查看課程時間與自己的安排"
+          subtitle="學校行事曆與自己的安排"
           onPress={() => safeNavigate(navigation, 'Calendar')}
         />
         <AIRow

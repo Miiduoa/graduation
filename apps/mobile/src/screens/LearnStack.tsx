@@ -410,8 +410,8 @@ export function LearnStack() {
 
       <Stack.Screen
         name="CourseSchedule"
-        component={UnifiedCalendarScreen}
-        options={{ title: '行事曆', headerShown: false }}
+        component={PersonalTimetableScreen}
+        options={{ title: '我的課表', headerShown: false }}
       />
       <Stack.Screen
         name="AddCourse"
