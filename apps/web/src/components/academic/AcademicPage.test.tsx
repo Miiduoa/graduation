@@ -30,6 +30,8 @@ const timetableApi = vi.hoisted(() => ({
   createMeetup: vi.fn(),
   createServerShare: vi.fn(),
   loadFriendTimetable: vi.fn(),
+  listMyMeetups: vi.fn(async () => []),
+  respondMeetup: vi.fn(),
 }));
 vi.mock('@/lib/timetable/store', () => timetableApi);
 vi.mock('@/lib/timetable/friends', () => ({
