@@ -60,6 +60,7 @@ beforeEach(() => {
   vi.mocked(loadMapLocations).mockResolvedValue([library, gate]);
   vi.mocked(loadMapFavorites).mockResolvedValue([]);
   vi.mocked(setMapFavorite).mockResolvedValue(undefined);
+  window.history.replaceState({}, '', '/map');
 });
 
 it('shows a retryable source error without fabricated places or opening hours', async () => {
@@ -113,11 +114,31 @@ it('provides keyboard-operable search, categories, selection and reset', async (
   ).toEqual(['library']);
   fireEvent.click(screen.getByRole('button', { name: '查看蓋夏圖書館' }));
   expect(screen.getByRole('link', { name: '從目前位置導航' })).toBeTruthy();
-  expect(screen.getByRole('link', { name: '登入後可收藏地點' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '連線學校帳號以收藏' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: '收藏蓋夏圖書館' })).toBeNull();
   fireEvent.change(input, { target: { value: '不存在' } });
   fireEvent.click(screen.getByRole('button', { name: '清除搜尋條件' }));
   expect(screen.getByRole('button', { name: '查看正門' })).toBeTruthy();
+});
+
+it('uses an explicit school flow for legacy favorites while keeping public navigation available', async () => {
+  state.user = null;
+  window.history.replaceState({}, '', '/map?schoolId=pu&route=gate%2Clibrary#directions');
+  render(<MapClient school="pu" route="gate,library" focus="gate" />);
+  fireEvent.click(await screen.findByRole('button', { name: '查看蓋夏圖書館' }));
+  const login = new URL(
+    screen.getByRole('link', { name: '連線學校帳號以收藏' }).getAttribute('href')!,
+    window.location.origin,
+  );
+  expect(login.pathname).toBe('/login');
+  expect(login.searchParams.get('reconnect')).toBe('school');
+  expect(login.searchParams.get('returnUrl')).toBe(
+    '/map?schoolId=pu&route=gate%2Clibrary&focus=library#directions',
+  );
+  expect(screen.getByText('地圖與導航不需登入；收藏尚未支援 Campus One 帳號。')).toBeTruthy();
+  expect(screen.getByRole('link', { name: '從目前位置導航' })).toBeTruthy();
+  expect(loadMapFavorites).not.toHaveBeenCalled();
+  expect(setMapFavorite).not.toHaveBeenCalled();
 });
 
 it('does not mark a failed or uncertain favorite as saved and reloads before retrying', async () => {

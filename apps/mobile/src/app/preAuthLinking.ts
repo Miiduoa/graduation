@@ -9,6 +9,10 @@ export const preAuthLinking: LinkingOptions<PreAuthStackParamList> = {
     initialRouteName: 'LoginLanding',
     screens: {
       LoginLanding: '',
+      Map: 'map',
+      BusSchedule: 'bus',
+      公告總覽: 'announcements',
+      公告詳情: 'announcement/:id',
       NuniWorkspace: 'campus-one',
       SSOLogin: 'sso-login',
     },

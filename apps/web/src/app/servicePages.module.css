@@ -1,3 +1,43 @@
+.guestAccess {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px 24px;
+  padding-bottom: 24px;
+  margin-bottom: 28px;
+  border-bottom: 1px solid var(--border);
+}
+
+.guestAccess h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.guestAccess p {
+  margin: 0;
+  max-width: 620px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.guestAccess nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  width: 100%;
+}
+
+.guestAccess nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
 .loginLayout {
   display: grid;
   grid-template-columns: minmax(0, 520px) minmax(0, 300px);

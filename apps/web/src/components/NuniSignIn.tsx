@@ -61,6 +61,7 @@ export function NuniSignIn({
     <section className={styles.loginHelp} aria-labelledby="platform-sign-in-title">
       <h2 id="platform-sign-in-title">登入或建立 Campus One 帳號</h2>
       <p>{purpose}</p>
+      <p>這是獨立的平台帳號，不需要先登入學校，也不要求學號或學校信箱。</p>
       <p>
         第一次使用？透過 Google 繼續即可建立帳號，不必另外設定密碼。之後請使用同一個 Google
         帳號登入。

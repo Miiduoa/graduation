@@ -91,6 +91,65 @@ it('offers school verification for an academic task without a misleading Google 
   expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('連線學校帳號');
   expect(screen.getByRole('button', { name: '連線學校帳號' })).toBeTruthy();
   expect(replace).not.toHaveBeenCalled();
+  expect(screen.getByRole('link', { name: '不登入，繼續瀏覽' }).getAttribute('href')).toBe(
+    '/#public-services',
+  );
+});
+
+it.each([
+  '/map?school=pu&focus=library#route',
+  '/bus?schoolId=tw-pu',
+  '/announcements/news-123?schoolId=tw-pu',
+  '/cafeteria',
+  '/library',
+])(
+  'keeps public destination %s optional and preserves the task with either account or guest browsing',
+  (destination) => {
+    state.user = null;
+    state.params = new URLSearchParams({ returnUrl: destination });
+    render(<LoginPage />);
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('登入 Campus One');
+    expect(screen.getByTestId('platform-sign-in').getAttribute('data-return-url')).toBe(
+      destination,
+    );
+    expect(screen.getByRole('link', { name: '不登入，繼續瀏覽' }).getAttribute('href')).toBe(
+      destination,
+    );
+    expect(replace).not.toHaveBeenCalled();
+    expect(signIn).not.toHaveBeenCalled();
+  },
+);
+
+it('keeps guest services accessible while school identity is loading or unavailable', () => {
+  state.user = null;
+  state.loading = true;
+  state.schoolAvailable = false;
+  render(<LoginPage />);
+  expect(screen.getByRole('link', { name: '校園地圖' }).getAttribute('href')).toBe('/map');
+  expect(screen.getByRole('link', { name: '公車資訊' }).getAttribute('href')).toBe('/bus');
+  expect(screen.getByRole('link', { name: '公開公告' }).getAttribute('href')).toBe(
+    '/announcements',
+  );
+  expect(screen.getByRole('link', { name: '不登入，繼續瀏覽' })).toBeTruthy();
+  expect(screen.queryByLabelText('密碼')).toBeNull();
+  expect(signIn).not.toHaveBeenCalled();
+});
+
+it('uses school identity only for the explicit legacy map favorite action and returns to that place', async () => {
+  state.user = null;
+  const destination = '/map?schoolId=pu&route=gate%2Clibrary&focus=library#directions';
+  state.params = new URLSearchParams({ returnUrl: destination, reconnect: 'school' });
+  render(<LoginPage />);
+  expect(screen.queryByTestId('platform-sign-in')).toBeNull();
+  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('連線學校帳號');
+  expect(screen.getByText('你選擇的個人功能仍使用學校帳號；瀏覽校園資訊不需登入。')).toBeTruthy();
+  expect(screen.getByRole('link', { name: '不登入，繼續瀏覽' }).getAttribute('href')).toBe(
+    destination,
+  );
+  fillSchoolLogin();
+  fireEvent.submit(screen.getByLabelText('學號').closest('form')!);
+  await waitFor(() => expect(replace).toHaveBeenCalledWith(destination));
+  expect(signIn).toHaveBeenCalledOnce();
 });
 it.each([
   '/login',
