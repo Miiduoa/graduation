@@ -13,7 +13,7 @@ import {
 } from '../../utils/courseNavigation';
 import { aiOverlay } from '../../app/useAIOverlay';
 
-describe('courseNavigation utilities (4+1 AI-First nav)', () => {
+describe('courseNavigation utilities (4+1 nav)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });

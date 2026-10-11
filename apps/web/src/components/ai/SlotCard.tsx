@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Campus AI-First — SlotCard
+ * SlotCard
  * --------------------------
  * AI 生成的卡片基底（Answer / Action / Compare / Schedule 四變體）
  *

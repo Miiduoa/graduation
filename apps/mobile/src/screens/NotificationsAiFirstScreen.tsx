@@ -1,5 +1,5 @@
 /**
- * Campus AI-First — 通知中心 V2
+ * 通知中心 V2
  */
 import React, { useState } from 'react';
 import { View, Text } from 'react-native';

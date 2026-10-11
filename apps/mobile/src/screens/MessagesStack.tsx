@@ -5,7 +5,7 @@ import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useThemeMode } from '../state/theme';
 import { createStackScreenOptions } from '../ui/navigationTheme';
-// AI-First v1：訊息 Tab 主入口（舊版 InboxScreen / MessagesHomeScreen /
+// 訊息 Tab 主入口（舊版 InboxScreen / MessagesHomeScreen /
 // AssignmentDetailScreen 已下架）
 import { GroupsScreen } from './GroupsScreen';
 import { GroupDetailScreen } from './GroupDetailScreen';
@@ -39,7 +39,7 @@ export function MessagesStack() {
       initialRouteName="Inbox"
       screenOptions={createStackScreenOptions()}
     >
-      {/* AI-First v1：landing 換新版 */}
+      {/* landing 換新版 */}
       <Stack.Screen
         name="Inbox"
         component={MessagesLandingScreen}
