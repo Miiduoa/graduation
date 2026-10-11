@@ -54,6 +54,11 @@ function fixture(t, native = false) {
   t.after(() => rmSync(project, { recursive: true, force: true }));
   for (const name of ['app.json', 'app.config.ts', 'package.json', 'eas.json'])
     copyFileSync(join(mobile, name), join(project, name));
+  mkdirSync(join(project, 'scripts'), { recursive: true });
+  copyFileSync(
+    join(mobile, 'scripts/configure-nuni-google.cjs'),
+    join(project, 'scripts/configure-nuni-google.cjs'),
+  );
   symlinkSync(join(root, 'node_modules'), join(project, 'node_modules'), 'dir');
   if (native) {
     mkdirSync(join(project, 'ios/mobile.xcodeproj'), { recursive: true });
@@ -111,7 +116,10 @@ test('prepares both shared and platform env without changing unrelated profiles 
   }
   assert.equal(prepared.build.production.environment, 'production');
   assert.equal(prepared.build.production.android.environment, 'production');
-  assert.ok(!Object.hasOwn(prepared.build.production.env, 'IOS_BUNDLE_IDENTIFIER'));
+  assert.equal(
+    prepared.build.production.env.IOS_BUNDLE_IDENTIFIER,
+    base.build.production.env.IOS_BUNDLE_IDENTIFIER,
+  );
 });
 
 test('actual dynamic Expo config reproduces the original gap and receives the prepared identity', (t) => {
@@ -192,6 +200,11 @@ test('the generated monorepo hook executes the existing hook and the worker guar
   mkdirSync(project, { recursive: true });
   for (const name of ['app.json', 'app.config.ts', 'package.json', 'eas.json'])
     copyFileSync(join(mobile, name), join(project, name));
+  mkdirSync(join(project, 'scripts'), { recursive: true });
+  copyFileSync(
+    join(mobile, 'scripts/configure-nuni-google.cjs'),
+    join(project, 'scripts/configure-nuni-google.cjs'),
+  );
   symlinkSync(join(root, 'node_modules'), join(checkout, 'node_modules'), 'dir');
   mkdirSync(join(checkout, 'scripts'));
   for (const name of ['prepare-eas-build.mjs', 'verify-eas-build.mjs'])
@@ -351,9 +364,14 @@ test(
       env: { ANDROID_PACKAGE_NAME: 'com.other.dev', APP_ENV: 'development' },
     };
     inherited.build.base.ios = { env: { IOS_BUNDLE_IDENTIFIER: 'com.other.dev' } };
+    const registeredTarget = {
+      ...target,
+      appIdentifier: base.build.production.env.IOS_BUNDLE_IDENTIFIER,
+      projectId: base.build.production.env.EXPO_PUBLIC_EAS_PROJECT_ID,
+    };
     for (const platform of ['android', 'ios']) {
       for (const profile of ['production', 'preview']) {
-        const expected = { ...target, platform, profile };
+        const expected = { ...registeredTarget, platform, profile };
         const prepared = prepareBuildConfig(inherited, expected);
         assert.equal(
           BuildProfileSchema.validate(prepared.build[profile], { abortEarly: false }).error,
@@ -375,3 +393,27 @@ test(
     }
   },
 );
+
+test('production Google client is bound to its verified iOS bundle and a new native runtime', (t) => {
+  const project = fixture(t);
+  const config = actualExpoConfig(project, base.build.production.env);
+  assert.equal(config.ios.bundleIdentifier, 'com.nuni.app');
+  assert.equal(config.android.package, 'com.nuni.app');
+  assert.equal(config.extra.eas.projectId, '8955b97c-802c-463c-bd1d-d5f02e30a966');
+  assert.equal(config.runtimeVersion, 'campus-one-native-google-1');
+  assert.equal(
+    config.ios.infoPlist.GIDClientID,
+    base.build.production.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+  );
+  assert.throws(
+    () =>
+      actualExpoConfig(project, {
+        ...base.build.production.env,
+        IOS_BUNDLE_IDENTIFIER: 'com.campus.app.dev',
+      }),
+    /requires com.nuni.app/,
+  );
+  const development = actualExpoConfig(project, { APP_ENV: 'development' });
+  assert.equal(development.ios.bundleIdentifier, 'com.campus.app.dev');
+  assert.equal(development.ios.infoPlist.GIDClientID, undefined);
+});

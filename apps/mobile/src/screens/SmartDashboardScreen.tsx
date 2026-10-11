@@ -1,19 +1,5 @@
 /* eslint-disable */
-/**
- * 🧠 智慧儀表板 — Smart Dashboard Screen
- *
- * Campus One 的核心差異化頁面：
- * 整合所有引擎的個人化洞察，一目瞭然。
- *
- * 佈局：
- *   1. 頂部 — 個人化問候 + 今日摘要
- *   2. GPA 趨勢圖 — 互動折線圖 + 預測
- *   3. 學業風險儀表 — 圓形進度條
- *   4. 智慧建議卡片 — 可操作的建議
- *   5. 校園脈動迷你卡 — 即時人潮
- *   6. 連續打卡 + XP — 遊戲化動態
- *   7. 學伴配對快捷入口
- */
+/** Daily coursework, school records and campus services. */
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
   View,
@@ -42,6 +28,7 @@ import { useSchool } from '../state/school';
 import { theme } from '../ui/theme';
 import { BrandFluxImageHeader } from '../ui/BrandFluxImageHeader';
 import { usePreferences } from '../state/preferences';
+import { buildStudySummary } from '../services/buildStudySummary';
 import { useWeatherForecast } from '../hooks/useWeatherForecast';
 import { shortWeatherLabelZh } from '../services/weather';
 import {
@@ -1319,7 +1306,7 @@ function AgentActionCenter(props: {
           })}
         >
           <Text style={{ color: theme.colors.text, fontSize: 16, fontWeight: '700' }}>
-            今天沒有高壓待辦
+            目前沒有優先待辦
           </Text>
           <Text
             style={{
@@ -1329,7 +1316,7 @@ function AgentActionCenter(props: {
               marginTop: 4,
             }}
           >
-            可以讓 AI 依課程、校園脈動與畢業進度生成今日計畫。
+            需要安排讀書時間時，可以請校園助理協助整理。
           </Text>
         </Pressable>
       )}
@@ -1417,7 +1404,7 @@ function AgentActionCenter(props: {
           <Ionicons name="sparkles-outline" size={14} color={theme.colors.accent} />
         </LinearGradient>
         <Text style={{ color: theme.colors.accent, fontSize: 13, fontWeight: '700', flex: 1 }}>
-          AI 可依授權資料拆作業、排讀書順序與建立提醒草稿
+          整理作業步驟與讀書安排
         </Text>
         <Ionicons name="arrow-forward" size={14} color={theme.colors.accent} />
       </Pressable>
@@ -1976,7 +1963,7 @@ function CampusTwinPanel(props: {
           x={centerX}
           y={100}
           icon="sparkles-outline"
-          title="AI Agent"
+          title="校園助理"
           value={`${actionCount} 個下一步`}
           color={theme.colors.accent}
         />
@@ -2344,7 +2331,7 @@ export function SmartDashboardScreen(props: any) {
     });
   }, [nextActions, auth.profile?.role]);
 
-  /** AI 分析使用者資料，生成個人化每日簡報 */
+  /** 依已讀取紀錄整理摘要 */
   const generateAIBriefing = useCallback(
     (
       insightsData: FullAcademicInsights | null,
@@ -2353,79 +2340,13 @@ export function SmartDashboardScreen(props: any) {
       attendanceData: TCAttendance[],
       coursesData: TCCourse[],
     ) => {
-      const parts: string[] = [];
-      const now = new Date();
-      const hour = now.getHours();
-
-      // 1. 出席風險分析
-      const lowAttendance = attendanceData.filter((a) => a.rate < 70);
-      if (lowAttendance.length > 0) {
-        parts.push(
-          `⚠️ ${lowAttendance.length} 門課出席率低於 70%，建議優先處理出席問題，部分課程可能影響學期成績。`,
-        );
-      } else if (attendanceData.length > 0) {
-        const avgRate = Math.round(
-          attendanceData.reduce((s, a) => s + a.rate, 0) / attendanceData.length,
-        );
-        if (avgRate >= 90) {
-          parts.push(`✅ 出席率 ${avgRate}%，保持得很好！`);
-        }
-      }
-
-      // 2. 截止日緊急分析
-      const urgentDeadlines = deadlinesData.filter((d) => d.remainingHours < 48 && !d.completed);
-      const upcomingDeadlines = deadlinesData.filter(
-        (d) => d.remainingHours >= 48 && d.remainingHours < 168 && !d.completed,
-      );
-      if (urgentDeadlines.length > 0) {
-        const names = urgentDeadlines.slice(0, 3).map((d) => d.title).join('、');
-        parts.push(
-          `🔴 ${urgentDeadlines.length} 項作業/考試即將到期（48 小時內）：${names}。建議立即處理。`,
-        );
-      } else if (upcomingDeadlines.length > 0) {
-        parts.push(
-          `📋 本週有 ${upcomingDeadlines.length} 項待辦，時間充裕但建議提早規劃。`,
-        );
-      }
-
-      // 3. GPA 趨勢分析
-      if (insightsData) {
-        const { trend, currentGpa, predictedNextGpa } = insightsData.gpaPrediction;
-        if (trend === 'declining' && currentGpa > 0) {
-          parts.push(
-            `📉 GPA 呈下降趨勢（目前 ${currentGpa.toFixed(2)}），AI 預測下學期 ${predictedNextGpa.toFixed(2)}。建議加強弱勢科目的複習。`,
-          );
-        } else if (trend === 'improving' && currentGpa > 0) {
-          parts.push(
-            `📈 GPA 穩步提升中（${currentGpa.toFixed(2)} → 預測 ${predictedNextGpa.toFixed(2)}），繼續保持！`,
-          );
-        }
-
-        // 4. 風險評估
-        if (insightsData.riskAssessment.level === 'critical' || insightsData.riskAssessment.level === 'warning') {
-          parts.push(
-            `🚨 學業風險：高。主要風險因素：${insightsData.riskAssessment.factors.slice(0, 2).join('、')}。`,
-          );
-        }
-
-        // 5. AI 推薦
-        const topRec = insightsData.recommendations[0];
-        if (topRec) {
-          parts.push(`💡 AI 建議：${topRec.title} — ${topRec.description}`);
-        }
-      }
-
-      // 6. 今日課程提醒
-      const today = now.getDay();
-      if (hour < 18 && coursesData.length > 0) {
-        parts.push(`📚 今天有 ${coursesData.length} 門課程，記得準時上課。`);
-      }
-
-      if (parts.length === 0) {
-        parts.push('目前沒有需要特別注意的事項，保持學習節奏！');
-      }
-
-      setAiBriefing(parts.join('\n\n'));
+      setAiBriefing(buildStudySummary({
+        deadlines: deadlinesData,
+        attendanceRates: attendanceData.map((item) => item.rate),
+        courseCount: coursesData.length,
+        pendingTodoCount: todosCount,
+        gpa: insightsData ? { current: insightsData.gpaPrediction.currentGpa, trend: insightsData.gpaPrediction.trend } : undefined,
+      }));
     },
     [],
   );
@@ -2490,7 +2411,7 @@ export function SmartDashboardScreen(props: any) {
         /* TronClass optional */
       }
 
-      // Load deadlines + todos for AI briefing
+      // Load deadlines and pending coursework
       let dlData: Deadline[] = [];
       let todosCount = 0;
       try {
@@ -2501,7 +2422,7 @@ export function SmartDashboardScreen(props: any) {
         setPendingTodos(todosCount);
       } catch {}
 
-      // Generate AI briefing from real data
+      // Summarize retrieved coursework
       generateAIBriefing(
         insightsData.status === 'fulfilled' ? insightsData.value : null,
         dlData,
@@ -2913,7 +2834,7 @@ export function SmartDashboardScreen(props: any) {
           >
             <Text style={{ fontSize: 28 }}>✨</Text>
             <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>AI 學伴</Text>
-            <Text style={{ color: '#fff', fontSize: 10, opacity: 0.85 }}>問我任何事</Text>
+            <Text style={{ color: '#fff', fontSize: 10, opacity: 0.85 }}>詢問課程與校園資訊</Text>
           </Pressable>
         </View>
 
@@ -2926,7 +2847,7 @@ export function SmartDashboardScreen(props: any) {
           />
         ) : null}
 
-        {/* ── AI 智慧日報 ── */}
+        {/* ── 課務摘要 ── */}
         {aiBriefing && (
           <View
             style={{
@@ -2960,10 +2881,10 @@ export function SmartDashboardScreen(props: any) {
                 <Ionicons name={'sparkles' as any} size={16} color={theme.colors.accent} />
               </View>
               <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: '700', flex: 1 }}>
-                AI 今日分析
+                課務摘要
               </Text>
               <Text style={{ color: theme.colors.muted, fontSize: 10 }}>
-                即時更新
+                依已讀取資料
               </Text>
             </View>
             <Text

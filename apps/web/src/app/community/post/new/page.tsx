@@ -32,8 +32,9 @@ const MAX_BODY = 1500;
 const MAX_TAGS = 5;
 
 export default function PostComposePage() {
+  const { schoolName } = resolveSchoolPageContext({});
   return (
-    <SiteShell title="發文" subtitle="撰寫校園社群貼文">
+    <SiteShell title="發文" subtitle="撰寫校園社群貼文" schoolName={schoolName}>
       <CommunityAccess>
         <PostComposeInner />
       </CommunityAccess>

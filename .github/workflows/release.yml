@@ -70,7 +70,7 @@ jobs:
           EAS_JSON_PACKAGE_ROOT: ${{ runner.temp }}/eas-config-schema/node_modules/@expo/eas-json
         run: |
           npm install --prefix "$RUNNER_TEMP/eas-config-schema" --ignore-scripts --no-audit --no-fund @expo/eas-json@24.9.0
-          node --test scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs scripts/prepare-eas-build.test.mjs
+          node --test scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs scripts/prepare-eas-build.test.mjs apps/mobile/scripts/prepare-native-release.test.cjs
           pnpm --filter mobile test --ci
           pnpm --filter web test
           pnpm --filter functions test --runInBand
@@ -121,6 +121,9 @@ jobs:
       - name: Build iOS
         working-directory: apps/mobile
         run: |
+          if [ "$BUILD_PROFILE" = "production" ]; then
+            node scripts/prepare-native-release.cjs --ci-write .
+          fi
           node ../../scripts/prepare-eas-build.mjs --prepare .
           trap 'rm -f "$RUNNER_TEMP/eas-config-ios.json"' EXIT
           eas config --platform ios --profile "$BUILD_PROFILE" --non-interactive --json > "$RUNNER_TEMP/eas-config-ios.json"

@@ -1,0 +1,7 @@
+# Reviewed false positives from dependency checksums and a synthetic test request key.
+# Keep the default Gitleaks rules active for all other findings.
+5ee68155df73d3d3995d1a84dbce8cf28c1bb025:apps/web/src/lib/nuni/merchant.test.ts:generic-api-key:17
+5ee68155df73d3d3995d1a84dbce8cf28c1bb025:apps/mobile/ios/Podfile.lock:generic-api-key:2490
+5ee68155df73d3d3995d1a84dbce8cf28c1bb025:apps/mobile/ios/Podfile.lock:generic-api-key:2492
+5ee68155df73d3d3995d1a84dbce8cf28c1bb025:apps/mobile/ios/Podfile.lock:generic-api-key:2514
+5ee68155df73d3d3995d1a84dbce8cf28c1bb025:apps/mobile/ios/Podfile.lock:generic-api-key:2534

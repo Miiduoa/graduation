@@ -45,7 +45,13 @@
         "EXPO_PUBLIC_FORCE_REAL_DATA": "true",
         "EXPO_PUBLIC_HYBRID_FALLBACK_TO_MOCK": "false",
         "EXPO_PUBLIC_ENABLE_UNIVERSAL_DEV_ACCOUNTS": "false",
-        "EXPO_PUBLIC_ALLOW_LOCAL_MOCK_AUTH": "false"
+        "EXPO_PUBLIC_ALLOW_LOCAL_MOCK_AUTH": "false",
+        "EXPO_PUBLIC_EAS_PROJECT_ID": "8955b97c-802c-463c-bd1d-d5f02e30a966",
+        "IOS_BUNDLE_IDENTIFIER": "com.nuni.app",
+        "ANDROID_PACKAGE_NAME": "com.nuni.app",
+        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "1096741064465-b8ue803rbqdpcq75t1g03o5t49vi0s4q.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "1096741064465-39b13khidhmohvo1go3nlmomgk3p07d4.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "1096741064465-0t5dq62t7oklrh8tnib7d4v27tm0apma.apps.googleusercontent.com"
       },
       "ios": {
         "resourceClass": "m-medium"

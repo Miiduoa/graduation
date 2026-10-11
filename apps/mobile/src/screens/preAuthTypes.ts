@@ -2,4 +2,5 @@
 export type PreAuthStackParamList = {
   LoginLanding: undefined;
   SSOLogin: undefined;
+  NuniWorkspace: undefined;
 };
