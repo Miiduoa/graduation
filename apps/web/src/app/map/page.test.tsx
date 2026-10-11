@@ -33,8 +33,8 @@ it('waits for Next route search parameters and passes the requested route and fo
   expect(destination).toEqual({ school: 'pu', route: 'gate,library', focus: 'library' });
   const askLink = screen.getByRole('link', { name: '詢問地點 →' });
   const url = new URL(askLink.getAttribute('href') || '', 'https://campus.example');
-  expect(url.pathname).toBe('/ai-assistant');
-  expect(url.searchParams.get('q')).toContain('校園地點');
+  expect(url.pathname).toBe('/search');
+  expect(url.searchParams.get('q')).toContain('地點');
   expect(screen.queryByText(/最快路線|AI 校園導航/)).toBeNull();
 });
 

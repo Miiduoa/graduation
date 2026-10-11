@@ -36,16 +36,16 @@ function Header() {
         </Link>
         <nav aria-label="主要導覽" className={styles.nav}>
           <Link href={href('/')} aria-current={pathname === '/' ? 'page' : undefined}>
-            今日
+            今天
           </Link>
           <Link
-            href={user ? `${href('/')}#courses` : '/login'}
-            aria-current={pathname?.startsWith('/course/') ? 'page' : undefined}
+            href={href('/timetable')}
+            aria-current={pathname === '/timetable' || pathname?.startsWith('/course/') ? 'page' : undefined}
           >
-            課程
+            課務
           </Link>
           <Link href={href('/map')} aria-current={pathname === '/map' ? 'page' : undefined}>
-            校園
+            生活
           </Link>
           <CampusServiceMenu />
         </nav>

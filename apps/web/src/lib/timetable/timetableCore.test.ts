@@ -1,0 +1,117 @@
+import { describe, expect, it } from 'vitest';
+import {
+  PERIOD_TIMES,
+  SchedulePlanner,
+  appealTopCard,
+  applyImport,
+  cleanCourse,
+  commonFree,
+  decodeTimetableShare,
+  encodeTimetableShare,
+  findCourseConflicts,
+  freeBlocks,
+  nextClass,
+  parseTimetableText,
+} from '@campus/shared';
+
+const monday = (name: string, start: number, end = start) =>
+  cleanCourse({ id: name, name, day: 1, start, end, teacher: '王老師', room: '主顧101' });
+
+describe('靜宜節次', () => {
+  it('第 1 節 08:10，第 13 節 21:40', () => {
+    expect(PERIOD_TIMES[0]).toEqual(['08:10', '09:00']);
+    expect(PERIOD_TIMES[12]).toEqual(['20:50', '21:40']);
+    expect(PERIOD_TIMES).toHaveLength(13);
+  });
+});
+
+describe('課表衝堂與匯入', () => {
+  it('同一天重疊的課會被抓出來', () => {
+    const conflicts = findCourseConflicts([monday('資料庫', 3, 4), monday('程式設計', 4, 5)]);
+    expect(conflicts).toHaveLength(1);
+  });
+
+  it('合併匯入不會覆寫同名同時段，確認前呼叫端自己拿草稿', () => {
+    const current = [monday('資料庫', 3, 4)];
+    const drafts = [monday('資料庫', 3, 4), monday('專題', 6, 7)];
+    expect(applyImport(current, drafts, 'merge').map((course) => course.name)).toEqual(['資料庫', '專題']);
+    expect(applyImport(current, drafts, 'replace').map((course) => course.name)).toEqual(['資料庫', '專題']);
+  });
+});
+
+describe('空堂與安排', () => {
+  it('算出連續空堂，並回答下一堂', () => {
+    const courses = [monday('資料庫', 1, 2), monday('專題', 5, 6)];
+    expect(freeBlocks(courses, 1, 2)).toEqual(
+      expect.arrayContaining([
+        { day: 1, start: 3, end: 4 },
+        { day: 1, start: 7, end: 13 },
+      ]),
+    );
+    const now = new Date();
+    now.setHours(8, 0, 0, 0);
+    // Sunday 0 ... if test runs Sunday, nextClass still finds Monday.
+    const planner = new SchedulePlanner(courses);
+    expect(planner.ask('空堂')).toContain('空檔');
+    expect(nextClass(courses, new Date('2026-10-12T08:00:00+08:00'))?.course.name).toBe('資料庫');
+  });
+
+  it('共同空堂要兩人都不上課', () => {
+    const mine = [monday('資料庫', 1, 4)];
+    const theirs = [monday('統計', 6, 8)];
+    const blocks = commonFree(mine, theirs, 1);
+    expect(blocks.some((block) => block.start === 9 && block.end === 13)).toBe(true);
+    expect(blocks.some((block) => block.start <= 3 && block.end >= 3)).toBe(false);
+    expect(blocks.some((block) => block.start === 5 && block.end === 5)).toBe(false);
+  });
+});
+
+describe('文字匯入與分享碼', () => {
+  it('讀得懂貼上的課表列', () => {
+    const courses = parseTimetableText('星期一 第3-4節 資料庫 / 王老師 / 主顧303\n星期三 第1節 英文');
+    expect(courses[0]).toMatchObject({ name: '資料庫', day: 1, start: 3, end: 4, teacher: '王老師' });
+    expect(courses[1]).toMatchObject({ name: '英文', day: 3, start: 1, end: 1 });
+  });
+
+  it('分享碼可以來回', () => {
+    const payload = {
+      v: 1 as const,
+      id: 'me',
+      name: '阿瑋',
+      t: 1,
+      courses: [monday('資料庫', 3, 4)],
+      meta: { school: '靜宜大學', year: '114', semester: '1', className: '資管三', credits: 18, title: '' },
+    };
+    const again = decodeTimetableShare(encodeTimetableShare(payload));
+    expect(again.name).toBe('阿瑋');
+    expect(again.courses[0].name).toBe('資料庫');
+  });
+});
+
+describe('申訴頂卡', () => {
+  it('沒有案件時不假裝有進度', () => {
+    const card = appealTopCard([]);
+    expect(card.status).toBeNull();
+    expect(card.title).toContain('目前沒有申訴');
+  });
+
+  it('頂卡跟著真實狀態', () => {
+    const card = appealTopCard([
+      {
+        id: '1',
+        schoolId: 'pu',
+        studentUid: 's',
+        courseId: 'c',
+        courseName: '資料庫',
+        title: '出缺席',
+        body: '當天有請假單',
+        status: 'approved',
+        teacherNote: '',
+        createdAt: '2026-10-01',
+        updatedAt: '2026-10-02',
+      },
+    ]);
+    expect(card.title).toContain('已核准');
+    expect(card.body).not.toContain('還在等');
+  });
+});

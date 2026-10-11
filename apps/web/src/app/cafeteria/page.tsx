@@ -1,7 +1,6 @@
 'use client';
 
 import { use, useMemo, useState } from 'react';
-import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
 import {
@@ -278,12 +277,6 @@ function CafeteriaContent({
             </p>
             <span>資料更新：{formatLastUpdated(lastUpdatedAt)}</span>
           </div>
-          <Link
-            href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('請幫我整理校內餐廳與菜單選擇')}`}
-            className={styles.assistantLink}
-          >
-            請助理整理用餐選擇 <span aria-hidden="true">↗</span>
-          </Link>
         </div>
         <p className={styles.notice}>
           依店家提供的資料顯示；實際營業與餐點供應請向店家確認。本頁提供菜單查詢，尚未開放線上點餐。
