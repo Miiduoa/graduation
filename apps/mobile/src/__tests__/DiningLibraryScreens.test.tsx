@@ -90,7 +90,7 @@ test('shows real menu prices, an explicit taxed quote, and only onsite ordering'
   fireEvent.press(view.getByText('選擇今日餐點'));
   expect(view.getByText('到店付款合計 NT$84')).toBeTruthy();
   await act(async () => fireEvent.press(view.getByText('送出訂單，到店付款')));
-  expect(view.getByText('等待店家確認')).toBeTruthy();
+  expect(view.getByText('等店家接單')).toBeTruthy();
   expect(view.queryByText('已付款')).toBeNull();
 });
 test('沒拿到號碼：寫「號碼還沒拿到，請到櫃台確認。」和下單時間、品項，店家給號碼後換成真的號碼', async () => {
@@ -124,10 +124,43 @@ test('沒拿到號碼：寫「號碼還沒拿到，請到櫃台確認。」和�
   await act(async () => push!({ queueNumber: 12, status: 'confirmed' }));
   expect(view.getByText('取餐號碼 12')).toBeTruthy();
   expect(view.queryByText('號碼還沒拿到，請到櫃台確認。')).toBeNull();
-  expect(view.getByText('店家已確認')).toBeTruthy();
+  expect(view.getByText('店家已接單')).toBeTruthy();
+  // 拿到號碼後還繼續盯著，直到取餐完或取消
+  expect(view.getByText(/訂單末 6 碼/)).toBeTruthy();
+});
+test('給了號碼之後店家取消：寫「這張單店家取消了」，號碼拿掉，不再監聽', async () => {
+  let push: ((patch: Record<string, unknown>) => void) | undefined;
+  const stop = jest.fn();
+  jest.mocked(watchDiningReceipt).mockImplementation((_scope, onChange) => {
+    push = onChange as never;
+    return stop;
+  });
+  jest.mocked(submitDiningIntent).mockResolvedValueOnce({
+    id: intent.orderId,
+    label: menu.name,
+    total: 84,
+    status: 'pending',
+    queueNumber: null,
+    createdAt: '2026-10-13T04:05:00.000Z',
+    items: [{ name: '雞腿飯', quantity: 1 }],
+  });
+  const view = render(<CafeteriaAiFirstScreen />);
+  await act(async () => {});
+  fireEvent.press(view.getByText('選擇今日餐點'));
+  await act(async () => fireEvent.press(view.getByText('送出訂單，到店付款')));
+  await act(async () => push!({ queueNumber: 7, status: 'confirmed' }));
+  expect(view.getByText('取餐號碼 7')).toBeTruthy();
+  expect(stop).not.toHaveBeenCalled();
+  await act(async () =>
+    push!({ queueNumber: null, status: 'cancelled', cancelledBy: 'merchant' }),
+  );
+  expect(view.getByText('這張單店家取消了')).toBeTruthy();
+  expect(view.getByText('訂單已取消')).toBeTruthy();
+  expect(view.queryByText(/取餐號碼/)).toBeNull();
+  expect(view.queryByText(/號碼還沒拿到/)).toBeNull();
   expect(stop).toHaveBeenCalled();
 });
-test('伺服器建單時已發號：直接顯示取餐號碼，不監聽', async () => {
+test('伺服器建單時已發號：直接顯示取餐號碼，照樣盯著訂單（店家取消時要拿掉號碼）', async () => {
   jest.mocked(submitDiningIntent).mockResolvedValueOnce({
     id: intent.orderId,
     label: menu.name,
@@ -143,7 +176,7 @@ test('伺服器建單時已發號：直接顯示取餐號碼，不監聽', async
   await act(async () => fireEvent.press(view.getByText('送出訂單，到店付款')));
   expect(view.getByText('取餐號碼 3')).toBeTruthy();
   expect(view.queryByText('號碼還沒拿到，請到櫃台確認。')).toBeNull();
-  expect(watchDiningReceipt).not.toHaveBeenCalled();
+  expect(watchDiningReceipt).toHaveBeenCalledTimes(1);
 });
 test('legacy menu links load the current catalog without static recommendations or reviews', async () => {
   const view = render(<MenuDetailAiFirstScreen />);
@@ -218,7 +251,7 @@ test('a server availability rejection clears the stale quote and requires a menu
   await act(async () => fireEvent.press(view.getByText('送出訂單，到店付款')));
   expect(view.getByText('餐點已變更')).toBeTruthy();
   expect(view.queryByText('選擇今日餐點')).toBeNull();
-  expect(view.queryByText('等待店家確認')).toBeNull();
+  expect(view.queryByText('等店家接單')).toBeNull();
 });
 test.each(['account', 'school'] as const)(
   'changing %s isolates a pending order response',
@@ -237,7 +270,7 @@ test.each(['account', 'school'] as const)(
     await act(async () =>
       pending.resolve({ id: 'old-order', label: menu.name, total: 84, status: 'pending' }),
     );
-    expect(view.queryByText('等待店家確認')).toBeNull();
+    expect(view.queryByText('等店家接單')).toBeNull();
   },
 );
 test('a failed menu read shows retry without fabricated restaurants', async () => {

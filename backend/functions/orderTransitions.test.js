@@ -303,3 +303,59 @@ test.each(
     else process.env.APP_ENV = previousEnv;
   }
 });
+
+describe('學生收到的取餐和取消通知', () => {
+  const items = [{ name: '雞腿飯', quantity: 1, price: 95 }];
+  // 2026-10-13T04:05:00Z = 台灣 10 月 13 日（二）12:05
+  const placedAt = Timestamp.fromDate(new Date('2026-10-13T04:05:00Z'));
+  function seed(extra) {
+    store.docs.set(canonical, { ...base, items, createdAt: placedAt, ...extra });
+    store.docs.set(mirror, { ...base, items, createdAt: placedAt, ...extra });
+  }
+
+  test('「餐點好了」帶取餐號碼', async () => {
+    seed({ status: 'preparing', queueNumber: 7, queueStatus: 'assigned' });
+    await handlers.updateOrderStatus(request('ready'));
+    expect(push.mock.calls[0][1]).toEqual({
+      title: '餐點好了',
+      body: '餐點好了，取餐號碼 7，請到櫃台取餐。',
+    });
+  });
+
+  test('沒號碼的「餐點好了」：請學生報下單時間和品項', async () => {
+    seed({ status: 'preparing', queueNumber: null });
+    await handlers.updateOrderStatus(request('ready'));
+    expect(push.mock.calls[0][1].body).toBe(
+      '餐點好了，請到櫃台報下單時間：10 月 13 日（二）12:05・雞腿飯 ×1。',
+    );
+  });
+
+  test('店家拒單（給過號碼也一樣）：號碼拿掉、記下是店家取消，通知寫「這張單店家取消了」', async () => {
+    seed({ status: 'confirmed', queueNumber: 4, queueStatus: 'assigned' });
+    await handlers.updateOrderStatus(request('cancelled'));
+    expect(store.docs.get(mirror)).toMatchObject({
+      status: 'cancelled',
+      queueNumber: null,
+      queueStatus: 'cancelled',
+      cancelledQueueNumber: 4,
+      cancelledBy: 'merchant',
+    });
+    expect(store.docs.get(mirror)).toEqual(store.docs.get(canonical));
+    expect(push.mock.calls[0][1].title).toBe('這張單店家取消了');
+    expect(JSON.stringify(push.mock.calls[0][1])).not.toMatch(/4/);
+  });
+
+  test('還沒給號碼就拒單：一樣是店家取消', async () => {
+    seed({ status: 'pending', queueNumber: null });
+    await handlers.updateOrderStatus(request('cancelled'));
+    expect(store.docs.get(mirror)).toMatchObject({ status: 'cancelled', queueNumber: null, cancelledBy: 'merchant' });
+    expect(store.docs.get(mirror)).not.toHaveProperty('cancelledQueueNumber');
+  });
+
+  test('學生自己取消：記成學生取消，號碼一樣拿掉，不推播', async () => {
+    seed({ status: 'pending', queueNumber: 2, queueStatus: 'assigned' });
+    await handlers.cancelOrder({ auth: { uid: 'alice' }, data: { schoolId: 'pu', orderId: 'one' } });
+    expect(store.docs.get(mirror)).toMatchObject({ status: 'cancelled', queueNumber: null, cancelledBy: 'customer' });
+    expect(push).not.toHaveBeenCalled();
+  });
+});
