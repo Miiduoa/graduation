@@ -6,7 +6,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../state/auth';
 import { shouldBlockForNoLogin, isDemoUid } from '../services/demoSession';
 import { useAsyncList } from '../hooks/useAsyncList';
-import { listMerchantOrders, updateMerchantOrderStatus } from '../services/merchant';
+import {
+  giveMerchantQueueNumber,
+  listMerchantOrders,
+  updateMerchantOrderStatus,
+} from '../services/merchant';
+import {
+  PICKUP_NUMBER_PENDING_LABEL,
+  formatTaipeiOrderTime,
+} from '@campus/shared/src/ordering/pickupNumber';
 import {
   listDemoMerchantOrders,
   updateDemoOrderStatus,
@@ -52,6 +60,11 @@ function getOrderStatusKind(status: Order['status']) {
   }
 }
 
+function realQueueNumber(value: unknown): number | null {
+  const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 function getNextOrderAction(status: Order['status']) {
   switch (status) {
     case 'pending':
@@ -81,6 +94,8 @@ export function MerchantHubScreen() {
   );
   const [showAllOrders, setShowAllOrders] = useState(false);
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
+  // 按了「給號碼」之後先換上伺服器回的號碼，重新整理後以訂單資料為準
+  const [givenNumbers, setGivenNumbers] = useState<Record<string, number>>({});
 
   useEffect(() => {
     if (!assignments.some((assignment) => assignment.cafeteriaId === selectedAssignmentId)) {
@@ -204,6 +219,24 @@ export function MerchantHubScreen() {
       );
     } catch (error: any) {
       Alert.alert('更新失敗', error?.message ?? '請稍後再試。');
+    } finally {
+      setUpdatingOrderId(null);
+    }
+  };
+
+  const handleGiveNumber = async (order: Order) => {
+    if (!selectedAssignment || isDemoSession) return;
+    setUpdatingOrderId(order.id);
+    try {
+      const given = await giveMerchantQueueNumber({
+        schoolId: selectedAssignment.schoolId,
+        orderId: order.id,
+        cafeteriaId: selectedAssignment.cafeteriaId,
+      });
+      setGivenNumbers((current) => ({ ...current, [order.id]: given.queueNumber }));
+      await refresh();
+    } catch (error: any) {
+      Alert.alert('號碼還沒給出去', error?.message ?? '請稍後再試一次。');
     } finally {
       setUpdatingOrderId(null);
     }
@@ -341,7 +374,15 @@ export function MerchantHubScreen() {
             </AnimatedCard>
           ) : (
             filteredOrders.map((order, index) => {
-              const nextAction = getNextOrderAction(order.status);
+              const queueNumber = realQueueNumber(order.queueNumber) ?? givenNumbers[order.id] ?? null;
+              // 號碼還沒拿到（待確認）：店家按「給號碼」由伺服器發真的號碼；待接單的會一併接單
+              const needsNumber =
+                !isDemoSession &&
+                queueNumber == null &&
+                order.status !== 'completed' &&
+                order.status !== 'cancelled';
+              const nextAction =
+                needsNumber && order.status === 'pending' ? null : getNextOrderAction(order.status);
               const customerLabel = order.customerName ?? order.userId;
               const customerRole = order.customerRole ? ` · ${order.customerRole}` : '';
               return (
@@ -426,6 +467,28 @@ export function MerchantHubScreen() {
                       ) : null}
                     </View>
 
+                    {queueNumber != null ? (
+                      <Text style={{ color: theme.colors.text, fontWeight: '700' }}>
+                        取餐號碼 {queueNumber}
+                      </Text>
+                    ) : needsNumber ? (
+                      <Text style={{ color: theme.colors.danger, fontWeight: '700' }}>
+                        取餐號碼：{PICKUP_NUMBER_PENDING_LABEL}
+                        {formatTaipeiOrderTime(order.createdAt)
+                          ? `・下單 ${formatTaipeiOrderTime(order.createdAt)}`
+                          : ''}
+                      </Text>
+                    ) : null}
+
+                    {needsNumber ? (
+                      <Button
+                        text={updatingOrderId === order.id ? '給號碼中...' : '給號碼'}
+                        kind="primary"
+                        disabled={updatingOrderId === order.id}
+                        onPress={() => handleGiveNumber(order)}
+                      />
+                    ) : null}
+
                     {nextAction ? (
                       <Button
                         text={updatingOrderId === order.id ? '更新中...' : nextAction.label}
@@ -433,7 +496,7 @@ export function MerchantHubScreen() {
                         disabled={updatingOrderId === order.id}
                         onPress={() => handleAdvanceOrder(order, nextAction.status)}
                       />
-                    ) : (
+                    ) : needsNumber ? null : (
                       <Text style={{ color: theme.colors.muted, textAlign: 'center' }}>
                         此訂單目前不需要進一步操作。
                       </Text>

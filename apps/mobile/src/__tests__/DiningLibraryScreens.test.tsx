@@ -9,6 +9,7 @@ import {
   loadDiningIntent,
   prepareDiningIntent,
   submitDiningIntent,
+  watchDiningReceipt,
   DiningError,
 } from '../features/dining';
 import type { DiningReceipt } from '../features/dining';
@@ -24,6 +25,7 @@ jest.mock('../features/dining', () => ({
   loadDiningIntent: jest.fn(),
   prepareDiningIntent: jest.fn(),
   submitDiningIntent: jest.fn(),
+  watchDiningReceipt: jest.fn(() => null),
   diningTotal: (price: number) => ({
     subtotal: price,
     tax: Math.round(price * 0.05),
@@ -89,6 +91,58 @@ test('shows real menu prices, an explicit taxed quote, and only onsite ordering'
   await act(async () => fireEvent.press(view.getByText('送出訂單，到店付款')));
   expect(view.getByText('等待店家確認')).toBeTruthy();
   expect(view.queryByText('已付款')).toBeNull();
+});
+test('沒拿到號碼：寫「號碼還沒拿到，請到櫃台確認。」和下單時間、品項，店家給號碼後換成真的號碼', async () => {
+  let push: ((patch: { queueNumber: number | null; status?: string }) => void) | undefined;
+  const stop = jest.fn();
+  jest.mocked(watchDiningReceipt).mockImplementation((_scope, onChange) => {
+    push = onChange;
+    return stop;
+  });
+  jest.mocked(submitDiningIntent).mockResolvedValueOnce({
+    id: intent.orderId,
+    label: menu.name,
+    total: 84,
+    status: 'pending',
+    queueNumber: null,
+    createdAt: '2026-10-13T04:05:00.000Z',
+    items: [{ name: '雞腿飯', quantity: 1 }],
+  });
+  const view = render(<CafeteriaAiFirstScreen />);
+  await act(async () => {});
+  fireEvent.press(view.getByText('選擇今日餐點'));
+  await act(async () => fireEvent.press(view.getByText('送出訂單，到店付款')));
+  expect(view.getByText('號碼還沒拿到，請到櫃台確認。')).toBeTruthy();
+  expect(view.getByText('10 月 13 日（二）12:05・雞腿飯 ×1')).toBeTruthy();
+  expect(view.getByText('狀態：待確認')).toBeTruthy();
+  expect(view.queryByText(/取餐號碼 \d/)).toBeNull();
+  expect(watchDiningReceipt).toHaveBeenCalledWith(
+    expect.objectContaining({ userId: 'student-a', schoolId: 'pu', orderId: intent.orderId }),
+    expect.any(Function),
+  );
+  await act(async () => push!({ queueNumber: 12, status: 'confirmed' }));
+  expect(view.getByText('取餐號碼 12')).toBeTruthy();
+  expect(view.queryByText('號碼還沒拿到，請到櫃台確認。')).toBeNull();
+  expect(view.getByText('店家已確認')).toBeTruthy();
+  expect(stop).toHaveBeenCalled();
+});
+test('伺服器建單時已發號：直接顯示取餐號碼，不監聽', async () => {
+  jest.mocked(submitDiningIntent).mockResolvedValueOnce({
+    id: intent.orderId,
+    label: menu.name,
+    total: 84,
+    status: 'pending',
+    queueNumber: 3,
+    createdAt: '2026-10-13T04:05:00.000Z',
+    items: [{ name: '雞腿飯', quantity: 1 }],
+  });
+  const view = render(<CafeteriaAiFirstScreen />);
+  await act(async () => {});
+  fireEvent.press(view.getByText('選擇今日餐點'));
+  await act(async () => fireEvent.press(view.getByText('送出訂單，到店付款')));
+  expect(view.getByText('取餐號碼 3')).toBeTruthy();
+  expect(view.queryByText('號碼還沒拿到，請到櫃台確認。')).toBeNull();
+  expect(watchDiningReceipt).not.toHaveBeenCalled();
 });
 test('legacy menu links load the current catalog without static recommendations or reviews', async () => {
   const view = render(<MenuDetailAiFirstScreen />);

@@ -123,3 +123,30 @@ export async function updateMerchantOrderStatus(input: {
     orderId: input.orderId,
   });
 }
+
+/**
+ * 店家按「給號碼」：走同一支 assignQueueNumber（一定帶 orderId，as: 'merchant'）。
+ * 伺服器檢查是不是這家店在職的店員；同一筆訂單已經有號碼就回原本那個號碼。
+ * 待接單的訂單會一併接單。
+ */
+export async function giveMerchantQueueNumber(input: {
+  schoolId: string;
+  orderId: string;
+  cafeteriaId: string;
+}): Promise<{ queueNumber: number; status?: Order['status'] }> {
+  const callable = httpsCallable<
+    { schoolId: string; orderId: string; vendorId: string; as: 'merchant' },
+    { queueNumber?: number; status?: Order['status'] }
+  >(getFunctionsInstance(), 'assignQueueNumber');
+  const result = await callable({
+    schoolId: input.schoolId,
+    orderId: input.orderId,
+    vendorId: input.cafeteriaId,
+    as: 'merchant',
+  });
+  const queueNumber = result.data?.queueNumber;
+  if (typeof queueNumber !== 'number' || !Number.isSafeInteger(queueNumber) || queueNumber <= 0) {
+    throw new Error('號碼還沒給出去，請稍後再試一次。');
+  }
+  return { queueNumber, status: result.data?.status };
+}

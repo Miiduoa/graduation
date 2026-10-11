@@ -155,6 +155,20 @@ test('sends the captured owner, menu IDs, quantity and expected total, then requ
   });
   expect(await loadDiningIntent(scope, () => true)).toBeNull();
 });
+test('回執帶上伺服器發的取餐號碼、下單時間和品項；沒有號碼就是 null', async () => {
+  jest.mocked(getDocFromServer).mockResolvedValueOnce(
+    document({ ...receipt, queueNumber: 9, createdAt: '2026-10-13T04:05:00.000Z' }) as never,
+  );
+  await expect(readDiningReceipt(intent, () => true)).resolves.toMatchObject({
+    queueNumber: 9,
+    createdAt: '2026-10-13T04:05:00.000Z',
+    items: [{ quantity: 1 }],
+  });
+  jest.mocked(getDocFromServer).mockResolvedValueOnce(
+    document({ ...receipt, queueNumber: null }) as never,
+  );
+  await expect(readDiningReceipt(intent, () => true)).resolves.toMatchObject({ queueNumber: null });
+});
 test('a matching existing receipt is returned without another callable write', async () => {
   jest.mocked(getDocFromServer).mockResolvedValue(document(receipt) as never);
   await expect(submitDiningIntent(intent, () => true)).resolves.toMatchObject({ total: 84 });

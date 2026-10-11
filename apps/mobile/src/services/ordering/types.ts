@@ -336,7 +336,10 @@ export type AtomicOrderRequest = {
 export type AtomicOrderResponse = {
   ok: boolean;
   orderId: string | null;
+  /** 伺服器發的取餐號碼；沒拿到是 null，畫面顯示「號碼還沒拿到，請到櫃台確認。」 */
   queueNumber: number | null;
+  /** 'pending_confirmation' = 待確認，店家可以按「給號碼」 */
+  queueStatus?: 'assigned' | 'pending_confirmation';
   pickupCode: PickupCode | null;
   walletHoldId: string | null;
   /** 預估完成時間（分鐘） */
