@@ -12,6 +12,7 @@ import { TripPlannerScreen } from './TripPlannerScreen';
 import { IndoorFloorMapScreen } from './IndoorFloorMapScreen';
 import { TransportHubScreen } from './TransportHubScreen';
 import CafeteriaAiFirstScreen from './CafeteriaAiFirstScreen';
+import MyOrdersScreen from './MyOrdersScreen';
 import PoiDetailAiFirstScreen from './PoiDetailAiFirstScreen';
 import BusAiFirstScreen from './BusAiFirstScreen';
 import MenuDetailAiFirstScreen from './MenuDetailAiFirstScreen';
@@ -121,6 +122,11 @@ export function MapStack() {
         options={{ title: '餐廳', headerShown: false }}
       />
       <Stack.Screen name="Ordering" component={OrderingScreen} options={{ title: '餐廳訂單' }} />
+      <Stack.Screen
+        name="StudentOrders"
+        component={MyOrdersScreen}
+        options={{ title: '我的訂單', headerShown: false }}
+      />
       <Stack.Screen
         name="MenuSubscription"
         component={MenuSubscriptionScreen}

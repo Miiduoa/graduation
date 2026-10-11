@@ -1,6 +1,7 @@
 const { HttpsError } = require('firebase-functions/v2/https');
 const { FieldValue } = require('firebase-admin/firestore');
 const { normalizeCafeteriaOperatorRecord } = require('./authz');
+const { formatAssistantDate } = require('./lib/assistantFormat');
 
 const NEXT_STATUS = {
   pending: 'confirmed',
@@ -82,6 +83,17 @@ function writeOrderTransition(
     throw new HttpsError('failed-precondition', 'Invalid order status transition');
   }
   const timestamp = FieldValue.serverTimestamp();
+  // 取消的單把號碼拿掉（給過號碼也一樣），學生畫面不會再掛著號碼
+  const cancelPatch =
+    status === 'cancelled'
+      ? {
+          queueNumber: null,
+          queueStatus: 'cancelled',
+          ...(realQueueNumber(order.queueNumber)
+            ? { cancelledQueueNumber: order.queueNumber }
+            : {}),
+        }
+      : {};
   writeOrderPatch(
     transaction,
     db,
@@ -93,12 +105,44 @@ function writeOrderTransition(
       ? {}
       : {
           ...extra,
+          ...cancelPatch,
           status,
           [`${status}At`]: timestamp,
           updatedAt: timestamp,
         },
   );
   return { success: true, status, reused };
+}
+
+function realQueueNumber(value) {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
+function pickupItems(items) {
+  return (Array.isArray(items) ? items : [])
+    .filter((item) => item && typeof item.name === 'string' && item.name.trim())
+    .map((item) =>
+      Number.isSafeInteger(item.quantity) && item.quantity > 0
+        ? `${item.name.trim()} ×${item.quantity}`
+        : item.name.trim(),
+    )
+    .join('、');
+}
+
+/** 學生收到的推播：「餐點好了」帶取餐號碼；沒號碼就請學生報下單時間和品項 */
+function orderNotification(status, order) {
+  if (status === 'ready') {
+    const number = realQueueNumber(order.queueNumber);
+    if (number) return { title: '餐點好了', body: `餐點好了，取餐號碼 ${number}，請到櫃台取餐。` };
+    const detail = [formatAssistantDate(order.createdAt), pickupItems(order.items)]
+      .filter(Boolean)
+      .join('・');
+    return {
+      title: '餐點好了',
+      body: detail ? `餐點好了，請到櫃台報下單時間：${detail}。` : '餐點好了，請到櫃台取餐。',
+    };
+  }
+  return { title: '這張單店家取消了', body: '這張單店家取消了，不用去取餐。' };
 }
 
 function activeMembership(snapshot) {
@@ -167,19 +211,20 @@ function createOrderStatusHandlers({ db, sendPushToUser, logger = console }) {
         orderId,
         order,
         status,
-        customerCancellation ? { cancelReason: input.reason?.trim() || 'User cancelled' } : {},
+        status !== 'cancelled'
+          ? {}
+          : customerCancellation
+            ? { cancelReason: input.reason?.trim() || 'User cancelled', cancelledBy: 'customer' }
+            : { cancelledBy: 'merchant' },
       );
-      return { ...transition, userId: order.userId };
+      return { ...transition, userId: order.userId, order };
     });
     let notification = { status: 'not_requested' };
     if (!customerCancellation && !result.reused && ['ready', 'cancelled'].includes(status)) {
       try {
         notification = (await sendPushToUser(
           result.userId,
-          {
-            title: status === 'ready' ? '🍽️ 餐點已備妥' : '❌ 訂單已取消',
-            body: status === 'ready' ? '您的餐點已準備完成，請前往取餐' : '您的訂單已被取消',
-          },
+          orderNotification(status, result.order),
           { type: 'order', orderId, schoolId, channel: 'orders' },
         )) ?? { status: 'unconfirmed' };
       } catch {
@@ -197,6 +242,7 @@ function createOrderStatusHandlers({ db, sendPushToUser, logger = console }) {
 
 module.exports = {
   createOrderStatusHandlers,
+  orderNotification,
   writeOrderTransition,
   writeOrderPatch,
   OPEN_STATUSES,

@@ -976,10 +976,16 @@ test('release AddCourse navigates to real course advice, with no simulated enrol
   expect(ensureLmsV2DemoSignIn).not.toHaveBeenCalled();
 });
 
+test('「我的訂單」開的是真的訂單列表，不是尚未開放', async () => {
+  const { view, navigation } = await mount(LearnStack);
+  act(() => navigation.navigate('StudentOrders'));
+  await waitFor(() => expect(view.getAllByText('我的訂單').length).toBeGreaterThan(0));
+  expect(view.queryByText(/校園訂餐尚未開放/)).toBeNull();
+});
+
 test.each([
   ['GradeWhatIf', '成績試算尚未開放'],
   ['MonthlySummary', '每月學習回顧尚未開放'],
-  ['StudentOrders', '校園訂餐尚未開放'],
   ['VendorRevenueReport', '營運報表尚未開放'],
   ['VendorLoyaltyPush', '顧客通知尚未開放'],
   ['VendorMenuManage', '菜單管理尚未開放'],

@@ -85,6 +85,7 @@ import RoleAwareTodayScreen, {
   RoleWorkspaceScreen,
 } from './RoleAwareTodayScreen';
 import { UnavailableFeatureScreen } from './UnavailableFeatureScreen';
+import MyOrdersScreen from './MyOrdersScreen';
 import { CampusAssistantScreen } from './CampusAssistantScreen';
 import PersonalTimetableScreen from './PersonalTimetableScreen';
 import CourseAppealsScreen from './CourseAppealsScreen';
@@ -719,7 +720,7 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="StudentOrders"
-        component={UnavailableFeatureScreen}
+        component={MyOrdersScreen}
         options={{ title: '🛒 我的訂單', headerShown: false }}
       />
       <Stack.Screen
