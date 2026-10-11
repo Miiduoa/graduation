@@ -7,7 +7,8 @@
  * 與 apps/mobile/src/firebase.ts 對齊（避免 region 不一致與 emulator 重複 wire）。
  */
 import { httpsCallable } from 'firebase/functions';
-import { getAuth, getFunctionsInstance, isFirebaseConfigured } from './firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { getAuth, getDb, getFunctionsInstance, isFirebaseConfigured } from './firebase';
 
 export type AgentCardKind =
   | 'directions_card'
@@ -110,6 +111,8 @@ export async function callCampusAssistant(
  */
 export interface CreateOrderInput {
   schoolId: string;
+  /** 同一張草稿重送沿用同一個編號，伺服器靠它避免重複下單 */
+  requestId: string;
   cafeteriaId: string;
   items: Array<{
     menuItemId: string;
@@ -129,6 +132,11 @@ export interface CreateOrderResult {
   cafeteria?: string;
   total?: number;
   itemCount?: number;
+  /** 伺服器下單時一起發的取餐號碼；沒拿到是 null */
+  queueNumber?: number | null;
+  queueStatus?: 'assigned' | 'pending_confirmation';
+  createdAt?: string | null;
+  items?: Array<{ name: string; quantity: number }>;
   errorCode?: string;
   errorMessage?: string;
 }
@@ -151,5 +159,30 @@ export async function confirmCreateOrder(input: CreateOrderInput): Promise<Creat
       errorCode: err?.code || 'callable_failed',
       errorMessage: err?.message || '下單失敗',
     };
+  }
+}
+
+/**
+ * 號碼還沒拿到時盯著學生自己的訂單副本；店家按「給號碼」後回呼真的號碼。
+ * 回傳取消監聽；沒登入或沒辦法監聽時回 null。
+ */
+export function watchOrderQueueNumber(
+  schoolId: string,
+  orderId: string,
+  onNumber: (queueNumber: number) => void,
+): (() => void) | null {
+  const uid = getAuth()?.currentUser?.uid;
+  if (!uid || !isFirebaseConfigured()) return null;
+  try {
+    return onSnapshot(
+      doc(getDb(), 'users', uid, 'schools', schoolId, 'orders', orderId),
+      snapshot => {
+        const value = snapshot.exists() ? snapshot.data()?.queueNumber : null;
+        if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) onNumber(value);
+      },
+      () => undefined,
+    );
+  } catch {
+    return null;
   }
 }

@@ -6,6 +6,7 @@ import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import {
   loadDiningCatalog,
+  watchDiningReceipt,
   loadDiningIntent,
   prepareDiningIntent,
   submitDiningIntent,
@@ -17,6 +18,7 @@ import {
   type DiningMenu,
   type DiningReceipt,
 } from '../features/dining';
+import { describePickupNumber } from '@campus/shared/src/ordering/pickupNumber';
 
 type Props = { navigation?: { goBack?: () => void } };
 const statuses: Record<string, string> = {
@@ -143,6 +145,24 @@ function DiningContent({
   );
   const venueName = (menu: DiningMenu) =>
     catalog?.venues.find((venue) => venue.id === menu.cafeteriaId)?.name ?? '未提供餐廳資料';
+  // 號碼還沒拿到時盯著這筆訂單，店家按「給號碼」後換成真的號碼
+  const receiptId = receipt?.id ?? null;
+  const waitingForNumber = Boolean(receipt && receipt.queueNumber == null);
+  useEffect(() => {
+    if (!receiptId || !waitingForNumber || !scope.userId) return;
+    const stop = watchDiningReceipt({ ...scope, orderId: receiptId }, (patch) => {
+      if (!isCurrent()) return;
+      setReceipt((current) =>
+        current && current.id === receiptId
+          ? { ...current, queueNumber: patch.queueNumber, status: patch.status ?? current.status }
+          : current,
+      );
+    });
+    return () => stop?.();
+    // scope is fixed for this mounted content (remounts on account/school change)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [receiptId, waitingForNumber]);
+  const pickup = receipt ? describePickupNumber(receipt) : null;
   const quote = selected?.price != null ? diningTotal(selected.price) : null;
   return (
     <AIDetailScreen
@@ -161,6 +181,24 @@ function DiningContent({
               <Text style={{ color: aiTokens.text }}>
                 {receipt.label} · 訂單金額 NT${receipt.total}
               </Text>
+              {pickup?.state === 'assigned' ? (
+                <Text
+                  accessibilityLabel={pickup.text}
+                  style={{ color: aiTokens.text, fontSize: 20, fontWeight: '700', marginTop: 8 }}
+                >
+                  {pickup.text}
+                </Text>
+              ) : pickup ? (
+                <View style={{ marginTop: 8, gap: 4 }}>
+                  <Text style={{ color: aiTokens.text, fontWeight: '700' }}>{pickup.text}</Text>
+                  {pickup.detail ? (
+                    <Text selectable style={{ color: aiTokens.text }}>
+                      {pickup.detail}
+                    </Text>
+                  ) : null}
+                  <Text style={{ color: aiTokens.muted }}>狀態：{pickup.label}</Text>
+                </View>
+              ) : null}
               <Text selectable style={{ color: aiTokens.muted, marginTop: 8 }}>
                 訂單編號：{receipt.id}
               </Text>

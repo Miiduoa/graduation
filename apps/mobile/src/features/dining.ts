@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Crypto from 'expo-crypto';
+import * as firestore from 'firebase/firestore';
 import { collection, doc, getDocFromServer, getDocsFromServer } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { getAuthInstance, getDb, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
@@ -23,7 +24,29 @@ export type DiningIntent = DiningScope & {
   expectedTotal: number;
   label: string;
 };
-export type DiningReceipt = { id: string; total: number; status: string; label: string };
+export type DiningReceipt = {
+  id: string;
+  total: number;
+  status: string;
+  label: string;
+  /** 伺服器發的取餐號碼；沒拿到是 null（畫面寫「號碼還沒拿到，請到櫃台確認。」） */
+  queueNumber?: number | null;
+  /** 下單時間 ISO，拿去櫃台時對單用 */
+  createdAt?: string | null;
+  items?: { name: string; quantity: number }[];
+};
+function realQueueNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+function isoOf(value: unknown): string | null {
+  if (typeof value === 'string' && Number.isFinite(new Date(value).getTime())) return value;
+  const maybe = value as { toDate?: () => Date } | null;
+  if (maybe && typeof maybe.toDate === 'function') {
+    const date = maybe.toDate();
+    if (date instanceof Date && Number.isFinite(date.getTime())) return date.toISOString();
+  }
+  return null;
+}
 export class DiningError extends Error {
   constructor(
     message: string,
@@ -227,7 +250,43 @@ export async function readDiningReceipt(
     total: row.total,
     status: row.status,
     label: typeof item.name === 'string' ? item.name : intent.label,
+    queueNumber: realQueueNumber(row.queueNumber),
+    createdAt: isoOf(row.createdAt),
+    items: [
+      {
+        name: typeof item.name === 'string' ? item.name : intent.label,
+        quantity: typeof item.quantity === 'number' ? item.quantity : 1,
+      },
+    ],
   };
+}
+
+/**
+ * 號碼還沒拿到時，盯著學生自己的訂單副本；店家按「給號碼」後畫面跟著換成真的號碼。
+ * 回傳取消監聽；沒辦法監聽時回 null。
+ */
+export function watchDiningReceipt(
+  scope: DiningScope & { orderId: string },
+  onChange: (patch: { queueNumber: number | null; status?: string }) => void,
+): (() => void) | null {
+  const listen = (firestore as { onSnapshot?: typeof firestore.onSnapshot }).onSnapshot;
+  if (typeof listen !== 'function' || isFirebaseMockMode()) return null;
+  try {
+    return listen(
+      doc(getDb(), 'users', scope.userId, 'schools', scope.schoolId, 'orders', scope.orderId),
+      (snapshot) => {
+        if (!snapshot.exists()) return;
+        const row = snapshot.data();
+        onChange({
+          queueNumber: realQueueNumber(row.queueNumber),
+          ...(typeof row.status === 'string' ? { status: row.status } : {}),
+        });
+      },
+      () => undefined,
+    );
+  } catch {
+    return null;
+  }
 }
 export async function submitDiningIntent(
   intent: DiningIntent,
