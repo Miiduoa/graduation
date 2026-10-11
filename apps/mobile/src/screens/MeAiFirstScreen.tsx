@@ -6,6 +6,7 @@ import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { usePermissions } from '../hooks/usePermissions';
 import { safeNavigate } from '../utils/safeNavigate';
+import { rootNavigate, rootNavigateNested } from '../app/rootNavigation';
 
 export default function MeAiFirstScreen() {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
@@ -56,7 +57,7 @@ export default function MeAiFirstScreen() {
       <AIHero
         eyebrow="CAMPUS ONE"
         title={displayName}
-        subtitle={details || '管理帳號、學習資料與個人設定。'}
+        subtitle={details || '管理帳號、課務資料與個人設定。'}
       />
       <AISection title="帳號資料">
         <AICard title={auth.profileLoading ? '正在讀取帳號資料' : '目前登入帳號'}>
@@ -71,7 +72,18 @@ export default function MeAiFirstScreen() {
         </AICard>
         <AIRow title="個人資料" subtitle="修改顯示名稱、簡介與電話" onPress={go('ProfileEdit')} />
       </AISection>
-      <AISection title="學習與參與">
+      <AISection title="課務與生活">
+        <AIRow
+          title="我的課表"
+          subtitle="一週、單日、匯入與空堂"
+          onPress={() => rootNavigateNested('學習', 'PersonalTimetable')}
+        />
+        <AIRow title="訊息" subtitle="私訊與課程通知" onPress={() => rootNavigate('訊息')} />
+        <AIRow
+          title="找人"
+          subtitle="加好友後才能看對方課表"
+          onPress={() => rootNavigateNested('訊息', 'FriendSearch')}
+        />
         <AIRow
           title="課程與成績"
           subtitle="從已加入的課程查看已發布成績"

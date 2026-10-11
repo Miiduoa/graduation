@@ -1,7 +1,7 @@
 import { AdminDashboardScreen } from './AdminDashboardScreen';
 /* eslint-disable */
 /**
- * LearnStack — 統一的「學習」Tab
+ * LearnStack — 底部「課務」入口
  * ═══════════════════════════════════════════════════════════════════════
  * 取代原本的：
  *   - 課程 Tab (AcademicStack)
@@ -10,7 +10,7 @@ import { AdminDashboardScreen } from './AdminDashboardScreen';
  *   - 審核 Tab (DepartmentStack)
  *   - 管理 Tab (AdminStack)
  *
- * 設計：所有角色看到同一個 Tab 名字「學習」，內容依角色自動切換。
+ * 設計：所有角色看到同一個入口「課務」，內容依角色自動切換。
  *  - 學生/校友 → CoursesHomeScreen (我的課程、作業、成績、行事曆)
  *  - 教師/教授 → TeachingHubScreen (我的班、待批改、出席、評量)
  *  - 系所主管/校方 → DepartmentHubScreen (審核 + 教學狀況)
@@ -86,6 +86,9 @@ import RoleAwareTodayScreen, {
 } from './RoleAwareTodayScreen';
 import { UnavailableFeatureScreen } from './UnavailableFeatureScreen';
 import { CampusAssistantScreen } from './CampusAssistantScreen';
+import PersonalTimetableScreen from './PersonalTimetableScreen';
+import CourseAppealsScreen from './CourseAppealsScreen';
+import ShopDockScreen from './ShopDockScreen';
 import { isDevelopmentDemoSession } from '../services/release';
 
 const Stack = createNativeStackNavigator<any, undefined>();
@@ -328,6 +331,7 @@ function LearnLanding(props: any) {
   const role = resolveDashboardRole(auth.user ? auth.profile : null);
   if (role === 'teacher') return <TeacherTodayScreen />;
   if (role === 'student') return <LearnAiFirstScreen />;
+  if (role === 'vendor') return <ShopDockScreen />;
   return <RoleWorkspaceScreen {...props} role={role} />;
 }
 
@@ -371,22 +375,22 @@ export function LearnStack() {
       initialRouteName="LearnHome"
       screenOptions={createStackScreenOptions()}
     >
-      {/* AI-First v1：landing 唯一入口 */}
+      {/* 課務入口，內容依角色切換 */}
       <Stack.Screen
         name="LearnHome"
         component={LearnLanding}
-        options={{ title: '學習', headerShown: false }}
+        options={{ title: '課務', headerShown: false }}
       />
       {/* 保留舊路由名稱作為別名（向後相容 deep link），全部導向新版 landing */}
       <Stack.Screen
         name="CoursesHome"
         component={LearnLanding}
-        options={{ title: '學習', headerShown: false }}
+        options={{ title: '課務', headerShown: false }}
       />
       <Stack.Screen
         name="TeachingHub"
         component={LearnLanding}
-        options={{ title: '學習', headerShown: false }}
+        options={{ title: '課務', headerShown: false }}
       />
       <Stack.Screen
         name="StaffHub"
@@ -550,6 +554,21 @@ export function LearnStack() {
         name="Calendar"
         component={UnifiedCalendarScreen}
         options={{ title: '行事曆', headerShown: false }}
+      />
+      <Stack.Screen
+        name="PersonalTimetable"
+        component={PersonalTimetableScreen}
+        options={{ title: '我的課表', headerShown: false }}
+      />
+      <Stack.Screen
+        name="CourseAppeals"
+        component={CourseAppealsScreen}
+        options={{ title: '課程申訴', headerShown: false }}
+      />
+      <Stack.Screen
+        name="ShopDock"
+        component={ShopDockScreen}
+        options={{ title: '店家工作台', headerShown: false }}
       />
       <Stack.Screen
         name="AICourseAdvisor"

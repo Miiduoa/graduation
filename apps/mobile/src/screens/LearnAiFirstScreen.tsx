@@ -76,14 +76,24 @@ export default function LearnAiFirstScreen() {
     <AIScreen>
       <AIHero
         eyebrow="CAMPUS ONE"
-        title="課程與學習"
-        subtitle="查看已加入的課程、成績與近期課務。"
+        title="課務"
+        subtitle="先看自己的課表，再處理這堂課要做的事。"
       />
       <AISection title="常用工具">
+        <AIRow
+          title="我的課表"
+          subtitle="一週、單日、匯入與空堂"
+          onPress={() => safeNavigate(navigation, 'PersonalTimetable')}
+        />
         <AIRow
           title="行事曆"
           subtitle="查看課程時間與自己的安排"
           onPress={() => safeNavigate(navigation, 'Calendar')}
+        />
+        <AIRow
+          title="課程申訴"
+          subtitle="頂卡跟著真實案件走"
+          onPress={() => safeNavigate(navigation, 'CourseAppeals')}
         />
         <AIRow
           title="課綱查詢"
