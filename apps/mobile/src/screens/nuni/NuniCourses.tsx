@@ -25,11 +25,24 @@ import {
 } from '../../services/nuniActivityTasks';
 
 type Classes = ReturnType<typeof createNuniClasses>;
-type Field = { name: string; label: string; max: number; multiline?: boolean; min?: number };
+type Field = {
+  name: string;
+  label: string;
+  max: number;
+  multiline?: boolean;
+  min?: number;
+  hint?: string;
+};
 type Activity = NuniAssignment | NuniQuiz;
 type Receipt = NuniSubmission | NuniQuizResponse;
+// Matches parseNuniQuizResponse and the platform quiz submission endpoint.
+const QUIZ_ANSWER_LIMIT = 2000;
 const time = (value: string) =>
   new Date(value).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
+const feedbackPredatesSubmission = (receipt: Receipt) =>
+  !!receipt.teacherFeedback &&
+  !!receipt.reviewedAt &&
+  Date.parse(receipt.reviewedAt) < Date.parse(receipt.submittedAt);
 
 function Copy({
   children,
@@ -111,10 +124,12 @@ function MutationForm({
   fields,
   label,
   submit,
+  savedContent,
 }: {
   draftKey: string;
   fields: Field[];
   label: string;
+  savedContent?: { values: Record<string, string>; revision: string };
   submit(
     values: Record<string, string>,
     key: string,
@@ -123,6 +138,16 @@ function MutationForm({
 }) {
   const theme = useTheme();
   const [values, setValues] = useNuniDraftState<Record<string, string>>(`${draftKey}:values`, {});
+  const [draftRevision, setDraftRevision] = useNuniDraftState<string | null>(
+    `${draftKey}:revision`,
+    null,
+  );
+  const editingValues = savedContent ? { ...savedContent.values, ...values } : values;
+  const changed =
+    !!savedContent &&
+    Object.keys(values).length > 0 &&
+    draftRevision !== null &&
+    savedContent.revision !== draftRevision;
   const [storedIntent, setStoredIntent] = useNuniDraftState<{
     values: Record<string, string>;
     signature: string;
@@ -145,9 +170,18 @@ function MutationForm({
   }, []);
   const send = async () => {
     if (lock.current || !mounted.current) return;
+    if (changed && !uncertain) {
+      setError('請先選擇使用最新內容，或保留草稿後再儲存。');
+      return;
+    }
     const payload = Object.fromEntries(
-      fields.map((field) => [field.name, (values[field.name] ?? '').trim()]),
+      fields.map((field) => [field.name, (editingValues[field.name] ?? '').trim()]),
     );
+    const tooLong = fields.find((field) => payload[field.name].length > field.max);
+    if (!uncertain && tooLong) {
+      setError(`${tooLong.label}最多 ${tooLong.max} 字，請縮短內容後再送出。`);
+      return;
+    }
     if (
       !uncertain &&
       fields.some(
@@ -176,6 +210,10 @@ function MutationForm({
         intent.current = null;
         setStoredIntent(null);
         setUncertain(false);
+        if (savedContent) {
+          setValues({});
+          setDraftRevision(null);
+        }
         setNotice(typeof confirmed === 'string' ? confirmed : '已確認儲存。');
       }
     } catch (failure) {
@@ -205,18 +243,53 @@ function MutationForm({
   };
   return (
     <View style={{ gap: 10 }}>
+      {changed && !uncertain ? (
+        <View style={{ gap: 8 }}>
+          <Copy alert>這份內容已有更新。你的草稿尚未儲存，請選擇接下來要編輯的內容。</Copy>
+          <Button
+            label="改用目前內容"
+            disabled={busy}
+            onPress={() => {
+              setValues({});
+              setDraftRevision(null);
+              setError('');
+              setNotice('');
+            }}
+          />
+          <Button
+            label="保留草稿，儲存時覆寫"
+            disabled={busy}
+            onPress={() => {
+              setDraftRevision(savedContent!.revision);
+              setError('');
+              setNotice('');
+            }}
+          />
+        </View>
+      ) : null}
       {fields.map((field) => (
         <View key={field.name} style={{ gap: 6 }}>
           <Copy>{field.label}</Copy>
           <TextInput
             accessibilityLabel={field.label}
-            value={values[field.name] ?? ''}
+            value={editingValues[field.name] ?? ''}
             editable={!busy && !uncertain}
             maxLength={field.max}
             multiline={field.multiline}
             autoCapitalize="none"
             textAlignVertical="top"
-            onChangeText={(value) => setValues((current) => ({ ...current, [field.name]: value }))}
+            onChangeText={(value) => {
+              const next = { ...editingValues, [field.name]: value };
+              if (savedContent) {
+                const pristine = fields.every(
+                  (entry) => (next[entry.name] ?? '') === (savedContent.values[entry.name] ?? ''),
+                );
+                setValues(pristine ? {} : next);
+                setDraftRevision(pristine ? null : (draftRevision ?? savedContent.revision));
+              } else setValues(next);
+              setError('');
+              setNotice('');
+            }}
             style={{
               borderWidth: 1,
               borderColor: theme.colors.border,
@@ -228,6 +301,7 @@ function MutationForm({
               fontSize: 16,
             }}
           />
+          {field.hint ? <Copy>{field.hint}</Copy> : null}
         </View>
       ))}
       {error ? <Copy alert>{error}</Copy> : null}
@@ -690,17 +764,32 @@ function ActivityCard({
                 ? `老師回饋：${receipt.teacherFeedback}`
                 : '老師尚未留下回饋。'}
             </Copy>
+            {receipt.reviewedAt ? <Copy>回饋時間：{time(receipt.reviewedAt)}</Copy> : null}
+            {feedbackPredatesSubmission(receipt) ? (
+              <Copy>這則回饋早於最近一次繳交，可請老師確認是否仍適用。</Copy>
+            ) : null}
           </View>
         ) : null}
         {canSubmit ? (
           <MutationForm
             draftKey={`course:${course.id}:${course.memberRole}:${course.state}:${assignment ? 'assignment' : 'quiz'}:${item.id}:${item.state}`}
+            savedContent={{
+              values: { body: receipt ? ('body' in receipt ? receipt.body : receipt.answer) : '' },
+              revision: JSON.stringify(
+                receipt
+                  ? ['body' in receipt ? receipt.body : receipt.answer, receipt.submittedAt]
+                  : null,
+              ),
+            }}
             fields={[
               {
                 name: 'body',
                 label: `${kind}內容：${item.title}`,
-                max: assignment ? 8000 : 4000,
+                max: assignment ? 8000 : QUIZ_ANSWER_LIMIT,
                 multiline: true,
+                hint: assignment
+                  ? undefined
+                  : `最多 ${QUIZ_ANSWER_LIMIT} 字。老師停止收件前仍可修改。`,
               },
             ]}
             label={receipt ? `更新${kind}繳交` : `繳交${kind}`}
@@ -767,9 +856,22 @@ function TeacherReceipts({
             ) : (
               <Copy>尚未回饋</Copy>
             )}
+            {receipt.reviewedAt ? <Copy>回饋時間：{time(receipt.reviewedAt)}</Copy> : null}
+            {feedbackPredatesSubmission(receipt) ? (
+              <Copy>學生在這則回饋之後更新了繳交內容，請確認回饋是否仍適用。</Copy>
+            ) : null}
             {course.state === 'active' ? (
               <MutationForm
                 draftKey={`course:${course.id}:${course.memberRole}:${course.state}:${assignment ? 'assignment' : 'quiz'}:${item.id}:feedback:${receipt.platformAccountId}`}
+                savedContent={{
+                  values: { feedback: receipt.teacherFeedback ?? '' },
+                  revision: JSON.stringify([
+                    'body' in receipt ? receipt.body : receipt.answer,
+                    receipt.submittedAt,
+                    receipt.teacherFeedback,
+                    receipt.reviewedAt,
+                  ]),
+                }}
                 fields={[
                   {
                     name: 'feedback',
@@ -804,7 +906,9 @@ function TeacherReceipts({
                       resource.version,
                     );
                   }
-                  return '老師回饋已儲存。';
+                  return result.teacherFeedback === feedback.trim()
+                    ? '老師回饋已儲存。'
+                    : '這份回饋已有新的內容，上方顯示目前儲存的版本。';
                 }}
               />
             ) : null}
