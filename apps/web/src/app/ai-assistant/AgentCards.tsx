@@ -1,9 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { AgentCard } from '@/lib/campusAssistantClient';
-import { confirmCreateOrder } from '@/lib/campusAssistantClient';
+import { confirmCreateOrder, watchOrderQueueNumber } from '@/lib/campusAssistantClient';
+import { describePickupNumber, type PickupNumberView } from '@campus/shared/src/ordering/pickupNumber';
 
 interface Props {
   cards: AgentCard[];
@@ -616,6 +617,17 @@ function OrderDraftCard({
   const [result, setResult] = useState<{ ok: boolean; message: string; orderId?: string } | null>(
     null,
   );
+  const [pickup, setPickup] = useState<PickupNumberView | null>(null);
+  // 同一張草稿重按沿用同一個送出編號，伺服器不會建出第二筆
+  const requestIdRef = useRef<string | null>(null);
+  const pendingOrderId = pickup?.state === 'pending' ? result?.orderId : undefined;
+  useEffect(() => {
+    if (!pendingOrderId) return;
+    const stop = watchOrderQueueNumber(schoolId, pendingOrderId, queueNumber =>
+      setPickup(describePickupNumber({ queueNumber })),
+    );
+    return () => stop?.();
+  }, [schoolId, pendingOrderId]);
 
   const handleConfirm = async () => {
     if (paymentMethod === 'tappay' || paymentMethod === 'linepay') {
@@ -626,8 +638,13 @@ function OrderDraftCard({
       return;
     }
     setSubmitting(true);
+    requestIdRef.current ??=
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? `web-${crypto.randomUUID()}`
+        : `web-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const res = await confirmCreateOrder({
       schoolId,
+      requestId: requestIdRef.current,
       cafeteriaId: payload.cafeteriaId,
       items: payload.confirmAction.input.items,
       pickupTime: payload.pickupTime,
@@ -637,6 +654,15 @@ function OrderDraftCard({
     setSubmitting(false);
     if (res.success && res.orderId) {
       setResult({ ok: true, message: `訂單已建立，訂單號 ${res.orderId}`, orderId: res.orderId });
+      setPickup(
+        describePickupNumber({
+          queueNumber: res.queueNumber,
+          createdAt: res.createdAt,
+          items:
+            res.items ??
+            payload.items.map(item => ({ name: item.name, quantity: item.quantity })),
+        }),
+      );
       onConfirmed?.({
         orderId: res.orderId,
         cafeteria: res.cafeteria || payload.cafeteriaName,
@@ -709,7 +735,21 @@ function OrderDraftCard({
         </div>
       </div>
       {result ? (
-        <div className={result.ok ? 'note ok' : 'note err'}>{result.message}</div>
+        <div className={result.ok ? 'note ok' : 'note err'}>
+          {result.message}
+          {result.ok && pickup?.state === 'assigned' ? (
+            <div className="pickup">
+              <strong>{pickup.text}</strong>
+            </div>
+          ) : null}
+          {result.ok && pickup?.state === 'pending' ? (
+            <div className="pickup">
+              <strong>{pickup.text}</strong>
+              {pickup.detail ? <div>{pickup.detail}</div> : null}
+              <div>狀態：{pickup.label}</div>
+            </div>
+          ) : null}
+        </div>
       ) : (
         <button type="button" className="confirm" onClick={handleConfirm} disabled={submitting}>
           {submitting ? '下單中…' : '確認下單'}

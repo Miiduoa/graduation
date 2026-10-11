@@ -154,8 +154,13 @@ export type Order = {
   completedAt: string | null;
   cancelledAt: string | null;
   cancelReason: string | null;
+  /** 取餐號碼，只認伺服器發的；沒拿到是 null */
   queueNumber: number | null;
+  /** 'pending_confirmation' = 號碼還沒拿到（待確認），店家可以按「給號碼」 */
+  queueStatus?: OrderQueueStatus;
 };
+
+export type OrderQueueStatus = 'assigned' | 'pending_confirmation';
 
 export type OrderItem = {
   menuItemId: string;
@@ -3728,6 +3733,11 @@ function _mapFirestoreToLocalOrder(id: string, data: Record<string, any>): Order
     cancelledAt: toIso(data.cancelledAt) ?? null,
     cancelReason: data.cancelReason ?? null,
     queueNumber: typeof data.queueNumber === 'number' ? data.queueNumber : (typeof data.queueNumber === 'string' ? parseInt(data.queueNumber, 10) || null : null),
+    queueStatus:
+      (typeof data.queueNumber === 'number' && data.queueNumber > 0) ||
+      (typeof data.queueNumber === 'string' && parseInt(data.queueNumber, 10) > 0)
+        ? 'assigned'
+        : 'pending_confirmation',
   };
 }
 
@@ -3808,6 +3818,7 @@ export async function createOrder(
     | 'cancelledAt'
     | 'cancelReason'
     | 'queueNumber'
+    | 'queueStatus'
   >,
 ): Promise<Order> {
   const schoolId = _getSchoolId();
@@ -3860,6 +3871,7 @@ export async function createOrder(
           cancelledAt: null,
           cancelReason: null,
           queueNumber: null,
+          queueStatus: 'pending_confirmation',
         };
         const local = await readStorage<Order[]>(STORAGE_KEYS.orders, []);
         local.push(fallback);
@@ -3872,11 +3884,8 @@ export async function createOrder(
   }
 
   // ── 降級：本地建立 ──
+  // 號碼只認伺服器發的，這裡不自己算號碼：顯示「號碼還沒拿到，請到櫃台確認。」
   const orders = await readStorage<Order[]>(STORAGE_KEYS.orders, []);
-  const queueNumber =
-    orders.filter(
-      (o) => o.vendorId === order.vendorId && o.status !== 'completed' && o.status !== 'cancelled',
-    ).length + 1;
 
   const newOrder: Order = {
     ...order,
@@ -3887,11 +3896,54 @@ export async function createOrder(
     completedAt: null,
     cancelledAt: null,
     cancelReason: null,
-    queueNumber,
+    queueNumber: null,
+    queueStatus: 'pending_confirmation',
   };
   orders.push(newOrder);
   await writeStorage(STORAGE_KEYS.orders, orders);
   return newOrder;
+}
+
+/**
+ * 幫訂單拿取餐號碼（Cloud Function `assignQueueNumber`，一定帶 orderId）。
+ * - 學生自己重試：asMerchant 不帶。
+ * - 店家按「給號碼」：asMerchant = true，伺服器會檢查是不是這家店的店員，待接單的訂單一併接單。
+ * 同一筆訂單重複呼叫回同一個號碼。拿不到就丟錯，不會在手機上自己算號碼。
+ */
+export async function assignOrderQueueNumber(
+  orderId: string,
+  options: { asMerchant?: boolean; vendorId?: string } = {},
+): Promise<{ queueNumber: number; status?: OrderStatus }> {
+  const schoolId = _getSchoolId();
+  if (!schoolId || !_tryFirebase() || !getAuthInstance().currentUser) {
+    throw new Error('目前連不上伺服器，號碼還沒拿到，請到櫃台確認。');
+  }
+  const fn = httpsCallable<
+    { schoolId: string; orderId: string; vendorId?: string; as?: 'merchant' },
+    { ok?: boolean; queueNumber?: number; status?: OrderStatus }
+  >(getFunctionsInstance(), 'assignQueueNumber');
+  const result = await fn({
+    schoolId,
+    orderId,
+    ...(options.vendorId ? { vendorId: options.vendorId } : {}),
+    ...(options.asMerchant ? { as: 'merchant' as const } : {}),
+  });
+  const queueNumber = result.data?.queueNumber;
+  if (typeof queueNumber !== 'number' || !Number.isSafeInteger(queueNumber) || queueNumber <= 0) {
+    throw new Error('號碼還沒拿到，請到櫃台確認。');
+  }
+  const local = await readStorage<Order[]>(STORAGE_KEYS.orders, []);
+  const idx = local.findIndex((o) => o.id === orderId);
+  if (idx >= 0) {
+    local[idx] = {
+      ...local[idx],
+      queueNumber,
+      queueStatus: 'assigned',
+      ...(result.data?.status ? { status: result.data.status } : {}),
+    };
+    await writeStorage(STORAGE_KEYS.orders, local);
+  }
+  return { queueNumber, status: result.data?.status };
 }
 
 /**

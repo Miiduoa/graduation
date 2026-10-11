@@ -27,6 +27,7 @@ import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { useAuth } from '../state/auth';
+import { PICKUP_NUMBER_PENDING_LABEL } from '@campus/shared/src/ordering/pickupNumber';
 import {
   getVendors,
   getVendor,
@@ -38,6 +39,7 @@ import {
   getReviews,
   getOrders,
   updateOrderStatus,
+  assignOrderQueueNumber,
   subscribeOrders,
   setOrderSchoolId,
   estimateWaitTime,
@@ -1042,14 +1044,46 @@ function OrdersTab(props: {
 // 訂單卡片
 // ══════════════════════════════════════════════════
 
-function OrderCard(props: {
+export function OrderCard(props: {
   order: Order;
   onAccept?: () => void;
   onCancel?: () => void;
   actionLabel?: string;
   isCompleted?: boolean;
 }) {
-  const { order, onAccept, onCancel, actionLabel = '確認訂單', isCompleted } = props;
+  const { onAccept, onCancel, actionLabel = '確認訂單', isCompleted } = props;
+  // 按了「給號碼」之後先換上伺服器回的號碼，訂單監聽到更新再以資料為準
+  const [assigned, setAssigned] = useState<{ queueNumber: number; status?: OrderStatus } | null>(
+    null,
+  );
+  const [assigning, setAssigning] = useState(false);
+  const order: Order =
+    assigned && !props.order.queueNumber
+      ? {
+          ...props.order,
+          queueNumber: assigned.queueNumber,
+          queueStatus: 'assigned',
+          status: assigned.status ?? props.order.status,
+        }
+      : props.order;
+  const needsNumber =
+    !order.queueNumber && order.status !== 'completed' && order.status !== 'cancelled';
+  const giveNumber = async () => {
+    if (assigning) return;
+    setAssigning(true);
+    try {
+      setAssigned(
+        await assignOrderQueueNumber(order.id, { asMerchant: true, vendorId: order.vendorId }),
+      );
+    } catch (err) {
+      Alert.alert(
+        '號碼還沒給出去',
+        err instanceof Error && err.message ? err.message : '請稍後再試一次。',
+      );
+    } finally {
+      setAssigning(false);
+    }
+  };
 
   const createdTime = new Date(order.createdAt);
   const timeAgo = Math.round((Date.now() - createdTime.getTime()) / 60000);
@@ -1096,6 +1130,20 @@ function OrderCard(props: {
                 }}
               >
                 號碼 {order.queueNumber}
+              </Text>
+            </View>
+          )}
+          {needsNumber && (
+            <View
+              style={{
+                paddingHorizontal: 8,
+                paddingVertical: 2,
+                borderRadius: 6,
+                backgroundColor: `${theme.colors.danger}20`,
+              }}
+            >
+              <Text style={{ color: theme.colors.danger, fontSize: 11, fontWeight: '600' }}>
+                {PICKUP_NUMBER_PENDING_LABEL}
               </Text>
             </View>
           )}
@@ -1167,7 +1215,27 @@ function OrderCard(props: {
       {/* 操作按鈕 */}
       {!isCompleted && (
         <View style={{ flexDirection: 'row', gap: 8 }}>
-          {onAccept && (
+          {needsNumber && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="給號碼"
+              onPress={() => void giveNumber()}
+              disabled={assigning}
+              style={{
+                flex: 1,
+                paddingVertical: 8,
+                borderRadius: 8,
+                backgroundColor: theme.colors.accent,
+                alignItems: 'center',
+                opacity: assigning ? 0.6 : 1,
+              }}
+            >
+              <Text style={{ color: '#fff', fontWeight: '600', fontSize: 12 }}>
+                {assigning ? '給號碼中…' : '給號碼'}
+              </Text>
+            </Pressable>
+          )}
+          {onAccept && !(needsNumber && order.status === 'pending') && (
             <Pressable
               onPress={onAccept}
               style={{
