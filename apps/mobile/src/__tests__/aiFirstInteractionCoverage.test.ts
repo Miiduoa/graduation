@@ -43,7 +43,7 @@ function hasExplicitInteractionPolicy(tag: string): boolean {
   return /\bonPress=/.test(tag) || /\bstatic\b/.test(tag) || /\bdisabled\b/.test(tag);
 }
 
-describe('AI-first demo interaction coverage', () => {
+describe('demo interaction coverage', () => {
   it('repo no longer contains empty Pressable onPress handlers', () => {
     const offenders = collectSourceFiles(srcRoot)
       .flatMap((file) => {
