@@ -102,7 +102,7 @@ export async function createMeetup(input: {
 export async function createServerShare(schoolId: string, name: string) {
   const call = httpsCallable(getFunctionsInstance(), 'createTimetableShare');
   const { data } = await call({ schoolId, name });
-  return data as { token: string; path: string };
+  return data as { token: string; path: string; expiresAt: string };
 }
 
 export async function listCourseAppeals(schoolId: string, uid: string) {

@@ -151,3 +151,14 @@ describe('申訴頂卡', () => {
     expect(all).not.toMatch(/資料庫|本站|頂卡|教師/);
   });
 });
+
+describe('share copy', () => {
+  it('uses the real expiry date in Taipei time for both the notice and the page title', async () => {
+    const { shareCopiedCopy, sharedTimetableTitle } = await import('@campus/shared');
+    // 2026-10-18 16:30 UTC = 台北 10 月 19 日 00:30
+    const expiresAt = '2026-10-18T16:30:00.000Z';
+    expect(shareCopiedCopy(expiresAt)).toBe('分享連結已複製，10 月 19 日前有效。');
+    expect(sharedTimetableTitle(expiresAt)).toBe('同學分享的課表 · 10 月 19 日前有效');
+    expect(shareCopiedCopy(expiresAt)).not.toMatch(/撤回|七天/);
+  });
+});

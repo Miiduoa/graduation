@@ -6,3 +6,4 @@ export * from './shareCodec';
 export * from './textImport';
 export * from './appeals';
 export * from './friendResend';
+export * from './shareCopy';
