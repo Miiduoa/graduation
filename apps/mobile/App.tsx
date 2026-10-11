@@ -65,9 +65,7 @@ import { useAIAmbientAwareness } from './src/app/useAIAmbientAwareness';
 import { useAIBrainLifecycle } from './src/app/useAIBrain';
 import { GlobalAIConfirmModalHost } from './src/components/GlobalAIConfirmModalHost';
 import { AIOverlayHost } from './src/components/AIOverlayHost';
-import { aiOverlay } from './src/app/useAIOverlay';
 import { HeaderDrawerHost } from './src/components/HeaderDrawer';
-import { AIFloatingBall } from './src/components/AIFloatingBall';
 import { useProactiveAIReporter } from './src/app/useProactiveAIReporter';
 import { useProactiveAIAgentLoop } from './src/app/useProactiveAIAgentLoop';
 import { useWebLearningSync } from './src/app/useWebLearningSync';
@@ -93,18 +91,8 @@ import { initCrossModuleConnections } from './src/services/crossModuleConnector'
 import { registerCompanionCampusBusBridge } from './src/services/companionBusBridge';
 
 /**
- * 4+1 AI-First 導航架構
- *
- *   [ 今天 ] [ 學習 ]  ✨AI 球✨  [ 校園 ] [ 訊息 ]
- *
- * + 隱藏 Tab「我的」：透過左上角頭像抽屜（HeaderDrawer）開啟
- *
- * 設計根據：
- * - Hick's Law: 首層只 4 個情境 Tab（今天/學習/校園/訊息），名字所有角色一致
- * - Fitts's Law: 中央 AI 球比兩側 Tab 大、突出 → 高頻最易點
- * - Spatial Memory: 左上頭像 = 個人，右下/中央 AI = 助理（與通用心智模型對齊）
- * - AI-First: AI 不是其中一個 Tab，而是整個 App 的作業系統（懸浮在所有畫面之上）
- * - 角色策略: Tab 名字統一，內容由 LearnStack 等內部 dispatcher 依角色適配
+ * 學生四個入口：今天｜課務｜生活｜我
+ * 訊息仍在導覽堆疊，從「我」進入。
  */
 const Tab = createBottomTabNavigator<RootTabParamList, undefined>();
 
@@ -557,30 +545,7 @@ function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
   );
 }
 
-/**
- * FloatingTabBar — 4+1 AI-First 導航
- *
- * 佈局：
- *   [ 今天 ] [ 學習 ]  ✨AI 球✨  [ 校園 ] [ 訊息 ]
- *
- * - 4 個情境 Tab 平均分布兩側
- * - 中央 AI 球凸出於 TabBar 上方（懸浮 FAB）
- * - 「我的」Tab 不顯示於 Bar 上，僅供 HeaderDrawer 內部 navigate 觸發
- *
- * 心理學：
- * - Fitts's Law：AI 球大且置中 → 高頻最易點
- * - Affordance：球體會脈動（活的）vs Tab 是死的（被動）
- * - Mental Model：使用者學到「找東西點 Tab；要 AI 做點球」
- */
-/** 須與下方 AIFloatingBall size 一致 */
-const FAB_SIZE = 68;
-/** 整顆 FAB 相對 Tab 列的微調（像素；預設 0，避免與章面 nudge 疊加偏移） */
-const FAB_SHELL_NUDGE_X = 0;
-const FAB_SHELL_NUDGE_Y = 0;
-/** 與 TabBar pill `paddingVertical` 對齊，供 FAB overlay 垂直錨點 */
 const TAB_BAR_PILL_PADDING_V = 6;
-/** 中央為 AI 球保留的淨空；若拿掉會讓左右各兩個 Tab 往中線擠、視覺與點擊區「跑掉」 */
-const FAB_CENTER_GAP = Math.max(84, FAB_SIZE + 14);
 
 function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
@@ -588,13 +553,8 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   // 訊息 Tab 上的紅色未讀徽章：即時訂閱我自己 DM 未讀數
   const unreadDms = useUnreadMessagingCount();
 
-  // 只顯示 4 個情境 Tab，過濾掉 '我的' 隱藏 Tab
   const visibleTabKeys = permissions.tabs.map((t) => t.key);
   const visibleRoutes = state.routes.filter((r) => visibleTabKeys.includes(r.name));
-
-  // 左 2／右 2 之間保留 FAB_CENTER_GAP，避免 Tab 標籤與中央球在版面與心理上重疊
-  const leftRoutes = visibleRoutes.slice(0, 2);
-  const rightRoutes = visibleRoutes.slice(2, 4);
 
   const renderTab = (route: typeof visibleRoutes[number]) => {
     const originalIndex = state.routes.findIndex((r) => r.key === route.key);
@@ -602,7 +562,7 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
     const focused = state.index === originalIndex;
     const config = permissions.tabs.find((t) => t.key === route.name);
     const iconName = config?.icon ?? 'ic_tab_today';
-    const showUnreadBadge = route.name === '訊息' && unreadDms > 0;
+    const showUnreadBadge = route.name === '我的' && unreadDms > 0;
     const badgeLabel = unreadDms > 99 ? '99+' : String(unreadDms);
 
     return (
@@ -697,10 +657,7 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
       }}
       pointerEvents="box-none"
     >
-      {/* TabBar pill：iOS HIG — BlurView 玻璃磨砂底 + 半透明 chrome
-          注意：overflow 必須保持 visible，FAB 浮球以負 marginTop 突出 pill 上緣；
-          所以 BlurView 用獨立的 clipping wrapper（borderRadius + overflow:hidden）
-          鋪在 pill 背景，FAB 仍可延伸到 pill 外。 */}
+      {/* 底部四個入口：今天｜課務｜生活｜我 */}
       <View
         style={{
           position: 'absolute',
@@ -725,7 +682,7 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
           position: 'relative',
           flexDirection: 'row',
           alignItems: 'stretch',
-          overflow: 'visible',
+          overflow: 'hidden',
           borderRadius: theme.radius.lg,
           paddingVertical: TAB_BAR_PILL_PADDING_V,
           paddingHorizontal: 8,
@@ -735,77 +692,15 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
           ...softShadowStyle(theme.shadows.soft),
         }}
       >
-        <View
-          style={{
-            flex: 1,
-            flexDirection: 'row',
-            alignItems: 'stretch',
-            minWidth: 0,
-            zIndex: 1,
-          }}
-        >
-          {leftRoutes.map(renderTab)}
-        </View>
-
-        <View
-          style={{
-            width: FAB_CENTER_GAP,
-            alignSelf: 'stretch',
-            zIndex: 1,
-          }}
-          pointerEvents="none"
-        />
-
-        <View
-          style={{
-            flex: 1,
-            flexDirection: 'row',
-            alignItems: 'stretch',
-            minWidth: 0,
-            zIndex: 1,
-          }}
-        >
-          {rightRoutes.map(renderTab)}
-        </View>
-
-        <View
-          pointerEvents="box-none"
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            bottom: TAB_BAR_PILL_PADDING_V,
-            alignItems: 'center',
-            zIndex: 10,
-          }}
-        >
-          <View
-            style={{
-              marginTop: -theme.layout.fabOffset,
-              transform: [
-                { translateX: FAB_SHELL_NUDGE_X },
-                { translateY: FAB_SHELL_NUDGE_Y },
-              ],
-            }}
-            pointerEvents="box-none"
-          >
-            <AIFloatingBall
-              size={FAB_SIZE}
-              onPress={() => aiOverlay.open({ mode: 'chat', source: 'tabbar' })}
-              onLongPress={() => aiOverlay.open({ mode: 'quick', source: 'tabbar_long' })}
-            />
-          </View>
-        </View>
+        {visibleRoutes.map(renderTab)}
       </View>
     </View>
   );
 }
 
 /**
- * AppTabNavigator — 統一的 4+1 導航
- *
- * 4 個情境 Tab + 1 個隱藏 Tab（我的，透過 HeaderDrawer 觸發）
- * 不再依角色變 Tab 結構，角色適配交給 LearnStack 內部 dispatcher。
+ * 學生四個入口：今天｜課務｜生活｜我
+ * 訊息仍在導覽堆疊，從「我」進入。
  */
 function AppTabNavigator() {
   return (
@@ -821,13 +716,12 @@ function AppTabNavigator() {
       <Tab.Screen name="Today" component={HomeStack} />
       <Tab.Screen name="學習" component={LearnStack} />
       <Tab.Screen name="校園" component={MapStack} />
-      <Tab.Screen name="訊息" component={MessagesStack} />
-      {/* 隱藏 Tab：僅作為 HeaderDrawer 跳轉用，不顯示於 TabBar */}
       <Tab.Screen
-        name="我的"
-        component={MeStack}
+        name="訊息"
+        component={MessagesStack}
         options={{ tabBarButton: () => null }}
       />
+      <Tab.Screen name="我的" component={MeStack} />
     </Tab.Navigator>
   );
 }
