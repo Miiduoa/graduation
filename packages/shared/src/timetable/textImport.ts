@@ -20,17 +20,17 @@ function parseDay(value: string): number {
   return DAY_MAP[match[1]] || 0;
 }
 
-function parsePeriods(value: string): { start: number; end: number } | null {
+function parsePeriods(value: string): { start: number; end: number; text: string } | null {
   const range = value.match(/第?\s*(\d{1,2})\s*[-–~到至]\s*第?\s*(\d{1,2})\s*節?/);
   if (range) {
     const start = Number(range[1]);
     const end = Number(range[2]);
-    if (start >= 1 && end >= start && end <= 13) return { start, end };
+    if (start >= 1 && end >= start && end <= 13) return { start, end, text: range[0] };
   }
   const single = value.match(/第?\s*(\d{1,2})\s*節/);
   if (single) {
     const start = Number(single[1]);
-    if (start >= 1 && start <= 13) return { start, end: start };
+    if (start >= 1 && start <= 13) return { start, end: start, text: single[0] };
   }
   return null;
 }
@@ -46,11 +46,10 @@ export function parseTimetableText(text: string): PersonalCourse[] {
     const day = parseDay(line);
     const periods = parsePeriods(line);
     if (!periods && /^(星期|節次|課表|注意|學年度)/.test(line) && line.length < 12) continue;
-    let rest = line
-      .replace(/(?:星期|週|禮拜)?[一二三四五]/, ' ')
-      .replace(/第?\s*\d{1,2}\s*(?:[-–~到至]\s*第?\s*\d{1,2})?\s*節?/g, ' ')
-      .replace(/\b\d{1,2}:\d{2}\s*[-–~]\s*\d{1,2}:\d{2}\b/g, ' ')
-      .trim();
+    // 只拿掉認出來的那一段節次，教室號碼（例如主顧303）要留著
+    let rest = line.replace(/\b\d{1,2}:\d{2}\s*[-–~]\s*\d{1,2}:\d{2}\b/g, ' ');
+    if (periods) rest = rest.replace(periods.text, ' ');
+    rest = rest.replace(/(?:星期|週|禮拜)?[一二三四五]/, ' ').trim();
     const parts = rest
       .split(/\s*\/\s*/)
       .map((part) => part.trim())
