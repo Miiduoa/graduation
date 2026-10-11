@@ -29,6 +29,7 @@ const { TAIPEI_TIME_ZONE, taipeiDateKey, taipeiDayStart, shiftDateKey } = requir
 
 const { writeOrderPatch, writeOrderTransition, identifier } = require('../orderTransitions');
 const { normalizeCafeteriaOperatorRecord } = require('../authz');
+const { assertOnlineOrderingEnabled } = require('../lib/onlineOrdering');
 
 const REGION = 'asia-east1';
 
@@ -211,6 +212,7 @@ function assignQueueNumberHandler({ db }) {
   return async (request) => {
     const uid = request.auth?.uid;
     if (!uid) throw new HttpsError('unauthenticated', 'Must be logged in');
+    assertOnlineOrderingEnabled();
     const schoolId = orderKey(request.data?.schoolId, 'schoolId');
     if (request.data?.orderId == null)
       throw new HttpsError('invalid-argument', 'orderId is required');

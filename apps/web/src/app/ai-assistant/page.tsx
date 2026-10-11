@@ -9,6 +9,7 @@ import { resolveSchoolPageContext } from '@/lib/pageContext';
 import { callCampusAssistant, CampusAssistantError, type CampusAssistantEnvelope } from '@/lib/campusAssistantClient';
 import { assistantSources, assistantSuggestions, hasOrderProposal, readOnlyAssistantCards } from '@/lib/assistantPresentation';
 import { AgentCardList } from './AgentCards';
+import { isWebOnlineOrderingEnabled, ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
 import home from '../home.module.css';
 import styles from './assistant.module.css';
 
@@ -87,10 +88,10 @@ function AssistantConversation({ userId, groupId, initialDraft }: { userId: stri
     <div role="log" aria-label="對話紀錄" aria-live="polite" aria-relevant="additions" className={styles.messages}>
       {messages.map((message, index) => <article key={index} className={message.role === 'user' ? styles.question : styles.answer}>
         <p className={styles.author}>{message.role === 'user' ? '你' : '校園助理'}</p>
-        <p className={styles.content}>{message.content}</p>
+        <p className={styles.content}>{message.role === 'assistant' && !isWebOnlineOrderingEnabled() && hasOrderProposal(message.response) ? ONLINE_ORDERING_OFF_TEXT : message.content}</p>
         {message.role === 'assistant' && <>
           <div className={styles.cards}><AgentCardList cards={readOnlyAssistantCards(message.response.cards, school.schoolId)} schoolId={school.schoolId} /></div>
-          {hasOrderProposal(message.response) && <p className={styles.note}>這段對話不會送出訂單。訂單狀態和取餐號碼請看<Link href="/orders">我的訂單</Link>。</p>}
+          {isWebOnlineOrderingEnabled() && hasOrderProposal(message.response) && <p className={styles.note}>這段對話不會送出訂單。訂單狀態和取餐號碼請看<Link href="/orders">我的訂單</Link>。</p>}
           {assistantSources(message.response.citations).length > 0 && <ul className={styles.sources} aria-label="參考來源">
             {assistantSources(message.response.citations).map(source => <li key={source.url}><a href={source.url} target="_blank" rel="noopener noreferrer">{source.label}</a></li>)}
           </ul>}

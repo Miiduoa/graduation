@@ -2,6 +2,7 @@
 
 const { getFirestore } = require('firebase-admin/firestore');
 const { createAuthzHelpers } = require('../authz');
+const { isOnlineOrderingEnabled, ONLINE_ORDERING_OFF_MESSAGE } = require('../lib/onlineOrdering');
 const {
   answerWithServerWebSearch,
   shouldUseServerWebSearch,
@@ -828,6 +829,13 @@ async function executeCampusAssistantCore({
   }
 
   if (intent === 'food_order') {
+    if (!isOnlineOrderingEnabled()) {
+      response.content = ONLINE_ORDERING_OFF_MESSAGE;
+      response.suggestions = [];
+      response.actions = [];
+      response.cards = [];
+      return await finalizeResponse();
+    }
     if (!uid) {
       response.content = '訂餐要先登入，並說明餐廳與品項（例：學生餐廳雞排飯＋紅茶）。';
       response.suggestions = ['功能說明'];

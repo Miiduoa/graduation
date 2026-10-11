@@ -1,6 +1,7 @@
 const nodeCrypto = require('node:crypto');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { Timestamp } = require('firebase-admin/firestore');
+const { assertOnlineOrderingEnabled } = require('./lib/onlineOrdering');
 
 function identifier(value, name, max = 160) {
   if (
@@ -152,6 +153,7 @@ function createOrderHandler({ db }) {
   return async (request) => {
     const uid = request.auth?.uid;
     if (!uid) throw new HttpsError('unauthenticated', 'Must be logged in');
+    assertOnlineOrderingEnabled();
     if (request.data?.userId != null && request.data.userId !== uid)
       throw new HttpsError('permission-denied', 'Order belongs to another user');
     const intent = normalizeInput(request.data);
