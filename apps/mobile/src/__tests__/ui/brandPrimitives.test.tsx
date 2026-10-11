@@ -129,7 +129,7 @@ test('role workspaces retain readable accent cards after a live theme change', (
   );
   expect(view.getByText('Campus One')).toBeTruthy();
   expect(view.getByText('接下來')).toBeTruthy();
-  expect(view.queryByText('AI-first 工作台')).toBeNull();
+  expect(view.queryByText(/first 工作台/i)).toBeNull();
   act(() => applyTheme('dark'));
   const { colors } = createDarkTheme();
   expect(view.getByText('今天的安排')).toHaveStyle({ color: colors.text });
