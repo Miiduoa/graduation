@@ -1580,3 +1580,22 @@ test('handles can be looked up one at a time but never listed', async () => {
   await assertFails(bob.collection('schools/pu/handles').get());
   await assertFails(stranger.doc('schools/pu/handles/alice_01').get());
 });
+
+test('assistant replies to a question are not posted under the student account', async () => {
+  await seedFirestore(async (db) => {
+    await db.doc('groups/g1').set({ schoolId: 'pu', name: '課' });
+    await db.doc('groups/g1/members/alice').set({ status: 'active', role: 'member' });
+    await db.doc('groups/g1/members/bob').set({ status: 'active', role: 'member' });
+    await db.doc('groups/g1/posts/q1').set({ kind: 'question', authorId: 'alice', title: '問', body: '問' });
+    await db.doc('groups/g1/posts/p2').set({ kind: 'post', authorId: 'alice', title: '貼文', body: '貼文' });
+  });
+  const alice = testEnv.authenticatedContext('alice').firestore();
+  const bob = testEnv.authenticatedContext('bob').firestore();
+  const reply = { body: '回覆', authorId: 'campus-assistant', authorName: '助理回覆', isAI: true, requestedBy: 'alice' };
+  await assertSucceeds(alice.collection('groups/g1/posts/q1/comments').add(reply));
+  // 不能把助理回覆掛在自己名下，也不能替別人的提問或一般貼文產生助理回覆
+  await assertFails(alice.collection('groups/g1/posts/q1/comments').add({ ...reply, authorId: 'alice' }));
+  await assertFails(bob.collection('groups/g1/posts/q1/comments').add({ ...reply, requestedBy: 'bob' }));
+  await assertFails(alice.collection('groups/g1/posts/p2/comments').add(reply));
+  await assertSucceeds(bob.collection('groups/g1/posts/q1/comments').add({ body: '我也想知道', authorId: 'bob' }));
+});
