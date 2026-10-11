@@ -19,8 +19,7 @@ import {
   type ImportDraft,
   type ImportMode,
   type PersonalCourse,
-  type PlannerFriend,
-} from '@campus/shared';
+  type PlannerFriend, shareCopiedCopy } from '@campus/shared';
 import { useAuth } from '@/components/AuthGuard';
 import { useSelectedSchool } from '@/components/SelectedSchoolProvider';
 import styles from '@/components/academic/academic.module.css';
@@ -172,7 +171,7 @@ export function PersonalTimetable() {
       const url = `${window.location.origin}${server.path}`;
       await navigator.clipboard.writeText(url).catch(() => undefined);
       setShareUrl(url);
-      setNotice('分享連結已複製，七天內有效，隨時可以撤回。');
+      setNotice(shareCopiedCopy(server.expiresAt));
     } catch {
       setShareUrl('');
       setNotice('現在產生不了分享連結，登入並連上網路後再試。');
@@ -308,7 +307,7 @@ export function PersonalTimetable() {
           複製分享連結
         </button>
       </div>
-      {!uid && <p className={styles.notice}>登入後才能產生七天內有效、可撤回的連結。</p>}
+      {!uid && <p className={styles.notice}>登入後才能產生分享連結。</p>}
       {shareUrl && <p className={styles.notice}>{shareUrl}</p>}
 
       {view === 'grid' ? (

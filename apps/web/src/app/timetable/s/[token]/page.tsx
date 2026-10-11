@@ -2,7 +2,13 @@
 
 import { use, useEffect, useState } from 'react';
 import { SiteShell } from '@/components/SiteShell';
-import { WEEKDAY_LABELS, courseTimeLabel, type PersonalCourse, type TimetableMeta } from '@campus/shared';
+import {
+  WEEKDAY_LABELS,
+  courseTimeLabel,
+  sharedTimetableTitle,
+  type PersonalCourse,
+  type TimetableMeta,
+} from '@campus/shared';
 import { loadSharedTimetable } from '@/lib/timetable/store';
 import styles from '@/components/academic/academic.module.css';
 
@@ -25,7 +31,7 @@ export default function SharedTimetablePage({ params }: { params: Promise<{ toke
           error.message === 'expired'
             ? '這份分享已過期。'
             : error.message === 'revoked'
-              ? '這份分享已撤回。'
+              ? '這份分享已經關掉了。'
               : error.message === 'unconfigured'
                 ? '這個環境還沒接上資料庫，沒有可顯示的分享課表。'
                 : '找不到這份分享。';
@@ -37,7 +43,10 @@ export default function SharedTimetablePage({ params }: { params: Promise<{ toke
   }, [token]);
 
   return (
-    <SiteShell title="分享的課表" subtitle="這是對方主動分享的快照，不是學校正式課表。">
+    <SiteShell
+      title={state.status === 'ready' ? sharedTimetableTitle(state.expiresAt) : '同學分享的課表'}
+      subtitle="這是對方主動分享的快照，不是學校正式課表。"
+    >
       {state.status === 'loading' && <p className={styles.notice}>正在讀取分享課表…</p>}
       {state.status === 'error' && (
         <p className={styles.note} role="alert">
@@ -47,7 +56,7 @@ export default function SharedTimetablePage({ params }: { params: Promise<{ toke
       {state.status === 'ready' && (
         <>
           <p className={styles.notice}>
-            {state.name} · 這份連結在 {new Date(state.expiresAt).toLocaleString('zh-TW')} 前有效。
+            {state.name}
           </p>
           <div className={styles.week}>
             {WEEKDAY_LABELS.map((label, index) => {
