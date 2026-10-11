@@ -5,7 +5,7 @@ const { HttpsError } = require('firebase-functions/v2/https');
 /**
  * 老師工作台的申訴清單。學生的名字和學號只有伺服器讀得到，所以由這裡補上再回傳；
  * 規則不用放寬讓老師讀學生的個人資料。
- * 學校管理者看全校；老師只看 schools/{schoolId}/courseTeachers 裡有自己的課。
+ * 學校管理者看全校；老師只看 schools/{schoolId}/courseTeachers（以開課代號「課名｜老師」為編號）裡有自己的課。
  */
 
 function isoOf(value) {
@@ -51,12 +51,17 @@ function createListTeacherAppealsHandler({ db }) {
         .collection(`schools/${schoolId}/courseTeachers`)
         .where('teacherUids', 'array-contains', uid)
         .get();
-      courses = mine.docs.map((item) => item.id);
-      for (const courseName of courses) {
+      // 文件編號是開課代號（課名｜老師），同名但不同老師的課分得開
+      const offeringIds = mine.docs.map((item) => item.id);
+      courses = offeringIds.map((id) => {
+        const [name, teacher] = id.split('｜');
+        return teacher ? `${name}（${teacher}）` : name;
+      });
+      for (const offeringId of offeringIds) {
         const snap = await db
           .collection('courseAppeals')
           .where('schoolId', '==', schoolId)
-          .where('courseName', '==', courseName)
+          .where('offeringId', '==', offeringId)
           .get();
         docs.push(...snap.docs);
       }

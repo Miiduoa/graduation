@@ -185,3 +185,18 @@ describe('meetups', () => {
     );
   });
 });
+
+describe('開課代號', () => {
+  it('同名的課、不同老師分得開；老師沒填也有代號', async () => {
+    const { courseOfferingId, timetableIndex } = await import('@campus/shared');
+    expect(courseOfferingId({ name: '資料庫', teacher: '王老師' })).toBe('資料庫｜王老師');
+    expect(courseOfferingId({ name: '資料庫', teacher: '李老師' })).not.toBe('資料庫｜王老師');
+    expect(courseOfferingId({ name: '專題/實作', teacher: '' })).toBe('專題／實作｜老師未填');
+    expect(
+      timetableIndex([
+        { id: 'a', name: '資料庫', teacher: '王老師' },
+        { id: 'b', name: '資料庫', teacher: '王老師' },
+      ]),
+    ).toEqual({ courseIds: ['a', 'b'], offeringIds: ['資料庫｜王老師'] });
+  });
+});

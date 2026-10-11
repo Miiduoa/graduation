@@ -15,8 +15,10 @@ import {
   MEETUP_DURATION_MINUTES,
   cleanCourses,
   cleanMeta,
+  courseOfferingId,
   meetupDocId,
   periodAt,
+  timetableIndex,
   type PersonalCourse,
   type TimetableMeta,
 } from '@campus/shared';
@@ -42,13 +44,17 @@ function empty(schoolId: string): StoredTimetable {
   };
 }
 
-export async function loadPersonalTimetable(uid: string | null, schoolId: string): Promise<StoredTimetable> {
+export async function loadPersonalTimetable(
+  uid: string | null,
+  schoolId: string,
+): Promise<StoredTimetable> {
   const local = await AsyncStorage.getItem(`${KEY}:${uid || 'local'}`);
   const fallback = local ? JSON.parse(local) : empty(schoolId);
   if (!uid) return { ...empty(schoolId), ...fallback, courses: cleanCourses(fallback.courses) };
   try {
     const snap = await getDoc(doc(getDb(), 'users', uid, 'personalTimetable', 'current'));
-    if (!snap.exists()) return { ...empty(schoolId), ...fallback, courses: cleanCourses(fallback.courses) };
+    if (!snap.exists())
+      return { ...empty(schoolId), ...fallback, courses: cleanCourses(fallback.courses) };
     const data = snap.data() as StoredTimetable;
     return {
       ...empty(schoolId),
@@ -72,6 +78,8 @@ export async function savePersonalTimetable(uid: string | null, timetable: Store
   if (!uid) return { stored: 'local' as const };
   await setDoc(doc(getDb(), 'users', uid, 'personalTimetable', 'current'), {
     ...next,
+    // 送申訴時規則用這兩個清單確認課在自己的課表裡
+    ...timetableIndex(next.courses),
     updatedAt: serverTimestamp(),
   });
   return { stored: 'cloud' as const };
@@ -156,30 +164,82 @@ export async function createServerShare(schoolId: string, name: string) {
 
 export async function listCourseAppeals(schoolId: string, uid: string) {
   const snap = await getDocs(
-    query(collection(getDb(), 'courseAppeals'), where('schoolId', '==', schoolId), where('studentUid', '==', uid)),
+    query(
+      collection(getDb(), 'courseAppeals'),
+      where('schoolId', '==', schoolId),
+      where('studentUid', '==', uid),
+    ),
   );
   return snap.docs.map((item) => ({ id: item.id, ...item.data() }));
 }
 
-export async function createCourseAppeal(input: {
-  schoolId: string;
-  studentUid: string;
-  courseId: string;
-  courseName: string;
-  title: string;
-  body: string;
-}, requestId?: string) {
+/** 舊的課表文件沒有索引時，用課表裡實際的課補上（只補，不會多加課）。 */
+async function ensureTimetableIndex(
+  uid: string,
+  schoolId: string,
+  localCourses?: PersonalCourse[],
+) {
+  const ref = doc(getDb(), 'users', uid, 'personalTimetable', 'current');
+  const snap = await getDoc(ref);
+  if (!snap.exists()) {
+    // 課表只存在這台裝置上：先存上去，申訴才對得到課
+    if (localCourses?.length) {
+      const courses = cleanCourses(localCourses);
+      await setDoc(
+        ref,
+        { schoolId, courses, ...timetableIndex(courses), updatedAt: serverTimestamp() },
+        { merge: true },
+      );
+    }
+    return;
+  }
+  const data = snap.data() as { courses?: unknown; courseIds?: unknown };
+  if (Array.isArray(data.courseIds)) return;
+  await setDoc(ref, timetableIndex(cleanCourses(data.courses)), { merge: true });
+}
+
+/** 課表裡這門課的開課代號（課名｜老師），老師工作台用它找到對的老師。 */
+export function appealOfferingId(course: PersonalCourse) {
+  return courseOfferingId(course);
+}
+
+export async function createCourseAppeal(
+  input: {
+    schoolId: string;
+    studentUid: string;
+    courseId: string;
+    courseName: string;
+    offeringId: string;
+    title: string;
+    body: string;
+  },
+  requestId?: string,
+  localCourses?: PersonalCourse[],
+) {
+  await ensureTimetableIndex(input.studentUid, input.schoolId, localCourses);
   // 同一次填寫用同一個編號，連按送出也只會有一筆
-  const ref = requestId ? doc(getDb(), 'courseAppeals', requestId) : doc(collection(getDb(), 'courseAppeals'));
-  await setDoc(ref, {
-    ...input,
-    teacherNote: '',
-    status: 'pending',
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
+  const ref = requestId
+    ? doc(getDb(), 'courseAppeals', requestId)
+    : doc(collection(getDb(), 'courseAppeals'));
+  try {
+    await setDoc(ref, {
+      ...input,
+      teacherNote: '',
+      status: 'pending',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    // 連按時第一下其實已經送到了：同一個編號的申訴已經在，就當作送出成功
+    const existing = await getDoc(ref).catch(() => null);
+    if (existing?.exists() && existing.data()?.studentUid === input.studentUid) return ref.id;
+    throw error;
+  }
 }
 
 export async function withdrawCourseAppeal(id: string) {
-  await updateDoc(doc(getDb(), 'courseAppeals', id), { status: 'withdrawn', updatedAt: serverTimestamp() });
+  await updateDoc(doc(getDb(), 'courseAppeals', id), {
+    status: 'withdrawn',
+    updatedAt: serverTimestamp(),
+  });
 }

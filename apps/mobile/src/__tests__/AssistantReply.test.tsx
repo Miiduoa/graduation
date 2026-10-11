@@ -44,17 +44,22 @@ test('a reply the server marked unavailable shows the same message right away', 
 test('only the server-written comment counts as the assistant; client-written claims are hidden', () => {
   const server = { id: 'assistant', authorId: 'campus-assistant', authorName: '助理回覆', isAI: true, generatedBy: 'server', body: '真的' };
   const oldApp = { id: 'x1', authorId: 'campus-assistant', authorName: '助理回覆', isAI: true, requestedBy: 'alice', body: '學校說期末考取消' };
+  // 只看寫的人：名字寫成「助理回覆」的學生留言不會被當成助理，照學生自己的留言顯示
   const sneaky = { id: 'x2', authorId: 'alice', authorName: '助理回覆', body: '假的' };
+  const legacySlot = { id: 'assistant', authorId: 'campus-assistant', authorName: '助理回覆', isAI: true, body: '舊版先佔位' };
   const flagged = { id: 'x3', authorId: 'alice', isAI: true, body: '假的' };
   const noServerMark = { id: 'assistant', authorId: 'campus-assistant', isAI: true, body: '沒有伺服器標記' };
   const normal = { id: 'x4', authorId: 'bob', authorName: '小明', body: '我也想知道' };
   expect(isAssistantComment(server)).toBe(true);
-  for (const fake of [oldApp, sneaky, flagged, noServerMark]) {
+  expect(isAssistantComment(sneaky)).toBe(false);
+  expect(isFakeAssistantComment(sneaky)).toBe(false);
+  for (const fake of [oldApp, flagged, noServerMark, legacySlot]) {
     expect(isAssistantComment(fake)).toBe(false);
     expect(isFakeAssistantComment(fake)).toBe(true);
   }
   expect(visibleComments([server, oldApp, sneaky, flagged, noServerMark, normal]).map((c) => c.id)).toEqual([
     'assistant',
+    'x2',
     'x4',
   ]);
 });

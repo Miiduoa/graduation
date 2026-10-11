@@ -28,7 +28,7 @@ export const APPEAL_EMPTY_COPY = {
   body: '要提出時填下面的表單。',
 };
 
-export const APPEAL_NEED_COURSE_COPY = '你的課表裡還沒有課，沒有課就不能送申訴。先到「我的課表」把課加進來。';
+export const APPEAL_NEED_COURSE_COPY = '先在『我的課表』加上這門課，才能送申訴。';
 
 type TimeLike = string | number | Date | { toMillis?: () => number; seconds?: number } | null | undefined;
 

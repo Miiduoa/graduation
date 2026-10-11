@@ -16,6 +16,7 @@ import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
 import { useSelectedSchool } from '@/components/SelectedSchoolProvider';
 import {
+  appealOfferingId,
   createCourseAppeal,
   listCourseAppeals,
   loadPersonalTimetable,
@@ -61,7 +62,8 @@ export default function AppealsPage() {
   const sorted = useMemo(
     () =>
       [...items].sort(
-        (a, b) => appealTimeValue(b.updatedAt || b.createdAt) - appealTimeValue(a.updatedAt || a.createdAt),
+        (a, b) =>
+          appealTimeValue(b.updatedAt || b.createdAt) - appealTimeValue(a.updatedAt || a.createdAt),
       ),
     [items],
   );
@@ -108,22 +110,26 @@ export default function AppealsPage() {
           studentUid: user.uid,
           courseId: picked.id,
           courseName: picked.name,
+          offeringId: appealOfferingId(picked),
           title: title.trim(),
           body: body.trim(),
         },
         requestId.current,
+        courses || undefined,
       );
       requestId.current = newRequestId();
       setTitle('');
       setBody('');
       setCourseId('');
       setNotice('已送出，等老師看。');
-      await load();
     } catch {
       setNotice('這次沒有送出，請稍後再試。');
-    } finally {
       setBusy(false);
+      return;
     }
+    // 重新整理清單失敗不影響已經送出的結果
+    await load().catch(() => undefined);
+    setBusy(false);
   };
 
   return (
@@ -140,9 +146,12 @@ export default function AppealsPage() {
       <section className={styles.panel} aria-label="新增申訴">
         <h2>新增申訴</h2>
         {noCourses ? (
-          <p className={styles.notice}>
-            {APPEAL_NEED_COURSE_COPY} <Link href="/timetable">我的課表 →</Link>
-          </p>
+          <>
+            <p className={styles.notice}>{APPEAL_NEED_COURSE_COPY}</p>
+            <Link href="/timetable" className="btn primary">
+              去我的課表
+            </Link>
+          </>
         ) : (
           <>
             <label className={styles.field}>
