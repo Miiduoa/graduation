@@ -49,7 +49,7 @@ PPT 用 **PingFang TC** 字體 + 中文 emoji。在你 Mac 的 PowerPoint 或 Ke
 
 PPT 裡 8 個影片 + 4 個截圖位置都是虛線框 placeholder，等你錄完媒體後：
 1. 把實機檔案放到 `demo-media/` 資料夾
-2. 重新跑 `node /Users/miiduoa/Library/Application\ Support/Claude/local-agent-mode-sessions/.../delivery/build_pptx.js`（或在 PPT 裡手動拖進去）
+2. 在 PPT 裡把媒體手動拖進對應的虛線框
 
 ## 4 人分工速查
 
