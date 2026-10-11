@@ -82,22 +82,36 @@ export default function StudentTodayScreen() {
         ) : (
           <>
             <View style={s.focus}>
-              <Text style={s.label}>接下來要做的事</Text>
+              {data?.tasks.length ? <Text style={s.label}>接下來要做的事</Text> : null}
               <Text style={s.focusTitle}>
-                {data
-                  ? data.tasks.length
-                    ? `${data.tasks.length} 項待辦`
-                    : '從你的課程開始'
-                  : '登入後查看課程'}
+                {!uid
+                  ? '登入後查看課程'
+                  : data
+                    ? data.tasks.length
+                      ? `${data.tasks.length} 項待辦`
+                      : '今天沒有待辦'
+                    : '課程讀取中'}
               </Text>
-              <Text style={s.focusBody}>查看課程內容，掌握作業期限與最新動態。</Text>
-              <Pressable
-                accessibilityRole="button"
-                style={s.primary}
-                onPress={() => safeNavigate(navigation, 'CoursesHome')}
-              >
-                <Text style={s.primaryText}>開啟課程 ↗</Text>
-              </Pressable>
+              {!uid ? (
+                <Pressable
+                  accessibilityRole="button"
+                  style={s.primary}
+                  onPress={() => rootNavigateNested('我的', 'SSOLogin')}
+                >
+                  <Text style={s.primaryText}>登入</Text>
+                </Pressable>
+              ) : data?.tasks.length ? (
+                <>
+                  <Text style={s.focusBody}>依截止時間排在下面，點進去看作業。</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    style={s.primary}
+                    onPress={() => safeNavigate(navigation, 'CoursesHome')}
+                  >
+                    <Text style={s.primaryText}>開啟課程 ↗</Text>
+                  </Pressable>
+                </>
+              ) : null}
             </View>
             {data && (
               <>
