@@ -44,7 +44,7 @@ import {
 import { useAsyncList } from '../hooks/useAsyncList';
 import { Ionicons } from '@expo/vector-icons';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
-import { ASSISTANT_AUTHOR_NAME, isAssistantComment } from './groupAssistant';
+import { ASSISTANT_AUTHOR_NAME, isAssistantComment, visibleComments } from './groupAssistant';
 
 type PostKind = 'announcement' | 'question' | 'post';
 
@@ -169,7 +169,8 @@ export function GroupPostScreen(props: any) {
     const ref = collection(db, 'groups', groupId, 'posts', postId, 'comments');
     const qy = query(ref, orderBy('createdAt', 'asc'), limit(200));
     const snap = await getDocs(qy);
-    return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }) as any);
+    // 不是伺服器寫的「助理回覆」不顯示
+    return visibleComments(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }) as any));
   }, [db, groupId, postId]);
 
   // Fetch user profiles for comments
@@ -714,7 +715,7 @@ export function GroupPostScreen(props: any) {
                     : commentAuthor?.displayName || c.authorName || c.authorId.slice(0, 8) || '用戶';
                   const isMyComment =
                     auth.user &&
-                    (fromAssistant ? c.requestedBy === auth.user.uid : c.authorId === auth.user.uid);
+                    !fromAssistant && c.authorId === auth.user.uid;
                   const alreadyLiked = auth.user && c.likedBy?.includes(auth.user.uid);
                   const isEditing = editingCommentId === c.id;
 
