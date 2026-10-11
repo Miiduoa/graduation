@@ -244,8 +244,10 @@ test('my account uses the signed-in profile without invented grades, identity or
 test('confirming logout calls the real sign-out flow without navigating to a fake login state', async () => {
   const alert = jest.spyOn(Alert, 'alert');
   const view = render(<MeAiFirstScreen />);
-  fireEvent.press(view.getByText('登出'));
-  await act(async () => alert.mock.calls[0][2]?.find((item) => item.text === '登出')?.onPress?.());
+  fireEvent.press(view.getByText('登出學校帳號'));
+  await act(async () =>
+    alert.mock.calls[0][2]?.find((item) => item.text === '登出學校帳號')?.onPress?.(),
+  );
   expect(mockAuth.signOutWithWarning).toHaveBeenCalledTimes(1);
   expect(mockNavigation.navigate).not.toHaveBeenCalled();
   expect(safeNavigate).not.toHaveBeenCalled();
@@ -254,8 +256,8 @@ test('confirming logout calls the real sign-out flow without navigating to a fak
 test('a logout confirmation belonging to an old account cannot sign out the new account', async () => {
   const alert = jest.spyOn(Alert, 'alert');
   const view = render(<MeAiFirstScreen />);
-  fireEvent.press(view.getByText('登出'));
-  const confirm = alert.mock.calls[0][2]?.find((item) => item.text === '登出')?.onPress;
+  fireEvent.press(view.getByText('登出學校帳號'));
+  const confirm = alert.mock.calls[0][2]?.find((item) => item.text === '登出學校帳號')?.onPress;
   mockAuth.user = { uid: 'student-b', email: 'student-b@example.edu' };
   view.rerender(<MeAiFirstScreen />);
   expect(view.queryByText('陳同學')).toBeNull();
@@ -268,8 +270,10 @@ test('a rejected sign-out stays on the account page and reports the failure', as
   const alert = jest.spyOn(Alert, 'alert');
   mockAuth.signOutWithWarning.mockRejectedValueOnce(new Error('offline'));
   const view = render(<MeAiFirstScreen />);
-  fireEvent.press(view.getByText('登出'));
-  await act(async () => alert.mock.calls[0][2]?.find((item) => item.text === '登出')?.onPress?.());
+  fireEvent.press(view.getByText('登出學校帳號'));
+  await act(async () =>
+    alert.mock.calls[0][2]?.find((item) => item.text === '登出學校帳號')?.onPress?.(),
+  );
   expect(alert).toHaveBeenLastCalledWith('無法登出', '請稍後重試。');
   expect(view.getByText('陳同學')).toBeTruthy();
   expect(safeNavigate).not.toHaveBeenCalled();

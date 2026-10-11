@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { NuniError, nuniRecord } from '@campus/shared/src/nuni';
+import { platformDestination } from '../accountDestination';
 import {
   HANDLE,
   LOGIN_COOKIE,
@@ -39,6 +40,7 @@ function redirect(path: string): NextResponse {
 }
 
 export async function startGoogle(request: NextRequest): Promise<NextResponse> {
+  const returnUrl = platformDestination(request.nextUrl.searchParams.get('returnUrl'));
   try {
     enabled();
     requireSameOrigin(request);
@@ -108,6 +110,7 @@ export async function startGoogle(request: NextRequest): Promise<NextResponse> {
         state,
         verifier,
         callback,
+        returnUrl,
         expiresAt,
       },
       expiresAt,
@@ -115,7 +118,9 @@ export async function startGoogle(request: NextRequest): Promise<NextResponse> {
     return response;
   } catch {
     try {
-      return redirect('/classroom/login?issue=unavailable');
+      return redirect(
+        `/classroom/login?issue=unavailable${returnUrl === '/classroom' ? '' : `&returnUrl=${encodeURIComponent(returnUrl)}`}`,
+      );
     } catch (error) {
       return errorResponse(error);
     }
@@ -123,9 +128,11 @@ export async function startGoogle(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function finishGoogle(request: NextRequest): Promise<NextResponse> {
+  let returnUrl = '/classroom';
   try {
     enabled();
     const tx = openCookie(LOGIN_COOKIE, request.cookies.get(LOGIN_COOKIE)?.value);
+    if (tx && typeof tx.returnUrl === 'string') returnUrl = platformDestination(tx.returnUrl);
     const params = request.nextUrl.searchParams;
     if (
       !tx ||
@@ -186,13 +193,17 @@ export async function finishGoogle(request: NextRequest): Promise<NextResponse> 
       sessionHandle: result.sessionHandle,
       expiresAt: Date.now() + result.expiresInSeconds * 1000,
     };
-    const response = redirect('/classroom');
+    const response = redirect(
+      platformDestination(typeof tx.returnUrl === 'string' ? tx.returnUrl : null),
+    );
     setCookie(response, SESSION_COOKIE, session, session.expiresAt);
     setCookie(response, LOGIN_COOKIE, null);
     return response;
   } catch {
     try {
-      const response = redirect('/classroom/login?issue=expired');
+      const response = redirect(
+        `/classroom/login?issue=expired${returnUrl === '/classroom' ? '' : `&returnUrl=${encodeURIComponent(returnUrl)}`}`,
+      );
       setCookie(response, LOGIN_COOKIE, null);
       return response;
     } catch (error) {

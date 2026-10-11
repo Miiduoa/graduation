@@ -58,6 +58,43 @@ afterEach(() => {
 });
 
 describe('Nuni additive classroom configuration', () => {
+  it('keeps the guest shell usable when optional course integration is disabled without opening course APIs', async () => {
+    vi.stubEnv('NUNI_CLASSROOM_ENABLED', '');
+    vi.stubEnv('CAMPUS_BACKEND', 'firebase');
+    const current = await handleNuni(request('api/nuni/session'), ['session']);
+    expect(await current.json()).toEqual({ authenticated: false });
+    const options = await handleNuni(request('api/nuni/sign-in-options'), ['sign-in-options']);
+    expect(await options.json()).toEqual({ google: false });
+    const courses = await handleNuni(request('api/nuni/class-workspaces'), ['class-workspaces']);
+    expect(courses.status).toBe(404);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it('verifies and revokes an existing session even after course integration is disabled', async () => {
+    vi.stubEnv('NUNI_CLASSROOM_ENABLED', 'false');
+    const value = session();
+    const cookie = `${SESSION_COOKIE}=${sealCookie(SESSION_COOKIE, value)}`;
+    fetcher.mockResolvedValueOnce(
+      response({ authenticated: true, platformAccountId: account, isPlatformOperator: false }),
+    );
+    const current = await handleNuni(request('api/nuni/session', { cookie }), ['session']);
+    expect(await current.json()).toMatchObject({
+      authenticated: true,
+      context: sessionContext(value),
+    });
+    expect(current.headers.has('set-cookie')).toBe(false);
+    fetcher.mockResolvedValueOnce(response({ signedOut: true }));
+    const done = await handleNuni(
+      request('api/nuni/logout', { cookie, context: sessionContext(value), post: {} }),
+      ['logout'],
+    );
+    expect(done.status).toBe(200);
+    expect(done.cookies.get(SESSION_COOKIE)?.value).toBe('');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(
+      (await handleNuni(request('api/nuni/class-workspaces', { cookie }), ['class-workspaces']))
+        .status,
+    ).toBe(404);
+  });
   it.each([
     ['true', '', true],
     ['true', 'firebase', true],
@@ -98,7 +135,9 @@ describe('Nuni additive classroom configuration', () => {
 
   it('keeps disabled classroom APIs closed and directs OAuth errors to the classroom login', async () => {
     vi.stubEnv('NUNI_CLASSROOM_ENABLED', 'false');
-    expect((await handleNuni(request('api/nuni/session'), ['session'])).status).toBe(404);
+    expect(
+      (await handleNuni(request('api/nuni/class-workspaces'), ['class-workspaces'])).status,
+    ).toBe(404);
     const started = await startGoogle(request('auth/platform/start', { post: {} }));
     expect(started.headers.get('location')).toBe(
       'https://nuni.tw/classroom/login?issue=unavailable',
@@ -351,6 +390,77 @@ describe('Nuni Google authorization code flow', () => {
     );
     expect(result.cookies.has(LOGIN_COOKIE)).toBe(false);
   });
+  it.each([
+    '/social?campus=tw-pu',
+    '/merchant',
+    '/classroom/course/cw_11111111-1111-4111-8111-111111111111#assignment-cwa_22222222-2222-4222-8222-222222222222',
+  ])('returns to the verified original task after OAuth: %s', async (returnUrl) => {
+    fetcher.mockResolvedValueOnce(response(tx()));
+    const started = await startGoogle(
+      request(`auth/platform/start?returnUrl=${encodeURIComponent(returnUrl)}`, { post: {} }),
+    );
+    const cookie = started.cookies.get(LOGIN_COOKIE)!.value;
+    const login = openCookie(LOGIN_COOKIE, cookie)!;
+    expect(login.returnUrl).toBe(returnUrl);
+    fetcher
+      .mockResolvedValueOnce(response({ id_token: 'signed-provider-token' }))
+      .mockResolvedValueOnce(
+        response({ sessionHandle: session().sessionHandle, expiresInSeconds: 3600 }),
+      );
+    const result = await finishGoogle(
+      request(`auth/platform/callback?state=${login.state}&code=test-code`, {
+        cookie: `${LOGIN_COOKIE}=${cookie}`,
+      }),
+    );
+    expect(result.headers.get('location')).toBe(`https://nuni.tw${returnUrl}`);
+  });
+  it('preserves a safe merchant destination when starting login is unavailable', async () => {
+    vi.stubEnv('PLATFORM_GOOGLE_LOGIN_ENABLED', 'false');
+    const result = await startGoogle(
+      request('auth/platform/start?returnUrl=%2Fmerchant', { post: {} }),
+    );
+    const location = new URL(result.headers.get('location')!);
+    expect(location.searchParams.get('returnUrl')).toBe('/merchant');
+    expect(location.searchParams.get('issue')).toBe('unavailable');
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it.each(['/merchant?application=current', 'https://attacker.example'])(
+    'only keeps the trusted safe transaction destination after cancellation: %s',
+    async (target) => {
+      const login = {
+        ...tx(),
+        returnUrl: target,
+        state: 's'.repeat(43),
+        verifier: 'v'.repeat(43),
+        callback: 'https://nuni.tw/auth/platform/callback',
+        expiresAt: Date.now() + 600_000,
+      };
+      const result = await finishGoogle(
+        request(
+          `auth/platform/callback?state=${login.state}&error=access_denied&returnUrl=https://attacker.example`,
+          { cookie: `${LOGIN_COOKIE}=${sealCookie(LOGIN_COOKIE, login)}` },
+        ),
+      );
+      const destination = new URL(result.headers.get('location')!);
+      expect(destination.origin).toBe('https://nuni.tw');
+      expect(destination.searchParams.get('returnUrl')).toBe(
+        target.startsWith('/') ? target : null,
+      );
+      expect(result.cookies.get(LOGIN_COOKIE)?.value).toBe('');
+      expect(fetcher).not.toHaveBeenCalled();
+    },
+  );
+  it.each(['https://attacker.example', '//attacker.example', '/auth/platform/start', '/grades'])(
+    'does not carry an external or school-only destination into the login transaction: %s',
+    async (target) => {
+      fetcher.mockResolvedValue(response(tx()));
+      const started = await startGoogle(
+        request(`auth/platform/start?returnUrl=${encodeURIComponent(target)}`, { post: {} }),
+      );
+      const login = openCookie(LOGIN_COOKIE, started.cookies.get(LOGIN_COOKIE)!.value)!;
+      expect(login.returnUrl).toBe('/classroom');
+    },
+  );
   it('rejects mismatched state before any token exchange', async () => {
     const login = {
       ...tx(),
