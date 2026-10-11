@@ -83,20 +83,52 @@ test('店家工作台：沒號碼的訂單寫「取餐號碼：待給號碼」�
   expect(view.getByText('開始製作')).toBeTruthy();
 });
 
-test('店家工作台：給號碼被擋（例如不是這家店的帳號）照實提示，不顯示假號碼', async () => {
-  const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
-  mockList.mockResolvedValue([pendingOrder]);
-  mockGive.mockRejectedValue(new Error('Only the buyer or this store can get a number'));
+test('店家工作台：給號碼失敗，按鈕旁邊寫「號碼沒給出去，請再按一次。」，同一顆鈕再按成功後那句消失', async () => {
+  mockList.mockResolvedValueOnce([pendingOrder]).mockResolvedValueOnce([pendingOrder]).mockResolvedValue([
+    { ...pendingOrder, status: 'confirmed', queueNumber: '7' },
+  ]);
+  mockGive.mockRejectedValueOnce(new Error('deadline-exceeded')).mockResolvedValue({ queueNumber: 7, status: 'confirmed' });
   const view = render(<MerchantHubScreen />);
   await waitFor(() => expect(view.getByText('給號碼並接單')).toBeTruthy());
   await act(async () => fireEvent.press(view.getByText('給號碼並接單')));
-  expect(alert).toHaveBeenCalledWith(
-    '號碼還沒給出去',
-    'Only the buyer or this store can get a number\n不接這張單可以按「拒單」。',
-  );
+  expect(view.getByText('號碼沒給出去，請再按一次。')).toBeTruthy();
   expect(view.getByText(/取餐號碼：待給號碼/)).toBeTruthy();
   expect(view.getByText('拒單')).toBeTruthy();
   expect(view.queryByText(/取餐號碼 \d/)).toBeNull();
+  await act(async () => fireEvent.press(view.getByText('給號碼並接單')));
+  await waitFor(() => expect(view.getByText('取餐號碼 7')).toBeTruthy());
+  expect(view.queryByText('號碼沒給出去，請再按一次。')).toBeNull();
+  expect(mockGive).toHaveBeenCalledTimes(2);
+});
+
+test('出餐頁：接了的單有「取消訂單」，先問「確定取消這張單？學生會收到通知。」，按「取消訂單」才走取消', async () => {
+  const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+  mockList.mockResolvedValue([{ ...pendingOrder, status: 'preparing', queueNumber: '3' }]);
+  mockUpdate.mockResolvedValue({ status: 'cancelled' });
+  const view = render(<MerchantHubScreen view="kitchen" />);
+  await waitFor(() => expect(view.getByText('取消訂單')).toBeTruthy());
+  expect(view.queryByText('拒單')).toBeNull();
+  fireEvent.press(view.getByText('取消訂單'));
+  expect(alert).toHaveBeenCalledTimes(1);
+  const [title, message, buttons] = alert.mock.calls[0] as [string, string, Array<{ text: string; onPress?: () => void }>];
+  expect(title).toBe('確定取消這張單？');
+  expect(message).toBe('學生會收到通知。');
+  expect(buttons.map((button) => button.text)).toEqual(['先不要', '取消訂單']);
+  expect(mockUpdate).not.toHaveBeenCalled();
+  await act(async () => buttons[1].onPress?.());
+  expect(mockUpdate).toHaveBeenCalledWith({ schoolId: 'pu', orderId: 'co_order_abcd', status: 'cancelled' });
+  alert.mockRestore();
+});
+
+test('出餐頁：按「先不要」不會取消；已完成或已取消的單沒有「取消訂單」', async () => {
+  const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+  mockList.mockResolvedValue([{ ...pendingOrder, status: 'ready', queueNumber: '3' }]);
+  const view = render(<MerchantHubScreen view="kitchen" />);
+  await waitFor(() => expect(view.getByText('取消訂單')).toBeTruthy());
+  fireEvent.press(view.getByText('取消訂單'));
+  const buttons = alert.mock.calls[0][2] as Array<{ text: string; onPress?: () => void }>;
+  buttons[0].onPress?.();
+  expect(mockUpdate).not.toHaveBeenCalled();
   alert.mockRestore();
 });
 
