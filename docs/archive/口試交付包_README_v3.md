@@ -18,7 +18,7 @@
 | 影片數 | 13 | **14**（新增 V14 agent 主秀） |
 | 截圖數 | 18 | **20**（新增 S19/S20 agent console） |
 
-## 4 份 v3 檔案（都在 `/Users/miiduoa/Desktop/畢業專題/`）
+## 4 份 v3 檔案（都在 repo 根目錄）
 
 | 檔案 | 內容亮點 |
 |------|------|
@@ -106,7 +106,7 @@
 8. V09 — AI 學伴配對 4 維評分
 9. V11 — OnBusMode 沉浸式搭車
 
-存到 `/Users/miiduoa/Desktop/畢業專題/demo-media/` 並依檔名規範存好。
+存到 repo 根目錄的 `demo-media/` 並依檔名規範存好。
 
 ## 加油！5/23 一戰成名。
 

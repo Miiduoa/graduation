@@ -17,7 +17,6 @@ Today → 角色入口 → 校園 → 收件匣 → 我的
 實際畫面先看：
 
 - [Mobile demo](../apps/mobile/DEMO.md)
-- `apps/mobile/ai_first_tabs.png`
 - `apps/mobile/ai_overlay_optional.png`
 
 ## 2. 再確認它不是只有前端
