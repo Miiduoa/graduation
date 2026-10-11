@@ -4825,6 +4825,32 @@ exports.busArrivalReminder = onSchedule(
 );
 
 // =====================================================
+// 群組提問的助理回覆（只由伺服器寫入）
+// =====================================================
+
+const { createGroupAssistantReplyHandler, generateWithCampusAssistant } = require('./groupAssistantReply');
+const handleGroupQuestion = createGroupAssistantReplyHandler({
+  db,
+  FieldValue,
+  generate: generateWithCampusAssistant,
+  // 設成 off 可以先關掉；關掉時提問底下不顯示助理回覆
+  enabled: () => process.env.GROUP_ASSISTANT_REPLY !== 'off',
+});
+
+exports.groupQuestionAssistantReply = onDocumentCreated(
+  {
+    document: 'groups/{groupId}/posts/{postId}',
+    region: REGION,
+    timeoutSeconds: 120,
+    memory: '1GiB',
+  },
+  async (event) => {
+    const { groupId, postId } = event.params;
+    await handleGroupQuestion({ groupId, postId, post: event.data?.data() });
+  },
+);
+
+// =====================================================
 // 成績通知排程
 // =====================================================
 

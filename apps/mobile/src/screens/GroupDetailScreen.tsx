@@ -33,9 +33,9 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
-import { chatWithCampusAssistant } from '../services/ai';
 import { navigateToCourseScreen } from '../utils/courseNavigation';
-import { ASSISTANT_AUTHOR_ID, ASSISTANT_AUTHOR_NAME } from './groupAssistant';
+import { ASSISTANT_AUTHOR_NAME } from './groupAssistant';
+import { AssistantReplyPending } from './AssistantReplyPending';
 
 type Group = {
   id: string;
@@ -59,6 +59,7 @@ type Post = {
   createdAt?: any;
   authorId: string;
   authorName?: string | null;
+  assistantReply?: { status?: string } | null;
   solved?: boolean;
   pinned?: boolean;
   pinnedAt?: any;
@@ -545,32 +546,7 @@ export function GroupDetailScreen(props: any) {
         likedBy: [],
       });
 
-      // 如果是問題，請校園助理先回一則，留言掛在助理名下，不掛發問的學生
-      if (composeKind === 'question') {
-        const postBody = body.trim();
-        const postTitle = title.trim();
-        const requesterUid = auth.user.uid;
-        // 非同步產生助理回覆（不阻擋 UI）
-        (async () => {
-          try {
-            const aiResponse = await chatWithCampusAssistant(
-              [{ role: 'user', content: `課程問題：${postTitle}\n\n詳細說明：${postBody}` }],
-              { schoolId: school.id, userId: 'ai-assistant' },
-            );
-            if (aiResponse.content && !aiResponse.error) {
-              await addDoc(collection(db, 'groups', groupId, 'posts', postRef.id, 'comments'), {
-                body: `${aiResponse.content}\n\n_這是校園助理的回覆，請以老師和同學的回答為準。_`,
-                createdAt: serverTimestamp(),
-                authorId: ASSISTANT_AUTHOR_ID,
-                authorName: ASSISTANT_AUTHOR_NAME,
-                requestedBy: requesterUid,
-                isAI: true,
-              });
-            }
-          } catch {}
-        })();
-      }
-
+      // 如果是問題，助理回覆由伺服器在提問建立後產生，這邊不用再寫
       setTitle('');
       setBody('');
       setTopic('課程討論');
@@ -1116,6 +1092,14 @@ export function GroupDetailScreen(props: any) {
                           {lastComment.body}
                         </Text>
                       </View>
+                    ) : p.kind === 'question' && groupId && !isFirebaseMockMode() ? (
+                      <AssistantReplyPending
+                        groupId={groupId}
+                        postId={p.id}
+                        createdAt={p.createdAt}
+                        status={p.assistantReply?.status}
+                        onArrived={reloadComments}
+                      />
                     ) : null}
 
                     {/* 回覆計數 */}
