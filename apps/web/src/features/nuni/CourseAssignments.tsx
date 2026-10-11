@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { NuniAssignment, NuniWorkspace } from '@campus/shared/src/nuni';
+import { useLocationHash } from '@/lib/useLocationHash';
 import { AssignmentCard } from './AssignmentCard';
 import { assignmentStatus, matchesAssignmentFilter, type AssignmentFilter } from './courseTasks';
 import styles from './NuniApp.module.css';
@@ -15,6 +16,7 @@ type Props = {
 
 export function CourseAssignments({ assignments, workspace, reload, onConfirmed }: Props) {
   const [filter, setFilter] = useState<AssignmentFilter>('all');
+  const hash = useLocationHash();
   const revealed = useRef('');
   const student = workspace.memberRole === 'student';
   const filters: [AssignmentFilter, string][] = student
@@ -41,7 +43,7 @@ export function CourseAssignments({ assignments, workspace, reload, onConfirmed 
   }, []);
 
   useEffect(() => {
-    const target = window.location.hash.slice(1);
+    const target = hash.slice(1);
     if (
       filter !== 'all' ||
       revealed.current === target ||
@@ -52,11 +54,12 @@ export function CourseAssignments({ assignments, workspace, reload, onConfirmed 
       const element = document.getElementById(target);
       if (element) {
         element.scrollIntoView?.({ block: 'start' });
+        element.focus({ preventScroll: true });
         revealed.current = target;
       }
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [assignments, filter]);
+  }, [assignments, filter, hash]);
 
   return (
     <section aria-label="課程作業">
@@ -113,7 +116,11 @@ export function CourseAssignments({ assignments, workspace, reload, onConfirmed 
             item={item}
             workspace={workspace}
             reload={reload}
-            onConfirmed={onConfirmed}
+            onConfirmed={(assignment) => {
+              if (student && assignment.mySubmission && filter === 'pending')
+                setFilter('submitted');
+              onConfirmed(assignment);
+            }}
           />
         </div>
       ))}

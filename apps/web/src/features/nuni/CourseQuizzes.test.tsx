@@ -97,6 +97,7 @@ beforeEach(() => {
   mocks.request.mockReset();
   mocks.refresh.mockReset();
   session();
+  window.history.replaceState(null, '', '/');
   vi.spyOn(Date, 'now').mockReturnValue(Date.parse(timestamp));
 });
 afterEach(() => vi.restoreAllMocks());
@@ -185,7 +186,7 @@ it('requires student confirmation then displays the confirmed own answer and fee
     }),
   );
   render(<CourseQuizzes workspace={workspace()} />);
-  await screen.findByText('說明研究方法');
+  await screen.findByRole('heading', { name: '說明研究方法' });
   const textarea = screen.getByLabelText('你的回答');
   fireEvent.change(textarea, { target: { value: '先觀察使用情境，再確認問題。' } });
   fireEvent.submit(textarea.closest('form')!);
@@ -207,7 +208,7 @@ it('retries an uncertain answer with the same content and idempotency key', asyn
     .mockRejectedValueOnce(new TypeError('offline'))
     .mockResolvedValueOnce(quiz({ responseCount: 1, myResponse: answer() }));
   render(<CourseQuizzes workspace={workspace()} />);
-  await screen.findByText('說明研究方法');
+  await screen.findByRole('heading', { name: '說明研究方法' });
   fillAnswer();
   fireEvent.click(screen.getByRole('button', { name: '送出作答' }));
   await screen.findByRole('button', { name: '確認送出結果' });
@@ -239,7 +240,7 @@ it.each(['student', 'owner-teacher'] as const)(
   async (role) => {
     replyList([quiz()]);
     render(<CourseQuizzes workspace={workspace(role, 'archived')} />);
-    await screen.findByText('說明研究方法');
+    await screen.findByRole('heading', { name: '說明研究方法' });
     expect(screen.queryByText('發布文字測驗')).toBeNull();
     expect(screen.queryByText('結束測驗')).toBeNull();
     expect(screen.queryByLabelText('你的回答')).toBeNull();
@@ -257,7 +258,7 @@ it('teacher response errors do not become empty responses, and feedback only cha
     .mockRejectedValueOnce(new TypeError('lost feedback response'))
     .mockResolvedValueOnce(answer({ teacherFeedback: '請補充研究對象。', reviewedAt: timestamp }));
   render(<CourseQuizzes workspace={workspace('owner-teacher')} />);
-  await screen.findByText('說明研究方法');
+  await screen.findByRole('heading', { name: '說明研究方法' });
   fireEvent.click(screen.getByRole('button', { name: '查看作答' }));
   await screen.findByRole('alert');
   expect(screen.queryByText('尚未收到作答。')).toBeNull();
@@ -298,7 +299,7 @@ it('late teacher response lists cannot expose student answers in a new session',
     .mockReturnValueOnce(old.promise)
     .mockResolvedValueOnce({ quizzes: [quiz()] });
   const view = render(<CourseQuizzes workspace={workspace('owner-teacher')} />);
-  await screen.findByText('說明研究方法');
+  await screen.findByRole('heading', { name: '說明研究方法' });
   fireEvent.click(screen.getByRole('button', { name: '查看作答' }));
   session(otherId, 'b'.repeat(43));
   view.rerender(<CourseQuizzes workspace={workspace()} />);
@@ -334,7 +335,7 @@ it('closing requires explicit confirmation and recovers a lost acknowledgment by
     .mockRejectedValueOnce(new TypeError('lost close response'))
     .mockResolvedValueOnce({ quizzes: [quiz({ state: 'closed', closedAt: timestamp })] });
   render(<CourseQuizzes workspace={workspace('owner-teacher')} />);
-  await screen.findByText('說明研究方法');
+  await screen.findByRole('heading', { name: '說明研究方法' });
   fireEvent.click(screen.getByText('結束測驗'));
   const checkbox = screen.getByLabelText('我確認結束這份測驗。');
   fireEvent.submit(checkbox.closest('form')!);
@@ -356,7 +357,7 @@ it('a close conflict is not success when the fresh server read still says open',
     .mockRejectedValueOnce(new NuniError(409, 'CONFLICT'))
     .mockResolvedValueOnce({ quizzes: [quiz()] });
   render(<CourseQuizzes workspace={workspace('owner-teacher')} />);
-  await screen.findByText('說明研究方法');
+  await screen.findByRole('heading', { name: '說明研究方法' });
   fireEvent.click(screen.getByText('結束測驗'));
   fireEvent.click(screen.getByLabelText('我確認結束這份測驗。'));
   fireEvent.click(screen.getByRole('button', { name: '確認結束測驗' }));
@@ -377,13 +378,13 @@ it('a refresh started before a confirmed publish cannot erase the new quiz after
   fireEvent.click(screen.getByRole('button', { name: '更新測驗' }));
   openPublish();
   fireEvent.click(screen.getByRole('button', { name: '發布測驗' }));
-  await screen.findByText('已確認的新題目');
+  await screen.findByRole('heading', { name: '已確認的新題目' });
   await act(async () => refresh.resolve({ quizzes: [] }));
-  expect(screen.getByText('已確認的新題目')).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '已確認的新題目' })).toBeTruthy();
 });
 
 async function openFeedbackEditor() {
-  await screen.findByText('說明研究方法');
+  await screen.findByRole('heading', { name: '說明研究方法' });
   fireEvent.click(screen.getByRole('button', { name: '查看作答' }));
   const editor = await screen.findByLabelText('給 林同學 的回饋');
   fireEvent.click(screen.getByText('修改回饋'));
@@ -500,4 +501,175 @@ it('does not show a pending teacher feedback receipt after the course role chang
   expect(screen.queryByText('林同學')).toBeNull();
   expect(screen.queryByText('尚未確認的回饋')).toBeNull();
   expect(screen.queryByText('回饋已儲存，學生現在可以查看。')).toBeNull();
+});
+
+it('counts answerable quizzes separately from submitted and closed quizzes even after a suggested date', async () => {
+  replyList([
+    quiz({ dueAt: '2026-10-07T08:00:00.000Z' }),
+    quiz({
+      id: quizId2,
+      title: '已回饋的測驗',
+      responseCount: 1,
+      myResponse: answer({
+        quizId: quizId2,
+        teacherFeedback: '請補充觀察方式。',
+        reviewedAt: timestamp,
+      }),
+    }),
+    quiz({
+      id: 'cwq_77777777-7777-4777-8777-777777777777',
+      title: '結束的測驗',
+      state: 'closed',
+      closedAt: timestamp,
+    }),
+  ]);
+  render(<CourseQuizzes workspace={workspace()} />);
+  fireEvent.click(await screen.findByRole('button', { name: '待作答 1' }));
+  expect(screen.getByRole('article', { name: '測驗：說明研究方法' })).toBeTruthy();
+  expect(screen.queryByRole('article', { name: '測驗：結束的測驗' })).toBeNull();
+  expect(screen.queryByRole('article', { name: '測驗：已回饋的測驗' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '老師回饋 1' }));
+  expect(screen.getByRole('article', { name: '測驗：已回饋的測驗' })).toBeTruthy();
+  expect(screen.queryByRole('article', { name: '測驗：說明研究方法' })).toBeNull();
+  expect(screen.getByRole('button', { name: '已作答 1' })).toBeTruthy();
+});
+
+it('preserves a draft through filtering and a failed refresh, then reveals the acknowledged answer', async () => {
+  mocks.request
+    .mockResolvedValueOnce({ quizzes: [quiz()] })
+    .mockRejectedValueOnce(new TypeError('offline'))
+    .mockResolvedValueOnce(quiz({ myResponse: answer(), responseCount: 1 }));
+  render(<CourseQuizzes workspace={workspace()} />);
+  await screen.findByRole('heading', { name: '說明研究方法' });
+  fillAnswer();
+  const editor = screen.getByLabelText('你的回答') as HTMLTextAreaElement;
+  fireEvent.click(screen.getByRole('button', { name: '老師回饋 0' }));
+  expect(screen.queryByRole('article')).toBeNull();
+  expect(screen.getByText('這個分類目前沒有測驗。選擇「全部」可查看其他內容。')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '待作答 1' }));
+  expect(screen.getByLabelText('你的回答')).toBe(editor);
+  expect(editor.value).toBe('先觀察使用情境，再確認問題。');
+  fireEvent.click(screen.getByRole('button', { name: '更新測驗' }));
+  await screen.findByRole('alert');
+  expect(editor.value).toBe('先觀察使用情境，再確認問題。');
+  expect((screen.getByLabelText(/我已檢查回答/) as HTMLInputElement).checked).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '送出作答' }));
+  await screen.findByText('已送出作答');
+  expect(screen.getByRole('article', { name: '測驗：說明研究方法' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '已作答 1' }).getAttribute('aria-pressed')).toBe(
+    'true',
+  );
+  expect(screen.getByRole('button', { name: '待作答 0' })).toBeTruthy();
+});
+
+it('retains an uncertain submission and its original key while a student switches task filters', async () => {
+  mocks.request
+    .mockResolvedValueOnce({ quizzes: [quiz()] })
+    .mockRejectedValueOnce(new TypeError('acknowledgment lost'))
+    .mockResolvedValueOnce(quiz({ myResponse: answer(), responseCount: 1 }));
+  render(<CourseQuizzes workspace={workspace()} />);
+  await screen.findByRole('heading', { name: '說明研究方法' });
+  fillAnswer();
+  fireEvent.click(screen.getByRole('button', { name: '送出作答' }));
+  await screen.findByRole('button', { name: '確認送出結果' });
+  fireEvent.click(screen.getByRole('button', { name: '已作答 0' }));
+  fireEvent.click(screen.getByRole('button', { name: '待作答 1' }));
+  expect(
+    (screen.getByLabelText('你的回答').closest('fieldset') as HTMLFieldSetElement).disabled,
+  ).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '確認送出結果' }));
+  await screen.findByText('已送出作答');
+  expect(requestsTo('/submit')[1][2]).toEqual(requestsTo('/submit')[0][2]);
+});
+
+it('positions and focuses incoming quiz links after loading, and responds to another link while showing all', async () => {
+  window.history.replaceState(null, '', `#quiz-${quizId}`);
+  const pending = deferred<unknown>();
+  mocks.request.mockReturnValueOnce(pending.promise);
+  render(<CourseQuizzes workspace={workspace()} />);
+  await act(async () =>
+    pending.resolve({ quizzes: [quiz(), quiz({ id: quizId2, title: '第二份測驗' })] }),
+  );
+  const first = screen.getByRole('article', { name: '測驗：說明研究方法' });
+  const second = screen.getByRole('article', { name: '測驗：第二份測驗' });
+  first.scrollIntoView = vi.fn();
+  second.scrollIntoView = vi.fn();
+  await waitFor(() => expect(first.scrollIntoView).toHaveBeenCalledWith({ block: 'start' }));
+  expect(document.activeElement).toBe(first);
+  act(() => {
+    window.history.replaceState(null, '', `#quiz-${quizId2}`);
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  await waitFor(() => expect(second.scrollIntoView).toHaveBeenCalledWith({ block: 'start' }));
+  expect(document.activeElement).toBe(second);
+  expect(first.scrollIntoView).toHaveBeenCalledTimes(1);
+});
+
+it('a linked quiz leaves a filtered view without erasing an answer draft', async () => {
+  replyList([quiz()]);
+  render(<CourseQuizzes workspace={workspace()} />);
+  await screen.findByRole('heading', { name: '說明研究方法' });
+  fillAnswer();
+  fireEvent.click(screen.getByRole('button', { name: '老師回饋 0' }));
+  act(() => {
+    window.history.replaceState(null, '', `#quiz-${quizId}`);
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  expect(screen.getByRole('article', { name: '測驗：說明研究方法' })).toBeTruthy();
+  expect((screen.getByLabelText('你的回答') as HTMLTextAreaElement).value).toBe(
+    '先觀察使用情境，再確認問題。',
+  );
+  expect(screen.getByRole('button', { name: '全部 1' }).getAttribute('aria-pressed')).toBe('true');
+});
+
+it('teachers can find quizzes with received responses and publishing reveals a new quiz outside that filter', async () => {
+  session(teacherId);
+  mocks.request
+    .mockResolvedValueOnce({
+      quizzes: [quiz(), quiz({ id: quizId2, title: '已有學生作答', responseCount: 2 })],
+    })
+    .mockResolvedValueOnce(
+      quiz({ id: 'cwq_77777777-7777-4777-8777-777777777777', title: '新的題目' }),
+    );
+  render(<CourseQuizzes workspace={workspace('co-teacher')} />);
+  fireEvent.click(await screen.findByRole('button', { name: '已收到作答 1' }));
+  expect(screen.getByRole('article', { name: '測驗：已有學生作答' })).toBeTruthy();
+  expect(screen.queryByRole('article', { name: '測驗：說明研究方法' })).toBeNull();
+  expect(screen.queryByRole('button', { name: /待作答/ })).toBeNull();
+  openPublish();
+  fireEvent.click(screen.getByRole('button', { name: '發布測驗' }));
+  await screen.findByRole('heading', { name: '新的題目' });
+  expect(screen.getByRole('article', { name: '測驗：新的題目' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '全部 3' }).getAttribute('aria-pressed')).toBe('true');
+});
+
+it('does not describe an archived quiz as open or pending', async () => {
+  replyList([quiz()]);
+  render(<CourseQuizzes workspace={workspace('student', 'archived')} />);
+  const article = await screen.findByRole('article', { name: '測驗：說明研究方法' });
+  expect(within(article).getByText('課程已封存')).toBeTruthy();
+  expect(within(article).queryByText('開放作答')).toBeNull();
+  expect(screen.getByRole('button', { name: '待作答 0' })).toBeTruthy();
+});
+
+it('lets students open reference links from quiz prompts and feedback', async () => {
+  replyList([
+    quiz({
+      prompt: '參考資料：https://example.edu/readings\n回答問題。',
+      myResponse: answer({
+        teacherFeedback: '請參考 https://example.edu/feedback。',
+        reviewedAt: timestamp,
+      }),
+    }),
+  ]);
+  render(<CourseQuizzes workspace={workspace()} />);
+  const article = await screen.findByRole('article', { name: '測驗：說明研究方法' });
+  expect(
+    within(article).getByRole('link', { name: 'https://example.edu/readings' }).getAttribute('rel'),
+  ).toBe('noopener noreferrer');
+  expect(
+    within(article)
+      .getByRole('link', { name: 'https://example.edu/feedback' })
+      .getAttribute('href'),
+  ).toBe('https://example.edu/feedback');
 });

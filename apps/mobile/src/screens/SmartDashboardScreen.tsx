@@ -26,7 +26,8 @@ import { useDataSource } from '../hooks/useDataSource';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { theme } from '../ui/theme';
-import { BrandFluxImageHeader } from '../ui/BrandFluxImageHeader';
+import { DashboardTaskPanel } from '../components/DashboardTaskPanel';
+import { useDashboardTasks } from '../hooks/useDashboardTasks';
 import { usePreferences } from '../state/preferences';
 import { buildStudySummary } from '../services/buildStudySummary';
 import { useWeatherForecast } from '../hooks/useWeatherForecast';
@@ -1596,186 +1597,6 @@ function AgentModeDock(props: {
   );
 }
 
-function AgentOSHero(props: {
-  displayName: string;
-  gamification: GamificationState | null;
-  actions: NextBestAction[];
-  risk: StudentRiskSnapshot | null;
-  aggregates: PulseAggregate[];
-  onOpenAction: (action: NextBestAction) => void;
-  onOpenAI: () => void;
-  onOpenPulse: () => void;
-}) {
-  const primary = props.actions[0] ?? null;
-  const heroColor = primary ? urgencyColor(primary.urgency) : theme.colors.accent;
-  const hour = new Date().getHours();
-  let greeting: string;
-  let greetIcon: string;
-  if (hour < 6) {
-    greeting = '夜深了';
-    greetIcon = 'moon-outline';
-  } else if (hour < 12) {
-    greeting = '早安';
-    greetIcon = 'sunny-outline';
-  } else if (hour < 18) {
-    greeting = '午安';
-    greetIcon = 'partly-sunny-outline';
-  } else {
-    greeting = '晚安';
-    greetIcon = 'moon-outline';
-  }
-
-  return (
-    <View style={{ paddingHorizontal: theme.space.lg, marginBottom: theme.space.md }}>
-      {/* Greeting */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-        <Ionicons name={greetIcon as any} size={18} color={theme.colors.accent} />
-        <Text style={{ color: theme.colors.textSecondary, fontSize: 14 }}>{greeting}</Text>
-      </View>
-      <Text
-        style={{ color: theme.colors.text, fontSize: 28, fontWeight: '700', letterSpacing: -0.5 }}
-      >
-        {props.displayName}
-      </Text>
-
-      {/* Level + Streak badges */}
-      {props.gamification && (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 }}>
-          <LinearGradient
-            colors={
-              [
-                `${props.gamification.levelInfo.color}20`,
-                `${props.gamification.levelInfo.color}08`,
-              ] as [string, string]
-            }
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 5,
-              paddingHorizontal: 10,
-              paddingVertical: 5,
-              borderRadius: 20,
-            }}
-          >
-            <Ionicons
-              name={props.gamification.levelInfo.icon as any}
-              size={13}
-              color={props.gamification.levelInfo.color}
-            />
-            <Text
-              style={{ color: props.gamification.levelInfo.color, fontSize: 12, fontWeight: '700' }}
-            >
-              Lv.{props.gamification.level}
-            </Text>
-          </LinearGradient>
-          <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-            {props.gamification.totalXP.toLocaleString()} XP
-          </Text>
-        </View>
-      )}
-
-      {/* Main Action Card */}
-      <Pressable
-        onPress={() => (primary ? props.onOpenAction(primary) : props.onOpenAI())}
-        style={({ pressed }) => ({
-          marginTop: 20,
-          borderRadius: 20,
-          overflow: 'hidden',
-          opacity: pressed ? 0.9 : 1,
-          transform: [{ scale: pressed ? 0.98 : 1 }],
-        })}
-      >
-        <LinearGradient
-          colors={['#1A0A3E', '#0D1B3E'] as [string, string]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={{ padding: 20, borderRadius: 20, borderWidth: 1, borderColor: '#2D1B69' }}
-        >
-          {/* Decorative circle */}
-          <View
-            style={{
-              position: 'absolute',
-              right: -20,
-              top: -20,
-              width: 100,
-              height: 100,
-              borderRadius: 50,
-              backgroundColor: `${heroColor}12`,
-            }}
-          />
-          {!primary ? (
-            <Image
-              source={generatedUiAssets.emptySpark}
-              accessibilityIgnoresInvertColors
-              accessibilityLabel=""
-              style={{
-                position: 'absolute',
-                right: 8,
-                bottom: 76,
-                width: 96,
-                height: 72,
-                borderRadius: theme.radius.md,
-                opacity: 0.85,
-              }}
-              resizeMode="contain"
-            />
-          ) : null}
-
-          <Text
-            style={{ color: '#FFFFFF', fontSize: 20, fontWeight: '700', lineHeight: 28 }}
-            numberOfLines={2}
-          >
-            {primary ? primary.title : '校園代理已就緒'}
-          </Text>
-          <Text
-            style={{ color: '#A8B7CC', fontSize: 13, lineHeight: 20, marginTop: 6 }}
-            numberOfLines={2}
-          >
-            {primary ? primary.reason : '依課程、地點與校園脈動生成今日計畫'}
-          </Text>
-
-          <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
-            <LinearGradient
-              colors={[heroColor, `${heroColor}BB`] as [string, string]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={{
-                flex: 1,
-                height: 44,
-                borderRadius: 12,
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexDirection: 'row',
-                gap: 8,
-              }}
-            >
-              <Ionicons name="flash" size={16} color="#FFF" />
-              <Text style={{ color: '#FFF', fontSize: 14, fontWeight: '700' }}>
-                {primary?.actionLabel ?? '生成今日計畫'}
-              </Text>
-            </LinearGradient>
-            <Pressable
-              onPress={props.onOpenAI}
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: 12,
-                backgroundColor: '#0E1B2D',
-                borderWidth: 1,
-                borderColor: '#253A58',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Ionicons name="chatbubble-ellipses-outline" size={18} color="#D9E8FF" />
-            </Pressable>
-          </View>
-        </LinearGradient>
-      </Pressable>
-    </View>
-  );
-}
-
 function GraphLine(props: { x1: number; y1: number; x2: number; y2: number; color: string }) {
   const length = Math.hypot(props.x2 - props.x1, props.y2 - props.y1);
   const angle = Math.atan2(props.y2 - props.y1, props.x2 - props.x1) * (180 / Math.PI);
@@ -2011,116 +1832,6 @@ function CampusTwinPanel(props: {
   );
 }
 
-function AutopilotMissionRail(props: {
-  actions: NextBestAction[];
-  risk: StudentRiskSnapshot | null;
-  aggregates: PulseAggregate[];
-  onOpenAction: (action: NextBestAction) => void;
-  onOpenAI: () => void;
-}) {
-  const topAction = props.actions[0] ?? null;
-  const crowded = [...props.aggregates].sort((a, b) => b.currentLevel - a.currentLevel)[0] ?? null;
-  const missions = [
-    topAction
-      ? {
-          id: 'action',
-          title: topAction.title,
-          detail: topAction.nextStep,
-          icon: topAction.requiresConfirmation
-            ? ('shield-checkmark-outline' as const)
-            : ('flash-outline' as const),
-          color: urgencyColor(topAction.urgency),
-          onPress: () => props.onOpenAction(topAction),
-        }
-      : {
-          id: 'action',
-          title: '生成今日任務',
-          detail: '依課程、地點與訊息待辦建立路線',
-          icon: 'sparkles-outline' as const,
-          color: theme.colors.accent,
-          onPress: props.onOpenAI,
-        },
-    {
-      id: 'campus',
-      title: crowded ? `${crowded.locationName} 時段判斷` : '校園空間判斷',
-      detail: crowded?.bestTimeToVisit ? `建議 ${crowded.bestTimeToVisit}` : '等待匿名樣本提高信心',
-      icon: 'map-outline' as const,
-      color: theme.colors.success,
-      onPress: props.onOpenAI,
-    },
-    {
-      id: 'risk',
-      title: props.risk?.summary ?? '學習風險掃描',
-      detail: props.risk
-        ? `${props.risk.recommendedActions.length} 個可執行建議`
-        : '讀取作業、出席與成績趨勢',
-      icon: 'pulse-outline' as const,
-      color: theme.colors.warning,
-      onPress: props.onOpenAI,
-    },
-  ];
-
-  return (
-    <View style={{ marginHorizontal: theme.space.lg, marginBottom: theme.space.xl }}>
-      <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: '700', marginBottom: 14 }}>
-        今日待辦
-      </Text>
-      <View
-        style={{
-          borderRadius: 16,
-          backgroundColor: theme.colors.surface,
-          overflow: 'hidden',
-        }}
-      >
-        {missions.map((mission, index) => (
-          <Pressable
-            key={mission.id}
-            onPress={mission.onPress}
-            style={({ pressed }) => ({
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 14,
-              paddingVertical: 16,
-              paddingHorizontal: 16,
-              borderBottomWidth: index < missions.length - 1 ? 1 : 0,
-              borderBottomColor: theme.colors.border,
-              opacity: pressed ? 0.7 : 1,
-            })}
-          >
-            <LinearGradient
-              colors={[`${mission.color}20`, `${mission.color}08`] as [string, string]}
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: 12,
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Ionicons name={mission.icon} size={18} color={mission.color} />
-            </LinearGradient>
-            <View style={{ flex: 1 }}>
-              <Text
-                style={{ color: theme.colors.text, fontSize: 15, fontWeight: '700' }}
-                numberOfLines={1}
-              >
-                {mission.title}
-              </Text>
-              <Text
-                style={{ color: theme.colors.muted, fontSize: 12, marginTop: 3 }}
-                numberOfLines={1}
-              >
-                {mission.detail}
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={16} color={theme.colors.muted} />
-          </Pressable>
-        ))}
-      </View>
-    </View>
-  );
-}
-
 function DataMoatPanel(props: {
   actions: NextBestAction[];
   risk: StudentRiskSnapshot | null;
@@ -2293,11 +2004,17 @@ export function SmartDashboardScreen(props: any) {
 
   const [rainReminderVisible, setRainReminderVisible] = useState(false);
 
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [insights, setInsights] = useState<FullAcademicInsights | null>(null);
   const [pulse, setPulse] = useState<CampusPulseSnapshot | null>(null);
-  const [nextActions, setNextActions] = useState<NextBestAction[]>([]);
+  const loadTasks = useCallback(
+    () => auth.user ? ds.listNextBestActions(auth.user.uid, school.id) : Promise.resolve([]),
+    [auth.user?.uid, ds, school.id],
+  );
+  const { tasks: nextActions, status: taskStatus, refresh: refreshTasks } = useDashboardTasks(
+    `${auth.user?.uid ?? 'signed-out'}:${school.id}`,
+    loadTasks,
+  );
   const [riskSnapshots, setRiskSnapshots] = useState<StudentRiskSnapshot[]>([]);
   const [pulseAggregates, setPulseAggregates] = useState<PulseAggregate[]>([]);
   const [gamification, setGamification] = useState<GamificationState | null>(null);
@@ -2352,16 +2069,14 @@ export function SmartDashboardScreen(props: any) {
   );
 
   const loadData = useCallback(async () => {
+    void refreshTasks();
     try {
-      const [insightsData, pulseData, gamData, optData, actionData, riskData, aggregateData] =
+      const [insightsData, pulseData, gamData, optData, riskData, aggregateData] =
         await Promise.allSettled([
           getFullAcademicInsights(),
           getCampusPulseSnapshot(),
           getGamificationState(displayName, auth.profile?.department ?? ''),
           getScheduleOptimization(),
-          auth.user
-            ? ds.listNextBestActions(auth.user.uid, school.id)
-            : Promise.resolve([] as NextBestAction[]),
           auth.user
             ? ds.listRiskSnapshots(auth.user.uid, school.id)
             : Promise.resolve([] as StudentRiskSnapshot[]),
@@ -2387,7 +2102,6 @@ export function SmartDashboardScreen(props: any) {
       }
 
       setOptimization(optData.status === 'fulfilled' ? optData.value : null);
-      setNextActions(actionData.status === 'fulfilled' ? actionData.value : []);
       setRiskSnapshots(riskData.status === 'fulfilled' ? riskData.value : []);
       setPulseAggregates(aggregateData.status === 'fulfilled' ? aggregateData.value : []);
 
@@ -2454,10 +2168,9 @@ export function SmartDashboardScreen(props: any) {
           /* ignore */
         }
       })();
-      setLoading(false);
       setRefreshing(false);
     }
-  }, [auth.profile?.department, auth.user?.uid, displayName, ds, school.id, generateAIBriefing]);
+  }, [auth.profile?.department, auth.user?.uid, displayName, ds, school.id, generateAIBriefing, refreshTasks]);
 
   // ─── Event Bus 即時監聽 — 點名/成績/作業等事件自動刷新 ───
   useEffect(() => {
@@ -2517,18 +2230,6 @@ export function SmartDashboardScreen(props: any) {
   useEffect(() => {
     loadData();
   }, [loadData]);
-
-  /** 弱網或單次載入異常時避免永遠停在「分析學業數據中」（E2E / Maestro 需可操作儀表） */
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setLoading((cur) => {
-        if (!cur) return cur;
-        console.warn('[SmartDashboard] loading failsafe: forcing dashboard render');
-        return false;
-      });
-    }, 25000);
-    return () => clearTimeout(t);
-  }, []);
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
@@ -2602,28 +2303,6 @@ export function SmartDashboardScreen(props: any) {
     [],
   );
 
-  if (loading) {
-    return (
-      <ImageBackground
-        source={generatedUiAssets.emptyRelaxed}
-        style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}
-        imageStyle={{ opacity: theme.mode === 'dark' ? 0.22 : 0.38 }}
-        resizeMode="cover"
-        accessibilityIgnoresInvertColors
-      >
-        <View
-          style={{
-            ...StyleSheet.absoluteFillObject,
-            backgroundColor: `${theme.colors.bg}${theme.mode === 'dark' ? 'CC' : 'AA'}`,
-          }}
-        />
-        <ActivityIndicator size="large" color={theme.colors.accent} />
-        <Text style={{ color: theme.colors.textSecondary, fontSize: 13, marginTop: theme.space.md }}>
-          分析學業數據中...
-        </Text>
-      </ImageBackground>
-    );
-  }
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
@@ -2639,30 +2318,17 @@ export function SmartDashboardScreen(props: any) {
           />
         }
       >
-        {/* Flux 視覺主題 header（ComfyUI 生成 + 漸層疊字） */}
-        <BrandFluxImageHeader
-          variant="dashboard"
-          paddingTop={insets.top + theme.space.lg}
-          paddingBottom={20}
-          ambientTone={
-            preferences.dashboardWeatherEffects &&
-            weatherForecastState.status === 'ready'
-              ? weatherForecastState.bundle.today.ambientTone
-              : 'default'
-          }
-        >
-          <AgentOSHero
+        <View style={{ paddingTop: insets.top + theme.space.lg, paddingBottom: 20 }}>
+          <DashboardTaskPanel
             displayName={displayName}
-            gamification={gamification}
-            actions={nextActionsForUi}
-            risk={riskSnapshots[0] ?? null}
-            aggregates={pulseAggregates}
-            onOpenAction={openAgentAction}
-            onOpenAI={openAI}
-            onOpenPulse={() => nav?.navigate?.('校園')}
+            tasks={nextActionsForUi}
+            status={taskStatus}
+            onRetry={() => void refreshTasks()}
+            onOpenTask={openAgentAction}
+            onOpenCourses={() => nav?.navigate?.('我的', { screen: 'NuniWorkspace' })}
+            onOpenSchool={() => navigateToCourseHome(nav, auth.profile?.role)}
+            onOpenCampus={() => nav?.navigate?.('校園')}
           />
-
-          <AgentModeDock selected={agentMode} onSelect={setAgentMode} onStart={startAgentMode} />
 
           {preferences.dashboardWeatherEffects &&
           weatherForecastState.status === 'ready' ? (
@@ -2685,7 +2351,7 @@ export function SmartDashboardScreen(props: any) {
               </Text>
             </View>
           ) : null}
-        </BrandFluxImageHeader>
+        </View>
 
         {rainReminderVisible ? (
           <View
@@ -2725,53 +2391,6 @@ export function SmartDashboardScreen(props: any) {
             </Pressable>
           </View>
         ) : null}
-
-        {/* 口試 Golden Path：下一個學習動作 → demo 課教材 */}
-        <Pressable
-          onPress={() =>
-            navigateToCourseScreen(nav, auth.profile?.role, 'CourseModules', {
-              groupId: '71378',
-              groupName: '機器學習',
-            })
-          }
-          accessibilityRole="button"
-          accessibilityLabel="開啟示範課程機器學習教材"
-          style={{
-            marginHorizontal: theme.space.lg,
-            marginTop: theme.space.sm,
-            marginBottom: theme.space.xs,
-            padding: theme.space.md,
-            borderRadius: theme.radius.lg,
-            backgroundColor: theme.colors.surface,
-            borderWidth: 1,
-            borderColor: `${theme.colors.accent}55`,
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: theme.space.sm,
-          }}
-        >
-          <View
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 12,
-              backgroundColor: theme.colors.accentSoft,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Ionicons name={'rocket-outline' as any} size={22} color={theme.colors.accent} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: '700' }}>
-              下一個學習動作（Demo）
-            </Text>
-            <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 4, lineHeight: 17 }}>
-              機器學習 · 查看本週教材與作業截止 · 與 TronClass App「跳出瀏覽器」相比，在此可直接走完 LMS 動線
-            </Text>
-          </View>
-          <Ionicons name={'chevron-forward' as any} size={20} color={theme.colors.muted} />
-        </Pressable>
 
         <View
           style={{
@@ -3028,14 +2647,7 @@ export function SmartDashboardScreen(props: any) {
           </View>
         )}
 
-        {/* Quick Actions — 簡潔任務區 */}
-        <AutopilotMissionRail
-          actions={nextActionsForUi}
-          risk={riskSnapshots[0] ?? null}
-          aggregates={pulseAggregates}
-          onOpenAction={openAgentAction}
-          onOpenAI={openAI}
-        />
+        <AgentModeDock selected={agentMode} onSelect={setAgentMode} onStart={startAgentMode} />
 
         {/* 3. GPA Trend */}
         {insights && (

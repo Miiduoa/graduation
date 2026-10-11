@@ -261,13 +261,8 @@ function createLiveSessionHandlers({ db, now = Date.now, notifyStarted, logger =
         documents.record,
       );
       const membership = requireMember(member);
-      if (
-        !live.exists ||
-        !attendance.exists ||
-        live.data().active !== true ||
-        attendance.data().active !== true
-      ) {
-        throw new HttpsError('failed-precondition', 'Session is not active');
+      if (!live.exists || !attendance.exists) {
+        throw new HttpsError('failed-precondition', 'Session records are missing');
       }
       // Legacy sessions exposed their token publicly. Never accept that token as proof of attendance.
       if (
@@ -282,10 +277,6 @@ function createLiveSessionHandlers({ db, now = Date.now, notifyStarted, logger =
       }
       if (!sameToken(data.qrToken, secret.data().qrToken))
         throw new HttpsError('permission-denied', 'Invalid QR token');
-      const checkedInMillis = now();
-      const expiresAt = timestampMillis(secret.data().qrExpiresAt);
-      if (expiresAt === null || checkedInMillis >= expiresAt)
-        throw new HttpsError('deadline-exceeded', 'QR code has expired');
       if (record.exists) {
         const existing = record.data();
         const confirmedAt = timestampMillis(existing.checkedInAt);
@@ -301,12 +292,21 @@ function createLiveSessionHandlers({ db, now = Date.now, notifyStarted, logger =
             'Attendance record requires administrator repair',
           );
         }
+        // A lost response can be retried after the attendance window closes.
+        // Current membership, the private token and the receipt identity still apply.
         return {
           success: true,
           alreadyJoined: true,
           checkedInAt: new Date(confirmedAt).toISOString(),
         };
       }
+      if (live.data().active !== true || attendance.data().active !== true) {
+        throw new HttpsError('failed-precondition', 'Session is not active');
+      }
+      const checkedInMillis = now();
+      const expiresAt = timestampMillis(secret.data().qrExpiresAt);
+      if (expiresAt === null || checkedInMillis >= expiresAt)
+        throw new HttpsError('deadline-exceeded', 'QR code has expired');
       const checkedInAt = Timestamp.fromMillis(checkedInMillis);
       transaction.create(documents.record, {
         uid,

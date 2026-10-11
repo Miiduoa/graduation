@@ -41,7 +41,9 @@ function Deadline({ task, now }: { task: HomeTask; now: Date | null }) {
         {due
           ? overdue
             ? task.acceptsLate
-              ? '已過參考期限・仍可繳交'
+              ? task.kind === 'quiz'
+                ? '已過參考期限・仍可作答'
+                : '已過參考期限・仍可繳交'
               : '已截止'
             : task.acceptsLate
               ? '參考期限'
@@ -114,8 +116,9 @@ export default function HomePage() {
   const teaching = data?.courses.filter((course) => teachingRoles.includes(course.role)) ?? [];
   const studying = data?.courses.filter((course) => !teachingRoles.includes(course.role)) ?? [];
   const nextTask =
-    data?.tasks.find((task) => task.dueAt && now && Date.parse(task.dueAt) >= now.getTime()) ??
-    data?.tasks[0];
+    data?.tasks.find(
+      (task) => task.acceptsLate || !task.dueAt || !now || Date.parse(task.dueAt) >= now.getTime(),
+    ) ?? data?.tasks[0];
   const signedIn = !!owner && !blocked;
   const busy = sessionLoading || (!!owner && loading);
   const courseSections = [
@@ -142,11 +145,11 @@ export default function HomePage() {
                 ? teaching.length && !studying.length
                   ? '今天的教學'
                   : '今天的課程與待辦'
-                : '今天，從這裡開始'}
+                : '課程與校園生活'}
             </h1>
             <p className={styles.intro}>
               {signedIn
-                ? '作業、課程與上課地點，接著處理。'
+                ? '查看待辦、回到課程，查找今天要用的校園服務。'
                 : '進入課程繳交作業，或查看課表與校園資訊。'}
             </p>
           </div>
@@ -213,7 +216,9 @@ export default function HomePage() {
                       ? teaching.length && !studying.length
                         ? `${teaching.length} 門課正在進行`
                         : data?.courses.length
-                          ? '目前沒有待繳作業'
+                          ? context
+                            ? '目前沒有待完成的作業或測驗'
+                            : '目前沒有待繳作業'
                           : '加入你的第一門課'
                       : '先回到你的課程'}
                 </h2>
@@ -253,7 +258,9 @@ export default function HomePage() {
                     }
                   >
                     {nextTask
-                      ? '查看並繳交作業'
+                      ? nextTask.kind === 'quiz'
+                        ? '查看並作答測驗'
+                        : '查看並繳交作業'
                       : teaching.length && !studying.length
                         ? '查看授課課程'
                         : signedIn
@@ -275,7 +282,7 @@ export default function HomePage() {
                   <section className={styles.section} aria-labelledby="tasks-title">
                     <div className={styles.sectionHeading}>
                       <h2 id="tasks-title">
-                        待繳作業 <span>{data.tasks.length}</span>
+                        {context ? '作業與測驗' : '待繳作業'} <span>{data.tasks.length}</span>
                       </h2>
                       <button
                         type="button"
@@ -288,7 +295,7 @@ export default function HomePage() {
                     </div>
                     <p className={styles.sectionNote}>
                       {context
-                        ? '只列出修習課程中仍開放收件、尚未繳交的作業。時間皆為台灣時間。'
+                        ? '依參考期限排列仍開放的作業與測驗，已送出後更新即可移除。每門課的測驗為最近 100 筆；更早紀錄請向授課老師確認。時間皆為台灣時間。'
                         : '依截止時間排序；已繳交的作業會在更新後移除。時間皆為台灣時間。'}
                     </p>
                     {data.tasks.length ? (
@@ -298,7 +305,9 @@ export default function HomePage() {
                             <Link href={taskHref(task)} className={styles.task}>
                               <span className={styles.taskContent}>
                                 <strong>{task.title}</strong>
-                                <span>{task.courseName}</span>
+                                <span>
+                                  {task.courseName} · {task.kind === 'quiz' ? '測驗' : '作業'}
+                                </span>
                               </span>
                               <Deadline task={task} now={now} />
                               <span aria-hidden className={styles.arrow}>
@@ -309,7 +318,9 @@ export default function HomePage() {
                         ))}
                       </ul>
                     ) : (
-                      <p className={styles.empty}>目前沒有待繳作業。</p>
+                      <p className={styles.empty}>
+                        {context ? '目前載入的作業與測驗沒有待完成事項。' : '目前沒有待繳作業。'}
+                      </p>
                     )}
                   </section>
                 )}

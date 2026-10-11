@@ -60,7 +60,7 @@ it('retains all existing services and search while adding a separate classroom e
   expect(screen.getByRole('link', { name: '課程空間' }).getAttribute('href')).toBe('/classroom');
   expect(screen.getByRole('link', { name: '跨校交流' }).getAttribute('href')).toBe('/social');
   expect(screen.getByRole('link', { name: '店家合作' }).getAttribute('href')).toBe('/merchant');
-  expect(screen.getAllByRole('link')).toHaveLength(20);
+  expect(screen.getAllByRole('link')).toHaveLength(22);
 });
 
 it('preserves school context without copying unrelated session or return parameters', () => {
@@ -188,4 +188,18 @@ it('identifies a nested service without selecting a route with only a matching p
   rerender(<CampusServiceMenu />);
   screen.getByText('所有服務').closest('details')!.open = true;
   expect(screen.getByRole('link', { name: '公告' }).getAttribute('aria-current')).toBeNull();
+});
+
+it('selects only the specific account service and closes its overview link on the current page', () => {
+  navigation.pathname = '/classroom/account';
+  const view = render(<CampusServiceMenu />);
+  screen.getByText('所有服務').closest('details')!.open = true;
+  expect(screen.getByRole('link', { name: '學校資格' }).getAttribute('aria-current')).toBe('page');
+  expect(screen.getByRole('link', { name: '課程空間' }).getAttribute('aria-current')).toBeNull();
+  navigation.pathname = '/search';
+  view.rerender(<CampusServiceMenu />);
+  const menu = screen.getByText('所有服務').closest('details')!;
+  menu.open = true;
+  fireEvent.click(screen.getByRole('link', { name: /尋找校園服務/ }));
+  expect(menu.open).toBe(false);
 });

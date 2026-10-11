@@ -12,11 +12,17 @@ import {
   type NuniSubmission,
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
-import { courseRoleLabels, matchesAssignmentFilter } from '@campus/shared/src/nuniCourseTasks';
+import { courseRoleLabels } from '@campus/shared/src/nuniCourseTasks';
 import { useNuniSession } from '../../state/nuniSession';
 import { useNuniDraftState } from '../../state/nuniDrafts';
 import { useTheme } from '../../state/theme';
 import type { NativeNuniSession } from '../../services/nuniSessionController';
+import {
+  isPendingActivity,
+  matchesActivityFilter,
+  prioritizeActivities,
+  type ActivityFilter,
+} from '../../services/nuniActivityTasks';
 
 type Classes = ReturnType<typeof createNuniClasses>;
 type Field = { name: string; label: string; max: number; multiline?: boolean; min?: number };
@@ -53,26 +59,28 @@ function Button({
   label,
   onPress,
   disabled = false,
+  selected,
 }: {
   label: string;
   onPress(): void;
   disabled?: boolean;
+  selected?: boolean;
 }) {
   const theme = useTheme();
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{ disabled }}
+      accessibilityState={{ disabled, ...(selected === undefined ? {} : { selected }) }}
       disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => ({
         borderRadius: 10,
         borderWidth: 1,
-        borderColor: theme.colors.border,
+        borderColor: selected ? theme.colors.accent : theme.colors.border,
         paddingHorizontal: 14,
         paddingVertical: 12,
-        backgroundColor: pressed ? theme.colors.surface2 : theme.colors.surface,
+        backgroundColor: pressed || selected ? theme.colors.surface2 : theme.colors.surface,
         opacity: disabled ? 0.5 : 1,
       })}
     >
@@ -340,7 +348,7 @@ function CourseList({ classes, open }: { classes: Classes; open(id: string): voi
   return (
     <>
       <Copy title>我的課程</Copy>
-      <Copy>修課與授課依每門課的身分顯示。建立課程不會取得校方教職員權限。</Copy>
+      <Copy>選擇課程，查看教材、作業與測驗。</Copy>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         <Button label="加入課程" onPress={() => setAction('join')} />
         <Button label="建立課程" onPress={() => setAction('create')} />
@@ -358,6 +366,7 @@ function CourseList({ classes, open }: { classes: Classes; open(id: string): voi
         />
       </View>
       <View style={{ display: action === 'create' ? 'flex' : 'none' }}>
+        <Copy>建立課程後，你可以發布教材與邀請學生。這不會取得校方教職員權限。</Copy>
         <MutationForm
           draftKey="courses:create"
           fields={[{ name: 'title', label: '課程名稱', max: 120, min: 2 }]}
@@ -437,8 +446,12 @@ function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; o
     `course:${id}:tab`,
     'assignments',
   );
+  const [activityFilter, setActivityFilter] = useNuniDraftState<ActivityFilter>(
+    `course:${id}:activity-filter`,
+    'all',
+  );
   const data = result.data;
-  const saveActivity = (item: Activity) =>
+  const saveActivity = (item: Activity) => {
     result.commit(
       (current) =>
         current
@@ -456,6 +469,9 @@ function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; o
           : current,
       result.version,
     );
+    // The confirmed receipt must stay visible when the item leaves the pending list.
+    setActivityFilter((filter) => (filter === 'pending' ? 'submitted' : filter));
+  };
   const teacher = data && data.course.memberRole !== 'student';
   return (
     <>
@@ -473,30 +489,69 @@ function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; o
           <Copy>
             {teacher
               ? '教學操作僅限這門課；不代表校方教職員身分。'
-              : `${data.assignments.filter((item) => matchesAssignmentFilter(item, data.course, 'pending')).length} 份待繳作業`}
+              : `待繳作業 ${data.assignments.filter((item) => isPendingActivity(item, data.course)).length} · 待答測驗 ${data.quizzes.filter((item) => isPendingActivity(item, data.course)).length}`}
           </Copy>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             <Button
               label={`作業 ${data.assignments.length}`}
               onPress={() => setTab('assignments')}
+              selected={tab === 'assignments'}
             />
-            <Button label={`教材 ${data.materials.length}`} onPress={() => setTab('materials')} />
-            <Button label={`測驗 ${data.quizzes.length}`} onPress={() => setTab('quizzes')} />
+            <Button
+              label={`教材 ${data.materials.length}`}
+              onPress={() => setTab('materials')}
+              selected={tab === 'materials'}
+            />
+            <Button
+              label={`測驗 ${data.quizzes.length}`}
+              onPress={() => setTab('quizzes')}
+              selected={tab === 'quizzes'}
+            />
           </View>
+          {!teacher && tab !== 'materials' ? (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {(['all', 'pending', 'submitted'] as const).map((filter) => {
+                const items = tab === 'assignments' ? data.assignments : data.quizzes;
+                const count = items.filter((item) =>
+                  matchesActivityFilter(item, data.course, filter),
+                ).length;
+                return (
+                  <Button
+                    key={filter}
+                    label={`${filter === 'all' ? '全部' : filter === 'pending' ? '待完成' : '已繳交'} ${count}`}
+                    selected={activityFilter === filter}
+                    onPress={() => setActivityFilter(filter)}
+                  />
+                );
+              })}
+            </View>
+          ) : null}
           <View style={{ display: tab === 'assignments' ? 'flex' : 'none', gap: 16 }}>
             {data.assignments.length === 0 ? (
               <Copy>老師尚未發布作業。</Copy>
             ) : (
-              data.assignments.map((item) => (
+              prioritizeActivities(data.assignments, data.course).map((item) => (
                 <ActivityCard
                   key={`${data.course.memberRole}:${data.course.state}:${item.id}`}
                   item={item}
                   course={data.course}
                   classes={classes}
                   saved={saveActivity}
+                  hidden={!teacher && !matchesActivityFilter(item, data.course, activityFilter)}
                 />
               ))
             )}
+            {!teacher &&
+            data.assignments.length > 0 &&
+            !data.assignments.some((item) =>
+              matchesActivityFilter(item, data.course, activityFilter),
+            ) ? (
+              <Copy>
+                {activityFilter === 'pending'
+                  ? '目前沒有待繳作業。可切換「全部」查看其他作業。'
+                  : '尚無已繳交的作業紀錄。'}
+              </Copy>
+            ) : null}
           </View>
           <View style={{ display: tab === 'materials' ? 'flex' : 'none', gap: 16 }}>
             {data.materials.length === 0 ? (
@@ -515,16 +570,28 @@ function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; o
             {data.quizzes.length === 0 ? (
               <Copy>老師尚未發布測驗。</Copy>
             ) : (
-              data.quizzes.map((item) => (
+              prioritizeActivities(data.quizzes, data.course).map((item) => (
                 <ActivityCard
                   key={`${data.course.memberRole}:${data.course.state}:${item.id}`}
                   item={item}
                   course={data.course}
                   classes={classes}
                   saved={saveActivity}
+                  hidden={!teacher && !matchesActivityFilter(item, data.course, activityFilter)}
                 />
               ))
             )}
+            {!teacher &&
+            data.quizzes.length > 0 &&
+            !data.quizzes.some((item) =>
+              matchesActivityFilter(item, data.course, activityFilter),
+            ) ? (
+              <Copy>
+                {activityFilter === 'pending'
+                  ? '目前沒有待答測驗。可切換「全部」查看其他測驗。'
+                  : '尚無已繳交的測驗紀錄。'}
+              </Copy>
+            ) : null}
           </View>
           {teacher && data.course.state === 'active' ? (
             <CoursePublishing
@@ -582,11 +649,13 @@ function ActivityCard({
   course,
   classes,
   saved,
+  hidden = false,
 }: {
   item: Activity;
   course: NuniWorkspace;
   classes: Classes;
   saved(item: Activity): void;
+  hidden?: boolean;
 }) {
   const assignment = 'instructions' in item;
   const receipt = assignment ? item.mySubmission : item.myResponse;
@@ -596,59 +665,65 @@ function ActivityCard({
   const canSubmit = student && active && item.state === 'open';
   const kind = assignment ? '作業' : '測驗';
   return (
-    <Section>
-      <Copy title>{item.title}</Copy>
-      <Copy>{prompt}</Copy>
-      <Copy>
-        {item.dueAt ? `參考期限：${time(item.dueAt)}` : '未設定參考期限'} ·{' '}
-        {item.state === 'open' ? '開放繳交' : '已停止收件'}
-      </Copy>
-      {item.dueAt && item.state === 'open' && active ? (
-        <Copy>目前仍開放繳交，收件狀態以老師是否停止收件為準。</Copy>
-      ) : null}
-      {receipt ? (
-        <View style={{ gap: 8 }}>
-          <Copy title>已繳交</Copy>
-          <Copy>{time(receipt.submittedAt)}</Copy>
-          <Copy>{'body' in receipt ? receipt.body : receipt.answer}</Copy>
-          <Copy>
-            {receipt.teacherFeedback
-              ? `老師回饋：${receipt.teacherFeedback}`
-              : '老師尚未留下回饋。'}
-          </Copy>
-        </View>
-      ) : null}
-      {canSubmit ? (
-        <MutationForm
-          draftKey={`course:${course.id}:${course.memberRole}:${course.state}:${assignment ? 'assignment' : 'quiz'}:${item.id}:${item.state}`}
-          fields={[
-            {
-              name: 'body',
-              label: `${kind}內容：${item.title}`,
-              max: assignment ? 8000 : 4000,
-              multiline: true,
-            },
-          ]}
-          label={receipt ? `更新${kind}繳交` : `繳交${kind}`}
-          submit={async ({ body }, key, stillActive) => {
-            const confirmed = assignment
-              ? await classes.submit(course.id, item.id, body, key)
-              : await classes.submitQuiz(course.id, item.id, body, key);
-            if (stillActive()) saved(confirmed);
-            return '已收到伺服器繳交紀錄。';
-          }}
-        />
-      ) : null}
-      {!active ? <Copy>這門課已封存，現在只能查看保留的紀錄。</Copy> : null}
-      {!student ? (
-        <TeacherReceipts
-          key={`${item.id}:${course.memberRole}:${course.state}`}
-          classes={classes}
-          course={course}
-          item={item}
-        />
-      ) : null}
-    </Section>
+    <View
+      style={{ display: hidden ? 'none' : 'flex' }}
+      accessibilityElementsHidden={hidden}
+      importantForAccessibility={hidden ? 'no-hide-descendants' : 'auto'}
+    >
+      <Section>
+        <Copy title>{item.title}</Copy>
+        <Copy>{prompt}</Copy>
+        <Copy>
+          {item.dueAt ? `參考期限：${time(item.dueAt)}` : '未設定參考期限'} ·{' '}
+          {item.state === 'open' ? '開放繳交' : '已停止收件'}
+        </Copy>
+        {item.dueAt && item.state === 'open' && active ? (
+          <Copy>目前仍開放繳交，收件狀態以老師是否停止收件為準。</Copy>
+        ) : null}
+        {receipt ? (
+          <View style={{ gap: 8 }}>
+            <Copy title>已繳交</Copy>
+            <Copy>{time(receipt.submittedAt)}</Copy>
+            <Copy>{'body' in receipt ? receipt.body : receipt.answer}</Copy>
+            <Copy>
+              {receipt.teacherFeedback
+                ? `老師回饋：${receipt.teacherFeedback}`
+                : '老師尚未留下回饋。'}
+            </Copy>
+          </View>
+        ) : null}
+        {canSubmit ? (
+          <MutationForm
+            draftKey={`course:${course.id}:${course.memberRole}:${course.state}:${assignment ? 'assignment' : 'quiz'}:${item.id}:${item.state}`}
+            fields={[
+              {
+                name: 'body',
+                label: `${kind}內容：${item.title}`,
+                max: assignment ? 8000 : 4000,
+                multiline: true,
+              },
+            ]}
+            label={receipt ? `更新${kind}繳交` : `繳交${kind}`}
+            submit={async ({ body }, key, stillActive) => {
+              const confirmed = assignment
+                ? await classes.submit(course.id, item.id, body, key)
+                : await classes.submitQuiz(course.id, item.id, body, key);
+              if (stillActive()) saved(confirmed);
+              return '已收到伺服器繳交紀錄。';
+            }}
+          />
+        ) : null}
+        {!active ? <Copy>這門課已封存，現在只能查看保留的紀錄。</Copy> : null}
+        {!student ? (
+          <TeacherReceipts
+            key={`${item.id}:${course.memberRole}:${course.state}`}
+            classes={classes}
+            course={course}
+            item={item}
+          />
+        ) : null}
+      </Section>
+    </View>
   );
 }
 
