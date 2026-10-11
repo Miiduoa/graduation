@@ -4,7 +4,7 @@
 
 整合課程、訊息、校園地圖與學習資訊的跨端產品原型。Mobile 與 Web 共用部分型別及商業規則，後端以 Firebase Functions、Firestore 和 Storage 處理資料與授權。
 
-目前持續開發中，部分功能使用示範資料；外部校務、LMS、交通與 AI 服務需要另行設定。
+目前持續開發中，部分功能使用示範資料；外部校務、LMS 與交通服務需要另行設定。
 
 [兩分鐘導覽](docs/REVIEW_IN_2_MINUTES.md) · [架構說明](docs/ARCHITECTURE_OVERVIEW.md) · [測試紀錄](docs/TESTING_EVIDENCE.md) · [作品介紹](https://miiduoa.github.io/case-studies/campus-one/)
 
@@ -20,9 +20,9 @@
 
 ## 功能與程式入口
 
-- **Mobile**：今日行動、課程與作業、訊息與群組、校園地圖、公車及學習資訊。使用 Expo 54、React Native 0.81、React Navigation，程式位於 [`apps/mobile/`](apps/mobile/)。
+- **Mobile**：今天、課務、生活、我。課表、作業、訊息、校園地圖與公車。使用 Expo 54、React Native 0.81、React Navigation，程式位於 [`apps/mobile/`](apps/mobile/)。
 - **Web**：學生與管理／教學介面，使用 Next.js 16、React 19、TypeScript，程式位於 [`apps/web/`](apps/web/)。
-- **Backend**：Firebase Functions、Firestore／Storage 規則與測試，位於 [`backend/`](backend/)。AI server 與訓練實驗另放在 `backend/ai-server/` 等目錄。
+- **Backend**：Firebase Functions、Firestore／Storage 規則與測試，位於 [`backend/`](backend/)。
 - **Shared**：跨端共用的型別與規則位於 [`packages/`](packages/)，由 pnpm workspace 管理。
 
 ## 本機執行
@@ -75,11 +75,9 @@ Deep link、通知與訊息 action 經過 route registry 及 safe navigation。�
 - [傳送前檢查](apps/mobile/src/services/prepareGradingDelivery.ts)
 - [收件人隔離測試](apps/mobile/src/__tests__/prepareGradingDelivery.test.ts)
 
-### AI 助理
+### 課表與安排
 
-AI 負責整理資訊與提出建議；核心資料、授權與導航由一般程式邏輯處理。高敏感寫入需要確認。離線 local LLM／llama.rn 與後端訓練仍屬實驗路徑，裝置支援及效能會有差異。
-
-詳見 [AI 助理架構](docs/AI_ASSISTANT_ARCHITECTURE.md)。
+個人課表用靜宜第 1–13 節。截圖或學校選課紀錄要確認後才寫入。好友課表要先加好友才看得到。共同空堂可以約吃飯或讀書。「幫我安排」是依課表算出下一堂、空堂與讀書時段，不是另外一套對話服務。
 
 ## 驗證
 
@@ -103,8 +101,7 @@ Mobile 使用 Jest，Web 使用 Vitest，原生 UI 流程另有 Maestro E2E work
 ## 目前限制
 
 - 這是校園產品原型，尚非正式校務系統；demo data 不代表校方權威資料。
-- 外部 LMS、地圖、即時交通與 AI 服務需要相應環境及憑證。
-- local LLM 與 AI training 為實驗功能。
+- 外部 LMS、地圖、即時交通需要相應環境及憑證。沒開通的服務會在畫面上直接說明。
 - Repo 同時保留研究、驗證及口試文件；待修問題見 [REMAINING_BUGS_AUDIT](docs/REMAINING_BUGS_AUDIT.md)。
 - 點名的伺服器確認要求及現有限制，另見 [Attendance verification boundary](docs/ATTENDANCE_VERIFICATION.md)。
 
