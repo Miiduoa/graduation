@@ -1,6 +1,6 @@
 # TronClass 靜宜部署實際 schema（2026-05-13 線上驗證）
 
-> 透過 Claude in Chrome 連到 https://tronclass.pu.edu.tw/ 登入後 fetch 抓真實 response 寫下來。
+> 用瀏覽器登入 https://tronclass.pu.edu.tw/ 後 fetch 抓真實 response 寫下來。
 > 不再用猜的 schema，這份是源頭真實 truth。
 
 ## 1. `POST /api/my-courses` — 我的課程列表
