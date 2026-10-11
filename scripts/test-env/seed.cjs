@@ -52,8 +52,13 @@ async function main() {
       .doc(`schools/${SCHOOL_ID}/members/${user.uid}`)
       .set({ status: 'active', role: user.role, displayName: user.name }, { merge: true });
   }
+  // T0000001 教「資料庫」：老師工作台只看得到這門課的申訴（「英文」沒有對應老師）
+  await db
+    .doc(`schools/${SCHOOL_ID}/courseTeachers/資料庫`)
+    .set({ courseName: '資料庫', teacherUids: ['test-teacher'] }, { merge: true });
   console.log('測試帳號（密碼都是 %s）：', PASSWORD);
   for (const user of users) console.log(`  ${user.login}  ${user.name}（${user.role}）`);
+  console.log('課程對應：T0000001 教「資料庫」');
 }
 
 main()
