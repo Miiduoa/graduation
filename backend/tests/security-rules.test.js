@@ -1516,3 +1516,67 @@ test('public timetable shares are readable until they expire or are revoked', as
   await assertFails(guest.collection('timetableShares').get());
 });
 
+
+test('only the invitee can accept a friend request', async () => {
+  await seedFirestore(async (db) => {
+    for (const uid of ['alice', 'carol', 'mallory']) {
+      await db.doc(`schools/pu/members/${uid}`).set({ status: 'active', role: 'student' });
+    }
+    await db.doc('users/carol/personalTimetable/current').set({
+      schoolId: 'pu',
+      shareWithFriends: true,
+      courses: [{ id: 'x', name: '丙的課', day: 2, start: 1, end: 2 }],
+      meta: {},
+    });
+  });
+  const alice = testEnv.authenticatedContext('alice').firestore();
+  const carol = testEnv.authenticatedContext('carol').firestore();
+  const mallory = testEnv.authenticatedContext('mallory').firestore();
+
+  await assertSucceeds(
+    alice.doc('friendships/req_pu_alice_carol').set({ schoolId: 'pu', fromUid: 'alice', toUid: 'carol', status: 'pending' }),
+  );
+  // 送出邀請的人不能自己改成已接受，也不能直接建立已接受的邀請
+  await assertFails(alice.doc('friendships/req_pu_alice_carol').update({ status: 'accepted' }));
+  await assertFails(
+    alice.doc('friendships/req_pu_alice_mallory').set({ schoolId: 'pu', fromUid: 'alice', toUid: 'mallory', status: 'accepted' }),
+  );
+  await assertFails(alice.doc('users/carol/personalTimetable/current').get());
+
+  // 文件編號要跟雙方對得起來，不能借別人的編號
+  await assertFails(
+    alice.doc('friendships/req_pu_alice_carol2').set({ schoolId: 'pu', fromUid: 'alice', toUid: 'mallory', status: 'pending' }),
+  );
+  await assertFails(
+    mallory.doc('friendships/req_pu_alice_carol').set({ schoolId: 'pu', fromUid: 'mallory', toUid: 'carol', status: 'pending' }),
+  );
+
+  // 被邀請的人接受之後，雙方才看得到課表
+  await assertSucceeds(carol.doc('friendships/req_pu_alice_carol').update({ status: 'accepted', toName: '丙' }));
+  await assertSucceeds(alice.doc('users/carol/personalTimetable/current').get());
+
+  // 已接受之後也不能被任一方改回待確認或改成別人
+  await assertFails(alice.doc('friendships/req_pu_alice_carol').update({ status: 'pending' }));
+  await assertFails(carol.doc('friendships/req_pu_alice_carol').update({ toUid: 'mallory' }));
+  // 任一方都可以封鎖
+  await assertSucceeds(alice.doc('friendships/req_pu_alice_carol').update({ status: 'blocked' }));
+  await assertFails(alice.doc('users/carol/personalTimetable/current').get());
+});
+
+test('handles can be looked up one at a time but never listed', async () => {
+  await seedFirestore(async (db) => {
+    await db.doc('schools/pu/members/alice').set({ status: 'active', role: 'student' });
+    await db.doc('schools/pu/members/bob').set({ status: 'active', role: 'student' });
+  });
+  const alice = testEnv.authenticatedContext('alice').firestore();
+  const bob = testEnv.authenticatedContext('bob').firestore();
+  const stranger = testEnv.authenticatedContext('stranger').firestore();
+  await assertSucceeds(
+    alice.doc('schools/pu/handles/alice_01').set({ uid: 'alice', name: 'Alice', handle: 'alice_01' }),
+  );
+  await assertFails(bob.doc('schools/pu/handles/bob_01').set({ uid: 'alice', name: 'Bob', handle: 'bob_01' }));
+  await assertFails(bob.doc('schools/pu/handles/alice_01').update({ uid: 'bob', name: 'Bob', handle: 'alice_01' }));
+  await assertSucceeds(bob.doc('schools/pu/handles/alice_01').get());
+  await assertFails(bob.collection('schools/pu/handles').get());
+  await assertFails(stranger.doc('schools/pu/handles/alice_01').get());
+});

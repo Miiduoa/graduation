@@ -1263,18 +1263,56 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && request.resource.data.fromUid == request.auth.uid
         && request.resource.data.toUid != request.auth.uid
+        && request.resource.data.toUid is string
+        && request.resource.data.schoolId is string
+        && friendshipId == 'req_' + request.resource.data.schoolId + '_' + request.auth.uid + '_' + request.resource.data.toUid
         && request.resource.data.status == 'pending'
         && request.resource.data.schoolId != null
         && isSchoolMember(request.resource.data.schoolId);
+      // 只有被邀請的人能接受或婉拒；送出邀請的人不能自己改成 accepted。
+      // 任一方都能封鎖；其他欄位（名字以外）不能動。
       allow update: if isSignedIn()
         && friendshipInvolves(request.auth.uid)
         && resource.data.schoolId == request.resource.data.schoolId
         && resource.data.fromUid == request.resource.data.fromUid
-        && resource.data.toUid == request.resource.data.toUid;
+        && resource.data.toUid == request.resource.data.toUid
+        && request.resource.data.get('fromName', null) == resource.data.get('fromName', null)
+        && (
+          (
+            request.auth.uid == resource.data.toUid
+            && resource.data.status == 'pending'
+            && request.resource.data.status in ['accepted', 'declined']
+          )
+          || (
+            request.resource.data.status == 'blocked'
+            && resource.data.status != 'blocked'
+          )
+        );
       allow delete: if isSignedIn()
         && friendshipInvolves(request.auth.uid)
         && isSchoolMember(resource.data.schoolId)
-        && resource.data.status in ['pending', 'accepted', 'blocked'];
+        && resource.data.status in ['pending', 'accepted', 'declined', 'blocked'];
+    }
+
+    // 找人代號：同學自己開放的代號，只能用完整代號查一筆，不能列出整份名單。
+    match /schools/{schoolId}/handles/{handle} {
+      allow get: if isSchoolMember(schoolId);
+      allow list: if false;
+      allow create: if isSchoolMember(schoolId)
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid', 'name', 'handle', 'updatedAt'])
+        && request.resource.data.handle == handle
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 40
+        && handle.matches('^[a-z0-9_.-]{3,32}$');
+      allow update: if isSchoolMember(schoolId)
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid', 'name', 'handle', 'updatedAt'])
+        && request.resource.data.handle == handle
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 40;
+      allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
     }
 
     match /timetableShares/{token} {
