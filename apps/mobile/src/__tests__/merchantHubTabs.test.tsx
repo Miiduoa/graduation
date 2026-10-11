@@ -131,7 +131,7 @@ test('給號碼失敗也能拒單：走原本的取消訂單', async () => {
   const view = render(<MerchantHubScreen view="pending" />);
   await act(async () => {});
   await act(async () => fireEvent.press(view.getByText('給號碼並接單')));
-  expect(alert).toHaveBeenCalledWith('號碼還沒給出去', expect.stringContaining('拒單'));
+  expect(view.getByText('號碼沒給出去，請再按一次。')).toBeTruthy();
   expect(view.getByText(/AAA111/)).toBeTruthy();
   const rejectButtons = view.getAllByText('拒單');
   await act(async () => fireEvent.press(rejectButtons[0]));

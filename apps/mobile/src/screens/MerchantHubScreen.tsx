@@ -102,6 +102,8 @@ export function MerchantHubScreen({
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
   // 按了「給號碼」之後先換上伺服器回的號碼，重新整理後以訂單資料為準
   const [givenNumbers, setGivenNumbers] = useState<Record<string, number>>({});
+  // 給號碼失敗的單：按鈕旁邊寫「號碼沒給出去，請再按一次。」，成功後拿掉
+  const [numberFailed, setNumberFailed] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (!assignments.some((assignment) => assignment.cafeteriaId === selectedAssignmentId)) {
@@ -219,12 +221,14 @@ export function MerchantHubScreen({
         cafeteriaId: selectedAssignment.cafeteriaId,
       });
       setGivenNumbers((current) => ({ ...current, [order.id]: given.queueNumber }));
+      setNumberFailed((current) => {
+        const { [order.id]: _cleared, ...rest } = current;
+        return rest;
+      });
       await refresh();
     } catch (error: any) {
-      Alert.alert(
-        '號碼還沒給出去',
-        `${error?.message ?? '請稍後再試一次。'}\n不接這張單可以按「拒單」。`,
-      );
+      console.warn('[MerchantHub] giveMerchantQueueNumber failed:', error?.message ?? error);
+      setNumberFailed((current) => ({ ...current, [order.id]: true }));
     } finally {
       setUpdatingOrderId(null);
     }
@@ -236,6 +240,18 @@ export function MerchantHubScreen({
       { text: '先不要', style: 'cancel' },
       {
         text: '拒單',
+        style: 'destructive',
+        onPress: () => void handleAdvanceOrder(order, 'cancelled'),
+      },
+    ]);
+  };
+
+  // 出餐頁取消：缺料或學生沒來時用，走同一條取消訂單，學生那邊寫「這張單店家取消了」，號碼拿掉
+  const handleCancelAccepted = (order: Order) => {
+    Alert.alert('確定取消這張單？', '學生會收到通知。', [
+      { text: '先不要', style: 'cancel' },
+      {
+        text: '取消訂單',
         style: 'destructive',
         onPress: () => void handleAdvanceOrder(order, 'cancelled'),
       },
@@ -396,6 +412,7 @@ export function MerchantHubScreen({
                 order.status !== 'completed' &&
                 !cancelled;
               const isPending = order.status === 'pending';
+              const isAccepted = ['confirmed', 'preparing', 'ready'].includes(order.status);
               const nextAction =
                 needsNumber && isPending ? null : getNextOrderAction(order.status);
               const busy = updatingOrderId === order.id;
@@ -505,6 +522,12 @@ export function MerchantHubScreen({
                       />
                     ) : null}
 
+                    {needsNumber && numberFailed[order.id] && !busy ? (
+                      <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>
+                        號碼沒給出去，請再按一次。
+                      </Text>
+                    ) : null}
+
                     {nextAction ? (
                       <Button
                         text={busy ? '更新中...' : nextAction.label}
@@ -523,7 +546,16 @@ export function MerchantHubScreen({
                       />
                     ) : null}
 
-                    {nextAction || needsNumber || isPending ? null : (
+                    {isAccepted ? (
+                      <Button
+                        text="取消訂單"
+                        kind="outline"
+                        disabled={busy}
+                        onPress={() => handleCancelAccepted(order)}
+                      />
+                    ) : null}
+
+                    {nextAction || needsNumber || isPending || isAccepted ? null : (
                       <Text style={{ color: theme.colors.muted, textAlign: 'center' }}>
                         此訂單目前不需要進一步操作。
                       </Text>
