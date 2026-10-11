@@ -6,7 +6,7 @@ import { GoogleMapsLikeScreen } from '../screens/GoogleMapsLikeScreen';
 import { loadCampusMapPlaces, type CampusMapPlace } from '../features/campusMap';
 
 let mockSchool = { id: 'school-a' };
-let mockUser = { uid: 'user-a' };
+let mockUser: { uid: string } | null = { uid: 'user-a' };
 let mockParams: Record<string, unknown> = {};
 const mockInject = jest.fn();
 jest.mock('../state/school', () => ({ useSchool: () => ({ school: mockSchool }) }));
@@ -210,3 +210,11 @@ test.each(['denied', 'failed'])(
     expect(mockInject).not.toHaveBeenCalledWith(expect.stringContaining('25.2'));
   },
 );
+
+test('a visitor can load the public map without a school identity', async () => {
+  mockUser = null;
+  const view = await openMap();
+  expect(loadCampusMapPlaces).toHaveBeenCalledWith('school-a');
+  expect(view.getByText('學校發布的圖書館')).toBeTruthy();
+  expect(Location.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
+});

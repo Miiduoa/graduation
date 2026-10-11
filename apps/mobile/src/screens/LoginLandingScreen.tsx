@@ -6,6 +6,7 @@ import { safeNavigate } from '../utils/safeNavigate';
 import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { useNuniSession } from '../state/nuniSession';
+import { isStudentIdLoginAvailable } from '../services/schoolLoginAvailability';
 
 export default function LoginLandingScreen() {
   const navigation = useNavigation();
@@ -17,8 +18,30 @@ export default function LoginLandingScreen() {
         <Text style={s.brand}>CAMPUS ONE</Text>
         <View style={s.intro}>
           <Text style={s.school}>課程・校園・每天的事</Text>
-          <Text style={s.heading}>你的課程，{'\n'}隨手就能查看。</Text>
-          <Text style={s.body}>查看課程、掌握待辦，找到校園裡需要的資訊。</Text>
+          <Text style={s.heading}>校園資訊，{'\n'}打開就能查看。</Text>
+          <Text style={s.body}>不必登入學校帳號，就能查看地圖、公車與公開公告。</Text>
+        </View>
+        <View style={s.publicPanel}>
+          <Text style={s.title}>先找需要的資訊</Text>
+          {(
+            [
+              ['Map', '校園地圖', '搜尋地點、查看位置與步行路線'],
+              ['BusSchedule', '公車查詢', '查看站點與官方到站資訊'],
+              ['公告總覽', '公開公告', '查看學校發布的消息'],
+            ] as const
+          ).map(([route, title, detail]) => (
+            <Pressable
+              key={route}
+              testID={`public-${route}`}
+              accessibilityRole="button"
+              accessibilityLabel={title}
+              style={s.publicButton}
+              onPress={() => safeNavigate(navigation, route)}
+            >
+              <Text style={s.publicTitle}>{title}</Text>
+              <Text style={s.publicDetail}>{detail}</Text>
+            </Pressable>
+          ))}
         </View>
         <View style={s.panel}>
           <Text style={s.title}>Campus One 帳號</Text>
@@ -42,14 +65,21 @@ export default function LoginLandingScreen() {
         </View>
         <View style={s.schoolPanel}>
           <Text style={s.title}>連線學校帳號</Text>
-          <Text style={s.body}>讀取學校提供的課表與成績。目前支援靜宜 E 校園。</Text>
+          <Text style={s.body}>
+            {isStudentIdLoginAvailable()
+              ? '只有讀取學校提供的個人課表與成績，才需要連線學校帳號。'
+              : '學校帳號連線尚未開放。公開資訊、Campus One 課程與店家服務仍可使用。'}
+          </Text>
           <Pressable
             testID="school-login-start"
             accessibilityRole="button"
             style={s.schoolButton}
+            disabled={!isStudentIdLoginAvailable()}
             onPress={() => safeNavigate(navigation, 'SSOLogin')}
           >
-            <Text style={s.schoolButtonText}>前往學校登入</Text>
+            <Text style={s.schoolButtonText}>
+              {isStudentIdLoginAvailable() ? '前往學校登入' : '學校連線尚未開放'}
+            </Text>
           </Pressable>
         </View>
         <Text style={s.footer}>Campus One · 課程與校園生活</Text>
@@ -68,7 +98,15 @@ const createStyles = () =>
       fontSize: 14,
       marginTop: 16,
     },
-    intro: { paddingVertical: 65 },
+    intro: { paddingVertical: 36 },
+    publicPanel: { marginBottom: 28 },
+    publicButton: {
+      paddingVertical: 18,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    publicTitle: { color: theme.colors.accent, fontSize: 17, fontWeight: '600' },
+    publicDetail: { color: theme.colors.muted, fontSize: 13, marginTop: 6 },
     school: { color: theme.colors.textSecondary, fontSize: 13, marginBottom: 18 },
     heading: {
       color: theme.colors.text,

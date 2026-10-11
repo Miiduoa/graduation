@@ -16,6 +16,7 @@ import { PROVIDENCE_UNIVERSITY_SCHOOL_ID } from '@campus/shared/src';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { signInWithStudentId, type LoginProgress } from '../services/studentIdAuth';
+import { isStudentIdLoginAvailable } from '../services/schoolLoginAvailability';
 import { Screen, Button, AnimatedCard } from '../ui/components';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
@@ -47,6 +48,8 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
   const nav = props?.navigation ?? routeNavigation;
   const auth = useAuth();
   const { school } = useSchool();
+
+  const schoolLoginAvailable = isStudentIdLoginAvailable();
 
   const [studentIdInput, setStudentIdInput] = useState('');
   const [studentPwInput, setStudentPwInput] = useState('');
@@ -128,7 +131,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
   };
 
   const handleStudentIdLogin = async () => {
-    if (!studentIdInput.trim() || !studentPwInput.trim()) return;
+    if (!schoolLoginAvailable || !studentIdInput.trim() || !studentPwInput.trim()) return;
     const attempt = beginAttempt('school');
     if (!attempt) return;
     setError(null);
@@ -205,65 +208,74 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
           <Text accessibilityRole="header" style={styles.heading}>
             從你的課程開始。
           </Text>
-          <Text style={styles.body}>使用學校帳號，查看課程與校園生活資訊。</Text>
+          <Text style={styles.body}>只有讀取個人校務資料，才需要連線學校帳號。</Text>
         </View>
 
-        <AnimatedCard title="學校帳號登入" subtitle="使用靜宜 E 校園帳號與密碼">
-          <View style={styles.fields}>
-            <View style={styles.field}>
-              <Text nativeID="student-id-label" style={styles.label}>
-                學號
-              </Text>
-              <TextInput
-                testID="student-id-input"
-                accessibilityLabel="學號"
-                accessibilityLabelledBy="student-id-label"
-                value={studentIdInput}
-                onChangeText={setStudentIdInput}
-                placeholder="輸入 E 校園帳號"
-                placeholderTextColor={theme.colors.muted}
-                autoCapitalize="none"
-                autoCorrect={false}
-                autoComplete="username"
-                textContentType="username"
-                returnKeyType="next"
-                onSubmitEditing={() => passwordInput.current?.focus()}
-                editable={!formLocked}
-                style={styles.input}
+        {schoolLoginAvailable ? (
+          <AnimatedCard title="學校帳號登入" subtitle="使用靜宜 E 校園帳號與密碼">
+            <View style={styles.fields}>
+              <View style={styles.field}>
+                <Text nativeID="student-id-label" style={styles.label}>
+                  學號
+                </Text>
+                <TextInput
+                  testID="student-id-input"
+                  accessibilityLabel="學號"
+                  accessibilityLabelledBy="student-id-label"
+                  value={studentIdInput}
+                  onChangeText={setStudentIdInput}
+                  placeholder="輸入 E 校園帳號"
+                  placeholderTextColor={theme.colors.muted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="username"
+                  textContentType="username"
+                  returnKeyType="next"
+                  onSubmitEditing={() => passwordInput.current?.focus()}
+                  editable={!formLocked}
+                  style={styles.input}
+                />
+              </View>
+              <View style={styles.field}>
+                <Text nativeID="student-password-label" style={styles.label}>
+                  密碼
+                </Text>
+                <TextInput
+                  ref={passwordInput}
+                  testID="student-password-input"
+                  accessibilityLabel="密碼"
+                  accessibilityLabelledBy="student-password-label"
+                  value={studentPwInput}
+                  onChangeText={setStudentPwInput}
+                  placeholder="輸入 E 校園密碼"
+                  placeholderTextColor={theme.colors.muted}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="current-password"
+                  textContentType="password"
+                  returnKeyType="done"
+                  editable={!formLocked}
+                  style={styles.input}
+                />
+              </View>
+              <Button
+                text={isBusy ? '登入中…' : '使用學號登入'}
+                kind="primary"
+                onPress={handleStudentIdLogin}
+                disabled={formLocked || !studentIdInput.trim() || !studentPwInput.trim()}
               />
+              <Text style={styles.note}>可同步的課程與成績依學校提供內容而定。</Text>
             </View>
-            <View style={styles.field}>
-              <Text nativeID="student-password-label" style={styles.label}>
-                密碼
-              </Text>
-              <TextInput
-                ref={passwordInput}
-                testID="student-password-input"
-                accessibilityLabel="密碼"
-                accessibilityLabelledBy="student-password-label"
-                value={studentPwInput}
-                onChangeText={setStudentPwInput}
-                placeholder="輸入 E 校園密碼"
-                placeholderTextColor={theme.colors.muted}
-                secureTextEntry
-                autoCapitalize="none"
-                autoCorrect={false}
-                autoComplete="current-password"
-                textContentType="password"
-                returnKeyType="done"
-                editable={!formLocked}
-                style={styles.input}
-              />
-            </View>
-            <Button
-              text={isBusy ? '登入中…' : '使用學號登入'}
-              kind="primary"
-              onPress={handleStudentIdLogin}
-              disabled={formLocked || !studentIdInput.trim() || !studentPwInput.trim()}
-            />
-            <Text style={styles.note}>可同步的課程與成績依學校提供內容而定。</Text>
-          </View>
-        </AnimatedCard>
+          </AnimatedCard>
+        ) : (
+          <AnimatedCard title="學校連線尚未開放">
+            <Text style={styles.body}>
+              目前無法連線學校帳號。你仍可查看公開資訊，或使用 Campus One
+              帳號加入課程、繳交作業及管理店家。
+            </Text>
+          </AnimatedCard>
+        )}
 
         {isBusy ? (
           <View
