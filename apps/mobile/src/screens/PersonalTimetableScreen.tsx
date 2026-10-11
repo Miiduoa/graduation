@@ -1,3 +1,4 @@
+import * as Clipboard from 'expo-clipboard';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
@@ -22,8 +23,7 @@ import {
   commonFree,
   parseTimetableText,
   periodRangeLabel,
-  type PersonalCourse,
-} from '@campus/shared';
+  type PersonalCourse, shareCopiedCopy } from '@campus/shared';
 import { Screen, Button } from '../ui/components';
 import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
@@ -391,15 +391,20 @@ export default function PersonalTimetableScreen() {
           text="分享課表"
           onPress={async () => {
             let path = '';
+            let expiresAt = '';
             try {
               const share = await createServerShare(schoolId, '我的課表');
               path = share.path;
+              expiresAt = share.expiresAt;
             } catch {
               setNotice('現在產生不了分享連結，登入並連上網路後再試。');
               return;
             }
+            const url = `https://nuni.tw${path}`;
+            await Clipboard.setStringAsync(url).catch(() => undefined);
+            if (expiresAt) setNotice(shareCopiedCopy(expiresAt));
             try {
-              await Share.share({ message: `https://nuni.tw${path}` });
+              await Share.share({ message: url });
             } catch {
               // 使用者關掉分享面板或系統拒絕，不用另外提示
             }
