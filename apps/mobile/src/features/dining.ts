@@ -34,7 +34,19 @@ export type DiningReceipt = {
   /** 下單時間 ISO，拿去櫃台時對單用 */
   createdAt?: string | null;
   items?: { name: string; quantity: number }[];
+  /** 取消的是誰：'merchant' 店家、'customer' 學生自己 */
+  cancelledBy?: string | null;
+  cancelReason?: string | null;
 };
+export type DiningReceiptPatch = {
+  queueNumber: number | null;
+  status?: string;
+  cancelledBy?: string | null;
+  cancelReason?: string | null;
+};
+function textOrNull(value: unknown): string | null {
+  return typeof value === 'string' && value ? value : null;
+}
 function realQueueNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : null;
 }
@@ -254,6 +266,8 @@ export async function readDiningReceipt(
     label: typeof item.name === 'string' ? item.name : intent.label,
     queueNumber: realQueueNumber(row.queueNumber),
     createdAt: isoOf(row.createdAt),
+    cancelledBy: textOrNull(row.cancelledBy),
+    cancelReason: textOrNull(row.cancelReason),
     items: [
       {
         name: typeof item.name === 'string' ? item.name : intent.label,
@@ -264,12 +278,12 @@ export async function readDiningReceipt(
 }
 
 /**
- * 號碼還沒拿到時，盯著學生自己的訂單副本；店家按「給號碼」後畫面跟著換成真的號碼。
+ * 訂單還沒結束前，盯著學生自己的訂單副本：店家給號碼就換成真的號碼，店家取消就拿掉號碼。
  * 回傳取消監聽；沒辦法監聽時回 null。
  */
 export function watchDiningReceipt(
   scope: DiningScope & { orderId: string },
-  onChange: (patch: { queueNumber: number | null; status?: string }) => void,
+  onChange: (patch: DiningReceiptPatch) => void,
 ): (() => void) | null {
   const listen = (firestore as { onSnapshot?: typeof firestore.onSnapshot }).onSnapshot;
   if (typeof listen !== 'function' || isFirebaseMockMode()) return null;
@@ -282,12 +296,72 @@ export function watchDiningReceipt(
         onChange({
           queueNumber: realQueueNumber(row.queueNumber),
           ...(typeof row.status === 'string' ? { status: row.status } : {}),
+          cancelledBy: textOrNull(row.cancelledBy),
+          cancelReason: textOrNull(row.cancelReason),
         });
       },
       () => undefined,
     );
   } catch {
     return null;
+  }
+}
+export type MyOrder = {
+  id: string;
+  shop: string;
+  total: number | null;
+  status: string;
+  queueNumber: number | null;
+  createdAt: string | null;
+  items: { name: string; quantity: number }[];
+  cancelledBy: string | null;
+  cancelReason: string | null;
+};
+function myOrderOf(id: string, row: Record<string, unknown>): MyOrder {
+  const items = Array.isArray(row.items) ? (row.items as Record<string, unknown>[]) : [];
+  return {
+    id,
+    shop: textOrNull(row.cafeteria) ?? textOrNull(row.merchantName) ?? '校園餐廳',
+    total: typeof row.total === 'number' ? row.total : null,
+    status: textOrNull(row.status) ?? 'pending',
+    queueNumber: realQueueNumber(row.queueNumber),
+    createdAt: isoOf(row.createdAt),
+    items: items
+      .filter((item) => item && typeof item.name === 'string' && item.name)
+      .map((item) => ({
+        name: item.name as string,
+        quantity: typeof item.quantity === 'number' ? item.quantity : 0,
+      })),
+    cancelledBy: textOrNull(row.cancelledBy),
+    cancelReason: textOrNull(row.cancelReason),
+  };
+}
+/**
+ * 「我的訂單」：讀學生自己的訂單副本（users/{uid}/schools/{schoolId}/orders），由新到舊，即時更新。
+ * 號碼、狀態都以伺服器上的訂單為準，App 關掉重開一樣讀得到；不讀手機本機存的訂單。
+ */
+export function watchMyOrders(
+  scope: DiningScope,
+  onChange: (orders: MyOrder[]) => void,
+  onError: (error: unknown) => void,
+): () => void {
+  if (!scope.userId || !scope.schoolId || isFirebaseMockMode()) {
+    onChange([]);
+    return () => undefined;
+  }
+  try {
+    return firestore.onSnapshot(
+      firestore.query(
+        collection(getDb(), 'users', scope.userId, 'schools', scope.schoolId, 'orders'),
+        firestore.orderBy('createdAt', 'desc'),
+        firestore.limit(30),
+      ),
+      (snapshot) => onChange(snapshot.docs.map((row) => myOrderOf(row.id, row.data()))),
+      onError,
+    );
+  } catch (error) {
+    onError(error);
+    return () => undefined;
   }
 }
 export async function submitDiningIntent(

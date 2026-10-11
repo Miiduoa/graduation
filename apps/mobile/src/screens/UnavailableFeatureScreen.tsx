@@ -75,10 +75,6 @@ const features: Record<string, { title: string; description: string; actions?: A
       { label: '調整通知設定', route: 'NotificationSettings' },
     ],
   },
-  StudentOrders: {
-    title: '我的訂單',
-    description: '校園訂餐尚未開放。開放後才會提供訂單與付款紀錄。',
-  },
   VendorRevenueReport: { title: '營運報表', description: '營運報表尚未開放。' },
   VendorLoyaltyPush: {
     title: '顧客通知',

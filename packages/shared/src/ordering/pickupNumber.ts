@@ -49,7 +49,12 @@ export function formatTaipeiOrderTime(value: unknown): string {
 export function formatPickupItems(items: ReadonlyArray<PickupOrderItem> | null | undefined): string {
   return (items ?? [])
     .filter((item) => item && typeof item.name === 'string' && item.name.trim())
-    .map((item) => `${item.name.trim()} ×${Number.isFinite(item.quantity) && item.quantity > 0 ? item.quantity : 1}`)
+    // 數量不明就只寫品名，不把壞資料寫成「×1」
+    .map((item) =>
+      Number.isSafeInteger(item.quantity) && item.quantity > 0
+        ? `${item.name.trim()} ×${item.quantity}`
+        : item.name.trim(),
+    )
     .join('、');
 }
 

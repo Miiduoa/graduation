@@ -19,16 +19,14 @@ import {
   type DiningMenu,
   type DiningReceipt,
 } from '../features/dining';
-import { describePickupNumber } from '@campus/shared/src/ordering/pickupNumber';
+import {
+  describePickupNumber,
+  formatShortOrderCode,
+} from '@campus/shared/src/ordering/pickupNumber';
+import { MY_ORDER_STATUS_LABELS as statuses } from './MyOrdersScreen';
 
-type Props = { navigation?: { goBack?: () => void } };
-const statuses: Record<string, string> = {
-  pending: '等待店家確認',
-  confirmed: '店家已確認',
-  preparing: '準備中',
-  ready: '可以取餐',
-  completed: '已完成',
-  cancelled: '已取消',
+type Props = {
+  navigation?: { goBack?: () => void; navigate?: (route: string) => void };
 };
 export default function CafeteriaAiFirstScreen({ navigation }: Props) {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
@@ -146,23 +144,31 @@ function DiningContent({
   );
   const venueName = (menu: DiningMenu) =>
     catalog?.venues.find((venue) => venue.id === menu.cafeteriaId)?.name ?? '未提供餐廳資料';
-  // 號碼還沒拿到時盯著這筆訂單，店家按「給號碼」後換成真的號碼
+  // 訂單還沒結束前一直盯著：店家給號碼就換成真的號碼，店家取消就拿掉號碼
   const receiptId = receipt?.id ?? null;
-  const waitingForNumber = Boolean(receipt && receipt.queueNumber == null);
+  const receiptOpen = Boolean(
+    receipt && receipt.status !== 'completed' && receipt.status !== 'cancelled',
+  );
   useEffect(() => {
-    if (!receiptId || !waitingForNumber || !scope.userId) return;
+    if (!receiptId || !receiptOpen || !scope.userId) return;
     const stop = watchDiningReceipt({ ...scope, orderId: receiptId }, (patch) => {
       if (!isCurrent()) return;
       setReceipt((current) =>
         current && current.id === receiptId
-          ? { ...current, queueNumber: patch.queueNumber, status: patch.status ?? current.status }
+          ? {
+              ...current,
+              queueNumber: patch.queueNumber,
+              status: patch.status ?? current.status,
+              cancelledBy: patch.cancelledBy ?? current.cancelledBy ?? null,
+              cancelReason: patch.cancelReason ?? current.cancelReason ?? null,
+            }
           : current,
       );
     });
     return () => stop?.();
     // scope is fixed for this mounted content (remounts on account/school change)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [receiptId, waitingForNumber]);
+  }, [receiptId, receiptOpen]);
   const pickup = receipt ? describePickupNumber(receipt) : null;
   const quote = selected?.price != null ? diningTotal(selected.price) : null;
   return (
@@ -205,8 +211,17 @@ function DiningContent({
                 </View>
               ) : null}
               <Text selectable style={{ color: aiTokens.muted, marginTop: 8 }}>
-                訂單編號：{receipt.id}
+                {formatShortOrderCode(receipt.id)}
               </Text>
+              {navigation?.navigate ? (
+                <View style={{ marginTop: 12 }}>
+                  <AIButton
+                    label="看我的訂單"
+                    variant="ghost"
+                    onPress={() => navigation.navigate?.('StudentOrders')}
+                  />
+                </View>
+              ) : null}
             </AICard>
           ) : null}
           {pending ? (
