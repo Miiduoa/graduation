@@ -37,7 +37,7 @@ const mockPost = {
 const mockComment = {
   id: 'comment-actual',
   body: '請先比較左右子樹的高度。',
-  authorId: 'ai-assistant',
+  authorId: 'campus-assistant',
   authorName: '校園助理',
   isAI: true,
 };
@@ -133,7 +133,7 @@ test('discussion controls retain contrast across themes and identify automated r
   const view = render(
     <GroupDetailScreen navigation={navigation} route={{ params: { groupId: 'course-actual' } }} />,
   );
-  await view.findByText('校園助理（自動回覆）');
+  await view.findByText('助理回覆');
   expect(view.queryByText(/MVP|Sprint 2/)).toBeNull();
   expect(view.getByRole('button', { name: '全部', selected: true })).toHaveStyle({ minHeight: 44 });
   expect(view.getByText('全部')).toHaveStyle({ color: createLightTheme().colors.onAccent });
@@ -141,7 +141,7 @@ test('discussion controls retain contrast across themes and identify automated r
   act(() => applyTheme('dark'));
   expect(view.getByText('全部')).toHaveStyle({ color: createDarkTheme().colors.onAccent });
   expect(view.getByText('樹狀結構的問題')).toHaveStyle({ color: createDarkTheme().colors.text });
-  expect(view.getByText('校園助理（自動回覆）')).toHaveStyle({
+  expect(view.getByText('助理回覆')).toHaveStyle({
     color: createDarkTheme().colors.accent,
   });
   fireEvent.press(view.getByRole('button', { name: '查看 / 留言' }));
