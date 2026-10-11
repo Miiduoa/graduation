@@ -72,10 +72,10 @@ const PERIOD_TIME_MAP: Record<number, { start: string; end: string }> = {
   7: { start: '15:10', end: '16:00' },
   8: { start: '16:10', end: '17:00' },
   9: { start: '17:10', end: '18:00' },
-  10: { start: '18:30', end: '19:20' },
-  11: { start: '19:25', end: '20:15' },
-  12: { start: '20:20', end: '21:10' },
-  13: { start: '21:15', end: '22:05' },
+  10: { start: '18:05', end: '18:55' },
+  11: { start: '19:00', end: '19:50' },
+  12: { start: '19:55', end: '20:45' },
+  13: { start: '20:50', end: '21:40' },
 };
 
 const DAY_MAP: Record<string, number> = {
