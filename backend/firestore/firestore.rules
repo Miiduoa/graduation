@@ -90,6 +90,23 @@ service cloud.firestore {
       return resource.data.fromUid == authUid || resource.data.toUid == authUid;
     }
 
+    function acceptedFriendsWith(otherUid, schoolId) {
+      let forwardId = 'req_' + schoolId + '_' + request.auth.uid + '_' + otherUid;
+      let reverseId = 'req_' + schoolId + '_' + otherUid + '_' + request.auth.uid;
+      return isSignedIn()
+        && schoolId is string
+        && (
+          (
+            exists(/databases/$(database)/documents/friendships/$(forwardId))
+            && get(/databases/$(database)/documents/friendships/$(forwardId)).data.status == 'accepted'
+          )
+          || (
+            exists(/databases/$(database)/documents/friendships/$(reverseId))
+            && get(/databases/$(database)/documents/friendships/$(reverseId)).data.status == 'accepted'
+          )
+        );
+    }
+
     function isSchoolBoardModerator(schoolId, boardId) {
       return isSchoolMember(schoolId)
         && exists(/databases/$(database)/documents/schools/$(schoolId)/boards/$(boardId))
@@ -998,6 +1015,20 @@ service cloud.firestore {
         allow read, write: if isSelf(uid);
       }
 
+      match /personalTimetable/{docId} {
+        allow read: if isSelf(uid) || (
+          docId == 'current'
+          && resource.data.shareWithFriends == true
+          && resource.data.schoolId is string
+          && isSchoolMember(resource.data.schoolId)
+          && acceptedFriendsWith(uid, resource.data.schoolId)
+        );
+        allow create, update: if isSelf(uid)
+          && request.resource.data.courses is list
+          && request.resource.data.courses.size() <= 80;
+        allow delete: if isSelf(uid);
+      }
+
       match /schools/{schoolId} {
         allow read: if isSelf(uid);
         allow write: if false;
@@ -1211,6 +1242,67 @@ service cloud.firestore {
         && friendshipInvolves(request.auth.uid)
         && isSchoolMember(resource.data.schoolId)
         && resource.data.status in ['pending', 'accepted', 'blocked'];
+    }
+
+    match /timetableShares/{token} {
+      allow get: if resource.data.revoked != true
+        && resource.data.expiresAt is timestamp
+        && resource.data.expiresAt > request.time;
+      allow list, write: if false;
+    }
+
+    match /meetups/{meetupId} {
+      allow read: if isSignedIn()
+        && (resource.data.creatorUid == request.auth.uid || resource.data.inviteeUid == request.auth.uid)
+        && isSchoolMember(resource.data.schoolId);
+      allow create: if isSignedIn()
+        && request.resource.data.creatorUid == request.auth.uid
+        && request.resource.data.inviteeUid != request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.kind in ['meal', 'study']
+        && request.resource.data.day is int
+        && request.resource.data.day >= 1
+        && request.resource.data.day <= 5
+        && isSchoolMember(request.resource.data.schoolId)
+        && acceptedFriendsWith(request.resource.data.inviteeUid, request.resource.data.schoolId);
+      allow update: if isSignedIn()
+        && resource.data.inviteeUid == request.auth.uid
+        && resource.data.schoolId == request.resource.data.schoolId
+        && resource.data.creatorUid == request.resource.data.creatorUid
+        && resource.data.status == 'pending'
+        && request.resource.data.status in ['accepted', 'declined'];
+      allow delete: if isSignedIn()
+        && resource.data.creatorUid == request.auth.uid
+        && resource.data.status == 'pending';
+    }
+
+    match /courseAppeals/{appealId} {
+      allow read: if isSignedIn() && (
+        resource.data.studentUid == request.auth.uid
+        || hasRole(resource.data.schoolId, 'teacher')
+        || hasEditorRole(resource.data.schoolId)
+      );
+      allow create: if isSignedIn()
+        && request.resource.data.studentUid == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.title is string
+        && request.resource.data.title.size() >= 4
+        && request.resource.data.body is string
+        && request.resource.data.body.size() >= 8
+        && isSchoolMember(request.resource.data.schoolId);
+      allow update: if isSignedIn() && (
+        (
+          resource.data.studentUid == request.auth.uid
+          && resource.data.status == 'pending'
+          && request.resource.data.status == 'withdrawn'
+        )
+        || (
+          (hasRole(resource.data.schoolId, 'teacher') || hasEditorRole(resource.data.schoolId))
+          && request.resource.data.status in ['reviewing', 'approved', 'rejected']
+          && request.resource.data.studentUid == resource.data.studentUid
+        )
+      );
+      allow delete: if false;
     }
 
     match /follows/{followId} {
