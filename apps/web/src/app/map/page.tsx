@@ -54,11 +54,11 @@ export default function MapPage(props: {
             找校園地點
           </div>
           <div style={{ fontSize: 13, color: 'var(--text)' }}>
-            找不到建築或設施？告訴校園助理你想前往哪裡。
+            找不到建築或設施？用地圖搜尋，或打開校園目錄。
           </div>
         </div>
         <Link
-          href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('我想查詢校園地點，請先問我想前往哪棟建築或設施。')}`}
+          href={`/search${q ? `${q}&` : '?'}q=${encodeURIComponent('地點')}`}
           className="btn"
           style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
         >

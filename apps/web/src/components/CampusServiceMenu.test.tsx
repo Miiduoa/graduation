@@ -19,11 +19,13 @@ vi.mock('./AuthGuard', () => ({
 const originalServices = [
   ['/announcements', '公告'],
   ['/timetable', '課表'],
+  ['/appeals', '課程申訴'],
   ['/grades', '成績'],
   ['/credit-planner', '學分規劃'],
   ['/groups', '課程與群組'],
   ['/clubs', '社團活動'],
   ['/community', '校園交流'],
+  ['/friends', '找人'],
   ['/messages', '通知'],
   ['/dms', '私訊'],
   ['/map', '校園地圖'],
@@ -31,6 +33,8 @@ const originalServices = [
   ['/cafeteria', '餐廳'],
   ['/library', '圖書館'],
   ['/ai-assistant', '校園助理'],
+  ['/support', '支援'],
+  ['/account-deletion', '刪除帳號'],
   ['/profile', '個人資料'],
   ['/settings', '設定'],
 ];
@@ -49,7 +53,7 @@ it('retains all existing services and search while adding a separate classroom e
   expect(screen.getByRole('link', { name: /尋找校園服務/ }).getAttribute('href')).toBe('/search');
   expect(screen.getByRole('link', { name: '課程空間' }).getAttribute('href')).toBe('/classroom');
   expect(screen.getByRole('link', { name: '跨校交流' }).getAttribute('href')).toBe('/social');
-  expect(screen.getAllByRole('link')).toHaveLength(19);
+  expect(screen.getAllByRole('link')).toHaveLength(23);
 });
 
 it('preserves school context without copying unrelated session or return parameters', () => {
@@ -83,7 +87,7 @@ it('keeps the Campus One header and original school login around the complete sh
   expect(screen.getByRole('link', { name: '登入' }).getAttribute('href')).toBe(
     '/login?returnUrl=%2Fmap%3FschoolId%3Dtw-pu',
   );
-  expect(screen.getByRole('link', { name: '今日' }).getAttribute('href')).toBe('/?schoolId=tw-pu');
+  expect(screen.getByRole('link', { name: '今天' }).getAttribute('href')).toBe('/?schoolId=tw-pu');
 });
 
 it('closes on Escape and returns keyboard focus to the service control', () => {
