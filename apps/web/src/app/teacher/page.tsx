@@ -6,7 +6,7 @@ import { APPEAL_STATUS_COPY, appealTimeValue, type AppealStatus, type CourseAppe
 import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
 import { useSelectedSchool } from '@/components/SelectedSchoolProvider';
-import { decideCourseAppeal, listSchoolAppeals } from '@/lib/timetable/store';
+import { decideCourseAppeal, listTeacherAppeals } from '@/lib/timetable/store';
 import styles from '@/components/academic/academic.module.css';
 
 export default function TeacherDeskPage() {
@@ -14,6 +14,7 @@ export default function TeacherDeskPage() {
   const school = useSelectedSchool();
   const schoolId = school.selectedSchoolId || 'pu';
   const [items, setItems] = useState<CourseAppeal[] | null>(null);
+  const [courses, setCourses] = useState<string[] | null>(null);
   const [denied, setDenied] = useState(false);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [busyId, setBusyId] = useState('');
@@ -22,7 +23,9 @@ export default function TeacherDeskPage() {
   const load = useCallback(async () => {
     if (!user) return;
     try {
-      const rows = (await listSchoolAppeals(schoolId)) as CourseAppeal[];
+      const result = await listTeacherAppeals(schoolId, user.uid);
+      const rows = result.rows as CourseAppeal[];
+      setCourses(result.courses);
       rows.sort((a, b) => appealTimeValue(b.updatedAt || b.createdAt) - appealTimeValue(a.updatedAt || a.createdAt));
       setItems(rows);
       setDenied(false);
@@ -79,7 +82,12 @@ export default function TeacherDeskPage() {
       )}
       <section className={styles.panel} aria-label="待處理申訴">
         <h2>待處理申訴</h2>
+        {courses && courses.length > 0 && <p className={styles.notice}>你教的課：{courses.join('、')}</p>}
         {items === null ? (
+          <p className={styles.notice}>讀取中…</p>
+        ) : courses && courses.length === 0 ? (
+          <p className={styles.notice}>你還沒有對應到任何一門課，所以看不到申訴。請學校管理者把你加到你教的課。</p>
+        ) : items === null ? (
           <p className={styles.notice}>讀取中…</p>
         ) : open.length === 0 ? (
           <p className={styles.notice}>現在沒有待處理的申訴。</p>

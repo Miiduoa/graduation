@@ -830,27 +830,27 @@ service cloud.firestore {
 
         match /comments/{commentId} {
           allow read: if isActiveGroupMember(groupId);
+          // 助理回覆只由伺服器（Cloud Functions）寫入；用戶端不能寫、不能改、不能冒用助理的名字
           allow create: if isActiveGroupMember(groupId)
+            && request.resource.data.authorId == request.auth.uid
+            && request.resource.data.get('isAI', false) != true
+            && request.resource.data.get('authorName', '') != '助理回覆';
+          allow update: if (
+              canManageGroup(groupId)
+              && (resource.data.authorId == 'campus-assistant' || resource.data.get('isAI', false) == true)
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isBestAnswer'])
+            )
+            || resource.data.authorId != 'campus-assistant'
+            && resource.data.get('isAI', false) != true
+            && request.resource.data.get('isAI', false) != true
+            && request.resource.data.get('authorName', '') != '助理回覆'
             && (
-              (
-                request.resource.data.authorId == request.auth.uid
-                && request.resource.data.get('isAI', false) != true
-              )
-              || (
-                // 校園助理對提問的回覆：掛在助理名下，只能由發問的人在自己的提問底下觸發
-                request.resource.data.authorId == 'campus-assistant'
-                && request.resource.data.isAI == true
-                && request.resource.data.requestedBy == request.auth.uid
-                && get(/databases/$(database)/documents/groups/$(groupId)/posts/$(postId)).data.authorId == request.auth.uid
-                && get(/databases/$(database)/documents/groups/$(groupId)/posts/$(postId)).data.kind == 'question'
-              )
+              canManageGroup(groupId)
+              || (isSignedIn() && resource.data.authorId == request.auth.uid
+                && request.resource.data.authorId == resource.data.authorId)
             );
-          allow update: if canManageGroup(groupId)
-            || (isSignedIn() && resource.data.authorId == request.auth.uid
-              && request.resource.data.authorId == resource.data.authorId);
           allow delete: if canManageGroup(groupId)
-            || (isSignedIn() && resource.data.authorId == request.auth.uid)
-            || (isSignedIn() && resource.data.get('requestedBy', '') == request.auth.uid);
+            || (isSignedIn() && resource.data.authorId == request.auth.uid);
         }
       }
 
@@ -1404,10 +1404,27 @@ service cloud.firestore {
         && resource.data.status == 'pending';
     }
 
+    // 哪位老師教哪門課：學校管理者設定，老師只看得到自己有教的那幾筆
+    match /schools/{schoolId}/courseTeachers/{courseName} {
+      allow get: if isSignedIn() && (
+        request.auth.uid in resource.data.get('teacherUids', [])
+        || hasEditorRole(schoolId)
+      );
+      allow list: if hasEditorRole(schoolId) || (isSignedIn() && request.auth.uid in resource.data.teacherUids);
+      allow write: if hasEditorRole(schoolId);
+    }
+
+    // 申訴的那門課，這位老師有沒有教
+    function teachesAppealCourse(appeal) {
+      return hasRole(appeal.schoolId, 'teacher')
+        && exists(/databases/$(database)/documents/schools/$(appeal.schoolId)/courseTeachers/$(appeal.courseName))
+        && request.auth.uid in get(/databases/$(database)/documents/schools/$(appeal.schoolId)/courseTeachers/$(appeal.courseName)).data.get('teacherUids', []);
+    }
+
     match /courseAppeals/{appealId} {
       allow read: if isSignedIn() && (
         resource.data.studentUid == request.auth.uid
-        || hasRole(resource.data.schoolId, 'teacher')
+        || teachesAppealCourse(resource.data)
         || hasEditorRole(resource.data.schoolId)
       );
       allow create: if isSignedIn()
@@ -1422,16 +1439,20 @@ service cloud.firestore {
         && request.resource.data.body is string
         && request.resource.data.body.size() >= 8
         && isSchoolMember(request.resource.data.schoolId);
+      // 學生只能撤回自己的；老師只能改狀態和回覆，課名、主旨、說明都不能動
       allow update: if isSignedIn() && (
         (
           resource.data.studentUid == request.auth.uid
           && resource.data.status == 'pending'
           && request.resource.data.status == 'withdrawn'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
         )
         || (
-          (hasRole(resource.data.schoolId, 'teacher') || hasEditorRole(resource.data.schoolId))
+          (teachesAppealCourse(resource.data) || hasEditorRole(resource.data.schoolId))
           && request.resource.data.status in ['reviewing', 'approved', 'rejected']
-          && request.resource.data.studentUid == resource.data.studentUid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'teacherNote', 'decidedAt', 'decidedBy', 'updatedAt'])
+          && request.resource.data.get('teacherNote', '') is string
+          && request.resource.data.get('teacherNote', '').size() <= 500
         )
       );
       allow delete: if false;

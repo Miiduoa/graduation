@@ -1594,23 +1594,41 @@ test('handles can be looked up one at a time but never listed', async () => {
   await assertFails(stranger.doc('schools/pu/handles/alice_01').get());
 });
 
-test('assistant replies to a question are not posted under the student account', async () => {
+test('assistant replies can only be written by the server, never by a student', async () => {
   await seedFirestore(async (db) => {
     await db.doc('groups/g1').set({ schoolId: 'pu', name: '課' });
     await db.doc('groups/g1/members/alice').set({ status: 'active', role: 'member' });
     await db.doc('groups/g1/members/bob').set({ status: 'active', role: 'member' });
+    await db.doc('groups/g1/members/tina').set({ status: 'active', role: 'owner' });
     await db.doc('groups/g1/posts/q1').set({ kind: 'question', authorId: 'alice', title: '問', body: '問' });
-    await db.doc('groups/g1/posts/p2').set({ kind: 'post', authorId: 'alice', title: '貼文', body: '貼文' });
+    // 伺服器寫的助理回覆
+    await db.doc('groups/g1/posts/q1/comments/assistant').set({
+      body: '伺服器的回覆', authorId: 'campus-assistant', authorName: '助理回覆', isAI: true, requestedBy: 'alice',
+    });
   });
   const alice = testEnv.authenticatedContext('alice').firestore();
   const bob = testEnv.authenticatedContext('bob').firestore();
-  const reply = { body: '回覆', authorId: 'campus-assistant', authorName: '助理回覆', isAI: true, requestedBy: 'alice' };
-  await assertSucceeds(alice.collection('groups/g1/posts/q1/comments').add(reply));
-  // 不能把助理回覆掛在自己名下，也不能替別人的提問或一般貼文產生助理回覆
-  await assertFails(alice.collection('groups/g1/posts/q1/comments').add({ ...reply, authorId: 'alice' }));
-  await assertFails(bob.collection('groups/g1/posts/q1/comments').add({ ...reply, requestedBy: 'bob' }));
-  await assertFails(alice.collection('groups/g1/posts/p2/comments').add(reply));
+  const tina = testEnv.authenticatedContext('tina').firestore();
+  const fake = { body: '學校說期末考取消（偽造）', authorId: 'campus-assistant', authorName: '助理回覆', isAI: true, requestedBy: 'alice' };
+  // 學生回報的偽造：發問的人在自己的提問底下用助理名義寫 → 擋
+  await assertFails(alice.collection('groups/g1/posts/q1/comments').add(fake));
+  await assertFails(alice.doc('groups/g1/posts/q1/comments/assistant2').set(fake));
+  await assertFails(alice.collection('groups/g1/posts/q1/comments').add({ ...fake, authorId: 'alice' }));
+  await assertFails(alice.collection('groups/g1/posts/q1/comments').add({ body: 'x', authorId: 'alice', authorName: '助理回覆' }));
+  // 不能改寫或刪掉伺服器的助理回覆
+  await assertFails(alice.doc('groups/g1/posts/q1/comments/assistant').update({ body: '學校說期末考取消' }));
+  await assertFails(alice.doc('groups/g1/posts/q1/comments/assistant').delete());
+  await assertFails(alice.doc('groups/g1/posts/q1/comments/assistant').set(fake));
+  // 自己的留言之後也不能改成助理回覆
+  const own = await alice.collection('groups/g1/posts/q1/comments').add({ body: '補充', authorId: 'alice' });
+  await assertFails(own.update({ isAI: true }));
+  await assertFails(own.update({ authorName: '助理回覆' }));
+  // 老師可以把助理回覆標成最佳解答，但不能改內容
+  await assertSucceeds(tina.doc('groups/g1/posts/q1/comments/assistant').update({ isBestAnswer: true }));
+  await assertFails(tina.doc('groups/g1/posts/q1/comments/assistant').update({ body: '改' }));
+  // 一般留言照常
   await assertSucceeds(bob.collection('groups/g1/posts/q1/comments').add({ body: '我也想知道', authorId: 'bob' }));
+  await assertSucceeds(alice.doc('groups/g1/posts/q1/comments/assistant').get());
 });
 
 test('course appeals need a course and only teachers can approve', async () => {
@@ -1629,9 +1647,54 @@ test('course appeals need a course and only teachers can approve', async () => {
   // 同一個編號再送一次不會多一筆
   await assertFails(stu.doc('courseAppeals/a1').set(appeal));
   await assertFails(stu.doc('courseAppeals/a1').update({ status: 'approved' }));
-  await assertSucceeds(teach.collection('courseAppeals').where('schoolId', '==', 'pu').get());
+  // 老師還沒對應到課程時，什麼都看不到、也不能核准
+  await assertFails(teach.doc('courseAppeals/a1').get());
+  await assertFails(teach.doc('courseAppeals/a1').update({ status: 'approved', teacherNote: '好' }));
+  await seedFirestore(async (db) => {
+    await db.doc('schools/pu/courseTeachers/資料庫').set({ teacherUids: ['teach'] });
+  });
+  await assertSucceeds(teach.doc('courseAppeals/a1').get());
+  await assertSucceeds(
+    teach.collection('courseAppeals').where('schoolId', '==', 'pu').where('courseName', '==', '資料庫').get(),
+  );
+  // 不能一次列全校
+  await assertFails(teach.collection('courseAppeals').where('schoolId', '==', 'pu').get());
+  // 只能改狀態和回覆
+  await assertFails(teach.doc('courseAppeals/a1').update({ status: 'approved', body: '改掉學生的說明' }));
+  await assertFails(teach.doc('courseAppeals/a1').update({ status: 'approved', courseName: '英文' }));
+  await assertFails(teach.doc('courseAppeals/a1').update({ status: 'approved', title: '改主旨' }));
   await assertSucceeds(teach.doc('courseAppeals/a1').update({ status: 'approved', teacherNote: '好' }));
   await assertSucceeds(stu.doc('courseAppeals/a1').get());
+  // 學生撤回也不能順便改內容
+  await assertSucceeds(stu.doc('courseAppeals/a2').set({ ...appeal, title: '第二件事情' }));
+  await assertFails(stu.doc('courseAppeals/a2').update({ status: 'withdrawn', body: '偷偷改掉說明內容' }));
+});
+
+test('a teacher only sees and decides appeals for courses they teach', async () => {
+  await seedFirestore(async (db) => {
+    await db.doc('schools/pu/members/stu').set({ status: 'active', role: 'student' });
+    await db.doc('schools/pu/members/t1').set({ status: 'active', role: 'teacher' });
+    await db.doc('schools/pu/courseTeachers/資料庫').set({ teacherUids: ['t1'] });
+    await db.doc('schools/pu/courseTeachers/英文').set({ teacherUids: ['t2'] });
+    const base = { schoolId: 'pu', studentUid: 'stu', title: '出缺席紀錄', body: '當天有請假單可以補', status: 'pending', teacherNote: '' };
+    await db.doc('courseAppeals/mine').set({ ...base, courseId: 'c1', courseName: '資料庫' });
+    await db.doc('courseAppeals/other').set({ ...base, courseId: 'c2', courseName: '英文' });
+  });
+  const t1 = testEnv.authenticatedContext('t1').firestore();
+  await assertSucceeds(t1.doc('courseAppeals/mine').get());
+  // 別門課的申訴：讀不到、改不了
+  await assertFails(t1.doc('courseAppeals/other').get());
+  await assertFails(t1.collection('courseAppeals').where('schoolId', '==', 'pu').where('courseName', '==', '英文').get());
+  await assertFails(t1.doc('courseAppeals/other').update({ status: 'approved' }));
+  // 自己的課也不能改學生寫的說明
+  await assertFails(t1.doc('courseAppeals/mine').update({ body: '老師改的說明內容' }));
+  await assertSucceeds(t1.doc('courseAppeals/mine').update({ status: 'rejected', teacherNote: '請附證明' }));
+  // 老師只看得到自己有教的課程對應
+  await assertSucceeds(t1.doc('schools/pu/courseTeachers/資料庫').get());
+  await assertFails(t1.doc('schools/pu/courseTeachers/英文').get());
+  await assertSucceeds(t1.collection('schools/pu/courseTeachers').where('teacherUids', 'array-contains', 't1').get());
+  await assertFails(t1.collection('schools/pu/courseTeachers').get());
+  await assertFails(t1.doc('schools/pu/courseTeachers/資料庫').set({ teacherUids: ['t1', 'x'] }));
 });
 
 test('a declined sender has to wait seven days before sending again', async () => {
