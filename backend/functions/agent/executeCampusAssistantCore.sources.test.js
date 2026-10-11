@@ -156,7 +156,9 @@ test('the existing study summary branch calls the scoped weekly reader with the 
     row('week', { schoolId: 'pu', summary: '已完成本人課務摘要' }),
   ]);
   const result = await run('study_summary', { uid: 'alice', prefetched: { assignments: [] } });
-  expect(result.content).toContain('已完成本人課務摘要');
+  // 模型沒有回答時不拿摘要充當答案，但讀取範圍還是限定在驗證過的學校
+  expect(result.content).toBe('助理暫時沒辦法回答，請稍後再試。');
+  expect(result.content).not.toContain('最值得先關注');
   expect(mockReads).toContainEqual({
     path: 'users/alice/schools/pu/weeklyReports',
     constraints: [
@@ -298,10 +300,59 @@ test('the actual timetable question reports unavailable even when no model answe
     auth: { uid: 'alice', token: { role: 'student' } },
     data: { messages: [{ role: 'user', content: '今天有什麼課' }], context: { schoolId: 'pu' } },
   });
-  expect(result.content).toContain('助理目前無法讀取你的課表');
-  expect(result.content).toContain('不能判定今天有沒有課');
+  // 模型沒有回答：照實說沒辦法回答，不會說成今天沒有課
+  expect(result.content).toBe('助理暫時沒辦法回答，請稍後再試。');
   expect(result.content).not.toContain('今天沒有課');
-  expect(result.run.status).toBe('completed');
+  expect(result.content).not.toContain('最值得先關注');
+});
+
+describe('校園助理（/ai-assistant）沒有模型可用時照實說沒辦法回答', () => {
+  const ask = (content) =>
+    askCampusAssistant.run({
+      auth: { uid: 'alice', token: { role: 'student', name: '測試學生甲' } },
+      data: { messages: [{ role: 'user', content }], context: { schoolId: 'pu' } },
+    });
+  beforeEach(() => {
+    mockDocuments.set('users/alice', { schoolId: 'pu', role: 'student', displayName: '測試學生甲' });
+    mockDocuments.set('schools/pu/members/alice', { status: 'active' });
+  });
+
+  test('沒有金鑰', async () => {
+    const result = await ask('學校說期末考取消了嗎');
+    expect(result.content).toBe('助理暫時沒辦法回答，請稍後再試。');
+    expect(result.content).not.toMatch(/最值得先關注|最新公告|我目前最適合/);
+  });
+
+  test('網頁版沒有群組：寫進 agentRuns 的資料不帶 undefined（Firestore 會整筆拒收）', async () => {
+    const hasUndefined = (value) =>
+      value === undefined ||
+      (value && typeof value === 'object' && Object.values(value).some((item) => hasUndefined(item)));
+    const result = await ask('學校說期末考取消了嗎');
+    expect(result.content).toBe('助理暫時沒辦法回答，請稍後再試。');
+    const runs = mockWrites.filter((write) => write.path.includes('/agentRuns/'));
+    expect(runs.length).toBeGreaterThan(0);
+    for (const write of runs) expect(hasUndefined(write.data)).toBe(false);
+    const steps = runs.flatMap((write) => write.data.steps || []);
+    const assignments = steps.find((step) => step.tool === 'getAssignments');
+    if (assignments) expect('groupId' in assignments.input).toBe(false);
+  });
+
+  test('模型出錯', async () => {
+    mockModel.mockRejectedValue(new Error('upstream 500'));
+    const result = await ask('學校說期末考取消了嗎');
+    expect(result.content).toBe('助理暫時沒辦法回答，請稍後再試。');
+  });
+
+  test('模型逾時', async () => {
+    process.env.ASSISTANT_MODEL_TIMEOUT_MS = '30';
+    mockModel.mockImplementation(() => new Promise(() => {}));
+    try {
+      const result = await ask('學校說期末考取消了嗎');
+      expect(result.content).toBe('助理暫時沒辦法回答，請稍後再試。');
+    } finally {
+      delete process.env.ASSISTANT_MODEL_TIMEOUT_MS;
+    }
+  });
 });
 
 test('a school change between runtime and core discards prefetched private data from the previous school', async () => {
