@@ -137,6 +137,14 @@ function receipt(payload, orderId, reused) {
     paymentMethod: payload.paymentMethod,
     paymentStatus: payload.paymentStatus,
     status: payload.status,
+    createdAt:
+      typeof payload.createdAt?.toDate === 'function' ? payload.createdAt.toDate().toISOString() : null,
+    queueNumber:
+      typeof payload.queueNumber === 'number' && payload.queueNumber > 0 ? payload.queueNumber : null,
+    queueStatus:
+      typeof payload.queueNumber === 'number' && payload.queueNumber > 0
+        ? 'assigned'
+        : 'pending_confirmation',
   };
 }
 
@@ -289,6 +297,9 @@ function createOrderHandler({ db }) {
           paymentMethod: intent.paymentMethod,
           status: 'pending',
           paymentStatus: 'pending',
+          // 號碼牌建單後由伺服器發；拿不到就留著「待確認」，店家可以按「給號碼」補發
+          queueNumber: null,
+          queueStatus: 'pending_confirmation',
           createdAt: Timestamp.now(),
           ...(request.data?.source === 'ai_agent' ? { source: 'ai_agent' } : {}),
         };
@@ -320,7 +331,20 @@ function createOrderHandler({ db }) {
       }
     });
     if (result.notCreatedMessage) throw notCreated(result.notCreatedMessage);
-    return result;
+    if (result.queueStatus === 'assigned') return result;
+    // 訂單已經成立，號碼另外拿；拿不到不影響訂單，畫面顯示「號碼還沒拿到，請到櫃台確認。」
+    try {
+      const { assignNumberForOrder } = require('./ordering/queueNumber');
+      const assigned = await assignNumberForOrder(db, { schoolId, orderId, uid, actor: 'system' });
+      return { ...result, queueNumber: assigned.queueNumber, queueStatus: 'assigned' };
+    } catch (error) {
+      require('firebase-functions/logger').warn('Order created; queue number pending confirmation', {
+        schoolId,
+        orderId,
+        error: error?.message,
+      });
+      return { ...result, queueNumber: null, queueStatus: 'pending_confirmation' };
+    }
   };
 }
 module.exports = { createOrderHandler };
