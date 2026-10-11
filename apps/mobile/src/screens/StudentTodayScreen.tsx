@@ -14,6 +14,7 @@ import { useAuth } from '../state/auth';
 import { loadStudentHome } from '../data/studentHome';
 import type { CourseSpace, InboxTask } from '../data/types';
 import { safeNavigate } from '../utils/safeNavigate';
+import { rootNavigateNested } from '../app/rootNavigation';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
@@ -152,14 +153,18 @@ export default function StudentTodayScreen() {
               {(
                 [
                   ['Map', '校園地圖'],
-                  ['CourseSchedule', '課表'],
+                  ['PersonalTimetable', '我的課表'],
                   ['AIAgentConsole', '校園助理'],
                 ] as const
               ).map(([route, label]) => (
                 <Pressable
                   key={route}
                   accessibilityRole="button"
-                  onPress={() => safeNavigate(navigation, route)}
+                  onPress={() =>
+                    route === 'PersonalTimetable'
+                      ? rootNavigateNested('學習', 'PersonalTimetable')
+                      : safeNavigate(navigation, route)
+                  }
                   style={s.tool}
                 >
                   <Text style={s.toolText}>{label}</Text>
