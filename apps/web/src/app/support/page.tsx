@@ -28,7 +28,9 @@ export default function SupportPage() {
         </section>
         <section>
           <h2>還沒開通的服務</h2>
-          <p>沒有接到的金流、校外客服信箱或商店審核，這裡不會寫成已經提供。</p>
+          <p>
+            沒有接到的金流、職涯職缺、校方選課與正式測驗繳交，這裡不會寫成已經提供。店家可以改菜單與營業時間，但還不能在這裡收款。
+          </p>
         </section>
       </article>
     </SiteShell>

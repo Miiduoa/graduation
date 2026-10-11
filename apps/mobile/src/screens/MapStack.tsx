@@ -143,6 +143,11 @@ export function MapStack() {
       />
       <Stack.Screen name="Health" component={HealthScreen} options={{ title: '校園健康', headerShown: false }} />
       <Stack.Screen
+        name="Career"
+        component={UnavailableFeatureScreen}
+        options={{ title: '職涯', headerShown: false }}
+      />
+      <Stack.Screen
         name="Dormitory"
         component={UnavailableFeatureScreen}
         options={{ title: '宿舍服務', headerShown: false }}

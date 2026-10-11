@@ -108,6 +108,7 @@ export const ROUTE_TO_TAB: Record<string, TabName> = {
   Library: '校園',
   LibraryCatalog: '校園',
   Dormitory: '校園',
+  Career: '校園',
   Health: '校園',
   BusSchedule: '校園',
   BusStopDetail: '校園',

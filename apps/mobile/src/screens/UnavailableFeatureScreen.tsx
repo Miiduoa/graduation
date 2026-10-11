@@ -109,6 +109,12 @@ const features: Record<string, { title: string; description: string; actions?: A
     title: '請假與報修',
     description: '線上申請尚未開放。請透過校方現有管道辦理；這裡不會代送申請。',
   },
+  Career: {
+    title: '職涯',
+    description:
+      '職涯資料還沒接到校方職涯發展處。這裡不會列出假職缺，也不會用預覽學生履歷充當你的資料。',
+    actions: publicActions,
+  },
   StaffHub: { title: '校務服務', description: '校務服務工作台尚未開放。' },
   DepartmentHub: { title: '系所工作台', description: '系所工作台尚未開放。' },
   AdminDashboard: { title: '管理工作台', description: '管理工作台尚未開放。' },
