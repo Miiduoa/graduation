@@ -66,12 +66,19 @@ function createCreateTimetableShareHandler({ db }) {
     const snapshot = await timetableRef.get();
     if (!snapshot.exists) throw new HttpsError('not-found', '還沒有可分享的課表。');
     const record = snapshot.data() || {};
-    const courses = Array.isArray(record.courses) ? record.courses.slice(0, MAX_COURSES).map(cleanCourse) : [];
+    // 分享出去的資料不帶老師姓名
+    const courses = Array.isArray(record.courses)
+      ? record.courses.slice(0, MAX_COURSES).map((course) => ({ ...cleanCourse(course), teacher: '' }))
+      : [];
     if (!courses.length) throw new HttpsError('failed-precondition', '課表是空的，沒有可分享的內容。');
     const token = nodeCrypto.randomBytes(16).toString('base64url');
     const expiresAt = Timestamp.fromMillis(Date.now() + SHARE_TTL_MS);
-    await db.collection('timetableShares').doc(token).set({
+    // 擁有者另外存在只有伺服器讀得到的地方，拿到分享碼的人看不到帳號
+    await db.collection('timetableShareOwners').doc(token).set({
       ownerUid: uid,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    await db.collection('timetableShares').doc(token).set({
       schoolId,
       name: optionalText(record.meta?.title || request.data?.name, 40) || '課表',
       courses,
@@ -90,8 +97,12 @@ function createRevokeTimetableShareHandler({ db }) {
     if (!uid) throw new HttpsError('unauthenticated', '請先登入。');
     const token = text(request.data?.token, 80, 'token');
     const ref = db.collection('timetableShares').doc(token);
-    const snapshot = await ref.get();
-    if (!snapshot.exists || snapshot.data()?.ownerUid !== uid) {
+    const [snapshot, owner] = await Promise.all([
+      ref.get(),
+      db.collection('timetableShareOwners').doc(token).get(),
+    ]);
+    const ownerUid = owner.exists ? owner.data()?.ownerUid : snapshot.data()?.ownerUid;
+    if (!snapshot.exists || ownerUid !== uid) {
       throw new HttpsError('not-found', '找不到這份分享連結。');
     }
     await ref.update({ revoked: true, revokedAt: FieldValue.serverTimestamp() });

@@ -1514,6 +1514,9 @@ test('public timetable shares are readable until they expire or are revoked', as
   await assertFails(guest.doc('timetableShares/gone').get());
   await assertFails(guest.doc('timetableShares/live').set({ name: 'x' }));
   await assertFails(guest.collection('timetableShares').get());
+  await seedFirestore(async (db) => db.doc('timetableShareOwners/live').set({ ownerUid: 'alice' }));
+  await assertFails(guest.doc('timetableShareOwners/live').get());
+  await assertFails(testEnv.authenticatedContext('alice').firestore().doc('timetableShareOwners/live').get());
 });
 
 
