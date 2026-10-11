@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { AIScreen, AIHero, AICard, AISection, AIEmptyState } from '../ui/aiFirst';
+import { AIScreen, AIHero, AICard, AISection, AIEmptyState, AIRow } from '../ui/aiFirst';
+import { rootNavigateNested } from '../app/rootNavigation';
 import { AppActionIcon } from '../ui/AppActionIcon';
 import type { GeneratedButtonIconId } from '../ui/generatedButtonIcons';
 import { useTheme } from '../state/theme';
@@ -191,7 +192,7 @@ function CampusDirectory({
           {schoolName}
         </Text>
       </View>
-      <AIHero title="校園" subtitle="找地點、查服務，安排課餘生活。" />
+      <AIHero title="生活" subtitle="找地點、查服務，安排課餘生活。" />
       <AICard>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.sm }}>
           <View
@@ -241,6 +242,21 @@ function CampusDirectory({
           </View>
         </View>
       </AICard>
+      {!query.trim() ? (
+        <AISection title="找人與空堂">
+          <AIRow
+            title="找人"
+            subtitle="加好友後才能看對方課表"
+            onPress={() => rootNavigateNested('訊息', 'FriendSearch')}
+          />
+          <AIRow
+            title="共同空堂"
+            subtitle="選一位好友，找兩個人都沒課的時段"
+            onPress={() => rootNavigateNested('學習', 'PersonalTimetable')}
+          />
+          <AIRow static title="報修" subtitle="報修還沒開，有問題先找系辦或總務處。" />
+        </AISection>
+      ) : null}
       {!query.trim() ? (
         <AICard title="先找到要去的地方">
           <Pressable
