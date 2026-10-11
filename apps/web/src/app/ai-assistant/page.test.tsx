@@ -89,5 +89,7 @@ it('retains read cards while keeping order writes and claimed receipts out of th
   render(<AssistantPage />); ask();
   await waitFor(() => expect(screen.getByText('poi_card')).toBeTruthy());
   expect(screen.queryByText(/order_draft_card|order_submitted/)).toBeNull();
-  expect(screen.getByRole('link', { name: '餐廳服務' })).toBeTruthy();
+  // 不再把學生帶去寫「尚未開放線上點餐」的餐廳頁，改指我的訂單
+  expect(screen.queryByRole('link', { name: '餐廳服務' })).toBeNull();
+  expect(screen.getByRole('link', { name: '我的訂單' }).getAttribute('href')).toBe('/orders');
 });
