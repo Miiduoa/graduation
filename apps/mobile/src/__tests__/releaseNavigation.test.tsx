@@ -1090,7 +1090,7 @@ test.each([
   expect(view.getByText(new RegExp(explanation))).toBeTruthy();
 });
 test.each([
-  ['MerchantHub', '商家工作台尚未開放'],
+  ['MerchantHub', '這間店還沒接到訂單系統'],
   ['Notifications', '通知彙整尚未開放'],
 ])('Me %s no longer shows fictitious account data', async (route, explanation) => {
   const { view, navigation } = await mount(MeStack);
