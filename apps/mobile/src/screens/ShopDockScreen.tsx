@@ -58,7 +58,8 @@ export default function ShopDockScreen() {
           </Text>
         </View>
       ) : tab === 'pending' || tab === 'kitchen' ? (
-        <MerchantHubScreen />
+        // 兩個分頁各自重新讀一次訂單：待接單只列還沒接的，出餐只列接了還沒取的
+        <MerchantHubScreen key={tab} view={tab} />
       ) : tab === 'menu' && shop ? (
         <ShopMenuPanel
           schoolId={shop.schoolId}

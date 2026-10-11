@@ -297,7 +297,7 @@ function createOrderHandler({ db }) {
           paymentMethod: intent.paymentMethod,
           status: 'pending',
           paymentStatus: 'pending',
-          // 號碼牌建單後由伺服器發；拿不到就留著「待確認」，店家可以按「給號碼」補發
+          // 號碼牌建單後由伺服器發；拿不到就留著「待給號碼」，店家按「給號碼並接單」補發
           queueNumber: null,
           queueStatus: 'pending_confirmation',
           createdAt: Timestamp.now(),

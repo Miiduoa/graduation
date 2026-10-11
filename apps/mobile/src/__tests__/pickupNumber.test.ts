@@ -1,5 +1,6 @@
 import {
   describePickupNumber,
+  formatShortOrderCode,
   formatTaipeiOrderTime,
   PICKUP_NUMBER_PENDING_TEXT,
 } from '@campus/shared/src/ordering/pickupNumber';
@@ -73,7 +74,7 @@ describe('取餐號碼顯示', () => {
     expect(formatTaipeiOrderTime('2026-10-12T16:30:00Z')).toBe('10 月 13 日（二）00:30');
   });
 
-  test('沒有號碼：顯示「號碼還沒拿到」，下面列下單時間和品項，狀態待確認', () => {
+  test('沒有號碼：顯示「號碼還沒拿到」，下面列下單時間和品項，狀態待給號碼', () => {
     const view = describePickupNumber({
       queueNumber: null,
       createdAt: '2026-10-13T04:05:00Z',
@@ -81,7 +82,7 @@ describe('取餐號碼顯示', () => {
     });
     expect(view).toEqual({
       state: 'pending',
-      label: '待確認',
+      label: '待給號碼',
       text: PICKUP_NUMBER_PENDING_TEXT,
       detail: '10 月 13 日（二）12:05・雞腿飯 ×1',
     });
@@ -99,6 +100,21 @@ describe('取餐號碼顯示', () => {
     for (const value of [0, -1, '12', 3.5, undefined]) {
       expect(describePickupNumber({ queueNumber: value }).state).toBe('pending');
     }
+  });
+
+  test('店家取消（給過號碼也一樣）：只寫「這張單店家取消了」，不顯示號碼', () => {
+    for (const queueNumber of [null, 7]) {
+      const view = describePickupNumber({ queueNumber, status: 'cancelled', cancelledBy: 'merchant' });
+      expect(view).toEqual({ state: 'cancelled', text: '這張單店家取消了' });
+      expect(JSON.stringify(view)).not.toMatch(/取餐號碼|7/);
+    }
+    expect(describePickupNumber({ status: 'cancelled', cancelReason: 'system_timeout' }).text).toBe('這張單店家取消了');
+    expect(describePickupNumber({ status: 'cancelled', cancelledBy: 'customer' }).text).toBe('你取消了這張單');
+  });
+
+  test('學生和店家看到同一個短代碼：訂單編號最後 6 碼', () => {
+    expect(formatShortOrderCode('co_8a1f9c2e33ee43a')).toBe('訂單末 6 碼 3EE43A');
+    expect(formatShortOrderCode('')).toBe('');
   });
 
   test('不寫今天、明天', () => {
@@ -128,7 +144,7 @@ describe('手機下單不再自己算號碼', () => {
     expect(result).toMatchObject({ ok: true, queueNumber: 5, queueStatus: 'assigned' });
   });
 
-  test('雲端拿不到號碼：訂單照樣成立，號碼是 null、待確認，不給裝置時間算出來的假號碼', async () => {
+  test('雲端拿不到號碼：訂單照樣成立，號碼是 null、待給號碼，不給裝置時間算出來的假號碼', async () => {
     jest.useFakeTimers({ now: new Date('2026-10-13T04:05:00Z') });
     try {
       mockCreateOrder.mockResolvedValue(order());

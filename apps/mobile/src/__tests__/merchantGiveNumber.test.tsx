@@ -34,18 +34,18 @@ const baseOrder: Order = {
 
 beforeEach(() => mockAssign.mockReset());
 
-test('待確認訂單：店家看到「待確認」和「給號碼」，按了走伺服器拿真的號碼並一併接單', async () => {
+test('待給號碼訂單：店家看到「待給號碼」和「給號碼」，按了走伺服器拿真的號碼並一併接單', async () => {
   const onAccept = jest.fn();
   mockAssign.mockResolvedValue({ queueNumber: 12, status: 'confirmed' });
   const view = render(<OrderCard order={baseOrder} onAccept={onAccept} onCancel={jest.fn()} />);
-  expect(view.getByText('待確認')).toBeTruthy();
+  expect(view.getByText('待給號碼')).toBeTruthy();
   // 沒號碼時不給「確認訂單」，免得接了單學生還是沒號碼
   expect(view.queryByText('確認訂單')).toBeNull();
   await act(async () => fireEvent.press(view.getByText('給號碼')));
   expect(mockAssign).toHaveBeenCalledTimes(1);
   expect(mockAssign).toHaveBeenCalledWith('co_order_abcd', { asMerchant: true, vendorId: 'cafe' });
   expect(view.getByText('號碼 12')).toBeTruthy();
-  expect(view.queryByText('待確認')).toBeNull();
+  expect(view.queryByText('待給號碼')).toBeNull();
   expect(view.queryByText('給號碼')).toBeNull();
   expect(onAccept).not.toHaveBeenCalled();
 });
@@ -56,17 +56,17 @@ test('給號碼失敗：照實提示，不顯示假號碼', async () => {
   const view = render(<OrderCard order={baseOrder} onAccept={jest.fn()} />);
   await act(async () => fireEvent.press(view.getByText('給號碼')));
   expect(alert).toHaveBeenCalled();
-  expect(view.getByText('待確認')).toBeTruthy();
+  expect(view.getByText('待給號碼')).toBeTruthy();
   expect(view.queryByText(/號碼 \d/)).toBeNull();
   alert.mockRestore();
 });
 
-test('已經有號碼：不出現「待確認」和「給號碼」，照常可以接單', () => {
+test('已經有號碼：不出現「待給號碼」和「給號碼」，照常可以接單', () => {
   const view = render(
     <OrderCard order={{ ...baseOrder, queueNumber: 4, queueStatus: 'assigned' }} onAccept={jest.fn()} />,
   );
   expect(view.getByText('號碼 4')).toBeTruthy();
-  expect(view.queryByText('待確認')).toBeNull();
+  expect(view.queryByText('待給號碼')).toBeNull();
   expect(view.queryByText('給號碼')).toBeNull();
   expect(view.getByText('確認訂單')).toBeTruthy();
 });
