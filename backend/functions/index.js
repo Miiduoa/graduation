@@ -2849,6 +2849,8 @@ const {
   createGetTimetableShareHandler,
 } = require('./personalCampus');
 exports.createTimetableShare = onCall({ region: REGION }, createCreateTimetableShareHandler({ db }));
+const { createListTeacherAppealsHandler } = require('./teacherAppeals');
+exports.listTeacherAppeals = onCall({ region: REGION }, createListTeacherAppealsHandler({ db }));
 exports.revokeTimetableShare = onCall({ region: REGION }, createRevokeTimetableShareHandler({ db }));
 exports.getTimetableShare = onRequest(
   { region: REGION, cors: true },
