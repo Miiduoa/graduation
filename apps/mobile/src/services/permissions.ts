@@ -331,17 +331,14 @@ export type TabConfig = {
 };
 
 /**
- * 新導航：4 個 Tab + 中央 AI 球（不是 Tab，是懸浮按鈕）。
- * Tab 名字在所有角色下統一；角色差異藏在「Tab 內部內容」與 AI 球可用工具。
- *
- * 順序：今天 | 學習 | [AI 球] | 校園 | 訊息
- * （AI 球以 placeholder 佔位，由 FloatingTabBar 在中央渲染懸浮 FAB）
+ * 學生四個入口：今天 | 課務 | 生活 | 我
+ * 訊息仍在導覽堆疊裡，從「我」進入。
  */
 export const UNIFIED_TABS: TabConfig[] = [
   { key: 'Today', label: '今天', icon: 'ic_tab_today' },
-  { key: '學習', label: '學習', icon: 'ic_tab_study' },
-  { key: '校園', label: '校園', icon: 'ic_tab_campus' },
-  { key: '訊息', label: '訊息', icon: 'ic_tab_messages' },
+  { key: '學習', label: '課務', icon: 'ic_tab_study' },
+  { key: '校園', label: '生活', icon: 'ic_tab_campus' },
+  { key: '我的', label: '我', icon: 'ic_profile' },
 ];
 
 export function getTabsForRole(_role: AppRole): TabConfig[] {

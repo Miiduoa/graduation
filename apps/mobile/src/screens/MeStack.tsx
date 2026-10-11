@@ -2,9 +2,7 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
-// AI-First v1：我的 Tab 主入口（舊版 PersonalHubScreen / ProfileEditScreen /
-// SettingsScreen / NotificationsScreen / AchievementsScreen 已下架，
-// 引用全部走 *AiFirstScreen）
+// 「我」入口：個人資料、課表、訊息、設定
 import MeAiFirstScreen from './MeAiFirstScreen';
 import ProfileEditAiFirstScreen from './ProfileEditAiFirstScreen';
 import AchievementsAiFirstScreen from './AchievementsAiFirstScreen';
@@ -20,6 +18,7 @@ import ConstellationScreen from './ConstellationScreen';
 import DataFlowDebugScreen from './DataFlowDebugScreen';
 import { AdminDashboardScreen } from './AdminDashboardScreen';
 import { UnavailableFeatureScreen } from './UnavailableFeatureScreen';
+import ShopDockScreen from './ShopDockScreen';
 import { AdminCourseVerifyScreen } from './AdminCourseVerifyScreen';
 import { SSOLoginScreen } from './SSOLoginScreen';
 import { DataExportScreen } from './DataExportScreen';
@@ -190,8 +189,8 @@ export function MeStack() {
       />
       <Stack.Screen
         name="MerchantHub"
-        component={UnavailableFeatureScreen}
-        options={{ title: '商家接單', headerShown: false }}
+        component={ShopDockScreen}
+        options={{ title: '店家工作台', headerShown: false }}
       />
 
       <Stack.Screen
@@ -239,7 +238,7 @@ export function MeStack() {
       <Stack.Screen
         name="AIModelManager"
         component={AIModelManagerScreen}
-        options={{ title: 'AI 模型管理' }}
+        options={{ title: '裝置模型' }}
       />
       <Stack.Screen
         name="Settings"
