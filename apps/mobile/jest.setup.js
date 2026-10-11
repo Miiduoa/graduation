@@ -83,6 +83,14 @@ jest.mock('expo-file-system', () => ({
   deleteAsync: jest.fn(() => Promise.resolve()),
   getInfoAsync: jest.fn(() => Promise.resolve({ exists: false })),
   makeDirectoryAsync: jest.fn(() => Promise.resolve()),
+  File: class {
+    constructor(uri) {
+      this.uri = uri;
+    }
+    async base64() {
+      return '';
+    }
+  },
 }));
 
 // Mock Firebase
