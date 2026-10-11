@@ -5,7 +5,7 @@
 
 ## A. Mobile AI 服務（最大重災區）
 
-`apps/mobile/src/services/` 目前 34+ 個 AI 相關檔案。按 `docs/AI_SERVICE_CONSOLIDATION_PLAN.md` 整合到 6 個。
+`apps/mobile/src/services/` 目前 34+ 個 AI 相關檔案。預計整合到 6 個。
 
 ### Phase 1 — 立刻刪除（純 stub / 已被取代）
 

@@ -128,7 +128,7 @@ DemoStore 介面新增欄位：`feedbackDrafts`、`discussionPosts`、`helpReque
 | `/teacher/course/[id]` 系列頁面無 server-side role guard | P3 | 學生直接輸入 URL 仍可進入；demo 場景透過身份膠囊切換，不會發生 |
 | `npm run build` FUSE 衝突 | INFRA | 沙盒問題；macOS / Vercel 本機可正常 build |
 | Mobile 端 14 個檔案仍寫死 `demo_teacher_chang` | P3 | 單老師 demo 不影響，後續遷移 |
-| AI 服務 30+ 重複檔案 | P3 | 已有 `docs/AI_SERVICE_CONSOLIDATION_PLAN.md`，本次未執行整合（避免影響 demo） |
+| AI 服務 30+ 重複檔案 | P3 | 本次未執行整合（避免影響 demo） |
 
 ---
 
