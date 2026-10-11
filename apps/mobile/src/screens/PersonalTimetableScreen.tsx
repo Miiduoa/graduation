@@ -29,6 +29,8 @@ import { Screen, Button } from '../ui/components';
 import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
+import { TimetableOcrHost, recognizeWithOnDeviceOcr } from '../components/TimetableOcrHost';
+import { readImageBase64, TimetableOcrError } from '../services/timetableOcr';
 import {
   createMeetup,
   createServerShare,
@@ -86,6 +88,7 @@ export default function PersonalTimetableScreen() {
   if (!timetable) {
     return (
       <Screen title="我的課表">
+        <TimetableOcrHost />
         <Text style={{ color: theme.colors.muted, padding: 16 }}>正在讀取課表…</Text>
       </Screen>
     );
@@ -102,8 +105,31 @@ export default function PersonalTimetableScreen() {
     .sort((a, b) => a.day - b.day || a.start - b.start);
   const common = friendId ? commonFree(timetable.courses, friendCourses) : [];
 
+  const ocrNotice = (error: unknown) => {
+    if (error instanceof TimetableOcrError && error.kind === 'network') {
+      return `${IMPORT_NOT_APPLIED_COPY}。截圖辨識需要連上網路下載字庫，這次沒連上。請對照圖片把文字貼上。`;
+    }
+    return `${IMPORT_NOT_APPLIED_COPY}。這台裝置還沒開通截圖辨識，請對照圖片把文字貼上。`;
+  };
+
+  const confirmParsed = (parsed: PersonalCourse[]) => {
+    if (!parsed.length) {
+      setNotice(`${IMPORT_NOT_APPLIED_COPY}。截圖有讀到，但沒有可靠找到課程，請改貼文字或手動新增。`);
+      return;
+    }
+    Alert.alert('確認匯入', `將寫入 ${parsed.length} 門課，原本課表會被這份取代。`, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '確認',
+        onPress: () =>
+          void persist({ ...timetable, courses: applyImport(timetable.courses, parsed, 'replace') }, '已匯入課表。'),
+      },
+    ]);
+  };
+
   return (
     <Screen title="我的課表" subtitle="確認前不會覆寫你現在的課表">
+      <TimetableOcrHost />
       <ScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 120 }}>
         {notice ? <Text style={{ color: theme.colors.text }}>{notice}</Text> : null}
         {uid ? (
@@ -278,14 +304,7 @@ export default function PersonalTimetableScreen() {
               setNotice(`${IMPORT_NOT_APPLIED_COPY}。沒有認出課程。`);
               return;
             }
-            Alert.alert('確認匯入', `將寫入 ${parsed.length} 門課，原本課表會被這份取代。`, [
-              { text: '取消', style: 'cancel' },
-              {
-                text: '確認',
-                onPress: () =>
-                  void persist({ ...timetable, courses: applyImport(timetable.courses, parsed, 'replace') }, '已匯入課表。'),
-              },
-            ]);
+            confirmParsed(parsed);
           }}
         />
         <Button
@@ -293,9 +312,26 @@ export default function PersonalTimetableScreen() {
           onPress={async () => {
             const picked = await ImagePicker.launchImageLibraryAsync({
               mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              base64: true,
             });
             if (picked.canceled) return;
-            setNotice(`${IMPORT_NOT_APPLIED_COPY}。這台裝置還沒開通截圖辨識，請對照圖片把文字貼上。`);
+            const asset = picked.assets[0];
+            if (!asset) {
+              setNotice(`${IMPORT_NOT_APPLIED_COPY}。讀不到這張圖，請對照圖片把文字貼上。`);
+              return;
+            }
+            setNotice('已收到圖片。辨識完成前不會改你的課表。');
+            try {
+              const base64 = asset.base64 || (asset.uri ? await readImageBase64(asset.uri) : '');
+              if (!base64) {
+                setNotice(`${IMPORT_NOT_APPLIED_COPY}。讀不到這張圖，請對照圖片把文字貼上。`);
+                return;
+              }
+              const text = await recognizeWithOnDeviceOcr(base64);
+              confirmParsed(parseTimetableText(text));
+            } catch (error) {
+              setNotice(ocrNotice(error));
+            }
           }}
         />
 
