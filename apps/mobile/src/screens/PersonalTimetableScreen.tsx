@@ -20,7 +20,12 @@ import {
   studySlots,
   applyImport,
   cleanCourse,
-  commonFree,
+  meetupLabel,
+  meetupStartOptions,
+  meetupWindowLabel,
+  meetupWindows,
+  minutesLabel,
+  type MeetupWindow,
   parseTimetableText,
   periodRangeLabel,
   type PersonalCourse, shareCopiedCopy } from '@campus/shared';
@@ -33,6 +38,9 @@ import { readImageBase64, TimetableOcrError } from '../services/timetableOcr';
 import {
   createMeetup,
   createServerShare,
+  listIncomingMeetups,
+  respondMeetup,
+  type MeetupRow,
   loadFriendTimetable,
   loadPersonalTimetable,
   savePersonalTimetable,
@@ -63,6 +71,8 @@ export default function PersonalTimetableScreen() {
   const [friends, setFriends] = useState<Array<{ uid: string; name: string }>>([]);
   const [friendId, setFriendId] = useState<string | null>(null);
   const [friendCourses, setFriendCourses] = useState<PersonalCourse[]>([]);
+  const [invites, setInvites] = useState<MeetupRow[]>([]);
+  const [meetupBusy, setMeetupBusy] = useState(false);
 
   const load = useCallback(async () => {
     const next = await loadPersonalTimetable(uid, schoolId);
@@ -72,9 +82,10 @@ export default function PersonalTimetableScreen() {
     setFriends(
       list.map((item) => ({
         uid: opponentUidFromFriendship(item, uid),
-        name: opponentUidFromFriendship(item, uid),
+        name: (item.fromUid === uid ? item.toName : item.fromName) || '好友',
       })),
     );
+    setInvites(await listIncomingMeetups(schoolId, uid).catch(() => []));
   }, [uid, schoolId]);
 
   useFocusEffect(
@@ -106,7 +117,44 @@ export default function PersonalTimetableScreen() {
   const visible = timetable.courses
     .filter((course) => (view === 'day' ? course.day === day : course.day >= 1))
     .sort((a, b) => a.day - b.day || a.start - b.start);
-  const common = friendId ? commonFree(timetable.courses, friendCourses) : [];
+  const windows = friendId ? meetupWindows(timetable.courses, friendCourses) : [];
+  const nameOf = (id: string) => friends.find((friend) => friend.uid === id)?.name || '同學';
+
+  const sendMeetup = async (kind: 'meal' | 'study', dayOfWeek: number, startMinute: number) => {
+    if (!uid || !friendId || meetupBusy) return;
+    setMeetupBusy(true);
+    const label = meetupLabel({ day: dayOfWeek, kind, startMinute });
+    try {
+      const result = await createMeetup({
+        schoolId,
+        creatorUid: uid,
+        inviteeUid: friendId,
+        kind,
+        day: dayOfWeek,
+        startMinute,
+        note: kind === 'meal' ? '約吃飯' : '約讀書',
+      });
+      setNotice(
+        result === 'already'
+          ? `「${label}」之前就約過了，不會再送一次。`
+          : `已送出邀請：${label}。對方會在「找人」和「我的課表」看到。`,
+      );
+    } catch {
+      setNotice('邀請沒有送出，請稍後再試。');
+    } finally {
+      setMeetupBusy(false);
+    }
+  };
+
+  const answerInvite = async (id: string, status: 'accepted' | 'declined') => {
+    try {
+      await respondMeetup(id, status);
+      setNotice(status === 'accepted' ? '已答應，對方會看到。' : '已婉拒。');
+    } catch {
+      setNotice('這次沒有回覆成功，請稍後再試。');
+    }
+    setInvites(uid ? await listIncomingMeetups(schoolId, uid).catch(() => []) : []);
+  };
 
   const ocrNotice = (error: unknown) => {
     if (error instanceof TimetableOcrError && error.kind === 'network') {
@@ -134,6 +182,22 @@ export default function PersonalTimetableScreen() {
     <Screen title="我的課表" subtitle="確認前不會覆寫你現在的課表">
       <TimetableOcrHost />
       <ScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 120 }}>
+        {invites.length > 0 ? (
+          <View accessibilityLabel="有人約你" style={{ gap: 8 }}>
+            <Text style={{ fontWeight: '700', color: theme.colors.text }}>有人約你</Text>
+            {invites.map((item) => (
+              <View key={item.id} style={{ gap: 6 }}>
+                <Text style={{ color: theme.colors.text }}>
+                  {nameOf(item.creatorUid)} 約你：{meetupLabel(item)}
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <Button text="答應" kind="primary" onPress={() => void answerInvite(item.id, 'accepted')} />
+                  <Button text="婉拒" onPress={() => void answerInvite(item.id, 'declined')} />
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : null}
         {notice ? <Text style={{ color: theme.colors.text }}>{notice}</Text> : null}
         {uid ? (
           <Pressable
@@ -411,7 +475,7 @@ export default function PersonalTimetableScreen() {
           }}
         />
 
-        <Text style={{ fontWeight: '700', color: theme.colors.text }}>好友空堂</Text>
+        <Text style={{ fontWeight: '700', color: theme.colors.text }}>共同空堂</Text>
         {!uid ? (
           <Text style={{ color: theme.colors.muted }}>登入並加好友後才能看對方課表。</Text>
         ) : friends.length === 0 ? (
@@ -434,54 +498,64 @@ export default function PersonalTimetableScreen() {
             />
           ))
         )}
-        {common.slice(0, 6).map((block) => (
-          <View key={`${block.day}-${block.start}`} style={{ gap: 6 }}>
-            <Text style={{ color: theme.colors.text }}>
-              {WEEKDAY_LABELS[block.day - 1]} {periodRangeLabel(block.start, block.end)}
-            </Text>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <Button
-                text="約吃飯"
-                onPress={() =>
-                  uid && friendId
-                    ? void createMeetup({
-                        schoolId,
-                        creatorUid: uid,
-                        inviteeUid: friendId,
-                        kind: 'meal',
-                        day: block.day,
-                        startPeriod: block.start,
-                        endPeriod: block.end,
-                        note: '有空就碰面，吃飯',
-                      }).then(() => setNotice('已送出吃飯邀請。'))
-                    : undefined
-                }
-              />
-              <Button
-                text="約讀書"
-                onPress={() =>
-                  uid && friendId
-                    ? void createMeetup({
-                        schoolId,
-                        creatorUid: uid,
-                        inviteeUid: friendId,
-                        kind: 'study',
-                        day: block.day,
-                        startPeriod: block.start,
-                        endPeriod: block.end,
-                        note: '有空就碰面，讀書',
-                      }).then(() => setNotice('已送出讀書邀請。'))
-                    : undefined
-                }
-              />
-            </View>
-          </View>
+        {friendId && friendCourses.length > 0 && windows.length === 0 ? (
+          <Text style={{ color: theme.colors.muted }}>這週找不到兩個人都沒課、有一小時的時段。</Text>
+        ) : null}
+        {windows.slice(0, 8).map((window) => (
+          <MeetupWindowRow
+            key={`${window.day}-${window.start}`}
+            window={window}
+            busy={meetupBusy}
+            onSend={(kind, startMinute) => void sendMeetup(kind, window.day, startMinute)}
+          />
         ))}
         <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
           靜宜第 1 節 {PERIOD_TIMES[0][0]}，第 13 節 {PERIOD_TIMES[12][1]}。
         </Text>
       </ScrollView>
     </Screen>
+  );
+}
+
+function MeetupWindowRow({
+  window,
+  busy,
+  onSend,
+}: {
+  window: MeetupWindow;
+  busy: boolean;
+  onSend: (kind: 'meal' | 'study', startMinute: number) => void;
+}) {
+  const options = meetupStartOptions(window);
+  const [start, setStart] = useState(options[0] ?? window.start);
+  return (
+    <View style={{ gap: 6 }}>
+      <Text style={{ color: theme.colors.text }}>{meetupWindowLabel(window)}</Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+        {options.slice(0, 8).map((at) => (
+          <Pressable
+            key={at}
+            accessibilityRole="button"
+            accessibilityState={{ selected: at === start }}
+            onPress={() => setStart(at)}
+            style={{
+              paddingHorizontal: 10,
+              paddingVertical: 6,
+              borderRadius: 999,
+              borderWidth: 1,
+              borderColor: at === start ? theme.colors.accent : theme.colors.border,
+            }}
+          >
+            <Text style={{ color: at === start ? theme.colors.accent : theme.colors.text }}>{minutesLabel(at)}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <Text style={{ color: theme.colors.muted, fontSize: 12 }}>從 {minutesLabel(start)} 開始，1 小時</Text>
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        <Button text="約吃飯" disabled={busy} onPress={() => onSend('meal', start)} />
+        <Button text="約讀書" disabled={busy} onPress={() => onSend('study', start)} />
+      </View>
+    </View>
   );
 }
 

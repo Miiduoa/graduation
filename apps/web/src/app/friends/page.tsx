@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { WEEKDAY_LABELS, friendResendCopy, periodRangeLabel } from '@campus/shared';
+import { friendResendCopy, meetupLabel } from '@campus/shared';
 import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
 import { useSelectedSchool } from '@/components/SelectedSchoolProvider';
@@ -34,6 +34,8 @@ type Meetup = {
   day: number;
   startPeriod: number;
   endPeriod: number;
+  startMinute?: number;
+  durationMinutes?: number;
   status: 'pending' | 'accepted' | 'declined';
 };
 
@@ -96,10 +98,7 @@ export default function FriendsPage() {
   const nameOf = (uid: string) => friends.find((friend) => friend.uid === uid)?.name || '同學';
   const incoming = pending.filter((row) => row.incoming);
   const outgoing = pending.filter((row) => !row.incoming);
-  const meetupLabel = (item: Meetup) =>
-    `${WEEKDAY_LABELS[item.day - 1] || ''} ${periodRangeLabel(item.startPeriod, item.endPeriod)} ${
-      item.kind === 'meal' ? '吃飯' : '讀書'
-    }`;
+  const meetupText = (item: Meetup) => meetupLabel(item);
 
   const search = async () => {
     setSearched(false);
@@ -324,7 +323,7 @@ export default function FriendsPage() {
                   <div>
                     <h3>{mine ? `你約 ${other}` : `${other} 約你`}</h3>
                     <p>
-                      {meetupLabel(item)} · {MEETUP_STATUS[item.status] || item.status}
+                      {meetupText(item)} · {MEETUP_STATUS[item.status] || item.status}
                     </p>
                   </div>
                   {!mine && item.status === 'pending' && (
@@ -332,14 +331,22 @@ export default function FriendsPage() {
                       <button
                         type="button"
                         className="btn primary"
-                        onClick={() => void respondMeetup(item.id, 'accepted').then(reload)}
+                        onClick={() =>
+                          void respondMeetup(item.id, 'accepted')
+                            .then(() => setNotice('已答應，對方會看到。'))
+                            .then(reload)
+                        }
                       >
                         答應
                       </button>
                       <button
                         type="button"
                         className="btn"
-                        onClick={() => void respondMeetup(item.id, 'declined').then(reload)}
+                        onClick={() =>
+                          void respondMeetup(item.id, 'declined')
+                            .then(() => setNotice('已婉拒。'))
+                            .then(reload)
+                        }
                       >
                         婉拒
                       </button>

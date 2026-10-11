@@ -1,7 +1,6 @@
 'use client';
 
 import {
-  addDoc,
   collection,
   deleteDoc,
   doc,
@@ -15,8 +14,11 @@ import {
 } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import {
+  MEETUP_DURATION_MINUTES,
   cleanCourses,
   cleanMeta,
+  meetupDocId,
+  periodAt,
   type PersonalCourse,
   type TimetableMeta,
 } from '@campus/shared';
@@ -144,21 +146,43 @@ export async function loadSharedTimetable(token: string) {
 
 export type MeetupKind = 'meal' | 'study';
 
+/**
+ * 同一個時間、同一件事只會有一筆（文件編號固定），連按也不會多送。
+ * 回傳 'sent'（這次送出）或 'already'（之前就送過了）。
+ */
 export async function createMeetup(input: {
   schoolId: string;
   creatorUid: string;
   inviteeUid: string;
   kind: MeetupKind;
   day: number;
-  startPeriod: number;
-  endPeriod: number;
+  startMinute: number;
   note: string;
-}) {
-  await addDoc(collection(getDb(), 'meetups'), {
-    ...input,
-    status: 'pending',
-    createdAt: serverTimestamp(),
-  });
+}): Promise<'sent' | 'already'> {
+  const ref = doc(
+    getDb(),
+    'meetups',
+    meetupDocId(input.creatorUid, input.inviteeUid, input.day, input.startMinute, input.kind),
+  );
+  const existing = await getDoc(ref).catch(() => null);
+  if (existing?.exists()) return 'already';
+  try {
+    await setDoc(ref, {
+      ...input,
+      durationMinutes: MEETUP_DURATION_MINUTES,
+      // 舊版畫面只看節次
+      startPeriod: periodAt(input.startMinute),
+      endPeriod: periodAt(input.startMinute + MEETUP_DURATION_MINUTES - 1),
+      status: 'pending',
+      createdAt: serverTimestamp(),
+    });
+    return 'sent';
+  } catch (error) {
+    // 兩次幾乎同時送出：第一次已經寫進去，第二次會被擋，當作已經送過
+    const again = await getDoc(ref).catch(() => null);
+    if (again?.exists()) return 'already';
+    throw error;
+  }
 }
 
 export async function listMyMeetups(schoolId: string, uid: string) {
