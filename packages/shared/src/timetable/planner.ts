@@ -174,12 +174,29 @@ function parseDuration(text: string): number {
   return 100;
 }
 
-function describeNext(result: NextClassResult): string {
-  if (!result) return '目前找不到下一堂課。';
-  const room = result.course.room ? `，在 ${result.course.room}` : '';
-  if (result.kind === 'now') return `現在是「${result.course.name}」，約 ${result.minutes} 分鐘後下課${room}。`;
-  if (result.kind === 'next') return `下一堂是「${result.course.name}」，約 ${result.minutes} 分鐘後開始${room}。`;
-  return `下一堂是${weekdayLabel(result.course.day)}的「${result.course.name}」，${periodStart(result.course.start)} 開始${room}。`;
+/** 「9 小時 51 分」「40 分」 */
+export function durationLabel(minutes: number): string {
+  const total = Math.max(0, Math.round(minutes));
+  const hours = Math.floor(total / 60);
+  const rest = total % 60;
+  if (!hours) return `${rest} 分`;
+  return rest ? `${hours} 小時 ${rest} 分` : `${hours} 小時`;
+}
+
+/**
+ * 下一堂的說法：
+ * 「下一堂：今天 10:10 資料庫，主顧303（還有 9 小時 51 分）」
+ * 「現在在上：資料庫，主顧303（還有 40 分下課）」
+ * 「下一堂：星期三 08:10 英文，任垣201」
+ */
+export function describeNext(result: NextClassResult): string {
+  if (!result) return '這週接下來沒有課。';
+  const room = result.course.room ? `，${result.course.room}` : '';
+  if (result.kind === 'now') return `現在在上：${result.course.name}${room}（還有 ${durationLabel(result.minutes)}下課）`;
+  if (result.kind === 'next') {
+    return `下一堂：今天 ${periodStart(result.course.start)} ${result.course.name}${room}（還有 ${durationLabel(result.minutes)}）`;
+  }
+  return `下一堂：${weekdayLabel(result.course.day)} ${periodStart(result.course.start)} ${result.course.name}${room}`;
 }
 
 export class SchedulePlanner {
