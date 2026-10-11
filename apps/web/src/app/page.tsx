@@ -6,11 +6,15 @@ import { AppHeader } from '@/components/AppHeader';
 import { SiteFooter } from '@/components/SiteFooter';
 import { useAuth } from '@/components/AuthGuard';
 import { loadHomeData, type HomeData } from '@/lib/homeOverview';
+import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
+import { isTeacherRole, useSchoolRole } from '@/lib/useSchoolRole';
 import styles from './home.module.css';
 
 export default function HomePage() {
   const { user, loading: authLoading } = useAuth();
   const uid = user?.uid;
+  const school = useOptionalSelectedSchool();
+  const role = useSchoolRole(uid, school?.selectedSchoolId || 'pu');
   const [result, setResult] = useState<{ uid: string; data: HomeData } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -75,6 +79,11 @@ export default function HomePage() {
             </span>
           </div>
         </div>
+        {isTeacherRole(role) && (
+          <p className={styles.notice}>
+            <Link href="/teacher">老師工作台 →</Link> 看學生送來的課程申訴。
+          </p>
+        )}
         {error && (
           <div role="alert" className={styles.notice}>
             {error}

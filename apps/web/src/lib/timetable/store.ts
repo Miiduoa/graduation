@@ -232,30 +232,31 @@ export async function createCourseAppeal(
   return ref.id;
 }
 
+export type TeacherAppealRow = {
+  id: string;
+  courseName: string;
+  title: string;
+  body: string;
+  status: string;
+  teacherNote: string;
+  createdAt: string | null;
+  updatedAt: string | null;
+  studentName: string;
+  studentNumber: string;
+};
+
 /**
- * 老師工作台的申訴：學校管理者看全校；老師只看自己有教的課（schools/{schoolId}/courseTeachers）。
+ * 老師工作台的申訴：由伺服器整理（學生名字和學號只有伺服器讀得到）。
+ * 學校管理者看全校；老師只看自己有教的課（schools/{schoolId}/courseTeachers）。
  * courses 為 null 代表是管理者、看的是全校。
  */
-export async function listTeacherAppeals(schoolId: string, uid: string) {
-  const db = getDb();
-  try {
-    const all = await getDocs(query(collection(db, 'courseAppeals'), where('schoolId', '==', schoolId)));
-    return { courses: null as string[] | null, rows: all.docs.map((item) => ({ id: item.id, ...item.data() })) };
-  } catch {
-    // 不是管理者，改看自己有教的課
-  }
-  const mine = await getDocs(
-    query(collection(db, 'schools', schoolId, 'courseTeachers'), where('teacherUids', 'array-contains', uid)),
+export async function listTeacherAppeals(schoolId: string) {
+  const call = httpsCallable<{ schoolId: string }, { courses: string[] | null; rows: TeacherAppealRow[] }>(
+    getFunctionsInstance(),
+    'listTeacherAppeals',
   );
-  const courses = mine.docs.map((item) => item.id);
-  const groups = await Promise.all(
-    courses.map((courseName) =>
-      getDocs(
-        query(collection(db, 'courseAppeals'), where('schoolId', '==', schoolId), where('courseName', '==', courseName)),
-      ),
-    ),
-  );
-  return { courses, rows: groups.flatMap((snap) => snap.docs.map((item) => ({ id: item.id, ...item.data() }))) };
+  const { data } = await call({ schoolId });
+  return data;
 }
 
 export async function decideCourseAppeal(id: string, status: 'approved' | 'rejected', teacherNote: string) {
