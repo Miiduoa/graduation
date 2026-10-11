@@ -32,6 +32,7 @@
 import {
   createOrder as cafeteriaCreateOrder,
   assignOrderQueueNumber,
+  ORDER_NOT_SENT_TEXT,
   updateOrderStatus,
   logNutrition,
   trackSpending,
@@ -195,10 +196,13 @@ export async function placeOrderAtomic(
     }).then(() => undefined),
   );
 
-  // 4. 建立訂單
+  // 4. 建立訂單：交給伺服器，沒建成就「訂單沒送出去，請再試一次。」，不在手機上自己建單。
+  // 重試時呼叫端帶回同一個 requestId，伺服器算出同一個訂單編號，不會重複下單。
+  const requestId = request.requestId?.trim() || newRequestId();
   let order: Order;
   try {
     order = await cafeteriaCreateOrder({
+      requestId,
       studentUid: request.studentUid,
       vendorId: request.vendorId,
       cafeteriaId: request.cafeteriaId,
@@ -207,12 +211,9 @@ export async function placeOrderAtomic(
       note: buildOrderNote(request, holdResult.holdId!),
       estimatedPickup: null,
     });
-  } catch (err: any) {
-    return fail(
-      'order_persist',
-      'persist_failed',
-      err?.message ?? '訂單建立失敗',
-    );
+  } catch {
+    const response = await fail('order_persist', 'order_not_sent', ORDER_NOT_SENT_TEXT);
+    return { ...response, failure: { ...response.failure!, requestId } };
   }
   rollback.push(async () => {
     await updateOrderStatus(order.id, 'cancelled', {
@@ -261,6 +262,14 @@ export async function placeOrderAtomic(
     walletHoldId: holdResult.holdId,
     estimatedMinutes,
   };
+}
+
+function newRequestId(): string {
+  const random =
+    typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+  return `app-${random}`;
 }
 
 function isRealQueueNumber(value: unknown): value is number {

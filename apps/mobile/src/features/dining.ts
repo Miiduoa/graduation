@@ -47,6 +47,8 @@ function isoOf(value: unknown): string | null {
   }
   return null;
 }
+/** 伺服器沒確認建單時給學生看的話；「再試一次」沿用同一個訂單編號，不會重複下單 */
+export const ORDER_NOT_SENT_TEXT = '訂單沒送出去，請再試一次。';
 export class DiningError extends Error {
   constructor(
     message: string,
@@ -313,10 +315,7 @@ export async function submitDiningIntent(
     assertScope(intent, isCurrent);
     const receipt = await readDiningReceipt(intent, isCurrent);
     if (!receipt)
-      throw new DiningError(
-        '尚未確認訂單結果，請使用同一筆訂單重新確認，避免重複下單。',
-        'unknown',
-      );
+      throw new DiningError(ORDER_NOT_SENT_TEXT, 'unknown');
     await clearDiningIntent(intent);
     return receipt;
   } catch (error) {
@@ -333,7 +332,7 @@ export async function submitDiningIntent(
       );
     }
     if (error instanceof DiningError) throw error;
-    throw new DiningError('尚未確認訂單結果。請重新確認同一筆訂單，避免重複下單。', 'unknown');
+    throw new DiningError(ORDER_NOT_SENT_TEXT, 'unknown');
   }
 }
 export async function clearDiningIntent(intent: DiningScope & { requestId: string }) {

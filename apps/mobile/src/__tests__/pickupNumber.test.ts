@@ -13,6 +13,7 @@ jest.mock('../services/cafeteriaData', () => ({
   logNutrition: jest.fn(),
   trackSpending: jest.fn(),
   getVendor: () => ({ id: 'cafe', isOpen: true }),
+  ORDER_NOT_SENT_TEXT: '訂單沒送出去，請再試一次。',
 }));
 jest.mock('../services/ordering/allergens', () => ({
   checkAllergens: jest.fn(async () => ({ severity: 'none', message: '' })),
@@ -144,5 +145,24 @@ describe('手機下單不再自己算號碼', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  test('伺服器沒建成：回「訂單沒送出去，請再試一次。」和送出編號，再試一次帶同一個編號', async () => {
+    mockCreateOrder.mockRejectedValueOnce(new Error('network'));
+    const failed = await placeOrderAtomic(request, {} as any, []);
+    expect(failed).toMatchObject({
+      ok: false,
+      orderId: null,
+      queueNumber: null,
+      failure: { stage: 'order_persist', code: 'order_not_sent', message: '訂單沒送出去，請再試一次。' },
+    });
+    const requestId = failed.failure!.requestId!;
+    expect(typeof requestId).toBe('string');
+    expect(mockCreateOrder.mock.calls[0][0].requestId).toBe(requestId);
+    expect(JSON.stringify(failed)).not.toMatch(/請到櫃台確認/);
+    mockCreateOrder.mockResolvedValueOnce(order({ queueNumber: 6 }));
+    const retried = await placeOrderAtomic({ ...request, requestId }, {} as any, []);
+    expect(mockCreateOrder.mock.calls[1][0].requestId).toBe(requestId);
+    expect(retried).toMatchObject({ ok: true, orderId: 'o1', queueNumber: 6 });
   });
 });

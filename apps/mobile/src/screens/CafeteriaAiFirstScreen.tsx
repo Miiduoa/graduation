@@ -12,6 +12,7 @@ import {
   submitDiningIntent,
   diningTotal,
   DiningError,
+  ORDER_NOT_SENT_TEXT,
   type DiningScope,
   type DiningCatalog,
   type DiningIntent,
@@ -123,7 +124,7 @@ function DiningContent({
     } catch (reason) {
       if (isCurrent()) {
         setError(
-          reason instanceof DiningError ? reason.message : '無法確認訂單結果，請稍後重新確認。',
+          reason instanceof DiningError ? reason.message : ORDER_NOT_SENT_TEXT,
         );
         if (reason instanceof DiningError && reason.kind === 'not-sent') {
           setPending(null);
@@ -205,16 +206,21 @@ function DiningContent({
             </AICard>
           ) : null}
           {pending ? (
-            <AICard title="確認上一筆訂單">
+            <AICard title={busy ? '訂單送出中' : '訂單沒送出去'}>
               <View style={{ gap: 12 }}>
+                {busy ? null : (
+                  <Text accessibilityRole="alert" style={{ color: aiTokens.text, fontWeight: '700' }}>
+                    {error || ORDER_NOT_SENT_TEXT}
+                  </Text>
+                )}
                 <Text style={{ color: aiTokens.text }}>
                   {pending.label} · 到店應付 NT${pending.expectedTotal}
                 </Text>
                 <Text style={{ color: aiTokens.muted }}>
-                  先確認這筆訂單的結果，再建立新訂單。重試會沿用同一個訂單編號。
+                  再試一次會沿用同一個訂單編號，不會重複下單。
                 </Text>
                 <AIButton
-                  label={busy ? '確認訂單中' : '確認或重試這筆訂單'}
+                  label={busy ? '送出中' : '再試一次'}
                   disabled={busy}
                   onPress={() => void submit()}
                 />
@@ -251,7 +257,7 @@ function DiningContent({
               {loading ? (
                 <ActivityIndicator accessibilityLabel="讀取餐廳" color={aiTokens.ai} />
               ) : null}
-              {error ? (
+              {error && !pending ? (
                 <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>
                   {error}
                 </Text>

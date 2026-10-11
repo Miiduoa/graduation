@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { httpsCallable } from 'firebase/functions';
 import { getFunctionsInstance } from '../firebase';
+
+const ORDER_NOT_SENT_TEXT = '訂單沒送出去，請再試一次。';
 
 export interface AgentCard {
   kind:
@@ -185,6 +187,8 @@ function OrderDraftCard({ payload }: { payload: any }) {
   const [paymentMethod, setPaymentMethod] = useState<string>(payload.paymentMethod || 'campus_card');
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+  // 同一張草稿「再試一次」沿用同一個送出編號，伺服器不會建出第二筆
+  const requestIdRef = useRef<string | null>(null);
   const items: any[] = payload.items || [];
 
   const handleConfirm = async () => {
@@ -196,9 +200,15 @@ function OrderDraftCard({ payload }: { payload: any }) {
       return;
     }
     setSubmitting(true);
+    setResult(null);
+    requestIdRef.current ??=
+      typeof globalThis.crypto?.randomUUID === 'function'
+        ? `app-${globalThis.crypto.randomUUID()}`
+        : `app-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
     try {
       const callable = httpsCallable(getFunctionsInstance(), 'createOrder');
       const res = await callable({
+        requestId: requestIdRef.current,
         schoolId: payload.confirmAction?.input?.schoolId || 'pu',
         cafeteriaId: payload.cafeteriaId,
         items: items.map((it) => ({
@@ -217,10 +227,13 @@ function OrderDraftCard({ payload }: { payload: any }) {
       if (data.success && data.orderId) {
         setResult({ ok: true, message: `✓ 訂單建立成功！訂單號 ${data.orderId}` });
       } else {
-        setResult({ ok: false, message: data.errorMessage || '下單失敗，請稍後再試' });
+        setResult({ ok: false, message: ORDER_NOT_SENT_TEXT });
       }
     } catch (e: any) {
-      setResult({ ok: false, message: e?.message || '下單失敗' });
+      // 伺服器明確說不成立（菜單或金額變了）才照實轉述；其他一律請學生用同一個編號再試一次
+      const notCreated = e?.details?.orderOutcome === 'not_created';
+      if (notCreated) requestIdRef.current = null;
+      setResult({ ok: false, message: notCreated && e?.message ? e.message : ORDER_NOT_SENT_TEXT });
     } finally {
       setSubmitting(false);
     }
@@ -272,6 +285,15 @@ function OrderDraftCard({ payload }: { payload: any }) {
         <View style={[styles.resultBox, result.ok ? styles.resultOk : styles.resultErr]}>
           <Text style={result.ok ? styles.resultOkText : styles.resultErrText}>{result.message}</Text>
         </View>
+      ) : null}
+      {result?.ok ? null : result ? (
+        <TouchableOpacity
+          style={[styles.confirmBtn, submitting && styles.confirmBtnDisabled]}
+          onPress={handleConfirm}
+          disabled={submitting}
+        >
+          {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.confirmBtnText}>再試一次</Text>}
+        </TouchableOpacity>
       ) : (
         <TouchableOpacity
           style={[styles.confirmBtn, submitting && styles.confirmBtnDisabled]}

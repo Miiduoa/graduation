@@ -331,6 +331,8 @@ export type AtomicOrderRequest = {
   groupOrderId?: string;
   /** 取餐方式 */
   pickupType?: 'self_pickup' | 'dine_in';
+  /** 送出編號；「再試一次」時帶回上一次失敗回傳的 failure.requestId，伺服器不會建出第二筆 */
+  requestId?: string;
 };
 
 export type AtomicOrderResponse = {
@@ -358,6 +360,8 @@ export type AtomicOrderResponse = {
     message: string;
     /** 是否有部分回滾失敗（需 admin 介入） */
     needsManualReconciliation?: boolean;
+    /** 訂單沒送出去時的送出編號，「再試一次」要帶回同一個 */
+    requestId?: string;
   };
 };
 
