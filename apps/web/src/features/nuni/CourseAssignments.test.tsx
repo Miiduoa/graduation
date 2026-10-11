@@ -203,3 +203,53 @@ it('does not claim an archived course still has submittable work', () => {
   expect(screen.getByRole('button', { name: '待繳交 0' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: '繳交作業' })).toBeNull();
 });
+
+it('follows another assignment link when the all filter has not changed', async () => {
+  render(
+    <CourseAssignments
+      assignments={[task, submitted]}
+      workspace={workspace}
+      reload={vi.fn()}
+      onConfirmed={vi.fn()}
+    />,
+  );
+  const target = screen.getByRole('article', { name: submitted.title });
+  target.scrollIntoView = vi.fn();
+  act(() => {
+    window.history.replaceState(null, '', `#assignment-${submitted.id}`);
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  await waitFor(() => expect(target.scrollIntoView).toHaveBeenCalledWith({ block: 'start' }));
+  expect(document.activeElement).toBe(target);
+});
+
+it('shows a confirmed submission even when the student submitted from the pending filter', async () => {
+  const receipt = {
+    ...task,
+    mySubmission: { ...submitted.mySubmission!, assignmentId: task.id },
+    submissionCount: 1,
+  };
+  request.mockResolvedValue(receipt);
+  function Course() {
+    const [assignments, setAssignments] = useState([task]);
+    return (
+      <CourseAssignments
+        assignments={assignments}
+        workspace={workspace}
+        reload={vi.fn()}
+        onConfirmed={(saved) => setAssignments([saved])}
+      />
+    );
+  }
+  render(<Course />);
+  fireEvent.click(screen.getByRole('button', { name: '待繳交 1' }));
+  fireEvent.change(screen.getByLabelText('作業內容'), {
+    target: { value: receipt.mySubmission.body },
+  });
+  fireEvent.submit(screen.getByRole('button', { name: '繳交作業' }).closest('form')!);
+  await screen.findByRole('region', { name: '我的繳交紀錄' });
+  expect(screen.getByRole('article', { name: task.title })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '已繳交 1' }).getAttribute('aria-pressed')).toBe(
+    'true',
+  );
+});

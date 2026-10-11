@@ -203,3 +203,35 @@ it('revalidates an expired course session before retrying with the new account c
   expect(loadNuniHomeData).toHaveBeenLastCalledWith(expect.any(Function), 'student-b');
   expect(screen.queryByRole('alert')).toBeNull();
 });
+
+it('keeps an overdue but open quiz actionable before later tasks', async () => {
+  state.uid = null;
+  state.session = { context: 'session-a', platformAccountId: 'student-a' };
+  vi.mocked(loadNuniHomeData).mockResolvedValue({
+    ...data('設計'),
+    tasks: [
+      {
+        kind: 'quiz',
+        id: 'quiz1',
+        courseId: 'design',
+        courseName: '設計',
+        title: '課堂提問',
+        dueAt: '2020-01-02T12:30:00Z',
+        acceptsLate: true,
+        href: '/classroom/course/design#quiz-quiz1',
+      },
+      {
+        id: 'later',
+        courseId: 'design',
+        courseName: '設計',
+        title: '期末作業',
+        dueAt: '2099-01-02T12:30:00Z',
+        acceptsLate: true,
+      },
+    ],
+  });
+  render(<HomePage />);
+  const action = await screen.findByRole('link', { name: /查看並作答測驗/ });
+  expect(action.getAttribute('href')).toBe('/classroom/course/design#quiz-quiz1');
+  expect(screen.getAllByText('已過參考期限・仍可作答')).toHaveLength(2);
+});

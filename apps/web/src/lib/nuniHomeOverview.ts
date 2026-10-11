@@ -19,13 +19,17 @@ export async function loadNuniHomeData(
   // Bound requests when an account belongs to many courses. A failed course read
   // rejects the overview so an incomplete list never claims all work is done.
   const studying = courses.filter((course) => course.role === 'student');
-  for (let start = 0; start < studying.length; start += 4) {
+  for (let start = 0; start < studying.length; start += 2) {
     const batch = await Promise.all(
-      studying.slice(start, start + 4).map(async (course) => {
-        const assignments = await classes.assignments(course.id);
-        return assignments
+      studying.slice(start, start + 2).map(async (course) => {
+        const [assignments, quizzes] = await Promise.all([
+          classes.assignments(course.id),
+          classes.quizzes(course.id),
+        ]);
+        const assignmentTasks: HomeTask[] = assignments
           .filter((assignment) => assignment.state === 'open' && !assignment.mySubmission)
           .map((assignment) => ({
+            kind: 'assignment',
             id: assignment.id,
             courseId: course.id,
             courseName: course.name,
@@ -34,6 +38,19 @@ export async function loadNuniHomeData(
             href: `${course.href}#assignment-${encodeURIComponent(assignment.id)}`,
             acceptsLate: true,
           }));
+        const quizTasks: HomeTask[] = quizzes
+          .filter((quiz) => quiz.state === 'open' && !quiz.myResponse)
+          .map((quiz) => ({
+            kind: 'quiz',
+            id: quiz.id,
+            courseId: course.id,
+            courseName: course.name,
+            title: quiz.title,
+            dueAt: quiz.dueAt,
+            href: `${course.href}#quiz-${encodeURIComponent(quiz.id)}`,
+            acceptsLate: true,
+          }));
+        return [...assignmentTasks, ...quizTasks];
       }),
     );
     tasks.push(...batch.flat());

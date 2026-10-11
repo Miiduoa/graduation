@@ -9,6 +9,7 @@ export interface HomeCourse {
   href?: string;
 }
 export interface HomeTask {
+  kind?: 'assignment' | 'quiz';
   id: string;
   courseId: string;
   courseName: string;

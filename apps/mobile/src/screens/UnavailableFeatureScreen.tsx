@@ -1,8 +1,11 @@
 import React, { useSyncExternalStore } from 'react';
-import { Text, View } from 'react-native';
+import { Alert, Text, View } from 'react-native';
 import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { safeNavigate } from '../utils/safeNavigate';
+import { useSchool } from '../state/school';
+import { DORM_OFFICE_INFO } from '../data/puDormData';
+import { linkingOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 
 export type ServiceScreenProps = {
   navigation?: Parameters<typeof safeNavigate>[0] & { goBack?: () => void };
@@ -122,6 +125,7 @@ export function UnavailableFeatureScreen({
   actions,
 }: ServiceScreenProps & { title?: string; description?: string; actions?: Action[] }) {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
+  const { school } = useSchool();
   const feature = features[route?.name ?? ''] ?? {
     title: '校園服務',
     description: '此功能尚未開放。你可以先使用下方的校園服務。',
@@ -133,6 +137,21 @@ export function UnavailableFeatureScreen({
           {description ?? feature.description}
         </Text>
       </AICard>
+      {route?.name === 'Dormitory' && school?.id === 'pu' && (
+        <AICard title="住宿服務組">
+          <Text style={{ color: aiTokens.text, lineHeight: 24 }}>
+            抽籤、入住與換房請依校方公告辦理；洗衣設備狀態與電費請至現場確認。
+          </Text>
+          <AIButton
+            label="前往靜宜住宿服務組官網"
+            variant="ghost"
+            onPress={async () => {
+              const opened = await linkingOpenWithPuTronClassGate(DORM_OFFICE_INFO.website);
+              if (!opened) Alert.alert('無法開啟官網', DORM_OFFICE_INFO.website);
+            }}
+          />
+        </AICard>
+      )}
       <AICard title="目前可以使用">
         <View style={{ gap: 12 }}>
           {(actions ?? feature.actions ?? publicActions).map((action) => (

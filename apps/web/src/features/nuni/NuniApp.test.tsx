@@ -109,9 +109,7 @@ it.each(['/admin', '/merchant?application=current#status'])(
     render(<NuniApp />);
     const button = await screen.findByRole('button', { name: '使用 Google 帳號繼續' });
     expect(screen.getByText('這次登入沒有完成，請重新登入。')).toBeTruthy();
-    expect(new URL(button.closest('form')!.action).searchParams.get('returnUrl')).toBe(
-      destination,
-    );
+    expect(new URL(button.closest('form')!.action).searchParams.get('returnUrl')).toBe(destination);
   },
 );
 
@@ -210,4 +208,26 @@ it('allows a co-teacher to publish work without offering the owner-only invite a
   expect(screen.getAllByText('發布作業').length).toBeGreaterThan(0);
   expect(screen.queryByRole('button', { name: '產生邀請碼' })).toBeNull();
   expect(screen.queryByRole('heading', { name: '邀請學生' })).toBeNull();
+});
+
+it('opens linked quizzes on initial load and follows same-course task history without losing drafts', async () => {
+  window.history.replaceState(
+    {},
+    '',
+    `${mocks.pathname}#quiz-cwq_11111111-1111-4111-8111-111111111111`,
+  );
+  render(<NuniApp />);
+  await waitFor(() =>
+    expect(screen.getByRole('tab', { name: '測驗' }).getAttribute('aria-selected')).toBe('true'),
+  );
+  fireEvent.change(screen.getByLabelText('測驗草稿'), { target: { value: '我的作答' } });
+  act(() => {
+    window.location.hash = '#assignment-cwa_11111111-1111-4111-8111-111111111111';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  await waitFor(() =>
+    expect(screen.getByRole('tab', { name: '作業' }).getAttribute('aria-selected')).toBe('true'),
+  );
+  fireEvent.click(screen.getByRole('tab', { name: '測驗' }));
+  expect((screen.getByLabelText('測驗草稿') as HTMLInputElement).value).toBe('我的作答');
 });

@@ -24,7 +24,12 @@ function assignment(suffix: string, extra: Record<string, unknown> = {}) {
     ...extra,
   };
 }
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  transport.mockReset().mockImplementation(async (path: string) => {
+    if (path.endsWith('/quizzes')) return { quizzes: [] };
+    throw new Error(`Unexpected request: ${path}`);
+  });
+});
 it('uses each course membership role and only includes open, unsubmitted work from active student courses', async () => {
   const submitted = assignment('3');
   transport
@@ -66,6 +71,7 @@ it('uses each course membership role and only includes open, unsubmitted work fr
   expect(transport.mock.calls.map(([path]) => path)).toEqual([
     'class-workspaces',
     `class-workspaces/${studentId}/assignments`,
+    `class-workspaces/${studentId}/quizzes`,
   ]);
 });
 it('rejects an incomplete overview when any course is no longer accessible', async () => {
@@ -112,4 +118,103 @@ it('returns a verified empty account without requesting assignments or inventing
     archivedCount: 0,
   });
   expect(transport).toHaveBeenCalledTimes(1);
+});
+
+function quiz(suffix: string, extra: Record<string, unknown> = {}) {
+  return {
+    id: `cwq_00000000-0000-0000-0000-00000000000${suffix}`,
+    workspaceId: studentId,
+    title: `測驗 ${suffix}`,
+    prompt: '請回答',
+    state: 'open',
+    createdAt: '2026-10-01T00:00:00Z',
+    closedAt: null,
+    dueAt: null,
+    unitId: null,
+    unitTitle: null,
+    responseCount: 0,
+    myResponse: null,
+    ...extra,
+  };
+}
+it('includes pending quizzes among assignments in deadline order and opens their actual panel', async () => {
+  const answered = quiz('3');
+  transport.mockImplementation(async (path: string) => {
+    if (path === 'class-workspaces')
+      return {
+        workspaces: [{ id: studentId, title: '課程', state: 'active', memberRole: 'student' }],
+      };
+    if (path.endsWith('/assignments'))
+      return { assignments: [assignment('1', { dueAt: '2026-10-10T00:00:00Z' })] };
+    return {
+      quizzes: [
+        quiz('1', { dueAt: '2026-10-09T00:00:00Z' }),
+        quiz('2', { state: 'closed', closedAt: '2026-10-08T00:00:00Z' }),
+        {
+          ...answered,
+          myResponse: {
+            quizId: answered.id,
+            platformAccountId: accountId,
+            displayName: '學生',
+            answer: '完成',
+            state: 'submitted',
+            submittedAt: '2026-10-08T00:00:00Z',
+            teacherFeedback: null,
+            reviewedAt: null,
+          },
+        },
+        quiz('4'),
+      ],
+    };
+  });
+  const result = await loadNuniHomeData(transport, accountId);
+  expect(result.tasks.map((task) => [task.kind, task.title])).toEqual([
+    ['quiz', '測驗 1'],
+    ['assignment', '作業 1'],
+    ['quiz', '測驗 4'],
+  ]);
+  expect(result.tasks[0].href).toBe(
+    `/classroom/course/${studentId}#quiz-cwq_00000000-0000-0000-0000-000000000001`,
+  );
+});
+it('does not present completed work when the quiz request fails', async () => {
+  transport.mockImplementation(async (path: string) => {
+    if (path === 'class-workspaces')
+      return {
+        workspaces: [{ id: studentId, title: '課程', state: 'active', memberRole: 'student' }],
+      };
+    if (path.endsWith('/assignments')) return { assignments: [] };
+    throw new NuniError(503, 'UNAVAILABLE');
+  });
+  await expect(loadNuniHomeData(transport, accountId)).rejects.toMatchObject({ status: 503 });
+});
+it('rejects quiz completion receipts belonging to another account', async () => {
+  const item = quiz('1');
+  transport.mockImplementation(async (path: string) => {
+    if (path === 'class-workspaces')
+      return {
+        workspaces: [{ id: studentId, title: '課程', state: 'active', memberRole: 'student' }],
+      };
+    if (path.endsWith('/assignments')) return { assignments: [] };
+    return {
+      quizzes: [
+        {
+          ...item,
+          myResponse: {
+            quizId: item.id,
+            platformAccountId: 'pa_00000000-0000-0000-0000-000000000099',
+            displayName: '其他人',
+            answer: '私密',
+            state: 'submitted',
+            submittedAt: '2026-10-08T00:00:00Z',
+            teacherFeedback: null,
+            reviewedAt: null,
+          },
+        },
+      ],
+    };
+  });
+  await expect(loadNuniHomeData(transport, accountId)).rejects.toMatchObject({
+    code: 'INVALID_RESPONSE',
+  });
 });

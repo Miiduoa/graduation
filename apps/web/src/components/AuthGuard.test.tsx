@@ -1,5 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
+import { hydrateRoot, type Root } from 'react-dom/client';
+import { Suspense } from 'react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { AuthGuard, AuthProvider, GuestAuthProvider, useAuth } from './AuthGuard';
 import { getAuth } from '@/features/auth/client';
@@ -29,6 +31,51 @@ it('keeps server and initial client markup stable even with a restored browser a
     ),
   ).toContain('Checking account');
   expect(getAuth).not.toHaveBeenCalled();
+});
+it.each([
+  { name: 'an unavailable auth service', restoredUser: undefined },
+  { name: 'a signed-out account', restoredUser: null },
+  { name: 'a restored account', restoredUser: { uid: 'alice' } },
+])('hydrates a deferred account branch after resolving $name', async ({ restoredUser }) => {
+  vi.mocked(getAuth).mockReturnValue(restoredUser === undefined ? null : ({} as never));
+  vi.mocked(onAuthStateChanged).mockImplementation((_auth, callback) => {
+    (callback as (user: unknown) => void)(restoredUser);
+    return () => {};
+  });
+  function AccountPage() {
+    const { user, loading } = useAuth();
+    return loading ? (
+      <div role="status">Checking account</div>
+    ) : (
+      <section aria-label="Account">{user ? `Account ${user.uid}` : 'Signed out'}</section>
+    );
+  }
+  const app = (
+    <AuthProvider>
+      <Suspense fallback={<p role="status">Loading page</p>}>
+        <AccountPage />
+      </Suspense>
+    </AuthProvider>
+  );
+  const container = document.createElement('div');
+  container.innerHTML = renderToString(app);
+  document.body.append(container);
+  expect(container.querySelector('[role="status"]')?.textContent).toBe('Checking account');
+  expect(getAuth).not.toHaveBeenCalled();
+  const onRecoverableError = vi.fn();
+  let root: Root | undefined;
+  try {
+    await act(async () => {
+      root = hydrateRoot(container, app, { onRecoverableError });
+    });
+    expect(container.querySelector('section[aria-label="Account"]')?.textContent).toBe(
+      restoredUser ? `Account ${restoredUser.uid}` : 'Signed out',
+    );
+    expect(onRecoverableError).not.toHaveBeenCalled();
+  } finally {
+    await act(async () => root?.unmount());
+    container.remove();
+  }
 });
 it('leaves loading when the service is unavailable without inventing an account', async () => {
   vi.mocked(getAuth).mockReturnValue(null);
@@ -66,9 +113,7 @@ it('preserves the school timetable query and section when redirecting a guest to
     );
     const destination = new URL(location.href, 'https://campus.test');
     expect(destination.pathname).toBe('/login');
-    expect(destination.searchParams.get('returnUrl')).toBe(
-      '/timetable?week=2026-10-05#today',
-    );
+    expect(destination.searchParams.get('returnUrl')).toBe('/timetable?week=2026-10-05#today');
     expect(screen.queryByText('私人課表')).toBeNull();
     view.unmount();
   } finally {

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -9,7 +9,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useAuth } from '../state/auth';
 import { loadStudentHome } from '../data/studentHome';
 import type { CourseSpace, InboxTask } from '../data/types';
@@ -17,43 +17,50 @@ import { safeNavigate } from '../utils/safeNavigate';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
+import { navigateFromInboxTask, resolveInboxAction } from '../services/inboxActions';
+
+type HomeState =
+  | { scope: string; status: 'loading' | 'error' }
+  | { scope: string; status: 'ready'; courses: CourseSpace[]; tasks: InboxTask[] };
 
 export default function StudentTodayScreen() {
   const s = useThemeStyleSheet(createStyles);
   const auth = useAuth();
   const navigation = useNavigation();
   const bottom = useTabBarContentBottomPadding();
-  const [result, setResult] = useState<{
-    uid: string;
-    courses: CourseSpace[];
-    tasks: InboxTask[];
-  } | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const generation = useRef(0);
   const uid = auth.user?.uid;
-  const data = result?.uid === uid ? result : null;
+  const schoolId = auth.profile?.schoolId;
+  const scope = JSON.stringify([uid, schoolId, auth.profile?.role]);
+  const currentScope = useRef(scope);
+  currentScope.current = scope;
+  const [state, setState] = useState<HomeState>({ scope, status: 'loading' });
+  const generation = useRef(0);
+  const current = state.scope === scope ? state : null;
+  const data = current?.status === 'ready' ? current : null;
+  const loading = !current || current.status === 'loading';
+  const error =
+    current?.status === 'error' ? '無法讀取校務課程。請確認登入狀態與網路連線後重試。' : '';
   const load = useCallback(async () => {
     const request = ++generation.current;
-    setLoading(true);
-    setError('');
+    setState({ scope, status: 'loading' });
     try {
       if (!uid) throw new Error('請先登入。');
-      const { courses, tasks } = await loadStudentHome(uid, auth.profile?.schoolId);
-      if (request === generation.current) setResult({ uid, courses, tasks });
+      const { courses, tasks } = await loadStudentHome(uid, schoolId);
+      if (request === generation.current && currentScope.current === scope)
+        setState({ scope, status: 'ready', courses, tasks });
     } catch {
-      if (request === generation.current)
-        setError('無法讀取課程。請確認登入狀態與網路連線後重試。');
-    } finally {
-      if (request === generation.current) setLoading(false);
+      if (request === generation.current && currentScope.current === scope)
+        setState({ scope, status: 'error' });
     }
-  }, [uid, auth.profile?.schoolId]);
-  useEffect(() => {
-    void load();
-    return () => {
-      generation.current += 1;
-    };
-  }, [load]);
+  }, [uid, schoolId, scope]);
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+      return () => {
+        generation.current += 1;
+      };
+    }, [load]),
+  );
 
   const openCourse = (courseId: string) =>
     safeNavigate(navigation, 'CourseHub', { courseSpaceId: courseId, groupId: courseId });
@@ -66,8 +73,36 @@ export default function StudentTodayScreen() {
         }
       >
         <Text style={s.brand}>CAMPUS ONE</Text>
-        <Text style={s.heading}>今天的課程與待辦</Text>
-        <Text style={s.caption}>查看作業期限與課程最新動態。</Text>
+        <Text accessibilityRole="header" style={s.heading}>
+          今天
+        </Text>
+        <Text style={s.caption}>從課程、作業或校務服務開始。</Text>
+        <View style={s.entry}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Campus One 課程與作業"
+            onPress={() => safeNavigate(navigation, 'NuniWorkspace')}
+            style={s.tool}
+          >
+            <View style={{ flex: 1, gap: 5 }}>
+              <Text style={s.toolText}>Campus One 課程與作業</Text>
+              <Text style={s.taskMeta}>加入課程、查看教材、繳交作業與測驗</Text>
+            </View>
+            <Text style={s.arrow}>↗</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="校務服務"
+            onPress={() => safeNavigate(navigation, 'CoursesHome')}
+            style={s.tool}
+          >
+            <View style={{ flex: 1, gap: 5 }}>
+              <Text style={s.toolText}>校務服務</Text>
+              <Text style={s.taskMeta}>已連結學校的課表、成績與出缺紀錄</Text>
+            </View>
+            <Text style={s.arrow}>↗</Text>
+          </Pressable>
+        </View>
         {!!error && (
           <View accessibilityRole="alert" style={s.error}>
             <Text style={s.errorText}>{error}</Text>
@@ -80,38 +115,27 @@ export default function StudentTodayScreen() {
           <ActivityIndicator color={theme.colors.accent} style={{ marginVertical: 36 }} />
         ) : (
           <>
-            <View style={s.focus}>
-              <Text style={s.label}>接下來要做的事</Text>
-              <Text style={s.focusTitle}>
-                {data
-                  ? data.tasks.length
-                    ? `${data.tasks.length} 項待辦`
-                    : '從你的課程開始'
-                  : '登入後查看課程'}
-              </Text>
-              <Text style={s.focusBody}>查看課程內容，掌握作業期限與最新動態。</Text>
-              <Pressable
-                accessibilityRole="button"
-                style={s.primary}
-                onPress={() => safeNavigate(navigation, 'CoursesHome')}
-              >
-                <Text style={s.primaryText}>開啟課程 ↗</Text>
-              </Pressable>
-            </View>
             {data && (
               <>
-                <Text style={s.sectionTitle}>待辦事項</Text>
+                <Text accessibilityRole="header" style={s.sectionTitle}>
+                  校務待辦
+                </Text>
                 {data.tasks.length ? (
                   data.tasks.map((task) => (
                     <Pressable
                       key={task.id}
                       accessibilityRole="button"
+                      accessibilityLabel={`${task.title}，${resolveInboxAction(task)?.label ?? '查看課程'}`}
                       style={s.task}
-                      onPress={() =>
-                        task.kind === 'assistant_queue'
-                          ? safeNavigate(navigation, 'AIAgentConsole')
-                          : openCourse(task.groupId)
-                      }
+                      onPress={() => {
+                        if (
+                          !navigateFromInboxTask(navigation, task, {
+                            role: auth.profile?.role,
+                            isTeachingRole: false,
+                          })
+                        )
+                          openCourse(task.groupId);
+                      }}
                     >
                       <View style={s.square} />
                       <View style={{ flex: 1 }}>
@@ -125,9 +149,11 @@ export default function StudentTodayScreen() {
                     </Pressable>
                   ))
                 ) : (
-                  <Text style={s.empty}>目前沒有待處理事項。</Text>
+                  <Text style={s.empty}>
+                    目前沒有校務待辦。Campus One 作業與測驗請到「課程與作業」查看。
+                  </Text>
                 )}
-                <Text style={s.sectionTitle}>我的課程</Text>
+                <Text style={s.sectionTitle}>校務課程</Text>
                 {data.courses.length ? (
                   data.courses.map((course) => (
                     <Pressable
@@ -185,6 +211,7 @@ const createStyles = () =>
     },
     heading: { color: theme.colors.text, fontSize: 28, fontWeight: '600', letterSpacing: -1 },
     caption: { color: theme.colors.muted, fontSize: 13, marginTop: 10, marginBottom: 26 },
+    entry: { borderTopWidth: 1, borderTopColor: theme.colors.border, marginBottom: 16 },
     focus: {
       backgroundColor: theme.colors.focusSurface,
       borderColor: theme.colors.border,
