@@ -100,6 +100,17 @@ const EMULATOR_AUTH_PORT = Number(
 );
 const _emulatorWired = { functions: false, firestore: false, auth: false };
 
+// 測試環境只能接 demo- 開頭的模擬器專案，避免本機測試不小心寫進正式專案。
+export function isEmulatorTestEnv(): boolean {
+  return USE_FIREBASE_EMULATOR && String(firebaseConfig.projectId || '').startsWith('demo-');
+}
+
+if (USE_FIREBASE_EMULATOR && !String(firebaseConfig.projectId || '').startsWith('demo-')) {
+  throw new Error(
+    `模擬器模式只能用 demo- 開頭的專案，現在是「${firebaseConfig.projectId || '（未設定）'}」。請改用 pnpm test-env:start。`,
+  );
+}
+
 let app: FirebaseApp | null = null;
 let db: Firestore | null = null;
 let auth: Auth | null = null;
@@ -242,6 +253,15 @@ export async function signInWithPuStudentId(
   studentId: string,
   password: string,
 ): Promise<User | null> {
+  if (isEmulatorTestEnv()) {
+    // 測試環境不連學校，學號對應到模擬器裡的測試帳號
+    const credential = await signInWithEmailAndPassword(
+      getAuth(),
+      `${studentId.trim().toLowerCase()}@test.campus-one.local`,
+      password,
+    );
+    return credential.user;
+  }
   const response = await fetch(getCloudFunctionUrl('signInPuStudentId'), {
     method: 'POST',
     headers: {
