@@ -8,7 +8,6 @@ import {
 } from '../services/notifications';
 
 import { rootNavigateNested, rootNavigationRef } from './rootNavigation';
-import { aiOverlay } from './useAIOverlay';
 import { navigateFromInboxTask } from '../services/inboxActions';
 import { isTeachingRole } from '../utils/campusOs';
 import { inboxTaskFromAssignmentPushData } from '../utils/inboxTaskFromNotification';
@@ -44,11 +43,7 @@ function navigateFromNotificationData(rawData: unknown, profileRole?: UserRole |
 
   switch (data.type) {
     case 'ai_proactive':
-      aiOverlay.open({
-        mode: 'chat',
-        source: 'push_ai_proactive',
-        proactiveReportId: typeof data.reportId === 'string' ? data.reportId : undefined,
-      });
+      rootNavigateNested('Today', 'TodayHome');
       break;
     case 'announcement':
       if (typeof data.announcementId === 'string' && data.announcementId) {
@@ -103,7 +98,7 @@ function navigateFromNotificationData(rawData: unknown, profileRole?: UserRole |
 }
 
 /**
- * navigationRef 保留與 App.tsx 的相容簽章；實際導頁一律走 rootNavigationRef + aiOverlay。
+ * navigationRef 保留與 App.tsx 的相容簽章；實際導頁一律走 rootNavigationRef。
  */
 export function usePushNotifications(
   _navigationRef: NavigationLike,
@@ -158,12 +153,8 @@ export function usePushNotifications(
       }
 
       const rawPayload = response?.notification?.request?.content?.data;
-      const isAiProactive =
-        rawPayload &&
-        typeof rawPayload === 'object' &&
-        (rawPayload as Record<string, unknown>).type === 'ai_proactive';
 
-      if (!isAiProactive && !rootNavigationRef.isReady()) return;
+      if (!rootNavigationRef.isReady()) return;
 
       lastHandledResponseKeyRef.current = responseKey;
       navigateFromNotificationData(rawPayload, roleRef.current);
@@ -180,13 +171,7 @@ export function usePushNotifications(
         const response = await getLastNotificationResponseAsync();
         if (!response || cancelled) return;
 
-        const rawPayload = response.notification?.request?.content?.data;
-        const isAiProactive =
-          rawPayload &&
-          typeof rawPayload === 'object' &&
-          (rawPayload as Record<string, unknown>).type === 'ai_proactive';
-
-        if (!isAiProactive && !rootNavigationRef.isReady()) {
+        if (!rootNavigationRef.isReady()) {
           if (attempt < 10) {
             setTimeout(() => {
               void tryHandleInitialResponse(attempt + 1);

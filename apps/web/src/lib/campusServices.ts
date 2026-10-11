@@ -122,6 +122,13 @@ export const CAMPUS_SERVICES = [
     category: 'campus',
   },
   {
+    name: '職涯',
+    text: '職涯資料還沒接到校方，先看支援說明',
+    href: '/career',
+    keywords: '實習 徵才 履歷 就業 career',
+    category: 'campus',
+  },
+  {
     name: '校園助理',
     text: '查詢課務與校園服務；排課請用課表裡的幫我安排',
     href: '/ai-assistant',

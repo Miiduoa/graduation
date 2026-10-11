@@ -32,6 +32,7 @@ const originalServices = [
   ['/bus', '公車'],
   ['/cafeteria', '餐廳'],
   ['/library', '圖書館'],
+  ['/career', '職涯'],
   ['/ai-assistant', '校園助理'],
   ['/support', '支援'],
   ['/account-deletion', '刪除帳號'],
@@ -53,7 +54,7 @@ it('retains all existing services and search while adding a separate classroom e
   expect(screen.getByRole('link', { name: /尋找校園服務/ }).getAttribute('href')).toBe('/search');
   expect(screen.getByRole('link', { name: '課程空間' }).getAttribute('href')).toBe('/classroom');
   expect(screen.getByRole('link', { name: '跨校交流' }).getAttribute('href')).toBe('/social');
-  expect(screen.getAllByRole('link')).toHaveLength(23);
+  expect(screen.getAllByRole('link')).toHaveLength(24);
 });
 
 it('preserves school context without copying unrelated session or return parameters', () => {
