@@ -25,16 +25,19 @@ const base = { schoolId: 'pu', title: '期中考成績', body: '第三題', stat
 const data = {
   'schools/pu/members/t1': { role: 'teacher', status: 'active' },
   'schools/pu/members/s1': { role: 'student', status: 'active' },
-  'schools/pu/courseTeachers/資料庫': { teacherUids: ['t1'] },
+  'schools/pu/courseTeachers/資料庫｜王老師': { teacherUids: ['t1'] },
+  'schools/pu/courseTeachers/資料庫｜李老師': { teacherUids: ['t2'] },
   'users/test-student-a': { displayName: '測試學生甲', email: 's0000001@test.campus-one.local' },
-  'courseAppeals/a1': { ...base, studentUid: 'test-student-a', courseName: '資料庫' },
-  'courseAppeals/a2': { ...base, studentUid: 'test-student-a', courseName: '英文' },
+  'courseAppeals/a1': { ...base, studentUid: 'test-student-a', courseName: '資料庫', offeringId: '資料庫｜王老師' },
+  'courseAppeals/a2': { ...base, studentUid: 'test-student-a', courseName: '英文', offeringId: '英文｜陳老師' },
+  // 同名的課、別的老師開的：t1 看不到
+  'courseAppeals/a3': { ...base, studentUid: 'test-student-a', courseName: '資料庫', offeringId: '資料庫｜李老師' },
 };
 
 test('a teacher gets only their course, with the student name, ID and submit time', async () => {
   const handle = createListTeacherAppealsHandler({ db: fakeDb(data) });
   const result = await handle({ auth: { uid: 't1' }, data: { schoolId: 'pu' } });
-  expect(result.courses).toEqual(['資料庫']);
+  expect(result.courses).toEqual(['資料庫（王老師）']);
   expect(result.rows).toHaveLength(1);
   expect(result.rows[0]).toMatchObject({
     id: 'a1',

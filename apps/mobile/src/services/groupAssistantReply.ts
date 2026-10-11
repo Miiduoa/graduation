@@ -14,7 +14,7 @@ export function subscribeAssistantReply(
       if (!snap.exists()) return;
       const data = snap.data() as { body?: string; authorId?: string; generatedBy?: string };
       // 只認伺服器寫的那一則
-      if (data.body && data.authorId === 'campus-assistant' && data.generatedBy === 'server') onReply(data.body);
+      if (data.body && data.generatedBy === 'server') onReply(data.body);
     },
     () => onError(),
   );
