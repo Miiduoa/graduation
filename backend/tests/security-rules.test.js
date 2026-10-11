@@ -415,6 +415,29 @@ describe('firestore security rules', () => {
     await assertFails(testEnv.authenticatedContext('staff-a').firestore().doc(`${school}/orders/b1`).get());
   });
 
+  test('學生 B 讀不到學生 A 的單：店家那份、自己的副本、舊的 /orders 都一樣', async () => {
+    const school = 'schools/tw-demo-uni';
+    const receipt = { userId: 'alice', schoolId: 'tw-demo-uni', cafeteriaId: 'cafe-a', status: 'pending', queueNumber: 7 };
+    await seedFirestore(async (db) => {
+      await db.doc(`${school}/orders/r1`).set(receipt);
+      await db.doc('users/alice/schools/tw-demo-uni/orders/r1').set(receipt);
+      await db.doc('orders/r1').set(receipt);
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    await assertSucceeds(alice.collection('users/alice/schools/tw-demo-uni/orders').orderBy('createdAt', 'desc').limit(30).get());
+    await assertSucceeds(alice.collection(`${school}/orders`).where('userId', '==', 'alice').get());
+
+    await assertFails(bob.doc(`${school}/orders/r1`).get());
+    await assertFails(bob.doc('users/alice/schools/tw-demo-uni/orders/r1').get());
+    await assertFails(bob.collection('users/alice/schools/tw-demo-uni/orders').orderBy('createdAt', 'desc').limit(30).get());
+    await assertFails(bob.collection(`${school}/orders`).where('userId', '==', 'alice').get());
+    await assertFails(bob.collection(`${school}/orders`).get());
+    await assertFails(bob.doc('orders/r1').get());
+    await assertFails(bob.collection('orders').where('userId', '==', 'alice').get());
+    await assertFails(bob.collectionGroup('orders').where('userId', '==', 'alice').get());
+  });
+
   test('deny group post impersonation on create', async () => {
     await seedFirestore(async (db) => {
       await db.collection('groups').doc('group-1').set({ schoolId: 'tw-demo-uni' });

@@ -243,6 +243,31 @@ test('伺服器沒建成：寫「訂單沒送出去，請再試一次。」，�
   expect(view.getByText('取餐號碼 5')).toBeTruthy();
   expect(view.queryByText('訂單沒送出去')).toBeNull();
 });
+test('沒送出去後連點「再試一次」：只再送一次，而且是同一個訂單編號', async () => {
+  const retry = deferred<DiningReceipt>();
+  jest
+    .mocked(submitDiningIntent)
+    .mockRejectedValueOnce(new DiningError('訂單沒送出去，請再試一次。', 'unknown'))
+    .mockReturnValueOnce(retry.promise);
+  const view = render(<CafeteriaAiFirstScreen />);
+  await act(async () => {});
+  fireEvent.press(view.getByText('選擇今日餐點'));
+  await act(async () => fireEvent.press(view.getByText('送出訂單，到店付款')));
+  const button = view.getByText('再試一次');
+  fireEvent.press(button);
+  fireEvent.press(button);
+  fireEvent.press(button);
+  fireEvent.press(view.getAllByText('送出中')[0]);
+  await act(async () => {});
+  expect(submitDiningIntent).toHaveBeenCalledTimes(2);
+  const ids = jest.mocked(submitDiningIntent).mock.calls.map(([sent]) => sent.orderId);
+  expect(new Set(ids)).toEqual(new Set([intent.orderId]));
+  await act(async () =>
+    retry.resolve({ id: intent.orderId, label: menu.name, total: 84, status: 'pending', queueNumber: 6 }),
+  );
+  expect(view.getByText('取餐號碼 6')).toBeTruthy();
+  expect(submitDiningIntent).toHaveBeenCalledTimes(2);
+});
 test('a server availability rejection clears the stale quote and requires a menu refresh', async () => {
   jest.mocked(submitDiningIntent).mockRejectedValueOnce(new DiningError('餐點已變更', 'not-sent'));
   const view = render(<CafeteriaAiFirstScreen />);

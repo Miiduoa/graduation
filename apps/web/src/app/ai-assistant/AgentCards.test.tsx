@@ -72,3 +72,46 @@ it('伺服器已發號：直接顯示取餐號碼', async () => {
   expect(screen.getByText('取餐號碼 3')).toBeTruthy();
   expect(mocks.watch).not.toHaveBeenCalled();
 });
+
+it('連點確認下單、失敗後再連點：同時只會有一個請求，全部同一個送出編號', async () => {
+  let release: (value: unknown) => void = () => undefined;
+  mocks.confirm
+    .mockImplementationOnce(
+      () => new Promise((resolve) => setTimeout(() => resolve({ success: false, errorMessage: '下單失敗，請稍後再試' }), 0)),
+    )
+    .mockImplementationOnce(() => new Promise((resolve) => (release = resolve)));
+  render(<AgentCardList cards={[draft]} schoolId="pu" />);
+  const button = screen.getByText('確認下單');
+  await act(async () => {
+    fireEvent.click(button);
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  });
+  expect(mocks.confirm).toHaveBeenCalledTimes(1);
+  expect(screen.getByText('訂單沒送出去，請再試一次。')).toBeTruthy();
+  const again = screen.getByText('再試一次');
+  await act(async () => {
+    fireEvent.click(again);
+    fireEvent.click(again);
+    fireEvent.click(again);
+  });
+  expect(mocks.confirm).toHaveBeenCalledTimes(2);
+  expect(new Set(mocks.confirm.mock.calls.map(([sent]) => sent.requestId)).size).toBe(1);
+  await act(async () => release({ success: true, orderId: 'co_9', total: 95, queueNumber: 4, queueStatus: 'assigned' }));
+  expect(screen.getByText('取餐號碼 4')).toBeTruthy();
+  expect(mocks.confirm).toHaveBeenCalledTimes(2);
+});
+
+it('伺服器明確說不成立（菜單變了）：照實轉述，下次換新的送出編號', async () => {
+  mocks.confirm
+    .mockResolvedValueOnce({ success: false, errorMessage: '餐點已售完，請重新確認', notCreated: true })
+    .mockResolvedValueOnce({ success: true, orderId: 'co_3', total: 95, queueNumber: 2, queueStatus: 'assigned' });
+  render(<AgentCardList cards={[draft]} schoolId="pu" />);
+  await act(async () => fireEvent.click(screen.getByText('確認下單')));
+  expect(screen.getByText('餐點已售完，請重新確認')).toBeTruthy();
+  await act(async () => fireEvent.click(screen.getByText('再試一次')));
+  const [first, second] = mocks.confirm.mock.calls.map(([sent]) => sent.requestId);
+  expect(second).not.toBe(first);
+  expect(screen.getByText('取餐號碼 2')).toBeTruthy();
+});

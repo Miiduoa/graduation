@@ -40,3 +40,38 @@ test('助理下單卡：伺服器沒建成寫「訂單沒送出去，請再試�
   expect(view.getByText(/訂單建立成功/)).toBeTruthy();
   expect(view.queryByText('再試一次')).toBeNull();
 });
+
+test('助理下單卡連點：確認下單、再試一次都只會有一個請求在路上，全部同一個送出編號', async () => {
+  let release: (value: unknown) => void = () => undefined;
+  mockCallable
+    .mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) =>
+          setTimeout(() => reject(Object.assign(new Error('internal'), { code: 'functions/internal' })), 0),
+        ),
+    )
+    .mockImplementationOnce(() => new Promise((resolve) => (release = resolve)));
+  const view = render(<AgentCardList cards={[card]} />);
+  const confirm = view.getByText('✅ 確認下單');
+  await act(async () => {
+    fireEvent.press(confirm);
+    fireEvent.press(confirm);
+    fireEvent.press(confirm);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  });
+  expect(mockCallable).toHaveBeenCalledTimes(1);
+  expect(view.getByText('訂單沒送出去，請再試一次。')).toBeTruthy();
+
+  const retry = view.getByText('再試一次');
+  await act(async () => {
+    fireEvent.press(retry);
+    fireEvent.press(retry);
+    fireEvent.press(retry);
+  });
+  expect(mockCallable).toHaveBeenCalledTimes(2);
+  const ids = mockCallable.mock.calls.map(([sent]) => sent.requestId);
+  expect(new Set(ids).size).toBe(1);
+  await act(async () => release({ data: { success: true, orderId: 'co_1' } }));
+  expect(view.getByText(/訂單建立成功/)).toBeTruthy();
+  expect(mockCallable).toHaveBeenCalledTimes(2);
+});
