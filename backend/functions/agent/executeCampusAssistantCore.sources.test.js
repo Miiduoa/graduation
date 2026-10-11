@@ -337,6 +337,42 @@ describe('校園助理（/ai-assistant）沒有模型可用時照實說沒辦法
     if (assignments) expect('groupId' in assignments.input).toBe(false);
   });
 
+  test('問題對得上公告：沒有模型也用那則公告回答', async () => {
+    mockDocuments.set('schools/pu/announcements', [
+      row('lib', { title: '圖書館國慶日閉館', schoolId: 'pu', publishedAt: new Date('2026-10-08T00:00:00Z') }),
+      row('dorm', { title: '宿舍週末停水', schoolId: 'pu', publishedAt: new Date('2026-10-07T00:00:00Z') }),
+    ]);
+    const result = await ask('國慶日閉館的公告');
+    expect(result.content).toContain('圖書館國慶日閉館');
+    expect(result.content).not.toContain('宿舍週末停水');
+  });
+
+  test('問地點但找到的地點對不上：不硬塞那個地點', async () => {
+    const result = await ask('體育館怎麼走');
+    expect(result.content).not.toContain('找到「校園地點」');
+    expect(result.content).toContain('找不到符合的校園地點');
+  });
+
+  test('只問「有什麼公告」：列出公告', async () => {
+    const result = await ask('今天有什麼公告');
+    expect(result.content).toContain('校方發布的公告');
+  });
+
+  test('問的是公告，但查到的公告都對不上：照實說沒辦法回答，不塞不相關的公告', async () => {
+    const result = await ask('期末考取消的公告');
+    expect(result.content).toBe('助理暫時沒辦法回答，請稍後再試。');
+    expect(result.content).not.toContain('校方發布的公告');
+  });
+
+  test('問的是活動，但沒有對得上的活動：照實說沒辦法回答', async () => {
+    mockDocuments.set('schools/pu/events', [
+      row('e1', { title: '社團博覽會', schoolId: 'pu', startsAt: new Date(Date.now() + 86400000) }),
+    ]);
+    const result = await ask('有沒有獎學金說明會的活動');
+    expect(result.content).toBe('助理暫時沒辦法回答，請稍後再試。');
+    expect(result.content).not.toContain('社團博覽會');
+  });
+
   test('模型出錯', async () => {
     mockModel.mockRejectedValue(new Error('upstream 500'));
     const result = await ask('學校說期末考取消了嗎');
