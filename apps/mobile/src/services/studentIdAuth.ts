@@ -18,6 +18,7 @@
  */
 
 import Constants from 'expo-constants';
+import { isStudentIdLoginAvailable } from './schoolLoginAvailability';
 import { signInWithCustomToken } from 'firebase/auth';
 
 import { saveMockAuthSession, type MockAuthSession } from './mockAuth';
@@ -87,12 +88,7 @@ export type StudentIdLoginResult = {
   session: PUSession;
 };
 
-/**
- * 學號登入永遠可用（這是 app 的主要登入入口）。
- */
-export function isStudentIdLoginAvailable(): boolean {
-  return true;
-}
+export { isStudentIdLoginAvailable } from './schoolLoginAvailability';
 
 function getExpoExtra(): Record<string, unknown> {
   return ((Constants.expoConfig as { extra?: Record<string, unknown> } | null)?.extra ??
@@ -228,12 +224,12 @@ async function runPostLoginContextPipeline(p: {
 // 用正常的學號/密碼欄位登入即可，不經過真實校園系統
 
 type TestAccount = {
-  account: string;       // 登入帳號（輸入在學號欄位）
-  password: string;      // 密碼
+  account: string; // 登入帳號（輸入在學號欄位）
+  password: string; // 密碼
   role: UserRole;
   displayName: string;
   department: string;
-  studentId: string;     // 模擬學號
+  studentId: string; // 模擬學號
 };
 
 const TEST_ACCOUNTS: TestAccount[] = [
@@ -304,7 +300,12 @@ const TEST_ACCOUNTS: TestAccount[] = [
 ];
 
 /** 取得所有測試帳號列表（供外部 UI 顯示） */
-export function getTestAccounts(): ReadonlyArray<{ account: string; password: string; role: UserRole; displayName: string }> {
+export function getTestAccounts(): ReadonlyArray<{
+  account: string;
+  password: string;
+  role: UserRole;
+  displayName: string;
+}> {
   return TEST_ACCOUNTS.map((a) => ({
     account: a.account,
     password: a.password,
@@ -358,7 +359,9 @@ async function tryTestAccountLogin(
   try {
     const routeResult = await routePostLoginData(test.role);
     routedRole = routeResult.roleInference.inferredRole;
-  } catch (_) { /* ignore */ }
+  } catch (_) {
+    /* ignore */
+  }
 
   await runPostLoginContextPipeline({
     uid,
@@ -410,6 +413,9 @@ export async function signInWithStudentId(params: {
   schoolName?: string;
   onProgress?: OnLoginProgress;
 }): Promise<StudentIdLoginResult> {
+  if (!isStudentIdLoginAvailable(params.schoolId)) {
+    throw new Error('這所學校的帳號連線尚未開放。公開資訊與 Campus One 帳號仍可使用。');
+  }
   const studentId = params.studentId.trim();
   const progress = params.onProgress ?? (() => {});
 
@@ -421,7 +427,12 @@ export async function signInWithStudentId(params: {
   }
 
   // ── 策略 0: 測試帳號快速登入 ──
-  const testResult = await tryTestAccountLogin(studentId, params.password, params.schoolId, progress);
+  const testResult = await tryTestAccountLogin(
+    studentId,
+    params.password,
+    params.schoolId,
+    progress,
+  );
   if (testResult) {
     return testResult;
   }
@@ -590,7 +601,9 @@ async function handleBackendLoginSuccess(
     const routeResult = await routePostLoginData(result.role);
     if (routeResult.roleInference.inferredRole !== result.role) {
       result.role = routeResult.roleInference.inferredRole;
-      console.log(`[studentIdAuth] Role updated to: ${result.role} (${routeResult.roleInference.reason})`);
+      console.log(
+        `[studentIdAuth] Role updated to: ${result.role} (${routeResult.roleInference.reason})`,
+      );
     }
   } catch (err) {
     console.warn('[studentIdAuth] postLoginDataRouter failed (continuing):', err);
@@ -641,7 +654,10 @@ async function handleHybridLogin(
           if (tcResult.success && tcResult.session) {
             tcLoginOk = true;
             tcSession = { userId: tcResult.session.userId, userName: tcResult.session.userName };
-            console.log('[studentIdAuth] Hybrid: TronClass login OK, user:', tcResult.session.userName);
+            console.log(
+              '[studentIdAuth] Hybrid: TronClass login OK, user:',
+              tcResult.session.userName,
+            );
           } else {
             console.warn('[studentIdAuth] Hybrid: TronClass login failed:', tcResult.error);
           }
@@ -822,7 +838,9 @@ async function handleHybridLogin(
     const routeResult = await routePostLoginData(result.role);
     if (routeResult.roleInference.inferredRole !== result.role) {
       result.role = routeResult.roleInference.inferredRole;
-      console.log(`[studentIdAuth] Hybrid: Role updated to: ${result.role} (${routeResult.roleInference.reason})`);
+      console.log(
+        `[studentIdAuth] Hybrid: Role updated to: ${result.role} (${routeResult.roleInference.reason})`,
+      );
     }
   } catch (err) {
     console.warn('[studentIdAuth] Hybrid: postLoginDataRouter failed (continuing):', err);

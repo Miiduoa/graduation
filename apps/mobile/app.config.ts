@@ -50,6 +50,27 @@ function requireReleaseValue(
   return normalized;
 }
 
+function errorReportingUrl(value: string | undefined): string {
+  const endpoint = value?.trim();
+  if (!endpoint) {
+    throw new Error(
+      '[app.config] Remote error reporting requires EXPO_PUBLIC_ERROR_REPORTING_ENDPOINT',
+    );
+  }
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    throw new Error('[app.config] EXPO_PUBLIC_ERROR_REPORTING_ENDPOINT must be an HTTPS URL');
+  }
+  if (url.protocol !== 'https:' || url.username || url.password || url.hash) {
+    throw new Error(
+      '[app.config] EXPO_PUBLIC_ERROR_REPORTING_ENDPOINT must be an HTTPS URL without credentials or a fragment',
+    );
+  }
+  return endpoint;
+}
+
 function requirePositiveInteger(
   name: string,
   value: string | number | undefined,
@@ -131,20 +152,21 @@ export default ({ config }: any) => {
     process.env.EXPO_PUBLIC_LEGAL_BASE_URL,
     isReleaseLike,
   );
-  const errorReportingEndpoint = requireReleaseValue(
-    'EXPO_PUBLIC_ERROR_REPORTING_ENDPOINT',
-    process.env.EXPO_PUBLIC_ERROR_REPORTING_ENDPOINT,
-    isReleaseLike,
-  );
-  const mapsApiKey = requireReleaseValue(
-    'EXPO_PUBLIC_GOOGLE_MAPS_API_KEY',
-    process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
-    isReleaseLike,
-  );
+  // Reporting already keeps diagnostics locally when no endpoint is configured.
+  // Never invent a remote destination just to make a platform build pass.
+  const remoteErrorReporting = parseBoolean(process.env.EXPO_PUBLIC_ERROR_REPORTING_ENABLED, false);
+  const errorReportingEndpoint = remoteErrorReporting
+    ? errorReportingUrl(process.env.EXPO_PUBLIC_ERROR_REPORTING_ENDPOINT)
+    : undefined;
+  // The current campus map uses Leaflet/OpenStreetMap, not the native Google SDK.
+  const mapsApiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() || undefined;
 
-  if (isReleaseLike && releasedSchoolIds.length === 0) {
+  const hasSchoolFeatures = Object.entries(featureAvailability).some(
+    ([feature, enabled]) => feature !== 'enabled' && enabled,
+  );
+  if (isReleaseLike && hasSchoolFeatures && releasedSchoolIds.length === 0) {
     throw new Error(
-      '[app.config] EXPO_PUBLIC_RELEASED_SCHOOL_IDS must contain at least one school for preview/production builds',
+      '[app.config] Enabled school features require verified schools in EXPO_PUBLIC_RELEASED_SCHOOL_IDS',
     );
   }
 
@@ -287,9 +309,7 @@ export default ({ config }: any) => {
         UIBackgroundModes: ['fetch', 'remote-notification'],
       },
       associatedDomains: deepLinkHost ? [`applinks:${deepLinkHost}`] : undefined,
-      config: {
-        googleMapsApiKey: mapsApiKey,
-      },
+      config: mapsApiKey ? { googleMapsApiKey: mapsApiKey } : undefined,
       entitlements: {
         'com.apple.developer.applesignin': ['Default'],
         'aps-environment': isProduction ? 'production' : 'development',
@@ -316,11 +336,7 @@ export default ({ config }: any) => {
         'USE_FINGERPRINT',
         'USE_BIOMETRIC',
       ],
-      config: {
-        googleMaps: {
-          apiKey: mapsApiKey,
-        },
-      },
+      config: mapsApiKey ? { googleMaps: { apiKey: mapsApiKey } } : undefined,
       intentFilters: androidIntentFilters,
     },
     plugins,

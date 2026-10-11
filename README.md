@@ -17,6 +17,8 @@ Campus One 將課程待辦、教材、作業、測驗和校園服務放在同一
 
 Web 服務入口：[nuni.tw](https://nuni.tw/)。線上版本以 [發布紀錄](docs/PLATFORM_RELEASE.md) 為準，尚未合併的修改不等於已上線。
 
+公開校園資訊可以直接瀏覽。需要加入課程、繳交作業或申請店家時，再使用 Campus One 平台帳號；個人課表與成績另需已開放的學校連線。瀏覽校園、平台登入或提交學校資格申請，都不會自動授予校籍、教師或管理員權限。
+
 ## Mobile 畫面
 
 <p>
@@ -78,7 +80,7 @@ Deep link、通知與訊息 action 經過 route registry 及 safe navigation。�
 
 ### 成績通知的收件人檢查
 
-教師評分頁目前是本機示範，不會寫入 TronClass 成績。發布本機成績事件前，會檢查教師帳號及教學角色、明確的學生 UID、作業 ID 與分數；不以姓名或學號推測收件人。
+舊版教師評分頁是本機示範，不會寫入 TronClass 成績；與 Nuni 課程空間的作業收件與回饋流程分開。發布本機成績事件前，會檢查教師帳號及教學角色、明確的學生 UID、作業 ID 與分數；不以姓名或學號推測收件人。
 
 - [評分頁](apps/mobile/src/screens/TeacherGradingScreen.tsx)
 - [傳送前檢查](apps/mobile/src/services/prepareGradingDelivery.ts)
