@@ -29,7 +29,7 @@ const PRIMARY_TABS: ShellTab[] = [
     href: '/',
     label: 'Today',
     icon: '☀️',
-    description: '今日課表、作業、訊息、AI 主動提醒',
+    description: '今天的課表、作業與訊息',
   },
   {
     href: '/hub',

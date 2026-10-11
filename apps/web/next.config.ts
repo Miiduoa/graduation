@@ -10,8 +10,9 @@ const contentSecurityPolicy = [
   "img-src 'self' data: blob: https:",
   "font-src 'self' data: https:",
   "style-src 'self' 'unsafe-inline' https:",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-  "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net https://*.web.app https://*.firebaseapp.com wss:",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net",
+  "worker-src 'self' blob:",
+  "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net https://*.web.app https://*.firebaseapp.com https://cdn.jsdelivr.net https://*.jsdelivr.net wss:",
 ].join('; ');
 
 const securityHeaders = [

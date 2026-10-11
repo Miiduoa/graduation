@@ -79,9 +79,9 @@ function AssistantConversation({ userId, groupId, initialDraft }: { userId: stri
     </div>
     {messages.length === 0 && !pending && <div className={styles.empty}>
       <h2>今天需要什麼幫忙？</h2>
-      <p>寫下問題，可以補充課程名稱、日期或地點，讓查詢更明確。</p>
+      <p>寫下問題，可以補充課程名稱、日期或地點。若要排課、找空堂，請用課表裡的「幫我安排」。</p>
       <nav aria-label="直接開啟服務" className={styles.serviceLinks}>
-        <Link href="/#courses">課程</Link><Link href="/map">校園地圖</Link><Link href="/cafeteria">餐廳</Link>
+        <Link href="/timetable">我的課表</Link><Link href="/#courses">課程</Link><Link href="/map">校園地圖</Link><Link href="/cafeteria">餐廳</Link>
       </nav>
     </div>}
     <div role="log" aria-label="對話紀錄" aria-live="polite" aria-relevant="additions" className={styles.messages}>

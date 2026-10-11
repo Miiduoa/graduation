@@ -17,9 +17,16 @@ export const CAMPUS_SERVICES = [
   },
   {
     name: '課表',
-    text: '查看本人的課程時間與教室',
+    text: '查看、編輯與匯入本學期課表',
     href: '/timetable',
-    keywords: '上課 行事曆 schedule',
+    keywords: '上課 行事曆 schedule 空堂',
+    category: 'study',
+  },
+  {
+    name: '課程申訴',
+    text: '送出課程相關申訴，狀態跟實際案件走',
+    href: '/appeals',
+    keywords: '申訴 出缺席 成績 appeal',
     category: 'study',
   },
   {
@@ -86,6 +93,13 @@ export const CAMPUS_SERVICES = [
     category: 'connect',
   },
   {
+    name: '找人',
+    text: '用姓名或 @帳號找同學，加好友後才看課表',
+    href: '/friends',
+    keywords: '好友 朋友 空堂 friend',
+    category: 'connect',
+  },
+  {
     name: '校園地圖',
     text: '查詢校內地點',
     href: '/map',
@@ -109,9 +123,23 @@ export const CAMPUS_SERVICES = [
   },
   {
     name: '校園助理',
-    text: '詢問校園服務與課務問題',
+    text: '查詢課務與校園服務；排課請用課表裡的幫我安排',
     href: '/ai-assistant',
-    keywords: '問答 assistant',
+    keywords: '問答 安排 課表 assistant',
+    category: 'account',
+  },
+  {
+    name: '支援',
+    text: '目前提供的協助範圍與連絡信箱',
+    href: '/support',
+    keywords: '客服 幫助 support',
+    category: 'account',
+  },
+  {
+    name: '刪除帳號',
+    text: '了解會刪掉與會留下的資料',
+    href: '/account-deletion',
+    keywords: '刪帳 隱私 deletion',
     category: 'account',
   },
   {

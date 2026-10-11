@@ -8,6 +8,8 @@ export function SiteFooter() {
       <nav aria-label="網站資訊">
         <Link href="/terms">服務條款</Link>
         <Link href="/privacy">隱私政策</Link>
+        <Link href="/support">支援</Link>
+        <Link href="/account-deletion">刪除帳號</Link>
         <Link href="/settings">設定</Link>
       </nav>
     </footer>

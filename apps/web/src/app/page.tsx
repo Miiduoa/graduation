@@ -233,10 +233,10 @@ export default function HomePage() {
                 ))}
               </section>
               <section className={styles.assistant}>
-                <span className={styles.eyebrow}>需要一起整理？</span>
-                <h2>問問校園助理。</h2>
-                <p>查找資訊、整理待辦，重要操作由你確認。</p>
-                <Link href="/ai-assistant">開啟助理 →</Link>
+                <span className={styles.eyebrow}>這一週怎麼排</span>
+                <h2>打開課表，讓空堂自己算出來。</h2>
+                <p>下一堂課、共同空堂、把讀書時間塞進這週，都在課表裡完成。</p>
+                <Link href="/timetable">打開課表 →</Link>
               </section>
             </aside>
           </div>
