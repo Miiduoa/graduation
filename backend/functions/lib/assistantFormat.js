@@ -28,21 +28,23 @@ function toJsDate(value) {
   return null;
 }
 
-function formatAssistantDate(date, locale = 'zh-TW') {
+// 伺服器跑在 UTC，給使用者看的時間一律換成台灣時間，寫成「10 月 13 日 02:35」
+const ASSISTANT_TIME_ZONE = 'Asia/Taipei';
+const assistantDateParts = new Intl.DateTimeFormat('en-US', {
+  timeZone: ASSISTANT_TIME_ZONE,
+  month: 'numeric',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+
+function formatAssistantDate(date) {
   const d = toJsDate(date);
   if (!d) return '';
-  try {
-    return d.toLocaleString(locale, {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    });
-  } catch {
-    return d.toISOString();
-  }
+  const parts = {};
+  for (const part of assistantDateParts.formatToParts(d)) parts[part.type] = part.value;
+  return `${Number(parts.month)} 月 ${Number(parts.day)} 日 ${parts.hour}:${parts.minute}`;
 }
 
 function getLastUserMessage(messages) {
@@ -69,6 +71,23 @@ function isDormRepairStatusQueryMessage(input) {
   return hasKey && hasStatus;
 }
 
+// 問的是「什麼時候、幾點、哪天」這類時間，不是要送報修
+const SCHEDULE_QUESTION_RE = /(什麼時候|甚麼時候|啥時|何時|幾點|哪天|哪一天|哪幾天|幾號|幾月|星期幾|禮拜幾|週幾|周幾|什麼時間|多久|\bwhen\b)/i;
+// 講到自己送出的報修單才算查報修進度
+const OWN_REPAIR_TICKET_RE = /(報修|維修單|工單|單號|進度|狀態)/;
+
+function isScheduleQuestionMessage(input) {
+  const text = typeof input === 'string' ? input : input && input.content;
+  if (!text || typeof text !== 'string') return false;
+  return SCHEDULE_QUESTION_RE.test(text);
+}
+
+function mentionsOwnRepairTicket(input) {
+  const text = typeof input === 'string' ? input : input && input.content;
+  if (!text || typeof text !== 'string') return false;
+  return OWN_REPAIR_TICKET_RE.test(text);
+}
+
 /**
  * 啟發式 intent 分類，回傳「intent name 字串」。
  * 此函式被 agent/classifyIntent.js 當成 keyword_fallback 使用，
@@ -92,10 +111,13 @@ function detectCampusAssistantIntent(input) {
 }
 
 module.exports = {
+  ASSISTANT_TIME_ZONE,
   toJsDate,
   formatAssistantDate,
   getLastUserMessage,
   normalizeAssistantText,
   isDormRepairStatusQueryMessage,
+  isScheduleQuestionMessage,
+  mentionsOwnRepairTicket,
   detectCampusAssistantIntent,
 };

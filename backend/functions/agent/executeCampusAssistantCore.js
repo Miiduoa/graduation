@@ -285,13 +285,13 @@ async function executeCampusAssistantCore({
   }
 
   let modelUnavailable = false;
-  const answerUnavailable = async () => {
+  const answerUnavailable = async (route = 'model_unavailable') => {
     response.content = ASSISTANT_UNAVAILABLE_COPY;
     response.suggestions = [];
     response.actions = [];
     response.citations = [];
     response.unavailable = true;
-    response.debug.route = 'model_unavailable';
+    response.debug.route = route;
     return await finalizeResponse();
   };
 
@@ -740,7 +740,7 @@ async function executeCampusAssistantCore({
       isRenew ? '我已整理續借確認，確認後才會更新借閱期限。' : '我已整理還書確認，確認後才會更新借閱狀態。',
       '',
       `書籍：${loanTitle}`,
-      resolvedLoan.loan.dueAt ? `到期：${formatAssistantDate(toJsDate(resolvedLoan.loan.dueAt), timeZone)}` : '',
+      resolvedLoan.loan.dueAt ? `到期：${formatAssistantDate(resolvedLoan.loan.dueAt)}` : '',
     ].filter(Boolean).join('\n');
     response.suggestions = isRenew ? ['查看借閱', '改續借其他書', '今日摘要'] : ['查看借閱', '改還其他書', '今日摘要'];
     response.actions = [
@@ -881,7 +881,7 @@ async function executeCampusAssistantCore({
       '3. 用 45 分鐘完成第一版內容。',
       '4. 截止前預留 20 分鐘檢查格式與附件。',
       '',
-      `截止時間：${formatAssistantDate(target.dueAt, true) || '未設定'}`,
+      `截止時間：${formatAssistantDate(target.dueAt) || '未設定'}`,
     ].join('\n');
     response.suggestions = ['設定提醒', '更細拆步驟', '查看作業'];
     response.actions = [
@@ -1114,7 +1114,7 @@ async function executeCampusAssistantCore({
         .slice(0, 3)
         .map(
           (event, index) =>
-            `${index + 1}. ${event.title ?? '未命名活動'}${event.location ? `（${event.location}）` : ''}${event.startsAt ? `，${formatAssistantDate(event.startsAt, true)}` : ''}`,
+            `${index + 1}. ${event.title ?? '未命名活動'}${event.location ? `（${event.location}）` : ''}${event.startsAt ? `，${formatAssistantDate(event.startsAt)}` : ''}`,
         )
         .join('\n'),
     ].join('\n');
@@ -1187,12 +1187,8 @@ async function executeCampusAssistantCore({
     }
     response.debug.sourcesUsed = pois.length > 0 ? 1 : 0;
 
-    if (!poi) {
-      response.content =
-        '我目前找不到符合的校園地點。你可以再說更具體一點，例如圖書館、行政大樓、餐廳或宿舍。';
-      response.suggestions = ['圖書館', '行政大樓', '餐廳'];
-      return await finalizeResponse();
-    }
+    // 找不到對得上的地點：跟其他查不到的情況一樣照實說沒辦法回答
+    if (!poi) return await answerUnavailable('pois_no_match');
 
     response.content = [
       `找到「${poi.name ?? '未命名地點'}」了。`,
