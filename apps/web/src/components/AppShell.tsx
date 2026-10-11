@@ -236,26 +236,20 @@ function AppShellInner({
           <span>Hub</span>
         </Link>
         <Link
-          href="/ai-assistant"
-          aria-label="AI 助理（主入口）"
+          href="/timetable"
           style={{
-            width: 56,
-            height: 56,
-            borderRadius: '50%',
-            background: 'var(--ai-gradient)',
-            color: 'white',
+            flex: 1,
             display: 'flex',
+            flexDirection: 'column',
             alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: 24,
-            marginTop: -28,
-            boxShadow: 'var(--shadow-ai)',
-            animation: 'aiBreath var(--ai-breath-duration) ease-in-out infinite',
-            flexShrink: 0,
+            gap: 2,
+            fontSize: 10,
+            color: isActive('/timetable') ? 'var(--ai)' : 'var(--muted)',
             textDecoration: 'none',
           }}
         >
-          ✨
+          <span style={{ fontSize: 22 }}>📒</span>
+          <span>課務</span>
         </Link>
         <Link
           href="/me"

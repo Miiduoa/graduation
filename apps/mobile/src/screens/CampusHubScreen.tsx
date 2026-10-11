@@ -7,7 +7,6 @@ import type { GeneratedButtonIconId } from '../ui/generatedButtonIcons';
 import { useTheme } from '../state/theme';
 import { useSchool } from '../state/school';
 import { safeNavigate } from '../utils/safeNavigate';
-import { aiOverlay } from '../app/useAIOverlay';
 import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
 
 type ServiceItem = {
@@ -111,6 +110,13 @@ const sections: Array<{ title: string; items: ServiceItem[] }> = [
         keywords: ['醫療', '診所', '保健'],
       },
       {
+        icon: 'ic_people_community',
+        label: '職涯',
+        description: '還沒接到校方資料',
+        screen: 'Career',
+        keywords: ['職涯', '實習', '徵才', '履歷', '就業'],
+      },
+      {
         icon: 'ic_lost_found',
         label: '失物招領',
         description: '找回遺失物品',
@@ -127,9 +133,9 @@ const sections: Array<{ title: string; items: ServiceItem[] }> = [
       {
         icon: 'ic_payment_card',
         label: '校園錢包',
-        description: '餘額與交易紀錄',
+        description: '金流還沒接到',
         screen: 'Payment',
-        keywords: ['付款', '支付', '繳費', '儲值'],
+        keywords: ['付款', '支付', '繳費', '儲值', '金流'],
       },
     ],
   },
@@ -163,7 +169,6 @@ function CampusDirectory({
       }))
       .filter((section) => section.items.length > 0);
   }, [query]);
-  const openAssistant = () => aiOverlay.open({ mode: 'chat', source: 'campus_hub' });
   const openService = (item: ServiceItem) => {
     safeNavigate(navigation, item.screen, undefined, {
       fallbackMessage: `「${item.label}」目前無法開啟。`,
@@ -234,22 +239,6 @@ function CampusDirectory({
               </Pressable>
             ) : null}
           </View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="詢問校園助理"
-            onPress={openAssistant}
-            style={({ pressed }) => ({
-              width: 48,
-              height: 48,
-              borderRadius: theme.radius.md,
-              backgroundColor: theme.colors.accent,
-              alignItems: 'center',
-              justifyContent: 'center',
-              opacity: pressed ? 0.75 : 1,
-            })}
-          >
-            <Ionicons name="chatbubble-outline" size={21} color={theme.colors.onAccent} />
-          </Pressable>
         </View>
       </AICard>
       {!query.trim() ? (
@@ -343,7 +332,7 @@ function CampusDirectory({
       {filtered.length === 0 ? (
         <AIEmptyState
           title={`找不到「${query.trim()}」相關的服務`}
-          subtitle="試試其他關鍵字，或詢問校園助理。"
+          subtitle="試試其他關鍵字。"
         />
       ) : null}
     </AIScreen>

@@ -9,7 +9,7 @@
  * - CampusGame：校園漫步原型（`campus://home/campus-game`）
  * - 智慧行事曆
  *
- * AI 對話已改為全域 Overlay（App 層 AIOverlayHost），不再在此 Stack 註冊。
+ * 校園問答走 AIChat 畫面，不再用全域覆蓋層。
  *
  * 移除的冗餘路由：
  * - ClassicToday → 與 SmartDashboard 重複

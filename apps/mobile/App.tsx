@@ -63,8 +63,6 @@ import { PreAuthStack } from './src/screens/PreAuthStack';
 import { usePushNotifications } from './src/app/usePushNotifications';
 import { useAIAmbientAwareness } from './src/app/useAIAmbientAwareness';
 import { useAIBrainLifecycle } from './src/app/useAIBrain';
-import { GlobalAIConfirmModalHost } from './src/components/GlobalAIConfirmModalHost';
-import { AIOverlayHost } from './src/components/AIOverlayHost';
 import { HeaderDrawerHost } from './src/components/HeaderDrawer';
 import { useProactiveAIReporter } from './src/app/useProactiveAIReporter';
 import { useProactiveAIAgentLoop } from './src/app/useProactiveAIAgentLoop';
@@ -976,8 +974,6 @@ function AppNavigation() {
       <View style={{ flex: 1 }}>
         <NetworkStatusBanner />
         <AppTabNavigator />
-        <GlobalAIConfirmModalHost />
-        <AIOverlayHost />
         <HeaderDrawerHost />
       </View>
     </NavigationContainer>
