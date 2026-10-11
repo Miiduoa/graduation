@@ -228,6 +228,73 @@ describe('firestore security rules', () => {
     );
   });
 
+  test('allow cafeteria operator to write hours and menus but not ordering flags', async () => {
+    await seedFirestore(async (db) => {
+      await db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .set({
+          name: '第一餐廳',
+          orderingEnabled: true,
+          openingHours: '11:00-14:00',
+          pilotStatus: 'live',
+        });
+      await db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .collection('operators')
+        .doc('merchant-1')
+        .set({
+          status: 'active',
+          role: 'manager',
+        });
+    });
+
+    const db = testEnv.authenticatedContext('merchant-1').firestore();
+    await assertSucceeds(
+      db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .update({
+          openingHours: '11:00-19:00',
+          updatedAt: new Date(),
+          sourceLabel: 'shop-dock',
+        }),
+    );
+    await assertFails(
+      db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .update({
+          orderingEnabled: false,
+        }),
+    );
+    await assertSucceeds(
+      db.collection('schools').doc('tw-demo-uni').collection('menus').doc('menu-1').set({
+        schoolId: 'tw-demo-uni',
+        cafeteriaId: 'cafeteria-1',
+        name: '滷肉飯',
+      }),
+    );
+    await assertSucceeds(
+      db.collection('schools').doc('tw-demo-uni').collection('menus').doc('menu-1').update({
+        cafeteriaId: 'cafeteria-1',
+        soldOut: true,
+      }),
+    );
+    await assertSucceeds(
+      db.collection('schools').doc('tw-demo-uni').collection('menus').doc('menu-1').delete(),
+    );
+  });
+
   test("deny other cafeteria reads and require server writes even for administrators", async () => {
     await seedFirestore(async (db) => {
       await db.collection('schools').doc('tw-demo-uni').collection('members').doc('admin-1').set({
