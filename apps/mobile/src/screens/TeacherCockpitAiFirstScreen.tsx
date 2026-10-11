@@ -1,5 +1,5 @@
 /**
- * Campus AI-First — 教師駕駛艙 V2
+ * 教師駕駛艙 V2
  *
  * 接 demoStore：「示範：送一則公告審核」按鈕 → publishAnnouncement，
  *   系主任會立即在收件匣看到待審；核准後全體師生 + 校友會收到「公告發布」。

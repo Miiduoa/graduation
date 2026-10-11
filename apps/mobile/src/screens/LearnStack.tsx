@@ -21,7 +21,7 @@ import { AdminDashboardScreen } from './AdminDashboardScreen';
  */
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-// AI-First v1：學習 Tab 主入口換新版
+// 學習 Tab 主入口換新版
 import LearnAiFirstScreen from './LearnAiFirstScreen';
 import GradesAiFirstScreen from './GradesAiFirstScreen';
 import CourseHubAiFirstScreen from './CourseHubAiFirstScreen';
@@ -422,7 +422,7 @@ export function LearnStack() {
           LMS v2 整批接管:Supabase 連上時,舊路由名沿用但 component 改 V2
           (保留路由名 = CoursesHomeScreen/TodayCockpit 不用改;component 換掉 = 看到新 UI)
           ═══════════════════════════════════════════════════════════ */}
-      {/* AI-First v1：課程中樞唯一入口 */}
+      {/* 課程中樞唯一入口 */}
       <Stack.Screen
         name="CourseHub"
         component={CourseHubAiFirstScreen}
@@ -529,7 +529,7 @@ export function LearnStack() {
         component={guardCourseView(ClassroomScreen)}
         options={{ title: '課堂互動' }}
       />
-      {/* AI-First v1：Grades 唯一入口 */}
+      {/* Grades 唯一入口 */}
       <Stack.Screen
         name="Grades"
         component={GradesAiFirstScreen}

@@ -160,7 +160,7 @@ export function MeStack() {
       initialRouteName="MeHome"
       screenOptions={createStackScreenOptions()}
     >
-      {/* AI-First v1：landing 換新版 */}
+      {/* landing 換新版 */}
       <Stack.Screen
         name="MeHome"
         component={MeAiFirstScreen}

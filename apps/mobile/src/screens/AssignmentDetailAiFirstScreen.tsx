@@ -1,5 +1,5 @@
 /**
- * Campus AI-First — 作業詳情 V2
+ * 作業詳情 V2
  * route.params: { assignmentId, courseId? }
  *
  * 接 demoStore：
