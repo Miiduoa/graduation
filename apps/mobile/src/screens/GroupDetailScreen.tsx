@@ -34,7 +34,7 @@ import {
   where,
 } from 'firebase/firestore';
 import { navigateToCourseScreen } from '../utils/courseNavigation';
-import { ASSISTANT_AUTHOR_NAME } from './groupAssistant';
+import { ASSISTANT_AUTHOR_NAME, isAssistantComment, visibleComments } from './groupAssistant';
 import { AssistantReplyPending } from './AssistantReplyPending';
 
 type Group = {
@@ -78,6 +78,7 @@ type Comment = {
   createdAt?: any;
   isBestAnswer?: boolean;
   isAI?: boolean;
+  generatedBy?: string | null;
 };
 
 // ─── Demo data ─────────────────────────────────────────────────────────────
@@ -344,16 +345,20 @@ export function GroupDetailScreen(props: any) {
       const promises = batch.map(async (p) => {
         try {
           const cref = collection(db, 'groups', groupId, 'posts', p.id, 'comments');
-          const cq = query(cref, orderBy('createdAt', 'desc'), limit(1));
+          const cq = query(cref, orderBy('createdAt', 'desc'), limit(5));
           const cs = await getDocs(cq);
-          const c = cs.empty
-            ? null
-            : ({ id: cs.docs[0].id, postId: p.id, ...(cs.docs[0].data() as any) } as Comment);
+          // 不是伺服器寫的「助理回覆」不顯示
+          const recent = visibleComments(
+            cs.docs.map((d: any) => ({ id: d.id, postId: p.id, ...(d.data() as any) }) as Comment),
+          );
+          const c = recent[0] ?? null;
 
           // Get comment count
           const cqCount = query(collection(db, 'groups', groupId, 'posts', p.id, 'comments'));
           const csCount = await getDocs(cqCount);
-          const commentCount = csCount.size;
+          const commentCount = visibleComments(
+            csCount.docs.map((d: any) => ({ id: d.id, ...(d.data() as any) }) as Comment),
+          ).length;
 
           return { postId: p.id, comment: c, commentCount };
         } catch (e) {
@@ -1036,7 +1041,7 @@ export function GroupDetailScreen(props: any) {
                         style={{
                           padding: 10,
                           borderRadius: theme.radius.md,
-                          backgroundColor: lastComment.isAI
+                          backgroundColor: isAssistantComment(lastComment)
                             ? theme.colors.accentSoft
                             : lastComment.isBestAnswer
                               ? theme.colors.successSoft
@@ -1044,7 +1049,7 @@ export function GroupDetailScreen(props: any) {
                           borderWidth: 1,
                           borderColor: lastComment.isBestAnswer
                             ? theme.colors.success
-                            : lastComment.isAI
+                            : isAssistantComment(lastComment)
                               ? theme.colors.accent
                               : theme.colors.border,
                         }}
@@ -1057,7 +1062,7 @@ export function GroupDetailScreen(props: any) {
                             marginBottom: 4,
                           }}
                         >
-                          {lastComment.isAI && (
+                          {isAssistantComment(lastComment) && (
                             <Ionicons
                               name="chatbubble-outline"
                               size={12}
@@ -1073,14 +1078,14 @@ export function GroupDetailScreen(props: any) {
                           )}
                           <Text
                             style={{
-                              color: lastComment.isAI ? theme.colors.accent : theme.colors.muted,
+                              color: isAssistantComment(lastComment) ? theme.colors.accent : theme.colors.muted,
                               fontSize: 11,
                               fontWeight: '700',
                             }}
                           >
                             {lastComment.isBestAnswer
                               ? '最佳解答'
-                              : lastComment.isAI
+                              : isAssistantComment(lastComment)
                                 ? ASSISTANT_AUTHOR_NAME
                                 : `留言：${lastComment.authorName ?? lastComment.authorId ?? ''}`}
                           </Text>

@@ -35,11 +35,12 @@ const mockPost = {
   likes: 0,
 };
 const mockComment = {
-  id: 'comment-actual',
+  id: 'assistant',
   body: '請先比較左右子樹的高度。',
   authorId: 'campus-assistant',
-  authorName: '校園助理',
+  authorName: '助理回覆',
   isAI: true,
+  generatedBy: 'server',
 };
 
 jest.mock('../state/auth', () => ({ useAuth: () => mockAuth }));

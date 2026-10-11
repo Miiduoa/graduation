@@ -12,8 +12,9 @@ export function subscribeAssistantReply(
     doc(getDb(), 'groups', groupId, 'posts', postId, 'comments', 'assistant'),
     (snap) => {
       if (!snap.exists()) return;
-      const body = (snap.data() as { body?: string }).body;
-      if (body) onReply(body);
+      const data = snap.data() as { body?: string; authorId?: string; generatedBy?: string };
+      // 只認伺服器寫的那一則
+      if (data.body && data.authorId === 'campus-assistant' && data.generatedBy === 'server') onReply(data.body);
     },
     () => onError(),
   );

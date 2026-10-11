@@ -2,20 +2,22 @@ import React, { useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
 import { subscribeAssistantReply } from '../services/groupAssistantReply';
 import { theme } from '../ui/theme';
-import { ASSISTANT_AUTHOR_NAME } from './groupAssistant';
+import { ASSISTANT_AUTHOR_NAME, ASSISTANT_PENDING_COPY, ASSISTANT_UNAVAILABLE_COPY } from './groupAssistant';
 
-/** 等太久就不再顯示「助理回覆中」，也不顯示錯誤。 */
-const WAIT_MS = 3 * 60 * 1000;
+/** 等超過一分鐘就改成「助理暫時沒辦法回答」，不會一直轉。 */
+export const ASSISTANT_WAIT_MS = 60 * 1000;
 
 function createdAtMs(value: any): number {
   if (typeof value?.toMillis === 'function') return value.toMillis();
-  // 剛送出、伺服器時間還沒回來
-  return value == null ? Date.now() : 0;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value?.seconds === 'number') return value.seconds * 1000;
+  // 剛送出、伺服器時間還沒回來，就從現在開始算
+  return Date.now();
 }
 
 /**
  * 提問底下的助理回覆：伺服器寫好之前顯示「助理回覆中」，寫好就即時換成回覆內容。
- * 沒有回覆（關掉、失敗或等太久）就什麼都不顯示。
+ * 一分鐘內沒回覆（或伺服器記成沒辦法回答）就改成「助理暫時沒辦法回答，可以等其他同學回覆」。
  */
 export function AssistantReplyPending(props: {
   groupId: string;
@@ -26,12 +28,10 @@ export function AssistantReplyPending(props: {
 }) {
   const { groupId, postId, createdAt, status, onArrived } = props;
   const [reply, setReply] = useState<string | null>(null);
-  const [gone, setGone] = useState(false);
-  const started = createdAtMs(createdAt);
-  const waiting = status !== 'unavailable' && status !== 'done' && Date.now() - started < WAIT_MS;
+  const [started] = useState(() => createdAtMs(createdAt));
+  const [timedOut, setTimedOut] = useState(() => Date.now() - started >= ASSISTANT_WAIT_MS);
 
   useEffect(() => {
-    if (!waiting && status !== 'done') return undefined;
     let unsub: (() => void) | undefined;
     try {
       unsub = subscribeAssistantReply(
@@ -41,17 +41,18 @@ export function AssistantReplyPending(props: {
           setReply(body);
           onArrived?.();
         },
-        () => setGone(true),
+        () => setTimedOut(true),
       );
     } catch {
-      setGone(true);
+      setTimedOut(true);
     }
-    const timer = waiting ? setTimeout(() => setGone(true), Math.max(0, WAIT_MS - (Date.now() - started))) : undefined;
+    const left = ASSISTANT_WAIT_MS - (Date.now() - started);
+    const timer = left > 0 ? setTimeout(() => setTimedOut(true), left) : undefined;
     return () => {
       unsub?.();
       if (timer) clearTimeout(timer);
     };
-  }, [groupId, postId, waiting, status, started, onArrived]);
+  }, [groupId, postId, started, onArrived]);
 
   if (reply) {
     return (
@@ -73,10 +74,10 @@ export function AssistantReplyPending(props: {
       </View>
     );
   }
-  if (gone || !waiting) return null;
+  const unavailable = timedOut || status === 'unavailable';
   return (
     <Text style={{ color: theme.colors.muted, fontSize: 12 }} accessibilityLiveRegion="polite">
-      助理回覆中
+      {unavailable ? ASSISTANT_UNAVAILABLE_COPY : ASSISTANT_PENDING_COPY}
     </Text>
   );
 }
