@@ -1,4 +1,4 @@
-const { createListTeacherAppealsHandler, studentNumberOf } = require('./teacherAppeals');
+const { createListTeacherAppealsHandler, createAppealTeacherStatusHandler, studentNumberOf } = require('./teacherAppeals');
 
 function fakeDb(data) {
   const snap = (path) => ({ exists: path in data, data: () => data[path] });
@@ -59,4 +59,56 @@ test('student ID comes from the profile, the PU uid, or the login email', () => 
   expect(studentNumberOf('pu-s1234567', {})).toBe('S1234567');
   expect(studentNumberOf('u', { email: 's0000002@test.campus-one.local' })).toBe('S0000002');
   expect(studentNumberOf('u', { email: 'someone@example.com' })).toBe('');
+});
+
+test('a student learns only whether courses in their own timetable have a teacher, nothing about who', async () => {
+  const db = fakeDb({
+    ...data,
+    'schools/pu/members/test-student-a': { role: 'student', status: 'active' },
+    'schools/pu/courseTeachers/空的｜張老師': { teacherUids: [] },
+    'schools/pu/courseTeachers/統計學｜林老師': { teacherUids: ['t9'] },
+    'users/test-student-a/personalTimetable/current': {
+      offeringIds: ['資料庫｜王老師', '英文｜陳老師', '空的｜張老師'],
+    },
+  });
+  const handle = createAppealTeacherStatusHandler({ db });
+  const result = await handle({
+    auth: { uid: 'test-student-a' },
+    data: { schoolId: 'pu', offeringIds: ['資料庫｜王老師', '英文｜陳老師', '空的｜張老師', '統計學｜林老師'] },
+  });
+  // 有對應：true；沒有對應或沒有老師：false；不在自己課表、也沒申訴過的（林老師的統計學）根本不查
+  expect(result).toEqual({ assigned: { '資料庫｜王老師': true, '英文｜陳老師': false, '空的｜張老師': false } });
+  expect(JSON.stringify(result)).not.toContain('t1');
+  await expect(handle({ data: { schoolId: 'pu', offeringIds: [] } })).rejects.toMatchObject({ code: 'unauthenticated' });
+  await expect(
+    handle({ auth: { uid: 'outsider' }, data: { schoolId: 'pu', offeringIds: ['資料庫｜王老師'] } }),
+  ).rejects.toMatchObject({ code: 'permission-denied' });
+});
+
+test('with no mapping at all every course comes back as not assigned', async () => {
+  const db = fakeDb({
+    'schools/pu/members/s9': { role: 'student', status: 'active' },
+    'users/s9/personalTimetable/current': { offeringIds: ['資料庫｜王老師'] },
+    // 舊申訴沒有開課代號：不會出現在查詢裡
+    'courseAppeals/old': { schoolId: 'pu', studentUid: 's9', courseName: '資料庫', status: 'pending' },
+  });
+  const result = await createAppealTeacherStatusHandler({ db })({
+    auth: { uid: 's9' },
+    data: { schoolId: 'pu', offeringIds: ['資料庫｜王老師'] },
+  });
+  expect(result).toEqual({ assigned: { '資料庫｜王老師': false } });
+});
+
+test('a course later removed from the timetable is still checked for the student own appeal', async () => {
+  const db = fakeDb({
+    ...data,
+    'schools/pu/members/test-student-a': { role: 'student', status: 'active' },
+    'users/test-student-a/personalTimetable/current': { offeringIds: [] },
+  });
+  const result = await createAppealTeacherStatusHandler({ db })({
+    auth: { uid: 'test-student-a' },
+    data: { schoolId: 'pu', offeringIds: ['資料庫｜王老師', '資料庫｜李老師'] },
+  });
+  // a1（王老師）、a3（李老師）都是自己的申訴
+  expect(result).toEqual({ assigned: { '資料庫｜王老師': true, '資料庫｜李老師': true } });
 });

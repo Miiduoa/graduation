@@ -5,8 +5,12 @@ import Link from 'next/link';
 import {
   APPEAL_NEED_COURSE_COPY,
   APPEAL_STATUS_COPY,
+  appealStatusDetail,
+  appealSubmittedCopy,
   appealTimeValue,
   appealTopCard,
+  courseOfferingId,
+  type AppealTeacherMap,
   courseTimeLabel,
   type AppealStatus,
   type CourseAppeal,
@@ -19,6 +23,7 @@ import {
   appealOfferingId,
   createCourseAppeal,
   listCourseAppeals,
+  loadAppealTeacherStatus,
   loadPersonalTimetable,
   withdrawCourseAppeal,
 } from '@/lib/timetable/store';
@@ -39,6 +44,7 @@ export default function AppealsPage() {
   const [items, setItems] = useState<CourseAppeal[]>([]);
   const [courses, setCourses] = useState<PersonalCourse[] | null>(null);
   const [courseId, setCourseId] = useState('');
+  const [assigned, setAssigned] = useState<AppealTeacherMap>({});
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [notice, setNotice] = useState('');
@@ -51,8 +57,19 @@ export default function AppealsPage() {
       listCourseAppeals(schoolId, user.uid),
       loadPersonalTimetable(user.uid, schoolId),
     ]);
-    setItems(rows as CourseAppeal[]);
-    setCourses(timetable.courses.filter((course) => course.name.trim()));
+    const list = rows as CourseAppeal[];
+    const usable = timetable.courses.filter((course) => course.name.trim());
+    const offeringIds = [
+      ...new Set([
+        ...usable.map((course) => courseOfferingId(course)),
+        ...list.map((item) => item.offeringId || '').filter(Boolean),
+      ]),
+    ];
+    const status = await loadAppealTeacherStatus(schoolId, offeringIds);
+    setItems(list);
+    setCourses(usable);
+    setAssigned(status);
+    return status;
   }, [user, schoolId]);
 
   useEffect(() => {
@@ -78,7 +95,7 @@ export default function AppealsPage() {
     );
   }
 
-  const top = appealTopCard(items);
+  const top = appealTopCard(items, assigned);
   const noCourses = courses !== null && courses.length === 0;
   const picked = courses?.find((course) => course.id === courseId);
 
@@ -99,7 +116,7 @@ export default function AppealsPage() {
         (item.status === 'pending' || item.status === 'reviewing'),
     );
     if (duplicate) {
-      setNotice('這門課已經有一樣主旨的申訴在等老師看了。');
+      setNotice('這門課已經有一樣主旨的申訴還沒處理完。');
       return;
     }
     setBusy(true);
@@ -121,14 +138,15 @@ export default function AppealsPage() {
       setTitle('');
       setBody('');
       setCourseId('');
-      setNotice('已送出，等老師看。');
     } catch {
       setNotice('這次沒有送出，請稍後再試。');
       setBusy(false);
       return;
     }
-    // 重新整理清單失敗不影響已經送出的結果
-    await load().catch(() => undefined);
+    // 送出成功（包括連按時第一下已經送到）：看這門課有沒有對應老師再決定怎麼說
+    const offeringId = appealOfferingId(picked);
+    const latest = await load().catch(() => null);
+    setNotice(appealSubmittedCopy(offeringId, latest || assigned));
     setBusy(false);
   };
 
@@ -195,7 +213,7 @@ export default function AppealsPage() {
                   {item.courseName} · {copy.label}
                 </h3>
                 <p>{item.title}</p>
-                <p>{copy.detail}</p>
+                <p>{appealStatusDetail(item, assigned)}</p>
                 {item.teacherNote ? <p>老師說：{item.teacherNote}</p> : null}
               </div>
               {item.status === 'pending' && (
