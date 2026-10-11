@@ -94,7 +94,7 @@ export const CAMPUS_SERVICES = [
   },
   {
     name: '找人',
-    text: '用姓名或 @帳號找同學，加好友後才看課表',
+    text: '用找人代號加好友，加好友後才看課表',
     href: '/friends',
     keywords: '好友 朋友 空堂 friend',
     category: 'connect',

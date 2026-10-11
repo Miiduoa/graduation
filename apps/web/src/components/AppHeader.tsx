@@ -44,8 +44,21 @@ function Header() {
           >
             課務
           </Link>
-          <Link href={href('/map')} aria-current={pathname === '/map' ? 'page' : undefined}>
+          <Link
+            href={href('/life')}
+            aria-current={
+              pathname === '/life' || ['/map', '/bus', '/cafeteria', '/community', '/friends'].includes(pathname || '')
+                ? 'page'
+                : undefined
+            }
+          >
             生活
+          </Link>
+          <Link
+            href={user ? '/profile' : '/login?returnUrl=%2Fprofile'}
+            aria-current={pathname === '/profile' || pathname === '/me' ? 'page' : undefined}
+          >
+            我
           </Link>
           <CampusServiceMenu />
         </nav>
