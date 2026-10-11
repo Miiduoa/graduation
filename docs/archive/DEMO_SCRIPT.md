@@ -137,7 +137,7 @@
 | AI 怎麼知道學生資料？ | `buildAISystemContext()` 把學籍、修課、學分需求、下學期課程全部注入 system prompt |
 | 衝堂偵測怎麼做？ | 比對 `conflictsWith` 欄位，credit-planner 即時 `useMemo` 計算 |
 | 角色切換機制？ | `localStorage` + CustomEvent 廣播，全站即時同步 |
-| 有沒有接真的 AI？ | 有 `/api/ai-chat` route，接 Anthropic Claude API；未設定時 fallback 到 demo 回應 |
+| 有沒有接真的 AI？ | 有 `/api/ai-chat` route，接後端模型服務；未設定時 fallback 到 demo 回應 |
 | RWD 手機版？ | Bottom Dock 五個標籤、SiteShell 響應式排版，在 375px 寬手機上測試過 |
 
 ---

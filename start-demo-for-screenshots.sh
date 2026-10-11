@@ -10,9 +10,7 @@
 # ║    1. http://localhost:3000   (Web demo · Next.js)               ║
 # ║    2. http://localhost:8081   (Mobile · Expo web mode)           ║
 # ║                                                                  ║
-# ║  起好之後回 Claude 說「好了」，                                   ║
-# ║  我會用 Chrome MCP 自動切 8 角色 + 5 cockpit 連續截圖，          ║
-# ║  存進 demo-media/ 並重 build PPT。                              ║
+# ║  起好之後依序切 8 角色 + 5 cockpit 截圖，存進 demo-media/。      ║
 # ╚══════════════════════════════════════════════════════════════════╝
 set -e
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -65,7 +63,7 @@ fi
 
 echo ""
 echo "═══════════════════════════════════════════════════════════════"
-echo "  ✅ 服務跑著了。回 Claude 說「好了」開始自動截圖"
+echo "  ✅ 服務跑著了，可以開始截圖"
 echo ""
 echo "  關掉服務：kill $WEB_PID $MOB_PID"
 echo "  或 Ctrl+C"
