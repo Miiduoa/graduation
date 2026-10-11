@@ -435,7 +435,12 @@ service cloud.firestore {
 
       match /cafeterias/{cafeteriaId} {
         allow read: if true;
-        allow create, update, delete: if hasEditorRole(schoolId);
+        allow create, delete: if hasEditorRole(schoolId);
+        allow update: if hasEditorRole(schoolId) || (
+          requesterIsCafeteriaOperator(schoolId, cafeteriaId)
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['openingHours', 'updatedAt', 'sourceLabel'])
+        );
 
         match /operators/{uid} {
           allow read: if isSelf(uid) || hasEditorRole(schoolId);
@@ -507,7 +512,21 @@ service cloud.firestore {
 
       match /menus/{docId} {
         allow read: if true;
-        allow create, update, delete: if hasEditorRole(schoolId);
+        allow create: if hasEditorRole(schoolId) || (
+          request.resource.data.schoolId == schoolId
+          && request.resource.data.cafeteriaId is string
+          && requesterIsCafeteriaOperator(schoolId, request.resource.data.cafeteriaId)
+          && request.resource.data.name is string
+        );
+        allow update: if hasEditorRole(schoolId) || (
+          resource.data.cafeteriaId is string
+          && requesterIsCafeteriaOperator(schoolId, resource.data.cafeteriaId)
+          && request.resource.data.cafeteriaId == resource.data.cafeteriaId
+        );
+        allow delete: if hasEditorRole(schoolId) || (
+          resource.data.cafeteriaId is string
+          && requesterIsCafeteriaOperator(schoolId, resource.data.cafeteriaId)
+        );
 
         match /reviews/{reviewId} {
           allow read: if true;
@@ -519,7 +538,21 @@ service cloud.firestore {
 
       match /cafeteriaMenus/{docId} {
         allow read: if true;
-        allow create, update, delete: if hasEditorRole(schoolId);
+        allow create: if hasEditorRole(schoolId) || (
+          request.resource.data.schoolId == schoolId
+          && request.resource.data.cafeteriaId is string
+          && requesterIsCafeteriaOperator(schoolId, request.resource.data.cafeteriaId)
+          && request.resource.data.name is string
+        );
+        allow update: if hasEditorRole(schoolId) || (
+          resource.data.cafeteriaId is string
+          && requesterIsCafeteriaOperator(schoolId, resource.data.cafeteriaId)
+          && request.resource.data.cafeteriaId == resource.data.cafeteriaId
+        );
+        allow delete: if hasEditorRole(schoolId) || (
+          resource.data.cafeteriaId is string
+          && requesterIsCafeteriaOperator(schoolId, resource.data.cafeteriaId)
+        );
       }
 
       match /busRoutes/{docId} {
