@@ -32,8 +32,9 @@ async function checkIsSubscribed(uid: string, schoolId: string, boardId: string)
 }
 
 export default function BoardDetailPage() {
+  const { schoolName } = resolveSchoolPageContext({});
   return (
-    <SiteShell title="看板" subtitle="校園交流">
+    <SiteShell title="看板" subtitle="校園交流" schoolName={schoolName}>
       <CommunityAccess>
         <BoardDetailInner />
       </CommunityAccess>

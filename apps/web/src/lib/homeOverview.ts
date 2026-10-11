@@ -6,6 +6,7 @@ export interface HomeCourse {
   name: string;
   role: string;
   unreadCount: number;
+  href?: string;
 }
 export interface HomeTask {
   id: string;
@@ -13,11 +14,14 @@ export interface HomeTask {
   courseName: string;
   title: string;
   dueAt: string | null;
+  href?: string;
+  acceptsLate?: boolean;
 }
 export interface HomeData {
   courses: HomeCourse[];
   tasks: HomeTask[];
   unreadCount: number;
+  archivedCount?: number;
 }
 
 function dateString(value: unknown): string | null {
