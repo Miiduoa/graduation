@@ -4,6 +4,7 @@ import {
   SchedulePlanner,
   APPEAL_STATUS_COPY,
   appealTopCard,
+  studySlots,
   applyImport,
   cleanCourse,
   commonFree,
@@ -64,6 +65,14 @@ describe('空堂與安排', () => {
     expect(blocks.some((block) => block.start === 9 && block.end === 13)).toBe(true);
     expect(blocks.some((block) => block.start <= 3 && block.end >= 3)).toBe(false);
     expect(blocks.some((block) => block.start === 5 && block.end === 5)).toBe(false);
+  });
+});
+
+describe('排讀書時間', () => {
+  it('從空堂開始排指定時數', () => {
+    const slots = studySlots([monday('資料庫', 1, 4)], 1, 2);
+    expect(slots[0]).toBe('星期一 13:10–15:10');
+    expect(studySlots([monday('整天', 1, 13)], 1, 1)).toEqual([]);
   });
 });
 
