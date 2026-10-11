@@ -442,7 +442,6 @@ Before app store submission, verify:
 ### Related Documents
 
 - App architecture documentation: `../API.md`
-- AI assistant architecture: `../AI_ASSISTANT_ARCHITECTURE.md`
 - Product blueprint: `../TRONCLASS_PLUS_PRODUCT_BLUEPRINT.md`
 - UI guidelines: `../UI_GUIDELINES.md`
 

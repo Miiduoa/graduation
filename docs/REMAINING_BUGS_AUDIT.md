@@ -74,7 +74,7 @@
 
 ### 🟡 Bug M：30+ 重複 AI service 仍未收斂
 **位置**：`apps/mobile/src/services/`
-**狀態**：已有計畫文件（`docs/AI_SERVICE_CONSOLIDATION_PLAN.md`），未執行
+**狀態**：未執行
 **風險**：新進開發者搞混；不影響 demo
 
 ### 🟡 Bug N：StudentInbox / AttendanceLive 等 screen 沒做這輪「load + subscribe」改造
