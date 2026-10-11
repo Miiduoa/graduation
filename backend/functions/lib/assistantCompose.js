@@ -9,7 +9,7 @@ const CAMPUS_ASSISTANT_MESSAGE_WINDOW = 20;
 const CAMPUS_ASSISTANT_MESSAGE_CHARS = 4000;
 const { tools } = require('../agent/tools/registry');
 const agentCases = require('../agent/cases.json');
-const { normalizeAssistantText, formatAssistantDate } = require('./assistantFormat');
+const { normalizeAssistantText, formatAssistantDate, extractScheduleSnippet } = require('./assistantFormat');
 const {
   loadConversationMessages,
   saveConversationMessages,
@@ -53,7 +53,11 @@ function buildAuthorizedAssistantContext({
     displayName,
     actorRole,
     intent,
-    announcements: compactAssistantItems(announcements, ['title', 'source', 'publishedAt'], 5),
+    announcements: compactAssistantItems(announcements, ['title', 'source', 'publishedAt'], 5).map((row, index) => {
+      // 內文裡講時段的那一句也給模型，問「什麼時候維修」才答得出時段
+      const timeNote = extractScheduleSnippet(String(announcements[index]?.body || announcements[index]?.content || ''));
+      return timeNote ? { ...row, timeNote } : row;
+    }),
     events: compactAssistantItems(events, ['title', 'location', 'startsAt'], 5),
     menus: compactAssistantItems(menus, ['name', 'title', 'price', 'cafeteria'], 6),
     pois: compactAssistantItems(pois, ['name', 'category', 'description', 'openingHours'], 8),

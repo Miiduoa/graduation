@@ -20,15 +20,15 @@ describe('formatAssistantDate 一律用台灣時間', () => {
   const { formatAssistantDate, isScheduleQuestionMessage, mentionsOwnRepairTicket } = require('./assistantFormat');
 
   test('跨日：UTC 前一天 18:35 是台灣隔天 02:35', () => {
-    expect(formatAssistantDate(new Date('2026-10-12T18:35:00Z'))).toBe('10 月 13 日 02:35');
+    expect(formatAssistantDate(new Date('2026-10-12T18:35:00Z'))).toBe('10 月 13 日（二）02:35');
   });
 
   test('跨年：UTC 12/31 16:00 是台灣 1 月 1 日 00:00', () => {
-    expect(formatAssistantDate(new Date('2026-12-31T16:00:00Z'))).toBe('1 月 1 日 00:00');
+    expect(formatAssistantDate(new Date('2026-12-31T16:00:00Z'))).toBe('1 月 1 日（五）00:00');
   });
 
   test('同一天：只加 8 小時', () => {
-    expect(formatAssistantDate(new Date('2026-10-13T01:05:00Z'))).toBe('10 月 13 日 09:05');
+    expect(formatAssistantDate(new Date('2026-10-13T01:05:00Z'))).toBe('10 月 13 日（二）09:05');
   });
 
   test.each([
@@ -38,7 +38,16 @@ describe('formatAssistantDate 一律用台灣時間', () => {
     ['ISO 字串', '2026-10-12T18:35:00.000Z'],
     ['毫秒', Date.parse('2026-10-12T18:35:00Z')],
   ])('%s 也換成台灣時間', (_label, value) => {
-    expect(formatAssistantDate(value)).toBe('10 月 13 日 02:35');
+    expect(formatAssistantDate(value)).toBe('10 月 13 日（二）02:35');
+  });
+
+  test('只寫絕對日期，不寫今天、明天這類相對的字', () => {
+    const soon = formatAssistantDate(new Date(Date.now() + 60 * 60 * 1000));
+    const tomorrow = formatAssistantDate(new Date(Date.now() + 24 * 60 * 60 * 1000));
+    for (const text of [soon, tomorrow]) {
+      expect(text).toMatch(/^\d{1,2} 月 \d{1,2} 日（[日一二三四五六]）\d{2}:\d{2}$/);
+      expect(text).not.toMatch(/今天|明天|後天|昨天|今日|明日/);
+    }
   });
 
   test('不再出現美式格式或年份', () => {

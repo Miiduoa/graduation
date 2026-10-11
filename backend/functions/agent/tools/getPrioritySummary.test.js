@@ -21,6 +21,6 @@ describe('getPrioritySummary tool', () => {
       { prefetched: { assignments: [{ title: 'HW2', dueAt: new Date('2026-10-12T18:35:00Z') }] } },
       {},
     );
-    expect(out.nextAssignmentDue).toBe('10 月 13 日 02:35');
+    expect(out.nextAssignmentDue).toBe('10 月 13 日（二）02:35');
   });
 });
