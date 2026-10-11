@@ -59,6 +59,7 @@ jobs:
         run: |
           npm install --prefix "$RUNNER_TEMP/eas-config-schema" --ignore-scripts --no-audit --no-fund @expo/eas-json@24.9.0
           node --test scripts/firebase-ci-workflow.test.cjs scripts/wait-for-firestore-indexes.test.cjs scripts/firebase-release-preflight.test.cjs scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs scripts/prepare-eas-build.test.mjs scripts/verify-nuni-integration.test.mjs
+          node --test scripts/nuni-course-source.test.mjs scripts/nuni-course-api-boundary.test.mjs
 
       - name: Audit Functions deployment dependencies
         working-directory: backend/functions
