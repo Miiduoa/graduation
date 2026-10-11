@@ -245,6 +245,14 @@ test.each(['preparing', 'ready'])('%s timeout updates both receipts once', async
   expect(store.docs.get(mirror)).toEqual(store.docs.get(canonical));
   expect(push).toHaveBeenCalledTimes(1);
 });
+test('超過取餐時間取消的推播用一般中文，不寫 NoShow', async () => {
+  setStatus('ready');
+  const processOrder = createTimeoutOrderProcessor({ db: store.db, sendPushToUser: push, now: () => 3600000, logger });
+  await processOrder({ schoolId: 'pu', orderId: 'one', expectedStatus: 'ready' });
+  expect(push.mock.calls[0][1]).toEqual({ title: '這張單取消了', body: '這張單超過取餐時間，已經取消了。' });
+  expect(JSON.stringify(push.mock.calls[0][1])).not.toMatch(/NoShow|您/);
+  expect(store.docs.get(mirror).cancelReason).toBe('system_no_show');
+});
 test('the deployed callable bindings use the transactional handlers', async () => {
   getFirestore.mockReturnValue(store.db);
   const exported = require('./index');

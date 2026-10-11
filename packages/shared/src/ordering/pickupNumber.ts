@@ -12,6 +12,7 @@ export const PICKUP_NUMBER_PENDING_LABEL = '待給號碼';
 export const ORDER_CANCELLED_BY_SHOP_TEXT = '這張單店家取消了';
 export const ORDER_CANCELLED_BY_CUSTOMER_TEXT = '你取消了這張單';
 export const ORDER_NO_SHOW_TEXT = '超過取餐時間沒取，這張單取消了';
+export const ORDER_SHOP_SUSPENDED_TEXT = '這家店暫停營業，這張單已取消。';
 
 const TAIPEI_OFFSET_MS = 8 * 60 * 60 * 1000;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
@@ -74,13 +75,14 @@ export function formatShortOrderCode(orderId: unknown): string {
   return code ? `訂單末 6 碼 ${code}` : '';
 }
 
-/** 取消的訂單給學生看的那一句；店家拒單、逾時沒接都算店家取消 */
+/** 取消的訂單給學生看的那一句；店家拒單、逾時沒接都算店家取消；稽查停權取消的單另外寫暫停營業 */
 export function describeCancelledOrder(order: {
   cancelledBy?: unknown;
   cancelReason?: unknown;
 }): string {
   if (order.cancelledBy === 'customer') return ORDER_CANCELLED_BY_CUSTOMER_TEXT;
   if (order.cancelReason === 'system_no_show') return ORDER_NO_SHOW_TEXT;
+  if (order.cancelReason === 'admin_vendor_suspended') return ORDER_SHOP_SUSPENDED_TEXT;
   return ORDER_CANCELLED_BY_SHOP_TEXT;
 }
 
