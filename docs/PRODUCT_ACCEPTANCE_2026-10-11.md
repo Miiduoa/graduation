@@ -32,9 +32,21 @@
 - 發布前置檢查完整覆跑：CI 的 6 個 readiness scripts 加上 `prepare-native-release.test.cjs`，139/139 通過、0 跳過；已載入隔離安裝的 `@expo/eas-json@24.9.0`，包含先前跳過的 schema 檢查。`verify-functions-package.cjs` 以 Firebase CLI 封裝並隔離載入 112 個 exports 通過。這些結果只證明本機發布檢查，不證明雲端已更新。
 - 宿舍與正式導航畫面測試 58/58，完整 Mobile typecheck 及變更檔 ESLint 通過。公車／宿舍獨立審查覆跑 5 suites、86/86，未發現確定問題；涵蓋正式環境不載入示範資料、模擬洗衣不寫伺服器、站牌精確對照、無法確認即時資料時回退、跨帳號／學校／站點的遲到回應隔離。未驗證真 TDX、真機外開瀏覽器及校方收件；完整最終測試結果以本輪交付紀錄與 CI 為準。
 
+## 續作：真實 API 與重新繳交
+
+接續整合 PR #29 的公開校園入口與學校登入開放條件，保留本分支的待辦、回執及登入初始化修正。Web 與 App 的測驗回答都遵守 2,000 字上限；開放中的測驗可更新原回答。編輯時帶入已儲存內容，若重新讀取後發現內容已變更，保留草稿並要求使用者選擇；不宣稱後端已具備跨端原子版本鎖。
+
+作業與測驗重新繳交後，既有 Nuni API 會保留舊教師回饋。因此兩端明示早於最近一次提交的回饋，老師編輯中的回饋也會比對已讀取到的學生稿件變更。這是文字回饋流程，並未新增數字成績或取代學校成績紀錄。
+
+`scripts/verify-nuni-course-api.mjs` 在隔離 PostgreSQL、固定 API 來源樹與真實 loopback HTTP 上驗證三個帳號身分。涵蓋課程建立、邀請加入、教師發布、同 key 並行提交只留一筆、回饋、更新與舊 key 重試、關閉後拒寫、登出後拒讀。使用本機 RS256 測試金鑰驗證 nonce／簽章／session handler，沒有使用 demo auth，也沒有連線正式資料庫；這不等於真人 Google 授權、Web/App 真機操作或正式校務驗收。
+
+Firebase CI 現在保護進行中的 main 部署不被後續 push 中斷，並在失敗時保存綁定提交及 run 的部署結果與前置檢查。PR 驗證仍可取消舊執行。
+
 ## 發布阻塞與整合順序
 
 2026-10-11 檢查的 main CI [run 38117411096](https://github.com/Miiduoa/graduation/actions/runs/38117411096) 在 Deploy Firebase Functions 因 production environment 缺少 `FIREBASE_TOKEN` 失敗。該次建置與檢查成功不能當作 Functions 部署成功；必須補正環境授權後，以新的部署記錄與服務驗證確認。本輪修正 CI 彙整不能代替部署憑證。
+
+同日以本機已登入身分執行唯讀 preflight：可存取 `campus-one-tw`，但計費未開通，多個 Functions 依賴 API 未啟用，Authentication 與指定 Storage bucket 查詢回 404。因此補 CI token 仍不足以發布這條 Firebase 路徑。現行平台課程、帳號與店家使用既有 Nuni API；不能把 Firebase 阻塞當成更新 Nuni 網頁的必要前置條件。本輪沒有開通付費方案或更換平台後端。
 
 先保留 main 的安全修正，再整合 #29 的平台帳號與學校資格，逐項移植仍適用的修復。#20 的 Node/Expo 修補與 #23 的部分原生修補已有重疊；#24 只取仍欠缺的正式 AI 設定限制。#25 的 `attendanceRecorded` 回傳假設、#26 的公開 `liveData.qrToken`、#27 的另一套 token/QR 格式與主線不相容，不能整支盲合或視為上架缺口已解決。
 

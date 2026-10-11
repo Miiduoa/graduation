@@ -297,6 +297,18 @@ function Quiz({
   const readGeneration = useRef(0);
   const readLocked = useRef(false);
   const closeAttempts = useRef(new Set<string>());
+  const currentAnswer = item.myResponse?.answer ?? '';
+  const answerVersion = JSON.stringify([item.myResponse?.answer, item.myResponse?.submittedAt]);
+  const [answerEditor, setAnswerEditor] = useState({
+    version: answerVersion,
+    original: currentAnswer,
+    text: currentAnswer,
+  });
+  const answerPristine = answerEditor.text === answerEditor.original;
+  const answerDraft = answerPristine ? currentAnswer : answerEditor.text;
+  const answerChanged = !answerPristine && answerEditor.version !== answerVersion;
+  const answerDispatched = useRef<string | null>(null);
+  const [answerNotice, setAnswerNotice] = useState('');
   const teacher = workspace.memberRole === 'owner-teacher' || workspace.memberRole === 'co-teacher';
   const writable = workspace.state === 'active';
   const student = workspace.memberRole === 'student';
@@ -384,6 +396,11 @@ function Quiz({
             <>
               <h4>老師回饋</h4>
               <CourseText text={item.myResponse.teacherFeedback} />
+              {item.myResponse.reviewedAt &&
+                Date.parse(item.myResponse.reviewedAt) <
+                  Date.parse(item.myResponse.submittedAt) && (
+                  <p className={styles.note}>這則回饋早於最近一次繳交，請老師確認是否仍適用。</p>
+                )}
               {item.myResponse.reviewedAt && (
                 <p className={styles.muted}>
                   回饋時間：
@@ -401,31 +418,98 @@ function Quiz({
       {student && !item.myResponse && item.state === 'closed' && (
         <p className={styles.note}>這份測驗已結束，沒有你的作答紀錄。</p>
       )}
-      {student && writable && item.state === 'open' && !item.myResponse && (
+      {answerNotice && (
+        <p role="status" className={styles.receipt}>
+          {answerNotice}
+        </p>
+      )}
+      {student && writable && item.state === 'open' && (
         <>
           {passedDue && (
             <p className={styles.note}>已過建議完成時間，老師尚未結束測驗，目前仍可送出作答。</p>
           )}
           <MutationForm
-            label="送出作答"
+            label={item.myResponse ? '更新回答' : '送出作答'}
             submit={async (form, key) => {
               if (form.get('confirm') !== 'yes') throw new NuniError(422, 'CONFIRMATION_REQUIRED');
-              const result = await classes.submitQuiz(
-                workspace.id,
-                item.id,
-                String(form.get('answer') || '').trim(),
-                key,
+              if (answerChanged && answerDispatched.current !== key)
+                throw new NuniError(409, 'ANSWER_CHANGED');
+              setAnswerNotice('');
+              const submitted = String(form.get('answer') || '').trim();
+              const updating = !!item.myResponse;
+              answerDispatched.current = key;
+              const result = await classes.submitQuiz(workspace.id, item.id, submitted, key);
+              if (!mounted.current) return;
+              const receipt = result.myResponse!;
+              setAnswerEditor({
+                version: JSON.stringify([receipt.answer, receipt.submittedAt]),
+                original: receipt.answer,
+                text: receipt.answer,
+              });
+              setAnswerNotice(
+                receipt.answer !== submitted
+                  ? '已確認送出結果，上方顯示目前儲存的回答。'
+                  : updating
+                    ? '回答已更新。'
+                    : '作答已送出。',
               );
-              if (mounted.current) acceptQuiz(result);
+              acceptQuiz(result);
             }}
           >
+            {answerChanged && (
+              <section className={styles.note} aria-label="回答內容已更新">
+                <p role="alert">回答已有新的內容。你的草稿尚未送出，請選擇接下來要編輯的內容。</p>
+                <div className={styles.actions}>
+                  <button
+                    type="button"
+                    className={`${styles.button} ${styles.secondary}`}
+                    onClick={() =>
+                      setAnswerEditor({
+                        version: answerVersion,
+                        original: currentAnswer,
+                        text: currentAnswer,
+                      })
+                    }
+                  >
+                    改用目前回答
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.button} ${styles.secondary}`}
+                    onClick={() =>
+                      setAnswerEditor({
+                        version: answerVersion,
+                        original: currentAnswer,
+                        text: answerDraft,
+                      })
+                    }
+                  >
+                    保留草稿，送出時取代
+                  </button>
+                </div>
+              </section>
+            )}
             <label>
               你的回答
-              <textarea name="answer" required maxLength={2000} />
+              <textarea
+                name="answer"
+                required
+                maxLength={2000}
+                value={answerDraft}
+                onChange={(event) => {
+                  setAnswerEditor({
+                    version: answerPristine ? answerVersion : answerEditor.version,
+                    original: answerPristine ? currentAnswer : answerEditor.original,
+                    text: event.target.value,
+                  });
+                  setAnswerNotice('');
+                }}
+              />
             </label>
+            <p className={styles.muted}>老師結束測驗前，可以更新回答。更新會取代目前儲存的內容。</p>
             <label className={quizStyles.confirmation}>
               <input name="confirm" type="checkbox" value="yes" required />
-              <span>我已檢查回答。送出後無法修改。</span>
+              <span>我已檢查回答，確認送出這份內容。</span>
             </label>
           </MutationForm>
         </>
@@ -529,7 +613,12 @@ function QuizFeedbackRow({
 }) {
   const [notice, setNotice] = useState('');
   const currentText = entry.teacherFeedback ?? '';
-  const version = JSON.stringify([entry.teacherFeedback, entry.reviewedAt]);
+  const version = JSON.stringify([
+    entry.answer,
+    entry.submittedAt,
+    entry.teacherFeedback,
+    entry.reviewedAt,
+  ]);
   const [editor, setEditor] = useState({ version, original: currentText, text: currentText });
   const pristine = editor.text === editor.original;
   const draft = pristine ? currentText : editor.text;
@@ -553,6 +642,9 @@ function QuizFeedbackRow({
         <div className={styles.receipt}>
           <strong>已儲存的回饋</strong>
           <CourseText text={entry.teacherFeedback} />
+          {entry.reviewedAt && Date.parse(entry.reviewedAt) < Date.parse(entry.submittedAt) && (
+            <p className={styles.note}>這則回饋早於最近一次繳交，請老師確認是否仍適用。</p>
+          )}
         </div>
       )}
       {notice && (
@@ -575,7 +667,12 @@ function QuizFeedbackRow({
               if (!mounted.current) throw new NuniError(409, 'SESSION_CHANGED');
               const text = receipt.teacherFeedback ?? '';
               setEditor({
-                version: JSON.stringify([receipt.teacherFeedback, receipt.reviewedAt]),
+                version: JSON.stringify([
+                  receipt.answer,
+                  receipt.submittedAt,
+                  receipt.teacherFeedback,
+                  receipt.reviewedAt,
+                ]),
                 original: text,
                 text,
               });
@@ -589,7 +686,7 @@ function QuizFeedbackRow({
             {changed && (
               <section className={styles.note} aria-label="回饋內容已更新">
                 <p role="alert">
-                  這份回饋已有新的內容。你的草稿尚未儲存，請選擇接下來要編輯的內容。
+                  學生回答或老師回饋已有更新。你的草稿尚未儲存，請先核對新內容，再選擇接下來要編輯的內容。
                 </p>
                 <div className={styles.actions}>
                   <button

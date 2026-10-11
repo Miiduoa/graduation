@@ -178,7 +178,7 @@ it('treats teacher permission rejection as a failed publish, retaining editable 
   ).toBe(false);
 });
 
-it('requires student confirmation then displays the confirmed own answer and feedback without an edit form', async () => {
+it('requires student confirmation then preserves the receipt and prefills an update form', async () => {
   mocks.request.mockResolvedValueOnce({ quizzes: [quiz()] }).mockResolvedValueOnce(
     quiz({
       responseCount: 1,
@@ -195,11 +195,65 @@ it('requires student confirmation then displays the confirmed own answer and fee
   fireEvent.click(screen.getByLabelText(/我已檢查回答/));
   fireEvent.click(screen.getByRole('button', { name: '送出作答' }));
   await screen.findByText('已送出作答');
-  expect(screen.getByText('先觀察使用情境，再確認問題。')).toBeTruthy();
+  expect(
+    within(screen.getByText('已送出作答').parentElement!).getByText('先觀察使用情境，再確認問題。'),
+  ).toBeTruthy();
   expect(screen.getByText('請補充訪談對象。')).toBeTruthy();
-  expect(screen.queryByLabelText('你的回答')).toBeNull();
+  expect((screen.getByLabelText('你的回答') as HTMLTextAreaElement).value).toBe(answer().answer);
+  expect(screen.getByRole('button', { name: '更新回答' })).toBeTruthy();
+  expect(screen.queryByText(/送出後無法修改/)).toBeNull();
   expect(screen.queryByText('查看作答')).toBeNull();
   expect(screen.queryByText('發布文字測驗')).toBeNull();
+});
+
+it('updates an existing answer, preserves an uncertain update key, and uses a fresh key for the next edit', async () => {
+  const updated = answer({ answer: '補上訪談對象。', submittedAt: '2026-10-08T09:00:00.000Z' });
+  const final = answer({ answer: '再補上訪談問題。', submittedAt: '2026-10-08T10:00:00.000Z' });
+  mocks.request
+    .mockResolvedValueOnce({ quizzes: [quiz({ myResponse: answer(), responseCount: 1 })] })
+    .mockRejectedValueOnce(new TypeError('reply lost'))
+    .mockResolvedValueOnce(quiz({ myResponse: updated, responseCount: 1 }))
+    .mockResolvedValueOnce(quiz({ myResponse: final, responseCount: 1 }));
+  render(<CourseQuizzes workspace={workspace()} />);
+  const editor = (await screen.findByLabelText('你的回答')) as HTMLTextAreaElement;
+  expect(editor.value).toBe(answer().answer);
+  fireEvent.change(editor, { target: { value: updated.answer } });
+  fireEvent.click(screen.getByLabelText(/我已檢查回答/));
+  fireEvent.click(screen.getByRole('button', { name: '更新回答' }));
+  await screen.findByRole('button', { name: '確認送出結果' });
+  expect(screen.getByText(answer().answer)).toBeTruthy();
+  expect((editor.closest('fieldset') as HTMLFieldSetElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '確認送出結果' }));
+  await screen.findByText('回答已更新。');
+  expect(requestsTo('/submit')[1][2]).toEqual(requestsTo('/submit')[0][2]);
+  expect(editor.value).toBe(updated.answer);
+  fireEvent.change(editor, { target: { value: final.answer } });
+  fireEvent.click(screen.getByLabelText(/我已檢查回答/));
+  fireEvent.click(screen.getByRole('button', { name: '更新回答' }));
+  await screen.findByText(final.answer);
+  expect(requestsTo('/submit')[2][2].idempotencyKey).not.toBe(
+    requestsTo('/submit')[1][2].idempotencyKey,
+  );
+});
+
+it('does not overwrite a dirty draft when a refresh discovers another saved answer', async () => {
+  const newer = answer({ answer: '另一個裝置的回答', submittedAt: '2026-10-08T09:00:00.000Z' });
+  mocks.request
+    .mockResolvedValueOnce({ quizzes: [quiz({ myResponse: answer(), responseCount: 1 })] })
+    .mockResolvedValueOnce({ quizzes: [quiz({ myResponse: newer, responseCount: 1 })] });
+  render(<CourseQuizzes workspace={workspace()} />);
+  const editor = (await screen.findByLabelText('你的回答')) as HTMLTextAreaElement;
+  fireEvent.change(editor, { target: { value: '本機未送出的草稿' } });
+  fireEvent.click(screen.getByRole('button', { name: '更新測驗' }));
+  await screen.findByRole('region', { name: '回答內容已更新' });
+  expect(editor.value).toBe('本機未送出的草稿');
+  fireEvent.click(screen.getByLabelText(/我已檢查回答/));
+  fireEvent.click(screen.getByRole('button', { name: '更新回答' }));
+  await waitFor(() => expect(screen.getAllByRole('alert').length).toBeGreaterThan(0));
+  expect(requestsTo('/submit')).toHaveLength(0);
+  fireEvent.click(screen.getByRole('button', { name: '改用目前回答' }));
+  expect(editor.value).toBe(newer.answer);
+  expect(screen.queryByRole('region', { name: '回答內容已更新' })).toBeNull();
 });
 
 it('retries an uncertain answer with the same content and idempotency key', async () => {
@@ -392,6 +446,52 @@ async function openFeedbackEditor() {
 }
 const reviewedAnswer = (feedback: string, reviewedAt = timestamp) =>
   answer({ teacherFeedback: feedback, reviewedAt });
+
+it.each(['student', 'owner-teacher'] as const)(
+  'marks earlier quiz feedback after a student edit for %s',
+  async (role) => {
+    const revised = answer({
+      answer: '更新後的作答',
+      submittedAt: '2026-10-08T10:00:00.000Z',
+      teacherFeedback: '針對舊回答的回饋',
+      reviewedAt: timestamp,
+    });
+    session(role === 'student' ? studentId : teacherId);
+    mocks.request
+      .mockResolvedValueOnce({
+        quizzes: [quiz({ myResponse: role === 'student' ? revised : null, responseCount: 1 })],
+      })
+      .mockResolvedValueOnce({ responses: [revised] });
+    render(<CourseQuizzes workspace={workspace(role)} />);
+    if (role === 'owner-teacher') {
+      fireEvent.click(await screen.findByRole('button', { name: '查看作答' }));
+    }
+    await screen.findByText('這則回饋早於最近一次繳交，請老師確認是否仍適用。');
+  },
+);
+
+it('requires a teacher to review a refreshed student answer before saving a dirty feedback draft', async () => {
+  session(teacherId);
+  const original = reviewedAnswer('已有回饋');
+  mocks.request
+    .mockResolvedValueOnce({ quizzes: [quiz({ responseCount: 1 })] })
+    .mockResolvedValueOnce({ responses: [original] })
+    .mockResolvedValueOnce({
+      responses: [
+        { ...original, answer: '學生已更新答案', submittedAt: '2026-10-08T10:00:00.000Z' },
+      ],
+    });
+  render(<CourseQuizzes workspace={workspace('owner-teacher')} />);
+  const editor = await openFeedbackEditor();
+  fireEvent.change(editor, { target: { value: '針對舊稿寫的未送出回饋' } });
+  fireEvent.click(screen.getByRole('button', { name: '更新作答' }));
+  await screen.findByText('學生已更新答案');
+  expect(screen.getByRole('region', { name: '回饋內容已更新' })).toBeTruthy();
+  fireEvent.submit(editor.closest('form')!);
+  await waitFor(() => expect(screen.getAllByRole('alert').length).toBeGreaterThan(0));
+  expect(requestsTo('/feedback')).toHaveLength(0);
+  expect(editor.value).toBe('針對舊稿寫的未送出回饋');
+});
 
 it('refreshes an untouched quiz feedback editor to the newest saved text', async () => {
   session(teacherId);
