@@ -26,8 +26,12 @@ export type TimetableMeta = {
 const COLOR_SET = new Set<string>(COURSE_COLORS);
 
 function cleanText(value: unknown, max = 100): string {
-  return String(value ?? '')
-    .replace(/[\u0000-\u001f\u007f]/g, '')
+  return [...String(value ?? '')]
+    .filter((character) => {
+      const code = character.charCodeAt(0);
+      return code >= 32 && code !== 127;
+    })
+    .join('')
     .trim()
     .slice(0, max);
 }

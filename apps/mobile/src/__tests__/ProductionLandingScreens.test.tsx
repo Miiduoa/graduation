@@ -42,6 +42,13 @@ jest.mock('@react-navigation/native', () => ({
   useNavigation: () => mockNavigation,
   useRoute: () => mockRoute,
   useFocusEffect: (callback: () => void) => require('react').useEffect(callback, [callback]),
+  createNavigationContainerRef: () => ({
+    isReady: () => false,
+    navigate: jest.fn(),
+    reset: jest.fn(),
+    getCurrentRoute: jest.fn(),
+    getRootState: jest.fn(),
+  }),
 }));
 
 function home(name = '實際課程') {

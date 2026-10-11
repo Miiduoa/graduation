@@ -24,6 +24,29 @@ vi.mock('@/lib/academicClient', async (original) => ({
   ...(await original<typeof import('@/lib/academicClient')>()),
   loadAcademicRecords: vi.fn(),
 }));
+const timetableApi = vi.hoisted(() => ({
+  loadPersonalTimetable: vi.fn(),
+  savePersonalTimetable: vi.fn(),
+  createMeetup: vi.fn(),
+  createServerShare: vi.fn(),
+  loadFriendTimetable: vi.fn(),
+}));
+vi.mock('@/lib/timetable/store', () => timetableApi);
+vi.mock('@/lib/timetable/friends', () => ({
+  listAcceptedFriends: vi.fn(async () => []),
+}));
+vi.mock('@/components/SelectedSchoolProvider', () => ({
+  useSelectedSchool: () => ({ selectedSchoolId: 'pu' }),
+}));
+function emptyTimetable() {
+  return {
+    courses: [],
+    meta: { school: '', year: '', semester: '', className: '', credits: 0, title: '' },
+    shareWithFriends: true,
+    updatedAt: '2026-10-08T00:00:00.000Z',
+    schoolId: 'pu',
+  };
+}
 function grades(uid = 'one', name = '真實來源科目'): AcademicSnapshot<'grades'> {
   return {
     ownerUid: uid,
@@ -45,6 +68,8 @@ beforeEach(() => {
   account.user = { uid: 'one' };
   account.loading = false;
   vi.mocked(loadAcademicRecords).mockResolvedValue(grades());
+  timetableApi.loadPersonalTimetable.mockResolvedValue(emptyTimetable());
+  timetableApi.savePersonalTimetable.mockResolvedValue({ stored: 'cloud' });
 });
 it('preserves unknown grades and a real zero without manufacturing GPA or rank', async () => {
   render(<GradesPage />);
@@ -109,7 +134,7 @@ it('offers reconnection without pretending an expired session has an empty trans
   expect(link.getAttribute('href')).toContain('reconnect=school');
   expect(screen.queryByText('課程紀錄')).toBeNull();
 });
-it('keeps weekend and unrecognized course times discoverable and detects actual overlaps', async () => {
+it('keeps weekend and unrecognized school courses as drafts until confirm', async () => {
   const course = {
     code: 'A',
     name: '週末課',
@@ -145,12 +170,17 @@ it('keeps weekend and unrecognized course times discoverable and detects actual 
     }),
   });
   render(<TimetablePage />);
-  expect(await screen.findByText('有 1 組課程時間重疊')).toBeTruthy();
-  expect(screen.getByRole('heading', { name: '上課日待確認' })).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: '課程清單' }));
-  expect(screen.getByRole('heading', { name: '週末課' })).toBeTruthy();
-  fireEvent.change(screen.getByLabelText('上課日'), { target: { value: '6' } });
-  expect(screen.queryByRole('heading', { name: '另約時間' })).toBeNull();
+  expect(await screen.findByRole('heading', { name: '匯入課表' })).toBeTruthy();
+  await waitFor(() => expect(loadAcademicRecords).toHaveBeenCalledWith('courses', 'one'));
+  fireEvent.click(screen.getByRole('button', { name: '從學校課表帶入' }));
+  expect(screen.getByText('課表尚未被修改，按確認匯入後才會套用')).toBeTruthy();
+  expect(screen.getByText('週末課')).toBeTruthy();
+  expect(screen.getByText('週末另一課')).toBeTruthy();
+  expect(screen.getByText('另約時間')).toBeTruthy();
+  expect(screen.getAllByText(/時間待定/).length).toBeGreaterThan(0);
+  expect(timetableApi.savePersonalTimetable).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入' }));
+  await waitFor(() => expect(timetableApi.savePersonalTimetable).toHaveBeenCalled());
 });
 it('requires personal input for credit planning and clears it when the account changes', async () => {
   const view = render(<CreditPlannerPage />);
