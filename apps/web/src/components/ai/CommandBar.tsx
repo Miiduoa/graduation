@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Campus AI-First — Global Command Bar
+ * Global Command Bar
  * --------------------------------------
  * 永遠置頂的 AI 對話入口。Cmd+K 觸發全屏，點擊 inline 觸發 drawer。
  *
