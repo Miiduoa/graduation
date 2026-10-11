@@ -11,35 +11,51 @@ export type CourseAppeal = {
   body: string;
   status: AppealStatus;
   teacherNote: string;
-  createdAt: string | null;
-  updatedAt: string | null;
+  createdAt: unknown;
+  updatedAt: unknown;
 };
 
 export const APPEAL_STATUS_COPY: Record<AppealStatus, { label: string; detail: string }> = {
-  pending: { label: '待看', detail: '已送到本站，教師還沒看。' },
-  reviewing: { label: '查看中', detail: '教師正在看這份申訴。' },
-  approved: { label: '已核准', detail: '這份申訴已核准。' },
-  rejected: { label: '未核准', detail: '這份申訴未核准。' },
-  withdrawn: { label: '已撤回', detail: '你已撤回，不會繼續處理。' },
+  pending: { label: '已送出', detail: '已送出，等老師看。' },
+  reviewing: { label: '老師在看', detail: '老師正在看這份申訴。' },
+  approved: { label: '已核准', detail: '老師已核准。' },
+  rejected: { label: '沒有核准', detail: '老師沒有核准。' },
+  withdrawn: { label: '已撤回', detail: '你已撤回這份申訴。' },
 };
 
+export const APPEAL_EMPTY_COPY = {
+  title: '目前沒有申訴',
+  body: '要提出時填下面的表單。',
+};
+
+export const APPEAL_NEED_COURSE_COPY = '你的課表裡還沒有課，沒有課就不能送申訴。先到「我的課表」把課加進來。';
+
+type TimeLike = string | number | Date | { toMillis?: () => number; seconds?: number } | null | undefined;
+
+export function appealTimeValue(value: unknown): number {
+  const time = value as TimeLike;
+  if (!time) return 0;
+  if (typeof time === 'number') return time;
+  if (typeof time === 'string') return Date.parse(time) || 0;
+  if (time instanceof Date) return time.getTime();
+  if (typeof time.toMillis === 'function') return time.toMillis();
+  if (typeof time.seconds === 'number') return time.seconds * 1000;
+  return 0;
+}
+
+/** 頂卡跟著最近一次有變動的申訴走，老師核准後會馬上換成核准。 */
 export function appealTopCard(appeals: CourseAppeal[]): { title: string; body: string; status: AppealStatus | null } {
-  if (!appeals.length) {
-    return {
-      title: '目前沒有申訴',
-      body: '現在沒有案件，所以沒有進度可看。要提出時填下面的表單。',
-      status: null,
-    };
+  const visible = appeals.filter((item) => item.status !== 'withdrawn');
+  if (!visible.length) {
+    return { ...APPEAL_EMPTY_COPY, status: null };
   }
-  const order: AppealStatus[] = ['reviewing', 'pending', 'approved', 'rejected', 'withdrawn'];
-  const latest = [...appeals].sort((a, b) => {
-    const rank = order.indexOf(a.status) - order.indexOf(b.status);
-    if (rank !== 0) return rank;
-    return String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || ''));
-  })[0];
-  const copy = APPEAL_STATUS_COPY[latest.status];
+  const latest = [...visible].sort(
+    (a, b) =>
+      appealTimeValue(b.updatedAt || b.createdAt) - appealTimeValue(a.updatedAt || a.createdAt),
+  )[0];
+  const copy = APPEAL_STATUS_COPY[latest.status] || APPEAL_STATUS_COPY.pending;
   return {
-    title: `${copy.label}｜${latest.courseName || latest.title}`,
+    title: latest.courseName || latest.title,
     body: copy.detail,
     status: latest.status,
   };

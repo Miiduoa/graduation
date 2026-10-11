@@ -1602,3 +1602,24 @@ test('assistant replies to a question are not posted under the student account',
   await assertFails(alice.collection('groups/g1/posts/p2/comments').add(reply));
   await assertSucceeds(bob.collection('groups/g1/posts/q1/comments').add({ body: '我也想知道', authorId: 'bob' }));
 });
+
+test('course appeals need a course and only teachers can approve', async () => {
+  await seedFirestore(async (db) => {
+    await db.doc('schools/pu/members/stu').set({ status: 'active', role: 'student' });
+    await db.doc('schools/pu/members/teach').set({ status: 'active', role: 'teacher' });
+  });
+  const stu = testEnv.authenticatedContext('stu').firestore();
+  const teach = testEnv.authenticatedContext('teach').firestore();
+  const appeal = {
+    schoolId: 'pu', studentUid: 'stu', courseId: 'db', courseName: '資料庫',
+    title: '出缺席紀錄', body: '當天有請假單可以補', status: 'pending', teacherNote: '',
+  };
+  await assertFails(stu.doc('courseAppeals/no-course').set({ ...appeal, courseId: '', courseName: '' }));
+  await assertSucceeds(stu.doc('courseAppeals/a1').set(appeal));
+  // 同一個編號再送一次不會多一筆
+  await assertFails(stu.doc('courseAppeals/a1').set(appeal));
+  await assertFails(stu.doc('courseAppeals/a1').update({ status: 'approved' }));
+  await assertSucceeds(teach.collection('courseAppeals').where('schoolId', '==', 'pu').get());
+  await assertSucceeds(teach.doc('courseAppeals/a1').update({ status: 'approved', teacherNote: '好' }));
+  await assertSucceeds(stu.doc('courseAppeals/a1').get());
+});

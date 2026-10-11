@@ -119,8 +119,10 @@ export async function createCourseAppeal(input: {
   courseName: string;
   title: string;
   body: string;
-}) {
-  await addDoc(collection(getDb(), 'courseAppeals'), {
+}, requestId?: string) {
+  // 同一次填寫用同一個編號，連按送出也只會有一筆
+  const ref = requestId ? doc(getDb(), 'courseAppeals', requestId) : doc(collection(getDb(), 'courseAppeals'));
+  await setDoc(ref, {
     ...input,
     teacherNote: '',
     status: 'pending',

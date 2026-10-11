@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PERIOD_TIMES,
   SchedulePlanner,
+  APPEAL_STATUS_COPY,
   appealTopCard,
   applyImport,
   cleanCourse,
@@ -98,29 +99,34 @@ describe('文字匯入與分享碼', () => {
 });
 
 describe('申訴頂卡', () => {
-  it('沒有案件時不假裝有進度', () => {
+  const base = {
+    schoolId: 'pu',
+    studentUid: 's',
+    courseId: 'c',
+    courseName: '資料庫',
+    title: '出缺席',
+    body: '當天有請假單',
+    teacherNote: '',
+  };
+
+  it('沒有案件時不顯示進度', () => {
     const card = appealTopCard([]);
     expect(card.status).toBeNull();
-    expect(card.title).toContain('目前沒有申訴');
+    expect(card.title).toBe('目前沒有申訴');
   });
 
-  it('頂卡跟著真實狀態', () => {
-    const card = appealTopCard([
-      {
-        id: '1',
-        schoolId: 'pu',
-        studentUid: 's',
-        courseId: 'c',
-        courseName: '資料庫',
-        title: '出缺席',
-        body: '當天有請假單',
-        status: 'approved',
-        teacherNote: '',
-        createdAt: '2026-10-01',
-        updatedAt: '2026-10-02',
-      },
-    ]);
-    expect(card.title).toContain('已核准');
-    expect(card.body).not.toContain('還在等');
+  it('送出後是「已送出，等老師看。」，核准後換成「老師已核准。」', () => {
+    const pending = { ...base, id: '1', status: 'pending' as const, createdAt: '2026-10-01', updatedAt: '2026-10-01' };
+    expect(appealTopCard([pending]).body).toBe('已送出，等老師看。');
+    const approved = { ...pending, status: 'approved' as const, updatedAt: '2026-10-03' };
+    const older = { ...base, id: '2', status: 'pending' as const, createdAt: '2026-10-02', updatedAt: '2026-10-02' };
+    const card = appealTopCard([older, approved]);
+    expect(card.body).toBe('老師已核准。');
+    expect(card.title).toBe('資料庫');
+  });
+
+  it('文案不出現內部用語', () => {
+    const all = JSON.stringify(APPEAL_STATUS_COPY);
+    expect(all).not.toMatch(/資料庫|本站|頂卡|教師/);
   });
 });
