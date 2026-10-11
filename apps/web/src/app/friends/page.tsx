@@ -72,7 +72,7 @@ export default function FriendsPage() {
       setPending(waiting);
       setMyHandle(mine.handle);
       setHandleInput((current) => current || mine.handle);
-      setMyName(mine.name || user.displayName || '');
+      setMyName(mine.name);
       setMeetups(invites as unknown as Meetup[]);
     } catch {
       setNotice('現在讀不到好友資料，請稍後再試。');

@@ -1525,6 +1525,7 @@ test('only the invitee can accept a friend request', async () => {
     for (const uid of ['alice', 'carol', 'mallory']) {
       await db.doc(`schools/pu/members/${uid}`).set({ status: 'active', role: 'student' });
     }
+    await db.doc('users/carol').set({ displayName: '丙' });
     await db.doc('users/carol/personalTimetable/current').set({
       schoolId: 'pu',
       shareWithFriends: true,
@@ -1570,9 +1571,13 @@ test('handles can be looked up one at a time but never listed', async () => {
   await seedFirestore(async (db) => {
     await db.doc('schools/pu/members/alice').set({ status: 'active', role: 'student' });
     await db.doc('schools/pu/members/bob').set({ status: 'active', role: 'student' });
+    await db.doc('users/alice').set({ displayName: 'Alice' });
+    await db.doc('users/bob').set({ displayName: 'Bob' });
   });
   const alice = testEnv.authenticatedContext('alice').firestore();
   const bob = testEnv.authenticatedContext('bob').firestore();
+  // 找人代號上的名字只能是自己個人資料的名字
+  await assertFails(alice.doc('schools/pu/handles/alice_02').set({ uid: 'alice', name: '教務處', handle: 'alice_02' }));
   const stranger = testEnv.authenticatedContext('stranger').firestore();
   await assertSucceeds(
     alice.doc('schools/pu/handles/alice_01').set({ uid: 'alice', name: 'Alice', handle: 'alice_01' }),
@@ -1643,4 +1648,26 @@ test('a declined sender has to wait seven days before sending again', async () =
   await seedFirestore(async (db) => db.doc(id).update({ declinedAt: new Date(Date.now() - 8 * 86400000) }));
   await assertSucceeds(amy.doc(id).delete());
   await assertSucceeds(amy.doc(id).set({ schoolId: 'pu', fromUid: 'amy', toUid: 'ben', status: 'pending' }));
+});
+
+test('friend invite names always come from the profiles, not from the sender', async () => {
+  await seedFirestore(async (db) => {
+    for (const uid of ['eve', 'dan']) await db.doc(`schools/pu/members/${uid}`).set({ status: 'active', role: 'student' });
+    await db.doc('users/eve').set({ displayName: '小芸' });
+    await db.doc('users/dan').set({ displayName: '阿丹' });
+  });
+  const eve = testEnv.authenticatedContext('eve').firestore();
+  const dan = testEnv.authenticatedContext('dan').firestore();
+  const id = 'friendships/req_pu_eve_dan';
+  const base = { schoolId: 'pu', fromUid: 'eve', toUid: 'dan', status: 'pending' };
+  // 冒充別人的名字會被擋
+  await assertFails(eve.doc(id).set({ ...base, fromName: '教務處' }));
+  await assertFails(eve.doc(id).set({ ...base, fromName: '小芸', toName: '校長' }));
+  // 用自己個人資料的名字可以
+  await assertSucceeds(eve.doc(id).set({ ...base, fromName: '小芸', toName: '阿丹' }));
+  await assertFails(eve.doc(id).update({ fromName: '教務處' }));
+  // 被邀請的人接受時，也只能寫自己的名字
+  await assertFails(dan.doc(id).update({ status: 'accepted', toName: '教務處' }));
+  await assertSucceeds(dan.doc(id).update({ status: 'accepted', toName: '阿丹' }));
+  await assertFails(eve.doc(id).update({ status: 'blocked', toName: '教務處' }));
 });
