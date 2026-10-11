@@ -1281,6 +1281,21 @@ service cloud.firestore {
     }
 
     // Campus social graph (friends / follows)
+    // 封鎖：一人一筆，只有封鎖的人自己看得到、能解除；不會動到原本的好友邀請
+    match /friendBlocks/{blockId} {
+      allow get, delete: if isSignedIn() && resource.data.blockerUid == request.auth.uid;
+      allow list: if false;
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly(['schoolId', 'blockerUid', 'blockedUid', 'createdAt'])
+        && request.resource.data.blockerUid == request.auth.uid
+        && request.resource.data.blockedUid is string
+        && request.resource.data.blockedUid != request.auth.uid
+        && request.resource.data.schoolId is string
+        && isSchoolMember(request.resource.data.schoolId)
+        && blockId == request.auth.uid + '_' + request.resource.data.blockedUid;
+      allow update: if false;
+    }
+
     match /friendships/{friendshipId} {
       allow read: if isSignedIn()
         && friendshipInvolves(request.auth.uid)
@@ -1295,9 +1310,10 @@ service cloud.firestore {
         && request.resource.data.schoolId != null
         && request.resource.data.get('fromName', profileName(request.auth.uid)) == profileName(request.auth.uid)
         && request.resource.data.get('toName', '') in ['', profileName(request.resource.data.toUid)]
+        && !exists(/databases/$(database)/documents/friendBlocks/$(request.resource.data.toUid + '_' + request.auth.uid))
         && isSchoolMember(request.resource.data.schoolId);
       // 只有被邀請的人能接受或婉拒；送出邀請的人不能自己改成 accepted。
-      // 任一方都能封鎖；其他欄位（名字以外）不能動。
+      // 封鎖另外記在 friendBlocks，不改這筆的狀態；其他欄位（名字以外）不能動。
       allow update: if isSignedIn()
         && friendshipInvolves(request.auth.uid)
         && resource.data.schoolId == request.resource.data.schoolId
@@ -1319,25 +1335,16 @@ service cloud.firestore {
             && request.resource.data.declinedAt == request.time
             && request.resource.data.get('toName', '') == resource.data.get('toName', '')
           )
-          || (
-            request.resource.data.status == 'blocked'
-            && resource.data.status != 'blocked'
-            && request.resource.data.get('toName', '') == resource.data.get('toName', '')
-          )
         );
+      // 婉拒過的邀請（包含舊版改成 blocked 的）：婉拒的人隨時可以刪，送出的人要等七天
       allow delete: if isSignedIn()
         && friendshipInvolves(request.auth.uid)
         && isSchoolMember(resource.data.schoolId)
         && (
-          resource.data.status in ['pending', 'accepted', 'blocked']
-          || (
-            resource.data.status == 'declined'
-            && (
-              request.auth.uid == resource.data.toUid
-              || !(resource.data.declinedAt is timestamp)
-              || request.time > resource.data.declinedAt + duration.value(7, 'd')
-            )
-          )
+          resource.data.status in ['pending', 'accepted']
+          || request.auth.uid == resource.data.toUid
+          || !(resource.data.get('declinedAt', null) is timestamp)
+          || request.time > resource.data.declinedAt + duration.value(7, 'd')
         );
     }
 

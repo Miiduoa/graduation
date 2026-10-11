@@ -8,7 +8,7 @@ import {
   acceptFriendRequest,
   removeFriendship,
   getFriendshipBetween,
-  blockFromPending,
+  blockUser,
   declineFriendRequest,
   friendshipDeclinedAtMs,
   type Friendship,
@@ -116,7 +116,7 @@ export function RelationshipButtons(props: RelationshipButtonsProps) {
 
   const onBlockIncoming = () => {
     if (!friendship?.id || !school?.id) return;
-    Alert.alert('封鎖對方', '對方將無法再以這筆邀請與你互動（可稍後移除封鎖紀錄）。', [
+    Alert.alert('封鎖對方', '封鎖後，對方不能再送好友邀請給你。', [
       { text: '取消', style: 'cancel' },
       {
         text: '封鎖',
@@ -124,7 +124,7 @@ export function RelationshipButtons(props: RelationshipButtonsProps) {
         onPress: async () => {
           setBusy(true);
           try {
-            await blockFromPending(friendship.id);
+            await blockUser(school.id, myUid, profileUid, friendship.id);
             const next = await getFriendshipBetween(school.id, myUid, profileUid);
             onFriendshipChange(profileUid, next);
           } catch (e: any) {
