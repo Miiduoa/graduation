@@ -92,7 +92,10 @@ function mentionsOwnRepairTicket(input) {
 }
 
 // 公告內文裡講時段的那一句，例如「10 月 14 日（三）01:00–05:00 宿舍網路維修」
-const TIME_MENTION_RE = /(\d{1,2}\s*[:：]\s*\d{2}|\d{1,2}\s*點|凌晨|上午|下午|中午|晚上|傍晚)/;
+// 要有真的鐘點（01:00、1 點）才算時段；只寫「下午」「近期」不算，免得把沒有時段的句子當成時段
+const TIME_MENTION_RE = /(\d{1,2}\s*[:：]\s*\d{2}|\d{1,2}\s*點)/;
+// 內文自己就寫「維修時段：…」時，拿掉這個標題，回覆不會變成「時段：維修時段：…」
+const LEADING_LABEL_RE = /^[\s【\[(（]*(?:[\u4e00-\u9fff]{0,6}(?:時段|時間))[\]】)）]*\s*[:：]\s*/;
 const RELATIVE_DAY_RE = /(今天|明天|後天|昨天|今日|明日|今晚|明晚)/;
 
 function extractScheduleSnippet(text, maxLength = 80) {
@@ -104,7 +107,9 @@ function extractScheduleSnippet(text, maxLength = 80) {
   // 回覆會存下來之後再看，寫「明天」的句子日後會指錯天，不拿來用
   const hit = sentences.find((sentence) => TIME_MENTION_RE.test(sentence) && !RELATIVE_DAY_RE.test(sentence));
   if (!hit) return '';
-  return hit.length > maxLength ? `${hit.slice(0, maxLength)}…` : hit;
+  const cleaned = hit.replace(LEADING_LABEL_RE, '').trim();
+  if (!cleaned || !TIME_MENTION_RE.test(cleaned)) return '';
+  return cleaned.length > maxLength ? `${cleaned.slice(0, maxLength)}…` : cleaned;
 }
 
 /**

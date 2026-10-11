@@ -453,6 +453,31 @@ describe('校園助理（/ai-assistant）沒有模型可用時照實說沒辦法
     expect(result.content).not.toMatch(/今天|明天|後天/);
   });
 
+  test.each([
+    ['內文完全沒提時間', '宿舍網路近期將進行維修，詳情另行公告。'],
+    ['只說「下午」沒有鐘點', '宿舍網路下午會有人員進行維修，請多包涵。'],
+    ['只有日期沒有時段', '10 月 14 日宿舍網路維修。'],
+    ['內文是空的', ''],
+  ])('問維修時間，但公告內文%s：整行「時段：」都不出現，不留空也不編', async (_label, body) => {
+    mockDocuments.set('schools/pu/announcements', [
+      row('net', { title: '宿舍網路維修通知', body, schoolId: 'pu', publishedAt: new Date('2026-10-11T13:00:00Z') }),
+    ]);
+    const result = await ask('宿舍網路什麼時候維修');
+    expect(result.content).toContain('宿舍網路維修通知（10 月 11 日（日）21:00）');
+    expect(result.content).not.toContain('時段');
+    expect(result.content).not.toMatch(/\d{1,2}:\d{2}–/);
+  });
+
+  test('內文自己寫「維修時段：」：回覆只有一個「時段：」，不會變成「時段：維修時段：」', async () => {
+    mockDocuments.set('schools/pu/announcements', [
+      row('net', { title: '宿舍網路 10/14 凌晨維修', body: '各位同學好。\n維修時段：10 月 14 日（三）01:00–05:00\n期間無法連線。', schoolId: 'pu', publishedAt: new Date('2026-10-11T13:00:00Z') }),
+    ]);
+    const result = await ask('宿舍網路什麼時候維修');
+    expect(result.content).toContain('時段：10 月 14 日（三）01:00–05:00');
+    expect(result.content).not.toContain('時段：維修時段');
+    expect(result.content.match(/時段：/g)).toHaveLength(1);
+  });
+
   test('只問有什麼公告：不加時段那一行', async () => {
     mockDocuments.set('schools/pu/announcements', [
       row('net', { title: '宿舍網路 10/14 凌晨維修', body: '10 月 14 日 01:00–05:00 維修。', schoolId: 'pu', publishedAt: new Date('2026-10-11T13:00:00Z') }),
