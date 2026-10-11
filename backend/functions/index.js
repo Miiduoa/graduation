@@ -2843,6 +2843,17 @@ exports.bulkUpdateSchoolAnnouncements = onCall(
 );
 
 exports.submitProductFeedback = onCall({ region: REGION }, createSubmitProductFeedback({ db }));
+const {
+  createCreateTimetableShareHandler,
+  createRevokeTimetableShareHandler,
+  createGetTimetableShareHandler,
+} = require('./personalCampus');
+exports.createTimetableShare = onCall({ region: REGION }, createCreateTimetableShareHandler({ db }));
+exports.revokeTimetableShare = onCall({ region: REGION }, createRevokeTimetableShareHandler({ db }));
+exports.getTimetableShare = onRequest(
+  { region: REGION, cors: true },
+  createGetTimetableShareHandler({ db }),
+);
 const eventRegistrationHandlers = createEventRegistrationHandlers({ db });
 exports.getEventRegistrations = onCall({ region: REGION }, eventRegistrationHandlers.getEventRegistrations);
 exports.registerCampusEvent = onCall({ region: REGION }, eventRegistrationHandlers.registerCampusEvent);

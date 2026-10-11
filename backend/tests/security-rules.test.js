@@ -1393,3 +1393,59 @@ test('push provider receipts are server-only even for the recipient', async () =
     }
   }
 });
+
+test('friends can read a shared personal timetable, strangers cannot', async () => {
+  const timetable = {
+    schoolId: 'pu',
+    shareWithFriends: true,
+    courses: [{ id: 'db', name: '資料庫', day: 1, start: 3, end: 4 }],
+    meta: {},
+  };
+  await seedFirestore(async (db) => {
+    await db.doc('users/alice').set({ displayName: 'Alice' });
+    await db.doc('users/bob').set({ displayName: 'Bob' });
+    await db.doc('users/carol').set({ displayName: 'Carol' });
+    await db.doc('schools/pu/members/alice').set({ status: 'active', role: 'student' });
+    await db.doc('schools/pu/members/bob').set({ status: 'active', role: 'student' });
+    await db.doc('schools/pu/members/carol').set({ status: 'active', role: 'student' });
+    await db.doc('friendships/req_pu_alice_bob').set({
+      schoolId: 'pu', fromUid: 'alice', toUid: 'bob', status: 'accepted',
+    });
+    await db.doc('users/alice/personalTimetable/current').set(timetable);
+  });
+  await assertSucceeds(
+    testEnv.authenticatedContext('alice').firestore().doc('users/alice/personalTimetable/current').get(),
+  );
+  await assertSucceeds(
+    testEnv.authenticatedContext('bob').firestore().doc('users/alice/personalTimetable/current').get(),
+  );
+  await assertFails(
+    testEnv.authenticatedContext('carol').firestore().doc('users/alice/personalTimetable/current').get(),
+  );
+  await assertFails(
+    testEnv.authenticatedContext('bob').firestore().doc('users/alice/personalTimetable/current').update({ courses: [] }),
+  );
+});
+
+test('public timetable shares are readable until they expire or are revoked', async () => {
+  const future = new Date(Date.now() + 86400000);
+  const past = new Date(Date.now() - 1000);
+  await seedFirestore(async (db) => {
+    await db.doc('timetableShares/live').set({
+      ownerUid: 'alice', revoked: false, expiresAt: future, courses: [], name: '課表',
+    });
+    await db.doc('timetableShares/old').set({
+      ownerUid: 'alice', revoked: false, expiresAt: past, courses: [], name: '課表',
+    });
+    await db.doc('timetableShares/gone').set({
+      ownerUid: 'alice', revoked: true, expiresAt: future, courses: [], name: '課表',
+    });
+  });
+  const guest = testEnv.unauthenticatedContext().firestore();
+  await assertSucceeds(guest.doc('timetableShares/live').get());
+  await assertFails(guest.doc('timetableShares/old').get());
+  await assertFails(guest.doc('timetableShares/gone').get());
+  await assertFails(guest.doc('timetableShares/live').set({ name: 'x' }));
+  await assertFails(guest.collection('timetableShares').get());
+});
+
