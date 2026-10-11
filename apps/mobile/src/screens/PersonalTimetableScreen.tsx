@@ -14,13 +14,11 @@ import {
   IMPORT_CONFIRM_COPY,
   IMPORT_NOT_APPLIED_COPY,
   PERIOD_TIMES,
-  SHARE_SNAPSHOT_NOTICE,
   SchedulePlanner,
   WEEKDAY_LABELS,
   applyImport,
   cleanCourse,
   commonFree,
-  encodeTimetableShare,
   parseTimetableText,
   periodRangeLabel,
   type PersonalCourse,
@@ -355,20 +353,18 @@ export default function PersonalTimetableScreen() {
         <Button
           text="分享課表"
           onPress={async () => {
+            let path = '';
             try {
               const share = await createServerShare(schoolId, '我的課表');
-              await Share.share({ message: `https://nuni.tw${share.path}` });
+              path = share.path;
             } catch {
-              const code = encodeTimetableShare({
-                v: 1,
-                id: uid || 'local',
-                name: '我的課表',
-                t: Date.now(),
-                courses: timetable.courses,
-                meta: timetable.meta,
-              });
-              await Share.share({ message: code });
-              setNotice(SHARE_SNAPSHOT_NOTICE);
+              setNotice('現在產生不了分享連結，登入並連上網路後再試。');
+              return;
+            }
+            try {
+              await Share.share({ message: `https://nuni.tw${path}` });
+            } catch {
+              // 使用者關掉分享面板或系統拒絕，不用另外提示
             }
           }}
         />
