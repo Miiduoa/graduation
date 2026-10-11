@@ -13,6 +13,9 @@
  * 舊鍵清掉之後讀到的都是不存在的文件，結果不受影響。
  *
  * 用 transaction 保證 atomic increment。
+ *
+ * 發號一定綁一筆訂單（orderId）：只有下單的學生本人或這家店的店員能拿號，
+ * 號碼存在訂單上，同一筆訂單重複呼叫回同一個號碼，不會多發。
  */
 
 const { onCall: firebaseOnCall, HttpsError } = require('firebase-functions/v2/https');
@@ -23,6 +26,9 @@ const onCall = createAccountGuardedOnCall({
 });
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { TAIPEI_TIME_ZONE, taipeiDateKey, taipeiDayStart, shiftDateKey } = require('../lib/taipeiDay');
+
+const { writeOrderPatch, writeOrderTransition, identifier } = require('../orderTransitions');
+const { normalizeCafeteriaOperatorRecord } = require('../authz');
 
 const REGION = 'asia-east1';
 
@@ -62,59 +68,157 @@ function legacySerialForTaipeiDay(legacySnaps, date) {
   return max;
 }
 
-async function allocateQueueSerial(db, { schoolId, vendorId, now = new Date() }) {
-  const date = taipeiDateKey(now);
-  const countersRef = db.collection('schools').doc(schoolId).collection('queueCounters');
+/**
+ * 在 transaction 裡算出這家店今天（台灣日期）的下一號。只讀不寫，回傳 write() 讓呼叫端
+ * 在讀完其他文件之後再寫（Firestore transaction 要先讀後寫）。
+ */
+async function readNextSerial(tx, countersRef, vendorId, date) {
   const ref = countersRef.doc(counterDocId(vendorId, date));
   // 台灣日期 D 的 0–8 點落在 UTC D-1，8 點以後落在 UTC D
   const legacyRefs = [shiftDateKey(date, -1), date].map((utcDate) =>
     countersRef.doc(legacyCounterDocId(vendorId, utcDate)),
   );
+  const snap = await tx.get(ref);
+  // 舊鍵每次都在同一個 transaction 裡讀：換版那一刻還在跑的舊版請求寫進舊鍵，
+  // 這邊會因為衝突重跑並讀到新的號碼，不會發出重複的號
+  const legacySnaps = [];
+  for (const legacyRef of legacyRefs) legacySnaps.push(await tx.get(legacyRef));
+  const current = snap.exists ? snap.data() : null;
+  const issuedToday =
+    current?.date === date && typeof current.nextSerial === 'number' ? current.nextSerial : 0;
+  const nextSerial = Math.max(issuedToday, legacySerialForTaipeiDay(legacySnaps, date)) + 1;
+  return {
+    nextSerial,
+    write() {
+      tx.set(
+        ref,
+        {
+          vendorId,
+          date,
+          dayTimeZone: TAIPEI_TIME_ZONE,
+          nextSerial,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+    },
+  };
+}
 
+async function allocateQueueSerial(db, { schoolId, vendorId, now = new Date() }) {
+  const date = taipeiDateKey(now);
+  const countersRef = db.collection('schools').doc(schoolId).collection('queueCounters');
   return db.runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
-    // 舊鍵每次都在同一個 transaction 裡讀：換版那一刻還在跑的舊版請求寫進舊鍵，
-    // 這邊會因為衝突重跑並讀到新的號碼，不會發出重複的號
-    const legacySnaps = [];
-    for (const legacyRef of legacyRefs) legacySnaps.push(await tx.get(legacyRef));
-    const current = snap.exists ? snap.data() : null;
-    const issuedToday =
-      current?.date === date && typeof current.nextSerial === 'number' ? current.nextSerial : 0;
-    const nextSerial = Math.max(issuedToday, legacySerialForTaipeiDay(legacySnaps, date)) + 1;
-    tx.set(
-      ref,
-      {
-        vendorId,
-        date,
-        dayTimeZone: TAIPEI_TIME_ZONE,
-        nextSerial,
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
-    return nextSerial;
+    const plan = await readNextSerial(tx, countersRef, vendorId, date);
+    plan.write();
+    return plan.nextSerial;
   });
 }
 
-module.exports.assignQueueNumber = onCall({ region: REGION }, async (request) => {
-  const uid = request.auth?.uid;
-  if (!uid) throw new HttpsError('unauthenticated', 'Must be logged in');
+const CLOSED_ORDER_STATUSES = ['completed', 'cancelled'];
 
-  const schoolId = String(request.data?.schoolId || '').trim();
-  const vendorId = String(request.data?.vendorId || '').trim();
-  if (!schoolId || !vendorId) {
-    throw new HttpsError('invalid-argument', 'Missing schoolId or vendorId');
-  }
+/**
+ * 幫一筆訂單拿號碼牌，和 assignQueueNumber 共用同一個計數器（以訂單的 cafeteriaId 為店）。
+ * - 訂單已有號碼就直接回那個號碼，不會再發一次。
+ * - 系統（actor = 'system'）：createOrder 建單後馬上拿號。
+ * - 下單的學生本人：重試拿號。
+ * - 這家店在職的店員：按「給號碼」（actor = 'merchant'）；訂單還在待接單時一併接單，不會卡在待接單。
+ * - 其他人（別家店、無關的學生）一律擋下，不會多發號。
+ * 號碼和狀態同時寫進學校訂單和學生自己的訂單副本，學生畫面會跟著換成真的號碼。
+ */
+async function assignNumberForOrder(
+  db,
+  { schoolId, orderId, uid, actor, vendorId = null, now = new Date() },
+) {
+  const schoolRef = db.collection('schools').doc(schoolId);
+  const orderRef = schoolRef.collection('orders').doc(orderId);
+  const countersRef = schoolRef.collection('queueCounters');
+  const date = taipeiDateKey(now);
+  return db.runTransaction(async (tx) => {
+    const orderDoc = await tx.get(orderRef);
+    if (!orderDoc.exists) throw new HttpsError('not-found', 'Order not found');
+    const order = orderDoc.data();
+    let cafeteriaId;
+    try {
+      cafeteriaId = identifier(order.cafeteriaId, 'cafeteriaId');
+    } catch {
+      throw new HttpsError('failed-precondition', 'Order has no store to number');
+    }
+    if (vendorId != null && vendorId !== cafeteriaId && vendorId !== order.merchantId)
+      throw new HttpsError('permission-denied', 'Order does not belong to this store');
+    const isOperator = async () => {
+      if (!uid) return false;
+      const operator = await tx.get(
+        schoolRef.collection('cafeterias').doc(cafeteriaId).collection('operators').doc(uid),
+      );
+      return operator.exists && normalizeCafeteriaOperatorRecord(operator.data()).status === 'active';
+    };
+    // 誰可以拿號：系統（建單後）、下單的學生本人、這家店在職的店員。其他人一律擋下
+    let role;
+    if (actor === 'system') role = 'system';
+    else if (actor !== 'merchant' && uid && order.userId === uid) role = 'customer';
+    else if (await isOperator()) role = 'merchant';
+    else throw new HttpsError('permission-denied', 'Only the buyer or this store can get a number');
+    if (typeof order.queueNumber === 'number' && order.queueNumber > 0) {
+      if (order.queueStatus !== 'assigned') {
+        writeOrderPatch(tx, db, orderRef, schoolId, orderId, order, { queueStatus: 'assigned' });
+      }
+      return { queueNumber: order.queueNumber, queueStatus: 'assigned', reused: true, status: order.status };
+    }
+    if (CLOSED_ORDER_STATUSES.includes(order.status))
+      throw new HttpsError('failed-precondition', 'Order is already closed');
+    const plan = await readNextSerial(tx, countersRef, cafeteriaId, date);
+    plan.write();
+    const numberPatch = {
+      queueNumber: plan.nextSerial,
+      queueStatus: 'assigned',
+      queueDate: date,
+      queueAssignedBy: role,
+      queueAssignedAt: FieldValue.serverTimestamp(),
+    };
+    let status = order.status;
+    if (role === 'merchant' && order.status === 'pending') {
+      writeOrderTransition(tx, db, orderRef, schoolId, orderId, order, 'confirmed', numberPatch);
+      status = 'confirmed';
+    } else {
+      writeOrderPatch(tx, db, orderRef, schoolId, orderId, order, numberPatch);
+    }
+    return { queueNumber: plan.nextSerial, queueStatus: 'assigned', reused: false, status };
+  });
+}
 
-  const db = getFirestore();
-  try {
-    const serial = await allocateQueueSerial(db, { schoolId, vendorId });
-    return { ok: true, serial };
-  } catch (err) {
-    console.error('[assignQueueNumber] failed:', err);
-    throw new HttpsError('internal', 'Failed to assign queue number');
-  }
-});
+function orderKey(value, name) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (!text || text.length > 160 || text.includes('/'))
+    throw new HttpsError('invalid-argument', `Invalid ${name}`);
+  return text;
+}
+
+/**
+ * Cloud Function: assignQueueNumber
+ * { schoolId, orderId, vendorId?, as? }
+ * 一定要帶 orderId，一筆訂單只會有一個號碼：號碼存在訂單上，重複呼叫回同一個號碼。
+ * 店家畫面的「給號碼」帶 as: 'merchant'，走同一條路。
+ */
+function assignQueueNumberHandler({ db }) {
+  return async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError('unauthenticated', 'Must be logged in');
+    const schoolId = orderKey(request.data?.schoolId, 'schoolId');
+    if (request.data?.orderId == null)
+      throw new HttpsError('invalid-argument', 'orderId is required');
+    const orderId = orderKey(request.data.orderId, 'orderId');
+    const vendorId =
+      request.data?.vendorId == null ? null : orderKey(request.data.vendorId, 'vendorId');
+    const actor = request.data?.as === 'merchant' ? 'merchant' : 'request';
+    const result = await assignNumberForOrder(db, { schoolId, orderId, uid, actor, vendorId });
+    return { ok: true, serial: result.queueNumber, ...result };
+  };
+}
+
+module.exports.assignQueueNumber = onCall({ region: REGION }, (request) =>
+  assignQueueNumberHandler({ db: getFirestore() })(request),
+);
 
 /**
  * Cloud Function: dailyQueueReset (scheduled)
@@ -156,5 +260,7 @@ async function runDailyQueueReset(db, now = new Date()) {
 }
 
 module.exports.allocateQueueSerial = allocateQueueSerial;
+module.exports.assignNumberForOrder = assignNumberForOrder;
+module.exports.assignQueueNumberHandler = assignQueueNumberHandler;
 module.exports.runDailyQueueReset = runDailyQueueReset;
 module.exports.counterDocId = counterDocId;

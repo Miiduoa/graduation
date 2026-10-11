@@ -33,6 +33,7 @@ function transactionStore(seed = []) {
       const tx = {
         getAll: async (...refs) => refs.map((reference) => snap(reference, base)),
         get: async (query) => {
+          if (!Array.isArray(query.filters)) return snap(query, base);
           const result = [...base]
             .filter(
               ([path, data]) =>

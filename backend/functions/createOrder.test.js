@@ -257,4 +257,26 @@ describe('canonical priced idempotent orders', () => {
     await expect(createOrder(request())).rejects.toThrow('commit unavailable');
     expect(paths()).toHaveLength(0);
   });
+  test('建單後由伺服器發號碼牌，同一筆重送回同一個號碼', async () => {
+    const first = await createOrder(request());
+    expect(first).toMatchObject({ queueNumber: 1, queueStatus: 'assigned' });
+    const canonical = store.docs.get(`schools/pu/orders/${first.orderId}`);
+    expect(canonical).toMatchObject({ queueNumber: 1, queueStatus: 'assigned' });
+    expect(store.docs.get(`users/alice/schools/pu/orders/${first.orderId}`)).toMatchObject({ queueNumber: 1 });
+    const replay = await createOrder(request());
+    expect(replay).toMatchObject({ reused: true, queueNumber: 1, queueStatus: 'assigned' });
+    const second = await createOrder(request({ requestId: 'attempt-2' }));
+    expect(second.queueNumber).toBe(2);
+  });
+  test('號碼拿不到時訂單照樣成立，標「待確認」，不給假號碼', async () => {
+    const queue = require('./ordering/queueNumber');
+    const spy = jest.spyOn(queue, 'assignNumberForOrder').mockRejectedValue(new Error('counter down'));
+    try {
+      const result = await createOrder(request());
+      expect(result).toMatchObject({ success: true, queueNumber: null, queueStatus: 'pending_confirmation' });
+      expect(store.docs.get(`schools/pu/orders/${result.orderId}`)).toMatchObject({ status: 'pending', queueNumber: null, queueStatus: 'pending_confirmation' });
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });
