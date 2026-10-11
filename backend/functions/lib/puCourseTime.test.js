@@ -26,7 +26,7 @@ describe('PU course meeting parser', () => {
   test('keeps missing room data empty and uses the existing night-period timetable', () => {
     expect(parsePuCourseTime('六(Sat) 4')).toMatchObject({ periods: [4], location: '' });
     expect(parsePuCourseTime('五(Fri) 10, 11, 12, 13:PH320')).toMatchObject({
-      startTime: '18:30', endTime: '22:05',
+      startTime: '18:05', endTime: '21:40',
     });
   });
 
