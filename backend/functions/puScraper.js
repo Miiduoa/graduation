@@ -20,6 +20,7 @@ const https = require('https');
 const { parsePuGradeDocument, parseGradeSemesterCodes } = require('./lib/puGradeDocument');
 const { buildDerivedCreditSummary } = require('./lib/puCreditSummary');
 const { parsePuCourseTime } = require('./lib/puCourseTime');
+const { taipeiDateKey } = require('./lib/taipeiDay');
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -511,7 +512,7 @@ async function puFetchGrades(cookies, semester) {
  * Falls back to today's date if no date found.
  */
 function extractDateFromContext(html, linkStartPos) {
-  if (!html || linkStartPos < 0) return new Date().toISOString().split('T')[0];
+  if (!html || linkStartPos < 0) return taipeiDateKey();
 
   // Look in a window around the link (200 chars before and after)
   const start = Math.max(0, linkStartPos - 200);
@@ -536,13 +537,13 @@ function extractDateFromContext(html, linkStartPos) {
   }
 
   // Fallback to today
-  return new Date().toISOString().split('T')[0];
+  return taipeiDateKey();
 }
 
 function extractAnnouncementsFromHtml(html) {
   const announcements = [];
   const seen = new Set();
-  const today = new Date().toISOString().split('T')[0];
+  const today = taipeiDateKey();
 
   const rowRegex = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
   let rowMatch;

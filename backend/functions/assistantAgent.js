@@ -545,6 +545,7 @@ function buildAgentSystemPrompt({
     '若使用者問的是單一查詢（例如：還沒還的書、某一門課、某一份作業），請專注回答該問題，不要額外附上與問題無關的長篇摘要。',
     '當所有工具都無法解決、且問題明顯屬於校園相關時，不能只說「我不知道」；要先呼叫 reflectOnGap，根據 breakthrough 回傳的工具建議與 learningSteps 說明下一步會如何學會。',
     '回答若使用來源，請在文字中簡短提到來源名稱。',
+    '提到日期時間一律用台灣時間（Asia/Taipei），寫成「10 月 13 日（二）02:35」這種絕對日期；資料裡結尾是 Z 的時間是 UTC，要先加 8 小時再說，日期和星期也跟著換。回覆會存下來之後再看，所以不要用「今天、明天、後天、昨天」這類相對的說法，一律寫日期。',
     '',
     `schoolId=${schoolId || 'unknown'} actorRole=${actorRole || 'student'} permissionScope=${permissionScope || 'public'}`,
     '',
