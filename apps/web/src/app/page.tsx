@@ -9,6 +9,7 @@ import { useAuth } from '@/components/AuthGuard';
 import { browserRequest, useNuniSession } from '@/features/nuni/Session';
 import { loadHomeData, type HomeCourse, type HomeData, type HomeTask } from '@/lib/homeOverview';
 import { loadNuniHomeData } from '@/lib/nuniHomeOverview';
+import { publicCampusServices } from '@/lib/publicCampusServices';
 import styles from './home.module.css';
 
 const teachingRoles = ['owner', 'instructor', 'moderator', 'owner-teacher', 'co-teacher'];
@@ -150,7 +151,7 @@ export default function HomePage() {
             <p className={styles.intro}>
               {signedIn
                 ? '查看待辦、回到課程，查找今天要用的校園服務。'
-                : '進入課程繳交作業，或查看課表與校園資訊。'}
+                : '先查校園資訊，需要課程與個人服務時再登入。'}
             </p>
           </div>
           <div className={styles.date}>
@@ -239,7 +240,7 @@ export default function HomePage() {
                           : context
                             ? '向老師取得邀請碼後加入課程；授課者也可以建立課程。'
                             : '前往課程空間加入課程，或查看學校課表。'
-                      : '使用 Campus One 帳號登入，查看老師的教材、作業與回饋。'}
+                      : '使用 Campus One 帳號查看教材、作業與回饋，不需要先連線學校帳號。'}
                   </p>
                 )}
                 <div className={styles.focusActions}>
@@ -270,8 +271,11 @@ export default function HomePage() {
                           : '登入 Campus One 帳號'}{' '}
                     <span aria-hidden>→</span>
                   </Link>
-                  <Link className={styles.secondary} href="/timetable">
-                    查看課表
+                  <Link
+                    className={styles.secondary}
+                    href={signedIn ? '/timetable' : '#public-services'}
+                  >
+                    {signedIn ? '查看課表' : '先瀏覽校園資訊'}
                   </Link>
                 </div>
               </section>
@@ -393,15 +397,14 @@ export default function HomePage() {
             )}
           </div>
           <aside className={styles.sidebar}>
-            <section className={styles.services} aria-labelledby="daily-links-title">
-              <h2 id="daily-links-title">今天會用到</h2>
-              {[
-                ['/timetable', '我的課表', '上課時間與教室'],
-                ['/map', '校園地圖', '找教室與校園設施'],
-                ['/bus', '公車資訊', '路線與到站時間'],
-                ['/cafeteria', '餐廳', '菜單與營業資訊'],
-                ['/library', '圖書館', '借閱與館藏查詢'],
-              ].map(([href, title, detail]) => (
+            <section
+              id="public-services"
+              className={styles.services}
+              aria-labelledby="daily-links-title"
+            >
+              <h2 id="daily-links-title">校園生活</h2>
+              <p className={styles.sectionNote}>這些入口不需登入；個人校務資料需另行驗證。</p>
+              {publicCampusServices.map(({ href, title, detail }) => (
                 <Link key={href} href={href}>
                   <span>
                     <strong>{title}</strong>
