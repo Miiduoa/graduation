@@ -8,10 +8,12 @@ const onCall = createAccountGuardedOnCall({
 });
 const { getFirestore } = require('firebase-admin/firestore');
 const { createOrderHandler } = require('./createOrder');
+const { assertOnlineOrderingEnabled } = require('./lib/onlineOrdering');
 
 module.exports = onCall({ region: 'asia-east1' }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', '請先登入後再確認訂單。');
+  assertOnlineOrderingEnabled();
   const input = request.data || {};
   if (input.userId != null && input.userId !== uid)
     throw new HttpsError('permission-denied', '無法代其他帳號建立訂單。');

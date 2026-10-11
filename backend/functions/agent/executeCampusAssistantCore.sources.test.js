@@ -574,3 +574,35 @@ test('the actual callable accepts the 4000-character Web question and preserves 
   expect(mockModel.mock.calls[0][0].messages.at(-1)).toEqual({ role: 'user', content });
   expect(mockWebSearch).toHaveBeenCalledWith(content.slice(0, 500));
 });
+
+describe('線上點餐關著時，助理不會留下訂單或下單按鈕', () => {
+  const saved = process.env.ONLINE_ORDERING_ENABLED;
+  beforeEach(() => {
+    process.env.ONLINE_ORDERING_ENABLED = 'false';
+  });
+  afterEach(() => {
+    if (saved === undefined) delete process.env.ONLINE_ORDERING_ENABLED;
+    else process.env.ONLINE_ORDERING_ENABLED = saved;
+  });
+
+  test('學生說「幫我點一份雞腿飯」，回「目前還不能線上點餐」', async () => {
+    mockDocuments.set('users/alice', { primarySchoolId: 'pu', role: 'student' });
+    mockDocuments.set('schools/pu/members/alice', { status: 'active' });
+    mockDocuments.set('schools/pu/cafeterias/cafe', { name: '學生餐廳', orderingEnabled: true });
+    mockDocuments.set('schools/pu/cafeterias', [row('cafe', { name: '學生餐廳', schoolId: 'pu', orderingEnabled: true })]);
+    mockDocuments.set('schools/pu/menus', [row('rice', { name: '雞腿飯', schoolId: 'pu', cafeteriaId: 'cafe', price: 100 })]);
+
+    const result = await askCampusAssistant.run({
+      auth: { uid: 'alice', token: { role: 'student' } },
+      data: { messages: [{ role: 'user', content: '幫我點一份雞腿飯' }], context: { schoolId: 'pu' } },
+    });
+
+    expect(result.content).toBe('目前還不能線上點餐');
+    expect(result.content).not.toMatch(/草稿|確認後會送出/);
+    const cards = Array.isArray(result.cards) ? result.cards : [];
+    expect(cards.some((card) => ['order_draft_card', 'order_submitted'].includes(card.kind))).toBe(false);
+    const actions = Array.isArray(result.actions) ? result.actions : [];
+    expect(JSON.stringify(actions)).not.toContain('createOrder');
+    expect(mockWrites.some(({ path }) => /(^|\/)orders\/|_orderRequests|queueCounters/.test(path))).toBe(false);
+  });
+});

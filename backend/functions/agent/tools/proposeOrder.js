@@ -2,6 +2,7 @@
 
 const { z } = require('zod');
 const { getFirestore } = require('firebase-admin/firestore');
+const { isOnlineOrderingEnabled, ONLINE_ORDERING_OFF_MESSAGE } = require('../../lib/onlineOrdering');
 
 const itemSchema = z.object({
   menuItemId: z.string().min(1),
@@ -25,6 +26,9 @@ const inputSchema = z.object({
  * confirms by calling createOrder.
  */
 async function execute(ctx, rawInput) {
+  if (!isOnlineOrderingEnabled()) {
+    return { success: false, errorCode: 'online_ordering_off', errorMessage: ONLINE_ORDERING_OFF_MESSAGE };
+  }
   try {
     const input = inputSchema.parse(rawInput ?? {});
     const schoolId = ctx.schoolId;

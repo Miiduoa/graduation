@@ -89,7 +89,30 @@ it('retains read cards while keeping order writes and claimed receipts out of th
   render(<AssistantPage />); ask();
   await waitFor(() => expect(screen.getByText('poi_card')).toBeTruthy());
   expect(screen.queryByText(/order_draft_card|order_submitted/)).toBeNull();
-  // 不再把學生帶去寫「尚未開放線上點餐」的餐廳頁，改指我的訂單
+  // 線上點餐還沒開：只回「目前還不能線上點餐」，不帶去我的訂單或餐廳頁
+  expect(screen.getByText('目前還不能線上點餐')).toBeTruthy();
+  expect(screen.queryByText('找到餐廳資訊')).toBeNull();
   expect(screen.queryByRole('link', { name: '餐廳服務' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '我的訂單' })).toBeNull();
+  expect(document.querySelector('a[href="/orders"]')).toBeNull();
+});
+
+it('asked to order chicken rice, the web assistant replies only that online ordering is not open', async () => {
+  vi.mocked(callCampusAssistant).mockResolvedValue({ content: '已整理好訂餐草稿（1 項），按下確認後會送出。', cards: [
+    { kind: 'order_draft_card', payload: { cafeteriaId: 'cafe', items: [{ menuItemId: 'rice', name: '雞腿飯', price: 100, quantity: 1 }] } },
+  ] });
+  render(<AssistantPage />); ask('幫我點一份雞腿飯');
+  await waitFor(() => expect(screen.getByText('目前還不能線上點餐')).toBeTruthy());
+  expect(screen.queryByText(/草稿|確認後會送出/)).toBeNull();
+  expect(screen.queryByRole('button', { name: /確認|下單/ })).toBeNull();
+  expect(document.querySelector('a[href="/orders"]')).toBeNull();
+});
+
+it('when web ordering is turned back on, the order note links to my orders again', async () => {
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'true');
+  vi.mocked(callCampusAssistant).mockResolvedValue({ content: '找到餐廳資訊', cards: [{ kind: 'order_draft_card', payload: {} }] });
+  render(<AssistantPage />); ask();
+  await waitFor(() => expect(screen.getByText('找到餐廳資訊')).toBeTruthy());
   expect(screen.getByRole('link', { name: '我的訂單' }).getAttribute('href')).toBe('/orders');
+  vi.unstubAllEnvs();
 });

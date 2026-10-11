@@ -1879,3 +1879,34 @@ test('the seven-day wait cannot be skipped by blocking, deleting or unblocking',
   await assertSucceeds(cat.doc(id).delete());
   await assertSucceeds(ann.doc(id).set(invite));
 });
+
+test('線上點餐關著時，學生或店員也不能直接在資料庫寫出訂單或號碼', async () => {
+  await seedFirestore(async (db) => {
+    await db.doc('users/alice').set({ schoolId: 'pu', role: 'student' });
+    await db.doc('schools/pu/members/alice').set({ status: 'active', role: 'student' });
+    await db.doc('schools/pu/members/op').set({ status: 'active', role: 'student' });
+    await db.doc('schools/pu/cafeterias/cafe').set({ name: '學生餐廳' });
+    await db.doc('schools/pu/cafeterias/cafe/operators/op').set({ status: 'active' });
+  });
+  const order = { userId: 'alice', schoolId: 'pu', cafeteriaId: 'cafe', status: 'pending', total: 100, items: [{ menuItemId: 'rice', quantity: 1 }] };
+  for (const uid of ['alice', 'op']) {
+    const db = testEnv.authenticatedContext(uid).firestore();
+    for (const target of [
+      'schools/pu/orders/direct',
+      'users/alice/schools/pu/orders/direct',
+      'orders/direct',
+      'schools/pu/cafeterias/cafe/orders/direct',
+      'schools/pu/queueCounters/cafe__tpe__2026-10-12',
+      '_orderRequests/direct',
+    ]) {
+      await assertFails(db.doc(target).set(order));
+    }
+  }
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    for (const target of ['schools/pu/orders', 'users/alice/schools/pu/orders', 'orders', 'schools/pu/cafeterias/cafe/orders', 'schools/pu/queueCounters', '_orderRequests']) {
+      const snap = await db.collection(target).get();
+      if (!snap.empty) throw new Error(`${target} has ${snap.size} docs`);
+    }
+  });
+});
