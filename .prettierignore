@@ -27,8 +27,6 @@ tmp
 outputs
 
 # Local tool state
-.claude
-.cursor
 .playwright-cli
 
 # Python runtime output

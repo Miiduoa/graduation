@@ -9,7 +9,7 @@ Campus One 保留紙白底、墨綠文字與清楚的列表層次。首頁、校
 - Web 服務名稱與分類：`apps/web/src/lib/campusServices.ts`；服務選單與搜尋共用這份目錄。
 - App 色彩、尺寸及陰影：`apps/mobile/src/ui/theme.ts`，畫面透過 `useTheme()` 取得目前模式；子頁沿用共用頁首。
 
-`packages/shared/src/designTokens.ts`、`AI_FIRST_REDESIGN.md` 與未掛載的舊 AppShell 屬於歷史設計，尚未與現行主題同步，不作為新畫面的樣式來源。既有檔案名稱不代表使用者介面需要出現 AI 標籤。
+`packages/shared/src/designTokens.ts`與未掛載的舊 AppShell 屬於歷史設計，尚未與現行主題同步，不作為新畫面的樣式來源。既有檔案名稱不代表使用者介面需要出現 AI 標籤。
 
 ## 色彩與層次
 

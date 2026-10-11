@@ -30,9 +30,7 @@ firestore-debug.log*
 *.bak.*
 _tmp_*
 
-# Local agent / IDE tooling (do not commit)
-.claude/
-.cursor/
+# Local tooling (do not commit)
 .playwright-cli/
 
 # Next
