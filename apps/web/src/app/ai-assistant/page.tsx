@@ -90,7 +90,7 @@ function AssistantConversation({ userId, groupId, initialDraft }: { userId: stri
         <p className={styles.content}>{message.content}</p>
         {message.role === 'assistant' && <>
           <div className={styles.cards}><AgentCardList cards={readOnlyAssistantCards(message.response.cards, school.schoolId)} schoolId={school.schoolId} /></div>
-          {hasOrderProposal(message.response) && <p className={styles.note}>這段對話不會送出訂單。餐點與訂單狀態請在<Link href="/cafeteria">餐廳服務</Link>確認。</p>}
+          {hasOrderProposal(message.response) && <p className={styles.note}>這段對話不會送出訂單。訂單狀態和取餐號碼請看<Link href="/orders">我的訂單</Link>。</p>}
           {assistantSources(message.response.citations).length > 0 && <ul className={styles.sources} aria-label="參考來源">
             {assistantSources(message.response.citations).map(source => <li key={source.url}><a href={source.url} target="_blank" rel="noopener noreferrer">{source.label}</a></li>)}
           </ul>}
