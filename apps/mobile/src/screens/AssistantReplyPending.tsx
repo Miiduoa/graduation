@@ -17,7 +17,7 @@ function createdAtMs(value: any): number {
 
 /**
  * 提問底下的助理回覆：伺服器寫好之前顯示「助理回覆中」，寫好就即時換成回覆內容。
- * 一分鐘內沒回覆（或伺服器記成沒辦法回答）就改成「助理暫時沒辦法回答，可以等其他同學回覆」。
+ * 一分鐘內沒回覆（或伺服器記成失敗）就改成「助理暫時沒辦法回答，可以等其他同學回覆」。
  */
 export function AssistantReplyPending(props: {
   groupId: string;
@@ -54,7 +54,9 @@ export function AssistantReplyPending(props: {
     };
   }, [groupId, postId, started, onArrived]);
 
-  if (reply) {
+  // 伺服器標成失敗（沒有金鑰、模型出錯或逾時）時寫的是固定說法，照一般提示顯示
+  const failed = status === 'failed' || status === 'unavailable' || reply === ASSISTANT_UNAVAILABLE_COPY;
+  if (reply && !failed) {
     return (
       <View
         style={{
@@ -74,7 +76,7 @@ export function AssistantReplyPending(props: {
       </View>
     );
   }
-  const unavailable = timedOut || status === 'unavailable';
+  const unavailable = failed || timedOut;
   return (
     <Text style={{ color: theme.colors.muted, fontSize: 12 }} accessibilityLiveRegion="polite">
       {unavailable ? ASSISTANT_UNAVAILABLE_COPY : ASSISTANT_PENDING_COPY}
