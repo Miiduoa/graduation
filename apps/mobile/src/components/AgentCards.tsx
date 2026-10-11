@@ -189,6 +189,8 @@ function OrderDraftCard({ payload }: { payload: any }) {
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
   // 同一張草稿「再試一次」沿用同一個送出編號，伺服器不會建出第二筆
   const requestIdRef = useRef<string | null>(null);
+  // 連點時第二下還沒等到畫面變灰就進來了，用 ref 擋住，同時只會有一個請求在路上
+  const inFlightRef = useRef(false);
   const items: any[] = payload.items || [];
 
   const handleConfirm = async () => {
@@ -199,6 +201,8 @@ function OrderDraftCard({ payload }: { payload: any }) {
       );
       return;
     }
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     setSubmitting(true);
     setResult(null);
     requestIdRef.current ??=
@@ -235,6 +239,7 @@ function OrderDraftCard({ payload }: { payload: any }) {
       if (notCreated) requestIdRef.current = null;
       setResult({ ok: false, message: notCreated && e?.message ? e.message : ORDER_NOT_SENT_TEXT });
     } finally {
+      inFlightRef.current = false;
       setSubmitting(false);
     }
   };
