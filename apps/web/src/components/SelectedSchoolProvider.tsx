@@ -182,3 +182,8 @@ export function useSelectedSchool() {
   if (!context) throw new Error('useSelectedSchool must be used within SelectedSchoolProvider');
   return context;
 }
+
+/** 沒有 SelectedSchoolProvider 時回傳 null（例如單獨測試頁面）。 */
+export function useOptionalSelectedSchool() {
+  return useContext(SelectedSchoolContext);
+}

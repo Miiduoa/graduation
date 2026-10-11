@@ -24,9 +24,16 @@ export const CAMPUS_SERVICES = [
   },
   {
     name: '課程申訴',
-    text: '送出課程相關申訴，狀態跟實際案件走',
+    text: '送出課程申訴，看老師處理到哪',
     href: '/appeals',
     keywords: '申訴 出缺席 成績 appeal',
+    category: 'study',
+  },
+  {
+    name: '老師工作台',
+    text: '老師看自己課的學生申訴，核准或不核准',
+    href: '/teacher',
+    keywords: '老師 教師 申訴 核准 teacher',
     category: 'study',
   },
   {
@@ -52,7 +59,7 @@ export const CAMPUS_SERVICES = [
   },
   {
     name: '課程空間',
-    text: '使用 Nuni 帳號閱讀教材、繳交作業與課堂作答',
+    text: '用學校帳號閱讀教材、繳交作業與課堂作答',
     href: '/classroom',
     keywords: 'nuni 課程 教材 作業 測驗 classroom',
     category: 'study',
