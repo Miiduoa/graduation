@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { WEEKDAY_LABELS, periodRangeLabel } from '@campus/shared';
+import { WEEKDAY_LABELS, friendResendCopy, periodRangeLabel } from '@campus/shared';
 import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
 import { useSelectedSchool } from '@/components/SelectedSchoolProvider';
@@ -18,6 +18,8 @@ import {
   normalizeHandle,
   publishHandle,
   sendFriendRequest,
+  sentRequestState,
+  type SentState,
   unpublishHandle,
   type FriendRow,
 } from '@/lib/timetable/friends';
@@ -48,6 +50,7 @@ export default function FriendsPage() {
   const [needle, setNeedle] = useState('');
   const [hit, setHit] = useState<{ uid: string; name: string; handle: string } | null>(null);
   const [searched, setSearched] = useState(false);
+  const [hitState, setHitState] = useState<SentState>({ kind: 'none' });
   const [friends, setFriends] = useState<FriendRow[]>([]);
   const [pending, setPending] = useState<FriendRow[]>([]);
   const [meetups, setMeetups] = useState<Meetup[]>([]);
@@ -108,7 +111,9 @@ export default function FriendsPage() {
     }
     try {
       const found = await findByHandle(schoolId, handle);
-      setHit(found && found.uid !== user.uid ? found : null);
+      const usable = found && found.uid !== user.uid ? found : null;
+      setHit(usable);
+      setHitState(usable ? await sentRequestState(schoolId, user.uid, usable.uid) : { kind: 'none' });
       setSearched(true);
       setNotice('');
     } catch {
@@ -198,26 +203,44 @@ export default function FriendsPage() {
                 <h3>{hit.name}</h3>
                 <p>@{hit.handle}</p>
               </div>
-              <button
-                type="button"
-                className="btn"
-                onClick={() =>
-                  void sendFriendRequest(schoolId, user.uid, hit.uid, myName, hit.name)
-                    .then((result) =>
-                      setNotice(
-                        result === 'accepted'
-                          ? '你們已經是好友了。'
-                          : result === 'pending'
-                            ? '邀請已經送過了，等對方回覆。'
-                            : '已送出好友邀請，等對方接受。',
-                      ),
-                    )
-                    .then(reload)
-                    .catch(() => setNotice('邀請沒有送出，請稍後再試。'))
-                }
-              >
-                加好友
-              </button>
+              {hitState.kind === 'declined' ? (
+                <div>
+                  <button type="button" className="btn" disabled>
+                    加好友
+                  </button>
+                  <p className={styles.notice}>{friendResendCopy(hitState.declinedAtMs)}</p>
+                </div>
+              ) : hitState.kind === 'accepted' ? (
+                <span>已是好友</span>
+              ) : hitState.kind === 'pending' ? (
+                <span>邀請已送出</span>
+              ) : (
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() =>
+                    void sendFriendRequest(schoolId, user.uid, hit.uid, myName, hit.name)
+                      .then((result) => {
+                        setHitState({ kind: result === 'accepted' ? 'accepted' : 'pending' });
+                        setNotice(
+                          result === 'accepted'
+                            ? '你們已經是好友了。'
+                            : result === 'pending'
+                              ? '邀請已經送過了，等對方回覆。'
+                              : '已送出好友邀請，等對方接受。',
+                        );
+                      })
+                      .then(reload)
+                      .catch(async () => {
+                        const state = await sentRequestState(schoolId, user.uid, hit.uid);
+                        setHitState(state);
+                        if (state.kind !== 'declined') setNotice('邀請沒有送出，請稍後再試。');
+                      })
+                  }
+                >
+                  加好友
+                </button>
+              )}
             </li>
           </ul>
         )}

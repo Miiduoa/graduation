@@ -1623,3 +1623,24 @@ test('course appeals need a course and only teachers can approve', async () => {
   await assertSucceeds(teach.doc('courseAppeals/a1').update({ status: 'approved', teacherNote: '好' }));
   await assertSucceeds(stu.doc('courseAppeals/a1').get());
 });
+
+test('a declined sender has to wait seven days before sending again', async () => {
+  const { serverTimestamp } = require('firebase/firestore');
+  await seedFirestore(async (db) => {
+    for (const uid of ['amy', 'ben']) await db.doc(`schools/pu/members/${uid}`).set({ status: 'active', role: 'student' });
+  });
+  const amy = testEnv.authenticatedContext('amy').firestore();
+  const ben = testEnv.authenticatedContext('ben').firestore();
+  const id = 'friendships/req_pu_amy_ben';
+  await assertSucceeds(amy.doc(id).set({ schoolId: 'pu', fromUid: 'amy', toUid: 'ben', status: 'pending' }));
+  // 婉拒一定要帶伺服器時間
+  await assertFails(ben.doc(id).update({ status: 'declined' }));
+  await assertSucceeds(ben.doc(id).update({ status: 'declined', declinedAt: serverTimestamp() }));
+  // 七天內送出邀請的人不能刪掉重送，也不能改回待確認
+  await assertFails(amy.doc(id).delete());
+  await assertFails(amy.doc(id).update({ status: 'pending' }));
+  // 過了七天就可以
+  await seedFirestore(async (db) => db.doc(id).update({ declinedAt: new Date(Date.now() - 8 * 86400000) }));
+  await assertSucceeds(amy.doc(id).delete());
+  await assertSucceeds(amy.doc(id).set({ schoolId: 'pu', fromUid: 'amy', toUid: 'ben', status: 'pending' }));
+});
