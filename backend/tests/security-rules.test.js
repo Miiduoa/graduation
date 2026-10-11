@@ -1562,9 +1562,14 @@ test('only the invitee can accept a friend request', async () => {
   // 已接受之後也不能被任一方改回待確認或改成別人
   await assertFails(alice.doc('friendships/req_pu_alice_carol').update({ status: 'pending' }));
   await assertFails(carol.doc('friendships/req_pu_alice_carol').update({ toUid: 'mallory' }));
-  // 任一方都可以封鎖
-  await assertSucceeds(alice.doc('friendships/req_pu_alice_carol').update({ status: 'blocked' }));
+  // 封鎖不改這筆的狀態；要斷掉就刪掉好友，再另外記一筆封鎖
+  await assertFails(alice.doc('friendships/req_pu_alice_carol').update({ status: 'blocked' }));
+  await assertSucceeds(carol.doc('friendBlocks/carol_alice').set({ schoolId: 'pu', blockerUid: 'carol', blockedUid: 'alice' }));
+  await assertSucceeds(carol.doc('friendships/req_pu_alice_carol').delete());
   await assertFails(alice.doc('users/carol/personalTimetable/current').get());
+  // 被封鎖的人不能再送邀請，也看不到封鎖紀錄
+  await assertFails(alice.doc('friendBlocks/carol_alice').get());
+  await assertFails(alice.doc('friendships/req_pu_alice_carol').set({ schoolId: 'pu', fromUid: 'alice', toUid: 'carol', status: 'pending' }));
 });
 
 test('handles can be looked up one at a time but never listed', async () => {
@@ -1670,4 +1675,43 @@ test('friend invite names always come from the profiles, not from the sender', a
   await assertFails(dan.doc(id).update({ status: 'accepted', toName: '教務處' }));
   await assertSucceeds(dan.doc(id).update({ status: 'accepted', toName: '阿丹' }));
   await assertFails(eve.doc(id).update({ status: 'blocked', toName: '教務處' }));
+});
+
+test('the seven-day wait cannot be skipped by blocking, deleting or unblocking', async () => {
+  const { serverTimestamp } = require('firebase/firestore');
+  await seedFirestore(async (db) => {
+    for (const uid of ['ann', 'cat']) await db.doc(`schools/pu/members/${uid}`).set({ status: 'active', role: 'student' });
+  });
+  const ann = testEnv.authenticatedContext('ann').firestore();
+  const cat = testEnv.authenticatedContext('cat').firestore();
+  const id = 'friendships/req_pu_ann_cat';
+  const invite = { schoolId: 'pu', fromUid: 'ann', toUid: 'cat', status: 'pending' };
+  await assertSucceeds(ann.doc(id).set(invite));
+  await assertSucceeds(cat.doc(id).update({ status: 'declined', declinedAt: serverTimestamp() }));
+  // 學生回報的繞法：先改成 blocked 再刪掉、馬上重送 → 每一步都要擋
+  await assertFails(ann.doc(id).update({ status: 'blocked' }));
+  await assertFails(ann.doc(id).delete());
+  await assertFails(ann.doc(id).set(invite));
+  // 舊版留下來的 blocked 也一樣要等七天
+  await seedFirestore(async (db) => db.doc(id).update({ status: 'blocked' }));
+  await assertFails(ann.doc(id).delete());
+  await seedFirestore(async (db) => db.doc(id).update({ status: 'declined' }));
+  // (b) 送出的人另外封鎖再解除，七天也不會重算或被跳過
+  await assertSucceeds(ann.doc('friendBlocks/ann_cat').set({ schoolId: 'pu', blockerUid: 'ann', blockedUid: 'cat' }));
+  await assertFails(ann.doc('friendBlocks/ann_cat').update({ blockedUid: 'cat' }));
+  await assertSucceeds(ann.doc('friendBlocks/ann_cat').delete());
+  await assertFails(ann.doc(id).delete());
+  await assertFails(ann.doc(id).set(invite));
+  const left = await cat.doc(id).get();
+  if (left.data().status !== 'declined') throw new Error('status changed');
+  // 不能替別人記封鎖
+  await assertFails(ann.doc('friendBlocks/cat_ann').set({ schoolId: 'pu', blockerUid: 'cat', blockedUid: 'ann' }));
+  // (a) 婉拒的人自己還是可以封鎖、也可以收回自己這邊的紀錄
+  await assertSucceeds(cat.doc('friendBlocks/cat_ann').set({ schoolId: 'pu', blockerUid: 'cat', blockedUid: 'ann' }));
+  await assertSucceeds(cat.doc('friendBlocks/cat_ann').get());
+  await assertSucceeds(cat.doc(id).delete());
+  // 被封鎖時，就算紀錄刪了也送不出去；解除封鎖後才可以
+  await assertFails(ann.doc(id).set(invite));
+  await assertSucceeds(cat.doc('friendBlocks/cat_ann').delete());
+  await assertSucceeds(ann.doc(id).set(invite));
 });

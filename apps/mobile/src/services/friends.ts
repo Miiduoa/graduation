@@ -94,11 +94,23 @@ export async function declineFriendRequest(friendshipId: string) {
   });
 }
 
-export async function blockFromPending(friendshipId: string) {
+/**
+ * 封鎖：另外記一筆 friendBlocks，不改原本邀請的狀態（婉拒的七天才不會被跳過）。
+ * 原本那筆能刪就刪（待確認或好友），刪不掉的（例如對方婉拒、還沒滿七天）就留著。
+ */
+export async function blockUser(schoolId: string, myUid: string, otherUid: string, friendshipId?: string) {
   const db = getDb();
-  await updateDoc(doc(db, 'friendships', friendshipId), {
-    status: 'blocked',
+  await setDoc(doc(db, 'friendBlocks', `${myUid}_${otherUid}`), {
+    schoolId,
+    blockerUid: myUid,
+    blockedUid: otherUid,
+    createdAt: serverTimestamp(),
   });
+  if (friendshipId) await deleteDoc(doc(db, 'friendships', friendshipId)).catch(() => undefined);
+}
+
+export async function unblockUser(myUid: string, otherUid: string) {
+  await deleteDoc(doc(getDb(), 'friendBlocks', `${myUid}_${otherUid}`));
 }
 
 export async function listAcceptedFriends(schoolId: string, myUid: string): Promise<Friendship[]> {
