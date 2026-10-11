@@ -35,6 +35,7 @@ import {
 } from 'firebase/firestore';
 import { chatWithCampusAssistant } from '../services/ai';
 import { navigateToCourseScreen } from '../utils/courseNavigation';
+import { ASSISTANT_AUTHOR_ID, ASSISTANT_AUTHOR_NAME } from './groupAssistant';
 
 type Group = {
   id: string;
@@ -544,11 +545,12 @@ export function GroupDetailScreen(props: any) {
         likedBy: [],
       });
 
-      // 如果是問題，觸發 AI 初步回答
+      // 如果是問題，請校園助理先回一則，留言掛在助理名下，不掛發問的學生
       if (composeKind === 'question') {
         const postBody = body.trim();
         const postTitle = title.trim();
-        // 非同步生成 AI 回答（不阻擋 UI）
+        const requesterUid = auth.user.uid;
+        // 非同步產生助理回覆（不阻擋 UI）
         (async () => {
           try {
             const aiResponse = await chatWithCampusAssistant(
@@ -557,10 +559,11 @@ export function GroupDetailScreen(props: any) {
             );
             if (aiResponse.content && !aiResponse.error) {
               await addDoc(collection(db, 'groups', groupId, 'posts', postRef.id, 'comments'), {
-                body: `**AI 初步回答（供參考）：**\n\n${aiResponse.content}\n\n_此回答由 AI 自動生成，請以教師和同學的回答為準。_`,
+                body: `${aiResponse.content}\n\n_這是校園助理的回覆，請以老師和同學的回答為準。_`,
                 createdAt: serverTimestamp(),
-                authorId: auth.user.uid,
-                authorName: 'AI 助理',
+                authorId: ASSISTANT_AUTHOR_ID,
+                authorName: ASSISTANT_AUTHOR_NAME,
+                requestedBy: requesterUid,
                 isAI: true,
               });
             }
@@ -1051,7 +1054,7 @@ export function GroupDetailScreen(props: any) {
                       {p.body}
                     </Text>
 
-                    {/* AI 初步回答或最新留言 */}
+                    {/* 助理回覆或最新留言 */}
                     {lastComment ? (
                       <View
                         style={{
@@ -1102,7 +1105,7 @@ export function GroupDetailScreen(props: any) {
                             {lastComment.isBestAnswer
                               ? '最佳解答'
                               : lastComment.isAI
-                                ? '校園助理（自動回覆）'
+                                ? ASSISTANT_AUTHOR_NAME
                                 : `留言：${lastComment.authorName ?? lastComment.authorId ?? ''}`}
                           </Text>
                         </View>
