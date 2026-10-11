@@ -5,6 +5,8 @@ import {
   APPEAL_STATUS_COPY,
   appealTopCard,
   studySlots,
+  friendResendCopy,
+  canResendFriendRequest,
   applyImport,
   cleanCourse,
   commonFree,
@@ -65,6 +67,16 @@ describe('空堂與安排', () => {
     expect(blocks.some((block) => block.start === 9 && block.end === 13)).toBe(true);
     expect(blocks.some((block) => block.start <= 3 && block.end >= 3)).toBe(false);
     expect(blocks.some((block) => block.start === 5 && block.end === 5)).toBe(false);
+  });
+});
+
+describe('婉拒後七天才能再送', () => {
+  it('日期用台北時間算', () => {
+    // 2026-10-11 20:00 UTC = 台北 10/12 04:00，加七天是 10/19
+    const declined = Date.UTC(2026, 9, 11, 20, 0);
+    expect(friendResendCopy(declined)).toBe('對方婉拒了，10 月 19 日之後才能再送。');
+    expect(canResendFriendRequest(declined, declined + 6 * 86400000)).toBe(false);
+    expect(canResendFriendRequest(declined, declined + 7 * 86400000 + 1)).toBe(true);
   });
 });
 

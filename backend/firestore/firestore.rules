@@ -1299,7 +1299,14 @@ service cloud.firestore {
           (
             request.auth.uid == resource.data.toUid
             && resource.data.status == 'pending'
-            && request.resource.data.status in ['accepted', 'declined']
+            && request.resource.data.status == 'accepted'
+          )
+          || (
+            // 婉拒時記下時間，送出邀請的人七天內不能再送
+            request.auth.uid == resource.data.toUid
+            && resource.data.status == 'pending'
+            && request.resource.data.status == 'declined'
+            && request.resource.data.declinedAt == request.time
           )
           || (
             request.resource.data.status == 'blocked'
@@ -1309,7 +1316,17 @@ service cloud.firestore {
       allow delete: if isSignedIn()
         && friendshipInvolves(request.auth.uid)
         && isSchoolMember(resource.data.schoolId)
-        && resource.data.status in ['pending', 'accepted', 'declined', 'blocked'];
+        && (
+          resource.data.status in ['pending', 'accepted', 'blocked']
+          || (
+            resource.data.status == 'declined'
+            && (
+              request.auth.uid == resource.data.toUid
+              || !(resource.data.declinedAt is timestamp)
+              || request.time > resource.data.declinedAt + duration.value(7, 'd')
+            )
+          )
+        );
     }
 
     // 找人代號：同學自己開放的代號，只能用完整代號查一筆，不能列出整份名單。

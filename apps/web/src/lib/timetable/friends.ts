@@ -12,6 +12,7 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
+import { canResendFriendRequest } from '@campus/shared';
 import { getDb } from '@/lib/firebase';
 
 export type FriendRow = {
@@ -29,7 +30,34 @@ type FriendshipDoc = {
   fromName?: string;
   toName?: string;
   status: string;
+  declinedAt?: { toMillis?: () => number } | null;
 };
+
+function millis(value: FriendshipDoc['declinedAt']) {
+  return typeof value?.toMillis === 'function' ? value.toMillis() : 0;
+}
+
+export type SentState =
+  | { kind: 'none' }
+  | { kind: 'pending' }
+  | { kind: 'accepted' }
+  | { kind: 'blocked' }
+  | { kind: 'declined'; declinedAtMs: number };
+
+/** 我送給對方的邀請現在是什麼狀態（只看我送出的那份）。 */
+export async function sentRequestState(schoolId: string, fromUid: string, toUid: string): Promise<SentState> {
+  const snap = await getDoc(doc(getDb(), 'friendships', friendshipId(schoolId, fromUid, toUid))).catch(() => null);
+  if (!snap?.exists()) return { kind: 'none' };
+  const data = snap.data() as FriendshipDoc;
+  if (data.status === 'declined') {
+    const declinedAtMs = millis(data.declinedAt);
+    if (declinedAtMs && !canResendFriendRequest(declinedAtMs)) return { kind: 'declined', declinedAtMs };
+    return { kind: 'none' };
+  }
+  if (data.status === 'accepted') return { kind: 'accepted' };
+  if (data.status === 'blocked') return { kind: 'blocked' };
+  return { kind: 'pending' };
+}
 
 /** 找人代號：小寫英數、底線、點、連字號，3 到 32 字。 */
 export function normalizeHandle(value: string) {
@@ -134,9 +162,12 @@ export async function sendFriendRequest(
   if (existing?.exists()) {
     const status = (existing.data() as FriendshipDoc).status;
     if (status === 'pending' || status === 'accepted') return status;
-    // 對方婉拒過的舊邀請先拿掉，才能重新送
-    if (status === 'declined') await deleteDoc(ref);
-    else throw new Error('blocked');
+    if (status === 'declined') {
+      // 婉拒滿七天才能重送；舊邀請先拿掉再送
+      const declinedAtMs = millis((existing.data() as FriendshipDoc).declinedAt);
+      if (declinedAtMs && !canResendFriendRequest(declinedAtMs)) throw new Error('declined-wait');
+      await deleteDoc(ref);
+    } else throw new Error('blocked');
   }
   await setDoc(ref, {
     schoolId,
@@ -159,7 +190,7 @@ export async function acceptFriendRequest(id: string, myName = '') {
 }
 
 export async function declineFriendRequest(id: string) {
-  await updateDoc(doc(getDb(), 'friendships', id), { status: 'declined' });
+  await updateDoc(doc(getDb(), 'friendships', id), { status: 'declined', declinedAt: serverTimestamp() });
 }
 
 export async function cancelFriendRequest(id: string) {
