@@ -12,6 +12,7 @@ import { sanitizeInternalPath } from '@/lib/navigation';
 import styles from '../servicePages.module.css';
 import { NuniSignIn } from '@/components/NuniSignIn';
 import { platformDestination } from '@/lib/accountDestination';
+import { isPublicCampusPath, publicCampusServices } from '@/lib/publicCampusServices';
 
 function loginDestination(value: string | null): string {
   const safe = sanitizeInternalPath(value && value.length <= 1200 ? value : null);
@@ -52,6 +53,10 @@ function LoginForm({
   const [error, setError] = useState('');
   const schoolRequired = reconnect || platformDestination(destination) !== destination;
   const schoolAvailable = isFirebaseConfigured();
+  const publicDestination = isPublicCampusPath(
+    new URL(destination, 'https://campus.local').pathname,
+  );
+  const guestDestination = publicDestination ? destination : '/#public-services';
   useEffect(() => {
     const restore = () => {
       if (busyRef.current === 'platform') {
@@ -113,13 +118,31 @@ function LoginForm({
   }
   return (
     <SiteShell
-      title={reconnect ? '重新連線學校帳號' : schoolRequired ? '連線學校帳號' : '登入 Campus One'}
+      title={
+        reconnect && user ? '重新連線學校帳號' : schoolRequired ? '連線學校帳號' : '登入 Campus One'
+      }
       subtitle={
         schoolRequired
           ? '驗證學校帳號後，返回你原本的頁面。'
-          : '課程交流與校務資料使用各自的帳號驗證。'
+          : '不需學校帳號也能使用。需要課程、交流或店家服務時，再登入 Campus One。'
       }
     >
+      <section className={styles.guestAccess} aria-labelledby="guest-access-title">
+        <div>
+          <h2 id="guest-access-title">先瀏覽校園資訊</h2>
+          <p>地圖、公車、公開公告、餐廳與圖書館入口不需登入。資料是否提供，依各校來源為準。</p>
+        </div>
+        <Link href={guestDestination} className="btn">
+          不登入，繼續瀏覽
+        </Link>
+        <nav aria-label="不需登入的校園服務">
+          {publicCampusServices.map((service) => (
+            <Link key={service.href} href={service.href}>
+              {service.title}
+            </Link>
+          ))}
+        </nav>
+      </section>
       <div className={styles.loginLayout}>
         {!schoolRequired && (
           <NuniSignIn
@@ -136,8 +159,14 @@ function LoginForm({
         )}
         <section className={styles.loginHelp} aria-label="學校校務登入">
           <h2>學校校務資料</h2>
-          <p>查看學校提供的課表、成績與個人校務紀錄。目前支援靜宜大學 e 校園帳號。</p>
-          {schoolRequired && <p>你要開啟的頁面需要學校帳號，Google 登入不會自動取得校務權限。</p>}
+          <p>讀取個人課表、成績、校務紀錄與既有地圖收藏時使用。目前支援靜宜大學 e 校園帳號。</p>
+          {schoolRequired && (
+            <p>
+              {publicDestination
+                ? '你選擇的個人功能仍使用學校帳號；瀏覽校園資訊不需登入。'
+                : '你要開啟的頁面需要學校帳號，Google 登入不會自動取得校務權限。'}
+            </p>
+          )}
           {schoolAvailable ? (
             <details open={schoolRequired}>
               <summary>使用靜宜大學學號登入</summary>

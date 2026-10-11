@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/components/AuthGuard';
+import { useLocationHash } from '@/lib/useLocationHash';
 import MapCanvas from './MapCanvas';
 import {
   loadMapFavorites,
@@ -45,6 +46,7 @@ function MapContent({
   uid?: string;
   authLoading: boolean;
 }) {
+  const hash = useLocationHash();
   const [placeState, setPlaceState] = useState<{
     status: 'loading' | 'error' | 'ready';
     locations: MapLocation[];
@@ -117,6 +119,10 @@ function MapContent({
     );
   }, [locations, category, search]);
   const selected = locations.find((location) => location.id === (selection ?? focus)) ?? null;
+  const returnParams = new URLSearchParams({ schoolId: school });
+  if (route) returnParams.set('route', route);
+  if (selection ?? focus) returnParams.set('focus', (selection ?? focus)!);
+  const schoolLoginHref = `/login?reconnect=school&returnUrl=${encodeURIComponent(`/map?${returnParams}${hash}`)}`;
   const routeLocations = useMemo<[MapLocation, MapLocation] | null>(() => {
     const ids = route?.split(',').map((id) => id.trim());
     if (!ids || ids.length !== 2 || ids[0] === ids[1]) return null;
@@ -276,12 +282,11 @@ function MapContent({
           <h2>
             地點列表 <span>{filtered.length} 個</span>
           </h2>
-          {!uid && !authLoading && (
-            <Link href={`/login?returnUrl=${encodeURIComponent(`/map?schoolId=${school}`)}`}>
-              登入後可收藏地點
-            </Link>
-          )}
+          {!uid && !authLoading && <Link href={schoolLoginHref}>連線學校帳號以收藏</Link>}
         </div>
+        {!uid && !authLoading && (
+          <p className={styles.note}>地圖與導航不需登入；收藏尚未支援 Campus One 帳號。</p>
+        )}
         {uid && favorites.status === 'loading' && (
           <p role="status" className={styles.note}>
             正在讀取收藏…

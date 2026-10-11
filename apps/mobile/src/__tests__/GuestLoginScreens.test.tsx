@@ -1,5 +1,6 @@
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
+import Constants from 'expo-constants';
 import { Alert } from 'react-native';
 import { signInWithCredential } from 'firebase/auth';
 import LoginLandingScreen from '../screens/LoginLandingScreen';
@@ -43,6 +44,7 @@ jest.mock('../ui/navigationTheme', () => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
+  Object.assign(Constants.expoConfig!, { extra: { appEnv: 'development' } });
   mockPlatformAuth = { session: null, loading: false, error: '', pendingLogout: false };
   jest.mocked(signInWithStudentId).mockReset();
   mockRefreshProfile.mockReset();
@@ -279,4 +281,30 @@ test('an unknown platform account state remains an explicit recovery entry', () 
   const view = render(<LoginLandingScreen />);
   expect(view.getByRole('button', { name: '繼續確認帳號狀態' })).toBeTruthy();
   expect(view.queryByText('回到我的 Campus One')).toBeNull();
+});
+
+test('a release without school SSO keeps public and platform entries, but does not collect school credentials', () => {
+  Object.assign(Constants.expoConfig!, {
+    extra: {
+      appEnv: 'production',
+      release: {
+        releasedSchoolIds: [],
+        features: { sso: false },
+      },
+    },
+  });
+  const landing = render(<LoginLandingScreen />);
+  expect(landing.getByTestId('school-login-start')).toBeDisabled();
+  fireEvent.press(landing.getByTestId('public-Map'));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'Map');
+  fireEvent.press(landing.getByTestId('login-start'));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace');
+  landing.unmount();
+  const direct = render(<SSOLoginScreen />);
+  expect(direct.getByText('學校連線尚未開放')).toBeTruthy();
+  expect(direct.queryByTestId('student-password-input')).toBeNull();
+  expect(direct.queryByText('使用學號登入')).toBeNull();
+  fireEvent.press(direct.getByText('前往 Campus One 帳號'));
+  expect(mockNavigation.navigate).toHaveBeenCalledWith('NuniWorkspace');
+  expect(signInWithStudentId).not.toHaveBeenCalled();
 });

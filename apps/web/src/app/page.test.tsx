@@ -187,7 +187,26 @@ it('keeps public campus entries usable when the course session is unavailable', 
   render(<HomePage />);
   expect(screen.getByRole('alert')).toBeTruthy();
   expect(screen.getByRole('link', { name: /校園地圖/ }).getAttribute('href')).toBe('/map');
+  expect(screen.getByRole('link', { name: /公車資訊/ }).getAttribute('href')).toBe('/bus');
+  expect(screen.getByRole('link', { name: /公開公告/ }).getAttribute('href')).toBe(
+    '/announcements',
+  );
   expect(screen.queryByRole('link', { name: /登入 Campus One 帳號/ })).toBeNull();
+});
+
+it('lets a guest browse before signing in and never loads personal courses', () => {
+  state.uid = null;
+  render(<HomePage />);
+  expect(screen.getByRole('link', { name: '先瀏覽校園資訊' }).getAttribute('href')).toBe(
+    '#public-services',
+  );
+  expect(screen.getByRole('region', { name: '校園生活' }).id).toBe('public-services');
+  expect(screen.getByRole('link', { name: /校園地圖/ }).getAttribute('href')).toBe('/map');
+  expect(screen.getByRole('link', { name: /公開公告/ }).getAttribute('href')).toBe(
+    '/announcements',
+  );
+  expect(loadHomeData).not.toHaveBeenCalled();
+  expect(loadNuniHomeData).not.toHaveBeenCalled();
 });
 
 it('revalidates an expired course session before retrying with the new account context', async () => {

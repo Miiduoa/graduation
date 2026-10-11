@@ -61,6 +61,7 @@ import { MessagesStack } from './src/screens/MessagesStack';
 import { MeStack } from './src/screens/MeStack';
 import { OnboardingScreen, hasSeenOnboarding } from './src/screens/OnboardingScreen';
 import { PreAuthStack } from './src/screens/PreAuthStack';
+import { SchoolSessionBoundary, hasReadySchoolSession } from './src/app/SchoolSessionBoundary';
 import { preAuthLinking } from './src/app/preAuthLinking';
 import { usePushNotifications } from './src/app/usePushNotifications';
 import { useAIAmbientAwareness } from './src/app/useAIAmbientAwareness';
@@ -498,7 +499,8 @@ function TokenErrorHandler() {
 function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
   const auth = useAuth();
   const { school } = useSchool();
-  const userId = auth.user?.uid ?? null;
+  const schoolSessionReady = hasReadySchoolSession(auth);
+  const userId = schoolSessionReady ? auth.user!.uid : null;
   const appState = useRef(AppState.currentState);
 
   useEffect(() => {
@@ -526,7 +528,8 @@ function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
       if (
         appState.current.match(/inactive|background/) &&
         nextAppState === 'active' &&
-        school?.id
+        school?.id &&
+        userId
       ) {
         syncEssentialData(school.id).catch(console.error);
       }
@@ -543,7 +546,7 @@ function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
 
     const subscription = AppState.addEventListener('change', handleAppStateChange);
     return () => subscription?.remove();
-  }, [school?.id]);
+  }, [school?.id, userId]);
 
   const schoolId = school?.id ?? null;
 
@@ -551,8 +554,8 @@ function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
     <SearchHistoryProvider userId={userId} schoolId={schoolId}>
       <FavoritesProvider userId={userId} schoolId={schoolId}>
         <ScheduleProvider>
-          <SyncStatusHandler />
-          <TokenErrorHandler />
+          {schoolSessionReady ? <SyncStatusHandler /> : null}
+          {schoolSessionReady ? <TokenErrorHandler /> : null}
           {children}
         </ScheduleProvider>
       </FavoritesProvider>
@@ -836,6 +839,35 @@ function AppTabNavigator() {
 }
 
 function AppNavigation() {
+  return (
+    <SchoolSessionBoundary publicContent={<PublicNavigation />}>
+      <SchoolNavigation />
+    </SchoolSessionBoundary>
+  );
+}
+
+function PublicNavigation() {
+  const navTheme = {
+    ...DefaultTheme,
+    colors: {
+      ...DefaultTheme.colors,
+      background: theme.colors.bg,
+      card: theme.colors.surface,
+      text: theme.colors.text,
+      border: theme.colors.border,
+      primary: theme.colors.accent,
+    },
+  };
+  return (
+    <NavigationContainer theme={navTheme} linking={preAuthLinking}>
+      <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
+        <PreAuthStack />
+      </View>
+    </NavigationContainer>
+  );
+}
+
+function SchoolNavigation() {
   const auth = useAuth();
   const pendingMessagingDeepLinkRef = useRef<string | null>(null);
   const authRoleRef = useRef(auth.profile?.role);
@@ -967,27 +999,6 @@ function AppNavigation() {
       primary: theme.colors.accent,
     },
   };
-
-  if (auth.loading || auth.profileLoading) {
-    return <FullScreenLoader />;
-  }
-
-  // 平台帳號可從 PreAuth 的 NuniWorkspace 使用；校務頁仍由學校帳號驗證。
-  if (!auth.user && !auth.profile) {
-    return (
-      <NavigationContainer
-        theme={navTheme}
-        linking={preAuthLinking}
-        onStateChange={(state) => {
-          if (__DEV__) console.info('[navigation] signed-out route', state?.routes[state.index]?.name);
-        }}
-      >
-        <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
-          <PreAuthStack />
-        </View>
-      </NavigationContainer>
-    );
-  }
 
   return (
     <NavigationContainer
