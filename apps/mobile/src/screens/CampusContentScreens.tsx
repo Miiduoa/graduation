@@ -22,9 +22,12 @@ import {
   loadCampusEvent,
 } from '../services/publicCampusContent';
 import {
+  announcementEmptyKind,
   formatStaleAnnouncementNotice,
   isAnnouncementSchoolVisibleToPublic,
+  listAnnouncementCatalogLinks,
   SOURCE_DOWN_EMPTY_TEXT,
+  SOURCE_NOT_CONNECTED_TEXT,
   staleAnnouncementUpdatedAt,
   SUMMARY_NOTICE,
 } from '@campus/shared/src/campusAnnouncements';
@@ -149,6 +152,7 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
   const sources = content.value?.sources ?? [];
   const visible = rows.filter((row) => category === 'all' || row.category === category);
   const down = sources.filter((item) => item.status === 'unavailable');
+  const emptyKind = announcementEmptyKind(rows, sources);
   if (!schoolVisible) {
     return (
       <AIDetailScreen
@@ -168,24 +172,34 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
     >
       {content.loading || content.error ? (
         <ReadState {...content} empty="目前沒有公告" />
+      ) : emptyKind === 'not_connected' ? (
+        <AICard title={SOURCE_NOT_CONNECTED_TEXT}>
+          <View style={{ gap: 12 }}>
+            {listAnnouncementCatalogLinks(school.id).map((item) => (
+              <AIButton
+                key={item.sourceId}
+                label={item.office}
+                onPress={() => void Linking.openURL(item.listUrl)}
+              />
+            ))}
+          </View>
+        </AICard>
+      ) : emptyKind === 'source_down' ? (
+        <AICard title={SOURCE_DOWN_EMPTY_TEXT}>
+          <View style={{ gap: 12 }}>
+            {down
+              .filter((item) => item.listUrl)
+              .map((item) => (
+                <AIButton
+                  key={item.sourceId}
+                  label={item.office}
+                  onPress={() => void Linking.openURL(item.listUrl!)}
+                />
+              ))}
+          </View>
+        </AICard>
       ) : !rows.length ? (
-        down.length ? (
-          <AICard title={SOURCE_DOWN_EMPTY_TEXT}>
-            <View style={{ gap: 12 }}>
-              {down
-                .filter((item) => item.listUrl)
-                .map((item) => (
-                  <AIButton
-                    key={item.sourceId}
-                    label={item.office}
-                    onPress={() => void Linking.openURL(item.listUrl!)}
-                  />
-                ))}
-            </View>
-          </AICard>
-        ) : (
-          <ReadState {...content} empty="目前沒有公告" />
-        )
+        <ReadState {...content} empty="目前沒有公告" />
       ) : (
         <>
           {down.length ? (

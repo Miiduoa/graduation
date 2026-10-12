@@ -7,6 +7,7 @@ const {
   PARSER_PRESETS,
   school,
   listSources,
+  allSources,
   listPublicSchools,
   coverageRows,
   formatCoverageTable,
@@ -77,6 +78,22 @@ test('demo schools without a real site stay off the public production list', () 
   expect(formatCoverageTable()).toContain('靜宜大學');
   expect(formatCoverageTable()).toContain('校網系統');
   expect(formatCoverageTable()).toContain('iweb');
+});
+
+test('shared catalog links stay aligned with backend sources', () => {
+  const shared = fs.readFileSync(
+    path.join(__dirname, '../../../packages/shared/src/campusAnnouncementCatalog.ts'),
+    'utf8',
+  );
+  const sources = allSources();
+  expect(sources.length).toBeGreaterThan(10);
+  for (const source of sources) {
+    expect(shared).toContain(source.sourceId);
+    expect(shared).toContain(source.listUrl);
+    expect(shared).toContain(source.office);
+  }
+  expect(shared).not.toContain('tw-demo-uni');
+  expect(shared).not.toContain('tw-taichung-uni-a');
 });
 
 test('adding a school only requires a catalog entry with shared parsers', () => {

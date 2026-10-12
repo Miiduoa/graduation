@@ -138,10 +138,30 @@ it('distinguishes a legacy source failure from a successfully empty announcement
     .mockRejectedValueOnce(new Error('offline'));
   render(<AnnouncementsPage />);
   await screen.findByRole('alert');
-  vi.mocked(getDocsFromServer).mockResolvedValue(snapshot());
+  vi.mocked(getDocsFromServer).mockImplementation((async (input: { path?: string }) => {
+    if (String(input?.path || '').includes('announcement-sources')) {
+      return {
+        empty: false,
+        docs: [
+          {
+            id: 'pu-acd',
+            data: () => ({
+              sourceId: 'pu-acd',
+              office: '教務處',
+              status: 'healthy',
+              lastSuccessAt: '2026-10-12T10:05:00.000Z',
+            }),
+          },
+        ],
+      } as never;
+    }
+    return snapshot();
+  }) as never);
   fireEvent.click(screen.getByRole('button', { name: '重新讀取' }));
   await screen.findByText('目前沒有公開公告');
   expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.queryByText('這裡還沒接上學校公告，請先到學校網站看最新消息')).toBeNull();
+  expect(screen.queryByText('學校網站暫時連不上')).toBeNull();
 });
 
 it('keeps server categories, pinned flags and search functional without invented importance', async () => {
@@ -321,15 +341,62 @@ it('links the office site when the school site is down and there is no cached co
     return snapshot();
   }) as never);
   render(<AnnouncementsPage />);
+  expect(await screen.findByRole('heading', { name: '學校網站暫時連不上' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '教務處' }).getAttribute('href')).toBe(
+    'https://acd.pu.edu.tw/p/403-1042-885-1.php',
+  );
+  expect(screen.getByRole('link', { name: '教務處' }).getAttribute('rel')).toBe(
+    'noopener noreferrer',
+  );
+  expect(screen.queryByText('目前沒有公開公告')).toBeNull();
+  expect(screen.queryByText('這裡還沒接上學校公告，請先到學校網站看最新消息')).toBeNull();
+  expect(screen.queryByText('暫時抓不到')).toBeNull();
+});
+
+it('links catalog office sites when the school has never been fetched', async () => {
+  vi.mocked(getDocsFromServer).mockResolvedValue(snapshot());
+  render(<AnnouncementsPage />);
   expect(
     await screen.findByRole('heading', {
-      name: '學校網站暫時連不上，可以先到學校網站看最新消息',
+      name: '這裡還沒接上學校公告，請先到學校網站看最新消息',
     }),
   ).toBeTruthy();
   expect(screen.getByRole('link', { name: '教務處' }).getAttribute('href')).toBe(
     'https://acd.pu.edu.tw/p/403-1042-885-1.php',
   );
-  expect(screen.queryByText('暫時抓不到')).toBeNull();
+  expect(screen.getByRole('link', { name: '教務處' }).getAttribute('rel')).toBe(
+    'noopener noreferrer',
+  );
+  expect(screen.getByRole('link', { name: '綜合業務組' })).toBeTruthy();
+  expect(screen.queryByText('目前沒有公開公告')).toBeNull();
+  expect(screen.queryByRole('heading', { name: '學校網站暫時連不上' })).toBeNull();
+});
+
+it('shows no public announcements only after a successful empty fetch', async () => {
+  vi.mocked(getDocsFromServer).mockImplementation((async (input: { path?: string }) => {
+    if (String(input?.path || '').includes('announcement-sources')) {
+      return {
+        empty: false,
+        docs: [
+          {
+            id: 'pu-acd',
+            data: () => ({
+              sourceId: 'pu-acd',
+              office: '教務處',
+              status: 'healthy',
+              lastSuccessAt: '2026-10-12T10:05:00.000Z',
+              listUrl: 'https://acd.pu.edu.tw/p/403-1042-885-1.php',
+            }),
+          },
+        ],
+      } as never;
+    }
+    return snapshot();
+  }) as never);
+  render(<AnnouncementsPage />);
+  expect(await screen.findByRole('heading', { name: '目前沒有公開公告' })).toBeTruthy();
+  expect(screen.queryByText('這裡還沒接上學校公告，請先到學校網站看最新消息')).toBeNull();
+  expect(screen.queryByText('學校網站暫時連不上')).toBeNull();
 });
 
 it.each(['', 'staging', 'production'])(
@@ -346,6 +413,8 @@ it.each(['', 'staging', 'production'])(
     });
     expect(screen.queryByText('示範大學')).toBeNull();
     expect(screen.getByRole('heading', { name: '目前沒有公開公告' })).toBeTruthy();
+    expect(screen.queryByText('這裡還沒接上學校公告，請先到學校網站看最新消息')).toBeNull();
+    expect(screen.queryByText('學校網站暫時連不上')).toBeNull();
     expect(getDocsFromServer).not.toHaveBeenCalled();
   },
 );
@@ -361,6 +430,8 @@ it('hides cms-none demo schools when NEXT_PUBLIC_APP_ENV is unset', async () => 
   });
   expect(screen.queryByText('示範大學')).toBeNull();
   expect(screen.getByRole('heading', { name: '目前沒有公開公告' })).toBeTruthy();
+  expect(screen.queryByText('這裡還沒接上學校公告，請先到學校網站看最新消息')).toBeNull();
+  expect(screen.queryByText('學校網站暫時連不上')).toBeNull();
   expect(getDocsFromServer).not.toHaveBeenCalled();
 });
 

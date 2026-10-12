@@ -11,8 +11,10 @@ export const ANNOUNCEMENT_CATEGORIES = [
 ] as const;
 export type PublicAnnouncementCategory = (typeof ANNOUNCEMENT_CATEGORIES)[number];
 export const SOURCE_UNAVAILABLE_TEXT = '暫時抓不到';
-export const SOURCE_DOWN_EMPTY_TEXT = '學校網站暫時連不上，可以先到學校網站看最新消息';
+export const SOURCE_NOT_CONNECTED_TEXT = '這裡還沒接上學校公告，請先到學校網站看最新消息';
+export const SOURCE_DOWN_EMPTY_TEXT = '學校網站暫時連不上';
 export const SOURCE_DOWN_WITH_CACHE_TEXT = '學校網站暫時連不上';
+export type AnnouncementEmptyKind = 'not_connected' | 'source_down' | 'empty' | 'has_items';
 export const PLACEHOLDER_ANNOUNCEMENT_SCHOOL_IDS = [
   'tw-demo-uni',
   'tw-taichung-uni-a',
@@ -176,3 +178,18 @@ export function staleAnnouncementUpdatedAt(
     ) ?? latestAnnouncementStamp(announcements.map((item) => item.publishedAt))
   );
 }
+
+export function announcementEmptyKind(
+  announcements: Array<unknown>,
+  sources: Array<{ status?: string; lastSuccessAt?: string | null }>,
+): AnnouncementEmptyKind {
+  if (announcements.length > 0) return 'has_items';
+  if (sources.some((item) => item.status === 'unavailable')) return 'source_down';
+  if (sources.some((item) => item.status === 'healthy' || item.lastSuccessAt)) return 'empty';
+  return 'not_connected';
+}
+
+export {
+  listAnnouncementCatalogLinks,
+  type AnnouncementCatalogLink,
+} from './campusAnnouncementCatalog';

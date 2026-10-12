@@ -7,8 +7,11 @@ import { SiteShell } from '@/components/SiteShell';
 import type { Announcement } from '@/lib/firebase';
 import { loadAnnouncementFeed, type AnnouncementSourceHealth } from './publicAnnouncements';
 import {
+  announcementEmptyKind,
   formatStaleAnnouncementNotice,
+  listAnnouncementCatalogLinks,
   SOURCE_DOWN_EMPTY_TEXT,
+  SOURCE_NOT_CONNECTED_TEXT,
   staleAnnouncementUpdatedAt,
 } from '@campus/shared/src/campusAnnouncements';
 import { resolveAnnouncementSchool } from './resolveSchool';
@@ -37,6 +40,27 @@ function categoryOf(announcement: Announcement): Category {
   return announcement.category === 'academic' || announcement.category === 'event'
     ? announcement.category
     : 'general';
+}
+
+function OfficeSourceLinks({
+  links,
+}: {
+  links: Array<{ sourceId: string; office: string; listUrl?: string }>;
+}) {
+  const items = links.filter((item) => item.listUrl);
+  if (!items.length) return null;
+  return (
+    <p>
+      {items.map((item, index) => (
+        <span key={item.sourceId}>
+          {index > 0 ? '、' : null}
+          <a href={item.listUrl} rel="noopener noreferrer" target="_blank">
+            {item.office}
+          </a>
+        </span>
+      ))}
+    </p>
+  );
 }
 
 function AnnouncementReader({ schoolId }: { schoolId: string }) {
@@ -138,6 +162,7 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
       (!pinnedOnly || announcement.pinned)
     );
   });
+  const emptyKind = announcementEmptyKind(state.announcements, state.sources);
 
   return (
     <div className={styles.page}>
@@ -203,22 +228,17 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
         )}
       {filtered.length === 0 ? (
         <section className={styles.status}>
-          {state.announcements.length === 0 &&
-          state.sources.some((item) => item.status === 'unavailable') ? (
+          {emptyKind === 'not_connected' ? (
+            <>
+              <h2>{SOURCE_NOT_CONNECTED_TEXT}</h2>
+              <OfficeSourceLinks links={listAnnouncementCatalogLinks(schoolId)} />
+            </>
+          ) : emptyKind === 'source_down' ? (
             <>
               <h2>{SOURCE_DOWN_EMPTY_TEXT}</h2>
-              <p>
-                {state.sources
-                  .filter((item) => item.status === 'unavailable' && item.listUrl)
-                  .map((item, index) => (
-                    <span key={item.sourceId}>
-                      {index > 0 ? '、' : null}
-                      <a href={item.listUrl} rel="noreferrer" target="_blank">
-                        {item.office}
-                      </a>
-                    </span>
-                  ))}
-              </p>
+              <OfficeSourceLinks
+                links={state.sources.filter((item) => item.status === 'unavailable')}
+              />
             </>
           ) : (
             <>

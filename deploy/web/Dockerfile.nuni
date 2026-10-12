@@ -25,6 +25,7 @@ ENV NEXT_PUBLIC_CLOUD_FUNCTION_REGION=asia-east1
 ENV NEXT_PUBLIC_DEFAULT_SCHOOL_ID=pu
 ENV NEXT_PUBLIC_ALLOW_LOCAL_MOCK_AUTH=false
 ENV NEXT_PUBLIC_ENABLE_UNIVERSAL_DEV_ACCOUNTS=false
+ENV NEXT_PUBLIC_APP_ENV=production
 ENV CAMPUS_LEGACY_ENABLED=true
 RUN node -e "for(const name of ['API_KEY','AUTH_DOMAIN','PROJECT_ID','STORAGE_BUCKET','MESSAGING_SENDER_ID','APP_ID'])if(!process.env['NEXT_PUBLIC_FIREBASE_'+name])throw new Error('Missing public Firebase build setting: '+name)"
 RUN pnpm --filter web build
