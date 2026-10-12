@@ -54,6 +54,11 @@ function fixture(t, native = false) {
   t.after(() => rmSync(project, { recursive: true, force: true }));
   for (const name of ['app.json', 'app.config.ts', 'package.json', 'eas.json'])
     copyFileSync(join(mobile, name), join(project, name));
+  mkdirSync(join(project, 'scripts'), { recursive: true });
+  copyFileSync(
+    join(mobile, 'scripts/configure-nuni-google.cjs'),
+    join(project, 'scripts/configure-nuni-google.cjs'),
+  );
   symlinkSync(join(root, 'node_modules'), join(project, 'node_modules'), 'dir');
   if (native) {
     mkdirSync(join(project, 'ios/mobile.xcodeproj'), { recursive: true });
@@ -111,7 +116,10 @@ test('prepares both shared and platform env without changing unrelated profiles 
   }
   assert.equal(prepared.build.production.environment, 'production');
   assert.equal(prepared.build.production.android.environment, 'production');
-  assert.ok(!Object.hasOwn(prepared.build.production.env, 'IOS_BUNDLE_IDENTIFIER'));
+  assert.equal(
+    prepared.build.production.env.IOS_BUNDLE_IDENTIFIER,
+    base.build.production.env.IOS_BUNDLE_IDENTIFIER,
+  );
 });
 
 test('actual dynamic Expo config reproduces the original gap and receives the prepared identity', (t) => {
@@ -149,15 +157,17 @@ test('rejects every missing or invalid target before changing any file', (t) => 
   assert.equal(existsSync(join(project, '.release-build-target.json')), false);
 });
 
-test('release manifests omit development provider credentials and preserve export compliance', (t) => {
+test('release manifests use the backend and preserve export compliance', (t) => {
   const project = fixture(t);
   const key = 'development-only-provider-key';
   for (const appEnv of ['preview', 'production']) {
     const config = actualExpoConfig(project, {
       ...identityEnvironment(target),
       APP_ENV: appEnv,
-      EXPO_PUBLIC_GEMINI_API_KEY: key,
+      EXPO_PUBLIC_AI_PROVIDER: 'gemini',
     });
+    assert.equal(config.extra.aiProvider, 'cloud');
+    assert.equal(config.extra.aiRuntimeMode, 'production-backend');
     assert.equal(config.extra.geminiApiKey, '');
     assert.equal(JSON.stringify(config).includes(key), false);
     assert.equal(config.ios.infoPlist.ITSAppUsesNonExemptEncryption, false);
@@ -165,9 +175,49 @@ test('release manifests omit development provider credentials and preserve expor
   }
   const development = actualExpoConfig(project, {
     APP_ENV: 'development',
+    EXPO_PUBLIC_AI_PROVIDER: 'gemini',
     EXPO_PUBLIC_GEMINI_API_KEY: key,
   });
+  assert.equal(development.extra.aiProvider, 'gemini');
   assert.equal(development.extra.geminiApiKey, key);
+});
+
+test('the Expo resolver rejects public provider credentials in every release profile', (t) => {
+  const project = fixture(t);
+  for (const appEnv of ['preview', 'production']) {
+    assert.throws(
+      () => actualExpoConfig(project, {
+        ...identityEnvironment(target),
+        APP_ENV: appEnv,
+        EXPO_PUBLIC_GEMINI_API_KEY: 'development-only-provider-key',
+      }),
+      /Remove EXPO_PUBLIC_GEMINI_API_KEY from release builds/,
+    );
+  }
+});
+
+test('the Expo resolver refuses release provider overrides except the backend', (t) => {
+  const project = fixture(t);
+  for (const appEnv of ['preview', 'production']) {
+    for (const provider of ['gemini', 'offline', 'unknown']) {
+      assert.throws(
+        () => actualExpoConfig(project, {
+          ...identityEnvironment(target),
+          APP_ENV: appEnv,
+          EXPO_PUBLIC_RELEASE_AI_PROVIDER: provider,
+        }),
+        /Release AI provider must be cloud/,
+      );
+    }
+    for (const provider of ['', '  ', ' cloud ']) {
+      const config = actualExpoConfig(project, {
+        ...identityEnvironment(target),
+        APP_ENV: appEnv,
+        EXPO_PUBLIC_RELEASE_AI_PROVIDER: provider,
+      });
+      assert.equal(config.extra.aiProvider, 'cloud');
+    }
+  }
 });
 
 test('local conflicting env and inherited malformed profile values fail closed', (t) => {
@@ -192,6 +242,11 @@ test('the generated monorepo hook executes the existing hook and the worker guar
   mkdirSync(project, { recursive: true });
   for (const name of ['app.json', 'app.config.ts', 'package.json', 'eas.json'])
     copyFileSync(join(mobile, name), join(project, name));
+  mkdirSync(join(project, 'scripts'), { recursive: true });
+  copyFileSync(
+    join(mobile, 'scripts/configure-nuni-google.cjs'),
+    join(project, 'scripts/configure-nuni-google.cjs'),
+  );
   symlinkSync(join(root, 'node_modules'), join(checkout, 'node_modules'), 'dir');
   mkdirSync(join(checkout, 'scripts'));
   for (const name of ['prepare-eas-build.mjs', 'verify-eas-build.mjs'])
@@ -351,9 +406,14 @@ test(
       env: { ANDROID_PACKAGE_NAME: 'com.other.dev', APP_ENV: 'development' },
     };
     inherited.build.base.ios = { env: { IOS_BUNDLE_IDENTIFIER: 'com.other.dev' } };
+    const registeredTarget = {
+      ...target,
+      appIdentifier: base.build.production.env.IOS_BUNDLE_IDENTIFIER,
+      projectId: base.build.production.env.EXPO_PUBLIC_EAS_PROJECT_ID,
+    };
     for (const platform of ['android', 'ios']) {
       for (const profile of ['production', 'preview']) {
-        const expected = { ...target, platform, profile };
+        const expected = { ...registeredTarget, platform, profile };
         const prepared = prepareBuildConfig(inherited, expected);
         assert.equal(
           BuildProfileSchema.validate(prepared.build[profile], { abortEarly: false }).error,
@@ -375,3 +435,27 @@ test(
     }
   },
 );
+
+test('production Google client is bound to its verified iOS bundle and a new native runtime', (t) => {
+  const project = fixture(t);
+  const config = actualExpoConfig(project, base.build.production.env);
+  assert.equal(config.ios.bundleIdentifier, 'com.nuni.app');
+  assert.equal(config.android.package, 'com.nuni.app');
+  assert.equal(config.extra.eas.projectId, '8955b97c-802c-463c-bd1d-d5f02e30a966');
+  assert.equal(config.runtimeVersion, 'campus-one-native-google-1');
+  assert.equal(
+    config.ios.infoPlist.GIDClientID,
+    base.build.production.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+  );
+  assert.throws(
+    () =>
+      actualExpoConfig(project, {
+        ...base.build.production.env,
+        IOS_BUNDLE_IDENTIFIER: 'com.campus.app.dev',
+      }),
+    /requires com.nuni.app/,
+  );
+  const development = actualExpoConfig(project, { APP_ENV: 'development' });
+  assert.equal(development.ios.bundleIdentifier, 'com.campus.app.dev');
+  assert.equal(development.ios.infoPlist.GIDClientID, undefined);
+});

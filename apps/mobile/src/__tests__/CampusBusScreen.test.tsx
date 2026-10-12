@@ -4,7 +4,7 @@ import { Linking } from 'react-native';
 import BusScreen from '../screens/BusAiFirstScreen';
 import { loadBusRoutes, loadBusArrivals, type BusArrivals } from '../features/campusBus';
 let mockSchool = { id: 'pu' };
-let mockUser = { uid: 'first' };
+let mockUser: { uid: string } | null = { uid: 'first' };
 jest.mock('../state/school', () => ({ useSchool: () => ({ school: mockSchool }) }));
 jest.mock('../state/auth', () => ({ useAuth: () => ({ user: mockUser }) }));
 jest.mock('../state/theme', () => ({ useTheme: () => require('../ui/theme').getCurrentTheme() }));
@@ -126,4 +126,17 @@ test('expires stale estimates while background polling is paused', async () => {
   expect(view.getByText(/目前沒有可確認的即時到站資訊/)).toBeTruthy();
   view.unmount();
   jest.useRealTimers();
+});
+
+test('a visitor can query the public bus source without a school identity', async () => {
+  mockUser = null;
+  const view = render(<BusScreen />);
+  fireEvent.press(await view.findByText('校門 · 查到站'));
+  await view.findByText('300 去程 · 約 8 分鐘');
+  expect(loadBusRoutes).toHaveBeenCalledWith('pu');
+  expect(loadBusArrivals).toHaveBeenCalledWith({
+    schoolId: 'pu',
+    stopId: 'stop-a',
+    city: 'Taichung',
+  });
 });

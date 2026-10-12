@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { friendResendCopy, meetupLabel } from '@campus/shared';
 import { SiteShell } from '@/components/SiteShell';
+import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
 import { useAuth } from '@/components/AuthGuard';
 import { useSelectedSchool } from '@/components/SelectedSchoolProvider';
 import {
@@ -88,9 +89,7 @@ export default function FriendsPage() {
   if (!user) {
     return (
       <SiteShell title="找人" subtitle="加好友之後，才能看對方課表、約共同空堂。">
-        <p className={styles.notice}>
-          請先 <Link href="/login?returnUrl=/friends">登入</Link>。成為好友前，看不到任何人的課表。
-        </p>
+        <SchoolAccountRequired returnUrl="/friends" />
       </SiteShell>
     );
   }

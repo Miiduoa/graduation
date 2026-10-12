@@ -21,6 +21,7 @@ import { UnavailableFeatureScreen } from './UnavailableFeatureScreen';
 import ShopDockScreen from './ShopDockScreen';
 import { AdminCourseVerifyScreen } from './AdminCourseVerifyScreen';
 import { SSOLoginScreen } from './SSOLoginScreen';
+import { NuniWorkspaceScreen } from './NuniWorkspaceScreen';
 import { DataExportScreen } from './DataExportScreen';
 import { AccountDeletionScreen } from './AccountDeletionScreen';
 import { AccessibilitySettingsScreen } from './AccessibilitySettingsScreen';
@@ -172,6 +173,11 @@ export function MeStack() {
         options={{ title: '編輯個人資料', headerShown: false }}
       />
       <Stack.Screen name="SSOLogin" component={SSOLoginScreen} options={{ title: '學校登入' }} />
+      <Stack.Screen
+        name="NuniWorkspace"
+        component={NuniWorkspaceScreen}
+        options={{ title: 'Campus One' }}
+      />
       <Stack.Screen
         name="Notifications"
         component={UnavailableFeatureScreen}

@@ -186,7 +186,7 @@ export default function CoursePage({ params }: { params: Promise<{ courseId: str
       ) : !user ? (
         <section className={styles.section}>
           <h2>登入後查看課程</h2>
-          <p>使用這門課的校園帳號登入，即可查看教材與繳交作業。</p>
+          <p>使用這門課的學校帳號登入，即可查看教材與繳交作業。</p>
           <Link
             className={styles.primary}
             href={`/login?redirect=${encodeURIComponent(`/course/${courseId}`)}`}

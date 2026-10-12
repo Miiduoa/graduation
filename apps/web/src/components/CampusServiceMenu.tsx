@@ -8,6 +8,9 @@ import styles from '@/app/home.module.css';
 
 export function CampusServiceMenu() {
   const pathname = usePathname();
+  const currentService = CAMPUS_SERVICES.filter(
+    (service) => pathname === service.href || pathname?.startsWith(`${service.href}/`),
+  ).sort((first, second) => second.href.length - first.href.length)[0]?.href;
   const params = useSearchParams();
   const menu = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
@@ -21,7 +24,7 @@ export function CampusServiceMenu() {
     return () => document.removeEventListener('pointerdown', dismiss);
   }, []);
   const context = new URLSearchParams();
-  for (const key of ['school', 'schoolId']) {
+  for (const key of ['school', 'schoolId', 'campus']) {
     const value = params?.get(key);
     if (value) context.set(key, value);
   }
@@ -53,6 +56,9 @@ export function CampusServiceMenu() {
           href={href('/search')}
           className={styles.menuOverview}
           aria-current={pathname === '/search' ? 'page' : undefined}
+          onClick={() => {
+            if (menu.current) menu.current.open = false;
+          }}
         >
           尋找校園服務 <span aria-hidden="true">→</span>
         </Link>
@@ -64,17 +70,13 @@ export function CampusServiceMenu() {
                 <Link
                   href={href(service.href)}
                   key={service.href}
-                  aria-current={
-                    pathname === service.href || pathname?.startsWith(`${service.href}/`)
-                      ? 'page'
-                      : undefined
-                  }
+                  aria-current={currentService === service.href ? 'page' : undefined}
                   onClick={() => {
                     if (menu.current) menu.current.open = false;
                   }}
                 >
                   {service.name}
-                  <span aria-hidden="true">↗</span>
+                  <span aria-hidden="true">→</span>
                 </Link>
               ),
             )}

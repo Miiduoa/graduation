@@ -5,37 +5,88 @@ import { useNavigation } from '@react-navigation/native';
 import { safeNavigate } from '../utils/safeNavigate';
 import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
+import { useNuniSession } from '../state/nuniSession';
+import { isStudentIdLoginAvailable } from '../services/schoolLoginAvailability';
 
 export default function LoginLandingScreen() {
   const navigation = useNavigation();
+  const auth = useNuniSession();
   const s = useThemeStyleSheet(createStyles);
   return (
     <SafeAreaView testID="login-landing" style={s.page}>
       <ScrollView contentContainerStyle={s.content}>
         <Text style={s.brand}>CAMPUS ONE</Text>
         <View style={s.intro}>
-          <Text style={s.school}>靜宜大學</Text>
-          <Text style={s.heading}>你的課程，{'\n'}隨手就能查看。</Text>
-          <Text style={s.body}>查看課程、掌握待辦，找到校園裡需要的資訊。</Text>
+          <Text style={s.school}>課程・校園・每天的事</Text>
+          <Text style={s.heading}>校園資訊，{'\n'}打開就能查看。</Text>
+          <Text style={s.body}>不必登入學校帳號，就能查看地圖、公車與公開公告。</Text>
+        </View>
+        <View style={s.publicPanel}>
+          <Text style={s.title}>先找需要的資訊</Text>
+          {(
+            [
+              ['Map', '校園地圖', '搜尋地點、查看位置與步行路線'],
+              ['BusSchedule', '公車查詢', '查看站點與官方到站資訊'],
+              ['公告總覽', '公開公告', '查看學校發布的消息'],
+            ] as const
+          ).map(([route, title, detail]) => (
+            <Pressable
+              key={route}
+              testID={`public-${route}`}
+              accessibilityRole="button"
+              accessibilityLabel={title}
+              style={s.publicButton}
+              onPress={() => safeNavigate(navigation, route)}
+            >
+              <Text style={s.publicTitle}>{title}</Text>
+              <Text style={s.publicDetail}>{detail}</Text>
+            </Pressable>
+          ))}
         </View>
         <View style={s.panel}>
-          <Text style={s.title}>登入你的校園帳號</Text>
-          <Text style={s.body}>使用學校帳號登入，查看個人課程與通知。</Text>
+          <Text style={s.title}>Google 帳號</Text>
+          <Text style={s.body}>和網頁版使用同一個帳號，加入課程、繳交作業或管理店家。</Text>
+          {auth.pendingLogout || auth.error ? (
+            <Text accessibilityRole="alert" style={s.body}>
+              {auth.pendingLogout ? '上次登出還沒完成，請先完成登出再使用其他帳號。' : auth.error}
+            </Text>
+          ) : null}
           <Pressable
             testID="login-start"
             accessibilityRole="button"
             style={s.button}
-            onPress={() => {
-              if (__DEV__) console.info('[navigation] school login pressed');
-              const requested = safeNavigate(navigation, 'SSOLogin');
-              if (__DEV__)
-                console.info('[navigation] school login requested', {
-                  requested,
-                  routes: navigation.getState?.()?.routeNames,
-                });
-            }}
+            onPress={() => safeNavigate(navigation, 'NuniWorkspace')}
           >
-            <Text style={s.buttonText}>前往登入 ↗</Text>
+            <Text style={s.buttonText}>
+              {auth.session && !auth.loading && !auth.error && !auth.pendingLogout
+                ? '回到我的 Campus One'
+                : auth.loading
+                  ? '確認 Google 帳號'
+                  : auth.pendingLogout
+                    ? '處理未完成的登出'
+                    : auth.error
+                      ? '查看登入問題'
+                      : '登入或建立帳號'}
+            </Text>
+          </Pressable>
+        </View>
+        <View style={s.schoolPanel}>
+          <Text style={s.title}>連線學校帳號</Text>
+          <Text style={s.body}>
+            {isStudentIdLoginAvailable()
+              ? '只有讀取學校提供的個人課表與成績，才需要連線學校帳號。'
+              : '學校帳號連線尚未開放。公開資訊、Campus One 課程與店家服務仍可使用。'}
+          </Text>
+          <Pressable
+            testID="school-login-start"
+            accessibilityRole="button"
+            style={s.schoolButton}
+            disabled={!isStudentIdLoginAvailable()}
+            onPress={() => safeNavigate(navigation, 'SSOLogin')}
+          >
+            <Text style={s.schoolButtonText}>
+              {isStudentIdLoginAvailable() ? '前往學校登入' : '學校連線尚未開放'}
+            </Text>
           </Pressable>
         </View>
         <Text style={s.footer}>Campus One · 課程與校園生活</Text>
@@ -54,7 +105,15 @@ const createStyles = () =>
       fontSize: 14,
       marginTop: 16,
     },
-    intro: { paddingVertical: 65 },
+    intro: { paddingVertical: 36 },
+    publicPanel: { marginBottom: 28 },
+    publicButton: {
+      paddingVertical: 18,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    publicTitle: { color: theme.colors.accent, fontSize: 17, fontWeight: '600' },
+    publicDetail: { color: theme.colors.muted, fontSize: 13, marginTop: 6 },
     school: { color: theme.colors.textSecondary, fontSize: 13, marginBottom: 18 },
     heading: {
       color: theme.colors.text,
@@ -79,5 +138,8 @@ const createStyles = () =>
       fontSize: 15,
       fontWeight: '600',
     },
+    schoolPanel: { paddingTop: 28 },
+    schoolButton: { minHeight: 48, justifyContent: 'center', paddingVertical: 14, marginTop: 10 },
+    schoolButtonText: { color: theme.colors.accent, fontSize: 15, fontWeight: '600' },
     footer: { color: theme.colors.muted, fontSize: 11, paddingVertical: 40 },
   });

@@ -147,6 +147,7 @@ export const ROUTE_TO_TAB: Record<string, TabName> = {
 
   // ── 我的 tab（hidden tab，drawer 進入）─────────────────
   MeHome: '我的',
+  NuniWorkspace: '我的',
   ProfileEdit: '我的',
   Settings: '我的',
   Notifications: '我的',

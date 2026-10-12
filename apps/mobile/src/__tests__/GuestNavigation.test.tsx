@@ -1,16 +1,82 @@
 import React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { createNavigationContainerRef, NavigationContainer } from '@react-navigation/native';
 import { PreAuthStack } from '../screens/PreAuthStack';
+import { Text } from 'react-native';
+import { SchoolSessionBoundary } from '../app/SchoolSessionBoundary';
+import { preAuthLinking } from '../app/preAuthLinking';
+
+let mockSchoolAuth: {
+  user: { uid: string } | null;
+  profile: { uid: string; schoolId: string } | null;
+  loading: boolean;
+  profileLoading: boolean;
+  tokenExpired?: boolean;
+} = {
+  user: null,
+  profile: null,
+  loading: false,
+  profileLoading: false,
+  tokenExpired: false,
+};
+jest.mock('../state/auth', () => ({ useAuth: () => mockSchoolAuth }));
+let mockInitialUrl: string | null = null;
+let mockLinkListener: ((event: { url: string }) => void) | undefined;
+const mockRemoveLinkListener = jest.fn();
+jest.mock('expo-linking', () => ({
+  createURL: () => 'campus://',
+  getInitialURL: async () => mockInitialUrl,
+  addEventListener: (_type: string, listener: (event: { url: string }) => void) => {
+    mockLinkListener = listener;
+    return { remove: mockRemoveLinkListener };
+  },
+}));
+beforeEach(() => {
+  mockSchoolAuth = {
+    user: null,
+    profile: null,
+    loading: false,
+    profileLoading: false,
+    tokenExpired: false,
+  };
+  mockInitialUrl = null;
+  mockLinkListener = undefined;
+  mockRemoveLinkListener.mockClear();
+});
 
 jest.unmock('@react-navigation/native');
 jest.mock('../state/theme', () => ({ useThemeMode: () => ({ themeMode: 'light' }) }));
+jest.mock('../state/nuniSession', () => ({
+  useNuniSession: () => ({ session: null, loading: false, error: '', pendingLogout: false }),
+}));
+jest.mock('../screens/NuniWorkspaceScreen', () => ({
+  NuniWorkspaceScreen: () => {
+    const { Text } = require('react-native');
+    return <Text testID="platform-workspace">Campus One 帳號</Text>;
+  },
+}));
 jest.mock('../screens/SSOLoginScreen', () => ({
   SSOLoginScreen: () => {
     const { Text } = require('react-native');
     return <Text testID="school-login-form">登入學校帳號</Text>;
   },
 }));
+
+jest.mock('../screens/GoogleMapsLikeScreen', () => {
+  const { Text } = require('react-native');
+  return { GoogleMapsLikeScreen: () => <Text testID="public-map-screen">校園地圖</Text> };
+});
+jest.mock('../screens/BusAiFirstScreen', () => {
+  const { Text } = require('react-native');
+  return { __esModule: true, default: () => <Text testID="public-bus-screen">公車查詢</Text> };
+});
+jest.mock('../screens/CampusContentScreens', () => {
+  const { Text } = require('react-native');
+  return {
+    CampusAnnouncementsScreen: () => <Text testID="public-announcements-screen">公开公告</Text>,
+    CampusAnnouncementDetailScreen: () => <Text testID="public-announcement-screen">公告詳情</Text>,
+  };
+});
 
 test('the signed-out stack opens school login through the real navigation helper', async () => {
   const onUnhandledAction = jest.fn();
@@ -21,11 +87,154 @@ test('the signed-out stack opens school login through the real navigation helper
     </NavigationContainer>
   );
   const view = render(content());
-  fireEvent.press(await view.findByTestId('login-start'));
+  fireEvent.press(await view.findByTestId('school-login-start'));
   await waitFor(() => expect(view.getByTestId('school-login-form')).toBeTruthy());
   expect(navigation.getRootState().index).toBe(1);
   expect(navigation.getCurrentRoute()?.name).toBe('SSOLogin');
   view.rerender(content());
   expect(navigation.getCurrentRoute()?.name).toBe('SSOLogin');
   expect(onUnhandledAction).not.toHaveBeenCalled();
+});
+
+test('the primary signed-out entry opens the independent platform workspace', async () => {
+  const navigation = createNavigationContainerRef();
+  const view = render(
+    <NavigationContainer ref={navigation}>
+      <PreAuthStack />
+    </NavigationContainer>,
+  );
+  fireEvent.press(await view.findByTestId('login-start'));
+  await view.findByTestId('platform-workspace');
+  expect(navigation.getCurrentRoute()?.name).toBe('NuniWorkspace');
+});
+
+test.each([
+  ['campus://campus-one', 'NuniWorkspace', 'platform-workspace'],
+  ['campus://sso-login', 'SSOLogin', 'school-login-form'],
+])('a cold %s opens before any school authentication', async (url, route, target) => {
+  mockInitialUrl = url;
+  const navigation = createNavigationContainerRef();
+  const view = render(
+    <NavigationContainer ref={navigation} linking={preAuthLinking}>
+      <PreAuthStack />
+    </NavigationContainer>,
+  );
+  await view.findByTestId(target);
+  expect(navigation.getCurrentRoute()?.name).toBe(route);
+  expect(navigation.canGoBack()).toBe(true);
+  act(() => navigation.goBack());
+  await view.findByTestId('login-landing');
+  fireEvent.press(view.getByTestId('school-login-start'));
+  await view.findByTestId('school-login-form');
+});
+
+test('a warm platform link works in the school-signed-out stack and cleans up its subscription', async () => {
+  const navigation = createNavigationContainerRef();
+  const view = render(
+    <NavigationContainer ref={navigation} linking={preAuthLinking}>
+      <PreAuthStack />
+    </NavigationContainer>,
+  );
+  await view.findByTestId('login-landing');
+  await waitFor(() => expect(mockLinkListener).toBeDefined());
+  act(() => mockLinkListener?.({ url: 'campus://campus-one' }));
+  await view.findByTestId('platform-workspace');
+  expect(navigation.getCurrentRoute()?.name).toBe('NuniWorkspace');
+  view.unmount();
+  expect(mockRemoveLinkListener).toHaveBeenCalledTimes(1);
+});
+
+test.each([
+  ['Map', 'public-map-screen'],
+  ['BusSchedule', 'public-bus-screen'],
+  ['公告總覽', 'public-announcements-screen'],
+])('signed-out users can open %s without either account', async (route, target) => {
+  const navigation = createNavigationContainerRef();
+  const view = render(
+    <NavigationContainer ref={navigation}>
+      <PreAuthStack />
+    </NavigationContainer>,
+  );
+  fireEvent.press(await view.findByTestId(`public-${route}`));
+  await view.findByTestId(target);
+  expect(navigation.getCurrentRoute()?.name).toBe(route);
+  act(() => navigation.goBack());
+  fireEvent.press(await view.findByTestId('login-start'));
+  await view.findByTestId('platform-workspace');
+});
+
+test.each([
+  ['campus://map', 'public-map-screen'],
+  ['campus://bus', 'public-bus-screen'],
+  ['campus://announcements', 'public-announcements-screen'],
+  ['campus://announcement/public-1', 'public-announcement-screen'],
+])('a public cold link %s opens without school authentication', async (url, target) => {
+  mockInitialUrl = url;
+  const view = render(
+    <NavigationContainer linking={preAuthLinking}>
+      <PreAuthStack />
+    </NavigationContainer>,
+  );
+  await view.findByTestId(target);
+});
+
+test.each([
+  { loading: true, profileLoading: true, user: null, profile: null },
+  { loading: false, profileLoading: true, user: { uid: 'u1' }, profile: null },
+  {
+    loading: false,
+    profileLoading: false,
+    user: { uid: 'u2' },
+    profile: { uid: 'u1', schoolId: 'pu' },
+  },
+  { loading: false, profileLoading: false, user: null, profile: { uid: 'u1', schoolId: 'pu' } },
+  {
+    loading: false,
+    profileLoading: false,
+    user: { uid: 'u1' },
+    profile: { uid: 'u1', schoolId: 'pu' },
+    tokenExpired: true,
+  },
+])('public navigation remains usable with unresolved or stale school session %j', async (state) => {
+  mockSchoolAuth = { ...mockSchoolAuth, ...state };
+  const mountPrivate = jest.fn(() => <Text testID="private-school">Private</Text>);
+  const Private = mountPrivate;
+  const view = render(
+    <SchoolSessionBoundary
+      publicContent={
+        <NavigationContainer>
+          <PreAuthStack />
+        </NavigationContainer>
+      }
+    >
+      <Private />
+    </SchoolSessionBoundary>,
+  );
+  fireEvent.press(await view.findByTestId('public-Map'));
+  await view.findByTestId('public-map-screen');
+  expect(mountPrivate).not.toHaveBeenCalled();
+});
+
+test('account changes unmount private content before exposing the next account', () => {
+  mockSchoolAuth = {
+    ...mockSchoolAuth,
+    user: { uid: 'u1' },
+    profile: { uid: 'u1', schoolId: 'pu' },
+  };
+  const cleanup = jest.fn();
+  function Private() {
+    React.useEffect(() => cleanup, []);
+    return <Text testID="private-school">Private</Text>;
+  }
+  const content = () => (
+    <SchoolSessionBoundary publicContent={<Text>Public</Text>}>
+      <Private />
+    </SchoolSessionBoundary>
+  );
+  const view = render(content());
+  expect(view.getByTestId('private-school')).toBeTruthy();
+  mockSchoolAuth = { ...mockSchoolAuth, user: { uid: 'u2' } };
+  view.rerender(content());
+  expect(view.queryByTestId('private-school')).toBeNull();
+  expect(cleanup).toHaveBeenCalledTimes(1);
 });

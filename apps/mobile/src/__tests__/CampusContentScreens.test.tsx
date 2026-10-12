@@ -141,16 +141,14 @@ test('real announcement attachments open and failures are visible', async () => 
 });
 
 test('event date filters work and list navigation uses the actual event ID', async () => {
-  jest
-    .mocked(loadCampusEventPage)
-    .mockResolvedValue({
-      items: [
-        event,
-        { ...event, id: 'old', title: '已結束的活動', startsAt: '2020-01-01T00:00:00Z' },
-      ],
-      source: event.source,
-      nextCursor: null,
-    });
+  jest.mocked(loadCampusEventPage).mockResolvedValue({
+    items: [
+      event,
+      { ...event, id: 'old', title: '已結束的活動', startsAt: '2020-01-01T00:00:00Z' },
+    ],
+    source: event.source,
+    nextCursor: null,
+  });
   const view = render(<EventsScreen navigation={navigation} />);
   await view.findByText('校方的新活動');
   fireEvent.press(view.getByText('未來活動'));
@@ -330,4 +328,13 @@ test('changing detail source clears same-ID content synchronously and sends the 
   expect(view.queryByText('校方的新活動')).toBeNull();
   await view.findByText('找不到這場活動，可能已移除或不屬於目前學校。');
   expect(loadCampusEvent).toHaveBeenLastCalledWith('pu', 'e1', 'legacy-events');
+});
+
+test('a visitor can read the public announcement list and open its detail', async () => {
+  mockUid = null;
+  jest.mocked(loadCampusAnnouncements).mockResolvedValue([announcement] as never);
+  const view = render(<AnnouncementsScreen navigation={navigation} />);
+  fireEvent.press(await view.findByText('校方的新公告'));
+  expect(loadCampusAnnouncements).toHaveBeenCalledWith('pu', '');
+  expect(safeNavigate).toHaveBeenCalledWith(navigation, '公告詳情', { id: 'a1' });
 });

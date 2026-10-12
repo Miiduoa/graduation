@@ -6,43 +6,32 @@
  * 提供：
  *   - 站名 + 站牌設施（遮雨棚、LED 看板）
  *   - 所有經過此站的路線
- *   - 每條路線下一班 ETA + 後續班次
+ *   - 僅在官方站牌識別碼符合時顯示到站資料
  *   - 路線首末班、班距
- *   - 設定到站提醒
  *   - 加入「儲存地點」
  *   - 附近 POI（餐廳、便利商店）
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Pressable,
-  ScrollView,
-  Text,
-  View,
-  Alert,
-  Share,
-} from 'react-native';
+import React, { useCallback, useEffect, useMemo } from 'react';
+import { Pressable, ScrollView, Text, View, Alert, Share } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import * as Notifications from 'expo-notifications';
 import { Screen } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useThemeMode } from '../state/theme';
 import { analytics } from '../services/analytics';
-import { scheduleLocalNotification } from '../services/notifications';
 import { upsertSavedPlace } from '../services/savedPlaces';
 import { useAuth } from '../state/auth';
+import { useSchool } from '../state/school';
+import { VerifiedBusStopArrivals } from '../components/VerifiedBusStopArrivals';
 import {
   CAMPUS_BUS_ROUTES,
-  crowdLabel,
   getAllBusStops,
   getRoutesByStop,
   haversineMeters,
-  simulateActiveVehicles,
   type CampusBusRoute,
   type CampusBusStop,
-  type CampusBusVehicle,
 } from '../data/campusBusRoutes';
 import { CAMPUS_POIS, type CampusPoi } from '../data/puCampusData';
 
@@ -57,12 +46,7 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
   const params = (route.params ?? {}) as Partial<ParamShape>;
   const { user } = useAuth();
   const uid = user?.uid ?? null;
-
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => setTick((x) => x + 1), 5000);
-    return () => clearInterval(t);
-  }, []);
+  const { school } = useSchool();
 
   useEffect(() => {
     analytics.logScreenView('BusStopDetail');
@@ -78,72 +62,16 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
     [stop],
   );
 
-  const activeVehicles: CampusBusVehicle[] = useMemo(
-    () => simulateActiveVehicles(new Date()),
-    [tick],
-  );
-
-  // 每條路線下一班抵達此站的車
-  const arrivalsByRoute: Record<
-    string,
-    { vehicle: CampusBusVehicle; etaMin: number }[]
-  > = useMemo(() => {
-    if (!stop) return {};
-    const out: Record<string, { vehicle: CampusBusVehicle; etaMin: number }[]> = {};
-    for (const r of routesAtStop) {
-      // 這條路線所有活躍車輛
-      const vs = activeVehicles.filter((v) => v.routeId === r.id);
-      const stopIndex = r.stops.findIndex((s) => s.id === stop.id);
-      const arr = vs
-        .map((v) => {
-          // 估算車輛從目前位置到此站的時間
-          const dToStop = haversineMeters(v.position.lat, v.position.lng, stop.lat, stop.lng);
-          // 簡化：以速度 350 公尺/分（含停站）
-          let etaMin = Math.max(1, Math.round(dToStop / 350));
-          // 如果車已過此站，加上一整圈時間
-          const nextIdx = r.stops.findIndex((s) => s.id === v.nextStopId);
-          if (nextIdx > stopIndex) {
-            etaMin += r.durationMin;
-          }
-          return { vehicle: v, etaMin };
-        })
-        .sort((a, b) => a.etaMin - b.etaMin)
-        .slice(0, 3);
-      out[r.id] = arr;
-    }
-    return out;
-  }, [stop, routesAtStop, activeVehicles]);
-
   // 附近 POI（500 公尺內）
   const nearbyPois: CampusPoi[] = useMemo(() => {
     if (!stop) return [];
     return CAMPUS_POIS.filter((p) => haversineMeters(stop.lat, stop.lng, p.lat, p.lng) < 500)
-      .filter((p) => p.category === 'cafeteria' || p.category === 'convenience' || p.category === 'library')
+      .filter(
+        (p) =>
+          p.category === 'cafeteria' || p.category === 'convenience' || p.category === 'library',
+      )
       .slice(0, 6);
   }, [stop]);
-
-  const handleSetReminder = useCallback(
-    async (rt: CampusBusRoute, vehicle: CampusBusVehicle, etaMin: number) => {
-      const triggerSeconds = Math.max(etaMin * 60 - 60, 5);
-      try {
-        await scheduleLocalNotification(
-          `${rt.shortName} 即將到站`,
-          `${vehicle.plate} 將抵達 ${stop?.name ?? ''}（${etaMin} 分鐘）`,
-          { type: 'bus_stop', routeId: rt.id, stopId: stop?.id },
-          {
-            type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-            seconds: triggerSeconds,
-            repeats: false,
-          },
-        );
-        Alert.alert('提醒已設定', `${rt.shortName} 將抵達 ${stop?.name} 前 1 分鐘通知你`);
-        analytics.logEvent('busstop_reminder_set', { route_id: rt.id, stop_id: stop?.id });
-      } catch (err) {
-        Alert.alert('提醒失敗', '請確認通知權限');
-      }
-    },
-    [stop],
-  );
 
   const handleSavePlace = useCallback(async () => {
     if (!stop) return;
@@ -178,7 +106,9 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
       <Screen>
         <View style={{ alignItems: 'center', paddingTop: 60 }}>
           <Ionicons name="alert-circle" size={48} color={theme.colors.muted} />
-          <Text style={{ color: theme.colors.text, fontSize: 16, marginTop: 12 }}>找不到此站點</Text>
+          <Text style={{ color: theme.colors.text, fontSize: 16, marginTop: 12 }}>
+            找不到此站點
+          </Text>
         </View>
       </Screen>
     );
@@ -214,7 +144,14 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
               <Ionicons name="bus" size={22} color="#fff" />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 11, fontWeight: '700', letterSpacing: 2 }}>
+              <Text
+                style={{
+                  color: 'rgba(255,255,255,0.85)',
+                  fontSize: 11,
+                  fontWeight: '700',
+                  letterSpacing: 2,
+                }}
+              >
                 公車站
               </Text>
               <Text style={{ color: '#fff', fontSize: 22, fontWeight: '700' }}>{stop.name}</Text>
@@ -233,6 +170,18 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
           </View>
         </View>
 
+        <View style={{ paddingHorizontal: 12, gap: 10 }}>
+          <Text style={{ color: theme.colors.muted, lineHeight: 21 }}>
+            站點與路線來源：App
+            內建參考資料，非即時班表。營運時間、班距與停靠資訊可能有異動，請以官方公告為準。
+          </Text>
+          <VerifiedBusStopArrivals
+            key={`${uid ?? 'guest'}:${school.id}:${stop.id}`}
+            schoolId={school.id}
+            stopId={stop.id}
+          />
+        </View>
+
         {/* Routes section */}
         <View style={{ paddingHorizontal: 12, gap: 10 }}>
           <Text style={{ ...SECTION_HEADER }}>經過此站的路線</Text>
@@ -242,7 +191,6 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
             </Text>
           )}
           {routesAtStop.map((rt) => {
-            const arrivals = arrivalsByRoute[rt.id] ?? [];
             const stopIdx = rt.stops.findIndex((s) => s.id === stop.id);
             return (
               <View
@@ -276,13 +224,18 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
                       backgroundColor: rt.color,
                     }}
                   >
-                    <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>{rt.code}</Text>
+                    <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>
+                      {rt.code}
+                    </Text>
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>
                       {rt.shortName}
                     </Text>
-                    <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 1 }} numberOfLines={1}>
+                    <Text
+                      style={{ color: theme.colors.muted, fontSize: 11, marginTop: 1 }}
+                      numberOfLines={1}
+                    >
                       {stopIdx === 0
                         ? `起點 → ${rt.stops[rt.stops.length - 1].name}`
                         : stopIdx === rt.stops.length - 1
@@ -292,73 +245,6 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
                   </View>
                   <Ionicons name="chevron-forward" size={18} color={theme.colors.muted} />
                 </Pressable>
-
-                {/* Arrivals */}
-                <View style={{ paddingHorizontal: 14, paddingBottom: 12, gap: 6 }}>
-                  {arrivals.length === 0 ? (
-                    <Text style={{ color: theme.colors.muted, fontSize: 12, paddingVertical: 6 }}>
-                      此時段暫無班次
-                    </Text>
-                  ) : (
-                    arrivals.map(({ vehicle, etaMin }, idx) => {
-                      const crowd = crowdLabel(vehicle.crowd);
-                      return (
-                        <View
-                          key={vehicle.id}
-                          style={{
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            gap: 10,
-                            padding: 10,
-                            backgroundColor: theme.colors.surface2,
-                            borderRadius: 10,
-                            borderWidth: 1,
-                            borderColor: theme.colors.border,
-                          }}
-                        >
-                          <View
-                            style={{
-                              width: 32,
-                              height: 32,
-                              borderRadius: 16,
-                              backgroundColor: idx === 0 ? `${rt.color}25` : theme.colors.surface,
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                            }}
-                          >
-                            <Text style={{ color: rt.color, fontWeight: '700', fontSize: 12 }}>
-                              {etaMin}
-                            </Text>
-                          </View>
-                          <View style={{ flex: 1 }}>
-                            <Text style={{ color: theme.colors.text, fontSize: 12, fontWeight: '700' }}>
-                              {vehicle.plate}{idx === 0 ? ' · 下一班' : ''}
-                            </Text>
-                            <Text style={{ color: theme.colors.muted, fontSize: 10, marginTop: 1 }}>
-                              {vehicle.headsign} · {crowd.text}
-                            </Text>
-                          </View>
-                          {idx === 0 && (
-                            <Pressable
-                              onPress={() => handleSetReminder(rt, vehicle, etaMin)}
-                              hitSlop={8}
-                              style={{
-                                width: 32,
-                                height: 32,
-                                borderRadius: 8,
-                                backgroundColor: theme.colors.accentSoft,
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                              }}
-                            >
-                              <Ionicons name="alarm-outline" size={15} color={theme.colors.accent} />
-                            </Pressable>
-                          )}
-                        </View>
-                      );
-                    })
-                  )}
-                </View>
 
                 {/* Meta row */}
                 <View
@@ -370,8 +256,10 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
                     flexWrap: 'wrap',
                   }}
                 >
-                  <MiniTag text={`${rt.firstBusTime}-${rt.lastBusTime}`} />
-                  <MiniTag text={`${rt.peakFrequencyMin}-${rt.offPeakFrequencyMin} 分一班`} />
+                  <MiniTag text={`參考營運時間 ${rt.firstBusTime}-${rt.lastBusTime}`} />
+                  <MiniTag
+                    text={`參考班距 ${rt.peakFrequencyMin}-${rt.offPeakFrequencyMin} 分鐘`}
+                  />
                   {rt.studentFree && <MiniTag text="學生免費" color="#34D399" />}
                   {rt.hasAccessibleBus && <MiniTag text="♿ 低底盤" color="#34D399" />}
                 </View>
@@ -421,7 +309,11 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
         {nearbyPois.length > 0 && (
           <View style={{ paddingHorizontal: 12 }}>
             <Text style={{ ...SECTION_HEADER }}>步行 5 分鐘內</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ gap: 8 }}
+            >
               {nearbyPois.map((poi) => {
                 const d = haversineMeters(stop.lat, stop.lng, poi.lat, poi.lng);
                 return (
@@ -437,7 +329,10 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
                       borderColor: theme.colors.border,
                     })}
                   >
-                    <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 13 }} numberOfLines={1}>
+                    <Text
+                      style={{ color: theme.colors.text, fontWeight: '700', fontSize: 13 }}
+                      numberOfLines={1}
+                    >
                       {poi.name}
                     </Text>
                     <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>
@@ -474,6 +369,8 @@ function CtaBtn({ icon, label, onPress }: { icon: any; label: string; onPress: (
   useThemeMode();
   return (
     <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
       onPress={onPress}
       style={({ pressed }) => ({
         flex: 1,
@@ -505,13 +402,17 @@ function MiniTag({ text, color }: { text: string; color?: string }) {
         borderColor: color ? `${color}55` : theme.colors.border,
       }}
     >
-      <Text style={{ color: color ?? theme.colors.muted, fontSize: 10, fontWeight: '700' }}>{text}</Text>
+      <Text style={{ color: color ?? theme.colors.muted, fontSize: 10, fontWeight: '700' }}>
+        {text}
+      </Text>
     </View>
   );
 }
 
 const SECTION_HEADER = {
-  get color() { return theme.colors.muted; },
+  get color() {
+    return theme.colors.muted;
+  },
   fontSize: 11,
   fontWeight: '700' as const,
   letterSpacing: 2,
