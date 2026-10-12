@@ -44,7 +44,7 @@ export default function LoginLandingScreen() {
           ))}
         </View>
         <View style={s.panel}>
-          <Text style={s.title}>Campus One 帳號</Text>
+          <Text style={s.title}>Google 帳號</Text>
           <Text style={s.body}>和網頁版使用同一個帳號，加入課程、繳交作業或管理店家。</Text>
           {auth.pendingLogout || auth.error ? (
             <Text accessibilityRole="alert" style={s.body}>
@@ -61,7 +61,7 @@ export default function LoginLandingScreen() {
               {auth.session && !auth.loading && !auth.error && !auth.pendingLogout
                 ? '回到我的 Campus One'
                 : auth.loading
-                  ? '確認 Campus One 帳號'
+                  ? '確認 Google 帳號'
                   : auth.pendingLogout
                     ? '處理未完成的登出'
                     : auth.error

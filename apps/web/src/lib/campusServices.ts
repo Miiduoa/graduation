@@ -9,7 +9,7 @@ export type ServiceCategory = (typeof SERVICE_CATEGORIES)[number]['id'];
 
 export const SERVICE_ACCESS = {
   public: '可直接瀏覽',
-  platform: 'Campus One 帳號',
+  platform: 'Google 帳號',
   school: '學校帳號',
   account: '依帳號查看',
   operator: '需平台管理權限',

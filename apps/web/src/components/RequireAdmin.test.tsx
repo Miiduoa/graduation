@@ -54,7 +54,7 @@ it('a signed-out campus account cannot expose a persisted LMS session', () => {
     </RequireAdmin>,
   );
   expect(screen.queryByText('Private records')).toBeNull();
-  expect(screen.getByText('請先登入校園帳號')).toBeTruthy();
+  expect(screen.getByText('請先登入學校帳號')).toBeTruthy();
   expect(client.auth.getSession).not.toHaveBeenCalled();
 });
 it('provides an explicit local logout for any residual teaching session', async () => {

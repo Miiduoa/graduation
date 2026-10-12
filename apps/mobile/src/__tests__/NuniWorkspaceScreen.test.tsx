@@ -163,8 +163,8 @@ test('logout hides data immediately and retries an unconfirmed server logout', a
   );
   const view = render(<NuniWorkspaceScreen />);
   fireEvent.press(view.getByRole('tab', { name: '帳號' }));
-  await view.findByText('登出 Campus One 帳號');
-  fireEvent.press(view.getByText('登出 Campus One 帳號'));
+  await view.findByText('登出 Google 帳號');
+  fireEvent.press(view.getByText('登出 Google 帳號'));
   expect(view.queryByTestId('course-draft')).toBeNull();
   expect(view.queryByText('我的店家資料')).toBeNull();
   Object.assign(mockAuth, { session: null, pendingLogout: true, error: '無法完成登出' });
@@ -339,11 +339,11 @@ test('explicit logout drops same-account drafts before that account signs in aga
   const view = render(<NuniWorkspaceScreen />);
   fireEvent.changeText(view.getByTestId('course-draft'), '登出前的草稿');
   fireEvent.press(view.getByRole('tab', { name: '帳號' }));
-  await view.findByText('登出 Campus One 帳號');
+  await view.findByText('登出 Google 帳號');
   mockAuth.logout.mockImplementation(async () => {
     Object.assign(mockAuth, { session: null, loading: false });
   });
-  await act(async () => fireEvent.press(view.getByText('登出 Campus One 帳號')));
+  await act(async () => fireEvent.press(view.getByText('登出 Google 帳號')));
   mockAuth.session = { ...principal, context: 'same-account-new-login' };
   view.rerender(<NuniWorkspaceScreen />);
   expect(view.getByTestId('course-draft').props.value).toBe('');

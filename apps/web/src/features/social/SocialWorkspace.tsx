@@ -68,7 +68,7 @@ export function SocialWorkspace() {
       ) : (
         <section className={styles.panel}>
           <h2>登入後參與公開交流</h2>
-          <p>{auth.error || '使用 Campus One 帳號，閱讀與發表跨校公開貼文。'}</p>
+          <p>{auth.error || '使用 Google 帳號，閱讀與發表跨校公開貼文。'}</p>
           <div className={styles.actions}>
             <Link className={styles.link} href={loginHref}>
               登入帳號

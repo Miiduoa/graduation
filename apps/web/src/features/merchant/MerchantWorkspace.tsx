@@ -46,7 +46,7 @@ function expired(error: unknown) {
 export function MerchantWorkspace() {
   const auth = useNuniSession();
   return (
-    <SiteShell title="店家合作" subtitle="使用同一個 Campus One 帳號，申請進駐並查看審核進度。">
+    <SiteShell title="店家合作" subtitle="使用同一個 Google 帳號，申請進駐並查看審核進度。">
       {auth.session && !auth.pendingLogout && !auth.error ? (
         <AccountWorkspace
           key={`${auth.session.platformAccountId}:${auth.session.context}`}

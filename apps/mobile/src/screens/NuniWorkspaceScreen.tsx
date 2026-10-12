@@ -215,7 +215,7 @@ function Account({ onLogout }: { onLogout: () => void }) {
   return (
     <ScrollView contentContainerStyle={s.content}>
       <Text accessibilityRole="header" style={s.heading}>
-        我的 Campus One 帳號
+        我的 Google 帳號
       </Text>
       <Text style={s.body}>App 和網頁版使用同一個 Google 帳號，就會讀取相同的課程與資格。</Text>
       <View style={s.panel}>
@@ -268,9 +268,9 @@ function Account({ onLogout }: { onLogout: () => void }) {
         </Text>
       ) : null}
       <Text style={s.note}>
-        網頁版會另外確認瀏覽器中的登入狀態。登出 Campus One 帳號不會登出已連線的學校帳號。
+        網頁版會另外確認瀏覽器中的登入狀態。登出 Google 帳號不會登出已連線的學校帳號。
       </Text>
-      <Action label="登出 Campus One 帳號" onPress={onLogout} />
+      <Action label="登出 Google 帳號" onPress={onLogout} />
     </ScrollView>
   );
 }
@@ -370,10 +370,10 @@ export function NuniWorkspaceScreen() {
       <View
         style={s.center}
         accessibilityRole="progressbar"
-        accessibilityLabel={action || '正在確認 Campus One 帳號'}
+        accessibilityLabel={action || '正在確認 Google 帳號'}
       >
         <ActivityIndicator color={theme.colors.accent} />
-        <Text style={s.body}>{action || '正在確認 Campus One 帳號…'}</Text>
+        <Text style={s.body}>{action || '正在確認 Google 帳號…'}</Text>
       </View>
     );
   if (auth.pendingLogout || auth.error || actionError)
@@ -410,7 +410,7 @@ export function NuniWorkspaceScreen() {
         登入或建立帳號
       </Text>
       <Text style={s.body}>
-        App 和網頁版使用同一個 Campus One 帳號。首次使用 Google
+        App 和網頁版使用同一個 Google 帳號。首次使用 Google
         繼續時會建立帳號；再次登入會回到原本的帳號。
       </Text>
       <View style={s.panel}>

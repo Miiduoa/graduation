@@ -97,7 +97,7 @@ export function NuniMerchant() {
   const styles = useThemeStyleSheet(createStyles);
   const auth = useNuniSession();
   if (auth.loading || !auth.session || auth.pendingLogout || auth.error) {
-    return <Text style={styles.text}>請先確認 Campus One 帳號狀態。</Text>;
+    return <Text style={styles.text}>請先確認 Google 帳號狀態。</Text>;
   }
   return (
     <MerchantAccount
@@ -245,7 +245,7 @@ function MerchantAccount({ context }: { context: string }) {
         店家合作
       </Text>
       <Text style={styles.text}>
-        使用同一個 Campus One 帳號申請進駐。審核與營運權限依場域分開，不會取得學校管理權限。
+        使用同一個 Google 帳號申請進駐。審核與營運權限依場域分開，不會取得學校管理權限。
       </Text>
       {invalidSession ? (
         <>

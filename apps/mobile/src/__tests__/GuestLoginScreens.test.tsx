@@ -73,7 +73,7 @@ test('the platform account entry uses the same account destination without signi
   const view = render(<SSOLoginScreen />);
   expect(view.getByText('和網頁版使用同一個帳號')).toBeTruthy();
   expect(view.queryByText(/Firebase|Firestore|Client ID|Demo|TronClass|OAuth/)).toBeNull();
-  fireEvent.press(view.getByText('前往 Campus One 帳號'));
+  fireEvent.press(view.getByText('用 Google 帳號登入'));
   expect(mockNavigation.navigate).toHaveBeenCalledWith('NuniWorkspace');
   expect(signInWithCredential).not.toHaveBeenCalled();
   expect(signInWithStudentId).not.toHaveBeenCalled();
@@ -87,7 +87,7 @@ test('a pending school request keeps both the form and platform navigation locke
   fireEvent.press(view.getByText('使用學號登入'));
   expect(view.getByRole('progressbar', { name: '登入處理中，確認學校帳號' })).toBeTruthy();
   expect(view.queryByRole('button', { name: '重新嘗試' })).toBeNull();
-  const platform = view.getByRole('button', { name: '前往 Campus One 帳號' });
+  const platform = view.getByRole('button', { name: '用 Google 帳號登入' });
   expect(platform).toBeDisabled();
   fireEvent.press(platform);
   fireEvent.press(view.getByRole('button', { name: '登入中…' }));
@@ -103,7 +103,7 @@ test.each(['school', 'platform'] as const)(
     enterSchoolCredentials(view);
     const buttons = view.UNSAFE_getAllByType(Button);
     const school = buttons.find((button) => button.props.text === '使用學號登入')!.props.onPress;
-    const platform = buttons.find((button) => button.props.text === '前往 Campus One 帳號')!.props
+    const platform = buttons.find((button) => button.props.text === '用 Google 帳號登入')!.props
       .onPress;
     act(() => {
       if (first === 'school') {
@@ -125,7 +125,7 @@ test.each(['school', 'platform'] as const)(
 test('returning from the platform account page restores the school form', () => {
   const view = render(<SSOLoginScreen />);
   enterSchoolCredentials(view);
-  fireEvent.press(view.getByText('前往 Campus One 帳號'));
+  fireEvent.press(view.getByText('用 Google 帳號登入'));
   expect(view.getByTestId('student-id-input').props.editable).toBe(false);
   act(() => mockFocus?.());
   expect(view.getByTestId('student-id-input').props.editable).toBe(true);
@@ -138,7 +138,7 @@ test('a failed school request unlocks the platform choice and supports a school 
   enterSchoolCredentials(view);
   fireEvent.press(view.getByText('使用學號登入'));
   await view.findByText('學校帳號登入未完成，請確認帳號密碼與網路連線後重試。');
-  expect(view.getByRole('button', { name: '前往 Campus One 帳號' })).not.toBeDisabled();
+  expect(view.getByRole('button', { name: '用 Google 帳號登入' })).not.toBeDisabled();
   fireEvent.press(view.getByText('重新嘗試'));
   expect(view.queryByRole('alert')).toBeNull();
   expect(view.getByTestId('student-id-input').props.editable).toBe(true);
@@ -153,7 +153,7 @@ test('school success keeps both flows locked and clears the pending dialog after
     await act(async () => fireEvent.press(view.getByText('使用學號登入')));
     expect(view.getByText('登入完成')).toBeTruthy();
     expect(view.getByRole('button', { name: '使用學號登入' })).toBeDisabled();
-    expect(view.getByRole('button', { name: '前往 Campus One 帳號' })).toBeDisabled();
+    expect(view.getByRole('button', { name: '用 Google 帳號登入' })).toBeDisabled();
     view.unmount();
     act(() => jest.advanceTimersByTime(250));
     expect(Alert.alert).not.toHaveBeenCalled();
@@ -316,7 +316,7 @@ test('a release without school SSO keeps public and platform entries, but does n
   expect(direct.getByText('學校連線尚未開放')).toBeTruthy();
   expect(direct.queryByTestId('student-password-input')).toBeNull();
   expect(direct.queryByText('使用學號登入')).toBeNull();
-  fireEvent.press(direct.getByText('前往 Campus One 帳號'));
+  fireEvent.press(direct.getByText('用 Google 帳號登入'));
   expect(mockNavigation.navigate).toHaveBeenCalledWith('NuniWorkspace');
   expect(signInWithStudentId).not.toHaveBeenCalled();
 });

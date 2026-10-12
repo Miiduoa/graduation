@@ -30,7 +30,7 @@ export default function MeAiFirstScreen() {
   const confirmLogout = useCallback(() => {
     if (!uid || signingOut.current) return;
     const requestedUid = uid;
-    Alert.alert('登出學校帳號', '確定要登出學校帳號嗎？Campus One 平台帳號會保留登入。', [
+    Alert.alert('登出學校帳號', '確定要登出學校帳號嗎？Google 帳號會保留登入。', [
       { text: '取消', style: 'cancel' },
       {
         text: '登出學校帳號',
@@ -59,9 +59,9 @@ export default function MeAiFirstScreen() {
         title={displayName}
         subtitle={details || '管理帳號、課務資料與個人設定。'}
       />
-      <AISection title="Campus One 帳號">
+      <AISection title="Google 帳號">
         <AIRow
-          title="課程、店家與平台帳號"
+          title="課程、店家與 Google 帳號"
           subtitle="和網頁版共用的課程、學校資格與店家權限"
           onPress={go('NuniWorkspace')}
         />

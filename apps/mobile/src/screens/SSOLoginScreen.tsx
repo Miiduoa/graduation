@@ -125,7 +125,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
     authenticating: '確認學校帳號',
     syncingCampus: '同步 E 校園資料',
     syncingTronClass: '同步課程資料',
-    linking: '準備你的校園帳號',
+    linking: '連上學校帳號',
     success: '登入完成',
     error: '登入失敗',
   };
@@ -310,9 +310,9 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
           </View>
         ) : null}
 
-        <AnimatedCard title="Campus One 帳號" subtitle="和網頁版使用同一個帳號">
+        <AnimatedCard title="Google 帳號" subtitle="和網頁版使用同一個帳號">
           <Button
-            text="前往 Campus One 帳號"
+            text="用 Google 帳號登入"
             kind="secondary"
             onPress={openPlatformAccount}
             disabled={formLocked}

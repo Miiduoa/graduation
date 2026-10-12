@@ -285,7 +285,7 @@ function MapContent({
           {!uid && !authLoading && <Link href={schoolLoginHref}>連線學校帳號以收藏</Link>}
         </div>
         {!uid && !authLoading && (
-          <p className={styles.note}>地圖與導航不需登入；收藏尚未支援 Campus One 帳號。</p>
+          <p className={styles.note}>地圖與導航不需登入；收藏尚未支援 Google 帳號。</p>
         )}
         {uid && favorites.status === 'loading' && (
           <p role="status" className={styles.note}>

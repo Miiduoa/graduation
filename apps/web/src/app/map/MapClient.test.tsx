@@ -135,7 +135,7 @@ it('uses an explicit school flow for legacy favorites while keeping public navig
   expect(login.searchParams.get('returnUrl')).toBe(
     '/map?schoolId=pu&route=gate%2Clibrary&focus=library#directions',
   );
-  expect(screen.getByText('地圖與導航不需登入；收藏尚未支援 Campus One 帳號。')).toBeTruthy();
+  expect(screen.getByText('地圖與導航不需登入；收藏尚未支援 Google 帳號。')).toBeTruthy();
   expect(screen.getByRole('link', { name: '從目前位置導航' })).toBeTruthy();
   expect(loadMapFavorites).not.toHaveBeenCalled();
   expect(setMapFavorite).not.toHaveBeenCalled();
