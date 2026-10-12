@@ -43,6 +43,9 @@ import {
 import { listAcceptedFriends } from '@/lib/timetable/friends';
 import { useAcademicRecords } from '@/lib/useAcademicRecords';
 import type { AcademicCourse } from '@/lib/academicRecords';
+import { CourseEditor } from './CourseEditor';
+import { TimetableGrid, UnscheduledCourses } from './TimetableGrid';
+import { validateCourseDraft } from './courseEditorModel';
 
 function fromSchoolCourse(course: AcademicCourse): PersonalCourse {
   const start = course.periods[0] || 0;
@@ -107,7 +110,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
   const schoolRecords = useAcademicRecords('courses');
 
   const planner = useMemo(
-    () => new SchedulePlanner(timetable?.courses || [], friends, selectedFriend),
+    () => new SchedulePlanner(timetable?.courses || [], friends.filter((friend) => friend.courses.length > 0), selectedFriend),
     [timetable?.courses, friends, selectedFriend],
   );
 
@@ -122,6 +125,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
   }, [uid, schoolId, loadAttempt]);
 
   useEffect(() => {
+    let current = true;
     if (!uid) {
       setFriends([]);
       return;
@@ -137,11 +141,13 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
             courses: theirs?.courses || [],
           });
         }
+        if (!current) return;
         setFriends(loaded);
         const wanted = new URLSearchParams(window.location.search).get('friend');
         if (wanted && loaded.some((friend) => friend.id === wanted)) setSelectedFriend(wanted);
       })
-      .catch(() => setFriends([]));
+      .catch(() => { if (current) setFriends([]); });
+    return () => { current = false; };
   }, [uid, schoolId]);
 
   // 別人約我、還沒回覆的邀約，在課表頁也看得到
@@ -205,9 +211,9 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
 
   const conflicts = findCourseConflicts(timetable.courses);
   const selected = friends.find((friend) => friend.id === selectedFriend);
-  const windows = selected ? meetupWindows(timetable.courses, selected.courses) : [];
+  const windows = selected && selected.courses.length > 0 ? meetupWindows(timetable.courses, selected.courses) : [];
   const sendMeetup = async (kind: 'meal' | 'study', day: number, startMinute: number) => {
-    if (!uid || !selected || meetupBusy) return;
+    if (!uid || !selected || !selected.courses.length || meetupBusy) return;
     setMeetupBusy(true);
     const label = meetupLabel({ day, kind, startMinute });
     try {
@@ -234,10 +240,18 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
   const analyzed = analyzeImportDrafts(timetable.courses, drafts, importMode);
   const importCount = analyzed.filter((item) => item.selected !== false).length;
   const startEditing = (course: PersonalCourse) => {
-    if (!saving.current) setEditing(course);
+    if (!saving.current) {
+      setNotice('');
+      setEditing(course);
+    }
   };
 
   const saveCourse = async (course: PersonalCourse) => {
+    const issues = validateCourseDraft(course, PERIOD_TIMES.length, WEEKDAY_LABELS.length);
+    if (Object.keys(issues).length) {
+      setNotice(Object.values(issues).join(' '));
+      return;
+    }
     const cleaned = cleanCourse(course);
     const next = timetable.courses.some((item) => item.id === cleaned.id)
       ? timetable.courses.map((item) => (item.id === cleaned.id ? cleaned : item))
@@ -405,7 +419,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
           讓已接受的好友看這份課表
         </label>
       ) : null}
-      {notice && (
+      {notice && !editing && (
         <p className={styles.note} role="status">
           {notice}
         </p>
@@ -437,7 +451,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
             ))}
           </select>
         </label>
-        <button type="button" className="btn" disabled={busy} onClick={() => startEditing(cleanCourse({ day, start: 1, end: 1 }))}>
+        <button type="button" className="btn" disabled={busy} onClick={() => startEditing({ ...cleanCourse({ day, start: 1, end: 1 }), name: '' })}>
           新增課程
         </button>
         <button
@@ -456,26 +470,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
       </label>}
 
       {view === 'grid' ? (
-        <div className={styles.grid} role="table" aria-label="一週格子課表">
-          <div className={styles.gridTime}>節次</div>
-          {WEEKDAY_LABELS.map((label) => (
-            <div className={styles.gridHead} key={label}>
-              {label}
-            </div>
-          ))}
-          {PERIOD_TIMES.map((time, index) => {
-            const period = index + 1;
-            return (
-              <FragmentRow
-                key={period}
-                period={period}
-                time={time}
-                courses={timetable.courses}
-                onEdit={startEditing}
-              />
-            );
-          })}
-        </div>
+        <TimetableGrid courses={timetable.courses} disabled={busy} onEdit={startEditing} />
       ) : view === 'week' ? (
         <div className={styles.week}>
           {WEEKDAY_LABELS.map((label, index) => {
@@ -487,7 +482,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
                 <h3>{label}</h3>
                 {entries.length ? (
                   entries.map((course) => (
-                    <button type="button" className={styles.course} key={course.id} onClick={() => startEditing(course)}>
+                    <button type="button" className={styles.course} key={course.id} disabled={busy} onClick={() => startEditing(course)}>
                       <time>{courseTimeLabel(course)}</time>
                       <h4>{course.name}</h4>
                       <p>{course.room || '教室未填'}</p>
@@ -501,28 +496,38 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
           })}
         </div>
       ) : (
-        <ul className={styles.list}>
-          {timetable.courses
-            .filter((course) => course.day === day)
-            .sort((a, b) => a.start - b.start)
-            .map((course) => (
-              <li key={course.id}>
-                <button type="button" className={styles.course} onClick={() => startEditing(course)}>
-                  <time>{periodRangeLabel(course.start, course.end)}</time>
-                  <h4>{course.name}</h4>
-                  <p>
-                    {course.teacher || '教師未填'} · {course.room || '教室未填'}
-                  </p>
-                </button>
-              </li>
-            ))}
-        </ul>
+        <>
+          {!timetable.courses.some((course) => course.day === day) && (
+            <p className={styles.empty}>{WEEKDAY_LABELS[day - 1]}還沒有課程，可使用上方「新增課程」安排。</p>
+          )}
+          <ul className={styles.list}>
+            {timetable.courses
+              .filter((course) => course.day === day)
+              .sort((a, b) => a.start - b.start)
+              .map((course) => (
+                <li key={course.id}>
+                  <button type="button" className={styles.course} disabled={busy} onClick={() => startEditing(course)}>
+                    <time>{periodRangeLabel(course.start, course.end)}</time>
+                    <h4>{course.name}</h4>
+                    <p>
+                      {course.teacher || '教師未填'} · {course.room || '教室未填'}
+                    </p>
+                  </button>
+                </li>
+              ))}
+          </ul>
+        </>
       )}
+      <UnscheduledCourses courses={timetable.courses} disabled={busy} onEdit={startEditing} />
 
       {editing && (
         <CourseEditor
+          key={editing.id}
           course={editing}
+          courses={timetable.courses}
+          existing={timetable.courses.some((course) => course.id === editing.id)}
           busy={busy}
+          feedback={notice}
           onChange={setEditing}
           onSave={() => void saveCourse(editing)}
           onRemove={() => void removeCourse(editing.id)}
@@ -676,7 +681,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
                 {friends.map((friend) => (
                   <option value={friend.id} key={friend.id}>
                     {friend.name}
-                    {friend.courses.length ? '' : '（還沒有課表）'}
+                    {friend.courses.length ? '' : '（課表不可用）'}
                   </option>
                 ))}
               </select>
@@ -685,7 +690,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
               <p className={styles.notice}>這週找不到兩個人都沒課、有一小時的時段。</p>
             )}
             {selected && !selected.courses.length && (
-              <p className={styles.notice}>這位朋友還沒有開放課表，或課表仍是空的。</p>
+              <p className={styles.notice}>目前沒有可用的好友課表，可能尚未開放、未排課或暫時讀取失敗；不會將缺少資料當作整天空堂。</p>
             )}
             {selected &&
               windows.slice(0, 8).map((window) => (
@@ -735,119 +740,6 @@ function MeetupWindowRow({
         約讀書
       </button>
     </div>
-  );
-}
-
-function FragmentRow({
-  period,
-  time,
-  courses,
-  onEdit,
-}: {
-  period: number;
-  time: readonly [string, string];
-  courses: PersonalCourse[];
-  onEdit: (course: PersonalCourse) => void;
-}) {
-  return (
-    <>
-      <div className={styles.gridTime}>
-        {period}
-        <br />
-        {time[0]}
-      </div>
-      {WEEKDAY_LABELS.map((_, dayIndex) => {
-        const hit = courses.find((course) => course.day === dayIndex + 1 && period >= course.start && period <= course.end);
-        return (
-          <div className={styles.gridCell} key={`${period}-${dayIndex}`}>
-            {hit && period === hit.start ? (
-              <button type="button" className={styles.gridCourse} onClick={() => onEdit(hit)}>
-                <strong>{hit.name}</strong>
-                <div>{hit.room}</div>
-              </button>
-            ) : null}
-          </div>
-        );
-      })}
-    </>
-  );
-}
-
-function CourseEditor({
-  course,
-  busy,
-  onChange,
-  onSave,
-  onRemove,
-  onCancel,
-}: {
-  course: PersonalCourse;
-  busy: boolean;
-  onChange: (course: PersonalCourse) => void;
-  onSave: () => void;
-  onRemove: () => void;
-  onCancel: () => void;
-}) {
-  return (
-    <section className={styles.panel} aria-label="編輯課程">
-      <h2>編輯課程</h2>
-      <label className={styles.field}>
-        課名
-        <input disabled={busy} value={course.name} onChange={(event) => onChange({ ...course, name: event.target.value })} />
-      </label>
-      <label className={styles.field}>
-        星期
-        <select disabled={busy} value={course.day} onChange={(event) => onChange({ ...course, day: Number(event.target.value) })}>
-          <option value={0}>未排定</option>
-          {WEEKDAY_LABELS.map((label, index) => (
-            <option value={index + 1} key={label}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className={styles.field}>
-        開始節次
-        <input
-          disabled={busy}
-          type="number"
-          min={1}
-          max={13}
-          value={course.start || 1}
-          onChange={(event) => onChange({ ...course, start: Number(event.target.value) })}
-        />
-      </label>
-      <label className={styles.field}>
-        結束節次
-        <input
-          disabled={busy}
-          type="number"
-          min={1}
-          max={13}
-          value={course.end || course.start || 1}
-          onChange={(event) => onChange({ ...course, end: Number(event.target.value) })}
-        />
-      </label>
-      <label className={styles.field}>
-        老師
-        <input disabled={busy} value={course.teacher} onChange={(event) => onChange({ ...course, teacher: event.target.value })} />
-      </label>
-      <label className={styles.field}>
-        教室
-        <input disabled={busy} value={course.room} onChange={(event) => onChange({ ...course, room: event.target.value })} />
-      </label>
-      <div className={styles.toolbar}>
-        <button type="button" className="btn primary" disabled={busy} onClick={onSave}>
-          儲存
-        </button>
-        <button type="button" className="btn" disabled={busy} onClick={onCancel}>
-          取消
-        </button>
-        <button type="button" className="btn" disabled={busy} onClick={onRemove}>
-          刪除
-        </button>
-      </div>
-    </section>
   );
 }
 
