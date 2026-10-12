@@ -3,6 +3,8 @@ const { after, beforeEach, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { initializeApp, deleteApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
+// 這裡測的是點餐流程本身，線上點餐開關要明確打開（正式環境沒設就是關）
+process.env.ONLINE_ORDERING_ENABLED = 'true';
 const { createGroupMembershipHandlers } = require('./groupMembership');
 const { createOrderHandler } = require('./createOrder');
 const { createSubmitProductFeedback } = require('./productFeedback');

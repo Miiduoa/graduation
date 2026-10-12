@@ -16,6 +16,8 @@ jest.mock('../data/studentHome', () => ({ loadStudentHome: jest.fn() }));
 jest.mock('../ui/navigationTheme', () => ({ useTabBarContentBottomPadding: () => 80 }));
 jest.mock('../services/companionSignalRecorder', () => ({ recordCompanionEvent: jest.fn() }));
 jest.mock('../app/useAIOverlay', () => ({ aiOverlay: { open: jest.fn() } }));
+jest.mock('../app/rootNavigation', () => ({ rootNavigateNested: jest.fn() }));
+jest.mock('../components/OpenOrderCard', () => ({ OpenOrderCard: () => null }));
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => mockNavigation,
   useFocusEffect: (callback: () => void) => require('react').useEffect(callback, [callback]),
