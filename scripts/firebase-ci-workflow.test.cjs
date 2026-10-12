@@ -38,10 +38,10 @@ test('a newer main run cannot cancel production; PR/develop validation remains c
   }
 });
 
-test('only a main push can enter the production deployment job', () => {
+test('only a manual run on main can enter the production deployment job', () => {
   for (const [ref, event_name, allowed] of [
-    ['refs/heads/main', 'push', true],
-    ['refs/heads/main', 'workflow_dispatch', false],
+    ['refs/heads/main', 'workflow_dispatch', true],
+    ['refs/heads/main', 'push', false],
     ['refs/pull/30/merge', 'pull_request', false],
     ['refs/heads/develop', 'push', false],
   ]) {
