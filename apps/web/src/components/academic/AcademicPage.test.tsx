@@ -30,7 +30,21 @@ vi.mock('@/features/nuni/Session', () => ({
 }));
 vi.mock('next/navigation', () => ({ usePathname: () => '/grades' }));
 vi.mock('@/components/SiteShell', () => ({
-  SiteShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main>,
+  SiteShell: ({
+    children,
+    title,
+    schoolName,
+  }: {
+    children: React.ReactNode;
+    title?: string;
+    schoolName?: string;
+  }) => (
+    <main>
+      {schoolName ? <p>{schoolName}</p> : null}
+      {title ? <h1>{title}</h1> : null}
+      {children}
+    </main>
+  ),
 }));
 vi.mock('@/lib/academicClient', async (original) => ({
   ...(await original<typeof import('@/lib/academicClient')>()),
@@ -45,7 +59,10 @@ const timetableApi = vi.hoisted(() => ({
   listMyMeetups: vi.fn(async () => []),
   respondMeetup: vi.fn(),
 }));
-vi.mock('@/lib/timetable/store', () => timetableApi);
+vi.mock('@/lib/timetable/store', async (original) => ({
+  ...(await original<typeof import('@/lib/timetable/store')>()),
+  ...timetableApi,
+}));
 vi.mock('@/lib/timetable/friends', () => ({
   listAcceptedFriends: vi.fn(async () => []),
 }));
@@ -84,7 +101,14 @@ beforeEach(() => {
   account.studentId = true;
   vi.mocked(loadAcademicRecords).mockResolvedValue(grades());
   timetableApi.loadPersonalTimetable.mockResolvedValue(emptyTimetable());
-  timetableApi.savePersonalTimetable.mockResolvedValue({ stored: 'cloud' });
+  timetableApi.savePersonalTimetable.mockResolvedValue({ stored: 'local' });
+});
+it('uses the function name in the header instead of a school name before the school account is connected', async () => {
+  account.studentId = false;
+  vi.mocked(loadAcademicRecords).mockRejectedValue(new AcademicConnectionError('reconnect'));
+  render(<GradesPage />);
+  expect(await screen.findByRole('heading', { level: 1, name: '成績' })).toBeTruthy();
+  expect(screen.queryByText('靜宜大學')).toBeNull();
 });
 it('preserves unknown grades and a real zero without manufacturing GPA or rank', async () => {
   render(<GradesPage />);
@@ -203,8 +227,13 @@ it('keeps weekend and unrecognized school courses as drafts until confirm', asyn
   expect(screen.getByText('另約時間')).toBeTruthy();
   expect(screen.getAllByText(/時間待定/).length).toBeGreaterThan(0);
   expect(timetableApi.savePersonalTimetable).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: '確認匯入' }));
+  expect(screen.queryByRole('button', { name: '確認匯入' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '存在這台裝置' }));
   await waitFor(() => expect(timetableApi.savePersonalTimetable).toHaveBeenCalled());
+  expect(screen.getByRole('status').textContent).toBe(
+    '已存在這台裝置，換手機或清除瀏覽器資料就會不見',
+  );
+  expect(screen.queryByText(/已儲存|已同步/)).toBeNull();
 });
 it('requires personal input for credit planning and clears it when the account changes', async () => {
   const view = render(<CreditPlannerPage />);

@@ -16,7 +16,21 @@ vi.mock('@/features/nuni/Session', () => ({
   useOptionalNuniSession: () => null,
 }));
 vi.mock('@/components/SiteShell', () => ({
-  SiteShell: ({ children }: { children: ReactNode }) => <main>{children}</main>,
+  SiteShell: ({
+    children,
+    title,
+    schoolName,
+  }: {
+    children: ReactNode;
+    title?: string;
+    schoolName?: string;
+  }) => (
+    <main>
+      {schoolName ? <p>{schoolName}</p> : null}
+      {title ? <h1>{title}</h1> : null}
+      {children}
+    </main>
+  ),
 }));
 vi.mock('@/lib/campusAssistantClient', async (original) => ({
   ...(await original<typeof import('@/lib/campusAssistantClient')>()),
@@ -37,6 +51,13 @@ function ask(content = '私人課表') {
   fireEvent.change(screen.getByLabelText('你的問題'), { target: { value: content } });
   fireEvent.submit(screen.getByRole('form', { name: '傳送問題' }));
 }
+
+it('uses the function name in the header instead of a school name before the school account is connected', () => {
+  state.uid = null;
+  render(<AssistantPage />);
+  expect(screen.getByRole('heading', { level: 1, name: '助理' })).toBeTruthy();
+  expect(screen.queryByText('靜宜大學')).toBeNull();
+});
 
 it('requires sign-in and does not send a query from a shared link automatically', () => {
   state.uid = null;

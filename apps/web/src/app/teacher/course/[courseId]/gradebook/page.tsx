@@ -15,7 +15,7 @@ export default function TeacherGradebookPage(props: {
 }) {
   const { courseId } = use(props.params);
   const searchParams = props.searchParams ? use(props.searchParams) : undefined;
-  const { schoolId, schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
+  const { schoolId, schoolSearch: q } = resolveSchoolPageContext(searchParams);
   const { state, refresh, authLoading, signedIn } = useTeacherCourse(
     schoolId,
     courseId,
@@ -33,7 +33,6 @@ export default function TeacherGradebookPage(props: {
     <SiteShell
       title={gradebook ? `${gradebook.course.name} · 成績簿` : '成績簿'}
       subtitle="查看課程已儲存的成績與發布狀態。"
-      schoolName={`${schoolName} · 教學工作台`}
     >
       <nav className={local.actions}>
         <Link className={styles.secondary} href={`${path}${q}`}>

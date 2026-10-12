@@ -186,6 +186,8 @@ it('keeps the teacher route and school context when returning to the course or s
     `/teacher/course/course%2Fid${schoolSearch}`,
   );
   expect(screen.getByRole('heading', { name: '這個功能還沒接通' })).toBeTruthy();
+  expect(screen.getByRole('heading', { level: 1, name: '點名' })).toBeTruthy();
+  expect(screen.queryByText('靜宜大學')).toBeNull();
   expect(screen.getByText('出缺席請先在課堂上向老師確認。')).toBeTruthy();
   expect(screen.queryByRole('link', { name: '登入帳號' })).toBeNull();
   expect(screen.getByRole('main').id).toBe('page-content');
