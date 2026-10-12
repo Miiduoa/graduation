@@ -16,7 +16,7 @@ import {
 } from '../services/publicCampusContent';
 import { exportAndShareICalFile } from '../services/ical';
 import { safeNavigate } from '../utils/safeNavigate';
-import { getReleaseConfig } from '../services/release';
+import { getRawAppEnv } from '../services/release';
 
 let mockUid: string | null = 'student-a';
 let mockSchool = { id: 'pu' };
@@ -35,7 +35,7 @@ jest.mock('../services/publicCampusContent', () => ({
 jest.mock('../services/ical', () => ({ exportAndShareICalFile: jest.fn() }));
 jest.mock('../utils/safeNavigate', () => ({ safeNavigate: jest.fn() }));
 jest.mock('../services/release', () => ({
-  getReleaseConfig: jest.fn(() => ({ appEnv: 'development' })),
+  getRawAppEnv: jest.fn(() => 'development'),
 }));
 jest.mock('../ui/navigationTheme', () => ({ useTabBarContentBottomPadding: () => 80 }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
@@ -69,7 +69,7 @@ beforeEach(() => {
   applyTheme('light');
   mockUid = 'student-a';
   mockSchool = { id: 'pu' };
-  jest.mocked(getReleaseConfig).mockReturnValue({ appEnv: 'development' } as never);
+  jest.mocked(getRawAppEnv).mockReturnValue('development');
   jest.mocked(loadCampusAnnouncements).mockResolvedValue([announcement]);
   jest.mocked(loadCampusAnnouncementFeed).mockResolvedValue({
     announcements: [announcement],
@@ -160,13 +160,23 @@ test('keeps old announcements when the school site is down and links the office 
   await detail.findByText('看原文');
 });
 
-test('production hides cms-none demo schools from the announcement list', async () => {
+test.each(['', 'staging', 'production'])(
+  'hides cms-none demo schools from the announcement list when app env is %s',
+  async (env) => {
+    mockSchool = { id: 'tw-demo-uni' };
+    jest.mocked(getRawAppEnv).mockReturnValue(env);
+    const view = render(<AnnouncementsScreen navigation={navigation} />);
+    expect(view.getByText('目前沒有公告')).toBeTruthy();
+    expect(view.queryByText('示範大學')).toBeNull();
+    expect(view.queryByText('暫時抓不到')).toBeNull();
+  },
+);
+
+test('shows cms-none demo schools on the announcement list in an explicit test environment', async () => {
   mockSchool = { id: 'tw-demo-uni' };
-  jest.mocked(getReleaseConfig).mockReturnValue({ appEnv: 'production' } as never);
+  jest.mocked(getRawAppEnv).mockReturnValue('test');
   const view = render(<AnnouncementsScreen navigation={navigation} />);
-  expect(view.getByText('目前沒有公告')).toBeTruthy();
-  expect(view.queryByText('示範大學')).toBeNull();
-  expect(view.queryByText('暫時抓不到')).toBeNull();
+  expect(await view.findByText('校方的新公告')).toBeTruthy();
 });
 
 test('a school change immediately hides old detail data and ignores late responses', async () => {

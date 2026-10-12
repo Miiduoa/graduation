@@ -230,8 +230,13 @@ function isPlaceholderSchool(entry) {
   return entry?.cms === 'none' || PLACEHOLDER_SCHOOL_IDS.includes(entry?.schoolId);
 }
 
-function isPublicAnnouncementSchool(entry, env = process.env.APP_ENV || process.env.NODE_ENV) {
-  return env !== 'production' || !isPlaceholderSchool(entry);
+function allowsPlaceholderSchools(env) {
+  const value = String(env ?? '').trim();
+  return value === 'development' || value === 'preview' || value === 'test';
+}
+
+function isPublicAnnouncementSchool(entry, env = process.env.APP_ENV ?? '') {
+  return !isPlaceholderSchool(entry) || allowsPlaceholderSchools(env);
 }
 
 function listPublicSchools(env) {

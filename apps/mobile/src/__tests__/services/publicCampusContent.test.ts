@@ -18,7 +18,7 @@ import {
   loadCampusEventPage,
   isPublicWebUrl,
 } from '../../services/publicCampusContent';
-import { getReleaseConfig } from '../../services/release';
+import { getRawAppEnv } from '../../services/release';
 
 jest.mock('firebase/firestore', () => ({
   collection: jest.fn((...args) => args),
@@ -37,7 +37,7 @@ jest.mock('../../firebase', () => ({
   isFirebaseMockMode: jest.fn(() => false),
 }));
 jest.mock('../../services/release', () => ({
-  getReleaseConfig: jest.fn(() => ({ appEnv: 'development' })),
+  getRawAppEnv: jest.fn(() => 'development'),
 }));
 const row = { title: '校方公告', body: '真實內文', publishedAt: '2026-10-08T00:00:00Z' };
 const document = (data = row) => ({ id: 'a1', exists: () => true, data: () => data });
@@ -45,7 +45,7 @@ const document = (data = row) => ({ id: 'a1', exists: () => true, data: () => da
 beforeEach(() => {
   jest.clearAllMocks();
   jest.mocked(isFirebaseMockMode).mockReturnValue(false);
-  jest.mocked(getReleaseConfig).mockReturnValue({ appEnv: 'development' } as never);
+  jest.mocked(getRawAppEnv).mockReturnValue('development');
 });
 
 function docsForPath(input: unknown, announcements: unknown[], sources: unknown[] = []) {
@@ -177,14 +177,25 @@ test('keeps scrape rows from dead sources and exposes the office url', async () 
   });
 });
 
-test('production does not load cms-none demo school announcement feeds', async () => {
-  jest.mocked(getReleaseConfig).mockReturnValue({ appEnv: 'production' } as never);
-  await expect(loadCampusAnnouncementFeed('tw-demo-uni')).resolves.toEqual({
-    announcements: [],
-    sources: [],
-    allUnavailable: false,
+test.each(['', 'staging', 'production'])(
+  'does not load cms-none demo school announcement feeds when app env is %s',
+  async (env) => {
+    jest.mocked(getRawAppEnv).mockReturnValue(env);
+    await expect(loadCampusAnnouncementFeed('tw-demo-uni')).resolves.toEqual({
+      announcements: [],
+      sources: [],
+      allUnavailable: false,
+    });
+    expect(getDocsFromServer).not.toHaveBeenCalled();
+  },
+);
+
+test('loads cms-none demo school announcement feeds in an explicit test environment', async () => {
+  jest.mocked(getRawAppEnv).mockReturnValue('test');
+  jest.mocked(getDocsFromServer).mockImplementation(async (input) => docsForPath(input, [document()]) as never);
+  await expect(loadCampusAnnouncementFeed('tw-demo-uni')).resolves.toMatchObject({
+    announcements: [{ id: 'a1', schoolId: 'tw-demo-uni' }],
   });
-  expect(getDocsFromServer).not.toHaveBeenCalled();
 });
 
 function eventDocument(id: string, path: string, data: Record<string, unknown> = {}) {

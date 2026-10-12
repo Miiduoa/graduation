@@ -10,6 +10,8 @@ const {
   studentCafeteriaAction,
   NATIVE_ORDERING_CLOSED_TEXT,
   EXTERNAL_ORDER_HONEST_TEXT,
+  SHOWCASE_ORDER_BUTTON_TEXT,
+  SHOWCASE_ORDER_CAPTION,
 } = require('./lib/merchantMode');
 const { isOnlineOrderingEnabled } = require('./lib/onlineOrdering');
 
@@ -42,6 +44,27 @@ test('native_order stays closed when the global switch is off and is not rewritt
     }),
   ).toEqual({ kind: 'native_closed', label: NATIVE_ORDERING_CLOSED_TEXT });
   expect(isOnlineOrderingEnabled({ ONLINE_ORDERING_ENABLED: 'false', JEST_WORKER_ID: '1' })).toBe(false);
+});
+
+test('showcase stores use outbound-order copy and stay info-only without an https URL', () => {
+  expect(SHOWCASE_ORDER_BUTTON_TEXT).toBe('到店家網站訂餐');
+  expect(SHOWCASE_ORDER_CAPTION).toBe(
+    '會開啟店家自己的網站，訂單和付款由店家處理，Campus One 查不到這筆訂單',
+  );
+  expect(SHOWCASE_ORDER_BUTTON_TEXT).not.toMatch(/點餐|下單/);
+  expect(
+    studentCafeteriaAction({
+      merchantMode: 'showcase_link',
+      orderingUrl: 'https://shop.example/order',
+    }),
+  ).toEqual({ kind: 'showcase', label: SHOWCASE_ORDER_BUTTON_TEXT });
+  expect(
+    studentCafeteriaAction({
+      merchantMode: 'showcase_link',
+      location: '學生餐廳',
+      openingHours: '11:00–14:00',
+    }),
+  ).toEqual({ kind: 'info', label: '查看店面' });
 });
 
 test('CSV menus and stale hints stay honest', () => {

@@ -1,7 +1,7 @@
 import { isAnnouncementSchoolVisibleToPublic } from '@campus/shared/src/campusAnnouncements';
 import { findSchoolById, findSchoolsByCode } from '@campus/shared/src/schools';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
-import { getWebAppEnv } from '@/lib/runtime';
+import { getAnnouncementVisibilityEnv } from '@/lib/runtime';
 
 export function resolveAnnouncementSchool(params?: { school?: string; schoolId?: string }) {
   const matches = findSchoolsByCode(params?.school);
@@ -10,6 +10,9 @@ export function resolveAnnouncementSchool(params?: { school?: string; schoolId?:
     findSchoolById(params?.schoolId) ?? (matches.length === 1 ? matches[0] : fallback);
   return {
     school,
-    visible: isAnnouncementSchoolVisibleToPublic({ schoolId: school.id }, getWebAppEnv()),
+    visible: isAnnouncementSchoolVisibleToPublic(
+      { schoolId: school.id },
+      getAnnouncementVisibilityEnv(),
+    ),
   };
 }

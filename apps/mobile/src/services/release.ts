@@ -8,7 +8,10 @@ import {
   type SchoolIntegrationStatus,
   toConfigObject,
 } from '@campus/shared/src';
-import { isAnnouncementSchoolVisibleToPublic } from '@campus/shared/src/campusAnnouncements';
+import {
+  allowsPlaceholderAnnouncementSchools,
+  isPlaceholderAnnouncementSchool,
+} from '@campus/shared/src/campusAnnouncements';
 
 type LegalDocumentType = 'privacy' | 'terms';
 
@@ -34,6 +37,12 @@ export function getReleaseConfig(): RuntimeReleaseConfig {
   return buildReleaseRuntimeConfig(getExtra(), {
     developmentFallbackFeatures: DEFAULT_RELEASE_FEATURES,
   });
+}
+
+/** 示範學校用原始 extra.appEnv。未設定、空字串都當關，不走 normalize 的 development 預設。 */
+export function getRawAppEnv(): string {
+  const extra = getExtra();
+  return typeof extra.appEnv === 'string' ? extra.appEnv : '';
 }
 
 export function areUniversalDevAccountsEnabled(): boolean {
@@ -80,8 +89,8 @@ export function isSchoolVisibleInDirectory(
   schoolId: string,
   input?: Partial<SchoolIntegrationStatus> | null,
 ): boolean {
-  if (!isAnnouncementSchoolVisibleToPublic({ schoolId }, getReleaseConfig().appEnv)) {
-    return false;
+  if (isPlaceholderAnnouncementSchool({ schoolId })) {
+    return allowsPlaceholderAnnouncementSchools(getRawAppEnv());
   }
   return getSchoolIntegrationStatus(schoolId, input).enabled;
 }

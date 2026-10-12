@@ -223,8 +223,18 @@ it('clears stale content during refresh and can recover from a failed request', 
   await screen.findByText('實際公告詳情');
 });
 
-it('hides cms-none demo schools from announcement details in production', async () => {
-  vi.stubEnv('NEXT_PUBLIC_APP_ENV', 'production');
+it.each(['', 'staging', 'production'])(
+  'hides cms-none demo school details when NEXT_PUBLIC_APP_ENV is %s',
+  async (env) => {
+    vi.stubEnv('NEXT_PUBLIC_APP_ENV', env);
+    await mount(props('notice-1', 'tw-demo-uni'));
+    expect(screen.queryByText('示範大學')).toBeNull();
+    expect(screen.getByRole('heading', { name: '目前沒有公開公告' })).toBeTruthy();
+    expect(getDocFromServer).not.toHaveBeenCalled();
+  },
+);
+
+it('hides cms-none demo school details when NEXT_PUBLIC_APP_ENV is unset', async () => {
   await mount(props('notice-1', 'tw-demo-uni'));
   expect(screen.queryByText('示範大學')).toBeNull();
   expect(screen.getByRole('heading', { name: '目前沒有公開公告' })).toBeTruthy();
@@ -232,4 +242,10 @@ it('hides cms-none demo schools from announcement details in production', async 
   expect(screen.getByRole('link', { name: '← 返回公告列表' }).getAttribute('href')).toBe(
     '/announcements',
   );
+});
+
+it('shows cms-none demo school details in an explicit test environment', async () => {
+  vi.stubEnv('NEXT_PUBLIC_APP_ENV', 'test');
+  await mount(props('notice-1', 'tw-demo-uni'));
+  expect(getDocFromServer).toHaveBeenCalled();
 });
