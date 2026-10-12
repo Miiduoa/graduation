@@ -9,13 +9,19 @@ import {
   where,
 } from 'firebase/firestore';
 import { getDb, isFirebaseConfigured, type Announcement } from '@/lib/firebase';
-import { SOURCE_UNAVAILABLE_TEXT } from '@campus/shared/src/campusAnnouncements';
+import {
+  isAnnouncementSchoolVisibleToPublic,
+  SOURCE_DOWN_EMPTY_TEXT,
+} from '@campus/shared/src/campusAnnouncements';
+import { getWebAppEnv } from '@/lib/runtime';
 
 export type AnnouncementSourceHealth = {
   sourceId: string;
   office: string;
   status: 'healthy' | 'unavailable';
   message: string;
+  listUrl?: string;
+  lastSuccessAt?: string;
 };
 
 export type AnnouncementFeed = {
@@ -53,6 +59,9 @@ export async function loadAnnouncements(schoolId: string): Promise<Announcement[
 }
 
 export async function loadAnnouncementFeed(schoolId: string): Promise<AnnouncementFeed> {
+  if (!isAnnouncementSchoolVisibleToPublic({ schoolId }, getWebAppEnv())) {
+    return { announcements: [], sources: [], allUnavailable: false };
+  }
   if (!isFirebaseConfigured()) throw new Error('Announcement source unavailable');
   const db = getDb();
   const constraints = [orderBy('publishedAt', 'desc'), limit(20)];
@@ -74,17 +83,12 @@ export async function loadAnnouncementFeed(schoolId: string): Promise<Announceme
       sourceId: typeof data.sourceId === 'string' ? data.sourceId : document.id,
       office: typeof data.office === 'string' ? data.office : document.id,
       status: unavailable ? 'unavailable' : 'healthy',
-      message: unavailable ? SOURCE_UNAVAILABLE_TEXT : '',
+      message: unavailable ? SOURCE_DOWN_EMPTY_TEXT : '',
+      listUrl: originalUrl(data.listUrl),
+      lastSuccessAt: publishedDate(data.lastSuccessAt) || undefined,
     };
   });
-  const hidden = new Set(
-    sources.filter((item) => item.status === 'unavailable').map((item) => item.sourceId),
-  );
-  const announcements = snapshot.docs
-    .map((document) => normalizeAnnouncement(document, schoolId))
-    .filter(
-      (row) => row.origin !== 'public_scrape' || !row.sourceId || !hidden.has(row.sourceId),
-    );
+  const announcements = snapshot.docs.map((document) => normalizeAnnouncement(document, schoolId));
   return {
     announcements,
     sources,
@@ -128,6 +132,7 @@ function normalizeAnnouncement(
 }
 
 export async function loadAnnouncement(schoolId: string, id: string): Promise<Announcement | null> {
+  if (!isAnnouncementSchoolVisibleToPublic({ schoolId }, getWebAppEnv())) return null;
   if (!isFirebaseConfigured()) throw new Error('Announcement source unavailable');
   if (!id || id.includes('/')) return null;
   const db = getDb();

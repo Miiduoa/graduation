@@ -2,13 +2,16 @@
 
 import { use, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { findSchoolById, findSchoolsByCode } from '@campus/shared/src/schools';
 import { useAuth } from '@/components/AuthGuard';
 import { SiteShell } from '@/components/SiteShell';
 import type { Announcement } from '@/lib/firebase';
 import { loadAnnouncementFeed, type AnnouncementSourceHealth } from './publicAnnouncements';
-import { SOURCE_UNAVAILABLE_TEXT } from '@campus/shared/src/campusAnnouncements';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
+import {
+  formatStaleAnnouncementNotice,
+  SOURCE_DOWN_EMPTY_TEXT,
+  staleAnnouncementUpdatedAt,
+} from '@campus/shared/src/campusAnnouncements';
+import { resolveAnnouncementSchool } from './resolveSchool';
 import styles from './announcements.module.css';
 
 type Category = 'all' | 'academic' | 'event' | 'general';
@@ -190,31 +193,43 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
           {notice}
         </p>
       )}
-      {state.sources.some((item) => item.status === 'unavailable') && !state.allUnavailable && (
-        <p role="status" className={styles.notice}>
-          {state.sources
-            .filter((item) => item.status === 'unavailable')
-            .map((item) => `${item.office}：${SOURCE_UNAVAILABLE_TEXT}`)
-            .join('、')}
-          。其他來源仍會顯示。
-        </p>
-      )}
+      {state.announcements.length > 0 &&
+        state.sources.some((item) => item.status === 'unavailable') && (
+          <p role="status" className={styles.notice}>
+            {formatStaleAnnouncementNotice(
+              staleAnnouncementUpdatedAt(state.sources, state.announcements),
+            )}
+          </p>
+        )}
       {filtered.length === 0 ? (
         <section className={styles.status}>
-          <h2>
-            {state.allUnavailable
-              ? SOURCE_UNAVAILABLE_TEXT
-              : state.announcements.length
-                ? '沒有符合條件的公告'
-                : '目前沒有公開公告'}
-          </h2>
-          <p>
-            {state.allUnavailable
-              ? '公開處室網站現在讀不到，不會繼續顯示可能已過期的舊稿。'
-              : state.announcements.length
-                ? '試試其他關鍵字或分類。'
-                : '學校發布新的公告後，會顯示在這裡。'}
-          </p>
+          {state.announcements.length === 0 &&
+          state.sources.some((item) => item.status === 'unavailable') ? (
+            <>
+              <h2>{SOURCE_DOWN_EMPTY_TEXT}</h2>
+              <p>
+                {state.sources
+                  .filter((item) => item.status === 'unavailable' && item.listUrl)
+                  .map((item, index) => (
+                    <span key={item.sourceId}>
+                      {index > 0 ? '、' : null}
+                      <a href={item.listUrl} rel="noreferrer" target="_blank">
+                        {item.office}
+                      </a>
+                    </span>
+                  ))}
+              </p>
+            </>
+          ) : (
+            <>
+              <h2>{state.announcements.length ? '沒有符合條件的公告' : '目前沒有公開公告'}</h2>
+              <p>
+                {state.announcements.length
+                  ? '試試其他關鍵字或分類。'
+                  : '學校發布新的公告後，會顯示在這裡。'}
+              </p>
+            </>
+          )}
         </section>
       ) : (
         <div className={styles.list} aria-label="公告列表">
@@ -278,19 +293,20 @@ export default function AnnouncementsPage(props: {
   searchParams?: Promise<{ school?: string; schoolId?: string }>;
 }) {
   const params = props.searchParams ? use(props.searchParams) : undefined;
-  const matches = findSchoolsByCode(params?.school);
-  const school =
-    findSchoolById(params?.schoolId) ??
-    (matches.length === 1 ? matches[0] : resolveSchoolPageContext().school);
+  const { school, visible } = resolveAnnouncementSchool(params);
   const { user, loading } = useAuth();
   return (
     <SiteShell
-      schoolName={school.name}
-      schoolCode={school.code}
+      schoolName={visible ? school.name : undefined}
+      schoolCode={visible ? school.code : undefined}
       title="校園公告"
       subtitle="公開處室公告的摘要與原文連結。一般帳號即可查看。"
     >
-      {loading ? (
+      {!visible ? (
+        <section className={styles.status}>
+          <h2>目前沒有公開公告</h2>
+        </section>
+      ) : loading ? (
         <div className={styles.status} role="status">
           正在準備公告…
         </div>

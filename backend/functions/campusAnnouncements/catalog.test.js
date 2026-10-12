@@ -7,9 +7,11 @@ const {
   PARSER_PRESETS,
   school,
   listSources,
+  listPublicSchools,
   coverageRows,
   formatCoverageTable,
   SOURCE_UNAVAILABLE,
+  PLACEHOLDER_SCHOOL_IDS,
 } = require('./catalog');
 
 const schoolsSrc = fs.readFileSync(
@@ -39,11 +41,19 @@ test('non-demo schools at least configure campus news and academic affairs', () 
   }
 });
 
-test('demo schools without a real site are reported as temporarily unavailable', () => {
+test('demo schools without a real site stay off the public production list', () => {
   const rows = coverageRows();
-  const demo = rows.filter((row) => ['tw-demo-uni', 'tw-taichung-uni-a', 'tw-taichung-uni-b'].includes(row.schoolId));
+  const demo = rows.filter((row) => PLACEHOLDER_SCHOOL_IDS.includes(row.schoolId));
   expect(demo.every((row) => row.status === 'unavailable')).toBe(true);
   expect(demo.every((row) => row.campus === SOURCE_UNAVAILABLE)).toBe(true);
+  expect(SCHOOLS.filter((item) => item.cms === 'none').map((item) => item.schoolId).sort()).toEqual(
+    [...PLACEHOLDER_SCHOOL_IDS].sort(),
+  );
+  const productionIds = listPublicSchools('production').map((item) => item.schoolId);
+  expect(productionIds.some((id) => PLACEHOLDER_SCHOOL_IDS.includes(id))).toBe(false);
+  const developmentIds = listPublicSchools('development').map((item) => item.schoolId);
+  expect(PLACEHOLDER_SCHOOL_IDS.every((id) => developmentIds.includes(id))).toBe(true);
+  expect(formatCoverageTable()).toContain('正式環境不顯示給一般使用者');
   expect(formatCoverageTable()).toContain('暫時抓不到');
   expect(formatCoverageTable()).toContain('靜宜大學');
   expect(formatCoverageTable()).toContain('校網系統');

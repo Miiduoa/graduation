@@ -18,6 +18,7 @@ import {
   loadCampusEventPage,
   isPublicWebUrl,
 } from '../../services/publicCampusContent';
+import { getReleaseConfig } from '../../services/release';
 
 jest.mock('firebase/firestore', () => ({
   collection: jest.fn((...args) => args),
@@ -35,12 +36,16 @@ jest.mock('../../firebase', () => ({
   getDb: jest.fn(() => 'db'),
   isFirebaseMockMode: jest.fn(() => false),
 }));
+jest.mock('../../services/release', () => ({
+  getReleaseConfig: jest.fn(() => ({ appEnv: 'development' })),
+}));
 const row = { title: '校方公告', body: '真實內文', publishedAt: '2026-10-08T00:00:00Z' };
 const document = (data = row) => ({ id: 'a1', exists: () => true, data: () => data });
 
 beforeEach(() => {
   jest.clearAllMocks();
   jest.mocked(isFirebaseMockMode).mockReturnValue(false);
+  jest.mocked(getReleaseConfig).mockReturnValue({ appEnv: 'development' } as never);
 });
 
 function docsForPath(input: unknown, announcements: unknown[], sources: unknown[] = []) {
@@ -132,7 +137,7 @@ test.each([[loadCampusAnnouncements, 'announcements', 'publishedAt']] as const)(
   },
 );
 
-test('hides scrape rows from dead sources and reports the whole feed as temporarily unavailable', async () => {
+test('keeps scrape rows from dead sources and exposes the office url', async () => {
   const scrape = document({
     ...row,
     origin: 'public_scrape',
@@ -141,15 +146,45 @@ test('hides scrape rows from dead sources and reports the whole feed as temporar
     summary: '選課摘要',
   });
   jest.mocked(getDocsFromServer).mockImplementation(async (input) =>
-    docsForPath(input, [scrape], [
-      { id: 'pu-acd', data: () => ({ sourceId: 'pu-acd', office: '教務處', status: 'unavailable' }) },
-    ]) as never,
+    docsForPath(
+      input,
+      [scrape],
+      [
+        {
+          id: 'pu-acd',
+          data: () => ({
+            sourceId: 'pu-acd',
+            office: '教務處',
+            status: 'unavailable',
+            listUrl: 'https://acd.pu.edu.tw/p/403-1042-885-1.php',
+            lastSuccessAt: '2026-10-12T10:05:00.000Z',
+          }),
+        },
+      ],
+    ) as never,
   );
   await expect(loadCampusAnnouncementFeed('pu')).resolves.toMatchObject({
-    announcements: [],
+    announcements: [{ title: '校方公告' }],
     allUnavailable: true,
-    sources: [{ office: '教務處', status: 'unavailable' }],
+    sources: [
+      {
+        office: '教務處',
+        status: 'unavailable',
+        listUrl: 'https://acd.pu.edu.tw/p/403-1042-885-1.php',
+        lastSuccessAt: '2026-10-12T10:05:00.000Z',
+      },
+    ],
   });
+});
+
+test('production does not load cms-none demo school announcement feeds', async () => {
+  jest.mocked(getReleaseConfig).mockReturnValue({ appEnv: 'production' } as never);
+  await expect(loadCampusAnnouncementFeed('tw-demo-uni')).resolves.toEqual({
+    announcements: [],
+    sources: [],
+    allUnavailable: false,
+  });
+  expect(getDocsFromServer).not.toHaveBeenCalled();
 });
 
 function eventDocument(id: string, path: string, data: Record<string, unknown> = {}) {

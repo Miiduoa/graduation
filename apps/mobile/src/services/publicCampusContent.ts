@@ -13,7 +13,11 @@ import {
 } from 'firebase/firestore';
 import { getDb, isFirebaseMockMode } from '../firebase';
 import type { Announcement, AnnouncementCategory, Attachment, ClubEvent } from '../data/types';
-import { SOURCE_UNAVAILABLE_TEXT } from '@campus/shared/src/campusAnnouncements';
+import {
+  isAnnouncementSchoolVisibleToPublic,
+  SOURCE_DOWN_EMPTY_TEXT,
+} from '@campus/shared/src/campusAnnouncements';
+import { getReleaseConfig } from './release';
 
 type SourceDocument = { id: string; data: () => Record<string, unknown> };
 
@@ -118,6 +122,8 @@ export type AnnouncementSourceHealth = {
   office: string;
   status: 'healthy' | 'unavailable';
   message: string;
+  listUrl?: string;
+  lastSuccessAt?: string;
 };
 
 export type CampusAnnouncementFeed = {
@@ -137,22 +143,21 @@ async function loadAnnouncementSources(schoolId: string): Promise<AnnouncementSo
       sourceId: typeof data.sourceId === 'string' ? data.sourceId : document.id,
       office: typeof data.office === 'string' ? data.office : document.id,
       status: unavailable ? 'unavailable' : 'healthy',
-      message: unavailable ? SOURCE_UNAVAILABLE_TEXT : '',
+      message: unavailable ? SOURCE_DOWN_EMPTY_TEXT : '',
+      listUrl: isPublicWebUrl(data.listUrl) ? data.listUrl : undefined,
+      lastSuccessAt: dateString(data.lastSuccessAt) || undefined,
     };
   });
 }
 
 export async function loadCampusAnnouncementFeed(schoolId: string): Promise<CampusAnnouncementFeed> {
+  if (!isAnnouncementSchoolVisibleToPublic({ schoolId }, getReleaseConfig().appEnv)) {
+    return { announcements: [], sources: [], allUnavailable: false };
+  }
   const announcements = await loadList(schoolId, 'announcements', announcement);
   const sources = await loadAnnouncementSources(schoolId);
-  const hidden = new Set(
-    sources.filter((item) => item.status === 'unavailable').map((item) => item.sourceId),
-  );
-  const visible = announcements.filter(
-    (row) => row.origin !== 'public_scrape' || !row.sourceId || !hidden.has(row.sourceId),
-  );
   return {
-    announcements: visible,
+    announcements,
     sources,
     allUnavailable: sources.length > 0 && sources.every((item) => item.status === 'unavailable'),
   };

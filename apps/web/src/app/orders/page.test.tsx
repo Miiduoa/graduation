@@ -10,8 +10,19 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => ({ user: state.uid ? { uid: state.uid } : null, loading: false, error: null }) }));
 vi.mock('@/components/SiteShell', () => ({
-  SiteShell: ({ children, title, subtitle }: { children: ReactNode; title?: string; subtitle?: string }) => (
+  SiteShell: ({
+    children,
+    title,
+    subtitle,
+    schoolName,
+  }: {
+    children: ReactNode;
+    title?: string;
+    subtitle?: string;
+    schoolName?: string;
+  }) => (
     <main>
+      {schoolName ? <p>{schoolName}</p> : null}
       {title && <h1>{title}</h1>}
       {subtitle && <p>{subtitle}</p>}
       {children}
@@ -74,6 +85,7 @@ it('沒登入、線上點餐還沒開：標題、副標題、內文都只寫「�
   state.uid = null;
   render(<OrdersPage />);
   expect(screen.getAllByText('目前還不能線上點餐').length).toBeGreaterThanOrEqual(3);
+  expect(screen.queryByText('靜宜大學')).toBeNull();
   expect(screen.queryByText('登入後查看訂單')).toBeNull();
   expect(screen.queryByText(/會自動更新/)).toBeNull();
   expect(screen.queryByRole('link', { name: '登入' })).toBeNull();

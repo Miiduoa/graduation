@@ -16,6 +16,7 @@ import {
 } from '../services/publicCampusContent';
 import { exportAndShareICalFile } from '../services/ical';
 import { safeNavigate } from '../utils/safeNavigate';
+import { getReleaseConfig } from '../services/release';
 
 let mockUid: string | null = 'student-a';
 let mockSchool = { id: 'pu' };
@@ -33,6 +34,9 @@ jest.mock('../services/publicCampusContent', () => ({
 }));
 jest.mock('../services/ical', () => ({ exportAndShareICalFile: jest.fn() }));
 jest.mock('../utils/safeNavigate', () => ({ safeNavigate: jest.fn() }));
+jest.mock('../services/release', () => ({
+  getReleaseConfig: jest.fn(() => ({ appEnv: 'development' })),
+}));
 jest.mock('../ui/navigationTheme', () => ({ useTabBarContentBottomPadding: () => 80 }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 const announcement = {
@@ -65,6 +69,7 @@ beforeEach(() => {
   applyTheme('light');
   mockUid = 'student-a';
   mockSchool = { id: 'pu' };
+  jest.mocked(getReleaseConfig).mockReturnValue({ appEnv: 'development' } as never);
   jest.mocked(loadCampusAnnouncements).mockResolvedValue([announcement]);
   jest.mocked(loadCampusAnnouncementFeed).mockResolvedValue({
     announcements: [announcement],
@@ -108,14 +113,44 @@ test('read failure offers retry without becoming an empty success', async () => 
   await view.findByText('校方的新公告');
 });
 
-test('dead scrape sources are labeled as temporarily unavailable and original links stay on the detail', async () => {
+test('keeps old announcements when the school site is down and links the office when empty', async () => {
   jest.mocked(loadCampusAnnouncementFeed).mockResolvedValue({
-    announcements: [],
-    sources: [{ sourceId: 'pu-acd', office: '教務處', status: 'unavailable', message: '暫時抓不到' }],
+    announcements: [announcement],
+    sources: [
+      {
+        sourceId: 'pu-acd',
+        office: '教務處',
+        status: 'unavailable',
+        message: '學校網站暫時連不上，可以先到學校網站看最新消息',
+        lastSuccessAt: '2026-10-12T10:05:00.000Z',
+        listUrl: 'https://acd.pu.edu.tw/p/403-1042-885-1.php',
+      },
+    ],
     allUnavailable: true,
   });
   const list = render(<AnnouncementsScreen navigation={navigation} />);
-  await list.findByText('暫時抓不到');
+  await list.findByText('最後更新 10/12 18:05，學校網站暫時連不上');
+  expect(list.getByText('校方的新公告')).toBeTruthy();
+  expect(list.queryByText('暫時抓不到')).toBeNull();
+  jest.mocked(loadCampusAnnouncementFeed).mockResolvedValue({
+    announcements: [],
+    sources: [
+      {
+        sourceId: 'pu-acd',
+        office: '教務處',
+        status: 'unavailable',
+        message: '學校網站暫時連不上，可以先到學校網站看最新消息',
+        listUrl: 'https://acd.pu.edu.tw/p/403-1042-885-1.php',
+      },
+    ],
+    allUnavailable: true,
+  });
+  const empty = render(<AnnouncementsScreen navigation={navigation} />);
+  await empty.findByText('學校網站暫時連不上，可以先到學校網站看最新消息');
+  const openUrl = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined as never);
+  fireEvent.press(empty.getByText('教務處'));
+  expect(openUrl).toHaveBeenCalledWith('https://acd.pu.edu.tw/p/403-1042-885-1.php');
+  openUrl.mockRestore();
   jest.mocked(loadCampusAnnouncement).mockResolvedValue({
     ...announcement,
     summary: '選課摘要',
@@ -123,6 +158,15 @@ test('dead scrape sources are labeled as temporarily unavailable and original li
   });
   const detail = render(<AnnouncementScreen route={{ params: { id: 'a1' } }} />);
   await detail.findByText('看原文');
+});
+
+test('production hides cms-none demo schools from the announcement list', async () => {
+  mockSchool = { id: 'tw-demo-uni' };
+  jest.mocked(getReleaseConfig).mockReturnValue({ appEnv: 'production' } as never);
+  const view = render(<AnnouncementsScreen navigation={navigation} />);
+  expect(view.getByText('目前沒有公告')).toBeTruthy();
+  expect(view.queryByText('示範大學')).toBeNull();
+  expect(view.queryByText('暫時抓不到')).toBeNull();
 });
 
 test('a school change immediately hides old detail data and ignores late responses', async () => {
