@@ -26,7 +26,16 @@ describe('functionRegistry', () => {
         __endpoint: {
           eventTrigger: {
             eventType: 'google.cloud.firestore.document.v1.written',
-            eventFilters: { document: 'users/{uid}' },
+            eventFilterPathPatterns: { document: 'users/{uid}' },
+          },
+        },
+      }),
+      gradePublishedNotification: Object.assign(jest.fn(), {
+        run: jest.fn(),
+        __endpoint: {
+          eventTrigger: {
+            eventType: 'google.cloud.firestore.document.v1.created',
+            eventFilterPathPatterns: { document: 'schools/{schoolId}/grades/{gradeId}' },
           },
         },
       }),
@@ -39,10 +48,18 @@ describe('functionRegistry', () => {
     expect(classified.firestoreTriggers).toEqual([
       expect.objectContaining({
         name: 'onUserProfileChanged',
-        supported: false,
+        supported: true,
         document: 'users/{uid}',
+        createdOnly: false,
+      }),
+      expect.objectContaining({
+        name: 'gradePublishedNotification',
+        supported: true,
+        document: 'schools/{schoolId}/grades/{gradeId}',
+        createdOnly: true,
       }),
     ]);
+    expect(typeof classified.firestoreTriggers[0].handler).toBe('function');
     expect(classifyExport('joinLiveSession', exported.joinLiveSession).kind).toBe('callable');
   });
 });

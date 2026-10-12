@@ -11,11 +11,14 @@ kill_timeout = "30s"
   FUNCTIONS_ROOT = "/app"
   ALLOWED_WEB_ORIGINS = "https://nuni.tw,https://www.nuni.tw"
   ENABLE_IN_PROCESS_SCHEDULES = "true"
+  ENABLE_FIRESTORE_TRIGGERS = "true"
   # ONLINE_ORDERING_ENABLED is intentionally unset (off).
 
 [http_service]
   internal_port = 8080
   force_https = true
+  # Firestore onSnapshot 只能有一台在跑。維持 `fly scale count 1`；
+  # 程式另有 Firestore 租約鎖，第二台即使被開起來也不會雙重處理。
   auto_stop_machines = false
   auto_start_machines = true
   min_machines_running = 1

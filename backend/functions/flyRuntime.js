@@ -5,9 +5,11 @@ const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const { getAuth } = require('firebase-admin/auth');
+const { getFirestore } = require('firebase-admin/firestore');
 const { createRequestListener } = require('./httpAdapter');
 const { classifyFunctions } = require('./functionRegistry');
 const { startScheduleRunner } = require('./scheduleRunner');
+const { startFirestoreTriggerRunner } = require('./firestoreTriggerRunner');
 
 const OPTIONAL_SECRET_NAMES = [
   'TDX_CLIENT_ID',
@@ -95,22 +97,45 @@ function start(options = {}) {
     enabled: enableSchedules && !process.env.JEST_WORKER_ID,
   });
 
+  const enableFirestoreTriggers =
+    options.enableFirestoreTriggers ??
+    String(process.env.ENABLE_FIRESTORE_TRIGGERS || 'true').toLowerCase() !== 'false';
+
   const port = Number(options.port || process.env.PORT || 8080);
   const host = options.host || process.env.HOSTNAME || '0.0.0.0';
   const server = http.createServer(listener);
 
   return new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(port, host, () => {
+    server.listen(port, host, async () => {
       const names = Object.keys(classified.callables);
+      let triggerRunner = { stop() {} };
+      try {
+        triggerRunner = await startFirestoreTriggerRunner({
+          db: options.db || getFirestore(),
+          triggers: classified.firestoreTriggers,
+          enabled: enableFirestoreTriggers && !process.env.JEST_WORKER_ID,
+        });
+      } catch (error) {
+        console.error('[functions-server] firestore triggers failed to start', error);
+      }
       console.log(
         `[functions-server] listening on ${host}:${port}; ${names.length} callables, ${
           Object.keys(classified.httpFunctions).length
-        } http, ${Object.keys(classified.schedules).length} schedules; firestore triggers not supported: ${
+        } http, ${Object.keys(classified.schedules).length} schedules, ${
+          classified.firestoreTriggers.length
+        } firestore triggers: ${
           classified.firestoreTriggers.map((item) => item.name).join(', ') || '(none)'
         }`,
       );
-      resolve({ server, classified, stop: () => runner.stop() });
+      resolve({
+        server,
+        classified,
+        stop: () => {
+          runner.stop();
+          triggerRunner.stop();
+        },
+      });
     });
   });
 }

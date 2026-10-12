@@ -26,12 +26,15 @@ function classifyExport(name, fn) {
   if (endpoint?.eventTrigger) {
     const filters = endpoint.eventTrigger.eventFilters || {};
     const pathPatterns = endpoint.eventTrigger.eventFilterPathPatterns || {};
+    const eventType = endpoint.eventTrigger.eventType;
     return {
       name,
       kind: 'firestore',
-      eventType: endpoint.eventTrigger.eventType,
+      eventType,
       document: filters.document || pathPatterns.document || null,
-      supported: false,
+      handler: typeof fn.run === 'function' ? fn.run.bind(fn) : fn,
+      createdOnly: String(eventType || '').includes('.created'),
+      supported: true,
     };
   }
   if (endpoint?.httpsTrigger) {
