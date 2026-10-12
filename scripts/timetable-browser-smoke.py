@@ -15,6 +15,10 @@ OUT.mkdir(parents=True, exist_ok=True)
 SEED = {'courses': [{'id': 'browser-database', 'name': '資料庫管理', 'day': 1, 'start': 3, 'end': 4,
                      'teacher': '測試教師', 'room': '主顧303'}],
         'meta': {'title': '測試課表'}, 'schoolId': 'pu', 'shareWithFriends': False, 'updatedAt': '2026-10-12T00:00:00Z'}
+READ_COPY = '''() => {
+    const scoped = localStorage.getItem('campus-one-personal-timetable:v2:' + JSON.stringify([null, 'pu']));
+    return scoped ? JSON.parse(scoped).value : JSON.parse(localStorage.getItem('campus-one-personal-timetable:local'));
+}'''
 
 async def main():
     results = []
@@ -28,6 +32,7 @@ async def main():
         try:
             await page.goto(BASE + '/timetable', wait_until='networkidle')
             await expect(page.get_by_role('button', name='移動課程', exact=True)).to_be_visible()
+            await expect(page.get_by_role('region', name='課表儲存狀態').get_by_role('status')).to_contain_text('本機課表')
             async def choose():
                 await page.get_by_role('button', name='移動課程', exact=True).click()
                 await page.get_by_role('combobox', name='要移動的課程', exact=True).select_option('browser-database')
@@ -45,7 +50,7 @@ async def main():
             confirm = page.get_by_role('dialog', name='放棄這次修改？', exact=True)
             await expect(confirm.get_by_role('button', name='繼續編輯')).to_be_focused()
             await confirm.get_by_role('button', name='放棄修改', exact=True).click()
-            saved = await page.evaluate('JSON.parse(localStorage.getItem("campus-one-personal-timetable:local"))')
+            saved = await page.evaluate(READ_COPY)
             assert saved['courses'][0]['day'] == 1
             await expect(page.get_by_role('status').filter(has_text='確認儲存後才會移動')).to_have_count(0)
             results.append('keyboard move, cancel and draft protection')
@@ -84,7 +89,11 @@ async def main():
             await expect(dialog).to_have_count(0)
             await page.reload(wait_until='networkidle')
             await expect(page.get_by_role('button', name='編輯 資料庫管理，星期二第 6 節', exact=True)).to_be_visible()
-            results.append('real drag with continuation offset, save and reload')
+            saved = await page.evaluate(READ_COPY)
+            assert saved['courses'][0]['day'] == 2
+            legacy = await page.evaluate('JSON.parse(localStorage.getItem("campus-one-personal-timetable:local"))')
+            assert legacy['courses'][0]['day'] == 1, 'Migration destroyed the original legacy record'
+            results.append('real drag with continuation offset, scoped save and reload; legacy retained')
             await page.screenshot(path=str(OUT / 'desktop.png'), full_page=True, animations='disabled')
             await page.set_viewport_size({'width': 390, 'height': 844})
             assert await page.evaluate('document.documentElement.scrollWidth <= innerWidth'), 'mobile page overflows horizontally'
@@ -102,11 +111,37 @@ async def main():
             await expect(page.get_by_role('status').filter(has_text='確認儲存後才會移動')).to_have_count(0)
             await page.screenshot(path=str(OUT / 'mobile.png'), full_page=True, animations='disabled')
             results.append('390px layout, reachable editor actions and non-dragging movement')
-            await page.evaluate('''() => { const key = 'campus-one-personal-timetable:local'; const data = JSON.parse(localStorage.getItem(key)); data.courses.push({...data.courses[0],id:'pending',name:'時間未定',day:0,start:0,end:0}); localStorage.setItem(key,JSON.stringify(data)); }''')
+            await page.evaluate('''() => {
+                const key = 'campus-one-personal-timetable:v2:' + JSON.stringify([null, 'pu']);
+                const data = JSON.parse(localStorage.getItem(key));
+                data.value.courses.push({...data.value.courses[0],id:'pending',name:'時間未定',day:0,start:0,end:0});
+                localStorage.setItem(key,JSON.stringify(data));
+            }''')
             await page.reload(wait_until='networkidle')
             await expect(page.get_by_role('button', name='今天空堂', exact=True)).to_be_disabled()
             await expect(page.get_by_role('button', name='排讀書時間', exact=True)).to_be_disabled()
             results.append('incomplete schedules do not produce planning suggestions')
+            await page.evaluate('''() => {
+                const key = 'campus-one-personal-timetable:v2:' + JSON.stringify([null, 'pu']);
+                const data = JSON.parse(localStorage.getItem(key));
+                data.value.courses = []; data.pending = true;
+                localStorage.setItem(key, JSON.stringify(data));
+            }''')
+            await page.reload(wait_until='networkidle')
+            await expect(page.get_by_role('button', name='今天空堂', exact=True)).to_be_disabled()
+            await expect(page.locator('button[aria-label^="編輯 資料庫管理"]')).to_have_count(0)
+            assert (await page.evaluate(READ_COPY))['courses'] == []
+            await page.screenshot(path=str(OUT / 'mobile-empty.png'), full_page=True, animations='disabled')
+            results.append('empty scoped copy is not resurrected from the legacy timetable')
+            await page.evaluate('''() => {
+                localStorage.setItem('campus-one-personal-timetable:v2:' + JSON.stringify([null, 'pu']), '{broken');
+            }''')
+            await page.reload(wait_until='networkidle')
+            await expect(page.locator('section[aria-label="課表讀取失敗"]')).to_be_visible()
+            await expect(page.get_by_role('region', name='課表儲存狀態').get_by_role('status')).to_contain_text('沒有用空白課表覆蓋')
+            assert await page.evaluate('localStorage.getItem("campus-one-personal-timetable:v2:" + JSON.stringify([null, "pu"]))') == '{broken'
+            await page.screenshot(path=str(OUT / 'storage-error.png'), full_page=True, animations='disabled')
+            results.append('corrupted local record is preserved and an explicit read error is shown')
             assert not errors, errors
         except Exception:
             (OUT / 'failure.txt').write_text(traceback.format_exc(), encoding='utf-8')
