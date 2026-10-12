@@ -1,8 +1,10 @@
 'use client';
 
-import { ReactNode, useEffect, useCallback } from 'react';
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from './Button';
+import { isOutsideDialog, openModalSession } from './modalSession';
+import styles from './Modal.module.css';
 
 interface ModalProps {
   isOpen: boolean;
@@ -15,197 +17,91 @@ interface ModalProps {
   closeOnOverlayClick?: boolean;
   closeOnEsc?: boolean;
   footer?: ReactNode;
+  initialFocusRef?: RefObject<HTMLElement | null>;
+  'aria-label'?: string;
+  'aria-describedby'?: string;
 }
 
+const subscribeToClient = () => () => {};
+const clientSnapshot = () => true;
+const serverSnapshot = () => false;
+
+const widths = { sm: '360px', md: '480px', lg: '640px', xl: '800px', full: 'calc(100vw - 32px)' };
+
 function Modal({
-  isOpen,
-  onClose,
-  title,
-  description,
-  children,
-  size = 'md',
-  showCloseButton = true,
-  closeOnOverlayClick = true,
-  closeOnEsc = true,
-  footer,
+  isOpen, onClose, title, description, children, size = 'md', showCloseButton = true,
+  closeOnOverlayClick = true, closeOnEsc = true, footer, initialFocusRef,
+  'aria-label': label, 'aria-describedby': describedBy,
 }: ModalProps) {
-  const handleEscKey = useCallback(
-    (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && closeOnEsc) {
-        onClose();
-      }
-    },
-    [closeOnEsc, onClose],
-  );
+  const clientReady = useSyncExternalStore(subscribeToClient, clientSnapshot, serverSnapshot);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const backdropStart = useRef(false);
+  const id = useId();
 
   useEffect(() => {
-    if (isOpen) {
-      document.addEventListener('keydown', handleEscKey);
-      document.body.style.overflow = 'hidden';
-    }
-    return () => {
-      document.removeEventListener('keydown', handleEscKey);
-      document.body.style.overflow = '';
-    };
-  }, [isOpen, handleEscKey]);
+    const dialog = dialogRef.current;
+    if (!isOpen || !clientReady || !dialog) return;
+    return openModalSession(dialog, initialFocusRef?.current);
+  }, [isOpen, clientReady, initialFocusRef]);
 
-  if (!isOpen) return null;
-
-  const sizeMap = {
-    sm: '360px',
-    md: '480px',
-    lg: '640px',
-    xl: '800px',
-    full: 'calc(100vw - 40px)',
-  };
-
-  const modalContent = (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 1000,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '20px',
+  if (!isOpen || !clientReady) return null;
+  return createPortal(
+    <dialog
+      ref={dialogRef}
+      className={styles.dialog}
+      style={{ '--dialog-width': widths[size] } as CSSProperties}
+      aria-modal="true"
+      aria-labelledby={title ? `${id}-title` : undefined}
+      aria-label={title ? undefined : label || '對話視窗'}
+      aria-describedby={describedBy || (description ? `${id}-description` : undefined)}
+      onCancel={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (closeOnEsc) onClose();
+      }}
+      onClose={(event) => {
+        event.stopPropagation();
+        // Ignore a queued close event from an effect cleanup followed by a reopen.
+        if (!event.currentTarget.open) onClose();
+      }}
+      onPointerDown={(event) => {
+        backdropStart.current = event.target === event.currentTarget &&
+          isOutsideDialog(event.currentTarget, event.clientX, event.clientY);
+      }}
+      onPointerCancel={() => { backdropStart.current = false; }}
+      onClick={(event) => {
+        const dismiss = backdropStart.current && event.target === event.currentTarget &&
+          isOutsideDialog(event.currentTarget, event.clientX, event.clientY);
+        backdropStart.current = false;
+        if (dismiss && closeOnOverlayClick) onClose();
       }}
     >
-      <div
-        style={{
-          position: 'absolute',
-          inset: 0,
-          background: 'rgba(0, 0, 0, 0.6)',
-          backdropFilter: 'blur(4px)',
-        }}
-        onClick={closeOnOverlayClick ? onClose : undefined}
-      />
-      <div
-        style={{
-          position: 'relative',
-          width: '100%',
-          maxWidth: sizeMap[size],
-          maxHeight: 'calc(100vh - 40px)',
-          background: 'var(--bg)',
-          border: '1px solid var(--border)',
-          borderRadius: 'var(--radius-lg)',
-          boxShadow: '0 24px 48px rgba(0, 0, 0, 0.3)',
-          display: 'flex',
-          flexDirection: 'column',
-          animation: 'modalIn 0.2s ease',
-        }}
-      >
-        <style>{`
-          @keyframes modalIn {
-            from {
-              opacity: 0;
-              transform: scale(0.95) translateY(10px);
-            }
-            to {
-              opacity: 1;
-              transform: scale(1) translateY(0);
-            }
-          }
-        `}</style>
-
-        {(title || showCloseButton) && (
-          <div
-            style={{
-              padding: '20px 24px',
-              borderBottom: '1px solid var(--border)',
-              display: 'flex',
-              alignItems: 'flex-start',
-              justifyContent: 'space-between',
-              gap: '16px',
-            }}
-          >
-            <div>
-              {title && (
-                <h2
-                  style={{
-                    margin: 0,
-                    fontSize: '18px',
-                    fontWeight: 700,
-                    color: 'var(--text)',
-                  }}
-                >
-                  {title}
-                </h2>
-              )}
-              {description && (
-                <p
-                  style={{
-                    margin: '8px 0 0',
-                    fontSize: '14px',
-                    color: 'var(--muted)',
-                    lineHeight: 1.5,
-                  }}
-                >
-                  {description}
-                </p>
-              )}
-            </div>
-            {showCloseButton && (
-              <button
-                onClick={onClose}
-                style={{
-                  width: '32px',
-                  height: '32px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  background: 'var(--panel)',
-                  border: '1px solid var(--border)',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  color: 'var(--muted)',
-                  fontSize: '18px',
-                  flexShrink: 0,
-                }}
-                aria-label="Close modal"
-              >
-                ✕
-              </button>
-            )}
+      {(title || description || showCloseButton) && (
+        <div className={styles.header}>
+          <div className={styles.heading}>
+            {title && <h2 id={`${id}-title`} className={styles.title}>{title}</h2>}
+            {description && <p id={`${id}-description`} className={styles.description}>{description}</p>}
           </div>
-        )}
-
-        <div
-          style={{
-            padding: '24px',
-            overflowY: 'auto',
-            flex: 1,
-          }}
-        >
-          {children}
+          {showCloseButton && (
+            <button type="button" onClick={onClose} className={styles.close} aria-label="關閉視窗">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+                <path d="m6 6 12 12M18 6 6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
+            </button>
+          )}
         </div>
-
-        {footer && (
-          <div
-            style={{
-              padding: '16px 24px',
-              borderTop: '1px solid var(--border)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'flex-end',
-              gap: '12px',
-            }}
-          >
-            {footer}
-          </div>
-        )}
-      </div>
-    </div>
+      )}
+      <div className={styles.body}>{children}</div>
+      {footer && <div className={styles.footer}>{footer}</div>}
+    </dialog>,
+    document.body,
   );
-
-  if (typeof window === 'undefined') return null;
-  return createPortal(modalContent, document.body);
 }
 
 interface ConfirmModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: () => void;
+  onConfirm: () => unknown;
   title: string;
   message: string;
   confirmText?: string;
@@ -214,69 +110,76 @@ interface ConfirmModalProps {
   loading?: boolean;
 }
 
-function ConfirmModal({
-  isOpen,
-  onClose,
-  onConfirm,
-  title,
-  message,
-  confirmText = '確認',
-  cancelText = '取消',
-  variant = 'info',
-  loading = false,
+function ConfirmDialog({
+  onClose, onConfirm, title, message, confirmText = '確認', cancelText = '取消',
+  variant = 'info', loading = false,
 }: ConfirmModalProps) {
-  const iconMap = {
-    danger: '⚠️',
-    warning: '⚡',
-    info: 'ℹ️',
-  };
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const inFlight = useRef(false);
+  const mounted = useRef(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const messageId = useId();
+  const busy = loading || pending;
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+
+  function requestClose() {
+    if (!loading && !inFlight.current) onClose();
+  }
+
+  async function confirm() {
+    if (loading || inFlight.current) return;
+    inFlight.current = true;
+    setPending(true);
+    setError(null);
+    try {
+      await onConfirm();
+    } catch {
+      if (mounted.current) {
+        // A lost response is not proof the server rejected an operation.
+        setError('無法確認操作結果。請先查看目前狀態，再決定是否重試。');
+      }
+    } finally {
+      inFlight.current = false;
+      if (mounted.current) setPending(false);
+    }
+  }
 
   return (
     <Modal
-      isOpen={isOpen}
-      onClose={onClose}
+      isOpen
+      onClose={requestClose}
+      title={title}
       size="sm"
       showCloseButton={false}
+      closeOnEsc={!busy}
+      closeOnOverlayClick={!busy}
+      initialFocusRef={cancelRef}
+      aria-describedby={messageId}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose} disabled={loading}>
+          <Button ref={cancelRef} type="button" variant="ghost" onClick={requestClose} disabled={busy}>
             {cancelText}
           </Button>
-          <Button
-            variant={variant === 'danger' ? 'danger' : 'primary'}
-            onClick={onConfirm}
-            loading={loading}
-          >
-            {confirmText}
+          <Button type="button" variant={variant === 'danger' ? 'danger' : 'primary'} onClick={confirm} loading={busy}>
+            {busy ? '處理中…' : confirmText}
           </Button>
         </>
       }
     >
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: '48px', marginBottom: '16px' }}>{iconMap[variant]}</div>
-        <h3
-          style={{
-            margin: '0 0 12px',
-            fontSize: '18px',
-            fontWeight: 700,
-            color: 'var(--text)',
-          }}
-        >
-          {title}
-        </h3>
-        <p
-          style={{
-            margin: 0,
-            fontSize: '14px',
-            color: 'var(--muted)',
-            lineHeight: 1.6,
-          }}
-        >
-          {message}
-        </p>
-      </div>
+      <p id={messageId} className={styles.message}>{message}</p>
+      {busy && <p role="status" className={styles.notice}>正在處理，請勿重複送出。</p>}
+      {error && <p role="alert" className={styles.error}>{error}</p>}
     </Modal>
   );
+}
+
+function ConfirmModal(props: ConfirmModalProps) {
+  // Each opening owns its pending state; a late response cannot alter the next opening.
+  return props.isOpen ? <ConfirmDialog {...props} /> : null;
 }
 
 export { Modal, ConfirmModal };
