@@ -65,7 +65,7 @@ export function SchoolSelector({ compact = false }: { compact?: boolean }) {
             aria-describedby={`${id}-results`}
           />
           <div className={styles.searchFeedback}>
-            <p id={`${id}-results`} role="status" aria-atomic="true" className={styles.state}>
+            <p id={`${id}-results`} role={needle ? 'status' : undefined} aria-live="polite" aria-label="校園搜尋結果" aria-atomic="true" className={styles.state}>
               {needle ? (results.length ? `找到 ${results.length} 所校園` : '找不到符合的校園，請試試其他名稱。') : `共 ${results.length} 所校園可供瀏覽`}
             </p>
             {query && (

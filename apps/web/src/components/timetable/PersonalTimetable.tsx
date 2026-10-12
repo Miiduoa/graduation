@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   IMPORT_CONFIRM_COPY,
   IMPORT_NOT_APPLIED_COPY,
@@ -24,7 +24,9 @@ import {
   type ImportDraft,
   type ImportMode,
   type PersonalCourse,
-  type PlannerFriend, shareCopiedCopy } from '@campus/shared';
+  type PlannerFriend,
+  shareCopiedCopy,
+} from '@campus/shared';
 import { useAuth } from '@/components/AuthGuard';
 import { useSelectedSchool } from '@/components/SelectedSchoolProvider';
 import styles from '@/components/academic/academic.module.css';
@@ -57,9 +59,18 @@ function fromSchoolCourse(course: AcademicCourse): PersonalCourse {
 }
 
 export function PersonalTimetable() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const school = useSelectedSchool();
   const schoolId = school.selectedSchoolId || 'pu';
+  if (loading || school.loading) {
+    return <p className={styles.notice} role="status">正在確認帳號與校園…</p>;
+  }
+  const uid = user?.uid || null;
+  // Private drafts and late responses must never cross an account or campus switch.
+  return <TimetableWorkspace key={JSON.stringify([uid, schoolId])} uid={uid} schoolId={schoolId} />;
+}
+
+function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: string }) {
   const [timetable, setTimetable] = useState<StoredTimetable | null>(null);
   const [view, setView] = useState<'grid' | 'week' | 'day'>('grid');
   const [day, setDay] = useState(() => {
@@ -69,6 +80,17 @@ export function PersonalTimetable() {
   const [editing, setEditing] = useState<PersonalCourse | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  const [loadError, setLoadError] = useState('');
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const saving = useRef(false);
+  const sharing = useRef(false);
+  const active = useRef(false);
+  const importRevision = useRef(0);
+  const [shareBusy, setShareBusy] = useState(false);
+  useEffect(() => {
+    active.current = true;
+    return () => { active.current = false; };
+  }, []);
   const [importText, setImportText] = useState('');
   const [importMode, setImportMode] = useState<ImportMode>('replace');
   const [drafts, setDrafts] = useState<ImportDraft[]>([]);
@@ -84,20 +106,20 @@ export function PersonalTimetable() {
   const [shareUrl, setShareUrl] = useState('');
   const schoolRecords = useAcademicRecords('courses');
 
-  const uid = user?.uid || null;
   const planner = useMemo(
     () => new SchedulePlanner(timetable?.courses || [], friends, selectedFriend),
     [timetable?.courses, friends, selectedFriend],
   );
 
-  const refresh = useCallback(async () => {
-    const next = await loadPersonalTimetable(uid, schoolId);
-    setTimetable(next);
-  }, [uid, schoolId]);
-
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    let current = true;
+    void loadPersonalTimetable(uid, schoolId)
+      .then((next) => { if (current) setTimetable(next); })
+      .catch(() => {
+        if (current) setLoadError('目前無法讀取課表，請確認連線後重新讀取。');
+      });
+    return () => { current = false; };
+  }, [uid, schoolId, loadAttempt]);
 
   useEffect(() => {
     if (!uid) {
@@ -145,18 +167,33 @@ export function PersonalTimetable() {
     await loadInvites();
   };
 
-  const persist = async (next: StoredTimetable, message: string) => {
+  const persist = async (next: StoredTimetable, message: string): Promise<boolean> => {
+    if (saving.current || !active.current) return false;
+    saving.current = true;
     setBusy(true);
     try {
       const saved = await savePersonalTimetable(uid, { ...next, schoolId });
+      if (!active.current) return false;
       setTimetable({ ...next, schoolId });
-      setNotice(saved.stored === 'cloud' ? message : `已記在本站。${message}`);
+      setNotice(saved.stored === 'cloud' ? message : '已記在本站，僅儲存於這台瀏覽器；尚未同步到帳號，好友可見狀態仍以雲端資料為準。');
+      return true;
     } catch {
-      setNotice('這次沒有存成。課表還停在你看到的這一版，請稍後再試。');
+      if (active.current) setNotice('目前無法確認儲存結果。編輯內容與匯入草稿仍保留，請先確認帳號課表狀態再重試。');
+      return false;
     } finally {
-      setBusy(false);
+      saving.current = false;
+      if (active.current) setBusy(false);
     }
   };
+
+  if (loadError) {
+    return <section className={styles.panel} aria-label="課表讀取失敗">
+      <p role="alert">{loadError}</p>
+      <button type="button" className="btn" onClick={() => { setLoadError(''); setLoadAttempt((attempt) => attempt + 1); }}>
+        重新讀取課表
+      </button>
+    </section>;
+  }
 
   if (!timetable) {
     return (
@@ -195,42 +232,60 @@ export function PersonalTimetable() {
     }
   };
   const analyzed = analyzeImportDrafts(timetable.courses, drafts, importMode);
+  const importCount = analyzed.filter((item) => item.selected !== false).length;
+  const startEditing = (course: PersonalCourse) => {
+    if (!saving.current) setEditing(course);
+  };
 
   const saveCourse = async (course: PersonalCourse) => {
     const cleaned = cleanCourse(course);
     const next = timetable.courses.some((item) => item.id === cleaned.id)
       ? timetable.courses.map((item) => (item.id === cleaned.id ? cleaned : item))
       : [...timetable.courses, cleaned];
-    await persist({ ...timetable, courses: next }, '課程已更新。');
-    setEditing(null);
+    if (await persist({ ...timetable, courses: next }, '課程已更新。')) setEditing(null);
   };
 
   const removeCourse = async (id: string) => {
-    await persist(
+    if (await persist(
       { ...timetable, courses: timetable.courses.filter((item) => item.id !== id) },
       '已從課表拿掉這門課。',
-    );
-    setEditing(null);
+    )) setEditing(null);
   };
 
   const confirmImport = async () => {
+    if (!importCount || saving.current) return;
+    importRevision.current += 1;
     const next = applyImport(timetable.courses, analyzed, importMode);
-    await persist({ ...timetable, courses: next }, `已匯入 ${analyzed.filter((item) => item.selected !== false).length} 門課。`);
-    setDrafts([]);
-    setImportText('');
+    if (await persist({ ...timetable, courses: next }, `已匯入 ${importCount} 門課。`)) {
+      setDrafts([]);
+      setImportText('');
+    }
   };
 
   const copyShare = async () => {
-    if (!uid) return;
+    if (!uid || sharing.current || saving.current || !active.current) return;
+    sharing.current = true;
+    setShareBusy(true);
     try {
       const server = await createServerShare(schoolId, timetable.meta.title || '我的課表');
+      if (!active.current) return;
       const url = `${window.location.origin}${server.path}`;
-      await navigator.clipboard.writeText(url).catch(() => undefined);
       setShareUrl(url);
-      setNotice(shareCopiedCopy(server.expiresAt));
+      try {
+        if (!navigator.clipboard?.writeText) throw new Error('clipboard-unavailable');
+        await navigator.clipboard.writeText(url);
+        if (active.current) setNotice(shareCopiedCopy(server.expiresAt));
+      } catch {
+        if (active.current) setNotice('分享連結已產生，但瀏覽器未完成複製。請選取下方連結後手動複製。');
+      }
     } catch {
-      setShareUrl('');
-      setNotice('現在產生不了分享連結，登入並連上網路後再試。');
+      if (active.current) {
+        setShareUrl('');
+        setNotice('現在產生不了分享連結，登入並連上網路後再試。');
+      }
+    } finally {
+      sharing.current = false;
+      if (active.current) setShareBusy(false);
     }
   };
 
@@ -255,6 +310,8 @@ export function PersonalTimetable() {
   };
 
   const bringSchool = async () => {
+    if (saving.current) return;
+    importRevision.current += 1;
     const records = schoolRecords.state?.snapshot?.records;
     if (!records?.courses?.length) {
       setNotice('現在沒有學校選課紀錄可帶入。');
@@ -266,6 +323,8 @@ export function PersonalTimetable() {
   };
 
   const parsePaste = () => {
+    if (saving.current) return;
+    importRevision.current += 1;
     const parsed = parseTimetableText(importText);
     if (!parsed.length) {
       setNotice(`${IMPORT_NOT_APPLIED_COPY}。貼上的文字裡沒有認出課程。`);
@@ -276,7 +335,8 @@ export function PersonalTimetable() {
   };
 
   const onPickImage = async (file?: File) => {
-    if (!file) return;
+    if (!file || saving.current) return;
+    const revision = ++importRevision.current;
     if (!file.type.startsWith('image/')) {
       setNotice('請選 PNG 或 JPEG 截圖。原本的課表沒有改。');
       return;
@@ -284,7 +344,9 @@ export function PersonalTimetable() {
     setNotice('已收到圖片。這個瀏覽器若能辨識文字會整理成草稿；確認前不會改你的課表。');
     try {
       const Tesseract = await loadTesseract();
+      if (!active.current || revision !== importRevision.current) return;
       const result = await Tesseract.recognize(file, 'chi_tra+eng');
+      if (!active.current || revision !== importRevision.current || saving.current) return;
       const parsed = parseTimetableText(result.data.text || '');
       if (!parsed.length) {
         setNotice(`${IMPORT_NOT_APPLIED_COPY}。截圖有讀到，但沒有可靠找到課程，請改貼文字或手動新增。`);
@@ -293,7 +355,8 @@ export function PersonalTimetable() {
       setDrafts(parsed.map((course) => ({ ...course, selected: true, confidence: 70 })));
       setNotice(IMPORT_CONFIRM_COPY);
     } catch {
-      setNotice(`${IMPORT_NOT_APPLIED_COPY}。這台裝置還沒開通截圖辨識，請對照圖片貼上課表文字。`);
+      if (!active.current || revision !== importRevision.current) return;
+      setNotice(`${IMPORT_NOT_APPLIED_COPY}。截圖辨識未完成，請改貼課表文字或稍後重試。`);
     }
   };
 
@@ -323,7 +386,7 @@ export function PersonalTimetable() {
       )}
       <p className={styles.notice}>
         {uid
-          ? '這份課表存在你的 Campus One 帳號。學校選課紀錄要經過確認才會覆蓋。'
+          ? '登入後可將課表同步到 Campus One 帳號。每次儲存會顯示同步結果；學校選課紀錄要經過確認才會覆蓋。'
           : '尚未登入時，課表只記在這台瀏覽器，成功後會顯示「已記在本站」。'}
       </p>
       {uid ? (
@@ -331,6 +394,7 @@ export function PersonalTimetable() {
           <input
             type="checkbox"
             checked={timetable.shareWithFriends !== false}
+            disabled={busy}
             onChange={(event) =>
               void persist(
                 { ...timetable, shareWithFriends: event.target.checked },
@@ -373,20 +437,23 @@ export function PersonalTimetable() {
             ))}
           </select>
         </label>
-        <button type="button" className="btn" onClick={() => setEditing(cleanCourse({ day, start: 1, end: 1 }))}>
+        <button type="button" className="btn" disabled={busy} onClick={() => startEditing(cleanCourse({ day, start: 1, end: 1 }))}>
           新增課程
         </button>
         <button
           type="button"
           className="btn"
           onClick={() => void copyShare()}
-          disabled={busy || !uid || !timetable.courses.length}
+          disabled={busy || shareBusy || !uid || !timetable.courses.length}
         >
-          複製分享連結
+          {shareBusy ? '正在產生連結…' : '複製分享連結'}
         </button>
       </div>
       {!uid && <p className={styles.notice}>登入後才能產生分享連結。</p>}
-      {shareUrl && <p className={styles.notice}>{shareUrl}</p>}
+      {shareUrl && <label className={styles.field}>
+        分享連結
+        <input readOnly value={shareUrl} onFocus={(event) => event.currentTarget.select()} />
+      </label>}
 
       {view === 'grid' ? (
         <div className={styles.grid} role="table" aria-label="一週格子課表">
@@ -404,7 +471,7 @@ export function PersonalTimetable() {
                 period={period}
                 time={time}
                 courses={timetable.courses}
-                onEdit={setEditing}
+                onEdit={startEditing}
               />
             );
           })}
@@ -420,7 +487,7 @@ export function PersonalTimetable() {
                 <h3>{label}</h3>
                 {entries.length ? (
                   entries.map((course) => (
-                    <button type="button" className={styles.course} key={course.id} onClick={() => setEditing(course)}>
+                    <button type="button" className={styles.course} key={course.id} onClick={() => startEditing(course)}>
                       <time>{courseTimeLabel(course)}</time>
                       <h4>{course.name}</h4>
                       <p>{course.room || '教室未填'}</p>
@@ -440,7 +507,7 @@ export function PersonalTimetable() {
             .sort((a, b) => a.start - b.start)
             .map((course) => (
               <li key={course.id}>
-                <button type="button" className={styles.course} onClick={() => setEditing(course)}>
+                <button type="button" className={styles.course} onClick={() => startEditing(course)}>
                   <time>{periodRangeLabel(course.start, course.end)}</time>
                   <h4>{course.name}</h4>
                   <p>
@@ -459,7 +526,7 @@ export function PersonalTimetable() {
           onChange={setEditing}
           onSave={() => void saveCourse(editing)}
           onRemove={() => void removeCourse(editing.id)}
-          onCancel={() => setEditing(null)}
+          onCancel={() => { if (!saving.current) setEditing(null); }}
         />
       )}
 
@@ -473,18 +540,19 @@ export function PersonalTimetable() {
             課表截圖
             <input
               type="file"
+              disabled={busy}
               accept="image/*"
               onChange={(event) => void onPickImage(event.target.files?.[0])}
             />
           </label>
           <label className={styles.field}>
             匯入方式
-            <select value={importMode} onChange={(event) => setImportMode(event.target.value as ImportMode)}>
+            <select disabled={busy} value={importMode} onChange={(event) => setImportMode(event.target.value as ImportMode)}>
               <option value="replace">整份取代</option>
               <option value="merge">只加入還沒有的課</option>
             </select>
           </label>
-          <button type="button" className="btn" onClick={() => void bringSchool()}>
+          <button type="button" className="btn" disabled={busy} onClick={() => void bringSchool()}>
             從學校課表帶入
           </button>
         </div>
@@ -492,12 +560,13 @@ export function PersonalTimetable() {
           或貼上課表文字
           <textarea
             rows={4}
+            disabled={busy}
             value={importText}
-            onChange={(event) => setImportText(event.target.value)}
+            onChange={(event) => { importRevision.current += 1; setImportText(event.target.value); }}
             placeholder="例如：星期一 第3-4節 資料庫 / 王老師 / 主顧303"
           />
         </label>
-        <button type="button" className="btn" onClick={parsePaste}>
+        <button type="button" className="btn" disabled={busy} onClick={parsePaste}>
           辨識文字
         </button>
         {analyzed.length > 0 && (
@@ -507,6 +576,7 @@ export function PersonalTimetable() {
                 <input
                   type="checkbox"
                   checked={draft.selected !== false}
+                  disabled={busy}
                   onChange={(event) =>
                     setDrafts((current) =>
                       current.map((item, itemIndex) =>
@@ -524,7 +594,7 @@ export function PersonalTimetable() {
                 ))}
               </label>
             ))}
-            <button type="button" className="btn primary" disabled={busy} onClick={() => void confirmImport()}>
+            <button type="button" className="btn primary" disabled={busy || !importCount} onClick={() => void confirmImport()}>
               確認匯入
             </button>
           </div>
@@ -723,11 +793,11 @@ function CourseEditor({
       <h2>編輯課程</h2>
       <label className={styles.field}>
         課名
-        <input value={course.name} onChange={(event) => onChange({ ...course, name: event.target.value })} />
+        <input disabled={busy} value={course.name} onChange={(event) => onChange({ ...course, name: event.target.value })} />
       </label>
       <label className={styles.field}>
         星期
-        <select value={course.day} onChange={(event) => onChange({ ...course, day: Number(event.target.value) })}>
+        <select disabled={busy} value={course.day} onChange={(event) => onChange({ ...course, day: Number(event.target.value) })}>
           <option value={0}>未排定</option>
           {WEEKDAY_LABELS.map((label, index) => (
             <option value={index + 1} key={label}>
@@ -739,6 +809,7 @@ function CourseEditor({
       <label className={styles.field}>
         開始節次
         <input
+          disabled={busy}
           type="number"
           min={1}
           max={13}
@@ -749,6 +820,7 @@ function CourseEditor({
       <label className={styles.field}>
         結束節次
         <input
+          disabled={busy}
           type="number"
           min={1}
           max={13}
@@ -758,17 +830,17 @@ function CourseEditor({
       </label>
       <label className={styles.field}>
         老師
-        <input value={course.teacher} onChange={(event) => onChange({ ...course, teacher: event.target.value })} />
+        <input disabled={busy} value={course.teacher} onChange={(event) => onChange({ ...course, teacher: event.target.value })} />
       </label>
       <label className={styles.field}>
         教室
-        <input value={course.room} onChange={(event) => onChange({ ...course, room: event.target.value })} />
+        <input disabled={busy} value={course.room} onChange={(event) => onChange({ ...course, room: event.target.value })} />
       </label>
       <div className={styles.toolbar}>
         <button type="button" className="btn primary" disabled={busy} onClick={onSave}>
           儲存
         </button>
-        <button type="button" className="btn" onClick={onCancel}>
+        <button type="button" className="btn" disabled={busy} onClick={onCancel}>
           取消
         </button>
         <button type="button" className="btn" disabled={busy} onClick={onRemove}>

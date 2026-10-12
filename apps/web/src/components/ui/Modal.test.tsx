@@ -30,11 +30,22 @@ afterEach(() => {
 
 function backdropClick(dialog: HTMLElement) {
   // jsdom has a zero-size rect, so negative coordinates are outside.
-  fireEvent.pointerDown(dialog, { clientX: -10, clientY: -10 });
+  fireEvent(dialog, new MouseEvent('pointerdown', { bubbles: true, clientX: -10, clientY: -10 }));
   fireEvent.click(dialog, { clientX: -10, clientY: -10 });
 }
 
 describe('modal interaction', () => {
+  it('dismisses an idle dialog only when the pointer starts and ends on its backdrop', () => {
+    const close = vi.fn();
+    render(<Modal isOpen title="檢視" onClose={close}>內容</Modal>);
+    const dialog = screen.getByRole('dialog');
+    fireEvent(dialog, new MouseEvent('pointerdown', { bubbles: true, clientX: 0, clientY: 0 }));
+    fireEvent.click(dialog, { clientX: -10, clientY: -10 });
+    expect(close).not.toHaveBeenCalled();
+    backdropClick(dialog);
+    expect(close).toHaveBeenCalledOnce();
+  });
+
   it('does not render a portal on the server even when initially open', () => {
     expect(renderToString(<Modal isOpen title="伺服器渲染" onClose={vi.fn()}>內容</Modal>)).toBe('');
     expect(HTMLDialogElement.prototype.showModal).not.toHaveBeenCalled();
