@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import traceback
 from pathlib import Path
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright, expect
@@ -28,7 +29,7 @@ async def main():
             await expect(page.get_by_role('button', name='移動課程', exact=True)).to_be_visible()
             async def choose():
                 await page.get_by_role('button', name='移動課程', exact=True).click()
-                await page.get_by_label('要移動的課程', exact=True).select_option('browser-database')
+                await page.get_by_role('combobox', name='要移動的課程', exact=True).select_option('browser-database')
             await choose()
             await page.get_by_role('button', name='移到星期二第 13 節', exact=True).click()
             await expect(page.get_by_role('status').filter(has_text='放不下')).to_be_visible()
@@ -37,8 +38,8 @@ async def main():
             await page.get_by_role('button', name='移到星期二第 5 節', exact=True).focus()
             await page.keyboard.press('Enter')
             dialog = page.get_by_role('dialog', name='編輯課程', exact=True)
-            await expect(dialog.get_by_label('開始節次', exact=True)).to_have_value('5')
-            await expect(dialog.get_by_label('結束節次', exact=True)).to_have_value('6')
+            await expect(dialog.get_by_role('combobox', name='開始節次', exact=True)).to_have_value('5')
+            await expect(dialog.get_by_role('combobox', name='結束節次', exact=True)).to_have_value('6')
             await dialog.get_by_role('button', name='取消', exact=True).click()
             confirm = page.get_by_role('dialog', name='放棄這次修改？', exact=True)
             await expect(confirm.get_by_role('button', name='繼續編輯')).to_be_focused()
@@ -48,8 +49,8 @@ async def main():
             results.append('keyboard move, cancel and draft protection')
             source = page.get_by_role('button', name='編輯 資料庫管理，星期一第 4 節，續堂', exact=True)
             await source.drag_to(page.locator('td[data-day="2"][data-period="7"]'))
-            await expect(dialog.get_by_label('開始節次', exact=True)).to_have_value('6')
-            await expect(dialog.get_by_label('結束節次', exact=True)).to_have_value('7')
+            await expect(dialog.get_by_role('combobox', name='開始節次', exact=True)).to_have_value('6')
+            await expect(dialog.get_by_role('combobox', name='結束節次', exact=True)).to_have_value('7')
             await dialog.get_by_role('button', name='儲存', exact=True).click()
             await expect(dialog).to_have_count(0)
             await page.reload(wait_until='networkidle')
@@ -60,7 +61,7 @@ async def main():
             assert await page.evaluate('document.documentElement.scrollWidth <= innerWidth'), 'mobile page overflows horizontally'
             await choose()
             await page.get_by_role('button', name='移到星期三第 2 節', exact=True).click()
-            await expect(dialog.get_by_label('開始節次', exact=True)).to_have_value('2')
+            await expect(dialog.get_by_role('combobox', name='開始節次', exact=True)).to_have_value('2')
             assert await dialog.evaluate('(el) => el.getBoundingClientRect().width <= innerWidth'), 'editor wider than viewport'
             await page.screenshot(path=str(OUT / 'mobile-editor.png'))
             await dialog.get_by_role('button', name='取消', exact=True).click()
@@ -74,6 +75,8 @@ async def main():
             results.append('incomplete schedules do not produce planning suggestions')
             assert not errors, errors
         except Exception:
+            (OUT / 'failure.txt').write_text(traceback.format_exc(), encoding='utf-8')
+            (OUT / 'accessibility.yml').write_text(await page.locator('body').aria_snapshot(), encoding='utf-8')
             await page.screenshot(path=str(OUT / 'failure.png'), full_page=True)
             raise
         finally:

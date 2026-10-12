@@ -43,7 +43,10 @@ jobs:
       - name: Exercise production guest timetable
         run: |
           mkdir -p artifacts/timetable-browser
-          pnpm --filter web start --hostname 127.0.0.1 --port 3100 > artifacts/timetable-browser/server.log 2>&1 &
+          mkdir -p apps/web/.next/standalone/apps/web/.next
+          cp -R apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static
+          if [ -d apps/web/public ]; then cp -R apps/web/public apps/web/.next/standalone/apps/web/public; fi
+          HOSTNAME=127.0.0.1 PORT=3100 node apps/web/.next/standalone/apps/web/server.js > artifacts/timetable-browser/server.log 2>&1 &
           WEB_PID=$!
           trap 'kill "$WEB_PID" 2>/dev/null || true' EXIT
           node --input-type=module - <<'NODE'
