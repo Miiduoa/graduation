@@ -33,3 +33,14 @@ it('keeps emulator URLs when the emulator is on', () => {
     }),
   ).toBe('http://localhost:5001/demo-campus/asia-east1/joinLiveSession');
 });
+
+it('lets the emulator win over a Fly base URL', () => {
+  expect(
+    resolveFunctionsHttpUrl({
+      functionName: 'joinLiveSession',
+      projectId: 'campus-one-tw',
+      baseUrl: 'https://nuni-functions.fly.dev',
+      emulator: { host: 'localhost', port: 5001 },
+    }),
+  ).toBe('http://localhost:5001/campus-one-tw/asia-east1/joinLiveSession');
+});

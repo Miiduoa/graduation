@@ -119,6 +119,13 @@ const {
 } = require('./tronClassScraper');
 const { runFinalizePostLogin } = require('./postLogin/finalizePostLogin');
 const { buildPuSignInAcademicFields } = require('./lib/puSignInAcademicFields');
+const {
+  createUserProfileChangedHandler,
+  createSchoolMembershipChangedHandler,
+  createCafeteriaOperatorChangedHandler,
+  createGroupQuestionAssistantReplyTrigger,
+  createGradePublishedNotificationHandler,
+} = require('./firestoreTriggerHandlers');
 
 // TDX API 金鑰（透過 firebase functions:secrets:set 設定）
 const TDX_CLIENT_ID = defineSecret('TDX_CLIENT_ID');
@@ -2600,27 +2607,10 @@ exports.onUserProfileChanged = onDocumentWritten(
     region: REGION,
     document: 'users/{uid}',
   },
-  async (event) => {
-    const uid = event.params.uid;
-    const afterData = event.data.after?.data();
-
-    if (!afterData) {
-      await syncDirectoryEntriesForUser(uid, null);
-      return;
-    }
-
-    try {
-      await syncAuthClaims(uid, afterData);
-    } catch (error) {
-      console.error('Failed to sync auth claims:', error);
-    }
-
-    try {
-      await syncDirectoryEntriesForUser(uid, afterData);
-    } catch (error) {
-      console.error('Failed to sync school directory entries:', error);
-    }
-  },
+  createUserProfileChangedHandler({
+    syncAuthClaims,
+    syncDirectoryEntriesForUser,
+  }),
 );
 
 exports.onSchoolMembershipChanged = onDocumentWritten(
@@ -2628,20 +2618,9 @@ exports.onSchoolMembershipChanged = onDocumentWritten(
     region: REGION,
     document: 'schools/{schoolId}/members/{uid}',
   },
-  async (event) => {
-    const { schoolId, uid } = event.params;
-    const membership = event.data.after?.data() || null;
-
-    try {
-      await syncSchoolDirectoryEntry({
-        schoolId,
-        uid,
-        membership,
-      });
-    } catch (error) {
-      console.error('Failed to sync school directory membership:', error);
-    }
-  },
+  createSchoolMembershipChangedHandler({
+    syncSchoolDirectoryEntry,
+  }),
 );
 
 exports.onCafeteriaOperatorChanged = onDocumentWritten(
@@ -2649,15 +2628,9 @@ exports.onCafeteriaOperatorChanged = onDocumentWritten(
     region: REGION,
     document: 'schools/{schoolId}/cafeterias/{cafeteriaId}/operators/{uid}',
   },
-  async (event) => {
-    const { schoolId, cafeteriaId } = event.params;
-
-    try {
-      await syncCafeteriaOperatorCount(schoolId, cafeteriaId);
-    } catch (error) {
-      console.error('Failed to sync cafeteria operator count:', error);
-    }
-  },
+  createCafeteriaOperatorChangedHandler({
+    syncCafeteriaOperatorCount,
+  }),
 );
 
 // =====================================================
@@ -4850,10 +4823,7 @@ exports.groupQuestionAssistantReply = onDocumentCreated(
     timeoutSeconds: 120,
     memory: '1GiB',
   },
-  async (event) => {
-    const { groupId, postId } = event.params;
-    await handleGroupQuestion({ groupId, postId, post: event.data?.data() });
-  },
+  createGroupQuestionAssistantReplyTrigger({ handleGroupQuestion }),
 );
 
 // =====================================================
@@ -4865,28 +4835,7 @@ exports.gradePublishedNotification = onDocumentCreated(
     document: 'schools/{schoolId}/grades/{gradeId}',
     region: REGION,
   },
-  async (event) => {
-    const { schoolId, gradeId } = event.params;
-    const grade = event.data?.data();
-
-    if (!grade) return;
-
-    console.log(`New grade published for user ${grade.userId}: ${grade.courseName}`);
-
-    await sendPushToUser(
-      grade.userId,
-      {
-        title: '📊 成績已公布',
-        body: `${grade.courseName} 成績已公布：${grade.letterGrade}`,
-      },
-      {
-        type: 'grade',
-        gradeId,
-        schoolId,
-        channel: 'grades',
-      },
-    );
-  },
+  createGradePublishedNotificationHandler({ sendPushToUser }),
 );
 
 // =====================================================

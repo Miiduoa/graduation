@@ -1,15 +1,10 @@
 'use strict';
 
 const { HttpsError } = require('firebase-functions/v2/https');
+const { isProductionRuntime } = require('./securityUtils');
 
-const DEFAULT_ALLOWED_ORIGINS = [
-  'https://nuni.tw',
-  'https://www.nuni.tw',
-  'http://localhost:3000',
-  'http://127.0.0.1:3000',
-  /^https:\/\/.*\.web\.app$/,
-  /^https:\/\/.*\.firebaseapp\.com$/,
-];
+const DEFAULT_ALLOWED_ORIGINS = ['https://nuni.tw', 'https://www.nuni.tw'];
+const LOCAL_DEV_ORIGINS = ['http://localhost:3000', 'http://127.0.0.1:3000'];
 
 const CORS_ALLOW_HEADERS =
   'Authorization, Content-Type, X-Firebase-AppCheck, X-Client-Version, X-Firebase-gmpid, X-Firebase-Encoding';
@@ -30,19 +25,19 @@ function resolveAllowedOrigins(allowedOrigins) {
     .split(',')
     .map((value) => value.trim())
     .filter(Boolean);
-  return fromEnv.length > 0 ? fromEnv : DEFAULT_ALLOWED_ORIGINS;
+  if (fromEnv.length > 0) return fromEnv;
+  if (isProductionRuntime()) return DEFAULT_ALLOWED_ORIGINS;
+  return [...DEFAULT_ALLOWED_ORIGINS, ...LOCAL_DEV_ORIGINS];
 }
 
 function isAllowedOrigin(origin, allowedOrigins) {
-  if (!origin) return true;
+  if (!origin) return false;
   return resolveAllowedOrigins(allowedOrigins).some((matcher) => originMatches(origin, matcher));
 }
 
 function applyCorsHeaders(req, res, allowedOrigins) {
   const origin = String(req.headers.origin || '');
-  if (!origin) {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-  } else if (isAllowedOrigin(origin, allowedOrigins)) {
+  if (origin && isAllowedOrigin(origin, allowedOrigins)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
   }
@@ -436,11 +431,13 @@ function createRequestListener({
 
 module.exports = {
   DEFAULT_ALLOWED_ORIGINS,
+  LOCAL_DEV_ORIGINS,
   applyCorsHeaders,
   createRequestListener,
   dispatchCallable,
   isAllowedOrigin,
   mapThrownError,
+  resolveAllowedOrigins,
   sendCallableError,
   verifyCallableAuth,
 };
