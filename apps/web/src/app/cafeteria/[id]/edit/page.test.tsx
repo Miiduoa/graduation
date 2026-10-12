@@ -99,10 +99,32 @@ it('blocks a URL with credentials and explains the reason', async () => {
   expect(screen.getByRole('alert').textContent).toBe('網址裡不能有帳號或密碼');
 });
 
+it('blocks javascript, userinfo and data URLs', async () => {
+  await mount();
+  fireEvent.change(screen.getByLabelText('店家網站'), {
+    target: { value: 'javascript:alert(1)' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '儲存店面' }));
+  expect(saveShopStorefront).not.toHaveBeenCalled();
+  expect(screen.getByRole('alert').textContent).toBe('請貼 https:// 開頭的網址');
+  fireEvent.change(screen.getByLabelText('店家網站'), {
+    target: { value: 'https://a@evil.com' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '儲存店面' }));
+  expect(saveShopStorefront).not.toHaveBeenCalled();
+  expect(screen.getByRole('alert').textContent).toBe('網址裡不能有帳號或密碼');
+  fireEvent.change(screen.getByLabelText('店家網站'), {
+    target: { value: 'data:text/html,hi' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '儲存店面' }));
+  expect(saveShopStorefront).not.toHaveBeenCalled();
+  expect(screen.getByRole('alert').textContent).toBe('請貼 https:// 開頭的網址');
+});
+
 it('blocks an overly long URL and explains the reason', async () => {
   await mount();
   fireEvent.change(screen.getByLabelText('店家網站'), {
-    target: { value: `https://shop.example/${'a'.repeat(500)}` },
+    target: { value: `https://shop.example/${'a'.repeat(2048)}` },
   });
   fireEvent.click(screen.getByRole('button', { name: '儲存店面' }));
   expect(saveShopStorefront).not.toHaveBeenCalled();

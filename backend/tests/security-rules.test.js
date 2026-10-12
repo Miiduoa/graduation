@@ -451,6 +451,145 @@ describe('firestore security rules', () => {
           paymentStatus: 'paid',
         }),
     );
+    const rejectedStorefrontUrls = [
+      'javascript:alert(1)',
+      'https://a@evil.com',
+      `https://shop.example/${'a'.repeat(2048)}`,
+      ' https://shop.example/order',
+      'https://shop.example/order ',
+      'http://shop.example/order',
+      'data:text/html,hi',
+    ];
+    for (const orderingUrl of rejectedStorefrontUrls) {
+      await assertFails(
+        db
+          .collection('schools')
+          .doc('tw-demo-uni')
+          .collection('cafeterias')
+          .doc('cafeteria-1')
+          .update({ orderingUrl }),
+      );
+      await assertFails(
+        db
+          .collection('schools')
+          .doc('tw-demo-uni')
+          .collection('cafeterias')
+          .doc('cafeteria-1')
+          .update({ websiteUrl: orderingUrl }),
+      );
+      await assertFails(
+        student
+          .collection('users')
+          .doc('alice')
+          .collection('schools')
+          .doc('tw-demo-uni')
+          .collection('externalOrders')
+          .doc(`bad-${Buffer.from(orderingUrl).toString('hex').slice(0, 24)}`)
+          .set({
+            fulfillment: 'external',
+            schoolId: 'tw-demo-uni',
+            cafeteriaId: 'cafeteria-1',
+            orderingUrl,
+          }),
+      );
+    }
+    await assertFails(
+      student
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .update({
+          websiteUrl: 'https://evil.example',
+          orderingUrl: 'https://evil.example/order',
+        }),
+    );
+  });
+
+  test('學生和別家店改不了別人的外連網址', async () => {
+    await seedFirestore(async (db) => {
+      await db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .set({
+          name: '第一餐廳',
+          orderingEnabled: true,
+          pilotStatus: 'live',
+          websiteUrl: 'https://shop.example',
+          orderingUrl: 'https://shop.example/order',
+        });
+      await db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .collection('operators')
+        .doc('merchant-1')
+        .set({
+          status: 'active',
+          role: 'manager',
+        });
+      await db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-2')
+        .set({
+          name: '第二餐廳',
+          orderingEnabled: true,
+          pilotStatus: 'live',
+        });
+      await db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-2')
+        .collection('operators')
+        .doc('merchant-2')
+        .set({
+          status: 'active',
+          role: 'staff',
+        });
+    });
+    const student = testEnv.authenticatedContext('alice').firestore();
+    const otherShop = testEnv.authenticatedContext('merchant-2').firestore();
+    const owner = testEnv.authenticatedContext('merchant-1').firestore();
+    await assertFails(
+      student
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .update({
+          websiteUrl: 'https://evil.example',
+          orderingUrl: 'https://evil.example/order',
+        }),
+    );
+    await assertFails(
+      otherShop
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .update({
+          websiteUrl: 'https://other.example',
+          orderingUrl: 'https://other.example/order',
+        }),
+    );
+    await assertSucceeds(
+      owner
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .update({
+          websiteUrl: 'https://shop.example/home',
+          orderingUrl: 'https://shop.example/menu',
+          updatedAt: new Date(),
+        }),
+    );
   });
 
   test("deny other cafeteria reads and require server writes even for administrators", async () => {

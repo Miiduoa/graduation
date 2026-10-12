@@ -65,6 +65,7 @@ import {
   type SchoolSSOConfig,
   type SSOCallbackResult,
   type SSOProvider,
+  safeStorefrontUrl,
 } from '@campus/shared/src';
 
 export type {
@@ -688,10 +689,10 @@ function normalizeCafeteriaRecord(row: Record<string, unknown>): Cafeteria {
         : row.orderingEnabled === true
           ? 'native_order'
           : 'info_only',
-    orderingUrl: toOptionalString(row.orderingUrl),
+    orderingUrl: safeStorefrontUrl(row.orderingUrl),
     intro: toOptionalString(row.intro),
     coverUrl: toOptionalString(row.coverUrl),
-    websiteUrl: toOptionalString(row.websiteUrl),
+    websiteUrl: safeStorefrontUrl(row.websiteUrl),
     menuSource: toOptionalString(row.menuSource),
     menuSyncedAt: toOptionalString(row.menuSyncedAt),
     pilotStatus: normalizeCafeteriaPilotStatus(row.pilotStatus),

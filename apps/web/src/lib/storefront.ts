@@ -19,6 +19,7 @@ import {
   buildShowcaseOrderingUrl,
   isHttpsOrderingUrl,
   resolveStoredMerchantMode,
+  safeStorefrontUrl,
   storefrontUrlIssue,
   trimStorefrontUrl,
 } from '@campus/shared/src/merchantMode';
@@ -59,8 +60,8 @@ export async function loadStorefront(
     openingHours: typeof data.openingHours === 'string' ? data.openingHours : undefined,
     intro: typeof data.intro === 'string' ? data.intro : undefined,
     coverUrl: typeof data.coverUrl === 'string' ? data.coverUrl : undefined,
-    websiteUrl: typeof data.websiteUrl === 'string' ? data.websiteUrl : undefined,
-    orderingUrl: typeof data.orderingUrl === 'string' ? data.orderingUrl : undefined,
+    websiteUrl: safeStorefrontUrl(data.websiteUrl),
+    orderingUrl: safeStorefrontUrl(data.orderingUrl),
     merchantMode: resolveStoredMerchantMode(data),
     menuSyncedAt:
       typeof data.menuSyncedAt === 'string'

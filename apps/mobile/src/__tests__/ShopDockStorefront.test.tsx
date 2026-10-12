@@ -90,11 +90,27 @@ test('帶帳密的網址不能存，畫面寫原因', async () => {
   expect(view.getByText('網址裡不能有帳號或密碼')).toBeTruthy();
 });
 
+test('javascript、帳號網址和 data 都不能存', async () => {
+  const view = await openHours();
+  fireEvent.changeText(view.getByPlaceholderText('店家網站（https）'), 'javascript:alert(1)');
+  fireEvent.press(view.getByText('儲存店面'));
+  expect(saveShopStorefront).not.toHaveBeenCalled();
+  expect(view.getByText('請貼 https:// 開頭的網址')).toBeTruthy();
+  fireEvent.changeText(view.getByPlaceholderText('店家網站（https）'), 'https://a@evil.com');
+  fireEvent.press(view.getByText('儲存店面'));
+  expect(saveShopStorefront).not.toHaveBeenCalled();
+  expect(view.getByText('網址裡不能有帳號或密碼')).toBeTruthy();
+  fireEvent.changeText(view.getByPlaceholderText('店家網站（https）'), 'data:text/html,hi');
+  fireEvent.press(view.getByText('儲存店面'));
+  expect(saveShopStorefront).not.toHaveBeenCalled();
+  expect(view.getByText('請貼 https:// 開頭的網址')).toBeTruthy();
+});
+
 test('太長的網址不能存，畫面寫原因', async () => {
   const view = await openHours();
   fireEvent.changeText(
     view.getByPlaceholderText('店家網站（https）'),
-    `https://shop.example/${'a'.repeat(500)}`,
+    `https://shop.example/${'a'.repeat(2048)}`,
   );
   fireEvent.press(view.getByText('儲存店面'));
   expect(saveShopStorefront).not.toHaveBeenCalled();
