@@ -95,7 +95,10 @@ it('abort and selection identity prevent an old station response from replacing 
     return new Promise((resolve) => { finish = resolve; });
   });
   renderExplorer();
-  fireEvent.click(await screen.findByRole('button', { name: /02 靜宜大學/ }));
+  await waitFor(() => expect(queryTransit).toHaveBeenCalledWith(
+    { action: 'arrivals', city: 'Taichung', stopId: 'TXG001' }, expect.any(AbortSignal),
+  ));
+  fireEvent.click(await screen.findByRole('button', { name: /站牌代碼 TXG002/ }));
   await screen.findByText(/目前沒有班次預估/);
   expect(firstSignal.aborted).toBe(true);
   await act(async () => finish({ status: 'ready', kind: 'arrivals', fetchedAt: new Date().toISOString(), arrivals: [{ id: 'old', route: '舊站路線', direction: 0, destination: '', status: 0, seconds: 480, updatedAt: new Date().toISOString() }] }));
