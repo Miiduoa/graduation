@@ -12,6 +12,15 @@ const state = vi.hoisted(() => ({
     merchantMode: 'showcase_link',
     orderingUrl: 'https://shop.example/order',
     location: '學生餐廳',
+    openingHours: undefined as string | undefined,
+  } as {
+    id: string;
+    name: string;
+    intro: string;
+    merchantMode: string;
+    orderingUrl?: string;
+    location: string;
+    openingHours?: string;
   },
   posts: [] as Array<{ id: string; title: string; text: string; kind: string; createdAt: string; likeCount: number; liked: boolean }>,
 }));

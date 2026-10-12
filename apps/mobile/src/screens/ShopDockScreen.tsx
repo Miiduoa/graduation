@@ -17,7 +17,7 @@ import {
   type ShopMenuItem,
   type ShopStorefront,
 } from '../services/shopCatalog';
-import { parseMenuCsv } from '@campus/shared/src/merchantMode';
+import { parseMenuCsv, storefrontUrlIssue } from '@campus/shared/src/merchantMode';
 
 const TABS = [
   { key: 'pending', label: '待接單' },
@@ -297,11 +297,23 @@ function ShopHoursPanel({ schoolId, cafeteriaId }: { schoolId: string; cafeteria
       </View>
       <Button
         text="儲存店面"
-        onPress={() =>
+        onPress={() => {
+          const websiteIssue = storefrontUrlIssue(storefront.websiteUrl);
+          const orderingIssue = storefrontUrlIssue(storefront.orderingUrl);
+          if (websiteIssue || orderingIssue) {
+            setNotice(websiteIssue || orderingIssue || '');
+            return;
+          }
           void saveShopStorefront({ schoolId, cafeteriaId, storefront })
             .then((result) => setNotice(savedCopy(result.stored, '店面資料已更新。')))
-            .catch(() => setNotice('這次沒寫成。請確認這支帳號是本店人員。'))
-        }
+            .catch((error) =>
+              setNotice(
+                error instanceof Error && error.message
+                  ? error.message
+                  : '這次沒寫成。請確認這支帳號是本店人員。',
+              ),
+            );
+        }}
       />
       <Text style={{ color: theme.colors.text, fontWeight: '700', marginTop: 8 }}>發一則店家貼文</Text>
       <TextInput placeholder="標題（可留空）" value={postTitle} onChangeText={setPostTitle} style={field} />

@@ -32,6 +32,36 @@ function isHttpsOrderingUrl(value) {
   }
 }
 
+const STOREFRONT_URL_MAX_LENGTH = 500;
+const STOREFRONT_URL_HTTPS_TEXT = '請貼 https:// 開頭的網址';
+const STOREFRONT_URL_CREDENTIALS_TEXT = '網址裡不能有帳號或密碼';
+const STOREFRONT_URL_TOO_LONG_TEXT = '網址太長，請改用店家網站首頁或訂餐頁的網址';
+
+function trimStorefrontUrl(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function storefrontUrlIssue(value) {
+  const trimmed = trimStorefrontUrl(value);
+  if (!trimmed) return null;
+  if (trimmed.length > STOREFRONT_URL_MAX_LENGTH) return STOREFRONT_URL_TOO_LONG_TEXT;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== 'https:') return STOREFRONT_URL_HTTPS_TEXT;
+    if (url.username || url.password) return STOREFRONT_URL_CREDENTIALS_TEXT;
+    return null;
+  } catch {
+    return STOREFRONT_URL_HTTPS_TEXT;
+  }
+}
+
+function isStoredStorefrontUrlAllowed(value) {
+  if (value == null || value === '') return true;
+  if (typeof value !== 'string') return false;
+  if (value !== value.trim() || /\s/.test(value)) return false;
+  return storefrontUrlIssue(value) === null;
+}
+
 function buildShowcaseOrderingUrl(orderingUrl, schoolId, cafeteriaId) {
   const url = new URL(orderingUrl);
   url.searchParams.set('utm_source', 'nuni');
@@ -126,6 +156,13 @@ module.exports = {
   normalizeMerchantMode,
   resolveStoredMerchantMode,
   isHttpsOrderingUrl,
+  STOREFRONT_URL_MAX_LENGTH,
+  STOREFRONT_URL_HTTPS_TEXT,
+  STOREFRONT_URL_CREDENTIALS_TEXT,
+  STOREFRONT_URL_TOO_LONG_TEXT,
+  trimStorefrontUrl,
+  storefrontUrlIssue,
+  isStoredStorefrontUrlAllowed,
   buildShowcaseOrderingUrl,
   isMenuStale,
   parseMenuCsv,

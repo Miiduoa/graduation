@@ -316,6 +316,57 @@ describe('firestore security rules', () => {
           merchantMode: 'native_order',
         }),
     );
+    await assertFails(
+      db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .update({
+          orderingUrl: ' https://shop.example/order',
+        }),
+    );
+    await assertFails(
+      db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .update({
+          websiteUrl: 'https://shop.example/order ',
+        }),
+    );
+    await assertFails(
+      db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .update({
+          orderingUrl: 'http://shop.example/order',
+        }),
+    );
+    await assertFails(
+      db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .update({
+          websiteUrl: 'https://user:pass@shop.example',
+        }),
+    );
+    await assertSucceeds(
+      db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .update({
+          websiteUrl: 'https://shop.example',
+          orderingUrl: '',
+        }),
+    );
     await assertSucceeds(
       db
         .collection('schools')
