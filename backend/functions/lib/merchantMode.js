@@ -22,20 +22,36 @@ function resolveStoredMerchantMode(cafeteria = {}) {
   return cafeteria.orderingEnabled === true ? 'native_order' : 'info_only';
 }
 
-function isHttpsOrderingUrl(value) {
-  if (typeof value !== 'string') return false;
-  try {
-    const url = new URL(value);
-    return url.protocol === 'https:' && !url.username && !url.password;
-  } catch {
-    return false;
-  }
-}
-
-const STOREFRONT_URL_MAX_LENGTH = 500;
+const STOREFRONT_URL_MAX_LENGTH = 2048;
 const STOREFRONT_URL_HTTPS_TEXT = '請貼 https:// 開頭的網址';
 const STOREFRONT_URL_CREDENTIALS_TEXT = '網址裡不能有帳號或密碼';
 const STOREFRONT_URL_TOO_LONG_TEXT = '網址太長，請改用店家網站首頁或訂餐頁的網址';
+
+function storefrontUrlHasForbiddenChars(value) {
+  if (value !== value.trim()) return true;
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code <= 0x20 || code === 0x7f) return true;
+  }
+  return false;
+}
+
+function inspectHttpsStorefrontUrl(value) {
+  if (value.length > STOREFRONT_URL_MAX_LENGTH) return 'length';
+  if (storefrontUrlHasForbiddenChars(value)) return 'chars';
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:') return 'https';
+    if (url.username || url.password) return 'credentials';
+    return 'ok';
+  } catch {
+    return 'https';
+  }
+}
+
+function isHttpsOrderingUrl(value) {
+  return typeof value === 'string' && value !== '' && inspectHttpsStorefrontUrl(value) === 'ok';
+}
 
 function trimStorefrontUrl(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -44,22 +60,20 @@ function trimStorefrontUrl(value) {
 function storefrontUrlIssue(value) {
   const trimmed = trimStorefrontUrl(value);
   if (!trimmed) return null;
-  if (trimmed.length > STOREFRONT_URL_MAX_LENGTH) return STOREFRONT_URL_TOO_LONG_TEXT;
-  try {
-    const url = new URL(trimmed);
-    if (url.protocol !== 'https:') return STOREFRONT_URL_HTTPS_TEXT;
-    if (url.username || url.password) return STOREFRONT_URL_CREDENTIALS_TEXT;
-    return null;
-  } catch {
-    return STOREFRONT_URL_HTTPS_TEXT;
-  }
+  const issue = inspectHttpsStorefrontUrl(trimmed);
+  if (issue === 'ok') return null;
+  if (issue === 'length') return STOREFRONT_URL_TOO_LONG_TEXT;
+  if (issue === 'credentials') return STOREFRONT_URL_CREDENTIALS_TEXT;
+  return STOREFRONT_URL_HTTPS_TEXT;
 }
 
 function isStoredStorefrontUrlAllowed(value) {
   if (value == null || value === '') return true;
-  if (typeof value !== 'string') return false;
-  if (value !== value.trim() || /\s/.test(value)) return false;
-  return storefrontUrlIssue(value) === null;
+  return isHttpsOrderingUrl(value);
+}
+
+function safeStorefrontUrl(value) {
+  return isHttpsOrderingUrl(value) ? value : undefined;
 }
 
 function buildShowcaseOrderingUrl(orderingUrl, schoolId, cafeteriaId) {
@@ -156,6 +170,7 @@ module.exports = {
   normalizeMerchantMode,
   resolveStoredMerchantMode,
   isHttpsOrderingUrl,
+  safeStorefrontUrl,
   STOREFRONT_URL_MAX_LENGTH,
   STOREFRONT_URL_HTTPS_TEXT,
   STOREFRONT_URL_CREDENTIALS_TEXT,

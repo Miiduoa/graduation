@@ -12,7 +12,11 @@ import {
   setDoc,
 } from 'firebase/firestore';
 import { getDb, isFirebaseMockMode } from '../firebase';
-import { resolveStoredMerchantMode, type MerchantMode } from '@campus/shared/src/merchantMode';
+import {
+  resolveStoredMerchantMode,
+  safeStorefrontUrl,
+  type MerchantMode,
+} from '@campus/shared/src/merchantMode';
 
 export type StorefrontShop = {
   id: string;
@@ -58,8 +62,8 @@ export async function loadStorefront(schoolId: string, cafeteriaId: string): Pro
     intro: typeof data.intro === 'string' ? data.intro : undefined,
     location: typeof data.location === 'string' ? data.location : undefined,
     openingHours: typeof data.openingHours === 'string' ? data.openingHours : undefined,
-    websiteUrl: typeof data.websiteUrl === 'string' ? data.websiteUrl : undefined,
-    orderingUrl: typeof data.orderingUrl === 'string' ? data.orderingUrl : undefined,
+    websiteUrl: safeStorefrontUrl(data.websiteUrl),
+    orderingUrl: safeStorefrontUrl(data.orderingUrl),
     merchantMode: resolveStoredMerchantMode(data),
     orderingEnabled: data.orderingEnabled === true,
     menuSyncedAt:

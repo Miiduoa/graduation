@@ -94,10 +94,52 @@ test('storefront URLs trim surrounding spaces and reject unsafe values before sa
         openingHours: '',
         intro: '',
         location: '',
-        websiteUrl: `https://shop.example/${'a'.repeat(500)}`,
+        websiteUrl: `https://shop.example/${'a'.repeat(2048)}`,
         orderingUrl: '',
         merchantMode: 'info_only',
       },
     }),
   ).rejects.toThrow('網址太長，請改用店家網站首頁或訂餐頁的網址');
+  await expect(
+    saveShopStorefront({
+      schoolId: 'pu',
+      cafeteriaId: 'cafe-1',
+      storefront: {
+        openingHours: '',
+        intro: '',
+        location: '',
+        websiteUrl: 'javascript:alert(1)',
+        orderingUrl: '',
+        merchantMode: 'info_only',
+      },
+    }),
+  ).rejects.toThrow('請貼 https:// 開頭的網址');
+  await expect(
+    saveShopStorefront({
+      schoolId: 'pu',
+      cafeteriaId: 'cafe-1',
+      storefront: {
+        openingHours: '',
+        intro: '',
+        location: '',
+        websiteUrl: '',
+        orderingUrl: 'https://a@evil.com',
+        merchantMode: 'showcase_link',
+      },
+    }),
+  ).rejects.toThrow('網址裡不能有帳號或密碼');
+  await expect(
+    saveShopStorefront({
+      schoolId: 'pu',
+      cafeteriaId: 'cafe-1',
+      storefront: {
+        openingHours: '',
+        intro: '',
+        location: '',
+        websiteUrl: 'data:text/html,hi',
+        orderingUrl: '',
+        merchantMode: 'info_only',
+      },
+    }),
+  ).rejects.toThrow('請貼 https:// 開頭的網址');
 });

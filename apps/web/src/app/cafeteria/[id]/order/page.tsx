@@ -65,7 +65,7 @@ export default function HonestOrderPage(props: {
             <a
               className="btn primary"
               href={tagged}
-              rel="noreferrer"
+              rel="noopener noreferrer"
               target="_blank"
               onClick={() => {
                 if (!user) return;

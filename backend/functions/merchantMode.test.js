@@ -14,19 +14,47 @@ const {
   SHOWCASE_ORDER_CAPTION,
   storefrontUrlIssue,
   isStoredStorefrontUrlAllowed,
+  safeStorefrontUrl,
   STOREFRONT_URL_HTTPS_TEXT,
   STOREFRONT_URL_CREDENTIALS_TEXT,
   STOREFRONT_URL_TOO_LONG_TEXT,
 } = require('./lib/merchantMode');
+
+const TOO_LONG_URL = `https://shop.example/${'a'.repeat(2048)}`;
+const REJECTED_STOREFRONT_URLS = [
+  'javascript:alert(1)',
+  'https://a@evil.com',
+  TOO_LONG_URL,
+  ' https://shop.example/order',
+  'https://shop.example/order ',
+  'http://shop.example/order',
+  'data:text/html,hi',
+];
 const { isOnlineOrderingEnabled } = require('./lib/onlineOrdering');
 
 test('showcase stores keep https ordering URLs with a source tag', () => {
   expect(normalizeMerchantMode('nope')).toBe('info_only');
+  expect(isHttpsOrderingUrl('https://shop.example/order')).toBe(true);
   expect(isHttpsOrderingUrl('http://shop.example/order')).toBe(false);
   expect(isHttpsOrderingUrl('https://user:pass@shop.example/order')).toBe(false);
   expect(
     buildShowcaseOrderingUrl('https://shop.example/order?x=1', 'pu', 'cafe-1'),
   ).toBe('https://shop.example/order?x=1&utm_source=nuni&utm_campaign=campus&ref=nuni-pu-cafe-1');
+});
+
+test('shared storefront URL check rejects javascript, userinfo, overlong, spaces, http and data', () => {
+  for (const url of REJECTED_STOREFRONT_URLS) {
+    expect(isHttpsOrderingUrl(url)).toBe(false);
+    expect(isStoredStorefrontUrlAllowed(url)).toBe(false);
+    expect(safeStorefrontUrl(url)).toBeUndefined();
+    expect(studentCafeteriaAction({ merchantMode: 'showcase_link', orderingUrl: url }).kind).toBe(
+      'info',
+    );
+  }
+  expect(isHttpsOrderingUrl('https://shop.example/order\u0000')).toBe(false);
+  expect(isHttpsOrderingUrl('\thttps://shop.example/order')).toBe(false);
+  expect(isStoredStorefrontUrlAllowed('')).toBe(true);
+  expect(safeStorefrontUrl('https://shop.example/order')).toBe('https://shop.example/order');
 });
 
 test('missing merchantMode stays native when the shop already takes orders', () => {
@@ -79,9 +107,10 @@ test('storefront URL editor trims spaces and explains https, credentials and len
   expect(storefrontUrlIssue('https://user:pass@shop.example/order')).toBe(
     STOREFRONT_URL_CREDENTIALS_TEXT,
   );
-  expect(storefrontUrlIssue(`https://shop.example/${'a'.repeat(500)}`)).toBe(
-    STOREFRONT_URL_TOO_LONG_TEXT,
-  );
+  expect(storefrontUrlIssue(TOO_LONG_URL)).toBe(STOREFRONT_URL_TOO_LONG_TEXT);
+  expect(storefrontUrlIssue('javascript:alert(1)')).toBe(STOREFRONT_URL_HTTPS_TEXT);
+  expect(storefrontUrlIssue('https://a@evil.com')).toBe(STOREFRONT_URL_CREDENTIALS_TEXT);
+  expect(storefrontUrlIssue('data:text/html,hi')).toBe(STOREFRONT_URL_HTTPS_TEXT);
   expect(isStoredStorefrontUrlAllowed('https://shop.example/order')).toBe(true);
   expect(isStoredStorefrontUrlAllowed('')).toBe(true);
   expect(isStoredStorefrontUrlAllowed(' https://shop.example/order')).toBe(false);
