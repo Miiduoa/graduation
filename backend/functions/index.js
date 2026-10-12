@@ -9,13 +9,12 @@ const { createAccountGuardedOnCall } = require('./accountLifecycle');
 const onCall = createAccountGuardedOnCall({ onCall: firebaseOnCall, getDb: () => db });
 const { defineSecret } = require('firebase-functions/params');
 const { initializeApp } = require('firebase-admin/app');
-const { getFirestore, FieldPath, FieldValue, Timestamp } = require('firebase-admin/firestore');
+const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { getMessaging } = require('firebase-admin/messaging');
 const https = require('https');
 const nodeCrypto = require('crypto');
 const {
   SERVICE_ROLE_DOMAINS,
-  buildSchoolDirectoryProfile,
   createAuthzHelpers,
   normalizeServiceRoleRecord,
   toSchoolMemberRole,
@@ -39,6 +38,7 @@ const { createPuCampusDataHandler, createGetMyAcademicRecords } = require('./aca
 const { createCalendarSubscriptionHandler } = require('./calendarSubscription');
 const { createExportUserDataHandler } = require('./userDataExport');
 const { createDeleteUserAccountHandler } = require('./accountDeletion');
+const directorySync = require('./directorySync');
 const { getAuth: getAdminAuth } = require('firebase-admin/auth');
 const {
   decryptSecretConfig,
@@ -933,90 +933,20 @@ async function getGroupMemberUids(groupId) {
 }
 
 function getSchoolDirectoryRef(schoolId, uid) {
-  return db.collection('schools').doc(schoolId).collection('directory').doc(uid);
+  return directorySync.getSchoolDirectoryRef(db, schoolId, uid);
 }
 
-async function syncSchoolDirectoryEntry({ schoolId, uid, userData = null, membership = null }) {
-  if (!schoolId || !uid) return;
-
-  const [resolvedUserData, resolvedMembership] = await Promise.all([
-    userData
-      ? Promise.resolve(userData)
-      : db
-          .collection('users')
-          .doc(uid)
-          .get()
-          .then((docSnap) => (docSnap.exists ? docSnap.data() : null)),
-    membership ? Promise.resolve(membership) : getActiveSchoolMembership(schoolId, uid),
-  ]);
-
-  const directoryRef = getSchoolDirectoryRef(schoolId, uid);
-
-  if (!resolvedUserData || !resolvedMembership) {
-    await directoryRef.delete().catch(() => null);
-    return;
-  }
-
-  const profile = buildSchoolDirectoryProfile({
-    uid,
-    userData: resolvedUserData,
-    membership: resolvedMembership,
+async function syncSchoolDirectoryEntry(args) {
+  return directorySync.syncSchoolDirectoryEntry(db, {
+    ...args,
+    getActiveSchoolMembership,
   });
-
-  await directoryRef.set(
-    {
-      ...profile,
-      updatedAt: FieldValue.serverTimestamp(),
-      updatedBy: 'system-sync',
-    },
-    { merge: true },
-  );
 }
 
 async function syncDirectoryEntriesForUser(uid, userData = null) {
-  if (!uid) return;
-
-  const membershipsSnap = await db
-    .collectionGroup('members')
-    .where(FieldPath.documentId(), '==', uid)
-    .get()
-    .catch(() => null);
-
-  if (!membershipsSnap) return;
-
-  const activeSchoolIds = [];
-  for (const membershipDoc of membershipsSnap.docs) {
-    const schoolId = membershipDoc.ref.parent.parent?.id;
-    const membership = membershipDoc.data() || {};
-    if (!schoolId) continue;
-
-    if (membership.status && membership.status !== 'active') {
-      await getSchoolDirectoryRef(schoolId, uid)
-        .delete()
-        .catch(() => null);
-      continue;
-    }
-
-    activeSchoolIds.push(schoolId);
-    await syncSchoolDirectoryEntry({
-      schoolId,
-      uid,
-      userData,
-      membership,
-    });
-  }
-
-  if (activeSchoolIds.length === 0) {
-    const schoolsSnap = await db
-      .collection('schools')
-      .get()
-      .catch(() => null);
-    for (const schoolDoc of schoolsSnap?.docs ?? []) {
-      await getSchoolDirectoryRef(schoolDoc.id, uid)
-        .delete()
-        .catch(() => null);
-    }
-  }
+  return directorySync.syncDirectoryEntriesForUser(db, uid, userData, {
+    getActiveSchoolMembership,
+  });
 }
 
 async function logAdminAction({ schoolId, action, details = '', actorUid = '', actorEmail = '' }) {

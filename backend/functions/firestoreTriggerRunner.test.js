@@ -1,6 +1,7 @@
 'use strict';
 
 const {
+  DEFAULT_LEASE_MS,
   paramsFromPath,
   policyFor,
   startFirestoreTriggerRunner,
@@ -77,6 +78,9 @@ function createMemoryDb() {
           data: opts.merge && prev ? { ...prev.data, ...data } : { ...data },
           updateTime: stamp(Date.now()),
         });
+      },
+      async delete() {
+        store.delete(path);
       },
     };
   }
@@ -188,7 +192,7 @@ describe('firestore trigger runner', () => {
     expect(claims.u1).toEqual({ role: 'admin', schoolId: 'pu' });
     expect(handler).toHaveBeenCalledTimes(1);
     expect(handler.mock.calls[0][0].data.after.data()).toEqual({ role: 'admin', schoolId: 'pu' });
-    first.stop();
+    await first.stop();
 
     const second = await startFirestoreTriggerRunner({
       db,
@@ -216,7 +220,7 @@ describe('firestore trigger runner', () => {
     await second.flush();
     expect(claims.u1).toEqual({ role: 'teacher', schoolId: 'pu' });
     expect(handler).toHaveBeenCalledTimes(2);
-    second.stop();
+    await second.stop();
   });
 
   test('membership and operator sync use before/after events', async () => {
@@ -280,7 +284,7 @@ describe('firestore trigger runner', () => {
       { params: { schoolId: 'pu', uid: 'u1' }, after: { status: 'active' } },
     ]);
     expect(operators).toEqual([{ schoolId: 'pu', cafeteriaId: 'cafe-1', uid: 'op-1' }]);
-    runner.stop();
+    await runner.stop();
   });
 
   test('notifications are not re-sent on the initial snapshot after restart', async () => {
@@ -325,7 +329,7 @@ describe('firestore trigger runner', () => {
     await first.flush();
     expect(handler).toHaveBeenCalledTimes(1);
     expect(handler.mock.calls[0][0].params).toEqual({ schoolId: 'pu', gradeId: 'g2' });
-    first.stop();
+    await first.stop();
 
     const second = await startFirestoreTriggerRunner({
       db,
@@ -345,7 +349,121 @@ describe('firestore trigger runner', () => {
     );
     await second.flush();
     expect(handler).toHaveBeenCalledTimes(1);
-    second.stop();
+    await second.stop();
+  });
+
+  test('grade and group-question writes from downtime are processed on restart catch-up', async () => {
+    const db = createMemoryDb();
+    const grades = [];
+    const posts = [];
+    const triggers = [
+      {
+        name: 'gradePublishedNotification',
+        document: 'schools/{schoolId}/grades/{gradeId}',
+        eventType: 'google.cloud.firestore.document.v1.created',
+        handler: async (event) => {
+          grades.push(event.params.gradeId);
+        },
+      },
+      {
+        name: 'groupQuestionAssistantReply',
+        document: 'groups/{groupId}/posts/{postId}',
+        eventType: 'google.cloud.firestore.document.v1.created',
+        handler: async (event) => {
+          posts.push(event.params.postId);
+        },
+      },
+    ];
+
+    const first = await startFirestoreTriggerRunner({
+      db,
+      triggers,
+      holderId: 'm1',
+      now: () => 1_000,
+      heartbeatMs: 60_000,
+    });
+    db.emit(
+      'cg:grades',
+      snapshotOf([{ type: 'added', doc: docSnap('schools/pu/grades/g-old', { letterGrade: 'A' }, 5) }]),
+    );
+    db.emit(
+      'cg:posts',
+      snapshotOf([{ type: 'added', doc: docSnap('groups/g1/posts/p-old', { kind: 'question' }, 5) }]),
+    );
+    await first.flush();
+    expect(grades).toEqual([]);
+    expect(posts).toEqual([]);
+
+    db.emit(
+      'cg:grades',
+      snapshotOf([{ type: 'added', doc: docSnap('schools/pu/grades/g-live', { letterGrade: 'B' }, 6) }]),
+    );
+    await first.flush();
+    expect(grades).toEqual(['g-live']);
+    await first.stop();
+
+    const second = await startFirestoreTriggerRunner({
+      db,
+      triggers,
+      holderId: 'm2',
+      now: () => 2_000,
+      heartbeatMs: 60_000,
+    });
+    expect(second.isHoldingLease()).toBe(true);
+    db.emit(
+      'cg:grades',
+      snapshotOf([
+        { type: 'added', doc: docSnap('schools/pu/grades/g-old', { letterGrade: 'A' }, 5) },
+        { type: 'added', doc: docSnap('schools/pu/grades/g-live', { letterGrade: 'B' }, 6) },
+        { type: 'added', doc: docSnap('schools/pu/grades/g-down', { letterGrade: 'C' }, 8) },
+      ]),
+    );
+    db.emit(
+      'cg:posts',
+      snapshotOf([
+        { type: 'added', doc: docSnap('groups/g1/posts/p-old', { kind: 'question' }, 5) },
+        { type: 'added', doc: docSnap('groups/g1/posts/p-down', { kind: 'question' }, 8) },
+      ]),
+    );
+    await second.flush();
+    expect(grades).toEqual(['g-live', 'g-down']);
+    expect(posts).toEqual(['p-down']);
+
+    db.emit(
+      'cg:grades',
+      snapshotOf([{ type: 'added', doc: docSnap('schools/pu/grades/g-down', { letterGrade: 'C' }, 8) }]),
+    );
+    await second.flush();
+    expect(grades).toEqual(['g-live', 'g-down']);
+    await second.stop();
+  });
+
+  test('stop releases the lease so a restart does not wait 45 seconds', async () => {
+    const db = createMemoryDb();
+    const now = 1_000;
+    const first = await startFirestoreTriggerRunner({
+      db,
+      triggers: [
+        {
+          name: 'onUserProfileChanged',
+          document: 'users/{uid}',
+          handler: async () => {},
+        },
+      ],
+      holderId: 'old-machine',
+      now: () => now,
+      leaseMs: DEFAULT_LEASE_MS,
+      heartbeatMs: 60_000,
+    });
+    expect(first.isHoldingLease()).toBe(true);
+    expect(await tryAcquireLease(db, { holderId: 'new-machine', now: () => now, leaseMs: DEFAULT_LEASE_MS })).toBe(
+      false,
+    );
+    await first.stop();
+    expect(first.isHoldingLease()).toBe(false);
+    expect(await tryAcquireLease(db, { holderId: 'new-machine', now: () => now, leaseMs: DEFAULT_LEASE_MS })).toBe(
+      true,
+    );
   });
 
   test('a second machine does not double-process while the lease is held', async () => {
@@ -395,8 +513,8 @@ describe('firestore trigger runner', () => {
     expect(firstHandler).toHaveBeenCalledTimes(1);
     expect(secondHandler).not.toHaveBeenCalled();
 
-    first.stop();
-    second.stop();
+    await first.stop();
+    await second.stop();
   });
 
   test('expired lease can be taken by another machine', async () => {
