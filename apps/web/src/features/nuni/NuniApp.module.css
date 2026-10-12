@@ -233,6 +233,67 @@
   letter-spacing: 0.16em;
   overflow-wrap: anywhere;
 }
+.taskSummary {
+  margin-bottom: 24px;
+}
+.taskSummary h2 {
+  margin: 0 0 8px;
+  font-size: 24px;
+  font-weight: 600;
+}
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 20px 0;
+}
+.filters button {
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.filters button[aria-pressed='true'] {
+  background: var(--brand);
+  color: var(--on-brand);
+  border-color: var(--brand);
+}
+.filters button:focus-visible,
+.assignmentIndex a:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 3px;
+}
+.assignmentIndex {
+  display: grid;
+  margin-bottom: 28px;
+  border-top: 1px solid var(--border);
+}
+.assignmentIndex a {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.assignmentIndex a:hover span {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.assignmentIndex small {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.nextForm {
+  margin-top: 24px;
+}
 @media (max-width: 760px) {
   .grid {
     grid-template-columns: minmax(0, 1fr);

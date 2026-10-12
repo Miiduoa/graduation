@@ -1,0 +1,25 @@
+.account {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px 16px;
+  min-width: 0;
+  max-width: 360px;
+  font-size: 13px;
+}
+.account > :first-child {
+  flex-basis: 100%;
+}
+@media (max-width: 760px) {
+  .account {
+    max-width: 100%;
+    margin-left: 0;
+    flex-basis: 100%;
+    justify-content: flex-start;
+  }
+  .account > :first-child {
+    flex-basis: auto;
+    flex-grow: 1;
+  }
+}

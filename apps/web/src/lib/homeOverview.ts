@@ -6,18 +6,23 @@ export interface HomeCourse {
   name: string;
   role: string;
   unreadCount: number;
+  href?: string;
 }
 export interface HomeTask {
+  kind?: 'assignment' | 'quiz';
   id: string;
   courseId: string;
   courseName: string;
   title: string;
   dueAt: string | null;
+  href?: string;
+  acceptsLate?: boolean;
 }
 export interface HomeData {
   courses: HomeCourse[];
   tasks: HomeTask[];
   unreadCount: number;
+  archivedCount?: number;
 }
 
 function dateString(value: unknown): string | null {
