@@ -27,7 +27,7 @@ export default function JoinPage(props: {
           </p>
           <div>
             <Link href={`/login${schoolSearch}`} className="btn primary">
-              登入校園帳號
+              登入學校帳號
             </Link>
           </div>
         </section>

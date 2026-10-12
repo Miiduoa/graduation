@@ -260,7 +260,7 @@ test('school login deletion never asks for a Firebase password and success survi
   mockUser = null;
   mockSdkUser = null;
   view.rerender(<AccountDeletionScreen navigation={navigation} />);
-  expect(view.getByText('Campus One 帳號已刪除')).toBeTruthy();
+  expect(view.getByText('Campus One 資料已刪除')).toBeTruthy();
   expect(view.queryByText('請先登入')).toBeNull();
 });
 test('password accounts must reauthenticate before deleting', async () => {
@@ -308,7 +308,7 @@ test.each(['account', 'school', 'sdk'])(
     view.rerender(<AccountDeletionScreen />);
     await act(async () => pending.resolve({ success: true, userId: 'u1' }));
     expect(mockSignOut).not.toHaveBeenCalled();
-    expect(view.queryByText('Campus One 帳號已刪除')).toBeNull();
+    expect(view.queryByText('Campus One 資料已刪除')).toBeNull();
   },
 );
 test('deletion requires affirmative server success and prevents duplicate requests', async () => {

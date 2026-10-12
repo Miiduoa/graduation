@@ -84,7 +84,7 @@ function PersonalProfile({ user }: { user: User }) {
           {Array.from(displayName)[0]}
         </span>
         <div>
-          <p className={styles.label}>校園帳號個人資料</p>
+          <p className={styles.label}>學校帳號個人資料</p>
           <h2>{displayName}</h2>
         </div>
         <Link href="/settings" className="btn">
@@ -143,18 +143,18 @@ export default function ProfilePage() {
             <section className={styles.panel}>
               <h2>
                 {error
-                  ? '暫時無法確認校園帳號'
+                  ? '暫時無法確認學校帳號'
                   : hasCourseAccount
-                    ? '連線校園帳號，查看學校資料'
+                    ? '連線學校帳號，查看學校資料'
                     : '登入後，查看你的資料'}
               </h2>
               <p>
                 {hasCourseAccount
-                  ? 'Campus One 帳號已登入。若要查看學校提供的課表、成績與校園個人資料，請另外連線校園帳號。'
+                  ? 'Google 帳號已登入。若要查看學校提供的課表、成績與校園個人資料，請另外連線學校帳號。'
                   : '使用你的學校帳號，查看個人資料與校務紀錄。'}
               </p>
               <Link className="btn primary" href="/login?reconnect=school&returnUrl=%2Fprofile">
-                {hasCourseAccount ? '連線校園帳號' : '登入帳號'}
+                {hasCourseAccount ? '連線學校帳號' : '登入帳號'}
               </Link>
             </section>
           )}

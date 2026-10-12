@@ -123,7 +123,7 @@ it('masks memberships while revalidating and clears them on logout', async () =>
   mocks.account.pendingLogout = true;
   view.rerender(<NuniAccountPanel />);
   expect(screen.queryByText('甲校')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '重試登出 Campus One 帳號' }));
+  fireEvent.click(screen.getByRole('button', { name: '重試登出 Google 帳號' }));
   expect(mocks.account.logout).toHaveBeenCalledOnce();
 });
 it('clears a session-change response and requests explicit account verification without a retry loop', async () => {

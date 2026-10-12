@@ -96,7 +96,7 @@ it('makes management and school qualifications discoverable without implying aut
   expect(
     screen.getByRole('link', { name: /管理員入口.*需平台管理權限/ }).getAttribute('href'),
   ).toBe('/admin');
-  expect(screen.getByRole('link', { name: /學校資格.*Campus One 帳號/ }).getAttribute('href')).toBe(
+  expect(screen.getByRole('link', { name: /學校資格.*Google 帳號/ }).getAttribute('href')).toBe(
     '/classroom/account',
   );
 });

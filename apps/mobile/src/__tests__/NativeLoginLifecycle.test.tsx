@@ -89,7 +89,7 @@ it('same verified account retains its draft after going to another app and back'
     mockAppActive?.('active');
   });
   expect(view.queryByTestId('review-course-draft')).toBeNull();
-  expect(view.getByLabelText('正在確認 Campus One 帳號')).toBeTruthy();
+  expect(view.getByLabelText('正在確認 Google 帳號')).toBeTruthy();
   await act(async () =>
     accept({ authenticated: true, platformAccountId: account, isPlatformOperator: false }),
   );
