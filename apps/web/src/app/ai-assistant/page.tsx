@@ -9,7 +9,7 @@ import { resolveSchoolPageContext } from '@/lib/pageContext';
 import { callCampusAssistant, CampusAssistantError, type CampusAssistantEnvelope } from '@/lib/campusAssistantClient';
 import { assistantSources, assistantSuggestions, hasOrderProposal, readOnlyAssistantCards } from '@/lib/assistantPresentation';
 import { AgentCardList } from './AgentCards';
-import { isWebOnlineOrderingEnabled, ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
+import { isWebOnlineOrderingEnabled, isWebOrderStatusQuestion, ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
 import home from '../home.module.css';
 import styles from './assistant.module.css';
 
@@ -40,6 +40,13 @@ function AssistantConversation({ userId, groupId, initialDraft }: { userId: stri
     event.preventDefault();
     const content = draft.trim();
     if (!content || request.current) return;
+    if (!isWebOnlineOrderingEnabled() && isWebOrderStatusQuestion(content)) {
+      setMessages(previous => [...previous, { role: 'user', content }, { role: 'assistant', content: ONLINE_ORDERING_OFF_TEXT, response: { content: ONLINE_ORDERING_OFF_TEXT } }]);
+      setDraft('');
+      setError('');
+      composer.current?.focus();
+      return;
+    }
     const controller = new AbortController();
     request.current = controller;
     sessionId.current ??= crypto.randomUUID();
@@ -108,7 +115,7 @@ function AssistantConversation({ userId, groupId, initialDraft }: { userId: stri
         placeholder="例如：圖書館怎麼走？" onChange={event => { setDraft(event.target.value); setError(''); }} aria-describedby={error ? 'assistant-error' : 'assistant-note'} />
       {error && <p id="assistant-error" role="alert" className={styles.error}>{error}</p>}
       <div className={styles.submitRow}>
-        <p id="assistant-note" className={styles.note}>回覆可能有誤；申請、繳費與訂單請以服務頁面的紀錄為準。</p>
+        <p id="assistant-note" className={styles.note}>{isWebOnlineOrderingEnabled() ? '回覆可能有誤；申請、繳費與訂單請以服務頁面的紀錄為準。' : '回覆可能有誤；申請、繳費請以服務頁面的紀錄為準。'}</p>
         <button type="submit" className={home.primary} disabled={pending || !draft.trim()}>{pending ? '查詢中…' : error ? '重試' : '送出'}</button>
       </div>
     </form>
