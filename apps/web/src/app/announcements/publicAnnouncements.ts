@@ -9,6 +9,20 @@ import {
   where,
 } from 'firebase/firestore';
 import { getDb, isFirebaseConfigured, type Announcement } from '@/lib/firebase';
+import { SOURCE_UNAVAILABLE_TEXT } from '@campus/shared/src/campusAnnouncements';
+
+export type AnnouncementSourceHealth = {
+  sourceId: string;
+  office: string;
+  status: 'healthy' | 'unavailable';
+  message: string;
+};
+
+export type AnnouncementFeed = {
+  announcements: Announcement[];
+  sources: AnnouncementSourceHealth[];
+  allUnavailable: boolean;
+};
 
 function publishedDate(value: unknown): string {
   const date =
@@ -23,20 +37,59 @@ function publishedDate(value: unknown): string {
   return date instanceof Date && Number.isFinite(date.getTime()) ? date.toISOString() : '';
 }
 
+function originalUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && !url.username && !url.password ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function loadAnnouncements(schoolId: string): Promise<Announcement[]> {
+  const feed = await loadAnnouncementFeed(schoolId);
+  return feed.announcements;
+}
+
+export async function loadAnnouncementFeed(schoolId: string): Promise<AnnouncementFeed> {
   if (!isFirebaseConfigured()) throw new Error('Announcement source unavailable');
   const db = getDb();
   const constraints = [orderBy('publishedAt', 'desc'), limit(20)];
   let snapshot = await getDocsFromServer(
     query(collection(db, 'schools', schoolId, 'announcements'), ...constraints),
   );
-  // Retain the existing migration path only after a successful, empty canonical read.
   if (snapshot.empty) {
     snapshot = await getDocsFromServer(
       query(collection(db, 'announcements'), where('schoolId', '==', schoolId), ...constraints),
     );
   }
-  return snapshot.docs.map((document) => normalizeAnnouncement(document, schoolId));
+  const sourcesSnap = await getDocsFromServer(
+    collection(db, 'schools', schoolId, 'announcement-sources'),
+  );
+  const sources: AnnouncementSourceHealth[] = sourcesSnap.docs.map((document) => {
+    const data = document.data();
+    const unavailable = data.status === 'unavailable';
+    return {
+      sourceId: typeof data.sourceId === 'string' ? data.sourceId : document.id,
+      office: typeof data.office === 'string' ? data.office : document.id,
+      status: unavailable ? 'unavailable' : 'healthy',
+      message: unavailable ? SOURCE_UNAVAILABLE_TEXT : '',
+    };
+  });
+  const hidden = new Set(
+    sources.filter((item) => item.status === 'unavailable').map((item) => item.sourceId),
+  );
+  const announcements = snapshot.docs
+    .map((document) => normalizeAnnouncement(document, schoolId))
+    .filter(
+      (row) => row.origin !== 'public_scrape' || !row.sourceId || !hidden.has(row.sourceId),
+    );
+  return {
+    announcements,
+    sources,
+    allUnavailable: sources.length > 0 && sources.every((item) => item.status === 'unavailable'),
+  };
 }
 
 function normalizeAnnouncement(
@@ -51,10 +104,21 @@ function normalizeAnnouncement(
   ) {
     throw new Error('Invalid announcement source');
   }
+  const summary =
+    typeof data.summary === 'string' && data.summary.trim()
+      ? data.summary
+      : typeof data.body === 'string'
+        ? data.body
+        : '';
   return {
     id: document.id,
     title: data.title,
-    body: typeof data.body === 'string' ? data.body : '',
+    body: summary,
+    summary,
+    originalUrl: originalUrl(data.originalUrl),
+    sourceId: typeof data.sourceId === 'string' ? data.sourceId : undefined,
+    origin: typeof data.origin === 'string' ? data.origin : undefined,
+    office: typeof data.office === 'string' ? data.office : undefined,
     publishedAt: publishedDate(data.publishedAt),
     source: typeof data.source === 'string' ? data.source : undefined,
     category: typeof data.category === 'string' ? data.category : undefined,

@@ -118,6 +118,9 @@ it('distinguishes unknown availability, paused supply and sold-out meals without
   expect(restaurant.getAllByText('供應中')).toHaveLength(1);
   expect(screen.getByText(/目前還不能線上點餐/)).toBeTruthy();
   expect(screen.queryByText('可點餐餐廳')).toBeNull();
+  expect(screen.getByRole('link', { name: '進入店面' }).getAttribute('href')).toContain(
+    '/cafeteria/stall',
+  );
 });
 it('exposes the selected restaurant and restores menus when clearing an empty search', () => {
   render(<CafeteriaPage />);

@@ -217,6 +217,8 @@ function createOrderHandler({ db }) {
         if (
           cafeteria.orderingEnabled !== true ||
           cafeteria.pilotStatus !== 'live' ||
+          cafeteria.merchantMode === 'showcase_link' ||
+          cafeteria.merchantMode === 'info_only' ||
           (cafeteria.schoolId != null && cafeteria.schoolId !== schoolId) ||
           (cafeteria.currency != null && cafeteria.currency !== 'TWD')
         ) {

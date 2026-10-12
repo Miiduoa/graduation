@@ -496,6 +496,11 @@ export type Announcement = {
   category?: string;
   pinned?: boolean;
   schoolId?: string;
+  summary?: string;
+  originalUrl?: string;
+  sourceId?: string;
+  origin?: string;
+  office?: string;
   /** 若公告綁定到某課程，可從這裡跳到 /course/[id] */
   relatedCourseId?: string;
   /** 若公告綁定到某社團，可從這裡跳到 /clubs */
@@ -544,6 +549,13 @@ export type Cafeteria = {
   currentOccupancy?: number;
   activeOperatorCount?: number;
   orderingEnabled?: boolean;
+  merchantMode?: 'native_order' | 'showcase_link' | 'info_only';
+  orderingUrl?: string;
+  intro?: string;
+  coverUrl?: string;
+  websiteUrl?: string;
+  menuSource?: string;
+  menuSyncedAt?: string;
   pilotStatus?: CafeteriaPilotStatus;
   rating?: number;
   reviewCount?: number;
@@ -668,6 +680,20 @@ function normalizeCafeteriaRecord(row: Record<string, unknown>): Cafeteria {
     currentOccupancy: toOptionalNumber(row.currentOccupancy),
     activeOperatorCount: toOptionalNumber(row.activeOperatorCount),
     orderingEnabled: row.orderingEnabled === true,
+    merchantMode:
+      row.merchantMode === 'native_order' ||
+      row.merchantMode === 'showcase_link' ||
+      row.merchantMode === 'info_only'
+        ? row.merchantMode
+        : row.orderingEnabled === true
+          ? 'native_order'
+          : 'info_only',
+    orderingUrl: toOptionalString(row.orderingUrl),
+    intro: toOptionalString(row.intro),
+    coverUrl: toOptionalString(row.coverUrl),
+    websiteUrl: toOptionalString(row.websiteUrl),
+    menuSource: toOptionalString(row.menuSource),
+    menuSyncedAt: toOptionalString(row.menuSyncedAt),
     pilotStatus: normalizeCafeteriaPilotStatus(row.pilotStatus),
     rating: toOptionalNumber(row.rating),
     reviewCount: toOptionalNumber(row.reviewCount),

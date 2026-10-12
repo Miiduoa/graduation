@@ -57,9 +57,10 @@ beforeEach(() => {
   account.user = { uid: 'alice' };
   account.loading = false;
   vi.mocked(isFirebaseConfigured).mockReturnValue(true);
-  vi.mocked(getDocsFromServer).mockResolvedValue(
-    snapshot(announcementDocument('校園公告實際內容')),
-  );
+  vi.mocked(getDocsFromServer).mockImplementation(async (input: { path?: string }) => {
+    if (String(input?.path || '').includes('announcement-sources')) return snapshot();
+    return snapshot(announcementDocument('校園公告實際內容'));
+  });
   window.history.replaceState({}, '', '/announcements');
 });
 
@@ -116,10 +117,11 @@ it('shows unavailable when Firebase is not configured and never reads demo conte
 it('retains the existing school-filtered legacy source when the canonical collection is empty', async () => {
   vi.mocked(getDocsFromServer)
     .mockResolvedValueOnce(snapshot())
-    .mockResolvedValueOnce(snapshot(announcementDocument('既有來源公告', { schoolId: 'pu' })));
+    .mockResolvedValueOnce(snapshot(announcementDocument('既有來源公告', { schoolId: 'pu' })))
+    .mockResolvedValueOnce(snapshot());
   render(<AnnouncementsPage />);
   await screen.findByText('既有來源公告');
-  expect(getDocsFromServer).toHaveBeenLastCalledWith({
+  expect(getDocsFromServer).toHaveBeenCalledWith({
     path: 'announcements',
     constraints: [
       { where: 'schoolId', operator: '==', value: 'pu' },
@@ -238,7 +240,7 @@ it('discards the old school response when the selected school changes', async ()
     old.resolve(snapshot(announcementDocument('靜宜晚回應', { schoolId: 'pu' }))),
   );
   expect(screen.queryByText('靜宜晚回應')).toBeNull();
-  expect(getDocsFromServer).toHaveBeenLastCalledWith(
+  expect(getDocsFromServer).toHaveBeenCalledWith(
     expect.objectContaining({ path: 'schools/nthu/announcements' }),
   );
 });
@@ -266,4 +268,26 @@ it('copies the real announcement detail link only after the clipboard operation 
   expect(screen.getByRole('link', { name: '校園公告實際內容' }).getAttribute('href')).toBe(
     `${url.pathname}${url.search}`,
   );
+});
+
+it('hides scrape rows from dead sources and labels them as temporarily unavailable', async () => {
+  vi.mocked(getDocsFromServer).mockImplementation(async (input: { path?: string }) => {
+    if (String(input?.path || '').includes('announcement-sources')) {
+      return {
+        empty: false,
+        docs: [
+          {
+            id: 'pu-acd',
+            data: () => ({ sourceId: 'pu-acd', office: '教務處', status: 'unavailable' }),
+          },
+        ],
+      } as never;
+    }
+    return snapshot(
+      announcementDocument('過期稿', { origin: 'public_scrape', sourceId: 'pu-acd' }),
+    );
+  });
+  render(<AnnouncementsPage />);
+  expect(await screen.findByRole('heading', { name: '暫時抓不到' })).toBeTruthy();
+  expect(screen.queryByText('過期稿')).toBeNull();
 });

@@ -12,6 +12,11 @@ import {
   where,
 } from 'firebase/firestore';
 import { getDb, isFirebaseMockMode } from '../firebase';
+import {
+  isHttpsOrderingUrl,
+  resolveStoredMerchantMode,
+  type MerchantMode,
+} from '@campus/shared/src/merchantMode';
 
 export type ShopMenuItem = {
   id: string;
@@ -26,14 +31,38 @@ export type ShopHours = {
 
 const localKey = (cafeteriaId: string) => `campus-one-shop:${cafeteriaId}`;
 
-type LocalShop = { hours: string; items: ShopMenuItem[] };
+export type ShopStorefront = ShopHours & {
+  intro: string;
+  location: string;
+  websiteUrl: string;
+  orderingUrl: string;
+  merchantMode: MerchantMode;
+};
+
+type LocalShop = {
+  hours: string;
+  items: ShopMenuItem[];
+  intro?: string;
+  location?: string;
+  websiteUrl?: string;
+  orderingUrl?: string;
+  merchantMode?: MerchantMode;
+};
 
 async function readLocal(cafeteriaId: string): Promise<LocalShop> {
   try {
     const raw = await AsyncStorage.getItem(localKey(cafeteriaId));
     if (!raw) return { hours: '', items: [] };
     const parsed = JSON.parse(raw) as LocalShop;
-    return { hours: parsed.hours || '', items: Array.isArray(parsed.items) ? parsed.items : [] };
+    return {
+      hours: parsed.hours || '',
+      items: Array.isArray(parsed.items) ? parsed.items : [],
+      intro: parsed.intro || '',
+      location: parsed.location || '',
+      websiteUrl: parsed.websiteUrl || '',
+      orderingUrl: parsed.orderingUrl || '',
+      merchantMode: parsed.merchantMode,
+    };
   } catch {
     return { hours: '', items: [] };
   }
@@ -121,6 +150,105 @@ export async function saveShopMenuItem(input: {
       soldOut: input.item.soldOut,
       availableOn: new Date().toISOString().slice(0, 10),
       updatedAt: serverTimestamp(),
+    });
+    return { stored: 'cloud' };
+  } catch {
+    return { stored: 'local' };
+  }
+}
+
+export async function loadShopStorefront(
+  schoolId: string,
+  cafeteriaId: string,
+): Promise<ShopStorefront> {
+  const local = await readLocal(cafeteriaId);
+  const fromLocal = {
+    openingHours: local.hours,
+    intro: local.intro || '',
+    location: local.location || '',
+    websiteUrl: local.websiteUrl || '',
+    orderingUrl: local.orderingUrl || '',
+    merchantMode: resolveStoredMerchantMode({ merchantMode: local.merchantMode }),
+  };
+  if (isFirebaseMockMode()) return fromLocal;
+  try {
+    const snap = await getDoc(doc(getDb(), 'schools', schoolId, 'cafeterias', cafeteriaId));
+    const data = snap.data() || {};
+    return {
+      openingHours: String(data.openingHours || local.hours || ''),
+      intro: String(data.intro || local.intro || ''),
+      location: String(data.location || local.location || ''),
+      websiteUrl: String(data.websiteUrl || local.websiteUrl || ''),
+      orderingUrl: String(data.orderingUrl || local.orderingUrl || ''),
+      merchantMode: resolveStoredMerchantMode(data),
+    };
+  } catch {
+    return fromLocal;
+  }
+}
+
+export async function saveShopStorefront(input: {
+  schoolId: string;
+  cafeteriaId: string;
+  storefront: ShopStorefront;
+}): Promise<{ stored: 'cloud' | 'local' }> {
+  const local = await readLocal(input.cafeteriaId);
+  const openingHours = input.storefront.openingHours.trim().slice(0, 120);
+  const intro = input.storefront.intro.trim().slice(0, 500);
+  const location = input.storefront.location.trim().slice(0, 120);
+  const websiteUrl = input.storefront.websiteUrl.trim();
+  const orderingUrl = input.storefront.orderingUrl.trim();
+  const merchantMode =
+    input.storefront.merchantMode === 'native_order'
+      ? 'native_order'
+      : input.storefront.merchantMode === 'showcase_link' && isHttpsOrderingUrl(orderingUrl)
+        ? 'showcase_link'
+        : 'info_only';
+  await writeLocal(input.cafeteriaId, {
+    ...local,
+    hours: openingHours,
+    intro,
+    location,
+    websiteUrl,
+    orderingUrl,
+    merchantMode,
+  });
+  if (isFirebaseMockMode()) return { stored: 'local' };
+  try {
+    await updateDoc(doc(getDb(), 'schools', input.schoolId, 'cafeterias', input.cafeteriaId), {
+      openingHours,
+      intro,
+      location,
+      websiteUrl: isHttpsOrderingUrl(websiteUrl) ? websiteUrl : '',
+      orderingUrl: isHttpsOrderingUrl(orderingUrl) ? orderingUrl : '',
+      merchantMode,
+      updatedAt: serverTimestamp(),
+      sourceLabel: 'shop-dock',
+    });
+    return { stored: 'cloud' };
+  } catch {
+    return { stored: 'local' };
+  }
+}
+
+export async function createShopPost(input: {
+  schoolId: string;
+  cafeteriaId: string;
+  title: string;
+  text: string;
+  kind: 'post' | 'announcement' | 'promo';
+}): Promise<{ stored: 'cloud' | 'local' }> {
+  const title = input.title.trim().slice(0, 80);
+  const text = input.text.trim().slice(0, 2000);
+  if (!text) throw new Error('請填貼文內容');
+  if (isFirebaseMockMode()) return { stored: 'local' };
+  try {
+    await setDoc(doc(collection(getDb(), 'schools', input.schoolId, 'cafeterias', input.cafeteriaId, 'posts')), {
+      title,
+      text,
+      kind: input.kind,
+      createdAt: serverTimestamp(),
+      likeCount: 0,
     });
     return { stored: 'cloud' };
   } catch {

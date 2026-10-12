@@ -446,13 +446,60 @@ service cloud.firestore {
         allow update: if hasEditorRole(schoolId) || (
           requesterIsCafeteriaOperator(schoolId, cafeteriaId)
           && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['openingHours', 'updatedAt', 'sourceLabel'])
+            .hasOnly([
+              'openingHours', 'updatedAt', 'sourceLabel', 'intro', 'coverUrl',
+              'location', 'websiteUrl', 'orderingUrl', 'merchantMode', 'menuSource',
+              'menuSyncedAt'
+            ])
+          && request.resource.data.orderingEnabled == resource.data.orderingEnabled
+          && request.resource.data.pilotStatus == resource.data.pilotStatus
+          && (
+            !('merchantMode' in request.resource.data)
+            || request.resource.data.merchantMode in ['showcase_link', 'info_only']
+            || (
+              request.resource.data.merchantMode == 'native_order'
+              && resource.data.get('merchantMode', 'native_order') == 'native_order'
+            )
+          )
         );
 
         match /operators/{uid} {
           allow read: if isSelf(uid) || hasEditorRole(schoolId);
           allow create, update, delete: if hasEditorRole(schoolId);
         }
+
+        match /posts/{postId} {
+          allow read: if true;
+          allow create, update, delete: if hasEditorRole(schoolId)
+            || requesterIsCafeteriaOperator(schoolId, cafeteriaId);
+
+          match /likes/{uid} {
+            allow read: if true;
+            allow create, delete: if isSelf(uid);
+            allow update: if false;
+          }
+
+          match /comments/{commentId} {
+            allow read: if true;
+            allow create: if isSignedIn()
+              && request.resource.data.authorId == request.auth.uid
+              && request.resource.data.text is string
+              && request.resource.data.text.size() >= 1
+              && request.resource.data.text.size() <= 2000;
+            allow update, delete: if isSignedIn() && resource.data.authorId == request.auth.uid;
+          }
+        }
+
+        match /followers/{uid} {
+          allow read: if true;
+          allow create, delete: if isSelf(uid);
+          allow update: if false;
+        }
+      }
+
+      match /announcement-sources/{sourceId} {
+        allow read: if true;
+        allow write: if false;
       }
 
       match /announcements/{docId} {
@@ -1139,6 +1186,19 @@ service cloud.firestore {
         match /orders/{orderId} {
           allow read: if isSelf(uid);
           allow write: if false;
+        }
+
+        match /externalOrders/{orderId} {
+          allow read: if isSelf(uid);
+          allow create: if isSelf(uid)
+            && request.resource.data.fulfillment == 'external'
+            && request.resource.data.schoolId == schoolId
+            && request.resource.data.cafeteriaId is string
+            && request.resource.data.orderingUrl is string
+            && request.resource.data.orderingUrl.matches('^https://')
+            && !('queueNumber' in request.resource.data)
+            && !('paymentStatus' in request.resource.data);
+          allow update, delete: if false;
         }
 
         match /transactions/{transactionId} {

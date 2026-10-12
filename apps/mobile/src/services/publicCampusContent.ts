@@ -13,6 +13,7 @@ import {
 } from 'firebase/firestore';
 import { getDb, isFirebaseMockMode } from '../firebase';
 import type { Announcement, AnnouncementCategory, Attachment, ClubEvent } from '../data/types';
+import { SOURCE_UNAVAILABLE_TEXT } from '@campus/shared/src/campusAnnouncements';
 
 type SourceDocument = { id: string; data: () => Record<string, unknown> };
 
@@ -86,11 +87,22 @@ function announcement(document: SourceDocument, schoolId: string): Announcement 
         ];
       })
     : [];
+  const summary =
+    typeof data.summary === 'string' && data.summary.trim()
+      ? data.summary
+      : typeof data.body === 'string'
+        ? data.body
+        : '';
   return {
     id: document.id,
     schoolId,
     title: data.title as string,
-    body: typeof data.body === 'string' ? data.body : '',
+    body: summary,
+    summary,
+    originalUrl: isPublicWebUrl(data.originalUrl) ? data.originalUrl : undefined,
+    sourceId: typeof data.sourceId === 'string' ? data.sourceId : undefined,
+    origin: typeof data.origin === 'string' ? data.origin : undefined,
+    office: typeof data.office === 'string' ? data.office : undefined,
     publishedAt: dateString(data.publishedAt),
     source: typeof data.source === 'string' ? data.source : undefined,
     category: categories.includes(data.category as AnnouncementCategory)
@@ -98,6 +110,51 @@ function announcement(document: SourceDocument, schoolId: string): Announcement 
       : 'general',
     pinned: data.pinned === true,
     attachments,
+  };
+}
+
+export type AnnouncementSourceHealth = {
+  sourceId: string;
+  office: string;
+  status: 'healthy' | 'unavailable';
+  message: string;
+};
+
+export type CampusAnnouncementFeed = {
+  announcements: Announcement[];
+  sources: AnnouncementSourceHealth[];
+  allUnavailable: boolean;
+};
+
+async function loadAnnouncementSources(schoolId: string): Promise<AnnouncementSourceHealth[]> {
+  const snapshot = await getDocsFromServer(
+    collection(sourceDb(schoolId), 'schools', schoolId, 'announcement-sources'),
+  );
+  return snapshot.docs.map((document) => {
+    const data = document.data();
+    const unavailable = data.status === 'unavailable';
+    return {
+      sourceId: typeof data.sourceId === 'string' ? data.sourceId : document.id,
+      office: typeof data.office === 'string' ? data.office : document.id,
+      status: unavailable ? 'unavailable' : 'healthy',
+      message: unavailable ? SOURCE_UNAVAILABLE_TEXT : '',
+    };
+  });
+}
+
+export async function loadCampusAnnouncementFeed(schoolId: string): Promise<CampusAnnouncementFeed> {
+  const announcements = await loadList(schoolId, 'announcements', announcement);
+  const sources = await loadAnnouncementSources(schoolId);
+  const hidden = new Set(
+    sources.filter((item) => item.status === 'unavailable').map((item) => item.sourceId),
+  );
+  const visible = announcements.filter(
+    (row) => row.origin !== 'public_scrape' || !row.sourceId || !hidden.has(row.sourceId),
+  );
+  return {
+    announcements: visible,
+    sources,
+    allUnavailable: sources.length > 0 && sources.every((item) => item.status === 'unavailable'),
   };
 }
 
@@ -162,8 +219,8 @@ async function loadDetail<T>(
   return normalize({ id: snapshot.id, data: () => snapshot.data()! }, schoolId);
 }
 
-export const loadCampusAnnouncements = (schoolId: string) =>
-  loadList(schoolId, 'announcements', announcement);
+export const loadCampusAnnouncements = async (schoolId: string) =>
+  (await loadCampusAnnouncementFeed(schoolId)).announcements;
 export const loadCampusAnnouncement = (schoolId: string, id: string) =>
   loadDetail(schoolId, id, 'announcements', announcement);
 export type CampusEventSource = 'school-club-events' | 'school-events' | 'legacy-events';

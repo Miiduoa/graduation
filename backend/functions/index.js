@@ -6226,5 +6226,16 @@ exports.puFetchTronClassData = onRequest(
 );
 
 exports.scheduledPushReceiptSweep = require('./pushReceiptSweep').scheduledPushReceiptSweep;
+exports.syncCampusAnnouncements = require('./campusAnnouncements/scheduled').syncCampusAnnouncements;
+exports.onCafeteriaStorefrontPostCreated = onDocumentCreated(
+  {
+    document: 'schools/{schoolId}/cafeterias/{cafeteriaId}/posts/{postId}',
+    region: REGION,
+  },
+  require('./storefront/notifyFollowers').createCafeteriaStorefrontPostHandler({
+    db,
+    sendPushToUser,
+  }),
+);
 
 console.log('Firebase Cloud Functions loaded successfully');
