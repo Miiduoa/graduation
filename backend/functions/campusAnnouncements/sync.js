@@ -1,7 +1,7 @@
 'use strict';
 
 const { FieldValue, Timestamp } = require('firebase-admin/firestore');
-const { schoolConfig, listSources, allSources, SOURCE_UNAVAILABLE } = require('./catalog');
+const { schoolConfig, listSources, allSources, SOURCE_DOWN_EMPTY } = require('./catalog');
 const { extractFromHtml, countDrop } = require('./extract');
 const { politeFetch } = require('./politeFetch');
 const { announcementDocId, isLoginPortalUrl } = require('./url');
@@ -32,26 +32,24 @@ async function hideSourceAnnouncements(db, source) {
 }
 
 async function writeHealth(db, source, health) {
-  await sourceRef(db, source).set(
-    {
-      schoolId: source.schoolId,
-      sourceId: source.sourceId,
-      office: source.office,
-      scope: source.scope,
-      kind: source.kind,
-      listUrl: source.listUrl,
-      parsers: source.parsers,
-      status: health.status,
-      reason: health.reason || '',
-      itemCount: health.itemCount || 0,
-      parser: health.parser || '',
-      fingerprint: health.fingerprint || '',
-      lastSuccessAt: health.lastSuccessAt || null,
-      lastCheckedAt: FieldValue.serverTimestamp(),
-      message: health.status === UNAVAILABLE ? SOURCE_UNAVAILABLE : '',
-    },
-    { merge: true },
-  );
+  const payload = {
+    schoolId: source.schoolId,
+    sourceId: source.sourceId,
+    office: source.office,
+    scope: source.scope,
+    kind: source.kind,
+    listUrl: source.listUrl,
+    parsers: source.parsers,
+    status: health.status,
+    reason: health.reason || '',
+    itemCount: health.itemCount || 0,
+    parser: health.parser || '',
+    fingerprint: health.fingerprint || '',
+    lastCheckedAt: FieldValue.serverTimestamp(),
+    message: health.status === UNAVAILABLE ? SOURCE_DOWN_EMPTY : '',
+  };
+  if (health.lastSuccessAt) payload.lastSuccessAt = health.lastSuccessAt;
+  await sourceRef(db, source).set(payload, { merge: true });
 }
 
 async function fetchSourceHtml(source, deps) {
@@ -107,7 +105,6 @@ async function syncSource(source, deps = {}) {
         parser: extracted.parser,
         fingerprint: extracted.fingerprint,
       });
-      await hideSourceAnnouncements(db, source);
       return {
         status: UNAVAILABLE,
         reason: extracted.items.length === 0 ? 'parse_empty' : 'count_drop',
@@ -159,7 +156,6 @@ async function syncSource(source, deps = {}) {
       reason: error.code || error.message || 'fetch_failed',
       itemCount: 0,
     });
-    await hideSourceAnnouncements(db, source);
     return { status: UNAVAILABLE, reason: error.code || error.message || 'fetch_failed', itemCount: 0 };
   }
 }
@@ -195,21 +191,14 @@ async function syncConfiguredSchools(deps = {}) {
   return results;
 }
 
-function visibleAnnouncements(rows, sources) {
-  const hidden = new Set(
-    (sources || []).filter((item) => item.status === UNAVAILABLE).map((item) => item.sourceId),
-  );
-  return (rows || []).filter((row) => {
-    if (row.visible === false) return false;
-    if (row.origin === 'public_scrape' && row.sourceId && hidden.has(row.sourceId)) return false;
-    return true;
-  });
+function visibleAnnouncements(rows, _sources) {
+  return (rows || []).filter((row) => row.visible !== false);
 }
 
 function feedStatus(announcements, sources) {
   const listed = sources || [];
   if (listed.length && listed.every((item) => item.status === UNAVAILABLE) && announcements.length === 0) {
-    return { status: UNAVAILABLE, message: SOURCE_UNAVAILABLE };
+    return { status: UNAVAILABLE, message: SOURCE_DOWN_EMPTY };
   }
   return { status: 'ready', message: '' };
 }

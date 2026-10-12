@@ -6,6 +6,11 @@ const { getFirestore } = require('firebase-admin/firestore');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { createAuthzHelpers } = require('../authz');
 const { toJsDate } = require('./assistantFormat');
+const {
+  schoolConfig,
+  isPublicAnnouncementSchool,
+  SOURCE_DOWN_EMPTY,
+} = require('../campusAnnouncements/catalog');
 
 const EMPTY = Object.freeze([]);
 
@@ -61,22 +66,22 @@ async function fetchAnnouncementSources(schoolId, deps = {}) {
       sourceId: data.sourceId || entry.id,
       office: typeof data.office === 'string' ? data.office : entry.id,
       status: data.status === 'unavailable' ? 'unavailable' : 'healthy',
-      message: data.status === 'unavailable' ? '暫時抓不到' : '',
+      message: data.status === 'unavailable' ? SOURCE_DOWN_EMPTY : '',
+      listUrl: typeof data.listUrl === 'string' ? data.listUrl : '',
     };
   });
 }
 
 async function fetchAssistantAnnouncements(schoolId, deps = {}) {
+  const school = schoolConfig(schoolId);
+  if (school && !isPublicAnnouncementSchool(school)) return [];
   const rows = await readSchoolRows(schoolId, ['announcements', 'announcements'], {
     order: ['publishedAt', 'desc'], limit: 20, requiredField: 'title', deps,
   });
   const sources = await fetchAnnouncementSources(schoolId, deps);
-  const hidden = new Set(sources.filter((item) => item.status === 'unavailable').map((item) => item.sourceId));
-  const announcements = rows.filter(
-    (row) => row.origin !== 'public_scrape' || !row.sourceId || !hidden.has(row.sourceId),
-  );
+  const announcements = rows.filter((row) => row.visible !== false);
   if (sources.length && sources.every((item) => item.status === 'unavailable') && announcements.length === 0) {
-    const error = new HttpsError('unavailable', '暫時抓不到');
+    const error = new HttpsError('unavailable', SOURCE_DOWN_EMPTY);
     error.details = { sources };
     throw error;
   }

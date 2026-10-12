@@ -304,7 +304,8 @@ it('offers useful account and notification next steps for a course-only account'
   state.nuni.session = { platformAccountId: 'pa_a', context: 'a', isPlatformOperator: false };
   render(<SettingsPage />);
   expect(screen.getByRole('heading', { name: '校園服務資料來源' })).toBeTruthy();
-  expect(screen.getByText(/靜宜大學。.*不代表你的帳號學籍或所屬學校/)).toBeTruthy();
+  expect(screen.getByText(/目前提供的是校園服務資料，不代表你的帳號學籍或所屬學校/)).toBeTruthy();
+  expect(screen.queryByText(/靜宜/)).toBeNull();
   expect(screen.queryByText('目前校園')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '帳號' }));
   expect(screen.getByText('Google 帳號已登入')).toBeTruthy();

@@ -11,6 +11,13 @@ export const ANNOUNCEMENT_CATEGORIES = [
 ] as const;
 export type PublicAnnouncementCategory = (typeof ANNOUNCEMENT_CATEGORIES)[number];
 export const SOURCE_UNAVAILABLE_TEXT = '暫時抓不到';
+export const SOURCE_DOWN_EMPTY_TEXT = '學校網站暫時連不上，可以先到學校網站看最新消息';
+export const SOURCE_DOWN_WITH_CACHE_TEXT = '學校網站暫時連不上';
+export const PLACEHOLDER_ANNOUNCEMENT_SCHOOL_IDS = [
+  'tw-demo-uni',
+  'tw-taichung-uni-a',
+  'tw-taichung-uni-b',
+] as const;
 export const SUMMARY_NOTICE = '摘要，全文見原文';
 export const LOGIN_PORTAL_HOSTS = ['alcat.pu.edu.tw', 'tronclass.com.tw', 'tronclass.pu.edu.tw'];
 export const ANNOUNCEMENT_PARSER_PRESETS = {
@@ -83,4 +90,76 @@ export function summarizeAnnouncement(text: string, max = 110): string {
     .trim();
   if (!compact) return '';
   return compact.length <= max ? compact : `${compact.slice(0, max).trim()}…`;
+}
+
+export function isPlaceholderAnnouncementSchool(input: {
+  schoolId?: string | null;
+  cms?: string | null;
+  demo?: boolean;
+}): boolean {
+  if (input.cms === 'none') return true;
+  const schoolId = (input.schoolId ?? '').trim();
+  return (
+    schoolId.length > 0 &&
+    (PLACEHOLDER_ANNOUNCEMENT_SCHOOL_IDS as readonly string[]).includes(schoolId)
+  );
+}
+
+export function isAnnouncementSchoolVisibleToPublic(
+  input: { schoolId?: string | null; cms?: string | null; demo?: boolean },
+  environment: string,
+): boolean {
+  return environment !== 'production' || !isPlaceholderAnnouncementSchool(input);
+}
+
+export function formatTaiwanMonthDayTime(value: Date | string | number): string | null {
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) return null;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Taipei',
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const read = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? '';
+  const month = Number(read('month'));
+  const day = Number(read('day'));
+  const hour = read('hour').padStart(2, '0');
+  const minute = read('minute').padStart(2, '0');
+  if (!month || !day || !hour || !minute) return null;
+  return `${month}/${day} ${hour}:${minute}`;
+}
+
+export function formatStaleAnnouncementNotice(
+  updatedAt?: Date | string | number | null,
+): string {
+  const stamp = updatedAt == null ? null : formatTaiwanMonthDayTime(updatedAt);
+  return stamp ? `最後更新 ${stamp}，學校網站暫時連不上` : SOURCE_DOWN_WITH_CACHE_TEXT;
+}
+
+export function latestAnnouncementStamp(
+  values: Array<string | undefined | null>,
+): string | undefined {
+  const dates = values
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+    .map((value) => new Date(value))
+    .filter((date) => Number.isFinite(date.getTime()))
+    .sort((left, right) => right.getTime() - left.getTime());
+  return dates[0]?.toISOString();
+}
+
+export function staleAnnouncementUpdatedAt(
+  sources: Array<{ status?: string; lastSuccessAt?: string | null }>,
+  announcements: Array<{ publishedAt?: string | null }>,
+): string | undefined {
+  return (
+    latestAnnouncementStamp(
+      sources
+        .filter((item) => item.status === 'unavailable')
+        .map((item) => item.lastSuccessAt),
+    ) ?? latestAnnouncementStamp(announcements.map((item) => item.publishedAt))
+  );
 }
