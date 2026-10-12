@@ -37,7 +37,7 @@ it('starts with school stops without requesting the user location', async () => 
   await screen.findByRole('button', { name: /01 靜宜大學/ });
   expect(queryTransit).toHaveBeenCalledWith({ action: 'campus', schoolId: 'pu' }, expect.any(AbortSignal));
   expect(locate).not.toHaveBeenCalled();
-  expect(screen.getAllByRole('button', { name: /收藏 靜宜大學/ })).toHaveLength(2);
+  expect(screen.getAllByRole('button', { name: /收藏\s*靜宜大學/ })).toHaveLength(2);
 });
 
 it('keeps school and manual search available when location permission is denied', async () => {
