@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import {
   PRICE_DISCLAIMER,
+  SHOWCASE_ORDER_BUTTON_TEXT,
   isMenuStale,
   studentCafeteriaAction,
 } from '@campus/shared/src/merchantMode';
@@ -387,7 +388,7 @@ function CafeteriaContent({
                     <Link
                       href={`/cafeteria/${encodeURIComponent(key)}/order?schoolId=${encodeURIComponent(schoolId)}`}
                     >
-                      去訂餐
+                      {SHOWCASE_ORDER_BUTTON_TEXT}
                     </Link>
                   )}
                 </p>

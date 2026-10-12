@@ -51,8 +51,27 @@ test('demo schools without a real site stay off the public production list', () 
   );
   const productionIds = listPublicSchools('production').map((item) => item.schoolId);
   expect(productionIds.some((id) => PLACEHOLDER_SCHOOL_IDS.includes(id))).toBe(false);
+  expect(listPublicSchools('').some((item) => PLACEHOLDER_SCHOOL_IDS.includes(item.schoolId))).toBe(
+    false,
+  );
+  expect(
+    listPublicSchools('staging').some((item) => PLACEHOLDER_SCHOOL_IDS.includes(item.schoolId)),
+  ).toBe(false);
+  const previousAppEnv = process.env.APP_ENV;
+  delete process.env.APP_ENV;
+  expect(listPublicSchools().some((item) => PLACEHOLDER_SCHOOL_IDS.includes(item.schoolId))).toBe(
+    false,
+  );
+  if (previousAppEnv == null) delete process.env.APP_ENV;
+  else process.env.APP_ENV = previousAppEnv;
   const developmentIds = listPublicSchools('development').map((item) => item.schoolId);
   expect(PLACEHOLDER_SCHOOL_IDS.every((id) => developmentIds.includes(id))).toBe(true);
+  expect(PLACEHOLDER_SCHOOL_IDS.every((id) => listPublicSchools('test').some((item) => item.schoolId === id))).toBe(
+    true,
+  );
+  expect(
+    PLACEHOLDER_SCHOOL_IDS.every((id) => listPublicSchools('preview').some((item) => item.schoolId === id)),
+  ).toBe(true);
   expect(formatCoverageTable()).toContain('正式環境不顯示給一般使用者');
   expect(formatCoverageTable()).toContain('暫時抓不到');
   expect(formatCoverageTable()).toContain('靜宜大學');

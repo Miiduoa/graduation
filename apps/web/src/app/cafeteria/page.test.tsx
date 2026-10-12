@@ -122,6 +122,38 @@ it('distinguishes unknown availability, paused supply and sold-out meals without
     '/cafeteria/stall',
   );
 });
+it('shows an outbound order link only when the shop has an https ordering URL', () => {
+  render(<CafeteriaPage />);
+  act(() => {
+    state.cafeterias[0].next([
+      {
+        id: 'linked',
+        name: '外連店',
+        merchantMode: 'showcase_link',
+        orderingUrl: 'https://shop.example/order',
+        location: '學生餐廳',
+        openingHours: '11:00–14:00',
+      },
+      {
+        id: 'info',
+        name: '只看資訊',
+        merchantMode: 'showcase_link',
+        location: '活動中心',
+        openingHours: '週一到週五',
+      },
+    ]);
+    state.menus[0].next([]);
+  });
+  const linked = within(screen.getByRole('region', { name: '外連店' }));
+  expect(linked.getByRole('link', { name: '到店家網站訂餐' }).getAttribute('href')).toContain(
+    '/cafeteria/linked/order',
+  );
+  expect(linked.queryByRole('link', { name: /點餐|下單/ })).toBeNull();
+  const info = within(screen.getByRole('region', { name: '只看資訊' }));
+  expect(info.queryByRole('link', { name: '到店家網站訂餐' })).toBeNull();
+  expect(info.getByText('位置：活動中心')).toBeTruthy();
+  expect(info.getByText('營業時間：週一到週五')).toBeTruthy();
+});
 it('exposes the selected restaurant and restores menus when clearing an empty search', () => {
   render(<CafeteriaPage />);
   receive();

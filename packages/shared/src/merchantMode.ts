@@ -5,8 +5,10 @@ export const PRICE_DISCLAIMER = '價格、是否賣完、是否接單以店家�
 export const EXTERNAL_ORDER_HONEST_TEXT =
   '訂單在店家系統，請到店家查看。我們沒有這筆的訂單號碼、餐點明細或付款狀態。';
 export const MENU_STALE_TEXT = '菜單可能過期，價格以店家頁面為準。';
-export const SHOWCASE_LEAVE_NOTICE =
-  '接下來會開啟店家網站點餐付款。除非店家已連結系統，否則訂單詳情要在店家那邊看。';
+export const SHOWCASE_ORDER_BUTTON_TEXT = '到店家網站訂餐';
+export const SHOWCASE_ORDER_CAPTION =
+  '會開啟店家自己的網站，訂單和付款由店家處理，Campus One 查不到這筆訂單';
+export const SHOWCASE_LEAVE_NOTICE = SHOWCASE_ORDER_CAPTION;
 export const NATIVE_ORDERING_CLOSED_TEXT = '這間店目前不能在 App 點餐';
 export const MENU_STALE_AFTER_HOURS = 24;
 
@@ -112,7 +114,7 @@ export function studentCafeteriaAction(input: {
 }): { kind: 'native' | 'showcase' | 'info' | 'native_closed'; label: string } {
   const mode = resolveStoredMerchantMode(input);
   if (mode === 'showcase_link' && isHttpsOrderingUrl(input.orderingUrl)) {
-    return { kind: 'showcase', label: '去訂餐' };
+    return { kind: 'showcase', label: SHOWCASE_ORDER_BUTTON_TEXT };
   }
   if (mode === 'native_order') {
     if (input.onlineOrderingEnabled === true && input.orderingEnabled === true) {

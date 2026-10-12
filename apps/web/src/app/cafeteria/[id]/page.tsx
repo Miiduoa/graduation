@@ -20,6 +20,8 @@ import {
 import {
   MENU_STALE_TEXT,
   PRICE_DISCLAIMER,
+  SHOWCASE_ORDER_BUTTON_TEXT,
+  SHOWCASE_ORDER_CAPTION,
   isMenuStale,
   studentCafeteriaAction,
 } from '@campus/shared/src/merchantMode';
@@ -102,7 +104,7 @@ export default function StorefrontPage(props: {
                   className="btn primary"
                   href={`/cafeteria/${encodeURIComponent(id)}/order?schoolId=${encodeURIComponent(context.schoolId)}`}
                 >
-                  去訂餐
+                  {SHOWCASE_ORDER_BUTTON_TEXT}
                 </Link>
               )}
               {action.kind === 'native_closed' && <p className={social.muted}>{action.label}</p>}
@@ -119,6 +121,9 @@ export default function StorefrontPage(props: {
                 </button>
               )}
             </div>
+            {action.kind === 'showcase' && (
+              <p className={social.muted}>{SHOWCASE_ORDER_CAPTION}</p>
+            )}
             <p className={social.muted}>{PRICE_DISCLAIMER}</p>
           </section>
           <section className={social.panel} aria-label="菜單">

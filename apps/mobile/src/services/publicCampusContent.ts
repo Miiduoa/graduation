@@ -17,7 +17,7 @@ import {
   isAnnouncementSchoolVisibleToPublic,
   SOURCE_DOWN_EMPTY_TEXT,
 } from '@campus/shared/src/campusAnnouncements';
-import { getReleaseConfig } from './release';
+import { getRawAppEnv } from './release';
 
 type SourceDocument = { id: string; data: () => Record<string, unknown> };
 
@@ -151,7 +151,7 @@ async function loadAnnouncementSources(schoolId: string): Promise<AnnouncementSo
 }
 
 export async function loadCampusAnnouncementFeed(schoolId: string): Promise<CampusAnnouncementFeed> {
-  if (!isAnnouncementSchoolVisibleToPublic({ schoolId }, getReleaseConfig().appEnv)) {
+  if (!isAnnouncementSchoolVisibleToPublic({ schoolId }, getRawAppEnv())) {
     return { announcements: [], sources: [], allUnavailable: false };
   }
   const announcements = await loadList(schoolId, 'announcements', announcement);

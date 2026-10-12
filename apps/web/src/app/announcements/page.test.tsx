@@ -332,8 +332,25 @@ it('links the office site when the school site is down and there is no cached co
   expect(screen.queryByText('暫時抓不到')).toBeNull();
 });
 
-it('hides cms-none demo schools from regular users in production', async () => {
-  vi.stubEnv('NEXT_PUBLIC_APP_ENV', 'production');
+it.each(['', 'staging', 'production'])(
+  'hides cms-none demo schools when NEXT_PUBLIC_APP_ENV is %s',
+  async (env) => {
+    vi.stubEnv('NEXT_PUBLIC_APP_ENV', env);
+    const params = Promise.resolve({ schoolId: 'tw-demo-uni' });
+    await act(async () => {
+      render(
+        <Suspense fallback={<p>載入學校</p>}>
+          <AnnouncementsPage searchParams={params} />
+        </Suspense>,
+      );
+    });
+    expect(screen.queryByText('示範大學')).toBeNull();
+    expect(screen.getByRole('heading', { name: '目前沒有公開公告' })).toBeTruthy();
+    expect(getDocsFromServer).not.toHaveBeenCalled();
+  },
+);
+
+it('hides cms-none demo schools when NEXT_PUBLIC_APP_ENV is unset', async () => {
   const params = Promise.resolve({ schoolId: 'tw-demo-uni' });
   await act(async () => {
     render(
@@ -347,19 +364,22 @@ it('hides cms-none demo schools from regular users in production', async () => {
   expect(getDocsFromServer).not.toHaveBeenCalled();
 });
 
-it('still shows cms-none demo schools in development', async () => {
-  vi.stubEnv('NEXT_PUBLIC_APP_ENV', 'development');
-  const params = Promise.resolve({ schoolId: 'tw-demo-uni' });
-  await act(async () => {
-    render(
-      <Suspense fallback={<p>載入學校</p>}>
-        <AnnouncementsPage searchParams={params} />
-      </Suspense>,
+it.each(['development', 'preview', 'test'])(
+  'shows cms-none demo schools when NEXT_PUBLIC_APP_ENV is %s',
+  async (env) => {
+    vi.stubEnv('NEXT_PUBLIC_APP_ENV', env);
+    const params = Promise.resolve({ schoolId: 'tw-demo-uni' });
+    await act(async () => {
+      render(
+        <Suspense fallback={<p>載入學校</p>}>
+          <AnnouncementsPage searchParams={params} />
+        </Suspense>,
+      );
+    });
+    await screen.findByText('校園公告實際內容');
+    expect(screen.getByText('示範大學')).toBeTruthy();
+    expect(getDocsFromServer).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'schools/tw-demo-uni/announcements' }),
     );
-  });
-  await screen.findByText('校園公告實際內容');
-  expect(screen.getByText('示範大學')).toBeTruthy();
-  expect(getDocsFromServer).toHaveBeenCalledWith(
-    expect.objectContaining({ path: 'schools/tw-demo-uni/announcements' }),
-  );
-});
+  },
+);

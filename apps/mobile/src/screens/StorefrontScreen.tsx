@@ -19,6 +19,8 @@ import {
 import {
   MENU_STALE_TEXT,
   PRICE_DISCLAIMER,
+  SHOWCASE_ORDER_BUTTON_TEXT,
+  SHOWCASE_ORDER_CAPTION,
   isMenuStale,
   studentCafeteriaAction,
 } from '@campus/shared/src/merchantMode';
@@ -81,7 +83,7 @@ export default function StorefrontScreen({ navigation, route }: Props) {
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
               {action.kind === 'showcase' && shop.orderingUrl ? (
                 <Button
-                  text="去訂餐"
+                  text={SHOWCASE_ORDER_BUTTON_TEXT}
                   onPress={() =>
                     navigation?.navigate?.('HonestOrder', { cafeteriaId, orderingUrl: shop.orderingUrl })
                   }
@@ -101,6 +103,9 @@ export default function StorefrontScreen({ navigation, route }: Props) {
                 />
               ) : null}
             </View>
+            {action.kind === 'showcase' && shop.orderingUrl ? (
+              <Text style={{ color: theme.colors.muted, lineHeight: 20 }}>{SHOWCASE_ORDER_CAPTION}</Text>
+            ) : null}
             {shop.websiteUrl ? (
               <Pressable onPress={() => void Linking.openURL(shop.websiteUrl!)}>
                 <Text style={{ color: theme.colors.accent }}>店家網站</Text>
