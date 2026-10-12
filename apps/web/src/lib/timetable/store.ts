@@ -22,134 +22,18 @@ import {
   periodAt,
   timetableIndex,
   type PersonalCourse,
-  type TimetableMeta,
 } from '@campus/shared';
 import { getAuth, getDb, getFunctionsInstance, isFirebaseConfigured } from '@/lib/firebase';
+import { emptyTimetable, type StoredTimetable } from './persistence';
 
-const LOCAL_KEY = 'campus-one-personal-timetable';
-
-export type StoredTimetable = {
-  courses: PersonalCourse[];
-  meta: TimetableMeta;
-  shareWithFriends: boolean;
-  updatedAt: string;
-  schoolId: string;
-};
-
-function emptyTimetable(schoolId: string): StoredTimetable {
-  return {
-    courses: [],
-    meta: cleanMeta({}),
-    shareWithFriends: true,
-    updatedAt: new Date().toISOString(),
-    schoolId,
-  };
-}
-
-function readLocal(ownerKey: string, schoolId: string): StoredTimetable {
-  try {
-    const raw = localStorage.getItem(`${LOCAL_KEY}:${ownerKey}`);
-    if (!raw) return emptyTimetable(schoolId);
-    const parsed = JSON.parse(raw) as StoredTimetable;
-    return {
-      ...emptyTimetable(schoolId),
-      ...parsed,
-      courses: cleanCourses(parsed.courses),
-      meta: cleanMeta(parsed.meta),
-      schoolId: parsed.schoolId || schoolId,
-    };
-  } catch {
-    return emptyTimetable(schoolId);
-  }
-}
-
-export const CLOUD_NEEDS_SCHOOL_COPY = '登入學校帳號後才能存到雲端';
-
-/** 本機那份已經寫好，只有雲端沒存成。 */
-export class TimetableCloudSaveError extends Error {
-  constructor(readonly reason: unknown) {
-    super('timetable-cloud-save-failed');
-    this.name = 'TimetableCloudSaveError';
-  }
-}
-
-function hasLocal(ownerKey: string): boolean {
-  try {
-    return !!localStorage.getItem(`${LOCAL_KEY}:${ownerKey}`);
-  } catch {
-    return false;
-  }
-}
-
-function savedAtMillis(value: unknown): number {
-  if (typeof value === 'string') return Date.parse(value) || 0;
-  if (value && typeof (value as { toMillis?: unknown }).toMillis === 'function') {
-    return (value as { toMillis: () => number }).toMillis();
-  }
-  return 0;
-}
-
-function writeLocal(ownerKey: string, timetable: StoredTimetable) {
-  localStorage.setItem(`${LOCAL_KEY}:${ownerKey}`, JSON.stringify(timetable));
-}
-
-export async function loadPersonalTimetable(
-  uid: string | null,
-  schoolId: string,
-): Promise<StoredTimetable> {
-  const ownerKey = uid || 'local';
-  if (!uid || !isFirebaseConfigured()) return readLocal(ownerKey, schoolId);
-  // 登入學校帳號前在這台瀏覽器排的課表，登入後先接著用，下次存檔就一起存到雲端
-  const local = hasLocal(uid) ? readLocal(uid, schoolId) : readLocal('local', schoolId);
-  let snap;
-  try {
-    snap = await getDoc(doc(getDb(), 'users', uid, 'personalTimetable', 'current'));
-  } catch {
-    return local;
-  }
-  if (!snap.exists()) return local;
-  const data = snap.data() as StoredTimetable & { updatedAt?: unknown };
-  // 上次雲端沒存成、只記在這台瀏覽器的那一版比較新，就用那一版，重新整理不會不見
-  if (local.courses.length && Date.parse(local.updatedAt) > savedAtMillis(data.updatedAt)) {
-    return local;
-  }
-  return {
-    ...emptyTimetable(schoolId),
-    ...data,
-    updatedAt: new Date(savedAtMillis(data.updatedAt) || Date.now()).toISOString(),
-    courses: cleanCourses(data.courses),
-    meta: cleanMeta(data.meta),
-    schoolId: data.schoolId || schoolId,
-  };
-}
-
-export async function savePersonalTimetable(
-  uid: string | null,
-  timetable: StoredTimetable,
-): Promise<{ stored: 'cloud' | 'local' }> {
-  const next = {
-    ...timetable,
-    courses: cleanCourses(timetable.courses),
-    meta: cleanMeta(timetable.meta),
-    updatedAt: new Date().toISOString(),
-  };
-  const ownerKey = uid || 'local';
-  writeLocal(ownerKey, next);
-  if (!uid || !isFirebaseConfigured() || getAuth()?.currentUser?.uid !== uid) {
-    return { stored: 'local' };
-  }
-  try {
-    await setDoc(doc(getDb(), 'users', uid, 'personalTimetable', 'current'), {
-      ...next,
-      // 送申訴時規則用這兩個清單確認課在自己的課表裡
-      ...timetableIndex(next.courses),
-      updatedAt: serverTimestamp(),
-    });
-  } catch (error) {
-    throw new TimetableCloudSaveError(error);
-  }
-  return { stored: 'cloud' };
-}
+export {
+  CLOUD_NEEDS_SCHOOL_COPY,
+  TimetableCloudSaveError,
+  loadPersonalTimetable,
+  savePersonalTimetable,
+  retryPersonalTimetableSync,
+  type StoredTimetable,
+} from './persistence';
 
 export async function loadFriendTimetable(friendUid: string): Promise<StoredTimetable | null> {
   if (!isFirebaseConfigured()) return null;
