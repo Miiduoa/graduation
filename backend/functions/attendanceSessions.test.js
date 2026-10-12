@@ -287,10 +287,98 @@ describe('live attendance session handlers', () => {
     expect(store.docs.get(path(session, 'liveSessions')).attendeeCount).toBe(1);
     expect(store.docs.get(path(session, 'attendanceSessions')).attendeeCount).toBe(1);
     time += 300_000;
-    await expect(handlers.joinLiveSession(sessionRequest(session))).rejects.toMatchObject({
-      code: 'deadline-exceeded',
+    await expect(handlers.joinLiveSession(sessionRequest(session))).resolves.toEqual({
+      ...first,
+      alreadyJoined: true,
     });
     expect(store.docs.get(path(session, 'attendanceSessions')).attendeeCount).toBe(1);
+  });
+
+  test('a lost receipt is recoverable after closing, without changing the record or either counter', async () => {
+    const session = await handlers.startLiveSession(startRequest());
+    const first = await handlers.joinLiveSession(sessionRequest(session));
+    await handlers.endLiveSession(sessionRequest(session, {}, 'teacher'));
+    time += 300_000;
+    const before = new Map(store.docs);
+    await expect(handlers.joinLiveSession(sessionRequest(session))).resolves.toEqual({
+      ...first,
+      alreadyJoined: true,
+    });
+    expect(store.docs).toEqual(before);
+  });
+
+  test.each(['inactive', 'deleted'])(
+    'a confirmed receipt remains inaccessible after membership becomes %s',
+    async (status) => {
+      const session = await handlers.startLiveSession(startRequest());
+      await handlers.joinLiveSession(sessionRequest(session));
+      time += 300_000;
+      store.docs.set('groups/class-1/members/student', { status, role: 'student' });
+      await expect(handlers.joinLiveSession(sessionRequest(session))).rejects.toMatchObject({
+        code: 'permission-denied',
+      });
+      expect(store.docs.get(path(session, 'attendanceSessions')).attendeeCount).toBe(1);
+    },
+  );
+
+  test('recovering a receipt still requires the matching private token and current membership', async () => {
+    const session = await handlers.startLiveSession(startRequest());
+    await handlers.joinLiveSession(sessionRequest(session));
+    time += 300_000;
+    await expect(
+      handlers.joinLiveSession(sessionRequest(session, { qrToken: 'wrong-token-long-enough' })),
+    ).rejects.toMatchObject({ code: 'permission-denied' });
+    store.docs.delete('groups/class-1/members/student');
+    await expect(handlers.joinLiveSession(sessionRequest(session))).rejects.toMatchObject({
+      code: 'permission-denied',
+    });
+  });
+
+  test('another active member cannot recover the first student receipt after expiry', async () => {
+    const session = await handlers.startLiveSession(startRequest());
+    await handlers.joinLiveSession(sessionRequest(session));
+    store.docs.set('groups/class-1/members/other-student', { status: 'active', role: 'student' });
+    time += 300_000;
+    await expect(
+      handlers.joinLiveSession(sessionRequest(session, { uid: 'student' }, 'other-student')),
+    ).rejects.toMatchObject({ code: 'deadline-exceeded' });
+    expect(store.docs.has(`${path(session, 'attendanceSessions')}/attendanceRecords/other-student`)).toBe(false);
+    expect(store.docs.get(path(session, 'attendanceSessions')).attendeeCount).toBe(1);
+  });
+
+  test.each([
+    { uid: 'other-student' },
+    { groupId: 'other-class' },
+    { sessionId: 'other-session' },
+    { status: 'absent', reviewedBy: 'teacher' },
+    { checkedInAt: null },
+  ])('does not return or overwrite a mismatched or teacher-adjusted receipt: %j', async (patch) => {
+    const session = await handlers.startLiveSession(startRequest());
+    await handlers.joinLiveSession(sessionRequest(session));
+    time += 300_000;
+    const recordPath = `${path(session, 'attendanceSessions')}/attendanceRecords/student`;
+    const adjusted = { ...store.docs.get(recordPath), ...patch };
+    store.docs.set(recordPath, adjusted);
+    await expect(handlers.joinLiveSession(sessionRequest(session))).rejects.toMatchObject({
+      code: 'failed-precondition',
+    });
+    expect(store.docs.get(recordPath)).toEqual(adjusted);
+    expect(store.docs.get(path(session, 'attendanceSessions')).attendeeCount).toBe(1);
+  });
+
+  test('a receipt cannot bypass missing canonical documents or private secrets', async () => {
+    const session = await handlers.startLiveSession(startRequest());
+    await handlers.joinLiveSession(sessionRequest(session));
+    time += 300_000;
+    for (const collection of ['liveSessions', 'attendanceSessions', 'liveSessionSecrets']) {
+      const documentPath = path(session, collection);
+      const original = store.docs.get(documentPath);
+      store.docs.delete(documentPath);
+      await expect(handlers.joinLiveSession(sessionRequest(session))).rejects.toMatchObject({
+        code: 'failed-precondition',
+      });
+      store.docs.set(documentPath, original);
+    }
   });
 
   test('joins after completion do not create records or change either counter', async () => {
