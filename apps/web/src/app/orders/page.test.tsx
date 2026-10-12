@@ -9,7 +9,15 @@ const state = vi.hoisted(() => ({
   paths: [] as string[],
 }));
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => ({ user: state.uid ? { uid: state.uid } : null, loading: false, error: null }) }));
-vi.mock('@/components/SiteShell', () => ({ SiteShell: ({ children }: { children: ReactNode }) => <main>{children}</main> }));
+vi.mock('@/components/SiteShell', () => ({
+  SiteShell: ({ children, title, subtitle }: { children: ReactNode; title?: string; subtitle?: string }) => (
+    <main>
+      {title && <h1>{title}</h1>}
+      {subtitle && <p>{subtitle}</p>}
+      {children}
+    </main>
+  ),
+}));
 vi.mock('@/lib/pageContext', () => ({ resolveSchoolPageContext: () => ({ schoolId: 'pu', schoolName: '靜宜大學', schoolCode: 'PU' }) }));
 vi.mock('@/lib/firebase', () => ({ getDb: () => ({}), isFirebaseConfigured: () => true }));
 vi.mock('firebase/firestore', () => ({
@@ -30,6 +38,7 @@ import OrdersPage from './page';
 
 const placed = { toDate: () => new Date('2026-10-13T04:05:00.000Z') };
 beforeEach(() => {
+  vi.unstubAllEnvs();
   state.uid = 'alice';
   state.paths = [];
   state.emitters = [];
@@ -61,17 +70,31 @@ it('店家給號碼或取消後即時更新', async () => {
   expect(screen.queryByText('號碼還沒拿到，請到櫃台確認。')).toBeNull();
 });
 
-it('沒登入：請先登入，不讀訂單', () => {
+it('沒登入、線上點餐還沒開：標題、副標題、內文都只寫「目前還不能線上點餐」，不叫人登入', () => {
   state.uid = null;
   render(<OrdersPage />);
-  expect(screen.getByRole('link', { name: '登入' }).getAttribute('href')).toBe('/login?returnUrl=%2Forders');
+  expect(screen.getAllByText('目前還不能線上點餐').length).toBeGreaterThanOrEqual(3);
+  expect(screen.queryByText('登入後查看訂單')).toBeNull();
+  expect(screen.queryByText(/會自動更新/)).toBeNull();
+  expect(screen.queryByRole('link', { name: '登入' })).toBeNull();
   expect(state.paths).toEqual([]);
 });
 
 it('沒有訂單、線上點餐還沒開：只寫「目前還不能線上點餐」，不叫學生去點餐', () => {
   state.rows = [];
   render(<OrdersPage />);
-  expect(screen.getByRole('heading', { name: '目前還不能線上點餐' })).toBeTruthy();
-  expect(screen.queryByText(/還沒有訂單|要點餐|餐廳/)).toBeNull();
+  expect(screen.getAllByRole('heading', { name: '目前還不能線上點餐' }).length).toBeGreaterThan(0);
+  expect(screen.queryByText(/還沒有訂單|要點餐|餐廳|會自動更新/)).toBeNull();
   expect(screen.queryByRole('link')).toBeNull();
+});
+
+it('線上點餐打開、沒登入：請先登入，不讀訂單', () => {
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'true');
+  state.uid = null;
+  render(<OrdersPage />);
+  expect(screen.getByRole('heading', { name: '我的訂單' })).toBeTruthy();
+  expect(screen.getByText('取餐號碼和訂單狀態以店家那邊為準，會自動更新。')).toBeTruthy();
+  expect(screen.getByText('登入後查看訂單')).toBeTruthy();
+  expect(screen.getByRole('link', { name: '登入' }).getAttribute('href')).toBe('/login?returnUrl=%2Forders');
+  expect(state.paths).toEqual([]);
 });
