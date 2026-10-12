@@ -1,0 +1,102 @@
+name: Transit runtime inspection
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [chore/transit-production-readiness]
+    paths: [.github/workflows/transit-runtime-inspect.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nuni-web-production-release
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 284ce4c3780090685fcd41ed03ab50fbc974f346
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '22'
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1
+      - name: Inspect existing app without deploying or disclosing credential values
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_NUNI_WEB_DEPLOY_TOKEN }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs/promises';
+          import {execFileSync} from 'node:child_process';
+          const app = 'nuni-web';
+          const origin = 'https://nuni.tw';
+          const expected = ['683e513be2d358','80e447b6140178'];
+          const keys = ['TDX_CLIENT_ID','TDX_CLIENT_SECRET'];
+          const marker = 'CAMPUS_TRANSIT_RUNTIME:';
+          const knownReasons = new Set(['tdx-not-configured','not-authorized','rate-limited','service-unavailable','network-unavailable','invalid-response','invalid-token-response','invalid-station-response','invalid-arrival-response','no-verified-campus-station','no-fresh-directional-arrival']);
+          const report = {checkedAt:new Date().toISOString(),app,origin,reviewedRevision:'284ce4c3780090685fcd41ed03ab50fbc974f346',deploymentPerformed:false,settingsChanged:false,credentialValuesExported:false,deployCredentialPresent:Boolean(process.env.FLY_API_TOKEN),platformAccess:false,secrets:null,machines:[],public:null};
+          await fs.mkdir('runtime-evidence',{recursive:true});
+          const cli = (args, timeout=30000) => execFileSync('flyctl',args,{encoding:'utf8',timeout,maxBuffer:1024*1024,stdio:['ignore','pipe','pipe']});
+          try {
+            if (process.env.FLY_API_TOKEN) {
+              let machines = [];
+              try {
+                const rows = JSON.parse(cli(['machine','list','--app',app,'--json']));
+                if (!Array.isArray(rows)) throw new Error('invalid-shape');
+                report.platformAccess = true;
+                report.expectedMachinesOnly = rows.length === expected.length && new Set(rows.map(r=>r.id)).size === expected.length && rows.every(r=>expected.includes(r.id)&&r.state==='started');
+                machines = report.expectedMachinesOnly ? rows : [];
+                report.machines = rows.filter(r=>expected.includes(r.id)).map(r=>({id:r.id,state:r.state,region:r.region,runtime:null}));
+              } catch { report.platformError = 'machine-read-unavailable'; }
+              try {
+                const parsed = JSON.parse(cli(['secrets','list','--app',app,'--json']));
+                const rows = Array.isArray(parsed) ? parsed : parsed.secrets;
+                if (!Array.isArray(rows)) throw new Error('invalid-shape');
+                report.secrets = Object.fromEntries(keys.map(key=>[key,rows.some(row=>(row.Name??row.name)===key)]));
+              } catch { report.secretMetadataError = 'secret-metadata-unavailable'; }
+              const source = await fs.readFile('deploy/web/transit-release-gate.mjs','utf8');
+              const moduleUrl = 'data:text/javascript;base64,' + Buffer.from(source).toString('base64');
+              const program = `const keys=${JSON.stringify(keys)};const present=Object.fromEntries(keys.map(k=>[k,Boolean(process.env[k]?.trim())]));const result={credentials:present,tdx:{attempted:false,ready:false,reason:'tdx-not-configured'}};if(keys.every(k=>present[k])){try{const m=await import(${JSON.stringify(moduleUrl)});const r=await m.probeTdx();result.tdx={attempted:true,ready:r.ready===true,stationCount:r.stationCount,directionVerified:r.directionVerified===true,sourceFreshnessVerified:r.sourceFreshnessVerified===true,countdownVerified:r.countdownVerified===true};}catch(e){const allowed=${JSON.stringify([...knownReasons])};result.tdx={attempted:true,ready:false,reason:allowed.includes(e?.message)?e.message:'transit-probe-failed'};}}console.log(${JSON.stringify(marker)}+JSON.stringify(result));`;
+              const command = "node --input-type=module -e '" + program.replaceAll("'", "'\\''") + "'";
+              for (const row of machines) {
+                const summary = report.machines.find(r=>r.id===row.id);
+                try {
+                  const stdout = cli(['ssh','console','--app',app,'--machine',row.id,'--quiet','--command',command],90000);
+                  const lines = stdout.split(/\r?\n/).filter(line=>line.startsWith(marker));
+                  if (lines.length !== 1) throw new Error('invalid-output');
+                  const value = JSON.parse(lines[0].slice(marker.length));
+                  if (!keys.every(key=>typeof value.credentials?.[key]==='boolean')) throw new Error('invalid-output');
+                  const tdx = value.tdx;
+                  summary.runtime = {checked:true,credentials:Object.fromEntries(keys.map(key=>[key,value.credentials[key]])),tdx:{attempted:tdx?.attempted===true,ready:tdx?.ready===true,reason:knownReasons.has(tdx?.reason)?tdx.reason:tdx?.ready===true?null:'transit-probe-failed',stationCount:Number.isInteger(tdx?.stationCount)?tdx.stationCount:null,directionVerified:tdx?.directionVerified===true,sourceFreshnessVerified:tdx?.sourceFreshnessVerified===true,countdownVerified:tdx?.countdownVerified===true}};
+                } catch { summary.runtime = {checked:false,reason:'ssh-or-runtime-inspection-unavailable'}; }
+              }
+            }
+            const request = async (path, query) => {
+              const response = await fetch(origin+path,{method:query?'POST':'GET',redirect:'error',cache:'no-store',credentials:'omit',signal:AbortSignal.timeout(15000),headers:{Accept:'application/json',...(query?{'Content-Type':'application/json',Origin:origin}:{})},...(query?{body:JSON.stringify(query)}:{})});
+              const isJson = response.headers.get('content-type')?.includes('application/json')===true;
+              let body = null;
+              if (isJson) {try {body = await response.json();} catch {}}
+              return {httpStatus:response.status,json:isJson,body};
+            };
+            const health = await request('/health/ready');
+            const campus = await request('/api/transit',{action:'campus',schoolId:'pu'});
+            report.public = {health:{httpStatus:health.httpStatus,ready:health.body?.status==='ready',revision:/^[a-f0-9]{40}$/.test(health.body?.revision??'')?health.body.revision:null},campus:{httpStatus:campus.httpStatus,json:campus.json,ready:campus.body?.status==='ready'&&campus.body?.kind==='stops',stationCount:Array.isArray(campus.body?.stops)?campus.body.stops.length:null,reason:['not-configured','invalid-query','rate-limited','upstream','network'].includes(campus.body?.reason)?campus.body.reason:null}};
+          } catch { report.inspectionError = 'inspection-incomplete'; }
+          report.runtimeTransitReady = report.expectedMachinesOnly===true && report.machines.length===expected.length && report.machines.every(row=>row.runtime?.tdx?.ready===true);
+          await fs.writeFile('runtime-evidence/inspection.json',JSON.stringify(report,null,2)+'\n');
+          console.log(JSON.stringify(report,null,2));
+          await fs.appendFile(process.env.GITHUB_STEP_SUMMARY,`## 公車伺服器唯讀檢查\n\n部署授權可讀取既有主機：${report.platformAccess}\n\nTDX runtime 通過：${report.runtimeTransitReady}\n\n公開查詢 HTTP：${report.public?.campus?.httpStatus??'unknown'}\n\n沒有部署、修改設定或輸出憑證值。流程完成不代表服務已上線。詳見 inspection.json。\n`);
+          NODE
+      - name: Preserve sanitized results only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: transit-runtime-${{ github.run_id }}-${{ github.run_attempt }}
+          path: runtime-evidence/inspection.json
+          retention-days: 7
+          if-no-files-found: error
