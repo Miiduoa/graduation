@@ -39,6 +39,10 @@ vi.mock('@/features/nuni/Session', () => ({
     throw new Error(path);
   }),
 }));
+vi.mock('@/lib/signInOptions', () => ({
+  useSignInOptions: () => ({ google: true, studentId: false, loading: false, retry: vi.fn() }),
+  STUDENT_ID_PREPARING_COPY: '學號登入還在準備，目前請用 Google 帳號登入',
+}));
 vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({ user: state.user, loading: false, signOutUser: state.signOut }),
 }));
@@ -307,6 +311,7 @@ it('offers useful account and notification next steps for a course-only account'
   expect(screen.getByRole('link', { name: '學校資格' }).getAttribute('href')).toBe(
     '/classroom/account',
   );
+  expect(screen.queryByRole('link', { name: '連線學校帳號' })).toBeNull();
   expect(screen.queryByText('訪客')).toBeNull();
   expect(screen.queryByLabelText('姓名')).toBeNull();
   expect(screen.queryByRole('button', { name: '儲存資料' })).toBeNull();

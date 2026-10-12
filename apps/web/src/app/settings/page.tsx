@@ -14,6 +14,7 @@ import { SiteShell } from '@/components/SiteShell';
 import { NuniAccountPanel } from '@/components/NuniAccountPanel';
 import { useNuniSession } from '@/features/nuni/Session';
 import { useToast } from '@/components/ui';
+import { useSignInOptions } from '@/lib/signInOptions';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import {
   getAuth,
@@ -186,6 +187,7 @@ function SettingsContent({
 }) {
   const { signOutUser } = useAuth();
   const nuni = useNuniSession();
+  const schoolLoginReady = useSignInOptions().studentId;
   const mounted = useRef(true);
   const profileLock = useRef(false);
   const notificationLock = useRef(false);
@@ -540,13 +542,15 @@ function SettingsContent({
               </Link>
             </section>
           )}
-          <section className={styles.notice}>
-            <h3>學校通知</h3>
-            <p>連線學校帳號後，可以調整學校公告、成績與校園訊息的通知偏好。</p>
-            <Link href="/login?reconnect=school&returnUrl=%2Fsettings" className="btn">
-              連線學校帳號
-            </Link>
-          </section>
+          {schoolLoginReady ? (
+            <section className={styles.notice}>
+              <h3>學校通知</h3>
+              <p>連線學校帳號後，可以調整學校公告、成績與校園訊息的通知偏好。</p>
+              <Link href="/login?reconnect=school&returnUrl=%2Fsettings" className="btn">
+                連線學校帳號
+              </Link>
+            </section>
+          ) : null}
         </div>
       );
     const notificationRows: Array<{
@@ -879,15 +883,17 @@ function SettingsContent({
               </Link>
             </section>
           )}
-          <section className={styles.notice}>
-            <h3>校園個人資料</h3>
-            <p>
-              學校帳號尚未連線。連線後可查看與編輯校園個人資料；填寫學號或系所不會取得學校權限。
-            </p>
-            <Link href="/login?reconnect=school&returnUrl=%2Fsettings" className="btn">
-              連線學校帳號
-            </Link>
-          </section>
+          {schoolLoginReady ? (
+            <section className={styles.notice}>
+              <h3>校園個人資料</h3>
+              <p>
+                學校帳號尚未連線。連線後可查看與編輯校園個人資料；填寫學號或系所不會取得學校權限。
+              </p>
+              <Link href="/login?reconnect=school&returnUrl=%2Fsettings" className="btn">
+                連線學校帳號
+              </Link>
+            </section>
+          ) : null}
           {logoutControl}
         </div>
       );

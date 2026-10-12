@@ -65,6 +65,8 @@ function readLocal(ownerKey: string, schoolId: string): StoredTimetable {
 
 export const CLOUD_NEEDS_SCHOOL_COPY = '登入學校帳號後才能存到雲端';
 export const CLOUD_NOT_READY_COPY = '這個功能還沒接通，雲端備份先不用。';
+export const TIMETABLE_DEVICE_ONLY_SUBMIT_COPY = '存在這台裝置';
+export const TIMETABLE_DEVICE_ONLY_STORED_COPY = '已存在這台裝置，換手機或清除瀏覽器資料就會不見';
 
 /** 本機那份已經寫好，只有雲端沒存成。 */
 export class TimetableCloudSaveError extends Error {
@@ -136,20 +138,8 @@ export async function savePersonalTimetable(
   };
   const ownerKey = uid || 'local';
   writeLocal(ownerKey, next);
-  if (!uid || !isFirebaseConfigured() || getAuth()?.currentUser?.uid !== uid) {
-    return { stored: 'local' };
-  }
-  try {
-    await setDoc(doc(getDb(), 'users', uid, 'personalTimetable', 'current'), {
-      ...next,
-      // 送申訴時規則用這兩個清單確認課在自己的課表裡
-      ...timetableIndex(next.courses),
-      updatedAt: serverTimestamp(),
-    });
-  } catch (error) {
-    throw new TimetableCloudSaveError(error);
-  }
-  return { stored: 'cloud' };
+  // 課表匯入與本機整理目前只留在這台裝置，不送到雲端。
+  return { stored: 'local' };
 }
 
 export async function loadFriendTimetable(friendUid: string): Promise<StoredTimetable | null> {

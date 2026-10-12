@@ -299,12 +299,7 @@ function AssistantRoute() {
 
 export default function AssistantPage() {
   return (
-    <SiteShell
-      title="校園助理"
-      subtitle="從一個問題開始，找到需要的資訊。"
-      schoolName={school.schoolName}
-      schoolCode={school.schoolCode}
-    >
+    <SiteShell title="助理" subtitle="從一個問題開始，找到需要的資訊。">
       <Suspense fallback={<p role="status">載入中…</p>}>
         <AssistantRoute />
       </Suspense>

@@ -72,6 +72,7 @@ it('shows each school qualification from the authenticated account without grant
   expect(screen.queryByText('server-verified-evidence')).toBeNull();
   expect(screen.queryByRole('button', { name: /加入|授權|教師|學生/ })).toBeNull();
   expect(screen.getByRole('link', { name: '店家合作' }).getAttribute('href')).toBe('/merchant');
+  expect(screen.queryByText(/連線學校帳號/)).toBeNull();
   expect(await screen.findByRole('heading', { name: '我的身分' })).toBeTruthy();
   expect(await screen.findByText(IDENTITY_NO_TEACHING_COPY)).toBeTruthy();
 });

@@ -43,7 +43,7 @@ export function NuniAccountPanel() {
       <p className={styles.label}>我的帳號</p>
       <h2>Google 帳號已登入</h2>
       <p>你可以開啟已加入的課程。老師、協同教師或學生身分依各課程的成員資格決定。</p>
-      <p>學校資格、課程成員與店家權限分別確認；校務課表與正式成績需要另外連線學校帳號。</p>
+      <p>學校資格、課程成員與店家權限分別確認。校務課表與正式成績還沒接通。</p>
       <div className={styles.actions}>
         <Link className="btn primary" href="/classroom">
           查看我的課程

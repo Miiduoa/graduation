@@ -38,8 +38,9 @@ import {
   loadFriendTimetable,
   loadPersonalTimetable,
   savePersonalTimetable,
-  CLOUD_NEEDS_SCHOOL_COPY,
   CLOUD_NOT_READY_COPY,
+  TIMETABLE_DEVICE_ONLY_STORED_COPY,
+  TIMETABLE_DEVICE_ONLY_SUBMIT_COPY,
   TimetableCloudSaveError,
   type StoredTimetable,
 } from '@/lib/timetable/store';
@@ -163,21 +164,20 @@ export function PersonalTimetable() {
     await loadInvites();
   };
 
-  const persist = async (next: StoredTimetable, message: string) => {
+  const persist = async (
+    next: StoredTimetable,
+    message: string,
+    options?: { deviceOnly?: boolean },
+  ) => {
     setBusy(true);
     try {
-      const saved = await savePersonalTimetable(uid, { ...next, schoolId });
+      await savePersonalTimetable(uid, { ...next, schoolId });
       setTimetable({ ...next, schoolId });
-      setNotice(
-        saved.stored === 'cloud'
-          ? message
-          : `已記在這台瀏覽器。${uid ? `${CLOUD_NEEDS_SCHOOL_COPY}。` : CLOUD_NOT_READY_COPY}${message}`,
-      );
+      setNotice(options?.deviceOnly ? TIMETABLE_DEVICE_ONLY_STORED_COPY : message);
     } catch (error) {
       if (error instanceof TimetableCloudSaveError) {
-        // 本機那份已經寫好，重新整理會讀到這一版，不會不見
         setTimetable({ ...next, schoolId });
-        setNotice(`已記在這台瀏覽器，雲端這次沒存成，下次存檔會再送一次。${message}`);
+        setNotice(options?.deviceOnly ? TIMETABLE_DEVICE_ONLY_STORED_COPY : message);
       } else {
         setNotice('這次沒有存成。課表還停在你看到的這一版，請稍後再試。');
       }
@@ -243,10 +243,9 @@ export function PersonalTimetable() {
 
   const confirmImport = async () => {
     const next = applyImport(timetable.courses, analyzed, importMode);
-    await persist(
-      { ...timetable, courses: next },
-      `已匯入 ${analyzed.filter((item) => item.selected !== false).length} 門課。`,
-    );
+    await persist({ ...timetable, courses: next }, TIMETABLE_DEVICE_ONLY_STORED_COPY, {
+      deviceOnly: true,
+    });
     setDrafts([]);
     setImportText('');
   };
@@ -370,9 +369,8 @@ export function PersonalTimetable() {
         </section>
       )}
       <p className={styles.notice}>
-        {uid
-          ? '這份課表存在你的學校帳號。學校選課紀錄要經過確認才會覆蓋。'
-          : `課表先記在這台瀏覽器，重新整理不會不見。${CLOUD_NOT_READY_COPY}`}
+        {TIMETABLE_DEVICE_ONLY_STORED_COPY}
+        {uid ? '' : ` ${CLOUD_NOT_READY_COPY}`}
       </p>
       {uid ? (
         <label className={styles.field}>
@@ -600,7 +598,7 @@ export function PersonalTimetable() {
               disabled={busy}
               onClick={() => void confirmImport()}
             >
-              確認匯入
+              {TIMETABLE_DEVICE_ONLY_SUBMIT_COPY}
             </button>
           </div>
         )}

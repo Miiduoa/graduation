@@ -16,7 +16,7 @@ export default function TeacherCoursePage(props: {
 }) {
   const { courseId } = use(props.params);
   const searchParams = props.searchParams ? use(props.searchParams) : undefined;
-  const { schoolId, schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
+  const { schoolId, schoolSearch: q } = resolveSchoolPageContext(searchParams);
   const { state, refresh, authLoading, signedIn } = useTeacherCourse(
     schoolId,
     courseId,
@@ -30,7 +30,6 @@ export default function TeacherCoursePage(props: {
     <SiteShell
       title={workspace?.course.name ?? '課程工作台'}
       subtitle="查看課程教材、作業與成績，接續課堂點名。"
-      schoolName={`${schoolName} · 教學工作台`}
     >
       {authLoading ? (
         <p role="status">確認登入狀態…</p>

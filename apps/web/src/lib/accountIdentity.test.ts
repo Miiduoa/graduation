@@ -1,7 +1,10 @@
 import { expect, it, vi } from 'vitest';
 import {
+  IDENTITY_LOOKUP_FAILED_COPY,
+  IDENTITY_LOOKUP_FAILED_HINT,
   IDENTITY_NO_MERCHANT_COPY,
   IDENTITY_NO_TEACHING_COPY,
+  IDENTITY_RETRY_COPY,
   STORE_NOT_OPEN_COPY,
   loadAccountIdentity,
   merchantLocationOpen,
@@ -100,6 +103,9 @@ it('does not treat a failed lookup as an empty identity', async () => {
   expect(identity.applications).toEqual({ status: 'ok', items: [] });
   expect(IDENTITY_NO_TEACHING_COPY).toContain('沒有授課課程');
   expect(IDENTITY_NO_MERCHANT_COPY).toContain('店家申請');
+  expect(IDENTITY_LOOKUP_FAILED_COPY).toBe('暫時查不到你的老師或店家身分');
+  expect(IDENTITY_LOOKUP_FAILED_HINT).toBe('不影響一般功能，請稍後再試一次');
+  expect(IDENTITY_RETRY_COPY).toBe('再試一次');
 });
 
 it('only calls a store open when the backend says it is open', () => {
