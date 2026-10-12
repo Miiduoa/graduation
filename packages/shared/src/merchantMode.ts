@@ -36,6 +36,38 @@ export function isHttpsOrderingUrl(value: unknown): value is string {
   }
 }
 
+export const STOREFRONT_URL_MAX_LENGTH = 500;
+export const STOREFRONT_URL_HTTPS_TEXT = '請貼 https:// 開頭的網址';
+export const STOREFRONT_URL_CREDENTIALS_TEXT = '網址裡不能有帳號或密碼';
+export const STOREFRONT_URL_TOO_LONG_TEXT = '網址太長，請改用店家網站首頁或訂餐頁的網址';
+
+export function trimStorefrontUrl(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+/** 畫面用：先去掉前後空白再檢查。空白本身不報錯；空字串表示沒填。 */
+export function storefrontUrlIssue(value: unknown): string | null {
+  const trimmed = trimStorefrontUrl(value);
+  if (!trimmed) return null;
+  if (trimmed.length > STOREFRONT_URL_MAX_LENGTH) return STOREFRONT_URL_TOO_LONG_TEXT;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== 'https:') return STOREFRONT_URL_HTTPS_TEXT;
+    if (url.username || url.password) return STOREFRONT_URL_CREDENTIALS_TEXT;
+    return null;
+  } catch {
+    return STOREFRONT_URL_HTTPS_TEXT;
+  }
+}
+
+/** 後端／規則用：帶空白的值直接擋，不先 trim。空字串可以。 */
+export function isStoredStorefrontUrlAllowed(value: unknown): boolean {
+  if (value == null || value === '') return true;
+  if (typeof value !== 'string') return false;
+  if (value !== value.trim() || /\s/.test(value)) return false;
+  return storefrontUrlIssue(value) === null;
+}
+
 export function buildShowcaseOrderingUrl(
   orderingUrl: string,
   schoolId: string,

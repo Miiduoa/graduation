@@ -14,6 +14,8 @@ import {
 import { getDb, isFirebaseMockMode } from '../firebase';
 import {
   isHttpsOrderingUrl,
+  storefrontUrlIssue,
+  trimStorefrontUrl,
   resolveStoredMerchantMode,
   type MerchantMode,
 } from '@campus/shared/src/merchantMode';
@@ -196,8 +198,12 @@ export async function saveShopStorefront(input: {
   const openingHours = input.storefront.openingHours.trim().slice(0, 120);
   const intro = input.storefront.intro.trim().slice(0, 500);
   const location = input.storefront.location.trim().slice(0, 120);
-  const websiteUrl = input.storefront.websiteUrl.trim();
-  const orderingUrl = input.storefront.orderingUrl.trim();
+  const websiteUrl = trimStorefrontUrl(input.storefront.websiteUrl);
+  const orderingUrl = trimStorefrontUrl(input.storefront.orderingUrl);
+  const websiteIssue = storefrontUrlIssue(input.storefront.websiteUrl);
+  const orderingIssue = storefrontUrlIssue(input.storefront.orderingUrl);
+  if (websiteIssue) throw new Error(websiteIssue);
+  if (orderingIssue) throw new Error(orderingIssue);
   const merchantMode =
     input.storefront.merchantMode === 'native_order'
       ? 'native_order'

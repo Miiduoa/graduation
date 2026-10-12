@@ -11,6 +11,7 @@ import {
   query,
   serverTimestamp,
   setDoc,
+  updateDoc,
 } from 'firebase/firestore';
 import { getDb, isFirebaseConfigured, type Cafeteria } from '@/lib/firebase';
 import {
@@ -18,6 +19,8 @@ import {
   buildShowcaseOrderingUrl,
   isHttpsOrderingUrl,
   resolveStoredMerchantMode,
+  storefrontUrlIssue,
+  trimStorefrontUrl,
 } from '@campus/shared/src/merchantMode';
 
 export type StorefrontPost = {
@@ -194,6 +197,43 @@ export async function recordExternalOrderClick(input: {
     },
   );
   return tagged;
+}
+
+export async function saveShopStorefront(input: {
+  schoolId: string;
+  cafeteriaId: string;
+  websiteUrl?: string;
+  orderingUrl?: string;
+  intro?: string;
+  location?: string;
+  openingHours?: string;
+  merchantMode?: 'showcase_link' | 'info_only' | 'native_order';
+}) {
+  const websiteUrl = trimStorefrontUrl(input.websiteUrl);
+  const orderingUrl = trimStorefrontUrl(input.orderingUrl);
+  const websiteIssue = storefrontUrlIssue(input.websiteUrl);
+  const orderingIssue = storefrontUrlIssue(input.orderingUrl);
+  if (websiteIssue) throw new Error(websiteIssue);
+  if (orderingIssue) throw new Error(orderingIssue);
+  if (!isFirebaseConfigured() || !input.cafeteriaId || input.cafeteriaId.includes('/')) {
+    throw new Error('暫時無法寫入店面。');
+  }
+  await updateDoc(doc(getDb(), ...cafeteriaPath(input.schoolId, input.cafeteriaId)), {
+    websiteUrl: websiteUrl && isHttpsOrderingUrl(websiteUrl) ? websiteUrl : '',
+    orderingUrl: orderingUrl && isHttpsOrderingUrl(orderingUrl) ? orderingUrl : '',
+    intro: typeof input.intro === 'string' ? input.intro.trim().slice(0, 500) : '',
+    location: typeof input.location === 'string' ? input.location.trim().slice(0, 120) : '',
+    openingHours: typeof input.openingHours === 'string' ? input.openingHours.trim().slice(0, 120) : '',
+    merchantMode:
+      input.merchantMode === 'showcase_link' && isHttpsOrderingUrl(orderingUrl)
+        ? 'showcase_link'
+        : input.merchantMode === 'native_order'
+          ? 'native_order'
+          : 'info_only',
+    updatedAt: serverTimestamp(),
+    sourceLabel: 'shop-dock',
+  });
+  return { websiteUrl, orderingUrl };
 }
 
 export function honestExternalCopy() {

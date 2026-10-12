@@ -12,6 +12,11 @@ const {
   EXTERNAL_ORDER_HONEST_TEXT,
   SHOWCASE_ORDER_BUTTON_TEXT,
   SHOWCASE_ORDER_CAPTION,
+  storefrontUrlIssue,
+  isStoredStorefrontUrlAllowed,
+  STOREFRONT_URL_HTTPS_TEXT,
+  STOREFRONT_URL_CREDENTIALS_TEXT,
+  STOREFRONT_URL_TOO_LONG_TEXT,
 } = require('./lib/merchantMode');
 const { isOnlineOrderingEnabled } = require('./lib/onlineOrdering');
 
@@ -65,6 +70,23 @@ test('showcase stores use outbound-order copy and stay info-only without an http
       openingHours: '11:00–14:00',
     }),
   ).toEqual({ kind: 'info', label: '查看店面' });
+});
+
+test('storefront URL editor trims spaces and explains https, credentials and length failures', () => {
+  expect(storefrontUrlIssue('  https://shop.example/order  ')).toBeNull();
+  expect(storefrontUrlIssue('')).toBeNull();
+  expect(storefrontUrlIssue('http://shop.example')).toBe(STOREFRONT_URL_HTTPS_TEXT);
+  expect(storefrontUrlIssue('https://user:pass@shop.example/order')).toBe(
+    STOREFRONT_URL_CREDENTIALS_TEXT,
+  );
+  expect(storefrontUrlIssue(`https://shop.example/${'a'.repeat(500)}`)).toBe(
+    STOREFRONT_URL_TOO_LONG_TEXT,
+  );
+  expect(isStoredStorefrontUrlAllowed('https://shop.example/order')).toBe(true);
+  expect(isStoredStorefrontUrlAllowed('')).toBe(true);
+  expect(isStoredStorefrontUrlAllowed(' https://shop.example/order')).toBe(false);
+  expect(isStoredStorefrontUrlAllowed('https://shop.example/order ')).toBe(false);
+  expect(isStoredStorefrontUrlAllowed('https://shop.example/path with space')).toBe(false);
 });
 
 test('CSV menus and stale hints stay honest', () => {
