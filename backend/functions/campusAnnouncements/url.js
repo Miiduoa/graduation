@@ -1,6 +1,6 @@
 'use strict';
 
-const crypto = require('node:crypto');
+const nodeCrypto = require('node:crypto');
 
 const LOGIN_PORTAL_HOSTS = ['alcat.pu.edu.tw', 'tronclass.com.tw', 'tronclass.pu.edu.tw'];
 
@@ -48,8 +48,7 @@ function isLoginPortalUrl(value) {
 }
 
 function announcementDocId(schoolId, originalUrl) {
-  const digest = crypto
-    .createHash('sha256')
+  const digest = nodeCrypto.createHash('sha256')
     .update(`${schoolId}:${normalizeAnnouncementUrl(originalUrl)}`)
     .digest('hex')
     .slice(0, 32);
@@ -90,8 +89,7 @@ function htmlFingerprint(html) {
     .toLowerCase()
     .replace(/<script[\s\S]*?<\/script>/g, '')
     .match(/<\/?[a-z0-9]+/g);
-  return crypto
-    .createHash('sha256')
+  return nodeCrypto.createHash('sha256')
     .update((tags || []).slice(0, 400).join(','))
     .digest('hex')
     .slice(0, 24);
