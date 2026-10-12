@@ -34,10 +34,10 @@ it('starts with school stops without requesting the user location', async () => 
   const locate = vi.fn();
   vi.stubGlobal('navigator', { onLine: true, geolocation: { getCurrentPosition: locate } });
   renderExplorer();
-  await screen.findByRole('button', { name: /01 靜宜大學/ });
+  await screen.findByText(/站牌代碼 TXG001/);
   expect(queryTransit).toHaveBeenCalledWith({ action: 'campus', schoolId: 'pu' }, expect.any(AbortSignal));
   expect(locate).not.toHaveBeenCalled();
-  expect(screen.getByRole('button', { name: /02 靜宜大學/ })).toBeTruthy();
+  expect(screen.getByText(/站牌代碼 TXG002/)).toBeTruthy();
 });
 
 it('keeps school and manual search available when location permission is denied', async () => {
@@ -48,7 +48,7 @@ it('keeps school and manual search available when location permission is denied'
   fireEvent.click(screen.getByRole('button', { name: '使用我的位置' }));
   expect(await screen.findByText(/你尚未允許定位/)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '學校站牌' }));
-  await screen.findByRole('button', { name: /01 靜宜大學/ });
+  await screen.findByText(/站牌代碼 TXG001/);
   expect(screen.getByRole('button', { name: '搜尋站名' })).toBeTruthy();
 });
 
