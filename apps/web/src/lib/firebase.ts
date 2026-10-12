@@ -51,7 +51,7 @@ import {
   connectFunctionsEmulator,
   type Functions,
 } from 'firebase/functions';
-import { normalizeFunctionsBaseUrl, resolveFunctionsHttpUrl } from './functionsUrl';
+import { getCloudFunctionUrl as resolveCloudFunctionUrl, getFunctionsBaseUrl } from './cloudFunctions';
 import {
   findUniversalDevAccountByEmail,
   buildGroupCollectionPath,
@@ -177,29 +177,12 @@ export function getAuth(): Auth | null {
   return auth;
 }
 
-export function getFunctionsBaseUrl(): string | null {
-  if (USE_FIREBASE_EMULATOR) return null;
-  return normalizeFunctionsBaseUrl(process.env.NEXT_PUBLIC_FUNCTIONS_BASE_URL);
-}
+export { getFunctionsBaseUrl };
 
 export function getCloudFunctionUrl(functionName: string): string {
-  if (USE_FIREBASE_EMULATOR) {
-    return resolveFunctionsHttpUrl({
-      functionName,
-      projectId: firebaseConfig.projectId,
-      region: process.env.NEXT_PUBLIC_CLOUD_FUNCTION_REGION || 'asia-east1',
-      emulator: {
-        host: EMULATOR_HOST,
-        port: EMULATOR_FUNCTIONS_PORT,
-        projectId: firebaseConfig.projectId,
-      },
-    });
-  }
-  return resolveFunctionsHttpUrl({
-    functionName,
+  return resolveCloudFunctionUrl(functionName, {
     projectId: firebaseConfig.projectId,
     region: process.env.NEXT_PUBLIC_CLOUD_FUNCTION_REGION || 'asia-east1',
-    baseUrl: getFunctionsBaseUrl(),
   });
 }
 

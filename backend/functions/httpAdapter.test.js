@@ -2,7 +2,12 @@
 
 const http = require('node:http');
 const { HttpsError } = require('firebase-functions/v2/https');
-const { createRequestListener } = require('./httpAdapter');
+const {
+  applyCorsHeaders,
+  createRequestListener,
+  isAllowedOrigin,
+  resolveAllowedOrigins,
+} = require('./httpAdapter');
 
 function listen(listener) {
   return new Promise((resolve, reject) => {
@@ -157,5 +162,63 @@ describe('callable HTTP adapter', () => {
     const res = await request(port, { method: 'GET', path: '/healthz' });
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ ok: true });
+  });
+
+  test('requests without Origin do not get a wildcard CORS allow', async () => {
+    const res = await request(port, {
+      method: 'POST',
+      path: '/joinLiveSession',
+      body: { data: {} },
+      headers: { Authorization: 'Bearer valid-token' },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers['access-control-allow-origin']).toBeUndefined();
+  });
+
+  test('disallowed Origin is not reflected', async () => {
+    const res = await request(port, {
+      method: 'POST',
+      path: '/joinLiveSession',
+      body: { data: {} },
+      headers: { Authorization: 'Bearer valid-token', Origin: 'https://evil.example' },
+    });
+    expect(res.headers['access-control-allow-origin']).toBeUndefined();
+  });
+});
+
+describe('httpAdapter CORS allowlist', () => {
+  const ORIGINAL_ENV = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+  });
+
+  test('missing Origin is not treated as allowed', () => {
+    expect(isAllowedOrigin('', ['https://nuni.tw'])).toBe(false);
+    expect(isAllowedOrigin(undefined, ['https://nuni.tw'])).toBe(false);
+  });
+
+  test('production defaults exclude localhost', () => {
+    process.env.APP_ENV = 'production';
+    delete process.env.ALLOWED_WEB_ORIGINS;
+    expect(resolveAllowedOrigins()).toEqual(['https://nuni.tw', 'https://www.nuni.tw']);
+    expect(isAllowedOrigin('http://localhost:3000')).toBe(false);
+  });
+
+  test('non-production defaults include localhost', () => {
+    process.env.APP_ENV = 'development';
+    delete process.env.ALLOWED_WEB_ORIGINS;
+    expect(resolveAllowedOrigins()).toEqual(
+      expect.arrayContaining(['https://nuni.tw', 'http://localhost:3000', 'http://127.0.0.1:3000']),
+    );
+  });
+
+  test('applyCorsHeaders never writes a wildcard', () => {
+    const headers = {};
+    const res = { setHeader: (name, value) => { headers[name] = value; } };
+    applyCorsHeaders({ headers: {} }, res, ['https://nuni.tw']);
+    expect(headers['Access-Control-Allow-Origin']).toBeUndefined();
+    applyCorsHeaders({ headers: { origin: 'https://nuni.tw' } }, res, ['https://nuni.tw']);
+    expect(headers['Access-Control-Allow-Origin']).toBe('https://nuni.tw');
   });
 });

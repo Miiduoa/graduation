@@ -80,8 +80,7 @@ for (const [failure, stages, hasPreflight] of [
   ['credential-exchange', ['preflight'], false],
   ['preflight', ['preflight'], true],
   ['indexes', ['preflight', 'rules', 'indexes'], true],
-  ['functions', ['preflight', 'rules', 'indexes', 'functions'], true],
-  ['', ['preflight', 'rules', 'indexes', 'functions'], true],
+  ['', ['preflight', 'rules', 'indexes'], true],
 ]) {
   test(`deployment evidence survives ${failure || 'success'} without exposing credentials`, (t) => {
     const { cwd, bin } = fixture(t);
@@ -150,6 +149,13 @@ for (const [failure, stages, hasPreflight] of [
     }
   });
 }
+
+test('Spark production job deploys rules and indexes only, never Cloud Functions', () => {
+  assert.equal(deploy.run.includes('deploy --only functions'), false);
+  assert.ok(deploy.run.includes('firestore:rules,storage,firestore:indexes'));
+  assert.ok(deploy.run.includes('docs/deploy/functions-on-fly.md'));
+  assert.equal(job.if.includes('workflow_dispatch'), true);
+});
 
 test('both successful and failed attempts retain versioned reports without weakening the gate', () => {
   assert.equal(record.if, 'always()');

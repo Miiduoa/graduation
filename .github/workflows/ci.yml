@@ -440,9 +440,11 @@ jobs:
             exit 1
           fi
           node scripts/firebase-release-preflight.cjs --project "$FIREBASE_PROJECT_ID" --storage-bucket campus-one-tw.firebasestorage.app --auth-domain nuni.tw --database-location nam5 --output firebase-preflight.json
+          # campus-one-tw 是 Spark，不能佈署 Cloud Functions。
+          # HTTP callable / 排程 / Firestore onSnapshot 跑在 Fly（docs/deploy/functions-on-fly.md）。
+          # 這裡只佈署規則、索引與 Storage。
           pnpm -w firebase deploy --only firestore:rules,storage,firestore:indexes --project "$FIREBASE_PROJECT_ID" --non-interactive
           node scripts/wait-for-firestore-indexes.cjs --project "$FIREBASE_PROJECT_ID" --timeout-seconds 1200
-          pnpm -w firebase deploy --only functions --project "$FIREBASE_PROJECT_ID" --non-interactive
 
       - name: Record Firebase deployment outcome
         if: always()
@@ -461,7 +463,7 @@ jobs:
             project: process.env.FIREBASE_PROJECT_ID || null,
             deploymentStepOutcome: process.env.DEPLOYMENT_OUTCOME || 'not-run',
             preflightReceiptAvailable: fs.existsSync('firebase-preflight.json'),
-            scope: 'Firebase deployment attempt only; application flows require separate verification.',
+            scope: 'Firebase rules/indexes/storage only; Cloud Functions run on Fly, not Spark.',
           };
           fs.writeFileSync('firebase-deployment-outcome.json', `${JSON.stringify(receipt, null, 2)}\n`);
           NODE
