@@ -57,10 +57,10 @@ beforeEach(() => {
   account.user = { uid: 'alice' };
   account.loading = false;
   vi.mocked(isFirebaseConfigured).mockReturnValue(true);
-  vi.mocked(getDocsFromServer).mockImplementation(async (input: { path?: string }) => {
+  vi.mocked(getDocsFromServer).mockImplementation((async (input: { path?: string }) => {
     if (String(input?.path || '').includes('announcement-sources')) return snapshot();
     return snapshot(announcementDocument('校園公告實際內容'));
-  });
+  }) as never);
   window.history.replaceState({}, '', '/announcements');
 });
 
@@ -271,7 +271,7 @@ it('copies the real announcement detail link only after the clipboard operation 
 });
 
 it('hides scrape rows from dead sources and labels them as temporarily unavailable', async () => {
-  vi.mocked(getDocsFromServer).mockImplementation(async (input: { path?: string }) => {
+  vi.mocked(getDocsFromServer).mockImplementation((async (input: { path?: string }) => {
     if (String(input?.path || '').includes('announcement-sources')) {
       return {
         empty: false,
@@ -286,7 +286,7 @@ it('hides scrape rows from dead sources and labels them as temporarily unavailab
     return snapshot(
       announcementDocument('過期稿', { origin: 'public_scrape', sourceId: 'pu-acd' }),
     );
-  });
+  }) as never);
   render(<AnnouncementsPage />);
   expect(await screen.findByRole('heading', { name: '暫時抓不到' })).toBeTruthy();
   expect(screen.queryByText('過期稿')).toBeNull();
