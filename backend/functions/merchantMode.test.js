@@ -57,6 +57,26 @@ test('shared storefront URL check rejects javascript, userinfo, overlong, spaces
   expect(safeStorefrontUrl('https://shop.example/order')).toBe('https://shop.example/order');
 });
 
+test('NUL and uppercase HTTPS have the same result in save, display and stored checks', () => {
+  const nul = 'https://shop.example/order\u0000';
+  const upper = 'HTTPS://shop.example/order';
+  expect(isHttpsOrderingUrl(nul)).toBe(false);
+  expect(isStoredStorefrontUrlAllowed(nul)).toBe(false);
+  expect(safeStorefrontUrl(nul)).toBeUndefined();
+  expect(storefrontUrlIssue(nul)).toBe(STOREFRONT_URL_HTTPS_TEXT);
+  expect(studentCafeteriaAction({ merchantMode: 'showcase_link', orderingUrl: nul }).kind).toBe(
+    'info',
+  );
+  expect(isHttpsOrderingUrl(upper)).toBe(true);
+  expect(isStoredStorefrontUrlAllowed(upper)).toBe(true);
+  expect(safeStorefrontUrl(upper)).toBe(upper);
+  expect(storefrontUrlIssue(upper)).toBeNull();
+  expect(studentCafeteriaAction({ merchantMode: 'showcase_link', orderingUrl: upper })).toEqual({
+    kind: 'showcase',
+    label: SHOWCASE_ORDER_BUTTON_TEXT,
+  });
+});
+
 test('missing merchantMode stays native when the shop already takes orders', () => {
   expect(resolveStoredMerchantMode({ orderingEnabled: true })).toBe('native_order');
   expect(

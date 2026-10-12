@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render } from '@testing-library/react-native';
+import { act, fireEvent, render, within } from '@testing-library/react-native';
 import { saveShopStorefront } from '../services/shopCatalog';
 
 jest.mock('../state/auth', () => ({
@@ -71,15 +71,16 @@ test('外連與網站網址先去掉前後空白再存，不報錯', async () =>
   expect(view.getByText('店面資料已更新。')).toBeTruthy();
 });
 
-test('不是 https 的網址不能存，畫面寫原因', async () => {
+test('不是 https 的網址不能存，錯誤出現在店家網站欄位下', async () => {
   const view = await openHours();
   fireEvent.changeText(view.getByPlaceholderText('店家網站（https）'), 'http://shop.example');
   fireEvent.press(view.getByText('儲存店面'));
   expect(saveShopStorefront).not.toHaveBeenCalled();
-  expect(view.getByText('請貼 https:// 開頭的網址')).toBeTruthy();
+  expect(within(view.getByTestId('website-field')).getByText('請貼 https:// 開頭的網址')).toBeTruthy();
+  expect(within(view.getByTestId('ordering-field')).queryByText('請貼 https:// 開頭的網址')).toBeNull();
 });
 
-test('帶帳密的網址不能存，畫面寫原因', async () => {
+test('帶帳密的網址不能存，錯誤出現在外連欄位下', async () => {
   const view = await openHours();
   fireEvent.changeText(
     view.getByPlaceholderText('外連訂餐網址（https，選填）'),
@@ -87,26 +88,27 @@ test('帶帳密的網址不能存，畫面寫原因', async () => {
   );
   fireEvent.press(view.getByText('儲存店面'));
   expect(saveShopStorefront).not.toHaveBeenCalled();
-  expect(view.getByText('網址裡不能有帳號或密碼')).toBeTruthy();
+  expect(within(view.getByTestId('ordering-field')).getByText('網址裡不能有帳號或密碼')).toBeTruthy();
+  expect(within(view.getByTestId('website-field')).queryByText('網址裡不能有帳號或密碼')).toBeNull();
 });
 
-test('javascript、帳號網址和 data 都不能存', async () => {
+test('javascript、帳號網址和 data 都不能存，錯誤在店家網站欄位下', async () => {
   const view = await openHours();
   fireEvent.changeText(view.getByPlaceholderText('店家網站（https）'), 'javascript:alert(1)');
   fireEvent.press(view.getByText('儲存店面'));
   expect(saveShopStorefront).not.toHaveBeenCalled();
-  expect(view.getByText('請貼 https:// 開頭的網址')).toBeTruthy();
+  expect(within(view.getByTestId('website-field')).getByText('請貼 https:// 開頭的網址')).toBeTruthy();
   fireEvent.changeText(view.getByPlaceholderText('店家網站（https）'), 'https://a@evil.com');
   fireEvent.press(view.getByText('儲存店面'));
   expect(saveShopStorefront).not.toHaveBeenCalled();
-  expect(view.getByText('網址裡不能有帳號或密碼')).toBeTruthy();
+  expect(within(view.getByTestId('website-field')).getByText('網址裡不能有帳號或密碼')).toBeTruthy();
   fireEvent.changeText(view.getByPlaceholderText('店家網站（https）'), 'data:text/html,hi');
   fireEvent.press(view.getByText('儲存店面'));
   expect(saveShopStorefront).not.toHaveBeenCalled();
-  expect(view.getByText('請貼 https:// 開頭的網址')).toBeTruthy();
+  expect(within(view.getByTestId('website-field')).getByText('請貼 https:// 開頭的網址')).toBeTruthy();
 });
 
-test('太長的網址不能存，畫面寫原因', async () => {
+test('太長的網址不能存，錯誤出現在店家網站欄位下', async () => {
   const view = await openHours();
   fireEvent.changeText(
     view.getByPlaceholderText('店家網站（https）'),
@@ -114,5 +116,22 @@ test('太長的網址不能存，畫面寫原因', async () => {
   );
   fireEvent.press(view.getByText('儲存店面'));
   expect(saveShopStorefront).not.toHaveBeenCalled();
-  expect(view.getByText('網址太長，請改用店家網站首頁或訂餐頁的網址')).toBeTruthy();
+  expect(
+    within(view.getByTestId('website-field')).getByText('網址太長，請改用店家網站首頁或訂餐頁的網址'),
+  ).toBeTruthy();
+});
+
+test('大寫 HTTPS 可以存，NUL 的錯誤在該欄位下', async () => {
+  const view = await openHours();
+  fireEvent.changeText(view.getByPlaceholderText('店家網站（https）'), 'HTTPS://shop.example');
+  fireEvent.press(view.getByText('儲存店面'));
+  expect(saveShopStorefront).toHaveBeenCalled();
+  expect(within(view.getByTestId('website-field')).queryByText('請貼 https:// 開頭的網址')).toBeNull();
+  jest.mocked(saveShopStorefront).mockClear();
+  fireEvent.changeText(view.getByPlaceholderText('店家網站（https）'), 'https://shop.example/\u0000');
+  fireEvent.press(view.getByText('儲存店面'));
+  expect(saveShopStorefront).not.toHaveBeenCalled();
+  expect(
+    within(view.getByTestId('website-field')).getByText('請貼 https:// 開頭的網址'),
+  ).toBeTruthy();
 });
