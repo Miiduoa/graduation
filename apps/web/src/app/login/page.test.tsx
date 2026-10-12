@@ -108,7 +108,7 @@ it.each([
     state.user = null;
     state.params = new URLSearchParams({ returnUrl: destination });
     render(<LoginPage />);
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('登入 Campus One');
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('登入');
     expect(screen.getByTestId('platform-sign-in').getAttribute('data-return-url')).toBe(
       destination,
     );

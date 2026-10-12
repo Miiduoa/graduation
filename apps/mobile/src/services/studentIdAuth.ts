@@ -414,7 +414,7 @@ export async function signInWithStudentId(params: {
   onProgress?: OnLoginProgress;
 }): Promise<StudentIdLoginResult> {
   if (!isStudentIdLoginAvailable(params.schoolId)) {
-    throw new Error('這所學校的帳號連線尚未開放。公開資訊與 Campus One 帳號仍可使用。');
+    throw new Error('這所學校的帳號連線尚未開放。公開資訊與 Google 帳號仍可使用。');
   }
   const studentId = params.studentId.trim();
   const progress = params.onProgress ?? (() => {});
@@ -527,7 +527,7 @@ async function handleBackendLoginSuccess(
   console.log(`[studentIdAuth] Seeded ${seededCount}/4 data types from backend`);
 
   // ── 建立帳號（先存 auth session，讓使用者立刻看到登入成功）──
-  progress('linking', '建立 Campus One 帳號');
+  progress('linking', '連上學校帳號');
 
   const email = `${studentId.toLowerCase()}@pu.edu.tw`;
   const uid = `pu-${studentId.toLowerCase()}`;
@@ -775,7 +775,7 @@ async function handleHybridLogin(
   }
 
   // ── Step 3: 建立帳號 ──
-  progress('linking', '建立 Campus One 帳號');
+  progress('linking', '連上學校帳號');
 
   const email = `${realStudentId.toLowerCase()}@pu.edu.tw`;
   const uid = `pu-${realStudentId.toLowerCase()}`;

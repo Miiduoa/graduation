@@ -542,9 +542,9 @@ function SettingsContent({
           )}
           <section className={styles.notice}>
             <h3>學校通知</h3>
-            <p>連線校園帳號後，可以調整學校公告、成績與校園訊息的通知偏好。</p>
+            <p>連線學校帳號後，可以調整學校公告、成績與校園訊息的通知偏好。</p>
             <Link href="/login?reconnect=school&returnUrl=%2Fsettings" className="btn">
-              連線校園帳號
+              連線學校帳號
             </Link>
           </section>
         </div>
@@ -563,8 +563,8 @@ function SettingsContent({
     ];
     return (
       <div className={styles.stack}>
-        <SectionHeading title="校園帳號通知">
-          選擇要接收的內容，儲存到目前的校園帳號。這些設定不會變更課程空間的通知。
+        <SectionHeading title="學校帳號通知">
+          選擇要接收的內容，儲存到目前的學校帳號。這些設定不會變更課程空間的通知。
         </SectionHeading>
         {!user && (
           <div className={styles.notice}>
@@ -851,7 +851,7 @@ function SettingsContent({
       <div className={styles.signOut}>
         <div>
           <h3>登出此瀏覽器</h3>
-          <p>結束目前的課程空間與校園帳號登入。</p>
+          <p>結束目前的課程空間與學校帳號登入。</p>
         </div>
         <button
           type="button"
@@ -867,7 +867,7 @@ function SettingsContent({
       return (
         <div className={styles.stack}>
           <SectionHeading title="帳號設定">
-            查看課程與校園帳號，管理此瀏覽器的登入狀態。
+            查看課程與學校帳號，管理此瀏覽器的登入狀態。
           </SectionHeading>
           <NuniAccountPanel />
           {!nuni.loading && !nuni.pendingLogout && !nuni.error && !nuni.session && (
@@ -882,10 +882,10 @@ function SettingsContent({
           <section className={styles.notice}>
             <h3>校園個人資料</h3>
             <p>
-              校園帳號尚未連線。連線後可查看與編輯校園個人資料；填寫學號或系所不會取得學校權限。
+              學校帳號尚未連線。連線後可查看與編輯校園個人資料；填寫學號或系所不會取得學校權限。
             </p>
             <Link href="/login?reconnect=school&returnUrl=%2Fsettings" className="btn">
-              連線校園帳號
+              連線學校帳號
             </Link>
           </section>
           {logoutControl}
@@ -899,13 +899,13 @@ function SettingsContent({
         : providerIds.some((provider) => provider.startsWith('saml.'))
           ? '學校單一登入'
           : user
-            ? '已登入校園帳號'
+            ? '已登入學校帳號'
             : '尚未登入';
     return (
       <div className={styles.stack}>
         <SectionHeading title="帳號設定">更新個人資料，管理此瀏覽器的登入狀態。</SectionHeading>
         <NuniAccountPanel />
-        <h3 className={styles.groupHeading}>校園帳號個人資料</h3>
+        <h3 className={styles.groupHeading}>學校帳號個人資料</h3>
         <div className={styles.identity}>
           <span className={styles.avatar} aria-hidden="true">
             {user ? Array.from(currentDisplayName)[0] : '—'}

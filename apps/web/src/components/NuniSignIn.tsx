@@ -30,7 +30,7 @@ export function NuniSignIn({
       ? '登入後確認管理權限，再回到管理台。'
       : taskPath.startsWith('/classroom/course/')
         ? '登入後回到這門課，繼續查看或繳交作業。'
-        : '使用 Campus One 帳號，繼續課程、作業與公開看板。';
+        : '使用 Google 帳號，繼續課程、作業與公開看板。';
   useEffect(() => {
     const restore = () => {
       submitting.current = false;
@@ -59,9 +59,9 @@ export function NuniSignIn({
 
   return (
     <section className={styles.loginHelp} aria-labelledby="platform-sign-in-title">
-      <h2 id="platform-sign-in-title">登入或建立 Campus One 帳號</h2>
+      <h2 id="platform-sign-in-title">用 Google 帳號登入</h2>
       <p>{purpose}</p>
-      <p>這是獨立的平台帳號，不需要先登入學校，也不要求學號或學校信箱。</p>
+      <p>不需要先登入學校，也不要求學號或學校信箱。</p>
       <p>
         第一次使用？透過 Google 繼續即可建立帳號，不必另外設定密碼。之後請使用同一個 Google
         帳號登入。
@@ -85,7 +85,7 @@ export function NuniSignIn({
         </div>
       ) : auth.session ? (
         <>
-          <p>你已登入 Campus One 帳號。</p>
+          <p>你已登入 Google 帳號。</p>
           <Link className="btn primary" href={destination}>
             繼續使用
           </Link>

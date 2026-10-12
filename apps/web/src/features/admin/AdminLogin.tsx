@@ -138,7 +138,7 @@ function LoginForm({ onAuthenticated }: { onAuthenticated: () => Promise<void> }
       </form>
       <aside className={common.loginHelp}>
         <h2>已有 Google 管理員帳號</h2>
-        <p>使用 Campus One 帳號登入，登入後會確認平台管理權限並返回管理台。</p>
+        <p>使用 Google 帳號登入，登入後會確認平台管理權限並返回管理台。</p>
         <Link className={styles.link} href="/classroom/login?returnUrl=%2Fadmin">
           使用 Google 登入
         </Link>

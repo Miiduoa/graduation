@@ -69,7 +69,7 @@ it('clears visible school account data and ignores an old response after account
   state.uid = null;
   view.rerender(<HomePage />);
   expect(screen.queryByText('Bob course')).toBeNull();
-  expect(screen.getByRole('link', { name: /登入 Campus One 帳號/ })).toBeTruthy();
+  expect(screen.getByRole('link', { name: /用 Google 帳號登入/ })).toBeTruthy();
 });
 it('does not report an empty course list as success after a failed load', async () => {
   vi.mocked(loadHomeData).mockRejectedValue(new Error('permission-denied'));
@@ -98,7 +98,7 @@ it('uses the Nuni account for home and links directly to pending work with its a
   const taskLink = await screen.findByRole('link', { name: /查看並繳交作業/ });
   expect(taskLink.getAttribute('href')).toBe('/classroom/course/design#assignment-draft');
   expect(loadHomeData).not.toHaveBeenCalled();
-  expect(screen.queryByRole('link', { name: /登入 Campus One 帳號/ })).toBeNull();
+  expect(screen.queryByRole('link', { name: /用 Google 帳號登入/ })).toBeNull();
   expect(screen.getAllByText('已過參考期限・仍可繳交')).toHaveLength(2);
   expect(screen.getAllByText(/1\/2 20:30/)).toHaveLength(2);
 });
@@ -191,7 +191,7 @@ it('keeps public campus entries usable when the course session is unavailable', 
   expect(screen.getByRole('link', { name: /公開公告/ }).getAttribute('href')).toBe(
     '/announcements',
   );
-  expect(screen.queryByRole('link', { name: /登入 Campus One 帳號/ })).toBeNull();
+  expect(screen.queryByRole('link', { name: /用 Google 帳號登入/ })).toBeNull();
 });
 
 it('lets a guest browse before signing in and never loads personal courses', () => {

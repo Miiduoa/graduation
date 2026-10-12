@@ -179,7 +179,7 @@ test.each([{ loading: true }, { pendingLogout: true }, { error: '無法確認帳
     mockAuth = { ...mockAuth, ...change };
     view.rerender(<NuniMerchant />);
     expect(view.queryByText('我的申請')).toBeNull();
-    expect(view.getByText('請先確認 Campus One 帳號狀態。')).toBeTruthy();
+    expect(view.getByText('請先確認 Google 帳號狀態。')).toBeTruthy();
   },
 );
 

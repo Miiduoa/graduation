@@ -119,12 +119,12 @@ function LoginForm({
   return (
     <SiteShell
       title={
-        reconnect && user ? '重新連線學校帳號' : schoolRequired ? '連線學校帳號' : '登入 Campus One'
+        reconnect && user ? '重新連線學校帳號' : schoolRequired ? '連線學校帳號' : '登入'
       }
       subtitle={
         schoolRequired
           ? '驗證學校帳號後，返回你原本的頁面。'
-          : '不需學校帳號也能使用。需要課程、交流或店家服務時，再登入 Campus One。'
+          : '不登入也能看校園資訊。需要課程、交流或店家服務時，用 Google 帳號登入；課表、成績和申訴用學校帳號登入。'
       }
     >
       <section className={styles.guestAccess} aria-labelledby="guest-access-title">
@@ -157,14 +157,14 @@ function LoginForm({
             }}
           />
         )}
-        <section className={styles.loginHelp} aria-label="學校校務登入">
-          <h2>學校校務資料</h2>
-          <p>讀取個人課表、成績、校務紀錄與既有地圖收藏時使用。目前支援靜宜大學 e 校園帳號。</p>
+        <section className={styles.loginHelp} aria-label="學校帳號登入">
+          <h2>學校帳號</h2>
+          <p>讀取個人課表、成績、校務紀錄與既有地圖收藏時使用。目前支援靜宜大學，用 e 校園的學號和密碼登入。</p>
           {schoolRequired && (
             <p>
               {publicDestination
                 ? '你選擇的個人功能仍使用學校帳號；瀏覽校園資訊不需登入。'
-                : '你要開啟的頁面需要學校帳號，Google 登入不會自動取得校務權限。'}
+                : '你要開啟的頁面要用學校帳號登入，Google 帳號不會自動取得校務權限。'}
             </p>
           )}
           {schoolAvailable ? (
@@ -228,7 +228,7 @@ function LoginForm({
           </div>
           {schoolRequired && (
             <Link href="/login" className={styles.backLink}>
-              改用課程與跨校交流
+              改用 Google 帳號登入
             </Link>
           )}
           <Link href="/" className={styles.backLink}>
@@ -256,7 +256,7 @@ export default function LoginPage() {
   return (
     <Suspense
       fallback={
-        <SiteShell title="登入 Campus One">
+        <SiteShell title="登入">
           <p role="status" className={styles.loading}>
             正在載入登入表單…
           </p>
