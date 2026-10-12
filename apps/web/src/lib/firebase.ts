@@ -51,6 +51,7 @@ import {
   connectFunctionsEmulator,
   type Functions,
 } from 'firebase/functions';
+import { normalizeFunctionsBaseUrl, resolveFunctionsHttpUrl } from './functionsUrl';
 import {
   findUniversalDevAccountByEmail,
   buildGroupCollectionPath,
@@ -176,14 +177,45 @@ export function getAuth(): Auth | null {
   return auth;
 }
 
+export function getFunctionsBaseUrl(): string | null {
+  if (USE_FIREBASE_EMULATOR) return null;
+  return normalizeFunctionsBaseUrl(process.env.NEXT_PUBLIC_FUNCTIONS_BASE_URL);
+}
+
+export function getCloudFunctionUrl(functionName: string): string {
+  if (USE_FIREBASE_EMULATOR) {
+    return resolveFunctionsHttpUrl({
+      functionName,
+      projectId: firebaseConfig.projectId,
+      region: process.env.NEXT_PUBLIC_CLOUD_FUNCTION_REGION || 'asia-east1',
+      emulator: {
+        host: EMULATOR_HOST,
+        port: EMULATOR_FUNCTIONS_PORT,
+        projectId: firebaseConfig.projectId,
+      },
+    });
+  }
+  return resolveFunctionsHttpUrl({
+    functionName,
+    projectId: firebaseConfig.projectId,
+    region: process.env.NEXT_PUBLIC_CLOUD_FUNCTION_REGION || 'asia-east1',
+    baseUrl: getFunctionsBaseUrl(),
+  });
+}
+
 export function getFunctionsInstance(): Functions {
   if (typeof window === "undefined") {
     throw new Error("Firebase Functions can only be used in the browser.");
   }
 
   if (!functionsInstance) {
-    const region = process.env.NEXT_PUBLIC_CLOUD_FUNCTION_REGION || "asia-east1";
-    functionsInstance = getFunctions(getApp(), region);
+    const customDomain = getFunctionsBaseUrl();
+    if (customDomain) {
+      functionsInstance = getFunctions(getApp(), customDomain);
+    } else {
+      const region = process.env.NEXT_PUBLIC_CLOUD_FUNCTION_REGION || "asia-east1";
+      functionsInstance = getFunctions(getApp(), region);
+    }
   }
   if (USE_FIREBASE_EMULATOR && !_emulatorWired.functions) {
     try {
@@ -397,15 +429,6 @@ export function getCurrentUser(): User | null {
 }
 
 export { onAuthStateChanged };
-
-function getCloudFunctionUrl(functionName: string): string {
-  if (!firebaseConfig.projectId) {
-    throw new Error('Firebase projectId is missing. Check your web environment variables.');
-  }
-
-  const region = process.env.NEXT_PUBLIC_CLOUD_FUNCTION_REGION || 'asia-east1';
-  return `https://${region}-${firebaseConfig.projectId}.cloudfunctions.net/${functionName}`;
-}
 
 function parseDocument<T extends { id: string }>(docSnap: {
   id: string;

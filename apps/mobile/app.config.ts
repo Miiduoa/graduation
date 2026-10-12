@@ -348,6 +348,11 @@ export default ({ config }: any) => {
       errorReportingEndpoint,
       firebase,
       cloudFunctionRegion: process.env.EXPO_PUBLIC_CLOUD_FUNCTION_REGION ?? 'asia-east1',
+      functionsBaseUrl: process.env.EXPO_PUBLIC_FUNCTIONS_BASE_URL ?? '',
+      cloudFunctionBaseUrl:
+        process.env.EXPO_PUBLIC_CLOUD_FUNCTION_BASE_URL ??
+        process.env.EXPO_PUBLIC_FUNCTIONS_BASE_URL ??
+        '',
       // Release builds must always use the backend proxy. Local Ollama/offline AI is only
       // for development, training, and evaluation; it cannot be an App Store dependency.
       aiProvider: releaseAiProvider,

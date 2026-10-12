@@ -9,6 +9,7 @@ type CloudFunctionConfig = {
   firebase?: { projectId?: string };
   cloudFunctionRegion?: string;
   cloudFunctionBaseUrl?: string;
+  functionsBaseUrl?: string;
   useCloudFunctionEmulator?: boolean | string;
 };
 
@@ -52,11 +53,16 @@ function getEmulatorHost(): string {
 export function getCloudFunctionBaseUrl(): string {
   const extra = getExpoExtra();
   const configuredBaseUrl = String(
-    extra.cloudFunctionBaseUrl ?? process.env.EXPO_PUBLIC_CLOUD_FUNCTION_BASE_URL ?? '',
+    extra.functionsBaseUrl ??
+      process.env.EXPO_PUBLIC_FUNCTIONS_BASE_URL ??
+      extra.cloudFunctionBaseUrl ??
+      process.env.EXPO_PUBLIC_CLOUD_FUNCTION_BASE_URL ??
+      '',
   ).trim();
 
   if (configuredBaseUrl) {
-    return trimTrailingSlash(configuredBaseUrl);
+    const trimmed = trimTrailingSlash(configuredBaseUrl);
+    return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
   }
 
   const projectId = getProjectId(extra);
