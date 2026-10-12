@@ -142,4 +142,35 @@ test('storefront URLs trim surrounding spaces and reject unsafe values before sa
       },
     }),
   ).rejects.toThrow('請貼 https:// 開頭的網址');
+  const savedUpper = await saveShopStorefront({
+    schoolId: 'pu',
+    cafeteriaId: 'cafe-1',
+    storefront: {
+      openingHours: '',
+      intro: '',
+      location: '',
+      websiteUrl: 'HTTPS://shop.example',
+      orderingUrl: 'HTTPS://shop.example/order',
+      merchantMode: 'showcase_link',
+    },
+  });
+  expect(savedUpper.stored).toBe('local');
+  await expect(loadShopStorefront('pu', 'cafe-1')).resolves.toMatchObject({
+    websiteUrl: 'HTTPS://shop.example',
+    orderingUrl: 'HTTPS://shop.example/order',
+  });
+  await expect(
+    saveShopStorefront({
+      schoolId: 'pu',
+      cafeteriaId: 'cafe-1',
+      storefront: {
+        openingHours: '',
+        intro: '',
+        location: '',
+        websiteUrl: 'https://shop.example/\u0000',
+        orderingUrl: '',
+        merchantMode: 'info_only',
+      },
+    }),
+  ).rejects.toThrow('請貼 https:// 開頭的網址');
 });

@@ -68,8 +68,9 @@ service cloud.firestore {
       return value is string
         && value.size() > 0
         && value.size() <= 2048
-        && value.matches('^https://[^\\s]+$')
-        && !value.matches('^https://[^/]*@.*');
+        && value.matches('^[Hh][Tt][Tt][Pp][Ss]://[^\\s]+$')
+        && !value.matches('^[Hh][Tt][Tt][Pp][Ss]://[^/]*@.*')
+        && !value.matches('.*\\p{Cc}.*');
     }
 
     function isOptionalStorefrontUrl(value) {

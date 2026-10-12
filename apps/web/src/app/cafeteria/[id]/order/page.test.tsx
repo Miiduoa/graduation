@@ -69,6 +69,7 @@ it('does not put an outbound button on javascript, userinfo, overlong, padded, h
     'https://shop.example/order ',
     'http://shop.example/order',
     'data:text/html,hi',
+    'https://shop.example/order\u0000',
   ];
   for (const orderingUrl of unsafe) {
     state.shop = {
@@ -91,4 +92,24 @@ it('does not put an outbound button on javascript, userinfo, overlong, padded, h
     expect(screen.queryByRole('link', { name: '到店家網站訂餐' })).toBeNull();
     view.unmount();
   }
+});
+
+it('keeps an outbound button for uppercase HTTPS', async () => {
+  state.shop = {
+    id: 'stall',
+    name: '校內咖啡店',
+    merchantMode: 'showcase_link',
+    orderingUrl: 'HTTPS://shop.example/order',
+  };
+  await act(async () => {
+    render(
+      <Suspense fallback={<p>載入訂餐</p>}>
+        <HonestOrderPage
+          params={Promise.resolve({ id: 'stall' })}
+          searchParams={Promise.resolve({ schoolId: 'pu' })}
+        />
+      </Suspense>,
+    );
+  });
+  expect(await screen.findByRole('link', { name: '到店家網站訂餐' })).toBeTruthy();
 });

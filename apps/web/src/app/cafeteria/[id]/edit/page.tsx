@@ -25,6 +25,8 @@ export default function ShopStorefrontEditPage(props: {
   const [merchantMode, setMerchantMode] = useState<'showcase_link' | 'info_only'>('info_only');
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
+  const [websiteError, setWebsiteError] = useState('');
+  const [orderingError, setOrderingError] = useState('');
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -50,8 +52,9 @@ export default function ShopStorefrontEditPage(props: {
     event.preventDefault();
     const websiteIssue = storefrontUrlIssue(websiteUrl);
     const orderingIssue = storefrontUrlIssue(orderingUrl);
+    setWebsiteError(websiteIssue || '');
+    setOrderingError(orderingIssue || '');
     if (websiteIssue || orderingIssue) {
-      setError(websiteIssue || orderingIssue || '');
       setNotice('');
       return;
     }
@@ -83,11 +86,7 @@ export default function ShopStorefrontEditPage(props: {
   }
 
   return (
-    <SiteShell
-      title="編輯店面"
-      subtitle="外連訂餐與店家網站會先去掉前後空白再檢查。訂單和付款仍由店家處理。"
-      schoolName={context.schoolName}
-    >
+    <SiteShell title="編輯店面" subtitle="訂單和付款仍由店家處理。" schoolName={context.schoolName}>
       {!ready && !error && <p role="status">正在讀取店面…</p>}
       {error && <p role="alert">{error}</p>}
       {ready && (
@@ -97,46 +96,77 @@ export default function ShopStorefrontEditPage(props: {
             <p className={social.muted}>
               沒有外連的店可以只填營業時間和地點。貼網址時前後空白會自動去掉，不會當成錯誤。
             </p>
-            <label>
-              店家網站
-              <input
-                value={websiteUrl}
-                onChange={(event) => setWebsiteUrl(event.target.value)}
-                autoCapitalize="none"
-                inputMode="url"
-              />
-            </label>
-            <label>
-              外連訂餐網址
-              <input
-                value={orderingUrl}
-                onChange={(event) => setOrderingUrl(event.target.value)}
-                autoCapitalize="none"
-                inputMode="url"
-              />
-            </label>
-            <label>
-              營業時間
-              <input value={openingHours} onChange={(event) => setOpeningHours(event.target.value)} />
-            </label>
-            <label>
-              地點
-              <input value={location} onChange={(event) => setLocation(event.target.value)} />
-            </label>
-            <label>
-              店面介紹
-              <textarea value={intro} onChange={(event) => setIntro(event.target.value)} rows={3} />
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={merchantMode === 'showcase_link'}
-                onChange={(event) =>
-                  setMerchantMode(event.target.checked ? 'showcase_link' : 'info_only')
-                }
-              />
-              設為外連訂餐
-            </label>
+            <div className={social.form}>
+              <div className={social.field} data-field="websiteUrl">
+                <label htmlFor="storefront-website">店家網站</label>
+                <input
+                  id="storefront-website"
+                  value={websiteUrl}
+                  onChange={(event) => setWebsiteUrl(event.target.value)}
+                  autoCapitalize="none"
+                  inputMode="url"
+                  aria-invalid={websiteError ? true : undefined}
+                  aria-describedby={websiteError ? 'storefront-website-error' : undefined}
+                />
+                {websiteError ? (
+                  <p id="storefront-website-error" className={social.fieldError} role="alert">
+                    {websiteError}
+                  </p>
+                ) : null}
+              </div>
+              <div className={social.field} data-field="orderingUrl">
+                <label htmlFor="storefront-ordering">外連訂餐網址</label>
+                <input
+                  id="storefront-ordering"
+                  value={orderingUrl}
+                  onChange={(event) => setOrderingUrl(event.target.value)}
+                  autoCapitalize="none"
+                  inputMode="url"
+                  aria-invalid={orderingError ? true : undefined}
+                  aria-describedby={orderingError ? 'storefront-ordering-error' : undefined}
+                />
+                {orderingError ? (
+                  <p id="storefront-ordering-error" className={social.fieldError} role="alert">
+                    {orderingError}
+                  </p>
+                ) : null}
+              </div>
+              <div className={social.field} data-field="openingHours">
+                <label htmlFor="storefront-hours">營業時間</label>
+                <input
+                  id="storefront-hours"
+                  value={openingHours}
+                  onChange={(event) => setOpeningHours(event.target.value)}
+                />
+              </div>
+              <div className={social.field} data-field="location">
+                <label htmlFor="storefront-location">地點</label>
+                <input
+                  id="storefront-location"
+                  value={location}
+                  onChange={(event) => setLocation(event.target.value)}
+                />
+              </div>
+              <div className={social.field} data-field="intro">
+                <label htmlFor="storefront-intro">店面介紹</label>
+                <textarea
+                  id="storefront-intro"
+                  value={intro}
+                  onChange={(event) => setIntro(event.target.value)}
+                  rows={3}
+                />
+              </div>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={merchantMode === 'showcase_link'}
+                  onChange={(event) =>
+                    setMerchantMode(event.target.checked ? 'showcase_link' : 'info_only')
+                  }
+                />
+                設為外連訂餐
+              </label>
+            </div>
             {notice && <p role="status">{notice}</p>}
             <div className={social.actions}>
               <button className="btn primary" type="submit">

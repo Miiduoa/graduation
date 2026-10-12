@@ -123,6 +123,7 @@ it('hides unsafe website and ordering URLs instead of rendering them as links', 
     'https://shop.example/order ',
     'http://shop.example/order',
     'data:text/html,hi',
+    'https://shop.example/order\u0000',
   ];
   for (const url of unsafe) {
     state.shop = {
@@ -146,6 +147,28 @@ it('hides unsafe website and ordering URLs instead of rendering them as links', 
     expect(screen.queryByRole('link', { name: '店家網站' })).toBeNull();
     view.unmount();
   }
+});
+
+it('shows the outbound button for uppercase HTTPS the same as lowercase', async () => {
+  state.shop = {
+    ...showcaseShop,
+    orderingUrl: 'HTTPS://shop.example/order',
+    websiteUrl: 'HTTPS://shop.example',
+  };
+  await act(async () => {
+    render(
+      <Suspense fallback={<p>載入店面</p>}>
+        <StorefrontPage
+          params={Promise.resolve({ id: 'stall' })}
+          searchParams={Promise.resolve({ schoolId: 'pu' })}
+        />
+      </Suspense>,
+    );
+  });
+  expect(await screen.findByRole('link', { name: '到店家網站訂餐' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '店家網站' }).getAttribute('href')).toBe(
+    'HTTPS://shop.example',
+  );
 });
 
 it('adds noopener noreferrer on a safe website link', async () => {

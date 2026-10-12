@@ -237,6 +237,8 @@ function ShopHoursPanel({ schoolId, cafeteriaId }: { schoolId: string; cafeteria
   const [postTitle, setPostTitle] = useState('');
   const [postText, setPostText] = useState('');
   const [notice, setNotice] = useState('');
+  const [websiteError, setWebsiteError] = useState('');
+  const [orderingError, setOrderingError] = useState('');
 
   useEffect(() => {
     void loadShopStorefront(schoolId, cafeteriaId)
@@ -248,42 +250,59 @@ function ShopHoursPanel({ schoolId, cafeteriaId }: { schoolId: string; cafeteria
     <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 80 }}>
       {notice ? <Text style={{ color: theme.colors.text }}>{notice}</Text> : null}
       <Text style={{ color: theme.colors.muted }}>
-        學生在店面頁看到封面介紹、營業時間與貼文。沒有接上我們點餐系統的店，可以只放外連訂餐網址。金流還沒接到，這裡不會收款。
+        學生在店面頁看到封面介紹、營業時間與貼文。沒有接上我們點餐系統的店，可以只放外連訂餐網址。貼網址時前後空白會自動去掉，不會當成錯誤。金流還沒接到，這裡不會收款。
       </Text>
-      <Text style={{ color: theme.colors.muted }}>營業時間，例如「週一至週五 11:00–19:00」。</Text>
-      <TextInput
-        value={storefront.openingHours}
-        onChangeText={(openingHours) => setStorefront((current) => ({ ...current, openingHours }))}
-        multiline
-        style={[field, { minHeight: 64 }]}
-      />
-      <TextInput
-        placeholder="店家位置"
-        value={storefront.location}
-        onChangeText={(location) => setStorefront((current) => ({ ...current, location }))}
-        style={field}
-      />
-      <TextInput
-        placeholder="店面介紹"
-        value={storefront.intro}
-        onChangeText={(intro) => setStorefront((current) => ({ ...current, intro }))}
-        multiline
-        style={[field, { minHeight: 80 }]}
-      />
-      <TextInput
-        placeholder="店家網站（https）"
-        value={storefront.websiteUrl}
-        onChangeText={(websiteUrl) => setStorefront((current) => ({ ...current, websiteUrl }))}
-        autoCapitalize="none"
-        style={field}
-      />
-      <TextInput
-        placeholder="外連訂餐網址（https，選填）"
-        value={storefront.orderingUrl}
-        onChangeText={(orderingUrl) => setStorefront((current) => ({ ...current, orderingUrl }))}
-        autoCapitalize="none"
-        style={field}
-      />
+      <View>
+        <Text style={{ color: theme.colors.text, fontWeight: '600', marginBottom: 8 }}>營業時間</Text>
+        <Text style={{ color: theme.colors.muted, marginBottom: 8 }}>例如「週一至週五 11:00–19:00」。</Text>
+        <TextInput
+          value={storefront.openingHours}
+          onChangeText={(openingHours) => setStorefront((current) => ({ ...current, openingHours }))}
+          multiline
+          style={[field, { minHeight: 64 }]}
+        />
+      </View>
+      <View>
+        <Text style={{ color: theme.colors.text, fontWeight: '600', marginBottom: 8 }}>地點</Text>
+        <TextInput
+          placeholder="店家位置"
+          value={storefront.location}
+          onChangeText={(location) => setStorefront((current) => ({ ...current, location }))}
+          style={field}
+        />
+      </View>
+      <View>
+        <Text style={{ color: theme.colors.text, fontWeight: '600', marginBottom: 8 }}>店面介紹</Text>
+        <TextInput
+          placeholder="店面介紹"
+          value={storefront.intro}
+          onChangeText={(intro) => setStorefront((current) => ({ ...current, intro }))}
+          multiline
+          style={[field, { minHeight: 80 }]}
+        />
+      </View>
+      <View testID="website-field">
+        <Text style={{ color: theme.colors.text, fontWeight: '600', marginBottom: 8 }}>店家網站</Text>
+        <TextInput
+          placeholder="店家網站（https）"
+          value={storefront.websiteUrl}
+          onChangeText={(websiteUrl) => setStorefront((current) => ({ ...current, websiteUrl }))}
+          autoCapitalize="none"
+          style={field}
+        />
+        {websiteError ? <Text style={{ color: theme.colors.danger, marginTop: 8 }}>{websiteError}</Text> : null}
+      </View>
+      <View testID="ordering-field">
+        <Text style={{ color: theme.colors.text, fontWeight: '600', marginBottom: 8 }}>外連訂餐網址</Text>
+        <TextInput
+          placeholder="外連訂餐網址（https，選填）"
+          value={storefront.orderingUrl}
+          onChangeText={(orderingUrl) => setStorefront((current) => ({ ...current, orderingUrl }))}
+          autoCapitalize="none"
+          style={field}
+        />
+        {orderingError ? <Text style={{ color: theme.colors.danger, marginTop: 8 }}>{orderingError}</Text> : null}
+      </View>
       <View style={{ flexDirection: 'row', gap: 8 }}>
         <Button
           text={storefront.merchantMode === 'showcase_link' ? '已設為外連訂餐' : '改成外連訂餐'}
@@ -300,12 +319,17 @@ function ShopHoursPanel({ schoolId, cafeteriaId }: { schoolId: string; cafeteria
         onPress={() => {
           const websiteIssue = storefrontUrlIssue(storefront.websiteUrl);
           const orderingIssue = storefrontUrlIssue(storefront.orderingUrl);
+          setWebsiteError(websiteIssue || '');
+          setOrderingError(orderingIssue || '');
           if (websiteIssue || orderingIssue) {
-            setNotice(websiteIssue || orderingIssue || '');
             return;
           }
           void saveShopStorefront({ schoolId, cafeteriaId, storefront })
-            .then((result) => setNotice(savedCopy(result.stored, '店面資料已更新。')))
+            .then((result) => {
+              setWebsiteError('');
+              setOrderingError('');
+              setNotice(savedCopy(result.stored, '店面資料已更新。'));
+            })
             .catch((error) =>
               setNotice(
                 error instanceof Error && error.message

@@ -459,6 +459,7 @@ describe('firestore security rules', () => {
       'https://shop.example/order ',
       'http://shop.example/order',
       'data:text/html,hi',
+      'https://shop.example/order\u0000',
     ];
     for (const orderingUrl of rejectedStorefrontUrls) {
       await assertFails(
@@ -502,6 +503,33 @@ describe('firestore security rules', () => {
         .update({
           websiteUrl: 'https://evil.example',
           orderingUrl: 'https://evil.example/order',
+        }),
+    );
+    await assertSucceeds(
+      db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .update({
+          websiteUrl: 'HTTPS://shop.example',
+          orderingUrl: 'HTTPS://shop.example/order',
+          updatedAt: new Date(),
+        }),
+    );
+    await assertSucceeds(
+      student
+        .collection('users')
+        .doc('alice')
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('externalOrders')
+        .doc('click-https')
+        .set({
+          fulfillment: 'external',
+          schoolId: 'tw-demo-uni',
+          cafeteriaId: 'cafeteria-1',
+          orderingUrl: 'HTTPS://shop.example/order',
         }),
     );
   });
