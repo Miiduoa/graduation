@@ -87,3 +87,5 @@ export * from './lms/tronclassAdapter';
 export * from './lms/actionGraph';
 export * from './lms/attendanceEngine';
 export * from './timetable';
+export * from './merchantMode';
+export * from './campusAnnouncements';

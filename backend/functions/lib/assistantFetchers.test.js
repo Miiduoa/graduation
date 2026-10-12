@@ -51,7 +51,28 @@ test('reads current announcement producers and preserves document identity and t
   })]);
   const rows = await fetchAssistantAnnouncements('pu');
   expect(rows[0]).toEqual({ id: 'school-notice', title: '課務公告', body: '正式內容', schoolId: 'pu', source: '課務組', pinned: true, publishedAt });
-  expect(mockReads).toEqual([{ path: 'schools/pu/announcements', constraints: [['orderBy', 'publishedAt', 'desc'], ['limit', 20]] }]);
+  expect(mockReads.map((entry) => entry.path)).toEqual([
+    'schools/pu/announcements',
+    'schools/pu/announcement-sources',
+  ]);
+});
+
+test('does not present stale scrape rows from unavailable sources and fails when every source is down', async () => {
+  mockDocuments.set('schools/pu/announcements', [
+    row('stale', { title: '過期稿', origin: 'public_scrape', sourceId: 'pu-acd' }),
+    row('other', { title: '學務處', origin: 'public_scrape', sourceId: 'pu-osa' }),
+  ]);
+  mockDocuments.set('schools/pu/announcement-sources', [
+    row('pu-acd', { sourceId: 'pu-acd', office: '教務處', status: 'unavailable' }),
+    row('pu-osa', { sourceId: 'pu-osa', office: '學務處', status: 'healthy' }),
+  ]);
+  expect((await fetchAssistantAnnouncements('pu')).map((row) => row.id)).toEqual(['other']);
+  mockDocuments.set('schools/pu/announcements', []);
+  mockDocuments.set('schools/pu/announcement-sources', [
+    row('pu-acd', { sourceId: 'pu-acd', status: 'unavailable' }),
+    row('pu-osa', { sourceId: 'pu-osa', status: 'unavailable' }),
+  ]);
+  await expect(fetchAssistantAnnouncements('pu')).rejects.toMatchObject({ message: '暫時抓不到' });
 });
 
 test('uses the active clubEvents producer and sorts actual event dates', async () => {

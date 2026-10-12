@@ -64,7 +64,9 @@ async function execute(ctx, rawInput) {
       cafeteriaName: cafData.name || input.cafeteriaId,
       count: items.length,
       items: items.slice(0, limit),
-      orderingEnabled: cafData.orderingEnabled !== false,
+      orderingEnabled: cafData.orderingEnabled === true,
+      priceDisclaimer: '價格以店家為準',
+      menuMayBeStale: true,
     };
   } catch (e) {
     return {

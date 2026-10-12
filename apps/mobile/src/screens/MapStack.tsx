@@ -26,6 +26,8 @@ import { LostFoundScreen } from './LostFoundScreen';
 import { LostFoundDetailScreen } from './LostFoundDetailScreen';
 import { LostFoundPostScreen } from './LostFoundPostScreen';
 import { PaymentScreen } from './PaymentScreen';
+import StorefrontScreen from './StorefrontScreen';
+import HonestOrderScreen from './HonestOrderScreen';
 import { useThemeMode } from '../state/theme';
 import { createStackScreenOptions } from '../ui/navigationTheme';
 
@@ -122,6 +124,16 @@ export function MapStack() {
         options={{ title: '餐廳', headerShown: false }}
       />
       <Stack.Screen name="Ordering" component={OrderingScreen} options={{ title: '餐廳訂單' }} />
+      <Stack.Screen
+        name="Storefront"
+        component={StorefrontScreen}
+        options={{ title: '店面', headerShown: false }}
+      />
+      <Stack.Screen
+        name="HonestOrder"
+        component={HonestOrderScreen}
+        options={{ title: '去訂餐', headerShown: false }}
+      />
       <Stack.Screen
         name="StudentOrders"
         component={MyOrdersScreen}

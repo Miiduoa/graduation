@@ -293,6 +293,113 @@ describe('firestore security rules', () => {
     await assertSucceeds(
       db.collection('schools').doc('tw-demo-uni').collection('menus').doc('menu-1').delete(),
     );
+    await assertSucceeds(
+      db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .update({
+          intro: '紙感小店',
+          merchantMode: 'showcase_link',
+          orderingUrl: 'https://shop.example/order',
+          updatedAt: new Date(),
+        }),
+    );
+    await assertFails(
+      db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .update({
+          merchantMode: 'native_order',
+        }),
+    );
+    await assertSucceeds(
+      db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .collection('posts')
+        .doc('post-1')
+        .set({ text: '週四折抵', authorId: 'merchant-1' }),
+    );
+    const student = testEnv.authenticatedContext('alice').firestore();
+    await assertSucceeds(
+      student
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .collection('followers')
+        .doc('alice')
+        .set({ createdAt: new Date() }),
+    );
+    await assertSucceeds(
+      student
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .collection('posts')
+        .doc('post-1')
+        .collection('likes')
+        .doc('alice')
+        .set({ createdAt: new Date() }),
+    );
+    await assertSucceeds(
+      student
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .collection('posts')
+        .doc('post-1')
+        .collection('comments')
+        .doc('c1')
+        .set({ authorId: 'alice', text: '收到' }),
+    );
+    await assertFails(
+      student
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('announcement-sources')
+        .doc('pu-acd')
+        .set({ status: 'healthy' }),
+    );
+    await assertSucceeds(
+      student
+        .collection('users')
+        .doc('alice')
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('externalOrders')
+        .doc('click-1')
+        .set({
+          fulfillment: 'external',
+          schoolId: 'tw-demo-uni',
+          cafeteriaId: 'cafeteria-1',
+          orderingUrl: 'https://shop.example/order',
+        }),
+    );
+    await assertFails(
+      student
+        .collection('users')
+        .doc('alice')
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('externalOrders')
+        .doc('click-2')
+        .set({
+          fulfillment: 'external',
+          schoolId: 'tw-demo-uni',
+          cafeteriaId: 'cafeteria-1',
+          orderingUrl: 'https://shop.example/order',
+          paymentStatus: 'paid',
+        }),
+    );
   });
 
   test("deny other cafeteria reads and require server writes even for administrators", async () => {

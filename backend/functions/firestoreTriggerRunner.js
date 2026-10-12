@@ -17,6 +17,7 @@ const TRIGGER_POLICIES = {
   onInspectionWritten: { sideEffect: 'sync', createdOnly: false },
   groupQuestionAssistantReply: { sideEffect: 'notify', createdOnly: true },
   gradePublishedNotification: { sideEffect: 'notify', createdOnly: true },
+  onCafeteriaStorefrontPostCreated: { sideEffect: 'notify', createdOnly: true },
 };
 
 function policyFor(trigger) {

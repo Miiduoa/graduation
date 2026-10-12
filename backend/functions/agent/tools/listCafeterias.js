@@ -40,6 +40,15 @@ async function execute(ctx, rawInput) {
         openTime: time(data.openTime),
         closeTime: time(data.closeTime),
         orderingEnabled: data.orderingEnabled === true,
+        merchantMode:
+          data.merchantMode === 'native_order' ||
+          data.merchantMode === 'showcase_link' ||
+          data.merchantMode === 'info_only'
+            ? data.merchantMode
+            : data.orderingEnabled === true
+              ? 'native_order'
+              : 'info_only',
+        orderingUrl: /^https:\/\//.test(text(data.orderingUrl)) ? text(data.orderingUrl) : '',
         // The cafeteria producer has no authoritative live opening-status field.
         openNow: null,
         seats: count(data.seats),

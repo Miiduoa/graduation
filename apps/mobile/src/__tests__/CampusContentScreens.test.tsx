@@ -9,6 +9,7 @@ import EventsScreen from '../screens/EventsListAiFirstScreen';
 import EventScreen from '../screens/EventDetailAiFirstScreen';
 import {
   loadCampusAnnouncements,
+  loadCampusAnnouncementFeed,
   loadCampusAnnouncement,
   loadCampusEventPage,
   loadCampusEvent,
@@ -25,6 +26,7 @@ jest.mock('../state/auth', () => ({
 jest.mock('../state/school', () => ({ useSchool: () => ({ school: mockSchool }) }));
 jest.mock('../services/publicCampusContent', () => ({
   loadCampusAnnouncements: jest.fn(),
+  loadCampusAnnouncementFeed: jest.fn(),
   loadCampusAnnouncement: jest.fn(),
   loadCampusEventPage: jest.fn(),
   loadCampusEvent: jest.fn(),
@@ -64,6 +66,11 @@ beforeEach(() => {
   mockUid = 'student-a';
   mockSchool = { id: 'pu' };
   jest.mocked(loadCampusAnnouncements).mockResolvedValue([announcement]);
+  jest.mocked(loadCampusAnnouncementFeed).mockResolvedValue({
+    announcements: [announcement],
+    sources: [],
+    allUnavailable: false,
+  });
   jest.mocked(loadCampusAnnouncement).mockResolvedValue(announcement);
   jest
     .mocked(loadCampusEventPage)
@@ -74,15 +81,17 @@ beforeEach(() => {
 afterEach(() => jest.restoreAllMocks());
 
 test('announcements use school data with working categories and a registered detail route', async () => {
-  jest
-    .mocked(loadCampusAnnouncements)
-    .mockResolvedValue([
+  jest.mocked(loadCampusAnnouncementFeed).mockResolvedValue({
+    announcements: [
       announcement,
       { ...announcement, id: 'a2', title: '社團活動', category: 'event' },
-    ]);
+    ],
+    sources: [],
+    allUnavailable: false,
+  });
   const view = render(<AnnouncementsScreen navigation={navigation} />);
   await view.findByText('校方的新公告');
-  expect(loadCampusAnnouncements).toHaveBeenCalledWith('pu', '');
+  expect(loadCampusAnnouncementFeed).toHaveBeenCalledWith('pu', '');
   expect(view.queryByText(/期末考程序|32 則|AI 從|全部已讀/)).toBeNull();
   fireEvent.press(view.getByText('教務'));
   expect(view.queryByText('社團活動')).toBeNull();
@@ -91,12 +100,29 @@ test('announcements use school data with working categories and a registered det
 });
 
 test('read failure offers retry without becoming an empty success', async () => {
-  jest.mocked(loadCampusAnnouncements).mockRejectedValueOnce(new Error('offline'));
+  jest.mocked(loadCampusAnnouncementFeed).mockRejectedValueOnce(new Error('offline'));
   const view = render(<AnnouncementsScreen navigation={navigation} />);
   await view.findByText('目前無法讀取，請確認網路連線後重試。');
   expect(view.queryByText('目前沒有公告')).toBeNull();
   fireEvent.press(view.getByText('重新讀取'));
   await view.findByText('校方的新公告');
+});
+
+test('dead scrape sources are labeled as temporarily unavailable and original links stay on the detail', async () => {
+  jest.mocked(loadCampusAnnouncementFeed).mockResolvedValue({
+    announcements: [],
+    sources: [{ sourceId: 'pu-acd', office: '教務處', status: 'unavailable', message: '暫時抓不到' }],
+    allUnavailable: true,
+  });
+  const list = render(<AnnouncementsScreen navigation={navigation} />);
+  await list.findByText('暫時抓不到');
+  jest.mocked(loadCampusAnnouncement).mockResolvedValue({
+    ...announcement,
+    summary: '選課摘要',
+    originalUrl: 'https://acd.pu.edu.tw/p/412-1042-1.php',
+  });
+  const detail = render(<AnnouncementScreen route={{ params: { id: 'a1' } }} />);
+  await detail.findByText('看原文');
 });
 
 test('a school change immediately hides old detail data and ignores late responses', async () => {
@@ -220,7 +246,7 @@ test('mounted announcement content and event content follow theme changes withou
 });
 
 test('mounted read errors follow theme changes without reloading or remounting', async () => {
-  jest.mocked(loadCampusAnnouncements).mockRejectedValue(new Error('offline'));
+  jest.mocked(loadCampusAnnouncementFeed).mockRejectedValue(new Error('offline'));
   const view = render(<AnnouncementsScreen navigation={navigation} />);
   const errorText = '目前無法讀取，請確認網路連線後重試。';
   await view.findByText(errorText);
@@ -228,7 +254,7 @@ test('mounted read errors follow theme changes without reloading or remounting',
   act(() => applyTheme('dark'));
   expect(aiTokens.danger).not.toBe(lightColor);
   expect(StyleSheet.flatten(view.getByText(errorText).props.style).color).toBe(aiTokens.danger);
-  expect(loadCampusAnnouncements).toHaveBeenCalledTimes(1);
+  expect(loadCampusAnnouncementFeed).toHaveBeenCalledTimes(1);
   act(() => applyTheme('light'));
 });
 
@@ -332,9 +358,13 @@ test('changing detail source clears same-ID content synchronously and sends the 
 
 test('a visitor can read the public announcement list and open its detail', async () => {
   mockUid = null;
-  jest.mocked(loadCampusAnnouncements).mockResolvedValue([announcement] as never);
+  jest.mocked(loadCampusAnnouncementFeed).mockResolvedValue({
+    announcements: [announcement],
+    sources: [],
+    allUnavailable: false,
+  });
   const view = render(<AnnouncementsScreen navigation={navigation} />);
   fireEvent.press(await view.findByText('校方的新公告'));
-  expect(loadCampusAnnouncements).toHaveBeenCalledWith('pu', '');
+  expect(loadCampusAnnouncementFeed).toHaveBeenCalledWith('pu', '');
   expect(safeNavigate).toHaveBeenCalledWith(navigation, '公告詳情', { id: 'a1' });
 });
