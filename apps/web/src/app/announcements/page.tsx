@@ -18,16 +18,26 @@ import { resolveAnnouncementSchool } from './resolveSchool';
 import styles from './announcements.module.css';
 
 type Category = 'all' | 'academic' | 'event' | 'general';
-type LoadState =
-  | { status: 'loading' }
-  | { status: 'error' }
-  | {
-      status: 'ready';
-      announcements: Announcement[];
-      sources: AnnouncementSourceHealth[];
-      allUnavailable: boolean;
-      fetchedAt: string;
-    };
+type ReadyState = {
+  status: 'ready';
+  announcements: Announcement[];
+  sources: AnnouncementSourceHealth[];
+  allUnavailable: boolean;
+  fetchedAt: string;
+  stale: boolean;
+};
+type LoadState = { status: 'loading' } | ReadyState;
+
+function emptyFeed(fetchedAt = new Date().toISOString()): ReadyState {
+  return {
+    status: 'ready',
+    announcements: [],
+    sources: [],
+    allUnavailable: false,
+    fetchedAt,
+    stale: false,
+  };
+}
 
 const categories: { id: Category; label: string }[] = [
   { id: 'all', label: '全部' },
@@ -83,18 +93,28 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
             sources: feed.sources,
             allUnavailable: feed.allUnavailable,
             fetchedAt: new Date().toISOString(),
+            stale: false,
           });
         }
       },
       () => {
-        if (mounted.current && request === generation.current) setState({ status: 'error' });
+        if (!mounted.current || request !== generation.current) return;
+        setState((current) =>
+          current.status === 'ready' && current.announcements.length > 0
+            ? { ...current, stale: true }
+            : emptyFeed(),
+        );
       },
     );
   }, [schoolId]);
 
   function refresh() {
-    setState({ status: 'loading' });
     setNotice('');
+    setState((current) =>
+      current.status === 'ready' && current.announcements.length > 0
+        ? current
+        : { status: 'loading' },
+    );
     void load();
   }
 
@@ -141,18 +161,6 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
       </div>
     );
   }
-  if (state.status === 'error') {
-    return (
-      <section className={styles.status} role="alert">
-        <h2>暫時無法讀取公告</h2>
-        <p>請確認網路後再試一次。</p>
-        <button className="btn primary" onClick={() => void refresh()}>
-          重新讀取
-        </button>
-      </section>
-    );
-  }
-
   const needle = search.trim().toLocaleLowerCase('zh-TW');
   const filtered = state.announcements.filter((announcement) => {
     const text = `${announcement.title} ${announcement.body} ${announcement.source ?? ''}`;
@@ -164,6 +172,13 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
   });
   const emptyKind = announcementEmptyKind(state.announcements, state.sources);
   const downLinks = state.sources.filter((item) => item.status === 'unavailable' && item.listUrl);
+  const showStaleNotice =
+    state.announcements.length > 0 &&
+    (state.stale || state.sources.some((item) => item.status === 'unavailable'));
+  const staleSources =
+    state.stale && !state.sources.some((item) => item.status === 'unavailable')
+      ? [{ status: 'unavailable' as const, lastSuccessAt: state.fetchedAt }]
+      : state.sources;
 
   return (
     <div className={styles.page}>
@@ -219,14 +234,13 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
           {notice}
         </p>
       )}
-      {state.announcements.length > 0 &&
-        state.sources.some((item) => item.status === 'unavailable') && (
-          <p role="status" className={styles.notice}>
-            {formatStaleAnnouncementNotice(
-              staleAnnouncementUpdatedAt(state.sources, state.announcements),
-            )}
-          </p>
-        )}
+      {showStaleNotice && (
+        <p role="status" className={styles.notice}>
+          {formatStaleAnnouncementNotice(
+            staleAnnouncementUpdatedAt(staleSources, state.announcements),
+          )}
+        </p>
+      )}
       {filtered.length === 0 ? (
         <section className={styles.status}>
           {emptyKind === 'not_connected' ? (
@@ -290,7 +304,12 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
                 <p className={styles.body}>{announcement.summary || announcement.body}</p>
               )}
               {announcement.originalUrl ? (
-                <a className={styles.share} href={announcement.originalUrl} rel="noreferrer" target="_blank">
+                <a
+                  className={styles.share}
+                  href={announcement.originalUrl}
+                  rel="noreferrer"
+                  target="_blank"
+                >
                   看原文
                 </a>
               ) : (

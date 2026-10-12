@@ -96,21 +96,45 @@ it.each(['teacher', 'department_head', 'admin'])(
   },
 );
 
-it('shows failure without demo fallback or hiding a failed canonical read behind the legacy collection', async () => {
-  vi.mocked(getDocsFromServer).mockRejectedValue(new Error('permission-denied'));
-  render(<AnnouncementsPage />);
-  expect(await screen.findByRole('alert')).toBeTruthy();
-  expect(screen.getByText('暫時無法讀取公告')).toBeTruthy();
-  expect(screen.queryByText('目前沒有公開公告')).toBeNull();
-  expect(screen.queryByText('示範資料')).toBeNull();
-  expect(screen.queryByRole('article')).toBeNull();
-  expect(getDocsFromServer).toHaveBeenCalledTimes(1);
-});
+it.each([
+  [
+    'permission-denied',
+    Object.assign(new Error('Missing or insufficient permissions.'), { code: 'permission-denied' }),
+  ],
+  ['unavailable', Object.assign(new Error('offline'), { code: 'unavailable' })],
+])(
+  'shows catalog office links when Firestore read fails with %s and there is no cached copy',
+  async (_code, error) => {
+    vi.mocked(getDocsFromServer).mockRejectedValue(error);
+    render(<AnnouncementsPage />);
+    expect(
+      await screen.findByRole('heading', {
+        name: '這裡還沒接上學校公告，請先到學校網站看最新消息',
+      }),
+    ).toBeTruthy();
+    expect(screen.getByRole('link', { name: '教務處' }).getAttribute('href')).toBe(
+      'https://acd.pu.edu.tw/p/403-1042-885-1.php',
+    );
+    expect(screen.getByRole('link', { name: '綜合業務組' })).toBeTruthy();
+    expect(screen.queryByText('請確認網路')).toBeNull();
+    expect(screen.queryByText('暫時無法讀取公告')).toBeNull();
+    expect(screen.queryByText('目前沒有公開公告')).toBeNull();
+    expect(screen.queryByText('示範資料')).toBeNull();
+    expect(screen.queryByRole('article')).toBeNull();
+    expect(getDocsFromServer).toHaveBeenCalledTimes(1);
+  },
+);
 
-it('shows unavailable when Firebase is not configured and never reads demo content', async () => {
+it('shows catalog office links when Firebase is not configured and never reads demo content', async () => {
   vi.mocked(isFirebaseConfigured).mockReturnValue(false);
   render(<AnnouncementsPage />);
-  await screen.findByRole('alert');
+  expect(
+    await screen.findByRole('heading', {
+      name: '這裡還沒接上學校公告，請先到學校網站看最新消息',
+    }),
+  ).toBeTruthy();
+  expect(screen.getByRole('link', { name: '教務處' })).toBeTruthy();
+  expect(screen.queryByText('請確認網路')).toBeNull();
   expect(getDocsFromServer).not.toHaveBeenCalled();
   expect(screen.queryByRole('article')).toBeNull();
 });
@@ -137,7 +161,10 @@ it('distinguishes a legacy source failure from a successfully empty announcement
     .mockResolvedValueOnce(snapshot())
     .mockRejectedValueOnce(new Error('offline'));
   render(<AnnouncementsPage />);
-  await screen.findByRole('alert');
+  await screen.findByRole('heading', {
+    name: '這裡還沒接上學校公告，請先到學校網站看最新消息',
+  });
+  expect(screen.queryByText('請確認網路')).toBeNull();
   vi.mocked(getDocsFromServer).mockImplementation((async (input: { path?: string }) => {
     if (String(input?.path || '').includes('announcement-sources')) {
       return {
@@ -157,9 +184,9 @@ it('distinguishes a legacy source failure from a successfully empty announcement
     }
     return snapshot();
   }) as never);
-  fireEvent.click(screen.getByRole('button', { name: '重新讀取' }));
+  fireEvent.click(screen.getByRole('button', { name: '更新公告' }));
   await screen.findByText('目前沒有公開公告');
-  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.queryByText('請確認網路')).toBeNull();
   expect(screen.queryByText('這裡還沒接上學校公告，請先到學校網站看最新消息')).toBeNull();
   expect(screen.queryByText('學校網站暫時連不上')).toBeNull();
 });
@@ -192,15 +219,15 @@ it('keeps server categories, pinned flags and search functional without invented
   expect(screen.getByText('置頂')).toBeTruthy();
 });
 
-it('clears old records on refresh failure and lets the reader retry', async () => {
+it('keeps cached announcements when a later Firestore read fails', async () => {
   render(<AnnouncementsPage />);
   await screen.findByText('校園公告實際內容');
-  vi.mocked(getDocsFromServer).mockRejectedValueOnce(new Error('offline'));
+  vi.mocked(getDocsFromServer).mockRejectedValueOnce(new Error('permission-denied'));
   fireEvent.click(screen.getByRole('button', { name: '更新公告' }));
-  expect(screen.queryByText('校園公告實際內容')).toBeNull();
-  await screen.findByRole('alert');
-  fireEvent.click(screen.getByRole('button', { name: '重新讀取' }));
   await screen.findByText('校園公告實際內容');
+  expect(screen.getByText(/最後更新/)).toBeTruthy();
+  expect(screen.queryByText('請確認網路')).toBeNull();
+  expect(screen.queryByText('這裡還沒接上學校公告，請先到學校網站看最新消息')).toBeNull();
 });
 
 it('removes the prior account list and filters synchronously when the account changes', async () => {
@@ -271,8 +298,13 @@ it('does not render a record whose stored school differs from the selected schoo
     snapshot(announcementDocument('錯誤學校資料', { schoolId: 'nthu' })),
   );
   render(<AnnouncementsPage />);
-  await screen.findByRole('alert');
+  expect(
+    await screen.findByRole('heading', {
+      name: '這裡還沒接上學校公告，請先到學校網站看最新消息',
+    }),
+  ).toBeTruthy();
   expect(screen.queryByText('錯誤學校資料')).toBeNull();
+  expect(screen.queryByText('請確認網路')).toBeNull();
 });
 
 it('copies the real announcement detail link only after the clipboard operation succeeds', async () => {
