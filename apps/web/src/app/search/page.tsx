@@ -1,35 +1,61 @@
 'use client';
 
-import { use, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
 import styles from './search.module.css';
-import { CAMPUS_SERVICES, SERVICE_CATEGORIES, type ServiceCategory } from '@/lib/campusServices';
+import {
+  SERVICE_ACCESS,
+  SERVICE_CATEGORIES,
+  searchCampusServices,
+  serviceContextSearch,
+  type ServiceCategory,
+} from '@/lib/campusServices';
 
-export default function SearchPage(props: {
-  searchParams?: Promise<{ school?: string; schoolId?: string }>;
-}) {
-  const searchParams = props.searchParams ? use(props.searchParams) : undefined;
-  const { schoolName, schoolSearch } = resolveSchoolPageContext(searchParams);
-  const [query, setQuery] = useState('');
-  const [category, setCategory] = useState<ServiceCategory | 'all'>('all');
-  const term = query.trim().toLocaleLowerCase();
-  const matches = CAMPUS_SERVICES.filter(
-    (service) =>
-      (category === 'all' || service.category === category) &&
-      `${service.name} ${service.text} ${service.keywords}`.toLocaleLowerCase().includes(term),
+function readFilters(params: URLSearchParams) {
+  const category = params.get('category');
+  return {
+    query: (params.get('q') ?? '').slice(0, 100),
+    category: SERVICE_CATEGORIES.some((item) => item.id === category)
+      ? (category as ServiceCategory)
+      : ('all' as const),
+  };
+}
+
+function ServiceDirectory() {
+  const params = useSearchParams();
+  const queryString = params.toString();
+  const [{ query, category }, setFilters] = useState(() =>
+    readFilters(new URLSearchParams(queryString)),
   );
+  useEffect(() => {
+    // Restore the URL state on history navigation or an external link to this directory.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setFilters(readFilters(new URLSearchParams(queryString)));
+  }, [queryString]);
+  const term = query.trim();
+  const matches = searchCampusServices(query, category);
+  const schoolSearch = serviceContextSearch(new URLSearchParams(queryString));
+  function updateFilters(next: { query: string; category: ServiceCategory | 'all' }) {
+    setFilters(next);
+    const url = new URL(window.location.href);
+    if (next.query) url.searchParams.set('q', next.query);
+    else url.searchParams.delete('q');
+    if (next.category !== 'all') url.searchParams.set('category', next.category);
+    else url.searchParams.delete('category');
+    // Next.js observes native history changes without a server request per keystroke.
+    window.history.replaceState(
+      null,
+      '',
+      `${url.pathname}${url.search}${url.hash}`,
+    );
+  }
   function resetFilters() {
-    setQuery('');
-    setCategory('all');
+    updateFilters({ query: '', category: 'all' });
   }
   return (
-    <SiteShell
-      title="所有服務"
-      subtitle="從今天要做的事，找到需要的校園服務。"
-      schoolName={schoolName}
-    >
+    <SiteShell title="所有服務" subtitle="搜尋要做的事，或依分類查找。每項服務都標示需要的帳號。">
       <div className={styles.directory}>
         <section className={styles.searchPanel} aria-label="尋找服務">
           <label htmlFor="service-search">想找什麼？</label>
@@ -40,7 +66,7 @@ export default function SearchPage(props: {
             value={query}
             maxLength={100}
             placeholder="課表、借書、公車…"
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => updateFilters({ query: event.target.value, category })}
           />
           <div className={styles.filters} role="group" aria-label="服務分類">
             {[{ id: 'all', label: '全部' }, ...SERVICE_CATEGORIES].map((item) => (
@@ -48,7 +74,9 @@ export default function SearchPage(props: {
                 type="button"
                 key={item.id}
                 aria-pressed={category === item.id}
-                onClick={() => setCategory(item.id as ServiceCategory | 'all')}
+                onClick={() =>
+                  updateFilters({ query, category: item.id as ServiceCategory | 'all' })
+                }
               >
                 {item.label}
               </button>
@@ -89,8 +117,9 @@ export default function SearchPage(props: {
                       <div>
                         <h3>{service.name}</h3>
                         <p>{service.text}</p>
+                        <small className={styles.access}>{SERVICE_ACCESS[service.access]}</small>
                       </div>
-                      <span aria-hidden="true">↗</span>
+                      <span aria-hidden="true">→</span>
                     </Link>
                   ))}
                 </div>
@@ -108,5 +137,13 @@ export default function SearchPage(props: {
         )}
       </div>
     </SiteShell>
+  );
+}
+
+export default function SearchPage() {
+  return (
+    <Suspense fallback={<p role="status">正在讀取服務…</p>}>
+      <ServiceDirectory />
+    </Suspense>
   );
 }

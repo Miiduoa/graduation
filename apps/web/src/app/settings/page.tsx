@@ -11,6 +11,8 @@ import {
 } from '@campus/shared/src';
 
 import { SiteShell } from '@/components/SiteShell';
+import { NuniAccountPanel } from '@/components/NuniAccountPanel';
+import { useNuniSession } from '@/features/nuni/Session';
 import { useToast } from '@/components/ui';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import {
@@ -18,7 +20,6 @@ import {
   getDb,
   isFirebaseConfigured,
   saveNotificationPreferences,
-  signOut,
   type NotificationPreferences,
   type UserProfile,
   updateUserProfile,
@@ -160,7 +161,7 @@ export default function SettingsPage(props: {
   const { user, loading } = useAuth();
   if (loading)
     return (
-      <SiteShell title="設定" schoolName={schoolName}>
+      <SiteShell title="設定">
         <p role="status">確認帳號…</p>
       </SiteShell>
     );
@@ -183,6 +184,8 @@ function SettingsContent({
   schoolName: string;
   schoolSearch: string;
 }) {
+  const { signOutUser } = useAuth();
+  const nuni = useNuniSession();
   const mounted = useRef(true);
   const profileLock = useRef(false);
   const notificationLock = useRef(false);
@@ -439,15 +442,30 @@ function SettingsContent({
   };
 
   const handleSignOut = async () => {
-    if (!user || !isCurrent() || signOutLock.current) return;
+    if (
+      signOutLock.current ||
+      nuni.loading ||
+      savingProfile ||
+      savingNotifications ||
+      (user && !isCurrent()) ||
+      (!user && !nuni.session && !nuni.pendingLogout)
+    )
+      return;
     signOutLock.current = true;
     setSigningOut(true);
+    const hasCourseSession = !!nuni.session || nuni.pendingLogout;
     try {
-      await signOut();
-      if (mounted.current && !getAuth()?.currentUser) success('已登出帳號');
+      const results = await Promise.allSettled([
+        ...(user ? [signOutUser()] : []),
+        ...(hasCourseSession ? [nuni.logout()] : []),
+      ]);
+      const failed = results.find((result) => result.status === 'rejected');
+      if (failed?.status === 'rejected') throw failed.reason;
+      // Course logout reports an unconfirmed result through pendingLogout, not a rejection.
+      if (!hasCourseSession && mounted.current && !getAuth()?.currentUser) success('已登出帳號');
     } catch (signOutError) {
       console.error('Failed to sign out:', signOutError);
-      if (isCurrent()) error('登出失敗', '請稍後再試一次');
+      if (mounted.current && (!user || isCurrent())) error('登出失敗', '請稍後再試一次');
     } finally {
       signOutLock.current = false;
       if (mounted.current) setSigningOut(false);
@@ -457,9 +475,12 @@ function SettingsContent({
   function renderGeneral() {
     return (
       <div className={styles.stack}>
-        <SectionHeading title="一般設定">查看目前校園與服務資訊。</SectionHeading>
+        <SectionHeading title="一般設定">查看校園服務的資料來源與使用資訊。</SectionHeading>
         <section className={styles.group} aria-label="校園與語言">
-          <SettingRow title="目前校園" subtitle={schoolName}>
+          <SettingRow
+            title="校園服務資料來源"
+            subtitle={`${schoolName}。這是服務目前提供的資料來源，不代表你的帳號學籍或所屬學校。`}
+          >
             <span className={styles.value}>校園服務</span>
           </SettingRow>
           <SettingRow title="介面語言" subtitle="目前以繁體中文提供服務。">
@@ -497,6 +518,37 @@ function SettingsContent({
   }
 
   function renderNotifications() {
+    if (!user)
+      return (
+        <div className={styles.stack}>
+          <SectionHeading title="通知設定">依帳號來源查看通知的設定方式。</SectionHeading>
+          <NuniAccountPanel />
+          {nuni.loading || nuni.pendingLogout || nuni.error ? null : nuni.session ? (
+            <section className={styles.notice}>
+              <h3>課程通知尚未提供偏好設定</h3>
+              <p>你已登入課程空間。目前請直接到課程查看作業、測驗與老師回饋。</p>
+              <Link href="/classroom" className="btn primary">
+                前往課程查看更新
+              </Link>
+            </section>
+          ) : (
+            <section className={styles.notice}>
+              <h3>登入後查看通知</h3>
+              <p>課程更新與學校通知使用各自的帳號。外觀設定不需要登入。</p>
+              <Link href="/classroom/login" className="btn primary">
+                登入課程空間
+              </Link>
+            </section>
+          )}
+          <section className={styles.notice}>
+            <h3>學校通知</h3>
+            <p>連線校園帳號後，可以調整學校公告、成績與校園訊息的通知偏好。</p>
+            <Link href="/login?reconnect=school&returnUrl=%2Fsettings" className="btn">
+              連線校園帳號
+            </Link>
+          </section>
+        </div>
+      );
     const notificationRows: Array<{
       key: NotificationToggleKey;
       title: string;
@@ -511,7 +563,9 @@ function SettingsContent({
     ];
     return (
       <div className={styles.stack}>
-        <SectionHeading title="通知設定">選擇要接收的內容，儲存到你的帳號。</SectionHeading>
+        <SectionHeading title="校園帳號通知">
+          選擇要接收的內容，儲存到目前的校園帳號。這些設定不會變更課程空間的通知。
+        </SectionHeading>
         {!user && (
           <div className={styles.notice}>
             <h3>登入後設定通知</h3>
@@ -785,6 +839,58 @@ function SettingsContent({
   }
 
   function renderAccount() {
+    if (signingOut)
+      return (
+        <div className={styles.stack} role="status">
+          <SectionHeading title="正在登出帳號…">
+            正在結束此瀏覽器的登入，帳號資料已隱藏。
+          </SectionHeading>
+        </div>
+      );
+    const logoutControl = (user || nuni.session || nuni.pendingLogout) && (
+      <div className={styles.signOut}>
+        <div>
+          <h3>登出此瀏覽器</h3>
+          <p>結束目前的課程空間與校園帳號登入。</p>
+        </div>
+        <button
+          type="button"
+          className={`btn ${styles.signOutButton}`}
+          onClick={() => void handleSignOut()}
+          disabled={nuni.loading || savingProfile || savingNotifications}
+        >
+          登出帳號
+        </button>
+      </div>
+    );
+    if (!user)
+      return (
+        <div className={styles.stack}>
+          <SectionHeading title="帳號設定">
+            查看課程與校園帳號，管理此瀏覽器的登入狀態。
+          </SectionHeading>
+          <NuniAccountPanel />
+          {!nuni.loading && !nuni.pendingLogout && !nuni.error && !nuni.session && (
+            <section className={styles.notice}>
+              <h3>登入課程空間</h3>
+              <p>登入後可開啟已加入的課程、作業與課堂回饋。你也可以先調整外觀。</p>
+              <Link href="/classroom/login" className="btn primary">
+                登入課程空間
+              </Link>
+            </section>
+          )}
+          <section className={styles.notice}>
+            <h3>校園個人資料</h3>
+            <p>
+              校園帳號尚未連線。連線後可查看與編輯校園個人資料；填寫學號或系所不會取得學校權限。
+            </p>
+            <Link href="/login?reconnect=school&returnUrl=%2Fsettings" className="btn">
+              連線校園帳號
+            </Link>
+          </section>
+          {logoutControl}
+        </div>
+      );
     const providerIds = user?.providerData?.map((provider) => provider.providerId) ?? [];
     const loginMethod = providerIds.includes('google.com')
       ? 'Google 帳號'
@@ -798,6 +904,8 @@ function SettingsContent({
     return (
       <div className={styles.stack}>
         <SectionHeading title="帳號設定">更新個人資料，管理此瀏覽器的登入狀態。</SectionHeading>
+        <NuniAccountPanel />
+        <h3 className={styles.groupHeading}>校園帳號個人資料</h3>
         <div className={styles.identity}>
           <span className={styles.avatar} aria-hidden="true">
             {user ? Array.from(currentDisplayName)[0] : '—'}
@@ -913,22 +1021,7 @@ function SettingsContent({
             </button>
           </div>
         </form>
-        {user && (
-          <div className={styles.signOut}>
-            <div>
-              <h3>登出此瀏覽器</h3>
-              <p>下次使用帳號服務時，需要重新登入。</p>
-            </div>
-            <button
-              type="button"
-              className={`btn ${styles.signOutButton}`}
-              onClick={() => void handleSignOut()}
-              disabled={signingOut || savingProfile || savingNotifications}
-            >
-              {signingOut ? '登出中…' : '登出帳號'}
-            </button>
-          </div>
-        )}
+        {logoutControl}
       </div>
     );
   }
@@ -942,7 +1035,7 @@ function SettingsContent({
   };
 
   return (
-    <SiteShell title="設定" subtitle="讓校園生活，照你的習慣安排。" schoolName={schoolName}>
+    <SiteShell title="設定" subtitle="讓校園生活，照你的習慣安排。">
       <div className={styles.layout}>
         <aside className={styles.sidebar}>
           <nav aria-label="設定分類" className={styles.navigation}>

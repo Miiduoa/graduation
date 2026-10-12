@@ -1,8 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,24 +9,18 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import Constants from 'expo-constants';
-import * as WebBrowser from 'expo-web-browser';
-import { exchangeCodeAsync } from 'expo-auth-session';
-import { discovery, useIdTokenAuthRequest } from 'expo-auth-session/providers/google';
-import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
+import { useFocusEffect, useNavigation, type NavigationProp } from '@react-navigation/native';
 
 import { PROVIDENCE_UNIVERSITY_SCHOOL_ID } from '@campus/shared/src';
 
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { signInWithStudentId, type LoginProgress } from '../services/studentIdAuth';
-import { getAuthInstance } from '../firebase';
+import { isStudentIdLoginAvailable } from '../services/schoolLoginAvailability';
 import { Screen, Button, AnimatedCard } from '../ui/components';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
-
-WebBrowser.maybeCompleteAuthSession();
 
 type LoginStep =
   | 'idle'
@@ -41,98 +34,22 @@ type LoginStep =
 type SSOLoginScreenProps = {
   navigation?: {
     goBack?: () => void;
+    navigate?: (screen: 'NuniWorkspace') => void;
   };
 };
 
-type GoogleClientIds = { web: string; ios: string; android: string };
-type LoginAttempt = { provider: 'school' | 'google' };
-
-function ConfiguredGoogleLoginButton({
-  clientIds,
-  busy,
-  disabled,
-  onStart,
-  onCancel,
-  onError,
-  onIdToken,
-}: {
-  clientIds: GoogleClientIds;
-  busy: boolean;
-  disabled: boolean;
-  onStart: () => boolean;
-  onCancel: () => void;
-  onError: () => void;
-  onIdToken: (idToken: string) => Promise<void>;
-}) {
-  const [request, , promptAsync] = useIdTokenAuthRequest({
-    webClientId: clientIds.web || undefined,
-    iosClientId: clientIds.ios || undefined,
-    androidClientId: clientIds.android || undefined,
-    shouldAutoExchangeCode: false,
-  });
-  const pending = useRef(false);
-  const mounted = useRef(true);
-
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
-
-  async function start() {
-    if (!mounted.current || !request || busy || disabled || pending.current) return;
-    if (!onStart()) return;
-    pending.current = true;
-    try {
-      const result = await promptAsync();
-      if (!mounted.current) return;
-      if (result.type === 'cancel' || result.type === 'dismiss') {
-        onCancel();
-        return;
-      }
-      if (result.type !== 'success') throw new Error('Google authorization did not complete');
-
-      let idToken = result.params.id_token;
-      if (!idToken && result.params.code) {
-        if (!request.codeVerifier) throw new Error('Missing Google authorization verifier');
-        const authentication = await exchangeCodeAsync(
-          {
-            clientId: request.clientId,
-            code: result.params.code,
-            redirectUri: request.redirectUri,
-            extraParams: { code_verifier: request.codeVerifier },
-          },
-          discovery,
-        );
-        idToken = authentication.idToken ?? '';
-      }
-      if (typeof idToken !== 'string' || !idToken) throw new Error('Missing Google ID token');
-      if (mounted.current) await onIdToken(idToken);
-    } catch {
-      if (mounted.current) onError();
-    } finally {
-      pending.current = false;
-    }
-  }
-
-  return (
-    <Button
-      text={busy ? 'Google 登入處理中…' : request ? '使用 Google 繼續' : '正在準備 Google 登入…'}
-      kind="secondary"
-      onPress={() => void start()}
-      disabled={busy || disabled || !request}
-    />
-  );
-}
+type LoginAttempt = { provider: 'school' | 'platform' };
 
 export function SSOLoginScreen(props: SSOLoginScreenProps) {
   const styles = useThemeStyleSheet(createStyles);
   const bottomPadding = useTabBarContentBottomPadding();
   const passwordInput = useRef<TextInput>(null);
-  const nav = props?.navigation;
+  const routeNavigation = useNavigation<NavigationProp<Record<string, undefined>>>();
+  const nav = props?.navigation ?? routeNavigation;
   const auth = useAuth();
   const { school } = useSchool();
+
+  const schoolLoginAvailable = isStudentIdLoginAvailable();
 
   const [studentIdInput, setStudentIdInput] = useState('');
   const [studentPwInput, setStudentPwInput] = useState('');
@@ -140,7 +57,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
   const [stageDetail, setStageDetail] = useState('確認學校帳號');
   const [error, setError] = useState<string | null>(null);
   const [isRetryable, setIsRetryable] = useState(false);
-  const [googleBusy, setGoogleBusy] = useState(false);
+  const [leavingForPlatform, setLeavingForPlatform] = useState(false);
   const mounted = useRef(true);
   const activeAttempt = useRef<LoginAttempt | null>(null);
   const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -183,21 +100,20 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
     }, 250);
   }
 
-  const googleIds = useMemo(() => {
-    const extra = (Constants.expoConfig?.extra ?? {}) as Record<string, unknown>;
-    return {
-      web: typeof extra.googleWebClientId === 'string' ? extra.googleWebClientId.trim() : '',
-      ios: typeof extra.googleIosClientId === 'string' ? extra.googleIosClientId.trim() : '',
-      android:
-        typeof extra.googleAndroidClientId === 'string' ? extra.googleAndroidClientId.trim() : '',
-    };
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      if (activeAttempt.current?.provider === 'platform') {
+        activeAttempt.current = null;
+        setLeavingForPlatform(false);
+      }
+    }, []),
+  );
 
-  const googleClientId = Platform.select({
-    ios: googleIds.ios,
-    android: googleIds.android,
-    default: googleIds.web,
-  });
+  const openPlatformAccount = () => {
+    if (!nav.navigate || !beginAttempt('platform')) return;
+    setLeavingForPlatform(true);
+    nav.navigate('NuniWorkspace');
+  };
 
   const schoolName = useMemo(
     () => (school.id === PROVIDENCE_UNIVERSITY_SCHOOL_ID ? school.name : '靜宜大學'),
@@ -215,7 +131,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
   };
 
   const handleStudentIdLogin = async () => {
-    if (!studentIdInput.trim() || !studentPwInput.trim()) return;
+    if (!schoolLoginAvailable || !studentIdInput.trim() || !studentPwInput.trim()) return;
     const attempt = beginAttempt('school');
     if (!attempt) return;
     setError(null);
@@ -269,59 +185,13 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
     setIsRetryable(false);
   };
 
-  const handleGoogleStart = () => {
-    if (!beginAttempt('google')) return false;
-    setError(null);
-    setIsRetryable(false);
-    setGoogleBusy(true);
-    return true;
-  };
-
-  const handleGoogleCancel = () => {
-    if (!mounted.current || activeAttempt.current?.provider !== 'google') return;
-    activeAttempt.current = null;
-    setGoogleBusy(false);
-  };
-
-  const handleGoogleError = () => {
-    if (!mounted.current || activeAttempt.current?.provider !== 'google') return;
-    activeAttempt.current = null;
-    setError('Google 登入未完成，請稍後重試或改用學校帳號。');
-    setIsRetryable(true);
-    setStep('error');
-    setGoogleBusy(false);
-  };
-
-  const handleGoogleLogin = async (idToken: string) => {
-    const attempt = activeAttempt.current;
-    if (!attempt || attempt.provider !== 'google' || !isCurrent(attempt)) return;
-    try {
-      const cred = GoogleAuthProvider.credential(idToken);
-      await signInWithCredential(getAuthInstance(), cred);
-      if (!isCurrent(attempt)) return;
-      await auth.refreshProfile();
-      if (!isCurrent(attempt)) return;
-      void import('../services/companionEngine')
-        .then((m) => m.recordCompanionFeatureSignal('sso_login'))
-        .catch(() => undefined);
-      setStep('success');
-      showSuccess(attempt, '已使用 Google 帳號登入');
-    } catch (loginError) {
-      if (!isCurrent(attempt)) return;
-      console.warn('Google login error:', loginError);
-      handleGoogleError();
-    } finally {
-      if (isCurrent(attempt)) setGoogleBusy(false);
-    }
-  };
-
   const isBusy =
     step === 'authenticating' ||
     step === 'syncingCampus' ||
     step === 'syncingTronClass' ||
     step === 'linking';
 
-  const formLocked = isBusy || googleBusy || step === 'success';
+  const formLocked = isBusy || leavingForPlatform || step === 'success';
 
   return (
     <Screen noPadding>
@@ -338,65 +208,74 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
           <Text accessibilityRole="header" style={styles.heading}>
             從你的課程開始。
           </Text>
-          <Text style={styles.body}>使用學校帳號，查看課程與校園生活資訊。</Text>
+          <Text style={styles.body}>只有讀取個人校務資料，才需要連線學校帳號。</Text>
         </View>
 
-        <AnimatedCard title="學校帳號登入" subtitle="使用靜宜 E 校園帳號與密碼">
-          <View style={styles.fields}>
-            <View style={styles.field}>
-              <Text nativeID="student-id-label" style={styles.label}>
-                學號
-              </Text>
-              <TextInput
-                testID="student-id-input"
-                accessibilityLabel="學號"
-                accessibilityLabelledBy="student-id-label"
-                value={studentIdInput}
-                onChangeText={setStudentIdInput}
-                placeholder="輸入 E 校園帳號"
-                placeholderTextColor={theme.colors.muted}
-                autoCapitalize="none"
-                autoCorrect={false}
-                autoComplete="username"
-                textContentType="username"
-                returnKeyType="next"
-                onSubmitEditing={() => passwordInput.current?.focus()}
-                editable={!formLocked}
-                style={styles.input}
+        {schoolLoginAvailable ? (
+          <AnimatedCard title="學校帳號登入" subtitle="使用靜宜 E 校園帳號與密碼">
+            <View style={styles.fields}>
+              <View style={styles.field}>
+                <Text nativeID="student-id-label" style={styles.label}>
+                  學號
+                </Text>
+                <TextInput
+                  testID="student-id-input"
+                  accessibilityLabel="學號"
+                  accessibilityLabelledBy="student-id-label"
+                  value={studentIdInput}
+                  onChangeText={setStudentIdInput}
+                  placeholder="輸入 E 校園帳號"
+                  placeholderTextColor={theme.colors.muted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="username"
+                  textContentType="username"
+                  returnKeyType="next"
+                  onSubmitEditing={() => passwordInput.current?.focus()}
+                  editable={!formLocked}
+                  style={styles.input}
+                />
+              </View>
+              <View style={styles.field}>
+                <Text nativeID="student-password-label" style={styles.label}>
+                  密碼
+                </Text>
+                <TextInput
+                  ref={passwordInput}
+                  testID="student-password-input"
+                  accessibilityLabel="密碼"
+                  accessibilityLabelledBy="student-password-label"
+                  value={studentPwInput}
+                  onChangeText={setStudentPwInput}
+                  placeholder="輸入 E 校園密碼"
+                  placeholderTextColor={theme.colors.muted}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="current-password"
+                  textContentType="password"
+                  returnKeyType="done"
+                  editable={!formLocked}
+                  style={styles.input}
+                />
+              </View>
+              <Button
+                text={isBusy ? '登入中…' : '使用學號登入'}
+                kind="primary"
+                onPress={handleStudentIdLogin}
+                disabled={formLocked || !studentIdInput.trim() || !studentPwInput.trim()}
               />
+              <Text style={styles.note}>可同步的課程與成績依學校提供內容而定。</Text>
             </View>
-            <View style={styles.field}>
-              <Text nativeID="student-password-label" style={styles.label}>
-                密碼
-              </Text>
-              <TextInput
-                ref={passwordInput}
-                testID="student-password-input"
-                accessibilityLabel="密碼"
-                accessibilityLabelledBy="student-password-label"
-                value={studentPwInput}
-                onChangeText={setStudentPwInput}
-                placeholder="輸入 E 校園密碼"
-                placeholderTextColor={theme.colors.muted}
-                secureTextEntry
-                autoCapitalize="none"
-                autoCorrect={false}
-                autoComplete="current-password"
-                textContentType="password"
-                returnKeyType="done"
-                editable={!formLocked}
-                style={styles.input}
-              />
-            </View>
-            <Button
-              text={isBusy ? '登入中…' : '使用學號登入'}
-              kind="primary"
-              onPress={handleStudentIdLogin}
-              disabled={formLocked || !studentIdInput.trim() || !studentPwInput.trim()}
-            />
-            <Text style={styles.note}>可同步的課程與成績依學校提供內容而定。</Text>
-          </View>
-        </AnimatedCard>
+          </AnimatedCard>
+        ) : (
+          <AnimatedCard title="學校連線尚未開放">
+            <Text style={styles.body}>
+              目前無法連線學校帳號。你仍可查看公開資訊，或使用 Campus One
+              帳號加入課程、繳交作業及管理店家。
+            </Text>
+          </AnimatedCard>
+        )}
 
         {isBusy ? (
           <View
@@ -431,25 +310,15 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
           </View>
         ) : null}
 
-        <AnimatedCard title="Google 登入" subtitle="使用 Google 帳號進入 Campus One">
-          {googleClientId ? (
-            <ConfiguredGoogleLoginButton
-              key={googleClientId}
-              clientIds={googleIds}
-              busy={googleBusy}
-              disabled={isBusy || step === 'success'}
-              onStart={handleGoogleStart}
-              onCancel={handleGoogleCancel}
-              onError={handleGoogleError}
-              onIdToken={handleGoogleLogin}
-            />
-          ) : (
-            <Button text="Google 登入暫時無法使用" kind="secondary" disabled />
-          )}
+        <AnimatedCard title="Campus One 帳號" subtitle="和網頁版使用同一個帳號">
+          <Button
+            text="前往 Campus One 帳號"
+            kind="secondary"
+            onPress={openPlatformAccount}
+            disabled={formLocked}
+          />
           <Text style={styles.note}>
-            {googleClientId
-              ? 'Google 登入不會同步學校課程；需要查看課程時，請使用學校帳號。'
-              : '目前暫時無法使用 Google 登入，請使用上方的學校帳號。'}
+            用於加入課程、繳交作業與校園社群。學校課表與成績仍需連線學校帳號。
           </Text>
         </AnimatedCard>
         <Text style={styles.note}>已同步的資料可離線查看，更新內容時仍需網路連線。</Text>
