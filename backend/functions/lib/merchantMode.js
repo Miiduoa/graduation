@@ -50,7 +50,12 @@ function inspectHttpsStorefrontUrl(value) {
 }
 
 function isHttpsOrderingUrl(value) {
-  return typeof value === 'string' && value !== '' && inspectHttpsStorefrontUrl(value) === 'ok';
+  return (
+    typeof value === 'string' &&
+    value !== '' &&
+    value === value.trim() &&
+    storefrontUrlIssue(value) === null
+  );
 }
 
 function trimStorefrontUrl(value) {
@@ -145,7 +150,11 @@ function splitCsvLine(line) {
 
 function studentCafeteriaAction(input = {}) {
   const mode = resolveStoredMerchantMode(input);
-  if (mode === 'showcase_link' && isHttpsOrderingUrl(input.orderingUrl)) {
+  if (
+    mode === 'showcase_link' &&
+    storefrontUrlIssue(input.orderingUrl) === null &&
+    isHttpsOrderingUrl(input.orderingUrl)
+  ) {
     return { kind: 'showcase', label: SHOWCASE_ORDER_BUTTON_TEXT };
   }
   if (mode === 'native_order') {

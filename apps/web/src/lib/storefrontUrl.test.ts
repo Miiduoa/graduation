@@ -67,6 +67,19 @@ it('blocks javascript, userinfo, overlong, padded, http and data URLs before the
   }
 });
 
+it('treats NUL and uppercase HTTPS the same for save and display helpers', () => {
+  const nul = 'https://shop.example/order\u0000';
+  const upper = 'HTTPS://shop.example/order';
+  expect(isHttpsOrderingUrl(nul)).toBe(false);
+  expect(isStoredStorefrontUrlAllowed(nul)).toBe(false);
+  expect(safeStorefrontUrl(nul)).toBeUndefined();
+  expect(storefrontUrlIssue(nul)).toBe(STOREFRONT_URL_HTTPS_TEXT);
+  expect(isHttpsOrderingUrl(upper)).toBe(true);
+  expect(isStoredStorefrontUrlAllowed(upper)).toBe(true);
+  expect(safeStorefrontUrl(upper)).toBe(upper);
+  expect(storefrontUrlIssue(upper)).toBeNull();
+});
+
 it('saves the trimmed URL and does not write a padded value', async () => {
   await expect(
     saveShopStorefront({
@@ -126,6 +139,28 @@ it('does not save an invalid storefront URL', async () => {
     }),
   ).rejects.toThrow(STOREFRONT_URL_HTTPS_TEXT);
   expect(updateDoc).not.toHaveBeenCalled();
+});
+
+it('records an uppercase HTTPS click and rejects a NUL URL', async () => {
+  await expect(
+    recordExternalOrderClick({
+      uid: 'alice',
+      schoolId: 'pu',
+      cafeteriaId: 'stall',
+      orderingUrl: 'HTTPS://shop.example/order',
+    }),
+  ).resolves.toContain('https://shop.example/order');
+  expect(addDoc).toHaveBeenCalled();
+  addDoc.mockClear();
+  await expect(
+    recordExternalOrderClick({
+      uid: 'alice',
+      schoolId: 'pu',
+      cafeteriaId: 'stall',
+      orderingUrl: 'https://shop.example/order\u0000',
+    }),
+  ).rejects.toThrow('Invalid ordering url');
+  expect(addDoc).not.toHaveBeenCalled();
 });
 
 it('does not record an external order click for an unsafe URL', async () => {

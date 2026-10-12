@@ -57,7 +57,12 @@ function inspectHttpsStorefrontUrl(value: string): StorefrontUrlIssueKind {
 }
 
 export function isHttpsOrderingUrl(value: unknown): value is string {
-  return typeof value === 'string' && value !== '' && inspectHttpsStorefrontUrl(value) === 'ok';
+  return (
+    typeof value === 'string' &&
+    value !== '' &&
+    value === value.trim() &&
+    storefrontUrlIssue(value) === null
+  );
 }
 
 export function trimStorefrontUrl(value: unknown): string {
@@ -162,7 +167,11 @@ export function studentCafeteriaAction(input: {
   orderingUrl?: unknown;
 }): { kind: 'native' | 'showcase' | 'info' | 'native_closed'; label: string } {
   const mode = resolveStoredMerchantMode(input);
-  if (mode === 'showcase_link' && isHttpsOrderingUrl(input.orderingUrl)) {
+  if (
+    mode === 'showcase_link' &&
+    storefrontUrlIssue(input.orderingUrl) === null &&
+    isHttpsOrderingUrl(input.orderingUrl)
+  ) {
     return { kind: 'showcase', label: SHOWCASE_ORDER_BUTTON_TEXT };
   }
   if (mode === 'native_order') {

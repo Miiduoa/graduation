@@ -67,6 +67,23 @@ test('沒有外連的店不放訂餐按鈕，只顯示營業時間和地點', as
   expect(view.queryByText(/點餐|下單/)).toBeNull();
 });
 
+test('大寫 HTTPS 外連跟小寫一樣放按鈕', async () => {
+  jest.mocked(loadStorefront).mockResolvedValue({
+    id: 'stall',
+    name: '校內咖啡店',
+    merchantMode: 'showcase_link',
+    orderingUrl: 'HTTPS://shop.example/order',
+    websiteUrl: 'HTTPS://shop.example',
+    location: '活動中心',
+    openingHours: '週一到週五',
+  } as never);
+  const view = render(
+    <StorefrontScreen navigation={navigation} route={{ params: { cafeteriaId: 'stall' } }} />,
+  );
+  expect(await view.findByText('到店家網站訂餐')).toBeTruthy();
+  expect(view.getByText('店家網站')).toBeTruthy();
+});
+
 test('不合格外連不當成按鈕，也不打開店家網站', async () => {
   const unsafe = [
     'javascript:alert(1)',
@@ -76,6 +93,7 @@ test('不合格外連不當成按鈕，也不打開店家網站', async () => {
     'https://shop.example/order ',
     'http://shop.example/order',
     'data:text/html,hi',
+    'https://shop.example/order\u0000',
   ];
   for (const url of unsafe) {
     jest.mocked(loadStorefront).mockResolvedValue({
@@ -105,6 +123,7 @@ test('外連確認頁不合格網址不放按鈕', async () => {
     ' https://shop.example/order',
     'http://shop.example/order',
     'data:text/html,hi',
+    'https://shop.example/order\u0000',
   ];
   for (const orderingUrl of unsafe) {
     const view = render(
