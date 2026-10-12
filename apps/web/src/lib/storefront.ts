@@ -81,24 +81,26 @@ export async function loadStorefrontPosts(
       limit(30),
     ),
   );
-  const posts = snapshot.docs
-    .map((row) => {
-      const data = row.data();
-      if (data.kind === 'draft') return null;
-      return {
+  const posts: StorefrontPost[] = snapshot.docs.flatMap((row) => {
+    const data = row.data();
+    if (data.kind === 'draft') return [];
+    const kind: StorefrontPost['kind'] =
+      data.kind === 'promo' || data.kind === 'announcement' ? data.kind : 'post';
+    return [
+      {
         id: row.id,
         title: typeof data.title === 'string' ? data.title : '',
         text: typeof data.text === 'string' ? data.text : '',
-        kind: data.kind === 'promo' || data.kind === 'announcement' ? data.kind : 'post',
+        kind,
         createdAt:
           data.createdAt && typeof data.createdAt.toDate === 'function'
             ? data.createdAt.toDate().toISOString()
             : '',
         likeCount: typeof data.likeCount === 'number' ? data.likeCount : 0,
         liked: false,
-      } satisfies StorefrontPost;
-    })
-    .filter((row): row is StorefrontPost => Boolean(row));
+      },
+    ];
+  });
   if (!uid) return posts;
   const liked = await Promise.all(
     posts.map((post) =>
