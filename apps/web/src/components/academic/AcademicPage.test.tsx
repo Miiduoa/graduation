@@ -14,8 +14,20 @@ const account = vi.hoisted(() => ({
   user: { uid: 'one' } as { uid: string } | null,
   loading: false,
   error: null,
+  studentId: true,
 }));
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => account }));
+vi.mock('@/lib/signInOptions', () => ({
+  useSignInOptions: () => ({
+    google: true,
+    studentId: account.studentId,
+    loading: false,
+    retry: vi.fn(),
+  }),
+}));
+vi.mock('@/features/nuni/Session', () => ({
+  useOptionalNuniSession: () => null,
+}));
 vi.mock('next/navigation', () => ({ usePathname: () => '/grades' }));
 vi.mock('@/components/SiteShell', () => ({
   SiteShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main>,
@@ -69,6 +81,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   account.user = { uid: 'one' };
   account.loading = false;
+  account.studentId = true;
   vi.mocked(loadAcademicRecords).mockResolvedValue(grades());
   timetableApi.loadPersonalTimetable.mockResolvedValue(emptyTimetable());
   timetableApi.savePersonalTimetable.mockResolvedValue({ stored: 'cloud' });
@@ -97,11 +110,12 @@ it('clears private records synchronously when signing out', async () => {
   const view = render(<GradesPage />);
   await screen.findByText('真實來源科目');
   account.user = null;
+  account.studentId = false;
   view.rerender(<GradesPage />);
   expect(screen.queryByText('真實來源科目')).toBeNull();
-  expect(screen.getByRole('link', { name: '登入學校帳號' }).getAttribute('href')).toBe(
-    '/login?returnUrl=%2Fgrades',
-  );
+  expect(screen.getByRole('heading', { name: '這個功能還沒接通' })).toBeTruthy();
+  expect(screen.getByText('成績請先到學校的 e 校園查看。')).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /學校帳號/ })).toBeNull();
 });
 it('ignores an old account response even after logging out and back into the same UID', async () => {
   let finish!: (value: AcademicSnapshot<'grades'>) => void;
@@ -135,6 +149,14 @@ it('offers reconnection without pretending an expired session has an empty trans
   const link = await screen.findByRole('link', { name: '連線學校帳號' });
   expect(link.getAttribute('href')).toContain('reconnect=school');
   expect(screen.queryByText('課程紀錄')).toBeNull();
+});
+it('does not open a school login form when student ID is unavailable', async () => {
+  account.studentId = false;
+  vi.mocked(loadAcademicRecords).mockRejectedValue(new AcademicConnectionError('reconnect'));
+  render(<GradesPage />);
+  expect(await screen.findByRole('heading', { name: '這個功能還沒接通' })).toBeTruthy();
+  expect(screen.getByText('成績請先到學校的 e 校園查看。')).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /學校帳號/ })).toBeNull();
 });
 it('keeps weekend and unrecognized school courses as drafts until confirm', async () => {
   const course = {

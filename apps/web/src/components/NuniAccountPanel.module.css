@@ -73,6 +73,11 @@
 .membershipList span {
   color: var(--muted);
 }
+.membershipList a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
 .membershipForm {
   display: grid;
   justify-items: start;

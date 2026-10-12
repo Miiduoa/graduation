@@ -23,7 +23,12 @@ vi.mock('@/features/nuni/Session', () => ({
     logout: vi.fn(),
     refresh: state.refresh,
   }),
-  browserRequest: vi.fn(),
+  browserRequest: vi.fn(async (path: string) => {
+    if (path === 'class-workspaces') return { workspaces: [] };
+    if (path === 'merchant-applications') return { applications: [] };
+    if (path === 'merchant-workspaces') return { workspaces: [] };
+    return {};
+  }),
 }));
 vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({
@@ -95,6 +100,7 @@ it('uses the Nuni account for home and links directly to pending work with its a
     ],
   });
   render(<HomePage />);
+  expect(await screen.findByRole('heading', { name: '我的身分' })).toBeTruthy();
   const taskLink = await screen.findByRole('link', { name: /查看並繳交作業/ });
   expect(taskLink.getAttribute('href')).toBe('/classroom/course/design#assignment-draft');
   expect(loadHomeData).not.toHaveBeenCalled();

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import QRCode from 'qrcode';
 import { useAuth } from './AuthGuard';
+import { SchoolAccountRequired } from './SchoolAccountRequired';
 import { SiteShell } from './SiteShell';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
@@ -22,7 +23,6 @@ import {
   type AttendanceSession,
   type CourseAttendance as AttendanceData,
 } from '@/lib/courseAttendance';
-import home from '@/app/home.module.css';
 import service from '@/app/servicePages.module.css';
 import styles from './course-attendance.module.css';
 
@@ -461,18 +461,10 @@ export function CourseAttendance({
         ) : user ? (
           <Workspace key={`${user.uid}:${courseId}`} uid={user.uid} courseId={courseId} />
         ) : (
-          <section className={service.stateCard}>
-            <h2>登入後查看課堂出席</h2>
-            <p>使用這門課的學校帳號登入，即可簽到或查看紀錄。</p>
-            <div className={service.actions}>
-              <Link
-                className={home.primary}
-                href={`/login?redirect=${encodeURIComponent(`${path}/attendance${schoolSearch}`)}`}
-              >
-                登入帳號
-              </Link>
-            </div>
-          </section>
+          <SchoolAccountRequired
+            returnUrl={`${path}/attendance${schoolSearch}`}
+            alternative="出缺席請先在課堂上向老師確認。"
+          />
         )}
       </div>
     </SiteShell>

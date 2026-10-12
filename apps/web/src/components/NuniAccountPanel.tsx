@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useNuniSession } from '@/features/nuni/Session';
+import { AccountIdentity } from './AccountIdentity';
 import { AccountMemberships } from './AccountMemberships';
 import styles from './NuniAccountPanel.module.css';
 
@@ -54,6 +55,11 @@ export function NuniAccountPanel() {
           店家合作
         </Link>
       </div>
+      <AccountIdentity
+        key={`identity:${account.session.platformAccountId}:${account.session.context}`}
+        context={account.session.context}
+        accountId={account.session.platformAccountId}
+      />
       <AccountMemberships
         key={`${account.session.platformAccountId}:${account.session.context}`}
         context={account.session.context}
