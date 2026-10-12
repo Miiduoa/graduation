@@ -121,7 +121,7 @@ test('keeps old announcements when the school site is down and links the office 
         sourceId: 'pu-acd',
         office: '教務處',
         status: 'unavailable',
-        message: '學校網站暫時連不上，可以先到學校網站看最新消息',
+        message: '學校網站暫時連不上',
         lastSuccessAt: '2026-10-12T10:05:00.000Z',
         listUrl: 'https://acd.pu.edu.tw/p/403-1042-885-1.php',
       },
@@ -139,14 +139,16 @@ test('keeps old announcements when the school site is down and links the office 
         sourceId: 'pu-acd',
         office: '教務處',
         status: 'unavailable',
-        message: '學校網站暫時連不上，可以先到學校網站看最新消息',
+        message: '學校網站暫時連不上',
         listUrl: 'https://acd.pu.edu.tw/p/403-1042-885-1.php',
       },
     ],
     allUnavailable: true,
   });
   const empty = render(<AnnouncementsScreen navigation={navigation} />);
-  await empty.findByText('學校網站暫時連不上，可以先到學校網站看最新消息');
+  await empty.findByText('學校網站暫時連不上');
+  expect(empty.queryByText('這裡還沒接上學校公告，請先到學校網站看最新消息')).toBeNull();
+  expect(empty.queryByText('目前沒有公告')).toBeNull();
   const openUrl = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined as never);
   fireEvent.press(empty.getByText('教務處'));
   expect(openUrl).toHaveBeenCalledWith('https://acd.pu.edu.tw/p/403-1042-885-1.php');
@@ -160,6 +162,43 @@ test('keeps old announcements when the school site is down and links the office 
   await detail.findByText('看原文');
 });
 
+test('links catalog office sites when the school has never been fetched', async () => {
+  jest.mocked(loadCampusAnnouncementFeed).mockResolvedValue({
+    announcements: [],
+    sources: [],
+    allUnavailable: false,
+  });
+  const view = render(<AnnouncementsScreen navigation={navigation} />);
+  await view.findByText('這裡還沒接上學校公告，請先到學校網站看最新消息');
+  expect(view.queryByText('目前沒有公告')).toBeNull();
+  expect(view.queryByText('學校網站暫時連不上')).toBeNull();
+  const openUrl = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined as never);
+  fireEvent.press(view.getByText('教務處'));
+  expect(openUrl).toHaveBeenCalledWith('https://acd.pu.edu.tw/p/403-1042-885-1.php');
+  openUrl.mockRestore();
+});
+
+test('shows an empty success only after a successful empty fetch', async () => {
+  jest.mocked(loadCampusAnnouncementFeed).mockResolvedValue({
+    announcements: [],
+    sources: [
+      {
+        sourceId: 'pu-acd',
+        office: '教務處',
+        status: 'healthy',
+        message: '',
+        lastSuccessAt: '2026-10-12T10:05:00.000Z',
+        listUrl: 'https://acd.pu.edu.tw/p/403-1042-885-1.php',
+      },
+    ],
+    allUnavailable: false,
+  });
+  const view = render(<AnnouncementsScreen navigation={navigation} />);
+  await view.findByText('目前沒有公告');
+  expect(view.queryByText('這裡還沒接上學校公告，請先到學校網站看最新消息')).toBeNull();
+  expect(view.queryByText('學校網站暫時連不上')).toBeNull();
+});
+
 test.each(['', 'staging', 'production'])(
   'hides cms-none demo schools from the announcement list when app env is %s',
   async (env) => {
@@ -169,6 +208,8 @@ test.each(['', 'staging', 'production'])(
     expect(view.getByText('目前沒有公告')).toBeTruthy();
     expect(view.queryByText('示範大學')).toBeNull();
     expect(view.queryByText('暫時抓不到')).toBeNull();
+    expect(view.queryByText('這裡還沒接上學校公告，請先到學校網站看最新消息')).toBeNull();
+    expect(view.queryByText('學校網站暫時連不上')).toBeNull();
   },
 );
 

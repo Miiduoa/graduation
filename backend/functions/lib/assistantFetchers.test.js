@@ -73,7 +73,7 @@ test('keeps stale scrape rows when a source is down and only fails when nothing 
     row('pu-osa', { sourceId: 'pu-osa', status: 'unavailable' }),
   ]);
   await expect(fetchAssistantAnnouncements('pu')).rejects.toMatchObject({
-    message: '學校網站暫時連不上，可以先到學校網站看最新消息',
+    message: '學校網站暫時連不上',
   });
 });
 
