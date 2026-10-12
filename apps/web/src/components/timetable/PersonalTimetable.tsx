@@ -45,7 +45,9 @@ import { useAcademicRecords } from '@/lib/useAcademicRecords';
 import type { AcademicCourse } from '@/lib/academicRecords';
 import { CourseEditor } from './CourseEditor';
 import { TimetableGrid, UnscheduledCourses } from './TimetableGrid';
-import { validateCourseDraft } from './courseEditorModel';
+import { isPlacedCourse, validateCourseDraft } from './courseEditorModel';
+import { planningReadiness } from './timetableMovement';
+import movement from './timetableMovement.module.css';
 
 function fromSchoolCourse(course: AcademicCourse): PersonalCourse {
   const start = course.periods[0] || 0;
@@ -110,7 +112,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
   const schoolRecords = useAcademicRecords('courses');
 
   const planner = useMemo(
-    () => new SchedulePlanner(timetable?.courses || [], friends.filter((friend) => friend.courses.length > 0), selectedFriend),
+    () => new SchedulePlanner(timetable?.courses || [], friends.filter((friend) => planningReadiness(friend.courses, PERIOD_TIMES.length, WEEKDAY_LABELS.length).ready), selectedFriend),
     [timetable?.courses, friends, selectedFriend],
   );
 
@@ -138,7 +140,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
           loaded.push({
             id: row.uid,
             name: row.name || '好友',
-            courses: theirs?.courses || [],
+            courses: theirs?.schoolId === schoolId ? theirs.courses : [],
           });
         }
         if (!current) return;
@@ -181,6 +183,8 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
       const saved = await savePersonalTimetable(uid, { ...next, schoolId });
       if (!active.current) return false;
       setTimetable({ ...next, schoolId });
+      setPlanResult(null);
+      setShareUrl('');
       setNotice(saved.stored === 'cloud' ? message : '已記在本站，僅儲存於這台瀏覽器；尚未同步到帳號，好友可見狀態仍以雲端資料為準。');
       return true;
     } catch {
@@ -211,9 +215,11 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
 
   const conflicts = findCourseConflicts(timetable.courses);
   const selected = friends.find((friend) => friend.id === selectedFriend);
-  const windows = selected && selected.courses.length > 0 ? meetupWindows(timetable.courses, selected.courses) : [];
+  const planning = planningReadiness(timetable.courses, PERIOD_TIMES.length, WEEKDAY_LABELS.length);
+  const friendPlanning = selected ? planningReadiness(selected.courses, PERIOD_TIMES.length, WEEKDAY_LABELS.length) : null;
+  const windows = planning.ready && selected && friendPlanning?.ready ? meetupWindows(timetable.courses, selected.courses) : [];
   const sendMeetup = async (kind: 'meal' | 'study', day: number, startMinute: number) => {
-    if (!uid || !selected || !selected.courses.length || meetupBusy) return;
+    if (!uid || !selected || !planning.ready || !friendPlanning?.ready || meetupBusy || saving.current) return;
     setMeetupBusy(true);
     const label = meetupLabel({ day, kind, startMinute });
     try {
@@ -304,6 +310,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
   };
 
   const runPlan = (title: string, query: string) => {
+    if (!planning.ready) return;
     const answer = planner.ask(query) || '這份課表算不出結果，先確認課有排上星期和節次。';
     setPlanResult({
       title,
@@ -315,6 +322,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
   };
 
   const todayFree = () => {
+    if (!planning.ready) return;
     const today = new Date().getDay();
     if (today < 1 || today > 5) {
       setPlanResult({ title: '今天空堂', lines: ['今天是週末，課表上沒有排課。'] });
@@ -441,7 +449,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
             單日
           </button>
         </div>
-        <label className={styles.field}>
+        {view === 'day' && <label className={styles.field}>
           上課日
           <select value={day} onChange={(event) => setDay(Number(event.target.value))}>
             {WEEKDAY_LABELS.map((label, index) => (
@@ -450,8 +458,8 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
               </option>
             ))}
           </select>
-        </label>
-        <button type="button" className="btn" disabled={busy} onClick={() => startEditing({ ...cleanCourse({ day, start: 1, end: 1 }), name: '' })}>
+        </label>}
+        <button type="button" className="btn primary" disabled={busy} onClick={() => startEditing({ ...cleanCourse({ day, start: 1, end: 1 }), name: '' })}>
           新增課程
         </button>
         <button
@@ -469,13 +477,17 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
         <input readOnly value={shareUrl} onFocus={(event) => event.currentTarget.select()} />
       </label>}
 
+      {timetable.courses.length === 0 && <section className={movement.empty} aria-label="開始建立課表">
+        <h2>把這週的課放進來</h2>
+        <p>可以點選下方空白格，也可以<a href="#timetable-import">匯入課表</a>。確認儲存前，不會更動任何課程。</p>
+      </section>}
       {view === 'grid' ? (
         <TimetableGrid courses={timetable.courses} disabled={busy} onEdit={startEditing} />
       ) : view === 'week' ? (
         <div className={styles.week}>
           {WEEKDAY_LABELS.map((label, index) => {
             const entries = timetable.courses
-              .filter((course) => course.day === index + 1)
+              .filter((course) => course.day === index + 1 && isPlacedCourse(course, PERIOD_TIMES.length, WEEKDAY_LABELS.length))
               .sort((a, b) => a.start - b.start);
             return (
               <section className={styles.day} key={label}>
@@ -489,7 +501,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
                     </button>
                   ))
                 ) : (
-                  <p className={styles.empty}>無課</p>
+                  <p className={styles.empty}>尚未排課</p>
                 )}
               </section>
             );
@@ -497,12 +509,12 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
         </div>
       ) : (
         <>
-          {!timetable.courses.some((course) => course.day === day) && (
+          {!timetable.courses.some((course) => course.day === day && isPlacedCourse(course, PERIOD_TIMES.length, WEEKDAY_LABELS.length)) && (
             <p className={styles.empty}>{WEEKDAY_LABELS[day - 1]}還沒有課程，可使用上方「新增課程」安排。</p>
           )}
           <ul className={styles.list}>
             {timetable.courses
-              .filter((course) => course.day === day)
+              .filter((course) => course.day === day && isPlacedCourse(course, PERIOD_TIMES.length, WEEKDAY_LABELS.length))
               .sort((a, b) => a.start - b.start)
               .map((course) => (
                 <li key={course.id}>
@@ -535,7 +547,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
         />
       )}
 
-      <section className={styles.panel} aria-label="匯入課表">
+      <section id="timetable-import" className={styles.panel} aria-label="匯入課表">
         <h2>匯入課表</h2>
         <p className={styles.notice}>
           截圖或貼上文字後會先變成草稿。{IMPORT_CONFIRM_COPY}
@@ -608,12 +620,12 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
 
       <section className={styles.panel} aria-label="幫我安排">
         <h2>幫我安排</h2>
-        <p className={styles.notice}>用你現在這份課表算。</p>
+        <p className={styles.notice}>{planning.ready ? '依目前已填入的課程計算；未匯入的課程或臨時調課，仍需自行核對。' : planning.message}</p>
         <div className={styles.toolbar}>
-          <button type="button" className="btn" onClick={() => runPlan('下一堂', '下一堂')}>
+          <button type="button" className="btn" disabled={busy || !planning.ready} onClick={() => runPlan('下一堂', '下一堂')}>
             下一堂
           </button>
-          <button type="button" className="btn" onClick={todayFree}>
+          <button type="button" className="btn" disabled={busy || !planning.ready} onClick={todayFree}>
             今天空堂
           </button>
         </div>
@@ -641,7 +653,9 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
           <button
             type="button"
             className="btn"
+            disabled={busy || !planning.ready}
             onClick={() => {
+              if (!planning.ready || saving.current) return;
               const slots = studySlots(timetable?.courses || [], studyDay, studyHours);
               setPlanResult({
                 title: `${WEEKDAY_LABELS[studyDay - 1]}排 ${studyHours} 小時讀書`,
@@ -676,7 +690,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
           <>
             <label className={styles.field}>
               朋友
-              <select value={selectedFriend || ''} onChange={(event) => setSelectedFriend(event.target.value || null)}>
+              <select value={selectedFriend || ''} onChange={(event) => { setSelectedFriend(event.target.value || null); setPlanResult(null); }}>
                 <option value="">選擇一位朋友</option>
                 {friends.map((friend) => (
                   <option value={friend.id} key={friend.id}>
@@ -686,9 +700,11 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
                 ))}
               </select>
             </label>
-            {selected && selected.courses.length > 0 && windows.length === 0 && (
+            {selected && planning.ready && friendPlanning?.ready && windows.length === 0 && (
               <p className={styles.notice}>這週找不到兩個人都沒課、有一小時的時段。</p>
             )}
+            {selected && !planning.ready && <p className={styles.notice}>{planning.message}</p>}
+            {selected && selected.courses.length > 0 && !friendPlanning?.ready && <p className={styles.notice}>好友課表仍有時間未完整的課程，暫不提供共同空堂與邀約。</p>}
             {selected && !selected.courses.length && (
               <p className={styles.notice}>目前沒有可用的好友課表，可能尚未開放、未排課或暫時讀取失敗；不會將缺少資料當作整天空堂。</p>
             )}
@@ -697,7 +713,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
                 <MeetupWindowRow
                   key={`${window.day}-${window.start}`}
                   window={window}
-                  busy={meetupBusy}
+                  busy={meetupBusy || busy}
                   onSend={(kind, startMinute) => void sendMeetup(kind, window.day, startMinute)}
                 />
               ))}
