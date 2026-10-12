@@ -1,0 +1,166 @@
+name: Web release
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_revision:
+        description: 'Complete main commit SHA whose full CI has passed'
+        required: true
+        type: string
+      confirm_app:
+        description: 'Type nuni-web to confirm the existing production Web app'
+        required: true
+        type: string
+  pull_request:
+    paths:
+      - 'deploy/web/release-check*'
+      - '.github/workflows/web-release.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/web/release-check*'
+      - '.github/workflows/web-release.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  guards:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '22'
+      - run: node --test deploy/web/release-check.test.mjs
+
+  release:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: guards
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    concurrency:
+      group: nuni-web-production-release
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      actions: read
+    env:
+      EXPECTED_RELEASE_SHA: ${{ inputs.expected_revision }}
+      CONFIRM_APP: ${{ inputs.confirm_app }}
+      CAMPUS_RELEASE_SHA: ${{ inputs.expected_revision }}
+      NEXT_PUBLIC_SITE_URL: https://nuni.tw
+      NEXT_PUBLIC_FUNCTIONS_BASE_URL: ${{ vars.NEXT_PUBLIC_FUNCTIONS_BASE_URL }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '22'
+      - name: Require exact main revision and successful full CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node deploy/web/release-check.mjs gate
+      - name: Validate approved Firebase public browser configuration
+        run: node deploy/web/release-check.mjs firebase
+      - name: Require an app-scoped deployment credential
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_NUNI_WEB_DEPLOY_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo '::error::Missing FLY_NUNI_WEB_DEPLOY_TOKEN; no deployment performed.'
+            exit 1
+          fi
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1
+      - name: Record existing machines and immutable rollback image
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_NUNI_WEB_DEPLOY_TOKEN }}
+        run: |
+          set -euo pipefail
+          flyctl machine list --app nuni-web --json > "$RUNNER_TEMP/campus-web-machines-before.json"
+          node deploy/web/release-check.mjs snapshot "$RUNNER_TEMP/campus-web-machines-before.json" release-evidence/before.json
+          rm -f "$RUNNER_TEMP/campus-web-machines-before.json"
+          flyctl auth docker
+      - name: Build production image on the existing GitHub runner
+        run: |
+          set -euo pipefail
+          IMAGE="registry.fly.io/nuni-web:source-${EXPECTED_RELEASE_SHA}"
+          docker build --platform linux/amd64 -f deploy/web/Dockerfile.nuni -t "$IMAGE" \
+            --build-arg CAMPUS_RELEASE_SHA \
+            --build-arg NEXT_PUBLIC_SITE_URL \
+            --build-arg NEXT_PUBLIC_FUNCTIONS_BASE_URL \
+            --build-arg NEXT_PUBLIC_FIREBASE_API_KEY \
+            --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN \
+            --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID \
+            --build-arg NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET \
+            --build-arg NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID \
+            --build-arg NEXT_PUBLIC_FIREBASE_APP_ID .
+          docker run -d --name campus-web-release-check -p 127.0.0.1:18080:3000 \
+            -e CAMPUS_LEGACY_ENABLED=false "$IMAGE"
+          trap 'docker rm -f campus-web-release-check >/dev/null 2>&1 || true' EXIT
+          curl --fail --silent --retry 10 --retry-all-errors --retry-delay 2 --max-time 5 \
+            http://127.0.0.1:18080/health/live >/dev/null
+          curl --fail --silent --max-time 15 http://127.0.0.1:18080/bus >/dev/null
+          test "$(docker exec campus-web-release-check id -u)" != '0'
+          docker push "$IMAGE"
+          docker image inspect "$IMAGE" --format '{{json .RepoDigests}}' > "$RUNNER_TEMP/campus-web-digests.json"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const entries = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/campus-web-digests.json`, 'utf8'));
+          const image = entries.find((entry) => /^registry\.fly\.io\/nuni-web@sha256:[a-f0-9]{64}$/.test(entry));
+          if (!image) throw new Error('Published image digest could not be established.');
+          fs.appendFileSync(process.env.GITHUB_ENV, `RELEASE_IMAGE=${image}\n`);
+          fs.writeFileSync('release-evidence/image.json', JSON.stringify({ image, revision: process.env.EXPECTED_RELEASE_SHA }, null, 2));
+          NODE
+      - name: Recheck source and production before changing any machine
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FLY_API_TOKEN: ${{ secrets.FLY_NUNI_WEB_DEPLOY_TOKEN }}
+        run: |
+          set -euo pipefail
+          node deploy/web/release-check.mjs gate
+          flyctl machine list --app nuni-web --json > "$RUNNER_TEMP/campus-web-machines-current.json"
+          node deploy/web/release-check.mjs snapshot "$RUNNER_TEMP/campus-web-machines-current.json" release-evidence/pre-rollout.json
+          rm -f "$RUNNER_TEMP/campus-web-machines-current.json"
+          node deploy/web/release-check.mjs stable release-evidence/before.json release-evidence/pre-rollout.json
+      - name: Roll out to existing Web machines only
+        id: rollout
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_NUNI_WEB_DEPLOY_TOKEN }}
+        run: |
+          set -euo pipefail
+          flyctl deploy --app nuni-web --config deploy/web/fly.nuni.toml \
+            --image "$RELEASE_IMAGE" --strategy rolling --update-only --ha=false --yes
+      - name: Verify both machines and public release
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_NUNI_WEB_DEPLOY_TOKEN }}
+        run: |
+          set -euo pipefail
+          flyctl machine list --app nuni-web --json > "$RUNNER_TEMP/campus-web-machines-after.json"
+          node deploy/web/release-check.mjs snapshot "$RUNNER_TEMP/campus-web-machines-after.json" release-evidence/after.json
+          rm -f "$RUNNER_TEMP/campus-web-machines-after.json"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const rows = JSON.parse(fs.readFileSync('release-evidence/after.json', 'utf8'));
+          if (!rows.every((row) => row.image === process.env.RELEASE_IMAGE)) throw new Error('Not every Web machine has the expected image.');
+          NODE
+          node deploy/web/release-check.mjs verify
+      - name: Preserve sanitized release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-release-${{ github.sha }}-${{ github.run_attempt }}
+          path: release-evidence/*.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Remove local registry credentials and transient machine responses
+        if: always()
+        run: |
+          docker logout registry.fly.io >/dev/null 2>&1 || true
+          rm -f "$RUNNER_TEMP"/campus-web-machines-*.json "$RUNNER_TEMP/campus-web-digests.json"
