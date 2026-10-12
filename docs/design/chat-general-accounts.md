@@ -1,6 +1,6 @@
 # 一般帳號開放聊天（含私訊與社團群）
 
-2026-10-12。顧晉瑋決定兩件事：
+2026-10-12。顧晉瑋決定兩件事，並把第 12 節五題交給我們定案（已全部寫入該節）：
 
 1. 只用 Google、Apple 或 Email 登入、沒綁學校的一般帳號，也可以用聊天，包括私訊。
 2. 一般帳號也可以進**社團群**（公開社團、活動群）。**班級群仍限已驗證的同校學生。**
@@ -38,7 +38,7 @@
 
 `users/{uid}` 只有本人能讀，裡面可有 `displayName`、`studentId`、`schoolId`、`email`。校內名錄另有 `department`、`roleLabel`。這些都不能因為開了聊天或社團群，就讓未驗證的人看見。
 
-「社團群／活動群」對應現有 `groups.type == 'club'`（活動群可再掛 `linkedEventId` 指到 `schools/{schoolId}/clubEvents/{eventId}`）。報名活動（`clubEvents/.../registrations`）**不會**自動變成聊天成員，避免把報名個資捲進群。`type == 'course'` 是班級群，不在此次放寬範圍。`type == 'study'` 見第 12 節待決。
+「社團群／活動群」對應現有 `groups.type == 'club'`（活動群可再掛 `linkedEventId` 指到 `schools/{schoolId}/clubEvents/{eventId}`）。報名活動（`clubEvents/.../registrations`）**不會**自動變成聊天成員，避免把報名個資捲進群。`type == 'course'` 是班級群，不在此次放寬範圍。`type == 'study'`（讀書會）見第 12 節已定案：預設僅限同校，且不准設成公開立刻加入。
 
 ---
 
@@ -129,6 +129,7 @@ Nuni 跨校看板已有 `joinPolicy: 'open' | 'request' | 'invite-only'`（`apps
 - **已經存在、沒有 `joinPolicy` 欄位的社團／活動群**：視同 `school_verified`。一般帳號進不去，行為與今天相同。幹部要公開或改需審核，必須自己改一次。
 - **之後新建的社團／活動群**：預設 `request`（需審核）。不要預設公開。
 - **班級群**：不能改，永遠 `school_verified`。
+- **讀書會（`type == 'study'`）**：缺欄或新建都視同 `school_verified`。幹部可改成 `request`，**不能**改成 `open`（第 12 題 5）。
 - 從 `school_verified` 改成 `open` 或 `request` 時，畫面要先確認：「之後沒綁學校的人也能進來。群裡只會顯示暱稱，不會顯示學號與真名。」
 - 從 `open`／`request` 改回 `school_verified` 時：未驗證成員改為 `status: 'left'`，並寫原因 `policy_closed`；他們不能再讀群聊。不刪歷史訊息。
 
@@ -326,10 +327,12 @@ Nuni 跨校看板已有 `joinPolicy: 'open' | 'request' | 'invite-only'`（`apps
 
 ### 6.5 能不能從群裡直接私訊別人
 
+未驗證**不能從社團群發起私訊**（名單與訊息氣泡都不行）。台灣常見手法是先入群再私訊（假幹部、加 LINE、營隊報名），Discord 也把「進群就能跟成員私訊」當成騷擾入口。未驗證要私訊，只能用對方主動給的平台代號或對方先傳來的請求；一般帳號之間的平台私訊契約不變。
+
 | 動作 | 未驗證 | 已驗證 |
 | --- | --- | --- |
 | 從完整成員名單點「傳訊」 | 沒有名單，所以不行 | 公開／需審核群：走平台私訊請求，不開校內 DM。僅限同校：維持現況 |
-| 從某則訊息長按「傳私訊」 | 冷靜期內不行。期滿後可以，一律進對方的訊息請求，且帶未驗證標示 | 可以；若對方是一般帳號，同樣進請求 |
+| 從某則訊息長按「傳私訊」 | 不行。按鈕隱藏或點了提示：**通過學校身分驗證後，才能從群裡傳私訊。** | 可以；若對方是一般帳號，同樣進請求 |
 | 幹部私訊申請者 | 不適用 | 可以，走請求 |
 
 群裡不提供「對所有人廣播私訊」或複製 uid 列表。這是 Telegram 隱藏名單要擋的掃人路徑。
@@ -366,14 +369,20 @@ Nuni 跨校看板已有 `joinPolicy: 'open' | 'request' | 'invite-only'`（`apps
 
 ### 7.4 檢舉後自動隱藏的門檻
 
-私訊不自動隱藏別人對話裡的內容（那是一對一）。社團群要擋擴散：
+私訊不自動隱藏別人對話裡的內容（那是一對一）。社團群要擋擴散，但不能讓十人小幹部群裡三個人就能默默隱藏別人。`memberCount` 已在群主文件上，callable 直接讀，不必新集合。
+
+定義 `hideThreshold = min(10, max(3, ceil(memberCount × 0.1)))`，`muteThreshold = min(20, max(5, ceil(memberCount × 0.1)))`。人數不到 10 的群不算比例、也不自動處理。
 
 | 條件 | 系統做什麼 | 不做什麼 |
 | --- | --- | --- |
-| 同一則群訊被 **3 個不同成員**檢舉 | 對作者與幹部以外的人隱藏（`hiddenByReports: true`）。作者看到「這則訊息因檢舉而隱藏」。幹部看到原文與檢舉數 | 不自動踢人、不自動封鎖 |
-| 同一人在同一群、24 小時內被 **5 個不同成員**檢舉（可跨多則） | 自動禁言 24 小時，並通知幹部 | 不自動改 `joinPolicy`、不解散群 |
+| 任何一則檢舉 | 立刻通知該群幹部 | 不對其他人隱藏 |
+| `memberCount < 10` | 只通知幹部，不自動隱藏、不自動禁言 | 小群交給人審，避免檢舉霸凌 |
+| `memberCount >= 10` 且同一則的不同檢舉人數 ≥ hideThreshold | 對作者與幹部以外的人隱藏（`hiddenByReports: true`）。作者看到「這則訊息因檢舉而隱藏」。幹部看到原文與檢舉數 | 不自動踢人、不自動封鎖 |
+| `memberCount >= 10` 且同一人在同一群、24 小時內被 ≥ muteThreshold 個不同成員檢舉（可跨多則） | 自動禁言 24 小時，並通知幹部 | 不自動改 `joinPolicy`、不解散群 |
 | 幹部點「不是問題」 | 取消隱藏與因門檻加上的禁言 | 不刪檢舉紀錄（後台仍看得到） |
 | 幹部點「確認違規」 | 維持隱藏，可再踢人 | — |
+
+例子：8 人社團只通知幹部；12 人隱藏門檻 3、禁言 5；50 人隱藏與禁言都是 5；200 人隱藏封頂 10、禁言封頂 20。Facebook 社團是「一則檢舉就通知管理員」、沒有公開的自動隱藏票數；Discord AutoMod 是關鍵字／洗版立刻擋，不是投票踢人。校園社團常只有十幾人，固定 3／5 會變成檢舉霸凌；迎新大群若只按 10% 無上限，詐騙訊息要等太久，所以加下限、比例與上限。
 
 檢舉人要是該群 active 成員。同一人對同一則只能檢舉一次。未進群的人不能檢舉群訊，避免被外部灌檢舉。
 
@@ -468,9 +477,9 @@ canonical 仍是 Firestore 的 app-native 聊天與群組（見 `docs/architectu
 - 已登入且 `type == 'club'` 且 `joinPolicy` 為 `open` 或 `request` 且 `isPublished == true` 時，可讀**主文件**（名稱、簡介、人數、joinPolicy），不能因此讀 `members`、作業、知識庫。
 - `type == 'course'` 維持只有成員可讀。
 
-建立：維持要校籍（一般帳號不能開社團）。`type == 'course'` 寫入時強制 `joinPolicy == 'school_verified'`。
+建立：維持要校籍（一般帳號不能開社團）。`type == 'course'` 寫入時強制 `joinPolicy == 'school_verified'`。`type == 'study'` 預設 `school_verified`，且拒絕 `open`。
 
-更新：`canManageGroup` 可改 `joinPolicy`、`isPublished`、簡介；不能改 `schoolId`、`type`。把班級改成公開必須被規則拒絕。
+更新：`canManageGroup` 可改 `joinPolicy`、`isPublished`、簡介；不能改 `schoolId`、`type`。把班級改成公開、或把讀書會改成 `open`，必須被規則拒絕。
 
 **`groups/{id}/members/{uid}`**
 
@@ -568,7 +577,7 @@ canonical 仍是 Firestore 的 app-native 聊天與群組（見 `docs/architectu
 社團／班級：
 
 - 一般帳號不能客戶端 `set` `groups/{id}/members/{uid}`。
-- `type == 'course'` 即使有人把 `joinPolicy` 改成 `open`，規則拒絕該 update；一般帳號讀班級主文件失敗。
+- `type == 'course'` 或 `type == 'study'` 即使有人把 `joinPolicy` 改成 `open`，規則拒絕該 update；一般帳號讀班級主文件失敗。
 - 缺 `joinPolicy` 的舊社團：一般帳號讀主文件失敗（視同 school_verified）。
 - `joinPolicy == 'open'` 且 `isPublished`：已登入可讀主文件；list `members` 失敗；get 自己的 member 成功；get 別人的 member 失敗。
 - 未驗證對公開社團群聊：冷靜期內 create 訊息失敗；含 `https://` 失敗；`mutedUntil` 在未來時失敗。
@@ -586,9 +595,9 @@ canonical 仍是 Firestore 的 app-native 聊天與群組（見 `docs/architectu
 | `apps/web/src/lib/privateMessages.test.ts` | 沒有校籍時平台 session 仍可建立；拒絕平台文件帶 `schoolId` |
 | `conversationAccess` 兩端 | 平台 DM id、`group_{id}` 與校內 id 不同 |
 | `Messaging.test.tsx` | 未登入文案；未驗證標籤；請求列表；社團橫幅文案 |
-| 配額／連結／冷靜期純函式 | 帳號年齡、進群 10 分鐘、網址檢測、檢舉 3／5 門檻 |
+| 配額／連結／冷靜期／檢舉門檻純函式 | 帳號年齡、進群 10 分鐘、網址檢測、hideThreshold／muteThreshold（人數 < 10 不自動隱藏；隱藏上限 10、禁言上限 20） |
 | `backend/functions/groupMembership.test.js` | course／school_verified 仍要校籍；open 加入；request 不增加 memberCount |
-| `createGroup` 相關測試 | course 強制 school_verified；新建 club 預設 request |
+| `createGroup`／`setClubJoinPolicy` | course 強制 school_verified；新建 club 預設 request；study 預設 school_verified 且拒絕 `open` |
 | `userDataExport.test.js` | 公開社團可依成員匯出；不含對方 studentId／schoolId |
 | App `GroupMembersScreen` 測試 | 未驗證看不到名單；公開群已驗證列只有暱稱 |
 
@@ -599,7 +608,7 @@ Web `MessagingSession` 要能表達平台模式。校內通知可維持要校籍
 現有 Maestro `09_messages.yaml` 實際是課程加入碼，不要把一般帳號塞進去。另增：
 
 1. `09_platform_message_request.yaml`：私訊請求、擋連結、接受、橫幅、封鎖（前一版範圍）。
-2. `10_public_club_join.yaml`：一般帳號在公開目錄看到需審核社團 → 申請 → 幹部核准 → 冷靜期內不能發言 → 期滿可發言、不能傳連結、看不到成員名單、從氣泡送出的私訊進請求匣。班級加入碼以一般帳號操作必須失敗。
+2. `10_public_club_join.yaml`：一般帳號在公開目錄看到需審核社團（目錄上看得到所屬校園名稱）→ 申請 → 幹部核准 → 冷靜期內不能發言 → 期滿可發言、不能傳連結、看不到成員名單、從氣泡不能開私訊。班級加入碼與把讀書會設成公開，以一般帳號或幹部操作都必須失敗。
 
 正式環境不跑這些 E2E 寫入。測試帳號限模擬器。不要求改 Maestro workflow 的觸發條件。
 
@@ -642,24 +651,29 @@ Web `MessagingSession` 要能表達平台模式。校內通知可維持要校籍
 
 ---
 
-## 12. 還需要顧晉瑋決定的問題
+## 12. 已定案（原待決五題）
 
-最多五題。沒拍板前，實作先用「建議」欄。
+顧晉瑋把五題交給我們定案。每題對照 Discord／LINE OpenChat／Telegram／Dcard／Facebook 社團的實際作法、台灣個資法（直接／間接識別、目的拘束）、校園詐騙與檢舉霸凌風險，以及現有 `createGroup`／`joinGroupByCode`／規則缺欄成本後反驗；有更好的已改，沒有則維持上一版建議。實作以本節為準，不再另開待決。
 
 1. **已經在運作的舊社團，要不要一上線就讓一般帳號申請？**  
-   建議：不要。沒有 `joinPolicy` 的一律當僅限同校，幹部自己改成需審核或公開才對外。避免資管學會這種原本的校內群突然湧進校外帳號。
+   **定案：** 不要。沒有 `joinPolicy` 的舊社團／活動群一律視同 `school_verified`；幹部必須自己改成 `request` 或 `open` 才對外。  
+   **理由：** 現有 `createGroup` 根本沒寫這個欄位，缺欄當僅限同校零遷移、也符合個資法目的拘束（原本為校內社團蒐集的成員關係，不能默默改成對校外開放）；LINE OpenChat 雖讓新房間預設公開，那只適用新建，不該套到已在運作的校內群。
 
 2. **公開社團目錄要不要寫「這是哪一校的社團」？**  
-   建議：可以寫社團掛載的校園名稱（例如「靜宜大學」），因為那是社團屬性，不是某個人的學籍。成員氣泡與名單仍禁止出現個人學校、真名、學號。
+   **定案：** 可以。`publicClubs` 與公開目錄可寫社團掛載校園名稱（`campusLabel`，例如「靜宜大學」）。成員氣泡、名單、`publicProfiles` 仍禁止出現個人學校、真名、學號。  
+   **理由：** 法務部函釋工商行號名稱非自然人個資，社團所屬校園是組織屬性、用來區分各校同名社團；間接識別已用「未驗證不能 list 成員、氣泡不標個人學校」擋住，目錄若不標校園則搜尋成本高、實作也只是投影多一個字串。
 
 3. **未驗證的人能不能從群內某則訊息對已驗證學生發私訊？**  
-   建議：冷靜期結束後可以，但一律進訊息請求，且對方看到未驗證標示。不能從完整名單點人（名單不給看）。
+   **定案：** 不能。未驗證從成員名單或訊息氣泡都不能發起私訊；按鈕隱藏，callable 一併拒絕。未驗證要私訊，只能用對方給的平台代號，或回覆對方先送來的請求。幹部仍可私訊申請者（走請求）。  
+   **理由：** 上一版「冷靜期後可從氣泡傳、進請求匣」仍開著台灣校園最常見的「先入群再私訊（假幹部、加 LINE、營隊轉帳）」路徑，Telegram 藏名單後掃人靠的就是點氣泡；LINE OpenChat 本來就不能從社群直接私訊、Discord 也把進群後 DM 當騷擾入口，藏按鈕加 callable 一行拒絕，比做一套「群內請求」還便宜。
 
 4. **檢舉幾次要自動隱藏、幾次要自動禁言？**  
-   建議：同一則被 3 個不同成員檢舉就對其他人隱藏；同一人 24 小時內在同群被 5 人檢舉則禁言 24 小時。不自動踢人，留給幹部決定。
+   **定案：** 第一則檢舉只通知幹部。`memberCount < 10` 不自動隱藏、不自動禁言。否則 `hideThreshold = min(10, max(3, ceil(n × 0.1)))`、`muteThreshold = min(20, max(5, ceil(n × 0.1)))`。永不自動踢人。  
+   **理由：** 上一版固定 3／5 在十人小幹部群等於三人就能默默隱藏同學，Facebook 社團實際是「一則檢舉通知管理員」、Discord 禁言不踢人；門檻讀現有 `memberCount` 幾乎零成本，加上限與上限是為了小群避霸凌、迎新大群又不必等 20 票才藏詐騙訊息。
 
 5. **讀書會（`groups.type == 'study'`）要不要跟社團同一套分級？**  
-   建議：同一套欄位可以設定，但預設維持僅限同校。讀書會常有課業討論，不應當成公開社團。活動群（掛 `linkedEventId` 的 club）才跟公開社團走同一預設（新建＝需審核）。
+   **定案：** 沿用同一套 `joinPolicy` 欄位，但缺欄與新建都視同 `school_verified`；幹部可改成 `request`，**不能**改成 `open`。活動群（`type == 'club'` 且可掛 `linkedEventId`）才跟公開社團走同一預設（新建＝`request`）。  
+   **理由：** 讀書會常有作業、解答與作業照片，公開立刻加入會把課業討論交給未驗證帳號，Dcard 校板與班級空間同樣留驗證牆；跨校讀書會用 `request` 即可，規則層拒絕 `open` 與班級群同一道檢查，不必新集合。
 
 ---
 
