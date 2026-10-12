@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
+import { isWebOnlineOrderingEnabled } from '@/lib/onlineOrdering';
 import styles from '@/components/academic/academic.module.css';
 
 const ITEMS = [
@@ -13,10 +14,11 @@ const ITEMS = [
 ];
 
 export default function LifePage() {
+  const items = ITEMS.filter((item) => item.href !== '/orders' || isWebOnlineOrderingEnabled());
   return (
     <SiteShell title="生活" subtitle="地圖、公車、餐廳、找人，都從這裡進。">
       <ul className={styles.list}>
-        {ITEMS.map((item) => (
+        {items.map((item) => (
           <li key={item.href + item.title}>
             <div>
               <h3>{item.title}</h3>
