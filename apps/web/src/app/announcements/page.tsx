@@ -238,6 +238,7 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
         <p role="status" className={styles.notice}>
           {formatStaleAnnouncementNotice(
             staleAnnouncementUpdatedAt(staleSources, state.announcements),
+            state.stale ? 'firestore' : 'source_down',
           )}
         </p>
       )}
