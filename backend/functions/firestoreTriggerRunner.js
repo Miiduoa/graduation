@@ -6,6 +6,7 @@ const os = require('node:os');
 const LEASE_COLLECTION = '_flyRuntime';
 const LEASE_DOC_ID = 'firestoreTriggerLease';
 const PROCESSED_COLLECTION = 'processed';
+const WATERMARK_COLLECTION = 'watermarks';
 const DEFAULT_LEASE_MS = 45_000;
 const DEFAULT_HEARTBEAT_MS = 15_000;
 
@@ -96,6 +97,27 @@ function markerRef(db, triggerName, path) {
   return leaseRef(db).collection(PROCESSED_COLLECTION).doc(markerId(triggerName, path));
 }
 
+function watermarkRef(db, triggerName) {
+  return leaseRef(db).collection(WATERMARK_COLLECTION).doc(triggerName);
+}
+
+async function readWatermarkMs(db, triggerName) {
+  const snap = await watermarkRef(db, triggerName).get();
+  if (!snap.exists) return 0;
+  return Number(snap.data()?.watermarkMs) || 0;
+}
+
+async function writeWatermarkMs(db, triggerName, watermarkMs) {
+  await watermarkRef(db, triggerName).set(
+    {
+      triggerName,
+      watermarkMs,
+      updatedAtMs: watermarkMs,
+    },
+    { merge: true },
+  );
+}
+
 async function readMarker(db, triggerName, path) {
   const snap = await markerRef(db, triggerName, path).get();
   if (!snap.exists) return null;
@@ -136,6 +158,25 @@ async function tryAcquireLease(db, { holderId, now, leaseMs }) {
   });
 }
 
+async function releaseLease(db, { holderId, now = Date.now }) {
+  const ref = leaseRef(db);
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const data = snap.exists ? snap.data() || {} : {};
+    if (data.holderId !== holderId) return false;
+    tx.set(
+      ref,
+      {
+        holderId: null,
+        expiresAtMs: 0,
+        releasedAtMs: now(),
+      },
+      { merge: true },
+    );
+    return true;
+  });
+}
+
 function createChangeEvent(trigger, params, beforeSnap, afterSnap) {
   const { createdOnly } = policyFor(trigger);
   if (createdOnly) {
@@ -153,7 +194,7 @@ function createChangeEvent(trigger, params, beforeSnap, afterSnap) {
   };
 }
 
-async function processChange(trigger, change, { cache, db, isInitial, now }) {
+async function processChange(trigger, change, { cache, db, isInitial, now, watermarkMs = 0 }) {
   const doc = change.doc;
   if (!doc?.ref?.path) return { status: 'ignored' };
   const path = doc.ref.path;
@@ -179,16 +220,21 @@ async function processChange(trigger, change, { cache, db, isInitial, now }) {
     return { status: 'skipped-not-create' };
   }
 
-  const version = changeVersion(change.type, beforeSnap, afterSnap);
+  const version = policy.createdOnly
+    ? `created:${versionOf(afterSnap)}`
+    : changeVersion(change.type, beforeSnap, afterSnap);
   const marker = await readMarker(db, trigger.name, path);
 
   if (marker?.version === version) {
     return { status: 'already-processed' };
   }
 
-  if (policy.sideEffect === 'notify' && isInitial) {
+  // First-ever start has no watermark: record markers so history is not spammed.
+  // After a watermark exists, the first snapshot is catch-up and must run
+  // unmarked notify work (grades / group questions written while we were down).
+  if (policy.sideEffect === 'notify' && isInitial && !watermarkMs) {
     await writeMarker(db, trigger.name, path, version, now);
-    return { status: 'marked-initial' };
+    return { status: 'marked-bootstrap' };
   }
 
   const event = createChangeEvent(trigger, params, beforeSnap, afterSnap);
@@ -227,8 +273,18 @@ function watchTrigger(db, trigger, { now, log }) {
       enqueue(async () => {
         const changes =
           typeof snapshot.docChanges === 'function' ? snapshot.docChanges() : snapshot.docChanges || [];
+        const watermarkMs = await readWatermarkMs(db, trigger.name);
         for (const change of changes) {
-          await processChange(trigger, change, { cache, db, isInitial: initial, now });
+          await processChange(trigger, change, {
+            cache,
+            db,
+            isInitial: initial,
+            now,
+            watermarkMs,
+          });
+        }
+        if (initial) {
+          await writeWatermarkMs(db, trigger.name, now());
         }
       });
     },
@@ -294,13 +350,18 @@ async function startFirestoreTriggerRunner({
     }
   };
 
-  const stop = () => {
+  const stop = async () => {
     if (heartbeatTimer) {
       clearInterval(heartbeatTimer);
       heartbeatTimer = null;
     }
     detach();
-    holdingLease = false;
+    if (holdingLease) {
+      holdingLease = false;
+      await releaseLease(db, { holderId, now });
+    } else {
+      holdingLease = false;
+    }
   };
 
   if (!enabled) {
@@ -338,11 +399,13 @@ module.exports = {
   LEASE_COLLECTION,
   LEASE_DOC_ID,
   TRIGGER_POLICIES,
+  WATERMARK_COLLECTION,
   changeVersion,
   listenQuery,
   markerId,
   paramsFromPath,
   policyFor,
+  releaseLease,
   startFirestoreTriggerRunner,
   tryAcquireLease,
   versionOf,
