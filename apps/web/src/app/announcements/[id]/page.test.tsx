@@ -137,10 +137,25 @@ it('renders not-found only after both public documents are confirmed absent', as
   expect(screen.queryByRole('alert')).toBeNull();
 });
 
-it('does not turn a canonical permission or network failure into absence or a legacy fallback', async () => {
-  vi.mocked(getDocFromServer).mockRejectedValue(new Error('permission-denied'));
+it.each([
+  [
+    'permission-denied',
+    Object.assign(new Error('Missing or insufficient permissions.'), { code: 'permission-denied' }),
+  ],
+  ['unavailable', Object.assign(new Error('offline'), { code: 'unavailable' })],
+])('shows catalog office links when Firestore detail read fails with %s', async (_code, error) => {
+  vi.mocked(getDocFromServer).mockRejectedValue(error);
   await mount();
-  await screen.findByRole('alert');
+  expect(
+    await screen.findByRole('heading', {
+      name: '這裡還沒接上學校公告，請先到學校網站看最新消息',
+    }),
+  ).toBeTruthy();
+  expect(screen.getByRole('link', { name: '教務處' }).getAttribute('href')).toBe(
+    'https://acd.pu.edu.tw/p/403-1042-885-1.php',
+  );
+  expect(screen.queryByText('請確認網路')).toBeNull();
+  expect(screen.queryByText('暫時無法讀取這則公告')).toBeNull();
   expect(screen.queryByText('找不到這則公告')).toBeNull();
   expect(getDocFromServer).toHaveBeenCalledTimes(1);
 });
@@ -150,15 +165,25 @@ it('reports a legacy source failure separately from a missing document', async (
     .mockResolvedValueOnce(snapshot(null))
     .mockRejectedValueOnce(new Error('unavailable'));
   await mount();
-  await screen.findByRole('alert');
+  expect(
+    await screen.findByRole('heading', {
+      name: '這裡還沒接上學校公告，請先到學校網站看最新消息',
+    }),
+  ).toBeTruthy();
+  expect(screen.queryByText('請確認網路')).toBeNull();
   expect(screen.queryByText('找不到這則公告')).toBeNull();
 });
 
 it('rejects inconsistent canonical school metadata', async () => {
   vi.mocked(getDocFromServer).mockResolvedValue(snapshot({ schoolId: 'nthu', title: '錯校公告' }));
   await mount();
-  await screen.findByRole('alert');
+  expect(
+    await screen.findByRole('heading', {
+      name: '這裡還沒接上學校公告，請先到學校網站看最新消息',
+    }),
+  ).toBeTruthy();
   expect(screen.queryByText('錯校公告')).toBeNull();
+  expect(screen.queryByText('請確認網路')).toBeNull();
 });
 
 it('never uses a crafted announcement ID as a Firestore subcollection path', async () => {
@@ -212,15 +237,15 @@ it('discards responses from before logout even when the same UID signs back in',
   expect(screen.queryByText('登出前晚回應')).toBeNull();
 });
 
-it('clears stale content during refresh and can recover from a failed request', async () => {
+it('keeps the cached announcement when a later Firestore read fails', async () => {
   await mount();
   await screen.findByText('實際公告詳情');
-  vi.mocked(getDocFromServer).mockRejectedValueOnce(new Error('offline'));
+  vi.mocked(getDocFromServer).mockRejectedValueOnce(new Error('permission-denied'));
   fireEvent.click(screen.getByRole('button', { name: '更新公告' }));
-  expect(screen.queryByText('實際公告詳情')).toBeNull();
-  await screen.findByRole('alert');
-  fireEvent.click(screen.getByRole('button', { name: '重新讀取' }));
   await screen.findByText('實際公告詳情');
+  expect(screen.getByText(/最後更新/)).toBeTruthy();
+  expect(screen.queryByText('請確認網路')).toBeNull();
+  expect(screen.queryByText('這裡還沒接上學校公告，請先到學校網站看最新消息')).toBeNull();
 });
 
 it.each(['', 'staging', 'production'])(

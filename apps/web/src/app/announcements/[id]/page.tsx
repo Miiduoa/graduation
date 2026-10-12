@@ -6,13 +6,40 @@ import { useAuth } from '@/components/AuthGuard';
 import { SiteShell } from '@/components/SiteShell';
 import type { Announcement } from '@/lib/firebase';
 import { loadAnnouncement } from '../publicAnnouncements';
+import {
+  formatStaleAnnouncementNotice,
+  listAnnouncementCatalogLinks,
+  SOURCE_NOT_CONNECTED_TEXT,
+  staleAnnouncementUpdatedAt,
+} from '@campus/shared/src/campusAnnouncements';
 import { resolveAnnouncementSchool } from '../resolveSchool';
 import styles from '../announcements.module.css';
 
 type LoadState =
   | { status: 'loading' }
-  | { status: 'error' }
-  | { status: 'ready'; announcement: Announcement | null };
+  | { status: 'not_connected' }
+  | { status: 'ready'; announcement: Announcement | null; fetchedAt: string; stale: boolean };
+
+function OfficeSourceLinks({
+  links,
+}: {
+  links: Array<{ sourceId: string; office: string; listUrl?: string }>;
+}) {
+  const items = links.filter((item) => item.listUrl);
+  if (!items.length) return null;
+  return (
+    <p>
+      {items.map((item, index) => (
+        <span key={item.sourceId}>
+          {index > 0 ? '、' : null}
+          <a href={item.listUrl} rel="noopener noreferrer" target="_blank">
+            {item.office}
+          </a>
+        </span>
+      ))}
+    </p>
+  );
+}
 
 function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) {
   const [state, setState] = useState<LoadState>({ status: 'loading' });
@@ -24,11 +51,21 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
     return loadAnnouncement(schoolId, id).then(
       (announcement) => {
         if (mounted.current && request === generation.current) {
-          setState({ status: 'ready', announcement });
+          setState({
+            status: 'ready',
+            announcement,
+            fetchedAt: new Date().toISOString(),
+            stale: false,
+          });
         }
       },
       () => {
-        if (mounted.current && request === generation.current) setState({ status: 'error' });
+        if (!mounted.current || request !== generation.current) return;
+        setState((current) =>
+          current.status === 'ready' && current.announcement
+            ? { ...current, stale: true }
+            : { status: 'not_connected' },
+        );
       },
     );
   }, [schoolId, id]);
@@ -43,8 +80,10 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
   }, [load]);
 
   function refresh() {
-    setState({ status: 'loading' });
     setNotice('');
+    setState((current) =>
+      current.status === 'ready' && current.announcement ? current : { status: 'loading' },
+    );
     void load();
   }
 
@@ -68,14 +107,11 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
         正在讀取公告…
       </p>
     );
-  if (state.status === 'error') {
+  if (state.status === 'not_connected') {
     return (
-      <section className={styles.status} role="alert">
-        <h2>暫時無法讀取這則公告</h2>
-        <p>請確認網路後再試一次。</p>
-        <button className="btn primary" onClick={refresh}>
-          重新讀取
-        </button>
+      <section className={styles.status}>
+        <h2>{SOURCE_NOT_CONNECTED_TEXT}</h2>
+        <OfficeSourceLinks links={listAnnouncementCatalogLinks(schoolId)} />
       </section>
     );
   }
@@ -107,12 +143,27 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
           <span>未提供發布日期</span>
         )}
       </div>
+      {state.stale ? (
+        <p role="status" className={styles.notice}>
+          {formatStaleAnnouncementNotice(
+            staleAnnouncementUpdatedAt(
+              [{ status: 'unavailable', lastSuccessAt: state.fetchedAt }],
+              [announcement],
+            ),
+          )}
+        </p>
+      ) : null}
       <h2>{announcement.title}</h2>
       {(announcement.summary || announcement.body) && (
         <p className={styles.body}>{announcement.summary || announcement.body}</p>
       )}
       {announcement.originalUrl && (
-        <a className={styles.share} href={announcement.originalUrl} rel="noreferrer" target="_blank">
+        <a
+          className={styles.share}
+          href={announcement.originalUrl}
+          rel="noreferrer"
+          target="_blank"
+        >
           看原文
         </a>
       )}

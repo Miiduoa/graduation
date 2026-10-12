@@ -44,7 +44,12 @@ type Props = {
   route?: { params?: { id?: string; announcementId?: string; eventId?: string; source?: string } };
 };
 
-function useContent<T>(loader: (schoolId: string, id: string) => Promise<T>, id = '', source = '') {
+function useContent<T>(
+  loader: (schoolId: string, id: string) => Promise<T>,
+  id = '',
+  source = '',
+  keepOnError = false,
+) {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const { user } = useAuth();
   const { school } = useSchool();
@@ -62,21 +67,30 @@ function useContent<T>(loader: (schoolId: string, id: string) => Promise<T>, id 
   const current = () => mounted.current && activeScope.current === scope;
   const reload = useCallback(async () => {
     const request = ++generation.current;
-    setState({ scope, value: null, error: '', loading: true });
+    setState((prev) => ({
+      scope,
+      value: keepOnError && prev.scope === scope ? prev.value : null,
+      error: '',
+      loading: !(keepOnError && prev.scope === scope && prev.value),
+    }));
     try {
       const value = await loader(school.id, id);
       if (mounted.current && activeScope.current === scope && generation.current === request)
         setState({ scope, value, error: '', loading: false });
     } catch {
       if (mounted.current && activeScope.current === scope && generation.current === request)
-        setState({
+        setState((prev) => ({
           scope,
-          value: null,
-          error: '目前無法讀取，請確認網路連線後重試。',
+          value: keepOnError && prev.scope === scope ? prev.value : null,
+          error: keepOnError
+            ? prev.scope === scope && prev.value
+              ? 'stale'
+              : 'not_connected'
+            : '目前無法讀取，請確認網路連線後重試。',
           loading: false,
-        });
+        }));
     }
-  }, [loader, school.id, id, scope]);
+  }, [loader, school.id, id, scope, keepOnError]);
   useEffect(() => {
     mounted.current = true;
     void reload();
@@ -90,6 +104,70 @@ function useContent<T>(loader: (schoolId: string, id: string) => Promise<T>, id 
     reload,
     current,
     scope,
+  };
+}
+
+function useAnnouncementFeed() {
+  useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
+  const { user } = useAuth();
+  const { school } = useSchool();
+  const scope = JSON.stringify([user?.uid, school.id]);
+  const activeScope = useRef(scope);
+  activeScope.current = scope;
+  const generation = useRef(0);
+  const mounted = useRef(true);
+  const [state, setState] = useState<{
+    scope: string;
+    feed: Awaited<ReturnType<typeof loadCampusAnnouncementFeed>> | null;
+    loading: boolean;
+    stale: boolean;
+  }>({ scope, feed: null, loading: true, stale: false });
+  const current = () => mounted.current && activeScope.current === scope;
+  const reload = useCallback(async () => {
+    const request = ++generation.current;
+    setState((prev) => ({
+      scope,
+      feed: prev.scope === scope ? prev.feed : null,
+      loading: !(prev.scope === scope && (prev.feed?.announcements.length ?? 0) > 0),
+      stale: prev.scope === scope ? prev.stale : false,
+    }));
+    try {
+      const feed = await loadCampusAnnouncementFeed(school.id);
+      if (mounted.current && activeScope.current === scope && generation.current === request)
+        setState({ scope, feed, loading: false, stale: false });
+    } catch {
+      if (mounted.current && activeScope.current === scope && generation.current === request) {
+        setState((prev) => {
+          const cached =
+            prev.scope === scope && prev.feed && prev.feed.announcements.length > 0
+              ? prev.feed
+              : { announcements: [], sources: [], allUnavailable: false };
+          return {
+            scope,
+            feed: cached,
+            loading: false,
+            stale: Boolean(prev.scope === scope && prev.feed && prev.feed.announcements.length > 0),
+          };
+        });
+      }
+    }
+  }, [school.id, scope]);
+  useEffect(() => {
+    mounted.current = true;
+    void reload();
+    return () => {
+      mounted.current = false;
+      generation.current += 1;
+    };
+  }, [reload]);
+  const feed = state.scope === scope ? state.feed : null;
+  return {
+    loading: state.scope === scope ? state.loading : true,
+    stale: state.scope === scope ? state.stale : false,
+    reload,
+    current,
+    announcements: feed?.announcements ?? [],
+    sources: feed?.sources ?? [],
   };
 }
 
@@ -145,15 +223,23 @@ function ReadState({
 
 export function CampusAnnouncementsScreen({ navigation }: Props) {
   const { school } = useSchool();
-  const schoolVisible = isAnnouncementSchoolVisibleToPublic({ schoolId: school.id }, getRawAppEnv());
-  const content = useContent(loadCampusAnnouncementFeed);
+  const schoolVisible = isAnnouncementSchoolVisibleToPublic(
+    { schoolId: school.id },
+    getRawAppEnv(),
+  );
+  const content = useAnnouncementFeed();
   const [category, setCategory] = useState<AnnouncementCategory | 'all'>('all');
-  const rows = content.value?.announcements ?? [];
-  const sources = content.value?.sources ?? [];
+  const rows = content.announcements;
+  const sources = content.sources;
   const visible = rows.filter((row) => category === 'all' || row.category === category);
   const down = sources.filter((item) => item.status === 'unavailable');
   const downLinks = down.filter((item) => item.listUrl);
   const emptyKind = announcementEmptyKind(rows, sources);
+  const showStaleNotice = rows.length > 0 && (content.stale || down.length > 0);
+  const staleSources =
+    content.stale && !down.length
+      ? [{ status: 'unavailable' as const, lastSuccessAt: undefined }]
+      : sources;
   if (!schoolVisible) {
     return (
       <AIDetailScreen
@@ -171,8 +257,8 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
       subtitle="公開處室公告的摘要與原文連結。一般帳號即可查看。"
       onBack={() => navigation?.goBack?.()}
     >
-      {content.loading || content.error ? (
-        <ReadState {...content} empty="目前沒有公告" />
+      {content.loading ? (
+        <ReadState loading error="" empty="目前沒有公告" reload={content.reload} />
       ) : emptyKind === 'not_connected' ? (
         <AICard title={SOURCE_NOT_CONNECTED_TEXT}>
           <View style={{ gap: 12 }}>
@@ -183,27 +269,30 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
                 onPress={() => void Linking.openURL(item.listUrl)}
               />
             ))}
+            <AIButton label="更新公告" variant="ghost" onPress={() => void content.reload()} />
           </View>
         </AICard>
       ) : emptyKind === 'source_down' ? (
         <AICard title={SOURCE_DOWN_EMPTY_TEXT}>
           <View style={{ gap: 12 }}>
-            {(downLinks.length ? downLinks : listAnnouncementCatalogLinks(school.id)).map((item) => (
-              <AIButton
-                key={item.sourceId}
-                label={item.office}
-                onPress={() => void Linking.openURL(item.listUrl!)}
-              />
-            ))}
+            {(downLinks.length ? downLinks : listAnnouncementCatalogLinks(school.id)).map(
+              (item) => (
+                <AIButton
+                  key={item.sourceId}
+                  label={item.office}
+                  onPress={() => void Linking.openURL(item.listUrl!)}
+                />
+              ),
+            )}
           </View>
         </AICard>
       ) : !rows.length ? (
-        <ReadState {...content} empty="目前沒有公告" />
+        <ReadState loading={false} error="" empty="目前沒有公告" reload={content.reload} />
       ) : (
         <>
-          {down.length ? (
+          {showStaleNotice ? (
             <AICard
-              title={formatStaleAnnouncementNotice(staleAnnouncementUpdatedAt(sources, rows))}
+              title={formatStaleAnnouncementNotice(staleAnnouncementUpdatedAt(staleSources, rows))}
             >
               {null}
             </AICard>
@@ -257,8 +346,9 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
 }
 
 export function CampusAnnouncementDetailScreen({ navigation, route }: Props) {
+  const { school } = useSchool();
   const id = route?.params?.id ?? route?.params?.announcementId ?? '';
-  const content = useContent(loadCampusAnnouncement, id);
+  const content = useContent(loadCampusAnnouncement, id, '', true);
   const announcement = content.value;
   const [actionError, setActionError] = useState<{ scope: string; text: string } | null>(null);
   const openAttachment = async (url: string) => {
@@ -273,10 +363,37 @@ export function CampusAnnouncementDetailScreen({ navigation, route }: Props) {
   };
   return (
     <AIDetailScreen title="公告詳情" onBack={() => navigation?.goBack?.()}>
-      {content.loading || content.error || !announcement ? (
+      {content.loading ? (
+        <ReadState {...content} empty="找不到這則公告，可能已移除或不屬於目前學校。" />
+      ) : content.error === 'not_connected' ||
+        (content.error && content.error !== 'stale' && !announcement) ? (
+        <AICard title={SOURCE_NOT_CONNECTED_TEXT}>
+          <View style={{ gap: 12 }}>
+            {listAnnouncementCatalogLinks(school.id).map((item) => (
+              <AIButton
+                key={item.sourceId}
+                label={item.office}
+                onPress={() => void Linking.openURL(item.listUrl)}
+              />
+            ))}
+          </View>
+        </AICard>
+      ) : !announcement ? (
         <ReadState {...content} empty="找不到這則公告，可能已移除或不屬於目前學校。" />
       ) : (
         <>
+          {content.error === 'stale' ? (
+            <AICard
+              title={formatStaleAnnouncementNotice(
+                staleAnnouncementUpdatedAt(
+                  [{ status: 'unavailable', lastSuccessAt: announcement.publishedAt }],
+                  [announcement],
+                ),
+              )}
+            >
+              {null}
+            </AICard>
+          ) : null}
           <AICard title={announcement.title}>
             <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
               {[announcement.source, dateLabel(announcement.publishedAt)]
