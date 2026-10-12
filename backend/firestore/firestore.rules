@@ -64,6 +64,24 @@ service cloud.firestore {
       return isSignedIn() && isCafeteriaOperator(schoolId, cafeteriaId, request.auth.uid);
     }
 
+    function isOptionalStorefrontUrl(value) {
+      return value is string
+        && (
+          value == ''
+          || (
+            value.size() > 0
+            && value.size() <= 500
+            && value.matches('^https://[^\\s]+$')
+            && !value.matches('^https://[^/]*@')
+          )
+        );
+    }
+
+    function cafeteriaStorefrontUrlsAllowed() {
+      return (!('websiteUrl' in request.resource.data) || isOptionalStorefrontUrl(request.resource.data.websiteUrl))
+        && (!('orderingUrl' in request.resource.data) || isOptionalStorefrontUrl(request.resource.data.orderingUrl));
+    }
+
     function isActiveGroupMember(groupId) {
       return isSignedIn()
         && exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid))
@@ -442,8 +460,10 @@ service cloud.firestore {
 
       match /cafeterias/{cafeteriaId} {
         allow read: if true;
-        allow create, delete: if hasEditorRole(schoolId);
-        allow update: if hasEditorRole(schoolId) || (
+        allow create: if hasEditorRole(schoolId) && cafeteriaStorefrontUrlsAllowed();
+        allow delete: if hasEditorRole(schoolId);
+        allow update: if cafeteriaStorefrontUrlsAllowed() && (
+          hasEditorRole(schoolId) || (
           requesterIsCafeteriaOperator(schoolId, cafeteriaId)
           && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly([
@@ -461,7 +481,7 @@ service cloud.firestore {
               && resource.data.get('merchantMode', 'native_order') == 'native_order'
             )
           )
-        );
+        ));
 
         match /operators/{uid} {
           allow read: if isSelf(uid) || hasEditorRole(schoolId);
