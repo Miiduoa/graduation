@@ -81,15 +81,15 @@ Spark 沒有 Cloud Functions 事件來源，所以 Fly 行程對相關 collectio
 
 單機：`fly scale count 1`，`min_machines_running = 1`。另外用 Firestore 文件 `_flyRuntime/firestoreTriggerLease` 當租約鎖；第二台拿不到鎖就不會開 listener，避免雙重處理。
 
-冪等：listener 重啟會重放目前 snapshot。權限同步用文件 `updateTime` 對照 `_flyRuntime/firestoreTriggerLease/processed/{id}`；版本沒變就跳過，有變才再同步（claims／目錄會跟上）。通知類在**第一次 snapshot** 只記標記、不重送。
+冪等：listener 重啟會重放目前 snapshot。權限同步用文件 `updateTime` 對照 `_flyRuntime/firestoreTriggerLease/processed/{id}`；版本沒變就跳過，有變才再同步（claims／目錄會跟上）。通知類（成績 push、群組提問助理）第一次啟動只記標記當水位；之後重啟會把停機期間寫入、還沒標記的變更補跑，已處理過的不會重送。`SIGTERM`／`SIGINT` 會先放掉租約，下一台不必空等 45 秒。
 
 | 匯出 | 文件 | Fly 上做什麼 |
 | --- | --- | --- |
 | `onUserProfileChanged` | `users/{uid}` | 同步 Auth custom claims（`role` / `schoolId` / `roles`）與各校 directory |
 | `onSchoolMembershipChanged` | `schools/{schoolId}/members/{uid}` | 依 membership 寫入或刪除 `schools/{schoolId}/directory/{uid}` |
 | `onCafeteriaOperatorChanged` | `schools/{schoolId}/cafeterias/{cafeteriaId}/operators/{uid}` | 重算 `activeOperatorCount` 寫回食堂文件 |
-| `groupQuestionAssistantReply` | `groups/{groupId}/posts/{postId}` | 提問建立後由伺服器寫助理回覆（重啟不重送） |
-| `gradePublishedNotification` | `schools/{schoolId}/grades/{gradeId}` | 成績公布 push（重啟不重送） |
+| `groupQuestionAssistantReply` | `groups/{groupId}/posts/{postId}` | 提問建立後由伺服器寫助理回覆（停機期間的提問重啟後補跑，已處理不重送） |
+| `gradePublishedNotification` | `schools/{schoolId}/grades/{gradeId}` | 成績公布 push（停機期間的成績重啟後補跑，已處理不重送） |
 | `onInspectionWritten` | `schools/{schoolId}/inspections/{inspectionId}` | 稽查分數連動停權；handler 本身依 inspection version 冪等，重啟會補跑未處理版本 |
 
 權限同步（profile / membership / operator → claims 或衍生文件）優先於通知。

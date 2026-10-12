@@ -79,6 +79,28 @@ function buildListener(exportsMap, options = {}) {
   return { listener, classified };
 }
 
+function installShutdownHandlers(proc, stop, { exit } = {}) {
+  const exitProcess = exit || ((code) => proc.exit(code));
+  let shuttingDown = false;
+  const onSignal = async (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    try {
+      await stop(signal);
+    } finally {
+      exitProcess(0);
+    }
+  };
+  const onTerm = () => onSignal('SIGTERM');
+  const onInt = () => onSignal('SIGINT');
+  proc.once('SIGTERM', onTerm);
+  proc.once('SIGINT', onInt);
+  return () => {
+    proc.removeListener('SIGTERM', onTerm);
+    proc.removeListener('SIGINT', onInt);
+  };
+}
+
 function start(options = {}) {
   applyFirebaseServiceAccount(process.env);
   const exported = options.exports || loadFunctionExports();
@@ -128,13 +150,19 @@ function start(options = {}) {
           classified.firestoreTriggers.map((item) => item.name).join(', ') || '(none)'
         }`,
       );
+      const stop = async () => {
+        runner.stop();
+        await triggerRunner.stop();
+      };
+
+      if (options.installSignalHandlers ?? !process.env.JEST_WORKER_ID) {
+        installShutdownHandlers(options.process || process, stop, { exit: options.exit });
+      }
+
       resolve({
         server,
         classified,
-        stop: () => {
-          runner.stop();
-          triggerRunner.stop();
-        },
+        stop,
       });
     });
   });
@@ -144,6 +172,7 @@ module.exports = {
   OPTIONAL_SECRET_NAMES,
   applyFirebaseServiceAccount,
   buildListener,
+  installShutdownHandlers,
   loadFunctionExports,
   start,
 };
