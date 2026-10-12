@@ -77,7 +77,7 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
     if (!nuniEnabled() && path !== 'session' && path !== 'logout') {
       // Existing sessions still need verification and revocation when courses are disabled.
       if (request.method === 'GET' && !request.nextUrl.search) {
-        if (path === 'sign-in-options') return jsonResponse({ google: false });
+        if (path === 'sign-in-options') return jsonResponse({ google: false, studentId: false });
       }
       throw new NuniError(404, 'NOT_FOUND');
     }
@@ -87,16 +87,17 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
     if (method === 'POST') requireSameOrigin(request);
     if (method === 'GET' && path === 'sign-in-options') {
       publicOrigin();
-      if (
-        process.env.PLATFORM_GOOGLE_LOGIN_ENABLED !== 'true' ||
-        !process.env.PLATFORM_GOOGLE_CLIENT_SECRET?.trim() ||
-        (process.env.BFF_SESSION_SECRET?.trim().length ?? 0) < 32
-      ) {
-        return jsonResponse({ google: false });
-      }
+      const googleReady =
+        process.env.PLATFORM_GOOGLE_LOGIN_ENABLED === 'true' &&
+        !!process.env.PLATFORM_GOOGLE_CLIENT_SECRET?.trim() &&
+        (process.env.BFF_SESSION_SECRET?.trim().length ?? 0) >= 32;
       const result = nuniRecord(await platformRequest('providers'));
-      if (!Array.isArray(result.kinds)) throw new NuniError(502, 'INVALID_RESPONSE');
-      return jsonResponse({ google: result.kinds.includes('google-consumer') });
+      if (!Array.isArray(result.kinds) || result.kinds.some((kind) => typeof kind !== 'string'))
+        throw new NuniError(502, 'INVALID_RESPONSE');
+      return jsonResponse({
+        google: googleReady && result.kinds.includes('google-consumer'),
+        studentId: result.kinds.includes('school-issued') || result.kinds.includes('student-id'),
+      });
     }
     if (method === 'GET' && path === 'session') {
       const session = readSession(request);

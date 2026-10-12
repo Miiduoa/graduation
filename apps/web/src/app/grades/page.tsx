@@ -134,6 +134,7 @@ export default function GradesPage() {
       kind="grades"
       title="成績紀錄"
       subtitle="查看各學期結果，保留學校提供的原始成績。"
+      closedAlternative="成績請先到學校的 e 校園查看。"
     >
       {({ records }) => <Grades records={records} />}
     </AcademicPage>

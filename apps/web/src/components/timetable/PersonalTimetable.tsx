@@ -24,7 +24,9 @@ import {
   type ImportDraft,
   type ImportMode,
   type PersonalCourse,
-  type PlannerFriend, shareCopiedCopy } from '@campus/shared';
+  type PlannerFriend,
+  shareCopiedCopy,
+} from '@campus/shared';
 import { useAuth } from '@/components/AuthGuard';
 import { useSelectedSchool } from '@/components/SelectedSchoolProvider';
 import styles from '@/components/academic/academic.module.css';
@@ -37,6 +39,7 @@ import {
   loadPersonalTimetable,
   savePersonalTimetable,
   CLOUD_NEEDS_SCHOOL_COPY,
+  CLOUD_NOT_READY_COPY,
   TimetableCloudSaveError,
   type StoredTimetable,
 } from '@/lib/timetable/store';
@@ -127,12 +130,24 @@ export function PersonalTimetable() {
 
   // 別人約我、還沒回覆的邀約，在課表頁也看得到
   const [invites, setInvites] = useState<
-    Array<{ id: string; creatorUid: string; kind: 'meal' | 'study'; day: number; startMinute?: number; startPeriod?: number; endPeriod?: number }>
+    Array<{
+      id: string;
+      creatorUid: string;
+      kind: 'meal' | 'study';
+      day: number;
+      startMinute?: number;
+      startPeriod?: number;
+      endPeriod?: number;
+    }>
   >([]);
   const loadInvites = useCallback(async () => {
-    const rows = uid ? ((await listMyMeetups(schoolId, uid).catch(() => [])) as Array<Record<string, unknown>>) : [];
+    const rows = uid
+      ? ((await listMyMeetups(schoolId, uid).catch(() => [])) as Array<Record<string, unknown>>)
+      : [];
     setInvites(
-      rows.filter((row) => row.inviteeUid === uid && row.status === 'pending') as unknown as typeof invites,
+      rows.filter(
+        (row) => row.inviteeUid === uid && row.status === 'pending',
+      ) as unknown as typeof invites,
     );
   }, [uid, schoolId]);
   useEffect(() => {
@@ -156,7 +171,7 @@ export function PersonalTimetable() {
       setNotice(
         saved.stored === 'cloud'
           ? message
-          : `已記在這台瀏覽器，${CLOUD_NEEDS_SCHOOL_COPY}。${message}`,
+          : `已記在這台瀏覽器。${uid ? `${CLOUD_NEEDS_SCHOOL_COPY}。` : CLOUD_NOT_READY_COPY}${message}`,
       );
     } catch (error) {
       if (error instanceof TimetableCloudSaveError) {
@@ -228,7 +243,10 @@ export function PersonalTimetable() {
 
   const confirmImport = async () => {
     const next = applyImport(timetable.courses, analyzed, importMode);
-    await persist({ ...timetable, courses: next }, `已匯入 ${analyzed.filter((item) => item.selected !== false).length} 門課。`);
+    await persist(
+      { ...timetable, courses: next },
+      `已匯入 ${analyzed.filter((item) => item.selected !== false).length} 門課。`,
+    );
     setDrafts([]);
     setImportText('');
   };
@@ -273,7 +291,13 @@ export function PersonalTimetable() {
       setNotice('現在沒有學校選課紀錄可帶入。');
       return;
     }
-    setDrafts(records.courses.map((course) => ({ ...fromSchoolCourse(course), selected: true, confidence: 90 })));
+    setDrafts(
+      records.courses.map((course) => ({
+        ...fromSchoolCourse(course),
+        selected: true,
+        confidence: 90,
+      })),
+    );
     setImportMode('replace');
     setNotice(IMPORT_CONFIRM_COPY);
   };
@@ -300,7 +324,9 @@ export function PersonalTimetable() {
       const result = await Tesseract.recognize(file, 'chi_tra+eng');
       const parsed = parseTimetableText(result.data.text || '');
       if (!parsed.length) {
-        setNotice(`${IMPORT_NOT_APPLIED_COPY}。截圖有讀到，但沒有可靠找到課程，請改貼文字或手動新增。`);
+        setNotice(
+          `${IMPORT_NOT_APPLIED_COPY}。截圖有讀到，但沒有可靠找到課程，請改貼文字或手動新增。`,
+        );
         return;
       }
       setDrafts(parsed.map((course) => ({ ...course, selected: true, confidence: 70 })));
@@ -319,13 +345,22 @@ export function PersonalTimetable() {
             {invites.map((item) => (
               <li key={item.id}>
                 <p>
-                  {friends.find((friend) => friend.id === item.creatorUid)?.name || '同學'} 約你：{meetupLabel(item)}
+                  {friends.find((friend) => friend.id === item.creatorUid)?.name || '同學'} 約你：
+                  {meetupLabel(item)}
                 </p>
                 <div className={styles.toolbar}>
-                  <button type="button" className="btn primary" onClick={() => void answerInvite(item.id, 'accepted')}>
+                  <button
+                    type="button"
+                    className="btn primary"
+                    onClick={() => void answerInvite(item.id, 'accepted')}
+                  >
                     答應
                   </button>
-                  <button type="button" className="btn" onClick={() => void answerInvite(item.id, 'declined')}>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => void answerInvite(item.id, 'declined')}
+                  >
                     婉拒
                   </button>
                 </div>
@@ -337,7 +372,7 @@ export function PersonalTimetable() {
       <p className={styles.notice}>
         {uid
           ? '這份課表存在你的學校帳號。學校選課紀錄要經過確認才會覆蓋。'
-          : `課表先記在這台瀏覽器，重新整理不會不見；${CLOUD_NEEDS_SCHOOL_COPY}。`}
+          : `課表先記在這台瀏覽器，重新整理不會不見。${CLOUD_NOT_READY_COPY}`}
       </p>
       {uid ? (
         <label className={styles.field}>
@@ -347,7 +382,9 @@ export function PersonalTimetable() {
             onChange={(event) =>
               void persist(
                 { ...timetable, shareWithFriends: event.target.checked },
-                event.target.checked ? '好友加完後看得到這份課表。' : '已關掉好友課表。對方現在看不到。',
+                event.target.checked
+                  ? '好友加完後看得到這份課表。'
+                  : '已關掉好友課表。對方現在看不到。',
               )
             }
           />
@@ -386,19 +423,29 @@ export function PersonalTimetable() {
             ))}
           </select>
         </label>
-        <button type="button" className="btn" onClick={() => setEditing(cleanCourse({ day, start: 1, end: 1 }))}>
-          新增課程
-        </button>
         <button
           type="button"
           className="btn"
-          onClick={() => void copyShare()}
-          disabled={busy || !uid || !timetable.courses.length}
+          onClick={() => setEditing(cleanCourse({ day, start: 1, end: 1 }))}
         >
-          複製分享連結
+          新增課程
         </button>
+        {uid ? (
+          <button
+            type="button"
+            className="btn"
+            onClick={() => void copyShare()}
+            disabled={busy || !timetable.courses.length}
+          >
+            複製分享連結
+          </button>
+        ) : null}
       </div>
-      {!uid && <p className={styles.notice}>登入學校帳號後才能產生分享連結。</p>}
+      {!uid && (
+        <p className={styles.notice}>
+          這個功能還沒接通。分享連結要等學校帳號接上才能用，課表仍可先在這台瀏覽器整理。
+        </p>
+      )}
       {shareUrl && <p className={styles.notice}>{shareUrl}</p>}
 
       {view === 'grid' ? (
@@ -433,7 +480,12 @@ export function PersonalTimetable() {
                 <h3>{label}</h3>
                 {entries.length ? (
                   entries.map((course) => (
-                    <button type="button" className={styles.course} key={course.id} onClick={() => setEditing(course)}>
+                    <button
+                      type="button"
+                      className={styles.course}
+                      key={course.id}
+                      onClick={() => setEditing(course)}
+                    >
                       <time>{courseTimeLabel(course)}</time>
                       <h4>{course.name}</h4>
                       <p>{course.room || '教室未填'}</p>
@@ -478,9 +530,7 @@ export function PersonalTimetable() {
 
       <section className={styles.panel} aria-label="匯入課表">
         <h2>匯入課表</h2>
-        <p className={styles.notice}>
-          截圖或貼上文字後會先變成草稿。{IMPORT_CONFIRM_COPY}
-        </p>
+        <p className={styles.notice}>截圖或貼上文字後會先變成草稿。{IMPORT_CONFIRM_COPY}</p>
         <div className={styles.toolbar}>
           <label className={styles.field}>
             課表截圖
@@ -492,14 +542,21 @@ export function PersonalTimetable() {
           </label>
           <label className={styles.field}>
             匯入方式
-            <select value={importMode} onChange={(event) => setImportMode(event.target.value as ImportMode)}>
+            <select
+              value={importMode}
+              onChange={(event) => setImportMode(event.target.value as ImportMode)}
+            >
               <option value="replace">整份取代</option>
               <option value="merge">只加入還沒有的課</option>
             </select>
           </label>
-          <button type="button" className="btn" onClick={() => void bringSchool()}>
-            從學校課表帶入
-          </button>
+          {uid ? (
+            <button type="button" className="btn" onClick={() => void bringSchool()}>
+              從學校課表帶入
+            </button>
+          ) : (
+            <p className={styles.notice}>這個功能還沒接通。請先貼上課表文字，或手動新增。</p>
+          )}
         </div>
         <label className={styles.field}>
           或貼上課表文字
@@ -537,7 +594,12 @@ export function PersonalTimetable() {
                 ))}
               </label>
             ))}
-            <button type="button" className="btn primary" disabled={busy} onClick={() => void confirmImport()}>
+            <button
+              type="button"
+              className="btn primary"
+              disabled={busy}
+              onClick={() => void confirmImport()}
+            >
               確認匯入
             </button>
           </div>
@@ -568,7 +630,10 @@ export function PersonalTimetable() {
           </label>
           <label className={styles.field}>
             時數
-            <select value={studyHours} onChange={(event) => setStudyHours(Number(event.target.value))}>
+            <select
+              value={studyHours}
+              onChange={(event) => setStudyHours(Number(event.target.value))}
+            >
               {[1, 2, 3, 4].map((hours) => (
                 <option key={hours} value={hours}>
                   {hours} 小時
@@ -606,18 +671,28 @@ export function PersonalTimetable() {
         <h2>共同空堂</h2>
         {!uid ? (
           <>
-            <SchoolAccountRequired returnUrl="/timetable" headingLevel={3} />
-            <p className={styles.notice}>加好友後才看得到對方課表，沒加好友不會露出任何人的時間。</p>
+            <SchoolAccountRequired
+              returnUrl="/timetable"
+              headingLevel={3}
+              alternative="空堂可以先看自己這台瀏覽器上的課表。"
+            />
+            <p className={styles.notice}>
+              加好友後才看得到對方課表，沒加好友不會露出任何人的時間。
+            </p>
           </>
         ) : friends.length === 0 ? (
           <p className={styles.notice}>
-            目前沒有已接受的好友，或對方還沒把課表開放給好友。去 <a href="/friends">找人</a> 送出邀請。
+            目前沒有已接受的好友，或對方還沒把課表開放給好友。去 <a href="/friends">找人</a>{' '}
+            送出邀請。
           </p>
         ) : (
           <>
             <label className={styles.field}>
               朋友
-              <select value={selectedFriend || ''} onChange={(event) => setSelectedFriend(event.target.value || null)}>
+              <select
+                value={selectedFriend || ''}
+                onChange={(event) => setSelectedFriend(event.target.value || null)}
+              >
                 <option value="">選擇一位朋友</option>
                 {friends.map((friend) => (
                   <option value={friend.id} key={friend.id}>
@@ -634,14 +709,16 @@ export function PersonalTimetable() {
               <p className={styles.notice}>這位朋友還沒有開放課表，或課表仍是空的。</p>
             )}
             {selected &&
-              windows.slice(0, 8).map((window) => (
-                <MeetupWindowRow
-                  key={`${window.day}-${window.start}`}
-                  window={window}
-                  busy={meetupBusy}
-                  onSend={(kind, startMinute) => void sendMeetup(kind, window.day, startMinute)}
-                />
-              ))}
+              windows
+                .slice(0, 8)
+                .map((window) => (
+                  <MeetupWindowRow
+                    key={`${window.day}-${window.start}`}
+                    window={window}
+                    busy={meetupBusy}
+                    onSend={(kind, startMinute) => void sendMeetup(kind, window.day, startMinute)}
+                  />
+                ))}
           </>
         )}
       </section>
@@ -703,7 +780,9 @@ function FragmentRow({
         {time[0]}
       </div>
       {WEEKDAY_LABELS.map((_, dayIndex) => {
-        const hit = courses.find((course) => course.day === dayIndex + 1 && period >= course.start && period <= course.end);
+        const hit = courses.find(
+          (course) => course.day === dayIndex + 1 && period >= course.start && period <= course.end,
+        );
         return (
           <div className={styles.gridCell} key={`${period}-${dayIndex}`}>
             {hit && period === hit.start ? (
@@ -739,11 +818,17 @@ function CourseEditor({
       <h2>編輯課程</h2>
       <label className={styles.field}>
         課名
-        <input value={course.name} onChange={(event) => onChange({ ...course, name: event.target.value })} />
+        <input
+          value={course.name}
+          onChange={(event) => onChange({ ...course, name: event.target.value })}
+        />
       </label>
       <label className={styles.field}>
         星期
-        <select value={course.day} onChange={(event) => onChange({ ...course, day: Number(event.target.value) })}>
+        <select
+          value={course.day}
+          onChange={(event) => onChange({ ...course, day: Number(event.target.value) })}
+        >
           <option value={0}>未排定</option>
           {WEEKDAY_LABELS.map((label, index) => (
             <option value={index + 1} key={label}>
@@ -774,11 +859,17 @@ function CourseEditor({
       </label>
       <label className={styles.field}>
         老師
-        <input value={course.teacher} onChange={(event) => onChange({ ...course, teacher: event.target.value })} />
+        <input
+          value={course.teacher}
+          onChange={(event) => onChange({ ...course, teacher: event.target.value })}
+        />
       </label>
       <label className={styles.field}>
         教室
-        <input value={course.room} onChange={(event) => onChange({ ...course, room: event.target.value })} />
+        <input
+          value={course.room}
+          onChange={(event) => onChange({ ...course, room: event.target.value })}
+        />
       </label>
       <div className={styles.toolbar}>
         <button type="button" className="btn primary" disabled={busy} onClick={onSave}>
@@ -795,8 +886,12 @@ function CourseEditor({
   );
 }
 
-async function loadTesseract(): Promise<{ recognize: (file: File, langs: string) => Promise<{ data: { text: string } }> }> {
-  const globalWindow = window as unknown as { Tesseract?: { recognize: (file: File, langs: string) => Promise<{ data: { text: string } }> } };
+async function loadTesseract(): Promise<{
+  recognize: (file: File, langs: string) => Promise<{ data: { text: string } }>;
+}> {
+  const globalWindow = window as unknown as {
+    Tesseract?: { recognize: (file: File, langs: string) => Promise<{ data: { text: string } }> };
+  };
   if (globalWindow.Tesseract) return globalWindow.Tesseract;
   await new Promise<void>((resolve, reject) => {
     const script = document.createElement('script');

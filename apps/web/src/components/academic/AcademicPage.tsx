@@ -4,8 +4,10 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { useAuth } from '@/components/AuthGuard';
+import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
 import { SiteShell } from '@/components/SiteShell';
 import { useAcademicRecords } from '@/lib/useAcademicRecords';
+import { useSignInOptions } from '@/lib/signInOptions';
 import type { AcademicKind, AcademicSnapshot } from '@/lib/academicClient';
 import styles from './academic.module.css';
 
@@ -13,12 +15,18 @@ type Props<K extends AcademicKind> = {
   kind: K;
   title: string;
   subtitle: string;
+  closedAlternative: string;
   children: (snapshot: AcademicSnapshot<K>) => ReactNode;
 };
 
-function Records<K extends AcademicKind>({ kind, children }: Pick<Props<K>, 'kind' | 'children'>) {
+function Records<K extends AcademicKind>({
+  kind,
+  closedAlternative,
+  children,
+}: Pick<Props<K>, 'kind' | 'closedAlternative' | 'children'>) {
   const { state, refresh } = useAcademicRecords(kind);
   const path = usePathname();
+  const options = useSignInOptions();
   if (!state || state.status === 'loading') {
     return (
       <div className={styles.status} role="status">
@@ -29,6 +37,18 @@ function Records<K extends AcademicKind>({ kind, children }: Pick<Props<K>, 'kin
   if (state.status === 'error' || !state.snapshot) {
     const reconnect = state.reason === 'reconnect';
     const permission = state.reason === 'permission';
+    if (reconnect || permission) {
+      if (options.loading) {
+        return (
+          <div className={styles.status} role="status">
+            正在確認這項功能…
+          </div>
+        );
+      }
+      if (!options.studentId) {
+        return <SchoolAccountRequired returnUrl={path} alternative={closedAlternative} />;
+      }
+    }
     return (
       <section className={styles.status} role="alert">
         <p className={styles.eyebrow}>學校資料</p>
@@ -59,7 +79,7 @@ function Records<K extends AcademicKind>({ kind, children }: Pick<Props<K>, 'kin
               重新讀取
             </button>
           )}
-          {!reconnect && !permission && (
+          {!reconnect && !permission && options.studentId && (
             <Link
               className="btn"
               href={`/login?reconnect=school&returnUrl=${encodeURIComponent(path)}`}
@@ -125,16 +145,16 @@ export function AcademicPage<K extends AcademicKind>(props: Props<K>) {
           正在確認帳號…
         </div>
       ) : !user ? (
-        <section className={styles.status}>
-          <p className={styles.eyebrow}>只屬於你的課務資料</p>
-          <h2>{error ? '暫時無法確認登入狀態' : '登入後，查看你的課表與成績'}</h2>
-          <p>使用學校帳號連線，資料會從 e 校園讀取。</p>
-          <Link className="btn primary" href={`/login?returnUrl=${encodeURIComponent(path)}`}>
-            登入學校帳號
-          </Link>
-        </section>
+        error ? (
+          <section className={styles.status}>
+            <h2>暫時無法確認登入狀態</h2>
+            <p>請確認網路後再試一次。</p>
+          </section>
+        ) : (
+          <SchoolAccountRequired returnUrl={path} alternative={props.closedAlternative} />
+        )
       ) : (
-        <Records key={user.uid} kind={props.kind}>
+        <Records key={user.uid} kind={props.kind} closedAlternative={props.closedAlternative}>
           {props.children}
         </Records>
       )}

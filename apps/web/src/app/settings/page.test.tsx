@@ -31,7 +31,13 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock('@/features/nuni/Session', () => ({
   useNuniSession: () => state.nuni,
-  browserRequest: vi.fn(async () => ({ memberships: [] })),
+  browserRequest: vi.fn(async (path: string) => {
+    if (path === 'memberships') return { memberships: [] };
+    if (path === 'class-workspaces') return { workspaces: [] };
+    if (path === 'merchant-applications') return { applications: [] };
+    if (path === 'merchant-workspaces') return { workspaces: [] };
+    throw new Error(path);
+  }),
 }));
 vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({ user: state.user, loading: false, signOutUser: state.signOut }),

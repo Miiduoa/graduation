@@ -16,6 +16,10 @@ const auth = vi.hoisted(() => ({ uid: 'student' as string | null }));
 vi.mock('@/components/SchoolSelector', () => ({ SchoolSelector: () => null }));
 vi.mock('@/features/nuni/Session', () => ({
   useNuniSession: () => ({ session: null, loading: false, pendingLogout: false, logout: vi.fn() }),
+  useOptionalNuniSession: () => null,
+}));
+vi.mock('@/lib/signInOptions', () => ({
+  useSignInOptions: () => ({ google: false, studentId: false, loading: false, retry: vi.fn() }),
 }));
 vi.mock('./AuthGuard', () => ({
   useAuth: () => ({ user: auth.uid ? { uid: auth.uid } : null, loading: false }),
@@ -181,8 +185,8 @@ it('keeps the teacher route and school context when returning to the course or s
   expect(screen.getByRole('link', { name: '回課程工作台' }).getAttribute('href')).toBe(
     `/teacher/course/course%2Fid${schoolSearch}`,
   );
-  expect(screen.getByRole('link', { name: '登入帳號' }).getAttribute('href')).toBe(
-    `/login?redirect=${encodeURIComponent(`/teacher/course/course%2Fid/attendance${schoolSearch}`)}`,
-  );
+  expect(screen.getByRole('heading', { name: '這個功能還沒接通' })).toBeTruthy();
+  expect(screen.getByText('出缺席請先在課堂上向老師確認。')).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '登入帳號' })).toBeNull();
   expect(screen.getByRole('main').id).toBe('page-content');
 });

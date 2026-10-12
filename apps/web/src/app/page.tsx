@@ -6,6 +6,7 @@ import { NuniError, nuniErrorMessage } from '@campus/shared/src/nuni';
 import { AppHeader } from '@/components/AppHeader';
 import { SiteFooter } from '@/components/SiteFooter';
 import { useAuth } from '@/components/AuthGuard';
+import { AccountIdentity } from '@/components/AccountIdentity';
 import { browserRequest, useNuniSession } from '@/features/nuni/Session';
 import { loadHomeData, type HomeCourse, type HomeData, type HomeTask } from '@/lib/homeOverview';
 import { loadNuniHomeData } from '@/lib/nuniHomeOverview';
@@ -423,14 +424,17 @@ export default function HomePage() {
                 </Link>
               ))}
             </section>
+            {signedIn && context && accountId ? (
+              <AccountIdentity
+                key={`identity:${accountId}:${context}`}
+                context={context}
+                accountId={accountId}
+              />
+            ) : null}
             <section className={styles.schoolAccess}>
               <h2>學校課表與成績</h2>
-              <p>
-                課程空間的加入紀錄與學校正式選課分開管理。查詢課表、成績時，請連線自己的學校帳號。
-              </p>
-              <Link href={user ? '/grades' : '/login?returnUrl=%2Ftimetable'}>
-                {user ? '查看學校成績' : '連線學校帳號'} →
-              </Link>
+              <p>這個功能還沒接通。課表可以先在這台瀏覽器整理；成績請先到學校的 e 校園查看。</p>
+              <Link href="/timetable">查看這台瀏覽器上的課表 →</Link>
             </section>
             <Link className={styles.supportLink} href="/ai-assistant">
               校園助理 →

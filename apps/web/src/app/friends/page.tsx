@@ -89,7 +89,10 @@ export default function FriendsPage() {
   if (!user) {
     return (
       <SiteShell title="找人" subtitle="加好友之後，才能看對方課表、約共同空堂。">
-        <SchoolAccountRequired returnUrl="/friends" />
+        <SchoolAccountRequired
+          returnUrl="/friends"
+          alternative="找同學請先用課堂或通訊軟體聯絡。"
+        />
       </SiteShell>
     );
   }
@@ -111,7 +114,9 @@ export default function FriendsPage() {
       const found = await findByHandle(schoolId, handle);
       const usable = found && found.uid !== user.uid ? found : null;
       setHit(usable);
-      setHitState(usable ? await sentRequestState(schoolId, user.uid, usable.uid) : { kind: 'none' });
+      setHitState(
+        usable ? await sentRequestState(schoolId, user.uid, usable.uid) : { kind: 'none' },
+      );
       setSearched(true);
       setNotice('');
     } catch {

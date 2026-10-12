@@ -64,6 +64,7 @@ function readLocal(ownerKey: string, schoolId: string): StoredTimetable {
 }
 
 export const CLOUD_NEEDS_SCHOOL_COPY = '登入學校帳號後才能存到雲端';
+export const CLOUD_NOT_READY_COPY = '這個功能還沒接通，雲端備份先不用。';
 
 /** 本機那份已經寫好，只有雲端沒存成。 */
 export class TimetableCloudSaveError extends Error {
