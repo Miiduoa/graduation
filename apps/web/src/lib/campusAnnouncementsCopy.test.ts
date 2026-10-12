@@ -47,7 +47,7 @@ it('formats the stale banner in Taiwan time and keeps the empty-state copy', () 
     '最後更新 10/12 18:05，學校網站暫時連不上',
   );
   expect(formatStaleAnnouncementNotice(null)).toBe('學校網站暫時連不上');
-  expect(SOURCE_DOWN_EMPTY_TEXT).toBe('學校網站暫時連不上');
+  expect(SOURCE_DOWN_EMPTY_TEXT).toBe('學校網站暫時連不上，可以先到學校網站看最新消息');
   expect(SOURCE_NOT_CONNECTED_TEXT).toBe('這裡還沒接上學校公告，請先到學校網站看最新消息');
   expect(
     formatStaleAnnouncementNotice(
