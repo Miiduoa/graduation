@@ -17,6 +17,7 @@ import {
   type PersonalCourse,
 } from '@campus/shared';
 import { SiteShell } from '@/components/SiteShell';
+import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
 import { useAuth } from '@/components/AuthGuard';
 import { useSelectedSchool } from '@/components/SelectedSchoolProvider';
 import {
@@ -88,9 +89,7 @@ export default function AppealsPage() {
   if (!user) {
     return (
       <SiteShell title="課程申訴" subtitle="送出後可以在這裡看老師處理到哪。">
-        <p className={styles.notice}>
-          請先 <Link href="/login?returnUrl=/appeals">登入</Link>。
-        </p>
+        <SchoolAccountRequired returnUrl="/appeals" />
       </SiteShell>
     );
   }

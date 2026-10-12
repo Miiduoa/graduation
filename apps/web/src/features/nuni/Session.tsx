@@ -197,6 +197,11 @@ export function NuniSessionProvider({ children }: { children: ReactNode }) {
   return <Context.Provider value={{ ...state, refresh, logout }}>{children}</Context.Provider>;
 }
 
+/** 沒有 NuniSessionProvider 時回傳 null（例如單獨測試頁面）。 */
+export function useOptionalNuniSession() {
+  return useContext(Context);
+}
+
 export function useNuniSession() {
   const value = useContext(Context);
   if (!value) throw new Error('NuniSessionProvider is required');
