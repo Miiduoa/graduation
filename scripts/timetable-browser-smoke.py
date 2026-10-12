@@ -47,6 +47,7 @@ async def main():
             await confirm.get_by_role('button', name='放棄修改', exact=True).click()
             saved = await page.evaluate('JSON.parse(localStorage.getItem("campus-one-personal-timetable:local"))')
             assert saved['courses'][0]['day'] == 1
+            await expect(page.get_by_role('status').filter(has_text='確認儲存後才會移動')).to_have_count(0)
             results.append('keyboard move, cancel and draft protection')
             await expect(dialog).to_have_count(0)
             await page.evaluate('''() => {
@@ -84,18 +85,23 @@ async def main():
             await page.reload(wait_until='networkidle')
             await expect(page.get_by_role('button', name='編輯 資料庫管理，星期二第 6 節', exact=True)).to_be_visible()
             results.append('real drag with continuation offset, save and reload')
-            await page.screenshot(path=str(OUT / 'desktop.png'), full_page=True)
+            await page.screenshot(path=str(OUT / 'desktop.png'), full_page=True, animations='disabled')
             await page.set_viewport_size({'width': 390, 'height': 844})
             assert await page.evaluate('document.documentElement.scrollWidth <= innerWidth'), 'mobile page overflows horizontally'
             await choose()
             await page.get_by_role('button', name='移到星期三第 2 節', exact=True).click()
             await expect(dialog.get_by_role('combobox', name='開始節次', exact=True)).to_have_value('2')
             assert await dialog.evaluate('(el) => el.getBoundingClientRect().width <= innerWidth'), 'editor wider than viewport'
-            await page.screenshot(path=str(OUT / 'mobile-editor.png'))
+            await page.screenshot(path=str(OUT / 'mobile-editor.png'), animations='disabled')
+            assert await dialog.evaluate('(el) => getComputedStyle(el).opacity') == '1', 'dialog animation did not settle'
+            await dialog.get_by_role('button', name='儲存', exact=True).scroll_into_view_if_needed()
+            await expect(dialog.get_by_role('button', name='儲存', exact=True)).to_be_in_viewport()
+            await page.screenshot(path=str(OUT / 'mobile-editor-actions.png'), animations='disabled')
             await dialog.get_by_role('button', name='取消', exact=True).click()
             await page.get_by_role('button', name='放棄修改', exact=True).click()
-            await page.screenshot(path=str(OUT / 'mobile.png'), full_page=True)
-            results.append('390px layout and non-dragging movement')
+            await expect(page.get_by_role('status').filter(has_text='確認儲存後才會移動')).to_have_count(0)
+            await page.screenshot(path=str(OUT / 'mobile.png'), full_page=True, animations='disabled')
+            results.append('390px layout, reachable editor actions and non-dragging movement')
             await page.evaluate('''() => { const key = 'campus-one-personal-timetable:local'; const data = JSON.parse(localStorage.getItem(key)); data.courses.push({...data.courses[0],id:'pending',name:'時間未定',day:0,start:0,end:0}); localStorage.setItem(key,JSON.stringify(data)); }''')
             await page.reload(wait_until='networkidle')
             await expect(page.get_by_role('button', name='今天空堂', exact=True)).to_be_disabled()
@@ -105,7 +111,7 @@ async def main():
         except Exception:
             (OUT / 'failure.txt').write_text(traceback.format_exc(), encoding='utf-8')
             (OUT / 'accessibility.yml').write_text(await page.locator('body').aria_snapshot(), encoding='utf-8')
-            await page.screenshot(path=str(OUT / 'failure.png'), full_page=True)
+            await page.screenshot(path=str(OUT / 'failure.png'), full_page=True, animations='disabled')
             raise
         finally:
             await page.context.tracing.stop(path=str(OUT / 'trace.zip'))
