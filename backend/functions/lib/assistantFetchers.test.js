@@ -77,14 +77,42 @@ test('keeps stale scrape rows when a source is down and only fails when nothing 
   });
 });
 
-test('production does not expose cms-none demo schools to the assistant', async () => {
+test.each(['', 'staging', 'production'])(
+  'does not expose cms-none demo schools to the assistant when APP_ENV is %s',
+  async (env) => {
+    const previous = process.env.APP_ENV;
+    process.env.APP_ENV = env;
+    mockDocuments.set('schools/tw-demo-uni/announcements', [
+      row('demo', { title: '示範公告', origin: 'public_scrape', sourceId: 'demo' }),
+    ]);
+    await expect(fetchAssistantAnnouncements('tw-demo-uni')).resolves.toEqual([]);
+    expect(mockReads).toEqual([]);
+    if (previous == null) delete process.env.APP_ENV;
+    else process.env.APP_ENV = previous;
+  },
+);
+
+test('does not expose cms-none demo schools to the assistant when APP_ENV is unset', async () => {
   const previous = process.env.APP_ENV;
-  process.env.APP_ENV = 'production';
+  delete process.env.APP_ENV;
   mockDocuments.set('schools/tw-demo-uni/announcements', [
     row('demo', { title: '示範公告', origin: 'public_scrape', sourceId: 'demo' }),
   ]);
   await expect(fetchAssistantAnnouncements('tw-demo-uni')).resolves.toEqual([]);
   expect(mockReads).toEqual([]);
+  if (previous == null) delete process.env.APP_ENV;
+  else process.env.APP_ENV = previous;
+});
+
+test('exposes cms-none demo schools to the assistant in an explicit test environment', async () => {
+  const previous = process.env.APP_ENV;
+  process.env.APP_ENV = 'test';
+  mockDocuments.set('schools/tw-demo-uni/announcements', [
+    row('demo', { title: '示範公告', origin: 'public_scrape', sourceId: 'demo' }),
+  ]);
+  await expect(fetchAssistantAnnouncements('tw-demo-uni')).resolves.toEqual([
+    expect.objectContaining({ id: 'demo', title: '示範公告' }),
+  ]);
   if (previous == null) delete process.env.APP_ENV;
   else process.env.APP_ENV = previous;
 });

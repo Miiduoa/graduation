@@ -13,7 +13,7 @@ import {
   isAnnouncementSchoolVisibleToPublic,
   SOURCE_DOWN_EMPTY_TEXT,
 } from '@campus/shared/src/campusAnnouncements';
-import { getWebAppEnv } from '@/lib/runtime';
+import { getAnnouncementVisibilityEnv } from '@/lib/runtime';
 
 export type AnnouncementSourceHealth = {
   sourceId: string;
@@ -59,7 +59,7 @@ export async function loadAnnouncements(schoolId: string): Promise<Announcement[
 }
 
 export async function loadAnnouncementFeed(schoolId: string): Promise<AnnouncementFeed> {
-  if (!isAnnouncementSchoolVisibleToPublic({ schoolId }, getWebAppEnv())) {
+  if (!isAnnouncementSchoolVisibleToPublic({ schoolId }, getAnnouncementVisibilityEnv())) {
     return { announcements: [], sources: [], allUnavailable: false };
   }
   if (!isFirebaseConfigured()) throw new Error('Announcement source unavailable');
@@ -132,7 +132,7 @@ function normalizeAnnouncement(
 }
 
 export async function loadAnnouncement(schoolId: string, id: string): Promise<Announcement | null> {
-  if (!isAnnouncementSchoolVisibleToPublic({ schoolId }, getWebAppEnv())) return null;
+  if (!isAnnouncementSchoolVisibleToPublic({ schoolId }, getAnnouncementVisibilityEnv())) return null;
   if (!isFirebaseConfigured()) throw new Error('Announcement source unavailable');
   if (!id || id.includes('/')) return null;
   const db = getDb();

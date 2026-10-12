@@ -8,7 +8,8 @@ import { resolveSchoolPageContext } from '@/lib/pageContext';
 import { loadStorefront, recordExternalOrderClick } from '@/lib/storefront';
 import {
   EXTERNAL_ORDER_HONEST_TEXT,
-  SHOWCASE_LEAVE_NOTICE,
+  SHOWCASE_ORDER_BUTTON_TEXT,
+  SHOWCASE_ORDER_CAPTION,
   buildShowcaseOrderingUrl,
   isHttpsOrderingUrl,
   studentCafeteriaAction,
@@ -39,7 +40,11 @@ export default function HonestOrderPage(props: {
       ? buildShowcaseOrderingUrl(shop.orderingUrl, context.schoolId, id)
       : '';
   return (
-    <SiteShell title="去訂餐" subtitle="訂單在店家系統，不走我們的結帳。" schoolName={context.schoolName}>
+    <SiteShell
+      title={SHOWCASE_ORDER_BUTTON_TEXT}
+      subtitle="訂單在店家系統，不走我們的結帳。"
+      schoolName={context.schoolName}
+    >
       {!shop && <p role="status">正在確認店家連結…</p>}
       {shop && action.kind !== 'showcase' && (
         <section>
@@ -53,7 +58,6 @@ export default function HonestOrderPage(props: {
       {shop && action.kind === 'showcase' && (
         <section>
           <h2>{shop.name}</h2>
-          <p>{SHOWCASE_LEAVE_NOTICE}</p>
           <p>{EXTERNAL_ORDER_HONEST_TEXT}</p>
           <p>價格以店家為準。Nuni 不會產生取餐號碼，也不會把這次點擊當成已下單或已付款。</p>
           {notice && <p role="status">{notice}</p>}
@@ -76,9 +80,10 @@ export default function HonestOrderPage(props: {
                 );
               }}
             >
-              打開店家訂餐頁
+              {SHOWCASE_ORDER_BUTTON_TEXT}
             </a>
           </p>
+          <p>{SHOWCASE_ORDER_CAPTION}</p>
           <Link className="btn" href={`/cafeteria/${encodeURIComponent(id)}?schoolId=${encodeURIComponent(context.schoolId)}`}>
             返回店面
           </Link>

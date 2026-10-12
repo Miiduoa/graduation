@@ -37,7 +37,11 @@ it('sends the student to the shop site and does not pretend Nuni took the order'
     );
   });
   expect(await screen.findByText(/訂單在店家系統/)).toBeTruthy();
-  const link = await screen.findByRole('link', { name: '打開店家訂餐頁' });
+  const link = await screen.findByRole('link', { name: '到店家網站訂餐' });
   expect(link.getAttribute('href')).toContain('utm_source=nuni');
   expect(link.getAttribute('href')).toContain('ref=nuni-pu-stall');
+  expect(
+    screen.getByText('會開啟店家自己的網站，訂單和付款由店家處理，Campus One 查不到這筆訂單'),
+  ).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /點餐|下單/ })).toBeNull();
 });

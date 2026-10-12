@@ -28,7 +28,7 @@ import {
   staleAnnouncementUpdatedAt,
   SUMMARY_NOTICE,
 } from '@campus/shared/src/campusAnnouncements';
-import { getReleaseConfig } from '../services/release';
+import { getRawAppEnv } from '../services/release';
 import { safeNavigate } from '../utils/safeNavigate';
 import { exportAndShareICalFile } from '../services/ical';
 import type { AnnouncementCategory } from '../data/types';
@@ -142,10 +142,7 @@ function ReadState({
 
 export function CampusAnnouncementsScreen({ navigation }: Props) {
   const { school } = useSchool();
-  const schoolVisible = isAnnouncementSchoolVisibleToPublic(
-    { schoolId: school.id },
-    getReleaseConfig().appEnv,
-  );
+  const schoolVisible = isAnnouncementSchoolVisibleToPublic({ schoolId: school.id }, getRawAppEnv());
   const content = useContent(loadCampusAnnouncementFeed);
   const [category, setCategory] = useState<AnnouncementCategory | 'all'>('all');
   const rows = content.value?.announcements ?? [];

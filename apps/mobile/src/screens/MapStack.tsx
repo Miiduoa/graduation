@@ -132,7 +132,7 @@ export function MapStack() {
       <Stack.Screen
         name="HonestOrder"
         component={HonestOrderScreen}
-        options={{ title: '去訂餐', headerShown: false }}
+        options={{ title: '到店家網站訂餐', headerShown: false }}
       />
       <Stack.Screen
         name="StudentOrders"

@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import {
+  allowsPlaceholderAnnouncementSchools,
   formatStaleAnnouncementNotice,
   isAnnouncementSchoolVisibleToPublic,
   isPlaceholderAnnouncementSchool,
@@ -10,7 +11,7 @@ import {
 
 afterEach(() => vi.unstubAllEnvs());
 
-it('treats cms-none demo schools as placeholders hidden only in production', () => {
+it('hides cms-none demo schools unless the environment is explicitly development, preview or test', () => {
   expect(PLACEHOLDER_ANNOUNCEMENT_SCHOOL_IDS).toEqual([
     'tw-demo-uni',
     'tw-taichung-uni-a',
@@ -19,12 +20,22 @@ it('treats cms-none demo schools as placeholders hidden only in production', () 
   expect(isPlaceholderAnnouncementSchool({ cms: 'none' })).toBe(true);
   expect(isPlaceholderAnnouncementSchool({ schoolId: 'tw-demo-uni' })).toBe(true);
   expect(isPlaceholderAnnouncementSchool({ schoolId: 'pu', cms: 'iweb' })).toBe(false);
+  expect(allowsPlaceholderAnnouncementSchools(undefined)).toBe(false);
+  expect(allowsPlaceholderAnnouncementSchools('')).toBe(false);
+  expect(allowsPlaceholderAnnouncementSchools('staging')).toBe(false);
+  expect(allowsPlaceholderAnnouncementSchools('production')).toBe(false);
+  expect(isAnnouncementSchoolVisibleToPublic({ schoolId: 'tw-demo-uni' })).toBe(false);
+  expect(isAnnouncementSchoolVisibleToPublic({ schoolId: 'tw-demo-uni' }, '')).toBe(false);
+  expect(isAnnouncementSchoolVisibleToPublic({ schoolId: 'tw-demo-uni' }, 'unknown')).toBe(false);
   expect(isAnnouncementSchoolVisibleToPublic({ schoolId: 'tw-demo-uni' }, 'production')).toBe(
     false,
   );
+  expect(isAnnouncementSchoolVisibleToPublic({ schoolId: 'tw-demo-uni' }, 'test')).toBe(true);
   expect(isAnnouncementSchoolVisibleToPublic({ schoolId: 'tw-demo-uni' }, 'development')).toBe(
     true,
   );
+  expect(isAnnouncementSchoolVisibleToPublic({ schoolId: 'tw-demo-uni' }, 'preview')).toBe(true);
+  expect(isAnnouncementSchoolVisibleToPublic({ schoolId: 'pu' }, '')).toBe(true);
   expect(isAnnouncementSchoolVisibleToPublic({ schoolId: 'pu' }, 'production')).toBe(true);
 });
 

@@ -105,11 +105,24 @@ export function isPlaceholderAnnouncementSchool(input: {
   );
 }
 
+const PLACEHOLDER_VISIBLE_ENVIRONMENTS = ['development', 'preview', 'test'] as const;
+
+/** 示範學校預設藏：只有明確寫 development / preview / test 才顯示。未設定、空字串、未知值都藏。 */
+export function allowsPlaceholderAnnouncementSchools(
+  environment?: string | null,
+): boolean {
+  return (PLACEHOLDER_VISIBLE_ENVIRONMENTS as readonly string[]).includes(
+    String(environment ?? '').trim(),
+  );
+}
+
 export function isAnnouncementSchoolVisibleToPublic(
   input: { schoolId?: string | null; cms?: string | null; demo?: boolean },
-  environment: string,
+  environment?: string | null,
 ): boolean {
-  return environment !== 'production' || !isPlaceholderAnnouncementSchool(input);
+  return (
+    !isPlaceholderAnnouncementSchool(input) || allowsPlaceholderAnnouncementSchools(environment)
+  );
 }
 
 export function formatTaiwanMonthDayTime(value: Date | string | number): string | null {
