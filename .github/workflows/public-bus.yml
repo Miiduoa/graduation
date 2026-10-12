@@ -1,0 +1,27 @@
+name: Public bus source checks
+on:
+  pull_request:
+    paths: ['apps/web/src/lib/publicBus*.ts', 'apps/web/src/components/PublicBus*', 'apps/web/src/app/api/bus-stops/**', 'scripts/test-public-bus.cjs', '.github/workflows/public-bus.yml']
+  push:
+    branches: [main, fix/public-bus-directory]
+    paths: ['apps/web/src/lib/publicBus*.ts', 'apps/web/src/components/PublicBus*', 'apps/web/src/app/api/bus-stops/**', 'scripts/test-public-bus.cjs', '.github/workflows/public-bus.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '22'
+      - run: npm install --prefix "$RUNNER_TEMP/bus-tools" --ignore-scripts --no-audit --no-fund typescript@5.8.3
+      - name: Strict model and server types
+        run: '"$RUNNER_TEMP/bus-tools/node_modules/.bin/tsc" --noEmit --strict --target es2022 --lib es2022,dom --module commonjs apps/web/src/lib/publicBusStops.ts apps/web/src/lib/publicBusServer.ts'
+      - name: Contracts and official-source acceptance
+        env:
+          NODE_PATH: ${{ runner.temp }}/bus-tools/node_modules
+          CHECK_PUBLIC_BUS_SOURCE: '1'
+        run: node --test scripts/test-public-bus.cjs
