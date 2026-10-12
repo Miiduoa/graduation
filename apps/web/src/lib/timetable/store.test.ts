@@ -12,10 +12,19 @@ vi.mock('firebase/firestore', () => ({
   deleteDoc: vi.fn(),
   doc: vi.fn(() => ({})),
   getDoc: firestore.getDoc,
+  getDocFromServer: firestore.getDoc,
   getDocs: vi.fn(),
   query: vi.fn(),
   serverTimestamp: () => 'server-time',
   setDoc: firestore.setDoc,
+  runTransaction: vi.fn(async (_db, work) => {
+    let commit: unknown;
+    await work({
+      get: async () => ({ exists: () => false }),
+      set: (...args: unknown[]) => { commit = firestore.setDoc(...args); },
+    });
+    await commit;
+  }),
   updateDoc: vi.fn(),
   where: vi.fn(),
 }));
@@ -65,7 +74,7 @@ it('keeps the browser copy when the cloud save fails, so a refresh shows the sam
   );
   firestore.getDoc.mockResolvedValue({
     exists: () => true,
-    data: () => ({ courses: [], updatedAt: { toMillis: () => Date.now() - 60_000 } }),
+    data: () => ({ courses: [], schoolId: 'pu', updatedAt: { toMillis: () => Date.now() - 60_000 } }),
   });
   const loaded = await loadPersonalTimetable('u-1', 'pu');
   expect(loaded.courses.map((item) => item.name)).toEqual(['資料庫']);
@@ -109,6 +118,7 @@ it('prefers a newer cloud copy over an older browser copy', async () => {
     exists: () => true,
     data: () => ({
       courses: [{ ...course, id: 'c-2', name: '作業系統' }],
+      schoolId: 'pu',
       updatedAt: { toMillis: () => Date.parse('2026-10-11T00:00:00.000Z') },
     }),
   });
