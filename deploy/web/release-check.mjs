@@ -94,7 +94,7 @@ export async function inspectPublic(expected, fetcher = fetch) {
   } catch { /* Preserve web outcome separately from a provider outage. */ }
   return { checkedAt: new Date().toISOString(), origin: ORIGIN, expectedRevision: expected,
     revision: SHA.test(health.body?.revision ?? '') ? health.body.revision : null,
-    webDeployed: webReady && pages.every((page) => page.status === 200 && page.html && page.geolocationAllowed),
+    webDeployed: webReady && pages.every((page) => page.status === 200 && page.html && page.geolocationAllowed && page.newBusPage),
     pages, transit, browserControlsVerified: false, liveArrivalsVerified: false };
 }
 
