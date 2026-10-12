@@ -109,7 +109,14 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
         )}
       </div>
       <h2>{announcement.title}</h2>
-      {announcement.body && <p className={styles.body}>{announcement.body}</p>}
+      {(announcement.summary || announcement.body) && (
+        <p className={styles.body}>{announcement.summary || announcement.body}</p>
+      )}
+      {announcement.originalUrl && (
+        <a className={styles.share} href={announcement.originalUrl} rel="noreferrer" target="_blank">
+          看原文
+        </a>
+      )}
       <div className={styles.detailActions}>
         <button className="btn" onClick={() => void copyLink()}>
           複製連結

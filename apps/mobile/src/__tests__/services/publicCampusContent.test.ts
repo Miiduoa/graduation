@@ -12,6 +12,7 @@ import {
 import { isFirebaseMockMode } from '../../firebase';
 import {
   loadCampusAnnouncements,
+  loadCampusAnnouncementFeed,
   loadCampusAnnouncement,
   loadCampusEvent,
   loadCampusEventPage,
@@ -42,22 +43,29 @@ beforeEach(() => {
   jest.mocked(isFirebaseMockMode).mockReturnValue(false);
 });
 
+function docsForPath(input: unknown, announcements: unknown[], sources: unknown[] = []) {
+  const path = JSON.stringify(input);
+  if (path.includes('announcement-sources')) return { empty: sources.length === 0, docs: sources };
+  return { empty: announcements.length === 0, docs: announcements };
+}
+
 test('reads school canonical server documents without a mock or cache fallback', async () => {
-  jest.mocked(getDocsFromServer).mockResolvedValue({ empty: false, docs: [document()] } as never);
+  jest.mocked(getDocsFromServer).mockImplementation(async (input) => docsForPath(input, [document()]) as never);
   await expect(loadCampusAnnouncements('pu')).resolves.toMatchObject([
     { id: 'a1', schoolId: 'pu', title: '校方公告' },
   ]);
   expect(collection).toHaveBeenCalledWith('db', 'schools', 'pu', 'announcements');
-  expect(getDocsFromServer).toHaveBeenCalledTimes(1);
+  expect(collection).toHaveBeenCalledWith('db', 'schools', 'pu', 'announcement-sources');
 });
 
 test('legacy content is only consulted after a successful empty canonical result', async () => {
   jest
     .mocked(getDocsFromServer)
     .mockResolvedValueOnce({ empty: true, docs: [] } as never)
-    .mockResolvedValueOnce({ empty: false, docs: [document()] } as never);
+    .mockResolvedValueOnce({ empty: false, docs: [document()] } as never)
+    .mockResolvedValueOnce({ empty: true, docs: [] } as never);
   await expect(loadCampusAnnouncements('pu')).resolves.toHaveLength(1);
-  expect(collection).toHaveBeenLastCalledWith('db', 'announcements');
+  expect(collection).toHaveBeenCalledWith('db', 'announcements');
   jest.clearAllMocks();
   jest.mocked(getDocsFromServer).mockRejectedValueOnce(new Error('permission-denied'));
   await expect(loadCampusAnnouncements('pu')).rejects.toThrow('permission-denied');
@@ -114,14 +122,35 @@ test.each([[loadCampusAnnouncements, 'announcements', 'publishedAt']] as const)(
     jest
       .mocked(getDocsFromServer)
       .mockResolvedValueOnce({ empty: true, docs: [] } as never)
+      .mockResolvedValueOnce({ empty: true, docs: [] } as never)
       .mockResolvedValueOnce({ empty: true, docs: [] } as never);
     await expect(load('pu')).resolves.toEqual([]);
-    expect(collection).toHaveBeenLastCalledWith('db', collectionName);
+    expect(collection).toHaveBeenCalledWith('db', collectionName);
     expect(where).toHaveBeenCalledWith('schoolId', '==', 'pu');
     expect(orderBy).toHaveBeenCalledWith(dateField, 'desc');
     expect(limit).toHaveBeenCalledWith(100);
   },
 );
+
+test('hides scrape rows from dead sources and reports the whole feed as temporarily unavailable', async () => {
+  const scrape = document({
+    ...row,
+    origin: 'public_scrape',
+    sourceId: 'pu-acd',
+    originalUrl: 'https://acd.pu.edu.tw/p/412-1042-1.php',
+    summary: '選課摘要',
+  });
+  jest.mocked(getDocsFromServer).mockImplementation(async (input) =>
+    docsForPath(input, [scrape], [
+      { id: 'pu-acd', data: () => ({ sourceId: 'pu-acd', office: '教務處', status: 'unavailable' }) },
+    ]) as never,
+  );
+  await expect(loadCampusAnnouncementFeed('pu')).resolves.toMatchObject({
+    announcements: [],
+    allUnavailable: true,
+    sources: [{ office: '教務處', status: 'unavailable' }],
+  });
+});
 
 function eventDocument(id: string, path: string, data: Record<string, unknown> = {}) {
   return {

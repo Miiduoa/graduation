@@ -17,10 +17,11 @@ import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useSchool } from '../state/school';
 import { useCampusEvents } from '../hooks/useCampusEvents';
 import {
-  loadCampusAnnouncements,
+  loadCampusAnnouncementFeed,
   loadCampusAnnouncement,
   loadCampusEvent,
 } from '../services/publicCampusContent';
+import { SOURCE_UNAVAILABLE_TEXT, SUMMARY_NOTICE } from '@campus/shared/src/campusAnnouncements';
 import { safeNavigate } from '../utils/safeNavigate';
 import { exportAndShareICalFile } from '../services/ical';
 import type { AnnouncementCategory } from '../data/types';
@@ -133,20 +134,34 @@ function ReadState({
 }
 
 export function CampusAnnouncementsScreen({ navigation }: Props) {
-  const content = useContent(loadCampusAnnouncements);
+  const content = useContent(loadCampusAnnouncementFeed);
   const [category, setCategory] = useState<AnnouncementCategory | 'all'>('all');
-  const rows = content.value ?? [];
+  const rows = content.value?.announcements ?? [];
+  const sources = content.value?.sources ?? [];
+  const allUnavailable = content.value?.allUnavailable === true;
   const visible = rows.filter((row) => category === 'all' || row.category === category);
+  const empty = allUnavailable ? SOURCE_UNAVAILABLE_TEXT : '目前沒有公告';
   return (
     <AIDetailScreen
       title="公告"
-      subtitle="查看學校發布的最新消息。"
+      subtitle="公開處室公告的摘要與原文連結。一般帳號即可查看。"
       onBack={() => navigation?.goBack?.()}
     >
       {content.loading || content.error || !rows.length ? (
-        <ReadState {...content} empty="目前沒有公告" />
+        <ReadState {...content} empty={empty} />
       ) : (
         <>
+          {sources.some((item) => item.status === 'unavailable') && !allUnavailable ? (
+            <AICard title={SOURCE_UNAVAILABLE_TEXT}>
+              <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
+                {sources
+                  .filter((item) => item.status === 'unavailable')
+                  .map((item) => item.office)
+                  .join('、')}
+                目前讀不到，不會繼續顯示可能已過期的舊稿。
+              </Text>
+            </AICard>
+          ) : null}
           <View
             style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, margin: aiTokens.space.md }}
           >
@@ -225,9 +240,20 @@ export function CampusAnnouncementDetailScreen({ navigation, route }: Props) {
           </AICard>
           <AICard title="公告內容">
             <Text selectable style={{ color: aiTokens.text, lineHeight: 25 }}>
-              {announcement.body || '此公告沒有提供內文。'}
+              {announcement.summary || announcement.body || '此公告沒有提供內文。'}
             </Text>
+            {announcement.originalUrl || announcement.summary ? (
+              <Text style={{ color: aiTokens.muted, lineHeight: 22, marginTop: 8 }}>
+                {SUMMARY_NOTICE}
+              </Text>
+            ) : null}
           </AICard>
+          {announcement.originalUrl ? (
+            <AIButton
+              label="看原文"
+              onPress={() => void openAttachment(announcement.originalUrl!)}
+            />
+          ) : null}
           {announcement.attachments?.length ? (
             <AISection title="附件">
               {announcement.attachments.map((attachment) => (

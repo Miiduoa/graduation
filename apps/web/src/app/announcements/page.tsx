@@ -6,7 +6,8 @@ import { findSchoolById, findSchoolsByCode } from '@campus/shared/src/schools';
 import { useAuth } from '@/components/AuthGuard';
 import { SiteShell } from '@/components/SiteShell';
 import type { Announcement } from '@/lib/firebase';
-import { loadAnnouncements } from './publicAnnouncements';
+import { loadAnnouncementFeed, type AnnouncementSourceHealth } from './publicAnnouncements';
+import { SOURCE_UNAVAILABLE_TEXT } from '@campus/shared/src/campusAnnouncements';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import styles from './announcements.module.css';
 
@@ -14,7 +15,13 @@ type Category = 'all' | 'academic' | 'event' | 'general';
 type LoadState =
   | { status: 'loading' }
   | { status: 'error' }
-  | { status: 'ready'; announcements: Announcement[]; fetchedAt: string };
+  | {
+      status: 'ready';
+      announcements: Announcement[];
+      sources: AnnouncementSourceHealth[];
+      allUnavailable: boolean;
+      fetchedAt: string;
+    };
 
 const categories: { id: Category; label: string }[] = [
   { id: 'all', label: '全部' },
@@ -40,10 +47,16 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
 
   const load = useCallback(() => {
     const request = ++generation.current;
-    return loadAnnouncements(schoolId).then(
-      (announcements) => {
+    return loadAnnouncementFeed(schoolId).then(
+      (feed) => {
         if (mounted.current && request === generation.current) {
-          setState({ status: 'ready', announcements, fetchedAt: new Date().toISOString() });
+          setState({
+            status: 'ready',
+            announcements: feed.announcements,
+            sources: feed.sources,
+            allUnavailable: feed.allUnavailable,
+            fetchedAt: new Date().toISOString(),
+          });
         }
       },
       () => {
@@ -177,13 +190,30 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
           {notice}
         </p>
       )}
+      {state.sources.some((item) => item.status === 'unavailable') && !state.allUnavailable && (
+        <p role="status" className={styles.notice}>
+          {state.sources
+            .filter((item) => item.status === 'unavailable')
+            .map((item) => `${item.office}：${SOURCE_UNAVAILABLE_TEXT}`)
+            .join('、')}
+          。其他來源仍會顯示。
+        </p>
+      )}
       {filtered.length === 0 ? (
         <section className={styles.status}>
-          <h2>{state.announcements.length ? '沒有符合條件的公告' : '目前沒有公開公告'}</h2>
+          <h2>
+            {state.allUnavailable
+              ? SOURCE_UNAVAILABLE_TEXT
+              : state.announcements.length
+                ? '沒有符合條件的公告'
+                : '目前沒有公開公告'}
+          </h2>
           <p>
-            {state.announcements.length
-              ? '試試其他關鍵字或分類。'
-              : '學校發布新的公告後，會顯示在這裡。'}
+            {state.allUnavailable
+              ? '公開處室網站現在讀不到，不會繼續顯示可能已過期的舊稿。'
+              : state.announcements.length
+                ? '試試其他關鍵字或分類。'
+                : '學校發布新的公告後，會顯示在這裡。'}
           </p>
         </section>
       ) : (
@@ -220,14 +250,22 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
                   {announcement.title}
                 </Link>
               </h2>
-              {announcement.body && <p className={styles.body}>{announcement.body}</p>}
-              <button
-                className={styles.share}
-                onClick={() => void share(announcement)}
-                aria-label={`分享公告：${announcement.title}`}
-              >
-                分享公告 ↗
-              </button>
+              {(announcement.summary || announcement.body) && (
+                <p className={styles.body}>{announcement.summary || announcement.body}</p>
+              )}
+              {announcement.originalUrl ? (
+                <a className={styles.share} href={announcement.originalUrl} rel="noreferrer" target="_blank">
+                  看原文
+                </a>
+              ) : (
+                <button
+                  className={styles.share}
+                  onClick={() => void share(announcement)}
+                  aria-label={`分享公告：${announcement.title}`}
+                >
+                  分享公告 ↗
+                </button>
+              )}
             </article>
           ))}
         </div>
@@ -250,7 +288,7 @@ export default function AnnouncementsPage(props: {
       schoolName={school.name}
       schoolCode={school.code}
       title="校園公告"
-      subtitle="學校公開消息，在這裡一起查看。"
+      subtitle="公開處室公告的摘要與原文連結。一般帳號即可查看。"
     >
       {loading ? (
         <div className={styles.status} role="status">

@@ -1,7 +1,14 @@
 'use client';
 
 import { use, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
+import {
+  PRICE_DISCLAIMER,
+  isMenuStale,
+  studentCafeteriaAction,
+} from '@campus/shared/src/merchantMode';
+import { ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
 import { useAuth } from '@/components/AuthGuard';
 import {
   fetchCafeterias,
@@ -279,7 +286,8 @@ function CafeteriaContent({
           </div>
         </div>
         <p className={styles.notice}>
-          依店家提供的資料顯示；實際營業與餐點供應請向店家確認。本頁提供菜單查詢，目前還不能線上點餐。
+          {ONLINE_ORDERING_OFF_TEXT}。依店家提供的資料顯示；實際營業與餐點供應請向店家確認。一般帳號即可看店面與菜單。
+          {PRICE_DISCLAIMER}
         </p>
 
         <section className={styles.toolbar} aria-label="尋找餐點">
@@ -366,7 +374,27 @@ function CafeteriaContent({
                 <p className={styles.count}>
                   {totalCount} 道餐點 · {availableCount} 道標記供應中
                 </p>
+                <p className={styles.details}>
+                  <Link href={`/cafeteria/${encodeURIComponent(key)}?schoolId=${encodeURIComponent(schoolId)}`}>
+                    進入店面
+                  </Link>
+                  {studentCafeteriaAction({
+                    merchantMode: cafeteria.merchantMode,
+                    orderingEnabled: cafeteria.orderingEnabled,
+                    onlineOrderingEnabled: false,
+                    orderingUrl: cafeteria.orderingUrl,
+                  }).kind === 'showcase' && (
+                    <Link
+                      href={`/cafeteria/${encodeURIComponent(key)}/order?schoolId=${encodeURIComponent(schoolId)}`}
+                    >
+                      去訂餐
+                    </Link>
+                  )}
+                </p>
               </header>
+              {isMenuStale(cafeteria.menuSyncedAt) && items.length > 0 && (
+                <p className={styles.menuEmpty}>菜單可能過期，價格以店家頁面為準。</p>
+              )}
 
               {items.length === 0 ? (
                 <p className={styles.menuEmpty}>店家尚未提供菜單，請至現場確認餐點。</p>

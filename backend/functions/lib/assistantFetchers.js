@@ -47,10 +47,40 @@ async function readSchoolRows(schoolId, collections, { order, limit, requiredFie
   return [];
 }
 
+async function fetchAnnouncementSources(schoolId, deps = {}) {
+  assertId(schoolId, 'schoolId');
+  const snapshot = await database(deps)
+    .collection('schools')
+    .doc(schoolId)
+    .collection('announcement-sources')
+    .get();
+  return snapshot.docs.map((entry) => {
+    const data = entry.data() || {};
+    return {
+      id: entry.id,
+      sourceId: data.sourceId || entry.id,
+      office: typeof data.office === 'string' ? data.office : entry.id,
+      status: data.status === 'unavailable' ? 'unavailable' : 'healthy',
+      message: data.status === 'unavailable' ? '暫時抓不到' : '',
+    };
+  });
+}
+
 async function fetchAssistantAnnouncements(schoolId, deps = {}) {
-  return readSchoolRows(schoolId, ['announcements', 'announcements'], {
+  const rows = await readSchoolRows(schoolId, ['announcements', 'announcements'], {
     order: ['publishedAt', 'desc'], limit: 20, requiredField: 'title', deps,
   });
+  const sources = await fetchAnnouncementSources(schoolId, deps);
+  const hidden = new Set(sources.filter((item) => item.status === 'unavailable').map((item) => item.sourceId));
+  const announcements = rows.filter(
+    (row) => row.origin !== 'public_scrape' || !row.sourceId || !hidden.has(row.sourceId),
+  );
+  if (sources.length && sources.every((item) => item.status === 'unavailable') && announcements.length === 0) {
+    const error = new HttpsError('unavailable', '暫時抓不到');
+    error.details = { sources };
+    throw error;
+  }
+  return announcements;
 }
 
 async function fetchAssistantEvents(schoolId, deps = {}) {
@@ -226,6 +256,7 @@ module.exports = {
   fetchAssistantTodaySchedule,
   fetchAssistantPendingAssignments,
   fetchAssistantAnnouncements,
+  fetchAnnouncementSources,
   fetchAssistantEvents,
   fetchAssistantMenus,
   fetchAssistantPois,
