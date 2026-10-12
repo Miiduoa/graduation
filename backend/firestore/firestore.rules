@@ -64,17 +64,16 @@ service cloud.firestore {
       return isSignedIn() && isCafeteriaOperator(schoolId, cafeteriaId, request.auth.uid);
     }
 
-    function isOptionalStorefrontUrl(value) {
+    function isHttpsStorefrontUrl(value) {
       return value is string
-        && (
-          value == ''
-          || (
-            value.size() > 0
-            && value.size() <= 500
-            && value.matches('^https://[^\\s]+$')
-            && !value.matches('^https://[^/]*@')
-          )
-        );
+        && value.size() > 0
+        && value.size() <= 2048
+        && value.matches('^https://[^\\s]+$')
+        && !value.matches('^https://[^/]*@.*');
+    }
+
+    function isOptionalStorefrontUrl(value) {
+      return value is string && (value == '' || isHttpsStorefrontUrl(value));
     }
 
     function cafeteriaStorefrontUrlsAllowed() {
@@ -1214,8 +1213,7 @@ service cloud.firestore {
             && request.resource.data.fulfillment == 'external'
             && request.resource.data.schoolId == schoolId
             && request.resource.data.cafeteriaId is string
-            && request.resource.data.orderingUrl is string
-            && request.resource.data.orderingUrl.matches('^https://.+')
+            && isHttpsStorefrontUrl(request.resource.data.orderingUrl)
             && !('queueNumber' in request.resource.data)
             && !('paymentStatus' in request.resource.data);
           allow update, delete: if false;

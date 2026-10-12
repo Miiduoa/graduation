@@ -23,6 +23,7 @@ import {
   SHOWCASE_ORDER_BUTTON_TEXT,
   SHOWCASE_ORDER_CAPTION,
   isMenuStale,
+  safeStorefrontUrl,
   studentCafeteriaAction,
 } from '@campus/shared/src/merchantMode';
 import social from '@/features/social/Social.module.css';
@@ -71,6 +72,7 @@ export default function StorefrontPage(props: {
     onlineOrderingEnabled: false,
     orderingUrl: shop?.orderingUrl,
   });
+  const websiteUrl = safeStorefrontUrl(shop?.websiteUrl);
   return (
     <SiteShell
       title={shop?.name || '店面'}
@@ -88,9 +90,9 @@ export default function StorefrontPage(props: {
             <p className={social.muted}>
               {[shop.location, shop.openingHours].filter(Boolean).join(' · ') || '位置與營業時間尚未提供'}
             </p>
-            {shop.websiteUrl && (
+            {websiteUrl && (
               <p>
-                <a className={social.link} href={shop.websiteUrl} rel="noreferrer" target="_blank">
+                <a className={social.link} href={websiteUrl} rel="noopener noreferrer" target="_blank">
                   店家網站
                 </a>
               </p>

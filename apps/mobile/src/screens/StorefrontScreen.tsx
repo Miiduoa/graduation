@@ -22,6 +22,7 @@ import {
   SHOWCASE_ORDER_BUTTON_TEXT,
   SHOWCASE_ORDER_CAPTION,
   isMenuStale,
+  safeStorefrontUrl,
   studentCafeteriaAction,
 } from '@campus/shared/src/merchantMode';
 
@@ -65,6 +66,7 @@ export default function StorefrontScreen({ navigation, route }: Props) {
     onlineOrderingEnabled: false,
     orderingUrl: shop?.orderingUrl,
   });
+  const websiteUrl = safeStorefrontUrl(shop?.websiteUrl);
   return (
     <Screen title={shop?.name || '店面'} subtitle="店家自己的主頁。一般帳號即可查看、追蹤與留言。">
       <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 80 }}>
@@ -106,8 +108,8 @@ export default function StorefrontScreen({ navigation, route }: Props) {
             {action.kind === 'showcase' && shop.orderingUrl ? (
               <Text style={{ color: theme.colors.muted, lineHeight: 20 }}>{SHOWCASE_ORDER_CAPTION}</Text>
             ) : null}
-            {shop.websiteUrl ? (
-              <Pressable onPress={() => void Linking.openURL(shop.websiteUrl!)}>
+            {websiteUrl ? (
+              <Pressable onPress={() => void Linking.openURL(websiteUrl)}>
                 <Text style={{ color: theme.colors.accent }}>店家網站</Text>
               </Pressable>
             ) : null}

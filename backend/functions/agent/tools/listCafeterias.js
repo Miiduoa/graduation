@@ -3,6 +3,7 @@
 const { z } = require('zod');
 const { getFirestore } = require('firebase-admin/firestore');
 const { hasCoordinates } = require('../../lib/assistantPois');
+const { isHttpsOrderingUrl } = require('../../lib/merchantMode');
 
 const text = (value) => typeof value === 'string' ? value.trim() : '';
 const time = (value) => /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(text(value)) ? text(value) : null;
@@ -48,7 +49,7 @@ async function execute(ctx, rawInput) {
             : data.orderingEnabled === true
               ? 'native_order'
               : 'info_only',
-        orderingUrl: /^https:\/\//.test(text(data.orderingUrl)) ? text(data.orderingUrl) : '',
+        orderingUrl: isHttpsOrderingUrl(data.orderingUrl) ? data.orderingUrl : '',
         // The cafeteria producer has no authoritative live opening-status field.
         openNow: null,
         seats: count(data.seats),

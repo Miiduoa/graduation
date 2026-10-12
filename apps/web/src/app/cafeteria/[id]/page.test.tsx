@@ -19,6 +19,7 @@ const state = vi.hoisted(() => ({
     intro: string;
     merchantMode: string;
     orderingUrl?: string;
+    websiteUrl?: string;
     location: string;
     openingHours?: string;
   },
@@ -111,4 +112,55 @@ it('does not show an outbound order button when the shop has no ordering URL', a
   expect(
     screen.queryByText('會開啟店家自己的網站，訂單和付款由店家處理，Campus One 查不到這筆訂單'),
   ).toBeNull();
+});
+
+it('hides unsafe website and ordering URLs instead of rendering them as links', async () => {
+  const unsafe = [
+    'javascript:alert(1)',
+    'https://a@evil.com',
+    `https://shop.example/${'a'.repeat(2048)}`,
+    ' https://shop.example/order',
+    'https://shop.example/order ',
+    'http://shop.example/order',
+    'data:text/html,hi',
+  ];
+  for (const url of unsafe) {
+    state.shop = {
+      ...showcaseShop,
+      merchantMode: 'showcase_link',
+      orderingUrl: url,
+      websiteUrl: url,
+    };
+    const view = await act(async () =>
+      render(
+        <Suspense fallback={<p>載入店面</p>}>
+          <StorefrontPage
+            params={Promise.resolve({ id: 'stall' })}
+            searchParams={Promise.resolve({ schoolId: 'pu' })}
+          />
+        </Suspense>,
+      ),
+    );
+    expect(await screen.findByText('紙感小店')).toBeTruthy();
+    expect(screen.queryByRole('link', { name: '到店家網站訂餐' })).toBeNull();
+    expect(screen.queryByRole('link', { name: '店家網站' })).toBeNull();
+    view.unmount();
+  }
+});
+
+it('adds noopener noreferrer on a safe website link', async () => {
+  state.shop = { ...showcaseShop, websiteUrl: 'https://shop.example' };
+  await act(async () => {
+    render(
+      <Suspense fallback={<p>載入店面</p>}>
+        <StorefrontPage
+          params={Promise.resolve({ id: 'stall' })}
+          searchParams={Promise.resolve({ schoolId: 'pu' })}
+        />
+      </Suspense>,
+    );
+  });
+  const link = await screen.findByRole('link', { name: '店家網站' });
+  expect(link.getAttribute('href')).toBe('https://shop.example');
+  expect(link.getAttribute('rel')).toBe('noopener noreferrer');
 });
