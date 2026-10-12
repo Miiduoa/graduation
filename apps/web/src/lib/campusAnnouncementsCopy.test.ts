@@ -7,7 +7,9 @@ import {
   isPlaceholderAnnouncementSchool,
   listAnnouncementCatalogLinks,
   PLACEHOLDER_ANNOUNCEMENT_SCHOOL_IDS,
+  FIRESTORE_UNAVAILABLE_WITH_CACHE_TEXT,
   SOURCE_DOWN_EMPTY_TEXT,
+  SOURCE_DOWN_WITH_CACHE_TEXT,
   SOURCE_NOT_CONNECTED_TEXT,
   staleAnnouncementUpdatedAt,
 } from '@campus/shared/src/campusAnnouncements';
@@ -46,7 +48,11 @@ it('formats the stale banner in Taiwan time and keeps the empty-state copy', () 
   expect(formatStaleAnnouncementNotice('2026-10-12T10:05:00.000Z')).toBe(
     '最後更新 10/12 18:05，學校網站暫時連不上',
   );
+  expect(formatStaleAnnouncementNotice('2026-10-12T10:05:00.000Z', 'source_down')).toBe(
+    '最後更新 10/12 18:05，學校網站暫時連不上',
+  );
   expect(formatStaleAnnouncementNotice(null)).toBe('學校網站暫時連不上');
+  expect(SOURCE_DOWN_WITH_CACHE_TEXT).toBe('學校網站暫時連不上');
   expect(SOURCE_DOWN_EMPTY_TEXT).toBe('學校網站暫時連不上，可以先到學校網站看最新消息');
   expect(SOURCE_NOT_CONNECTED_TEXT).toBe('這裡還沒接上學校公告，請先到學校網站看最新消息');
   expect(
@@ -55,22 +61,38 @@ it('formats the stale banner in Taiwan time and keeps the empty-state copy', () 
         [{ status: 'unavailable', lastSuccessAt: '2026-10-12T10:05:00.000Z' }],
         [{ publishedAt: '2026-01-01T00:00:00.000Z' }],
       ),
+      'source_down',
     ),
   ).toBe('最後更新 10/12 18:05，學校網站暫時連不上');
+});
+
+it('uses a Firestore unread banner when cached copy remains after a local read failure', () => {
+  expect(FIRESTORE_UNAVAILABLE_WITH_CACHE_TEXT).toBe('暫時讀不到新公告');
+  expect(formatStaleAnnouncementNotice('2026-10-12T10:05:00.000Z', 'firestore')).toBe(
+    '最後更新 10/12 18:05，暫時讀不到新公告',
+  );
+  expect(formatStaleAnnouncementNotice(null, 'firestore')).toBe('暫時讀不到新公告');
+  expect(formatStaleAnnouncementNotice('2026-10-12T10:05:00.000Z', 'firestore')).not.toContain(
+    '學校網站暫時連不上',
+  );
+  expect(formatStaleAnnouncementNotice('2026-10-12T10:05:00.000Z', 'source_down')).not.toContain(
+    '暫時讀不到新公告',
+  );
 });
 
 it('classifies empty feeds as never connected, source down, or confirmed empty', () => {
   expect(announcementEmptyKind([], [])).toBe('not_connected');
   expect(announcementEmptyKind([], [{ status: 'unavailable' }])).toBe('source_down');
   expect(
-    announcementEmptyKind([], [{ status: 'unavailable', lastSuccessAt: '2026-10-12T10:05:00.000Z' }]),
+    announcementEmptyKind(
+      [],
+      [{ status: 'unavailable', lastSuccessAt: '2026-10-12T10:05:00.000Z' }],
+    ),
   ).toBe('source_down');
   expect(
     announcementEmptyKind([], [{ status: 'healthy', lastSuccessAt: '2026-10-12T10:05:00.000Z' }]),
   ).toBe('empty');
-  expect(
-    announcementEmptyKind([{ title: '舊稿' }], [{ status: 'unavailable' }]),
-  ).toBe('has_items');
+  expect(announcementEmptyKind([{ title: '舊稿' }], [{ status: 'unavailable' }])).toBe('has_items');
 });
 
 it('exposes catalog office urls for a school that has never been fetched', () => {

@@ -151,7 +151,8 @@ test('keeps cached announcements when a later Firestore read fails', async () =>
   jest.mocked(loadCampusAnnouncementFeed).mockRejectedValueOnce(new Error('permission-denied'));
   fireEvent.press(view.getByText('更新公告'));
   await view.findByText('校方的新公告');
-  expect(view.getByText(/最後更新/)).toBeTruthy();
+  expect(view.getByText('最後更新 10/8 08:00，暫時讀不到新公告')).toBeTruthy();
+  expect(view.queryByText('學校網站暫時連不上')).toBeNull();
   expect(view.queryByText('請確認網路')).toBeNull();
   expect(view.queryByText('這裡還沒接上學校公告，請先到學校網站看最新消息')).toBeNull();
 });
@@ -174,6 +175,7 @@ test('keeps old announcements when the school site is down and links the office 
   const list = render(<AnnouncementsScreen navigation={navigation} />);
   await list.findByText('最後更新 10/12 18:05，學校網站暫時連不上');
   expect(list.getByText('校方的新公告')).toBeTruthy();
+  expect(list.queryByText('暫時讀不到新公告')).toBeNull();
   expect(list.queryByText('暫時抓不到')).toBeNull();
   jest.mocked(loadCampusAnnouncementFeed).mockResolvedValue({
     announcements: [],

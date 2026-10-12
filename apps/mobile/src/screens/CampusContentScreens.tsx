@@ -292,7 +292,10 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
         <>
           {showStaleNotice ? (
             <AICard
-              title={formatStaleAnnouncementNotice(staleAnnouncementUpdatedAt(staleSources, rows))}
+              title={formatStaleAnnouncementNotice(
+                staleAnnouncementUpdatedAt(staleSources, rows),
+                content.stale ? 'firestore' : 'source_down',
+              )}
             >
               {null}
             </AICard>
@@ -389,6 +392,7 @@ export function CampusAnnouncementDetailScreen({ navigation, route }: Props) {
                   [{ status: 'unavailable', lastSuccessAt: announcement.publishedAt }],
                   [announcement],
                 ),
+                'firestore',
               )}
             >
               {null}

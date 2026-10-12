@@ -243,7 +243,8 @@ it('keeps the cached announcement when a later Firestore read fails', async () =
   vi.mocked(getDocFromServer).mockRejectedValueOnce(new Error('permission-denied'));
   fireEvent.click(screen.getByRole('button', { name: '更新公告' }));
   await screen.findByText('實際公告詳情');
-  expect(screen.getByText(/最後更新/)).toBeTruthy();
+  expect(screen.getByText(/最後更新 \d+\/\d+ \d{2}:\d{2}，暫時讀不到新公告/)).toBeTruthy();
+  expect(screen.queryByText('學校網站暫時連不上')).toBeNull();
   expect(screen.queryByText('請確認網路')).toBeNull();
   expect(screen.queryByText('這裡還沒接上學校公告，請先到學校網站看最新消息')).toBeNull();
 });
