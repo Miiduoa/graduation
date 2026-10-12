@@ -167,8 +167,30 @@ export function getCloudFunctionRegion(): string {
   );
 }
 
+function trimFunctionsBaseUrl(value: string): string {
+  return value.trim().replace(/\/+$/, '');
+}
+
+export function getFunctionsBaseUrl(): string | null {
+  if (USE_FIREBASE_EMULATOR) return null;
+  const extra = (Constants.expoConfig as any)?.extra ?? (Constants as any)?.manifest?.extra ?? {};
+  const raw = String(
+    extra.functionsBaseUrl ??
+      process.env.EXPO_PUBLIC_FUNCTIONS_BASE_URL ??
+      extra.cloudFunctionBaseUrl ??
+      process.env.EXPO_PUBLIC_CLOUD_FUNCTION_BASE_URL ??
+      '',
+  ).trim();
+  if (!raw) return null;
+  const trimmed = trimFunctionsBaseUrl(raw);
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
 export function getFunctionsInstance(): Functions {
-  const functions = getFunctions(getFirebaseApp(), getCloudFunctionRegion());
+  const customDomain = getFunctionsBaseUrl();
+  const functions = customDomain
+    ? getFunctions(getFirebaseApp(), customDomain)
+    : getFunctions(getFirebaseApp(), getCloudFunctionRegion());
   if (USE_FIREBASE_EMULATOR && !_emulatorWired.functions) {
     try {
       connectFunctionsEmulator(functions, EMULATOR_HOST, EMULATOR_FUNCTIONS_PORT);

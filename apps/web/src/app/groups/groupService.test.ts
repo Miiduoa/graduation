@@ -10,6 +10,8 @@ vi.mock('@/lib/firebase', () => ({
   getDb: () => ({}),
   isFirebaseConfigured: () => runtime.configured,
   getAuth: () => ({ currentUser: runtime.user, app: { options: { projectId: 'campus-test' } } }),
+  getCloudFunctionUrl: (name: string) =>
+    `https://asia-east1-campus-test.cloudfunctions.net/${name}`,
 }));
 vi.mock('firebase/firestore', () => ({
   collection: (_db: unknown, ...path: string[]) => ({ path: path.join('/') }),

@@ -95,11 +95,22 @@ function formatMonthYear(date: Date): string {
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
-const CALENDAR_API_BASE_URL =
-  process.env.EXPO_PUBLIC_FIREBASE_FUNCTIONS_URL ??
-  (process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID
+const CALENDAR_API_BASE_URL = (() => {
+  const override = (
+    process.env.EXPO_PUBLIC_FUNCTIONS_BASE_URL ??
+    process.env.EXPO_PUBLIC_FIREBASE_FUNCTIONS_URL ??
+    process.env.EXPO_PUBLIC_CLOUD_FUNCTION_BASE_URL ??
+    ''
+  )
+    .trim()
+    .replace(/\/+$/, '');
+  if (override) {
+    return /^https?:\/\//i.test(override) ? override : `https://${override}`;
+  }
+  return process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID
     ? `https://asia-east1-${process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID}.cloudfunctions.net`
-    : null);
+    : null;
+})();
 
 type SubscribeButtonProps = {
   icon: string;
