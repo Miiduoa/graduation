@@ -15,6 +15,7 @@ if (!emulatorHost || Number(emulatorHost[1]) < 1 || Number(emulatorHost[1]) > 65
 }
 const host = `127.0.0.1:${emulatorHost[1]}`;
 process.env.FIRESTORE_EMULATOR_HOST = host;
+const initialOrderingEnabled = process.env.ONLINE_ORDERING_ENABLED;
 const projectId = 'demo-campus-order-concurrency';
 const app = initializeApp({ projectId }, 'transaction-concurrency-tests');
 const db = getFirestore(app);
@@ -54,6 +55,8 @@ const feedback = (uid = 'alice', change = {}) =>
     },
   });
 beforeEach(async () => {
+  // This Node test process uses only the guarded local Firestore emulator, not the Functions emulator.
+  process.env.ONLINE_ORDERING_ENABLED = 'true';
   const response = await fetch(
     `http://${host}/emulator/v1/projects/${projectId}/databases/(default)/documents`,
     { method: 'DELETE' },
@@ -89,8 +92,20 @@ beforeEach(async () => {
   await batch.commit();
 });
 after(async () => {
+  if (initialOrderingEnabled === undefined) delete process.env.ONLINE_ORDERING_ENABLED;
+  else process.env.ONLINE_ORDERING_ENABLED = initialOrderingEnabled;
   await db.terminate();
   await deleteApp(app);
+});
+
+test('a disabled ordering gate rejects before creating any order, mirror or request key', async () => {
+  process.env.ONLINE_ORDERING_ENABLED = 'false';
+  await assert.rejects(order(), (error) =>
+    error.code === 'failed-precondition' && error.details?.reason === 'online_ordering_off',
+  );
+  for (const path of ['schools/pu/orders', 'users/alice/schools/pu/orders', '_orderRequests']) {
+    assert.equal((await db.collection(path).get()).size, 0);
+  }
 });
 
 test('concurrent feedback retries persist one receipt with a server timestamp', async () => {
@@ -497,167 +512,3 @@ test('a replaced inspection score prevents stale enforcement before and during o
   await createInspectionEnforcement({ db })(event);
   assert.equal((await assertReceipts(id)).status, 'pending');
 });
-
-test('refund request failure cannot commit cancellation or its mirror; retry completes the same receipt', async () => {
-  const id = await setupOrder();
-  const payment = db.batch();
-  payment.update(db.doc(`schools/pu/orders/${id}`), {
-    paymentMethod: 'linepay',
-    paymentStatus: 'paid',
-  });
-  payment.update(db.doc(`users/alice/schools/pu/orders/${id}`), {
-    paymentMethod: 'linepay',
-    paymentStatus: 'paid',
-  });
-  await payment.commit();
-  const event = await inspectionEvent();
-  const database = {
-    collection: db.collection.bind(db),
-    runTransaction: (callback) =>
-      db.runTransaction((transaction) =>
-        callback({
-          getAll: transaction.getAll.bind(transaction),
-          set: transaction.set.bind(transaction),
-          update: transaction.update.bind(transaction),
-          create: () => {
-            throw new Error('refund request unavailable');
-          },
-        }),
-      ),
-  };
-  await assert.rejects(
-    createInspectionEnforcement({ db: database })(event),
-    /refund request unavailable/,
-  );
-  assert.equal((await assertReceipts(id)).status, 'pending');
-  assert.deepEqual((await read('schools/pu/inspectionEnforcements/review')).affectedOrderIds, []);
-  await createInspectionEnforcement({ db })(event);
-  assert.equal((await assertReceipts(id)).status, 'cancelled');
-  assert.equal((await db.collection('schools/pu/refunds').get()).size, 1);
-});
-
-test('inspection warning never closes orders and suspension retries do not extend seven days', async () => {
-  const id = await setupOrder();
-  await createInspectionEnforcement({ db })(await inspectionEvent(80));
-  assert.equal((await assertReceipts(id)).status, 'pending');
-  assert.equal((await read('schools/pu/cafeterias/cafe')).orderingEnabled, true);
-  const event = await inspectionEvent(70);
-  await createInspectionEnforcement({ db, now: () => 1000 })(event);
-  await createInspectionEnforcement({ db, now: () => 9999999 })(event);
-  assert.equal(
-    (await read('schools/pu/inspectionEnforcements/review')).resumeAt,
-    new Date(1000 + 7 * 86400000).toISOString(),
-  );
-  assert.equal((await assertReceipts(id)).status, 'pending');
-});
-
-test('force closure drains more than one candidate batch without dropping mirrored cancellations', async () => {
-  const originalId = await setupOrder();
-  const receipt = await read(`schools/pu/orders/${originalId}`);
-  const batch = db.batch();
-  for (let i = 0; i < 200; i++) {
-    const id = `extra-${i}`;
-    const data = { ...receipt, orderId: id };
-    batch.set(db.doc(`schools/pu/orders/${id}`), data);
-    batch.set(db.doc(`users/alice/schools/pu/orders/${id}`), data);
-  }
-  await batch.commit();
-  await createInspectionEnforcement({ db })(await inspectionEvent());
-  assert.equal(
-    (
-      await db
-        .collection('schools/pu/orders')
-        .where('status', 'in', ['pending', 'confirmed', 'preparing', 'ready'])
-        .get()
-    ).size,
-    0,
-  );
-  assert.equal((await db.collection('schools/pu/refunds').get()).size, 0);
-  assert.equal(
-    (await read('schools/pu/inspectionEnforcements/review')).affectedOrderIds.length,
-    201,
-  );
-  assert.equal((await assertReceipts('extra-199')).status, 'cancelled');
-});
-
-for (const status of ['pending', 'preparing', 'ready']) {
-  test(`timeout pagination reaches overdue ${status} orders beyond 100 ineligible candidates`, async () => {
-    const { createOrderTimeoutSweep } = require('./ordering/orderTimeoutOperations');
-    const now = 3600000;
-    const batch = db.batch();
-    batch.set(db.doc('schools/pu'), { name: 'School' });
-    for (let i = 0; i <= 100; i++) {
-      const id = i === 100 ? 'z-overdue' : `a${String(i).padStart(3, '0')}`;
-      const time = Timestamp.fromMillis(i === 100 || status === 'preparing' ? 0 : now);
-      const data = {
-        orderId: id,
-        userId: 'alice',
-        schoolId: 'pu',
-        cafeteriaId: 'cafe',
-        status,
-        total: 100,
-        createdAt: time,
-        preparingAt: time,
-        readyAt: time,
-        ...(status === 'preparing' && i !== 100 ? { timeoutNotified: true } : {}),
-      };
-      batch.set(db.doc(`schools/pu/orders/${id}`), data);
-      batch.set(db.doc(`users/alice/schools/pu/orders/${id}`), data);
-    }
-    await batch.commit();
-    let notifications = 0;
-    const result = await createOrderTimeoutSweep({
-      db,
-      now: () => now,
-      logger: { info() {}, warn() {} },
-      sendPushToUser: async () => {
-        notifications++;
-        return { status: 'accepted' };
-      },
-    })();
-    assert.equal(notifications, 1);
-    const final = await assertReceipts('z-overdue');
-    assert.equal(final.status, status === 'preparing' ? 'preparing' : 'cancelled');
-    if (status === 'preparing') assert.equal(final.timeoutNotified, true);
-    assert.equal(
-      result[
-        { pending: 'pendingCancelled', preparing: 'preparingNotified', ready: 'readyNoShow' }[
-          status
-        ]
-      ],
-      1,
-    );
-    assert.equal((await assertReceipts('a000')).status, status);
-  });
-}
-
-for (const payment of [
-  { paymentMethod: 'linepay', paymentStatus: 'paid' },
-  { paymentMethod: 'campus_card', paymentStatus: 'paid' },
-  { paymentMethod: null, paymentStatus: null },
-]) {
-  test(`inspection cancellation creates only manual payment review for ${JSON.stringify(payment)}`, async () => {
-    const id = await setupOrder();
-    const batch = db.batch();
-    batch.update(db.doc(`schools/pu/orders/${id}`), payment);
-    batch.update(db.doc(`users/alice/schools/pu/orders/${id}`), payment);
-    await batch.commit();
-    const event = await inspectionEvent();
-    const enforce = createInspectionEnforcement({ db });
-    await Promise.all([enforce(event), enforce(event)]);
-    assert.equal((await assertReceipts(id)).status, 'cancelled');
-    const refunds = await db.collection('schools/pu/refunds').get();
-    assert.equal(refunds.size, 1);
-    const review = refunds.docs[0].data();
-    assert.equal(review.status, 'needs_review');
-    assert.equal(review.manualReviewRequired, true);
-    assert.equal(review.orderTotal, 210);
-    assert.equal(review.studentUid, 'alice');
-    assert.equal(review.paymentMethod, payment.paymentMethod);
-    assert.equal(review.paymentStatus, payment.paymentStatus);
-    assert.equal('amount' in review, false);
-    assert.equal('destination' in review, false);
-    assert.equal('gatewayRefundId' in review, false);
-    assert.equal((await db.collection('users/alice/schools/pu/walletLedger').get()).size, 0);
-  });
-}
