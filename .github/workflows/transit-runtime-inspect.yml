@@ -42,23 +42,38 @@ jobs:
           const report = {checkedAt:new Date().toISOString(),app,origin,reviewedRevision:'284ce4c3780090685fcd41ed03ab50fbc974f346',deploymentPerformed:false,settingsChanged:false,credentialValuesExported:false,deployCredentialPresent:Boolean(process.env.FLY_API_TOKEN),platformAccess:false,secrets:null,machines:[],public:null};
           await fs.mkdir('runtime-evidence',{recursive:true});
           const cli = (args, timeout=30000) => execFileSync('flyctl',args,{encoding:'utf8',timeout,maxBuffer:1024*1024,stdio:['ignore','pipe','pipe']});
+          const category = (error) => {
+            if (error?.code === 'ENOENT') return 'cli-executable-not-found';
+            if (error?.code === 'ETIMEDOUT') return 'cli-timeout';
+            if (error instanceof SyntaxError) return 'invalid-json-output';
+            const raw = String(error?.stderr ?? '') + String(error?.stdout ?? '');
+            if (/expired/i.test(raw)) return 'credential-expired';
+            if (/unauthorized|not authenticated|authentication|invalid.{0,20}token|401/i.test(raw)) return 'authentication-failed';
+            if (/forbidden|permission|not authorized|access denied|403/i.test(raw)) return 'permission-denied';
+            if (/not found|404|could not find/i.test(raw)) return 'app-or-resource-not-found';
+            if (/unknown flag|unknown command|invalid argument/i.test(raw)) return 'cli-command-incompatible';
+            if (/no such host|lookup|resolve|network|connect|TLS|certificate|EOF/i.test(raw)) return 'network-or-tls-failure';
+            return 'unclassified-cli-failure';
+          };
           try {
             if (process.env.FLY_API_TOKEN) {
               let machines = [];
+              try { cli(['version']); report.cliExecutableAvailable = true; }
+              catch (error) { report.cliExecutableAvailable = false; report.cliError = category(error); }
               try {
                 const rows = JSON.parse(cli(['machine','list','--app',app,'--json']));
-                if (!Array.isArray(rows)) throw new Error('invalid-shape');
+                if (!Array.isArray(rows)) throw new SyntaxError('invalid-shape');
                 report.platformAccess = true;
                 report.expectedMachinesOnly = rows.length === expected.length && new Set(rows.map(r=>r.id)).size === expected.length && rows.every(r=>expected.includes(r.id)&&r.state==='started');
                 machines = report.expectedMachinesOnly ? rows : [];
                 report.machines = rows.filter(r=>expected.includes(r.id)).map(r=>({id:r.id,state:r.state,region:r.region,runtime:null}));
-              } catch { report.platformError = 'machine-read-unavailable'; }
+              } catch (error) { report.platformError = category(error); }
               try {
                 const parsed = JSON.parse(cli(['secrets','list','--app',app,'--json']));
                 const rows = Array.isArray(parsed) ? parsed : parsed.secrets;
-                if (!Array.isArray(rows)) throw new Error('invalid-shape');
+                if (!Array.isArray(rows)) throw new SyntaxError('invalid-shape');
                 report.secrets = Object.fromEntries(keys.map(key=>[key,rows.some(row=>(row.Name??row.name)===key)]));
-              } catch { report.secretMetadataError = 'secret-metadata-unavailable'; }
+              } catch (error) { report.secretMetadataError = category(error); }
               const source = await fs.readFile('deploy/web/transit-release-gate.mjs','utf8');
               const moduleUrl = 'data:text/javascript;base64,' + Buffer.from(source).toString('base64');
               const program = `const keys=${JSON.stringify(keys)};const present=Object.fromEntries(keys.map(k=>[k,Boolean(process.env[k]?.trim())]));const result={credentials:present,tdx:{attempted:false,ready:false,reason:'tdx-not-configured'}};if(keys.every(k=>present[k])){try{const m=await import(${JSON.stringify(moduleUrl)});const r=await m.probeTdx();result.tdx={attempted:true,ready:r.ready===true,stationCount:r.stationCount,directionVerified:r.directionVerified===true,sourceFreshnessVerified:r.sourceFreshnessVerified===true,countdownVerified:r.countdownVerified===true};}catch(e){const allowed=${JSON.stringify([...knownReasons])};result.tdx={attempted:true,ready:false,reason:allowed.includes(e?.message)?e.message:'transit-probe-failed'};}}console.log(${JSON.stringify(marker)}+JSON.stringify(result));`;
@@ -68,12 +83,12 @@ jobs:
                 try {
                   const stdout = cli(['ssh','console','--app',app,'--machine',row.id,'--quiet','--command',command],90000);
                   const lines = stdout.split(/\r?\n/).filter(line=>line.startsWith(marker));
-                  if (lines.length !== 1) throw new Error('invalid-output');
+                  if (lines.length !== 1) throw new SyntaxError('invalid-output');
                   const value = JSON.parse(lines[0].slice(marker.length));
-                  if (!keys.every(key=>typeof value.credentials?.[key]==='boolean')) throw new Error('invalid-output');
+                  if (!keys.every(key=>typeof value.credentials?.[key]==='boolean')) throw new SyntaxError('invalid-output');
                   const tdx = value.tdx;
                   summary.runtime = {checked:true,credentials:Object.fromEntries(keys.map(key=>[key,value.credentials[key]])),tdx:{attempted:tdx?.attempted===true,ready:tdx?.ready===true,reason:knownReasons.has(tdx?.reason)?tdx.reason:tdx?.ready===true?null:'transit-probe-failed',stationCount:Number.isInteger(tdx?.stationCount)?tdx.stationCount:null,directionVerified:tdx?.directionVerified===true,sourceFreshnessVerified:tdx?.sourceFreshnessVerified===true,countdownVerified:tdx?.countdownVerified===true}};
-                } catch { summary.runtime = {checked:false,reason:'ssh-or-runtime-inspection-unavailable'}; }
+                } catch (error) { summary.runtime = {checked:false,reason:category(error)}; }
               }
             }
             const request = async (path, query) => {
