@@ -36,8 +36,11 @@ import {
   loadFriendTimetable,
   loadPersonalTimetable,
   savePersonalTimetable,
+  CLOUD_NEEDS_SCHOOL_COPY,
+  TimetableCloudSaveError,
   type StoredTimetable,
 } from '@/lib/timetable/store';
+import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
 import { listAcceptedFriends } from '@/lib/timetable/friends';
 import { useAcademicRecords } from '@/lib/useAcademicRecords';
 import type { AcademicCourse } from '@/lib/academicRecords';
@@ -150,9 +153,19 @@ export function PersonalTimetable() {
     try {
       const saved = await savePersonalTimetable(uid, { ...next, schoolId });
       setTimetable({ ...next, schoolId });
-      setNotice(saved.stored === 'cloud' ? message : `已記在本站。${message}`);
-    } catch {
-      setNotice('這次沒有存成。課表還停在你看到的這一版，請稍後再試。');
+      setNotice(
+        saved.stored === 'cloud'
+          ? message
+          : `已記在這台瀏覽器，${CLOUD_NEEDS_SCHOOL_COPY}。${message}`,
+      );
+    } catch (error) {
+      if (error instanceof TimetableCloudSaveError) {
+        // 本機那份已經寫好，重新整理會讀到這一版，不會不見
+        setTimetable({ ...next, schoolId });
+        setNotice(`已記在這台瀏覽器，雲端這次沒存成，下次存檔會再送一次。${message}`);
+      } else {
+        setNotice('這次沒有存成。課表還停在你看到的這一版，請稍後再試。');
+      }
     } finally {
       setBusy(false);
     }
@@ -230,7 +243,7 @@ export function PersonalTimetable() {
       setNotice(shareCopiedCopy(server.expiresAt));
     } catch {
       setShareUrl('');
-      setNotice('現在產生不了分享連結，登入並連上網路後再試。');
+      setNotice('現在產生不了分享連結，登入學校帳號並連上網路後再試。');
     }
   };
 
@@ -323,8 +336,8 @@ export function PersonalTimetable() {
       )}
       <p className={styles.notice}>
         {uid
-          ? '這份課表存在你的 Campus One 帳號。學校選課紀錄要經過確認才會覆蓋。'
-          : '尚未登入時，課表只記在這台瀏覽器，成功後會顯示「已記在本站」。'}
+          ? '這份課表存在你的學校帳號。學校選課紀錄要經過確認才會覆蓋。'
+          : `課表先記在這台瀏覽器，重新整理不會不見；${CLOUD_NEEDS_SCHOOL_COPY}。`}
       </p>
       {uid ? (
         <label className={styles.field}>
@@ -385,7 +398,7 @@ export function PersonalTimetable() {
           複製分享連結
         </button>
       </div>
-      {!uid && <p className={styles.notice}>登入後才能產生分享連結。</p>}
+      {!uid && <p className={styles.notice}>登入學校帳號後才能產生分享連結。</p>}
       {shareUrl && <p className={styles.notice}>{shareUrl}</p>}
 
       {view === 'grid' ? (
@@ -592,7 +605,10 @@ export function PersonalTimetable() {
       <section className={styles.panel} aria-label="共同空堂">
         <h2>共同空堂</h2>
         {!uid ? (
-          <p className={styles.notice}>登入並加好友後，才能看對方課表。沒加好友不會露出任何人的時間。</p>
+          <>
+            <SchoolAccountRequired returnUrl="/timetable" headingLevel={3} />
+            <p className={styles.notice}>加好友後才看得到對方課表，沒加好友不會露出任何人的時間。</p>
+          </>
         ) : friends.length === 0 ? (
           <p className={styles.notice}>
             目前沒有已接受的好友，或對方還沒把課表開放給好友。去 <a href="/friends">找人</a> 送出邀請。
