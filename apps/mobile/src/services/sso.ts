@@ -19,22 +19,9 @@ import {
 } from '@campus/shared/src/auth';
 import { getAuthInstance, getDb } from '../firebase';
 import { getReleaseConfig } from './release';
+import { getCloudFunctionUrl } from './cloudFunctions';
 
 export type { SchoolSSOConfig, SSOProvider, SSOUserInfo } from '@campus/shared/src/auth';
-
-function getCloudFunctionUrl(functionName: string): string {
-  const extra = (Constants.expoConfig as any)?.extra ?? {};
-  const projectId = extra.firebase?.projectId;
-  const region = extra.cloudFunctionRegion ?? 'asia-east1';
-
-  if (!projectId) {
-    throw new Error(
-      'Firebase projectId not configured. Set EXPO_PUBLIC_FIREBASE_PROJECT_ID in env.',
-    );
-  }
-
-  return `https://${region}-${projectId}.cloudfunctions.net/${functionName}`;
-}
 
 WebBrowser.maybeCompleteAuthSession();
 type SSOConfig = NonNullable<SchoolSSOConfig['ssoConfig']>;

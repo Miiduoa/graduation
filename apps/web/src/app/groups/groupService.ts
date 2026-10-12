@@ -1,5 +1,5 @@
 import { collection, doc, getDocFromServer, getDocsFromServer } from 'firebase/firestore';
-import { getAuth, getDb, isFirebaseConfigured } from '@/lib/firebase';
+import { getAuth, getCloudFunctionUrl, getDb, isFirebaseConfigured } from '@/lib/firebase';
 
 export type MemberGroup = {
   id: string;
@@ -92,17 +92,7 @@ async function callForUser(
   const token = await user.getIdToken();
   assertCurrent(uid, current);
   if (getAuth()?.currentUser !== user) throw new Error('Login session changed');
-  const projectId = auth.app.options.projectId;
-  if (!projectId) throw new Error('Service unavailable');
-  const region = process.env.NEXT_PUBLIC_CLOUD_FUNCTION_REGION || 'asia-east1';
-  const emulator =
-    process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === '1' ||
-    process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === 'true';
-  const host = process.env.NEXT_PUBLIC_FIREBASE_EMULATOR_HOST || 'localhost';
-  const port = process.env.NEXT_PUBLIC_FIREBASE_EMULATOR_FUNCTIONS_PORT || '5001';
-  const endpoint = emulator
-    ? `http://${host}:${port}/${projectId}/${region}/${name}`
-    : `https://${region}-${projectId}.cloudfunctions.net/${name}`;
+  const endpoint = getCloudFunctionUrl(name);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 20000);
   try {
