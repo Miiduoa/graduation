@@ -2,7 +2,6 @@ import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { Linking, Share, StyleSheet } from 'react-native';
 import { applyTheme, theme } from '../ui/theme';
-import { aiTokens } from '../ui/aiFirst';
 import AnnouncementsScreen from '../screens/AnnouncementsListAiFirstScreen';
 import AnnouncementScreen from '../screens/AnnouncementDetailAiFirstScreen';
 import EventsScreen from '../screens/EventsListAiFirstScreen';
@@ -96,7 +95,7 @@ test('announcements use school data with working categories and a registered det
   });
   const view = render(<AnnouncementsScreen navigation={navigation} />);
   await view.findByText('校方的新公告');
-  expect(loadCampusAnnouncementFeed).toHaveBeenCalledWith('pu', '');
+  expect(loadCampusAnnouncementFeed).toHaveBeenCalledWith('pu');
   expect(view.queryByText(/期末考程序|32 則|AI 從|全部已讀/)).toBeNull();
   fireEvent.press(view.getByText('教務'));
   expect(view.queryByText('社團活動')).toBeNull();
@@ -104,13 +103,57 @@ test('announcements use school data with working categories and a registered det
   expect(safeNavigate).toHaveBeenCalledWith(navigation, '公告詳情', { id: 'a1' });
 });
 
-test('read failure offers retry without becoming an empty success', async () => {
-  jest.mocked(loadCampusAnnouncementFeed).mockRejectedValueOnce(new Error('offline'));
+test.each([
+  [
+    'permission-denied',
+    Object.assign(new Error('Missing or insufficient permissions.'), { code: 'permission-denied' }),
+  ],
+  ['unavailable', Object.assign(new Error('offline'), { code: 'unavailable' })],
+])(
+  'shows catalog office links when Firestore read fails with %s and there is no cached copy',
+  async (_code, error) => {
+    jest.mocked(loadCampusAnnouncementFeed).mockRejectedValueOnce(error);
+    const view = render(<AnnouncementsScreen navigation={navigation} />);
+    await view.findByText('這裡還沒接上學校公告，請先到學校網站看最新消息');
+    expect(view.queryByText('請確認網路')).toBeNull();
+    expect(view.queryByText('目前無法讀取，請確認網路連線後重試。')).toBeNull();
+    expect(view.queryByText('目前沒有公告')).toBeNull();
+    const openUrl = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined as never);
+    fireEvent.press(view.getByText('教務處'));
+    expect(openUrl).toHaveBeenCalledWith('https://acd.pu.edu.tw/p/403-1042-885-1.php');
+    openUrl.mockRestore();
+    fireEvent.press(view.getByText('更新公告'));
+    await view.findByText('校方的新公告');
+  },
+);
+
+test.each([
+  [
+    'permission-denied',
+    Object.assign(new Error('Missing or insufficient permissions.'), { code: 'permission-denied' }),
+  ],
+  ['unavailable', Object.assign(new Error('offline'), { code: 'unavailable' })],
+])(
+  'announcement detail shows catalog office links when Firestore read fails with %s',
+  async (_code, error) => {
+    jest.mocked(loadCampusAnnouncement).mockRejectedValueOnce(error);
+    const view = render(<AnnouncementScreen route={{ params: { id: 'a1' } }} />);
+    await view.findByText('這裡還沒接上學校公告，請先到學校網站看最新消息');
+    expect(view.queryByText('請確認網路')).toBeNull();
+    expect(view.queryByText('目前無法讀取，請確認網路連線後重試。')).toBeNull();
+    expect(view.queryByText('找不到這則公告，可能已移除或不屬於目前學校。')).toBeNull();
+  },
+);
+
+test('keeps cached announcements when a later Firestore read fails', async () => {
   const view = render(<AnnouncementsScreen navigation={navigation} />);
-  await view.findByText('目前無法讀取，請確認網路連線後重試。');
-  expect(view.queryByText('目前沒有公告')).toBeNull();
-  fireEvent.press(view.getByText('重新讀取'));
   await view.findByText('校方的新公告');
+  jest.mocked(loadCampusAnnouncementFeed).mockRejectedValueOnce(new Error('permission-denied'));
+  fireEvent.press(view.getByText('更新公告'));
+  await view.findByText('校方的新公告');
+  expect(view.getByText(/最後更新/)).toBeTruthy();
+  expect(view.queryByText('請確認網路')).toBeNull();
+  expect(view.queryByText('這裡還沒接上學校公告，請先到學校網站看最新消息')).toBeNull();
 });
 
 test('keeps old announcements when the school site is down and links the office when empty', async () => {
@@ -343,14 +386,14 @@ test('mounted announcement content and event content follow theme changes withou
 test('mounted read errors follow theme changes without reloading or remounting', async () => {
   jest.mocked(loadCampusAnnouncementFeed).mockRejectedValue(new Error('offline'));
   const view = render(<AnnouncementsScreen navigation={navigation} />);
-  const errorText = '目前無法讀取，請確認網路連線後重試。';
-  await view.findByText(errorText);
-  const lightColor = StyleSheet.flatten(view.getByText(errorText).props.style).color;
+  const emptyText = '這裡還沒接上學校公告，請先到學校網站看最新消息';
+  await view.findByText(emptyText);
+  expect(view.queryByText('請確認網路')).toBeNull();
   act(() => applyTheme('dark'));
-  expect(aiTokens.danger).not.toBe(lightColor);
-  expect(StyleSheet.flatten(view.getByText(errorText).props.style).color).toBe(aiTokens.danger);
+  expect(view.getByText(emptyText)).toBeTruthy();
   expect(loadCampusAnnouncementFeed).toHaveBeenCalledTimes(1);
   act(() => applyTheme('light'));
+  expect(view.getByText(emptyText)).toBeTruthy();
 });
 
 const eventCursor = { schoolId: 'pu', source: event.source, document: {} as never };
@@ -460,6 +503,6 @@ test('a visitor can read the public announcement list and open its detail', asyn
   });
   const view = render(<AnnouncementsScreen navigation={navigation} />);
   fireEvent.press(await view.findByText('校方的新公告'));
-  expect(loadCampusAnnouncementFeed).toHaveBeenCalledWith('pu', '');
+  expect(loadCampusAnnouncementFeed).toHaveBeenCalledWith('pu');
   expect(safeNavigate).toHaveBeenCalledWith(navigation, '公告詳情', { id: 'a1' });
 });
