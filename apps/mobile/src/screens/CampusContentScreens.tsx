@@ -152,6 +152,7 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
   const sources = content.value?.sources ?? [];
   const visible = rows.filter((row) => category === 'all' || row.category === category);
   const down = sources.filter((item) => item.status === 'unavailable');
+  const downLinks = down.filter((item) => item.listUrl);
   const emptyKind = announcementEmptyKind(rows, sources);
   if (!schoolVisible) {
     return (
@@ -187,15 +188,13 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
       ) : emptyKind === 'source_down' ? (
         <AICard title={SOURCE_DOWN_EMPTY_TEXT}>
           <View style={{ gap: 12 }}>
-            {down
-              .filter((item) => item.listUrl)
-              .map((item) => (
-                <AIButton
-                  key={item.sourceId}
-                  label={item.office}
-                  onPress={() => void Linking.openURL(item.listUrl!)}
-                />
-              ))}
+            {(downLinks.length ? downLinks : listAnnouncementCatalogLinks(school.id)).map((item) => (
+              <AIButton
+                key={item.sourceId}
+                label={item.office}
+                onPress={() => void Linking.openURL(item.listUrl!)}
+              />
+            ))}
           </View>
         </AICard>
       ) : !rows.length ? (

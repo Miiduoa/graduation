@@ -163,6 +163,7 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
     );
   });
   const emptyKind = announcementEmptyKind(state.announcements, state.sources);
+  const downLinks = state.sources.filter((item) => item.status === 'unavailable' && item.listUrl);
 
   return (
     <div className={styles.page}>
@@ -237,7 +238,7 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
             <>
               <h2>{SOURCE_DOWN_EMPTY_TEXT}</h2>
               <OfficeSourceLinks
-                links={state.sources.filter((item) => item.status === 'unavailable')}
+                links={downLinks.length ? downLinks : listAnnouncementCatalogLinks(schoolId)}
               />
             </>
           ) : (
