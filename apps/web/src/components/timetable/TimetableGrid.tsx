@@ -57,7 +57,8 @@ export function TimetableGrid({ courses, disabled, onEdit }: CourseActions) {
     setSelected(null);
     setDragged(null);
     setTarget(null);
-    setMessage(`已選擇${courseTimeLabel(next.course)}，確認儲存後才會移動。`);
+    // The editor owns the pending change; do not leave a stale hint after cancellation.
+    setMessage('');
     triggerRef.current?.focus();
     onEdit(next.course);
   }
