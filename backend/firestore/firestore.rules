@@ -1195,7 +1195,7 @@ service cloud.firestore {
             && request.resource.data.schoolId == schoolId
             && request.resource.data.cafeteriaId is string
             && request.resource.data.orderingUrl is string
-            && request.resource.data.orderingUrl.matches('^https://')
+            && request.resource.data.orderingUrl.matches('^https://.+')
             && !('queueNumber' in request.resource.data)
             && !('paymentStatus' in request.resource.data);
           allow update, delete: if false;
