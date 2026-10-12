@@ -21,6 +21,7 @@ async def main():
     async with async_playwright() as p:
         browser = await p.chromium.launch()
         page = await browser.new_page(viewport={'width': 1440, 'height': 1000})
+        await page.context.tracing.start(screenshots=True, snapshots=True)
         errors = []
         page.on('pageerror', lambda error: errors.append(str(error)))
         await page.add_init_script('if (!localStorage.getItem("campus-one-personal-timetable:local")) localStorage.setItem("campus-one-personal-timetable:local", ' + json.dumps(json.dumps(SEED, ensure_ascii=False)) + ');')
@@ -47,8 +48,35 @@ async def main():
             saved = await page.evaluate('JSON.parse(localStorage.getItem("campus-one-personal-timetable:local"))')
             assert saved['courses'][0]['day'] == 1
             results.append('keyboard move, cancel and draft protection')
+            await expect(dialog).to_have_count(0)
+            await page.evaluate('''() => {
+                window.dragEvents = [];
+                for (const type of ['mousedown', 'dragstart', 'dragover', 'drop', 'dragend']) {
+                    document.addEventListener(type, (event) => {
+                        if (window.dragEvents.length < 300) window.dragEvents.push({
+                            type, trusted: event.isTrusted, target: event.target.closest('button,td')?.outerHTML.slice(0, 350),
+                            x: event.clientX, y: event.clientY
+                        });
+                    }, true);
+                }
+            }''')
             source = page.get_by_role('button', name='編輯 資料庫管理，星期一第 4 節，續堂', exact=True)
-            await source.drag_to(page.locator('td[data-day="2"][data-period="7"]'))
+            target = page.locator('td[data-day="2"][data-period="7"]')
+            await expect(source).to_have_attribute('draggable', 'true')
+            # Keep both ends visible before pressing. A long table must not scroll
+            # under the pointer between mousedown and the first native drag event.
+            await target.scroll_into_view_if_needed()
+            await source.hover()
+            bounds = await source.bounding_box()
+            assert bounds is not None
+            await page.mouse.down()
+            await page.mouse.move(bounds['x'] + bounds['width'] / 2 + 12, bounds['y'] + bounds['height'] / 2, steps=4)
+            await target.hover()
+            await target.hover()
+            await page.mouse.up()
+            drag_events = await page.evaluate('window.dragEvents')
+            (OUT / 'drag-events.json').write_text(json.dumps(drag_events, ensure_ascii=False, indent=2))
+            assert any(event['type'] == 'drop' and event['trusted'] for event in drag_events), 'No native drop event reached the timetable'
             await expect(dialog.get_by_role('combobox', name='開始節次', exact=True)).to_have_value('6')
             await expect(dialog.get_by_role('combobox', name='結束節次', exact=True)).to_have_value('7')
             await dialog.get_by_role('button', name='儲存', exact=True).click()
@@ -80,6 +108,7 @@ async def main():
             await page.screenshot(path=str(OUT / 'failure.png'), full_page=True)
             raise
         finally:
+            await page.context.tracing.stop(path=str(OUT / 'trace.zip'))
             (OUT / 'results.json').write_text(json.dumps({'completed': results, 'pageErrors': errors}, ensure_ascii=False, indent=2))
             await browser.close()
     print(json.dumps({'passed': len(results), 'checks': results}, ensure_ascii=False))
