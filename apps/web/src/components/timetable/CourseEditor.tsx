@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
-import { PERIOD_TIMES, WEEKDAY_LABELS, type PersonalCourse } from '@campus/shared';
+import { PERIOD_TIMES, WEEKDAY_LABELS, courseTimeLabel, type PersonalCourse } from '@campus/shared';
 import { ConfirmModal, Modal } from '@/components/ui/Modal';
 import { draftConflicts, hasCourseChanges, validateCourseDraft, type CourseIssues } from './courseEditorModel';
 import styles from './timetable.module.css';
@@ -19,13 +19,14 @@ type CourseEditorProps = {
 };
 
 export function CourseEditor({ course, courses, existing, busy, feedback, onChange, onSave, onRemove, onCancel }: CourseEditorProps) {
-  const [initial] = useState(course);
+  const [initial] = useState(() => courses.find((item) => item.id === course.id) || course);
   const [submitted, setSubmitted] = useState(false);
   const [confirmation, setConfirmation] = useState<'delete' | 'discard' | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const id = useId();
   const dirty = hasCourseChanges(initial, course);
+  const moved = existing && (initial.day !== course.day || initial.start !== course.start || initial.end !== course.end);
   const issues = validateCourseDraft(course, PERIOD_TIMES.length, WEEKDAY_LABELS.length);
   const conflicts = draftConflicts(course, courses, PERIOD_TIMES.length, WEEKDAY_LABELS.length);
   const visibleIssues: CourseIssues = submitted ? issues : {};
@@ -74,6 +75,7 @@ export function CourseEditor({ course, courses, existing, busy, feedback, onChan
       >
         <section aria-label="編輯課程">
           <form ref={formRef} onSubmit={submit} noValidate className={styles.editor}>
+            {moved && <p className={styles.feedback}>時間變更：{courseTimeLabel(initial)} → {courseTimeLabel(course)}。儲存後才會更新個人課表。</p>}
             <fieldset disabled={busy} className={styles.fields}>
               <legend className={styles.srOnly}>課程資料</legend>
               <label className={`${styles.field} ${styles.fullWidth}`}>

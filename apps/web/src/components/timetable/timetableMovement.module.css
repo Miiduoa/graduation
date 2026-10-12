@@ -1,0 +1,23 @@
+.instructions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
+.instructions p { flex: 1 1 280px; margin: 0; }
+.instructions button { min-height: 44px; flex-shrink: 0; }
+.tools { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-soft); }
+.tools label { display: grid; flex: 1 1 260px; gap: 8px; min-width: 0; font-size: 14px; font-weight: 600; }
+.tools select { width: 100%; min-width: 0; max-width: 100%; min-height: 44px; padding: 10px 12px; font: inherit; font-size: 16px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--text); background: var(--surface); }
+.tools p { flex: 1 1 240px; margin: 0; color: var(--muted); line-height: 1.7; font-size: 13px; }
+.status { margin: 8px 0; color: var(--text); font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+.status:empty { display: none; }
+.draggable { cursor: grab; }
+.draggable:active { cursor: grabbing; }
+.stationary { cursor: default; }
+.destination { box-shadow: inset 0 0 0 2px var(--brand); background: var(--bg-soft); }
+.invalid { box-shadow: inset 0 0 0 2px var(--danger); background: var(--warning-soft); }
+.pickSlot { width: 100%; min-height: 44px; margin-top: 6px; padding: 8px; border: 1px dashed var(--brand); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
+.pickSlot:hover { background: var(--bg-soft); }
+.pickSlot:focus-visible, .tools select:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.empty { margin: 16px 0; padding: 22px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.empty h2 { margin: 0 0 8px; font-size: 18px; }
+.empty p { margin: 0; line-height: 1.7; color: var(--muted); }
+@media (pointer: coarse) { .draggable, .draggable:active { cursor: pointer; } }
+@media (max-width: 420px) { .instructions button { width: 100%; } .tools { padding: 14px; } }
+@media print { .instructions, .tools, .status, .pickSlot { display: none; } .destination, .invalid { box-shadow: none; } }
