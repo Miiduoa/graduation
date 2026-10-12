@@ -164,7 +164,7 @@
 **答**：本次最終 hardening 已**統一為 stu-001**（`DEMO_USERS[0].uid` 與 `DEMO_STUDENTS[0].uid` 是同一個 join key）。修改前是雙軌制會導致老師 gradebook join 不到學生的請假紀錄，現在已修正。
 
 ### Q5：「mobile 端呢？」
-**答**：mobile 端（Expo / React Native）目前已完成 9 個關鍵互動的接線（TodayAiFirstScreen、Health、Studybuddy 等），demoStore 的跨平台共享是後續迭代規劃，本次口試展示以 web 為主。
+**答**：mobile 端（Expo / React Native）目前已完成 9 個關鍵互動的接線（學生首頁、Health、Studybuddy 等），demoStore 的跨平台共享是後續迭代規劃，本次口試展示以 web 為主。
 
 ### Q6：「AI 助手是真的 AI 嗎？」
 **答**：兩段式設計。先嘗試呼叫 `/api/ai-chat`（接 Anthropic / Groq / 自架 LLM），若 env 未配置或 timeout 就走 **fallback rule-based**，後者**會讀 demoStore + DEMO_STUDENTS 即時資料生成回答**（不是純 hardcode）。可以開 Network panel 看 `/api/ai-chat` 的請求。

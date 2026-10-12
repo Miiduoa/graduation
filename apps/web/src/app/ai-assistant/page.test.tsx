@@ -10,7 +10,7 @@ vi.mock('@/components/AuthGuard', () => ({ useAuth: () => ({ user: state.uid ? {
 vi.mock('@/components/SiteShell', () => ({ SiteShell: ({ children }: { children: ReactNode }) => <main>{children}</main> }));
 vi.mock('@/lib/campusAssistantClient', async original => ({ ...await original<typeof import('@/lib/campusAssistantClient')>(), callCampusAssistant: vi.fn() }));
 vi.mock('./AgentCards', () => ({ AgentCardList: ({ cards }: { cards: Array<{ kind: string }> }) => <div>{cards.map(card => card.kind).join(',')}</div> }));
-beforeEach(() => { vi.clearAllMocks(); state.uid = 'alice'; state.query = ''; });
+beforeEach(() => { vi.clearAllMocks(); vi.unstubAllEnvs(); state.uid = 'alice'; state.query = ''; });
 function ask(content = '私人課表') {
   fireEvent.change(screen.getByLabelText('你的問題'), { target: { value: content } });
   fireEvent.submit(screen.getByRole('form', { name: '傳送問題' }));
@@ -114,5 +114,21 @@ it('when web ordering is turned back on, the order note links to my orders again
   render(<AssistantPage />); ask();
   await waitFor(() => expect(screen.getByText('找到餐廳資訊')).toBeTruthy());
   expect(screen.getByRole('link', { name: '我的訂單' }).getAttribute('href')).toBe('/orders');
-  vi.unstubAllEnvs();
+});
+
+it.each(['餐點好了沒', '我的取餐號碼'])('線上點餐還沒開，問「%s」只回「目前還不能線上點餐」，不走後端、也不出現失敗句', async question => {
+  vi.mocked(callCampusAssistant).mockRejectedValue({ code: 'functions/unavailable' });
+  render(<AssistantPage />);
+  expect(screen.queryByText(/訂單請以服務頁面的紀錄為準/)).toBeNull();
+  ask(question);
+  await waitFor(() => expect(screen.getByText('目前還不能線上點餐')).toBeTruthy());
+  expect(callCampusAssistant).not.toHaveBeenCalled();
+  expect(screen.queryByText('這次未能取得回覆。你的問題已保留，請稍後重試。')).toBeNull();
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('線上點餐打開之後，輸入提示會再寫訂單以服務頁面為準', () => {
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'true');
+  render(<AssistantPage />);
+  expect(screen.getByText('回覆可能有誤；申請、繳費與訂單請以服務頁面的紀錄為準。')).toBeTruthy();
 });

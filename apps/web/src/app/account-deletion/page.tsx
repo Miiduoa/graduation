@@ -5,12 +5,12 @@ import styles from '../servicePages.module.css';
 
 export const metadata: Metadata = {
   title: '刪除帳號 | Campus One',
-  description: '如何刪除 Campus One 帳號',
+  description: '如何刪除你在 Campus One 的帳號資料',
 };
 
 export default function AccountDeletionPage() {
   return (
-    <SiteShell title="刪除帳號" subtitle="刪的是 Campus One 帳號，不是學校學籍。">
+    <SiteShell title="刪除帳號" subtitle="刪的是你在 Campus One 的資料，不是 Google 帳號，也不是學校學籍。">
       <article className={styles.document}>
         <section>
           <h2>在產品裡刪</h2>

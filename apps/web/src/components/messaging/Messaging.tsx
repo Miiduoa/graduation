@@ -142,7 +142,7 @@ export function MessagingShell({
         ) : !uid ? (
           <section className={styles.notice}>
             <h2>登入後查看訊息</h2>
-            <p>登入校園帳號後，就能查看你的對話與通知。</p>
+            <p>登入學校帳號後，就能查看你的對話與通知。</p>
             <Link
               className={styles.primary}
               href={`/login?returnUrl=${section === 'notifications' ? '%2Fmessages' : '%2Fdms'}`}

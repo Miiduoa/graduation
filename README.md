@@ -1,12 +1,23 @@
-# Campus One｜校園資訊與行動助手
+# Campus One｜課程與校園生活
 
 [![CI](https://github.com/Miiduoa/graduation/actions/workflows/ci.yml/badge.svg)](https://github.com/Miiduoa/graduation/actions/workflows/ci.yml)
 
-整合課程、訊息、校園地圖與學習資訊的跨端產品原型。Mobile 與 Web 共用部分型別及商業規則，後端以 Firebase Functions、Firestore 和 Storage 處理資料與授權。
+Campus One 將課程待辦、教材、作業、測驗和校園服務放在同一個入口。學生從待辦回到課程完成繳交，老師查看實際收件並留下回饋。Web 與 App 共用帳號契約及部分商業規則。
 
-目前持續開發中，部分功能使用示範資料；外部校務、LMS 與交通服務需要另行設定。
+目前持續開發中。平台課程使用 Nuni 帳號與 API；學校課表、成績及部分校園服務仍使用各自的校務連線與 Firebase。多校瀏覽不代表已取得校籍或校方授權。正式服務、示範流程和未完成項目見 [全功能驗收表](docs/PRODUCT_ACCEPTANCE_2026-10-11.md)。
 
 [兩分鐘導覽](docs/REVIEW_IN_2_MINUTES.md) · [架構說明](docs/ARCHITECTURE_OVERVIEW.md) · [測試紀錄](docs/TESTING_EVIDENCE.md) · [作品介紹](https://miiduoa.github.io/case-studies/campus-one/)
+
+## 日常操作
+
+- **學生**：今日待辦 → 對應作業或測驗 → 送出 → 確認回執；在課程內查看老師回饋。
+- **老師**：授課課程 → 發布內容 → 查看收件 → 留下回饋。課程角色與學校職務分開驗證。
+- **校園服務**：以「繳交 作業」「借書」「公車」等需求搜尋，確認所需帳號後進入。
+- **店家與管理員**：店家合作查看進駐申請；管理員入口處理學校接入與跨校檢舉，權限由伺服器確認。
+
+Web 服務入口：[nuni.tw](https://nuni.tw/)。線上版本以 [發布紀錄](docs/PLATFORM_RELEASE.md) 為準，尚未合併的修改不等於已上線。
+
+公開校園資訊可以直接瀏覽。需要加入課程、繳交作業或申請店家時，再使用 Campus One 平台帳號；個人課表與成績另需已開放的學校連線。瀏覽校園、平台登入或提交學校資格申請，都不會自動授予校籍、教師或管理員權限。
 
 ## Mobile 畫面
 
@@ -22,7 +33,7 @@
 
 - **Mobile**：今天、課務、生活、我。課表、作業、訊息、校園地圖與公車。使用 Expo 54、React Native 0.81、React Navigation，程式位於 [`apps/mobile/`](apps/mobile/)。
 - **Web**：學生與管理／教學介面，使用 Next.js 16、React 19、TypeScript，程式位於 [`apps/web/`](apps/web/)。
-- **Backend**：Firebase Functions、Firestore／Storage 規則與測試，位於 [`backend/`](backend/)。
+- **Backend**：Nuni API 的可重建來源與修補位於 [`deploy/nuni-api/`](deploy/nuni-api/)；Firebase Functions、Firestore／Storage 規則與測試位於 [`backend/`](backend/)。
 - **Shared**：跨端共用的型別與規則位於 [`packages/`](packages/)，由 pnpm workspace 管理。
 
 ## 本機執行
@@ -55,7 +66,7 @@ pnpm ios:sim
 
 外部服務的可用範圍取決於環境與憑證設定；部分資料及角色流程以 demo data 展示。
 
-## 幾個設計重點
+## 資料與權限
 
 ### 跨端與角色權限
 
@@ -69,7 +80,7 @@ Deep link、通知與訊息 action 經過 route registry 及 safe navigation。�
 
 ### 成績通知的收件人檢查
 
-教師評分頁目前是本機示範，不會寫入 TronClass 成績。發布本機成績事件前，會檢查教師帳號及教學角色、明確的學生 UID、作業 ID 與分數；不以姓名或學號推測收件人。
+舊版教師評分頁是本機示範，不會寫入 TronClass 成績；與 Nuni 課程空間的作業收件與回饋流程分開。發布本機成績事件前，會檢查教師帳號及教學角色、明確的學生 UID、作業 ID 與分數；不以姓名或學號推測收件人。
 
 - [評分頁](apps/mobile/src/screens/TeacherGradingScreen.tsx)
 - [傳送前檢查](apps/mobile/src/services/prepareGradingDelivery.ts)

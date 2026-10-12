@@ -46,7 +46,7 @@ function TeachingAccess() {
     <section className="card" style={{ padding: 24 }}>
       <h2>教學管理尚未完成帳號連結</h2>
       <p>
-        這個管理服務尚未與目前的校園帳號完成安全連結，暫時無法開啟。你的課程與點名仍可從課程頁使用。
+        這個管理服務尚未與目前的學校帳號完成安全連結，暫時無法開啟。你的課程與點名仍可從課程頁使用。
       </p>
       <button className="btn" disabled={ending} onClick={() => void clearSession()}>
         {ending ? '正在清除…' : '清除先前的教學服務登入'}
@@ -63,11 +63,11 @@ function TeachingAccess() {
 export function RequireAdmin({ children }: { children: ReactNode }) {
   void children;
   const { user, loading } = useAuth();
-  if (loading) return <p role="status">確認校園帳號…</p>;
+  if (loading) return <p role="status">確認學校帳號…</p>;
   if (!user)
     return (
       <section className="card" style={{ padding: 24 }}>
-        <h2>請先登入校園帳號</h2>
+        <h2>請先登入學校帳號</h2>
         <p>登入後才能確認教學服務是否已開放。</p>
         <Link href="/login">登入帳號</Link>
       </section>
