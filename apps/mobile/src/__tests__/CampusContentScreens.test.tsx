@@ -121,7 +121,7 @@ test('keeps old announcements when the school site is down and links the office 
         sourceId: 'pu-acd',
         office: '教務處',
         status: 'unavailable',
-        message: '學校網站暫時連不上',
+        message: '學校網站暫時連不上，可以先到學校網站看最新消息',
         lastSuccessAt: '2026-10-12T10:05:00.000Z',
         listUrl: 'https://acd.pu.edu.tw/p/403-1042-885-1.php',
       },
@@ -139,14 +139,14 @@ test('keeps old announcements when the school site is down and links the office 
         sourceId: 'pu-acd',
         office: '教務處',
         status: 'unavailable',
-        message: '學校網站暫時連不上',
+        message: '學校網站暫時連不上，可以先到學校網站看最新消息',
         listUrl: 'https://acd.pu.edu.tw/p/403-1042-885-1.php',
       },
     ],
     allUnavailable: true,
   });
   const empty = render(<AnnouncementsScreen navigation={navigation} />);
-  await empty.findByText('學校網站暫時連不上');
+  await empty.findByText('學校網站暫時連不上，可以先到學校網站看最新消息');
   expect(empty.queryByText('這裡還沒接上學校公告，請先到學校網站看最新消息')).toBeNull();
   expect(empty.queryByText('目前沒有公告')).toBeNull();
   const openUrl = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined as never);

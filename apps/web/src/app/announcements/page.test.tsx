@@ -341,7 +341,11 @@ it('links the office site when the school site is down and there is no cached co
     return snapshot();
   }) as never);
   render(<AnnouncementsPage />);
-  expect(await screen.findByRole('heading', { name: '學校網站暫時連不上' })).toBeTruthy();
+  expect(
+    await screen.findByRole('heading', {
+      name: '學校網站暫時連不上，可以先到學校網站看最新消息',
+    }),
+  ).toBeTruthy();
   expect(screen.getByRole('link', { name: '教務處' }).getAttribute('href')).toBe(
     'https://acd.pu.edu.tw/p/403-1042-885-1.php',
   );
@@ -369,7 +373,11 @@ it('links catalog office sites when the school has never been fetched', async ()
   );
   expect(screen.getByRole('link', { name: '綜合業務組' })).toBeTruthy();
   expect(screen.queryByText('目前沒有公開公告')).toBeNull();
-  expect(screen.queryByRole('heading', { name: '學校網站暫時連不上' })).toBeNull();
+  expect(
+    screen.queryByRole('heading', {
+      name: '學校網站暫時連不上，可以先到學校網站看最新消息',
+    }),
+  ).toBeNull();
 });
 
 it('shows no public announcements only after a successful empty fetch', async () => {
