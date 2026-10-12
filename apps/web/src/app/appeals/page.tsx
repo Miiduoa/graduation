@@ -89,7 +89,7 @@ export default function AppealsPage() {
   if (!user) {
     return (
       <SiteShell title="課程申訴" subtitle="送出後可以在這裡看老師處理到哪。">
-        <SchoolAccountRequired returnUrl="/appeals" />
+        <SchoolAccountRequired returnUrl="/appeals" alternative="申訴請先向授課老師或系辦反映。" />
       </SiteShell>
     );
   }
