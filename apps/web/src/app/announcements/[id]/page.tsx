@@ -2,12 +2,11 @@
 
 import { use, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { findSchoolById, findSchoolsByCode } from '@campus/shared/src/schools';
 import { useAuth } from '@/components/AuthGuard';
 import { SiteShell } from '@/components/SiteShell';
 import type { Announcement } from '@/lib/firebase';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
 import { loadAnnouncement } from '../publicAnnouncements';
+import { resolveAnnouncementSchool } from '../resolveSchool';
 import styles from '../announcements.module.css';
 
 type LoadState =
@@ -140,21 +139,28 @@ export default function AnnouncementDetailPage(props: {
 }) {
   const { id } = use(props.params);
   const params = props.searchParams ? use(props.searchParams) : undefined;
-  const matches = findSchoolsByCode(params?.school);
-  const school =
-    findSchoolById(params?.schoolId) ??
-    (matches.length === 1 ? matches[0] : resolveSchoolPageContext().school);
+  const { school, visible } = resolveAnnouncementSchool(params);
   const { user, loading } = useAuth();
   return (
-    <SiteShell schoolName={school.name} schoolCode={school.code} title="公告詳情">
+    <SiteShell
+      schoolName={visible ? school.name : undefined}
+      schoolCode={visible ? school.code : undefined}
+      title="公告詳情"
+    >
       <div className={styles.page}>
         <Link
           className={styles.back}
-          href={`/announcements?schoolId=${encodeURIComponent(school.id)}`}
+          href={
+            visible ? `/announcements?schoolId=${encodeURIComponent(school.id)}` : '/announcements'
+          }
         >
           ← 返回公告列表
         </Link>
-        {loading ? (
+        {!visible ? (
+          <section className={styles.status}>
+            <h2>目前沒有公開公告</h2>
+          </section>
+        ) : loading ? (
           <p className={styles.status} role="status">
             正在準備公告…
           </p>

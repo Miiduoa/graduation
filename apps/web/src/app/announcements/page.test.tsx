@@ -54,6 +54,7 @@ function deferred() {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.unstubAllEnvs();
   account.user = { uid: 'alice' };
   account.loading = false;
   vi.mocked(isFirebaseConfigured).mockReturnValue(true);
@@ -270,7 +271,7 @@ it('copies the real announcement detail link only after the clipboard operation 
   );
 });
 
-it('hides scrape rows from dead sources and labels them as temporarily unavailable', async () => {
+it('keeps old announcements when the school site is down and shows the last Taiwan update time', async () => {
   vi.mocked(getDocsFromServer).mockImplementation((async (input: { path?: string }) => {
     if (String(input?.path || '').includes('announcement-sources')) {
       return {
@@ -278,7 +279,13 @@ it('hides scrape rows from dead sources and labels them as temporarily unavailab
         docs: [
           {
             id: 'pu-acd',
-            data: () => ({ sourceId: 'pu-acd', office: '教務處', status: 'unavailable' }),
+            data: () => ({
+              sourceId: 'pu-acd',
+              office: '教務處',
+              status: 'unavailable',
+              lastSuccessAt: '2026-10-12T10:05:00.000Z',
+              listUrl: 'https://acd.pu.edu.tw/p/403-1042-885-1.php',
+            }),
           },
         ],
       } as never;
@@ -288,6 +295,71 @@ it('hides scrape rows from dead sources and labels them as temporarily unavailab
     );
   }) as never);
   render(<AnnouncementsPage />);
-  expect(await screen.findByRole('heading', { name: '暫時抓不到' })).toBeTruthy();
-  expect(screen.queryByText('過期稿')).toBeNull();
+  await screen.findByText('過期稿');
+  expect(screen.getByText('最後更新 10/12 18:05，學校網站暫時連不上')).toBeTruthy();
+  expect(screen.queryByText('暫時抓不到')).toBeNull();
+});
+
+it('links the office site when the school site is down and there is no cached copy', async () => {
+  vi.mocked(getDocsFromServer).mockImplementation((async (input: { path?: string }) => {
+    if (String(input?.path || '').includes('announcement-sources')) {
+      return {
+        empty: false,
+        docs: [
+          {
+            id: 'pu-acd',
+            data: () => ({
+              sourceId: 'pu-acd',
+              office: '教務處',
+              status: 'unavailable',
+              listUrl: 'https://acd.pu.edu.tw/p/403-1042-885-1.php',
+            }),
+          },
+        ],
+      } as never;
+    }
+    return snapshot();
+  }) as never);
+  render(<AnnouncementsPage />);
+  expect(
+    await screen.findByRole('heading', {
+      name: '學校網站暫時連不上，可以先到學校網站看最新消息',
+    }),
+  ).toBeTruthy();
+  expect(screen.getByRole('link', { name: '教務處' }).getAttribute('href')).toBe(
+    'https://acd.pu.edu.tw/p/403-1042-885-1.php',
+  );
+  expect(screen.queryByText('暫時抓不到')).toBeNull();
+});
+
+it('hides cms-none demo schools from regular users in production', async () => {
+  vi.stubEnv('NEXT_PUBLIC_APP_ENV', 'production');
+  const params = Promise.resolve({ schoolId: 'tw-demo-uni' });
+  await act(async () => {
+    render(
+      <Suspense fallback={<p>載入學校</p>}>
+        <AnnouncementsPage searchParams={params} />
+      </Suspense>,
+    );
+  });
+  expect(screen.queryByText('示範大學')).toBeNull();
+  expect(screen.getByRole('heading', { name: '目前沒有公開公告' })).toBeTruthy();
+  expect(getDocsFromServer).not.toHaveBeenCalled();
+});
+
+it('still shows cms-none demo schools in development', async () => {
+  vi.stubEnv('NEXT_PUBLIC_APP_ENV', 'development');
+  const params = Promise.resolve({ schoolId: 'tw-demo-uni' });
+  await act(async () => {
+    render(
+      <Suspense fallback={<p>載入學校</p>}>
+        <AnnouncementsPage searchParams={params} />
+      </Suspense>,
+    );
+  });
+  await screen.findByText('校園公告實際內容');
+  expect(screen.getByText('示範大學')).toBeTruthy();
+  expect(getDocsFromServer).toHaveBeenCalledWith(
+    expect.objectContaining({ path: 'schools/tw-demo-uni/announcements' }),
+  );
 });

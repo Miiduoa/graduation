@@ -158,7 +158,7 @@ export default function SettingsPage(props: {
   searchParams?: Promise<{ school?: string; schoolId?: string }>;
 }) {
   const searchParams = props.searchParams ? use(props.searchParams) : undefined;
-  const { schoolName, schoolSearch } = resolveSchoolPageContext(searchParams);
+  const { schoolSearch } = resolveSchoolPageContext(searchParams);
   const { user, loading } = useAuth();
   if (loading)
     return (
@@ -170,7 +170,6 @@ export default function SettingsPage(props: {
     <SettingsContent
       key={user?.uid ?? 'guest'}
       user={user}
-      schoolName={schoolName}
       schoolSearch={schoolSearch}
     />
   );
@@ -178,11 +177,9 @@ export default function SettingsPage(props: {
 
 function SettingsContent({
   user,
-  schoolName,
   schoolSearch,
 }: {
   user: User | null;
-  schoolName: string;
   schoolSearch: string;
 }) {
   const { signOutUser } = useAuth();
@@ -481,7 +478,7 @@ function SettingsContent({
         <section className={styles.group} aria-label="校園與語言">
           <SettingRow
             title="校園服務資料來源"
-            subtitle={`${schoolName}。這是服務目前提供的資料來源，不代表你的帳號學籍或所屬學校。`}
+            subtitle="目前提供的是校園服務資料，不代表你的帳號學籍或所屬學校。"
           >
             <span className={styles.value}>校園服務</span>
           </SettingRow>

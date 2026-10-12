@@ -13,6 +13,8 @@ const PARSER_PRESETS = {
 };
 
 const SOURCE_UNAVAILABLE = '暫時抓不到';
+const SOURCE_DOWN_EMPTY = '學校網站暫時連不上，可以先到學校網站看最新消息';
+const PLACEHOLDER_SCHOOL_IDS = ['tw-demo-uni', 'tw-taichung-uni-a', 'tw-taichung-uni-b'];
 
 function source(schoolId, sourceId, office, scope, listUrl, parsers, extra = {}) {
   return {
@@ -224,6 +226,18 @@ function listSchools() {
   }));
 }
 
+function isPlaceholderSchool(entry) {
+  return entry?.cms === 'none' || PLACEHOLDER_SCHOOL_IDS.includes(entry?.schoolId);
+}
+
+function isPublicAnnouncementSchool(entry, env = process.env.APP_ENV || process.env.NODE_ENV) {
+  return env !== 'production' || !isPlaceholderSchool(entry);
+}
+
+function listPublicSchools(env) {
+  return listSchools().filter((entry) => isPublicAnnouncementSchool(entry, env));
+}
+
 function schoolConfig(schoolId) {
   return SCHOOLS.find((entry) => entry.schoolId === schoolId) || null;
 }
@@ -250,7 +264,7 @@ function coverageRows() {
     }
     if (entry.demo && sources.length === 0) {
       status = 'unavailable';
-      note = '示範學校沒有真實校網，畫面標「暫時抓不到」';
+      note = '示範學校沒有真實校網，正式環境不顯示給一般使用者';
     } else if (sources.length === 0) {
       status = 'unavailable';
       note = '尚未找到可抓的公開列表';
@@ -287,9 +301,14 @@ module.exports = {
   school,
   schoolConfig,
   listSchools,
+  listPublicSchools,
+  isPlaceholderSchool,
+  isPublicAnnouncementSchool,
   listSources,
   allSources,
   coverageRows,
   formatCoverageTable,
   SOURCE_UNAVAILABLE,
+  SOURCE_DOWN_EMPTY,
+  PLACEHOLDER_SCHOOL_IDS,
 };

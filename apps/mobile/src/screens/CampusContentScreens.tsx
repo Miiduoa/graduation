@@ -21,7 +21,14 @@ import {
   loadCampusAnnouncement,
   loadCampusEvent,
 } from '../services/publicCampusContent';
-import { SOURCE_UNAVAILABLE_TEXT, SUMMARY_NOTICE } from '@campus/shared/src/campusAnnouncements';
+import {
+  formatStaleAnnouncementNotice,
+  isAnnouncementSchoolVisibleToPublic,
+  SOURCE_DOWN_EMPTY_TEXT,
+  staleAnnouncementUpdatedAt,
+  SUMMARY_NOTICE,
+} from '@campus/shared/src/campusAnnouncements';
+import { getReleaseConfig } from '../services/release';
 import { safeNavigate } from '../utils/safeNavigate';
 import { exportAndShareICalFile } from '../services/ical';
 import type { AnnouncementCategory } from '../data/types';
@@ -134,32 +141,61 @@ function ReadState({
 }
 
 export function CampusAnnouncementsScreen({ navigation }: Props) {
+  const { school } = useSchool();
+  const schoolVisible = isAnnouncementSchoolVisibleToPublic(
+    { schoolId: school.id },
+    getReleaseConfig().appEnv,
+  );
   const content = useContent(loadCampusAnnouncementFeed);
   const [category, setCategory] = useState<AnnouncementCategory | 'all'>('all');
   const rows = content.value?.announcements ?? [];
   const sources = content.value?.sources ?? [];
-  const allUnavailable = content.value?.allUnavailable === true;
   const visible = rows.filter((row) => category === 'all' || row.category === category);
-  const empty = allUnavailable ? SOURCE_UNAVAILABLE_TEXT : '目前沒有公告';
+  const down = sources.filter((item) => item.status === 'unavailable');
+  if (!schoolVisible) {
+    return (
+      <AIDetailScreen
+        title="公告"
+        subtitle="公開處室公告的摘要與原文連結。一般帳號即可查看。"
+        onBack={() => navigation?.goBack?.()}
+      >
+        <AICard title="目前沒有公告">{null}</AICard>
+      </AIDetailScreen>
+    );
+  }
   return (
     <AIDetailScreen
       title="公告"
       subtitle="公開處室公告的摘要與原文連結。一般帳號即可查看。"
       onBack={() => navigation?.goBack?.()}
     >
-      {content.loading || content.error || !rows.length ? (
-        <ReadState {...content} empty={empty} />
+      {content.loading || content.error ? (
+        <ReadState {...content} empty="目前沒有公告" />
+      ) : !rows.length ? (
+        down.length ? (
+          <AICard title={SOURCE_DOWN_EMPTY_TEXT}>
+            <View style={{ gap: 12 }}>
+              {down
+                .filter((item) => item.listUrl)
+                .map((item) => (
+                  <AIButton
+                    key={item.sourceId}
+                    label={item.office}
+                    onPress={() => void Linking.openURL(item.listUrl!)}
+                  />
+                ))}
+            </View>
+          </AICard>
+        ) : (
+          <ReadState {...content} empty="目前沒有公告" />
+        )
       ) : (
         <>
-          {sources.some((item) => item.status === 'unavailable') && !allUnavailable ? (
-            <AICard title={SOURCE_UNAVAILABLE_TEXT}>
-              <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
-                {sources
-                  .filter((item) => item.status === 'unavailable')
-                  .map((item) => item.office)
-                  .join('、')}
-                目前讀不到，不會繼續顯示可能已過期的舊稿。
-              </Text>
+          {down.length ? (
+            <AICard
+              title={formatStaleAnnouncementNotice(staleAnnouncementUpdatedAt(sources, rows))}
+            >
+              {null}
             </AICard>
           ) : null}
           <View

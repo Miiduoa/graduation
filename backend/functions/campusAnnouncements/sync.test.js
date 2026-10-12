@@ -2,7 +2,7 @@
 
 const { FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { syncSource, visibleAnnouncements, feedStatus, UNAVAILABLE } = require('./sync');
-const { SOURCE_UNAVAILABLE } = require('./catalog');
+const { SOURCE_DOWN_EMPTY } = require('./catalog');
 const { robotsAllows, resetPoliteFetch } = require('./politeFetch');
 const { countDrop } = require('./extract');
 
@@ -99,7 +99,7 @@ test('successful fetch writes summaries with original URLs and does not keep log
   expect(JSON.stringify(written[0][1])).not.toMatch(/alcat/);
 });
 
-test('a failed fetch hides previous scrape rows instead of showing stale copy', async () => {
+test('a failed fetch keeps previous scrape rows and does not clear lastSuccessAt', async () => {
   const db = memoryDb();
   db.docs.set('schools/pu/announcements/old', {
     sourceId: 'pu-acd',
@@ -111,18 +111,24 @@ test('a failed fetch hides previous scrape rows instead of showing stale copy', 
     origin: 'editor',
     title: '校方自行發布',
   });
+  db.docs.set('schools/pu/announcement-sources/pu-acd', {
+    lastSuccessAt: 'kept',
+    status: 'healthy',
+  });
   const fetchImpl = jest.fn(async (url) => {
     if (String(url).endsWith('robots.txt')) return htmlResponse('User-agent: *\nAllow: /\n');
     return htmlResponse('', 500);
   });
   const result = await syncSource(source, { db, fetchImpl, now: () => 1_000, wait: async () => {} });
   expect(result.status).toBe(UNAVAILABLE);
-  expect(db.docs.has('schools/pu/announcements/old')).toBe(false);
+  expect(db.docs.get('schools/pu/announcements/old').title).toBe('過期稿');
   expect(db.docs.get('schools/pu/announcements/manual').title).toBe('校方自行發布');
   expect(db.docs.get('schools/pu/announcement-sources/pu-acd').status).toBe(UNAVAILABLE);
+  expect(db.docs.get('schools/pu/announcement-sources/pu-acd').lastSuccessAt).toBe('kept');
+  expect(db.docs.get('schools/pu/announcement-sources/pu-acd').message).toBe(SOURCE_DOWN_EMPTY);
 });
 
-test('visible feed drops unavailable sources and labels a total outage', () => {
+test('visible feed keeps stale scrape rows and only labels a total outage when nothing remains', () => {
   const rows = [
     { id: 'a', sourceId: 'pu-acd', origin: 'public_scrape', title: '舊稿' },
     { id: 'b', sourceId: 'pu-osa', origin: 'public_scrape', title: '學務處' },
@@ -131,10 +137,11 @@ test('visible feed drops unavailable sources and labels a total outage', () => {
     { sourceId: 'pu-acd', status: UNAVAILABLE },
     { sourceId: 'pu-osa', status: 'healthy' },
   ];
-  expect(visibleAnnouncements(rows, sources).map((row) => row.id)).toEqual(['b']);
+  expect(visibleAnnouncements(rows, sources).map((row) => row.id)).toEqual(['a', 'b']);
+  expect(feedStatus(rows, sources).status).toBe('ready');
   expect(feedStatus([], [{ status: UNAVAILABLE }, { status: UNAVAILABLE }])).toEqual({
     status: UNAVAILABLE,
-    message: SOURCE_UNAVAILABLE,
+    message: SOURCE_DOWN_EMPTY,
   });
 });
 

@@ -22,7 +22,7 @@ export default function SupportPage() {
         <section>
           <h2>學校事務</h2>
           <p>
-            選課、成績、出缺席與正式公告仍以靜宜 e 校園與各處室為準。Campus One
+            選課、成績、出缺席與正式公告仍以學校校務系統與各處室為準。Campus One
             無法代替校務系統核准請假或加退選。
           </p>
         </section>

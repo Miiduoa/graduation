@@ -57,7 +57,7 @@ test('reads current announcement producers and preserves document identity and t
   ]);
 });
 
-test('does not present stale scrape rows from unavailable sources and fails when every source is down', async () => {
+test('keeps stale scrape rows when a source is down and only fails when nothing remains', async () => {
   mockDocuments.set('schools/pu/announcements', [
     row('stale', { title: '過期稿', origin: 'public_scrape', sourceId: 'pu-acd' }),
     row('other', { title: '學務處', origin: 'public_scrape', sourceId: 'pu-osa' }),
@@ -66,13 +66,27 @@ test('does not present stale scrape rows from unavailable sources and fails when
     row('pu-acd', { sourceId: 'pu-acd', office: '教務處', status: 'unavailable' }),
     row('pu-osa', { sourceId: 'pu-osa', office: '學務處', status: 'healthy' }),
   ]);
-  expect((await fetchAssistantAnnouncements('pu')).map((row) => row.id)).toEqual(['other']);
+  expect((await fetchAssistantAnnouncements('pu')).map((row) => row.id)).toEqual(['stale', 'other']);
   mockDocuments.set('schools/pu/announcements', []);
   mockDocuments.set('schools/pu/announcement-sources', [
     row('pu-acd', { sourceId: 'pu-acd', status: 'unavailable' }),
     row('pu-osa', { sourceId: 'pu-osa', status: 'unavailable' }),
   ]);
-  await expect(fetchAssistantAnnouncements('pu')).rejects.toMatchObject({ message: '暫時抓不到' });
+  await expect(fetchAssistantAnnouncements('pu')).rejects.toMatchObject({
+    message: '學校網站暫時連不上，可以先到學校網站看最新消息',
+  });
+});
+
+test('production does not expose cms-none demo schools to the assistant', async () => {
+  const previous = process.env.APP_ENV;
+  process.env.APP_ENV = 'production';
+  mockDocuments.set('schools/tw-demo-uni/announcements', [
+    row('demo', { title: '示範公告', origin: 'public_scrape', sourceId: 'demo' }),
+  ]);
+  await expect(fetchAssistantAnnouncements('tw-demo-uni')).resolves.toEqual([]);
+  expect(mockReads).toEqual([]);
+  if (previous == null) delete process.env.APP_ENV;
+  else process.env.APP_ENV = previous;
 });
 
 test('uses the active clubEvents producer and sorts actual event dates', async () => {

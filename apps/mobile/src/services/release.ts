@@ -8,6 +8,7 @@ import {
   type SchoolIntegrationStatus,
   toConfigObject,
 } from '@campus/shared/src';
+import { isAnnouncementSchoolVisibleToPublic } from '@campus/shared/src/campusAnnouncements';
 
 type LegalDocumentType = 'privacy' | 'terms';
 
@@ -79,6 +80,9 @@ export function isSchoolVisibleInDirectory(
   schoolId: string,
   input?: Partial<SchoolIntegrationStatus> | null,
 ): boolean {
+  if (!isAnnouncementSchoolVisibleToPublic({ schoolId }, getReleaseConfig().appEnv)) {
+    return false;
+  }
   return getSchoolIntegrationStatus(schoolId, input).enabled;
 }
 

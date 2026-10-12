@@ -71,6 +71,7 @@ async function mount(input = props()) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
   vi.mocked(getDocFromServer).mockReset().mockResolvedValue(snapshot());
   account.user = { uid: 'alice' };
   account.loading = false;
@@ -220,4 +221,15 @@ it('clears stale content during refresh and can recover from a failed request', 
   await screen.findByRole('alert');
   fireEvent.click(screen.getByRole('button', { name: '重新讀取' }));
   await screen.findByText('實際公告詳情');
+});
+
+it('hides cms-none demo schools from announcement details in production', async () => {
+  vi.stubEnv('NEXT_PUBLIC_APP_ENV', 'production');
+  await mount(props('notice-1', 'tw-demo-uni'));
+  expect(screen.queryByText('示範大學')).toBeNull();
+  expect(screen.getByRole('heading', { name: '目前沒有公開公告' })).toBeTruthy();
+  expect(getDocFromServer).not.toHaveBeenCalled();
+  expect(screen.getByRole('link', { name: '← 返回公告列表' }).getAttribute('href')).toBe(
+    '/announcements',
+  );
 });
