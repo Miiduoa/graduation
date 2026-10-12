@@ -439,14 +439,10 @@ export function CourseAttendance({
   searchParams?: SchoolSearchParams;
 }) {
   const { user, loading } = useAuth();
-  const { schoolName, schoolSearch } = resolveSchoolPageContext(searchParams);
+  const { schoolSearch } = resolveSchoolPageContext(searchParams);
   const path = `${audience === 'teacher' ? '/teacher' : ''}/course/${encodeURIComponent(courseId)}`;
   return (
-    <SiteShell
-      title="點名與簽到"
-      subtitle="查看課堂簽到與已保存的出席紀錄。"
-      schoolName={audience === 'teacher' ? `${schoolName} · 教學工作台` : schoolName}
-    >
+    <SiteShell title="點名" subtitle="查看課堂簽到與已保存的出席紀錄。">
       <nav className={styles.navigation} aria-label="課程導覽">
         <Link href={`${path}${schoolSearch}`}>
           <span aria-hidden="true">←</span>

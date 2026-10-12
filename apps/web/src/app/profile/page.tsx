@@ -9,6 +9,7 @@ import { SiteShell } from '@/components/SiteShell';
 import { NuniAccountPanel } from '@/components/NuniAccountPanel';
 import { useNuniSession } from '@/features/nuni/Session';
 import { getAuth, getDb } from '@/lib/firebase';
+import { useSignInOptions } from '@/lib/signInOptions';
 import styles from './profile.module.css';
 
 type Profile = Partial<
@@ -127,7 +128,9 @@ const services = [
 export default function ProfilePage() {
   const { user, loading, error } = useAuth();
   const nuni = useNuniSession();
+  const options = useSignInOptions();
   const hasCourseAccount = !nuni.loading && !nuni.pendingLogout && !nuni.error && !!nuni.session;
+  const schoolLoginReady = options.studentId;
   return (
     <SiteShell title="個人資料" subtitle="管理你的帳號，接著處理課務與校園生活。">
       <div className={styles.layout}>
@@ -139,15 +142,14 @@ export default function ProfilePage() {
             </div>
           ) : user ? (
             <PersonalProfile key={user.uid} user={user} />
-          ) : (
+          ) : error ? (
             <section className={styles.panel}>
-              <h2>
-                {error
-                  ? '暫時無法確認學校帳號'
-                  : hasCourseAccount
-                    ? '連線學校帳號，查看學校資料'
-                    : '登入後，查看你的資料'}
-              </h2>
+              <h2>暫時無法確認學校帳號</h2>
+              <p>請確認網路後再試一次。</p>
+            </section>
+          ) : schoolLoginReady ? (
+            <section className={styles.panel}>
+              <h2>{hasCourseAccount ? '連線學校帳號，查看學校資料' : '登入後，查看你的資料'}</h2>
               <p>
                 {hasCourseAccount
                   ? 'Google 帳號已登入。若要查看學校提供的課表、成績與校園個人資料，請另外連線學校帳號。'
@@ -155,6 +157,14 @@ export default function ProfilePage() {
               </p>
               <Link className="btn primary" href="/login?reconnect=school&returnUrl=%2Fprofile">
                 {hasCourseAccount ? '連線學校帳號' : '登入帳號'}
+              </Link>
+            </section>
+          ) : hasCourseAccount ? null : (
+            <section className={styles.panel}>
+              <h2>登入後，查看你的資料</h2>
+              <p>使用 Google 帳號查看課程與個人資料。學號登入還在準備。</p>
+              <Link className="btn primary" href="/classroom/login?returnUrl=%2Fprofile">
+                登入帳號
               </Link>
             </section>
           )}

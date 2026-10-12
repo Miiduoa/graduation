@@ -7,7 +7,9 @@ import {
   type NuniMerchantWorkspace,
 } from '@campus/shared/src/nuniMerchant';
 
-export const IDENTITY_LOOKUP_FAILED_COPY = '暫時無法確認老師／店家身分';
+export const IDENTITY_LOOKUP_FAILED_COPY = '暫時查不到你的老師或店家身分';
+export const IDENTITY_LOOKUP_FAILED_HINT = '不影響一般功能，請稍後再試一次';
+export const IDENTITY_RETRY_COPY = '再試一次';
 export const IDENTITY_NO_TEACHING_COPY = '這個帳號目前沒有授課課程';
 export const IDENTITY_NO_MERCHANT_COPY = '目前沒有店家申請或已核准門市';
 export const STORE_NOT_OPEN_COPY = '目前還不能開店';

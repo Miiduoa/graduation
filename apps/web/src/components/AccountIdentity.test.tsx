@@ -3,8 +3,10 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { AccountIdentity } from './AccountIdentity';
 import {
   IDENTITY_LOOKUP_FAILED_COPY,
+  IDENTITY_LOOKUP_FAILED_HINT,
   IDENTITY_NO_MERCHANT_COPY,
   IDENTITY_NO_TEACHING_COPY,
+  IDENTITY_RETRY_COPY,
   STORE_NOT_OPEN_COPY,
 } from '@/lib/accountIdentity';
 
@@ -96,7 +98,10 @@ it('says empty only after a real empty result, and retries a failed lookup', asy
     throw new Error(path);
   });
   render(<AccountIdentity context="ctx-a" accountId="pa_33333333-3333-4333-8333-333333333333" />);
-  expect((await screen.findByRole('alert')).textContent).toContain(IDENTITY_LOOKUP_FAILED_COPY);
+  const failed = await screen.findByRole('alert');
+  expect(failed.textContent).toContain(IDENTITY_LOOKUP_FAILED_COPY);
+  expect(failed.textContent).toContain(IDENTITY_LOOKUP_FAILED_HINT);
+  expect(screen.getByRole('button', { name: IDENTITY_RETRY_COPY })).toBeTruthy();
   expect(screen.queryByText(IDENTITY_NO_TEACHING_COPY)).toBeNull();
   expect(screen.queryByText(IDENTITY_NO_MERCHANT_COPY)).toBeNull();
   request.mockImplementation(async (path: string) => {

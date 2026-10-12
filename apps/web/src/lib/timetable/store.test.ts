@@ -28,7 +28,8 @@ vi.mock('@/lib/firebase', () => ({
 }));
 
 import {
-  TimetableCloudSaveError,
+  TIMETABLE_DEVICE_ONLY_STORED_COPY,
+  TIMETABLE_DEVICE_ONLY_SUBMIT_COPY,
   loadPersonalTimetable,
   savePersonalTimetable,
 } from './store';
@@ -51,8 +52,7 @@ beforeEach(() => {
   auth.currentUser = { uid: 'u-1' };
 });
 
-it('keeps the browser copy when the cloud save fails, so a refresh shows the same timetable', async () => {
-  firestore.setDoc.mockRejectedValue(new Error('offline'));
+it('keeps imported timetables on this device and does not send them to the cloud', async () => {
   const timetable = {
     courses: [course],
     meta: {} as never,
@@ -60,9 +60,11 @@ it('keeps the browser copy when the cloud save fails, so a refresh shows the sam
     updatedAt: new Date().toISOString(),
     schoolId: 'pu',
   };
-  await expect(savePersonalTimetable('u-1', timetable)).rejects.toBeInstanceOf(
-    TimetableCloudSaveError,
-  );
+  await expect(savePersonalTimetable('u-1', timetable)).resolves.toEqual({ stored: 'local' });
+  expect(firestore.setDoc).not.toHaveBeenCalled();
+  expect(TIMETABLE_DEVICE_ONLY_SUBMIT_COPY).toBe('存在這台裝置');
+  expect(TIMETABLE_DEVICE_ONLY_STORED_COPY).toBe('已存在這台裝置，換手機或清除瀏覽器資料就會不見');
+  expect(TIMETABLE_DEVICE_ONLY_STORED_COPY).not.toMatch(/已儲存|已同步/);
   firestore.getDoc.mockResolvedValue({
     exists: () => true,
     data: () => ({ courses: [], updatedAt: { toMillis: () => Date.now() - 60_000 } }),

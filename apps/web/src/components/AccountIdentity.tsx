@@ -5,8 +5,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { browserRequest } from '@/features/nuni/Session';
 import {
   IDENTITY_LOOKUP_FAILED_COPY,
+  IDENTITY_LOOKUP_FAILED_HINT,
   IDENTITY_NO_MERCHANT_COPY,
   IDENTITY_NO_TEACHING_COPY,
+  IDENTITY_RETRY_COPY,
   loadAccountIdentity,
   type AccountIdentity as Identity,
 } from '@/lib/accountIdentity';
@@ -68,6 +70,7 @@ export function AccountIdentity({ context, accountId }: { context: string; accou
           {failed && (
             <div role="alert">
               <p>{IDENTITY_LOOKUP_FAILED_COPY}</p>
+              <p>{IDENTITY_LOOKUP_FAILED_HINT}</p>
               <button
                 className="btn"
                 type="button"
@@ -75,7 +78,7 @@ export function AccountIdentity({ context, accountId }: { context: string; accou
                   setAttempt((value) => value + 1);
                 }}
               >
-                再試一次
+                {IDENTITY_RETRY_COPY}
               </button>
             </div>
           )}

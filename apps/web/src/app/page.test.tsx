@@ -4,6 +4,7 @@ import HomePage from './page';
 import { loadHomeData, type HomeData } from '@/lib/homeOverview';
 import { loadNuniHomeData } from '@/lib/nuniHomeOverview';
 import { NuniError } from '@campus/shared/src/nuni';
+import { IDENTITY_LOOKUP_FAILED_COPY, IDENTITY_LOOKUP_FAILED_HINT } from '@/lib/accountIdentity';
 const state = vi.hoisted(() => ({
   uid: 'alice' as string | null,
   session: null as null | { context: string; platformAccountId: string },
@@ -11,6 +12,12 @@ const state = vi.hoisted(() => ({
   sessionError: '',
   pendingLogout: false,
   refresh: vi.fn(),
+  request: vi.fn(async (path: string) => {
+    if (path === 'class-workspaces') return { workspaces: [] };
+    if (path === 'merchant-applications') return { applications: [] };
+    if (path === 'merchant-workspaces') return { workspaces: [] };
+    return {};
+  }),
 }));
 vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>Campus One</header> }));
 vi.mock('@/components/SiteFooter', () => ({ SiteFooter: () => null }));
@@ -23,12 +30,7 @@ vi.mock('@/features/nuni/Session', () => ({
     logout: vi.fn(),
     refresh: state.refresh,
   }),
-  browserRequest: vi.fn(async (path: string) => {
-    if (path === 'class-workspaces') return { workspaces: [] };
-    if (path === 'merchant-applications') return { applications: [] };
-    if (path === 'merchant-workspaces') return { workspaces: [] };
-    return {};
-  }),
+  browserRequest: (path: string) => state.request(path),
 }));
 vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({
@@ -51,6 +53,12 @@ beforeEach(() => {
   state.sessionLoading = false;
   state.sessionError = '';
   state.pendingLogout = false;
+  state.request.mockImplementation(async (path: string) => {
+    if (path === 'class-workspaces') return { workspaces: [] };
+    if (path === 'merchant-applications') return { applications: [] };
+    if (path === 'merchant-workspaces') return { workspaces: [] };
+    return {};
+  });
 });
 it('clears visible school account data and ignores an old response after account switching', async () => {
   let finishAlice!: (value: HomeData) => void;
@@ -107,6 +115,22 @@ it('uses the Nuni account for home and links directly to pending work with its a
   expect(screen.queryByRole('link', { name: /用 Google 帳號登入/ })).toBeNull();
   expect(screen.getAllByText('已過參考期限・仍可繳交')).toHaveLength(2);
   expect(screen.getAllByText(/1\/2 20:30/)).toHaveLength(2);
+});
+it('uses the same identity lookup copy as the account page when the lookup fails', async () => {
+  state.uid = null;
+  state.session = { context: 'session-a', platformAccountId: 'student-a' };
+  vi.mocked(loadNuniHomeData).mockResolvedValue({
+    courses: [],
+    tasks: [],
+    unreadCount: 0,
+  });
+  state.request.mockImplementation(async () => {
+    throw new Error('offline');
+  });
+  render(<HomePage />);
+  expect(await screen.findByText(IDENTITY_LOOKUP_FAILED_COPY)).toBeTruthy();
+  expect(screen.getByText(IDENTITY_LOOKUP_FAILED_HINT)).toBeTruthy();
+  expect(screen.getByRole('button', { name: '再試一次' })).toBeTruthy();
 });
 it('keeps teaching and studying roles separate for the same account', async () => {
   state.session = { context: 'session-a', platformAccountId: 'teacher-a' };

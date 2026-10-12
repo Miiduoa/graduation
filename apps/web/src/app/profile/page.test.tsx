@@ -33,6 +33,10 @@ vi.mock('@/features/nuni/Session', () => ({
     throw new Error(path);
   }),
 }));
+vi.mock('@/lib/signInOptions', () => ({
+  useSignInOptions: () => ({ google: true, studentId: false, loading: false, retry: vi.fn() }),
+  STUDENT_ID_PREPARING_COPY: '學號登入還在準備，目前請用 Google 帳號登入',
+}));
 vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({ user: state.user, loading: state.loading, error: null }),
 }));
@@ -101,8 +105,8 @@ it('clears the prior account immediately and ignores a response after logout', a
   rerender(<ProfilePage />);
   await act(async () => finish(snapshot('私人資料 B')));
   expect(screen.queryByText('私人資料 B')).toBeNull();
-  expect(screen.getByRole('link', { name: '登入帳號' }).getAttribute('href')).toContain(
-    'returnUrl=%2Fprofile',
+  expect(screen.getByRole('link', { name: '登入帳號' }).getAttribute('href')).toBe(
+    '/classroom/login?returnUrl=%2Fprofile',
   );
 });
 it('does not read personal data before authentication resolves', () => {
@@ -123,9 +127,8 @@ it('recognizes a course-only account without inventing school records or a globa
   expect(screen.getByRole('link', { name: '學校資格' }).getAttribute('href')).toBe(
     '/classroom/account',
   );
-  expect(screen.getByRole('link', { name: '連線學校帳號' }).getAttribute('href')).toContain(
-    'reconnect=school',
-  );
+  expect(screen.queryByRole('link', { name: '連線學校帳號' })).toBeNull();
+  expect(screen.queryByText('連線學校帳號，查看學校資料')).toBeNull();
   expect(screen.queryByText('登入後，查看你的資料')).toBeNull();
   expect(screen.queryByRole('link', { name: /平台管理/ })).toBeNull();
   expect(screen.queryByText('學號')).toBeNull();

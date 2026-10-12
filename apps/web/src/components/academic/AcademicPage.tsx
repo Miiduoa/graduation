@@ -126,7 +126,7 @@ export function AcademicPage<K extends AcademicKind>(props: Props<K>) {
   const { user, loading, error } = useAuth();
   const path = usePathname();
   return (
-    <SiteShell title={props.title} subtitle={props.subtitle} schoolName="靜宜大學">
+    <SiteShell title={props.title} subtitle={props.subtitle}>
       <nav className={styles.navigation} aria-label="我的課務">
         {(
           [
