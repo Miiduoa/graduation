@@ -1,6 +1,15 @@
 'use client';
 
-import { useEffect, useState, ReactNode, createContext, useContext, useCallback } from 'react';
+import {
+  useEffect,
+  useState,
+  ReactNode,
+  createContext,
+  useContext,
+  useCallback,
+  useMemo,
+  useSyncExternalStore,
+} from 'react';
 import { onAuthStateChanged, User, signOut } from 'firebase/auth';
 import { getAuth } from '@/features/auth/client';
 import Link from 'next/link';
@@ -17,15 +26,41 @@ interface AuthContextType extends AuthState {
   refreshUser: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextType | null>(null);
+const initialAuthState: AuthState = { user: null, loading: true, error: null };
+
+function createAuthStore(initialState: AuthState) {
+  let state = initialState;
+  const listeners = new Set<() => void>();
+  return {
+    getSnapshot: () => state,
+    // Each delayed Suspense boundary must hydrate against the server's account-neutral state.
+    getServerSnapshot: () => initialState,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    setState: (next: AuthState | ((previous: AuthState) => AuthState)) => {
+      state = typeof next === 'function' ? next(state) : next;
+      listeners.forEach((listener) => listener());
+    },
+  };
+}
+
+type AuthStore = ReturnType<typeof createAuthStore>;
+const AuthContext = createContext<{
+  store: AuthStore;
+  signOutUser: AuthContextType['signOutUser'];
+  refreshUser: AuthContextType['refreshUser'];
+} | null>(null);
 
 export function GuestAuthProvider({ children }: { children: ReactNode }) {
+  const [store] = useState(() => createAuthStore({ user: null, loading: false, error: null }));
   return (
     <AuthContext.Provider
       value={{
-        user: null,
-        loading: false,
-        error: null,
+        store,
         signOutUser: async () => {},
         refreshUser: async () => {},
       }}
@@ -35,12 +70,14 @@ export function GuestAuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function useAuth() {
+export function useAuth(): AuthContextType {
   const context = useContext(AuthContext);
   if (!context) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
-  return context;
+  const { store, signOutUser, refreshUser } = context;
+  const state = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getServerSnapshot);
+  return { ...state, signOutUser, refreshUser };
 }
 
 interface AuthProviderProps {
@@ -55,11 +92,8 @@ async function clearTeachingSession() {
 }
 
 export function AuthProvider({ children }: AuthProviderProps) {
-  const [state, setState] = useState<AuthState>({
-    user: null,
-    loading: true,
-    error: null,
-  });
+  const [store] = useState(() => createAuthStore(initialAuthState));
+  const { setState } = store;
 
   useEffect(() => {
     const auth = getAuth();
@@ -94,7 +128,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     );
 
     return () => unsubscribe();
-  }, []);
+  }, [setState]);
 
   const signOutUser = useCallback(async () => {
     const auth = getAuth();
@@ -109,7 +143,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       console.error('Sign out error:', failure.reason);
       throw failure.reason;
     }
-  }, []);
+  }, [setState]);
 
   const refreshUser = useCallback(async () => {
     const auth = getAuth();
@@ -124,13 +158,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
     } catch (error) {
       console.error('Refresh user error:', error);
     }
-  }, []);
+  }, [setState]);
 
-  return (
-    <AuthContext.Provider value={{ ...state, signOutUser, refreshUser }}>
-      {children}
-    </AuthContext.Provider>
+  const context = useMemo(
+    () => ({ store, signOutUser, refreshUser }),
+    [store, signOutUser, refreshUser],
   );
+
+  return <AuthContext.Provider value={context}>{children}</AuthContext.Provider>;
 }
 
 interface AuthGuardProps {
@@ -150,7 +185,7 @@ export function AuthGuard({
 
   useEffect(() => {
     if (!loading && requireAuth && !user) {
-      const currentPath = window.location.pathname + window.location.search;
+      const currentPath = window.location.pathname + window.location.search + window.location.hash;
       const loginUrl = `${redirectTo}?returnUrl=${encodeURIComponent(currentPath)}`;
       window.location.href = loginUrl;
     }

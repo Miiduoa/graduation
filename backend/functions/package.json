@@ -13,7 +13,7 @@
     "lint": "eslint .",
     "backfill:canonical": "node backfillCanonicalData.js",
     "build:shared": "node ../../scripts/build-functions-shared.cjs",
-    "test": "pnpm run build:shared && jest"
+    "test": "pnpm run build:shared && ONLINE_ORDERING_ENABLED=true jest"
   },
   "dependencies": {
     "firebase-admin": "13.10.0",

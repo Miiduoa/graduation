@@ -704,3 +704,68 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.focusDeadline {
+  display: block;
+  margin-top: 10px;
+}
+.focusDeadline > span {
+  text-align: left;
+  font-size: 16px;
+}
+.focusDeadline small {
+  font-size: 12px;
+}
+.textButton {
+  border: 0;
+  background: transparent;
+  color: var(--soft);
+  padding: 10px 0;
+  min-height: 44px;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.schoolAccess {
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+}
+.schoolAccess h2 {
+  font-size: 15px;
+  margin: 0;
+}
+.schoolAccess p {
+  font-size: 13px;
+  color: var(--soft);
+  line-height: 1.8;
+}
+.schoolAccess a,
+.supportLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.supportLink {
+  color: var(--soft) !important;
+}
+.taskContent strong,
+.course h3 {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 480px) {
+  .task {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+  .task > :is(.deadline, .overdue) {
+    grid-column: 1;
+    text-align: left;
+    font-size: 13px;
+  }
+  .task > .arrow {
+    grid-column: 2;
+    grid-row: 1 / 3;
+  }
+}

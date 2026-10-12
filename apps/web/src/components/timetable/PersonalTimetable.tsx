@@ -28,6 +28,7 @@ import {
   shareCopiedCopy,
 } from '@campus/shared';
 import { useAuth } from '@/components/AuthGuard';
+import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
 import { useSelectedSchool } from '@/components/SelectedSchoolProvider';
 import styles from '@/components/academic/academic.module.css';
 import {
@@ -185,9 +186,17 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
       setTimetable({ ...next, schoolId });
       setPlanResult(null);
       setShareUrl('');
-      setNotice(saved.stored === 'cloud' ? message : '已記在本站，僅儲存於這台瀏覽器；尚未同步到帳號，好友可見狀態仍以雲端資料為準。');
+      setNotice(saved.stored === 'cloud' ? message : '已記在本站，僅儲存於這台瀏覽器；登入學校帳號後才能存到雲端，好友可見狀態仍以雲端資料為準。');
       return true;
-    } catch {
+    } catch (error) {
+      // The store emits this named error only after confirming the local write.
+      if (active.current && error instanceof Error && error.name === 'TimetableCloudSaveError') {
+        setTimetable({ ...next, schoolId });
+        setPlanResult(null);
+        setShareUrl('');
+        setNotice('已記在這台瀏覽器，但這次雲端同步沒有成功。下次儲存會再嘗試同步，好友目前看到的仍是雲端版本。');
+        return true;
+      }
       if (active.current) setNotice('目前無法確認儲存結果。編輯內容與匯入草稿仍保留，請先確認帳號課表狀態再重試。');
       return false;
     } finally {
@@ -383,7 +392,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
   };
 
   return (
-    <>
+    <div className={movement.workspace}>
       {invites.length > 0 && (
         <section className={styles.panel} aria-label="邀約">
           <h2>有人約你</h2>
@@ -393,7 +402,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
                 <p>
                   {friends.find((friend) => friend.id === item.creatorUid)?.name || '同學'} 約你：{meetupLabel(item)}
                 </p>
-                <div className={styles.toolbar}>
+                <div className={`${styles.toolbar} ${movement.toolbar}`}>
                   <button type="button" className="btn primary" onClick={() => void answerInvite(item.id, 'accepted')}>
                     答應
                   </button>
@@ -408,8 +417,8 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
       )}
       <p className={styles.notice}>
         {uid
-          ? '登入後可將課表同步到 Campus One 帳號。每次儲存會顯示同步結果；學校選課紀錄要經過確認才會覆蓋。'
-          : '尚未登入時，課表只記在這台瀏覽器，成功後會顯示「已記在本站」。'}
+          ? '學校帳號可同步個人課表。每次儲存會顯示同步結果；學校選課紀錄要經過確認才會覆蓋。'
+          : '課表先記在這台瀏覽器，成功後會顯示「已記在本站」；登入學校帳號後才能存到雲端。'}
       </p>
       {uid ? (
         <label className={styles.field}>
@@ -437,7 +446,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
           有 {conflicts.length} 組課程時間重疊，仍可先留著，約人時會避開這些時段。
         </section>
       )}
-      <div className={styles.toolbar}>
+      <div className={`${styles.toolbar} ${movement.toolbar}`}>
         <div className={styles.segment} aria-label="課表顯示方式">
           <button type="button" aria-pressed={view === 'grid'} onClick={() => setView('grid')}>
             格子
@@ -471,7 +480,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
           {shareBusy ? '正在產生連結…' : '複製分享連結'}
         </button>
       </div>
-      {!uid && <p className={styles.notice}>登入後才能產生分享連結。</p>}
+      {!uid && <p className={styles.notice}>登入學校帳號後才能產生分享連結。</p>}
       {shareUrl && <label className={styles.field}>
         分享連結
         <input readOnly value={shareUrl} onFocus={(event) => event.currentTarget.select()} />
@@ -484,7 +493,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
       {view === 'grid' ? (
         <TimetableGrid courses={timetable.courses} disabled={busy} onEdit={startEditing} />
       ) : view === 'week' ? (
-        <div className={styles.week}>
+        <div className={`${styles.week} ${movement.week}`} aria-label="一週課程清單">
           {WEEKDAY_LABELS.map((label, index) => {
             const entries = timetable.courses
               .filter((course) => course.day === index + 1 && isPlacedCourse(course, PERIOD_TIMES.length, WEEKDAY_LABELS.length))
@@ -494,7 +503,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
                 <h3>{label}</h3>
                 {entries.length ? (
                   entries.map((course) => (
-                    <button type="button" className={styles.course} key={course.id} disabled={busy} onClick={() => startEditing(course)}>
+                    <button type="button" className={`${styles.course} ${movement.courseCard}`} key={course.id} disabled={busy} onClick={() => startEditing(course)}>
                       <time>{courseTimeLabel(course)}</time>
                       <h4>{course.name}</h4>
                       <p>{course.room || '教室未填'}</p>
@@ -518,7 +527,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
               .sort((a, b) => a.start - b.start)
               .map((course) => (
                 <li key={course.id}>
-                  <button type="button" className={styles.course} disabled={busy} onClick={() => startEditing(course)}>
+                  <button type="button" className={`${styles.course} ${movement.courseCard}`} disabled={busy} onClick={() => startEditing(course)}>
                     <time>{periodRangeLabel(course.start, course.end)}</time>
                     <h4>{course.name}</h4>
                     <p>
@@ -552,7 +561,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
         <p className={styles.notice}>
           截圖或貼上文字後會先變成草稿。{IMPORT_CONFIRM_COPY}
         </p>
-        <div className={styles.toolbar}>
+        <div className={`${styles.toolbar} ${movement.toolbar}`}>
           <label className={styles.field}>
             課表截圖
             <input
@@ -621,7 +630,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
       <section className={styles.panel} aria-label="幫我安排">
         <h2>幫我安排</h2>
         <p className={styles.notice}>{planning.ready ? '依目前已填入的課程計算；未匯入的課程或臨時調課，仍需自行核對。' : planning.message}</p>
-        <div className={styles.toolbar}>
+        <div className={`${styles.toolbar} ${movement.toolbar}`}>
           <button type="button" className="btn" disabled={busy || !planning.ready} onClick={() => runPlan('下一堂', '下一堂')}>
             下一堂
           </button>
@@ -629,7 +638,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
             今天空堂
           </button>
         </div>
-        <div className={styles.toolbar}>
+        <div className={`${styles.toolbar} ${movement.toolbar}`}>
           <label className={styles.field}>
             星期
             <select value={studyDay} onChange={(event) => setStudyDay(Number(event.target.value))}>
@@ -681,7 +690,10 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
       <section className={styles.panel} aria-label="共同空堂">
         <h2>共同空堂</h2>
         {!uid ? (
-          <p className={styles.notice}>登入並加好友後，才能看對方課表。沒加好友不會露出任何人的時間。</p>
+          <>
+            <SchoolAccountRequired returnUrl="/timetable" headingLevel={3} />
+            <p className={styles.notice}>加好友後才看得到對方課表，沒加好友不會露出任何人的時間。</p>
+          </>
         ) : friends.length === 0 ? (
           <p className={styles.notice}>
             目前沒有已接受的好友，或對方還沒把課表開放給好友。去 <a href="/friends">找人</a> 送出邀請。
@@ -720,7 +732,7 @@ function TimetableWorkspace({ uid, schoolId }: { uid: string | null; schoolId: s
           </>
         )}
       </section>
-    </>
+    </div>
   );
 }
 
@@ -736,7 +748,7 @@ function MeetupWindowRow({
   const options = meetupStartOptions(window);
   const [start, setStart] = useState(options[0] ?? window.start);
   return (
-    <div className={styles.toolbar}>
+    <div className={`${styles.toolbar} ${movement.toolbar}`}>
       <span>{meetupWindowLabel(window)}</span>
       <label className={styles.field}>
         開始

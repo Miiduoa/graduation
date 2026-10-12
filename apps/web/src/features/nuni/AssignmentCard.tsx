@@ -14,7 +14,12 @@ import { useNuniSession } from './Session';
 import shared from './NuniApp.module.css';
 import styles from './CourseLearning.module.css';
 
-type Props = { item: NuniAssignment; workspace: NuniWorkspace; reload: () => void };
+type Props = {
+  item: NuniAssignment;
+  workspace: NuniWorkspace;
+  reload: () => void;
+  onConfirmed?: (assignment: NuniAssignment) => void;
+};
 
 function latestAssignment(item: NuniAssignment, saved: NuniAssignment | null): NuniAssignment {
   if (!saved) return item;
@@ -46,7 +51,7 @@ export function AssignmentCard(props: Props) {
   );
 }
 
-function Assignment({ item, workspace, reload }: Props) {
+function Assignment({ item, workspace, reload, onConfirmed }: Props) {
   const classes = useClasses();
   const [saved, setSaved] = useState<NuniAssignment | null>(null);
   const assignment = latestAssignment(item, saved);
@@ -105,6 +110,7 @@ function Assignment({ item, workspace, reload }: Props) {
     }
     if (!mounted.current) throw new NuniError(409, 'SESSION_CHANGED');
     setSaved(result);
+    onConfirmed?.(result);
     setConfirmClose(false);
     setCloseNotice('目前已停止收件，已繳交的內容與老師回饋仍會保留。');
   }
@@ -123,6 +129,7 @@ function Assignment({ item, workspace, reload }: Props) {
     <article
       className={shared.panel}
       id={`assignment-${item.id}`}
+      tabIndex={-1}
       aria-labelledby={`assignment-title-${item.id}`}
     >
       <div className={styles.heading}>
@@ -136,7 +143,7 @@ function Assignment({ item, workspace, reload }: Props) {
           <>
             參考期限：
             <time dateTime={assignment.dueAt}>
-              {new Date(assignment.dueAt).toLocaleString('zh-TW')}
+              {new Date(assignment.dueAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}
             </time>
           </>
         ) : (
@@ -153,7 +160,9 @@ function Assignment({ item, workspace, reload }: Props) {
           <strong>已繳交</strong>
           <p>
             <time dateTime={assignment.mySubmission.submittedAt}>
-              {new Date(assignment.mySubmission.submittedAt).toLocaleString('zh-TW')}
+              {new Date(assignment.mySubmission.submittedAt).toLocaleString('zh-TW', {
+                timeZone: 'Asia/Taipei',
+              })}
             </time>
           </p>
           <CourseText text={assignment.mySubmission.body} />
@@ -161,10 +170,17 @@ function Assignment({ item, workspace, reload }: Props) {
             <div className={styles.feedback}>
               <h4>老師回饋</h4>
               <CourseText text={assignment.mySubmission.teacherFeedback} />
+              {assignment.mySubmission.reviewedAt &&
+                Date.parse(assignment.mySubmission.reviewedAt) <
+                  Date.parse(assignment.mySubmission.submittedAt) && (
+                  <p className={styles.note}>這則回饋早於最近一次繳交，請老師確認是否仍適用。</p>
+                )}
               {assignment.mySubmission.reviewedAt && (
                 <p className={shared.muted}>
                   <time dateTime={assignment.mySubmission.reviewedAt}>
-                    {new Date(assignment.mySubmission.reviewedAt).toLocaleString('zh-TW')}
+                    {new Date(assignment.mySubmission.reviewedAt).toLocaleString('zh-TW', {
+                      timeZone: 'Asia/Taipei',
+                    })}
                   </time>
                 </p>
               )}
@@ -179,6 +195,7 @@ function Assignment({ item, workspace, reload }: Props) {
           <summary>{assignment.mySubmission ? '修改繳交內容' : '繳交這份作業'}</summary>
           <MutationForm
             label={assignment.mySubmission ? '更新繳交內容' : '繳交作業'}
+            success="繳交內容已儲存，老師現在可以查看。"
             submit={async (data, key) => {
               const result = await classes.submit(
                 workspace.id,
@@ -188,6 +205,7 @@ function Assignment({ item, workspace, reload }: Props) {
               );
               if (!mounted.current) throw new NuniError(409, 'SESSION_CHANGED');
               setSaved(result);
+              onConfirmed?.(result);
               reload();
             }}
           >
@@ -311,7 +329,12 @@ function FeedbackRow({
 }) {
   const [notice, setNotice] = useState('');
   const currentText = entry.teacherFeedback ?? '';
-  const version = JSON.stringify([entry.teacherFeedback, entry.reviewedAt]);
+  const version = JSON.stringify([
+    entry.body,
+    entry.submittedAt,
+    entry.teacherFeedback,
+    entry.reviewedAt,
+  ]);
   const [editor, setEditor] = useState({ version, original: currentText, text: currentText });
   const pristine = editor.text === editor.original;
   const draft = pristine ? currentText : editor.text;
@@ -338,6 +361,9 @@ function FeedbackRow({
           <section className={styles.feedback} aria-label="目前老師回饋">
             <h5>目前回饋</h5>
             <CourseText text={entry.teacherFeedback} />
+            {entry.reviewedAt && Date.parse(entry.reviewedAt) < Date.parse(entry.submittedAt) && (
+              <p className={styles.note}>這則回饋早於最近一次繳交，請老師確認是否仍適用。</p>
+            )}
           </section>
         )}
         {notice && (
@@ -359,7 +385,12 @@ function FeedbackRow({
               if (!mounted.current) throw new NuniError(409, 'SESSION_CHANGED');
               const text = receipt.teacherFeedback ?? '';
               setEditor({
-                version: JSON.stringify([receipt.teacherFeedback, receipt.reviewedAt]),
+                version: JSON.stringify([
+                  receipt.body,
+                  receipt.submittedAt,
+                  receipt.teacherFeedback,
+                  receipt.reviewedAt,
+                ]),
                 original: text,
                 text,
               });
@@ -373,7 +404,7 @@ function FeedbackRow({
             {changed && (
               <section className={styles.confirmation} aria-label="回饋內容已更新">
                 <p role="alert">
-                  這份回饋已有新的內容。你的草稿尚未儲存，請選擇接下來要編輯的內容。
+                  學生內容或老師回饋已有更新。你的草稿尚未儲存，請先核對新內容，再選擇接下來要編輯的內容。
                 </p>
                 <div className={styles.toolbar}>
                   <button

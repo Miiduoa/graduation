@@ -279,7 +279,7 @@ function CafeteriaContent({
           </div>
         </div>
         <p className={styles.notice}>
-          依店家提供的資料顯示；實際營業與餐點供應請向店家確認。本頁提供菜單查詢，尚未開放線上點餐。
+          依店家提供的資料顯示；實際營業與餐點供應請向店家確認。本頁提供菜單查詢，目前還不能線上點餐。
         </p>
 
         <section className={styles.toolbar} aria-label="尋找餐點">

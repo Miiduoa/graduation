@@ -23,7 +23,7 @@ export function CommunityAccess({ children }: { children: ReactNode }) {
     return (
       <section className={styles.status}>
         <h2>登入後加入校園交流</h2>
-        <p>閱讀貼文、參與看板與讀書會，需要先確認你的校園帳號。</p>
+        <p>閱讀貼文、參與看板與讀書會，需要先確認你的學校帳號。</p>
         <Link className="btn primary" href={`/login?returnUrl=${encodeURIComponent(returnUrl)}`}>
           登入帳號
         </Link>

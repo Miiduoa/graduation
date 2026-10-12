@@ -60,12 +60,21 @@ function OrdersRoute() {
   const { user, loading, error } = useAuth();
   if (loading) return <p role="status">正在確認登入狀態…</p>;
   if (error) return <p role="alert">無法確認登入狀態，請重新整理後再試。</p>;
-  if (!user) return <div><h2>登入後查看訂單</h2><Link className={home.primary} href={`/login?returnUrl=${encodeURIComponent('/orders')}`}>登入</Link></div>;
+  if (!user) {
+    if (!isWebOnlineOrderingEnabled()) return <div><h2>{ONLINE_ORDERING_OFF_TEXT}</h2></div>;
+    return <div><h2>登入後查看訂單</h2><Link className={home.primary} href={`/login?returnUrl=${encodeURIComponent('/orders')}`}>登入</Link></div>;
+  }
   return <OrdersList key={user.uid} uid={user.uid} />;
 }
 
 export default function OrdersPage() {
-  return <SiteShell title="我的訂單" subtitle="取餐號碼和訂單狀態以店家那邊為準，會自動更新。" schoolName={school.schoolName} schoolCode={school.schoolCode}>
+  const orderingOn = isWebOnlineOrderingEnabled();
+  return <SiteShell
+    title={orderingOn ? '我的訂單' : ONLINE_ORDERING_OFF_TEXT}
+    subtitle={orderingOn ? '取餐號碼和訂單狀態以店家那邊為準，會自動更新。' : ONLINE_ORDERING_OFF_TEXT}
+    schoolName={school.schoolName}
+    schoolCode={school.schoolCode}
+  >
     <OrdersRoute />
   </SiteShell>;
 }

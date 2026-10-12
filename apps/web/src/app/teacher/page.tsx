@@ -1,9 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import Link from 'next/link';
 import { APPEAL_STATUS_COPY, type AppealStatus } from '@campus/shared';
 import { SiteShell } from '@/components/SiteShell';
+import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
 import { useAuth } from '@/components/AuthGuard';
 import { useSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { decideCourseAppeal, listTeacherAppeals, type TeacherAppealRow } from '@/lib/timetable/store';
@@ -67,9 +67,7 @@ export default function TeacherDeskPage() {
   if (!user) {
     return (
       <SiteShell title="老師工作台" subtitle="看學生的課程申訴，核准或不核准。">
-        <p className={styles.notice}>
-          請先 <Link href="/login?returnUrl=/teacher">登入</Link>。
-        </p>
+        <SchoolAccountRequired returnUrl="/teacher" />
       </SiteShell>
     );
   }
