@@ -150,6 +150,7 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
               [{ status: 'unavailable', lastSuccessAt: state.fetchedAt }],
               [announcement],
             ),
+            'firestore',
           )}
         </p>
       ) : null}

@@ -14,6 +14,9 @@ export const SOURCE_UNAVAILABLE_TEXT = '暫時抓不到';
 export const SOURCE_NOT_CONNECTED_TEXT = '這裡還沒接上學校公告，請先到學校網站看最新消息';
 export const SOURCE_DOWN_EMPTY_TEXT = '學校網站暫時連不上，可以先到學校網站看最新消息';
 export const SOURCE_DOWN_WITH_CACHE_TEXT = '學校網站暫時連不上';
+export const FIRESTORE_UNAVAILABLE_WITH_CACHE_TEXT = '暫時讀不到新公告';
+export const STALE_ANNOUNCEMENT_REASONS = ['source_down', 'firestore'] as const;
+export type StaleAnnouncementReason = (typeof STALE_ANNOUNCEMENT_REASONS)[number];
 export type AnnouncementEmptyKind = 'not_connected' | 'source_down' | 'empty' | 'has_items';
 export const PLACEHOLDER_ANNOUNCEMENT_SCHOOL_IDS = [
   'tw-demo-uni',
@@ -73,10 +76,7 @@ export function isLoginPortalUrl(value: string): boolean {
   }
 }
 
-export function classifyAnnouncement(
-  title: string,
-  office = '',
-): PublicAnnouncementCategory {
+export function classifyAnnouncement(title: string, office = ''): PublicAnnouncementCategory {
   const text = `${title} ${office}`;
   if (/停課|颱風|地震|緊急|疏散|警報|災/.test(text)) return 'emergency';
   if (/維修|資訊處|網路|系統中斷|資安/.test(text)) return 'system';
@@ -110,9 +110,7 @@ export function isPlaceholderAnnouncementSchool(input: {
 const PLACEHOLDER_VISIBLE_ENVIRONMENTS = ['development', 'preview', 'test'] as const;
 
 /** 示範學校預設藏：只有明確寫 development / preview / test 才顯示。未設定、空字串、未知值都藏。 */
-export function allowsPlaceholderAnnouncementSchools(
-  environment?: string | null,
-): boolean {
+export function allowsPlaceholderAnnouncementSchools(environment?: string | null): boolean {
   return (PLACEHOLDER_VISIBLE_ENVIRONMENTS as readonly string[]).includes(
     String(environment ?? '').trim(),
   );
@@ -150,9 +148,12 @@ export function formatTaiwanMonthDayTime(value: Date | string | number): string 
 
 export function formatStaleAnnouncementNotice(
   updatedAt?: Date | string | number | null,
+  reason: StaleAnnouncementReason = 'source_down',
 ): string {
+  const suffix =
+    reason === 'firestore' ? FIRESTORE_UNAVAILABLE_WITH_CACHE_TEXT : SOURCE_DOWN_WITH_CACHE_TEXT;
   const stamp = updatedAt == null ? null : formatTaiwanMonthDayTime(updatedAt);
-  return stamp ? `最後更新 ${stamp}，學校網站暫時連不上` : SOURCE_DOWN_WITH_CACHE_TEXT;
+  return stamp ? `最後更新 ${stamp}，${suffix}` : suffix;
 }
 
 export function latestAnnouncementStamp(
@@ -172,9 +173,7 @@ export function staleAnnouncementUpdatedAt(
 ): string | undefined {
   return (
     latestAnnouncementStamp(
-      sources
-        .filter((item) => item.status === 'unavailable')
-        .map((item) => item.lastSuccessAt),
+      sources.filter((item) => item.status === 'unavailable').map((item) => item.lastSuccessAt),
     ) ?? latestAnnouncementStamp(announcements.map((item) => item.publishedAt))
   );
 }
