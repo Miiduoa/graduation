@@ -1,0 +1,146 @@
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { TransitExplorer } from './TransitExplorer';
+import { queryTransit, type TransitResult, type TransitStop } from '@/lib/transit';
+
+vi.mock('@/lib/transit', async (original) => ({
+  ...(await original<typeof import('@/lib/transit')>()),
+  queryTransit: vi.fn(),
+}));
+const stops: TransitStop[] = [
+  { id: 'TXG001', name: '靜宜大學', city: 'Taichung', lat: 24.22, lon: 120.58, distance: null },
+  { id: 'TXG002', name: '靜宜大學', city: 'Taichung', lat: 24.221, lon: 120.58, distance: null },
+];
+const stopResult = (): TransitResult => ({ status: 'ready', kind: 'stops', stops, limited: false, fetchedAt: new Date().toISOString() });
+const emptyArrivals = (): TransitResult => ({ status: 'ready', kind: 'arrivals', arrivals: [], fetchedAt: new Date().toISOString() });
+const renderExplorer = () => render(<TransitExplorer schoolId="pu" schoolName="靜宜大學" />);
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  localStorage.clear();
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+  vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
+  vi.stubGlobal('isSecureContext', true);
+  vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'arrivals' ? emptyArrivals() : stopResult());
+});
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+it('starts with school stops without requesting the user location', async () => {
+  const locate = vi.fn();
+  vi.stubGlobal('navigator', { onLine: true, geolocation: { getCurrentPosition: locate } });
+  renderExplorer();
+  await screen.findByText(/站牌代碼 TXG001/);
+  expect(queryTransit).toHaveBeenCalledWith({ action: 'campus', schoolId: 'pu' }, expect.any(AbortSignal));
+  expect(locate).not.toHaveBeenCalled();
+  expect(screen.getByText(/站牌代碼 TXG002/)).toBeTruthy();
+});
+
+it('keeps school and manual search available when location permission is denied', async () => {
+  const locate = vi.fn((_ok: PositionCallback, fail: PositionErrorCallback) => fail({ code: 1 } as GeolocationPositionError));
+  vi.stubGlobal('navigator', { onLine: true, geolocation: { getCurrentPosition: locate } });
+  renderExplorer();
+  fireEvent.click(screen.getByRole('button', { name: '找我附近' }));
+  fireEvent.click(screen.getByRole('button', { name: '使用我的位置' }));
+  expect(await screen.findByText(/你尚未允許定位/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '學校站牌' }));
+  await screen.findByText(/站牌代碼 TXG001/);
+  expect(screen.getByRole('button', { name: '搜尋站名' })).toBeTruthy();
+});
+
+it('ignores a late geolocation response after the user changes modes', async () => {
+  let locateSuccess!: PositionCallback;
+  vi.stubGlobal('navigator', { onLine: true, geolocation: { getCurrentPosition: (ok: PositionCallback) => { locateSuccess = ok; } } });
+  renderExplorer();
+  fireEvent.click(screen.getByRole('button', { name: '找我附近' }));
+  fireEvent.click(screen.getByRole('button', { name: '使用我的位置' }));
+  fireEvent.click(screen.getByRole('button', { name: '搜尋站名' }));
+  await act(async () => locateSuccess({ coords: { latitude: 24.22, longitude: 120.58, accuracy: 20 } } as GeolocationPosition));
+  expect(vi.mocked(queryTransit).mock.calls.some(([query]) => query.action === 'nearby')).toBe(false);
+  expect(screen.getByLabelText('站名或學校名稱')).toBeTruthy();
+});
+
+it('uses the selected city and radius when location succeeds', async () => {
+  vi.stubGlobal('navigator', { onLine: true, geolocation: { getCurrentPosition: (ok: PositionCallback) => ok({ coords: { latitude: 24.22, longitude: 120.58, accuracy: 20 } } as GeolocationPosition) } });
+  renderExplorer();
+  fireEvent.click(screen.getByRole('button', { name: '找我附近' }));
+  fireEvent.change(screen.getByLabelText('查詢縣市'), { target: { value: 'Taipei' } });
+  fireEvent.change(screen.getByLabelText('搜尋半徑'), { target: { value: '300' } });
+  fireEvent.click(screen.getByRole('button', { name: '使用我的位置' }));
+  await waitFor(() => expect(queryTransit).toHaveBeenCalledWith({ action: 'nearby', city: 'Taipei', lat: 24.22, lon: 120.58, radius: 300 }, expect.any(AbortSignal)));
+  fireEvent.click(screen.getByRole('button', { name: '學校站牌' }));
+  expect(screen.getByRole('link', { name: '官方公車網站 ↗' }).getAttribute('href')).toBe('https://citybus-free.taichung.gov.tw/');
+});
+
+it('does not send a station-name query for every keystroke', async () => {
+  renderExplorer();
+  fireEvent.click(screen.getByRole('button', { name: '搜尋站名' }));
+  fireEvent.change(screen.getByLabelText('站名或學校名稱'), { target: { value: '臺中車站' } });
+  expect(vi.mocked(queryTransit).mock.calls.some(([query]) => query.action === 'search')).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: '尋找站牌' }));
+  await waitFor(() => expect(queryTransit).toHaveBeenCalledWith({ action: 'search', city: 'Taichung', text: '臺中車站' }, expect.any(AbortSignal)));
+});
+
+it('abort and selection identity prevent an old station response from replacing the current one', async () => {
+  let finish!: (result: TransitResult) => void;
+  let firstSignal!: AbortSignal;
+  vi.mocked(queryTransit).mockImplementation(async (query, signal) => {
+    if (query.action !== 'arrivals') return stopResult();
+    if (query.stopId === 'TXG002') return emptyArrivals();
+    firstSignal = signal;
+    return new Promise((resolve) => { finish = resolve; });
+  });
+  renderExplorer();
+  await waitFor(() => expect(queryTransit).toHaveBeenCalledWith(
+    { action: 'arrivals', city: 'Taichung', stopId: 'TXG001' }, expect.any(AbortSignal),
+  ));
+  fireEvent.click(await screen.findByRole('button', { name: /站牌代碼 TXG002/ }));
+  await screen.findByText(/目前沒有班次預估/);
+  expect(firstSignal.aborted).toBe(true);
+  await act(async () => finish({ status: 'ready', kind: 'arrivals', fetchedAt: new Date().toISOString(), arrivals: [{ id: 'old', route: '舊站路線', direction: 0, destination: '', status: 0, seconds: 480, updatedAt: new Date().toISOString() }] }));
+  expect(screen.queryByText('舊站路線')).toBeNull();
+});
+
+it('saves public stops, never the location-derived distance, and supports removing a favorite', async () => {
+  renderExplorer();
+  fireEvent.click(await screen.findByRole('button', { name: '收藏 靜宜大學 TXG001' }));
+  const saved = JSON.parse(localStorage.getItem('campus-one:transit-stops:v1') || '[]');
+  expect(saved).toHaveLength(1);
+  expect(saved[0].distance).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '常用站牌 1' }));
+  expect(screen.getByRole('button', { name: '取消收藏 靜宜大學 TXG001' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '取消收藏 靜宜大學 TXG001' }));
+  expect(screen.getByText(/在站牌旁按「收藏」/)).toBeTruthy();
+});
+
+it('shows a missing integration honestly with retry and official fallback', async () => {
+  vi.mocked(queryTransit).mockResolvedValue({ status: 'unavailable', reason: 'not-configured' });
+  renderExplorer();
+  expect(await screen.findByText(/附近站牌服務尚未啟用/)).toBeTruthy();
+  expect(screen.getByRole('button', { name: '重新查詢' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '官方公車網站 ↗' })).toBeTruthy();
+  expect(screen.queryByText(/約 8 分鐘/)).toBeNull();
+});
+
+it('expires countdowns while hidden without continuing to poll the provider', async () => {
+  vi.useFakeTimers();
+  vi.mocked(queryTransit).mockImplementation(async (query) => query.action !== 'arrivals' ? stopResult() : {
+    status: 'ready', kind: 'arrivals', fetchedAt: new Date().toISOString(),
+    arrivals: [{ id: 'a', route: '300', direction: 0, destination: '', status: 0, seconds: 480, updatedAt: new Date().toISOString() }],
+  });
+  await act(async () => { renderExplorer(); });
+  expect(screen.getByText('約 8 分鐘')).toBeTruthy();
+  const calls = vi.mocked(queryTransit).mock.calls.length;
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+  await act(async () => {
+    document.dispatchEvent(new Event('visibilitychange'));
+    vi.advanceTimersByTime(90_000);
+  });
+  expect(screen.queryByText('約 8 分鐘')).toBeNull();
+  expect(screen.getByText('資料待更新')).toBeTruthy();
+  expect(vi.mocked(queryTransit).mock.calls.length).toBe(calls);
+});
