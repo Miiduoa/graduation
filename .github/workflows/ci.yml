@@ -196,6 +196,9 @@ jobs:
       - name: Test web server lifecycle
         run: node --test deploy/web/start.test.cjs
 
+      - name: Test shared ordering contracts
+        run: pnpm --filter @campus/shared test:food
+
       - name: Run web tests
         # vitest 4 不接受 --ci flag（vitest run 已預設 CI-friendly）；
         # --coverage 需要 @vitest/coverage-v8（已在 devDeps）。

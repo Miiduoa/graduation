@@ -14,6 +14,7 @@ import {
 import { useNuniSession } from '../../state/nuniSession';
 import { useNuniDraftState } from '../../state/nuniDrafts';
 import { useTheme } from '../../state/theme';
+import { NuniMerchantOrders } from './NuniMerchantOrders';
 
 type MenuItem = {
   name: string;
@@ -145,6 +146,7 @@ export function NuniMerchantWorkspace({
 }) {
   const theme = useTheme();
   const { request, refresh, session } = useNuniSession();
+  const [showOrders, setShowOrders] = useState(false);
   const operations = useMemo(
     () => createMerchantOperations((path, input, method) => request(path, context, input, method)),
     [request, context],
@@ -385,6 +387,18 @@ export function NuniMerchantWorkspace({
     </View>
   );
   const section = { borderTopWidth: 1, borderColor: theme.colors.border, paddingTop: 20, gap: 12 };
+  if (showOrders)
+    return (
+      <NuniMerchantOrders
+        tenantId={tenantId}
+        locationId={locationId}
+        context={context}
+        onBack={() => {
+          setShowOrders(false);
+          void load();
+        }}
+      />
+    );
   return (
     <ScrollView
       keyboardShouldPersistTaps="handled"
@@ -409,6 +423,11 @@ export function NuniMerchantWorkspace({
             {workspace.tenantName} · {workspace.campusName}
           </Copy>
           <Copy>{merchantWorkspaceStateLabel(workspace)}</Copy>
+          {workspace.activated ? (
+            <Action disabled={unavailable} onPress={() => setShowOrders(true)}>
+              處理訂單與收銀
+            </Action>
+          ) : null}
           <Copy>{`營運設定：${workspace.managerConfirmed ? '已確認' : '待確認'}\n有庫存的上架品項：${workspace.publishedMenuItems} 項`}</Copy>
           {reconcile ? <Copy alert>畫面尚未核對這次操作後的狀態，請先重新載入。</Copy> : null}
           {!workspace.activated && setting ? (

@@ -220,8 +220,17 @@ export async function fetchJson(url: string, init: RequestInit): Promise<unknown
       signal: AbortSignal.timeout(8000),
     });
     if (!response.ok) {
-      void response.body?.cancel().catch(() => {});
-      throw new NuniError(response.status >= 500 ? 503 : response.status, 'REQUEST_FAILED');
+      let code = 'REQUEST_FAILED';
+      try {
+        const body = nuniRecord(await boundedJson(response, 8192));
+        const failure =
+          typeof body.error === 'object' && body.error ? nuniRecord(body.error) : body;
+        if (typeof failure.code === 'string' && /^[A-Z0-9_]{1,100}$/.test(failure.code))
+          code = failure.code;
+      } catch {
+        void response.body?.cancel().catch(() => {});
+      }
+      throw new NuniError(response.status >= 500 ? 503 : response.status, code);
     }
     return await boundedJson(response);
   } catch (error) {

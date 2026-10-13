@@ -161,6 +161,14 @@ export const CAMPUS_SERVICES = [
     category: 'campus',
   },
   {
+    name: '點餐與取餐',
+    text: '選餐點、查訂單、出示取餐憑證',
+    href: '/food',
+    access: 'platform',
+    keywords: '點餐 訂單 取餐 外帶 food order pickup',
+    category: 'campus',
+  },
+  {
     name: '店家合作',
     text: '申請進駐，查看審核進度與授權門市',
     href: '/merchant',

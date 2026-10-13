@@ -103,6 +103,32 @@ it('does not expose offline cached identity and allows a verified retry', async 
   await controller.refresh();
   expect(controller.state.session).toMatchObject({ platformAccountId: account });
 });
+
+it('binds paginated food reads to the captured account and aborts them on logout', async () => {
+  const { controller, request } = setup(stored());
+  await controller.refresh();
+  const context = controller.state.session!.context;
+  const page = deferred<unknown>();
+  request.mockImplementationOnce(() => page.promise);
+  const read = controller.request('realms/school-one/food/orders', context, undefined, undefined, {
+    cursor: 'next-page',
+    limit: '25',
+  });
+  const rejection = expect(read).rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+  const signal = request.mock.calls.at(-1)![3]!;
+  expect(request).toHaveBeenLastCalledWith(
+    'realms/school-one/food/orders',
+    handle,
+    undefined,
+    signal,
+    undefined,
+    { cursor: 'next-page', limit: '25' },
+  );
+  await controller.logout();
+  expect(signal.aborted).toBe(true);
+  page.resolve({ orders: [] });
+  await rejection;
+});
 it('removes expired secure storage without calling authenticated endpoints', async () => {
   const { controller, storage, request } = setup(stored(false, 999));
   await controller.refresh();

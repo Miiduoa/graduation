@@ -12,6 +12,8 @@ import { browserRequest } from '@/features/nuni/Session';
 import { Button } from '@/components/ui/Button';
 import { Input, Select, Textarea } from '@/components/ui/Input';
 import styles from './MerchantWorkspace.module.css';
+import { MerchantOrderDesk } from './MerchantOrderDesk';
+import type { FoodDraftCache } from '@/features/food/foodState';
 
 type Detail = NuniMerchantWorkspaceDetail;
 type SettingDraft = Omit<NuniMerchantSettingsInput, 'termsVersion' | 'expectedVersion'> & {
@@ -69,6 +71,7 @@ export function MerchantOperations({
   locationId,
   suspended,
   drafts,
+  foodDrafts,
   onBack,
   onExpired,
   onChanged,
@@ -78,6 +81,7 @@ export function MerchantOperations({
   locationId: string;
   suspended: boolean;
   drafts: MerchantOperationDrafts;
+  foodDrafts?: FoodDraftCache;
   onBack(): void;
   onExpired(): void;
   onChanged(detail: Detail): void;
@@ -104,6 +108,8 @@ export function MerchantOperations({
   const [menuReceipt, setMenuReceipt] = useState<number | null>(saved?.menuReceipt ?? null);
   const [menuBlocked, setMenuBlocked] = useState(saved?.menuBlocked ?? false);
   const [activationConfirmed, setActivationConfirmed] = useState(false);
+  const [showOrders, setShowOrders] = useState(false);
+  const [localFoodDrafts] = useState<FoodDraftCache>(() => new Map());
   const active = useRef(false);
   const lock = useRef(false);
   const run = useRef(0);
@@ -649,6 +655,24 @@ export function MerchantOperations({
               <p>門市的營運狀態需要由場域管理者確認，這裡無法自行恢復接單。</p>
             )}
           </section>
+          {operational && (
+            <section className={styles.panel}>
+              <h3>門市工作台</h3>
+              <p>開班、確認收款、準備餐點與核對取餐憑證。</p>
+              <Button disabled={locked} onClick={() => setShowOrders((value) => !value)}>
+                {showOrders ? '收起訂單工作台' : '處理訂單與收銀'}
+              </Button>
+              {showOrders && !locked && (
+                <MerchantOrderDesk
+                  key={`${context}:${tenantId}:${locationId}`}
+                  context={context}
+                  tenantId={tenantId}
+                  locationId={locationId}
+                  cache={foodDrafts ?? localFoodDrafts}
+                />
+              )}
+            </section>
+          )}
         </>
       )}
     </div>

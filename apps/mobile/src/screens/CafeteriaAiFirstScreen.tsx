@@ -25,6 +25,7 @@ import {
   formatShortOrderCode,
 } from '@campus/shared/src/ordering/pickupNumber';
 import { MY_ORDER_STATUS_LABELS as statuses } from './MyOrdersScreen';
+import { safeNavigate } from '../utils/safeNavigate';
 
 type Props = {
   navigation?: { goBack?: () => void; navigate?: (route: string) => void };
@@ -122,9 +123,7 @@ function DiningContent({
       }
     } catch (reason) {
       if (isCurrent()) {
-        setError(
-          reason instanceof DiningError ? reason.message : ORDER_NOT_SENT_TEXT,
-        );
+        setError(reason instanceof DiningError ? reason.message : ORDER_NOT_SENT_TEXT);
         if (reason instanceof DiningError && reason.kind === 'not-sent') {
           setPending(null);
           setSelected(null);
@@ -178,6 +177,15 @@ function DiningContent({
       subtitle="看看餐點，確認店家是否開放接單。"
       onBack={() => navigation?.goBack?.()}
     >
+      <AICard title="平台點餐與取餐">
+        <Text style={{ color: aiTokens.textSecondary, lineHeight: 24 }}>
+          使用 Google 帳號選餐、查看訂單與出示取餐憑證。學校原有餐廳服務仍保留在下方。
+        </Text>
+        <AIButton
+          label="前往平台點餐"
+          onPress={() => safeNavigate(navigation, 'NuniWorkspace', { tab: 'food' })}
+        />
+      </AICard>
       {!scope.userId ? (
         <AICard title="登入後查看菜單">
           <Text style={{ color: aiTokens.muted }}>請先登入學校帳號，再查看餐廳與訂單。</Text>
@@ -235,10 +243,21 @@ function DiningContent({
             </AICard>
           ) : null}
           {pending ? (
-            <AICard title={busy ? '訂單送出中' : error === ORDER_CHECKING_TEXT ? '還在確認訂單' : '訂單沒送出去'}>
+            <AICard
+              title={
+                busy
+                  ? '訂單送出中'
+                  : error === ORDER_CHECKING_TEXT
+                    ? '還在確認訂單'
+                    : '訂單沒送出去'
+              }
+            >
               <View style={{ gap: 12 }}>
                 {busy ? null : (
-                  <Text accessibilityRole="alert" style={{ color: aiTokens.text, fontWeight: '700' }}>
+                  <Text
+                    accessibilityRole="alert"
+                    style={{ color: aiTokens.text, fontWeight: '700' }}
+                  >
                     {error || ORDER_NOT_SENT_TEXT}
                   </Text>
                 )}

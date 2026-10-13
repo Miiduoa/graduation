@@ -2,7 +2,7 @@
 // fresh schema in the named loopback acceptance database; it never uses ambient DATABASE_URL.
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, unlink } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -53,7 +53,7 @@ const report = {
   identityProvider: 'Isolated RS256 test keys; real nonce, signature, account and session handlers',
   transport: 'loopback HTTP',
   database: 'PostgreSQL',
-  audit: 'pause-last-public-location-existing-customer-orders',
+  audit: 'shared-client-student-merchant-pickup-and-refund',
   checks: [],
   observations: [],
 };
@@ -62,6 +62,8 @@ let db;
 let schemaCreated = false;
 let origin;
 let requestCount = 0;
+const fixtureFile = path.join(repository, '../.food-browser-fixture.json');
+let fixtureCreated = false;
 async function request(method, route, session, payload, expected = 200) {
   ++requestCount;
   const response = await fetch(`${origin}${route}`, {
@@ -333,126 +335,349 @@ try {
   assert.equal(detail.activated, true);
   assert.equal(detail.locationStatus, 'open');
   assert.equal(detail.publicAccess, true);
-  // Every test mutation below targets this owned random schema, never production.
-  const customer = outsider;
-  const foodBase = `${base}/realms/${tenant}/food`;
-  assert.equal(Number((await db.query('SELECT count(*) AS count FROM social_communities WHERE tenant_id=$1', [tenant])).rows[0].count), 0);
-  assert.equal(Number((await db.query('SELECT count(*) AS count FROM food_locations WHERE tenant_id=$1', [tenant])).rows[0].count), 1);
-  const customerMenu = await request('GET', `${foodBase}/locations/${location}/menu`, customer);
-  const menuItem = customerMenu.sections.flatMap(section => section.items)[0];
-  assert(menuItem?.available);
-  async function placeCustomerOrder(suffix) {
-    const quote = await request('POST', `${foodBase}/quotes`, customer, {
-      locationId: location,
-      requestedPickupAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
-      items: [{ menuItemId: menuItem.id, quantity: 1 }],
-      idempotencyKey: `pause-audit-quote-${suffix}`,
-    }, 201);
-    assert.equal(quote.total.amountMinor, 120);
-    const order = await request('POST', `${foodBase}/orders`, customer, {
-      quoteId: quote.id, idempotencyKey: `pause-audit-order-${suffix}`,
-    }, 201);
-    assert.equal(order.state, 'payment-pending');
-    return order;
-  }
-  const readyOrder = await placeCustomerOrder('ready-one');
-  const cancelOrder = await placeCustomerOrder('cancel-two');
-  await request('POST', `${route}/shift`, merchant, { openingCashMinor: 0, idempotencyKey: 'pause-audit-open-shift-0001' }, 201);
-  await request('POST', `${route}/orders/${readyOrder.orderId}/counter-payment`, merchant, { idempotencyKey: 'pause-audit-counter-0001' });
-  const accepted = await request('POST', `${route}/orders/${readyOrder.orderId}/accept`, merchant, { idempotencyKey: 'pause-audit-accept-0001' });
-  await request('POST', `${route}/kitchen-tickets/${accepted.kitchenTicketId}/start`, merchant, { idempotencyKey: 'pause-audit-start-0001' });
-  await request('POST', `${route}/kitchen-tickets/${accepted.kitchenTicketId}/ready`, merchant, { idempotencyKey: 'pause-audit-ready-0001' });
-  const beforeReady = await request('GET', `${foodBase}/orders/${readyOrder.orderId}`, customer);
-  assert.equal(beforeReady.state, 'ready');
-  assert(beforeReady.pickup.credential?.token);
-  const beforeCancel = await request('GET', `${foodBase}/orders/${cancelOrder.orderId}`, customer);
-  assert.equal(beforeCancel.state, 'payment-pending');
-  passed('Before pause, two real HTTP-created customer orders are readable; first is paid/accepted/prepared/ready with a one-time pickup token, second awaits payment');
-  report.orderBeforePause = { readyOrder: beforeReady.state, readyTokenAvailable: true, cancelOrder: beforeCancel.state, onlyLocation: true, publicCommunityCount: 0 };
-  detail = await ops.setAvailability(tenant, location, false);
-  assert.equal(detail.locationStatus, 'closed');
-  assert.equal(detail.publicAccess, false);
-  const pausedList = await request('GET', `${foodBase}/orders`, customer);
-  assert(pausedList.orders.some(order => order.id === readyOrder.orderId));
-  const pausedReady = await request('GET', `${foodBase}/orders/${readyOrder.orderId}`, customer);
-  assert.equal(pausedReady.state, 'ready');
-  assert(pausedReady.pickup.credential?.token);
-  const pausedPending = await request('GET', `${foodBase}/orders/${cancelOrder.orderId}`, customer);
-  assert.equal(pausedPending.state, 'payment-pending');
-  await request('GET', `${foodBase}/orders/${readyOrder.orderId}`, merchant, undefined, 404);
-  await request('POST', `${foodBase}/orders/${cancelOrder.orderId}/cancel`, merchant, {
-    reason: 'changed-mind', idempotencyKey: 'pause-audit-foreign-cancel-0001',
-  }, 404);
-  await request('GET', `${foodBase}/locations/${location}/menu`, customer, undefined, 404);
-  await request('POST', `${foodBase}/quotes`, customer, {
-    locationId: location, requestedPickupAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
-    items: [{ menuItemId: menuItem.id, quantity: 1 }], idempotencyKey: 'pause-audit-new-quote-denied',
-  }, 404);
-  const pausedQueue = await request('GET', `${route}/orders`, merchant);
-  assert(pausedQueue.orders.some(order => order.id === readyOrder.orderId && order.state === 'ready'));
-  const canceled = await request('POST', `${foodBase}/orders/${cancelOrder.orderId}/cancel`, customer, {
-    reason: 'changed-mind', idempotencyKey: 'pause-audit-cancel-0001',
-  });
-  assert.equal(canceled.state, 'canceled');
-  const fulfilled = await request('POST', `${route}/orders/${readyOrder.orderId}/fulfill`, merchant, {
-    pickupToken: pausedReady.pickup.credential.token, idempotencyKey: 'pause-audit-fulfill-0001',
-  });
-  assert.equal(fulfilled.state, 'fulfilled');
-  const fulfillmentReplay = await request('POST', `${route}/orders/${readyOrder.orderId}/fulfill`, merchant, {
-    pickupToken: pausedReady.pickup.credential.token, idempotencyKey: 'pause-audit-fulfill-0001',
-  });
-  assert.equal(fulfillmentReplay.replayed, true);
-  await request('POST', `${route}/orders/${readyOrder.orderId}/fulfill`, merchant, {
-    pickupToken: pausedReady.pickup.credential.token, idempotencyKey: 'pause-audit-consumed-token',
-  }, 409);
-  const finalOrder = await request('GET', `${foodBase}/orders/${readyOrder.orderId}`, customer);
-  assert.equal(finalOrder.state, 'fulfilled');
-  assert.equal(finalOrder.pickup.credential, undefined);
-  const storedOrders = await db.query('SELECT id,state FROM food_orders WHERE tenant_id=$1 ORDER BY id', [tenant]);
-  assert.deepEqual(storedOrders.rows.map(row => row.state).sort(), ['cancelled', 'fulfilled']);
-  report.paused = {
-    customerListStatus: 200, readyTokenAvailable: true, cancellationState: canceled.state,
-    fulfillmentState: fulfilled.state, merchantQueueStatus: 200,
-    foreignOrderDenied: true, publicMenuAndNewQuoteDenied: true,
-    fulfillmentReplayed: true, consumedTokenDenied: true,
-    databaseOrderStates: storedOrders.rows.map(row => row.state).sort(),
-  };
-  passed('Pausing the last public location preserves only the existing customer order list/detail/cancel and pickup credential; merchant fulfillment still works and foreign orders/new quotes remain denied');
-  const replay = await ops.activate(tenant, location);
-  assert.equal(replay.locationStatus, 'closed');
-  detail = await ops.setAvailability(tenant, location, true);
-  assert.equal(detail.locationStatus, 'open');
-  passed(
-    'Shared client validates actual API activation and pause/resume receipts; replaying activation does not reopen a paused store',
-  );
-  const replayCanceled = await request('POST', `${foodBase}/orders/${cancelOrder.orderId}/cancel`, customer, {
-    reason: 'changed-mind', idempotencyKey: 'pause-audit-cancel-0001',
-  });
-  assert.equal(replayCanceled.state, 'canceled');
-  assert.equal(replayCanceled.replayed, true);
-  report.resumed = { cancellationReplayed: true };
-  passed('Restoring order acceptance keeps existing order receipts and the original cancellation idempotency key');
+  if (args.includes('--serve')) {
+    // Own-schema credentials are ephemeral and never printed or added to the report.
+    await writeFile(
+      fixtureFile,
+      JSON.stringify({
+        apiOrigin: origin,
+        tenantId: tenant,
+        locationId: location,
+        merchant,
+        customer: outsider,
+      }),
+      { mode: 0o600, flag: 'wx' },
+    );
+    fixtureCreated = true;
+    process.stdout.write(
+      `Isolated food browser fixture ready at ${origin}; waiting for SIGINT/SIGTERM.\n`,
+    );
+    await new Promise((resolve) => {
+      process.once('SIGINT', resolve);
+      process.once('SIGTERM', resolve);
+    });
+    report.status = 'browser-fixture-stopped';
+  } else {
+    // Every test mutation below targets this owned random schema, never production.
+    const customer = outsider;
+    const foodBase = `${base}/realms/${tenant}/food`;
+    assert.equal(
+      Number(
+        (
+          await db.query('SELECT count(*) AS count FROM social_communities WHERE tenant_id=$1', [
+            tenant,
+          ])
+        ).rows[0].count,
+      ),
+      0,
+    );
+    assert.equal(
+      Number(
+        (
+          await db.query('SELECT count(*) AS count FROM food_locations WHERE tenant_id=$1', [
+            tenant,
+          ])
+        ).rows[0].count,
+      ),
+      1,
+    );
+    const { createNuniFoodClient } = await import(
+      pathToFileURL(path.join(repository, 'packages/shared/src/nuniFood.ts')).href
+    );
+    const foodTransport = (actor) => async (resource, input, query) => {
+      const search = new URLSearchParams(query).toString();
+      const created = input && (/\/(quotes|orders)$/.test(resource) || resource.endsWith('/shift'));
+      report.lastResource = resource;
+      const value = await request(
+        input ? 'POST' : 'GET',
+        `${base}/${resource}${search ? `?${search}` : ''}`,
+        actor,
+        input,
+        created ? 201 : 200,
+      );
+      return value;
+    };
+    const customerFood = createNuniFoodClient(foodTransport(customer));
+    const merchantFood = createNuniFoodClient(foodTransport(merchant));
+    assert((await customerFood.listRealms()).some((realm) => realm.tenantId === tenant));
+    assert((await customerFood.listLocations(tenant)).locations.some((row) => row.id === location));
+    assert.deepEqual(await customerFood.listOrderRealms(), []);
+    const paymentMethods = await customerFood.getPaymentMethods(tenant, location);
+    assert(paymentMethods.methods.every((method) => method.available === false));
+    const customerMenu = await customerFood.getMenu(tenant, location);
+    const menuItem = customerMenu.sections.flatMap((section) => section.items)[0];
+    assert(menuItem?.available);
+    async function placeCustomerOrder(suffix) {
+      const quote = await customerFood.createQuote(tenant, {
+        locationId: location,
+        requestedPickupAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+        items: [{ menuItemId: menuItem.id, quantity: 1 }],
+        idempotencyKey: `pause-audit-quote-${suffix}`,
+      });
+      assert.equal(quote.total.amountMinor, 120);
+      const order = await customerFood.createOrder(tenant, {
+        quoteId: quote.id,
+        idempotencyKey: `pause-audit-order-${suffix}`,
+      });
+      assert.equal(order.state, 'payment-pending');
+      return order;
+    }
+    const readyOrder = await placeCustomerOrder('ready-one');
+    const cancelOrder = await placeCustomerOrder('cancel-two');
+    await merchantFood.openShift(tenant, location, {
+      openingCashMinor: 0,
+      idempotencyKey: 'pause-audit-open-shift-0001',
+    });
+    assert.equal((await merchantFood.getShift(tenant, location)).state, 'open');
+    await merchantFood.recordCounterPayment(tenant, location, readyOrder.orderId, {
+      idempotencyKey: 'pause-audit-counter-0001',
+    });
+    const accepted = await merchantFood.acceptOrder(tenant, location, readyOrder.orderId, {
+      idempotencyKey: 'pause-audit-accept-0001',
+    });
+    await merchantFood.startTicket(tenant, location, readyOrder.orderId, accepted.kitchenTicketId, {
+      idempotencyKey: 'pause-audit-start-0001',
+    });
+    await merchantFood.readyTicket(tenant, location, readyOrder.orderId, accepted.kitchenTicketId, {
+      idempotencyKey: 'pause-audit-ready-0001',
+    });
+    const beforeReady = await customerFood.getOrder(tenant, readyOrder.orderId);
+    assert.equal(beforeReady.state, 'ready');
+    assert(beforeReady.pickup.credential?.token);
+    const beforeCancel = await customerFood.getOrder(tenant, cancelOrder.orderId);
+    assert.equal(beforeCancel.state, 'payment-pending');
+    passed(
+      'Before pause, two real HTTP-created customer orders are readable; first is paid/accepted/prepared/ready with a one-time pickup token, second awaits payment',
+    );
+    report.orderBeforePause = {
+      readyOrder: beforeReady.state,
+      readyTokenAvailable: true,
+      cancelOrder: beforeCancel.state,
+      onlyLocation: true,
+      publicCommunityCount: 0,
+    };
+    detail = await ops.setAvailability(tenant, location, false);
+    assert.equal(detail.locationStatus, 'closed');
+    assert.equal(detail.publicAccess, false);
+    assert((await customerFood.listOrderRealms()).some((realm) => realm.tenantId === tenant));
+    assert.deepEqual(await merchantFood.listOrderRealms(), []);
+    const pausedList = await customerFood.listOrders(tenant);
+    const firstPage = await customerFood.listOrders(tenant, { limit: 1 });
+    assert(firstPage.nextCursor);
+    const nextPage = await customerFood.listOrders(tenant, {
+      limit: 1,
+      cursor: firstPage.nextCursor,
+    });
+    assert.notEqual(firstPage.orders[0].id, nextPage.orders[0].id);
+    assert(pausedList.orders.some((order) => order.id === readyOrder.orderId));
+    const pausedReady = await customerFood.getOrder(tenant, readyOrder.orderId);
+    assert.equal(pausedReady.state, 'ready');
+    assert(pausedReady.pickup.credential?.token);
+    const pausedPending = await customerFood.getOrder(tenant, cancelOrder.orderId);
+    assert.equal(pausedPending.state, 'payment-pending');
+    await request('GET', `${foodBase}/orders/${readyOrder.orderId}`, merchant, undefined, 404);
+    await request(
+      'POST',
+      `${foodBase}/orders/${cancelOrder.orderId}/cancel`,
+      merchant,
+      {
+        reason: 'changed-mind',
+        idempotencyKey: 'pause-audit-foreign-cancel-0001',
+      },
+      404,
+    );
+    await request('GET', `${foodBase}/locations/${location}/menu`, customer, undefined, 404);
+    await request(
+      'POST',
+      `${foodBase}/quotes`,
+      customer,
+      {
+        locationId: location,
+        requestedPickupAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+        items: [{ menuItemId: menuItem.id, quantity: 1 }],
+        idempotencyKey: 'pause-audit-new-quote-denied',
+      },
+      404,
+    );
+    const pausedQueue = await merchantFood.listMerchantOrders(tenant, location);
+    assert(
+      pausedQueue.orders.some(
+        (order) => order.id === readyOrder.orderId && order.state === 'ready',
+      ),
+    );
+    const canceled = await customerFood.cancelOrder(tenant, cancelOrder.orderId, {
+      reason: 'changed-mind',
+      idempotencyKey: 'pause-audit-cancel-0001',
+    });
+    assert.equal(canceled.state, 'canceled');
+    const fulfilled = await merchantFood.fulfillOrder(tenant, location, readyOrder.orderId, {
+      pickupToken: pausedReady.pickup.credential.token,
+      idempotencyKey: 'pause-audit-fulfill-0001',
+    });
+    assert.equal(fulfilled.state, 'fulfilled');
+    const fulfillmentReplay = await merchantFood.fulfillOrder(
+      tenant,
+      location,
+      readyOrder.orderId,
+      {
+        pickupToken: pausedReady.pickup.credential.token,
+        idempotencyKey: 'pause-audit-fulfill-0001',
+      },
+    );
+    assert.equal(fulfillmentReplay.replayed, true);
+    await request(
+      'POST',
+      `${route}/orders/${readyOrder.orderId}/fulfill`,
+      merchant,
+      {
+        pickupToken: pausedReady.pickup.credential.token,
+        idempotencyKey: 'pause-audit-consumed-token',
+      },
+      409,
+    );
+    const finalOrder = await customerFood.getOrder(tenant, readyOrder.orderId);
+    assert.equal(finalOrder.state, 'fulfilled');
+    assert.equal(finalOrder.pickup.credential, undefined);
+    const storedOrders = await db.query(
+      'SELECT id,state FROM food_orders WHERE tenant_id=$1 ORDER BY id',
+      [tenant],
+    );
+    assert.deepEqual(storedOrders.rows.map((row) => row.state).sort(), ['cancelled', 'fulfilled']);
+    report.paused = {
+      customerListStatus: 200,
+      readyTokenAvailable: true,
+      cancellationState: canceled.state,
+      fulfillmentState: fulfilled.state,
+      merchantQueueStatus: 200,
+      foreignOrderDenied: true,
+      publicMenuAndNewQuoteDenied: true,
+      fulfillmentReplayed: true,
+      consumedTokenDenied: true,
+      databaseOrderStates: storedOrders.rows.map((row) => row.state).sort(),
+    };
+    passed(
+      'Pausing the last public location preserves only the existing customer order list/detail/cancel and pickup credential; merchant fulfillment still works and foreign orders/new quotes remain denied',
+    );
+    const replay = await ops.activate(tenant, location);
+    assert.equal(replay.locationStatus, 'closed');
+    detail = await ops.setAvailability(tenant, location, true);
+    assert.equal(detail.locationStatus, 'open');
+    passed(
+      'Shared client validates actual API activation and pause/resume receipts; replaying activation does not reopen a paused store',
+    );
+    const replayCanceled = await customerFood.cancelOrder(tenant, cancelOrder.orderId, {
+      reason: 'changed-mind',
+      idempotencyKey: 'pause-audit-cancel-0001',
+    });
+    assert.equal(replayCanceled.state, 'canceled');
+    assert.equal(replayCanceled.replayed, true);
+    report.resumed = { cancellationReplayed: true };
+    passed(
+      'Restoring order acceptance keeps existing order receipts and the original cancellation idempotency key',
+    );
 
-  await db.query(
-    `UPDATE food_locations SET status='suspended',public_access=false WHERE tenant_id=$1 AND id=$2`,
-    [tenant, location],
-  );
-  await request('POST', `${route}/availability`, merchant, { acceptingOrders: true }, 409);
-  await db.query(`DELETE FROM food_staff_assignments WHERE tenant_id=$1 AND location_id=$2`, [
-    tenant,
-    location,
-  ]);
-  await request('GET', route, merchant, undefined, 404);
-  await request('POST', `${route}/activate`, merchant, {}, 404);
-  await request('POST', `${base}/logout`, merchant, {});
-  await request('GET', route, merchant, undefined, 401);
-  passed(
-    'School suspension, revoked manager assignment and revoked session block further operations',
-  );
-  report.observations.push(
-    'Approval uses a schema-local reviewer fixture with the real service; no real school login, merchant, payment or production data is exercised.',
-  );
-  report.status = 'passed';
+    const refundOrder = await placeCustomerOrder('refund-three');
+    await merchantFood.recordCounterPayment(tenant, location, refundOrder.orderId, {
+      idempotencyKey: 'flow-paid-refund-three',
+    });
+    const pendingRefund = await customerFood.cancelOrder(tenant, refundOrder.orderId, {
+      reason: 'changed-mind',
+      idempotencyKey: 'flow-cancel-refund-three',
+    });
+    assert.equal(pendingRefund.state, 'cancellation-pending-refund');
+    const refundQueue = await merchantFood.listMerchantOrders(tenant, location);
+    assert(
+      refundQueue.orders
+        .find((order) => order.id === refundOrder.orderId)
+        .allowedActions.includes('confirm-counter-refund'),
+    );
+    const refunded = await merchantFood.confirmCounterRefund(
+      tenant,
+      location,
+      refundOrder.orderId,
+      { idempotencyKey: 'flow-refund-three' },
+    );
+    assert.equal(refunded.state, 'canceled');
+    assert.equal(
+      (await customerFood.getOrder(tenant, refundOrder.orderId)).refund.state,
+      'completed',
+    );
+    const rejectedOrder = await placeCustomerOrder('reject-four');
+    await merchantFood.recordCounterPayment(tenant, location, rejectedOrder.orderId, {
+      idempotencyKey: 'flow-paid-reject-four',
+    });
+    assert.equal(
+      (
+        await merchantFood.rejectOrder(tenant, location, rejectedOrder.orderId, {
+          reason: 'item-unavailable',
+          idempotencyKey: 'flow-reject-four',
+        })
+      ).state,
+      'rejection-pending-refund',
+    );
+    assert.equal(
+      (
+        await merchantFood.confirmCounterRefund(tenant, location, rejectedOrder.orderId, {
+          idempotencyKey: 'flow-refund-four',
+        })
+      ).state,
+      'rejected',
+    );
+    const canceledAccepted = await placeCustomerOrder('accepted-five');
+    await merchantFood.recordCounterPayment(tenant, location, canceledAccepted.orderId, {
+      idempotencyKey: 'flow-paid-accepted-five',
+    });
+    await merchantFood.acceptOrder(tenant, location, canceledAccepted.orderId, {
+      idempotencyKey: 'flow-accept-five',
+    });
+    assert.equal(
+      (
+        await merchantFood.cancelAcceptedOrder(tenant, location, canceledAccepted.orderId, {
+          reason: 'item-unavailable',
+          idempotencyKey: 'flow-cancel-five',
+        })
+      ).state,
+      'cancellation-pending-refund',
+    );
+    await merchantFood.confirmCounterRefund(tenant, location, canceledAccepted.orderId, {
+      idempotencyKey: 'flow-refund-five',
+    });
+    assert.equal(
+      (await customerFood.getOrder(tenant, canceledAccepted.orderId)).refund.state,
+      'completed',
+    );
+    const handover = await merchantFood.handoverShift(tenant, location, {
+      countedCashMinor: 120,
+      openNext: false,
+      idempotencyKey: 'flow-handover-final',
+    });
+    assert.equal(handover.closed.state, 'closed');
+    assert.equal(handover.closed.expectedCash.amountMinor, 120);
+    passed(
+      'Shared client validates real API quote/menu/list/pagination/shift/fulfillment; paid customer cancellation, merchant rejection and accepted-order cancellation each require and complete a counter refund, then cash handover reconciles NT$120',
+    );
+
+    await db.query(
+      `UPDATE food_locations SET status='suspended',public_access=false WHERE tenant_id=$1 AND id=$2`,
+      [tenant, location],
+    );
+    await request('POST', `${route}/availability`, merchant, { acceptingOrders: true }, 409);
+    await db.query(`DELETE FROM food_staff_assignments WHERE tenant_id=$1 AND location_id=$2`, [
+      tenant,
+      location,
+    ]);
+    await request('GET', route, merchant, undefined, 404);
+    await request('POST', `${route}/activate`, merchant, {}, 404);
+    await request('POST', `${base}/logout`, merchant, {});
+    await request('GET', route, merchant, undefined, 401);
+    passed(
+      'School suspension, revoked manager assignment and revoked session block further operations',
+    );
+    report.observations.push(
+      'Approval uses a schema-local reviewer fixture with the real service; no real school login, merchant, payment or production data is exercised.',
+    );
+    report.status = 'passed';
+  }
 } catch (error) {
   report.status = 'failed';
   report.failure = error instanceof Error ? error.message : String(error);
@@ -461,6 +686,9 @@ try {
   report.schemaRemoved = false;
   report.cleanupErrors = [];
   for (const cleanup of [
+    async () => {
+      if (fixtureCreated) await unlink(fixtureFile);
+    },
     () => app?.close(),
     () => db?.close(),
     async () => {

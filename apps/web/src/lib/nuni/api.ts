@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { handleFood, isFoodResource } from './food';
 import {
   createNuniClasses,
   NuniError,
@@ -97,8 +98,10 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
       )
     )
       throw new NuniError(405, 'METHOD_NOT_ALLOWED');
-    if (request.nextUrl.search) throw new NuniError(400, 'INVALID_INPUT');
+    if (request.nextUrl.search && !isFoodResource(segments))
+      throw new NuniError(400, 'INVALID_INPUT');
     if (method !== 'GET') requireSameOrigin(request);
+    if (isFoodResource(segments)) return await handleFood(request, segments);
     if (method === 'GET' && path === 'sign-in-options') {
       publicOrigin();
       const googleReady =
