@@ -1,114 +1,52 @@
-import React, { useRef } from 'react';
+import React, { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import { View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { TIMETABLE_OCR_HTML, TimetableOcrError } from '../services/timetableOcr';
+import { OcrCoordinator } from '../services/imports/ocrCoordinator';
 
-const OCR_TIMEOUT_MS = 20_000;
-
-type Job = {
-  base64: string;
-  resolve: (text: string) => void;
-  reject: (error: TimetableOcrError) => void;
-  timer: ReturnType<typeof setTimeout>;
+export type TimetableOcrHandle = {
+  recognize: (
+    base64: string,
+    mime: 'image/png' | 'image/jpeg',
+    signal?: AbortSignal,
+  ) => Promise<string>;
+  cancel: () => void;
 };
-
-let pending: Job | null = null;
-let ready = false;
-let webRef: WebView | null = null;
-
-function failPending(error: TimetableOcrError) {
-  const job = pending;
-  pending = null;
-  if (!job) return;
-  clearTimeout(job.timer);
-  job.reject(error);
-}
-
-function ocrErrorFromMessage(message: string) {
-  const lower = message.toLowerCase();
-  const network =
-    lower.includes('network') ||
-    lower.includes('fetch') ||
-    lower.includes('failed to load') ||
-    lower.includes('timeout');
-  return new TimetableOcrError(
-    network
-      ? '截圖辨識需要連上網路下載字庫，這次沒連上'
-      : message || '這台裝置還沒開通截圖辨識',
-    network ? 'network' : 'unavailable',
+export const TimetableOcrHost = forwardRef<TimetableOcrHandle>(function TimetableOcrHost(_, ref) {
+  const web = useRef<WebView>(null);
+  const coordinator = useRef<OcrCoordinator | null>(null);
+  if (!coordinator.current)
+    coordinator.current = new OcrCoordinator((script) => web.current?.injectJavaScript(script));
+  const instance = coordinator.current;
+  useImperativeHandle(
+    ref,
+    () => ({
+      recognize: (base64, mime, signal) => instance.recognize(base64, mime, signal),
+      cancel: () => instance.cancel(),
+    }),
+    [instance],
   );
-}
-
-export function recognizeWithOnDeviceOcr(base64: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    if (pending) failPending(new TimetableOcrError('上一次辨識還沒結束', 'unavailable'));
-    const timer = setTimeout(() => {
-      failPending(new TimetableOcrError('這台裝置還沒開通截圖辨識', 'unavailable'));
-    }, OCR_TIMEOUT_MS);
-    pending = {
-      base64,
-      resolve: (text) => {
-        clearTimeout(timer);
-        resolve(text);
-      },
-      reject: (error) => {
-        clearTimeout(timer);
-        reject(error);
-      },
-      timer,
-    };
-    if (ready && webRef) {
-      webRef.injectJavaScript(`window.recognizeTimetable(${JSON.stringify(base64)}); true;`);
-    }
-  });
-}
-
-export function TimetableOcrHost() {
-  const ref = useRef<WebView>(null);
+  useEffect(() => () => instance.reset(), [instance]);
   return (
-    <View style={{ height: 0, overflow: 'hidden' }} pointerEvents="none">
+    <View
+      style={{ height: 0, overflow: 'hidden' }}
+      pointerEvents="none"
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+    >
       <WebView
-        ref={(node) => {
-          webRef = node;
-          ref.current = node;
-        }}
-        originWhitelist={['*']}
+        ref={web}
+        originWhitelist={['https://*', 'about:*']}
         source={{ html: TIMETABLE_OCR_HTML, baseUrl: 'https://cdn.jsdelivr.net' }}
         javaScriptEnabled
-        onMessage={(event) => {
-          try {
-            const payload = JSON.parse(event.nativeEvent.data) as {
-              ready?: boolean;
-              ok?: boolean;
-              text?: string;
-              error?: string;
-            };
-            if (payload.ready) {
-              ready = true;
-              if (pending && webRef) {
-                webRef.injectJavaScript(`window.recognizeTimetable(${JSON.stringify(pending.base64)}); true;`);
-              }
-              return;
-            }
-            const job = pending;
-            pending = null;
-            if (!job) return;
-            if (payload.ok) {
-              clearTimeout(job.timer);
-              job.resolve(String(payload.text || ''));
-            } else {
-              clearTimeout(job.timer);
-              job.reject(ocrErrorFromMessage(payload.error || '辨識失敗'));
-            }
-          } catch {
-            failPending(new TimetableOcrError('辨識結果讀不到', 'unavailable'));
-          }
-        }}
+        onMessage={(event) => instance.message(event.nativeEvent.data)}
         onError={() => {
-          ready = false;
-          failPending(new TimetableOcrError('這台裝置還沒開通截圖辨識', 'unavailable'));
+          instance.fail(
+            new TimetableOcrError('辨識程式未能載入，請確認網路或改貼文字。', 'network'),
+          );
+          instance.reset();
         }}
       />
     </View>
   );
-}
+});

@@ -80,6 +80,7 @@ export default function LearnAiFirstScreen() {
         subtitle="先看自己的課表，再處理這堂課要做的事。"
       />
       <AISection title="常用工具">
+        <AIRow title="匯入我的資料" subtitle="截圖、文字、檔案；課表、成績與行事曆" onPress={() => safeNavigate(navigation, 'PersonalImport')} />
         <AIRow
           title="我的課表"
           subtitle="一週、單日、匯入與空堂"

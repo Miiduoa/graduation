@@ -48,9 +48,12 @@ function emptyTimetable(schoolId: string): StoredTimetable {
 
 function readLocal(ownerKey: string, schoolId: string): StoredTimetable {
   try {
-    const raw = localStorage.getItem(`${LOCAL_KEY}:${ownerKey}`);
+    const raw =
+      localStorage.getItem(`${LOCAL_KEY}:${ownerKey}:${schoolId}`) ||
+      localStorage.getItem(`${LOCAL_KEY}:${ownerKey}`);
     if (!raw) return emptyTimetable(schoolId);
     const parsed = JSON.parse(raw) as StoredTimetable;
+    if (parsed.schoolId && parsed.schoolId !== schoolId) return emptyTimetable(schoolId);
     return {
       ...emptyTimetable(schoolId),
       ...parsed,
@@ -76,9 +79,12 @@ export class TimetableCloudSaveError extends Error {
   }
 }
 
-function hasLocal(ownerKey: string): boolean {
+function hasLocal(ownerKey: string, schoolId: string): boolean {
   try {
-    return !!localStorage.getItem(`${LOCAL_KEY}:${ownerKey}`);
+    return (
+      !!localStorage.getItem(`${LOCAL_KEY}:${ownerKey}:${schoolId}`) ||
+      !!localStorage.getItem(`${LOCAL_KEY}:${ownerKey}`)
+    );
   } catch {
     return false;
   }
@@ -93,17 +99,26 @@ function savedAtMillis(value: unknown): number {
 }
 
 function writeLocal(ownerKey: string, timetable: StoredTimetable) {
-  localStorage.setItem(`${LOCAL_KEY}:${ownerKey}`, JSON.stringify(timetable));
+  localStorage.setItem(`${LOCAL_KEY}:${ownerKey}:${timetable.schoolId}`, JSON.stringify(timetable));
 }
 
 export async function loadPersonalTimetable(
   uid: string | null,
   schoolId: string,
+  localOwner?: string,
 ): Promise<StoredTimetable> {
-  const ownerKey = uid || 'local';
-  if (!uid || !isFirebaseConfigured()) return readLocal(ownerKey, schoolId);
+  const ownerKey = localOwner === 'guest' ? 'local' : localOwner || uid || 'local';
+  // The school-account namespace replaces the older uid key. Only that exact
+  // identity may read its old copy, and an existing new copy (even empty) wins.
+  const readOwnerKey =
+    uid && localOwner === `school:${uid}` && !hasLocal(ownerKey, schoolId) ? uid : ownerKey;
+  if (!uid || !isFirebaseConfigured()) return readLocal(readOwnerKey, schoolId);
   // 登入學校帳號前在這台瀏覽器排的課表，登入後先接著用，下次存檔就一起存到雲端
-  const local = hasLocal(uid) ? readLocal(uid, schoolId) : readLocal('local', schoolId);
+  const local = localOwner
+    ? readLocal(readOwnerKey, schoolId)
+    : hasLocal(uid, schoolId)
+      ? readLocal(uid, schoolId)
+      : readLocal('local', schoolId);
   let snap;
   try {
     snap = await getDoc(doc(getDb(), 'users', uid, 'personalTimetable', 'current'));
@@ -112,6 +127,7 @@ export async function loadPersonalTimetable(
   }
   if (!snap.exists()) return local;
   const data = snap.data() as StoredTimetable & { updatedAt?: unknown };
+  if (data.schoolId && data.schoolId !== schoolId) return local;
   // 上次雲端沒存成、只記在這台瀏覽器的那一版比較新，就用那一版，重新整理不會不見
   if (local.courses.length && Date.parse(local.updatedAt) > savedAtMillis(data.updatedAt)) {
     return local;
@@ -129,6 +145,7 @@ export async function loadPersonalTimetable(
 export async function savePersonalTimetable(
   uid: string | null,
   timetable: StoredTimetable,
+  localOwner?: string,
 ): Promise<{ stored: 'cloud' | 'local' }> {
   const next = {
     ...timetable,
@@ -136,7 +153,7 @@ export async function savePersonalTimetable(
     meta: cleanMeta(timetable.meta),
     updatedAt: new Date().toISOString(),
   };
-  const ownerKey = uid || 'local';
+  const ownerKey = localOwner === 'guest' ? 'local' : localOwner || uid || 'local';
   writeLocal(ownerKey, next);
   // 課表匯入與本機整理目前只留在這台裝置，不送到雲端。
   return { stored: 'local' };

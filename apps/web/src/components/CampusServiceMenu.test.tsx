@@ -66,7 +66,7 @@ it('retains all existing services and search while adding a separate classroom e
   expect(screen.getByRole('link', { name: '課程空間' }).getAttribute('href')).toBe('/classroom');
   expect(screen.getByRole('link', { name: '跨校交流' }).getAttribute('href')).toBe('/social');
   expect(screen.getByRole('link', { name: '店家合作' }).getAttribute('href')).toBe('/merchant');
-  expect(screen.getAllByRole('link')).toHaveLength(29);
+  expect(screen.getAllByRole('link')).toHaveLength(31);
 });
 
 it('preserves school context without copying unrelated session or return parameters', () => {
