@@ -59,7 +59,7 @@ jobs:
         run: |
           npm install --prefix "$RUNNER_TEMP/eas-config-schema" --ignore-scripts --no-audit --no-fund @expo/eas-json@24.9.0
           node --test scripts/firebase-ci-workflow.test.cjs scripts/wait-for-firestore-indexes.test.cjs scripts/firebase-release-preflight.test.cjs scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs scripts/prepare-eas-build.test.mjs scripts/verify-nuni-integration.test.mjs
-          node --test scripts/nuni-course-source.test.mjs scripts/nuni-course-api-boundary.test.mjs
+          node --test scripts/nuni-course-source.test.mjs scripts/nuni-course-api-boundary.test.mjs scripts/nuni-merchant-api-boundary.test.mjs
 
       - name: Audit Functions deployment dependencies
         working-directory: backend/functions
@@ -439,7 +439,7 @@ jobs:
             echo "::error::The approved production target is campus-one-tw. Update the release configuration before changing projects."
             exit 1
           fi
-          node scripts/firebase-release-preflight.cjs --project "$FIREBASE_PROJECT_ID" --storage-bucket campus-one-tw.firebasestorage.app --auth-domain nuni.tw --database-location nam5 --output firebase-preflight.json
+          node scripts/firebase-release-preflight.cjs --mode rules-only --project "$FIREBASE_PROJECT_ID" --storage-bucket campus-one-tw.firebasestorage.app --auth-domain nuni.tw --database-location nam5 --output firebase-preflight.json
           # campus-one-tw 是 Spark，不能佈署 Cloud Functions。
           # HTTP callable / 排程 / Firestore onSnapshot 跑在 Fly（docs/deploy/functions-on-fly.md）。
           # 這裡只佈署規則、索引與 Storage。

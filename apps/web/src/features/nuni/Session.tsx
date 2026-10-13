@@ -32,9 +32,10 @@ export async function browserRequest(
   path: string,
   context?: string,
   input?: Record<string, unknown>,
+  method?: 'PUT',
 ): Promise<unknown> {
   const response = await fetch(`/api/nuni/${path}`, {
-    method: input ? 'POST' : 'GET',
+    method: method ?? (input ? 'POST' : 'GET'),
     cache: 'no-store',
     credentials: 'same-origin',
     redirect: 'error',
