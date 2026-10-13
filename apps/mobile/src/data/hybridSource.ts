@@ -248,9 +248,9 @@ export const hybridSource: DataSource = {
     );
   },
 
-  getAnnouncement: async (id: string): Promise<Announcement | null> => {
-    const schoolId = resolveSchoolId(undefined, id);
-    return fetchWithFallback(schoolId, 'getAnnouncement', () => mockSource.getAnnouncement(id), id);
+  getAnnouncement: async (id: string, schoolId?: string): Promise<Announcement | null> => {
+    const sid = resolveSchoolId(schoolId, id);
+    return fetchWithFallback(sid, 'getAnnouncement', () => mockSource.getAnnouncement(id, sid), id, sid);
   },
 
   listEvents: async (schoolId?: string, options?: QueryOptions): Promise<ClubEvent[]> => {

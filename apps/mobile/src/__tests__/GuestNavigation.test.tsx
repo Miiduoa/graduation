@@ -215,6 +215,32 @@ test.each([
   expect(mountPrivate).not.toHaveBeenCalled();
 });
 
+test('school changes unmount private listeners before exposing the next school', () => {
+  mockSchoolAuth = {
+    ...mockSchoolAuth,
+    user: { uid: 'u1' },
+    profile: { uid: 'u1', schoolId: 'pu' },
+  };
+  const cleanup = jest.fn();
+  function Private() {
+    React.useEffect(() => cleanup, []);
+    return <Text testID="private-school">Private</Text>;
+  }
+  const content = () => (
+    <SchoolSessionBoundary publicContent={<Text>Public</Text>}>
+      <Private />
+    </SchoolSessionBoundary>
+  );
+  const view = render(content());
+  expect(view.getByTestId('private-school')).toBeTruthy();
+  mockSchoolAuth = {
+    ...mockSchoolAuth,
+    profile: { uid: 'u1', schoolId: 'nthu' },
+  };
+  view.rerender(content());
+  expect(cleanup).toHaveBeenCalledTimes(1);
+});
+
 test('account changes unmount private content before exposing the next account', () => {
   mockSchoolAuth = {
     ...mockSchoolAuth,

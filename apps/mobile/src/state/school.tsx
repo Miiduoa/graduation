@@ -51,8 +51,21 @@ function toSelection(school: School): SchoolSelection {
   };
 }
 
-function normalizeSelection(_selection: Partial<SchoolSelection>): SchoolSelection {
-  return toSelection(getProvidenceSchool());
+export function schoolFromSelection(selection: Partial<SchoolSelection>): School {
+  return (
+    (selection.schoolId ? findSchoolById(selection.schoolId) : undefined) ??
+    (selection.code
+      ? resolveSchool({
+          school: selection.code,
+          schoolId: selection.schoolId ?? undefined,
+        })
+      : undefined) ??
+    getProvidenceSchool()
+  );
+}
+
+function normalizeSelection(selection: Partial<SchoolSelection>): SchoolSelection {
+  return toSelection(schoolFromSelection(selection));
 }
 
 export function SchoolProvider(props: {
@@ -148,9 +161,11 @@ export function SchoolProvider(props: {
     AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(selection)).catch(() => void 0);
   }, [loaded, selection]);
 
-  const school = useMemo(() => {
-    return getProvidenceSchool();
-  }, []);
+  const normalizedSelection = useMemo(() => normalizeSelection(selection), [selection]);
+  const school = useMemo(
+    () => schoolFromSelection(normalizedSelection),
+    [normalizedSelection],
+  );
 
   useEffect(() => {
     if (!loaded || !school) return;
@@ -165,8 +180,6 @@ export function SchoolProvider(props: {
     applySchoolTheme(school.id, school.themeColor);
     setHybridSourceSchoolContext(school.id);
   }, [loaded, school]);
-
-  const normalizedSelection = useMemo(() => normalizeSelection(selection), [selection]);
 
   const value: SchoolContextValue = useMemo(
     () => ({
