@@ -11,6 +11,8 @@ import { theme } from '../ui/theme';
 import { useThemeMode } from '../state/theme';
 import { rootNavigateNested } from '../app/rootNavigation';
 
+import { PersonalImportSummary } from '../components/PersonalImportSummary';
+
 import { CalendarPanel } from './unifiedCalendar/CalendarPanel';
 
 export function UnifiedCalendarScreen(props: Record<string, unknown>) {
@@ -46,6 +48,7 @@ export function UnifiedCalendarScreen(props: Record<string, unknown>) {
         >
           <Text style={{ fontSize: 13, color: theme.colors.accent }}>課表請看「我的課表」 →</Text>
         </Pressable>
+        <PersonalImportSummary kind="events" />
       </View>
 
       <View style={{ flex: 1 }}>

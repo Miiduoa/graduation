@@ -28,7 +28,10 @@ vi.mock('@/lib/signInOptions', () => ({
 vi.mock('@/features/nuni/Session', () => ({
   useOptionalNuniSession: () => null,
 }));
-vi.mock('next/navigation', () => ({ usePathname: () => '/grades' }));
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/grades',
+  useRouter: () => ({ push: vi.fn() }),
+}));
 vi.mock('@/components/SiteShell', () => ({
   SiteShell: ({
     children,
@@ -68,6 +71,7 @@ vi.mock('@/lib/timetable/friends', () => ({
 }));
 vi.mock('@/components/SelectedSchoolProvider', () => ({
   useSelectedSchool: () => ({ selectedSchoolId: 'pu' }),
+  useOptionalSelectedSchool: () => ({ selectedSchoolId: 'pu' }),
 }));
 function emptyTimetable() {
   return {
