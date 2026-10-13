@@ -163,11 +163,14 @@ export async function addStorefrontComment(
   uid: string,
   text: string,
 ) {
-  await addDoc(collection(getDb(), ...cafeteriaPath(schoolId, cafeteriaId), 'posts', postId, 'comments'), {
-    authorId: uid,
-    text: text.trim().slice(0, 2000),
-    createdAt: serverTimestamp(),
-  });
+  await addDoc(
+    collection(getDb(), ...cafeteriaPath(schoolId, cafeteriaId), 'posts', postId, 'comments'),
+    {
+      authorId: uid,
+      text: text.trim().slice(0, 2000),
+      createdAt: serverTimestamp(),
+    },
+  );
 }
 
 export async function loadStorefrontComments(
@@ -235,7 +238,8 @@ export async function saveShopStorefront(input: {
     orderingUrl: orderingUrl && isHttpsOrderingUrl(orderingUrl) ? orderingUrl : '',
     intro: typeof input.intro === 'string' ? input.intro.trim().slice(0, 500) : '',
     location: typeof input.location === 'string' ? input.location.trim().slice(0, 120) : '',
-    openingHours: typeof input.openingHours === 'string' ? input.openingHours.trim().slice(0, 120) : '',
+    openingHours:
+      typeof input.openingHours === 'string' ? input.openingHours.trim().slice(0, 120) : '',
     merchantMode:
       input.merchantMode === 'showcase_link' && isHttpsOrderingUrl(orderingUrl)
         ? 'showcase_link'

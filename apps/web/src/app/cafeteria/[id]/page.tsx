@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useEffect, useRef, useState } from 'react';
+import { use, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
@@ -48,10 +48,10 @@ export default function StorefrontPage(props: {
   const [socialBlocked, setSocialBlocked] = useState(false);
   const [error, setError] = useState('');
   const canReadSocial = signedIn && !socialBlocked;
+  const onSocialDenied = useCallback(() => setSocialBlocked(true), []);
   useEffect(() => {
     let active = true;
     setError('');
-    setSocialBlocked(!authLoading && !signedIn);
     Promise.all([
       loadStorefront(context.schoolId, id),
       fetchMenus(context.schoolId),
@@ -74,7 +74,7 @@ export default function StorefrontPage(props: {
         },
         (reason) => {
           if (!active) return;
-          if (isPermissionDeniedError(reason)) setSocialBlocked(true);
+          if (isPermissionDeniedError(reason)) onSocialDenied();
         },
       );
     } else {
@@ -83,7 +83,7 @@ export default function StorefrontPage(props: {
     return () => {
       active = false;
     };
-  }, [authLoading, context.schoolId, id, signedIn, user?.uid]);
+  }, [authLoading, context.schoolId, id, onSocialDenied, signedIn, user?.uid]);
   const action = studentCafeteriaAction({
     merchantMode: shop?.merchantMode,
     orderingEnabled: shop?.orderingEnabled,
@@ -106,17 +106,26 @@ export default function StorefrontPage(props: {
             <h2>{shop.name}</h2>
             {shop.intro && <p>{shop.intro}</p>}
             <p className={social.muted}>
-              {[shop.location, shop.openingHours].filter(Boolean).join(' · ') || '位置與營業時間尚未提供'}
+              {[shop.location, shop.openingHours].filter(Boolean).join(' · ') ||
+                '位置與營業時間尚未提供'}
             </p>
             {websiteUrl && (
               <p>
-                <a className={social.link} href={websiteUrl} rel="noopener noreferrer" target="_blank">
+                <a
+                  className={social.link}
+                  href={websiteUrl}
+                  rel="noopener noreferrer"
+                  target="_blank"
+                >
                   店家網站
                 </a>
               </p>
             )}
             <div className={social.actions}>
-              <Link className="btn" href={`/cafeteria?schoolId=${encodeURIComponent(context.schoolId)}`}>
+              <Link
+                className="btn"
+                href={`/cafeteria?schoolId=${encodeURIComponent(context.schoolId)}`}
+              >
                 返回餐廳列表
               </Link>
               {action.kind === 'showcase' && (
@@ -143,9 +152,7 @@ export default function StorefrontPage(props: {
                 <LoginRequiredLostFoundComments returnUrl={loginReturnUrl} />
               )}
             </div>
-            {action.kind === 'showcase' && (
-              <p className={social.muted}>{SHOWCASE_ORDER_CAPTION}</p>
-            )}
+            {action.kind === 'showcase' && <p className={social.muted}>{SHOWCASE_ORDER_CAPTION}</p>}
             <p className={social.muted}>{PRICE_DISCLAIMER}</p>
           </section>
           <section className={social.panel} aria-label="菜單">
@@ -178,7 +185,7 @@ export default function StorefrontPage(props: {
                 uid={user?.uid}
                 canReadSocial={canReadSocial}
                 post={post}
-                onSocialDenied={() => setSocialBlocked(true)}
+                onSocialDenied={onSocialDenied}
               />
             ))}
           </section>
@@ -206,22 +213,19 @@ function StorefrontPostCard({
   const [liked, setLiked] = useState(post.liked);
   const [comments, setComments] = useState<StorefrontComment[]>([]);
   const [draft, setDraft] = useState('');
-  const onSocialDeniedRef = useRef(onSocialDenied);
-  onSocialDeniedRef.current = onSocialDenied;
   useEffect(() => {
-    if (!canReadSocial) {
-      setComments([]);
-      return;
-    }
+    if (!canReadSocial) return;
     void loadStorefrontComments(schoolId, cafeteriaId, post.id).then(setComments, (reason) => {
-      if (isPermissionDeniedError(reason)) onSocialDeniedRef.current();
+      if (isPermissionDeniedError(reason)) onSocialDenied();
     });
-  }, [canReadSocial, schoolId, cafeteriaId, post.id]);
+  }, [canReadSocial, onSocialDenied, schoolId, cafeteriaId, post.id]);
   return (
     <article className={`${social.panel} ${social.post}`} aria-label={post.title || '店家貼文'}>
       <div className={social.metadata}>
         <strong>{post.title || '店家消息'}</strong>
-        <span className={social.muted}>{post.kind === 'promo' ? '優惠' : post.kind === 'announcement' ? '公告' : '貼文'}</span>
+        <span className={social.muted}>
+          {post.kind === 'promo' ? '優惠' : post.kind === 'announcement' ? '公告' : '貼文'}
+        </span>
       </div>
       <p className={social.postText}>{post.text}</p>
       {canReadSocial && uid ? (
@@ -251,14 +255,21 @@ function StorefrontPostCard({
             event.preventDefault();
             if (!draft.trim()) return;
             void addStorefrontComment(schoolId, cafeteriaId, post.id, uid, draft).then(() => {
-              setComments((current) => [...current, { id: `local-${Date.now()}`, authorId: uid, text: draft }]);
+              setComments((current) => [
+                ...current,
+                { id: `local-${Date.now()}`, authorId: uid, text: draft },
+              ]);
               setDraft('');
             });
           }}
         >
           <label>
             留言
-            <input value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={2000} />
+            <input
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              maxLength={2000}
+            />
           </label>
           <button className="btn" type="submit">
             送出留言

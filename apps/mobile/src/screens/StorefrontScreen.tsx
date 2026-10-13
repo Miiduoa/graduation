@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { Screen, Button } from '../ui/components';
 import { theme } from '../ui/theme';
@@ -29,7 +29,10 @@ import {
 } from '@campus/shared/src/merchantMode';
 
 type Props = {
-  navigation?: { goBack?: () => void; navigate?: (screen: string, params?: Record<string, unknown>) => void };
+  navigation?: {
+    goBack?: () => void;
+    navigate?: (screen: string, params?: Record<string, unknown>) => void;
+  };
   route?: { params?: { cafeteriaId?: string; id?: string } };
 };
 
@@ -44,10 +47,10 @@ export default function StorefrontScreen({ navigation, route }: Props) {
   const [socialBlocked, setSocialBlocked] = useState(false);
   const [error, setError] = useState('');
   const canReadSocial = signedIn && !socialBlocked;
+  const onSocialDenied = useCallback(() => setSocialBlocked(true), []);
   const openLogin = () => navigation?.navigate?.('SSOLogin');
   useEffect(() => {
     let active = true;
-    setSocialBlocked(!authLoading && !signedIn);
     Promise.all([
       loadStorefront(school.id, cafeteriaId),
       loadStorefrontPosts(school.id, cafeteriaId, signedIn ? user?.uid : undefined),
@@ -68,7 +71,7 @@ export default function StorefrontScreen({ navigation, route }: Props) {
         },
         (reason) => {
           if (!active) return;
-          if (isPermissionDeniedError(reason)) setSocialBlocked(true);
+          if (isPermissionDeniedError(reason)) onSocialDenied();
         },
       );
     } else {
@@ -77,7 +80,7 @@ export default function StorefrontScreen({ navigation, route }: Props) {
     return () => {
       active = false;
     };
-  }, [authLoading, school.id, cafeteriaId, signedIn, user?.uid]);
+  }, [authLoading, cafeteriaId, onSocialDenied, school.id, signedIn, user?.uid]);
   const action = studentCafeteriaAction({
     merchantMode: shop?.merchantMode,
     orderingEnabled: shop?.orderingEnabled,
@@ -92,9 +95,12 @@ export default function StorefrontScreen({ navigation, route }: Props) {
         {!shop && !error ? <Text style={{ color: theme.colors.muted }}>正在讀取店面…</Text> : null}
         {shop ? (
           <>
-            {shop.intro ? <Text style={{ color: theme.colors.text, lineHeight: 22 }}>{shop.intro}</Text> : null}
+            {shop.intro ? (
+              <Text style={{ color: theme.colors.text, lineHeight: 22 }}>{shop.intro}</Text>
+            ) : null}
             <Text style={{ color: theme.colors.muted }}>
-              {[shop.location, shop.openingHours].filter(Boolean).join(' · ') || '位置與營業時間尚未提供'}
+              {[shop.location, shop.openingHours].filter(Boolean).join(' · ') ||
+                '位置與營業時間尚未提供'}
             </Text>
             <Text style={{ color: theme.colors.muted }}>{PRICE_DISCLAIMER}</Text>
             {isMenuStale(shop.menuSyncedAt) ? (
@@ -105,7 +111,10 @@ export default function StorefrontScreen({ navigation, route }: Props) {
                 <Button
                   text={SHOWCASE_ORDER_BUTTON_TEXT}
                   onPress={() =>
-                    navigation?.navigate?.('HonestOrder', { cafeteriaId, orderingUrl: shop.orderingUrl })
+                    navigation?.navigate?.('HonestOrder', {
+                      cafeteriaId,
+                      orderingUrl: shop.orderingUrl,
+                    })
                   }
                 />
               ) : null}
@@ -126,7 +135,9 @@ export default function StorefrontScreen({ navigation, route }: Props) {
               )}
             </View>
             {action.kind === 'showcase' && shop.orderingUrl ? (
-              <Text style={{ color: theme.colors.muted, lineHeight: 20 }}>{SHOWCASE_ORDER_CAPTION}</Text>
+              <Text style={{ color: theme.colors.muted, lineHeight: 20 }}>
+                {SHOWCASE_ORDER_CAPTION}
+              </Text>
             ) : null}
             {websiteUrl ? (
               <Pressable onPress={() => void Linking.openURL(websiteUrl)}>
@@ -145,7 +156,7 @@ export default function StorefrontScreen({ navigation, route }: Props) {
                   uid={user?.uid}
                   canReadSocial={canReadSocial}
                   post={post}
-                  onSocialDenied={() => setSocialBlocked(true)}
+                  onSocialDenied={onSocialDenied}
                 />
               ))
             )}
@@ -174,20 +185,24 @@ function StorefrontPostCard({
   const [liked, setLiked] = useState(post.liked);
   const [comments, setComments] = useState<StorefrontComment[]>([]);
   const [draft, setDraft] = useState('');
-  const onSocialDeniedRef = useRef(onSocialDenied);
-  onSocialDeniedRef.current = onSocialDenied;
   useEffect(() => {
-    if (!canReadSocial) {
-      setComments([]);
-      return;
-    }
+    if (!canReadSocial) return;
     void loadStorefrontComments(schoolId, cafeteriaId, post.id).then(setComments, (reason) => {
-      if (isPermissionDeniedError(reason)) onSocialDeniedRef.current();
+      if (isPermissionDeniedError(reason)) onSocialDenied();
     });
-  }, [canReadSocial, schoolId, cafeteriaId, post.id]);
+  }, [canReadSocial, cafeteriaId, onSocialDenied, post.id, schoolId]);
   return (
-    <View style={{ gap: 8, borderBottomWidth: 1, borderBottomColor: theme.colors.separator, paddingBottom: 10 }}>
-      <Text style={{ color: theme.colors.text, fontWeight: '700' }}>{post.title || '店家消息'}</Text>
+    <View
+      style={{
+        gap: 8,
+        borderBottomWidth: 1,
+        borderBottomColor: theme.colors.separator,
+        paddingBottom: 10,
+      }}
+    >
+      <Text style={{ color: theme.colors.text, fontWeight: '700' }}>
+        {post.title || '店家消息'}
+      </Text>
       <Text style={{ color: theme.colors.muted }}>
         {post.kind === 'promo' ? '優惠' : post.kind === 'announcement' ? '公告' : '貼文'}
       </Text>
@@ -196,7 +211,9 @@ function StorefrontPostCard({
         <Button
           text={liked ? '收回讚' : '讚'}
           onPress={() =>
-            void toggleStorefrontLike(schoolId, cafeteriaId, post.id, uid, liked).then(() => setLiked(!liked))
+            void toggleStorefrontLike(schoolId, cafeteriaId, post.id, uid, liked).then(() =>
+              setLiked(!liked),
+            )
           }
         />
       ) : null}
@@ -209,13 +226,22 @@ function StorefrontPostCard({
         : null}
       {canReadSocial && uid ? (
         <>
-          <TextInput value={draft} onChangeText={setDraft} placeholder="留言" style={field} maxLength={2000} />
+          <TextInput
+            value={draft}
+            onChangeText={setDraft}
+            placeholder="留言"
+            style={field}
+            maxLength={2000}
+          />
           <Button
             text="送出留言"
             onPress={() => {
               if (!draft.trim()) return;
               void addStorefrontComment(schoolId, cafeteriaId, post.id, uid, draft).then(() => {
-                setComments((current) => [...current, { id: `local-${Date.now()}`, authorId: uid, text: draft }]);
+                setComments((current) => [
+                  ...current,
+                  { id: `local-${Date.now()}`, authorId: uid, text: draft },
+                ]);
                 setDraft('');
               });
             }}
