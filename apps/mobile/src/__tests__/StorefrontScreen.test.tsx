@@ -126,6 +126,7 @@ test('店面有外連時按鈕寫「到店家網站訂餐」，下面放免責�
     orderingUrl: 'https://shop.example/order',
     location: '學生餐廳',
     openingHours: '週一至週五 11:00–14:00',
+    reviewStatus: 'verified',
   } as never);
   const view = render(
     <StorefrontScreen navigation={navigation} route={{ params: { cafeteriaId: 'stall' } }} />,
@@ -147,6 +148,7 @@ test('沒有外連的店不放訂餐按鈕，只顯示營業時間和地點', as
     merchantMode: 'showcase_link',
     location: '活動中心',
     openingHours: '週一到週五',
+    reviewStatus: 'verified',
   } as never);
   const view = render(
     <StorefrontScreen navigation={navigation} route={{ params: { cafeteriaId: 'stall' } }} />,
