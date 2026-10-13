@@ -81,8 +81,20 @@ async function runCli(argv, deps = {}) {
   return summarize({ ...result, schoolId: options.schoolId });
 }
 
+function getAdminDb() {
+  const { initializeApp, getApps, applicationDefault } = require('firebase-admin/app');
+  const { getFirestore } = require('firebase-admin/firestore');
+  const app =
+    getApps()[0] ||
+    initializeApp({
+      credential: applicationDefault(),
+      projectId: process.env.FIREBASE_PROJECT_ID || 'campus-one-tw',
+    });
+  return getFirestore(app);
+}
+
 async function main() {
-  const summary = await runCli(process.argv.slice(2));
+  const summary = await runCli(process.argv.slice(2), { getDb: getAdminDb });
   process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
 }
 
