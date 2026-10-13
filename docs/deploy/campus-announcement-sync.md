@@ -1,11 +1,11 @@
-# 校園公告同步：最小權限帳號與排程（尚未核准，不要執行）
+# 校園公告同步：最小權限帳號與排程（2026-10-13 晉瑋核准，已啟用）
 
 正式專案是 Firebase `campus-one-tw`。同步程式只准寫入：
 
 - `schools/{schoolId}/announcements/{docId}`
 - `schools/{schoolId}/announcement-sources/{sourceId}`
 
-這份文件只規劃。**不要現在建立服務帳戶、不要上傳金鑰、不要在 GitHub Actions 加 `schedule`、不要設 `CAMPUS_ANNOUNCEMENT_SYNC_ENABLED`。** 點餐開關維持關。
+2026-10-13 已啟用：服務帳戶 `campus-announcement-sync`（只有 `roles/datastore.user`）、GitHub Environment `production` 的 `ANNOUNCEMENT_SYNC_SA_JSON` 與 `CAMPUS_ANNOUNCEMENT_SYNC_ENABLED=true`、workflow 每小時第 17 分（UTC）同步 `pu`。點餐開關維持關。
 
 現況：CLI 預設 dry-run；`.github/workflows/campus-announcement-sync.yml` 只有手動試跑，寫入步驟固定失敗。
 

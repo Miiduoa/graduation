@@ -1,7 +1,10 @@
-# 預設關閉。不要加 schedule；晉瑋核准後才可打開 cron、寫入密鑰與 CAMPUS_ANNOUNCEMENT_SYNC_ENABLED。
+# 晉瑋已核准：每小時第 17 分（UTC）同步 pu 公告；只寫 schools/{schoolId}/announcements 與 announcement-sources。
+# 要停：拿掉 schedule，或刪掉 production 環境的 CAMPUS_ANNOUNCEMENT_SYNC_ENABLED。
 name: Campus announcement sync
 
 on:
+  schedule:
+    - cron: '17 * * * *'
   workflow_dispatch:
     inputs:
       school:
@@ -27,6 +30,10 @@ jobs:
     name: Preview or sync campus announcements
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    environment: production
+    env:
+      SCHOOL_ID: ${{ inputs.school || 'pu' }}
+      WRITE: ${{ github.event_name == 'schedule' || inputs.write == true }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,13 +51,21 @@ jobs:
         run: pnpm install --frozen-lockfile --filter functions...
 
       - name: Dry-run
-        if: ${{ inputs.write != true }}
-        run: pnpm --filter functions sync:announcements -- --school "${{ inputs.school }}"
+        if: ${{ env.WRITE != 'true' }}
+        run: pnpm --filter functions sync:announcements -- --school "$SCHOOL_ID"
 
-      - name: Write is blocked until explicitly enabled
-        if: ${{ inputs.write == true }}
+      - name: Sync to Firestore
+        if: ${{ env.WRITE == 'true' }}
         env:
           CAMPUS_ANNOUNCEMENT_SYNC_ENABLED: ${{ secrets.CAMPUS_ANNOUNCEMENT_SYNC_ENABLED }}
+          ANNOUNCEMENT_SYNC_SA_JSON: ${{ secrets.ANNOUNCEMENT_SYNC_SA_JSON }}
         run: |
-          echo "::error::寫入尚未開放。需晉瑋核准後才設定 CAMPUS_ANNOUNCEMENT_SYNC_ENABLED 與服務帳號。"
-          exit 1
+          if [ -z "$ANNOUNCEMENT_SYNC_SA_JSON" ]; then
+            echo "::error::缺少 ANNOUNCEMENT_SYNC_SA_JSON"
+            exit 1
+          fi
+          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/announcement-sync-sa.json"
+          trap 'rm -f "$GOOGLE_APPLICATION_CREDENTIALS"' EXIT
+          umask 077
+          printf '%s' "$ANNOUNCEMENT_SYNC_SA_JSON" > "$GOOGLE_APPLICATION_CREDENTIALS"
+          pnpm --filter functions sync:announcements -- --school "$SCHOOL_ID" --write
