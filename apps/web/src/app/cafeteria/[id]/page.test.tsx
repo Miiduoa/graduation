@@ -2,7 +2,7 @@ import { Suspense } from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import StorefrontPage from './page';
-import { fetchMenus } from '@/lib/firebase';
+import { fetchMenus, type Cafeteria, type MenuItem } from '@/lib/firebase';
 import {
   isFollowingStorefront,
   loadStorefront,
@@ -17,28 +17,13 @@ const state = vi.hoisted(() => ({
     id: 'stall',
     name: '校內咖啡店',
     intro: '紙感小店',
-    merchantMode: 'showcase_link',
+    merchantMode: 'showcase_link' as const,
     orderingUrl: 'https://shop.example/order',
     location: '學生餐廳',
     openingHours: undefined as string | undefined,
-  } as {
-    id: string;
-    name: string;
-    intro: string;
-    merchantMode: string;
-    orderingUrl?: string;
-    websiteUrl?: string;
-    location: string;
-    openingHours?: string;
-  },
+  } as Cafeteria,
   posts: [] as StorefrontPost[],
-  menus: [] as Array<{
-    id: string;
-    cafeteriaId: string;
-    name: string;
-    price?: number;
-    soldOut?: boolean;
-  }>,
+  menus: [] as MenuItem[],
 }));
 
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => ({ user: state.user }) }));
@@ -66,13 +51,22 @@ vi.mock('@/lib/storefront', () => ({
   toggleStorefrontLike: vi.fn(),
 }));
 
-const showcaseShop = {
+const showcaseShop: Cafeteria = {
   id: 'stall',
   name: '校內咖啡店',
   intro: '紙感小店',
   merchantMode: 'showcase_link',
   orderingUrl: 'https://shop.example/order',
   location: '學生餐廳',
+};
+
+const toastMenu: MenuItem = {
+  id: 'meal',
+  cafeteria: 'stall',
+  cafeteriaId: 'stall',
+  name: '蔬菜吐司',
+  price: 60,
+  availableOn: '2026-10-13',
 };
 
 beforeEach(() => {
@@ -214,7 +208,7 @@ const commentsPrompt = '登入後才能看評論';
 
 it('does not read comments, likes or follows before login and shows a login prompt', async () => {
   state.user = null;
-  state.menus = [{ id: 'meal', cafeteriaId: 'stall', name: '蔬菜吐司', price: 60 }];
+  state.menus = [toastMenu];
   state.posts = [
     {
       id: 'post-1',
@@ -267,7 +261,7 @@ it('keeps the shop when menus fail to load', async () => {
 });
 
 it('keeps shop data and menus when comment reads are blocked', async () => {
-  state.menus = [{ id: 'meal', cafeteriaId: 'stall', name: '蔬菜吐司', price: 60 }];
+  state.menus = [toastMenu];
   vi.mocked(loadStorefrontPosts).mockRejectedValueOnce(
     Object.assign(new Error('permission-denied'), { code: 'permission-denied' }),
   );
