@@ -411,6 +411,7 @@ describe('Nuni Google authorization code flow', () => {
     '/map?school=pu&focus=library#route',
     '/bus?school=pu',
     '/announcements/news-123?schoolId=tw-pu',
+    '/cafeteria/stall?schoolId=pu',
     '/classroom/course/cw_11111111-1111-4111-8111-111111111111#assignment-cwa_22222222-2222-4222-8222-222222222222',
   ])('returns to the verified original task after OAuth: %s', async (returnUrl) => {
     fetcher.mockResolvedValueOnce(response(tx()));

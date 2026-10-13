@@ -7,6 +7,7 @@ const ITEMS = [
   { href: '/map', title: '校園地圖', text: '找教室、行政單位和地點。' },
   { href: '/bus', title: '公車', text: '查路線與站牌。' },
   { href: '/cafeteria', title: '餐廳', text: '看今天開的店和菜單。' },
+  { href: '/lost-found', title: '失物招領', text: '登入後查看遺失與拾獲刊登。' },
   { href: '/orders', title: '我的訂單', text: '看訂單狀態和取餐號碼。' },
   { href: '/community', title: '校園交流', text: '看同學在討論什麼。' },
   { href: '/friends', title: '找人', text: '用找人代號加好友。' },

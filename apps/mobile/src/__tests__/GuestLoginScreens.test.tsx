@@ -248,6 +248,54 @@ test('a school service completion after unmount cannot refresh the screen or sho
   expect(goBack).not.toHaveBeenCalled();
 });
 
+test('after login from a storefront, returns to the same shop', async () => {
+  jest.useFakeTimers();
+  try {
+    jest.mocked(signInWithStudentId).mockResolvedValueOnce(schoolResult);
+    const goBack = jest.fn();
+    const view = render(
+      <SSOLoginScreen
+        navigation={{ goBack, navigate: mockNavigation.navigate }}
+        route={{ params: { returnTo: '/cafeteria/stall' } }}
+      />,
+    );
+    enterSchoolCredentials(view);
+    await act(async () => fireEvent.press(view.getByText('使用學號登入')));
+    act(() => jest.advanceTimersByTime(250));
+    const confirm = jest.mocked(Alert.alert).mock.calls[0][2]?.[0].onPress;
+    act(() => confirm?.());
+    expect(safeNavigate).toHaveBeenCalledWith(expect.anything(), 'Storefront', {
+      cafeteriaId: 'stall',
+    });
+    expect(goBack).not.toHaveBeenCalled();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test('blocks an off-site returnTo after login', async () => {
+  jest.useFakeTimers();
+  try {
+    jest.mocked(signInWithStudentId).mockResolvedValueOnce(schoolResult);
+    const goBack = jest.fn();
+    const view = render(
+      <SSOLoginScreen
+        navigation={{ goBack, navigate: mockNavigation.navigate }}
+        route={{ params: { returnTo: 'https://evil.test' } }}
+      />,
+    );
+    enterSchoolCredentials(view);
+    await act(async () => fireEvent.press(view.getByText('使用學號登入')));
+    act(() => jest.advanceTimersByTime(250));
+    const confirm = jest.mocked(Alert.alert).mock.calls[0][2]?.[0].onPress;
+    act(() => confirm?.());
+    expect(safeNavigate).not.toHaveBeenCalled();
+    expect(goBack).toHaveBeenCalled();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 test('an already displayed success dialog cannot navigate after its screen unmounts', async () => {
   jest.useFakeTimers();
   try {

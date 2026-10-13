@@ -252,7 +252,7 @@ export function LostFoundPostScreen({ navigation, route }: Props) {
         <AnimatedCard title="失物招領">
           <LoginRequiredLostFoundComments
             onLogin={() => {
-              if (isCurrent()) navigation?.navigate?.('SSOLogin');
+              if (isCurrent()) navigation?.navigate?.('SSOLogin', { returnTo: '/lost-found/post' });
             }}
           />
         </AnimatedCard>

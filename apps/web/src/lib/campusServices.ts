@@ -153,6 +153,14 @@ export const CAMPUS_SERVICES = [
     category: 'campus',
   },
   {
+    name: '失物招領',
+    text: '查看本校遺失與拾獲刊登',
+    href: '/lost-found',
+    access: 'platform',
+    keywords: '失物 招領 遺失 拾獲 lost found',
+    category: 'campus',
+  },
+  {
     name: '店家合作',
     text: '申請進駐，查看審核進度與授權門市',
     href: '/merchant',

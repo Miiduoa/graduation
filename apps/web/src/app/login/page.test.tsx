@@ -134,6 +134,7 @@ it.each([
   '/bus?schoolId=tw-pu',
   '/announcements/news-123?schoolId=tw-pu',
   '/cafeteria',
+  '/cafeteria/stall?schoolId=pu',
   '/library',
 ])(
   'keeps public destination %s optional and preserves the task with either account or guest browsing',
@@ -184,6 +185,28 @@ it('uses school identity only for the explicit legacy map favorite action and re
   await waitFor(() => expect(replace).toHaveBeenCalledWith(destination));
   expect(signIn).toHaveBeenCalledOnce();
 });
+it('returns to the same storefront after a platform login', () => {
+  state.user = null;
+  const destination = '/cafeteria/stall?schoolId=pu';
+  state.params = new URLSearchParams({ returnUrl: destination });
+  render(<LoginPage />);
+  expect(screen.getByTestId('platform-sign-in').getAttribute('data-return-url')).toBe(destination);
+  expect(screen.getByRole('link', { name: '不登入，繼續瀏覽' }).getAttribute('href')).toBe(
+    destination,
+  );
+});
+
+it.each(['https://evil.test', '//evil.test', '/\\evil.test'])(
+  'does not honor an off-site returnUrl %s',
+  (target) => {
+    state.user = null;
+    state.params = new URLSearchParams({ returnUrl: target });
+    render(<LoginPage />);
+    expect(screen.getByTestId('platform-sign-in').getAttribute('data-return-url')).toBe('/');
+    expect(replace).not.toHaveBeenCalled();
+  },
+);
+
 it.each([
   '/login',
   '/login/',

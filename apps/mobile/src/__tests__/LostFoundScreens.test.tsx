@@ -112,7 +112,7 @@ test('unsigned visitors do not read listings and see a login prompt with a login
   expect(view.queryByText('暫時無法讀取')).toBeNull();
   expect(view.queryByText('請確認網路')).toBeNull();
   fireEvent.press(view.getByText('登入'));
-  expect(navigation.navigate).toHaveBeenCalledWith('SSOLogin');
+  expect(navigation.navigate).toHaveBeenCalledWith('SSOLogin', { returnTo: '/lost-found' });
 });
 
 test('permission-denied list reads show the login prompt instead of a network or empty state', async () => {
@@ -135,7 +135,7 @@ test('unsigned detail and post screens show the same login prompt without readin
   expect(detail.queryByText('暫時無法讀取物品')).toBeNull();
   expect(detail.queryByText('找不到物品')).toBeNull();
   fireEvent.press(detail.getByText('登入'));
-  expect(navigation.navigate).toHaveBeenCalledWith('SSOLogin');
+  expect(navigation.navigate).toHaveBeenCalledWith('SSOLogin', { returnTo: '/lost-found/item-1' });
   detail.unmount();
   const post = render(<LostFoundPostScreen navigation={navigation} />);
   expect(await post.findByText('登入後才能看失物招領和評論')).toBeTruthy();

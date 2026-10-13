@@ -4,6 +4,7 @@ import StorefrontScreen from '../screens/StorefrontScreen';
 import HonestOrderScreen from '../screens/HonestOrderScreen';
 import {
   loadStorefront,
+  loadStorefrontMenus,
   loadStorefrontPosts,
   isFollowingStorefront,
   loadStorefrontComments,
@@ -17,6 +18,7 @@ jest.mock('../ui/navigationTheme', () => ({ useTabBarContentBottomPadding: () =>
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('../services/storefront', () => ({
   loadStorefront: jest.fn(),
+  loadStorefrontMenus: jest.fn(async () => []),
   loadStorefrontPosts: jest.fn(async () => []),
   isFollowingStorefront: jest.fn(async () => false),
   followStorefront: jest.fn(),
@@ -31,13 +33,14 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockUser = { uid: 'alice' };
   jest.mocked(loadStorefrontPosts).mockResolvedValue([]);
+  jest.mocked(loadStorefrontMenus).mockResolvedValue([]);
   jest.mocked(isFollowingStorefront).mockResolvedValue(false);
   jest.mocked(loadStorefrontComments).mockResolvedValue([]);
 });
 
-const prompt = '登入後才能看失物招領和評論';
+const commentsPrompt = '登入後才能看評論';
 
-test('unsigned visitors keep public shop info, skip social reads, and see a login prompt', async () => {
+test('unsigned visitors keep public shop info and menus, skip social reads, and see a comments login prompt', async () => {
   mockUser = null;
   jest.mocked(loadStorefront).mockResolvedValue({
     id: 'stall',
@@ -48,33 +51,37 @@ test('unsigned visitors keep public shop info, skip social reads, and see a logi
     location: '學生餐廳',
     openingHours: '週一至週五 11:00–14:00',
   } as never);
-  jest
-    .mocked(loadStorefrontPosts)
-    .mockResolvedValue([
-      {
-        id: 'post-1',
-        title: '今日優惠',
-        text: '買一送一',
-        kind: 'promo',
-        likeCount: 0,
-        liked: false,
-      },
-    ] as never);
+  jest.mocked(loadStorefrontMenus).mockResolvedValue([
+    { id: 'meal', name: '蔬菜吐司', price: 60 },
+  ] as never);
+  jest.mocked(loadStorefrontPosts).mockResolvedValue([
+    {
+      id: 'post-1',
+      title: '今日優惠',
+      text: '買一送一',
+      kind: 'promo',
+      likeCount: 0,
+      liked: false,
+    },
+  ] as never);
   const view = render(
     <StorefrontScreen navigation={navigation} route={{ params: { cafeteriaId: 'stall' } }} />,
   );
   expect(await view.findByText('紙感小店')).toBeTruthy();
-  expect(await view.findByText(prompt)).toBeTruthy();
+  expect(await view.findByText('蔬菜吐司 · NT$60')).toBeTruthy();
+  expect(await view.findByText(commentsPrompt)).toBeTruthy();
+  expect(view.queryByText('登入後才能看失物招領和評論')).toBeNull();
   expect(loadStorefrontPosts).toHaveBeenCalledWith('pu', 'stall', undefined);
   expect(loadStorefrontComments).not.toHaveBeenCalled();
   expect(isFollowingStorefront).not.toHaveBeenCalled();
+  expect(view.queryByText('暫時讀不到這間店。')).toBeNull();
   expect(view.queryByText('目前沒有資料')).toBeNull();
   expect(view.queryByText('請確認網路')).toBeNull();
   fireEvent.press(view.getByText('登入'));
-  expect(navigation.navigate).toHaveBeenCalledWith('SSOLogin');
+  expect(navigation.navigate).toHaveBeenCalledWith('SSOLogin', { returnTo: '/cafeteria/stall' });
 });
 
-test('permission-denied social reads show the login prompt instead of empty comments', async () => {
+test('permission-denied comment reads keep shop data and menus instead of failing the page', async () => {
   jest.mocked(loadStorefront).mockResolvedValue({
     id: 'stall',
     name: '校內咖啡店',
@@ -83,18 +90,12 @@ test('permission-denied social reads show the login prompt instead of empty comm
     location: '學生餐廳',
     openingHours: '週一到週五',
   } as never);
-  jest
-    .mocked(loadStorefrontPosts)
-    .mockResolvedValue([
-      {
-        id: 'post-1',
-        title: '今日優惠',
-        text: '買一送一',
-        kind: 'promo',
-        likeCount: 0,
-        liked: false,
-      },
-    ] as never);
+  jest.mocked(loadStorefrontMenus).mockResolvedValue([
+    { id: 'meal', name: '蔬菜吐司', price: 60 },
+  ] as never);
+  jest.mocked(loadStorefrontPosts).mockRejectedValueOnce(
+    Object.assign(new Error('permission-denied'), { code: 'permission-denied' }),
+  );
   jest
     .mocked(isFollowingStorefront)
     .mockRejectedValueOnce(
@@ -108,7 +109,9 @@ test('permission-denied social reads show the login prompt instead of empty comm
   const view = render(
     <StorefrontScreen navigation={navigation} route={{ params: { cafeteriaId: 'stall' } }} />,
   );
-  expect(await view.findByText(prompt)).toBeTruthy();
+  expect(await view.findByText('紙感小店')).toBeTruthy();
+  expect(await view.findByText('蔬菜吐司 · NT$60')).toBeTruthy();
+  expect(await view.findByText(commentsPrompt)).toBeTruthy();
   expect(view.queryByText('暫時讀不到這間店。')).toBeNull();
   expect(view.queryByText('目前沒有資料')).toBeNull();
   expect(view.queryByText('請確認網路')).toBeNull();

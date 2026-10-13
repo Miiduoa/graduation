@@ -10,6 +10,7 @@ export const publicCampusServices = [
 export function isPublicCampusPath(path: string): boolean {
   return (
     publicCampusServices.some((service) => service.href === path) ||
-    /^\/announcements\/[^/]+$/.test(path)
+    /^\/announcements\/[^/]+$/.test(path) ||
+    /^\/cafeteria\/[^/]+$/.test(path)
   );
 }
