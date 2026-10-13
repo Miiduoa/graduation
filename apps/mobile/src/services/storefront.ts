@@ -54,7 +54,10 @@ function cafeteriaPath(schoolId: string, cafeteriaId: string) {
   return ['schools', schoolId, 'cafeterias', cafeteriaId] as const;
 }
 
-export async function loadStorefront(schoolId: string, cafeteriaId: string): Promise<StorefrontShop | null> {
+export async function loadStorefront(
+  schoolId: string,
+  cafeteriaId: string,
+): Promise<StorefrontShop | null> {
   if (isFirebaseMockMode() || !cafeteriaId || cafeteriaId.includes('/')) return null;
   const snapshot = await getDoc(doc(getDb(), ...cafeteriaPath(schoolId, cafeteriaId)));
   if (!snapshot.exists()) return null;
@@ -109,7 +112,9 @@ export async function loadStorefrontPosts(
   try {
     const liked = await Promise.all(
       posts.map((post) =>
-        getDoc(doc(getDb(), ...cafeteriaPath(schoolId, cafeteriaId), 'posts', post.id, 'likes', uid)),
+        getDoc(
+          doc(getDb(), ...cafeteriaPath(schoolId, cafeteriaId), 'posts', post.id, 'likes', uid),
+        ),
       ),
     );
     return posts.map((post, index) => ({ ...post, liked: liked[index]?.exists() === true }));
@@ -119,7 +124,12 @@ export async function loadStorefrontPosts(
   }
 }
 
-export async function followStorefront(schoolId: string, cafeteriaId: string, uid: string, on: boolean) {
+export async function followStorefront(
+  schoolId: string,
+  cafeteriaId: string,
+  uid: string,
+  on: boolean,
+) {
   const ref = doc(getDb(), ...cafeteriaPath(schoolId, cafeteriaId), 'followers', uid);
   if (on) await setDoc(ref, { createdAt: serverTimestamp() });
   else await deleteDoc(ref);
@@ -127,7 +137,9 @@ export async function followStorefront(schoolId: string, cafeteriaId: string, ui
 
 export async function isFollowingStorefront(schoolId: string, cafeteriaId: string, uid: string) {
   if (!getAuthInstance().currentUser) throw permissionDeniedError();
-  const snapshot = await getDoc(doc(getDb(), ...cafeteriaPath(schoolId, cafeteriaId), 'followers', uid));
+  const snapshot = await getDoc(
+    doc(getDb(), ...cafeteriaPath(schoolId, cafeteriaId), 'followers', uid),
+  );
   return snapshot.exists();
 }
 
@@ -150,11 +162,14 @@ export async function addStorefrontComment(
   uid: string,
   text: string,
 ) {
-  await addDoc(collection(getDb(), ...cafeteriaPath(schoolId, cafeteriaId), 'posts', postId, 'comments'), {
-    authorId: uid,
-    text: text.trim().slice(0, 2000),
-    createdAt: serverTimestamp(),
-  });
+  await addDoc(
+    collection(getDb(), ...cafeteriaPath(schoolId, cafeteriaId), 'posts', postId, 'comments'),
+    {
+      authorId: uid,
+      text: text.trim().slice(0, 2000),
+      createdAt: serverTimestamp(),
+    },
+  );
 }
 
 export async function loadStorefrontComments(
