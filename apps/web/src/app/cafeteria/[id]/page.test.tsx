@@ -28,9 +28,18 @@ const state = vi.hoisted(() => ({
 
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => ({ user: state.user }) }));
 vi.mock('@/components/SiteShell', () => ({
-  SiteShell: ({ title, children }: { title: string; children: React.ReactNode }) => (
+  SiteShell: ({
+    title,
+    subtitle,
+    children,
+  }: {
+    title: string;
+    subtitle?: string;
+    children: React.ReactNode;
+  }) => (
     <main>
       <h1>{title}</h1>
+      {subtitle ? <p>{subtitle}</p> : null}
       {children}
     </main>
   ),
@@ -94,6 +103,13 @@ it('lets a regular account open a storefront and leave to the shop order page', 
     );
   });
   expect(await screen.findByText('紙感小店')).toBeTruthy();
+  expect(screen.getByText('店家自己的主頁。')).toBeTruthy();
+  expect(screen.queryByText('店家自己的主頁。一般帳號即可查看、追蹤與留言。')).toBeNull();
+  expect(
+    screen.queryByText('價格、是否賣完、是否接單以店家訂餐頁為準。Nuni 不處理這筆的付款與退款。'),
+  ).toBeNull();
+  expect(screen.queryByRole('link', { name: '返回餐廳列表' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '回餐廳列表' })).toBeNull();
   expect(screen.getByRole('link', { name: '到店家網站訂餐' }).getAttribute('href')).toContain(
     '/cafeteria/stall/order',
   );
@@ -343,6 +359,9 @@ it.each([
   expect(await screen.findByText(notice)).toBeTruthy();
   expect(screen.queryByText(hidden)).toBeNull();
   expect(screen.getByText('紙感小店')).toBeTruthy();
+  const box = screen.getByTestId('cafeteria-review-notice');
+  expect(box.textContent).toBe(notice);
+  expect(box.className).toMatch(/reviewNotice/);
 });
 
 it('does not mark a verified shop page', async () => {
@@ -362,4 +381,6 @@ it('does not mark a verified shop page', async () => {
   expect(
     screen.queryByText('這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。'),
   ).toBeNull();
+  expect(screen.queryByTestId('cafeteria-review-notice')).toBeNull();
+  expect(screen.queryByRole('link', { name: '返回餐廳列表' })).toBeNull();
 });

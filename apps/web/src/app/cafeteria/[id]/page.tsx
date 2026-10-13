@@ -10,6 +10,7 @@ import type { MenuItem } from '@/lib/firebase';
 import {
   CAFETERIA_BACK_TO_LIST_TEXT,
   CAFETERIA_NOT_FOUND_TEXT,
+  STOREFRONT_PAGE_SUBTITLE,
   cafeteriaListHref,
   cafeteriaReviewNotice,
 } from '@campus/shared/src/cafeteriaCatalog';
@@ -30,7 +31,6 @@ import {
 } from '@/lib/storefront';
 import {
   MENU_STALE_TEXT,
-  PRICE_DISCLAIMER,
   SHOWCASE_ORDER_BUTTON_TEXT,
   SHOWCASE_ORDER_CAPTION,
   isMenuStale,
@@ -110,7 +110,7 @@ export default function StorefrontPage(props: {
   return (
     <SiteShell
       title={shop?.name || '店面'}
-      subtitle="店家自己的主頁。一般帳號即可查看、追蹤與留言。"
+      subtitle={STOREFRONT_PAGE_SUBTITLE}
       schoolName={context.schoolName}
     >
       {error && <p role="alert">{error}</p>}
@@ -126,7 +126,9 @@ export default function StorefrontPage(props: {
       {shop && (
         <div className={social.stack}>
           {cafeteriaReviewNotice(shop.reviewStatus) ? (
-            <p role="status">{cafeteriaReviewNotice(shop.reviewStatus)}</p>
+            <p role="status" className={social.reviewNotice} data-testid="cafeteria-review-notice">
+              {cafeteriaReviewNotice(shop.reviewStatus)}
+            </p>
           ) : null}
           <section className={social.panel}>
             <h2>{shop.name}</h2>
@@ -148,12 +150,6 @@ export default function StorefrontPage(props: {
               </p>
             )}
             <div className={social.actions}>
-              <Link
-                className="btn"
-                href={`/cafeteria?schoolId=${encodeURIComponent(context.schoolId)}`}
-              >
-                返回餐廳列表
-              </Link>
               {action.kind === 'showcase' && (
                 <Link
                   className="btn primary"
@@ -177,7 +173,6 @@ export default function StorefrontPage(props: {
               ) : null}
             </div>
             {action.kind === 'showcase' && <p className={social.muted}>{SHOWCASE_ORDER_CAPTION}</p>}
-            <p className={social.muted}>{PRICE_DISCLAIMER}</p>
           </section>
           <section className={social.panel} aria-label="菜單">
             <h2>菜單</h2>

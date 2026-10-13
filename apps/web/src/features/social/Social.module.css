@@ -110,6 +110,15 @@
   padding: 16px 0;
   border-top: 1px solid var(--border);
 }
+.reviewNotice {
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  line-height: 1.7;
+}
 .list {
   padding: 0;
   margin: 0;

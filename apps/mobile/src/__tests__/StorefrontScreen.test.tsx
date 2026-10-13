@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import StorefrontScreen from '../screens/StorefrontScreen';
 import HonestOrderScreen from '../screens/HonestOrderScreen';
+import { theme } from '../ui/theme';
 import {
   loadStorefront,
   loadStorefrontMenus,
@@ -68,6 +69,13 @@ test('unsigned visitors keep public shop info and menus, skip social reads, and 
     <StorefrontScreen navigation={navigation} route={{ params: { cafeteriaId: 'stall' } }} />,
   );
   expect(await view.findByText('紙感小店')).toBeTruthy();
+  expect(view.getByText('店家自己的主頁。')).toBeTruthy();
+  expect(view.queryByText('店家自己的主頁。一般帳號即可查看、追蹤與留言。')).toBeNull();
+  expect(
+    view.queryByText('價格、是否賣完、是否接單以店家訂餐頁為準。Nuni 不處理這筆的付款與退款。'),
+  ).toBeNull();
+  expect(view.queryByText('返回餐廳列表')).toBeNull();
+  expect(view.queryByText('回餐廳列表')).toBeNull();
   expect(await view.findByText('蔬菜吐司 · NT$60')).toBeTruthy();
   expect(await view.findByText(commentsPrompt)).toBeTruthy();
   expect(view.queryByText('登入後才能看失物招領和評論')).toBeNull();
@@ -274,6 +282,13 @@ test.each([
   expect(view.queryByText(hidden)).toBeNull();
   expect(view.getByText('紙感小店')).toBeTruthy();
   expect(view.queryByText('找不到這間店。')).toBeNull();
+  const box = view.getByTestId('cafeteria-review-notice');
+  expect(view.getByText(notice)).toBeTruthy();
+  expect(box).toHaveStyle({
+    backgroundColor: theme.colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  });
 });
 
 test('does not mark a verified shop page', async () => {
@@ -292,6 +307,8 @@ test('does not mark a verified shop page', async () => {
   expect(
     view.queryByText('這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。'),
   ).toBeNull();
+  expect(view.queryByTestId('cafeteria-review-notice')).toBeNull();
+  expect(view.queryByText('返回餐廳列表')).toBeNull();
 });
 
 test('外連確認頁按鈕與小字同一套文案', async () => {
