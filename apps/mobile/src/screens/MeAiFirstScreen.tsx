@@ -6,6 +6,7 @@ import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { usePermissions } from '../hooks/usePermissions';
 import { safeNavigate } from '../utils/safeNavigate';
+import { loadFailureCopy } from '../utils/loadFailureCopy';
 import { rootNavigate, rootNavigateNested } from '../app/rootNavigation';
 
 export default function MeAiFirstScreen() {
@@ -73,7 +74,9 @@ export default function MeAiFirstScreen() {
           </Text>
           {!profile && !auth.profileLoading ? (
             <Text style={{ color: aiTokens.muted, marginTop: 8 }}>
-              目前無法讀取個人檔案，請確認登入狀態。
+              {uid && !auth.profile
+                ? auth.error || loadFailureCopy()
+                : '目前無法讀取個人檔案，請確認登入狀態。'}
             </Text>
           ) : null}
         </AICard>

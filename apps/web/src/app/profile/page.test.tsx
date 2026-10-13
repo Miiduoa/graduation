@@ -77,9 +77,20 @@ it('shows a retryable failure without presenting empty records as success', asyn
   state.read.mockRejectedValueOnce(new Error('offline'));
   render(<ProfilePage />);
   await screen.findByRole('alert');
+  expect(screen.getByText(/暫時讀不到資料，請稍後再試/)).toBeTruthy();
+  expect(screen.queryByText(/請確認網路後再試/)).toBeNull();
   expect(screen.queryByText('尚未填寫個人資料，可以到帳號設定補上。')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '重新讀取' }));
   await screen.findByText('私人資料 A');
+});
+
+it('asks to check the network only when a profile read fails at the network layer', async () => {
+  Object.defineProperty(window.navigator, 'onLine', { configurable: true, value: true });
+  state.read.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+  render(<ProfilePage />);
+  await screen.findByRole('alert');
+  expect(screen.getByText(/請確認網路後再試/)).toBeTruthy();
+  expect(screen.queryByText(/暫時讀不到資料，請稍後再試/)).toBeNull();
 });
 it('distinguishes a missing profile from a failed read', async () => {
   state.read.mockResolvedValue({ exists: () => false });

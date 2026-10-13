@@ -14,6 +14,7 @@ type RecordState<K extends AcademicKind> = {
   status: 'loading' | 'ready' | 'error';
   snapshot?: AcademicSnapshot<K>;
   reason?: 'reconnect' | 'unavailable' | 'permission';
+  error?: unknown;
 };
 
 export function useAcademicRecords<K extends AcademicKind>(kind: K) {
@@ -37,6 +38,7 @@ export function useAcademicRecords<K extends AcademicKind>(kind: K) {
           scope,
           status: 'error',
           reason: error instanceof AcademicConnectionError ? error.reason : 'unavailable',
+          error,
         });
       }
     }

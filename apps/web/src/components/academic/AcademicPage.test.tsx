@@ -130,9 +130,21 @@ it('shows failure and retries without falling back to demo or previously loaded 
   vi.mocked(loadAcademicRecords).mockRejectedValueOnce(new AcademicConnectionError('unavailable'));
   fireEvent.click(screen.getByRole('button', { name: '更新資料' }));
   expect(await screen.findByText('暫時無法讀取學校資料')).toBeTruthy();
+  expect(screen.getByText(/暫時讀不到資料，請稍後再試/)).toBeTruthy();
+  expect(screen.queryByText(/請確認網路後再試/)).toBeNull();
   expect(screen.queryByText('真實來源科目')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '重新讀取' }));
   await screen.findByText('真實來源科目');
+});
+
+it('asks to check the network only when the academic fetch fails at the network layer', async () => {
+  vi.mocked(loadAcademicRecords).mockRejectedValueOnce(
+    new AcademicConnectionError('unavailable', new TypeError('Failed to fetch')),
+  );
+  render(<GradesPage />);
+  expect(await screen.findByText('暫時無法讀取學校資料')).toBeTruthy();
+  expect(screen.getByText(/請確認網路後再試/)).toBeTruthy();
+  expect(screen.queryByText(/暫時讀不到資料，請稍後再試/)).toBeNull();
 });
 it('clears private records synchronously when signing out', async () => {
   const view = render(<GradesPage />);

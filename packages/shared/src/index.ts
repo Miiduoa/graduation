@@ -89,5 +89,6 @@ export * from './lms/attendanceEngine';
 export * from './timetable';
 export * from './merchantMode';
 export * from './campusAnnouncements';
+export * from './loadFailureCopy';
 export * from './signedInSocialReads';
 export * from './imports';

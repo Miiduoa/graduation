@@ -32,6 +32,9 @@ test('Providence University has the seven first-wave offices and no login portal
   expect(listSources('pu').every((item) => item.kind === 'html_list')).toBe(true);
   expect(listSources('pu').every((item) => item.parsers.length >= 2)).toBe(true);
   expect(JSON.stringify(listSources('pu'))).not.toMatch(/alcat\.pu\.edu\.tw|tronclass/i);
+  const byId = Object.fromEntries(listSources('pu').map((item) => [item.sourceId, item.listUrl]));
+  expect(byId['pu-osa']).toBe('https://osa.pu.edu.tw/p/422-1111-1039.php');
+  expect(byId['pu-dorm']).toBe('https://osadorm.pu.edu.tw/p/403-1065-679-1.php');
 });
 
 test('non-demo schools at least configure campus news and academic affairs', () => {
@@ -47,9 +50,11 @@ test('demo schools without a real site stay off the public production list', () 
   const demo = rows.filter((row) => PLACEHOLDER_SCHOOL_IDS.includes(row.schoolId));
   expect(demo.every((row) => row.status === 'unavailable')).toBe(true);
   expect(demo.every((row) => row.campus === SOURCE_UNAVAILABLE)).toBe(true);
-  expect(SCHOOLS.filter((item) => item.cms === 'none').map((item) => item.schoolId).sort()).toEqual(
-    [...PLACEHOLDER_SCHOOL_IDS].sort(),
-  );
+  expect(
+    SCHOOLS.filter((item) => item.cms === 'none')
+      .map((item) => item.schoolId)
+      .sort(),
+  ).toEqual([...PLACEHOLDER_SCHOOL_IDS].sort());
   const productionIds = listPublicSchools('production').map((item) => item.schoolId);
   expect(productionIds.some((id) => PLACEHOLDER_SCHOOL_IDS.includes(id))).toBe(false);
   expect(listPublicSchools('').some((item) => PLACEHOLDER_SCHOOL_IDS.includes(item.schoolId))).toBe(
@@ -67,11 +72,15 @@ test('demo schools without a real site stay off the public production list', () 
   else process.env.APP_ENV = previousAppEnv;
   const developmentIds = listPublicSchools('development').map((item) => item.schoolId);
   expect(PLACEHOLDER_SCHOOL_IDS.every((id) => developmentIds.includes(id))).toBe(true);
-  expect(PLACEHOLDER_SCHOOL_IDS.every((id) => listPublicSchools('test').some((item) => item.schoolId === id))).toBe(
-    true,
-  );
   expect(
-    PLACEHOLDER_SCHOOL_IDS.every((id) => listPublicSchools('preview').some((item) => item.schoolId === id)),
+    PLACEHOLDER_SCHOOL_IDS.every((id) =>
+      listPublicSchools('test').some((item) => item.schoolId === id),
+    ),
+  ).toBe(true);
+  expect(
+    PLACEHOLDER_SCHOOL_IDS.every((id) =>
+      listPublicSchools('preview').some((item) => item.schoolId === id),
+    ),
   ).toBe(true);
   expect(formatCoverageTable()).toContain('正式環境不顯示給一般使用者');
   expect(formatCoverageTable()).toContain('暫時抓不到');
