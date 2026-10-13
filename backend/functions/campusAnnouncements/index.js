@@ -5,6 +5,7 @@ const { syncSource, syncSchool, visibleAnnouncements, feedStatus } = require('./
 const { extractFromHtml } = require('./extract');
 const { runParser } = require('./parsers');
 const { normalizeAnnouncementUrl } = require('./url');
+const { parseCli, runCli } = require('./cli');
 
 module.exports = {
   ...catalog,
@@ -15,4 +16,6 @@ module.exports = {
   extractFromHtml,
   runParser,
   normalizeAnnouncementUrl,
+  parseCli,
+  runCli,
 };
