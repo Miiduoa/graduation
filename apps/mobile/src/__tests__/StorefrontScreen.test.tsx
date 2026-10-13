@@ -48,9 +48,18 @@ test('unsigned visitors keep public shop info, skip social reads, and see a logi
     location: '學生餐廳',
     openingHours: '週一至週五 11:00–14:00',
   } as never);
-  jest.mocked(loadStorefrontPosts).mockResolvedValue([
-    { id: 'post-1', title: '今日優惠', text: '買一送一', kind: 'promo', likeCount: 0, liked: false },
-  ] as never);
+  jest
+    .mocked(loadStorefrontPosts)
+    .mockResolvedValue([
+      {
+        id: 'post-1',
+        title: '今日優惠',
+        text: '買一送一',
+        kind: 'promo',
+        likeCount: 0,
+        liked: false,
+      },
+    ] as never);
   const view = render(
     <StorefrontScreen navigation={navigation} route={{ params: { cafeteriaId: 'stall' } }} />,
   );
@@ -74,15 +83,28 @@ test('permission-denied social reads show the login prompt instead of empty comm
     location: '學生餐廳',
     openingHours: '週一到週五',
   } as never);
-  jest.mocked(loadStorefrontPosts).mockResolvedValue([
-    { id: 'post-1', title: '今日優惠', text: '買一送一', kind: 'promo', likeCount: 0, liked: false },
-  ] as never);
+  jest
+    .mocked(loadStorefrontPosts)
+    .mockResolvedValue([
+      {
+        id: 'post-1',
+        title: '今日優惠',
+        text: '買一送一',
+        kind: 'promo',
+        likeCount: 0,
+        liked: false,
+      },
+    ] as never);
   jest
     .mocked(isFollowingStorefront)
-    .mockRejectedValueOnce(Object.assign(new Error('permission-denied'), { code: 'permission-denied' }));
+    .mockRejectedValueOnce(
+      Object.assign(new Error('permission-denied'), { code: 'permission-denied' }),
+    );
   jest
     .mocked(loadStorefrontComments)
-    .mockRejectedValue(Object.assign(new Error('permission-denied'), { code: 'permission-denied' }));
+    .mockRejectedValue(
+      Object.assign(new Error('permission-denied'), { code: 'permission-denied' }),
+    );
   const view = render(
     <StorefrontScreen navigation={navigation} route={{ params: { cafeteriaId: 'stall' } }} />,
   );

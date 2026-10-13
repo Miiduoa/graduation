@@ -2,7 +2,11 @@ import { Suspense } from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import StorefrontPage from './page';
-import { isFollowingStorefront, loadStorefrontComments, loadStorefrontPosts } from '@/lib/storefront';
+import {
+  isFollowingStorefront,
+  loadStorefrontComments,
+  loadStorefrontPosts,
+} from '@/lib/storefront';
 
 const state = vi.hoisted(() => ({
   user: { uid: 'alice' } as { uid: string } | null,
@@ -24,7 +28,15 @@ const state = vi.hoisted(() => ({
     location: string;
     openingHours?: string;
   },
-  posts: [] as Array<{ id: string; title: string; text: string; kind: string; createdAt: string; likeCount: number; liked: boolean }>,
+  posts: [] as Array<{
+    id: string;
+    title: string;
+    text: string;
+    kind: string;
+    createdAt: string;
+    likeCount: number;
+    liked: boolean;
+  }>,
 }));
 
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => ({ user: state.user }) }));
@@ -67,7 +79,9 @@ beforeEach(() => {
   state.posts = [];
   vi.mocked(isFollowingStorefront).mockReset().mockResolvedValue(false);
   vi.mocked(loadStorefrontComments).mockReset().mockResolvedValue([]);
-  vi.mocked(loadStorefrontPosts).mockReset().mockImplementation(async () => state.posts);
+  vi.mocked(loadStorefrontPosts)
+    .mockReset()
+    .mockImplementation(async () => state.posts);
 });
 
 it('lets a regular account open a storefront and leave to the shop order page', async () => {
