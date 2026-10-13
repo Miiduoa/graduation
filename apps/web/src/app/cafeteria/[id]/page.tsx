@@ -1,11 +1,13 @@
 'use client';
 
-import { use, useEffect, useState } from 'react';
+import { use, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
+import { LoginRequiredLostFoundComments } from '@/components/LoginRequiredLostFoundComments';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import { fetchMenus, type MenuItem } from '@/lib/firebase';
+import { isPermissionDeniedError } from '@campus/shared/src/signedInSocialReads';
 import {
   addStorefrontComment,
   followStorefront,
@@ -36,36 +38,52 @@ export default function StorefrontPage(props: {
   const { id } = use(props.params);
   const search = props.searchParams ? use(props.searchParams) : undefined;
   const context = resolveSchoolPageContext(search);
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
+  const signedIn = Boolean(user?.uid);
+  const loginReturnUrl = `/cafeteria/${encodeURIComponent(id)}?schoolId=${encodeURIComponent(context.schoolId)}`;
   const [shop, setShop] = useState<Cafeteria | null | undefined>(undefined);
   const [menus, setMenus] = useState<MenuItem[]>([]);
   const [posts, setPosts] = useState<StorefrontPost[]>([]);
   const [following, setFollowing] = useState(false);
+  const [socialBlocked, setSocialBlocked] = useState(false);
   const [error, setError] = useState('');
+  const canReadSocial = signedIn && !socialBlocked;
   useEffect(() => {
     let active = true;
     setError('');
+    setSocialBlocked(!authLoading && !signedIn);
     Promise.all([
       loadStorefront(context.schoolId, id),
       fetchMenus(context.schoolId),
-      loadStorefrontPosts(context.schoolId, id, user?.uid),
-      user?.uid ? isFollowingStorefront(context.schoolId, id, user.uid) : Promise.resolve(false),
+      loadStorefrontPosts(context.schoolId, id, signedIn ? user?.uid : undefined),
     ]).then(
-      ([nextShop, nextMenus, nextPosts, nextFollowing]) => {
+      ([nextShop, nextMenus, nextPosts]) => {
         if (!active) return;
         setShop(nextShop);
         setMenus(nextMenus.filter((item) => item.cafeteriaId === id));
         setPosts(nextPosts);
-        setFollowing(nextFollowing);
       },
       () => {
         if (active) setError('暫時讀不到這間店。');
       },
     );
+    if (signedIn && user?.uid) {
+      isFollowingStorefront(context.schoolId, id, user.uid).then(
+        (nextFollowing) => {
+          if (active) setFollowing(nextFollowing);
+        },
+        (reason) => {
+          if (!active) return;
+          if (isPermissionDeniedError(reason)) setSocialBlocked(true);
+        },
+      );
+    } else {
+      setFollowing(false);
+    }
     return () => {
       active = false;
     };
-  }, [context.schoolId, id, user?.uid]);
+  }, [authLoading, context.schoolId, id, signedIn, user?.uid]);
   const action = studentCafeteriaAction({
     merchantMode: shop?.merchantMode,
     orderingEnabled: shop?.orderingEnabled,
@@ -110,7 +128,7 @@ export default function StorefrontPage(props: {
                 </Link>
               )}
               {action.kind === 'native_closed' && <p className={social.muted}>{action.label}</p>}
-              {user && (
+              {canReadSocial && user ? (
                 <button
                   className="btn"
                   onClick={() =>
@@ -121,6 +139,8 @@ export default function StorefrontPage(props: {
                 >
                   {following ? '取消追蹤' : '追蹤店家'}
                 </button>
+              ) : authLoading ? null : (
+                <LoginRequiredLostFoundComments returnUrl={loginReturnUrl} />
               )}
             </div>
             {action.kind === 'showcase' && (
@@ -156,7 +176,9 @@ export default function StorefrontPage(props: {
                 schoolId={context.schoolId}
                 cafeteriaId={id}
                 uid={user?.uid}
+                canReadSocial={canReadSocial}
                 post={post}
+                onSocialDenied={() => setSocialBlocked(true)}
               />
             ))}
           </section>
@@ -170,19 +192,31 @@ function StorefrontPostCard({
   schoolId,
   cafeteriaId,
   uid,
+  canReadSocial,
   post,
+  onSocialDenied,
 }: {
   schoolId: string;
   cafeteriaId: string;
   uid?: string;
+  canReadSocial: boolean;
   post: StorefrontPost;
+  onSocialDenied: () => void;
 }) {
   const [liked, setLiked] = useState(post.liked);
   const [comments, setComments] = useState<StorefrontComment[]>([]);
   const [draft, setDraft] = useState('');
+  const onSocialDeniedRef = useRef(onSocialDenied);
+  onSocialDeniedRef.current = onSocialDenied;
   useEffect(() => {
-    void loadStorefrontComments(schoolId, cafeteriaId, post.id).then(setComments, () => undefined);
-  }, [schoolId, cafeteriaId, post.id]);
+    if (!canReadSocial) {
+      setComments([]);
+      return;
+    }
+    void loadStorefrontComments(schoolId, cafeteriaId, post.id).then(setComments, (reason) => {
+      if (isPermissionDeniedError(reason)) onSocialDeniedRef.current();
+    });
+  }, [canReadSocial, schoolId, cafeteriaId, post.id]);
   return (
     <article className={`${social.panel} ${social.post}`} aria-label={post.title || '店家貼文'}>
       <div className={social.metadata}>
@@ -190,7 +224,7 @@ function StorefrontPostCard({
         <span className={social.muted}>{post.kind === 'promo' ? '優惠' : post.kind === 'announcement' ? '公告' : '貼文'}</span>
       </div>
       <p className={social.postText}>{post.text}</p>
-      {uid && (
+      {canReadSocial && uid ? (
         <div className={social.actions}>
           <button
             className="btn"
@@ -203,13 +237,15 @@ function StorefrontPostCard({
             {liked ? '收回讚' : '讚'}
           </button>
         </div>
-      )}
-      {comments.map((comment) => (
-        <p key={comment.id} className={social.muted}>
-          {comment.text}
-        </p>
-      ))}
-      {uid && (
+      ) : null}
+      {canReadSocial
+        ? comments.map((comment) => (
+            <p key={comment.id} className={social.muted}>
+              {comment.text}
+            </p>
+          ))
+        : null}
+      {canReadSocial && uid && (
         <form
           onSubmit={(event) => {
             event.preventDefault();

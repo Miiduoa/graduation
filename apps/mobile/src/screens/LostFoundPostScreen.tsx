@@ -13,6 +13,7 @@ import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useThemeMode } from '../state/theme';
 import type { LostFoundCategory, LostFoundItem } from '../data/types';
+import { LoginRequiredLostFoundComments } from '../components/LoginRequiredLostFoundComments';
 import {
   LOST_FOUND_CATEGORIES,
   lostFoundDataSource,
@@ -21,7 +22,7 @@ import {
 } from '../features/lostFound';
 
 type Props = {
-  navigation?: { goBack?: () => void };
+  navigation?: { goBack?: () => void; navigate?: (screen: string, params?: object) => void };
   route?: { params?: { id?: string; type?: 'lost' | 'found' } };
 };
 function Field({
@@ -244,11 +245,17 @@ export function LostFoundPostScreen({ navigation, route }: Props) {
       throw new Error('無法編輯這則刊登。');
     return item;
   }, [id, uid, schoolId]);
-  const { state, refresh } = useLostFoundLoad(scope, loader, isCurrent);
-  if (!uid)
+  const { state, refresh } = useLostFoundLoad(scope, loader, isCurrent, Boolean(uid));
+  if (!uid || state.status === 'login-required')
     return (
       <Screen>
-        <AnimatedCard title="請先登入" subtitle="登入後即可發布失物招領資訊。" />
+        <AnimatedCard title="失物招領">
+          <LoginRequiredLostFoundComments
+            onLogin={() => {
+              if (isCurrent()) navigation?.navigate?.('SSOLogin');
+            }}
+          />
+        </AnimatedCard>
       </Screen>
     );
   if (state.status === 'loading')

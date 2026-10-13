@@ -137,6 +137,18 @@ test('a canonical read failure never masquerades as a successful fallback or an 
   expect(getDocFromServer).toHaveBeenCalledTimes(1);
 });
 
+test('unsigned reads fail before hitting Firestore', async () => {
+  mockUid = null;
+  await expect(lostFoundSource.listLostFoundItems('pu')).rejects.toMatchObject({
+    code: 'permission-denied',
+  });
+  await expect(lostFoundSource.getLostFoundItem('item-1', 'pu')).rejects.toMatchObject({
+    code: 'permission-denied',
+  });
+  expect(getDocsFromServer).not.toHaveBeenCalled();
+  expect(getDocFromServer).not.toHaveBeenCalled();
+});
+
 test('list merges both actual same-school collections with canonical IDs taking precedence', async () => {
   jest
     .mocked(getDocsFromServer)

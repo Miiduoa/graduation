@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { Screen, Button } from '../ui/components';
 import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
+import { LoginRequiredLostFoundComments } from '../components/LoginRequiredLostFoundComments';
+import { isPermissionDeniedError } from '@campus/shared/src/signedInSocialReads';
 import {
   addStorefrontComment,
   followStorefront,
@@ -33,33 +35,49 @@ type Props = {
 
 export default function StorefrontScreen({ navigation, route }: Props) {
   const cafeteriaId = route?.params?.cafeteriaId || route?.params?.id || '';
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const { school } = useSchool();
+  const signedIn = Boolean(user?.uid);
   const [shop, setShop] = useState<StorefrontShop | null>(null);
   const [posts, setPosts] = useState<StorefrontPost[]>([]);
   const [following, setFollowing] = useState(false);
+  const [socialBlocked, setSocialBlocked] = useState(false);
   const [error, setError] = useState('');
+  const canReadSocial = signedIn && !socialBlocked;
+  const openLogin = () => navigation?.navigate?.('SSOLogin');
   useEffect(() => {
     let active = true;
+    setSocialBlocked(!authLoading && !signedIn);
     Promise.all([
       loadStorefront(school.id, cafeteriaId),
-      loadStorefrontPosts(school.id, cafeteriaId, user?.uid),
-      user?.uid ? isFollowingStorefront(school.id, cafeteriaId, user.uid) : Promise.resolve(false),
+      loadStorefrontPosts(school.id, cafeteriaId, signedIn ? user?.uid : undefined),
     ]).then(
-      ([nextShop, nextPosts, nextFollowing]) => {
+      ([nextShop, nextPosts]) => {
         if (!active) return;
         setShop(nextShop);
         setPosts(nextPosts);
-        setFollowing(nextFollowing);
       },
       () => {
         if (active) setError('暫時讀不到這間店。');
       },
     );
+    if (signedIn && user?.uid) {
+      isFollowingStorefront(school.id, cafeteriaId, user.uid).then(
+        (nextFollowing) => {
+          if (active) setFollowing(nextFollowing);
+        },
+        (reason) => {
+          if (!active) return;
+          if (isPermissionDeniedError(reason)) setSocialBlocked(true);
+        },
+      );
+    } else {
+      setFollowing(false);
+    }
     return () => {
       active = false;
     };
-  }, [school.id, cafeteriaId, user?.uid]);
+  }, [authLoading, school.id, cafeteriaId, signedIn, user?.uid]);
   const action = studentCafeteriaAction({
     merchantMode: shop?.merchantMode,
     orderingEnabled: shop?.orderingEnabled,
@@ -94,7 +112,7 @@ export default function StorefrontScreen({ navigation, route }: Props) {
               {action.kind === 'native_closed' ? (
                 <Text style={{ color: theme.colors.muted }}>{action.label}</Text>
               ) : null}
-              {user?.uid ? (
+              {canReadSocial && user?.uid ? (
                 <Button
                   text={following ? '取消追蹤' : '追蹤店家'}
                   onPress={() =>
@@ -103,7 +121,9 @@ export default function StorefrontScreen({ navigation, route }: Props) {
                     )
                   }
                 />
-              ) : null}
+              ) : authLoading ? null : (
+                <LoginRequiredLostFoundComments onLogin={openLogin} />
+              )}
             </View>
             {action.kind === 'showcase' && shop.orderingUrl ? (
               <Text style={{ color: theme.colors.muted, lineHeight: 20 }}>{SHOWCASE_ORDER_CAPTION}</Text>
@@ -123,7 +143,9 @@ export default function StorefrontScreen({ navigation, route }: Props) {
                   schoolId={school.id}
                   cafeteriaId={cafeteriaId}
                   uid={user?.uid}
+                  canReadSocial={canReadSocial}
                   post={post}
+                  onSocialDenied={() => setSocialBlocked(true)}
                 />
               ))
             )}
@@ -138,19 +160,31 @@ function StorefrontPostCard({
   schoolId,
   cafeteriaId,
   uid,
+  canReadSocial,
   post,
+  onSocialDenied,
 }: {
   schoolId: string;
   cafeteriaId: string;
   uid?: string;
+  canReadSocial: boolean;
   post: StorefrontPost;
+  onSocialDenied: () => void;
 }) {
   const [liked, setLiked] = useState(post.liked);
   const [comments, setComments] = useState<StorefrontComment[]>([]);
   const [draft, setDraft] = useState('');
+  const onSocialDeniedRef = useRef(onSocialDenied);
+  onSocialDeniedRef.current = onSocialDenied;
   useEffect(() => {
-    void loadStorefrontComments(schoolId, cafeteriaId, post.id).then(setComments, () => undefined);
-  }, [schoolId, cafeteriaId, post.id]);
+    if (!canReadSocial) {
+      setComments([]);
+      return;
+    }
+    void loadStorefrontComments(schoolId, cafeteriaId, post.id).then(setComments, (reason) => {
+      if (isPermissionDeniedError(reason)) onSocialDeniedRef.current();
+    });
+  }, [canReadSocial, schoolId, cafeteriaId, post.id]);
   return (
     <View style={{ gap: 8, borderBottomWidth: 1, borderBottomColor: theme.colors.separator, paddingBottom: 10 }}>
       <Text style={{ color: theme.colors.text, fontWeight: '700' }}>{post.title || '店家消息'}</Text>
@@ -158,7 +192,7 @@ function StorefrontPostCard({
         {post.kind === 'promo' ? '優惠' : post.kind === 'announcement' ? '公告' : '貼文'}
       </Text>
       <Text style={{ color: theme.colors.text, lineHeight: 22 }}>{post.text}</Text>
-      {uid ? (
+      {canReadSocial && uid ? (
         <Button
           text={liked ? '收回讚' : '讚'}
           onPress={() =>
@@ -166,12 +200,14 @@ function StorefrontPostCard({
           }
         />
       ) : null}
-      {comments.map((comment) => (
-        <Text key={comment.id} style={{ color: theme.colors.muted }}>
-          {comment.text}
-        </Text>
-      ))}
-      {uid ? (
+      {canReadSocial
+        ? comments.map((comment) => (
+            <Text key={comment.id} style={{ color: theme.colors.muted }}>
+              {comment.text}
+            </Text>
+          ))
+        : null}
+      {canReadSocial && uid ? (
         <>
           <TextInput value={draft} onChangeText={setDraft} placeholder="留言" style={field} maxLength={2000} />
           <Button

@@ -6,6 +6,7 @@ import { theme } from '../ui/theme';
 import { useThemeMode } from '../state/theme';
 import type { LostFoundCategory } from '../data/types';
 import { formatDateTime } from '../utils/format';
+import { LoginRequiredLostFoundComments } from '../components/LoginRequiredLostFoundComments';
 import {
   LOST_FOUND_CATEGORIES,
   categoryLabel,
@@ -24,7 +25,7 @@ export function LostFoundScreen({ navigation }: Props) {
     () => lostFoundDataSource().listLostFoundItems(schoolId, { limit: 100 }),
     [schoolId],
   );
-  const { state, refresh } = useLostFoundLoad(scope, loader, isCurrent);
+  const { state, refresh } = useLostFoundLoad(scope, loader, isCurrent, Boolean(uid));
   const [filters, setFilters] = useState<{
     scope: string;
     type: string;
@@ -51,6 +52,18 @@ export function LostFoundScreen({ navigation }: Props) {
       }),
     [state.data, schoolId, current.type, current.open, current.category, current.search],
   );
+  const openLogin = () => {
+    if (isCurrent()) navigation?.navigate('SSOLogin');
+  };
+  if (!uid || state.status === 'login-required') {
+    return (
+      <Screen>
+        <AnimatedCard title="失物招領">
+          <LoginRequiredLostFoundComments onLogin={openLogin} />
+        </AnimatedCard>
+      </Screen>
+    );
+  }
   const post = (type: 'lost' | 'found') => {
     if (!uid) {
       Alert.alert('請先登入', '登入後即可發布失物招領資訊。');

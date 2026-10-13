@@ -6,6 +6,7 @@ import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useThemeMode } from '../state/theme';
 import { formatDateTime } from '../utils/format';
+import { LoginRequiredLostFoundComments } from '../components/LoginRequiredLostFoundComments';
 import {
   categoryLabel,
   statusLabel,
@@ -28,11 +29,23 @@ export function LostFoundDetailScreen({ navigation, route }: Props) {
     if (item && (item.id !== id || item.schoolId !== schoolId)) throw new Error('物品範圍不符');
     return item;
   }, [id, schoolId]);
-  const { state, refresh } = useLostFoundLoad(scope, loader, isCurrent);
-  const item = state.data;
-  const isOwner = !!uid && uid === item?.reporterId;
+  const { state, refresh } = useLostFoundLoad(scope, loader, isCurrent, Boolean(uid));
   const lock = useRef<{ scope: string; token: symbol } | null>(null);
   const [busyScope, setBusyScope] = useState<string | null>(null);
+  const openLogin = () => {
+    if (isCurrent()) navigation?.navigate('SSOLogin');
+  };
+  if (!uid || state.status === 'login-required') {
+    return (
+      <Screen>
+        <AnimatedCard title="失物招領">
+          <LoginRequiredLostFoundComments onLogin={openLogin} />
+        </AnimatedCard>
+      </Screen>
+    );
+  }
+  const item = state.data;
+  const isOwner = !!uid && uid === item?.reporterId;
   const busy = busyScope === scope;
   const copy = async () => {
     if (!uid || !item?.contactInfo || !isCurrent() || lock.current?.scope === scope) return;

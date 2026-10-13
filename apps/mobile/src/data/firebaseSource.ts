@@ -80,6 +80,7 @@ import {
   buildUserCollectionPath,
   buildUserSchoolCollectionPath,
   PROVIDENCE_UNIVERSITY_SCHOOL_ID,
+  permissionDeniedError,
 } from '@campus/shared/src';
 import { collectionFromSegments, docFromSegments } from './firestorePath';
 import {
@@ -1023,6 +1024,7 @@ export const firebaseSource: DataSource = {
   },
 
   async listPoiReviews(poiId, schoolId = undefined) {
+    if (!getAuthInstance().currentUser) throw permissionDeniedError();
     if (schoolId) {
       try {
         const rows = await fetchCollectionAtPath<PoiReview>(
@@ -1038,6 +1040,7 @@ export const firebaseSource: DataSource = {
           }));
         }
       } catch (error) {
+        if (isPermissionDeniedError(error)) throw error;
         console.warn('[firebaseSource] listPoiReviews school-scoped read failed:', error);
       }
     }
@@ -1046,7 +1049,10 @@ export const firebaseSource: DataSource = {
       buildLegacyPoiCollectionPath(poiId, 'reviews'),
       [orderBy('createdAt', 'desc')],
       { pageSize: 100 },
-    ).catch(() => []);
+    ).catch((error) => {
+      if (isPermissionDeniedError(error)) throw error;
+      return [];
+    });
 
     return legacyRows.map((row) => ({
       ...row,

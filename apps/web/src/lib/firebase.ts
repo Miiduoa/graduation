@@ -58,7 +58,9 @@ import {
   buildSchoolCollectionPath,
   buildUserSchoolCollectionPath,
   defaultNotificationPreferences,
+  isPermissionDeniedError,
   normalizeNotificationPreferences,
+  permissionDeniedError,
   type PuStudentLoginResponse,
   normalizeSchoolSSOConfig,
   type NotificationPreferences,
@@ -2040,6 +2042,9 @@ export async function fetchComments(
   if (!isFirebaseConfigured()) {
     return [];
   }
+  if (!getAuth()?.currentUser) {
+    throw permissionDeniedError();
+  }
 
   try {
     const firestore = getDb();
@@ -2067,7 +2072,8 @@ export async function fetchComments(
       limit(maxItems),
     );
 
-    const snap = await getDocs(q).catch(async () => {
+    const snap = await getDocs(q).catch(async (error) => {
+      if (isPermissionDeniedError(error)) throw error;
       if (!schoolId || targetType === 'announcement') {
         throw new Error('comments query failed');
       }
@@ -2094,6 +2100,7 @@ export async function fetchComments(
       };
     });
   } catch (error) {
+    if (isPermissionDeniedError(error)) throw error;
     console.error('[Firebase] Failed to fetch comments:', error);
     return [];
   }
