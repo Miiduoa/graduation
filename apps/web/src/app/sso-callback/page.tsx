@@ -8,7 +8,7 @@ import {
 } from '@campus/shared/src';
 
 import { completeWebSSOCallback, signInWithCustomAuthToken } from '@/features/auth/client';
-import { appendSchoolContext, sanitizeInternalPath } from '@/lib/navigation';
+import { appendSchoolContext, readLoginReturnParam, sanitizeInternalPath } from '@/lib/navigation';
 import { SiteShell } from '@/components/SiteShell';
 import home from '../home.module.css';
 import {
@@ -34,7 +34,7 @@ function SSOCallbackContent() {
     async function run() {
       const school = PROVIDENCE_UNIVERSITY_SCHOOL_CODE;
       const schoolId = PROVIDENCE_UNIVERSITY_SCHOOL_ID;
-      const returnUrl = sanitizeInternalPath(searchParams.get('returnUrl'));
+      const returnUrl = sanitizeInternalPath(readLoginReturnParam(searchParams));
       const authError = searchParams.get('error');
       const callbackParams = readWebSsoCallbackParams(searchParams);
       const transactionState = getSsoTransactionState(searchParams);
@@ -117,11 +117,11 @@ function SSOCallbackContent() {
   }, [router, searchParams]);
 
   const loginQuery = new URLSearchParams();
-  const returnUrl = searchParams.get('returnUrl');
+  const returnUrl = sanitizeInternalPath(readLoginReturnParam(searchParams));
 
   loginQuery.set('school', PROVIDENCE_UNIVERSITY_SCHOOL_CODE);
   loginQuery.set('schoolId', PROVIDENCE_UNIVERSITY_SCHOOL_ID);
-  if (returnUrl) loginQuery.set('returnUrl', returnUrl);
+  if (returnUrl !== '/') loginQuery.set('returnUrl', returnUrl);
   const loginQueryString = loginQuery.toString();
 
   return (

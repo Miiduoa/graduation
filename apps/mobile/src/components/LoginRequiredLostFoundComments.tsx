@@ -7,7 +7,13 @@ import {
 import { Button } from '../ui/components';
 import { theme } from '../ui/theme';
 
-export function LoginRequiredLostFoundComments({ onLogin }: { onLogin?: () => void }) {
+export function LoginRequiredLostFoundComments({
+  onLogin,
+  text = LOGIN_REQUIRED_LOST_FOUND_AND_COMMENTS_TEXT,
+}: {
+  onLogin?: () => void;
+  text?: string;
+}) {
   return (
     <View
       style={{
@@ -17,9 +23,7 @@ export function LoginRequiredLostFoundComments({ onLogin }: { onLogin?: () => vo
         gap: 12,
       }}
     >
-      <Text style={{ color: theme.colors.text, flexShrink: 1, lineHeight: 22 }}>
-        {LOGIN_REQUIRED_LOST_FOUND_AND_COMMENTS_TEXT}
-      </Text>
+      <Text style={{ color: theme.colors.text, flexShrink: 1, lineHeight: 22 }}>{text}</Text>
       <Button text={LOGIN_REQUIRED_ACTION_TEXT} kind="primary" onPress={onLogin} />
     </View>
   );

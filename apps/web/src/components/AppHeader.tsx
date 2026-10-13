@@ -59,7 +59,9 @@ function Header() {
           <Link
             href={href('/life')}
             aria-current={
-              pathname === '/life' || ['/map', '/bus', '/cafeteria', '/community', '/friends'].includes(pathname || '')
+              pathname === '/life' ||
+              pathname?.startsWith('/lost-found') ||
+              ['/map', '/bus', '/cafeteria', '/community', '/friends'].includes(pathname || '')
                 ? 'page'
                 : undefined
             }

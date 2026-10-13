@@ -33,7 +33,10 @@ export function LostFoundDetailScreen({ navigation, route }: Props) {
   const lock = useRef<{ scope: string; token: symbol } | null>(null);
   const [busyScope, setBusyScope] = useState<string | null>(null);
   const openLogin = () => {
-    if (isCurrent()) navigation?.navigate('SSOLogin');
+    if (isCurrent())
+      navigation?.navigate('SSOLogin', {
+        returnTo: id && !id.includes('/') ? `/lost-found/${id}` : '/lost-found',
+      });
   };
   if (!uid || state.status === 'login-required') {
     return (

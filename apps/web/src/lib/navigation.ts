@@ -1,3 +1,5 @@
+import { sanitizeLoginReturnPath } from '@campus/shared/src/signedInSocialReads';
+
 export type SchoolContext = {
   code: string;
   id: string;
@@ -8,11 +10,15 @@ function toUrl(path: string): URL {
 }
 
 export function sanitizeInternalPath(value?: string | null, fallback: string = '/'): string {
-  if (!value) return fallback;
-  if (!value.startsWith('/') || value.startsWith('//') || /[\\\u0000-\u001f\u007f]/.test(value))
-    return fallback;
-  if (toUrl(value).origin !== 'https://campus.local') return fallback;
-  return value;
+  return sanitizeLoginReturnPath(value, fallback);
+}
+
+export function readLoginReturnParam(params: { get(name: string): string | null }): string | null {
+  return params.get('returnUrl') || params.get('returnTo') || params.get('redirect');
+}
+
+export function loginHref(returnPath: string): string {
+  return `/login?returnUrl=${encodeURIComponent(sanitizeInternalPath(returnPath))}`;
 }
 
 export function extractSchoolContextFromPath(path?: string | null): {

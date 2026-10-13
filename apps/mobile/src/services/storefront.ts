@@ -50,6 +50,13 @@ export type StorefrontComment = {
   text: string;
 };
 
+export type StorefrontMenuItem = {
+  id: string;
+  name: string;
+  price?: number;
+  soldOut?: boolean;
+};
+
 function cafeteriaPath(schoolId: string, cafeteriaId: string) {
   return ['schools', schoolId, 'cafeterias', cafeteriaId] as const;
 }
@@ -80,6 +87,26 @@ export async function loadStorefront(
           ? data.menuSyncedAt.toDate().toISOString()
           : undefined,
   };
+}
+
+export async function loadStorefrontMenus(
+  schoolId: string,
+  cafeteriaId: string,
+): Promise<StorefrontMenuItem[]> {
+  if (isFirebaseMockMode() || !cafeteriaId || cafeteriaId.includes('/')) return [];
+  const snapshot = await getDocs(query(collection(getDb(), 'schools', schoolId, 'menus'), limit(80)));
+  return snapshot.docs.flatMap((row) => {
+    const data = row.data();
+    if (data.cafeteriaId !== cafeteriaId) return [];
+    return [
+      {
+        id: row.id,
+        name: typeof data.name === 'string' ? data.name : '未命名餐點',
+        price: typeof data.price === 'number' ? data.price : undefined,
+        soldOut: data.soldOut === true,
+      } satisfies StorefrontMenuItem,
+    ];
+  });
 }
 
 export async function loadStorefrontPosts(

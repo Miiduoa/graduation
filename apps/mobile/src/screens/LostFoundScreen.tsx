@@ -53,7 +53,7 @@ export function LostFoundScreen({ navigation }: Props) {
     [state.data, schoolId, current.type, current.open, current.category, current.search],
   );
   const openLogin = () => {
-    if (isCurrent()) navigation?.navigate('SSOLogin');
+    if (isCurrent()) navigation?.navigate('SSOLogin', { returnTo: '/lost-found' });
   };
   if (!uid || state.status === 'login-required') {
     return (

@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
 import {
   LOGIN_REQUIRED_ACTION_TEXT,
+  LOGIN_REQUIRED_COMMENTS_TEXT,
   LOGIN_REQUIRED_LOST_FOUND_AND_COMMENTS_TEXT,
   isPermissionDeniedError,
   permissionDeniedError,
@@ -8,6 +9,7 @@ import {
 
 it('keeps the signed-in social read copy stable', () => {
   expect(LOGIN_REQUIRED_LOST_FOUND_AND_COMMENTS_TEXT).toBe('登入後才能看失物招領和評論');
+  expect(LOGIN_REQUIRED_COMMENTS_TEXT).toBe('登入後才能看評論');
   expect(LOGIN_REQUIRED_ACTION_TEXT).toBe('登入');
 });
 

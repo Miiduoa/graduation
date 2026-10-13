@@ -1261,10 +1261,14 @@ describe('firestore security rules', () => {
     await assertSucceeds(guest.doc('schools/pu/events/event-1').get());
     await assertSucceeds(guest.doc('schools/pu/pois/lib').get());
     await assertSucceeds(guest.doc('schools/pu/cafeterias/cafe-1').get());
+    await assertSucceeds(guest.collection('schools/pu/cafeterias').get());
+    await assertSucceeds(guest.collection('schools/pu/menus').get());
     await assertSucceeds(guest.doc('courses/cs101').get());
     await assertFails(guest.doc('schools/pu/lostFound/item-1').get());
+    await assertFails(guest.collection('schools/pu/lostFound').get());
     await assertFails(guest.doc('lostFoundItems/item-2').get());
     await assertFails(guest.doc('schools/pu/pois/lib/reviews/rev-1').get());
+    await assertFails(guest.collection('schools/pu/cafeterias/cafe-1/posts/post-1/comments').get());
     await assertFails(guest.doc('schools/pu/cafeterias/cafe-1/posts/post-1/comments/c1').get());
     await assertFails(guest.doc('schools/pu/cafeterias/cafe-1/posts/post-1/likes/alice').get());
     await assertFails(guest.doc('schools/pu/cafeterias/cafe-1/followers/alice').get());

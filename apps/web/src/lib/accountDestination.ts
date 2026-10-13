@@ -18,7 +18,10 @@ export function platformDestination(value?: string | null): string {
       '/merchant',
       '/merchant/apply',
       '/merchant/workspace',
+      '/lost-found',
     ].includes(path) ||
+    /^\/lost-found\/[^/]+$/.test(path) ||
+    /^\/cafeteria\/[^/]+$/.test(path) ||
     /^\/classroom\/course\/cw_[0-9a-f-]{36}$/.test(path)
   )
     return safe;

@@ -4,6 +4,8 @@ import {
   appendSchoolContext,
   buildSsoCallbackPath,
   extractSchoolContextFromPath,
+  loginHref,
+  readLoginReturnParam,
   sanitizeInternalPath,
 } from './navigation';
 
@@ -64,5 +66,23 @@ it.each([
 it('preserves a course destination and its query and fragment', () => {
   expect(sanitizeInternalPath('/course/one?tab=work#assignment-two')).toBe(
     '/course/one?tab=work#assignment-two',
+  );
+});
+
+it('builds a login href that returns to the original storefront', () => {
+  expect(loginHref('/cafeteria/stall?schoolId=pu')).toBe(
+    '/login?returnUrl=%2Fcafeteria%2Fstall%3FschoolId%3Dpu',
+  );
+});
+
+it('reads returnUrl, returnTo or redirect and drops off-site values', () => {
+  expect(readLoginReturnParam(new URLSearchParams({ returnTo: '/cafeteria/stall' }))).toBe(
+    '/cafeteria/stall',
+  );
+  expect(readLoginReturnParam(new URLSearchParams({ redirect: '/lost-found' }))).toBe(
+    '/lost-found',
+  );
+  expect(sanitizeInternalPath(readLoginReturnParam(new URLSearchParams({ returnUrl: 'https://evil.test' })))).toBe(
+    '/',
   );
 });
