@@ -10,8 +10,8 @@ import type { MenuItem } from '@/lib/firebase';
 import {
   CAFETERIA_BACK_TO_LIST_TEXT,
   CAFETERIA_NOT_FOUND_TEXT,
-  DEMO_CAFETERIA_NOTICE,
   cafeteriaListHref,
+  cafeteriaReviewNotice,
 } from '@campus/shared/src/cafeteriaCatalog';
 import {
   LOGIN_REQUIRED_COMMENTS_TEXT,
@@ -125,7 +125,9 @@ export default function StorefrontPage(props: {
       )}
       {shop && (
         <div className={social.stack}>
-          {shop.demo ? <p role="status">{DEMO_CAFETERIA_NOTICE}</p> : null}
+          {cafeteriaReviewNotice(shop.reviewStatus) ? (
+            <p role="status">{cafeteriaReviewNotice(shop.reviewStatus)}</p>
+          ) : null}
           <section className={social.panel}>
             <h2>{shop.name}</h2>
             {shop.intro && <p>{shop.intro}</p>}

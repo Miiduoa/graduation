@@ -35,7 +35,7 @@ import {
 import {
   CAFETERIA_BACK_TO_LIST_TEXT,
   CAFETERIA_NOT_FOUND_TEXT,
-  DEMO_CAFETERIA_NOTICE,
+  cafeteriaReviewNotice,
 } from '@campus/shared/src/cafeteriaCatalog';
 
 type Props = {
@@ -139,8 +139,10 @@ export default function StorefrontScreen({ navigation, route }: Props) {
         ) : null}
         {shop ? (
           <>
-            {shop.demo ? (
-              <Text style={{ color: theme.colors.text }}>{DEMO_CAFETERIA_NOTICE}</Text>
+            {cafeteriaReviewNotice(shop.reviewStatus) ? (
+              <Text style={{ color: theme.colors.text }}>
+                {cafeteriaReviewNotice(shop.reviewStatus)}
+              </Text>
             ) : null}
             {shop.intro ? (
               <Text style={{ color: theme.colors.text, lineHeight: 22 }}>{shop.intro}</Text>

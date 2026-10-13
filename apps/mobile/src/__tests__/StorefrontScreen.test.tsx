@@ -241,20 +241,55 @@ test('keeps the not-found copy and offers a way back when the shop is missing', 
   expect(navigation.navigate).toHaveBeenCalledWith('Cafeteria');
 });
 
-test('shows the demo notice only on a demo shop page', async () => {
+test.each([
+  {
+    reviewStatus: 'demo' as const,
+    notice: '這是示範店家，菜單和價格不是真的，不能點餐。',
+    hidden: '這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。',
+  },
+  {
+    reviewStatus: 'unverified' as const,
+    notice: '這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。',
+    hidden: '這是示範店家，菜單和價格不是真的，不能點餐。',
+  },
+  {
+    reviewStatus: undefined,
+    notice: '這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。',
+    hidden: '這是示範店家，菜單和價格不是真的，不能點餐。',
+  },
+])('shows the review notice for $reviewStatus shops', async ({ reviewStatus, notice, hidden }) => {
   jest.mocked(loadStorefront).mockResolvedValueOnce({
     id: 'cafe-1',
     name: '校園小棧',
     intro: '紙感小店',
     merchantMode: 'info_only',
-    demo: true,
+    reviewStatus,
   } as never);
   const view = render(
     <StorefrontScreen navigation={navigation} route={{ params: { cafeteriaId: 'cafe-1' } }} />,
   );
-  expect(await view.findByText('這是示範店家，菜單和價格不是真的，不能點餐。')).toBeTruthy();
+  expect(await view.findByText(notice)).toBeTruthy();
+  expect(view.queryByText(hidden)).toBeNull();
   expect(view.getByText('紙感小店')).toBeTruthy();
   expect(view.queryByText('找不到這間店。')).toBeNull();
+});
+
+test('does not mark a verified shop page', async () => {
+  jest.mocked(loadStorefront).mockResolvedValueOnce({
+    id: 'stall',
+    name: '校內咖啡店',
+    intro: '紙感小店',
+    merchantMode: 'info_only',
+    reviewStatus: 'verified',
+  } as never);
+  const view = render(
+    <StorefrontScreen navigation={navigation} route={{ params: { cafeteriaId: 'stall' } }} />,
+  );
+  expect(await view.findByText('紙感小店')).toBeTruthy();
+  expect(view.queryByText('這是示範店家，菜單和價格不是真的，不能點餐。')).toBeNull();
+  expect(
+    view.queryByText('這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。'),
+  ).toBeNull();
 });
 
 test('外連確認頁按鈕與小字同一套文案', async () => {

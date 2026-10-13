@@ -101,6 +101,7 @@ beforeEach(async () => {
 test('loads only school-scoped canonical records without curated/sample fallbacks', async () => {
   const result = await loadDiningCatalog(scope, () => true);
   expect(result.menus[0]).toMatchObject({ name: menu.name, orderable: true });
+  expect(result.venues[0]).toMatchObject({ id: 'venue-a', reviewStatus: 'unverified' });
   expect(getDocsFromServer).toHaveBeenCalledWith('schools/pu/menus');
   expect(getDocsFromServer).toHaveBeenCalledWith('schools/pu/cafeterias');
 });
@@ -112,7 +113,7 @@ test('reads the platform catalog when the backend returns this school', async ()
       schoolId: 'pu',
       location: '活動中心',
       merchantMode: 'info_only',
-      demo: false,
+      reviewStatus: 'unverified',
     },
   ] as never);
   jest.mocked(fetchCafeteriaMenu).mockResolvedValueOnce([
@@ -128,7 +129,15 @@ test('reads the platform catalog when the backend returns this school', async ()
     },
   ] as never);
   await expect(loadDiningCatalog(scope, () => true)).resolves.toEqual({
-    venues: [{ id: 'stall', name: '校內咖啡店', location: '活動中心', orderingEnabled: false }],
+    venues: [
+      {
+        id: 'stall',
+        name: '校內咖啡店',
+        location: '活動中心',
+        orderingEnabled: false,
+        reviewStatus: 'unverified',
+      },
+    ],
     menus: [
       {
         id: 'toast',

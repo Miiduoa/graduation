@@ -22,6 +22,10 @@ import {
   type MerchantMode,
 } from '@campus/shared/src/merchantMode';
 import { fetchCafeteriaDetail } from './cafeteriaCatalog';
+import {
+  parseCafeteriaReviewStatus,
+  type CafeteriaReviewStatus,
+} from '@campus/shared/src/cafeteriaCatalog';
 
 export type StorefrontShop = {
   id: string;
@@ -34,7 +38,7 @@ export type StorefrontShop = {
   merchantMode: MerchantMode;
   orderingEnabled?: boolean;
   menuSyncedAt?: string;
-  demo?: boolean;
+  reviewStatus?: CafeteriaReviewStatus;
 };
 
 export type StorefrontPost = {
@@ -81,7 +85,7 @@ export async function loadStorefront(
         orderingUrl: cafeteria.orderingUrl,
         merchantMode: cafeteria.merchantMode,
         menuSyncedAt: cafeteria.menuSyncedAt,
-        demo: cafeteria.demo,
+        reviewStatus: cafeteria.reviewStatus,
       };
     }
     return null;
@@ -102,6 +106,9 @@ export async function loadStorefront(
     orderingUrl: safeStorefrontUrl(data.orderingUrl),
     merchantMode: resolveStoredMerchantMode(data),
     orderingEnabled: data.orderingEnabled === true,
+    reviewStatus: parseCafeteriaReviewStatus(
+      data.reviewStatus ?? data.verificationStatus ?? data.catalogReview,
+    ),
     menuSyncedAt:
       typeof data.menuSyncedAt === 'string'
         ? data.menuSyncedAt

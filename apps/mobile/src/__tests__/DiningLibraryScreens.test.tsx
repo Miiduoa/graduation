@@ -61,7 +61,15 @@ const menu = {
   orderable: true,
 };
 const catalog = {
-  venues: [{ id: 'venue-a', name: '校園餐廳甲', location: '一樓', orderingEnabled: true }],
+  venues: [
+    {
+      id: 'venue-a',
+      name: '校園餐廳甲',
+      location: '一樓',
+      orderingEnabled: true,
+      reviewStatus: 'verified' as const,
+    },
+  ],
   menus: [menu],
 };
 function deferred<T>() {
@@ -299,6 +307,42 @@ test.each(['account', 'school'] as const)(
     expect(view.queryByText('等店家接單')).toBeNull();
   },
 );
+test('marks unverified and demo venues and leaves verified unmarked', async () => {
+  jest.mocked(loadDiningCatalog).mockResolvedValueOnce({
+    venues: [
+      {
+        id: 'cafe-1',
+        name: '校園小棧',
+        location: '活動中心',
+        orderingEnabled: false,
+        reviewStatus: 'demo',
+      },
+      {
+        id: 'stall',
+        name: '校內咖啡店',
+        location: '學生餐廳',
+        orderingEnabled: false,
+        reviewStatus: 'unverified',
+      },
+      {
+        id: 'jingyuan',
+        name: '靜園餐廳',
+        location: '文興樓對面',
+        orderingEnabled: false,
+        reviewStatus: 'verified',
+      },
+    ],
+    menus: [],
+  });
+  const view = render(<CafeteriaAiFirstScreen />);
+  await act(async () => {});
+  expect(view.getByText('示範')).toBeTruthy();
+  expect(view.getByText('未核對')).toBeTruthy();
+  expect(view.getByText('靜園餐廳')).toBeTruthy();
+  expect(view.queryAllByText('示範')).toHaveLength(1);
+  expect(view.queryAllByText('未核對')).toHaveLength(1);
+});
+
 test('uses an honest empty state when this school has no restaurants', async () => {
   jest.mocked(loadDiningCatalog).mockResolvedValueOnce({ venues: [], menus: [] });
   const view = render(<CafeteriaAiFirstScreen />);

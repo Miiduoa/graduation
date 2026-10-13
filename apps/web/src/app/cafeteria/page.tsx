@@ -11,7 +11,8 @@ import {
 } from '@campus/shared/src/merchantMode';
 import {
   CAFETERIA_EMPTY_SCHOOL_TEXT,
-  DEMO_CAFETERIA_BADGE,
+  CAFETERIA_REVIEW_STATUS_DEFAULT,
+  cafeteriaReviewBadge,
 } from '@campus/shared/src/cafeteriaCatalog';
 import { ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
 import { fetchCafeteriaCatalog, type CatalogCafeteria } from '@/lib/cafeteriaCatalog';
@@ -136,6 +137,7 @@ function CafeteriaContent({
       merged.set(key, {
         id: menu.cafeteriaId || key,
         name: menu.cafeteria || '未命名餐廳',
+        reviewStatus: CAFETERIA_REVIEW_STATUS_DEFAULT,
       });
     });
 
@@ -339,8 +341,10 @@ function CafeteriaContent({
                 <div>
                   <h2>
                     {cafeteria.name}
-                    {cafeteria.demo ? (
-                      <span className={styles.demoBadge}>{DEMO_CAFETERIA_BADGE}</span>
+                    {cafeteriaReviewBadge(cafeteria.reviewStatus) ? (
+                      <span className={styles.reviewBadge}>
+                        {cafeteriaReviewBadge(cafeteria.reviewStatus)}
+                      </span>
                     ) : null}
                   </h2>
                   <div className={styles.details}>
