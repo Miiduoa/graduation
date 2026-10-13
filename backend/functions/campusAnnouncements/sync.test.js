@@ -1,7 +1,13 @@
 'use strict';
 
 const { FieldValue, Timestamp } = require('firebase-admin/firestore');
-const { syncSource, visibleAnnouncements, feedStatus, UNAVAILABLE } = require('./sync');
+const {
+  syncSource,
+  visibleAnnouncements,
+  feedStatus,
+  UNAVAILABLE,
+  assertSchoolScopedWrite,
+} = require('./sync');
 const { SOURCE_DOWN_EMPTY } = require('./catalog');
 const { robotsAllows, resetPoliteFetch } = require('./politeFetch');
 const { countDrop } = require('./extract');
@@ -155,4 +161,60 @@ test('robots disallow and count drops are treated as failures', () => {
 test('FieldValue timestamps are used when writing health', async () => {
   expect(typeof FieldValue.serverTimestamp).toBe('function');
   expect(Timestamp.now()).toBeInstanceOf(Timestamp);
+});
+
+test('dry-run fetches and parses without writing Firestore', async () => {
+  const db = memoryDb();
+  const html = `<table><tr><td><a href="/p/412-1042-1.php">選課公告</a></td><td>2026-10-01</td></tr></table>`;
+  const fetchImpl = jest.fn(async (url) => {
+    if (String(url).endsWith('robots.txt')) return htmlResponse('User-agent: *\nAllow: /\n');
+    return htmlResponse(html);
+  });
+  const result = await syncSource(source, {
+    db,
+    dryRun: true,
+    fetchImpl,
+    now: () => 1_000,
+    wait: async () => {},
+  });
+  expect(result).toMatchObject({
+    status: 'healthy',
+    dryRun: true,
+    itemCount: 1,
+  });
+  expect(result.items[0]).toMatchObject({
+    schoolId: 'pu',
+    title: '選課公告',
+    originalUrl: 'https://acd.pu.edu.tw/p/412-1042-1.php',
+    path: expect.stringMatching(/^schools\/pu\/announcements\//),
+  });
+  expect([...db.docs.keys()]).toEqual([]);
+});
+
+test('dry-run does not need Firestore', async () => {
+  const html = `<table><tr><td><a href="/p/412-1042-1.php">選課公告</a></td><td>2026-10-01</td></tr></table>`;
+  const result = await syncSource(source, {
+    dryRun: true,
+    fetchImpl: async (url) =>
+      String(url).endsWith('robots.txt')
+        ? htmlResponse('User-agent: *\nAllow: /\n')
+        : htmlResponse(html),
+    now: () => 1_000,
+    wait: async () => {},
+  });
+  expect(result.status).toBe('healthy');
+  expect(result.items).toHaveLength(1);
+});
+
+test('writes stay inside the selected school announcement collections', () => {
+  expect(() =>
+    assertSchoolScopedWrite('pu', { path: 'schools/pu/announcements/pub_1' }),
+  ).not.toThrow();
+  expect(() =>
+    assertSchoolScopedWrite('pu', { path: 'schools/pu/announcement-sources/pu-acd' }),
+  ).not.toThrow();
+  expect(() => assertSchoolScopedWrite('pu', { path: 'announcements/pub_1' })).toThrow(/refused/);
+  expect(() =>
+    assertSchoolScopedWrite('pu', { path: 'schools/nthu/announcements/pub_1' }),
+  ).toThrow(/refused/);
 });
