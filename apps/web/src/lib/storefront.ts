@@ -13,7 +13,11 @@ import {
   setDoc,
   updateDoc,
 } from 'firebase/firestore';
-import { getDb, isFirebaseConfigured, type Cafeteria } from '@/lib/firebase';
+import {
+  isPermissionDeniedError,
+  permissionDeniedError,
+} from '@campus/shared/src/signedInSocialReads';
+import { getAuth, getDb, isFirebaseConfigured, type Cafeteria } from '@/lib/firebase';
 import {
   EXTERNAL_ORDER_HONEST_TEXT,
   buildShowcaseOrderingUrl,
@@ -106,14 +110,19 @@ export async function loadStorefrontPosts(
     ];
   });
   if (!uid) return posts;
-  const liked = await Promise.all(
-    posts.map((post) =>
-      getDocFromServer(
-        doc(getDb(), ...cafeteriaPath(schoolId, cafeteriaId), 'posts', post.id, 'likes', uid),
+  try {
+    const liked = await Promise.all(
+      posts.map((post) =>
+        getDocFromServer(
+          doc(getDb(), ...cafeteriaPath(schoolId, cafeteriaId), 'posts', post.id, 'likes', uid),
+        ),
       ),
-    ),
-  );
-  return posts.map((post, index) => ({ ...post, liked: liked[index]?.exists() === true }));
+    );
+    return posts.map((post, index) => ({ ...post, liked: liked[index]?.exists() === true }));
+  } catch (error) {
+    if (isPermissionDeniedError(error)) return posts;
+    throw error;
+  }
 }
 
 export async function followStorefront(
@@ -128,6 +137,7 @@ export async function followStorefront(
 }
 
 export async function isFollowingStorefront(schoolId: string, cafeteriaId: string, uid: string) {
+  if (!getAuth()?.currentUser) throw permissionDeniedError();
   const snapshot = await getDocFromServer(
     doc(getDb(), ...cafeteriaPath(schoolId, cafeteriaId), 'followers', uid),
   );
@@ -165,6 +175,7 @@ export async function loadStorefrontComments(
   cafeteriaId: string,
   postId: string,
 ): Promise<StorefrontComment[]> {
+  if (!getAuth()?.currentUser) throw permissionDeniedError();
   const snapshot = await getDocsFromServer(
     query(
       collection(getDb(), ...cafeteriaPath(schoolId, cafeteriaId), 'posts', postId, 'comments'),

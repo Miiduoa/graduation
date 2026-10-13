@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
+import { isPermissionDeniedError } from '@campus/shared/src/signedInSocialReads';
 import { getDataSource, getDataSourceEvidence, hasDataSource } from '../data/source';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
@@ -62,24 +63,40 @@ export function useLostFoundScope(recordId = '') {
   return { uid, schoolId, scope, isCurrent };
 }
 
-type LoadState<T> = { scope: string; status: 'loading' | 'ready' | 'error'; data?: T };
+type LoadState<T> = {
+  scope: string;
+  status: 'loading' | 'ready' | 'error' | 'login-required';
+  data?: T;
+};
 export function useLostFoundLoad<T>(
   scope: string,
   loader: () => Promise<T>,
   isCurrent: () => boolean,
+  enabled = true,
 ) {
-  const [state, setState] = useState<LoadState<T>>({ scope, status: 'loading' });
+  const [state, setState] = useState<LoadState<T>>({
+    scope,
+    status: enabled ? 'loading' : 'login-required',
+  });
   const sequence = useRef(0);
   const refresh = useCallback(async () => {
     const request = ++sequence.current;
+    if (!enabled) {
+      setState({ scope, status: 'login-required' });
+      return;
+    }
     setState({ scope, status: 'loading' });
     try {
       const data = await loader();
       if (isCurrent() && sequence.current === request) setState({ scope, status: 'ready', data });
-    } catch {
-      if (isCurrent() && sequence.current === request) setState({ scope, status: 'error' });
+    } catch (error) {
+      if (isCurrent() && sequence.current === request)
+        setState({
+          scope,
+          status: isPermissionDeniedError(error) ? 'login-required' : 'error',
+        });
     }
-  }, [scope, loader, isCurrent]);
+  }, [scope, loader, isCurrent, enabled]);
   useFocusEffect(
     useCallback(() => {
       void refresh();
