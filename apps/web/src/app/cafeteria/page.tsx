@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useMemo, useState } from 'react';
+import { use, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import {
@@ -9,18 +9,14 @@ import {
   isMenuStale,
   studentCafeteriaAction,
 } from '@campus/shared/src/merchantMode';
-import { ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
-import { useAuth } from '@/components/AuthGuard';
 import {
-  fetchCafeterias,
-  fetchMenus,
-  subscribeCafeterias,
-  subscribeMenus,
-  type Cafeteria,
-  type MenuItem,
-} from '@/lib/firebase';
+  CAFETERIA_EMPTY_SCHOOL_TEXT,
+  DEMO_CAFETERIA_BADGE,
+} from '@campus/shared/src/cafeteriaCatalog';
+import { ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
+import { fetchCafeteriaCatalog, type CatalogCafeteria } from '@/lib/cafeteriaCatalog';
+import type { MenuItem } from '@/lib/firebase';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
-import { useSchoolCollectionData } from '@/lib/useSchoolCollectionData';
 import styles from './cafeteria.module.css';
 
 const ALL_CAFETERIAS_KEY = 'all';
@@ -34,7 +30,7 @@ function getCafeteriaKey(input: {
   return input.id || input.cafeteriaId || input.name || input.cafeteria || '';
 }
 
-function getMenuCafeteriaKey(menu: MenuItem, cafeterias: Cafeteria[]) {
+function getMenuCafeteriaKey(menu: MenuItem, cafeterias: CatalogCafeteria[]) {
   if (menu.cafeteriaId) return menu.cafeteriaId;
   const matching = cafeterias.filter((row) => row.name === menu.cafeteria);
   return matching.length === 1 ? matching[0].id : menu.cafeteria || '';
@@ -73,62 +69,55 @@ function getMenuAvailability(item: MenuItem) {
 }
 
 export default function CafeteriaPage(props: {
-  searchParams?: Promise<{ school?: string; schoolId?: string }>;
+  searchParams?: Promise<{ school?: string; schoolId?: string; campus?: string }>;
 }) {
   const searchParams = props.searchParams ? use(props.searchParams) : undefined;
   const context = resolveSchoolPageContext(searchParams);
-  const { user, loading: authLoading } = useAuth();
-  const scopeKey = JSON.stringify([user?.uid ?? null, authLoading]);
-  return (
-    <CafeteriaContent
-      key={JSON.stringify([context.schoolId, scopeKey])}
-      {...context}
-      scopeKey={scopeKey}
-      authLoading={authLoading}
-    />
-  );
+  return <CafeteriaContent key={context.schoolId} {...context} />;
 }
 
 function CafeteriaContent({
   schoolId,
   schoolName,
-  schoolSearch: q,
-  scopeKey,
-  authLoading,
 }: {
   schoolId: string;
   schoolName: string;
   schoolSearch: string;
-  scopeKey: string;
-  authLoading: boolean;
 }) {
   const [selectedCafeteria, setSelectedCafeteria] = useState(ALL_CAFETERIAS_KEY);
   const [search, setSearch] = useState('');
+  const [cafeteriaRows, setCafeteriaRows] = useState<CatalogCafeteria[]>([]);
+  const [menuRows, setMenuRows] = useState<MenuItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
-  const {
-    data: cafeteriaRows,
-    loading: cafeteriaLoading,
-    error: cafeteriaError,
-    retry: retryCafeterias,
-  } = useSchoolCollectionData<Cafeteria>(schoolId, fetchCafeterias, {
-    subscribeLive: subscribeCafeterias,
-    scopeKey,
-  });
-
-  const {
-    data: menuRows,
-    loading: menuLoading,
-    error: menuError,
-    retry: retryMenus,
-  } = useSchoolCollectionData<MenuItem>(schoolId, fetchMenus, {
-    subscribeLive: subscribeMenus,
-    scopeKey,
-  });
-
-  const loading = cafeteriaLoading || menuLoading;
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setFailed(false);
+    setCafeteriaRows([]);
+    setMenuRows([]);
+    void fetchCafeteriaCatalog(schoolId).then(
+      (catalog) => {
+        if (!active) return;
+        setCafeteriaRows(catalog.cafeterias);
+        setMenuRows(catalog.menus);
+        setLoading(false);
+      },
+      () => {
+        if (!active) return;
+        setFailed(true);
+        setLoading(false);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [attempt, schoolId]);
 
   const cafeterias = useMemo(() => {
-    const merged = new Map<string, Cafeteria>();
+    const merged = new Map<string, CatalogCafeteria>();
 
     cafeteriaRows.forEach((cafeteria) => {
       const key = getCafeteriaKey(cafeteria);
@@ -250,8 +239,7 @@ function CafeteriaContent({
   }, [cafeterias, menuRows]);
 
   const sourceLabel = '餐廳資料';
-  if (authLoading || loading || cafeteriaError || menuError) {
-    const failed = !authLoading && (cafeteriaError || menuError);
+  if (loading || failed) {
     return (
       <SiteShell title="餐廳" subtitle="查看校內餐廳與菜單" schoolName={schoolName}>
         <section className="card" role={failed ? 'alert' : 'status'}>
@@ -259,13 +247,7 @@ function CafeteriaContent({
           {failed && (
             <>
               <p>這次沒有取得完整資料，請稍後重試。餐點供應仍以店家現場資訊為準。</p>
-              <button
-                className="btn primary"
-                onClick={() => {
-                  retryCafeterias();
-                  retryMenus();
-                }}
-              >
+              <button className="btn primary" onClick={() => setAttempt((value) => value + 1)}>
                 重新讀取
               </button>
             </>
@@ -330,12 +312,12 @@ function CafeteriaContent({
             <h2>
               {search.trim() || selectedCafeteria !== ALL_CAFETERIAS_KEY
                 ? '找不到符合的餐廳或菜單'
-                : '目前沒有餐廳資料'}
+                : CAFETERIA_EMPTY_SCHOOL_TEXT}
             </h2>
             <p>
               {search.trim() || selectedCafeteria !== ALL_CAFETERIAS_KEY
                 ? '試試其他菜名，或清除篩選查看全部餐廳。'
-                : '店家提供餐廳與菜單資料後，會顯示在這裡。'}
+                : '這間學校還沒提供餐廳資料，不會沿用其他學校的店家。'}
             </p>
             {(search.trim() || selectedCafeteria !== ALL_CAFETERIAS_KEY) && (
               <button
@@ -355,7 +337,12 @@ function CafeteriaContent({
             <section key={key} className={styles.restaurant} aria-label={cafeteria.name}>
               <header className={styles.restaurantHeader}>
                 <div>
-                  <h2>{cafeteria.name}</h2>
+                  <h2>
+                    {cafeteria.name}
+                    {cafeteria.demo ? (
+                      <span className={styles.demoBadge}>{DEMO_CAFETERIA_BADGE}</span>
+                    ) : null}
+                  </h2>
                   <div className={styles.details}>
                     {cafeteria.location && <span>位置：{cafeteria.location}</span>}
                     {cafeteria.openingHours && <span>營業時間：{cafeteria.openingHours}</span>}

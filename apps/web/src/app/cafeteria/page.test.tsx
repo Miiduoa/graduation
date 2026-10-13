@@ -1,16 +1,17 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import CafeteriaPage from './page';
+import { fetchCafeteriaCatalog } from '@/lib/cafeteriaCatalog';
+
 const state = vi.hoisted(() => ({
-  configured: true,
   school: 'pu',
-  uid: 'a',
-  cafeterias: [] as Array<{ next: (rows: unknown[]) => void; fail: (error: unknown) => void }>,
-  menus: [] as Array<{ next: (rows: unknown[]) => void; fail: (error: unknown) => void }>,
+  catalog: {
+    cafeterias: [] as Array<Record<string, unknown>>,
+    menus: [] as Array<Record<string, unknown>>,
+  },
+  fail: false,
 }));
-vi.mock('@/components/AuthGuard', () => ({
-  useAuth: () => ({ user: { uid: state.uid }, loading: false }),
-}));
+
 vi.mock('@/components/SiteShell', () => ({
   SiteShell: ({ title, children }: { title: string; children: React.ReactNode }) => (
     <main>
@@ -23,38 +24,38 @@ vi.mock('@/lib/pageContext', () => ({
   resolveSchoolPageContext: () => ({
     schoolId: state.school,
     schoolName: state.school,
-    schoolSearch: '',
+    schoolSearch: `?schoolId=${state.school}`,
   }),
 }));
-vi.mock('@/lib/firebase', () => ({
-  isFirebaseConfigured: () => state.configured,
-  fetchCafeterias: vi.fn(),
-  fetchMenus: vi.fn(),
-  subscribeCafeterias: (
-    _: string,
-    next: (rows: unknown[]) => void,
-    fail: (error: unknown) => void,
-  ) => {
-    state.cafeterias.push({ next, fail });
-    return () => {};
-  },
-  subscribeMenus: (_: string, next: (rows: unknown[]) => void, fail: (error: unknown) => void) => {
-    state.menus.push({ next, fail });
-    return () => {};
-  },
+vi.mock('@/lib/cafeteriaCatalog', () => ({
+  fetchCafeteriaCatalog: vi.fn(async () => {
+    if (state.fail) throw new Error('offline');
+    return state.catalog;
+  }),
 }));
+
 beforeEach(() => {
-  state.configured = true;
   state.school = 'pu';
-  state.uid = 'a';
-  state.cafeterias = [];
-  state.menus = [];
+  state.fail = false;
+  state.catalog = { cafeterias: [], menus: [] };
+  vi.mocked(fetchCafeteriaCatalog).mockClear();
 });
 afterEach(cleanup);
-function receive(index = 0) {
-  act(() => {
-    state.cafeterias[index].next([{ id: 'stall', name: '校內咖啡店' }]);
-    state.menus[index].next([
+
+async function receive(rows?: {
+  cafeterias?: Array<Record<string, unknown>>;
+  menus?: Array<Record<string, unknown>>;
+}) {
+  if (rows) state.catalog = { cafeterias: rows.cafeterias ?? [], menus: rows.menus ?? [] };
+  await act(async () => {
+    render(<CafeteriaPage />);
+  });
+}
+
+it('reads restaurants from the backend catalog and hides sample copy', async () => {
+  await receive({
+    cafeterias: [{ id: 'stall', name: '校內咖啡店', demo: false }],
+    menus: [
       {
         id: 'meal',
         cafeteriaId: 'stall',
@@ -64,51 +65,72 @@ function receive(index = 0) {
         availableOn: '2026-10-08',
         available: true,
       },
-    ]);
+    ],
   });
-}
-it('does not display sample menus without a configured service', () => {
-  state.configured = false;
-  render(<CafeteriaPage />);
+  expect(await screen.findByText('蔬菜吐司')).toBeTruthy();
+  expect(screen.getByText('NT$60')).toBeTruthy();
+  expect(screen.queryByText(/示範資料/)).toBeNull();
+  expect(fetchCafeteriaCatalog).toHaveBeenCalledWith('pu');
+});
+
+it('shows a retry when the backend catalog fails and does not keep old rows after school change', async () => {
+  state.fail = true;
+  await act(async () => {
+    render(<CafeteriaPage />);
+  });
   expect(screen.getByRole('alert').textContent).toContain('暫時無法讀取餐廳資料');
   expect(screen.queryByText(/示範資料/)).toBeNull();
-  expect(state.menus).toHaveLength(0);
-});
-it('shows actual source rows and hides them after a source failure', () => {
-  render(<CafeteriaPage />);
-  receive();
-  expect(screen.getByText('蔬菜吐司')).toBeTruthy();
-  expect(screen.getByText('NT$60')).toBeTruthy();
-  act(() => state.menus[0].fail(new Error('offline')));
-  expect(screen.getByRole('alert')).toBeTruthy();
-  expect(screen.queryByText('蔬菜吐司')).toBeNull();
+  state.fail = false;
+  state.catalog = {
+    cafeterias: [{ id: 'stall', name: '校內咖啡店', demo: false }],
+    menus: [
+      {
+        id: 'meal',
+        cafeteriaId: 'stall',
+        cafeteria: '校內咖啡店',
+        name: '蔬菜吐司',
+        price: 60,
+        availableOn: '2026-10-08',
+        available: true,
+      },
+    ],
+  };
   fireEvent.click(screen.getByRole('button', { name: '重新讀取' }));
-  expect(state.menus).toHaveLength(2);
-  receive(1);
-  expect(screen.getByText('蔬菜吐司')).toBeTruthy();
+  expect(await screen.findByText('蔬菜吐司')).toBeTruthy();
 });
-it('does not interpret an empty source as an unavailable service', () => {
-  render(<CafeteriaPage />);
-  act(() => {
-    state.cafeterias[0].next([]);
-    state.menus[0].next([]);
-  });
+
+it('uses an honest empty state when this school has no restaurants', async () => {
+  await receive({ cafeterias: [], menus: [] });
   expect(screen.queryByRole('alert')).toBeNull();
-  expect(screen.getByText('餐廳資料')).toBeTruthy();
+  expect(screen.getByText('這間學校的餐廳還沒上架')).toBeTruthy();
+  expect(screen.queryByText('目前沒有餐廳資料')).toBeNull();
   expect(screen.queryByText(/示範資料/)).toBeNull();
 });
-it('distinguishes unknown availability, paused supply and sold-out meals without claiming ordering is available', () => {
-  render(<CafeteriaPage />);
-  act(() => {
-    state.cafeterias[0].next([
-      { id: 'stall', name: '校內咖啡店', orderingEnabled: true, pilotStatus: 'live' },
-    ]);
-    state.menus[0].next([
+
+it('marks only demo shops beside the shop name', async () => {
+  await receive({
+    cafeterias: [
+      { id: 'cafe-1', name: '校園小棧', demo: true, location: '活動中心' },
+      { id: 'jingyuan', name: '靜園餐廳', demo: false, location: '文興樓對面' },
+    ],
+    menus: [],
+  });
+  const demo = within(screen.getByRole('region', { name: '校園小棧' }));
+  expect(demo.getByText('示範')).toBeTruthy();
+  const real = within(screen.getByRole('region', { name: '靜園餐廳' }));
+  expect(real.queryByText('示範')).toBeNull();
+  expect(screen.queryByText('這是示範店家，菜單和價格不是真的，不能點餐。')).toBeNull();
+});
+
+it('distinguishes unknown availability, paused supply and sold-out meals without claiming ordering is available', async () => {
+  await receive({
+    cafeterias: [{ id: 'stall', name: '校內咖啡店', orderingEnabled: true, pilotStatus: 'live' }],
+    menus: [
       { id: 'unknown', cafeteriaId: 'stall', name: '未知供應餐點' },
       { id: 'paused', cafeteriaId: 'stall', name: '暫停餐點', available: false },
       { id: 'sold-out', cafeteriaId: 'stall', name: '售完餐點', available: true, soldOut: true },
       { id: 'available', cafeteriaId: 'stall', name: '現有餐點', available: true },
-    ]);
+    ],
   });
   const restaurant = within(screen.getByRole('region', { name: '校內咖啡店' }));
   expect(restaurant.getByText('4 道餐點 · 1 道標記供應中')).toBeTruthy();
@@ -122,10 +144,10 @@ it('distinguishes unknown availability, paused supply and sold-out meals without
     '/cafeteria/stall',
   );
 });
-it('shows an outbound order link only when the shop has an https ordering URL', () => {
-  render(<CafeteriaPage />);
-  act(() => {
-    state.cafeterias[0].next([
+
+it('shows an outbound order link only when the shop has an https ordering URL', async () => {
+  await receive({
+    cafeterias: [
       {
         id: 'linked',
         name: '外連店',
@@ -141,8 +163,8 @@ it('shows an outbound order link only when the shop has an https ordering URL', 
         location: '活動中心',
         openingHours: '週一到週五',
       },
-    ]);
-    state.menus[0].next([]);
+    ],
+    menus: [],
   });
   const linked = within(screen.getByRole('region', { name: '外連店' }));
   expect(linked.getByRole('link', { name: '到店家網站訂餐' }).getAttribute('href')).toContain(
@@ -154,9 +176,22 @@ it('shows an outbound order link only when the shop has an https ordering URL', 
   expect(info.getByText('位置：活動中心')).toBeTruthy();
   expect(info.getByText('營業時間：週一到週五')).toBeTruthy();
 });
-it('exposes the selected restaurant and restores menus when clearing an empty search', () => {
-  render(<CafeteriaPage />);
-  receive();
+
+it('exposes the selected restaurant and restores menus when clearing an empty search', async () => {
+  await receive({
+    cafeterias: [{ id: 'stall', name: '校內咖啡店' }],
+    menus: [
+      {
+        id: 'meal',
+        cafeteriaId: 'stall',
+        cafeteria: '校內咖啡店',
+        name: '蔬菜吐司',
+        price: 60,
+        availableOn: '2026-10-08',
+        available: true,
+      },
+    ],
+  });
   fireEvent.click(screen.getByRole('button', { name: '校內咖啡店' }));
   expect(screen.getByRole('button', { name: '校內咖啡店' }).getAttribute('aria-pressed')).toBe(
     'true',
@@ -172,17 +207,30 @@ it('exposes the selected restaurant and restores menus when clearing an empty se
   );
   expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
 });
-it.each(['school', 'uid'] as const)(
-  'clears loaded menus and rejects old listeners after changing %s',
-  (key) => {
-    const { rerender } = render(<CafeteriaPage />);
-    receive();
-    state[key] = 'different';
-    rerender(<CafeteriaPage />);
-    expect(screen.queryByText('蔬菜吐司')).toBeNull();
-    receive(0);
-    expect(screen.queryByText('蔬菜吐司')).toBeNull();
-    receive(1);
-    expect(screen.getByText('蔬菜吐司')).toBeTruthy();
-  },
-);
+
+it('clears loaded menus after changing school and does not keep the previous school catalog', async () => {
+  state.catalog = {
+    cafeterias: [{ id: 'stall', name: '校內咖啡店' }],
+    menus: [
+      {
+        id: 'meal',
+        cafeteriaId: 'stall',
+        cafeteria: '校內咖啡店',
+        name: '蔬菜吐司',
+        price: 60,
+        availableOn: '2026-10-08',
+        available: true,
+      },
+    ],
+  };
+  const view = await act(async () => render(<CafeteriaPage />));
+  expect(await screen.findByText('蔬菜吐司')).toBeTruthy();
+  state.school = 'cgu';
+  state.catalog = { cafeterias: [], menus: [] };
+  await act(async () => {
+    view.rerender(<CafeteriaPage />);
+  });
+  expect(await screen.findByText('這間學校的餐廳還沒上架')).toBeTruthy();
+  expect(screen.queryByText('蔬菜吐司')).toBeNull();
+  expect(fetchCafeteriaCatalog).toHaveBeenCalledWith('cgu');
+});

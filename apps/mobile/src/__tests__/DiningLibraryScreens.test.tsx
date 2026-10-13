@@ -299,6 +299,15 @@ test.each(['account', 'school'] as const)(
     expect(view.queryByText('等店家接單')).toBeNull();
   },
 );
+test('uses an honest empty state when this school has no restaurants', async () => {
+  jest.mocked(loadDiningCatalog).mockResolvedValueOnce({ venues: [], menus: [] });
+  const view = render(<CafeteriaAiFirstScreen />);
+  await act(async () => {});
+  expect(view.getByText('這間學校的餐廳還沒上架')).toBeTruthy();
+  expect(view.queryByText('今日餐點')).toBeNull();
+  expect(view.queryByText('校園餐廳甲')).toBeNull();
+});
+
 test('a failed menu read shows retry without fabricated restaurants', async () => {
   jest.mocked(loadDiningCatalog).mockRejectedValueOnce(new Error('offline'));
   const view = render(<CafeteriaAiFirstScreen />);

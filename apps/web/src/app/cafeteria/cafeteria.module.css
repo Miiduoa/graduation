@@ -117,6 +117,18 @@
   overflow-wrap: anywhere;
 }
 
+.demoBadge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-soft);
+  color: var(--muted);
+  font-size: var(--font-label-sm-size);
+  font-weight: 500;
+  vertical-align: middle;
+}
+
 .details {
   display: flex;
   flex-wrap: wrap;

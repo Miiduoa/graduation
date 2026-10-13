@@ -325,6 +325,42 @@ it('discards the old school response when the selected school changes', async ()
   );
 });
 
+it('uses the announcement empty state when switching to a school with no announcements', async () => {
+  const pu = Promise.resolve({ schoolId: 'pu' });
+  const cgu = Promise.resolve({ schoolId: 'cgu', campus: 'cgu' });
+  let view!: ReturnType<typeof render>;
+  await act(async () => {
+    view = render(
+      <Suspense fallback={<p>載入學校</p>}>
+        <AnnouncementsPage searchParams={pu} />
+      </Suspense>,
+    );
+  });
+  await screen.findByText('校園公告實際內容');
+  vi.mocked(getDocsFromServer).mockImplementation((async (input: { path?: string }) => {
+    const path = String(input?.path || '');
+    if (path.includes('cgu') || path === 'announcements') return snapshot();
+    return snapshot(announcementDocument('靜宜舊公告'));
+  }) as never);
+  await act(async () => {
+    view.rerender(
+      <Suspense fallback={<p>載入學校</p>}>
+        <AnnouncementsPage searchParams={cgu} />
+      </Suspense>,
+    );
+  });
+  expect(screen.queryByText('校園公告實際內容')).toBeNull();
+  expect(screen.queryByText('靜宜舊公告')).toBeNull();
+  expect(
+    await screen.findByRole('heading', {
+      name: '這裡還沒接上學校公告，請先到學校網站看最新消息',
+    }),
+  ).toBeTruthy();
+  expect(getDocsFromServer).toHaveBeenCalledWith(
+    expect.objectContaining({ path: 'schools/cgu/announcements' }),
+  );
+});
+
 it('does not render a record whose stored school differs from the selected school', async () => {
   vi.mocked(getDocsFromServer).mockResolvedValue(
     snapshot(announcementDocument('錯誤學校資料', { schoolId: 'nthu' })),

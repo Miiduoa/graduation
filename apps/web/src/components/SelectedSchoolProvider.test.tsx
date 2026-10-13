@@ -72,19 +72,18 @@ it('uses only the supplied directory, searches it, and treats selection as brows
   expect(navigation.search).toBe('?campus=all');
 });
 
-it('changes only campus and preserves existing school authority, route, query and fragment', () => {
-  navigation.pathname = '/teacher/course/course-a';
-  navigation.search = 'school=PU&schoolId=pu&tab=grades';
+it('updates schoolId when switching campus and keeps the current route, extra query and fragment', () => {
+  navigation.pathname = '/announcements';
+  navigation.search = 'school=PU&schoolId=pu&tab=list';
   window.history.replaceState({}, '', '/#assignment-a');
   render(<View />);
   fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
   const [href, options] = navigation.replace.mock.calls[0];
   const target = new URL(href, 'https://campus.test');
-  expect(target.pathname).toBe('/teacher/course/course-a');
-  expect(target.searchParams.get('school')).toBe('PU');
-  expect(target.searchParams.get('schoolId')).toBe('pu');
+  expect(target.pathname).toBe('/announcements');
+  expect(target.searchParams.get('schoolId')).toBe('school-b');
   expect(target.searchParams.get('campus')).toBe('school-b');
-  expect(target.searchParams.get('tab')).toBe('grades');
+  expect(target.searchParams.get('tab')).toBe('list');
   expect(target.hash).toBe('#assignment-a');
   expect(options).toEqual({ scroll: false });
 });
@@ -215,5 +214,5 @@ it('distinguishes a listed campus from an opened school service', () => {
   expect(screen.getByRole('option', { name: '甲校（校務尚未開通）' })).toBeTruthy();
   fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-a' } });
   expect(screen.getByText(/此校目前可瀏覽公開交流，校務服務尚未開通/)).toBeTruthy();
-  expect(navigation.search).toBe('?campus=school-a');
+  expect(navigation.search).toBe('?schoolId=school-a&campus=school-a');
 });

@@ -4,6 +4,7 @@ import * as firestore from 'firebase/firestore';
 import { collection, doc, getDocFromServer, getDocsFromServer } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { getAuthInstance, getDb, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
+import { fetchCafeteriaLocations, fetchCafeteriaMenu } from '../services/cafeteriaCatalog';
 
 export type DiningScope = { userId: string; schoolId: string };
 export type DiningVenue = { id: string; name: string; location: string; orderingEnabled: boolean };
@@ -110,11 +111,55 @@ export const diningTotal = (price: number, quantity = 1) => {
   const tax = Math.round(subtotal * 0.05);
   return { subtotal, tax, total: (subtotalCents + tax * 100) / 100 };
 };
+async function loadDiningCatalogFromApi(schoolId: string): Promise<DiningCatalog> {
+  const locations = await fetchCafeteriaLocations(schoolId);
+  const venues = locations.map((row) => ({
+    id: row.id,
+    name: row.name,
+    location: row.location ?? '',
+    orderingEnabled: row.merchantMode === 'native_order',
+  }));
+  const menus = (
+    await Promise.all(locations.slice(0, 40).map((row) => fetchCafeteriaMenu(schoolId, row)))
+  )
+    .flat()
+    .map((item) => {
+      const venue = venues.find((row) => row.id === item.cafeteriaId);
+      const price =
+        typeof item.price === 'number' &&
+        Number.isFinite(item.price) &&
+        item.price >= 0 &&
+        Number.isSafeInteger(Math.round(item.price * 100))
+          ? item.price
+          : null;
+      return {
+        id: item.id,
+        name: item.name,
+        cafeteriaId: item.cafeteriaId,
+        description: item.description ?? '',
+        price,
+        orderable:
+          item.available === true &&
+          item.soldOut !== true &&
+          price !== null &&
+          Boolean(venue?.orderingEnabled),
+      };
+    });
+  return { venues, menus };
+}
+
 export async function loadDiningCatalog(
   scope: DiningScope,
   isCurrent: () => boolean,
 ): Promise<DiningCatalog> {
   assertScope(scope, isCurrent);
+  try {
+    const catalog = await loadDiningCatalogFromApi(scope.schoolId);
+    assertScope(scope, isCurrent);
+    return catalog;
+  } catch {
+    // Platform catalog unavailable: keep the school-scoped Firestore read.
+  }
   const db = getDb();
   const [venueSnap, firstMenus] = await Promise.all([
     getDocsFromServer(collection(db, 'schools', scope.schoolId, 'cafeterias')),

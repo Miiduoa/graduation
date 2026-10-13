@@ -32,6 +32,11 @@ import {
   safeStorefrontUrl,
   studentCafeteriaAction,
 } from '@campus/shared/src/merchantMode';
+import {
+  CAFETERIA_BACK_TO_LIST_TEXT,
+  CAFETERIA_NOT_FOUND_TEXT,
+  DEMO_CAFETERIA_NOTICE,
+} from '@campus/shared/src/cafeteriaCatalog';
 
 type Props = {
   navigation?: {
@@ -46,7 +51,7 @@ export default function StorefrontScreen({ navigation, route }: Props) {
   const { user, loading: authLoading } = useAuth();
   const { school } = useSchool();
   const signedIn = Boolean(user?.uid);
-  const [shop, setShop] = useState<StorefrontShop | null>(null);
+  const [shop, setShop] = useState<StorefrontShop | null | undefined>(undefined);
   const [menus, setMenus] = useState<StorefrontMenuItem[]>([]);
   const [posts, setPosts] = useState<StorefrontPost[]>([]);
   const [following, setFollowing] = useState(false);
@@ -61,6 +66,8 @@ export default function StorefrontScreen({ navigation, route }: Props) {
   useEffect(() => {
     let active = true;
     setError('');
+    setShop(undefined);
+    setMenus([]);
     setSocialBlocked(!authLoading && !signedIn);
     void loadStorefront(school.id, cafeteriaId).then(
       (nextShop) => {
@@ -115,9 +122,26 @@ export default function StorefrontScreen({ navigation, route }: Props) {
     <Screen title={shop?.name || '店面'} subtitle="店家自己的主頁。一般帳號即可查看、追蹤與留言。">
       <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 80 }}>
         {error ? <Text style={{ color: theme.colors.text }}>{error}</Text> : null}
-        {!shop && !error ? <Text style={{ color: theme.colors.muted }}>正在讀取店面…</Text> : null}
+        {shop === undefined && !error ? (
+          <Text style={{ color: theme.colors.muted }}>正在讀取店面…</Text>
+        ) : null}
+        {shop === null && !error ? (
+          <>
+            <Text style={{ color: theme.colors.text }}>{CAFETERIA_NOT_FOUND_TEXT}</Text>
+            <Button
+              text={CAFETERIA_BACK_TO_LIST_TEXT}
+              onPress={() => {
+                if (navigation?.navigate) navigation.navigate('Cafeteria');
+                else navigation?.goBack?.();
+              }}
+            />
+          </>
+        ) : null}
         {shop ? (
           <>
+            {shop.demo ? (
+              <Text style={{ color: theme.colors.text }}>{DEMO_CAFETERIA_NOTICE}</Text>
+            ) : null}
             {shop.intro ? (
               <Text style={{ color: theme.colors.text, lineHeight: 22 }}>{shop.intro}</Text>
             ) : null}
