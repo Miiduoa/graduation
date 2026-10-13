@@ -1,9 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { usePersonalImportScope, usePersonalImports } from '@/lib/usePersonalImports';
 import {
   IMPORT_CONFIRM_COPY,
-  IMPORT_NOT_APPLIED_COPY,
   PERIOD_TIMES,
   SchedulePlanner,
   studySlots,
@@ -19,7 +21,6 @@ import {
   type MeetupWindow,
   courseTimeLabel,
   findCourseConflicts,
-  parseTimetableText,
   periodRangeLabel,
   type ImportDraft,
   type ImportMode,
@@ -64,6 +65,12 @@ function fromSchoolCourse(course: AcademicCourse): PersonalCourse {
 }
 
 export function PersonalTimetable() {
+  const context = usePersonalImportScope();
+  if (context.loading) return <p role="status">正在確認課表…</p>;
+  return <TimetableWorkspace key={context.scopeKey} />;
+}
+
+function TimetableWorkspace() {
   const { user } = useAuth();
   const school = useSelectedSchool();
   const schoolId = school.selectedSchoolId || 'pu';
@@ -76,8 +83,7 @@ export function PersonalTimetable() {
   const [editing, setEditing] = useState<PersonalCourse | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
-  const [importText, setImportText] = useState('');
-  const [importMode, setImportMode] = useState<ImportMode>('replace');
+  const [importMode, setImportMode] = useState<ImportMode>('merge');
   const [drafts, setDrafts] = useState<ImportDraft[]>([]);
   const [planResult, setPlanResult] = useState<{ title: string; lines: string[] } | null>(null);
   const [studyDay, setStudyDay] = useState(() => {
@@ -92,15 +98,67 @@ export function PersonalTimetable() {
   const schoolRecords = useAcademicRecords('courses');
 
   const uid = user?.uid || null;
-  const planner = useMemo(
-    () => new SchedulePlanner(timetable?.courses || [], friends, selectedFriend),
-    [timetable?.courses, friends, selectedFriend],
-  );
+  const router = useRouter();
+  const importScope = usePersonalImportScope();
+  const imported = usePersonalImports(importScope.scope, !importScope.loading);
+  const [importTerm, setImportTerm] = useState('');
+  const terms = [
+    ...new Set(
+      imported.records
+        .filter((row) => row.kind === 'timetable')
+        .map((row) => `${row.academicYear}|${row.semester}`),
+    ),
+  ];
+  const latestTerm = [...imported.records].reverse().find((row) => row.kind === 'timetable');
+  const activeTerm =
+    importTerm === 'manual'
+      ? 'manual'
+      : terms.includes(importTerm)
+        ? importTerm
+        : latestTerm
+          ? `${latestTerm.academicYear}|${latestTerm.semester}`
+          : '';
+  const importedCourses: PersonalCourse[] = imported.records
+    .filter(
+      (row) =>
+        row.kind === 'timetable' &&
+        row.schoolId === 'pu' &&
+        `${row.academicYear}|${row.semester}` === activeTerm &&
+        row.dayOfWeek &&
+        row.dayOfWeek <= 5 &&
+        row.startPeriod &&
+        row.endPeriod,
+    )
+    .map((row) =>
+      cleanCourse({
+        id: `import:${row.id}`,
+        name: row.title,
+        day: row.dayOfWeek,
+        start: row.startPeriod,
+        end: row.endPeriod,
+        teacher: row.teacher,
+        room: row.location,
+      }),
+    );
+  const legacyTerm =
+    timetable?.meta.year && timetable.meta.semester
+      ? `${timetable.meta.year}|${timetable.meta.semester}`
+      : '';
+  const legacyCourses =
+    !terms.length || activeTerm === 'manual' || legacyTerm === activeTerm
+      ? timetable?.courses || []
+      : [];
+  const visibleCourses = [...legacyCourses, ...importedCourses];
+  const openCourse = (course: PersonalCourse) => {
+    if (course.id.startsWith('import:')) router.push('/import?kind=timetable');
+    else setEditing(course);
+  };
+  const planner = new SchedulePlanner(visibleCourses, friends, selectedFriend);
 
   const refresh = useCallback(async () => {
-    const next = await loadPersonalTimetable(uid, schoolId);
+    const next = await loadPersonalTimetable(uid, schoolId, importScope.scope.owner);
     setTimetable(next);
-  }, [uid, schoolId]);
+  }, [uid, schoolId, importScope.scope.owner]);
 
   useEffect(() => {
     void refresh();
@@ -171,7 +229,7 @@ export function PersonalTimetable() {
   ) => {
     setBusy(true);
     try {
-      await savePersonalTimetable(uid, { ...next, schoolId });
+      await savePersonalTimetable(uid, { ...next, schoolId }, importScope.scope.owner);
       setTimetable({ ...next, schoolId });
       setNotice(options?.deviceOnly ? TIMETABLE_DEVICE_ONLY_STORED_COPY : message);
     } catch (error) {
@@ -194,9 +252,9 @@ export function PersonalTimetable() {
     );
   }
 
-  const conflicts = findCourseConflicts(timetable.courses);
+  const conflicts = findCourseConflicts(visibleCourses);
   const selected = friends.find((friend) => friend.id === selectedFriend);
-  const windows = selected ? meetupWindows(timetable.courses, selected.courses) : [];
+  const windows = selected ? meetupWindows(visibleCourses, selected.courses) : [];
   const sendMeetup = async (kind: 'meal' | 'study', day: number, startMinute: number) => {
     if (!uid || !selected || meetupBusy) return;
     setMeetupBusy(true);
@@ -247,7 +305,6 @@ export function PersonalTimetable() {
       deviceOnly: true,
     });
     setDrafts([]);
-    setImportText('');
   };
 
   const copyShare = async () => {
@@ -297,42 +354,8 @@ export function PersonalTimetable() {
         confidence: 90,
       })),
     );
-    setImportMode('replace');
+    setImportMode('merge');
     setNotice(IMPORT_CONFIRM_COPY);
-  };
-
-  const parsePaste = () => {
-    const parsed = parseTimetableText(importText);
-    if (!parsed.length) {
-      setNotice(`${IMPORT_NOT_APPLIED_COPY}。貼上的文字裡沒有認出課程。`);
-      return;
-    }
-    setDrafts(parsed.map((course) => ({ ...course, selected: true, confidence: 80 })));
-    setNotice(IMPORT_CONFIRM_COPY);
-  };
-
-  const onPickImage = async (file?: File) => {
-    if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      setNotice('請選 PNG 或 JPEG 截圖。原本的課表沒有改。');
-      return;
-    }
-    setNotice('已收到圖片。這個瀏覽器若能辨識文字會整理成草稿；確認前不會改你的課表。');
-    try {
-      const Tesseract = await loadTesseract();
-      const result = await Tesseract.recognize(file, 'chi_tra+eng');
-      const parsed = parseTimetableText(result.data.text || '');
-      if (!parsed.length) {
-        setNotice(
-          `${IMPORT_NOT_APPLIED_COPY}。截圖有讀到，但沒有可靠找到課程，請改貼文字或手動新增。`,
-        );
-        return;
-      }
-      setDrafts(parsed.map((course) => ({ ...course, selected: true, confidence: 70 })));
-      setNotice(IMPORT_CONFIRM_COPY);
-    } catch {
-      setNotice(`${IMPORT_NOT_APPLIED_COPY}。這台裝置還沒開通截圖辨識，請對照圖片貼上課表文字。`);
-    }
   };
 
   return (
@@ -446,6 +469,31 @@ export function PersonalTimetable() {
       )}
       {shareUrl && <p className={styles.notice}>{shareUrl}</p>}
 
+      {imported.error && (
+        <p role="alert" className={styles.notice}>
+          {imported.error}
+        </p>
+      )}
+      {terms.length > 0 && (
+        <div className={styles.toolbar}>
+          <label className={styles.field}>
+            顯示自行匯入的學期
+            <select value={activeTerm} onChange={(event) => setImportTerm(event.target.value)}>
+              <option value="manual">原本的手動課表</option>
+              {terms.map((term) => (
+                <option key={term} value={term}>
+                  {term.replace('|', ' 學年度 ')} 學期
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className={styles.notice}>
+            自行匯入 {importedCourses.length}{' '}
+            筆。原有手動課表只有在學期相符時一起顯示，也可切換查看。點選可回到匯入頁修改；其他學校與週末課程請查看
+            <Link href="/import?kind=timetable">個人紀錄</Link>。
+          </p>
+        </div>
+      )}
       {view === 'grid' ? (
         <div className={styles.grid} role="table" aria-label="一週格子課表">
           <div className={styles.gridTime}>節次</div>
@@ -461,8 +509,8 @@ export function PersonalTimetable() {
                 key={period}
                 period={period}
                 time={time}
-                courses={timetable.courses}
-                onEdit={setEditing}
+                courses={visibleCourses}
+                onEdit={openCourse}
               />
             );
           })}
@@ -470,7 +518,7 @@ export function PersonalTimetable() {
       ) : view === 'week' ? (
         <div className={styles.week}>
           {WEEKDAY_LABELS.map((label, index) => {
-            const entries = timetable.courses
+            const entries = visibleCourses
               .filter((course) => course.day === index + 1)
               .sort((a, b) => a.start - b.start);
             return (
@@ -482,7 +530,7 @@ export function PersonalTimetable() {
                       type="button"
                       className={styles.course}
                       key={course.id}
-                      onClick={() => setEditing(course)}
+                      onClick={() => openCourse(course)}
                     >
                       <time>{courseTimeLabel(course)}</time>
                       <h4>{course.name}</h4>
@@ -498,12 +546,12 @@ export function PersonalTimetable() {
         </div>
       ) : (
         <ul className={styles.list}>
-          {timetable.courses
+          {visibleCourses
             .filter((course) => course.day === day)
             .sort((a, b) => a.start - b.start)
             .map((course) => (
               <li key={course.id}>
-                <button type="button" className={styles.course} onClick={() => setEditing(course)}>
+                <button type="button" className={styles.course} onClick={() => openCourse(course)}>
                   <time>{periodRangeLabel(course.start, course.end)}</time>
                   <h4>{course.name}</h4>
                   <p>
@@ -528,46 +576,17 @@ export function PersonalTimetable() {
 
       <section className={styles.panel} aria-label="匯入課表">
         <h2>匯入課表</h2>
-        <p className={styles.notice}>截圖或貼上文字後會先變成草稿。{IMPORT_CONFIRM_COPY}</p>
+        <p className={styles.notice}>截圖、文字與檔案都可以先整理成草稿，再逐筆確認。</p>
         <div className={styles.toolbar}>
-          <label className={styles.field}>
-            課表截圖
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(event) => void onPickImage(event.target.files?.[0])}
-            />
-          </label>
-          <label className={styles.field}>
-            匯入方式
-            <select
-              value={importMode}
-              onChange={(event) => setImportMode(event.target.value as ImportMode)}
-            >
-              <option value="replace">整份取代</option>
-              <option value="merge">只加入還沒有的課</option>
-            </select>
-          </label>
-          {uid ? (
+          <Link className="btn primary" href="/import?kind=timetable">
+            匯入截圖或檔案
+          </Link>
+          {uid && (
             <button type="button" className="btn" onClick={() => void bringSchool()}>
               從學校課表帶入
             </button>
-          ) : (
-            <p className={styles.notice}>這個功能還沒接通。請先貼上課表文字，或手動新增。</p>
           )}
         </div>
-        <label className={styles.field}>
-          或貼上課表文字
-          <textarea
-            rows={4}
-            value={importText}
-            onChange={(event) => setImportText(event.target.value)}
-            placeholder="例如：星期一 第3-4節 資料庫 / 王老師 / 主顧303"
-          />
-        </label>
-        <button type="button" className="btn" onClick={parsePaste}>
-          辨識文字
-        </button>
         {analyzed.length > 0 && (
           <div className={styles.draftList}>
             {analyzed.map((draft, index) => (
@@ -643,7 +662,7 @@ export function PersonalTimetable() {
             type="button"
             className="btn"
             onClick={() => {
-              const slots = studySlots(timetable?.courses || [], studyDay, studyHours);
+              const slots = studySlots(visibleCourses, studyDay, studyHours);
               setPlanResult({
                 title: `${WEEKDAY_LABELS[studyDay - 1]}排 ${studyHours} 小時讀書`,
                 lines: slots.length ? slots : ['這天的空堂都不夠長，換一天或少排一點。'],
@@ -882,22 +901,4 @@ function CourseEditor({
       </div>
     </section>
   );
-}
-
-async function loadTesseract(): Promise<{
-  recognize: (file: File, langs: string) => Promise<{ data: { text: string } }>;
-}> {
-  const globalWindow = window as unknown as {
-    Tesseract?: { recognize: (file: File, langs: string) => Promise<{ data: { text: string } }> };
-  };
-  if (globalWindow.Tesseract) return globalWindow.Tesseract;
-  await new Promise<void>((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error('辨識模組下載失敗'));
-    document.head.append(script);
-  });
-  if (!globalWindow.Tesseract) throw new Error('辨識模組不可用');
-  return globalWindow.Tesseract;
 }

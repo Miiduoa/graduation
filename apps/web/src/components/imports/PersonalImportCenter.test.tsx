@@ -1,0 +1,200 @@
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, expect, it, vi } from 'vitest';
+import { PersonalImportCenter } from './PersonalImportCenter';
+import { readPersonalImports } from '@/lib/personalImports';
+import { browserRequest } from '@/features/nuni/Session';
+const context = vi.hoisted(() => ({
+  owner: 'guest',
+  schoolId: 'pu',
+  loading: false,
+  session: null as {
+    platformAccountId: string;
+    context: string;
+    isPlatformOperator: boolean;
+  } | null,
+}));
+vi.mock('@/lib/usePersonalImports', async (actual) => ({
+  ...(await actual<typeof import('@/lib/usePersonalImports')>()),
+  usePersonalImportScope: () => ({
+    scope: { owner: context.owner, schoolId: context.schoolId },
+    scopeKey: `${context.owner}:${context.schoolId}`,
+    loading: context.loading,
+    schoolName: '靜宜大學',
+  }),
+}));
+vi.mock('@/features/nuni/Session', () => ({
+  useOptionalNuniSession: () => (context.session ? { session: context.session } : null),
+  browserRequest: vi.fn(),
+}));
+vi.mock('@/lib/personalImportOcr', () => ({ recognizePersonalImportImage: vi.fn() }));
+beforeEach(() => {
+  localStorage.clear();
+  context.owner = 'guest';
+  context.session = null;
+  vi.mocked(browserRequest).mockReset();
+  context.schoolId = 'pu';
+  context.loading = false;
+  window.history.replaceState(null, '', '/import?kind=grades');
+  Object.defineProperty(navigator, 'locks', {
+    configurable: true,
+    value: { request: (_key: string, fn: () => unknown) => Promise.resolve().then(fn) },
+  });
+  Element.prototype.scrollIntoView = vi.fn();
+});
+async function prepare(text = '課程名稱,學分,成績\n資料庫,3,85') {
+  fireEvent.change(screen.getByLabelText('這份資料的學年度'), { target: { value: '115' } });
+  fireEvent.change(screen.getByLabelText('學期'), { target: { value: '1' } });
+  fireEvent.change(screen.getByLabelText('原始文字'), { target: { value: text } });
+  fireEvent.click(screen.getByRole('button', { name: '整理成待確認清單' }));
+}
+it('reviews edits before persistence, reimport dedupes, undo only reverses the new batch', async () => {
+  render(<PersonalImportCenter />);
+  await prepare();
+  expect(readPersonalImports(context)).toHaveLength(0);
+  fireEvent.change(screen.getByLabelText('成績'), { target: { value: '88' } });
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
+  await screen.findByText('已在這台裝置新增 1 筆。原有資料保留。');
+  expect(readPersonalImports(context)[0].grade).toBe('88');
+  await prepare('課程名稱,學分,成績\n資料庫,3,88');
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
+  await screen.findByText('已在這台裝置新增 0 筆，略過 1 筆重複資料。原有資料保留。');
+  fireEvent.click(screen.getByRole('button', { name: '撤銷上次匯入' }));
+  await waitFor(() => expect(readPersonalImports(context)).toHaveLength(0));
+});
+it('blocks malformed table rows despite otherwise valid fields', async () => {
+  render(<PersonalImportCenter />);
+  await prepare('課程名稱,學分,成績\n資料庫,3,85,錯位欄位');
+  expect(
+    (screen.getByRole('button', { name: '確認匯入 1 筆' }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+  expect(screen.getByText(/欄位數與標題不同/)).toBeTruthy();
+  expect(readPersonalImports(context)).toHaveLength(0);
+});
+it('clears draft and private records synchronously on account change', async () => {
+  const view = render(<PersonalImportCenter />);
+  await prepare();
+  context.owner = 'platform:two';
+  view.rerender(<PersonalImportCenter />);
+  expect(screen.queryByRole('button', { name: '確認匯入 1 筆' })).toBeNull();
+  expect((screen.getByLabelText('原始文字') as HTMLTextAreaElement).value).toBe('');
+});
+it('imports an all-day event and keeps academic fields optional', async () => {
+  window.history.replaceState(null, '', '/import?kind=events');
+  render(<PersonalImportCenter />);
+  fireEvent.change(screen.getByLabelText('原始文字'), {
+    target: { value: '活動名稱,日期,全天\n校慶,2026-10-24,是' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '整理成待確認清單' }));
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
+  await waitFor(() => expect(readPersonalImports(context)).toHaveLength(1));
+  expect(readPersonalImports(context)[0]).toMatchObject({
+    title: '校慶',
+    allDay: true,
+    date: '2026-10-24',
+  });
+});
+it('ignores OCR completion after switching accounts', async () => {
+  const { recognizePersonalImportImage } = await import('@/lib/personalImportOcr');
+  let resolve!: (text: string) => void;
+  vi.mocked(recognizePersonalImportImage).mockReturnValue(
+    new Promise((done) => {
+      resolve = done;
+    }),
+  );
+  URL.createObjectURL = vi.fn(() => 'blob:preview');
+  URL.revokeObjectURL = vi.fn();
+  const view = render(<PersonalImportCenter />);
+  fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), {
+    target: { files: [new File(['test'], 'grades.png', { type: 'image/png' })] },
+  });
+  context.owner = 'platform:two';
+  view.rerender(<PersonalImportCenter />);
+  await act(async () => resolve('課程名稱,學分,成績\n舊帳號秘密,3,90'));
+  expect(screen.queryByText(/舊帳號秘密/)).toBeNull();
+  expect((screen.getByLabelText('原始文字') as HTMLTextAreaElement).value).toBe('');
+});
+it('keeps a same-account draft hidden while the session revalidates', async () => {
+  const view = render(<PersonalImportCenter />);
+  await prepare();
+  context.loading = true;
+  view.rerender(<PersonalImportCenter />);
+  expect(screen.queryByRole('button', { name: '確認匯入 1 筆' })).toBeNull();
+  context.loading = false;
+  view.rerender(<PersonalImportCenter />);
+  expect(screen.getByRole('button', { name: '確認匯入 1 筆' })).toBeTruthy();
+  expect((screen.getByLabelText('名稱') as HTMLInputElement).value).toBe('資料庫');
+});
+it('allows a corrected OCR field without dismissing unrelated structural errors', async () => {
+  window.history.replaceState(null, '', '/import?kind=timetable');
+  render(<PersonalImportCenter />);
+  await prepare('課程名稱,星期,開始節次,結束節次\n資料庫,星期一上午,3,4');
+  expect(
+    (screen.getByRole('button', { name: '確認匯入 1 筆' }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+  fireEvent.change(screen.getByLabelText('星期'), { target: { value: '1' } });
+  expect(
+    (screen.getByRole('button', { name: '確認匯入 1 筆' }) as HTMLButtonElement).disabled,
+  ).toBe(false);
+});
+it('cannot flatten a recurring ICS event into one confirmed personal record', async () => {
+  window.history.replaceState(null, '', '/import?kind=events');
+  render(<PersonalImportCenter />);
+  fireEvent.change(screen.getByLabelText('原始文字'), {
+    target: {
+      value:
+        'BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nSUMMARY:每週讀書\nDTSTART;TZID=Asia/Taipei:20261020T180000\nDTEND;TZID=Asia/Taipei:20261020T190000\nRRULE:FREQ=WEEKLY;COUNT=10\nEND:VEVENT\nEND:VCALENDAR',
+    },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '整理成待確認清單' }));
+  expect(
+    (screen.getByRole('button', { name: '確認匯入 1 筆' }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+  expect(readPersonalImports(context)).toHaveLength(0);
+});
+
+it('saves only an explicitly selected accessible class as a personal link without granting membership', async () => {
+  const platformAccountId = 'pa_12345678-1234-1234-1234-123456789abc';
+  const accessibleId = 'cw_12345678-1234-1234-1234-123456789abc';
+  const archivedId = 'cw_23456789-1234-1234-1234-123456789abc';
+  context.owner = `platform:${platformAccountId}`;
+  context.session = {
+    platformAccountId,
+    context: 'verified-account-context',
+    isPlatformOperator: false,
+  };
+  vi.mocked(browserRequest).mockResolvedValue({
+    workspaces: [
+      { id: accessibleId, title: '資料庫', state: 'active', memberRole: 'student' },
+      { id: archivedId, title: '上學期資料庫', state: 'archived', memberRole: 'student' },
+    ],
+  });
+  render(<PersonalImportCenter />);
+  await prepare();
+  const selector = screen.getByLabelText('連結我的課程') as HTMLSelectElement;
+  await waitFor(() =>
+    expect(Array.from(selector.options, (option) => option.value)).toEqual(['', accessibleId]),
+  );
+  // A same-name course does not auto-link; the user must choose from the returned active list.
+  expect(selector.value).toBe('');
+  expect(readPersonalImports(context)).toHaveLength(0);
+  fireEvent.change(selector, { target: { value: accessibleId } });
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
+  await screen.findByText('已在這台裝置新增 1 筆。原有資料保留。');
+  expect(readPersonalImports(context)).toEqual([
+    expect.objectContaining({
+      kind: 'grades',
+      title: '資料庫',
+      linkedCourseId: accessibleId,
+      grade: '85',
+      credits: 3,
+    }),
+  ]);
+  expect(readPersonalImports({ owner: 'guest', schoolId: 'pu' })).toHaveLength(0);
+  expect(screen.getByRole('link', { name: '開啟連結的課程 →' }).getAttribute('href')).toBe(
+    `/classroom/course/${accessibleId}`,
+  );
+  // The only server call is the accessible-list GET; import never submits membership/role changes.
+  expect(vi.mocked(browserRequest).mock.calls).toEqual([
+    ['class-workspaces', 'verified-account-context', undefined],
+  ]);
+});
