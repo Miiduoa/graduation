@@ -68,8 +68,8 @@ it('does not infer review status from shop names such as 路易莎 or 全家', (
     'pu',
   );
   expect(rows.map((row) => ({ id: row.id, reviewStatus: row.reviewStatus }))).toEqual([
-    { id: 'family', reviewStatus: 'unverified' },
     { id: 'unknown-shop', reviewStatus: 'unverified' },
+    { id: 'family', reviewStatus: 'unverified' },
     { id: 'louisa', reviewStatus: 'unverified' },
   ]);
 });
