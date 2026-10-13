@@ -318,3 +318,25 @@ it('fails closed when the independent logout fence cannot be read on restart', a
   expect(controller.state.error).not.toBe('');
   expect(request).not.toHaveBeenCalled();
 });
+
+it('binds a merchant settings PUT to the current account and aborts it on logout', async () => {
+  const { controller, request } = setup(stored());
+  await controller.refresh();
+  const context = controller.state.session!.context;
+  const update = deferred<unknown>();
+  request.mockImplementationOnce(() => update.promise);
+  const pending = controller.request(
+    'merchant-workspaces/school-one/location-one/settings',
+    context,
+    { expectedVersion: 1 },
+    'PUT',
+  );
+  const rejected = expect(pending).rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+  const last = request.mock.calls.at(-1)!;
+  expect(last[0]).toBe('merchant-workspaces/school-one/location-one/settings');
+  expect(last[4]).toBe('PUT');
+  await controller.logout();
+  expect(last[3]?.aborted).toBe(true);
+  update.resolve({ readinessVersion: 2 });
+  await rejected;
+});

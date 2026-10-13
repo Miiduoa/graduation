@@ -235,11 +235,12 @@ export function platformRequest(
   session?: PlatformSession,
   input?: Record<string, unknown>,
   query?: Record<string, string>,
+  method?: 'PUT',
 ): Promise<unknown> {
   if (!/^[a-zA-Z0-9/_-]+$/.test(path)) throw new NuniError(400, 'INVALID_PATH');
   const search = new URLSearchParams(query);
   return fetchJson(`${apiOrigin()}/v1/auth/platform/${path}${search.size ? `?${search}` : ''}`, {
-    method: input ? 'POST' : 'GET',
+    method: method ?? (input ? 'POST' : 'GET'),
     headers: {
       Accept: 'application/json',
       ...(session ? { Authorization: `Platform ${session.sessionHandle}` } : {}),

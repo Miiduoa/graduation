@@ -7,10 +7,11 @@ export type NuniTransport = (
   handle?: string,
   input?: Record<string, unknown>,
   signal?: AbortSignal,
+  method?: 'PUT',
 ) => Promise<unknown>;
 
 /** Credentials are sent only to the platform API, never to a supplied URL. */
-export const nuniPlatformRequest: NuniTransport = async (path, handle, input, signal) => {
+export const nuniPlatformRequest: NuniTransport = async (path, handle, input, signal, method) => {
   if (!/^[a-z0-9-]+(?:\/[A-Za-z0-9_-]+)*$/.test(path) || (handle && !NUNI_HANDLE.test(handle)))
     throw new NuniError(400, 'INVALID_REQUEST');
   const controller = new AbortController();
@@ -20,7 +21,7 @@ export const nuniPlatformRequest: NuniTransport = async (path, handle, input, si
   const timeout = setTimeout(abort, 12000);
   try {
     const response = await fetch(`${API}${path}`, {
-      method: input ? 'POST' : 'GET',
+      method: method ?? (input ? 'POST' : 'GET'),
       redirect: 'error',
       cache: 'no-store',
       signal: controller.signal,
