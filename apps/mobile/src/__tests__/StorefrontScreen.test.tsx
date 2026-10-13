@@ -229,6 +229,34 @@ test('外連確認頁不合格網址不放按鈕', async () => {
   }
 });
 
+test('keeps the not-found copy and offers a way back when the shop is missing', async () => {
+  jest.mocked(loadStorefront).mockResolvedValueOnce(null);
+  const view = render(
+    <StorefrontScreen navigation={navigation} route={{ params: { cafeteriaId: 'cafe-1' } }} />,
+  );
+  expect(await view.findByText('找不到這間店。')).toBeTruthy();
+  expect(view.getByText('回餐廳列表')).toBeTruthy();
+  expect(view.queryByText('這是示範店家，菜單和價格不是真的，不能點餐。')).toBeNull();
+  fireEvent.press(view.getByText('回餐廳列表'));
+  expect(navigation.navigate).toHaveBeenCalledWith('Cafeteria');
+});
+
+test('shows the demo notice only on a demo shop page', async () => {
+  jest.mocked(loadStorefront).mockResolvedValueOnce({
+    id: 'cafe-1',
+    name: '校園小棧',
+    intro: '紙感小店',
+    merchantMode: 'info_only',
+    demo: true,
+  } as never);
+  const view = render(
+    <StorefrontScreen navigation={navigation} route={{ params: { cafeteriaId: 'cafe-1' } }} />,
+  );
+  expect(await view.findByText('這是示範店家，菜單和價格不是真的，不能點餐。')).toBeTruthy();
+  expect(view.getByText('紙感小店')).toBeTruthy();
+  expect(view.queryByText('找不到這間店。')).toBeNull();
+});
+
 test('外連確認頁按鈕與小字同一套文案', async () => {
   const view = render(
     <HonestOrderScreen

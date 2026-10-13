@@ -6,16 +6,22 @@ import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
 import { LoginRequiredLostFoundComments } from '@/components/LoginRequiredLostFoundComments';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
-import { fetchMenus, type MenuItem } from '@/lib/firebase';
+import type { MenuItem } from '@/lib/firebase';
+import {
+  CAFETERIA_BACK_TO_LIST_TEXT,
+  CAFETERIA_NOT_FOUND_TEXT,
+  DEMO_CAFETERIA_NOTICE,
+  cafeteriaListHref,
+} from '@campus/shared/src/cafeteriaCatalog';
 import {
   LOGIN_REQUIRED_COMMENTS_TEXT,
   isPermissionDeniedError,
 } from '@campus/shared/src/signedInSocialReads';
+import { fetchCafeteriaDetail, type CatalogCafeteria } from '@/lib/cafeteriaCatalog';
 import {
   addStorefrontComment,
   followStorefront,
   isFollowingStorefront,
-  loadStorefront,
   loadStorefrontComments,
   loadStorefrontPosts,
   toggleStorefrontLike,
@@ -32,7 +38,6 @@ import {
   studentCafeteriaAction,
 } from '@campus/shared/src/merchantMode';
 import social from '@/features/social/Social.module.css';
-import type { Cafeteria } from '@/lib/firebase';
 
 export default function StorefrontPage(props: {
   params: Promise<{ id: string }>;
@@ -44,7 +49,7 @@ export default function StorefrontPage(props: {
   const { user, loading: authLoading } = useAuth();
   const signedIn = Boolean(user?.uid);
   const loginReturnUrl = `/cafeteria/${encodeURIComponent(id)}?schoolId=${encodeURIComponent(context.schoolId)}`;
-  const [shop, setShop] = useState<Cafeteria | null | undefined>(undefined);
+  const [shop, setShop] = useState<CatalogCafeteria | null | undefined>(undefined);
   const [menus, setMenus] = useState<MenuItem[]>([]);
   const [posts, setPosts] = useState<StorefrontPost[]>([]);
   const [following, setFollowing] = useState(false);
@@ -56,20 +61,17 @@ export default function StorefrontPage(props: {
     let active = true;
     setError('');
     setSocialBlocked(!authLoading && !signedIn);
-    void loadStorefront(context.schoolId, id).then(
-      (nextShop) => {
-        if (active) setShop(nextShop);
+    void fetchCafeteriaDetail(context.schoolId, id).then(
+      (detail) => {
+        if (!active) return;
+        setShop(detail.cafeteria);
+        setMenus(detail.menus);
       },
       () => {
-        if (active) setError('暫時讀不到這間店。');
-      },
-    );
-    void fetchMenus(context.schoolId).then(
-      (nextMenus) => {
-        if (active) setMenus(nextMenus.filter((item) => item.cafeteriaId === id));
-      },
-      () => {
-        if (active) setMenus([]);
+        if (!active) return;
+        setShop(null);
+        setMenus([]);
+        setError('暫時讀不到這間店。');
       },
     );
     void loadStorefrontPosts(context.schoolId, id, signedIn ? user?.uid : undefined).then(
@@ -113,9 +115,17 @@ export default function StorefrontPage(props: {
     >
       {error && <p role="alert">{error}</p>}
       {shop === undefined && !error && <p role="status">正在讀取店面…</p>}
-      {shop === null && <p>找不到這間店。</p>}
+      {shop === null && !error && (
+        <section className={social.panel}>
+          <p>{CAFETERIA_NOT_FOUND_TEXT}</p>
+          <Link className="btn primary" href={cafeteriaListHref(context.schoolId)}>
+            {CAFETERIA_BACK_TO_LIST_TEXT}
+          </Link>
+        </section>
+      )}
       {shop && (
         <div className={social.stack}>
+          {shop.demo ? <p role="status">{DEMO_CAFETERIA_NOTICE}</p> : null}
           <section className={social.panel}>
             <h2>{shop.name}</h2>
             {shop.intro && <p>{shop.intro}</p>}

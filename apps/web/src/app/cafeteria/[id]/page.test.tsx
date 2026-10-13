@@ -2,10 +2,10 @@ import { Suspense } from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import StorefrontPage from './page';
-import { fetchMenus, type Cafeteria, type MenuItem } from '@/lib/firebase';
+import type { Cafeteria, MenuItem } from '@/lib/firebase';
+import { fetchCafeteriaDetail } from '@/lib/cafeteriaCatalog';
 import {
   isFollowingStorefront,
-  loadStorefront,
   loadStorefrontComments,
   loadStorefrontPosts,
   type StorefrontPost,
@@ -38,11 +38,10 @@ vi.mock('@/components/SiteShell', () => ({
 vi.mock('@/lib/pageContext', () => ({
   resolveSchoolPageContext: () => ({ schoolId: 'pu', schoolName: '靜宜大學' }),
 }));
-vi.mock('@/lib/firebase', () => ({
-  fetchMenus: vi.fn(async () => state.menus),
+vi.mock('@/lib/cafeteriaCatalog', () => ({
+  fetchCafeteriaDetail: vi.fn(async () => ({ cafeteria: state.shop, menus: state.menus })),
 }));
 vi.mock('@/lib/storefront', () => ({
-  loadStorefront: vi.fn(async () => state.shop),
   loadStorefrontPosts: vi.fn(async () => state.posts),
   isFollowingStorefront: vi.fn(async () => false),
   followStorefront: vi.fn(),
@@ -77,8 +76,10 @@ beforeEach(() => {
   vi.mocked(isFollowingStorefront).mockReset().mockResolvedValue(false);
   vi.mocked(loadStorefrontComments).mockReset().mockResolvedValue([]);
   vi.mocked(loadStorefrontPosts).mockReset().mockImplementation(async () => state.posts);
-  vi.mocked(fetchMenus).mockReset().mockImplementation(async () => state.menus);
-  vi.mocked(loadStorefront).mockReset().mockImplementation(async () => state.shop);
+  vi.mocked(fetchCafeteriaDetail).mockReset().mockImplementation(async () => ({
+    cafeteria: state.shop,
+    menus: state.menus,
+  }));
 });
 
 it('lets a regular account open a storefront and leave to the shop order page', async () => {
@@ -245,7 +246,10 @@ it('does not read comments, likes or follows before login and shows a login prom
 });
 
 it('keeps the shop when menus fail to load', async () => {
-  vi.mocked(fetchMenus).mockRejectedValueOnce(new Error('offline'));
+  vi.mocked(fetchCafeteriaDetail).mockResolvedValueOnce({
+    cafeteria: state.shop,
+    menus: [],
+  });
   await act(async () => {
     render(
       <Suspense fallback={<p>載入店面</p>}>
@@ -287,4 +291,39 @@ it('keeps shop data and menus when comment reads are blocked', async () => {
   expect(screen.queryByText('暫時讀不到這間店。')).toBeNull();
   expect(screen.queryByText('目前沒有資料')).toBeNull();
   expect(screen.queryByText('請確認網路')).toBeNull();
+});
+
+it('keeps the not-found copy and offers a way back when the shop is missing', async () => {
+  state.shop = null as never;
+  await act(async () => {
+    render(
+      <Suspense fallback={<p>載入店面</p>}>
+        <StorefrontPage
+          params={Promise.resolve({ id: 'cafe-1' })}
+          searchParams={Promise.resolve({ schoolId: 'pu' })}
+        />
+      </Suspense>,
+    );
+  });
+  expect(await screen.findByText('找不到這間店。')).toBeTruthy();
+  expect(screen.getByRole('link', { name: '回餐廳列表' }).getAttribute('href')).toBe(
+    '/cafeteria?schoolId=pu',
+  );
+  expect(screen.queryByText('這是示範店家，菜單和價格不是真的，不能點餐。')).toBeNull();
+});
+
+it('shows the demo notice only on a demo shop page', async () => {
+  state.shop = { ...showcaseShop, id: 'cafe-1', name: '校園小棧', demo: true } as never;
+  await act(async () => {
+    render(
+      <Suspense fallback={<p>載入店面</p>}>
+        <StorefrontPage
+          params={Promise.resolve({ id: 'cafe-1' })}
+          searchParams={Promise.resolve({ schoolId: 'pu' })}
+        />
+      </Suspense>,
+    );
+  });
+  expect(await screen.findByText('這是示範店家，菜單和價格不是真的，不能點餐。')).toBeTruthy();
+  expect(screen.getByText('紙感小店')).toBeTruthy();
 });
