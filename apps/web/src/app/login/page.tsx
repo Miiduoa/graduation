@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/components/AuthGuard';
 import { isFirebaseConfigured, signInWithPuStudentId } from '@/features/auth/client';
-import { sanitizeInternalPath } from '@/lib/navigation';
+import { readLoginReturnParam, sanitizeInternalPath } from '@/lib/navigation';
 import styles from '../servicePages.module.css';
 import { NuniSignIn } from '@/components/NuniSignIn';
 import { platformDestination } from '@/lib/accountDestination';
@@ -249,7 +249,7 @@ function LoginForm({
 }
 function LoginRoute() {
   const params = useSearchParams();
-  const destination = loginDestination(params.get('redirect') || params.get('returnUrl'));
+  const destination = loginDestination(readLoginReturnParam(params));
   const reconnect = params.get('reconnect') === 'school';
   return (
     <LoginForm

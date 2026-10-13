@@ -15,6 +15,7 @@ import { PROVIDENCE_UNIVERSITY_SCHOOL_ID } from '@campus/shared/src';
 
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
+import { finishLoginReturn } from '../utils/loginReturn';
 import { signInWithStudentId, type LoginProgress } from '../services/studentIdAuth';
 import { isStudentIdLoginAvailable } from '../services/schoolLoginAvailability';
 import { Screen, Button, AnimatedCard } from '../ui/components';
@@ -34,8 +35,9 @@ type LoginStep =
 type SSOLoginScreenProps = {
   navigation?: {
     goBack?: () => void;
-    navigate?: (screen: 'NuniWorkspace') => void;
+    navigate?: (screen: string, params?: Record<string, unknown>) => void;
   };
+  route?: { params?: { returnTo?: string } };
 };
 
 type LoginAttempt = { provider: 'school' | 'platform' };
@@ -93,7 +95,6 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
           onPress: () => {
             if (!isCurrent(attempt)) return;
             onConfirm?.();
-            nav?.goBack?.();
           },
         },
       ]);
@@ -166,6 +167,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
         void import('../services/companionEngine')
           .then((m) => m.recordCompanionFeatureSignal('sso_login'))
           .catch(() => undefined);
+        finishLoginReturn(nav, props.route?.params?.returnTo);
       });
     } catch (loginError) {
       if (!isCurrent(attempt)) return;

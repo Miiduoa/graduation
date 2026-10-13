@@ -13,6 +13,10 @@ it.each([
   '/announcements?school=pu',
   '/announcements/news-123?schoolId=tw-pu',
   '/cafeteria',
+  '/cafeteria/stall?schoolId=pu',
+  '/lost-found',
+  '/lost-found/item-1?schoolId=pu',
+  '/lost-found/post',
   '/library',
   '/classroom/course/cw_11111111-1111-4111-8111-111111111111#assignments',
 ])('returns to platform task %s', (path) => {

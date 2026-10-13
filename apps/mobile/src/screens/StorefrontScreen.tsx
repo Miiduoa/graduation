@@ -5,16 +5,21 @@ import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { LoginRequiredLostFoundComments } from '../components/LoginRequiredLostFoundComments';
-import { isPermissionDeniedError } from '@campus/shared/src/signedInSocialReads';
+import {
+  LOGIN_REQUIRED_COMMENTS_TEXT,
+  isPermissionDeniedError,
+} from '@campus/shared/src/signedInSocialReads';
 import {
   addStorefrontComment,
   followStorefront,
   isFollowingStorefront,
   loadStorefront,
   loadStorefrontComments,
+  loadStorefrontMenus,
   loadStorefrontPosts,
   toggleStorefrontLike,
   type StorefrontComment,
+  type StorefrontMenuItem,
   type StorefrontPost,
   type StorefrontShop,
 } from '../services/storefront';
@@ -42,26 +47,44 @@ export default function StorefrontScreen({ navigation, route }: Props) {
   const { school } = useSchool();
   const signedIn = Boolean(user?.uid);
   const [shop, setShop] = useState<StorefrontShop | null>(null);
+  const [menus, setMenus] = useState<StorefrontMenuItem[]>([]);
   const [posts, setPosts] = useState<StorefrontPost[]>([]);
   const [following, setFollowing] = useState(false);
   const [socialBlocked, setSocialBlocked] = useState(false);
   const [error, setError] = useState('');
   const canReadSocial = signedIn && !socialBlocked;
   const onSocialDenied = useCallback(() => setSocialBlocked(true), []);
-  const openLogin = () => navigation?.navigate?.('SSOLogin');
+  const openLogin = () =>
+    navigation?.navigate?.('SSOLogin', {
+      returnTo: cafeteriaId && !cafeteriaId.includes('/') ? `/cafeteria/${cafeteriaId}` : '/cafeteria',
+    });
   useEffect(() => {
     let active = true;
-    Promise.all([
-      loadStorefront(school.id, cafeteriaId),
-      loadStorefrontPosts(school.id, cafeteriaId, signedIn ? user?.uid : undefined),
-    ]).then(
-      ([nextShop, nextPosts]) => {
-        if (!active) return;
-        setShop(nextShop);
-        setPosts(nextPosts);
+    setError('');
+    setSocialBlocked(!authLoading && !signedIn);
+    void loadStorefront(school.id, cafeteriaId).then(
+      (nextShop) => {
+        if (active) setShop(nextShop);
       },
       () => {
         if (active) setError('暫時讀不到這間店。');
+      },
+    );
+    void loadStorefrontMenus(school.id, cafeteriaId).then(
+      (nextMenus) => {
+        if (active) setMenus(nextMenus);
+      },
+      () => {
+        if (active) setMenus([]);
+      },
+    );
+    void loadStorefrontPosts(school.id, cafeteriaId, signedIn ? user?.uid : undefined).then(
+      (nextPosts) => {
+        if (active) setPosts(nextPosts);
+      },
+      (reason) => {
+        if (!active) return;
+        if (isPermissionDeniedError(reason)) setSocialBlocked(true);
       },
     );
     if (signedIn && user?.uid) {
@@ -130,9 +153,7 @@ export default function StorefrontScreen({ navigation, route }: Props) {
                     )
                   }
                 />
-              ) : authLoading ? null : (
-                <LoginRequiredLostFoundComments onLogin={openLogin} />
-              )}
+              ) : null}
             </View>
             {action.kind === 'showcase' && shop.orderingUrl ? (
               <Text style={{ color: theme.colors.muted, lineHeight: 20 }}>
@@ -144,6 +165,18 @@ export default function StorefrontScreen({ navigation, route }: Props) {
                 <Text style={{ color: theme.colors.accent }}>店家網站</Text>
               </Pressable>
             ) : null}
+            <Text style={{ color: theme.colors.text, fontWeight: '700' }}>菜單</Text>
+            {menus.length === 0 ? (
+              <Text style={{ color: theme.colors.muted }}>還沒有菜單。沒串接的店也可以只放訂餐連結。</Text>
+            ) : (
+              menus.map((item) => (
+                <Text key={item.id} style={{ color: theme.colors.text }}>
+                  {item.name}
+                  {typeof item.price === 'number' ? ` · NT$${item.price}` : ''}
+                  {item.soldOut ? '（售完）' : ''}
+                </Text>
+              ))
+            )}
             <Text style={{ color: theme.colors.text, fontWeight: '700' }}>店家貼文</Text>
             {posts.length === 0 ? (
               <Text style={{ color: theme.colors.muted }}>還沒有貼文或優惠公告。</Text>
@@ -160,6 +193,11 @@ export default function StorefrontScreen({ navigation, route }: Props) {
                 />
               ))
             )}
+            {!canReadSocial && !authLoading ? (
+              <View accessibilityLabel="評論">
+                <LoginRequiredLostFoundComments onLogin={openLogin} text={LOGIN_REQUIRED_COMMENTS_TEXT} />
+              </View>
+            ) : null}
           </>
         ) : null}
       </ScrollView>

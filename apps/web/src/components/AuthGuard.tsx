@@ -14,6 +14,7 @@ import { onAuthStateChanged, User, signOut } from 'firebase/auth';
 import { getAuth } from '@/features/auth/client';
 import Link from 'next/link';
 import { getSupabaseClient } from '@/lib/supabaseClient';
+import { readLoginReturnParam, sanitizeInternalPath } from '@/lib/navigation';
 
 interface AuthState {
   user: User | null;
@@ -322,8 +323,9 @@ export function GuestOnly({ children, redirectTo = '/' }: GuestOnlyProps) {
   useEffect(() => {
     if (!loading && user) {
       const searchParams = new URLSearchParams(window.location.search);
-      const returnUrl = searchParams.get('returnUrl') || redirectTo;
-      window.location.href = returnUrl;
+      window.location.replace(
+        sanitizeInternalPath(readLoginReturnParam(searchParams), redirectTo),
+      );
     }
   }, [user, loading, redirectTo]);
 

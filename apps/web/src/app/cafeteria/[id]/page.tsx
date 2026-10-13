@@ -7,7 +7,10 @@ import { useAuth } from '@/components/AuthGuard';
 import { LoginRequiredLostFoundComments } from '@/components/LoginRequiredLostFoundComments';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import { fetchMenus, type MenuItem } from '@/lib/firebase';
-import { isPermissionDeniedError } from '@campus/shared/src/signedInSocialReads';
+import {
+  LOGIN_REQUIRED_COMMENTS_TEXT,
+  isPermissionDeniedError,
+} from '@campus/shared/src/signedInSocialReads';
 import {
   addStorefrontComment,
   followStorefront,
@@ -52,19 +55,30 @@ export default function StorefrontPage(props: {
   useEffect(() => {
     let active = true;
     setError('');
-    Promise.all([
-      loadStorefront(context.schoolId, id),
-      fetchMenus(context.schoolId),
-      loadStorefrontPosts(context.schoolId, id, signedIn ? user?.uid : undefined),
-    ]).then(
-      ([nextShop, nextMenus, nextPosts]) => {
-        if (!active) return;
-        setShop(nextShop);
-        setMenus(nextMenus.filter((item) => item.cafeteriaId === id));
-        setPosts(nextPosts);
+    setSocialBlocked(!authLoading && !signedIn);
+    void loadStorefront(context.schoolId, id).then(
+      (nextShop) => {
+        if (active) setShop(nextShop);
       },
       () => {
         if (active) setError('暫時讀不到這間店。');
+      },
+    );
+    void fetchMenus(context.schoolId).then(
+      (nextMenus) => {
+        if (active) setMenus(nextMenus.filter((item) => item.cafeteriaId === id));
+      },
+      () => {
+        if (active) setMenus([]);
+      },
+    );
+    void loadStorefrontPosts(context.schoolId, id, signedIn ? user?.uid : undefined).then(
+      (nextPosts) => {
+        if (active) setPosts(nextPosts);
+      },
+      (reason) => {
+        if (!active) return;
+        if (isPermissionDeniedError(reason)) setSocialBlocked(true);
       },
     );
     if (signedIn && user?.uid) {
@@ -148,9 +162,7 @@ export default function StorefrontPage(props: {
                 >
                   {following ? '取消追蹤' : '追蹤店家'}
                 </button>
-              ) : authLoading ? null : (
-                <LoginRequiredLostFoundComments returnUrl={loginReturnUrl} />
-              )}
+              ) : null}
             </div>
             {action.kind === 'showcase' && <p className={social.muted}>{SHOWCASE_ORDER_CAPTION}</p>}
             <p className={social.muted}>{PRICE_DISCLAIMER}</p>
@@ -188,6 +200,14 @@ export default function StorefrontPage(props: {
                 onSocialDenied={onSocialDenied}
               />
             ))}
+            {!canReadSocial && !authLoading ? (
+              <section className={social.panel} aria-label="評論">
+                <LoginRequiredLostFoundComments
+                  returnUrl={loginReturnUrl}
+                  text={LOGIN_REQUIRED_COMMENTS_TEXT}
+                />
+              </section>
+            ) : null}
           </section>
         </div>
       )}
