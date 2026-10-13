@@ -1129,7 +1129,7 @@ describe('firestore security rules', () => {
     );
   });
 
-  test('allow public pulse aggregate reads but deny raw pulse reports and aggregate writes', async () => {
+  test('signed-in users can read pulse aggregates; guests and writers cannot', async () => {
     await seedFirestore(async (db) => {
       await db
         .collection('schools')
@@ -1154,7 +1154,7 @@ describe('firestore security rules', () => {
     });
 
     const publicDb = testEnv.unauthenticatedContext().firestore();
-    await assertSucceeds(
+    await assertFails(
       publicDb
         .collection('schools')
         .doc('tw-demo-uni')
@@ -1172,6 +1172,14 @@ describe('firestore security rules', () => {
     );
 
     const aliceDb = testEnv.authenticatedContext('alice').firestore();
+    await assertSucceeds(
+      aliceDb
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('pulseAggregates')
+        .doc('library')
+        .get(),
+    );
     await assertFails(
       aliceDb
         .collection('schools')
@@ -1182,6 +1190,98 @@ describe('firestore security rules', () => {
           currentLevel: 5,
         }),
     );
+  });
+
+  test('guests can read campus announcements but not lost-and-found or reviews', async () => {
+    await seedFirestore(async (db) => {
+      const school = db.collection('schools').doc('pu');
+      await school.set({ name: '靜宜大學' });
+      await school.collection('announcements').doc('notice-1').set({
+        title: '停課通知',
+        schoolId: 'pu',
+      });
+      await school.collection('lostFound').doc('item-1').set({
+        title: '遺失學生證',
+        userId: 'alice',
+        phone: '0900000000',
+      });
+      await school.collection('pois').doc('lib').set({ name: '圖書館' });
+      await school.collection('pois').doc('lib').collection('reviews').doc('rev-1').set({
+        uid: 'alice',
+        text: '很安靜',
+      });
+      await school.collection('cafeterias').doc('cafe-1').set({ name: '一餐' });
+      await school
+        .collection('cafeterias')
+        .doc('cafe-1')
+        .collection('posts')
+        .doc('post-1')
+        .set({ text: '今日特餐' });
+      await school
+        .collection('cafeterias')
+        .doc('cafe-1')
+        .collection('posts')
+        .doc('post-1')
+        .collection('comments')
+        .doc('c1')
+        .set({ authorId: 'alice', text: '收到' });
+      await school
+        .collection('cafeterias')
+        .doc('cafe-1')
+        .collection('posts')
+        .doc('post-1')
+        .collection('likes')
+        .doc('alice')
+        .set({ createdAt: '2026-10-13' });
+      await school.collection('cafeterias').doc('cafe-1').collection('followers').doc('alice').set({
+        createdAt: '2026-10-13',
+      });
+      await school.collection('leaderboard').doc('weekly').set({ uid: 'alice', score: 12 });
+      await school.collection('pulseAggregates').doc('library').set({ currentLevel: 2 });
+      await school.collection('menus').doc('bento').set({ name: '便當' });
+      await school.collection('busRoutes').doc('route-1').set({ name: '校車' });
+      await school.collection('events').doc('event-1').set({ title: '迎新' });
+      await db.collection('courses').doc('cs101').set({ name: '程式設計' });
+      await db.collection('lostFoundItems').doc('item-2').set({
+        userId: 'alice',
+        title: '雨傘',
+      });
+      await db.collection('menuRatings').doc('rate-1').set({
+        userId: 'alice',
+        menuItemId: 'bento',
+        score: 5,
+      });
+    });
+
+    const guest = testEnv.unauthenticatedContext().firestore();
+    await assertSucceeds(guest.doc('schools/pu/announcements/notice-1').get());
+    await assertSucceeds(guest.doc('schools/pu').get());
+    await assertSucceeds(guest.doc('schools/pu/menus/bento').get());
+    await assertSucceeds(guest.doc('schools/pu/busRoutes/route-1').get());
+    await assertSucceeds(guest.doc('schools/pu/events/event-1').get());
+    await assertSucceeds(guest.doc('schools/pu/pois/lib').get());
+    await assertSucceeds(guest.doc('schools/pu/cafeterias/cafe-1').get());
+    await assertSucceeds(guest.doc('courses/cs101').get());
+    await assertFails(guest.doc('schools/pu/lostFound/item-1').get());
+    await assertFails(guest.doc('lostFoundItems/item-2').get());
+    await assertFails(guest.doc('schools/pu/pois/lib/reviews/rev-1').get());
+    await assertFails(guest.doc('schools/pu/cafeterias/cafe-1/posts/post-1/comments/c1').get());
+    await assertFails(guest.doc('schools/pu/cafeterias/cafe-1/posts/post-1/likes/alice').get());
+    await assertFails(guest.doc('schools/pu/cafeterias/cafe-1/followers/alice').get());
+    await assertFails(guest.doc('menuRatings/rate-1').get());
+    await assertFails(guest.doc('schools/pu/leaderboard/weekly').get());
+    await assertFails(guest.doc('schools/pu/pulseAggregates/library').get());
+    await assertFails(guest.doc('schools/pu/announcements/notice-1').set({ title: '竄改' }));
+
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    await assertSucceeds(alice.doc('schools/pu/announcements/notice-1').get());
+    await assertSucceeds(alice.doc('schools/pu/lostFound/item-1').get());
+    await assertSucceeds(alice.doc('lostFoundItems/item-2').get());
+    await assertSucceeds(alice.doc('schools/pu/pois/lib/reviews/rev-1').get());
+    await assertSucceeds(alice.doc('schools/pu/cafeterias/cafe-1/posts/post-1/comments/c1').get());
+    await assertSucceeds(alice.doc('menuRatings/rate-1').get());
+    await assertFails(alice.doc('schools/pu/announcements/notice-1').set({ title: '竄改' }));
+    await assertFails(alice.doc('schools/pu/leaderboard/weekly').set({ score: 99 }));
   });
 
   test('protect Campus Agent OS private risk snapshots and action queue', async () => {
