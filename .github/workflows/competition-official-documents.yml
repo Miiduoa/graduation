@@ -1,0 +1,83 @@
+name: Competition official documents
+on:
+  push:
+    branches: [competition/2026-official-documents-check]
+    paths: [.github/workflows/competition-official-documents.yml]
+permissions:
+  contents: read
+jobs:
+  documents:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Install document readers
+        run: python -m pip install --quiet requests beautifulsoup4 pymupdf python-docx
+      - name: Retrieve only public competition documents
+        run: |
+          python - <<'PY'
+          import requests, pathlib, json, hashlib, datetime, urllib.parse, base64
+          from bs4 import BeautifulSoup
+          import fitz
+          from docx import Document
+          out=pathlib.Path('official-documents'); out.mkdir()
+          url='https://ssid.pu.edu.tw/p/404-1103-74745.php'
+          session=requests.Session()
+          session.headers['User-Agent']='Mozilla/5.0 (Campus One competition document verification)'
+          manifest={'captured_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'announcement':url,'files':[],'errors':[]}
+          try:
+              r=session.get(url,timeout=25); r.raise_for_status()
+              (out/'announcement.html').write_text(r.text,encoding='utf-8')
+              soup=BeautifulSoup(r.text,'html.parser')
+              (out/'announcement.txt').write_text(soup.get_text('\n',strip=True),encoding='utf-8')
+              links=[]
+              for a in soup.find_all('a',href=True):
+                  label=a.get_text(' ',strip=True)
+                  href=urllib.parse.urljoin(url,a['href'])
+                  if 'Action=downloadfile' in href and any(x in label for x in ['簡章','切結','報名表']):
+                      links.append((label,href))
+              for label,href in links[:3]:
+                  row={'title':label,'source_url':href}
+                  try:
+                      rr=session.get(href,timeout=30); rr.raise_for_status(); data=rr.content
+                      if not (data.startswith(b'%PDF') or data.startswith(b'PK')):
+                          raise ValueError('Downloaded response is not PDF or DOCX: '+rr.headers.get('Content-Type',''))
+                      kind='guide' if '簡章' in label else 'declaration' if '切結' in label else 'registration'
+                      ext='.pdf' if data.startswith(b'%PDF') else '.docx'
+                      path=out/(kind+ext); path.write_bytes(data)
+                      row.update(file=path.name,final_url=rr.url,size=len(data),sha256=hashlib.sha256(data).hexdigest())
+                      if ext=='.pdf':
+                          doc=fitz.open(path); parts=[]
+                          for i,p in enumerate(doc):
+                              parts.append('PAGE '+str(i+1)+'\n'+p.get_text())
+                              p.get_pixmap(matrix=fitz.Matrix(1.5,1.5)).save(out/(kind+'-page-'+str(i+1)+'.png'))
+                          text='\n\n'.join(parts)
+                          row['pages']=len(doc)
+                      else:
+                          doc=Document(path)
+                          text='\n'.join(p.text for p in doc.paragraphs)+'\n'
+                          for t in doc.tables:
+                              text+='\nTABLE\n'+'\n'.join(' | '.join(c.text for c in row.cells) for row in t.rows)+'\n'
+                      (out/(kind+'.txt')).write_text(text,encoding='utf-8')
+                      print('\nDOCUMENT:',label,'\n',text)
+                      manifest['files'].append(row)
+                  except Exception as e:
+                      manifest['errors'].append({'title':label,'source_url':href,'error':str(e)})
+              if not links: manifest['errors'].append({'error':'No matching attachment anchors found'})
+              try:
+                  f=session.get('https://forms.gle/1ofafW19sKt7icqa8',timeout=20)
+                  manifest['form']={'url':f.url,'status':f.status_code,'login_required':'accounts.google.com' in f.url}
+                  (out/'form-public.html').write_text(f.text,encoding='utf-8')
+              except Exception as e: manifest['errors'].append({'form_error':str(e)})
+          except Exception as e:
+              manifest['errors'].append({'error':str(e)})
+          (out/'manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8')
+          print(json.dumps(manifest,ensure_ascii=False,indent=2))
+          PY
+      - name: Preserve sources and page renders
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: campus-one-competition-official-documents
+          path: official-documents/
+          retention-days: 7
+          if-no-files-found: error
