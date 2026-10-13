@@ -1,0 +1,56 @@
+# 預設關閉。不要加 schedule；晉瑋核准後才可打開 cron、寫入密鑰與 CAMPUS_ANNOUNCEMENT_SYNC_ENABLED。
+name: Campus announcement sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      school:
+        description: 'schoolId to scrape, for example pu'
+        required: true
+        default: 'pu'
+        type: string
+      write:
+        description: 'Write to Firestore. Keep false unless production write is approved.'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: campus-announcement-sync
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    name: Preview or sync campus announcements
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter functions...
+
+      - name: Dry-run
+        if: ${{ inputs.write != true }}
+        run: pnpm --filter functions sync:announcements -- --school "${{ inputs.school }}"
+
+      - name: Write is blocked until explicitly enabled
+        if: ${{ inputs.write == true }}
+        env:
+          CAMPUS_ANNOUNCEMENT_SYNC_ENABLED: ${{ secrets.CAMPUS_ANNOUNCEMENT_SYNC_ENABLED }}
+        run: |
+          echo "::error::寫入尚未開放。需晉瑋核准後才設定 CAMPUS_ANNOUNCEMENT_SYNC_ENABLED 與服務帳號。"
+          exit 1
