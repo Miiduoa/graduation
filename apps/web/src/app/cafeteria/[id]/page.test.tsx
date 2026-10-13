@@ -6,6 +6,7 @@ import {
   isFollowingStorefront,
   loadStorefrontComments,
   loadStorefrontPosts,
+  type StorefrontPost,
 } from '@/lib/storefront';
 
 const state = vi.hoisted(() => ({
@@ -28,15 +29,7 @@ const state = vi.hoisted(() => ({
     location: string;
     openingHours?: string;
   },
-  posts: [] as Array<{
-    id: string;
-    title: string;
-    text: string;
-    kind: string;
-    createdAt: string;
-    likeCount: number;
-    liked: boolean;
-  }>,
+  posts: [] as StorefrontPost[],
 }));
 
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => ({ user: state.user }) }));
