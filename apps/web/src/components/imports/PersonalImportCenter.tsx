@@ -482,6 +482,7 @@ function ImportWorkspace({
       setExcluded([]);
       setParseIssues([]);
       setText('');
+      setSource({ type: 'paste' });
       setPreview('');
     } catch (error) {
       if (active.current) setNotice(errorMessage(error));
@@ -693,7 +694,8 @@ function ImportWorkspace({
                 onChange={(event) => {
                   setText(event.target.value);
                   // Keep screenshot provenance so corrected OCR table spacing is still parsed.
-                  if (source.type !== 'screenshot') setSource({ type: 'paste' });
+                  if (!event.target.value || source.type !== 'screenshot')
+                    setSource({ type: 'paste' });
                 }}
                 placeholder={EXAMPLES[kind]}
                 maxLength={200000}

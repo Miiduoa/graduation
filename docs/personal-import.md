@@ -55,7 +55,7 @@ ICS 以台灣時間呈現，可處理明確的 `Asia/Taipei`、UTC 及全天日�
 
 | 檢查 | 結果 | 證據範圍 |
 | --- | --- | --- |
-| Web 完整測試 | 1,188 通過、1 略過 | 本機測試；共用匯入核心的 45 項包含在其中，不能重複加總。 |
+| Web 完整測試 | 1,189 通過、1 略過 | 本機測試；共用匯入核心的 45 項包含在其中，不能重複加總。 |
 | Web TypeScript／正式版建置 | 通過 | 本機 production build；不是線上部署。Web lint 0 errors、90 warnings，包含既有警告。 |
 | Mobile focused／導覽測試 | 77 通過 | 本機測試，非完整 Mobile 全套或實體裝置驗證。 |
 | Mobile TypeScript／iOS export | 通過 | 型別與 iOS 匯出產物；不代表安裝、簽章、商店或真機功能驗收。 |

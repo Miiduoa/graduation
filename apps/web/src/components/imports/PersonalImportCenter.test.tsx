@@ -78,6 +78,30 @@ it('clears draft and private records synchronously on account change', async () 
   expect(screen.queryByRole('button', { name: '確認匯入 1 筆' })).toBeNull();
   expect((screen.getByLabelText('原始文字') as HTMLTextAreaElement).value).toBe('');
 });
+it('starts new pasted data without inheriting the previous screenshot source', async () => {
+  const { recognizePersonalImportImage } = await import('@/lib/personalImportOcr');
+  vi.mocked(recognizePersonalImportImage).mockResolvedValue('課程名稱,學分,成績\n資料庫,3,85');
+  URL.createObjectURL = vi.fn(() => 'blob:preview');
+  URL.revokeObjectURL = vi.fn();
+  render(<PersonalImportCenter />);
+  fireEvent.change(screen.getByLabelText('這份資料的學年度'), { target: { value: '115' } });
+  fireEvent.change(screen.getByLabelText('學期'), { target: { value: '1' } });
+  fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), {
+    target: { files: [new File(['test'], 'grades.png', { type: 'image/png' })] },
+  });
+  await screen.findByRole('button', { name: '確認匯入 1 筆' });
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
+  await screen.findByText('已在這台裝置新增 1 筆。原有資料保留。');
+  await prepare('課程名稱,學分,成績\n英文,2,90');
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
+  await waitFor(() => expect(readPersonalImports(context)).toHaveLength(2));
+  expect(readPersonalImports(context)[0].source).toMatchObject({
+    type: 'screenshot',
+    name: 'grades.png',
+  });
+  expect(readPersonalImports(context)[1].source).toMatchObject({ type: 'paste' });
+  expect(readPersonalImports(context)[1].source.name).toBeUndefined();
+});
 it('imports an all-day event and keeps academic fields optional', async () => {
   window.history.replaceState(null, '', '/import?kind=events');
   render(<PersonalImportCenter />);
@@ -154,7 +178,7 @@ it('cannot flatten a recurring ICS event into one confirmed personal record', as
 
 it('saves only an explicitly selected accessible class as a personal link without granting membership', async () => {
   const platformAccountId = 'pa_12345678-1234-1234-1234-123456789abc';
-  const accessibleId = 'cw_12345678-1234-1234-1234-123456789abc';
+  const linkedWorkspaceId = 'cw_12345678-1234-1234-1234-123456789abc';
   const archivedId = 'cw_23456789-1234-1234-1234-123456789abc';
   context.owner = `platform:${platformAccountId}`;
   context.session = {
@@ -164,7 +188,7 @@ it('saves only an explicitly selected accessible class as a personal link withou
   };
   vi.mocked(browserRequest).mockResolvedValue({
     workspaces: [
-      { id: accessibleId, title: '資料庫', state: 'active', memberRole: 'student' },
+      { id: linkedWorkspaceId, title: '資料庫', state: 'active', memberRole: 'student' },
       { id: archivedId, title: '上學期資料庫', state: 'archived', memberRole: 'student' },
     ],
   });
@@ -172,26 +196,26 @@ it('saves only an explicitly selected accessible class as a personal link withou
   await prepare();
   const selector = screen.getByLabelText('連結我的課程') as HTMLSelectElement;
   await waitFor(() =>
-    expect(Array.from(selector.options, (option) => option.value)).toEqual(['', accessibleId]),
+    expect(Array.from(selector.options, (option) => option.value)).toEqual(['', linkedWorkspaceId]),
   );
   // A same-name course does not auto-link; the user must choose from the returned active list.
   expect(selector.value).toBe('');
   expect(readPersonalImports(context)).toHaveLength(0);
-  fireEvent.change(selector, { target: { value: accessibleId } });
+  fireEvent.change(selector, { target: { value: linkedWorkspaceId } });
   fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
   await screen.findByText('已在這台裝置新增 1 筆。原有資料保留。');
   expect(readPersonalImports(context)).toEqual([
     expect.objectContaining({
       kind: 'grades',
       title: '資料庫',
-      linkedCourseId: accessibleId,
+      linkedCourseId: linkedWorkspaceId,
       grade: '85',
       credits: 3,
     }),
   ]);
   expect(readPersonalImports({ owner: 'guest', schoolId: 'pu' })).toHaveLength(0);
   expect(screen.getByRole('link', { name: '開啟連結的課程 →' }).getAttribute('href')).toBe(
-    `/classroom/course/${accessibleId}`,
+    `/classroom/course/${linkedWorkspaceId}`,
   );
   // The only server call is the accessible-list GET; import never submits membership/role changes.
   expect(vi.mocked(browserRequest).mock.calls).toEqual([
