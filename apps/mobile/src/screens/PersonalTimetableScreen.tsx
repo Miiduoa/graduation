@@ -1,7 +1,6 @@
 import * as Clipboard from 'expo-clipboard';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
   Pressable,
   ScrollView,
   Share,
@@ -10,15 +9,11 @@ import {
   View,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import * as ImagePicker from 'expo-image-picker';
 import {
-  IMPORT_CONFIRM_COPY,
-  IMPORT_NOT_APPLIED_COPY,
   PERIOD_TIMES,
   SchedulePlanner,
   WEEKDAY_LABELS,
   studySlots,
-  applyImport,
   cleanCourse,
   meetupLabel,
   meetupStartOptions,
@@ -26,15 +21,17 @@ import {
   meetupWindows,
   minutesLabel,
   type MeetupWindow,
-  parseTimetableText,
   periodRangeLabel,
   type PersonalCourse, shareCopiedCopy } from '@campus/shared';
 import { Screen, Button } from '../ui/components';
 import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
-import { TimetableOcrHost, recognizeWithOnDeviceOcr } from '../components/TimetableOcrHost';
-import { readImageBase64, TimetableOcrError } from '../services/timetableOcr';
+import { usePersonalImportScope } from '../state/personalImportScope';
+import { loadPersonalImports, selectPersonalTimetableCourses } from '../services/personalImports';
+import { PersonalImportSummary } from '../components/PersonalImportSummary';
+import { rootNavigateNested } from '../app/rootNavigation';
+import type { PersonalImportRecord } from '@campus/shared';
 import {
   createMeetup,
   createServerShare,
@@ -51,6 +48,13 @@ import { listAcceptedFriends, opponentUidFromFriendship } from '../services/frie
 export default function PersonalTimetableScreen() {
   const auth = useAuth();
   const { school } = useSchool();
+  const scope = usePersonalImportScope();
+  return <PersonalTimetableWorkspace key={`${auth.user?.uid || 'guest'}:${school?.id || 'pu'}:${scope?.owner || 'pending'}`} />;
+}
+
+function PersonalTimetableWorkspace() {
+  const auth = useAuth();
+  const { school } = useSchool();
   const uid = auth.user?.uid || null;
   const schoolId = school?.id || 'pu';
   const [timetable, setTimetable] = useState<StoredTimetable | null>(null);
@@ -60,7 +64,20 @@ export default function PersonalTimetableScreen() {
     return today >= 1 && today <= 5 ? today : 1;
   });
   const [editing, setEditing] = useState<PersonalCourse | null>(null);
-  const [paste, setPaste] = useState('');
+  const importScope = usePersonalImportScope();
+  const importScopeKey = importScope ? JSON.stringify(importScope) : '';
+  const loadGeneration = useRef(0);
+  const scopeRef = useRef(importScopeKey);
+  scopeRef.current = importScopeKey;
+  const [importState, setImportState] = useState<{ scope: string; records: PersonalImportRecord[] } | null>(null);
+  const [importTerm, setImportTerm] = useState('');
+  const importedRecords = useMemo(() => importState?.scope === importScopeKey ? importState.records : [], [importState, importScopeKey]);
+  const importTerms = [...new Set(importedRecords.filter((row) => row.kind === 'timetable').map((row) => `${row.academicYear}／${row.semester}`))].reverse();
+  const selectedView = importTerm === 'legacy' || (!importTerm && timetable?.courses.length)
+    ? 'legacy' : (importTerms.includes(importTerm) ? importTerm : importTerms[0]);
+  const displayCourses = useMemo(() => selectPersonalTimetableCourses(timetable, importedRecords, schoolId, selectedView), [timetable, importedRecords, schoolId, selectedView]);
+  const openCourse = (course: PersonalCourse) => course.id.startsWith('import:')
+    ? rootNavigateNested('學習', 'PersonalImport', { kind: 'timetable' }) : setEditing(course);
   const [answer, setAnswer] = useState<string[]>([]);
   const [studyDay, setStudyDay] = useState(() => {
     const today = new Date().getDay();
@@ -75,34 +92,45 @@ export default function PersonalTimetableScreen() {
   const [meetupBusy, setMeetupBusy] = useState(false);
 
   const load = useCallback(async () => {
+    const requestScope = importScopeKey;
+    const run = ++loadGeneration.current;
+    const active = () => scopeRef.current === requestScope && loadGeneration.current === run;
+    setFriends([]); setFriendId(null); setFriendCourses([]); setInvites([]);
+    if (importScope) {
+      try { const imported = await loadPersonalImports(importScope); if (active()) setImportState({ scope: requestScope, records: imported.records }); }
+      catch { if (active()) setNotice('匯入資料暫時讀不到，請至「匯入我的資料」重試。'); }
+    }
     const next = await loadPersonalTimetable(uid, schoolId);
+    if (!active()) return;
     setTimetable(next);
     if (!uid) return;
     const list = await listAcceptedFriends(schoolId, uid).catch(() => []);
+    if (!active()) return;
     setFriends(
       list.map((item) => ({
         uid: opponentUidFromFriendship(item, uid),
         name: (item.fromUid === uid ? item.toName : item.fromName) || '好友',
       })),
     );
-    setInvites(await listIncomingMeetups(schoolId, uid).catch(() => []));
-  }, [uid, schoolId]);
+    const incoming = await listIncomingMeetups(schoolId, uid).catch(() => []);
+    if (active()) setInvites(incoming);
+  }, [uid, schoolId, importScopeKey, importScope]);
 
   useFocusEffect(
     useCallback(() => {
       void load();
+      return () => { loadGeneration.current += 1; };
     }, [load]),
   );
 
   const planner = useMemo(
-    () => new SchedulePlanner(timetable?.courses || [], friendId ? [{ id: friendId, name: '好友', courses: friendCourses }] : [], friendId),
-    [timetable?.courses, friendId, friendCourses],
+    () => new SchedulePlanner(displayCourses, friendId ? [{ id: friendId, name: '好友', courses: friendCourses }] : [], friendId),
+    [displayCourses, friendId, friendCourses],
   );
 
   if (!timetable) {
     return (
       <Screen title="我的課表">
-        <TimetableOcrHost />
         <Text style={{ color: theme.colors.muted, padding: 16 }}>正在讀取課表…</Text>
       </Screen>
     );
@@ -114,10 +142,10 @@ export default function PersonalTimetableScreen() {
     setNotice(saved.stored === 'cloud' ? message : `已記在本站。${message}`);
   };
 
-  const visible = timetable.courses
+  const visible = displayCourses
     .filter((course) => (view === 'day' ? course.day === day : course.day >= 1))
     .sort((a, b) => a.day - b.day || a.start - b.start);
-  const windows = friendId ? meetupWindows(timetable.courses, friendCourses) : [];
+  const windows = friendId ? meetupWindows(displayCourses, friendCourses) : [];
   const nameOf = (id: string) => friends.find((friend) => friend.uid === id)?.name || '同學';
 
   const sendMeetup = async (kind: 'meal' | 'study', dayOfWeek: number, startMinute: number) => {
@@ -156,32 +184,15 @@ export default function PersonalTimetableScreen() {
     setInvites(uid ? await listIncomingMeetups(schoolId, uid).catch(() => []) : []);
   };
 
-  const ocrNotice = (error: unknown) => {
-    if (error instanceof TimetableOcrError && error.kind === 'network') {
-      return `${IMPORT_NOT_APPLIED_COPY}。截圖辨識需要連上網路下載字庫，這次沒連上。請對照圖片把文字貼上。`;
-    }
-    return `${IMPORT_NOT_APPLIED_COPY}。這台裝置還沒開通截圖辨識，請對照圖片把文字貼上。`;
-  };
-
-  const confirmParsed = (parsed: PersonalCourse[]) => {
-    if (!parsed.length) {
-      setNotice(`${IMPORT_NOT_APPLIED_COPY}。截圖有讀到，但沒有可靠找到課程，請改貼文字或手動新增。`);
-      return;
-    }
-    Alert.alert('確認匯入', `將寫入 ${parsed.length} 門課，原本課表會被這份取代。`, [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '確認',
-        onPress: () =>
-          void persist({ ...timetable, courses: applyImport(timetable.courses, parsed, 'replace') }, '已匯入課表。'),
-      },
-    ]);
-  };
 
   return (
-    <Screen title="我的課表" subtitle="確認前不會覆寫你現在的課表">
-      <TimetableOcrHost />
+    <Screen title="我的課表" subtitle="查看上課時間與空堂">
       <ScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 120 }}>
+        <PersonalImportSummary kind="timetable" />
+        {importTerms.length ? <View style={{ gap: 8 }}>
+          <Text style={{ color: theme.colors.muted }}>正在查看：{selectedView === 'legacy' ? `原有課表（${timetable.meta.year && timetable.meta.semester ? `${timetable.meta.year}／${timetable.meta.semester}` : '學期未填'}）` : selectedView}。匯入課程只存在這台裝置，不會透過好友課表分享。</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}><Button text="原有課表" kind={selectedView === 'legacy' ? 'primary' : 'outline'} onPress={() => setImportTerm('legacy')} />{importTerms.map((term) => <Button key={term} text={term} kind={term === selectedView ? 'primary' : 'outline'} onPress={() => setImportTerm(term)} />)}</View>
+        </View> : null}
         {invites.length > 0 ? (
           <View accessibilityLabel="有人約你" style={{ gap: 8 }}>
             <Text style={{ fontWeight: '700', color: theme.colors.text }}>有人約你</Text>
@@ -219,7 +230,7 @@ export default function PersonalTimetableScreen() {
           <Button text="一週" onPress={() => setView('week')} />
           <Button text="單日" onPress={() => setView('day')} />
           <Button text="格子" onPress={() => setView('grid')} />
-          <Button text="新增" onPress={() => setEditing(cleanCourse({ day, start: 1, end: 1 }))} />
+          <Button text="新增" onPress={() => { setImportTerm('legacy'); setEditing(cleanCourse({ day, start: 1, end: 1 })); }} />
         </View>
         {view === 'day' ? (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
@@ -250,13 +261,13 @@ export default function PersonalTimetableScreen() {
                     {time[0]}
                   </Text>
                   {WEEKDAY_LABELS.map((_, dayIndex) => {
-                    const hit = timetable.courses.find(
+                    const hit = displayCourses.find(
                       (course) => course.day === dayIndex + 1 && period >= course.start && period <= course.end,
                     );
                     return (
                       <Pressable
                         key={`${period}-${dayIndex}`}
-                        onPress={() => hit && setEditing(hit)}
+                        onPress={() => hit && openCourse(hit)}
                         style={{
                           flex: 1,
                           borderWidth: 0.5,
@@ -283,7 +294,7 @@ export default function PersonalTimetableScreen() {
           visible.map((course) => (
             <Pressable
               key={course.id}
-              onPress={() => setEditing(course)}
+              onPress={() => openCourse(course)}
               style={{
                 borderWidth: 1,
                 borderColor: theme.colors.separator,
@@ -297,7 +308,7 @@ export default function PersonalTimetableScreen() {
               </Text>
               <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>{course.name}</Text>
               <Text style={{ color: theme.colors.muted }}>
-                {course.teacher || '教師未填'} · {course.room || '教室未填'}
+                {course.teacher || '教師未填'} · {course.room || '教室未填'}{course.id.startsWith('import:') ? ' · 個人匯入' : ''}
               </Text>
             </Pressable>
           ))
@@ -354,54 +365,6 @@ export default function PersonalTimetableScreen() {
           </View>
         ) : null}
 
-        <Text style={{ fontWeight: '700', color: theme.colors.text }}>匯入</Text>
-        <Text style={{ color: theme.colors.muted }}>{IMPORT_CONFIRM_COPY}</Text>
-        <TextInput
-          value={paste}
-          onChangeText={setPaste}
-          placeholder={'星期一 第3-4節 資料庫 / 王老師 / 主顧303'}
-          multiline
-          style={[inputStyle, { minHeight: 90 }]}
-        />
-        <Button
-          text="辨識文字"
-          onPress={() => {
-            const parsed = parseTimetableText(paste);
-            if (!parsed.length) {
-              setNotice(`${IMPORT_NOT_APPLIED_COPY}。沒有認出課程。`);
-              return;
-            }
-            confirmParsed(parsed);
-          }}
-        />
-        <Button
-          text="選截圖"
-          onPress={async () => {
-            const picked = await ImagePicker.launchImageLibraryAsync({
-              mediaTypes: ImagePicker.MediaTypeOptions.Images,
-              base64: true,
-            });
-            if (picked.canceled) return;
-            const asset = picked.assets[0];
-            if (!asset) {
-              setNotice(`${IMPORT_NOT_APPLIED_COPY}。讀不到這張圖，請對照圖片把文字貼上。`);
-              return;
-            }
-            setNotice('已收到圖片。辨識完成前不會改你的課表。');
-            try {
-              const base64 = asset.base64 || (asset.uri ? await readImageBase64(asset.uri) : '');
-              if (!base64) {
-                setNotice(`${IMPORT_NOT_APPLIED_COPY}。讀不到這張圖，請對照圖片把文字貼上。`);
-                return;
-              }
-              const text = await recognizeWithOnDeviceOcr(base64);
-              confirmParsed(parseTimetableText(text));
-            } catch (error) {
-              setNotice(ocrNotice(error));
-            }
-          }}
-        />
-
         <Text style={{ fontWeight: '700', color: theme.colors.text }}>幫我安排</Text>
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <Button text="下一堂" onPress={() => setAnswer([planner.ask('下一堂') || '課表上還沒有排課。'])} />
@@ -439,7 +402,7 @@ export default function PersonalTimetableScreen() {
           <Button
             text="排讀書時間"
             onPress={() => {
-              const slots = studySlots(timetable.courses, studyDay, studyHours);
+              const slots = studySlots(displayCourses, studyDay, studyHours);
               setAnswer(slots.length ? slots : ['這天的空堂都不夠長，換一天或少排一點。']);
             }}
           />

@@ -17,6 +17,22 @@ export const SERVICE_ACCESS = {
 
 export const CAMPUS_SERVICES = [
   {
+    name: '個人行事曆',
+    text: '查看自行匯入的活動、考試與行程',
+    href: '/calendar',
+    access: 'public',
+    keywords: '行事曆 活動 考試 日期 calendar',
+    category: 'study',
+  },
+  {
+    name: '匯入我的資料',
+    text: '從截圖、文字或檔案整理課表、成績與行程',
+    href: '/import',
+    access: 'public',
+    keywords: '截圖 匯入 課表 成績 學分 活動 考試 行事曆 import',
+    category: 'study',
+  },
+  {
     name: '跨校交流',
     text: '在公開看板分享近況，認識其他校園的人',
     href: '/social',
@@ -28,7 +44,7 @@ export const CAMPUS_SERVICES = [
     name: '課表',
     text: '查看、編輯與匯入本學期課表',
     href: '/timetable',
-    access: 'school',
+    access: 'public',
     keywords: '上課 行事曆 schedule 空堂',
     category: 'study',
   },
