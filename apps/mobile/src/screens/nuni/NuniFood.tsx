@@ -216,7 +216,10 @@ function FoodRealm({
               <FoodText>{`預計取餐 ${foodTime(order.requestedPickupAt)}`}</FoodText>
               <FoodButton
                 onPress={() => selectOrder(order.id)}
-              >{`查看訂單 ${order.id}`}</FoodButton>
+                accessibilityLabel={`查看訂單 ${order.id}`}
+              >
+                查看訂單
+              </FoodButton>
             </FoodCard>
           ))}
           {!resource.data.value.orders.length ? (
@@ -514,6 +517,7 @@ function FoodOrder({
     'changed-mind',
   );
   const [detail, setDetail] = useNuniDraftState(`food:${tenantId}:${orderId}:cancel-detail`, '');
+  const [showOrderNumber, setShowOrderNumber] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [notice, setNotice] = useState('');
   const [now, setNow] = useState(Date.now());
@@ -557,7 +561,13 @@ function FoodOrder({
         <>
           <FoodText title>{order.locationName}</FoodText>
           <FoodText>{orderState[order.state]}</FoodText>
-          <FoodText>{`訂單 ${order.id}`}</FoodText>
+          <FoodButton
+            expanded={showOrderNumber}
+            onPress={() => setShowOrderNumber((visible) => !visible)}
+          >
+            {showOrderNumber ? '收起訂單編號' : '訂單編號'}
+          </FoodButton>
+          {showOrderNumber ? <FoodText>{`訂單 ${order.id}`}</FoodText> : null}
           <FoodText>{`取餐號碼 ${order.pickup.displayCode}`}</FoodText>
           <FoodText>{`預計取餐 ${foodTime(order.requestedPickupAt)}`}</FoodText>
           <OrderLines lines={order.lines} />

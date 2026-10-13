@@ -6,6 +6,7 @@ const firestore = vi.hoisted(() => ({
   setDoc: vi.fn(),
 }));
 const auth = vi.hoisted(() => ({ currentUser: { uid: 'u-1' } as { uid: string } | null }));
+const firebase = vi.hoisted(() => ({ configured: true }));
 
 vi.mock('firebase/firestore', () => ({
   collection: vi.fn(),
@@ -24,7 +25,7 @@ vi.mock('@/lib/firebase', () => ({
   getAuth: () => auth,
   getDb: () => ({}),
   getFunctionsInstance: () => ({}),
-  isFirebaseConfigured: () => true,
+  isFirebaseConfigured: () => firebase.configured,
 }));
 
 import {
@@ -50,6 +51,7 @@ beforeEach(() => {
   firestore.getDoc.mockReset();
   firestore.setDoc.mockReset();
   auth.currentUser = { uid: 'u-1' };
+  firebase.configured = true;
 });
 
 it('keeps imported timetables on this device and does not send them to the cloud', async () => {
@@ -116,4 +118,78 @@ it('prefers a newer cloud copy over an older browser copy', async () => {
   });
   const loaded = await loadPersonalTimetable('u-1', 'pu');
   expect(loaded.courses.map((item) => item.name)).toEqual(['作業系統']);
+});
+
+it.each(['campus-one-personal-timetable:u-1', 'campus-one-personal-timetable:u-1:pu'])(
+  'recovers the same school-account legacy key %s without migrating or deleting it',
+  async (key) => {
+    const raw = JSON.stringify({
+      courses: [course],
+      updatedAt: '2026-10-01T00:00:00.000Z',
+      schoolId: 'pu',
+    });
+    localStorage.setItem(key, raw);
+    firestore.getDoc.mockResolvedValue({ exists: () => false });
+    const loaded = await loadPersonalTimetable('u-1', 'pu', 'school:u-1');
+    expect(loaded.courses.map((item) => item.name)).toEqual(['資料庫']);
+    expect(localStorage.getItem(key)).toBe(raw);
+    expect(localStorage.getItem('campus-one-personal-timetable:school:u-1:pu')).toBeNull();
+  },
+);
+
+it('recovers the same school-account legacy copy when Firebase is unavailable', async () => {
+  firebase.configured = false;
+  localStorage.setItem(
+    'campus-one-personal-timetable:u-1',
+    JSON.stringify({ courses: [course], schoolId: 'pu' }),
+  );
+  const loaded = await loadPersonalTimetable('u-1', 'pu', 'school:u-1');
+  expect(loaded.courses.map((item) => item.name)).toEqual(['資料庫']);
+  expect(firestore.getDoc).not.toHaveBeenCalled();
+});
+
+it('does not resurrect a legacy copy after an empty timetable is saved in the new namespace', async () => {
+  localStorage.setItem(
+    'campus-one-personal-timetable:u-1',
+    JSON.stringify({ courses: [course], schoolId: 'pu' }),
+  );
+  firestore.getDoc.mockResolvedValue({ exists: () => false });
+  await savePersonalTimetable(
+    'u-1',
+    {
+      courses: [],
+      meta: {} as never,
+      shareWithFriends: true,
+      updatedAt: '',
+      schoolId: 'pu',
+    },
+    'school:u-1',
+  );
+  expect((await loadPersonalTimetable('u-1', 'pu', 'school:u-1')).courses).toEqual([]);
+  expect(JSON.parse(localStorage.getItem('campus-one-personal-timetable:u-1')!).courses).toEqual([
+    course,
+  ]);
+});
+
+it.each(['platform:account-a', 'nuni:account-a', 'school:u-2', 'guest'])(
+  'never exposes a school-account legacy copy through the different owner %s',
+  async (owner) => {
+    localStorage.setItem(
+      'campus-one-personal-timetable:u-1',
+      JSON.stringify({ courses: [course], schoolId: 'pu' }),
+    );
+    firestore.getDoc.mockResolvedValue({ exists: () => false });
+    expect((await loadPersonalTimetable('u-1', 'pu', owner)).courses).toEqual([]);
+  },
+);
+
+it('keeps school and uid boundaries when falling back to legacy storage', async () => {
+  localStorage.setItem(
+    'campus-one-personal-timetable:u-1',
+    JSON.stringify({ courses: [course], schoolId: 'other' }),
+  );
+  firestore.getDoc.mockResolvedValue({ exists: () => false });
+  expect((await loadPersonalTimetable('u-1', 'pu', 'school:u-1')).courses).toEqual([]);
+  expect((await loadPersonalTimetable('u-2', 'other', 'school:u-2')).courses).toEqual([]);
+  expect((await loadPersonalTimetable(null, 'other', 'school:u-1')).courses).toEqual([]);
 });

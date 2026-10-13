@@ -288,7 +288,7 @@ async function fillQuote(view: ReturnType<typeof render>) {
 async function openOrder(view: ReturnType<typeof render>) {
   fireEvent.press(await view.findByRole('button', { name: '訂單紀錄：第一校區' }));
   fireEvent.press(await view.findByRole('button', { name: '查看訂單 order-one' }));
-  await view.findByText('訂單 order-one');
+  await view.findByText('取餐號碼 A001');
 }
 beforeEach(() => {
   mockAuth = {
@@ -322,7 +322,7 @@ test('student selects required options, reviews whole TWD quote and explicitly p
   });
   expect(view.getByText(/不會線上扣款/)).toBeTruthy();
   fireEvent.press(view.getByRole('button', { name: '確認送出訂單，到店付款' }));
-  await view.findByText('訂單 order-one');
+  await view.findByText('取餐號碼 A001');
   expect(view.getByText('等待現場付款')).toBeTruthy();
   expect(writes()[1][2]).toMatchObject({ quoteId: 'quote-one' });
   expect(writes().some((call) => call[0].includes('payment-session'))).toBe(false);
@@ -374,7 +374,7 @@ test('unknown order write survives back and same-account revalidation with the e
     expect(view.getByRole('button', { name: '重試確認這次送出' })).not.toBeDisabled(),
   );
   fireEvent.press(view.getByRole('button', { name: '重試確認這次送出' }));
-  await view.findByText('訂單 order-one');
+  await view.findByText('取餐號碼 A001');
   expect(writes().at(-1)![2]).toEqual(sent);
   expect(writes().at(-1)![1]).toBe('context-b');
 });
@@ -730,3 +730,30 @@ test.each([
     expect(writes()[0][2]).toMatchObject({ reason: 'other', reasonDetail: '停電無法供餐' });
   },
 );
+
+test('order number is hidden by default and resets after returning to the accessible order list', async () => {
+  hasOrder = true;
+  const view = render(ui());
+  fireEvent.press(await view.findByRole('button', { name: '訂單紀錄：第一校區' }));
+  const button = await view.findByRole('button', { name: '查看訂單 order-one' });
+  expect(button).toHaveTextContent('查看訂單');
+  expect(view.queryByText('查看訂單 order-one')).toBeNull();
+  fireEvent.press(button);
+  await view.findByText('取餐號碼 A001');
+  expect(view.queryByText('訂單 order-one')).toBeNull();
+  expect(view.getByRole('button', { name: '訂單編號' }).props.accessibilityState.expanded).toBe(
+    false,
+  );
+  fireEvent.press(view.getByRole('button', { name: '訂單編號' }));
+  expect(view.getByText('訂單 order-one')).toBeTruthy();
+  expect(view.getByRole('button', { name: '收起訂單編號' }).props.accessibilityState.expanded).toBe(
+    true,
+  );
+  fireEvent.press(view.getByRole('button', { name: '返回訂單紀錄' }));
+  fireEvent.press(await view.findByRole('button', { name: '查看訂單 order-one' }));
+  await view.findByText('取餐號碼 A001');
+  expect(view.queryByText('訂單 order-one')).toBeNull();
+  expect(view.getByRole('button', { name: '訂單編號' }).props.accessibilityState.expanded).toBe(
+    false,
+  );
+});

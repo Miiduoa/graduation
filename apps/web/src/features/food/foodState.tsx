@@ -159,7 +159,7 @@ export function FoodMutationStatus({ task }: { task: ReturnType<typeof useFoodMu
       {task.notice && <p role="status">{task.notice}</p>}
       {task.pending && (
         <div role="status">
-          <p>尚未確認是否成功，請用下方按鈕重試。</p>
+          <p>{task.busy ? '正在確認這次操作…' : '尚未確認是否成功，請用下方按鈕重試。'}</p>
           <Button disabled={task.busy} onClick={task.retry}>
             重試同一份操作
           </Button>

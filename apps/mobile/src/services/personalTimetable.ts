@@ -48,14 +48,18 @@ export async function loadPersonalTimetable(
   uid: string | null,
   schoolId: string,
 ): Promise<StoredTimetable> {
-  const local = await AsyncStorage.getItem(`${KEY}:${uid || 'local'}`);
-  const fallback = local ? JSON.parse(local) : empty(schoolId);
+  const local = await AsyncStorage.getItem(`${KEY}:${uid || 'local'}:${schoolId}`) || await AsyncStorage.getItem(`${KEY}:${uid || 'local'}`);
+  let fallback = empty(schoolId);
+  if (local) {
+    try { const parsed = JSON.parse(local) as StoredTimetable; if (parsed.schoolId === schoolId) fallback = parsed; } catch { /* Keep malformed or unscoped legacy data out of this school. */ }
+  }
   if (!uid) return { ...empty(schoolId), ...fallback, courses: cleanCourses(fallback.courses) };
   try {
     const snap = await getDoc(doc(getDb(), 'users', uid, 'personalTimetable', 'current'));
     if (!snap.exists())
       return { ...empty(schoolId), ...fallback, courses: cleanCourses(fallback.courses) };
     const data = snap.data() as StoredTimetable;
+    if (data.schoolId !== schoolId) return { ...empty(schoolId), ...fallback, courses: cleanCourses(fallback.courses) };
     return {
       ...empty(schoolId),
       ...data,
@@ -74,7 +78,7 @@ export async function savePersonalTimetable(uid: string | null, timetable: Store
     meta: cleanMeta(timetable.meta),
     updatedAt: new Date().toISOString(),
   };
-  await AsyncStorage.setItem(`${KEY}:${uid || 'local'}`, JSON.stringify(next));
+  await AsyncStorage.setItem(`${KEY}:${uid || 'local'}:${timetable.schoolId}`, JSON.stringify(next));
   if (!uid) return { stored: 'local' as const };
   await setDoc(doc(getDb(), 'users', uid, 'personalTimetable', 'current'), {
     ...next,

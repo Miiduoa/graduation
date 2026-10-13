@@ -98,6 +98,7 @@ export function FoodOrders({
                 </p>
                 <p>預計取餐 {foodTime(order.requestedPickupAt)}</p>
                 <Button
+                  aria-label={`查看訂單：${order.id}`}
                   onClick={() => {
                     setSelected(order.id);
                     window.history.replaceState(
@@ -107,7 +108,7 @@ export function FoodOrders({
                     );
                   }}
                 >
-                  查看訂單：{order.id}
+                  查看訂單
                 </Button>
               </div>
             ))}
@@ -206,7 +207,10 @@ export function FoodOrderDetail({
             <h3>
               {receipt.locationName} · {foodStateLabels[receipt.state]}
             </h3>
-            <p>訂單 {receipt.id}</p>
+            <details>
+              <summary>訂單編號</summary>
+              <p>{receipt.id}</p>
+            </details>
             <p>
               預計取餐 {foodTime(receipt.requestedPickupAt)} · 取餐號碼 {receipt.pickup.displayCode}
             </p>
