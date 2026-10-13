@@ -30,7 +30,9 @@ export function SchoolSessionBoundary({
 }) {
   const auth = useAuth();
   return hasReadySchoolSession(auth) ? (
-    <React.Fragment key={auth.user!.uid}>{children}</React.Fragment>
+    <React.Fragment key={`${auth.user!.uid}:${auth.profile!.schoolId ?? ''}`}>
+      {children}
+    </React.Fragment>
   ) : (
     <>{publicContent}</>
   );

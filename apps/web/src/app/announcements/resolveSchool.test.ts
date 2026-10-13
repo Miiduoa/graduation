@@ -10,6 +10,8 @@ it('hides cms-none demo schools unless NEXT_PUBLIC_APP_ENV is explicitly develop
   });
   expect(resolveAnnouncementSchool({ schoolId: 'tw-taichung-uni-a' }).visible).toBe(false);
   expect(resolveAnnouncementSchool({ schoolId: 'pu' }).visible).toBe(true);
+  expect(resolveAnnouncementSchool({ campus: 'nthu' }).school.id).toBe('nthu');
+  expect(resolveAnnouncementSchool({ schoolId: 'pu', campus: 'nthu' }).school.id).toBe('pu');
   vi.stubEnv('NEXT_PUBLIC_APP_ENV', '');
   expect(resolveAnnouncementSchool({ schoolId: 'tw-demo-uni' }).visible).toBe(false);
   vi.stubEnv('NEXT_PUBLIC_APP_ENV', 'staging');

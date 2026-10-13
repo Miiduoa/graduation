@@ -331,7 +331,7 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
 }
 
 export default function AnnouncementsPage(props: {
-  searchParams?: Promise<{ school?: string; schoolId?: string }>;
+  searchParams?: Promise<{ school?: string; schoolId?: string; campus?: string }>;
 }) {
   const params = props.searchParams ? use(props.searchParams) : undefined;
   const { school, visible } = resolveAnnouncementSchool(params);

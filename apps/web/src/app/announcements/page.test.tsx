@@ -260,6 +260,37 @@ it('ignores a late response after logout and signing back into the same account'
   expect(screen.queryByText('舊帳號晚回應')).toBeNull();
 });
 
+it('does not keep previous school announcements after switching when the next school read fails', async () => {
+  const pu = Promise.resolve({ schoolId: 'pu' });
+  const nthu = Promise.resolve({ campus: 'nthu' });
+  let view!: ReturnType<typeof render>;
+  await act(async () => {
+    view = render(
+      <Suspense fallback={<p>載入學校</p>}>
+        <AnnouncementsPage searchParams={pu} />
+      </Suspense>,
+    );
+  });
+  await screen.findByText('校園公告實際內容');
+  vi.mocked(getDocsFromServer).mockRejectedValue(new Error('permission-denied'));
+  await act(async () => {
+    view.rerender(
+      <Suspense fallback={<p>載入學校</p>}>
+        <AnnouncementsPage searchParams={nthu} />
+      </Suspense>,
+    );
+  });
+  expect(screen.queryByText('校園公告實際內容')).toBeNull();
+  expect(
+    await screen.findByRole('heading', {
+      name: '這裡還沒接上學校公告，請先到學校網站看最新消息',
+    }),
+  ).toBeTruthy();
+  expect(getDocsFromServer).toHaveBeenCalledWith(
+    expect.objectContaining({ path: 'schools/nthu/announcements' }),
+  );
+});
+
 it('discards the old school response when the selected school changes', async () => {
   const old = deferred();
   vi.mocked(getDocsFromServer).mockReturnValueOnce(old.promise);

@@ -413,6 +413,12 @@ const CACHEABLE_GET_METHODS: Record<string, string> = {
   getGroup: 'group',
 };
 
+const SCHOOL_SCOPED_GET_METHODS = new Set(['getAnnouncement', 'getEvent']);
+
+export function schoolScopedCacheKey(prefix: string, schoolId: string, id: string): string {
+  return `${prefix}_${schoolId}_${id}`;
+}
+
 export function createCachedSource(
   source: DataSource,
   options: CachedDataSourceOptions = {},
@@ -494,10 +500,11 @@ export function createCachedSource(
 
   async function fetchAndCacheSingleWithExpiry<T>(
     cacheKey: string,
+    schoolId: string,
     fetcher: () => Promise<T | null>,
     expiryMs: number,
   ): Promise<T | null> {
-    const cached = await getCache<T>(cacheKey, 'global', { allowStale: true, expiryMs });
+    const cached = await getCache<T>(cacheKey, schoolId, { allowStale: true, expiryMs });
 
     if (cached) {
       if (cached.isStale && !backgroundUpdateLocks.has(cacheKey)) {
@@ -507,7 +514,7 @@ export function createCachedSource(
         fetchWithRetry(fetcher)
           .then(async (fresh) => {
             if (fresh !== null) {
-              const saved = await setCache(cacheKey, fresh, 'global', undefined, updateVersion);
+              const saved = await setCache(cacheKey, fresh, schoolId, undefined, updateVersion);
               if (saved) {
                 notifyCacheUpdate(cacheKey, fresh);
               }
@@ -535,11 +542,11 @@ export function createCachedSource(
         const updateVersion = Date.now();
         const fresh = await fetchWithRetry(fetcher);
         if (fresh !== null) {
-          await setCache(cacheKey, fresh, 'global', undefined, updateVersion);
+          await setCache(cacheKey, fresh, schoolId, undefined, updateVersion);
         }
         return fresh;
       } catch (e) {
-        const staleCached = await getCache<T>(cacheKey, 'global', {
+        const staleCached = await getCache<T>(cacheKey, schoolId, {
           allowStale: true,
           expiryMs: Infinity,
         });
@@ -599,9 +606,16 @@ export function createCachedSource(
         const cachePrefix = CACHEABLE_GET_METHODS[prop];
         const getMethod = originalMethod as (id: string, ...args: unknown[]) => Promise<unknown>;
         return async (id: string, ...args: unknown[]) => {
-          const cacheKey = `${cachePrefix}_${id}`;
+          const schoolId =
+            SCHOOL_SCOPED_GET_METHODS.has(prop) && typeof args[0] === 'string' && args[0]
+              ? args[0]
+              : SCHOOL_SCOPED_GET_METHODS.has(prop)
+                ? 'missing-school'
+                : 'global';
+          const cacheKey = schoolScopedCacheKey(cachePrefix, schoolId, id);
           return fetchAndCacheSingleWithExpiry(
             cacheKey,
+            schoolId,
             () => getMethod.call(target, id, ...args),
             expiryMs,
           );
