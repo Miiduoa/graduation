@@ -87,7 +87,11 @@ it('loads the selected shop menu after listing locations', async () => {
   );
   expect(response.status).toBe(200);
   const body = await response.json();
-  expect(body.cafeteria).toMatchObject({ id: 'stall', name: '校內咖啡店', demo: false });
+  expect(body.cafeteria).toMatchObject({
+    id: 'stall',
+    name: '校內咖啡店',
+    reviewStatus: 'unverified',
+  });
   expect(body.menus).toEqual([
     expect.objectContaining({ id: 'toast', cafeteriaId: 'stall', price: 60 }),
   ]);

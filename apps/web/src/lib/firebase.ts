@@ -563,6 +563,7 @@ export type Cafeteria = {
   rating?: number;
   reviewCount?: number;
   schoolId?: string;
+  reviewStatus?: 'verified' | 'unverified' | 'demo';
   createdAt?: string;
   updatedAt?: string;
 };

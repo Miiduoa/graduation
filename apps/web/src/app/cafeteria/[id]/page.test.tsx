@@ -312,8 +312,24 @@ it('keeps the not-found copy and offers a way back when the shop is missing', as
   expect(screen.queryByText('這是示範店家，菜單和價格不是真的，不能點餐。')).toBeNull();
 });
 
-it('shows the demo notice only on a demo shop page', async () => {
-  state.shop = { ...showcaseShop, id: 'cafe-1', name: '校園小棧', demo: true } as never;
+it.each([
+  {
+    reviewStatus: 'demo' as const,
+    notice: '這是示範店家，菜單和價格不是真的，不能點餐。',
+    hidden: '這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。',
+  },
+  {
+    reviewStatus: 'unverified' as const,
+    notice: '這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。',
+    hidden: '這是示範店家，菜單和價格不是真的，不能點餐。',
+  },
+  {
+    reviewStatus: undefined,
+    notice: '這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。',
+    hidden: '這是示範店家，菜單和價格不是真的，不能點餐。',
+  },
+])('shows the review notice for $reviewStatus shops', async ({ reviewStatus, notice, hidden }) => {
+  state.shop = { ...showcaseShop, id: 'cafe-1', name: '校園小棧', reviewStatus } as never;
   await act(async () => {
     render(
       <Suspense fallback={<p>載入店面</p>}>
@@ -324,6 +340,26 @@ it('shows the demo notice only on a demo shop page', async () => {
       </Suspense>,
     );
   });
-  expect(await screen.findByText('這是示範店家，菜單和價格不是真的，不能點餐。')).toBeTruthy();
+  expect(await screen.findByText(notice)).toBeTruthy();
+  expect(screen.queryByText(hidden)).toBeNull();
   expect(screen.getByText('紙感小店')).toBeTruthy();
+});
+
+it('does not mark a verified shop page', async () => {
+  state.shop = { ...showcaseShop, reviewStatus: 'verified' } as never;
+  await act(async () => {
+    render(
+      <Suspense fallback={<p>載入店面</p>}>
+        <StorefrontPage
+          params={Promise.resolve({ id: 'stall' })}
+          searchParams={Promise.resolve({ schoolId: 'pu' })}
+        />
+      </Suspense>,
+    );
+  });
+  expect(await screen.findByText('紙感小店')).toBeTruthy();
+  expect(screen.queryByText('這是示範店家，菜單和價格不是真的，不能點餐。')).toBeNull();
+  expect(
+    screen.queryByText('這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。'),
+  ).toBeNull();
 });

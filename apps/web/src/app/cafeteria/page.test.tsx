@@ -54,7 +54,7 @@ async function receive(rows?: {
 
 it('reads restaurants from the backend catalog and hides sample copy', async () => {
   await receive({
-    cafeterias: [{ id: 'stall', name: '校內咖啡店', demo: false }],
+    cafeterias: [{ id: 'stall', name: '校內咖啡店', reviewStatus: 'verified' }],
     menus: [
       {
         id: 'meal',
@@ -82,7 +82,7 @@ it('shows a retry when the backend catalog fails and does not keep old rows afte
   expect(screen.queryByText(/示範資料/)).toBeNull();
   state.fail = false;
   state.catalog = {
-    cafeterias: [{ id: 'stall', name: '校內咖啡店', demo: false }],
+    cafeterias: [{ id: 'stall', name: '校內咖啡店', reviewStatus: 'verified' }],
     menus: [
       {
         id: 'meal',
@@ -107,19 +107,31 @@ it('uses an honest empty state when this school has no restaurants', async () =>
   expect(screen.queryByText(/示範資料/)).toBeNull();
 });
 
-it('marks only demo shops beside the shop name', async () => {
+it('marks unverified and demo shops beside the shop name and leaves verified unmarked', async () => {
   await receive({
     cafeterias: [
-      { id: 'cafe-1', name: '校園小棧', demo: true, location: '活動中心' },
-      { id: 'jingyuan', name: '靜園餐廳', demo: false, location: '文興樓對面' },
+      { id: 'cafe-1', name: '校園小棧', reviewStatus: 'demo', location: '活動中心' },
+      { id: 'stall', name: '校內咖啡店', reviewStatus: 'unverified', location: '學生餐廳' },
+      { id: 'jingyuan', name: '靜園餐廳', reviewStatus: 'verified', location: '文興樓對面' },
+      { id: 'louisa', name: '路易莎咖啡', location: '圖書館' },
     ],
     menus: [],
   });
   const demo = within(screen.getByRole('region', { name: '校園小棧' }));
   expect(demo.getByText('示範')).toBeTruthy();
-  const real = within(screen.getByRole('region', { name: '靜園餐廳' }));
-  expect(real.queryByText('示範')).toBeNull();
+  expect(demo.queryByText('未核對')).toBeNull();
+  const unverified = within(screen.getByRole('region', { name: '校內咖啡店' }));
+  expect(unverified.getByText('未核對')).toBeTruthy();
+  expect(unverified.queryByText('示範')).toBeNull();
+  const missing = within(screen.getByRole('region', { name: '路易莎咖啡' }));
+  expect(missing.getByText('未核對')).toBeTruthy();
+  const verified = within(screen.getByRole('region', { name: '靜園餐廳' }));
+  expect(verified.queryByText('示範')).toBeNull();
+  expect(verified.queryByText('未核對')).toBeNull();
   expect(screen.queryByText('這是示範店家，菜單和價格不是真的，不能點餐。')).toBeNull();
+  expect(
+    screen.queryByText('這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。'),
+  ).toBeNull();
 });
 
 it('distinguishes unknown availability, paused supply and sold-out meals without claiming ordering is available', async () => {
