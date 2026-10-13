@@ -6,8 +6,11 @@
  *   schools/{schoolId}/cafeterias/{cafeteriaId}/menuItems  # 菜單品項
  *
  * 用法：
- *   GOOGLE_APPLICATION_CREDENTIALS=/path/to/sa.json node scripts/seed-cafeterias.js
- *   或設 FIRESTORE_EMULATOR_HOST=localhost:8080 後執行
+ *   FIRESTORE_EMULATOR_HOST=localhost:8080 node scripts/seed-cafeterias.js
+ *   或 NODE_ENV=test 且專案是 demo- / test- / campus-demo- 的明確測試環境
+ *
+ * 偵測到正式庫（campus-one-tw、正式 DATABASE_URL、NODE_ENV=production、
+ * 非本機模擬器）會直接停止。沒有繞過開關。
  *
  * 可選環境變數：
  *   SCHOOL_ID（預設 'pu'）
@@ -17,9 +20,95 @@
 
 const admin = require('firebase-admin');
 
+const DEFAULT_TEST_PROJECT = 'campus-demo-3a869';
+const PRODUCTION_PROJECTS = new Set(['campus-one-tw']);
+const PROJECT_ENV_KEYS = [
+  'GCLOUD_PROJECT',
+  'GOOGLE_CLOUD_PROJECT',
+  'FIREBASE_PROJECT_ID',
+  'FIREBASE_PROJECT',
+];
+const PRODUCTION_ENV_KEYS = ['NODE_ENV', 'APP_ENV', 'NEXT_PUBLIC_APP_ENV'];
+
+function text(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function listedProjectIds(env) {
+  const ids = PROJECT_ENV_KEYS.map((key) => text(env[key])).filter(Boolean);
+  return ids.length ? ids : [DEFAULT_TEST_PROJECT];
+}
+
+function resolveSeedProjectId(env = process.env) {
+  return (
+    text(env.GCLOUD_PROJECT) ||
+    text(env.GOOGLE_CLOUD_PROJECT) ||
+    text(env.FIREBASE_PROJECT_ID) ||
+    text(env.FIREBASE_PROJECT) ||
+    DEFAULT_TEST_PROJECT
+  );
+}
+
+function isTestProjectId(projectId) {
+  return /^(demo-|test-|campus-demo-)/.test(projectId);
+}
+
+function hostOf(value) {
+  const raw = text(value);
+  if (!raw) return '';
+  if (raw.startsWith('[')) {
+    const end = raw.indexOf(']');
+    return end > 1 ? raw.slice(1, end) : raw;
+  }
+  return raw.split('/')[0].split(':')[0];
+}
+
+function isLocalHost(host) {
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+}
+
+function databaseUrlIsLocal(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  if (url.hash) return false;
+  if (!isLocalHost(url.hostname)) return false;
+  const hostParam = url.searchParams.get('host');
+  return !hostParam || isLocalHost(hostParam);
+}
+
+function refuse(reason) {
+  throw new Error(`[seed] 拒絕寫入正式資料庫：${reason}。只允許本機模擬器或明確的測試環境。`);
+}
+
+function assertSafeCafeteriaSeedTarget(env = process.env) {
+  for (const key of PRODUCTION_ENV_KEYS) {
+    if (text(env[key]).toLowerCase() === 'production') {
+      refuse(`${key}=production`);
+    }
+  }
+  const projectIds = listedProjectIds(env);
+  const productionProject = projectIds.find((id) => PRODUCTION_PROJECTS.has(id));
+  if (productionProject) refuse(`Firebase 專案 ${productionProject}`);
+  const databaseUrl = text(env.DATABASE_URL);
+  if (databaseUrl && !databaseUrlIsLocal(databaseUrl)) {
+    refuse('DATABASE_URL 指向正式或遠端資料庫');
+  }
+  const emulator = text(env.FIRESTORE_EMULATOR_HOST);
+  if (emulator) {
+    if (!isLocalHost(hostOf(emulator))) refuse(`模擬器位址不是本機（${emulator}）`);
+    return;
+  }
+  const projectId = resolveSeedProjectId(env);
+  if (text(env.NODE_ENV).toLowerCase() === 'test' && isTestProjectId(projectId)) return;
+  refuse('沒有本機模擬器，也不是明確的測試環境');
+}
+
 const SCHOOL_ID = process.env.SCHOOL_ID || 'pu';
-const PROJECT_ID =
-  process.env.GCLOUD_PROJECT || process.env.FIREBASE_PROJECT_ID || 'campus-demo-3a869';
+const PROJECT_ID = resolveSeedProjectId();
 
 function init() {
   if (admin.apps.length > 0) return;
@@ -155,6 +244,7 @@ async function seedOne(db, cafeteria) {
 }
 
 async function main() {
+  assertSafeCafeteriaSeedTarget(process.env);
   init();
   const db = admin.firestore();
   console.log(`[seed] schoolId=${SCHOOL_ID} project=${PROJECT_ID}`);
@@ -165,7 +255,15 @@ async function main() {
   process.exit(0);
 }
 
-main().catch((e) => {
-  console.error('[seed] FAILED:', e?.message || e);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((e) => {
+    console.error('[seed] FAILED:', e?.message || e);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  assertSafeCafeteriaSeedTarget,
+  resolveSeedProjectId,
+  DEFAULT_TEST_PROJECT,
+};
