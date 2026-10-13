@@ -10,6 +10,7 @@ import { useAcademicRecords } from '@/lib/useAcademicRecords';
 import { useSignInOptions } from '@/lib/signInOptions';
 import type { AcademicKind, AcademicSnapshot } from '@/lib/academicClient';
 import styles from './academic.module.css';
+import { PersonalImportSummary } from '@/components/imports/PersonalImportSummary';
 
 type Props<K extends AcademicKind> = {
   kind: K;
@@ -140,6 +141,7 @@ export function AcademicPage<K extends AcademicKind>(props: Props<K>) {
           </Link>
         ))}
       </nav>
+      <PersonalImportSummary kind="grades" />
       {loading ? (
         <div className={styles.status} role="status">
           正在確認帳號…

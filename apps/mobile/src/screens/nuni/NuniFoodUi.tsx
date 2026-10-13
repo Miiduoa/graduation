@@ -59,17 +59,22 @@ export function FoodButton({
   onPress,
   disabled = false,
   selected = false,
+  accessibilityLabel,
+  expanded,
 }: {
   children: string;
   onPress(): void;
   disabled?: boolean;
   selected?: boolean;
+  accessibilityLabel?: string;
+  expanded?: boolean;
 }) {
   const theme = useTheme();
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityState={{ disabled, selected }}
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ disabled, selected, expanded }}
       disabled={disabled}
       onPress={onPress}
       style={{

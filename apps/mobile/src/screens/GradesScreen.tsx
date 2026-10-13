@@ -23,6 +23,7 @@ import { useSchool } from '../state/school';
 import { getDataSource, hasDataSource } from '../data';
 import type { Grade as DataGrade } from '../data/types';
 import { analytics } from '../services/analytics';
+import { PersonalImportSummary } from '../components/PersonalImportSummary';
 
 type Grade = {
   id: string;
@@ -426,6 +427,7 @@ export function GradesScreen(props: Record<string, unknown>) {
   if (shouldBlockForNoLogin({ uid: auth.user?.uid ?? null, hasUser: !!auth.user })) {
     return (
       <Screen>
+        <PersonalImportSummary kind="grades" />
         <AnimatedCard title="成績查詢" subtitle="請先登入">
           <Text style={{ color: theme.colors.muted, marginBottom: 12 }}>
             登入後才能查看成績資料
@@ -439,6 +441,7 @@ export function GradesScreen(props: Record<string, unknown>) {
   if (loading) {
     return (
       <Screen>
+        <PersonalImportSummary kind="grades" />
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
           <Spinner />
           <Text style={{ color: theme.colors.muted, marginTop: 12 }}>載入成績中...</Text>
@@ -449,6 +452,7 @@ export function GradesScreen(props: Record<string, unknown>) {
 
   return (
     <Screen>
+      <PersonalImportSummary kind="grades" />
       <View style={{ flex: 1 }}>
         <SegmentedControl options={TABS} selected={selectedTab} onChange={setSelectedTab} />
 

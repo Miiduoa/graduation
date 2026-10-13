@@ -146,8 +146,6 @@ import {
   matchTaskChain,
   getAgentCapabilitySummary,
   simulateAgentGreeting,
-  simulateRecentExecutions,
-  simulateProactiveMessages,
   getDefaultMemory,
   getInitialContext,
   getMemoryStorageKey,
@@ -1796,12 +1794,10 @@ export function AIChatScreen(props: any) {
   const deliveredRouteSeedPromptRef = useRef<string | null>(null);
   const [latestProactiveReports, setLatestProactiveReports] = useState<ProactiveAIReport[]>([]);
   const [showCapabilities, setShowCapabilities] = useState(true);
-  const [recentExecutions, setRecentExecutions] = useState<ToolExecution[]>(() =>
-    isOfflineAI ? [] : simulateRecentExecutions(),
-  );
-  const [proactiveMessages, setProactiveMessages] = useState(() =>
-    isOfflineAI ? [] : simulateProactiveMessages(),
-  );
+  const [recentExecutions, setRecentExecutions] = useState<ToolExecution[]>([]);
+  const [proactiveMessages, setProactiveMessages] = useState<
+    { trigger: ProactiveTrigger; message: string }[]
+  >([]);
   const [agentContext, setAgentContext] = useState<ConversationContext>(() => getInitialContext());
   const [agentMemory, setAgentMemory] = useState<AgentMemory>(() =>
     getDefaultMemory(effectiveUserId ?? 'guest'),
@@ -4777,9 +4773,6 @@ export function AIChatScreen(props: any) {
       startedAt: new Date().toISOString(),
       completedAt: new Date().toISOString(),
     };
-    if (!isOfflineAI) {
-      setRecentExecutions((prev) => [execution, ...prev].slice(0, 5));
-    }
     setAgentContext((prev) => ({ ...prev, state: 'reporting', currentTool: undefined }));
     return {
       id: genMsgId(),
@@ -4973,11 +4966,14 @@ export function AIChatScreen(props: any) {
 
       let status: ToolExecutionStatus = 'success';
       let result = '';
+      let hasExecutionReceipt = false;
       let resultActions: AssistantActionProposal[] | undefined;
       try {
         const executionResult = await executeConfirmedToolResult(tool, params);
         status = executionResult.kind === 'blocked' ? 'failed' : 'success';
         result = executionResult.message;
+        hasExecutionReceipt =
+          executionResult.kind === 'executed' && Boolean(executionResult.recordId);
         resultActions = executionResult.actions;
       } catch (error: any) {
         status = 'failed';
@@ -4993,7 +4989,7 @@ export function AIChatScreen(props: any) {
             result,
             completedAt: new Date().toISOString(),
           };
-          if (status === 'success' && !isOfflineAI) {
+          if (status === 'success' && hasExecutionReceipt) {
             setRecentExecutions((r) => [updatedExec, ...r].slice(0, 5));
           }
           return {
@@ -7688,8 +7684,8 @@ export function AIChatScreen(props: any) {
           };
           setMessages([greeting]);
           setShowCapabilities(true);
-          setRecentExecutions(isOfflineAI ? [] : simulateRecentExecutions());
-          setProactiveMessages(isOfflineAI ? [] : simulateProactiveMessages());
+          setRecentExecutions([]);
+          setProactiveMessages([]);
           setAgentContext(getInitialContext());
         },
       },
