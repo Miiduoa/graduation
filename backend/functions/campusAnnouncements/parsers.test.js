@@ -48,6 +48,61 @@ test('iWeb link fallback still finds 412 documents when the table is gone', () =
   ]);
 });
 
+test('iWeb links skip navigation and keep news-list articles', () => {
+  const html = `
+<nav class="hdmenu"><ul class="nav navbar-nav">
+  <li class="dropdown"><a class="dropdown-toggle" href="https://www.pu.edu.tw/p/403-1000-195.php">行政單位</a>
+    <ul class="dropdown-menu"><li><a href="/p/412-1042-3144.php">教務Q&amp;A</a></li></ul>
+  </li>
+  <li><a href="/p/403-1042-885.php">最新消息</a></li>
+</ul></nav>
+<div id="pageptlist">
+  <div class="row listBS"><div class="d-item"><div class="mtitle">
+    <a href="https://acd.pu.edu.tw/p/406-1042-71089,r885.php" title="【教務】選課公告">【教務】選課公告</a>
+  </div></div></div>
+  <div class="row listBS"><div class="d-item"><div class="mtitle">
+    <a href="/var/file/42/1042/img/notice.pdf" title="[115.09.18]機車通行證抽籤結果">[115.09.18]機車通行證抽籤結果</a>
+  </div></div></div>
+</div>
+<div class="mbox"><div class="mtitle">
+  <a href="https://c039.pu.edu.tw/p/406-1072-73284,r13.php">暑修學生進校之收費規定</a>
+</div><div class="mdate before">2026-07-01</div></div>
+`;
+  const titles = parseIwebLinks(html, 'https://acd.pu.edu.tw/p/403-1042-885-1.php').map((row) => row.title);
+  expect(titles).toEqual([
+    '選課公告',
+    '[115.09.18]機車通行證抽籤結果',
+    '暑修學生進校之收費規定',
+  ]);
+  expect(titles).not.toContain('行政單位');
+  expect(titles).not.toContain('最新消息');
+  expect(titles).not.toContain('教務Q&A');
+});
+
+test('iWeb links ignore homepage shortcut tiles that reuse mtitle markup', () => {
+  const html = `
+<div class="d-item d-title col-sm-12"><div class="mbox"><div class="mtitle">
+  <a href="https://c030.pu.edu.tw/p/412-1063-5585.php">安心助學</a>
+</div></div></div>
+<div class="d-item"><div class="mtitle">
+  <a href="https://osachc.pu.edu.tw/var/file/67/1067/img/map.pdf">校園無障礙地圖</a>
+</div></div>`;
+  expect(parseIwebLinks(html, 'https://osa.pu.edu.tw/')).toEqual([]);
+});
+
+test('iWeb table keeps dated PDF notices and drops section index links', () => {
+  const html = `
+<table class="listTB">
+<tr><th>標題</th><th>日期</th></tr>
+<tr><td><a href="/p/403-1059-719.php">各類通知</a></td><td>2026-10-06</td></tr>
+<tr><td><a href="/var/file/59/1059/img/notice.pdf">復學申請時程</a></td><td>2026-10-06</td></tr>
+<tr><td><a href="/p/405-1059-72811,c5205.php">彈性轉系事宜</a></td><td>2026-09-02</td></tr>
+</table>`;
+  const rows = parseIwebTable(html, 'https://dorac.pu.edu.tw/p/403-1059-719-1.php');
+  expect(rows.map((row) => row.title)).toEqual(['復學申請時程', '彈性轉系事宜']);
+  expect(rows[0].originalUrl).toContain('.pdf');
+});
+
 test('RPage parser reads news list links', () => {
   const rows = parseRpageList(RPAGE, 'https://www.ncu.edu.tw/tw/news/index.php');
   expect(rows).toHaveLength(2);
