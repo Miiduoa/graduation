@@ -5,9 +5,19 @@ import { collection, doc, getDocFromServer, getDocsFromServer } from 'firebase/f
 import { httpsCallable } from 'firebase/functions';
 import { getAuthInstance, getDb, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
 import { fetchCafeteriaLocations, fetchCafeteriaMenu } from '../services/cafeteriaCatalog';
+import {
+  parseCafeteriaReviewStatus,
+  type CafeteriaReviewStatus,
+} from '@campus/shared/src/cafeteriaCatalog';
 
 export type DiningScope = { userId: string; schoolId: string };
-export type DiningVenue = { id: string; name: string; location: string; orderingEnabled: boolean };
+export type DiningVenue = {
+  id: string;
+  name: string;
+  location: string;
+  orderingEnabled: boolean;
+  reviewStatus: CafeteriaReviewStatus;
+};
 export type DiningMenu = {
   id: string;
   name: string;
@@ -118,6 +128,7 @@ async function loadDiningCatalogFromApi(schoolId: string): Promise<DiningCatalog
     name: row.name,
     location: row.location ?? '',
     orderingEnabled: row.merchantMode === 'native_order',
+    reviewStatus: row.reviewStatus,
   }));
   const menus = (
     await Promise.all(locations.slice(0, 40).map((row) => fetchCafeteriaMenu(schoolId, row)))
@@ -184,6 +195,9 @@ export async function loadDiningCatalog(
       name: typeof data.name === 'string' ? data.name : '未提供店名',
       location: typeof data.location === 'string' ? data.location : '',
       orderingEnabled: data.pilotStatus === 'live' && data.orderingEnabled === true,
+      reviewStatus: parseCafeteriaReviewStatus(
+        data.reviewStatus ?? data.verificationStatus ?? data.catalogReview,
+      ),
     };
   });
   const menus = menuSnap.docs.map((entry) => {

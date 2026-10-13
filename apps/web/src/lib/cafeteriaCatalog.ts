@@ -3,9 +3,10 @@ import {
   parseCafeteriaLocations,
   type CafeteriaCatalogMenuItem,
   type CafeteriaCatalogRecord,
+  type CafeteriaReviewStatus,
 } from '@campus/shared/src/cafeteriaCatalog';
 
-export type CatalogCafeteria = Cafeteria & { demo?: boolean };
+export type CatalogCafeteria = Cafeteria & { reviewStatus?: CafeteriaReviewStatus };
 
 function toCafeteria(row: CafeteriaCatalogRecord): CatalogCafeteria {
   return {
@@ -19,7 +20,7 @@ function toCafeteria(row: CafeteriaCatalogRecord): CatalogCafeteria {
     orderingUrl: row.orderingUrl,
     merchantMode: row.merchantMode,
     menuSyncedAt: row.menuSyncedAt,
-    demo: row.demo,
+    reviewStatus: row.reviewStatus,
   };
 }
 

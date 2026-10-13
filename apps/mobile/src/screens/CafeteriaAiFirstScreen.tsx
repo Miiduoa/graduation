@@ -24,7 +24,10 @@ import {
   describePickupNumber,
   formatShortOrderCode,
 } from '@campus/shared/src/ordering/pickupNumber';
-import { CAFETERIA_EMPTY_SCHOOL_TEXT } from '@campus/shared/src/cafeteriaCatalog';
+import {
+  CAFETERIA_EMPTY_SCHOOL_TEXT,
+  cafeteriaReviewBadge,
+} from '@campus/shared/src/cafeteriaCatalog';
 import { MY_ORDER_STATUS_LABELS as statuses } from './MyOrdersScreen';
 
 type Props = {
@@ -348,6 +351,11 @@ function DiningContent({
               )}
               {catalog.venues.map((venue) => (
                 <AICard key={venue.id} title={venue.name}>
+                  {cafeteriaReviewBadge(venue.reviewStatus) ? (
+                    <Text style={{ color: aiTokens.muted }}>
+                      {cafeteriaReviewBadge(venue.reviewStatus)}
+                    </Text>
+                  ) : null}
                   <Text style={{ color: aiTokens.muted }}>
                     {venue.location || '位置資訊未提供'}
                   </Text>
