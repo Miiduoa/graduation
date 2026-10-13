@@ -25,7 +25,6 @@ import {
 } from '../services/storefront';
 import {
   MENU_STALE_TEXT,
-  PRICE_DISCLAIMER,
   SHOWCASE_ORDER_BUTTON_TEXT,
   SHOWCASE_ORDER_CAPTION,
   isMenuStale,
@@ -35,6 +34,7 @@ import {
 import {
   CAFETERIA_BACK_TO_LIST_TEXT,
   CAFETERIA_NOT_FOUND_TEXT,
+  STOREFRONT_PAGE_SUBTITLE,
   cafeteriaReviewNotice,
 } from '@campus/shared/src/cafeteriaCatalog';
 
@@ -119,7 +119,7 @@ export default function StorefrontScreen({ navigation, route }: Props) {
   });
   const websiteUrl = safeStorefrontUrl(shop?.websiteUrl);
   return (
-    <Screen title={shop?.name || '店面'} subtitle="店家自己的主頁。一般帳號即可查看、追蹤與留言。">
+    <Screen title={shop?.name || '店面'} subtitle={STOREFRONT_PAGE_SUBTITLE}>
       <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 80 }}>
         {error ? <Text style={{ color: theme.colors.text }}>{error}</Text> : null}
         {shop === undefined && !error ? (
@@ -140,9 +140,11 @@ export default function StorefrontScreen({ navigation, route }: Props) {
         {shop ? (
           <>
             {cafeteriaReviewNotice(shop.reviewStatus) ? (
-              <Text style={{ color: theme.colors.text }}>
-                {cafeteriaReviewNotice(shop.reviewStatus)}
-              </Text>
+              <View testID="cafeteria-review-notice" style={reviewNoticeBox}>
+                <Text style={{ color: theme.colors.text, lineHeight: 22 }}>
+                  {cafeteriaReviewNotice(shop.reviewStatus)}
+                </Text>
+              </View>
             ) : null}
             {shop.intro ? (
               <Text style={{ color: theme.colors.text, lineHeight: 22 }}>{shop.intro}</Text>
@@ -151,7 +153,6 @@ export default function StorefrontScreen({ navigation, route }: Props) {
               {[shop.location, shop.openingHours].filter(Boolean).join(' · ') ||
                 '位置與營業時間尚未提供'}
             </Text>
-            <Text style={{ color: theme.colors.muted }}>{PRICE_DISCLAIMER}</Text>
             {isMenuStale(shop.menuSyncedAt) ? (
               <Text style={{ color: theme.colors.muted }}>{MENU_STALE_TEXT}</Text>
             ) : null}
@@ -315,6 +316,15 @@ function StorefrontPostCard({
     </View>
   );
 }
+
+const reviewNoticeBox = {
+  backgroundColor: theme.colors.surfaceMuted,
+  borderWidth: 1,
+  borderColor: theme.colors.border,
+  borderRadius: theme.radius.sm,
+  paddingVertical: 12,
+  paddingHorizontal: 14,
+};
 
 const field = {
   borderWidth: 1,

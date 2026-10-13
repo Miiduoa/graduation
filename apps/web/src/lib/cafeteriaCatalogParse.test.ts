@@ -3,6 +3,7 @@ import {
   CAFETERIA_BACK_TO_LIST_TEXT,
   CAFETERIA_EMPTY_SCHOOL_TEXT,
   CAFETERIA_NOT_FOUND_TEXT,
+  STOREFRONT_PAGE_SUBTITLE,
   CAFETERIA_REVIEW_STATUS_DEFAULT,
   DEMO_CAFETERIA_BADGE,
   DEMO_CAFETERIA_NOTICE,
@@ -20,6 +21,7 @@ it('keeps the student-facing cafeteria copy used by empty and missing shops', ()
   expect(CAFETERIA_EMPTY_SCHOOL_TEXT).toBe('這間學校的餐廳還沒上架');
   expect(CAFETERIA_NOT_FOUND_TEXT).toBe('找不到這間店。');
   expect(CAFETERIA_BACK_TO_LIST_TEXT).toBe('回餐廳列表');
+  expect(STOREFRONT_PAGE_SUBTITLE).toBe('店家自己的主頁。');
   expect(DEMO_CAFETERIA_BADGE).toBe('示範');
   expect(DEMO_CAFETERIA_NOTICE).toBe('這是示範店家，菜單和價格不是真的，不能點餐。');
   expect(UNVERIFIED_CAFETERIA_BADGE).toBe('未核對');
