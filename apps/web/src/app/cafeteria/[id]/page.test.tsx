@@ -2,6 +2,7 @@ import { Suspense } from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import StorefrontPage from './page';
+import { isFollowingStorefront, loadStorefrontComments, loadStorefrontPosts } from '@/lib/storefront';
 
 const state = vi.hoisted(() => ({
   user: { uid: 'alice' } as { uid: string } | null,
@@ -63,6 +64,10 @@ const showcaseShop = {
 beforeEach(() => {
   state.user = { uid: 'alice' };
   state.shop = { ...showcaseShop };
+  state.posts = [];
+  vi.mocked(isFollowingStorefront).mockReset().mockResolvedValue(false);
+  vi.mocked(loadStorefrontComments).mockReset().mockResolvedValue([]);
+  vi.mocked(loadStorefrontPosts).mockReset().mockImplementation(async () => state.posts);
 });
 
 it('lets a regular account open a storefront and leave to the shop order page', async () => {
@@ -186,4 +191,74 @@ it('adds noopener noreferrer on a safe website link', async () => {
   const link = await screen.findByRole('link', { name: '店家網站' });
   expect(link.getAttribute('href')).toBe('https://shop.example');
   expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+});
+
+const prompt = '登入後才能看失物招領和評論';
+
+it('does not read comments, likes or follows before login and shows a login prompt', async () => {
+  state.user = null;
+  state.posts = [
+    {
+      id: 'post-1',
+      title: '今日優惠',
+      text: '買一送一',
+      kind: 'promo',
+      createdAt: '',
+      likeCount: 0,
+      liked: false,
+    },
+  ];
+  await act(async () => {
+    render(
+      <Suspense fallback={<p>載入店面</p>}>
+        <StorefrontPage
+          params={Promise.resolve({ id: 'stall' })}
+          searchParams={Promise.resolve({ schoolId: 'pu' })}
+        />
+      </Suspense>,
+    );
+  });
+  expect(await screen.findByText('紙感小店')).toBeTruthy();
+  expect(screen.getByText(prompt)).toBeTruthy();
+  const login = screen.getByRole('link', { name: '登入' });
+  expect(login.getAttribute('href')).toBe('/login?returnUrl=%2Fcafeteria%2Fstall%3FschoolId%3Dpu');
+  expect(loadStorefrontPosts).toHaveBeenCalledWith('pu', 'stall', undefined);
+  expect(loadStorefrontComments).not.toHaveBeenCalled();
+  expect(isFollowingStorefront).not.toHaveBeenCalled();
+  expect(screen.queryByText('目前沒有資料')).toBeNull();
+  expect(screen.queryByText('請確認網路')).toBeNull();
+});
+
+it('shows the same login prompt when signed-in social reads are blocked by permissions', async () => {
+  state.posts = [
+    {
+      id: 'post-1',
+      title: '今日優惠',
+      text: '買一送一',
+      kind: 'promo',
+      createdAt: '',
+      likeCount: 0,
+      liked: false,
+    },
+  ];
+  vi.mocked(isFollowingStorefront).mockRejectedValueOnce(
+    Object.assign(new Error('permission-denied'), { code: 'permission-denied' }),
+  );
+  vi.mocked(loadStorefrontComments).mockRejectedValue(
+    Object.assign(new Error('permission-denied'), { code: 'permission-denied' }),
+  );
+  await act(async () => {
+    render(
+      <Suspense fallback={<p>載入店面</p>}>
+        <StorefrontPage
+          params={Promise.resolve({ id: 'stall' })}
+          searchParams={Promise.resolve({ schoolId: 'pu' })}
+        />
+      </Suspense>,
+    );
+  });
+  expect(await screen.findByText(prompt)).toBeTruthy();
+  expect(screen.queryByText('暫時讀不到這間店。')).toBeNull();
+  expect(screen.queryByText('目前沒有資料')).toBeNull();
+  expect(screen.queryByText('請確認網路')).toBeNull();
 });

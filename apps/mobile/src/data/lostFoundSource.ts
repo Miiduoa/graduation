@@ -10,6 +10,7 @@ import {
   where,
   type DocumentSnapshot,
 } from 'firebase/firestore';
+import { permissionDeniedError } from '@campus/shared/src/signedInSocialReads';
 import { getAuthInstance, getDb } from '../firebase';
 import type { DataSource } from './source';
 import type { LostFoundItem } from './types';
@@ -29,6 +30,9 @@ function currentUid(): string {
   const uid = getAuthInstance().currentUser?.uid;
   if (!uid) throw new Error('請先登入後再操作。');
   return uid;
+}
+function requireSignedIn() {
+  if (!getAuthInstance().currentUser) throw permissionDeniedError();
 }
 function sameUser(uid: string) {
   if (currentUid() !== uid) throw new Error('帳號已切換，請重新操作。');
@@ -126,6 +130,7 @@ export const lostFoundSource: Pick<
   | 'resolveLostFoundItem'
 > = {
   async listLostFoundItems(school, options) {
+    requireSignedIn();
     const schoolId = segment(school);
     const db = getDb();
     const [schoolRows, legacyRows] = await Promise.all([
@@ -148,6 +153,7 @@ export const lostFoundSource: Pick<
     return options?.limit ? sorted.slice(0, options.limit) : sorted;
   },
   async getLostFoundItem(id, school) {
+    requireSignedIn();
     const schoolId = segment(school);
     const record = await locate(id, schoolId);
     return readItem(record.snapshot, schoolId, record.canonical);

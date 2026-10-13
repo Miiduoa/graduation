@@ -1,8 +1,12 @@
-import { buildSchoolCollectionPath } from '@campus/shared/src';
+import {
+  buildSchoolCollectionPath,
+  isPermissionDeniedError,
+  permissionDeniedError,
+} from '@campus/shared/src';
 import { getDoc, getDocs, orderBy, query, serverTimestamp, setDoc } from 'firebase/firestore';
 
 import { collectionFromSegments, docFromSegments } from '../../data/firestorePath';
-import { getDb } from '../../firebase';
+import { getAuthInstance, getDb } from '../../firebase';
 
 export type EventRegistration = {
   uid: string;
@@ -82,6 +86,7 @@ export async function loadEventRegistrations(
 }
 
 export async function loadEventReviews(eventId: string, schoolId: string): Promise<EventReview[]> {
+  if (!getAuthInstance().currentUser) throw permissionDeniedError();
   const db = getDb();
 
   try {
@@ -102,6 +107,7 @@ export async function loadEventReviews(eventId: string, schoolId: string): Promi
       }));
     }
   } catch (error) {
+    if (isPermissionDeniedError(error)) throw error;
     console.warn('[EventRepository] Failed to read canonical reviews:', error);
   }
 
