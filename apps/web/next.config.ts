@@ -20,7 +20,8 @@ const contentSecurityPolicy = [
   "style-src 'self' 'unsafe-inline' https:",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net",
   "worker-src 'self' blob:",
-  "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net https://*.fly.dev https://*.web.app https://*.firebaseapp.com https://cdn.jsdelivr.net https://*.jsdelivr.net wss:" + emulatorConnectSrc,
+  "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net https://*.fly.dev https://*.web.app https://*.firebaseapp.com https://cdn.jsdelivr.net https://*.jsdelivr.net wss:" +
+    emulatorConnectSrc,
 ].join('; ');
 
 const securityHeaders = [
@@ -47,6 +48,12 @@ const nextConfig: NextConfig = {
         headers: [
           { key: 'Content-Security-Policy', value: contentSecurityPolicy },
           ...securityHeaders,
+        ],
+      },
+      {
+        source: '/merchant',
+        headers: [
+          { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=(self)' },
         ],
       },
       {

@@ -6,6 +6,7 @@
   "main": "./src/index.ts",
   "scripts": {
     "lint": "eslint src --ext .ts",
+    "test:food": "node --test tests/nuniFood.test.cjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build:cjs": "tsc -p tsconfig.cjs.json"
   },

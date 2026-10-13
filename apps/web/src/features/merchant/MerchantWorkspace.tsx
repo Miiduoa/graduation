@@ -17,6 +17,7 @@ import {
 } from '@campus/shared/src/nuniMerchant';
 import styles from './MerchantWorkspace.module.css';
 import { MerchantOperations, type MerchantOperationDrafts } from './MerchantOperations';
+import type { FoodDraftCache } from '@/features/food/foodState';
 
 type Overview = Awaited<ReturnType<typeof loadMerchantOverview>>;
 type Draft = Omit<NuniMerchantApplicationInput, 'idempotencyKey'>;
@@ -49,7 +50,8 @@ export function MerchantWorkspace() {
   const [operationScope, setOperationScope] = useState<{
     accountId: string | null;
     locations: MerchantOperationDrafts;
-  }>(() => ({ accountId: null, locations: new Map() }));
+    food: FoodDraftCache;
+  }>(() => ({ accountId: null, locations: new Map(), food: new Map() }));
   const confirmedAccount = auth.pendingLogout
     ? null
     : (auth.session?.platformAccountId ??
@@ -57,7 +59,7 @@ export function MerchantWorkspace() {
   if (confirmedAccount !== operationScope.accountId) {
     // An unavailable session is not proof of logout. Keep uncertain write intent
     // hidden until this account returns, or discard it for a confirmed identity change.
-    setOperationScope({ accountId: confirmedAccount, locations: new Map() });
+    setOperationScope({ accountId: confirmedAccount, locations: new Map(), food: new Map() });
     return null;
   }
   return (
@@ -67,6 +69,7 @@ export function MerchantWorkspace() {
           key={`${auth.session.platformAccountId}:${auth.session.context}`}
           context={auth.session.context}
           operationDrafts={operationScope.locations}
+          foodDrafts={operationScope.food}
           suspended={auth.loading}
           onExpired={auth.refresh}
         />
@@ -80,11 +83,13 @@ export function MerchantWorkspace() {
 function AccountWorkspace({
   context,
   operationDrafts,
+  foodDrafts,
   suspended,
   onExpired,
 }: {
   context: string;
   operationDrafts: MerchantOperationDrafts;
+  foodDrafts: FoodDraftCache;
   suspended: boolean;
   onExpired: () => Promise<void>;
 }) {
@@ -236,6 +241,7 @@ function AccountWorkspace({
         key={`${context}:${selectedLocation.tenantId}:${selectedLocation.locationId}`}
         context={context}
         drafts={operationDrafts}
+        foodDrafts={foodDrafts}
         {...selectedLocation}
         suspended={suspended}
         onBack={() => setSelectedLocation(null)}

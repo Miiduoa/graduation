@@ -23,6 +23,14 @@ jest.mock('../screens/nuni/NuniCourses', () => ({
     return <TextInput testID="course-draft" value={draft} onChangeText={setDraft} />;
   },
 }));
+jest.mock('../screens/nuni/NuniFood', () => ({
+  NuniFood: () => {
+    const { TextInput } = require('react-native');
+    const { useNuniDraftState } = jest.requireActual('../state/nuniDrafts');
+    const [draft, setDraft] = useNuniDraftState('test:food-intent', '');
+    return <TextInput testID="food-intent" value={draft} onChangeText={setDraft} />;
+  },
+}));
 jest.mock('../screens/nuni/NuniMerchant', () => ({
   NuniMerchant: () => {
     const { Text } = require('react-native');
@@ -347,4 +355,25 @@ test('explicit logout drops same-account drafts before that account signs in aga
   mockAuth.session = { ...principal, context: 'same-account-new-login' };
   view.rerender(<NuniWorkspaceScreen />);
   expect(view.getByTestId('course-draft').props.value).toBe('');
+});
+
+test('restaurant entry selects food and retains its retry intent through temporary validation only', async () => {
+  mockAuth.session = principal;
+  const view = render(<NuniWorkspaceScreen route={{ params: { tab: 'food' } }} />);
+  const input = await view.findByTestId('food-intent');
+  fireEvent.changeText(input, 'same-order-key');
+  mockAuth.session = null;
+  mockAuth.error = 'temporary';
+  view.rerender(<NuniWorkspaceScreen route={{ params: { tab: 'food' } }} />);
+  expect(view.queryByTestId('food-intent')).toBeNull();
+  mockAuth.error = '';
+  mockAuth.session = { ...principal, context: 'renewed' };
+  view.rerender(<NuniWorkspaceScreen route={{ params: { tab: 'food' } }} />);
+  expect((await view.findByTestId('food-intent')).props.value).toBe('same-order-key');
+  mockAuth.pendingLogout = true;
+  view.rerender(<NuniWorkspaceScreen route={{ params: { tab: 'food' } }} />);
+  mockAuth.pendingLogout = false;
+  mockAuth.session = { ...principal, platformAccountId: 'pa-new', context: 'new' };
+  view.rerender(<NuniWorkspaceScreen route={{ params: { tab: 'food' } }} />);
+  expect((await view.findByTestId('food-intent')).props.value).toBe('');
 });
