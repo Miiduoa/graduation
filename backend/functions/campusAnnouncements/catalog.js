@@ -197,11 +197,15 @@ const SCHOOLS = [
         url: 'https://dorac.pu.edu.tw/p/403-1059-719-1.php',
       },
       { sourceId: 'pu-acd', office: '教務處', url: 'https://acd.pu.edu.tw/p/403-1042-885-1.php' },
-      { sourceId: 'pu-osa', office: '學務處', url: 'https://osa.pu.edu.tw/' },
+      { sourceId: 'pu-osa', office: '學務處', url: 'https://osa.pu.edu.tw/p/422-1111-1039.php' },
       { sourceId: 'pu-dbs', office: '事務組', url: 'https://dbs.pu.edu.tw/p/403-1069-783-1.php' },
       { sourceId: 'pu-oits', office: '資訊處', url: 'https://oits.pu.edu.tw/' },
       { sourceId: 'pu-csp', office: '校警', url: 'https://csp.pu.edu.tw/' },
-      { sourceId: 'pu-dorm', office: '住宿', url: 'https://osadorm.pu.edu.tw/' },
+      {
+        sourceId: 'pu-dorm',
+        office: '住宿',
+        url: 'https://osadorm.pu.edu.tw/p/403-1065-679-1.php',
+      },
     ],
   }),
   school('scu', '東吳大學', {
@@ -260,7 +264,9 @@ function coverageRows() {
   return SCHOOLS.map((entry) => {
     const sources = entry.sources || [];
     const campus = sources.find((item) => item.scope === 'campus');
-    const academic = sources.find((item) => /教務/.test(item.office) || item.sourceId.endsWith('-aca'));
+    const academic = sources.find(
+      (item) => /教務/.test(item.office) || item.sourceId.endsWith('-aca'),
+    );
     const offices = sources.filter((item) => item.scope === 'office').map((item) => item.office);
     let status = 'configured';
     let note = campus && academic ? '已設定全校與教務處；實際抽出看健康檢查' : '';
@@ -289,12 +295,22 @@ function coverageRows() {
 }
 
 function formatCoverageTable(rows = coverageRows()) {
-  const header = ['學校', 'schoolId', '狀態', '校網系統', '全校最新消息', '教務處', '其他處室', '備註'];
+  const header = [
+    '學校',
+    'schoolId',
+    '狀態',
+    '校網系統',
+    '全校最新消息',
+    '教務處',
+    '其他處室',
+    '備註',
+  ];
   const lines = [
     `| ${header.join(' | ')} |`,
     `| ${header.map(() => '---').join(' | ')} |`,
-    ...rows.map((row) =>
-      `| ${row.name} | ${row.schoolId} | ${row.status === 'unavailable' ? SOURCE_UNAVAILABLE : '已接設定'} | ${row.cms} | ${row.campus} | ${row.academic} | ${row.offices.join('、') || '—'} | ${row.note} |`,
+    ...rows.map(
+      (row) =>
+        `| ${row.name} | ${row.schoolId} | ${row.status === 'unavailable' ? SOURCE_UNAVAILABLE : '已接設定'} | ${row.cms} | ${row.campus} | ${row.academic} | ${row.offices.join('、') || '—'} | ${row.note} |`,
     ),
   ];
   return lines.join('\n');

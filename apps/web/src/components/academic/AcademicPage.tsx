@@ -9,6 +9,7 @@ import { SiteShell } from '@/components/SiteShell';
 import { useAcademicRecords } from '@/lib/useAcademicRecords';
 import { useSignInOptions } from '@/lib/signInOptions';
 import type { AcademicKind, AcademicSnapshot } from '@/lib/academicClient';
+import { loadFailureCopy } from '@campus/shared/src/loadFailureCopy';
 import styles from './academic.module.css';
 import { PersonalImportSummary } from '@/components/imports/PersonalImportSummary';
 
@@ -65,7 +66,7 @@ function Records<K extends AcademicKind>({
             ? '學校登入已到期，重新登入後就能更新課表與成績。'
             : permission
               ? '請確認目前使用的是你的學校帳號。'
-              : '請確認網路後再試一次。這次未取得資料，不會以舊紀錄代替。'}
+              : `${loadFailureCopy(state.error, { online: navigator.onLine })}。這次未取得資料，不會以舊紀錄代替。`}
         </p>
         <div className={styles.actions}>
           {reconnect || permission ? (
@@ -150,7 +151,7 @@ export function AcademicPage<K extends AcademicKind>(props: Props<K>) {
         error ? (
           <section className={styles.status}>
             <h2>暫時無法確認登入狀態</h2>
-            <p>請確認網路後再試一次。</p>
+            <p>{loadFailureCopy(error, { online: navigator.onLine })}。</p>
           </section>
         ) : (
           <SchoolAccountRequired returnUrl={path} alternative={props.closedAlternative} />

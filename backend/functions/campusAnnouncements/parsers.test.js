@@ -1,5 +1,7 @@
 'use strict';
 
+const fs = require('node:fs');
+const path = require('node:path');
 const {
   parseIwebTable,
   parseIwebLinks,
@@ -68,12 +70,10 @@ test('iWeb links skip navigation and keep news-list articles', () => {
   <a href="https://c039.pu.edu.tw/p/406-1072-73284,r13.php">暑修學生進校之收費規定</a>
 </div><div class="mdate before">2026-07-01</div></div>
 `;
-  const titles = parseIwebLinks(html, 'https://acd.pu.edu.tw/p/403-1042-885-1.php').map((row) => row.title);
-  expect(titles).toEqual([
-    '選課公告',
-    '[115.09.18]機車通行證抽籤結果',
-    '暑修學生進校之收費規定',
-  ]);
+  const titles = parseIwebLinks(html, 'https://acd.pu.edu.tw/p/403-1042-885-1.php').map(
+    (row) => row.title,
+  );
+  expect(titles).toEqual(['選課公告', '[115.09.18]機車通行證抽籤結果', '暑修學生進校之收費規定']);
   expect(titles).not.toContain('行政單位');
   expect(titles).not.toContain('最新消息');
   expect(titles).not.toContain('教務Q&A');
@@ -113,9 +113,12 @@ test('RSS parser reads items without keeping login portal URLs', async () => {
   const rows = await parseRss(RSS, 'https://aca.example.edu/rss.xml');
   expect(rows[0].title).toBe('教務處公告');
   expect(isLoginPortalUrl('https://alcat.pu.edu.tw/index_menu.php')).toBe(true);
-  expect(parseHtmlLinks('<a href="https://alcat.pu.edu.tw/index_menu.php">系統通知</a>', 'https://www.pu.edu.tw/')).toEqual(
-    [],
-  );
+  expect(
+    parseHtmlLinks(
+      '<a href="https://alcat.pu.edu.tw/index_menu.php">系統通知</a>',
+      'https://www.pu.edu.tw/',
+    ),
+  ).toEqual([]);
 });
 
 test('dual extract uses the first parser that returns rows', async () => {
@@ -142,4 +145,48 @@ test('URL normalization drops language and tracking query and classifies summari
 
 test('runParser rejects unknown parser names', async () => {
   await expect(runParser('not-a-parser', IWEB, 'https://example.edu/')).resolves.toEqual([]);
+});
+
+function fixture(name) {
+  return fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8');
+}
+
+test('Providence Student Affairs news snapshot yields titles, dates and links', async () => {
+  const html = fixture('pu-osa-news.html');
+  const extracted = await extractFromHtml(html, {
+    sourceId: 'pu-osa',
+    office: '學務處',
+    scope: 'office',
+    listUrl: 'https://osa.pu.edu.tw/p/422-1111-1039.php',
+    parsers: ['iwebTable', 'iwebLinks'],
+  });
+  expect(extracted.parser).toBe('iwebLinks');
+  expect(extracted.items.length).toBeGreaterThanOrEqual(3);
+  for (const item of extracted.items) {
+    expect(item.title.length).toBeGreaterThan(4);
+    expect(item.originalUrl).toMatch(/^https:\/\/osa.+\.pu\.edu\.tw\/p\/404-/);
+    expect(item.publishedAt).toMatch(/^2026-/);
+  }
+  expect(extracted.items.map((item) => item.title)).not.toContain('最新消息');
+  expect(extracted.items.map((item) => item.title)).not.toContain('單位願景');
+});
+
+test('Providence housing news snapshot yields titles, dates and links', async () => {
+  const html = fixture('pu-dorm-news.html');
+  const extracted = await extractFromHtml(html, {
+    sourceId: 'pu-dorm',
+    office: '住宿',
+    scope: 'office',
+    listUrl: 'https://osadorm.pu.edu.tw/p/403-1065-679-1.php',
+    parsers: ['iwebTable', 'iwebLinks'],
+  });
+  expect(extracted.parser).toBe('iwebLinks');
+  expect(extracted.items.length).toBeGreaterThanOrEqual(3);
+  expect(extracted.items[0]).toMatchObject({
+    title: '115學年度第1學期高教深耕計畫之公共服務學習方案開放申請',
+    originalUrl: 'https://osadorm.pu.edu.tw/p/406-1065-75602,r679.php',
+  });
+  expect(extracted.items[0].publishedAt.startsWith('2026-10-06')).toBe(true);
+  expect(extracted.items.map((item) => item.title)).not.toContain('單位願景');
+  expect(extracted.items.map((item) => item.title)).not.toContain('校內訊息');
 });

@@ -10,6 +10,7 @@ import { NuniAccountPanel } from '@/components/NuniAccountPanel';
 import { useNuniSession } from '@/features/nuni/Session';
 import { getAuth, getDb } from '@/lib/firebase';
 import { useSignInOptions } from '@/lib/signInOptions';
+import { loadFailureCopy } from '@campus/shared/src/loadFailureCopy';
 import styles from './profile.module.css';
 
 type Profile = Partial<
@@ -17,7 +18,7 @@ type Profile = Partial<
 >;
 type ProfileState =
   | { status: 'loading' }
-  | { status: 'error' }
+  | { status: 'error'; error: unknown }
   | { status: 'ready'; profile: Profile | null };
 
 function readProfile(data: Record<string, unknown>): Profile {
@@ -44,8 +45,8 @@ function PersonalProfile({ user }: { user: User }) {
             status: 'ready',
             profile: snapshot.exists() ? readProfile(snapshot.data()) : null,
           });
-      } catch {
-        if (current()) setState({ status: 'error' });
+      } catch (error) {
+        if (current()) setState({ status: 'error', error });
       }
     }
     void load();
@@ -64,7 +65,7 @@ function PersonalProfile({ user }: { user: User }) {
     return (
       <section className={styles.panel} role="alert">
         <h2>暫時無法讀取個人資料</h2>
-        <p>請確認網路後再試一次。這次未取得資料。</p>
+        <p>{loadFailureCopy(state.error, { online: navigator.onLine })}。這次未取得資料。</p>
         <button
           className="btn primary"
           onClick={() => {
@@ -145,7 +146,7 @@ export default function ProfilePage() {
           ) : error ? (
             <section className={styles.panel}>
               <h2>暫時無法確認學校帳號</h2>
-              <p>請確認網路後再試一次。</p>
+              <p>{loadFailureCopy(error, { online: navigator.onLine })}。</p>
             </section>
           ) : schoolLoginReady ? (
             <section className={styles.panel}>

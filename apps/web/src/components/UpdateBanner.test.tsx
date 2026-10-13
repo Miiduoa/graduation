@@ -48,7 +48,18 @@ it('waits for activation, prevents duplicate requests, and preserves the page wh
     reject(new Error('timed out'));
   });
   expect(screen.getByRole('alert').textContent).toContain('頁面已保留');
+  expect(screen.getByRole('alert').textContent).toContain('暫時讀不到資料，請稍後再試');
+  expect(screen.getByRole('alert').textContent).not.toContain('請確認網路後再試');
   expect(button.hasAttribute('disabled')).toBe(false);
+});
+
+it('asks to check the network only when the device is offline', async () => {
+  vi.mocked(activateServiceWorkerUpdate).mockRejectedValueOnce(new TypeError('Failed to fetch'));
+  Object.defineProperty(window.navigator, 'onLine', { configurable: true, value: false });
+  render(<UpdateBanner />);
+  fireEvent.click(await screen.findByRole('button', { name: '更新並重新載入' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('請確認網路後再試');
+  expect(screen.getByRole('alert').textContent).not.toContain('暫時讀不到資料，請稍後再試');
 });
 
 it('cleans up listeners and ignores a late registration lookup after leaving the page', async () => {
