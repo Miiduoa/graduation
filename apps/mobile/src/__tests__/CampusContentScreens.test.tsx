@@ -157,6 +157,17 @@ test('keeps cached announcements when a later Firestore read fails', async () =>
   expect(view.queryByText('這裡還沒接上學校公告，請先到學校網站看最新消息')).toBeNull();
 });
 
+test('switching schools hides the previous announcement list and does not keep it as stale cache', async () => {
+  const view = render(<AnnouncementsScreen navigation={navigation} />);
+  await view.findByText('校方的新公告');
+  jest.mocked(loadCampusAnnouncementFeed).mockRejectedValueOnce(new Error('permission-denied'));
+  mockSchool = { id: 'nthu' };
+  view.rerender(<AnnouncementsScreen navigation={navigation} />);
+  expect(view.queryByText('校方的新公告')).toBeNull();
+  await view.findByText('這裡還沒接上學校公告，請先到學校網站看最新消息');
+  expect(loadCampusAnnouncementFeed).toHaveBeenLastCalledWith('nthu');
+});
+
 test('keeps old announcements when the school site is down and links the office when empty', async () => {
   jest.mocked(loadCampusAnnouncementFeed).mockResolvedValue({
     announcements: [announcement],

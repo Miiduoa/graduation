@@ -187,7 +187,7 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
 
 export default function AnnouncementDetailPage(props: {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ school?: string; schoolId?: string }>;
+  searchParams?: Promise<{ school?: string; schoolId?: string; campus?: string }>;
 }) {
   const { id } = use(props.params);
   const params = props.searchParams ? use(props.searchParams) : undefined;

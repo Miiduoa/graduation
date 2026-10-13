@@ -901,7 +901,20 @@ export const firebaseSource: DataSource = {
     });
   },
 
-  async getAnnouncement(id) {
+  async getAnnouncement(id, schoolId) {
+    if (!id || id.includes('/')) return null;
+    if (schoolId) {
+      const canonical = await fetchDocumentAtPath<Announcement>(
+        buildSchoolCollectionPath(schoolId, 'announcements', id),
+      );
+      if (canonical) {
+        if (canonical.schoolId && canonical.schoolId !== schoolId) return null;
+        return { ...canonical, schoolId };
+      }
+      const legacy = await fetchDocument<Announcement>('announcements', id);
+      if (!legacy || legacy.schoolId !== schoolId) return null;
+      return { ...legacy, schoolId };
+    }
     return fetchDocument<Announcement>('announcements', id);
   },
 

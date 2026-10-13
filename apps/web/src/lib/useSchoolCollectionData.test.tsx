@@ -64,6 +64,29 @@ it('rejects a late school response after switching schools', async () => {
   await act(async () => resolveOld(['old school']));
   expect(result.current.data).toEqual(['new school']);
 });
+it('unsubscribes the previous school listener before attaching the next school', async () => {
+  const callbacks: Array<{ school: string; next: (rows: string[]) => void }> = [];
+  const stop = vi.fn();
+  const subscribe = vi.fn((school: string, next: (rows: string[]) => void) => {
+    callbacks.push({ school, next });
+    return stop;
+  });
+  const { result, rerender } = renderHook(
+    ({ school }) => useSchoolCollectionData(school, undefined, { subscribeLive: subscribe }),
+    { initialProps: { school: 'pu' } },
+  );
+  act(() => callbacks[0].next(['靜宜公告']));
+  expect(result.current.data).toEqual(['靜宜公告']);
+  rerender({ school: 'nthu' });
+  expect(stop).toHaveBeenCalledTimes(1);
+  expect(result.current.data).toEqual([]);
+  expect(result.current.loading).toBe(true);
+  act(() => callbacks[0].next(['舊校晚到']));
+  expect(result.current.data).toEqual([]);
+  act(() => callbacks[1].next(['清華公告']));
+  expect(result.current.data).toEqual(['清華公告']);
+  expect(subscribe.mock.calls.map((call) => call[0])).toEqual(['pu', 'nthu']);
+});
 it('unsubscribes and clears previous account data before accepting the new source', async () => {
   const callbacks: Array<{ next: (rows: string[]) => void; fail: (error: unknown) => void }> = [];
   const stop = vi.fn();
