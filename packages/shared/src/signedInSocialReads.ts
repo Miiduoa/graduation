@@ -2,9 +2,17 @@ export const LOGIN_REQUIRED_LOST_FOUND_AND_COMMENTS_TEXT = '登入後才能看�
 export const LOGIN_REQUIRED_COMMENTS_TEXT = '登入後才能看評論';
 export const LOGIN_REQUIRED_ACTION_TEXT = '登入';
 
+function hasUnsafeLoginReturnChars(value: string): boolean {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code <= 31 || code === 92 || code === 127) return true;
+  }
+  return false;
+}
+
 export function sanitizeLoginReturnPath(value?: string | null, fallback = '/'): string {
   if (!value) return fallback;
-  if (!value.startsWith('/') || value.startsWith('//') || /[\\\u0000-\u001f\u007f]/.test(value)) {
+  if (!value.startsWith('/') || value.startsWith('//') || hasUnsafeLoginReturnChars(value)) {
     return fallback;
   }
   try {
