@@ -76,6 +76,14 @@ it.each(['functions/failed-precondition', 'functions/unauthenticated'])(
     });
   },
 );
+it('keeps the original fetch failure so copy can distinguish network from other errors', async () => {
+  const cause = new TypeError('Failed to fetch');
+  call.mockRejectedValue(cause);
+  const error = await loadAcademicRecords('grades', 'student-a').catch((item) => item);
+  expect(error).toMatchObject({ reason: 'unavailable' });
+  expect(error.cause).toBe(cause);
+});
+
 it('rejects a malformed source rather than reporting an empty transcript', async () => {
   call.mockResolvedValue({ data: { ...response(), result: { success: false, grades: [] } } });
   await expect(loadAcademicRecords('grades', 'student-a')).rejects.toMatchObject({

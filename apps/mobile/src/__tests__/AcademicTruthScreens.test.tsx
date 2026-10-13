@@ -271,6 +271,22 @@ test.each([
     restored: '已加入的課程',
   },
   {
+    name: 'grades-timeout',
+    Screen: GradesAiFirstScreen,
+    reject: () =>
+      jest.mocked(firebaseSource.listGrades).mockRejectedValueOnce(new Error('timed out')),
+    message: '暫時讀不到資料，請稍後再試',
+    restored: '已發布的課程',
+  },
+  {
+    name: 'overview-network',
+    Screen: AcademicOverviewAiFirstScreen,
+    reject: () =>
+      jest.mocked(loadStudentHome).mockRejectedValueOnce(new TypeError('Failed to fetch')),
+    message: '請確認網路後再試',
+    restored: '已加入的課程',
+  },
+  {
     name: 'achievements',
     Screen: AchievementsAiFirstScreen,
     reject: () =>

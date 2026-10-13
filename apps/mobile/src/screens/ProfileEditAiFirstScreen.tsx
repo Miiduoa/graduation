@@ -5,6 +5,7 @@ import { AIDetailScreen, AISection, AIButton, aiTokens } from '../ui/aiFirst';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { useAuth, type UserProfile } from '../state/auth';
 import { firebaseSource } from '../data/firebaseSource';
+import { loadFailureCopy } from '../utils/loadFailureCopy';
 
 export default function ProfileEditAiFirstScreen() {
   const auth = useAuth();
@@ -23,7 +24,9 @@ export default function ProfileEditAiFirstScreen() {
             <ActivityIndicator accessibilityLabel="讀取個人資料" color={aiTokens.ai} />
           ) : (
             <Text style={{ padding: 16, color: aiTokens.textSecondary }}>
-              目前無法讀取個人資料，請確認登入狀態後重新開啟。
+              {uid && !auth.profile
+                ? auth.error || loadFailureCopy()
+                : '目前無法讀取個人資料，請確認登入狀態後重新開啟。'}
             </Text>
           )}
         </AISection>

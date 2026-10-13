@@ -7,6 +7,7 @@ import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { firebaseSource } from '../data/firebaseSource';
 import type { Grade } from '../data/types';
 import { safeNavigate } from '../utils/safeNavigate';
+import { loadFailureOrLoginCopy } from '../utils/loadFailureCopy';
 
 export default function GradesAiFirstScreen() {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
@@ -22,12 +23,12 @@ export default function GradesAiFirstScreen() {
     scope: string;
     rows: Grade[];
     loading: boolean;
-    error: boolean;
+    error: unknown | null;
   } | null>(null);
   const visible = state?.scope === scope ? state : null;
   const load = useCallback(async () => {
     const request = ++generation.current;
-    setState({ scope, rows: [], loading: true, error: false });
+    setState({ scope, rows: [], loading: true, error: null });
     try {
       if (!uid || !schoolId || uid.startsWith('demo_')) throw new Error('missing-account');
       const rows = (await firebaseSource.listGrades(uid, undefined, schoolId)).filter(
@@ -39,11 +40,11 @@ export default function GradesAiFirstScreen() {
           Date.parse(grade.publishedAt) <= Date.now(),
       );
       if (currentScope.current === scope && generation.current === request) {
-        setState({ scope, rows, loading: false, error: false });
+        setState({ scope, rows, loading: false, error: null });
       }
-    } catch {
+    } catch (error) {
       if (currentScope.current === scope && generation.current === request) {
-        setState({ scope, rows: [], loading: false, error: true });
+        setState({ scope, rows: [], loading: false, error });
       }
     }
   }, [uid, schoolId, scope]);
@@ -67,7 +68,9 @@ export default function GradesAiFirstScreen() {
           <ActivityIndicator accessibilityLabel="讀取成績" color={aiTokens.ai} />
         ) : visible.error ? (
           <View accessibilityRole="alert" style={{ padding: 16, gap: 12 }}>
-            <Text style={{ color: aiTokens.text }}>無法讀取成績，請確認登入狀態與網路後重試。</Text>
+            <Text style={{ color: aiTokens.text }}>
+              {loadFailureOrLoginCopy(visible.error, '無法讀取成績，請確認登入狀態與網路後重試。')}
+            </Text>
             <AIButton label="重新讀取" onPress={() => void load()} />
           </View>
         ) : visible.rows.length ? (
