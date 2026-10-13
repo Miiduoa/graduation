@@ -24,6 +24,7 @@ import {
   describePickupNumber,
   formatShortOrderCode,
 } from '@campus/shared/src/ordering/pickupNumber';
+import { CAFETERIA_EMPTY_SCHOOL_TEXT } from '@campus/shared/src/cafeteriaCatalog';
 import { MY_ORDER_STATUS_LABELS as statuses } from './MyOrdersScreen';
 
 type Props = {
@@ -305,8 +306,18 @@ function DiningContent({
           {catalog ? (
             <>
               {visibleMenus.length === 0 ? (
-                <AICard title="目前沒有符合的餐點">
-                  <Text style={{ color: aiTokens.muted }}>試著換個關鍵字，或稍後更新菜單。</Text>
+                <AICard
+                  title={
+                    !keyword.trim() && catalog.venues.length === 0
+                      ? CAFETERIA_EMPTY_SCHOOL_TEXT
+                      : '目前沒有符合的餐點'
+                  }
+                >
+                  <Text style={{ color: aiTokens.muted }}>
+                    {!keyword.trim() && catalog.venues.length === 0
+                      ? '這間學校還沒提供餐廳資料，不會沿用其他學校的店家。'
+                      : '試著換個關鍵字，或稍後更新菜單。'}
+                  </Text>
                 </AICard>
               ) : (
                 visibleMenus.map((menu) => (

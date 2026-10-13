@@ -17,7 +17,8 @@ import {
   isPermissionDeniedError,
   permissionDeniedError,
 } from '@campus/shared/src/signedInSocialReads';
-import { getAuth, getDb, isFirebaseConfigured, type Cafeteria } from '@/lib/firebase';
+import { getAuth, getDb, isFirebaseConfigured } from '@/lib/firebase';
+import { fetchCafeteriaDetail, type CatalogCafeteria } from '@/lib/cafeteriaCatalog';
 import {
   EXTERNAL_ORDER_HONEST_TEXT,
   buildShowcaseOrderingUrl,
@@ -51,30 +52,9 @@ export function cafeteriaPath(schoolId: string, cafeteriaId: string) {
 export async function loadStorefront(
   schoolId: string,
   cafeteriaId: string,
-): Promise<Cafeteria | null> {
-  if (!isFirebaseConfigured() || !cafeteriaId || cafeteriaId.includes('/')) return null;
-  const snapshot = await getDocFromServer(doc(getDb(), ...cafeteriaPath(schoolId, cafeteriaId)));
-  if (!snapshot.exists()) return null;
-  const data = snapshot.data();
-  if (data.schoolId != null && data.schoolId !== schoolId) return null;
-  return {
-    id: snapshot.id,
-    name: typeof data.name === 'string' ? data.name : '未命名店家',
-    location: typeof data.location === 'string' ? data.location : undefined,
-    openingHours: typeof data.openingHours === 'string' ? data.openingHours : undefined,
-    intro: typeof data.intro === 'string' ? data.intro : undefined,
-    coverUrl: typeof data.coverUrl === 'string' ? data.coverUrl : undefined,
-    websiteUrl: safeStorefrontUrl(data.websiteUrl),
-    orderingUrl: safeStorefrontUrl(data.orderingUrl),
-    merchantMode: resolveStoredMerchantMode(data),
-    menuSyncedAt:
-      typeof data.menuSyncedAt === 'string'
-        ? data.menuSyncedAt
-        : data.menuSyncedAt && typeof data.menuSyncedAt.toDate === 'function'
-          ? data.menuSyncedAt.toDate().toISOString()
-          : undefined,
-    schoolId,
-  };
+): Promise<CatalogCafeteria | null> {
+  const { cafeteria } = await fetchCafeteriaDetail(schoolId, cafeteriaId);
+  return cafeteria;
 }
 
 export async function loadStorefrontPosts(

@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { findSchoolById } from '@campus/shared/src/schools';
 
 export type BrowseSchool = {
   id: string;
@@ -153,8 +154,16 @@ export function SelectedSchoolProvider({
     }
     setPreference({ scope, schoolId: id, storageError });
     const next = new URLSearchParams(params?.toString());
-    next.set('campus', id ?? 'all');
-    // Browsing preference never writes school/schoolId, account claims or a school login.
+    if (id) {
+      next.set('schoolId', id);
+      next.set('campus', id);
+      const code = findSchoolById(id)?.code;
+      if (code) next.set('school', code);
+    } else {
+      next.delete('schoolId');
+      next.delete('school');
+      next.set('campus', 'all');
+    }
     router.replace(`${pathname}?${next.toString()}${window.location.hash}`, { scroll: false });
   }
 

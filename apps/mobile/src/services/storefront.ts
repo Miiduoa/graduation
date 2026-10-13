@@ -21,6 +21,7 @@ import {
   safeStorefrontUrl,
   type MerchantMode,
 } from '@campus/shared/src/merchantMode';
+import { fetchCafeteriaDetail } from './cafeteriaCatalog';
 
 export type StorefrontShop = {
   id: string;
@@ -33,6 +34,7 @@ export type StorefrontShop = {
   merchantMode: MerchantMode;
   orderingEnabled?: boolean;
   menuSyncedAt?: string;
+  demo?: boolean;
 };
 
 export type StorefrontPost = {
@@ -66,6 +68,26 @@ export async function loadStorefront(
   cafeteriaId: string,
 ): Promise<StorefrontShop | null> {
   if (isFirebaseMockMode() || !cafeteriaId || cafeteriaId.includes('/')) return null;
+  try {
+    const { cafeteria } = await fetchCafeteriaDetail(schoolId, cafeteriaId);
+    if (cafeteria) {
+      return {
+        id: cafeteria.id,
+        name: cafeteria.name,
+        intro: cafeteria.intro,
+        location: cafeteria.location,
+        openingHours: cafeteria.openingHours,
+        websiteUrl: cafeteria.websiteUrl,
+        orderingUrl: cafeteria.orderingUrl,
+        merchantMode: cafeteria.merchantMode,
+        menuSyncedAt: cafeteria.menuSyncedAt,
+        demo: cafeteria.demo,
+      };
+    }
+    return null;
+  } catch {
+    // Platform catalog unavailable: keep the school-scoped Firestore read.
+  }
   const snapshot = await getDoc(doc(getDb(), ...cafeteriaPath(schoolId, cafeteriaId)));
   if (!snapshot.exists()) return null;
   const data = snapshot.data();
@@ -94,6 +116,20 @@ export async function loadStorefrontMenus(
   cafeteriaId: string,
 ): Promise<StorefrontMenuItem[]> {
   if (isFirebaseMockMode() || !cafeteriaId || cafeteriaId.includes('/')) return [];
+  try {
+    const { cafeteria, menus } = await fetchCafeteriaDetail(schoolId, cafeteriaId);
+    if (cafeteria) {
+      return menus.map((item) => ({
+        id: item.id,
+        name: item.name,
+        price: item.price,
+        soldOut: item.soldOut,
+      }));
+    }
+    return [];
+  } catch {
+    // Platform catalog unavailable: keep the school-scoped Firestore read.
+  }
   const snapshot = await getDocs(query(collection(getDb(), 'schools', schoolId, 'menus'), limit(80)));
   return snapshot.docs.flatMap((row) => {
     const data = row.data();
