@@ -52,7 +52,7 @@ jobs:
 
       - name: Dry-run
         if: ${{ env.WRITE != 'true' }}
-        run: pnpm --filter functions sync:announcements -- --school "$SCHOOL_ID"
+        run: pnpm --filter functions sync:announcements --school "$SCHOOL_ID"
 
       - name: Sync to Firestore
         if: ${{ env.WRITE == 'true' }}
@@ -68,4 +68,4 @@ jobs:
           trap 'rm -f "$GOOGLE_APPLICATION_CREDENTIALS"' EXIT
           umask 077
           printf '%s' "$ANNOUNCEMENT_SYNC_SA_JSON" > "$GOOGLE_APPLICATION_CREDENTIALS"
-          pnpm --filter functions sync:announcements -- --school "$SCHOOL_ID" --write
+          pnpm --filter functions sync:announcements --school "$SCHOOL_ID" --write
