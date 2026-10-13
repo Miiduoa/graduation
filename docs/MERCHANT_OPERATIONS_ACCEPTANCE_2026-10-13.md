@@ -17,16 +17,19 @@ Web `/merchant` 與 App 平台店家頁原本只能申請、查看進度與讀�
 
 ## 真實 API 與資料庫驗證
 
-`scripts/verify-nuni-merchant-api.mjs` 重建並核對 `deploy/nuni-api/source.json` 的 patch hash、完整固定 tree `6776b19a7cea998728469c3091c0ea7c264f6aa3`（API 原始版本 `cb57e78aa5f09155ec045ea4b5c130827cdf4fad`）。API 原始碼保持不變。
+`scripts/verify-nuni-merchant-api.mjs` 核對 `deploy/nuni-api/source.json` 的五份 patch hash、完整固定 tree `8547af2b85bc65cc902f313c2311b69999b28f04`（API 修補版本 `9b1fc44c2d8369b6aed6a5ac9760fcac670e02fb`）。從原始 base 重新套用補丁的乾淨來源驗證出完全相同的 tree；沒有變更已封存的來源 repository。
 
-隔離 PostgreSQL 17.11、正式帳號驗證程式、測試 RS256 簽署身分、`demoAuthEnabled=false`、`seedDemo=false` 下完成 26 次 loopback HTTP 請求：
+Node.js 24、隔離 PostgreSQL 17.11、正式帳號驗證程式、測試 RS256 簽署身分、`demoAuthEnabled=false`、`seedDemo=false` 下完成 52 次 loopback HTTP 請求：
 
 1. 兩個獨立平台帳號；申請未核准前沒有操作門市。
 2. 透過真正審核 service 核准，仍為私密且未啟用；其他帳號與場域不能讀取或操作。
 3. 設定回執通過共用 parser；舊版本儲存被拒絕。
 4. 兩個並行首次菜單要求分別回 201、409；資料庫只有一項、價格 120、庫存 10。
 5. 啟用、暫停、恢復皆通過新共用 client 與真實 API 回執檢查；重播啟用不會把已暫停門市重新開放。
-6. 管理者停權、撤銷店長指派及登出撤銷 session 後，繼續操作被拒絕。
+6. 建立兩筆顧客訂單，其中一筆記錄櫃檯收款、接單、製作與備妥。最後一家公開店暫停時，顧客仍可查自己的訂單、取得取餐憑證、取消未付款訂單，店家仍可核銷已備妥訂單。重試原核銷 key 回傳原回執，換 key 使用已消耗憑證被拒絕。
+7. 暫停時新報價與公開菜單仍關閉；他人查詢／取消訂單被拒絕。管理者停權、撤銷店長指派及登出撤銷 session 後，繼續操作被拒絕。
+
+這個舊訂單存取問題先在前一來源 `cb57e78` 用 47 次 HTTP 重現；改為正確期望的回歸腳本亦先在舊來源得到 404／200 差異的失敗結果，再以新來源通過。修補僅把四個既有訂單路由改為查找目前帳號既有且有效的 persona，不建立新 persona、不取得校方角色；FoodService 的本人、場域、模組、付款與訂單狀態檢查保持。首次使用者尚未建立 persona 時，直接查訂單會回 404；現有公開門市瀏覽流程會先建立此身分。
 
 審核員與查核結果是臨時 schema 的測試資料，使用真實審核邏輯；不代表真人校方登入、實際食品登錄查核或正式商家已啟用。所有測試資料只在隨機新 schema，結束時移除；腳本拒絕正式主機、未指定連接埠、其他資料庫及 URL query/hash，也不使用環境中的 `DATABASE_URL`。
 
@@ -47,6 +50,8 @@ node --test scripts/nuni-merchant-api-boundary.test.mjs
 - Web／Mobile／shared 型別檢查通過；workspace ESLint 零錯誤，仍有 706 個警告，沒有宣稱已清除所有技術債。
 - Firebase 發布檢查、工作流程與 API 隔離邊界測試：66 通過。
 - Web／Mobile／共用契約、轉接與驗收腳本經交叉審查；Web 第二輪已修正返回門市、背景回應及登入暫時失敗造成的草稿／未確認寫入狀態遺失。
+- API 修補六組相關測試共 52 通過、型別檢查與乾淨來源建置通過；獨立審查另外覆跑 15 個測試。runtime grant inventory 與重新推導結果一致，但原有 `BLOCK` 狀態保留，兩個新增 SQL 亦受既有可達性分析限制；沒有新增權限或把該清單當成正式授權驗收通過。
+- 同一修補來源另以真實 HTTP／PostgreSQL 重跑課程驗收，47 次請求通過，包含教師發布、学生繳交、並行重試、回饋、重新繳交、關閉與登出撤銷；兩組測試 schema 均已清理。
 
 ## 發布檢查修正
 
@@ -56,7 +61,7 @@ node --test scripts/nuni-merchant-api-boundary.test.mjs
 
 2026-10-13 12:20 UTC 的正式專案唯讀檢查仍為 `ready: false`，共有四個未通過項目：Firebase Storage API 未啟用；Auth 設定回應 404；因此授權網域亦無法確認；指定 Storage bucket 回應 404。專案、Firestore native 資料庫及其區域等其他檢查已通過。此次修正去掉不屬於規則發布的 Cloud Functions／帳務檢查，沒有繞過上述實際阻塞。
 
-同日檢查到 Web 正式健康端點為 revision `5aaa0f9c15fed30b3f5912bf712cce2f0c69367b`（release 39），與這次開發基底不同。API 為固定來源候選的 release 20；平台 Google 登入就緒，但校務登入 provider 可用數為零。GitHub 主線 CI 成功的 Firebase 部署步驟實際為略過，不是規則已發布的證據。
+同日檢查到 Web 正式健康端點為 revision `5aaa0f9c15fed30b3f5912bf712cce2f0c69367b`（release 39），與這次開發基底不同。API 為前一來源 `cb57e78` 的 release 20，尚未部署本輪 API 修補；平台 Google 登入就緒，但校務登入 provider 可用數為零。GitHub 主線 CI 成功的 Firebase 部署步驟實際為略過，不是規則已發布的證據。
 
 ## 仍待完成
 
