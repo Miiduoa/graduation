@@ -14,11 +14,13 @@ on:
   pull_request:
     paths:
       - 'deploy/web/release-check*'
+      - 'deploy/web/transit-release-gate*'
       - '.github/workflows/web-release.yml'
   push:
     branches: [main]
     paths:
       - 'deploy/web/release-check*'
+      - 'deploy/web/transit-release-gate*'
       - '.github/workflows/web-release.yml'
 
 permissions:
@@ -35,7 +37,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: '22'
-      - run: node --test deploy/web/release-check.test.mjs
+      - run: node --test deploy/web/release-check.test.mjs deploy/web/transit-release-gate.test.mjs
 
   release:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
@@ -87,6 +89,10 @@ jobs:
           node deploy/web/release-check.mjs snapshot "$RUNNER_TEMP/campus-web-machines-before.json" release-evidence/before.json
           rm -f "$RUNNER_TEMP/campus-web-machines-before.json"
           flyctl auth docker
+      - name: Verify real TDX data inside every existing Web machine before building
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_NUNI_WEB_DEPLOY_TOKEN }}
+        run: node deploy/web/transit-release-gate.mjs fly release-evidence/before.json
       - name: Build production image on the existing GitHub runner
         run: |
           set -euo pipefail
@@ -151,6 +157,7 @@ jobs:
           if (!rows.every((row) => row.image === process.env.RELEASE_IMAGE)) throw new Error('Not every Web machine has the expected image.');
           NODE
           node deploy/web/release-check.mjs verify
+          node deploy/web/transit-release-gate.mjs public
       - name: Preserve sanitized release evidence
         if: always()
         uses: actions/upload-artifact@v4
