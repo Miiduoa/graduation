@@ -55,7 +55,7 @@ function fakeFetch(health = {}, transit = { status: 'unavailable', reason: 'not-
       assert.deepEqual(JSON.parse(init.body), { action: 'campus', schoolId: 'pu' });
       return Response.json(transit, { status: transit.status === 'ready' ? 200 : 503 });
     }
-    return new Response('<html>Public shell</html>', { status: pageStatus, headers: { 'Content-Type': 'text/html', 'Permissions-Policy': policy } });
+    return new Response('<html>學校站牌 找我附近 搜尋站名 常用站牌</html>', { status: pageStatus, headers: { 'Content-Type': 'text/html', 'Permissions-Policy': policy } });
   };
 }
 test('distinguishes Web deployment from missing TDX and unverified browser interaction', async () => {
@@ -82,4 +82,12 @@ test('never copies unknown provider errors into public reports', async () => {
 });
 test('rejects a non-JSON API response rather than assuming successful connectivity', async () => {
   await assert.rejects(getJson('https://example.invalid/', { fetcher: async () => new Response('login') }));
+});
+
+test('a healthy Web revision without the new bus controls cannot pass', async () => {
+  const healthy = fakeFetch();
+  const fetcher = (url, init) => url.endsWith('/bus')
+    ? Promise.resolve(new Response('<html>Old bus page</html>', {headers:{'Content-Type':'text/html','Permissions-Policy':'geolocation=(self)'}}))
+    : healthy(url, init);
+  assert.equal((await inspectPublic(sha, fetcher)).webDeployed, false);
 });
