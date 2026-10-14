@@ -24,13 +24,14 @@ export default function LibraryPage(props: {
     explicitId === undefined
       ? (selection ? selection.selectedSchoolId : context.schoolId)
       : explicitId;
-  const officialLibrary = getOfficialCampusLibrary(schoolId);
-  const schoolName =
+  const selectedSchoolName =
     selection?.selectedSchool?.id === schoolId
       ? selection.selectedSchool.name
       : schoolId === context.schoolId
         ? context.schoolName
-        : officialLibrary?.name ?? '所選校園';
+        : undefined;
+  const officialLibrary = getOfficialCampusLibrary(schoolId, selectedSchoolName);
+  const schoolName = selectedSchoolName ?? officialLibrary?.name ?? '所選校園';
 
   return (
     <LibraryContent
@@ -50,7 +51,7 @@ function LibraryContent({
 }) {
   const [keyword, setKeyword] = useState('');
   const [field, setField] = useState('FullText');
-  const officialLibrary = getOfficialCampusLibrary(schoolId);
+  const officialLibrary = getOfficialCampusLibrary(schoolId, schoolName);
   if (schoolId !== 'pu') {
     return (
       <SiteShell title="圖書館" schoolName={schoolId ? schoolName : undefined}>
