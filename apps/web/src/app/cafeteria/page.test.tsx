@@ -2,6 +2,10 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import CafeteriaPage from './page';
 import { fetchCafeteriaCatalog } from '@/lib/cafeteriaCatalog';
+import {
+  UNVERIFIED_CAFETERIA_BADGE,
+  UNVERIFIED_CAFETERIA_NOTICE,
+} from '@campus/shared/src/cafeteriaCatalog';
 
 const state = vi.hoisted(() => ({
   school: 'pu',
@@ -146,19 +150,17 @@ it('marks unverified and demo shops beside the shop name and leaves verified unm
   });
   const demo = within(screen.getByRole('region', { name: '校園小棧' }));
   expect(demo.getByText('示範')).toBeTruthy();
-  expect(demo.queryByText('尚未確認')).toBeNull();
+  expect(demo.queryByText(UNVERIFIED_CAFETERIA_BADGE)).toBeNull();
   const unverified = within(screen.getByRole('region', { name: '校內咖啡店' }));
-  expect(unverified.getByText('尚未確認')).toBeTruthy();
+  expect(unverified.getByText(UNVERIFIED_CAFETERIA_BADGE)).toBeTruthy();
   expect(unverified.queryByText('示範')).toBeNull();
   const missing = within(screen.getByRole('region', { name: '路易莎咖啡' }));
-  expect(missing.getByText('尚未確認')).toBeTruthy();
+  expect(missing.getByText(UNVERIFIED_CAFETERIA_BADGE)).toBeTruthy();
   const verified = within(screen.getByRole('region', { name: '靜園餐廳' }));
   expect(verified.queryByText('示範')).toBeNull();
-  expect(verified.queryByText('尚未確認')).toBeNull();
+  expect(verified.queryByText(UNVERIFIED_CAFETERIA_BADGE)).toBeNull();
   expect(screen.queryByText('這是示範店家，菜單和價格不是真的，不能點餐。')).toBeNull();
-  expect(
-    screen.queryByText('這間店的資料還沒經店家確認，菜單和價錢可能跟現場不一樣。'),
-  ).toBeNull();
+  expect(screen.queryByText(UNVERIFIED_CAFETERIA_NOTICE)).toBeNull();
 });
 
 it('distinguishes unknown availability, paused supply and sold-out meals without claiming ordering is available', async () => {

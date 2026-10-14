@@ -5,9 +5,9 @@ export type CafeteriaReviewStatus = (typeof CAFETERIA_REVIEW_STATUSES)[number];
 export const CAFETERIA_REVIEW_STATUS_DEFAULT: CafeteriaReviewStatus = 'unverified';
 export const DEMO_CAFETERIA_BADGE = '示範';
 export const DEMO_CAFETERIA_NOTICE = '這是示範店家，菜單和價格不是真的，不能點餐。';
-export const UNVERIFIED_CAFETERIA_BADGE = '尚未確認';
+export const UNVERIFIED_CAFETERIA_BADGE = '未核對';
 export const UNVERIFIED_CAFETERIA_NOTICE =
-  '這間店的資料還沒經店家確認，菜單和價錢可能跟現場不一樣。';
+  '這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。';
 export const PUBLIC_CAFETERIA_FIELDS = [
   'id',
   'name',
