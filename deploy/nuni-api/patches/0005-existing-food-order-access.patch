@@ -1,0 +1,4502 @@
+diff --git a/apps/api/src/accounts/platform-account-service.ts b/apps/api/src/accounts/platform-account-service.ts
+index ea74d77..8559524 100644
+--- a/apps/api/src/accounts/platform-account-service.ts
++++ b/apps/api/src/accounts/platform-account-service.ts
+@@ -773,6 +773,36 @@ export class PlatformAccountService {
+     };
+   }
+ 
++  /** Existing-order routes must survive a merchant pausing public discovery.
++   * Only reuse an active persisted persona; never create one here. FoodService
++   * still checks the tenant/person owner and each order's allowed transition.
++   */
++  async resolveExistingFoodOrderActor(actor: PlatformActor, tenantIdInput: string): Promise<AuthActor> {
++    const tenantId = tenantIdInput.trim();
++    if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/u.test(tenantId)) throw invalidPublicRealm();
++    const personId = await this.db.transaction(async (tx) => {
++      const account = await tx.query<{ id: string }>(
++        `SELECT account.id FROM platform_accounts account
++         CROSS JOIN tenants tenant
++         WHERE account.id=$1 AND account.state='active'
++           AND tenant.id=$2 AND tenant.state IN ('provisioned','open')
++         FOR UPDATE OF account FOR SHARE OF tenant`,
++        [actor.platformAccountId, tenantId],
++      );
++      if (!account.rows[0]) throw invalidPublicRealm();
++      const persona = (await tx.query<{ person_id: string }>(
++        `SELECT persona.person_id FROM platform_tenant_personas persona
++         JOIN people person ON person.tenant_id=persona.tenant_id AND person.id=persona.person_id
++         WHERE persona.platform_account_id=$1 AND persona.tenant_id=$2
++           AND person.credential_status='active' FOR UPDATE OF persona,person`,
++        [actor.platformAccountId, tenantId],
++      )).rows[0];
++      if (!persona) throw invalidPublicRealm();
++      return persona.person_id;
++    });
++    return { tenantId, personId, roles: ["platform-user"], sessionKind: "platform-account", credentialId: actor.credentialId };
++  }
++
+   async logout(authorization: string | undefined): Promise<{ signedOut: true }> {
+     const [scheme, handle, extra] = authorization?.trim().split(/\s+/) ?? [];
+     if (scheme === "Platform" && handle && !extra && SESSION_PATTERN.test(handle)) {
+diff --git a/apps/api/src/accounts/platform-existing-food-orders.test.ts b/apps/api/src/accounts/platform-existing-food-orders.test.ts
+new file mode 100644
+index 0000000..5076707
+--- /dev/null
++++ b/apps/api/src/accounts/platform-existing-food-orders.test.ts
+@@ -0,0 +1,188 @@
++import { createHash, randomBytes, randomUUID } from "node:crypto";
++import { afterEach, beforeEach, describe, expect, it } from "vitest";
++import { createApp } from "../app";
++import { createDatabase, type CampusDatabase } from "../database";
++import { readPaymentRuntime } from "../payments/config";
++
++const secret = "existing-platform-food-orders-test-secret-over-thirty-two";
++const realm = "/v1/auth/platform/realms/campus-demo";
++
++describe("platform customers retain their existing orders when public ordering pauses", () => {
++  let db: CampusDatabase;
++  let app: Awaited<ReturnType<typeof createApp>>;
++  let owner: Awaited<ReturnType<typeof account>>;
++  let other: Awaited<ReturnType<typeof account>>;
++  let orderId: string;
++  let quoteId: string;
++  let paymentCalls: number;
++
++  async function account() {
++    const id = `pa_${randomUUID()}`;
++    const credentialId = `pac_${randomUUID()}`;
++    const handle = `ps_${randomBytes(32).toString("base64url")}`;
++    const digest = createHash("sha256").update(handle).digest("hex");
++    await db.query(`INSERT INTO platform_accounts (id,display_name) VALUES ($1,'顧客')`, [id]);
++    await db.query(`INSERT INTO platform_account_credentials
++      (id,platform_account_id,method,provider_issuer,provider_subject,verified_at,last_authenticated_at)
++      VALUES ($1,$2,'google','https://accounts.google.com',$3,now(),now())`, [credentialId, id, randomUUID()]);
++    await db.query(`INSERT INTO platform_account_sessions
++      (token_sha256,platform_account_id,credential_id,expires_at)
++      VALUES ($1,$2,$3,now()+interval '1 hour')`, [digest, id, credentialId]);
++    return { id, credentialId, digest, headers: { authorization: `Platform ${handle}` } };
++  }
++
++  beforeEach(async () => {
++    db = await createDatabase({ attendanceCodeSecret: secret, seedDemo: true });
++    paymentCalls = 0;
++    app = await createApp(db, {
++      auth: { mode: "demo", sessionSecret: secret },
++      enableDemoAuth: false,
++      attendanceCodeSecret: secret,
++      foodPickupTokenSecret: secret,
++      paymentEndpoints: {
++        apiBaseUrl: "https://api.campus.example.edu",
++        webBaseUrl: "https://campus.example.edu",
++        handoffSecret: secret,
++      },
++      // No real provider or payment is contacted by these route tests.
++      paymentRuntime: readPaymentRuntime({
++        PAYMENT_ONLINE_ENABLED: "true", PAYMENT_ENABLED_METHODS: "credit-card",
++        TAPPAY_PARTNER_KEY: "fixture-key", TAPPAY_MERCHANT_ID: "FIXTURE",
++        TAPPAY_API_BASE_URL: "https://sandbox.tappaysdk.com",
++      }, false, async () => {
++        paymentCalls += 1;
++        return new Response(JSON.stringify({ status: 0, payment_url: "https://sandbox.tappaysdk.com/link/fixture" }), {
++          status: 200, headers: { "content-type": "application/json" },
++        });
++      }),
++    });
++    owner = await account();
++    other = await account();
++    const quote = await app.inject({ method: "POST", url: `${realm}/food/quotes`, headers: owner.headers,
++      payload: { locationId: "food-location-main", requestedPickupAt: new Date(Date.now() + 30 * 60_000).toISOString(),
++        items: [{ menuItemId: "food-item-chicken", quantity: 1, selectedOptionIds: [] }], idempotencyKey: "existing-order-quote" } });
++    expect(quote.statusCode, quote.body).toBe(201);
++    quoteId = quote.json().id;
++    const order = await app.inject({ method: "POST", url: `${realm}/food/orders`, headers: owner.headers,
++      payload: { quoteId, idempotencyKey: "existing-order-create" } });
++    expect(order.statusCode, order.body).toBe(201);
++    orderId = order.json().orderId;
++    // Give the second account its own persisted persona before closing discovery.
++    expect((await app.inject({ method: "GET", url: `${realm}/food/locations`, headers: other.headers })).statusCode).toBe(200);
++    await db.query(`UPDATE food_locations SET status='closed',public_access=false WHERE tenant_id='campus-demo'`);
++    expect((await db.query(`SELECT 1 FROM social_communities WHERE tenant_id='campus-demo'
++      AND access_scope='public' AND discoverability='listed'`)).rows).toHaveLength(0);
++  }, 60_000);
++
++  afterEach(async () => { await app?.close(); await db?.close(); });
++
++  it("lists and reads only the caller's existing orders without reopening discovery", async () => {
++    const list = await app.inject({ method: "GET", url: `${realm}/food/orders`, headers: owner.headers });
++    expect(list.statusCode, list.body).toBe(200);
++    expect(list.json().orders).toEqual([expect.objectContaining({ id: orderId, state: "payment-pending" })]);
++    const detail = await app.inject({ method: "GET", url: `${realm}/food/orders/${orderId}`, headers: owner.headers });
++    expect(detail.statusCode, detail.body).toBe(200);
++    expect(detail.json()).toMatchObject({ id: orderId, state: "payment-pending" });
++    const empty = await app.inject({ method: "GET", url: `${realm}/food/orders`, headers: other.headers });
++    expect(empty.statusCode, empty.body).toBe(200);
++    expect(empty.json().orders).toEqual([]);
++    const realms = await app.inject({ method: "GET", url: "/v1/auth/platform/realms", headers: owner.headers });
++    expect(realms.json().realms).not.toContainEqual(expect.objectContaining({ tenantId: "campus-demo" }));
++    for (const suffix of ["food/locations", "food/locations/food-location-main/menu", "social/profile", "social/communities"]) {
++      const response = await app.inject({ method: "GET", url: `${realm}/${suffix}`, headers: owner.headers });
++      expect(response.statusCode, response.body).toBe(404);
++    }
++    const quote = await app.inject({ method: "POST", url: `${realm}/food/quotes`, headers: owner.headers,
++      payload: { locationId: "food-location-main", requestedPickupAt: new Date(Date.now() + 30 * 60_000).toISOString(),
++        items: [{ menuItemId: "food-item-chicken", quantity: 1, selectedOptionIds: [] }], idempotencyKey: "paused-new-quote" } });
++    expect(quote.statusCode, quote.body).toBe(404);
++    const create = await app.inject({ method: "POST", url: `${realm}/food/orders`, headers: owner.headers,
++      payload: { quoteId, idempotencyKey: "paused-new-order" } });
++    expect(create.statusCode, create.body).toBe(404);
++  });
++
++  it("can continue the existing checkout and cancel once, retaining idempotency", async () => {
++    const checkout = await app.inject({ method: "POST", url: `${realm}/food/orders/${orderId}/payment-session`, headers: owner.headers,
++      payload: { method: "credit-card", idempotencyKey: "paused-checkout-key" } });
++    expect(checkout.statusCode, checkout.body).toBe(201);
++    expect(paymentCalls).toBe(1);
++    const payload = { reason: "changed-mind", idempotencyKey: "paused-cancel-key" };
++    const cancel = await app.inject({ method: "POST", url: `${realm}/food/orders/${orderId}/cancel`, headers: owner.headers, ...(payload ? { payload } : {}) });
++    expect(cancel.statusCode, cancel.body).toBe(200);
++    expect(cancel.json()).toMatchObject({ orderId, state: "canceled" });
++    const replay = await app.inject({ method: "POST", url: `${realm}/food/orders/${orderId}/cancel`, headers: owner.headers, ...(payload ? { payload } : {}) });
++    expect(replay.statusCode, replay.body).toBe(200);
++    expect(replay.json()).toEqual({ ...cancel.json(), replayed: true });
++    const later = await app.inject({ method: "POST", url: `${realm}/food/orders/${orderId}/payment-session`, headers: owner.headers,
++      payload: { method: "credit-card", idempotencyKey: "canceled-checkout-key" } });
++    expect(later.statusCode, later.body).toBe(409);
++    expect(paymentCalls).toBe(1);
++  });
++
++  it("does not disclose or mutate another customer's order or call its payment provider", async () => {
++    for (const [method, suffix, payload] of [
++      ["GET", "", undefined],
++      ["POST", "/cancel", { reason: "changed-mind", idempotencyKey: "outsider-cancel-key" }],
++      ["POST", "/payment-session", { method: "credit-card", idempotencyKey: "outsider-checkout-key" }],
++    ] as const) {
++      const response = await app.inject({ method, url: `${realm}/food/orders/${orderId}${suffix}`, headers: other.headers, ...(payload ? { payload } : {}) });
++      expect(response.statusCode, response.body).toBe(404);
++      expect(response.json()).toMatchObject({ error: { code: "FOOD_ORDER_NOT_FOUND" } });
++    }
++    expect(paymentCalls).toBe(0);
++    expect((await db.query(`SELECT state FROM food_orders WHERE id=$1`, [orderId])).rows).toEqual([{ state: "awaiting_payment" }]);
++  });
++
++  it("does not create a persona for a new account trying to access old orders", async () => {
++    const newcomer = await account();
++    const before = (await db.query(`SELECT count(*)::int AS count FROM people`)).rows;
++    for (const suffix of ["", `/${orderId}`]) {
++      const response = await app.inject({ method: "GET", url: `${realm}/food/orders${suffix}`, headers: newcomer.headers });
++      expect(response.statusCode, response.body).toBe(404);
++    }
++    expect((await db.query(`SELECT 1 FROM platform_tenant_personas WHERE platform_account_id=$1`, [newcomer.id])).rows).toEqual([]);
++    expect((await db.query(`SELECT count(*)::int AS count FROM people`)).rows).toEqual(before);
++  });
++
++  it("does not reuse a persona or order from a different tenant", async () => {
++    await db.query(`INSERT INTO people
++      (tenant_id,id,student_number,display_name,program,curriculum_version,study_year,campus,credential_status)
++      VALUES ('nccu','legacy-order-person','legacy-order-person','顧客','一般使用者','platform',1,'校區','active')`);
++    await db.query(`INSERT INTO platform_tenant_personas (platform_account_id,tenant_id,person_id)
++      VALUES ($1,'nccu','legacy-order-person')`, [owner.id]);
++    const otherRealm = "/v1/auth/platform/realms/nccu";
++    for (const [method, suffix, payload] of [
++      ["GET", "", undefined],
++      ["POST", "/cancel", { reason: "changed-mind", idempotencyKey: "wrong-tenant-cancel" }],
++      ["POST", "/payment-session", { method: "credit-card", idempotencyKey: "wrong-tenant-checkout" }],
++    ] as const) {
++      const response = await app.inject({ method, url: `${otherRealm}/food/orders/${orderId}${suffix}`, headers: owner.headers, ...(payload ? { payload } : {}) });
++      expect(response.statusCode, response.body).toBe(404);
++      expect(response.json()).toMatchObject({ error: { code: "FOOD_ORDER_NOT_FOUND" } });
++    }
++    expect(paymentCalls).toBe(0);
++  });
++
++  it.each([
++    ["account", 401, `UPDATE platform_accounts SET state='suspended',suspended_at=now() WHERE id=$1`, "account"],
++    ["credential", 401, `UPDATE platform_account_credentials SET state='revoked',revoked_at=now() WHERE id=$1`, "credential"],
++    ["session", 401, `DELETE FROM platform_account_sessions WHERE token_sha256=$1`, "session"],
++    ["persona", 404, `UPDATE people SET credential_status='suspended' WHERE (tenant_id,id) IN
++      (SELECT tenant_id,person_id FROM platform_tenant_personas WHERE platform_account_id=$1)`, "account"],
++    ["tenant", 404, `UPDATE tenants SET state='suspended' WHERE id=$1`, "tenant"],
++    ["food module", 403, `UPDATE tenants SET module_food_enabled=false WHERE id=$1`, "tenant"],
++  ] as const)("still denies all existing-order actions after %s revocation", async (_kind, status, sql, identity) => {
++    const current = await app.inject({ method: "GET", url: `${realm}/food/orders/${orderId}`, headers: owner.headers });
++    expect(current.statusCode, current.body).toBe(200);
++    await db.query(sql, [identity === "account" ? owner.id : identity === "credential" ? owner.credentialId : identity === "session" ? owner.digest : "campus-demo"]);
++    for (const [method, suffix, payload] of [
++      ["GET", "", undefined], ["GET", `/${orderId}`, undefined],
++      ["POST", `/${orderId}/cancel`, { reason: "changed-mind", idempotencyKey: "revoked-cancel-key" }],
++      ["POST", `/${orderId}/payment-session`, { method: "credit-card", idempotencyKey: "revoked-checkout-key" }],
++    ] as const) {
++      const response = await app.inject({ method, url: `${realm}/food/orders${suffix}`, headers: owner.headers, ...(payload ? { payload } : {}) });
++      expect(response.statusCode, response.body).toBe(status);
++    }
++    expect(paymentCalls).toBe(0);
++  });
++});
+diff --git a/apps/api/src/app.ts b/apps/api/src/app.ts
+index cf91129..eca0c35 100644
+--- a/apps/api/src/app.ts
++++ b/apps/api/src/app.ts
+@@ -2936,6 +2936,13 @@ export async function createApp(db: CampusDatabase, options: AppOptions): Promis
+     return platformAccounts.resolvePublicRealmActor(platformActor, tenantId);
+   };
+ 
++  const existingFoodOrderActor = async (request: FastifyRequest) => {
++    const platformActor = await platformAccounts.resolveSession(request.headers.authorization);
++    const tenantId = (request.params as { tenantId?: unknown }).tenantId;
++    if (typeof tenantId !== "string") throw new DomainError("PLATFORM_PUBLIC_REALM_NOT_FOUND", "找不到公開服務", 404);
++    return platformAccounts.resolveExistingFoodOrderActor(platformActor, tenantId);
++  };
++
+   app.get("/v1/auth/platform/realms/:tenantId/food/locations", async (request) =>
+     food.listLocations(await publicRealmActor(request), FoodLocationListQuerySchema.parse(request.query)));
+   app.get("/v1/auth/platform/realms/:tenantId/food/locations/:locationId/menu", async (request) =>
+@@ -2952,12 +2959,12 @@ export async function createApp(db: CampusDatabase, options: AppOptions): Promis
+     food.listPaymentMethods(await publicRealmActor(request)));
+   app.get("/v1/auth/platform/realms/:tenantId/food/orders", async (request) =>
+     food.listCustomerOrders(
+-      await publicRealmActor(request),
++      await existingFoodOrderActor(request),
+       FoodCustomerOrderListQuerySchema.parse(request.query),
+     ));
+   app.get("/v1/auth/platform/realms/:tenantId/food/orders/:orderId", async (request) =>
+     food.getCustomerOrder(
+-      await publicRealmActor(request),
++      await existingFoodOrderActor(request),
+       IdSchema.parse((request.params as { orderId?: unknown }).orderId),
+     ));
+   app.post("/v1/auth/platform/realms/:tenantId/food/quotes", publicAuthRateLimit, async (request, reply) =>
+@@ -2972,13 +2979,13 @@ export async function createApp(db: CampusDatabase, options: AppOptions): Promis
+     )));
+   app.post("/v1/auth/platform/realms/:tenantId/food/orders/:orderId/payment-session", publicAuthRateLimit, async (request, reply) =>
+     reply.status(201).send(await food.createPaymentSession(
+-      await publicRealmActor(request),
++      await existingFoodOrderActor(request),
+       IdSchema.parse((request.params as { orderId?: unknown }).orderId),
+       FoodCreatePaymentSessionRequestSchema.parse(request.body),
+     )));
+   app.post("/v1/auth/platform/realms/:tenantId/food/orders/:orderId/cancel", publicAuthRateLimit, async (request) =>
+     food.cancelOrder(
+-      await publicRealmActor(request),
++      await existingFoodOrderActor(request),
+       IdSchema.parse((request.params as { orderId?: unknown }).orderId),
+       FoodCancelOrderRequestSchema.parse(request.body),
+     ));
+diff --git a/runtime-grant-matrix.json b/runtime-grant-matrix.json
+index 052fc3f..60f629c 100644
+--- a/runtime-grant-matrix.json
++++ b/runtime-grant-matrix.json
+@@ -110,7 +110,7 @@
+     },
+     {
+       "path": "apps/api/src/accounts/platform-account-service.ts",
+-      "sha256": "1cc68f914d39db985ca885273bf2df14744e9e687b1923f0ff5a25d9d389617e"
++      "sha256": "67aa23a21dc794513397df501d598d84b84123db4e36ff4b7851f1b26d007dff"
+     },
+     {
+       "path": "apps/api/src/accounts/platform-idp.ts",
+@@ -230,7 +230,7 @@
+     },
+     {
+       "path": "apps/api/src/app.ts",
+-      "sha256": "e9cf2ead348eedfffa1895e5857cc48ffc386317fda93dc42bed5ef894d31649"
++      "sha256": "a565b172fb41f401b612b6105a1e1c7007979a52403a4c902e1d4c202f40eb79"
+     },
+     {
+       "path": "apps/api/src/attachments/attachment-safety-state.ts",
+@@ -3917,7 +3917,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 3490,
++      "line": 3497,
+       "column": 36,
+       "code": "DB_SINK_ESCAPE_UNRESOLVED",
+       "detail": "query"
+@@ -3925,7 +3925,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 3500,
++      "line": 3507,
+       "column": 36,
+       "code": "DB_SINK_ESCAPE_UNRESOLVED",
+       "detail": "query"
+@@ -3933,7 +3933,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4033,
++      "line": 4040,
+       "column": 38,
+       "code": "DB_SINK_ESCAPE_UNRESOLVED",
+       "detail": "query"
+@@ -3949,7 +3949,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5980,
++      "line": 5987,
+       "column": 48,
+       "code": "DB_SINK_ESCAPE_UNRESOLVED",
+       "detail": "query"
+@@ -3957,7 +3957,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4921,
++      "line": 4928,
+       "column": 50,
+       "code": "DB_SINK_ESCAPE_UNRESOLVED",
+       "detail": "query"
+@@ -3981,7 +3981,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6254,
++      "line": 6261,
+       "column": 55,
+       "code": "DB_SINK_ESCAPE_UNRESOLVED",
+       "detail": "query"
+@@ -3997,7 +3997,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 3673,
++      "line": 3680,
+       "column": 57,
+       "code": "DB_SINK_ESCAPE_UNRESOLVED",
+       "detail": "query"
+@@ -4005,7 +4005,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4032,
++      "line": 4039,
+       "column": 58,
+       "code": "DB_SINK_ESCAPE_UNRESOLVED",
+       "detail": "query"
+@@ -4013,7 +4013,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5367,
++      "line": 5374,
+       "column": 58,
+       "code": "DB_SINK_ESCAPE_UNRESOLVED",
+       "detail": "query"
+@@ -4021,7 +4021,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5828,
++      "line": 5835,
+       "column": 58,
+       "code": "DB_SINK_ESCAPE_UNRESOLVED",
+       "detail": "query"
+@@ -4029,7 +4029,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 3668,
++      "line": 3675,
+       "column": 59,
+       "code": "DB_SINK_ESCAPE_UNRESOLVED",
+       "detail": "query"
+@@ -4045,7 +4045,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4429,
++      "line": 4436,
+       "column": 63,
+       "code": "DB_SINK_ESCAPE_UNRESOLVED",
+       "detail": "query"
+@@ -4053,7 +4053,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4425,
++      "line": 4432,
+       "column": 65,
+       "code": "DB_SINK_ESCAPE_UNRESOLVED",
+       "detail": "query"
+@@ -4061,7 +4061,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4885,
++      "line": 4892,
+       "column": 67,
+       "code": "DB_SINK_ESCAPE_UNRESOLVED",
+       "detail": "query"
+@@ -4069,7 +4069,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6254,
++      "line": 6261,
+       "column": 68,
+       "code": "DB_SINK_ESCAPE_UNRESOLVED",
+       "detail": "query"
+@@ -4077,7 +4077,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 3490,
++      "line": 3497,
+       "column": 73,
+       "code": "DB_SINK_ESCAPE_UNRESOLVED",
+       "detail": "query"
+@@ -4085,7 +4085,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 3500,
++      "line": 3507,
+       "column": 73,
+       "code": "DB_SINK_ESCAPE_UNRESOLVED",
+       "detail": "query"
+@@ -4117,7 +4117,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4846,
++      "line": 4853,
+       "column": 81,
+       "code": "DB_SINK_ESCAPE_UNRESOLVED",
+       "detail": "query"
+@@ -4125,7 +4125,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 3042,
++      "line": 3049,
+       "column": 86,
+       "code": "DB_SINK_ESCAPE_UNRESOLVED",
+       "detail": "query"
+@@ -4149,7 +4149,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 3035,
++      "line": 3042,
+       "column": 94,
+       "code": "DB_SINK_ESCAPE_UNRESOLVED",
+       "detail": "query"
+@@ -4981,15 +4981,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4567,
+-      "column": 3,
+-      "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+-      "detail": "receiver-escaped-or-overridden-before-registration"
+-    },
+-    {
+-      "component": "api",
+-      "file": "apps/api/src/app.ts",
+-      "line": 4569,
++      "line": 4574,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -4997,7 +4989,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4575,
++      "line": 4576,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5005,7 +4997,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4580,
++      "line": 4582,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5013,7 +5005,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4586,
++      "line": 4587,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5021,7 +5013,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4599,
++      "line": 4593,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5029,7 +5021,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4609,
++      "line": 4606,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5037,7 +5029,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4619,
++      "line": 4616,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5045,7 +5037,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4632,
++      "line": 4626,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5053,7 +5045,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4634,
++      "line": 4639,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5061,7 +5053,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4636,
++      "line": 4641,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5069,7 +5061,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4642,
++      "line": 4643,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5077,7 +5069,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4644,
++      "line": 4649,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5085,7 +5077,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4646,
++      "line": 4651,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5101,7 +5093,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4654,
++      "line": 4660,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5109,15 +5101,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4655,
+-      "column": 3,
+-      "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+-      "detail": "receiver-escaped-or-overridden-before-registration"
+-    },
+-    {
+-      "component": "api",
+-      "file": "apps/api/src/app.ts",
+-      "line": 4657,
++      "line": 4661,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5125,7 +5109,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4661,
++      "line": 4662,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5133,7 +5117,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4663,
++      "line": 4664,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5141,7 +5125,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4667,
++      "line": 4668,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5157,7 +5141,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4671,
++      "line": 4674,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5165,7 +5149,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4672,
++      "line": 4677,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5181,7 +5165,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4680,
++      "line": 4679,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5189,7 +5173,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4682,
++      "line": 4685,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5197,7 +5181,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4688,
++      "line": 4687,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5205,7 +5189,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4693,
++      "line": 4689,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5221,7 +5205,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4697,
++      "line": 4700,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5229,7 +5213,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4699,
++      "line": 4702,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5237,7 +5221,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4701,
++      "line": 4704,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5253,7 +5237,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4712,
++      "line": 4708,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5261,7 +5245,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4718,
++      "line": 4713,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5269,7 +5253,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4724,
++      "line": 4719,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5277,7 +5261,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4730,
++      "line": 4725,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5285,7 +5269,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4736,
++      "line": 4731,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5293,7 +5277,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4738,
++      "line": 4737,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5301,7 +5285,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4744,
++      "line": 4743,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5309,7 +5293,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4750,
++      "line": 4745,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5317,7 +5301,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4756,
++      "line": 4751,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5325,7 +5309,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4758,
++      "line": 4757,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5333,7 +5317,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4764,
++      "line": 4763,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5357,7 +5341,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4777,
++      "line": 4772,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5365,7 +5349,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4783,
++      "line": 4778,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5373,7 +5357,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4789,
++      "line": 4784,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5381,7 +5365,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4791,
++      "line": 4790,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5389,7 +5373,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4797,
++      "line": 4796,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5397,7 +5381,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4799,
++      "line": 4798,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5405,7 +5389,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4801,
++      "line": 4804,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5413,7 +5397,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4807,
++      "line": 4806,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5421,7 +5405,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4813,
++      "line": 4808,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5429,7 +5413,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4834,
++      "line": 4814,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5437,7 +5421,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4836,
++      "line": 4820,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5445,7 +5429,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4838,
++      "line": 4841,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5453,7 +5437,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4840,
++      "line": 4843,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5461,7 +5445,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4842,
++      "line": 4845,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5469,7 +5453,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4844,
++      "line": 4847,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5477,7 +5461,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4848,
++      "line": 4849,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5485,7 +5469,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4855,
++      "line": 4851,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5493,7 +5477,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4859,
++      "line": 4855,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5501,7 +5485,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4870,
++      "line": 4862,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5509,7 +5493,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4871,
++      "line": 4866,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5517,7 +5501,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4873,
++      "line": 4877,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5525,7 +5509,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4882,
++      "line": 4878,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5533,7 +5517,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4887,
++      "line": 4880,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5541,7 +5525,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4891,
++      "line": 4889,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5549,7 +5533,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4896,
++      "line": 4894,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5557,7 +5541,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4901,
++      "line": 4898,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5581,7 +5565,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4913,
++      "line": 4910,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5589,7 +5573,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4918,
++      "line": 4915,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5597,15 +5581,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4919,
+-      "column": 3,
+-      "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+-      "detail": "receiver-escaped-or-overridden-before-registration"
+-    },
+-    {
+-      "component": "api",
+-      "file": "apps/api/src/app.ts",
+-      "line": 4923,
++      "line": 4920,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5621,7 +5597,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4933,
++      "line": 4926,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5629,7 +5605,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4935,
++      "line": 4930,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5637,7 +5613,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4937,
++      "line": 4932,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5645,7 +5621,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4939,
++      "line": 4940,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5653,7 +5629,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4941,
++      "line": 4942,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5661,7 +5637,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4943,
++      "line": 4944,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5717,7 +5693,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4961,
++      "line": 4960,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5725,7 +5701,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4963,
++      "line": 4962,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5733,7 +5709,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4965,
++      "line": 4964,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5765,7 +5741,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4976,
++      "line": 4975,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5773,7 +5749,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4979,
++      "line": 4977,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5781,7 +5757,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4981,
++      "line": 4979,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5797,15 +5773,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4985,
+-      "column": 3,
+-      "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+-      "detail": "receiver-escaped-or-overridden-before-registration"
+-    },
+-    {
+-      "component": "api",
+-      "file": "apps/api/src/app.ts",
+-      "line": 4989,
++      "line": 4986,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5813,7 +5781,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4991,
++      "line": 4988,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5821,7 +5789,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4993,
++      "line": 4990,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5829,7 +5797,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4995,
++      "line": 4992,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5837,7 +5805,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 4999,
++      "line": 4996,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5845,7 +5813,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5001,
++      "line": 4998,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5853,7 +5821,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5003,
++      "line": 5000,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5861,7 +5829,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5011,
++      "line": 5002,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5869,7 +5837,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5013,
++      "line": 5006,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5877,7 +5845,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5016,
++      "line": 5008,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5885,7 +5853,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5017,
++      "line": 5010,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5901,7 +5869,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5019,
++      "line": 5020,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5909,7 +5877,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5020,
++      "line": 5023,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5917,7 +5885,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5021,
++      "line": 5024,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5925,7 +5893,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5022,
++      "line": 5025,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5933,7 +5901,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5023,
++      "line": 5026,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5941,7 +5909,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5024,
++      "line": 5027,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5949,7 +5917,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5034,
++      "line": 5028,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5957,7 +5925,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5035,
++      "line": 5029,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5965,7 +5933,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5037,
++      "line": 5030,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -5973,7 +5941,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5039,
++      "line": 5031,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6013,7 +5981,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5052,
++      "line": 5048,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6021,7 +5989,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5058,
++      "line": 5049,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6029,7 +5997,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5064,
++      "line": 5051,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6037,7 +6005,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5070,
++      "line": 5053,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6045,7 +6013,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5072,
++      "line": 5059,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6053,7 +6021,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5074,
++      "line": 5065,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6061,7 +6029,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5076,
++      "line": 5071,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6069,7 +6037,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5078,
++      "line": 5077,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6077,7 +6045,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5080,
++      "line": 5079,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6085,7 +6053,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5082,
++      "line": 5081,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6093,7 +6061,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5084,
++      "line": 5083,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6101,7 +6069,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5086,
++      "line": 5085,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6109,7 +6077,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5088,
++      "line": 5087,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6117,7 +6085,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5090,
++      "line": 5089,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6125,7 +6093,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5092,
++      "line": 5091,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6133,7 +6101,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5094,
++      "line": 5093,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6141,7 +6109,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5096,
++      "line": 5095,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6149,7 +6117,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5098,
++      "line": 5097,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6157,7 +6125,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5100,
++      "line": 5099,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6197,7 +6165,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5109,
++      "line": 5108,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6205,7 +6173,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5111,
++      "line": 5110,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6213,7 +6181,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5113,
++      "line": 5112,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6221,7 +6189,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5115,
++      "line": 5114,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6229,7 +6197,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5121,
++      "line": 5116,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6237,7 +6205,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5127,
++      "line": 5118,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6245,7 +6213,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5129,
++      "line": 5120,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6253,7 +6221,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5131,
++      "line": 5122,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6261,7 +6229,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5133,
++      "line": 5128,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6269,7 +6237,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5135,
++      "line": 5134,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6277,7 +6245,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5141,
++      "line": 5136,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6285,7 +6253,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5147,
++      "line": 5138,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6293,7 +6261,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5149,
++      "line": 5140,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6301,7 +6269,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5151,
++      "line": 5142,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6309,7 +6277,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5152,
++      "line": 5148,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6333,7 +6301,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5157,
++      "line": 5158,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6365,7 +6333,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5165,
++      "line": 5164,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6373,7 +6341,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5167,
++      "line": 5166,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6397,7 +6365,23 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5176,
++      "line": 5172,
++      "column": 3,
++      "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
++      "detail": "receiver-escaped-or-overridden-before-registration"
++    },
++    {
++      "component": "api",
++      "file": "apps/api/src/app.ts",
++      "line": 5174,
++      "column": 3,
++      "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
++      "detail": "receiver-escaped-or-overridden-before-registration"
++    },
++    {
++      "component": "api",
++      "file": "apps/api/src/app.ts",
++      "line": 5175,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6413,7 +6397,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5178,
++      "line": 5183,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6421,7 +6405,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5179,
++      "line": 5184,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6429,7 +6413,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5188,
++      "line": 5185,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6437,7 +6421,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5190,
++      "line": 5186,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6445,7 +6429,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5192,
++      "line": 5195,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6453,7 +6437,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5194,
++      "line": 5197,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6461,7 +6445,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5200,
++      "line": 5199,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6469,7 +6453,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5207,
++      "line": 5201,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6477,7 +6461,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5210,
++      "line": 5207,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6493,7 +6477,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5221,
++      "line": 5217,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6501,7 +6485,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5228,
++      "line": 5221,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6509,7 +6493,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5229,
++      "line": 5228,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6517,7 +6501,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5237,
++      "line": 5235,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6525,7 +6509,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5240,
++      "line": 5236,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6541,7 +6525,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5248,
++      "line": 5247,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6549,7 +6533,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5250,
++      "line": 5251,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6557,7 +6541,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5254,
++      "line": 5255,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6565,7 +6549,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5259,
++      "line": 5257,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6573,7 +6557,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5267,
++      "line": 5261,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6581,7 +6565,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5275,
++      "line": 5266,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6589,7 +6573,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5310,
++      "line": 5274,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6597,7 +6581,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5312,
++      "line": 5282,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6605,7 +6589,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5316,
++      "line": 5317,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6621,7 +6605,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5322,
++      "line": 5323,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6629,7 +6613,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5325,
++      "line": 5326,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6637,7 +6621,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5333,
++      "line": 5329,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6645,7 +6629,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5343,
++      "line": 5332,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6653,7 +6637,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5353,
++      "line": 5340,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6661,7 +6645,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5357,
++      "line": 5350,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6669,7 +6653,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5361,
++      "line": 5360,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6677,7 +6661,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5374,
++      "line": 5364,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6685,7 +6669,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5376,
++      "line": 5368,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6693,7 +6677,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5380,
++      "line": 5381,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6709,7 +6693,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5386,
++      "line": 5387,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6717,7 +6701,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5392,
++      "line": 5390,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6725,7 +6709,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5395,
++      "line": 5393,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6733,7 +6717,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5400,
++      "line": 5399,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6741,7 +6725,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5405,
++      "line": 5402,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6749,7 +6733,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5411,
++      "line": 5407,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6757,7 +6741,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5414,
++      "line": 5412,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6773,7 +6757,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5420,
++      "line": 5421,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6781,7 +6765,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5423,
++      "line": 5425,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6797,7 +6781,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5435,
++      "line": 5430,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6805,7 +6789,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5440,
++      "line": 5434,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6813,7 +6797,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5446,
++      "line": 5442,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6821,7 +6805,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5450,
++      "line": 5447,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6829,7 +6813,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5456,
++      "line": 5453,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6837,7 +6821,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5465,
++      "line": 5457,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6845,7 +6829,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5469,
++      "line": 5463,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6853,7 +6837,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5470,
++      "line": 5472,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6861,7 +6845,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5474,
++      "line": 5476,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6869,7 +6853,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5478,
++      "line": 5477,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6877,7 +6861,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5482,
++      "line": 5481,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6885,7 +6869,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5486,
++      "line": 5485,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6893,7 +6877,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5490,
++      "line": 5489,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6901,7 +6885,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5494,
++      "line": 5493,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6909,7 +6893,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5498,
++      "line": 5497,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6917,7 +6901,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5506,
++      "line": 5501,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6925,7 +6909,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5510,
++      "line": 5505,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6933,7 +6917,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5514,
++      "line": 5513,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6941,7 +6925,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5522,
++      "line": 5517,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6949,7 +6933,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5526,
++      "line": 5521,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6957,7 +6941,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5530,
++      "line": 5529,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6965,7 +6949,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5538,
++      "line": 5533,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6973,7 +6957,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5542,
++      "line": 5537,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6981,7 +6965,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5550,
++      "line": 5545,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6989,7 +6973,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5558,
++      "line": 5549,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -6997,7 +6981,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5566,
++      "line": 5557,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7005,7 +6989,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5574,
++      "line": 5565,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7013,7 +6997,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5578,
++      "line": 5573,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7021,7 +7005,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5582,
++      "line": 5581,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7029,7 +7013,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5586,
++      "line": 5585,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7037,7 +7021,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5594,
++      "line": 5589,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7045,7 +7029,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5603,
++      "line": 5593,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7053,7 +7037,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5606,
++      "line": 5601,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7061,7 +7045,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5609,
++      "line": 5610,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7069,7 +7053,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5616,
++      "line": 5613,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7077,7 +7061,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5624,
++      "line": 5616,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7085,7 +7069,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5628,
++      "line": 5623,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7093,7 +7077,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5632,
++      "line": 5631,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7117,7 +7101,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5641,
++      "line": 5642,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7125,7 +7109,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5645,
++      "line": 5646,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7133,7 +7117,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5649,
++      "line": 5648,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7141,7 +7125,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5657,
++      "line": 5652,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7149,7 +7133,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5665,
++      "line": 5656,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7157,7 +7141,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5673,
++      "line": 5664,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7165,7 +7149,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5681,
++      "line": 5672,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7173,7 +7157,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5682,
++      "line": 5680,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7181,7 +7165,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5692,
++      "line": 5688,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7189,7 +7173,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5695,
++      "line": 5689,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7197,7 +7181,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5702,
++      "line": 5699,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7205,7 +7189,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5710,
++      "line": 5702,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7213,7 +7197,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5713,
++      "line": 5709,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7221,7 +7205,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5720,
++      "line": 5717,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7229,7 +7213,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5723,
++      "line": 5720,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7237,7 +7221,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5730,
++      "line": 5727,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7245,7 +7229,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5734,
++      "line": 5730,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7253,7 +7237,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5736,
++      "line": 5737,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7261,7 +7245,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5738,
++      "line": 5741,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7269,7 +7253,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5740,
++      "line": 5743,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7285,7 +7269,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5753,
++      "line": 5747,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7293,7 +7277,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5761,
++      "line": 5752,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7301,7 +7285,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5769,
++      "line": 5760,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7309,7 +7293,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5771,
++      "line": 5768,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7317,7 +7301,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5779,
++      "line": 5776,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7325,7 +7309,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5782,
++      "line": 5778,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7333,7 +7317,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5784,
++      "line": 5786,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7341,7 +7325,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5786,
++      "line": 5789,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7349,7 +7333,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5794,
++      "line": 5791,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7357,7 +7341,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5802,
++      "line": 5793,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7365,7 +7349,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5810,
++      "line": 5801,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7373,7 +7357,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5818,
++      "line": 5809,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7381,7 +7365,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5826,
++      "line": 5817,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7389,7 +7373,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5830,
++      "line": 5825,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7413,7 +7397,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5841,
++      "line": 5840,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7421,7 +7405,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5845,
++      "line": 5844,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7445,7 +7429,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5856,
++      "line": 5855,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7453,7 +7437,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5860,
++      "line": 5859,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7477,7 +7461,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5872,
++      "line": 5870,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7485,7 +7469,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5878,
++      "line": 5874,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7493,7 +7477,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5884,
++      "line": 5879,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7501,7 +7485,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5890,
++      "line": 5885,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7509,7 +7493,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5896,
++      "line": 5891,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7517,7 +7501,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5899,
++      "line": 5897,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7533,7 +7517,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5907,
++      "line": 5906,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7541,7 +7525,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5912,
++      "line": 5910,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7557,7 +7541,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5922,
++      "line": 5919,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7565,7 +7549,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5924,
++      "line": 5921,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7581,7 +7565,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5937,
++      "line": 5931,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7589,7 +7573,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5945,
++      "line": 5936,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7597,7 +7581,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5953,
++      "line": 5944,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7605,7 +7589,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5959,
++      "line": 5952,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7613,7 +7597,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5978,
++      "line": 5960,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7621,7 +7605,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5982,
++      "line": 5966,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7629,7 +7613,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5983,
++      "line": 5985,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7637,7 +7621,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5984,
++      "line": 5989,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7645,7 +7629,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5985,
++      "line": 5990,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7653,7 +7637,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5988,
++      "line": 5991,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7661,7 +7645,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5991,
++      "line": 5992,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7669,7 +7653,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5994,
++      "line": 5995,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7677,7 +7661,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5997,
++      "line": 5998,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7685,7 +7669,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6000,
++      "line": 6001,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7693,7 +7677,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6001,
++      "line": 6004,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7701,7 +7685,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6002,
++      "line": 6007,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7709,7 +7693,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6003,
++      "line": 6008,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7717,7 +7701,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6006,
++      "line": 6009,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7733,7 +7717,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6015,
++      "line": 6013,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7741,7 +7725,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6018,
++      "line": 6017,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7749,7 +7733,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6021,
++      "line": 6022,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7757,7 +7741,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6032,
++      "line": 6025,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7765,7 +7749,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6033,
++      "line": 6028,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7773,7 +7757,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6034,
++      "line": 6039,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7781,7 +7765,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6035,
++      "line": 6040,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7789,7 +7773,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6036,
++      "line": 6041,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7797,7 +7781,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6037,
++      "line": 6042,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7805,7 +7789,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6041,
++      "line": 6043,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7813,7 +7797,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6045,
++      "line": 6044,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7837,7 +7821,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6056,
++      "line": 6055,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7853,7 +7837,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6062,
++      "line": 6063,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7869,7 +7853,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6070,
++      "line": 6069,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7877,7 +7861,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6074,
++      "line": 6073,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7901,7 +7885,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6085,
++      "line": 6084,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7909,7 +7893,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6090,
++      "line": 6088,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7917,7 +7901,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6094,
++      "line": 6092,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7925,7 +7909,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6101,
++      "line": 6097,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7933,7 +7917,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6102,
++      "line": 6101,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7941,7 +7925,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6106,
++      "line": 6108,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7949,7 +7933,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6110,
++      "line": 6109,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7957,7 +7941,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6115,
++      "line": 6113,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7965,7 +7949,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6118,
++      "line": 6117,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7973,7 +7957,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6121,
++      "line": 6122,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7981,7 +7965,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6129,
++      "line": 6125,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -7989,7 +7973,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6132,
++      "line": 6128,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8021,7 +8005,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6147,
++      "line": 6146,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8029,7 +8013,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6151,
++      "line": 6150,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8037,7 +8021,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6155,
++      "line": 6154,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8045,7 +8029,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6174,
++      "line": 6158,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8053,7 +8037,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6184,
++      "line": 6162,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8061,7 +8045,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6185,
++      "line": 6181,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8069,7 +8053,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6186,
++      "line": 6191,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8077,7 +8061,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6188,
++      "line": 6192,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8085,7 +8069,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6190,
++      "line": 6193,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8093,7 +8077,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6191,
++      "line": 6195,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8101,7 +8085,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6193,
++      "line": 6197,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8109,7 +8093,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6197,
++      "line": 6198,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8117,7 +8101,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6199,
++      "line": 6200,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8125,7 +8109,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6201,
++      "line": 6204,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8133,7 +8117,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6203,
++      "line": 6206,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8141,7 +8125,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6205,
++      "line": 6208,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8149,7 +8133,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6209,
++      "line": 6210,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8157,7 +8141,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6213,
++      "line": 6212,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8165,7 +8149,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6215,
++      "line": 6216,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8189,7 +8173,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6224,
++      "line": 6227,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8197,7 +8181,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6228,
++      "line": 6229,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8205,7 +8189,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6232,
++      "line": 6231,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8213,7 +8197,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6236,
++      "line": 6235,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8221,7 +8205,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6240,
++      "line": 6239,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8229,7 +8213,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6241,
++      "line": 6243,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8237,7 +8221,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6243,
++      "line": 6247,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8245,7 +8229,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6247,
++      "line": 6248,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8253,7 +8237,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6251,
++      "line": 6250,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8261,7 +8245,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6256,
++      "line": 6254,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8277,7 +8261,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6262,
++      "line": 6263,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8285,7 +8269,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6264,
++      "line": 6265,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8293,7 +8277,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6268,
++      "line": 6269,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8301,7 +8285,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6270,
++      "line": 6271,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8309,7 +8293,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6272,
++      "line": 6275,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8317,7 +8301,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6276,
++      "line": 6277,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8325,7 +8309,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6280,
++      "line": 6279,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8333,7 +8317,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6284,
++      "line": 6283,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8341,7 +8325,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6286,
++      "line": 6287,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8349,7 +8333,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6287,
++      "line": 6291,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8357,7 +8341,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6289,
++      "line": 6293,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8365,7 +8349,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6293,
++      "line": 6294,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8373,7 +8357,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6299,
++      "line": 6296,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8381,7 +8365,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6304,
++      "line": 6300,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8389,7 +8373,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6305,
++      "line": 6306,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8397,7 +8381,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6307,
++      "line": 6311,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8405,7 +8389,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6309,
++      "line": 6312,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8413,7 +8397,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6311,
++      "line": 6314,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8421,7 +8405,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6313,
++      "line": 6316,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8429,7 +8413,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6317,
++      "line": 6318,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8437,7 +8421,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6319,
++      "line": 6320,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8445,7 +8429,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6323,
++      "line": 6324,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8453,7 +8437,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6327,
++      "line": 6326,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8461,7 +8445,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6329,
++      "line": 6330,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8469,7 +8453,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6330,
++      "line": 6334,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8477,7 +8461,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6332,
++      "line": 6336,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8485,7 +8469,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6338,
++      "line": 6337,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8493,7 +8477,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6343,
++      "line": 6339,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8501,7 +8485,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6344,
++      "line": 6345,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8509,7 +8493,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6345,
++      "line": 6350,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8517,7 +8501,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6347,
++      "line": 6351,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8525,7 +8509,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6349,
++      "line": 6352,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8533,7 +8517,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6351,
++      "line": 6354,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8541,7 +8525,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6353,
++      "line": 6356,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8549,7 +8533,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6355,
++      "line": 6358,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8557,7 +8541,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6357,
++      "line": 6360,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8565,7 +8549,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6359,
++      "line": 6362,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8573,7 +8557,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6361,
++      "line": 6364,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8581,7 +8565,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6370,
++      "line": 6366,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8589,7 +8573,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6372,
++      "line": 6368,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8597,7 +8581,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6374,
++      "line": 6377,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8605,7 +8589,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6388,
++      "line": 6379,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8613,7 +8597,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6392,
++      "line": 6381,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8621,7 +8605,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6394,
++      "line": 6395,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8629,7 +8613,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6400,
++      "line": 6399,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8645,7 +8629,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6403,
++      "line": 6407,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8653,7 +8637,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6407,
++      "line": 6408,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8661,7 +8645,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6411,
++      "line": 6410,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8669,7 +8653,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6415,
++      "line": 6414,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8677,7 +8661,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6417,
++      "line": 6418,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8685,7 +8669,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6419,
++      "line": 6422,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8693,7 +8677,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6423,
++      "line": 6424,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8701,7 +8685,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6427,
++      "line": 6426,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8709,7 +8693,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6428,
++      "line": 6430,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8717,7 +8701,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6429,
++      "line": 6434,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8725,7 +8709,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6433,
++      "line": 6435,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8733,7 +8717,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6437,
++      "line": 6436,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8741,7 +8725,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6441,
++      "line": 6440,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8749,7 +8733,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6445,
++      "line": 6444,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8757,7 +8741,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6450,
++      "line": 6448,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8765,7 +8749,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6454,
++      "line": 6452,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8773,7 +8757,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6456,
++      "line": 6457,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8781,7 +8765,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6460,
++      "line": 6461,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8789,7 +8773,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6464,
++      "line": 6463,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8797,7 +8781,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6468,
++      "line": 6467,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8805,7 +8789,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6472,
++      "line": 6471,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8813,7 +8797,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6474,
++      "line": 6475,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8829,7 +8813,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6483,
++      "line": 6481,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8837,7 +8821,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6485,
++      "line": 6486,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8845,7 +8829,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6487,
++      "line": 6490,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8853,7 +8837,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6491,
++      "line": 6492,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8861,7 +8845,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6495,
++      "line": 6494,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8869,7 +8853,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6497,
++      "line": 6498,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8893,7 +8877,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6506,
++      "line": 6509,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8901,7 +8885,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6508,
++      "line": 6511,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8909,7 +8893,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6512,
++      "line": 6513,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8917,7 +8901,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6516,
++      "line": 6515,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8925,7 +8909,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6520,
++      "line": 6519,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8933,7 +8917,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6522,
++      "line": 6523,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8941,7 +8925,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6526,
++      "line": 6527,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8949,7 +8933,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6530,
++      "line": 6529,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8957,7 +8941,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6534,
++      "line": 6533,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8965,7 +8949,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6535,
++      "line": 6537,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8973,7 +8957,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6537,
++      "line": 6541,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8981,7 +8965,23 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6541,
++      "line": 6542,
++      "column": 3,
++      "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
++      "detail": "receiver-escaped-or-overridden-before-registration"
++    },
++    {
++      "component": "api",
++      "file": "apps/api/src/app.ts",
++      "line": 6544,
++      "column": 3,
++      "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
++      "detail": "receiver-escaped-or-overridden-before-registration"
++    },
++    {
++      "component": "api",
++      "file": "apps/api/src/app.ts",
++      "line": 6548,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -8989,7 +8989,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 6545,
++      "line": 6552,
+       "column": 3,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -9093,7 +9093,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/app.ts",
+-      "line": 5303,
++      "line": 5310,
+       "column": 5,
+       "code": "FASTIFY_ROUTE_HANDLER_EDGE_UNPROVEN",
+       "detail": "receiver-escaped-or-overridden-before-registration"
+@@ -65386,6 +65386,14 @@
+       "code": "SQL_CALL_REACHABILITY_UNPROVEN",
+       "detail": "anonymous-callable"
+     },
++    {
++      "component": "api",
++      "file": "apps/api/src/accounts/platform-account-service.ts",
++      "line": 784,
++      "column": 29,
++      "code": "SQL_CALL_REACHABILITY_UNPROVEN",
++      "detail": "anonymous-callable"
++    },
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/platform-ops-service.ts",
+@@ -67234,6 +67242,14 @@
+       "code": "SQL_CALL_REACHABILITY_UNPROVEN",
+       "detail": "anonymous-callable"
+     },
++    {
++      "component": "api",
++      "file": "apps/api/src/accounts/platform-account-service.ts",
++      "line": 793,
++      "column": 30,
++      "code": "SQL_CALL_REACHABILITY_UNPROVEN",
++      "detail": "anonymous-callable"
++    },
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/platform-ops-service.ts",
+@@ -80733,7 +80749,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/platform-account-service.ts",
+-      "line": 779,
++      "line": 809,
+       "column": 13,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_DELETE_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_account_sessions"
+@@ -80781,7 +80797,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/platform-account-service.ts",
+-      "line": 779,
++      "line": 809,
+       "column": 13,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_account_sessions"
+@@ -85037,7 +85053,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/platform-account-service.ts",
+-      "line": 796,
++      "line": 826,
+       "column": 26,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_accounts"
+@@ -85093,7 +85109,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/platform-account-service.ts",
+-      "line": 785,
++      "line": 815,
+       "column": 26,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_identity_providers"
+@@ -85509,7 +85525,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/platform-account-service.ts",
+-      "line": 804,
++      "line": 834,
+       "column": 27,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:and"
+@@ -85677,7 +85693,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/platform-account-service.ts",
+-      "line": 804,
++      "line": 834,
+       "column": 27,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:identity_staff_assignments"
+@@ -85733,7 +85749,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/platform-account-service.ts",
+-      "line": 804,
++      "line": 834,
+       "column": 27,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:people"
+@@ -85869,7 +85885,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/platform-account-service.ts",
+-      "line": 804,
++      "line": 834,
+       "column": 27,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SESSION_AUTHORIZATION_OR_SEARCH_PATH_UNMODELED"
+@@ -89033,5 +89049,5 @@
+     "securityInvokerTrigger": "fixed-point expansion into invoker relation/function capabilities",
+     "publicExecute": "never used as a grant source; ACL proof remains independently blocked when unresolved"
+   },
+-  "canonicalSha256": "974f644c53d1baf9de2b5c0f4000297ec4c8eb929bdfb29ffbdcfe7166f69aa7"
++  "canonicalSha256": "2849bd1d916006dbb8e0ba2f47dd17af1fffd20d2259467dd6401a841eca5315"
+ }

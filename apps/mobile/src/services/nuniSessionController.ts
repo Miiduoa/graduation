@@ -88,11 +88,21 @@ export class NuniSessionController {
     this.controllers.clear();
     return this.generation;
   }
-  private async call(path: string, handle?: string, input?: Record<string, unknown>) {
+  private async call(
+    path: string,
+    handle?: string,
+    input?: Record<string, unknown>,
+    method?: 'PUT',
+    query?: Record<string, string>,
+  ) {
     const controller = new AbortController();
     this.controllers.add(controller);
     try {
-      return await this.deps.request(path, handle, input, controller.signal);
+      return await (query
+        ? this.deps.request(path, handle, input, controller.signal, method, query)
+        : method
+          ? this.deps.request(path, handle, input, controller.signal, method)
+          : this.deps.request(path, handle, input, controller.signal));
     } finally {
       this.controllers.delete(controller);
     }
@@ -336,6 +346,8 @@ export class NuniSessionController {
     path: string,
     expectedContext: string,
     input?: Record<string, unknown>,
+    method?: 'PUT',
+    query?: Record<string, string>,
   ): Promise<unknown> => {
     const session = this.state.session;
     if (
@@ -353,7 +365,7 @@ export class NuniSessionController {
     }
     const run = this.generation;
     try {
-      const result = await this.call(path, this.record.sessionHandle, input);
+      const result = await this.call(path, this.record.sessionHandle, input, method, query);
       if (!this.current(run) || this.state.session?.context !== expectedContext)
         throw new NuniError(409, 'SESSION_CHANGED');
       return result;
