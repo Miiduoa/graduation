@@ -3,9 +3,10 @@
 import { use, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
+import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
 import { LoginRequiredLostFoundComments } from '@/components/LoginRequiredLostFoundComments';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import type { MenuItem } from '@/lib/firebase';
 import {
   CAFETERIA_BACK_TO_LIST_TEXT,
@@ -41,11 +42,21 @@ import social from '@/features/social/Social.module.css';
 
 export default function StorefrontPage(props: {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ schoolId?: string; school?: string }>;
+  searchParams?: Promise<{ schoolId?: string; school?: string; campus?: string }>;
 }) {
   const { id } = use(props.params);
   const search = props.searchParams ? use(props.searchParams) : undefined;
-  const context = resolveSchoolPageContext(search);
+  const context = useBrowsingSchoolPageContext(search);
+  if (!context.ready) {
+    return <SiteShell title="餐廳"><SchoolScopePlaceholder /></SiteShell>;
+  }
+  return <StorefrontContent key={`${context.schoolId}:${id}`} id={id} context={context} />;
+}
+
+function StorefrontContent({ id, context }: {
+  id: string;
+  context: ReturnType<typeof useBrowsingSchoolPageContext>;
+}) {
   const { user, loading: authLoading } = useAuth();
   const signedIn = Boolean(user?.uid);
   const loginReturnUrl = `/cafeteria/${encodeURIComponent(id)}?schoolId=${encodeURIComponent(context.schoolId)}`;
