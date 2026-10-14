@@ -29,3 +29,22 @@ export function hasOfficialProvidenceLibraryGuide(
 ): boolean {
   return schoolId === 'pu' && place.category === '圖書館' && place.name.includes('蓋夏');
 }
+
+/** A verified university-operated campus plan, not an imported POI data feed. */
+export const PROVIDENCE_CAMPUS_MAP_URL =
+  'https://gnl.pu.edu.tw/p/426-1007-8.php?Lang=zh-tw';
+
+const OFFICIAL_CAMPUS_MAP_URLS = new Map<string, string>([
+  ['pu', PROVIDENCE_CAMPUS_MAP_URL],
+  ['nthu', 'https://www.nthu.edu.tw/campusmap'],
+  ['ncu', 'https://www.ncu.edu.tw/p/412-1000-105.php?Lang=zh-tw'],
+  ['ntu', 'https://www.ntu.edu.tw/about/map.html'],
+  ['tw-nchu', 'https://www.nchu.edu.tw/about/mid/869'],
+  ['ncku', 'https://web.ncku.edu.tw/p/412-1000-29366.php'],
+  ['ntust', 'https://www.ntust.edu.tw/p/412-1000-102.php?Lang=zh-tw'],
+  ['nycu', 'https://www.nycu.edu.tw/aa/ch/app/artwebsite/view?id=2454&module=artwebsite&serno=d4bf9e00-384d-4ce7-bdf9-8ff5b2a00375'],
+]);
+
+export function getOfficialCampusMapUrl(schoolId?: string | null): string | null {
+  return schoolId ? OFFICIAL_CAMPUS_MAP_URLS.get(schoolId) ?? null : null;
+}

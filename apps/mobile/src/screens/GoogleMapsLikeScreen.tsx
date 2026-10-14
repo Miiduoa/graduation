@@ -18,7 +18,11 @@ import { useTheme } from '../state/theme';
 import { useSchool } from '../state/school';
 import { useAuth } from '../state/auth';
 import { safeNavigate } from '../utils/safeNavigate';
-import { buildCampusMapSearchUrl, hasOfficialProvidenceLibraryGuide } from '@campus/shared/src/campusMapLookup';
+import {
+  buildCampusMapSearchUrl,
+  getOfficialCampusMapUrl,
+  hasOfficialProvidenceLibraryGuide,
+} from '@campus/shared/src/campusMapLookup';
 import {
   buildCampusMapHtml,
   buildWalkingDirectionsUrl,
@@ -74,6 +78,7 @@ function CampusMapContent({
 }) {
   const theme = useTheme();
   const mapSearchUrl = buildCampusMapSearchUrl(schoolName);
+  const officialMapUrl = getOfficialCampusMapUrl(schoolId);
   const webRef = useRef<WebView>(null);
   const scrollRef = useRef<ScrollView>(null);
   const mounted = useRef(true);
@@ -94,6 +99,7 @@ function CampusMapContent({
   const [locating, setLocating] = useState(false);
   const [locationError, setLocationError] = useState('');
   const [directionsError, setDirectionsError] = useState('');
+  const [officialMapError, setOfficialMapError] = useState('');
 
   useEffect(() => {
     mounted.current = true;
@@ -235,6 +241,31 @@ function CampusMapContent({
     }
   };
 
+  const openOfficialMap = async () => {
+    if (!officialMapUrl) return;
+    setOfficialMapError('');
+    try {
+      await Linking.openURL(officialMapUrl);
+    } catch {
+      if (mounted.current) setOfficialMapError('無法開啟校方校區平面圖，請確認網路連線後重試。');
+    }
+  };
+
+  const officialPlanAction = officialMapUrl ? (
+    <View style={{ gap: theme.space.sm }}>
+      <AIButton
+        label="查看校方校區平面圖"
+        variant="ghost"
+        onPress={() => void openOfficialMap()}
+      />
+      {officialMapError ? (
+        <Text accessibilityRole="alert" style={{ ...theme.typography.bodySmall, color: theme.colors.danger }}>
+          {officialMapError}
+        </Text>
+      ) : null}
+    </View>
+  ) : null;
+
   const textStyle = { ...theme.typography.bodySmall, color: theme.colors.muted };
 
   return (
@@ -254,10 +285,12 @@ function CampusMapContent({
             請確認登入狀態與網路連線後重試。
           </Text>
           <AIButton label="重新讀取地點" onPress={() => void load()} />
+          {officialPlanAction}
         </AICard>
       ) : catalog.length === 0 ? (
         <AICard title="尚未提供校園地點">
           <Text style={textStyle}>目前沒有可顯示的地點資料，不會改用其他學校的建築或導航位置。</Text>
+          {officialPlanAction}
           {mapSearchUrl ? (
             <>
               <AIButton
@@ -431,6 +464,7 @@ function CampusMapContent({
               <Text style={textStyle}>
                 依目前校園地點資料顯示。開放時間與出入口請以現場公告為準。
               </Text>
+              {officialPlanAction}
             </View>
           </AICard>
           {selected ? (
