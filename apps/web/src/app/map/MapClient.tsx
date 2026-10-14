@@ -268,25 +268,24 @@ function MapContent({
       <div className={`card ${styles.state}`}>
         <h2>目前沒有可顯示的校園地點</h2>
         <p>地點需要有完整的名稱與座標才能顯示。你也可以先查詢校方提供的校園資訊。</p>
-        {officialMapUrl ? (
-          <>
+        <p>目前還沒有這所校園可顯示的地點清單，不會改用其他學校的建築或導航位置。</p>
+        <div className={styles.actions}>
+          {officialMapUrl && (
             <a className="btn" href={officialMapUrl} target="_blank" rel="noopener noreferrer">
               查看校方校區平面圖
             </a>
-            <p>這是學校公布的校區配置，不代表目前已經具備可供程式導航的建築座標。</p>
-          </>
-        ) : (
-          <>
-            <p>目前還沒有這所校園的地點資料，不會改用其他學校的建築或導航位置。</p>
-            {fallbackMapUrl && (
-              <>
-                <a className="btn" href={fallbackMapUrl} target="_blank" rel="noopener noreferrer">
-                  在 Google 地圖搜尋{schoolName} ↗
-                </a>
-                <p>此連結為第三方地圖搜尋，地點及路線仍需自行核對，不代表校方已發布建築座標。</p>
-              </>
-            )}
-          </>
+          )}
+          {fallbackMapUrl && (
+            <a className="btn" href={fallbackMapUrl} target="_blank" rel="noopener noreferrer">
+              在 Google 地圖搜尋{schoolName} ↗
+            </a>
+          )}
+        </div>
+        {officialMapUrl && (
+          <p>校方發布的平面圖可用來核對校舍位置，不代表已有可用於程式導航的建築座標。</p>
+        )}
+        {fallbackMapUrl && (
+          <p>第三方地圖搜尋的地點及路線仍需核對，不能視為校方已發布的資料。</p>
         )}
       </div>
     );
