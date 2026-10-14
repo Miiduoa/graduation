@@ -7,6 +7,7 @@ import { AppActionIcon } from '../ui/AppActionIcon';
 import type { GeneratedButtonIconId } from '../ui/generatedButtonIcons';
 import { useTheme } from '../state/theme';
 import { useSchool } from '../state/school';
+import { supportsLegacyTransportHub } from '../features/campusTransportScope';
 import { safeNavigate } from '../utils/safeNavigate';
 import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
 import { OpenOrderCard } from '../components/OpenOrderCard';
@@ -169,7 +170,7 @@ function CampusDirectory({
   const [query, setQuery] = useState('');
   const filtered = useMemo(() => {
     const keyword = query.trim().toLowerCase();
-    const isProvidence = schoolId === 'pu' || schoolId === 'tw-pu';
+    const isProvidence = supportsLegacyTransportHub(schoolId);
     return sections
       .map((section) => ({
         ...section,
