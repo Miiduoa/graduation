@@ -29,9 +29,9 @@ it('keeps the student-facing cafeteria copy used by empty and missing shops', ()
   expect(CAFETERIA_PAYMENT_DISCLAIMER).not.toMatch(/nuni/i);
   expect(DEMO_CAFETERIA_BADGE).toBe('示範');
   expect(DEMO_CAFETERIA_NOTICE).toBe('這是示範店家，菜單和價格不是真的，不能點餐。');
-  expect(UNVERIFIED_CAFETERIA_BADGE).toBe('尚未確認');
+  expect(UNVERIFIED_CAFETERIA_BADGE).toBe('未核對');
   expect(UNVERIFIED_CAFETERIA_NOTICE).toBe(
-    '這間店的資料還沒經店家確認，菜單和價錢可能跟現場不一樣。',
+    '這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。',
   );
   expect(CAFETERIA_REVIEW_STATUS_DEFAULT).toBe('unverified');
   expect(cafeteriaListHref('cgu')).toBe('/cafeteria?schoolId=cgu');
@@ -50,16 +50,16 @@ it('reads only the catalog reviewStatus field and treats missing or unknown valu
   expect(parseCafeteriaReviewStatus(true)).toBe('unverified');
   expect(parseCafeteriaReviewStatus(false)).toBe('unverified');
   expect(cafeteriaReviewBadge('verified')).toBeNull();
-  expect(cafeteriaReviewBadge('unverified')).toBe('尚未確認');
+  expect(cafeteriaReviewBadge('unverified')).toBe('未核對');
   expect(cafeteriaReviewBadge('demo')).toBe('示範');
-  expect(cafeteriaReviewBadge(undefined)).toBe('尚未確認');
+  expect(cafeteriaReviewBadge(undefined)).toBe('未核對');
   expect(cafeteriaReviewNotice('verified')).toBeNull();
   expect(cafeteriaReviewNotice('unverified')).toBe(
-    '這間店的資料還沒經店家確認，菜單和價錢可能跟現場不一樣。',
+    '這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。',
   );
   expect(cafeteriaReviewNotice('demo')).toBe('這是示範店家，菜單和價格不是真的，不能點餐。');
   expect(cafeteriaReviewNotice('unknown')).toBe(
-    '這間店的資料還沒經店家確認，菜單和價錢可能跟現場不一樣。',
+    '這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。',
   );
 });
 
