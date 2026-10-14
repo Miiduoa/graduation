@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   PROVIDENCE_UNIVERSITY_SCHOOL_CODE,
@@ -68,16 +68,31 @@ function normalizeSelection(selection: Partial<SchoolSelection>): SchoolSelectio
   return toSelection(schoolFromSelection(selection));
 }
 
+/** An ID and a school code are alternative selectors, not independent fields. */
+export function mergeSchoolSelection(
+  previous: SchoolSelection,
+  patch: Partial<SchoolSelection>,
+): SchoolSelection {
+  const idChanged = patch.schoolId !== undefined;
+  const codeChanged = patch.code !== undefined;
+  const schoolId = idChanged ? patch.schoolId : codeChanged ? null : previous.schoolId;
+  const code = idChanged && !codeChanged
+    ? ''
+    : codeChanged ? normalizeSchoolCode(patch.code) : previous.code;
+  return normalizeSelection({ code, schoolId });
+}
+
 export function SchoolProvider(props: {
   children: React.ReactNode;
   initial?: Partial<SchoolSelection>;
 }) {
-  const initialSelection = normalizeSelection({
-    code: props.initial?.code ?? PROVIDENCE_UNIVERSITY_SCHOOL_CODE,
-    schoolId: props.initial?.schoolId ?? PROVIDENCE_UNIVERSITY_SCHOOL_ID,
-  });
+  const initialSelection = mergeSchoolSelection(
+    toSelection(getProvidenceSchool()),
+    props.initial ?? {},
+  );
   const [selection, setSelectionState] = useState<SchoolSelection>(initialSelection);
   const [loaded, setLoaded] = useState(false);
+  const touched = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -87,16 +102,7 @@ export function SchoolProvider(props: {
         if (!raw) return;
         const parsed = JSON.parse(raw) as Partial<SchoolSelection>;
         if (cancelled) return;
-        setSelectionState((prev) =>
-          normalizeSelection({
-            code: parsed.code ?? prev.code,
-            schoolId: parsed.schoolId ?? prev.schoolId,
-            schoolName: parsed.schoolName ?? prev.schoolName ?? null,
-            shortName: parsed.shortName ?? prev.shortName ?? null,
-            themeColor: parsed.themeColor ?? prev.themeColor ?? null,
-            domains: parsed.domains ?? prev.domains ?? null,
-          }),
-        );
+        setSelectionState((prev) => (touched.current ? prev : mergeSchoolSelection(prev, parsed)));
       } catch {
         // ignore invalid persisted state
       } finally {
@@ -111,39 +117,10 @@ export function SchoolProvider(props: {
 
   const previousSchoolRef = useRef<string | null>(null);
 
-  const setSelection = (next: Partial<SchoolSelection>) => {
-    setSelectionState((prev) => {
-      const identityChanged = next.code !== undefined || next.schoolId !== undefined;
-      const code = next.code != null ? normalizeSchoolCode(next.code) : prev.code;
-      const schoolId = next.schoolId === undefined ? prev.schoolId : next.schoolId;
-      const schoolName =
-        next.schoolName === undefined
-          ? identityChanged
-            ? null
-            : (prev.schoolName ?? null)
-          : next.schoolName;
-      const shortName =
-        next.shortName === undefined
-          ? identityChanged
-            ? null
-            : (prev.shortName ?? null)
-          : next.shortName;
-      const themeColor =
-        next.themeColor === undefined
-          ? identityChanged
-            ? null
-            : (prev.themeColor ?? null)
-          : next.themeColor;
-      const domains =
-        next.domains === undefined
-          ? identityChanged
-            ? null
-            : (prev.domains ?? null)
-          : next.domains;
-
-      return normalizeSelection({ code, schoolId, schoolName, shortName, themeColor, domains });
-    });
-  };
+  const setSelection = useCallback((next: Partial<SchoolSelection>) => {
+    touched.current = true;
+    setSelectionState((previous) => mergeSchoolSelection(previous, next));
+  }, []);
 
   useEffect(() => {
     if (!loaded) return;
@@ -188,7 +165,7 @@ export function SchoolProvider(props: {
       school,
       schoolId: normalizedSelection.schoolId ?? school?.id ?? null,
     }),
-    [normalizedSelection, school],
+    [normalizedSelection, school, setSelection],
   );
 
   return <SchoolContext.Provider value={value}>{props.children}</SchoolContext.Provider>;
