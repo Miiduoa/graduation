@@ -234,7 +234,7 @@ function TransitExplorerContent({ schoolId, schoolName, legacy }: { schoolId: st
       {(mode === 'nearby' || mode === 'search') && <label>查詢縣市<select value={city} onChange={(event) => {
         if (!isCity(event.target.value)) return;
         generation.current += 1; setLocating(false); setCity(event.target.value); setMessage(''); search(null);
-      }}><option value="">請先選擇縣市</option>{Object.entries(TRANSIT_CITIES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
+      }}><option value="" disabled>請先選擇縣市</option>{Object.entries(TRANSIT_CITIES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
       {mode === 'nearby' && <><label>搜尋半徑<select value={radius} onChange={(event) => { generation.current += 1; setLocating(false); setRadius(Number(event.target.value)); search(null); }}><option value={300}>300 公尺</option><option value={600}>600 公尺</option><option value={1000}>1 公里</option></select></label><button type="button" className={css.primary} disabled={locating} onClick={locate}>{locating ? '正在取得位置…' : '使用我的位置'}</button></>}
       {mode === 'search' && <form className={css.searchForm} onSubmit={(event) => { event.preventDefault(); if (term.trim().length < 2) { setMessage('請輸入至少兩個字的站名。'); return; } if (!isCity(city)) { setMessage('請先選擇要查詢的縣市。'); return; } setMessage(''); search({ action: 'search', city, text: term.trim() }); }}><label>站名或學校名稱<input type="search" value={term} maxLength={40} minLength={2} required placeholder="例如 靜宜大學、臺中車站" onChange={(event) => setTerm(event.target.value)} /></label><button type="submit" className={css.primary}>尋找站牌</button></form>}
       {mode === 'saved' && <p className={css.scope}>收藏只保存在目前瀏覽器。清除瀏覽器資料後，收藏也會移除。</p>}
