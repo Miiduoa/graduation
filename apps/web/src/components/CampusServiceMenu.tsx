@@ -2,6 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
+import { useOptionalSelectedSchool } from './SelectedSchoolProvider';
+import { browsingSchoolSearch } from '@/lib/navigation';
 import { useEffect, useRef } from 'react';
 import { CAMPUS_SERVICES, SERVICE_CATEGORIES } from '@/lib/campusServices';
 import styles from '@/app/home.module.css';
@@ -12,6 +14,7 @@ export function CampusServiceMenu() {
     (service) => pathname === service.href || pathname?.startsWith(`${service.href}/`),
   ).sort((first, second) => second.href.length - first.href.length)[0]?.href;
   const params = useSearchParams();
+  const selected = useOptionalSelectedSchool();
   const menu = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
     function dismiss(event: PointerEvent) {
@@ -23,12 +26,8 @@ export function CampusServiceMenu() {
     document.addEventListener('pointerdown', dismiss);
     return () => document.removeEventListener('pointerdown', dismiss);
   }, []);
-  const context = new URLSearchParams();
-  for (const key of ['school', 'schoolId', 'campus']) {
-    const value = params?.get(key);
-    if (value) context.set(key, value);
-  }
-  const href = (path: string) => `${path}${context.size ? `?${context}` : ''}`;
+  const schoolSearch = browsingSchoolSearch(params, selected?.selectedSchoolId ?? null);
+  const href = (path: string) => `${path}${schoolSearch}`;
   return (
     <details
       ref={menu}
