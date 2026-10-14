@@ -15,9 +15,6 @@ export type CourseOutlineSection = {
   missingUnit: boolean;
 };
 
-type CourseActivity = Pick<NuniAssignment, 'state' | 'dueAt' | 'mySubmission'> &
-  Partial<Pick<NuniQuiz, 'myResponse'>>;
-
 export function selectCourseUnit(form: FormData, units: NuniUnit[] | null): string | undefined {
   const selected = form.get('unitId');
   if (selected === null || selected === '') return undefined;
