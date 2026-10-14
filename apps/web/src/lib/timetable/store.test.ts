@@ -193,3 +193,50 @@ it('keeps school and uid boundaries when falling back to legacy storage', async 
   expect((await loadPersonalTimetable('u-2', 'other', 'school:u-2')).courses).toEqual([]);
   expect((await loadPersonalTimetable(null, 'other', 'school:u-1')).courses).toEqual([]);
 });
+
+
+it.each([
+  ['invalid JSON', '{broken'],
+  ['non-array course list', JSON.stringify({ schoolId: 'pu', courses: 'missing-list', meta: {} })],
+  ['oversized course list', JSON.stringify({ schoolId: 'pu', courses: Array.from({ length: 81 }, () => course), meta: {} })],
+  ['foreign scoped school', JSON.stringify({ schoolId: 'ntu', courses: [course], meta: {} })],
+])('preserves %s from a damaged scoped copy instead of treating it as empty', async (_label, raw) => {
+  const key = 'campus-one-personal-timetable:school:u-1:pu';
+  localStorage.setItem(key, raw);
+  await expect(loadPersonalTimetable('u-1', 'pu', 'school:u-1')).rejects.toThrow();
+  await expect(savePersonalTimetable('u-1', {
+    courses: [course], meta: {} as never, shareWithFriends: true,
+    updatedAt: new Date().toISOString(), schoolId: 'pu',
+  }, 'school:u-1')).rejects.toThrow();
+  expect(localStorage.getItem(key)).toBe(raw);
+  expect(firestore.setDoc).not.toHaveBeenCalled();
+});
+
+it('retains a mismatched unscoped legacy school without exposing it', async () => {
+  const legacyKey = 'campus-one-personal-timetable:u-1';
+  const raw = JSON.stringify({ schoolId: 'ntu', courses: [course] });
+  localStorage.setItem(legacyKey, raw);
+  firestore.getDoc.mockResolvedValue({ exists: () => false });
+  expect((await loadPersonalTimetable('u-1', 'pu', 'school:u-1')).courses).toEqual([]);
+  expect(localStorage.getItem(legacyKey)).toBe(raw);
+});
+
+
+it('does not claim an unscoped legacy copy with no school or silently migrate it', async () => {
+  const key = 'campus-one-personal-timetable:u-1';
+  const raw = JSON.stringify({ courses: [course], updatedAt: '2026-10-12T00:00:00Z' });
+  localStorage.setItem(key, raw);
+  firestore.getDoc.mockResolvedValue({ exists: () => false });
+  expect((await loadPersonalTimetable('u-1', 'pu', 'school:u-1')).courses).toEqual([]);
+  expect(localStorage.getItem(key)).toBe(raw);
+});
+
+it('rejects a scoped timetable missing the school marker without erasing it', async () => {
+  const key = 'campus-one-personal-timetable:school:u-1:pu';
+  const raw = JSON.stringify({ courses: [course], updatedAt: '2026-10-12T00:00:00Z' });
+  localStorage.setItem(key, raw);
+  await expect(savePersonalTimetable('u-1', {
+    courses: [course], meta: {} as never, shareWithFriends: true, updatedAt: '', schoolId: 'pu',
+  }, 'school:u-1')).rejects.toThrow('資料');
+  expect(localStorage.getItem(key)).toBe(raw);
+});
