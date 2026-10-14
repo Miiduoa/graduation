@@ -1,15 +1,20 @@
-import React, { useRef, useState, useSyncExternalStore, useEffect } from 'react';
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Linking, Text, TextInput, View } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
+import {
+  buildOfficialLibraryCatalogUrl,
+  getOfficialLibrary,
+} from '@campus/shared/src/officialLibraries';
 import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
-import { buildLibrarySearchUrl, getLibraryOpacBaseUrl } from '../services/libraryOpacClient';
 
 type Navigation = {
   goBack?: () => void;
   navigate?: (screen: string, params?: { initialQuery: string }) => void;
 };
+
 export default function LibraryAiFirstScreen({ navigation }: { navigation?: Navigation }) {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const { user } = useAuth();
@@ -23,33 +28,42 @@ export default function LibraryAiFirstScreen({ navigation }: { navigation?: Navi
       scope={scope}
       activeScope={activeScope}
       schoolId={school.id}
+      schoolName={school.name}
       navigation={navigation}
     />
   );
 }
+
 function LibraryContent({
   scope,
   activeScope,
   schoolId,
+  schoolName,
   navigation,
 }: {
   scope: string;
   activeScope: React.MutableRefObject<string>;
   schoolId: string;
+  schoolName: string;
   navigation?: Navigation;
 }) {
+  const library = getOfficialLibrary(schoolId, schoolName);
   const [keyword, setKeyword] = useState('');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const mounted = useRef(true);
+
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
     };
   }, []);
+
   const isCurrent = () => mounted.current && activeScope.current === scope;
+
   const open = async (url: string) => {
-    if (!isCurrent() || schoolId !== 'pu') return;
+    if (!isCurrent() || !library) return;
     setError('');
     try {
       await Linking.openURL(url);
@@ -57,30 +71,55 @@ function LibraryContent({
       if (isCurrent()) setError('無法開啟圖書館網頁，請確認網路連線後重試。');
     }
   };
+
+  const searchOfficialCatalog = async () => {
+    if (!isCurrent() || !library || !keyword.trim()) return;
+    if (library.catalogSearch === 'pu-webpac') {
+      if (navigation?.navigate) {
+        navigation.navigate('LibraryCatalog', { initialQuery: keyword.trim() });
+      } else {
+        const url = buildOfficialLibraryCatalogUrl(schoolId, keyword);
+        if (url) await open(url);
+      }
+      return;
+    }
+    try {
+      await Clipboard.setStringAsync(keyword.trim());
+      if (isCurrent()) setNotice('已複製關鍵字，請貼到圖書館網站的搜尋欄位。');
+    } catch {
+      if (isCurrent()) setNotice('請在學校圖書館網站自行輸入關鍵字。');
+    }
+    await open(library.catalogUrl);
+  };
+
   return (
     <AIDetailScreen
       title="圖書館"
       subtitle="找書、查借閱紀錄，安排下一次到館。"
       onBack={() => navigation?.goBack?.()}
     >
-      {schoolId !== 'pu' ? (
+      {!library ? (
         <AICard title="學校圖書館">
-          <Text style={{ color: aiTokens.muted }}>
-            目前尚未提供這所學校的圖書館入口，請從學校官網查詢。
+          <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
+            目前尚未提供這所學校的圖書館入口。未核對到校方官方網站前，不會帶你到其他學校的館藏。
           </Text>
         </AICard>
       ) : (
         <>
-          <AICard title="找一本書">
+          <AICard title={library.name}>
             <View style={{ gap: 12 }}>
-              <Text style={{ color: aiTokens.muted }}>依書名、作者或 ISBN 查詢學校館藏。</Text>
+              <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
+                {library.catalogSearch === 'pu-webpac'
+                  ? '依書名、作者或 ISBN 查詢學校館藏。'
+                  : '已連結這所學校的官方圖書館。不同學校有各自的館藏系統，請在官網確認館藏及可借狀態。'}
+              </Text>
               <TextInput
                 accessibilityLabel="館藏關鍵字"
                 placeholder="書名、作者或 ISBN"
                 placeholderTextColor={aiTokens.muted}
                 value={keyword}
                 maxLength={200}
-                onChangeText={setKeyword}
+                onChangeText={(value) => { setKeyword(value); setNotice(''); }}
                 style={{
                   color: aiTokens.text,
                   borderColor: aiTokens.border,
@@ -94,52 +133,64 @@ function LibraryContent({
                 <AIButton
                   label="查詢館藏"
                   disabled={!keyword.trim()}
-                  onPress={() => {
-                    if (!isCurrent()) return;
-                    if (navigation?.navigate)
-                      navigation.navigate('LibraryCatalog', { initialQuery: keyword.trim() });
-                    else void open(buildLibrarySearchUrl(keyword));
-                  }}
+                  onPress={() => void searchOfficialCatalog()}
                 />
                 <AIButton
                   label="在圖書館網站搜尋"
                   variant="ghost"
                   disabled={!keyword.trim()}
-                  onPress={() => void open(buildLibrarySearchUrl(keyword))}
+                  onPress={() => {
+                    const url = buildOfficialLibraryCatalogUrl(schoolId, keyword);
+                    if (url) void open(url);
+                  }}
                 />
               </View>
+              {notice ? (
+                <Text accessibilityRole="text" style={{ color: aiTokens.muted, lineHeight: 20 }}>
+                  {notice}
+                </Text>
+              ) : null}
             </View>
           </AICard>
           <AICard title="我的借閱與續借">
             <View style={{ gap: 12 }}>
               <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
-                前往圖書館網站登入自己的帳號，查看到期日與可續借項目。是否續借或預約成功，以館方回覆為準。
+                前往這所學校圖書館的網站登入，查看到期日與可續借項目。續借是否成功以館方回覆為準。
               </Text>
               <AIButton
-                label="開啟我的借閱紀錄"
-                onPress={() => void open(`${getLibraryOpacBaseUrl()}personal/`)}
+                label={library.accountUrl ? '開啟我的借閱紀錄' : '前往圖書館官網登入'}
+                onPress={() => void open(library.accountUrl ?? library.websiteUrl)}
               />
             </View>
           </AICard>
           <AICard title="到館前先看看">
             <View style={{ gap: 12 }}>
               <Text style={{ color: aiTokens.muted }}>
-                開放時間與空間使用情況請以館方公告為準。
+                開放時間與空間使用情況請以校方公告為準。
               </Text>
               <AIButton
                 label="開館時間"
                 variant="ghost"
-                onPress={() => void open('https://library.pu.edu.tw/p/426-1054-32.php?Lang=zh-tw')}
+                onPress={() => void open(library.hoursUrl ?? library.websiteUrl)}
               />
+              {library.spacesUrl ? (
+                <AIButton
+                  label="空間與設備預約"
+                  variant="ghost"
+                  onPress={() => void open(library.spacesUrl!)}
+                />
+              ) : null}
+              {library.electronicResourcesUrl ? (
+                <AIButton
+                  label="電子資源"
+                  variant="ghost"
+                  onPress={() => void open(library.electronicResourcesUrl!)}
+                />
+              ) : null}
               <AIButton
-                label="空間與設備預約"
+                label="圖書館官網"
                 variant="ghost"
-                onPress={() => void open('https://library.pu.edu.tw/p/426-1054-14.php?Lang=zh-tw')}
-              />
-              <AIButton
-                label="電子資源"
-                variant="ghost"
-                onPress={() => void open('https://jumper.lib.pu.edu.tw/')}
+                onPress={() => void open(library.websiteUrl)}
               />
             </View>
           </AICard>

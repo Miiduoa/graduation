@@ -1,6 +1,7 @@
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { Linking } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import CafeteriaAiFirstScreen from '../screens/CafeteriaAiFirstScreen';
 import MenuDetailAiFirstScreen from '../screens/MenuDetailAiFirstScreen';
 import LibraryAiFirstScreen from '../screens/LibraryAiFirstScreen';
@@ -16,6 +17,7 @@ import type { DiningReceipt } from '../features/dining';
 
 let mockUser: { uid: string } | null = { uid: 'student-a' };
 let mockSchool = { id: 'pu' };
+jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn(async () => {}) }));
 jest.mock('../state/auth', () => ({ useAuth: () => ({ user: mockUser }) }));
 jest.mock('../state/school', () => ({ useSchool: () => ({ school: mockSchool }) }));
 jest.mock('../ui/navigationTheme', () => ({ useTabBarContentBottomPadding: () => 80 }));
@@ -441,4 +443,29 @@ test('restaurant keeps the school catalog and links directly to the platform foo
     params: { tab: 'food' },
   });
   expect(view.getByText('選擇今日餐點')).toBeTruthy();
+});
+
+test('switching universities opens that university official library instead of Providence OPAC', async () => {
+  mockSchool = { id: 'ntu' };
+  const navigate = jest.fn();
+  const view = render(<LibraryAiFirstScreen navigation={{ navigate }} />);
+  expect(view.getByText('國立臺灣大學圖書館')).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText('館藏關鍵字'), ' 分散式系統 ');
+  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  expect(Clipboard.setStringAsync).toHaveBeenCalledWith('分散式系統');
+  expect(Linking.openURL).toHaveBeenCalledWith('https://www.lib.ntu.edu.tw/');
+  expect(navigate).not.toHaveBeenCalledWith('LibraryCatalog', expect.anything());
+  expect(view.queryByText('蓋夏圖書館')).toBeNull();
+});
+
+test('a campus switch resets library search and never carries the previous OPAC account link', async () => {
+  const view = render(<LibraryAiFirstScreen />);
+  fireEvent.changeText(view.getByLabelText('館藏關鍵字'), 'private search');
+  mockSchool = { id: 'ncue' };
+  view.rerender(<LibraryAiFirstScreen />);
+  expect(view.getByLabelText('館藏關鍵字').props.value).toBe('');
+  expect(view.getByText('國立彰化師範大學圖書與資訊處')).toBeTruthy();
+  expect(view.queryByText('開啟我的借閱紀錄')).toBeNull();
+  await act(async () => fireEvent.press(view.getByText('圖書館官網')));
+  expect(Linking.openURL).toHaveBeenCalledWith('https://olis.ncue.edu.tw/');
 });

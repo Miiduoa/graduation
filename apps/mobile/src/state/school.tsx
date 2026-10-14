@@ -5,7 +5,7 @@ import {
   PROVIDENCE_UNIVERSITY_SCHOOL_ID,
   type School,
 } from '@campus/shared/src';
-import { findSchoolById, normalizeSchoolCode, resolveSchool } from '@campus/shared/src/schools';
+import { findSchoolById, findSchoolsByCode, normalizeSchoolCode, resolveSchool } from '@campus/shared/src/schools';
 import { clearCacheExceptSchool } from '../data/cachedSource';
 import { setHybridSourceSchoolContext } from '../data/hybridSource';
 import { applySchoolTheme, registerSchoolTheme } from '../ui/theme';
@@ -52,16 +52,26 @@ function toSelection(school: School): SchoolSelection {
 }
 
 export function schoolFromSelection(selection: Partial<SchoolSelection>): School {
-  return (
-    (selection.schoolId ? findSchoolById(selection.schoolId) : undefined) ??
-    (selection.code
-      ? resolveSchool({
-          school: selection.code,
-          schoolId: selection.schoolId ?? undefined,
-        })
-      : undefined) ??
-    getProvidenceSchool()
-  );
+  const byId = findSchoolById(selection.schoolId);
+  if (byId) return byId;
+  const id = selection.schoolId?.trim();
+  if (id && /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(id)) {
+    // The public directory can introduce schools before the bundled legacy catalog is updated.
+    // Preserve their identity instead of silently rendering another institution's data.
+    const chosenCode = normalizeSchoolCode(selection.code);
+    const code =
+      chosenCode && chosenCode !== PROVIDENCE_UNIVERSITY_SCHOOL_CODE
+        ? chosenCode
+        : id.toUpperCase();
+    return {
+      id,
+      code,
+      name: selection.schoolName?.trim() || '所選校園',
+      shortName: selection.shortName?.trim() || undefined,
+    };
+  }
+  const matches = findSchoolsByCode(selection.code);
+  return matches.length === 1 ? matches[0] : getProvidenceSchool();
 }
 
 function normalizeSelection(selection: Partial<SchoolSelection>): SchoolSelection {
@@ -74,7 +84,7 @@ export function SchoolProvider(props: {
 }) {
   const initialSelection = normalizeSelection({
     code: props.initial?.code ?? PROVIDENCE_UNIVERSITY_SCHOOL_CODE,
-    schoolId: props.initial?.schoolId ?? PROVIDENCE_UNIVERSITY_SCHOOL_ID,
+    schoolId: props.initial?.schoolId ?? (props.initial?.code ? null : PROVIDENCE_UNIVERSITY_SCHOOL_ID),
   });
   const [selection, setSelectionState] = useState<SchoolSelection>(initialSelection);
   const [loaded, setLoaded] = useState(false);
@@ -90,7 +100,7 @@ export function SchoolProvider(props: {
         setSelectionState((prev) =>
           normalizeSelection({
             code: parsed.code ?? prev.code,
-            schoolId: parsed.schoolId ?? prev.schoolId,
+            schoolId: parsed.schoolId === undefined ? (parsed.code ? null : prev.schoolId) : parsed.schoolId,
             schoolName: parsed.schoolName ?? prev.schoolName ?? null,
             shortName: parsed.shortName ?? prev.shortName ?? null,
             themeColor: parsed.themeColor ?? prev.themeColor ?? null,
@@ -115,7 +125,11 @@ export function SchoolProvider(props: {
     setSelectionState((prev) => {
       const identityChanged = next.code !== undefined || next.schoolId !== undefined;
       const code = next.code != null ? normalizeSchoolCode(next.code) : prev.code;
-      const schoolId = next.schoolId === undefined ? prev.schoolId : next.schoolId;
+      const schoolId = next.schoolId === undefined
+        ? next.code === undefined
+          ? prev.schoolId
+          : null
+        : next.schoolId;
       const schoolName =
         next.schoolName === undefined
           ? identityChanged

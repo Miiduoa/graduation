@@ -8,6 +8,7 @@ vi.mock('@/components/SiteShell', () => ({
 }));
 beforeEach(() => {
   context.schoolId = 'pu';
+  context.schoolName = '靜宜大學';
 });
 afterEach(cleanup);
 it('searches the official catalog with the chosen field and user input', () => {
@@ -48,4 +49,33 @@ it('clears search input when the selected school changes', () => {
   context.schoolId = 'pu';
   rerender(<LibraryPage />);
   expect((screen.getByLabelText('關鍵字') as HTMLInputElement).value).toBe('');
+});
+
+it('opens the chosen university library without showing Providence links or a simulated catalog', () => {
+  context.schoolId = 'nthu';
+  context.schoolName = '國立清華大學';
+  render(<LibraryPage />);
+  expect(screen.getByText('國立清華大學圖書館')).toBeTruthy();
+  expect(screen.getByRole('link', { name: '前往官方館藏入口 ↗' }).getAttribute('href')).toBe(
+    'https://www.lib.nthu.edu.tw/',
+  );
+  expect(screen.getByRole('link', { name: '從本校圖書館官網登入 ↗' }).getAttribute('href')).toBe(
+    'https://www.lib.nthu.edu.tw/',
+  );
+  expect(screen.queryByRole('link', { name: '前往我的借閱紀錄 ↗' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '搜尋學校館藏 ↗' })).toBeNull();
+  expect(screen.queryByText('蓋夏圖書館')).toBeNull();
+});
+
+it('shows a separate official catalog for schools with verified catalog links', () => {
+  context.schoolId = 'ncue';
+  context.schoolName = '國立彰化師範大學';
+  render(<LibraryPage />);
+  expect(screen.getByRole('link', { name: '前往官方館藏入口 ↗' }).getAttribute('href')).toBe(
+    'https://webpacx.ncue.edu.tw/',
+  );
+  fireEvent.change(screen.getByLabelText('想找的書或關鍵字'), {
+    target: { value: '資料科學' },
+  });
+  expect((screen.getByRole('button', { name: '複製關鍵字' }) as HTMLButtonElement).disabled).toBe(false);
 });
