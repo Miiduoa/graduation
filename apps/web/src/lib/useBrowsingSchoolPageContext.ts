@@ -42,9 +42,20 @@ export function useBrowsingSchoolPageContext(params?: SchoolSearchParams) {
         schoolSearch: buildSchoolSearch({ id: preferred.id, code }),
       }
     : resolved;
+  const scopeStatus = !selection
+    ? 'ready'
+    : selection.loading || selection.catalogStatus === 'loading'
+      ? 'loading'
+      : selection.catalogStatus === 'error'
+        ? 'error'
+        : !selection.selectedSchool && (!explicit || params?.campus === 'all')
+          ? 'choose-school'
+          : 'ready';
   return {
     ...context,
-    ready: !selection || (!selection.loading && selection.catalogStatus === 'ready'),
-    catalogError: selection?.catalogStatus === 'error',
+    ready: scopeStatus === 'ready',
+    scopeStatus,
+    catalogError: scopeStatus === 'error',
+    requiresSchoolSelection: scopeStatus === 'choose-school',
   };
 }
