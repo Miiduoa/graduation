@@ -74,7 +74,9 @@ it('offers a personal-record link only after an approved request and active stud
   view.rerender(<CourseAccessPanel row={row} workspaces={[workspace]} onRefreshWorkspaces={refresh} onSelectLinkedCourse={choose} />);
   const button = await screen.findByRole('button', { name: /選擇已核准課班/ });
   fireEvent.click(button);
-  expect(choose).toHaveBeenCalledExactlyOnceWith(workspace.id);
+  expect(choose).toHaveBeenCalledTimes(1);
+  expect(choose).toHaveBeenCalledWith(workspace.id);
+  view.rerender(<CourseAccessPanel row={{ ...row, linkedCourseId: workspace.id }} workspaces={[workspace]} onRefreshWorkspaces={refresh} onSelectLinkedCourse={choose} />);
   expect(state.request).toHaveBeenCalledWith('course-access/requests', state.context, { cursor: null });
   expect(screen.getByText(/儲存個人紀錄後才生效/)).toBeTruthy();
 });
