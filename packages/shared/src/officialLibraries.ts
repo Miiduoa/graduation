@@ -46,8 +46,9 @@ export const officialLibraryDirectory: Readonly<Record<string, OfficialLibrarySe
   },
   ncu: {
     name: '國立中央大學圖書館',
-    websiteUrl: 'https://www.ncu.edu.tw/p/412-1000-324.php?Lang=zh-tw',
-    catalogUrl: 'https://www.ncu.edu.tw/p/412-1000-324.php?Lang=zh-tw',
+    websiteUrl: 'https://www.lib.ncu.edu.tw/',
+    catalogUrl: 'https://www.lib.ncu.edu.tw/',
+    hoursUrl: 'https://www.lib.ncu.edu.tw/open/hours_ca.php',
   },
   nsysu: {
     name: '國立中山大學圖書與資訊處',
