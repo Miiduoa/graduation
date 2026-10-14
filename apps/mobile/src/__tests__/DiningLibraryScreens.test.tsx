@@ -15,7 +15,7 @@ import {
 import type { DiningReceipt } from '../features/dining';
 
 let mockUser: { uid: string } | null = { uid: 'student-a' };
-let mockSchool = { id: 'pu' };
+let mockSchool: { id: string; name?: string } = { id: 'pu', name: '靜宜大學' };
 jest.mock('../state/auth', () => ({ useAuth: () => ({ user: mockUser }) }));
 jest.mock('../state/school', () => ({ useSchool: () => ({ school: mockSchool }) }));
 jest.mock('../ui/navigationTheme', () => ({ useTabBarContentBottomPadding: () => 80 }));
@@ -82,7 +82,7 @@ function deferred<T>() {
 beforeEach(() => {
   jest.clearAllMocks();
   mockUser = { uid: 'student-a' };
-  mockSchool = { id: 'pu' };
+  mockSchool = { id: 'pu', name: '靜宜大學' };
   jest.mocked(loadDiningCatalog).mockResolvedValue(catalog);
   jest.mocked(loadDiningIntent).mockResolvedValue(null);
   jest.mocked(prepareDiningIntent).mockResolvedValue(intent);
@@ -449,4 +449,12 @@ test('斷線後連查都查不出結果：寫「還在確認訂單有沒有送�
   const buttons = view.getAllByText('我的訂單');
   fireEvent.press(buttons[buttons.length - 1]);
   expect(navigate).toHaveBeenCalledWith('StudentOrders');
+});
+
+test('library can resolve an exact official university name with a different platform tenant ID', async () => {
+  mockSchool = { id: 'tenant-nthu', name: '國立清華大學' };
+  const view = render(<LibraryAiFirstScreen />);
+  await act(async () => fireEvent.press(view.getByText('開啟官方圖書館')));
+  expect(Linking.openURL).toHaveBeenCalledWith('https://www.lib.nthu.edu.tw/');
+  expect(view.queryByLabelText('館藏關鍵字')).toBeNull();
 });
