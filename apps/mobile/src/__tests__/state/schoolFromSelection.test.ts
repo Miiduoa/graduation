@@ -26,3 +26,18 @@ test('initial selection from code alone resolves the requested campus', () => {
   expect(preference.schoolId).toBe('thu');
   expect(preference.code).toBe('THU');
 });
+
+test('a directory school outside the built-in list stays selected by its unique ID', () => {
+  const remote = {
+    schoolId: 'tw-new-university',
+    code: 'NEWU',
+    schoolName: '新大學',
+    shortName: '新大',
+    themeColor: '#123456',
+  };
+  const selected = mergeSchoolSelection({ code: 'PU', schoolId: 'pu' }, remote);
+  expect(selected).toMatchObject(remote);
+  expect(schoolFromSelection(selected)).toMatchObject({ id: 'tw-new-university', name: '新大學' });
+  expect(mergeSchoolSelection(selected, { schoolName: '更新別名' }).schoolId).toBe('tw-new-university');
+  expect(mergeSchoolSelection(selected, { code: 'PU' }).schoolId).toBe('pu');
+});
