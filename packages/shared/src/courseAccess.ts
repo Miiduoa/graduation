@@ -32,8 +32,12 @@ export function courseKeys(value: Record<string, unknown>, keys: readonly string
     throw new CourseAccessError('COURSE_INVALID_INPUT');
 }
 export function courseText(value: unknown, max = 200, min = 0): string {
-  if (typeof value !== 'string' || value.length > max || /[\u0000-\u001f\u007f]/u.test(value))
+  if (typeof value !== 'string' || value.length > max)
     throw new CourseAccessError('COURSE_INVALID_INPUT');
+  for (const character of value) {
+    const code = character.charCodeAt(0);
+    if (code < 32 || code === 127) throw new CourseAccessError('COURSE_INVALID_INPUT');
+  }
   const text = value.normalize('NFKC').replace(/\s+/gu, ' ').trim();
   if (text.length < min || text.length > max) throw new CourseAccessError('COURSE_INVALID_INPUT');
   return text;
