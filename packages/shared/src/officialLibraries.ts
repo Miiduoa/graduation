@@ -1,3 +1,5 @@
+import { mockSchools } from './schools';
+
 export type OfficialLibraryService = {
   name: string;
   websiteUrl: string;
@@ -63,7 +65,7 @@ export const officialLibraryDirectory: Readonly<Record<string, OfficialLibrarySe
   ntust: {
     name: '國立臺灣科技大學圖書館',
     websiteUrl: 'https://library.ntust.edu.tw/?Lang=zh-tw',
-    catalogUrl: 'https://library.ntust.edu.tw/?Lang=zh-tw',
+    catalogUrl: 'https://sierra.lib.ntust.edu.tw/%2Acht',
   },
   nccu: {
     name: '國立政治大學圖書館',
@@ -127,11 +129,25 @@ export const officialLibraryDirectory: Readonly<Record<string, OfficialLibrarySe
   },
 };
 
-export function getOfficialLibrary(schoolId?: string | null): OfficialLibraryService | null {
-  if (!schoolId || !Object.prototype.hasOwnProperty.call(officialLibraryDirectory, schoolId)) {
-    return null;
+export function getOfficialLibrary(
+  schoolId?: string | null,
+  schoolName?: string | null,
+): OfficialLibraryService | null {
+  if (!schoolId) return null;
+  if (Object.prototype.hasOwnProperty.call(officialLibraryDirectory, schoolId)) {
+    return officialLibraryDirectory[schoolId];
   }
-  return officialLibraryDirectory[schoolId];
+  // Public tenant IDs may differ from the legacy school directory IDs.
+  // Match only an exact, unique institution name; never guess by substring or old selection.
+  if (!schoolName) return null;
+  const matches = mockSchools.filter(
+    (school) =>
+      school.name === schoolName &&
+      Object.prototype.hasOwnProperty.call(officialLibraryDirectory, school.id),
+  );
+  const libraryId =
+    matches.length === 1 ? matches[0].id : schoolName === '國立中興大學' ? 'tw-nchu' : null;
+  return libraryId ? officialLibraryDirectory[libraryId] : null;
 }
 
 export function buildOfficialLibraryCatalogUrl(
