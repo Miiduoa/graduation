@@ -1,14 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
 import { createPersonalImportId, type PersonalImportRow } from '@campus/shared';
-import { courseHints, courseAccessErrorMessage, courseRequestCopy, type CourseMatch, type CourseRequest } from '@campus/shared/src/courseAccess';
+import { approvedCourseLinks, courseHints, courseAccessErrorMessage, courseRequestCopy, type CourseMatch, type CourseRequest } from '@campus/shared/src/courseAccess';
 import { createCourseAccess, type CourseTransport } from '@campus/shared/src/courseAccessClient';
 import { type NuniWorkspace } from '@campus/shared/src/nuni';
 import { useNuniSession } from '../state/nuniSession';
 import { Button } from '../ui/components';
 import { theme } from '../ui/theme';
 
-type Props = { row: PersonalImportRow; workspaces: NuniWorkspace[]; disabled?: boolean };
+type Props = { row: PersonalImportRow; workspaces: NuniWorkspace[]; disabled?: boolean;
+  onRefreshWorkspaces?: () => void;
+  onSelectLinkedCourse?: (workspaceId: string) => void;
+};
 const textStyle = { color: theme.colors.text, lineHeight: 23 };
 const inputStyle = { borderWidth: 1, borderColor: theme.colors.border, borderRadius: 8, padding: 12, color: theme.colors.text };
 export function CourseAccessPanel(props: Props) {
@@ -21,7 +24,7 @@ export function CourseAccessPanel(props: Props) {
     props.row.semester, props.row.title, props.row.courseCode, props.row.teacher, props.row.className]);
   return <CourseAccessSession key={scopeKey} {...props} request={(path, input) => auth.request(path, context, input)} />;
 }
-function CourseAccessSession({ row, workspaces, request }: Props & { request: CourseTransport }) {
+function CourseAccessSession({ row, workspaces, request, onRefreshWorkspaces, onSelectLinkedCourse }: Props & { request: CourseTransport }) {
   const client = createCourseAccess(request);
   const alive = useRef(true), lock = useRef(false), retryKeys = useRef(new Map<string, string>());
   const [open, setOpen] = useState(false), [busy, setBusy] = useState(false), [message, setMessage] = useState('');
@@ -41,10 +44,13 @@ function CourseAccessSession({ row, workspaces, request }: Props & { request: Co
   function receipt(value: CourseRequest) {
     if (!alive.current) return;
     setRequests(items => [value, ...items.filter(item => item.id !== value.id)]);
+    if (value.kind === 'student' && value.state === 'approved' && value.membershipActive) onRefreshWorkspaces?.();
     setMessage(`${courseRequestCopy[value.state]}。${value.membershipActive ? '成員資格有效；重新開啟匯入頁後再連結課班。' : '尚未取得有效課班成員資格。'}`);
   }
   const candidate = matches?.find(item => item.course.id === selected)?.course;
   const already = candidate && requests.some(item => item.courseId === candidate.id && ['pending', 'approved'].includes(item.state));
+  const approvedLinks = approvedCourseLinks(row, requests, workspaces);
+  const hasApprovedMembership = requests.some(item => item.kind === 'student' && item.state === 'approved' && item.membershipActive);
   return <View style={{ gap: 12 }}>
     <Button text={open ? '收合課班申請' : '查找課班與申請加入'} disabled={busy} onPress={() => setOpen(!open)} />
     {open && <>
@@ -82,8 +88,17 @@ function CourseAccessSession({ row, workspaces, request }: Props & { request: Co
             idempotencyKey: retryKey(`teacher:${workspace}:${statement}`) })))} />
       </>}
       <Button text="重新查詢我的申請" disabled={busy} onPress={() => void run(async () => {
-        const result = await client.mine(); if (alive.current) { setRequests(result.requests); setCursor(result.nextCursor); }
+        const result = await client.mine(); if (alive.current) { setRequests(result.requests); setCursor(result.nextCursor);
+          if (result.requests.some(item => item.kind === 'student' && item.state === 'approved' && item.membershipActive)) onRefreshWorkspaces?.(); }
       })} />
+      {hasApprovedMembership && <View style={{ gap: 10 }}>
+        <Text style={textStyle}>已有核准的課班申請。重新核對目前的成員資格後，才能選擇連結到這筆個人紀錄。</Text>
+        {onRefreshWorkspaces && <Button text="更新已加入的課班" disabled={busy} onPress={onRefreshWorkspaces} />}
+        {approvedLinks.map(item => <Button key={item.id} disabled={busy || !onSelectLinkedCourse || row.linkedCourseId === item.id}
+          text={row.linkedCourseId === item.id ? `已選：${item.title}（尚未儲存）` : `選擇已核准課班：${item.title}`}
+          onPress={() => onSelectLinkedCourse?.(item.id)} />)}
+        {!approvedLinks.length && <Text style={textStyle}>尚未核對到可直接連結的課班。課號、教師或班別不同時，請在下方自行核對；系統不會自動連結。</Text>}
+      </View>}
       {requests.map(item => <View key={item.id} style={{ gap: 6 }}>
         <Text style={textStyle}>{item.metadata.title} · {item.metadata.schoolId} · {item.metadata.academicYear}/{item.metadata.semester} · {item.kind === 'teacher' ? '教師核對' : '加入申請'}：{courseRequestCopy[item.state]}</Text>
         <Text style={textStyle}>{item.decisionReason || '尚無審核說明'}。{item.membershipActive ? '成員資格有效；重新開啟匯入頁後可連結課班。' : '目前沒有有效成員資格。'}</Text>
