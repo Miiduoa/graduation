@@ -85,14 +85,14 @@ jest.mock('../screens/BusAiFirstScreen', () => {
   const { Text } = require('react-native');
   return { __esModule: true, default: () => <Text testID="public-bus-screen">公車查詢</Text> };
 });
-jest.mock('../screens/LibraryAiFirstScreen', () => ({
-  __esModule: true,
-  default: () => <Text testID="public-library-screen">圖書館</Text>,
-}));
-jest.mock('../screens/LibraryCatalogScreen', () => ({
-  __esModule: true,
-  default: () => <Text testID="public-library-catalog">館藏查詢</Text>,
-}));
+jest.mock('../screens/LibraryAiFirstScreen', () => {
+  const { Text } = require('react-native');
+  return { __esModule: true, default: () => <Text testID="public-library-screen">圖書館</Text> };
+});
+jest.mock('../screens/LibraryCatalogScreen', () => {
+  const { Text } = require('react-native');
+  return { __esModule: true, default: () => <Text testID="public-library-catalog">館藏查詢</Text> };
+});
 jest.mock('../screens/CampusContentScreens', () => {
   const { Text } = require('react-native');
   return {
