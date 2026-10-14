@@ -62,3 +62,8 @@
     right: 20px;
   }
 }
+
+/* Compact search feedback remains legible at 320px and preserves the selected school. */
+.searchFeedback { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.searchFeedback > p { flex: 1 1 140px; }
+.searchFeedback > button { flex-shrink: 0; }
