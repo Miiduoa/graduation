@@ -168,6 +168,7 @@ function CampusMapContent({
         : '',
     [theme, campusCenter],
   );
+  const mapSource = useMemo(() => ({ html }), [html]);
 
   const post = useCallback((payload: object) => {
     const serialized = JSON.stringify(JSON.stringify(payload)).replace(/</g, '\\u003c');
@@ -363,7 +364,7 @@ function CampusMapContent({
                 <PuWebView
                   key={`${theme.mode}-${mapAttempt}`}
                   ref={webRef}
-                  source={{ html }}
+                  source={mapSource}
                   applicationNameForUserAgent="CampusOne/1.0 (+https://nuni.tw)"
                   testID="campus-map-webview"
                   accessibilityLabel="校區地圖；下方也提供地點清單"
