@@ -29,7 +29,6 @@ import {
   shareCopiedCopy,
 } from '@campus/shared';
 import { useAuth } from '@/components/AuthGuard';
-import { useSelectedSchool } from '@/components/SelectedSchoolProvider';
 import styles from '@/components/academic/academic.module.css';
 import {
   createMeetup,
@@ -72,13 +71,13 @@ function fromSchoolCourse(course: AcademicCourse): PersonalCourse {
 export function PersonalTimetable() {
   const context = usePersonalImportScope();
   if (context.loading) return <p role="status">正在確認課表…</p>;
-  return <TimetableWorkspace key={context.scopeKey} />;
+  if (context.scope.schoolId === 'personal')
+    return <p role="status">請先選擇一所學校，再查看或編輯這所學校的課表。</p>;
+  return <TimetableWorkspace key={context.scopeKey} schoolId={context.scope.schoolId} />;
 }
 
-function TimetableWorkspace() {
+function TimetableWorkspace({ schoolId }: { schoolId: string }) {
   const { user } = useAuth();
-  const school = useSelectedSchool();
-  const schoolId = school.selectedSchoolId || 'pu';
   const [timetable, setTimetable] = useState<StoredTimetable | null>(null);
   const [view, setView] = useState<'grid' | 'week' | 'day'>('grid');
   const [day, setDay] = useState(() => {
@@ -110,7 +109,7 @@ function TimetableWorkspace() {
   const [selectedFriend, setSelectedFriend] = useState<string | null>(null);
   const [meetupBusy, setMeetupBusy] = useState(false);
   const [shareUrl, setShareUrl] = useState('');
-  const schoolRecords = useAcademicRecords('courses');
+  const schoolRecords = useAcademicRecords('courses', schoolId === 'pu');
 
   const uid = user?.uid || null;
   const router = useRouter();
@@ -137,7 +136,7 @@ function TimetableWorkspace() {
     .filter(
       (row) =>
         row.kind === 'timetable' &&
-        row.schoolId === 'pu' &&
+        row.schoolId === schoolId &&
         `${row.academicYear}|${row.semester}` === activeTerm &&
         row.dayOfWeek &&
         row.dayOfWeek <= 5 &&
@@ -433,7 +432,8 @@ function TimetableWorkspace() {
   };
 
   const bringSchool = async () => {
-    const records = schoolRecords.state?.snapshot?.records;
+    const snapshot = schoolRecords.state?.snapshot;
+    const records = snapshot?.schoolId === schoolId ? snapshot.records : null;
     if (!records?.courses?.length) {
       setNotice('現在沒有學校選課紀錄可帶入。');
       return;
