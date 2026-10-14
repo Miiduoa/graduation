@@ -5,7 +5,7 @@ tags:
   - onboarding
 
 ---
-# A fresh installation starts signed out. Authenticated navigation needs a separate test account.
+# Guest access must not depend on a Google or university login.
 - launchApp
 - extendedWaitUntil:
     visible:
@@ -16,19 +16,30 @@ tags:
 - assertNotVisible:
     id: tab-Today
 - takeScreenshot: guest_startup
+
+# The platform account is the path for courses, assignments and merchant work.
+- scrollUntilVisible:
+    element:
+      id: login-start
+    direction: DOWN
+- assertVisible: 'Google 帳號'
+- tapOn:
+    id: login-start
+- extendedWaitUntil:
+    visible: '登入或建立帳號'
+    timeout: 20000
+- assertVisible: '從你的課程開始'
+- takeScreenshot: platform_login
+
+# School authentication is a separate, capability-gated entry.
+- back
+- extendedWaitUntil:
+    visible:
+      id: login-landing
+    timeout: 20000
 - scrollUntilVisible:
     element:
       id: school-login-start
     direction: DOWN
-- assertVisible: 'Campus One 帳號'
-- tapOn:
-    id: school-login-start
-- extendedWaitUntil:
-    visible: '學校登入'
-    timeout: 20000
-- assertVisible:
-    id: student-id-input
-- assertVisible:
-    id: student-password-input
-- assertVisible: '使用學號登入'
-- takeScreenshot: school_login
+- assertVisible: '連線學校帳號'
+- takeScreenshot: school_login_availability
