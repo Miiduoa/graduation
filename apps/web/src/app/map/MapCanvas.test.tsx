@@ -103,3 +103,31 @@ it('keeps the location list usable when tiles fail and recreates the map on retr
   await waitFor(() => expect(vi.mocked(L.map)).toHaveBeenCalledTimes(2));
   expect(remove).toHaveBeenCalledTimes(1);
 });
+
+
+it('draws route points as a dashed straight-line guide and marks a consented user position', async () => {
+  const view = render(
+    <MapCanvas
+      locations={[library, gate]}
+      selected={library}
+      route={[gate, library]}
+      myLocation={{ lat: gate.lat, lng: gate.lng }}
+      onSelect={vi.fn()}
+    />,
+  );
+  await waitFor(() =>
+    expect(view.container.querySelectorAll('.leaflet-marker-icon')).toHaveLength(2),
+  );
+  const map = vi.mocked(L.map).mock.results.at(-1)!.value as L.Map;
+  await waitFor(() => {
+    let route: L.Polyline | null = null;
+    let locationMarker: L.CircleMarker | null = null;
+    map.eachLayer((layer) => {
+      if (layer instanceof L.Polyline) route = layer;
+      if (layer instanceof L.CircleMarker) locationMarker = layer;
+    });
+    expect(route).not.toBeNull();
+    expect(route!.options.dashArray).toBe('6 9');
+    expect(locationMarker?.getTooltip()?.getContent()).toBe('我的位置');
+  });
+});
