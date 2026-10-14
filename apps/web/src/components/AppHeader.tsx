@@ -10,6 +10,7 @@ import { SchoolSelector } from './SchoolSelector';
 import { useNuniSession } from '@/features/nuni/Session';
 import { useLocationHash } from '@/lib/useLocationHash';
 import headerStyles from './AppHeader.module.css';
+import { useCampusNavigationSearch } from '@/lib/useCampusNavigationSearch';
 
 function Header() {
   const pathname = usePathname();
@@ -19,12 +20,8 @@ function Header() {
   const nuni = useNuniSession();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const context = new URLSearchParams();
-  for (const key of ['school', 'schoolId', 'campus']) {
-    const value = params?.get(key);
-    if (value) context.set(key, value);
-  }
-  const href = (path: string) => `${path}${context.size ? `?${context}` : ''}`;
+  const context = useCampusNavigationSearch();
+  const href = (path: string) => path + (context ? '?' + context : '');
   const currentPage = `${pathname || '/'}${params?.size ? `?${params}` : ''}${hash}`;
   const loginPage = ['/login', '/classroom/login', '/admin/login'].includes(pathname || '');
   const loginHref = `/login?returnUrl=${encodeURIComponent(currentPage)}`;

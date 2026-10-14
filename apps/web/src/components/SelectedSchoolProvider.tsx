@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { findSchoolById } from '@campus/shared/src/schools';
+import { findSchoolById, findSchoolsByCode } from '@campus/shared/src/schools';
 
 export type BrowseSchool = {
   id: string;
@@ -131,8 +131,11 @@ export function SelectedSchoolProvider({
       return true;
     });
   }, [schools]);
-  const queryId = params?.get('campus');
-  const requestedId = queryId === 'all' ? null : queryId || savedSchoolId;
+  const queryId = params?.get('campus') ?? params?.get('schoolId');
+  const schoolCode = params?.get('school');
+  const matches = queryId == null && schoolCode ? findSchoolsByCode(schoolCode) : [];
+  const legacyId = matches.length === 1 ? matches[0].id : null;
+  const requestedId = queryId === 'all' ? null : queryId || legacyId || savedSchoolId;
   const ready = !loading && hydrated && catalogStatus === 'ready';
   const selectedSchool = ready
     ? (catalog.find((school) => school.id === requestedId) ?? null)
@@ -159,6 +162,7 @@ export function SelectedSchoolProvider({
       next.set('campus', id);
       const code = findSchoolById(id)?.code;
       if (code) next.set('school', code);
+      else next.delete('school');
     } else {
       next.delete('schoolId');
       next.delete('school');
