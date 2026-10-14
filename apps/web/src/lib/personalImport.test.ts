@@ -5,6 +5,7 @@ import {
   personalImportKey,
   personalImportSavedNotice,
   personalImportUndoBody,
+  personalImportUndoneNotice,
   planPersonalImport,
   resolvePersonalImportCourse,
   undoPersonalImportBatch,
@@ -733,6 +734,7 @@ describe('personal import notices', () => {
     expect(personalImportUndoBody(2)).toBe(
       '上次匯入的 2 筆會從這台裝置刪掉，你原本的資料不會動。刪掉後沒辦法復原。',
     );
+    expect(personalImportUndoneNotice(4)).toBe('已撤銷上次匯入的 4 筆，原本的資料都還在。');
     expect(personalImportErrorMessage(new Error('The source image could not be decoded.'), '備用')).toBe(
       PERSONAL_IMPORT_IMAGE_UNREADABLE,
     );
