@@ -109,7 +109,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
   const [selectedFriend, setSelectedFriend] = useState<string | null>(null);
   const [meetupBusy, setMeetupBusy] = useState(false);
   const [shareUrl, setShareUrl] = useState('');
-  const schoolRecords = useAcademicRecords('courses');
+  const schoolRecords = useAcademicRecords('courses', schoolId === 'pu');
 
   const uid = user?.uid || null;
   const router = useRouter();
@@ -411,7 +411,8 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
   };
 
   const bringSchool = async () => {
-    const records = schoolRecords.state?.snapshot?.records;
+    const snapshot = schoolRecords.state?.snapshot;
+    const records = snapshot?.schoolId === schoolId ? snapshot.records : null;
     if (!records?.courses?.length) {
       setNotice('現在沒有學校選課紀錄可帶入。');
       return;
