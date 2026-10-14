@@ -17,7 +17,7 @@ function LibraryContent({ schoolId, schoolName, status }: CampusBrowseContext) {
   const [keyword, setKeyword] = useState('');
   const [field, setField] = useState('FullText');
   const [copyMessage, setCopyMessage] = useState('');
-  const library = getOfficialLibrary(schoolId);
+  const library = getOfficialLibrary(schoolId, schoolName);
 
   async function copyKeyword() {
     const query = keyword.trim();
