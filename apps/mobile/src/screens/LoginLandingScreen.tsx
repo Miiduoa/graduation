@@ -6,6 +6,7 @@ import { safeNavigate } from '../utils/safeNavigate';
 import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { useNuniSession } from '../state/nuniSession';
+import { useSchool } from '../state/school';
 import {
   SCHOOL_LOGIN_BIND_HINT,
   isSchoolLoginEntryAvailable,
@@ -15,12 +16,14 @@ import {
 export default function LoginLandingScreen() {
   const navigation = useNavigation();
   const auth = useNuniSession();
+  const { school } = useSchool();
   const s = useThemeStyleSheet(createStyles);
-  const [schoolEntry, setSchoolEntry] = useState(isSchoolLoginEntryAvailable());
+  const [, refreshProviders] = useState(0);
+  const schoolEntry = isSchoolLoginEntryAvailable(school.id);
   useEffect(() => {
     let active = true;
     void loadSchoolLoginProviderKinds().then(() => {
-      if (active) setSchoolEntry(isSchoolLoginEntryAvailable());
+      if (active) refreshProviders((revision) => revision + 1);
     });
     return () => {
       active = false;
