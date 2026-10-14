@@ -15,6 +15,7 @@ import {
   DiningError,
 } from '../features/dining';
 import type { DiningReceipt } from '../features/dining';
+import { UNVERIFIED_CAFETERIA_BADGE } from '@campus/shared/src/cafeteriaCatalog';
 
 let mockUser: { uid: string } | null = { uid: 'student-a' };
 let mockSchool = { id: 'pu' };
@@ -346,10 +347,10 @@ test('marks unverified and demo venues and leaves verified unmarked', async () =
   const view = render(<CafeteriaAiFirstScreen />);
   await act(async () => {});
   expect(view.getByText('示範')).toBeTruthy();
-  expect(view.getByText('尚未確認')).toBeTruthy();
+  expect(view.getByText(UNVERIFIED_CAFETERIA_BADGE)).toBeTruthy();
   expect(view.getByText('靜園餐廳')).toBeTruthy();
   expect(view.queryAllByText('示範')).toHaveLength(1);
-  expect(view.queryAllByText('尚未確認')).toHaveLength(1);
+  expect(view.queryAllByText(UNVERIFIED_CAFETERIA_BADGE)).toHaveLength(1);
 });
 
 test('restaurant list payment copy does not mention Nuni', async () => {
