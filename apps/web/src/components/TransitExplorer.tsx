@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  CAMPUS_TRANSIT, TRANSIT_CITIES, TRANSIT_MESSAGES, arrivalLabel, directionLabel,
+  CAMPUS_TRANSIT, TRANSIT_CITIES, TRANSIT_MESSAGES, arrivalLabel, directionLabel, preferredTransitCity,
   formatDistance, isCity, isPosition, queryTransit, readSavedStops, stopMapUrl,
   type TransitCity, type TransitQuery, type TransitResult, type TransitStop,
 } from '@/lib/transit';
@@ -156,10 +156,14 @@ function StopResults({ query, saved, toggleSaved }: {
   );
 }
 
-export function TransitExplorer({ schoolId, schoolName, legacy }: { schoolId: string; schoolName: string; legacy?: ReactNode }) {
+export function TransitExplorer(props: { schoolId: string; schoolName: string; legacy?: ReactNode }) {
+  return <TransitExplorerContent key={props.schoolId} {...props} />;
+}
+
+function TransitExplorerContent({ schoolId, schoolName, legacy }: { schoolId: string; schoolName: string; legacy?: ReactNode }) {
   const campus = Object.hasOwn(CAMPUS_TRANSIT, schoolId) ? CAMPUS_TRANSIT[schoolId] : undefined;
   const [mode, setMode] = useState<Mode>(campus ? 'campus' : 'search');
-  const [city, setCity] = useState<TransitCity>(campus?.city ?? 'Taichung');
+  const [city, setCity] = useState<TransitCity | ''>(campus?.city ?? preferredTransitCity(schoolId) ?? '');
   const [radius, setRadius] = useState(600);
   const [term, setTerm] = useState('');
   const [lookup, setLookup] = useState<{ query: TransitQuery | null; revision: number }>({ query: campus ? { action: 'campus', schoolId } : null, revision: 0 });
@@ -185,6 +189,11 @@ export function TransitExplorer({ schoolId, schoolName, legacy }: { schoolId: st
   function locate() {
     const current = ++generation.current;
     setMessage('');
+    const queryCity = city;
+    if (!isCity(queryCity)) {
+      setMessage('請先選擇要查詢的縣市，再尋找附近站牌。');
+      return;
+    }
     if (!window.isSecureContext || !navigator.geolocation) {
       setMessage('此瀏覽器無法使用定位。請改用學校站牌，或輸入站名搜尋。');
       return;
@@ -197,7 +206,7 @@ export function TransitExplorer({ schoolId, schoolName, legacy }: { schoolId: st
       const point = { lat: position.coords.latitude, lon: position.coords.longitude };
       if (!isPosition(point)) { setMessage('無法確認目前位置，請改用站名搜尋。'); return; }
       if (position.coords.accuracy > 500) setMessage('定位誤差較大，站牌距離僅供參考；建議確認站名或重新定位。');
-      search({ action: 'nearby', city, ...point, radius });
+      search({ action: 'nearby', city: queryCity, ...point, radius });
     }, (error) => {
       if (current !== generation.current) return;
       setLocating(false);
@@ -225,11 +234,12 @@ export function TransitExplorer({ schoolId, schoolName, legacy }: { schoolId: st
       {(mode === 'nearby' || mode === 'search') && <label>查詢縣市<select value={city} onChange={(event) => {
         if (!isCity(event.target.value)) return;
         generation.current += 1; setLocating(false); setCity(event.target.value); setMessage(''); search(null);
-      }}>{Object.entries(TRANSIT_CITIES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
+      }}><option value="" disabled>請先選擇縣市</option>{Object.entries(TRANSIT_CITIES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
       {mode === 'nearby' && <><label>搜尋半徑<select value={radius} onChange={(event) => { generation.current += 1; setLocating(false); setRadius(Number(event.target.value)); search(null); }}><option value={300}>300 公尺</option><option value={600}>600 公尺</option><option value={1000}>1 公里</option></select></label><button type="button" className={css.primary} disabled={locating} onClick={locate}>{locating ? '正在取得位置…' : '使用我的位置'}</button></>}
-      {mode === 'search' && <form className={css.searchForm} onSubmit={(event) => { event.preventDefault(); if (term.trim().length < 2) { setMessage('請輸入至少兩個字的站名。'); return; } setMessage(''); search({ action: 'search', city, text: term.trim() }); }}><label>站名或學校名稱<input type="search" value={term} maxLength={40} minLength={2} required placeholder="例如 靜宜大學、臺中車站" onChange={(event) => setTerm(event.target.value)} /></label><button type="submit" className={css.primary}>尋找站牌</button></form>}
+      {mode === 'search' && <form className={css.searchForm} onSubmit={(event) => { event.preventDefault(); if (term.trim().length < 2) { setMessage('請輸入至少兩個字的站名。'); return; } if (!isCity(city)) { setMessage('請先選擇要查詢的縣市。'); return; } setMessage(''); search({ action: 'search', city, text: term.trim() }); }}><label>站名或學校名稱<input type="search" value={term} maxLength={40} minLength={2} required placeholder="例如 靜宜大學、臺中車站" onChange={(event) => setTerm(event.target.value)} /></label><button type="submit" className={css.primary}>尋找站牌</button></form>}
       {mode === 'saved' && <p className={css.scope}>收藏只保存在目前瀏覽器。清除瀏覽器資料後，收藏也會移除。</p>}
     </div>
+    {(mode === 'nearby' || mode === 'search') && <p className={css.privacy}>縣市僅決定查詢範圍；同一大學若有跨縣市校區，請切換到實際搭車地點的縣市。</p>}
     {mode === 'nearby' && <p className={css.privacy}>只查詢所選縣市。定位僅在你按下按鈕後使用，不會寫入個人檔案；不會持續追蹤。跨縣市旅行時請切換查詢縣市。</p>}
     {message && <p className={css.message} role="status">{message}</p>}
     {lookup.query || mode === 'saved' ? <StopResults key={`${mode}:${lookup.revision}`} query={lookup.query} saved={saved} toggleSaved={toggleSaved} /> : <p className={css.empty}>{locating ? '正在取得你的位置；也可以切回學校站牌，不需等待定位。' : mode === 'nearby' ? '選好縣市與範圍後，按「使用我的位置」查詢。' : '輸入站名後按搜尋，不會在每次打字時傳送查詢。'}</p>}
