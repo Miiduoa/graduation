@@ -114,6 +114,9 @@ for (const [failure, stages, hasPreflight] of [
     );
     for (const command of commands) {
       assert.equal(command.args[command.args.indexOf('--project') + 1], 'campus-one-tw');
+      if (command.stage === 'preflight') {
+        assert.equal(command.args[command.args.indexOf('--mode') + 1], 'rules-only');
+      }
     }
     if (!failure) {
       assert.ok(commands[1].args.includes('firestore:rules,storage,firestore:indexes'));
@@ -171,4 +174,5 @@ test('both successful and failed attempts retain versioned reports without weake
     (step) => step.name === 'Test deployment readiness gates',
   );
   assert.ok(readiness.run.includes('scripts/firebase-ci-workflow.test.cjs'));
+  assert.ok(readiness.run.includes('scripts/nuni-merchant-api-boundary.test.mjs'));
 });
