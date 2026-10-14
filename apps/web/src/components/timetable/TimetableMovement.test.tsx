@@ -1,5 +1,11 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => '/timetable',
+}));
+
 import { cleanCourse, cleanMeta, WEEKDAY_LABELS, PERIOD_TIMES } from '@campus/shared';
 import { TimetableGrid } from './TimetableGrid';
 import { PersonalTimetable } from './PersonalTimetable';
