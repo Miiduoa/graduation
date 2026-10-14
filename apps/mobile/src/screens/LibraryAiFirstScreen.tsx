@@ -28,6 +28,7 @@ export default function LibraryAiFirstScreen({ navigation }: { navigation?: Navi
       scope={scope}
       activeScope={activeScope}
       schoolId={school.id}
+      schoolName={school.name}
       navigation={navigation}
     />
   );
@@ -37,14 +38,16 @@ function LibraryContent({
   scope,
   activeScope,
   schoolId,
+  schoolName,
   navigation,
 }: {
   scope: string;
   activeScope: React.MutableRefObject<string>;
   schoolId: string;
+  schoolName: string;
   navigation?: Navigation;
 }) {
-  const library = getOfficialLibrary(schoolId);
+  const library = getOfficialLibrary(schoolId, schoolName);
   const [keyword, setKeyword] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
