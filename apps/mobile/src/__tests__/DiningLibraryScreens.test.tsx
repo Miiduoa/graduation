@@ -160,9 +160,7 @@ test('給了號碼之後店家取消：寫「這張單店家取消了」，號�
   await act(async () => push!({ queueNumber: 7, status: 'confirmed' }));
   expect(view.getByText('取餐號碼 7')).toBeTruthy();
   expect(stop).not.toHaveBeenCalled();
-  await act(async () =>
-    push!({ queueNumber: null, status: 'cancelled', cancelledBy: 'merchant' }),
-  );
+  await act(async () => push!({ queueNumber: null, status: 'cancelled', cancelledBy: 'merchant' }));
   expect(view.getByText('這張單店家取消了')).toBeTruthy();
   expect(view.getByText('訂單已取消')).toBeTruthy();
   expect(view.queryByText(/取餐號碼/)).toBeNull();
@@ -272,7 +270,13 @@ test('沒送出去後連點「再試一次」：只再送一次，而且是同�
   const ids = jest.mocked(submitDiningIntent).mock.calls.map(([sent]) => sent.orderId);
   expect(new Set(ids)).toEqual(new Set([intent.orderId]));
   await act(async () =>
-    retry.resolve({ id: intent.orderId, label: menu.name, total: 84, status: 'pending', queueNumber: 6 }),
+    retry.resolve({
+      id: intent.orderId,
+      label: menu.name,
+      total: 84,
+      status: 'pending',
+      queueNumber: 6,
+    }),
   );
   expect(view.getByText('取餐號碼 6')).toBeTruthy();
   expect(submitDiningIntent).toHaveBeenCalledTimes(2);
@@ -412,7 +416,9 @@ test('斷線後連查都查不出結果：寫「還在確認訂單有沒有送�
   const navigate = jest.fn();
   jest
     .mocked(submitDiningIntent)
-    .mockRejectedValueOnce(new DiningError('還在確認訂單有沒有送出，請到『我的訂單』看。', 'checking'));
+    .mockRejectedValueOnce(
+      new DiningError('還在確認訂單有沒有送出，請到『我的訂單』看。', 'checking'),
+    );
   const view = render(<CafeteriaAiFirstScreen navigation={{ navigate }} />);
   await act(async () => {});
   fireEvent.press(view.getByText('選擇今日餐點'));
@@ -423,4 +429,16 @@ test('斷線後連查都查不出結果：寫「還在確認訂單有沒有送�
   const buttons = view.getAllByText('我的訂單');
   fireEvent.press(buttons[buttons.length - 1]);
   expect(navigate).toHaveBeenCalledWith('StudentOrders');
+});
+
+test('restaurant keeps the school catalog and links directly to the platform food tab', async () => {
+  const navigate = jest.fn();
+  const view = render(<CafeteriaAiFirstScreen navigation={{ navigate }} />);
+  await act(async () => {});
+  fireEvent.press(view.getByText('前往平台點餐'));
+  expect(navigate).toHaveBeenCalledWith('我的', {
+    screen: 'NuniWorkspace',
+    params: { tab: 'food' },
+  });
+  expect(view.getByText('選擇今日餐點')).toBeTruthy();
 });

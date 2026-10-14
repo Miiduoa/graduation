@@ -242,6 +242,16 @@ it('shows review instructions and actual authorized location readiness', async (
   expect(within(locations).getByText('已核准，待完成營運設定')).toBeTruthy();
   expect(within(locations).getByText(/待完成：確認營運設定與條款、建立菜單/)).toBeTruthy();
   expect(within(locations).queryByText('營業中')).toBeNull();
+  fireEvent.click(within(locations).getByRole('button', { name: '管理門市：一樓' }));
+  await waitFor(() =>
+    expect(mocks.request).toHaveBeenCalledWith(
+      'merchant-workspaces/campus-one/location-1',
+      'context-a',
+      undefined,
+      undefined,
+    ),
+  );
+  expect(screen.queryByRole('heading', { name: '申請進駐' })).toBeNull();
 });
 it('sends one mutation while a submission is already in flight', async () => {
   let complete!: (value: unknown) => void;
@@ -293,4 +303,77 @@ it('keeps an uncertain application locked when the program closes before retry',
   expect(screen.queryByText(/申請未被接受/)).toBeNull();
   const requests = mocks.request.mock.calls.filter((call) => call[2]);
   expect(requests[1][2]).toEqual(requests[0][2]);
+});
+
+it('retains an uncertain menu through a session network error, but clears it for a different verified account', async () => {
+  const detail = {
+    tenantId: 'campus-one',
+    tenantName: '開放申請校園',
+    merchantName: '已核准餐坊',
+    locationId: 'location-1',
+    locationName: '一樓',
+    campusName: '主校區',
+    merchantStatus: 'suspended',
+    locationStatus: 'suspended',
+    activated: false,
+    publicAccess: false,
+    missingRequirements: ['settings', 'menu'],
+    applicationId: 'application-1',
+    merchantId: 'merchant-1',
+    campusId: 'main-campus',
+    serviceModes: ['pickup'],
+    paymentMode: 'counter-only',
+    onlinePaymentAvailable: false,
+    paymentCapabilityState: 'not-requested',
+    managerConfirmed: false,
+    termsVersion: null,
+    readinessVersion: 1,
+    publishedMenuItems: 0,
+    merchantMode: 'info_only',
+    merchantModeLabel: '資訊展示',
+    sourceLabel: '',
+    sourceUpdatedAt: null,
+    sourceLine: null,
+  };
+  mocks.request.mockImplementation((path, context, input) => {
+    if (path.endsWith('/initial-menu')) return Promise.reject(new NuniError(0, 'NETWORK_ERROR'));
+    if (path === 'merchant-workspaces') return Promise.resolve({ workspaces: [detail] });
+    if (path === 'merchant-workspaces/campus-one/location-1') return Promise.resolve(detail);
+    return respond(path, context, input);
+  });
+  const view = render(<MerchantWorkspace />);
+  fireEvent.click(await screen.findByRole('button', { name: '管理門市：一樓' }));
+  await screen.findByLabelText('品項 1 名稱');
+  for (const [label, value] of [
+    ['品項 1 名稱', '保留便當'],
+    ['品項 1 售價（元）', '85'],
+    ['品項 1 初始庫存', '20'],
+  ]) {
+    fireEvent.change(screen.getByLabelText(label), { target: { value } });
+  }
+  fireEvent.click(screen.getByLabelText(/我已確認品項、元售價/));
+  fireEvent.click(screen.getByRole('button', { name: '確認建立並上架菜單' }));
+  await screen.findByText(/尚未確認這次操作的結果/);
+  mocks.auth.session = null;
+  mocks.auth.error = '無法確認登入狀態';
+  view.rerender(<MerchantWorkspace />);
+  expect(screen.queryByLabelText('品項 1 名稱')).toBeNull();
+  mocks.auth.session = { platformAccountId: 'account-a', context: 'renewed-context' };
+  mocks.auth.error = '';
+  view.rerender(<MerchantWorkspace />);
+  fireEvent.click(await screen.findByRole('button', { name: '管理門市：一樓' }));
+  await screen.findByLabelText('品項 1 名稱');
+  expect((screen.getByLabelText('品項 1 名稱') as HTMLInputElement).value).toBe('保留便當');
+  expect(
+    (screen.getByRole('button', { name: '確認建立並上架菜單' }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+  fireEvent.submit(screen.getByLabelText('品項 1 名稱').closest('form')!);
+  expect(mocks.request.mock.calls.filter(([path]) => path.endsWith('/initial-menu'))).toHaveLength(
+    1,
+  );
+  mocks.auth.session = { platformAccountId: 'account-b', context: 'other-context' };
+  view.rerender(<MerchantWorkspace />);
+  fireEvent.click(await screen.findByRole('button', { name: '管理門市：一樓' }));
+  await screen.findByLabelText('品項 1 名稱');
+  expect((screen.getByLabelText('品項 1 名稱') as HTMLInputElement).value).toBe('');
 });

@@ -8,3 +8,4 @@ export async function GET(request: NextRequest, context: Context) {
   return handleNuni(request, (await context.params).path);
 }
 export const POST = GET;
+export const PUT = GET;

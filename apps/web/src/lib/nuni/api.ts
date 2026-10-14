@@ -1,6 +1,7 @@
 import { CourseAccessError, courseMetadata, courseRecord, parseCourseCandidate, sameCourseScope } from '@campus/shared/src/courseAccess';
 import { parseCourseRequest, parseCourseRequests, isCourseAccessPath } from '@campus/shared/src/courseAccessClient';
 import { NextRequest, NextResponse } from 'next/server';
+import { handleFood, isFoodResource } from './food';
 import {
   createNuniClasses,
   NuniError,
@@ -13,6 +14,10 @@ import {
   parseMerchantWorkspaces,
   validateMerchantApplicationInput,
 } from '@campus/shared/src/nuniMerchant';
+import {
+  createMerchantOperations,
+  validateMerchantAvailabilityInput,
+} from '@campus/shared/src/nuniMerchantOperations';
 import {
   parseNuniMemberships,
   parseMembershipRequestReceipt,
@@ -84,9 +89,21 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
       throw new NuniError(404, 'NOT_FOUND');
     }
     const method = request.method;
-    if (method !== 'GET' && method !== 'POST') throw new NuniError(405, 'METHOD_NOT_ALLOWED');
-    if (request.nextUrl.search) throw new NuniError(400, 'INVALID_INPUT');
-    if (method === 'POST') requireSameOrigin(request);
+    if (method !== 'GET' && method !== 'POST' && method !== 'PUT')
+      throw new NuniError(405, 'METHOD_NOT_ALLOWED');
+    if (
+      method === 'PUT' &&
+      !(
+        segments.length === 4 &&
+        segments[0] === 'merchant-workspaces' &&
+        segments[3] === 'settings'
+      )
+    )
+      throw new NuniError(405, 'METHOD_NOT_ALLOWED');
+    if (request.nextUrl.search && !isFoodResource(segments))
+      throw new NuniError(400, 'INVALID_INPUT');
+    if (method !== 'GET') requireSameOrigin(request);
+    if (isFoodResource(segments)) return await handleFood(request, segments);
     if (method === 'GET' && path === 'sign-in-options') {
       publicOrigin();
       const googleReady =
@@ -209,6 +226,48 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
           (path.endsWith('/teacher-requests') && (response.kind !== 'teacher' || response.workspaceId !== input.workspaceId)))
         throw new NuniError(502, 'INVALID_RESPONSE');
       return jsonResponse(response);
+    }
+    if (segments[0] === 'merchant-workspaces' && segments.length > 1) {
+      const session = requireSession(request);
+      const operations = createMerchantOperations((resource, input, verb) =>
+        platformRequest(resource, session, input, undefined, verb),
+      );
+      const identity = { tenantId: segments[1], locationId: segments[2] };
+      if (method === 'GET' && segments.length === 3)
+        return jsonResponse(await operations.get(identity.tenantId, identity.locationId));
+      if (segments.length !== 4) throw new NuniError(404, 'NOT_FOUND');
+      const action = segments[3];
+      if (method === 'PUT' && action === 'settings')
+        return jsonResponse(
+          await operations.updateSettings(
+            identity.tenantId,
+            identity.locationId,
+            await boundedJson(request, 4096),
+          ),
+        );
+      if (method === 'POST' && action === 'initial-menu')
+        return jsonResponse(
+          await operations.createInitialMenu(
+            identity.tenantId,
+            identity.locationId,
+            await boundedJson(request, 512 * 1024),
+          ),
+          201,
+        );
+      if (method === 'POST' && action === 'activate') {
+        const body = nuniRecord(await boundedJson(request, 1024));
+        if (Object.keys(body).length) throw new NuniError(422, 'INVALID_INPUT');
+        return jsonResponse(await operations.activate(identity.tenantId, identity.locationId));
+      }
+      if (method === 'POST' && action === 'availability')
+        return jsonResponse(
+          await operations.setAvailability(
+            identity.tenantId,
+            identity.locationId,
+            validateMerchantAvailabilityInput(await boundedJson(request, 1024)).acceptingOrders,
+          ),
+        );
+      throw new NuniError(405, 'METHOD_NOT_ALLOWED');
     }
     if (segments[0] !== 'class-workspaces') throw new NuniError(404, 'NOT_FOUND');
     const session = requireSession(request);
