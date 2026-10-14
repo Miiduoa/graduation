@@ -15,9 +15,9 @@ vi.mock('@/components/SelectedSchoolProvider', () => ({
     catalogStatus: 'ready',
   }),
 }));
-function Probe({ explicit }: { explicit?: string }) {
-  const result = useBrowsingSchoolPageContext(explicit ? { schoolId: explicit } : undefined);
-  return <output>{result.ready ? result.schoolId : 'loading'}</output>;
+function Probe({ explicit, all }: { explicit?: string; all?: boolean }) {
+  const result = useBrowsingSchoolPageContext(all ? { campus: 'all' } : explicit ? { schoolId: explicit } : undefined);
+  return <output>{result.ready ? result.schoolId : result.scopeStatus}</output>;
 }
 it('updates scoped public data after a school switch', () => {
   browsing.id = 'pu';
@@ -49,5 +49,13 @@ it('does not confuse a campus in the live directory with the default bundled cam
   browsing.name = '某所新設大學';
   const view = render(<Probe />);
   expect(screen.getByText('tw-new-university')).toBeTruthy();
+  view.unmount();
+});
+
+it('requires a school choice rather than returning Providence data for all-campus browsing', () => {
+  browsing.id = null;
+  browsing.loading = false;
+  const view = render(<Probe all />);
+  expect(screen.getByText('choose-school')).toBeTruthy();
   view.unmount();
 });
