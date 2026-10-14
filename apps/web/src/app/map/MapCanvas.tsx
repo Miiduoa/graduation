@@ -83,7 +83,7 @@ export default function MapCanvas({
     const { map, L } = runtime;
     const color = getComputedStyle(map.getContainer()).getPropertyValue('--brand').trim();
     const indicator = L.polyline(
-      route.map((place) => [place.lat, place.lng]),
+      route.map((place): [number, number] => [place.lat, place.lng]),
       { color: color || '#11796f', weight: 3, opacity: 0.85, dashArray: '6 9', interactive: false },
     ).addTo(map);
     return () => {
