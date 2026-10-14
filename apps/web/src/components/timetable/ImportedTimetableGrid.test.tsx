@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanCourse } from '@campus/shared';
+import { cleanCourse, WEEKDAY_LABELS } from '@campus/shared';
 import { TimetableGrid } from './TimetableGrid';
 
 afterEach(cleanup);
@@ -25,7 +25,7 @@ it('only lets the user move manual classes and keeps imported records unchanged'
   const select = screen.getByRole('combobox', { name: '要移動的課程' }) as HTMLSelectElement;
   expect([...select.options].map(option => option.textContent).join(' ')).not.toContain('匯入課程');
   fireEvent.change(select, { target: { value: manual.id } });
-  fireEvent.click(screen.getByRole('button', { name: /移到星期二第 6 節/ }));
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(`移到${WEEKDAY_LABELS[1]}第 6 節`) }));
   expect(onEdit).toHaveBeenCalledWith({ ...manual, day: 2, start: 6, end: 7 });
   expect(imported).toMatchObject({ day: 1, start: 3, end: 5 });
 });
