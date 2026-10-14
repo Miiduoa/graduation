@@ -320,3 +320,45 @@ it('does not send geolocation results to another campus after a school switch', 
     Object.defineProperty(navigator, 'geolocation', { configurable: true, value: undefined });
   }
 });
+
+it('searches official POI metadata and shows real floors and facilities without invented hours', async () => {
+  state.user = null;
+  vi.mocked(loadMapLocations).mockResolvedValueOnce([
+    { ...library, building: '任垣樓', floor: '3F', facilities: ['電腦教室', '電梯'] },
+    gate,
+  ]);
+  render(<MapClient school="pu" />);
+  const input = await screen.findByRole('searchbox', { name: '搜尋地點' });
+  fireEvent.change(input, { target: { value: '電腦教室' } });
+  expect(screen.getByRole('button', { name: '查看蓋夏圖書館' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '查看正門' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '查看蓋夏圖書館' }));
+  expect(screen.getByText('任垣樓 · 樓層：3F')).toBeTruthy();
+  expect(screen.getByText('提供設施：電腦教室、電梯')).toBeTruthy();
+  expect(screen.queryByText(/開放中|營業中|預計抵達時間/)).toBeNull();
+});
+
+it('ignores a stale position callback after a newer location attempt', async () => {
+  state.user = null;
+  const callbacks: PositionCallback[] = [];
+  Object.defineProperty(navigator, 'geolocation', {
+    configurable: true,
+    value: { getCurrentPosition: (callback: PositionCallback) => { callbacks.push(callback); } },
+  });
+  try {
+    render(<MapClient school="pu" />);
+    await screen.findByRole('button', { name: '查看蓋夏圖書館' });
+    fireEvent.click(screen.getByRole('button', { name: '查看我的位置' }));
+    act(() => callbacks[0]({ coords: { latitude: library.lat, longitude: library.lng } } as GeolocationPosition));
+    fireEvent.click(screen.getByRole('button', { name: '更新我的位置' }));
+    act(() => callbacks[0]({ coords: { latitude: 0, longitude: 0 } } as GeolocationPosition));
+    expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).myLocation).toBeNull();
+    act(() => callbacks[1]({ coords: { latitude: gate.lat, longitude: gate.lng } } as GeolocationPosition));
+    expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).myLocation).toEqual({
+      lat: gate.lat,
+      lng: gate.lng,
+    });
+  } finally {
+    Object.defineProperty(navigator, 'geolocation', { configurable: true, value: undefined });
+  }
+});

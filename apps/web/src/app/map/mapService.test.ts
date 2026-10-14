@@ -168,3 +168,56 @@ it('shows only measured straight-line distances and uses a robust campus viewpor
   ])).toEqual({ lat: 24.2265, lng: 120.5645 });
   expect(centerOfCoordinates([])).toBeNull();
 });
+
+it('reads valid latitude/longitude and nested school POIs without borrowing other schools', async () => {
+  respond(snapshot(
+    entry('library', {
+      schoolId: 'pu',
+      name: '蓋夏圖書館',
+      category: 'library',
+      location: { latitude: 24.2275, longitude: 120.5635 },
+      building: '圖書館',
+      floor: 'B1~5F',
+      facilities: ['閱覽室', '討論室', '閱覽室', '  '],
+    }),
+    entry('entrance', {
+      name: '大門',
+      category: 'gate',
+      latitude: 24.22495,
+      longitude: 120.56535,
+    }),
+    entry('missing', { name: '未提供座標', location: '校園中心' }),
+    entry('zero', { name: '無效原點', lat: 0, lng: 0 }),
+  ));
+  const locations = await loadMapLocations('pu');
+  expect(locations).toHaveLength(2);
+  expect(locations.find((location) => location.id === 'library')).toEqual({
+    id: 'library',
+    name: '蓋夏圖書館',
+    category: '圖書館',
+    description: '',
+    lat: 24.2275,
+    lng: 120.5635,
+    building: '圖書館',
+    floor: 'B1~5F',
+    facilities: ['閱覽室', '討論室'],
+  });
+  expect(locations.find((location) => location.id === 'entrance')).toEqual({
+    id: 'entrance',
+    name: '大門',
+    category: '交通',
+    description: '',
+    lat: 24.22495,
+    lng: 120.56535,
+  });
+});
+
+it('does not promote malformed primary coordinates over a second nested coordinate', async () => {
+  respond(snapshot(entry('wrong-coordinates', {
+    name: '無法定位',
+    lat: Number.NaN,
+    lng: 120.56,
+    location: { lat: 24.22, lng: 120.56 },
+  })));
+  expect(await loadMapLocations('pu')).toEqual([]);
+});

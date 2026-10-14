@@ -93,6 +93,7 @@ function MapContent({
   const [pending, setPending] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
   const mounted = useRef(false);
+  const positionGeneration = useRef(0);
   const writing = useRef(false);
   const favoriteGeneration = useRef(0);
   useEffect(() => {
@@ -100,6 +101,7 @@ function MapContent({
     return () => {
       mounted.current = false;
       favoriteGeneration.current += 1;
+      positionGeneration.current += 1;
     };
   }, []);
 
@@ -127,7 +129,14 @@ function MapContent({
     const matched = locations.filter(
       (location) =>
         (category === '全部' || location.category === category) &&
-        `${location.name} ${location.description}`.toLocaleLowerCase('zh-TW').includes(term) &&
+        [
+          location.name,
+          location.category,
+          location.description,
+          location.building,
+          location.floor,
+          ...(location.facilities ?? []),
+        ].filter(Boolean).join(' ').toLocaleLowerCase('zh-TW').includes(term) &&
         (!onlyFavorites || favorites.status !== 'ready' || favorites.ids.has(location.id)) &&
         (!nearbyOnly || !myLocation || distanceMeters(myLocation, location) <= 1000),
     );
@@ -165,6 +174,7 @@ function MapContent({
   }, [filtered, selected, routeLocations]);
 
   function locate() {
+    const request = ++positionGeneration.current;
     setMyLocation(null);
     setPositionError('');
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
@@ -175,7 +185,7 @@ function MapContent({
     setPositionStatus('loading');
     navigator.geolocation.getCurrentPosition(
       ({ coords }) => {
-        if (!mounted.current) return;
+        if (!mounted.current || request !== positionGeneration.current) return;
         if (!Number.isFinite(coords.latitude) || !Number.isFinite(coords.longitude)) {
           setPositionStatus('error');
           setPositionError('定位結果無效，請重新取得位置。');
@@ -185,7 +195,7 @@ function MapContent({
         setPositionStatus('idle');
       },
       (positionError) => {
-        if (!mounted.current) return;
+        if (!mounted.current || request !== positionGeneration.current) return;
         setPositionStatus('error');
         setPositionError(
           positionError.code === 1
@@ -375,6 +385,12 @@ function MapContent({
             <p className={styles.eyebrow}>{selected.category}</p>
             <h2>{selected.name}</h2>
             {selected.description && <p>{selected.description}</p>}
+            {(selected.building || selected.floor) && (
+              <p>{[selected.building, selected.floor && `樓層：${selected.floor}`].filter(Boolean).join(' · ')}</p>
+            )}
+            {Boolean(selected.facilities?.length) && (
+              <p>提供設施：{selected.facilities!.join('、')}</p>
+            )}
             {myLocation && (
               <p>距離我的位置約 {formatDistance(distanceMeters(myLocation, selected))}（直線距離）</p>
             )}
@@ -484,7 +500,7 @@ function MapContent({
                 >
                   <span className={styles.locationName}>{location.name}</span>
                   <span className={styles.note}>
-                    {location.category}
+                    {[location.category, location.building, location.floor && `樓層：${location.floor}`].filter(Boolean).join(' · ')}
                     {myLocation && ` · 直線距離 ${formatDistance(distanceMeters(myLocation, location))}`}
                   </span>
                   {location.description && (

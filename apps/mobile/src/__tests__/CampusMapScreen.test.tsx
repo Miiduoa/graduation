@@ -293,3 +293,25 @@ test('does not invent cross-school points when a deep link targets an unpublishe
   expect(Linking.openURL).not.toHaveBeenCalled();
   expect(view.queryByText('查看步行路線')).toBeNull();
 });
+
+test('does not interpret an old campus POI id as another campus destination after a school switch', async () => {
+  mockParams = { toPoiId: 'library' };
+  const view = await openMap();
+  expect(view.getByText('查看步行路線')).toBeTruthy();
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([{
+    ...place,
+    id: 'library',
+    name: '乙校圖書館',
+    lat: 23.8,
+    lng: 120.5,
+  }]);
+  mockSchool = { id: 'school-b' };
+  view.rerender(<GoogleMapsLikeScreen />);
+  await view.findByText('乙校圖書館');
+  expect(view.queryByText('查看步行路線')).toBeNull();
+  fireEvent.press(view.getByText('乙校圖書館'));
+  await act(async () => fireEvent.press(view.getByText('查看步行路線')));
+  expect(Linking.openURL).toHaveBeenCalledWith(
+    expect.stringContaining('destination=23.8%2C120.5'),
+  );
+});

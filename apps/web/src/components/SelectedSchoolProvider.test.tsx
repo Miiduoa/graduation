@@ -236,3 +236,27 @@ it('clears an old code when changing to a school listed only by the live directo
   expect(params.get('campus')).toBe('tw-new-university');
   expect(params.has('school')).toBe(false);
 });
+
+it('clears map deep links when changing campuses while preserving unrelated map search filters', () => {
+  navigation.pathname = '/map';
+  navigation.search = '?schoolId=school-a&campus=school-a&route=library,gate&focus=library&q=%E8%87%AA%E7%BF%92';
+  render(<View />);
+  expect(screen.getByTestId('selected-school').textContent).toBe('甲校');
+  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
+  const next = new URLSearchParams(navigation.search);
+  expect(next.get('schoolId')).toBe('school-b');
+  expect(next.get('campus')).toBe('school-b');
+  expect(next.has('route')).toBe(false);
+  expect(next.has('focus')).toBe(false);
+  expect(next.get('q')).toBe('自習');
+});
+
+it('keeps a current-school map link intact when choosing the same campus again', () => {
+  navigation.pathname = '/map';
+  navigation.search = '?schoolId=school-a&campus=school-a&route=library,gate&focus=library';
+  render(<View />);
+  act(() => capturedSelection.selectSchool('school-a'));
+  const next = new URLSearchParams(navigation.search);
+  expect(next.get('route')).toBe('library,gate');
+  expect(next.get('focus')).toBe('library');
+});
