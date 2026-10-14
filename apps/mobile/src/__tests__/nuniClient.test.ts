@@ -6,6 +6,35 @@ import {
 
 const handle = `ps_${'a'.repeat(43)}`;
 const originalFetch = global.fetch;
+it('encodes food pagination as data without permitting request URL or mutation overrides', async () => {
+  const fetchMock = jest.fn(async (_url: unknown, _options?: unknown) => ({
+    ok: true,
+    text: async () => '{}',
+  }));
+  global.fetch = fetchMock as unknown as typeof fetch;
+  await nuniPlatformRequest(
+    'realms/school-one/food/orders',
+    handle,
+    undefined,
+    undefined,
+    undefined,
+    { cursor: 'abc+/=next&personId=other', limit: '25' },
+  );
+  expect(fetchMock.mock.calls[0]?.[0]).toBe(
+    'https://api.nuni.tw/v1/auth/platform/realms/school-one/food/orders?cursor=abc%2B%2F%3Dnext%26personId%3Dother&limit=25',
+  );
+  await expect(
+    nuniPlatformRequest('realms/school-one/food/orders', handle, {}, undefined, undefined, {
+      cursor: 'abc',
+    }),
+  ).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+  await expect(
+    nuniPlatformRequest('realms/school-one/food/orders', handle, undefined, undefined, undefined, {
+      cursor: 'a'.repeat(501),
+    }),
+  ).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
 afterEach(() => {
   global.fetch = originalFetch;
   jest.useRealTimers();
@@ -98,5 +127,32 @@ it('parses the actual session-create contract without requiring current-session 
   );
   expect(() => parseNuniLoginSession({ ...value, expiresInSeconds: Infinity })).toThrow(
     'INVALID_RESPONSE',
+  );
+});
+
+it('uses the API settings PUT contract without changing the credential origin', async () => {
+  const fetchMock = jest.fn(async () => ({ ok: true, text: async () => '{}' }));
+  global.fetch = fetchMock as unknown as typeof fetch;
+  const input = {
+    expectedVersion: 1,
+    serviceModes: ['pickup'],
+    paymentMode: 'counter-only',
+    termsVersion: 'merchant-terms-v1',
+  };
+  await nuniPlatformRequest(
+    'merchant-workspaces/school-one/location-one/settings',
+    handle,
+    input,
+    undefined,
+    'PUT',
+  );
+  expect(fetchMock).toHaveBeenCalledWith(
+    'https://api.nuni.tw/v1/auth/platform/merchant-workspaces/school-one/location-one/settings',
+    expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify(input),
+      redirect: 'error',
+      headers: expect.objectContaining({ Authorization: `Platform ${handle}` }),
+    }),
   );
 });

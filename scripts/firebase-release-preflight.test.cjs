@@ -12,6 +12,13 @@ const service = (name) => ({
   config: { name },
   state: 'ENABLED',
 });
+const rulesOnlyApis = [
+  'firestore.googleapis.com',
+  'identitytoolkit.googleapis.com',
+  'firebaserules.googleapis.com',
+  'firebasestorage.googleapis.com',
+  'storage.googleapis.com',
+];
 
 function fixture(overrides = {}) {
   const calls = [];
@@ -92,6 +99,170 @@ test('validates every prerequisite with refresh-token auth and produces a versio
   assert.equal(tokenRequest.body.get('scope'), 'https://www.googleapis.com/auth/cloud-platform');
   assert.equal(f.calls.filter((call) => call.options.method !== 'GET').length, 1);
 });
+
+test('rules-only validates its services without requesting Functions billing or build prerequisites', async () => {
+  const f = fixture({
+    'cloudbilling.googleapis.com': () => {
+      throw new Error('Unrelated billing access must not be attempted');
+    },
+    'serviceusage.googleapis.com': { services: rulesOnlyApis.map(service) },
+  });
+  const result = await preflight({ ...f.options, mode: 'rules-only' });
+  assert.equal(result.ready, true);
+  assert.equal(result.mode, 'rules-only');
+  assert.equal(result.sourceCommit, sha);
+  assert.equal(result.checks.length, rulesOnlyApis.length + 5);
+  assert.deepEqual(
+    result.checks.filter((item) => item.id.startsWith('api:')).map((item) => item.id),
+    rulesOnlyApis.map((api) => `api:${api}`),
+  );
+  assert.equal(
+    result.checks.some((item) => item.id === 'billing'),
+    false,
+  );
+  assert.equal(
+    f.calls.some((call) => call.url.hostname === 'cloudbilling.googleapis.com'),
+    false,
+  );
+  assert.equal(f.calls.filter((call) => call.options.method !== 'GET').length, 1);
+  assert.match(result.scope, /rules.*indexes.*storage/i);
+  assert.doesNotMatch(JSON.stringify(result), /private-/);
+});
+
+test('the default remains full and still requires billing and every Functions API', async () => {
+  const f = fixture({
+    'cloudbilling.googleapis.com': { projectId: project, billingEnabled: false },
+    'serviceusage.googleapis.com': { services: rulesOnlyApis.map(service) },
+  });
+  const result = await preflight(f.options);
+  assert.equal(result.mode, 'full');
+  assert.equal(result.ready, false);
+  assert.equal(result.checks.find((item) => item.id === 'billing').status, 'blocked');
+  assert.equal(
+    result.checks.find((item) => item.id === 'api:cloudfunctions.googleapis.com').status,
+    'blocked',
+  );
+  assert.equal(result.checks.length, REQUIRED_APIS.length + 6);
+});
+
+for (const mode of ['', 'rules', 'RULES-ONLY', 'disabled', null, false, {}]) {
+  test(`rejects unknown preflight mode ${JSON.stringify(mode)} before credentials or network`, async () => {
+    const f = fixture();
+    await assert.rejects(preflight({ ...f.options, mode }), /mode.*full.*rules-only/i);
+    assert.equal(f.calls.length, 0);
+  });
+}
+
+for (const api of rulesOnlyApis) {
+  test(`rules-only still blocks missing ${api}`, async () => {
+    const f = fixture({
+      'serviceusage.googleapis.com': {
+        services: rulesOnlyApis.filter((item) => item !== api).map(service),
+      },
+    });
+    const result = await preflight({ ...f.options, mode: 'rules-only' });
+    assert.equal(result.ready, false);
+    const blocked = result.checks.find((item) => item.id === `api:${api}`);
+    assert.equal(blocked.status, 'blocked');
+    assert.doesNotMatch(blocked.action, /billing|Blaze|Functions/);
+  });
+}
+
+for (const [name, overrides, blocked] of [
+  [
+    'wrong project identity',
+    {
+      'cloudresourcemanager.googleapis.com': {
+        projectId: 'another-project',
+        projectNumber: number,
+        lifecycleState: 'ACTIVE',
+      },
+    },
+    'project',
+  ],
+  [
+    'foreign service identity',
+    {
+      'serviceusage.googleapis.com': {
+        services: [
+          { ...service(rulesOnlyApis[0]), name: `projects/999/services/${rulesOnlyApis[0]}` },
+        ],
+      },
+    },
+    `api:${rulesOnlyApis[0]}`,
+  ],
+  ['missing Auth', { 'identitytoolkit.googleapis.com': () => response({}, 404) }, 'auth'],
+  [
+    'foreign Auth identity',
+    {
+      'identitytoolkit.googleapis.com': {
+        name: 'projects/999/config',
+        authorizedDomains: ['nuni.tw'],
+      },
+    },
+    'auth',
+  ],
+  [
+    'missing authorized domain',
+    {
+      'identitytoolkit.googleapis.com': {
+        name: `projects/${number}/config`,
+        authorizedDomains: ['other.test'],
+      },
+    },
+    'auth-domain',
+  ],
+  [
+    'wrong Firestore mode',
+    {
+      'firestore.googleapis.com': {
+        name: `projects/${project}/databases/(default)`,
+        type: 'DATASTORE_MODE',
+        locationId: 'nam5',
+      },
+    },
+    'firestore',
+  ],
+  [
+    'wrong Firestore location',
+    {
+      'firestore.googleapis.com': {
+        name: `projects/${project}/databases/(default)`,
+        type: 'FIRESTORE_NATIVE',
+        locationId: 'eur3',
+      },
+    },
+    'firestore',
+  ],
+  [
+    'foreign Firestore database',
+    {
+      'firestore.googleapis.com': {
+        name: 'projects/another-project/databases/(default)',
+        type: 'FIRESTORE_NATIVE',
+        locationId: 'nam5',
+      },
+    },
+    'firestore',
+  ],
+  ['missing Storage bucket', { 'storage.googleapis.com': () => response({}, 404) }, 'storage'],
+  [
+    'foreign Storage owner',
+    { 'storage.googleapis.com': { name: bucket, projectNumber: '999' } },
+    'storage',
+  ],
+  [
+    'wrong Storage bucket',
+    { 'storage.googleapis.com': { name: 'another-bucket', projectNumber: number } },
+    'storage',
+  ],
+]) {
+  test(`rules-only never bypasses ${name}`, async () => {
+    const result = await preflight({ ...fixture(overrides).options, mode: 'rules-only' });
+    assert.equal(result.ready, false);
+    assert.equal(result.checks.find((item) => item.id === blocked).status, 'blocked');
+  });
+}
 
 test('reports all missing prerequisites together instead of stopping at the first one', async () => {
   const f = fixture({
