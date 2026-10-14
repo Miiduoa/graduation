@@ -4,7 +4,7 @@
  */
 import React, { useState } from 'react';
 import { Linking, Platform, Pressable, Text, View } from 'react-native';
-import { getOfficialLibrary } from '@campus/shared/src/officialLibraries';
+import { buildOfficialLibraryCatalogUrl, getOfficialLibrary } from '@campus/shared/src/officialLibraries';
 import { Screen } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { analytics } from '../services/analytics';
@@ -41,7 +41,8 @@ export function LibraryCatalogScreen(props: { navigation?: any; route?: any }) {
               accessibilityLabel={`開啟${library.name}官方館藏`}
               onPress={() => {
                 setFailedSchoolId(null);
-                void Linking.openURL(library.catalogUrl).catch(() => setFailedSchoolId(school.id));
+                const searchUrl = buildOfficialLibraryCatalogUrl(school.id, initialQ, 'FullText', school.name) ?? library.catalogUrl;
+                void Linking.openURL(searchUrl).catch(() => setFailedSchoolId(school.id));
               }}
               style={{
                 minHeight: 48,
@@ -53,7 +54,9 @@ export function LibraryCatalogScreen(props: { navigation?: any; route?: any }) {
               }}
             >
               <Text style={{ color: theme.colors.onAccent, fontWeight: '700' }}>
-                開啟學校官方館藏
+                {library.catalogSearch === 'primo-ve' && initialQ.trim()
+                  ? '搜尋本校館藏'
+                  : '開啟學校官方館藏'}
               </Text>
             </Pressable>
           ) : null}
