@@ -16,6 +16,15 @@ vi.mock('@/components/SelectedSchoolProvider', () => ({
   useSelectedSchool: () => ({ selectedSchoolId: 'pu', loading: false }),
   useOptionalSelectedSchool: () => ({ selectedSchoolId: 'pu', selectedSchool: { id: 'pu', name: '靜宜大學' }, loading: false, catalogStatus: 'ready' }),
 }));
+vi.mock('@/lib/usePersonalImports', () => ({
+  usePersonalImportScope: () => ({
+    scope: { owner: 'school:alice', schoolId: 'pu' },
+    scopeKey: 'school:alice:pu',
+    loading: false,
+    schoolName: '靜宜大學',
+  }),
+  usePersonalImports: () => ({ records: [], error: '', loading: false }),
+}));
 vi.mock('@/lib/timetable/store', () => ({ loadPersonalTimetable: mocks.load, savePersonalTimetable: mocks.save,
   loadFriendTimetable: mocks.friend, createMeetup: mocks.meetups, createServerShare: vi.fn(),
   listMyMeetups: vi.fn(async () => []), respondMeetup: vi.fn() }));
