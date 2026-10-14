@@ -1,4 +1,5 @@
 import { sanitizeLoginReturnPath } from '@campus/shared/src/signedInSocialReads';
+import { findSchoolById } from '@campus/shared/src/schools';
 
 export type SchoolContext = {
   code: string;
@@ -32,6 +33,23 @@ export function extractSchoolContextFromPath(path?: string | null): {
     school: url.searchParams.get('school') || undefined,
     schoolId: url.searchParams.get('schoolId') || undefined,
   };
+}
+
+/** Preserve the browsing campus when moving between public service pages. */
+export function browsingSchoolSearch(
+  params: { get(name: string): string | null } | null | undefined,
+  selectedSchoolId: string | null,
+): string {
+  const campus = params?.get('campus');
+  if (campus === 'all') return '?campus=all';
+
+  const schoolId = campus || params?.get('schoolId') || selectedSchoolId;
+  if (!schoolId || !/^[a-z0-9][a-z0-9-]{0,78}[a-z0-9]$/.test(schoolId)) return '';
+
+  const school = findSchoolById(schoolId);
+  const search = school ? buildSchoolSearch({ code: school.code, id: school.id })
+    : `?schoolId=${encodeURIComponent(schoolId)}`;
+  return `${search}&campus=${encodeURIComponent(schoolId)}`;
 }
 
 export function buildSchoolSearch(context: SchoolContext): string {
