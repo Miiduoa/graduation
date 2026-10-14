@@ -8,7 +8,7 @@ export function isUsableFootRoute(
   destination: CampusCoordinate,
 ): route is RouteGeometry {
   if (!route || !Number.isFinite(route.distance) || route.distance <= 0 ||
-      !Array.isArray(route.geometry) || route.geometry.length < 2) return false;
+      route.distance > 5000 || !Array.isArray(route.geometry) || route.geometry.length < 2) return false;
   const valid = (pair: unknown) => {
     if (!Array.isArray(pair) || pair.length !== 2) return false;
     const [lng, lat] = pair;
