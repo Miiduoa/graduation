@@ -18,6 +18,7 @@ export default function MapPage(props: {
   searchParams?: Promise<{
     school?: string;
     schoolId?: string;
+    campus?: string;
     route?: string | string[];
     focus?: string | string[];
   }>;
