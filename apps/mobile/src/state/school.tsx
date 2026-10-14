@@ -59,15 +59,22 @@ export function schoolFromSelection(selection: Partial<SchoolSelection>): School
     // The public directory can introduce schools before the bundled legacy catalog is updated.
     // Preserve their identity instead of silently rendering another institution's data.
     const chosenCode = normalizeSchoolCode(selection.code);
+    const codeOwner = findSchoolsByCode(chosenCode);
     const code =
-      chosenCode && chosenCode !== PROVIDENCE_UNIVERSITY_SCHOOL_CODE
+      /^[A-Z0-9_-]{1,120}$/.test(chosenCode) &&
+      !(codeOwner.length === 1 && codeOwner[0].id !== id)
         ? chosenCode
         : id.toUpperCase();
+    const name = typeof selection.schoolName === 'string' ? selection.schoolName.trim() : '';
+    const shortName = typeof selection.shortName === 'string' ? selection.shortName.trim() : '';
+    const color = typeof selection.themeColor === 'string' ? selection.themeColor : '';
     return {
       id,
       code,
-      name: selection.schoolName?.trim() || '所選校園',
-      shortName: selection.shortName?.trim() || undefined,
+      name: name.slice(0, 160) || `所選校園（${id}）`,
+      shortName: shortName.slice(0, 80) || undefined,
+      themeColor: /^#[0-9a-fA-F]{6}$/.test(color) ? color : undefined,
+      // Browsing metadata is not evidence of an authorized email domain.
     };
   }
   const matches = findSchoolsByCode(selection.code);
