@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import {
   createPersonalImportId,
+  serializePersonalImportsCsv,
   parsePersonalImport,
   personalImportErrorMessage,
   personalImportSavedNotice,
@@ -522,45 +523,12 @@ function ImportWorkspace({
     }
   };
   const exportRecords = () => {
-    const fields = [
-      'kind',
-      'title',
-      'schoolId',
-      'academicYear',
-      'semester',
-      'courseCode',
-      'teacher',
-      'className',
-      'location',
-      'dayOfWeek',
-      'startPeriod',
-      'endPeriod',
-      'startTime',
-      'endTime',
-      'credits',
-      'grade',
-      'date',
-      'endDate',
-      'allDay',
-      'periodLabel',
-    ] as const;
-    const quoted = (value: unknown) =>
-      `"${String(value ?? '')
-        .replace(/^[=+@-]/, (match) => `\t${match}`)
-        .replace(/"/g, '""')}"`;
-    const content =
-      '\uFEFF' +
-      [
-        fields.join(','),
-        ...ledger.records
-          .filter((row) => row.kind === kind)
-          .map((row) => fields.map((field) => quoted(row[field])).join(',')),
-      ].join('\r\n');
+    const content = serializePersonalImportsCsv(ledger.records.filter((row) => row.kind === kind));
     const url = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8' }));
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `campus-one-${kind}.csv`;
-    a.click();
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'campus-one-' + kind + '.csv';
+    anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   const saved = ledger.records.filter(
