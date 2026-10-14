@@ -16,6 +16,11 @@ import {
   getHSRSchedule,
 } from '../services/tdxApi';
 
+let mockSelectedSchool = { id: 'pu', name: '靜宜大學' };
+jest.mock('../state/school', () => ({
+  useSchool: () => ({ school: mockSelectedSchool }),
+}));
+
 const mockPosition = jest.fn();
 jest.mock('../hooks/useGeolocation', () => ({
   useGeolocation: () => ({ getCurrentPosition: mockPosition, loading: false }),
@@ -75,6 +80,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 beforeEach(() => {
+  mockSelectedSchool = { id: 'pu', name: '靜宜大學' };
   jest.clearAllMocks();
   mockPosition.mockResolvedValue(null);
   jest.mocked(reverseGeocode).mockResolvedValue('已確認位置');
@@ -235,4 +241,12 @@ test('clearing the search invalidates the pending response', async () => {
     ]),
   );
   expect(view.queryByText('舊搜尋地點')).toBeNull();
+});
+
+test('does not expose Taichung transit when another campus is selected', () => {
+  mockSelectedSchool = { id: 'nthu', name: '國立清華大學' };
+  const view = render(<TransportHubScreen />);
+  expect(view.getByText('這所學校尚未接入跨運具交通資料')).toBeTruthy();
+  expect(view.queryByText('台中車站')).toBeNull();
+  expect(planRoutes).not.toHaveBeenCalled();
 });
