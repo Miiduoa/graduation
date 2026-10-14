@@ -22,7 +22,7 @@ function formatWhen(value: string) {
 }
 
 export default function LostFoundPage(props: {
-  searchParams?: Promise<{ schoolId?: string; school?: string }>;
+  searchParams?: Promise<{ schoolId?: string; school?: string; campus?: string }>;
 }) {
   const search = props.searchParams ? use(props.searchParams) : undefined;
   const context = resolveSchoolPageContext(search);
