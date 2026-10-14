@@ -9,7 +9,7 @@ import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 
 function BusContext() {
   const search = useSearchParams();
-  const { schoolId, schoolName, status } = useCampusBrowseContext({
+  const { schoolId, schoolName, schoolSearch, status } = useCampusBrowseContext({
     school: search.get('school') ?? undefined,
     schoolId: search.get('schoolId') ?? undefined,
     campus: search.get('campus') ?? undefined,
@@ -34,7 +34,7 @@ function BusContext() {
           schoolName={schoolName || '不限校園'}
           legacy={
             <p>
-              <Link href="/bus/registered">開啟已登錄的校園路線查詢 →</Link>
+              <Link href={`/bus/registered${schoolSearch}`}>開啟已登錄的校園路線查詢 →</Link>
             </p>
           }
         />

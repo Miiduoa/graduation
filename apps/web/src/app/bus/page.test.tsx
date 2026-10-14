@@ -46,3 +46,12 @@ it('prompts for a school rather than querying any campus when none is chosen', (
   expect(screen.queryByTestId('bus-school')).toBeNull();
   expect(screen.queryByText('靜宜大學')).toBeNull();
 });
+
+it('keeps the selected campus in the registered-routes deep link', () => {
+  navigation.query = '?campus=nthu&schoolId=pu';
+  render(<BusPage />);
+  const link = screen.getByRole('link', { name: /開啟已登錄的校園路線查詢/ });
+  const href = new URL(link.getAttribute('href')!, 'https://campus.example');
+  expect(href.searchParams.get('schoolId')).toBe('nthu');
+  expect(href.searchParams.get('school')).toBe('NTHU');
+});
