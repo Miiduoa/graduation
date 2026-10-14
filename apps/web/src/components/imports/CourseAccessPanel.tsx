@@ -2,13 +2,16 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createPersonalImportId, type PersonalImportRow } from '@campus/shared';
-import { courseHints, courseAccessErrorMessage, courseRequestCopy, type CourseMatch, type CourseRequest } from '@campus/shared/src/courseAccess';
+import { approvedCourseLinks, courseHints, courseAccessErrorMessage, courseRequestCopy, type CourseMatch, type CourseRequest } from '@campus/shared/src/courseAccess';
 import { createCourseAccess } from '@campus/shared/src/courseAccessClient';
 import { type NuniWorkspace } from '@campus/shared/src/nuni';
 import { browserRequest, useOptionalNuniSession } from '@/features/nuni/Session';
 import styles from './PersonalImport.module.css';
 
-type Props = { row: PersonalImportRow; workspaces: NuniWorkspace[] };
+type Props = { row: PersonalImportRow; workspaces: NuniWorkspace[];
+  onRefreshWorkspaces?: () => void;
+  onSelectLinkedCourse?: (workspaceId: string) => void;
+};
 export function CourseAccessPanel(props: Props) {
   const auth = useOptionalNuniSession();
   if (props.row.kind !== 'timetable') return null;
@@ -20,7 +23,7 @@ export function CourseAccessPanel(props: Props) {
   return <CourseAccessSession key={scopeKey} {...props} context={context} operator={isPlatformOperator} />;
 }
 
-function CourseAccessSession({ row, workspaces, context, operator }: Props & { context: string; operator: boolean }) {
+function CourseAccessSession({ row, workspaces, context, operator, onRefreshWorkspaces, onSelectLinkedCourse }: Props & { context: string; operator: boolean }) {
   const client = createCourseAccess((path, input) => browserRequest(path, context, input));
   const alive = useRef(true), locked = useRef(false), retryKeys = useRef(new Map<string, string>());
   const [busy, setBusy] = useState(false), [message, setMessage] = useState('');
@@ -42,11 +45,14 @@ function CourseAccessSession({ row, workspaces, context, operator }: Props & { c
   function receipt(value: CourseRequest) {
     if (!alive.current) return;
     setRequests(items => [value, ...items.filter(item => item.id !== value.id)]);
+    if (value.kind === 'student' && value.state === 'approved' && value.membershipActive) onRefreshWorkspaces?.();
     setMessage(`${courseRequestCopy[value.state]}。${value.membershipActive ? '課班成員資格有效；重新載入課班清單後再建立個人連結。' : '尚未取得有效課班成員資格。'}`);
   }
   const candidate = matches?.find(item => item.course.id === selected)?.course;
   const already = candidate && requests.some(item => item.courseId === candidate.id && ['pending', 'approved'].includes(item.state));
   const owners = workspaces.filter(item => item.memberRole === 'owner-teacher' && item.state === 'active');
+  const approvedLinks = approvedCourseLinks(row, requests, workspaces);
+  const hasApprovedMembership = requests.some(item => item.kind === 'student' && item.state === 'approved' && item.membershipActive);
   return <details className={styles.source}>
     <summary>查找課班與申請加入</summary>
     <p>只查詢管理員已核對、已連結學校正式班次的課班。比對不代表修課資格或教師身分已獲認證。</p>
@@ -87,8 +93,18 @@ function CourseAccessSession({ row, workspaces, context, operator }: Props & { c
     </details>
     <h4>我的申請</h4>
     <button type="button" disabled={busy} onClick={() => void run(async () => {
-      const result = await client.mine(); if (alive.current) { setRequests(result.requests); setCursor(result.nextCursor); }
+      const result = await client.mine(); if (alive.current) { setRequests(result.requests); setCursor(result.nextCursor);
+        if (result.requests.some(item => item.kind === 'student' && item.state === 'approved' && item.membershipActive)) onRefreshWorkspaces?.(); }
     })}>重新查詢申請狀態</button>
+    {hasApprovedMembership && <div className={styles.source}>
+      <p>申請已有核准結果。請重新核對你目前擁有的課班成員資格，再決定是否連結到這筆個人課表。</p>
+      {onRefreshWorkspaces && <button type="button" disabled={busy} onClick={onRefreshWorkspaces}>更新已加入的課班</button>}
+      {approvedLinks.map(item => <button key={item.id} type="button" disabled={busy || !onSelectLinkedCourse || row.linkedCourseId === item.id}
+        onClick={() => onSelectLinkedCourse?.(item.id)}>
+        {row.linkedCourseId === item.id ? `已選：${item.title}（儲存個人紀錄後才生效）` : `選擇已核准課班：${item.title}`}
+      </button>)}
+      {!approvedLinks.length && <p>尚未核對到可安全直接連結的課班。若課名、課號、教師或班別不同，請先在上方人工確認，不會自動連結。</p>}
+    </div>}
     {requests.map(item => <div key={item.id}>
       <p>{item.metadata.title} · {item.metadata.schoolId} · {item.metadata.academicYear}/{item.metadata.semester} · {item.kind === 'teacher' ? '教師核對' : '加入申請'}：{courseRequestCopy[item.state]}</p>
       <p>{item.decisionReason || '尚無審核說明'} · {item.membershipActive ? '成員資格有效；請重新載入課班清單' : '目前沒有有效成員資格'}</p>
