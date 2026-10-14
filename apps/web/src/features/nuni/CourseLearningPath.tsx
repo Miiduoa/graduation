@@ -22,6 +22,7 @@ type Props = {
   refreshVersion?: number;
   reloadUnits: () => void;
   onUnitCreated: (unit: NuniUnit) => void;
+  onNavigate?: (panel: 'materials' | 'assignments' | 'quizzes') => void;
 };
 
 function suggestedTime(value: string | null) {
@@ -30,7 +31,7 @@ function suggestedTime(value: string | null) {
 }
 
 export function CourseLearningPath({
-  workspace, assignments, units, unitsError, refreshVersion = 0, reloadUnits, onUnitCreated,
+  workspace, assignments, units, unitsError, refreshVersion = 0, reloadUnits, onUnitCreated, onNavigate,
 }: Props) {
   const classes = useClasses();
   const courseApi = useRef(classes);
@@ -137,17 +138,17 @@ export function CourseLearningPath({
                 <ul className={styles.contents}>
                   {section.materials.map((item) => (
                     <li key={item.id}>
-                      <a href={`#material-${item.id}`}> <span className={styles.kind}>教材</span><span className={styles.itemTitle}>{item.title}</span><span className={styles.itemMeta}>開啟閱讀</span></a>
+                      <a href={`#material-${item.id}`} onClick={() => onNavigate?.('materials')}> <span className={styles.kind}>教材</span><span className={styles.itemTitle}>{item.title}</span><span className={styles.itemMeta}>開啟閱讀</span></a>
                     </li>
                   ))}
                   {section.assignments.map((item) => (
                     <li key={item.id}>
-                      <a href={`#assignment-${item.id}`}><span className={styles.kind}>作業</span><span className={styles.itemTitle}>{item.title}</span><span className={styles.itemMeta}>{teacher ? `${item.submissionCount} 份繳交` : courseActivityStatus(item, 'assignment')}{item.dueAt ? ` · 建議 ${suggestedTime(item.dueAt)}` : ''}</span></a>
+                      <a href={`#assignment-${item.id}`} onClick={() => onNavigate?.('assignments')}><span className={styles.kind}>作業</span><span className={styles.itemTitle}>{item.title}</span><span className={styles.itemMeta}>{teacher ? `${item.submissionCount} 份繳交` : courseActivityStatus(item, 'assignment')}{item.dueAt ? ` · 建議 ${suggestedTime(item.dueAt)}` : ''}</span></a>
                     </li>
                   ))}
                   {section.quizzes.map((item) => (
                     <li key={item.id}>
-                      <a href={`#quiz-${item.id}`}><span className={styles.kind}>測驗</span><span className={styles.itemTitle}>{item.title}</span><span className={styles.itemMeta}>{teacher ? `${item.responseCount} 份作答` : courseActivityStatus(item, 'quiz')}{item.dueAt ? ` · 建議 ${suggestedTime(item.dueAt)}` : ''}</span></a>
+                      <a href={`#quiz-${item.id}`} onClick={() => onNavigate?.('quizzes')}><span className={styles.kind}>測驗</span><span className={styles.itemTitle}>{item.title}</span><span className={styles.itemMeta}>{teacher ? `${item.responseCount} 份作答` : courseActivityStatus(item, 'quiz')}{item.dueAt ? ` · 建議 ${suggestedTime(item.dueAt)}` : ''}</span></a>
                     </li>
                   ))}
                 </ul>
