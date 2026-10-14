@@ -137,6 +137,11 @@ export async function queryPublicTransit(
   signal?: AbortSignal,
 ): Promise<PublicTransitResult> {
   if (!validQuery(input)) return unavailable('invalid-query');
+  if (signal?.aborted) return unavailable('network');
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal?.addEventListener('abort', abort);
+  const timer = setTimeout(abort, 12_000);
   try {
     const response = await fetch(TRANSIT_GATEWAY, {
       method: 'POST',
@@ -145,7 +150,7 @@ export async function queryPublicTransit(
       cache: 'no-store',
       credentials: 'omit',
       redirect: 'error',
-      signal,
+      signal: controller.signal,
     });
     const body: unknown = await response.json();
     const data = record(body);
@@ -203,5 +208,8 @@ export async function queryPublicTransit(
     return unavailable('upstream');
   } catch {
     return unavailable('network');
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
   }
 }
