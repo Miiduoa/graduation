@@ -17,7 +17,7 @@ import {
 } from './mapService';
 import styles from './map.module.css';
 import {
-  buildCampusMapSearchUrl,
+  getCampusMapFallback,
   hasOfficialProvidenceLibraryGuide,
   PROVIDENCE_LIBRARY_FLOOR_GUIDE_URL,
 } from '@campus/shared/src/campusMapLookup';
@@ -56,7 +56,7 @@ function MapContent({
   authLoading: boolean;
 }) {
   const hash = useLocationHash();
-  const fallbackMapUrl = buildCampusMapSearchUrl(schoolName);
+  const fallbackMap = getCampusMapFallback(school, schoolName);
   const [placeState, setPlaceState] = useState<{
     status: 'loading' | 'error' | 'ready';
     locations: MapLocation[];
@@ -259,21 +259,24 @@ function MapContent({
       <div className={`card ${styles.state}`}>
         <h2>目前沒有可顯示的校園地點</h2>
         <p>地點需要有完整的名稱與座標才能顯示。你也可以先查詢校方提供的校園資訊。</p>
-        {school === 'pu' ? (
-          <a className="btn" href="https://www.pu.edu.tw/" target="_blank" rel="noopener noreferrer">
-            開啟靜宜大學網站
-          </a>
-        ) : (
+        {school !== 'pu' && (
+          <p>目前還沒有這所校園的地點資料，不會改用其他學校的建築或導航位置。</p>
+        )}
+        {fallbackMap && (
           <>
-            <p>目前還沒有這所校園的地點資料，不會改用其他學校的建築或導航位置。</p>
-            {fallbackMapUrl && (
-              <>
-                <a className="btn" href={fallbackMapUrl} target="_blank" rel="noopener noreferrer">
-                  在 Google 地圖搜尋{schoolName} ↗
-                </a>
-                <p>此連結為第三方地圖搜尋，地點及路線仍需自行核對，不代表校方已發布建築座標。</p>
-              </>
-            )}
+            <a
+              className="btn"
+              href={fallbackMap.url}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {fallbackMap.label}{fallbackMap.source === 'external-search' ? ' ↗' : ''}
+            </a>
+            <p>
+              {fallbackMap.source === 'official'
+                ? '校方地圖提供建築與單位對照；Campus One 尚未將這些建物逐筆建成可導航的官方座標。'
+                : '此連結為第三方地圖搜尋，地點及路線仍需自行核對，不代表校方已發布建築座標。'}
+            </p>
           </>
         )}
       </div>
