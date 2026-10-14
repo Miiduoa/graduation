@@ -21,3 +21,28 @@ test('unknown or ambiguous codes never select a demonstration school', () => {
   expect(mergeSchoolSelection(previous, { code: 'TCU' })).toEqual(previous);
   expect(schoolFromSelection({ code: 'INVALID' }).id).toBe('pu');
 });
+
+test('valid directory tenant IDs remain isolated rather than showing PU metadata', () => {
+  const external = schoolFromSelection({
+    schoolId: 'tenant-university-12',
+    schoolName: '其他大學',
+  });
+  expect(external.id).toBe('tenant-university-12');
+  expect(external.name).toBe('其他大學');
+  expect(external.code).toBe('');
+});
+
+test('switching from PU to an external tenant clears its previous code and school', () => {
+  const previous = { code: 'PU', schoolId: 'pu', schoolName: '靜宜大學' };
+  expect(
+    mergeSchoolSelection(previous, {
+      schoolId: 'remote-university-12',
+      schoolName: '其他大學',
+    }),
+  ).toMatchObject({
+    schoolId: 'remote-university-12',
+    schoolName: '其他大學',
+    code: '',
+  });
+  expect(mergeSchoolSelection(previous, { schoolId: '../pu' })).toEqual(previous);
+});
