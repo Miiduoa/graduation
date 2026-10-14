@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import {
   BUS_FRESHNESS_MS,
   TAICHUNG_BUS_URL,
@@ -262,13 +262,27 @@ function SchoolBus({ schoolId }: { schoolId: string }) {
 
 function BusContext() {
   const search = useSearchParams();
-  const { schoolId, schoolName } = resolveSchoolPageContext({
+  const { schoolId, schoolName, status } = useCampusBrowseContext({
     school: search.get('school') ?? undefined,
     schoolId: search.get('schoolId') ?? undefined,
+    campus: search.get('campus') ?? undefined,
   });
   return (
     <SiteShell title="公車與交通" subtitle="查看候車站牌，確認到站資訊。" schoolName={schoolName}>
-      <SchoolBus key={schoolId} schoolId={schoolId} />
+      {status !== 'ready' || !schoolId ? (
+        <section className={styles.empty} role="status">
+          <h2>
+            {status === 'loading'
+              ? '正在確認所選校園…'
+              : status === 'error'
+                ? '無法確認所選校園'
+                : '請先選擇一所學校'}
+          </h2>
+          <p>選擇校園後才能查看已登錄的路線，不會載入其他學校的站牌。</p>
+        </section>
+      ) : (
+        <SchoolBus key={schoolId} schoolId={schoolId} />
+      )}
     </SiteShell>
   );
 }

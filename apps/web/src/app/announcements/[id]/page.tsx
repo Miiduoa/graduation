@@ -12,7 +12,9 @@ import {
   SOURCE_NOT_CONNECTED_TEXT,
   staleAnnouncementUpdatedAt,
 } from '@campus/shared/src/campusAnnouncements';
-import { resolveAnnouncementSchool } from '../resolveSchool';
+import { isAnnouncementSchoolVisibleToPublic } from '@campus/shared/src/campusAnnouncements';
+import { getAnnouncementVisibilityEnv } from '@/lib/runtime';
+import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import styles from '../announcements.module.css';
 
 type LoadState =
@@ -191,26 +193,42 @@ export default function AnnouncementDetailPage(props: {
 }) {
   const { id } = use(props.params);
   const params = props.searchParams ? use(props.searchParams) : undefined;
-  const { school, visible } = resolveAnnouncementSchool(params);
+  const context = useCampusBrowseContext(params);
+  const schoolId = context.schoolId;
+  const visible =
+    context.status === 'ready' &&
+    Boolean(schoolId && isAnnouncementSchoolVisibleToPublic(
+      { schoolId },
+      getAnnouncementVisibilityEnv(),
+    ));
   const { user, loading } = useAuth();
   return (
     <SiteShell
-      schoolName={visible ? school.name : undefined}
-      schoolCode={visible ? school.code : undefined}
+      schoolName={visible ? context.schoolName : undefined}
       title="公告詳情"
     >
       <div className={styles.page}>
         <Link
           className={styles.back}
           href={
-            visible ? `/announcements?schoolId=${encodeURIComponent(school.id)}` : '/announcements'
+            visible && schoolId
+              ? `/announcements?schoolId=${encodeURIComponent(schoolId)}`
+              : '/announcements'
           }
         >
           ← 返回公告列表
         </Link>
         {!visible ? (
           <section className={styles.status}>
-            <h2>目前沒有公開公告</h2>
+            <h2>
+              {context.status === 'loading'
+                ? '正在確認所選校園…'
+                : context.status === 'error'
+                  ? '無法取得校園目錄'
+                  : context.status === 'unselected'
+                    ? '先選擇一所學校'
+                    : '目前沒有公開公告'}
+            </h2>
           </section>
         ) : loading ? (
           <p className={styles.status} role="status">
@@ -218,8 +236,8 @@ export default function AnnouncementDetailPage(props: {
           </p>
         ) : (
           <AnnouncementDetail
-            key={JSON.stringify([school.id, id, user?.uid ?? null])}
-            schoolId={school.id}
+            key={JSON.stringify([schoolId, id, user?.uid ?? null])}
+            schoolId={schoolId!}
             id={id}
           />
         )}
