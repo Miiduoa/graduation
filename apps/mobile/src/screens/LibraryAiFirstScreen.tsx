@@ -78,9 +78,14 @@ function LibraryContent({
       if (navigation?.navigate) {
         navigation.navigate('LibraryCatalog', { initialQuery: keyword.trim() });
       } else {
-        const url = buildOfficialLibraryCatalogUrl(schoolId, keyword);
+        const url = buildOfficialLibraryCatalogUrl(schoolId, keyword, 'FullText', schoolName);
         if (url) await open(url);
       }
+      return;
+    }
+    if (library.catalogSearch === 'primo-ve') {
+      const url = buildOfficialLibraryCatalogUrl(schoolId, keyword, 'FullText', schoolName);
+      if (url) await open(url);
       return;
     }
     try {
@@ -140,7 +145,11 @@ function LibraryContent({
                   variant="ghost"
                   disabled={!keyword.trim()}
                   onPress={() => {
-                    const url = buildOfficialLibraryCatalogUrl(schoolId, keyword);
+                    if (library?.catalogSearch === 'primo-ve') {
+                      void searchOfficialCatalog();
+                      return;
+                    }
+                    const url = buildOfficialLibraryCatalogUrl(schoolId, keyword, 'FullText', schoolName);
                     if (url) void open(url);
                   }}
                 />
