@@ -16,6 +16,7 @@ import {
 } from '@campus/shared/src/cafeteriaCatalog';
 import { ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
 import { fetchCafeteriaCatalog, type CatalogCafeteria } from '@/lib/cafeteriaCatalog';
+import { loadFailureCopy } from '@campus/shared/src/loadFailureCopy';
 import type { MenuItem } from '@/lib/firebase';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import styles from './cafeteria.module.css';
@@ -90,13 +91,13 @@ function CafeteriaContent({
   const [cafeteriaRows, setCafeteriaRows] = useState<CatalogCafeteria[]>([]);
   const [menuRows, setMenuRows] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<unknown>(null);
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
-    setFailed(false);
+    setFailed(null);
     setCafeteriaRows([]);
     setMenuRows([]);
     void fetchCafeteriaCatalog(schoolId).then(
@@ -106,9 +107,9 @@ function CafeteriaContent({
         setMenuRows(catalog.menus);
         setLoading(false);
       },
-      () => {
+      (reason) => {
         if (!active) return;
-        setFailed(true);
+        setFailed(reason);
         setLoading(false);
       },
     );
@@ -245,15 +246,18 @@ function CafeteriaContent({
     return (
       <SiteShell title="餐廳" subtitle="查看校內餐廳與菜單" schoolName={schoolName}>
         <section className="card" role={failed ? 'alert' : 'status'}>
-          <h2>{failed ? '暫時無法讀取餐廳資料' : '正在讀取餐廳與菜單…'}</h2>
-          {failed && (
-            <>
-              <p>這次沒有取得完整資料，請稍後重試。餐點供應仍以店家現場資訊為準。</p>
-              <button className="btn primary" onClick={() => setAttempt((value) => value + 1)}>
-                重新讀取
-              </button>
-            </>
-          )}
+          <h2>
+            {failed
+              ? loadFailureCopy(failed, {
+                  online: typeof navigator === 'undefined' ? true : navigator.onLine,
+                })
+              : '正在讀取餐廳與菜單…'}
+          </h2>
+          {failed ? (
+            <button className="btn primary" onClick={() => setAttempt((value) => value + 1)}>
+              重新整理
+            </button>
+          ) : null}
         </section>
       </SiteShell>
     );

@@ -36,6 +36,9 @@ test('uses the shared network copy only for device offline or fetch-layer failur
   });
   expect(loadFailureCopy(new TypeError('Failed to fetch'))).toBe(NETWORK_RETRY_TEXT);
   expect(loadFailureCopy(new Error('Network request failed'))).toBe(NETWORK_RETRY_TEXT);
+  expect(loadFailureCopy(Object.assign(new Error('NETWORK_ERROR'), { code: 'NETWORK_ERROR' }))).toBe(
+    NETWORK_RETRY_TEXT,
+  );
   expect(
     loadFailureCopy(
       Object.assign(new Error('Failed to get document because the client is offline.'), {

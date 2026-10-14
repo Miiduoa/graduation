@@ -46,6 +46,9 @@ it('uses the temporary copy for timeouts, server errors and permission failures'
   expect(loadFailureCopy(Object.assign(new Error('offline'), { code: 'unavailable' }))).toBe(
     TEMPORARY_UNAVAILABLE_TEXT,
   );
+  expect(loadFailureCopy(Object.assign(new Error('NETWORK_ERROR'), { code: 'NETWORK_ERROR' }))).toBe(
+    NETWORK_RETRY_TEXT,
+  );
   expect(loadFailureCopy()).toBe(TEMPORARY_UNAVAILABLE_TEXT);
   expect(loadFailureCopy(undefined, { online: true })).toBe(TEMPORARY_UNAVAILABLE_TEXT);
 });

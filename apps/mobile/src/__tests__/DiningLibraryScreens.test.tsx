@@ -366,7 +366,20 @@ test('a failed menu read shows retry without fabricated restaurants', async () =
   const view = render(<CafeteriaAiFirstScreen />);
   await act(async () => {});
   expect(view.queryByText('今日餐點')).toBeNull();
-  expect(view.getByText('目前無法取得餐廳資料，請確認連線後重試。')).toBeTruthy();
+  expect(view.getByText('暫時讀不到資料，請稍後再試')).toBeTruthy();
+  expect(view.queryByText('請確認網路後再試')).toBeNull();
+  fireEvent.press(view.getByText('重新整理'));
+  await act(async () => {});
+  expect(view.getByText('今日餐點')).toBeTruthy();
+});
+test('keeps the offline copy when the device has no network', async () => {
+  jest.mocked(loadDiningCatalog).mockRejectedValueOnce(new TypeError('Network request failed'));
+  const view = render(<CafeteriaAiFirstScreen />);
+  await act(async () => {});
+  expect(view.getByText('請確認網路後再試')).toBeTruthy();
+  expect(view.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
+  expect(view.getByText('重新整理')).toBeTruthy();
+  expect(view.queryByText('今日餐點')).toBeNull();
 });
 test('library search opens the existing real catalog with the typed query', () => {
   const navigate = jest.fn();
