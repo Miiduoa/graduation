@@ -7,20 +7,43 @@ export type NuniTransport = (
   handle?: string,
   input?: Record<string, unknown>,
   signal?: AbortSignal,
+  method?: 'PUT',
+  query?: Record<string, string>,
 ) => Promise<unknown>;
 
 /** Credentials are sent only to the platform API, never to a supplied URL. */
-export const nuniPlatformRequest: NuniTransport = async (path, handle, input, signal) => {
+export const nuniPlatformRequest: NuniTransport = async (
+  path,
+  handle,
+  input,
+  signal,
+  method,
+  query,
+) => {
   if (!/^[a-z0-9-]+(?:\/[A-Za-z0-9_-]+)*$/.test(path) || (handle && !NUNI_HANDLE.test(handle)))
     throw new NuniError(400, 'INVALID_REQUEST');
+  if (
+    query &&
+    (input ||
+      method ||
+      Object.keys(query).length > 10 ||
+      Object.entries(query).some(
+        ([key, value]) =>
+          !/^[A-Za-z][A-Za-z0-9]{0,31}$/.test(key) ||
+          typeof value !== 'string' ||
+          value.length > 500,
+      ))
+  )
+    throw new NuniError(400, 'INVALID_REQUEST');
+  const search = new URLSearchParams(query).toString();
   const controller = new AbortController();
   const abort = () => controller.abort();
   signal?.addEventListener('abort', abort);
   if (signal?.aborted) controller.abort();
   const timeout = setTimeout(abort, 12000);
   try {
-    const response = await fetch(`${API}${path}`, {
-      method: input ? 'POST' : 'GET',
+    const response = await fetch(`${API}${path}${search ? `?${search}` : ''}`, {
+      method: method ?? (input ? 'POST' : 'GET'),
       redirect: 'error',
       cache: 'no-store',
       signal: controller.signal,

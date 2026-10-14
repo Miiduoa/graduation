@@ -32,9 +32,26 @@ export async function browserRequest(
   path: string,
   context?: string,
   input?: Record<string, unknown>,
+  method?: 'PUT',
+  query?: Record<string, string>,
 ): Promise<unknown> {
-  const response = await fetch(`/api/nuni/${path}`, {
-    method: input ? 'POST' : 'GET',
+  if (
+    !/^[a-z0-9-]+(?:\/[A-Za-z0-9_-]+)*$/.test(path) ||
+    (query &&
+      (input ||
+        method ||
+        Object.keys(query).length > 10 ||
+        Object.entries(query).some(
+          ([key, value]) =>
+            !/^[A-Za-z][A-Za-z0-9]{0,31}$/.test(key) ||
+            typeof value !== 'string' ||
+            value.length > 500,
+        )))
+  )
+    throw new NuniError(400, 'INVALID_REQUEST');
+  const search = new URLSearchParams(query).toString();
+  const response = await fetch(`/api/nuni/${path}${search ? `?${search}` : ''}`, {
+    method: method ?? (input ? 'POST' : 'GET'),
     cache: 'no-store',
     credentials: 'same-origin',
     redirect: 'error',
