@@ -96,3 +96,20 @@ test('an unconfigured provider or network failure never becomes a fictional succ
     status: 'unavailable', reason: 'network',
   });
 });
+
+
+test('a stalled public data request times out rather than leaving the native page spinning', async () => {
+  jest.useFakeTimers();
+  try {
+    jest.mocked(global.fetch).mockImplementationOnce(
+      (_url, options) => new Promise((_resolve, reject) => {
+        (options?.signal as AbortSignal).addEventListener('abort', () => reject(new Error('aborted')));
+      }),
+    );
+    const pending = queryPublicTransit({ action: 'search', city: 'Hsinchu', text: '清華大學' });
+    jest.advanceTimersByTime(12_000);
+    await expect(pending).resolves.toMatchObject({ status: 'unavailable', reason: 'network' });
+  } finally {
+    jest.useRealTimers();
+  }
+});
