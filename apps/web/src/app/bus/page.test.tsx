@@ -15,8 +15,11 @@ vi.mock('@/components/SiteShell', () => ({
   ),
 }));
 vi.mock('@/components/TransitExplorer', () => ({
-  TransitExplorer: ({ schoolId }: { schoolId: string }) => (
-    <output data-testid="bus-school">{schoolId}</output>
+  TransitExplorer: ({ schoolId, legacy }: { schoolId: string; legacy?: React.ReactNode }) => (
+    <div>
+      <output data-testid="bus-school">{schoolId}</output>
+      {legacy}
+    </div>
   ),
 }));
 
