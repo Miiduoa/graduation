@@ -3,13 +3,14 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { createNavigationContainerRef, NavigationContainer } from '@react-navigation/native';
 import { PreAuthStack } from '../screens/PreAuthStack';
 import { Text } from 'react-native';
-import { SchoolSessionBoundary } from '../app/SchoolSessionBoundary';
+import { SchoolSessionBoundary, hasReadySchoolSession } from '../app/SchoolSessionBoundary';
 import { preAuthLinking } from '../app/preAuthLinking';
 import {
   resetSchoolLoginProviderCache,
   setSchoolLoginProviderKinds,
 } from '../services/schoolLoginAvailability';
 
+let mockBrowsingSchoolId = 'pu';
 let mockSchoolAuth: {
   user: { uid: string } | null;
   profile: { uid: string; schoolId: string } | null;
@@ -27,7 +28,7 @@ jest.mock('../state/auth', () => ({ useAuth: () => mockSchoolAuth }));
 // Navigation tests render the signed-out stack without mounting the app shell.
 // Supply the same selected-campus context that production SchoolProvider supplies.
 jest.mock('../state/school', () => ({
-  useSchool: () => ({ school: { id: 'pu', name: '靜宜大學' } }),
+  useSchool: () => ({ school: { id: mockBrowsingSchoolId, name: mockBrowsingSchoolId === 'pu' ? '靜宜大學' : '國立清華大學' } }),
 }));
 let mockInitialUrl: string | null = null;
 let mockLinkListener: ((event: { url: string }) => void) | undefined;
@@ -41,6 +42,7 @@ jest.mock('expo-linking', () => ({
   },
 }));
 beforeEach(() => {
+  mockBrowsingSchoolId = 'pu';
   mockSchoolAuth = {
     user: null,
     profile: null,
@@ -276,4 +278,54 @@ test('account changes unmount private content before exposing the next account',
   view.rerender(content());
   expect(view.queryByTestId('private-school')).toBeNull();
   expect(cleanup).toHaveBeenCalledTimes(1);
+});
+
+
+test('browsing another school unmounts private school screens and restores them only after returning', () => {
+  mockSchoolAuth = {
+    user: { uid: 'pu-student' },
+    profile: { uid: 'pu-student', schoolId: 'pu' },
+    loading: false,
+    profileLoading: false,
+    tokenExpired: false,
+  };
+  const cleanup = jest.fn();
+  const mounts = jest.fn();
+  function Private() {
+    React.useEffect(() => {
+      mounts();
+      return cleanup;
+    }, []);
+    return <Text testID="private-school">靜宜私人課務</Text>;
+  }
+  const content = () => (
+    <SchoolSessionBoundary publicContent={<Text testID="public-campus">公開校園</Text>}>
+      <Private />
+    </SchoolSessionBoundary>
+  );
+  const view = render(content());
+  expect(view.getByTestId('private-school')).toBeTruthy();
+  mockBrowsingSchoolId = 'nthu';
+  view.rerender(content());
+  expect(view.queryByTestId('private-school')).toBeNull();
+  expect(view.getByTestId('public-campus')).toBeTruthy();
+  expect(cleanup).toHaveBeenCalledTimes(1);
+  expect(hasReadySchoolSession(mockSchoolAuth, 'nthu')).toBe(false);
+  mockBrowsingSchoolId = 'pu';
+  view.rerender(content());
+  expect(view.getByTestId('private-school')).toBeTruthy();
+  expect(mounts).toHaveBeenCalledTimes(2);
+});
+
+test('school aliases do not bypass cross-campus isolation', () => {
+  mockSchoolAuth = {
+    user: { uid: 'u1' },
+    profile: { uid: 'u1', schoolId: 'tw-pu' },
+    loading: false,
+    profileLoading: false,
+  };
+  expect(hasReadySchoolSession(mockSchoolAuth, 'pu')).toBe(true);
+  expect(hasReadySchoolSession(mockSchoolAuth, 'tw-pu')).toBe(true);
+  expect(hasReadySchoolSession(mockSchoolAuth, 'nthu')).toBe(false);
+  expect(hasReadySchoolSession(mockSchoolAuth, null)).toBe(false);
 });
