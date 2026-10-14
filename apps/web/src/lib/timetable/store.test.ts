@@ -216,6 +216,7 @@ it('retains a mismatched unscoped legacy school without exposing it', async () =
   const legacyKey = 'campus-one-personal-timetable:u-1';
   const raw = JSON.stringify({ schoolId: 'ntu', courses: [course] });
   localStorage.setItem(legacyKey, raw);
+  firestore.getDoc.mockResolvedValue({ exists: () => false });
   expect((await loadPersonalTimetable('u-1', 'pu', 'school:u-1')).courses).toEqual([]);
   expect(localStorage.getItem(legacyKey)).toBe(raw);
 });
