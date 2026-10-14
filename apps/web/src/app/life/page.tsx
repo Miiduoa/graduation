@@ -1,4 +1,8 @@
+'use client';
+
 import Link from 'next/link';
+import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
+import { buildCampusNavigationSearch, campusServiceHref } from '@/lib/campusNavigation';
 import { SiteShell } from '@/components/SiteShell';
 import { isWebOnlineOrderingEnabled } from '@/lib/onlineOrdering';
 import styles from '@/components/academic/academic.module.css';
@@ -15,6 +19,12 @@ const ITEMS = [
 ];
 
 export default function LifePage() {
+  const selection = useOptionalSelectedSchool();
+  const scope = buildCampusNavigationSearch(
+    null,
+    selection?.selectedSchool,
+    Boolean(selection && !selection.loading && selection.catalogStatus === 'ready'),
+  );
   const items = ITEMS.filter((item) => item.href !== '/orders' || isWebOnlineOrderingEnabled());
   return (
     <SiteShell title="生活" subtitle="地圖、公車、餐廳、找人，都從這裡進。">
@@ -25,7 +35,7 @@ export default function LifePage() {
               <h3>{item.title}</h3>
               <p>{item.text}</p>
             </div>
-            <Link className="btn" href={item.href}>
+            <Link className="btn" href={campusServiceHref(item.href, scope)}>
               打開 →
             </Link>
           </li>

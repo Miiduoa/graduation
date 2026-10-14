@@ -5,6 +5,7 @@ import { AIDetailScreen, AISection, AIRow, AICard, AIButton, aiTokens } from '..
 import { useAuth } from '../state/auth';
 import { useThemeMode } from '../state/theme';
 import { getLegalUrl } from '../services/release';
+import { SchoolBrowsingControl } from '../components/SchoolBrowsingControl';
 
 type Navigation = { goBack?: () => void; navigate?: (screen: string) => void };
 
@@ -95,6 +96,10 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
           )}
         </View>
       </AICard>
+
+      <AISection title="校園">
+        <SchoolBrowsingControl />
+      </AISection>
 
       <AISection title="外觀與閱讀">
         <AICard title="介面主題">
