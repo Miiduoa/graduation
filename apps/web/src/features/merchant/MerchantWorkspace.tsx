@@ -16,6 +16,8 @@ import {
   type NuniMerchantApplicationInput,
 } from '@campus/shared/src/nuniMerchant';
 import styles from './MerchantWorkspace.module.css';
+import { MerchantOperations, type MerchantOperationDrafts } from './MerchantOperations';
+import type { FoodDraftCache } from '@/features/food/foodState';
 
 type Overview = Awaited<ReturnType<typeof loadMerchantOverview>>;
 type Draft = Omit<NuniMerchantApplicationInput, 'idempotencyKey'>;
@@ -45,12 +47,29 @@ function expired(error: unknown) {
 
 export function MerchantWorkspace() {
   const auth = useNuniSession();
+  const [operationScope, setOperationScope] = useState<{
+    accountId: string | null;
+    locations: MerchantOperationDrafts;
+    food: FoodDraftCache;
+  }>(() => ({ accountId: null, locations: new Map(), food: new Map() }));
+  const confirmedAccount = auth.pendingLogout
+    ? null
+    : (auth.session?.platformAccountId ??
+      (!auth.loading && !auth.error ? null : operationScope.accountId));
+  if (confirmedAccount !== operationScope.accountId) {
+    // An unavailable session is not proof of logout. Keep uncertain write intent
+    // hidden until this account returns, or discard it for a confirmed identity change.
+    setOperationScope({ accountId: confirmedAccount, locations: new Map(), food: new Map() });
+    return null;
+  }
   return (
     <SiteShell title="店家合作" subtitle="使用同一個 Google 帳號，申請進駐並查看審核進度。">
       {auth.session && !auth.pendingLogout && !auth.error ? (
         <AccountWorkspace
           key={`${auth.session.platformAccountId}:${auth.session.context}`}
           context={auth.session.context}
+          operationDrafts={operationScope.locations}
+          foodDrafts={operationScope.food}
           suspended={auth.loading}
           onExpired={auth.refresh}
         />
@@ -63,10 +82,14 @@ export function MerchantWorkspace() {
 
 function AccountWorkspace({
   context,
+  operationDrafts,
+  foodDrafts,
   suspended,
   onExpired,
 }: {
   context: string;
+  operationDrafts: MerchantOperationDrafts;
+  foodDrafts: FoodDraftCache;
   suspended: boolean;
   onExpired: () => Promise<void>;
 }) {
@@ -79,6 +102,10 @@ function AccountWorkspace({
   const [notice, setNotice] = useState('');
   const [submitError, setSubmitError] = useState('');
   const [pending, setPending] = useState<NuniMerchantApplicationInput | null>(null);
+  const [selectedLocation, setSelectedLocation] = useState<{
+    tenantId: string;
+    locationId: string;
+  } | null>(null);
   const generation = useRef(0);
   const mounted = useRef(true);
   const busyRef = useRef(false);
@@ -208,6 +235,35 @@ function AccountWorkspace({
     }
   }
 
+  if (selectedLocation && !invalidSession)
+    return (
+      <MerchantOperations
+        key={`${context}:${selectedLocation.tenantId}:${selectedLocation.locationId}`}
+        context={context}
+        drafts={operationDrafts}
+        foodDrafts={foodDrafts}
+        {...selectedLocation}
+        suspended={suspended}
+        onBack={() => setSelectedLocation(null)}
+        onExpired={expire}
+        onChanged={(detail) => {
+          if (!mounted.current || !enabled.current) return;
+          setOverview((current) =>
+            current
+              ? {
+                  ...current,
+                  workspaces: current.workspaces.map((workspace) =>
+                    workspace.tenantId === detail.tenantId &&
+                    workspace.locationId === detail.locationId
+                      ? detail
+                      : workspace,
+                  ),
+                }
+              : current,
+          );
+        }}
+      />
+    );
   if (suspended) return <p role="status">正在重新確認帳號，店家資料暫時隱藏。</p>;
   if (invalidSession)
     return (
@@ -221,7 +277,7 @@ function AccountWorkspace({
       <section className={styles.intro}>
         <h2>先申請，再開店</h2>
         <p>
-          一般帳號即可申請。場域管理者查核營業資料後，才會核發對應店家的權限；核准不等於已上線，也不等於能在這裡收款。核准後到店家工作台的「營業」分頁編輯店面主頁、貼文與外連訂餐網址。
+          場域管理者核准後，從下方選擇門市，完成營運設定與首次菜單，再確認啟用。核准不代表已經開始接單。
         </p>
         <ol>
           <li>送出營業與聯絡資料</li>
@@ -263,6 +319,16 @@ function AccountWorkspace({
                           .join('、')}
                       </p>
                     )}
+                    <Button
+                      onClick={() =>
+                        setSelectedLocation({
+                          tenantId: item.tenantId,
+                          locationId: item.locationId,
+                        })
+                      }
+                    >
+                      管理門市：{item.locationName}
+                    </Button>
                   </li>
                 ))}
               </ul>

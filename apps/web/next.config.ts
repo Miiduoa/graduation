@@ -50,6 +50,12 @@ const nextConfig: NextConfig = {
         ],
       },
       {
+        source: '/merchant',
+        headers: [
+          { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=(self)' },
+        ],
+      },
+      {
         source: '/sso-callback',
         headers: [
           { key: 'Cache-Control', value: 'no-store, max-age=0' },

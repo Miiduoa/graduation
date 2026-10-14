@@ -18,7 +18,23 @@ const REQUIRED_APIS = Object.freeze([
   'storage.googleapis.com',
 ]);
 
+// Rules/indexes/Storage deployments do not deploy or build Cloud Functions.
+// Auth and bucket checks remain required; this scope does not grant service entitlement.
+const RULES_ONLY_REQUIRED_APIS = Object.freeze([
+  'firestore.googleapis.com',
+  'identitytoolkit.googleapis.com',
+  'firebaserules.googleapis.com',
+  'firebasestorage.googleapis.com',
+  'storage.googleapis.com',
+]);
+
 class PreflightError extends Error {}
+
+function requiredApisForMode(mode) {
+  if (mode === 'full') return REQUIRED_APIS;
+  if (mode === 'rules-only') return RULES_ONLY_REQUIRED_APIS;
+  throw new PreflightError('Preflight mode must be full or rules-only.');
+}
 
 function validateTarget({ project, database, storageBucket, authDomain, databaseLocation }) {
   if (
@@ -144,7 +160,8 @@ function check(id, ready, action) {
   return { id, status: ready ? 'ready' : 'blocked', ...(ready ? {} : { action }) };
 }
 
-function evaluatePrerequisites(target, observations) {
+function evaluatePrerequisites(target, observations, mode = 'full') {
+  const requiredApis = requiredApisForMode(mode);
   const { project, database, storageBucket, authDomain, databaseLocation } = target;
   const { projectNumber, billing, services, auth, firestore, storage } = observations;
   const checks = [];
@@ -166,18 +183,20 @@ function evaluatePrerequisites(target, observations) {
       'Verify access to the selected Google Cloud project.',
     ),
   );
-  verify(
-    'billing',
-    billing,
-    (d) => d.projectId === project && d.billingEnabled === true,
-    'Link an active billing account and enable Blaze for the selected Firebase project.',
-  );
-  for (const api of REQUIRED_APIS) {
+  if (mode === 'full') {
+    verify(
+      'billing',
+      billing,
+      (d) => d.projectId === project && d.billingEnabled === true,
+      'Link an active billing account and enable Blaze for the selected Firebase project.',
+    );
+  }
+  for (const api of requiredApis) {
     verify(
       `api:${api}`,
       services,
       (d) => d.enabled.includes(api),
-      `Enable ${api} in the selected project after billing is ready.`,
+      `Enable ${api} in the selected project${mode === 'full' ? ' after billing is ready' : ''}.`,
     );
   }
   verify(
@@ -218,6 +237,7 @@ function evaluatePrerequisites(target, observations) {
 }
 
 async function preflight({
+  mode = 'full',
   project,
   database = '(default)',
   storageBucket,
@@ -232,6 +252,7 @@ async function preflight({
   workingTreeDirty = null,
   timeoutMs = 60_000,
 }) {
+  requiredApisForMode(mode);
   const target = { project, database, storageBucket, authDomain, databaseLocation };
   validateTarget(target);
   if (
@@ -305,20 +326,19 @@ async function preflight({
       return { ok: false, failure: 'service page limit exceeded' };
     };
     const [billing, services, auth, firestore, storage] = await Promise.all([
-      get(`https://cloudbilling.googleapis.com/v1/projects/${project}/billingInfo`),
+      mode === 'full'
+        ? get(`https://cloudbilling.googleapis.com/v1/projects/${project}/billingInfo`)
+        : undefined,
       listServices(),
       get(`https://identitytoolkit.googleapis.com/admin/v2/projects/${project}/config`),
       get(`https://firestore.googleapis.com/v1/projects/${project}/databases/${database}`),
       get(`https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(storageBucket)}`),
     ]);
-    const checks = evaluatePrerequisites(target, {
-      projectNumber,
-      billing,
-      services,
-      auth,
-      firestore,
-      storage,
-    });
+    const checks = evaluatePrerequisites(
+      target,
+      { projectNumber, billing, services, auth, firestore, storage },
+      mode,
+    );
     if (controller.signal.aborted)
       checks.push(
         check('deadline', false, 'The preflight deadline elapsed. Verify connectivity and retry.'),
@@ -326,6 +346,7 @@ async function preflight({
     const firestoreReady = checks.find((entry) => entry.id === 'firestore').status === 'ready';
     return {
       schemaVersion: 1,
+      mode,
       checkedAt: new Date().toISOString(),
       sourceCommit,
       workingTreeDirty: typeof workingTreeDirty === 'boolean' ? workingTreeDirty : null,
@@ -336,7 +357,9 @@ async function preflight({
       },
       ready: checks.every((entry) => entry.status === 'ready'),
       scope:
-        'Infrastructure prerequisites only. Index readiness, rules, deployment, sign-in providers and application flows require separate verification.',
+        mode === 'rules-only'
+          ? 'Read-only infrastructure prerequisites for Firebase rules, indexes and storage only. Cloud Functions billing/build services are outside this scope. Provider entitlement, index readiness, actual deployment, sign-in providers and application flows require separate verification.'
+          : 'Infrastructure prerequisites only. Index readiness, rules, deployment, sign-in providers and application flows require separate verification.',
       checks,
     };
   } finally {
@@ -348,6 +371,7 @@ async function preflight({
 async function main() {
   const { values } = parseArgs({
     options: {
+      mode: { type: 'string', default: 'full' },
       project: { type: 'string' },
       database: { type: 'string', default: '(default)' },
       'storage-bucket': { type: 'string' },
@@ -373,6 +397,7 @@ async function main() {
     /* A receipt outside a checkout explicitly has no source version. */
   }
   const receipt = await preflight({
+    mode: values.mode,
     project: values.project,
     database: values.database,
     storageBucket: values['storage-bucket'],
@@ -399,4 +424,10 @@ if (require.main === module) {
   });
 }
 
-module.exports = { REQUIRED_APIS, validateTarget, evaluatePrerequisites, preflight };
+module.exports = {
+  REQUIRED_APIS,
+  RULES_ONLY_REQUIRED_APIS,
+  validateTarget,
+  evaluatePrerequisites,
+  preflight,
+};
