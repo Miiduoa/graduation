@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   parsePersonalImport,
+  personalImportErrorMessage,
   personalImportKey,
+  personalImportSavedNotice,
+  personalImportUndoBody,
   planPersonalImport,
   resolvePersonalImportCourse,
   undoPersonalImportBatch,
   validatePersonalImportRow,
+  PERSONAL_IMPORT_IMAGE_UNREADABLE,
+  PERSONAL_IMPORT_UNDO_LABEL,
   type PersonalImportCatalogCourse,
   type PersonalImportOptions,
   type PersonalImportRow,
@@ -716,5 +721,24 @@ describe('iCalendar import keeps dates and recurrence semantics explicit', () =>
     expect(errors(mixed.issues)).toContainEqual(
       expect.objectContaining({ code: 'mixed-calendar-date' }),
     );
+  });
+});
+
+describe('personal import notices', () => {
+  it('uses the same save, undo, and broken-image sentences on every surface', () => {
+    expect(personalImportSavedNotice(3)).toBe(
+      '已在這台裝置新增 3 筆，原有資料保留。資料只存在這台裝置，換手機或清除資料就會不見。',
+    );
+    expect(PERSONAL_IMPORT_UNDO_LABEL).toBe('撤銷上次匯入');
+    expect(personalImportUndoBody(2)).toBe(
+      '上次匯入的 2 筆會從這台裝置刪掉，你原本的資料不會動。刪掉後沒辦法復原。',
+    );
+    expect(personalImportErrorMessage(new Error('The source image could not be decoded.'), '備用')).toBe(
+      PERSONAL_IMPORT_IMAGE_UNREADABLE,
+    );
+    expect(personalImportErrorMessage(new Error('圖片超過 10 MB，請裁切後再選一次。'), '備用')).toBe(
+      '圖片超過 10 MB，請裁切後再選一次。',
+    );
+    expect(personalImportErrorMessage(new Error('NetworkError'), '備用')).toBe('備用');
   });
 });

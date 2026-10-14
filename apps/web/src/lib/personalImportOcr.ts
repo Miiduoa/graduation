@@ -1,5 +1,14 @@
 'use client';
 
+import {
+  PERSONAL_IMPORT_IMAGE_UNREADABLE,
+  PERSONAL_IMPORT_OCR_CORE,
+  PERSONAL_IMPORT_OCR_LANG,
+  PERSONAL_IMPORT_OCR_LANGUAGES,
+  PERSONAL_IMPORT_OCR_SCRIPT,
+  PERSONAL_IMPORT_OCR_WORKER,
+} from '@campus/shared';
+
 type Worker = {
   recognize: (file: File) => Promise<{ data: { text: string } }>;
   setParameters: (parameters: Record<string, string>) => Promise<unknown>;
@@ -9,7 +18,13 @@ type Engine = {
   createWorker: (
     language: string,
     engine: number,
-    options: { logger: (entry: { status: string; progress: number }) => void },
+    options: {
+      logger: (entry: { status: string; progress: number }) => void;
+      workerPath: string;
+      corePath: string;
+      langPath: string;
+      workerBlobURL: boolean;
+    },
   ) => Promise<Worker>;
 };
 let enginePromise: Promise<Engine> | null = null;
@@ -22,8 +37,7 @@ function loadEngine(): Promise<Engine> {
       script.remove();
       reject(new Error('辨識工具下載逾時，請確認網路後重試。'));
     }, 25_000);
-    script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
-    script.crossOrigin = 'anonymous';
+    script.src = PERSONAL_IMPORT_OCR_SCRIPT;
     script.onload = () => {
       clearTimeout(timer);
       const engine = (window as unknown as { Tesseract?: Engine }).Tesseract;
@@ -68,15 +82,24 @@ export async function recognizePersonalImportImage(
     if (signal.aborted) onAbort();
   });
   const recognize = async () => {
-    const bitmap = await createImageBitmap(file);
-    const pixels = bitmap.width * bitmap.height;
-    bitmap.close();
-    if (pixels > 24_000_000) throw new Error('圖片尺寸太大，請裁切到需要的表格後再試。');
+    try {
+      const bitmap = await createImageBitmap(file);
+      const pixels = bitmap.width * bitmap.height;
+      bitmap.close();
+      if (pixels > 24_000_000) throw new Error('圖片尺寸太大，請裁切到需要的表格後再試。');
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('圖片尺寸太大')) throw error;
+      throw new Error(PERSONAL_IMPORT_IMAGE_UNREADABLE);
+    }
     if (stopped) throw new Error('已取消');
-    progress('正在準備辨識工具，首次使用需要下載中文字庫…');
+    progress('正在準備辨識工具…');
     const engine = await loadEngine();
     if (stopped) throw new Error('已取消');
-    const created = await engine.createWorker('chi_tra+eng', 1, {
+    const created = await engine.createWorker(PERSONAL_IMPORT_OCR_LANGUAGES, 1, {
+      workerPath: PERSONAL_IMPORT_OCR_WORKER,
+      corePath: PERSONAL_IMPORT_OCR_CORE,
+      langPath: PERSONAL_IMPORT_OCR_LANG,
+      workerBlobURL: false,
       logger: (entry) => {
         if (!stopped && entry.status === 'recognizing text')
           progress(`正在讀取文字 ${Math.round(entry.progress * 100)}%`);

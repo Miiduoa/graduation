@@ -6,6 +6,14 @@ import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import {
   createPersonalImportId,
   parsePersonalImport,
+  personalImportErrorMessage,
+  personalImportSavedNotice,
+  personalImportUndoBody,
+  PERSONAL_IMPORT_IMAGE_UNREADABLE,
+  PERSONAL_IMPORT_UNDO_CONFIRM,
+  PERSONAL_IMPORT_UNDO_KEEP,
+  PERSONAL_IMPORT_UNDO_LABEL,
+  PERSONAL_IMPORT_UNDO_TITLE,
   validatePersonalImportRow,
   type PersonalImportKind,
   type PersonalImportRow,
@@ -35,8 +43,8 @@ const EXAMPLES: Record<PersonalImportKind, string> = {
   grades: '課程名稱,學分,成績,課號\n資料庫,3,85,CS301',
   events: '活動名稱,日期,開始時間,結束時間,地點\n期中考,2026-11-05,10:00,12:00,主顧303',
 };
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : '這次沒有完成，草稿仍保留，請再試一次。';
+function errorMessage(error: unknown, fallback = '這次沒有完成，草稿仍保留，請再試一次。') {
+  return personalImportErrorMessage(error, fallback);
 }
 function rowSummary(row: PersonalImportRow) {
   if (row.kind === 'grades')
@@ -304,6 +312,7 @@ function ImportWorkspace({
   const [workspaces, setWorkspaces] = useState<NuniWorkspace[]>([]);
   const [linkStatus, setLinkStatus] = useState('');
   const [lastBatch, setLastBatch] = useState('');
+  const [undoOpen, setUndoOpen] = useState(false);
   const [editing, setEditing] = useState<{
     original: PersonalImportRecord;
     row: PersonalImportRow;
@@ -314,6 +323,10 @@ function ImportWorkspace({
   const writing = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const review = useRef<HTMLElement>(null);
+  const undoKeep = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (undoOpen) undoKeep.current?.focus();
+  }, [undoOpen]);
   useEffect(() => {
     const value = new URLSearchParams(window.location.search).get('kind');
     if (KINDS.some((entry) => entry.value === value)) setKind(value as PersonalImportKind);
@@ -440,7 +453,8 @@ function ImportWorkspace({
       setSource(nextSource);
       parse(input, nextSource);
     } catch (error) {
-      if (active.current && !controller.signal.aborted) setNotice(errorMessage(error));
+      if (active.current && !controller.signal.aborted)
+        setNotice(errorMessage(error, image ? PERSONAL_IMPORT_IMAGE_UNREADABLE : undefined));
     } finally {
       if (active.current && job.current === controller) {
         setReading(false);
@@ -474,9 +488,7 @@ function ImportWorkspace({
         () => active.current && !suspended.current,
       );
       if (!active.current) return;
-      setNotice(
-        `已在這台裝置新增 ${result.added} 筆${result.duplicates ? `，略過 ${result.duplicates} 筆重複資料` : ''}。原有資料保留。`,
-      );
+      setNotice(personalImportSavedNotice(result.added));
       if (result.added) setLastBatch(result.batchId);
       setRows([]);
       setExcluded([]);
@@ -729,7 +741,7 @@ function ImportWorkspace({
           </div>
         )}
         <p className={styles.note}>
-          辨識在這台裝置執行，首次使用需連網下載工具與中文字庫。格狀課表或模糊照片可能需要手動補欄位，無法確認的時間不會猜填。
+          辨識在這台裝置執行，使用本站提供的辨識程式與中英文字庫。格狀課表或模糊照片可能需要手動補欄位，無法確認的時間不會猜填。
         </p>
         {kind === 'timetable' && (
           <p className={styles.note}>
@@ -880,18 +892,9 @@ function ImportWorkspace({
                 type="button"
                 className="btn"
                 disabled={saving}
-                onClick={() =>
-                  void mutate(async () => {
-                    await undoPersonalImports(
-                      scope,
-                      lastBatch,
-                      () => active.current && !suspended.current,
-                    );
-                    if (active.current) setLastBatch('');
-                  }, '已撤銷上次匯入；之後編輯過的資料仍保留。')
-                }
+                onClick={() => setUndoOpen(true)}
               >
-                撤銷上次匯入
+                {PERSONAL_IMPORT_UNDO_LABEL}
               </button>
             )}
           </div>
@@ -944,6 +947,52 @@ function ImportWorkspace({
               </li>
             ))}
           </ul>
+        )}
+        {undoOpen && lastBatch && (
+          <div className={styles.dialogMask}>
+            <div
+              className={styles.dialog}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="personal-import-undo-title"
+            >
+              <h3 id="personal-import-undo-title">{PERSONAL_IMPORT_UNDO_TITLE}</h3>
+              <p>
+                {personalImportUndoBody(
+                  ledger.records.filter((row) => row.batchId === lastBatch).length,
+                )}
+              </p>
+              <div className={styles.dialogActions}>
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  disabled={saving}
+                  onClick={() => {
+                    setUndoOpen(false);
+                    void mutate(async () => {
+                      await undoPersonalImports(
+                        scope,
+                        lastBatch,
+                        () => active.current && !suspended.current,
+                      );
+                      if (active.current) setLastBatch('');
+                    }, '已撤銷上次匯入；之後編輯過的資料仍保留。');
+                  }}
+                >
+                  {PERSONAL_IMPORT_UNDO_CONFIRM}
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  ref={undoKeep}
+                  disabled={saving}
+                  onClick={() => setUndoOpen(false)}
+                >
+                  {PERSONAL_IMPORT_UNDO_KEEP}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
         {editing && (
           <section className={styles.row} aria-label="編輯個人紀錄">

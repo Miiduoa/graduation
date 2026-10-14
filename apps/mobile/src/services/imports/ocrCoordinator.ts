@@ -74,7 +74,13 @@ export class OcrCoordinator {
     clearTimeout(job.timer);
     job.cleanup();
     if (value.ok && typeof value.text === 'string') job.resolve(value.text);
-    else job.reject(new TimetableOcrError('這次辨識失敗，請確認網路，或改貼文字。', 'network'));
+    else {
+      const message =
+        typeof value.error === 'string' && /[\u4e00-\u9fff]/.test(value.error)
+          ? value.error
+          : '這次辨識失敗，請改貼文字。';
+      job.reject(new TimetableOcrError(message, 'unavailable'));
+    }
   }
   fail(error: TimetableOcrError) {
     const job = this.pending;

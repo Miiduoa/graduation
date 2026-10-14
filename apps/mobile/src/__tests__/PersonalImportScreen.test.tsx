@@ -3,6 +3,11 @@ import type { useNuniSession } from '../state/nuniSession';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
+import {
+  PERSONAL_IMPORT_IMAGE_UNREADABLE,
+  personalImportSavedNotice,
+  personalImportUndoBody,
+} from '@campus/shared';
 import PersonalImportScreen from '../screens/PersonalImportScreen';
 import { loadPersonalImports } from '../services/personalImports';
 
@@ -100,11 +105,11 @@ test.each([
     fill(view, kind, content);
     expect((await loadPersonalImports(scope)).records).toHaveLength(0);
     fireEvent.press(view.getByText('確認新增 1 筆'));
-    await waitFor(() =>
-      expect(view.getByText('已存 1 筆到這台裝置，略過 0 筆重複資料。')).toBeTruthy(),
-    );
+    await waitFor(() => expect(view.getByText(personalImportSavedNotice(1))).toBeTruthy());
     expect((await loadPersonalImports(scope)).records[0].kind).toBe(kind);
-    fireEvent.press(view.getByText('撤回最近一次匯入'));
+    fireEvent.press(view.getByText('撤銷上次匯入'));
+    expect(view.getByText(personalImportUndoBody(1))).toBeTruthy();
+    fireEvent.press(view.getByText('撤銷'));
     await waitFor(() =>
       expect(view.getByText('已撤回 1 筆；匯入後另外編輯過的資料已保留。')).toBeTruthy(),
     );
@@ -193,7 +198,7 @@ test('recurring ICS stays blocked even when its first event has valid editable f
 
 test('class link is explicitly selected from the accessible workspace list without a membership write', async () => {
   const workspace = {
-    id: 'cw_12345678-1234-1234-1234-123456789abc',
+    id: 'cw_aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
     title: '微積分甲班',
     memberRole: 'student',
     state: 'active',
@@ -201,7 +206,7 @@ test('class link is explicitly selected from the accessible workspace list witho
   mockPlatform = {
     ...mockPlatform,
     session: {
-      platformAccountId: 'pa_12345678-1234-1234-1234-123456789abc',
+      platformAccountId: 'pa_aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
       context: 'session-1',
       isPlatformOperator: false,
     },
@@ -212,9 +217,7 @@ test('class link is explicitly selected from the accessible workspace list witho
   await waitFor(() => expect(view.getByText('微積分甲班（學生）')).toBeTruthy());
   fireEvent.press(view.getByText('微積分甲班（學生）'));
   fireEvent.press(view.getByText('確認新增 1 筆'));
-  await waitFor(() =>
-    expect(view.getByText('已存 1 筆到這台裝置，略過 0 筆重複資料。')).toBeTruthy(),
-  );
+  await waitFor(() => expect(view.getByText(personalImportSavedNotice(1))).toBeTruthy());
   expect((await loadPersonalImports(scope)).records[0].linkedCourseId).toBe(workspace.id);
   expect(
     mockRequest.mock.calls.every(
@@ -245,13 +248,73 @@ test('correcting screenshot text preserves space-delimited table parsing', async
   );
   fireEvent.press(view.getByText('整理成可編輯資料'));
   fireEvent.press(view.getByText('確認新增 1 筆'));
-  await waitFor(() =>
-    expect(view.getByText('已存 1 筆到這台裝置，略過 0 筆重複資料。')).toBeTruthy(),
-  );
+  await waitFor(() => expect(view.getByText(personalImportSavedNotice(1))).toBeTruthy());
   expect((await loadPersonalImports(scope)).records[0]).toMatchObject({
     title: '微積分',
     credits: 3,
     grade: '90',
     source: { type: 'screenshot' },
   });
+});
+
+test('starts new pasted data without inheriting the previous screenshot source', async () => {
+  jest.mocked(ImagePicker.launchImageLibraryAsync).mockResolvedValue({
+    canceled: false,
+    assets: [
+      {
+        uri: 'file:///grades.png',
+        width: 100,
+        height: 100,
+        mimeType: 'image/png',
+        fileName: 'grades.png',
+      },
+    ],
+  });
+  mockRecognize.mockResolvedValue('課程名稱,學分,成績\n資料庫,3,85');
+  const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
+  fireEvent.press(view.getByText('成績與學分'));
+  fireEvent.changeText(view.getByLabelText('這批資料的學年度（例如 115）'), '115');
+  fireEvent.changeText(view.getByLabelText('這批資料的學期（例如 1、2、暑期）'), '1');
+  fireEvent.press(view.getByText('選擇截圖'));
+  await waitFor(() =>
+    expect(view.getByDisplayValue('課程名稱,學分,成績\n資料庫,3,85')).toBeTruthy(),
+  );
+  fireEvent.press(view.getByText('整理成可編輯資料'));
+  fireEvent.press(view.getByText('確認新增 1 筆'));
+  await waitFor(() => expect(view.getByText(personalImportSavedNotice(1))).toBeTruthy());
+  fireEvent.changeText(view.getByLabelText('貼上或修正原始文字'), '課程名稱,學分,成績\n英文,2,90');
+  fireEvent.press(view.getByText('整理成可編輯資料'));
+  fireEvent.press(view.getByText('確認新增 1 筆'));
+  await waitFor(async () => expect((await loadPersonalImports(scope)).records).toHaveLength(2));
+  const records = (await loadPersonalImports(scope)).records;
+  expect(records[0].source).toMatchObject({ type: 'screenshot', name: 'grades.png' });
+  expect(records[1].source).toMatchObject({ type: 'paste' });
+  expect(records[1].source.name).toBeUndefined();
+});
+
+test('asks before undoing and keeps records when the person chooses not to', async () => {
+  const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
+  fill(view, 'grades', '課程名稱,學分,成績\n微積分,3,A-');
+  fireEvent.press(view.getByText('確認新增 1 筆'));
+  await waitFor(() => expect(view.getByText(personalImportSavedNotice(1))).toBeTruthy());
+  fireEvent.press(view.getByText('撤銷上次匯入'));
+  expect(view.getByText('撤銷上次匯入？')).toBeTruthy();
+  expect(view.getByText(personalImportUndoBody(1))).toBeTruthy();
+  fireEvent.press(view.getByText('先不要'));
+  expect((await loadPersonalImports(scope)).records).toHaveLength(1);
+  expect(view.queryByText('撤銷上次匯入？')).toBeNull();
+});
+
+test('shows a Chinese notice when the screenshot file cannot be opened', async () => {
+  jest.mocked(ImagePicker.launchImageLibraryAsync).mockResolvedValue({
+    canceled: false,
+    assets: [{ uri: 'file:///broken.png', width: 100, height: 100, mimeType: 'image/png' }],
+  });
+  mockRecognize.mockRejectedValue(new Error('The source image could not be decoded.'));
+  const view = render(<PersonalImportScreen />);
+  fireEvent.press(view.getByText('選擇截圖'));
+  await waitFor(() => expect(view.getByText(PERSONAL_IMPORT_IMAGE_UNREADABLE)).toBeTruthy());
+  expect(view.queryByText(/could not be decoded/i)).toBeNull();
 });
