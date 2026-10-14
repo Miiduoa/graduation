@@ -5,7 +5,7 @@ import {
   PROVIDENCE_UNIVERSITY_SCHOOL_ID,
   type School,
 } from '@campus/shared/src';
-import { findSchoolById, normalizeSchoolCode, resolveSchool } from '@campus/shared/src/schools';
+import { findSchoolById, findSchoolsByCode, normalizeSchoolCode, resolveSchool } from '@campus/shared/src/schools';
 import { clearCacheExceptSchool } from '../data/cachedSource';
 import { setHybridSourceSchoolContext } from '../data/hybridSource';
 import { applySchoolTheme, registerSchoolTheme } from '../ui/theme';
@@ -52,20 +52,33 @@ function toSelection(school: School): SchoolSelection {
 }
 
 export function schoolFromSelection(selection: Partial<SchoolSelection>): School {
-  return (
-    (selection.schoolId ? findSchoolById(selection.schoolId) : undefined) ??
-    (selection.code
-      ? resolveSchool({
-          school: selection.code,
-          schoolId: selection.schoolId ?? undefined,
-        })
-      : undefined) ??
-    getProvidenceSchool()
-  );
+  const byId = selection.schoolId ? findSchoolById(selection.schoolId) : undefined;
+  if (byId) return byId;
+  const matches = selection.code ? findSchoolsByCode(selection.code) : [];
+  return matches.length === 1 ? matches[0] : getProvidenceSchool();
 }
 
 function normalizeSelection(selection: Partial<SchoolSelection>): SchoolSelection {
   return toSelection(schoolFromSelection(selection));
+}
+
+/** Code-only switches must not reuse the previous school's authoritative ID. */
+export function mergeSchoolSelection(
+  previous: SchoolSelection,
+  next: Partial<SchoolSelection>,
+): SchoolSelection {
+  if (next.schoolId && !findSchoolById(next.schoolId)) return previous;
+  if (next.code !== undefined && next.schoolId === undefined) {
+    if (findSchoolsByCode(next.code).length !== 1) return previous;
+  }
+  const code = next.code != null ? normalizeSchoolCode(next.code) : previous.code;
+  const schoolId =
+    next.schoolId !== undefined
+      ? next.schoolId
+      : next.code !== undefined
+        ? null
+        : previous.schoolId;
+  return normalizeSelection({ code, schoolId });
 }
 
 export function SchoolProvider(props: {
@@ -112,37 +125,7 @@ export function SchoolProvider(props: {
   const previousSchoolRef = useRef<string | null>(null);
 
   const setSelection = (next: Partial<SchoolSelection>) => {
-    setSelectionState((prev) => {
-      const identityChanged = next.code !== undefined || next.schoolId !== undefined;
-      const code = next.code != null ? normalizeSchoolCode(next.code) : prev.code;
-      const schoolId = next.schoolId === undefined ? prev.schoolId : next.schoolId;
-      const schoolName =
-        next.schoolName === undefined
-          ? identityChanged
-            ? null
-            : (prev.schoolName ?? null)
-          : next.schoolName;
-      const shortName =
-        next.shortName === undefined
-          ? identityChanged
-            ? null
-            : (prev.shortName ?? null)
-          : next.shortName;
-      const themeColor =
-        next.themeColor === undefined
-          ? identityChanged
-            ? null
-            : (prev.themeColor ?? null)
-          : next.themeColor;
-      const domains =
-        next.domains === undefined
-          ? identityChanged
-            ? null
-            : (prev.domains ?? null)
-          : next.domains;
-
-      return normalizeSelection({ code, schoolId, schoolName, shortName, themeColor, domains });
-    });
+    setSelectionState((prev) => mergeSchoolSelection(prev, next));
   };
 
   useEffect(() => {

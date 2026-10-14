@@ -396,6 +396,7 @@ test('library web search encodes the query, and another school cannot open PU se
   mockSchool = { id: 'other' };
   view.rerender(<LibraryAiFirstScreen />);
   expect(view.queryByText('開啟我的借閱紀錄')).toBeNull();
+  expect(view.queryByText('在圖書館網站搜尋')).toBeNull();
 });
 test('library account switches clear the previous keyword', () => {
   const view = render(<LibraryAiFirstScreen />);
@@ -441,4 +442,25 @@ test('restaurant keeps the school catalog and links directly to the platform foo
     params: { tab: 'food' },
   });
   expect(view.getByText('選擇今日餐點')).toBeTruthy();
+});
+
+test('non-PU library services open the selected school, not Providence', async () => {
+  mockSchool = { id: 'nthu' };
+  const view = render(<LibraryAiFirstScreen />);
+  expect(view.getByText('國立清華大學圖書館：請在官方館藏系統搜尋書名、作者或 ISBN。')).toBeTruthy();
+  await act(async () => fireEvent.press(view.getByText('開啟圖書館查詢網站')));
+  expect(Linking.openURL).toHaveBeenCalledWith('https://www.lib.nthu.edu.tw/');
+  expect(view.queryByText('蓋夏圖書館')).toBeNull();
+  expect(view.queryByText('開啟我的借閱紀錄')).toBeNull();
+});
+
+test('switching campuses replaces official links and clears private search', async () => {
+  const view = render(<LibraryAiFirstScreen />);
+  fireEvent.changeText(view.getByLabelText('館藏關鍵字'), '某本書');
+  mockSchool = { id: 'thu' };
+  view.rerender(<LibraryAiFirstScreen />);
+  expect(view.queryByLabelText('館藏關鍵字')).toBeNull();
+  await act(async () => fireEvent.press(view.getByText('開啟官方館藏目錄')));
+  expect(Linking.openURL).toHaveBeenCalledWith('https://webpac.lib.thu.edu.tw/');
+  expect(Linking.openURL).not.toHaveBeenCalledWith(expect.stringContaining('lib.pu.edu.tw'));
 });
