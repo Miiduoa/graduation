@@ -8,6 +8,7 @@ const context = vi.hoisted(() => ({
   owner: 'guest',
   records: [] as Array<Record<string, unknown>>,
   load: vi.fn(),
+  academic: vi.fn(),
 }));
 
 vi.mock('next/navigation', () => ({
@@ -49,7 +50,10 @@ vi.mock('@/lib/timetable/friends', () => ({
   listAcceptedFriends: vi.fn(async () => []),
 }));
 vi.mock('@/lib/useAcademicRecords', () => ({
-  useAcademicRecords: () => ({ state: null, refresh: vi.fn() }),
+  useAcademicRecords: (kind: string, enabled: boolean) => {
+    context.academic(kind, enabled);
+    return { state: null, refresh: vi.fn() };
+  },
 }));
 vi.mock('@/components/SchoolAccountRequired', () => ({
   SchoolAccountRequired: () => null,
@@ -84,6 +88,7 @@ it('shows only imported courses belonging to the selected university', async () 
   expect(await screen.findByText(/自行匯入 1 筆/)).toBeTruthy();
   expect(screen.getAllByText('清大新課表').length).toBeGreaterThan(0);
   expect(screen.queryByText('靜宜舊課表')).toBeNull();
+  expect(context.academic).toHaveBeenCalledWith('courses', false);
 });
 
 it('resets the timetable and importer when the browsing school changes', async () => {
@@ -98,6 +103,7 @@ it('resets the timetable and importer when the browsing school changes', async (
   await waitFor(() => expect(context.load).toHaveBeenCalledWith(null, 'pu', 'guest'));
   expect(screen.getAllByText('靜宜舊課表').length).toBeGreaterThan(0);
   expect(screen.queryByText('清大新課表')).toBeNull();
+  expect(context.academic).toHaveBeenCalledWith('courses', true);
 });
 
 it('does not silently load Providence data when no campus is selected', () => {
