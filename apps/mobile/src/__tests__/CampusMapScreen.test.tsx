@@ -399,3 +399,18 @@ test('does not replace the WebView document when only the map search changes', a
   fireEvent.changeText(view.getByLabelText('搜尋校園地點'), '圖書館');
   expect(view.getByTestId('campus-map-webview').props.source).toBe(source);
 });
+
+
+test('keeps a route starting-point marker visible when the start is filtered out', async () => {
+  mockParams = { fromPoiId: 'gate', toPoiId: 'library' };
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([
+    place,
+    { ...place, id: 'gate', name: '校園正門', lat: 25, lng: 121 },
+  ]);
+  const view = await openMap();
+  mockInject.mockClear();
+  fireEvent.changeText(view.getByLabelText('搜尋校園地點'), '圖書館');
+  expect(mockInject.mock.calls.some(([script]) =>
+    script.includes('places') && script.includes('校園正門') && script.includes('學校發布的圖書館')
+  )).toBe(true);
+});
