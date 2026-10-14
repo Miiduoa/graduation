@@ -1,4 +1,4 @@
-import { schoolFromSelection } from '../../state/school';
+import { mergeSchoolSelection, schoolFromSelection } from '../../state/school';
 
 test('school selection follows the requested school instead of staying on Providence', () => {
   expect(schoolFromSelection({ schoolId: 'nthu' }).id).toBe('nthu');
@@ -7,7 +7,6 @@ test('school selection follows the requested school instead of staying on Provid
 });
 
 test('a code-only change resolves the new school without keeping the last ID', () => {
-  const { mergeSchoolSelection } = require('../../state/school');
   const previous = { code: 'PU', schoolId: 'pu', schoolName: '靜宜大學' };
   expect(mergeSchoolSelection(previous, { code: 'NTHU' })).toMatchObject({
     code: 'NTHU',
@@ -18,7 +17,6 @@ test('a code-only change resolves the new school without keeping the last ID', (
 });
 
 test('unknown or ambiguous codes never select a demonstration school', () => {
-  const { mergeSchoolSelection } = require('../../state/school');
   const previous = { code: 'PU', schoolId: 'pu', schoolName: '靜宜大學' };
   expect(mergeSchoolSelection(previous, { code: 'TCU' })).toEqual(previous);
   expect(schoolFromSelection({ code: 'INVALID' }).id).toBe('pu');

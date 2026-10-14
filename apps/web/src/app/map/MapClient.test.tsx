@@ -198,3 +198,14 @@ it('clears old account favorites synchronously while the next account loads', as
   const favorite = await screen.findByRole('button', { name: '收藏蓋夏圖書館' });
   expect(favorite.hasAttribute('disabled')).toBe(true);
 });
+
+it('never links to Providence when another campus has no confirmed map places', async () => {
+  vi.mocked(loadMapLocations).mockResolvedValue([]);
+  render(<MapClient school="nthu" schoolName="國立清華大學" />);
+  expect(await screen.findByText('目前沒有可顯示的校園地點')).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '開啟靜宜大學網站' })).toBeNull();
+  const link = screen.getByRole('link', { name: '在 Google 地圖搜尋這所學校' });
+  const target = new URL(link.getAttribute('href')!);
+  expect(target.searchParams.get('query')).toContain('國立清華大學');
+  expect(target.searchParams.get('query')).not.toContain('靜宜');
+});
