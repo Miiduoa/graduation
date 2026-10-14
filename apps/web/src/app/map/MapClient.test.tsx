@@ -225,7 +225,9 @@ it('opens an explicitly labeled map search for the selected university when POIs
   expect(link.getAttribute('target')).toBe('_blank');
   expect(screen.getByText(/第三方地圖搜尋/)).toBeTruthy();
   expect(screen.queryByText('蓋夏圖書館')).toBeNull();
-  expect(screen.queryByRole('link', { name: '查看校方校區平面圖' })).toBeNull();
+  expect(screen.getByRole('link', { name: '查看校方校區平面圖' }).getAttribute('href')).toBe(
+    'https://www.nthu.edu.tw/campusmap',
+  );
 });
 
 it('does not produce a public map search for an unresolved campus name', async () => {
@@ -393,9 +395,14 @@ it('lets visitors compare mapped Providence points with the official campus plan
   expect(await screen.findByRole('link', { name: '校方校區平面圖' })).toBeTruthy();
 });
 
-it('does not offer another university the Providence campus plan', async () => {
+it('shows each school its own official map rather than reusing Providence', async () => {
   state.user = null;
-  render(<MapClient school="nthu" schoolName="國立清華大學" />);
+  const view = render(<MapClient school="nthu" schoolName="國立清華大學" />);
+  await screen.findByRole('button', { name: '查看蓋夏圖書館' });
+  expect(screen.getByRole('link', { name: '校方校區平面圖' }).getAttribute('href')).toBe(
+    'https://www.nthu.edu.tw/campusmap',
+  );
+  view.rerender(<MapClient school="tw-demo-uni" schoolName="示範大學" />);
   await screen.findByRole('button', { name: '查看蓋夏圖書館' });
   expect(screen.queryByRole('link', { name: '校方校區平面圖' })).toBeNull();
   expect(screen.queryByRole('link', { name: '查看校方校區平面圖' })).toBeNull();
