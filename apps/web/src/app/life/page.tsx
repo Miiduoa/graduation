@@ -1,5 +1,6 @@
 'use client';
 
+import { Suspense } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { useSearchParams } from 'next/navigation';
@@ -20,6 +21,14 @@ const ITEMS = [
 ];
 
 export default function LifePage() {
+  return (
+    <Suspense fallback={<SiteShell title="生活"><p role="status">正在載入服務…</p></SiteShell>}>
+      <LifeDirectory />
+    </Suspense>
+  );
+}
+
+function LifeDirectory() {
   const selected = useOptionalSelectedSchool();
   const params = useSearchParams();
   const schoolSearch = browsingSchoolSearch(params, selected?.selectedSchoolId ?? null);
