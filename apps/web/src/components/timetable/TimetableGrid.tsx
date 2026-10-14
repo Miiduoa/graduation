@@ -90,9 +90,11 @@ export function TimetableGrid({ courses, disabled, onEdit }: CourseActions) {
         </label>
         <p>選課程 → 選新時段 → 確認儲存。連續節次會一起移動，按 Escape 可取消。</p>
       </div>}
-      <p role="status" aria-live="polite" aria-atomic="true" className={movement.status}>
-        {preview && !preview.ok ? preview.message : message}
-      </p>
+      {(preview && !preview.ok ? preview.message : message) && (
+        <p role="status" aria-live="polite" aria-atomic="true" className={movement.status}>
+          {preview && !preview.ok ? preview.message : message}
+        </p>
+      )}
       <div className={styles.gridViewport} role="region" aria-label="課表捲動區" aria-describedby={hintId} tabIndex={0}
         onKeyDown={(event) => { if (event.key === 'Escape' && (choosing || dragged)) { event.preventDefault(); cancelMove(); } }}
         onPointerLeave={() => setTarget(null)}>
