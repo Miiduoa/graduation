@@ -23,7 +23,7 @@ function dateLabel(value: string) {
   return new Date(value).toLocaleString('zh-TW', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
-export function CourseQuizzes({ workspace, units }: { workspace: NuniWorkspace; units?: NuniUnit[] | null }) {
+export function CourseQuizzes({ workspace, units, onChanged }: { workspace: NuniWorkspace; units?: NuniUnit[] | null; onChanged?: () => void }) {
   const { session } = useNuniSession();
   if (!session) return <p role="status">請先登入，再查看課程測驗。</p>;
   return (
@@ -31,12 +31,13 @@ export function CourseQuizzes({ workspace, units }: { workspace: NuniWorkspace; 
       key={`${session.context}:${workspace.id}:${workspace.memberRole}:${workspace.state}`}
       workspace={workspace}
       units={units}
+      onChanged={onChanged}
       accountId={session.platformAccountId}
     />
   );
 }
 
-function QuizList({ workspace, accountId, units }: { workspace: NuniWorkspace; accountId: string; units?: NuniUnit[] | null }) {
+function QuizList({ workspace, accountId, units, onChanged }: { workspace: NuniWorkspace; accountId: string; units?: NuniUnit[] | null; onChanged?: () => void }) {
   const classes = useClasses();
   const readClasses = useRef(classes);
   const { refresh } = useNuniSession();
@@ -151,6 +152,7 @@ function QuizList({ workspace, accountId, units }: { workspace: NuniWorkspace; a
     setError('');
     if (!teacher && item.myResponse && filter === 'pending') setFilter('answered');
     if (teacher && !items?.some((entry) => entry.id === item.id)) setFilter('all');
+    onChanged?.();
     setItems((previous) =>
       previous?.some((entry) => entry.id === item.id)
         ? previous.map((entry) => (entry.id === item.id ? item : entry))
