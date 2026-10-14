@@ -41,8 +41,11 @@ afterEach(() => jest.restoreAllMocks());
 test('a foreign campus deep link opens its own catalog, never Providence OPAC', async () => {
   const view = render(<LibraryCatalogScreen route={{ params: { initialQuery: '資料庫' } }} />);
   expect(view.queryByText('靜宜館藏搜尋面板')).toBeNull();
-  await act(async () => fireEvent.press(view.getByText('開啟學校官方館藏')));
-  expect(Linking.openURL).toHaveBeenCalledWith('https://www.lib.nthu.edu.tw/');
+  await act(async () => fireEvent.press(view.getByText('搜尋本校館藏')));
+  const url = new URL(jest.mocked(Linking.openURL).mock.calls[0][0]);
+  expect(url.hostname).toBe('nthu.primo.exlibrisgroup.com');
+  expect(url.searchParams.get('vid')).toBe('886UST_NTHU:886UST_NTHU');
+  expect(url.searchParams.get('query')).toBe('any,contains,資料庫');
 });
 
 test('a failed official catalog link reports the error instead of silently ignoring it', async () => {

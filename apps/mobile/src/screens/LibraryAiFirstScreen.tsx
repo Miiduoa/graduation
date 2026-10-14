@@ -78,9 +78,14 @@ function LibraryContent({
       if (navigation?.navigate) {
         navigation.navigate('LibraryCatalog', { initialQuery: keyword.trim() });
       } else {
-        const url = buildOfficialLibraryCatalogUrl(schoolId, keyword);
+        const url = buildOfficialLibraryCatalogUrl(schoolId, keyword, 'FullText', schoolName);
         if (url) await open(url);
       }
+      return;
+    }
+    if (library.catalogSearch === 'primo-ve') {
+      const url = buildOfficialLibraryCatalogUrl(schoolId, keyword, 'FullText', schoolName);
+      if (url) await open(url);
       return;
     }
     try {
@@ -135,15 +140,17 @@ function LibraryContent({
                   disabled={!keyword.trim()}
                   onPress={() => void searchOfficialCatalog()}
                 />
-                <AIButton
-                  label="在圖書館網站搜尋"
-                  variant="ghost"
-                  disabled={!keyword.trim()}
-                  onPress={() => {
-                    const url = buildOfficialLibraryCatalogUrl(schoolId, keyword);
-                    if (url) void open(url);
-                  }}
-                />
+                {library.catalogSearch !== 'primo-ve' ? (
+                  <AIButton
+                    label="在圖書館網站搜尋"
+                    variant="ghost"
+                    disabled={!keyword.trim()}
+                    onPress={() => {
+                      const url = buildOfficialLibraryCatalogUrl(schoolId, keyword, 'FullText', schoolName);
+                      if (url) void open(url);
+                    }}
+                  />
+                ) : null}
               </View>
               {notice ? (
                 <Text accessibilityRole="text" style={{ color: aiTokens.muted, lineHeight: 20 }}>
