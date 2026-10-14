@@ -29,3 +29,11 @@ export function hasOfficialProvidenceLibraryGuide(
 ): boolean {
   return schoolId === 'pu' && place.category === '圖書館' && place.name.includes('蓋夏');
 }
+
+/** A verified university-operated campus plan, not an imported POI data feed. */
+export const PROVIDENCE_CAMPUS_MAP_URL =
+  'https://gnl.pu.edu.tw/p/426-1007-8.php?Lang=zh-tw';
+
+export function getOfficialCampusMapUrl(schoolId?: string | null): string | null {
+  return schoolId === 'pu' ? PROVIDENCE_CAMPUS_MAP_URL : null;
+}
