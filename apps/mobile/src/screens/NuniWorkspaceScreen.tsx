@@ -213,7 +213,7 @@ function Account({ onLogout }: { onLogout: () => void }) {
   };
 
   return (
-    <ScrollView testID="nuni-workspace" contentContainerStyle={s.content}>
+    <ScrollView contentContainerStyle={s.content}>
       <Text accessibilityRole="header" style={s.heading}>
         我的 Google 帳號
       </Text>
@@ -405,7 +405,7 @@ export function NuniWorkspaceScreen() {
     );
   const capability = getGoogleCredentialCapability();
   return (
-    <ScrollView contentContainerStyle={s.content}>
+    <ScrollView testID="nuni-workspace" contentContainerStyle={s.content}>
       <Text style={s.eyebrow}>CAMPUS ONE</Text>
       <Text accessibilityRole="header" style={s.heading}>
         登入或建立帳號
