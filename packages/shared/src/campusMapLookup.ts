@@ -18,3 +18,14 @@ export function buildCampusMapSearchUrl(schoolName?: string | null): string | nu
   url.searchParams.set('query', `${name} 校園`);
   return url.toString();
 }
+
+
+export const PROVIDENCE_LIBRARY_FLOOR_GUIDE_URL =
+  'https://b028.pu.edu.tw/p/426-1054-34.php?Lang=zh-tw';
+
+export function hasOfficialProvidenceLibraryGuide(
+  schoolId: string,
+  place: { name: string; category: string },
+): boolean {
+  return schoolId === 'pu' && place.category === '圖書館' && place.name.includes('蓋夏');
+}

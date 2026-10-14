@@ -15,3 +15,13 @@ it('never searches generic or absent campus identities', () => {
     expect(buildCampusMapSearchUrl(name)).toBeNull();
   }
 });
+
+
+it('limits the official library floor guide to the identified Providence library', async () => {
+  const { hasOfficialProvidenceLibraryGuide, PROVIDENCE_LIBRARY_FLOOR_GUIDE_URL } =
+    await import('@campus/shared/src/campusMapLookup');
+  expect(hasOfficialProvidenceLibraryGuide('pu', { name: '蓋夏圖書館', category: '圖書館' })).toBe(true);
+  expect(hasOfficialProvidenceLibraryGuide('nthu', { name: '蓋夏圖書館', category: '圖書館' })).toBe(false);
+  expect(hasOfficialProvidenceLibraryGuide('pu', { name: '蓋夏咖啡', category: '餐飲' })).toBe(false);
+  expect(PROVIDENCE_LIBRARY_FLOOR_GUIDE_URL).toMatch(/^https:\/\/b028\.pu\.edu\.tw\//);
+});

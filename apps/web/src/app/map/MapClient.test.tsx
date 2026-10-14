@@ -362,3 +362,16 @@ it('ignores a stale position callback after a newer location attempt', async () 
     Object.defineProperty(navigator, 'geolocation', { configurable: true, value: undefined });
   }
 });
+
+
+it('offers the official floor guide only for the Providence library', async () => {
+  state.user = null;
+  const view = render(<MapClient school="pu" />);
+  fireEvent.click(await screen.findByRole('button', { name: '查看蓋夏圖書館' }));
+  const link = screen.getByRole('link', { name: '查看校方樓層導覽' });
+  expect(link.getAttribute('href')).toBe('https://b028.pu.edu.tw/p/426-1054-34.php?Lang=zh-tw');
+  expect(link.getAttribute('target')).toBe('_blank');
+  view.rerender(<MapClient school="nthu" />);
+  await screen.findByRole('button', { name: '查看蓋夏圖書館' });
+  expect(screen.queryByRole('link', { name: '查看校方樓層導覽' })).toBeNull();
+});

@@ -4,6 +4,7 @@ import { Linking } from 'react-native';
 import * as Location from 'expo-location';
 import { GoogleMapsLikeScreen } from '../screens/GoogleMapsLikeScreen';
 import { loadCampusMapPlaces, type CampusMapPlace } from '../features/campusMap';
+import { safeNavigate } from '../utils/safeNavigate';
 
 let mockSchool: { id: string; name?: string } = { id: 'school-a' };
 let mockUser: { uid: string } | null = { uid: 'user-a' };
@@ -27,6 +28,7 @@ jest.mock('../ui/PuWebView', () => {
     }),
   };
 });
+jest.mock('../utils/safeNavigate', () => ({ safeNavigate: jest.fn() }));
 jest.mock('../features/campusMap', () => ({
   ...jest.requireActual('../features/campusMap'),
   loadCampusMapPlaces: jest.fn(),
@@ -314,4 +316,30 @@ test('does not interpret an old campus POI id as another campus destination afte
   expect(Linking.openURL).toHaveBeenCalledWith(
     expect.stringContaining('destination=23.8%2C120.5'),
   );
+});
+
+
+test('opens the verified library floor directory from Providence campus map only', async () => {
+  mockSchool = { id: 'pu', name: '靜宜大學' };
+  mockParams = { poiId: 'pu-library' };
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([
+    { ...place, id: 'pu-library', name: '蓋夏圖書館', category: '圖書館' },
+  ]);
+  const view = await openMap();
+  expect(view.getByText('查看校方樓層導覽')).toBeTruthy();
+  fireEvent.press(view.getByText('查看校方樓層導覽'));
+  expect(safeNavigate).toHaveBeenCalledWith(expect.any(Object), 'IndoorFloorMap', {
+    poiId: 'pu-library',
+  });
+  expect(Linking.openURL).not.toHaveBeenCalled();
+});
+
+test('never offers a Providence floor directory for a different university', async () => {
+  mockSchool = { id: 'nthu', name: '國立清華大學' };
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([
+    { ...place, id: 'pu-library', name: '蓋夏圖書館', category: '圖書館' },
+  ]);
+  const view = await openMap();
+  expect(view.queryByText('查看校方樓層導覽')).toBeNull();
+  expect(safeNavigate).not.toHaveBeenCalled();
 });
