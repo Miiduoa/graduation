@@ -3,6 +3,7 @@ import { act, fireEvent, render } from '@testing-library/react-native';
 import StorefrontScreen from '../screens/StorefrontScreen';
 import HonestOrderScreen from '../screens/HonestOrderScreen';
 import { theme } from '../ui/theme';
+import { UNVERIFIED_CAFETERIA_NOTICE } from '@campus/shared/src/cafeteriaCatalog';
 import {
   loadStorefront,
   loadStorefrontMenus,
@@ -255,16 +256,16 @@ test.each([
   {
     reviewStatus: 'demo' as const,
     notice: '這是示範店家，菜單和價格不是真的，不能點餐。',
-    hidden: '這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。',
+    hidden: UNVERIFIED_CAFETERIA_NOTICE,
   },
   {
     reviewStatus: 'unverified' as const,
-    notice: '這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。',
+    notice: UNVERIFIED_CAFETERIA_NOTICE,
     hidden: '這是示範店家，菜單和價格不是真的，不能點餐。',
   },
   {
     reviewStatus: undefined,
-    notice: '這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。',
+    notice: UNVERIFIED_CAFETERIA_NOTICE,
     hidden: '這是示範店家，菜單和價格不是真的，不能點餐。',
   },
 ])('shows the review notice for $reviewStatus shops', async ({ reviewStatus, notice, hidden }) => {
@@ -305,7 +306,7 @@ test('does not mark a verified shop page', async () => {
   expect(await view.findByText('紙感小店')).toBeTruthy();
   expect(view.queryByText('這是示範店家，菜單和價格不是真的，不能點餐。')).toBeNull();
   expect(
-    view.queryByText('這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。'),
+    view.queryByText(UNVERIFIED_CAFETERIA_NOTICE),
   ).toBeNull();
   expect(view.queryByTestId('cafeteria-review-notice')).toBeNull();
   expect(view.queryByText('返回餐廳列表')).toBeNull();

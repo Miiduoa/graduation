@@ -284,7 +284,7 @@ function SignedInWorkspace({ onLogout, initialTab }: { onLogout: () => void; ini
       setTab(initialTab);
   }, [initialTab, setTab]);
   return (
-    <View style={s.page}>
+    <View testID="nuni-workspace" style={s.page}>
       <View accessibilityRole="tablist" style={s.tabs}>
         {(
           [
@@ -375,6 +375,7 @@ export function NuniWorkspaceScreen({ route }: { route?: { params?: { tab?: Tab 
   if (auth.loading || action)
     return (
       <View
+        testID="nuni-workspace"
         style={s.center}
         accessibilityRole="progressbar"
         accessibilityLabel={action || '正在確認 Google 帳號'}
@@ -385,7 +386,7 @@ export function NuniWorkspaceScreen({ route }: { route?: { params?: { tab?: Tab 
     );
   if (auth.pendingLogout || auth.error || actionError)
     return (
-      <View style={s.center}>
+      <View testID="nuni-workspace" style={s.center}>
         <Text accessibilityRole="header" style={s.heading}>
           {auth.pendingLogout ? '登出尚未完成' : '目前無法確認登入狀態'}
         </Text>
@@ -412,7 +413,7 @@ export function NuniWorkspaceScreen({ route }: { route?: { params?: { tab?: Tab 
     );
   const capability = getGoogleCredentialCapability();
   return (
-    <ScrollView contentContainerStyle={s.content}>
+    <ScrollView testID="nuni-workspace" contentContainerStyle={s.content}>
       <Text style={s.eyebrow}>CAMPUS ONE</Text>
       <Text accessibilityRole="header" style={s.heading}>
         登入或建立帳號

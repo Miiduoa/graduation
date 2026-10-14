@@ -3,7 +3,10 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import BusPage from './page';
 import { loadBusArrivals, loadBusRoutes, type BusArrivals } from '@/lib/bus';
 
-vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams('schoolId=pu') }));
+const navigation = vi.hoisted(() => ({ query: 'schoolId=pu' }));
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => new URLSearchParams(navigation.query),
+}));
 vi.mock('@/components/SiteShell', () => ({
   SiteShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main>,
 }));
@@ -14,6 +17,7 @@ vi.mock('@/lib/bus', async (original) => ({
 }));
 
 beforeEach(() => {
+  navigation.query = 'schoolId=pu';
   vi.clearAllMocks();
   vi.mocked(loadBusRoutes).mockResolvedValue([
     {
@@ -87,4 +91,20 @@ it('removes estimates when their source timestamp expires while the page is hidd
   });
   expect(screen.queryByText('約 8 分鐘')).toBeNull();
   expect(screen.getByText(/目前沒有可確認的即時到站資訊/)).toBeTruthy();
+});
+
+it('uses the selected campus rather than a stale school ID for registered bus routes', async () => {
+  navigation.query = 'campus=nthu&schoolId=pu';
+  render(<BusPage />);
+  await screen.findByText('實際路線');
+  expect(loadBusRoutes).toHaveBeenCalledWith('nthu');
+  expect(loadBusRoutes).not.toHaveBeenCalledWith('pu');
+  expect(screen.queryByRole('link', { name: /臺中市官方公車查詢/ })).toBeNull();
+});
+
+it('does not fetch any school routes when browsing all campuses', () => {
+  navigation.query = 'campus=all&schoolId=pu';
+  render(<BusPage />);
+  expect(screen.getByText('請先選擇一所學校')).toBeTruthy();
+  expect(loadBusRoutes).not.toHaveBeenCalled();
 });

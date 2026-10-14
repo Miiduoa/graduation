@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
-import { parseSignInOptions, useSignInOptions } from './signInOptions';
+import { parseSignInOptions, STUDENT_ID_PREPARING_COPY, useSignInOptions } from './signInOptions';
+import { hasUsableSchoolLoginProvider } from '@campus/shared/src/schoolLogin';
 
 const request = vi.fn();
 vi.mock('@/features/nuni/Session', () => ({
@@ -10,6 +11,14 @@ vi.mock('@/features/nuni/Session', () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   request.mockResolvedValue({ google: true, studentId: false });
+});
+
+it('hides school login unless a usable school-issued provider is listed', () => {
+  expect(STUDENT_ID_PREPARING_COPY).toBe('先用 Google 登入，再綁定學校');
+  expect(hasUsableSchoolLoginProvider(['google-consumer'])).toBe(false);
+  expect(hasUsableSchoolLoginProvider([])).toBe(false);
+  expect(hasUsableSchoolLoginProvider(['school-issued'])).toBe(true);
+  expect(hasUsableSchoolLoginProvider(['student-id'])).toBe(true);
 });
 
 it('treats student ID as unavailable unless the backend says it is available', () => {

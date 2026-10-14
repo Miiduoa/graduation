@@ -1,3 +1,10 @@
+import {
+  listAnnouncementCatalogLinks,
+  type AnnouncementCatalogLink,
+} from './campusAnnouncementCatalog';
+
+export { listAnnouncementCatalogLinks, type AnnouncementCatalogLink };
+
 export const ANNOUNCEMENT_SCOPES = ['campus', 'office', 'department'] as const;
 export type AnnouncementScope = (typeof ANNOUNCEMENT_SCOPES)[number];
 export const ANNOUNCEMENT_SOURCE_KINDS = ['rss', 'api', 'opendata', 'html_list', 'none'] as const;
@@ -188,7 +195,63 @@ export function announcementEmptyKind(
   return 'not_connected';
 }
 
-export {
-  listAnnouncementCatalogLinks,
-  type AnnouncementCatalogLink,
-} from './campusAnnouncementCatalog';
+export const ANNOUNCEMENT_RECENT_LIMIT = 200;
+export const ANNOUNCEMENT_SOURCE_LIMIT = 50;
+
+export type AnnouncementSearchFields = {
+  title?: string | null;
+  body?: string | null;
+  summary?: string | null;
+  source?: string | null;
+  office?: string | null;
+  sourceId?: string | null;
+};
+
+export function announcementSearchText(item: AnnouncementSearchFields): string {
+  return [item.title, item.body, item.summary, item.source, item.office, item.sourceId]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .join(' ')
+    .toLocaleLowerCase('zh-TW');
+}
+
+export function announcementMatchesSearch(
+  item: AnnouncementSearchFields,
+  needle: string,
+): boolean {
+  const query = needle.trim().toLocaleLowerCase('zh-TW');
+  return !query || announcementSearchText(item).includes(query);
+}
+
+export function announcementSourceIdsForSchool(
+  schoolId: string,
+  extra: Array<{ sourceId?: string | null } | string> = [],
+): string[] {
+  const ids = [
+    ...listAnnouncementCatalogLinks(schoolId).map((item) => item.sourceId),
+    ...extra.map((item) => (typeof item === 'string' ? item : item.sourceId)),
+  ];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const id of ids) {
+    if (typeof id !== 'string' || !id.trim() || id.includes('/') || seen.has(id)) continue;
+    seen.add(id);
+    result.push(id);
+  }
+  return result;
+}
+
+export function mergeAnnouncementsById<T extends { id: string; publishedAt?: string | null }>(
+  buckets: T[][],
+): T[] {
+  const merged = new Map<string, T>();
+  for (const rows of buckets) {
+    for (const row of rows) {
+      if (!merged.has(row.id)) merged.set(row.id, row);
+    }
+  }
+  return [...merged.values()].sort((left, right) => {
+    const leftTime = Date.parse(left.publishedAt ?? '') || 0;
+    const rightTime = Date.parse(right.publishedAt ?? '') || 0;
+    return rightTime - leftTime;
+  });
+}
