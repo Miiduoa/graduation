@@ -30,6 +30,18 @@ describe('official library directory', () => {
     expect(getOfficialCampusLibrary(null)).toBeNull();
   });
 
+  it('matches an exact, verified official name when the platform uses a different tenant ID', () => {
+    expect(
+      getOfficialCampusLibrary('tenant-567', '國立清華大學')?.websiteUrl,
+    ).toBe('https://www.lib.nthu.edu.tw/');
+    expect(
+      getOfficialCampusLibrary('tenant-568', '國立中興大學')?.websiteUrl,
+    ).toBe('https://www.lib.nchu.edu.tw/');
+    expect(getOfficialCampusLibrary('tenant-569', '清華大學圖書館')).toBeNull();
+    expect(getOfficialCampusLibrary('../nthu', '國立清華大學')).toBeNull();
+    expect(getOfficialCampusLibrary(null, '國立清華大學')).toBeNull();
+  });
+
   it('allows direct catalogue and account links only where configured', () => {
     const pu = getOfficialCampusLibrary('pu')!;
     const nthu = getOfficialCampusLibrary('nthu')!;
