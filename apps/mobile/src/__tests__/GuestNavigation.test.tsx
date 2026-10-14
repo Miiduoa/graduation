@@ -24,6 +24,11 @@ let mockSchoolAuth: {
   tokenExpired: false,
 };
 jest.mock('../state/auth', () => ({ useAuth: () => mockSchoolAuth }));
+// Navigation tests render the signed-out stack without mounting the app shell.
+// Supply the same selected-campus context that production SchoolProvider supplies.
+jest.mock('../state/school', () => ({
+  useSchool: () => ({ school: { id: 'pu', name: '靜宜大學' } }),
+}));
 let mockInitialUrl: string | null = null;
 let mockLinkListener: ((event: { url: string }) => void) | undefined;
 const mockRemoveLinkListener = jest.fn();
