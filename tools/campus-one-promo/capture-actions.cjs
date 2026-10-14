@@ -22,8 +22,7 @@ const stories = [
     {kind:'click',name:'切換單日模式',selectors:['button:has-text("單日")','text=單日'],optional:true},
     {kind:'click',name:'打開新增課程',selectors:['button:has-text("新增課程")','text=新增課程'],optional:true},
   ]},
-  { id:'03-search', title:'首頁 → 所有服務 → 搜尋', actions: [
-    {kind:'click',name:'開啟所有服務',selectors:['a[href="/search"]','a:has-text("所有服務")'],expect:'/search'},
+  { id:'03-search', title:'服務搜尋 → 點擊結果', startRoute:'/search', actions: [
     {kind:'type',name:'搜尋公車服務',selectors:['input[type="search"]','input[name="q"]','input[placeholder*="搜尋"]','input:visible'],value:'公車',optional:true},
     {kind:'click',name:'點選搜尋結果公車',selectors:['a[href="/bus"]','a:has-text("查詢路線與站牌")'],expect:'/bus',optional:true},
   ]},
@@ -94,7 +93,7 @@ function digest(file) { return crypto.createHash('sha256').update(fs.readFileSyn
       };
     });
     try {
-      const response = await page.goto(BASE+'/',{waitUntil:'domcontentloaded',timeout:55000});
+      const response = await page.goto(BASE+(story.startRoute||'/'),{waitUntil:'domcontentloaded',timeout:55000});
       if (!response || response.status() >= 400) throw Error('Live homepage status: '+response?.status());
       await page.waitForTimeout(1550);
       chapter.home_status=response.status();
@@ -113,12 +112,14 @@ function digest(file) { return crypto.createHash('sha256').update(fs.readFileSyn
             chapter.valid_clicks++;
           } else {
             await loc.click({timeout:8500});
+            chapter.valid_clicks++;
             await page.keyboard.press('ControlOrMeta+A');
             await page.keyboard.press('Backspace');
             await loc.pressSequentially(act.value,{delay:120,timeout:18000});
             step.typed=act.value;
           }
-          await page.waitForTimeout(act.expect?1150:850);
+          if (act.expect) await page.waitForURL(u=>u.pathname===act.expect,{timeout:10000}).catch(()=>{});
+          await page.waitForTimeout(act.expect?800:850);
           step.url_after=page.url();
           step.ok= !act.expect || new URL(step.url_after).pathname===act.expect;
           if(!step.ok) step.note='URL did not reach expected route '+act.expect;
