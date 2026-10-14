@@ -477,13 +477,6 @@ function ProvidenceARNavigationScreen(props: any) {
     return Math.min(done / totalDistance, 1);
   }, [distanceRemaining, hasLiveLocation, totalDistance]);
 
-  const handleRequestPermission = async () => {
-    const result = await requestPermission();
-    if (result.granted) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    }
-  };
-
   const handleStartNavigation = async () => {
     if (!target || loadingTarget || routing) {
       Alert.alert('無法開始導航', routeError ?? '目的地資料尚未準備好');
