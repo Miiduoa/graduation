@@ -12,6 +12,7 @@ function BusContext() {
   const { schoolId, schoolName } = resolveSchoolPageContext({
     school: search.get('school') ?? undefined,
     schoolId: search.get('schoolId') ?? undefined,
+    campus: search.get('campus') ?? undefined,
   });
   return (
     <SiteShell title="公車與交通" subtitle="找站牌、確認方向，再出發。" schoolName={schoolName}>

@@ -30,11 +30,12 @@ it('waits for Next route search parameters and passes the requested route and fo
     resolve({ schoolId: 'another-school', route: 'gate,library', focus: 'library' }),
   );
   const destination = JSON.parse(screen.getByLabelText('地圖目的地').textContent || '{}');
-  expect(destination).toEqual({ school: 'pu', route: 'gate,library', focus: 'library' });
+  expect(destination).toEqual({ school: 'another-school', route: 'gate,library', focus: 'library' });
   const askLink = screen.getByRole('link', { name: '詢問地點 →' });
   const url = new URL(askLink.getAttribute('href') || '', 'https://campus.example');
   expect(url.pathname).toBe('/search');
   expect(url.searchParams.get('q')).toContain('地點');
+  expect(url.searchParams.get('schoolId')).toBe('another-school');
   expect(screen.queryByText(/最快路線|AI 校園導航/)).toBeNull();
 });
 
