@@ -2,7 +2,7 @@
  * School-aware catalog route. Providence has an integrated OPAC client;
  * other universities use their verified official catalog entry points.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { Linking, Platform, Pressable, Text, View } from 'react-native';
 import { getOfficialLibrary } from '@campus/shared/src/officialLibraries';
 import { Screen } from '../ui/components';
@@ -16,6 +16,7 @@ export function LibraryCatalogScreen(props: { navigation?: any; route?: any }) {
   const initialQ =
     typeof props.route?.params?.initialQuery === 'string' ? props.route.params.initialQuery : '';
   const { school } = useSchool();
+  const [failedSchoolId, setFailedSchoolId] = useState<string | null>(null);
   const library = getOfficialLibrary(school.id, school.name);
 
   React.useEffect(() => {
@@ -37,7 +38,11 @@ export function LibraryCatalogScreen(props: { navigation?: any; route?: any }) {
           {library ? (
             <Pressable
               accessibilityRole="link"
-              onPress={() => void Linking.openURL(library.catalogUrl).catch(() => {})}
+              accessibilityLabel={`開啟${library.name}官方館藏`}
+              onPress={() => {
+                setFailedSchoolId(null);
+                void Linking.openURL(library.catalogUrl).catch(() => setFailedSchoolId(school.id));
+              }}
               style={{
                 minHeight: 48,
                 justifyContent: 'center',
@@ -47,10 +52,15 @@ export function LibraryCatalogScreen(props: { navigation?: any; route?: any }) {
                 paddingHorizontal: 16,
               }}
             >
-              <Text style={{ color: theme.colors.text, fontWeight: '700' }}>
+              <Text style={{ color: theme.colors.onAccent, fontWeight: '700' }}>
                 開啟學校官方館藏
               </Text>
             </Pressable>
+          ) : null}
+          {failedSchoolId === school.id ? (
+            <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>
+              無法開啟館藏網站，請確認網路連線後再試。
+            </Text>
           ) : null}
         </View>
       </Screen>
