@@ -52,7 +52,7 @@ export function CourseText({ text }: { text: string }) {
   return <div className={`${shared.prose} ${styles.body}`}>{parts}</div>;
 }
 
-export function CourseMaterials({ workspace, units }: { workspace: NuniWorkspace; units?: NuniUnit[] | null }) {
+export function CourseMaterials({ workspace, units, onChanged }: { workspace: NuniWorkspace; units?: NuniUnit[] | null; onChanged?: () => void }) {
   const { session, pendingLogout } = useNuniSession();
   if (!session || pendingLogout) return null;
   return (
@@ -60,11 +60,12 @@ export function CourseMaterials({ workspace, units }: { workspace: NuniWorkspace
       key={`${session.context}:${workspace.id}:${workspace.memberRole}:${workspace.state}`}
       workspace={workspace}
       units={units}
+      onChanged={onChanged}
     />
   );
 }
 
-function Materials({ workspace, units }: { workspace: NuniWorkspace; units?: NuniUnit[] | null }) {
+function Materials({ workspace, units, onChanged }: { workspace: NuniWorkspace; units?: NuniUnit[] | null; onChanged?: () => void }) {
   const classes = useClasses();
   const [items, setItems] = useState<NuniMaterial[] | null>(null);
   const hash = useLocationHash();
@@ -202,6 +203,7 @@ function Materials({ workspace, units }: { workspace: NuniWorkspace; units?: Nun
                 ...(previous ?? []).filter((item) => item.id !== receipt.id),
               ]);
               setNotice(`已發布「${receipt.title}」。`);
+              onChanged?.();
               void load();
             }}
           >
