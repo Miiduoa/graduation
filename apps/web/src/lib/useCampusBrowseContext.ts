@@ -17,6 +17,9 @@ export type CampusBrowseContext = {
 export function useCampusBrowseContext(params?: SchoolSearchParams): CampusBrowseContext {
   const selection = useOptionalSelectedSchool();
   if (!selection) {
+    if (params?.campus === 'all' || (params?.schoolId === 'all' && !params?.campus)) {
+      return { status: 'unselected', schoolId: null, schoolName: '', schoolSearch: '?campus=all' };
+    }
     const legacy = resolveSchoolPageContext(params);
     return {
       status: 'ready',
