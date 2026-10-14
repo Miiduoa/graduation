@@ -389,3 +389,13 @@ test('accepts a new explicit destination for the current campus after a school c
   await act(async () => fireEvent.press(view.getByText('查看步行路線')));
   expect(Linking.openURL).toHaveBeenCalledWith(expect.stringContaining('destination=24.1%2C121.1'));
 });
+
+
+test('does not replace the WebView document when only the map search changes', async () => {
+  const view = await openMap();
+  const source = view.getByTestId('campus-map-webview').props.source;
+  fireEvent.changeText(view.getByLabelText('搜尋校園地點'), '沒有這個校舍');
+  expect(view.getByTestId('campus-map-webview').props.source).toBe(source);
+  fireEvent.changeText(view.getByLabelText('搜尋校園地點'), '圖書館');
+  expect(view.getByTestId('campus-map-webview').props.source).toBe(source);
+});
