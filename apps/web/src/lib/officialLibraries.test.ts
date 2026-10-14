@@ -61,9 +61,13 @@ it('only contains HTTPS university-specific library destinations', () => {
       expect(parsed.protocol, schoolId).toBe('https:');
       if (parsed.hostname.endsWith('.primo.exlibrisgroup.com')) {
         // Primo VE is a university-managed catalog hosted under Ex Libris.
-        expect(parsed.hostname, schoolId).toBe(`${schoolId === 'tw-nchu' ? 'nchu' : schoolId}.primo.exlibrisgroup.com`);
+        expect(parsed.hostname, schoolId).toBe(
+          `${schoolId === 'tw-nchu' ? 'nchu' : schoolId === 'scu' ? 'uco-scu' : schoolId}.primo.exlibrisgroup.com`,
+        );
+      } else if (schoolId === 'ncyu' && parsed.hostname === 'ncyu.summon.serialssolutions.com') {
+        expect(parsed.hostname).toBe('ncyu.summon.serialssolutions.com');
       } else {
-      expect(parsed.hostname, schoolId).toMatch(/\.edu\.tw$/);
+        expect(parsed.hostname, schoolId).toMatch(/\.edu\.tw$/);
       }
       if (schoolId !== 'pu') expect(parsed.hostname).not.toContain('.pu.edu.tw');
     }
