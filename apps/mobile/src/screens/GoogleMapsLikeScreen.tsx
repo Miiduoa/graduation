@@ -42,13 +42,15 @@ export function GoogleMapsLikeScreen() {
   const { school } = useSchool();
   const { user } = useAuth();
   const params = (route.params ?? {}) as MapParams;
+  const linkedSchool = useRef(school.id);
+  const schoolScopedParams = linkedSchool.current === school.id ? params : {};
   return (
     <CampusMapContent
       key={JSON.stringify([user?.uid, school.id, school.name])}
       schoolId={school.id}
       schoolName={school.name}
       navigation={navigation}
-      params={params}
+      params={schoolScopedParams}
     />
   );
 }
