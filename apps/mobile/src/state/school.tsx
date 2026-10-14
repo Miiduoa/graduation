@@ -51,9 +51,23 @@ function toSelection(school: School): SchoolSelection {
   };
 }
 
+const VALID_CAMPUS_ID = /^[a-z0-9](?:[a-z0-9-]{0,78}[a-z0-9])?$/;
+
 export function schoolFromSelection(selection: Partial<SchoolSelection>): School {
   const byId = selection.schoolId ? findSchoolById(selection.schoolId) : undefined;
   if (byId) return byId;
+  // A directory tenant does not need to be hard-coded in the offline school
+  // list to remain distinct. Never turn an unknown but valid ID into PU.
+  if (selection.schoolId && VALID_CAMPUS_ID.test(selection.schoolId)) {
+    return {
+      id: selection.schoolId,
+      code: normalizeSchoolCode(selection.code),
+      name: selection.schoolName?.trim() || '所選校園尚未接入',
+      ...(selection.shortName ? { shortName: selection.shortName } : {}),
+      ...(selection.themeColor ? { themeColor: selection.themeColor } : {}),
+      ...(selection.domains ? { domains: selection.domains } : {}),
+    };
+  }
   const matches = selection.code ? findSchoolsByCode(selection.code) : [];
   return matches.length === 1 ? matches[0] : getProvidenceSchool();
 }
@@ -67,18 +81,31 @@ export function mergeSchoolSelection(
   previous: SchoolSelection,
   next: Partial<SchoolSelection>,
 ): SchoolSelection {
-  if (next.schoolId && !findSchoolById(next.schoolId)) return previous;
+  if (next.schoolId && !VALID_CAMPUS_ID.test(next.schoolId)) return previous;
   if (next.code !== undefined && next.schoolId === undefined) {
     if (findSchoolsByCode(next.code).length !== 1) return previous;
   }
-  const code = next.code != null ? normalizeSchoolCode(next.code) : previous.code;
   const schoolId =
     next.schoolId !== undefined
       ? next.schoolId
       : next.code !== undefined
         ? null
         : previous.schoolId;
-  return normalizeSelection({ code, schoolId });
+  const code =
+    next.code !== undefined
+      ? normalizeSchoolCode(next.code)
+      : next.schoolId !== undefined
+        ? findSchoolById(next.schoolId)?.code ?? ''
+        : previous.code;
+  const identityChanged = next.schoolId !== undefined || next.code !== undefined;
+  return normalizeSelection({
+    code,
+    schoolId,
+    schoolName: next.schoolName ?? (identityChanged ? null : previous.schoolName),
+    shortName: next.shortName ?? (identityChanged ? null : previous.shortName),
+    themeColor: next.themeColor ?? (identityChanged ? null : previous.themeColor),
+    domains: next.domains ?? (identityChanged ? null : previous.domains),
+  });
 }
 
 export function SchoolProvider(props: {
