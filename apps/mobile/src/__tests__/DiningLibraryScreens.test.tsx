@@ -393,6 +393,32 @@ test('library web search encodes the query, and another school cannot open PU se
   view.rerender(<LibraryAiFirstScreen />);
   expect(view.queryByText('開啟我的借閱紀錄')).toBeNull();
 });
+test('library opens the selected school rather than showing Providence borrowing data', async () => {
+  mockSchool = { id: 'nthu' };
+  const view = render(<LibraryAiFirstScreen />);
+  expect(view.getByText('國立清華大學圖書館')).toBeTruthy();
+  expect(view.queryByLabelText('館藏關鍵字')).toBeNull();
+  await act(async () => fireEvent.press(view.getByText('開啟官方圖書館')));
+  expect(Linking.openURL).toHaveBeenCalledWith('https://www.lib.nthu.edu.tw/');
+  expect(Linking.openURL).not.toHaveBeenCalledWith('https://webpacx.lib.pu.edu.tw/personal/');
+});
+
+test('the library entry never guesses an unverified university URL', () => {
+  mockSchool = { id: 'unverified-school' };
+  const view = render(<LibraryAiFirstScreen />);
+  expect(view.getByText(/尚未查證這所學校的官方圖書館網址/)).toBeTruthy();
+  expect(view.queryByText('開啟官方圖書館')).toBeNull();
+  expect(view.queryByLabelText('館藏關鍵字')).toBeNull();
+});
+
+test('library link failures are visible for non-Providence campuses', async () => {
+  mockSchool = { id: 'nthu' };
+  jest.mocked(Linking.openURL).mockRejectedValueOnce(new Error('unavailable'));
+  const view = render(<LibraryAiFirstScreen />);
+  await act(async () => fireEvent.press(view.getByText('開啟官方圖書館')));
+  expect(view.getByText('無法開啟圖書館網頁，請確認網路連線後重試。')).toBeTruthy();
+});
+
 test('library account switches clear the previous keyword', () => {
   const view = render(<LibraryAiFirstScreen />);
   fireEvent.changeText(view.getByLabelText('館藏關鍵字'), 'private query');
