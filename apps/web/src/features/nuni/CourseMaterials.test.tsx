@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { NuniError, type NuniMaterial, type NuniWorkspace } from '@campus/shared/src/nuni';
 import { CourseMaterials } from './CourseMaterials';
@@ -112,7 +112,7 @@ it('publishes materials to the teacher-selected chapter using the original cours
     'session-a',
     expect.objectContaining({ unitId, idempotencyKey: expect.any(String) }),
   );
-  expect(screen.getByText('第二章')).toBeTruthy();
+  expect(within(screen.getByRole('article', { name: '章節閱讀' })).getByText('第二章')).toBeTruthy();
 });
 
 it('preserves the same uncertain payload and key when confirming a lost publication response', async () => {
