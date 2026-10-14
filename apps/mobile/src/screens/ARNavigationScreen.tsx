@@ -78,16 +78,11 @@ async function buildARNavigationRoute(params: {
   const from: LatLng = { lat: start.latitude, lng: start.longitude };
   const to: LatLng = { lat: dest.lat, lng: dest.lng };
   const foot = await loadUsableFootRoute(getFootRoute, from, to);
-  if (!foot) return null;
+  if (!foot || !Array.isArray(foot.steps) || foot.steps.length === 0) return null;
 
-  const steps: NavigationStep[] = foot.steps.length
-    ? foot.steps.map((step, index) => routeStepToNavigationStep(step, index))
-    : [{
-        id: '1',
-        instruction: '已找到步行路線，但供應商未提供轉彎指示，請改用一般地圖確認路線。',
-        distance: Math.round(foot.distance),
-        direction: 'straight',
-      }];
+  const steps: NavigationStep[] = foot.steps.map((step, index) =>
+    routeStepToNavigationStep(step, index),
+  );
   return {
     points: geometryLngLatToARLocations(foot.geometry),
     distance: Math.round(foot.distance),
