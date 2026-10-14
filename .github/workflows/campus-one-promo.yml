@@ -34,7 +34,7 @@ jobs:
           cd tools/campus-one-promo
           npx playwright install --with-deps chromium
 
-      - name: Record NEW live website using visible UI clicks and typing
+      - name: Record visible clicks, route transitions, search typing on live site
         run: |
           node --check tools/campus-one-promo/capture-actions.cjs
           node tools/campus-one-promo/capture-actions.cjs
