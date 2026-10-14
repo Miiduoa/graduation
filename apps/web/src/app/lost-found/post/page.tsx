@@ -17,7 +17,7 @@ export default function LostFoundPostPage(props: {
   const { user, loading: authLoading } = useAuth();
   const loginReturnUrl = `/lost-found/post?schoolId=${encodeURIComponent(context.schoolId)}`;
   return (
-    <SiteShell title="發布失物招領" schoolName={context.schoolName}>
+    <SiteShell title="發布失物招領" schoolName={context.ready ? context.schoolName : undefined}>
       {!context.ready ? (
         <SchoolScopePlaceholder />
       ) : authLoading ? (
