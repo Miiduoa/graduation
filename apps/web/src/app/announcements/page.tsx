@@ -337,7 +337,7 @@ export default function AnnouncementsPage(props: {
 }) {
   const params = props.searchParams ? use(props.searchParams) : undefined;
   const browsing = useBrowsingSchoolPageContext(params);
-  const { school, visible } = resolveAnnouncementSchool({ schoolId: browsing.schoolId });
+  const { school, visible } = resolveAnnouncementSchool({ resolvedSchool: browsing.school });
   const { user, loading } = useAuth();
   return (
     <SiteShell

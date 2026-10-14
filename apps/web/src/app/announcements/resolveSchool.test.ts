@@ -25,3 +25,10 @@ it('hides cms-none demo schools unless NEXT_PUBLIC_APP_ENV is explicitly develop
   vi.stubEnv('NEXT_PUBLIC_APP_ENV', 'preview');
   expect(resolveAnnouncementSchool({ schoolId: 'tw-demo-uni' }).visible).toBe(true);
 });
+
+it('keeps a directory campus identity instead of resolving to Providence', () => {
+  const record = { id: 'tw-new-university', code: 'NEWU', name: '新大學' };
+  const result = resolveAnnouncementSchool({ resolvedSchool: record });
+  expect(result.school).toEqual(record);
+  expect(result.visible).toBe(true);
+});
