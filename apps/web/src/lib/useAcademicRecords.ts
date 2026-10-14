@@ -17,15 +17,15 @@ type RecordState<K extends AcademicKind> = {
   error?: unknown;
 };
 
-export function useAcademicRecords<K extends AcademicKind>(kind: K) {
+export function useAcademicRecords<K extends AcademicKind>(kind: K, enabled = true) {
   const { user, loading: authLoading } = useAuth();
   const uid = user?.uid;
-  const scope = JSON.stringify([uid, kind]);
+  const scope = JSON.stringify([uid, kind, enabled]);
   const generation = useRef(0);
   const [state, setState] = useState<RecordState<K> | null>(null);
   const refresh = useCallback(async () => {
     const request = ++generation.current;
-    if (!uid || authLoading) return;
+    if (!enabled || !uid || authLoading) return;
     setState({ scope, status: 'loading' });
     try {
       const snapshot = await loadAcademicRecords(kind, uid);
@@ -42,13 +42,13 @@ export function useAcademicRecords<K extends AcademicKind>(kind: K) {
         });
       }
     }
-  }, [uid, authLoading, kind, scope]);
+  }, [uid, authLoading, kind, scope, enabled]);
   useEffect(() => {
     void refresh();
     return () => {
       generation.current += 1;
     };
   }, [refresh]);
-  const visible = !authLoading && uid && state?.scope === scope ? state : null;
+  const visible = enabled && !authLoading && uid && state?.scope === scope ? state : null;
   return { state: visible, refresh };
 }
