@@ -110,6 +110,49 @@ export function recommendCourses(hints: CourseMetadata, candidates: readonly Cou
   }
   return matches.sort((a, b) => b.rank - a.rank || a.course.id.localeCompare(b.course.id));
 }
+
+/**
+ * A shortcut may only point at the workspace proven by BOTH an approved
+ * server request and a fresh active student membership. A matching course
+ * title alone is never enough to imply membership or school enrollment.
+ * This changes the user's personal draft only; saving remains explicit.
+ */
+export function approvedCourseLinks(
+  hints: CourseMetadata,
+  requests: readonly CourseRequest[],
+  workspaces: readonly { id: string; title: string; state: 'active' | 'archived'; memberRole: string }[],
+): { id: string; title: string }[] {
+  let input: CourseMetadata;
+  try { input = courseMetadata(hints); }
+  catch { return []; }
+
+  const output: { id: string; title: string }[] = [];
+  const used = new Set<string>();
+  for (const request of requests) {
+    if (request.kind !== 'student' || request.state !== 'approved' ||
+        !request.membershipActive || !request.courseId ||
+        !sameCourseScope(input, request.metadata)) continue;
+    const matchedCode = !!input.courseCode && !!request.metadata.courseCode &&
+      courseFold(input.courseCode) === courseFold(request.metadata.courseCode);
+    const matchedTitle = courseFold(input.title) === courseFold(request.metadata.title);
+    // A nonempty, contradictory course code must never be masked by a similar title.
+    if ((!matchedCode && !matchedTitle) ||
+        (input.courseCode && request.metadata.courseCode && !matchedCode) ||
+        (input.teacher && request.metadata.teacher &&
+          courseFold(input.teacher) !== courseFold(request.metadata.teacher)) ||
+        (input.className && request.metadata.className &&
+          courseFold(input.className) !== courseFold(request.metadata.className))) continue;
+
+    const member = workspaces.find(item => item.id === request.workspaceId &&
+      item.state === 'active' && item.memberRole === 'student');
+    if (member && !used.has(member.id)) {
+      output.push({ id: member.id, title: member.title });
+      used.add(member.id);
+    }
+  }
+  return output;
+}
+
 export const courseRequestCopy: Record<CourseRequestState, string> = {
   pending: '等待管理員核對', approved: '管理員已核對通過', rejected: '申請未通過',
   withdrawn: '已撤回申請', revoked: '授權已撤銷',
