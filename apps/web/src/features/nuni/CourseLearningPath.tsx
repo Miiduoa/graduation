@@ -39,12 +39,18 @@ export function CourseLearningPath({
   const [error, setError] = useState('');
   const [reading, setReading] = useState(true);
   const [epoch, setEpoch] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
   const request = useRef(0);
   const teacher = workspace.memberRole !== 'student';
   const complete = units !== null && materials !== null && quizzes !== null;
   const groups = buildCourseOutline(units ?? [], materials ?? [], assignments, quizzes ?? []);
-  const overall = courseTaskTotals(assignments, quizzes ?? [], Date.now());
+  const overall = courseTaskTotals(assignments, quizzes ?? [], now);
   const hasLimitedResult = (materials?.length ?? 0) >= 100 || (quizzes?.length ?? 0) >= 100;
+
+  useEffect(() => {
+    const tick = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(tick);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -69,7 +75,6 @@ export function CourseLearningPath({
     });
     return () => {
       active = false;
-      ++request.current;
     };
   }, [workspace.id, epoch, refreshVersion]);
 
@@ -111,7 +116,7 @@ export function CourseLearningPath({
       )}
       <div className={styles.sections}>
         {groups.map((section, index) => {
-          const totals = courseTaskTotals(section.assignments, section.quizzes, Date.now());
+          const totals = courseTaskTotals(section.assignments, section.quizzes, now);
           const empty = !section.materials.length && !section.assignments.length && !section.quizzes.length;
           return (
             <section key={section.id ?? 'unassigned'} className={styles.unit} aria-labelledby={`outline-unit-${index}`}>
