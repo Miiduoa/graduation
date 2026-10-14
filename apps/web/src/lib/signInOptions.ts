@@ -5,7 +5,7 @@ import { browserRequest } from '@/features/nuni/Session';
 
 export type SignInOptions = { google: boolean; studentId: boolean };
 
-export const STUDENT_ID_PREPARING_COPY = '學號登入還在準備，目前請用 Google 帳號登入';
+export { SCHOOL_LOGIN_BIND_HINT as STUDENT_ID_PREPARING_COPY } from '@campus/shared/src/schoolLogin';
 
 export function parseSignInOptions(value: unknown): SignInOptions {
   if (!value || typeof value !== 'object') return { google: false, studentId: false };

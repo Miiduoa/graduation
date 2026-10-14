@@ -6,6 +6,11 @@ import { signInWithCredential } from 'firebase/auth';
 import LoginLandingScreen from '../screens/LoginLandingScreen';
 import { SSOLoginScreen } from '../screens/SSOLoginScreen';
 import { signInWithStudentId } from '../services/studentIdAuth';
+import {
+  resetSchoolLoginProviderCache,
+  setSchoolLoginProviderKinds,
+} from '../services/schoolLoginAvailability';
+import { SCHOOL_LOGIN_BIND_HINT } from '@campus/shared/src/schoolLogin';
 import { safeNavigate } from '../utils/safeNavigate';
 import { applyTheme, createLightTheme, createDarkTheme, clearSchoolTheme } from '../ui/theme';
 import { Button } from '../ui/components';
@@ -45,6 +50,7 @@ jest.mock('../ui/navigationTheme', () => ({
 beforeEach(() => {
   jest.clearAllMocks();
   Object.assign(Constants.expoConfig!, { extra: { appEnv: 'development' } });
+  setSchoolLoginProviderKinds(['school-issued']);
   mockPlatformAuth = { session: null, loading: false, error: '', pendingLogout: false };
   jest.mocked(signInWithStudentId).mockReset();
   mockRefreshProfile.mockReset();
@@ -57,6 +63,7 @@ beforeEach(() => {
 afterEach(() => {
   jest.useRealTimers();
   jest.restoreAllMocks();
+  resetSchoolLoginProviderCache();
   act(() => applyTheme('light'));
 });
 
@@ -343,6 +350,19 @@ test('pending logout explains the next step without presenting a restored accoun
   expect(view.queryByText('回到我的 Campus One')).toBeNull();
 });
 
+test('hides the school login button when no usable school provider is listed', () => {
+  setSchoolLoginProviderKinds([]);
+  const landing = render(<LoginLandingScreen />);
+  expect(landing.getByText(SCHOOL_LOGIN_BIND_HINT)).toBeTruthy();
+  expect(landing.queryByTestId('school-login-start')).toBeNull();
+  expect(landing.queryByText('前往學校登入')).toBeNull();
+  landing.unmount();
+  const direct = render(<SSOLoginScreen />);
+  expect(direct.getByText(SCHOOL_LOGIN_BIND_HINT)).toBeTruthy();
+  expect(direct.queryByTestId('student-password-input')).toBeNull();
+  expect(direct.queryByText('使用學號登入')).toBeNull();
+});
+
 test('a release without school SSO keeps public and platform entries, but does not collect school credentials', () => {
   Object.assign(Constants.expoConfig!, {
     extra: {
@@ -353,8 +373,10 @@ test('a release without school SSO keeps public and platform entries, but does n
       },
     },
   });
+  setSchoolLoginProviderKinds([]);
   const landing = render(<LoginLandingScreen />);
-  expect(landing.getByTestId('school-login-start')).toBeDisabled();
+  expect(landing.getByText(SCHOOL_LOGIN_BIND_HINT)).toBeTruthy();
+  expect(landing.queryByTestId('school-login-start')).toBeNull();
   fireEvent.press(landing.getByTestId('public-Map'));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'Map');
   fireEvent.press(landing.getByTestId('login-start'));

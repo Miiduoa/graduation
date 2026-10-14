@@ -17,7 +17,11 @@ import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { finishLoginReturn } from '../utils/loginReturn';
 import { signInWithStudentId, type LoginProgress } from '../services/studentIdAuth';
-import { isStudentIdLoginAvailable } from '../services/schoolLoginAvailability';
+import {
+  SCHOOL_LOGIN_BIND_HINT,
+  isSchoolLoginEntryAvailable,
+  loadSchoolLoginProviderKinds,
+} from '../services/schoolLoginAvailability';
 import { Screen, Button, AnimatedCard } from '../ui/components';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
@@ -51,7 +55,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
   const auth = useAuth();
   const { school } = useSchool();
 
-  const schoolLoginAvailable = isStudentIdLoginAvailable();
+  const [schoolLoginAvailable, setSchoolLoginAvailable] = useState(isSchoolLoginEntryAvailable());
 
   const [studentIdInput, setStudentIdInput] = useState('');
   const [studentPwInput, setStudentPwInput] = useState('');
@@ -66,6 +70,9 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
 
   useEffect(() => {
     mounted.current = true;
+    void loadSchoolLoginProviderKinds().then(() => {
+      if (mounted.current) setSchoolLoginAvailable(isSchoolLoginEntryAvailable());
+    });
     return () => {
       mounted.current = false;
       // Authentication may still finish; only this screen's callbacks are invalidated.
@@ -272,10 +279,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
           </AnimatedCard>
         ) : (
           <AnimatedCard title="學校連線尚未開放">
-            <Text style={styles.body}>
-              目前無法連線學校帳號。你仍可查看公開資訊，或使用 Campus One
-              帳號加入課程、繳交作業及管理店家。
-            </Text>
+            <Text style={styles.body}>{SCHOOL_LOGIN_BIND_HINT}</Text>
           </AnimatedCard>
         )}
 
