@@ -42,13 +42,15 @@ export function GoogleMapsLikeScreen() {
   const { school } = useSchool();
   const { user } = useAuth();
   const params = (route.params ?? {}) as MapParams;
+  const linkedSchool = useRef(school.id);
+  const schoolScopedParams = linkedSchool.current === school.id ? params : {};
   return (
     <CampusMapContent
       key={JSON.stringify([user?.uid, school.id, school.name])}
       schoolId={school.id}
       schoolName={school.name}
       navigation={navigation}
-      params={params}
+      params={schoolScopedParams}
     />
   );
 }
@@ -126,7 +128,7 @@ function CampusMapContent({
     const matches = catalog.filter(
       (place) =>
         (category === 'all' || place.category === category) &&
-        [place.name, place.category, place.description, place.building, ...place.facilities].some(
+        [place.name, place.category, place.description, place.building, place.floor, ...place.facilities].some(
           (value) => value?.toLowerCase().includes(keyword),
         ) &&
         (!nearbyOnly || !location || distanceMeters(location, place) <= 1000),
@@ -437,7 +439,7 @@ function CampusMapContent({
                     {[
                       selected.category,
                       selected.building,
-                      selected.floor ? `${selected.floor} 樓` : null,
+                      selected.floor ? `樓層：${selected.floor}` : null,
                     ]
                       .filter(Boolean)
                       .join(' · ')}
