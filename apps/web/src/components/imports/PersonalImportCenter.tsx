@@ -62,11 +62,13 @@ function RowFields({
   onChange,
   workspaces,
   periodProfile,
+  onRefreshWorkspaces,
 }: {
   row: PersonalImportRow;
   onChange: (row: PersonalImportRow) => void;
   workspaces: NuniWorkspace[];
   periodProfile?: 'pu';
+  onRefreshWorkspaces?: () => void;
 }) {
   const update = (field: keyof PersonalImportRow, value: string | number | boolean | undefined) =>
     onChange({ ...row, [field]: value });
@@ -233,7 +235,12 @@ function RowFields({
           </label>
         </div>
       </details>
-      <CourseAccessPanel row={row} workspaces={workspaces} />
+      <CourseAccessPanel
+        row={row}
+        workspaces={workspaces}
+        onRefreshWorkspaces={onRefreshWorkspaces}
+        onSelectLinkedCourse={(id) => onChange({ ...row, linkedCourseId: id })}
+      />
       {issues.some((issue) => issue.severity === 'error') && (
         <ul className={styles.issues}>
           {issues
@@ -314,6 +321,7 @@ function ImportWorkspace({
   const [saving, setSaving] = useState(false);
   const [preview, setPreview] = useState('');
   const [workspaces, setWorkspaces] = useState<NuniWorkspace[]>([]);
+  const [linkRefreshVersion, setLinkRefreshVersion] = useState(0);
   const [linkStatus, setLinkStatus] = useState('');
   const [lastBatch, setLastBatch] = useState('');
   const [undoOpen, setUndoOpen] = useState(false);
@@ -376,7 +384,7 @@ function ImportWorkspace({
     return () => {
       current = false;
     };
-  }, [nuni?.session]);
+  }, [nuni?.session, linkRefreshVersion]);
 
   const options = {
     kind,
@@ -819,6 +827,7 @@ function ImportWorkspace({
                     row={row}
                     periodProfile={periodProfile}
                     workspaces={workspaces}
+                    onRefreshWorkspaces={() => setLinkRefreshVersion((v) => v + 1)}
                     onChange={(next) => updateDraft(row, next)}
                   />
                 </article>
@@ -975,6 +984,7 @@ function ImportWorkspace({
                 row={editing.row}
                 workspaces={workspaces}
                 periodProfile={periodProfile}
+                onRefreshWorkspaces={() => setLinkRefreshVersion((v) => v + 1)}
                 onChange={(row) => setEditing({ ...editing, row })}
               />
             </fieldset>
