@@ -34,4 +34,42 @@ describe('resolveSchoolPageContext', () => {
     expect(context.schoolName).toBe('靜宜大學');
     expect(context.schoolSearch).toBe('?school=PU&schoolId=pu');
   });
+  it('uses the explicit campus before an old schoolId or code', () => {
+    const context = resolveSchoolPageContext({
+      campus: 'cgu',
+      schoolId: 'pu',
+      school: 'PU',
+    });
+    expect(context.schoolId).toBe('cgu');
+    expect(context.schoolName).toBe('長庚大學');
+  });
+
+  it('preserves a remote directory school identity instead of reading Providence data', () => {
+    const context = resolveSchoolPageContext({
+      campus: 'remote-university-12',
+      schoolId: 'pu',
+      school: 'PU',
+    });
+    expect(context.schoolId).toBe('remote-university-12');
+    expect(context.schoolName).toBe('所選校園尚未接入');
+    expect(context.schoolCode).toBe('');
+    expect(context.schoolSearch).toBe('?school=&schoolId=remote-university-12');
+  });
+
+  it('does not reinterpret all-campus browsing as a Providence selection', () => {
+    const context = resolveSchoolPageContext({
+      campus: 'all',
+      schoolId: 'pu',
+      school: 'PU',
+    });
+    expect(context.schoolId).toBe('unavailable-campus');
+    expect(context.schoolName).toBe('請先選擇校園');
+  });
+
+  it('does not pass an unsafe campus identifier through to database paths', () => {
+    const context = resolveSchoolPageContext({ campus: '../pu', schoolId: 'pu' });
+    expect(context.schoolId).toBe('unavailable-campus');
+    expect(context.schoolId).not.toBe('pu');
+  });
+
 });
