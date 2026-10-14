@@ -4,12 +4,13 @@ import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
+import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
+import { browsingSchoolSearch } from '@/lib/navigation';
 import styles from './search.module.css';
 import {
   SERVICE_ACCESS,
   SERVICE_CATEGORIES,
   searchCampusServices,
-  serviceContextSearch,
   type ServiceCategory,
 } from '@/lib/campusServices';
 
@@ -25,6 +26,7 @@ function readFilters(params: URLSearchParams) {
 
 function ServiceDirectory() {
   const params = useSearchParams();
+  const school = useOptionalSelectedSchool();
   const queryString = params.toString();
   const [{ query, category }, setFilters] = useState(() =>
     readFilters(new URLSearchParams(queryString)),
@@ -36,7 +38,7 @@ function ServiceDirectory() {
   }, [queryString]);
   const term = query.trim();
   const matches = searchCampusServices(query, category);
-  const schoolSearch = serviceContextSearch(new URLSearchParams(queryString));
+  const schoolSearch = browsingSchoolSearch(params, school?.selectedSchoolId ?? null);
   function updateFilters(next: { query: string; category: ServiceCategory | 'all' }) {
     setFilters(next);
     const url = new URL(window.location.href);
