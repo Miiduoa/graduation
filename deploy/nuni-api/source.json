@@ -1,9 +1,9 @@
 {
   "repository": "https://github.com/Miiduoa/nuni-prod.git",
   "baseCommit": "9de47b4b3492325e430562c37bcad552867162db",
-  "candidateCommit": "cb57e78aa5f09155ec045ea4b5c130827cdf4fad",
-  "candidateTree": "6776b19a7cea998728469c3091c0ea7c264f6aa3",
-  "runtimeSourceCommit": "cb57e78aa5f09155ec045ea4b5c130827cdf4fad",
+  "candidateCommit": "5e419aeb0482a535819e9345599e03f950de95a1",
+  "candidateTree": "cb6c18ea7f0ccc73b64d3df99e0e772563561c68",
+  "runtimeSourceCommit": "5e419aeb0482a535819e9345599e03f950de95a1",
   "patches": [
     {
       "file": "0001-platform-admin-and-public-social.patch",
@@ -20,6 +20,14 @@
     {
       "file": "0004-existing-platform-personas.patch",
       "sha256": "f65e4cac5664b95aeefc5535f7b745dd1c4165a4e7911db496291c49b19953ce"
+    },
+    {
+      "file": "0005-existing-food-order-access.patch",
+      "sha256": "30536a185bca8c845e6165144542b30fd4053c18ca66949bd8553408f5ada319"
+    },
+    {
+      "file": "0006-food-order-realms.patch",
+      "sha256": "137eff0afe9b6b682bf59ec24f2f63c7e960032bb918fe3820eea7b2b850f2a5"
     }
   ]
 }
