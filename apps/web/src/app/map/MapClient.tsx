@@ -16,7 +16,11 @@ import {
   type MapLocation,
 } from './mapService';
 import styles from './map.module.css';
-import { buildCampusMapSearchUrl } from '@campus/shared/src/campusMapLookup';
+import {
+  buildCampusMapSearchUrl,
+  hasOfficialProvidenceLibraryGuide,
+  PROVIDENCE_LIBRARY_FLOOR_GUIDE_URL,
+} from '@campus/shared/src/campusMapLookup';
 
 type MapProps = { school: string; schoolName?: string; route?: string; focus?: string };
 type FavoritesState = { status: 'loading' | 'error' | 'ready'; ids: Set<string> };
@@ -403,6 +407,16 @@ function MapContent({
               >
                 從目前位置導航
               </a>
+              {hasOfficialProvidenceLibraryGuide(school, selected) && (
+                <a
+                  className="btn"
+                  href={PROVIDENCE_LIBRARY_FLOOR_GUIDE_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  查看校方樓層導覽
+                </a>
+              )}
               <button
                 className="btn"
                 onClick={() => {
