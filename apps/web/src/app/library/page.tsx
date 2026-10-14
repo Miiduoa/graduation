@@ -3,27 +3,85 @@
 import { use, useState } from 'react';
 import { SiteShell } from '@/components/SiteShell';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
+import { getOfficialCampusLibrary } from '@campus/shared/src/libraryDirectory';
 
 const CATALOG = 'https://webpacx.lib.pu.edu.tw/';
 const LIBRARY = 'https://library.pu.edu.tw/';
 
 export default function LibraryPage(props: {
-  searchParams?: Promise<{ school?: string; schoolId?: string }>;
+  searchParams?: Promise<{ school?: string; schoolId?: string; campus?: string }>;
 }) {
   const searchParams = props.searchParams ? use(props.searchParams) : undefined;
-  const { schoolId, schoolName } = resolveSchoolPageContext(searchParams);
-  return <LibraryContent key={schoolId} schoolId={schoolId} schoolName={schoolName} />;
+  const context = resolveSchoolPageContext(searchParams);
+  const selection = useOptionalSelectedSchool();
+  // The directory can contain campuses not present in the bundled school list.
+  // Never fall back to Providence when a different campus is explicitly requested.
+  const campus = searchParams?.campus?.trim();
+  const explicitId =
+    campus === 'all' ? null : (campus || searchParams?.schoolId?.trim() || undefined);
+  const schoolId =
+    explicitId === undefined
+      ? (selection ? selection.selectedSchoolId : context.schoolId)
+      : explicitId;
+  const officialLibrary = getOfficialCampusLibrary(schoolId);
+  const schoolName =
+    selection?.selectedSchool?.id === schoolId
+      ? selection.selectedSchool.name
+      : schoolId === context.schoolId
+        ? context.schoolName
+        : officialLibrary?.name ?? '所選校園';
+
+  return (
+    <LibraryContent
+      key={schoolId ?? 'no-campus'}
+      schoolId={schoolId}
+      schoolName={schoolName}
+    />
+  );
 }
 
-function LibraryContent({ schoolId, schoolName }: { schoolId: string; schoolName: string }) {
+function LibraryContent({
+  schoolId,
+  schoolName,
+}: {
+  schoolId: string | null;
+  schoolName: string;
+}) {
   const [keyword, setKeyword] = useState('');
   const [field, setField] = useState('FullText');
+  const officialLibrary = getOfficialCampusLibrary(schoolId);
   if (schoolId !== 'pu') {
     return (
-      <SiteShell title="圖書館" schoolName={schoolName}>
+      <SiteShell title="圖書館" schoolName={schoolId ? schoolName : undefined}>
         <section className="card">
-          <h2>尚未提供這所學校的圖書館入口</h2>
-          <p>請從學校官網前往圖書館，查詢館藏與借閱紀錄。</p>
+          {officialLibrary ? (
+            <>
+              <p className="eyebrow">{officialLibrary.name}</p>
+              <h2>前往這所學校的圖書館</h2>
+              <p style={{ color: 'var(--muted)', lineHeight: 1.8 }}>
+                館藏、借閱紀錄、續借與開放時間以校方網站為準。
+                目前沒有這所學校的館藏直連介面，請在館方網站輸入關鍵字查詢。
+              </p>
+              <a
+                className="btn primary"
+                href={officialLibrary.catalogUrl ?? officialLibrary.websiteUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                開啟官方圖書館 ↗
+              </a>
+            </>
+          ) : (
+            <>
+              <h2>{schoolId ? '尚未確認這所學校的圖書館入口' : '請先選擇一所學校'}</h2>
+              <p>
+                {schoolId
+                  ? '尚未查證這所學校的官方圖書館網址，因此不會顯示其他學校的館藏或借閱連結。'
+                  : '請透過上方的校園選擇器選擇學校，再開啟對應圖書館。'}
+              </p>
+            </>
+          )}
         </section>
       </SiteShell>
     );
