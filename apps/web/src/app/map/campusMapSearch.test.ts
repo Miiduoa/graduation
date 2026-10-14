@@ -27,12 +27,20 @@ it('limits the official library floor guide to the identified Providence library
 });
 
 
-it('returns the university-operated campus map only for the confirmed Providence school id', async () => {
+it('returns only verified university-run maps for the selected school identity', async () => {
   const { getOfficialCampusMapUrl, PROVIDENCE_CAMPUS_MAP_URL } =
     await import('@campus/shared/src/campusMapLookup');
   expect(PROVIDENCE_CAMPUS_MAP_URL).toBe('https://gnl.pu.edu.tw/p/426-1007-8.php?Lang=zh-tw');
   expect(getOfficialCampusMapUrl('pu')).toBe(PROVIDENCE_CAMPUS_MAP_URL);
-  expect(getOfficialCampusMapUrl('nthu')).toBeNull();
+  expect(getOfficialCampusMapUrl('nthu')).toBe('https://www.nthu.edu.tw/campusmap');
+  expect(getOfficialCampusMapUrl('ncu')).toBe('https://www.ncu.edu.tw/p/412-1000-105.php?Lang=zh-tw');
+  expect(getOfficialCampusMapUrl('ntu')).toBe('https://www.ntu.edu.tw/about/map.html');
+  expect(getOfficialCampusMapUrl('tw-nchu')).toBe('https://www.nchu.edu.tw/about/mid/869');
+  expect(getOfficialCampusMapUrl('ncku')).toBe('https://web.ncku.edu.tw/p/412-1000-29366.php');
+  expect(getOfficialCampusMapUrl('ntust')).toBe('https://www.ntust.edu.tw/p/412-1000-102.php?Lang=zh-tw');
+  expect(getOfficialCampusMapUrl('nycu')).toContain('www.nycu.edu.tw/aa/ch/app/artwebsite/view');
   expect(getOfficialCampusMapUrl('tw-demo-uni')).toBeNull();
+  expect(getOfficialCampusMapUrl('toString')).toBeNull();
+  expect(getOfficialCampusMapUrl('__proto__')).toBeNull();
   expect(getOfficialCampusMapUrl()).toBeNull();
 });
