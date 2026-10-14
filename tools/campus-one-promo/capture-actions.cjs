@@ -34,11 +34,18 @@ const stories = [
 ];
 
 async function target(page, selectors) {
+  // Many mobile pages keep invisible duplicate links inside closed nav drawers.
+  // Click ONLY genuinely visible onscreen elements, not the first CSS match.
   for (const s of selectors) {
     try {
-      let loc = page.locator(s).first();
-      if (await loc.count() && await loc.isVisible()) return {loc, selector:s};
-      if (await loc.count()) return {loc, selector:s};
+      const matches = page.locator(s);
+      const count = Math.min(await matches.count(), 30);
+      for (let i = 0; i < count; i++) {
+        const loc = matches.nth(i);
+        if (await loc.isVisible() && await loc.isEnabled()) {
+          return {loc, selector:s+' [visible #'+i+'/'+count+']'};
+        }
+      }
     } catch (_) {}
   }
   return null;
