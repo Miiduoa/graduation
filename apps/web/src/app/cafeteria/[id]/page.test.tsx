@@ -4,6 +4,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import StorefrontPage from './page';
 import type { Cafeteria, MenuItem } from '@/lib/firebase';
 import { fetchCafeteriaDetail } from '@/lib/cafeteriaCatalog';
+import { UNVERIFIED_CAFETERIA_NOTICE } from '@campus/shared/src/cafeteriaCatalog';
 import {
   isFollowingStorefront,
   loadStorefrontComments,
@@ -332,16 +333,16 @@ it.each([
   {
     reviewStatus: 'demo' as const,
     notice: '這是示範店家，菜單和價格不是真的，不能點餐。',
-    hidden: '這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。',
+    hidden: UNVERIFIED_CAFETERIA_NOTICE,
   },
   {
     reviewStatus: 'unverified' as const,
-    notice: '這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。',
+    notice: UNVERIFIED_CAFETERIA_NOTICE,
     hidden: '這是示範店家，菜單和價格不是真的，不能點餐。',
   },
   {
     reviewStatus: undefined,
-    notice: '這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。',
+    notice: UNVERIFIED_CAFETERIA_NOTICE,
     hidden: '這是示範店家，菜單和價格不是真的，不能點餐。',
   },
 ])('shows the review notice for $reviewStatus shops', async ({ reviewStatus, notice, hidden }) => {
@@ -379,7 +380,7 @@ it('does not mark a verified shop page', async () => {
   expect(await screen.findByText('紙感小店')).toBeTruthy();
   expect(screen.queryByText('這是示範店家，菜單和價格不是真的，不能點餐。')).toBeNull();
   expect(
-    screen.queryByText('這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。'),
+    screen.queryByText(UNVERIFIED_CAFETERIA_NOTICE),
   ).toBeNull();
   expect(screen.queryByTestId('cafeteria-review-notice')).toBeNull();
   expect(screen.queryByRole('link', { name: '返回餐廳列表' })).toBeNull();
