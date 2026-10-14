@@ -56,6 +56,8 @@ function Workspace({ id }: { id: string }) {
   const [units, setUnits] = useState<NuniUnit[] | null>(null);
   const [unitsError, setUnitsError] = useState('');
   const [unitsEpoch, setUnitsEpoch] = useState(0);
+  const [outlineVersion, setOutlineVersion] = useState(0);
+  const refreshOutline = () => setOutlineVersion((value) => value + 1);
   useEffect(() => {
     // A task link must open its panel, including browser back/forward in the same course.
     if (hash.startsWith('#quiz-')) setTab('quizzes');
@@ -65,7 +67,10 @@ function Workspace({ id }: { id: string }) {
   const [refreshing, setRefreshing] = useState(false);
   const generation = useRef(0);
   const unitGeneration = useRef(0);
-  const reload = () => setEpoch(++generation.current);
+  const reload = () => {
+    refreshOutline();
+    setEpoch(++generation.current);
+  };
   const reloadUnits = () => setUnitsEpoch((value) => value + 1);
   function beginCourseRequest() {
     const started = generation.current;
@@ -147,6 +152,7 @@ function Workspace({ id }: { id: string }) {
   if (!data) return <p role="status">正在讀取課程內容…</p>;
   const teacher = data.workspace.memberRole !== 'student';
   const acceptAssignment = (assignment: NuniAssignment) => {
+    refreshOutline();
     setData((current) =>
       current && current.workspace.id === assignment.workspaceId
         ? {
@@ -217,7 +223,7 @@ function Workspace({ id }: { id: string }) {
                     : event.key === 'Home'
                       ? 0
                       : event.key === 'End'
-                        ? 2
+                        ? keys.length - 1
                         : null;
               if (next !== null) {
                 event.preventDefault();
@@ -242,6 +248,7 @@ function Workspace({ id }: { id: string }) {
             assignments={data.assignments}
             units={units}
             unitsError={unitsError}
+            refreshVersion={outlineVersion}
             reloadUnits={reloadUnits}
             onUnitCreated={acceptUnit}
           />
@@ -252,7 +259,7 @@ function Workspace({ id }: { id: string }) {
           aria-labelledby="tab-materials"
           hidden={tab !== 'materials'}
         >
-          <CourseMaterials workspace={data.workspace} units={units} />
+          <CourseMaterials workspace={data.workspace} units={units} onChanged={refreshOutline} />
         </section>
         <section
           role="tabpanel"
@@ -260,7 +267,7 @@ function Workspace({ id }: { id: string }) {
           aria-labelledby="tab-quizzes"
           hidden={tab !== 'quizzes'}
         >
-          <CourseQuizzes workspace={data.workspace} units={units} />
+          <CourseQuizzes workspace={data.workspace} units={units} onChanged={refreshOutline} />
         </section>
         <section
           role="tabpanel"
