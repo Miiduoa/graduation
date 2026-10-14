@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -47,15 +47,24 @@ type SSOLoginScreenProps = {
 type LoginAttempt = { provider: 'school' | 'platform' };
 
 export function SSOLoginScreen(props: SSOLoginScreenProps) {
+  const { school } = useSchool();
+  return <SchoolLoginContent key={school.id} school={school} {...props} />;
+}
+
+function SchoolLoginContent(
+  props: SSOLoginScreenProps & { school: ReturnType<typeof useSchool>['school'] },
+) {
+  const { school } = props;
   const styles = useThemeStyleSheet(createStyles);
   const bottomPadding = useTabBarContentBottomPadding();
   const passwordInput = useRef<TextInput>(null);
   const routeNavigation = useNavigation<NavigationProp<Record<string, undefined>>>();
   const nav = props?.navigation ?? routeNavigation;
   const auth = useAuth();
-  const { school } = useSchool();
 
-  const [schoolLoginAvailable, setSchoolLoginAvailable] = useState(isSchoolLoginEntryAvailable());
+  const [schoolLoginAvailable, setSchoolLoginAvailable] = useState(
+    isSchoolLoginEntryAvailable(school.id),
+  );
 
   const [studentIdInput, setStudentIdInput] = useState('');
   const [studentPwInput, setStudentPwInput] = useState('');
@@ -71,7 +80,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
   useEffect(() => {
     mounted.current = true;
     void loadSchoolLoginProviderKinds().then(() => {
-      if (mounted.current) setSchoolLoginAvailable(isSchoolLoginEntryAvailable());
+      if (mounted.current) setSchoolLoginAvailable(isSchoolLoginEntryAvailable(school.id));
     });
     return () => {
       mounted.current = false;
@@ -123,10 +132,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
     nav.navigate('NuniWorkspace');
   };
 
-  const schoolName = useMemo(
-    () => (school.id === PROVIDENCE_UNIVERSITY_SCHOOL_ID ? school.name : '靜宜大學'),
-    [school.id, school.name],
-  );
+  const schoolName = school.name;
 
   const stepLabels: Record<LoginStep, string> = {
     idle: '等待登入',
@@ -139,7 +145,12 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
   };
 
   const handleStudentIdLogin = async () => {
-    if (!schoolLoginAvailable || !studentIdInput.trim() || !studentPwInput.trim()) return;
+    if (
+      !schoolLoginAvailable ||
+      school.id !== PROVIDENCE_UNIVERSITY_SCHOOL_ID ||
+      !studentIdInput.trim() ||
+      !studentPwInput.trim()
+    ) return;
     const attempt = beginAttempt('school');
     if (!attempt) return;
     setError(null);
@@ -157,7 +168,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
       const result = await signInWithStudentId({
         studentId: studentIdInput,
         password: studentPwInput,
-        schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
+        schoolId: school.id,
         schoolName,
         onProgress,
       });
