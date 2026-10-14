@@ -10,6 +10,7 @@ import {
   personalImportErrorMessage,
   personalImportSavedNotice,
   personalImportUndoBody,
+  personalImportUndoneNotice,
   PERSONAL_IMPORT_IMAGE_UNREADABLE,
   PERSONAL_IMPORT_UNDO_CONFIRM,
   PERSONAL_IMPORT_UNDO_KEEP,
@@ -519,7 +520,7 @@ function ImportWorkspace({
         setLedger(result.ledger);
         setEditing(null);
         setUndoOpen(false);
-        setNotice(`已撤回 ${result.removed} 筆；匯入後另外編輯過的資料已保留。`);
+        setNotice(personalImportUndoneNotice(result.removed));
       }
     } catch (error) {
       if (active()) setNotice(personalImportErrorMessage(error, '撤回失敗。'));

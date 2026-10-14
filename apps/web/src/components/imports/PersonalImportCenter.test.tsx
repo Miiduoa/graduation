@@ -4,6 +4,7 @@ import {
   PERSONAL_IMPORT_IMAGE_UNREADABLE,
   personalImportSavedNotice,
   personalImportUndoBody,
+  personalImportUndoneNotice,
 } from '@campus/shared';
 import { PersonalImportCenter } from './PersonalImportCenter';
 import { readPersonalImports } from '@/lib/personalImports';
@@ -68,6 +69,7 @@ it('reviews edits before persistence, reimport dedupes, undo only reverses the n
   fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
   await screen.findByText(personalImportSavedNotice(0));
   await confirmUndo();
+  await screen.findByText(personalImportUndoneNotice(1));
   await waitFor(() => expect(readPersonalImports(context)).toHaveLength(0));
 });
 it('blocks malformed table rows despite otherwise valid fields', async () => {

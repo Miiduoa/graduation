@@ -9,6 +9,7 @@ import {
   personalImportErrorMessage,
   personalImportSavedNotice,
   personalImportUndoBody,
+  personalImportUndoneNotice,
   PERSONAL_IMPORT_IMAGE_UNREADABLE,
   PERSONAL_IMPORT_UNDO_CONFIRM,
   PERSONAL_IMPORT_UNDO_KEEP,
@@ -976,7 +977,9 @@ function ImportWorkspace({
                         () => active.current && !suspended.current,
                       );
                       if (active.current) setLastBatch('');
-                    }, '已撤銷上次匯入；之後編輯過的資料仍保留。');
+                    }, personalImportUndoneNotice(
+                      ledger.records.filter((row) => row.batchId === lastBatch).length,
+                    ));
                   }}
                 >
                   {PERSONAL_IMPORT_UNDO_CONFIRM}

@@ -7,6 +7,7 @@ import {
   PERSONAL_IMPORT_IMAGE_UNREADABLE,
   personalImportSavedNotice,
   personalImportUndoBody,
+  personalImportUndoneNotice,
 } from '@campus/shared';
 import PersonalImportScreen from '../screens/PersonalImportScreen';
 import { loadPersonalImports } from '../services/personalImports';
@@ -110,9 +111,7 @@ test.each([
     fireEvent.press(view.getByText('撤銷上次匯入'));
     expect(view.getByText(personalImportUndoBody(1))).toBeTruthy();
     fireEvent.press(view.getByText('撤銷'));
-    await waitFor(() =>
-      expect(view.getByText('已撤回 1 筆；匯入後另外編輯過的資料已保留。')).toBeTruthy(),
-    );
+    await waitFor(() => expect(view.getByText(personalImportUndoneNotice(1))).toBeTruthy());
     expect((await loadPersonalImports(scope)).records).toHaveLength(0);
   },
 );

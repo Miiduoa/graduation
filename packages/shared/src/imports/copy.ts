@@ -21,6 +21,10 @@ export function personalImportSavedNotice(added: number): string {
   return `已在這台裝置新增 ${added} 筆，原有資料保留。資料只存在這台裝置，換手機或清除資料就會不見。`;
 }
 
+export function personalImportUndoneNotice(removed: number): string {
+  return `已撤銷上次匯入的 ${removed} 筆，原本的資料都還在。`;
+}
+
 export function isUnreadablePersonalImportImage(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error ?? '');
   return /decod|encodingerror|invalidstateerror|corrupt|unrecognized image|imagebitmap|failed to load image|source image|could not be read|invalid image|image format|unsupported image/i.test(
