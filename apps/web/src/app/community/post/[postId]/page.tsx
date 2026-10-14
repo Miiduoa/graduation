@@ -16,7 +16,7 @@ import Link from 'next/link';
 import { CommunityAccess } from '../../_components/CommunityAccess';
 import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import {
   addCampusReply,
   deleteCampusPost,
@@ -34,22 +34,25 @@ import {
 } from '@/lib/community/firestore';
 
 export default function PostDetailPage() {
-  const { schoolName } = resolveSchoolPageContext({});
+  const { schoolId, schoolName, ready } = useBrowsingSchoolPageContext();
   return (
     <SiteShell title="貼文" subtitle="校園交流" schoolName={schoolName}>
-      <CommunityAccess>
-        <PostDetailInner />
-      </CommunityAccess>
+      {ready ? (
+        <CommunityAccess>
+          <PostDetailInner key={schoolId} schoolId={schoolId} />
+        </CommunityAccess>
+      ) : (
+        <p role="status">正在確認校園目錄…</p>
+      )}
     </SiteShell>
   );
 }
 
-function PostDetailInner() {
+function PostDetailInner({ schoolId }: { schoolId: string }) {
   const router = useRouter();
   const params = useParams<{ postId: string }>();
   const postId = params?.postId;
   const { user } = useAuth();
-  const { schoolId } = useMemo(() => resolveSchoolPageContext({}), []);
 
   const [post, setPost] = useState<CampusPostDoc | null>(null);
   const [replies, setReplies] = useState<CampusReply[]>([]);
@@ -177,7 +180,7 @@ function PostDetailInner() {
       try {
         await deleteCampusPost(schoolId, postId);
         alert('已刪除');
-        router.push('/community');
+        router.push(`/community?schoolId=${encodeURIComponent(schoolId)}`);
       } catch {
         alert('這次未能刪除，請稍後再試。');
       }
