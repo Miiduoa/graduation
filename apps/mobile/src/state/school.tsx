@@ -64,6 +64,16 @@ export function schoolFromSelection(selection: Partial<SchoolSelection>): School
   );
 }
 
+export function schoolIdForUpdate(
+  previousSchoolId: string | null,
+  next: Partial<SchoolSelection>,
+): string | null {
+  if (next.schoolId !== undefined) return next.schoolId;
+  if (next.code === undefined) return previousSchoolId;
+  const matches = findSchoolsByCode(next.code);
+  return matches.length === 1 ? matches[0].id : null;
+}
+
 function normalizeSelection(selection: Partial<SchoolSelection>): SchoolSelection {
   return toSelection(schoolFromSelection(selection));
 }
@@ -112,19 +122,13 @@ export function SchoolProvider(props: {
   const previousSchoolRef = useRef<string | null>(null);
 
   const setSelection = (next: Partial<SchoolSelection>) => {
+    // Ambiguous or unknown code-only requests cannot safely select a campus.
+    if (next.schoolId === undefined && next.code !== undefined &&
+        findSchoolsByCode(next.code).length !== 1) return;
     setSelectionState((prev) => {
       const identityChanged = next.code !== undefined || next.schoolId !== undefined;
       const code = next.code != null ? normalizeSchoolCode(next.code) : prev.code;
-      // A code-only switch must not retain the previous school's canonical ID.
-      const codeMatches = next.code !== undefined ? findSchoolsByCode(code) : [];
-      const schoolId =
-        next.schoolId !== undefined
-          ? next.schoolId
-          : next.code !== undefined && codeMatches.length === 1
-            ? codeMatches[0].id
-            : next.code !== undefined
-              ? null
-              : prev.schoolId;
+      const schoolId = schoolIdForUpdate(prev.schoolId, next);
       const schoolName =
         next.schoolName === undefined
           ? identityChanged
