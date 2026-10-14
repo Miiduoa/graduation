@@ -369,3 +369,23 @@ test('keeps the selected map marker after a search hides it from the directory',
     script.includes('places') && script.includes('學校發布的圖書館')
   )).toBe(true);
 });
+
+
+test('accepts a new explicit destination for the current campus after a school change', async () => {
+  mockParams = { toPoiId: 'library' };
+  const view = await openMap();
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([
+    { ...place, name: '乙校圖書館' },
+    { ...place, id: 'entrance', name: '乙校正門', lat: 24.1, lng: 121.1 },
+  ]);
+  mockSchool = { id: 'school-b' };
+  view.rerender(<GoogleMapsLikeScreen />);
+  await view.findByText('乙校正門');
+  expect(view.queryByText('查看步行路線')).toBeNull();
+
+  mockParams = { toPoiId: 'entrance' };
+  view.rerender(<GoogleMapsLikeScreen />);
+  expect(view.getByText('查看步行路線')).toBeTruthy();
+  await act(async () => fireEvent.press(view.getByText('查看步行路線')));
+  expect(Linking.openURL).toHaveBeenCalledWith(expect.stringContaining('destination=24.1%2C121.1'));
+});
