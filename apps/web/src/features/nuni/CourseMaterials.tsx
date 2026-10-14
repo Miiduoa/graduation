@@ -5,9 +5,13 @@ import {
   NuniError,
   nuniErrorMessage,
   type NuniMaterial,
+  type NuniUnit,
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
 import { MutationForm, useClasses } from './CourseUI';
+import { CourseUnitSelect } from './CourseUnitSelect';
+import { selectCourseUnit } from './courseOutline';
+import { useLocationHash } from '@/lib/useLocationHash';
 import { useNuniSession } from './Session';
 import shared from './NuniApp.module.css';
 import styles from './CourseLearning.module.css';
@@ -48,20 +52,23 @@ export function CourseText({ text }: { text: string }) {
   return <div className={`${shared.prose} ${styles.body}`}>{parts}</div>;
 }
 
-export function CourseMaterials({ workspace }: { workspace: NuniWorkspace }) {
+export function CourseMaterials({ workspace, units }: { workspace: NuniWorkspace; units?: NuniUnit[] | null }) {
   const { session, pendingLogout } = useNuniSession();
   if (!session || pendingLogout) return null;
   return (
     <Materials
       key={`${session.context}:${workspace.id}:${workspace.memberRole}:${workspace.state}`}
       workspace={workspace}
+      units={units}
     />
   );
 }
 
-function Materials({ workspace }: { workspace: NuniWorkspace }) {
+function Materials({ workspace, units }: { workspace: NuniWorkspace; units?: NuniUnit[] | null }) {
   const classes = useClasses();
   const [items, setItems] = useState<NuniMaterial[] | null>(null);
+  const hash = useLocationHash();
+  const revealed = useRef('');
   const [reading, setReading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -104,6 +111,20 @@ function Materials({ workspace }: { workspace: NuniWorkspace }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    const target = hash.slice(1);
+    if (!target.startsWith('material-') || revealed.current === target ||
+      !items?.some((item) => `material-${item.id}` === target)) return;
+    const frame = window.requestAnimationFrame(() => {
+      const element = document.getElementById(target);
+      if (!element) return;
+      element.scrollIntoView?.({ block: 'start' });
+      element.focus({ preventScroll: true });
+      revealed.current = target;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [hash, items]);
+
   return (
     <section className={shared.panel} aria-labelledby={`materials-${workspace.id}`}>
       <div className={styles.heading}>
@@ -140,14 +161,14 @@ function Materials({ workspace }: { workspace: NuniWorkspace }) {
           <ul className={`${shared.list} ${styles.materials}`}>
             {items.map((item) => (
               <li key={item.id}>
-                <article aria-labelledby={`material-${item.id}`}>
+                <article id={`material-${item.id}`} tabIndex={-1} aria-labelledby={`material-heading-${item.id}`}>
                   <div className={styles.metadata}>
                     {item.unitTitle && <span>{item.unitTitle}</span>}
                     <time dateTime={item.createdAt}>
                       {new Date(item.createdAt).toLocaleDateString('zh-TW')}
                     </time>
                   </div>
-                  <h3 id={`material-${item.id}`}>{item.title}</h3>
+                  <h3 id={`material-heading-${item.id}`}>{item.title}</h3>
                   <CourseText text={item.body} />
                 </article>
               </li>
@@ -171,6 +192,7 @@ function Materials({ workspace }: { workspace: NuniWorkspace }) {
               const receipt = await classes.createMaterial(workspace.id, {
                 title: String(data.get('title') ?? ''),
                 body: String(data.get('body') ?? ''),
+                unitId: units === undefined ? undefined : selectCourseUnit(data, units),
                 idempotencyKey: key,
               });
               if (!mounted.current) throw new NuniError(409, 'SESSION_CHANGED');
@@ -187,6 +209,7 @@ function Materials({ workspace }: { workspace: NuniWorkspace }) {
               教材標題
               <input name="title" required maxLength={160} placeholder="例如：本週閱讀與課前準備" />
             </label>
+            {units !== undefined && <CourseUnitSelect units={units} />}
             <label>
               教材內容或參考連結
               <textarea
