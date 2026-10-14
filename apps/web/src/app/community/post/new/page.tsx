@@ -14,7 +14,7 @@ import { CommunityLoadError, useCommunityLoad } from '../../_components/useCommu
 import { CommunityAccess } from '../../_components/CommunityAccess';
 import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import {
   createCampusPost,
   listBoards,
@@ -32,20 +32,23 @@ const MAX_BODY = 1500;
 const MAX_TAGS = 5;
 
 export default function PostComposePage() {
-  const { schoolName } = resolveSchoolPageContext({});
+  const { schoolId, schoolName, ready } = useBrowsingSchoolPageContext();
   return (
     <SiteShell title="發文" subtitle="撰寫校園社群貼文" schoolName={schoolName}>
-      <CommunityAccess>
-        <PostComposeInner />
-      </CommunityAccess>
+      {ready ? (
+        <CommunityAccess>
+          <PostComposeInner key={schoolId} schoolId={schoolId} />
+        </CommunityAccess>
+      ) : (
+        <p role="status">正在確認校園目錄…</p>
+      )}
     </SiteShell>
   );
 }
 
-function PostComposeInner() {
+function PostComposeInner({ schoolId }: { schoolId: string }) {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
-  const { schoolId } = useMemo(() => resolveSchoolPageContext({}), []);
   const searchParams = useSearchParams();
   const routeBoardId = searchParams?.get('boardId') ?? '';
 
@@ -155,7 +158,7 @@ function PostComposeInner() {
         ...(anonymous ? { aliasSnapshot: aliasSnap } : { authorUid: user.uid }),
       });
       alert('已發佈');
-      router.push(`/community/post/${postId}`);
+      router.push(`/community/post/${postId}?schoolId=${encodeURIComponent(schoolId)}`);
     } catch {
       alert('這次未能發佈，請稍後再試。');
     } finally {
