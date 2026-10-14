@@ -9,6 +9,8 @@ import {
 } from 'firebase/firestore';
 import { getAuth, getDb, isFirebaseConfigured } from '@/lib/firebase';
 
+export type MapCoordinate = { lat: number; lng: number };
+
 export type MapLocation = {
   id: string;
   name: string;
@@ -142,7 +144,24 @@ export async function setMapFavorite(
   assertCurrent(uid, current);
 }
 
-export function walkingDirectionsUrl(destination: MapLocation, origin?: MapLocation): string {
+export function distanceMeters(start: MapCoordinate, end: MapCoordinate): number {
+  const radians = (degrees: number) => (degrees * Math.PI) / 180;
+  const latitude = radians(end.lat - start.lat);
+  const longitude = radians(end.lng - start.lng);
+  const arc =
+    Math.sin(latitude / 2) ** 2 +
+    Math.cos(radians(start.lat)) *
+      Math.cos(radians(end.lat)) *
+      Math.sin(longitude / 2) ** 2;
+  return 6371000 * 2 * Math.atan2(Math.sqrt(arc), Math.sqrt(Math.max(0, 1 - arc)));
+}
+
+export function formatDistance(meters: number): string {
+  if (meters < 1000) return `${Math.round(meters / 10) * 10} 公尺`;
+  return `${(meters / 1000).toFixed(1)} 公里`;
+}
+
+export function walkingDirectionsUrl(destination: MapCoordinate, origin?: MapCoordinate): string {
   const parameters = new URLSearchParams({
     api: '1',
     destination: `${destination.lat},${destination.lng}`,
