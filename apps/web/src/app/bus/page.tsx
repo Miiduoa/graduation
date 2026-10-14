@@ -16,15 +16,21 @@ function BusContext() {
   });
   return (
     <SiteShell title="公車與交通" subtitle="找站牌、確認方向，再出發。" schoolName={schoolName}>
-      {status === 'loading' || status === 'error' ? (
+      {status !== 'ready' || !schoolId ? (
         <section className="card" role="status">
-          <h2>{status === 'loading' ? '正在確認所選校園…' : '無法確認所選校園'}</h2>
-          <p>校園資料確認後再載入附近站牌；也可以從頁首重新選擇。</p>
+          <h2>
+            {status === 'loading'
+              ? '正在確認所選校園…'
+              : status === 'error'
+                ? '無法確認所選校園'
+                : '請先選擇一所學校'}
+          </h2>
+          <p>選擇校園後才能查看對應的站牌資訊，不會載入其他學校的路線。</p>
         </section>
       ) : (
         <TransitExplorer
           key={schoolId ?? 'all'}
-          schoolId={schoolId ?? ''}
+          schoolId={schoolId}
           schoolName={schoolName || '不限校園'}
           legacy={
             <p>
