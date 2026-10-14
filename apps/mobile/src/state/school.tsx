@@ -54,6 +54,22 @@ function toSelection(school: School): SchoolSelection {
 export function schoolFromSelection(selection: Partial<SchoolSelection>): School {
   const byId = findSchoolById(selection.schoolId);
   if (byId) return byId;
+  const id = selection.schoolId?.trim();
+  if (id && /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(id)) {
+    // The public directory can introduce schools before the bundled legacy catalog is updated.
+    // Preserve their identity instead of silently rendering another institution's data.
+    const chosenCode = normalizeSchoolCode(selection.code);
+    const code =
+      chosenCode && chosenCode !== PROVIDENCE_UNIVERSITY_SCHOOL_CODE
+        ? chosenCode
+        : id.toUpperCase();
+    return {
+      id,
+      code,
+      name: selection.schoolName?.trim() || '所選校園',
+      shortName: selection.shortName?.trim() || undefined,
+    };
+  }
   const matches = findSchoolsByCode(selection.code);
   return matches.length === 1 ? matches[0] : getProvidenceSchool();
 }
