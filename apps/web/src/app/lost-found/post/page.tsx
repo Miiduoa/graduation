@@ -3,21 +3,24 @@
 import { use } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
+import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
 import { LoginRequiredLostFoundComments } from '@/components/LoginRequiredLostFoundComments';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import social from '@/features/social/Social.module.css';
 
 export default function LostFoundPostPage(props: {
-  searchParams?: Promise<{ schoolId?: string; school?: string }>;
+  searchParams?: Promise<{ schoolId?: string; school?: string; campus?: string }>;
 }) {
   const search = props.searchParams ? use(props.searchParams) : undefined;
-  const context = resolveSchoolPageContext(search);
+  const context = useBrowsingSchoolPageContext(search);
   const { user, loading: authLoading } = useAuth();
   const loginReturnUrl = `/lost-found/post?schoolId=${encodeURIComponent(context.schoolId)}`;
   return (
-    <SiteShell title="發布失物招領" schoolName={context.schoolName}>
-      {authLoading ? (
+    <SiteShell title="發布失物招領" schoolName={context.ready ? context.schoolName : undefined}>
+      {!context.ready ? (
+        <SchoolScopePlaceholder />
+      ) : authLoading ? (
         <p role="status">正在確認登入狀態…</p>
       ) : !user ? (
         <section className={social.panel}>

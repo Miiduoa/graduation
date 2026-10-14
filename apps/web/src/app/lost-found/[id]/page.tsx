@@ -3,9 +3,10 @@
 import { use, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
+import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
 import { LoginRequiredLostFoundComments } from '@/components/LoginRequiredLostFoundComments';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import {
   categoryLabel,
   getLostFoundItem,
@@ -23,11 +24,21 @@ function formatWhen(value: string) {
 
 export default function LostFoundDetailPage(props: {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ schoolId?: string; school?: string }>;
+  searchParams?: Promise<{ schoolId?: string; school?: string; campus?: string }>;
 }) {
   const { id } = use(props.params);
   const search = props.searchParams ? use(props.searchParams) : undefined;
-  const context = resolveSchoolPageContext(search);
+  const context = useBrowsingSchoolPageContext(search);
+  if (!context.ready) {
+    return <SiteShell title="失物招領"><SchoolScopePlaceholder /></SiteShell>;
+  }
+  return <LostFoundDetailPageContent key={`${context.schoolId}:${id}`} id={id} context={context} />;
+}
+
+function LostFoundDetailPageContent({ context, id }: {
+  context: ReturnType<typeof useBrowsingSchoolPageContext>;
+  id: string;
+}) {
   const { user, loading: authLoading } = useAuth();
   const signedIn = Boolean(user?.uid);
   const loginReturnUrl = `/lost-found/${encodeURIComponent(id)}?schoolId=${encodeURIComponent(context.schoolId)}`;
