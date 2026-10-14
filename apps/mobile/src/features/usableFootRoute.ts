@@ -9,9 +9,13 @@ export function isUsableFootRoute(
 ): route is RouteGeometry {
   if (!route || !Number.isFinite(route.distance) || route.distance <= 0 ||
       !Array.isArray(route.geometry) || route.geometry.length < 2) return false;
-  const valid = ([lng, lat]: number[]) =>
-    Number.isFinite(lat) && Number.isFinite(lng) &&
-    Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && !(lat === 0 && lng === 0);
+  const valid = (pair: unknown) => {
+    if (!Array.isArray(pair) || pair.length !== 2) return false;
+    const [lng, lat] = pair;
+    return typeof lng === 'number' && typeof lat === 'number' &&
+      Number.isFinite(lat) && Number.isFinite(lng) &&
+      Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && !(lat === 0 && lng === 0);
+  };
   if (!route.geometry.every(valid)) return false;
   const start = route.geometry[0];
   const end = route.geometry[route.geometry.length - 1];
