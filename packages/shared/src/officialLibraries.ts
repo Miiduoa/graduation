@@ -34,7 +34,10 @@ export const officialLibraryDirectory: Readonly<Record<string, OfficialLibrarySe
   nthu: {
     name: '國立清華大學圖書館',
     websiteUrl: 'https://www.lib.nthu.edu.tw/',
-    catalogUrl: 'https://www.lib.nthu.edu.tw/',
+    catalogUrl: 'https://nthu.primo.exlibrisgroup.com/discovery/search?lang=zh-tw&mode=advanced&vid=886UST_NTHU%3A886UST_NTHU',
+    accountUrl: 'https://nthu.primo.exlibrisgroup.com/discovery/account?section=overview&vid=886UST_NTHU%3A886UST_NTHU',
+    hoursUrl: 'https://www.lib.nthu.edu.tw/use/hours.html',
+    spacesUrl: 'https://libsms.lib.nthu.edu.tw/build/',
   },
   ncku: {
     name: '國立成功大學圖書館',
@@ -125,7 +128,8 @@ export const officialLibraryDirectory: Readonly<Record<string, OfficialLibrarySe
   'tw-nchu': {
     name: '國立中興大學圖書館',
     websiteUrl: 'https://www.lib.nchu.edu.tw/',
-    catalogUrl: 'https://www.lib.nchu.edu.tw/',
+    catalogUrl: 'https://nchu.primo.exlibrisgroup.com/discovery/search?tab=LibraryCatalog&search_scope=MyInstitution&vid=886NCHU_INST%3A886NCHU_INST&lang=zh-tw&offset=0',
+    hoursUrl: 'https://www.lib.nchu.edu.tw/service.php?cID=35',
   },
 };
 
