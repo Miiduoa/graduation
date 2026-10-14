@@ -21,6 +21,26 @@ export const personalImportStorageKey = (scope: PersonalImportScope) =>
 const empty = (): PersonalImportLedger => ({ version: 1, records: [], batches: [] });
 const locks = new Map<string, Promise<unknown>>();
 
+function retainActiveBatches(
+  batches: PersonalImportLedger['batches'],
+  records: PersonalImportRecord[],
+): PersonalImportLedger['batches'] {
+  const activeIds = new Set(records.map((row) => row.batchId));
+  return batches.filter((batch) => activeIds.has(batch.id));
+}
+
+/** Read after pending writes so a shared backup never uses an out-of-date UI snapshot. */
+export async function snapshotPersonalImports(
+  scope: PersonalImportScope,
+  active = () => true,
+): Promise<PersonalImportLedger> {
+  await (locks.get(personalImportStorageKey(scope)) || Promise.resolve()).catch(() => undefined);
+  if (!active()) throw new Error('帳號或學校已切換，請重新開啟匯入。');
+  const snapshot = await loadPersonalImports(scope);
+  if (!active()) throw new Error('帳號或學校已切換，請重新開啟匯入。');
+  return snapshot;
+}
+
 export async function loadPersonalImports(
   scope: PersonalImportScope,
 ): Promise<PersonalImportLedger> {
@@ -159,9 +179,33 @@ export function editPersonalImport(
       batchId: `revision:${createPersonalImportId()}`,
       importedAt: before.importedAt,
     };
+    const records = current.records.map((row, i) => (i === index ? record : row));
     const ledger = {
       ...current,
-      records: current.records.map((row, i) => (i === index ? record : row)),
+      records,
+      batches: retainActiveBatches(current.batches, records),
+    };
+    return { ledger, result: ledger };
+  });
+}
+
+/** Remove one exact revision, never another tab's newer edit or a different school's row. */
+export function deletePersonalImport(
+  scope: PersonalImportScope,
+  before: PersonalImportRecord,
+  active = () => true,
+) {
+  return mutate(scope, active, (current) => {
+    const found = current.records.find((row) => row.id === before.id);
+    if (!found || JSON.stringify(found) !== JSON.stringify(before)) {
+      throw new Error('這筆資料已變更，請重新載入後再移除。');
+    }
+    if (found.schoolId !== scope.schoolId) throw new Error('資料範圍不符。');
+    const records = current.records.filter((row) => row.id !== before.id);
+    const ledger = {
+      ...current,
+      records,
+      batches: retainActiveBatches(current.batches, records),
     };
     return { ledger, result: ledger };
   });
