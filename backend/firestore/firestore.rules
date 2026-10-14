@@ -85,7 +85,8 @@ service cloud.firestore {
     function isActiveGroupMember(groupId) {
       return isSignedIn()
         && exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid))
-        && get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.status == 'active';
+        && get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.status == 'active'
+        && isSchoolMember(get(/databases/$(database)/documents/groups/$(groupId)).data.schoolId);
     }
 
     function canManageGroup(groupId) {
@@ -877,14 +878,18 @@ service cloud.firestore {
       allow read: if isActiveGroupMember(groupId);
       allow create: if isSignedIn()
         && request.resource.data.schoolId != null
-        && isSchoolMember(request.resource.data.schoolId);
-      allow update: if canManageGroup(groupId) && request.resource.data.schoolId == resource.data.schoolId;
+        && isSchoolMember(request.resource.data.schoolId)
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.get('verification', {'status': 'unverified'}) == {'status': 'unverified'};
+      allow update: if canManageGroup(groupId)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['schoolId', 'createdBy', 'verification', 'type']);
       allow delete: if canManageGroup(groupId);
 
       match /members/{uid} {
         allow read: if isActiveGroupMember(groupId);
         allow create: if false;
-        allow update: if canManageGroup(groupId);
+        allow update: if canManageGroup(groupId)
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['uid', 'role', 'joinedAt']);
         allow delete: if canManageGroup(groupId);
       }
 
