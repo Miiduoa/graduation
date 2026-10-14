@@ -312,7 +312,7 @@ export function RealtimeTab(props: { schoolId: string }) {
           限時動態
         </h3>
         <Link
-          href={`/community/story/new?poiId=${encodeURIComponent(selectedPoi)}`}
+          href={`/community/story/new?poiId=${encodeURIComponent(selectedPoi)}&schoolId=${encodeURIComponent(schoolId)}`}
           className="btn primary"
           style={{ fontSize: 12, padding: '6px 12px' }}
         >
