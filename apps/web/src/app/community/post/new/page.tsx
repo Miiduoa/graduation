@@ -35,7 +35,7 @@ const MAX_TAGS = 5;
 export default function PostComposePage() {
   const { schoolId, schoolName, ready } = useBrowsingSchoolPageContext();
   return (
-    <SiteShell title="發文" subtitle="撰寫校園社群貼文" schoolName={schoolName}>
+    <SiteShell title="發文" subtitle="撰寫校園社群貼文" schoolName={ready ? schoolName : undefined}>
       {ready ? (
         <CommunityAccess>
           <PostComposeInner key={schoolId} schoolId={schoolId} />

@@ -35,7 +35,7 @@ async function checkIsSubscribed(uid: string, schoolId: string, boardId: string)
 export default function BoardDetailPage() {
   const { schoolId, schoolName, ready } = useBrowsingSchoolPageContext();
   return (
-    <SiteShell title="看板" subtitle="校園交流" schoolName={schoolName}>
+    <SiteShell title="看板" subtitle="校園交流" schoolName={ready ? schoolName : undefined}>
       {ready ? (
         <CommunityAccess>
           <BoardDetailInner key={schoolId} schoolId={schoolId} />

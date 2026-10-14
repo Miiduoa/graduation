@@ -341,7 +341,7 @@ export default function AnnouncementsPage(props: {
   const { user, loading } = useAuth();
   return (
     <SiteShell
-      schoolName={visible ? school.name : undefined}
+      schoolName={browsing.ready && visible ? school.name : undefined}
       schoolCode={visible ? school.code : undefined}
       title="校園公告"
       subtitle="公開處室公告的摘要與原文連結。一般帳號即可查看。"

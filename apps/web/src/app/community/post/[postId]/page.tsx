@@ -37,7 +37,7 @@ import {
 export default function PostDetailPage() {
   const { schoolId, schoolName, ready } = useBrowsingSchoolPageContext();
   return (
-    <SiteShell title="貼文" subtitle="校園交流" schoolName={schoolName}>
+    <SiteShell title="貼文" subtitle="校園交流" schoolName={ready ? schoolName : undefined}>
       {ready ? (
         <CommunityAccess>
           <PostDetailInner key={schoolId} schoolId={schoolId} />
