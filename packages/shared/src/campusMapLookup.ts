@@ -8,7 +8,7 @@ export function buildCampusMapSearchUrl(schoolName?: string | null): string | nu
   if (
     !name ||
     name.length > 160 ||
-    /[\u0000-\u001f\u007f]/.test(name) ||
+    Array.from(name).some((character) => { const code = character.charCodeAt(0); return code < 32 || code === 127; }) ||
     name === '請先選擇校園' ||
     name === '所選校園尚未接入' ||
     /^所選校園[（(]/.test(name)
