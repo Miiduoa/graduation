@@ -19,6 +19,7 @@ type Props = {
   assignments: NuniAssignment[];
   units: NuniUnit[] | null;
   unitsError: string;
+  refreshVersion?: number;
   reloadUnits: () => void;
   onUnitCreated: (unit: NuniUnit) => void;
 };
@@ -29,7 +30,7 @@ function suggestedTime(value: string | null) {
 }
 
 export function CourseLearningPath({
-  workspace, assignments, units, unitsError, reloadUnits, onUnitCreated,
+  workspace, assignments, units, unitsError, refreshVersion = 0, reloadUnits, onUnitCreated,
 }: Props) {
   const classes = useClasses();
   const courseApi = useRef(classes);
@@ -70,7 +71,7 @@ export function CourseLearningPath({
       active = false;
       ++request.current;
     };
-  }, [workspace.id, epoch]);
+  }, [workspace.id, epoch, refreshVersion]);
 
   return (
     <section className={styles.root} aria-label="學習路徑">
