@@ -61,6 +61,7 @@ export * from './schoolLogin';
 export * from './devUniversalAccounts';
 export * from './notifications';
 export * from './schools';
+export * from './campusGeo';
 export * from './release';
 export * from './creditAudit';
 export * from './puGradRequirements';
