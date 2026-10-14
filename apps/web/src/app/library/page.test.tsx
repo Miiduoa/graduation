@@ -130,3 +130,28 @@ it('provides Chiayi University official catalog and opening hours as separate li
   expect(screen.getByRole('link', { name: '開館時間 ↗' }).getAttribute('href'))
     .toBe('https://www.ncyu.edu.tw/lib/Contents?nodeId=41764');
 });
+
+
+it('shows Taipei University official catalog, reader services and room booking without PU links', () => {
+  context.schoolId = 'ntpu';
+  context.schoolName = '國立臺北大學';
+  render(<LibraryPage />);
+  expect(screen.getByRole('link', { name: '前往官方館藏入口 ↗' }).getAttribute('href'))
+    .toBe('https://wpac.lib.ntpu.edu.tw/webpac/search.cfm');
+  expect(screen.getByRole('link', { name: '前往我的借閱紀錄 ↗' }).getAttribute('href'))
+    .toBe('https://wpac.lib.ntpu.edu.tw/webpac/search.cfm?type=shelf_user');
+  expect(screen.getByRole('link', { name: '空間與設備預約 ↗' }).getAttribute('href'))
+    .toBe('https://ireserve.lib.ntpu.edu.tw/sm/home_web.do');
+  expect(screen.queryByText('蓋夏圖書館')).toBeNull();
+});
+
+it('shows TMU verified catalog and electronic resources without fabricating personal account access', () => {
+  context.schoolId = 'tmu';
+  context.schoolName = '臺北醫學大學';
+  render(<LibraryPage />);
+  expect(screen.getByRole('link', { name: '前往官方館藏入口 ↗' }).getAttribute('href'))
+    .toBe('https://libelis.tmu.edu.tw/webpacIndex.jsp');
+  expect(screen.getByRole('link', { name: '電子資源 ↗' }).getAttribute('href'))
+    .toBe('https://jumper.tmu.edu.tw/');
+  expect(screen.queryByRole('link', { name: '前往我的借閱紀錄 ↗' })).toBeNull();
+});
