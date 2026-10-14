@@ -5,6 +5,7 @@ import { AICard, AIButton, AIDetailScreen } from '../ui/aiFirst';
 import { useTheme } from '../state/theme';
 import { useSchool } from '../state/school';
 import { safeNavigate } from '../utils/safeNavigate';
+import { PROVIDENCE_LIBRARY_FLOOR_GUIDE_URL } from '@campus/shared/src/campusMapLookup';
 
 type Floor = { id: string; title: string; facilities: string[] };
 type Params = {
@@ -14,8 +15,6 @@ type Params = {
   roomId?: string;
   roomCode?: string;
 };
-
-const LIBRARY_GUIDE_URL = 'https://b028.pu.edu.tw/p/426-1054-34.php?Lang=zh-tw';
 
 // Library floor allocations are summarized from the school's public directory.
 // The directory does not supply verified room polygons or indoor turn-by-turn routes.
@@ -60,7 +59,7 @@ export function IndoorFloorMapScreen() {
   async function openOfficialGuide() {
     setError('');
     try {
-      await Linking.openURL(LIBRARY_GUIDE_URL);
+      await Linking.openURL(PROVIDENCE_LIBRARY_FLOOR_GUIDE_URL);
     } catch {
       setError('無法開啟校方樓層導覽，請確認網路連線後再試一次。');
     }
