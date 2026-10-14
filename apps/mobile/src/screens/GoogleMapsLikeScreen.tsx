@@ -16,6 +16,7 @@ import {
 import { useTheme } from '../state/theme';
 import { useSchool } from '../state/school';
 import { useAuth } from '../state/auth';
+import { buildCampusMapSearchUrl } from '@campus/shared/src/campusMapLookup';
 import {
   buildCampusMapHtml,
   buildWalkingDirectionsUrl,
@@ -42,8 +43,9 @@ export function GoogleMapsLikeScreen() {
   const params = (route.params ?? {}) as MapParams;
   return (
     <CampusMapContent
-      key={JSON.stringify([user?.uid, school.id])}
+      key={JSON.stringify([user?.uid, school.id, school.name])}
       schoolId={school.id}
+      schoolName={school.name}
       navigation={navigation}
       params={params}
     />
@@ -52,14 +54,17 @@ export function GoogleMapsLikeScreen() {
 
 function CampusMapContent({
   schoolId,
+  schoolName,
   navigation,
   params,
 }: {
   schoolId: string;
+  schoolName?: string;
   navigation: MapNavigation;
   params: MapParams;
 }) {
   const theme = useTheme();
+  const mapSearchUrl = buildCampusMapSearchUrl(schoolName);
   const webRef = useRef<WebView>(null);
   const scrollRef = useRef<ScrollView>(null);
   const mounted = useRef(true);
@@ -228,7 +233,29 @@ function CampusMapContent({
         </AICard>
       ) : catalog.length === 0 ? (
         <AICard title="尚未提供校園地點">
-          <Text style={textStyle}>目前沒有可顯示的地點資料。你可以先從學校官網查詢校區地圖。</Text>
+          <Text style={textStyle}>目前沒有可顯示的地點資料，不會改用其他學校的建築或導航位置。</Text>
+          {mapSearchUrl ? (
+            <>
+              <AIButton
+                label={`在 Google 地圖搜尋${schoolName}`}
+                variant="ghost"
+                onPress={() => {
+                  if (!mounted.current) return;
+                  setDirectionsError('');
+                  void Linking.openURL(mapSearchUrl).catch(() => {
+                    if (mounted.current)
+                      setDirectionsError('無法開啟地圖服務，請確認網路連線後重試。');
+                  });
+                }}
+              />
+              <Text style={textStyle}>第三方地圖搜尋結果尚未由校方核對，請確認校區名稱及位置。</Text>
+            </>
+          ) : null}
+          {directionsError ? (
+            <Text accessibilityRole="alert" style={{ ...textStyle, color: theme.colors.danger }}>
+              {directionsError}
+            </Text>
+          ) : null}
           <AIButton label="重新讀取地點" variant="ghost" onPress={() => void load()} />
         </AICard>
       ) : (
