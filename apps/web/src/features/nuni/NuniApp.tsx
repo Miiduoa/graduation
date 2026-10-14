@@ -7,6 +7,7 @@ import {
   NuniError,
   nuniErrorMessage,
   type NuniAssignment,
+  type NuniUnit,
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
 import { AppHeader } from '@/components/AppHeader';
@@ -20,6 +21,9 @@ import { WorkspaceList } from './WorkspaceList';
 import { courseRoleLabels } from './courseTasks';
 import { CourseMaterials } from './CourseMaterials';
 import { CourseQuizzes } from './CourseQuizzes';
+import { CourseLearningPath } from './CourseLearningPath';
+import { CourseUnitSelect } from './CourseUnitSelect';
+import { selectCourseUnit } from './courseOutline';
 import styles from './NuniApp.module.css';
 
 export function NuniHeader() {
@@ -48,15 +52,21 @@ function Workspace({ id }: { id: string }) {
   const [error, setError] = useState('');
   const [epoch, setEpoch] = useState(0);
   const [code, setCode] = useState('');
-  const [tab, setTab] = useState<'materials' | 'assignments' | 'quizzes'>('assignments');
+  const [tab, setTab] = useState<'outline' | 'materials' | 'assignments' | 'quizzes'>('outline');
+  const [units, setUnits] = useState<NuniUnit[] | null>(null);
+  const [unitsError, setUnitsError] = useState('');
+  const [unitsEpoch, setUnitsEpoch] = useState(0);
   useEffect(() => {
     // A task link must open its panel, including browser back/forward in the same course.
     if (hash.startsWith('#quiz-')) setTab('quizzes');
     else if (hash.startsWith('#assignment-')) setTab('assignments');
+    else if (hash.startsWith('#material-')) setTab('materials');
   }, [hash]);
   const [refreshing, setRefreshing] = useState(false);
   const generation = useRef(0);
+  const unitGeneration = useRef(0);
   const reload = () => setEpoch(++generation.current);
+  const reloadUnits = () => setUnitsEpoch((value) => value + 1);
   function beginCourseRequest() {
     const started = generation.current;
     return () => {
@@ -97,6 +107,34 @@ function Workspace({ id }: { id: string }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, epoch]);
+  useEffect(() => {
+    let active = true;
+    const requestId = ++unitGeneration.current;
+    setUnits(null);
+    setUnitsError('');
+    void classes
+      .units(id)
+      .then((result) => {
+        if (active && unitGeneration.current === requestId && generation.current === epoch) {
+          setUnits(result);
+        }
+      })
+      .catch((failure) => {
+        if (active && unitGeneration.current === requestId && generation.current === epoch) {
+          setUnitsError(nuniErrorMessage(failure));
+        }
+      });
+    return () => {
+      active = false;
+    };
+    // The parent owns the account-scoped course client and remounts on session changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, epoch, unitsEpoch]);
+  const acceptUnit = (unit: NuniUnit) => {
+    if (unit.workspaceId !== id) return;
+    ++unitGeneration.current;
+    setUnits((current) => current ? [...current.filter((entry) => entry.id !== unit.id), unit] : current);
+  };
   if (error && !data)
     return (
       <div role="alert" className={styles.notice}>
@@ -153,6 +191,7 @@ function Workspace({ id }: { id: string }) {
       <div className={styles.courseTabs} role="tablist" aria-label="課程內容">
         {(
           [
+            ['outline', '學習路徑'],
             ['materials', '教材'],
             ['assignments', '作業'],
             ['quizzes', '測驗'],
@@ -168,13 +207,13 @@ function Workspace({ id }: { id: string }) {
             tabIndex={tab === value ? 0 : -1}
             onClick={() => setTab(value)}
             onKeyDown={(event) => {
-              const keys = ['materials', 'assignments', 'quizzes'] as const;
+              const keys = ['outline', 'materials', 'assignments', 'quizzes'] as const;
               const index = keys.indexOf(value);
               const next =
                 event.key === 'ArrowRight'
-                  ? (index + 1) % 3
+                  ? (index + 1) % keys.length
                   : event.key === 'ArrowLeft'
-                    ? (index + 2) % 3
+                    ? (index + keys.length - 1) % keys.length
                     : event.key === 'Home'
                       ? 0
                       : event.key === 'End'
@@ -194,11 +233,26 @@ function Workspace({ id }: { id: string }) {
       <CourseAccessBoundary beginRequest={beginCourseRequest}>
         <section
           role="tabpanel"
+          id="panel-outline"
+          aria-labelledby="tab-outline"
+          hidden={tab !== 'outline'}
+        >
+          <CourseLearningPath
+            workspace={data.workspace}
+            assignments={data.assignments}
+            units={units}
+            unitsError={unitsError}
+            reloadUnits={reloadUnits}
+            onUnitCreated={acceptUnit}
+          />
+        </section>
+        <section
+          role="tabpanel"
           id="panel-materials"
           aria-labelledby="tab-materials"
           hidden={tab !== 'materials'}
         >
-          <CourseMaterials workspace={data.workspace} />
+          <CourseMaterials workspace={data.workspace} units={units} />
         </section>
         <section
           role="tabpanel"
@@ -206,7 +260,7 @@ function Workspace({ id }: { id: string }) {
           aria-labelledby="tab-quizzes"
           hidden={tab !== 'quizzes'}
         >
-          <CourseQuizzes workspace={data.workspace} />
+          <CourseQuizzes workspace={data.workspace} units={units} />
         </section>
         <section
           role="tabpanel"
@@ -236,6 +290,7 @@ function Workspace({ id }: { id: string }) {
                           title: String(form.get('title')),
                           instructions: String(form.get('instructions')),
                           dueAt: due ? new Date(due).toISOString() : null,
+                          unitId: selectCourseUnit(form, units),
                           idempotencyKey: key,
                         });
                         reload();
@@ -249,6 +304,7 @@ function Workspace({ id }: { id: string }) {
                         作業說明
                         <textarea name="instructions" required maxLength={8000} />
                       </label>
+                      <CourseUnitSelect units={units} />
                       <label>
                         參考期限（選填）
                         <input name="dueAt" type="datetime-local" />
