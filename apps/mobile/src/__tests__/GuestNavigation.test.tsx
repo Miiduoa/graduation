@@ -85,6 +85,14 @@ jest.mock('../screens/BusAiFirstScreen', () => {
   const { Text } = require('react-native');
   return { __esModule: true, default: () => <Text testID="public-bus-screen">公車查詢</Text> };
 });
+jest.mock('../screens/LibraryAiFirstScreen', () => ({
+  __esModule: true,
+  default: () => <Text testID="public-library-screen">圖書館</Text>,
+}));
+jest.mock('../screens/LibraryCatalogScreen', () => ({
+  __esModule: true,
+  default: () => <Text testID="public-library-catalog">館藏查詢</Text>,
+}));
 jest.mock('../screens/CampusContentScreens', () => {
   const { Text } = require('react-native');
   return {
@@ -161,6 +169,7 @@ test('a warm platform link works in the school-signed-out stack and cleans up it
 
 test.each([
   ['Map', 'public-map-screen'],
+  ['Library', 'public-library-screen'],
   ['BusSchedule', 'public-bus-screen'],
   ['公告總覽', 'public-announcements-screen'],
 ])('signed-out users can open %s without either account', async (route, target) => {
@@ -180,6 +189,8 @@ test.each([
 
 test.each([
   ['campus://map', 'public-map-screen'],
+  ['campus://library', 'public-library-screen'],
+  ['campus://library/catalog', 'public-library-catalog'],
   ['campus://bus', 'public-bus-screen'],
   ['campus://announcements', 'public-announcements-screen'],
   ['campus://announcement/public-1', 'public-announcement-screen'],
@@ -328,4 +339,25 @@ test('school aliases do not bypass cross-campus isolation', () => {
   expect(hasReadySchoolSession(mockSchoolAuth, 'tw-pu')).toBe(true);
   expect(hasReadySchoolSession(mockSchoolAuth, 'nthu')).toBe(false);
   expect(hasReadySchoolSession(mockSchoolAuth, null)).toBe(false);
+});
+
+
+test('the public library remains reachable after browsing away from the logged-in school', async () => {
+  mockSchoolAuth = {
+    user: { uid: 'u1' },
+    profile: { uid: 'u1', schoolId: 'pu' },
+    loading: false,
+    profileLoading: false,
+  };
+  mockBrowsingSchoolId = 'nthu';
+  const view = render(
+    <SchoolSessionBoundary
+      publicContent={<NavigationContainer><PreAuthStack /></NavigationContainer>}
+    >
+      <Text testID="private-school">靜宜私人課務</Text>
+    </SchoolSessionBoundary>,
+  );
+  expect(view.queryByTestId('private-school')).toBeNull();
+  fireEvent.press(await view.findByTestId('public-Library'));
+  expect(await view.findByTestId('public-library-screen')).toBeTruthy();
 });
