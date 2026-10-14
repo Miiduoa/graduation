@@ -52,6 +52,20 @@ async function receive(rows?: {
   });
 }
 
+it('shows a brandless payment disclaimer on the restaurant list', async () => {
+  await receive({
+    cafeterias: [{ id: 'stall', name: '校內咖啡店', reviewStatus: 'verified' }],
+    menus: [],
+  });
+  expect(
+    screen.getByText(/價格、是否賣完、是否接單以店家訂餐頁為準，付款與退款由店家處理。/),
+  ).toBeTruthy();
+  expect(screen.queryByText(/Nuni|nuni/)).toBeNull();
+  expect(
+    screen.queryByText('價格、是否賣完、是否接單以店家訂餐頁為準。Nuni 不處理這筆的付款與退款。'),
+  ).toBeNull();
+});
+
 it('reads restaurants from the backend catalog and hides sample copy', async () => {
   await receive({
     cafeterias: [{ id: 'stall', name: '校內咖啡店', reviewStatus: 'verified' }],

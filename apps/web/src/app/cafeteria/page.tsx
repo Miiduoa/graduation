@@ -4,13 +4,13 @@ import { use, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import {
-  PRICE_DISCLAIMER,
   SHOWCASE_ORDER_BUTTON_TEXT,
   isMenuStale,
   studentCafeteriaAction,
 } from '@campus/shared/src/merchantMode';
 import {
   CAFETERIA_EMPTY_SCHOOL_TEXT,
+  CAFETERIA_PAYMENT_DISCLAIMER,
   CAFETERIA_REVIEW_STATUS_DEFAULT,
   cafeteriaReviewBadge,
 } from '@campus/shared/src/cafeteriaCatalog';
@@ -272,7 +272,7 @@ function CafeteriaContent({
         </div>
         <p className={styles.notice}>
           {ONLINE_ORDERING_OFF_TEXT}。依店家提供的資料顯示；實際營業與餐點供應請向店家確認。一般帳號即可看店面與菜單。
-          {PRICE_DISCLAIMER}
+          {CAFETERIA_PAYMENT_DISCLAIMER}
         </p>
 
         <section className={styles.toolbar} aria-label="尋找餐點">
