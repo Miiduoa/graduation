@@ -11,8 +11,22 @@ let mockAuth: {
 let mockMode: 'light' | 'dark' = 'light';
 let mockLegalBase: string | null = 'https://nuni.tw';
 const mockSetMode = jest.fn();
+const mockSelectSchool = jest.fn();
+let mockSchoolId = 'pu';
 const navigation = { navigate: jest.fn(), goBack: jest.fn() };
 jest.mock('../state/auth', () => ({ useAuth: () => mockAuth }));
+jest.mock('../state/school', () => ({
+  useSchool: () => ({
+    school: { id: mockSchoolId, name: mockSchoolId === 'pu' ? '靜宜大學' : '國立清華大學' },
+    setSelection: mockSelectSchool,
+  }),
+}));
+jest.mock('../services/schoolDirectory', () => ({
+  fetchSchoolDirectory: jest.fn().mockResolvedValue([
+    { id: 'pu', code: 'PU', name: '靜宜大學' },
+    { id: 'nthu', code: 'NTHU', name: '國立清華大學', shortName: '清大', themeColor: '#7a0019' },
+  ]),
+}));
 jest.mock('../state/theme', () => ({
   useThemeMode: () => ({ mode: mockMode, setMode: mockSetMode }),
 }));
@@ -41,6 +55,7 @@ beforeEach(() => {
     signOutWithWarning: jest.fn().mockResolvedValue(true),
   };
   mockMode = 'light';
+  mockSchoolId = 'pu';
   mockLegalBase = 'https://nuni.tw';
 });
 afterEach(() => jest.restoreAllMocks());
@@ -123,4 +138,22 @@ test('missing legal configuration is unavailable and signed-out users see no acc
   expect(view.queryByText('匯出我的資料')).toBeNull();
   fireEvent.press(view.getByText('學校登入'));
   expect(navigation.navigate).toHaveBeenCalledWith('SSOLogin');
+});
+
+test('selecting another campus changes browsing identity without changing the signed-in account', async () => {
+  const view = render(<SettingsAiFirstScreen navigation={navigation} />);
+  expect(view.getByText('靜宜大學')).toBeTruthy();
+  fireEvent.press(view.getByText('選擇其他學校'));
+  await view.findByText('國立清華大學');
+  fireEvent.changeText(view.getByLabelText('搜尋學校'), '清華');
+  fireEvent.press(view.getByLabelText('選擇國立清華大學'));
+  expect(mockSelectSchool).toHaveBeenCalledWith({
+    schoolId: 'nthu',
+    code: 'NTHU',
+    schoolName: '國立清華大學',
+    shortName: '清大',
+    themeColor: '#7a0019',
+    domains: null,
+  });
+  expect(view.getByText('student-a@example.edu')).toBeTruthy();
 });
