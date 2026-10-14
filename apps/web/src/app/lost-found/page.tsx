@@ -3,6 +3,7 @@
 import { use, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
+import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
 import { LoginRequiredLostFoundComments } from '@/components/LoginRequiredLostFoundComments';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
@@ -27,7 +28,7 @@ export default function LostFoundPage(props: {
   const search = props.searchParams ? use(props.searchParams) : undefined;
   const context = useBrowsingSchoolPageContext(search);
   if (!context.ready) {
-    return <SiteShell title="失物招領"><p role="status">正在確認校園目錄…</p></SiteShell>;
+    return <SiteShell title="失物招領"><SchoolScopePlaceholder /></SiteShell>;
   }
   return <LostFoundPageContent key={`${context.schoolId}`} context={context} />;
 }

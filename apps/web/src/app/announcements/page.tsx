@@ -4,6 +4,7 @@ import { use, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/components/AuthGuard';
 import { SiteShell } from '@/components/SiteShell';
+import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import type { Announcement } from '@/lib/firebase';
 import { loadAnnouncementFeed, type AnnouncementSourceHealth } from './publicAnnouncements';
 import {
@@ -346,7 +347,7 @@ export default function AnnouncementsPage(props: {
       subtitle="公開處室公告的摘要與原文連結。一般帳號即可查看。"
     >
       {!browsing.ready ? (
-        <p className={styles.status} role="status">正在確認校園目錄…</p>
+        <SchoolScopePlaceholder />
       ) : !visible ? (
         <section className={styles.status}>
           <h2>目前沒有公開公告</h2>

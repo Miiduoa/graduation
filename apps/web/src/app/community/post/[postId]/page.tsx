@@ -15,6 +15,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { CommunityAccess } from '../../_components/CommunityAccess';
 import { SiteShell } from '@/components/SiteShell';
+import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import {
@@ -42,7 +43,7 @@ export default function PostDetailPage() {
           <PostDetailInner key={schoolId} schoolId={schoolId} />
         </CommunityAccess>
       ) : (
-        <p role="status">正在確認校園目錄…</p>
+        <SchoolScopePlaceholder />
       )}
     </SiteShell>
   );
