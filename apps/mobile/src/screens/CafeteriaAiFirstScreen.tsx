@@ -6,6 +6,7 @@ import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import {
   loadDiningCatalog,
+  loadPublicDiningCatalog,
   watchDiningReceipt,
   loadDiningIntent,
   prepareDiningIntent,
@@ -68,7 +69,7 @@ function DiningContent({
   const [selected, setSelected] = useState<DiningMenu | null>(null);
   const [pending, setPending] = useState<DiningIntent | null>(null);
   const [receipt, setReceipt] = useState<DiningReceipt | null>(null);
-  const [loading, setLoading] = useState(Boolean(scope.userId));
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const mounted = useRef(true);
@@ -76,15 +77,17 @@ function DiningContent({
   const generation = useRef(0);
   const isCurrent = () => mounted.current && activeScope.current === scopeKey;
   const load = async () => {
-    if (!scope.userId || !isCurrent() || lock.current) return;
+    if (!isCurrent() || lock.current) return;
     const request = ++generation.current;
     setLoading(true);
     setError('');
     setCatalog(null);
     try {
       const [next, saved] = await Promise.all([
-        loadDiningCatalog(scope, isCurrent),
-        loadDiningIntent(scope, isCurrent),
+        scope.userId
+          ? loadDiningCatalog(scope, isCurrent)
+          : loadPublicDiningCatalog(scope.schoolId),
+        scope.userId ? loadDiningIntent(scope, isCurrent) : Promise.resolve(null),
       ]);
       if (isCurrent() && request === generation.current) {
         setCatalog(next);
@@ -189,13 +192,7 @@ function DiningContent({
           onPress={() => safeNavigate(navigation, 'NuniWorkspace', { tab: 'food' })}
         />
       </AICard>
-      {!scope.userId ? (
-        <AICard title="登入後查看菜單">
-          <Text style={{ color: aiTokens.muted }}>請先登入學校帳號，再查看餐廳與訂單。</Text>
-        </AICard>
-      ) : (
-        <>
-          {navigation?.navigate ? (
+      {scope.userId && navigation?.navigate ? (
             <View style={{ alignItems: 'flex-start' }}>
               <AIButton
                 label="我的訂單"
@@ -353,7 +350,7 @@ function DiningContent({
                       {menu.description ? (
                         <Text style={{ color: aiTokens.muted }}>{menu.description}</Text>
                       ) : null}
-                      {menu.orderable ? (
+                      {menu.orderable && scope.userId ? (
                         <AIButton
                           label={`選擇${menu.name}`}
                           disabled={busy || Boolean(pending)}
@@ -439,8 +436,6 @@ function DiningContent({
               </View>
             </View>
           </Modal>
-        </>
-      )}
     </AIDetailScreen>
   );
 }

@@ -275,3 +275,37 @@ it('shows cms-none demo school details in an explicit test environment', async (
   await mount(props('notice-1', 'tw-demo-uni'));
   expect(getDocFromServer).toHaveBeenCalled();
 });
+
+it('reads announcement details from the selected campus, not a stale schoolId', async () => {
+  vi.mocked(getDocFromServer).mockResolvedValue(
+    snapshot({ schoolId: 'nthu', title: '清華公告詳情' }),
+  );
+  await mount({
+    params: Promise.resolve({ id: 'notice-1' }),
+    searchParams: Promise.resolve({ campus: 'nthu', schoolId: 'pu' }),
+  });
+  await screen.findByText('清華公告詳情');
+  expect(getDocFromServer).toHaveBeenCalledExactlyOnceWith({
+    path: 'schools/nthu/announcements/notice-1',
+  });
+  expect(screen.getByRole('link', { name: '← 返回公告列表' }).getAttribute('href')).toBe(
+    '/announcements?schoolId=nthu',
+  );
+});
+
+it('does not query any announcement when the campus is unselected or invalid', async () => {
+  const { view } = await mount({
+    params: Promise.resolve({ id: 'notice-1' }),
+    searchParams: Promise.resolve({ campus: 'all', schoolId: 'pu' }),
+  });
+  expect(screen.getByText('先選擇一所學校')).toBeTruthy();
+  expect(getDocFromServer).not.toHaveBeenCalled();
+  await act(async () => {
+    view.rerender(subject({
+      params: Promise.resolve({ id: 'notice-1' }),
+      searchParams: Promise.resolve({ campus: 'INVALID', schoolId: 'pu' }),
+    }));
+  });
+  expect(screen.getByText('先選擇一所學校')).toBeTruthy();
+  expect(getDocFromServer).not.toHaveBeenCalled();
+});
