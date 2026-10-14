@@ -4,6 +4,8 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import LoginLandingScreen from './LoginLandingScreen';
 import { GoogleMapsLikeScreen } from './GoogleMapsLikeScreen';
 import BusAiFirstScreen from './BusAiFirstScreen';
+import LibraryAiFirstScreen from './LibraryAiFirstScreen';
+import LibraryCatalogScreen from './LibraryCatalogScreen';
 import { CampusAnnouncementsScreen, CampusAnnouncementDetailScreen } from './CampusContentScreens';
 import { SSOLoginScreen } from './SSOLoginScreen';
 import { NuniWorkspaceScreen } from './NuniWorkspaceScreen';
@@ -31,6 +33,8 @@ export function PreAuthStack() {
         options={{ headerShown: false }}
       />
       <Stack.Screen name="Map" component={GoogleMapsLikeScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="Library" component={LibraryAiFirstScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="LibraryCatalog" component={LibraryCatalogScreen} options={{ headerShown: false }} />
       <Stack.Screen
         name="BusSchedule"
         component={BusAiFirstScreen}
