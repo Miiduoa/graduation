@@ -25,8 +25,20 @@ async def main():
         errors = []
         page.on('pageerror', lambda error: errors.append(str(error)))
         await page.add_init_script('if (!localStorage.getItem("campus-one-personal-timetable:local")) localStorage.setItem("campus-one-personal-timetable:local", ' + json.dumps(json.dumps(SEED, ensure_ascii=False)) + ');')
+        # This local browser smoke owns its directory fixture. Never depend on a
+        # deployed campus gateway or silently treat the guest as a PU student.
+        async def local_school_directory(route):
+            await route.fulfill(status=200, content_type='application/json', body=json.dumps({
+                'schools': [{'id': 'pu', 'name': '靜宜大學', 'status': 'not-open'}]
+            }, ensure_ascii=False))
+        await page.route('**/api/schools', local_school_directory)
         try:
-            await page.goto(BASE + '/timetable', wait_until='networkidle')
+            await page.goto(BASE + '/timetable?campus=all', wait_until='networkidle')
+            await expect(page.get_by_role('status').filter(has_text='請先選擇一所學校')).to_be_visible()
+            assert await page.get_by_role('button', name='移動課程', exact=True).count() == 0
+            results.append('no private timetable is loaded before explicitly selecting a campus')
+            await page.get_by_text('瀏覽校園：不限校園', exact=True).click()
+            await page.get_by_role('combobox', name='瀏覽校園').select_option('pu')
             await expect(page.get_by_role('button', name='移動課程', exact=True)).to_be_visible()
             async def choose():
                 await page.get_by_role('button', name='移動課程', exact=True).click()
