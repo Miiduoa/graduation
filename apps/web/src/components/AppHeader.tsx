@@ -2,6 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
+import { useOptionalSelectedSchool } from './SelectedSchoolProvider';
+import { browsingSchoolSearch } from '@/lib/navigation';
 import { Suspense, useState } from 'react';
 import { useAuth } from './AuthGuard';
 import { CampusServiceMenu } from './CampusServiceMenu';
@@ -17,14 +19,11 @@ function Header() {
   const hash = useLocationHash();
   const { user, loading, signOutUser } = useAuth();
   const nuni = useNuniSession();
+  const selected = useOptionalSelectedSchool();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const context = new URLSearchParams();
-  for (const key of ['school', 'schoolId', 'campus']) {
-    const value = params?.get(key);
-    if (value) context.set(key, value);
-  }
-  const href = (path: string) => `${path}${context.size ? `?${context}` : ''}`;
+  const schoolSearch = browsingSchoolSearch(params, selected?.selectedSchoolId ?? null);
+  const href = (path: string) => `${path}${schoolSearch}`;
   const currentPage = `${pathname || '/'}${params?.size ? `?${params}` : ''}${hash}`;
   const loginPage = ['/login', '/classroom/login', '/admin/login'].includes(pathname || '');
   const loginHref = `/login?returnUrl=${encodeURIComponent(currentPage)}`;

@@ -216,3 +216,11 @@ it('distinguishes a listed campus from an opened school service', () => {
   expect(screen.getByText(/此校目前可瀏覽公開交流，校務服務尚未開通/)).toBeTruthy();
   expect(navigation.search).toBe('?schoolId=school-a&campus=school-a');
 });
+
+it('uses an explicit schoolId deep link ahead of a saved browsing preference', () => {
+  localStorage.setItem(schoolPreferenceKey(defaults.ownerKey), JSON.stringify({ schoolId: 'school-a' }));
+  navigation.search = '?schoolId=school-b';
+  render(<View />);
+  expect(screen.getByTestId('selected-school').textContent).toBe('乙校');
+  expect(JSON.parse(localStorage.getItem(schoolPreferenceKey(defaults.ownerKey))!)).toEqual({ schoolId: 'school-a' });
+});

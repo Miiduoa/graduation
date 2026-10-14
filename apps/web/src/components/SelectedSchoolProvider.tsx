@@ -131,7 +131,7 @@ export function SelectedSchoolProvider({
       return true;
     });
   }, [schools]);
-  const queryId = params?.get('campus');
+  const queryId = params?.get('campus') ?? params?.get('schoolId');
   const requestedId = queryId === 'all' ? null : queryId || savedSchoolId;
   const ready = !loading && hydrated && catalogStatus === 'ready';
   const selectedSchool = ready
