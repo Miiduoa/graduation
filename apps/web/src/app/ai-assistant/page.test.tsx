@@ -234,3 +234,41 @@ it('線上點餐打開之後，輸入提示會再寫訂單以服務頁面為準'
   render(<AssistantPage />);
   expect(screen.getByText('回覆可能有誤；申請、繳費與訂單請以服務頁面的紀錄為準。')).toBeTruthy();
 });
+
+it('routes assistant queries to the selected campus rather than the previous school ID', async () => {
+  state.query = 'campus=nthu&schoolId=pu';
+  vi.mocked(callCampusAssistant).mockResolvedValueOnce({ content: '清華的服務回覆' });
+  render(<AssistantPage />);
+  ask('圖書館');
+  await screen.findByText('清華的服務回覆');
+  expect(vi.mocked(callCampusAssistant).mock.calls[0][0].schoolId).toBe('nthu');
+});
+
+it('drops the previous campus conversation and cancels pending requests after a switch', async () => {
+  state.query = 'campus=pu';
+  let resolveOld!: (value: CampusAssistantEnvelope) => void;
+  vi.mocked(callCampusAssistant).mockImplementation(
+    () => new Promise((resolve) => { resolveOld = resolve; }),
+  );
+  const view = render(<AssistantPage />);
+  ask('舊校課表');
+  const signal = vi.mocked(callCampusAssistant).mock.calls[0][1];
+  state.query = 'campus=nthu&schoolId=pu';
+  view.rerender(<AssistantPage />);
+  expect(signal?.aborted).toBe(true);
+  expect(screen.getByRole('log').textContent).toBe('');
+  await act(async () => resolveOld({ content: '晚到的靜宜私人資訊' }));
+  expect(screen.queryByText('晚到的靜宜私人資訊')).toBeNull();
+  vi.mocked(callCampusAssistant).mockResolvedValueOnce({ content: '清華的服務回覆' });
+  ask('新校圖書館');
+  await screen.findByText('清華的服務回覆');
+  expect(vi.mocked(callCampusAssistant).mock.calls[1][0].schoolId).toBe('nthu');
+});
+
+it('does not send campus-specific requests before a campus is selected', () => {
+  state.query = 'campus=all&schoolId=pu';
+  render(<AssistantPage />);
+  expect(screen.getByText('請先選擇一所學校，再使用校園助理。')).toBeTruthy();
+  expect(screen.queryByRole('form', { name: '傳送問題' })).toBeNull();
+  expect(callCampusAssistant).not.toHaveBeenCalled();
+});

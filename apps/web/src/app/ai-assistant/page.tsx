@@ -6,7 +6,7 @@ import { Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
 import { SiteShell } from '@/components/SiteShell';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
 import { useAuth } from '@/components/AuthGuard';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import {
   callCampusAssistant,
   CampusAssistantError,
@@ -30,8 +30,6 @@ import styles from './assistant.module.css';
 type Message =
   | { role: 'user'; content: string }
   | { role: 'assistant'; content: string; response: CampusAssistantEnvelope };
-const school = resolveSchoolPageContext();
-
 function requestError(error: unknown): string {
   if (error instanceof CampusAssistantError && error.code === 'session-changed')
     return '登入狀態已變更，請重新登入後再試。';
@@ -48,10 +46,12 @@ function AssistantConversation({
   userId,
   groupId,
   initialDraft,
+  schoolId,
 }: {
   userId: string;
   groupId: string;
   initialDraft: string;
+  schoolId: string;
 }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState(initialDraft);
@@ -97,7 +97,7 @@ function AssistantConversation({
       const response = await callCampusAssistant(
         {
           userId,
-          schoolId: school.schoolId,
+          schoolId,
           groupId: groupId || undefined,
           sessionId: sessionId.current,
           messages: [
@@ -187,8 +187,8 @@ function AssistantConversation({
               <>
                 <div className={styles.cards}>
                   <AgentCardList
-                    cards={readOnlyAssistantCards(message.response.cards, school.schoolId)}
-                    schoolId={school.schoolId}
+                    cards={readOnlyAssistantCards(message.response.cards, schoolId)}
+                    schoolId={schoolId}
                   />
                 </div>
                 {isWebOnlineOrderingEnabled() && hasOrderProposal(message.response) && (
@@ -276,8 +276,24 @@ function AssistantConversation({
 function AssistantRoute() {
   const { user, loading, error } = useAuth();
   const search = useSearchParams();
+  const campus = useCampusBrowseContext({
+    campus: search.get('campus') ?? undefined,
+    schoolId: search.get('schoolId') ?? undefined,
+    school: search.get('school') ?? undefined,
+  });
   const groupId = search.get('courseId') || search.get('groupId') || '';
   const initialDraft = (search.get('q') || '').slice(0, 4000);
+  if (campus.status !== 'ready' || !campus.schoolId) {
+    return (
+      <p role="status">
+        {campus.status === 'loading'
+          ? '正在確認校園…'
+          : campus.status === 'error'
+            ? '無法載入校園資料，請稍後重試。'
+            : '請先選擇一所學校，再使用校園助理。'}
+      </p>
+    );
+  }
   if (loading) return <p role="status">正在確認登入狀態…</p>;
   if (error) return <p role="alert">無法確認登入狀態，請重新整理後再試。</p>;
   if (!user)
@@ -289,10 +305,11 @@ function AssistantRoute() {
     );
   return (
     <AssistantConversation
-      key={JSON.stringify([user.uid, school.schoolId, groupId, initialDraft])}
+      key={JSON.stringify([user.uid, campus.schoolId, groupId, initialDraft])}
       userId={user.uid}
       groupId={groupId}
       initialDraft={initialDraft}
+      schoolId={campus.schoolId}
     />
   );
 }
