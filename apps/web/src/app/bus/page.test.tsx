@@ -39,9 +39,10 @@ it('keeps a not-yet-integrated university isolated from the previous school', ()
   expect(screen.getByText('所選校園尚未接入')).toBeTruthy();
 });
 
-it('never uses Providence stations for all-campus browsing', () => {
+it('prompts for a school rather than querying any campus when none is chosen', () => {
   navigation.query = '?campus=all&schoolId=pu';
   render(<BusPage />);
-  expect(screen.getByTestId('bus-school').textContent).toBe('unavailable-campus');
+  expect(screen.getByText('請先選擇一所學校')).toBeTruthy();
+  expect(screen.queryByTestId('bus-school')).toBeNull();
   expect(screen.queryByText('靜宜大學')).toBeNull();
 });
