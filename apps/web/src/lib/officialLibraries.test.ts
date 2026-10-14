@@ -15,6 +15,8 @@ it('keeps official destinations separate by campus and never returns a Providenc
   expect(getOfficialLibrary('other')).toBeNull();
   expect(getOfficialLibrary('__proto__')).toBeNull();
   expect(getOfficialLibrary(null)).toBeNull();
+  expect(getOfficialLibrary('tenant-nthu', '國立清華大學')?.catalogUrl).toBe('https://www.lib.nthu.edu.tw/');
+  expect(getOfficialLibrary('tenant-fake', '國立清華大學（校外）')).toBeNull();
 });
 
 it('does not attach unverified personal accounts or fabricate a search endpoint', () => {
