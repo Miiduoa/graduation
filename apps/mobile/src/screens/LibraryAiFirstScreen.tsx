@@ -5,6 +5,7 @@ import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { buildLibrarySearchUrl, getLibraryOpacBaseUrl } from '../services/libraryOpacClient';
+import { getOfficialCampusLibrary } from '@campus/shared/src/libraryDirectory';
 
 type Navigation = {
   goBack?: () => void;
@@ -40,6 +41,7 @@ function LibraryContent({
 }) {
   const [keyword, setKeyword] = useState('');
   const [error, setError] = useState('');
+  const officialLibrary = getOfficialCampusLibrary(schoolId);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -49,7 +51,7 @@ function LibraryContent({
   }, []);
   const isCurrent = () => mounted.current && activeScope.current === scope;
   const open = async (url: string) => {
-    if (!isCurrent() || schoolId !== 'pu') return;
+    if (!isCurrent()) return;
     setError('');
     try {
       await Linking.openURL(url);
@@ -64,10 +66,20 @@ function LibraryContent({
       onBack={() => navigation?.goBack?.()}
     >
       {schoolId !== 'pu' ? (
-        <AICard title="學校圖書館">
-          <Text style={{ color: aiTokens.muted }}>
-            目前尚未提供這所學校的圖書館入口，請從學校官網查詢。
-          </Text>
+        <AICard title={officialLibrary?.name ?? '學校圖書館'}>
+          <View style={{ gap: 12 }}>
+            <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
+              {officialLibrary
+                ? '館藏、借閱紀錄、續借與開放時間以校方網站為準。請在館方網站進行搜尋或登入。'
+                : '尚未查證這所學校的官方圖書館網址，因此不會顯示其他學校的館藏資料。'}
+            </Text>
+            {officialLibrary ? (
+              <AIButton
+                label="開啟官方圖書館"
+                onPress={() => void open(officialLibrary.websiteUrl)}
+              />
+            ) : null}
+          </View>
         </AICard>
       ) : (
         <>
@@ -143,15 +155,15 @@ function LibraryContent({
               />
             </View>
           </AICard>
-          {error ? (
-            <AICard>
-              <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>
-                {error}
-              </Text>
-            </AICard>
-          ) : null}
         </>
       )}
+      {error ? (
+        <AICard>
+          <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>
+            {error}
+          </Text>
+        </AICard>
+      ) : null}
     </AIDetailScreen>
   );
 }
