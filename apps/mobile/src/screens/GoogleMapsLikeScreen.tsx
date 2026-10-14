@@ -18,7 +18,7 @@ import { useTheme } from '../state/theme';
 import { useSchool } from '../state/school';
 import { useAuth } from '../state/auth';
 import { safeNavigate } from '../utils/safeNavigate';
-import { buildCampusMapSearchUrl, hasOfficialProvidenceLibraryGuide } from '@campus/shared/src/campusMapLookup';
+import { getCampusMapFallback, hasOfficialProvidenceLibraryGuide } from '@campus/shared/src/campusMapLookup';
 import {
   buildCampusMapHtml,
   buildWalkingDirectionsUrl,
@@ -73,7 +73,7 @@ function CampusMapContent({
   params: MapParams;
 }) {
   const theme = useTheme();
-  const mapSearchUrl = buildCampusMapSearchUrl(schoolName);
+  const mapFallback = getCampusMapFallback(schoolId, schoolName);
   const webRef = useRef<WebView>(null);
   const scrollRef = useRef<ScrollView>(null);
   const mounted = useRef(true);
@@ -258,21 +258,25 @@ function CampusMapContent({
       ) : catalog.length === 0 ? (
         <AICard title="尚未提供校園地點">
           <Text style={textStyle}>目前沒有可顯示的地點資料，不會改用其他學校的建築或導航位置。</Text>
-          {mapSearchUrl ? (
+          {mapFallback ? (
             <>
               <AIButton
-                label={`在 Google 地圖搜尋${schoolName}`}
+                label={mapFallback.label}
                 variant="ghost"
                 onPress={() => {
                   if (!mounted.current) return;
                   setDirectionsError('');
-                  void Linking.openURL(mapSearchUrl).catch(() => {
+                  void Linking.openURL(mapFallback.url).catch(() => {
                     if (mounted.current)
                       setDirectionsError('無法開啟地圖服務，請確認網路連線後重試。');
                   });
                 }}
               />
-              <Text style={textStyle}>第三方地圖搜尋結果尚未由校方核對，請確認校區名稱及位置。</Text>
+              <Text style={textStyle}>
+                {mapFallback.source === 'official'
+                  ? '校方地圖提供建築與單位對照；尚未將各建築位置逐筆建成可導航的校園座標。'
+                  : '第三方地圖搜尋結果尚未由校方核對，請確認校區名稱及位置。'}
+              </Text>
             </>
           ) : null}
           {directionsError ? (
