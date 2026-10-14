@@ -57,12 +57,12 @@ it('opens the chosen university library without showing Providence links or a si
   render(<LibraryPage />);
   expect(screen.getByText('國立清華大學圖書館')).toBeTruthy();
   expect(screen.getByRole('link', { name: '前往官方館藏入口 ↗' }).getAttribute('href')).toBe(
-    'https://www.lib.nthu.edu.tw/',
+    'https://nthu.primo.exlibrisgroup.com/discovery/search?lang=zh-tw&mode=advanced&vid=886UST_NTHU%3A886UST_NTHU',
   );
-  expect(screen.getByRole('link', { name: '從本校圖書館官網登入 ↗' }).getAttribute('href')).toBe(
-    'https://www.lib.nthu.edu.tw/',
+  expect(screen.getByRole('link', { name: '前往我的借閱紀錄 ↗' }).getAttribute('href')).toBe(
+    'https://nthu.primo.exlibrisgroup.com/discovery/account?section=overview&vid=886UST_NTHU%3A886UST_NTHU',
   );
-  expect(screen.queryByRole('link', { name: '前往我的借閱紀錄 ↗' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '從本校圖書館官網登入 ↗' })).toBeNull();
   expect(screen.queryByRole('button', { name: '搜尋學校館藏 ↗' })).toBeNull();
   expect(screen.queryByText('蓋夏圖書館')).toBeNull();
 });
