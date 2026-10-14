@@ -50,6 +50,9 @@ describe('official library catalog destinations', () => {
     );
     expect(buildOfficialLibraryCatalogUrl('cgu', '資料庫')).toBe('https://web20.lib.cgu.edu.tw/');
     expect(buildOfficialLibraryCatalogUrl('ncyu', '資料庫')).toBe('https://libaleph.ncyu.edu.tw/F');
+    expect(buildOfficialLibraryCatalogUrl('ntpu', '資料庫')).toBe('https://wpac.lib.ntpu.edu.tw/webpac/search.cfm');
+    expect(buildOfficialLibraryCatalogUrl('tmu', '資料庫')).toBe('https://libelis.tmu.edu.tw/webpacIndex.jsp');
+    expect(buildOfficialLibraryCatalogUrl('cycu', '資料庫')).toBe('https://cylis.lib.cycu.edu.tw/search*cht');
   });
 
   it('does not route an unknown campus into Providence or other schools', () => {
