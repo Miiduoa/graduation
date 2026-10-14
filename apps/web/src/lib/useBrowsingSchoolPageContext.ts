@@ -1,6 +1,8 @@
 'use client';
 
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
+import { findSchoolById } from '@campus/shared/src/schools';
+import { buildSchoolSearch } from './navigation';
 import { resolveSchoolPageContext, type SchoolSearchParams } from './pageContext';
 
 /**
@@ -13,9 +15,33 @@ export function useBrowsingSchoolPageContext(params?: SchoolSearchParams) {
     (value) => typeof value === 'string' && value.trim().length > 0,
   );
   const selectedSchoolId = selection?.selectedSchoolId;
-  const context = resolveSchoolPageContext(
+  const preferred = selection?.selectedSchool;
+  const requestedId = params?.campus && params.campus !== 'all'
+    ? params.campus
+    : params?.schoolId;
+  const usePreferred = preferred && (!explicit || requestedId === preferred.id);
+  const resolved = resolveSchoolPageContext(
     explicit ? params : selectedSchoolId ? { schoolId: selectedSchoolId } : params,
   );
+  // The live directory may contain campuses not bundled with this release.
+  const code = usePreferred
+    ? (preferred.code || findSchoolById(preferred.id)?.code || preferred.id.toUpperCase())
+    : resolved.schoolCode;
+  const context = usePreferred
+    ? {
+        school: {
+          id: preferred.id,
+          code,
+          name: preferred.name,
+          shortName: preferred.shortName,
+        },
+        schoolId: preferred.id,
+        schoolCode: code,
+        schoolName: preferred.name,
+        schoolContext: { id: preferred.id, code },
+        schoolSearch: buildSchoolSearch({ id: preferred.id, code }),
+      }
+    : resolved;
   return {
     ...context,
     ready: !selection || (!selection.loading && selection.catalogStatus === 'ready'),
