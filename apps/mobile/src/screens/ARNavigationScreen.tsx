@@ -15,6 +15,8 @@ import * as Haptics from 'expo-haptics';
 import { Magnetometer, Accelerometer } from 'expo-sensors';
 import { Screen, Button, Pill, AnimatedCard } from '../ui/components';
 import { theme } from '../ui/theme';
+import { useSchool } from '../state/school';
+import { canUseProvidencePathNetwork } from '../features/campusArScope';
 import { linkingOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 import {
   buildOutdoorRoute,
@@ -233,6 +235,35 @@ function getDirectionColor(direction: NavigationStep['direction']): string {
 }
 
 export function ARNavigationScreen(props: any) {
+  const { school } = useSchool();
+  if (!canUseProvidencePathNetwork(school.id)) {
+    return (
+      <Screen>
+        <View style={{ flex: 1, padding: 24, justifyContent: 'center', gap: 18 }}>
+          <Text style={{ color: theme.colors.text, fontSize: 22, fontWeight: '700' }}>
+            目前校園尚未提供 AR 校內導航
+          </Text>
+          <Text style={{ color: theme.colors.muted, fontSize: 15, lineHeight: 25 }}>
+            {school.name}尚未建立經校方核對的步行路網。為避免導錯校園，這裡不會套用靜宜大學的路徑節點或顯示未確認的轉彎指示。
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="返回目前校園地圖"
+            style={{ minHeight: 48, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.accent, borderRadius: 10, paddingHorizontal: 18 }}
+            onPress={() => props?.navigation?.navigate?.('MapV2')}
+          >
+            <Text style={{ fontSize: 15, fontWeight: '700', color: theme.colors.onAccent }}>
+              返回目前校園地圖
+            </Text>
+          </Pressable>
+        </View>
+      </Screen>
+    );
+  }
+  return <ProvidenceARNavigationScreen {...props} />;
+}
+
+function ProvidenceARNavigationScreen(props: any) {
   const nav = props?.navigation;
   const destination = props?.route?.params?.destination ?? '目的地';
   const destinationId = props?.route?.params?.destinationId;
