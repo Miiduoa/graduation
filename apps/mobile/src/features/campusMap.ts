@@ -1,5 +1,6 @@
 import { collection, getDocsFromServer, query, where } from 'firebase/firestore';
 import { getDb, isFirebaseMockMode } from '../firebase';
+import type { CampusCoordinate } from '@campus/shared/src/campusGeo';
 
 export type CampusMapPlace = {
   id: string;
@@ -83,7 +84,7 @@ export async function loadCampusMapPlaces(schoolId: string): Promise<CampusMapPl
     .sort((left, right) => left.name.localeCompare(right.name, 'zh-Hant'));
 }
 
-export type MapCoordinate = { lat: number; lng: number };
+export type MapCoordinate = CampusCoordinate;
 export type CampusMapPalette = {
   background: string;
   accent: string;
@@ -121,9 +122,12 @@ window.onerror=function(){send({type:'error'});};
 <script>
 if(typeof L!=='undefined'){
 var colors=${colors};
-var map=L.map('map').setView([${center.lat},${center.lng}],16);
+var campusCenter=L.latLng(${center.lat},${center.lng});
+var map=L.map('map').setView(campusCenter,16);
 var tileLayer=L.tileLayer('${tile}',{maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'}).addTo(map);
-tileLayer.on('tileerror',function(){send({type:'error'});});
+var failedTiles=0;
+tileLayer.on('tileerror',function(){if(++failedTiles>=4)send({type:'error'});});
+tileLayer.on('tileload',function(){failedTiles=0;});
 var markers=L.layerGroup().addTo(map),userMarker=null;
 document.addEventListener('message',function(event){
  try{
@@ -141,8 +145,9 @@ document.addEventListener('message',function(event){
   if(data.type==='clearLocation'&&userMarker){map.removeLayer(userMarker);userMarker=null;}
   if(data.type==='location'){
    if(userMarker)map.removeLayer(userMarker);
-   userMarker=L.circleMarker([data.lat,data.lng],{radius:8,color:colors.surface,weight:3,fillColor:colors.accent,fillOpacity:1}).addTo(map);
-   userMarker.bindTooltip('目前位置');map.setView([data.lat,data.lng],17);
+   userMarker=L.circleMarker([data.lat,data.lng],{radius:8,color:colors.surface,weight:3,fillColor:'#2563eb',fillOpacity:1}).addTo(map);
+   userMarker.bindTooltip('目前位置');
+   if(campusCenter.distanceTo([data.lat,data.lng])<=2000)map.setView([data.lat,data.lng],17);
   }
  }catch(error){}
 });

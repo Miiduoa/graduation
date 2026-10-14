@@ -242,3 +242,54 @@ test('unresolved campus titles do not create misleading Google Maps searches', a
   await view.findByText('尚未提供校園地點');
   expect(view.queryByText(/在 Google 地圖搜尋/)).toBeNull();
 });
+
+
+test('uses the confirmed user position for directions only after an explicit location request', async () => {
+  mockParams = { toPoiId: 'library' };
+  const view = await openMap();
+  expect(Location.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(view.getByText('查看目前位置')));
+  await act(async () => fireEvent.press(view.getByText('查看步行路線')));
+  expect(Linking.openURL).toHaveBeenCalledWith(expect.stringContaining('&origin=25.2%2C121.3'));
+  expect(view.getByText(/與目前位置直線相距約/)).toBeTruthy();
+});
+
+test('lets a visitor choose the start and destination from real school points', async () => {
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([
+    place,
+    { ...place, id: 'gate', name: '學校正門', lat: 25.11, lng: 121.21 },
+  ]);
+  const view = await openMap();
+  fireEvent.press(view.getByText(place.name));
+  fireEvent.press(view.getByText('設為步行起點'));
+  await act(async () => fireEvent.press(view.getByText('查看步行路線')));
+  expect(Linking.openURL).not.toHaveBeenCalled();
+  expect(view.getByText(/起點與終點不能相同/)).toBeTruthy();
+  fireEvent.press(view.getByText('學校正門'));
+  await act(async () => fireEvent.press(view.getByText('查看步行路線')));
+  expect(Linking.openURL).toHaveBeenCalledWith(expect.stringContaining('&origin=25.1%2C121.2'));
+  expect(view.getByText(/兩地直線距離約/)).toBeTruthy();
+});
+
+test('sorts nearby places only after location permission and supports clearing the radius filter', async () => {
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([
+    place,
+    { ...place, id: 'near', name: '附近教室', lat: 25.2, lng: 121.3 },
+  ]);
+  const view = await openMap();
+  expect(view.queryByText('附近 1 公里')).toBeNull();
+  await act(async () => fireEvent.press(view.getByText('查看目前位置')));
+  fireEvent.press(view.getByText('附近 1 公里'));
+  expect(view.queryByText(place.name)).toBeNull();
+  expect(view.getByText('附近教室')).toBeTruthy();
+  fireEvent.press(view.getByText('附近 1 公里'));
+  expect(view.getByText(place.name)).toBeTruthy();
+});
+
+test('does not invent cross-school points when a deep link targets an unpublished place', async () => {
+  mockParams = { focusPoiId: 'from-previous-campus' };
+  const view = await openMap();
+  expect(view.getByText('找不到連結指定的地點')).toBeTruthy();
+  expect(Linking.openURL).not.toHaveBeenCalled();
+  expect(view.queryByText('查看步行路線')).toBeNull();
+});

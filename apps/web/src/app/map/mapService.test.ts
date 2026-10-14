@@ -1,5 +1,13 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import { loadMapFavorites, loadMapLocations, setMapFavorite, type MapLocation } from './mapService';
+import {
+  distanceMeters,
+  formatDistance,
+  loadMapFavorites,
+  loadMapLocations,
+  setMapFavorite,
+  type MapLocation,
+} from './mapService';
+import { centerOfCoordinates } from '@campus/shared/src/campusGeo';
 import { getDocsFromServer } from 'firebase/firestore';
 
 const state = vi.hoisted(() => ({
@@ -144,4 +152,19 @@ it('does not write after the page scope is revoked during the transaction read',
     'Account changed',
   );
   expect(state.set).not.toHaveBeenCalled();
+});
+
+
+it('shows only measured straight-line distances and uses a robust campus viewport', () => {
+  expect(distanceMeters(location, location)).toBe(0);
+  expect(distanceMeters(location, { lat: 24.22495, lng: 120.56535 })).toBeGreaterThan(200);
+  expect(formatDistance(56)).toBe('60 公尺');
+  expect(formatDistance(1600)).toBe('1.6 公里');
+  expect(centerOfCoordinates([
+    { lat: 24.225, lng: 120.563 },
+    { lat: 24.226, lng: 120.564 },
+    { lat: 24.227, lng: 120.565 },
+    { lat: 25.1, lng: 121.2 },
+  ])).toEqual({ lat: 24.2265, lng: 120.5645 });
+  expect(centerOfCoordinates([])).toBeNull();
 });
