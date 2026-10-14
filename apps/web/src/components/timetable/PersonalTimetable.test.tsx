@@ -20,6 +20,15 @@ vi.mock('@/components/SelectedSchoolProvider', () => ({
   useSelectedSchool: () => mocks.school,
   useOptionalSelectedSchool: () => ({ ...mocks.school, selectedSchool: mocks.school.selectedSchoolId ? { id: mocks.school.selectedSchoolId, name: '靜宜大學' } : null, catalogStatus: 'ready' }),
 }));
+vi.mock('@/lib/usePersonalImports', () => ({
+  usePersonalImportScope: () => ({
+    scope: { owner: 'school:alice', schoolId: 'pu' },
+    scopeKey: 'school:alice:pu',
+    loading: false,
+    schoolName: '靜宜大學',
+  }),
+  usePersonalImports: () => ({ records: [], error: '', loading: false }),
+}));
 vi.mock('@/lib/timetable/store', () => ({
   loadPersonalTimetable: mocks.load,
   savePersonalTimetable: mocks.save,
