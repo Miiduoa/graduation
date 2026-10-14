@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -6,12 +6,26 @@ import { safeNavigate } from '../utils/safeNavigate';
 import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { useNuniSession } from '../state/nuniSession';
-import { isStudentIdLoginAvailable } from '../services/schoolLoginAvailability';
+import {
+  SCHOOL_LOGIN_BIND_HINT,
+  isSchoolLoginEntryAvailable,
+  loadSchoolLoginProviderKinds,
+} from '../services/schoolLoginAvailability';
 
 export default function LoginLandingScreen() {
   const navigation = useNavigation();
   const auth = useNuniSession();
   const s = useThemeStyleSheet(createStyles);
+  const [schoolEntry, setSchoolEntry] = useState(isSchoolLoginEntryAvailable());
+  useEffect(() => {
+    let active = true;
+    void loadSchoolLoginProviderKinds().then(() => {
+      if (active) setSchoolEntry(isSchoolLoginEntryAvailable());
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
   return (
     <SafeAreaView testID="login-landing" style={s.page}>
       <ScrollView contentContainerStyle={s.content}>
@@ -72,22 +86,21 @@ export default function LoginLandingScreen() {
         </View>
         <View style={s.schoolPanel}>
           <Text style={s.title}>連線學校帳號</Text>
-          <Text style={s.body}>
-            {isStudentIdLoginAvailable()
+          <Text style={s.body} testID={schoolEntry ? undefined : 'school-login-hint'}>
+            {schoolEntry
               ? '只有讀取學校提供的個人課表與成績，才需要連線學校帳號。'
-              : '學校帳號連線尚未開放。公開資訊、Campus One 課程與店家服務仍可使用。'}
+              : SCHOOL_LOGIN_BIND_HINT}
           </Text>
-          <Pressable
-            testID="school-login-start"
-            accessibilityRole="button"
-            style={s.schoolButton}
-            disabled={!isStudentIdLoginAvailable()}
-            onPress={() => safeNavigate(navigation, 'SSOLogin')}
-          >
-            <Text style={s.schoolButtonText}>
-              {isStudentIdLoginAvailable() ? '前往學校登入' : '學校連線尚未開放'}
-            </Text>
-          </Pressable>
+          {schoolEntry ? (
+            <Pressable
+              testID="school-login-start"
+              accessibilityRole="button"
+              style={s.schoolButton}
+              onPress={() => safeNavigate(navigation, 'SSOLogin')}
+            >
+              <Text style={s.schoolButtonText}>前往學校登入</Text>
+            </Pressable>
+          ) : null}
         </View>
         <Text style={s.footer}>Campus One · 課程與校園生活</Text>
       </ScrollView>

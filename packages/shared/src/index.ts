@@ -57,6 +57,7 @@ export type School = {
 };
 
 export * from './auth';
+export * from './schoolLogin';
 export * from './devUniversalAccounts';
 export * from './notifications';
 export * from './schools';

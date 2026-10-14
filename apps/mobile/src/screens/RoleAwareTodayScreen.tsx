@@ -7,6 +7,7 @@ import { AIDetailScreen, AICard, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { UnavailableFeatureScreen, type ServiceScreenProps } from './UnavailableFeatureScreen';
 import { resolveDashboardRole, type ResolvedDashboardRole } from '../services/dashboardRole';
+import { isSchoolLoginEntryAvailable } from '../services/schoolLoginAvailability';
 export { resolveDashboardRole, type ResolvedDashboardRole } from '../services/dashboardRole';
 
 const roleTitles: Partial<Record<ResolvedDashboardRole, string>> = {
@@ -62,7 +63,9 @@ export default function RoleAwareTodayScreen(props: ServiceScreenProps) {
         title="確認帳號身分"
         description="目前無法確認帳號身分。請到登入頁重新確認；也可以先查看公開公告。"
         actions={[
-          { label: '前往學校登入', route: 'SSOLogin' },
+          ...(isSchoolLoginEntryAvailable()
+            ? [{ label: '前往學校登入', route: 'SSOLogin' }]
+            : []),
           { label: '查看校方公告', route: '公告總覽' },
         ]}
       />
