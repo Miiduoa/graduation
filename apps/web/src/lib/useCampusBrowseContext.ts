@@ -21,6 +21,9 @@ export function useCampusBrowseContext(params?: SchoolSearchParams): CampusBrows
       return { status: 'unselected', schoolId: null, schoolName: '', schoolSearch: '?campus=all' };
     }
     const legacy = resolveSchoolPageContext(params);
+    if (legacy.schoolId === 'unavailable-campus') {
+      return { status: 'unselected', schoolId: null, schoolName: '', schoolSearch: '?campus=all' };
+    }
     return {
       status: 'ready',
       schoolId: legacy.schoolId,
