@@ -286,7 +286,7 @@ export function PublicTransitExplorer({
         />
         {status === 'loading' && <Text accessibilityRole="progressbar" style={body}>正在查詢官方站牌…</Text>}
         {message ? <Text accessibilityRole="alert" style={body}>{message}</Text> : null}
-        {accuracyNotice ? <Text accessibilityRole="status" style={body}>{accuracyNotice}</Text> : null}
+        {accuracyNotice ? <Text style={body}>{accuracyNotice}</Text> : null}
         {stops.map((stop) => (
           <AIButton
             key={stop.city + ':' + stop.id}
