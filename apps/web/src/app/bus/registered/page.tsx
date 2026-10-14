@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import {
   BUS_FRESHNESS_MS,
   TAICHUNG_BUS_URL,
@@ -262,10 +262,14 @@ function SchoolBus({ schoolId }: { schoolId: string }) {
 
 function BusContext() {
   const search = useSearchParams();
-  const { schoolId, schoolName } = resolveSchoolPageContext({
+  const { schoolId, schoolName, ready } = useBrowsingSchoolPageContext({
     school: search.get('school') ?? undefined,
     schoolId: search.get('schoolId') ?? undefined,
+    campus: search.get('campus') ?? undefined,
   });
+  if (!ready) {
+    return <SiteShell title="公車與交通"><p role="status">正在確認校園目錄…</p></SiteShell>;
+  }
   return (
     <SiteShell title="公車與交通" subtitle="查看候車站牌，確認到站資訊。" schoolName={schoolName}>
       <SchoolBus key={schoolId} schoolId={schoolId} />

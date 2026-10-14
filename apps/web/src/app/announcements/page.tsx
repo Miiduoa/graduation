@@ -14,6 +14,7 @@ import {
   SOURCE_NOT_CONNECTED_TEXT,
   staleAnnouncementUpdatedAt,
 } from '@campus/shared/src/campusAnnouncements';
+import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import { resolveAnnouncementSchool } from './resolveSchool';
 import styles from './announcements.module.css';
 
@@ -334,7 +335,8 @@ export default function AnnouncementsPage(props: {
   searchParams?: Promise<{ school?: string; schoolId?: string; campus?: string }>;
 }) {
   const params = props.searchParams ? use(props.searchParams) : undefined;
-  const { school, visible } = resolveAnnouncementSchool(params);
+  const browsing = useBrowsingSchoolPageContext(params);
+  const { school, visible } = resolveAnnouncementSchool({ schoolId: browsing.schoolId });
   const { user, loading } = useAuth();
   return (
     <SiteShell
@@ -343,7 +345,9 @@ export default function AnnouncementsPage(props: {
       title="校園公告"
       subtitle="公開處室公告的摘要與原文連結。一般帳號即可查看。"
     >
-      {!visible ? (
+      {!browsing.ready ? (
+        <p className={styles.status} role="status">正在確認校園目錄…</p>
+      ) : !visible ? (
         <section className={styles.status}>
           <h2>目前沒有公開公告</h2>
         </section>
