@@ -2,10 +2,15 @@ import { render, screen } from '@testing-library/react';
 import { vi, expect, it } from 'vitest';
 import { useBrowsingSchoolPageContext } from './useBrowsingSchoolPageContext';
 
-const browsing = vi.hoisted(() => ({ id: 'pu' as string | null, loading: false }));
+const browsing = vi.hoisted(() => ({
+  id: 'pu' as string | null,
+  name: '靜宜大學',
+  loading: false,
+}));
 vi.mock('@/components/SelectedSchoolProvider', () => ({
   useOptionalSelectedSchool: () => ({
     selectedSchoolId: browsing.id,
+    selectedSchool: browsing.id ? { id: browsing.id, name: browsing.name } : null,
     loading: browsing.loading,
     catalogStatus: 'ready',
   }),
@@ -16,9 +21,11 @@ function Probe({ explicit }: { explicit?: string }) {
 }
 it('updates scoped public data after a school switch', () => {
   browsing.id = 'pu';
+  browsing.name = '靜宜大學';
   const view = render(<Probe />);
   expect(screen.getByText('pu')).toBeTruthy();
   browsing.id = 'nthu';
+  browsing.name = '國立清華大學';
   view.rerender(<Probe />);
   expect(screen.getByText('nthu')).toBeTruthy();
   view.unmount();
@@ -34,5 +41,13 @@ it('blocks rendering school-specific content during preference hydration', () =>
   const view = render(<Probe />);
   expect(screen.getByText('loading')).toBeTruthy();
   browsing.loading = false;
+  view.unmount();
+});
+
+it('does not confuse a campus in the live directory with the default bundled campus', () => {
+  browsing.id = 'tw-new-university';
+  browsing.name = '某所新設大學';
+  const view = render(<Probe />);
+  expect(screen.getByText('tw-new-university')).toBeTruthy();
   view.unmount();
 });
