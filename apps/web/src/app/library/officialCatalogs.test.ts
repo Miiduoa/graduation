@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { mockSchools } from '@campus/shared/src/schools';
+import { isPlaceholderAnnouncementSchool } from '@campus/shared/src/campusAnnouncements';
 import {
   buildOfficialLibraryCatalogUrl,
   getOfficialLibrary,
@@ -72,6 +74,26 @@ describe('official library catalog destinations', () => {
       for (const value of [library.websiteUrl, library.catalogUrl, library.accountUrl, library.hoursUrl, library.spacesUrl, library.electronicResourcesUrl]) {
         if (value) expect(new URL(value).protocol).toBe('https:');
       }
+    }
+  });
+});
+
+
+describe('bundled campus library completeness', () => {
+  it('provides a campus-specific catalog for every public university in the built-in directory', () => {
+    const officialSchools = mockSchools.filter(
+      (school) =>
+        !isPlaceholderAnnouncementSchool({ schoolId: school.id }) &&
+        !school.name.includes('（示範）'),
+    );
+    expect(officialSchools.length).toBeGreaterThanOrEqual(21);
+    for (const school of officialSchools) {
+      const library = getOfficialLibrary(school.id, school.name);
+      expect(library, `Missing official library for ${school.id}`).not.toBeNull();
+      expect(library!.catalogUrl, school.id).not.toBe(library!.websiteUrl);
+      const catalog = new URL(library!.catalogUrl);
+      expect(catalog.protocol, school.id).toBe('https:');
+      if (school.id !== 'pu') expect(catalog.hostname).not.toContain('.lib.pu.edu.tw');
     }
   });
 });
