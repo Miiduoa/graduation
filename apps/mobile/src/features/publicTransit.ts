@@ -110,7 +110,7 @@ function validQuery(input: PublicTransitQuery): boolean {
   return input.action === 'arrivals' && /^[A-Za-z0-9_-]{1,80}$/.test(input.stopId);
 }
 
-const unavailable = (reason: PublicTransitResult & { status: 'unavailable' }['reason']): PublicTransitResult => ({
+const unavailable = (reason: Extract<PublicTransitResult, { status: 'unavailable' }>['reason']): PublicTransitResult => ({
   status: 'unavailable', reason,
 });
 
