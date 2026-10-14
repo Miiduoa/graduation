@@ -14,7 +14,7 @@ import { SiteShell } from '@/components/SiteShell';
 import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
-import { findSocialPoi } from '@/lib/community/pois';
+import { findSocialPoi, verifiedSocialPoisForSchool } from '@/lib/community/pois';
 import { publishStory, type StoryKind } from '@/lib/community/firestore';
 import { uploadCampusMedia } from '@/lib/community/media';
 
@@ -45,7 +45,10 @@ function StoryComposeInner({ schoolId }: { schoolId: string }) {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
   const searchParams = useSearchParams();
-  const initialPoiId = searchParams?.get('poiId') ?? null;
+  const requestedPoiId = searchParams?.get('poiId') ?? null;
+  const initialPoiId = verifiedSocialPoisForSchool(schoolId).some(
+    (poi) => poi.id === requestedPoiId,
+  ) ? requestedPoiId : null;
   const initialPoi = initialPoiId ? findSocialPoi(initialPoiId) : null;
 
   const [kind, setKind] = useState<StoryKind>('text');
