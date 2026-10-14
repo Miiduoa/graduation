@@ -207,3 +207,26 @@ it('clears old account favorites synchronously while the next account loads', as
   const favorite = await screen.findByRole('button', { name: '收藏蓋夏圖書館' });
   expect(favorite.hasAttribute('disabled')).toBe(true);
 });
+
+
+it('opens an explicitly labeled map search for the selected university when POIs are unavailable', async () => {
+  vi.mocked(loadMapLocations).mockResolvedValue([]);
+  render(<MapClient school="nthu" schoolName="國立清華大學" />);
+  expect(await screen.findByText('目前沒有可顯示的校園地點')).toBeTruthy();
+  const link = screen.getByRole('link', { name: '在 Google 地圖搜尋國立清華大學 ↗' });
+  const url = new URL(link.getAttribute('href')!);
+  expect(url.hostname).toBe('www.google.com');
+  expect(url.pathname).toBe('/maps/search/');
+  expect(url.searchParams.get('query')).toBe('國立清華大學 校園');
+  expect(link.getAttribute('target')).toBe('_blank');
+  expect(screen.getByText(/第三方地圖搜尋/)).toBeTruthy();
+  expect(screen.queryByText('蓋夏圖書館')).toBeNull();
+  expect(screen.queryByRole('link', { name: '開啟靜宜大學網站' })).toBeNull();
+});
+
+it('does not produce a public map search for an unresolved campus name', async () => {
+  vi.mocked(loadMapLocations).mockResolvedValue([]);
+  render(<MapClient school="external-school" schoolName="所選校園（external-school）" />);
+  expect(await screen.findByText('目前沒有可顯示的校園地點')).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /在 Google 地圖搜尋/ })).toBeNull();
+});
