@@ -1,4 +1,5 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { Suspense } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import LibraryPage from './page';
 const context = vi.hoisted(() => ({ schoolId: 'pu', schoolName: '靜宜大學' }));
@@ -63,9 +64,13 @@ it('opens the chosen university library without reusing Providence links', () =>
 });
 
 it('never opens a different school when the query names an unsupported campus', async () => {
-  const { findByText } = render(
-    <LibraryPage searchParams={Promise.resolve({ campus: 'campus-not-yet-listed', schoolId: 'pu' })} />,
-  );
-  expect(await findByText('尚未確認這所學校的圖書館入口')).toBeTruthy();
+  await act(async () => {
+    render(
+      <Suspense fallback={<p>載入校園</p>}>
+        <LibraryPage searchParams={Promise.resolve({ campus: 'campus-not-yet-listed', schoolId: 'pu' })} />
+      </Suspense>,
+    );
+  });
+  expect(await screen.findByText('尚未確認這所學校的圖書館入口')).toBeTruthy();
   expect(screen.queryByRole('link')).toBeNull();
 });
