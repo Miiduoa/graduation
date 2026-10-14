@@ -477,10 +477,16 @@ test('switching universities opens that university official library instead of P
   const navigate = jest.fn();
   const view = render(<LibraryAiFirstScreen navigation={{ navigate }} />);
   expect(view.getByText('國立臺灣大學圖書館')).toBeTruthy();
+  expect(view.queryByText('在圖書館網站搜尋')).toBeNull();
   fireEvent.changeText(view.getByLabelText('館藏關鍵字'), ' 分散式系統 ');
   await act(async () => fireEvent.press(view.getByText('查詢館藏')));
-  expect(Clipboard.setStringAsync).toHaveBeenCalledWith('分散式系統');
-  expect(Linking.openURL).toHaveBeenCalledWith('https://www.lib.ntu.edu.tw/');
+  expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
+  const opened = jest.mocked(Linking.openURL).mock.calls.at(-1)?.[0];
+  expect(opened).toBeTruthy();
+  const url = new URL(opened!);
+  expect(url.hostname).toBe('ntu.primo.exlibrisgroup.com');
+  expect(url.searchParams.get('vid')).toBe('886NTU_INST:886NTU_INST');
+  expect(url.searchParams.get('query')).toBe('any,contains,分散式系統');
   expect(navigate).not.toHaveBeenCalledWith('LibraryCatalog', expect.anything());
   expect(view.queryByText('蓋夏圖書館')).toBeNull();
 });
@@ -495,4 +501,24 @@ test('a campus switch resets library search and never carries the previous OPAC 
   expect(view.queryByText('開啟我的借閱紀錄')).toBeNull();
   await act(async () => fireEvent.press(view.getByText('圖書館官網')));
   expect(Linking.openURL).toHaveBeenCalledWith('https://olis.ncue.edu.tw/');
+});
+
+test('changing the university replaces both the catalog destination and previous search', async () => {
+  mockSchool = { id: 'nthu' };
+  const view = render(<LibraryAiFirstScreen />);
+  fireEvent.changeText(view.getByLabelText('館藏關鍵字'), 'old query');
+  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  const first = new URL(jest.mocked(Linking.openURL).mock.calls.at(-1)![0]);
+  expect(first.hostname).toBe('nthu.primo.exlibrisgroup.com');
+  expect(first.searchParams.get('query')).toBe('any,contains,old query');
+  mockSchool = { id: 'ncku' };
+  view.rerender(<LibraryAiFirstScreen />);
+  expect(view.getByLabelText('館藏關鍵字').props.value).toBe('');
+  fireEvent.changeText(view.getByLabelText('館藏關鍵字'), 'new query');
+  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  const second = new URL(jest.mocked(Linking.openURL).mock.calls.at(-1)![0]);
+  expect(second.hostname).toBe('ncku.primo.exlibrisgroup.com');
+  expect(second.searchParams.get('vid')).toBe('886NCKU_INST:886NCKU_INST');
+  expect(second.searchParams.get('query')).toBe('any,contains,new query');
+  expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
 });
