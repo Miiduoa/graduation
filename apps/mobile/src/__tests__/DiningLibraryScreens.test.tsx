@@ -546,3 +546,26 @@ test('Chang Gung library uses its official iGrid catalog rather than Providence'
   expect(Clipboard.setStringAsync).toHaveBeenCalledWith('護理');
   expect(view.queryByText('蓋夏圖書館')).toBeNull();
 });
+
+
+test('Chung Yuan library account and catalog stay on its official domain', async () => {
+  mockSchool = { id: 'cycu' };
+  const view = render(<LibraryAiFirstScreen />);
+  fireEvent.changeText(view.getByLabelText('館藏關鍵字'), '企業管理');
+  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  expect(Linking.openURL).toHaveBeenCalledWith('https://cylis.lib.cycu.edu.tw/search*cht');
+  expect(Clipboard.setStringAsync).toHaveBeenCalledWith('企業管理');
+  await act(async () => fireEvent.press(view.getByText('開啟我的借閱紀錄')));
+  expect(Linking.openURL).toHaveBeenCalledWith('https://cylis.lib.cycu.edu.tw/patroninfo*cht');
+  expect(view.queryByText('蓋夏圖書館')).toBeNull();
+});
+
+test('Taipei Medical library uses its own WebPAC catalog rather than a Providence search', async () => {
+  mockSchool = { id: 'tmu' };
+  const view = render(<LibraryAiFirstScreen />);
+  fireEvent.changeText(view.getByLabelText('館藏關鍵字'), '醫學');
+  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  expect(Linking.openURL).toHaveBeenCalledWith('https://libelis.tmu.edu.tw/webpacIndex.jsp');
+  expect(Clipboard.setStringAsync).toHaveBeenCalledWith('醫學');
+  expect(view.queryByText('蓋夏圖書館')).toBeNull();
+});
