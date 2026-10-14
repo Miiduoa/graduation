@@ -50,6 +50,38 @@ test('unknown availability never becomes verified success', () => {
   assert.match(c.courseAccessErrorMessage({ status: 404 }), /尚未開放/);
   assert.throws(() => c.parseCourseCandidate({ ...candidate(), version: NaN }));
 });
+
+test('approved personal course shortcut needs both an active student membership and matching term', () => {
+  const request = receipt({ state: 'approved', membershipActive: true });
+  const member = { id: id('cw'), title: '正式資料庫', state: 'active', memberRole: 'student' };
+  assert.deepEqual(c.approvedCourseLinks(metadata, [request], [member]), [{ id: id('cw'), title: '正式資料庫' }]);
+  assert.deepEqual(c.approvedCourseLinks(metadata, [request, request], [member]), [{ id: id('cw'), title: '正式資料庫' }]);
+  for (const stale of [
+    receipt({ state: 'pending', membershipActive: false }),
+    receipt({ state: 'revoked', membershipActive: false }),
+    receipt({ state: 'approved', membershipActive: false }),
+    receipt({ state: 'approved', membershipActive: true, metadata: { ...metadata, schoolId: 'other' } }),
+    receipt({ state: 'approved', membershipActive: true, metadata: { ...metadata, academicYear: '114' } }),
+    receipt({ state: 'approved', membershipActive: true, metadata: { ...metadata, semester: '2' } }),
+  ]) assert.deepEqual(c.approvedCourseLinks(metadata, [stale], [member]), []);
+  assert.deepEqual(c.approvedCourseLinks(metadata, [request], [{ ...member, state: 'archived' }]), []);
+  assert.deepEqual(c.approvedCourseLinks(metadata, [request], [{ ...member, memberRole: 'owner-teacher' }]), []);
+  assert.deepEqual(c.approvedCourseLinks(metadata, [request], [{ ...member, id: id('cw', 9) }]), []);
+});
+
+test('a conflicting course code, teacher or section cannot produce a direct-link shortcut', () => {
+  const member = { id: id('cw'), title: '正式資料庫', state: 'active', memberRole: 'student' };
+  const request = receipt({ state: 'approved', membershipActive: true });
+  for (const field of [
+    { courseCode: 'IM302' },
+    { teacher: '另一位老師' },
+    { className: '資管三A' },
+    { courseCode: 'OTHER', title: metadata.title },
+  ]) assert.deepEqual(c.approvedCourseLinks(metadata, [{ ...request, metadata: { ...metadata, ...field } }], [member]), []);
+  assert.deepEqual(c.approvedCourseLinks({ ...metadata, academicYear: '' }, [request], [member]), []);
+  assert.deepEqual(c.approvedCourseLinks({ ...metadata, courseCode: '', title: '另一門' }, [request], [member]), []);
+});
+
 test('BFF allowlist rejects path escape, arbitrary grants and malformed IDs', () => {
   for (const path of ['course-access/match', `course-access/requests/${id('car')}/decide`]) assert.equal(isCourseAccessPath(path), true);
   for (const path of ['course-access/../ops', 'course-access/grant-teacher', 'course-access/requests/pa_x/decide', 'course-access/match?school=other', 'course-access/match/']) assert.equal(isCourseAccessPath(path), false);

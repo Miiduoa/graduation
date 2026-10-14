@@ -124,11 +124,13 @@ function RowEditor({
   onChange,
   workspaces,
   disabled = false,
+  onRefreshWorkspaces,
 }: {
   row: PersonalImportRow;
   onChange(row: PersonalImportRow): void;
   workspaces: NuniWorkspace[];
   disabled?: boolean;
+  onRefreshWorkspaces?: () => void;
 }) {
   const fields = [...commonFields, ...extraFields[row.kind]];
   return (
@@ -160,7 +162,9 @@ function RowEditor({
           }
         />
       ))}
-      <CourseAccessPanel row={row} workspaces={workspaces} disabled={disabled} />
+      <CourseAccessPanel row={row} workspaces={workspaces} disabled={disabled}
+        onRefreshWorkspaces={onRefreshWorkspaces}
+        onSelectLinkedCourse={(workspaceId) => onChange({ ...row, linkedCourseId: workspaceId })} />
       <Text style={textStyle}>連結已加入的課班（選填）</Text>
       <Text style={{ color: theme.colors.muted }}>
         只建立你自己的對照；不會加入課班或通知老師。課班清單尚未提供學校、學期與教師資訊，請先自行核對。教師姓名是個人記錄，尚未驗證身分。
@@ -731,6 +735,7 @@ function ImportWorkspace({
                       disabled={saving}
                       row={row}
                       workspaces={workspaces}
+                      onRefreshWorkspaces={() => void loadLinks()}
                       onChange={(next) =>
                         setRows((items) => items.map((item) => (item.id === row.id ? next : item)))
                       }
@@ -820,6 +825,7 @@ function ImportWorkspace({
                       disabled={saving}
                       row={editing.row}
                       workspaces={workspaces}
+                      onRefreshWorkspaces={() => void loadLinks()}
                       onChange={(next) => setEditing({ before: editing.before, row: next })}
                     />
                     <Button text="儲存編輯" disabled={saving} onPress={saveEdit} />
