@@ -25,3 +25,14 @@ it('limits the official library floor guide to the identified Providence library
   expect(hasOfficialProvidenceLibraryGuide('pu', { name: '蓋夏咖啡', category: '餐飲' })).toBe(false);
   expect(PROVIDENCE_LIBRARY_FLOOR_GUIDE_URL).toMatch(/^https:\/\/b028\.pu\.edu\.tw\//);
 });
+
+
+it('returns the university-operated campus map only for the confirmed Providence school id', async () => {
+  const { getOfficialCampusMapUrl, PROVIDENCE_CAMPUS_MAP_URL } =
+    await import('@campus/shared/src/campusMapLookup');
+  expect(PROVIDENCE_CAMPUS_MAP_URL).toBe('https://gnl.pu.edu.tw/p/426-1007-8.php?Lang=zh-tw');
+  expect(getOfficialCampusMapUrl('pu')).toBe(PROVIDENCE_CAMPUS_MAP_URL);
+  expect(getOfficialCampusMapUrl('nthu')).toBeNull();
+  expect(getOfficialCampusMapUrl('tw-demo-uni')).toBeNull();
+  expect(getOfficialCampusMapUrl()).toBeNull();
+});
