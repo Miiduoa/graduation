@@ -46,24 +46,52 @@ function emptyTimetable(schoolId: string): StoredTimetable {
   };
 }
 
+/** Corrupted on-device records are not an empty timetable. Never overwrite them silently. */
+export class TimetableLocalReadError extends Error {
+  constructor(readonly reason: 'corrupt' | 'unavailable') {
+    super(reason === 'corrupt'
+      ? '這台裝置的課表資料格式異常，原始資料仍保留。請勿清除瀏覽器資料。'
+      : '目前無法讀取這台裝置的課表，請確認瀏覽器儲存權限。');
+    this.name = 'TimetableLocalReadError';
+  }
+}
+
 function readLocal(ownerKey: string, schoolId: string): StoredTimetable {
+  let scopedRaw: string | null;
+  let legacyRaw: string | null;
   try {
-    const raw =
-      localStorage.getItem(`${LOCAL_KEY}:${ownerKey}:${schoolId}`) ||
-      localStorage.getItem(`${LOCAL_KEY}:${ownerKey}`);
-    if (!raw) return emptyTimetable(schoolId);
-    const parsed = JSON.parse(raw) as StoredTimetable;
-    if (parsed.schoolId && parsed.schoolId !== schoolId) return emptyTimetable(schoolId);
-    return {
-      ...emptyTimetable(schoolId),
-      ...parsed,
-      courses: cleanCourses(parsed.courses),
-      meta: cleanMeta(parsed.meta),
-      schoolId: parsed.schoolId || schoolId,
-    };
+    scopedRaw = localStorage.getItem(`${LOCAL_KEY}:${ownerKey}:${schoolId}`);
+    legacyRaw = scopedRaw === null ? localStorage.getItem(`${LOCAL_KEY}:${ownerKey}`) : null;
   } catch {
+    throw new TimetableLocalReadError('unavailable');
+  }
+  const raw = scopedRaw ?? legacyRaw;
+  if (raw === null) return emptyTimetable(schoolId);
+  let parsed: StoredTimetable;
+  try {
+    parsed = JSON.parse(raw) as StoredTimetable;
+  } catch {
+    throw new TimetableLocalReadError('corrupt');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) ||
+      !Array.isArray(parsed.courses) || parsed.courses.length > 80 ||
+      parsed.courses.some((row) => !row || typeof row !== 'object' || Array.isArray(row)) ||
+      (parsed.meta !== undefined && (!parsed.meta || typeof parsed.meta !== 'object' || Array.isArray(parsed.meta)))) {
+    throw new TimetableLocalReadError('corrupt');
+  }
+  // An unscoped legacy copy without an explicit school must never be claimed.
+  // A mismatched scoped copy is potentially damaged and must remain untouched.
+  if (parsed.schoolId !== schoolId) {
+    if (scopedRaw !== null) throw new TimetableLocalReadError('corrupt');
     return emptyTimetable(schoolId);
   }
+  return {
+    ...emptyTimetable(schoolId),
+    ...parsed,
+    courses: cleanCourses(parsed.courses),
+    meta: cleanMeta(parsed.meta),
+    schoolId: parsed.schoolId || schoolId,
+  };
 }
 
 export const CLOUD_NEEDS_SCHOOL_COPY = '登入學校帳號後才能存到雲端';
@@ -154,6 +182,8 @@ export async function savePersonalTimetable(
     updatedAt: new Date().toISOString(),
   };
   const ownerKey = localOwner === 'guest' ? 'local' : localOwner || uid || 'local';
+  // A failed read, damaged JSON or cross-school scoped record must not be overwritten.
+  readLocal(ownerKey, timetable.schoolId);
   writeLocal(ownerKey, next);
   // 課表匯入與本機整理目前只留在這台裝置，不送到雲端。
   return { stored: 'local' };
