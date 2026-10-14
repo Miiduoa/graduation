@@ -343,6 +343,15 @@ test('marks unverified and demo venues and leaves verified unmarked', async () =
   expect(view.queryAllByText('未核對')).toHaveLength(1);
 });
 
+test('restaurant list payment copy does not mention Nuni', async () => {
+  const view = render(<CafeteriaAiFirstScreen />);
+  await act(async () => {});
+  expect(view.queryByText(/Nuni|nuni/)).toBeNull();
+  expect(
+    view.queryByText('價格、是否賣完、是否接單以店家訂餐頁為準。Nuni 不處理這筆的付款與退款。'),
+  ).toBeNull();
+});
+
 test('uses an honest empty state when this school has no restaurants', async () => {
   jest.mocked(loadDiningCatalog).mockResolvedValueOnce({ venues: [], menus: [] });
   const view = render(<CafeteriaAiFirstScreen />);
