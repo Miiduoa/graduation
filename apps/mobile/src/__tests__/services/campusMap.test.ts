@@ -129,12 +129,21 @@ test('rejects a wrong-school nested coordinate even when the values are valid', 
 });
 
 test('hides historical demo POIs without hiding legitimate published places', async () => {
-  jest.mocked(getDocsFromServer).mockResolvedValueOnce(snapshot([
-    { schoolId: 'tw-nchu', name: '工程館', category: 'building', location: { lat: 24.1234, lng: 120.789 } },
-    { schoolId: 'tw-nchu', name: '真實地點', isDemo: true, lat: 24.2, lng: 120.5 },
-    { schoolId: 'tw-nchu', name: '學校提供的校舍', lat: 24.13, lng: 120.67 },
-  ]));
-  // The fixture generator assigns a document ID matching its known seed signature.
+  const docs = [
+    {
+      id: 'tw-nchu-poi-1',
+      data: () => ({ schoolId: 'tw-nchu', name: '工程館', category: 'building', location: { lat: 24.1234, lng: 120.789 } }),
+    },
+    {
+      id: 'tagged',
+      data: () => ({ schoolId: 'tw-nchu', name: '測試校舍', isDemo: true, lat: 24.2, lng: 120.5 }),
+    },
+    {
+      id: 'official',
+      data: () => ({ schoolId: 'tw-nchu', name: '學校提供的校舍', lat: 24.13, lng: 120.67 }),
+    },
+  ];
+  jest.mocked(getDocsFromServer).mockResolvedValueOnce({ empty: false, docs } as never);
   const places = await loadCampusMapPlaces('tw-nchu');
-  expect(places.map((place) => place.name)).toEqual(['工程館', '學校提供的校舍']);
+  expect(places.map((place) => place.name)).toEqual(['學校提供的校舍']);
 });
