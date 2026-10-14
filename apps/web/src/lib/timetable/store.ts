@@ -56,7 +56,14 @@ export class TimetableLocalReadError extends Error {
   }
 }
 
-function readLocal(ownerKey: string, schoolId: string): StoredTimetable {
+type LocalTimetableRead = {
+  timetable: StoredTimetable;
+  // Only an actual current-school record may compete with a cloud copy.
+  found: boolean;
+  recordedAt: number;
+};
+
+function readLocalSnapshot(ownerKey: string, schoolId: string): LocalTimetableRead {
   let scopedRaw: string | null;
   let legacyRaw: string | null;
   try {
@@ -66,7 +73,7 @@ function readLocal(ownerKey: string, schoolId: string): StoredTimetable {
     throw new TimetableLocalReadError('unavailable');
   }
   const raw = scopedRaw ?? legacyRaw;
-  if (raw === null) return emptyTimetable(schoolId);
+  if (raw === null) return { timetable: emptyTimetable(schoolId), found: false, recordedAt: 0 };
   let parsed: StoredTimetable;
   try {
     parsed = JSON.parse(raw) as StoredTimetable;
@@ -83,15 +90,24 @@ function readLocal(ownerKey: string, schoolId: string): StoredTimetable {
   // A mismatched scoped copy is potentially damaged and must remain untouched.
   if (parsed.schoolId !== schoolId) {
     if (scopedRaw !== null) throw new TimetableLocalReadError('corrupt');
-    return emptyTimetable(schoolId);
+    return { timetable: emptyTimetable(schoolId), found: false, recordedAt: 0 };
   }
   return {
-    ...emptyTimetable(schoolId),
-    ...parsed,
-    courses: cleanCourses(parsed.courses),
-    meta: cleanMeta(parsed.meta),
-    schoolId: parsed.schoolId || schoolId,
+    timetable: {
+      ...emptyTimetable(schoolId),
+      ...parsed,
+      courses: cleanCourses(parsed.courses),
+      meta: cleanMeta(parsed.meta),
+      schoolId: parsed.schoolId || schoolId,
+    },
+    found: true,
+    // Missing timestamps from old records must not inherit the fresh default date.
+    recordedAt: savedAtMillis(parsed.updatedAt),
   };
+}
+
+function readLocal(ownerKey: string, schoolId: string): StoredTimetable {
+  return readLocalSnapshot(ownerKey, schoolId).timetable;
 }
 
 export const CLOUD_NEEDS_SCHOOL_COPY = '登入學校帳號後才能存到雲端';
@@ -142,11 +158,12 @@ export async function loadPersonalTimetable(
     uid && localOwner === `school:${uid}` && !hasLocal(ownerKey, schoolId) ? uid : ownerKey;
   if (!uid || !isFirebaseConfigured()) return readLocal(readOwnerKey, schoolId);
   // 登入學校帳號前在這台瀏覽器排的課表，登入後先接著用，下次存檔就一起存到雲端
-  const local = localOwner
-    ? readLocal(readOwnerKey, schoolId)
+  const localSnapshot = localOwner
+    ? readLocalSnapshot(readOwnerKey, schoolId)
     : hasLocal(uid, schoolId)
-      ? readLocal(uid, schoolId)
-      : readLocal('local', schoolId);
+      ? readLocalSnapshot(uid, schoolId)
+      : readLocalSnapshot('local', schoolId);
+  const local = localSnapshot.timetable;
   let snap;
   try {
     snap = await getDoc(doc(getDb(), 'users', uid, 'personalTimetable', 'current'));
@@ -156,8 +173,9 @@ export async function loadPersonalTimetable(
   if (!snap.exists()) return local;
   const data = snap.data() as StoredTimetable & { updatedAt?: unknown };
   if (data.schoolId && data.schoolId !== schoolId) return local;
-  // 上次雲端沒存成、只記在這台瀏覽器的那一版比較新，就用那一版，重新整理不會不見
-  if (local.courses.length && Date.parse(local.updatedAt) > savedAtMillis(data.updatedAt)) {
+  // Removing the final course is a real local edit. An older cloud copy must not
+  // bring it back merely because the new timetable has zero courses.
+  if (localSnapshot.found && localSnapshot.recordedAt > savedAtMillis(data.updatedAt)) {
     return local;
   }
   return {
