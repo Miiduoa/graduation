@@ -10,7 +10,10 @@ const mocks = vi.hoisted(() => ({
   friends: vi.fn(), invites: vi.fn(), friendTimetable: vi.fn(), meetup: vi.fn(),
 }));
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => mocks.auth }));
-vi.mock('@/components/SelectedSchoolProvider', () => ({ useSelectedSchool: () => mocks.school }));
+vi.mock('@/components/SelectedSchoolProvider', () => ({
+  useSelectedSchool: () => mocks.school,
+  useOptionalSelectedSchool: () => ({ ...mocks.school, selectedSchool: mocks.school.selectedSchoolId ? { id: mocks.school.selectedSchoolId, name: '靜宜大學' } : null, catalogStatus: 'ready' }),
+}));
 vi.mock('@/lib/timetable/store', () => ({
   loadPersonalTimetable: mocks.load,
   savePersonalTimetable: mocks.save,
