@@ -124,16 +124,12 @@ test('attachment links require safe web URLs and malformed dates are not invente
 test.each([[loadCampusAnnouncements, 'announcements', 'publishedAt']] as const)(
   'legacy queries keep the school filter and an explicit bounded date ordering (%s)',
   async (load, collectionName, dateField) => {
-    jest
-      .mocked(getDocsFromServer)
-      .mockResolvedValueOnce({ empty: true, docs: [] } as never)
-      .mockResolvedValueOnce({ empty: true, docs: [] } as never)
-      .mockResolvedValueOnce({ empty: true, docs: [] } as never);
+    jest.mocked(getDocsFromServer).mockResolvedValue({ empty: true, docs: [] } as never);
     await expect(load('pu')).resolves.toEqual([]);
     expect(collection).toHaveBeenCalledWith('db', collectionName);
     expect(where).toHaveBeenCalledWith('schoolId', '==', 'pu');
     expect(orderBy).toHaveBeenCalledWith(dateField, 'desc');
-    expect(limit).toHaveBeenCalledWith(100);
+    expect(limit).toHaveBeenCalledWith(200);
   },
 );
 

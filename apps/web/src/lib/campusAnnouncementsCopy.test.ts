@@ -2,10 +2,13 @@ import { afterEach, expect, it, vi } from 'vitest';
 import {
   allowsPlaceholderAnnouncementSchools,
   announcementEmptyKind,
+  announcementMatchesSearch,
+  announcementSourceIdsForSchool,
   formatStaleAnnouncementNotice,
   isAnnouncementSchoolVisibleToPublic,
   isPlaceholderAnnouncementSchool,
   listAnnouncementCatalogLinks,
+  mergeAnnouncementsById,
   PLACEHOLDER_ANNOUNCEMENT_SCHOOL_IDS,
   FIRESTORE_UNAVAILABLE_WITH_CACHE_TEXT,
   SOURCE_DOWN_EMPTY_TEXT,
@@ -111,4 +114,29 @@ it('exposes catalog office urls for a school that has never been fetched', () =>
     ]),
   );
   expect(listAnnouncementCatalogLinks('tw-demo-uni')).toEqual([]);
+});
+
+it('finds office announcements by 學務處 or 住宿 even when source is missing', () => {
+  expect(
+    announcementMatchesSearch({ title: '生活輔導', office: '學務處' }, '學務處'),
+  ).toBe(true);
+  expect(announcementMatchesSearch({ title: '宿舍開放', office: '住宿' }, '住宿')).toBe(true);
+  expect(announcementMatchesSearch({ title: '選課', source: '教務處', office: '教務處' }, '學務處')).toBe(
+    false,
+  );
+  expect(announcementSourceIdsForSchool('pu')).toEqual(
+    expect.arrayContaining(['pu-osa', 'pu-dorm', 'pu-acd']),
+  );
+  expect(announcementSourceIdsForSchool('nthu')).not.toEqual(
+    expect.arrayContaining(['pu-osa', 'pu-dorm']),
+  );
+  expect(
+    mergeAnnouncementsById([
+      [{ id: 'a', publishedAt: '2026-10-01T00:00:00.000Z' }],
+      [
+        { id: 'a', publishedAt: '2026-09-01T00:00:00.000Z' },
+        { id: 'b', publishedAt: '2026-10-02T00:00:00.000Z' },
+      ],
+    ]).map((item) => item.id),
+  ).toEqual(['b', 'a']);
 });

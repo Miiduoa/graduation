@@ -14,7 +14,11 @@ import {
 import { getDb, isFirebaseMockMode } from '../firebase';
 import type { Announcement, AnnouncementCategory, Attachment, ClubEvent } from '../data/types';
 import {
+  ANNOUNCEMENT_RECENT_LIMIT,
+  ANNOUNCEMENT_SOURCE_LIMIT,
+  announcementSourceIdsForSchool,
   isAnnouncementSchoolVisibleToPublic,
+  mergeAnnouncementsById,
   SOURCE_DOWN_EMPTY_TEXT,
 } from '@campus/shared/src/campusAnnouncements';
 import { getRawAppEnv } from './release';
@@ -150,14 +154,53 @@ async function loadAnnouncementSources(schoolId: string): Promise<AnnouncementSo
   });
 }
 
+async function loadAnnouncementRows(
+  schoolId: string,
+  extra: Array<ReturnType<typeof where> | ReturnType<typeof orderBy>>,
+  maxItems: number,
+) {
+  const db = sourceDb(schoolId);
+  const constraints = [...extra, limit(maxItems)];
+  let snapshot = await getDocsFromServer(
+    query(collection(db, 'schools', schoolId, 'announcements'), ...constraints),
+  );
+  if (snapshot.empty) {
+    snapshot = await getDocsFromServer(
+      query(collection(db, 'announcements'), where('schoolId', '==', schoolId), ...constraints),
+    );
+  }
+  return snapshot.docs.flatMap((document) => {
+    try {
+      return [announcement(document, schoolId)];
+    } catch {
+      return [];
+    }
+  });
+}
+
 export async function loadCampusAnnouncementFeed(schoolId: string): Promise<CampusAnnouncementFeed> {
   if (!isAnnouncementSchoolVisibleToPublic({ schoolId }, getRawAppEnv())) {
     return { announcements: [], sources: [], allUnavailable: false };
   }
-  const announcements = await loadList(schoolId, 'announcements', announcement);
+  const recent = await loadAnnouncementRows(
+    schoolId,
+    [orderBy('publishedAt', 'desc')],
+    ANNOUNCEMENT_RECENT_LIMIT,
+  );
   const sources = await loadAnnouncementSources(schoolId);
+  const present = new Set(
+    recent.map((item) => item.sourceId).filter((value): value is string => Boolean(value)),
+  );
+  const missing = announcementSourceIdsForSchool(schoolId, sources).filter(
+    (sourceId) => !present.has(sourceId),
+  );
+  const extras = await Promise.all(
+    missing.map((sourceId) =>
+      loadAnnouncementRows(schoolId, [where('sourceId', '==', sourceId)], ANNOUNCEMENT_SOURCE_LIMIT),
+    ),
+  );
   return {
-    announcements,
+    announcements: mergeAnnouncementsById([recent, ...extras]),
     sources,
     allUnavailable: sources.length > 0 && sources.every((item) => item.status === 'unavailable'),
   };
@@ -185,27 +228,6 @@ function event(document: SourceDocument, schoolId: string): ClubEvent {
       Number.isSafeInteger(data.appRegistrationCount) &&
       (data.appRegistrationCount as number) >= 0,
   };
-}
-
-async function loadList<T>(
-  schoolId: string,
-  name: 'announcements' | 'events',
-  normalize: (document: SourceDocument, schoolId: string) => T,
-) {
-  const db = sourceDb(schoolId);
-  const constraints = [
-    orderBy(name === 'announcements' ? 'publishedAt' : 'startsAt', 'desc'),
-    limit(100),
-  ];
-  let snapshot = await getDocsFromServer(
-    query(collection(db, 'schools', schoolId, name), ...constraints),
-  );
-  // Legacy data is read only after an authoritative empty result; failed reads remain failures.
-  if (snapshot.empty)
-    snapshot = await getDocsFromServer(
-      query(collection(db, name), where('schoolId', '==', schoolId), ...constraints),
-    );
-  return snapshot.docs.map((document) => normalize(document, schoolId));
 }
 
 async function loadDetail<T>(
