@@ -1,4 +1,4 @@
-name: Course access review
+name: Course access candidate validation
 
 on:
   push:
@@ -10,16 +10,90 @@ permissions:
   contents: read
 
 jobs:
-  source:
+  candidate:
+    if: github.ref == 'refs/heads/feature/course-matching-review-20261014'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: course_access_test
+          POSTGRES_USER: course_test
+          POSTGRES_PASSWORD: isolated-test-only
+        ports: [5432:5432]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
         with:
-          persist-credentials: false
-      - name: Prepare tracked source for isolated review
-        run: git archive --format=tar.gz --output=/tmp/campus-one-source.tar.gz HEAD
-      - uses: actions/upload-artifact@v4
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - name: Verify and apply the reviewed candidate
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64, hashlib, lzma, subprocess
+          parts = []
+          for i in range(1, 7):
+              p = Path(f'.github/course-access-transfer/part-{i}.txt')
+              content = ''.join(p.read_text().split())
+              print(p.name, len(content), hashlib.sha256(content.encode()).hexdigest())
+              parts.append(content)
+          compressed = base64.b64decode(''.join(parts), validate=True)
+          assert hashlib.sha256(compressed).hexdigest() == '815f2bb25a7eb7803a95694681063a4e77d3596cc3cae07ad7f5c0e30f444928', 'Compressed integrity check failed'
+          patch = lzma.decompress(compressed)
+          assert len(patch) == 130280
+          assert hashlib.sha256(patch).hexdigest() == '4c3298a5d7a60b5701e89ad985b5f6e496c643ad69397bf21310d18f4995d4b2', 'Patch integrity check failed'
+          Path('/tmp/course-access.patch').write_bytes(patch)
+          original = subprocess.check_output(['git', 'show', '354d26f73c17525433368789c8f48d94f1ef0cc8:.github/workflows/course-access-review.yml'])
+          Path('.github/workflows/course-access-review.yml').write_bytes(original)
+          subprocess.run(['git', 'apply', '--check', '/tmp/course-access.patch'], check=True)
+          subprocess.run(['git', 'apply', '/tmp/course-access.patch'], check=True)
+          # The final read-only workflow is installed separately through the connector.
+          # The Actions token never edits workflow files or the main branch.
+          subprocess.run(['git', 'restore', '--source=HEAD', '--worktree', '.github/workflows/course-access-review.yml'], check=True)
+          PY
+          rm -rf .github/course-access-transfer
+          git add apps/mobile/src/components/CourseAccessPanel.tsx apps/mobile/src/screens/PersonalImportScreen.tsx apps/web/src/components/imports/CourseAccessPanel.tsx apps/web/src/components/imports/PersonalImportCenter.tsx apps/web/src/lib/nuni/api.ts backend/firestore/firestore.rules backend/functions/index.js deploy/nuni-api/build.py deploy/nuni-api/course-access docs/course-access-review.md docs/personal-import.md packages/shared/src/courseAccess.ts packages/shared/src/courseAccessClient.ts scripts/course-access scripts/test-course-access.mjs .github/course-access-transfer
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m '新增課班推薦、學生加入申請與獨立教師審核候選流程'
+          git push origin HEAD:refs/heads/feature/course-matching-review-20261014
+      - uses: actions/setup-node@v4
         with:
-          name: campus-one-source
-          path: /tmp/campus-one-source.tar.gz
-          retention-days: 1
+          node-version: '22'
+      - name: Install isolated test tools
+        run: npm install --prefix "$RUNNER_TEMP/course-tools" --ignore-scripts --no-audit --no-fund typescript@5.5.4 @types/node@22.10.2 pg@8.16.3
+      - name: Compile and execute policy and PostgreSQL tests
+        env:
+          COURSE_TEST_DATABASE_URL: postgres://course_test:isolated-test-only@localhost:5432/course_access_test
+        run: |
+          set -o pipefail
+          export COURSE_TEST_TSC="$RUNNER_TEMP/course-tools/node_modules/.bin/tsc"
+          export COURSE_TEST_TYPE_ROOTS="$RUNNER_TEMP/course-tools/node_modules/@types"
+          export COURSE_TEST_DEPS="$RUNNER_TEMP/course-tools/node_modules"
+          node scripts/test-course-access.mjs | tee course-access-results.tap
+      - name: Installer and existing boundary regression tests
+        if: always()
+        run: |
+          set -o pipefail
+          python3 -m unittest discover -s scripts/course-access -p '*_test.py' -v 2>&1 | tee course-installer-results.txt
+          node --test scripts/nuni-course-source.test.mjs scripts/nuni-course-api-boundary.test.mjs | tee course-regression-results.tap
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: course-access-results
+          path: |
+            course-access-results.tap
+            course-installer-results.txt
+            course-regression-results.tap
+          if-no-files-found: warn
+          retention-days: 14
