@@ -12,7 +12,11 @@ const DIRECTORY_TIMEOUT_MS = 5000;
 type BrowsableSchool = School & { publicBrowsing?: boolean };
 const bundledOfficialSchoolIds = new Set(
   mockSchools
-    .filter((school) => !isPlaceholderAnnouncementSchool({ schoolId: school.id }))
+    .filter(
+      (school) =>
+        !isPlaceholderAnnouncementSchool({ schoolId: school.id }) &&
+        !school.name.includes('（示範）'),
+    )
     .map((school) => school.id),
 );
 
