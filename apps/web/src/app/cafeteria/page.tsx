@@ -84,7 +84,14 @@ export default function CafeteriaPage(props: {
       </SiteShell>
     );
   }
-  return <CafeteriaContent key={context.schoolId} {...context} />;
+  return (
+    <CafeteriaContent
+      key={context.schoolId}
+      schoolId={context.schoolId}
+      schoolName={context.schoolName}
+      schoolSearch={context.schoolSearch}
+    />
+  );
 }
 
 function CafeteriaContent({
