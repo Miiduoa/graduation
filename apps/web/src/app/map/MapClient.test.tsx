@@ -209,3 +209,13 @@ it('never links to Providence when another campus has no confirmed map places', 
   expect(target.searchParams.get('query')).toContain('國立清華大學');
   expect(target.searchParams.get('query')).not.toContain('靜宜');
 });
+
+
+it('never points an empty non-Providence map back to Providence', async () => {
+  vi.mocked(loadMapLocations).mockResolvedValue([]);
+  render(<MapClient school="remote-university-12" />);
+  expect(await screen.findByText('目前沒有可顯示的校園地點')).toBeTruthy();
+  expect(screen.getByText(/不會改用其他學校的建築或導航位置/)).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '開啟靜宜大學網站' })).toBeNull();
+  expect(loadMapLocations).toHaveBeenCalledWith('remote-university-12');
+});
