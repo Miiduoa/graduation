@@ -1,5 +1,10 @@
+'use client';
+
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
+import { useSearchParams } from 'next/navigation';
+import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
+import { browsingSchoolSearch } from '@/lib/navigation';
 import { isWebOnlineOrderingEnabled } from '@/lib/onlineOrdering';
 import styles from '@/components/academic/academic.module.css';
 
@@ -15,6 +20,9 @@ const ITEMS = [
 ];
 
 export default function LifePage() {
+  const selected = useOptionalSelectedSchool();
+  const params = useSearchParams();
+  const schoolSearch = browsingSchoolSearch(params, selected?.selectedSchoolId ?? null);
   const items = ITEMS.filter((item) => item.href !== '/orders' || isWebOnlineOrderingEnabled());
   return (
     <SiteShell title="生活" subtitle="地圖、公車、餐廳、找人，都從這裡進。">
@@ -25,7 +33,7 @@ export default function LifePage() {
               <h3>{item.title}</h3>
               <p>{item.text}</p>
             </div>
-            <Link className="btn" href={item.href}>
+            <Link className="btn" href={`${item.href}${schoolSearch}`}>
               打開 →
             </Link>
           </li>
