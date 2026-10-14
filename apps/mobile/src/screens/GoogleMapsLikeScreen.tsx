@@ -126,7 +126,7 @@ function CampusMapContent({
     const matches = catalog.filter(
       (place) =>
         (category === 'all' || place.category === category) &&
-        [place.name, place.category, place.description, place.building, ...place.facilities].some(
+        [place.name, place.category, place.description, place.building, place.floor, ...place.facilities].some(
           (value) => value?.toLowerCase().includes(keyword),
         ) &&
         (!nearbyOnly || !location || distanceMeters(location, place) <= 1000),
@@ -437,7 +437,7 @@ function CampusMapContent({
                     {[
                       selected.category,
                       selected.building,
-                      selected.floor ? `${selected.floor} 樓` : null,
+                      selected.floor ? `樓層：${selected.floor}` : null,
                     ]
                       .filter(Boolean)
                       .join(' · ')}
