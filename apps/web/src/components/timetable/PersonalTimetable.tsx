@@ -376,16 +376,37 @@ function TimetableWorkspace() {
   };
 
   const copyShare = async () => {
-    if (!uid) return;
+    if (!uid || busy || sharingRef.current || !activeRef.current) return;
+    sharingRef.current = true;
+    setShareBusy(true);
+    setShareUrl('');
     try {
       const server = await createServerShare(schoolId, timetable.meta.title || '我的課表');
-      const url = `${window.location.origin}${server.path}`;
-      await navigator.clipboard.writeText(url).catch(() => undefined);
+      if (!activeRef.current) return;
+      const parsed = new URL(server.path, window.location.origin);
+      if (parsed.origin !== window.location.origin || !/^\/timetable\/share\/[^/]+$/.test(parsed.pathname)) {
+        throw new Error('invalid-timetable-share-path');
+      }
+      const url = parsed.toString();
       setShareUrl(url);
-      setNotice(shareCopiedCopy(server.expiresAt));
+      if (!navigator.clipboard?.writeText) {
+        setNotice('瀏覽器無法自動複製。請手動複製下方連結。');
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(url);
+        if (activeRef.current) setNotice(shareCopiedCopy(server.expiresAt));
+      } catch {
+        if (activeRef.current) setNotice('瀏覽器未完成複製，請手動複製下方連結。');
+      }
     } catch {
-      setShareUrl('');
-      setNotice('現在產生不了分享連結，登入學校帳號並連上網路後再試。');
+      if (activeRef.current) {
+        setShareUrl('');
+        setNotice('現在產生不了分享連結，登入學校帳號並連上網路後再試。');
+      }
+    } finally {
+      sharingRef.current = false;
+      if (activeRef.current) setShareBusy(false);
     }
   };
 
@@ -527,9 +548,10 @@ function TimetableWorkspace() {
             type="button"
             className="btn"
             onClick={() => void copyShare()}
-            disabled={busy || !timetable.courses.length}
+            disabled={busy || shareBusy || !timetable.courses.length}
+            aria-busy={shareBusy}
           >
-            複製分享連結
+            {shareBusy ? '正在產生連結…' : '複製分享連結'}
           </button>
         ) : null}
       </div>
