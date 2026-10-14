@@ -3,8 +3,9 @@
 import { use, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
+import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import { loadStorefront, recordExternalOrderClick } from '@/lib/storefront';
 import {
   EXTERNAL_ORDER_HONEST_TEXT,
@@ -18,16 +19,31 @@ import type { Cafeteria } from '@/lib/firebase';
 
 export default function HonestOrderPage(props: {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ schoolId?: string; school?: string }>;
+  searchParams?: Promise<{ schoolId?: string; school?: string; campus?: string }>;
 }) {
   const { id } = use(props.params);
   const search = props.searchParams ? use(props.searchParams) : undefined;
-  const context = resolveSchoolPageContext(search);
+  const context = useBrowsingSchoolPageContext(search);
+  if (!context.ready) {
+    return <SiteShell title="餐廳"><SchoolScopePlaceholder /></SiteShell>;
+  }
+  return <OrderContent key={`${context.schoolId}:${id}`} id={id} context={context} />;
+}
+
+function OrderContent({ id, context }: {
+  id: string;
+  context: ReturnType<typeof useBrowsingSchoolPageContext>;
+}) {
   const { user } = useAuth();
-  const [shop, setShop] = useState<Cafeteria | null>(null);
+  const [shop, setShop] = useState<Cafeteria | null | undefined>(undefined);
   const [notice, setNotice] = useState('');
   useEffect(() => {
-    void loadStorefront(context.schoolId, id).then(setShop, () => setShop(null));
+    let active = true;
+    void loadStorefront(context.schoolId, id).then(
+      (value) => { if (active) setShop(value); },
+      () => { if (active) setShop(null); },
+    );
+    return () => { active = false; };
   }, [context.schoolId, id]);
   const action = studentCafeteriaAction({
     merchantMode: shop?.merchantMode,
@@ -45,7 +61,16 @@ export default function HonestOrderPage(props: {
       subtitle="訂單在店家系統，不走我們的結帳。"
       schoolName={context.schoolName}
     >
-      {!shop && <p role="status">正在確認店家連結…</p>}
+      {shop === undefined && <p role="status">正在確認店家連結…</p>}
+      {shop === null && (
+        <section>
+          <h2>目前沒有可使用的店家訂餐連結</h2>
+          <p>此店家可能尚未提供訂餐資訊，請回店面查看其他服務。</p>
+          <Link className="btn" href={`/cafeteria/${encodeURIComponent(id)}?schoolId=${encodeURIComponent(context.schoolId)}`}>
+            返回店面
+          </Link>
+        </section>
+      )}
       {shop && action.kind !== 'showcase' && (
         <section>
           <h2>這間店還沒有可打開的訂餐連結</h2>
