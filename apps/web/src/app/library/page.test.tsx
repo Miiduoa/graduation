@@ -57,12 +57,11 @@ it('opens the chosen university library without showing Providence links or a si
   render(<LibraryPage />);
   expect(screen.getByText('國立清華大學圖書館')).toBeTruthy();
   expect(screen.getByRole('link', { name: '前往官方館藏入口 ↗' }).getAttribute('href')).toBe(
-    'https://www.lib.nthu.edu.tw/',
+    'https://nthu.primo.exlibrisgroup.com/discovery/search?vid=886UST_NTHU:886UST_NTHU',
   );
-  expect(screen.getByRole('link', { name: '從本校圖書館官網登入 ↗' }).getAttribute('href')).toBe(
-    'https://www.lib.nthu.edu.tw/',
+  expect(screen.getByRole('link', { name: '前往我的借閱紀錄 ↗' }).getAttribute('href')).toBe(
+    'https://nthu.primo.exlibrisgroup.com/discovery/account?section=overview&vid=886UST_NTHU:886UST_NTHU',
   );
-  expect(screen.queryByRole('link', { name: '前往我的借閱紀錄 ↗' })).toBeNull();
   expect(screen.queryByRole('button', { name: '搜尋學校館藏 ↗' })).toBeNull();
   expect(screen.queryByText('蓋夏圖書館')).toBeNull();
 });
@@ -78,4 +77,31 @@ it('shows a separate official catalog for schools with verified catalog links', 
     target: { value: '資料科學' },
   });
   expect((screen.getByRole('button', { name: '複製關鍵字' }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+
+it('searches the selected university catalog directly without carrying another campus view', () => {
+  context.schoolId = 'nthu';
+  context.schoolName = '國立清華大學';
+  const { rerender } = render(<LibraryPage />);
+  fireEvent.change(screen.getByLabelText('想找的書或關鍵字'), {
+    target: { value: '分散式系統 & AI' },
+  });
+  const catalog = screen.getByRole('link', { name: '直接搜尋本校館藏 ↗' });
+  const url = new URL(catalog.getAttribute('href')!);
+  expect(url.hostname).toBe('nthu.primo.exlibrisgroup.com');
+  expect(url.searchParams.get('vid')).toBe('886UST_NTHU:886UST_NTHU');
+  expect(url.searchParams.get('query')).toBe('any,contains,分散式系統 & AI');
+  expect(screen.queryByRole('button', { name: '複製關鍵字' })).toBeNull();
+
+  context.schoolId = 'ncku';
+  context.schoolName = '國立成功大學';
+  rerender(<LibraryPage />);
+  const switched = screen.getByRole('link', { name: '前往官方館藏入口 ↗' });
+  expect(switched.getAttribute('href')).toContain('ncku.primo.exlibrisgroup.com');
+  expect(switched.getAttribute('href')).not.toContain('分散式系統');
+  expect(screen.getByRole('link', { name: '前往我的借閱紀錄 ↗' }).getAttribute('href')).toContain(
+    'ncku.primo.exlibrisgroup.com',
+  );
+  expect(screen.queryByText('國立清華大學圖書館')).toBeNull();
 });
