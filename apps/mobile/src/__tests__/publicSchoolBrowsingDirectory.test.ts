@@ -45,7 +45,10 @@ test('official public universities stay selectable even before school login is e
   expect(ids).not.toContain('tw-demo-uni');
   expect(ids).not.toContain('tw-taichung-uni-a');
   expect(ids).not.toContain('tw-taichung-uni-b');
-  expect(ids).not.toContain('tw-nchu');
+  expect(ids).toContain('tw-nchu');
+  expect(schools.find((school) => school.id === 'tw-nchu')?.name).toBe('國立中興大學');
+  expect(schools.find((school) => school.id === 'tw-nchu')?.integrationStatus?.enabled).toBe(false);
+  expect(isStudentIdLoginAvailable('tw-nchu')).toBe(false);
   expect(schools.find((school) => school.id === 'nthu')?.integrationStatus?.enabled).toBe(false);
   expect(isStudentIdLoginAvailable('nthu')).toBe(false);
 });
