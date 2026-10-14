@@ -48,6 +48,14 @@ export const SOCIAL_POI_CATEGORY_LABEL: Record<SocialPoiCategory, string> = {
   transit: '通勤',
 };
 
+/**
+ * Fixed PU campus-place IDs are not reusable across other universities.
+ * Unverified campuses can still publish stories without a place check-in.
+ */
+export function verifiedSocialPoisForSchool(schoolId: string): readonly SocialPoi[] {
+  return schoolId === 'pu' || schoolId === 'tw-pu' ? SOCIAL_POIS : [];
+}
+
 export function findSocialPoi(id?: string | null): SocialPoi | null {
   if (!id) return null;
   return SOCIAL_POIS.find((p) => p.id === id) ?? null;
