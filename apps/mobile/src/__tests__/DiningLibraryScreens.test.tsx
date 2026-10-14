@@ -523,3 +523,26 @@ test('changing the university replaces both the catalog destination and previous
   expect(second.searchParams.get('query')).toBe('any,contains,new query');
   expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
 });
+
+
+test('Soochow library search uses its verified Primo view instead of a different campus', async () => {
+  mockSchool = { id: 'scu' };
+  const view = render(<LibraryAiFirstScreen />);
+  fireEvent.changeText(view.getByLabelText('館藏關鍵字'), '閱讀教育');
+  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  const url = new URL(jest.mocked(Linking.openURL).mock.calls.at(-1)![0]);
+  expect(url.hostname).toBe('uco-scu.primo.exlibrisgroup.com');
+  expect(url.searchParams.get('vid')).toBe('886UCO_SCU:886SCU_INST');
+  expect(url.searchParams.get('query')).toBe('any,contains,閱讀教育');
+  expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
+});
+
+test('Chang Gung library uses its official iGrid catalog rather than Providence', async () => {
+  mockSchool = { id: 'cgu' };
+  const view = render(<LibraryAiFirstScreen />);
+  fireEvent.changeText(view.getByLabelText('館藏關鍵字'), '護理');
+  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  expect(jest.mocked(Linking.openURL)).toHaveBeenCalledWith('https://web20.lib.cgu.edu.tw/');
+  expect(Clipboard.setStringAsync).toHaveBeenCalledWith('護理');
+  expect(view.queryByText('蓋夏圖書館')).toBeNull();
+});
