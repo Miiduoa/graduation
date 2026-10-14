@@ -18,8 +18,6 @@ export function SchoolBrowsingControl() {
   useEffect(() => {
     if (!open) return;
     let active = true;
-    setDirectory(null);
-    setError(false);
     void fetchSchoolDirectory().then(
       (schools) => {
         if (active) setDirectory(schools);
@@ -41,7 +39,12 @@ export function SchoolBrowsingControl() {
           <Text style={{ color: aiTokens.muted, lineHeight: 21 }}>
             切換後，公開校園資訊會依學校更新。已登入的帳號、課班資格及校務資料權限不會跟著改變。
           </Text>
-          <AIButton label="選擇其他學校" onPress={() => { setQuery(''); setOpen(true); }} />
+          <AIButton label="選擇其他學校" onPress={() => {
+            setQuery('');
+            setDirectory(null);
+            setError(false);
+            setOpen(true);
+          }} />
         </View>
       </AICard>
       <Modal visible={open} animationType="slide" onRequestClose={() => setOpen(false)}>
@@ -79,7 +82,11 @@ export function SchoolBrowsingControl() {
           ) : error ? (
             <View style={{ padding: 28, gap: 14 }}>
               <Text accessibilityRole="alert" style={{ color: aiTokens.text }}>無法讀取學校目錄，請檢查網路後重試。</Text>
-              <AIButton label="重新讀取" onPress={() => setAttempt((value) => value + 1)} />
+              <AIButton label="重新讀取" onPress={() => {
+                setDirectory(null);
+                setError(false);
+                setAttempt((value) => value + 1);
+              }} />
             </View>
           ) : (
             <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 20, paddingBottom: 42 }}>

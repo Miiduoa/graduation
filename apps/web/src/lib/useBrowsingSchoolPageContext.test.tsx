@@ -59,3 +59,11 @@ it('requires a school choice rather than returning Providence data for all-campu
   expect(screen.getByText('choose-school')).toBeTruthy();
   view.unmount();
 });
+
+it('does not silently substitute Providence for an unknown campus in a shared URL', () => {
+  browsing.id = null;
+  browsing.loading = false;
+  const view = render(<Probe explicit="tw-unknown-school" />);
+  expect(screen.getByText('unavailable')).toBeTruthy();
+  view.unmount();
+});
