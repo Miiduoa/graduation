@@ -13,6 +13,7 @@ const primoSchools: Record<string, string> = {
   ncu: '886UST_NCU:886UST_NCU',
   nsysu: '886NSYSU_INST:886NSYSU_INST',
   nccu: '886NCCU_INST:886NCCU_INST',
+  scu: '886UCO_SCU:886SCU_INST',
 };
 
 describe('official library catalog destinations', () => {
@@ -47,6 +48,8 @@ describe('official library catalog destinations', () => {
     expect(buildOfficialLibraryCatalogUrl('ncue', '資料庫')).toBe(
       'https://webpacx.ncue.edu.tw/',
     );
+    expect(buildOfficialLibraryCatalogUrl('cgu', '資料庫')).toBe('https://web20.lib.cgu.edu.tw/');
+    expect(buildOfficialLibraryCatalogUrl('ncyu', '資料庫')).toBe('https://libaleph.ncyu.edu.tw/F');
   });
 
   it('does not route an unknown campus into Providence or other schools', () => {

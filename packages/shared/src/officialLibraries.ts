@@ -101,7 +101,11 @@ export const officialLibraryDirectory: Readonly<Record<string, OfficialLibrarySe
   ncyu: {
     name: '國立嘉義大學圖書館',
     websiteUrl: 'https://www.ncyu.edu.tw/lib/',
-    catalogUrl: 'https://www.ncyu.edu.tw/lib/',
+    // https://www.ncyu.edu.tw/lib/ - 館藏查詢 / 個人借閱紀錄
+    catalogUrl: 'https://libaleph.ncyu.edu.tw/F',
+    accountUrl: 'https://libaleph.ncyu.edu.tw/F',
+    hoursUrl: 'https://www.ncyu.edu.tw/lib/Contents?nodeId=41764',
+    electronicResourcesUrl: 'https://ncyu.summon.serialssolutions.com/za-CN/',
   },
   ncue: {
     name: '國立彰化師範大學圖書與資訊處',
@@ -131,7 +135,9 @@ export const officialLibraryDirectory: Readonly<Record<string, OfficialLibrarySe
   cgu: {
     name: '長庚大學圖書館',
     websiteUrl: 'https://www.cgu.edu.tw/library/',
-    catalogUrl: 'https://www.cgu.edu.tw/library/',
+    // https://www.cgu.edu.tw/library/ - 館藏查詢系統 / 館藏總覽
+    catalogUrl: 'https://web20.lib.cgu.edu.tw/',
+    hoursUrl: 'https://www.cgu.edu.tw/library/Contents?nodeId=7401',
   },
   cycu: {
     name: '中原大學圖書館',
@@ -141,7 +147,10 @@ export const officialLibraryDirectory: Readonly<Record<string, OfficialLibrarySe
   scu: {
     name: '東吳大學圖書館',
     websiteUrl: 'https://www.lib.scu.edu.tw/',
-    catalogUrl: 'https://www.lib.scu.edu.tw/',
+    // https://www.lib.scu.edu.tw/ - 館藏查詢
+    catalogUrl: 'https://uco-scu.primo.exlibrisgroup.com/discovery/search?lang=zh-tw&vid=886UCO_SCU%3A886SCU_INST',
+    catalogSearch: 'primo-ve',
+    hoursUrl: 'https://www.lib.scu.edu.tw/CMS/Page/12',
   },
   ntub: {
     name: '國立臺北商業大學圖書館',
