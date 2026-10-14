@@ -1,0 +1,81 @@
+name: Campus One — fresh vertical reel
+on:
+  push:
+    branches:
+      - 'media/campus-one-reel-20261014'
+    paths:
+      - '.github/workflows/campus-one-promo.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: campus-one-reel-20261014
+  cancel-in-progress: false
+
+jobs:
+  capture-and-edit:
+    name: Capture real website and render vertical MP4
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout separate media branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install browser tooling
+        run: |
+          npm install --no-save --no-audit --no-fund --prefix tools/campus-one-promo playwright@1.56.1
+          cd tools/campus-one-promo
+          npx playwright install --with-deps chromium
+
+      - name: Capture public pages from the actual live site
+        run: node tools/campus-one-promo/capture.cjs
+
+      - name: Set up video renderer
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install video dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-cjk ffmpeg
+          python -m pip install --disable-pip-version-check pillow numpy
+          python -m py_compile tools/campus-one-promo/render.py
+
+      - name: Render professional short-form video
+        run: python tools/campus-one-promo/render.py
+
+      - name: Validate actual MP4
+        run: |
+          test -s tools/campus-one-promo/output/Campus_One_2026-10-14_Reel.mp4
+          ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 tools/campus-one-promo/output/Campus_One_2026-10-14_Reel.mp4
+
+      - name: Upload MP4 and freshly captured website screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: Campus-One-2026-10-14-reel-and-captures
+          path: |
+            tools/campus-one-promo/output/Campus_One_2026-10-14_Reel.mp4
+            tools/campus-one-promo/output/SOURCE_README.txt
+            tools/campus-one-promo/capture/*.png
+            tools/campus-one-promo/capture/capture.json
+          retention-days: 30
+
+      - name: Publish finished MP4 on this media branch only
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tools/campus-one-promo/output/Campus_One_2026-10-14_Reel.mp4
+          git add tools/campus-one-promo/output/SOURCE_README.txt
+          git add tools/campus-one-promo/capture/capture.json
+          git diff --cached --quiet || git commit -m "Add 2026-10-14 real-site Campus One short video"
+          git push origin HEAD:media/campus-one-reel-20261014
