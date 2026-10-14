@@ -77,8 +77,8 @@ it('organizes real lessons by unit, shows receipt-based pending work and links t
   fireEvent.click(link);
   expect(onNavigate).toHaveBeenCalledTimes(2);
   expect(onNavigate).toHaveBeenCalledWith('assignments');
-  expect(screen.getByRole('link', { name: /第一週課前閱讀/ }).getAttribute('href')).toBe(`#material-${material.id}`);
-  expect(screen.getByText('0 / 1')).toBeTruthy();
+  expect((await screen.findByRole('link', { name: /第一週課前閱讀/ })).getAttribute('href')).toBe(`#material-${material.id}`);
+  expect(await screen.findByText('0 / 1')).toBeTruthy();
   expect(screen.getByText('可處理的待辦').previousElementSibling?.textContent).toBe('1');
   expect(screen.getByText(/教材閱讀不會自動標記完成/)).toBeTruthy();
 });
