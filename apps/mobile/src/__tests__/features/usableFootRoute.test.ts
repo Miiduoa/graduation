@@ -22,7 +22,7 @@ test('does not turn a failed routing request into invented turn-by-turn guidance
 });
 
 test('rejects unusable route lengths and invalid or reversed coordinates', () => {
-  for (const distance of [-1, 0, NaN, Infinity]) {
+  for (const distance of [-1, 0, NaN, Infinity, 5001]) {
     expect(isUsableFootRoute({ ...providerResponse, distance }, start, destination)).toBe(false);
   }
   const badGeometries: unknown[] = [
