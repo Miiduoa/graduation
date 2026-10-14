@@ -83,6 +83,38 @@ it('publishes only text and links, then displays the confirmed material', async 
   expect(document.querySelector('input[type="file"]')).toBeNull();
 });
 
+it('publishes materials to the teacher-selected chapter using the original course API', async () => {
+  const unitId = 'cwu_22222222-2222-4222-8222-222222222222';
+  const unit = {
+    id: unitId,
+    workspaceId: workspace.id,
+    title: '第二章',
+    position: 1,
+    createdAt: material.createdAt,
+  };
+  let saved: NuniMaterial | null = null;
+  state.request.mockImplementation(async (_path, _context, input) => {
+    if (input) {
+      saved = { ...material, title: input.title, body: input.body, unitId, unitTitle: unit.title };
+      return saved;
+    }
+    return { materials: saved ? [saved] : [] };
+  });
+  render(<CourseMaterials workspace={workspace} units={[unit]} />);
+  await screen.findByText(/目前還沒有教材/);
+  fireEvent.change(screen.getByLabelText('教材標題'), { target: { value: '章節閱讀' } });
+  fireEvent.change(screen.getByLabelText('教材內容或參考連結'), { target: { value: '內容' } });
+  fireEvent.change(screen.getByLabelText('所屬章節（選填）'), { target: { value: unitId } });
+  fireEvent.submit(screen.getByLabelText('教材標題').closest('form')!);
+  await screen.findByText('已發布「章節閱讀」。');
+  expect(state.request).toHaveBeenCalledWith(
+    `class-workspaces/${workspace.id}/materials`,
+    'session-a',
+    expect.objectContaining({ unitId, idempotencyKey: expect.any(String) }),
+  );
+  expect(screen.getByText('第二章')).toBeTruthy();
+});
+
 it('preserves the same uncertain payload and key when confirming a lost publication response', async () => {
   state.request
     .mockResolvedValueOnce({ materials: [] })
