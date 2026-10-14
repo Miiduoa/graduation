@@ -46,12 +46,16 @@ def apply_extension(checkout, apply=False):
     for target in targets:
         if (checkout / target).exists():
             raise ValueError(f'Candidate target already exists: {target}')
+    files = {target: hashlib.sha256(source.read_bytes()).hexdigest() for target, source in targets.items()}
+    pinned = json.loads((HERE / 'packaging-source.json').read_text())
+    if files != pinned:
+        raise ValueError('Overlay checksum mismatch')
     app = checkout / 'apps/api/src/app.ts'
     patched = patch_app(app.read_text())
     plan = {
         'baseTree': tree,
         'mode': 'candidate-only',
-        'files': {target: hashlib.sha256(source.read_bytes()).hexdigest() for target, source in targets.items()},
+        'files': files,
         'deploys': False,
         'runsMigrations': False,
         'writesProductionDatabase': False,

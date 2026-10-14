@@ -155,7 +155,7 @@ export class PublicCafeteriaService {
     }
     const locations = (
       await this.db.query<LocationRow>(
-        `SELECT id, name, zone_label, opening_hours, description, merchant_mode, review_status,
+        `SELECT id, name, zone_label, NULL::text AS opening_hours, description, merchant_mode, review_status,
                 source_url, external_order_url, source_label, source_updated_at
            FROM food_locations
           WHERE tenant_id=$1
@@ -172,9 +172,10 @@ export class PublicCafeteriaService {
         : projectMenus(
             (
               await this.db.query<MenuRow>(
-                `SELECT id, location_id, name, section_name, description, price_minor, available, sold_out
-                   FROM food_menu_items
-                  WHERE tenant_id=$1
+                `SELECT i.id, v.location_id, i.name, i.section_name, i.description, i.price_minor, i.available, false AS sold_out
+                   FROM food_menu_items i
+                   JOIN food_menu_versions v ON v.id=i.menu_version_id AND v.tenant_id=i.tenant_id
+                  WHERE i.tenant_id=$1 AND v.state='published'
                   LIMIT 400`,
                 [schoolId],
               )
