@@ -140,19 +140,17 @@ function LibraryContent({
                   disabled={!keyword.trim()}
                   onPress={() => void searchOfficialCatalog()}
                 />
-                <AIButton
-                  label="在圖書館網站搜尋"
-                  variant="ghost"
-                  disabled={!keyword.trim()}
-                  onPress={() => {
-                    if (library?.catalogSearch === 'primo-ve') {
-                      void searchOfficialCatalog();
-                      return;
-                    }
-                    const url = buildOfficialLibraryCatalogUrl(schoolId, keyword, 'FullText', schoolName);
-                    if (url) void open(url);
-                  }}
-                />
+                {library.catalogSearch !== 'primo-ve' ? (
+                  <AIButton
+                    label="在圖書館網站搜尋"
+                    variant="ghost"
+                    disabled={!keyword.trim()}
+                    onPress={() => {
+                      const url = buildOfficialLibraryCatalogUrl(schoolId, keyword, 'FullText', schoolName);
+                      if (url) void open(url);
+                    }}
+                  />
+                ) : null}
               </View>
               {notice ? (
                 <Text accessibilityRole="text" style={{ color: aiTokens.muted, lineHeight: 20 }}>
