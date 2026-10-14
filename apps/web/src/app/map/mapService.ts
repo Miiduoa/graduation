@@ -1,3 +1,6 @@
+import type { CampusCoordinate } from '@campus/shared/src/campusGeo';
+export { distanceMeters, formatDistance } from '@campus/shared/src/campusGeo';
+
 import {
   collection,
   doc,
@@ -8,6 +11,8 @@ import {
   where,
 } from 'firebase/firestore';
 import { getAuth, getDb, isFirebaseConfigured } from '@/lib/firebase';
+
+export type MapCoordinate = CampusCoordinate;
 
 export type MapLocation = {
   id: string;
@@ -142,7 +147,7 @@ export async function setMapFavorite(
   assertCurrent(uid, current);
 }
 
-export function walkingDirectionsUrl(destination: MapLocation, origin?: MapLocation): string {
+export function walkingDirectionsUrl(destination: MapCoordinate, origin?: MapCoordinate): string {
   const parameters = new URLSearchParams({
     api: '1',
     destination: `${destination.lat},${destination.lng}`,
