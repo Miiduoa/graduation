@@ -74,3 +74,12 @@ it('never opens a different school when the query names an unsupported campus', 
   expect(await screen.findByText('尚未確認這所學校的圖書館入口')).toBeTruthy();
   expect(screen.queryByRole('link')).toBeNull();
 });
+
+it('uses the exact official name for a verified campus with a different platform tenant ID', () => {
+  context.schoolId = 'tenant-567';
+  context.schoolName = '國立清華大學';
+  render(<LibraryPage />);
+  const link = screen.getByRole('link', { name: '開啟官方圖書館 ↗' });
+  expect(link.getAttribute('href')).toBe('https://www.lib.nthu.edu.tw/');
+  expect(screen.queryByLabelText('關鍵字')).toBeNull();
+});
