@@ -74,6 +74,9 @@ beforeEach(() => {
     if (path === `class-workspaces/${workspaceId}`)
       return { id: workspaceId, title: '設計專題', state: 'active', memberRole };
     if (path.endsWith('/assignments')) return { assignments: [] };
+    if (path.endsWith('/units')) return { units: [] };
+    if (path.endsWith('/materials')) return { materials: [] };
+    if (path.endsWith('/quizzes')) return { quizzes: [] };
     throw new Error(`Unexpected request: ${path}`);
   });
 });
@@ -194,6 +197,7 @@ it('clears course data when a retained child client loses access after a complet
 it('clears course data when the parent invite mutation loses access', async () => {
   render(<NuniApp />);
   await screen.findByRole('heading', { name: '設計專題' });
+  fireEvent.click(screen.getByRole('tab', { name: '作業' }));
   failure = new NuniError(403, 'ACCESS_DENIED');
   fireEvent.click(screen.getByRole('button', { name: '產生邀請碼' }));
   await screen.findByRole('alert');
