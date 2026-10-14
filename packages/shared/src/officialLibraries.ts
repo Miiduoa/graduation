@@ -147,7 +147,22 @@ export function getOfficialLibrary(
   );
   const libraryId =
     matches.length === 1 ? matches[0].id : schoolName === '國立中興大學' ? 'tw-nchu' : null;
-  return libraryId ? officialLibraryDirectory[libraryId] : null;
+  if (!libraryId) return null;
+  // A duplicate display name does not establish tenant identity.
+  // External IDs must still contain the recognized institution code as a whole token.
+  const aliases = libraryId === 'tw-nchu' ? ['tw-nchu', 'nchu'] : [libraryId];
+  if (
+    !aliases.some(
+      (alias) =>
+        schoolId === alias ||
+        schoolId.startsWith(`${alias}-`) ||
+        schoolId.endsWith(`-${alias}`) ||
+        schoolId.includes(`-${alias}-`),
+    )
+  ) {
+    return null;
+  }
+  return officialLibraryDirectory[libraryId];
 }
 
 export function buildOfficialLibraryCatalogUrl(
