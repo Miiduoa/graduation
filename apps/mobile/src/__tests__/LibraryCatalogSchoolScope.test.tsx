@@ -32,6 +32,7 @@ jest.mock('../ui/theme', () => ({
 }));
 
 beforeEach(() => {
+  jest.clearAllMocks();
   mockSchool = { id: 'nthu', name: '國立清華大學' };
   jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
 });
