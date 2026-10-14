@@ -16,7 +16,7 @@ export function LibraryCatalogScreen(props: { navigation?: any; route?: any }) {
   const initialQ =
     typeof props.route?.params?.initialQuery === 'string' ? props.route.params.initialQuery : '';
   const { school } = useSchool();
-  const library = getOfficialLibrary(school.id);
+  const library = getOfficialLibrary(school.id, school.name);
 
   React.useEffect(() => {
     analytics.logScreenView('LibraryCatalog');
