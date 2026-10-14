@@ -143,7 +143,7 @@ def main():
  cmd+=['-i',str(wav)]
  filters=[]
  for i in range(n):
-  filters.append(f'[{i}:v]scale=720:1280,zoompan=z=\\'min(zoom+0.00012,1.032)\\':x=\\'iw/2-iw/zoom/2\\':y=\\'ih/2-ih/zoom/2\\':d=1:s=720x1280:fps=30,trim=duration={length},setpts=PTS-STARTPTS,fps=30,settb=AVTB,format=yuv420p[v{i}]')
+  filters.append(f'[{i}:v]scale=720:1280,zoompan=z=\'min(zoom+0.00012,1.032)\':x=\'iw/2-iw/zoom/2\':y=\'ih/2-ih/zoom/2\':d=1:s=720x1280:fps=30,trim=duration={length},setpts=PTS-STARTPTS,fps=30,settb=AVTB,format=yuv420p[v{i}]')
  last='v0'
  for i in range(1,n):
   target=f'xf{i}'
