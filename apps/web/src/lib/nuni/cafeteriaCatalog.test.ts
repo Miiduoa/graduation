@@ -33,31 +33,60 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it('returns an empty catalog for a school with no locations', async () => {
-  fetcher.mockResolvedValueOnce(json({ locations: [] }));
+it('returns 400 when schoolId is missing and does not list every school', async () => {
+  const response = await handleCafeteriaCatalog(request('/api/cafeterias'));
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({ error: 'INVALID_INPUT' });
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+it('reads the public school catalog when nobody is signed in', async () => {
+  fetcher.mockResolvedValueOnce(json({ schoolId: 'cgu', cafeterias: [], menus: [] }));
   const response = await handleCafeteriaCatalog(request('/api/cafeterias?schoolId=cgu'));
   expect(response.status).toBe(200);
   expect(await response.json()).toEqual({ schoolId: 'cgu', cafeterias: [], menus: [] });
+  expect(response.headers.get('Cache-Control')).toBe('public, max-age=60');
   expect(fetcher).toHaveBeenCalledWith(
-    'https://api.nuni.tw/v1/auth/platform/realms/cgu/food/locations',
+    'https://api.nuni.tw/v1/public/schools/cgu/cafeterias',
     expect.objectContaining({
       headers: expect.objectContaining({ Accept: 'application/json' }),
     }),
   );
+  expect(String(fetcher.mock.calls[0][0])).not.toContain('/v1/auth/platform/');
 });
 
-it('forwards a platform session when the browser has one', async () => {
-  fetcher.mockResolvedValueOnce(json({ locations: [] }));
-  await handleCafeteriaCatalog(
-    request('/api/cafeterias?schoolId=pu', sealCookie(SESSION_COOKIE, session)),
+it('uses the bound school for a verified membership and ignores the URL schoolId', async () => {
+  fetcher
+    .mockResolvedValueOnce(
+      json({
+        memberships: [
+          {
+            membershipId: 'pm_11111111-1111-4111-8111-111111111111',
+            tenantId: 'pu',
+            campusName: '靜宜大學',
+            state: 'verified',
+            assurance: 'email',
+          },
+        ],
+      }),
+    )
+    .mockResolvedValueOnce(json({ schoolId: 'pu', cafeterias: [], menus: [] }));
+  const response = await handleCafeteriaCatalog(
+    request('/api/cafeterias?schoolId=cgu', sealCookie(SESSION_COOKIE, session)),
   );
-  expect(fetcher.mock.calls[0][1].headers.Authorization).toBe(`Platform ${session.sessionHandle}`);
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ schoolId: 'pu', cafeterias: [], menus: [] });
+  expect(fetcher.mock.calls[0][0]).toBe('https://api.nuni.tw/v1/auth/platform/memberships');
+  expect(fetcher.mock.calls[1][0]).toBe('https://api.nuni.tw/v1/public/schools/pu/cafeterias');
+  expect(fetcher.mock.calls.some((call) => String(call[0]).includes('/schools/cgu/'))).toBe(false);
 });
 
 it('keeps a missing shop as null instead of failing the page', async () => {
   fetcher.mockResolvedValueOnce(
     json({
-      locations: [{ id: 'jingyuan', name: '靜園餐廳', merchantMode: 'info_only' }],
+      schoolId: 'pu',
+      cafeterias: [{ id: 'jingyuan', name: '靜園餐廳', merchantMode: 'info_only' }],
+      menus: [],
     }),
   );
   const response = await handleCafeteriaDetail(
@@ -68,19 +97,14 @@ it('keeps a missing shop as null instead of failing the page', async () => {
   expect(await response.json()).toEqual({ schoolId: 'pu', cafeteria: null, menus: [] });
 });
 
-it('loads the selected shop menu after listing locations', async () => {
-  fetcher
-    .mockResolvedValueOnce(
-      json({
-        locations: [{ id: 'stall', name: '校內咖啡店', merchantMode: 'info_only' }],
-      }),
-    )
-    .mockResolvedValueOnce(
-      json({
-        location: { id: 'stall', name: '校內咖啡店' },
-        items: [{ id: 'toast', name: '蔬菜吐司', price: 60 }],
-      }),
-    );
+it('loads the selected shop menu from the public catalog', async () => {
+  fetcher.mockResolvedValueOnce(
+    json({
+      schoolId: 'pu',
+      cafeterias: [{ id: 'stall', name: '校內咖啡店', merchantMode: 'info_only' }],
+      menus: [{ id: 'toast', name: '蔬菜吐司', cafeteriaId: 'stall', price: 60 }],
+    }),
+  );
   const response = await handleCafeteriaDetail(
     request('/api/cafeterias/stall?schoolId=pu'),
     'stall',
@@ -95,6 +119,13 @@ it('loads the selected shop menu after listing locations', async () => {
   expect(body.menus).toEqual([
     expect.objectContaining({ id: 'toast', cafeteriaId: 'stall', price: 60 }),
   ]);
+  expect(body.cafeteria).not.toHaveProperty('phone');
+  expect(body.cafeteria).not.toHaveProperty('email');
+  expect(body.cafeteria).not.toHaveProperty('contact');
+  expect(body.cafeteria).not.toHaveProperty('reviewNote');
+  expect(body.cafeteria).not.toHaveProperty('reviewer');
+  expect(body.cafeteria).not.toHaveProperty('orders');
+  expect(body.cafeteria).not.toHaveProperty('revenue');
 });
 
 it('surfaces a backend failure instead of pretending the school has no shops', async () => {

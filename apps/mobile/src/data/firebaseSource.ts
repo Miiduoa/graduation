@@ -82,6 +82,12 @@ import {
   PROVIDENCE_UNIVERSITY_SCHOOL_ID,
   permissionDeniedError,
 } from '@campus/shared/src';
+import {
+  ANNOUNCEMENT_RECENT_LIMIT,
+  ANNOUNCEMENT_SOURCE_LIMIT,
+  announcementSourceIdsForSchool,
+  mergeAnnouncementsById,
+} from '@campus/shared/src/campusAnnouncements';
 import { collectionFromSegments, docFromSegments } from './firestorePath';
 import {
   checkInAttendance as checkInCourseAttendance,
@@ -892,14 +898,37 @@ function getCollectionLabel(collectionName: string): string {
 export const firebaseSource: DataSource = {
   // ===== 公告 =====
   async listAnnouncements(schoolId, options) {
-    return fetchCanonicalSchoolCollection<Announcement>({
+    const recent = await fetchCanonicalSchoolCollection<Announcement>({
       schoolId,
       canonicalCollections: ['announcements'],
       schoolConstraints: [orderBy('publishedAt', 'desc')],
       fallbackCollection: 'announcements',
       fallbackConstraints: [bySchool(schoolId), orderBy('publishedAt', 'desc')],
-      options,
+      options: { ...options, limit: options?.limit ?? ANNOUNCEMENT_RECENT_LIMIT },
     });
+    if (!schoolId) return recent;
+    const present = new Set(
+      recent
+        .map((item) => item.sourceId)
+        .filter((value): value is string => typeof value === 'string' && value.length > 0),
+    );
+    const missing = announcementSourceIdsForSchool(schoolId).filter(
+      (sourceId) => !present.has(sourceId),
+    );
+    if (missing.length === 0) return recent;
+    const extras = await Promise.all(
+      missing.map((sourceId) =>
+        fetchCanonicalSchoolCollection<Announcement>({
+          schoolId,
+          canonicalCollections: ['announcements'],
+          schoolConstraints: [where('sourceId', '==', sourceId)],
+          fallbackCollection: 'announcements',
+          fallbackConstraints: [bySchool(schoolId), where('sourceId', '==', sourceId)],
+          options: { limit: ANNOUNCEMENT_SOURCE_LIMIT },
+        }),
+      ),
+    );
+    return mergeAnnouncementsById([recent, ...extras]);
   },
 
   async getAnnouncement(id, schoolId) {

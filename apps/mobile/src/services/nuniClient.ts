@@ -1,7 +1,10 @@
 import { NuniError, nuniRecord, parseNuniPrincipal } from '@campus/shared/src/nuni';
 
 const API = 'https://api.nuni.tw/v1/auth/platform/';
+const PUBLIC_API = 'https://api.nuni.tw/v1/public/';
 export const NUNI_HANDLE = /^ps_[A-Za-z0-9_-]{43}$/;
+const PUBLIC_CAFETERIA_PATH =
+  /^schools\/[a-z0-9][a-z0-9-]{0,78}[a-z0-9]\/cafeterias(?:\/[A-Za-z0-9_-]{1,100})?$/;
 export type NuniTransport = (
   path: string,
   handle?: string,
@@ -80,6 +83,48 @@ export const nuniPlatformRequest: NuniTransport = async (
     signal?.removeEventListener('abort', abort);
   }
 };
+
+export async function nuniPublicRequest(path: string, signal?: AbortSignal): Promise<unknown> {
+  if (!PUBLIC_CAFETERIA_PATH.test(path)) throw new NuniError(400, 'INVALID_REQUEST');
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal?.addEventListener('abort', abort);
+  if (signal?.aborted) controller.abort();
+  const timeout = setTimeout(abort, 12000);
+  try {
+    const response = await fetch(`${PUBLIC_API}${path}`, {
+      method: 'GET',
+      redirect: 'error',
+      cache: 'no-store',
+      signal: controller.signal,
+      headers: { Accept: 'application/json' },
+    });
+    const body = await response.text();
+    if (body.length > 2_000_000) throw new NuniError(502, 'INVALID_RESPONSE');
+    let value: unknown;
+    try {
+      value = JSON.parse(body);
+    } catch {
+      throw new NuniError(response.ok ? 502 : response.status, 'INVALID_RESPONSE');
+    }
+    if (!response.ok) {
+      const record = nuniRecord(value);
+      const failure = typeof record.error === 'object' && record.error ? record.error : record;
+      const code = nuniRecord(failure).code;
+      throw new NuniError(
+        response.status,
+        typeof code === 'string' && /^[A-Z0-9_]{1,100}$/.test(code) ? code : 'REQUEST_FAILED',
+      );
+    }
+    return value;
+  } catch (error) {
+    if (error instanceof NuniError) throw error;
+    throw new NuniError(0, controller.signal.aborted ? 'REQUEST_CANCELLED' : 'NETWORK_ERROR');
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener('abort', abort);
+  }
+}
 
 export function parseNuniLoginTransaction(value: unknown) {
   const row = nuniRecord(value);

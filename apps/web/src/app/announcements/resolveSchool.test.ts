@@ -11,7 +11,7 @@ it('hides cms-none demo schools unless NEXT_PUBLIC_APP_ENV is explicitly develop
   expect(resolveAnnouncementSchool({ schoolId: 'tw-taichung-uni-a' }).visible).toBe(false);
   expect(resolveAnnouncementSchool({ schoolId: 'pu' }).visible).toBe(true);
   expect(resolveAnnouncementSchool({ campus: 'nthu' }).school.id).toBe('nthu');
-  expect(resolveAnnouncementSchool({ schoolId: 'pu', campus: 'nthu' }).school.id).toBe('pu');
+  expect(resolveAnnouncementSchool({ schoolId: 'pu', campus: 'nthu' }).school.id).toBe('nthu');
   vi.stubEnv('NEXT_PUBLIC_APP_ENV', '');
   expect(resolveAnnouncementSchool({ schoolId: 'tw-demo-uni' }).visible).toBe(false);
   vi.stubEnv('NEXT_PUBLIC_APP_ENV', 'staging');
@@ -24,4 +24,10 @@ it('hides cms-none demo schools unless NEXT_PUBLIC_APP_ENV is explicitly develop
   expect(resolveAnnouncementSchool({ schoolId: 'tw-demo-uni' }).visible).toBe(true);
   vi.stubEnv('NEXT_PUBLIC_APP_ENV', 'preview');
   expect(resolveAnnouncementSchool({ schoolId: 'tw-demo-uni' }).visible).toBe(true);
+});
+
+it('never falls back to Providence when the campus selection is explicitly unavailable', () => {
+  expect(resolveAnnouncementSchool({ campus: 'all', schoolId: 'pu' }).visible).toBe(false);
+  expect(resolveAnnouncementSchool({ campus: 'INVALID', schoolId: 'pu' }).visible).toBe(false);
+  expect(resolveAnnouncementSchool({ campus: 'nthu', schoolId: 'pu' }).school.id).toBe('nthu');
 });

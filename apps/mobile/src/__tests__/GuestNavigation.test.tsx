@@ -5,6 +5,10 @@ import { PreAuthStack } from '../screens/PreAuthStack';
 import { Text } from 'react-native';
 import { SchoolSessionBoundary } from '../app/SchoolSessionBoundary';
 import { preAuthLinking } from '../app/preAuthLinking';
+import {
+  resetSchoolLoginProviderCache,
+  setSchoolLoginProviderKinds,
+} from '../services/schoolLoginAvailability';
 
 let mockSchoolAuth: {
   user: { uid: string } | null;
@@ -42,6 +46,10 @@ beforeEach(() => {
   mockInitialUrl = null;
   mockLinkListener = undefined;
   mockRemoveLinkListener.mockClear();
+  setSchoolLoginProviderKinds(['school-issued']);
+});
+afterEach(() => {
+  resetSchoolLoginProviderCache();
 });
 
 jest.unmock('@react-navigation/native');

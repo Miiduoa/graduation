@@ -319,13 +319,15 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
                 />
               ))}
           </View>
-          <AISection title="學校公告" subtitle="最近發布的 100 則以內">
+          <AISection title="學校公告" subtitle="各處室公開公告">
             {visible.length ? (
               visible.map((row) => (
                 <AIRow
                   key={row.id}
                   title={row.title}
-                  subtitle={[row.source, dateLabel(row.publishedAt)].filter(Boolean).join(' · ')}
+                  subtitle={[row.source || row.office, dateLabel(row.publishedAt)]
+                    .filter(Boolean)
+                    .join(' · ')}
                   tag={row.pinned ? '置頂' : undefined}
                   onPress={() => {
                     if (content.current()) safeNavigate(navigation, '公告詳情', { id: row.id });

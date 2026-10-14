@@ -10,7 +10,11 @@ import {
 } from 'firebase/firestore';
 import { getDb, isFirebaseConfigured, type Announcement } from '@/lib/firebase';
 import {
+  ANNOUNCEMENT_RECENT_LIMIT,
+  ANNOUNCEMENT_SOURCE_LIMIT,
+  announcementSourceIdsForSchool,
   isAnnouncementSchoolVisibleToPublic,
+  mergeAnnouncementsById,
   SOURCE_DOWN_EMPTY_TEXT,
 } from '@campus/shared/src/campusAnnouncements';
 import { getAnnouncementVisibilityEnv } from '@/lib/runtime';
@@ -58,21 +62,45 @@ export async function loadAnnouncements(schoolId: string): Promise<Announcement[
   return feed.announcements;
 }
 
+async function querySchoolAnnouncements(
+  schoolId: string,
+  extra: Array<ReturnType<typeof where> | ReturnType<typeof orderBy>>,
+  maxItems: number,
+) {
+  const db = getDb();
+  const constraints = [...extra, limit(maxItems)];
+  let snapshot = await getDocsFromServer(
+    query(collection(db, 'schools', schoolId, 'announcements'), ...constraints),
+  );
+  if (snapshot.empty) {
+    snapshot = await getDocsFromServer(
+      query(
+        collection(db, 'announcements'),
+        where('schoolId', '==', schoolId),
+        ...constraints,
+      ),
+    );
+  }
+  return snapshot.docs.flatMap((document) => {
+    try {
+      return [normalizeAnnouncement(document, schoolId)];
+    } catch {
+      return [];
+    }
+  });
+}
+
 export async function loadAnnouncementFeed(schoolId: string): Promise<AnnouncementFeed> {
   if (!isAnnouncementSchoolVisibleToPublic({ schoolId }, getAnnouncementVisibilityEnv())) {
     return { announcements: [], sources: [], allUnavailable: false };
   }
   if (!isFirebaseConfigured()) throw new Error('Announcement source unavailable');
   const db = getDb();
-  const constraints = [orderBy('publishedAt', 'desc'), limit(20)];
-  let snapshot = await getDocsFromServer(
-    query(collection(db, 'schools', schoolId, 'announcements'), ...constraints),
+  const recent = await querySchoolAnnouncements(
+    schoolId,
+    [orderBy('publishedAt', 'desc')],
+    ANNOUNCEMENT_RECENT_LIMIT,
   );
-  if (snapshot.empty) {
-    snapshot = await getDocsFromServer(
-      query(collection(db, 'announcements'), where('schoolId', '==', schoolId), ...constraints),
-    );
-  }
   const sourcesSnap = await getDocsFromServer(
     collection(db, 'schools', schoolId, 'announcement-sources'),
   );
@@ -88,9 +116,23 @@ export async function loadAnnouncementFeed(schoolId: string): Promise<Announceme
       lastSuccessAt: publishedDate(data.lastSuccessAt) || undefined,
     };
   });
-  const announcements = snapshot.docs.map((document) => normalizeAnnouncement(document, schoolId));
+  const present = new Set(
+    recent.map((item) => item.sourceId).filter((value): value is string => Boolean(value)),
+  );
+  const missing = announcementSourceIdsForSchool(schoolId, sources).filter(
+    (sourceId) => !present.has(sourceId),
+  );
+  const extras = await Promise.all(
+    missing.map((sourceId) =>
+      querySchoolAnnouncements(
+        schoolId,
+        [where('sourceId', '==', sourceId)],
+        ANNOUNCEMENT_SOURCE_LIMIT,
+      ),
+    ),
+  );
   return {
-    announcements,
+    announcements: mergeAnnouncementsById([recent, ...extras]),
     sources,
     allUnavailable: sources.length > 0 && sources.every((item) => item.status === 'unavailable'),
   };
