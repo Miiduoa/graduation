@@ -79,8 +79,9 @@ function readLocal(ownerKey: string, schoolId: string): StoredTimetable {
       (parsed.meta !== undefined && (!parsed.meta || typeof parsed.meta !== 'object' || Array.isArray(parsed.meta)))) {
     throw new TimetableLocalReadError('corrupt');
   }
-  // Old unscoped copies may belong to another school: do not claim them.
-  if (parsed.schoolId && parsed.schoolId !== schoolId) {
+  // An unscoped legacy copy without an explicit school must never be claimed.
+  // A mismatched scoped copy is potentially damaged and must remain untouched.
+  if (parsed.schoolId !== schoolId) {
     if (scopedRaw !== null) throw new TimetableLocalReadError('corrupt');
     return emptyTimetable(schoolId);
   }
