@@ -197,6 +197,7 @@ it('clears course data when a retained child client loses access after a complet
 it('clears course data when the parent invite mutation loses access', async () => {
   render(<NuniApp />);
   await screen.findByRole('heading', { name: '設計專題' });
+  fireEvent.click(screen.getByRole('tab', { name: '作業' }));
   failure = new NuniError(403, 'ACCESS_DENIED');
   fireEvent.click(screen.getByRole('button', { name: '產生邀請碼' }));
   await screen.findByRole('alert');
