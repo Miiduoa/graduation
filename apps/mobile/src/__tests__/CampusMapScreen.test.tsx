@@ -5,7 +5,7 @@ import * as Location from 'expo-location';
 import { GoogleMapsLikeScreen } from '../screens/GoogleMapsLikeScreen';
 import { loadCampusMapPlaces, type CampusMapPlace } from '../features/campusMap';
 
-let mockSchool = { id: 'school-a' };
+let mockSchool: { id: string; name?: string } = { id: 'school-a' };
 let mockUser: { uid: string } | null = { uid: 'user-a' };
 let mockParams: Record<string, unknown> = {};
 const mockInject = jest.fn();
@@ -217,4 +217,28 @@ test('a visitor can load the public map without a school identity', async () => 
   expect(loadCampusMapPlaces).toHaveBeenCalledWith('school-a');
   expect(view.getByText('學校發布的圖書館')).toBeTruthy();
   expect(Location.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
+});
+
+
+test('an empty university map can search that university externally without inventing local POIs', async () => {
+  mockSchool = { id: 'nthu', name: '國立清華大學' };
+  jest.mocked(loadCampusMapPlaces).mockResolvedValue([]);
+  const view = render(<GoogleMapsLikeScreen />);
+  await view.findByText('尚未提供校園地點');
+  expect(view.queryByText('學校發布的圖書館')).toBeNull();
+  await act(async () => fireEvent.press(view.getByText('在 Google 地圖搜尋國立清華大學')));
+  const url = new URL(jest.mocked(Linking.openURL).mock.calls[0][0]);
+  expect(url.origin).toBe('https://www.google.com');
+  expect(url.pathname).toBe('/maps/search/');
+  expect(url.searchParams.get('query')).toBe('國立清華大學 校園');
+  expect(view.getByText(/第三方地圖搜尋結果尚未由校方核對/)).toBeTruthy();
+  expect(Location.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
+});
+
+test('unresolved campus titles do not create misleading Google Maps searches', async () => {
+  mockSchool = { id: 'unknown', name: '所選校園（unknown）' };
+  jest.mocked(loadCampusMapPlaces).mockResolvedValue([]);
+  const view = render(<GoogleMapsLikeScreen />);
+  await view.findByText('尚未提供校園地點');
+  expect(view.queryByText(/在 Google 地圖搜尋/)).toBeNull();
 });
