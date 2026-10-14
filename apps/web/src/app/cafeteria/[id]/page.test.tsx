@@ -332,16 +332,16 @@ it.each([
   {
     reviewStatus: 'demo' as const,
     notice: '這是示範店家，菜單和價格不是真的，不能點餐。',
-    hidden: '這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。',
+    hidden: '這間店的資料還沒經店家確認，菜單和價錢可能跟現場不一樣。',
   },
   {
     reviewStatus: 'unverified' as const,
-    notice: '這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。',
+    notice: '這間店的資料還沒經店家確認，菜單和價錢可能跟現場不一樣。',
     hidden: '這是示範店家，菜單和價格不是真的，不能點餐。',
   },
   {
     reviewStatus: undefined,
-    notice: '這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。',
+    notice: '這間店的資料還沒經店家確認，菜單和價錢可能跟現場不一樣。',
     hidden: '這是示範店家，菜單和價格不是真的，不能點餐。',
   },
 ])('shows the review notice for $reviewStatus shops', async ({ reviewStatus, notice, hidden }) => {
@@ -379,7 +379,7 @@ it('does not mark a verified shop page', async () => {
   expect(await screen.findByText('紙感小店')).toBeTruthy();
   expect(screen.queryByText('這是示範店家，菜單和價格不是真的，不能點餐。')).toBeNull();
   expect(
-    screen.queryByText('這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。'),
+    screen.queryByText('這間店的資料還沒經店家確認，菜單和價錢可能跟現場不一樣。'),
   ).toBeNull();
   expect(screen.queryByTestId('cafeteria-review-notice')).toBeNull();
   expect(screen.queryByRole('link', { name: '返回餐廳列表' })).toBeNull();
