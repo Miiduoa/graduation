@@ -47,6 +47,8 @@ import {
   type TDXHSRTimetable,
 } from '../services/tdxApi';
 import { useGeolocation } from '../hooks/useGeolocation';
+import { useSchool } from '../state/school';
+import { supportsLegacyTransportHub } from '../features/campusTransportScope';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const MAP_HEIGHT = SCREEN_HEIGHT * 0.32;
@@ -210,6 +212,23 @@ type QuickTab = 'none' | 'bus' | 'train' | 'hsr' | 'bike';
 // ─── Main Component ─────────────────────────────────────
 
 export function TransportHubScreen(props: any) {
+  const { school } = useSchool();
+  if (!supportsLegacyTransportHub(school.id)) {
+    return (
+      <Screen title="交通資訊" subtitle="依目前學校提供的官方來源查詢">
+        <Card title="這所學校尚未接入跨運具交通資料">
+          <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
+            舊版交通頁只支援靜宜大學與台中鄰近站點，不能顯示為{school.name}的交通資訊。
+            請使用「校園公車」查詢目前校園已串接的站牌；其他交通班次請以當地運輸業者的公告為準。
+          </Text>
+        </Card>
+      </Screen>
+    );
+  }
+  return <ProvidenceTransportHub key={school.id} {...props} />;
+}
+
+function ProvidenceTransportHub(props: any) {
   const themeMode = useThemeMode();
   const { width: screenWidth } = useWindowDimensions();
   const searchRequest = useRef(0);
