@@ -3,6 +3,8 @@
  * Campus One lending APIs. Library account access remains with each university.
  * Only add a direct catalog/account URL after confirming that exact destination.
  */
+import { mockSchools } from './schools';
+
 export type OfficialCampusLibrary = Readonly<{
   name: string;
   websiteUrl: string;
@@ -46,7 +48,26 @@ const LIBRARY_DIRECTORY: Readonly<Record<string, OfficialCampusLibrary>> = {
   ntub: { name: '國立臺北商業大學圖書館', websiteUrl: 'https://library.ntub.edu.tw/' },
 };
 
-export function getOfficialCampusLibrary(schoolId: string | null | undefined): OfficialCampusLibrary | null {
-  if (!schoolId || !Object.prototype.hasOwnProperty.call(LIBRARY_DIRECTORY, schoolId)) return null;
-  return LIBRARY_DIRECTORY[schoolId];
+/**
+ * Public school directories may use their own tenant IDs. An exact official school
+ * name is a safe fallback for a public outbound URL; it is never used for login,
+ * membership or borrowing data.
+ */
+export function getOfficialCampusLibrary(
+  schoolId: string | null | undefined,
+  schoolName?: string | null,
+): OfficialCampusLibrary | null {
+  if (!schoolId) return null;
+  if (Object.prototype.hasOwnProperty.call(LIBRARY_DIRECTORY, schoolId)) {
+    return LIBRARY_DIRECTORY[schoolId];
+  }
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,78}[a-z0-9])?$/.test(schoolId) || !schoolName) return null;
+  const exactName = schoolName.trim();
+  const matched = mockSchools.find(
+    (school) =>
+      school.name === exactName &&
+      Object.prototype.hasOwnProperty.call(LIBRARY_DIRECTORY, school.id),
+  );
+  const officialId = matched?.id ?? (exactName === '國立中興大學' ? 'nchu' : null);
+  return officialId ? LIBRARY_DIRECTORY[officialId] : null;
 }
