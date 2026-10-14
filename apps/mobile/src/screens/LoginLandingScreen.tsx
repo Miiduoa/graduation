@@ -7,6 +7,7 @@ import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { useNuniSession } from '../state/nuniSession';
 import { useSchool } from '../state/school';
+import { SchoolBrowsingControl } from '../components/SchoolBrowsingControl';
 import {
   SCHOOL_LOGIN_BIND_HINT,
   isSchoolLoginEntryAvailable,
@@ -36,13 +37,15 @@ export default function LoginLandingScreen() {
         <View style={s.intro}>
           <Text style={s.school}>課程・校園・每天的事</Text>
           <Text style={s.heading}>校園資訊，{'\n'}打開就能查看。</Text>
-          <Text style={s.body}>不必登入學校帳號，就能查看地圖、公車與公開公告。</Text>
+          <Text style={s.body}>不必登入學校帳號，就能查看各校地圖、公車、圖書館與公開公告。</Text>
         </View>
+        <SchoolBrowsingControl />
         <View style={s.publicPanel}>
           <Text style={s.title}>先找需要的資訊</Text>
           {(
             [
               ['Map', '校園地圖', '搜尋地點、查看位置與步行路線'],
+              ['Library', '圖書館', '搜尋目前選擇學校的館藏與官方服務'],
               ['BusSchedule', '公車查詢', '查看站點與官方到站資訊'],
               ['公告總覽', '公開公告', '查看學校發布的消息'],
             ] as const

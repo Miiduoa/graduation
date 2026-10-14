@@ -10,6 +10,8 @@ export const preAuthLinking: LinkingOptions<PreAuthStackParamList> = {
     screens: {
       LoginLanding: '',
       Map: 'map',
+      Library: 'library',
+      LibraryCatalog: 'library/catalog',
       BusSchedule: 'bus',
       公告總覽: 'announcements',
       公告詳情: 'announcement/:id',
