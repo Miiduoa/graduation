@@ -49,10 +49,26 @@
   gap: 8px;
   font-weight: 600;
 }
-.categories {
+.categories,
+.tools,
+.actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
+}
+.tools button[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--brand);
+  border-color: var(--brand);
+}
+.tools button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.actions a,
+.actions button {
+  white-space: normal;
 }
 .categories button,
 .favorite,
@@ -96,6 +112,12 @@
   border-radius: 50% 50% 50% 0;
   transform: rotate(-45deg);
   box-shadow: var(--shadow-md);
+}
+.pinSelected {
+  background: var(--text);
+  width: 34px;
+  height: 34px;
+  box-shadow: 0 0 0 5px var(--accent-soft), var(--shadow-md);
 }
 .map :global(.leaflet-control-zoom a),
 .map :global(.leaflet-control-attribution),
