@@ -85,7 +85,7 @@ export const officialLibraryDirectory: Readonly<Record<string, OfficialLibrarySe
   ntpu: {
     name: '國立臺北大學圖書館',
     websiteUrl: 'https://library.ntpu.edu.tw/',
-    catalogUrl: 'https://library.ntpu.edu.tw/link/49e75ae8d34d4da88f36f29ef2a5568d',
+    catalogUrl: 'https://library.ntpu.edu.tw/',
   },
   tmu: {
     name: '臺北醫學大學圖書館',
@@ -137,32 +137,18 @@ export function getOfficialLibrary(
   if (Object.prototype.hasOwnProperty.call(officialLibraryDirectory, schoolId)) {
     return officialLibraryDirectory[schoolId];
   }
-  // Public tenant IDs may differ from the legacy school directory IDs.
-  // Match only an exact, unique institution name; never guess by substring or old selection.
-  if (!schoolName) return null;
+  // The platform may assign an arbitrary tenant ID to a known university.
+  // Exact official display names can resolve a public website link, but must
+  // never establish school membership, account or library borrowing access.
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,78}[a-z0-9])?$/.test(schoolId) || !schoolName) return null;
+  const exactName = schoolName.trim();
   const matches = mockSchools.filter(
     (school) =>
-      school.name === schoolName &&
+      school.name === exactName &&
       Object.prototype.hasOwnProperty.call(officialLibraryDirectory, school.id),
   );
-  const libraryId =
-    matches.length === 1 ? matches[0].id : schoolName === '國立中興大學' ? 'tw-nchu' : null;
-  if (!libraryId) return null;
-  // A duplicate display name does not establish tenant identity.
-  // External IDs must still contain the recognized institution code as a whole token.
-  const aliases = libraryId === 'tw-nchu' ? ['tw-nchu', 'nchu'] : [libraryId];
-  if (
-    !aliases.some(
-      (alias) =>
-        schoolId === alias ||
-        schoolId.startsWith(`${alias}-`) ||
-        schoolId.endsWith(`-${alias}`) ||
-        schoolId.includes(`-${alias}-`),
-    )
-  ) {
-    return null;
-  }
-  return officialLibraryDirectory[libraryId];
+  if (matches.length !== 1) return null;
+  return officialLibraryDirectory[matches[0].id];
 }
 
 export function buildOfficialLibraryCatalogUrl(
