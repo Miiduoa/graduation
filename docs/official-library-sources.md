@@ -9,6 +9,9 @@
 | 靜宜大學 | 圖書館官網、WebPac 館藏查詢 | https://library.pu.edu.tw/ 、 https://webpacx.lib.pu.edu.tw/ |
 | 國立清華大學 | Primo 館藏查詢、讀者帳號、開館時間、空間預約 | https://www.lib.nthu.edu.tw/ 、 https://www.lib.nthu.edu.tw/use/hours.html 、 https://libsms.lib.nthu.edu.tw/build/ |
 | 國立中興大學 | Primo 本館館藏查詢、開放時間 | https://www.lib.nchu.edu.tw/ 、 https://www.lib.nchu.edu.tw/service.php?cID=35 |
+| 東吳大學 | 官方 Primo 館藏入口、開放時間 | https://www.lib.scu.edu.tw/ 、 https://www.lib.scu.edu.tw/CMS/Page/12 |
+| 長庚大學 | iGrid／館藏總覽、開放時間 | https://www.cgu.edu.tw/library/ 、 https://web20.lib.cgu.edu.tw/ |
+| 國立嘉義大學 | 館藏／個人借閱官方入口、開館時間與 Summon 資源探索 | https://www.ncyu.edu.tw/lib/ 、 https://libaleph.ncyu.edu.tw/F 、 https://ncyu.summon.serialssolutions.com/za-CN/ |
 
 清華與中興的 Primo 網址，來自各校圖書館官網「進階檢索」或「館藏查詢」連結。校方使用第三方 Ex Libris 網域提供查詢，並不代表本站已取得館藏或讀者帳號 API 權限。
 
