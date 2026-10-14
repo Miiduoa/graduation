@@ -36,7 +36,7 @@ export const mockSchools: School[] = [
   {
     id: 'tw-nchu',
     code: 'NCHU',
-    name: '國立中興大學（示範）',
+    name: '國立中興大學',
     shortName: '中興',
     themeColor: '#991b1b',
     domains: ['nchu.edu.tw'],
