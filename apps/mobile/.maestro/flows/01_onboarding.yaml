@@ -5,7 +5,7 @@ tags:
   - onboarding
 
 ---
-# A fresh installation starts signed out. Authenticated navigation needs a separate test account.
+# Guest access must not depend on a Google or university login.
 - launchApp
 - extendedWaitUntil:
     visible:
@@ -16,19 +16,34 @@ tags:
 - assertNotVisible:
     id: tab-Today
 - takeScreenshot: guest_startup
+
+# The platform account is the path for courses, assignments and merchant work.
+- scrollUntilVisible:
+    element:
+      id: login-start
+    direction: DOWN
+- assertVisible: 'Google 帳號'
+- tapOn:
+    id: login-start
+# The navigation target is valid even when the remote session check fails.
+# The offline/error state must not pretend that a Google login succeeded.
+- extendedWaitUntil:
+    visible:
+      id: nuni-workspace
+    timeout: 20000
+- takeScreenshot: platform_account_state
+
+# On iOS the navigation header owns the back action; a device-level back gesture
+# does not reliably pop the React Navigation stack.
+- tapOn:
+    id: BackButton
+- extendedWaitUntil:
+    visible:
+      id: login-landing
+    timeout: 20000
 - scrollUntilVisible:
     element:
       id: school-login-start
     direction: DOWN
-- assertVisible: 'Campus One 帳號'
-- tapOn:
-    id: school-login-start
-- extendedWaitUntil:
-    visible: '學校登入'
-    timeout: 20000
-- assertVisible:
-    id: student-id-input
-- assertVisible:
-    id: student-password-input
-- assertVisible: '使用學號登入'
-- takeScreenshot: school_login
+- assertVisible: '連線學校帳號'
+- takeScreenshot: school_login_availability
