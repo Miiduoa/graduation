@@ -11,6 +11,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => mocks.auth }));
 vi.mock('@/lib/community/pois', () => ({
   SOCIAL_POIS: [{ id: 'library', name: '圖書館', category: 'library' }, { id: 'classroom', name: '教室', category: 'academic' }],
+  verifiedSocialPoisForSchool: (schoolId: string) => schoolId === 'pu' || schoolId === 'tw-pu'
+    ? [{ id: 'library', name: '圖書館', category: 'library' }, { id: 'classroom', name: '教室', category: 'academic' }]
+    : [],
   defaultSocialPoiId: () => 'library',
   findSocialPoi: (id: string) => ({ id, name: id === 'library' ? '圖書館' : '教室', category: 'library' }),
   SOCIAL_POI_CATEGORY_LABEL: { library: '校園地點' },
