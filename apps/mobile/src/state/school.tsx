@@ -95,24 +95,29 @@ export function SchoolProvider(props: {
   });
   const [selection, setSelectionState] = useState<SchoolSelection>(initialSelection);
   const [loaded, setLoaded] = useState(false);
+  // Any user-initiated selection takes priority over an earlier pending storage read.
+  const selectionRevision = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
+    const startingRevision = selectionRevision.current;
     (async () => {
       try {
         const raw = await AsyncStorage.getItem(STORAGE_KEY);
         if (!raw) return;
         const parsed = JSON.parse(raw) as Partial<SchoolSelection>;
-        if (cancelled) return;
+        if (cancelled || selectionRevision.current !== startingRevision) return;
         setSelectionState((prev) =>
-          normalizeSelection({
-            code: parsed.code ?? prev.code,
-            schoolId: parsed.schoolId === undefined ? (parsed.code ? null : prev.schoolId) : parsed.schoolId,
-            schoolName: parsed.schoolName ?? prev.schoolName ?? null,
-            shortName: parsed.shortName ?? prev.shortName ?? null,
-            themeColor: parsed.themeColor ?? prev.themeColor ?? null,
-            domains: parsed.domains ?? prev.domains ?? null,
-          }),
+          selectionRevision.current !== startingRevision
+            ? prev
+            : normalizeSelection({
+                code: parsed.code ?? prev.code,
+                schoolId: parsed.schoolId === undefined ? (parsed.code ? null : prev.schoolId) : parsed.schoolId,
+                schoolName: parsed.schoolName ?? prev.schoolName ?? null,
+                shortName: parsed.shortName ?? prev.shortName ?? null,
+                themeColor: parsed.themeColor ?? prev.themeColor ?? null,
+                domains: parsed.domains ?? prev.domains ?? null,
+              }),
         );
       } catch {
         // ignore invalid persisted state
@@ -129,6 +134,8 @@ export function SchoolProvider(props: {
   const previousSchoolRef = useRef<string | null>(null);
 
   const setSelection = (next: Partial<SchoolSelection>) => {
+    // Never let the initialization read overwrite a campus chosen while it was pending.
+    selectionRevision.current += 1;
     setSelectionState((prev) => {
       const identityChanged = next.code !== undefined || next.schoolId !== undefined;
       const code = next.code != null ? normalizeSchoolCode(next.code) : prev.code;
