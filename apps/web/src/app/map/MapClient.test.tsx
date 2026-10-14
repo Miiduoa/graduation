@@ -82,9 +82,10 @@ it('distinguishes a confirmed empty source from an unavailable source', async ()
   render(<MapClient school="pu" />);
   expect(await screen.findByText('目前沒有可顯示的校園地點')).toBeTruthy();
   expect(screen.queryByLabelText('地圖狀態')).toBeNull();
-  expect(screen.getByRole('link', { name: '開啟靜宜大學網站' }).getAttribute('href')).toBe(
-    'https://www.pu.edu.tw/',
+  expect(screen.getByRole('link', { name: '查看靜宜大學官方校園地圖' }).getAttribute('href')).toBe(
+    'https://www.pu.edu.tw/p/404-1000-1131.php?Lang=zh-tw',
   );
+  expect(screen.getByText(/校方地圖提供建築與單位對照/)).toBeTruthy();
 });
 
 it('never points an empty non-Providence map back to Providence', async () => {
@@ -92,7 +93,7 @@ it('never points an empty non-Providence map back to Providence', async () => {
   render(<MapClient school="remote-university-12" />);
   expect(await screen.findByText('目前沒有可顯示的校園地點')).toBeTruthy();
   expect(screen.getByText(/不會改用其他學校的建築或導航位置/)).toBeTruthy();
-  expect(screen.queryByRole('link', { name: '開啟靜宜大學網站' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '查看靜宜大學官方校園地圖' })).toBeNull();
   expect(loadMapLocations).toHaveBeenCalledWith('remote-university-12');
 });
 
@@ -225,7 +226,7 @@ it('opens an explicitly labeled map search for the selected university when POIs
   expect(link.getAttribute('target')).toBe('_blank');
   expect(screen.getByText(/第三方地圖搜尋/)).toBeTruthy();
   expect(screen.queryByText('蓋夏圖書館')).toBeNull();
-  expect(screen.queryByRole('link', { name: '開啟靜宜大學網站' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '查看靜宜大學官方校園地圖' })).toBeNull();
 });
 
 it('does not produce a public map search for an unresolved campus name', async () => {
