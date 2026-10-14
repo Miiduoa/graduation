@@ -59,6 +59,7 @@ beforeEach(() => {
 });
 
 it('organizes real lessons by unit, shows receipt-based pending work and links to the actual course item', async () => {
+  const onNavigate = vi.fn();
   render(
     <CourseLearningPath
       workspace={workspace}
@@ -67,10 +68,15 @@ it('organizes real lessons by unit, shows receipt-based pending work and links t
       unitsError=""
       reloadUnits={vi.fn()}
       onUnitCreated={vi.fn()}
+      onNavigate={onNavigate}
     />,
   );
   const link = await screen.findByRole('link', { name: /關聯式模型練習/ });
   expect(link.getAttribute('href')).toBe(`#assignment-${assignment.id}`);
+  fireEvent.click(link);
+  fireEvent.click(link);
+  expect(onNavigate).toHaveBeenCalledTimes(2);
+  expect(onNavigate).toHaveBeenCalledWith('assignments');
   expect(screen.getByRole('link', { name: /第一週課前閱讀/ }).getAttribute('href')).toBe(`#material-${material.id}`);
   expect(screen.getByText('0 / 1')).toBeTruthy();
   expect(screen.getByText('可處理的待辦').previousElementSibling?.textContent).toBe('1');
