@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import re
 import traceback
 from pathlib import Path
 from urllib.parse import urlparse
@@ -15,6 +16,10 @@ OUT.mkdir(parents=True, exist_ok=True)
 SEED = {'courses': [{'id': 'browser-database', 'name': '資料庫管理', 'day': 1, 'start': 3, 'end': 4,
                      'teacher': '測試教師', 'room': '主顧303'}],
         'meta': {'title': '測試課表'}, 'schoolId': 'pu', 'shareWithFriends': False, 'updatedAt': '2026-10-12T00:00:00Z'}
+NTHU_SEED = {'courses': [{'id': 'browser-nthu', 'name': '清大測試課程', 'day': 3, 'start': 2, 'end': 3,
+                          'teacher': '測試教師', 'room': '測試教室'}],
+             'meta': {'title': '清大測試課表'}, 'schoolId': 'nthu', 'shareWithFriends': False,
+             'updatedAt': '2026-10-12T00:00:00Z'}
 
 async def main():
     results = []
@@ -25,11 +30,13 @@ async def main():
         errors = []
         page.on('pageerror', lambda error: errors.append(str(error)))
         await page.add_init_script('if (!localStorage.getItem("campus-one-personal-timetable:local")) localStorage.setItem("campus-one-personal-timetable:local", ' + json.dumps(json.dumps(SEED, ensure_ascii=False)) + ');')
+        await page.add_init_script('if (!localStorage.getItem("campus-one-personal-timetable:local:nthu")) localStorage.setItem("campus-one-personal-timetable:local:nthu", ' + json.dumps(json.dumps(NTHU_SEED, ensure_ascii=False)) + ');')
         # This local browser smoke owns its directory fixture. Never depend on a
         # deployed campus gateway or silently treat the guest as a PU student.
         async def local_school_directory(route):
             await route.fulfill(status=200, content_type='application/json', body=json.dumps({
-                'schools': [{'id': 'pu', 'name': '靜宜大學', 'status': 'not-open'}]
+                'schools': [{'id': 'pu', 'name': '靜宜大學', 'status': 'not-open'},
+                            {'id': 'nthu', 'name': '國立清華大學', 'status': 'not-open'}]
             }, ensure_ascii=False))
         await page.route('**/api/schools', local_school_directory)
         try:
@@ -40,6 +47,27 @@ async def main():
             await page.get_by_text('瀏覽校園：不限校園', exact=True).click()
             await page.get_by_role('combobox', name='瀏覽校園').select_option('pu')
             await expect(page.get_by_role('button', name='移動課程', exact=True)).to_be_visible()
+            await expect(page.get_by_role('button', name=re.compile(r'^編輯 資料庫管理')).first).to_be_visible()
+            assert await page.evaluate('localStorage.getItem("campus-one-personal-timetable:local:pu")') is None, 'Reading a legacy timetable must not silently rewrite it'
+            # A second university has its own scoped copy; neither copy may leak
+            # when navigating back and forth in the same browser session.
+            await page.locator('details summary').filter(has_text='瀏覽校園：').click()
+            await page.get_by_role('combobox', name='瀏覽校園').select_option('nthu')
+            await expect(page.get_by_role('button', name=re.compile(r'^編輯 清大測試課程')).first).to_be_visible()
+            assert await page.get_by_role('button', name=re.compile(r'^編輯 資料庫管理')).count() == 0, 'PU courses leaked into NTHU'
+            await page.locator('details summary').filter(has_text='瀏覽校園：').click()
+            await page.get_by_role('combobox', name='瀏覽校園').select_option('')
+            await expect(page.get_by_role('status').filter(has_text='請先選擇一所學校')).to_be_visible()
+            assert await page.get_by_role('button', name='移動課程', exact=True).count() == 0, 'Private timetable leaked into campus=all'
+            await page.locator('details summary').filter(has_text='瀏覽校園：').click()
+            await page.get_by_role('combobox', name='瀏覽校園').select_option('pu')
+            await expect(page.get_by_role('button', name=re.compile(r'^編輯 資料庫管理')).first).to_be_visible()
+            assert await page.get_by_role('button', name=re.compile(r'^編輯 清大測試課程')).count() == 0, 'NTHU courses leaked into PU'
+            legacy = await page.evaluate('JSON.parse(localStorage.getItem("campus-one-personal-timetable:local"))')
+            nthu = await page.evaluate('JSON.parse(localStorage.getItem("campus-one-personal-timetable:local:nthu"))')
+            assert legacy['schoolId'] == 'pu' and legacy['courses'][0]['id'] == 'browser-database'
+            assert nthu['schoolId'] == 'nthu' and nthu['courses'][0]['id'] == 'browser-nthu'
+            results.append('PU legacy and NTHU scoped copies are isolated through PU → NTHU → all → PU')
             async def choose():
                 await page.get_by_role('button', name='移動課程', exact=True).click()
                 await page.get_by_role('combobox', name='要移動的課程', exact=True).select_option('browser-database')
