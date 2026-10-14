@@ -16,6 +16,15 @@ export function SchoolScopePlaceholder() {
       </section>
     );
   }
+  if (selection?.selectionError && selection.catalogStatus === 'ready') {
+    return (
+      <section className="card" role="alert">
+        <h2>找不到這所校園</h2>
+        <p>這所學校未列在目前可瀏覽的校園目錄，請重新選擇。</p>
+        <SchoolSelector />
+      </section>
+    );
+  }
   if (
     selection && !selection.loading && selection.catalogStatus === 'ready' &&
     selection.selectedSchoolId === null

@@ -157,8 +157,9 @@ export function SelectedSchoolProvider({
     if (id) {
       next.set('schoolId', id);
       next.set('campus', id);
-      const code = findSchoolById(id)?.code;
+      const code = catalog.find((school) => school.id === id)?.code || findSchoolById(id)?.code;
       if (code) next.set('school', code);
+      else next.delete('school');
     } else {
       next.delete('schoolId');
       next.delete('school');
