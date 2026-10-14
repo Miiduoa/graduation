@@ -463,6 +463,7 @@ test('switching universities opens that university official library instead of P
   const navigate = jest.fn();
   const view = render(<LibraryAiFirstScreen navigation={{ navigate }} />);
   expect(view.getByText('國立臺灣大學圖書館')).toBeTruthy();
+  expect(view.queryByText('在圖書館網站搜尋')).toBeNull();
   fireEvent.changeText(view.getByLabelText('館藏關鍵字'), ' 分散式系統 ');
   await act(async () => fireEvent.press(view.getByText('查詢館藏')));
   expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
