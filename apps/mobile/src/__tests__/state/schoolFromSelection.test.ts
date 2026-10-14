@@ -25,3 +25,18 @@ test('a new directory tenant does not silently inherit another university identi
     name: '乙校',
   });
 });
+
+test('unknown school IDs do not borrow an existing school code or untrusted login domains', () => {
+  const school = schoolFromSelection({
+    schoolId: 'remote-school-id',
+    schoolName: '外部校園',
+    code: 'NTHU',
+    themeColor: '#123456',
+    domains: ['nthu.edu.tw'],
+  });
+  expect(school.id).toBe('remote-school-id');
+  expect(school.code).toBe('REMOTE-SCHOOL-ID');
+  expect(school.name).toBe('外部校園');
+  expect(school.themeColor).toBe('#123456');
+  expect(school.domains).toBeUndefined();
+});
