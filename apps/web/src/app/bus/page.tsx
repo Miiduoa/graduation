@@ -5,14 +5,19 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
 import { TransitExplorer } from '@/components/TransitExplorer';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { usePublicSchoolContext } from '@/lib/usePublicSchoolContext';
+import { PublicCampusStatus } from '@/components/PublicCampusStatus';
 
 function BusContext() {
   const search = useSearchParams();
-  const { schoolId, schoolName } = resolveSchoolPageContext({
+  const { schoolId, schoolName, status } = usePublicSchoolContext({
     school: search.get('school') ?? undefined,
     schoolId: search.get('schoolId') ?? undefined,
+    campus: search.get('campus') ?? undefined,
   });
+  if (status !== 'ready') {
+    return <SiteShell title="公車與交通"><PublicCampusStatus status={status} service="公車站牌" /></SiteShell>;
+  }
   return (
     <SiteShell title="公車與交通" subtitle="找站牌、確認方向，再出發。" schoolName={schoolName}>
       <TransitExplorer

@@ -14,7 +14,10 @@ import {
   SOURCE_NOT_CONNECTED_TEXT,
   staleAnnouncementUpdatedAt,
 } from '@campus/shared/src/campusAnnouncements';
-import { resolveAnnouncementSchool } from './resolveSchool';
+import { usePublicSchoolContext } from '@/lib/usePublicSchoolContext';
+import { PublicCampusStatus } from '@/components/PublicCampusStatus';
+import { isAnnouncementSchoolVisibleToPublic } from '@campus/shared/src/campusAnnouncements';
+import { getAnnouncementVisibilityEnv } from '@/lib/runtime';
 import styles from './announcements.module.css';
 
 type Category = 'all' | 'academic' | 'event' | 'general';
@@ -334,7 +337,11 @@ export default function AnnouncementsPage(props: {
   searchParams?: Promise<{ school?: string; schoolId?: string; campus?: string }>;
 }) {
   const params = props.searchParams ? use(props.searchParams) : undefined;
-  const { school, visible } = resolveAnnouncementSchool(params);
+  const publicContext = usePublicSchoolContext(params);
+  const { school } = publicContext;
+  const visible = publicContext.status === 'ready' && isAnnouncementSchoolVisibleToPublic(
+    { schoolId: school.id }, getAnnouncementVisibilityEnv(),
+  );
   const { user, loading } = useAuth();
   return (
     <SiteShell
@@ -343,7 +350,9 @@ export default function AnnouncementsPage(props: {
       title="校園公告"
       subtitle="公開處室公告的摘要與原文連結。一般帳號即可查看。"
     >
-      {!visible ? (
+      {publicContext.status !== 'ready' ? (
+        <PublicCampusStatus status={publicContext.status} service="公開公告" />
+      ) : !visible ? (
         <section className={styles.status}>
           <h2>目前沒有公開公告</h2>
         </section>

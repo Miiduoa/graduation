@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { findSchoolById } from '@campus/shared/src/schools';
 import { useAuth } from '@/components/AuthGuard';
 import { useLocationHash } from '@/lib/useLocationHash';
 import MapCanvas from './MapCanvas';
@@ -14,7 +15,7 @@ import {
 } from './mapService';
 import styles from './map.module.css';
 
-type MapProps = { school: string; route?: string; focus?: string };
+type MapProps = { school: string; schoolName?: string; route?: string; focus?: string };
 type FavoritesState = { status: 'loading' | 'error' | 'ready'; ids: Set<string> };
 
 export default function MapClient(props: MapProps) {
@@ -23,6 +24,7 @@ export default function MapClient(props: MapProps) {
     <MapContent
       key={JSON.stringify([
         props.school,
+        props.schoolName,
         props.route,
         props.focus,
         user?.uid,
@@ -38,6 +40,7 @@ export default function MapClient(props: MapProps) {
 
 function MapContent({
   school,
+  schoolName,
   route,
   focus,
   uid,
@@ -186,9 +189,21 @@ function MapContent({
       <div className={`card ${styles.state}`}>
         <h2>目前沒有可顯示的校園地點</h2>
         <p>地點需要有完整的名稱與座標才能顯示。你也可以先查詢校方提供的校園資訊。</p>
-        <a className="btn" href="https://www.pu.edu.tw/" target="_blank" rel="noopener noreferrer">
-          開啟靜宜大學網站
-        </a>
+        {school === 'pu' ? (
+          <a className="btn" href="https://www.pu.edu.tw/" target="_blank" rel="noopener noreferrer">
+            開啟靜宜大學網站
+          </a>
+        ) : (schoolName || findSchoolById(school)?.name) ? (
+          <a
+            className="btn"
+            href={'https://www.google.com/maps/search/?api=1&query=' +
+              encodeURIComponent((schoolName || findSchoolById(school)?.name || '') + ' 校園')}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            在 Google 地圖搜尋這所學校
+          </a>
+        ) : null}
       </div>
     );
 

@@ -17,7 +17,8 @@ import {
 import { ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
 import { fetchCafeteriaCatalog, type CatalogCafeteria } from '@/lib/cafeteriaCatalog';
 import type { MenuItem } from '@/lib/firebase';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { usePublicSchoolContext } from '@/lib/usePublicSchoolContext';
+import { PublicCampusStatus } from '@/components/PublicCampusStatus';
 import styles from './cafeteria.module.css';
 
 const ALL_CAFETERIAS_KEY = 'all';
@@ -73,7 +74,10 @@ export default function CafeteriaPage(props: {
   searchParams?: Promise<{ school?: string; schoolId?: string; campus?: string }>;
 }) {
   const searchParams = props.searchParams ? use(props.searchParams) : undefined;
-  const context = resolveSchoolPageContext(searchParams);
+  const context = usePublicSchoolContext(searchParams);
+  if (context.status !== 'ready') {
+    return <SiteShell title="餐廳"><PublicCampusStatus status={context.status} service="餐廳" /></SiteShell>;
+  }
   return <CafeteriaContent key={context.schoolId} {...context} />;
 }
 

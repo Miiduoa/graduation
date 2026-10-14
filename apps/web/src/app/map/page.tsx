@@ -5,7 +5,8 @@ import { use } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { usePublicSchoolContext } from '@/lib/usePublicSchoolContext';
+import { PublicCampusStatus } from '@/components/PublicCampusStatus';
 import { PageLoadingCard } from '@/components/PageLoadingCard';
 
 // 使用 dynamic import 並關閉 SSR（Leaflet 需要 browser API）
@@ -23,9 +24,13 @@ export default function MapPage(props: {
   }>;
 }) {
   const searchParams = props.searchParams ? use(props.searchParams) : undefined;
-  const { schoolId, schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
+  const { schoolId, schoolName, schoolSearch: q, status } = usePublicSchoolContext(searchParams);
   const route = Array.isArray(searchParams?.route) ? searchParams.route[0] : searchParams?.route;
   const focus = Array.isArray(searchParams?.focus) ? searchParams.focus[0] : searchParams?.focus;
+
+  if (status !== 'ready') {
+    return <SiteShell title="校園地圖"><PublicCampusStatus status={status} service="校園地圖" /></SiteShell>;
+  }
 
   return (
     <SiteShell
@@ -33,7 +38,7 @@ export default function MapPage(props: {
       subtitle="找教室、查設施，規劃前往目的地的路線"
       schoolName={schoolName}
     >
-      <MapClient school={schoolId} route={route} focus={focus} />
+      <MapClient school={schoolId} schoolName={schoolName} route={route} focus={focus} />
 
       <div
         style={{
