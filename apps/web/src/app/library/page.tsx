@@ -2,7 +2,7 @@
 
 import { use, useState } from 'react';
 import { SiteShell } from '@/components/SiteShell';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 
 const CATALOG = 'https://webpacx.lib.pu.edu.tw/';
 const LIBRARY = 'https://library.pu.edu.tw/';
@@ -11,7 +11,10 @@ export default function LibraryPage(props: {
   searchParams?: Promise<{ school?: string; schoolId?: string }>;
 }) {
   const searchParams = props.searchParams ? use(props.searchParams) : undefined;
-  const { schoolId, schoolName } = resolveSchoolPageContext(searchParams);
+  const { schoolId, schoolName, ready } = useBrowsingSchoolPageContext(searchParams);
+  if (!ready) {
+    return <SiteShell title="圖書館"><p role="status">正在確認校園目錄…</p></SiteShell>;
+  }
   return <LibraryContent key={schoolId} schoolId={schoolId} schoolName={schoolName} />;
 }
 
