@@ -61,7 +61,9 @@ function Header() {
             aria-current={
               pathname === '/life' ||
               pathname?.startsWith('/lost-found') ||
-              ['/map', '/bus', '/cafeteria', '/community', '/friends'].includes(pathname || '')
+              ['/map', '/bus', '/cafeteria', '/food', '/community', '/friends'].includes(
+                pathname || '',
+              )
                 ? 'page'
                 : undefined
             }

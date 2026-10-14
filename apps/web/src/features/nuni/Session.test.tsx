@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { NuniSessionProvider, useNuniSession } from './Session';
+import { browserRequest, NuniSessionProvider, useNuniSession } from './Session';
 
 const accountA = 'pa_11111111-1111-4111-8111-111111111111';
 const accountB = 'pa_22222222-2222-4222-8222-222222222222';
@@ -31,6 +31,28 @@ function View() {
 }
 beforeEach(() => vi.stubGlobal('fetch', fetcher.mockReset()));
 afterEach(() => vi.unstubAllGlobals());
+
+it('encodes food cursors as data while preserving origin and session restrictions', async () => {
+  fetcher.mockResolvedValue(response({ orders: [] }));
+  await browserRequest('realms/school-one/food/orders', contextA, undefined, undefined, {
+    cursor: 'abc+/=next&personId=other',
+  });
+  expect(fetcher).toHaveBeenCalledWith(
+    '/api/nuni/realms/school-one/food/orders?cursor=abc%2B%2F%3Dnext%26personId%3Dother',
+    expect.objectContaining({
+      method: 'GET',
+      redirect: 'error',
+      headers: { 'X-Campus-Session': contextA },
+    }),
+  );
+  await expect(browserRequest('//foreign.test', contextA)).rejects.toMatchObject({
+    code: 'INVALID_REQUEST',
+  });
+  await expect(
+    browserRequest('realms/school-one/food/orders', contextA, {}, undefined, { cursor: 'abc' }),
+  ).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
 
 it('discards a delayed session read after logout has started', async () => {
   let finishRead!: (response: Response) => void;

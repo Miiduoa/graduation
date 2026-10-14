@@ -107,6 +107,44 @@
 .stack[hidden] {
   display: none;
 }
+.confirmation {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  line-height: 1.7;
+  margin: 16px 0;
+}
+.confirmation input {
+  width: 18px;
+  height: 18px;
+  margin-top: 5px;
+  flex: none;
+}
+.menuItem {
+  display: grid;
+  gap: 16px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 22px;
+}
+.menuItem h4 {
+  margin: 0;
+}
+.summary {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 20px;
+}
+.summary > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+}
+.summary dt {
+  color: var(--muted);
+}
+.summary dd {
+  margin: 0;
+}
 @media (max-width: 600px) {
   .panel {
     padding: 20px;

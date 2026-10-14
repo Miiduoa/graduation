@@ -6,5 +6,5 @@ export type PreAuthStackParamList = {
   公告總覽: undefined;
   公告詳情: { id: string };
   SSOLogin: undefined;
-  NuniWorkspace: undefined;
+  NuniWorkspace: { tab?: 'courses' | 'food' | 'merchant' | 'account' } | undefined;
 };
