@@ -44,10 +44,12 @@ export function browsingSchoolSearch(
   if (campus === 'all') return '?campus=all';
 
   const schoolId = campus || params?.get('schoolId') || selectedSchoolId;
-  const school = findSchoolById(schoolId);
-  if (!school) return '';
+  if (!schoolId || !/^[a-z0-9][a-z0-9-]{0,78}[a-z0-9]$/.test(schoolId)) return '';
 
-  return `${buildSchoolSearch({ code: school.code, id: school.id })}&campus=${encodeURIComponent(school.id)}`;
+  const school = findSchoolById(schoolId);
+  const search = school ? buildSchoolSearch({ code: school.code, id: school.id })
+    : `?schoolId=${encodeURIComponent(schoolId)}`;
+  return `${search}&campus=${encodeURIComponent(schoolId)}`;
 }
 
 export function buildSchoolSearch(context: SchoolContext): string {
