@@ -6,10 +6,13 @@ import {
   nuniErrorMessage,
   type NuniQuiz,
   type NuniQuizResponse,
+  type NuniUnit,
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
 import { useLocationHash } from '@/lib/useLocationHash';
 import { MutationForm, useClasses } from './CourseUI';
+import { CourseUnitSelect } from './CourseUnitSelect';
+import { selectCourseUnit } from './courseOutline';
 import { CourseText } from './CourseMaterials';
 import { matchesQuizFilter, quizStatus, type QuizFilter } from './courseTasks';
 import { useNuniSession } from './Session';
@@ -20,19 +23,21 @@ function dateLabel(value: string) {
   return new Date(value).toLocaleString('zh-TW', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
-export function CourseQuizzes({ workspace }: { workspace: NuniWorkspace }) {
+export function CourseQuizzes({ workspace, units, onChanged }: { workspace: NuniWorkspace; units?: NuniUnit[] | null; onChanged?: () => void }) {
   const { session } = useNuniSession();
   if (!session) return <p role="status">請先登入，再查看課程測驗。</p>;
   return (
     <QuizList
       key={`${session.context}:${workspace.id}:${workspace.memberRole}:${workspace.state}`}
       workspace={workspace}
+      units={units}
+      onChanged={onChanged}
       accountId={session.platformAccountId}
     />
   );
 }
 
-function QuizList({ workspace, accountId }: { workspace: NuniWorkspace; accountId: string }) {
+function QuizList({ workspace, accountId, units, onChanged }: { workspace: NuniWorkspace; accountId: string; units?: NuniUnit[] | null; onChanged?: () => void }) {
   const classes = useClasses();
   const readClasses = useRef(classes);
   const { refresh } = useNuniSession();
@@ -147,6 +152,7 @@ function QuizList({ workspace, accountId }: { workspace: NuniWorkspace; accountI
     setError('');
     if (!teacher && item.myResponse && filter === 'pending') setFilter('answered');
     if (teacher && !items?.some((entry) => entry.id === item.id)) setFilter('all');
+    onChanged?.();
     setItems((previous) =>
       previous?.some((entry) => entry.id === item.id)
         ? previous.map((entry) => (entry.id === item.id ? item : entry))
@@ -246,6 +252,7 @@ function QuizList({ workspace, accountId }: { workspace: NuniWorkspace; accountI
                 title: String(form.get('title') || '').trim(),
                 prompt: String(form.get('prompt') || '').trim(),
                 dueAt: due ? new Date(due).toISOString() : null,
+                unitId: units === undefined ? undefined : selectCourseUnit(form, units),
                 idempotencyKey: key,
               });
               acceptQuiz(item);
@@ -264,6 +271,7 @@ function QuizList({ workspace, accountId }: { workspace: NuniWorkspace; accountI
                 placeholder="寫下希望學生回答的問題，以及需要說明的重點。"
               />
             </label>
+            {units !== undefined && <CourseUnitSelect units={units} />}
             <label>
               建議完成時間（選填）
               <input name="dueAt" type="datetime-local" />
