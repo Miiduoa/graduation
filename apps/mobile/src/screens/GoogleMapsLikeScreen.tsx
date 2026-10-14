@@ -147,10 +147,12 @@ function CampusMapContent({
     if (location) matches.sort((a, b) => distanceMeters(location, a) - distanceMeters(location, b));
     return matches;
   }, [query, category, catalog, location, nearbyOnly]);
-  const visiblePlaces = useMemo(
-    () => (selected && !places.some((place) => place.id === selected.id) ? [...places, selected] : places),
-    [places, selected],
-  );
+  const visiblePlaces = useMemo(() => {
+    const visible = new Map(places.map((place) => [place.id, place]));
+    if (origin) visible.set(origin.id, origin);
+    if (selected) visible.set(selected.id, selected);
+    return [...visible.values()];
+  }, [places, origin, selected]);
   const campusCenter = useMemo(() => centerOfCoordinates(catalog), [catalog]);
   const html = useMemo(
     () =>
