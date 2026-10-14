@@ -42,7 +42,9 @@ test('a foreign campus deep link opens its own catalog, never Providence OPAC', 
   const view = render(<LibraryCatalogScreen route={{ params: { initialQuery: '資料庫' } }} />);
   expect(view.queryByText('靜宜館藏搜尋面板')).toBeNull();
   await act(async () => fireEvent.press(view.getByText('開啟學校官方館藏')));
-  expect(Linking.openURL).toHaveBeenCalledWith('https://www.lib.nthu.edu.tw/');
+  expect(Linking.openURL).toHaveBeenCalledWith(
+    expect.stringContaining('nthu.primo.exlibrisgroup.com/discovery/search'),
+  );
 });
 
 test('a failed official catalog link reports the error instead of silently ignoring it', async () => {
