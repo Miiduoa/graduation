@@ -4,6 +4,7 @@ import { Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
+import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { TransitExplorer } from '@/components/TransitExplorer';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 
@@ -14,7 +15,7 @@ function BusContext() {
     schoolId: search.get('schoolId') ?? undefined,
     campus: search.get('campus') ?? undefined,
   });
-  if (!ready) return <SiteShell title="公車與交通"><p role="status">正在確認校園目錄…</p></SiteShell>;
+  if (!ready) return <SiteShell title="公車與交通"><SchoolScopePlaceholder /></SiteShell>;
 
   return (
     <SiteShell title="公車與交通" subtitle="找站牌、確認方向，再出發。" schoolName={schoolName}>
