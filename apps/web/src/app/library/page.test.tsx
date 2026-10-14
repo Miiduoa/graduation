@@ -37,7 +37,7 @@ it('sends personal borrowing actions to the library instead of reporting local s
 it('does not show another school’s library for an unsupported school', () => {
   context.schoolId = 'other';
   render(<LibraryPage />);
-  expect(screen.getByText('尚未提供這所學校的圖書館入口')).toBeTruthy();
+  expect(screen.getByText('尚未確認這所學校的圖書館入口')).toBeTruthy();
   expect(screen.queryByRole('link')).toBeNull();
 });
 it('clears search input when the selected school changes', () => {
@@ -48,4 +48,24 @@ it('clears search input when the selected school changes', () => {
   context.schoolId = 'pu';
   rerender(<LibraryPage />);
   expect((screen.getByLabelText('關鍵字') as HTMLInputElement).value).toBe('');
+});
+
+it('opens the chosen university library without reusing Providence links', () => {
+  context.schoolId = 'nthu';
+  context.schoolName = '國立清華大學';
+  render(<LibraryPage />);
+  const link = screen.getByRole('link', { name: '開啟官方圖書館 ↗' });
+  expect(link.getAttribute('href')).toBe('https://www.lib.nthu.edu.tw/');
+  expect(link.getAttribute('target')).toBe('_blank');
+  expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+  expect(screen.queryByLabelText('關鍵字')).toBeNull();
+  expect(screen.queryByRole('link', { name: /借閱紀錄/ })).toBeNull();
+});
+
+it('never opens a different school when the query names an unsupported campus', async () => {
+  const { findByText } = render(
+    <LibraryPage searchParams={Promise.resolve({ campus: 'campus-not-yet-listed', schoolId: 'pu' })} />,
+  );
+  expect(await findByText('尚未確認這所學校的圖書館入口')).toBeTruthy();
+  expect(screen.queryByRole('link')).toBeNull();
 });
