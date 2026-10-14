@@ -9,7 +9,7 @@ type SchoolSession = Pick<
   'user' | 'profile' | 'loading' | 'profileLoading' | 'tokenExpired'
 >;
 
-export function hasReadySchoolSession(auth: SchoolSession, browsingSchoolId?: string | null): boolean {
+export function hasReadySchoolSession(auth: SchoolSession, browsingSchoolId: string | null): boolean {
   if (
     auth.loading ||
     auth.profileLoading ||
@@ -22,8 +22,7 @@ export function hasReadySchoolSession(auth: SchoolSession, browsingSchoolId?: st
   const accountSchoolId = toPublicSchoolId(auth.profile.schoolId);
   if (!accountSchoolId) return false;
   // Browsing another university never grants access to the signed-in school's private data.
-  if (browsingSchoolId !== undefined &&
-      toPublicSchoolId(browsingSchoolId) !== accountSchoolId) return false;
+  if (toPublicSchoolId(browsingSchoolId) !== accountSchoolId) return false;
   return isStudentIdLoginAvailable(accountSchoolId);
 }
 
