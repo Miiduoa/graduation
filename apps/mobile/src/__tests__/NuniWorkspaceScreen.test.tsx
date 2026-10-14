@@ -348,3 +348,19 @@ test('explicit logout drops same-account drafts before that account signs in aga
   view.rerender(<NuniWorkspaceScreen />);
   expect(view.getByTestId('course-draft').props.value).toBe('');
 });
+
+test.each([
+  ['signed out', { session: null, loading: false, error: '', pendingLogout: false }],
+  ['checking account', { session: null, loading: true, error: '', pendingLogout: false }],
+  ['unconfirmed session', { session: null, loading: false, error: '無法確認登入狀態', pendingLogout: false }],
+  ['signed in', { session: principal, loading: false, error: '', pendingLogout: false }],
+])('identifies the platform account destination even when %s', (_label, state) => {
+  Object.assign(mockAuth, state);
+  const view = render(<NuniWorkspaceScreen />);
+  expect(view.getByTestId('nuni-workspace')).toBeTruthy();
+  // A status check that failed must not show a false Google sign-in success.
+  if (state.error) {
+    expect(view.getByText('目前無法確認登入狀態')).toBeTruthy();
+    expect(view.queryByText('登入或建立帳號')).toBeNull();
+  }
+});
