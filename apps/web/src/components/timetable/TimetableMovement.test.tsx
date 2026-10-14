@@ -6,7 +6,10 @@ import { PersonalTimetable } from './PersonalTimetable';
 
 const mocks = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn(), friends: vi.fn(), friend: vi.fn(), meetups: vi.fn() }));
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => ({ user: { uid: 'alice' }, loading: false }) }));
-vi.mock('@/components/SelectedSchoolProvider', () => ({ useSelectedSchool: () => ({ selectedSchoolId: 'pu', loading: false }) }));
+vi.mock('@/components/SelectedSchoolProvider', () => ({
+  useSelectedSchool: () => ({ selectedSchoolId: 'pu', loading: false }),
+  useOptionalSelectedSchool: () => ({ selectedSchoolId: 'pu', selectedSchool: { id: 'pu', name: '靜宜大學' }, loading: false, catalogStatus: 'ready' }),
+}));
 vi.mock('@/lib/timetable/store', () => ({ loadPersonalTimetable: mocks.load, savePersonalTimetable: mocks.save,
   loadFriendTimetable: mocks.friend, createMeetup: mocks.meetups, createServerShare: vi.fn(),
   listMyMeetups: vi.fn(async () => []), respondMeetup: vi.fn() }));
