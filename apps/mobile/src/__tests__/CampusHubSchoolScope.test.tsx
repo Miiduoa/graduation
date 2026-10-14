@@ -2,8 +2,8 @@ import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
 import { CampusHubScreen } from '../screens/CampusHubScreen';
 
-let currentSchool = { id: 'pu', name: '靜宜大學' };
-jest.mock('../state/school', () => ({ useSchool: () => ({ school: currentSchool }) }));
+let mockSchool = { id: 'pu', name: '靜宜大學' };
+jest.mock('../state/school', () => ({ useSchool: () => ({ school: mockSchool }) }));
 jest.mock('../state/theme', () => ({ useTheme: () => require('../ui/theme').theme }));
 jest.mock('../components/HeaderAvatarButton', () => ({ HeaderAvatarButton: () => null }));
 jest.mock('../components/OpenOrderCard', () => ({ OpenOrderCard: () => null }));
@@ -13,13 +13,13 @@ jest.mock('../ui/AppActionIcon', () => ({ AppActionIcon: () => null }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 
 beforeEach(() => {
-  currentSchool = { id: 'pu', name: '靜宜大學' };
+  mockSchool = { id: 'pu', name: '靜宜大學' };
 });
 
 test('Taichung-specific transport entry is only available in its original PU context', () => {
   const view = render(<CampusHubScreen />);
   expect(view.getByText('台中交通')).toBeTruthy();
-  currentSchool = { id: 'nthu', name: '國立清華大學' };
+  mockSchool = { id: 'nthu', name: '國立清華大學' };
   view.rerender(<CampusHubScreen />);
   expect(view.queryByText('台中交通')).toBeNull();
   expect(view.getByText('國立清華大學')).toBeTruthy();
@@ -27,7 +27,7 @@ test('Taichung-specific transport entry is only available in its original PU con
 });
 
 test('another school does not expose Providence-specific library search keywords', () => {
-  currentSchool = { id: 'nthu', name: '國立清華大學' };
+  mockSchool = { id: 'nthu', name: '國立清華大學' };
   const view = render(<CampusHubScreen />);
   fireEvent.changeText(view.getByPlaceholderText('搜尋地點或服務'), '蓋夏');
   expect(view.queryByText('圖書館')).toBeNull();
