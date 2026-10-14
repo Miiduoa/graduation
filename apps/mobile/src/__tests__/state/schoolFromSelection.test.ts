@@ -40,3 +40,10 @@ test('unknown school IDs do not borrow an existing school code or untrusted logi
   expect(school.themeColor).toBe('#123456');
   expect(school.domains).toBeUndefined();
 });
+
+
+test('National Chung Hsing University is selectable as an official browsing campus', () => {
+  const school = schoolFromSelection({ schoolId: 'tw-nchu' });
+  expect(school).toMatchObject({ id: 'tw-nchu', code: 'NCHU', name: '國立中興大學' });
+  expect(school.name).not.toContain('示範');
+});
