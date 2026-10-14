@@ -104,7 +104,14 @@ async def main():
             await expect(page.get_by_role('status').filter(has_text='確認儲存後才會移動')).to_have_count(0)
             await page.screenshot(path=str(OUT / 'mobile.png'), full_page=True, animations='disabled')
             results.append('390px layout, reachable editor actions and non-dragging movement')
-            await page.evaluate('''() => { const key = 'campus-one-personal-timetable:local'; const data = JSON.parse(localStorage.getItem(key)); data.courses.push({...data.courses[0],id:'pending',name:'時間未定',day:0,start:0,end:0}); localStorage.setItem(key,JSON.stringify(data)); }''')
+            await page.evaluate('''() => {
+                // Saving creates the campus-scoped copy, which must take precedence over legacy.
+                const key = 'campus-one-personal-timetable:local:pu';
+                const data = JSON.parse(localStorage.getItem(key));
+                if (!data || !data.courses.length) throw new Error('Scoped timetable was not saved');
+                data.courses.push({...data.courses[0],id:'pending',name:'時間未定',day:0,start:0,end:0});
+                localStorage.setItem(key, JSON.stringify(data));
+            }''')
             await page.reload(wait_until='networkidle')
             await expect(page.get_by_role('button', name='今天空堂', exact=True)).to_be_disabled()
             await expect(page.get_by_role('button', name='排讀書時間', exact=True)).to_be_disabled()
