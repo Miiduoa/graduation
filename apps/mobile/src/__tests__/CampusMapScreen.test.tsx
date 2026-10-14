@@ -373,11 +373,20 @@ test('links to the university plan for a confirmed empty Providence collection',
   expect(Linking.openURL).toHaveBeenCalledWith('https://gnl.pu.edu.tw/p/426-1007-8.php?Lang=zh-tw');
 });
 
-test('never substitutes Providence official campus maps for another selected school', async () => {
-  mockSchool = { id: 'nthu', name: '國立清華大學' };
+test('never substitutes Providence official campus maps for an unverified university id', async () => {
+  mockSchool = { id: 'tw-demo-uni', name: '示範大學' };
   jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([]);
   const view = render(<GoogleMapsLikeScreen />);
   await view.findByText('尚未提供校園地點');
   expect(view.queryByText('查看校方校區平面圖')).toBeNull();
-  expect(view.getByText('在 Google 地圖搜尋國立清華大學')).toBeTruthy();
+  expect(view.getByText('在 Google 地圖搜尋示範大學')).toBeTruthy();
+});
+
+test('opens the selected university official map instead of Providence for a non-Providence school', async () => {
+  mockSchool = { id: 'nthu', name: '國立清華大學' };
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([]);
+  const view = render(<GoogleMapsLikeScreen />);
+  await view.findByText('尚未提供校園地點');
+  await act(async () => fireEvent.press(view.getByText('查看校方校區平面圖')));
+  expect(Linking.openURL).toHaveBeenCalledWith('https://www.nthu.edu.tw/campusmap');
 });
