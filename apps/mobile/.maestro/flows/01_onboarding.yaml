@@ -25,11 +25,13 @@ tags:
 - assertVisible: 'Google 帳號'
 - tapOn:
     id: login-start
+# The navigation target is valid even when the remote session check fails.
+# The offline/error state must not pretend that a Google login succeeded.
 - extendedWaitUntil:
-    visible: '登入或建立帳號'
+    visible:
+      id: nuni-workspace
     timeout: 20000
-- assertVisible: '從你的課程開始'
-- takeScreenshot: platform_login
+- takeScreenshot: platform_account_state
 
 # School authentication is a separate, capability-gated entry.
 - back
