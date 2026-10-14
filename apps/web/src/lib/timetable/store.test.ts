@@ -240,3 +240,48 @@ it('rejects a scoped timetable missing the school marker without erasing it', as
   }, 'school:u-1')).rejects.toThrow('資料');
   expect(localStorage.getItem(key)).toBe(raw);
 });
+
+
+it('preserves an intentional empty local timetable against an older cloud snapshot', async () => {
+  const schoolOwner = 'school:u-1';
+  const updated = await savePersonalTimetable('u-1', {
+    courses: [],
+    meta: {} as never,
+    shareWithFriends: false,
+    updatedAt: '2026-10-14T00:00:00.000Z',
+    schoolId: 'pu',
+  }, schoolOwner);
+  expect(updated).toEqual({ stored: 'local' });
+  const raw = localStorage.getItem('campus-one-personal-timetable:school:u-1:pu');
+  expect(raw).toContain('"courses":[]');
+  firestore.getDoc.mockResolvedValue({
+    exists: () => true,
+    data: () => ({
+      courses: [course],
+      shareWithFriends: true,
+      updatedAt: { toMillis: () => Date.parse('2026-10-01T00:00:00.000Z') },
+      schoolId: 'pu',
+    }),
+  });
+  const loaded = await loadPersonalTimetable('u-1', 'pu', schoolOwner);
+  expect(loaded.courses).toEqual([]);
+  expect(loaded.shareWithFriends).toBe(false);
+  expect(localStorage.getItem('campus-one-personal-timetable:school:u-1:pu')).toBe(raw);
+});
+
+it('does not treat a foreign legacy timetable or a missing timestamp as a fresh empty edit', async () => {
+  const key = 'campus-one-personal-timetable:u-1';
+  const remote = { ...course, name: '雲端學期課程' };
+  firestore.getDoc.mockResolvedValue({
+    exists: () => true,
+    data: () => ({
+      courses: [remote], schoolId: 'pu',
+      updatedAt: { toMillis: () => Date.parse('2026-10-11T00:00:00.000Z') },
+    }),
+  });
+  localStorage.setItem(key, JSON.stringify({ courses: [course], schoolId: 'ntu' }));
+  expect((await loadPersonalTimetable('u-1', 'pu', 'school:u-1')).courses).toEqual([remote]);
+  localStorage.setItem(key, JSON.stringify({ courses: [course], schoolId: 'pu' }));
+  expect((await loadPersonalTimetable('u-1', 'pu', 'school:u-1')).courses).toEqual([remote]);
+  expect(firestore.setDoc).not.toHaveBeenCalled();
+});
