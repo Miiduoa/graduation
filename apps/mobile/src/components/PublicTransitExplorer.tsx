@@ -30,6 +30,7 @@ function Arrivals({ stop }: { stop: PublicBusStop }) {
     const request = new AbortController();
     controller.current = request;
     setLoading(true);
+    setData(null);
     const next = await queryPublicTransit(
       { action: 'arrivals', city: stop.city, stopId: stop.id },
       request.signal,
@@ -113,6 +114,7 @@ export function PublicTransitExplorer({
   const [selected, setSelected] = useState<PublicBusStop | null>(null);
   const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'unavailable'>('idle');
   const [message, setMessage] = useState('');
+  const [accuracyNotice, setAccuracyNotice] = useState('');
   const [locating, setLocating] = useState(false);
   const request = useRef<AbortController | null>(null);
   const positionRevision = useRef(0);
@@ -135,6 +137,7 @@ export function PublicTransitExplorer({
     setSelected(null);
     setStatus('idle');
     setMessage('');
+    setAccuracyNotice('');
   };
 
   const lookup = useCallback(async (query: PublicTransitQuery) => {
@@ -174,6 +177,7 @@ export function PublicTransitExplorer({
     const run = ++positionRevision.current;
     setLocating(true);
     setMessage('');
+    setAccuracyNotice('');
     try {
       const permission = await Location.requestForegroundPermissionsAsync();
       if (!mounted.current || run !== positionRevision.current) return;
@@ -193,7 +197,7 @@ export function PublicTransitExplorer({
         return;
       }
       if (location.coords.accuracy != null && location.coords.accuracy > 500)
-        setMessage('定位誤差偏大，請再次確認站牌位置與方向。');
+        setAccuracyNotice('定位誤差偏大，請再次確認站牌位置與方向。');
       await lookup({ action: 'nearby', city, lat, lon, radius });
     } catch {
       if (mounted.current && run === positionRevision.current)
@@ -282,6 +286,7 @@ export function PublicTransitExplorer({
         />
         {status === 'loading' && <Text accessibilityRole="progressbar" style={body}>正在查詢官方站牌…</Text>}
         {message ? <Text accessibilityRole="alert" style={body}>{message}</Text> : null}
+        {accuracyNotice ? <Text accessibilityRole="status" style={body}>{accuracyNotice}</Text> : null}
         {stops.map((stop) => (
           <AIButton
             key={stop.city + ':' + stop.id}
