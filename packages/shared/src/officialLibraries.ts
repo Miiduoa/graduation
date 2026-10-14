@@ -115,12 +115,20 @@ export const officialLibraryDirectory: Readonly<Record<string, OfficialLibrarySe
   ntpu: {
     name: '國立臺北大學圖書館',
     websiteUrl: 'https://library.ntpu.edu.tw/',
-    catalogUrl: 'https://library.ntpu.edu.tw/',
+    // https://library.ntpu.edu.tw/ - official catalog and personal borrowing links
+    catalogUrl: 'https://wpac.lib.ntpu.edu.tw/webpac/search.cfm',
+    accountUrl: 'https://wpac.lib.ntpu.edu.tw/webpac/search.cfm?type=shelf_user',
+    hoursUrl: 'https://library.ntpu.edu.tw/singlehtml/70dcb2e4549c413eb3d533f3b1e54dbe?cntId=f130dcaa5d424ae5911a14b81856d706',
+    spacesUrl: 'https://ireserve.lib.ntpu.edu.tw/sm/home_web.do',
+    electronicResourcesUrl: 'https://erm.library.ntpu.edu.tw/',
   },
   tmu: {
     name: '臺北醫學大學圖書館',
     websiteUrl: 'https://library.tmu.edu.tw/',
-    catalogUrl: 'https://library.tmu.edu.tw/',
+    // https://library.tmu.edu.tw/Forms/Form0200/Form0200.aspx - resource system guide
+    catalogUrl: 'https://libelis.tmu.edu.tw/webpacIndex.jsp',
+    hoursUrl: 'https://library.tmu.edu.tw/Forms/Form0102/Form0102.aspx',
+    electronicResourcesUrl: 'https://jumper.tmu.edu.tw/',
   },
   fju: {
     name: '輔仁大學圖書館',
@@ -140,9 +148,11 @@ export const officialLibraryDirectory: Readonly<Record<string, OfficialLibrarySe
     hoursUrl: 'https://www.cgu.edu.tw/library/Contents?nodeId=7401',
   },
   cycu: {
-    name: '中原大學圖書館',
+    name: '中原大學張靜愚紀念圖書館',
     websiteUrl: 'https://lib.cycu.edu.tw/',
-    catalogUrl: 'https://lib.cycu.edu.tw/',
+    // https://lib.cycu.edu.tw/ - official catalog and personal loan lookup
+    catalogUrl: 'https://cylis.lib.cycu.edu.tw/search*cht',
+    accountUrl: 'https://cylis.lib.cycu.edu.tw/patroninfo*cht',
   },
   scu: {
     name: '東吳大學圖書館',
