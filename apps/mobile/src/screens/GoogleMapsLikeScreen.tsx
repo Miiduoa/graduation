@@ -42,8 +42,18 @@ export function GoogleMapsLikeScreen() {
   const { school } = useSchool();
   const { user } = useAuth();
   const params = (route.params ?? {}) as MapParams;
-  const linkedSchool = useRef({ id: school.id, invalidated: false });
-  if (linkedSchool.current.id !== school.id) linkedSchool.current.invalidated = true;
+  const signature = JSON.stringify([
+    params.poiId,
+    params.focusPoiId,
+    params.toPoiId,
+    params.fromPoiId,
+  ]);
+  const linkedSchool = useRef({ id: school.id, signature, invalidated: false });
+  if (linkedSchool.current.signature !== signature) {
+    linkedSchool.current = { id: school.id, signature, invalidated: false };
+  } else if (linkedSchool.current.id !== school.id) {
+    linkedSchool.current.invalidated = true;
+  }
   const schoolScopedParams = linkedSchool.current.invalidated ? {} : params;
   return (
     <CampusMapContent
