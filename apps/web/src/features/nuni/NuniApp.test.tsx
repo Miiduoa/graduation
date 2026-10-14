@@ -74,6 +74,9 @@ beforeEach(() => {
     if (path === `class-workspaces/${workspaceId}`)
       return { id: workspaceId, title: '設計專題', state: 'active', memberRole };
     if (path.endsWith('/assignments')) return { assignments: [] };
+    if (path.endsWith('/units')) return { units: [] };
+    if (path.endsWith('/materials')) return { materials: [] };
+    if (path.endsWith('/quizzes')) return { quizzes: [] };
     throw new Error(`Unexpected request: ${path}`);
   });
 });
