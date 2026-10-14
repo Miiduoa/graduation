@@ -25,7 +25,7 @@ it('keeps official destinations separate by campus and never returns a Providenc
   );
   expect(getOfficialLibrary('platform-campus-42', '清華大學')).toBeNull();
   expect(getOfficialLibrary('../pu', '國立清華大學')).toBeNull();
-  expect(getOfficialLibrary('ntpu')?.catalogUrl).toBe('https://library.ntpu.edu.tw/');
+  expect(getOfficialLibrary('ntpu')?.catalogUrl).toBe('https://wpac.lib.ntpu.edu.tw/webpac/search.cfm');
   expect(getOfficialLibrary('tenant-fake', '國立清華大學（校外）')).toBeNull();
 });
 
@@ -87,4 +87,23 @@ it('keeps NCHU and NTHU official services scoped to their own universities', () 
   const url = new URL(buildOfficialLibraryCatalogUrl('tw-nchu', '資管')!);
   expect(url.hostname).toBe('nchu.primo.exlibrisgroup.com');
   expect(url.searchParams.get('query')).toBe('any,contains,資管');
+});
+
+
+it('keeps Taipei University, TMU and CYCU official borrowing services separate', () => {
+  const ntpu = getOfficialLibrary('ntpu')!;
+  const tmu = getOfficialLibrary('tmu')!;
+  const cycu = getOfficialLibrary('cycu')!;
+  expect(ntpu.accountUrl).toBe('https://wpac.lib.ntpu.edu.tw/webpac/search.cfm?type=shelf_user');
+  expect(ntpu.spacesUrl).toBe('https://ireserve.lib.ntpu.edu.tw/sm/home_web.do');
+  expect(ntpu.electronicResourcesUrl).toBe('https://erm.library.ntpu.edu.tw/');
+  expect(tmu.catalogUrl).toBe('https://libelis.tmu.edu.tw/webpacIndex.jsp');
+  expect(tmu.electronicResourcesUrl).toBe('https://jumper.tmu.edu.tw/');
+  expect(tmu.accountUrl).toBeUndefined();
+  expect(cycu.catalogUrl).toBe('https://cylis.lib.cycu.edu.tw/search*cht');
+  expect(cycu.accountUrl).toBe('https://cylis.lib.cycu.edu.tw/patroninfo*cht');
+  for (const schoolId of ['ntpu', 'tmu', 'cycu']) {
+    expect(buildOfficialLibraryCatalogUrl(schoolId, '資管課程')).toBe(getOfficialLibrary(schoolId)!.catalogUrl);
+    expect(buildOfficialLibraryCatalogUrl(schoolId, '資管課程')).not.toContain('webpacx.lib.pu.edu.tw');
+  }
 });
