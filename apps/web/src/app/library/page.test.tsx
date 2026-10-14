@@ -37,6 +37,7 @@ it('sends personal borrowing actions to the library instead of reporting local s
 });
 it('does not show another school’s library for an unsupported school', () => {
   context.schoolId = 'other';
+  context.schoolName = '未接入的大學';
   render(<LibraryPage />);
   expect(screen.getByText('尚未提供這所學校的圖書館入口')).toBeTruthy();
   expect(screen.queryByRole('link')).toBeNull();
