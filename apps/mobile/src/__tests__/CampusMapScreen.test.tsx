@@ -343,3 +343,41 @@ test('never offers a Providence floor directory for a different university', asy
   expect(view.queryByText('查看校方樓層導覽')).toBeNull();
   expect(safeNavigate).not.toHaveBeenCalled();
 });
+
+
+test('shows the verified campus plan alongside public map POIs without automatically leaving the app', async () => {
+  mockSchool = { id: 'pu', name: '靜宜大學' };
+  const view = await openMap();
+  expect(view.getByText('查看校方校區平面圖')).toBeTruthy();
+  expect(Linking.openURL).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(view.getByText('查看校方校區平面圖')));
+  expect(Linking.openURL).toHaveBeenCalledWith('https://gnl.pu.edu.tw/p/426-1007-8.php?Lang=zh-tw');
+});
+
+test('offers the university plan when its POI source is unavailable, and reports browser handoff failures', async () => {
+  mockSchool = { id: 'pu', name: '靜宜大學' };
+  jest.mocked(loadCampusMapPlaces).mockRejectedValueOnce(new Error('offline'));
+  const view = render(<GoogleMapsLikeScreen />);
+  await view.findByText('目前無法讀取校園地點');
+  jest.mocked(Linking.openURL).mockRejectedValueOnce(new Error('not available'));
+  await act(async () => fireEvent.press(view.getByText('查看校方校區平面圖')));
+  expect(view.getByText(/無法開啟校方校區平面圖/)).toBeTruthy();
+});
+
+test('links to the university plan for a confirmed empty Providence collection', async () => {
+  mockSchool = { id: 'pu', name: '靜宜大學' };
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([]);
+  const view = render(<GoogleMapsLikeScreen />);
+  await view.findByText('尚未提供校園地點');
+  await act(async () => fireEvent.press(view.getByText('查看校方校區平面圖')));
+  expect(Linking.openURL).toHaveBeenCalledWith('https://gnl.pu.edu.tw/p/426-1007-8.php?Lang=zh-tw');
+});
+
+test('never substitutes Providence official campus maps for another selected school', async () => {
+  mockSchool = { id: 'nthu', name: '國立清華大學' };
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([]);
+  const view = render(<GoogleMapsLikeScreen />);
+  await view.findByText('尚未提供校園地點');
+  expect(view.queryByText('查看校方校區平面圖')).toBeNull();
+  expect(view.getByText('在 Google 地圖搜尋國立清華大學')).toBeTruthy();
+});
