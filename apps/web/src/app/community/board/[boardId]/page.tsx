@@ -6,13 +6,14 @@
  * 對應 mobile/BoardDetailScreen：板規 / 訂閱 toggle / 發文按鈕 / 該板貼文列表
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { CommunityAccess } from '../../_components/CommunityAccess';
 import { SiteShell } from '@/components/SiteShell';
+import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import {
   CAMPUS_BOARD_TYPE_LABEL,
   fetchRecentCampusPosts,
@@ -32,21 +33,24 @@ async function checkIsSubscribed(uid: string, schoolId: string, boardId: string)
 }
 
 export default function BoardDetailPage() {
-  const { schoolName } = resolveSchoolPageContext({});
+  const { schoolId, schoolName, ready } = useBrowsingSchoolPageContext();
   return (
-    <SiteShell title="看板" subtitle="校園交流" schoolName={schoolName}>
-      <CommunityAccess>
-        <BoardDetailInner />
-      </CommunityAccess>
+    <SiteShell title="看板" subtitle="校園交流" schoolName={ready ? schoolName : undefined}>
+      {ready ? (
+        <CommunityAccess>
+          <BoardDetailInner key={schoolId} schoolId={schoolId} />
+        </CommunityAccess>
+      ) : (
+        <SchoolScopePlaceholder />
+      )}
     </SiteShell>
   );
 }
 
-function BoardDetailInner() {
+function BoardDetailInner({ schoolId }: { schoolId: string }) {
   const params = useParams<{ boardId: string }>();
   const boardId = params?.boardId;
   const { user } = useAuth();
-  const { schoolId } = useMemo(() => resolveSchoolPageContext({}), []);
 
   const [board, setBoard] = useState<CampusBoard | null>(null);
   const [posts, setPosts] = useState<CampusPostDoc[]>([]);
@@ -181,7 +185,7 @@ function BoardDetailInner() {
             {subscribed ? '🔔 已訂閱' : '訂閱'}
           </button>
           <Link
-            href={`/community/post/new?boardId=${encodeURIComponent(boardId)}`}
+            href={`/community/post/new?boardId=${encodeURIComponent(boardId)}&schoolId=${encodeURIComponent(schoolId)}`}
             className="btn primary"
             style={{ fontSize: 12, padding: '6px 12px' }}
           >
@@ -225,7 +229,7 @@ function BoardDetailInner() {
             return (
               <Link
                 key={p.id}
-                href={`/community/post/${p.id}`}
+                href={`/community/post/${p.id}?schoolId=${encodeURIComponent(schoolId)}`}
                 className="card"
                 style={{ padding: 14, textDecoration: 'none', color: 'var(--text)' }}
               >
