@@ -13,6 +13,7 @@ import Link from 'next/link';
 import { CommunityLoadError, useCommunityLoad } from '../../_components/useCommunityLoad';
 import { CommunityAccess } from '../../_components/CommunityAccess';
 import { SiteShell } from '@/components/SiteShell';
+import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import {
@@ -40,7 +41,7 @@ export default function PostComposePage() {
           <PostComposeInner key={schoolId} schoolId={schoolId} />
         </CommunityAccess>
       ) : (
-        <p role="status">正在確認校園目錄…</p>
+        <SchoolScopePlaceholder />
       )}
     </SiteShell>
   );
