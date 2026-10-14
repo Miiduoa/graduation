@@ -13,7 +13,11 @@ import {
   clearDiningIntent,
 } from '../features/dining';
 import type { DiningIntent, DiningMenu } from '../features/dining';
-import { fetchCafeteriaLocations, fetchCafeteriaMenu } from '../services/cafeteriaCatalog';
+import {
+  fetchCafeteriaCatalog,
+  fetchCafeteriaLocations,
+  fetchCafeteriaMenu,
+} from '../services/cafeteriaCatalog';
 
 jest.mock('firebase/firestore', () => ({
   collection: (_db: unknown, ...parts: string[]) => parts.join('/'),
@@ -34,6 +38,9 @@ jest.mock('expo-crypto', () => ({
   digestStringAsync: jest.fn(async () => 'hash-a'),
 }));
 jest.mock('../services/cafeteriaCatalog', () => ({
+  fetchCafeteriaCatalog: jest.fn(async () => {
+    throw new Error('catalog-unavailable');
+  }),
   fetchCafeteriaLocations: jest.fn(async () => {
     throw new Error('catalog-unavailable');
   }),
@@ -78,6 +85,7 @@ const rows = (data: Array<[string, Record<string, unknown>]>) => ({
 });
 beforeEach(async () => {
   jest.clearAllMocks();
+  jest.mocked(fetchCafeteriaCatalog).mockRejectedValue(new Error('catalog-unavailable'));
   jest.mocked(fetchCafeteriaLocations).mockRejectedValue(new Error('catalog-unavailable'));
   jest.mocked(fetchCafeteriaMenu).mockResolvedValue([]);
   jest.mocked(Crypto.randomUUID).mockReturnValue('uuid-a');
@@ -106,28 +114,30 @@ test('loads only school-scoped canonical records without curated/sample fallback
   expect(getDocsFromServer).toHaveBeenCalledWith('schools/pu/cafeterias');
 });
 test('reads the platform catalog when the backend returns this school', async () => {
-  jest.mocked(fetchCafeteriaLocations).mockResolvedValueOnce([
-    {
-      id: 'stall',
-      name: '校內咖啡店',
-      schoolId: 'pu',
-      location: '活動中心',
-      merchantMode: 'info_only',
-      reviewStatus: 'unverified',
-    },
-  ] as never);
-  jest.mocked(fetchCafeteriaMenu).mockResolvedValueOnce([
-    {
-      id: 'toast',
-      name: '蔬菜吐司',
-      cafeteria: '校內咖啡店',
-      cafeteriaId: 'stall',
-      availableOn: '2026-10-13',
-      price: 60,
-      available: true,
-      schoolId: 'pu',
-    },
-  ] as never);
+  jest.mocked(fetchCafeteriaCatalog).mockResolvedValueOnce({
+    cafeterias: [
+      {
+        id: 'stall',
+        name: '校內咖啡店',
+        schoolId: 'pu',
+        location: '活動中心',
+        merchantMode: 'info_only',
+        reviewStatus: 'unverified',
+      },
+    ],
+    menus: [
+      {
+        id: 'toast',
+        name: '蔬菜吐司',
+        cafeteria: '校內咖啡店',
+        cafeteriaId: 'stall',
+        availableOn: '2026-10-13',
+        price: 60,
+        available: true,
+        schoolId: 'pu',
+      },
+    ],
+  } as never);
   await expect(loadDiningCatalog(scope, () => true)).resolves.toEqual({
     venues: [
       {
@@ -152,7 +162,7 @@ test('reads the platform catalog when the backend returns this school', async ()
   expect(getDocsFromServer).not.toHaveBeenCalled();
 });
 test('keeps an empty platform catalog instead of filling another school', async () => {
-  jest.mocked(fetchCafeteriaLocations).mockResolvedValueOnce([]);
+  jest.mocked(fetchCafeteriaCatalog).mockResolvedValueOnce({ cafeterias: [], menus: [] });
   await expect(loadDiningCatalog({ ...scope, schoolId: 'cgu' }, () => true)).resolves.toEqual({
     venues: [],
     menus: [],
