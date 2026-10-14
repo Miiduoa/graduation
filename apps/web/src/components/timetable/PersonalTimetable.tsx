@@ -29,7 +29,6 @@ import {
   shareCopiedCopy,
 } from '@campus/shared';
 import { useAuth } from '@/components/AuthGuard';
-import { useSelectedSchool } from '@/components/SelectedSchoolProvider';
 import styles from '@/components/academic/academic.module.css';
 import {
   createMeetup,
@@ -72,13 +71,13 @@ function fromSchoolCourse(course: AcademicCourse): PersonalCourse {
 export function PersonalTimetable() {
   const context = usePersonalImportScope();
   if (context.loading) return <p role="status">正在確認課表…</p>;
-  return <TimetableWorkspace key={context.scopeKey} />;
+  if (context.scope.schoolId === 'personal')
+    return <p role="status">請先選擇一所學校，再查看或編輯這所學校的課表。</p>;
+  return <TimetableWorkspace key={context.scopeKey} schoolId={context.scope.schoolId} />;
 }
 
-function TimetableWorkspace() {
+function TimetableWorkspace({ schoolId }: { schoolId: string }) {
   const { user } = useAuth();
-  const school = useSelectedSchool();
-  const schoolId = school.selectedSchoolId || 'pu';
   const [timetable, setTimetable] = useState<StoredTimetable | null>(null);
   const [view, setView] = useState<'grid' | 'week' | 'day'>('grid');
   const [day, setDay] = useState(() => {
@@ -137,7 +136,7 @@ function TimetableWorkspace() {
     .filter(
       (row) =>
         row.kind === 'timetable' &&
-        row.schoolId === 'pu' &&
+        row.schoolId === schoolId &&
         `${row.academicYear}|${row.semester}` === activeTerm &&
         row.dayOfWeek &&
         row.dayOfWeek <= 5 &&
