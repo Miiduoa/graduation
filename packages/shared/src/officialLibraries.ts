@@ -4,7 +4,7 @@ export type OfficialLibraryService = {
   name: string;
   websiteUrl: string;
   catalogUrl: string;
-  catalogSearch?: 'pu-webpac';
+  catalogSearch?: 'pu-webpac' | 'primo-ve';
   accountUrl?: string;
   hoursUrl?: string;
   spacesUrl?: string;
@@ -29,38 +29,60 @@ export const officialLibraryDirectory: Readonly<Record<string, OfficialLibrarySe
   ntu: {
     name: '國立臺灣大學圖書館',
     websiteUrl: 'https://www.lib.ntu.edu.tw/',
-    catalogUrl: 'https://www.lib.ntu.edu.tw/',
+    // https://www.lib.ntu.edu.tw/node/981
+    catalogUrl: 'https://ntu.primo.exlibrisgroup.com/discovery/search?tab=LibraryCatalog&search_scope=MyInstitution&vid=886NTU_INST:886NTU_INST&lang=zh-tw&offset=0',
+    catalogSearch: 'primo-ve',
+    accountUrl: 'https://ntu.primo.exlibrisgroup.com/discovery/account?lang=zh-tw&vid=886NTU_INST:886NTU_INST',
+    hoursUrl: 'https://www.lib.ntu.edu.tw/hours',
   },
   nthu: {
     name: '國立清華大學圖書館',
     websiteUrl: 'https://www.lib.nthu.edu.tw/',
-    catalogUrl: 'https://www.lib.nthu.edu.tw/',
+    // https://libstat.ncl.edu.tw/libraryDataDetail/L4584000
+    catalogUrl: 'https://nthu.primo.exlibrisgroup.com/discovery/search?vid=886UST_NTHU:886UST_NTHU',
+    catalogSearch: 'primo-ve',
+    accountUrl: 'https://nthu.primo.exlibrisgroup.com/discovery/account?section=overview&vid=886UST_NTHU:886UST_NTHU',
+    hoursUrl: 'https://www.lib.nthu.edu.tw/use/hours.html',
+    spacesUrl: 'https://libsms.lib.nthu.edu.tw/build/',
   },
   ncku: {
     name: '國立成功大學圖書館',
     websiteUrl: 'https://www.lib.ncku.edu.tw/',
-    catalogUrl: 'https://www.lib.ncku.edu.tw/',
+    // https://libstat.ncl.edu.tw/libraryDataDetail/L4602000
+    catalogUrl: 'https://ncku.primo.exlibrisgroup.com/discovery/search?vid=886NCKU_INST:886NCKU_INST&lang=zh-tw',
+    catalogSearch: 'primo-ve',
+    accountUrl: 'https://ncku.primo.exlibrisgroup.com/discovery/account?lang=zh-tw&section=overview&vid=886NCKU_INST:886NCKU_INST',
+    hoursUrl: 'https://www.lib.ncku.edu.tw/service/access/openhours.php',
+    spacesUrl: 'https://space.lib.ncku.edu.tw/',
   },
   nycu: {
     name: '國立陽明交通大學圖書館',
     websiteUrl: 'https://lib.nycu.edu.tw/',
-    catalogUrl: 'https://lib.nycu.edu.tw/',
+    // https://libstat.ncl.edu.tw/libraryDataDetail/L4583000
+    catalogUrl: 'https://nycu.primo.exlibrisgroup.com/discovery/search?vid=886UST_NYCU:886UST_NYCU&lang=zh-tw',
+    catalogSearch: 'primo-ve',
+    accountUrl: 'https://nycu.primo.exlibrisgroup.com/discovery/account?section=overview&vid=886UST_NYCU:886UST_NYCU',
   },
   ncu: {
     name: '國立中央大學圖書館',
     websiteUrl: 'https://www.lib.ncu.edu.tw/',
-    catalogUrl: 'https://www.lib.ncu.edu.tw/',
+    // https://www.lib.ncu.edu.tw/libboard/news_content.php?NewsID=6368
+    catalogUrl: 'https://ncu.primo.exlibrisgroup.com/discovery/search?vid=886UST_NCU:886UST_NCU',
+    catalogSearch: 'primo-ve',
     hoursUrl: 'https://www.lib.ncu.edu.tw/open/hours_ca.php',
   },
   nsysu: {
     name: '國立中山大學圖書與資訊處',
     websiteUrl: 'https://lis.nsysu.edu.tw/',
-    catalogUrl: 'https://lis.nsysu.edu.tw/',
+    // https://lis.nsysu.edu.tw/p/412-1001-17833.php?Lang=zh-tw
+    catalogUrl: 'https://nsysu.primo.exlibrisgroup.com/discovery/search?tab=LibraryCatalog&search_scope=MyInstitution&vid=886NSYSU_INST:886NSYSU_INST&lang=zh-tw&offset=0',
+    catalogSearch: 'primo-ve',
   },
   ntnu: {
     name: '國立臺灣師範大學圖書館',
     websiteUrl: 'https://www.lib.ntnu.edu.tw/',
-    catalogUrl: 'https://www.lib.ntnu.edu.tw/',
+    // https://opac.lib.ntnu.edu.tw/
+    catalogUrl: 'https://opac.lib.ntnu.edu.tw/',
   },
   ntust: {
     name: '國立臺灣科技大學圖書館',
@@ -70,7 +92,11 @@ export const officialLibraryDirectory: Readonly<Record<string, OfficialLibrarySe
   nccu: {
     name: '國立政治大學圖書館',
     websiteUrl: 'https://www.lib.nccu.edu.tw/',
-    catalogUrl: 'https://www.lib.nccu.edu.tw/',
+    // https://freshmen.nccu.edu.tw/web/newborn/newborn_in.jsp?cp_id=CP1629415765258
+    catalogUrl: 'https://nccu.primo.exlibrisgroup.com/discovery/search?vid=886NCCU_INST:886NCCU_INST&lang=zh-tw',
+    catalogSearch: 'primo-ve',
+    accountUrl: 'https://nccu.primo.exlibrisgroup.com/discovery/account?vid=886NCCU_INST:886NCCU_INST&section=overview&lang=zh-tw',
+    spacesUrl: 'https://rbs.lib.nccu.edu.tw/nccuroom/conew/co_enter',
   },
   ncyu: {
     name: '國立嘉義大學圖書館',
@@ -168,12 +194,23 @@ export function buildOfficialLibraryCatalogUrl(
   schoolId: string,
   keyword: string,
   field = 'FullText',
+  schoolName?: string | null,
 ): string | null {
-  const library = getOfficialLibrary(schoolId);
+  const library = getOfficialLibrary(schoolId, schoolName);
   if (!library) return null;
-  if (library.catalogSearch !== 'pu-webpac' || !keyword.trim()) return library.catalogUrl;
-  const search = new URL('search', library.catalogUrl);
-  search.searchParams.set('searchField', field);
-  search.searchParams.set('searchInput', keyword.trim());
-  return search.toString();
+  const query = keyword.trim().replace(/[\r\n\t]+/g, ' ').slice(0, 200);
+  if (!query) return library.catalogUrl;
+  if (library.catalogSearch === 'pu-webpac') {
+    const search = new URL('search', library.catalogUrl);
+    search.searchParams.set('searchField', field);
+    search.searchParams.set('searchInput', query);
+    return search.toString();
+  }
+  if (library.catalogSearch === 'primo-ve') {
+    // Keep each university’s verified discovery view; never use another school's view ID.
+    const search = new URL(library.catalogUrl);
+    search.searchParams.set('query', `any,contains,${query.replace(/,/g, ' ')}`);
+    return search.toString();
+  }
+  return library.catalogUrl;
 }
