@@ -7,6 +7,7 @@ import MenuDetailAiFirstScreen from '../screens/MenuDetailAiFirstScreen';
 import LibraryAiFirstScreen from '../screens/LibraryAiFirstScreen';
 import {
   loadDiningCatalog,
+  loadPublicDiningCatalog,
   loadDiningIntent,
   prepareDiningIntent,
   submitDiningIntent,
@@ -24,6 +25,7 @@ jest.mock('../ui/navigationTheme', () => ({ useTabBarContentBottomPadding: () =>
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('../features/dining', () => ({
   loadDiningCatalog: jest.fn(),
+  loadPublicDiningCatalog: jest.fn(),
   loadDiningIntent: jest.fn(),
   prepareDiningIntent: jest.fn(),
   submitDiningIntent: jest.fn(),
@@ -86,6 +88,7 @@ beforeEach(() => {
   mockUser = { uid: 'student-a' };
   mockSchool = { id: 'pu' };
   jest.mocked(loadDiningCatalog).mockResolvedValue(catalog);
+  jest.mocked(loadPublicDiningCatalog).mockResolvedValue(catalog);
   jest.mocked(loadDiningIntent).mockResolvedValue(null);
   jest.mocked(prepareDiningIntent).mockResolvedValue(intent);
   jest
@@ -343,10 +346,10 @@ test('marks unverified and demo venues and leaves verified unmarked', async () =
   const view = render(<CafeteriaAiFirstScreen />);
   await act(async () => {});
   expect(view.getByText('示範')).toBeTruthy();
-  expect(view.getByText('未核對')).toBeTruthy();
+  expect(view.getByText('尚未確認')).toBeTruthy();
   expect(view.getByText('靜園餐廳')).toBeTruthy();
   expect(view.queryAllByText('示範')).toHaveLength(1);
-  expect(view.queryAllByText('未核對')).toHaveLength(1);
+  expect(view.queryAllByText('尚未確認')).toHaveLength(1);
 });
 
 test('restaurant list payment copy does not mention Nuni', async () => {
@@ -377,6 +380,17 @@ test('a failed menu read shows retry without fabricated restaurants', async () =
   fireEvent.press(view.getByText('重新整理'));
   await act(async () => {});
   expect(view.getByText('今日餐點')).toBeTruthy();
+});
+test('lets a guest read restaurants without asking them to sign in first', async () => {
+  mockUser = null;
+  const view = render(<CafeteriaAiFirstScreen />);
+  await act(async () => {});
+  expect(loadPublicDiningCatalog).toHaveBeenCalledWith('pu');
+  expect(loadDiningCatalog).not.toHaveBeenCalled();
+  expect(view.getAllByText('校園餐廳甲').length).toBeGreaterThan(0);
+  expect(view.queryByText('登入後查看菜單')).toBeNull();
+  expect(view.queryByText('請先登入學校帳號，再查看餐廳與訂單。')).toBeNull();
+  expect(view.queryByText('我的訂單')).toBeNull();
 });
 test('keeps the offline copy when the device has no network', async () => {
   jest.mocked(loadDiningCatalog).mockRejectedValueOnce(new TypeError('Network request failed'));
