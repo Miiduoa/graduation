@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { friendResendCopy, meetupLabel } from '@campus/shared';
 import { SiteShell } from '@/components/SiteShell';
+import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
 import { useAuth } from '@/components/AuthGuard';
 import { useSelectedSchool } from '@/components/SelectedSchoolProvider';
@@ -47,9 +48,15 @@ const MEETUP_STATUS: Record<Meetup['status'], string> = {
 };
 
 export default function FriendsPage() {
+  const { selectedSchoolId } = useSelectedSchool();
+  if (!selectedSchoolId) {
+    return <SiteShell title="找人"><SchoolScopePlaceholder /></SiteShell>;
+  }
+  return <FriendsContent key={selectedSchoolId} schoolId={selectedSchoolId} />;
+}
+
+function FriendsContent({ schoolId }: { schoolId: string }) {
   const { user } = useAuth();
-  const school = useSelectedSchool();
-  const schoolId = school.selectedSchoolId || 'pu';
   const [needle, setNeedle] = useState('');
   const [hit, setHit] = useState<{ uid: string; name: string; handle: string } | null>(null);
   const [searched, setSearched] = useState(false);
@@ -375,7 +382,7 @@ export default function FriendsPage() {
                   <h3>{friend.name}</h3>
                   <p>已是好友</p>
                 </div>
-                <Link className="btn" href={`/timetable?friend=${encodeURIComponent(friend.uid)}`}>
+                <Link className="btn" href={`/timetable?friend=${encodeURIComponent(friend.uid)}&schoolId=${encodeURIComponent(schoolId)}`}>
                   看共同空堂
                 </Link>
               </li>
