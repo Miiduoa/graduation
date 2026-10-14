@@ -92,7 +92,7 @@ it('refuses a removed board from the URL instead of accepting an arbitrary ident
   expect(mocks.publish).not.toHaveBeenCalled();
 });
 
-it('explains the connected source and publishes under that school and signed-in author despite unrelated URL values', async () => {
+it('publishes into the selected school despite unrelated URL author values', async () => {
   mocks.search = new URLSearchParams(
     'school=ncku&schoolId=ncku&campus=ncku&uid=other-student&boardId=science',
   );
@@ -102,14 +102,10 @@ it('explains the connected source and publishes under that school and signed-in 
   mocks.publish.mockResolvedValue('published-post');
   render(<PostComposePage />);
 
-  const source = screen.getByRole('complementary', { name: '目前校園資料範圍' });
-  expect(source.textContent).toContain('此頁目前提供靜宜大學的資料');
-  expect(source.textContent).toContain('尚未連結你選擇的國立成功大學');
-  expect(
-    screen.getByRole('link', { name: '查看國立成功大學的公開交流' }).getAttribute('href'),
-  ).toBe('/social?campus=ncku');
+  expect(screen.queryByText('此頁目前提供靜宜大學的資料')).toBeNull();
   await screen.findByRole('combobox', { name: '發布看板' });
-  expect(mocks.list).toHaveBeenCalledWith(PROVIDENCE_UNIVERSITY_SCHOOL_ID, 80);
+  expect(mocks.list).toHaveBeenCalledWith('ncku', 80);
+  expect(mocks.list).not.toHaveBeenCalledWith(PROVIDENCE_UNIVERSITY_SCHOOL_ID, 80);
   fireEvent.change(screen.getByPlaceholderText('一句話描述你的貼文'), {
     target: { value: '讀書會時間' },
   });
@@ -121,9 +117,9 @@ it('explains the connected source and publishes under that school and signed-in 
   );
   fireEvent.click(screen.getByRole('button', { name: '發布' }));
 
-  await waitFor(() => expect(mocks.push).toHaveBeenCalledWith('/community/post/published-post'));
+  await waitFor(() => expect(mocks.push).toHaveBeenCalledWith('/community/post/published-post?schoolId=ncku'));
   expect(mocks.publish).toHaveBeenCalledExactlyOnceWith({
-    schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
+    schoolId: 'ncku',
     boardId: 'science',
     title: '讀書會時間',
     content: '明天下午一起複習。',
