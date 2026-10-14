@@ -30,6 +30,10 @@ vi.mock('@/lib/usePersonalImports', () => ({
   usePersonalImports: () => ({ records: [], error: '', loading: false }),
 }));
 vi.mock('@/lib/timetable/store', () => ({
+  CLOUD_NOT_READY_COPY: '這個功能還沒接通，雲端備份先不用。',
+  TIMETABLE_DEVICE_ONLY_STORED_COPY: '已存在這台裝置，換手機或清除瀏覽器資料就會不見',
+  TIMETABLE_DEVICE_ONLY_SUBMIT_COPY: '存在這台裝置',
+  TimetableCloudSaveError: class TimetableCloudSaveError extends Error {},
   loadPersonalTimetable: mocks.load,
   savePersonalTimetable: mocks.save,
   createServerShare: mocks.share,
