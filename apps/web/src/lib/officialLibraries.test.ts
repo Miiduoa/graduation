@@ -16,7 +16,9 @@ it('keeps official destinations separate by campus and never returns a Providenc
   expect(getOfficialLibrary('__proto__')).toBeNull();
   expect(getOfficialLibrary(null)).toBeNull();
   expect(getOfficialLibrary('tenant-nthu', '國立清華大學')?.catalogUrl).toBe('https://www.lib.nthu.edu.tw/');
-  expect(getOfficialLibrary('platform-campus-42', '國立清華大學')?.catalogUrl).toBe(
+  expect(getOfficialLibrary('platform-campus-42', '國立清華大學')).toBeNull();
+  expect(getOfficialLibrary('other', '靜宜大學')).toBeNull();
+  expect(getOfficialLibrary('remote-nthu-campus', '國立清華大學')?.catalogUrl).toBe(
     'https://www.lib.nthu.edu.tw/',
   );
   expect(getOfficialLibrary('platform-campus-42', '清華大學')).toBeNull();
