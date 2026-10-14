@@ -1,0 +1,6 @@
+{
+  "apps/api/src/public-cafeterias/cafeteriaCatalog.ts": "8fbbc5b155dbe214e4c2febd696efd1a67fe1d25a6f8532b0238998de78116f6",
+  "apps/api/src/public-cafeterias/merchantMode.ts": "4ccbb3f6f3acda5943b566c3c2a33620226cf6f1cbfb0fc03109057a5fbfa0e7",
+  "apps/api/src/public-cafeterias/service.ts": "9cf5a9e95e11e60bbc639750de2645e66ed8b690618a46c7e4a7c9fc2a108e89",
+  "apps/api/src/public-cafeterias/routes.ts": "26cf2ceece52346e4bdeb36e05b7786876cc263fbfa5159a4fb642a8e345a0df"
+}

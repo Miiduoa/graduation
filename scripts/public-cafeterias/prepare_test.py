@@ -1,4 +1,6 @@
+import hashlib
 import importlib.util
+import json
 from pathlib import Path
 import unittest
 
@@ -30,6 +32,11 @@ class PrepareTests(unittest.TestCase):
         self.assertEqual(len(paths), 4)
         self.assertTrue(all(path.is_file() for path in paths.values()))
         self.assertNotIn('source.json', paths)
+        pinned = json.loads(
+            (ROOT / 'deploy/nuni-api/public-cafeterias/packaging-source.json').read_text()
+        )
+        files = {target: hashlib.sha256(source.read_bytes()).hexdigest() for target, source in paths.items()}
+        self.assertEqual(files, pinned)
 
 if __name__ == '__main__':
     unittest.main()
