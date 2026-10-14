@@ -17,7 +17,8 @@ import {
 import { useTheme } from '../state/theme';
 import { useSchool } from '../state/school';
 import { useAuth } from '../state/auth';
-import { buildCampusMapSearchUrl } from '@campus/shared/src/campusMapLookup';
+import { safeNavigate } from '../utils/safeNavigate';
+import { buildCampusMapSearchUrl, hasOfficialProvidenceLibraryGuide } from '@campus/shared/src/campusMapLookup';
 import {
   buildCampusMapHtml,
   buildWalkingDirectionsUrl,
@@ -27,7 +28,12 @@ import {
   type MapCoordinate,
 } from '../features/campusMap';
 
-type MapNavigation = { goBack?: () => void };
+type MapNavigation = {
+  goBack?: () => void;
+  navigate?: (...args: unknown[]) => void;
+  getState?: () => unknown;
+  getParent?: () => unknown;
+};
 type MapParams = {
   poiId?: string;
   focusPoiId?: string;
@@ -466,6 +472,13 @@ function CampusMapContent({
                     將開啟 Google 地圖確認實際步行路線與所需時間。
                   </Text>
                   <AIButton label="查看步行路線" onPress={() => void openDirections()} />
+                  {hasOfficialProvidenceLibraryGuide(schoolId, selected) ? (
+                    <AIButton
+                      label="查看校方樓層導覽"
+                      variant="ghost"
+                      onPress={() => safeNavigate(navigation, 'IndoorFloorMap', { poiId: 'pu-library' })}
+                    />
+                  ) : null}
                   <AIButton
                     label={originId === selected.id ? '已設為起點' : '設為步行起點'}
                     variant="ghost"
