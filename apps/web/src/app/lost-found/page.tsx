@@ -3,9 +3,10 @@
 import { use, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
+import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
 import { LoginRequiredLostFoundComments } from '@/components/LoginRequiredLostFoundComments';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import {
   categoryLabel,
   listLostFoundItems,
@@ -25,7 +26,17 @@ export default function LostFoundPage(props: {
   searchParams?: Promise<{ schoolId?: string; school?: string; campus?: string }>;
 }) {
   const search = props.searchParams ? use(props.searchParams) : undefined;
-  const context = resolveSchoolPageContext(search);
+  const context = useBrowsingSchoolPageContext(search);
+  if (!context.ready) {
+    return <SiteShell title="失物招領"><SchoolScopePlaceholder /></SiteShell>;
+  }
+  return <LostFoundPageContent key={`${context.schoolId}`} context={context} />;
+}
+
+function LostFoundPageContent({ context }: {
+  context: ReturnType<typeof useBrowsingSchoolPageContext>;
+  
+}) {
   const { user, loading: authLoading } = useAuth();
   const signedIn = Boolean(user?.uid);
   const loginReturnUrl = `/lost-found?schoolId=${encodeURIComponent(context.schoolId)}`;
