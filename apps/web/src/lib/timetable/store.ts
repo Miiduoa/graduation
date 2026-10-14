@@ -172,7 +172,11 @@ export async function loadPersonalTimetable(
   }
   if (!snap.exists()) return local;
   const data = snap.data() as StoredTimetable & { updatedAt?: unknown };
+  // Early cloud timetables had no school marker because the timetable only
+  // supported PU. Allow that legacy copy only when PU is explicitly selected;
+  // an untagged remote document cannot become a different university's data.
   if (data.schoolId && data.schoolId !== schoolId) return local;
+  if (!data.schoolId && schoolId !== 'pu') return local;
   // Removing the final course is a real local edit. An older cloud copy must not
   // bring it back merely because the new timetable has zero courses.
   if (localSnapshot.found && localSnapshot.recordedAt > savedAtMillis(data.updatedAt)) {

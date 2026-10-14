@@ -120,6 +120,34 @@ it('prefers a newer cloud copy over an older browser copy', async () => {
   expect(loaded.courses.map((item) => item.name)).toEqual(['作業系統']);
 });
 
+
+it('reads a schoolless pre-scope cloud timetable only for explicitly selected PU', async () => {
+  firestore.getDoc.mockResolvedValue({
+    exists: () => true,
+    data: () => ({
+      courses: [course],
+      updatedAt: { toMillis: () => Date.parse('2026-10-11T00:00:00.000Z') },
+    }),
+  });
+  expect((await loadPersonalTimetable('u-1', 'nthu', 'school:u-1')).courses).toEqual([]);
+  expect((await loadPersonalTimetable('u-1', 'pu', 'school:u-1')).courses).toEqual([course]);
+  expect(firestore.setDoc).not.toHaveBeenCalled();
+});
+
+it('does not mix explicitly tagged remote university timetables when switching campuses', async () => {
+  firestore.getDoc.mockResolvedValue({
+    exists: () => true,
+    data: () => ({
+      courses: [{ ...course, id: 'nthu-course', name: '清大資料' }],
+      schoolId: 'nthu',
+      updatedAt: { toMillis: () => Date.parse('2026-10-11T00:00:00.000Z') },
+    }),
+  });
+  expect((await loadPersonalTimetable('u-1', 'pu', 'school:u-1')).courses).toEqual([]);
+  expect((await loadPersonalTimetable('u-1', 'nthu', 'school:u-1')).courses.map((row) => row.name)).toEqual(['清大資料']);
+  expect((await loadPersonalTimetable('u-1', 'pu', 'school:u-1')).courses).toEqual([]);
+});
+
 it.each(['campus-one-personal-timetable:u-1', 'campus-one-personal-timetable:u-1:pu'])(
   'recovers the same school-account legacy key %s without migrating or deleting it',
   async (key) => {
