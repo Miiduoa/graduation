@@ -198,7 +198,7 @@ export default function AnnouncementDetailPage(props: {
   const { user, loading } = useAuth();
   return (
     <SiteShell
-      schoolName={visible ? school.name : undefined}
+      schoolName={browsing.ready && visible ? school.name : undefined}
       schoolCode={visible ? school.code : undefined}
       title="公告詳情"
     >

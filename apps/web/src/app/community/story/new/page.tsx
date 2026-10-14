@@ -28,7 +28,7 @@ export default function StoryComposePage() {
     <SiteShell
       title="發布限時動態"
       subtitle="分享此刻的校園生活，動態保留 24 小時。"
-      schoolName={schoolName}
+      schoolName={ready ? schoolName : undefined}
     >
       {ready ? (
         <CommunityAccess>

@@ -33,7 +33,7 @@ export default function CommunityPage() {
     <SiteShell
       title="校園交流"
       subtitle="分享校園消息，找到一起上課與讀書的同學。"
-      schoolName={schoolName}
+      schoolName={ready ? schoolName : undefined}
     >
       {ready ? (
         <CommunityAccess>
