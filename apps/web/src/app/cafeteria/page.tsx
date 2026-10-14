@@ -17,7 +17,7 @@ import {
 import { ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
 import { fetchCafeteriaCatalog, type CatalogCafeteria } from '@/lib/cafeteriaCatalog';
 import type { MenuItem } from '@/lib/firebase';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import styles from './cafeteria.module.css';
 
 const ALL_CAFETERIAS_KEY = 'all';
@@ -73,7 +73,17 @@ export default function CafeteriaPage(props: {
   searchParams?: Promise<{ school?: string; schoolId?: string; campus?: string }>;
 }) {
   const searchParams = props.searchParams ? use(props.searchParams) : undefined;
-  const context = resolveSchoolPageContext(searchParams);
+  const context = useCampusBrowseContext(searchParams);
+  if (context.status !== 'ready' || !context.schoolId) {
+    return (
+      <SiteShell title="餐廳">
+        <section className="card" role="status">
+          <h2>{context.status === 'loading' ? '正在讀取校園目錄…' : context.status === 'error' ? '無法確認所選校園' : '先選擇一所學校'}</h2>
+          <p>選擇校園後才讀取該校的餐廳與菜單，不會顯示另一所學校的餐點。</p>
+        </section>
+      </SiteShell>
+    );
+  }
   return <CafeteriaContent key={context.schoolId} {...context} />;
 }
 

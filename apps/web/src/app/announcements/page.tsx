@@ -14,7 +14,9 @@ import {
   SOURCE_NOT_CONNECTED_TEXT,
   staleAnnouncementUpdatedAt,
 } from '@campus/shared/src/campusAnnouncements';
-import { resolveAnnouncementSchool } from './resolveSchool';
+import { isAnnouncementSchoolVisibleToPublic } from '@campus/shared/src/campusAnnouncements';
+import { getAnnouncementVisibilityEnv } from '@/lib/runtime';
+import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import styles from './announcements.module.css';
 
 type Category = 'all' | 'academic' | 'event' | 'general';
@@ -334,18 +336,27 @@ export default function AnnouncementsPage(props: {
   searchParams?: Promise<{ school?: string; schoolId?: string; campus?: string }>;
 }) {
   const params = props.searchParams ? use(props.searchParams) : undefined;
-  const { school, visible } = resolveAnnouncementSchool(params);
+  const context = useCampusBrowseContext(params);
+  const schoolId = context.schoolId;
+  const visible = Boolean(
+    context.status === 'ready' &&
+    schoolId &&
+    isAnnouncementSchoolVisibleToPublic({ schoolId }, getAnnouncementVisibilityEnv()),
+  );
   const { user, loading } = useAuth();
   return (
     <SiteShell
-      schoolName={visible ? school.name : undefined}
-      schoolCode={visible ? school.code : undefined}
+      schoolName={visible ? context.schoolName : undefined}
       title="校園公告"
       subtitle="公開處室公告的摘要與原文連結。一般帳號即可查看。"
     >
       {!visible ? (
         <section className={styles.status}>
-          <h2>目前沒有公開公告</h2>
+          <h2>
+            {context.status === 'loading' ? '正在讀取所選校園…' :
+              context.status === 'error' ? '無法取得校園目錄' :
+              context.status === 'unselected' ? '先選擇一所學校' : '目前沒有公開公告'}
+          </h2>
         </section>
       ) : loading ? (
         <div className={styles.status} role="status">
@@ -353,8 +364,8 @@ export default function AnnouncementsPage(props: {
         </div>
       ) : (
         <AnnouncementReader
-          key={JSON.stringify([school.id, user?.uid ?? null])}
-          schoolId={school.id}
+          key={JSON.stringify([schoolId, user?.uid ?? null])}
+          schoolId={schoolId!}
         />
       )}
     </SiteShell>
