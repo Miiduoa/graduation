@@ -485,7 +485,7 @@ function TokenErrorHandler() {
 function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
   const auth = useAuth();
   const { school } = useSchool();
-  const schoolSessionReady = hasReadySchoolSession(auth);
+  const schoolSessionReady = hasReadySchoolSession(auth, school?.id ?? null);
   const userId = schoolSessionReady ? auth.user!.uid : null;
   const appState = useRef(AppState.currentState);
 
