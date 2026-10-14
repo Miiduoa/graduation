@@ -5,9 +5,49 @@ export type CafeteriaReviewStatus = (typeof CAFETERIA_REVIEW_STATUSES)[number];
 export const CAFETERIA_REVIEW_STATUS_DEFAULT: CafeteriaReviewStatus = 'unverified';
 export const DEMO_CAFETERIA_BADGE = '示範';
 export const DEMO_CAFETERIA_NOTICE = '這是示範店家，菜單和價格不是真的，不能點餐。';
-export const UNVERIFIED_CAFETERIA_BADGE = '未核對';
+export const UNVERIFIED_CAFETERIA_BADGE = '尚未確認';
 export const UNVERIFIED_CAFETERIA_NOTICE =
-  '這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。';
+  '這間店的資料還沒經店家確認，菜單和價錢可能跟現場不一樣。';
+export const PUBLIC_CAFETERIA_FIELDS = [
+  'id',
+  'name',
+  'schoolId',
+  'location',
+  'openingHours',
+  'intro',
+  'websiteUrl',
+  'orderingUrl',
+  'merchantMode',
+  'sourceLabel',
+  'menuSyncedAt',
+  'reviewStatus',
+] as const;
+export const PUBLIC_CAFETERIA_MENU_FIELDS = [
+  'id',
+  'name',
+  'cafeteria',
+  'cafeteriaId',
+  'availableOn',
+  'price',
+  'category',
+  'description',
+  'available',
+  'soldOut',
+  'schoolId',
+] as const;
+export const PRIVATE_CAFETERIA_FIELDS = [
+  'contact',
+  'contactName',
+  'phone',
+  'email',
+  'reviewNote',
+  'reviewNotes',
+  'reviewer',
+  'reviewerId',
+  'reviewedBy',
+  'orders',
+  'revenue',
+] as const;
 export const CAFETERIA_EMPTY_SCHOOL_TEXT = '這間學校的餐廳還沒上架';
 export const CAFETERIA_NOT_FOUND_TEXT = '找不到這間店。';
 export const CAFETERIA_BACK_TO_LIST_TEXT = '回餐廳列表';
@@ -204,4 +244,36 @@ export function cafeteriaListHref(schoolId: string): string {
 
 export function cafeteriaHref(schoolId: string, cafeteriaId: string): string {
   return `/cafeteria/${encodeURIComponent(cafeteriaId)}?schoolId=${encodeURIComponent(schoolId)}`;
+}
+
+function pick<T extends Record<string, unknown>>(
+  row: T,
+  fields: readonly string[],
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const field of fields) {
+    if (row[field] !== undefined) result[field] = row[field];
+  }
+  return result;
+}
+
+export function toPublicCafeteriaRecord(row: CafeteriaCatalogRecord): Record<string, unknown> {
+  return pick(row as unknown as Record<string, unknown>, PUBLIC_CAFETERIA_FIELDS);
+}
+
+export function toPublicCafeteriaMenuItem(row: CafeteriaCatalogMenuItem): Record<string, unknown> {
+  return pick(row as unknown as Record<string, unknown>, PUBLIC_CAFETERIA_MENU_FIELDS);
+}
+
+export function assertNoPrivateCafeteriaFields(value: unknown): void {
+  if (!value || typeof value !== 'object') return;
+  const rows = Array.isArray(value) ? value : [value];
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue;
+    for (const field of PRIVATE_CAFETERIA_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(row, field)) {
+        throw new Error(`private cafeteria field leaked: ${field}`);
+      }
+    }
+  }
 }

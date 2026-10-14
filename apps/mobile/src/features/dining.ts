@@ -4,7 +4,7 @@ import * as firestore from 'firebase/firestore';
 import { collection, doc, getDocFromServer, getDocsFromServer } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { getAuthInstance, getDb, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
-import { fetchCafeteriaLocations, fetchCafeteriaMenu } from '../services/cafeteriaCatalog';
+import { fetchCafeteriaCatalog } from '../services/cafeteriaCatalog';
 import {
   parseCafeteriaReviewStatus,
   type CafeteriaReviewStatus,
@@ -122,7 +122,7 @@ export const diningTotal = (price: number, quantity = 1) => {
   return { subtotal, tax, total: (subtotalCents + tax * 100) / 100 };
 };
 async function loadDiningCatalogFromApi(schoolId: string): Promise<DiningCatalog> {
-  const locations = await fetchCafeteriaLocations(schoolId);
+  const { cafeterias: locations, menus: items } = await fetchCafeteriaCatalog(schoolId);
   const venues = locations.map((row) => ({
     id: row.id,
     name: row.name,
@@ -130,11 +130,7 @@ async function loadDiningCatalogFromApi(schoolId: string): Promise<DiningCatalog
     orderingEnabled: row.merchantMode === 'native_order',
     reviewStatus: row.reviewStatus,
   }));
-  const menus = (
-    await Promise.all(locations.slice(0, 40).map((row) => fetchCafeteriaMenu(schoolId, row)))
-  )
-    .flat()
-    .map((item) => {
+  const menus = items.map((item) => {
       const venue = venues.find((row) => row.id === item.cafeteriaId);
       const price =
         typeof item.price === 'number' &&
@@ -157,6 +153,11 @@ async function loadDiningCatalogFromApi(schoolId: string): Promise<DiningCatalog
       };
     });
   return { venues, menus };
+}
+
+export async function loadPublicDiningCatalog(schoolId: string): Promise<DiningCatalog> {
+  if (!schoolId) throw new DiningError('請指定學校');
+  return loadDiningCatalogFromApi(schoolId);
 }
 
 export async function loadDiningCatalog(
