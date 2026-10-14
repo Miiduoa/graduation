@@ -13,8 +13,9 @@ import {
   type MapLocation,
 } from './mapService';
 import styles from './map.module.css';
+import { buildCampusMapSearchUrl } from '@campus/shared/src/campusMapLookup';
 
-type MapProps = { school: string; route?: string; focus?: string };
+type MapProps = { school: string; schoolName?: string; route?: string; focus?: string };
 type FavoritesState = { status: 'loading' | 'error' | 'ready'; ids: Set<string> };
 
 export default function MapClient(props: MapProps) {
@@ -38,6 +39,7 @@ export default function MapClient(props: MapProps) {
 
 function MapContent({
   school,
+  schoolName,
   route,
   focus,
   uid,
@@ -47,6 +49,7 @@ function MapContent({
   authLoading: boolean;
 }) {
   const hash = useLocationHash();
+  const fallbackMapUrl = buildCampusMapSearchUrl(schoolName);
   const [placeState, setPlaceState] = useState<{
     status: 'loading' | 'error' | 'ready';
     locations: MapLocation[];
@@ -191,7 +194,17 @@ function MapContent({
             開啟靜宜大學網站
           </a>
         ) : (
-          <p>目前還沒有這所校園的地點資料，不會改用其他學校的建築或導航位置。</p>
+          <>
+            <p>目前還沒有這所校園的地點資料，不會改用其他學校的建築或導航位置。</p>
+            {fallbackMapUrl && (
+              <>
+                <a className="btn" href={fallbackMapUrl} target="_blank" rel="noopener noreferrer">
+                  在 Google 地圖搜尋{schoolName} ↗
+                </a>
+                <p>此連結為第三方地圖搜尋，地點及路線仍需自行核對，不代表校方已發布建築座標。</p>
+              </>
+            )}
+          </>
         )}
       </div>
     );

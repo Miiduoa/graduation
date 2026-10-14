@@ -35,7 +35,7 @@ export default function MapPage(props: {
       schoolName={schoolName}
     >
       {status === 'ready' && schoolId ? (
-        <MapClient key={schoolId} school={schoolId} route={route} focus={focus} />
+        <MapClient key={schoolId} school={schoolId} schoolName={schoolName} route={route} focus={focus} />
       ) : (
         <section className="card" role="status">
           <h2>{status === 'loading' ? '正在讀取校園目錄…' : status === 'error' ? '無法確認所選學校' : '先選擇一所學校'}</h2>
