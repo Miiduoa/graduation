@@ -37,6 +37,20 @@ test('abort cancels the worker and stale errors leave future jobs untouched', as
   expect(inject).toHaveBeenCalledWith(expect.stringContaining('cancelTimetable(1)'));
 });
 
+test('broken image errors keep the Chinese sentence and hide the original English', async () => {
+  const ocr = new OcrCoordinator(jest.fn());
+  ocr.message(JSON.stringify({ ready: true }));
+  const failed = ocr.recognize('a', 'image/png').catch((error) => error.message);
+  ocr.message(
+    JSON.stringify({
+      id: 1,
+      ok: false,
+      error: '這張圖片打不開，可能檔案壞了或格式不支援，請換一張截圖再試。',
+    }),
+  );
+  expect(await failed).toBe('這張圖片打不開，可能檔案壞了或格式不支援，請換一張截圖再試。');
+});
+
 test('host disposal rejects pending recognition and timeout is bounded', async () => {
   const ocr = new OcrCoordinator(jest.fn());
   const first = ocr.recognize('a', 'image/png').catch((error) => error.kind);

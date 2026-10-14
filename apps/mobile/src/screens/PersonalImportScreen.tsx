@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
@@ -7,6 +7,14 @@ import { File } from 'expo-file-system';
 import {
   createPersonalImportId,
   parsePersonalImport,
+  personalImportErrorMessage,
+  personalImportSavedNotice,
+  personalImportUndoBody,
+  PERSONAL_IMPORT_IMAGE_UNREADABLE,
+  PERSONAL_IMPORT_UNDO_CONFIRM,
+  PERSONAL_IMPORT_UNDO_KEEP,
+  PERSONAL_IMPORT_UNDO_LABEL,
+  PERSONAL_IMPORT_UNDO_TITLE,
   validatePersonalImportRow,
   type PersonalImportRow,
   type PersonalImportRecord,
@@ -225,6 +233,7 @@ function ImportWorkspace({
     before: PersonalImportRecord;
     row: PersonalImportRow;
   } | null>(null);
+  const [undoOpen, setUndoOpen] = useState(false);
   const alive = useRef(true);
   const focused = useRef(true);
   const generation = useRef(0);
@@ -355,7 +364,7 @@ function ImportWorkspace({
           : '沒有找到可匯入的資料。可修正文字，或手動新增一筆。',
       );
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : '無法解析，請檢查內容。');
+      setNotice(personalImportErrorMessage(error, '無法解析，請檢查內容。'));
     }
   };
   const pickImage = async () => {
@@ -402,7 +411,7 @@ function ImportWorkspace({
       );
     } catch (error) {
       if (current(run) && !(error instanceof TimetableOcrError && error.kind === 'cancelled'))
-        setNotice(error instanceof Error ? error.message : '讀取截圖失敗，請改貼文字。');
+        setNotice(personalImportErrorMessage(error, PERSONAL_IMPORT_IMAGE_UNREADABLE));
     } finally {
       if (current(run)) setBusy(false);
     }
@@ -434,7 +443,7 @@ function ImportWorkspace({
       if (/\.ics$/i.test(asset.name)) setKind('events');
       setNotice(`已讀取 ${asset.name}，請核對內容後整理。`);
     } catch (error) {
-      if (current(run)) setNotice(error instanceof Error ? error.message : '檔案讀取失敗。');
+      if (current(run)) setNotice(personalImportErrorMessage(error, '檔案讀取失敗。'));
     } finally {
       if (current(run)) setBusy(false);
     }
@@ -464,9 +473,11 @@ function ImportWorkspace({
       setSelected(new Set());
       setIssues([]);
       setExpanded(null);
-      setNotice(`已存 ${result.added} 筆到這台裝置，略過 ${result.duplicates} 筆重複資料。`);
+      setText('');
+      setSource({ type: 'paste' });
+      setNotice(personalImportSavedNotice(result.added));
     } catch (error) {
-      if (active()) setNotice(error instanceof Error ? error.message : '儲存失敗，請重試。');
+      if (active()) setNotice(personalImportErrorMessage(error, '儲存失敗，請重試。'));
     } finally {
       savingRef.current = false;
       if (alive.current) setSaving(false);
@@ -486,14 +497,18 @@ function ImportWorkspace({
         setNotice('已更新這筆個人資料。撤回原匯入批次會保留這次編輯。');
       }
     } catch (error) {
-      if (active()) setNotice(error instanceof Error ? error.message : '更新失敗。');
+      if (active()) setNotice(personalImportErrorMessage(error, '更新失敗。'));
     } finally {
       savingRef.current = false;
       if (alive.current) setSaving(false);
     }
   };
+  const lastBatch = ledger?.batches[ledger.batches.length - 1];
+  const lastBatchCount = lastBatch
+    ? ledger.records.filter((row) => row.batchId === lastBatch.id).length
+    : 0;
   const undo = async () => {
-    const batch = ledger?.batches[ledger.batches.length - 1];
+    const batch = lastBatch;
     if (!batch || savingRef.current) return;
     savingRef.current = true;
     ledgerGeneration.current += 1;
@@ -503,10 +518,11 @@ function ImportWorkspace({
       if (active()) {
         setLedger(result.ledger);
         setEditing(null);
+        setUndoOpen(false);
         setNotice(`已撤回 ${result.removed} 筆；匯入後另外編輯過的資料已保留。`);
       }
     } catch (error) {
-      if (active()) setNotice(error instanceof Error ? error.message : '撤回失敗。');
+      if (active()) setNotice(personalImportErrorMessage(error, '撤回失敗。'));
     } finally {
       savingRef.current = false;
       if (alive.current) setSaving(false);
@@ -588,7 +604,7 @@ function ImportWorkspace({
             ) : null}
           </View>
           <Text style={{ color: theme.colors.muted }}>
-            截圖支援 PNG、JPG，最多 8 MB。圖片在裝置上辨識；首次需連網下載程式與字庫。文字檔支援
+            截圖支援 PNG、JPG，最多 8 MB。圖片在裝置上辨識，使用 App 內的辨識程式與中英文字庫。文字檔支援
             TXT、CSV；行事曆也可讀 ICS。
           </Text>
           {busy ? <ActivityIndicator accessibilityLabel="正在讀取資料" /> : null}
@@ -602,7 +618,7 @@ function ImportWorkspace({
             onChangeText={(value) => {
               if (busy) cancel();
               setText(value);
-              if (!value) setSource({ type: 'paste' });
+              if (!value || source.type !== 'screenshot') setSource({ type: 'paste' });
               setRows([]);
               setIssues([]);
             }}
@@ -817,7 +833,11 @@ function ImportWorkspace({
             ))}
           {ledger?.batches.length ? (
             <>
-              <Button text="撤回最近一次匯入" disabled={saving} onPress={undo} />
+              <Button
+                text={PERSONAL_IMPORT_UNDO_LABEL}
+                disabled={saving}
+                onPress={() => setUndoOpen(true)}
+              />
               <Text style={{ color: theme.colors.muted }}>
                 僅移除該次新增且未再編輯的資料，之後新增或編輯的內容會保留。
               </Text>
@@ -825,6 +845,49 @@ function ImportWorkspace({
           ) : null}
         </ScrollView>
       )}
+      <Modal
+        visible={undoOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setUndoOpen(false)}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(48, 38, 28, 0.32)',
+            justifyContent: 'center',
+            padding: 24,
+          }}
+        >
+          <View
+            accessibilityRole="alert"
+            style={{
+              backgroundColor: theme.colors.surface,
+              borderColor: theme.colors.border,
+              borderWidth: 1,
+              borderRadius: 12,
+              padding: 20,
+              gap: 14,
+            }}
+          >
+            <Text style={{ ...textStyle, fontSize: 18, fontWeight: '700' }}>
+              {PERSONAL_IMPORT_UNDO_TITLE}
+            </Text>
+            <Text style={textStyle}>{personalImportUndoBody(lastBatchCount)}</Text>
+            <Button
+              text={PERSONAL_IMPORT_UNDO_CONFIRM}
+              kind="danger"
+              disabled={saving}
+              onPress={() => void undo()}
+            />
+            <Button
+              text={PERSONAL_IMPORT_UNDO_KEEP}
+              disabled={saving}
+              onPress={() => setUndoOpen(false)}
+            />
+          </View>
+        </View>
+      </Modal>
     </Screen>
   );
 }

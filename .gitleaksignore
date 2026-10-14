@@ -9,6 +9,3 @@
 # https://campus-one-tw.firebaseapp.com/__/firebase/init.json on 2026-10-11.
 # This exact historical finding is public app configuration, not a server credential.
 a1d1202b5c4fcd3891f4974455af846f5bff6ab1:apps/mobile/eas.json:gcp-api-key:55
-# Synthetic course workspace identifier used only in a mocked linking UI test.
-# Exact historical finding; this identifier grants no access and is not a credential.
-d99b0107ddafe0c029f48f348d246eee5efe419c:apps/web/src/components/imports/PersonalImportCenter.test.tsx:generic-api-key:157

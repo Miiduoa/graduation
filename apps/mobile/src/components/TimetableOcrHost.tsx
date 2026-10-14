@@ -1,7 +1,8 @@
-import React, { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { TIMETABLE_OCR_HTML, TimetableOcrError } from '../services/timetableOcr';
+import { prepareOcrBaseUrl } from '../services/ocrLocalBase';
 import { OcrCoordinator } from '../services/imports/ocrCoordinator';
 
 export type TimetableOcrHandle = {
@@ -18,13 +19,31 @@ export const TimetableOcrHost = forwardRef<TimetableOcrHandle>(function Timetabl
   if (!coordinator.current)
     coordinator.current = new OcrCoordinator((script) => web.current?.injectJavaScript(script));
   const instance = coordinator.current;
+  const [baseUrl, setBaseUrl] = useState('');
+  useEffect(() => {
+    let open = true;
+    void prepareOcrBaseUrl()
+      .then((url) => {
+        if (open) setBaseUrl(url);
+      })
+      .catch(() => {
+        if (open)
+          instance.fail(new TimetableOcrError('辨識程式未能載入，請改貼文字。', 'unavailable'));
+      });
+    return () => {
+      open = false;
+    };
+  }, [instance]);
   useImperativeHandle(
     ref,
     () => ({
-      recognize: (base64, mime, signal) => instance.recognize(base64, mime, signal),
+      recognize: async (base64, mime, signal) => {
+        if (!baseUrl) await prepareOcrBaseUrl();
+        return instance.recognize(base64, mime, signal);
+      },
       cancel: () => instance.cancel(),
     }),
-    [instance],
+    [instance, baseUrl],
   );
   useEffect(() => () => instance.reset(), [instance]);
   return (
@@ -34,19 +53,22 @@ export const TimetableOcrHost = forwardRef<TimetableOcrHandle>(function Timetabl
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
     >
-      <WebView
-        ref={web}
-        originWhitelist={['https://*', 'about:*']}
-        source={{ html: TIMETABLE_OCR_HTML, baseUrl: 'https://cdn.jsdelivr.net' }}
-        javaScriptEnabled
-        onMessage={(event) => instance.message(event.nativeEvent.data)}
-        onError={() => {
-          instance.fail(
-            new TimetableOcrError('辨識程式未能載入，請確認網路或改貼文字。', 'network'),
-          );
-          instance.reset();
-        }}
-      />
+      {baseUrl ? (
+        <WebView
+          ref={web}
+          originWhitelist={['file://*', 'about:*']}
+          source={{ html: TIMETABLE_OCR_HTML, baseUrl }}
+          allowFileAccess
+          allowFileAccessFromFileURLs
+          allowUniversalAccessFromFileURLs
+          javaScriptEnabled
+          onMessage={(event) => instance.message(event.nativeEvent.data)}
+          onError={() => {
+            instance.fail(new TimetableOcrError('辨識程式未能載入，請改貼文字。', 'unavailable'));
+            instance.reset();
+          }}
+        />
+      ) : null}
     </View>
   );
 });
