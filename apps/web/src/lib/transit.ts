@@ -28,6 +28,36 @@ export const TRANSIT_FRESHNESS_MS = 90_000;
 export const CAMPUS_TRANSIT: Record<string, { city: TransitCity; stopName: string }> = {
   pu: { city: 'Taichung', stopName: '靜宜大學' },
 };
+
+/**
+ * Initial search city for a university's primary campus, not a claim that
+ * any particular bus stop or route has been registered with TDX.
+ * Multi-city universities deliberately require a manual city selection.
+ */
+const SCHOOL_SEARCH_CITIES: Readonly<Record<string, TransitCity>> = {
+  pu: 'Taichung',
+  ntu: 'Taipei',
+  nthu: 'Hsinchu',
+  ncku: 'Tainan',
+  ncu: 'Taoyuan',
+  nsysu: 'Kaohsiung',
+  ntnu: 'Taipei',
+  ntust: 'Taipei',
+  nccu: 'Taipei',
+  ncue: 'ChanghuaCounty',
+  tmu: 'Taipei',
+  fju: 'NewTaipei',
+  thu: 'Taichung',
+  cgu: 'Taoyuan',
+  cycu: 'Taoyuan',
+  scu: 'Taipei',
+  ntub: 'Taipei',
+  'tw-nchu': 'Taichung',
+};
+
+export function preferredTransitCity(schoolId: string): TransitCity | null {
+  return Object.hasOwn(SCHOOL_SEARCH_CITIES, schoolId) ? SCHOOL_SEARCH_CITIES[schoolId] : null;
+}
 export const TRANSIT_MESSAGES: Record<TransitFailure, string> = {
   'not-configured': '附近站牌服務尚未啟用。你仍可查看已登錄路線，或開啟官方公車網站。',
   'invalid-query': '請確認縣市、站名或定位資料後再查詢。',

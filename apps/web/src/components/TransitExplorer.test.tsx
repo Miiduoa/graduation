@@ -144,3 +144,48 @@ it('expires countdowns while hidden without continuing to poll the provider', as
   expect(screen.getByText('資料待更新')).toBeTruthy();
   expect(vi.mocked(queryTransit).mock.calls.length).toBe(calls);
 });
+
+
+it('uses the selected university’s primary city rather than Taichung for public bus search', async () => {
+  render(<TransitExplorer schoolId="nthu" schoolName="國立清華大學" />);
+  const city = screen.getByLabelText('查詢縣市') as HTMLSelectElement;
+  expect(city.value).toBe('Hsinchu');
+  expect(screen.queryByRole('button', { name: '學校站牌' })).toBeNull();
+  fireEvent.change(screen.getByLabelText('站名或學校名稱'), { target: { value: '清華大學' } });
+  fireEvent.click(screen.getByRole('button', { name: '尋找站牌' }));
+  await waitFor(() => expect(queryTransit).toHaveBeenCalledWith(
+    { action: 'search', city: 'Hsinchu', text: '清華大學' },
+    expect.any(AbortSignal),
+  ));
+  expect(vi.mocked(queryTransit).mock.calls.some(([query]) =>
+    query.action === 'search' && query.city === 'Taichung')).toBe(false);
+});
+
+it('never assumes a city for an unfamiliar university', async () => {
+  render(<TransitExplorer schoolId="external-university" schoolName="外部大學" />);
+  const city = screen.getByLabelText('查詢縣市') as HTMLSelectElement;
+  expect(city.value).toBe('');
+  fireEvent.change(screen.getByLabelText('站名或學校名稱'), { target: { value: '圖書館' } });
+  fireEvent.click(screen.getByRole('button', { name: '尋找站牌' }));
+  expect(screen.getByText('請先選擇要查詢的縣市。')).toBeTruthy();
+  expect(queryTransit).not.toHaveBeenCalled();
+  fireEvent.change(city, { target: { value: 'Tainan' } });
+  fireEvent.click(screen.getByRole('button', { name: '尋找站牌' }));
+  await waitFor(() => expect(queryTransit).toHaveBeenCalledWith(
+    { action: 'search', city: 'Tainan', text: '圖書館' },
+    expect.any(AbortSignal),
+  ));
+});
+
+it('resets the entire transit search when changing campuses', async () => {
+  const view = render(<TransitExplorer schoolId="nthu" schoolName="國立清華大學" />);
+  fireEvent.change(screen.getByLabelText('站名或學校名稱'), { target: { value: '清華大學' } });
+  fireEvent.click(screen.getByRole('button', { name: '尋找站牌' }));
+  await waitFor(() => expect(queryTransit).toHaveBeenCalledWith(
+    { action: 'search', city: 'Hsinchu', text: '清華大學' }, expect.any(AbortSignal),
+  ));
+  view.rerender(<TransitExplorer schoolId="ncku" schoolName="國立成功大學" />);
+  expect((screen.getByLabelText('查詢縣市') as HTMLSelectElement).value).toBe('Tainan');
+  expect((screen.getByLabelText('站名或學校名稱') as HTMLInputElement).value).toBe('');
+  expect(screen.queryByText(/站牌代碼 TXG001/)).toBeNull();
+});
