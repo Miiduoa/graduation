@@ -18,7 +18,7 @@ import { useTheme } from '../state/theme';
 import { useSchool } from '../state/school';
 import { useAuth } from '../state/auth';
 import { safeNavigate } from '../utils/safeNavigate';
-import { buildCampusMapSearchUrl } from '@campus/shared/src/campusMapLookup';
+import { buildCampusMapSearchUrl, hasOfficialProvidenceLibraryGuide } from '@campus/shared/src/campusMapLookup';
 import {
   buildCampusMapHtml,
   buildWalkingDirectionsUrl,
@@ -472,8 +472,7 @@ function CampusMapContent({
                     將開啟 Google 地圖確認實際步行路線與所需時間。
                   </Text>
                   <AIButton label="查看步行路線" onPress={() => void openDirections()} />
-                  {schoolId === 'pu' && selected.category === '圖書館' &&
-                  selected.name.includes('蓋夏') ? (
+                  {hasOfficialProvidenceLibraryGuide(schoolId, selected) ? (
                     <AIButton
                       label="查看校方樓層導覽"
                       variant="ghost"
