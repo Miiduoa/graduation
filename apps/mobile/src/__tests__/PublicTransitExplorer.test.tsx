@@ -1,6 +1,7 @@
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import * as Location from 'expo-location';
+import { View } from 'react-native';
 import { PublicTransitExplorer } from '../components/PublicTransitExplorer';
 import {
   queryPublicTransit,
@@ -118,10 +119,10 @@ test('switching school cancels previous searches and clears the old station list
   jest.mocked(queryPublicTransit).mockImplementationOnce(
     () => new Promise((resolve) => { finish = resolve; }),
   );
-  const view = render(<PublicTransitExplorer key="nthu" schoolId="nthu" />);
+  const view = render(<View><PublicTransitExplorer key="nthu" schoolId="nthu" /></View>);
   fireEvent.changeText(view.getByLabelText('搜尋公車站名'), '清華大學');
   fireEvent.press(view.getByText('搜尋官方站牌'));
-  view.rerender(<PublicTransitExplorer key="ncku" schoolId="ncku" />);
+  await act(async () => view.rerender(<View><PublicTransitExplorer key="ncku" schoolId="ncku" /></View>));
   expect(view.getByText('查詢縣市：臺南市')).toBeTruthy();
   expect(view.getByLabelText('搜尋公車站名').props.value).toBe('');
   await act(async () => finish(result()));
