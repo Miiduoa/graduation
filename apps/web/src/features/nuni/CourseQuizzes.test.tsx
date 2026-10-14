@@ -161,6 +161,29 @@ it('preserves the original publish payload and key across an uncertain response 
   expect(screen.getAllByRole('article')).toHaveLength(1);
 });
 
+it('links a new quiz to its selected teaching chapter without replacing text quiz behavior', async () => {
+  session(teacherId);
+  const unitId = 'cwu_11111111-1111-4111-8111-111111111111';
+  const unit = { id: unitId, workspaceId, title: '第三章', position: 2, createdAt: timestamp };
+  mocks.request.mockImplementation(async (path, _context, input) => {
+    if (path === listPath && !input) return { quizzes: [] };
+    if (path === listPath && input) {
+      return quiz({ title: input.title, prompt: input.prompt, unitId, unitTitle: unit.title });
+    }
+    throw new Error('Unexpected route');
+  });
+  render(<CourseQuizzes workspace={workspace('owner-teacher')} units={[unit]} />);
+  await screen.findByText('還沒有測驗。可以先發布一個文字題目。');
+  openPublish();
+  fireEvent.change(screen.getByLabelText('所屬章節（選填）'), { target: { value: unitId } });
+  fireEvent.click(screen.getByRole('button', { name: '發布測驗' }));
+  await screen.findByText('測驗已發布。');
+  expect(requestsTo('/quizzes')[0][2]).toEqual(
+    expect.objectContaining({ unitId, idempotencyKey: expect.any(String) }),
+  );
+  expect(screen.getByText('章節：第三章')).toBeTruthy();
+});
+
 it('treats teacher permission rejection as a failed publish, retaining editable input', async () => {
   session(teacherId);
   mocks.request
