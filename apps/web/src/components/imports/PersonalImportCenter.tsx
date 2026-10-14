@@ -33,6 +33,7 @@ import {
 import { usePersonalImportScope, usePersonalImports } from '@/lib/usePersonalImports';
 import { recognizePersonalImportImage } from '@/lib/personalImportOcr';
 import styles from './PersonalImport.module.css';
+import { CourseAccessPanel } from './CourseAccessPanel';
 
 const KINDS: { value: PersonalImportKind; title: string; detail: string }[] = [
   { value: 'timetable', title: '課表與選課結果', detail: '上課日、時間、教室與老師' },
@@ -224,13 +225,14 @@ function RowFields({
               )}
               {workspaces.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {item.title} · {item.memberRole === 'student' ? '我修的課' : '我教的課'}
+                  {item.title} · {item.memberRole === 'student' ? '學生' : '管理者（未代表教師認證）'}
                 </option>
               ))}
             </select>
           </label>
         </div>
       </details>
+      <CourseAccessPanel row={row} workspaces={workspaces} />
       {issues.some((issue) => issue.severity === 'error') && (
         <ul className={styles.issues}>
           {issues

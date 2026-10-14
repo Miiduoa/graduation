@@ -1,3 +1,5 @@
+import { CourseAccessError, courseMetadata, courseRecord, parseCourseCandidate, sameCourseScope } from '@campus/shared/src/courseAccess';
+import { parseCourseRequest, parseCourseRequests, isCourseAccessPath } from '@campus/shared/src/courseAccessClient';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   createNuniClasses,
@@ -179,6 +181,35 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
         throw new NuniError(502, 'INVALID_RESPONSE');
       return jsonResponse(result, 201);
     }
+    if (segments[0] === 'course-access') {
+      if (method !== 'POST' || !isCourseAccessPath(path)) throw new NuniError(404, 'NOT_FOUND');
+      const session = requireSession(request);
+      const input = courseRecord(await boundedJson(request, 8192));
+      const result = await platformRequest(path, session, input);
+      if (path === 'course-access/match') {
+        const scope = courseMetadata(input), response = courseRecord(result);
+        if (!Array.isArray(response.candidates) || response.candidates.length > 200 || typeof response.truncated !== 'boolean')
+          throw new NuniError(502, 'INVALID_RESPONSE');
+        const candidates = response.candidates.map(parseCourseCandidate);
+        if (candidates.some(item => !sameCourseScope(item, scope)) || new Set(candidates.map(item => item.id)).size !== candidates.length)
+          throw new NuniError(502, 'INVALID_RESPONSE');
+        return jsonResponse({ candidates, truncated: response.truncated });
+      }
+      if (path === 'course-access/requests' || path === 'course-access/reviews') {
+        const response = parseCourseRequests(result);
+        if (path.endsWith('/reviews') && response.requests.some(item => item.metadata.schoolId !== input.schoolId))
+          throw new NuniError(502, 'INVALID_RESPONSE');
+        // Never return reviewer-only identity fields on the applicant endpoint.
+        if (path.endsWith('/requests')) response.requests = response.requests.map(({ applicantId: _applicantId, ...item }) => item);
+        return jsonResponse(response);
+      }
+      const response = parseCourseRequest(result);
+      if ((segments.length === 4 && response.id !== segments[2]) ||
+          (path.endsWith('/student-requests') && (response.kind !== 'student' || response.courseId !== input.courseId)) ||
+          (path.endsWith('/teacher-requests') && (response.kind !== 'teacher' || response.workspaceId !== input.workspaceId)))
+        throw new NuniError(502, 'INVALID_RESPONSE');
+      return jsonResponse(response);
+    }
     if (segments[0] !== 'class-workspaces') throw new NuniError(404, 'NOT_FOUND');
     const session = requireSession(request);
     let principal: Promise<string> | undefined;
@@ -324,6 +355,6 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
     }
     throw new NuniError(404, 'NOT_FOUND');
   } catch (error) {
-    return errorResponse(error);
+    return errorResponse(error instanceof CourseAccessError ? new NuniError(error.statusCode, error.code) : error);
   }
 }
