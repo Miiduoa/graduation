@@ -34,7 +34,6 @@ if (!process.env.PUBLIC_CAFETERIA_TEST_DATABASE_URL) {
         tenant_id text NOT NULL REFERENCES tenants(id),
         name text NOT NULL,
         zone_label text,
-        opening_hours text,
         description text,
         merchant_mode text,
         review_status text NOT NULL DEFAULT 'unverified',
@@ -48,16 +47,21 @@ if (!process.env.PUBLIC_CAFETERIA_TEST_DATABASE_URL) {
         review_notes text,
         reviewer_id text
       );
-      CREATE TABLE food_menu_items (
+      CREATE TABLE food_menu_versions (
         id text PRIMARY KEY,
         tenant_id text NOT NULL REFERENCES tenants(id),
         location_id text NOT NULL REFERENCES food_locations(id),
+        state text NOT NULL
+      );
+      CREATE TABLE food_menu_items (
+        id text PRIMARY KEY,
+        tenant_id text NOT NULL REFERENCES tenants(id),
+        menu_version_id text NOT NULL REFERENCES food_menu_versions(id),
         name text NOT NULL,
         section_name text,
         description text,
         price_minor integer,
-        available boolean,
-        sold_out boolean
+        available boolean
       );
       CREATE TABLE food_orders (id text PRIMARY KEY, tenant_id text, total integer);
     `);
@@ -72,20 +76,28 @@ if (!process.env.PUBLIC_CAFETERIA_TEST_DATABASE_URL) {
   async function seed() {
     resetPublicCafeteriaCache();
     await pool.query("DELETE FROM food_menu_items");
+    await pool.query("DELETE FROM food_menu_versions");
     await pool.query("DELETE FROM food_locations");
     await pool.query("DELETE FROM tenants");
     await pool.query("INSERT INTO tenants VALUES ('pu','open'), ('cgu','open'), ('ntu','provisioned')");
     await pool.query(
       `INSERT INTO food_locations
-        (id, tenant_id, name, zone_label, opening_hours, merchant_mode, review_status, contact_name, phone, email, review_notes, reviewer_id)
+        (id, tenant_id, name, zone_label, merchant_mode, review_status, contact_name, phone, email, review_notes, reviewer_id)
        VALUES
-        ('stall','pu','校內咖啡店','學生餐廳','11:00–14:00','info_only','unverified','店長','04-111','a@b.test','內部備註','op-1'),
-        ('other','cgu','他校餐廳',null,null,'info_only','verified','別人','02-222','c@d.test','別校備註','op-2')`,
+        ('stall','pu','校內咖啡店','學生餐廳','info_only','unverified','店長','04-111','a@b.test','內部備註','op-1'),
+        ('other','cgu','他校餐廳',null,'info_only','verified','別人','02-222','c@d.test','別校備註','op-2')`,
     );
     await pool.query(
-      `INSERT INTO food_menu_items (id, tenant_id, location_id, name, section_name, price_minor, available, sold_out)
-       VALUES ('toast','pu','stall','蔬菜吐司','吐司',60,true,false),
-              ('secret','cgu','other','他校套餐',null,90,true,false)`,
+      `INSERT INTO food_menu_versions (id, tenant_id, location_id, state)
+       VALUES ('menu-pu','pu','stall','published'),
+              ('menu-cgu','cgu','other','published'),
+              ('draft-pu','pu','stall','draft')`,
+    );
+    await pool.query(
+      `INSERT INTO food_menu_items (id, tenant_id, menu_version_id, name, section_name, price_minor, available)
+       VALUES ('toast','pu','menu-pu','蔬菜吐司','吐司',60,true),
+              ('secret','cgu','menu-cgu','他校套餐',null,90,true),
+              ('hidden','pu','draft-pu','未上架',null,1,true)`,
     );
   }
 

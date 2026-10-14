@@ -10,6 +10,16 @@ const listPath = /^\/v1\/public\/schools\/([^/]+)\/cafeterias\/?$/;
 const missingSchoolPath = /^\/v1\/public\/(?:schools\/)?cafeterias\/?$/;
 const limiter = createWindowLimiter({ max: 60, windowMs: 60_000 });
 
+const orderingPath = /^\/v1\/(?:.*\/)?food\/(?:.*\/)?(?:orders|quotes|pos-orders|pickup[^/]*)(?:\/|$)/;
+
+export function onlineOrderingEnabled() {
+  return process.env.ONLINE_ORDERING_ENABLED === 'true';
+}
+
+export function isOrderingRoute(path: string) {
+  return orderingPath.test(path.split('?')[0]) && !/\/purchase-orders(?:\/|$)/.test(path);
+}
+
 export function isPublicCafeteriaRoute(method: string, path: string) {
   const normalized = method.toUpperCase();
   return (
@@ -29,6 +39,11 @@ export function registerPublicCafeteriaRoutes(
   app: FastifyInstance,
   db: { query: PublicCafeteriaService['list'] extends never ? never : ConstructorParameters<typeof PublicCafeteriaService>[0]['query'] },
 ) {
+  app.addHook('onRequest', async (request, reply) => {
+    if (!onlineOrderingEnabled() && isOrderingRoute(request.url)) {
+      return reply.code(412).send({ error: { code: 'ONLINE_ORDERING_DISABLED', message: '線上點餐尚未開放' } });
+    }
+  });
   const service = new PublicCafeteriaService(db);
   const send = async (request: FastifyRequest, reply: FastifyReply, schoolId: unknown) => {
     if (request.method !== 'GET') {
