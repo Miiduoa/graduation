@@ -150,6 +150,7 @@
   line-height: 1.6;
 }
 .form input,
+.form select,
 .form textarea {
   box-sizing: border-box;
   width: 100%;
