@@ -483,12 +483,6 @@ function ProvidenceARNavigationScreen(props: any) {
       return;
     }
 
-    if (!hasPermission) {
-      const response = await requestPermission();
-      if (!response.granted) return;
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    }
-
     const hasLocationPermission = await geo.requestPermission();
     if (!hasLocationPermission) {
       Alert.alert('需要位置權限', '請授權位置權限以使用 AR 導航。');
@@ -514,10 +508,18 @@ function ProvidenceARNavigationScreen(props: any) {
         destination: { lat: target.lat, lng: target.lng, name: target.name },
       });
       if (!built) {
-        const message = '目前無法取得可信的步行路網路線，請改用一般地圖確認路徑。';
+        const message = '目前無法取得可用的步行路網路線，請改用一般地圖確認路徑。';
         setRouteError(message);
         Alert.alert('尚無可用步行路線', message);
         return;
+      }
+      if (!hasPermission) {
+        const response = await requestPermission();
+        if (!response.granted) {
+          setRouteError('尚未取得相機權限，已取消 AR 導航。');
+          return;
+        }
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       setRoutePoints(built.points);
