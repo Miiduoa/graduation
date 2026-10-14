@@ -5,7 +5,7 @@ import {
   PROVIDENCE_UNIVERSITY_SCHOOL_ID,
   type School,
 } from '@campus/shared/src';
-import { findSchoolById, normalizeSchoolCode, resolveSchool } from '@campus/shared/src/schools';
+import { findSchoolById, findSchoolsByCode, normalizeSchoolCode, resolveSchool } from '@campus/shared/src/schools';
 import { clearCacheExceptSchool } from '../data/cachedSource';
 import { setHybridSourceSchoolContext } from '../data/hybridSource';
 import { applySchoolTheme, registerSchoolTheme } from '../ui/theme';
@@ -52,16 +52,35 @@ function toSelection(school: School): SchoolSelection {
 }
 
 export function schoolFromSelection(selection: Partial<SchoolSelection>): School {
-  return (
-    (selection.schoolId ? findSchoolById(selection.schoolId) : undefined) ??
-    (selection.code
-      ? resolveSchool({
-          school: selection.code,
-          schoolId: selection.schoolId ?? undefined,
-        })
-      : undefined) ??
-    getProvidenceSchool()
-  );
+  const id = typeof selection.schoolId === 'string' ? selection.schoolId.trim() : '';
+  const bundled = id ? findSchoolById(id) : undefined;
+  if (bundled) return bundled;
+
+  // The public school directory is larger than the bundled offline catalogue.
+  // Retain the exact selected ID instead of resolving an unknown ID to a demo campus.
+  if (/^[a-z0-9](?:[a-z0-9-]{0,78}[a-z0-9])?$/.test(id)) {
+    const suppliedCode = normalizeSchoolCode(selection.code);
+    const knownCodeSchools = findSchoolsByCode(suppliedCode);
+    const code =
+      knownCodeSchools.length === 1 && knownCodeSchools[0].id !== id
+        ? id.toUpperCase()
+        : suppliedCode || id.toUpperCase();
+    const label = typeof selection.schoolName === 'string' ? selection.schoolName.trim() : '';
+    const shortName = typeof selection.shortName === 'string' ? selection.shortName.trim() : '';
+    const color = typeof selection.themeColor === 'string' ? selection.themeColor : '';
+    return {
+      id,
+      code,
+      name: label.slice(0, 160) || `校園（${id}）`,
+      shortName: shortName.slice(0, 80) || undefined,
+      themeColor: /^#[0-9a-fA-F]{6}$/.test(color) ? color : undefined,
+      // Unrecognized school metadata cannot establish trusted email domains.
+    };
+  }
+
+  const matches = findSchoolsByCode(selection.code);
+  if (matches.length === 1) return matches[0];
+  return getProvidenceSchool();
 }
 
 function normalizeSelection(selection: Partial<SchoolSelection>): SchoolSelection {
@@ -73,8 +92,11 @@ export function SchoolProvider(props: {
   initial?: Partial<SchoolSelection>;
 }) {
   const initialSelection = normalizeSelection({
-    code: props.initial?.code ?? PROVIDENCE_UNIVERSITY_SCHOOL_CODE,
-    schoolId: props.initial?.schoolId ?? PROVIDENCE_UNIVERSITY_SCHOOL_ID,
+    ...props.initial,
+    code: props.initial?.code ?? (props.initial?.schoolId ? '' : PROVIDENCE_UNIVERSITY_SCHOOL_CODE),
+    schoolId:
+      props.initial?.schoolId ??
+      (props.initial?.code ? null : PROVIDENCE_UNIVERSITY_SCHOOL_ID),
   });
   const [selection, setSelectionState] = useState<SchoolSelection>(initialSelection);
   const [loaded, setLoaded] = useState(false);
@@ -114,7 +136,12 @@ export function SchoolProvider(props: {
   const setSelection = (next: Partial<SchoolSelection>) => {
     setSelectionState((prev) => {
       const identityChanged = next.code !== undefined || next.schoolId !== undefined;
-      const code = next.code != null ? normalizeSchoolCode(next.code) : prev.code;
+      const code =
+        next.code != null
+          ? normalizeSchoolCode(next.code)
+          : next.schoolId !== undefined && next.schoolId !== prev.schoolId
+            ? ''
+            : prev.code;
       const schoolId = next.schoolId === undefined ? prev.schoolId : next.schoolId;
       const schoolName =
         next.schoolName === undefined
