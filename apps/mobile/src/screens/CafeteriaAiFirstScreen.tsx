@@ -20,6 +20,7 @@ import {
   type DiningMenu,
   type DiningReceipt,
 } from '../features/dining';
+import { loadFailureCopy } from '../utils/loadFailureCopy';
 import {
   describePickupNumber,
   formatShortOrderCode,
@@ -92,9 +93,7 @@ function DiningContent({
     } catch (reason) {
       if (isCurrent() && request === generation.current)
         setError(
-          reason instanceof DiningError
-            ? reason.message
-            : '目前無法取得餐廳資料，請確認連線後重試。',
+          reason instanceof DiningError ? reason.message : loadFailureCopy(reason),
         );
     } finally {
       if (isCurrent() && request === generation.current) setLoading(false);
@@ -319,9 +318,12 @@ function DiningContent({
                 <ActivityIndicator accessibilityLabel="讀取餐廳" color={aiTokens.ai} />
               ) : null}
               {error && !pending ? (
-                <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>
-                  {error}
-                </Text>
+                <View style={{ gap: 12 }}>
+                  <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>
+                    {error}
+                  </Text>
+                  <AIButton label="重新整理" variant="ghost" onPress={() => void load()} />
+                </View>
               ) : null}
             </View>
           </AICard>
