@@ -5,7 +5,7 @@ import {
   PROVIDENCE_UNIVERSITY_SCHOOL_ID,
   type School,
 } from '@campus/shared/src';
-import { findSchoolById, normalizeSchoolCode, resolveSchool } from '@campus/shared/src/schools';
+import { findSchoolById, findSchoolsByCode, normalizeSchoolCode, resolveSchool } from '@campus/shared/src/schools';
 import { clearCacheExceptSchool } from '../data/cachedSource';
 import { setHybridSourceSchoolContext } from '../data/hybridSource';
 import { applySchoolTheme, registerSchoolTheme } from '../ui/theme';
@@ -52,16 +52,26 @@ function toSelection(school: School): SchoolSelection {
 }
 
 export function schoolFromSelection(selection: Partial<SchoolSelection>): School {
-  return (
-    (selection.schoolId ? findSchoolById(selection.schoolId) : undefined) ??
-    (selection.code
-      ? resolveSchool({
-          school: selection.code,
-          schoolId: selection.schoolId ?? undefined,
-        })
-      : undefined) ??
-    getProvidenceSchool()
-  );
+  const schoolId = selection.schoolId?.trim();
+  const known = findSchoolById(schoolId);
+  if (known) return known;
+
+  const code = normalizeSchoolCode(selection.code);
+  const name = selection.schoolName?.trim();
+  if (schoolId && /^[a-z0-9][a-z0-9-]{0,78}[a-z0-9]$/.test(schoolId) && code && name) {
+    // Some schools come from the live directory rather than the bundled list.
+    return {
+      id: schoolId,
+      code,
+      name,
+      shortName: selection.shortName?.trim() || undefined,
+      themeColor: selection.themeColor?.trim() || undefined,
+      domains: selection.domains ?? undefined,
+    };
+  }
+
+  const codeMatches = !schoolId ? findSchoolsByCode(code) : [];
+  return codeMatches.length === 1 ? codeMatches[0] : getProvidenceSchool();
 }
 
 function normalizeSelection(selection: Partial<SchoolSelection>): SchoolSelection {
@@ -75,11 +85,22 @@ export function mergeSchoolSelection(
 ): SchoolSelection {
   const idChanged = patch.schoolId !== undefined;
   const codeChanged = patch.code !== undefined;
-  const schoolId = idChanged ? patch.schoolId : codeChanged ? null : previous.schoolId;
-  const code = idChanged && !codeChanged
-    ? ''
-    : codeChanged ? normalizeSchoolCode(patch.code) : previous.code;
-  return normalizeSelection({ code, schoolId });
+  if (
+    idChanged && patch.schoolId &&
+    !findSchoolById(patch.schoolId) &&
+    !(patch.schoolName?.trim() || previous.schoolId === patch.schoolId && previous.schoolName)
+  ) return previous;
+
+  const identityChanged = idChanged || codeChanged;
+  const candidate: Partial<SchoolSelection> = {
+    schoolId: idChanged ? patch.schoolId : codeChanged ? null : previous.schoolId,
+    code: idChanged && !codeChanged ? '' : codeChanged ? patch.code : previous.code,
+    schoolName: identityChanged ? patch.schoolName : previous.schoolName,
+    shortName: identityChanged ? patch.shortName : previous.shortName,
+    themeColor: identityChanged ? patch.themeColor : previous.themeColor,
+    domains: identityChanged ? patch.domains : previous.domains,
+  };
+  return normalizeSelection(candidate);
 }
 
 export function SchoolProvider(props: {
