@@ -4,7 +4,7 @@ Campus One uses the existing `api.nuni.tw` database and API. The running API's s
 
 This directory preserves the exact base and reviewed changes used by Campus One, without changing the archived repository or replacing the rewrite. `source.json` binds the base commit, patch checksums, final Git tree, and runtime implementation commit. The second patch updates the derived runtime grant inventory. The third adds a scoped installer for the 30 built-in social event contracts, with enforce-mode regression coverage. The fourth preserves existing account-to-person mappings and serializes first-time persona creation, so legacy accounts can publish and read their public posts without creating a second identity.
 
-The fifth patch keeps existing customer orders accessible when the last public merchant pauses ordering. Only the order list, detail, payment-session and cancellation routes use a lookup of an existing active account/persona; they retain tenant, food-module, order-owner and state checks. Public discovery, new quotes/orders and social access still require an available public service. These order routes no longer create a persona for a first-time visitor: the public location flow establishes it before ordering. No migration or new database grant is added. The regenerated grant inventory remains `BLOCK` because its analyzer cannot prove all SQL reachability; it is not an authorization or release approval.
+第五、第六份補丁（`patches/0005-existing-food-order-access.patch`、`patches/0006-food-order-realms.patch`）仍留在目錄裡，之後可單獨驗收暫停門市的本人舊訂單與訂單場域列表。這次 `source.json` 只打包 0001–0004，目標 tree 為 `6776b19a7cea998728469c3091c0ea7c264f6aa3`；`build.py` 不會套用 0005／0006。
 
 Build from the repository root:
 
