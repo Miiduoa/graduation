@@ -18,6 +18,7 @@ import {
 import styles from './map.module.css';
 import {
   buildCampusMapSearchUrl,
+  getOfficialCampusMapUrl,
   hasOfficialProvidenceLibraryGuide,
   PROVIDENCE_LIBRARY_FLOOR_GUIDE_URL,
 } from '@campus/shared/src/campusMapLookup';
@@ -57,6 +58,7 @@ function MapContent({
 }) {
   const hash = useLocationHash();
   const fallbackMapUrl = buildCampusMapSearchUrl(schoolName);
+  const officialMapUrl = getOfficialCampusMapUrl(school);
   const [placeState, setPlaceState] = useState<{
     status: 'loading' | 'error' | 'ready';
     locations: MapLocation[];
@@ -249,9 +251,16 @@ function MapContent({
       <div className={`card ${styles.state}`} role="alert">
         <h2>暫時無法取得校園地點</h2>
         <p>請稍後重新載入。確認地點資料後，就能搜尋設施與開啟導航。</p>
-        <button className="btn" onClick={retry}>
-          重新載入地點
-        </button>
+        <div className={styles.actions}>
+          <button className="btn" onClick={retry}>
+            重新載入地點
+          </button>
+          {officialMapUrl && (
+            <a className="btn" href={officialMapUrl} target="_blank" rel="noopener noreferrer">
+              查看校方校區平面圖
+            </a>
+          )}
+        </div>
       </div>
     );
   if (!locations.length)
@@ -259,10 +268,13 @@ function MapContent({
       <div className={`card ${styles.state}`}>
         <h2>目前沒有可顯示的校園地點</h2>
         <p>地點需要有完整的名稱與座標才能顯示。你也可以先查詢校方提供的校園資訊。</p>
-        {school === 'pu' ? (
-          <a className="btn" href="https://www.pu.edu.tw/" target="_blank" rel="noopener noreferrer">
-            開啟靜宜大學網站
-          </a>
+        {officialMapUrl ? (
+          <>
+            <a className="btn" href={officialMapUrl} target="_blank" rel="noopener noreferrer">
+              查看校方校區平面圖
+            </a>
+            <p>這是學校公布的校區配置，不代表目前已經具備可供程式導航的建築座標。</p>
+          </>
         ) : (
           <>
             <p>目前還沒有這所校園的地點資料，不會改用其他學校的建築或導航位置。</p>
@@ -335,6 +347,11 @@ function MapContent({
           />
         </label>
         <div className={styles.tools}>
+          {officialMapUrl && (
+            <a className="btn" href={officialMapUrl} target="_blank" rel="noopener noreferrer">
+              校方校區平面圖
+            </a>
+          )}
           <button className="btn" onClick={locate} disabled={positionStatus === 'loading'}>
             {positionStatus === 'loading' ? '正在定位…' : myLocation ? '更新我的位置' : '查看我的位置'}
           </button>
