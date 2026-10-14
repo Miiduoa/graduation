@@ -7,12 +7,11 @@
  * 子畫面：發文、Story、貼文詳情、看板詳情走獨立子路由（/community/post/new 等）
  */
 
-import { useMemo } from 'react';
 import styles from './community.module.css';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { CommunityAccess } from './_components/CommunityAccess';
 import { SiteShell } from '@/components/SiteShell';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import { FeedTab } from './_components/FeedTab';
 import { BoardsTab } from './_components/BoardsTab';
 import { RealtimeTab } from './_components/RealtimeTab';
@@ -28,21 +27,25 @@ const TABS: { key: TabKey; label: string; icon: string; desc: string }[] = [
 ];
 
 export default function CommunityPage() {
-  const { schoolName } = resolveSchoolPageContext({});
+  const { schoolId, schoolName, schoolSearch, ready } = useBrowsingSchoolPageContext();
   return (
     <SiteShell
       title="校園交流"
       subtitle="分享校園消息，找到一起上課與讀書的同學。"
       schoolName={schoolName}
     >
-      <CommunityAccess>
-        <CommunityPageInner />
-      </CommunityAccess>
+      {ready ? (
+        <CommunityAccess>
+          <CommunityPageInner key={schoolId} schoolId={schoolId} schoolSearch={schoolSearch} />
+        </CommunityAccess>
+      ) : (
+        <p role="status">正在確認校園目錄…</p>
+      )}
     </SiteShell>
   );
 }
 
-function CommunityPageInner() {
+function CommunityPageInner({ schoolId, schoolSearch }: { schoolId: string; schoolSearch: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const tabParam = searchParams?.get('tab');
@@ -52,7 +55,6 @@ function CommunityPageInner() {
       : 'feed';
 
   const activeTab = initial;
-  const { schoolId, schoolSearch } = useMemo(() => resolveSchoolPageContext({}), []);
 
   const switchTab = (k: TabKey) => {
     const sp = new URLSearchParams(searchParams?.toString() ?? '');
