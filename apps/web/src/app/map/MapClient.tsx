@@ -186,9 +186,7 @@ function MapContent({
       <div className={`card ${styles.state}`}>
         <h2>目前沒有可顯示的校園地點</h2>
         <p>地點需要有完整的名稱與座標才能顯示。你也可以先查詢校方提供的校園資訊。</p>
-        <a className="btn" href="https://www.pu.edu.tw/" target="_blank" rel="noopener noreferrer">
-          開啟靜宜大學網站
-        </a>
+        <p>這個校園尚未提供經確認的地點資料；請由學校官網查詢，不會改用其他校園的地圖。</p>
       </div>
     );
 
