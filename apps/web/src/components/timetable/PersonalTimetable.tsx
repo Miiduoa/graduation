@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { usePersonalImportScope, usePersonalImports } from '@/lib/usePersonalImports';
@@ -49,6 +49,11 @@ import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
 import { listAcceptedFriends } from '@/lib/timetable/friends';
 import { useAcademicRecords } from '@/lib/useAcademicRecords';
 import type { AcademicCourse } from '@/lib/academicRecords';
+import { CourseEditor as EditableCourseDialog } from './CourseEditor';
+import { TimetableGrid, UnscheduledCourses } from './TimetableGrid';
+import { validateCourseDraft } from './courseEditorModel';
+import { planningReadiness } from './timetableMovement';
+import movement from './timetableMovement.module.css';
 
 function fromSchoolCourse(course: AcademicCourse): PersonalCourse {
   const start = course.periods[0] || 0;
@@ -82,6 +87,16 @@ function TimetableWorkspace() {
   });
   const [editing, setEditing] = useState<PersonalCourse | null>(null);
   const [busy, setBusy] = useState(false);
+  const savingRef = useRef(false);
+  const activeRef = useRef(false);
+  const [loadError, setLoadError] = useState('');
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [shareBusy, setShareBusy] = useState(false);
+  const sharingRef = useRef(false);
+  useEffect(() => {
+    activeRef.current = true;
+    return () => { activeRef.current = false; };
+  }, []);
   const [notice, setNotice] = useState('');
   const [importMode, setImportMode] = useState<ImportMode>('merge');
   const [drafts, setDrafts] = useState<ImportDraft[]>([]);
@@ -149,22 +164,43 @@ function TimetableWorkspace() {
       ? timetable?.courses || []
       : [];
   const visibleCourses = [...legacyCourses, ...importedCourses];
+  const missingImportTimes = imported.records.filter((row) =>
+    row.kind === 'timetable' &&
+    row.schoolId === schoolId &&
+    `${row.academicYear}|${row.semester}` === activeTerm &&
+    !importedCourses.some((course) => course.id === `import:${row.id}`)
+  );
+  // Unscheduled imported rows cannot be treated as free time.
+  const planningCourses = [...visibleCourses, ...missingImportTimes.map((row) =>
+    cleanCourse({ id: `unplaced-import:${row.id}`, name: row.title, day: 0 }),
+  )];
+  const planning = planningReadiness(planningCourses, PERIOD_TIMES.length, WEEKDAY_LABELS.length);
   const openCourse = (course: PersonalCourse) => {
+    if (busy || savingRef.current) return;
     if (course.id.startsWith('import:')) router.push('/import?kind=timetable');
-    else setEditing(course);
+    else {
+      setNotice('');
+      setEditing({ ...course });
+    }
   };
   const planner = new SchedulePlanner(visibleCourses, friends, selectedFriend);
 
   const refresh = useCallback(async () => {
-    const next = await loadPersonalTimetable(uid, schoolId, importScope.scope.owner);
-    setTimetable(next);
+    try {
+      const next = await loadPersonalTimetable(uid, schoolId, importScope.scope.owner);
+      if (activeRef.current) {
+        setTimetable(next);
+        setLoadError('');
+      }
+    } catch {
+      if (activeRef.current) setLoadError('目前無法讀取課表，請保留本機資料並重新讀取。');
+    }
   }, [uid, schoolId, importScope.scope.owner]);
 
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  useEffect(() => { void refresh(); }, [refresh, loadAttempt]);
 
   useEffect(() => {
+    let current = true;
     if (!uid) {
       setFriends([]);
       return;
@@ -177,14 +213,16 @@ function TimetableWorkspace() {
           loaded.push({
             id: row.uid,
             name: row.name || '好友',
-            courses: theirs?.courses || [],
+            courses: theirs?.schoolId === schoolId ? theirs.courses : [],
           });
         }
+        if (!current) return;
         setFriends(loaded);
         const wanted = new URLSearchParams(window.location.search).get('friend');
         if (wanted && loaded.some((friend) => friend.id === wanted)) setSelectedFriend(wanted);
       })
-      .catch(() => setFriends([]));
+      .catch(() => { if (current) setFriends([]); });
+    return () => { current = false; };
   }, [uid, schoolId]);
 
   // 別人約我、還沒回覆的邀約，在課表頁也看得到
@@ -226,24 +264,44 @@ function TimetableWorkspace() {
     next: StoredTimetable,
     message: string,
     options?: { deviceOnly?: boolean },
-  ) => {
+  ): Promise<boolean> => {
+    if (savingRef.current || !activeRef.current) return false;
+    savingRef.current = true;
     setBusy(true);
     try {
-      await savePersonalTimetable(uid, { ...next, schoolId }, importScope.scope.owner);
+      const result = await savePersonalTimetable(uid, { ...next, schoolId }, importScope.scope.owner);
+      if (!activeRef.current) return false;
       setTimetable({ ...next, schoolId });
-      setNotice(options?.deviceOnly ? TIMETABLE_DEVICE_ONLY_STORED_COPY : message);
+      setPlanResult(null);
+      setShareUrl('');
+      setNotice(options?.deviceOnly || result.stored === 'local' ? TIMETABLE_DEVICE_ONLY_STORED_COPY : message);
+      return true;
     } catch (error) {
-      if (error instanceof TimetableCloudSaveError) {
+      if (activeRef.current && error instanceof TimetableCloudSaveError) {
         setTimetable({ ...next, schoolId });
-        setNotice(options?.deviceOnly ? TIMETABLE_DEVICE_ONLY_STORED_COPY : message);
-      } else {
-        setNotice('這次沒有存成。課表還停在你看到的這一版，請稍後再試。');
+        setPlanResult(null);
+        setShareUrl('');
+        setNotice('已儲存於這台裝置，但雲端同步沒有成功；好友目前看到的仍是原先版本。');
+        return true;
       }
+      if (activeRef.current) setNotice('無法確認儲存結果，原編輯內容保留。請確認課表後再重試。');
+      return false;
     } finally {
-      setBusy(false);
+      savingRef.current = false;
+      if (activeRef.current) setBusy(false);
     }
   };
 
+  if (loadError) {
+    return (
+      <section className={styles.panel} aria-label="課表讀取失敗">
+        <p role="alert">{loadError}</p>
+        <button type="button" className="btn" onClick={() => { setLoadError(''); setLoadAttempt((count) => count + 1); }}>
+          重新讀取課表
+        </button>
+      </section>
+    );
+  }
   if (!timetable) {
     return (
       <p className={styles.notice} role="status">
@@ -254,9 +312,14 @@ function TimetableWorkspace() {
 
   const conflicts = findCourseConflicts(visibleCourses);
   const selected = friends.find((friend) => friend.id === selectedFriend);
-  const windows = selected ? meetupWindows(visibleCourses, selected.courses) : [];
+  const friendPlanning = selected
+    ? planningReadiness(selected.courses, PERIOD_TIMES.length, WEEKDAY_LABELS.length)
+    : null;
+  const windows = planning.ready && selected && friendPlanning?.ready
+    ? meetupWindows(visibleCourses, selected.courses)
+    : [];
   const sendMeetup = async (kind: 'meal' | 'study', day: number, startMinute: number) => {
-    if (!uid || !selected || meetupBusy) return;
+    if (!uid || !selected || !planning.ready || !friendPlanning?.ready || meetupBusy || savingRef.current) return;
     setMeetupBusy(true);
     const label = meetupLabel({ day, kind, startMinute });
     try {
@@ -283,28 +346,33 @@ function TimetableWorkspace() {
   const analyzed = analyzeImportDrafts(timetable.courses, drafts, importMode);
 
   const saveCourse = async (course: PersonalCourse) => {
+    if (course.id.startsWith('import:')) return;
+    const issues = validateCourseDraft(course, PERIOD_TIMES.length, WEEKDAY_LABELS.length);
+    if (Object.keys(issues).length) {
+      setNotice(Object.values(issues).join(' '));
+      return;
+    }
     const cleaned = cleanCourse(course);
     const next = timetable.courses.some((item) => item.id === cleaned.id)
       ? timetable.courses.map((item) => (item.id === cleaned.id ? cleaned : item))
       : [...timetable.courses, cleaned];
-    await persist({ ...timetable, courses: next }, '課程已更新。');
-    setEditing(null);
+    if (await persist({ ...timetable, courses: next }, '課程已更新。')) setEditing(null);
   };
 
   const removeCourse = async (id: string) => {
-    await persist(
+    if (id.startsWith('import:')) return;
+    if (await persist(
       { ...timetable, courses: timetable.courses.filter((item) => item.id !== id) },
       '已從課表拿掉這門課。',
-    );
-    setEditing(null);
+    )) setEditing(null);
   };
 
   const confirmImport = async () => {
     const next = applyImport(timetable.courses, analyzed, importMode);
-    await persist({ ...timetable, courses: next }, TIMETABLE_DEVICE_ONLY_STORED_COPY, {
+    if (!analyzed.some((item) => item.selected !== false) || savingRef.current) return;
+    if (await persist({ ...timetable, courses: next }, TIMETABLE_DEVICE_ONLY_STORED_COPY, {
       deviceOnly: true,
-    });
-    setDrafts([]);
+    })) setDrafts([]);
   };
 
   const copyShare = async () => {
@@ -322,6 +390,7 @@ function TimetableWorkspace() {
   };
 
   const runPlan = (title: string, query: string) => {
+    if (!planning.ready) return;
     const answer = planner.ask(query) || '這份課表算不出結果，先確認課有排上星期和節次。';
     setPlanResult({
       title,
@@ -333,6 +402,7 @@ function TimetableWorkspace() {
   };
 
   const todayFree = () => {
+    if (!planning.ready) return;
     const today = new Date().getDay();
     if (today < 1 || today > 5) {
       setPlanResult({ title: '今天空堂', lines: ['今天是週末，課表上沒有排課。'] });
@@ -359,7 +429,7 @@ function TimetableWorkspace() {
   };
 
   return (
-    <>
+    <div className={movement.workspace}>
       {invites.length > 0 && (
         <section className={styles.panel} aria-label="邀約">
           <h2>有人約你</h2>
@@ -447,7 +517,8 @@ function TimetableWorkspace() {
         <button
           type="button"
           className="btn"
-          onClick={() => setEditing(cleanCourse({ day, start: 1, end: 1 }))}
+          disabled={busy}
+          onClick={() => openCourse({ ...cleanCourse({ day, start: 1, end: 1 }), name: '' })}
         >
           新增課程
         </button>
@@ -495,26 +566,7 @@ function TimetableWorkspace() {
         </div>
       )}
       {view === 'grid' ? (
-        <div className={styles.grid} role="table" aria-label="一週格子課表">
-          <div className={styles.gridTime}>節次</div>
-          {WEEKDAY_LABELS.map((label) => (
-            <div className={styles.gridHead} key={label}>
-              {label}
-            </div>
-          ))}
-          {PERIOD_TIMES.map((time, index) => {
-            const period = index + 1;
-            return (
-              <FragmentRow
-                key={period}
-                period={period}
-                time={time}
-                courses={visibleCourses}
-                onEdit={openCourse}
-              />
-            );
-          })}
-        </div>
+        <TimetableGrid courses={visibleCourses} disabled={busy} onEdit={openCourse} />
       ) : view === 'week' ? (
         <div className={styles.week}>
           {WEEKDAY_LABELS.map((label, index) => {
@@ -563,14 +615,19 @@ function TimetableWorkspace() {
         </ul>
       )}
 
+      <UnscheduledCourses courses={legacyCourses} disabled={busy} onEdit={openCourse} />
       {editing && (
-        <CourseEditor
+        <EditableCourseDialog
+          key={editing.id}
           course={editing}
+          courses={timetable.courses}
+          existing={timetable.courses.some((course) => course.id === editing.id)}
           busy={busy}
+          feedback={notice}
           onChange={setEditing}
           onSave={() => void saveCourse(editing)}
           onRemove={() => void removeCourse(editing.id)}
-          onCancel={() => setEditing(null)}
+          onCancel={() => { if (!savingRef.current) setEditing(null); }}
         />
       )}
 
@@ -625,12 +682,14 @@ function TimetableWorkspace() {
 
       <section className={styles.panel} aria-label="幫我安排">
         <h2>幫我安排</h2>
-        <p className={styles.notice}>用你現在這份課表算。</p>
+        <p className={styles.notice}>
+          {planning.ready ? '依目前選取學期的課表計算；尚未匯入的課程仍需自行核對。' : planning.message}
+        </p>
         <div className={styles.toolbar}>
-          <button type="button" className="btn" onClick={() => runPlan('下一堂', '下一堂')}>
+          <button type="button" className="btn" disabled={busy || !planning.ready} onClick={() => runPlan('下一堂', '下一堂')}>
             下一堂
           </button>
-          <button type="button" className="btn" onClick={todayFree}>
+          <button type="button" className="btn" disabled={busy || !planning.ready} onClick={todayFree}>
             今天空堂
           </button>
         </div>
@@ -661,7 +720,9 @@ function TimetableWorkspace() {
           <button
             type="button"
             className="btn"
+            disabled={busy || !planning.ready}
             onClick={() => {
+              if (!planning.ready || savingRef.current) return;
               const slots = studySlots(visibleCourses, studyDay, studyHours);
               setPlanResult({
                 title: `${WEEKDAY_LABELS[studyDay - 1]}排 ${studyHours} 小時讀書`,
@@ -719,11 +780,15 @@ function TimetableWorkspace() {
                 ))}
               </select>
             </label>
-            {selected && selected.courses.length > 0 && windows.length === 0 && (
+            {selected && planning.ready && friendPlanning?.ready && windows.length === 0 && (
               <p className={styles.notice}>這週找不到兩個人都沒課、有一小時的時段。</p>
             )}
+            {selected && !planning.ready && <p className={styles.notice}>{planning.message}</p>}
+            {selected && selected.courses.length > 0 && !friendPlanning?.ready && (
+              <p className={styles.notice}>好友課表仍有不完整的時間資料，暫不提供共同空堂與邀約。</p>
+            )}
             {selected && !selected.courses.length && (
-              <p className={styles.notice}>這位朋友還沒有開放課表，或課表仍是空的。</p>
+              <p className={styles.notice}>目前沒有可用的好友課表，不會把缺少資料誤判為整天空堂。</p>
             )}
             {selected &&
               windows
@@ -739,7 +804,7 @@ function TimetableWorkspace() {
           </>
         )}
       </section>
-    </>
+    </div>
   );
 }
 
@@ -775,130 +840,5 @@ function MeetupWindowRow({
         約讀書
       </button>
     </div>
-  );
-}
-
-function FragmentRow({
-  period,
-  time,
-  courses,
-  onEdit,
-}: {
-  period: number;
-  time: readonly [string, string];
-  courses: PersonalCourse[];
-  onEdit: (course: PersonalCourse) => void;
-}) {
-  return (
-    <>
-      <div className={styles.gridTime}>
-        {period}
-        <br />
-        {time[0]}
-      </div>
-      {WEEKDAY_LABELS.map((_, dayIndex) => {
-        const hit = courses.find(
-          (course) => course.day === dayIndex + 1 && period >= course.start && period <= course.end,
-        );
-        return (
-          <div className={styles.gridCell} key={`${period}-${dayIndex}`}>
-            {hit && period === hit.start ? (
-              <button type="button" className={styles.gridCourse} onClick={() => onEdit(hit)}>
-                <strong>{hit.name}</strong>
-                <div>{hit.room}</div>
-              </button>
-            ) : null}
-          </div>
-        );
-      })}
-    </>
-  );
-}
-
-function CourseEditor({
-  course,
-  busy,
-  onChange,
-  onSave,
-  onRemove,
-  onCancel,
-}: {
-  course: PersonalCourse;
-  busy: boolean;
-  onChange: (course: PersonalCourse) => void;
-  onSave: () => void;
-  onRemove: () => void;
-  onCancel: () => void;
-}) {
-  return (
-    <section className={styles.panel} aria-label="編輯課程">
-      <h2>編輯課程</h2>
-      <label className={styles.field}>
-        課名
-        <input
-          value={course.name}
-          onChange={(event) => onChange({ ...course, name: event.target.value })}
-        />
-      </label>
-      <label className={styles.field}>
-        星期
-        <select
-          value={course.day}
-          onChange={(event) => onChange({ ...course, day: Number(event.target.value) })}
-        >
-          <option value={0}>未排定</option>
-          {WEEKDAY_LABELS.map((label, index) => (
-            <option value={index + 1} key={label}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className={styles.field}>
-        開始節次
-        <input
-          type="number"
-          min={1}
-          max={13}
-          value={course.start || 1}
-          onChange={(event) => onChange({ ...course, start: Number(event.target.value) })}
-        />
-      </label>
-      <label className={styles.field}>
-        結束節次
-        <input
-          type="number"
-          min={1}
-          max={13}
-          value={course.end || course.start || 1}
-          onChange={(event) => onChange({ ...course, end: Number(event.target.value) })}
-        />
-      </label>
-      <label className={styles.field}>
-        老師
-        <input
-          value={course.teacher}
-          onChange={(event) => onChange({ ...course, teacher: event.target.value })}
-        />
-      </label>
-      <label className={styles.field}>
-        教室
-        <input
-          value={course.room}
-          onChange={(event) => onChange({ ...course, room: event.target.value })}
-        />
-      </label>
-      <div className={styles.toolbar}>
-        <button type="button" className="btn primary" disabled={busy} onClick={onSave}>
-          儲存
-        </button>
-        <button type="button" className="btn" onClick={onCancel}>
-          取消
-        </button>
-        <button type="button" className="btn" disabled={busy} onClick={onRemove}>
-          刪除
-        </button>
-      </div>
-    </section>
   );
 }
