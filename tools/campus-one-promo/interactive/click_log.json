@@ -1,0 +1,183 @@
+{
+  "type": "real_live_browser_interaction_video",
+  "origin": "https://nuni.tw",
+  "started_at": "2026-10-14T05:01:25.710Z",
+  "branch": "media/campus-one-interactive-demo-20261014",
+  "commit": "0510c730622dad92b3fb8526ec9b221e9813b638",
+  "viewport": "393 x 852 CSS px / 786 x 1704 video",
+  "chapters": [
+    {
+      "id": "01-bus",
+      "title": "首頁 → 公車 → 站名搜尋",
+      "started_at": "2026-10-14T05:01:26.555Z",
+      "steps": [
+        {
+          "name": "從首頁打開公車",
+          "kind": "click",
+          "started_at": "2026-10-14T05:01:29.608Z",
+          "url_before": "https://nuni.tw/",
+          "selector": "a[href=\"/bus\"] [visible #1/2]",
+          "url_after": "https://nuni.tw/bus",
+          "ok": true,
+          "visible_excerpt": "靜宜大學\n\n公車與交通\n\n找站牌、確認方向，再出發。\n\n出發前，少一點猜測\n\n從你身邊的站牌開始\n\n先找上車地點，再確認路線和方向。沒有開啟定位，也能查詢。\n\n資料來源 TDX\n學校站牌\n找我附近\n搜尋站名\n常用站牌\n\n靜宜大學 · 尋找名稱含「靜宜大學」的站牌，不需要先記住路線號碼。\n\n可搭乘站牌\n0 站\n\n附近站牌服務尚未啟用。你仍可查看已登錄路線，或開啟官方公車網站。\n\n重新查詢\n\n到站時間為預估值，請以現場車況與業者公告為準。\n\n官方公車網站 ↗\n已登錄校園路線 · 備用查詢\nCampus One\n服務條款\n隱私政策\n支援\n刪除帳號\n設定"
+        },
+        {
+          "name": "切換站名搜尋",
+          "kind": "click",
+          "started_at": "2026-10-14T05:01:31.868Z",
+          "url_before": "https://nuni.tw/bus",
+          "selector": "button:has-text(\"搜尋站名\") [visible #0/1]",
+          "url_after": "https://nuni.tw/bus",
+          "ok": true,
+          "visible_excerpt": "靜宜大學\n\n公車與交通\n\n找站牌、確認方向，再出發。\n\n出發前，少一點猜測\n\n從你身邊的站牌開始\n\n先找上車地點，再確認路線和方向。沒有開啟定位，也能查詢。\n\n資料來源 TDX\n學校站牌\n找我附近\n搜尋站名\n常用站牌\n查詢縣市\n臺北市\n新北市\n桃園市\n臺中市\n臺南市\n高雄市\n基隆市\n新竹市\n新竹縣\n苗栗縣\n彰化縣\n南投縣\n雲林縣\n嘉義市\n嘉義縣\n屏東縣\n宜蘭縣\n花蓮縣\n臺東縣\n澎湖縣\n金門縣\n連江縣\n站名或學校名稱\n尋找站牌\n\n輸入站名後按搜尋，不會在每次打字時傳送查詢。\n\n到站時間為預估值，請以現場車況與業者公告為準。\n\n官方公車網站 ↗\n已登錄校園路線 · 備用查詢\nCampus One\n服務條款\n隱私政策\n支援\n刪除帳號\n設定"
+        },
+        {
+          "name": "輸入靜宜大學",
+          "kind": "type",
+          "started_at": "2026-10-14T05:01:33.619Z",
+          "url_before": "https://nuni.tw/bus",
+          "selector": "input[placeholder*=\"站\"] [visible #0/1]",
+          "typed": "靜宜大學",
+          "url_after": "https://nuni.tw/bus",
+          "ok": true,
+          "visible_excerpt": "靜宜大學\n\n公車與交通\n\n找站牌、確認方向，再出發。\n\n出發前，少一點猜測\n\n從你身邊的站牌開始\n\n先找上車地點，再確認路線和方向。沒有開啟定位，也能查詢。\n\n資料來源 TDX\n學校站牌\n找我附近\n搜尋站名\n常用站牌\n查詢縣市\n臺北市\n新北市\n桃園市\n臺中市\n臺南市\n高雄市\n基隆市\n新竹市\n新竹縣\n苗栗縣\n彰化縣\n南投縣\n雲林縣\n嘉義市\n嘉義縣\n屏東縣\n宜蘭縣\n花蓮縣\n臺東縣\n澎湖縣\n金門縣\n連江縣\n站名或學校名稱\n尋找站牌\n\n輸入站名後按搜尋，不會在每次打字時傳送查詢。\n\n到站時間為預估值，請以現場車況與業者公告為準。\n\n官方公車網站 ↗\n已登錄校園路線 · 備用查詢\nCampus One\n服務條款\n隱私政策\n支援\n刪除帳號\n設定"
+        }
+      ],
+      "valid_clicks": 3,
+      "home_status": 200,
+      "home_title": "Campus One｜課程與校園生活",
+      "final_url": "https://nuni.tw/bus",
+      "screenshot_sha256": "67927e5c7379618558afbfee65ff6fbd8664594604a0b55891c7e24827cc0e25",
+      "video_file": "interactive/01-bus.webm",
+      "video_bytes": 777017,
+      "video_sha256": "59b22d1f90a9ba09942040de415d121ed2c956fe4dac5b211ac8ae839e83f41d"
+    },
+    {
+      "id": "02-timetable",
+      "title": "首頁 → 課務 → 課表切換",
+      "started_at": "2026-10-14T05:01:36.812Z",
+      "steps": [
+        {
+          "name": "打開課務課表",
+          "kind": "click",
+          "started_at": "2026-10-14T05:01:38.646Z",
+          "url_before": "https://nuni.tw/",
+          "selector": "a[href=\"/timetable\"] [visible #0/3]",
+          "url_after": "https://nuni.tw/timetable",
+          "ok": true,
+          "visible_excerpt": "我的課表\n\n先看這週去哪上課。截圖或學校課表都要確認後才會寫入。\n\n老師在 Nuni 開的課、教材和作業在這裡：Nuni 課程 →\n\n已存在這台裝置，換手機或清除瀏覽器資料就會不見 這個功能還沒接通，雲端備份先不用。\n\n格子\n一週\n單日\n上課日\n星期一\n星期二\n星期三\n星期四\n星期五\n新增課程\n\n這個功能還沒接通。分享連結要等學校帳號接上才能用，課表仍可先在這台瀏覽器整理。\n\n節次\n星期一\n星期二\n星期三\n星期四\n星期五\n1\n08:10\n2\n09:10\n3\n10:10\n4\n11:10\n5\n13:10\n6\n14:10\n7\n15:10\n8\n16:10\n9\n17:10\n10\n18:05\n11\n19:00\n12\n19:55\n13\n20:50\n匯入課表\n\n截圖或貼上文字後會先變成草稿。課表尚未被修改，按確認匯入後才會套用\n\n課表截圖\n匯入方式\n整份取代\n只加入還沒有的課\n\n這個功能還沒接通。請先貼上課表文字，或手動新增。\n\n或貼上課表文字"
+        },
+        {
+          "name": "切換一週模式",
+          "kind": "click",
+          "started_at": "2026-10-14T05:01:40.857Z",
+          "url_before": "https://nuni.tw/timetable",
+          "selector": "button:has-text(\"一週\") [visible #0/1]",
+          "url_after": "https://nuni.tw/timetable",
+          "ok": true,
+          "visible_excerpt": "我的課表\n\n先看這週去哪上課。截圖或學校課表都要確認後才會寫入。\n\n老師在 Nuni 開的課、教材和作業在這裡：Nuni 課程 →\n\n已存在這台裝置，換手機或清除瀏覽器資料就會不見 這個功能還沒接通，雲端備份先不用。\n\n格子\n一週\n單日\n上課日\n星期一\n星期二\n星期三\n星期四\n星期五\n新增課程\n\n這個功能還沒接通。分享連結要等學校帳號接上才能用，課表仍可先在這台瀏覽器整理。\n\n星期一\n\n無課\n\n星期二\n\n無課\n\n星期三\n\n無課\n\n星期四\n\n無課\n\n星期五\n\n無課\n\n匯入課表\n\n截圖或貼上文字後會先變成草稿。課表尚未被修改，按確認匯入後才會套用\n\n課表截圖\n匯入方式\n整份取代\n只加入還沒有的課\n\n這個功能還沒接通。請先貼上課表文字，或手動新增。\n\n或貼上課表文字\n辨識文字\n幫我安排\n\n用你現在這份課表算。\n\n下一堂\n今天空堂\n星期\n星期一\n星期二\n星期三\n星期四\n星期五\n時數\n1 小時\n2 小時\n3 小時\n4 小時\n排讀書時間\n共"
+        },
+        {
+          "name": "切換單日模式",
+          "kind": "click",
+          "started_at": "2026-10-14T05:01:42.612Z",
+          "url_before": "https://nuni.tw/timetable",
+          "selector": "button:has-text(\"單日\") [visible #0/1]",
+          "url_after": "https://nuni.tw/timetable",
+          "ok": true,
+          "visible_excerpt": "我的課表\n\n先看這週去哪上課。截圖或學校課表都要確認後才會寫入。\n\n老師在 Nuni 開的課、教材和作業在這裡：Nuni 課程 →\n\n已存在這台裝置，換手機或清除瀏覽器資料就會不見 這個功能還沒接通，雲端備份先不用。\n\n格子\n一週\n單日\n上課日\n星期一\n星期二\n星期三\n星期四\n星期五\n新增課程\n\n這個功能還沒接通。分享連結要等學校帳號接上才能用，課表仍可先在這台瀏覽器整理。\n\n匯入課表\n\n截圖或貼上文字後會先變成草稿。課表尚未被修改，按確認匯入後才會套用\n\n課表截圖\n匯入方式\n整份取代\n只加入還沒有的課\n\n這個功能還沒接通。請先貼上課表文字，或手動新增。\n\n或貼上課表文字\n辨識文字\n幫我安排\n\n用你現在這份課表算。\n\n下一堂\n今天空堂\n星期\n星期一\n星期二\n星期三\n星期四\n星期五\n時數\n1 小時\n2 小時\n3 小時\n4 小時\n排讀書時間\n共同空堂\n這個功能還沒接通\n\n空堂可以先看自己這台瀏覽器上的課表。\n\n加好友後才看得到對方課"
+        },
+        {
+          "name": "打開新增課程",
+          "kind": "click",
+          "started_at": "2026-10-14T05:01:44.358Z",
+          "url_before": "https://nuni.tw/timetable",
+          "selector": "button:has-text(\"新增課程\") [visible #0/1]",
+          "url_after": "https://nuni.tw/timetable",
+          "ok": true,
+          "visible_excerpt": "我的課表\n\n先看這週去哪上課。截圖或學校課表都要確認後才會寫入。\n\n老師在 Nuni 開的課、教材和作業在這裡：Nuni 課程 →\n\n已存在這台裝置，換手機或清除瀏覽器資料就會不見 這個功能還沒接通，雲端備份先不用。\n\n格子\n一週\n單日\n上課日\n星期一\n星期二\n星期三\n星期四\n星期五\n新增課程\n\n這個功能還沒接通。分享連結要等學校帳號接上才能用，課表仍可先在這台瀏覽器整理。\n\n編輯課程\n課名\n星期\n未排定\n星期一\n星期二\n星期三\n星期四\n星期五\n開始節次\n結束節次\n老師\n教室\n儲存\n取消\n刪除\n匯入課表\n\n截圖或貼上文字後會先變成草稿。課表尚未被修改，按確認匯入後才會套用\n\n課表截圖\n匯入方式\n整份取代\n只加入還沒有的課\n\n這個功能還沒接通。請先貼上課表文字，或手動新增。\n\n或貼上課表文字\n辨識文字\n幫我安排\n\n用你現在這份課表算。\n\n下一堂\n今天空堂\n星期\n星期一\n星期二\n星期三\n星期四\n星期五\n時數\n1 小時\n2 小時\n3 "
+        }
+      ],
+      "valid_clicks": 4,
+      "home_status": 200,
+      "home_title": "Campus One｜課程與校園生活",
+      "final_url": "https://nuni.tw/timetable",
+      "screenshot_sha256": "23aa08f283d7ed23cc708c740c62f215de45a42cd6e9af5918873e8ed69dac49",
+      "video_file": "interactive/02-timetable.webm",
+      "video_bytes": 589529,
+      "video_sha256": "831bfcaec35156a1096f3b4b5f31d20d0fbc415e987b13c7277c071b1b4c8c00"
+    },
+    {
+      "id": "03-search",
+      "title": "服務搜尋 → 點擊結果",
+      "started_at": "2026-10-14T05:01:47.268Z",
+      "steps": [
+        {
+          "name": "搜尋公車服務",
+          "kind": "type",
+          "started_at": "2026-10-14T05:01:49.134Z",
+          "url_before": "https://nuni.tw/search",
+          "selector": "input[type=\"search\"] [visible #1/2]",
+          "typed": "公車",
+          "url_after": "https://nuni.tw/search?q=%E5%85%AC%E8%BB%8A",
+          "ok": true,
+          "visible_excerpt": "所有服務\n\n搜尋要做的事，或依分類查找。每項服務都標示需要的帳號。\n\n想找什麼？\n全部\n學習與課務\n校園生活\n消息與交流\n帳號與協助\n\n找到 1 項服務\n\n清除篩選\n校園生活\n\n找教室、看公車，安排課堂以外的時間。\n\n公車\n\n查詢路線與站牌\n\n可直接瀏覽\n→\nCampus One\n服務條款\n隱私政策\n支援\n刪除帳號\n設定"
+        },
+        {
+          "name": "點選搜尋結果公車",
+          "kind": "click",
+          "started_at": "2026-10-14T05:01:51.186Z",
+          "url_before": "https://nuni.tw/search?q=%E5%85%AC%E8%BB%8A",
+          "selector": "a[href=\"/bus\"] [visible #1/2]",
+          "url_after": "https://nuni.tw/bus",
+          "ok": true,
+          "visible_excerpt": "靜宜大學\n\n公車與交通\n\n找站牌、確認方向，再出發。\n\n出發前，少一點猜測\n\n從你身邊的站牌開始\n\n先找上車地點，再確認路線和方向。沒有開啟定位，也能查詢。\n\n資料來源 TDX\n學校站牌\n找我附近\n搜尋站名\n常用站牌\n\n靜宜大學 · 尋找名稱含「靜宜大學」的站牌，不需要先記住路線號碼。\n\n可搭乘站牌\n0 站\n\n附近站牌服務尚未啟用。你仍可查看已登錄路線，或開啟官方公車網站。\n\n重新查詢\n\n到站時間為預估值，請以現場車況與業者公告為準。\n\n官方公車網站 ↗\n已登錄校園路線 · 備用查詢\nCampus One\n服務條款\n隱私政策\n支援\n刪除帳號\n設定"
+        }
+      ],
+      "valid_clicks": 2,
+      "home_status": 200,
+      "home_title": "Campus One｜課程與校園生活",
+      "final_url": "https://nuni.tw/bus",
+      "screenshot_sha256": "a4e2ab99f9f7fa2d5bcd78d6320929c881378530902c3c0d064fae06c8580ca9",
+      "video_file": "interactive/03-search.webm",
+      "video_bytes": 384425,
+      "video_sha256": "ad1717d763b338df88cb977fb72a3f949dc235da1a998fc6a0c043fd6b186443"
+    },
+    {
+      "id": "04-campus",
+      "title": "首頁 → 校園地圖 → 找地點",
+      "started_at": "2026-10-14T05:01:54.217Z",
+      "steps": [
+        {
+          "name": "從首頁打開校園地圖",
+          "kind": "click",
+          "started_at": "2026-10-14T05:01:56.065Z",
+          "url_before": "https://nuni.tw/",
+          "selector": "a[href=\"/map\"] [visible #1/2]",
+          "url_after": "https://nuni.tw/map",
+          "ok": true,
+          "visible_excerpt": "靜宜大學\n\n校園地圖\n\n找教室、查設施，規劃前往目的地的路線\n\n目前沒有可顯示的校園地點\n\n地點需要有完整的名稱與座標才能顯示。你也可以先查詢校方提供的校園資訊。\n\n開啟靜宜大學網站\n找校園地點\n找不到建築或設施？用地圖搜尋，或打開校園目錄。\n詢問地點 →\nCampus One\n服務條款\n隱私政策\n支援\n刪除帳號\n設定"
+        },
+        {
+          "name": "點擊找校園地點",
+          "kind": "click",
+          "started_at": "2026-10-14T05:01:58.214Z",
+          "url_before": "https://nuni.tw/map",
+          "selector": "text=找校園地點 [visible #0/1]",
+          "url_after": "https://nuni.tw/map",
+          "ok": true,
+          "visible_excerpt": "靜宜大學\n\n校園地圖\n\n找教室、查設施，規劃前往目的地的路線\n\n目前沒有可顯示的校園地點\n\n地點需要有完整的名稱與座標才能顯示。你也可以先查詢校方提供的校園資訊。\n\n開啟靜宜大學網站\n找校園地點\n找不到建築或設施？用地圖搜尋，或打開校園目錄。\n詢問地點 →\nCampus One\n服務條款\n隱私政策\n支援\n刪除帳號\n設定"
+        }
+      ],
+      "valid_clicks": 2,
+      "home_status": 200,
+      "home_title": "Campus One｜課程與校園生活",
+      "final_url": "https://nuni.tw/map",
+      "screenshot_sha256": "6ac00c3ee172584278dcb0077bf18740cdf01e2f60e260ff2d721ba23cfc05a0",
+      "video_file": "interactive/04-campus.webm",
+      "video_bytes": 404513,
+      "video_sha256": "3794feec4bb5ea68d36b7e8badd1a1d40a4930205fdd9f01a3481a63ef869f6c"
+    }
+  ],
+  "finished_at": "2026-10-14T05:02:01.046Z"
+}
