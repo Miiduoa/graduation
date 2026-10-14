@@ -214,7 +214,7 @@ it('distinguishes a listed campus from an opened school service', () => {
   expect(screen.getByRole('option', { name: '甲校（校務尚未開通）' })).toBeTruthy();
   fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-a' } });
   expect(screen.getByText(/此校目前可瀏覽公開交流，校務服務尚未開通/)).toBeTruthy();
-  expect(navigation.search).toBe('?schoolId=school-a&campus=school-a');
+  expect(navigation.search).toBe('?schoolId=school-a&campus=school-a&school=A');
 });
 
 it('uses an explicit schoolId deep link ahead of a saved browsing preference', () => {
@@ -223,4 +223,16 @@ it('uses an explicit schoolId deep link ahead of a saved browsing preference', (
   render(<View />);
   expect(screen.getByTestId('selected-school').textContent).toBe('乙校');
   expect(JSON.parse(localStorage.getItem(schoolPreferenceKey(defaults.ownerKey))!)).toEqual({ schoolId: 'school-a' });
+});
+
+it('clears an old code when changing to a school listed only by the live directory', () => {
+  navigation.search = '?school=PU&schoolId=pu&campus=pu';
+  render(<View schools={[{ id: 'tw-new-university', name: '新大學' }]} />);
+  fireEvent.change(screen.getByLabelText('瀏覽校園'), {
+    target: { value: 'tw-new-university' },
+  });
+  const params = new URLSearchParams(navigation.search);
+  expect(params.get('schoolId')).toBe('tw-new-university');
+  expect(params.get('campus')).toBe('tw-new-university');
+  expect(params.has('school')).toBe(false);
 });
