@@ -1511,6 +1511,8 @@ describe('course assignment submissions', () => {
   async function seedAssignment(overrides = {}) {
     await seedFirestore(async (db) => {
       await db.doc('groups/course-1').set({ name: 'Course', schoolId: 'school-1', type: 'course' });
+      await db.doc('schools/school-1/members/alice').set({ role: 'student', status: 'active' });
+      await db.doc('schools/school-1/members/bob').set({ role: 'faculty', status: 'active' });
       await db.doc('schools/school-1/members/teacher').set({ role: 'faculty', status: 'active' });
       await db.doc('groups/course-1/members/alice').set({ role: 'member', status: 'active' });
       await db.doc('groups/course-1/members/teacher').set({ role: 'instructor', status: 'active' });
@@ -1742,6 +1744,7 @@ describe('protected attendance records', () => {
         ['alice', 'student'], ['bob', 'student'], ['teacher', 'instructor'],
         ['owner', 'owner'], ['admin', 'admin'], ['removed', 'instructor', 'inactive'],
       ]) {
+        await db.doc(`schools/tw-demo-uni/members/${uid}`).set({ role: 'student', status });
         await group.collection('members').doc(uid).set({ role, status });
       }
       for (const collection of ['liveSessions', 'attendanceSessions']) {
@@ -2140,6 +2143,9 @@ test('handles can be looked up one at a time but never listed', async () => {
 
 test('assistant replies can only be written by the server, never by a student', async () => {
   await seedFirestore(async (db) => {
+    for (const uid of ['alice', 'bob', 'tina']) {
+      await db.doc(`schools/pu/members/${uid}`).set({ role: 'student', status: 'active' });
+    }
     await db.doc('groups/g1').set({ schoolId: 'pu', name: '課' });
     await db.doc('groups/g1/members/alice').set({ status: 'active', role: 'member' });
     await db.doc('groups/g1/members/bob').set({ status: 'active', role: 'member' });
@@ -2390,5 +2396,56 @@ test('線上點餐關著時，學生或店員也不能直接在資料庫寫出�
       const snap = await db.collection(target).get();
       if (!snap.empty) throw new Error(`${target} has ${snap.size} docs`);
     }
+  });
+});
+
+
+describe('reviewed course legacy access boundaries', () => {
+  async function seedCourse() {
+    await seedFirestore(async (db) => {
+      await db.doc('groups/review-boundary').set({ schoolId: 'pu', createdBy: 'owner', type: 'course', verification: { status: 'unverified' }, name: 'Course' });
+      for (const uid of ['owner', 'student']) {
+        await db.doc(`schools/pu/members/${uid}`).set({ status: 'active', role: 'student' });
+        await db.doc(`groups/review-boundary/members/${uid}`).set({ status: 'active', role: uid === 'owner' ? 'owner' : 'member', uid });
+      }
+    });
+  }
+  test('active same-school members retain access and descriptive editing', async () => {
+    await seedCourse();
+    const owner = testEnv.authenticatedContext('owner').firestore();
+    const student = testEnv.authenticatedContext('student').firestore();
+    await assertSucceeds(student.doc('groups/review-boundary').get());
+    await assertSucceeds(owner.doc('groups/review-boundary').update({ name: 'Updated title' }));
+  });
+  test('stale group membership cannot cross schools or survive revoked enrollment', async () => {
+    await seedCourse();
+    const student = testEnv.authenticatedContext('student').firestore();
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/student').delete();
+      await db.doc('schools/other/members/student').set({ status: 'active', role: 'admin' });
+    });
+    await assertFails(student.doc('groups/review-boundary').get());
+    await seedFirestore(async (db) => db.doc('schools/pu/members/student').set({ status: 'inactive', role: 'student' }));
+    await assertFails(student.doc('groups/review-boundary').get());
+    await assertFails(student.collection('groups/review-boundary/posts').add({ authorId: 'student', kind: 'question', title: 'Denied' }));
+  });
+  test('workspace management does not grant direct verification or role promotion', async () => {
+    await seedCourse();
+    const owner = testEnv.authenticatedContext('owner', { role: 'teacher', verified: true }).firestore();
+    const course = owner.doc('groups/review-boundary');
+    await assertFails(course.update({ verification: { status: 'verified' } }));
+    await assertFails(course.update({ schoolId: 'other' }));
+    await assertFails(course.update({ createdBy: 'student' }));
+    await assertFails(owner.doc('groups/review-boundary/members/student').update({ role: 'instructor' }));
+    await assertFails(owner.doc('groups/review-boundary/members/new-teacher').set({ role: 'instructor', status: 'active' }));
+  });
+  test('client-created courses cannot claim verification or somebody else as creator', async () => {
+    await seedCourse();
+    const student = testEnv.authenticatedContext('student', { role: 'teacher' }).firestore();
+    const base = { schoolId: 'pu', createdBy: 'student', type: 'course', name: 'Personal course', verification: { status: 'unverified' } };
+    await assertSucceeds(student.doc('groups/personal-course').set(base));
+    await assertFails(student.doc('groups/fake-verified').set({ ...base, verification: { status: 'verified' } }));
+    await assertFails(student.doc('groups/fake-creator').set({ ...base, createdBy: 'owner' }));
+    await assertFails(student.doc('groups/fake-school').set({ ...base, schoolId: 'other' }));
   });
 });

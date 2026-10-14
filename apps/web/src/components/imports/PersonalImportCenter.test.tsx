@@ -265,3 +265,21 @@ it('shows a Chinese notice when the screenshot file cannot be opened', async () 
   await screen.findByText(PERSONAL_IMPORT_IMAGE_UNREADABLE);
   expect(screen.queryByText(/could not be decoded/i)).toBeNull();
 });
+
+
+it('keeps course application and personal-import controls in the same timetable review', async () => {
+  window.history.replaceState(null, '', '/import?kind=timetable');
+  context.owner = 'platform:pa_aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  context.session = {
+    platformAccountId: 'pa_aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+    context: 'course-integration-test',
+    isPlatformOperator: false,
+  };
+  vi.mocked(browserRequest).mockResolvedValue({ workspaces: [] });
+  render(<PersonalImportCenter />);
+  await prepare('課程名稱,星期,開始節次,結束節次,教師,課號\n資料庫,一,3,4,王老師,CS301');
+  expect(screen.getByText('查找課班與申請加入')).toBeTruthy();
+  expect(screen.getByLabelText('連結我的課程')).toBeTruthy();
+  expect((screen.getByRole('button', { name: '確認匯入 1 筆' }) as HTMLButtonElement).disabled).toBe(false);
+  expect(readPersonalImports(context)).toHaveLength(0);
+});

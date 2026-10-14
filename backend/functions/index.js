@@ -3277,7 +3277,8 @@ exports.createGroup = onCall(
       schoolId,
       isPrivate: !!isPrivate,
       isPublished: Boolean(isPublished),
-      verification: verification || { status: 'unverified' },
+      // Imported names and caller-supplied flags never constitute teacher verification.
+      verification: { status: 'unverified' },
       joinCode,
       createdBy: uid,
       createdAt: FieldValue.serverTimestamp(),
