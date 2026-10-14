@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname, useSearchParams } from 'next/navigation';
+import { usePathname } from 'next/navigation';
+import { useCampusNavigationSearch } from '@/lib/useCampusNavigationSearch';
 import { useEffect, useRef } from 'react';
 import { CAMPUS_SERVICES, SERVICE_CATEGORIES } from '@/lib/campusServices';
 import styles from '@/app/home.module.css';
@@ -11,7 +12,7 @@ export function CampusServiceMenu() {
   const currentService = CAMPUS_SERVICES.filter(
     (service) => pathname === service.href || pathname?.startsWith(`${service.href}/`),
   ).sort((first, second) => second.href.length - first.href.length)[0]?.href;
-  const params = useSearchParams();
+  const context = useCampusNavigationSearch();
   const menu = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
     function dismiss(event: PointerEvent) {
@@ -23,12 +24,7 @@ export function CampusServiceMenu() {
     document.addEventListener('pointerdown', dismiss);
     return () => document.removeEventListener('pointerdown', dismiss);
   }, []);
-  const context = new URLSearchParams();
-  for (const key of ['school', 'schoolId', 'campus']) {
-    const value = params?.get(key);
-    if (value) context.set(key, value);
-  }
-  const href = (path: string) => `${path}${context.size ? `?${context}` : ''}`;
+  const href = (path: string) => path + (context ? '?' + context : '');
   return (
     <details
       ref={menu}
