@@ -146,18 +146,18 @@ it('marks unverified and demo shops beside the shop name and leaves verified unm
   });
   const demo = within(screen.getByRole('region', { name: '校園小棧' }));
   expect(demo.getByText('示範')).toBeTruthy();
-  expect(demo.queryByText('未核對')).toBeNull();
+  expect(demo.queryByText('尚未確認')).toBeNull();
   const unverified = within(screen.getByRole('region', { name: '校內咖啡店' }));
-  expect(unverified.getByText('未核對')).toBeTruthy();
+  expect(unverified.getByText('尚未確認')).toBeTruthy();
   expect(unverified.queryByText('示範')).toBeNull();
   const missing = within(screen.getByRole('region', { name: '路易莎咖啡' }));
-  expect(missing.getByText('未核對')).toBeTruthy();
+  expect(missing.getByText('尚未確認')).toBeTruthy();
   const verified = within(screen.getByRole('region', { name: '靜園餐廳' }));
   expect(verified.queryByText('示範')).toBeNull();
-  expect(verified.queryByText('未核對')).toBeNull();
+  expect(verified.queryByText('尚未確認')).toBeNull();
   expect(screen.queryByText('這是示範店家，菜單和價格不是真的，不能點餐。')).toBeNull();
   expect(
-    screen.queryByText('這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。'),
+    screen.queryByText('這間店的資料還沒經店家確認，菜單和價錢可能跟現場不一樣。'),
   ).toBeNull();
 });
 

@@ -268,14 +268,30 @@ export async function revokeSession(session: PlatformSession): Promise<void> {
   }
 }
 
-export function jsonResponse(value: unknown, status = 200): NextResponse {
+export function jsonResponse(
+  value: unknown,
+  status = 200,
+  cache: 'private' | 'public' = 'private',
+): NextResponse {
   return NextResponse.json(value, {
     status,
     headers: {
-      'Cache-Control': 'no-store, private',
+      'Cache-Control': cache === 'public' ? 'public, max-age=60' : 'no-store, private',
       Vary: 'Cookie, X-Campus-Session',
       'Referrer-Policy': 'no-referrer',
     },
+  });
+}
+
+export function publicRequest(path: string): Promise<unknown> {
+  if (
+    !/^schools\/[a-z0-9][a-z0-9-]{0,78}[a-z0-9]\/cafeterias(?:\/[A-Za-z0-9_-]{1,100})?$/.test(path)
+  ) {
+    throw new NuniError(400, 'INVALID_PATH');
+  }
+  return fetchJson(`${apiOrigin()}/v1/public/${path}`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
   });
 }
 
