@@ -19,10 +19,8 @@ import { useSchool } from '../state/school';
 import { canUseProvidencePathNetwork } from '../features/campusArScope';
 import { linkingOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 import {
-  buildOutdoorRoute,
   calculateBearing,
   calculateDistance,
-  calculateRouteDistance,
   calculateRelativeAngle,
   getRouteProgress,
   getDirectionType,
@@ -35,11 +33,7 @@ import {
 import { getFootRoute, type LatLng, type RouteStep } from '../services/routingService';
 import { useDataSource } from '../hooks/useDataSource';
 import { useGeolocation } from '../hooks/useGeolocation';
-import {
-  findShortestPath,
-  pathToNavigationSteps,
-  CAMPUS_PATH_NODES,
-} from '../data/puCampusData';
+import { isUsableFootRoute } from '../features/usableFootRoute';
 
 type ARMode = 'preview' | 'navigating' | 'arrived';
 
@@ -75,121 +69,30 @@ function routeStepToNavigationStep(step: RouteStep, index: number): NavigationSt
   };
 }
 
-/**
- * 優先使用 OpenStreetMap 步行路網真實折線；失敗時回退校園 A* 節點路網。
- */
+/** Use the routing provider's walking geometry, never unverified campus path sketches. */
 async function buildARNavigationRoute(params: {
   start: ARLocation;
   destination: { lat: number; lng: number; name: string };
-  campusSnapNodes: ARLocation[];
-}): Promise<{ points: ARLocation[]; distance: number; steps: NavigationStep[] }> {
-  const { start, destination: dest, campusSnapNodes } = params;
+}): Promise<{ points: ARLocation[]; distance: number; steps: NavigationStep[] } | null> {
+  const { start, destination: dest } = params;
   const from: LatLng = { lat: start.latitude, lng: start.longitude };
   const to: LatLng = { lat: dest.lat, lng: dest.lng };
-
   const foot = await getFootRoute(from, to);
-  if (foot && foot.geometry.length >= 2) {
-    const points = geometryLngLatToARLocations(foot.geometry);
-    const steps =
-      foot.steps.length > 0
-        ? foot.steps.map((s, i) => routeStepToNavigationStep(s, i))
-        : generateRealNavigationSteps(
-            start.latitude,
-            start.longitude,
-            dest.lat,
-            dest.lng,
-            dest.name,
-          );
-    return {
-      points,
-      distance: Math.round(foot.distance),
-      steps,
-    };
-  }
+  if (!isUsableFootRoute(foot, from, to)) return null;
 
-  const pathNodes = findShortestPath(start.latitude, start.longitude, dest.lat, dest.lng);
-  const routeFromPathNetwork: ARLocation[] = pathNodes.map((n) => ({
-    latitude: n.lat,
-    longitude: n.lng,
-  }));
-
-  const route =
-    routeFromPathNetwork.length >= 2
-      ? routeFromPathNetwork
-      : buildOutdoorRoute(
-          start,
-          { latitude: dest.lat, longitude: dest.lng },
-          campusSnapNodes,
-        );
-
-  const distance = Math.round(calculateRouteDistance(route));
-  const steps = generateRealNavigationSteps(
-    start.latitude,
-    start.longitude,
-    dest.lat,
-    dest.lng,
-    dest.name,
-  );
-
+  const steps: NavigationStep[] = foot.steps.length
+    ? foot.steps.map((step, index) => routeStepToNavigationStep(step, index))
+    : [{
+        id: '1',
+        instruction: '已找到步行路線，但供應商未提供轉彎指示，請改用一般地圖確認路線。',
+        distance: Math.round(foot.distance),
+        direction: 'straight',
+      }];
   return {
-    points: route,
-    distance:
-      distance ||
-      Math.round(calculateDistance(start, { latitude: dest.lat, longitude: dest.lng })),
+    points: geometryLngLatToARLocations(foot.geometry),
+    distance: Math.round(foot.distance),
     steps,
   };
-}
-
-/**
- * 使用校園路網 A* 路徑規劃產生真實導航步驟
- * 取代舊版 mock 步驟，根據使用者 GPS 位置 + 目的地座標計算
- */
-function generateRealNavigationSteps(
-  userLat: number | null,
-  userLng: number | null,
-  destLat: number,
-  destLng: number,
-  destName: string,
-): NavigationStep[] {
-  // 沒有使用者位置 → 只產生目的地步驟
-  if (userLat === null || userLng === null) {
-    return [
-      {
-        id: '1',
-        instruction: `前往 ${destName}`,
-        distance: 0,
-        direction: 'straight',
-        landmark: '等待定位中...',
-      },
-    ];
-  }
-
-  // A* 路徑規劃
-  const pathNodes = findShortestPath(userLat, userLng, destLat, destLng);
-  const rawSteps = pathToNavigationSteps(pathNodes, destName);
-
-  // 轉換為 NavigationStep 格式
-  return rawSteps.map((s, i) => {
-    let dir: NavigationStep['direction'] = 'straight';
-    if (s.direction === 'left' || s.direction === 'slight_left') dir = 'left';
-    else if (s.direction === 'right' || s.direction === 'slight_right') dir = 'right';
-    else if (s.direction === 'destination') dir = 'destination';
-
-    return {
-      id: String(i + 1),
-      instruction: s.instruction,
-      distance: s.distance,
-      direction: dir,
-      landmark: s.direction === 'destination' ? '目的地在視線範圍內' : undefined,
-    };
-  });
-}
-
-/**
- * 將校園路網節點轉為 ARLocation 陣列，用於路線吸附
- */
-function campusNodesToARLocations(): ARLocation[] {
-  return CAMPUS_PATH_NODES.map((n) => ({ latitude: n.lat, longitude: n.lng }));
 }
 
 // Fallback steps when no destination is provided
@@ -287,7 +190,7 @@ function ProvidenceARNavigationScreen(props: any) {
   } | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
   const [loadingTarget, setLoadingTarget] = useState(false);
-  const [campusNodes, setCampusNodes] = useState<ARLocation[]>([]);
+  const [routing, setRouting] = useState(false);
   const [routePoints, setRoutePoints] = useState<ARLocation[]>([]);
   const [routeTotalDistance, setRouteTotalDistance] = useState(0);
   const [deviationDistance, setDeviationDistance] = useState<number | null>(null);
@@ -363,11 +266,6 @@ function ProvidenceARNavigationScreen(props: any) {
     };
   }, [destination, destinationId, destinationLat, destinationLng, ds]);
 
-  // 直接使用校園路網節點（不再需要從 adapter 抓 POI 轉換）
-  useEffect(() => {
-    setCampusNodes(campusNodesToARLocations());
-  }, []);
-
   useEffect(() => {
     if (mode === 'navigating') {
       geo.startWatching();
@@ -442,16 +340,15 @@ function ProvidenceARNavigationScreen(props: any) {
     return getDirectionType(calculateRelativeAngle(bearingToTarget, compassHeading));
   }, [bearingToTarget, compassHeading, distanceRemaining]);
 
-  const previewNavigationSteps = useMemo(() => {
+  const previewNavigationSteps = useMemo<NavigationStep[]>(() => {
     if (!target) return FALLBACK_STEPS;
-    return generateRealNavigationSteps(
-      geo.latitude ?? null,
-      geo.longitude ?? null,
-      target.lat,
-      target.lng,
-      target.name,
-    );
-  }, [target, geo.latitude, geo.longitude]);
+    return [{
+      id: 'preview',
+      instruction: '開始時才會向步行路網供應商確認路線，尚未產生轉彎指示。',
+      distance: 0,
+      direction: 'straight',
+    }];
+  }, [target]);
 
   const generatedSteps =
     footNavigationSteps && footNavigationSteps.length > 0
@@ -540,35 +437,35 @@ function ProvidenceARNavigationScreen(props: any) {
   ]);
 
   useEffect(() => {
-    if (mode !== 'navigating') return;
-    if (!routeProgress || !target || campusNodes.length === 0) return;
+    if (mode !== 'navigating' || !routeProgress || !target) return;
     if (routeProgress.deviationDistance < ROUTE_RECALC_THRESHOLD_M) return;
-
     const now = Date.now();
     if (lastRecalcAtRef.current && now - lastRecalcAtRef.current < ROUTE_RECALC_INTERVAL_MS) return;
-
     lastRecalcAtRef.current = now;
-
     let cancelled = false;
     const snapped = routeProgress.snappedLocation;
-
     void (async () => {
-      const built = await buildARNavigationRoute({
-        start: snapped,
-        destination: { lat: target.lat, lng: target.lng, name: target.name },
-        campusSnapNodes: campusNodes,
-      });
-      if (cancelled) return;
-      setRoutePoints(built.points);
-      setRouteTotalDistance(built.distance);
-      setDistanceRemaining(Math.round(built.distance));
-      setFootNavigationSteps(built.steps);
+      try {
+        const built = await buildARNavigationRoute({
+          start: snapped,
+          destination: { lat: target.lat, lng: target.lng, name: target.name },
+        });
+        if (cancelled) return;
+        if (!built) throw new Error('No usable walking route');
+        setRoutePoints(built.points);
+        setRouteTotalDistance(built.distance);
+        setDistanceRemaining(Math.round(built.distance));
+        setFootNavigationSteps(built.steps);
+      } catch {
+        if (cancelled) return;
+        setRouteError('離開原路線後無法重新確認步行路線，已停止 AR 指示。請改用一般地圖。');
+        setRoutePoints([]);
+        setFootNavigationSteps(null);
+        setMode('preview');
+      }
     })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [campusNodes, mode, routeProgress, target]);
+    return () => { cancelled = true; };
+  }, [mode, routeProgress, target]);
 
   const totalDistance = useMemo(() => {
     return Math.max(routeTotalDistance, distanceRemaining, 1);
@@ -588,14 +485,15 @@ function ProvidenceARNavigationScreen(props: any) {
   };
 
   const handleStartNavigation = async () => {
-    if (!target || loadingTarget) {
+    if (!target || loadingTarget || routing) {
       Alert.alert('無法開始導航', routeError ?? '目的地資料尚未準備好');
       return;
     }
 
     if (!hasPermission) {
-      await handleRequestPermission();
-      if (!permission?.granted) return;
+      const response = await requestPermission();
+      if (!response.granted) return;
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
 
     const hasLocationPermission = await geo.requestPermission();
@@ -615,22 +513,34 @@ function ProvidenceARNavigationScreen(props: any) {
       longitude: position.longitude!,
     };
 
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
-    const built = await buildARNavigationRoute({
-      start: startLocation,
-      destination: { lat: target.lat, lng: target.lng, name: target.name },
-      campusSnapNodes: campusNodes,
-    });
-
-    setRoutePoints(built.points);
-    setRouteTotalDistance(built.distance);
-    setFootNavigationSteps(built.steps);
-    setDistanceRemaining(Math.round(built.distance));
-
-    setMode('navigating');
-    setCurrentStep(0);
-    setLastVoiceAnnouncement('');
+    setRouting(true);
+    setRouteError(null);
+    try {
+      const built = await buildARNavigationRoute({
+        start: startLocation,
+        destination: { lat: target.lat, lng: target.lng, name: target.name },
+      });
+      if (!built) {
+        const message = '目前無法取得可信的步行路網路線，請改用一般地圖確認路徑。';
+        setRouteError(message);
+        Alert.alert('尚無可用步行路線', message);
+        return;
+      }
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      setRoutePoints(built.points);
+      setRouteTotalDistance(built.distance);
+      setFootNavigationSteps(built.steps);
+      setDistanceRemaining(Math.round(built.distance));
+      setMode('navigating');
+      setCurrentStep(0);
+      setLastVoiceAnnouncement('');
+    } catch {
+      const message = '步行路網查詢失敗，請檢查連線並改用一般地圖。';
+      setRouteError(message);
+      Alert.alert('無法開始導航', message);
+    } finally {
+      setRouting(false);
+    }
   };
 
   const handleCameraReady = () => {
@@ -1053,8 +963,8 @@ function ProvidenceARNavigationScreen(props: any) {
               </View>
               <View style={{ alignItems: 'center' }}>
                 <Pill
-                  text={loadingTarget ? '載入中' : routeError ? '待修正' : '可導航'}
-                  kind={loadingTarget ? 'muted' : routeError ? 'danger' : 'success'}
+                  text={loadingTarget || routing ? '確認路線中' : routeError ? '待修正' : routePoints.length >= 2 ? '路線已取得' : '尚未查詢'}
+                  kind={loadingTarget || routing ? 'muted' : routeError ? 'danger' : routePoints.length >= 2 ? 'success' : 'muted'}
                 />
                 <Text style={{ color: theme.colors.muted, fontSize: 12 }}>路線狀態</Text>
               </View>
@@ -1080,16 +990,16 @@ function ProvidenceARNavigationScreen(props: any) {
                 }}
               >
                 <Text style={{ color: theme.colors.success, fontSize: 12 }}>
-                  已建立路網路線：{routePoints.length} 節點，約 {Math.round(routeTotalDistance)}m
+                  已取得步行路網估算：{routePoints.length} 個路線座標，約 {Math.round(routeTotalDistance)}m（仍以現場為準）
                 </Text>
               </View>
             )}
 
             <Button
-              text={hasPermission ? '開始 AR 導航' : '授權相機並開始'}
+              text={routing ? '正在查詢步行路線…' : hasPermission ? '查詢路線並開始 AR 導航' : '授權相機並查詢路線'}
               kind="primary"
               onPress={handleStartNavigation}
-              disabled={!target || loadingTarget}
+              disabled={!target || loadingTarget || routing}
             />
           </View>
         </AnimatedCard>
@@ -1097,7 +1007,7 @@ function ProvidenceARNavigationScreen(props: any) {
         <AnimatedCard
           title="導航路線預覽"
           subtitle={
-            !target ? '請先選擇目的地' : `校園路網 A* 路徑規劃 · ${generatedSteps.length} 步驟`
+            !target ? '請先選擇目的地' : '須取得步行路網資料，才會提供轉彎指示'
           }
           delay={100}
         >
@@ -1146,12 +1056,12 @@ function ProvidenceARNavigationScreen(props: any) {
           </View>
         </AnimatedCard>
 
-        <AnimatedCard title="導航技術" subtitle="校園路網 A* + 即時感測器" delay={200}>
+        <AnimatedCard title="導航技術" subtitle="公開步行路網 + 裝置感測器" delay={200}>
           <View style={{ gap: 10 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
               <Ionicons name="git-network-outline" size={20} color={theme.colors.accent} />
               <Text style={{ color: theme.colors.muted, flex: 1, lineHeight: 20 }}>
-                A* 路徑規劃（22 節點校園路網圖）
+                步行路網由第三方供應商查詢，失敗時不會生成示意路線
               </Text>
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
