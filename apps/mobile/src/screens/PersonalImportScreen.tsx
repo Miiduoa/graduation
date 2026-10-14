@@ -3,9 +3,11 @@ import { ActivityIndicator, Modal, Pressable, ScrollView, Text, TextInput, View 
 import { useFocusEffect } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
-import { File } from 'expo-file-system';
+import { File, Paths } from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import {
   createPersonalImportId,
+  serializePersonalImportsCsv,
   parsePersonalImport,
   personalImportErrorMessage,
   personalImportSavedNotice,
@@ -22,6 +24,7 @@ import {
   type ImportIssue,
 } from '@campus/shared';
 import { createNuniClasses, type NuniWorkspace } from '@campus/shared/src/nuni';
+import { CourseAccessPanel } from '../components/CourseAccessPanel';
 import { Screen, Button } from '../ui/components';
 import { theme } from '../ui/theme';
 import { useNuniSession } from '../state/nuniSession';
@@ -38,6 +41,8 @@ import {
   loadPersonalImports,
   appendPersonalImports,
   editPersonalImport,
+  deletePersonalImport,
+  snapshotPersonalImports,
   undoLastPersonalImport,
   type PersonalImportScope,
   type PersonalImportLedger,
@@ -159,6 +164,7 @@ function RowEditor({
           }
         />
       ))}
+      <CourseAccessPanel row={row} workspaces={workspaces} disabled={disabled} />
       <Text style={textStyle}>連結已加入的課班（選填）</Text>
       <Text style={{ color: theme.colors.muted }}>
         只建立你自己的對照；不會加入課班或通知老師。課班清單尚未提供學校、學期與教師資訊，請先自行核對。教師姓名是個人記錄，尚未驗證身分。
@@ -172,7 +178,7 @@ function RowEditor({
         <Button
           key={workspace.id}
           disabled={disabled}
-          text={`${row.linkedCourseId === workspace.id ? '已選：' : ''}${workspace.title}（${workspace.memberRole === 'student' ? '學生' : '教師'}）`}
+          text={`${row.linkedCourseId === workspace.id ? '已選：' : ''}${workspace.title}（${workspace.memberRole === 'student' ? '學生' : '管理者（未代表教師認證）'}）`}
           kind={row.linkedCourseId === workspace.id ? 'primary' : 'outline'}
           onPress={() => onChange({ ...row, linkedCourseId: workspace.id })}
         />
@@ -235,10 +241,16 @@ function ImportWorkspace({
     row: PersonalImportRow;
   } | null>(null);
   const [undoOpen, setUndoOpen] = useState(false);
+  const [deleting, setDeleting] = useState<PersonalImportRecord | null>(null);
+  const [savedQuery, setSavedQuery] = useState('');
+  const [visibleSavedCount, setVisibleSavedCount] = useState(40);
+  const [savedFeedback, setSavedFeedback] = useState('');
+  const [exporting, setExporting] = useState(false);
   const alive = useRef(true);
   const focused = useRef(true);
   const generation = useRef(0);
   const savingRef = useRef(false);
+  const sharingRef = useRef(false);
   const ledgerGeneration = useRef(0);
   const abort = useRef<AbortController | null>(null);
   const ocr = useRef<TimetableOcrHandle>(null);
@@ -508,6 +520,84 @@ function ImportWorkspace({
   const lastBatchCount = lastBatch
     ? ledger.records.filter((row) => row.batchId === lastBatch.id).length
     : 0;
+  const savedRecords = useMemo(() => {
+    if (!ledger) return [];
+    const query = savedQuery.trim().toLowerCase();
+    return ledger.records.filter(
+      (row) =>
+        row.kind === kind &&
+        (!query ||
+          [row.title, row.teacher, row.courseCode, row.academicYear, row.location, row.grade].some(
+            (value) => String(value || '').toLowerCase().includes(query),
+          )),
+    );
+  }, [ledger, kind, savedQuery]);
+
+  const deleteRecord = async () => {
+    const original = deleting;
+    if (!original || savingRef.current) return;
+    savingRef.current = true;
+    ledgerGeneration.current += 1;
+    setSaving(true);
+    try {
+      const next = await deletePersonalImport(scope, original, active);
+      if (active()) {
+        setLedger(next);
+        setEditing(null);
+        setDeleting(null);
+        setSavedFeedback('已移除這筆個人紀錄；其他紀錄不受影響。');
+      }
+    } catch (error) {
+      if (active()) {
+        setSavedFeedback(personalImportErrorMessage(error, '移除失敗，原資料沒有變更。'));
+        setDeleting(null);
+        void load();
+      }
+    } finally {
+      savingRef.current = false;
+      if (alive.current) setSaving(false);
+    }
+  };
+
+  const exportRecords = async () => {
+    if (sharingRef.current || savingRef.current || !active()) return;
+    sharingRef.current = true;
+    setExporting(true);
+    setSavedFeedback('');
+    try {
+      const latest = await snapshotPersonalImports(scope, active);
+      if (!active()) return;
+      const records = latest.records.filter((row) => row.kind === kind);
+      if (!records.length) {
+        setSavedFeedback('這類資料目前沒有可匯出的紀錄。');
+        return;
+      }
+      const supported = await Sharing.isAvailableAsync();
+      if (!active()) return;
+      if (!supported) {
+        setSavedFeedback('此裝置目前無法開啟系統檔案分享。資料仍留在裝置上。');
+        return;
+      }
+      const file = new File(Paths.cache, 'campus-one-' + kind + '-' + createPersonalImportId() + '.csv');
+      file.create();
+      file.write(serializePersonalImportsCsv(records));
+      if (!active()) {
+        file.delete();
+        return;
+      }
+      await Sharing.shareAsync(file.uri, {
+        mimeType: 'text/csv',
+        UTI: 'public.comma-separated-values-text',
+      });
+      if (active()) setSavedFeedback('分享選單已關閉；請確認已在「檔案」或其他位置完成儲存。');
+    } catch (error) {
+      if (active()) setSavedFeedback(personalImportErrorMessage(error, '無法準備 CSV，原有資料未變更。'));
+    } finally {
+      sharingRef.current = false;
+      if (alive.current) setExporting(false);
+    }
+  };
+
   const undo = async () => {
     const batch = lastBatch;
     if (!batch || savingRef.current) return;
@@ -566,6 +656,10 @@ function ImportWorkspace({
                   setRows([]);
                   setIssues([]);
                   setEditing(null);
+                  setDeleting(null);
+                  setSavedQuery('');
+                  setVisibleSavedCount(40);
+                  setSavedFeedback('');
                 }}
               />
             ))}
@@ -770,6 +864,39 @@ function ImportWorkspace({
           >
             已儲存的{names[kind]}
           </Text>
+          {ledger?.records.some((row) => row.kind === kind) ? (
+            <View style={{ gap: 10 }}>
+              <TextInput
+                accessibilityLabel="搜尋已儲存的個人紀錄"
+                placeholder="搜尋課程、教師、學年度、成績或地點"
+                value={savedQuery}
+                onChangeText={(value) => {
+                  setSavedQuery(value);
+                  setVisibleSavedCount(40);
+                }}
+                editable={!saving}
+                style={inputStyle}
+              />
+              <Text style={{ color: theme.colors.muted }}>
+                找到 {savedRecords.length} 筆，顯示前 {Math.min(visibleSavedCount, savedRecords.length)} 筆。
+              </Text>
+              <Button
+                text="匯出本類資料為 CSV"
+                kind="outline"
+                disabled={saving || exporting || !!loadError}
+                loading={exporting}
+                onPress={() => void exportRecords()}
+              />
+              <Text style={{ color: theme.colors.muted }}>
+                匯出包含私人課表或成績，請只分享給信任的對象。CSV 供試算表保存與查閱，不會同步帳號，也不包含原始截圖。
+              </Text>
+              {savedFeedback ? (
+                <Text accessibilityRole="alert" style={textStyle}>
+                  {savedFeedback}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
           {loadError ? (
             <>
               <Text accessibilityRole="alert" style={textStyle}>
@@ -782,9 +909,10 @@ function ImportWorkspace({
           {ledger && !ledger.records.some((row) => row.kind === kind) ? (
             <Text style={{ color: theme.colors.muted }}>目前沒有這類資料。</Text>
           ) : null}
-          {ledger?.records
-            .filter((row) => row.kind === kind)
-            .map((row) => (
+          {ledger && !!savedQuery.trim() && !savedRecords.length ? (
+            <Text style={{ color: theme.colors.muted }}>沒有符合搜尋條件的資料，可修改關鍵字。</Text>
+          ) : null}
+          {savedRecords.slice(0, visibleSavedCount).map((row) => (
               <View
                 key={row.id}
                 style={{
@@ -830,8 +958,24 @@ function ImportWorkspace({
                     onPress={() => setEditing({ before: row, row: { ...row } })}
                   />
                 )}
+                <Button
+                  text="移除這筆"
+                  kind="outline"
+                  disabled={saving}
+                  onPress={() => {
+                    setSavedFeedback('');
+                    setDeleting(row);
+                  }}
+                />
               </View>
             ))}
+          {savedRecords.length > visibleSavedCount ? (
+            <Button
+              text={'再顯示 ' + Math.min(40, savedRecords.length - visibleSavedCount) + ' 筆'}
+              disabled={saving}
+              onPress={() => setVisibleSavedCount((count) => count + 40)}
+            />
+          ) : null}
           {ledger?.batches.length ? (
             <>
               <Button
@@ -886,6 +1030,48 @@ function ImportWorkspace({
               disabled={saving}
               onPress={() => setUndoOpen(false)}
             />
+          </View>
+        </View>
+      </Modal>
+      <Modal
+        visible={!!deleting && available}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDeleting(null)}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(48, 38, 28, 0.32)',
+            justifyContent: 'center',
+            padding: 24,
+          }}
+        >
+          <View
+            accessibilityRole="alert"
+            style={{
+              backgroundColor: theme.colors.surface,
+              borderColor: theme.colors.border,
+              borderWidth: 1,
+              borderRadius: 12,
+              padding: 20,
+              gap: 14,
+            }}
+          >
+            <Text style={{ ...textStyle, fontSize: 18, fontWeight: '700' }}>
+              移除個人紀錄
+            </Text>
+            <Text style={textStyle}>
+              確定移除「{deleting?.title}」？只會刪除目前帳號與學校的這筆本機資料。此操作無法直接復原，請先確認是否需要匯出備份。
+            </Text>
+            <Button
+              text="確認移除"
+              kind="danger"
+              disabled={saving}
+              loading={saving}
+              onPress={() => void deleteRecord()}
+            />
+            <Button text="保留這筆" disabled={saving} onPress={() => setDeleting(null)} />
           </View>
         </View>
       </Modal>

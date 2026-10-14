@@ -2,6 +2,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { meetupWindows, type PersonalImportRow } from '@campus/shared';
 import {
   appendPersonalImports,
+  deletePersonalImport,
+  snapshotPersonalImports,
   editPersonalImport,
   loadPersonalImports,
   personalImportCourses,
@@ -190,4 +192,45 @@ test('selected historical term does not mix current or unknown-term original cou
       '114／2',
     ),
   ).toHaveLength(2);
+});
+
+
+test('deleting one saved record is durable and does not remove its batch siblings', async () => {
+  const saved = await appendPersonalImports(scope, [row('a'), row('b', '英文')]);
+  const original = saved.ledger.records[0];
+  const updated = await deletePersonalImport(scope, original);
+  expect(updated.records.map((item) => item.title)).toEqual(['英文']);
+  expect(updated.batches).toHaveLength(1);
+  await expect(deletePersonalImport(scope, original)).rejects.toThrow('已變更');
+  expect((await loadPersonalImports(scope)).records).toEqual(updated.records);
+});
+
+test('a stale deletion, an account change and damaged storage never erase a newer revision', async () => {
+  const saved = await appendPersonalImports(scope, [row('a')]);
+  const original = saved.ledger.records[0];
+  const edited = await editPersonalImport(scope, original, { ...original, title: '高等微積分' });
+  expect(edited.batches).toHaveLength(0);
+  await expect(deletePersonalImport(scope, original)).rejects.toThrow('已變更');
+  await expect(deletePersonalImport(scope, edited.records[0], () => false)).rejects.toThrow('切換');
+  expect((await loadPersonalImports(scope)).records[0].title).toBe('高等微積分');
+
+  const key = personalImportStorageKey(scope);
+  await AsyncStorage.setItem(key, '{corrupt');
+  await expect(deletePersonalImport(scope, edited.records[0])).rejects.toThrow();
+  expect(await AsyncStorage.getItem(key)).toBe('{corrupt');
+});
+
+test('removing the last record prunes an empty undo batch', async () => {
+  const saved = await appendPersonalImports(scope, [row('a')]);
+  const ledger = await deletePersonalImport(scope, saved.ledger.records[0]);
+  expect(ledger).toMatchObject({ records: [], batches: [] });
+  await expect(undoLastPersonalImport(scope, saved.ledger.batches[0].id)).rejects.toThrow('已更新');
+});
+
+test('backup snapshot waits for pending writes and checks identity before returning', async () => {
+  const pending = appendPersonalImports(scope, [row('a')]);
+  const result = snapshotPersonalImports(scope);
+  await pending;
+  expect((await result).records).toHaveLength(1);
+  await expect(snapshotPersonalImports(scope, () => false)).rejects.toThrow('切換');
 });
