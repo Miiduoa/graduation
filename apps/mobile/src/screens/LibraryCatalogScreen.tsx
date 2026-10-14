@@ -21,7 +21,7 @@ export function LibraryCatalogScreen(props: {
   const [openError, setOpenError] = useState(false);
   const initialQ =
     typeof props.route?.params?.initialQuery === 'string' ? props.route.params.initialQuery : '';
-  const library = getOfficialCampusLibrary(school.id);
+  const library = getOfficialCampusLibrary(school.id, school.name);
 
   React.useEffect(() => {
     analytics.logScreenView('LibraryCatalog');
