@@ -22,3 +22,17 @@ export function isUsableFootRoute(
   return distanceMeters(origin, { lat: start[1], lng: start[0] }) <= 350 &&
     distanceMeters(destination, { lat: end[1], lng: end[0] }) <= 350;
 }
+
+/** Network failures and unusable provider responses leave no navigable route. */
+export async function loadUsableFootRoute<T extends RouteGeometry>(
+  lookup: (from: CampusCoordinate, to: CampusCoordinate) => Promise<T | null>,
+  origin: CampusCoordinate,
+  destination: CampusCoordinate,
+): Promise<T | null> {
+  try {
+    const route = await lookup(origin, destination);
+    return isUsableFootRoute(route, origin, destination) ? route : null;
+  } catch {
+    return null;
+  }
+}
