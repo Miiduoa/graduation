@@ -1,4 +1,4 @@
-import { isUsableFootRoute } from '../../features/usableFootRoute';
+import { isUsableFootRoute, loadUsableFootRoute } from '../../features/usableFootRoute';
 
 const start = { lat: 24.227, lng: 120.564 };
 const destination = { lat: 24.228, lng: 120.565 };
@@ -49,4 +49,21 @@ test('rejects endpoints snapped to a different road even when provider data is f
     [120.564, 24.227],
     [120.57, 24.235],
   ] }, start, destination)).toBe(false);
+});
+
+
+test('does not return a route when the walking provider rejects or reports no route', async () => {
+  const offline = jest.fn().mockRejectedValue(new Error('offline'));
+  const absent = jest.fn().mockResolvedValue(null);
+  expect(await loadUsableFootRoute(offline, start, destination)).toBeNull();
+  expect(await loadUsableFootRoute(absent, start, destination)).toBeNull();
+  expect(offline).toHaveBeenCalledWith(start, destination);
+  expect(absent).toHaveBeenCalledWith(start, destination);
+});
+
+test('returns only valid walking geometry from the supplier, never sample campus paths', async () => {
+  const valid = jest.fn().mockResolvedValue(providerResponse);
+  expect(await loadUsableFootRoute(valid, start, destination)).toEqual(providerResponse);
+  const distant = jest.fn().mockResolvedValue({ ...providerResponse, geometry: [[121.5, 25.05], [121.51, 25.06]] });
+  expect(await loadUsableFootRoute(distant, start, destination)).toBeNull();
 });
