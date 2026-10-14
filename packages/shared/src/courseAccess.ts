@@ -118,12 +118,12 @@ export function recommendCourses(hints: CourseMetadata, candidates: readonly Cou
  * This changes the user's personal draft only; saving remains explicit.
  */
 export function approvedCourseLinks(
-  hints: CourseMetadata,
+  hints: CourseScope & { title: string; courseCode?: string; teacher?: string; className?: string },
   requests: readonly CourseRequest[],
   workspaces: readonly { id: string; title: string; state: 'active' | 'archived'; memberRole: string }[],
 ): { id: string; title: string }[] {
   let input: CourseMetadata;
-  try { input = courseMetadata(hints); }
+  try { input = courseHints(hints); }
   catch { return []; }
 
   const output: { id: string; title: string }[] = [];
