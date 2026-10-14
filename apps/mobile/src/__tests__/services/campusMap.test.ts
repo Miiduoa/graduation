@@ -85,6 +85,9 @@ test('map uses provided school center and retains attribution without fake navig
   expect(html).toContain('setView(campusCenter,16)');
   expect(html).toContain('failedTiles>=4');
   expect(html).toContain('campusCenter.distanceTo');
+  expect(html).toContain("data.type==='route'");
+  expect(html).toContain("data.type==='clearRoute'");
+  expect(html).toContain("dashArray:'6 9'");
   expect(html).toContain('OpenStreetMap');
   expect(html).toContain('label.textContent=place.name');
   expect(html).not.toMatch(/simulate|busTick|setInterval|buildMock/);
