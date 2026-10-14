@@ -92,7 +92,8 @@ it('shows a retry when the backend catalog fails and does not keep old rows afte
   await act(async () => {
     render(<CafeteriaPage />);
   });
-  expect(screen.getByRole('alert').textContent).toContain('暫時無法讀取餐廳資料');
+  expect(screen.getByRole('alert').textContent).toContain('暫時讀不到資料，請稍後再試');
+  expect(screen.getByRole('alert').textContent).not.toContain('請確認網路後再試');
   expect(screen.queryByText(/示範資料/)).toBeNull();
   state.fail = false;
   state.catalog = {
@@ -109,8 +110,20 @@ it('shows a retry when the backend catalog fails and does not keep old rows afte
       },
     ],
   };
-  fireEvent.click(screen.getByRole('button', { name: '重新讀取' }));
+  fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
   expect(await screen.findByText('蔬菜吐司')).toBeTruthy();
+});
+
+it('keeps the offline copy when the device has no network', async () => {
+  const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+  state.fail = true;
+  await act(async () => {
+    render(<CafeteriaPage />);
+  });
+  expect(screen.getByRole('alert').textContent).toContain('請確認網路後再試');
+  expect(screen.getByRole('alert').textContent).not.toContain('暫時讀不到資料，請稍後再試');
+  expect(screen.getByRole('button', { name: '重新整理' })).toBeTruthy();
+  online.mockRestore();
 });
 
 it('uses an honest empty state when this school has no restaurants', async () => {

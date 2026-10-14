@@ -36,6 +36,7 @@ const NETWORK_CODES = new Set([
   'ERR_NAME_NOT_RESOLVED',
   'ERR_ADDRESS_UNREACHABLE',
   'ERR_NETWORK_CHANGED',
+  'NETWORK_ERROR',
 ]);
 
 export type LoadFailureCopyOptions = {
