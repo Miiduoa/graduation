@@ -72,7 +72,7 @@ it('reads the public school source without requiring a signed-in account', async
   expect(screen.getByText('靜宜大學')).toBeTruthy();
   expect(getDocsFromServer).toHaveBeenCalledWith({
     path: 'schools/pu/announcements',
-    constraints: [{ orderBy: 'publishedAt', direction: 'desc' }, { limit: 20 }],
+    constraints: [{ orderBy: 'publishedAt', direction: 'desc' }, { limit: 200 }],
   });
   expect(screen.queryByText('示範資料')).toBeNull();
   expect(screen.queryByText('重要')).toBeNull();
@@ -140,10 +140,11 @@ it('shows catalog office links when Firebase is not configured and never reads d
 });
 
 it('retains the existing school-filtered legacy source when the canonical collection is empty', async () => {
-  vi.mocked(getDocsFromServer)
-    .mockResolvedValueOnce(snapshot())
-    .mockResolvedValueOnce(snapshot(announcementDocument('既有來源公告', { schoolId: 'pu' })))
-    .mockResolvedValueOnce(snapshot());
+  vi.mocked(getDocsFromServer).mockImplementation((async (input: { path?: string }) => {
+    if (String(input?.path || '').includes('announcement-sources')) return snapshot();
+    if (String(input?.path || '') === 'schools/pu/announcements') return snapshot();
+    return snapshot(announcementDocument('既有來源公告', { schoolId: 'pu' }));
+  }) as never);
   render(<AnnouncementsPage />);
   await screen.findByText('既有來源公告');
   expect(getDocsFromServer).toHaveBeenCalledWith({
@@ -151,7 +152,7 @@ it('retains the existing school-filtered legacy source when the canonical collec
     constraints: [
       { where: 'schoolId', operator: '==', value: 'pu' },
       { orderBy: 'publishedAt', direction: 'desc' },
-      { limit: 20 },
+      { limit: 200 },
     ],
   });
 });
@@ -217,6 +218,73 @@ it('keeps server categories, pinned flags and search functional without invented
   fireEvent.click(screen.getByLabelText('只看置頂'));
   expect(screen.getAllByRole('article')).toHaveLength(1);
   expect(screen.getByText('置頂')).toBeTruthy();
+});
+
+it('keeps older 學務處 and 住宿 announcements visible and searchable when other offices fill the recent list', async () => {
+  const recent = Array.from({ length: 20 }, (_, index) =>
+    announcementDocument(`教務處稿${index + 1}`, {
+      sourceId: 'pu-acd',
+      source: '教務處',
+      office: '教務處',
+      publishedAt: `2026-10-14T${String(index).padStart(2, '0')}:00:00.000Z`,
+    }),
+  );
+  const osa = announcementDocument('學務處生活輔導', {
+    sourceId: 'pu-osa',
+    office: '學務處',
+    publishedAt: '2026-09-01T00:00:00.000Z',
+  });
+  const dorms = Array.from({ length: 5 }, (_, index) =>
+    announcementDocument(`住宿公告${index + 1}`, {
+      sourceId: 'pu-dorm',
+      source: '住宿',
+      office: '住宿',
+      publishedAt: `2026-09-0${index + 1}T00:00:00.000Z`,
+    }),
+  );
+  vi.mocked(getDocsFromServer).mockImplementation((async (input: {
+    path?: string;
+    constraints?: Array<{ where?: string; value?: string; orderBy?: string }>;
+  }) => {
+    const path = String(input?.path || '');
+    if (path.includes('announcement-sources')) {
+      return {
+        empty: false,
+        docs: [
+          {
+            id: 'pu-acd',
+            data: () => ({ sourceId: 'pu-acd', office: '教務處', status: 'healthy' }),
+          },
+          {
+            id: 'pu-osa',
+            data: () => ({ sourceId: 'pu-osa', office: '學務處', status: 'healthy' }),
+          },
+          {
+            id: 'pu-dorm',
+            data: () => ({ sourceId: 'pu-dorm', office: '住宿', status: 'healthy' }),
+          },
+        ],
+      } as never;
+    }
+    const sourceId = input?.constraints?.find((item) => item.where === 'sourceId')?.value;
+    if (sourceId === 'pu-osa') return snapshot(osa);
+    if (sourceId === 'pu-dorm') return snapshot(...dorms);
+    if (path === 'schools/nthu/announcements' || sourceId?.startsWith('nthu-')) return snapshot();
+    if (input?.constraints?.some((item) => item.orderBy === 'publishedAt')) return snapshot(...recent);
+    return snapshot();
+  }) as never);
+  render(<AnnouncementsPage />);
+  await screen.findByText('學務處生活輔導');
+  expect(screen.getByText('住宿公告1')).toBeTruthy();
+  expect(screen.getByText('住宿公告5')).toBeTruthy();
+  expect(screen.queryByText('清華偽裝')).toBeNull();
+  fireEvent.change(screen.getByLabelText('搜尋公告'), { target: { value: '學務處' } });
+  expect(screen.getByText('學務處生活輔導')).toBeTruthy();
+  expect(screen.queryByText('教務處稿1')).toBeNull();
+  expect(screen.queryByText('住宿公告1')).toBeNull();
+  fireEvent.change(screen.getByLabelText('搜尋公告'), { target: { value: '住宿' } });
+  expect(screen.getAllByRole('article')).toHaveLength(5);
+  expect(screen.queryByText('學務處生活輔導')).toBeNull();
 });
 
 it('keeps cached announcements when a later Firestore read fails', async () => {
@@ -362,9 +430,10 @@ it('uses the announcement empty state when switching to a school with no announc
 });
 
 it('does not render a record whose stored school differs from the selected school', async () => {
-  vi.mocked(getDocsFromServer).mockResolvedValue(
-    snapshot(announcementDocument('錯誤學校資料', { schoolId: 'nthu' })),
-  );
+  vi.mocked(getDocsFromServer).mockImplementation((async (input: { path?: string }) => {
+    if (String(input?.path || '').includes('announcement-sources')) return snapshot();
+    return snapshot(announcementDocument('錯誤學校資料', { schoolId: 'nthu' }));
+  }) as never);
   render(<AnnouncementsPage />);
   expect(
     await screen.findByRole('heading', {

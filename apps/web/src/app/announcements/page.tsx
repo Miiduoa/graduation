@@ -8,6 +8,7 @@ import type { Announcement } from '@/lib/firebase';
 import { loadAnnouncementFeed, type AnnouncementSourceHealth } from './publicAnnouncements';
 import {
   announcementEmptyKind,
+  announcementMatchesSearch,
   formatStaleAnnouncementNotice,
   listAnnouncementCatalogLinks,
   SOURCE_DOWN_EMPTY_TEXT,
@@ -163,11 +164,9 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
       </div>
     );
   }
-  const needle = search.trim().toLocaleLowerCase('zh-TW');
   const filtered = state.announcements.filter((announcement) => {
-    const text = `${announcement.title} ${announcement.body} ${announcement.source ?? ''}`;
     return (
-      (!needle || text.toLocaleLowerCase('zh-TW').includes(needle)) &&
+      announcementMatchesSearch(announcement, search) &&
       (category === 'all' || categoryOf(announcement) === category) &&
       (!pinnedOnly || announcement.pinned)
     );
@@ -282,7 +281,9 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
                 <span>
                   {categories.find((item) => item.id === categoryOf(announcement))?.label}
                 </span>
-                {announcement.source && <span>{announcement.source}</span>}
+                {(announcement.source || announcement.office) && (
+                  <span>{announcement.source || announcement.office}</span>
+                )}
                 {announcement.publishedAt ? (
                   <time dateTime={announcement.publishedAt}>
                     {new Date(announcement.publishedAt).toLocaleDateString('zh-TW', {
