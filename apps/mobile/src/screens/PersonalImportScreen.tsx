@@ -23,6 +23,7 @@ import {
 } from '@campus/shared';
 import { createNuniClasses, type NuniWorkspace } from '@campus/shared/src/nuni';
 import { Screen, Button } from '../ui/components';
+import { CourseAccessPanel } from '../components/CourseAccessPanel';
 import { theme } from '../ui/theme';
 import { useNuniSession } from '../state/nuniSession';
 import { useSchool } from '../state/school';
@@ -159,6 +160,7 @@ function RowEditor({
           }
         />
       ))}
+      <CourseAccessPanel row={row} workspaces={workspaces} disabled={disabled} />
       <Text style={textStyle}>連結已加入的課班（選填）</Text>
       <Text style={{ color: theme.colors.muted }}>
         只建立你自己的對照；不會加入課班或通知老師。課班清單尚未提供學校、學期與教師資訊，請先自行核對。教師姓名是個人記錄，尚未驗證身分。
@@ -172,7 +174,7 @@ function RowEditor({
         <Button
           key={workspace.id}
           disabled={disabled}
-          text={`${row.linkedCourseId === workspace.id ? '已選：' : ''}${workspace.title}（${workspace.memberRole === 'student' ? '學生' : '教師'}）`}
+          text={`${row.linkedCourseId === workspace.id ? '已選：' : ''}${workspace.title}（${workspace.memberRole === 'student' ? '學生' : '管理者（未代表教師認證）'}）`}
           kind={row.linkedCourseId === workspace.id ? 'primary' : 'outline'}
           onPress={() => onChange({ ...row, linkedCourseId: workspace.id })}
         />

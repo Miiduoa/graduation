@@ -90,3 +90,7 @@ ICS 以台灣時間呈現，可處理明確的 `Asia/Taipei`、UTC 及全天日�
 - [Unigent](https://www.unigent.tw/)：課表、待辦、學期行事曆與小工具，作為日常使用體驗參考。
 - [MyStudyLife](https://mystudylife.com/tour/)：照片／PDF、確認匯入、輪替週及跨裝置；[支援文章](https://care.mystudylife.com/en/articles/9502590-adding-your-timetable)與現行功能頁對辨識器的輪替週支援敘述仍需實測釐清。
 - [Shovel](https://shovelapp.io/) 與 [Canvas 匯入說明](https://help.shovelapp.io/en/connect-school-system/connect-canvas-to-shovel)：教學大綱、LMS feed、選課程、合併及同步，是後續作業／期限管理的比較基準。
+
+## 課班推薦與審核候選
+
+功能分支新增課表的課班比對、學生加入申請與教師人工核對入口，沿用這份文件的匯入儲存與手動連結。候選必須由平台管理員獨立核對並已掛靠正式班次；不會因截圖／姓名／課號直接加入或取得教師權限。後端預設停用，尚未正式部署；詳見 [課班比對與人工核對](course-access-review.md) 的流程、測試範圍與發布門檻。核准後仍須重新載入課班清單，再由使用者確認個人連結。
