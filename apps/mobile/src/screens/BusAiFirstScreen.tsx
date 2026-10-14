@@ -5,6 +5,7 @@ import { useSchool } from '../state/school';
 import { useTheme } from '../state/theme';
 import { AIDetailScreen, AICard, AIButton } from '../ui/aiFirst';
 import { CampusBusArrivals } from '../components/CampusBusArrivals';
+import { PublicTransitExplorer } from '../components/PublicTransitExplorer';
 import { TAICHUNG_BUS_URL, loadBusRoutes, type CampusBusRoute } from '../features/campusBus';
 
 type Props = { navigation?: { goBack?: () => void } };
@@ -15,12 +16,13 @@ export default function BusAiFirstScreen({ navigation }: Props) {
     <BusDirectory
       key={`${school.id}:${user?.uid ?? 'guest'}`}
       schoolId={school.id}
+      schoolName={school.name}
       navigation={navigation}
     />
   );
 }
 
-function BusDirectory({ schoolId, navigation }: Props & { schoolId: string }) {
+function BusDirectory({ schoolId, schoolName, navigation }: Props & { schoolId: string; schoolName?: string }) {
   const theme = useTheme();
   const [routes, setRoutes] = useState<CampusBusRoute[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -124,6 +126,7 @@ function BusDirectory({ schoolId, navigation }: Props & { schoolId: string }) {
           stop={selected.stop}
         />
       ) : null}
+      <PublicTransitExplorer key={schoolId} schoolId={schoolId} schoolName={schoolName} />
       {routes.map((route) => (
         <AICard key={route.id} title={route.name}>
           <View style={{ gap: theme.space.md }}>
