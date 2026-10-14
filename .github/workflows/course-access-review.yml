@@ -1,0 +1,25 @@
+name: Course access review
+
+on:
+  push:
+    branches: [feature/course-matching-review-20261014]
+    paths: [.github/workflows/course-access-review.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Prepare tracked source for isolated review
+        run: git archive --format=tar.gz --output=/tmp/campus-one-source.tar.gz HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: campus-one-source
+          path: /tmp/campus-one-source.tar.gz
+          retention-days: 1
