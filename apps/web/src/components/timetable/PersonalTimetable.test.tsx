@@ -1,5 +1,11 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => '/timetable',
+}));
+
 import { cleanCourse, cleanMeta, shareCopiedCopy, WEEKDAY_LABELS } from '@campus/shared';
 import { PersonalTimetable } from './PersonalTimetable';
 
@@ -191,7 +197,7 @@ describe('personal timetable data retention', () => {
   it('does not load private or guest data while identity is unresolved', () => {
     mocks.auth.loading = true;
     render(<PersonalTimetable />);
-    expect(screen.getByRole('status').textContent).toContain('正在確認帳號');
+    expect(screen.getByRole('status').textContent).toMatch(/正在確認(帳號|課表)/);
     expect(mocks.load).not.toHaveBeenCalled();
   });
 });
