@@ -16,9 +16,10 @@ export function CourseAccessPanel(props: Props) {
   if (props.row.kind !== 'timetable') return null;
   if (!auth.session || auth.loading || auth.pendingLogout || props.disabled)
     return <Text style={textStyle}>登入課班帳號且完成目前操作後，可查找已核對的課班。</Text>;
-  const scopeKey = JSON.stringify([auth.session.context, props.row.id, props.row.schoolId, props.row.academicYear,
+  const context = auth.session.context;
+  const scopeKey = JSON.stringify([context, props.row.id, props.row.schoolId, props.row.academicYear,
     props.row.semester, props.row.title, props.row.courseCode, props.row.teacher, props.row.className]);
-  return <CourseAccessSession key={scopeKey} {...props} request={auth.request} />;
+  return <CourseAccessSession key={scopeKey} {...props} request={(path, input) => auth.request(path, context, input)} />;
 }
 function CourseAccessSession({ row, workspaces, request }: Props & { request: CourseTransport }) {
   const client = createCourseAccess(request);
