@@ -5,7 +5,7 @@ import {
   PROVIDENCE_UNIVERSITY_SCHOOL_ID,
   type School,
 } from '@campus/shared/src';
-import { findSchoolById, normalizeSchoolCode, resolveSchool } from '@campus/shared/src/schools';
+import { findSchoolById, findSchoolsByCode, normalizeSchoolCode, resolveSchool } from '@campus/shared/src/schools';
 import { clearCacheExceptSchool } from '../data/cachedSource';
 import { setHybridSourceSchoolContext } from '../data/hybridSource';
 import { applySchoolTheme, registerSchoolTheme } from '../ui/theme';
@@ -115,7 +115,16 @@ export function SchoolProvider(props: {
     setSelectionState((prev) => {
       const identityChanged = next.code !== undefined || next.schoolId !== undefined;
       const code = next.code != null ? normalizeSchoolCode(next.code) : prev.code;
-      const schoolId = next.schoolId === undefined ? prev.schoolId : next.schoolId;
+      // A code-only switch must not retain the previous school's canonical ID.
+      const codeMatches = next.code !== undefined ? findSchoolsByCode(code) : [];
+      const schoolId =
+        next.schoolId !== undefined
+          ? next.schoolId
+          : next.code !== undefined && codeMatches.length === 1
+            ? codeMatches[0].id
+            : next.code !== undefined
+              ? null
+              : prev.schoolId;
       const schoolName =
         next.schoolName === undefined
           ? identityChanged
