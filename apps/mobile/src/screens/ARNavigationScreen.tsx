@@ -33,7 +33,7 @@ import {
 import { getFootRoute, type LatLng, type RouteStep } from '../services/routingService';
 import { useDataSource } from '../hooks/useDataSource';
 import { useGeolocation } from '../hooks/useGeolocation';
-import { isUsableFootRoute } from '../features/usableFootRoute';
+import { loadUsableFootRoute } from '../features/usableFootRoute';
 
 type ARMode = 'preview' | 'navigating' | 'arrived';
 
@@ -77,8 +77,8 @@ async function buildARNavigationRoute(params: {
   const { start, destination: dest } = params;
   const from: LatLng = { lat: start.latitude, lng: start.longitude };
   const to: LatLng = { lat: dest.lat, lng: dest.lng };
-  const foot = await getFootRoute(from, to);
-  if (!isUsableFootRoute(foot, from, to)) return null;
+  const foot = await loadUsableFootRoute(getFootRoute, from, to);
+  if (!foot) return null;
 
   const steps: NavigationStep[] = foot.steps.length
     ? foot.steps.map((step, index) => routeStepToNavigationStep(step, index))
