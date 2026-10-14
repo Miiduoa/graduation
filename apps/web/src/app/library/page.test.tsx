@@ -105,3 +105,28 @@ it('searches the selected university catalog directly without carrying another c
   );
   expect(screen.queryByText('國立清華大學圖書館')).toBeNull();
 });
+
+
+it('uses Soochow Primo with the university view and never opens the previous campus', () => {
+  context.schoolId = 'scu';
+  context.schoolName = '東吳大學';
+  render(<LibraryPage />);
+  fireEvent.change(screen.getByLabelText('想找的書或關鍵字'), {
+    target: { value: '現代文學' },
+  });
+  const url = new URL(screen.getByRole('link', { name: '直接搜尋本校館藏 ↗' }).getAttribute('href')!);
+  expect(url.hostname).toBe('uco-scu.primo.exlibrisgroup.com');
+  expect(url.searchParams.get('vid')).toBe('886UCO_SCU:886SCU_INST');
+  expect(url.searchParams.get('query')).toBe('any,contains,現代文學');
+  expect(screen.queryByText('蓋夏圖書館')).toBeNull();
+});
+
+it('provides Chiayi University official catalog and opening hours as separate links', () => {
+  context.schoolId = 'ncyu';
+  context.schoolName = '國立嘉義大學';
+  render(<LibraryPage />);
+  expect(screen.getByRole('link', { name: '前往官方館藏入口 ↗' }).getAttribute('href'))
+    .toBe('https://libaleph.ncyu.edu.tw/F');
+  expect(screen.getByRole('link', { name: '開館時間 ↗' }).getAttribute('href'))
+    .toBe('https://www.ncyu.edu.tw/lib/Contents?nodeId=41764');
+});
