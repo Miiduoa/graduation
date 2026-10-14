@@ -33,6 +33,7 @@ import {
 import { usePersonalImportScope, usePersonalImports } from '@/lib/usePersonalImports';
 import { recognizePersonalImportImage } from '@/lib/personalImportOcr';
 import styles from './PersonalImport.module.css';
+import { CourseAccessPanel } from './CourseAccessPanel';
 
 const KINDS: { value: PersonalImportKind; title: string; detail: string }[] = [
   { value: 'timetable', title: '課表與選課結果', detail: '上課日、時間、教室與老師' },
@@ -60,11 +61,13 @@ function RowFields({
   onChange,
   workspaces,
   periodProfile,
+  onRefreshWorkspaces,
 }: {
   row: PersonalImportRow;
   onChange: (row: PersonalImportRow) => void;
   workspaces: NuniWorkspace[];
   periodProfile?: 'pu';
+  onRefreshWorkspaces?: () => void;
 }) {
   const update = (field: keyof PersonalImportRow, value: string | number | boolean | undefined) =>
     onChange({ ...row, [field]: value });
@@ -224,13 +227,16 @@ function RowFields({
               )}
               {workspaces.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {item.title} · {item.memberRole === 'student' ? '我修的課' : '我教的課'}
+                  {item.title} · {item.memberRole === 'student' ? '學生' : '管理者（未代表教師認證）'}
                 </option>
               ))}
             </select>
           </label>
         </div>
       </details>
+      <CourseAccessPanel row={row} workspaces={workspaces}
+        onRefreshWorkspaces={onRefreshWorkspaces}
+        onSelectLinkedCourse={(workspaceId) => update('linkedCourseId', workspaceId)} />
       {issues.some((issue) => issue.severity === 'error') && (
         <ul className={styles.issues}>
           {issues
@@ -312,6 +318,7 @@ function ImportWorkspace({
   const [preview, setPreview] = useState('');
   const [workspaces, setWorkspaces] = useState<NuniWorkspace[]>([]);
   const [linkStatus, setLinkStatus] = useState('');
+  const [linksEpoch, setLinksEpoch] = useState(0);
   const [lastBatch, setLastBatch] = useState('');
   const [undoOpen, setUndoOpen] = useState(false);
   const [editing, setEditing] = useState<{
@@ -373,7 +380,7 @@ function ImportWorkspace({
     return () => {
       current = false;
     };
-  }, [nuni?.session]);
+  }, [nuni?.session, linksEpoch]);
 
   const options = {
     kind,
@@ -849,6 +856,7 @@ function ImportWorkspace({
                     row={row}
                     periodProfile={periodProfile}
                     workspaces={workspaces}
+                    onRefreshWorkspaces={() => setLinksEpoch((value) => value + 1)}
                     onChange={(next) => updateDraft(row, next)}
                   />
                 </article>
@@ -1005,6 +1013,7 @@ function ImportWorkspace({
                 row={editing.row}
                 workspaces={workspaces}
                 periodProfile={periodProfile}
+                onRefreshWorkspaces={() => setLinksEpoch((value) => value + 1)}
                 onChange={(row) => setEditing({ ...editing, row })}
               />
             </fieldset>
