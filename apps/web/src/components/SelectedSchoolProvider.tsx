@@ -154,6 +154,10 @@ export function SelectedSchoolProvider({
     }
     setPreference({ scope, schoolId: id, storageError });
     const next = new URLSearchParams(params?.toString());
+    if (pathname === '/map' && selectedSchool?.id !== id) {
+      next.delete('route');
+      next.delete('focus');
+    }
     if (id) {
       next.set('schoolId', id);
       next.set('campus', id);

@@ -1,4 +1,5 @@
 import type { CampusCoordinate } from '@campus/shared/src/campusGeo';
+import { parseCampusMapRecord } from '@campus/shared/src/campusMapRecords';
 export { distanceMeters, formatDistance } from '@campus/shared/src/campusGeo';
 
 import {
@@ -21,22 +22,9 @@ export type MapLocation = {
   description: string;
   lat: number;
   lng: number;
-};
-
-const categoryNames: Record<string, string> = {
-  academic: '教學',
-  research: '研究',
-  library: '圖書館',
-  admin: '行政',
-  cafeteria: '餐飲',
-  dormitory: '住宿',
-  sports: '運動',
-  parking: '停車',
-  convenience: '生活',
-  medical: '健康',
-  religious: '宗教',
-  gate: '交通',
-  other: '其他',
+  building?: string;
+  floor?: string;
+  facilities?: string[];
 };
 
 function validId(value: string) {
@@ -55,31 +43,19 @@ export async function loadMapLocations(schoolId: string): Promise<MapLocation[]>
   }
   return snapshot.docs
     .flatMap((entry) => {
-      const data = entry.data();
-      if (data.schoolId != null && data.schoolId !== schoolId)
-        throw new Error('Invalid map school');
-      if (
-        typeof data.name !== 'string' ||
-        !data.name.trim() ||
-        typeof data.lat !== 'number' ||
-        !Number.isFinite(data.lat) ||
-        Math.abs(data.lat) > 90 ||
-        typeof data.lng !== 'number' ||
-        !Number.isFinite(data.lng) ||
-        Math.abs(data.lng) > 180
-      )
-        return [];
-      const category = typeof data.category === 'string' ? data.category.trim() : '';
-      return [
-        {
-          id: entry.id,
-          name: data.name.trim(),
-          category: categoryNames[category] ?? (category || '其他'),
-          description: typeof data.description === 'string' ? data.description : '',
-          lat: data.lat,
-          lng: data.lng,
-        },
-      ];
+      const place = parseCampusMapRecord(entry.id, entry.data(), schoolId);
+      if (!place) return [];
+      return [{
+        id: place.id,
+        name: place.name,
+        category: place.category,
+        description: place.description,
+        lat: place.lat,
+        lng: place.lng,
+        ...(place.building ? { building: place.building } : {}),
+        ...(place.floor ? { floor: place.floor } : {}),
+        ...(place.facilities.length ? { facilities: place.facilities } : {}),
+      }];
     })
     .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
 }

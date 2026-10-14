@@ -90,3 +90,40 @@ test('map uses provided school center and retains attribution without fake navig
   expect(html).not.toMatch(/simulate|busTick|setInterval|buildMock/);
   expect(buildWalkingDirectionsUrl({ lat: 24, lng: 120 })).not.toContain('origin=');
 });
+
+test('loads an actual school POI from GeoPoint-style or nested coordinate fields', async () => {
+  jest.mocked(getDocsFromServer).mockResolvedValueOnce(snapshot([
+    {
+      schoolId: 'pu',
+      name: '任垣樓',
+      category: 'academic',
+      location: { latitude: 24.22765, longitude: 120.56453 },
+      floor: 3,
+      building: '理工學院',
+      description: '教學大樓',
+      facilities: ['電腦教室', '電腦教室', null, '電梯'],
+    },
+    { name: '缺少座標', category: 'academic', location: { lat: null, lng: 120.56 } },
+    { name: '無效原點', category: 'building', lat: 0, lng: 0 },
+  ]));
+  expect(await loadCampusMapPlaces('pu')).toEqual([{
+    id: 'place-0',
+    name: '任垣樓',
+    category: '教學',
+    description: '教學大樓',
+    lat: 24.22765,
+    lng: 120.56453,
+    building: '理工學院',
+    floor: '3',
+    facilities: ['電腦教室', '電梯'],
+  }]);
+});
+
+test('rejects a wrong-school nested coordinate even when the values are valid', async () => {
+  jest.mocked(getDocsFromServer).mockResolvedValueOnce(snapshot([{
+    ...row,
+    location: { lat: 24.227, lng: 120.564 },
+    schoolId: 'another-school',
+  }]));
+  await expect(loadCampusMapPlaces('pu')).rejects.toThrow('Invalid map school');
+});
