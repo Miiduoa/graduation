@@ -16,6 +16,12 @@ it('keeps official destinations separate by campus and never returns a Providenc
   expect(getOfficialLibrary('__proto__')).toBeNull();
   expect(getOfficialLibrary(null)).toBeNull();
   expect(getOfficialLibrary('tenant-nthu', '國立清華大學')?.catalogUrl).toBe('https://www.lib.nthu.edu.tw/');
+  expect(getOfficialLibrary('platform-campus-42', '國立清華大學')?.catalogUrl).toBe(
+    'https://www.lib.nthu.edu.tw/',
+  );
+  expect(getOfficialLibrary('platform-campus-42', '清華大學')).toBeNull();
+  expect(getOfficialLibrary('../pu', '國立清華大學')).toBeNull();
+  expect(getOfficialLibrary('ntpu')?.catalogUrl).toBe('https://library.ntpu.edu.tw/');
   expect(getOfficialLibrary('tenant-fake', '國立清華大學（校外）')).toBeNull();
 });
 
