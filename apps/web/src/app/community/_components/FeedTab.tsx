@@ -205,7 +205,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
         }}
       >
         <Link
-          href="/community/story/new"
+          href={`/community/story/new?schoolId=${encodeURIComponent(schoolId)}`}
           aria-label="發布限時動態"
           style={{
             display: 'flex',
@@ -353,7 +353,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
           {refreshing ? '更新中…' : '重新整理'}
         </button>
         <Link
-          href="/community/post/new"
+          href={`/community/post/new?schoolId=${encodeURIComponent(schoolId)}`}
           className="btn primary"
           style={{ fontSize: 13, padding: '7px 14px', borderRadius: 'var(--radius)' }}
         >
@@ -370,7 +370,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>
           {filter === 'subscribed' ? '尚無已訂閱看板的新貼文' : '尚無校園貼文'}
           <div style={{ marginTop: 10 }}>
-            <Link href="/community/post/new" className="btn primary">
+            <Link href={`/community/post/new?schoolId=${encodeURIComponent(schoolId)}`} className="btn primary">
               發第一篇貼文 →
             </Link>
           </div>
@@ -434,7 +434,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
                       </span>
                     </div>
                     <Link
-                      href={`/community/board/${item.boardId}`}
+                      href={`/community/board/${item.boardId}?schoolId=${encodeURIComponent(schoolId)}`}
                       style={{
                         fontSize: 12,
                         color: 'var(--brand)',
@@ -448,7 +448,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
                 </div>
 
                 <Link
-                  href={`/community/post/${item.id}`}
+                  href={`/community/post/${item.id}?schoolId=${encodeURIComponent(schoolId)}`}
                   style={{ textDecoration: 'none', color: 'var(--text)', display: 'block' }}
                 >
                   <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>{item.title}</h3>
@@ -468,7 +468,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
                   </p>
                 </Link>
 
-                {media.length > 0 && <MediaGrid uris={media.slice(0, 4)} postId={item.id} />}
+                {media.length > 0 && <MediaGrid uris={media.slice(0, 4)} postId={item.id} schoolId={schoolId} />}
 
                 {(item.tags ?? []).length > 0 && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
@@ -522,7 +522,7 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
                     {liked ? '❤️' : '🤍'} {likesOf(item)}
                   </button>
                   <Link
-                    href={`/community/post/${item.id}`}
+                    href={`/community/post/${item.id}?schoolId=${encodeURIComponent(schoolId)}`}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -545,11 +545,11 @@ export function FeedTab(props: { schoolId: string; schoolSearch: string }) {
   );
 }
 
-function MediaGrid({ uris, postId }: { uris: string[]; postId: string }) {
+function MediaGrid({ uris, postId, schoolId }: { uris: string[]; postId: string; schoolId: string }) {
   if (uris.length === 1) {
     return (
       <Link
-        href={`/community/post/${postId}`}
+        href={`/community/post/${postId}?schoolId=${encodeURIComponent(schoolId)}`}
         style={{
           display: 'block',
           marginTop: 10,
@@ -574,7 +574,7 @@ function MediaGrid({ uris, postId }: { uris: string[]; postId: string }) {
   }
   return (
     <Link
-      href={`/community/post/${postId}`}
+      href={`/community/post/${postId}?schoolId=${encodeURIComponent(schoolId)}`}
       style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(2, 1fr)',

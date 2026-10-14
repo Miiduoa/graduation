@@ -14,8 +14,8 @@ import Link from 'next/link';
 import { CommunityLoadError, useCommunityLoad } from './useCommunityLoad';
 import { useAuth } from '@/components/AuthGuard';
 import {
-  SOCIAL_POIS,
   defaultSocialPoiId,
+  verifiedSocialPoisForSchool,
   findSocialPoi,
   SOCIAL_POI_CATEGORY_LABEL,
   type SocialPoiCategory,
@@ -44,6 +44,8 @@ const POI_ICON: Record<SocialPoiCategory, string> = {
 
 export function RealtimeTab(props: { schoolId: string }) {
   const { schoolId } = props;
+  const campusPois = verifiedSocialPoisForSchool(schoolId);
+  const hasVerifiedPoiDirectory = campusPois.length > 0;
   const { user } = useAuth();
   const [selectedPoi, setSelectedPoi] = useState<string>(defaultSocialPoiId());
   const [storyGroups, setStoryGroups] = useState<StoryAuthorGroup[]>([]);
@@ -71,7 +73,10 @@ export function RealtimeTab(props: { schoolId: string }) {
 
   const refreshPeers = useCallback(async () => {
     const request = ++peersGeneration.current;
-    if (!schoolId) return;
+    if (!schoolId || !hasVerifiedPoiDirectory) {
+      setPeerResult(null);
+      return;
+    }
     const raw = await peersAtPoi(schoolId, selectedPoi);
     const unique = [...new Set(raw.map((row) => row.uid).filter(Boolean))].filter((uid) => uid !== user?.uid);
     const profiles = unique.length ? await fetchSchoolDirectoryProfiles(schoolId, unique) : [];
@@ -80,7 +85,7 @@ export function RealtimeTab(props: { schoolId: string }) {
       const profile = profiles.find((row) => row.uid === uid);
       return { uid, name: profile?.displayName ?? '同學', avatarUrl: profile?.avatarUrl ?? null, department: profile?.department ?? null };
     }) });
-  }, [schoolId, selectedPoi, user]);
+  }, [schoolId, selectedPoi, user, hasVerifiedPoiDirectory]);
 
   const load = useCallback(async () => {
     await Promise.all([refreshStories(), refreshPeers()]);
@@ -113,7 +118,7 @@ export function RealtimeTab(props: { schoolId: string }) {
   }, [storyGroups, schoolId]);
 
   const tapHeart = async () => {
-    if (!user?.uid || !schoolId || checkInFlight.current) return;
+    if (!user?.uid || !schoolId || !hasVerifiedPoiDirectory || checkInFlight.current) return;
     checkInFlight.current = true;
     setCheckingIn(true);
     try {
@@ -155,6 +160,12 @@ export function RealtimeTab(props: { schoolId: string }) {
 
   return (
     <div>
+      {!hasVerifiedPoiDirectory ? (
+        <p role="status" className="card" style={{ padding: 18, marginBottom: 18 }}>
+          這所學校尚未接入經核實的校園打卡地點。限時動態仍可使用，但不會套用靜宜大學的位置。
+        </p>
+      ) : (
+        <>
       <h3 style={{ margin: '4px 0 8px', fontSize: 13, color: 'var(--muted)', fontWeight: 700 }}>
         我在哪
       </h3>
@@ -166,7 +177,7 @@ export function RealtimeTab(props: { schoolId: string }) {
           paddingBottom: 8,
         }}
       >
-        {SOCIAL_POIS.map((poi) => {
+        {campusPois.map((poi) => {
           const active = poi.id === selectedPoi;
           const checked = heartbeatSession?.poiId === poi.id;
           return (
@@ -306,13 +317,19 @@ export function RealtimeTab(props: { schoolId: string }) {
           ))}
         </div>
       )}
+        </>
+      )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 18 }}>
         <h3 style={{ margin: 0, fontSize: 13, color: 'var(--muted)', fontWeight: 700, flex: 1 }}>
           限時動態
         </h3>
         <Link
-          href={`/community/story/new?poiId=${encodeURIComponent(selectedPoi)}`}
+          href={
+            hasVerifiedPoiDirectory
+              ? `/community/story/new?poiId=${encodeURIComponent(selectedPoi)}&schoolId=${encodeURIComponent(schoolId)}`
+              : `/community/story/new?schoolId=${encodeURIComponent(schoolId)}`
+          }
           className="btn primary"
           style={{ fontSize: 12, padding: '6px 12px' }}
         >
