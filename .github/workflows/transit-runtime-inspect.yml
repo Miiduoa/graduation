@@ -1,0 +1,105 @@
+name: Transit runtime inspection
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [chore/transit-production-readiness]
+    paths: [.github/workflows/transit-runtime-inspect.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nuni-web-production-release
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 284ce4c3780090685fcd41ed03ab50fbc974f346
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '22'
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1
+      - name: Inspect existing app without deployment or credential disclosure
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_NUNI_WEB_DEPLOY_TOKEN }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs/promises';
+          import {execFileSync} from 'node:child_process';
+          import {buildRemoteCommand,parseRemoteReport} from './deploy/web/transit-release-gate.mjs';
+          const app='nuni-web', origin='https://nuni.tw';
+          const ids=['683e513be2d358','80e447b6140178'];
+          const keys=['TDX_CLIENT_ID','TDX_CLIENT_SECRET'];
+          const original=process.env.FLY_API_TOKEN??'';
+          const token=original.trim();
+          process.env.FLY_API_TOKEN=token;
+          const report={checkedAt:new Date().toISOString(),app,origin,deployCredentialPresent:Boolean(token),credentialFormat:{outerWhitespaceRemoved:original!==token,containsLineBreak:/[\r\n]/.test(token),containsEllipsis:/…|\.{3}/.test(token),flyV1Scheme:token.startsWith('FlyV1 ')},platformAccess:false,secrets:null,machines:[],apiChecks:[],deploymentPerformed:false,settingsChanged:false,credentialValuesExported:false};
+          const safeError=(e)=>{
+            let value=String(e?.stderr??'');
+            for(const secret of [original,token]) if(secret) value=value.split(secret).join('[REDACTED]');
+            value=value.replace(/\u001b\[[0-9;]*m/g,'').replace(/(?:Bearer|FlyV1)\s+[^\s]+/gi,'[REDACTED AUTHORIZATION]').replace(/[A-Za-z0-9_+\/=.-]{24,}/g,'[REDACTED]');
+            return {exitStatus:Number.isInteger(e?.status)?e.status:null,code:['ENOENT','ETIMEDOUT','ENOBUFS'].includes(e?.code)?e.code:null,message:value.slice(0,500)||'No safe stderr available'};
+          };
+          const cli=(args,timeout=30000)=>execFileSync('flyctl',args,{encoding:'utf8',timeout,maxBuffer:1024*1024,stdio:['ignore','pipe','pipe']});
+          let rows=[];
+          if(token){
+            try {cli(['version']);report.cliAvailable=true;}catch(e){report.cliError=safeError(e);}
+            try {rows=JSON.parse(cli(['machine','list','--app',app,'--json']));if(!Array.isArray(rows))throw new Error('invalid-shape');report.platformAccess=true;}catch(e){report.cliMachineError=safeError(e);rows=[];}
+            if(!report.platformAccess&&!/[\r\n]/.test(token)){
+              for(const [scheme,authorization] of [['bearer',`Bearer ${token}`],...(token.startsWith('FlyV1 ')?[['native',token]]:[])]){
+                try {
+                  const response=await fetch('https://api.machines.dev/v1/apps/nuni-web/machines',{headers:{Authorization:authorization,Accept:'application/json'},redirect:'error',signal:AbortSignal.timeout(15000)});
+                  report.apiChecks.push({scheme,httpStatus:response.status});
+                  if(response.ok){const value=await response.json();if(Array.isArray(value)){rows=value;report.platformAccess=true;break;}}
+                }catch{report.apiChecks.push({scheme,httpStatus:null,error:'request-unavailable'});}
+              }
+            }
+            try {const value=JSON.parse(cli(['secrets','list','--app',app,'--json']));const entries=Array.isArray(value)?value:value.secrets;if(!Array.isArray(entries))throw new Error('invalid-shape');report.secrets=Object.fromEntries(keys.map(k=>[k,entries.some(v=>(v.Name??v.name)===k)]));}catch(e){report.cliSecretError=safeError(e);}
+            report.expectedMachinesOnly=rows.length===ids.length&&new Set(rows.map(r=>r.id)).size===ids.length&&rows.every(r=>ids.includes(r.id)&&r.state==='started');
+            report.machines=rows.filter(r=>ids.includes(r.id)).map(r=>({id:r.id,state:r.state,region:r.region,runtime:null}));
+            if(report.expectedMachinesOnly){
+              const credentialProgram=`console.log('CAMPUS_KEYS:'+JSON.stringify(Object.fromEntries(${JSON.stringify(keys)}.map(k=>[k,Boolean(process.env[k]?.trim())]))));`;
+              const credentialCommand="node -e '"+credentialProgram.replaceAll("'","'\\''")+"'";
+              const source=await fs.readFile('deploy/web/transit-release-gate.mjs','utf8');
+              for(const row of report.machines){
+                try {
+                  const output=cli(['ssh','console','--app',app,'--machine',row.id,'--quiet','--command',credentialCommand],60000);
+                  const line=output.split(/\r?\n/).find(v=>v.startsWith('CAMPUS_KEYS:'));
+                  const result=JSON.parse(line?.slice('CAMPUS_KEYS:'.length)??'null');
+                  if(!result||!keys.every(k=>typeof result[k]==='boolean'))throw new Error('invalid-output');
+                  row.runtime={checked:true,credentials:Object.fromEntries(keys.map(k=>[k,result[k]])),tdx:{attempted:false,ready:false,reason:'tdx-not-configured'}};
+                  if(keys.every(k=>result[k])){
+                    try {const live=parseRemoteReport(cli(['ssh','console','--app',app,'--machine',row.id,'--quiet','--command',buildRemoteCommand(source)],90000));row.runtime.tdx={attempted:true,...live};}
+                    catch {row.runtime.tdx={attempted:true,ready:false,reason:'live-tdx-check-failed'};}
+                  }
+                }catch(e){row.runtime={checked:false,error:safeError(e)};}
+              }
+            }
+          }
+          try {
+            const health=await fetch(origin+'/health/ready',{redirect:'error',signal:AbortSignal.timeout(15000)});
+            const data=await health.json();
+            const transit=await fetch(origin+'/api/transit',{method:'POST',headers:{'Content-Type':'application/json',Origin:origin},body:JSON.stringify({action:'campus',schoolId:'pu'}),redirect:'error',signal:AbortSignal.timeout(15000)});
+            report.public={healthStatus:health.status,revision:/^[a-f0-9]{40}$/.test(data?.revision??'')?data.revision:null,transitHttpStatus:transit.status,transitJson:transit.headers.get('content-type')?.includes('application/json')===true};
+          }catch{report.public={error:'public-inspection-incomplete'};}
+          report.runtimeTransitReady=report.expectedMachinesOnly===true&&report.machines.length===ids.length&&report.machines.every(r=>r.runtime?.tdx?.ready===true);
+          await fs.mkdir('runtime-evidence',{recursive:true});
+          await fs.writeFile('runtime-evidence/inspection.json',JSON.stringify(report,null,2)+'\n');
+          console.log(JSON.stringify(report,null,2));
+          await fs.appendFile(process.env.GITHUB_STEP_SUMMARY,`## 公車唯讀檢查\n\nFly 主機存取：${report.platformAccess}\n\n真實 TDX runtime 通過：${report.runtimeTransitReady}\n\n没有部署、改設定或輸出憑證值；檢查執行完成不等於公車上線。\n`);
+          NODE
+      - name: Preserve sanitized results only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: transit-runtime-${{ github.run_id }}-${{ github.run_attempt }}
+          path: runtime-evidence/inspection.json
+          retention-days: 7
+          if-no-files-found: error
