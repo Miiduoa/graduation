@@ -560,7 +560,18 @@ function TimetableWorkspace() {
           這個功能還沒接通。分享連結要等學校帳號接上才能用，課表仍可先在這台瀏覽器整理。
         </p>
       )}
-      {shareUrl && <p className={styles.notice}>{shareUrl}</p>}
+      {shareUrl && (
+        <label className={styles.field}>
+          分享連結
+          <input
+            className="input"
+            aria-label="分享連結"
+            value={shareUrl}
+            readOnly
+            onFocus={(event) => event.currentTarget.select()}
+          />
+        </label>
+      )}
 
       {imported.error && (
         <p role="alert" className={styles.notice}>
