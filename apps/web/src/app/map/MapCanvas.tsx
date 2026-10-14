@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { Map as LeafletMap } from 'leaflet';
-import type { MapLocation } from './mapService';
+import type { MapCoordinate, MapLocation } from './mapService';
 import styles from './map.module.css';
 
 type LeafletModule = typeof import('leaflet');
@@ -12,11 +12,13 @@ export default function MapCanvas({
   selected,
   route,
   onSelect,
+  myLocation = null,
 }: {
   locations: MapLocation[];
   selected: MapLocation | null;
   route: [MapLocation, MapLocation] | null;
   onSelect: (location: MapLocation) => void;
+  myLocation?: MapCoordinate | null;
 }) {
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
   const [runtime, setRuntime] = useState<{ map: LeafletMap; L: LeafletModule } | null>(null);
@@ -57,7 +59,7 @@ export default function MapCanvas({
     const markers = L.layerGroup().addTo(map);
     for (const location of locations) {
       const pin = document.createElement('span');
-      pin.className = styles.pin;
+      pin.className = selected?.id === location.id ? `${styles.pin} ${styles.pinSelected}` : styles.pin;
       const tooltip = document.createElement('span');
       // Leaflet interprets string tooltips as HTML; location names are plain text.
       tooltip.textContent = location.name;
@@ -74,7 +76,37 @@ export default function MapCanvas({
     return () => {
       markers.remove();
     };
-  }, [runtime, locations, onSelect]);
+  }, [runtime, locations, selected, onSelect]);
+
+  useEffect(() => {
+    if (!runtime || !route) return;
+    const { map, L } = runtime;
+    const color = getComputedStyle(map.getContainer()).getPropertyValue('--brand').trim();
+    const indicator = L.polyline(
+      route.map((place): [number, number] => [place.lat, place.lng]),
+      { color: color || '#11796f', weight: 3, opacity: 0.85, dashArray: '6 9', interactive: false },
+    ).addTo(map);
+    return () => {
+      indicator.remove();
+    };
+  }, [runtime, route]);
+
+  useEffect(() => {
+    if (!runtime || !myLocation) return;
+    const { map, L } = runtime;
+    const marker = L.circleMarker([myLocation.lat, myLocation.lng], {
+      radius: 8,
+      color: '#fff',
+      weight: 3,
+      fillColor: '#2563eb',
+      fillOpacity: 1,
+    })
+      .bindTooltip('我的位置')
+      .addTo(map);
+    return () => {
+      marker.remove();
+    };
+  }, [runtime, myLocation]);
 
   useEffect(() => {
     if (!runtime) return;
