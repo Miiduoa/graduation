@@ -1,5 +1,10 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
+import {
+  PERSONAL_IMPORT_IMAGE_UNREADABLE,
+  personalImportSavedNotice,
+  personalImportUndoBody,
+} from '@campus/shared';
 import { PersonalImportCenter } from './PersonalImportCenter';
 import { readPersonalImports } from '@/lib/personalImports';
 import { browserRequest } from '@/features/nuni/Session';
@@ -47,18 +52,22 @@ async function prepare(text = '課程名稱,學分,成績\n資料庫,3,85') {
   fireEvent.change(screen.getByLabelText('原始文字'), { target: { value: text } });
   fireEvent.click(screen.getByRole('button', { name: '整理成待確認清單' }));
 }
+async function confirmUndo() {
+  fireEvent.click(screen.getByRole('button', { name: '撤銷上次匯入' }));
+  fireEvent.click(screen.getByRole('button', { name: '撤銷' }));
+}
 it('reviews edits before persistence, reimport dedupes, undo only reverses the new batch', async () => {
   render(<PersonalImportCenter />);
   await prepare();
   expect(readPersonalImports(context)).toHaveLength(0);
   fireEvent.change(screen.getByLabelText('成績'), { target: { value: '88' } });
   fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
-  await screen.findByText('已在這台裝置新增 1 筆。原有資料保留。');
+  await screen.findByText(personalImportSavedNotice(1));
   expect(readPersonalImports(context)[0].grade).toBe('88');
   await prepare('課程名稱,學分,成績\n資料庫,3,88');
   fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
-  await screen.findByText('已在這台裝置新增 0 筆，略過 1 筆重複資料。原有資料保留。');
-  fireEvent.click(screen.getByRole('button', { name: '撤銷上次匯入' }));
+  await screen.findByText(personalImportSavedNotice(0));
+  await confirmUndo();
   await waitFor(() => expect(readPersonalImports(context)).toHaveLength(0));
 });
 it('blocks malformed table rows despite otherwise valid fields', async () => {
@@ -91,7 +100,7 @@ it('starts new pasted data without inheriting the previous screenshot source', a
   });
   await screen.findByRole('button', { name: '確認匯入 1 筆' });
   fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
-  await screen.findByText('已在這台裝置新增 1 筆。原有資料保留。');
+  await screen.findByText(personalImportSavedNotice(1));
   await prepare('課程名稱,學分,成績\n英文,2,90');
   fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
   await waitFor(() => expect(readPersonalImports(context)).toHaveLength(2));
@@ -177,9 +186,9 @@ it('cannot flatten a recurring ICS event into one confirmed personal record', as
 });
 
 it('saves only an explicitly selected accessible class as a personal link without granting membership', async () => {
-  const platformAccountId = 'pa_12345678-1234-1234-1234-123456789abc';
-  const linkedWorkspaceId = 'cw_12345678-1234-1234-1234-123456789abc';
-  const archivedId = 'cw_23456789-1234-1234-1234-123456789abc';
+  const platformAccountId = 'pa_aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  const linkedWorkspaceId = 'cw_aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  const archivedId = 'cw_bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
   context.owner = `platform:${platformAccountId}`;
   context.session = {
     platformAccountId,
@@ -203,7 +212,7 @@ it('saves only an explicitly selected accessible class as a personal link withou
   expect(readPersonalImports(context)).toHaveLength(0);
   fireEvent.change(selector, { target: { value: linkedWorkspaceId } });
   fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
-  await screen.findByText('已在這台裝置新增 1 筆。原有資料保留。');
+  await screen.findByText(personalImportSavedNotice(1));
   expect(readPersonalImports(context)).toEqual([
     expect.objectContaining({
       kind: 'grades',
@@ -221,4 +230,36 @@ it('saves only an explicitly selected accessible class as a personal link withou
   expect(vi.mocked(browserRequest).mock.calls).toEqual([
     ['class-workspaces', 'verified-account-context', undefined],
   ]);
+});
+
+it('asks before undoing and keeps records when the person chooses not to', async () => {
+  render(<PersonalImportCenter />);
+  await prepare();
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
+  await screen.findByText(personalImportSavedNotice(1));
+  fireEvent.click(screen.getByRole('button', { name: '撤銷上次匯入' }));
+  const dialog = screen.getByRole('dialog', { name: '撤銷上次匯入？' });
+  expect(dialog).toBeTruthy();
+  expect(screen.getByText(personalImportUndoBody(1))).toBeTruthy();
+  await waitFor(() =>
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '先不要' })),
+  );
+  fireEvent.click(screen.getByRole('button', { name: '先不要' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(readPersonalImports(context)).toHaveLength(1);
+});
+
+it('shows a Chinese notice when the screenshot file cannot be opened', async () => {
+  const { recognizePersonalImportImage } = await import('@/lib/personalImportOcr');
+  vi.mocked(recognizePersonalImportImage).mockRejectedValue(
+    new Error('The source image could not be decoded.'),
+  );
+  URL.createObjectURL = vi.fn(() => 'blob:preview');
+  URL.revokeObjectURL = vi.fn();
+  render(<PersonalImportCenter />);
+  fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), {
+    target: { files: [new File(['test'], 'broken.png', { type: 'image/png' })] },
+  });
+  await screen.findByText(PERSONAL_IMPORT_IMAGE_UNREADABLE);
+  expect(screen.queryByText(/could not be decoded/i)).toBeNull();
 });
