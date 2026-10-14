@@ -33,8 +33,10 @@ tags:
     timeout: 20000
 - takeScreenshot: platform_account_state
 
-# School authentication is a separate, capability-gated entry.
-- back
+# On iOS the navigation header owns the back action; a device-level back gesture
+# does not reliably pop the React Navigation stack.
+- tapOn:
+    id: BackButton
 - extendedWaitUntil:
     visible:
       id: login-landing
