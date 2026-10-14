@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
 import { SiteShell } from '@/components/SiteShell';
+import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
 import { useAuth } from '@/components/AuthGuard';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
@@ -284,7 +285,7 @@ function AssistantRoute() {
   });
   const groupId = search.get('courseId') || search.get('groupId') || '';
   const initialDraft = (search.get('q') || '').slice(0, 4000);
-  if (!school.ready) return <p role="status">正在確認校園資料…</p>;
+  if (!school.ready) return <SchoolScopePlaceholder />;
   if (loading) return <p role="status">正在確認登入狀態…</p>;
   if (error) return <p role="alert">無法確認登入狀態，請重新整理後再試。</p>;
   if (!user)

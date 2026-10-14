@@ -3,6 +3,7 @@
 import { use, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
+import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import {
   SHOWCASE_ORDER_BUTTON_TEXT,
   isMenuStale,
@@ -75,7 +76,7 @@ export default function CafeteriaPage(props: {
   const searchParams = props.searchParams ? use(props.searchParams) : undefined;
   const context = useBrowsingSchoolPageContext(searchParams);
   if (!context.ready) {
-    return <SiteShell title="餐廳"><p role="status">正在確認校園目錄…</p></SiteShell>;
+    return <SiteShell title="餐廳"><SchoolScopePlaceholder /></SiteShell>;
   }
   return <CafeteriaContent key={context.schoolId} {...context} />;
 }

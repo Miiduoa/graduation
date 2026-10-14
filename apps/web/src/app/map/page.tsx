@@ -5,6 +5,7 @@ import { use } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
+import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import { PageLoadingCard } from '@/components/PageLoadingCard';
 
@@ -28,7 +29,7 @@ export default function MapPage(props: {
   const route = Array.isArray(searchParams?.route) ? searchParams.route[0] : searchParams?.route;
   const focus = Array.isArray(searchParams?.focus) ? searchParams.focus[0] : searchParams?.focus;
 
-  if (!ready) return <SiteShell title="校園地圖"><p role="status">正在確認校園目錄…</p></SiteShell>;
+  if (!ready) return <SiteShell title="校園地圖"><SchoolScopePlaceholder /></SiteShell>;
 
   return (
     <SiteShell

@@ -11,6 +11,7 @@ import styles from './community.module.css';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { CommunityAccess } from './_components/CommunityAccess';
 import { SiteShell } from '@/components/SiteShell';
+import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import { FeedTab } from './_components/FeedTab';
 import { BoardsTab } from './_components/BoardsTab';
@@ -39,7 +40,7 @@ export default function CommunityPage() {
           <CommunityPageInner key={schoolId} schoolId={schoolId} schoolSearch={schoolSearch} />
         </CommunityAccess>
       ) : (
-        <p role="status">正在確認校園目錄…</p>
+        <SchoolScopePlaceholder />
       )}
     </SiteShell>
   );

@@ -3,6 +3,7 @@
 import { use } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
+import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
 import { LoginRequiredLostFoundComments } from '@/components/LoginRequiredLostFoundComments';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
@@ -18,7 +19,7 @@ export default function LostFoundPostPage(props: {
   return (
     <SiteShell title="發布失物招領" schoolName={context.schoolName}>
       {!context.ready ? (
-        <p role="status">正在確認校園目錄…</p>
+        <SchoolScopePlaceholder />
       ) : authLoading ? (
         <p role="status">正在確認登入狀態…</p>
       ) : !user ? (
