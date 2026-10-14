@@ -221,3 +221,21 @@ it('does not promote malformed primary coordinates over a second nested coordina
   })));
   expect(await loadMapLocations('pu')).toEqual([]);
 });
+
+it('does not publish locations from historical unflagged demo seed documents', async () => {
+  respond(snapshot(
+    entry('tw-nchu-poi-1', { schoolId: 'tw-nchu', name: '工程館', category: 'building', location: { lat: 24.1234, lng: 120.789 } }),
+    entry('tw-nchu-poi-2', { schoolId: 'tw-nchu', name: '圖書館', category: 'library', location: { lat: 24.124, lng: 120.7885 } }),
+    entry('tw-nchu-poi-3', { schoolId: 'tw-nchu', name: '學生餐廳', category: 'cafeteria', location: { lat: 24.122, lng: 120.79 } }),
+    entry('official', { schoolId: 'tw-nchu', name: '圖書館', category: 'library', lat: 24.12, lng: 120.67 }),
+  ));
+  expect((await loadMapLocations('tw-nchu')).map((place) => place.id)).toEqual(['official']);
+});
+
+it('excludes explicitly marked demo data but does not discard verified POIs merely for sharing a name', async () => {
+  respond(snapshot(
+    entry('marked', { name: '第一圖書館', isDemo: true, lat: 24.2, lng: 120.5 }),
+    entry('tw-nchu-poi-2', { name: '圖書館', lat: 24.12, lng: 120.67 }),
+  ));
+  expect((await loadMapLocations('tw-nchu')).map((place) => place.id)).toEqual(['tw-nchu-poi-2']);
+});
