@@ -45,3 +45,11 @@ SecureStore 測試使用符合已安裝 Expo key 規則的儲存替身，驗證�
 第五份補丁保留暫停門市的既有訂單權限，第六份提供訂單場域清單。驗收工具會拒絕把四／五份補丁的來源當成完整候選。建置與驗收指令見 [API 說明](../../deploy/nuni-api/README.md)。
 
 正式開放前還需要：選定包含點餐候選的整合發布版本、確認正式場域與店家營運權限、部署後雙帳號驗證，以及安裝 App 的登入、重啟恢復與相機掃碼實機驗收。本機 bundle 匯出沒有產生可安裝 APK／IPA，也沒有提交商店。
+
+## 正式環境的到期處理尚未就緒
+
+2026-10-15 的唯讀 Fly 稽核看到 `nuni-api` 只有兩台 `app` process machine，API image 啟動的是 `index.js`；可見 Fly apps 沒有獨立的訂餐到期 worker。未查 Fly 以外主機，不能推論所有主機都沒有 worker。
+
+同一份六補丁 image 包含 `apps/api/dist/food-expiry-worker.js`，但單純更新 API image 不會啟動它。正式發布必須另有 private worker process／service，明確啟用 `FOOD_EXPIRY_ENABLED=true`，以自己的 `4102/health/ready` 驗證；API 的 `4100` 探針不能替代它。需要先驗證 worker 資料庫身分、精確 schema manifest 及各目標場域的 food event contracts，保持 enforce。worker 同時處理餐桌關閉與候位到期，啟用前須盤點其影響範圍。
+
+瀏覽器 fixture 未啟動背景 worker，因此逾時的未付款訂單可能仍顯示待付款且沒有可用操作。正式驗收必須證明到期狀態更新、庫存只釋放一次、已付款訂單不被誤刪，以及 worker readiness 能反映失敗。此項尚未完成，不以 happy-path 成功取代發布驗收。

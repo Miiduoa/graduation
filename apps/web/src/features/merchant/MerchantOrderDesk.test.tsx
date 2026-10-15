@@ -319,7 +319,9 @@ it('quietly polls the merchant queue without clearing an open confirm panel, and
     configurable: true,
     get: () => 'hidden',
   });
-  document.dispatchEvent(new Event('visibilitychange'));
+  await act(async () => {
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(10_000);
   });
@@ -329,9 +331,11 @@ it('quietly polls the merchant queue without clearing an open confirm panel, and
     get: () => 'visible',
   });
   queue = [{ ...queueFixture(), state: 'paid', allowedActions: ['accept', 'reject'] }];
-  document.dispatchEvent(new Event('visibilitychange'));
+  await act(async () => {
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
   await screen.findByText('取餐 A101 · 已付款，待店家接單');
-  expect(screen.queryByLabelText('我已實際收到這筆訂單的款項')).toBeNull();
+  await waitFor(() => expect(screen.queryByLabelText('我已實際收到這筆訂單的款項')).toBeNull());
   expect(screen.getByRole('button', { name: '接單：A101' })).toBeTruthy();
   vi.useRealTimers();
 });
