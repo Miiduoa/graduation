@@ -1,6 +1,5 @@
 import { NextRequest } from 'next/server';
 import { NuniError } from '@campus/shared/src/nuni';
-import { parseNuniMemberships } from '@campus/shared/src/nuniAccount';
 import {
   assertNoPrivateCafeteriaFields,
   parseCafeteriaLocations,
@@ -10,7 +9,7 @@ import {
   type CafeteriaCatalogMenuItem,
   type CafeteriaCatalogRecord,
 } from '@campus/shared/src/cafeteriaCatalog';
-import { errorResponse, jsonResponse, platformRequest, publicRequest, readSession } from './server';
+import { errorResponse, jsonResponse, publicRequest } from './server';
 
 const TENANT = /^[a-z0-9][a-z0-9-]{0,78}[a-z0-9]$/;
 const LOCATION = /^[A-Za-z0-9_-]{1,100}$/;
@@ -36,35 +35,13 @@ function allowPublicRead(request: NextRequest, now = Date.now()): boolean {
   return true;
 }
 
-function requestedSchoolId(request: NextRequest): string | null {
+function requestedSchoolId(request: NextRequest): string {
   const extra = [...request.nextUrl.searchParams.keys()].filter((key) => key !== 'schoolId');
   if (extra.length) throw new NuniError(400, 'INVALID_INPUT');
   const value = request.nextUrl.searchParams.get('schoolId');
-  if (value === null || value === '') return null;
+  if (value === null || value === '') throw new NuniError(400, 'INVALID_INPUT');
   if (!TENANT.test(value)) throw new NuniError(400, 'INVALID_INPUT');
   return value;
-}
-
-async function boundSchoolId(request: NextRequest): Promise<string | null> {
-  const session = readSession(request);
-  if (!session || session.pendingLogout) return null;
-  try {
-    const memberships = parseNuniMemberships(await platformRequest('memberships', session)).filter(
-      (row) => row.state === 'verified',
-    );
-    if (memberships.length === 0) return null;
-    return memberships[0].tenantId;
-  } catch {
-    return null;
-  }
-}
-
-async function resolveCatalogScope(request: NextRequest): Promise<{ schoolId: string; bound: boolean }> {
-  const bound = await boundSchoolId(request);
-  if (bound) return { schoolId: bound, bound: true };
-  const requested = requestedSchoolId(request);
-  if (!requested) throw new NuniError(400, 'INVALID_INPUT');
-  return { schoolId: requested, bound: false };
 }
 
 function asCatalog(value: unknown, schoolId: string): {
@@ -110,12 +87,12 @@ export async function handleCafeteriaCatalog(request: NextRequest) {
   try {
     if (request.method !== 'GET') throw new NuniError(405, 'METHOD_NOT_ALLOWED');
     if (!allowPublicRead(request)) throw new NuniError(429, 'RATE_LIMITED');
-    const { schoolId, bound } = await resolveCatalogScope(request);
+    const schoolId = requestedSchoolId(request);
     const catalog = await loadPublicCatalog(schoolId);
     return jsonResponse(
       { schoolId, cafeterias: catalog.cafeterias, menus: catalog.menus },
       200,
-      bound ? 'private' : 'public',
+      'public',
     );
   } catch (error) {
     return errorResponse(error);
@@ -127,7 +104,7 @@ export async function handleCafeteriaDetail(request: NextRequest, cafeteriaId: s
     if (request.method !== 'GET') throw new NuniError(405, 'METHOD_NOT_ALLOWED');
     if (!LOCATION.test(cafeteriaId)) throw new NuniError(400, 'INVALID_INPUT');
     if (!allowPublicRead(request)) throw new NuniError(429, 'RATE_LIMITED');
-    const { schoolId, bound } = await resolveCatalogScope(request);
+    const schoolId = requestedSchoolId(request);
     const catalog = await loadPublicCatalog(schoolId);
     const cafeteria = catalog.cafeterias.find((row) => row.id === cafeteriaId) ?? null;
     return jsonResponse(
@@ -137,7 +114,7 @@ export async function handleCafeteriaDetail(request: NextRequest, cafeteriaId: s
         menus: cafeteria ? catalog.menus.filter((row) => row.cafeteriaId === cafeteriaId) : [],
       },
       200,
-      bound ? 'private' : 'public',
+      'public',
     );
   } catch (error) {
     return errorResponse(error);

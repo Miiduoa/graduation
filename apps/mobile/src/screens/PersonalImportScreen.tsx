@@ -1,5 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Modal,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
@@ -9,10 +17,12 @@ import {
   createPersonalImportId,
   serializePersonalImportsCsv,
   parsePersonalImport,
+  parsePersonalImportBackup,
   personalImportErrorMessage,
   personalImportSavedNotice,
   personalImportUndoBody,
   personalImportUndoneNotice,
+  PERSONAL_IMPORT_BACKUP_MAX_BYTES,
   PERSONAL_IMPORT_IMAGE_UNREADABLE,
   PERSONAL_IMPORT_UNDO_CONFIRM,
   PERSONAL_IMPORT_UNDO_KEEP,
@@ -47,6 +57,7 @@ import {
   type PersonalImportScope,
   type PersonalImportLedger,
 } from '../services/personalImports';
+import { sharePersonalImportBackup } from '../services/personalImportBackupSharing';
 
 const kinds = [
   ['timetable', '課表'],
@@ -230,6 +241,10 @@ function ImportWorkspace({
     type: 'paste',
   });
   const [rows, setRows] = useState<PersonalImportRow[]>([]);
+  const [backupPreview, setBackupPreview] = useState<
+    (Omit<ReturnType<typeof parsePersonalImportBackup>, 'rows'> & { name: string }) | null
+  >(null);
+  const [visibleRowCount, setVisibleRowCount] = useState(50);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [issues, setIssues] = useState<ImportIssue[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -373,6 +388,8 @@ function ImportWorkspace({
           .flatMap((row) => validatePersonalImportRow(row, { periodProfile: profile }))
           .map((issue) => JSON.stringify(issue)),
       );
+      setBackupPreview(null);
+      setVisibleRowCount(50);
       setRows(parsed.rows);
       setSelected(new Set(parsed.rows.map((row) => row.id)));
       // Parser errors (including unsupported calendar recurrence) survive field editing.
@@ -423,6 +440,7 @@ function ImportWorkspace({
       if (!current(run)) return;
       setText(result);
       setSource({ type: 'screenshot', name: asset.fileName || '截圖' });
+      setBackupPreview(null);
       setRows([]);
       setIssues([]);
       setNotice(
@@ -459,6 +477,7 @@ function ImportWorkspace({
       if (resultText.length > 100_000) throw new Error('文字過長，請分批匯入。');
       setText(resultText);
       setSource({ type: 'file', name: asset.name });
+      setBackupPreview(null);
       setRows([]);
       setIssues([]);
       if (/\.ics$/i.test(asset.name)) setKind('events');
@@ -467,6 +486,65 @@ function ImportWorkspace({
       if (current(run)) setNotice(personalImportErrorMessage(error, '檔案讀取失敗。'));
     } finally {
       if (current(run)) setBusy(false);
+    }
+  };
+  const readBackup = async () => {
+    if (savingRef.current) return;
+    cancel();
+    const run = generation.current;
+    setBusy(true);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/json', 'text/plain', 'application/octet-stream'],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+      if (!current(run) || result.canceled) return;
+      const asset = result.assets[0];
+      if (!asset || !/\.json$/i.test(asset.name))
+        throw new Error('請選擇 Campus One 匯出的 JSON 備份檔。');
+      const file = new File(asset.uri);
+      if ((asset.size || file.size) > PERSONAL_IMPORT_BACKUP_MAX_BYTES)
+        throw new Error('備份檔超過 8 MB，請確認檔案。');
+      const content = await file.text();
+      if (!current(run)) return;
+      const { rows: restored, ...summary } = parsePersonalImportBackup(content);
+      if (summary.schoolId !== scope.schoolId)
+        throw new Error(
+          `這份備份屬於 ${summary.schoolId}，與目前學校不同。請先切換學校再還原；原有資料沒有變更。`,
+        );
+      setText('');
+      setRows(restored);
+      setSelected(new Set(restored.map((row) => row.id)));
+      setIssues([]);
+      setVisibleRowCount(50);
+      setExpanded(restored[0]?.id || null);
+      setEditing(null);
+      setBackupPreview({ ...summary, name: asset.name });
+      setNotice('已讀取備份。請核對目的帳號、學校與各筆資料；確認前不會寫入。');
+    } catch (error) {
+      if (current(run))
+        setNotice(error instanceof Error ? error.message : '備份讀取失敗，原有資料沒有變更。');
+    } finally {
+      if (current(run)) setBusy(false);
+    }
+  };
+  const shareBackup = async () => {
+    if (savingRef.current || !active()) return;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      await sharePersonalImportBackup(scope, active);
+      if (active())
+        setNotice(
+          '已開啟系統分享選單。是否已保存，請到你選擇的目的地確認；這不代表資料已雲端同步。',
+        );
+    } catch (error) {
+      if (active())
+        setNotice(error instanceof Error ? error.message : '分享未完成，個人資料仍保留。');
+    } finally {
+      savingRef.current = false;
+      if (alive.current) setSaving(false);
     }
   };
   const verifyLinks = (items: PersonalImportRow[]) => {
@@ -487,9 +565,12 @@ function ImportWorkspace({
     setSaving(true);
     try {
       verifyLinks(chosen);
-      const result = await appendPersonalImports(scope, chosen, active);
+      const result = await appendPersonalImports(scope, chosen, active, {
+        restoreBackup: !!backupPreview,
+      });
       if (!active()) return;
       setLedger(result.ledger);
+      setBackupPreview(null);
       setRows([]);
       setSelected(new Set());
       setIssues([]);
@@ -536,7 +617,10 @@ function ImportWorkspace({
         row.kind === kind &&
         (!query ||
           [row.title, row.teacher, row.courseCode, row.academicYear, row.location, row.grade].some(
-            (value) => String(value || '').toLowerCase().includes(query),
+            (value) =>
+              String(value || '')
+                .toLowerCase()
+                .includes(query),
           )),
     );
   }, [ledger, kind, savedQuery]);
@@ -586,7 +670,10 @@ function ImportWorkspace({
         setSavedFeedback('此裝置目前無法開啟系統檔案分享。資料仍留在裝置上。');
         return;
       }
-      const file = new File(Paths.cache, 'campus-one-' + kind + '-' + createPersonalImportId() + '.csv');
+      const file = new File(
+        Paths.cache,
+        'campus-one-' + kind + '-' + createPersonalImportId() + '.csv',
+      );
       file.create();
       file.write(serializePersonalImportsCsv(records));
       if (!active()) {
@@ -599,7 +686,8 @@ function ImportWorkspace({
       });
       if (active()) setSavedFeedback('分享選單已關閉；請確認已在「檔案」或其他位置完成儲存。');
     } catch (error) {
-      if (active()) setSavedFeedback(personalImportErrorMessage(error, '無法準備 CSV，原有資料未變更。'));
+      if (active())
+        setSavedFeedback(personalImportErrorMessage(error, '無法準備 CSV，原有資料未變更。'));
     } finally {
       sharingRef.current = false;
       if (alive.current) setExporting(false);
@@ -661,8 +749,10 @@ function ImportWorkspace({
                 onPress={() => {
                   cancel();
                   setKind(value);
-                  setRows([]);
-                  setIssues([]);
+                  if (!backupPreview) {
+                    setRows([]);
+                    setIssues([]);
+                  }
                   setEditing(null);
                   setDeleting(null);
                   setSavedQuery('');
@@ -672,92 +762,142 @@ function ImportWorkspace({
               />
             ))}
           </View>
-          <Field
-            label="這批資料的學年度（例如 115）"
-            value={academicYear}
-            onChange={(value) => {
-              setYear(value);
-              setRows([]);
-              setIssues([]);
-            }}
-            disabled={saving}
-          />
-          <Field
-            label="這批資料的學期（例如 1、2、暑期）"
-            value={semester}
-            onChange={(value) => {
-              setSemester(value);
-              setRows([]);
-              setIssues([]);
-            }}
-            disabled={saving}
-          />
-          <Text style={textStyle}>1. 放入資料</Text>
+          <Text style={{ ...textStyle, fontWeight: '700' }}>備份與換裝置</Text>
+          <Text style={{ color: theme.colors.muted }}>
+            備份包含目前帳號與學校的全部課表、成績、活動與來源文字，檔案沒有加密。請只存到你信任的位置；分享選單開啟不代表已保存。
+          </Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            <Button text="選擇截圖" onPress={pickImage} disabled={busy || saving} />
-            <Button text="選擇文字檔" onPress={pickFile} disabled={busy || saving} />
-            {busy ? (
+            <Button
+              text="備份全部個人資料"
+              onPress={shareBackup}
+              disabled={busy || saving || !ledger?.records.length || !!loadError}
+            />
+            <Button text="從備份檔還原" onPress={readBackup} disabled={busy || saving} />
+          </View>
+          {backupPreview ? (
+            <View style={{ gap: 10 }}>
+              <Text style={{ ...textStyle, fontWeight: '700' }}>
+                備份還原預覽：{backupPreview.name}
+              </Text>
+              <Text style={textStyle}>
+                目的地：
+                {scope.owner === 'guest:device'
+                  ? '這台裝置的訪客資料'
+                  : scope.owner.startsWith('nuni:')
+                    ? '目前登入的平台帳號'
+                    : '目前登入的校園帳號'}{' '}
+                · {school?.name || scope.schoolId}
+              </Text>
+              <Text style={textStyle}>
+                備份時間：{new Date(backupPreview.exportedAt).toLocaleString('zh-TW')}。課表{' '}
+                {backupPreview.counts.timetable} 筆、成績 {backupPreview.counts.grades} 筆、活動{' '}
+                {backupPreview.counts.events} 筆。
+              </Text>
+              <Text style={{ color: theme.colors.muted }}>
+                每筆資料保留原學年度、學期與來源。新匯入資料的課班連結需從目前可存取的課班重新選擇；原有相同紀錄的個人連結會保留。
+              </Text>
               <Button
-                text="取消讀取"
+                text="取消備份預覽"
+                disabled={saving}
                 onPress={() => {
-                  cancel();
-                  setNotice('已取消，原有資料沒有變更。');
+                  setBackupPreview(null);
+                  setRows([]);
+                  setIssues([]);
+                  setSelected(new Set());
+                  setNotice('已取消預覽，原有資料沒有變更。');
                 }}
               />
-            ) : null}
-          </View>
-          <Text style={{ color: theme.colors.muted }}>
-            截圖支援 PNG、JPG，最多 8 MB。圖片在裝置上辨識，使用 App 內的辨識程式與中英文字庫。文字檔支援
-            TXT、CSV；行事曆也可讀 ICS。
-          </Text>
-          {busy ? <ActivityIndicator accessibilityLabel="正在讀取資料" /> : null}
-          <TextInput
-            accessibilityLabel="貼上或修正原始文字"
-            placeholder="貼上從學校網頁複製的文字，也可修正截圖辨識結果。"
-            multiline
-            editable={!saving}
-            maxLength={100_000}
-            value={text}
-            onChangeText={(value) => {
-              if (busy) cancel();
-              setText(value);
-              if (!value || source.type !== 'screenshot') setSource({ type: 'paste' });
-              setRows([]);
-              setIssues([]);
-            }}
-            style={[inputStyle, { minHeight: 130, textAlignVertical: 'top' }]}
-          />
-          <Text style={{ color: theme.colors.muted }}>
-            {kind === 'timetable'
-              ? '文字範例：資料庫 星期一 第3-4節 老師：王老師 教室：主顧303'
-              : kind === 'grades'
-                ? 'CSV 欄位：課程名稱,學分,成績,課號,教師'
-                : 'CSV 欄位：活動名稱,日期,開始時間,結束時間,地點。全天活動加「全天」欄並填「是」，時間留空。'}
-          </Text>
-          <Button
-            text="整理成可編輯資料"
-            kind="primary"
-            disabled={!text.trim() || busy || saving}
-            onPress={preview}
-          />
-          <Button
-            text="手動新增一筆"
-            disabled={busy || saving}
-            onPress={() => {
-              const row: PersonalImportRow = {
-                id: createPersonalImportId(),
-                kind,
-                title: '',
-                schoolId: scope.schoolId,
-                academicYear,
-                semester,
-                source: { type: 'paste', line: 1, rawText: '' },
-              };
-              setRows((currentRows) => [...currentRows, row]);
-              setSelected((value) => new Set([...value, row.id]));
-              setExpanded(row.id);
-            }}
-          />
+            </View>
+          ) : (
+            <>
+              <Field
+                label="這批資料的學年度（例如 115）"
+                value={academicYear}
+                onChange={(value) => {
+                  setYear(value);
+                  setRows([]);
+                  setIssues([]);
+                }}
+                disabled={saving}
+              />
+              <Field
+                label="這批資料的學期（例如 1、2、暑期）"
+                value={semester}
+                onChange={(value) => {
+                  setSemester(value);
+                  setRows([]);
+                  setIssues([]);
+                }}
+                disabled={saving}
+              />
+              <Text style={textStyle}>1. 放入資料</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                <Button text="選擇截圖" onPress={pickImage} disabled={busy || saving} />
+                <Button text="選擇文字檔" onPress={pickFile} disabled={busy || saving} />
+                {busy ? (
+                  <Button
+                    text="取消讀取"
+                    onPress={() => {
+                      cancel();
+                      setNotice('已取消，原有資料沒有變更。');
+                    }}
+                  />
+                ) : null}
+              </View>
+              <Text style={{ color: theme.colors.muted }}>
+                截圖支援 PNG、JPG，最多 8 MB。圖片在裝置上辨識，使用 App
+                內的辨識程式與中英文字庫。文字檔支援 TXT、CSV；行事曆也可讀 ICS。
+              </Text>
+              {busy ? <ActivityIndicator accessibilityLabel="正在讀取資料" /> : null}
+              <TextInput
+                accessibilityLabel="貼上或修正原始文字"
+                placeholder="貼上從學校網頁複製的文字，也可修正截圖辨識結果。"
+                multiline
+                editable={!saving}
+                maxLength={100_000}
+                value={text}
+                onChangeText={(value) => {
+                  if (busy) cancel();
+                  setText(value);
+                  if (!value || source.type !== 'screenshot') setSource({ type: 'paste' });
+                  setRows([]);
+                  setIssues([]);
+                }}
+                style={[inputStyle, { minHeight: 130, textAlignVertical: 'top' }]}
+              />
+              <Text style={{ color: theme.colors.muted }}>
+                {kind === 'timetable'
+                  ? '文字範例：資料庫 星期一 第3-4節 老師：王老師 教室：主顧303'
+                  : kind === 'grades'
+                    ? 'CSV 欄位：課程名稱,學分,成績,課號,教師'
+                    : 'CSV 欄位：活動名稱,日期,開始時間,結束時間,地點。全天活動加「全天」欄並填「是」，時間留空。'}
+              </Text>
+              <Button
+                text="整理成可編輯資料"
+                kind="primary"
+                disabled={!text.trim() || busy || saving}
+                onPress={preview}
+              />
+              <Button
+                text="手動新增一筆"
+                disabled={busy || saving}
+                onPress={() => {
+                  const row: PersonalImportRow = {
+                    id: createPersonalImportId(),
+                    kind,
+                    title: '',
+                    schoolId: scope.schoolId,
+                    academicYear,
+                    semester,
+                    source: { type: 'paste', line: 1, rawText: '' },
+                  };
+                  setRows((currentRows) => [...currentRows, row]);
+                  setSelected((value) => new Set([...value, row.id]));
+                  setExpanded(row.id);
+                }}
+              />
+            </>
+          )}
           {notice ? (
             <Text accessibilityRole="alert" style={textStyle}>
               {notice}
@@ -782,7 +922,7 @@ function ImportWorkspace({
               </Text>
               <Text style={textStyle}>{linksStatus}</Text>
               <Button text="重新讀取可連結課班" onPress={loadLinks} disabled={saving} />
-              {rows.map((row, index) => (
+              {rows.slice(0, visibleRowCount).map((row, index) => (
                 <View
                   key={row.id}
                   style={{
@@ -806,10 +946,20 @@ function ImportWorkspace({
                     }
                   >
                     <Text style={{ ...textStyle, fontWeight: '700' }}>
-                      {selected.has(row.id) ? '☑' : '□'} {index + 1}. {row.title || '名稱待填'}
+                      {selected.has(row.id) ? '☑' : '□'} {index + 1}.{' '}
+                      {backupPreview ? `${names[row.kind]} · ` : ''}
+                      {row.title || '名稱待填'}
                     </Text>
                   </Pressable>
                   <Text style={textStyle}>{rowSummary(row)}</Text>
+                  {backupPreview?.proposedLinks[row.id] ? (
+                    <Text style={{ color: theme.colors.muted }}>
+                      原備份有課班對照：
+                      {workspaces.find((item) => item.id === backupPreview.proposedLinks[row.id])
+                        ?.title || '目前無法確認原課班'}
+                      。需要時請在下方重新選擇。
+                    </Text>
+                  ) : null}
                   {(rowIssues.get(row.id) || []).map((issue, i) => (
                     <Text
                       key={i}
@@ -839,6 +989,19 @@ function ImportWorkspace({
                   ) : null}
                 </View>
               ))}
+              {rows.length > visibleRowCount ? (
+                <>
+                  <Text style={{ color: theme.colors.muted }}>
+                    目前顯示前 {visibleRowCount} 筆，共 {rows.length} 筆；已勾選 {chosen.length}{' '}
+                    筆。
+                  </Text>
+                  <Button
+                    text="顯示接下來 50 筆"
+                    disabled={saving}
+                    onPress={() => setVisibleRowCount((count) => count + 50)}
+                  />
+                </>
+              ) : null}
               {structuralErrors.length ? (
                 <Text style={{ color: theme.colors.danger }}>
                   來源格式還有問題，請修正原文後重新整理，或取消勾選有問題的資料。
@@ -887,7 +1050,8 @@ function ImportWorkspace({
                 style={inputStyle}
               />
               <Text style={{ color: theme.colors.muted }}>
-                找到 {savedRecords.length} 筆，顯示前 {Math.min(visibleSavedCount, savedRecords.length)} 筆。
+                找到 {savedRecords.length} 筆，顯示前{' '}
+                {Math.min(visibleSavedCount, savedRecords.length)} 筆。
               </Text>
               <Button
                 text="匯出本類資料為 CSV"
@@ -897,14 +1061,15 @@ function ImportWorkspace({
                 onPress={() => void exportRecords()}
               />
               <Text style={{ color: theme.colors.muted }}>
-                匯出包含私人課表或成績，請只分享給信任的對象。CSV 供試算表保存與查閱，不會同步帳號，也不包含原始截圖。
+                匯出包含私人課表或成績，請只分享給信任的對象。CSV
+                供試算表保存與查閱，不會同步帳號，也不包含原始截圖。
               </Text>
-              {savedFeedback ? (
-                <Text accessibilityRole="alert" style={textStyle}>
-                  {savedFeedback}
-                </Text>
-              ) : null}
             </View>
+          ) : null}
+          {savedFeedback ? (
+            <Text accessibilityRole="alert" style={textStyle}>
+              {savedFeedback}
+            </Text>
           ) : null}
           {loadError ? (
             <>
@@ -919,66 +1084,68 @@ function ImportWorkspace({
             <Text style={{ color: theme.colors.muted }}>目前沒有這類資料。</Text>
           ) : null}
           {ledger && !!savedQuery.trim() && !savedRecords.length ? (
-            <Text style={{ color: theme.colors.muted }}>沒有符合搜尋條件的資料，可修改關鍵字。</Text>
+            <Text style={{ color: theme.colors.muted }}>
+              沒有符合搜尋條件的資料，可修改關鍵字。
+            </Text>
           ) : null}
           {savedRecords.slice(0, visibleSavedCount).map((row) => (
-              <View
-                key={row.id}
-                style={{
-                  paddingVertical: 12,
-                  borderTopWidth: 1,
-                  borderColor: theme.colors.border,
-                  gap: 8,
-                }}
-              >
-                <Text style={{ ...textStyle, fontWeight: '700' }}>{row.title}</Text>
-                <Text style={textStyle}>{rowSummary(row)}</Text>
-                {row.kind === 'timetable' &&
-                (scope.schoolId !== 'pu' ||
-                  !row.startPeriod ||
-                  !row.endPeriod ||
-                  (row.dayOfWeek || 0) > 5) ? (
-                  <Text style={{ color: theme.colors.muted }}>
-                    已保存原始上課時間；目前課表格子只支援靜宜週一至週五的節次，這筆尚未放入格子。
-                  </Text>
-                ) : null}
-                {row.linkedCourseId ? (
-                  <Text style={textStyle}>
-                    個人課班對照：
-                    {workspaces.find((workspace) => workspace.id === row.linkedCourseId)?.title ||
-                      '目前無法驗證存取的課班'}
-                  </Text>
-                ) : null}
-                {editing?.before.id === row.id ? (
-                  <>
-                    <RowEditor
-                      disabled={saving}
-                      row={editing.row}
-                      workspaces={workspaces}
-                      onRefreshWorkspaces={() => void loadLinks()}
-                      onChange={(next) => setEditing({ before: editing.before, row: next })}
-                    />
-                    <Button text="儲存編輯" disabled={saving} onPress={saveEdit} />
-                    <Button text="取消編輯" disabled={saving} onPress={() => setEditing(null)} />
-                  </>
-                ) : (
-                  <Button
-                    text={`編輯 ${row.title}`}
+            <View
+              key={row.id}
+              style={{
+                paddingVertical: 12,
+                borderTopWidth: 1,
+                borderColor: theme.colors.border,
+                gap: 8,
+              }}
+            >
+              <Text style={{ ...textStyle, fontWeight: '700' }}>{row.title}</Text>
+              <Text style={textStyle}>{rowSummary(row)}</Text>
+              {row.kind === 'timetable' &&
+              (scope.schoolId !== 'pu' ||
+                !row.startPeriod ||
+                !row.endPeriod ||
+                (row.dayOfWeek || 0) > 5) ? (
+                <Text style={{ color: theme.colors.muted }}>
+                  已保存原始上課時間；目前課表格子只支援靜宜週一至週五的節次，這筆尚未放入格子。
+                </Text>
+              ) : null}
+              {row.linkedCourseId ? (
+                <Text style={textStyle}>
+                  個人課班對照：
+                  {workspaces.find((workspace) => workspace.id === row.linkedCourseId)?.title ||
+                    '目前無法驗證存取的課班'}
+                </Text>
+              ) : null}
+              {editing?.before.id === row.id ? (
+                <>
+                  <RowEditor
                     disabled={saving}
-                    onPress={() => setEditing({ before: row, row: { ...row } })}
+                    row={editing.row}
+                    workspaces={workspaces}
+                    onRefreshWorkspaces={() => void loadLinks()}
+                    onChange={(next) => setEditing({ before: editing.before, row: next })}
                   />
-                )}
+                  <Button text="儲存編輯" disabled={saving} onPress={saveEdit} />
+                  <Button text="取消編輯" disabled={saving} onPress={() => setEditing(null)} />
+                </>
+              ) : (
                 <Button
-                  text="移除這筆"
-                  kind="outline"
+                  text={`編輯 ${row.title}`}
                   disabled={saving}
-                  onPress={() => {
-                    setSavedFeedback('');
-                    setDeleting(row);
-                  }}
+                  onPress={() => setEditing({ before: row, row: { ...row } })}
                 />
-              </View>
-            ))}
+              )}
+              <Button
+                text="移除這筆"
+                kind="outline"
+                disabled={saving}
+                onPress={() => {
+                  setSavedFeedback('');
+                  setDeleting(row);
+                }}
+              />
+            </View>
+          ))}
           {savedRecords.length > visibleSavedCount ? (
             <Button
               text={'再顯示 ' + Math.min(40, savedRecords.length - visibleSavedCount) + ' 筆'}
@@ -1068,11 +1235,10 @@ function ImportWorkspace({
               gap: 14,
             }}
           >
-            <Text style={{ ...textStyle, fontSize: 18, fontWeight: '700' }}>
-              移除個人紀錄
-            </Text>
+            <Text style={{ ...textStyle, fontSize: 18, fontWeight: '700' }}>移除個人紀錄</Text>
             <Text style={textStyle}>
-              確定移除「{deleting?.title}」？只會刪除目前帳號與學校的這筆本機資料。此操作無法直接復原，請先確認是否需要匯出備份。
+              確定移除「{deleting?.title}
+              」？只會刪除目前帳號與學校的這筆本機資料。此操作無法直接復原，請先確認是否需要匯出備份。
             </Text>
             <Button
               text="確認移除"

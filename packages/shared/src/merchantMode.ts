@@ -114,15 +114,16 @@ export function parseMenuCsv(text: string): { name: string; price: number | null
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
-  if (lines.length === 0) return [];
-  const header = splitCsvLine(lines[0]).map((cell) => cell.toLowerCase());
+  const firstLine = lines[0];
+  if (firstLine === undefined) return [];
+  const header = splitCsvLine(firstLine).map((cell) => cell.toLowerCase());
   const nameIndex = header.findIndex((cell) => /name|品名|名稱/.test(cell));
   const priceIndex = header.findIndex((cell) => /price|價格|售價/.test(cell));
   const categoryIndex = header.findIndex((cell) => /category|分類|類別/.test(cell));
   const start = nameIndex >= 0 ? 1 : 0;
   return lines.slice(start).flatMap((line) => {
     const cells = splitCsvLine(line);
-    const name = (nameIndex >= 0 ? cells[nameIndex] : cells[0] || '').trim();
+    const name = ((nameIndex >= 0 ? cells[nameIndex] : cells[0]) ?? '').trim();
     if (!name) return [];
     const rawPrice = priceIndex >= 0 ? cells[priceIndex] : cells[1];
     const parsed = rawPrice != null && rawPrice !== '' ? Number(String(rawPrice).replace(/[^\d.]/g, '')) : NaN;
