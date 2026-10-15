@@ -155,10 +155,11 @@ export class PublicCafeteriaService {
     }
     const locations = (
       await this.db.query<LocationRow>(
-        `SELECT id, name, zone_label, NULL::text AS opening_hours, description, merchant_mode, review_status,
+        `SELECT id, name, zone_label, NULL::text AS opening_hours, description, merchant_mode,
+                'unverified'::text AS review_status,
                 source_url, external_order_url, source_label, source_updated_at
            FROM food_locations
-          WHERE tenant_id=$1
+          WHERE tenant_id=$1 AND public_access=true AND status='open'
           ORDER BY name
           LIMIT 100`,
         [schoolId],
@@ -166,8 +167,9 @@ export class PublicCafeteriaService {
     ).rows
       .map((row) => projectLocation(row, schoolId))
       .filter((row): row is CafeteriaCatalogRecord => row !== null);
+    const locationIds = locations.map((row) => row.id);
     const menus =
-      locations.length === 0
+      locationIds.length === 0
         ? []
         : projectMenus(
             (
@@ -175,9 +177,9 @@ export class PublicCafeteriaService {
                 `SELECT i.id, v.location_id, i.name, i.section_name, i.description, i.price_minor, i.available, false AS sold_out
                    FROM food_menu_items i
                    JOIN food_menu_versions v ON v.id=i.menu_version_id AND v.tenant_id=i.tenant_id
-                  WHERE i.tenant_id=$1 AND v.state='published'
+                  WHERE i.tenant_id=$1 AND v.state='published' AND v.location_id = ANY($2::text[])
                   LIMIT 400`,
-                [schoolId],
+                [schoolId, locationIds],
               )
             ).rows,
             locations,

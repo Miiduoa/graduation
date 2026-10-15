@@ -52,10 +52,18 @@ def apply_extension(checkout, apply=False):
         raise ValueError('Overlay checksum mismatch')
     app = checkout / 'apps/api/src/app.ts'
     patched = patch_app(app.read_text())
+    inventory = json.loads((HERE / 'packaging-inventory.json').read_text())
+    inventory_patch = HERE / 'runtime-inventory.patch'
+    if (inventory['sourceFiles'] != files
+            or inventory['appSha256'] != hashlib.sha256(patched.encode()).hexdigest()
+            or inventory['patchSha256'] != hashlib.sha256(inventory_patch.read_bytes()).hexdigest()):
+        raise ValueError('Runtime inventory does not match the catalog source; regenerate it before building')
+    subprocess.run(['git', 'apply', '--check', str(inventory_patch)], cwd=checkout, check=True)
     plan = {
         'baseTree': tree,
         'mode': 'candidate-only',
         'files': files,
+        'runtimeInventorySha256': inventory['inventorySha256'],
         'deploys': False,
         'runsMigrations': False,
         'writesProductionDatabase': False,
@@ -68,6 +76,9 @@ def apply_extension(checkout, apply=False):
         destination.write_bytes(source.read_bytes())
     app.write_text(patched)
     subprocess.run(['git', 'add', 'apps/api/src/app.ts', *targets.keys()], cwd=checkout, check=True)
+    subprocess.run(['git', 'apply', '--index', str(inventory_patch)], cwd=checkout, check=True)
+    if hashlib.sha256((checkout / 'runtime-grant-matrix.json').read_bytes()).hexdigest() != inventory['inventorySha256']:
+        raise ValueError('Patched runtime inventory checksum mismatch')
     plan['candidateTree'] = subprocess.check_output(['git', 'write-tree'], cwd=checkout, text=True).strip()
     return plan
 
