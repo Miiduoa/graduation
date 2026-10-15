@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { NuniError } from '@campus/shared/src/nuni';
 import {
   createNuniFoodClient,
@@ -8,10 +8,11 @@ import {
   type NuniFoodOrderCommandResult,
   type NuniFoodHandoverReceipt,
 } from '@campus/shared/src/nuniFood';
-import { browserRequest } from '@/features/nuni/Session';
+import { browserRequest, useNuniSession } from '@/features/nuni/Session';
 import { Button } from '@/components/ui/Button';
 import { Input, Select, Textarea } from '@/components/ui/Input';
 import {
+  FOOD_POLL_MS,
   FoodMutationStatus,
   foodKey,
   foodMoney,
@@ -52,6 +53,8 @@ export function MerchantOrderDesk({
   locationId: string;
   cache: FoodDraftCache;
 }) {
+  const auth = useNuniSession();
+  const accountId = auth.session?.platformAccountId ?? '';
   const client = useMemo(
     () =>
       createNuniFoodClient((path, input, query) =>
@@ -76,7 +79,7 @@ export function MerchantOrderDesk({
     ]);
     return { queue, shift };
   }, [client, tenantId, locationId, cursor]);
-  const data = useFoodRead(load);
+  const data = useFoodRead(load, { pollMs: FOOD_POLL_MS });
   const [opening, setOpening] = useFoodDraft(cache, `${scope}:opening`, '0');
   const [counted, setCounted] = useFoodDraft(cache, `${scope}:counted`, '');
   const [openNext, setOpenNext] = useFoodDraft(cache, `${scope}:open-next`, false);
@@ -119,6 +122,7 @@ export function MerchantOrderDesk({
   const task = useFoodMutation({
     cache,
     scope,
+    accountId,
     enabled: !!data.data,
     execute,
     reload: data.reload,
@@ -144,8 +148,20 @@ export function MerchantOrderDesk({
       }
     },
   });
-  const locked = !data.data || task.busy || !!task.pending;
+  const locked = !data.data || task.busy || !!task.pending || task.storageBlocked;
   const chosen = data.data?.queue.orders.find((order) => order.id === selected?.orderId);
+  useEffect(() => {
+    if (!selected || !data.data || task.busy || task.pending) return;
+    if (
+      !chosen ||
+      !chosen.allowedActions.includes(
+        selected.action as NuniFoodStaffOrderQueueItem['allowedActions'][number],
+      )
+    ) {
+      setSelected(null);
+      setConfirmed(false);
+    }
+  }, [selected, data.data, chosen, task.busy, task.pending]);
   const form = selected
     ? (fields[selected.orderId] ?? { token: '', reason: 'item-unavailable', detail: '' })
     : null;
