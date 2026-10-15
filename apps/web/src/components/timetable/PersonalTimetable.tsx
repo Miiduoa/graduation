@@ -273,7 +273,13 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
       setTimetable({ ...next, schoolId });
       setPlanResult(null);
       setShareUrl('');
-      setNotice(options?.deviceOnly || result.stored === 'local' ? TIMETABLE_DEVICE_ONLY_STORED_COPY : message);
+      setNotice(
+        options?.deviceOnly
+          ? TIMETABLE_DEVICE_ONLY_STORED_COPY
+          : result.stored === 'local' && next.shareWithFriends !== timetable?.shareWithFriends
+            ? '已儲存於這台裝置，但好友可見狀態仍以雲端資料為準。'
+            : result.stored === 'local' ? TIMETABLE_DEVICE_ONLY_STORED_COPY : message,
+      );
       return true;
     } catch (error) {
       if (activeRef.current && error instanceof TimetableCloudSaveError) {
@@ -631,6 +637,9 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
         </div>
       ) : (
         <ul className={styles.list}>
+          {visibleCourses.every((course) => course.day !== day) && (
+            <li><p className={styles.empty}>這天還沒有課程，可使用上方「新增課程」開始。</p></li>
+          )}
           {visibleCourses
             .filter((course) => course.day === day)
             .sort((a, b) => a.start - b.start)
@@ -704,7 +713,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
             <button
               type="button"
               className="btn primary"
-              disabled={busy}
+              disabled={busy || !analyzed.some((item) => item.selected !== false)}
               onClick={() => void confirmImport()}
             >
               {TIMETABLE_DEVICE_ONLY_SUBMIT_COPY}
