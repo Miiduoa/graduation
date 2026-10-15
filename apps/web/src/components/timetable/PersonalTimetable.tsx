@@ -713,7 +713,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
             <button
               type="button"
               className="btn primary"
-              disabled={busy}
+              disabled={busy || !analyzed.some((item) => item.selected !== false)}
               onClick={() => void confirmImport()}
             >
               {TIMETABLE_DEVICE_ONLY_SUBMIT_COPY}
