@@ -16,17 +16,22 @@ import {
   PERSONAL_IMPORT_UNDO_KEEP,
   PERSONAL_IMPORT_UNDO_LABEL,
   PERSONAL_IMPORT_UNDO_TITLE,
+  parsePersonalImportBackup,
+  serializePersonalImportBackup,
+  PERSONAL_IMPORT_BACKUP_MAX_BYTES,
   validatePersonalImportRow,
   type PersonalImportKind,
   type PersonalImportRow,
   type PersonalImportRecord,
   type PersonalImportSource,
   type ImportIssue,
+  type PersonalImportBackupPreview,
 } from '@campus/shared';
 import { createNuniClasses, type NuniWorkspace } from '@campus/shared/src/nuni';
 import { browserRequest, useOptionalNuniSession } from '@/features/nuni/Session';
 import {
   changePersonalImport,
+  readPersonalImports,
   savePersonalImportBatch,
   undoPersonalImports,
   type PersonalImportScope,
@@ -46,6 +51,7 @@ const EXAMPLES: Record<PersonalImportKind, string> = {
   grades: '課程名稱,學分,成績,課號\n資料庫,3,85,CS301',
   events: '活動名稱,日期,開始時間,結束時間,地點\n期中考,2026-11-05,10:00,12:00,主顧303',
 };
+const REVIEW_PAGE_SIZE = 25;
 function errorMessage(error: unknown, fallback = '這次沒有完成，草稿仍保留，請再試一次。') {
   return personalImportErrorMessage(error, fallback);
 }
@@ -228,7 +234,8 @@ function RowFields({
               )}
               {workspaces.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {item.title} · {item.memberRole === 'student' ? '學生' : '管理者（未代表教師認證）'}
+                  {item.title} ·{' '}
+                  {item.memberRole === 'student' ? '學生' : '管理者（未代表教師認證）'}
                 </option>
               ))}
             </select>
@@ -313,6 +320,8 @@ function ImportWorkspace({
     type: 'paste',
   });
   const [rows, setRows] = useState<PersonalImportRow[]>([]);
+  const [backup, setBackup] = useState<Omit<PersonalImportBackupPreview, 'rows'> | null>(null);
+  const [reviewPage, setReviewPage] = useState(0);
   const [excluded, setExcluded] = useState<string[]>([]);
   const [parseIssues, setParseIssues] = useState<ImportIssue[]>([]);
   const [notice, setNotice] = useState('');
@@ -397,6 +406,8 @@ function ImportWorkspace({
   const parse = (input: string, inputSource = source) => {
     const parsed = parsePersonalImport(input, { ...options, source: inputSource });
     setRows(parsed.rows);
+    setBackup(null);
+    setReviewPage(0);
     setParseIssues(
       parsed.issues.filter((issue) => {
         if (issue.severity !== 'error') return false;
@@ -450,13 +461,41 @@ function ImportWorkspace({
       name: file.name,
     };
     try {
+      if (/\.json$/i.test(file.name)) {
+        if (file.size > PERSONAL_IMPORT_BACKUP_MAX_BYTES)
+          throw new Error('備份檔超過 8 MB，請確認是否為 Campus One 匯出的備份。');
+        const restored = parsePersonalImportBackup(await file.text());
+        if (!active.current || controller.signal.aborted) return;
+        if (restored.schoolId !== scope.schoolId)
+          throw new Error('這份備份屬於其他校園。請先切換到備份原本的校園，再選擇檔案。');
+        const { rows: restoredRows, ...metadata } = restored;
+        setRows(restoredRows);
+        setBackup(metadata);
+        setReviewPage(0);
+        setExcluded([]);
+        setParseIssues([]);
+        setText('');
+        setPreview('');
+        setSource({ type: 'paste' });
+        setNotice(
+          restoredRows.length
+            ? `備份已讀取，共 ${restoredRows.length} 筆。請核對後再加入目前的個人紀錄。`
+            : '這份備份沒有個人紀錄。',
+        );
+        requestAnimationFrame(() =>
+          review.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+        );
+        return;
+      }
       let input: string;
       if (image) {
         setPreview(URL.createObjectURL(file));
         input = await recognizePersonalImportImage(file, controller.signal, setProgress);
       } else {
         if (!/\.(csv|tsv|txt|ics)$/i.test(file.name))
-          throw new Error('目前可讀圖片、CSV、TSV、TXT 與 ICS。PDF、Excel 請先匯出成 CSV 或截圖。');
+          throw new Error(
+            '目前可讀圖片、CSV、TSV、TXT、ICS 與 Campus One JSON 備份。PDF、Excel 請先匯出成 CSV 或截圖。',
+          );
         if (file.size > 400_000) throw new Error('文字檔超過 400 KB，請分成較小的檔案再匯入。');
         input = await file.text();
       }
@@ -498,11 +537,14 @@ function ImportWorkspace({
         scope,
         selected,
         () => active.current && !suspended.current,
+        { restoreBackup: !!backup },
       );
       if (!active.current) return;
       setNotice(personalImportSavedNotice(result.added));
       if (result.added) setLastBatch(result.batchId);
       setRows([]);
+      setBackup(null);
+      setReviewPage(0);
       setExcluded([]);
       setParseIssues([]);
       setText('');
@@ -540,6 +582,25 @@ function ImportWorkspace({
     anchor.download = 'campus-one-' + kind + '.csv';
     anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  const exportBackup = () => {
+    if (!active.current || suspended.current || writing.current) return;
+    try {
+      const content = serializePersonalImportBackup(readPersonalImports(scope), {
+        schoolId: scope.schoolId,
+      });
+      const url = URL.createObjectURL(
+        new Blob([content], { type: 'application/json;charset=utf-8' }),
+      );
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `campus-one-backup-${scope.schoolId}-${new Date().toISOString().slice(0, 10)}.json`;
+      anchor.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setNotice('已交由瀏覽器下載完整備份，請確認檔案已存好。檔案含個人資料，請妥善保管。');
+    } catch (error) {
+      setNotice(errorMessage(error));
+    }
   };
   const saved = ledger.records.filter(
     (row) =>
@@ -657,7 +718,7 @@ function ImportWorkspace({
             <input
               ref={fileInput}
               type="file"
-              accept="image/png,image/jpeg,image/webp,.csv,.tsv,.txt,.ics"
+              accept="image/png,image/jpeg,image/webp,.csv,.tsv,.txt,.ics,.json,application/json"
               className={styles.file}
               aria-label="選擇截圖或檔案"
               onChange={(event) => {
@@ -674,6 +735,9 @@ function ImportWorkspace({
             </button>
             <span>也可以拖曳到這裡</span>
             <small>PNG／JPEG／WebP，單張 10 MB 內；CSV／TSV／TXT／ICS，400 KB 內</small>
+            <small>
+              換裝置：也可選擇 Campus One 完整備份（JSON，8 MB 內），一次帶回三類資料與所有學期。
+            </small>
           </div>
           <details className={styles.paste} open={!!text}>
             <summary>或貼上文字</summary>
@@ -782,6 +846,19 @@ function ImportWorkspace({
         <p className={styles.note}>
           課程連結只方便你開啟已加入的課。匯入不會自動加入班級、驗證教師身分或修改正式成績。
         </p>
+        {backup && (
+          <div className={styles.notice}>
+            <strong>正在核對完整備份</strong>
+            <p>
+              {new Date(backup.exportedAt).toLocaleString('zh-TW')} 匯出 · 課表{' '}
+              {backup.counts.timetable} 筆、成績 {backup.counts.grades} 筆、活動{' '}
+              {backup.counts.events} 筆。
+            </p>
+            <p>
+              各筆保留原學期與來源文字。原有課程連結需重新選擇你現在可開啟的課程；已在這台裝置存在的相同紀錄會保留原連結。
+            </p>
+          </div>
+        )}
         {!rows.length ? (
           <p className={styles.empty}>帶入資料後，會在這裡逐筆顯示。你也可以直接手動新增。</p>
         ) : (
@@ -796,6 +873,8 @@ function ImportWorkspace({
                 disabled={saving}
                 onClick={() => {
                   setRows([]);
+                  setBackup(null);
+                  setReviewPage(0);
                   setExcluded([]);
                   setParseIssues([]);
                   setNotice('草稿已取消，原本的紀錄沒有改變。');
@@ -803,36 +882,88 @@ function ImportWorkspace({
               >
                 取消這份草稿
               </button>
+              <button
+                className="btn"
+                type="button"
+                disabled={saving}
+                onClick={() => setExcluded([])}
+              >
+                全選
+              </button>
+              <button
+                className="btn"
+                type="button"
+                disabled={saving}
+                onClick={() => setExcluded(rows.map((row) => row.id))}
+              >
+                全部取消勾選
+              </button>
             </div>
             <fieldset className={styles.fieldset} disabled={saving || reading}>
-              {rows.map((row, index) => (
-                <article className={styles.row} key={row.id}>
-                  <label className={styles.check}>
-                    <input
-                      type="checkbox"
-                      checked={!excluded.includes(row.id)}
-                      onChange={(event) =>
-                        setExcluded((current) =>
-                          event.target.checked
-                            ? current.filter((id) => id !== row.id)
-                            : [...current, row.id],
-                        )
-                      }
+              {rows
+                .slice(reviewPage * REVIEW_PAGE_SIZE, (reviewPage + 1) * REVIEW_PAGE_SIZE)
+                .map((row, index) => (
+                  <article className={styles.row} key={row.id}>
+                    <label className={styles.check}>
+                      <input
+                        type="checkbox"
+                        checked={!excluded.includes(row.id)}
+                        onChange={(event) =>
+                          setExcluded((current) =>
+                            event.target.checked
+                              ? current.filter((id) => id !== row.id)
+                              : [...current, row.id],
+                          )
+                        }
+                      />
+                      <strong>
+                        第 {reviewPage * REVIEW_PAGE_SIZE + index + 1} 筆 ·{' '}
+                        {KINDS.find((entry) => entry.value === row.kind)?.title}
+                        {row.title ? ` · ${row.title}` : ''}
+                      </strong>
+                    </label>
+                    {backup?.proposedLinks[row.id] && (
+                      <p className={styles.note}>
+                        原備份有課程連結。
+                        {workspaces.find((item) => item.id === backup.proposedLinks[row.id])
+                          ?.title || '請核對目前可用的課程'}
+                        ；要連結請在下方重新選擇，也可先保留個人紀錄。
+                      </p>
+                    )}
+                    <RowFields
+                      row={row}
+                      periodProfile={periodProfile}
+                      workspaces={workspaces}
+                      onRefreshWorkspaces={() => setLinkRefreshVersion((v) => v + 1)}
+                      onChange={(next) => updateDraft(row, next)}
                     />
-                    <strong>
-                      第 {index + 1} 筆{row.title ? ` · ${row.title}` : ''}
-                    </strong>
-                  </label>
-                  <RowFields
-                    row={row}
-                    periodProfile={periodProfile}
-                    workspaces={workspaces}
-                    onRefreshWorkspaces={() => setLinkRefreshVersion((v) => v + 1)}
-                    onChange={(next) => updateDraft(row, next)}
-                  />
-                </article>
-              ))}
+                  </article>
+                ))}
             </fieldset>
+            {rows.length > REVIEW_PAGE_SIZE && (
+              <nav className={styles.actions} aria-label="待確認資料分頁">
+                <button
+                  className="btn"
+                  type="button"
+                  disabled={saving || reviewPage === 0}
+                  onClick={() => setReviewPage((page) => page - 1)}
+                >
+                  上一頁
+                </button>
+                <span>
+                  第 {reviewPage + 1} / {Math.ceil(rows.length / REVIEW_PAGE_SIZE)} 頁 · 每頁{' '}
+                  {REVIEW_PAGE_SIZE} 筆
+                </span>
+                <button
+                  className="btn"
+                  type="button"
+                  disabled={saving || (reviewPage + 1) * REVIEW_PAGE_SIZE >= rows.length}
+                  onClick={() => setReviewPage((page) => page + 1)}
+                >
+                  下一頁
+                </button>
+              </nav>
+            )}
             <div className={styles.confirm}>
               <div>
                 <strong>只新增，不取代你原有的資料</strong>
@@ -864,6 +995,16 @@ function ImportWorkspace({
             <span>3</span> 我的個人紀錄
           </h2>
           <div className={styles.actions}>
+            <button
+              type="button"
+              className="btn"
+              disabled={
+                saving || reading || ledger.loading || !!ledger.error || !ledger.records.length
+              }
+              onClick={exportBackup}
+            >
+              下載完整備份
+            </button>
             <button type="button" className="btn" disabled={!saved.length} onClick={exportRecords}>
               匯出這類資料
             </button>
@@ -879,6 +1020,10 @@ function ImportWorkspace({
             )}
           </div>
         </div>
+        <p className={styles.note}>
+          完整備份包含目前帳號在{schoolName}的課表、成績、活動、所有學期與來源文字，可在 Web 或 App
+          選檔還原。JSON 檔未加密，請存到自己信任的位置；下載後請確認檔案存在。
+        </p>
         {kind === 'grades' && (
           <p className={styles.note}>
             自行匯入的參考成績，共 {saved.length} 筆、
@@ -949,16 +1094,19 @@ function ImportWorkspace({
                   disabled={saving}
                   onClick={() => {
                     setUndoOpen(false);
-                    void mutate(async () => {
-                      await undoPersonalImports(
-                        scope,
-                        lastBatch,
-                        () => active.current && !suspended.current,
-                      );
-                      if (active.current) setLastBatch('');
-                    }, personalImportUndoneNotice(
-                      ledger.records.filter((row) => row.batchId === lastBatch).length,
-                    ));
+                    void mutate(
+                      async () => {
+                        await undoPersonalImports(
+                          scope,
+                          lastBatch,
+                          () => active.current && !suspended.current,
+                        );
+                        if (active.current) setLastBatch('');
+                      },
+                      personalImportUndoneNotice(
+                        ledger.records.filter((row) => row.batchId === lastBatch).length,
+                      ),
+                    );
                   }}
                 >
                   {PERSONAL_IMPORT_UNDO_CONFIRM}

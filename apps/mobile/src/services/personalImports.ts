@@ -2,6 +2,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   createPersonalImportId,
   planPersonalImport,
+  preparePersonalImportBackupRestore,
+  PERSONAL_IMPORT_BACKUP_MAX_RECORDS,
   personalImportKey,
   mapPersonalImportPeriods,
   validatePersonalImportRow,
@@ -118,13 +120,17 @@ export function appendPersonalImports(
   scope: PersonalImportScope,
   rows: PersonalImportRow[],
   active = () => true,
+  options: { restoreBackup?: boolean } = {},
 ) {
   return mutate(scope, active, (current) => {
     if (rows.some((row) => row.schoolId !== scope.schoolId))
       throw new Error('資料的學校與目前選擇不同。');
     const id = createPersonalImportId();
     const createdAt = new Date().toISOString();
-    const planned = planPersonalImport(current.records, rows, {
+    const incoming = options.restoreBackup
+      ? preparePersonalImportBackupRestore(rows, current.records)
+      : rows;
+    const planned = planPersonalImport(current.records, incoming, {
       batchId: id,
       importedAt: createdAt,
       periodProfile: scope.schoolId === 'pu' ? 'pu' : undefined,
@@ -133,6 +139,8 @@ export function appendPersonalImports(
       (issue) => issue.severity === 'error' || issue.code === 'duplicate-metadata-conflict',
     );
     if (errors.length) throw new Error(`這次沒有儲存。${errors[0].message}`);
+    if (planned.records.length > PERSONAL_IMPORT_BACKUP_MAX_RECORDS)
+      throw new Error('這台裝置已達 2,000 筆上限，請先備份並移除不需要的紀錄。');
     const ledger: PersonalImportLedger = {
       version: 1,
       records: planned.records,

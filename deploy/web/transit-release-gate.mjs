@@ -8,11 +8,31 @@ export const MACHINE_IDS = ['683e513be2d358', '80e447b6140178'];
 const CITY = 'Taichung';
 const MARKER = 'CAMPUS_TRANSIT_PROBE:';
 const FRESH_MS = 90_000;
+const LIVE_PROFILE = 'live-tdx';
+const LINKS_PROFILE = 'official-links-only';
+const OFFICIAL_LINKS = ['https://citybus-free.taichung.gov.tw/', 'https://citybus.taichung.gov.tw/'];
+
 const record = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const text = (v) => typeof v === 'string' ? v.trim().slice(0, 120) : '';
 const id = (v) => typeof v === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(v);
 class GateError extends Error {}
 const fail = (code) => { throw new GateError(code); };
+
+export function validateProfile(profile = LIVE_PROFILE) {
+  if (profile !== LIVE_PROFILE && profile !== LINKS_PROFILE) fail('unknown-transit-profile');
+  return profile;
+}
+
+export async function probeRuntime(profile = LIVE_PROFILE, options = {}) {
+  validateProfile(profile);
+  if (profile === LIVE_PROFILE) return { ...await probeTdx(options), profile, transitReady: true };
+  const credentials = options.credentials ?? { clientId: process.env.TDX_CLIENT_ID, clientSecret: process.env.TDX_CLIENT_SECRET };
+  // Even an empty or whitespace-only configured variable is not an absent credential.
+  const configured = [credentials.clientId, credentials.clientSecret].map((value) => value !== undefined);
+  if (configured.some(Boolean)) fail(configured.every(Boolean) ? 'tdx-credentials-present' : 'tdx-partial-configuration');
+  return { ready: true, profile, mode: 'official-links', transitReady: false,
+    credentialsAbsent: true, reason: 'not-configured', physicalDeviceVerified: false };
+}
 
 async function json(url, init = {}, fetcher = fetch) {
   let response;
@@ -85,7 +105,8 @@ export async function probeTdx({ credentials = {clientId: process.env.TDX_CLIENT
   return collect(stops, (stopId) => request('EstimatedTimeOfArrival', `StopUID eq '${stopId}'`, 200), true, now);
 }
 
-export async function probePublic(expectedRevision, {fetcher = fetch, now = Date.now} = {}) {
+export async function probePublic(expectedRevision, {fetcher = fetch, now = Date.now, profile = LIVE_PROFILE} = {}) {
+  validateProfile(profile);
   if (!/^[a-f0-9]{40}$/.test(expectedRevision ?? '')) fail('exact-revision-required');
   const health = await json(`${ORIGIN}/health/ready`, {}, fetcher);
   if (health?.service !== 'campus-one-web' || health.status !== 'ready' || health.legacy !== 'ready' ||
@@ -96,7 +117,23 @@ export async function probePublic(expectedRevision, {fetcher = fetch, now = Date
   if (page.status !== 200 || !page.headers.get('content-type')?.includes('text/html') ||
       !/geolocation=\(self\)/.test(page.headers.get('permissions-policy') ?? '')) fail('public-page-not-ready');
   const html = await page.text();
-  if (!['學校站牌','找我附近','搜尋站名','常用站牌'].every((label) => html.includes(label))) fail('new-bus-page-missing');
+  if (!hasBusShell(html)) fail('new-bus-page-missing');
+  if (profile === LINKS_PROFILE) {
+    const officialHref = verifyOfficialNotice(html);
+    let response;
+    try {
+      response = await fetcher(`${ORIGIN}/api/transit`, {method:'POST',headers:{'Content-Type':'application/json',Origin:ORIGIN},
+        body:JSON.stringify({action:'campus',schoolId:'pu'}),cache:'no-store',redirect:'error',credentials:'omit',signal:AbortSignal.timeout(10_000)});
+    } catch { fail('public-transit-unavailable-check-failed'); }
+    if (response.status !== 503 || !response.headers.get('content-type')?.includes('application/json')) fail('public-transit-not-explicitly-unconfigured');
+    let body;
+    try { body = await response.json(); } catch { fail('public-transit-not-explicitly-unconfigured'); }
+    if (!record(body) || body.status !== 'unavailable' || body.reason !== 'not-configured' ||
+        Object.keys(body).length !== 2) fail('public-transit-not-explicitly-unconfigured');
+    return { ready:true, webReady:true, profile, mode:'official-links', transitReady:false, reason:'not-configured',
+      origin:ORIGIN, revision:expectedRevision, checkedAt:new Date(now()).toISOString(), officialHref,
+      serverNoticeVerified:true, browserControlsVerified:false, liveArrivalsVerified:false, physicalDeviceVerified:false };
+  }
   const query = async (body, kind) => {
     const result = await json(`${ORIGIN}/api/transit`, {method:'POST',headers:{'Content-Type':'application/json',Origin:ORIGIN},body:JSON.stringify(body)},fetcher);
     if (result?.status !== 'ready' || result.kind !== kind) fail('public-transit-not-ready');
@@ -104,35 +141,59 @@ export async function probePublic(expectedRevision, {fetcher = fetch, now = Date
   };
   const stops = stopsFrom(await query({action:'campus',schoolId:'pu'},'stops'), false);
   const report = await collect(stops, (stopId) => query({action:'arrivals',city:CITY,stopId},'arrivals'), false, now);
-  return {...report, origin:ORIGIN, revision:expectedRevision};
+  return {...report, profile, transitReady:true, browserControlsVerified:false, origin:ORIGIN, revision:expectedRevision};
 }
 
-export function buildRemoteCommand(source) {
+export function hasBusShell(html) {
+  return typeof html === 'string' && /<[^>]+data-campus-bus-shell=["']true["'][^>]*>/.test(html) && html.includes('公車與交通');
+}
+
+export function verifyOfficialNotice(html) {
+  const notices = [...html.matchAll(/<aside\b[^>]*data-transit-mode=["']official-links["'][^>]*>([\s\S]*?)<\/aside>/g)];
+  for (const [, content] of notices) {
+    if (!content.includes('即時到站尚未啟用') || !content.includes('臺中市官方公車查詢')) continue;
+    for (const href of OFFICIAL_LINKS) {
+      const escaped = href.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (new RegExp(`<a\\b[^>]*href=["']${escaped}["'][^>]*>臺中市官方公車查詢(?:[^<]*)<\\/a>`).test(content)) return href;
+    }
+  }
+  fail('official-transit-notice-missing');
+}
+
+export function buildRemoteCommand(source, profile = LIVE_PROFILE) {
+  validateProfile(profile);
   const moduleUrl = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
-  const program = `import(${JSON.stringify(moduleUrl)}).then(m=>m.probeTdx()).then(r=>console.log(${JSON.stringify(MARKER)}+JSON.stringify(r))).catch(()=>{console.log(${JSON.stringify(MARKER)}+JSON.stringify({ready:false,reason:'runtime-transit-preflight-failed'}));process.exitCode=1})`;
+  const program = `import(${JSON.stringify(moduleUrl)}).then(m=>m.probeRuntime(${JSON.stringify(profile)})).then(r=>console.log(${JSON.stringify(MARKER)}+JSON.stringify(r))).catch(()=>{console.log(${JSON.stringify(MARKER)}+JSON.stringify({ready:false,reason:'runtime-transit-preflight-failed'}));process.exitCode=1})`;
   return `node --input-type=module -e '${program.replaceAll("'", "'\\''")}'`;
 }
 
-export function parseRemoteReport(stdout) {
+export function parseRemoteReport(stdout, profile = LIVE_PROFILE) {
+  validateProfile(profile);
   const lines = stdout.split(/\r?\n/).filter((line) => line.startsWith(MARKER));
   if (lines.length !== 1) fail('runtime-probe-output-invalid');
   let value;
   try { value = JSON.parse(lines[0].slice(MARKER.length)); } catch { fail('runtime-probe-output-invalid'); }
-  if (value?.ready !== true || value.provider !== 'TDX' || value.directionVerified !== true ||
+  if (profile === LINKS_PROFILE) {
+    if (value?.ready !== true || value.profile !== profile || value.mode !== 'official-links' || value.transitReady !== false ||
+        value.credentialsAbsent !== true || value.reason !== 'not-configured') fail('runtime-official-links-not-ready');
+    return {ready:true,profile,mode:'official-links',transitReady:false,credentialsAbsent:true,reason:'not-configured',physicalDeviceVerified:false};
+  }
+  if (value?.ready !== true || value.profile !== profile || value.transitReady !== true || value.provider !== 'TDX' || value.directionVerified !== true ||
       value.sourceFreshnessVerified !== true || !Number.isInteger(value.stationCount) || value.stationCount < 1)
     fail('runtime-transit-not-ready');
   // Never persist arbitrary stdout or provider fields from a remote process.
-  return {ready:true,provider:'TDX',stationCount:value.stationCount,directionVerified:true,
+  return {ready:true,profile,transitReady:true,provider:'TDX',stationCount:value.stationCount,directionVerified:true,
     sourceFreshnessVerified:true,countdownVerified:value.countdownVerified === true,physicalDeviceVerified:false};
 }
 
 async function main() {
-  const [mode, input] = process.argv.slice(2);
+  const [mode, input, output] = process.argv.slice(2);
+  const profile = validateProfile(process.env.TRANSIT_RELEASE_PROFILE);
   await mkdir('release-evidence',{recursive:true});
   if (mode === 'public') {
-    const report = await probePublic(process.env.EXPECTED_RELEASE_SHA);
+    const report = await probePublic(process.env.EXPECTED_RELEASE_SHA, {profile});
     await writeFile('release-evidence/transit-public.json',JSON.stringify(report,null,2)+'\n');
-    console.log('Verified the expected public revision, campus stations and fresh directional transit data.');
+    console.log(profile === LIVE_PROFILE ? 'Verified the expected public revision, campus stations and fresh directional transit data.' : 'Verified the expected Web revision and official links. Live transit remains unavailable.');
     return;
   }
   if (mode === 'fly') {
@@ -141,7 +202,7 @@ async function main() {
     if (!Array.isArray(rows) || rows.length !== MACHINE_IDS.length ||
         new Set(rows.map((row) => row?.id)).size !== MACHINE_IDS.length ||
         !rows.every((row) => MACHINE_IDS.includes(row?.id) && row.state === 'started')) fail('unexpected-machine-target');
-    const command = buildRemoteCommand(await readFile(new URL(import.meta.url),'utf8'));
+    const command = buildRemoteCommand(await readFile(new URL(import.meta.url),'utf8'), profile);
     const reports = [];
     for (const row of rows) {
       let stdout;
@@ -149,10 +210,10 @@ async function main() {
         stdout = execFileSync('flyctl',['ssh','console','--app','nuni-web','--machine',row.id,'--quiet','--command',command],
           {encoding:'utf8',timeout:90_000,maxBuffer:256*1024,stdio:['ignore','pipe','pipe']});
       } catch { fail('fly-runtime-probe-failed'); }
-      reports.push({machineId:row.id,...parseRemoteReport(stdout)});
+      reports.push({machineId:row.id,...parseRemoteReport(stdout, profile)});
     }
-    await writeFile('release-evidence/transit-preflight.json',JSON.stringify({checkedAt:new Date().toISOString(),machines:reports},null,2)+'\n');
-    console.log('Verified TDX inside every existing Web machine; credential values never left the machines.');
+    await writeFile(output ?? 'release-evidence/transit-preflight.json',JSON.stringify({checkedAt:new Date().toISOString(),profile,transitReady:profile === LIVE_PROFILE,machines:reports},null,2)+'\n');
+    console.log(profile === LIVE_PROFILE ? 'Verified TDX inside every existing Web machine; credential values never left the machines.' : 'Verified both TDX variables are absent inside every existing Web machine; live transit remains unavailable.');
     return;
   }
   fail('expected-public-or-fly-mode');
