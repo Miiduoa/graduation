@@ -52,8 +52,14 @@ export function GoogleMapsLikeScreen() {
   const { school } = useSchool();
   const { user } = useAuth();
   const params = (route.params ?? {}) as MapParams;
-  const linkedSchool = useRef(school.id);
-  const schoolScopedParams = linkedSchool.current === school.id ? params : {};
+  const signature = JSON.stringify([params.poiId, params.focusPoiId, params.toPoiId, params.fromPoiId]);
+  const linkedSchool = useRef({ id: school.id, signature, invalidated: false });
+  if (linkedSchool.current.signature !== signature) {
+    linkedSchool.current = { id: school.id, signature, invalidated: false };
+  } else if (linkedSchool.current.id !== school.id) {
+    linkedSchool.current.invalidated = true;
+  }
+  const schoolScopedParams = linkedSchool.current.invalidated ? {} : params;
   return (
     <CampusMapContent
       key={JSON.stringify([user?.uid, school.id, school.name])}
@@ -91,7 +97,7 @@ function CampusMapContent({
   const [category, setCategory] = useState<string>('all');
   const [nearbyOnly, setNearbyOnly] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [originId, setOriginId] = useState<string | null>(null);
+  const [originId, setOriginId] = useState<string | null | undefined>(undefined);
   const [ready, setReady] = useState(false);
   const [mapFailed, setMapFailed] = useState(false);
   const [mapAttempt, setMapAttempt] = useState(0);
@@ -126,7 +132,7 @@ function CampusMapContent({
     void load();
   }, [load]);
   const selected = catalog.find((place) => place.id === selectedId);
-  const origin = catalog.find((place) => place.id === (originId ?? params.fromPoiId));
+  const origin = catalog.find((place) => place.id === (originId === undefined ? params.fromPoiId : originId));
   const missingDeepLink =
     selectedId !== null &&
     selectedId === (params.focusPoiId ?? params.toPoiId ?? params.poiId) &&
@@ -148,6 +154,12 @@ function CampusMapContent({
     if (location) matches.sort((a, b) => distanceMeters(location, a) - distanceMeters(location, b));
     return matches;
   }, [query, category, catalog, location, nearbyOnly]);
+  const visiblePlaces = useMemo(() => {
+    const visible = new Map(places.map((place) => [place.id, place]));
+    if (origin) visible.set(origin.id, origin);
+    if (selected) visible.set(selected.id, selected);
+    return [...visible.values()];
+  }, [places, origin, selected]);
   const campusCenter = useMemo(() => centerOfCoordinates(catalog), [catalog]);
   const html = useMemo(
     () =>
@@ -165,6 +177,7 @@ function CampusMapContent({
         : '',
     [theme, campusCenter],
   );
+  const mapSource = useMemo(() => ({ html }), [html]);
 
   const post = useCallback((payload: object) => {
     const serialized = JSON.stringify(JSON.stringify(payload)).replace(/</g, '\\u003c');
@@ -191,11 +204,17 @@ function CampusMapContent({
   }, [schoolId, ready, mapFailed, html, mapAttempt]);
 
   useEffect(() => {
-    if (ready) post(mapPlacesPayload(places, selectedId));
-  }, [ready, places, selectedId, post]);
+    if (ready) post(mapPlacesPayload(visiblePlaces, selectedId));
+  }, [ready, visiblePlaces, selectedId, post]);
   useEffect(() => {
     if (ready && selected) post({ type: 'focus', lat: selected.lat, lng: selected.lng });
   }, [ready, selected, post]);
+  useEffect(() => {
+    if (!ready) return;
+    post(selected && origin && selected.id !== origin.id
+      ? { type: 'route', start: { lat: origin.lat, lng: origin.lng }, end: { lat: selected.lat, lng: selected.lng } }
+      : { type: 'clearRoute' });
+  }, [ready, selected, origin, post]);
   useEffect(() => {
     if (ready) post(location ? { type: 'location', ...location } : { type: 'clearLocation' });
   }, [ready, location, post]);
@@ -379,7 +398,7 @@ function CampusMapContent({
                 <PuWebView
                   key={`${theme.mode}-${mapAttempt}`}
                   ref={webRef}
-                  source={{ html }}
+                  source={mapSource}
                   applicationNameForUserAgent="CampusOne/1.0 (+https://nuni.tw)"
                   testID="campus-map-webview"
                   accessibilityLabel="校區地圖；下方也提供地點清單"
@@ -499,7 +518,7 @@ function CampusMapContent({
                   ) : null}
                   {origin && origin.id !== selected.id ? (
                     <Text style={textStyle}>
-                      從{origin.name}出發；兩地直線距離約 {formatDistance(distanceMeters(origin, selected))}。
+                      從{origin.name}出發；兩地直線距離約 {formatDistance(distanceMeters(origin, selected))}（地圖虛線僅為位置示意）。
                     </Text>
                   ) : null}
                   <Text style={textStyle}>
@@ -521,6 +540,13 @@ function CampusMapContent({
                       setDirectionsError('');
                     }}
                   />
+                  {origin ? (
+                    <AIButton
+                      label="清除步行起點"
+                      variant="ghost"
+                      onPress={() => { setOriginId(null); setDirectionsError(""); }}
+                    />
+                  ) : null}
                   {directionsError ? (
                     <Text
                       accessibilityRole="alert"
