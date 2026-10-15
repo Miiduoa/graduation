@@ -66,10 +66,34 @@ function memoryDb(rows) {
         return { rows: rows.tenants.filter((row) => row.id === params[0]) };
       }
       if (sql.includes('FROM food_locations')) {
-        return { rows: rows.locations.filter((row) => row.tenant_id === params[0]) };
+        return {
+          rows: rows.locations
+            .filter(
+              (row) =>
+                row.tenant_id === params[0] && row.public_access === true && row.status === 'open',
+            )
+            .map((row) => ({
+              id: row.id,
+              name: row.name,
+              zone_label: row.zone_label,
+              opening_hours: null,
+              description: row.description,
+              merchant_mode: row.merchant_mode,
+              review_status: 'unverified',
+              source_url: row.source_url,
+              external_order_url: row.external_order_url,
+              source_label: row.source_label,
+              source_updated_at: row.source_updated_at,
+            })),
+        };
       }
       if (sql.includes('FROM food_menu_items')) {
-        return { rows: rows.menus.filter((row) => row.tenant_id === params[0]) };
+        const allowed = new Set(params[1] ?? []);
+        return {
+          rows: rows.menus.filter(
+            (row) => row.tenant_id === params[0] && allowed.has(row.location_id),
+          ),
+        };
       }
       throw new Error(`unexpected sql: ${sql}`);
     },
@@ -91,10 +115,10 @@ test('school A cannot read school B, and a closed school is empty', async () => 
           tenant_id: 'pu',
           name: '校內咖啡店',
           zone_label: '學生餐廳',
-          opening_hours: '11:00–14:00',
           description: null,
           merchant_mode: 'info_only',
-          review_status: 'unverified',
+          public_access: true,
+          status: 'open',
           source_url: null,
           external_order_url: null,
           source_label: null,
@@ -102,14 +126,28 @@ test('school A cannot read school B, and a closed school is empty', async () => 
           phone: '不該被選出',
         },
         {
+          id: 'private',
+          tenant_id: 'pu',
+          name: '內部餐廳',
+          zone_label: null,
+          description: null,
+          merchant_mode: 'info_only',
+          public_access: false,
+          status: 'open',
+          source_url: null,
+          external_order_url: null,
+          source_label: null,
+          source_updated_at: null,
+        },
+        {
           id: 'other',
           tenant_id: 'cgu',
           name: '他校餐廳',
           zone_label: null,
-          opening_hours: null,
           description: null,
           merchant_mode: 'info_only',
-          review_status: 'verified',
+          public_access: true,
+          status: 'open',
           source_url: null,
           external_order_url: null,
           source_label: null,
@@ -125,6 +163,17 @@ test('school A cannot read school B, and a closed school is empty', async () => 
           section_name: '吐司',
           description: null,
           price_minor: 60,
+          available: true,
+          sold_out: false,
+        },
+        {
+          id: 'hidden-private',
+          tenant_id: 'pu',
+          location_id: 'private',
+          name: '內部套餐',
+          section_name: null,
+          description: null,
+          price_minor: 80,
           available: true,
           sold_out: false,
         },
@@ -147,6 +196,10 @@ test('school A cannot read school B, and a closed school is empty', async () => 
   assert.equal(pu.cafeterias.length, 1);
   assert.equal(pu.cafeterias[0].name, '校內咖啡店');
   assert.equal(pu.menus[0].name, '蔬菜吐司');
+  assert.equal(
+    pu.menus.some((row) => row.id === 'hidden-private'),
+    false,
+  );
   catalog.assertNoPrivateCafeteriaFields(pu.cafeterias);
   catalog.assertNoPrivateCafeteriaFields(pu.menus);
   const cgu = await service.list('cgu');
