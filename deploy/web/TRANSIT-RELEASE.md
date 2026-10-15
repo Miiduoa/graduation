@@ -4,13 +4,23 @@
 
 ## 發布前
 
-Web release 先在兩台既有 `nuni-web` 機器內執行唯讀 TDX 檢查，再建置和發布。只傳送檢查程式，不讀出、回傳或複製機器上的 TDX Secret；需要既有 Fly 部署權杖與 SSH 權限。不會新建主機，也不會自動更換或啟用 Secret。
+`live-tdx` 是 Web release 的預設 profile：先在兩台既有 `nuni-web` 機器內執行唯讀 TDX 檢查，再建置和發布；rollout 前後亦重新檢查，並分別保留證據。只傳送檢查程式，不讀出、回傳或複製機器上的 TDX Secret；需要既有 Fly 部署權杖與 SSH 權限。不會新建主機，也不會自動更換或啟用 Secret。
 
 檢查必須取得名稱包含「靜宜大學」的臺中站牌，以及至少一筆具去返程與有效來源時間的資料。超過 90 秒、來源來自未來、空資料、HTML 404、無權限及限流都會停止發布。末班已過等有效狀態與真正倒數分開記錄；只有明確的正常狀態加有效秒數才會標記 countdownVerified。非營運時段若 TDX 不提供新鮮狀態，檢查會停止，不能以假倒數通過。
 
 ## 發布後
 
 另檢查公開 `/health/ready` 的確切版本、新版 `/bus`、定位權限政策、`/api/transit` 真實站牌和新鮮到站資料。只通過 Web 健康檢查或一般 CI 不會被記成公車上線成功。
+
+## 尚未申請 TDX 的官方入口發布
+
+明確選擇 `transit_profile=official-links-only` 時，所有既有主機必須在建置前、rollout 前後證明 `TDX_CLIENT_ID` 與 `TDX_CLIENT_SECRET` 都沒有設定；部分設定、空值或完整設定都會停止。此檢查不呼叫 TDX，也不會移除現有憑證來通過檢查。
+
+公開檢查仍要求確切 Web SHA、legacy ready、公車頁框與同源定位政策，並驗證 API 精確回覆 503 / not-configured、伺服器 HTML 有「即時到站尚未啟用」及標明臺中市的官方查詢連結。成功的證據寫入 `profile: official-links-only`、`transitReady: false`、`browserControlsVerified: false`。任何 401、429、服務故障或假站牌／到站資料都不能冒充這個狀態。實際瀏覽器操作另行驗收。
+
+這是尚未啟用即時資料時可使用的官方網站入口，不是免金鑰即時資料串接。TDX [官方 API 說明](https://tdx.transportdata.tw/api-service/swagger) 的訪客服務限瀏覽器且每 IP 每日 20 次；臺中 [官方動態資料集](https://data.gov.tw/dataset/83749) 的下載為範例，正式介接仍須申請。現階段可讓使用者前往 [臺中市官方公車查詢](https://citybus-free.taichung.gov.tw/)。不得以訪客額度或範例資料替代正式即時服務。
+
+預設模式不變；未知 profile 或 `live-tdx` 檢查失敗時，絕不自動切換為官方入口模式。
 
 ## 金鑰與權限
 
@@ -20,4 +30,4 @@ Web release 先在兩台既有 `nuni-web` 機器內執行唯讀 TDX 檢查，再
 
 ## 驗證邊界
 
-`node --test deploy/web/transit-release-gate.test.mjs` 使用明確的本機傳輸替身，不能當作正式 TDX 連線紀錄。手機實機定位、道路兩側現場方向與多機器共享配額仍須另行驗收。所有正式機器、憑證、TDX 及發布流程都必須通過實際檢查，才可宣稱已上線。
+`node --test deploy/web/transit-release-gate.test.mjs` 使用明確的本機傳輸替身，不能當作正式 TDX 連線紀錄。手機實機定位、道路兩側現場方向與多機器共享配額仍須另行驗收。只有正式機器、憑證、TDX 及發布流程都通過實際檢查，才可宣稱即時公車已啟用；官方入口模式的 Web 發布必須另外註明即時公車尚未啟用。

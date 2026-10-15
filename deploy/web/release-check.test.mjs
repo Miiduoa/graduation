@@ -55,7 +55,7 @@ function fakeFetch(health = {}, transit = { status: 'unavailable', reason: 'not-
       assert.deepEqual(JSON.parse(init.body), { action: 'campus', schoolId: 'pu' });
       return Response.json(transit, { status: transit.status === 'ready' ? 200 : 503 });
     }
-    return new Response('<html>學校站牌 找我附近 搜尋站名 常用站牌</html>', { status: pageStatus, headers: { 'Content-Type': 'text/html', 'Permissions-Policy': policy } });
+    return new Response('<html><div data-campus-bus-shell="true">公車與交通</div></html>', { status: pageStatus, headers: { 'Content-Type': 'text/html', 'Permissions-Policy': policy } });
   };
 }
 test('distinguishes Web deployment from missing TDX and unverified browser interaction', async () => {
@@ -84,10 +84,19 @@ test('rejects a non-JSON API response rather than assuming successful connectivi
   await assert.rejects(getJson('https://example.invalid/', { fetcher: async () => new Response('login') }));
 });
 
-test('a healthy Web revision without the new bus controls cannot pass', async () => {
+test('a healthy Web revision without the current bus shell cannot pass', async () => {
   const healthy = fakeFetch();
   const fetcher = (url, init) => url.endsWith('/bus')
     ? Promise.resolve(new Response('<html>Old bus page</html>', {headers:{'Content-Type':'text/html','Permissions-Policy':'geolocation=(self)'}}))
     : healthy(url, init);
   assert.equal((await inspectPublic(sha, fetcher)).webDeployed, false);
+});
+
+test('an explicit links profile is recorded without claiming live transit or browser verification',async()=>{
+  const report=await inspectPublic(sha,fakeFetch(),'official-links-only');
+  assert.equal(report.profile,'official-links-only');
+  assert.equal(report.webDeployed,true);
+  assert.equal(report.browserControlsVerified,false);
+  assert.equal(report.liveArrivalsVerified,false);
+  await assert.rejects(inspectPublic(sha,()=>assert.fail('must not request'),'unknown'),/unknown-transit-profile/);
 });

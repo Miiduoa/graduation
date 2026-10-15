@@ -1,5 +1,6 @@
 import { readFile, writeFile, appendFile, mkdir } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
+import { hasBusShell, validateProfile } from './transit-release-gate.mjs';
 
 export const APP = 'nuni-web';
 export const ORIGIN = 'https://nuni.tw';
@@ -67,7 +68,8 @@ export async function getJson(url, { fetcher = fetch, headers = {}, query } = {}
   return { status: response.status, body: await response.json() };
 }
 
-export async function inspectPublic(expected, fetcher = fetch) {
+export async function inspectPublic(expected, fetcher = fetch, profile = 'live-tdx') {
+  validateProfile(profile);
   if (!SHA.test(expected ?? '')) fail('A full expected revision is required.');
   const health = await getJson(`${ORIGIN}/health/ready`, { fetcher });
   const webReady = health.status === 200 && health.body?.service === 'campus-one-web' &&
@@ -78,7 +80,7 @@ export async function inspectPublic(expected, fetcher = fetch) {
       credentials: 'omit', signal: AbortSignal.timeout(15000) });
     const html = await response.text();
     pages.push({ path, status: response.status, html: response.headers.get('content-type')?.includes('text/html') === true,
-      newBusPage: path !== '/bus' || ['學校站牌', '找我附近', '搜尋站名', '常用站牌'].every((text) => html.includes(text)),
+      newBusPage: path !== '/bus' || hasBusShell(html),
       geolocationAllowed: path !== '/bus' || /geolocation=\(self\)/.test(response.headers.get('permissions-policy') ?? '') });
   }
   let transit = { status: 'network-error', stationCount: 0 };
@@ -92,7 +94,7 @@ export async function inspectPublic(expected, fetcher = fetch) {
       transit.status = body?.status === 'unavailable' && known.includes(body.reason) ? body.reason : 'invalid-response';
     }
   } catch { /* Preserve web outcome separately from a provider outage. */ }
-  return { checkedAt: new Date().toISOString(), origin: ORIGIN, expectedRevision: expected,
+  return { checkedAt: new Date().toISOString(), profile, origin: ORIGIN, expectedRevision: expected,
     revision: SHA.test(health.body?.revision ?? '') ? health.body.revision : null,
     webDeployed: webReady && pages.every((page) => page.status === 200 && page.html && page.geolocationAllowed && page.newBusPage),
     pages, transit, browserControlsVerified: false, liveArrivalsVerified: false };
@@ -135,10 +137,10 @@ async function main() {
   }
   if (command === 'stable') return requireStable(await json(input), await json(output));
   if (command === 'verify') {
-    const report = await inspectPublic(env.EXPECTED_RELEASE_SHA);
+    const report = await inspectPublic(env.EXPECTED_RELEASE_SHA, fetch, validateProfile(env.TRANSIT_RELEASE_PROFILE));
     await save('release-evidence/public-check.json', report);
     if (env.GITHUB_STEP_SUMMARY) await appendFile(env.GITHUB_STEP_SUMMARY,
-      `## Campus One Web release\n\nExpected: ${report.expectedRevision}\n\nObserved: ${report.revision ?? 'unknown'}\n\nWeb deployment verified: ${report.webDeployed}\n\nTransit station query: ${report.transit.status}\n\nLive arrivals and device geolocation require separate verification.\n`);
+      `## Campus One Web release\n\nExpected: ${report.expectedRevision}\n\nObserved: ${report.revision ?? 'unknown'}\n\nTransit release profile: ${report.profile}\n\nWeb deployment verified: ${report.webDeployed}\n\nTransit station query: ${report.transit.status}\n\nLive arrivals and device geolocation require separate verification.\n`);
     if (!report.webDeployed) fail('Public Web verification did not pass. Inspect the evidence before any rollback.');
     return;
   }

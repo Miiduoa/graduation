@@ -1,5 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { meetupWindows, type PersonalImportRow } from '@campus/shared';
+import {
+  meetupWindows,
+  serializePersonalImportBackup,
+  parsePersonalImportBackup,
+  type PersonalImportRow,
+} from '@campus/shared';
 import {
   appendPersonalImports,
   deletePersonalImport,
@@ -194,7 +199,6 @@ test('selected historical term does not mix current or unknown-term original cou
   ).toHaveLength(2);
 });
 
-
 test('deleting one saved record is durable and does not remove its batch siblings', async () => {
   const saved = await appendPersonalImports(scope, [row('a'), row('b', '英文')]);
   const original = saved.ledger.records[0];
@@ -233,4 +237,39 @@ test('backup snapshot waits for pending writes and checks identity before return
   await pending;
   expect((await result).records).toHaveLength(1);
   await expect(snapshotPersonalImports(scope, () => false)).rejects.toThrow('切換');
+});
+
+test('backup reimport preserves an existing class reference without granting a new one', async () => {
+  const initial = await appendPersonalImports(scope, [
+    { ...row('a'), linkedCourseId: 'cw_existing' },
+  ]);
+  const backup = serializePersonalImportBackup(initial.ledger.records, { schoolId: 'pu' });
+  const parsed = parsePersonalImportBackup(backup);
+  expect(parsed.rows[0].linkedCourseId).toBeUndefined();
+  const duplicate = await appendPersonalImports(scope, parsed.rows, () => true, {
+    restoreBackup: true,
+  });
+  expect(duplicate.added).toBe(0);
+  expect(duplicate.duplicates).toBe(1);
+  expect(duplicate.ledger.records[0].linkedCourseId).toBe('cw_existing');
+  const differentOwner = { ...scope, owner: 'nuni:account-b' };
+  const restored = await appendPersonalImports(differentOwner, parsed.rows, () => true, {
+    restoreBackup: true,
+  });
+  expect(restored.ledger.records[0].linkedCourseId).toBeUndefined();
+});
+
+test('backup mode still blocks changed course metadata and never overwrites', async () => {
+  const initial = await appendPersonalImports(scope, [
+    { ...row('a'), location: '101', linkedCourseId: 'cw_existing' },
+  ]);
+  const parsed = parsePersonalImportBackup(
+    serializePersonalImportBackup([{ ...initial.ledger.records[0], location: '202' }], {
+      schoolId: 'pu',
+    }),
+  );
+  await expect(
+    appendPersonalImports(scope, parsed.rows, () => true, { restoreBackup: true }),
+  ).rejects.toThrow('沒有儲存');
+  expect((await loadPersonalImports(scope)).records[0].location).toBe('101');
 });

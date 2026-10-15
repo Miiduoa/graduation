@@ -3,6 +3,7 @@
 import {
   createPersonalImportId,
   planPersonalImport,
+  preparePersonalImportBackupRestore,
   undoPersonalImportBatch,
   validatePersonalImportRow,
   type PersonalImportRecord,
@@ -84,6 +85,7 @@ export async function savePersonalImportBatch(
   scope: PersonalImportScope,
   rows: PersonalImportRow[],
   active = () => true,
+  options: { restoreBackup?: boolean } = {},
 ) {
   if (!rows.length || rows.some((row) => row.schoolId !== scope.schoolId))
     throw new Error('請確認校園與要匯入的資料。');
@@ -91,7 +93,10 @@ export async function savePersonalImportBatch(
     scope,
     (existing) => {
       const batchId = createPersonalImportId();
-      const plan = planPersonalImport(existing, rows, {
+      const drafts = options.restoreBackup
+        ? preparePersonalImportBackupRestore(rows, existing)
+        : rows;
+      const plan = planPersonalImport(existing, drafts, {
         batchId,
         importedAt: new Date().toISOString(),
         ...(scope.schoolId === 'pu' ? { periodProfile: 'pu' as const } : {}),
