@@ -18,6 +18,34 @@ test('refuses an ambient DATABASE_URL when no explicit database URL was supplied
   assert.match(result.stderr, /Pass --source .* --database-url/);
 });
 
+test('requires explicit food candidate selection before accessing source or database', () => {
+  const result = run([
+    '--source',
+    '/unused-source',
+    '--database-url',
+    'postgresql://127.0.0.1:5432/campus_nuni_merchant_acceptance',
+  ]);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Pass --food-ordering-candidate explicitly/);
+  assert.doesNotMatch(result.stderr, /ENOENT|Cannot find module|Failed to connect/);
+});
+
+test('source-only verification also requires explicit food candidate selection', () => {
+  const result = run(['--source', '/unused-source', '--verify-source-only']);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Pass --food-ordering-candidate explicitly/);
+  assert.doesNotMatch(result.stderr, /ENOENT|Cannot find module|Failed to connect/);
+});
+
+for (const incompatible of ['--serve', '--verify-source-only']) {
+  test(`native transport acceptance rejects ${incompatible} before accessing source or database`, () => {
+    const result = run(['--native-client', incompatible]);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /--native-client (cannot be combined|requires HTTP acceptance)/);
+    assert.doesNotMatch(result.stderr, /ENOENT|Cannot find module|Failed to connect/);
+  });
+}
+
 for (const url of [
   'postgresql://production.example.test:5432/campus_nuni_merchant_acceptance',
   'postgresql://localhost:5432/campus_nuni_merchant_acceptance',

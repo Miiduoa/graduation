@@ -5,6 +5,7 @@ import { NuniError } from '@campus/shared/src/nuni';
 import type { NativeNuniState } from '../services/nuniSessionController';
 
 const mockCapability = jest.fn();
+const mockClearFoodPending = jest.fn();
 let mockAuth: NativeNuniState & {
   signIn: jest.Mock;
   logout: jest.Mock;
@@ -12,6 +13,9 @@ let mockAuth: NativeNuniState & {
   request: jest.Mock;
 };
 jest.mock('../state/nuniSession', () => ({ useNuniSession: () => mockAuth }));
+jest.mock('../state/foodPersistence', () => ({
+  clearAllFoodPendingForAccount: (...args: unknown[]) => mockClearFoodPending(...args),
+}));
 jest.mock('../services/nuniGoogle', () => ({
   getGoogleCredentialCapability: () => mockCapability(),
 }));
@@ -52,6 +56,7 @@ const membership = (state: string) => ({
 });
 beforeEach(() => {
   mockCapability.mockReturnValue({ available: true });
+  mockClearFoodPending.mockReset().mockResolvedValue(undefined);
   mockAuth = {
     session: null,
     loading: false,
@@ -181,6 +186,108 @@ test('logout hides data immediately and retries an unconfirmed server logout', a
   await act(async () => fireEvent.press(view.getByText('重試登出')));
   expect(mockAuth.logout).toHaveBeenCalledTimes(2);
   expect(view.queryByText('使用 Google 繼續')).toBeNull();
+});
+
+test('logout starts before slow storage cleanup and reports its failure only after auth revocation', async () => {
+  mockAuth.session = principal;
+  let rejectCleanup!: (error: Error) => void;
+  mockClearFoodPending.mockImplementationOnce(
+    () =>
+      new Promise<void>((_resolve, reject) => {
+        rejectCleanup = reject;
+      }),
+  );
+  mockAuth.logout.mockImplementation(async () => {
+    mockAuth.session = null;
+  });
+  const view = render(<NuniWorkspaceScreen />);
+  fireEvent.press(view.getByRole('tab', { name: '帳號' }));
+  await view.findByText('登出 Google 帳號');
+  fireEvent.press(view.getByText('登出 Google 帳號'));
+  expect(mockAuth.logout).toHaveBeenCalledTimes(1);
+  expect(mockClearFoodPending).toHaveBeenCalledWith(principal.platformAccountId);
+  expect(view.queryByTestId('course-draft')).toBeNull();
+  await act(async () => rejectCleanup(new Error('keychain unavailable')));
+  expect(view.getByRole('alert')).toHaveTextContent(/未能清除裝置上的訂餐重試紀錄/);
+  expect(mockAuth.logout).toHaveBeenCalledTimes(1);
+  expect(mockClearFoodPending).toHaveBeenCalledTimes(1);
+});
+
+test.each([
+  {
+    session: { ...principal, platformAccountId: 'pa_other', context: 'other-login' },
+    logoutFails: true,
+  },
+  { session: { ...principal, context: 'same-account-new-login' }, logoutFails: false },
+])(
+  'late logout results and cleanup failure cannot mask a new session: %p',
+  async ({ session: newSession, logoutFails }) => {
+    mockAuth.session = principal;
+    let finishLogout!: () => void;
+    let rejectCleanup!: (error: Error) => void;
+    mockAuth.logout.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          finishLogout = () => (logoutFails ? reject(new Error('old logout failed')) : resolve());
+        }),
+    );
+    mockClearFoodPending.mockImplementationOnce(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectCleanup = reject;
+        }),
+    );
+    const view = render(<NuniWorkspaceScreen />);
+    fireEvent.press(view.getByRole('tab', { name: '帳號' }));
+    await view.findByText('登出 Google 帳號');
+    fireEvent.press(view.getByText('登出 Google 帳號'));
+    mockAuth.session = newSession;
+    view.rerender(<NuniWorkspaceScreen />);
+    expect(view.getByTestId('course-draft').props.value).toBe('');
+    await act(async () => {
+      rejectCleanup(new Error('old cleanup failed'));
+      finishLogout();
+    });
+    expect(view.getByTestId('course-draft')).toBeTruthy();
+    expect(view.queryByRole('alert')).toBeNull();
+  },
+);
+
+test('background cleanup after a confirmed identity leave cannot report failure on another account', async () => {
+  mockAuth.session = principal;
+  let rejectCleanup!: (error: Error) => void;
+  mockClearFoodPending.mockImplementationOnce(
+    () =>
+      new Promise<void>((_resolve, reject) => {
+        rejectCleanup = reject;
+      }),
+  );
+  const view = render(<NuniWorkspaceScreen />);
+  mockAuth.pendingLogout = true;
+  view.rerender(<NuniWorkspaceScreen />);
+  expect(mockClearFoodPending).toHaveBeenCalledWith(principal.platformAccountId);
+  mockAuth.pendingLogout = false;
+  mockAuth.session = { ...principal, platformAccountId: 'pa_other', context: 'other-login' };
+  view.rerender(<NuniWorkspaceScreen />);
+  await act(async () => rejectCleanup(new Error('old cleanup failed')));
+  expect(view.getByTestId('course-draft')).toBeTruthy();
+  expect(view.queryByRole('alert')).toBeNull();
+});
+
+test('late cleanup rejection after unmount is handled', async () => {
+  mockAuth.session = principal;
+  let rejectCleanup!: (error: Error) => void;
+  mockClearFoodPending.mockImplementationOnce(
+    () =>
+      new Promise<void>((_resolve, reject) => {
+        rejectCleanup = reject;
+      }),
+  );
+  const view = render(<NuniWorkspaceScreen />);
+  mockAuth.pendingLogout = true;
+  view.rerender(<NuniWorkspaceScreen />);
+  view.unmount();
+  await act(async () => rejectCleanup(new Error('unmounted cleanup failed')));
 });
 
 const membershipReceipt = {
@@ -381,7 +488,10 @@ test('restaurant entry selects food and retains its retry intent through tempora
 test.each([
   ['signed out', { session: null, loading: false, error: '', pendingLogout: false }],
   ['checking account', { session: null, loading: true, error: '', pendingLogout: false }],
-  ['unconfirmed session', { session: null, loading: false, error: '無法確認登入狀態', pendingLogout: false }],
+  [
+    'unconfirmed session',
+    { session: null, loading: false, error: '無法確認登入狀態', pendingLogout: false },
+  ],
   ['signed in', { session: principal, loading: false, error: '', pendingLogout: false }],
 ])('identifies the platform account destination even when %s', (_label, state) => {
   Object.assign(mockAuth, state);

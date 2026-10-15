@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import { NuniError } from '@campus/shared/src/nuni';
@@ -9,6 +9,7 @@ import type {
 import { useNuniDraftState } from '../../state/nuniDrafts';
 import { NuniPickupScanner } from './NuniPickupScanner';
 import {
+  FOOD_POLL_MS,
   FoodButton,
   FoodCard,
   FoodField,
@@ -95,7 +96,7 @@ export function NuniMerchantOrders({
     ]);
     return { queue, shift };
   }, [client, tenantId, locationId, cursor]);
-  const resource = useFoodLoad(loader);
+  const resource = useFoodLoad(loader, { pollMs: FOOD_POLL_MS });
   const mutation = useFoodMutation<Intent>(
     `${scope}:intent`,
     (intent) => {
@@ -153,6 +154,36 @@ export function NuniMerchantOrders({
       void resource.load();
     },
   );
+  useEffect(() => {
+    if (!scanOrder || !resource.data || mutation.locked || review) return;
+    const stillAllowed = resource.data.queue.orders.some(
+      (order) => order.id === scanOrder && order.allowedActions.includes('fulfill-pickup'),
+    );
+    if (!stillAllowed) setScanOrder(null);
+  }, [scanOrder, resource.data, mutation.locked, review]);
+  useEffect(() => {
+    if (!review || !resource.data || mutation.locked || mutation.pending) return;
+    if (!('orderId' in review)) return;
+    const orderId = review.orderId;
+    const order = resource.data.queue.orders.find((entry) => entry.id === orderId);
+    const actionOk =
+      review.kind === 'counter'
+        ? order?.allowedActions.includes('record-counter-payment')
+        : review.kind === 'accept'
+          ? order?.allowedActions.includes('accept')
+          : review.kind === 'fulfill'
+            ? order?.allowedActions.includes('fulfill-pickup')
+            : review.kind === 'refund'
+              ? order?.allowedActions.includes('confirm-counter-refund')
+              : review.kind === 'reject'
+                ? order?.allowedActions.includes('reject')
+                : review.kind === 'cancel'
+                  ? order?.allowedActions.includes('cancel-accepted')
+                  : review.kind === 'start' || review.kind === 'ready'
+                    ? !!order
+                    : false;
+    if (!actionOk) setReview(null);
+  }, [review, resource.data, mutation.locked, mutation.pending]);
   const disabled =
     mutation.locked || !!review || resource.loading || !!resource.error || !resource.data;
   const prepareShift = (kind: 'open' | 'handover') => {
