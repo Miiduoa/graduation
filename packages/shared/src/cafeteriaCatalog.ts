@@ -59,14 +59,14 @@ export type CafeteriaCatalogRecord = {
   id: string;
   name: string;
   schoolId: string;
-  location?: string;
-  openingHours?: string;
-  intro?: string;
-  websiteUrl?: string;
-  orderingUrl?: string;
+  location?: string | undefined;
+  openingHours?: string | undefined;
+  intro?: string | undefined;
+  websiteUrl?: string | undefined;
+  orderingUrl?: string | undefined;
   merchantMode: MerchantMode;
-  sourceLabel?: string;
-  menuSyncedAt?: string;
+  sourceLabel?: string | undefined;
+  menuSyncedAt?: string | undefined;
   reviewStatus: CafeteriaReviewStatus;
 };
 
@@ -76,11 +76,11 @@ export type CafeteriaCatalogMenuItem = {
   cafeteria: string;
   cafeteriaId: string;
   availableOn: string;
-  price?: number;
-  category?: string;
-  description?: string;
-  available?: boolean;
-  soldOut?: boolean;
+  price?: number | undefined;
+  category?: string | undefined;
+  description?: string | undefined;
+  available?: boolean | undefined;
+  soldOut?: boolean | undefined;
   schoolId: string;
 };
 

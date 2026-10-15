@@ -20,6 +20,20 @@ jobs:
   security-gates:
     name: Security Gates
     runs-on: ubuntu-latest
+    services:
+      public-cafeteria-postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: cafeteria_test
+          POSTGRES_PASSWORD: cafeteria_test_only
+          POSTGRES_DB: cafeteria_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cafeteria_test -d cafeteria_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -61,7 +75,17 @@ jobs:
           node --test scripts/firebase-ci-workflow.test.cjs scripts/wait-for-firestore-indexes.test.cjs scripts/firebase-release-preflight.test.cjs scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs scripts/prepare-eas-build.test.mjs scripts/verify-nuni-integration.test.mjs
           node --test scripts/nuni-course-source.test.mjs scripts/nuni-course-api-boundary.test.mjs scripts/nuni-merchant-api-boundary.test.mjs scripts/nuni-merchant-source.test.mjs scripts/nuni-merchant-native-transport.test.mjs scripts/seed-cafeterias.test.cjs
           python3 deploy/nuni-api/food-ordering/build_test.py
+
+      - name: Test public cafeteria HTTP and PostgreSQL contracts
+        env:
+          PUBLIC_CAFETERIA_TEST_DATABASE_URL: postgresql://cafeteria_test:cafeteria_test_only@127.0.0.1:5432/cafeteria_test
+          PUBLIC_CAFETERIA_TEST_DEPS: ${{ runner.temp }}/public-cafeteria-test/node_modules
+          PUBLIC_CAFETERIA_TEST_TYPE_ROOTS: ${{ runner.temp }}/public-cafeteria-test/node_modules/@types
+          PUBLIC_CAFETERIA_TEST_TSC: ${{ runner.temp }}/public-cafeteria-test/node_modules/.bin/tsc
+        run: |
+          npm install --prefix "$RUNNER_TEMP/public-cafeteria-test" --ignore-scripts --no-audit --no-fund fastify@5.10.0 pg@8.22.0 typescript@5.9.3 @types/node@22.20.5
           node scripts/test-public-cafeterias.mjs
+          python3 -m unittest discover -s scripts/public-cafeterias -p '*_test.py'
 
       - name: Audit Functions deployment dependencies
         working-directory: backend/functions
