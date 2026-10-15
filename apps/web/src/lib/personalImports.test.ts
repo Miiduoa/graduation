@@ -100,3 +100,19 @@ it('keeps an incoming changed classroom for review instead of silently discardin
   await expect(savePersonalImportBatch(scope, course('505'))).rejects.toThrow();
   expect(readPersonalImports(scope)[0].location).toBe('303');
 });
+
+it('restores against the latest locked ledger, preserving existing links without masking grade conflicts', async () => {
+  const linked = { ...rows()[0], linkedCourseId: 'currently-linked-class' };
+  await savePersonalImportBatch(scope, [linked]);
+  const original = readPersonalImports(scope);
+  expect(
+    await savePersonalImportBatch(scope, rows(), () => true, { restoreBackup: true }),
+  ).toMatchObject({ added: 0, duplicates: 1 });
+  expect(readPersonalImports(scope)).toEqual(original);
+  await expect(
+    savePersonalImportBatch(scope, rows('課程名稱,學分,成績\n資料庫,3,95'), () => true, {
+      restoreBackup: true,
+    }),
+  ).rejects.toThrow('成績或學分不同');
+  expect(readPersonalImports(scope)).toEqual(original);
+});
