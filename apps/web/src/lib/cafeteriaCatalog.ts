@@ -80,6 +80,7 @@ export async function fetchCafeteriaCatalog(schoolId: string): Promise<{
     signal: AbortSignal.timeout(15000),
   });
   const value = await readJson(response);
+  if (value.schoolId !== schoolId) throw new Error('unavailable');
   return {
     cafeterias: parseCafeteriaLocations(value.cafeterias ?? value, schoolId).map(toCafeteria),
     menus: Array.isArray(value.menus)
@@ -108,6 +109,7 @@ export async function fetchCafeteriaDetail(
     },
   );
   const value = await readJson(response);
+  if (value.schoolId !== schoolId) throw new Error('unavailable');
   const cafeteria = value.cafeteria
     ? (parseCafeteriaLocations([value.cafeteria], schoolId).map(toCafeteria)[0] ?? null)
     : null;
