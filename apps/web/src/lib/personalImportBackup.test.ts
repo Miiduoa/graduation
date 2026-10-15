@@ -75,6 +75,50 @@ describe('portable personal backup round trip', () => {
       title: '校慶',
     });
   });
+  it.each([
+    {
+      kind: 'grades' as const,
+      text: '課程名稱,學分,成績,日期\n英文,3,A,115/10/15',
+    },
+    {
+      kind: 'grades' as const,
+      text: '課程名稱,學分,成績,日期,結束日期,開始時間,結束時間,開始節次,結束節次\n英文,3,A,115/10/15,原始註記,24:90,上午,0.5,1000',
+    },
+    {
+      kind: 'timetable' as const,
+      text: `課程名稱,星期,開始節次,結束節次,學分,成績,日期,結束日期\n英文,一,1,2,1000,${'原始附註'.repeat(15)},115/10/15,尚未公布`,
+    },
+    {
+      kind: 'events' as const,
+      text: '活動名稱,日期,開始時間,結束時間,開始節次,結束節次,學分\n讀書會,2026-10-15,09:00,10:00,0.5,1000,1000',
+    },
+  ])(
+    'round trips all scalar fields accepted by the normal $kind importer and append plan',
+    ({ kind, text }) => {
+      const parsed = parsePersonalImport(text, {
+        kind,
+        schoolId: 'pu',
+        academicYear: '115',
+        semester: '1',
+        periodProfile: 'pu',
+      });
+      expect(parsed.issues.filter((issue) => issue.severity === 'error')).toEqual([]);
+      const plan = planPersonalImport([], parsed.rows, {
+        batchId: 'normal-import',
+        importedAt: exportedAt,
+        periodProfile: 'pu',
+      });
+      expect(plan.issues.filter((issue) => issue.severity === 'error')).toEqual([]);
+      expect(plan.added).toHaveLength(1);
+      const preview = parsePersonalImportBackup(serialize(plan.records));
+      const { id, batchId, importedAt, ...fields } = plan.records[0];
+      expect(preview.rows[0]).toEqual({ ...fields, id: preview.rows[0].id });
+      expect(preview.rows[0].id).not.toBe(id);
+      expect(batchId).toBe('normal-import');
+      expect(importedAt).toBe(exportedAt);
+    },
+  );
+
   it('preserves every personal field and source across kinds and terms, without installing archive metadata', () => {
     const records: PersonalImportRecord[] = [
       record({
@@ -209,8 +253,8 @@ describe('backup validation and privacy boundaries', () => {
     { importedAt: '2026-02-30T00:00:00.000Z' },
     { batchId: '' },
     { dayOfWeek: '1' },
-    { date: '2026-02-30' },
-    { startTime: '24:00' },
+    { date: 20261015 },
+    { startTime: { hour: 24 } },
     { allDay: 'true' },
     { source: null },
     { source: { type: 'image-url', line: 1, rawText: 'x' } },
@@ -222,6 +266,46 @@ describe('backup validation and privacy boundaries', () => {
     const bad = { ...record({ id: 'invalid' }), ...patch } as PersonalImportRecord;
     expect(() => parsePersonalImportBackup(JSON.stringify(document([record(), bad])))).toThrow();
   });
+
+  it.each([
+    { kind: 'events' as const, date: '2026-02-30', allDay: true },
+    { kind: 'events' as const, date: '2026-10-15', startTime: '24:00', endTime: '25:00' },
+    { kind: 'timetable' as const, dayOfWeek: 1, startPeriod: 1, endPeriod: 99 },
+    { kind: 'timetable' as const, dayOfWeek: 1, startPeriod: 1, endPeriod: 2, startTime: '24:00' },
+    { kind: 'grades' as const, credits: 41 },
+  ])('continues to reject semantic errors for the record kind that uses them (%j)', (patch) => {
+    const bad = record(patch);
+    expect(() => serialize([bad])).toThrow();
+    expect(() => parsePersonalImportBackup(JSON.stringify(document([bad])))).toThrow();
+  });
+
+  it.each(['date', 'endDate', 'startTime', 'endTime', 'grade'] as const)(
+    'keeps unrelated %s fields bounded even when their meaning is not validated',
+    (field) => {
+      const bad = record({
+        kind: 'events',
+        date: '2026-10-15',
+        allDay: true,
+        [field]: 'x'.repeat(200_001),
+      });
+      expect(() => serialize([bad])).toThrow();
+      expect(() => parsePersonalImportBackup(JSON.stringify(document([bad])))).toThrow();
+    },
+  );
+
+  it.each(['\u0000', '\u001f', '\u007f'])(
+    'rejects control characters within school identifiers (%j)',
+    (character) => {
+      expect(() =>
+        serializePersonalImportBackup([], { schoolId: `school${character}id`, exportedAt }),
+      ).toThrow();
+      expect(() =>
+        parsePersonalImportBackup(
+          JSON.stringify({ ...document([]), schoolId: `school${character}id` }),
+        ),
+      ).toThrow();
+    },
+  );
 
   it('rejects duplicate archive IDs and mixed schools during export as well as import', () => {
     for (const rows of [

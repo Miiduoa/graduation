@@ -114,7 +114,10 @@ function validSchoolId(value: unknown): value is string {
   return (
     boundedString(value, 100, true) &&
     value === value.trim() &&
-    !/[\u0000-\u001f\u007f]/.test(value)
+    !Array.from(value).some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 31 || code === 127;
+    })
   );
 }
 
@@ -143,40 +146,24 @@ function validatedRecord(
     !boundedString(record.batchId, 300, true) ||
     !validTimestamp(record.importedAt) ||
     record.schoolId !== schoolId ||
-    !boundedString(
-      record.academicYear,
-      record.kind === 'events' ? PERSONAL_IMPORT_MAX_TEXT_LENGTH : 4,
-    ) ||
-    (record.kind !== 'events' &&
-      record.academicYear !== '' &&
-      !/^\d{2,4}$/.test(record.academicYear)) ||
-    !boundedString(record.semester, record.kind === 'events' ? PERSONAL_IMPORT_MAX_TEXT_LENGTH : 30)
+    !boundedString(record.academicYear, PERSONAL_IMPORT_MAX_TEXT_LENGTH) ||
+    !boundedString(record.semester, PERSONAL_IMPORT_MAX_TEXT_LENGTH)
   )
     rowError();
+  // Archive checks enforce scalar types and bounds. Meaning and numeric ranges belong to
+  // validatePersonalImportRow below, which applies them only to the relevant record kind.
   for (const field of ['dayOfWeek', 'startPeriod', 'endPeriod', 'credits'] as const) {
     const number = record[field];
-    if (number === undefined) continue;
-    const maximum = field === 'dayOfWeek' ? 7 : field === 'credits' ? 40 : 99;
+    if (number !== undefined && (typeof number !== 'number' || !Number.isFinite(number)))
+      rowError();
+  }
+  for (const field of ['date', 'endDate', 'startTime', 'endTime', 'grade'] as const) {
     if (
-      typeof number !== 'number' ||
-      !Number.isFinite(number) ||
-      number < (field === 'credits' ? 0 : 1) ||
-      number > maximum ||
-      (field !== 'credits' && !Number.isInteger(number))
+      record[field] !== undefined &&
+      !boundedString(record[field], PERSONAL_IMPORT_MAX_TEXT_LENGTH)
     )
       rowError();
   }
-  for (const field of ['date', 'endDate'] as const) {
-    const date = record[field];
-    if (date !== undefined && (typeof date !== 'string' || (date && !isPersonalImportDate(date))))
-      rowError();
-  }
-  for (const field of ['startTime', 'endTime'] as const) {
-    const time = record[field];
-    if (time !== undefined && (typeof time !== 'string' || (time && !isPersonalImportTime(time))))
-      rowError();
-  }
-  if (record.grade !== undefined && !boundedString(record.grade, 40)) rowError();
   const source = objectWithFields(record.source, SOURCE_FIELDS, allowExtraFields);
   if (
     !['paste', 'file', 'screenshot'].includes(source.type as string) ||
