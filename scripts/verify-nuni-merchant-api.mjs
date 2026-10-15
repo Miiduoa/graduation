@@ -1,37 +1,59 @@
 // Run with the pinned Nuni checkout's tsx loader. This creates and drops only a
 // fresh schema in the named loopback acceptance database; it never uses ambient DATABASE_URL.
 import assert from 'node:assert/strict';
-import { createHash, randomUUID } from 'node:crypto';
-import { readFile, writeFile, unlink } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { writeFile, unlink } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { assertPinnedNuniSource } from './lib/nuni-course-source.mjs';
+import { assertFoodOrderingSource, loadFoodOrderingCandidate } from './nuni-merchant-source.mjs';
+import { nativeLoopbackFetch } from './nuni-merchant-native-transport.mjs';
 
 const args = process.argv.slice(2);
 const option = (name) => args[args.indexOf(name) + 1];
+const sourceOnly = args.includes('--verify-source-only');
+const nativeClient = args.includes('--native-client');
 assert(
-  args.includes('--source') && args.includes('--database-url'),
-  'Pass --source <pinned checkout> --database-url <owned loopback acceptance database>',
+  !(nativeClient && args.includes('--serve')),
+  '--native-client cannot be combined with --serve',
+);
+assert(
+  !(nativeClient && sourceOnly),
+  '--native-client requires HTTP acceptance, not --verify-source-only',
+);
+assert(
+  args.includes('--source') && (sourceOnly || args.includes('--database-url')),
+  'Pass --source <pinned checkout> --database-url <owned loopback acceptance database> (or --verify-source-only)',
 );
 const source = path.resolve(option('--source'));
-const databaseUrl = new URL(option('--database-url'));
-assert.equal(databaseUrl.protocol, 'postgresql:');
-assert.equal(databaseUrl.hostname, '127.0.0.1');
-assert.equal(databaseUrl.pathname, '/campus_nuni_merchant_acceptance');
+const databaseUrl = sourceOnly ? null : new URL(option('--database-url'));
+if (databaseUrl) {
+  assert.equal(databaseUrl.protocol, 'postgresql:');
+  assert.equal(databaseUrl.hostname, '127.0.0.1');
+  assert.equal(databaseUrl.pathname, '/campus_nuni_merchant_acceptance');
+  assert(
+    databaseUrl.port && !databaseUrl.search && !databaseUrl.hash,
+    'Explicit loopback port required',
+  );
+}
 assert(
-  databaseUrl.port && !databaseUrl.search && !databaseUrl.hash,
-  'Explicit loopback port required',
+  args.includes('--food-ordering-candidate'),
+  'Pass --food-ordering-candidate explicitly; the default v20 source does not support complete ordering',
 );
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const manifest = JSON.parse(
-  await readFile(path.join(repository, 'deploy/nuni-api/source.json'), 'utf8'),
-);
-for (const patch of manifest.patches) {
-  const bytes = await readFile(path.join(repository, 'deploy/nuni-api/patches', patch.file));
-  assert.equal(createHash('sha256').update(bytes).digest('hex'), patch.sha256);
+const manifest = await loadFoodOrderingCandidate(repository);
+const tree = assertFoodOrderingSource(source, manifest);
+if (sourceOnly) {
+  console.log(
+    JSON.stringify({
+      candidate: 'food-ordering',
+      candidateCommit: manifest.candidateCommit,
+      candidateTree: tree,
+      databaseAccessed: false,
+    }),
+  );
+  process.exit(0);
 }
-const tree = assertPinnedNuniSource(source, manifest.candidateTree);
 const sourceRequire = createRequire(path.join(source, 'apps/api/package.json'));
 const load = (relative) => import(pathToFileURL(path.join(source, relative)).href);
 const { Client } = sourceRequire('pg');
@@ -41,10 +63,18 @@ const { generateKeyPair, exportJWK, SignJWT } = await import(
 const { createDatabase } = await load('apps/api/src/database.ts');
 const { readDatabaseRuntimeConfig } = await load('apps/api/src/database-runtime-config.ts');
 const { createApp } = await load('apps/api/src/app.ts');
+const nativeRequest = nativeClient
+  ? (
+      await import(
+        pathToFileURL(path.join(repository, 'apps/mobile/src/services/nuniClient.ts')).href
+      )
+    ).nuniPlatformRequest
+  : null;
 const schemaName = `merchant_accept_${randomUUID().replaceAll('-', '')}`;
 const admin = new Client({ connectionString: databaseUrl.href });
 const report = {
   startedAt: new Date().toISOString(),
+  candidate: 'food-ordering',
   candidateCommit: manifest.candidateCommit,
   candidateTree: tree,
   authMode: 'campus-account',
@@ -53,7 +83,18 @@ const report = {
   identityProvider: 'Isolated RS256 test keys; real nonce, signature, account and session handlers',
   transport: 'loopback HTTP',
   database: 'PostgreSQL',
-  audit: 'shared-client-student-merchant-pickup-and-refund',
+  audit: nativeClient
+    ? 'native-transport-shared-client-student-merchant-pickup-and-refund'
+    : 'shared-client-student-merchant-pickup-and-refund',
+  ...(nativeClient
+    ? {
+        nativeTransport: {
+          source: 'apps/mobile/src/services/nuniClient.ts',
+          requests: [],
+          uiOrDeviceValidated: false,
+        },
+      }
+    : {}),
   checks: [],
   observations: [],
 };
@@ -62,6 +103,9 @@ let db;
 let schemaCreated = false;
 let origin;
 let requestCount = 0;
+let nativeExpected = null;
+let nativeLogicalRequests = 0;
+const originalFetch = globalThis.fetch;
 const fixtureFile = path.join(repository, '../.food-browser-fixture.json');
 let fixtureCreated = false;
 async function request(method, route, session, payload, expected = 200) {
@@ -130,6 +174,17 @@ try {
       }),
   });
   origin = await app.listen({ host: '127.0.0.1', port: 0 });
+  if (nativeClient) {
+    globalThis.fetch = nativeLoopbackFetch(
+      origin,
+      originalFetch,
+      () => nativeExpected,
+      (entry) => {
+        ++requestCount;
+        report.nativeTransport.requests.push(entry);
+      },
+    );
+  }
   const base = '/v1/auth/platform';
   async function login(subject) {
     const tx = await request('POST', `${base}/login-transactions`, null, {
@@ -388,6 +443,28 @@ try {
       const search = new URLSearchParams(query).toString();
       const created = input && (/\/(quotes|orders)$/.test(resource) || resource.endsWith('/shift'));
       report.lastResource = resource;
+      if (nativeRequest) {
+        assert.equal(nativeExpected, null, 'Native acceptance requests must not overlap');
+        ++nativeLogicalRequests;
+        nativeExpected = {
+          method: input ? 'POST' : 'GET',
+          path: `${base}/${resource}${search ? `?${search}` : ''}`,
+          authorization: `Platform ${actor.sessionHandle}`,
+          status: created ? 201 : 200,
+        };
+        try {
+          return await nativeRequest(
+            resource,
+            actor.sessionHandle,
+            input,
+            undefined,
+            undefined,
+            query,
+          );
+        } finally {
+          nativeExpected = null;
+        }
+      }
       const value = await request(
         input ? 'POST' : 'GET',
         `${base}/${resource}${search ? `?${search}` : ''}`,
@@ -676,6 +753,41 @@ try {
     report.observations.push(
       'Approval uses a schema-local reviewer fixture with the real service; no real school login, merchant, payment or production data is exercised.',
     );
+    if (nativeClient) {
+      const requests = report.nativeTransport.requests;
+      assert.equal(
+        requests.length,
+        nativeLogicalRequests,
+        'Every native operation must reach the real API exactly once',
+      );
+      for (const [method, suffix] of [
+        ['GET', '/food-order-realms'],
+        ['POST', '/quotes'],
+        ['POST', '/orders'],
+        ['POST', '/counter-payment'],
+        ['POST', '/accept'],
+        ['POST', '/start'],
+        ['POST', '/ready'],
+        ['POST', '/fulfill'],
+        ['POST', '/cancel'],
+        ['POST', '/reject'],
+        ['POST', '/confirm-counter-refund'],
+        ['POST', '/shift/handover'],
+      ]) {
+        assert(
+          requests.some((entry) => entry.method === method && entry.path.endsWith(suffix)),
+          `Native workflow did not exercise ${method} ${suffix}`,
+        );
+      }
+      report.nativeTransport.httpRequests = requests.length;
+      report.nativeTransport.methodPathAndStatusVerified = true;
+      report.observations.push(
+        'App transport and shared client used real HTTP responses through an acceptance-process-only loopback origin adapter. This is not native UI, camera, simulator or physical-device evidence.',
+      );
+      passed(
+        'The production App nuniPlatformRequest completed the student/merchant lifecycle through the same real HTTP API; every method, path/query, actor and status matched the requested operation',
+      );
+    }
     report.status = 'passed';
   }
 } catch (error) {
@@ -683,6 +795,8 @@ try {
   report.failure = error instanceof Error ? error.message : String(error);
   process.exitCode = 1;
 } finally {
+  globalThis.fetch = originalFetch;
+  nativeExpected = null;
   report.schemaRemoved = false;
   report.cleanupErrors = [];
   for (const cleanup of [

@@ -21,6 +21,7 @@ import {
 import { NuniError } from '@campus/shared/src/nuni';
 import { useNuniSession } from '../state/nuniSession';
 import { NuniDraftProvider, useNuniDraftState, type NuniDraftCache } from '../state/nuniDrafts';
+import { clearAllFoodPendingForAccount } from '../state/foodPersistence';
 import { getGoogleCredentialCapability } from '../services/nuniGoogle';
 import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
@@ -335,15 +336,45 @@ function SignedInWorkspace({ onLogout, initialTab }: { onLogout: () => void; ini
 export function NuniWorkspaceScreen({ route }: { route?: { params?: { tab?: Tab } } } = {}) {
   const auth = useNuniSession();
   const s = useThemeStyleSheet(createStyles);
-  const [action, setAction] = useState('');
-  const [actionError, setActionError] = useState('');
-  const active = useRef(false);
+  const identity = useRef({ key: '', epoch: 0 });
+  const identityKey = auth.session
+    ? JSON.stringify([auth.session.platformAccountId, auth.session.context])
+    : '';
+  if (identity.current.key !== identityKey) {
+    identity.current.key = identityKey;
+    // Keep logout feedback visible while signed out, but never carry it into a
+    // new login (including the same account with a new session context).
+    if (identityKey) identity.current.epoch += 1;
+  }
+  const epoch = identity.current.epoch;
+  const [actionState, setActionState] = useState({ epoch, label: '', error: '' });
+  const action = actionState.epoch === epoch ? actionState.label : '';
+  const actionError = actionState.epoch === epoch ? actionState.error : '';
+  const active = useRef<{ epoch: number; id: number } | null>(null);
+  const nextOperation = useRef(0);
   const mounted = useRef(true);
   const drafts = useRef<{ accountId: string; cache: NuniDraftCache } | null>(null);
+  const cleanupError = (ownerEpoch: number) => {
+    if (!mounted.current || identity.current.epoch !== ownerEpoch) return;
+    setActionState((previous) => ({
+      epoch: ownerEpoch,
+      label: previous.epoch === ownerEpoch ? previous.label : '',
+      error: '已停止使用這個帳號，但未能清除裝置上的訂餐重試紀錄。',
+    }));
+  };
   // Revalidation keeps only user input in memory. The actual workspace still unmounts,
   // so all server data and permissions must be loaded again with the new request context.
-  if (auth.pendingLogout || (!auth.session && !auth.loading && !auth.error)) drafts.current = null;
-  if (auth.session && !auth.loading && !auth.pendingLogout && !auth.error) {
+  // Confirmed logout clears food SecureStore keys once when the in-memory draft scope drops.
+  if (auth.pendingLogout || (!auth.session && !auth.loading && !auth.error)) {
+    if (drafts.current) {
+      const accountId = drafts.current.accountId;
+      drafts.current = null;
+      void clearAllFoodPendingForAccount(accountId).catch(() => {
+        cleanupError(epoch);
+      });
+    }
+  }
+  if (auth.session && !auth.loading && !auth.pendingLogout && !auth.error && !action) {
     if (drafts.current?.accountId !== auth.session.platformAccountId)
       drafts.current = { accountId: auth.session.platformAccountId, cache: new Map() };
   }
@@ -354,22 +385,35 @@ export function NuniWorkspaceScreen({ route }: { route?: { params?: { tab?: Tab 
     };
   }, []);
   const run = async (label: string, operation: () => Promise<unknown>) => {
-    if (active.current || !mounted.current) return;
-    active.current = true;
-    setAction(label);
-    setActionError('');
+    if (active.current?.epoch === epoch || !mounted.current) return;
+    const id = ++nextOperation.current;
+    active.current = { epoch, id };
+    setActionState({ epoch, label, error: '' });
     try {
       await operation();
     } catch {
-      if (mounted.current) setActionError('操作未完成，請確認連線後重試。');
+      if (mounted.current && identity.current.epoch === epoch && active.current?.id === id)
+        setActionState({ epoch, label, error: '操作未完成，請確認連線後重試。' });
     } finally {
-      active.current = false;
-      if (mounted.current) setAction('');
+      if (active.current?.id === id) {
+        active.current = null;
+        if (mounted.current && identity.current.epoch === epoch)
+          setActionState((previous) => ({ ...previous, label: '' }));
+      }
     }
   };
   const logout = () => {
+    const accountId = drafts.current?.accountId ?? auth.session?.platformAccountId;
     drafts.current = null;
-    void run('正在登出…', auth.logout);
+    void run('正在登出…', async () => {
+      // Revoke authentication immediately. Slow or unavailable device storage
+      // must not postpone logout; both promises get rejection handlers together.
+      const logoutResult = auth.logout();
+      const cleanup = accountId ? clearAllFoodPendingForAccount(accountId) : Promise.resolve();
+      const [session, storage] = await Promise.allSettled([logoutResult, cleanup]);
+      if (session.status === 'rejected') throw session.reason;
+      if (storage.status === 'rejected') cleanupError(epoch);
+    });
   };
   const openWeb = () => void run('正在開啟網頁…', () => Linking.openURL('https://nuni.tw/login'));
   if (auth.loading || action)

@@ -7,8 +7,23 @@ import type {
 } from '@campus/shared/src/nuniFood';
 import { future, money, queueFixture, shiftFixture } from '@/features/food/foodTestFixtures';
 import { MerchantOrderDesk } from './MerchantOrderDesk';
-const mocks = vi.hoisted(() => ({ request: vi.fn() }));
-vi.mock('@/features/nuni/Session', () => ({ browserRequest: mocks.request }));
+const mocks = vi.hoisted(() => ({
+  request: vi.fn(),
+  session: {
+    platformAccountId: 'account-a',
+    context: 'context-a',
+  } as { platformAccountId: string; context: string } | null,
+}));
+vi.mock('@/features/nuni/Session', () => ({
+  browserRequest: mocks.request,
+  useNuniSession: () => ({
+    session: mocks.session,
+    loading: false,
+    error: '',
+    pendingLogout: false,
+    refresh: vi.fn(),
+  }),
+}));
 vi.mock('./PickupScanner', () => ({
   PickupScanner: ({
     onToken,
@@ -123,6 +138,8 @@ async function respond(path: string, _context: string, input?: Record<string, un
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  sessionStorage.clear();
+  mocks.session = { platformAccountId: 'account-a', context: 'context-a' };
   shift = shiftFixture();
   queue = [queueFixture()];
   mocks.request.mockImplementation(respond);
@@ -289,6 +306,75 @@ it('requires an actual refund acknowledgment and a meaningful other rejection re
     reason: 'other',
     reasonDetail: '設備臨時故障',
   });
+});
+
+it('quietly polls the merchant queue without clearing an open confirm panel, and ignores background ticks', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  mount();
+  fireEvent.click(await screen.findByRole('button', { name: '登記櫃檯收款：A101' }));
+  fireEvent.click(screen.getByLabelText('我已實際收到這筆訂單的款項'));
+  expect(button('確認：登記櫃檯收款').disabled).toBe(false);
+  const before = mocks.request.mock.calls.filter(([path]) => path.endsWith('/orders')).length;
+  Object.defineProperty(document, 'visibilityState', {
+    configurable: true,
+    get: () => 'hidden',
+  });
+  document.dispatchEvent(new Event('visibilitychange'));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10_000);
+  });
+  expect(mocks.request.mock.calls.filter(([path]) => path.endsWith('/orders')).length).toBe(before);
+  Object.defineProperty(document, 'visibilityState', {
+    configurable: true,
+    get: () => 'visible',
+  });
+  queue = [{ ...queueFixture(), state: 'paid', allowedActions: ['accept', 'reject'] }];
+  document.dispatchEvent(new Event('visibilitychange'));
+  await screen.findByText('取餐 A101 · 已付款，待店家接單');
+  expect(screen.queryByLabelText('我已實際收到這筆訂單的款項')).toBeNull();
+  expect(screen.getByRole('button', { name: '接單：A101' })).toBeTruthy();
+  vi.useRealTimers();
+});
+
+it('persists an uncertain cash write across a new Map and rejects storage failure before the network', async () => {
+  let attempts = 0;
+  mocks.request.mockImplementation((path, context, input) =>
+    path.endsWith('/counter-payment') && ++attempts === 1
+      ? Promise.reject(new NuniError(0, 'NETWORK_ERROR'))
+      : respond(path, context, input),
+  );
+  const first = mount(new Map());
+  await confirm('登記櫃檯收款', '我已實際收到這筆訂單的款項');
+  await screen.findByText(/尚未確認這次操作的結果/);
+  const original = mocks.request.mock.calls.find(([path]) => path.endsWith('/counter-payment'))![2];
+  // Cold start with an empty Map; durable sessionStorage must restore the same key.
+  first.unmount();
+  const second = mount(new Map(), 'context-renewed');
+  await screen.findByText('目前收銀班別');
+  fireEvent.click(button('重試同一份操作'));
+  await screen.findByText('取餐 A101 · 已付款，待店家接單');
+  const writes = mocks.request.mock.calls.filter(([path]) => path.endsWith('/counter-payment'));
+  expect(writes[1][2]).toEqual(original);
+
+  second.unmount();
+  queue = [queueFixture()];
+  mocks.request.mockClear();
+  mount(new Map());
+  await screen.findByText('目前收銀班別');
+  fireEvent.click(await screen.findByRole('button', { name: '登記櫃檯收款：A101' }));
+  fireEvent.click(screen.getByLabelText('我已實際收到這筆訂單的款項'));
+  const blocked = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    throw new Error('quota');
+  });
+  try {
+    fireEvent.click(button('確認：登記櫃檯收款'));
+    await screen.findByText(/目前無法安全保存/);
+    expect(mocks.request.mock.calls.some(([path]) => path.endsWith('/counter-payment'))).toBe(
+      false,
+    );
+  } finally {
+    blocked.mockRestore();
+  }
 });
 
 it.each([401, 403, 409])(

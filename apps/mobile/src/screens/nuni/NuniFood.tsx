@@ -14,6 +14,8 @@ import type {
 import { useNuniSession } from '../../state/nuniSession';
 import { useNuniDraftState } from '../../state/nuniDrafts';
 import {
+  FOOD_POLL_MS,
+  FOOD_TERMINAL_STATES,
   FoodButton,
   FoodCard,
   FoodField,
@@ -130,7 +132,9 @@ function FoodRealm({
           },
     [client, selection.tenantId, mode, cursor],
   );
-  const resource = useFoodLoad(loader);
+  const resource = useFoodLoad(loader, {
+    pollMs: mode === 'orders' ? FOOD_POLL_MS : undefined,
+  });
   if (orderId)
     return (
       <FoodOrder
@@ -511,7 +515,10 @@ function FoodOrder({
 }) {
   const client = useFoodClient(context);
   const loader = useCallback(() => client.getOrder(tenantId, orderId), [client, tenantId, orderId]);
-  const resource = useFoodLoad(loader);
+  const resource = useFoodLoad(loader, {
+    pollMs: FOOD_POLL_MS,
+    shouldPoll: (data) => !data || !FOOD_TERMINAL_STATES.has(data.state),
+  });
   const [reason, setReason] = useNuniDraftState<NuniFoodCancelInput['reason']>(
     `food:${tenantId}:${orderId}:cancel-reason`,
     'changed-mind',
