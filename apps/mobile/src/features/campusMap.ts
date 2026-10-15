@@ -76,7 +76,7 @@ var tileLayer=L.tileLayer('${tile}',{maxZoom:19,attribution:'&copy; <a href="htt
 var failedTiles=0;
 tileLayer.on('tileerror',function(){if(++failedTiles>=4)send({type:'error'});});
 tileLayer.on('tileload',function(){failedTiles=0;});
-var markers=L.layerGroup().addTo(map),userMarker=null;
+var markers=L.layerGroup().addTo(map),userMarker=null,routeLine=null;
 document.addEventListener('message',function(event){
  try{
   var data=JSON.parse(event.data);
@@ -88,6 +88,14 @@ document.addEventListener('message',function(event){
     marker.bindTooltip(label);
     marker.on('click',function(){send({type:'select',id:place.id});});
    });
+  }
+  if(data.type==='clearRoute'&&routeLine){map.removeLayer(routeLine);routeLine=null;}
+  if(data.type==='route'){
+   if(routeLine){map.removeLayer(routeLine);routeLine=null;}
+   var start=data.start,end=data.end;
+   if(start&&end&&[start.lat,start.lng,end.lat,end.lng].every(Number.isFinite)){
+    routeLine=L.polyline([[start.lat,start.lng],[end.lat,end.lng]],{color:colors.accent,weight:3,opacity:.85,dashArray:'6 9',interactive:false}).addTo(map);
+   }
   }
   if(data.type==='focus')map.setView([data.lat,data.lng],18);
   if(data.type==='clearLocation'&&userMarker){map.removeLayer(userMarker);userMarker=null;}
