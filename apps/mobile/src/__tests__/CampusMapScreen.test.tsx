@@ -390,3 +390,101 @@ test('opens the selected university official map instead of Providence for a non
   await act(async () => fireEvent.press(view.getByText('查看校方校區平面圖')));
   expect(Linking.openURL).toHaveBeenCalledWith('https://www.nthu.edu.tw/campusmap');
 });
+
+test('never revives an old deep-link destination after switching A → B → A in the same screen', async () => {
+  mockParams = { toPoiId: 'library' };
+  const view = await openMap();
+  expect(view.getByText('查看步行路線')).toBeTruthy();
+
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([{
+    ...place,
+    name: '乙校圖書館',
+  }]);
+  mockSchool = { id: 'school-b' };
+  view.rerender(<GoogleMapsLikeScreen />);
+  await view.findByText('乙校圖書館');
+  expect(view.queryByText('查看步行路線')).toBeNull();
+
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([{
+    ...place,
+    name: '甲校圖書館',
+  }]);
+  mockSchool = { id: 'school-a' };
+  view.rerender(<GoogleMapsLikeScreen />);
+  await view.findByText('甲校圖書館');
+  expect(view.queryByText('查看步行路線')).toBeNull();
+  fireEvent.press(view.getByText('甲校圖書館'));
+  expect(view.getByText('查看步行路線')).toBeTruthy();
+});
+
+test('lets a visitor clear a linked school origin before opening directions', async () => {
+  mockParams = { fromPoiId: 'gate', toPoiId: 'library' };
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([
+    place,
+    { ...place, id: 'gate', name: '校園正門', lat: 25, lng: 121 },
+  ]);
+  const view = await openMap();
+  expect(view.getByText('清除步行起點')).toBeTruthy();
+  expect(mockInject.mock.calls.some(([script]) => script.includes('route') && script.includes('start'))).toBe(true);
+  fireEvent.press(view.getByText('清除步行起點'));
+  await act(async () => fireEvent.press(view.getByText('查看步行路線')));
+  expect(Linking.openURL).toHaveBeenCalledWith(
+    'https://www.google.com/maps/dir/?api=1&destination=25.1%2C121.2&travelmode=walking',
+  );
+  expect(mockInject.mock.calls.some(([script]) => script.includes('clearRoute'))).toBe(true);
+});
+
+test('keeps the selected map marker after a search hides it from the directory', async () => {
+  mockParams = { toPoiId: 'library' };
+  const view = await openMap();
+  mockInject.mockClear();
+  fireEvent.changeText(view.getByLabelText('搜尋校園地點'), '不存在的設施');
+  expect(mockInject.mock.calls.some(([script]) =>
+    script.includes('places') && script.includes('學校發布的圖書館')
+  )).toBe(true);
+});
+
+
+test('accepts a new explicit destination for the current campus after a school change', async () => {
+  mockParams = { toPoiId: 'library' };
+  const view = await openMap();
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([
+    { ...place, name: '乙校圖書館' },
+    { ...place, id: 'entrance', name: '乙校正門', lat: 24.1, lng: 121.1 },
+  ]);
+  mockSchool = { id: 'school-b' };
+  view.rerender(<GoogleMapsLikeScreen />);
+  await view.findByText('乙校正門');
+  expect(view.queryByText('查看步行路線')).toBeNull();
+
+  mockParams = { toPoiId: 'entrance' };
+  view.rerender(<GoogleMapsLikeScreen />);
+  expect(view.getByText('查看步行路線')).toBeTruthy();
+  await act(async () => fireEvent.press(view.getByText('查看步行路線')));
+  expect(Linking.openURL).toHaveBeenCalledWith(expect.stringContaining('destination=24.1%2C121.1'));
+});
+
+
+test('does not replace the WebView document when only the map search changes', async () => {
+  const view = await openMap();
+  const source = view.getByTestId('campus-map-webview').props.source;
+  fireEvent.changeText(view.getByLabelText('搜尋校園地點'), '沒有這個校舍');
+  expect(view.getByTestId('campus-map-webview').props.source).toBe(source);
+  fireEvent.changeText(view.getByLabelText('搜尋校園地點'), '圖書館');
+  expect(view.getByTestId('campus-map-webview').props.source).toBe(source);
+});
+
+
+test('keeps a route starting-point marker visible when the start is filtered out', async () => {
+  mockParams = { fromPoiId: 'gate', toPoiId: 'library' };
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([
+    place,
+    { ...place, id: 'gate', name: '校園正門', lat: 25, lng: 121 },
+  ]);
+  const view = await openMap();
+  mockInject.mockClear();
+  fireEvent.changeText(view.getByLabelText('搜尋校園地點'), '圖書館');
+  expect(mockInject.mock.calls.some(([script]) =>
+    script.includes('places') && script.includes('校園正門') && script.includes('學校發布的圖書館')
+  )).toBe(true);
+});
