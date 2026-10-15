@@ -2,9 +2,11 @@ import contextlib
 import importlib.util
 import io
 import json
+from itertools import combinations
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('nuni_api_build', ROOT / 'build.py')
@@ -47,10 +49,51 @@ class BuildTests(unittest.TestCase):
                 build.build(build.parse_args(['--food-ordering-candidate']))
         self.assertFalse(any(call.args[0][0] == 'docker' for call in run.call_args_list))
 
-    def test_course_and_food_candidates_cannot_be_combined(self):
-        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
-            build.parse_args(['--course-access-candidate', '--food-ordering-candidate'])
-        self.assertEqual(raised.exception.code, 2)
+    def assert_extension_build(self, option, folder, module_name, image):
+        manifest = json.loads((ROOT / 'source.json').read_text())
+        candidate_tree = 'f' * 40
+        extension = SimpleNamespace(apply_extension=Mock(return_value={'candidateTree': candidate_tree}))
+        extension_spec = SimpleNamespace(loader=SimpleNamespace(exec_module=Mock()))
+        with contextlib.redirect_stdout(io.StringIO()), patch.object(build.subprocess, 'run') as run, patch.object(
+            build.subprocess, 'check_output', return_value=manifest['candidateTree'] + '\n'
+        ), patch.object(build.importlib.util, 'spec_from_file_location', return_value=extension_spec) as load_spec, patch.object(
+            build.importlib.util, 'module_from_spec', return_value=extension
+        ):
+            build.build(build.parse_args([option]))
+        load_spec.assert_called_once_with(module_name, ROOT / folder / 'prepare.py')
+        extension_spec.loader.exec_module.assert_called_once_with(extension)
+        extension.apply_extension.assert_called_once()
+        self.assertEqual(extension.apply_extension.call_args.kwargs, {'apply': True})
+        commands = [call.args[0] for call in run.call_args_list]
+        applied = [Path(command[-1]).name for command in commands if command[:3] == ['git', 'apply', '--index']]
+        self.assertEqual(applied, [item['file'] for item in manifest['patches']])
+        self.assertEqual(len(applied), 4)
+        self.assertIn(image, commands[-1])
+        self.assertIn('org.opencontainers.image.revision=' + candidate_tree, commands[-1])
+
+    def test_course_candidate_preserves_its_extension_and_image(self):
+        self.assert_extension_build(
+            '--course-access-candidate', 'course-access', 'course_access_prepare',
+            'nuni-api:course-access-candidate',
+        )
+
+    def test_public_cafeterias_candidate_preserves_its_extension_and_image(self):
+        self.assert_extension_build(
+            '--public-cafeterias-candidate', 'public-cafeterias', 'public_cafeterias_prepare',
+            'nuni-api:public-cafeterias-candidate',
+        )
+
+    def test_all_candidate_combinations_fail_before_git_or_docker(self):
+        flags = ['--course-access-candidate', '--public-cafeterias-candidate', '--food-ordering-candidate']
+        for selected in [*combinations(flags, 2), tuple(flags)]:
+            with self.subTest(selected=selected), patch.object(build.subprocess, 'run') as run, patch.object(
+                build.subprocess, 'check_output'
+            ) as read, contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as raised:
+                    build.build(build.parse_args(list(selected)))
+                self.assertEqual(raised.exception.code, 2)
+                run.assert_not_called()
+                read.assert_not_called()
 
 
 if __name__ == '__main__':

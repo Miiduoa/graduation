@@ -7,7 +7,8 @@ import {
   personalImportUndoneNotice,
 } from '@campus/shared';
 import { PersonalImportCenter } from './PersonalImportCenter';
-import { readPersonalImports } from '@/lib/personalImports';
+import { readPersonalImports, savePersonalImportBatch } from '@/lib/personalImports';
+import { serializePersonalImportBackup, type PersonalImportRecord } from '@campus/shared';
 import { browserRequest } from '@/features/nuni/Session';
 const context = vi.hoisted(() => ({
   owner: 'guest',
@@ -266,7 +267,6 @@ it('shows a Chinese notice when the screenshot file cannot be opened', async () 
   expect(screen.queryByText(/could not be decoded/i)).toBeNull();
 });
 
-
 it('keeps course application and personal-import controls in the same timetable review', async () => {
   window.history.replaceState(null, '', '/import?kind=timetable');
   context.owner = 'platform:pa_aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
@@ -280,6 +280,164 @@ it('keeps course application and personal-import controls in the same timetable 
   await prepare('課程名稱,星期,開始節次,結束節次,教師,課號\n資料庫,一,3,4,王老師,CS301');
   expect(screen.getByText('查找課班與申請加入')).toBeTruthy();
   expect(screen.getByLabelText('連結我的課程')).toBeTruthy();
-  expect((screen.getByRole('button', { name: '確認匯入 1 筆' }) as HTMLButtonElement).disabled).toBe(false);
+  expect(
+    (screen.getByRole('button', { name: '確認匯入 1 筆' }) as HTMLButtonElement).disabled,
+  ).toBe(false);
   expect(readPersonalImports(context)).toHaveLength(0);
+});
+
+function backupRecords(): PersonalImportRecord[] {
+  const base = {
+    schoolId: 'pu',
+    academicYear: '115',
+    semester: '1',
+    batchId: 'old-batch',
+    importedAt: '2026-10-12T12:00:00.000Z',
+    source: { type: 'screenshot' as const, name: '成績.png', line: 2, rawText: '原始學校文字' },
+  };
+  return [
+    {
+      ...base,
+      id: 'old-grade',
+      kind: 'grades',
+      title: '備份成績',
+      credits: 3,
+      grade: '85',
+      linkedCourseId: 'old-course-reference',
+    },
+    {
+      ...base,
+      id: 'old-course',
+      kind: 'timetable',
+      title: '備份課表',
+      dayOfWeek: 1,
+      startPeriod: 3,
+      endPeriod: 4,
+    },
+    {
+      ...base,
+      id: 'old-event',
+      kind: 'events',
+      title: '備份活動',
+      academicYear: '',
+      semester: '',
+      date: '2026-11-01',
+      allDay: true,
+    },
+  ];
+}
+function uploadBackup(
+  content = serializePersonalImportBackup(backupRecords(), { schoolId: 'pu' }),
+) {
+  const file = new File([content], 'campus-one-backup.json', { type: 'application/json' });
+  Object.defineProperty(file, 'text', { value: () => Promise.resolve(content) });
+  fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), { target: { files: [file] } });
+}
+it('restores all kinds and original terms only after review, without adopting a file class link', async () => {
+  render(<PersonalImportCenter />);
+  uploadBackup();
+  await screen.findByRole('button', { name: '確認匯入 3 筆' });
+  expect(readPersonalImports(context)).toEqual([]);
+  expect(
+    screen
+      .getAllByLabelText('連結我的課程')
+      .every((node) => (node as HTMLSelectElement).value === ''),
+  ).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入 3 筆' }));
+  await screen.findByText(personalImportSavedNotice(3));
+  const saved = readPersonalImports(context);
+  expect(saved.map((row) => row.kind)).toEqual(['grades', 'timetable', 'events']);
+  expect(saved[0]).toMatchObject({
+    academicYear: '115',
+    semester: '1',
+    source: backupRecords()[0].source,
+  });
+  expect(
+    saved.every(
+      (row) => row.batchId !== 'old-batch' && !row.id.startsWith('old-') && !row.linkedCourseId,
+    ),
+  ).toBe(true);
+  uploadBackup();
+  await screen.findByRole('button', { name: '確認匯入 3 筆' });
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入 3 筆' }));
+  await screen.findByText(personalImportSavedNotice(0));
+  expect(readPersonalImports(context)).toHaveLength(3);
+});
+it('rejects a wrong-school or corrupt backup without replacing existing records', async () => {
+  await savePersonalImportBatch(context, [backupRecords()[0]]);
+  render(<PersonalImportCenter />);
+  uploadBackup(
+    serializePersonalImportBackup(
+      backupRecords().map((row) => ({ ...row, schoolId: 'ntu' })),
+      { schoolId: 'ntu' },
+    ),
+  );
+  await screen.findByText(/這份備份屬於其他校園/);
+  expect(screen.queryByRole('button', { name: /確認匯入 \d+ 筆/ })).toBeNull();
+  uploadBackup('{broken');
+  await waitFor(() => expect(screen.queryByText(/這份備份屬於其他校園/)).toBeNull());
+  expect(readPersonalImports(context)).toHaveLength(1);
+  expect(screen.queryByRole('button', { name: /確認匯入 \d+ 筆/ })).toBeNull();
+});
+it('ignores backup file completion after changing accounts', async () => {
+  let resolve!: (text: string) => void;
+  const file = new File([], 'backup.json');
+  Object.defineProperty(file, 'text', {
+    value: () =>
+      new Promise<string>((done) => {
+        resolve = done;
+      }),
+  });
+  const view = render(<PersonalImportCenter />);
+  fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), { target: { files: [file] } });
+  context.owner = 'platform:two';
+  view.rerender(<PersonalImportCenter />);
+  await act(async () =>
+    resolve(serializePersonalImportBackup(backupRecords(), { schoolId: 'pu' })),
+  );
+  expect(screen.queryByRole('button', { name: '確認匯入 3 筆' })).toBeNull();
+  expect(readPersonalImports(context)).toEqual([]);
+});
+it('keeps selection across backup pages and imports only checked rows', async () => {
+  const records = Array.from({ length: 26 }, (_, index) => ({
+    ...backupRecords()[0],
+    id: `record-${index}`,
+    title: `課程 ${index}`,
+    linkedCourseId: undefined,
+  }));
+  render(<PersonalImportCenter />);
+  uploadBackup(serializePersonalImportBackup(records, { schoolId: 'pu' }));
+  await screen.findByRole('button', { name: '確認匯入 26 筆' });
+  expect(screen.getAllByLabelText('名稱')).toHaveLength(25);
+  fireEvent.click(screen.getByRole('button', { name: '全部取消勾選' }));
+  fireEvent.click(screen.getByRole('button', { name: '下一頁' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: /第 26 筆/ }));
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
+  await screen.findByText(personalImportSavedNotice(1));
+  expect(readPersonalImports(context).map((row) => row.title)).toEqual(['課程 25']);
+});
+it('downloads the full current-school ledger even while a kind and search are selected', async () => {
+  await savePersonalImportBatch(context, backupRecords());
+  const otherSchool = { owner: context.owner, schoolId: 'ntu' };
+  await savePersonalImportBatch(otherSchool, [{ ...backupRecords()[0], schoolId: 'ntu' }]);
+  const blobs: Blob[] = [];
+  URL.createObjectURL = vi.fn((blob: Blob) => {
+    blobs.push(blob);
+    return 'blob:backup';
+  });
+  URL.revokeObjectURL = vi.fn();
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+  render(<PersonalImportCenter />);
+  fireEvent.change(screen.getByLabelText('搜尋個人紀錄'), { target: { value: '找不到' } });
+  fireEvent.click(screen.getByRole('button', { name: '下載完整備份' }));
+  expect(click).toHaveBeenCalledTimes(1);
+  const content = await new Promise<string>((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.readAsText(blobs[0]);
+  });
+  expect(JSON.parse(content).records).toHaveLength(3);
+  expect(JSON.parse(content).schoolId).toBe('pu');
+  expect(JSON.parse(content).owner).toBeUndefined();
+  click.mockRestore();
 });

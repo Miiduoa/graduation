@@ -4,3 +4,4 @@ export * from './parser';
 export * from './records';
 export * from './csv';
 export * from './copy';
+export * from './backup';

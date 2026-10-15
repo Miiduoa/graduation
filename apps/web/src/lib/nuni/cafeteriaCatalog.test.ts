@@ -40,6 +40,29 @@ it('returns 400 when schoolId is missing and does not list every school', async 
   expect(fetcher).not.toHaveBeenCalled();
 });
 
+it('returns 400 for invalid or unexpected school params for guests and signed-in users', async () => {
+  const cookie = sealCookie(SESSION_COOKIE, session);
+  for (const [path, cookieValue] of [
+    ['/api/cafeterias?schoolId=', undefined],
+    ['/api/cafeterias?schoolId=CGU', undefined],
+    ['/api/cafeterias?schoolId=cgu&extra=1', undefined],
+    ['/api/cafeterias?schoolId=', cookie],
+    ['/api/cafeterias?schoolId=CGU', cookie],
+    ['/api/cafeterias?schoolId=cgu&extra=1', cookie],
+    ['/api/cafeterias/stall?schoolId=', undefined],
+    ['/api/cafeterias/stall?schoolId=Not-A-Tenant', cookie],
+    ['/api/cafeterias/stall?schoolId=cgu&extra=1', cookie],
+  ] as const) {
+    fetcher.mockReset();
+    const response = await (path.includes('/stall')
+      ? handleCafeteriaDetail(request(path, cookieValue), 'stall')
+      : handleCafeteriaCatalog(request(path, cookieValue)));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'INVALID_INPUT' });
+    expect(fetcher).not.toHaveBeenCalled();
+  }
+});
+
 it('reads the public school catalog when nobody is signed in', async () => {
   fetcher.mockResolvedValueOnce(json({ schoolId: 'cgu', cafeterias: [], menus: [] }));
   const response = await handleCafeteriaCatalog(request('/api/cafeterias?schoolId=cgu'));
@@ -55,30 +78,68 @@ it('reads the public school catalog when nobody is signed in', async () => {
   expect(String(fetcher.mock.calls[0][0])).not.toContain('/v1/auth/platform/');
 });
 
-it('uses the bound school for a verified membership and ignores the URL schoolId', async () => {
-  fetcher
-    .mockResolvedValueOnce(
-      json({
-        memberships: [
-          {
-            membershipId: 'pm_11111111-1111-4111-8111-111111111111',
-            tenantId: 'pu',
-            campusName: '靜宜大學',
-            state: 'verified',
-            assurance: 'email',
-          },
-        ],
-      }),
-    )
-    .mockResolvedValueOnce(json({ schoolId: 'pu', cafeterias: [], menus: [] }));
+it('uses the requested schoolId for signed-in cross-school catalog without memberships fetch', async () => {
+  fetcher.mockResolvedValueOnce(json({ schoolId: 'cgu', cafeterias: [], menus: [] }));
   const response = await handleCafeteriaCatalog(
     request('/api/cafeterias?schoolId=cgu', sealCookie(SESSION_COOKIE, session)),
   );
   expect(response.status).toBe(200);
-  expect(await response.json()).toEqual({ schoolId: 'pu', cafeterias: [], menus: [] });
-  expect(fetcher.mock.calls[0][0]).toBe('https://api.nuni.tw/v1/auth/platform/memberships');
-  expect(fetcher.mock.calls[1][0]).toBe('https://api.nuni.tw/v1/public/schools/pu/cafeterias');
-  expect(fetcher.mock.calls.some((call) => String(call[0]).includes('/schools/cgu/'))).toBe(false);
+  expect(await response.json()).toEqual({ schoolId: 'cgu', cafeterias: [], menus: [] });
+  expect(response.headers.get('Cache-Control')).toBe('public, max-age=60');
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(fetcher.mock.calls[0][0]).toBe('https://api.nuni.tw/v1/public/schools/cgu/cafeterias');
+  expect(fetcher.mock.calls.some((call) => String(call[0]).includes('/v1/auth/platform/'))).toBe(
+    false,
+  );
+  expect(fetcher.mock.calls.some((call) => String(call[0]).includes('/memberships'))).toBe(false);
+});
+
+it('uses the requested schoolId for signed-in cross-school detail without memberships fetch', async () => {
+  fetcher.mockResolvedValueOnce(
+    json({
+      schoolId: 'cgu',
+      cafeterias: [{ id: 'stall', name: '校內咖啡店', merchantMode: 'info_only' }],
+      menus: [{ id: 'toast', name: '蔬菜吐司', cafeteriaId: 'stall', price: 60 }],
+    }),
+  );
+  const response = await handleCafeteriaDetail(
+    request('/api/cafeterias/stall?schoolId=cgu', sealCookie(SESSION_COOKIE, session)),
+    'stall',
+  );
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.schoolId).toBe('cgu');
+  expect(body.cafeteria).toMatchObject({ id: 'stall', name: '校內咖啡店' });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(fetcher.mock.calls[0][0]).toBe('https://api.nuni.tw/v1/public/schools/cgu/cafeterias');
+  expect(fetcher.mock.calls.some((call) => String(call[0]).includes('/memberships'))).toBe(false);
+});
+
+it('keeps guest detail parity with the public catalog contract', async () => {
+  fetcher.mockResolvedValueOnce(
+    json({
+      schoolId: 'pu',
+      cafeterias: [{ id: 'stall', name: '校內咖啡店', merchantMode: 'info_only' }],
+      menus: [{ id: 'toast', name: '蔬菜吐司', cafeteriaId: 'stall', price: 60 }],
+    }),
+  );
+  const response = await handleCafeteriaDetail(
+    request('/api/cafeterias/stall?schoolId=pu'),
+    'stall',
+  );
+  expect(response.status).toBe(200);
+  expect(response.headers.get('Cache-Control')).toBe('public, max-age=60');
+  const body = await response.json();
+  expect(body.schoolId).toBe('pu');
+  expect(body.cafeteria).toMatchObject({
+    id: 'stall',
+    name: '校內咖啡店',
+    reviewStatus: 'unverified',
+  });
+  expect(body.menus).toEqual([
+    expect.objectContaining({ id: 'toast', cafeteriaId: 'stall', price: 60 }),
+  ]);
+  expect(String(fetcher.mock.calls[0][0])).not.toContain('/v1/auth/platform/');
 });
 
 it('keeps a missing shop as null instead of failing the page', async () => {
@@ -133,4 +194,16 @@ it('surfaces a backend failure instead of pretending the school has no shops', a
   const response = await handleCafeteriaCatalog(request('/api/cafeterias?schoolId=pu'));
   expect(response.status).toBe(401);
   expect(await response.json()).toEqual({ error: 'REQUEST_FAILED' });
+});
+
+it('rejects a missing schoolId for signed-in catalog and detail the same as guests', async () => {
+  const cookie = sealCookie(SESSION_COOKIE, session);
+  for (const response of [
+    await handleCafeteriaCatalog(request('/api/cafeterias', cookie)),
+    await handleCafeteriaDetail(request('/api/cafeterias/stall', cookie), 'stall'),
+  ]) {
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'INVALID_INPUT' });
+  }
+  expect(fetcher).not.toHaveBeenCalled();
 });
