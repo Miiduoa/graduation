@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
-import {TDX,ORIGIN,probeTdx,probePublic,verifiedArrival,buildRemoteCommand,parseRemoteReport} from './transit-release-gate.mjs';
+import {TDX,ORIGIN,probeTdx,probePublic,verifiedArrival,buildRemoteCommand,parseRemoteReport,probeRuntime,validateProfile,hasBusShell,verifyOfficialNotice} from './transit-release-gate.mjs';
 const stamp = '2026-10-12T16:00:00Z';
 const now = () => Date.parse(stamp);
 const sha = 'a'.repeat(40);
@@ -17,7 +17,7 @@ function mock({provider=true,stops=[stop],rows=[arrival],page=true,healthRevisio
       return errorStatus ? Response.json({secret:'must-not-appear'},{status:errorStatus}) : Response.json({access_token:'test-bearer',expires_in:300});
     }
     if (!provider && url.endsWith('/health/ready')) return Response.json({service:'campus-one-web',status:'ready',legacy:'ready',revision:healthRevision});
-    if (!provider && url.endsWith('/bus')) return new Response(page ? '學校站牌 找我附近 搜尋站名 常用站牌' : 'Old bus page',{headers:{'Content-Type':'text/html','Permissions-Policy':'geolocation=(self)'}});
+    if (!provider && url.endsWith('/bus')) return new Response(page ? '<div data-campus-bus-shell="true">公車與交通</div>' : 'Old bus page',{headers:{'Content-Type':'text/html','Permissions-Policy':'geolocation=(self)'}});
     const stationQuery = provider ? url.includes('/Stop/City/') : JSON.parse(init.body).action === 'campus';
     if (provider) {
       assert.equal(init.headers.Authorization,'Bearer test-bearer');
@@ -67,13 +67,103 @@ test('HTML errors and transport failures fail closed',async()=>{
   await assert.rejects(probeTdx({credentials,fetcher:async()=>{throw new Error('private-detail');},now}),/network-unavailable/);
 });
 test('remote command transmits source only and supports shell quoting',()=>{
-  const command=buildRemoteCommand('export async function probeTdx(){return {ready:true,provider:"TDX",stationCount:2,directionVerified:true,sourceFreshnessVerified:true}}');
+  const command=buildRemoteCommand('export async function probeRuntime(){return {ready:true,profile:"live-tdx",transitReady:true,provider:"TDX",stationCount:2,directionVerified:true,sourceFreshnessVerified:true}}');
   const output=execFileSync('/bin/sh',['-c',command],{encoding:'utf8'});
   assert.equal(parseRemoteReport(output).ready,true);
   assert.ok(!command.includes(credentials.clientSecret));
 });
 test('remote stdout is allowlisted and cannot masquerade as a passing check',()=>{
-  const good={ready:true,provider:'TDX',stationCount:1,directionVerified:true,sourceFreshnessVerified:true,secret:'never-persist'};
+  const good={ready:true,profile:'live-tdx',transitReady:true,provider:'TDX',stationCount:1,directionVerified:true,sourceFreshnessVerified:true,secret:'never-persist'};
   assert.ok(!JSON.stringify(parseRemoteReport('CAMPUS_TRANSIT_PROBE:'+JSON.stringify(good))).includes('never-persist'));
   for(const line of ['', 'CAMPUS_TRANSIT_PROBE:{}','CAMPUS_TRANSIT_PROBE:broken','CAMPUS_TRANSIT_PROBE:{}\nCAMPUS_TRANSIT_PROBE:{}']) assert.throws(()=>parseRemoteReport(line));
+});
+
+const linksProfile = 'official-links-only';
+const shell = '<div data-campus-bus-shell="true">公車與交通</div>';
+const officialNotice = '<aside data-transit-mode="official-links"><h2>即時到站尚未啟用</h2><a href="https://citybus-free.taichung.gov.tw/" target="_blank">臺中市官方公車查詢 ↗</a></aside>';
+function unconfiguredPublic({status=503, body={status:'unavailable',reason:'not-configured'}, contentType='application/json', notice=officialNotice, health={}}={}) {
+  return async (url, init) => {
+    assert.equal(new URL(url).origin, ORIGIN);
+    assert.equal(init.redirect, 'error');
+    assert.equal(init.credentials, 'omit');
+    if (url.endsWith('/health/ready')) return Response.json({service:'campus-one-web',status:'ready',legacy:'ready',revision:sha,...health});
+    if (url.endsWith('/bus')) return new Response(shell+notice,{headers:{'Content-Type':'text/html','Permissions-Policy':'geolocation=(self)'}});
+    assert.ok(url.endsWith('/api/transit'));
+    assert.equal(init.method, 'POST');
+    assert.equal(init.headers.Origin, ORIGIN);
+    assert.deepEqual(JSON.parse(init.body), {action:'campus',schoolId:'pu'});
+    return new Response(JSON.stringify(body),{status,headers:{'Content-Type':contentType}});
+  };
+}
+test('profiles are explicit and unknown or empty choices fail before network or runtime access',async()=>{
+  assert.equal(validateProfile(), 'live-tdx');
+  for (const profile of ['', 'optional', 'LIVE-TDX', null]) {
+    assert.throws(()=>validateProfile(profile), /unknown-transit-profile/);
+    await assert.rejects(probeRuntime(profile,{credentials:{},fetcher:()=>assert.fail('must not request')}), /unknown-transit-profile/);
+    await assert.rejects(probePublic(sha,{profile,fetcher:()=>assert.fail('must not request')}), /unknown-transit-profile/);
+    assert.throws(()=>buildRemoteCommand('',profile), /unknown-transit-profile/);
+  }
+});
+test('official links runtime requires complete absence and never requests TDX',async()=>{
+  const report=await probeRuntime(linksProfile,{credentials:{},fetcher:()=>assert.fail('must not request')});
+  assert.deepEqual(report,{ready:true,profile:linksProfile,mode:'official-links',transitReady:false,credentialsAbsent:true,reason:'not-configured',physicalDeviceVerified:false});
+  for (const credentials of [{clientId:'x'}, {clientSecret:'x'}, {clientId:''}, {clientSecret:' '}, {clientId:null}]) {
+    await assert.rejects(probeRuntime(linksProfile,{credentials,fetcher:()=>assert.fail('must not request')}), /tdx-partial-configuration/);
+  }
+  for (const credentials of [{clientId:'x',clientSecret:'y'},{clientId:'',clientSecret:''},{clientId:' ',clientSecret:' '}]) {
+    await assert.rejects(probeRuntime(linksProfile,{credentials,fetcher:()=>assert.fail('must not request')}), /tdx-credentials-present/);
+  }
+});
+test('default runtime remains strict and never falls back after a provider failure',async()=>{
+  await assert.rejects(probeRuntime(undefined,{credentials:{},fetcher:()=>assert.fail('must not request')}), /tdx-not-configured/);
+  await assert.rejects(probeRuntime('live-tdx',{credentials,fetcher:mock({errorStatus:429}),now}), /rate-limited/);
+  const report=await probeRuntime('live-tdx',{credentials,fetcher:mock(),now});
+  assert.equal(report.transitReady,true);
+  assert.equal(report.profile,'live-tdx');
+});
+test('official links public report distinguishes usable Web from unavailable transit and untested browser controls',async()=>{
+  const report=await probePublic(sha,{profile:linksProfile,fetcher:unconfiguredPublic(),now});
+  assert.equal(report.webReady,true);
+  assert.equal(report.transitReady,false);
+  assert.equal(report.serverNoticeVerified,true);
+  assert.equal(report.browserControlsVerified,false);
+  assert.equal(report.liveArrivalsVerified,false);
+  assert.equal(report.officialHref,'https://citybus-free.taichung.gov.tw/');
+});
+test('links profile rejects wrong health revision and unavailable legacy service',async()=>{
+  for (const health of [{revision:'b'.repeat(40)},{legacy:'disabled'},{status:'unavailable'},{service:'other'}]) {
+    await assert.rejects(probePublic(sha,{profile:linksProfile,fetcher:unconfiguredPublic({health}),now}), /public-revision-not-ready/);
+  }
+});
+test('links profile cannot convert authorization, provider outages, quotas or fabricated data into success',async()=>{
+  for (const status of [200,400,401,403,429,500]) {
+    await assert.rejects(probePublic(sha,{profile:linksProfile,fetcher:unconfiguredPublic({status}),now}), /public-transit-not-explicitly-unconfigured/);
+  }
+  for (const body of [{status:'unavailable',reason:'upstream'},{status:'ready',kind:'stops',stops:[]},{status:'unavailable',reason:'not-configured',arrivals:[]},null]) {
+    await assert.rejects(probePublic(sha,{profile:linksProfile,fetcher:unconfiguredPublic({body}),now}), /public-transit-not-explicitly-unconfigured/);
+  }
+  await assert.rejects(probePublic(sha,{profile:linksProfile,fetcher:unconfiguredPublic({contentType:'text/html'}),now}), /public-transit-not-explicitly-unconfigured/);
+  await assert.rejects(probePublic(sha,{fetcher:unconfiguredPublic(),now}), /service-unavailable/);
+});
+test('links profile requires real server notice and exact official destination rather than arbitrary HTML text',async()=>{
+  for (const notice of ['',officialNotice.replace('即時到站尚未啟用','即時到站已啟用'),officialNotice.replace('https://citybus-free.taichung.gov.tw/','https://citybus-free.taichung.gov.tw.evil.example/'),officialNotice.replace('臺中市官方公車查詢','立即開始'),officialNotice.replace('<a href=','<p href=')]) {
+    await assert.rejects(probePublic(sha,{profile:linksProfile,fetcher:unconfiguredPublic({notice}),now}), /official-transit-notice-missing/);
+  }
+  assert.equal(verifyOfficialNotice(officialNotice.replace('https://citybus-free.taichung.gov.tw/','https://citybus.taichung.gov.tw/')),'https://citybus.taichung.gov.tw/');
+  assert.equal(hasBusShell('<div>data-campus-bus-shell="true" 公車與交通</div>'),false);
+});
+test('remote profile reports cannot be confused or persist arbitrary provider content',()=>{
+  const links={ready:true,profile:linksProfile,mode:'official-links',transitReady:false,credentialsAbsent:true,reason:'not-configured',privateDetail:'must-not-persist'};
+  const stdout='CAMPUS_TRANSIT_PROBE:'+JSON.stringify(links);
+  assert.equal(parseRemoteReport(stdout,linksProfile).transitReady,false);
+  assert.ok(!JSON.stringify(parseRemoteReport(stdout,linksProfile)).includes('must-not-persist'));
+  assert.throws(()=>parseRemoteReport(stdout),/runtime-transit-not-ready/);
+  for (const change of [{profile:'live-tdx'},{transitReady:true},{credentialsAbsent:false},{reason:'upstream'},{mode:'TDX'}]) {
+    assert.throws(()=>parseRemoteReport('CAMPUS_TRANSIT_PROBE:'+JSON.stringify({...links,...change}),linksProfile), /runtime-official-links-not-ready/);
+  }
+});
+test('remote source executes the chosen links profile without loading local environment values',()=>{
+  const source='export async function probeRuntime(profile){if(profile!=="official-links-only")throw new Error("bad-profile");return {ready:true,profile,mode:"official-links",transitReady:false,credentialsAbsent:true,reason:"not-configured"}}';
+  const output=execFileSync('/bin/sh',['-c',buildRemoteCommand(source,linksProfile)],{encoding:'utf8'});
+  assert.equal(parseRemoteReport(output,linksProfile).transitReady,false);
 });

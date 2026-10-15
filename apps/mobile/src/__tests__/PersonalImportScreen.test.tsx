@@ -2,13 +2,17 @@ import type { ReactNode } from 'react';
 import type { useNuniSession } from '../state/nuniSession';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import {
   PERSONAL_IMPORT_IMAGE_UNREADABLE,
   personalImportSavedNotice,
   personalImportUndoBody,
   personalImportUndoneNotice,
+  serializePersonalImportBackup,
+  type PersonalImportRecord,
 } from '@campus/shared';
+import { sharePersonalImportBackup } from '../services/personalImportBackupSharing';
+import * as ImagePicker from 'expo-image-picker';
 import PersonalImportScreen from '../screens/PersonalImportScreen';
 import { loadPersonalImports } from '../services/personalImports';
 
@@ -16,6 +20,25 @@ let mockScope: { owner: string; schoolId: string } | null;
 const mockRequest = jest.fn();
 let mockPlatform: ReturnType<typeof useNuniSession>;
 const mockRecognize = jest.fn();
+const mockFileText = jest.fn();
+jest.mock('../services/personalImportBackupSharing', () => ({
+  sharePersonalImportBackup: jest.fn(),
+}));
+jest.mock('expo-file-system', () => ({
+  File: class {
+    size = 1000;
+    uri: string;
+    constructor(value: string) {
+      this.uri = value;
+    }
+    async text() {
+      return mockFileText();
+    }
+    async base64() {
+      return '';
+    }
+  },
+}));
 jest.mock('../state/personalImportScope', () => ({ usePersonalImportScope: () => mockScope }));
 jest.mock('../state/school', () => ({
   useSchool: () => ({ school: { id: 'pu', name: '靜宜大學' } }),
@@ -69,6 +92,9 @@ const scope = { owner: 'nuni:pa-a', schoolId: 'pu' };
 beforeEach(async () => {
   await AsyncStorage.clear();
   jest.clearAllMocks();
+  mockFileText.mockReset();
+  jest.mocked(DocumentPicker.getDocumentAsync).mockReset();
+  jest.mocked(sharePersonalImportBackup).mockReset();
   mockScope = { ...scope };
   mockPlatform = {
     session: null,
@@ -226,12 +252,10 @@ test('class link is explicitly selected from the accessible workspace list witho
 });
 
 test('correcting screenshot text preserves space-delimited table parsing', async () => {
-  jest
-    .mocked(ImagePicker.launchImageLibraryAsync)
-    .mockResolvedValue({
-      canceled: false,
-      assets: [{ uri: 'file:///grades.png', width: 100, height: 100, mimeType: 'image/png' }],
-    });
+  jest.mocked(ImagePicker.launchImageLibraryAsync).mockResolvedValue({
+    canceled: false,
+    assets: [{ uri: 'file:///grades.png', width: 100, height: 100, mimeType: 'image/png' }],
+  });
   mockRecognize.mockResolvedValue('課程名稱  學分  成績\n微積分  3  85');
   const view = render(<PersonalImportScreen />);
   fireEvent.press(view.getByText('成績與學分'));
@@ -316,4 +340,139 @@ test('shows a Chinese notice when the screenshot file cannot be opened', async (
   fireEvent.press(view.getByText('選擇截圖'));
   await waitFor(() => expect(view.getByText(PERSONAL_IMPORT_IMAGE_UNREADABLE)).toBeTruthy());
   expect(view.queryByText(/could not be decoded/i)).toBeNull();
+});
+
+const backupGrade = (): PersonalImportRecord => ({
+  id: 'old-grade',
+  batchId: 'old-batch',
+  importedAt: '2026-10-13T00:00:00.000Z',
+  kind: 'grades',
+  title: '備份英文',
+  schoolId: 'pu',
+  academicYear: '114',
+  semester: '2',
+  credits: 3,
+  grade: 'A-',
+  linkedCourseId: 'cw_12345678-1234-1234-1234-123456789abc',
+  source: { type: 'screenshot', name: '舊成績截圖.png', line: 3, rawText: '英文 3 A-' },
+});
+function chooseBackup(records: PersonalImportRecord[] = [backupGrade()]) {
+  mockFileText.mockResolvedValue(
+    serializePersonalImportBackup(records, { schoolId: records[0]?.schoolId || 'pu' }),
+  );
+  jest.mocked(DocumentPicker.getDocumentAsync).mockResolvedValue({
+    canceled: false,
+    assets: [
+      {
+        uri: 'file:///backup.json',
+        name: 'backup.json',
+        size: 1000,
+        mimeType: 'application/json',
+      },
+    ],
+  });
+}
+
+test('backup restores mixed kinds and terms only after review without activating archive links', async () => {
+  const grade = backupGrade();
+  chooseBackup([
+    grade,
+    {
+      ...grade,
+      id: 'old-course',
+      kind: 'timetable',
+      title: '備份課表',
+      academicYear: '115',
+      semester: '1',
+      dayOfWeek: 1,
+      startPeriod: 3,
+      endPeriod: 4,
+    },
+    {
+      ...grade,
+      id: 'old-event',
+      kind: 'events',
+      title: '備份校慶',
+      academicYear: '',
+      semester: '',
+      date: '2026-10-24',
+      allDay: true,
+    },
+  ]);
+  const view = render(<PersonalImportScreen />);
+  fireEvent.press(view.getByText('從備份檔還原'));
+  await waitFor(() => expect(view.getByText('確認新增 3 筆')).toBeTruthy());
+  expect((await loadPersonalImports(scope)).records).toHaveLength(0);
+  expect(view.getByText(/目的地：目前登入的平台帳號/)).toBeTruthy();
+  fireEvent.press(view.getByText('確認新增 3 筆'));
+  await waitFor(() => expect(view.getByText(personalImportSavedNotice(3))).toBeTruthy());
+  const saved = (await loadPersonalImports(scope)).records;
+  expect(saved.map((row) => row.kind).sort()).toEqual(['events', 'grades', 'timetable']);
+  expect(saved.find((row) => row.kind === 'grades')).toMatchObject({
+    academicYear: '114',
+    semester: '2',
+    source: grade.source,
+  });
+  expect(saved.every((row) => !row.linkedCourseId && row.batchId !== 'old-batch')).toBe(true);
+  expect(mockRequest).not.toHaveBeenCalled();
+});
+
+test('wrong-school backup is rejected without changing the current ledger', async () => {
+  chooseBackup([{ ...backupGrade(), schoolId: 'ntu' }]);
+  const view = render(<PersonalImportScreen />);
+  fireEvent.press(view.getByText('從備份檔還原'));
+  await waitFor(() => expect(view.getByText(/與目前學校不同/)).toBeTruthy());
+  expect(view.queryByText('確認新增 1 筆')).toBeNull();
+  expect((await loadPersonalImports(scope)).records).toHaveLength(0);
+});
+
+test('late backup file result cannot populate another account preview', async () => {
+  chooseBackup();
+  let resolve!: (text: string) => void;
+  mockFileText.mockReturnValue(
+    new Promise<string>((done) => {
+      resolve = done;
+    }),
+  );
+  const view = render(<PersonalImportScreen />);
+  fireEvent.press(view.getByText('從備份檔還原'));
+  await waitFor(() => expect(mockFileText).toHaveBeenCalled());
+  mockScope = { ...scope, owner: 'nuni:pa-b' };
+  view.rerender(<PersonalImportScreen />);
+  await act(async () => {
+    resolve(serializePersonalImportBackup([backupGrade()], { schoolId: 'pu' }));
+  });
+  expect(view.queryByText('確認新增 1 筆')).toBeNull();
+  expect(view.queryByText('備份英文')).toBeNull();
+});
+
+test('backup sharing failure is shown without claiming that a file was saved', async () => {
+  chooseBackup();
+  const view = render(<PersonalImportScreen />);
+  fireEvent.press(view.getByText('從備份檔還原'));
+  await waitFor(() => expect(view.getByText('確認新增 1 筆')).toBeTruthy());
+  fireEvent.press(view.getByText('確認新增 1 筆'));
+  await waitFor(() => expect(view.getByText(personalImportSavedNotice(1))).toBeTruthy());
+  jest.mocked(sharePersonalImportBackup).mockRejectedValue(new Error('分享未完成'));
+  fireEvent.press(view.getByText('備份全部個人資料'));
+  await waitFor(() => expect(view.getByText('分享未完成')).toBeTruthy());
+  expect(view.queryByText(/^已開啟系統分享選單/)).toBeNull();
+  expect((await loadPersonalImports(scope)).records).toHaveLength(1);
+});
+
+test('record deletion requires confirmation naming that record', async () => {
+  chooseBackup();
+  const view = render(<PersonalImportScreen route={{ params: { kind: 'grades' } }} />);
+  fireEvent.press(view.getByText('從備份檔還原'));
+  await waitFor(() => expect(view.getByText('確認新增 1 筆')).toBeTruthy());
+  fireEvent.press(view.getByText('確認新增 1 筆'));
+  await waitFor(() => expect(view.getByText('編輯 備份英文')).toBeTruthy());
+  fireEvent.press(view.getByText('移除這筆'));
+  expect(view.getByText(/確定移除「備份英文」/)).toBeTruthy();
+  expect((await loadPersonalImports(scope)).records).toHaveLength(1);
+  fireEvent.press(view.getByText('確認移除'));
+  await waitFor(() =>
+    expect(view.getByText('已移除這筆個人紀錄；其他紀錄不受影響。')).toBeTruthy(),
+  );
+  expect((await loadPersonalImports(scope)).records).toHaveLength(0);
 });

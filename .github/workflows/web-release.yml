@@ -11,6 +11,14 @@ on:
         description: 'Type nuni-web to confirm the existing production Web app'
         required: true
         type: string
+      transit_profile:
+        description: 'live-tdx requires real arrivals; official-links-only requires both TDX variables absent and truthful unavailable UI'
+        required: true
+        type: choice
+        default: live-tdx
+        options:
+          - live-tdx
+          - official-links-only
   pull_request:
     paths:
       - 'deploy/web/release-check*'
@@ -54,6 +62,7 @@ jobs:
     env:
       EXPECTED_RELEASE_SHA: ${{ inputs.expected_revision }}
       CONFIRM_APP: ${{ inputs.confirm_app }}
+      TRANSIT_RELEASE_PROFILE: ${{ inputs.transit_profile }}
       CAMPUS_RELEASE_SHA: ${{ inputs.expected_revision }}
       NEXT_PUBLIC_SITE_URL: https://nuni.tw
       NEXT_PUBLIC_FUNCTIONS_BASE_URL: ${{ vars.NEXT_PUBLIC_FUNCTIONS_BASE_URL }}
@@ -89,7 +98,7 @@ jobs:
           node deploy/web/release-check.mjs snapshot "$RUNNER_TEMP/campus-web-machines-before.json" release-evidence/before.json
           rm -f "$RUNNER_TEMP/campus-web-machines-before.json"
           flyctl auth docker
-      - name: Verify real TDX data inside every existing Web machine before building
+      - name: Verify selected transit profile inside every existing Web machine before building
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_NUNI_WEB_DEPLOY_TOKEN }}
         run: node deploy/web/transit-release-gate.mjs fly release-evidence/before.json
@@ -135,6 +144,7 @@ jobs:
           node deploy/web/release-check.mjs snapshot "$RUNNER_TEMP/campus-web-machines-current.json" release-evidence/pre-rollout.json
           rm -f "$RUNNER_TEMP/campus-web-machines-current.json"
           node deploy/web/release-check.mjs stable release-evidence/before.json release-evidence/pre-rollout.json
+          node deploy/web/transit-release-gate.mjs fly release-evidence/pre-rollout.json release-evidence/transit-before-rollout.json
       - name: Roll out to existing Web machines only
         id: rollout
         env:
@@ -156,6 +166,7 @@ jobs:
           const rows = JSON.parse(fs.readFileSync('release-evidence/after.json', 'utf8'));
           if (!rows.every((row) => row.image === process.env.RELEASE_IMAGE)) throw new Error('Not every Web machine has the expected image.');
           NODE
+          node deploy/web/transit-release-gate.mjs fly release-evidence/after.json release-evidence/transit-after-rollout.json
           node deploy/web/release-check.mjs verify
           node deploy/web/transit-release-gate.mjs public
       - name: Preserve sanitized release evidence
