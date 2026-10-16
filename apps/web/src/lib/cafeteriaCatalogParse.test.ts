@@ -12,6 +12,7 @@ import {
   UNVERIFIED_CAFETERIA_BADGE,
   UNVERIFIED_CAFETERIA_NOTICE,
   cafeteriaListHref,
+  cafeteriaListReviewNotices,
   cafeteriaReviewBadge,
   cafeteriaReviewNotice,
   cafeteriaShowsMenuAvailability,
@@ -69,6 +70,15 @@ it('reads only the catalog reviewStatus field and treats missing or unknown valu
   expect(cafeteriaShowsMenuAvailability('unverified')).toBe(false);
   expect(cafeteriaShowsMenuAvailability('demo')).toBe(false);
   expect(cafeteriaShowsMenuAvailability(undefined)).toBe(false);
+  expect(cafeteriaListReviewNotices(['unverified', 'verified'])).toEqual([
+    UNVERIFIED_CAFETERIA_NOTICE,
+  ]);
+  expect(cafeteriaListReviewNotices(['demo', 'unverified'])).toEqual([
+    UNVERIFIED_CAFETERIA_NOTICE,
+    DEMO_CAFETERIA_NOTICE,
+  ]);
+  expect(cafeteriaListReviewNotices(['verified'])).toEqual([]);
+  expect(cafeteriaListReviewNotices([])).toEqual([]);
 });
 
 it('does not infer review status from shop names such as 路易莎 or 全家', () => {
