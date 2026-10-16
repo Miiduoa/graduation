@@ -28,7 +28,14 @@ import {
   PERSONAL_IMPORT_UNDO_KEEP,
   PERSONAL_IMPORT_UNDO_LABEL,
   PERSONAL_IMPORT_UNDO_TITLE,
+  periodCount,
+  periodDisplayLabel,
+  periodLabelAt,
+  periodProfileForSchool,
+  PERIOD_PROFILE_TITLES,
+  slotIndexForLabel,
   validatePersonalImportRow,
+  type PeriodProfileId,
   type PersonalImportRow,
   type PersonalImportRecord,
   type ImportIssue,
@@ -140,12 +147,14 @@ function RowEditor({
   workspaces,
   disabled = false,
   onRefreshWorkspaces,
+  periodProfile,
 }: {
   row: PersonalImportRow;
   onChange(row: PersonalImportRow): void;
   workspaces: NuniWorkspace[];
   disabled?: boolean;
   onRefreshWorkspaces?: () => void;
+  periodProfile?: PeriodProfileId;
 }) {
   const fields = [...commonFields, ...extraFields[row.kind]];
   return (
@@ -168,11 +177,24 @@ function RowEditor({
           key={key}
           disabled={disabled}
           label={label}
-          value={row[key] == null ? '' : String(row[key])}
+          value={
+            periodProfile && (key === 'startPeriod' || key === 'endPeriod') && row[key]
+              ? periodLabelAt(Number(row[key]), periodProfile)
+              : row[key] == null
+                ? ''
+                : String(row[key])
+          }
           onChange={(value) =>
             onChange({
               ...row,
-              [key]: numeric.has(key) ? (value.trim() ? Number(value) : undefined) : value,
+              [key]:
+                periodProfile && (key === 'startPeriod' || key === 'endPeriod')
+                  ? slotIndexForLabel(value, periodProfile)
+                  : numeric.has(key)
+                    ? value.trim()
+                      ? Number(value)
+                      : undefined
+                    : value,
             })
           }
         />
@@ -212,12 +234,17 @@ function RowEditor({
   );
 }
 
-function rowSummary(row: PersonalImportRow) {
+function rowSummary(row: PersonalImportRow, profile?: PeriodProfileId) {
   if (row.kind === 'grades')
     return `${row.academicYear}／${row.semester} · ${row.credits ?? '未填'} 學分 · 成績 ${row.grade || '未填'}`;
   if (row.kind === 'events')
     return `${row.date || '日期待填'} ${row.startTime || '全天'}${row.endTime ? `–${row.endTime}` : ''} · ${row.location || '地點未填'}`;
-  return `星期 ${row.dayOfWeek ?? '未填'} · ${row.startPeriod ? `第 ${row.startPeriod}–${row.endPeriod ?? '?'} 節` : row.periodLabel || `${row.startTime || '?'}–${row.endTime || '?'}`} · ${row.teacher || '教師未填'}`;
+  const periods = row.startPeriod
+    ? profile
+      ? `${periodDisplayLabel(row.startPeriod, profile)}–${periodDisplayLabel(row.endPeriod ?? row.startPeriod, profile)}`
+      : `第 ${row.startPeriod}–${row.endPeriod ?? '?'} 節`
+    : row.periodLabel || `${row.startTime || '?'}–${row.endTime || '?'}`;
+  return `星期 ${row.dayOfWeek ?? '未填'} · ${periods} · ${row.teacher || '教師未填'}`;
 }
 
 function ImportWorkspace({
@@ -277,7 +304,7 @@ function ImportWorkspace({
   const ledgerGeneration = useRef(0);
   const abort = useRef<AbortController | null>(null);
   const ocr = useRef<TimetableOcrHandle>(null);
-  const profile = scope.schoolId === 'pu' ? ('pu' as const) : undefined;
+  const profile = periodProfileForSchool(scope.schoolId);
   const active = () => alive.current && focused.current && availableRef.current;
   const current = (run: number) => alive.current && focused.current && generation.current === run;
   const cancel = () => {
@@ -867,7 +894,9 @@ function ImportWorkspace({
               />
               <Text style={{ color: theme.colors.muted }}>
                 {kind === 'timetable'
-                  ? '文字範例：資料庫 星期一 第3-4節 老師：王老師 教室：主顧303'
+                  ? profile
+                    ? `目前使用${PERIOD_PROFILE_TITLES[profile]} ${periodCount(profile)} 節。文字範例：資料庫 星期一 第3-4節 老師：王老師 教室：主顧303`
+                    : '這所學校尚未設定課表格線，請保留原始時間。文字範例：資料庫 星期一 09:00-12:00 老師：王老師'
                   : kind === 'grades'
                     ? 'CSV 欄位：課程名稱,學分,成績,課號,教師'
                     : 'CSV 欄位：活動名稱,日期,開始時間,結束時間,地點。全天活動加「全天」欄並填「是」，時間留空。'}
@@ -951,7 +980,7 @@ function ImportWorkspace({
                       {row.title || '名稱待填'}
                     </Text>
                   </Pressable>
-                  <Text style={textStyle}>{rowSummary(row)}</Text>
+                  <Text style={textStyle}>{rowSummary(row, profile)}</Text>
                   {backupPreview?.proposedLinks[row.id] ? (
                     <Text style={{ color: theme.colors.muted }}>
                       原備份有課班對照：
@@ -981,6 +1010,7 @@ function ImportWorkspace({
                       disabled={saving}
                       row={row}
                       workspaces={workspaces}
+                      periodProfile={profile}
                       onRefreshWorkspaces={() => void loadLinks()}
                       onChange={(next) =>
                         setRows((items) => items.map((item) => (item.id === row.id ? next : item)))
@@ -1099,14 +1129,16 @@ function ImportWorkspace({
               }}
             >
               <Text style={{ ...textStyle, fontWeight: '700' }}>{row.title}</Text>
-              <Text style={textStyle}>{rowSummary(row)}</Text>
+              <Text style={textStyle}>{rowSummary(row, profile)}</Text>
               {row.kind === 'timetable' &&
-              (scope.schoolId !== 'pu' ||
+              (!profile ||
                 !row.startPeriod ||
                 !row.endPeriod ||
                 (row.dayOfWeek || 0) > 5) ? (
                 <Text style={{ color: theme.colors.muted }}>
-                  已保存原始上課時間；目前課表格子只支援靜宜週一至週五的節次，這筆尚未放入格子。
+                  {profile
+                    ? '這筆缺少星期一至五的節次，尚未放入課表格子。'
+                    : '已保存原始上課時間；這所學校尚未設定課表格線，這筆不會放入格子。'}
                 </Text>
               ) : null}
               {row.linkedCourseId ? (
@@ -1122,6 +1154,7 @@ function ImportWorkspace({
                     disabled={saving}
                     row={editing.row}
                     workspaces={workspaces}
+                    periodProfile={profile}
                     onRefreshWorkspaces={() => void loadLinks()}
                     onChange={(next) => setEditing({ before: editing.before, row: next })}
                   />

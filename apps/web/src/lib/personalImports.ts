@@ -2,6 +2,7 @@
 
 import {
   createPersonalImportId,
+  periodProfileForSchool,
   planPersonalImport,
   preparePersonalImportBackupRestore,
   undoPersonalImportBatch,
@@ -44,7 +45,9 @@ export function readPersonalImports(scope: PersonalImportScope): PersonalImportR
         typeof row.importedAt !== 'string' ||
         !row.source ||
         typeof row.source.rawText !== 'string' ||
-        validatePersonalImportRow(row).some((issue) => issue.severity === 'error')
+        validatePersonalImportRow(row, {
+          periodProfile: periodProfileForSchool(scope.schoolId),
+        }).some((issue) => issue.severity === 'error')
       )
         throw new Error();
       ids.add(row.id);
@@ -99,7 +102,7 @@ export async function savePersonalImportBatch(
       const plan = planPersonalImport(existing, drafts, {
         batchId,
         importedAt: new Date().toISOString(),
-        ...(scope.schoolId === 'pu' ? { periodProfile: 'pu' as const } : {}),
+        periodProfile: periodProfileForSchool(scope.schoolId),
       });
       const error = plan.issues.find(
         (issue) => issue.severity === 'error' || issue.code === 'duplicate-metadata-conflict',
@@ -147,7 +150,7 @@ export async function changePersonalImport(
       const plan = planPersonalImport(rest, [{ ...revised, id: original.id }], {
         batchId: createPersonalImportId(),
         importedAt: new Date().toISOString(),
-        ...(scope.schoolId === 'pu' ? { periodProfile: 'pu' as const } : {}),
+        periodProfile: periodProfileForSchool(scope.schoolId),
       });
       const error = plan.issues.find(
         (issue) => issue.severity === 'error' || issue.code === 'duplicate-metadata-conflict',

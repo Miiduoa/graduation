@@ -1,6 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   createPersonalImportId,
+  periodCount,
+  periodProfileForSchool,
   planPersonalImport,
   preparePersonalImportBackupRestore,
   PERSONAL_IMPORT_BACKUP_MAX_RECORDS,
@@ -70,7 +72,7 @@ export async function loadPersonalImports(
         typeof row.source.rawText !== 'string' ||
         (row.source.name !== undefined && typeof row.source.name !== 'string') ||
         validatePersonalImportRow(row, {
-          periodProfile: scope.schoolId === 'pu' ? 'pu' : undefined,
+          periodProfile: periodProfileForSchool(scope.schoolId),
         }).some((issue) => issue.severity === 'error'),
     ) ||
     new Set(value.records.map((row) => row.id)).size !== value.records.length ||
@@ -133,7 +135,7 @@ export function appendPersonalImports(
     const planned = planPersonalImport(current.records, incoming, {
       batchId: id,
       importedAt: createdAt,
-      periodProfile: scope.schoolId === 'pu' ? 'pu' : undefined,
+      periodProfile: periodProfileForSchool(scope.schoolId),
     });
     const errors = planned.issues.filter(
       (issue) => issue.severity === 'error' || issue.code === 'duplicate-metadata-conflict',
@@ -170,11 +172,11 @@ export function editPersonalImport(
     if (next.id !== before.id || next.schoolId !== scope.schoolId)
       throw new Error('資料範圍不符。');
     const errors = validatePersonalImportRow(next, {
-      periodProfile: scope.schoolId === 'pu' ? 'pu' : undefined,
+      periodProfile: periodProfileForSchool(scope.schoolId),
     }).filter((issue) => issue.severity === 'error');
     if (errors.length) throw new Error(errors[0].message);
     const mapped = mapPersonalImportPeriods(next, {
-      periodProfile: scope.schoolId === 'pu' ? 'pu' : undefined,
+      periodProfile: periodProfileForSchool(scope.schoolId),
     });
     if (
       current.records.some(
@@ -234,12 +236,14 @@ export function undoLastPersonalImport(
   });
 }
 
-/** The legacy grid uses Providence period times. Never invent equivalent times for another school. */
+/** The grid uses the school's official period table. Unknown schools stay off the grid. */
 export function personalImportCourses(
   records: PersonalImportRecord[],
   schoolId: string,
 ): PersonalCourse[] {
-  if (schoolId !== 'pu') return [];
+  const profile = periodProfileForSchool(schoolId);
+  if (!profile) return [];
+  const slots = periodCount(profile);
   return records
     .filter(
       (row) =>
@@ -252,7 +256,7 @@ export function personalImportCourses(
         Number.isInteger(row.endPeriod) &&
         row.startPeriod! >= 1 &&
         row.endPeriod! >= row.startPeriod! &&
-        row.endPeriod! <= 13,
+        row.endPeriod! <= slots,
     )
     .map((row) => ({
       id: `import:${row.id}`,

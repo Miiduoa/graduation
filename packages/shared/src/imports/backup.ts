@@ -1,3 +1,4 @@
+import { periodProfileForSchool } from '../timetable/periods';
 import { createPersonalImportId, personalImportKey } from './records';
 import {
   PERSONAL_IMPORT_MAX_TEXT_LENGTH,
@@ -186,7 +187,9 @@ function validatedRecord(
   );
   const typed = copy as PersonalImportRecord;
   if (
-    validatePersonalImportRow(typed, schoolId === 'pu' ? { periodProfile: 'pu' } : {}).some(
+    validatePersonalImportRow(typed, {
+      periodProfile: periodProfileForSchool(schoolId),
+    }).some(
       (issue) => issue.severity === 'error',
     )
   )

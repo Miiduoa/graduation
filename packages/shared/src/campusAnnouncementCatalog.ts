@@ -27,7 +27,16 @@ const ANNOUNCEMENT_CATALOG_LINKS: Record<string, readonly AnnouncementCatalogLin
       office: '全校最新消息',
       listUrl: 'https://web.ncku.edu.tw/p/403-1000-14-1.php',
     },
-    { sourceId: 'ncku-aca', office: '教務處', listUrl: 'https://www.acad.ncku.edu.tw/' },
+    {
+      sourceId: 'ncku-aca',
+      office: '教務處',
+      listUrl: 'https://acad.ncku.edu.tw/p/403-1025-397-1.php',
+    },
+    {
+      sourceId: 'ncku-osa',
+      office: '學務處',
+      listUrl: 'https://osa.ncku.edu.tw/p/403-1026-40-1.php',
+    },
   ],
   nycu: [
     {

@@ -119,6 +119,7 @@ import {
   hasPuOfficialMenuSignal,
   isProvidenceDiningSchoolId,
 } from './puDiningCatalog';
+import { publicDiningCafeterias } from '@campus/shared/src/publicDiningCatalog';
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -1184,15 +1185,17 @@ export const firebaseSource: DataSource = {
         const normalized = rows.map((row) =>
           normalizeCafeteriaRecord(row as unknown as Record<string, unknown>),
         );
-        if (
-          !isProvidenceDiningSchoolId(schoolId) ||
-          normalized.some((row) => hasPuOfficialCafeteriaName(row.name))
-        ) {
-          return normalized;
+        if (normalized.length) {
+          if (
+            !isProvidenceDiningSchoolId(schoolId) ||
+            normalized.some((row) => hasPuOfficialCafeteriaName(row.name))
+          ) {
+            return normalized;
+          }
+          console.info(
+            '[firebaseSource] Falling back to curated PU cafeteria catalog because Firestore data does not match verified campus venues.',
+          );
         }
-        console.info(
-          '[firebaseSource] Falling back to curated PU cafeteria catalog because Firestore data does not match verified campus venues.',
-        );
       } catch (error) {
         console.warn('[firebaseSource] listCafeterias school-scoped read failed:', error);
       }
@@ -1202,7 +1205,18 @@ export const firebaseSource: DataSource = {
       return getPuDiningCafeterias(schoolId || 'pu');
     }
 
-    return [];
+    return publicDiningCafeterias(schoolId || '').map((row) => ({
+      id: row.id,
+      schoolId: row.schoolId,
+      name: row.name,
+      description: row.intro,
+      location: row.location,
+      openingHours: row.openingHours,
+      orderingEnabled: false,
+      pilotStatus: 'live' as const,
+      sourceLabel: row.sourceLabel,
+      sourceUrl: row.websiteUrl,
+    }));
   },
 
   async listMenus(schoolId, options) {
@@ -1230,6 +1244,7 @@ export const firebaseSource: DataSource = {
         console.warn('[firebaseSource] listMenus falling back to curated PU catalog:', error);
         return getPuDiningMenuItems(schoolId || 'pu');
       }
+      if (publicDiningCafeterias(schoolId || '').length) return [];
       throw error;
     }
   },
