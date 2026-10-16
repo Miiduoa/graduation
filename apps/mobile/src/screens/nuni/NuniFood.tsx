@@ -26,6 +26,7 @@ import {
   useFoodLoad,
   useFoodMutation,
 } from './NuniFoodUi';
+import { isAppOnlineOrderingEnabled, ONLINE_ORDERING_OFF_TEXT } from '../../features/onlineOrdering';
 
 const page = { padding: 20, paddingBottom: 48, gap: 16 };
 const key = () => `food-${Crypto.randomUUID()}`;
@@ -49,33 +50,43 @@ function FoodAccount({ context }: { context: string }) {
     [client],
   );
   const resource = useFoodLoad(loader);
-  if (selected)
+  const orderingOn = isAppOnlineOrderingEnabled();
+  const active = selected && (orderingOn || selected.mode === 'orders') ? selected : null;
+  if (active)
     return (
       <FoodRealm
-        key={`${selected.tenantId}:${selected.mode}`}
+        key={`${active.tenantId}:${active.mode}`}
         context={context}
-        selection={selected}
+        selection={active}
         onBack={() => select(null)}
       />
     );
   return (
     <ScrollView contentContainerStyle={page}>
       <FoodText title>點餐與取餐</FoodText>
-      <FoodText>選擇門市、確認金額後送出，到店付款。取餐前可隨時查看進度。</FoodText>
+      {orderingOn ? (
+        <FoodText>選擇門市、確認金額後送出，到店付款。取餐前可隨時查看進度。</FoodText>
+      ) : (
+        <FoodText>{ONLINE_ORDERING_OFF_TEXT}</FoodText>
+      )}
       <FoodReadState resource={resource} />
       {resource.data ? (
         <>
-          <FoodText title>選擇用餐校區</FoodText>
-          {resource.data.public
-            .filter((realm) => realm.services.includes('food'))
-            .map((realm) => (
-              <FoodButton
-                key={realm.tenantId}
-                onPress={() => select({ ...realm, mode: 'menu' })}
-              >{`查看餐點：${realm.name}`}</FoodButton>
-            ))}
-          {!resource.data.public.some((realm) => realm.services.includes('food')) ? (
-            <FoodText>目前沒有開放接單的門市。</FoodText>
+          {orderingOn ? (
+            <>
+              <FoodText title>選擇用餐校區</FoodText>
+              {resource.data.public
+                .filter((realm) => realm.services.includes('food'))
+                .map((realm) => (
+                  <FoodButton
+                    key={realm.tenantId}
+                    onPress={() => select({ ...realm, mode: 'menu' })}
+                  >{`查看餐點：${realm.name}`}</FoodButton>
+                ))}
+              {!resource.data.public.some((realm) => realm.services.includes('food')) ? (
+                <FoodText>目前沒有開放接單的門市。</FoodText>
+              ) : null}
+            </>
           ) : null}
           <FoodText title>我的訂單</FoodText>
           <FoodText>店家暫停接新單時，仍可從這裡查看原有訂單。</FoodText>
@@ -109,7 +120,9 @@ function FoodRealm({
     `food:${selection.tenantId}:order`,
     null,
   );
-  const [mode, setMode] = useState(selection.mode);
+  const orderingOn = isAppOnlineOrderingEnabled();
+  const [storedMode, setMode] = useState(selection.mode);
+  const mode = orderingOn ? storedMode : 'orders';
   const [cursor, setCursor] = useState<string | undefined>();
   const loader = useCallback(
     async () =>
@@ -161,15 +174,17 @@ function FoodRealm({
       <FoodButton onPress={onBack}>返回用餐校區</FoodButton>
       <FoodText title>{selection.name}</FoodText>
       <View style={{ flexDirection: 'row', gap: 10 }}>
-        <FoodButton
-          selected={mode === 'menu'}
-          onPress={() => {
-            setCursor(undefined);
-            setMode('menu');
-          }}
-        >
-          餐點門市
-        </FoodButton>
+        {orderingOn ? (
+          <FoodButton
+            selected={mode === 'menu'}
+            onPress={() => {
+              setCursor(undefined);
+              setMode('menu');
+            }}
+          >
+            餐點門市
+          </FoodButton>
+        ) : null}
         <FoodButton
           selected={mode === 'orders'}
           onPress={() => {

@@ -9,6 +9,7 @@ const {
   parseMenuCsv,
   studentCafeteriaAction,
   NATIVE_ORDERING_CLOSED_TEXT,
+  PRICE_DISCLAIMER,
   EXTERNAL_ORDER_HONEST_TEXT,
   SHOWCASE_ORDER_BUTTON_TEXT,
   SHOWCASE_ORDER_CAPTION,
@@ -147,4 +148,6 @@ test('CSV menus and stale hints stay honest', () => {
   expect(isMenuStale('2026-10-10T00:00:00.000Z', new Date('2026-10-12T01:00:00.000Z'))).toBe(true);
   expect(isMenuStale('2026-10-12T00:00:00.000Z', new Date('2026-10-12T01:00:00.000Z'))).toBe(false);
   expect(EXTERNAL_ORDER_HONEST_TEXT).toContain('請到店家查看');
+  expect(PRICE_DISCLAIMER).toBe('價格、是否賣完、是否接單以店家訂餐頁為準，付款與退款由店家處理。');
+  expect(PRICE_DISCLAIMER).not.toMatch(/nuni/i);
 });

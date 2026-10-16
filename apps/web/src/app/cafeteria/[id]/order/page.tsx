@@ -84,7 +84,6 @@ function OrderContent({ id, context }: {
         <section>
           <h2>{shop.name}</h2>
           <p>{EXTERNAL_ORDER_HONEST_TEXT}</p>
-          <p>價格以店家為準。Nuni 不會產生取餐號碼，也不會把這次點擊當成已下單或已付款。</p>
           {notice && <p role="status">{notice}</p>}
           <p>
             <a
