@@ -27,6 +27,8 @@ export type TransitResult =
 export const TRANSIT_FRESHNESS_MS = 90_000;
 export const CAMPUS_TRANSIT: Record<string, { city: TransitCity; stopName: string }> = {
   pu: { city: 'Taichung', stopName: '靜宜大學' },
+  ncku: { city: 'Tainan', stopName: '成功大學' },
+  ntpu: { city: 'NewTaipei', stopName: '國立臺北大學' },
 };
 
 /**
@@ -39,6 +41,7 @@ const SCHOOL_SEARCH_CITIES: Readonly<Record<string, TransitCity>> = {
   ntu: 'Taipei',
   nthu: 'Hsinchu',
   ncku: 'Tainan',
+  ntpu: 'NewTaipei',
   ncu: 'Taoyuan',
   nsysu: 'Kaohsiung',
   ntnu: 'Taipei',
