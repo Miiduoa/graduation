@@ -159,7 +159,7 @@ function setField(
     if (!/^\d+(?:\.\d+)?$/.test(clean)) invalid();
     else row.credits = Number(clean);
   } else if (field === 'startPeriod' || field === 'endPeriod') {
-    if (profile) {
+    if (profile && row.kind === 'timetable') {
       const slot = slotIndexForLabel(clean, profile);
       if (slot) row[field] = slot;
       else invalid();
