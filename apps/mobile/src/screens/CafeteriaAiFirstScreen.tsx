@@ -28,7 +28,6 @@ import {
 } from '@campus/shared/src/ordering/pickupNumber';
 import {
   CAFETERIA_EMPTY_SCHOOL_TEXT,
-  cafeteriaListReviewNotices,
   cafeteriaReviewBadge,
 } from '@campus/shared/src/cafeteriaCatalog';
 import { MY_ORDER_STATUS_LABELS as statuses } from './MyOrdersScreen';
@@ -178,25 +177,12 @@ function DiningContent({
   }, [receiptId, receiptOpen]);
   const pickup = receipt ? describePickupNumber(receipt) : null;
   const quote = selected?.price != null ? diningTotal(selected.price) : null;
-  const reviewNotices = cafeteriaListReviewNotices(
-    (catalog?.venues ?? []).map((venue) => venue.reviewStatus),
-  );
   return (
     <AIDetailScreen
       title="校園餐廳"
       subtitle="看看餐點，確認店家是否開放接單。"
       onBack={() => navigation?.goBack?.()}
     >
-      {reviewNotices.map((notice) => (
-        <View key={notice} testID="cafeteria-review-notice" style={reviewNoticeBox}>
-          <Text style={{ color: aiTokens.text, lineHeight: 22 }}>{notice}</Text>
-        </View>
-      ))}
-      {catalog ? (
-        <Text style={{ color: aiTokens.textSecondary, lineHeight: 22 }}>
-          目前還不能線上點餐。目前僅提供已開通店家的到店付款。線上付款尚未開放。
-        </Text>
-      ) : null}
       <AICard title="平台點餐與取餐">
         <Text style={{ color: aiTokens.textSecondary, lineHeight: 24 }}>
           使用 Google 帳號選餐、查看訂單與出示取餐憑證。學校原有餐廳服務仍保留在下方。
@@ -455,12 +441,3 @@ function DiningContent({
     </AIDetailScreen>
   );
 }
-
-const reviewNoticeBox = {
-  backgroundColor: aiTokens.surface,
-  borderWidth: 1,
-  borderColor: aiTokens.border,
-  borderRadius: 12,
-  paddingVertical: 12,
-  paddingHorizontal: 14,
-};

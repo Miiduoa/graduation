@@ -3,11 +3,9 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import CafeteriaPage from './page';
 import { fetchCafeteriaCatalog } from '@/lib/cafeteriaCatalog';
 import {
-  DEMO_CAFETERIA_NOTICE,
   UNVERIFIED_CAFETERIA_BADGE,
   UNVERIFIED_CAFETERIA_NOTICE,
 } from '@campus/shared/src/cafeteriaCatalog';
-import { ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
 
 const state = vi.hoisted(() => ({
   school: 'pu',
@@ -145,42 +143,8 @@ it('marks unverified and demo shops beside the shop name and leaves verified unm
   const verified = within(screen.getByRole('region', { name: '靜園餐廳' }));
   expect(verified.queryByText('示範')).toBeNull();
   expect(verified.queryByText(UNVERIFIED_CAFETERIA_BADGE)).toBeNull();
-  const reviewNotices = screen.getAllByTestId('cafeteria-review-notice');
-  expect(reviewNotices[0].textContent).toBe(UNVERIFIED_CAFETERIA_NOTICE);
-  expect(reviewNotices[1].textContent).toBe(DEMO_CAFETERIA_NOTICE);
-});
-
-function expectReviewNoticeBeforeOrderingCopy() {
-  const review = screen.getAllByTestId('cafeteria-review-notice')[0];
-  const ordering = screen.getByText(new RegExp(ONLINE_ORDERING_OFF_TEXT));
-  expect(review.textContent).toBe(UNVERIFIED_CAFETERIA_NOTICE);
-  expect(review.compareDocumentPosition(ordering) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-}
-
-it.each(['ncku', 'ntpu'] as const)(
-  'shows the unverified catalog notice above the closed-ordering copy on the %s restaurant list',
-  async (school) => {
-    state.school = school;
-    await receive({
-      cafeterias: [
-        { id: `${school}-hall`, name: '學生餐廳', reviewStatus: 'unverified' },
-        { id: `${school}-cafe`, name: '校園咖啡', reviewStatus: 'unverified' },
-      ],
-      menus: [],
-    });
-    expectReviewNoticeBeforeOrderingCopy();
-    expect(screen.queryByText(DEMO_CAFETERIA_NOTICE)).toBeNull();
-  },
-);
-
-it('does not show the unverified catalog notice when every shop is verified', async () => {
-  await receive({
-    cafeterias: [{ id: 'jingyuan', name: '靜園餐廳', reviewStatus: 'verified' }],
-    menus: [],
-  });
+  expect(screen.queryByText('這是示範店家，菜單和價格不是真的，不能點餐。')).toBeNull();
   expect(screen.queryByText(UNVERIFIED_CAFETERIA_NOTICE)).toBeNull();
-  expect(screen.queryByTestId('cafeteria-review-notice')).toBeNull();
-  expect(screen.getByText(new RegExp(ONLINE_ORDERING_OFF_TEXT))).toBeTruthy();
 });
 
 it('hides availability marks on unverified and demo menus', async () => {

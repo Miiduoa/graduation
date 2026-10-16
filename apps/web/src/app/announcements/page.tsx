@@ -7,12 +7,13 @@ import { SiteShell } from '@/components/SiteShell';
 import type { Announcement } from '@/lib/firebase';
 import { loadAnnouncementFeed, type AnnouncementSourceHealth } from './publicAnnouncements';
 import {
+  ANNOUNCEMENT_EMPTY_SCHOOL_TEXT,
+  announcementEmptyHeading,
   announcementEmptyKind,
   announcementMatchesSearch,
   formatStaleAnnouncementNotice,
   listAnnouncementCatalogLinks,
   SOURCE_DOWN_EMPTY_TEXT,
-  SOURCE_NOT_CONNECTED_TEXT,
   staleAnnouncementUpdatedAt,
 } from '@campus/shared/src/campusAnnouncements';
 import { isAnnouncementSchoolVisibleToPublic } from '@campus/shared/src/campusAnnouncements';
@@ -245,26 +246,22 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
       )}
       {filtered.length === 0 ? (
         <section className={styles.status}>
-          {emptyKind === 'not_connected' ? (
-            <>
-              <h2>{SOURCE_NOT_CONNECTED_TEXT}</h2>
-              <OfficeSourceLinks links={listAnnouncementCatalogLinks(schoolId)} />
-            </>
-          ) : emptyKind === 'source_down' ? (
+          {emptyKind === 'source_down' ? (
             <>
               <h2>{SOURCE_DOWN_EMPTY_TEXT}</h2>
               <OfficeSourceLinks
                 links={downLinks.length ? downLinks : listAnnouncementCatalogLinks(schoolId)}
               />
             </>
+          ) : emptyKind !== 'has_items' ? (
+            <>
+              <h2>{announcementEmptyHeading(emptyKind) ?? ANNOUNCEMENT_EMPTY_SCHOOL_TEXT}</h2>
+              <OfficeSourceLinks links={listAnnouncementCatalogLinks(schoolId)} />
+            </>
           ) : (
             <>
-              <h2>{state.announcements.length ? '沒有符合條件的公告' : '目前沒有公開公告'}</h2>
-              <p>
-                {state.announcements.length
-                  ? '試試其他關鍵字或分類。'
-                  : '學校發布新的公告後，會顯示在這裡。'}
-              </p>
+              <h2>沒有符合條件的公告</h2>
+              <p>試試其他關鍵字或分類。</p>
             </>
           )}
         </section>

@@ -22,12 +22,12 @@ import {
   loadCampusEvent,
 } from '../services/publicCampusContent';
 import {
+  ANNOUNCEMENT_EMPTY_SCHOOL_TEXT,
   announcementEmptyKind,
   formatStaleAnnouncementNotice,
   isAnnouncementSchoolVisibleToPublic,
   listAnnouncementCatalogLinks,
   SOURCE_DOWN_EMPTY_TEXT,
-  SOURCE_NOT_CONNECTED_TEXT,
   staleAnnouncementUpdatedAt,
   SUMMARY_NOTICE,
 } from '@campus/shared/src/campusAnnouncements';
@@ -259,19 +259,6 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
     >
       {content.loading ? (
         <ReadState loading error="" empty="目前沒有公告" reload={content.reload} />
-      ) : emptyKind === 'not_connected' ? (
-        <AICard title={SOURCE_NOT_CONNECTED_TEXT}>
-          <View style={{ gap: 12 }}>
-            {listAnnouncementCatalogLinks(school.id).map((item) => (
-              <AIButton
-                key={item.sourceId}
-                label={item.office}
-                onPress={() => void Linking.openURL(item.listUrl)}
-              />
-            ))}
-            <AIButton label="更新公告" variant="ghost" onPress={() => void content.reload()} />
-          </View>
-        </AICard>
       ) : emptyKind === 'source_down' ? (
         <AICard title={SOURCE_DOWN_EMPTY_TEXT}>
           <View style={{ gap: 12 }}>
@@ -286,8 +273,19 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
             )}
           </View>
         </AICard>
-      ) : !rows.length ? (
-        <ReadState loading={false} error="" empty="目前沒有公告" reload={content.reload} />
+      ) : emptyKind !== 'has_items' ? (
+        <AICard title={ANNOUNCEMENT_EMPTY_SCHOOL_TEXT}>
+          <View style={{ gap: 12 }}>
+            {listAnnouncementCatalogLinks(school.id).map((item) => (
+              <AIButton
+                key={item.sourceId}
+                label={item.office}
+                onPress={() => void Linking.openURL(item.listUrl)}
+              />
+            ))}
+            <AIButton label="更新公告" variant="ghost" onPress={() => void content.reload()} />
+          </View>
+        </AICard>
       ) : (
         <>
           {showStaleNotice ? (
@@ -372,7 +370,7 @@ export function CampusAnnouncementDetailScreen({ navigation, route }: Props) {
         <ReadState {...content} empty="找不到這則公告，可能已移除或不屬於目前學校。" />
       ) : content.error === 'not_connected' ||
         (content.error && content.error !== 'stale' && !announcement) ? (
-        <AICard title={SOURCE_NOT_CONNECTED_TEXT}>
+        <AICard title={ANNOUNCEMENT_EMPTY_SCHOOL_TEXT}>
           <View style={{ gap: 12 }}>
             {listAnnouncementCatalogLinks(school.id).map((item) => (
               <AIButton
