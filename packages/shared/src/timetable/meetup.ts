@@ -1,5 +1,12 @@
 import type { PersonalCourse } from './course';
-import { PERIOD_TIMES, periodEnd, periodStart, timeToMinutes, weekdayLabel } from './periods';
+import {
+  periodEnd,
+  periodStart,
+  periodTimes,
+  timeToMinutes,
+  weekdayLabel,
+  type PeriodProfileId,
+} from './periods';
 
 export type MeetupKindName = 'meal' | 'study';
 
@@ -13,10 +20,16 @@ export type MeetupWindow = {
 };
 
 export const MEETUP_DURATION_MINUTES = 60;
-const DAY_START = timeToMinutes(PERIOD_TIMES[0][0]);
-const DAY_END = timeToMinutes(PERIOD_TIMES[PERIOD_TIMES.length - 1][1]);
 const LUNCH = { start: timeToMinutes('12:00'), end: timeToMinutes('13:10') };
 const DINNER = { start: timeToMinutes('17:10'), end: timeToMinutes('18:05') };
+
+function dayBounds(profile: PeriodProfileId) {
+  const times = periodTimes(profile);
+  return {
+    start: timeToMinutes(times[0][0]),
+    end: timeToMinutes(times[times.length - 1][1]),
+  };
+}
 
 function pad(value: number) {
   return String(value).padStart(2, '0');
@@ -26,10 +39,14 @@ export function minutesLabel(total: number): string {
   return `${pad(Math.floor(total / 60))}:${pad(total % 60)}`;
 }
 
-function busyIntervals(courses: PersonalCourse[], day: number): Array<[number, number]> {
+function busyIntervals(
+  courses: PersonalCourse[],
+  day: number,
+  profile: PeriodProfileId,
+): Array<[number, number]> {
   return courses
     .filter((course) => course.day === day && course.start > 0 && course.end >= course.start)
-    .map((course) => [timeToMinutes(periodStart(course.start)), timeToMinutes(periodEnd(course.end))] as [number, number])
+    .map((course) => [timeToMinutes(periodStart(course.start, profile)), timeToMinutes(periodEnd(course.end, profile))] as [number, number])
     .sort((a, b) => a[0] - b[0]);
 }
 
@@ -43,19 +60,24 @@ function mealOf(start: number, end: number): MeetupWindow['meal'] {
  * 兩個人都沒課、至少一小時的時段（用實際時間算，所以午休 12:00–13:10 也算得到）。
  * 有午餐、晚餐時間的排前面。
  */
-export function meetupWindows(mine: PersonalCourse[], theirs: PersonalCourse[]): MeetupWindow[] {
+export function meetupWindows(
+  mine: PersonalCourse[],
+  theirs: PersonalCourse[],
+  profile: PeriodProfileId = 'pu',
+): MeetupWindow[] {
   const out: MeetupWindow[] = [];
+  const bounds = dayBounds(profile);
   for (let day = 1; day <= 5; day += 1) {
-    const busy = [...busyIntervals(mine, day), ...busyIntervals(theirs, day)].sort((a, b) => a[0] - b[0]);
-    let cursor = DAY_START;
+    const busy = [...busyIntervals(mine, day, profile), ...busyIntervals(theirs, day, profile)].sort((a, b) => a[0] - b[0]);
+    let cursor = bounds.start;
     const push = (start: number, end: number) => {
       if (end - start >= MEETUP_DURATION_MINUTES) out.push({ day, start, end, meal: mealOf(start, end) });
     };
     for (const [start, end] of busy) {
-      if (start > cursor) push(cursor, Math.min(start, DAY_END));
+      if (start > cursor) push(cursor, Math.min(start, bounds.end));
       cursor = Math.max(cursor, end);
     }
-    if (cursor < DAY_END) push(cursor, DAY_END);
+    if (cursor < bounds.end) push(cursor, bounds.end);
   }
   return out.sort((a, b) => {
     const rank = (w: MeetupWindow) => (w.meal ? 0 : 1);
@@ -100,9 +122,10 @@ export function meetupLabel(meetup: {
 }
 
 /** 開始時間落在哪一節（給還只看節次的舊版畫面用）。 */
-export function periodAt(minute: number): number {
-  for (let index = 0; index < PERIOD_TIMES.length; index += 1) {
-    if (minute < timeToMinutes(PERIOD_TIMES[index][1])) return index + 1;
+export function periodAt(minute: number, profile: PeriodProfileId = 'pu'): number {
+  const times = periodTimes(profile);
+  for (let index = 0; index < times.length; index += 1) {
+    if (minute < timeToMinutes(times[index][1])) return index + 1;
   }
-  return PERIOD_TIMES.length;
+  return times.length;
 }

@@ -32,6 +32,7 @@ function source(schoolId, sourceId, office, scope, listUrl, parsers, extra = {})
     intervalMinutes: extra.intervalMinutes || 20,
     owner: extra.owner || 'campus-announcements',
     enabled: extra.enabled !== false,
+    fragile: extra.fragile || '',
   };
 }
 
@@ -61,6 +62,7 @@ function school(schoolId, name, spec = {}) {
           scope: 'campus',
           url: spec.campus.url,
           cms: spec.campus.cms,
+          extra: spec.campus.extra,
         },
         cms,
       ),
@@ -76,6 +78,7 @@ function school(schoolId, name, spec = {}) {
           scope: 'office',
           url: spec.academic.url,
           cms: spec.academic.cms,
+          extra: spec.academic.extra,
         },
         cms,
       ),
@@ -115,7 +118,15 @@ const SCHOOLS = [
   school('ncku', '國立成功大學', {
     cms: 'iweb',
     campus: { url: 'https://web.ncku.edu.tw/p/403-1000-14-1.php' },
-    academic: { url: 'https://www.acad.ncku.edu.tw/', cms: 'html' },
+    academic: { url: 'https://acad.ncku.edu.tw/p/403-1025-397-1.php', cms: 'iweb' },
+    offices: [
+      {
+        sourceId: 'ncku-osa',
+        office: '學務處',
+        url: 'https://osa.ncku.edu.tw/p/403-1026-40-1.php',
+        cms: 'iweb',
+      },
+    ],
   }),
   school('nycu', '國立陽明交通大學', {
     cms: 'html',
@@ -159,7 +170,7 @@ const SCHOOLS = [
   }),
   school('ntpu', '國立臺北大學', {
     cms: 'html',
-    campus: { url: 'https://new.ntpu.edu.tw/news' },
+    campus: { url: 'https://new.ntpu.edu.tw/news', extra: { fragile: 'spa' } },
     academic: { url: 'https://www.aa.ntpu.edu.tw/' },
   }),
   school('tmu', '臺北醫學大學', {
@@ -260,6 +271,14 @@ function allSources() {
   return SCHOOLS.flatMap((entry) => entry.sources.filter((item) => item.enabled !== false));
 }
 
+const DEFAULT_SYNC_SCHOOLS = ['pu'];
+
+function parseSyncSchoolIds(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return [...DEFAULT_SYNC_SCHOOLS];
+  return [...new Set(raw.split(/[,\s]+/).map((item) => item.trim()).filter(Boolean))];
+}
+
 function coverageRows() {
   return SCHOOLS.map((entry) => {
     const sources = entry.sources || [];
@@ -272,6 +291,12 @@ function coverageRows() {
     let note = campus && academic ? '已設定全校與教務處；實際抽出看健康檢查' : '';
     if (entry.schoolId === 'pu') {
       note = '第一批七處室完整接上 iWeb 雙解析器';
+    }
+    if (entry.schoolId === 'ncku') {
+      note = '全校、教務處、學務處公開列表已接 iWeb；寫入仍要列進 CAMPUS_ANNOUNCEMENT_SYNC_SCHOOLS';
+    }
+    if (entry.schoolId === 'ntpu') {
+      note = '校網最新消息是前端頁，抽出 0 筆時記 parse_empty；寫入仍要列進 CAMPUS_ANNOUNCEMENT_SYNC_SCHOOLS';
     }
     if (entry.demo && sources.length === 0) {
       status = 'unavailable';
@@ -327,6 +352,8 @@ module.exports = {
   isPublicAnnouncementSchool,
   listSources,
   allSources,
+  DEFAULT_SYNC_SCHOOLS,
+  parseSyncSchoolIds,
   coverageRows,
   formatCoverageTable,
   SOURCE_UNAVAILABLE,

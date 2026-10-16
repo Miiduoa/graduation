@@ -100,6 +100,18 @@ test('projection accepts only explicit supported PU periods without changing sav
     end: 2,
   });
   expect(personalImportCourses(records, 'ntu')).toEqual([]);
+  expect(
+    personalImportCourses(
+      [{ ...records[0], schoolId: 'ncku', startPeriod: 12, endPeriod: 15 }],
+      'ncku',
+    )[0],
+  ).toMatchObject({ start: 12, end: 15 });
+  expect(
+    personalImportCourses(
+      [{ ...records[0], schoolId: 'ntpu', startPeriod: 10, endPeriod: 13 }],
+      'ntpu',
+    )[0],
+  ).toMatchObject({ start: 10, end: 13 });
   expect(personalImportCourses([{ ...records[0], dayOfWeek: 6 }], 'pu')).toEqual([]);
   expect(personalImportCourses([{ ...records[0], startPeriod: undefined }], 'pu')).toEqual([]);
   expect(records[0].id).toBe('a');

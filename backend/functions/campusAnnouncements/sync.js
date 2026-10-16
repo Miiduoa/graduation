@@ -1,7 +1,7 @@
 'use strict';
 
 const { FieldValue, Timestamp } = require('firebase-admin/firestore');
-const { schoolConfig, listSources, allSources, SOURCE_DOWN_EMPTY } = require('./catalog');
+const { schoolConfig, listSources, parseSyncSchoolIds, SOURCE_DOWN_EMPTY } = require('./catalog');
 const { extractFromHtml, countDrop } = require('./extract');
 const { politeFetch } = require('./politeFetch');
 const { announcementDocId, isLoginPortalUrl } = require('./url');
@@ -247,13 +247,10 @@ async function syncSchool(schoolId, deps = {}) {
 }
 
 async function syncConfiguredSchools(deps = {}) {
-  const bySchool = new Map();
-  for (const source of allSources()) {
-    if (!bySchool.has(source.schoolId)) bySchool.set(source.schoolId, []);
-    bySchool.get(source.schoolId).push(source);
-  }
+  const env = deps.env || process.env;
+  const schoolIds = parseSyncSchoolIds(env.CAMPUS_ANNOUNCEMENT_SYNC_SCHOOLS);
   const results = [];
-  for (const schoolId of bySchool.keys()) {
+  for (const schoolId of schoolIds) {
     results.push(await syncSchool(schoolId, deps));
   }
   return results;

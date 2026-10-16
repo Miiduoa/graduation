@@ -1,3 +1,5 @@
+import type { PeriodProfileId } from '../timetable/schoolPeriods';
+
 export type PersonalImportKind = 'timetable' | 'grades' | 'events';
 
 export type PersonalImportSource = {
@@ -23,7 +25,7 @@ export type PersonalImportRow = {
   dayOfWeek?: number;
   startPeriod?: number;
   endPeriod?: number;
-  /** Original school period notation when it is not a known numeric PU period. */
+  /** Original school period notation when it is not a mapped grid slot. */
   periodLabel?: string;
   startTime?: string;
   endTime?: string;
@@ -53,8 +55,8 @@ export type PersonalImportOptions = {
   academicYear: string;
   semester: string;
   source?: Pick<PersonalImportSource, 'type' | 'name'>;
-  /** The current timetable supports Providence University's weekday/period grid. */
-  periodProfile?: 'pu';
+  /** School weekday/period grid used to map paste/screenshot text into slots. */
+  periodProfile?: PeriodProfileId;
 };
 
 export type PersonalImportRecord = PersonalImportRow & {

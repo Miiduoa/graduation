@@ -1,4 +1,10 @@
 import {
+  isPeriodProfileId,
+  parsePeriodRange,
+  slotIndexForLabel,
+  type PeriodProfileId,
+} from '../timetable/periods';
+import {
   PERSONAL_IMPORT_MAX_ROWS,
   PERSONAL_IMPORT_MAX_TEXT_LENGTH,
   type ImportIssue,
@@ -94,10 +100,18 @@ function weekday(value: string): number | undefined {
   )[clean.toLowerCase()];
 }
 
-function periods(value: string): [number, number] | undefined {
+function periods(
+  value: string,
+  profile?: PeriodProfileId,
+): [number, number] | undefined {
+  const clean = normalizePersonalImportText(value);
+  if (profile) {
+    const parsed = parsePeriodRange(clean, profile);
+    return parsed ? [parsed.start, parsed.end] : undefined;
+  }
   const match =
     /^(?:第\s*)?(\d{1,2})(?:\s*節)?(?:\s*[-–—~～至到]\s*(?:第\s*)?(\d{1,2})(?:\s*節)?)?$/.exec(
-      normalizePersonalImportText(value),
+      clean,
     );
   return match ? [Number(match[1]), Number(match[2] ?? match[1])] : undefined;
 }
@@ -117,7 +131,13 @@ function date(value: string): string {
   return clean;
 }
 
-function setField(row: PersonalImportRow, field: Field, value: string, issues: ImportIssue[]) {
+function setField(
+  row: PersonalImportRow,
+  field: Field,
+  value: string,
+  issues: ImportIssue[],
+  profile?: PeriodProfileId,
+) {
   const clean = normalizePersonalImportText(value);
   if (!clean) return;
   const invalid = () =>
@@ -135,11 +155,18 @@ function setField(row: PersonalImportRow, field: Field, value: string, issues: I
   } else if (field === 'dayOfWeek') {
     row.dayOfWeek = weekday(clean);
     if (row.dayOfWeek === undefined) invalid();
-  } else if (field === 'startPeriod' || field === 'endPeriod' || field === 'credits') {
+  } else if (field === 'credits') {
     if (!/^\d+(?:\.\d+)?$/.test(clean)) invalid();
+    else row.credits = Number(clean);
+  } else if (field === 'startPeriod' || field === 'endPeriod') {
+    if (profile) {
+      const slot = slotIndexForLabel(clean, profile);
+      if (slot) row[field] = slot;
+      else invalid();
+    } else if (!/^\d+(?:\.\d+)?$/.test(clean)) invalid();
     else row[field] = Number(clean);
   } else if (field === 'periods') {
-    const parsed = periods(clean);
+    const parsed = periods(clean, profile);
     if (parsed) [row.startPeriod, row.endPeriod] = parsed;
     else row.periodLabel = clean;
   } else if (field === 'times') {
@@ -250,6 +277,17 @@ const labelNames = Object.values(aliases)
   .sort((a, b) => b.length - a.length);
 const labelPattern = new RegExp(`(?:^|[\\s/|;；,，])(${labelNames.join('|')})\\s*[:：]\\s*`, 'gi');
 
+function profileOf(options: PersonalImportOptions): PeriodProfileId | undefined {
+  return isPeriodProfileId(options.periodProfile) ? options.periodProfile : undefined;
+}
+
+function naturalPeriodPattern(profile?: PeriodProfileId): RegExp {
+  if (profile === 'ncku') {
+    return /第\s*(?:0|[1-9]|[NABCD])(?:\s*節)?\s*[-–—~～至到]\s*(?:第\s*)?(?:0|[1-9]|[NABCD])\s*節?|第\s*(?:0|[1-9]|[NABCD])\s*節|\[(?:0|[1-9]|[NABCD])\](?:\s*\[(?:0|[1-9]|[NABCD])\])+/i;
+  }
+  return /第\s*\d{1,2}(?:\s*節)?\s*[-–—~～至到]\s*(?:第\s*)?\d{1,2}\s*節|第\s*\d{1,2}\s*節/;
+}
+
 function naturalRow(
   rawText: string,
   line: number,
@@ -257,6 +295,7 @@ function naturalRow(
   issues: ImportIssue[],
 ): PersonalImportRow {
   const row = newRow(options, line, rawText);
+  const profile = profileOf(options);
   let clean = normalizePersonalImportText(rawText);
   const labels = Array.from(clean.matchAll(labelPattern));
   const seen = new Set<Field>();
@@ -274,7 +313,7 @@ function naturalRow(
     seen.add(field);
     const start = current.index! + current[0].length;
     const end = labels[index + 1]?.index ?? clean.length;
-    setField(row, field, clean.slice(start, end).replace(/[\s/|;；,，]+$/, ''), issues);
+    setField(row, field, clean.slice(start, end).replace(/[\s/|;；,，]+$/, ''), issues, profile);
   }
   clean = clean.slice(0, labels[0]?.index ?? clean.length).trim();
   if (options.kind === 'timetable') {
@@ -284,17 +323,14 @@ function naturalRow(
       row.dayOfWeek = weekday(day[0]);
       clean = clean.replace(day[0], ' ');
     }
-    const period =
-      /第\s*\d{1,2}(?:\s*節)?\s*[-–—~～至到]\s*(?:第\s*)?\d{1,2}\s*節|第\s*\d{1,2}\s*節/.exec(
-        clean,
-      );
+    const period = naturalPeriodPattern(profile).exec(clean);
     if (period && row.startPeriod === undefined) {
-      setField(row, 'periods', period[0], issues);
+      setField(row, 'periods', period[0], issues, profile);
       clean = clean.replace(period[0], ' ');
     }
     const times = /\b\d{1,2}:\d{2}\s*[-–—~～至到]\s*\d{1,2}:\d{2}\b/.exec(clean);
     if (times && !row.startTime) {
-      setField(row, 'times', times[0], issues);
+      setField(row, 'times', times[0], issues, profile);
       clean = clean.replace(times[0], ' ');
     }
   }
@@ -399,7 +435,7 @@ export function parsePersonalImport(
             message: '這一列的欄位數與標題不同，請確認分隔符號。',
           });
         table.headers.forEach((field, index) => {
-          if (field) setField(row, field, source.cells[index] ?? '', issues);
+          if (field) setField(row, field, source.cells[index] ?? '', issues, profileOf(options));
         });
         return mapPersonalImportPeriods(row, options);
       });

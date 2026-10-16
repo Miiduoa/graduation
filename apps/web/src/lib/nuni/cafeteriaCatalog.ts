@@ -9,6 +9,7 @@ import {
   type CafeteriaCatalogMenuItem,
   type CafeteriaCatalogRecord,
 } from '@campus/shared/src/cafeteriaCatalog';
+import { publicDiningCafeterias } from '@campus/shared/src/publicDiningCatalog';
 import { errorResponse, jsonResponse, publicRequest } from './server';
 
 const TENANT = /^[a-z0-9][a-z0-9-]{0,78}[a-z0-9]$/;
@@ -79,8 +80,24 @@ function asCatalog(value: unknown, schoolId: string): {
   return { cafeterias, menus };
 }
 
+function fallbackCatalog(schoolId: string): {
+  cafeterias: CafeteriaCatalogRecord[];
+  menus: CafeteriaCatalogMenuItem[];
+} {
+  return { cafeterias: publicDiningCafeterias(schoolId), menus: [] };
+}
+
 async function loadPublicCatalog(schoolId: string) {
-  return asCatalog(await publicRequest(`schools/${schoolId}/cafeterias`), schoolId);
+  try {
+    const catalog = asCatalog(await publicRequest(`schools/${schoolId}/cafeterias`), schoolId);
+    if (catalog.cafeterias.length) return catalog;
+    const fallback = fallbackCatalog(schoolId);
+    return fallback.cafeterias.length ? fallback : catalog;
+  } catch (error) {
+    const fallback = fallbackCatalog(schoolId);
+    if (fallback.cafeterias.length) return fallback;
+    throw error;
+  }
 }
 
 export async function handleCafeteriaCatalog(request: NextRequest) {
