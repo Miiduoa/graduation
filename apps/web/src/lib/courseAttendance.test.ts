@@ -3,9 +3,12 @@ import { getDoc, getDocs } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import {
   attendanceCsv,
+  hasOwnActiveAttendance,
   joinCourseAttendance,
   loadCourseAttendance,
   startCourseAttendance,
+  studentCheckInSession,
+  type AttendanceSession,
 } from './courseAttendance';
 vi.mock('./firebase', () => ({
   getDb: () => ({}),
@@ -68,6 +71,28 @@ it('rejects blank tokens without calling the backend', async () => {
   await expect(joinCourseAttendance('class', 'session', '  ')).rejects.toThrow();
   expect(httpsCallable).not.toHaveBeenCalled();
 });
+it('lets a student check into only the latest open session of this course', () => {
+  const session = (id: string, active: boolean, startedAt: string | null): AttendanceSession => ({
+    id,
+    teacherId: 'teacher',
+    active,
+    startedAt,
+    endedAt: active ? null : startedAt,
+    qrExpiresAt: startedAt,
+    attendeeCount: 0,
+    ownRecord: null,
+  });
+  const sessions = [
+    session('older-open', true, '2026-10-16T01:00:00Z'),
+    session('ended', false, '2026-10-16T00:00:00Z'),
+    session('latest-open', true, '2026-10-16T02:00:00Z'),
+  ];
+  expect(studentCheckInSession(sessions)?.id).toBe('latest-open');
+  expect(studentCheckInSession(sessions.filter((row) => !row.active))).toBeNull();
+  expect(hasOwnActiveAttendance(sessions, 'teacher')).toBe(true);
+  expect(hasOwnActiveAttendance(sessions, 'other-teacher')).toBe(false);
+});
+
 it('escapes commas, quotes and spreadsheet formula prefixes in exports', () => {
   const csv = attendanceCsv([
     { uid: 'u1', studentId: '=1+1', displayName: '陳,"同學"', checkedInAt: null },

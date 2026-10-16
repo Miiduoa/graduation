@@ -81,6 +81,16 @@ function sameToken(actual, expected) {
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
+function sessionIdsFromQuery(snapshot) {
+  const ids = [];
+  const docs = snapshot && Array.isArray(snapshot.docs) ? snapshot.docs : [];
+  for (const entry of docs) {
+    const id = typeof entry.id === 'string' ? entry.id : '';
+    if (id) ids.push(id);
+  }
+  return ids;
+}
+
 function createLiveSessionHandlers({ db, now = Date.now, notifyStarted, logger = console }) {
   function refs(groupId, sessionId, uid) {
     const group = db.collection('groups').doc(groupId);
@@ -93,6 +103,48 @@ function createLiveSessionHandlers({ db, now = Date.now, notifyStarted, logger =
       secret: group.collection('liveSessionSecrets').doc(sessionId),
       record: attendance.collection('attendanceRecords').doc(uid),
     };
+  }
+
+  async function otherActiveSessionIds(transaction, group, sessionId) {
+    const [activeLive, activeAttendance] = await Promise.all([
+      transaction.get(group.collection('liveSessions').where('active', '==', true)),
+      transaction.get(group.collection('attendanceSessions').where('active', '==', true)),
+    ]);
+    return [...new Set([...sessionIdsFromQuery(activeLive), ...sessionIdsFromQuery(activeAttendance)])].filter(
+      (id) => id !== sessionId,
+    );
+  }
+
+  function closeActiveSession(transaction, documents, endedAt) {
+    transaction.update(documents.live, { active: false, endedAt });
+    transaction.update(documents.attendance, { active: false, endedAt });
+  }
+
+  async function closeOtherActiveSessions(transaction, groupId, sessionId, endedAt) {
+    const group = db.collection('groups').doc(groupId);
+    const otherIds = await otherActiveSessionIds(transaction, group, sessionId);
+    if (otherIds.length === 0) return;
+    const extra = [];
+    for (const id of otherIds) {
+      extra.push(group.collection('liveSessions').doc(id), group.collection('attendanceSessions').doc(id));
+    }
+    const snapshots = await transaction.getAll(...extra);
+    for (let index = 0; index < otherIds.length; index += 1) {
+      const live = snapshots[index * 2];
+      const attendance = snapshots[index * 2 + 1];
+      if (!live.exists || !attendance.exists || live.data().active !== attendance.data().active) {
+        throw new HttpsError('failed-precondition', 'Session records require administrator repair');
+      }
+      if (live.data().active !== true) continue;
+      closeActiveSession(
+        transaction,
+        {
+          live: extra[index * 2],
+          attendance: extra[index * 2 + 1],
+        },
+        endedAt,
+      );
+    }
   }
 
   async function startLiveSession(request) {
@@ -147,6 +199,9 @@ function createLiveSessionHandlers({ db, now = Date.now, notifyStarted, logger =
             'Session records require administrator repair',
           );
         }
+        if (live.data().active === true) {
+          await closeOtherActiveSessions(transaction, groupId, sessionId, Timestamp.fromMillis(now()));
+        }
         return {
           success: true,
           sessionId,
@@ -158,6 +213,7 @@ function createLiveSessionHandlers({ db, now = Date.now, notifyStarted, logger =
       }
 
       const startedAt = Timestamp.fromMillis(now());
+      await closeOtherActiveSessions(transaction, groupId, sessionId, startedAt);
       const qrExpiresAt = Timestamp.fromMillis(
         startedAt.toMillis() + options.qrExpiryMinutes * 60_000,
       );
