@@ -20,6 +20,7 @@ function reply(body: unknown, ok = true) {
 test('selects the primary school city without treating unknown campuses as Taichung', () => {
   expect(primaryBusCity('nthu')).toBe('Hsinchu');
   expect(primaryBusCity('ncku')).toBe('Tainan');
+  expect(primaryBusCity('ntpu')).toBe('NewTaipei');
   expect(primaryBusCity('tw-nchu')).toBe('Taichung');
   expect(primaryBusCity('nycu')).toBeNull();
   expect(primaryBusCity('external-university')).toBeNull();

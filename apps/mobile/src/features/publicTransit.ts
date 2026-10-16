@@ -64,6 +64,7 @@ const PRIMARY_CITY: Readonly<Record<string, BusCity>> = {
   ntu: 'Taipei',
   nthu: 'Hsinchu',
   ncku: 'Tainan',
+  ntpu: 'NewTaipei',
   ncu: 'Taoyuan',
   nsysu: 'Kaohsiung',
   ntnu: 'Taipei',

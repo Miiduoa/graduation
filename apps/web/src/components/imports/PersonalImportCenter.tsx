@@ -19,7 +19,14 @@ import {
   parsePersonalImportBackup,
   serializePersonalImportBackup,
   PERSONAL_IMPORT_BACKUP_MAX_BYTES,
+  periodCount,
+  periodDisplayLabel,
+  periodLabelAt,
+  periodProfileForSchool,
+  periodSlots,
+  PERIOD_PROFILE_TITLES,
   validatePersonalImportRow,
+  type PeriodProfileId,
   type PersonalImportKind,
   type PersonalImportRow,
   type PersonalImportRecord,
@@ -55,12 +62,23 @@ const REVIEW_PAGE_SIZE = 25;
 function errorMessage(error: unknown, fallback = '這次沒有完成，草稿仍保留，請再試一次。') {
   return personalImportErrorMessage(error, fallback);
 }
-function rowSummary(row: PersonalImportRow) {
+function periodSummary(row: PersonalImportRow, periodProfile?: PeriodProfileId) {
+  if (row.startTime && row.endTime) return `${row.startTime}–${row.endTime}`;
+  if (row.periodLabel) return row.periodLabel;
+  if (periodProfile && row.startPeriod) {
+    const start = periodLabelAt(row.startPeriod, periodProfile);
+    const end = periodLabelAt(row.endPeriod ?? row.startPeriod, periodProfile);
+    return start === end ? `第 ${start} 節` : `第 ${start}–${end} 節`;
+  }
+  return `第 ${row.startPeriod ?? '?'}–${row.endPeriod ?? '?'} 節`;
+}
+
+function rowSummary(row: PersonalImportRow, periodProfile?: PeriodProfileId) {
   if (row.kind === 'grades')
     return `${row.academicYear} 學年度 ${row.semester} 學期 · ${row.credits} 學分 · ${row.grade}`;
   if (row.kind === 'events')
     return `${row.date} ${row.startTime || '全天'}${row.endTime ? `–${row.endTime}` : ''}${row.endDate && row.endDate !== row.date ? `（至 ${row.endDate}）` : ''}`;
-  return `星期${['', '一', '二', '三', '四', '五', '六', '日'][row.dayOfWeek || 0] || '待確認'} · ${row.startTime && row.endTime ? `${row.startTime}–${row.endTime}` : row.periodLabel || `第 ${row.startPeriod ?? '?'}–${row.endPeriod ?? '?'} 節`} · ${row.teacher || '老師未填'} · ${row.location || '教室未填'}`;
+  return `星期${['', '一', '二', '三', '四', '五', '六', '日'][row.dayOfWeek || 0] || '待確認'} · ${periodSummary(row, periodProfile)} · ${row.teacher || '老師未填'} · ${row.location || '教室未填'}`;
 }
 
 function RowFields({
@@ -73,7 +91,7 @@ function RowFields({
   row: PersonalImportRow;
   onChange: (row: PersonalImportRow) => void;
   workspaces: NuniWorkspace[];
-  periodProfile?: 'pu';
+  periodProfile?: PeriodProfileId;
   onRefreshWorkspaces?: () => void;
 }) {
   const update = (field: keyof PersonalImportRow, value: string | number | boolean | undefined) =>
@@ -139,8 +157,35 @@ function RowFields({
                 ))}
               </select>
             </label>
-            {number('startPeriod', '開始節次', periodProfile ? 13 : 99)}
-            {number('endPeriod', '結束節次', periodProfile ? 13 : 99)}
+            {periodProfile
+              ? ['startPeriod', 'endPeriod'].map((name) => (
+                  <label className={styles.field} key={name}>
+                    {name === 'startPeriod' ? '開始節次' : '結束節次'}
+                    <select
+                      value={row[name as 'startPeriod' | 'endPeriod'] ?? ''}
+                      onChange={(event) =>
+                        update(
+                          name as 'startPeriod' | 'endPeriod',
+                          event.target.value ? Number(event.target.value) : undefined,
+                        )
+                      }
+                    >
+                      <option value="">請選擇</option>
+                      {periodSlots(periodProfile).map((slot) => (
+                        <option key={slot.index} value={slot.index}>
+                          {periodDisplayLabel(slot.index, periodProfile)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ))
+              : null}
+            {!periodProfile ? (
+              <>
+                {number('startPeriod', '開始節次', 99)}
+                {number('endPeriod', '結束節次', 99)}
+              </>
+            ) : null}
             {field('teacher', '老師')}
             {field('location', '教室／地點')}
             {!periodProfile && (
@@ -311,7 +356,7 @@ function ImportWorkspace({
     suspended.current = paused;
   }, [paused]);
   const nuni = useOptionalNuniSession();
-  const periodProfile = scope.schoolId === 'pu' ? ('pu' as const) : undefined;
+  const periodProfile = periodProfileForSchool(scope.schoolId);
   const [kind, setKind] = useState<PersonalImportKind>('timetable');
   const [year, setYear] = useState('');
   const [semester, setSemester] = useState('');
@@ -789,7 +834,7 @@ function ImportWorkspace({
         {kind === 'timetable' && (
           <p className={styles.note}>
             {periodProfile
-              ? '目前使用靜宜大學節次表；星期一至五的課程可顯示在「我的課表」。'
+              ? `目前使用${PERIOD_PROFILE_TITLES[periodProfile]}節次表（${periodCount(periodProfile)} 節）；星期一至五的課程可顯示在「我的課表」。`
               : '尚未選用學校節次表。請保留原始上課時間；其他學校與週末課程會顯示在下方個人紀錄。'}
           </p>
         )}
@@ -1050,7 +1095,7 @@ function ImportWorkspace({
               <li key={row.id}>
                 <div>
                   <strong>{row.title}</strong>
-                  <p>{rowSummary(row)}</p>
+                  <p>{rowSummary(row, periodProfile)}</p>
                   <small>自行匯入 · {row.source.name || '手動／貼上文字'}</small>
                   {row.linkedCourseId &&
                     workspaces.some((item) => item.id === row.linkedCourseId) && (

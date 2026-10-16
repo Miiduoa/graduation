@@ -63,6 +63,28 @@ it('returns 400 for invalid or unexpected school params for guests and signed-in
   }
 });
 
+it('falls back to the public NCKU dining list when the live catalog is empty', async () => {
+  fetcher.mockResolvedValueOnce(json({ schoolId: 'ncku', cafeterias: [], menus: [] }));
+  const response = await handleCafeteriaCatalog(request('/api/cafeterias?schoolId=ncku'));
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.schoolId).toBe('ncku');
+  expect(body.menus).toEqual([]);
+  expect(body.cafeterias.some((row: { name: string }) => row.name === '光復餐廳')).toBe(true);
+  expect(body.cafeterias.every((row: { schoolId: string }) => row.schoolId === 'ncku')).toBe(true);
+  expect(body.cafeterias.every((row: { merchantMode: string }) => row.merchantMode === 'info_only')).toBe(
+    true,
+  );
+});
+
+it('does not leak NTPU dining into another school empty catalog', async () => {
+  fetcher.mockResolvedValueOnce(json({ schoolId: 'cgu', cafeterias: [], menus: [] }));
+  const response = await handleCafeteriaCatalog(request('/api/cafeterias?schoolId=cgu'));
+  const body = await response.json();
+  expect(body.cafeterias).toEqual([]);
+  expect(JSON.stringify(body)).not.toContain('優米自助餐');
+});
+
 it('reads the public school catalog when nobody is signed in', async () => {
   fetcher.mockResolvedValueOnce(json({ schoolId: 'cgu', cafeterias: [], menus: [] }));
   const response = await handleCafeteriaCatalog(request('/api/cafeterias?schoolId=cgu'));
