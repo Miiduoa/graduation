@@ -15,7 +15,11 @@ import {
   DiningError,
 } from '../features/dining';
 import type { DiningReceipt } from '../features/dining';
-import { UNVERIFIED_CAFETERIA_BADGE } from '@campus/shared/src/cafeteriaCatalog';
+import {
+  DEMO_CAFETERIA_NOTICE,
+  UNVERIFIED_CAFETERIA_BADGE,
+  UNVERIFIED_CAFETERIA_NOTICE,
+} from '@campus/shared/src/cafeteriaCatalog';
 
 let mockUser: { uid: string } | null = { uid: 'student-a' };
 let mockSchool = { id: 'pu' };
@@ -351,7 +355,35 @@ test('marks unverified and demo venues and leaves verified unmarked', async () =
   expect(view.getByText('靜園餐廳')).toBeTruthy();
   expect(view.queryAllByText('示範')).toHaveLength(1);
   expect(view.queryAllByText(UNVERIFIED_CAFETERIA_BADGE)).toHaveLength(1);
+  expect(view.getByText(UNVERIFIED_CAFETERIA_NOTICE)).toBeTruthy();
+  expect(view.getByText(DEMO_CAFETERIA_NOTICE)).toBeTruthy();
 });
+
+test.each(['ncku', 'ntpu'] as const)(
+  'shows the unverified catalog notice above closed ordering copy on the %s restaurant list',
+  async (school) => {
+    mockSchool = { id: school };
+    jest.mocked(loadDiningCatalog).mockResolvedValueOnce({
+      venues: [
+        {
+          id: `${school}-hall`,
+          name: '學生餐廳',
+          location: '校區',
+          orderingEnabled: false,
+          reviewStatus: 'unverified',
+        },
+      ],
+      menus: [],
+    });
+    const view = render(<CafeteriaAiFirstScreen />);
+    await act(async () => {});
+    const review = view.getByTestId('cafeteria-review-notice');
+    expect(view.getByText(UNVERIFIED_CAFETERIA_NOTICE)).toBeTruthy();
+    expect(view.getByText(/目前還不能線上點餐/)).toBeTruthy();
+    expect(review).toBeTruthy();
+    expect(view.queryByText(DEMO_CAFETERIA_NOTICE)).toBeNull();
+  },
+);
 
 test('restaurant list payment copy does not mention Nuni', async () => {
   const view = render(<CafeteriaAiFirstScreen />);

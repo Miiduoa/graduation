@@ -132,6 +132,15 @@ export function cafeteriaShowsMenuAvailability(status: unknown): boolean {
   return parseCafeteriaReviewStatus(status) === 'verified';
 }
 
+/** 列表頁提示順序：還沒跟店家核對過 → 示範店（若有）→ 呼叫端再放點餐關閉。 */
+export function cafeteriaListReviewNotices(statuses: Iterable<unknown>): string[] {
+  const parsed = new Set(Array.from(statuses, parseCafeteriaReviewStatus));
+  const notices: string[] = [];
+  if (parsed.has('unverified')) notices.push(UNVERIFIED_CAFETERIA_NOTICE);
+  if (parsed.has('demo')) notices.push(DEMO_CAFETERIA_NOTICE);
+  return notices;
+}
+
 export function parseCafeteriaLocation(
   value: unknown,
   schoolId: string,

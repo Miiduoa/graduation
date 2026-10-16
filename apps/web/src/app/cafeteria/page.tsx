@@ -12,6 +12,7 @@ import {
   CAFETERIA_EMPTY_SCHOOL_TEXT,
   CAFETERIA_PAYMENT_DISCLAIMER,
   CAFETERIA_REVIEW_STATUS_DEFAULT,
+  cafeteriaListReviewNotices,
   cafeteriaReviewBadge,
   cafeteriaShowsMenuAvailability,
 } from '@campus/shared/src/cafeteriaCatalog';
@@ -267,6 +268,7 @@ function CafeteriaContent({
 
   const sourceLabel = '餐廳資料';
   const online = typeof navigator === 'undefined' ? true : navigator.onLine;
+  const reviewNotices = cafeteriaListReviewNotices(cafeterias.map((row) => row.reviewStatus));
   if (loading || failed) {
     return (
       <SiteShell title="餐廳" subtitle="查看校內餐廳與菜單" schoolName={schoolName}>
@@ -297,10 +299,22 @@ function CafeteriaContent({
             <span>資料更新：{formatLastUpdated(lastUpdatedAt)}</span>
           </div>
         </div>
-        <p className={styles.notice}>
-          {ONLINE_ORDERING_OFF_TEXT}。依店家提供的資料顯示；實際營業與餐點供應請向店家確認。一般帳號即可看店面與菜單。
-          {CAFETERIA_PAYMENT_DISCLAIMER}
-        </p>
+        <div className={styles.notices}>
+          {reviewNotices.map((notice) => (
+            <p
+              key={notice}
+              role="status"
+              className={styles.reviewNotice}
+              data-testid="cafeteria-review-notice"
+            >
+              {notice}
+            </p>
+          ))}
+          <p className={styles.notice}>
+            {ONLINE_ORDERING_OFF_TEXT}。依店家提供的資料顯示；實際營業與餐點供應請向店家確認。一般帳號即可看店面與菜單。
+            {CAFETERIA_PAYMENT_DISCLAIMER}
+          </p>
+        </div>
 
         <section className={styles.toolbar} aria-label="尋找餐點">
           <label className={styles.search}>

@@ -28,8 +28,24 @@
   text-underline-offset: 4px;
 }
 
-.notice {
+.notices {
+  display: grid;
+  gap: 12px;
   margin: 16px 0 28px;
+}
+
+.reviewNotice {
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  line-height: 1.7;
+}
+
+.notice {
+  margin: 0;
   color: var(--muted);
   font-size: var(--font-body-sm-size);
   line-height: 1.8;
