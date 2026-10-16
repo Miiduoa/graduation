@@ -58,7 +58,7 @@ export function createTeacherLiveSessionStarter(ports: {
       const response = (await ports.send({
         groupId: scope.groupId,
         requestId,
-        qrExpiryMinutes: 5,
+        qrExpiryMinutes: 10,
       })) as StartResponse | null;
 
       if (!stillCurrent(scope)) return { status: 'stale' };
