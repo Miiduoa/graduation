@@ -32,6 +32,7 @@ import {
 } from '@campus/shared/src/cafeteriaCatalog';
 import { MY_ORDER_STATUS_LABELS as statuses } from './MyOrdersScreen';
 import { safeNavigate } from '../utils/safeNavigate';
+import { isAppOnlineOrderingEnabled, ONLINE_ORDERING_OFF_TEXT } from '../features/onlineOrdering';
 
 type Props = {
   navigation?: { goBack?: () => void; navigate?: (route: string) => void };
@@ -184,13 +185,21 @@ function DiningContent({
       onBack={() => navigation?.goBack?.()}
     >
       <AICard title="平台點餐與取餐">
-        <Text style={{ color: aiTokens.textSecondary, lineHeight: 24 }}>
-          使用 Google 帳號選餐、查看訂單與出示取餐憑證。學校原有餐廳服務仍保留在下方。
-        </Text>
-        <AIButton
-          label="前往平台點餐"
-          onPress={() => safeNavigate(navigation, 'NuniWorkspace', { tab: 'food' })}
-        />
+        {isAppOnlineOrderingEnabled() ? (
+          <>
+            <Text style={{ color: aiTokens.textSecondary, lineHeight: 24 }}>
+              使用 Google 帳號選餐、查看訂單與出示取餐憑證。學校原有餐廳服務仍保留在下方。
+            </Text>
+            <AIButton
+              label="前往平台點餐"
+              onPress={() => safeNavigate(navigation, 'NuniWorkspace', { tab: 'food' })}
+            />
+          </>
+        ) : (
+          <Text style={{ color: aiTokens.textSecondary, lineHeight: 24 }}>
+            {ONLINE_ORDERING_OFF_TEXT}
+          </Text>
+        )}
       </AICard>
       {scope.userId && navigation?.navigate ? (
             <View style={{ alignItems: 'flex-start' }}>

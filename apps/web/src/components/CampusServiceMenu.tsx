@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useEffect, useRef } from 'react';
-import { CAMPUS_SERVICES, SERVICE_CATEGORIES } from '@/lib/campusServices';
+import { CAMPUS_SERVICES, presentCampusService, SERVICE_CATEGORIES } from '@/lib/campusServices';
+import { isWebOnlineOrderingEnabled, ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
 import styles from '@/app/home.module.css';
 import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
 
@@ -63,19 +64,26 @@ export function CampusServiceMenu() {
           <section key={category.id} className={styles.menuGroup} aria-label={category.label}>
             <h2>{category.label}</h2>
             {CAMPUS_SERVICES.filter((service) => service.category === category.id).map(
-              (service) => (
-                <Link
-                  href={href(service.href)}
-                  key={service.href}
-                  aria-current={currentService === service.href ? 'page' : undefined}
-                  onClick={() => {
-                    if (menu.current) menu.current.open = false;
-                  }}
-                >
-                  {service.name}
-                  <span aria-hidden="true">→</span>
-                </Link>
-              ),
+              (service) => {
+                const shown = presentCampusService(service);
+                return (
+                  <div key={shown.href}>
+                    <Link
+                      href={href(shown.href)}
+                      aria-current={currentService === shown.href ? 'page' : undefined}
+                      onClick={() => {
+                        if (menu.current) menu.current.open = false;
+                      }}
+                    >
+                      {shown.name}
+                      <span aria-hidden="true">→</span>
+                    </Link>
+                    {shown.href === '/food' && !isWebOnlineOrderingEnabled() ? (
+                      <p>{ONLINE_ORDERING_OFF_TEXT}</p>
+                    ) : null}
+                  </div>
+                );
+              },
             )}
           </section>
         ))}
