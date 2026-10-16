@@ -19,6 +19,7 @@ import {
   loadAttendanceRecords,
   loadCourseAttendance,
   startCourseAttendance,
+  studentAttendanceHeading,
   studentCheckInSession,
   watchCourseMembership,
   type AttendanceRecord,
@@ -37,6 +38,7 @@ function date(value: string | null) {
 function Session({
   session,
   courseId,
+  courseName,
   uid,
   canReadRoster,
   canStart,
@@ -45,6 +47,7 @@ function Session({
 }: {
   session: AttendanceSession;
   courseId: string;
+  courseName: string;
   uid: string;
   canReadRoster: boolean;
   canStart: boolean;
@@ -115,7 +118,7 @@ function Session({
     <article className={styles.session}>
       <div className={styles.sessionHeading}>
         <div>
-          <p className={styles.label}>{session.active ? '點名進行中' : '點名已結束'}</p>
+          <p className={styles.label}>{studentAttendanceHeading(courseName, session.active)}</p>
           <h3>{date(session.startedAt)}</h3>
         </div>
         {canReadRoster && (
@@ -421,6 +424,7 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
                 key={`${session.id}:${data.canStart}:${data.canReadRoster}`}
                 session={session}
                 courseId={courseId}
+                courseName={data.courseName}
                 uid={uid}
                 canStart={data.canStart}
                 canReadRoster={data.canReadRoster}
