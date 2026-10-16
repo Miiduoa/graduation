@@ -284,6 +284,54 @@ describe('personal import parsing preserves evidence', () => {
     ).toContainEqual(expect.objectContaining({ code: 'invalid-period' }));
   });
 
+  it('maps NCKU official labels 0, N and A into grid slots without using PU times', () => {
+    const ncku = { ...timetable, schoolId: 'ncku', periodProfile: 'ncku' as const };
+    const labeled = parsePersonalImport(
+      '課程名稱,星期,節次\n微積分,星期二,1-2\n通識,星期三,0\n實驗,星期四,N-5\n專題,星期五,A-B',
+      ncku,
+    );
+    expect(errors(labeled.issues)).toEqual([]);
+    expect(labeled.rows[0]).toMatchObject({ schoolId: 'ncku', startPeriod: 2, endPeriod: 3 });
+    expect(labeled.rows[1]).toMatchObject({ startPeriod: 1, endPeriod: 1 });
+    expect(labeled.rows[2]).toMatchObject({ startPeriod: 6, endPeriod: 7 });
+    expect(labeled.rows[3]).toMatchObject({ startPeriod: 12, endPeriod: 13 });
+    const clock = parsePersonalImport(
+      '課程名稱,星期,開始時間,結束時間\n微積分,星期二,08:00,09:50',
+      ncku,
+    );
+    expect(clock.rows[0]).toMatchObject({ startPeriod: 2, endPeriod: 3 });
+    const puClock = parsePersonalImport(
+      '課程名稱,星期,開始時間,結束時間\n微積分,星期二,08:10,10:00',
+      ncku,
+    );
+    expect(puClock.rows[0].startPeriod).toBeUndefined();
+    expect(errors(puClock.issues)).toContainEqual(expect.objectContaining({ code: 'invalid-period' }));
+  });
+
+  it('maps NTPU evening periods 10–13 to 18:30 and keeps them out of other schools', () => {
+    const ntpu = { ...timetable, schoolId: 'ntpu', periodProfile: 'ntpu' as const };
+    const parsed = parsePersonalImport(
+      '課程名稱,星期,節次\n進階會計,星期一,10-13',
+      ntpu,
+    );
+    expect(errors(parsed.issues)).toEqual([]);
+    expect(parsed.rows[0]).toMatchObject({
+      schoolId: 'ntpu',
+      startPeriod: 10,
+      endPeriod: 13,
+    });
+    const clock = parsePersonalImport(
+      '課程名稱,星期,開始時間,結束時間\n進階會計,星期一,18:30,22:10',
+      ntpu,
+    );
+    expect(clock.rows[0]).toMatchObject({ startPeriod: 10, endPeriod: 13 });
+    expect(parsePersonalImport('課程名稱,星期,節次\n進階會計,星期一,10-13', timetable).rows[0]).toMatchObject({
+      schoolId: 'pu',
+      startPeriod: 10,
+      endPeriod: 13,
+    });
+  });
+
   it('requires complete valid event dates and times instead of inventing a year or end time', () => {
     const parsed = parsePersonalImport(
       '活動名稱,日期,開始時間,結束時間\n迎新,10/20,18:00,\n說明會,2026-02-30,18:00,20:00',
