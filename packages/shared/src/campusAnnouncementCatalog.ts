@@ -95,8 +95,21 @@ const ANNOUNCEMENT_CATALOG_LINKS: Record<string, readonly AnnouncementCatalogLin
     { sourceId: 'ncue-aca', office: '教務處', listUrl: 'https://acadoff.ncue.edu.tw/' },
   ],
   ntpu: [
-    { sourceId: 'ntpu-campus', office: '全校最新消息', listUrl: 'https://new.ntpu.edu.tw/news' },
-    { sourceId: 'ntpu-aca', office: '教務處', listUrl: 'https://www.aa.ntpu.edu.tw/' },
+    {
+      sourceId: 'ntpu-campus',
+      office: '電子公文一般公告（含教務處）',
+      listUrl: 'https://fms.ntpu.edu.tw/km/24662',
+    },
+    {
+      sourceId: 'ntpu-oga',
+      office: '總務處',
+      listUrl: 'https://oga.ntpu.edu.tw/p/403-1008-39-1.php',
+    },
+    {
+      sourceId: 'ntpu-su',
+      office: '學生會',
+      listUrl: 'https://ntpusu.ntpu.edu.tw/p/403-1015-39-1.php',
+    },
   ],
   tmu: [
     { sourceId: 'tmu-campus', office: '全校最新消息', listUrl: 'https://www.tmu.edu.tw/news' },

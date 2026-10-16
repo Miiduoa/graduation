@@ -169,9 +169,26 @@ const SCHOOLS = [
     academic: { url: 'https://acadoff.ncue.edu.tw/' },
   }),
   school('ntpu', '國立臺北大學', {
-    cms: 'html',
-    campus: { url: 'https://new.ntpu.edu.tw/news', extra: { fragile: 'spa' } },
-    academic: { url: 'https://www.aa.ntpu.edu.tw/' },
+    cms: 'iweb',
+    campus: {
+      office: '電子公文一般公告（含教務處）',
+      url: 'https://fms.ntpu.edu.tw/km/24662',
+      cms: 'iweb',
+    },
+    offices: [
+      {
+        sourceId: 'ntpu-oga',
+        office: '總務處',
+        url: 'https://oga.ntpu.edu.tw/p/403-1008-39-1.php',
+        cms: 'iweb',
+      },
+      {
+        sourceId: 'ntpu-su',
+        office: '學生會',
+        url: 'https://ntpusu.ntpu.edu.tw/p/403-1015-39-1.php',
+        cms: 'iweb',
+      },
+    ],
   }),
   school('tmu', '臺北醫學大學', {
     cms: 'html',
@@ -296,7 +313,8 @@ function coverageRows() {
       note = '全校、教務處、學務處公開列表已接 iWeb；寫入仍要列進 CAMPUS_ANNOUNCEMENT_SYNC_SCHOOLS';
     }
     if (entry.schoolId === 'ntpu') {
-      note = '校網最新消息是前端頁，抽出 0 筆時記 parse_empty；寫入仍要列進 CAMPUS_ANNOUNCEMENT_SYNC_SCHOOLS';
+      note =
+        '全校電子公文一般公告、總務處活動消息、學生會公開列表已接上；教務處獨立網站 www.aa.ntpu.edu.tw 目前連不上，教務處公文在全校列表。寫入仍要列進 CAMPUS_ANNOUNCEMENT_SYNC_SCHOOLS';
     }
     if (entry.demo && sources.length === 0) {
       status = 'unavailable';

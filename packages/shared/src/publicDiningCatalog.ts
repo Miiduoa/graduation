@@ -19,7 +19,7 @@ const NCKU_HOUSING_SOURCE = {
 };
 
 const NCKU_HOURS_SOURCE = {
-  label: '國立成功大學學生宿舍餐廳顧客資訊網',
+  label: '國立成功大學學生宿舍餐廳顧客資訊網（營業時間頁無現行時段可摘；107–108 學年試算表過舊）',
   url: 'https://sites.google.com/view/ncku-cafeteria',
 };
 
