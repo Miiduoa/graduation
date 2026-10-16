@@ -31,6 +31,13 @@ class PrepareTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             prepare.patch_app(result)
 
+    def test_overlay_routes_keep_online_ordering_write_switch(self):
+        source = (ROOT / 'deploy/nuni-api/public-cafeterias/routes.ts').read_text()
+        self.assertIn('ONLINE_ORDERING_ENABLED', source)
+        self.assertIn('ONLINE_ORDERING_DISABLED', source)
+        self.assertIn('isOrderingWrite', source)
+        self.assertIn("process.env.ONLINE_ORDERING_ENABLED === 'true'", source)
+
     def test_candidate_copies_only_reviewed_sources(self):
         paths = prepare.extension_files()
         self.assertEqual(len(paths), 4)
