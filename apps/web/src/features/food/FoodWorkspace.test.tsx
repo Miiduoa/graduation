@@ -60,6 +60,7 @@ async function respond(path: string, _context: string, input?: Record<string, un
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'true');
   mocks.auth.session = { platformAccountId: 'account-a', context: 'context-a' };
   mocks.auth.error = '';
   mocks.auth.loading = false;
@@ -220,6 +221,17 @@ it('rereads a rejected quote and keeps editable cart contents without offering s
   await waitFor(() => expect(button('計算金額與確認庫存').disabled).toBe(false));
   expect((screen.getByLabelText('蔬菜便當 數量') as HTMLInputElement).value).toBe('1');
   expect(screen.queryByRole('button', { name: '確認送出訂單' })).toBeNull();
+});
+
+it('keeps placed orders visible and does not invite a new order while online ordering is off', async () => {
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'false');
+  render(<FoodWorkspace initialTenant="campus-one" initialOrder="order-1" />);
+  expect(screen.getByText('目前還不能線上點餐')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '我要點餐' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '查看菜單：米飯店' })).toBeNull();
+  expect(screen.queryByText('先看菜單與金額，確認後才送出訂單。')).toBeNull();
+  await screen.findByText('米飯店 · 待付款');
+  expect(screen.getByRole('link', { name: '原有餐廳訂單' }).getAttribute('href')).toBe('/orders');
 });
 
 it('does not read private food data without a platform session', () => {

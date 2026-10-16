@@ -49,7 +49,12 @@ it('sends the student to the shop site and does not pretend Nuni took the order'
       </Suspense>,
     );
   });
-  expect(await screen.findByText(/訂單在店家系統/)).toBeTruthy();
+  expect(
+    await screen.findByText(
+      '訂單在店家系統，請到店家查看。我們沒有這筆的訂單號碼、餐點明細或付款狀態。',
+    ),
+  ).toBeTruthy();
+  expect(screen.queryByText(/Nuni 不會產生取餐號碼/)).toBeNull();
   const link = await screen.findByRole('link', { name: '到店家網站訂餐' });
   expect(link.getAttribute('href')).toContain('utm_source=nuni');
   expect(link.getAttribute('href')).toContain('ref=nuni-pu-stall');
