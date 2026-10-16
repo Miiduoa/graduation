@@ -219,6 +219,8 @@ it('shows a student only one check-in box when two sessions of the same course a
   expect(screen.getAllByRole('button', { name: '確認簽到' })).toHaveLength(1);
   expect(screen.getByLabelText('教師提供的簽到碼').id).toBe('code-session-b');
   expect(document.getElementById('code-session-c')).toBeNull();
+  expect(screen.getByText('資料結構 · 點名進行中')).toBeTruthy();
+  expect(screen.getByText('資料結構 · 點名已結束')).toBeTruthy();
 });
 
 it('keeps the teacher route and school context when returning to the course or signing in', () => {

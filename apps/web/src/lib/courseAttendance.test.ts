@@ -7,6 +7,7 @@ import {
   joinCourseAttendance,
   loadCourseAttendance,
   startCourseAttendance,
+  studentAttendanceHeading,
   studentCheckInSession,
   type AttendanceSession,
 } from './courseAttendance';
@@ -91,6 +92,11 @@ it('lets a student check into only the latest open session of this course', () =
   expect(studentCheckInSession(sessions.filter((row) => !row.active))).toBeNull();
   expect(hasOwnActiveAttendance(sessions, 'teacher')).toBe(true);
   expect(hasOwnActiveAttendance(sessions, 'other-teacher')).toBe(false);
+  expect(studentAttendanceHeading('微積分', true)).toBe('微積分 · 點名進行中');
+  expect(studentAttendanceHeading('程式設計', true)).toBe('程式設計 · 點名進行中');
+  expect(studentAttendanceHeading('微積分', true)).not.toBe(
+    studentAttendanceHeading('程式設計', true),
+  );
 });
 
 it('escapes commas, quotes and spreadsheet formula prefixes in exports', () => {

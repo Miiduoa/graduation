@@ -13,6 +13,8 @@ import {
   FIRESTORE_UNAVAILABLE_WITH_CACHE_TEXT,
   SOURCE_DOWN_EMPTY_TEXT,
   SOURCE_DOWN_WITH_CACHE_TEXT,
+  ANNOUNCEMENT_EMPTY_SCHOOL_TEXT,
+  announcementEmptyHeading,
   SOURCE_NOT_CONNECTED_TEXT,
   staleAnnouncementUpdatedAt,
 } from '@campus/shared/src/campusAnnouncements';
@@ -57,7 +59,8 @@ it('formats the stale banner in Taiwan time and keeps the empty-state copy', () 
   expect(formatStaleAnnouncementNotice(null)).toBe('學校網站暫時連不上');
   expect(SOURCE_DOWN_WITH_CACHE_TEXT).toBe('學校網站暫時連不上');
   expect(SOURCE_DOWN_EMPTY_TEXT).toBe('學校網站暫時連不上，可以先到學校網站看最新消息');
-  expect(SOURCE_NOT_CONNECTED_TEXT).toBe('這裡還沒接上學校公告，請先到學校網站看最新消息');
+  expect(ANNOUNCEMENT_EMPTY_SCHOOL_TEXT).toBe('這間學校的公告還沒上架。');
+  expect(SOURCE_NOT_CONNECTED_TEXT).toBe(ANNOUNCEMENT_EMPTY_SCHOOL_TEXT);
   expect(
     formatStaleAnnouncementNotice(
       staleAnnouncementUpdatedAt(
@@ -96,6 +99,31 @@ it('classifies empty feeds as never connected, source down, or confirmed empty',
     announcementEmptyKind([], [{ status: 'healthy', lastSuccessAt: '2026-10-12T10:05:00.000Z' }]),
   ).toBe('empty');
   expect(announcementEmptyKind([{ title: '舊稿' }], [{ status: 'unavailable' }])).toBe('has_items');
+  expect(announcementEmptyHeading('not_connected')).toBe(ANNOUNCEMENT_EMPTY_SCHOOL_TEXT);
+  expect(announcementEmptyHeading('empty')).toBe(ANNOUNCEMENT_EMPTY_SCHOOL_TEXT);
+  expect(announcementEmptyHeading('source_down')).toBe(SOURCE_DOWN_EMPTY_TEXT);
+  expect(announcementEmptyHeading('has_items')).toBeNull();
+});
+
+it('exposes official NCKU and NTPU announcement pages already connected in the catalog', () => {
+  expect(listAnnouncementCatalogLinks('ncku')).toEqual(
+    expect.arrayContaining([
+      {
+        sourceId: 'ncku-campus',
+        office: '全校最新消息',
+        listUrl: 'https://web.ncku.edu.tw/p/403-1000-14-1.php',
+      },
+    ]),
+  );
+  expect(listAnnouncementCatalogLinks('ntpu')).toEqual(
+    expect.arrayContaining([
+      {
+        sourceId: 'ntpu-campus',
+        office: '電子公文一般公告（含教務處）',
+        listUrl: 'https://fms.ntpu.edu.tw/km/24662',
+      },
+    ]),
+  );
 });
 
 it('exposes catalog office urls for a school that has never been fetched', () => {

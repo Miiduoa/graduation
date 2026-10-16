@@ -49,6 +49,10 @@ export function studentCheckInSession(sessions: AttendanceSession[]): Attendance
     String(right.startedAt ?? '').localeCompare(String(left.startedAt ?? '')),
   )[0];
 }
+export function studentAttendanceHeading(courseName: string, active: boolean): string {
+  const name = courseName.trim() || '課程';
+  return active ? `${name} · 點名進行中` : `${name} · 點名已結束`;
+}
 export function hasOwnActiveAttendance(sessions: AttendanceSession[], uid: string): boolean {
   return sessions.some((session) => session.active && session.teacherId === uid);
 }
