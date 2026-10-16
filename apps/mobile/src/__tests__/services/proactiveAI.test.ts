@@ -6,9 +6,13 @@ jest.mock('../../firebase', () => ({
 
 import { buildProactiveAIReports } from '../../services/proactiveAI';
 
+function clock(date: Date) {
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
 describe('proactive AI reports', () => {
   const now = new Date('2026-04-30T08:10:00+08:00');
-  const today = now.getDay();
+  const classStart = new Date(now.getTime() + 30 * 60_000);
 
   it("creates a class-soon report from the user's real course schedule", () => {
     const reports = buildProactiveAIReports(
@@ -22,7 +26,12 @@ describe('proactive AI reports', () => {
             credits: 3,
             semester: '2026-2',
             schedule: [
-              { dayOfWeek: today, startTime: '08:40', endTime: '10:00', location: 'DB201' },
+              {
+                dayOfWeek: now.getDay(),
+                startTime: clock(classStart),
+                endTime: clock(new Date(classStart.getTime() + 80 * 60_000)),
+                location: 'DB201',
+              },
             ],
           },
         ],
