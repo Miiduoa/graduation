@@ -90,6 +90,37 @@ test('iWeb links ignore homepage shortcut tiles that reuse mtitle markup', () =>
   expect(parseIwebLinks(html, 'https://osa.pu.edu.tw/')).toEqual([]);
 });
 
+test('NTPU FMS public bulletin table extracts numbered media links', () => {
+  const html = `
+<table>
+<tr><th>Name</th><th>Upload Date</th></tr>
+<tr><td><a href="/media/32913">115/10/15-人事室-教師聘任暨升等評審辦法修正公告</a></td><td>2026-10-15</td></tr>
+<tr><td><a href="/media/32801">115/07/22-教務處-公告學生實習辦法修正</a></td><td>2026-07-22</td></tr>
+</table>`;
+  const extracted = parseIwebTable(html, 'https://fms.ntpu.edu.tw/km/24662');
+  expect(extracted).toHaveLength(2);
+  expect(extracted[0]).toMatchObject({
+    title: '115/10/15-人事室-教師聘任暨升等評審辦法修正公告',
+    originalUrl: 'https://fms.ntpu.edu.tw/media/32913',
+  });
+  expect(extracted[1].title).toContain('教務處');
+});
+
+test('NTPU student union iWeb news list extracts article links', () => {
+  const html = `
+<div id="pageptlist">
+  <div class="mtitle"><a href="/p/406-1015-1969,r39.php">學生自治展新頁，北大學生會聯合辦公空間啟用</a></div>
+  <div class="mdate">2026-03-01</div>
+  <div class="mtitle"><a href="/p/406-1015-1573,r39.php">北聯大系統交流—與北科學生會自治交流</a></div>
+  <div class="mdate">2025-11-20</div>
+</div>`;
+  const extracted = parseIwebLinks(html, 'https://ntpusu.ntpu.edu.tw/p/403-1015-39-1.php');
+  expect(extracted.map((row) => row.title)).toEqual([
+    '學生自治展新頁，北大學生會聯合辦公空間啟用',
+    '北聯大系統交流—與北科學生會自治交流',
+  ]);
+});
+
 test('iWeb table keeps dated PDF notices and drops section index links', () => {
   const html = `
 <table class="listTB">

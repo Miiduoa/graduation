@@ -118,7 +118,20 @@ test('NCKU and NTPU keep school-scoped public lists and do not share sources', (
     'https://acad.ncku.edu.tw/p/403-1025-397-1.php',
   );
   expect(ntpu.every((item) => item.schoolId === 'ntpu')).toBe(true);
-  expect(ntpu.find((item) => item.sourceId === 'ntpu-campus').fragile).toBe('spa');
+  expect(ntpu.map((item) => item.office)).toEqual([
+    '電子公文一般公告（含教務處）',
+    '總務處',
+    '學生會',
+  ]);
+  expect(ntpu.map((item) => item.parsers)).toEqual([
+    PARSER_PRESETS.iweb,
+    PARSER_PRESETS.iweb,
+    PARSER_PRESETS.iweb,
+  ]);
+  expect(ntpu.find((item) => item.sourceId === 'ntpu-campus').listUrl).toBe(
+    'https://fms.ntpu.edu.tw/km/24662',
+  );
+  expect(ntpu.every((item) => item.fragile !== 'spa')).toBe(true);
   expect(ntpu.map((item) => item.listUrl).some((url) => url.includes('ncku.edu.tw'))).toBe(false);
   expect(ncku.map((item) => item.listUrl).some((url) => url.includes('ntpu.edu.tw'))).toBe(false);
 });

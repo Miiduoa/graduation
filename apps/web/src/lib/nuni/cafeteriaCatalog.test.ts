@@ -85,6 +85,18 @@ it('does not leak NTPU dining into another school empty catalog', async () => {
   expect(JSON.stringify(body)).not.toContain('優米自助餐');
 });
 
+it('does not let an NCKU dining request fall back to NTPU shops or the other way around', async () => {
+  fetcher.mockResolvedValue(json({ schoolId: 'ignored', cafeterias: [], menus: [] }));
+  const ncku = await handleCafeteriaCatalog(request('/api/cafeterias?schoolId=ncku'));
+  const ntpu = await handleCafeteriaCatalog(request('/api/cafeterias?schoolId=ntpu'));
+  const nckuBody = await ncku.json();
+  const ntpuBody = await ntpu.json();
+  expect(nckuBody.cafeterias.every((row: { schoolId: string }) => row.schoolId === 'ncku')).toBe(true);
+  expect(ntpuBody.cafeterias.every((row: { schoolId: string }) => row.schoolId === 'ntpu')).toBe(true);
+  expect(JSON.stringify(nckuBody)).not.toContain('優米自助餐');
+  expect(JSON.stringify(ntpuBody)).not.toContain('光復餐廳');
+});
+
 it('reads the public school catalog when nobody is signed in', async () => {
   fetcher.mockResolvedValueOnce(json({ schoolId: 'cgu', cafeterias: [], menus: [] }));
   const response = await handleCafeteriaCatalog(request('/api/cafeterias?schoolId=cgu'));
