@@ -48,6 +48,25 @@ test('append is durable, duplicate-safe, and isolated by account and school', as
   expect((await loadPersonalImports({ ...scope, schoolId: 'ntu' })).records).toHaveLength(0);
 });
 
+test('NCKU and NTPU accounts do not see each other’s timetable imports', async () => {
+  const ncku = { owner: 'nuni:chengda', schoolId: 'ncku' };
+  const ntpu = { owner: 'nuni:beida', schoolId: 'ntpu' };
+  await appendPersonalImports(ncku, [
+    { ...row('ncku-1', '微積分'), schoolId: 'ncku', startPeriod: 1, endPeriod: 1 },
+  ]);
+  await appendPersonalImports(ntpu, [
+    { ...row('ntpu-1', '進階會計'), schoolId: 'ntpu', startPeriod: 10, endPeriod: 13 },
+  ]);
+  expect((await loadPersonalImports(ncku)).records.map((item) => item.title)).toEqual(['微積分']);
+  expect((await loadPersonalImports(ntpu)).records.map((item) => item.title)).toEqual(['進階會計']);
+  expect((await loadPersonalImports({ owner: ncku.owner, schoolId: 'ntpu' })).records).toHaveLength(
+    0,
+  );
+  expect((await loadPersonalImports({ owner: ntpu.owner, schoolId: 'ncku' })).records).toHaveLength(
+    0,
+  );
+});
+
 test('simultaneous saves serialize and do not lose either record', async () => {
   await Promise.all([
     appendPersonalImports(scope, [row('a')]),
