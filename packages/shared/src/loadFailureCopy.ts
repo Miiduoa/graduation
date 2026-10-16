@@ -1,5 +1,6 @@
 export const NETWORK_RETRY_TEXT = '請確認網路後再試';
 export const TEMPORARY_UNAVAILABLE_TEXT = '暫時讀不到資料，請稍後再試';
+export const SERVICE_PAUSED_TEXT = '服務暫時停止，我們正在處理，請稍後再來。';
 
 const TIMEOUT_MARKERS = [
   'timeout',
@@ -132,4 +133,18 @@ export function isNetworkUnavailable(
 
 export function loadFailureCopy(error?: unknown, options: LoadFailureCopyOptions = {}): string {
   return isNetworkUnavailable(error, options) ? NETWORK_RETRY_TEXT : TEMPORARY_UNAVAILABLE_TEXT;
+}
+
+export function loadServiceFailureCopy(
+  error?: unknown,
+  options: LoadFailureCopyOptions = {},
+): string {
+  return isNetworkUnavailable(error, options) ? NETWORK_RETRY_TEXT : SERVICE_PAUSED_TEXT;
+}
+
+export function shouldOfferLoadRetry(
+  error?: unknown,
+  options: LoadFailureCopyOptions = {},
+): boolean {
+  return isNetworkUnavailable(error, options);
 }

@@ -134,6 +134,7 @@ test('the primary signed-out entry opens the independent platform workspace', as
 test.each([
   ['campus://campus-one', 'NuniWorkspace', 'platform-workspace'],
   ['campus://sso-login', 'SSOLogin', 'school-login-form'],
+  ['campus://shops', 'SSOLogin', 'school-login-form'],
 ])('a cold %s opens before any school authentication', async (url, route, target) => {
   mockInitialUrl = url;
   const navigation = createNavigationContainerRef();

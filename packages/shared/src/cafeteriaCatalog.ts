@@ -52,6 +52,7 @@ export const CAFETERIA_EMPTY_SCHOOL_TEXT = '這間學校的餐廳還沒上架';
 export const CAFETERIA_NOT_FOUND_TEXT = '找不到這間店。';
 export const CAFETERIA_BACK_TO_LIST_TEXT = '回餐廳列表';
 export const STOREFRONT_PAGE_SUBTITLE = '店家自己的主頁。';
+export const STOREFRONT_EMPTY_MENU_TEXT = '還沒有菜單。';
 export const CAFETERIA_PAYMENT_DISCLAIMER =
   '價格、是否賣完、是否接單以店家訂餐頁為準，付款與退款由店家處理。';
 
@@ -125,6 +126,10 @@ export function cafeteriaReviewNotice(status: unknown): string | null {
   if (parsed === 'demo') return DEMO_CAFETERIA_NOTICE;
   if (parsed === 'unverified') return UNVERIFIED_CAFETERIA_NOTICE;
   return null;
+}
+
+export function cafeteriaShowsMenuAvailability(status: unknown): boolean {
+  return parseCafeteriaReviewStatus(status) === 'verified';
 }
 
 export function parseCafeteriaLocation(
