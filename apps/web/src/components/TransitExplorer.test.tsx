@@ -185,7 +185,11 @@ it('resets the entire transit search when changing campuses', async () => {
     { action: 'search', city: 'Hsinchu', text: '清華大學' }, expect.any(AbortSignal),
   ));
   view.rerender(<TransitExplorer schoolId="ncku" schoolName="國立成功大學" />);
-  expect((screen.getByLabelText('查詢縣市') as HTMLSelectElement).value).toBe('Tainan');
-  expect((screen.getByLabelText('站名或學校名稱') as HTMLInputElement).value).toBe('');
-  expect(screen.queryByText(/站牌代碼 TXG001/)).toBeNull();
+  expect(screen.getByRole('button', { name: '學校站牌' }).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByText(/尋找名稱含「成功大學」的站牌/)).toBeTruthy();
+  expect(screen.queryByLabelText('查詢縣市')).toBeNull();
+  expect(screen.queryByLabelText('站名或學校名稱')).toBeNull();
+  await waitFor(() => expect(queryTransit).toHaveBeenCalledWith(
+    { action: 'campus', schoolId: 'ncku' }, expect.any(AbortSignal),
+  ));
 });
