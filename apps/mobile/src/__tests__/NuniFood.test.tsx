@@ -312,6 +312,13 @@ beforeEach(() => {
   mockRefresh.mockReset().mockResolvedValue(undefined);
 });
 
+test('omits confirm-to-submit copy when online ordering is off', async () => {
+  const view = render(ui());
+  expect(await view.findByText('選擇門市，先看菜單與金額。')).toBeTruthy();
+  expect(view.queryByText('確認後才送出訂單')).toBeNull();
+  expect(view.queryByText('選擇門市、確認金額後送出，到店付款。取餐前可隨時查看進度。')).toBeNull();
+});
+
 test('student selects required options, reviews whole TWD quote and explicitly places an onsite order', async () => {
   const view = render(ui());
   await fillQuote(view);

@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   NavigationContainer,
   DefaultTheme,
+  getStateFromPath,
   type LinkingOptions,
 } from '@react-navigation/native';
 import { createBottomTabNavigator, BottomTabBarProps } from '@react-navigation/bottom-tabs';
@@ -90,6 +91,7 @@ import type { InboxTask } from './src/data/types';
 import { navigateToCourseScreen } from './src/utils/courseNavigation';
 import { initCrossModuleConnections } from './src/services/crossModuleConnector';
 import { registerCompanionCampusBusBridge } from './src/services/companionBusBridge';
+import { rewriteLegacyShopsPath } from './src/app/legacyShopsPath';
 
 /**
  * 學生四個入口：今天｜課務｜生活｜我
@@ -221,6 +223,7 @@ const linkingBase: LinkingOptions<RootTabParamList> = {
       },
     },
   },
+  getStateFromPath: (path, options) => getStateFromPath(rewriteLegacyShopsPath(path), options),
 };
 
 const { usingFirebase: USING_FIREBASE } = initializeRuntimeDataSource();

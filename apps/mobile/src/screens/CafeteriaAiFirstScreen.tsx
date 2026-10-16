@@ -21,7 +21,7 @@ import {
   type DiningMenu,
   type DiningReceipt,
 } from '../features/dining';
-import { loadFailureCopy } from '../utils/loadFailureCopy';
+import { NETWORK_RETRY_TEXT, loadServiceFailureCopy } from '../utils/loadFailureCopy';
 import {
   describePickupNumber,
   formatShortOrderCode,
@@ -96,7 +96,7 @@ function DiningContent({
     } catch (reason) {
       if (isCurrent() && request === generation.current)
         setError(
-          reason instanceof DiningError ? reason.message : loadFailureCopy(reason),
+          reason instanceof DiningError ? reason.message : loadServiceFailureCopy(reason),
         );
     } finally {
       if (isCurrent() && request === generation.current) setLoading(false);
@@ -319,7 +319,9 @@ function DiningContent({
                   <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>
                     {error}
                   </Text>
-                  <AIButton label="重新整理" variant="ghost" onPress={() => void load()} />
+                  {error === NETWORK_RETRY_TEXT ? (
+                    <AIButton label="重新整理" variant="ghost" onPress={() => void load()} />
+                  ) : null}
                 </View>
               ) : null}
             </View>
