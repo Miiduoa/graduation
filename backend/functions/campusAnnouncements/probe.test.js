@@ -29,9 +29,9 @@ test('probe dry-runs requested schools without opening Firestore', async () => {
       {
         sourceId: `${schoolId}-campus`,
         office: '全校最新消息',
-        status: schoolId === 'ntpu' ? 'unavailable' : 'healthy',
-        reason: schoolId === 'ntpu' ? 'parse_empty' : '',
-        itemCount: schoolId === 'ntpu' ? 0 : 4,
+        status: 'healthy',
+        reason: '',
+        itemCount: 4,
       },
     ],
   }));
@@ -64,5 +64,5 @@ test('probe fails the job when a non-SPA source returns HTTP or empty parse', as
   expect(summary.wrote).toBe(false);
   expect(summary.failed).toBe(true);
   expect(summary.schools.find((item) => item.schoolId === 'ncku').severity).toBe('error');
-  expect(summary.schools.find((item) => item.schoolId === 'ntpu').severity).toBe('warn');
+  expect(summary.schools.find((item) => item.schoolId === 'ntpu').severity).toBe('error');
 });

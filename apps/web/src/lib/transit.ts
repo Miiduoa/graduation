@@ -27,9 +27,39 @@ export type TransitResult =
 export const TRANSIT_FRESHNESS_MS = 90_000;
 export const CAMPUS_TRANSIT: Record<string, { city: TransitCity; stopName: string }> = {
   pu: { city: 'Taichung', stopName: '靜宜大學' },
-  ncku: { city: 'Tainan', stopName: '成功大學' },
-  ntpu: { city: 'NewTaipei', stopName: '國立臺北大學' },
+  ncku: { city: 'Tainan', stopName: '成大' },
+  ntpu: { city: 'NewTaipei', stopName: '臺北大學' },
 };
+
+/** TDX 公開站名與路線代碼，供校園搜尋 contains(StopName/Zh_tw) 對過後再寫進 CAMPUS_TRANSIT.stopName。 */
+export const CAMPUS_TRANSIT_PUBLIC = {
+  ncku: {
+    city: 'Tainan' as TransitCity,
+    stopName: '成大',
+    stops: ['成大自強校區', '成大光復校區', '成大醫院(勝利路)', '成大醫院(小東路)'] as const,
+    routes: [
+      { name: '0左', routeUID: 'TNN10450' },
+      { name: '0右', routeUID: 'TNN10451' },
+      { name: '77', routeUID: 'TNN1077' },
+    ] as const,
+    sources: [
+      { label: '交通部TDX｜0左', url: 'https://taiwanhelper.com/bus/TNN/TNN10450' },
+      { label: '交通部TDX｜0右', url: 'https://taiwanhelper.com/bus/TNN/TNN10451' },
+      { label: '交通部TDX｜77', url: 'https://taiwanhelper.com/bus/TNN/TNN1077' },
+      { label: '大臺南公車｜0左站牌代碼 0465', url: 'https://busmap.tainan.gov.tw/ebus/pathInfo.jsp?pathId=10450' },
+    ] as const,
+  },
+  ntpu: {
+    city: 'NewTaipei' as TransitCity,
+    stopName: '臺北大學',
+    stops: ['臺北大學正門', '臺北大學宿舍', '捷運臺北大學站(復興大勇路口)'] as const,
+    routes: [{ name: '851', routeUID: 'NWT16665', routeId: '0400085100' }] as const,
+    sources: [
+      { label: '交通部TDX｜851', url: 'https://taiwanhelper.com/bus/NWT/NWT16665' },
+      { label: '大臺北公車｜851', url: 'https://ebus.gov.taipei/Route/StopsOfRoute?routeid=0400085100' },
+    ] as const,
+  },
+} as const;
 
 /**
  * Initial search city for a university's primary campus, not a claim that

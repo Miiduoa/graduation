@@ -186,7 +186,7 @@ it('resets the entire transit search when changing campuses', async () => {
   ));
   view.rerender(<TransitExplorer schoolId="ncku" schoolName="國立成功大學" />);
   expect(screen.getByRole('button', { name: '學校站牌' }).getAttribute('aria-pressed')).toBe('true');
-  expect(screen.getByText(/尋找名稱含「成功大學」的站牌/)).toBeTruthy();
+  expect(screen.getByText(/尋找名稱含「成大」的站牌/)).toBeTruthy();
   expect(screen.queryByLabelText('查詢縣市')).toBeNull();
   expect(screen.queryByLabelText('站名或學校名稱')).toBeNull();
   await waitFor(() => expect(queryTransit).toHaveBeenCalledWith(
