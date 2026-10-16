@@ -1,10 +1,11 @@
-# 晉瑋已核准：每小時第 17 分（UTC）同步 pu 公告；只寫 schools/{schoolId}/announcements 與 announcement-sources。
+# 晉瑋已核准：每天兩次同步 pu 公告（台北 07:00、11:30）；只寫 schools/{schoolId}/announcements 與 announcement-sources。
 # 要停：拿掉 schedule，或刪掉 production 環境的 CAMPUS_ANNOUNCEMENT_SYNC_ENABLED。
 name: Campus announcement sync
 
 on:
   schedule:
-    - cron: '17 * * * *'
+    - cron: '0 23 * * *' # 07:00 Taipei，早上第一堂前
+    - cron: '30 3 * * *' # 11:30 Taipei，中午尖峰前
   workflow_dispatch:
     inputs:
       school:
