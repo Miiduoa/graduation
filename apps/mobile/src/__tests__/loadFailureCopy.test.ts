@@ -1,8 +1,11 @@
 import {
   NETWORK_RETRY_TEXT,
+  SERVICE_PAUSED_TEXT,
   TEMPORARY_UNAVAILABLE_TEXT,
   loadFailureCopy,
   loadFailureOrLoginCopy,
+  loadServiceFailureCopy,
+  shouldOfferLoadRetry,
 } from '../utils/loadFailureCopy';
 import { getNetworkStatus } from '../services/offline';
 
@@ -66,6 +69,13 @@ test('uses the temporary copy for timeouts, server errors and unknown failures',
     TEMPORARY_UNAVAILABLE_TEXT,
   );
   expect(loadFailureCopy()).toBe(TEMPORARY_UNAVAILABLE_TEXT);
+});
+
+test('uses the paused-service copy without offering refresh after a backend wake failure', () => {
+  expect(loadServiceFailureCopy(new Error('timed out'))).toBe(SERVICE_PAUSED_TEXT);
+  expect(shouldOfferLoadRetry(new Error('timed out'))).toBe(false);
+  expect(loadServiceFailureCopy(new TypeError('Failed to fetch'))).toBe(NETWORK_RETRY_TEXT);
+  expect(shouldOfferLoadRetry(new TypeError('Failed to fetch'))).toBe(true);
 });
 
 test('keeps the original login prompt when permission is denied or the account is missing', () => {

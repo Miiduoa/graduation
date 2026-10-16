@@ -376,11 +376,9 @@ test('a failed menu read shows retry without fabricated restaurants', async () =
   const view = render(<CafeteriaAiFirstScreen />);
   await act(async () => {});
   expect(view.queryByText('今日餐點')).toBeNull();
-  expect(view.getByText('暫時讀不到資料，請稍後再試')).toBeTruthy();
+  expect(view.getByText('服務暫時停止，我們正在處理，請稍後再來。')).toBeTruthy();
   expect(view.queryByText('請確認網路後再試')).toBeNull();
-  fireEvent.press(view.getByText('重新整理'));
-  await act(async () => {});
-  expect(view.getByText('今日餐點')).toBeTruthy();
+  expect(view.queryByText('重新整理')).toBeNull();
 });
 test('lets a guest read restaurants without asking them to sign in first', async () => {
   mockUser = null;
