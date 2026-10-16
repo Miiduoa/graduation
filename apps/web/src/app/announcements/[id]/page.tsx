@@ -7,9 +7,9 @@ import { SiteShell } from '@/components/SiteShell';
 import type { Announcement } from '@/lib/firebase';
 import { loadAnnouncement } from '../publicAnnouncements';
 import {
+  ANNOUNCEMENT_EMPTY_SCHOOL_TEXT,
   formatStaleAnnouncementNotice,
   listAnnouncementCatalogLinks,
-  SOURCE_NOT_CONNECTED_TEXT,
   staleAnnouncementUpdatedAt,
 } from '@campus/shared/src/campusAnnouncements';
 import { isAnnouncementSchoolVisibleToPublic } from '@campus/shared/src/campusAnnouncements';
@@ -112,7 +112,7 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
   if (state.status === 'not_connected') {
     return (
       <section className={styles.status}>
-        <h2>{SOURCE_NOT_CONNECTED_TEXT}</h2>
+        <h2>{ANNOUNCEMENT_EMPTY_SCHOOL_TEXT}</h2>
         <OfficeSourceLinks links={listAnnouncementCatalogLinks(schoolId)} />
       </section>
     );

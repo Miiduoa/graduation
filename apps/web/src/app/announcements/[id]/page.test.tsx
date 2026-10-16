@@ -148,7 +148,7 @@ it.each([
   await mount();
   expect(
     await screen.findByRole('heading', {
-      name: '這裡還沒接上學校公告，請先到學校網站看最新消息',
+      name: '這間學校的公告還沒上架。',
     }),
   ).toBeTruthy();
   expect(screen.getByRole('link', { name: '教務處' }).getAttribute('href')).toBe(
@@ -167,7 +167,7 @@ it('reports a legacy source failure separately from a missing document', async (
   await mount();
   expect(
     await screen.findByRole('heading', {
-      name: '這裡還沒接上學校公告，請先到學校網站看最新消息',
+      name: '這間學校的公告還沒上架。',
     }),
   ).toBeTruthy();
   expect(screen.queryByText('請確認網路')).toBeNull();
@@ -179,7 +179,7 @@ it('rejects inconsistent canonical school metadata', async () => {
   await mount();
   expect(
     await screen.findByRole('heading', {
-      name: '這裡還沒接上學校公告，請先到學校網站看最新消息',
+      name: '這間學校的公告還沒上架。',
     }),
   ).toBeTruthy();
   expect(screen.queryByText('錯校公告')).toBeNull();
@@ -246,7 +246,7 @@ it('keeps the cached announcement when a later Firestore read fails', async () =
   expect(screen.getByText(/最後更新 \d+\/\d+ \d{2}:\d{2}，暫時讀不到新公告/)).toBeTruthy();
   expect(screen.queryByText('學校網站暫時連不上')).toBeNull();
   expect(screen.queryByText('請確認網路')).toBeNull();
-  expect(screen.queryByText('這裡還沒接上學校公告，請先到學校網站看最新消息')).toBeNull();
+  expect(screen.queryByText('這間學校的公告還沒上架。')).toBeNull();
 });
 
 it.each(['', 'staging', 'production'])(

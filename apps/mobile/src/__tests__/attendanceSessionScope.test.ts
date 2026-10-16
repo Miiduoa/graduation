@@ -80,6 +80,22 @@ test('students only see open sessions for their own courses, and only the latest
   expect(filterActiveSessionsForStudent([otherClass], ['course-a'])).toEqual([]);
 });
 
+test('two enrolled courses keep separate labeled sessions when both are live', () => {
+  const calculus = session({ id: 'calc-open', courseId: 'course-a', courseName: '微積分' });
+  const programming = session({
+    id: 'prog-open',
+    courseId: 'course-b',
+    courseName: '程式設計',
+  });
+  const visible = filterActiveSessionsForStudent([calculus, programming], [
+    'course-a',
+    'course-b',
+  ]);
+  expect(visible.map((row) => row.id).sort()).toEqual(['calc-open', 'prog-open']);
+  expect(visible.map((row) => row.courseName).sort()).toEqual(['微積分', '程式設計']);
+  expect(new Set(visible.map((row) => row.id)).size).toBe(2);
+});
+
 test('student lookup ignores another class even when that session is still open', async () => {
   await AsyncStorage.setItem(
     '@attend:sessions',

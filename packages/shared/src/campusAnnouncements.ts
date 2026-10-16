@@ -18,7 +18,8 @@ export const ANNOUNCEMENT_CATEGORIES = [
 ] as const;
 export type PublicAnnouncementCategory = (typeof ANNOUNCEMENT_CATEGORIES)[number];
 export const SOURCE_UNAVAILABLE_TEXT = '暫時抓不到';
-export const SOURCE_NOT_CONNECTED_TEXT = '這裡還沒接上學校公告，請先到學校網站看最新消息';
+export const ANNOUNCEMENT_EMPTY_SCHOOL_TEXT = '這間學校的公告還沒上架。';
+export const SOURCE_NOT_CONNECTED_TEXT = ANNOUNCEMENT_EMPTY_SCHOOL_TEXT;
 export const SOURCE_DOWN_EMPTY_TEXT = '學校網站暫時連不上，可以先到學校網站看最新消息';
 export const SOURCE_DOWN_WITH_CACHE_TEXT = '學校網站暫時連不上';
 export const FIRESTORE_UNAVAILABLE_WITH_CACHE_TEXT = '暫時讀不到新公告';
@@ -193,6 +194,12 @@ export function announcementEmptyKind(
   if (sources.some((item) => item.status === 'unavailable')) return 'source_down';
   if (sources.some((item) => item.status === 'healthy' || item.lastSuccessAt)) return 'empty';
   return 'not_connected';
+}
+
+export function announcementEmptyHeading(kind: AnnouncementEmptyKind): string | null {
+  if (kind === 'has_items') return null;
+  if (kind === 'source_down') return SOURCE_DOWN_EMPTY_TEXT;
+  return ANNOUNCEMENT_EMPTY_SCHOOL_TEXT;
 }
 
 export const ANNOUNCEMENT_RECENT_LIMIT = 200;
