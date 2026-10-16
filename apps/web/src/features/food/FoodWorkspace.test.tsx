@@ -28,7 +28,21 @@ vi.mock('@/features/nuni/Session', () => ({
   useNuniSession: () => mocks.auth,
 }));
 vi.mock('@/components/SiteShell', () => ({
-  SiteShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main>,
+  SiteShell: ({
+    title,
+    subtitle,
+    children,
+  }: {
+    title?: string;
+    subtitle?: string;
+    children: React.ReactNode;
+  }) => (
+    <main>
+      {title ? <h1>{title}</h1> : null}
+      {subtitle ? <p>{subtitle}</p> : null}
+      {children}
+    </main>
+  ),
 }));
 vi.mock('@/components/NuniSignIn', () => ({
   NuniSignIn: ({ returnUrl }: { returnUrl: string }) => <a href={returnUrl}>登入後點餐</a>,
@@ -82,6 +96,13 @@ async function quote() {
   await screen.findByRole('region', { name: '送出前確認' });
   await waitFor(() => expect(screen.queryByText('正在讀取菜單…')).toBeNull());
 }
+
+it('omits confirm-to-submit copy on /food when online ordering is off', async () => {
+  render(<FoodWorkspace />);
+  expect(screen.getByText('先看菜單與金額。')).toBeTruthy();
+  expect(screen.queryByText('確認後才送出訂單')).toBeNull();
+  expect(screen.queryByText('先看菜單與金額，確認後才送出訂單。')).toBeNull();
+});
 
 it('requires options and final confirmation, then shows the actual order and keeps legacy entrances', async () => {
   render(<FoodWorkspace />);

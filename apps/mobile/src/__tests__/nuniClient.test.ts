@@ -65,6 +65,16 @@ it('sends a platform credential only to the fixed HTTPS API and refuses paths th
   }
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
+it('retries a waking API failure once before giving up', async () => {
+  const fetchMock = jest
+    .fn()
+    .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    .mockResolvedValueOnce({ ok: true, text: async () => '{"ready":true}' });
+  global.fetch = fetchMock as unknown as typeof fetch;
+  await expect(nuniPlatformRequest('session')).resolves.toEqual({ ready: true });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
 it('maps bounded API errors without reflecting arbitrary server messages', async () => {
   global.fetch = jest.fn(async () => ({
     ok: false,

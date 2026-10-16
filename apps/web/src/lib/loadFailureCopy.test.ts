@@ -1,10 +1,13 @@
 import { expect, it } from 'vitest';
 import {
   NETWORK_RETRY_TEXT,
+  SERVICE_PAUSED_TEXT,
   TEMPORARY_UNAVAILABLE_TEXT,
   isNetworkLayerError,
   isNetworkUnavailable,
   loadFailureCopy,
+  loadServiceFailureCopy,
+  shouldOfferLoadRetry,
 } from '@campus/shared/src/loadFailureCopy';
 
 it('blames the network only when the device is offline or fetch fails at the network layer', () => {
@@ -51,4 +54,13 @@ it('uses the temporary copy for timeouts, server errors and permission failures'
   );
   expect(loadFailureCopy()).toBe(TEMPORARY_UNAVAILABLE_TEXT);
   expect(loadFailureCopy(undefined, { online: true })).toBe(TEMPORARY_UNAVAILABLE_TEXT);
+});
+
+it('uses the paused-service copy without offering refresh after a backend wake failure', () => {
+  expect(loadServiceFailureCopy(new Error('timed out'))).toBe(SERVICE_PAUSED_TEXT);
+  expect(loadServiceFailureCopy(new Error('offline'))).toBe(SERVICE_PAUSED_TEXT);
+  expect(shouldOfferLoadRetry(new Error('offline'))).toBe(false);
+  expect(loadServiceFailureCopy(undefined, { online: false })).toBe(NETWORK_RETRY_TEXT);
+  expect(shouldOfferLoadRetry(undefined, { online: false })).toBe(true);
+  expect(loadServiceFailureCopy(new TypeError('Failed to fetch'))).toBe(NETWORK_RETRY_TEXT);
 });

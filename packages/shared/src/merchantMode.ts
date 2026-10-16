@@ -6,6 +6,7 @@ export const EXTERNAL_ORDER_HONEST_TEXT =
   '訂單在店家系統，請到店家查看。我們沒有這筆的訂單號碼、餐點明細或付款狀態。';
 export const MENU_STALE_TEXT = '菜單可能過期，價格以店家頁面為準。';
 export const SHOWCASE_ORDER_BUTTON_TEXT = '到店家網站訂餐';
+export const SHOWCASE_EXTERNAL_ORDER_HINT = '這間店要到店家自己的頁面訂餐。';
 export const SHOWCASE_ORDER_CAPTION =
   '會開啟店家自己的網站，訂單和付款由店家處理，Campus One 查不到這筆訂單';
 export const SHOWCASE_LEAVE_NOTICE = SHOWCASE_ORDER_CAPTION;

@@ -8,6 +8,7 @@ import {
 } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { NuniError, nuniRecord } from '@campus/shared/src/nuni';
+import { WAKE_REQUEST_TIMEOUT_MS, withWakeRetry } from '@campus/shared/src/wakeAwareRequest';
 
 export const SESSION_COOKIE =
   process.env.NODE_ENV === 'production'
@@ -171,7 +172,7 @@ export async function boundedJson(
   let size = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new NuniError(503, 'READ_TIMEOUT')), 8000);
+    timer = setTimeout(() => reject(new NuniError(503, 'READ_TIMEOUT')), WAKE_REQUEST_TIMEOUT_MS);
   });
   try {
     while (true) {
@@ -211,32 +212,36 @@ export function apiOrigin(): string {
 }
 
 export async function fetchJson(url: string, init: RequestInit): Promise<unknown> {
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      ...init,
-      cache: 'no-store',
-      redirect: 'error',
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!response.ok) {
-      let code = 'REQUEST_FAILED';
+  return withWakeRetry(
+    async (signal) => {
       try {
-        const body = nuniRecord(await boundedJson(response, 8192));
-        const failure =
-          typeof body.error === 'object' && body.error ? nuniRecord(body.error) : body;
-        if (typeof failure.code === 'string' && /^[A-Z0-9_]{1,100}$/.test(failure.code))
-          code = failure.code;
-      } catch {
-        void response.body?.cancel().catch(() => {});
+        const response = await fetch(url, {
+          ...init,
+          cache: 'no-store',
+          redirect: 'error',
+          signal,
+        });
+        if (!response.ok) {
+          let code = 'REQUEST_FAILED';
+          try {
+            const body = nuniRecord(await boundedJson(response, 8192));
+            const failure =
+              typeof body.error === 'object' && body.error ? nuniRecord(body.error) : body;
+            if (typeof failure.code === 'string' && /^[A-Z0-9_]{1,100}$/.test(failure.code))
+              code = failure.code;
+          } catch {
+            void response.body?.cancel().catch(() => {});
+          }
+          throw new NuniError(response.status >= 500 ? 503 : response.status, code);
+        }
+        return await boundedJson(response);
+      } catch (error) {
+        if (error instanceof NuniError) throw error;
+        throw new NuniError(503, 'SERVICE_UNAVAILABLE');
       }
-      throw new NuniError(response.status >= 500 ? 503 : response.status, code);
-    }
-    return await boundedJson(response);
-  } catch (error) {
-    if (error instanceof NuniError) throw error;
-    throw new NuniError(503, 'SERVICE_UNAVAILABLE');
-  }
+    },
+    { timeoutMs: WAKE_REQUEST_TIMEOUT_MS, externalSignal: init.signal ?? undefined },
+  );
 }
 
 export function platformRequest(

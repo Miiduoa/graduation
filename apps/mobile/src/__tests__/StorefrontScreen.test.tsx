@@ -141,8 +141,10 @@ test('店面有外連時按鈕寫「到店家網站訂餐」，下面放免責�
     <StorefrontScreen navigation={navigation} route={{ params: { cafeteriaId: 'stall' } }} />,
   );
   expect(await view.findByText('到店家網站訂餐')).toBeTruthy();
+  expect(view.getByText('這間店要到店家自己的頁面訂餐。')).toBeTruthy();
   expect(view.getByText(caption)).toBeTruthy();
   expect(view.queryByText(/點餐|下單/)).toBeNull();
+  expect(view.queryByText('沒串接的店也可以只放訂餐連結。')).toBeNull();
   fireEvent.press(view.getByText('到店家網站訂餐'));
   expect(navigation.navigate).toHaveBeenCalledWith('HonestOrder', {
     cafeteriaId: 'stall',
@@ -164,8 +166,11 @@ test('沒有外連的店不放訂餐按鈕，只顯示營業時間和地點', as
   );
   expect(await view.findByText('活動中心 · 週一到週五')).toBeTruthy();
   expect(view.queryByText('到店家網站訂餐')).toBeNull();
+  expect(view.queryByText('這間店要到店家自己的頁面訂餐。')).toBeNull();
   expect(view.queryByText(caption)).toBeNull();
   expect(view.queryByText(/點餐|下單/)).toBeNull();
+  expect(view.getByText('還沒有菜單。')).toBeTruthy();
+  expect(view.queryByText('沒串接的店也可以只放訂餐連結。')).toBeNull();
 });
 
 test('大寫 HTTPS 外連跟小寫一樣放按鈕', async () => {
@@ -290,6 +295,24 @@ test.each([
     borderWidth: 1,
     borderColor: theme.colors.border,
   });
+});
+
+test('hides sold-out marks on unverified storefront menus', async () => {
+  jest.mocked(loadStorefront).mockResolvedValueOnce({
+    id: 'stall',
+    name: '校內咖啡店',
+    merchantMode: 'info_only',
+    reviewStatus: 'unverified',
+  } as never);
+  jest.mocked(loadStorefrontMenus).mockResolvedValueOnce([
+    { id: 'meal', name: '蔬菜吐司', price: 60, soldOut: true },
+  ] as never);
+  const view = render(
+    <StorefrontScreen navigation={navigation} route={{ params: { cafeteriaId: 'stall' } }} />,
+  );
+  expect(await view.findByText('蔬菜吐司 · NT$60')).toBeTruthy();
+  expect(view.queryByText(/售完/)).toBeNull();
+  expect(view.queryByText('供應中')).toBeNull();
 });
 
 test('does not mark a verified shop page', async () => {
