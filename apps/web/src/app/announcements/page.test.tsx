@@ -270,7 +270,8 @@ it('keeps older 學務處 and 住宿 announcements visible and searchable when o
     if (sourceId === 'pu-osa') return snapshot(osa);
     if (sourceId === 'pu-dorm') return snapshot(...dorms);
     if (path === 'schools/nthu/announcements' || sourceId?.startsWith('nthu-')) return snapshot();
-    if (input?.constraints?.some((item) => item.orderBy === 'publishedAt')) return snapshot(...recent);
+    if (input?.constraints?.some((item) => item.orderBy === 'publishedAt'))
+      return snapshot(...recent);
     return snapshot();
   }) as never);
   render(<AnnouncementsPage />);
@@ -296,6 +297,66 @@ it('keeps cached announcements when a later Firestore read fails', async () => {
   expect(screen.getByText(/最後更新 \d+\/\d+ \d{2}:\d{2}，暫時讀不到新公告/)).toBeTruthy();
   expect(screen.queryByText('學校網站暫時連不上')).toBeNull();
   expect(screen.queryByText('請確認網路')).toBeNull();
+  expect(screen.queryByText('這間學校的公告還沒上架。')).toBeNull();
+});
+
+function expectAnnouncementLoading() {
+  expect(screen.getByText('正在讀取公告…')).toBeTruthy();
+  expect(screen.queryByText(/最近 0 則/)).toBeNull();
+  expect(screen.queryByText('這間學校的公告還沒上架。')).toBeNull();
+  expect(screen.queryByText('目前沒有公開公告')).toBeNull();
+  expect(screen.queryByText('目前沒有公告')).toBeNull();
+  expect(screen.queryByRole('article')).toBeNull();
+}
+
+it('does not show an empty school state before the first feed returns', async () => {
+  const pending = deferred();
+  vi.mocked(getDocsFromServer).mockReturnValueOnce(pending.promise);
+  render(<AnnouncementsPage />);
+  expectAnnouncementLoading();
+  await act(async () => pending.resolve(snapshot(announcementDocument('校園公告實際內容'))));
+  await screen.findByText('校園公告實際內容');
+  expect(screen.getByText(/最近 \d+ 則/)).toBeTruthy();
+  expect(screen.queryByText('這間學校的公告還沒上架。')).toBeNull();
+});
+
+it('shows unpublished copy only after an empty feed has finished loading', async () => {
+  const pending = deferred();
+  vi.mocked(getDocsFromServer).mockReturnValue(pending.promise);
+  render(<AnnouncementsPage />);
+  expectAnnouncementLoading();
+  await act(async () => pending.resolve(snapshot()));
+  expect(await screen.findByRole('heading', { name: '這間學校的公告還沒上架。' })).toBeTruthy();
+});
+
+it('returns to loading and hides the previous school while the next school feed is in flight', async () => {
+  const pu = Promise.resolve({ schoolId: 'pu' });
+  const nthu = Promise.resolve({ schoolId: 'nthu' });
+  let view!: ReturnType<typeof render>;
+  await act(async () => {
+    view = render(
+      <Suspense fallback={<p>載入學校</p>}>
+        <AnnouncementsPage searchParams={pu} />
+      </Suspense>,
+    );
+  });
+  await screen.findByText('校園公告實際內容');
+  const pending = deferred();
+  vi.mocked(getDocsFromServer).mockReturnValue(pending.promise);
+  await act(async () => {
+    view.rerender(
+      <Suspense fallback={<p>載入學校</p>}>
+        <AnnouncementsPage searchParams={nthu} />
+      </Suspense>,
+    );
+  });
+  expect(screen.queryByText('校園公告實際內容')).toBeNull();
+  expectAnnouncementLoading();
+  await act(async () =>
+    pending.resolve(snapshot(announcementDocument('清華公告', { schoolId: 'nthu' }))),
+  );
+  await screen.findByText('清華公告');
+  expect(screen.queryByText('校園公告實際內容')).toBeNull();
   expect(screen.queryByText('這間學校的公告還沒上架。')).toBeNull();
 });
 
@@ -528,16 +589,8 @@ it('links the office site when the school site is down and there is no cached co
 });
 
 it.each([
-  [
-    'ncku',
-    '全校最新消息',
-    'https://web.ncku.edu.tw/p/403-1000-14-1.php',
-  ],
-  [
-    'ntpu',
-    '電子公文一般公告（含教務處）',
-    'https://fms.ntpu.edu.tw/km/24662',
-  ],
+  ['ncku', '全校最新消息', 'https://web.ncku.edu.tw/p/403-1000-14-1.php'],
+  ['ntpu', '電子公文一般公告（含教務處）', 'https://fms.ntpu.edu.tw/km/24662'],
 ] as const)(
   'shows unpublished copy and the official %s announcement page when that school has no items',
   async (school, office, url) => {
@@ -550,9 +603,7 @@ it.each([
         </Suspense>,
       );
     });
-    expect(
-      await screen.findByRole('heading', { name: '這間學校的公告還沒上架。' }),
-    ).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: '這間學校的公告還沒上架。' })).toBeTruthy();
     expect(screen.getByRole('link', { name: office }).getAttribute('href')).toBe(url);
   },
 );

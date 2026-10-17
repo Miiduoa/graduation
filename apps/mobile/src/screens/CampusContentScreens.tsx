@@ -23,7 +23,7 @@ import {
 } from '../services/publicCampusContent';
 import {
   ANNOUNCEMENT_EMPTY_SCHOOL_TEXT,
-  announcementEmptyKind,
+  announcementViewPhase,
   formatStaleAnnouncementNotice,
   isAnnouncementSchoolVisibleToPublic,
   listAnnouncementCatalogLinks,
@@ -160,14 +160,16 @@ function useAnnouncementFeed() {
       generation.current += 1;
     };
   }, [reload]);
-  const feed = state.scope === scope ? state.feed : null;
+  const scoped = state.scope === scope;
+  const feed = scoped ? state.feed : null;
+  const loading = !scoped || state.loading || feed == null;
   return {
-    loading: state.scope === scope ? state.loading : true,
-    stale: state.scope === scope ? state.stale : false,
+    loading,
+    stale: scoped ? state.stale : false,
     reload,
     current,
-    announcements: feed?.announcements ?? [],
-    sources: feed?.sources ?? [],
+    announcements: loading ? [] : (feed?.announcements ?? []),
+    sources: loading ? [] : (feed?.sources ?? []),
   };
 }
 
@@ -234,7 +236,7 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
   const visible = rows.filter((row) => category === 'all' || row.category === category);
   const down = sources.filter((item) => item.status === 'unavailable');
   const downLinks = down.filter((item) => item.listUrl);
-  const emptyKind = announcementEmptyKind(rows, sources);
+  const phase = announcementViewPhase(content.loading, rows, sources);
   const showStaleNotice = rows.length > 0 && (content.stale || down.length > 0);
   const staleSources =
     content.stale && !down.length
@@ -257,9 +259,9 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
       subtitle="公開處室公告的摘要與原文連結。一般帳號即可查看。"
       onBack={() => navigation?.goBack?.()}
     >
-      {content.loading ? (
+      {phase === 'loading' ? (
         <ReadState loading error="" empty="目前沒有公告" reload={content.reload} />
-      ) : emptyKind === 'source_down' ? (
+      ) : phase === 'source_down' ? (
         <AICard title={SOURCE_DOWN_EMPTY_TEXT}>
           <View style={{ gap: 12 }}>
             {(downLinks.length ? downLinks : listAnnouncementCatalogLinks(school.id)).map(
@@ -273,7 +275,7 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
             )}
           </View>
         </AICard>
-      ) : emptyKind !== 'has_items' ? (
+      ) : phase !== 'has_items' ? (
         <AICard title={ANNOUNCEMENT_EMPTY_SCHOOL_TEXT}>
           <View style={{ gap: 12 }}>
             {listAnnouncementCatalogLinks(school.id).map((item) => (
