@@ -192,6 +192,17 @@ it('never uses a crafted announcement ID as a Firestore subcollection path', asy
   expect(getDocFromServer).not.toHaveBeenCalled();
 });
 
+it('does not show unpublished copy before the first detail document returns', async () => {
+  const pending = deferred();
+  vi.mocked(getDocFromServer).mockReturnValueOnce(pending.promise);
+  await mount();
+  expect(screen.getByText('正在讀取公告…')).toBeTruthy();
+  expect(screen.queryByText('這間學校的公告還沒上架。')).toBeNull();
+  expect(screen.queryByText('找不到這則公告')).toBeNull();
+  await act(async () => pending.resolve(snapshot()));
+  await screen.findByText('實際公告詳情');
+});
+
 it('hides the previous detail immediately when changing to another account', async () => {
   const { view, input } = await mount();
   await screen.findByText('實際公告詳情');
@@ -301,10 +312,12 @@ it('does not query any announcement when the campus is unselected or invalid', a
   expect(screen.getByText('先選擇一所學校')).toBeTruthy();
   expect(getDocFromServer).not.toHaveBeenCalled();
   await act(async () => {
-    view.rerender(subject({
-      params: Promise.resolve({ id: 'notice-1' }),
-      searchParams: Promise.resolve({ campus: 'INVALID', schoolId: 'pu' }),
-    }));
+    view.rerender(
+      subject({
+        params: Promise.resolve({ id: 'notice-1' }),
+        searchParams: Promise.resolve({ campus: 'INVALID', schoolId: 'pu' }),
+      }),
+    );
   });
   expect(screen.getByText('先選擇一所學校')).toBeTruthy();
   expect(getDocFromServer).not.toHaveBeenCalled();
