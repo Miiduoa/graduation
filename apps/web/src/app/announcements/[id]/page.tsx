@@ -7,9 +7,9 @@ import { SiteShell } from '@/components/SiteShell';
 import type { Announcement } from '@/lib/firebase';
 import { loadAnnouncement } from '../publicAnnouncements';
 import {
-  ANNOUNCEMENT_EMPTY_SCHOOL_TEXT,
+  ANNOUNCEMENT_READ_FAILURE_TEXT,
+  ANNOUNCEMENT_RETRY_TEXT,
   formatStaleAnnouncementNotice,
-  listAnnouncementCatalogLinks,
   staleAnnouncementUpdatedAt,
 } from '@campus/shared/src/campusAnnouncements';
 import { isAnnouncementSchoolVisibleToPublic } from '@campus/shared/src/campusAnnouncements';
@@ -19,7 +19,7 @@ import styles from '../announcements.module.css';
 
 type LoadState =
   | { status: 'loading'; schoolId: string; id: string }
-  | { status: 'not_connected'; schoolId: string; id: string }
+  | { status: 'failed'; schoolId: string; id: string }
   | {
       status: 'ready';
       schoolId: string;
@@ -33,27 +33,6 @@ function detailForRequest(state: LoadState, schoolId: string, id: string): LoadS
   return state.schoolId === schoolId && state.id === id
     ? state
     : { status: 'loading', schoolId, id };
-}
-
-function OfficeSourceLinks({
-  links,
-}: {
-  links: Array<{ sourceId: string; office: string; listUrl?: string }>;
-}) {
-  const items = links.filter((item) => item.listUrl);
-  if (!items.length) return null;
-  return (
-    <p>
-      {items.map((item, index) => (
-        <span key={item.sourceId}>
-          {index > 0 ? '、' : null}
-          <a href={item.listUrl} rel="noopener noreferrer" target="_blank">
-            {item.office}
-          </a>
-        </span>
-      ))}
-    </p>
-  );
 }
 
 function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) {
@@ -85,7 +64,7 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
           current.status === 'ready' &&
           current.announcement
             ? { ...current, stale: true }
-            : { status: 'not_connected', schoolId, id },
+            : { status: 'failed', schoolId, id },
         );
       },
     );
@@ -133,11 +112,13 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
         正在讀取公告…
       </p>
     );
-  if (view.status === 'not_connected') {
+  if (view.status === 'failed') {
     return (
       <section className={styles.status}>
-        <h2>{ANNOUNCEMENT_EMPTY_SCHOOL_TEXT}</h2>
-        <OfficeSourceLinks links={listAnnouncementCatalogLinks(schoolId)} />
+        <h2>{ANNOUNCEMENT_READ_FAILURE_TEXT}</h2>
+        <button className="btn" type="button" onClick={refresh}>
+          {ANNOUNCEMENT_RETRY_TEXT}
+        </button>
       </section>
     );
   }

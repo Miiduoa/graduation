@@ -23,6 +23,8 @@ import {
 } from '../services/publicCampusContent';
 import {
   ANNOUNCEMENT_EMPTY_SCHOOL_TEXT,
+  ANNOUNCEMENT_READ_FAILURE_TEXT,
+  ANNOUNCEMENT_RETRY_TEXT,
   announcementViewPhase,
   formatStaleAnnouncementNotice,
   isAnnouncementSchoolVisibleToPublic,
@@ -85,7 +87,7 @@ function useContent<T>(
           error: keepOnError
             ? prev.scope === scope && prev.value
               ? 'stale'
-              : 'not_connected'
+              : 'failed'
             : '目前無法讀取，請確認網路連線後重試。',
           loading: false,
         }));
@@ -121,7 +123,8 @@ function useAnnouncementFeed() {
     feed: Awaited<ReturnType<typeof loadCampusAnnouncementFeed>> | null;
     loading: boolean;
     stale: boolean;
-  }>({ scope, feed: null, loading: true, stale: false });
+    failed: boolean;
+  }>({ scope, feed: null, loading: true, stale: false, failed: false });
   const current = () => mounted.current && activeScope.current === scope;
   const reload = useCallback(async () => {
     const request = ++generation.current;
@@ -130,23 +133,25 @@ function useAnnouncementFeed() {
       feed: prev.scope === scope ? prev.feed : null,
       loading: !(prev.scope === scope && (prev.feed?.announcements.length ?? 0) > 0),
       stale: prev.scope === scope ? prev.stale : false,
+      failed: false,
     }));
     try {
       const feed = await loadCampusAnnouncementFeed(school.id);
       if (mounted.current && activeScope.current === scope && generation.current === request)
-        setState({ scope, feed, loading: false, stale: false });
+        setState({ scope, feed, loading: false, stale: false, failed: false });
     } catch {
       if (mounted.current && activeScope.current === scope && generation.current === request) {
         setState((prev) => {
           const cached =
             prev.scope === scope && prev.feed && prev.feed.announcements.length > 0
               ? prev.feed
-              : { announcements: [], sources: [], allUnavailable: false };
+              : null;
           return {
             scope,
             feed: cached,
             loading: false,
-            stale: Boolean(prev.scope === scope && prev.feed && prev.feed.announcements.length > 0),
+            stale: Boolean(cached),
+            failed: !cached,
           };
         });
       }
@@ -162,9 +167,11 @@ function useAnnouncementFeed() {
   }, [reload]);
   const scoped = state.scope === scope;
   const feed = scoped ? state.feed : null;
-  const loading = !scoped || state.loading || feed == null;
+  const failed = scoped && !state.loading && state.failed;
+  const loading = !scoped || state.loading || (feed == null && !failed);
   return {
     loading,
+    failed,
     stale: scoped ? state.stale : false,
     reload,
     current,
@@ -236,7 +243,7 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
   const visible = rows.filter((row) => category === 'all' || row.category === category);
   const down = sources.filter((item) => item.status === 'unavailable');
   const downLinks = down.filter((item) => item.listUrl);
-  const phase = announcementViewPhase(content.loading, rows, sources);
+  const phase = announcementViewPhase(content.loading, rows, sources, content.failed);
   const showStaleNotice = rows.length > 0 && (content.stale || down.length > 0);
   const staleSources =
     content.stale && !down.length
@@ -261,6 +268,10 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
     >
       {phase === 'loading' ? (
         <ReadState loading error="" empty="目前沒有公告" reload={content.reload} />
+      ) : phase === 'failed' ? (
+        <AICard title={ANNOUNCEMENT_READ_FAILURE_TEXT}>
+          <AIButton label={ANNOUNCEMENT_RETRY_TEXT} onPress={() => void content.reload()} />
+        </AICard>
       ) : phase === 'source_down' ? (
         <AICard title={SOURCE_DOWN_EMPTY_TEXT}>
           <View style={{ gap: 12 }}>
@@ -351,7 +362,6 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
 }
 
 export function CampusAnnouncementDetailScreen({ navigation, route }: Props) {
-  const { school } = useSchool();
   const id = route?.params?.id ?? route?.params?.announcementId ?? '';
   const content = useContent(loadCampusAnnouncement, id, '', true);
   const announcement = content.value;
@@ -370,18 +380,10 @@ export function CampusAnnouncementDetailScreen({ navigation, route }: Props) {
     <AIDetailScreen title="公告詳情" onBack={() => navigation?.goBack?.()}>
       {content.loading ? (
         <ReadState {...content} empty="找不到這則公告，可能已移除或不屬於目前學校。" />
-      ) : content.error === 'not_connected' ||
+      ) : content.error === 'failed' ||
         (content.error && content.error !== 'stale' && !announcement) ? (
-        <AICard title={ANNOUNCEMENT_EMPTY_SCHOOL_TEXT}>
-          <View style={{ gap: 12 }}>
-            {listAnnouncementCatalogLinks(school.id).map((item) => (
-              <AIButton
-                key={item.sourceId}
-                label={item.office}
-                onPress={() => void Linking.openURL(item.listUrl)}
-              />
-            ))}
-          </View>
+        <AICard title={ANNOUNCEMENT_READ_FAILURE_TEXT}>
+          <AIButton label={ANNOUNCEMENT_RETRY_TEXT} onPress={() => void content.reload()} />
         </AICard>
       ) : !announcement ? (
         <ReadState {...content} empty="找不到這則公告，可能已移除或不屬於目前學校。" />
