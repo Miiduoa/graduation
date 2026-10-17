@@ -17,6 +17,7 @@ import {
 } from '@campus/shared/src/nuniMerchant';
 import styles from './MerchantWorkspace.module.css';
 import { MerchantOperations, type MerchantOperationDrafts } from './MerchantOperations';
+import { clearAllFoodPendingForAccount } from '@/features/food/foodPersistence';
 import type { FoodDraftCache } from '@/features/food/foodState';
 
 type Overview = Awaited<ReturnType<typeof loadMerchantOverview>>;
@@ -47,6 +48,7 @@ function expired(error: unknown) {
 
 export function MerchantWorkspace() {
   const auth = useNuniSession();
+  const [cleanupError, setCleanupError] = useState('');
   const [operationScope, setOperationScope] = useState<{
     accountId: string | null;
     locations: MerchantOperationDrafts;
@@ -59,11 +61,20 @@ export function MerchantWorkspace() {
   if (confirmedAccount !== operationScope.accountId) {
     // An unavailable session is not proof of logout. Keep uncertain write intent
     // hidden until this account returns, or discard it for a confirmed identity change.
+    // Confirmed logout clears only food's durable pending keys for this account.
+    if (operationScope.accountId && !confirmedAccount) {
+      try {
+        clearAllFoodPendingForAccount(operationScope.accountId);
+      } catch {
+        setCleanupError('未能清除這個分頁的訂餐重試紀錄，關閉分頁即可清除。');
+      }
+    }
     setOperationScope({ accountId: confirmedAccount, locations: new Map(), food: new Map() });
     return null;
   }
   return (
     <SiteShell title="店家合作" subtitle="使用同一個 Google 帳號，申請進駐並查看審核進度。">
+      {cleanupError ? <p role="alert">{cleanupError}</p> : null}
       {auth.session && !auth.pendingLogout && !auth.error ? (
         <AccountWorkspace
           key={`${auth.session.platformAccountId}:${auth.session.context}`}

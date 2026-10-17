@@ -1,12 +1,34 @@
 import React from 'react';
 import { AppState } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
 import { NavigationContext } from '@react-navigation/native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { NuniFood } from '../screens/nuni/NuniFood';
 import { NuniMerchantOrders } from '../screens/nuni/NuniMerchantOrders';
 import { NuniDraftProvider } from '../state/nuniDrafts';
+import {
+  clearAllFoodPendingForAccount,
+  loadFoodPending,
+  saveFoodPending,
+} from '../state/foodPersistence';
 import { NuniError } from '@campus/shared/src/nuni';
 
+const mockSecureRecords = new Map<string, string>();
+const mockSecureKey = (key: string) => {
+  if (!/^[\w.-]+$/.test(key)) throw new Error('Invalid native SecureStore key');
+  return key;
+};
+jest.mock('expo-secure-store', () => ({
+  AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 'device-only',
+  isAvailableAsync: jest.fn(async () => true),
+  getItemAsync: jest.fn(async (key: string) => mockSecureRecords.get(mockSecureKey(key)) ?? null),
+  setItemAsync: jest.fn(async (key: string, value: string) => {
+    mockSecureRecords.set(mockSecureKey(key), value);
+  }),
+  deleteItemAsync: jest.fn(async (key: string) => {
+    mockSecureRecords.delete(mockSecureKey(key));
+  }),
+}));
 const mockRequest = jest.fn();
 const mockRefresh = jest.fn();
 const mockPermission = jest.fn();
@@ -290,7 +312,9 @@ async function openOrder(view: ReturnType<typeof render>) {
   fireEvent.press(await view.findByRole('button', { name: '查看訂單 order-one' }));
   await view.findByText('取餐號碼 A001');
 }
-beforeEach(() => {
+beforeEach(async () => {
+  jest.spyOn(AppState, 'addEventListener').mockImplementation(() => ({ remove: jest.fn() }));
+  Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'active' });
   mockAuth = {
     session: { platformAccountId: 'pa-a', context: 'context-a' },
     loading: false,
@@ -310,6 +334,8 @@ beforeEach(() => {
   mockPermission.mockReset().mockResolvedValue({ granted: false });
   mockRequest.mockReset().mockImplementation(respond);
   mockRefresh.mockReset().mockResolvedValue(undefined);
+  await clearAllFoodPendingForAccount('pa-a');
+  await clearAllFoodPendingForAccount('pa-b');
 });
 
 test('omits confirm-to-submit copy when online ordering is off', async () => {
@@ -763,4 +789,94 @@ test('order number is hidden by default and resets after returning to the access
   expect(view.getByRole('button', { name: '訂單編號' }).props.accessibilityState.expanded).toBe(
     false,
   );
+});
+
+test('cold start restores the same food idempotency key from SecureStore at the original store', async () => {
+  const scope = 'food:school-one:location-one:intent';
+  await saveFoodPending('pa-a', scope, {
+    kind: 'order',
+    input: { quoteId: 'quote-one', idempotencyKey: 'food-mobile-cold-key' },
+  });
+  const view = render(ui(new Map()));
+  fireEvent.press(await view.findByRole('button', { name: '查看餐點：第一校區' }));
+  fireEvent.press(await view.findByRole('button', { name: '選餐：餐坊' }));
+  await waitFor(() =>
+    expect(view.getByRole('button', { name: '重試確認這次送出' })).not.toBeDisabled(),
+  );
+  fireEvent.press(view.getByRole('button', { name: '重試確認這次送出' }));
+  await view.findByText('取餐號碼 A001');
+  expect(writes().at(-1)![2]).toEqual({
+    quoteId: 'quote-one',
+    idempotencyKey: 'food-mobile-cold-key',
+  });
+  expect(await loadFoodPending('pa-a', scope)).toBeNull();
+});
+
+test('storage failure blocks the network mutation and cross-account pending stays isolated', async () => {
+  await saveFoodPending('pa-b', 'food:school-one:location-one:intent', {
+    kind: 'order',
+    input: { quoteId: 'quote-other', idempotencyKey: 'food-other-account' },
+  });
+  const view = render(ui(new Map()));
+  await fillQuote(view);
+  const spy = jest
+    .spyOn(SecureStore, 'setItemAsync')
+    .mockRejectedValue(new Error('secure unavailable'));
+  try {
+    fireEvent.press(view.getByRole('button', { name: '確認送出訂單，到店付款' }));
+    await view.findByText(/目前無法安全保存/);
+    expect(writes().some((call) => call[0].endsWith('/orders') && call[2]?.quoteId)).toBe(false);
+  } finally {
+    spy.mockRestore();
+  }
+  expect(await loadFoodPending('pa-b', 'food:school-one:location-one:intent')).toMatchObject({
+    input: { idempotencyKey: 'food-other-account' },
+  });
+});
+
+test('order detail skips background polls, keeps cancel confirm on quiet refresh, then shows ready QR and revokes it when fulfilled', async () => {
+  jest.useFakeTimers({ advanceTimers: true });
+  hasOrder = true;
+  state = 'payment-pending';
+  let appListener: ((state: string) => void) | undefined;
+  const subscription = jest
+    .spyOn(AppState, 'addEventListener')
+    .mockImplementation((_event, listener) => {
+      appListener = listener as (state: string) => void;
+      return { remove: jest.fn() };
+    });
+  Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'active' });
+  const view = render(ui());
+  await openOrder(view);
+  fireEvent.press(view.getByRole('button', { name: '檢查取消訂單' }));
+  expect(view.getByRole('button', { name: '確認取消這張訂單' })).toBeTruthy();
+  Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'background' });
+  appListener?.('background');
+  const before = mockRequest.mock.calls.filter((call) =>
+    call[0].endsWith('/orders/order-one'),
+  ).length;
+  await act(async () => {
+    await jest.advanceTimersByTimeAsync(10_000);
+  });
+  expect(
+    mockRequest.mock.calls.filter((call) => call[0].endsWith('/orders/order-one')).length,
+  ).toBe(before);
+  Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'active' });
+  await act(async () => {
+    appListener?.('active');
+  });
+  await waitFor(() => expect(view.getByRole('button', { name: '確認取消這張訂單' })).toBeTruthy());
+  state = 'ready';
+  await act(async () => {
+    await jest.advanceTimersByTimeAsync(10_000);
+  });
+  await view.findByLabelText('一次性取餐憑證');
+  state = 'fulfilled';
+  await act(async () => {
+    await jest.advanceTimersByTimeAsync(10_000);
+  });
+  await waitFor(() => expect(view.queryByLabelText('一次性取餐憑證')).toBeNull());
+  expect(view.getByText('已取餐')).toBeTruthy();
+  subscription.mockRestore();
+  jest.useRealTimers();
 });

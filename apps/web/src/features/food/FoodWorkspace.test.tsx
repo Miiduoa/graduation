@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
 import { FoodWorkspace } from './FoodWorkspace';
+import { loadFoodPending, saveFoodPending } from './foodPersistence';
 import {
   future,
   menuFixture,
@@ -74,6 +75,7 @@ async function respond(path: string, _context: string, input?: Record<string, un
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  sessionStorage.clear();
   mocks.auth.session = { platformAccountId: 'account-a', context: 'context-a' };
   mocks.auth.error = '';
   mocks.auth.loading = false;
@@ -322,13 +324,94 @@ it('discards an uncertain order when the user logs out and then signs in again',
   fireEvent.click(screen.getByLabelText('我已確認餐點、取餐時間與應付金額'));
   fireEvent.click(button('確認送出訂單'));
   await screen.findByText(/尚未確認這次操作的結果/);
+  expect(
+    loadFoodPending('account-a', 'food:cart:campus-one:store-1')?.input.idempotencyKey,
+  ).toEqual(expect.any(String));
   mocks.auth.pendingLogout = true;
   view.rerender(<FoodWorkspace />);
   expect(screen.queryByRole('button', { name: '重試同一份操作' })).toBeNull();
+  expect(loadFoodPending('account-a', 'food:cart:campus-one:store-1')).toBeNull();
   mocks.auth.pendingLogout = false;
   mocks.auth.session = { platformAccountId: 'account-a', context: 'after-logout' };
   view.rerender(<FoodWorkspace />);
   await choose();
   expect(screen.queryByRole('button', { name: '重試同一份操作' })).toBeNull();
   expect(screen.queryByRole('region', { name: '送出前確認' })).toBeNull();
+});
+
+it('restores the durable pending order key after a cold Map and keeps storage failure offline', async () => {
+  const scope = 'food:cart:campus-one:store-1';
+  const saved = {
+    action: 'order',
+    input: { quoteId: 'quote-1', idempotencyKey: 'food-cold-start-key-0001' },
+  };
+  saveFoodPending('account-a', scope, saved);
+  render(<FoodWorkspace />);
+  fireEvent.click(await screen.findByRole('button', { name: '查看菜單：米飯店' }));
+  await screen.findByRole('button', { name: '重試同一份操作' });
+  fireEvent.click(button('重試同一份操作'));
+  await screen.findByText('米飯店 · 待付款');
+  const writes = mocks.request.mock.calls.filter(
+    ([path, , input]) => path.endsWith('/orders') && input,
+  );
+  expect(writes[0][2].idempotencyKey).toBe('food-cold-start-key-0001');
+
+  mocks.request.mockClear();
+  fireEvent.click(button('我要點餐'));
+  await quote();
+  fireEvent.click(screen.getByLabelText('我已確認餐點、取餐時間與應付金額'));
+  const blocked = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    throw new Error('quota');
+  });
+  try {
+    fireEvent.click(button('確認送出訂單'));
+    await screen.findByText(/目前無法安全保存/);
+    expect(
+      mocks.request.mock.calls.some(([path, , input]) => path.endsWith('/orders') && input),
+    ).toBe(false);
+  } finally {
+    blocked.mockRestore();
+  }
+});
+
+it('quietly polls order detail to ready/fulfilled, drops the QR, and skips hidden polling', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  order = readyOrder();
+  render(<FoodWorkspace initialTenant="campus-one" initialOrder="order-1" />);
+  fireEvent.click(await screen.findByRole('button', { name: '出示取餐憑證' }));
+  expect(screen.getByLabelText('一次性取餐憑證')).toBeTruthy();
+  const before = mocks.request.mock.calls.filter(([path]) => path.endsWith('/order-1')).length;
+  Object.defineProperty(document, 'visibilityState', {
+    configurable: true,
+    get: () => 'hidden',
+  });
+  document.dispatchEvent(new Event('visibilitychange'));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10_000);
+  });
+  expect(mocks.request.mock.calls.filter(([path]) => path.endsWith('/order-1')).length).toBe(
+    before,
+  );
+  Object.defineProperty(document, 'visibilityState', {
+    configurable: true,
+    get: () => 'visible',
+  });
+  order = {
+    ...readyOrder(),
+    state: 'fulfilled',
+    allowedActions: [],
+    pickup: {
+      state: 'fulfilled',
+      displayCode: 'A101',
+      readyAt: future,
+      calls: [],
+      callCount: 0,
+      allowedActions: [],
+    },
+  };
+  document.dispatchEvent(new Event('visibilitychange'));
+  await screen.findByText('米飯店 · 已取餐');
+  expect(screen.queryByLabelText('一次性取餐憑證')).toBeNull();
+  expect(screen.queryByRole('button', { name: '出示取餐憑證' })).toBeNull();
+  vi.useRealTimers();
 });

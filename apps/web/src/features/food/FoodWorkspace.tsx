@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Input';
 import { FoodMenu } from './FoodMenu';
 import { FoodOrders } from './FoodOrders';
+import { clearAllFoodPendingForAccount } from './foodPersistence';
 import { useFoodDraft, useFoodRead, type FoodDraftCache } from './foodState';
 import { isWebOnlineOrderingEnabled } from '@/lib/onlineOrdering';
 import { foodPageSubtitle } from '@campus/shared/src/foodPageCopy';
@@ -24,6 +25,7 @@ export function FoodWorkspace({
   initialOrder?: string;
 }) {
   const auth = useNuniSession();
+  const [cleanupError, setCleanupError] = useState('');
   const [scope, setScope] = useState<{ account: string | null; drafts: FoodDraftCache }>(() => ({
     account: null,
     drafts: new Map(),
@@ -32,12 +34,20 @@ export function FoodWorkspace({
     ? null
     : (auth.session?.platformAccountId ?? (!auth.loading && !auth.error ? null : scope.account));
   if (account !== scope.account) {
+    if (scope.account && !account) {
+      try {
+        clearAllFoodPendingForAccount(scope.account);
+      } catch {
+        setCleanupError('未能清除這個分頁的訂餐重試紀錄，關閉分頁即可清除。');
+      }
+    }
     setScope({ account, drafts: new Map() });
     return null;
   }
   return (
     <SiteShell title="點餐與取餐" subtitle={foodPageSubtitle(isWebOnlineOrderingEnabled())}>
       <div className={styles.stack}>
+        {cleanupError ? <p role="alert">{cleanupError}</p> : null}
         <nav className={styles.bar} aria-label="餐飲服務">
           <Link href="/cafeteria">餐廳資訊</Link>
           <Link href="/orders">原有餐廳訂單</Link>
@@ -53,6 +63,7 @@ export function FoodWorkspace({
         ) : auth.session && !auth.pendingLogout ? (
           <FoodAccount
             key={`${auth.session.platformAccountId}:${auth.session.context}`}
+            accountId={auth.session.platformAccountId}
             context={auth.session.context}
             cache={scope.drafts}
             initialTenant={initialTenant}
@@ -73,11 +84,13 @@ export function FoodWorkspace({
 }
 
 function FoodAccount({
+  accountId,
   context,
   cache,
   initialTenant,
   initialOrder,
 }: {
+  accountId: string;
   context: string;
   cache: FoodDraftCache;
   initialTenant: string;
@@ -148,6 +161,7 @@ function FoodAccount({
                 key={tenantId}
                 client={client}
                 cache={cache}
+                accountId={accountId}
                 tenantId={tenantId}
                 onOrder={(orderId) => {
                   cache.set(`food:orders:${tenantId}:selected`, orderId);
@@ -166,6 +180,7 @@ function FoodAccount({
                 key={tenantId}
                 client={client}
                 cache={cache}
+                accountId={accountId}
                 tenantId={tenantId}
                 initialOrder={
                   created?.tenantId === tenantId
@@ -185,11 +200,13 @@ function FoodAccount({
 function FoodLocations({
   client,
   cache,
+  accountId,
   tenantId,
   onOrder,
 }: {
   client: FoodClient;
   cache: FoodDraftCache;
+  accountId: string;
   tenantId: string;
   onOrder(orderId: string): void;
 }) {
@@ -263,6 +280,7 @@ function FoodLocations({
           key={`${tenantId}:${selected}`}
           client={client}
           cache={cache}
+          accountId={accountId}
           tenantId={tenantId}
           locationId={selected}
           onOrder={onOrder}
