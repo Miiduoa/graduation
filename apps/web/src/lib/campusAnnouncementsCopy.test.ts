@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import {
   allowsPlaceholderAnnouncementSchools,
   announcementEmptyKind,
+  announcementViewPhase,
   announcementMatchesSearch,
   announcementSourceIdsForSchool,
   formatStaleAnnouncementNotice,
@@ -103,6 +104,17 @@ it('classifies empty feeds as never connected, source down, or confirmed empty',
   expect(announcementEmptyHeading('empty')).toBe(ANNOUNCEMENT_EMPTY_SCHOOL_TEXT);
   expect(announcementEmptyHeading('source_down')).toBe(SOURCE_DOWN_EMPTY_TEXT);
   expect(announcementEmptyHeading('has_items')).toBeNull();
+  expect(announcementViewPhase(true, [], [])).toBe('loading');
+  expect(announcementViewPhase(true, [{ title: '舊稿' }], [])).toBe('loading');
+  expect(announcementViewPhase(false, [{ title: '舊稿' }], [])).toBe('has_items');
+  expect(announcementViewPhase(false, [], [])).toBe('not_connected');
+  expect(
+    announcementViewPhase(
+      false,
+      [],
+      [{ status: 'healthy', lastSuccessAt: '2026-10-12T10:05:00.000Z' }],
+    ),
+  ).toBe('empty');
 });
 
 it('exposes official NCKU and NTPU announcement pages already connected in the catalog', () => {
@@ -145,13 +157,11 @@ it('exposes catalog office urls for a school that has never been fetched', () =>
 });
 
 it('finds office announcements by 學務處 or 住宿 even when source is missing', () => {
-  expect(
-    announcementMatchesSearch({ title: '生活輔導', office: '學務處' }, '學務處'),
-  ).toBe(true);
+  expect(announcementMatchesSearch({ title: '生活輔導', office: '學務處' }, '學務處')).toBe(true);
   expect(announcementMatchesSearch({ title: '宿舍開放', office: '住宿' }, '住宿')).toBe(true);
-  expect(announcementMatchesSearch({ title: '選課', source: '教務處', office: '教務處' }, '學務處')).toBe(
-    false,
-  );
+  expect(
+    announcementMatchesSearch({ title: '選課', source: '教務處', office: '教務處' }, '學務處'),
+  ).toBe(false);
   expect(announcementSourceIdsForSchool('pu')).toEqual(
     expect.arrayContaining(['pu-osa', 'pu-dorm', 'pu-acd']),
   );

@@ -196,6 +196,32 @@ export function announcementEmptyKind(
   return 'not_connected';
 }
 
+export type AnnouncementViewPhase = 'loading' | AnnouncementEmptyKind;
+
+export function announcementViewPhase(
+  loading: true,
+  announcements?: Array<unknown>,
+  sources?: Array<{ status?: string; lastSuccessAt?: string | null }>,
+): 'loading';
+export function announcementViewPhase(
+  loading: false,
+  announcements?: Array<unknown>,
+  sources?: Array<{ status?: string; lastSuccessAt?: string | null }>,
+): AnnouncementEmptyKind;
+export function announcementViewPhase(
+  loading: boolean,
+  announcements?: Array<unknown>,
+  sources?: Array<{ status?: string; lastSuccessAt?: string | null }>,
+): AnnouncementViewPhase;
+export function announcementViewPhase(
+  loading: boolean,
+  announcements: Array<unknown> = [],
+  sources: Array<{ status?: string; lastSuccessAt?: string | null }> = [],
+): AnnouncementViewPhase {
+  if (loading) return 'loading';
+  return announcementEmptyKind(announcements, sources);
+}
+
 export function announcementEmptyHeading(kind: AnnouncementEmptyKind): string | null {
   if (kind === 'has_items') return null;
   if (kind === 'source_down') return SOURCE_DOWN_EMPTY_TEXT;
@@ -221,10 +247,7 @@ export function announcementSearchText(item: AnnouncementSearchFields): string {
     .toLocaleLowerCase('zh-TW');
 }
 
-export function announcementMatchesSearch(
-  item: AnnouncementSearchFields,
-  needle: string,
-): boolean {
+export function announcementMatchesSearch(item: AnnouncementSearchFields, needle: string): boolean {
   const query = needle.trim().toLocaleLowerCase('zh-TW');
   return !query || announcementSearchText(item).includes(query);
 }

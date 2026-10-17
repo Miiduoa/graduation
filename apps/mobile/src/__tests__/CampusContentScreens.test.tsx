@@ -157,6 +157,63 @@ test('keeps cached announcements when a later Firestore read fails', async () =>
   expect(view.queryByText('這間學校的公告還沒上架。')).toBeNull();
 });
 
+test('does not show unpublished copy before the first feed returns', async () => {
+  const pending = deferred<Awaited<ReturnType<typeof loadCampusAnnouncementFeed>>>();
+  jest.mocked(loadCampusAnnouncementFeed).mockReturnValueOnce(pending.promise);
+  const view = render(<AnnouncementsScreen navigation={navigation} />);
+  expect(view.getByText('正在讀取')).toBeTruthy();
+  expect(view.queryByText('這間學校的公告還沒上架。')).toBeNull();
+  expect(view.queryByText('目前沒有公告')).toBeNull();
+  await act(async () =>
+    pending.resolve({
+      announcements: [announcement],
+      sources: [],
+      allUnavailable: false,
+    }),
+  );
+  await view.findByText('校方的新公告');
+  expect(view.queryByText('這間學校的公告還沒上架。')).toBeNull();
+});
+
+test('shows unpublished copy only after an empty feed has finished loading', async () => {
+  const pending = deferred<Awaited<ReturnType<typeof loadCampusAnnouncementFeed>>>();
+  jest.mocked(loadCampusAnnouncementFeed).mockReturnValueOnce(pending.promise);
+  const view = render(<AnnouncementsScreen navigation={navigation} />);
+  expect(view.getByText('正在讀取')).toBeTruthy();
+  expect(view.queryByText('這間學校的公告還沒上架。')).toBeNull();
+  expect(view.queryByText('目前沒有公告')).toBeNull();
+  await act(async () =>
+    pending.resolve({
+      announcements: [],
+      sources: [],
+      allUnavailable: false,
+    }),
+  );
+  await view.findByText('這間學校的公告還沒上架。');
+});
+
+test('switching schools shows loading instead of the previous list or an empty school', async () => {
+  const view = render(<AnnouncementsScreen navigation={navigation} />);
+  await view.findByText('校方的新公告');
+  const pending = deferred<Awaited<ReturnType<typeof loadCampusAnnouncementFeed>>>();
+  jest.mocked(loadCampusAnnouncementFeed).mockReturnValueOnce(pending.promise);
+  mockSchool = { id: 'nthu' };
+  view.rerender(<AnnouncementsScreen navigation={navigation} />);
+  expect(view.queryByText('校方的新公告')).toBeNull();
+  expect(view.getByText('正在讀取')).toBeTruthy();
+  expect(view.queryByText('這間學校的公告還沒上架。')).toBeNull();
+  expect(view.queryByText('目前沒有公告')).toBeNull();
+  await act(async () =>
+    pending.resolve({
+      announcements: [{ ...announcement, title: '清華公告' }],
+      sources: [],
+      allUnavailable: false,
+    }),
+  );
+  await view.findByText('清華公告');
+  expect(view.queryByText('校方的新公告')).toBeNull();
+});
+
 test('switching schools hides the previous announcement list and does not keep it as stale cache', async () => {
   const view = render(<AnnouncementsScreen navigation={navigation} />);
   await view.findByText('校方的新公告');
@@ -219,16 +276,8 @@ test('keeps old announcements when the school site is down and links the office 
 });
 
 test.each([
-  [
-    'ncku',
-    '全校最新消息',
-    'https://web.ncku.edu.tw/p/403-1000-14-1.php',
-  ],
-  [
-    'ntpu',
-    '電子公文一般公告（含教務處）',
-    'https://fms.ntpu.edu.tw/km/24662',
-  ],
+  ['ncku', '全校最新消息', 'https://web.ncku.edu.tw/p/403-1000-14-1.php'],
+  ['ntpu', '電子公文一般公告（含教務處）', 'https://fms.ntpu.edu.tw/km/24662'],
 ] as const)(
   'shows unpublished copy and the official %s announcement page when that school has no items',
   async (school, office, url) => {
