@@ -23,6 +23,8 @@ export const SOURCE_NOT_CONNECTED_TEXT = ANNOUNCEMENT_EMPTY_SCHOOL_TEXT;
 export const SOURCE_DOWN_EMPTY_TEXT = '學校網站暫時連不上，可以先到學校網站看最新消息';
 export const SOURCE_DOWN_WITH_CACHE_TEXT = '學校網站暫時連不上';
 export const FIRESTORE_UNAVAILABLE_WITH_CACHE_TEXT = '暫時讀不到新公告';
+export const ANNOUNCEMENT_READ_FAILURE_TEXT = '暫時讀不到資料，請稍後再試';
+export const ANNOUNCEMENT_RETRY_TEXT = '再試一次';
 export const STALE_ANNOUNCEMENT_REASONS = ['source_down', 'firestore'] as const;
 export type StaleAnnouncementReason = (typeof STALE_ANNOUNCEMENT_REASONS)[number];
 export type AnnouncementEmptyKind = 'not_connected' | 'source_down' | 'empty' | 'has_items';
@@ -196,29 +198,34 @@ export function announcementEmptyKind(
   return 'not_connected';
 }
 
-export type AnnouncementViewPhase = 'loading' | AnnouncementEmptyKind;
+export type AnnouncementViewPhase = 'loading' | 'failed' | AnnouncementEmptyKind;
 
 export function announcementViewPhase(
   loading: true,
   announcements?: Array<unknown>,
   sources?: Array<{ status?: string; lastSuccessAt?: string | null }>,
+  failed?: boolean,
 ): 'loading';
 export function announcementViewPhase(
   loading: false,
   announcements?: Array<unknown>,
   sources?: Array<{ status?: string; lastSuccessAt?: string | null }>,
-): AnnouncementEmptyKind;
+  failed?: boolean,
+): Exclude<AnnouncementViewPhase, 'loading'>;
 export function announcementViewPhase(
   loading: boolean,
   announcements?: Array<unknown>,
   sources?: Array<{ status?: string; lastSuccessAt?: string | null }>,
+  failed?: boolean,
 ): AnnouncementViewPhase;
 export function announcementViewPhase(
   loading: boolean,
   announcements: Array<unknown> = [],
   sources: Array<{ status?: string; lastSuccessAt?: string | null }> = [],
+  failed = false,
 ): AnnouncementViewPhase {
   if (loading) return 'loading';
+  if (failed && announcements.length === 0) return 'failed';
   return announcementEmptyKind(announcements, sources);
 }
 
