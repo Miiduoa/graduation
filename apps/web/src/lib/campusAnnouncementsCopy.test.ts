@@ -15,10 +15,13 @@ import {
   SOURCE_DOWN_EMPTY_TEXT,
   SOURCE_DOWN_WITH_CACHE_TEXT,
   ANNOUNCEMENT_EMPTY_SCHOOL_TEXT,
+  ANNOUNCEMENT_READ_FAILURE_TEXT,
+  ANNOUNCEMENT_RETRY_TEXT,
   announcementEmptyHeading,
   SOURCE_NOT_CONNECTED_TEXT,
   staleAnnouncementUpdatedAt,
 } from '@campus/shared/src/campusAnnouncements';
+import { TEMPORARY_UNAVAILABLE_TEXT } from '@campus/shared/src/loadFailureCopy';
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -62,6 +65,10 @@ it('formats the stale banner in Taiwan time and keeps the empty-state copy', () 
   expect(SOURCE_DOWN_EMPTY_TEXT).toBe('學校網站暫時連不上，可以先到學校網站看最新消息');
   expect(ANNOUNCEMENT_EMPTY_SCHOOL_TEXT).toBe('這間學校的公告還沒上架。');
   expect(SOURCE_NOT_CONNECTED_TEXT).toBe(ANNOUNCEMENT_EMPTY_SCHOOL_TEXT);
+  expect(ANNOUNCEMENT_READ_FAILURE_TEXT).toBe('暫時讀不到資料，請稍後再試');
+  expect(ANNOUNCEMENT_READ_FAILURE_TEXT).toBe(TEMPORARY_UNAVAILABLE_TEXT);
+  expect(ANNOUNCEMENT_RETRY_TEXT).toBe('再試一次');
+  expect(ANNOUNCEMENT_READ_FAILURE_TEXT).not.toBe(ANNOUNCEMENT_EMPTY_SCHOOL_TEXT);
   expect(
     formatStaleAnnouncementNotice(
       staleAnnouncementUpdatedAt(
@@ -108,6 +115,9 @@ it('classifies empty feeds as never connected, source down, or confirmed empty',
   expect(announcementViewPhase(true, [{ title: '舊稿' }], [])).toBe('loading');
   expect(announcementViewPhase(false, [{ title: '舊稿' }], [])).toBe('has_items');
   expect(announcementViewPhase(false, [], [])).toBe('not_connected');
+  expect(announcementViewPhase(true, [], [], true)).toBe('loading');
+  expect(announcementViewPhase(false, [], [], true)).toBe('failed');
+  expect(announcementViewPhase(false, [{ title: '舊稿' }], [], true)).toBe('has_items');
   expect(
     announcementViewPhase(
       false,
@@ -115,6 +125,14 @@ it('classifies empty feeds as never connected, source down, or confirmed empty',
       [{ status: 'healthy', lastSuccessAt: '2026-10-12T10:05:00.000Z' }],
     ),
   ).toBe('empty');
+  expect(
+    announcementViewPhase(
+      false,
+      [],
+      [{ status: 'healthy', lastSuccessAt: '2026-10-12T10:05:00.000Z' }],
+      true,
+    ),
+  ).toBe('failed');
 });
 
 it('exposes official NCKU and NTPU announcement pages already connected in the catalog', () => {

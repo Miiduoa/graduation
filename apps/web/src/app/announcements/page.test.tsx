@@ -96,6 +96,16 @@ it.each(['teacher', 'department_head', 'admin'])(
   },
 );
 
+function expectAnnouncementReadFailure() {
+  expect(screen.getByRole('heading', { name: '暫時讀不到資料，請稍後再試' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '再試一次' })).toBeTruthy();
+  expect(screen.queryByText('這間學校的公告還沒上架。')).toBeNull();
+  expect(screen.queryByText(/最近 0 則/)).toBeNull();
+  expect(screen.queryByRole('link', { name: '教務處' })).toBeNull();
+  expect(screen.queryByText('目前沒有公開公告')).toBeNull();
+  expect(screen.queryByRole('article')).toBeNull();
+}
+
 it.each([
   [
     'permission-denied',
@@ -103,40 +113,34 @@ it.each([
   ],
   ['unavailable', Object.assign(new Error('offline'), { code: 'unavailable' })],
 ])(
-  'shows catalog office links when Firestore read fails with %s and there is no cached copy',
+  'shows a retryable unread message when Firestore read fails with %s and there is no cached copy',
   async (_code, error) => {
-    vi.mocked(getDocsFromServer).mockRejectedValue(error);
+    vi.mocked(getDocsFromServer).mockRejectedValueOnce(error);
     render(<AnnouncementsPage />);
-    expect(
-      await screen.findByRole('heading', {
-        name: '這間學校的公告還沒上架。',
-      }),
-    ).toBeTruthy();
-    expect(screen.getByRole('link', { name: '教務處' }).getAttribute('href')).toBe(
-      'https://acd.pu.edu.tw/p/403-1042-885-1.php',
-    );
-    expect(screen.getByRole('link', { name: '綜合業務組' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: '暫時讀不到資料，請稍後再試' })).toBeTruthy();
+    expectAnnouncementReadFailure();
     expect(screen.queryByText('請確認網路')).toBeNull();
     expect(screen.queryByText('暫時無法讀取公告')).toBeNull();
-    expect(screen.queryByText('目前沒有公開公告')).toBeNull();
     expect(screen.queryByText('示範資料')).toBeNull();
-    expect(screen.queryByRole('article')).toBeNull();
     expect(getDocsFromServer).toHaveBeenCalledTimes(1);
+    const pending = deferred();
+    vi.mocked(getDocsFromServer).mockReturnValue(pending.promise);
+    fireEvent.click(screen.getByRole('button', { name: '再試一次' }));
+    expectAnnouncementLoading();
+    await act(async () => pending.resolve(snapshot(announcementDocument('校園公告實際內容'))));
+    await screen.findByText('校園公告實際內容');
+    expect(screen.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
+    expect(screen.queryByText('這間學校的公告還沒上架。')).toBeNull();
   },
 );
 
-it('shows catalog office links when Firebase is not configured and never reads demo content', async () => {
+it('shows a retryable unread message when Firebase is not configured and never reads demo content', async () => {
   vi.mocked(isFirebaseConfigured).mockReturnValue(false);
   render(<AnnouncementsPage />);
-  expect(
-    await screen.findByRole('heading', {
-      name: '這間學校的公告還沒上架。',
-    }),
-  ).toBeTruthy();
-  expect(screen.getByRole('link', { name: '教務處' })).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: '暫時讀不到資料，請稍後再試' })).toBeTruthy();
+  expectAnnouncementReadFailure();
   expect(screen.queryByText('請確認網路')).toBeNull();
   expect(getDocsFromServer).not.toHaveBeenCalled();
-  expect(screen.queryByRole('article')).toBeNull();
 });
 
 it('retains the existing school-filtered legacy source when the canonical collection is empty', async () => {
@@ -162,32 +166,17 @@ it('distinguishes a legacy source failure from a successfully empty announcement
     .mockResolvedValueOnce(snapshot())
     .mockRejectedValueOnce(new Error('offline'));
   render(<AnnouncementsPage />);
-  await screen.findByRole('heading', {
-    name: '這間學校的公告還沒上架。',
-  });
+  expect(await screen.findByRole('heading', { name: '暫時讀不到資料，請稍後再試' })).toBeTruthy();
+  expectAnnouncementReadFailure();
   expect(screen.queryByText('請確認網路')).toBeNull();
-  vi.mocked(getDocsFromServer).mockImplementation((async (input: { path?: string }) => {
-    if (String(input?.path || '').includes('announcement-sources')) {
-      return {
-        empty: false,
-        docs: [
-          {
-            id: 'pu-acd',
-            data: () => ({
-              sourceId: 'pu-acd',
-              office: '教務處',
-              status: 'healthy',
-              lastSuccessAt: '2026-10-12T10:05:00.000Z',
-            }),
-          },
-        ],
-      } as never;
-    }
-    return snapshot();
-  }) as never);
-  fireEvent.click(screen.getByRole('button', { name: '更新公告' }));
-  await screen.findByRole('heading', { name: '這間學校的公告還沒上架。' });
+  const pending = deferred();
+  vi.mocked(getDocsFromServer).mockReturnValue(pending.promise);
+  fireEvent.click(screen.getByRole('button', { name: '再試一次' }));
+  expectAnnouncementLoading();
+  await act(async () => pending.resolve(snapshot()));
+  expect(await screen.findByRole('heading', { name: '這間學校的公告還沒上架。' })).toBeTruthy();
   expect(screen.getByRole('link', { name: '教務處' })).toBeTruthy();
+  expect(screen.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
   expect(screen.queryByText('請確認網路')).toBeNull();
   expect(screen.queryByText('學校網站暫時連不上')).toBeNull();
 });
@@ -304,6 +293,7 @@ function expectAnnouncementLoading() {
   expect(screen.getByText('正在讀取公告…')).toBeTruthy();
   expect(screen.queryByText(/最近 0 則/)).toBeNull();
   expect(screen.queryByText('這間學校的公告還沒上架。')).toBeNull();
+  expect(screen.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
   expect(screen.queryByText('目前沒有公開公告')).toBeNull();
   expect(screen.queryByText('目前沒有公告')).toBeNull();
   expect(screen.queryByRole('article')).toBeNull();
@@ -410,11 +400,8 @@ it('does not keep previous school announcements after switching when the next sc
     );
   });
   expect(screen.queryByText('校園公告實際內容')).toBeNull();
-  expect(
-    await screen.findByRole('heading', {
-      name: '這間學校的公告還沒上架。',
-    }),
-  ).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: '暫時讀不到資料，請稍後再試' })).toBeTruthy();
+  expectAnnouncementReadFailure();
   expect(getDocsFromServer).toHaveBeenCalledWith(
     expect.objectContaining({ path: 'schools/nthu/announcements' }),
   );
@@ -485,6 +472,7 @@ it('uses the announcement empty state when switching to a school with no announc
       name: '這間學校的公告還沒上架。',
     }),
   ).toBeTruthy();
+  expect(screen.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
   expect(getDocsFromServer).toHaveBeenCalledWith(
     expect.objectContaining({ path: 'schools/cgu/announcements' }),
   );
@@ -501,6 +489,7 @@ it('does not render a record whose stored school differs from the selected schoo
       name: '這間學校的公告還沒上架。',
     }),
   ).toBeTruthy();
+  expect(screen.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
   expect(screen.queryByText('錯誤學校資料')).toBeNull();
   expect(screen.queryByText('請確認網路')).toBeNull();
 });
@@ -604,6 +593,7 @@ it.each([
       );
     });
     expect(await screen.findByRole('heading', { name: '這間學校的公告還沒上架。' })).toBeTruthy();
+    expect(screen.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
     expect(screen.getByRole('link', { name: office }).getAttribute('href')).toBe(url);
   },
 );
@@ -658,6 +648,7 @@ it('shows no public announcements only after a successful empty fetch', async ()
     'https://acd.pu.edu.tw/p/403-1042-885-1.php',
   );
   expect(screen.queryByText('學校網站暫時連不上')).toBeNull();
+  expect(screen.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
 });
 
 it.each(['', 'staging', 'production'])(

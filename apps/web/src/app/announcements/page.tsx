@@ -8,8 +8,10 @@ import type { Announcement } from '@/lib/firebase';
 import { loadAnnouncementFeed, type AnnouncementSourceHealth } from './publicAnnouncements';
 import {
   ANNOUNCEMENT_EMPTY_SCHOOL_TEXT,
+  ANNOUNCEMENT_READ_FAILURE_TEXT,
+  ANNOUNCEMENT_RETRY_TEXT,
   announcementEmptyHeading,
-  announcementViewPhase,
+  announcementEmptyKind,
   announcementMatchesSearch,
   formatStaleAnnouncementNotice,
   listAnnouncementCatalogLinks,
@@ -31,19 +33,10 @@ type ReadyState = {
   fetchedAt: string;
   stale: boolean;
 };
-type LoadState = { status: 'loading'; schoolId: string } | ReadyState;
-
-function emptyFeed(schoolId: string, fetchedAt = new Date().toISOString()): ReadyState {
-  return {
-    status: 'ready',
-    schoolId,
-    announcements: [],
-    sources: [],
-    allUnavailable: false,
-    fetchedAt,
-    stale: false,
-  };
-}
+type LoadState =
+  | { status: 'loading'; schoolId: string }
+  | { status: 'failed'; schoolId: string }
+  | ReadyState;
 
 function feedForSchool(state: LoadState, schoolId: string): LoadState {
   return state.schoolId === schoolId ? state : { status: 'loading', schoolId };
@@ -116,7 +109,7 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
           current.status === 'ready' &&
           current.announcements.length > 0
             ? { ...current, stale: true }
-            : emptyFeed(schoolId),
+            : { status: 'failed', schoolId },
         );
       },
     );
@@ -177,7 +170,17 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
       </div>
     );
   }
-  const emptyKind = announcementViewPhase(false, view.announcements, view.sources);
+  if (view.status === 'failed') {
+    return (
+      <section className={styles.status}>
+        <h2>{ANNOUNCEMENT_READ_FAILURE_TEXT}</h2>
+        <button className="btn" type="button" onClick={() => void refresh()}>
+          {ANNOUNCEMENT_RETRY_TEXT}
+        </button>
+      </section>
+    );
+  }
+  const emptyKind = announcementEmptyKind(view.announcements, view.sources);
   const filtered = view.announcements.filter((announcement) => {
     return (
       announcementMatchesSearch(announcement, search) &&
