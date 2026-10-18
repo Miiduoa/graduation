@@ -141,7 +141,7 @@ Gemini Nano（上節，2026-10-08）把隱私與離線放在端側，能力不�
 
 **模型接通後才可以多的（未做）：** 把多張規則卡合成一句人話、解釋教材相關性、建議下一動。仍須預覽確認；不可跳過權限分級。沒有模型時行為與現在相同。
 
-裝置端、免費、夠強的接線已另案鎖定，見 [today-sense-on-device-model.md](./today-sense-on-device-model.md)。結論：第一選擇是使用者同意後下載的 Qwen3-0.6B（Web／Transformers.js）；Apple Foundation Models 與 Gemini Nano 只當合格裝置的免下載備案。模型不得自行判斷截止或寫回。本切片仍不接模型。
+裝置端模型已另案用產品卡片考過，見 [today-sense-on-device-model.md](./today-sense-on-device-model.md)。結論：**不接**。Qwen3-0.6B 會漏課程名，同系列 1.7B 會把截止時間講成觸發時間；兩邊都不達「不能改錯事實」的及格線。畫面維持規則文案。模型不得自行判斷截止或寫回。
 
 ---
 
@@ -173,4 +173,4 @@ Gemini Nano（上節，2026-10-08）把隱私與離線放在端側，能力不�
 - Mobile 今天頁完整可用：進行中點名、以及 inbox 裡 24h 內截止的作業／測驗；寫入 AsyncStorage。**不出** Mobile 端沒載入的過期作業卡。
 - 兩端都接同一套規則與文案。不部署、不寫正式資料庫。
 
-尚未做（誠實）：背景感知、系統提醒、模型、MCP／A2A、公告／課表／成績／公車進感知、代繳與代點名、把 demo `proactiveAIAgent` 改成真來源。裝置端模型怎麼接、接哪個、失敗怎麼回到本規則版，見 [today-sense-on-device-model.md](./today-sense-on-device-model.md)（研究定案，尚未接線）。
+尚未做（誠實）：背景感知、系統提醒、模型、MCP／A2A、公告／課表／成績／公車進感知、代繳與代點名、把 demo `proactiveAIAgent` 改成真來源。裝置端模型考題與「為什麼不接」見 [today-sense-on-device-model.md](./today-sense-on-device-model.md)。
