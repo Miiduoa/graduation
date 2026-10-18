@@ -112,9 +112,18 @@ function expectAnnouncementReadFailure() {
   expect(screen.getByRole('heading', { name: '暫時讀不到資料，請稍後再試' })).toBeTruthy();
   expect(screen.getByRole('button', { name: '再試一次' })).toBeTruthy();
   expect(screen.queryByText('本站還沒接上這間學校的公告。')).toBeNull();
+  expect(screen.queryByText('學校網站暫時連不上')).toBeNull();
   expect(screen.queryByText(/最近 0 則/)).toBeNull();
   expect(screen.queryByRole('link', { name: '教務處' })).toBeNull();
   expect(screen.queryByText('目前沒有公開公告')).toBeNull();
+  expect(screen.queryByRole('article')).toBeNull();
+}
+
+function expectSourceScrapeFailure() {
+  expect(screen.getByRole('heading', { name: '暫時讀不到資料，請稍後再試' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '再試一次' })).toBeTruthy();
+  expect(screen.queryByText('本站還沒接上這間學校的公告。')).toBeNull();
+  expect(screen.queryByText('學校網站暫時連不上')).toBeNull();
   expect(screen.queryByRole('article')).toBeNull();
 }
 
@@ -519,7 +528,7 @@ it('copies the real announcement detail link only after the clipboard operation 
   );
 });
 
-it('hides stale scrape rows when the school site is down and labels 暫時抓不到', async () => {
+it('hides stale scrape rows when the school site is down and shows a retryable unread message', async () => {
   vi.mocked(getDocsFromServer).mockImplementation((async (input: { path?: string }) => {
     if (String(input?.path || '').includes('announcement-sources')) {
       return {
@@ -544,16 +553,14 @@ it('hides stale scrape rows when the school site is down and labels 暫時抓不
   }) as never);
   render(<AnnouncementsPage />);
   expect(
-    await screen.findByRole('heading', {
-      name: '學校網站暫時連不上，可以先到學校網站看最新消息',
-    }),
+    await screen.findByRole('heading', { name: '暫時讀不到資料，請稍後再試' }),
   ).toBeTruthy();
-  expect(screen.getByText('暫時抓不到')).toBeTruthy();
+  expectSourceScrapeFailure();
   expect(screen.queryByText('過期稿')).toBeNull();
   expect(screen.queryByText('暫時讀不到新公告')).toBeNull();
 });
 
-it('links the office site when the school site is down and there is no cached copy', async () => {
+it('keeps official links secondary when the school site is down and there is no cached copy', async () => {
   vi.mocked(getDocsFromServer).mockImplementation((async (input: { path?: string }) => {
     if (String(input?.path || '').includes('announcement-sources')) {
       return {
@@ -575,10 +582,13 @@ it('links the office site when the school site is down and there is no cached co
   }) as never);
   render(<AnnouncementsPage />);
   expect(
-    await screen.findByRole('heading', {
-      name: '學校網站暫時連不上，可以先到學校網站看最新消息',
-    }),
+    await screen.findByRole('heading', { name: '暫時讀不到資料，請稍後再試' }),
   ).toBeTruthy();
+  expectSourceScrapeFailure();
+  expect(screen.getByRole('link', { name: '前往學校官方公告' }).getAttribute('href')).toBe(
+    'https://dorac.pu.edu.tw/p/403-1059-719-1.php',
+  );
+  expect(screen.getByRole('link', { name: '前往學校官方公告' }).className).not.toBe('btn');
   expect(screen.getByRole('link', { name: '教務處' }).getAttribute('href')).toBe(
     'https://acd.pu.edu.tw/p/403-1042-885-1.php',
   );
@@ -586,9 +596,52 @@ it('links the office site when the school site is down and there is no cached co
     'noopener noreferrer',
   );
   expect(screen.queryByText('目前沒有公開公告')).toBeNull();
-  expect(screen.queryByText('本站還沒接上這間學校的公告。')).toBeNull();
-  expect(screen.getByText('暫時抓不到')).toBeTruthy();
 });
+
+it.each([
+  ['cycu', '全校最新消息', 'https://www.cycu.edu.tw/'],
+  ['tmu', '全校最新消息', 'https://www.tmu.edu.tw/news'],
+] as const)(
+  'shows a retryable unread message when %s sources are unavailable and the list is empty',
+  async (school, office, url) => {
+    vi.mocked(getDocsFromServer).mockImplementation((async (input: { path?: string }) => {
+      const path = String(input?.path || '');
+      if (path.includes('announcement-sources')) {
+        return {
+          empty: false,
+          docs: [
+            {
+              id: `${school}-campus`,
+              data: () => ({
+                sourceId: `${school}-campus`,
+                office,
+                status: 'unavailable',
+                listUrl: url,
+              }),
+            },
+          ],
+        } as never;
+      }
+      return snapshot();
+    }) as never);
+    const params = Promise.resolve({ schoolId: school });
+    await act(async () => {
+      render(
+        <Suspense fallback={<p>載入學校</p>}>
+          <AnnouncementsPage searchParams={params} />
+        </Suspense>,
+      );
+    });
+    expect(
+      await screen.findByRole('heading', { name: '暫時讀不到資料，請稍後再試' }),
+    ).toBeTruthy();
+    expectSourceScrapeFailure();
+    expect(screen.getByRole('link', { name: office }).getAttribute('href')).toBe(url);
+    expect(screen.queryByRole('link', { name: '前往學校官方公告' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '再試一次' }));
+    await waitFor(() => expect(vi.mocked(getDocsFromServer).mock.calls.length).toBeGreaterThan(2));
+  },
+);
 
 it.each([
   ['ncku', '全校最新消息', 'https://web.ncku.edu.tw/p/422-1000-1026.php?Lang=zh-tw'],
@@ -607,6 +660,7 @@ it.each([
     });
     expect(await screen.findByRole('heading', { name: '本站還沒接上這間學校的公告。' })).toBeTruthy();
     expect(screen.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
+    expect(screen.queryByRole('button', { name: '再試一次' })).toBeNull();
     expect(screen.getByRole('link', { name: '前往學校官方公告' }).getAttribute('href')).toBe(url);
     expect(screen.getByRole('link', { name: office }).getAttribute('href')).toBe(url);
   },

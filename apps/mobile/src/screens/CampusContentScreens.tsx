@@ -35,7 +35,6 @@ import {
   formatStaleAnnouncementNotice,
   isAnnouncementSchoolVisibleToPublic,
   listAnnouncementCatalogLinks,
-  SOURCE_DOWN_EMPTY_TEXT,
   staleAnnouncementUpdatedAt,
   SUMMARY_NOTICE,
   verifiedOfficialAnnouncementUrl,
@@ -287,12 +286,13 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
           <AIButton label={ANNOUNCEMENT_RETRY_TEXT} onPress={() => void content.reload()} />
         </AICard>
       ) : !showFeed && phase === 'source_down' ? (
-        <AICard title={SOURCE_DOWN_EMPTY_TEXT}>
+        <AICard title={ANNOUNCEMENT_READ_FAILURE_TEXT}>
           <View style={{ gap: 12 }}>
-            <Text>暫時抓不到</Text>
+            <AIButton label={ANNOUNCEMENT_RETRY_TEXT} onPress={() => void content.reload()} />
             {officialUrl ? (
               <AIButton
                 label={ANNOUNCEMENT_OFFICIAL_SITE_BUTTON}
+                variant="ghost"
                 onPress={() => void Linking.openURL(officialUrl)}
               />
             ) : null}
@@ -300,6 +300,7 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
               <AIButton
                 key={item.sourceId}
                 label={item.office}
+                variant="ghost"
                 onPress={() => void Linking.openURL(item.listUrl!)}
               />
             ))}
