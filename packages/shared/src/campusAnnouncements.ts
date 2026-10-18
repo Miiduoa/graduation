@@ -1,24 +1,39 @@
 import {
   listAnnouncementCatalogLinks,
+  verifiedOfficialAnnouncementUrl,
   type AnnouncementCatalogLink,
 } from './campusAnnouncementCatalog';
 import {
   announcementQualityFlags,
   chineseDisplayTitle,
   parseAnnouncementDate,
+  selectOfficialAnnouncements,
   selectStudentAnnouncements,
   studentWallStartUtc,
+  tallyStudentWallFilter,
+  STUDENT_WALL_DROP_REASON_LABELS,
   type StudentAnnouncementRow,
+  type StudentWallDropReason,
+  type StudentWallFilterTally,
 } from './campusAnnouncementQuality';
 
-export { listAnnouncementCatalogLinks, type AnnouncementCatalogLink };
+export {
+  listAnnouncementCatalogLinks,
+  verifiedOfficialAnnouncementUrl,
+  type AnnouncementCatalogLink,
+};
 export {
   announcementQualityFlags,
   chineseDisplayTitle,
   parseAnnouncementDate,
+  selectOfficialAnnouncements,
   selectStudentAnnouncements,
   studentWallStartUtc,
+  tallyStudentWallFilter,
+  STUDENT_WALL_DROP_REASON_LABELS,
   type StudentAnnouncementRow,
+  type StudentWallDropReason,
+  type StudentWallFilterTally,
 };
 
 export const ANNOUNCEMENT_SCOPES = ['campus', 'office', 'department'] as const;
@@ -34,8 +49,12 @@ export const ANNOUNCEMENT_CATEGORIES = [
 ] as const;
 export type PublicAnnouncementCategory = (typeof ANNOUNCEMENT_CATEGORIES)[number];
 export const SOURCE_UNAVAILABLE_TEXT = '暫時抓不到';
-export const ANNOUNCEMENT_EMPTY_SCHOOL_TEXT = '這間學校的公告還沒上架。';
-export const SOURCE_NOT_CONNECTED_TEXT = ANNOUNCEMENT_EMPTY_SCHOOL_TEXT;
+export const SOURCE_NOT_CONNECTED_TEXT = '本站還沒接上這間學校的公告。';
+export const ANNOUNCEMENT_EMPTY_SCHOOL_TEXT = SOURCE_NOT_CONNECTED_TEXT;
+export const ANNOUNCEMENT_EMPTY_CONNECTED_TEXT = '目前沒有學生日常公告。';
+export const ANNOUNCEMENT_OFFICIAL_SITE_BUTTON = '前往學校官方公告';
+export const ANNOUNCEMENT_STUDENT_WALL_LABEL = '學生公告';
+export const ANNOUNCEMENT_ALL_VIEW_LABEL = '全部公告';
 export const SOURCE_DOWN_EMPTY_TEXT = '學校網站暫時連不上，可以先到學校網站看最新消息';
 export const SOURCE_DOWN_WITH_CACHE_TEXT = '學校網站暫時連不上';
 export const FIRESTORE_UNAVAILABLE_WITH_CACHE_TEXT = '暫時讀不到新公告';
@@ -248,7 +267,8 @@ export function announcementViewPhase(
 export function announcementEmptyHeading(kind: AnnouncementEmptyKind): string | null {
   if (kind === 'has_items') return null;
   if (kind === 'source_down') return SOURCE_DOWN_EMPTY_TEXT;
-  return ANNOUNCEMENT_EMPTY_SCHOOL_TEXT;
+  if (kind === 'not_connected') return SOURCE_NOT_CONNECTED_TEXT;
+  return ANNOUNCEMENT_EMPTY_CONNECTED_TEXT;
 }
 
 export const ANNOUNCEMENT_RECENT_LIMIT = 200;

@@ -15,6 +15,7 @@ import {
   announcementSourceIdsForSchool,
   isAnnouncementSchoolVisibleToPublic,
   mergeAnnouncementsById,
+  selectOfficialAnnouncements,
   selectStudentAnnouncements,
   SOURCE_UNAVAILABLE_TEXT,
 } from '@campus/shared/src/campusAnnouncements';
@@ -31,6 +32,7 @@ export type AnnouncementSourceHealth = {
 
 export type AnnouncementFeed = {
   announcements: Announcement[];
+  officialAnnouncements: Announcement[];
   sources: AnnouncementSourceHealth[];
   allUnavailable: boolean;
 };
@@ -83,7 +85,7 @@ async function querySchoolAnnouncements(
 
 export async function loadAnnouncementFeed(schoolId: string): Promise<AnnouncementFeed> {
   if (!isAnnouncementSchoolVisibleToPublic({ schoolId }, getAnnouncementVisibilityEnv())) {
-    return { announcements: [], sources: [], allUnavailable: false };
+    return { announcements: [], officialAnnouncements: [], sources: [], allUnavailable: false };
   }
   if (!isFirebaseConfigured()) throw new Error('Announcement source unavailable');
   const db = getDb();
@@ -128,8 +130,10 @@ export async function loadAnnouncementFeed(schoolId: string): Promise<Announceme
         );
   const merged = mergeAnnouncementsById([recent, ...extras]);
   const announcements = selectStudentAnnouncements(merged, sources);
+  const officialAnnouncements = selectOfficialAnnouncements(merged, sources);
   return {
     announcements,
+    officialAnnouncements,
     sources,
     allUnavailable: sources.length > 0 && sources.every((item) => item.status === 'unavailable'),
   };

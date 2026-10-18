@@ -141,3 +141,14 @@ const ANNOUNCEMENT_CATALOG_LINKS: Record<string, readonly AnnouncementCatalogLin
 export function listAnnouncementCatalogLinks(schoolId: string): AnnouncementCatalogLink[] {
   return [...(ANNOUNCEMENT_CATALOG_LINKS[schoolId] ?? [])];
 }
+
+/** 已人工查證為學校官方公告列表，不是校首頁或教務處首頁。 */
+export const VERIFIED_OFFICIAL_ANNOUNCEMENT_URLS: Record<string, string> = {
+  pu: 'https://dorac.pu.edu.tw/p/403-1059-719-1.php',
+  ncku: 'https://web.ncku.edu.tw/p/422-1000-1026.php?Lang=zh-tw',
+  ntpu: 'https://fms.ntpu.edu.tw/km/24662',
+};
+
+export function verifiedOfficialAnnouncementUrl(schoolId: string): string | null {
+  return VERIFIED_OFFICIAL_ANNOUNCEMENT_URLS[schoolId] ?? null;
+}

@@ -7,9 +7,13 @@ import { SiteShell } from '@/components/SiteShell';
 import type { Announcement } from '@/lib/firebase';
 import { loadAnnouncementFeed, type AnnouncementSourceHealth } from './publicAnnouncements';
 import {
+  ANNOUNCEMENT_ALL_VIEW_LABEL,
+  ANNOUNCEMENT_EMPTY_CONNECTED_TEXT,
   ANNOUNCEMENT_EMPTY_SCHOOL_TEXT,
+  ANNOUNCEMENT_OFFICIAL_SITE_BUTTON,
   ANNOUNCEMENT_READ_FAILURE_TEXT,
   ANNOUNCEMENT_RETRY_TEXT,
+  ANNOUNCEMENT_STUDENT_WALL_LABEL,
   announcementEmptyHeading,
   announcementEmptyKind,
   announcementMatchesSearch,
@@ -17,6 +21,7 @@ import {
   listAnnouncementCatalogLinks,
   SOURCE_DOWN_EMPTY_TEXT,
   staleAnnouncementUpdatedAt,
+  verifiedOfficialAnnouncementUrl,
 } from '@campus/shared/src/campusAnnouncements';
 import { isAnnouncementSchoolVisibleToPublic } from '@campus/shared/src/campusAnnouncements';
 import { getAnnouncementVisibilityEnv } from '@/lib/runtime';
@@ -24,10 +29,12 @@ import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import styles from './announcements.module.css';
 
 type Category = 'all' | 'academic' | 'event' | 'general';
+type ListView = 'student' | 'all';
 type ReadyState = {
   status: 'ready';
   schoolId: string;
   announcements: Announcement[];
+  officialAnnouncements: Announcement[];
   sources: AnnouncementSourceHealth[];
   allUnavailable: boolean;
   fetchedAt: string;
@@ -76,10 +83,28 @@ function OfficeSourceLinks({
   );
 }
 
+function OfficialSiteButton({ schoolId }: { schoolId: string }) {
+  const url = verifiedOfficialAnnouncementUrl(schoolId);
+  if (!url) return null;
+  return (
+    <p>
+      <a className="btn" href={url} rel="noopener noreferrer" target="_blank">
+        {ANNOUNCEMENT_OFFICIAL_SITE_BUTTON}
+      </a>
+    </p>
+  );
+}
+
+function VerifiedCatalogLinks({ schoolId }: { schoolId: string }) {
+  if (!verifiedOfficialAnnouncementUrl(schoolId)) return null;
+  return <OfficeSourceLinks links={listAnnouncementCatalogLinks(schoolId)} />;
+}
+
 function AnnouncementReader({ schoolId }: { schoolId: string }) {
   const [state, setState] = useState<LoadState>({ status: 'loading', schoolId });
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState<Category>('all');
+  const [listView, setListView] = useState<ListView>('student');
   const [pinnedOnly, setPinnedOnly] = useState(false);
   const [notice, setNotice] = useState('');
   const generation = useRef(0);
@@ -95,6 +120,7 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
             status: 'ready',
             schoolId,
             announcements: feed.announcements,
+            officialAnnouncements: feed.officialAnnouncements,
             sources: feed.sources,
             allUnavailable: feed.allUnavailable,
             fetchedAt: new Date().toISOString(),
@@ -180,8 +206,12 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
       </section>
     );
   }
-  const emptyKind = announcementEmptyKind(view.announcements, view.sources);
-  const filtered = view.announcements.filter((announcement) => {
+  const student = view.announcements;
+  const official = view.officialAnnouncements || [];
+  const listed = listView === 'all' ? official : student;
+  const emptyKind = announcementEmptyKind(student, view.sources);
+  const showFeed = official.length > 0 || student.length > 0;
+  const filtered = listed.filter((announcement) => {
     return (
       announcementMatchesSearch(announcement, search) &&
       (category === 'all' || categoryOf(announcement) === category) &&
@@ -190,8 +220,7 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
   });
   const downLinks = view.sources.filter((item) => item.status === 'unavailable' && item.listUrl);
   const showStaleNotice =
-    view.announcements.length > 0 &&
-    (view.stale || view.sources.some((item) => item.status === 'unavailable'));
+    listed.length > 0 && (view.stale || view.sources.some((item) => item.status === 'unavailable'));
   const staleSources =
     view.stale && !view.sources.some((item) => item.status === 'unavailable')
       ? [{ status: 'unavailable' as const, lastSuccessAt: view.fetchedAt }]
@@ -201,7 +230,7 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
     <div className={styles.page}>
       <div className={styles.source}>
         <p>
-          公開公告 · 最近 {view.announcements.length} 則
+          公開公告 · 最近 {listed.length} 則
           <span>
             {new Date(view.fetchedAt).toLocaleTimeString('zh-TW', {
               timeZone: 'Asia/Taipei',
@@ -215,37 +244,51 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
           更新公告
         </button>
       </div>
-      <div className={styles.toolbar}>
-        <label className={styles.search}>
-          搜尋公告
-          <input
-            type="search"
-            placeholder="標題、內容或發布單位"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-          />
-        </label>
-        <div className={styles.filters} aria-label="公告分類">
-          {categories.map((item) => (
+      {showFeed ? (
+        <div className={styles.toolbar}>
+          <label className={styles.search}>
+            搜尋公告
+            <input
+              type="search"
+              placeholder="標題、內容或發布單位"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </label>
+          <div className={styles.filters} aria-label="公告檢視">
             <button
-              key={item.id}
               type="button"
-              aria-pressed={category === item.id}
-              onClick={() => setCategory(item.id)}
+              aria-pressed={listView === 'student'}
+              onClick={() => setListView('student')}
             >
-              {item.label}
+              {ANNOUNCEMENT_STUDENT_WALL_LABEL}
             </button>
-          ))}
+            <button type="button" aria-pressed={listView === 'all'} onClick={() => setListView('all')}>
+              {ANNOUNCEMENT_ALL_VIEW_LABEL}
+            </button>
+          </div>
+          <div className={styles.filters} aria-label="公告分類">
+            {categories.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                aria-pressed={category === item.id}
+                onClick={() => setCategory(item.id)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          <label className={styles.pinnedFilter}>
+            <input
+              type="checkbox"
+              checked={pinnedOnly}
+              onChange={(event) => setPinnedOnly(event.target.checked)}
+            />
+            只看置頂
+          </label>
         </div>
-        <label className={styles.pinnedFilter}>
-          <input
-            type="checkbox"
-            checked={pinnedOnly}
-            onChange={(event) => setPinnedOnly(event.target.checked)}
-          />
-          只看置頂
-        </label>
-      </div>
+      ) : null}
       {notice && (
         <p role="status" className={styles.notice}>
           {notice}
@@ -254,25 +297,42 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
       {showStaleNotice && (
         <p role="status" className={styles.notice}>
           {formatStaleAnnouncementNotice(
-            staleAnnouncementUpdatedAt(staleSources, view.announcements),
+            staleAnnouncementUpdatedAt(staleSources, listed),
             view.stale ? 'firestore' : 'source_down',
           )}
         </p>
       )}
-      {filtered.length === 0 ? (
+      {!showFeed ? (
         <section className={styles.status}>
           {emptyKind === 'source_down' ? (
             <>
               <h2>{SOURCE_DOWN_EMPTY_TEXT}</h2>
               <p>暫時抓不到</p>
+              <OfficialSiteButton schoolId={schoolId} />
               <OfficeSourceLinks
-                links={downLinks.length ? downLinks : listAnnouncementCatalogLinks(schoolId)}
+                links={
+                  downLinks.length
+                    ? downLinks
+                    : verifiedOfficialAnnouncementUrl(schoolId)
+                      ? listAnnouncementCatalogLinks(schoolId)
+                      : []
+                }
               />
             </>
-          ) : emptyKind !== 'has_items' ? (
+          ) : (
             <>
               <h2>{announcementEmptyHeading(emptyKind) ?? ANNOUNCEMENT_EMPTY_SCHOOL_TEXT}</h2>
-              <OfficeSourceLinks links={listAnnouncementCatalogLinks(schoolId)} />
+              <OfficialSiteButton schoolId={schoolId} />
+              <VerifiedCatalogLinks schoolId={schoolId} />
+            </>
+          )}
+        </section>
+      ) : filtered.length === 0 ? (
+        <section className={styles.status}>
+          {listView === 'student' && student.length === 0 ? (
+            <>
+              <h2>{ANNOUNCEMENT_EMPTY_CONNECTED_TEXT}</h2>
+              <p>教師向、資安轉知等正式公告可到「{ANNOUNCEMENT_ALL_VIEW_LABEL}」查看。</p>
             </>
           ) : (
             <>

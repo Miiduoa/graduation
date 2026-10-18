@@ -4,7 +4,9 @@ const {
   announcementQualityFlags,
   chineseDisplayTitle,
   parseAnnouncementDate,
+  selectOfficialAnnouncements,
   selectStudentAnnouncements,
+  tallyStudentWallFilter,
   studentWallStartUtc,
 } = require('./quality');
 
@@ -95,4 +97,55 @@ test('selectStudentAnnouncements does not treat down-source scrape rows as curre
       NOW,
     ).map((row) => row.id),
   ).toEqual(['keep']);
+});
+
+test('undated and future rows stay out of both lists; staff and security stay in 全部公告', () => {
+  const rows = [
+    { id: 'keep', title: '選課公告', publishedAt: '2026-10-08T00:00:00.000Z' },
+    { id: 'none', title: '無日期稿' },
+    { id: 'future', title: '未來稿', publishedAt: '2099-01-01T00:00:00.000Z' },
+    {
+      id: 'sec',
+      title: '【漏洞預警】Cisco License 存在重大資安漏洞',
+      publishedAt: '2026-10-08T00:00:00.000Z',
+      office: '計算機與網路中心',
+    },
+    { id: 'staff', title: '點名計分單(for教師)', publishedAt: '2026-10-08T00:00:00.000Z' },
+  ];
+  expect(announcementQualityFlags({ title: '無日期稿' }, NOW)).toMatchObject({
+    studentFeed: false,
+    visible: false,
+  });
+  expect(
+    announcementQualityFlags({ title: '未來稿', publishedAt: '2099-01-01T00:00:00.000Z' }, NOW),
+  ).toMatchObject({ studentFeed: false, visible: false });
+  expect(
+    announcementQualityFlags(
+      {
+        title: '【漏洞預警】Cisco License 存在重大資安漏洞',
+        office: '計算機與網路中心',
+        publishedAt: '2026-10-08T00:00:00.000Z',
+      },
+      NOW,
+    ),
+  ).toMatchObject({ studentFeed: false, visible: true });
+  expect(selectStudentAnnouncements(rows, [], NOW).map((row) => row.id)).toEqual(['keep']);
+  expect(selectOfficialAnnouncements(rows, [], NOW).map((row) => row.id)).toEqual([
+    'keep',
+    'sec',
+    'staff',
+  ]);
+  expect(tallyStudentWallFilter(rows, [], NOW)).toEqual({
+    input: 5,
+    kept: 1,
+    duplicate: 0,
+    no_date: 1,
+    future_date: 1,
+    stale_source: 0,
+    non_announcement: 0,
+    staff: 1,
+    security: 1,
+    off_season: 0,
+    outside_wall: 0,
+  });
 });
