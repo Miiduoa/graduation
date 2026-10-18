@@ -8,6 +8,7 @@ import type { CourseSpace, InboxTask } from '../data/types';
 import {
   SENSE_EMPTY_TEXT,
   SENSE_HANDLE_PREVIEW,
+  SENSE_MOBILE_SAVE_FAILED_TEXT,
   SENSE_SECTION_TITLE,
   senseStorageKey,
 } from '@campus/shared/src/todaySense';
@@ -196,6 +197,26 @@ test('places sense cards below school inbox tasks', async () => {
   });
   expect(labels.indexOf('校務待辦')).toBeGreaterThan(-1);
   expect(labels.indexOf('校務待辦')).toBeLessThan(labels.indexOf(SENSE_SECTION_TITLE));
+});
+
+test('rolls back and says save failed when local write fails', async () => {
+  const data = result();
+  data.tasks[0] = {
+    ...data.tasks[0],
+    dueAt: new Date(Date.now() - 60 * 60 * 1000),
+  };
+  jest.mocked(loadStudentHome).mockResolvedValue(data);
+  const view = render(<StudentTodayScreen />);
+  expect(await view.findByText(/已過截止時間/)).toBeTruthy();
+  jest.mocked(AsyncStorage.setItem).mockRejectedValueOnce(new Error('disk full'));
+  fireEvent.press(view.getByRole('button', { name: '從清單移出' }));
+  fireEvent.press(view.getByRole('button', { name: '確認移出' }));
+  expect(await view.findByText(SENSE_MOBILE_SAVE_FAILED_TEXT)).toBeTruthy();
+  expect(view.getByText(/已過截止時間/)).toBeTruthy();
+  expect(view.queryByText(SENSE_EMPTY_TEXT)).toBeNull();
+  expect(view.queryByText(/已從清單移出/)).toBeNull();
+  expect(view.queryByText(/已將「.*」稍後/)).toBeNull();
+  expect(view.queryByRole('button', { name: '撤銷上次操作' })).toBeNull();
 });
 
 test('opens the live session from a sense card', async () => {

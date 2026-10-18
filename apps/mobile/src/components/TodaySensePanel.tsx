@@ -10,6 +10,7 @@ import {
   SENSE_CANCEL_ACTION,
   SENSE_EMPTY_TEXT,
   SENSE_HANDLE_CONFIRM,
+  SENSE_MOBILE_SAVE_FAILED_TEXT,
   SENSE_SECTION_NOTE,
   SENSE_SECTION_TITLE,
   SENSE_SNOOZE_CONFIRM,
@@ -66,6 +67,7 @@ export function TodaySensePanel({
   const storageKey = uid ? senseStorageKey(uid, schoolId) : '';
   const [state, setState] = useState<SenseState>(() => parseSenseState(null));
   const [hydrated, setHydrated] = useState(() => !uid);
+  const [saveError, setSaveError] = useState(false);
   const [pending, setPending] = useState<{ cardId: string; action: 'handle' | 'snooze' } | null>(
     null,
   );
@@ -74,6 +76,7 @@ export function TodaySensePanel({
   useEffect(() => {
     let cancelled = false;
     setPending(null);
+    setSaveError(false);
     if (!storageKey) {
       setState(parseSenseState(null));
       setHydrated(true);
@@ -99,10 +102,21 @@ export function TodaySensePanel({
   }, [storageKey]);
 
   const write = useCallback(
-    (next: SenseState) => {
+    async (next: SenseState) => {
+      if (!storageKey) {
+        setState(next);
+        setSaveError(false);
+        return true;
+      }
+      try {
+        await AsyncStorage.setItem(storageKey, serializeSenseState(next));
+      } catch {
+        setSaveError(true);
+        return false;
+      }
       setState(next);
-      if (!storageKey) return;
-      void AsyncStorage.setItem(storageKey, serializeSenseState(next)).catch(() => undefined);
+      setSaveError(false);
+      return true;
     },
     [storageKey],
   );
@@ -124,8 +138,7 @@ export function TodaySensePanel({
   };
 
   const confirm = (card: SenseCard, action: 'handle' | 'snooze') => {
-    write(applySenseAction(state, action, card, now));
-    setPending(null);
+    void write(applySenseAction(state, action, card, now)).then(() => setPending(null));
   };
 
   return (
@@ -134,6 +147,11 @@ export function TodaySensePanel({
         {SENSE_SECTION_TITLE}
       </Text>
       <Text style={s.note}>{SENSE_SECTION_NOTE}</Text>
+      {saveError ? (
+        <Text accessibilityRole="alert" style={s.saveError}>
+          {SENSE_MOBILE_SAVE_FAILED_TEXT}
+        </Text>
+      ) : null}
       {phase === 'unsigned' ? (
         <Text style={s.empty}>{SENSE_UNSIGNED_TEXT}</Text>
       ) : cards.length === 0 ? (
@@ -210,7 +228,7 @@ export function TodaySensePanel({
               accessibilityLabel={SENSE_UNDO_ACTION}
               onPress={() => {
                 const result = undoLastSenseAction(state, now);
-                if (result.ok) write(result.state);
+                if (result.ok) void write(result.state);
               }}
             >
               <Text style={s.link}>{SENSE_UNDO_ACTION}</Text>
@@ -233,6 +251,7 @@ const createStyles = () =>
       marginBottom: 8,
     },
     note: { color: theme.colors.muted, fontSize: 12, lineHeight: 20, marginBottom: 10 },
+    saveError: { color: theme.colors.danger, fontSize: 13, lineHeight: 22, marginBottom: 10 },
     empty: { color: theme.colors.muted, fontSize: 13, lineHeight: 23, paddingVertical: 8 },
     card: {
       backgroundColor: theme.colors.surface,

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   applySenseAction,
@@ -26,22 +26,32 @@ import {
   type SenseState,
 } from '@campus/shared/src/todaySense';
 import {
+  AGENT_CANCEL_DOWNLOAD_ACTION,
   AGENT_DECLINE_ACTION,
   AGENT_DOWNLOAD_ACTION,
   AGENT_DOWNLOAD_NOTE,
   AGENT_LOADING_TEXT,
+  AGENT_MODEL_EVENT,
   AGENT_PLAN_NOTE,
   AGENT_PLAN_TITLE,
   agentConsentStorageKey,
   assembleAgentPlan,
   canOfferOnDeviceAgent,
+  formatAgentDownloadProgress,
+  notifyAgentModelChanged,
   orderedSenseCards,
   parseAgentConsent,
   serializeAgentConsent,
   type AgentConsent,
   type AgentJudgement,
 } from '@campus/shared/src/todaySenseAgent';
-import { hasWebGpu, inferTodaySenseOrder, type AgentInfer } from '@/lib/todaySenseAgentRuntime';
+import {
+  downloadTodaySenseModel,
+  hasWebGpu,
+  inferTodaySenseOrder,
+  type AgentDownload,
+  type AgentInfer,
+} from '@/lib/todaySenseAgentRuntime';
 import styles from '../app/home.module.css';
 
 function readSenseState(storageKey: string): SenseState {
@@ -69,6 +79,7 @@ export function TodaySensePanel({
   now,
   phase,
   inferAgent = inferTodaySenseOrder,
+  downloadAgent = downloadTodaySenseModel,
   gpu,
 }: {
   ownerId: string | null;
@@ -77,6 +88,7 @@ export function TodaySensePanel({
   now: Date | null;
   phase: SensePhase;
   inferAgent?: AgentInfer;
+  downloadAgent?: AgentDownload;
   gpu?: unknown;
 }) {
   const storageKey = ownerId ? senseStorageKey(ownerId, schoolId) : '';
@@ -86,6 +98,9 @@ export function TodaySensePanel({
   const [gpuReady, setGpuReady] = useState(false);
   const [judgement, setJudgement] = useState<AgentJudgement | null>(null);
   const [agentLoading, setAgentLoading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const downloadAbort = useRef<AbortController | null>(null);
   const [loadedKey, setLoadedKey] = useState(storageKey);
   const [hydrated, setHydrated] = useState(false);
   const [pending, setPending] = useState<{ cardId: string; action: 'handle' | 'snooze' } | null>(
@@ -98,6 +113,8 @@ export function TodaySensePanel({
     setConsent('unset');
     setJudgement(null);
     setAgentLoading(false);
+    setDownloading(false);
+    setDownloadProgress(0);
     setPending(null);
     setSaveError(false);
     setHydrated(false);
@@ -113,6 +130,23 @@ export function TodaySensePanel({
   useEffect(() => {
     setGpuReady(gpu !== undefined ? Boolean(gpu) : hasWebGpu());
   }, [gpu]);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const refresh = () => {
+      const next = readConsent(consentKey);
+      setConsent(next);
+      if (next !== 'accepted') {
+        setJudgement(null);
+        setAgentLoading(false);
+      }
+    };
+    window.addEventListener(AGENT_MODEL_EVENT, refresh);
+    window.addEventListener('storage', refresh);
+    return () => {
+      window.removeEventListener(AGENT_MODEL_EVENT, refresh);
+      window.removeEventListener('storage', refresh);
+    };
+  }, [consentKey]);
 
   const clock = now ?? null;
   const { cards, hiddenCount } = useMemo(
@@ -167,13 +201,55 @@ export function TodaySensePanel({
       window.localStorage.setItem(consentKey, serializeAgentConsent(next));
     } catch {
       setConsent(next);
+      notifyAgentModelChanged();
       return;
     }
     setConsent(next);
+    notifyAgentModelChanged();
     if (next === 'refused') {
       setJudgement(null);
       setAgentLoading(false);
     }
+  };
+
+  const startDownload = () => {
+    const controller = new AbortController();
+    downloadAbort.current = controller;
+    setDownloading(true);
+    setDownloadProgress(0);
+    void downloadAgent({
+      signal: controller.signal,
+      onProgress: (info) => {
+        const percent = Number.isFinite(info.progress)
+          ? Math.max(0, Math.min(100, Math.round(info.progress)))
+          : 0;
+        setDownloadProgress(percent);
+      },
+    })
+      .then((ok) => {
+        if (downloadAbort.current !== controller) return;
+        if (controller.signal.aborted || !ok) {
+          setDownloading(false);
+          setDownloadProgress(0);
+          return;
+        }
+        writeConsent('accepted');
+        setDownloading(false);
+      })
+      .catch(() => {
+        if (downloadAbort.current !== controller) return;
+        setDownloading(false);
+        setDownloadProgress(0);
+      })
+      .finally(() => {
+        if (downloadAbort.current === controller) downloadAbort.current = null;
+      });
+  };
+
+  const cancelDownload = () => {
+    downloadAbort.current?.abort();
+    setDownloading(false);
+    setDownloadProgress(0);
   };
 
   const confirm = (card: SenseCard, action: 'handle' | 'snooze') => {
@@ -187,11 +263,12 @@ export function TodaySensePanel({
   };
 
   const offerDownload =
-    phase === 'ready' && canOfferOnDeviceAgent(gpuReady || gpu, cards.length) && consent === 'unset';
+    phase === 'ready' &&
+    canOfferOnDeviceAgent(gpuReady || gpu, cards.length) &&
+    consent === 'unset' &&
+    !downloading;
   const plan =
-    phase === 'ready' && clock && judgement
-      ? assembleAgentPlan(cards, judgement, clock)
-      : null;
+    phase === 'ready' && clock && judgement ? assembleAgentPlan(cards, judgement, clock) : null;
   const visibleCards = plan ? orderedSenseCards(cards, judgement) : cards;
 
   return (
@@ -212,11 +289,24 @@ export function TodaySensePanel({
         <div className={styles.senseAgent}>
           <p className={styles.senseWhy}>{AGENT_DOWNLOAD_NOTE}</p>
           <div className={styles.senseActions}>
-            <button type="button" className={styles.primary} onClick={() => writeConsent('accepted')}>
+            <button type="button" className={styles.primary} onClick={startDownload}>
               {AGENT_DOWNLOAD_ACTION}
             </button>
             <button type="button" className={styles.textButton} onClick={() => writeConsent('refused')}>
               {AGENT_DECLINE_ACTION}
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {downloading ? (
+        <div className={styles.senseAgent}>
+          <p className={styles.sectionNote} role="status">
+            {formatAgentDownloadProgress(downloadProgress)}
+          </p>
+          <progress max={100} value={downloadProgress} aria-label={formatAgentDownloadProgress(downloadProgress)} />
+          <div className={styles.senseActions}>
+            <button type="button" className={styles.textButton} onClick={cancelDownload}>
+              {AGENT_CANCEL_DOWNLOAD_ACTION}
             </button>
           </div>
         </div>

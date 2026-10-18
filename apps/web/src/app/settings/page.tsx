@@ -9,6 +9,13 @@ import {
   defaultNotificationPreferences,
   normalizeNotificationPreferences,
 } from '@campus/shared/src';
+import {
+  AGENT_DELETE_MODEL_ACTION,
+  AGENT_MODEL_EVENT,
+  listAcceptedAgentConsentKeys,
+  notifyAgentModelChanged,
+} from '@campus/shared/src/todaySenseAgent';
+import { deleteTodaySenseModelCache } from '@/lib/todaySenseAgentRuntime';
 
 import { SiteShell } from '@/components/SiteShell';
 import { NuniAccountPanel } from '@/components/NuniAccountPanel';
@@ -216,6 +223,26 @@ function SettingsContent({
   );
   const [localPrefsReady, setLocalPrefsReady] = useState(false);
   const [localPrefsSaved, setLocalPrefsSaved] = useState(true);
+  const [agentModelInstalled, setAgentModelInstalled] = useState(false);
+  const [agentModelMessage, setAgentModelMessage] = useState('');
+  const [deletingAgentModel, setDeletingAgentModel] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const refreshAgentModel = () => {
+      setAgentModelInstalled(listAcceptedAgentConsentKeys(window.localStorage).length > 0);
+    };
+    refreshAgentModel();
+    window.addEventListener('storage', refreshAgentModel);
+    window.addEventListener(AGENT_MODEL_EVENT, refreshAgentModel);
+    return () => {
+      window.removeEventListener('storage', refreshAgentModel);
+      window.removeEventListener(AGENT_MODEL_EVENT, refreshAgentModel);
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -829,7 +856,39 @@ function SettingsContent({
           >
             <span className={styles.value}>本機保存</span>
           </SettingRow>
+          {agentModelInstalled ? (
+            <SettingRow
+              title="裝置端模型"
+              subtitle="刪除後自動退回規則版，不再用已下載的模型排序。"
+            >
+              <button
+                type="button"
+                className="btn"
+                disabled={deletingAgentModel}
+                onClick={async () => {
+                  if (deletingAgentModel) return;
+                  setDeletingAgentModel(true);
+                  try {
+                    for (const key of listAcceptedAgentConsentKeys(window.localStorage)) {
+                      window.localStorage.removeItem(key);
+                    }
+                    const result = await deleteTodaySenseModelCache();
+                    notifyAgentModelChanged();
+                    setAgentModelInstalled(false);
+                    setAgentModelMessage(result.message);
+                  } finally {
+                    setDeletingAgentModel(false);
+                  }
+                }}
+              >
+                {AGENT_DELETE_MODEL_ACTION}
+              </button>
+            </SettingRow>
+          ) : null}
         </div>
+        {agentModelMessage ? (
+          <p role="status">{agentModelMessage}</p>
+        ) : null}
         <div>
           <Link className="btn" href={`/privacy${schoolSearch}`}>
             查看隱私政策
