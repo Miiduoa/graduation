@@ -29,7 +29,7 @@ export function inboxTaskFromAssignmentPushData(data: Record<string, unknown>): 
 }
 
 export function inboxTaskFromAssignmentNotification(n: Notification): InboxTask | null {
-  if (n.type !== 'assignment') return null;
+  if (n.type !== 'assignment' && n.type !== 'grade') return null;
   const gid = n.data?.groupId;
   const aid = n.data?.assignmentId;
   if (typeof gid !== 'string' || typeof aid !== 'string') return null;
