@@ -118,7 +118,12 @@ test('exposes cms-none demo schools to the assistant in an explicit test environ
   const previous = process.env.APP_ENV;
   process.env.APP_ENV = 'test';
   mockDocuments.set('schools/tw-demo-uni/announcements', [
-    row('demo', { title: '示範公告', origin: 'public_scrape', sourceId: 'demo' }),
+    row('demo', {
+      title: '示範公告',
+      origin: 'public_scrape',
+      sourceId: 'demo',
+      publishedAt: '2026-10-08T00:00:00.000Z',
+    }),
   ]);
   await expect(fetchAssistantAnnouncements('tw-demo-uni')).resolves.toEqual([
     expect.objectContaining({ id: 'demo', title: '示範公告' }),
@@ -188,8 +193,12 @@ test('announcement tools cannot override the caller school or create one from mo
   await expect(getAnnouncements.execute({ schoolId: 'pu' }, { schoolId: 'nthu' })).rejects.toMatchObject({ code: 'permission-denied' });
   await expect(getAnnouncements.execute({}, { schoolId: 'pu' })).rejects.toMatchObject({ code: 'permission-denied' });
   expect(mockReads).toEqual([]);
-  mockDocuments.set('schools/pu/announcements', [row('one', { title: '校方公告' })]);
-  expect(await getAnnouncements.execute({ schoolId: 'pu' }, {})).toEqual([{ id: 'one', title: '校方公告', schoolId: 'pu' }]);
+  mockDocuments.set('schools/pu/announcements', [
+    row('one', { title: '校方公告', publishedAt: '2026-10-08T00:00:00.000Z' }),
+  ]);
+  expect(await getAnnouncements.execute({ schoolId: 'pu' }, {})).toEqual([
+    { id: 'one', title: '校方公告', schoolId: 'pu', publishedAt: '2026-10-08T00:00:00.000Z' },
+  ]);
 });
 
 test('loads only the authenticated profile fields used to resolve the school context', async () => {

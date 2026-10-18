@@ -151,6 +151,7 @@ test.each(['ncku', 'ntpu', 'feu', 'mmc'] as const)(
     jest.mocked(getDocsFromServer).mockImplementation(productionEmptySchoolRead(schoolId) as never);
     await expect(loadCampusAnnouncementFeed(schoolId)).resolves.toEqual({
       announcements: [],
+      officialAnnouncements: [],
       sources: [],
       allUnavailable: false,
     });
@@ -169,6 +170,7 @@ test('does not mix leftover root-collection rows from another school into an emp
     );
   await expect(loadCampusAnnouncementFeed('ncku')).resolves.toEqual({
     announcements: [],
+    officialAnnouncements: [],
     sources: [],
     allUnavailable: false,
   });
@@ -214,6 +216,7 @@ test('hides scrape rows from dead sources and exposes the office url', async () 
   );
   await expect(loadCampusAnnouncementFeed('pu')).resolves.toMatchObject({
     announcements: [],
+    officialAnnouncements: [],
     allUnavailable: true,
     sources: [
       {
@@ -233,6 +236,7 @@ test.each(['', 'staging', 'production'])(
     jest.mocked(getRawAppEnv).mockReturnValue(env);
     await expect(loadCampusAnnouncementFeed('tw-demo-uni')).resolves.toEqual({
       announcements: [],
+      officialAnnouncements: [],
       sources: [],
       allUnavailable: false,
     });
@@ -245,6 +249,7 @@ test('loads cms-none demo school announcement feeds in an explicit test environm
   jest.mocked(getDocsFromServer).mockImplementation(async (input) => docsForPath(input, [document()]) as never);
   await expect(loadCampusAnnouncementFeed('tw-demo-uni')).resolves.toMatchObject({
     announcements: [{ id: 'a1', schoolId: 'tw-demo-uni' }],
+    officialAnnouncements: [{ id: 'a1', schoolId: 'tw-demo-uni' }],
   });
 });
 
