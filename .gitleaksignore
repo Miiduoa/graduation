@@ -12,3 +12,6 @@ a1d1202b5c4fcd3891f4974455af846f5bff6ab1:apps/mobile/eas.json:gcp-api-key:55
 # Historical emulator-only password fixture; requires demo- project and Firebase emulator hosts.
 # Reviewed exact commit/line only; keep all other Gitleaks findings active.
 15e53bae378e9ba570c1bc47d03402a130a8328f:scripts/test-env/seed.cjs:generic-api-key:20
+# Reviewed public source and migration SHA-256 checksums, not credentials.
+4977c46dd1150c4ef3c41fad733b01188edb980b:deploy/nuni-api/composed/rollback-source.json:generic-api-key:6
+4977c46dd1150c4ef3c41fad733b01188edb980b:deploy/nuni-api/composed/source.json:generic-api-key:11
