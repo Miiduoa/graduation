@@ -19,7 +19,6 @@ import {
   announcementMatchesSearch,
   formatStaleAnnouncementNotice,
   listAnnouncementCatalogLinks,
-  SOURCE_DOWN_EMPTY_TEXT,
   staleAnnouncementUpdatedAt,
   verifiedOfficialAnnouncementUrl,
 } from '@campus/shared/src/campusAnnouncements';
@@ -83,12 +82,23 @@ function OfficeSourceLinks({
   );
 }
 
-function OfficialSiteButton({ schoolId }: { schoolId: string }) {
+function OfficialSiteButton({
+  schoolId,
+  secondary = false,
+}: {
+  schoolId: string;
+  secondary?: boolean;
+}) {
   const url = verifiedOfficialAnnouncementUrl(schoolId);
   if (!url) return null;
   return (
     <p>
-      <a className="btn" href={url} rel="noopener noreferrer" target="_blank">
+      <a
+        className={secondary ? undefined : 'btn'}
+        href={url}
+        rel="noopener noreferrer"
+        target="_blank"
+      >
         {ANNOUNCEMENT_OFFICIAL_SITE_BUTTON}
       </a>
     </p>
@@ -306,9 +316,13 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
         <section className={styles.status}>
           {emptyKind === 'source_down' ? (
             <>
-              <h2>{SOURCE_DOWN_EMPTY_TEXT}</h2>
-              <p>暫時抓不到</p>
-              <OfficialSiteButton schoolId={schoolId} />
+              <h2>{ANNOUNCEMENT_READ_FAILURE_TEXT}</h2>
+              <p>
+                <button className="btn" type="button" onClick={() => void refresh()}>
+                  {ANNOUNCEMENT_RETRY_TEXT}
+                </button>
+              </p>
+              <OfficialSiteButton schoolId={schoolId} secondary />
               <OfficeSourceLinks
                 links={
                   downLinks.length

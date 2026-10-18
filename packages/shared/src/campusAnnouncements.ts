@@ -55,11 +55,11 @@ export const ANNOUNCEMENT_EMPTY_CONNECTED_TEXT = '目前沒有學生日常公告
 export const ANNOUNCEMENT_OFFICIAL_SITE_BUTTON = '前往學校官方公告';
 export const ANNOUNCEMENT_STUDENT_WALL_LABEL = '學生公告';
 export const ANNOUNCEMENT_ALL_VIEW_LABEL = '全部公告';
-export const SOURCE_DOWN_EMPTY_TEXT = '學校網站暫時連不上，可以先到學校網站看最新消息';
-export const SOURCE_DOWN_WITH_CACHE_TEXT = '學校網站暫時連不上';
-export const FIRESTORE_UNAVAILABLE_WITH_CACHE_TEXT = '暫時讀不到新公告';
 export const ANNOUNCEMENT_READ_FAILURE_TEXT = '暫時讀不到資料，請稍後再試';
 export const ANNOUNCEMENT_RETRY_TEXT = '再試一次';
+export const SOURCE_DOWN_EMPTY_TEXT = ANNOUNCEMENT_READ_FAILURE_TEXT;
+export const SOURCE_DOWN_WITH_CACHE_TEXT = '學校網站暫時連不上';
+export const FIRESTORE_UNAVAILABLE_WITH_CACHE_TEXT = '暫時讀不到新公告';
 export const STALE_ANNOUNCEMENT_REASONS = ['source_down', 'firestore'] as const;
 export type StaleAnnouncementReason = (typeof STALE_ANNOUNCEMENT_REASONS)[number];
 export type AnnouncementEmptyKind = 'not_connected' | 'source_down' | 'empty' | 'has_items';
@@ -266,7 +266,7 @@ export function announcementViewPhase(
 
 export function announcementEmptyHeading(kind: AnnouncementEmptyKind): string | null {
   if (kind === 'has_items') return null;
-  if (kind === 'source_down') return SOURCE_DOWN_EMPTY_TEXT;
+  if (kind === 'source_down') return ANNOUNCEMENT_READ_FAILURE_TEXT;
   if (kind === 'not_connected') return SOURCE_NOT_CONNECTED_TEXT;
   return ANNOUNCEMENT_EMPTY_CONNECTED_TEXT;
 }
