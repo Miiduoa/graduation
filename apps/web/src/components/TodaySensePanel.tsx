@@ -25,6 +25,23 @@ import {
   type SensePhase,
   type SenseState,
 } from '@campus/shared/src/todaySense';
+import {
+  AGENT_DECLINE_ACTION,
+  AGENT_DOWNLOAD_ACTION,
+  AGENT_DOWNLOAD_NOTE,
+  AGENT_LOADING_TEXT,
+  AGENT_PLAN_NOTE,
+  AGENT_PLAN_TITLE,
+  agentConsentStorageKey,
+  assembleAgentPlan,
+  canOfferOnDeviceAgent,
+  orderedSenseCards,
+  parseAgentConsent,
+  serializeAgentConsent,
+  type AgentConsent,
+  type AgentJudgement,
+} from '@campus/shared/src/todaySenseAgent';
+import { hasWebGpu, inferTodaySenseOrder, type AgentInfer } from '@/lib/todaySenseAgentRuntime';
 import styles from '../app/home.module.css';
 
 function readSenseState(storageKey: string): SenseState {
@@ -36,21 +53,39 @@ function readSenseState(storageKey: string): SenseState {
   }
 }
 
+function readConsent(storageKey: string): AgentConsent {
+  if (!storageKey || typeof window === 'undefined') return parseAgentConsent(null);
+  try {
+    return parseAgentConsent(window.localStorage.getItem(storageKey));
+  } catch {
+    return parseAgentConsent(null);
+  }
+}
+
 export function TodaySensePanel({
   ownerId,
   schoolId,
   items,
   now,
   phase,
+  inferAgent = inferTodaySenseOrder,
+  gpu,
 }: {
   ownerId: string | null;
   schoolId?: string | null;
   items: SenseInputItem[];
   now: Date | null;
   phase: SensePhase;
+  inferAgent?: AgentInfer;
+  gpu?: unknown;
 }) {
   const storageKey = ownerId ? senseStorageKey(ownerId, schoolId) : '';
+  const consentKey = ownerId ? agentConsentStorageKey(ownerId, schoolId) : '';
   const [state, setState] = useState<SenseState>(() => parseSenseState(null));
+  const [consent, setConsent] = useState<AgentConsent>('unset');
+  const [gpuReady, setGpuReady] = useState(false);
+  const [judgement, setJudgement] = useState<AgentJudgement | null>(null);
+  const [agentLoading, setAgentLoading] = useState(false);
   const [loadedKey, setLoadedKey] = useState(storageKey);
   const [hydrated, setHydrated] = useState(false);
   const [pending, setPending] = useState<{ cardId: string; action: 'handle' | 'snooze' } | null>(
@@ -60,6 +95,9 @@ export function TodaySensePanel({
   if (loadedKey !== storageKey) {
     setLoadedKey(storageKey);
     setState(parseSenseState(null));
+    setConsent('unset');
+    setJudgement(null);
+    setAgentLoading(false);
     setPending(null);
     setSaveError(false);
     setHydrated(false);
@@ -67,9 +105,14 @@ export function TodaySensePanel({
   useEffect(() => {
     setPending(null);
     setSaveError(false);
+    setJudgement(null);
     setState(readSenseState(storageKey));
+    setConsent(readConsent(consentKey));
     setHydrated(true);
-  }, [storageKey]);
+  }, [storageKey, consentKey]);
+  useEffect(() => {
+    setGpuReady(gpu !== undefined ? Boolean(gpu) : hasWebGpu());
+  }, [gpu]);
 
   const clock = now ?? null;
   const { cards, hiddenCount } = useMemo(
@@ -79,6 +122,25 @@ export function TodaySensePanel({
         : { cards: [] as SenseCard[], hiddenCount: 0 },
     [phase, clock, items, state],
   );
+  const cardIds = cards.map((card) => card.id).join('|');
+
+  useEffect(() => {
+    if (phase !== 'ready' || !clock || consent !== 'accepted' || cards.length < 2) {
+      setJudgement(null);
+      setAgentLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setAgentLoading(true);
+    inferAgent(cards, clock).then((next) => {
+      if (cancelled) return;
+      setJudgement(next);
+      setAgentLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [phase, clock, consent, cardIds, inferAgent, cards.length]);
 
   if (phase === 'hidden' || phase === 'loading' || phase === 'error' || !clock) return null;
   if (phase === 'ready' && !hydrated) return null;
@@ -96,6 +158,24 @@ export function TodaySensePanel({
     return true;
   };
 
+  const writeConsent = (next: Exclude<AgentConsent, 'unset'>) => {
+    if (!consentKey || typeof window === 'undefined') {
+      setConsent(next);
+      return;
+    }
+    try {
+      window.localStorage.setItem(consentKey, serializeAgentConsent(next));
+    } catch {
+      setConsent(next);
+      return;
+    }
+    setConsent(next);
+    if (next === 'refused') {
+      setJudgement(null);
+      setAgentLoading(false);
+    }
+  };
+
   const confirm = (card: SenseCard, action: 'handle' | 'snooze') => {
     write(applySenseAction(state, action, card, clock));
     setPending(null);
@@ -105,6 +185,14 @@ export function TodaySensePanel({
     const result = undoLastSenseAction(state, clock);
     if (result.ok) write(result.state);
   };
+
+  const offerDownload =
+    phase === 'ready' && canOfferOnDeviceAgent(gpuReady || gpu, cards.length) && consent === 'unset';
+  const plan =
+    phase === 'ready' && clock && judgement
+      ? assembleAgentPlan(cards, judgement, clock)
+      : null;
+  const visibleCards = plan ? orderedSenseCards(cards, judgement) : cards;
 
   return (
     <section className={styles.section} aria-labelledby="today-sense-title">
@@ -120,13 +208,45 @@ export function TodaySensePanel({
           {SENSE_SAVE_FAILED_TEXT}
         </p>
       ) : null}
+      {offerDownload ? (
+        <div className={styles.senseAgent}>
+          <p className={styles.senseWhy}>{AGENT_DOWNLOAD_NOTE}</p>
+          <div className={styles.senseActions}>
+            <button type="button" className={styles.primary} onClick={() => writeConsent('accepted')}>
+              {AGENT_DOWNLOAD_ACTION}
+            </button>
+            <button type="button" className={styles.textButton} onClick={() => writeConsent('refused')}>
+              {AGENT_DECLINE_ACTION}
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {consent === 'accepted' && agentLoading ? (
+        <p className={styles.sectionNote}>{AGENT_LOADING_TEXT}</p>
+      ) : null}
+      {plan && plan.length > 0 ? (
+        <div className={styles.senseAgent}>
+          <p className={styles.senseMeta}>{AGENT_PLAN_TITLE}</p>
+          <p className={styles.sectionNote}>{AGENT_PLAN_NOTE}</p>
+          <ol className={styles.sensePlan}>
+            {plan.map((row) => (
+              <li key={row.card.id}>
+                <strong>
+                  {row.card.title} · {row.card.courseName}
+                </strong>
+                <span>{row.reasonText}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
       {phase === 'unsigned' ? (
         <p className={styles.empty}>{SENSE_UNSIGNED_TEXT}</p>
       ) : cards.length === 0 ? (
         <p className={styles.empty}>{SENSE_EMPTY_TEXT}</p>
       ) : (
         <ul className={styles.senseList}>
-          {cards.map((card) => (
+          {visibleCards.map((card) => (
             <li key={card.id} className={styles.senseCard}>
               <h3>{card.title}</h3>
               <p className={styles.senseMeta}>{card.courseName}</p>

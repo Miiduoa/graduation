@@ -18,9 +18,9 @@ const contentSecurityPolicy = [
   "img-src 'self' data: blob: https:",
   "font-src 'self' data: https:",
   "style-src 'self' 'unsafe-inline' https:",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'",
   "worker-src 'self' blob:",
-  "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net https://*.fly.dev https://*.web.app https://*.firebaseapp.com wss:" + emulatorConnectSrc,
+  "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net https://*.fly.dev https://*.web.app https://*.firebaseapp.com https://huggingface.co https://*.huggingface.co https://*.hf.co wss:" + emulatorConnectSrc,
 ].join('; ');
 
 const securityHeaders = [
@@ -37,6 +37,8 @@ const nextConfig: NextConfig = {
   output: 'standalone',
   poweredByHeader: false,
   agentRules: false,
+  transpilePackages: ['@huggingface/transformers'],
+  serverExternalPackages: ['@huggingface/transformers', 'onnxruntime-node', 'onnxruntime-web'],
   async rewrites() {
     return legacyRewrites(legacyEnabled());
   },
