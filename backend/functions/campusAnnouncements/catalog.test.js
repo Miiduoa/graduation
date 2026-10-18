@@ -43,6 +43,10 @@ test('non-demo schools at least configure campus news and academic affairs', () 
   for (const school of SCHOOLS.filter((item) => item.demo !== true)) {
     const sources = listSources(school.schoolId);
     expect(sources.some((item) => item.scope === 'campus')).toBe(true);
+    if (school.schoolId === 'ncku') {
+      expect(sources.map((item) => item.sourceId)).toEqual(['ncku-campus']);
+      continue;
+    }
     expect(sources.some((item) => /教務/.test(item.office))).toBe(true);
   }
 });
@@ -110,26 +114,21 @@ test('shared catalog links stay aligned with backend sources', () => {
 test('NCKU and NTPU keep school-scoped public lists and do not share sources', () => {
   const ncku = listSources('ncku');
   const ntpu = listSources('ntpu');
-  expect(ncku.map((item) => item.office)).toEqual(['全校最新消息', '教務處', '學務處']);
+  expect(ncku.map((item) => item.office)).toEqual(['全校最新消息']);
   expect(ncku.every((item) => item.schoolId === 'ncku')).toBe(true);
-  expect(ncku).toHaveLength(3);
+  expect(ncku).toHaveLength(1);
+  expect(ncku[0].listUrl).toBe('https://web.ncku.edu.tw/p/422-1000-1026.php?Lang=zh-tw');
   expect(ncku.every((item) => item.parsers.length >= 2)).toBe(true);
-  expect(ncku.find((item) => item.sourceId === 'ncku-aca').listUrl).toBe(
-    'https://acad.ncku.edu.tw/p/403-1025-397-1.php',
-  );
+  expect(ncku.some((item) => item.sourceId === 'ncku-aca')).toBe(false);
+  expect(JSON.stringify(ncku)).not.toContain('403-1025-397');
   expect(ntpu.every((item) => item.schoolId === 'ntpu')).toBe(true);
-  expect(ntpu.map((item) => item.office)).toEqual([
-    '電子公文一般公告（含教務處）',
-    '總務處',
-    '學生會',
-  ]);
-  expect(ntpu.map((item) => item.parsers)).toEqual([
-    PARSER_PRESETS.iweb,
-    PARSER_PRESETS.iweb,
-    PARSER_PRESETS.iweb,
-  ]);
+  expect(ntpu.map((item) => item.office)).toEqual(['電子公文一般公告（含教務處）']);
+  expect(ntpu.map((item) => item.parsers)).toEqual([PARSER_PRESETS.iweb]);
   expect(ntpu.find((item) => item.sourceId === 'ntpu-campus').listUrl).toBe(
     'https://fms.ntpu.edu.tw/km/24662',
+  );
+  expect(ntpu.some((item) => item.sourceId === 'ntpu-oga' || item.sourceId === 'ntpu-su')).toBe(
+    false,
   );
   expect(ntpu.every((item) => item.fragile !== 'spa')).toBe(true);
   expect(ntpu.map((item) => item.listUrl).some((url) => url.includes('ncku.edu.tw'))).toBe(false);

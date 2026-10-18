@@ -57,23 +57,33 @@ test('reads current announcement producers and preserves document identity and t
   ]);
 });
 
-test('keeps stale scrape rows when a source is down and only fails when nothing remains', async () => {
+test('hides stale scrape rows when a source is down and fails with 暫時抓不到 when nothing remains', async () => {
   mockDocuments.set('schools/pu/announcements', [
-    row('stale', { title: '過期稿', origin: 'public_scrape', sourceId: 'pu-acd' }),
-    row('other', { title: '學務處', origin: 'public_scrape', sourceId: 'pu-osa' }),
+    row('stale', {
+      title: '選課公告',
+      origin: 'public_scrape',
+      sourceId: 'pu-acd',
+      publishedAt: '2026-10-01T00:00:00.000Z',
+    }),
+    row('other', {
+      title: '宿舍申請',
+      origin: 'public_scrape',
+      sourceId: 'pu-osa',
+      publishedAt: '2026-10-08T00:00:00.000Z',
+    }),
   ]);
   mockDocuments.set('schools/pu/announcement-sources', [
     row('pu-acd', { sourceId: 'pu-acd', office: '教務處', status: 'unavailable' }),
     row('pu-osa', { sourceId: 'pu-osa', office: '學務處', status: 'healthy' }),
   ]);
-  expect((await fetchAssistantAnnouncements('pu')).map((row) => row.id)).toEqual(['stale', 'other']);
+  expect((await fetchAssistantAnnouncements('pu')).map((row) => row.id)).toEqual(['other']);
   mockDocuments.set('schools/pu/announcements', []);
   mockDocuments.set('schools/pu/announcement-sources', [
     row('pu-acd', { sourceId: 'pu-acd', status: 'unavailable' }),
     row('pu-osa', { sourceId: 'pu-osa', status: 'unavailable' }),
   ]);
   await expect(fetchAssistantAnnouncements('pu')).rejects.toMatchObject({
-    message: '學校網站暫時連不上，可以先到學校網站看最新消息',
+    message: '暫時抓不到',
   });
 });
 

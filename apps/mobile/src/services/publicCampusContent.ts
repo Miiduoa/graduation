@@ -19,7 +19,8 @@ import {
   announcementSourceIdsForSchool,
   isAnnouncementSchoolVisibleToPublic,
   mergeAnnouncementsById,
-  SOURCE_DOWN_EMPTY_TEXT,
+  selectStudentAnnouncements,
+  SOURCE_UNAVAILABLE_TEXT,
 } from '@campus/shared/src/campusAnnouncements';
 import { getRawAppEnv } from './release';
 
@@ -118,7 +119,10 @@ function announcement(document: SourceDocument, schoolId: string): Announcement 
       : 'general',
     pinned: data.pinned === true,
     attachments,
-  };
+    studentFeed: data.studentFeed !== false,
+    visible: data.visible !== false,
+    audience: typeof data.audience === 'string' ? data.audience : undefined,
+  } as Announcement;
 }
 
 export type AnnouncementSourceHealth = {
@@ -147,7 +151,7 @@ async function loadAnnouncementSources(schoolId: string): Promise<AnnouncementSo
       sourceId: typeof data.sourceId === 'string' ? data.sourceId : document.id,
       office: typeof data.office === 'string' ? data.office : document.id,
       status: unavailable ? 'unavailable' : 'healthy',
-      message: unavailable ? SOURCE_DOWN_EMPTY_TEXT : '',
+      message: unavailable ? SOURCE_UNAVAILABLE_TEXT : '',
       listUrl: isPublicWebUrl(data.listUrl) ? data.listUrl : undefined,
       lastSuccessAt: dateString(data.lastSuccessAt) || undefined,
     };
@@ -172,7 +176,9 @@ async function loadAnnouncementRows(
   });
 }
 
-export async function loadCampusAnnouncementFeed(schoolId: string): Promise<CampusAnnouncementFeed> {
+export async function loadCampusAnnouncementFeed(
+  schoolId: string,
+): Promise<CampusAnnouncementFeed> {
   if (!isAnnouncementSchoolVisibleToPublic({ schoolId }, getRawAppEnv())) {
     return { announcements: [], sources: [], allUnavailable: false };
   }
@@ -201,8 +207,10 @@ export async function loadCampusAnnouncementFeed(schoolId: string): Promise<Camp
             ),
           ),
         );
+  const merged = mergeAnnouncementsById([recent, ...extras]);
+  const announcements = selectStudentAnnouncements(merged, sources);
   return {
-    announcements: mergeAnnouncementsById([recent, ...extras]),
+    announcements,
     sources,
     allUnavailable: sources.length > 0 && sources.every((item) => item.status === 'unavailable'),
   };

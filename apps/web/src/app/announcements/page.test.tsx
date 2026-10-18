@@ -515,7 +515,7 @@ it('copies the real announcement detail link only after the clipboard operation 
   );
 });
 
-it('keeps old announcements when the school site is down and shows the last Taiwan update time', async () => {
+it('hides stale scrape rows when the school site is down and labels 暫時抓不到', async () => {
   vi.mocked(getDocsFromServer).mockImplementation((async (input: { path?: string }) => {
     if (String(input?.path || '').includes('announcement-sources')) {
       return {
@@ -539,10 +539,14 @@ it('keeps old announcements when the school site is down and shows the last Taiw
     );
   }) as never);
   render(<AnnouncementsPage />);
-  await screen.findByText('過期稿');
-  expect(screen.getByText('最後更新 10/12 18:05，學校網站暫時連不上')).toBeTruthy();
+  expect(
+    await screen.findByRole('heading', {
+      name: '學校網站暫時連不上，可以先到學校網站看最新消息',
+    }),
+  ).toBeTruthy();
+  expect(screen.getByText('暫時抓不到')).toBeTruthy();
+  expect(screen.queryByText('過期稿')).toBeNull();
   expect(screen.queryByText('暫時讀不到新公告')).toBeNull();
-  expect(screen.queryByText('暫時抓不到')).toBeNull();
 });
 
 it('links the office site when the school site is down and there is no cached copy', async () => {
@@ -579,11 +583,11 @@ it('links the office site when the school site is down and there is no cached co
   );
   expect(screen.queryByText('目前沒有公開公告')).toBeNull();
   expect(screen.queryByText('這間學校的公告還沒上架。')).toBeNull();
-  expect(screen.queryByText('暫時抓不到')).toBeNull();
+  expect(screen.getByText('暫時抓不到')).toBeTruthy();
 });
 
 it.each([
-  ['ncku', '全校最新消息', 'https://web.ncku.edu.tw/p/403-1000-14-1.php'],
+  ['ncku', '全校最新消息', 'https://web.ncku.edu.tw/p/422-1000-1026.php?Lang=zh-tw'],
   ['ntpu', '電子公文一般公告（含教務處）', 'https://fms.ntpu.edu.tw/km/24662'],
 ] as const)(
   'shows unpublished copy and the official %s announcement page when that school has no items',
@@ -604,7 +608,7 @@ it.each([
 );
 
 it.each([
-  ['ncku', '全校最新消息', 'https://web.ncku.edu.tw/p/403-1000-14-1.php'],
+  ['ncku', '全校最新消息', 'https://web.ncku.edu.tw/p/422-1000-1026.php?Lang=zh-tw'],
   ['ntpu', '電子公文一般公告（含教務處）', 'https://fms.ntpu.edu.tw/km/24662'],
 ] as const)(
   'keeps unpublished copy for %s without querying the root announcements collection',

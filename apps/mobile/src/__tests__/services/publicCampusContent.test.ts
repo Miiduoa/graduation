@@ -186,7 +186,7 @@ test.each(['ncku', 'ntpu'] as const)(
   },
 );
 
-test('keeps scrape rows from dead sources and exposes the office url', async () => {
+test('hides scrape rows from dead sources and exposes the office url', async () => {
   const scrape = document({
     ...row,
     origin: 'public_scrape',
@@ -213,12 +213,13 @@ test('keeps scrape rows from dead sources and exposes the office url', async () 
     ) as never,
   );
   await expect(loadCampusAnnouncementFeed('pu')).resolves.toMatchObject({
-    announcements: [{ title: '校方公告' }],
+    announcements: [],
     allUnavailable: true,
     sources: [
       {
         office: '教務處',
         status: 'unavailable',
+        message: '暫時抓不到',
         listUrl: 'https://acd.pu.edu.tw/p/403-1042-885-1.php',
         lastSuccessAt: '2026-10-12T10:05:00.000Z',
       },

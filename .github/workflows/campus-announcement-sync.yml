@@ -1,5 +1,5 @@
-# 晉瑋已核准：每天兩次同步 pu 公告（台北 07:00、11:30）；只寫 schools/{schoolId}/announcements 與 announcement-sources。
-# 成大／北大預設只探測、不寫入。要寫入需先 dry-run 通過，再把 schoolId 加進 CAMPUS_ANNOUNCEMENT_SYNC_SCHOOLS。
+# 晉瑋已核准：每天兩次同步 pu、ncku、ntpu 公告（台北 07:00、11:30）；只寫 schools/{schoolId}/announcements 與 announcement-sources。
+# 寫入學校以 CAMPUS_ANNOUNCEMENT_SYNC_SCHOOLS 為準，未設時用 pu,ncku,ntpu；不要一次掃其他學校。
 # 要停：拿掉 schedule，或刪掉 production 環境的 CAMPUS_ANNOUNCEMENT_SYNC_ENABLED。
 name: Campus announcement sync
 
@@ -65,6 +65,7 @@ jobs:
         if: ${{ env.WRITE == 'true' }}
         env:
           CAMPUS_ANNOUNCEMENT_SYNC_ENABLED: ${{ secrets.CAMPUS_ANNOUNCEMENT_SYNC_ENABLED }}
+          CAMPUS_ANNOUNCEMENT_SYNC_SCHOOLS: ${{ secrets.CAMPUS_ANNOUNCEMENT_SYNC_SCHOOLS }}
           ANNOUNCEMENT_SYNC_SA_JSON: ${{ secrets.ANNOUNCEMENT_SYNC_SA_JSON }}
         run: |
           if [ -z "$ANNOUNCEMENT_SYNC_SA_JSON" ]; then
@@ -75,7 +76,24 @@ jobs:
           trap 'rm -f "$GOOGLE_APPLICATION_CREDENTIALS"' EXIT
           umask 077
           printf '%s' "$ANNOUNCEMENT_SYNC_SA_JSON" > "$GOOGLE_APPLICATION_CREDENTIALS"
-          pnpm --filter functions sync:announcements --school "$SCHOOL_ID" --write
+          SCHOOLS="${CAMPUS_ANNOUNCEMENT_SYNC_SCHOOLS:-}"
+          if [ -z "$SCHOOLS" ]; then
+            if [ "${{ github.event_name }}" = "schedule" ]; then
+              SCHOOLS="pu,ncku,ntpu"
+            else
+              SCHOOLS="$SCHOOL_ID"
+            fi
+          fi
+          APPROVED=" pu ncku ntpu "
+          IFS=', ' read -ra IDS <<< "$SCHOOLS"
+          for id in "${IDS[@]}"; do
+            [ -z "$id" ] && continue
+            case "$APPROVED" in
+              *" $id "*) ;;
+              *) echo "::error::未核准寫入 $id"; exit 1 ;;
+            esac
+            pnpm --filter functions sync:announcements --school "$id" --write
+          done
 
   probe:
     name: Probe NCKU and NTPU sources

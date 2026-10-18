@@ -275,6 +275,7 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
       ) : phase === 'source_down' ? (
         <AICard title={SOURCE_DOWN_EMPTY_TEXT}>
           <View style={{ gap: 12 }}>
+            <Text>暫時抓不到</Text>
             {(downLinks.length ? downLinks : listAnnouncementCatalogLinks(school.id)).map(
               (item) => (
                 <AIButton
