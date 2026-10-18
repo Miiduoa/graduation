@@ -37,8 +37,25 @@ const nextConfig: NextConfig = {
   output: 'standalone',
   poweredByHeader: false,
   agentRules: false,
-  transpilePackages: ['@huggingface/transformers'],
-  serverExternalPackages: ['@huggingface/transformers', 'onnxruntime-node', 'onnxruntime-web'],
+  // 4B 只在瀏覽器以 Transformers.js 下載並推論。Next 已預設把
+  // @huggingface/transformers 當 server external，不可再列入 transpilePackages，
+  // 否則與 serverExternalPackages 衝突，Turbopack 建置會失敗。
+  // 原生 Node 綁定不進瀏覽器包；權重也不進伺服器映像。
+  serverExternalPackages: ['onnxruntime-node'],
+  turbopack: {
+    resolveAlias: {
+      'onnxruntime-node': { browser: './src/lib/nodeNativeStub.ts' },
+      sharp: { browser: './src/lib/nodeNativeStub.ts' },
+    },
+  },
+  webpack: (config) => {
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      'onnxruntime-node$': false,
+      sharp$: false,
+    };
+    return config;
+  },
   async rewrites() {
     return legacyRewrites(legacyEnabled());
   },
