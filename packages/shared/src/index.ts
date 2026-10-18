@@ -95,6 +95,7 @@ export * from './publicDiningCatalog';
 export * from './campusAnnouncements';
 export * from './loadFailureCopy';
 export * from './todaySense';
+export * from './todaySenseAgent';
 export * from './wakeAwareRequest';
 export * from './foodPageCopy';
 export * from './signedInSocialReads';

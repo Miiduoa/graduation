@@ -777,6 +777,25 @@
   line-height: 1.7;
   margin: 8px 0 0;
 }
+.senseAgent {
+  margin-top: 12px;
+}
+.sensePlan {
+  margin: 8px 0 0;
+  padding-left: 1.2em;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.sensePlan li {
+  margin: 0 0 8px;
+}
+.sensePlan strong {
+  display: block;
+  font-weight: 600;
+}
+.sensePlan span {
+  color: var(--soft);
+}
 .schoolAccess {
   border-top: 1px solid var(--line);
   padding-top: 20px;
