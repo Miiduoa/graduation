@@ -499,6 +499,14 @@ jest.mock('../screens/HelpScreen', () => {
   const { Text } = require('react-native');
   return { __esModule: true, HelpScreen: () => React.createElement(Text, null, 'HelpScreen') };
 });
+jest.mock('../screens/HomeworkSubmitScreen', () => {
+  const React = require('react');
+  const { Text } = require('react-native');
+  return {
+    __esModule: true,
+    default: () => React.createElement(Text, null, 'HomeworkSubmitScreen'),
+  };
+});
 jest.mock('../screens/IndoorFloorMapScreen', () => {
   const React = require('react');
   const { Text } = require('react-native');
@@ -993,7 +1001,6 @@ test.each([
   ['TeachingEvaluation', '教學評量分析尚未開放'],
   ['AIStudyBuddy', '學習夥伴配對尚未開放'],
   ['LifeRequests', '線上申請尚未開放'],
-  ['HomeworkSubmit', '此入口尚未提供線上繳交'],
   ['MistakeRepertoire', '錯題整理尚未開放'],
   ['StudentInbox', '待辦彙整尚未開放'],
   ['AITrustCard', '使用紀錄彙整尚未開放'],
@@ -1114,11 +1121,17 @@ test('message landing reaches live private conversations and its old alias has n
   fireEvent.press(view.getByText('開啟群組'));
   await waitFor(() => expect(view.getByText('GroupsScreen')).toBeTruthy());
 });
-test('assignment deep links never mount the simulated submission page', async () => {
+test('HomeworkSubmit mounts the live text submission page', async () => {
+  const { view, navigation } = await mount(LearnStack);
+  act(() => navigation.navigate('HomeworkSubmit', { courseId: 'course-a', hwId: 'hw-a' }));
+  expect(view.getByText('HomeworkSubmitScreen')).toBeTruthy();
+  expect(view.queryByText(/此入口尚未提供線上繳交/)).toBeNull();
+});
+test('assignment deep links open the live text submission page', async () => {
   const { view, navigation } = await mount(MessagesStack);
   act(() => navigation.navigate('AssignmentDetail', { assignmentId: 'A001', groupId: 'G001' }));
-  expect(view.getByText(/此作業入口尚未提供線上繳交/)).toBeTruthy();
-  expect(view.queryByText('提交作業')).toBeNull();
+  expect(view.getByText('HomeworkSubmitScreen')).toBeTruthy();
+  expect(view.queryByText(/此作業入口尚未提供線上繳交/)).toBeNull();
 });
 
 test.each([MeStack, LearnStack])(
