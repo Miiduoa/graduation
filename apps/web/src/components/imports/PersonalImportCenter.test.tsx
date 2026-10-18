@@ -6,6 +6,8 @@ import {
   personalImportUndoBody,
   personalImportUndoneNotice,
 } from '@campus/shared';
+import { readPersonalImportDocumentFile } from '@/lib/personalImportDocuments';
+import type { PersonalImportDocument } from '@campus/shared';
 import { PersonalImportCenter } from './PersonalImportCenter';
 import { readPersonalImports, savePersonalImportBatch } from '@/lib/personalImports';
 import { serializePersonalImportBackup, type PersonalImportRecord } from '@campus/shared';
@@ -33,9 +35,11 @@ vi.mock('@/features/nuni/Session', () => ({
   useOptionalNuniSession: () => (context.session ? { session: context.session } : null),
   browserRequest: vi.fn(),
 }));
+vi.mock('@/lib/personalImportDocuments', () => ({ readPersonalImportDocumentFile: vi.fn() }));
 vi.mock('@/lib/personalImportOcr', () => ({ recognizePersonalImportImage: vi.fn() }));
 beforeEach(() => {
   localStorage.clear();
+  vi.mocked(readPersonalImportDocumentFile).mockReset();
   context.owner = 'guest';
   context.session = null;
   vi.mocked(browserRequest).mockReset();
@@ -440,4 +444,83 @@ it('downloads the full current-school ledger even while a kind and search are se
   expect(JSON.parse(content).schoolId).toBe('pu');
   expect(JSON.parse(content).owner).toBeUndefined();
   click.mockRestore();
+});
+
+const pdfDocument: PersonalImportDocument = {
+  name: 'grades.pdf',
+  format: 'pdf',
+  warnings: [],
+  sections: [
+    {
+      id: 'page-1',
+      label: '第 1 頁',
+      needsOcr: false,
+      warnings: [],
+      rows: [
+        { line: 1, cells: ['課程名稱', '學分', '成績'] },
+        { line: 2, cells: ['資料庫', '3', '85'] },
+      ],
+    },
+  ],
+};
+it('re-reads the same PDF locally and requires review before saving the recovered rows', async () => {
+  vi.mocked(readPersonalImportDocumentFile)
+    .mockResolvedValueOnce({
+      ...pdfDocument,
+      sections: [{ ...pdfDocument.sections[0], rows: [{ line: 1, cells: ['學期成績單'] }] }],
+    })
+    .mockResolvedValueOnce(pdfDocument);
+  render(<PersonalImportCenter />);
+  fireEvent.change(screen.getByLabelText('這份資料的學年度'), { target: { value: '115' } });
+  fireEvent.change(screen.getByLabelText('學期'), { target: { value: '1' } });
+  const file = new File(['pdf'], 'grades.pdf', { type: 'application/pdf' });
+  fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), { target: { files: [file] } });
+  await screen.findByText('grades.pdf');
+  expect(readPersonalImports(context)).toHaveLength(0);
+  fireEvent.click(screen.getByRole('button', { name: '重新辨識 PDF 整頁' }));
+  await waitFor(() =>
+    expect(readPersonalImportDocumentFile).toHaveBeenCalledWith(file, expect.any(AbortSignal), {
+      pdfMode: 'ocr',
+    }),
+  );
+  await screen.findByText('資料庫');
+  fireEvent.click(screen.getByRole('button', { name: '整理選取內容' }));
+  expect(readPersonalImports(context)).toHaveLength(0);
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
+  await screen.findByText(personalImportSavedNotice(1));
+  expect(readPersonalImports(context)[0]).toMatchObject({
+    title: '資料庫',
+    grade: '85',
+    source: { name: 'grades.pdf · 第 1 頁' },
+  });
+});
+it('preserves the existing PDF preview on re-read failure, then cancels and ignores a late result after a school change', async () => {
+  let finish!: (value: PersonalImportDocument) => void;
+  vi.mocked(readPersonalImportDocumentFile)
+    .mockResolvedValueOnce(pdfDocument)
+    .mockRejectedValueOnce(new Error('讀取失敗'))
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+  const view = render(<PersonalImportCenter />);
+  fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), {
+    target: { files: [new File(['pdf'], 'grades.pdf', { type: 'application/pdf' })] },
+  });
+  await screen.findByText('grades.pdf');
+  fireEvent.click(screen.getByRole('button', { name: '重新辨識 PDF 整頁' }));
+  await screen.findByText('讀取失敗');
+  expect(screen.getByText('資料庫')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '重新辨識 PDF 整頁' }));
+  const signal = vi.mocked(readPersonalImportDocumentFile).mock.calls[2][1];
+  fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
+  expect(signal?.aborted).toBe(true);
+  expect(screen.getByText('資料庫')).toBeTruthy();
+  context.schoolId = 'ncku';
+  view.rerender(<PersonalImportCenter />);
+  await act(async () => finish(pdfDocument));
+  expect(screen.queryByText('grades.pdf')).toBeNull();
+  expect(readPersonalImports(context)).toHaveLength(0);
 });

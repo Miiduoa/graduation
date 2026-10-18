@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  parsePersonalImportSnapshot,
+  parsePersonalImportSyncState,
   type PersonalImportSyncState,
 } from '@campus/shared/src/imports/sync';
 import {
@@ -102,21 +102,8 @@ export async function loadPersonalImports(
   ) {
     throw new Error('儲存的匯入資料無法讀取，請保留此裝置上的資料並稍後重試。');
   }
-  if (value.sync !== undefined) {
-    if (
-      !value.sync ||
-      typeof value.sync.enabled !== 'boolean' ||
-      !Object.hasOwn(value.sync, 'base')
-    )
-      throw new Error('同步紀錄無法讀取，原有資料仍保留，請先匯出備份。');
-    value.sync = {
-      enabled: value.sync.enabled,
-      base:
-        value.sync.base === null
-          ? null
-          : parsePersonalImportSnapshot(value.sync.base, scope.schoolId),
-    };
-  }
+  if (value.sync !== undefined)
+    value.sync = parsePersonalImportSyncState(value.sync, scope.schoolId);
   return value;
 }
 
@@ -125,6 +112,7 @@ export function mutatePersonalImportLedger<T>(
   active: () => boolean,
   update: (
     ledger: PersonalImportLedger,
+    checkpoint: (ledger: PersonalImportLedger) => Promise<void>,
   ) =>
     | { ledger: PersonalImportLedger; result: T }
     | Promise<{ ledger: PersonalImportLedger; result: T }>,
@@ -138,16 +126,22 @@ export function mutatePersonalImportLedger<T>(
       if (!active()) throw new Error('帳號或學校已切換，請重新開啟匯入。');
       const current = await loadPersonalImports(scope);
       if (!active()) throw new Error('帳號或學校已切換，請重新開啟匯入。');
-      const { ledger, result } = await update(current);
-      if (!active()) throw new Error('帳號或學校已切換，請重新開啟匯入。');
-      await AsyncStorage.setItem(key, JSON.stringify(ledger));
-      for (const listener of listeners) {
-        try {
-          listener({ scope, source });
-        } catch {
-          /* A view cannot invalidate a durable write. */
+      let persisted = current;
+      const checkpoint = async (ledger: PersonalImportLedger) => {
+        if (!active()) throw new Error('帳號或學校已切換，請重新開啟匯入。');
+        if (JSON.stringify(persisted) === JSON.stringify(ledger)) return;
+        await AsyncStorage.setItem(key, JSON.stringify(ledger));
+        persisted = ledger;
+        for (const listener of listeners) {
+          try {
+            listener({ scope, source });
+          } catch {
+            /* A view cannot invalidate a durable write. */
+          }
         }
-      }
+      };
+      const { ledger, result } = await update(current, checkpoint);
+      await checkpoint(ledger);
       return result;
     });
   locks.set(key, task);

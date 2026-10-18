@@ -34,6 +34,10 @@ export type PersonalImportDocument = {
   sections: PersonalImportDocumentSection[];
   warnings: string[];
 };
+/** Auto uses PDF text when present; OCR explicitly re-reads every page, including hybrid scans. */
+export type PersonalImportDocumentReadOptions = {
+  pdfMode?: 'auto' | 'ocr';
+};
 
 export class PersonalImportDocumentError extends Error {
   constructor(

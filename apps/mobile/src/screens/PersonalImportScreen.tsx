@@ -25,11 +25,14 @@ import {
   personalImportUndoBody,
   personalImportUndoneNotice,
   PERSONAL_IMPORT_BACKUP_MAX_BYTES,
+  PERSONAL_IMPORT_DOCUMENT_LIMITS,
   PERSONAL_IMPORT_IMAGE_UNREADABLE,
+  PERSONAL_IMPORT_MAX_ROWS,
   PERSONAL_IMPORT_UNDO_CONFIRM,
   PERSONAL_IMPORT_UNDO_KEEP,
   PERSONAL_IMPORT_UNDO_LABEL,
   PERSONAL_IMPORT_UNDO_TITLE,
+  PersonalImportDocumentError,
   periodCount,
   periodDisplayLabel,
   periodLabelAt,
@@ -71,8 +74,6 @@ import {
 } from '../services/personalImports';
 import { sharePersonalImportBackup } from '../services/personalImportBackupSharing';
 
-/** UI gate; native adapters may enforce a stricter limit. */
-const PERSONAL_IMPORT_DOCUMENT_UI_MAX_BYTES = 10 * 1024 * 1024;
 const DOCUMENT_PREVIEW_ROWS = 6;
 
 type DocumentPrep = {
@@ -80,6 +81,7 @@ type DocumentPrep = {
   /** sectionId → chosen header line (original worksheet/page line). */
   selections: Record<string, number>;
 };
+type DocumentSource = { uri: string; name: string; size?: number };
 
 const kinds = [
   ['timetable', '課表'],
@@ -321,9 +323,14 @@ function ImportWorkspace({
   const abort = useRef<AbortController | null>(null);
   const ocr = useRef<TimetableOcrHandle>(null);
   const documents = useRef<React.ElementRef<typeof DocumentImportHost>>(null);
+  /** Picked PDF URI stays in memory only until confirm, cancel, or unmount / scope remount. */
+  const documentSource = useRef<DocumentSource | null>(null);
   const profile = periodProfileForSchool(scope.schoolId);
   const active = () => alive.current && focused.current && availableRef.current;
   const current = (run: number) => alive.current && focused.current && generation.current === run;
+  const clearDocumentSource = () => {
+    documentSource.current = null;
+  };
   const cancel = () => {
     generation.current += 1;
     abort.current?.abort();
@@ -338,6 +345,7 @@ function ImportWorkspace({
       generation.current += 1;
       abort.current?.abort();
       documents.current?.cancel();
+      clearDocumentSource();
     };
   }, []);
 
@@ -435,6 +443,7 @@ function ImportWorkspace({
           .flatMap((row) => validatePersonalImportRow(row, { periodProfile: profile }))
           .map((issue) => JSON.stringify(issue)),
       );
+      clearDocumentSource();
       setDocumentPrep(null);
       setBackupPreview(null);
       setVisibleRowCount(50);
@@ -488,6 +497,7 @@ function ImportWorkspace({
       if (!current(run)) return;
       setText(result);
       setSource({ type: 'screenshot', name: asset.fileName || '截圖' });
+      clearDocumentSource();
       setDocumentPrep(null);
       setBackupPreview(null);
       setRows([]);
@@ -529,23 +539,22 @@ function ImportWorkspace({
         const size = asset.size;
         if (typeof size === 'number') {
           if (size <= 0) throw new Error('這個檔案沒有內容，請重新選擇。');
-          if (size > PERSONAL_IMPORT_DOCUMENT_UI_MAX_BYTES)
-            throw new Error('PDF／Excel 上限 10 MiB，請拆成較小的檔案。');
+          if (size > PERSONAL_IMPORT_DOCUMENT_LIMITS.bytes)
+            throw new Error('PDF／Excel 上限 8 MiB，請拆成較小的檔案。');
         }
         if (!documents.current) throw new Error('文件讀取程式尚未就緒，請改用 CSV 或截圖。');
         setNotice('正在讀取文件，可隨時取消。不會上傳網路。');
         abort.current = new AbortController();
-        const document = await documents.current.read(
-          { uri: asset.uri, name, size: asset.size },
-          abort.current.signal,
-        );
+        const source = { uri: asset.uri, name, size: asset.size };
+        const document = await documents.current.read(source, abort.current.signal);
         if (!current(run)) return;
         setBackupPreview(null);
+        documentSource.current = document.format === 'pdf' ? source : null;
         setDocumentPrep({ document, selections: {} });
         setNotice(
           document.sections.some((section) => !section.needsOcr && section.rows.length)
             ? '請選擇要讀取的工作表或頁面，並指定標題列。確認前不會寫入。'
-            : '這個檔案沒有可讀取的文字頁。掃描 PDF 請改用「選擇截圖」。',
+            : '這個檔案沒有可讀取的文字頁。掃描 PDF 請改用「選擇截圖」；若預覽不完整也可試「重新辨識 PDF 整頁」。',
         );
         return;
       }
@@ -557,6 +566,7 @@ function ImportWorkspace({
       const resultText = await file.text();
       if (!current(run)) return;
       if (resultText.length > 100_000) throw new Error('文字過長，請分批匯入。');
+      clearDocumentSource();
       setDocumentPrep(null);
       setText(resultText);
       setSource({ type: 'file', name });
@@ -602,8 +612,50 @@ function ImportWorkspace({
   };
   const cancelDocumentPrep = () => {
     if (busy || saving) return;
+    clearDocumentSource();
     setDocumentPrep(null);
     setNotice('已取消文件準備，先前草稿保留。');
+  };
+  const rereadDocumentPdf = async () => {
+    if (
+      !documentPrep ||
+      documentPrep.document.format !== 'pdf' ||
+      !documentSource.current ||
+      busy ||
+      saving ||
+      savingRef.current ||
+      !documents.current
+    )
+      return;
+    const source = documentSource.current;
+    generation.current += 1;
+    abort.current?.abort();
+    documents.current.cancel();
+    const run = generation.current;
+    setBusy(true);
+    setNotice('正在這台裝置重新辨識 PDF 每一頁，原本的預覽會保留到讀取完成…');
+    try {
+      abort.current = new AbortController();
+      const document = await documents.current.read(source, abort.current.signal, {
+        pdfMode: 'ocr',
+      });
+      if (!current(run)) return;
+      setDocumentPrep({ document, selections: {} });
+      setNotice(
+        document.sections.some((section) => !section.needsOcr && section.rows.length)
+          ? '已重新辨識整頁。請再選擇頁面與標題列；確認前不會寫入。'
+          : '重新辨識後仍沒有可讀取的文字頁。請改用「選擇截圖」。',
+      );
+    } catch (error) {
+      if (
+        current(run) &&
+        !(error instanceof PersonalImportDocumentError && error.code === 'cancelled')
+      )
+        setNotice(personalImportErrorMessage(error, '重新辨識失敗。原本的文件預覽仍可使用。'));
+      else if (current(run)) setNotice('已取消重新辨識，原本的文件預覽保留。');
+    } finally {
+      if (current(run)) setBusy(false);
+    }
   };
   const applyDocumentSelection = () => {
     if (!documentPrep || busy || saving || savingRef.current) return;
@@ -641,11 +693,14 @@ function ImportWorkspace({
         parsedRows.push(...parsed.rows);
         parsedIssues.push(...parsed.issues);
       }
+      if (parsedRows.length > PERSONAL_IMPORT_MAX_ROWS)
+        throw new Error('選取的內容超過 500 筆，請減少工作表或頁面，分次匯入。');
       const validationKeys = new Set(
         parsedRows
           .flatMap((row) => validatePersonalImportRow(row, { periodProfile: profile }))
           .map((issue) => JSON.stringify(issue)),
       );
+      clearDocumentSource();
       setDocumentPrep(null);
       setBackupPreview(null);
       setText('');
@@ -693,6 +748,7 @@ function ImportWorkspace({
         throw new Error(
           `這份備份屬於 ${summary.schoolId}，與目前學校不同。請先切換學校再還原；原有資料沒有變更。`,
         );
+      clearDocumentSource();
       setDocumentPrep(null);
       setText('');
       setRows(restored);
@@ -931,6 +987,7 @@ function ImportWorkspace({
                 onPress={() => {
                   cancel();
                   setKind(value);
+                  clearDocumentSource();
                   setDocumentPrep(null);
                   if (!backupPreview) {
                     setRows([]);
@@ -1011,6 +1068,31 @@ function ImportWorkspace({
                   {warning}
                 </Text>
               ))}
+              {documentPrep.document.format === 'pdf' ? (
+                <View style={{ gap: 8 }}>
+                  <Text style={{ color: theme.colors.muted }}>
+                    預覽只有標題，或表格文字不完整？可以重新辨識整頁，再核對一次。不會自動對每個 PDF
+                    做整頁辨識。
+                  </Text>
+                  <Button
+                    text="重新辨識 PDF 整頁"
+                    disabled={busy || saving || !documentSource.current}
+                    onPress={() => void rereadDocumentPdf()}
+                  />
+                </View>
+              ) : null}
+              {busy ? (
+                <>
+                  <ActivityIndicator accessibilityLabel="正在讀取文件" />
+                  <Button
+                    text="取消讀取"
+                    onPress={() => {
+                      cancel();
+                      setNotice('已取消重新辨識，原本的文件預覽保留。');
+                    }}
+                  />
+                </>
+              ) : null}
               <Text style={textStyle}>選擇工作表／頁面</Text>
               {documentPrep.document.sections.map((section) => {
                 const selectedSection = section.id in documentPrep.selections;
@@ -1127,7 +1209,7 @@ function ImportWorkspace({
               </View>
               <Text style={{ color: theme.colors.muted }}>
                 截圖支援 PNG、JPG，最多 8 MB。圖片在裝置上辨識。文字檔支援 TXT、CSV、TSV；行事曆可讀
-                ICS。PDF／XLSX 上限 10 MiB，只在裝置讀取、不會上傳。
+                ICS。PDF／XLSX 上限 8 MiB，只在裝置讀取、不會上傳。
               </Text>
               {busy ? <ActivityIndicator accessibilityLabel="正在讀取資料" /> : null}
               <TextInput
@@ -1385,10 +1467,7 @@ function ImportWorkspace({
               <Text style={{ ...textStyle, fontWeight: '700' }}>{row.title}</Text>
               <Text style={textStyle}>{rowSummary(row, profile)}</Text>
               {row.kind === 'timetable' &&
-              (!profile ||
-                !row.startPeriod ||
-                !row.endPeriod ||
-                (row.dayOfWeek || 0) > 5) ? (
+              (!profile || !row.startPeriod || !row.endPeriod || (row.dayOfWeek || 0) > 5) ? (
                 <Text style={{ color: theme.colors.muted }}>
                   {profile
                     ? '這筆缺少星期一至五的節次，尚未放入課表格子。'

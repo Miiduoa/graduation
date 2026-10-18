@@ -4,11 +4,13 @@ import {
   validatePersonalImportDocument,
   validatePersonalImportDocumentFile,
   type PersonalImportDocument,
+  type PersonalImportDocumentReadOptions,
 } from '@campus/shared';
 type Job = {
   id: number;
   name: string;
   base64: string;
+  pdfMode?: PersonalImportDocumentReadOptions['pdfMode'];
   resolve: (document: PersonalImportDocument) => void;
   reject: (error: unknown) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -23,7 +25,12 @@ export class DocumentCoordinator {
     private inject: (script: string) => void,
     private restart: () => void,
   ) {}
-  read(name: string, base64: string, signal?: AbortSignal): Promise<PersonalImportDocument> {
+  read(
+    name: string,
+    base64: string,
+    signal?: AbortSignal,
+    options: PersonalImportDocumentReadOptions = {},
+  ): Promise<PersonalImportDocument> {
     this.cancel();
     if (signal?.aborted)
       return Promise.reject(new PersonalImportDocumentError('已取消讀取。', 'cancelled'));
@@ -55,6 +62,7 @@ export class DocumentCoordinator {
         id,
         name,
         base64,
+        pdfMode: options.pdfMode,
         resolve,
         reject,
         timer,
@@ -66,10 +74,11 @@ export class DocumentCoordinator {
   }
   private start() {
     const job = this.pending;
-    if (job)
-      this.inject(
-        `window.readCampusDocument(${job.id},${JSON.stringify(job.name)},${JSON.stringify(job.base64)}); true;`,
-      );
+    if (!job) return;
+    const mode = job.pdfMode === undefined ? '' : `,${JSON.stringify(job.pdfMode)}`;
+    this.inject(
+      `window.readCampusDocument(${job.id},${JSON.stringify(job.name)},${JSON.stringify(job.base64)}${mode}); true;`,
+    );
   }
   message(raw: string) {
     if (raw.length > 4_000_000)
