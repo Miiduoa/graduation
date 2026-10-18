@@ -210,7 +210,7 @@ export function apiOrigin(): string {
   return url.origin;
 }
 
-export async function fetchJson(url: string, init: RequestInit): Promise<unknown> {
+export async function fetchJson(url: string, init: RequestInit, responseLimit = 1024 * 1024): Promise<unknown> {
   let response: Response;
   try {
     response = await fetch(url, {
@@ -232,7 +232,7 @@ export async function fetchJson(url: string, init: RequestInit): Promise<unknown
       }
       throw new NuniError(response.status >= 500 ? 503 : response.status, code);
     }
-    return await boundedJson(response);
+    return await boundedJson(response, responseLimit);
   } catch (error) {
     if (error instanceof NuniError) throw error;
     throw new NuniError(503, 'SERVICE_UNAVAILABLE');

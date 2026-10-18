@@ -107,3 +107,27 @@ it('discards pending status results after an account changes', async () => {
   expect(screen.queryByRole('button', { name: /選擇已核准課班/ })).toBeNull();
   expect(choose).not.toHaveBeenCalled();
 });
+
+it.each(['grades', 'events'] as const)('allows %s records to search without sending grades or event details', async kind => {
+  state.request.mockResolvedValue({ candidates: [], truncated: false });
+  render(<CourseAccessPanel row={{ ...row, kind, grade: '95', date: '2026-10-15', source: { type: 'paste', line: 1, rawText: 'private' } }} workspaces={[]} />);
+  fireEvent.click(screen.getByRole('button', { name: '查找可能對應課班' }));
+  await waitFor(() => expect(state.request).toHaveBeenCalled());
+  expect(state.request.mock.calls[0][2]).toEqual(approved.metadata);
+});
+it('reads server teacher metadata without replacing the imported teacher hint', async () => {
+  state.request.mockResolvedValue({ status: 'reviewed', workspaceId: workspace.id, membershipActive: true, memberRole: 'student', course: { ...approved.metadata, teacher: '經核對的老師', id: id('ccd'), workspaceId: workspace.id, version: 1, verification: 'administrator-reviewed' } });
+  render(<CourseAccessPanel row={{ ...row, linkedCourseId: workspace.id }} workspaces={[workspace]} />);
+  fireEvent.click(screen.getByRole('button', { name: '核對目前課班與教師資料' }));
+  expect(await screen.findByText('經管理員核對的授課者：經核對的老師')).toBeTruthy();
+  expect(row.teacher).toBe('王老師');
+});
+it('discards a linked-course readback after switching the linked workspace', async () => {
+  let resolve!: (value: unknown) => void;
+  state.request.mockReturnValue(new Promise(finish => { resolve = finish; }));
+  const view = render(<CourseAccessPanel row={{ ...row, linkedCourseId: workspace.id }} workspaces={[workspace]} />);
+  fireEvent.click(screen.getByRole('button', { name: '核對目前課班與教師資料' }));
+  view.rerender(<CourseAccessPanel row={{ ...row, linkedCourseId: id('cw', 2) }} workspaces={[workspace]} />);
+  await act(async () => resolve({ status: 'reviewed', workspaceId: workspace.id, membershipActive: true, memberRole: 'student', course: { ...approved.metadata, teacher: '過期老師', id: id('ccd'), workspaceId: workspace.id, version: 1, verification: 'administrator-reviewed' } }));
+  expect(screen.queryByText(/過期老師/)).toBeNull();
+});

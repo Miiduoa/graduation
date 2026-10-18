@@ -1,7 +1,8 @@
 import { CourseAccessError, courseMetadata, courseRecord, parseCourseCandidate, sameCourseScope } from '@campus/shared/src/courseAccess';
-import { parseCourseRequest, parseCourseRequests, isCourseAccessPath } from '@campus/shared/src/courseAccessClient';
+import { parseCourseRequest, parseCourseRequests, parseCourseWorkspace, isCourseAccessPath } from '@campus/shared/src/courseAccessClient';
 import { NextRequest, NextResponse } from 'next/server';
 import { handleFood, isFoodResource } from './food';
+import { handlePersonalImportSync } from './personalImportSync';
 import {
   createNuniClasses,
   NuniError,
@@ -104,6 +105,8 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
       throw new NuniError(400, 'INVALID_INPUT');
     if (method !== 'GET') requireSameOrigin(request);
     if (isFoodResource(segments)) return await handleFood(request, segments);
+    if (path === 'personal-imports/read' || path === 'personal-imports/write')
+      return await handlePersonalImportSync(request, path.endsWith('/read') ? 'read' : 'write');
     if (method === 'GET' && path === 'sign-in-options') {
       publicOrigin();
       const googleReady =
@@ -203,6 +206,11 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
       const session = requireSession(request);
       const input = courseRecord(await boundedJson(request, 8192));
       const result = await platformRequest(path, session, input);
+      if (path === 'course-access/workspace-course') {
+        if (typeof input.workspaceId !== 'string' || typeof input.schoolId !== 'string')
+          throw new NuniError(422, 'INVALID_INPUT');
+        return jsonResponse(parseCourseWorkspace(result, input.workspaceId, input.schoolId));
+      }
       if (path === 'course-access/match') {
         const scope = courseMetadata(input), response = courseRecord(result);
         if (!Array.isArray(response.candidates) || response.candidates.length > 200 || typeof response.truncated !== 'boolean')
