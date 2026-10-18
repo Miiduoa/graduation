@@ -15,7 +15,7 @@ def extension_files():
         'apps/api/src/course-access/courseAccess.ts': ROOT / 'packages/shared/src/courseAccess.ts',
         'apps/api/src/course-access/service.ts': HERE / 'service.ts',
         'apps/api/src/course-access/routes.ts': HERE / 'routes.ts',
-        'apps/api/migrations/277_course_access_review.sql': HERE / '277_course_access_review.sql',
+        'apps/api/src/migrations/278_course_access_review.sql': HERE / '278_course_access_review.sql',
     }
 
 
