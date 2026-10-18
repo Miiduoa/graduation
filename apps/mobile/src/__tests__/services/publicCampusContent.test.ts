@@ -19,6 +19,7 @@ import {
   isPublicWebUrl,
 } from '../../services/publicCampusContent';
 import { getRawAppEnv } from '../../services/release';
+import { announcementSourceIdsForSchool } from '@campus/shared/src/campusAnnouncements';
 
 jest.mock('firebase/firestore', () => ({
   collection: jest.fn((...args) => args),
@@ -27,9 +28,9 @@ jest.mock('firebase/firestore', () => ({
   startAfter: jest.fn((snapshot) => ({ after: snapshot })),
   getDocFromServer: jest.fn(),
   getDocsFromServer: jest.fn(),
-  limit: jest.fn(),
-  orderBy: jest.fn(),
-  where: jest.fn(),
+  limit: jest.fn((count) => ({ limit: count })),
+  orderBy: jest.fn((field, direction) => ({ orderBy: field, direction })),
+  where: jest.fn((field, operator, value) => ({ where: field, operator, value })),
   query: jest.fn((...args) => args),
 }));
 jest.mock('../../firebase', () => ({
@@ -68,7 +69,7 @@ test('legacy content is only consulted after a successful empty canonical result
     .mocked(getDocsFromServer)
     .mockResolvedValueOnce({ empty: true, docs: [] } as never)
     .mockResolvedValueOnce({ empty: false, docs: [document()] } as never)
-    .mockResolvedValueOnce({ empty: true, docs: [] } as never);
+    .mockImplementation(async (input) => docsForPath(input, []) as never);
   await expect(loadCampusAnnouncements('pu')).resolves.toHaveLength(1);
   expect(collection).toHaveBeenCalledWith('db', 'announcements');
   jest.clearAllMocks();
@@ -130,6 +131,48 @@ test.each([[loadCampusAnnouncements, 'announcements', 'publishedAt']] as const)(
     expect(where).toHaveBeenCalledWith('schoolId', '==', 'pu');
     expect(orderBy).toHaveBeenCalledWith(dateField, 'desc');
     expect(limit).toHaveBeenCalledWith(200);
+  },
+);
+
+function missingIndexError() {
+  return Object.assign(new Error('The query requires an index.'), { code: 'failed-precondition' });
+}
+
+function productionEmptySchoolRead(schoolId: string) {
+  return async (input: unknown) => {
+    const encoded = JSON.stringify(input ?? '');
+    if (encoded.includes('announcement-sources')) return { empty: true, docs: [] };
+    if (encoded.includes('"where":"sourceId"') && !encoded.includes(`"schools","${schoolId}"`)) {
+      throw missingIndexError();
+    }
+    return { empty: true, docs: [] };
+  };
+}
+
+test.each(['ncku', 'ntpu'] as const)(
+  'treats a successfully empty %s feed as unpublished even when extras would hit a missing legacy sourceId index',
+  async (schoolId) => {
+    expect(announcementSourceIdsForSchool(schoolId).length).toBeGreaterThan(0);
+    jest.mocked(getDocsFromServer).mockImplementation(productionEmptySchoolRead(schoolId) as never);
+    await expect(loadCampusAnnouncementFeed(schoolId)).resolves.toEqual({
+      announcements: [],
+      sources: [],
+      allUnavailable: false,
+    });
+    expect(collection).toHaveBeenCalledWith('db', 'schools', schoolId, 'announcements');
+    expect(collection).toHaveBeenCalledWith('db', 'schools', schoolId, 'announcement-sources');
+    expect(where).not.toHaveBeenCalledWith('sourceId', '==', expect.anything());
+  },
+);
+
+test.each(['ncku', 'ntpu'] as const)(
+  'still rejects %s when the canonical dated query actually fails',
+  async (schoolId) => {
+    jest.mocked(getDocsFromServer).mockRejectedValueOnce(missingIndexError());
+    await expect(loadCampusAnnouncementFeed(schoolId)).rejects.toMatchObject({
+      code: 'failed-precondition',
+    });
+    expect(getDocsFromServer).toHaveBeenCalledTimes(1);
   },
 );
 

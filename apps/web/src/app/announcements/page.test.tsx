@@ -44,6 +44,22 @@ function snapshot(...docs: ReturnType<typeof announcementDocument>[]) {
     ReturnType<typeof getDocsFromServer>
   >;
 }
+function missingIndexError() {
+  return Object.assign(new Error('The query requires an index.'), { code: 'failed-precondition' });
+}
+function productionEmptySchoolRead(schoolId: string) {
+  return async (input: {
+    path?: string;
+    constraints?: Array<{ where?: string; value?: string }>;
+  }) => {
+    const path = String(input?.path || '');
+    if (path.includes('announcement-sources')) return snapshot();
+    const hasSourceId = Boolean(input?.constraints?.some((item) => item.where === 'sourceId'));
+    if (path === 'announcements' && hasSourceId) throw missingIndexError();
+    if (path === `schools/${schoolId}/announcements` || path === 'announcements') return snapshot();
+    return snapshot();
+  };
+}
 function deferred() {
   let resolve!: (value: ReturnType<typeof snapshot>) => void;
   const promise = new Promise<ReturnType<typeof snapshot>>((finish) => {
@@ -595,6 +611,55 @@ it.each([
     expect(await screen.findByRole('heading', { name: '這間學校的公告還沒上架。' })).toBeTruthy();
     expect(screen.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
     expect(screen.getByRole('link', { name: office }).getAttribute('href')).toBe(url);
+  },
+);
+
+it.each([
+  ['ncku', '全校最新消息', 'https://web.ncku.edu.tw/p/403-1000-14-1.php'],
+  ['ntpu', '電子公文一般公告（含教務處）', 'https://fms.ntpu.edu.tw/km/24662'],
+] as const)(
+  'keeps unpublished copy for %s when the empty school would otherwise hit a missing legacy sourceId index',
+  async (school, office, url) => {
+    vi.mocked(getDocsFromServer).mockImplementation(productionEmptySchoolRead(school) as never);
+    const params = Promise.resolve({ schoolId: school });
+    await act(async () => {
+      render(
+        <Suspense fallback={<p>載入學校</p>}>
+          <AnnouncementsPage searchParams={params} />
+        </Suspense>,
+      );
+    });
+    expect(await screen.findByRole('heading', { name: '這間學校的公告還沒上架。' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: office }).getAttribute('href')).toBe(url);
+    expect(screen.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
+    expect(screen.queryByRole('button', { name: '再試一次' })).toBeNull();
+    expect(getDocsFromServer).toHaveBeenCalledWith(
+      expect.objectContaining({ path: `schools/${school}/announcements` }),
+    );
+    expect(getDocsFromServer).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: 'announcements',
+        constraints: expect.arrayContaining([expect.objectContaining({ where: 'sourceId' })]),
+      }),
+    );
+  },
+);
+
+it.each(['ncku', 'ntpu'] as const)(
+  'still shows a retryable unread message when the canonical %s announcement query actually fails',
+  async (school) => {
+    vi.mocked(getDocsFromServer).mockRejectedValueOnce(missingIndexError());
+    const params = Promise.resolve({ schoolId: school });
+    await act(async () => {
+      render(
+        <Suspense fallback={<p>載入學校</p>}>
+          <AnnouncementsPage searchParams={params} />
+        </Suspense>,
+      );
+    });
+    expect(await screen.findByRole('heading', { name: '暫時讀不到資料，請稍後再試' })).toBeTruthy();
+    expectAnnouncementReadFailure();
+    expect(getDocsFromServer).toHaveBeenCalledTimes(1);
   },
 );
 
