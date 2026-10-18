@@ -15,6 +15,10 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useAuth } from '../state/auth';
 import { useDataSource } from '../hooks/useDataSource';
 import type { Assignment, Submission } from '../data/types';
+import {
+  publishedAssignmentGrade,
+  type PublishedAssignmentGrade,
+} from '../data/assignmentGrade';
 import { onAssignmentSubmitted } from '../services/companionHooks';
 
 type RouteParams = {
@@ -65,6 +69,8 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
   const [answer, setAnswer] = useState('');
   const [submittedAt, setSubmittedAt] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [points, setPoints] = useState<number | null>(null);
+  const [grade, setGrade] = useState<PublishedAssignmentGrade | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -86,6 +92,12 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
       setUnpublished(assignment.published === false || status === 'draft');
       setClosed(status === 'closed');
       setQuizLike(['quiz', 'exam'].includes(type));
+      setPoints(
+        typeof assignment.points === 'number' && Number.isFinite(assignment.points)
+          ? assignment.points
+          : null,
+      );
+      setGrade(publishedAssignmentGrade(submission as unknown as Record<string, unknown>));
       const already = asText(submission?.submittedAt) || null;
       setSubmittedAt(already);
       setAnswer(already ? asText(submission?.content) : '');
@@ -248,6 +260,42 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
                 >
                   {answer || '（無文字內容）'}
                 </Text>
+                {grade ? (
+                  <View
+                    accessibilityLabel="作業評分"
+                    style={{
+                      marginTop: 16,
+                      backgroundColor: '#fff',
+                      borderRadius: 12,
+                      padding: 16,
+                      borderWidth: 1,
+                      borderColor: '#E5E5EA',
+                    }}
+                  >
+                    <Text style={{ fontSize: 15, fontWeight: '700', color: '#1C1C1E' }}>
+                      教師已評分：{grade.score}
+                      {points !== null ? ` / ${points}` : ''} 分
+                    </Text>
+                    {grade.revisionCount > 0 ? (
+                      <Text style={{ marginTop: 8, fontSize: 13, color: '#3C3C43', lineHeight: 20 }}>
+                        此筆評分已更正 {grade.revisionCount} 次，顯示目前已發布的結果。
+                      </Text>
+                    ) : null}
+                    {grade.feedback ? (
+                      <Text style={{ marginTop: 8, fontSize: 14, color: '#3C3C43', lineHeight: 22 }}>
+                        {grade.feedback}
+                      </Text>
+                    ) : null}
+                    {grade.publishedAt ? (
+                      <Text style={{ marginTop: 8, fontSize: 12, color: '#8E8E93' }}>
+                        發布時間：
+                        {new Date(grade.publishedAt).toLocaleString('zh-TW', {
+                          timeZone: 'Asia/Taipei',
+                        })}
+                      </Text>
+                    ) : null}
+                  </View>
+                ) : null}
                 <View
                   style={{ marginTop: 16, padding: 14, backgroundColor: '#dcfce7', borderRadius: 12 }}
                 >
