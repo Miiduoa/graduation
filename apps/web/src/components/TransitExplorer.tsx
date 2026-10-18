@@ -277,7 +277,7 @@ function TransitExplorerContent({ schoolId, schoolName, legacy }: { schoolId: st
     {mode === 'nearby' && <p className={css.privacy}>只查詢所選縣市。定位僅在你按下按鈕後使用，不會寫入個人檔案；不會持續追蹤。跨縣市旅行時請切換查詢縣市。</p>}
     {message && <p className={css.message} role="status">{message}</p>}
     {lookup.query || mode === 'saved' ? <StopResults key={`${mode}:${lookup.revision}`} query={lookup.query} saved={saved} toggleSaved={toggleSaved} /> : <p className={css.empty}>{locating ? '正在取得你的位置；也可以切回學校站牌，不需等待定位。' : mode === 'nearby' ? '選好縣市與範圍後，按「使用我的位置」查詢。' : '輸入站名後按搜尋，不會在每次打字時傳送查詢。'}</p>}
-    <footer className={css.footer}><p>到站時間為預估值，請以現場車況與業者公告為準。</p><a href={city === 'Taichung' ? TAICHUNG_BUS_URL : 'https://www.taiwanbus.tw/'} target="_blank" rel="noopener noreferrer">官方公車網站 ↗</a></footer>
+    <footer className={css.footer}><a href={city === 'Taichung' ? TAICHUNG_BUS_URL : 'https://www.taiwanbus.tw/'} target="_blank" rel="noopener noreferrer">官方公車網站 ↗</a></footer>
     {legacy && <details className={css.legacy}><summary>已登錄校園路線 · 備用查詢</summary>{legacy}</details>}
   </div>;
 }
