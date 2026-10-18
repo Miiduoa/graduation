@@ -15,7 +15,7 @@ try {
     join(root, 'deploy/nuni-api/personal-import-sync/service.ts'),
     join(dir, 'src/service.ts'),
   );
-  for (const name of ['sync', 'backup', 'records', 'validation', 'types'])
+  for (const name of ['sync', 'copy', 'backup', 'records', 'validation', 'types'])
     cpSync(
       join(root, `packages/shared/src/imports/${name}.ts`),
       join(dir, `src/imports/${name}.ts`),
