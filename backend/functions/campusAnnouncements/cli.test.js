@@ -13,8 +13,14 @@ function htmlResponse(html, status = 200) {
 
 beforeEach(() => resetPoliteFetch());
 
-test('defaults to dry-run and requires a school', () => {
-  expect(parseCli(['--school', 'pu'])).toEqual({ schoolId: 'pu', write: false, dryRun: true });
+test('defaults to dry-run and requires a school or --all', () => {
+  expect(parseCli(['--school', 'pu'])).toEqual({
+    schoolId: 'pu',
+    all: false,
+    write: false,
+    dryRun: true,
+  });
+  expect(parseCli(['--all'])).toEqual({ schoolId: '', all: true, write: false, dryRun: true });
   expect(parseCli(['--school', 'pu', '--write', '--dry-run'])).toMatchObject({
     write: false,
     dryRun: true,

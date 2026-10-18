@@ -265,7 +265,13 @@ function allSources() {
   return SCHOOLS.flatMap((entry) => entry.sources.filter((item) => item.enabled !== false));
 }
 
-const DEFAULT_SYNC_SCHOOLS = ['pu'];
+function listSyncSchoolIds() {
+  return SCHOOLS.filter(
+    (entry) => !isPlaceholderSchool(entry) && (entry.sources || []).some((item) => item.enabled !== false),
+  ).map((entry) => entry.schoolId);
+}
+
+const DEFAULT_SYNC_SCHOOLS = listSyncSchoolIds();
 
 function parseSyncSchoolIds(value) {
   const raw = String(value ?? '').trim();
@@ -348,6 +354,7 @@ module.exports = {
   isPublicAnnouncementSchool,
   listSources,
   allSources,
+  listSyncSchoolIds,
   DEFAULT_SYNC_SCHOOLS,
   parseSyncSchoolIds,
   coverageRows,

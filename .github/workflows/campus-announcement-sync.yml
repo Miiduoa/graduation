@@ -1,5 +1,5 @@
-# 晉瑋已核准：每天兩次同步 pu、ncku、ntpu 公告（台北 07:00、11:30）；只寫 schools/{schoolId}/announcements 與 announcement-sources。
-# 寫入學校以 CAMPUS_ANNOUNCEMENT_SYNC_SCHOOLS 為準，未設時用 pu,ncku,ntpu；不要一次掃其他學校。
+# 晉瑋已核准：每天兩次同步目錄內全部可抓學校公告（台北 07:00、11:30）；只寫 schools/{schoolId}/announcements 與 announcement-sources。
+# 排程與手動共用同一份目錄名單（排除三間示範校）；單一學校失敗就略過並記錄，不要停整批。
 # 要停：拿掉 schedule，或刪掉 production 環境的 CAMPUS_ANNOUNCEMENT_SYNC_ENABLED。
 name: Campus announcement sync
 
@@ -10,9 +10,9 @@ on:
   workflow_dispatch:
     inputs:
       school:
-        description: 'schoolId to scrape, for example pu'
-        required: true
-        default: 'pu'
+        description: 'schoolId；留空則同步目錄內全部可抓學校'
+        required: false
+        default: ''
         type: string
       write:
         description: 'Write to Firestore. Keep false unless production write is approved.'
@@ -20,9 +20,9 @@ on:
         default: false
         type: boolean
       probe:
-        description: 'Also dry-run NCKU and NTPU sources without writing.'
+        description: 'Also dry-run extra schools without writing.'
         required: false
-        default: true
+        default: false
         type: boolean
 
 permissions:
@@ -36,10 +36,10 @@ jobs:
   sync:
     name: Preview or sync campus announcements
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     environment: production
     env:
-      SCHOOL_ID: ${{ inputs.school || 'pu' }}
+      SCHOOL_ID: ${{ inputs.school || '' }}
       WRITE: ${{ github.event_name == 'schedule' || inputs.write == true }}
     steps:
       - name: Checkout
@@ -59,13 +59,17 @@ jobs:
 
       - name: Dry-run
         if: ${{ env.WRITE != 'true' }}
-        run: pnpm --filter functions sync:announcements --school "$SCHOOL_ID"
+        run: |
+          if [ -n "$SCHOOL_ID" ]; then
+            pnpm --filter functions sync:announcements --school "$SCHOOL_ID"
+          else
+            pnpm --filter functions sync:announcements --all
+          fi
 
       - name: Sync to Firestore
         if: ${{ env.WRITE == 'true' }}
         env:
           CAMPUS_ANNOUNCEMENT_SYNC_ENABLED: ${{ secrets.CAMPUS_ANNOUNCEMENT_SYNC_ENABLED }}
-          CAMPUS_ANNOUNCEMENT_SYNC_SCHOOLS: ${{ secrets.CAMPUS_ANNOUNCEMENT_SYNC_SCHOOLS }}
           ANNOUNCEMENT_SYNC_SA_JSON: ${{ secrets.ANNOUNCEMENT_SYNC_SA_JSON }}
         run: |
           if [ -z "$ANNOUNCEMENT_SYNC_SA_JSON" ]; then
@@ -76,28 +80,15 @@ jobs:
           trap 'rm -f "$GOOGLE_APPLICATION_CREDENTIALS"' EXIT
           umask 077
           printf '%s' "$ANNOUNCEMENT_SYNC_SA_JSON" > "$GOOGLE_APPLICATION_CREDENTIALS"
-          SCHOOLS="${CAMPUS_ANNOUNCEMENT_SYNC_SCHOOLS:-}"
-          if [ -z "$SCHOOLS" ]; then
-            if [ "${{ github.event_name }}" = "schedule" ]; then
-              SCHOOLS="pu,ncku,ntpu"
-            else
-              SCHOOLS="$SCHOOL_ID"
-            fi
+          if [ -n "$SCHOOL_ID" ]; then
+            pnpm --filter functions sync:announcements --school "$SCHOOL_ID" --write
+          else
+            pnpm --filter functions sync:announcements --all --write
           fi
-          APPROVED=" pu ncku ntpu "
-          IFS=', ' read -ra IDS <<< "$SCHOOLS"
-          for id in "${IDS[@]}"; do
-            [ -z "$id" ] && continue
-            case "$APPROVED" in
-              *" $id "*) ;;
-              *) echo "::error::未核准寫入 $id"; exit 1 ;;
-            esac
-            pnpm --filter functions sync:announcements --school "$id" --write
-          done
 
   probe:
-    name: Probe NCKU and NTPU sources
-    if: ${{ github.event_name == 'schedule' || inputs.probe != false }}
+    name: Probe extra schools
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.probe == true }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -116,5 +107,5 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --filter functions...
 
-      - name: Dry-run NCKU and NTPU without writing
+      - name: Dry-run extra schools without writing
         run: pnpm --filter functions sync:announcements:probe -- --schools ncku,ntpu
