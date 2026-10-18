@@ -140,7 +140,17 @@ export default function LearnAiFirstScreen() {
                 <AICard key={course.groupId} title={course.name}>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                     <AIButton
+                      label="教材"
+                      onPress={() =>
+                        safeNavigate(navigation, 'CourseHub', {
+                          groupId: course.groupId,
+                          groupName: course.name,
+                        })
+                      }
+                    />
+                    <AIButton
                       label="課程動態"
+                      variant="ghost"
                       onPress={() =>
                         safeNavigate(navigation, 'GroupDetail', { groupId: course.groupId })
                       }

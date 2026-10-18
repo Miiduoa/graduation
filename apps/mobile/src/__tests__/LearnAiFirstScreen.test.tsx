@@ -70,3 +70,12 @@ test('a course task opens that assignment instead of the class feed', async () =
     expect.objectContaining({ screen: 'GroupDetail' }),
   );
 });
+
+test('a course card opens the materials cabinet instead of the class feed', async () => {
+  const view = render(<LearnAiFirstScreen />);
+  fireEvent.press(await view.findByText('教材'));
+  expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    screen: 'CourseHub',
+    params: { groupId: 'course-a', groupName: '資料結構' },
+  });
+});
