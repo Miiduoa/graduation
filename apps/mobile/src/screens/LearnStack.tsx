@@ -49,6 +49,7 @@ import { AdminCourseVerifyScreen } from './AdminCourseVerifyScreen';
 import CourseDiscussionScreen from './CourseDiscussionScreen';
 import DiscussionThreadDetailScreen from './DiscussionThreadDetailScreen';
 import CourseMaterialViewerScreen from './CourseMaterialViewerScreen';
+import HomeworkSubmitScreen from './HomeworkSubmitScreen';
 import VideoMaterialScreen from './VideoMaterialScreen';
 import SurveyScreen from './SurveyScreen';
 import PeerReviewSubmitScreen from './PeerReviewSubmitScreen';
@@ -622,7 +623,7 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="HomeworkSubmit"
-        component={UnavailableFeatureScreen}
+        component={guardCourseView(HomeworkSubmitScreen)}
         options={{ title: '繳交作業', headerShown: false }}
       />
       <Stack.Screen
