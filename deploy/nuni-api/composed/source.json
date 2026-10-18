@@ -9,7 +9,7 @@
   "adapters": {
     "public-cafeterias": "df277892a55935d66cbabe856f0f578ae90e83a52e469020bc1c929c09f4cf7b",
     "course-access": "8fb5841ffd51c257b74148ff2484b13ccc296a6b917dc007f21a92259a9e74a0",
-    "personal-import-sync": "0a5d8bf082eb27a30f2f0886b74e4aa8bccef11af0b359825e4a79952e0876e1"
+    "personal-import-sync": "98c69ddd3f66717cfccd2f8312257262e353dca141d43be4ab26611b1085719c"
   },
   "sourceFiles": {
     "apps/api/src/course-access/courseAccess.ts": {
@@ -36,13 +36,17 @@
       "source": "packages/shared/src/imports/backup.ts",
       "sha256": "3e651bc0f71ae0d07713b71b69e274ba990281dc71c1ec52747668595adf1287"
     },
+    "apps/api/src/personal-import-sync/imports/copy.ts": {
+      "source": "packages/shared/src/imports/copy.ts",
+      "sha256": "f6a4d299ddff0abea25d453c7f1385810afbb8f04c83641009eee8a0bbff6e9b"
+    },
     "apps/api/src/personal-import-sync/imports/records.ts": {
       "source": "packages/shared/src/imports/records.ts",
       "sha256": "cfdf52eedddcac89a30e9576a450b320a611b10afcda9042fc6cefbb9b3a48a7"
     },
     "apps/api/src/personal-import-sync/imports/sync.ts": {
       "source": "packages/shared/src/imports/sync.ts",
-      "sha256": "594b9006a4e95cddd1020cc996991887bfe43c7c678f80588e3169769376118f"
+      "sha256": "b28abfe37280742a0e275e3d14e2a6e1ac43190ae56ba8d682edba6cd9859d7c"
     },
     "apps/api/src/personal-import-sync/imports/types.ts": {
       "source": "packages/shared/src/imports/types.ts",

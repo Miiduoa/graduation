@@ -12,7 +12,7 @@ def extension_files():
         'apps/api/src/migrations/279_personal_import_sync.sql': HERE / '279_personal_import_sync.sql',
     }
     # Keep shared-module relative imports intact in the isolated API packaging source.
-    for name in ['sync', 'backup', 'records', 'validation', 'types']:
+    for name in ['sync', 'copy', 'backup', 'records', 'validation', 'types']:
         sources[f'apps/api/src/personal-import-sync/imports/{name}.ts'] = ROOT / f'packages/shared/src/imports/{name}.ts'
     for name in ['periods', 'schoolPeriods']:
         sources[f'apps/api/src/personal-import-sync/timetable/{name}.ts'] = ROOT / f'packages/shared/src/timetable/{name}.ts'
