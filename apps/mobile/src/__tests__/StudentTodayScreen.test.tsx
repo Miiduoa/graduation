@@ -45,6 +45,7 @@ function result(name = '資料結構'): Awaited<ReturnType<typeof loadStudentHom
     subtitle: '報告尚未繳交',
     assignmentId: 'homework-a',
     priority: 1,
+    dueAt: new Date('2026-10-20T16:00:00.000Z'),
   };
   return { courses: [course], tasks: [task] };
 }
@@ -79,7 +80,12 @@ test.each([
     'assignment',
     '去繳交',
     'HomeworkSubmit',
-    { courseId: 'course-a', hwId: 'homework-a', hwTitle: '繳交期末報告' },
+    {
+      courseId: 'course-a',
+      hwId: 'homework-a',
+      hwTitle: '繳交期末報告',
+      dueAt: '2026-10-20T16:00:00.000Z',
+    },
   ],
   ['quiz', '去作答', 'QuizCenter', { groupId: 'course-a', groupName: '資料結構' }],
   ['live', '去簽到', 'AttendanceMultiMethod', { courseId: 'course-a', sessionId: 'attendance-a' }],
