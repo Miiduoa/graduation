@@ -70,6 +70,7 @@ export async function publishStory(payload: {
 export async function listActiveStoriesForSchool(
   schoolId: string,
   lim = 80,
+  options: { throwOnError?: boolean } = {},
 ): Promise<CampusStoryDoc[]> {
   const db = getDb();
   const now = Date.now();
@@ -94,7 +95,8 @@ export async function listActiveStoriesForSchool(
       return snap.docs
         .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
         .filter((s) => (typeof s.expiresAt === 'number' ? s.expiresAt > now : true));
-    } catch {
+    } catch (error) {
+      if (options.throwOnError) throw error;
       return [];
     }
   }

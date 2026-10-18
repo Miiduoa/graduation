@@ -14,26 +14,41 @@ export function parseSignInOptions(value: unknown): SignInOptions {
 }
 
 export function useSignInOptions() {
-  const [options, setOptions] = useState<SignInOptions | null>(null);
+  const [result, setResult] = useState<{
+    attempt: number;
+    options: SignInOptions | null;
+    error: boolean;
+  }>({ attempt: 0, options: null, error: false });
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let active = true;
-    setOptions(null);
     void browserRequest('sign-in-options')
       .then((value) => {
-        if (active) setOptions(parseSignInOptions(value));
+        // A missing or malformed response cannot establish which services are closed.
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+          throw new Error('invalid-sign-in-options');
+        }
+        const row = value as Record<string, unknown>;
+        if (typeof row.google !== 'boolean' || typeof row.studentId !== 'boolean') {
+          throw new Error('invalid-sign-in-options');
+        }
+        if (active) setResult({ attempt, options: parseSignInOptions(value), error: false });
       })
       .catch(() => {
-        if (active) setOptions({ google: false, studentId: false });
+        if (active) setResult({ attempt, options: null, error: true });
       });
     return () => {
       active = false;
     };
   }, [attempt]);
+  const current = result.attempt === attempt;
+  const options = current ? result.options : null;
+  const error = current && result.error;
   return {
     google: options?.google === true,
     studentId: options?.studentId === true,
-    loading: options === null,
+    loading: options === null && !error,
+    error,
     retry: () => setAttempt((value) => value + 1),
   };
 }
