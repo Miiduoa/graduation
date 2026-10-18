@@ -32,7 +32,8 @@ export function createTeacherLiveSessionStarter(ports: {
 
   const validId = (value: string): boolean =>
     value.length > 0 && value.length <= 128 && value.trim() === value &&
-    !/[\/\u0000-\u001f\u007f]/u.test(value) && value !== '.' && value !== '..' &&
+    !Array.from(value).some((c) => c === '/' || c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127) &&
+    value !== '.' && value !== '..' &&
     !/^__.*__$/u.test(value);
   const stillCurrent = (scope: TeacherSessionScope) => {
     const current = ports.currentScope();
