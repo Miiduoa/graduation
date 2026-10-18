@@ -40,7 +40,7 @@ beforeEach(() => {
 });
 
 it.each(['ncku', 'ntpu', 'feu', 'mmc'] as const)(
-  'keeps a successfully empty %s feed when the school-scoped legacy fallback lacks an index',
+  'keeps a successfully empty %s feed without querying the root announcements collection',
   async (schoolId) => {
     vi.mocked(getDocsFromServer).mockImplementation(productionEmptySchoolRead(schoolId) as never);
     await expect(loadAnnouncementFeed(schoolId)).resolves.toEqual({
@@ -56,19 +56,13 @@ it.each(['ncku', 'ntpu', 'feu', 'mmc'] as const)(
         ]),
       }),
     );
-    expect(getDocsFromServer).toHaveBeenCalledWith(
-      expect.objectContaining({
-        path: 'announcements',
-        constraints: expect.arrayContaining([
-          { where: 'schoolId', operator: '==', value: schoolId },
-          { orderBy: 'publishedAt', direction: 'desc' },
-        ]),
-      }),
+    expect(getDocsFromServer).not.toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'announcements' }),
     );
   },
 );
 
-it('drops fallback rows that belong to another school', async () => {
+it('does not mix leftover root-collection rows from another school into an empty feed', async () => {
   vi.mocked(getDocsFromServer).mockImplementation((async (input: { path?: string }) => {
     const path = String(input?.path || '');
     if (path.includes('announcement-sources')) return snapshot();
@@ -83,6 +77,9 @@ it('drops fallback rows that belong to another school', async () => {
     sources: [],
     allUnavailable: false,
   });
+  expect(getDocsFromServer).not.toHaveBeenCalledWith(
+    expect.objectContaining({ path: 'announcements' }),
+  );
 });
 
 it.each(['ncku', 'ntpu'] as const)(

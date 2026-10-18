@@ -155,25 +155,22 @@ it('shows a retryable unread message when Firebase is not configured and never r
   expect(getDocsFromServer).not.toHaveBeenCalled();
 });
 
-it('retains the existing school-filtered legacy source when the canonical collection is empty', async () => {
+it('does not display leftover root-collection rows when the school collection is empty', async () => {
   vi.mocked(getDocsFromServer).mockImplementation((async (input: { path?: string }) => {
     if (String(input?.path || '').includes('announcement-sources')) return snapshot();
     if (String(input?.path || '') === 'schools/pu/announcements') return snapshot();
     return snapshot(announcementDocument('既有來源公告', { schoolId: 'pu' }));
   }) as never);
   render(<AnnouncementsPage />);
-  await screen.findByText('既有來源公告');
-  expect(getDocsFromServer).toHaveBeenCalledWith({
-    path: 'announcements',
-    constraints: [
-      { where: 'schoolId', operator: '==', value: 'pu' },
-      { orderBy: 'publishedAt', direction: 'desc' },
-      { limit: 200 },
-    ],
-  });
+  expect(await screen.findByRole('heading', { name: '這間學校的公告還沒上架。' })).toBeTruthy();
+  expect(screen.queryByText('既有來源公告')).toBeNull();
+  expect(screen.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
+  expect(getDocsFromServer).not.toHaveBeenCalledWith(
+    expect.objectContaining({ path: 'announcements' }),
+  );
 });
 
-it('shows unpublished copy when the school collection is empty and the legacy fallback cannot be indexed', async () => {
+it('shows unpublished copy when the school collection is empty even if a root query would fail', async () => {
   vi.mocked(getDocsFromServer).mockImplementation(productionEmptySchoolRead('pu') as never);
   render(<AnnouncementsPage />);
   expect(await screen.findByRole('heading', { name: '這間學校的公告還沒上架。' })).toBeTruthy();
@@ -184,14 +181,9 @@ it('shows unpublished copy when the school collection is empty and the legacy fa
     path: 'schools/pu/announcements',
     constraints: [{ orderBy: 'publishedAt', direction: 'desc' }, { limit: 200 }],
   });
-  expect(getDocsFromServer).toHaveBeenCalledWith({
-    path: 'announcements',
-    constraints: [
-      { where: 'schoolId', operator: '==', value: 'pu' },
-      { orderBy: 'publishedAt', direction: 'desc' },
-      { limit: 200 },
-    ],
-  });
+  expect(getDocsFromServer).not.toHaveBeenCalledWith(
+    expect.objectContaining({ path: 'announcements' }),
+  );
 });
 
 it('keeps server categories, pinned flags and search functional without invented importance', async () => {
@@ -615,7 +607,7 @@ it.each([
   ['ncku', '全校最新消息', 'https://web.ncku.edu.tw/p/403-1000-14-1.php'],
   ['ntpu', '電子公文一般公告（含教務處）', 'https://fms.ntpu.edu.tw/km/24662'],
 ] as const)(
-  'keeps unpublished copy for %s when the empty school-scoped fallback lacks an index',
+  'keeps unpublished copy for %s without querying the root announcements collection',
   async (school, office, url) => {
     vi.mocked(getDocsFromServer).mockImplementation(productionEmptySchoolRead(school) as never);
     const params = Promise.resolve({ schoolId: school });
@@ -634,19 +626,8 @@ it.each([
       path: `schools/${school}/announcements`,
       constraints: [{ orderBy: 'publishedAt', direction: 'desc' }, { limit: 200 }],
     });
-    expect(getDocsFromServer).toHaveBeenCalledWith({
-      path: 'announcements',
-      constraints: [
-        { where: 'schoolId', operator: '==', value: school },
-        { orderBy: 'publishedAt', direction: 'desc' },
-        { limit: 200 },
-      ],
-    });
     expect(getDocsFromServer).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        path: 'announcements',
-        constraints: expect.arrayContaining([expect.objectContaining({ where: 'sourceId' })]),
-      }),
+      expect.objectContaining({ path: 'announcements' }),
     );
   },
 );

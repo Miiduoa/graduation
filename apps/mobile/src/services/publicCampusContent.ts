@@ -158,36 +158,18 @@ async function loadAnnouncementRows(
   schoolId: string,
   extra: Array<ReturnType<typeof where> | ReturnType<typeof orderBy>>,
   maxItems: number,
-  allowLegacyFallback = true,
 ) {
   const db = sourceDb(schoolId);
-  const constraints = [...extra, limit(maxItems)];
   const snapshot = await getDocsFromServer(
-    query(collection(db, 'schools', schoolId, 'announcements'), ...constraints),
+    query(collection(db, 'schools', schoolId, 'announcements'), ...extra, limit(maxItems)),
   );
-  if (!snapshot.empty || !allowLegacyFallback) {
-    return snapshot.docs.flatMap((document) => {
-      try {
-        return [announcement(document, schoolId)];
-      } catch {
-        return [];
-      }
-    });
-  }
-  try {
-    const legacy = await getDocsFromServer(
-      query(collection(db, 'announcements'), where('schoolId', '==', schoolId), ...constraints),
-    );
-    return legacy.docs.flatMap((document) => {
-      try {
-        return [announcement(document, schoolId)];
-      } catch {
-        return [];
-      }
-    });
-  } catch {
-    return [];
-  }
+  return snapshot.docs.flatMap((document) => {
+    try {
+      return [announcement(document, schoolId)];
+    } catch {
+      return [];
+    }
+  });
 }
 
 export async function loadCampusAnnouncementFeed(schoolId: string): Promise<CampusAnnouncementFeed> {
@@ -206,7 +188,7 @@ export async function loadCampusAnnouncementFeed(schoolId: string): Promise<Camp
   const missing = announcementSourceIdsForSchool(schoolId, sources).filter(
     (sourceId) => !present.has(sourceId),
   );
-  // 學校自己的集合已確定是 0 則時，不必再依處室打舊路。
+  // 學校自己的集合已確定是 0 則時，不必再依處室補查。
   const extras =
     recent.length === 0 || missing.length === 0
       ? []
@@ -216,7 +198,6 @@ export async function loadCampusAnnouncementFeed(schoolId: string): Promise<Camp
               schoolId,
               [where('sourceId', '==', sourceId)],
               ANNOUNCEMENT_SOURCE_LIMIT,
-              false,
             ),
           ),
         );
