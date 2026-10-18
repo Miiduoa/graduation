@@ -1,7 +1,7 @@
 import React from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, fireEvent, render } from '@testing-library/react-native';
-import { RefreshControl } from 'react-native';
+import { RefreshControl, Text } from 'react-native';
 import StudentTodayScreen from '../screens/StudentTodayScreen';
 import { loadStudentHome } from '../data/studentHome';
 import type { CourseSpace, InboxTask } from '../data/types';
@@ -175,6 +175,27 @@ test('handles an overdue inbox item locally after preview and undoes it', async 
   );
   fireEvent.press(view.getByRole('button', { name: '撤銷上次操作' }));
   expect(await view.findByText(/已過截止時間/)).toBeTruthy();
+});
+
+test('places sense cards below school inbox tasks', async () => {
+  const data = result();
+  data.tasks[0] = {
+    ...data.tasks[0],
+    dueAt: new Date(Date.now() - 60 * 60 * 1000),
+  };
+  jest.mocked(loadStudentHome).mockResolvedValue(data);
+  const view = render(<StudentTodayScreen />);
+  expect(await view.findByText(SENSE_SECTION_TITLE)).toBeTruthy();
+  const labels = view.UNSAFE_getAllByType(Text).map((node) => {
+    const children = node.props.children;
+    if (typeof children === 'string') return children;
+    if (Array.isArray(children) && children.every((part) => typeof part === 'string')) {
+      return children.join('');
+    }
+    return '';
+  });
+  expect(labels.indexOf('校務待辦')).toBeGreaterThan(-1);
+  expect(labels.indexOf('校務待辦')).toBeLessThan(labels.indexOf(SENSE_SECTION_TITLE));
 });
 
 test('opens the live session from a sense card', async () => {

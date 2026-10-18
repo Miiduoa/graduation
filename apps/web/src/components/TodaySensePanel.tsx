@@ -12,6 +12,7 @@ import {
   SENSE_EMPTY_TEXT,
   SENSE_HANDLE_CONFIRM,
   SENSE_SECTION_NOTE,
+  SENSE_SAVE_FAILED_TEXT,
   SENSE_SECTION_TITLE,
   SENSE_SNOOZE_CONFIRM,
   SENSE_UNDO_ACTION,
@@ -55,14 +56,17 @@ export function TodaySensePanel({
   const [pending, setPending] = useState<{ cardId: string; action: 'handle' | 'snooze' } | null>(
     null,
   );
+  const [saveError, setSaveError] = useState(false);
   if (loadedKey !== storageKey) {
     setLoadedKey(storageKey);
     setState(parseSenseState(null));
     setPending(null);
+    setSaveError(false);
     setHydrated(false);
   }
   useEffect(() => {
     setPending(null);
+    setSaveError(false);
     setState(readSenseState(storageKey));
     setHydrated(true);
   }, [storageKey]);
@@ -80,13 +84,16 @@ export function TodaySensePanel({
   if (phase === 'ready' && !hydrated) return null;
 
   const write = (next: SenseState) => {
-    setState(next);
-    if (!storageKey || typeof window === 'undefined') return;
+    if (!storageKey || typeof window === 'undefined') return false;
     try {
       window.localStorage.setItem(storageKey, serializeSenseState(next));
     } catch {
-      /* 本機寫入失敗時畫面仍反映這次操作，下次重開會回到讀取結果 */
+      setSaveError(true);
+      return false;
     }
+    setState(next);
+    setSaveError(false);
+    return true;
   };
 
   const confirm = (card: SenseCard, action: 'handle' | 'snooze') => {
@@ -108,6 +115,11 @@ export function TodaySensePanel({
         </h2>
       </div>
       <p className={styles.sectionNote}>{SENSE_SECTION_NOTE}</p>
+      {saveError ? (
+        <p className={styles.senseSaveError} role="alert">
+          {SENSE_SAVE_FAILED_TEXT}
+        </p>
+      ) : null}
       {phase === 'unsigned' ? (
         <p className={styles.empty}>{SENSE_UNSIGNED_TEXT}</p>
       ) : cards.length === 0 ? (
