@@ -50,6 +50,15 @@ const nextConfig: NextConfig = {
         ],
       },
       {
+        source: '/documents/reader.html',
+        headers: [
+          {
+            key: 'Content-Security-Policy',
+            value: contentSecurityPolicy.replace("frame-ancestors 'none'", "frame-ancestors 'self'"),
+          },
+        ],
+      },
+      {
         source: '/merchant',
         headers: [
           { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=(self)' },

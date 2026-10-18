@@ -156,3 +156,30 @@ it('uses the API settings PUT contract without changing the credential origin', 
     }),
   );
 });
+
+it('permits large import snapshots only on the two exact sync endpoints', async () => {
+  const body = JSON.stringify({ records: 'a'.repeat(2_000_001) });
+  global.fetch = jest.fn(async () => ({
+    ok: true,
+    text: async () => body,
+  })) as unknown as typeof fetch;
+  for (const path of ['personal-imports/read', 'personal-imports/write']) {
+    await expect(nuniPlatformRequest(path, handle, {})).resolves.toHaveProperty('records');
+  }
+  for (const path of [
+    'sessions/current',
+    'personal-imports/read/extra',
+    'personal-imports/read-other',
+  ]) {
+    await expect(nuniPlatformRequest(path, handle, {})).rejects.toMatchObject({
+      code: 'INVALID_RESPONSE',
+    });
+  }
+  global.fetch = jest.fn(async () => ({
+    ok: true,
+    text: async () => ' '.repeat(8 * 1024 * 1024 + 16 * 1024 + 1),
+  })) as unknown as typeof fetch;
+  await expect(nuniPlatformRequest('personal-imports/read', handle, {})).rejects.toMatchObject({
+    code: 'INVALID_RESPONSE',
+  });
+});
