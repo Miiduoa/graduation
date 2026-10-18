@@ -10,6 +10,7 @@ const MARKER = 'CAMPUS_TRANSIT_PROBE:';
 const FRESH_MS = 90_000;
 const LIVE_PROFILE = 'live-tdx';
 const LINKS_PROFILE = 'official-links-only';
+const CATALOG_PROFILE = 'static-catalog';
 const OFFICIAL_LINKS = ['https://citybus-free.taichung.gov.tw/', 'https://citybus.taichung.gov.tw/'];
 
 const record = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -19,7 +20,7 @@ class GateError extends Error {}
 const fail = (code) => { throw new GateError(code); };
 
 export function validateProfile(profile = LIVE_PROFILE) {
-  if (profile !== LIVE_PROFILE && profile !== LINKS_PROFILE) fail('unknown-transit-profile');
+  if (![LIVE_PROFILE, LINKS_PROFILE, CATALOG_PROFILE].includes(profile)) fail('unknown-transit-profile');
   return profile;
 }
 
@@ -30,7 +31,7 @@ export async function probeRuntime(profile = LIVE_PROFILE, options = {}) {
   // Even an empty or whitespace-only configured variable is not an absent credential.
   const configured = [credentials.clientId, credentials.clientSecret].map((value) => value !== undefined);
   if (configured.some(Boolean)) fail(configured.every(Boolean) ? 'tdx-credentials-present' : 'tdx-partial-configuration');
-  return { ready: true, profile, mode: 'official-links', transitReady: false,
+  return { ready: true, profile, mode: profile === CATALOG_PROFILE ? 'static-catalog' : 'official-links', transitReady: false,
     credentialsAbsent: true, reason: 'not-configured', physicalDeviceVerified: false };
 }
 
@@ -118,6 +119,7 @@ export async function probePublic(expectedRevision, {fetcher = fetch, now = Date
       !/geolocation=\(self\)/.test(page.headers.get('permissions-policy') ?? '')) fail('public-page-not-ready');
   const html = await page.text();
   if (!hasBusShell(html)) fail('new-bus-page-missing');
+  if (profile === CATALOG_PROFILE) return probeStaticCatalog(expectedRevision, html, fetcher, now);
   if (profile === LINKS_PROFILE) {
     const officialHref = verifyOfficialNotice(html);
     let response;
@@ -160,6 +162,60 @@ export function verifyOfficialNotice(html) {
   fail('official-transit-notice-missing');
 }
 
+async function probeStaticCatalog(revision, html, fetcher, now) {
+  const notice = html.match(/<aside\b[^>]*data-transit-mode=["']static-catalog["'][^>]*>([\s\S]*?)<\/aside>/)?.[1];
+  if (!notice?.includes('即時到站尚未接通') ||
+      !/<a\b[^>]*href=["']https:\/\/citybus\.taichung\.gov\.tw\/["'][^>]*>/.test(notice)) fail('static-catalog-notice-missing');
+  const request = async (query, expectedStatus = 200) => {
+    let response;
+    try { response = await fetcher(`${ORIGIN}/api/transit`, {method:'POST',headers:{'Content-Type':'application/json',Origin:ORIGIN},
+      body:JSON.stringify(query),cache:'no-store',redirect:'error',credentials:'omit',signal:AbortSignal.timeout(10_000)}); }
+    catch { fail('static-catalog-request-failed'); }
+    if (response.status !== expectedStatus || !response.headers.get('content-type')?.includes('application/json')) fail('static-catalog-response-invalid');
+    try { return await response.json(); } catch { fail('static-catalog-response-invalid'); }
+  };
+  const validateStops = (body) => {
+    if (body?.status !== 'ready' || body.kind !== 'stops' || !Array.isArray(body.stops) ||
+        body.stops.length < 1 || body.stops.length > 16 || typeof body.limited !== 'boolean' ||
+        typeof body.fetchedAt !== 'string' || !Number.isFinite(Date.parse(body.fetchedAt)) ||
+        Math.abs(now() - Date.parse(body.fetchedAt)) > 5 * 60_000) fail('static-catalog-not-ready');
+    const seen = new Set();
+    for (const stop of body.stops) {
+      const date = Date.parse(stop?.catalogDate);
+      if (!id(stop?.id) || !/^TCOD_[A-Za-z0-9_-]+$/.test(stop.id) || seen.has(stop.id) ||
+          stop.city !== CITY || !text(stop.name) || stop.source !== 'taichung-open-data' ||
+          !Number.isFinite(stop.lat) || stop.lat < 20 || stop.lat > 27 ||
+          !Number.isFinite(stop.lon) || stop.lon < 118 || stop.lon > 123 ||
+          typeof stop.catalogDate !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(stop.catalogDate) ||
+          !Number.isFinite(date) || new Date(date).toISOString().replace('.000Z', 'Z') !== stop.catalogDate.replace('.000Z', 'Z') ||
+          date > now() + 30_000 || now() - date > 180 * 86400_000 ||
+          !Array.isArray(stop.routes) || !stop.routes.length || stop.routes.length > 200 || !stop.routes.every(route =>
+            record(route) && typeof route.name === 'string' && text(route.name) && route.name.length <= 120 &&
+            typeof route.direction === 'string' && route.direction.length <= 40 &&
+            typeof route.destination === 'string' && route.destination.length <= 120)) fail('static-catalog-station-invalid');
+      seen.add(stop.id);
+    }
+    return body.stops;
+  };
+  const campus = validateStops(await request({action:'campus',schoolId:'pu'}));
+  if (!campus.every(stop => stop.name.includes('靜宜大學'))) fail('static-catalog-campus-mismatch');
+  const search = validateStops(await request({action:'search',city:CITY,text:'靜宜大學'}));
+  if (JSON.stringify(search) !== JSON.stringify(campus)) fail('static-catalog-search-mismatch');
+  const first = campus[0];
+  const nearby = validateStops(await request({action:'nearby',city:CITY,lat:first.lat,lon:first.lon,radius:300}));
+  if (!nearby.every(stop => Number.isFinite(stop.distance) && stop.distance >= 0 && stop.distance <= 300) ||
+      !nearby.some(stop => stop.id === first.id)) fail('static-catalog-nearby-mismatch');
+  for (const query of [{action:'arrivals',city:CITY,stopId:first.id},{action:'search',city:'Taipei',text:'靜宜大學'}]) {
+    const body = await request(query, 503);
+    if (body?.status !== 'unavailable' || body.reason !== 'not-configured' || Object.keys(body).length !== 2)
+      fail('static-catalog-unavailable-state-invalid');
+  }
+  return {ready:true,webReady:true,profile:CATALOG_PROFILE,mode:'static-catalog',transitReady:false,
+    stationCatalogReady:true,provider:'taichung-open-data',revision,origin:ORIGIN,checkedAt:new Date(now()).toISOString(),
+    stationCount:campus.length,catalogDate:first.catalogDate,campusSearchVerified:true,nearbyVerified:true,
+    serverNoticeVerified:true,liveArrivalsVerified:false,browserControlsVerified:false,physicalDeviceVerified:false};
+}
+
 export function buildRemoteCommand(source, profile = LIVE_PROFILE) {
   validateProfile(profile);
   const moduleUrl = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
@@ -173,10 +229,11 @@ export function parseRemoteReport(stdout, profile = LIVE_PROFILE) {
   if (lines.length !== 1) fail('runtime-probe-output-invalid');
   let value;
   try { value = JSON.parse(lines[0].slice(MARKER.length)); } catch { fail('runtime-probe-output-invalid'); }
-  if (profile === LINKS_PROFILE) {
-    if (value?.ready !== true || value.profile !== profile || value.mode !== 'official-links' || value.transitReady !== false ||
+  if (profile === LINKS_PROFILE || profile === CATALOG_PROFILE) {
+    const mode = profile === CATALOG_PROFILE ? 'static-catalog' : 'official-links';
+    if (value?.ready !== true || value.profile !== profile || value.mode !== mode || value.transitReady !== false ||
         value.credentialsAbsent !== true || value.reason !== 'not-configured') fail('runtime-official-links-not-ready');
-    return {ready:true,profile,mode:'official-links',transitReady:false,credentialsAbsent:true,reason:'not-configured',physicalDeviceVerified:false};
+    return {ready:true,profile,mode,transitReady:false,credentialsAbsent:true,reason:'not-configured',physicalDeviceVerified:false};
   }
   if (value?.ready !== true || value.profile !== profile || value.transitReady !== true || value.provider !== 'TDX' || value.directionVerified !== true ||
       value.sourceFreshnessVerified !== true || !Number.isInteger(value.stationCount) || value.stationCount < 1)
@@ -193,7 +250,9 @@ async function main() {
   if (mode === 'public') {
     const report = await probePublic(process.env.EXPECTED_RELEASE_SHA, {profile});
     await writeFile('release-evidence/transit-public.json',JSON.stringify(report,null,2)+'\n');
-    console.log(profile === LIVE_PROFILE ? 'Verified the expected public revision, campus stations and fresh directional transit data.' : 'Verified the expected Web revision and official links. Live transit remains unavailable.');
+    console.log(profile === LIVE_PROFILE ? 'Verified the expected public revision, campus stations and fresh directional transit data.' :
+      profile === CATALOG_PROFILE ? 'Verified the expected revision, static campus/search/nearby stations and explicit unavailable arrivals.' :
+      'Verified the expected Web revision and official links. Live transit remains unavailable.');
     return;
   }
   if (mode === 'fly') {
