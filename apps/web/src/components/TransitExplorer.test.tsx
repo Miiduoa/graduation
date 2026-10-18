@@ -210,6 +210,7 @@ it('shows catalog directions and source instead of polling or presenting the sna
   vi.mocked(queryTransit).mockResolvedValue(catalogResult());
   await act(async () => { renderExplorer(); });
   expect(screen.getByText('即時到站尚未接通')).toBeTruthy();
+  expect(screen.queryByText(/到站時間為預估值/)).toBeNull();
   expect(screen.getByText('去程 · 往 臺中車站')).toBeTruthy();
   expect(screen.getByText(/資料快照：2026\/10\/18/)).toBeTruthy();
   expect(screen.getByRole('link', { name: '臺中市政府公車路線站牌資料 ↗' }).getAttribute('href')).toBe('https://data.gov.tw/dataset/81555');
