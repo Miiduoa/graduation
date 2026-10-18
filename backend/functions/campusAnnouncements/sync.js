@@ -1,11 +1,18 @@
 'use strict';
 
 const { FieldValue, Timestamp } = require('firebase-admin/firestore');
-const { schoolConfig, listSources, parseSyncSchoolIds, SOURCE_UNAVAILABLE } = require('./catalog');
+const { schoolConfig, listSources, listSyncSchoolIds, SOURCE_UNAVAILABLE } = require('./catalog');
 const { extractFromHtml, countDrop } = require('./extract');
 const { politeFetch } = require('./politeFetch');
 const { announcementDocId, isLoginPortalUrl } = require('./url');
-const { selectStudentAnnouncements } = require('./quality');
+const {
+  parseAnnouncementDate,
+  selectStudentAnnouncements,
+  selectOfficialAnnouncements,
+  tallyStudentWallFilter,
+} = require('./quality');
+
+const RETENTION_DAYS = 180;
 
 const UNAVAILABLE = 'unavailable';
 const HEALTHY = 'healthy';
@@ -63,6 +70,13 @@ async function hideAnnouncementDoc(schoolId, doc) {
     },
     { merge: true },
   );
+}
+
+function shouldHideLeftoverScrape(data, now = new Date()) {
+  if (data.origin !== 'public_scrape') return false;
+  const published = parseAnnouncementDate(data.publishedAt);
+  if (!published) return false;
+  return now.getTime() - new Date(published).getTime() > RETENTION_DAYS * 24 * 60 * 60 * 1000;
 }
 
 async function hideSourceAnnouncements(db, source, deps = {}) {
@@ -201,7 +215,7 @@ async function syncSource(source, deps = {}) {
         .where('sourceId', '==', source.sourceId)
         .get();
       for (const doc of existing.docs || []) {
-        if (!keep.has(doc.id) && doc.data().origin === 'public_scrape') {
+        if (!keep.has(doc.id) && shouldHideLeftoverScrape(doc.data() || {}, new Date())) {
           await hideAnnouncementDoc(source.schoolId, doc);
         }
       }
@@ -237,30 +251,83 @@ async function syncSource(source, deps = {}) {
   }
 }
 
+function schoolFilterTally(results, now) {
+  const items = (results || []).flatMap((item) => item.items || []);
+  return tallyStudentWallFilter(items, results, now);
+}
+
 async function syncSchool(schoolId, deps = {}) {
   const school = schoolConfig(schoolId);
-  if (!school) return { schoolId, status: UNAVAILABLE, sources: [] };
+  if (!school) return { schoolId, status: UNAVAILABLE, sources: [], fetched: 0, written: 0 };
   if (!school.sources.length) {
-    return { schoolId, status: UNAVAILABLE, reason: 'no_public_sources', sources: [] };
+    return {
+      schoolId,
+      status: UNAVAILABLE,
+      reason: 'no_public_sources',
+      sources: [],
+      fetched: 0,
+      written: 0,
+    };
   }
   const results = [];
   for (const source of listSources(schoolId)) {
-    results.push({ sourceId: source.sourceId, office: source.office, ...(await syncSource(source, deps)) });
+    try {
+      results.push({
+        sourceId: source.sourceId,
+        office: source.office,
+        ...(await syncSource(source, deps)),
+      });
+    } catch (error) {
+      const reason = error.message || 'sync_failed';
+      console.error(`Announcement sync skipped ${schoolId}/${source.sourceId}: ${reason}`);
+      results.push({
+        sourceId: source.sourceId,
+        office: source.office,
+        status: UNAVAILABLE,
+        reason,
+        itemCount: 0,
+        items: [],
+        dryRun: isDryRun(deps),
+      });
+    }
   }
   const healthy = results.filter((item) => item.status === HEALTHY);
+  const items = results.flatMap((item) => item.items || []);
+  const fetched = results.reduce((sum, item) => sum + (item.itemCount || 0), 0);
+  const written = isDryRun(deps)
+    ? 0
+    : results.filter((item) => item.status === HEALTHY).reduce((sum, item) => sum + (item.itemCount || 0), 0);
   return {
     schoolId,
     status: healthy.length ? HEALTHY : UNAVAILABLE,
     sources: results,
+    fetched,
+    written,
+    studentWallCount: selectStudentAnnouncements(items, results).length,
+    officialCount: selectOfficialAnnouncements(items, results).length,
+    filterTally: schoolFilterTally(results),
   };
 }
 
 async function syncConfiguredSchools(deps = {}) {
-  const env = deps.env || process.env;
-  const schoolIds = parseSyncSchoolIds(env.CAMPUS_ANNOUNCEMENT_SYNC_SCHOOLS);
+  const schoolIds =
+    Array.isArray(deps.schoolIds) && deps.schoolIds.length ? deps.schoolIds : listSyncSchoolIds();
   const results = [];
   for (const schoolId of schoolIds) {
-    results.push(await syncSchool(schoolId, deps));
+    try {
+      results.push(await syncSchool(schoolId, deps));
+    } catch (error) {
+      const reason = error.message || 'sync_failed';
+      console.error(`Announcement sync skipped ${schoolId}: ${reason}`);
+      results.push({
+        schoolId,
+        status: UNAVAILABLE,
+        reason,
+        sources: [],
+        fetched: 0,
+        written: 0,
+      });
+    }
   }
   return results;
 }
@@ -283,7 +350,9 @@ module.exports = {
   isDryRun,
   schoolAnnouncementPath,
   assertSchoolScopedWrite,
+  RETENTION_DAYS,
   previewItems,
+  shouldHideLeftoverScrape,
   syncSource,
   syncSchool,
   syncConfiguredSchools,

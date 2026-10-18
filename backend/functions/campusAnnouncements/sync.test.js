@@ -219,7 +219,7 @@ test('dry-run does not need Firestore', async () => {
   expect(result.items).toHaveLength(1);
 });
 
-test('missing dates stay empty and leftover scrape rows are hidden instead of deleted', async () => {
+test('missing dates stay empty and undated leftover scrape rows are kept, not deleted', async () => {
   const db = memoryDb();
   db.docs.set('schools/pu/announcements/old', {
     sourceId: 'pu-acd',
@@ -242,10 +242,52 @@ test('missing dates stay empty and leftover scrape rows are hidden instead of de
   const written = [...db.docs.entries()].filter(([path]) => path.includes('/announcements/'));
   const current = written.find(([path]) => path !== 'schools/pu/announcements/old');
   expect(current[1].publishedAt).toBeNull();
+  expect(current[1].visible).toBe(false);
   expect(db.docs.get('schools/pu/announcements/old')).toMatchObject({
     title: '過期稿',
+    visible: true,
+    studentFeed: true,
+  });
+});
+
+test('leftover scrapes older than 180 days and not on the current list are hidden, not deleted', async () => {
+  const db = memoryDb();
+  db.docs.set('schools/pu/announcements/stale', {
+    sourceId: 'pu-acd',
+    origin: 'public_scrape',
+    title: '兩年前的稿',
+    publishedAt: Timestamp.fromDate(new Date('2025-01-01T00:00:00.000Z')),
+    visible: true,
+    studentFeed: true,
+  });
+  db.docs.set('schools/pu/announcements/recent', {
+    sourceId: 'pu-acd',
+    origin: 'public_scrape',
+    title: '還在期限內的舊稿',
+    publishedAt: Timestamp.fromDate(new Date('2026-10-01T00:00:00.000Z')),
+    visible: true,
+    studentFeed: true,
+  });
+  const html = `<table><tr><td><a href="/p/412-1042-1.php">選課公告</a></td><td>2026-10-08</td></tr></table>`;
+  const result = await syncSource(source, {
+    db,
+    fetchImpl: async (url) =>
+      String(url).endsWith('robots.txt')
+        ? htmlResponse('User-agent: *\nAllow: /\n')
+        : htmlResponse(html),
+    now: () => 1_000,
+    wait: async () => {},
+  });
+  expect(result.status).toBe('healthy');
+  expect(db.docs.get('schools/pu/announcements/stale')).toMatchObject({
+    title: '兩年前的稿',
     visible: false,
     studentFeed: false,
+  });
+  expect(db.docs.get('schools/pu/announcements/recent')).toMatchObject({
+    title: '還在期限內的舊稿',
+    visible: true,
+    studentFeed: true,
   });
 });
 

@@ -14,6 +14,7 @@ const {
   SOURCE_UNAVAILABLE,
   PLACEHOLDER_SCHOOL_IDS,
   parseSyncSchoolIds,
+  listSyncSchoolIds,
   DEFAULT_SYNC_SCHOOLS,
 } = require('./catalog');
 
@@ -135,10 +136,14 @@ test('NCKU and NTPU keep school-scoped public lists and do not share sources', (
   expect(ncku.map((item) => item.listUrl).some((url) => url.includes('ntpu.edu.tw'))).toBe(false);
 });
 
-test('sync school allowlist defaults to pu and never invents extra schools', () => {
-  expect(DEFAULT_SYNC_SCHOOLS).toEqual(['pu']);
-  expect(parseSyncSchoolIds(undefined)).toEqual(['pu']);
-  expect(parseSyncSchoolIds('')).toEqual(['pu']);
+test('sync school list is every catalog school with real sources except the three placeholders', () => {
+  const realIds = SCHOOLS.filter((entry) => entry.cms !== 'none').map((entry) => entry.schoolId);
+  expect(DEFAULT_SYNC_SCHOOLS).toEqual(realIds);
+  expect(listSyncSchoolIds()).toEqual(realIds);
+  expect(DEFAULT_SYNC_SCHOOLS).toEqual(expect.arrayContaining(['pu', 'ncku', 'ntpu', 'tw-nchu', 'cgu']));
+  expect(DEFAULT_SYNC_SCHOOLS.some((id) => PLACEHOLDER_SCHOOL_IDS.includes(id))).toBe(false);
+  expect(parseSyncSchoolIds(undefined)).toEqual(realIds);
+  expect(parseSyncSchoolIds('')).toEqual(realIds);
   expect(parseSyncSchoolIds('ncku, ntpu')).toEqual(['ncku', 'ntpu']);
   expect(parseSyncSchoolIds('pu,pu,ncku')).toEqual(['pu', 'ncku']);
 });
