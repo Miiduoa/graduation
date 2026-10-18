@@ -6,6 +6,7 @@ const {
   assertSafeCafeteriaSeedTarget,
   resolveSeedProjectId,
   DEFAULT_TEST_PROJECT,
+  cafeteriasForSchool,
 } = require('./seed-cafeterias.js');
 
 const script = path.join(__dirname, 'seed-cafeterias.js');
@@ -29,6 +30,26 @@ function run(overrides = {}) {
     },
   });
 }
+
+test('public dining seeds stay school-scoped and refuse ordering', () => {
+  const ncku = cafeteriasForSchool('ncku');
+  const ntpu = cafeteriasForSchool('ntpu');
+  assert.ok(ncku.length > 0);
+  assert.ok(ntpu.length > 0);
+  assert.ok(ncku.every((row) => row.orderingEnabled === false && row.merchantMode === 'info_only'));
+  assert.ok(ntpu.every((row) => row.orderingEnabled === false && row.merchantMode === 'info_only'));
+  assert.ok(ncku.every((row) => row.id.startsWith('ncku-')));
+  assert.ok(ntpu.every((row) => row.id.startsWith('ntpu-')));
+  assert.ok(ncku.every((row) => row.sourceUrl && row.websiteUrl));
+  assert.ok(ntpu.every((row) => row.sourceUrl && row.websiteUrl));
+  assert.ok(ncku.some((row) => row.name === '光復餐廳'));
+  assert.ok(ncku.some((row) => row.name === '雲平咖啡'));
+  assert.ok(ntpu.some((row) => row.name === '優米自助餐'));
+  assert.ok(ntpu.some((row) => row.name === 'PaperShoot Café'));
+  assert.ok(!ncku.some((row) => row.id.startsWith('ntpu-')));
+  assert.ok(!ntpu.some((row) => row.id.startsWith('ncku-')));
+  assert.equal(cafeteriasForSchool('nthu').length, 0);
+});
 
 test('defaults the seed project to the local demo id', () => {
   assert.equal(resolveSeedProjectId({}), DEFAULT_TEST_PROJECT);

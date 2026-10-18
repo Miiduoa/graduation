@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import {
   allowsPlaceholderAnnouncementSchools,
   announcementEmptyKind,
+  announcementViewPhase,
   announcementMatchesSearch,
   announcementSourceIdsForSchool,
   formatStaleAnnouncementNotice,
@@ -13,9 +14,14 @@ import {
   FIRESTORE_UNAVAILABLE_WITH_CACHE_TEXT,
   SOURCE_DOWN_EMPTY_TEXT,
   SOURCE_DOWN_WITH_CACHE_TEXT,
+  ANNOUNCEMENT_EMPTY_SCHOOL_TEXT,
+  ANNOUNCEMENT_READ_FAILURE_TEXT,
+  ANNOUNCEMENT_RETRY_TEXT,
+  announcementEmptyHeading,
   SOURCE_NOT_CONNECTED_TEXT,
   staleAnnouncementUpdatedAt,
 } from '@campus/shared/src/campusAnnouncements';
+import { TEMPORARY_UNAVAILABLE_TEXT } from '@campus/shared/src/loadFailureCopy';
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -57,7 +63,12 @@ it('formats the stale banner in Taiwan time and keeps the empty-state copy', () 
   expect(formatStaleAnnouncementNotice(null)).toBe('學校網站暫時連不上');
   expect(SOURCE_DOWN_WITH_CACHE_TEXT).toBe('學校網站暫時連不上');
   expect(SOURCE_DOWN_EMPTY_TEXT).toBe('學校網站暫時連不上，可以先到學校網站看最新消息');
-  expect(SOURCE_NOT_CONNECTED_TEXT).toBe('這裡還沒接上學校公告，請先到學校網站看最新消息');
+  expect(ANNOUNCEMENT_EMPTY_SCHOOL_TEXT).toBe('這間學校的公告還沒上架。');
+  expect(SOURCE_NOT_CONNECTED_TEXT).toBe(ANNOUNCEMENT_EMPTY_SCHOOL_TEXT);
+  expect(ANNOUNCEMENT_READ_FAILURE_TEXT).toBe('暫時讀不到資料，請稍後再試');
+  expect(ANNOUNCEMENT_READ_FAILURE_TEXT).toBe(TEMPORARY_UNAVAILABLE_TEXT);
+  expect(ANNOUNCEMENT_RETRY_TEXT).toBe('再試一次');
+  expect(ANNOUNCEMENT_READ_FAILURE_TEXT).not.toBe(ANNOUNCEMENT_EMPTY_SCHOOL_TEXT);
   expect(
     formatStaleAnnouncementNotice(
       staleAnnouncementUpdatedAt(
@@ -96,6 +107,53 @@ it('classifies empty feeds as never connected, source down, or confirmed empty',
     announcementEmptyKind([], [{ status: 'healthy', lastSuccessAt: '2026-10-12T10:05:00.000Z' }]),
   ).toBe('empty');
   expect(announcementEmptyKind([{ title: '舊稿' }], [{ status: 'unavailable' }])).toBe('has_items');
+  expect(announcementEmptyHeading('not_connected')).toBe(ANNOUNCEMENT_EMPTY_SCHOOL_TEXT);
+  expect(announcementEmptyHeading('empty')).toBe(ANNOUNCEMENT_EMPTY_SCHOOL_TEXT);
+  expect(announcementEmptyHeading('source_down')).toBe(SOURCE_DOWN_EMPTY_TEXT);
+  expect(announcementEmptyHeading('has_items')).toBeNull();
+  expect(announcementViewPhase(true, [], [])).toBe('loading');
+  expect(announcementViewPhase(true, [{ title: '舊稿' }], [])).toBe('loading');
+  expect(announcementViewPhase(false, [{ title: '舊稿' }], [])).toBe('has_items');
+  expect(announcementViewPhase(false, [], [])).toBe('not_connected');
+  expect(announcementViewPhase(true, [], [], true)).toBe('loading');
+  expect(announcementViewPhase(false, [], [], true)).toBe('failed');
+  expect(announcementViewPhase(false, [{ title: '舊稿' }], [], true)).toBe('has_items');
+  expect(
+    announcementViewPhase(
+      false,
+      [],
+      [{ status: 'healthy', lastSuccessAt: '2026-10-12T10:05:00.000Z' }],
+    ),
+  ).toBe('empty');
+  expect(
+    announcementViewPhase(
+      false,
+      [],
+      [{ status: 'healthy', lastSuccessAt: '2026-10-12T10:05:00.000Z' }],
+      true,
+    ),
+  ).toBe('failed');
+});
+
+it('exposes official NCKU and NTPU announcement pages already connected in the catalog', () => {
+  expect(listAnnouncementCatalogLinks('ncku')).toEqual(
+    expect.arrayContaining([
+      {
+        sourceId: 'ncku-campus',
+        office: '全校最新消息',
+        listUrl: 'https://web.ncku.edu.tw/p/403-1000-14-1.php',
+      },
+    ]),
+  );
+  expect(listAnnouncementCatalogLinks('ntpu')).toEqual(
+    expect.arrayContaining([
+      {
+        sourceId: 'ntpu-campus',
+        office: '電子公文一般公告（含教務處）',
+        listUrl: 'https://fms.ntpu.edu.tw/km/24662',
+      },
+    ]),
+  );
 });
 
 it('exposes catalog office urls for a school that has never been fetched', () => {
@@ -117,13 +175,11 @@ it('exposes catalog office urls for a school that has never been fetched', () =>
 });
 
 it('finds office announcements by 學務處 or 住宿 even when source is missing', () => {
-  expect(
-    announcementMatchesSearch({ title: '生活輔導', office: '學務處' }, '學務處'),
-  ).toBe(true);
+  expect(announcementMatchesSearch({ title: '生活輔導', office: '學務處' }, '學務處')).toBe(true);
   expect(announcementMatchesSearch({ title: '宿舍開放', office: '住宿' }, '住宿')).toBe(true);
-  expect(announcementMatchesSearch({ title: '選課', source: '教務處', office: '教務處' }, '學務處')).toBe(
-    false,
-  );
+  expect(
+    announcementMatchesSearch({ title: '選課', source: '教務處', office: '教務處' }, '學務處'),
+  ).toBe(false);
   expect(announcementSourceIdsForSchool('pu')).toEqual(
     expect.arrayContaining(['pu-osa', 'pu-dorm', 'pu-acd']),
   );

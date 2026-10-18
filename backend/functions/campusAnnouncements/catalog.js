@@ -32,6 +32,7 @@ function source(schoolId, sourceId, office, scope, listUrl, parsers, extra = {})
     intervalMinutes: extra.intervalMinutes || 20,
     owner: extra.owner || 'campus-announcements',
     enabled: extra.enabled !== false,
+    fragile: extra.fragile || '',
   };
 }
 
@@ -61,6 +62,7 @@ function school(schoolId, name, spec = {}) {
           scope: 'campus',
           url: spec.campus.url,
           cms: spec.campus.cms,
+          extra: spec.campus.extra,
         },
         cms,
       ),
@@ -76,6 +78,7 @@ function school(schoolId, name, spec = {}) {
           scope: 'office',
           url: spec.academic.url,
           cms: spec.academic.cms,
+          extra: spec.academic.extra,
         },
         cms,
       ),
@@ -115,7 +118,15 @@ const SCHOOLS = [
   school('ncku', '國立成功大學', {
     cms: 'iweb',
     campus: { url: 'https://web.ncku.edu.tw/p/403-1000-14-1.php' },
-    academic: { url: 'https://www.acad.ncku.edu.tw/', cms: 'html' },
+    academic: { url: 'https://acad.ncku.edu.tw/p/403-1025-397-1.php', cms: 'iweb' },
+    offices: [
+      {
+        sourceId: 'ncku-osa',
+        office: '學務處',
+        url: 'https://osa.ncku.edu.tw/p/403-1026-40-1.php',
+        cms: 'iweb',
+      },
+    ],
   }),
   school('nycu', '國立陽明交通大學', {
     cms: 'html',
@@ -158,9 +169,26 @@ const SCHOOLS = [
     academic: { url: 'https://acadoff.ncue.edu.tw/' },
   }),
   school('ntpu', '國立臺北大學', {
-    cms: 'html',
-    campus: { url: 'https://new.ntpu.edu.tw/news' },
-    academic: { url: 'https://www.aa.ntpu.edu.tw/' },
+    cms: 'iweb',
+    campus: {
+      office: '電子公文一般公告（含教務處）',
+      url: 'https://fms.ntpu.edu.tw/km/24662',
+      cms: 'iweb',
+    },
+    offices: [
+      {
+        sourceId: 'ntpu-oga',
+        office: '總務處',
+        url: 'https://oga.ntpu.edu.tw/p/403-1008-39-1.php',
+        cms: 'iweb',
+      },
+      {
+        sourceId: 'ntpu-su',
+        office: '學生會',
+        url: 'https://ntpusu.ntpu.edu.tw/p/403-1015-39-1.php',
+        cms: 'iweb',
+      },
+    ],
   }),
   school('tmu', '臺北醫學大學', {
     cms: 'html',
@@ -260,6 +288,14 @@ function allSources() {
   return SCHOOLS.flatMap((entry) => entry.sources.filter((item) => item.enabled !== false));
 }
 
+const DEFAULT_SYNC_SCHOOLS = ['pu'];
+
+function parseSyncSchoolIds(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return [...DEFAULT_SYNC_SCHOOLS];
+  return [...new Set(raw.split(/[,\s]+/).map((item) => item.trim()).filter(Boolean))];
+}
+
 function coverageRows() {
   return SCHOOLS.map((entry) => {
     const sources = entry.sources || [];
@@ -272,6 +308,13 @@ function coverageRows() {
     let note = campus && academic ? '已設定全校與教務處；實際抽出看健康檢查' : '';
     if (entry.schoolId === 'pu') {
       note = '第一批七處室完整接上 iWeb 雙解析器';
+    }
+    if (entry.schoolId === 'ncku') {
+      note = '全校、教務處、學務處公開列表已接 iWeb；寫入仍要列進 CAMPUS_ANNOUNCEMENT_SYNC_SCHOOLS';
+    }
+    if (entry.schoolId === 'ntpu') {
+      note =
+        '全校電子公文一般公告、總務處活動消息、學生會公開列表已接上；教務處獨立網站 www.aa.ntpu.edu.tw 目前連不上，教務處公文在全校列表。寫入仍要列進 CAMPUS_ANNOUNCEMENT_SYNC_SCHOOLS';
     }
     if (entry.demo && sources.length === 0) {
       status = 'unavailable';
@@ -327,6 +370,8 @@ module.exports = {
   isPublicAnnouncementSchool,
   listSources,
   allSources,
+  DEFAULT_SYNC_SCHOOLS,
+  parseSyncSchoolIds,
   coverageRows,
   formatCoverageTable,
   SOURCE_UNAVAILABLE,

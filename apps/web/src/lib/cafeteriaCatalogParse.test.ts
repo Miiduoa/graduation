@@ -4,6 +4,7 @@ import {
   CAFETERIA_EMPTY_SCHOOL_TEXT,
   CAFETERIA_NOT_FOUND_TEXT,
   CAFETERIA_PAYMENT_DISCLAIMER,
+  STOREFRONT_EMPTY_MENU_TEXT,
   STOREFRONT_PAGE_SUBTITLE,
   CAFETERIA_REVIEW_STATUS_DEFAULT,
   DEMO_CAFETERIA_BADGE,
@@ -11,8 +12,10 @@ import {
   UNVERIFIED_CAFETERIA_BADGE,
   UNVERIFIED_CAFETERIA_NOTICE,
   cafeteriaListHref,
+  cafeteriaListReviewNotices,
   cafeteriaReviewBadge,
   cafeteriaReviewNotice,
+  cafeteriaShowsMenuAvailability,
   parseCafeteriaLocations,
   parseCafeteriaMenu,
   parseCafeteriaReviewStatus,
@@ -23,6 +26,8 @@ it('keeps the student-facing cafeteria copy used by empty and missing shops', ()
   expect(CAFETERIA_NOT_FOUND_TEXT).toBe('找不到這間店。');
   expect(CAFETERIA_BACK_TO_LIST_TEXT).toBe('回餐廳列表');
   expect(STOREFRONT_PAGE_SUBTITLE).toBe('店家自己的主頁。');
+  expect(STOREFRONT_EMPTY_MENU_TEXT).toBe('還沒有菜單。');
+  expect(STOREFRONT_EMPTY_MENU_TEXT).not.toContain('沒串接的店也可以只放訂餐連結');
   expect(CAFETERIA_PAYMENT_DISCLAIMER).toBe(
     '價格、是否賣完、是否接單以店家訂餐頁為準，付款與退款由店家處理。',
   );
@@ -61,6 +66,19 @@ it('reads only the catalog reviewStatus field and treats missing or unknown valu
   expect(cafeteriaReviewNotice('unknown')).toBe(
     '這間店的菜單和價格還沒跟店家核對過，可能跟現場不一樣，目前不能點餐。',
   );
+  expect(cafeteriaShowsMenuAvailability('verified')).toBe(true);
+  expect(cafeteriaShowsMenuAvailability('unverified')).toBe(false);
+  expect(cafeteriaShowsMenuAvailability('demo')).toBe(false);
+  expect(cafeteriaShowsMenuAvailability(undefined)).toBe(false);
+  expect(cafeteriaListReviewNotices(['unverified', 'verified'])).toEqual([
+    UNVERIFIED_CAFETERIA_NOTICE,
+  ]);
+  expect(cafeteriaListReviewNotices(['demo', 'unverified'])).toEqual([
+    UNVERIFIED_CAFETERIA_NOTICE,
+    DEMO_CAFETERIA_NOTICE,
+  ]);
+  expect(cafeteriaListReviewNotices(['verified'])).toEqual([]);
+  expect(cafeteriaListReviewNotices([])).toEqual([]);
 });
 
 it('does not infer review status from shop names such as 路易莎 or 全家', () => {

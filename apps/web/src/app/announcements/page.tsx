@@ -7,12 +7,15 @@ import { SiteShell } from '@/components/SiteShell';
 import type { Announcement } from '@/lib/firebase';
 import { loadAnnouncementFeed, type AnnouncementSourceHealth } from './publicAnnouncements';
 import {
+  ANNOUNCEMENT_EMPTY_SCHOOL_TEXT,
+  ANNOUNCEMENT_READ_FAILURE_TEXT,
+  ANNOUNCEMENT_RETRY_TEXT,
+  announcementEmptyHeading,
   announcementEmptyKind,
   announcementMatchesSearch,
   formatStaleAnnouncementNotice,
   listAnnouncementCatalogLinks,
   SOURCE_DOWN_EMPTY_TEXT,
-  SOURCE_NOT_CONNECTED_TEXT,
   staleAnnouncementUpdatedAt,
 } from '@campus/shared/src/campusAnnouncements';
 import { isAnnouncementSchoolVisibleToPublic } from '@campus/shared/src/campusAnnouncements';
@@ -23,23 +26,20 @@ import styles from './announcements.module.css';
 type Category = 'all' | 'academic' | 'event' | 'general';
 type ReadyState = {
   status: 'ready';
+  schoolId: string;
   announcements: Announcement[];
   sources: AnnouncementSourceHealth[];
   allUnavailable: boolean;
   fetchedAt: string;
   stale: boolean;
 };
-type LoadState = { status: 'loading' } | ReadyState;
+type LoadState =
+  | { status: 'loading'; schoolId: string }
+  | { status: 'failed'; schoolId: string }
+  | ReadyState;
 
-function emptyFeed(fetchedAt = new Date().toISOString()): ReadyState {
-  return {
-    status: 'ready',
-    announcements: [],
-    sources: [],
-    allUnavailable: false,
-    fetchedAt,
-    stale: false,
-  };
+function feedForSchool(state: LoadState, schoolId: string): LoadState {
+  return state.schoolId === schoolId ? state : { status: 'loading', schoolId };
 }
 
 const categories: { id: Category; label: string }[] = [
@@ -77,13 +77,14 @@ function OfficeSourceLinks({
 }
 
 function AnnouncementReader({ schoolId }: { schoolId: string }) {
-  const [state, setState] = useState<LoadState>({ status: 'loading' });
+  const [state, setState] = useState<LoadState>({ status: 'loading', schoolId });
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState<Category>('all');
   const [pinnedOnly, setPinnedOnly] = useState(false);
   const [notice, setNotice] = useState('');
   const generation = useRef(0);
   const mounted = useRef(false);
+  const view = feedForSchool(state, schoolId);
 
   const load = useCallback(() => {
     const request = ++generation.current;
@@ -92,6 +93,7 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
         if (mounted.current && request === generation.current) {
           setState({
             status: 'ready',
+            schoolId,
             announcements: feed.announcements,
             sources: feed.sources,
             allUnavailable: feed.allUnavailable,
@@ -103,9 +105,11 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
       () => {
         if (!mounted.current || request !== generation.current) return;
         setState((current) =>
-          current.status === 'ready' && current.announcements.length > 0
+          current.schoolId === schoolId &&
+          current.status === 'ready' &&
+          current.announcements.length > 0
             ? { ...current, stale: true }
-            : emptyFeed(),
+            : { status: 'failed', schoolId },
         );
       },
     );
@@ -114,9 +118,11 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
   function refresh() {
     setNotice('');
     setState((current) =>
-      current.status === 'ready' && current.announcements.length > 0
+      current.schoolId === schoolId &&
+      current.status === 'ready' &&
+      current.announcements.length > 0
         ? current
-        : { status: 'loading' },
+        : { status: 'loading', schoolId },
     );
     void load();
   }
@@ -157,37 +163,47 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
     }
   }
 
-  if (state.status === 'loading') {
+  if (view.status === 'loading') {
     return (
       <div className={styles.status} role="status">
         正在讀取公告…
       </div>
     );
   }
-  const filtered = state.announcements.filter((announcement) => {
+  if (view.status === 'failed') {
+    return (
+      <section className={styles.status}>
+        <h2>{ANNOUNCEMENT_READ_FAILURE_TEXT}</h2>
+        <button className="btn" type="button" onClick={() => void refresh()}>
+          {ANNOUNCEMENT_RETRY_TEXT}
+        </button>
+      </section>
+    );
+  }
+  const emptyKind = announcementEmptyKind(view.announcements, view.sources);
+  const filtered = view.announcements.filter((announcement) => {
     return (
       announcementMatchesSearch(announcement, search) &&
       (category === 'all' || categoryOf(announcement) === category) &&
       (!pinnedOnly || announcement.pinned)
     );
   });
-  const emptyKind = announcementEmptyKind(state.announcements, state.sources);
-  const downLinks = state.sources.filter((item) => item.status === 'unavailable' && item.listUrl);
+  const downLinks = view.sources.filter((item) => item.status === 'unavailable' && item.listUrl);
   const showStaleNotice =
-    state.announcements.length > 0 &&
-    (state.stale || state.sources.some((item) => item.status === 'unavailable'));
+    view.announcements.length > 0 &&
+    (view.stale || view.sources.some((item) => item.status === 'unavailable'));
   const staleSources =
-    state.stale && !state.sources.some((item) => item.status === 'unavailable')
-      ? [{ status: 'unavailable' as const, lastSuccessAt: state.fetchedAt }]
-      : state.sources;
+    view.stale && !view.sources.some((item) => item.status === 'unavailable')
+      ? [{ status: 'unavailable' as const, lastSuccessAt: view.fetchedAt }]
+      : view.sources;
 
   return (
     <div className={styles.page}>
       <div className={styles.source}>
         <p>
-          公開公告 · 最近 {state.announcements.length} 則
+          公開公告 · 最近 {view.announcements.length} 則
           <span>
-            {new Date(state.fetchedAt).toLocaleTimeString('zh-TW', {
+            {new Date(view.fetchedAt).toLocaleTimeString('zh-TW', {
               timeZone: 'Asia/Taipei',
               hour: '2-digit',
               minute: '2-digit',
@@ -238,33 +254,29 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
       {showStaleNotice && (
         <p role="status" className={styles.notice}>
           {formatStaleAnnouncementNotice(
-            staleAnnouncementUpdatedAt(staleSources, state.announcements),
-            state.stale ? 'firestore' : 'source_down',
+            staleAnnouncementUpdatedAt(staleSources, view.announcements),
+            view.stale ? 'firestore' : 'source_down',
           )}
         </p>
       )}
       {filtered.length === 0 ? (
         <section className={styles.status}>
-          {emptyKind === 'not_connected' ? (
-            <>
-              <h2>{SOURCE_NOT_CONNECTED_TEXT}</h2>
-              <OfficeSourceLinks links={listAnnouncementCatalogLinks(schoolId)} />
-            </>
-          ) : emptyKind === 'source_down' ? (
+          {emptyKind === 'source_down' ? (
             <>
               <h2>{SOURCE_DOWN_EMPTY_TEXT}</h2>
               <OfficeSourceLinks
                 links={downLinks.length ? downLinks : listAnnouncementCatalogLinks(schoolId)}
               />
             </>
+          ) : emptyKind !== 'has_items' ? (
+            <>
+              <h2>{announcementEmptyHeading(emptyKind) ?? ANNOUNCEMENT_EMPTY_SCHOOL_TEXT}</h2>
+              <OfficeSourceLinks links={listAnnouncementCatalogLinks(schoolId)} />
+            </>
           ) : (
             <>
-              <h2>{state.announcements.length ? '沒有符合條件的公告' : '目前沒有公開公告'}</h2>
-              <p>
-                {state.announcements.length
-                  ? '試試其他關鍵字或分類。'
-                  : '學校發布新的公告後，會顯示在這裡。'}
-              </p>
+              <h2>沒有符合條件的公告</h2>
+              <p>試試其他關鍵字或分類。</p>
             </>
           )}
         </section>
@@ -354,9 +366,13 @@ export default function AnnouncementsPage(props: {
       {!visible ? (
         <section className={styles.status}>
           <h2>
-            {context.status === 'loading' ? '正在讀取所選校園…' :
-              context.status === 'error' ? '無法取得校園目錄' :
-              context.status === 'unselected' ? '先選擇一所學校' : '目前沒有公開公告'}
+            {context.status === 'loading'
+              ? '正在讀取所選校園…'
+              : context.status === 'error'
+                ? '無法取得校園目錄'
+                : context.status === 'unselected'
+                  ? '先選擇一所學校'
+                  : '目前沒有公開公告'}
           </h2>
         </section>
       ) : loading ? (

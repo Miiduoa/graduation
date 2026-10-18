@@ -20,6 +20,7 @@ function reply(body: unknown, ok = true) {
 test('selects the primary school city without treating unknown campuses as Taichung', () => {
   expect(primaryBusCity('nthu')).toBe('Hsinchu');
   expect(primaryBusCity('ncku')).toBe('Tainan');
+  expect(primaryBusCity('ntpu')).toBe('NewTaipei');
   expect(primaryBusCity('tw-nchu')).toBe('Taichung');
   expect(primaryBusCity('nycu')).toBeNull();
   expect(primaryBusCity('external-university')).toBeNull();
@@ -54,6 +55,51 @@ test('rejects spoofed school stops and malformed provider responses instead of s
   ] });
   const result = await queryPublicTransit({ action: 'search', city: 'Hsinchu', text: '站牌' });
   expect(result).toMatchObject({ status: 'ready', kind: 'stops', stops: [{ id: 'ONE' }] });
+});
+
+test('retains validated static route metadata without treating its snapshot as live arrivals', async () => {
+  const catalog = {
+    id: 'TCOD_static001', name: '靜宜大學', city: 'Taichung', lat: 24.23, lon: 120.57, distance: null,
+    source: 'taichung-open-data', catalogDate: '2026-01-01T00:00:00.000Z',
+    routes: [{ name: '300', direction: '去', destination: '臺中車站' }],
+  };
+  reply({ status: 'ready', kind: 'stops', fetchedAt: now(), limited: false, stops: [catalog] });
+  expect(await queryPublicTransit({ action: 'search', city: 'Taichung', text: '靜宜' })).toMatchObject({
+    status: 'ready', kind: 'stops', stops: [catalog],
+  });
+});
+
+test('rejects inconsistent catalog identity and metadata instead of downgrading static stops to TDX', async () => {
+  const catalog = {
+    id: 'TCOD_static001', name: '靜宜大學', city: 'Taichung', lat: 24.23, lon: 120.57,
+    source: 'taichung-open-data', catalogDate: '2026-01-01T00:00:00.000Z',
+    routes: [{ name: '300', direction: '去', destination: '臺中車站' }],
+  };
+  reply({ status: 'ready', kind: 'stops', fetchedAt: now(), limited: false, stops: [
+    { ...catalog, id: 'TCOD_no_source', source: undefined },
+    { ...catalog, id: 'TDX_WRONG_NAMESPACE' },
+    { ...catalog, id: 'TCOD_wrong_source', source: 'unverified-provider' },
+    { ...catalog, id: 'TCOD_wrong_date', catalogDate: 'not-a-date' },
+    { ...catalog, id: 'TCOD_invalid_calendar_date', catalogDate: '2026-02-31T00:00:00.000Z' },
+    { ...catalog, id: 'TCOD_future_date', catalogDate: '2999-01-01T00:00:00.000Z' },
+    { ...catalog, id: 'TCOD_wrong_routes', routes: [{ name: '300', direction: '去' }] },
+    { ...catalog, id: 'TCOD_wrong_routes_type', routes: null },
+    { ...catalog, id: 'TCOD_other_city', city: 'Taipei' },
+    catalog,
+  ] });
+  const result = await queryPublicTransit({ action: 'search', city: 'Taichung', text: '靜宜' });
+  expect(result).toMatchObject({ status: 'ready', kind: 'stops', stops: [{ id: catalog.id }] });
+});
+
+test('retains missing catalog route fields as empty values without inventing destinations', async () => {
+  reply({ status: 'ready', kind: 'stops', fetchedAt: now(), limited: false, stops: [{
+    id: 'TCOD_incomplete_route', name: '靜宜大學', city: 'Taichung', lat: 24.23, lon: 120.57,
+    source: 'taichung-open-data', catalogDate: '2026-01-01T00:00:00Z',
+    routes: [{ name: '300', direction: '', destination: '' }],
+  }] });
+  expect(await queryPublicTransit({ action: 'search', city: 'Taichung', text: '靜宜' })).toMatchObject({
+    status: 'ready', kind: 'stops', stops: [{ routes: [{ name: '300', direction: '', destination: '' }] }],
+  });
 });
 
 test('invalid city, station name and location never issue a network request', async () => {

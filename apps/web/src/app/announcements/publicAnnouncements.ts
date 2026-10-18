@@ -68,19 +68,9 @@ async function querySchoolAnnouncements(
   maxItems: number,
 ) {
   const db = getDb();
-  const constraints = [...extra, limit(maxItems)];
-  let snapshot = await getDocsFromServer(
-    query(collection(db, 'schools', schoolId, 'announcements'), ...constraints),
+  const snapshot = await getDocsFromServer(
+    query(collection(db, 'schools', schoolId, 'announcements'), ...extra, limit(maxItems)),
   );
-  if (snapshot.empty) {
-    snapshot = await getDocsFromServer(
-      query(
-        collection(db, 'announcements'),
-        where('schoolId', '==', schoolId),
-        ...constraints,
-      ),
-    );
-  }
   return snapshot.docs.flatMap((document) => {
     try {
       return [normalizeAnnouncement(document, schoolId)];
@@ -122,15 +112,19 @@ export async function loadAnnouncementFeed(schoolId: string): Promise<Announceme
   const missing = announcementSourceIdsForSchool(schoolId, sources).filter(
     (sourceId) => !present.has(sourceId),
   );
-  const extras = await Promise.all(
-    missing.map((sourceId) =>
-      querySchoolAnnouncements(
-        schoolId,
-        [where('sourceId', '==', sourceId)],
-        ANNOUNCEMENT_SOURCE_LIMIT,
-      ),
-    ),
-  );
+  // 學校自己的集合已確定是 0 則時，不必再依處室補查。
+  const extras =
+    recent.length === 0 || missing.length === 0
+      ? []
+      : await Promise.all(
+          missing.map((sourceId) =>
+            querySchoolAnnouncements(
+              schoolId,
+              [where('sourceId', '==', sourceId)],
+              ANNOUNCEMENT_SOURCE_LIMIT,
+            ),
+          ),
+        );
   return {
     announcements: mergeAnnouncementsById([recent, ...extras]),
     sources,
