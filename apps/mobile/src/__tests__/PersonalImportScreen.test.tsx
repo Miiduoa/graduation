@@ -680,9 +680,7 @@ test('document errors stay Chinese and scan pages are not treated as readable te
   });
   const view = render(<PersonalImportScreen />);
   fireEvent.press(view.getByText('選擇檔案'));
-  await waitFor(() =>
-    expect(view.getByText('此 PDF 已加密，請先解除密碼保護。')).toBeTruthy(),
-  );
+  await waitFor(() => expect(view.getByText('此 PDF 已加密，請先解除密碼保護。')).toBeTruthy());
   expect(view.queryByText('準備讀取：locked.pdf')).toBeNull();
 
   chooseDocument({
@@ -701,9 +699,7 @@ test('document errors stay Chinese and scan pages are not treated as readable te
   });
   fireEvent.press(view.getByText('選擇檔案'));
   await waitFor(() => expect(view.getByText('準備讀取：scan.pdf')).toBeTruthy());
-  expect(
-    view.getByText('這個檔案沒有可讀取的文字頁。掃描 PDF 請改用「選擇截圖」。'),
-  ).toBeTruthy();
+  expect(view.getByText(/這個檔案沒有可讀取的文字頁。掃描 PDF 請改用「選擇截圖」/)).toBeTruthy();
   expect(
     view.getByRole('button', { name: '讀取選取內容' }).props.accessibilityState?.disabled,
   ).toBe(true);
@@ -717,7 +713,7 @@ test('oversize PDF is rejected before the native document host runs', async () =
       {
         uri: 'file:///huge.pdf',
         name: 'huge.pdf',
-        size: 10 * 1024 * 1024 + 1,
+        size: 8 * 1024 * 1024 + 1,
         mimeType: 'application/pdf',
       },
     ],
@@ -725,10 +721,188 @@ test('oversize PDF is rejected before the native document host runs', async () =
   const view = render(<PersonalImportScreen />);
   fireEvent.press(view.getByText('選擇檔案'));
   await waitFor(() =>
-    expect(view.getByText('PDF／Excel 上限 10 MiB，請拆成較小的檔案。')).toBeTruthy(),
+    expect(view.getByText('PDF／Excel 上限 8 MiB，請拆成較小的檔案。')).toBeTruthy(),
   );
   expect(mockDocumentRead).not.toHaveBeenCalled();
   expect(mockFileText).not.toHaveBeenCalled();
+});
+
+function gradeSection(id: string, label: string, count: number) {
+  return {
+    id,
+    label,
+    needsOcr: false,
+    warnings: [],
+    rows: [
+      { line: 1, cells: ['課程名稱', '學分', '成績'] },
+      ...Array.from({ length: count }, (_, index) => ({
+        line: index + 2,
+        cells: [`課${id}-${index}`, '2', 'A'],
+      })),
+    ],
+  };
+}
+
+test('total rows across all chosen sections are capped; nothing is imported or truncated', async () => {
+  chooseDocument({
+    format: 'xlsx',
+    name: 'many.xlsx',
+    warnings: [],
+    sections: [gradeSection('a', '上學期', 300), gradeSection('b', '下學期', 300)],
+  });
+  const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
+  fireEvent.press(view.getByText('成績與學分'));
+  fireEvent.changeText(view.getByLabelText('這批資料的學年度（例如 115）'), '115');
+  fireEvent.changeText(view.getByLabelText('這批資料的學期（例如 1、2、暑期）'), '1');
+  fireEvent.press(view.getByText('選擇檔案'));
+  await waitFor(() => expect(view.getByText('□ 上學期')).toBeTruthy());
+  fireEvent.press(view.getByText('□ 上學期'));
+  fireEvent.press(view.getByText('□ 下學期'));
+  fireEvent.press(view.getByText('讀取選取內容'));
+  await waitFor(() =>
+    expect(view.getByText('選取的內容超過 500 筆，請減少工作表或頁面，分次匯入。')).toBeTruthy(),
+  );
+  expect(view.getByText('準備讀取：many.xlsx')).toBeTruthy();
+  expect(view.queryByText('確認新增')).toBeNull();
+  expect((await loadPersonalImports(scope)).records).toHaveLength(0);
+});
+
+test('PDF full-page reread wires pdfMode ocr and keeps preview on cancel or failure', async () => {
+  const autoDoc: PersonalImportDocument = {
+    format: 'pdf',
+    name: 'hybrid.pdf',
+    warnings: [],
+    sections: [
+      {
+        id: 'page-1',
+        label: '第 1 頁',
+        needsOcr: false,
+        warnings: [],
+        rows: [
+          { line: 1, cells: ['課程名稱', '學分', '成績'] },
+          { line: 2, cells: ['微積分', '3', 'A'] },
+        ],
+      },
+    ],
+  };
+  const ocrDoc: PersonalImportDocument = {
+    ...autoDoc,
+    sections: [
+      {
+        ...autoDoc.sections[0],
+        rows: [
+          { line: 1, cells: ['課程名稱', '學分', '成績'] },
+          { line: 2, cells: ['微積分', '3', 'A'] },
+          { line: 3, cells: ['英文', '2', 'B'] },
+        ],
+      },
+    ],
+  };
+  chooseDocument(autoDoc, { name: 'hybrid.pdf', size: 4096, mimeType: 'application/pdf' });
+  const view = render(<PersonalImportScreen />);
+  fireEvent.press(view.getByText('成績與學分'));
+  fireEvent.changeText(view.getByLabelText('這批資料的學年度（例如 115）'), '115');
+  fireEvent.changeText(view.getByLabelText('這批資料的學期（例如 1、2、暑期）'), '1');
+  fireEvent.press(view.getByText('選擇檔案'));
+  await waitFor(() => expect(view.getByText('準備讀取：hybrid.pdf')).toBeTruthy());
+  expect(mockDocumentRead).toHaveBeenCalledWith(
+    expect.objectContaining({ uri: 'file:///hybrid.pdf', name: 'hybrid.pdf' }),
+    expect.any(AbortSignal),
+  );
+  expect(view.getByText('重新辨識 PDF 整頁')).toBeTruthy();
+
+  let resolveOcr!: (value: PersonalImportDocument) => void;
+  mockDocumentRead.mockReturnValueOnce(
+    new Promise<PersonalImportDocument>((done) => {
+      resolveOcr = done;
+    }),
+  );
+  fireEvent.press(view.getByText('重新辨識 PDF 整頁'));
+  await waitFor(() =>
+    expect(mockDocumentRead).toHaveBeenLastCalledWith(
+      expect.objectContaining({ uri: 'file:///hybrid.pdf', name: 'hybrid.pdf' }),
+      expect.any(AbortSignal),
+      { pdfMode: 'ocr' },
+    ),
+  );
+  expect(
+    view.getByRole('button', { name: '讀取選取內容' }).props.accessibilityState?.disabled,
+  ).toBe(true);
+  fireEvent.press(view.getByText('取消讀取'));
+  await act(async () => {
+    resolveOcr(ocrDoc);
+  });
+  expect(view.getByText('準備讀取：hybrid.pdf')).toBeTruthy();
+  expect(view.queryByText('已重新辨識整頁')).toBeNull();
+
+  mockDocumentRead.mockRejectedValueOnce(new Error('辨識引擎暫時無法使用。'));
+  fireEvent.press(view.getByText('重新辨識 PDF 整頁'));
+  await waitFor(() => expect(view.getByText('辨識引擎暫時無法使用。')).toBeTruthy());
+  expect(view.getByText('準備讀取：hybrid.pdf')).toBeTruthy();
+
+  mockDocumentRead.mockResolvedValueOnce(ocrDoc);
+  fireEvent.press(view.getByText('重新辨識 PDF 整頁'));
+  await waitFor(() => expect(view.getByText(/已重新辨識整頁/)).toBeTruthy());
+  fireEvent.press(view.getByText('□ 第 1 頁'));
+  fireEvent.press(view.getByText('讀取選取內容'));
+  await waitFor(() => expect(view.getByText('確認新增 2 筆')).toBeTruthy());
+});
+
+test('late PDF reread after account switch cannot replace the scoped document prep', async () => {
+  const autoDoc: PersonalImportDocument = {
+    format: 'pdf',
+    name: 'scoped.pdf',
+    warnings: [],
+    sections: [
+      {
+        id: 'page-1',
+        label: '第 1 頁',
+        needsOcr: false,
+        warnings: [],
+        rows: [
+          { line: 1, cells: ['課程名稱', '學分', '成績'] },
+          { line: 2, cells: ['微積分', '3', 'A'] },
+        ],
+      },
+    ],
+  };
+  chooseDocument(autoDoc, { name: 'scoped.pdf', size: 2048, mimeType: 'application/pdf' });
+  const view = render(<PersonalImportScreen />);
+  fireEvent.press(view.getByText('選擇檔案'));
+  await waitFor(() => expect(view.getByText('準備讀取：scoped.pdf')).toBeTruthy());
+  let resolveOcr!: (value: PersonalImportDocument) => void;
+  mockDocumentRead.mockReturnValueOnce(
+    new Promise<PersonalImportDocument>((done) => {
+      resolveOcr = done;
+    }),
+  );
+  fireEvent.press(view.getByText('重新辨識 PDF 整頁'));
+  await waitFor(() =>
+    expect(mockDocumentRead).toHaveBeenLastCalledWith(expect.anything(), expect.any(AbortSignal), {
+      pdfMode: 'ocr',
+    }),
+  );
+  mockScope = { ...scope, owner: 'nuni:pa-b' };
+  view.rerender(<PersonalImportScreen />);
+  await act(async () => {
+    resolveOcr({
+      ...autoDoc,
+      name: 'scoped.pdf',
+      sections: [
+        {
+          ...autoDoc.sections[0],
+          rows: [
+            { line: 1, cells: ['課程名稱', '學分', '成績'] },
+            { line: 2, cells: ['不該出現', '3', 'A'] },
+          ],
+        },
+      ],
+    });
+  });
+  expect(view.queryByText('準備讀取：scoped.pdf')).toBeNull();
+  expect(view.queryByText('不該出現')).toBeNull();
+  expect(view.queryByText(/已重新辨識整頁/)).toBeNull();
 });
 
 test.each([

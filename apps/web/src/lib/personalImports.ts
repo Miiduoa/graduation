@@ -10,7 +10,10 @@ import {
   type PersonalImportRecord,
   type PersonalImportRow,
 } from '@campus/shared';
-import { parsePersonalImportSnapshot, type PersonalImportSyncState } from '@campus/shared/src/imports/sync';
+import {
+  parsePersonalImportSyncState,
+  type PersonalImportSyncState,
+} from '@campus/shared/src/imports/sync';
 import type { PersonalImportLocalState } from '@campus/shared/src/imports/syncEngine';
 
 export type PersonalImportScope = { owner: string; schoolId: string };
@@ -64,26 +67,40 @@ export function readPersonalImportSyncState(scope: PersonalImportScope): Persona
   const raw = localStorage.getItem(personalImportsStorageKey(scope));
   const value = raw ? JSON.parse(raw).sync : undefined;
   if (value === undefined) return { enabled: false, base: null };
-  if (!value || typeof value.enabled !== 'boolean' || !('base' in value))
-    throw new Error('同步紀錄暫時讀不到，裝置資料仍保留，請勿清除瀏覽器資料。');
-  return { enabled: value.enabled, base: value.base === null ? null : parsePersonalImportSnapshot(value.base, scope.schoolId) };
+  return parsePersonalImportSyncState(value, scope.schoolId);
 }
 
-export async function withPersonalImportSyncLock<T>(scope: PersonalImportScope,
-  action: (state: PersonalImportLocalState) => Promise<{ state: PersonalImportLocalState; result: T }>,
+export async function withPersonalImportSyncLock<T>(
+  scope: PersonalImportScope,
+  action: (
+    state: PersonalImportLocalState,
+    checkpoint: (state: PersonalImportLocalState) => Promise<void>,
+  ) => Promise<{ state: PersonalImportLocalState; result: T }>,
   active = () => true,
 ): Promise<T> {
   if (!navigator.locks) throw new Error('目前瀏覽器無法安全同步，請使用最新版瀏覽器。');
   return navigator.locks.request(personalImportsStorageKey(scope), async () => {
     if (!active()) throw new Error('帳號或校園已切換，這次同步已停止。');
-    const previous = { records: readPersonalImports(scope), sync: readPersonalImportSyncState(scope) };
-    const { state, result } = await action(previous);
-    if (!active()) throw new Error('帳號或校園已切換，這次同步已停止。');
-    if (JSON.stringify(previous) !== JSON.stringify(state)) {
-      try { localStorage.setItem(personalImportsStorageKey(scope), JSON.stringify({ version: 1, ...state })); }
-      catch { throw new Error('裝置空間不足，這次同步未能保存；原資料仍保留，請先下載備份。'); }
+    let persisted: PersonalImportLocalState = {
+      records: readPersonalImports(scope),
+      sync: readPersonalImportSyncState(scope),
+    };
+    const checkpoint = async (state: PersonalImportLocalState) => {
+      if (!active()) throw new Error('帳號或校園已切換，這次同步已停止。');
+      if (JSON.stringify(persisted) === JSON.stringify(state)) return;
+      try {
+        localStorage.setItem(
+          personalImportsStorageKey(scope),
+          JSON.stringify({ version: 1, ...state }),
+        );
+      } catch {
+        throw new Error('裝置空間不足，這次同步未能保存；原資料仍保留，請先下載備份。');
+      }
+      persisted = state;
       window.dispatchEvent(new Event(PERSONAL_IMPORT_CHANGE));
-    }
+    };
+    const { state, result } = await action(persisted, checkpoint);
+    await checkpoint(state);
     return result;
   });
 }

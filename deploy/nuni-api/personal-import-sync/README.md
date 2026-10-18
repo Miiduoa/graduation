@@ -23,7 +23,7 @@
 
 交易內重新檢查並鎖住帳號、憑證及特定 session，以涵蓋登出／停用競態。課班連結必須存在於有效 workspace 與有效成員關係；存在校園掛靠時也必須有效且校園相同。個人 workspace 可以作為個人參考，但不代表學校審核。每次讀取和重試都重新檢查連結；失效連結被移除，不以資料錯誤為由丟棄個人成績。
 
-Runtime grants：`personal_import_ledgers` 需要 SELECT、INSERT、UPDATE、DELETE；`personal_import_mutations` 需要 SELECT、INSERT、DELETE。原有帳號、憑證、session、workspace、成員及掛靠表需要 SELECT；關閉帳號的路徑也要能執行 trigger 的 ledger DELETE。
+Runtime grants：`personal_import_ledgers` 需要 SELECT、INSERT、UPDATE、DELETE；`personal_import_mutations` 需要 SELECT、INSERT、DELETE。原有帳號、憑證、session、workspace、成員及掛靠表需要 SELECT；使用 `FOR SHARE` 鎖住的帳號、憑證、session、workspace 與成員表也需要 UPDATE 權限（PostgreSQL 鎖定查詢要求），程式不會因此更新這些身分資料；關閉帳號的路徑也要能執行 trigger 的 ledger DELETE。
 
 ## 驗證
 

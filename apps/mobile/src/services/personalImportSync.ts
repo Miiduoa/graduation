@@ -65,7 +65,10 @@ export async function setPersonalImportSyncEnabled(
     throw new Error('請登入平台帳號並選擇校園後再同步；原有資料保留在裝置上。');
   if (!enabled) cancelPersonalImportSync(scope);
   return mutatePersonalImportLedger(scope, active, (current) => {
-    const ledger = { ...current, sync: { enabled, base: current.sync?.base || null } };
+    const ledger = {
+      ...current,
+      sync: { ...current.sync, enabled, base: current.sync?.base || null },
+    };
     return { ledger, result: ledger };
   });
 }
@@ -85,13 +88,21 @@ export function syncPersonalImports(
   const task = mutatePersonalImportLedger(
     scope,
     current,
-    async (ledger) => {
+    async (ledger, checkpoint) => {
       const result = await performPersonalImportSync(
         scope.schoolId,
         ledger,
         transport,
         current,
         resolution,
+        async (state) => {
+          const batchIds = new Set(state.records.map((record) => record.batchId));
+          await checkpoint({
+            ...ledger,
+            ...state,
+            batches: ledger.batches.filter((batch) => batchIds.has(batch.id)),
+          });
+        },
       );
       const batchIds = new Set(result.state.records.map((record) => record.batchId));
       return {

@@ -95,6 +95,38 @@ it('abort disposes the actual iframe and ignores late cross-origin results', asy
   expect(await pending).toBe('cancelled');
   expect(document.querySelectorAll('iframe')).toHaveLength(0);
 });
+it('full-page OCR reaches only the owned reader and wrong sources or request IDs cannot complete it', async () => {
+  const file = new File(['%PDF-'], 'grades.pdf');
+  Object.defineProperty(file, 'arrayBuffer', {
+    value: vi.fn().mockResolvedValue(new ArrayBuffer(5)),
+  });
+  const pending = readPersonalImportDocumentFile(file, undefined, { pdfMode: 'ocr' });
+  const frame = document.querySelector('iframe')!;
+  const send = vi.spyOn(frame.contentWindow!, 'postMessage').mockImplementation(() => {});
+  const dispatch = (data: unknown, source: Window | null = frame.contentWindow) =>
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        origin: window.location.origin,
+        source,
+        data,
+      }),
+    );
+  dispatch({ channel: 'campus-document', ready: true }, window);
+  expect(send).not.toHaveBeenCalled();
+  dispatch({ channel: 'campus-document', ready: true });
+  await Promise.resolve();
+  expect(send).toHaveBeenCalledOnce();
+  const input = send.mock.calls[0][0];
+  expect(input).toMatchObject({ name: 'grades.pdf', pdfMode: 'ocr' });
+  const result = { ...documentFixture(), name: 'grades.pdf', format: 'pdf' };
+  dispatch({ channel: 'campus-document', id: input.id + 1, ok: true, document: result });
+  expect(document.querySelector('iframe')).toBe(frame);
+  dispatch({ channel: 'campus-document', id: input.id, ok: true, document: result }, window);
+  expect(document.querySelector('iframe')).toBe(frame);
+  dispatch({ channel: 'campus-document', id: input.id, ok: true, document: result });
+  await expect(pending).resolves.toEqual(result);
+  expect(document.querySelector('iframe')).toBeNull();
+});
 it('timeout disposes a reader that never starts and pre-aborted/oversize files do not mount it', async () => {
   vi.useFakeTimers();
   const pending = readPersonalImportDocumentFile(new File(['xlsx'], 'grades.xlsx')).catch(

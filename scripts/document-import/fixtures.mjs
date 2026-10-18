@@ -2,7 +2,6 @@ import * as XLSX from 'xlsx';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { deflateSync } from 'node:zlib';
 import { createRequire } from 'node:module';
-import path from 'node:path';
 const require = createRequire(import.meta.url);
 export function makePdf(pages) {
   const objects = [];
@@ -18,7 +17,7 @@ export function makePdf(pages) {
     const page = put('');
     refs.push(page);
     const stream = content.image
-      ? Buffer.from('q 500 0 0 250 40 450 cm /Im0 Do Q')
+      ? Buffer.from(`q 500 0 0 250 40 450 cm /Im0 Do Q\n${content.text || ''}`)
       : Buffer.from(content.text);
     const contents = put(
       Buffer.concat([
@@ -133,5 +132,34 @@ if (process.argv.includes('--write')) {
     new URL('scanned-table.pdf', directory),
     makePdf([{ image: { width: 1000, height: 500, data: rgb } }]),
   );
-  console.log('Wrote real XLSX, text PDF, and scanned PDF fixtures.');
+  await writeFile(
+    new URL('hybrid-scanned-table.pdf', directory),
+    makePdf([
+      {
+        image: { width: 1000, height: 500, data: rgb },
+        text: 'BT /F1 12 Tf 1 0 0 1 40 750 Tm (Semester report) Tj ET',
+      },
+    ]),
+  );
+  context.fillStyle = 'white';
+  context.fillRect(0, 0, 1000, 500);
+  context.fillStyle = 'black';
+  context.font = '36px sans-serif';
+  for (const [y, values] of [
+    [100, ['課程名稱', '學分', '成績']],
+    [200, ['英文', '3', '90']],
+    [300, ['歷史', '2', '85']],
+  ])
+    values.forEach((text, index) => context.fillText(text, [40, 430, 730][index], y));
+  const chineseRgba = context.getImageData(0, 0, 1000, 500).data;
+  for (let i = 0, j = 0; i < chineseRgba.length; i += 4) {
+    rgb[j++] = chineseRgba[i];
+    rgb[j++] = chineseRgba[i + 1];
+    rgb[j++] = chineseRgba[i + 2];
+  }
+  await writeFile(
+    new URL('scanned-chinese-grades.pdf', directory),
+    makePdf([{ image: { width: 1000, height: 500, data: rgb } }]),
+  );
+  console.log('Wrote real XLSX, text PDF, English/Chinese scanned PDF and hybrid PDF fixtures.');
 }

@@ -62,7 +62,7 @@ export function planPersonalImport(
   options: {
     batchId: string;
     importedAt: string;
-    periodProfile?: PersonalImportOptions['periodProfile'];
+    periodProfile?: NonNullable<PersonalImportOptions['periodProfile']>;
   },
 ): {
   records: PersonalImportRecord[];
@@ -177,11 +177,12 @@ export function resolvePersonalImportCourse(
   const exact = row.courseCode?.trim()
     ? scoped.filter((course) => normalized(course.courseCode) === normalized(row.courseCode))
     : [];
-  if (exact.length === 1) {
+  const exactMatch = exact.length === 1 ? exact[0] : undefined;
+  if (exactMatch) {
     const contradictory =
-      (row.teacher?.trim() && normalized(row.teacher) !== normalized(exact[0].teacher)) ||
-      (row.className?.trim() && normalized(row.className) !== normalized(exact[0].className));
-    if (!contradictory) return { status: 'linked', linkedCourseId: exact[0].id, suggestions: [] };
+      (row.teacher?.trim() && normalized(row.teacher) !== normalized(exactMatch.teacher)) ||
+      (row.className?.trim() && normalized(row.className) !== normalized(exactMatch.className));
+    if (!contradictory) return { status: 'linked', linkedCourseId: exactMatch.id, suggestions: [] };
   }
   // A shared course code can describe multiple sections. Even teacher/name matches require confirmation.
   const suggestions = exact.length

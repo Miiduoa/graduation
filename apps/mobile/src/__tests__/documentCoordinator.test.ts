@@ -73,3 +73,25 @@ test('malformed result or wrong source filename cannot enter the editable draft'
   );
   expect(await next).toBe('invalid-result');
 });
+test('explicit pdfMode ocr is wired into the bridge call; auto omits the fourth argument', async () => {
+  const inject = jest.fn();
+  const coordinator = new DocumentCoordinator(inject, jest.fn());
+  coordinator.message(ready);
+  const auto = coordinator.read('grades.pdf', 'YQ==');
+  expect(inject).toHaveBeenLastCalledWith(
+    expect.stringMatching(/^window\.readCampusDocument\(1,"grades\.pdf","YQ=="\); true;$/),
+  );
+  coordinator.message(
+    JSON.stringify({ channel: 'campus-document', id: 1, ok: true, document: doc('grades.pdf') }),
+  );
+  await auto;
+  const ocr = coordinator.read('grades.pdf', 'YQ==', undefined, { pdfMode: 'ocr' });
+  coordinator.message(ready);
+  expect(inject).toHaveBeenLastCalledWith(
+    expect.stringMatching(/^window\.readCampusDocument\(2,"grades\.pdf","YQ==","ocr"\); true;$/),
+  );
+  coordinator.message(
+    JSON.stringify({ channel: 'campus-document', id: 2, ok: true, document: doc('grades.pdf') }),
+  );
+  await ocr;
+});
