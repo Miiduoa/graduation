@@ -5,13 +5,23 @@ export const AGENT_CONSENT_VERSION = 1 as const;
 export const AGENT_MODEL_ID = 'onnx-community/Qwen3-4B-ONNX';
 export const AGENT_MODEL_DTYPE = 'q4f16';
 export const AGENT_MODEL_ONNX_BYTES = 2_832_918_673;
+export const AGENT_DOWNLOAD_FACTS =
+  '約 2.8 GB、會占這台裝置空間、建議用 Wi-Fi、只排先後不改課名與時間';
 export const AGENT_DOWNLOAD_NOTE =
-  '可下載裝置端模型，用來判斷今天先處理哪一件。約 2.8 GB，請用 Wi-Fi。課名、時間與截止仍由程式照原樣顯示。';
+  `可下載裝置端模型，用來判斷今天先處理哪一件。${AGENT_DOWNLOAD_FACTS}。下載中可取消、下載後可刪除。沒同意就用規則版。`;
 export const AGENT_DOWNLOAD_ACTION = '下載並使用';
 export const AGENT_DECLINE_ACTION = '不用';
+export const AGENT_CANCEL_DOWNLOAD_ACTION = '取消下載';
+export const AGENT_DELETE_MODEL_ACTION = '刪除模型';
 export const AGENT_LOADING_TEXT = '正在準備裝置端模型…';
 export const AGENT_PLAN_TITLE = '建議處理順序';
 export const AGENT_PLAN_NOTE = '課名與時間未改；只是判斷先後。動作仍要你確認。';
+export const AGENT_MODEL_DELETED_TEXT = '模型已刪除，已改回規則版。';
+export const AGENT_MODEL_DELETE_INCOMPLETE_TEXT =
+  '已改回規則版，但這台裝置可能還沒把檔案刪乾淨。';
+export const AGENT_MODEL_EVENT = 'campus.todaySenseAgent.changed';
+export const AGENT_TRANSFORMERS_CACHE = 'transformers-cache';
+export const AGENT_TRANSFORMERS_HASH_CACHE = 'experimental_transformers-hash-cache';
 
 export const AGENT_REASON_CODES = [
   'happening_now',
@@ -81,6 +91,29 @@ export function parseAgentConsent(raw: string | null | undefined): AgentConsent 
 
 export function serializeAgentConsent(value: Exclude<AgentConsent, 'unset'>): string {
   return JSON.stringify({ version: AGENT_CONSENT_VERSION, value });
+}
+
+export function notifyAgentModelChanged(): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new Event(AGENT_MODEL_EVENT));
+}
+
+export function formatAgentDownloadProgress(percent: number): string {
+  const clamped = Number.isFinite(percent) ? Math.max(0, Math.min(100, Math.round(percent))) : 0;
+  return `下載中 ${clamped}%`;
+}
+
+export function listAcceptedAgentConsentKeys(
+  storage: Pick<Storage, 'length' | 'key' | 'getItem'> | null | undefined,
+): string[] {
+  if (!storage) return [];
+  const keys: string[] = [];
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (!key || !key.includes('todaySenseAgent')) continue;
+    if (parseAgentConsent(storage.getItem(key)) === 'accepted') keys.push(key);
+  }
+  return keys;
 }
 
 export function canOfferOnDeviceAgent(

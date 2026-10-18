@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AGENT_DOWNLOAD_FACTS,
+  AGENT_DOWNLOAD_NOTE,
   assembleAgentPlan,
   canOfferOnDeviceAgent,
+  formatAgentDownloadProgress,
+  listAcceptedAgentConsentKeys,
   orderedSenseCards,
   parseAgentConsent,
   serializeAgentConsent,
@@ -199,5 +203,38 @@ describe('同意與是否出現下載', () => {
     expect(parseAgentConsent('{')).toBe('unset');
     expect(parseAgentConsent(serializeAgentConsent('refused'))).toBe('refused');
     expect(parseAgentConsent(serializeAgentConsent('accepted'))).toBe('accepted');
+  });
+
+  it('同意畫面一次講完下載事實', () => {
+    expect(AGENT_DOWNLOAD_FACTS).toBe(
+      '約 2.8 GB、會占這台裝置空間、建議用 Wi-Fi、只排先後不改課名與時間',
+    );
+    expect(AGENT_DOWNLOAD_NOTE).toContain(AGENT_DOWNLOAD_FACTS);
+    expect(AGENT_DOWNLOAD_NOTE).toContain('下載中可取消');
+    expect(AGENT_DOWNLOAD_NOTE).toContain('下載後可刪除');
+    expect(AGENT_DOWNLOAD_NOTE).toContain('沒同意就用規則版');
+    expect(formatAgentDownloadProgress(10.4)).toBe('下載中 10%');
+  });
+
+  it('找出本機已同意下載的模型鍵', () => {
+    const memory: Record<string, string> = {
+      'campus.scope.todaySenseAgent.u:alice.s:default': serializeAgentConsent('accepted'),
+      'campus.scope.todaySenseAgent.u:bob.s:default': serializeAgentConsent('refused'),
+      unrelated: '1',
+    };
+    const storage = {
+      get length() {
+        return Object.keys(memory).length;
+      },
+      key(index: number) {
+        return Object.keys(memory)[index] ?? null;
+      },
+      getItem(name: string) {
+        return Object.prototype.hasOwnProperty.call(memory, name) ? memory[name] : null;
+      },
+    };
+    expect(listAcceptedAgentConsentKeys(storage)).toEqual([
+      'campus.scope.todaySenseAgent.u:alice.s:default',
+    ]);
   });
 });
