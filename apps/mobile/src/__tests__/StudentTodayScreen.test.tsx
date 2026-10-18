@@ -87,7 +87,17 @@ test.each([
       dueAt: '2026-10-20T16:00:00.000Z',
     },
   ],
-  ['quiz', '去作答', 'QuizCenter', { groupId: 'course-a', groupName: '資料結構' }],
+  [
+    'quiz',
+    '去作答',
+    'QuizTaking',
+    {
+      groupId: 'course-a',
+      groupName: '資料結構',
+      quizId: 'homework-a',
+      dueAt: '2026-10-20T16:00:00.000Z',
+    },
+  ],
   ['live', '去簽到', 'AttendanceMultiMethod', { courseId: 'course-a', sessionId: 'attendance-a' }],
 ] as const)(
   'opens the actual %s action instead of stopping at the course overview',
