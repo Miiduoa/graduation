@@ -5,6 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
 import {
   PERSONAL_IMPORT_IMAGE_UNREADABLE,
+  personalImportPreviewNotice,
   personalImportSavedNotice,
   personalImportUndoBody,
   personalImportUndoneNotice,
@@ -15,7 +16,7 @@ import {
 import { sharePersonalImportBackup } from '../services/personalImportBackupSharing';
 import * as ImagePicker from 'expo-image-picker';
 import PersonalImportScreen from '../screens/PersonalImportScreen';
-import { loadPersonalImports } from '../services/personalImports';
+import { loadPersonalImports, personalImportStorageKey } from '../services/personalImports';
 
 let mockScope: { owner: string; schoolId: string } | null;
 const mockRequest = jest.fn();
@@ -211,6 +212,7 @@ test.each([
     const view = render(<PersonalImportScreen />);
     await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
     fill(view, kind, content);
+    expect(view.getByText(personalImportPreviewNotice(1))).toBeTruthy();
     expect((await loadPersonalImports(scope)).records).toHaveLength(0);
     fireEvent.press(view.getByText('確認新增 1 筆'));
     await waitFor(() => expect(view.getByText(personalImportSavedNotice(1))).toBeTruthy());
@@ -222,6 +224,20 @@ test.each([
     expect((await loadPersonalImports(scope)).records).toHaveLength(0);
   },
 );
+
+test('with sync enabled, saving only reports the local add', async () => {
+  await AsyncStorage.setItem(
+    personalImportStorageKey(scope),
+    JSON.stringify({ version: 1, records: [], batches: [], sync: { enabled: true, base: null } }),
+  );
+  const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
+  fill(view, 'grades', '課程名稱,學分,成績\n微積分,3,A-');
+  fireEvent.press(view.getByText('確認新增 1 筆'));
+  await waitFor(() => expect(view.getByText(personalImportSavedNotice(1, true))).toBeTruthy());
+  expect(view.queryByText(/資料只存在這台裝置/)).toBeNull();
+  expect(view.queryByText(/還沒同步到你的帳號，同步狀態請看下方/)).toBeNull();
+});
 
 test('unknown columns and incomplete CSV cannot silently bypass preview errors', async () => {
   const view = render(<PersonalImportScreen />);
@@ -600,6 +616,7 @@ test('mixed sheet selection with distinct header rows builds a draft only after 
   expect(view.getByText(/掃描頁（無文字，需截圖）/)).toBeTruthy();
   fireEvent.press(view.getByText('讀取選取內容'));
   await waitFor(() => expect(view.getByText('確認新增 2 筆')).toBeTruthy());
+  expect(view.getByText(personalImportPreviewNotice(2))).toBeTruthy();
   expect(view.getByDisplayValue('微積分')).toBeTruthy();
   expect(view.getByText(/英文/)).toBeTruthy();
   expect((await loadPersonalImports(scope)).records).toHaveLength(0);

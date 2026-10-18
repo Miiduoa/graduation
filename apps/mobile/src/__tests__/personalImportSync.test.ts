@@ -1,5 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { type PersonalImportRow, type PersonalImportRecord } from '@campus/shared';
+import {
+  PERSONAL_IMPORT_SYNCED,
+  PERSONAL_IMPORT_SYNCING,
+  PERSONAL_IMPORT_SYNC_NETWORK_FAILURE,
+  type PersonalImportRow,
+  type PersonalImportRecord,
+} from '@campus/shared';
 import {
   appendPersonalImports,
   deletePersonalImport,
@@ -10,6 +16,7 @@ import {
 } from '../services/personalImports';
 import {
   cancelPersonalImportSync,
+  personalImportSyncStatus,
   setPersonalImportSyncEnabled,
   syncPersonalImports,
 } from '../services/personalImportSync';
@@ -74,6 +81,36 @@ test('local-only data never contacts the server before opt-in; legacy/guest scop
     syncPersonalImports({ ...scope, owner: 'guest:device' }, transport, () => true),
   ).rejects.toThrow();
 });
+test('sync status starts with the syncing sentence and then follows the outcome', async () => {
+  await appendPersonalImports(scope, [row('one')]);
+  await setPersonalImportSyncEnabled(scope, true, () => true);
+  let resolve!: (value: unknown) => void;
+  transport.mockImplementationOnce(
+    () =>
+      new Promise((finish) => {
+        resolve = finish;
+      }),
+  );
+  const running = sync();
+  while (!resolve) await Promise.resolve();
+  expect(personalImportSyncStatus(scope)).toMatchObject({
+    running: true,
+    message: PERSONAL_IMPORT_SYNCING,
+  });
+  resolve(remote);
+  await running;
+  expect(personalImportSyncStatus(scope)).toMatchObject({
+    running: false,
+    message: PERSONAL_IMPORT_SYNCED,
+  });
+  transport.mockRejectedValueOnce(new Error('network unavailable'));
+  await expect(sync()).rejects.toThrow('network unavailable');
+  expect(personalImportSyncStatus(scope)).toMatchObject({
+    running: false,
+    message: PERSONAL_IMPORT_SYNC_NETWORK_FAILURE,
+  });
+});
+
 test('stores acknowledged base atomically and ordinary local imports preserve sync metadata', async () => {
   await initialize();
   const first = await loadPersonalImports(scope);

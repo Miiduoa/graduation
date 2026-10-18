@@ -14,7 +14,12 @@ import {
   setPersonalImportSyncEnabled,
   syncPersonalImports,
 } from '../services/personalImportSync';
-import type { PersonalImportRecord, PersonalImportRow } from '@campus/shared';
+import {
+  PERSONAL_IMPORT_SYNCED,
+  PERSONAL_IMPORT_SYNC_NETWORK_FAILURE,
+  type PersonalImportRecord,
+  type PersonalImportRow,
+} from '@campus/shared';
 import type { PersonalImportSnapshot } from '@campus/shared/src/imports/sync';
 const scope = { owner: 'nuni:pa_11111111-1111-4111-8111-111111111111', schoolId: 'pu' };
 const mockAuth = {
@@ -90,7 +95,7 @@ test('mounting stays local; explicit opt-in uploads source text and pause preser
   );
   expect(mockAuth.request).not.toHaveBeenCalled();
   fireEvent.press(screen.getByText('開啟此帳號與校園的同步'));
-  await waitFor(() => expect(screen.getByText('已同步到帳號。')).toBeTruthy());
+  await waitFor(() => expect(screen.getByText(PERSONAL_IMPORT_SYNCED)).toBeTruthy());
   expect(remote.records[0].source.rawText).toBe('英文 85');
   expect(mockAuth.request.mock.calls.every((call) => call[1] === mockAuth.session.context)).toBe(
     true,
@@ -111,7 +116,7 @@ test('offline opt-in persists intent without network requests or losing local ro
     expect(screen.getByRole('button', { name: '開啟此帳號與校園的同步' })).toBeEnabled(),
   );
   fireEvent.press(screen.getByText('開啟此帳號與校園的同步'));
-  await waitFor(() => expect(screen.getByText(/目前離線/)).toBeTruthy());
+  await waitFor(() => expect(screen.getByText(PERSONAL_IMPORT_SYNC_NETWORK_FAILURE)).toBeTruthy());
   expect(mockAuth.request).not.toHaveBeenCalled();
   expect((await loadPersonalImports(scope)).sync?.enabled).toBe(true);
   expect((await loadPersonalImports(scope)).records).toHaveLength(1);
@@ -130,7 +135,7 @@ test('a cloud/local edit conflict requires an explicit row choice before changin
   expect((await loadPersonalImports(scope)).records[0].grade).toBe('90');
   fireEvent.press(screen.getByText('保留帳號資料'));
   fireEvent.press(screen.getByText('確認這些選擇並同步'));
-  await waitFor(() => expect(screen.getByText('已同步到帳號。')).toBeTruthy());
+  await waitFor(() => expect(screen.getByText(PERSONAL_IMPORT_SYNCED)).toBeTruthy());
   expect((await loadPersonalImports(scope)).records[0].grade).toBe('95');
 });
 test('account context replacement while reading cannot upload or apply old context data', async () => {

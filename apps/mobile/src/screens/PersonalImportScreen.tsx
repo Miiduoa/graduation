@@ -21,6 +21,7 @@ import {
   parsePersonalImportDocument,
   personalImportDocumentFormat,
   personalImportErrorMessage,
+  personalImportPreviewNotice,
   personalImportSavedNotice,
   personalImportUndoBody,
   personalImportUndoneNotice,
@@ -455,7 +456,7 @@ function ImportWorkspace({
       setExpanded(parsed.rows[0]?.id || null);
       setNotice(
         parsed.rows.length
-          ? '請逐筆核對。確認儲存前不會寫入。'
+          ? personalImportPreviewNotice(parsed.rows.length)
           : '沒有找到可匯入的資料。可修正文字，或手動新增一筆。',
       );
     } catch (error) {
@@ -712,7 +713,7 @@ function ImportWorkspace({
       setExpanded(parsedRows[0]?.id || null);
       setNotice(
         parsedRows.length
-          ? `已讀取 ${entries.length} 個選取範圍，共 ${parsedRows.length} 筆。請逐筆核對；確認儲存前不會寫入。`
+          ? personalImportPreviewNotice(parsedRows.length)
           : '選取範圍沒有找到可匯入的資料。可調整標題列，或改貼文字。',
       );
     } catch (error) {
@@ -814,7 +815,7 @@ function ImportWorkspace({
       setExpanded(null);
       setText('');
       setSource({ type: 'paste' });
-      setNotice(personalImportSavedNotice(result.added));
+      setNotice(personalImportSavedNotice(result.added, !!ledger.sync?.enabled));
     } catch (error) {
       if (active()) setNotice(personalImportErrorMessage(error, '儲存失敗，請重試。'));
     } finally {

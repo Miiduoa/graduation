@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Text, View } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import type { PersonalImportSyncChoices } from '@campus/shared/src/imports/sync';
+import { PERSONAL_IMPORT_SYNC_NETWORK_FAILURE } from '@campus/shared';
 import { personalImportSyncErrorMessage } from '@campus/shared/src/imports/sync';
 import { useNuniSession } from '../state/nuniSession';
 import { Button } from '../ui/components';
@@ -144,7 +145,7 @@ export function PersonalImportSyncPanel(props: Props) {
       const network = await NetInfo.fetch();
       if (!active()) return;
       if (network.isConnected === false || network.isInternetReachable === false) {
-        setMessage('目前離線，資料保留在裝置上；連線後會繼續同步。');
+        setMessage(PERSONAL_IMPORT_SYNC_NETWORK_FAILURE);
         return;
       }
       const review = operation === 'resolve' ? status.result?.review : undefined;

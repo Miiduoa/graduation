@@ -5,6 +5,7 @@ import {
   type PersonalImportSyncTransport,
 } from '@campus/shared/src/imports/syncEngine';
 import { personalImportSyncErrorMessage } from '@campus/shared/src/imports/sync';
+import { PERSONAL_IMPORT_SYNCED, PERSONAL_IMPORT_SYNCING } from '@campus/shared';
 import {
   mutatePersonalImportLedger,
   personalImportStorageKey,
@@ -84,7 +85,7 @@ export function syncPersonalImports(
   if (pending.has(key)) return pending.get(key)!;
   const generation = generations.get(key) || 0;
   const current = () => active() && generation === (generations.get(key) || 0);
-  publish(key, { running: true, message: '正在核對帳號中的資料…' });
+  publish(key, { running: true, message: PERSONAL_IMPORT_SYNCING });
   const task = mutatePersonalImportLedger(
     scope,
     current,
@@ -124,7 +125,7 @@ export function syncPersonalImports(
           message: result.conflicts.length
             ? '有資料同時在兩台裝置變更，請逐筆選擇要保留的內容。'
             : result.state.sync?.enabled
-              ? `已同步到帳號。${result.detachedCourseLinks.length ? '部分課班連結已失效，個人資料仍保留，請重新核對。' : ''}`
+              ? `${PERSONAL_IMPORT_SYNCED}${result.detachedCourseLinks.length ? '部分課班連結已失效，個人資料仍保留，請重新核對。' : ''}`
               : '同步已暫停。',
         });
       return result;
