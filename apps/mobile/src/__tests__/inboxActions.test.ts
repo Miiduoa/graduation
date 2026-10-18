@@ -165,6 +165,27 @@ describe('navigateFromInboxTask', () => {
     );
   });
 
+  test('quiz opens QuizTaking with quiz id and due date', () => {
+    const dueAt = new Date('2026-10-20T16:00:00.000Z');
+    const ok = navigateFromInboxTask(
+      {},
+      baseTask({ kind: 'quiz', assignmentId: 'q1', dueAt }),
+      { role: 'student', isTeachingRole: false },
+    );
+    expect(ok).toBe(true);
+    expect(navigateToCourseScreen).toHaveBeenCalledWith(
+      {},
+      'student',
+      'QuizTaking',
+      {
+        groupId: 'cs1',
+        groupName: 'DB',
+        quizId: 'q1',
+        dueAt: '2026-10-20T16:00:00.000Z',
+      },
+    );
+  });
+
   test('assignment without id does not open the class feed', () => {
     const ok = navigateFromInboxTask({}, baseTask({ assignmentId: undefined }), {
       role: 'student',

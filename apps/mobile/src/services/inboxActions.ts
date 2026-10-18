@@ -195,13 +195,24 @@ export function navigateFromInboxTask(
       emitInboxNavigationSignal(resolved);
       return true;
     }
-    case 'start_quiz':
-      navigateToCourseScreen(navigation, role, 'QuizCenter', {
+    case 'start_quiz': {
+      const quizId = resolved.params?.quizId ?? task.assignmentId;
+      if (typeof quizId !== 'string' || !quizId) {
+        return fallBackToCourseHub();
+      }
+      const dueAt =
+        task.dueAt instanceof Date && Number.isFinite(task.dueAt.getTime())
+          ? task.dueAt.toISOString()
+          : undefined;
+      navigateToCourseScreen(navigation, role, 'QuizTaking', {
         groupId: courseId,
         groupName: task.groupName,
+        quizId,
+        ...(dueAt ? { dueAt } : {}),
       });
       emitInboxNavigationSignal(resolved);
       return true;
+    }
 
     case 'attendance_checkin': {
       const sessionId = resolved.params?.sessionId;
