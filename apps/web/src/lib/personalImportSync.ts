@@ -5,6 +5,7 @@ import {
   type PersonalImportSyncResult,
 } from '@campus/shared/src/imports/syncEngine';
 import { personalImportSyncErrorMessage } from '@campus/shared/src/imports/sync';
+import { PERSONAL_IMPORT_SYNCED, PERSONAL_IMPORT_SYNCING } from '@campus/shared';
 import { browserRequest } from '@/features/nuni/Session';
 import {
   personalImportsStorageKey,
@@ -89,7 +90,7 @@ export function syncPersonalImports(
   const key = `${storageKey}:${identity.context}:${generation}`;
   const pending = running.get(key);
   if (pending) return pending;
-  const progress: ImportSyncStatus = { phase: 'syncing', message: '正在同步…' };
+  const progress: ImportSyncStatus = { phase: 'syncing', message: PERSONAL_IMPORT_SYNCING };
   const task = (async () => {
     publish(scope, progress);
     try {
@@ -126,7 +127,7 @@ export function syncPersonalImports(
               phase: 'synced',
               message: result.detachedCourseLinks.length
                 ? `已同步。有 ${result.detachedCourseLinks.length} 筆課班已無法存取，個人資料仍保留，請重新選擇課班。`
-                : '已同步到帳號，其他裝置登入同帳號並開啟同步後即可讀取。',
+                : PERSONAL_IMPORT_SYNCED,
               result,
             },
       );

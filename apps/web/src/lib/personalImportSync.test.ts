@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { parsePersonalImport, type PersonalImportRecord } from '@campus/shared';
+import {
+  parsePersonalImport,
+  PERSONAL_IMPORT_SYNCED,
+  PERSONAL_IMPORT_SYNCING,
+  PERSONAL_IMPORT_SYNC_NETWORK_FAILURE,
+  type PersonalImportRecord,
+} from '@campus/shared';
 import type { PersonalImportSnapshot } from '@campus/shared/src/imports/sync';
 import { browserRequest } from '@/features/nuni/Session';
 import {
@@ -102,11 +108,17 @@ describe('browser personal import synchronization', () => {
     const before = localStorage.getItem(personalImportsStorageKey(scope));
     vi.mocked(browserRequest).mockRejectedValueOnce(new Error('network unavailable'));
     await syncPersonalImports(scope, identity, () => true);
-    expect(getPersonalImportSyncStatus(scope)).toMatchObject({ phase: 'error' });
+    expect(getPersonalImportSyncStatus(scope)).toMatchObject({
+      phase: 'error',
+      message: PERSONAL_IMPORT_SYNC_NETWORK_FAILURE,
+    });
     expect(localStorage.getItem(personalImportsStorageKey(scope))).toBe(before);
     expect(remote.revision).toBe(0);
     await syncPersonalImports(scope, identity, () => true);
-    expect(getPersonalImportSyncStatus(scope)).toMatchObject({ phase: 'synced' });
+    expect(getPersonalImportSyncStatus(scope)).toMatchObject({
+      phase: 'synced',
+      message: PERSONAL_IMPORT_SYNCED,
+    });
     expect(remote.records).toHaveLength(1);
   });
 
@@ -117,10 +129,18 @@ describe('browser personal import synchronization', () => {
     vi.mocked(browserRequest).mockImplementationOnce(() => reading.promise);
     const sync = syncPersonalImports(scope, identity, () => true);
     await vi.waitFor(() => expect(browserRequest).toHaveBeenCalledTimes(1));
+    expect(getPersonalImportSyncStatus(scope)).toMatchObject({
+      phase: 'syncing',
+      message: PERSONAL_IMPORT_SYNCING,
+    });
     const saved = savePersonalImportBatch(scope, rows('英文'));
     expect(readPersonalImports(scope)).toHaveLength(1);
     reading.resolve(structuredClone(remote));
     await Promise.all([sync, saved]);
+    expect(getPersonalImportSyncStatus(scope)).toMatchObject({
+      phase: 'synced',
+      message: PERSONAL_IMPORT_SYNCED,
+    });
     expect(readPersonalImports(scope).map((row) => row.title)).toEqual(['資料庫', '英文']);
     expect(remote.records.map((row) => row.title)).toEqual(['資料庫']);
     await syncPersonalImports(scope, identity, () => true);

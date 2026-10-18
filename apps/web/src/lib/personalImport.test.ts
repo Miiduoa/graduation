@@ -3,6 +3,7 @@ import {
   parsePersonalImport,
   personalImportErrorMessage,
   personalImportKey,
+  personalImportPreviewNotice,
   personalImportSavedNotice,
   personalImportUndoBody,
   personalImportUndoneNotice,
@@ -11,11 +12,17 @@ import {
   undoPersonalImportBatch,
   validatePersonalImportRow,
   PERSONAL_IMPORT_IMAGE_UNREADABLE,
+  PERSONAL_IMPORT_SYNCED,
+  PERSONAL_IMPORT_SYNCING,
+  PERSONAL_IMPORT_SYNC_CONFLICT,
+  PERSONAL_IMPORT_SYNC_NETWORK_FAILURE,
+  PERSONAL_IMPORT_SYNC_SESSION_EXPIRED,
   PERSONAL_IMPORT_UNDO_LABEL,
   type PersonalImportCatalogCourse,
   type PersonalImportOptions,
   type PersonalImportRow,
 } from '@campus/shared';
+import { personalImportSyncErrorMessage } from '@campus/shared/src/imports/sync';
 
 const timetable: PersonalImportOptions = {
   kind: 'timetable',
@@ -305,15 +312,14 @@ describe('personal import parsing preserves evidence', () => {
       ncku,
     );
     expect(puClock.rows[0].startPeriod).toBeUndefined();
-    expect(errors(puClock.issues)).toContainEqual(expect.objectContaining({ code: 'invalid-period' }));
+    expect(errors(puClock.issues)).toContainEqual(
+      expect.objectContaining({ code: 'invalid-period' }),
+    );
   });
 
   it('maps NTPU evening periods 10–13 to 18:30 and keeps them out of other schools', () => {
     const ntpu = { ...timetable, schoolId: 'ntpu', periodProfile: 'ntpu' as const };
-    const parsed = parsePersonalImport(
-      '課程名稱,星期,節次\n進階會計,星期一,10-13',
-      ntpu,
-    );
+    const parsed = parsePersonalImport('課程名稱,星期,節次\n進階會計,星期一,10-13', ntpu);
     expect(errors(parsed.issues)).toEqual([]);
     expect(parsed.rows[0]).toMatchObject({
       schoolId: 'ntpu',
@@ -325,7 +331,9 @@ describe('personal import parsing preserves evidence', () => {
       ntpu,
     );
     expect(clock.rows[0]).toMatchObject({ startPeriod: 10, endPeriod: 13 });
-    expect(parsePersonalImport('課程名稱,星期,節次\n進階會計,星期一,10-13', timetable).rows[0]).toMatchObject({
+    expect(
+      parsePersonalImport('課程名稱,星期,節次\n進階會計,星期一,10-13', timetable).rows[0],
+    ).toMatchObject({
       schoolId: 'pu',
       startPeriod: 10,
       endPeriod: 13,
@@ -775,20 +783,53 @@ describe('iCalendar import keeps dates and recurrence semantics explicit', () =>
 
 describe('personal import notices', () => {
   it('uses the same save, undo, and broken-image sentences on every surface', () => {
+    expect(personalImportPreviewNotice(3)).toBe('整理出 3 筆，請逐筆核對再匯入。');
     expect(personalImportSavedNotice(3)).toBe(
-      '已在這台裝置新增 3 筆，原有資料保留。換裝置或清除資料前，請確認同步成功，或下載完整備份。',
+      '已在這台裝置新增 3 筆，原有資料保留。資料只存在這台裝置，換手機或清除資料就會不見。',
+    );
+    expect(personalImportSavedNotice(3, false)).toBe(personalImportSavedNotice(3));
+    expect(personalImportSavedNotice(3, true)).toBe('已在這台裝置新增 3 筆，原有資料保留。');
+    expect(PERSONAL_IMPORT_SYNCING).toBe('正在同步到你的帳號…');
+    expect(PERSONAL_IMPORT_SYNCED).toBe(
+      '已同步到你的帳號，換裝置登入同一個帳號並開啟同步就能看到。',
+    );
+    expect(PERSONAL_IMPORT_SYNC_NETWORK_FAILURE).toBe('還沒同步到你的帳號，請確認網路後再試。');
+    expect(PERSONAL_IMPORT_SYNC_CONFLICT).toBe('另一台裝置剛更新資料，請重新同步並核對差異。');
+    expect(PERSONAL_IMPORT_SYNC_SESSION_EXPIRED).toBe(
+      '登入狀態已變更，請重新登入後同步；這台裝置的資料仍保留。',
     );
     expect(PERSONAL_IMPORT_UNDO_LABEL).toBe('撤銷上次匯入');
     expect(personalImportUndoBody(2)).toBe(
       '上次匯入的 2 筆會從這台裝置刪掉，你原本的資料不會動。刪掉後沒辦法復原。',
     );
     expect(personalImportUndoneNotice(4)).toBe('已撤銷上次匯入的 4 筆，原本的資料都還在。');
-    expect(personalImportErrorMessage(new Error('The source image could not be decoded.'), '備用')).toBe(
-      PERSONAL_IMPORT_IMAGE_UNREADABLE,
-    );
-    expect(personalImportErrorMessage(new Error('圖片超過 10 MB，請裁切後再選一次。'), '備用')).toBe(
-      '圖片超過 10 MB，請裁切後再選一次。',
-    );
+    expect(
+      personalImportErrorMessage(new Error('The source image could not be decoded.'), '備用'),
+    ).toBe(PERSONAL_IMPORT_IMAGE_UNREADABLE);
+    expect(
+      personalImportErrorMessage(new Error('圖片超過 10 MB，請裁切後再選一次。'), '備用'),
+    ).toBe('圖片超過 10 MB，請裁切後再選一次。');
     expect(personalImportErrorMessage(new Error('NetworkError'), '備用')).toBe('備用');
+    expect(
+      personalImportSyncErrorMessage(
+        Object.assign(new Error('conflict'), { code: 'PERSONAL_IMPORT_REVISION_CONFLICT' }),
+      ),
+    ).toBe(PERSONAL_IMPORT_SYNC_CONFLICT);
+    expect(
+      personalImportSyncErrorMessage(
+        Object.assign(new Error('expired'), { code: 'PERSONAL_IMPORT_SESSION_EXPIRED' }),
+      ),
+    ).toBe(PERSONAL_IMPORT_SYNC_SESSION_EXPIRED);
+    expect(personalImportSyncErrorMessage(new Error('network unavailable'))).toBe(
+      PERSONAL_IMPORT_SYNC_NETWORK_FAILURE,
+    );
+    expect(personalImportSyncErrorMessage(new Error('Failed to fetch'))).toBe(
+      PERSONAL_IMPORT_SYNC_NETWORK_FAILURE,
+    );
+    expect(
+      personalImportSyncErrorMessage(
+        new Error('裝置空間不足，這次同步未能保存；原資料仍保留，請先下載備份。'),
+      ),
+    ).toBe('裝置空間不足，這次同步未能保存；原資料仍保留，請先下載備份。');
   });
 });

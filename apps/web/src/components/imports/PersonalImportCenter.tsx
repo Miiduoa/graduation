@@ -8,6 +8,7 @@ import {
   serializePersonalImportsCsv,
   parsePersonalImport,
   personalImportErrorMessage,
+  personalImportPreviewNotice,
   personalImportSavedNotice,
   personalImportUndoBody,
   personalImportUndoneNotice,
@@ -40,6 +41,7 @@ import { browserRequest, useOptionalNuniSession } from '@/features/nuni/Session'
 import {
   changePersonalImport,
   readPersonalImports,
+  readPersonalImportSyncState,
   savePersonalImportBatch,
   undoPersonalImports,
   type PersonalImportScope,
@@ -477,7 +479,7 @@ function ImportWorkspace({
     const warnings = parsed.issues.filter((issue) => !issue.rowId).map((issue) => issue.message);
     setNotice(
       parsed.rows.length
-        ? `整理出 ${parsed.rows.length} 筆，請逐筆核對再匯入。${warnings.join(' ')}`
+        ? `${personalImportPreviewNotice(parsed.rows.length)}${warnings.join(' ')}`
         : `沒有整理出資料。可以修正下方文字，或手動加一筆。${warnings.join(' ')}`,
     );
     requestAnimationFrame(() =>
@@ -607,7 +609,9 @@ function ImportWorkspace({
         { restoreBackup: !!backup },
       );
       if (!active.current) return;
-      setNotice(personalImportSavedNotice(result.added));
+      setNotice(
+        personalImportSavedNotice(result.added, readPersonalImportSyncState(scope).enabled),
+      );
       if (result.added) setLastBatch(result.batchId);
       setRows([]);
       setBackup(null);
@@ -921,7 +925,7 @@ function ImportWorkspace({
               documentFile.current = null;
               setDocument(null);
               setNotice(
-                `整理出 ${nextRows.length} 筆，請逐筆核對再匯入。${[...new Set(issues.filter((issue) => issue.severity === 'warning').map((issue) => issue.message))].join(' ')}`,
+                `${personalImportPreviewNotice(nextRows.length)}${[...new Set(issues.filter((issue) => issue.severity === 'warning').map((issue) => issue.message))].join(' ')}`,
               );
               requestAnimationFrame(() =>
                 review.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),

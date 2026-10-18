@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, it, vi } from 'vitest';
 import {
   PERSONAL_IMPORT_IMAGE_UNREADABLE,
+  personalImportPreviewNotice,
   personalImportSavedNotice,
   personalImportUndoBody,
   personalImportUndoneNotice,
@@ -9,7 +10,11 @@ import {
 import { readPersonalImportDocumentFile } from '@/lib/personalImportDocuments';
 import type { PersonalImportDocument } from '@campus/shared';
 import { PersonalImportCenter } from './PersonalImportCenter';
-import { readPersonalImports, savePersonalImportBatch } from '@/lib/personalImports';
+import {
+  personalImportsStorageKey,
+  readPersonalImports,
+  savePersonalImportBatch,
+} from '@/lib/personalImports';
 import { serializePersonalImportBackup, type PersonalImportRecord } from '@campus/shared';
 import { browserRequest } from '@/features/nuni/Session';
 const context = vi.hoisted(() => ({
@@ -65,6 +70,7 @@ async function confirmUndo() {
 it('reviews edits before persistence, reimport dedupes, undo only reverses the new batch', async () => {
   render(<PersonalImportCenter />);
   await prepare();
+  expect(screen.getByText(personalImportPreviewNotice(1))).toBeTruthy();
   expect(readPersonalImports(context)).toHaveLength(0);
   fireEvent.change(screen.getByLabelText('成績'), { target: { value: '88' } });
   fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
@@ -237,6 +243,27 @@ it('saves only an explicitly selected accessible class as a personal link withou
   expect(vi.mocked(browserRequest).mock.calls).toEqual([
     ['class-workspaces', 'verified-account-context', undefined],
   ]);
+});
+
+it('with sync enabled, saving only reports the local add and does not claim the account already has it', async () => {
+  const platformAccountId = 'pa_aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  context.owner = `platform:${platformAccountId}`;
+  context.session = {
+    platformAccountId,
+    context: 'verified-account-context',
+    isPlatformOperator: false,
+  };
+  vi.mocked(browserRequest).mockResolvedValue({ workspaces: [] });
+  localStorage.setItem(
+    personalImportsStorageKey({ owner: context.owner, schoolId: 'pu' }),
+    JSON.stringify({ version: 1, records: [], sync: { enabled: true, base: null } }),
+  );
+  render(<PersonalImportCenter />);
+  await prepare();
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
+  await screen.findByText(personalImportSavedNotice(1, true));
+  expect(screen.queryByText(/還沒同步到你的帳號，同步狀態請看下方/)).toBeNull();
+  expect(screen.queryByText(/資料只存在這台裝置/)).toBeNull();
 });
 
 it('asks before undoing and keeps records when the person chooses not to', async () => {

@@ -1,4 +1,9 @@
 import { validatePersonalImportBackupRecords } from './backup';
+import {
+  PERSONAL_IMPORT_SYNC_CONFLICT,
+  PERSONAL_IMPORT_SYNC_NETWORK_FAILURE,
+  PERSONAL_IMPORT_SYNC_SESSION_EXPIRED,
+} from './copy';
 import { personalImportKey } from './records';
 import type { PersonalImportRecord } from './types';
 
@@ -219,8 +224,7 @@ export function mergePersonalImportRecords(
 
 export function personalImportSyncErrorMessage(error: unknown): string {
   const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
-  if (code === 'PERSONAL_IMPORT_REVISION_CONFLICT')
-    return '另一台裝置剛更新資料，請重新同步並核對差異。';
+  if (code === 'PERSONAL_IMPORT_REVISION_CONFLICT') return PERSONAL_IMPORT_SYNC_CONFLICT;
   if (
     [
       'SIGN_IN_REQUIRED',
@@ -230,11 +234,12 @@ export function personalImportSyncErrorMessage(error: unknown): string {
       'PERSONAL_IMPORT_SESSION_EXPIRED',
     ].includes(code)
   )
-    return '登入狀態已變更，請重新登入後同步；這台裝置的資料仍保留。';
+    return PERSONAL_IMPORT_SYNC_SESSION_EXPIRED;
   if (code === 'PERSONAL_IMPORT_SCHOOL_LIMIT')
     return '已達帳號可同步的校園數量上限，這份資料仍保留在裝置。';
   if (['NOT_FOUND', 'IMPORT_SYNC_DISABLED'].includes(code))
     return '帳號同步暫時無法使用，資料已保留在這台裝置。';
-  if (error instanceof Error && !code) return error.message;
-  return '暫時無法同步，這台裝置的修改仍保留。連線恢復後會再試，也可以下載備份。';
+  if (error instanceof Error && !code && /[\u4e00-\u9fff]/.test(error.message))
+    return error.message;
+  return PERSONAL_IMPORT_SYNC_NETWORK_FAILURE;
 }
