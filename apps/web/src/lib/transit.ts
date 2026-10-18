@@ -9,7 +9,14 @@ export const TRANSIT_CITIES = {
 } as const;
 export type TransitCity = keyof typeof TRANSIT_CITIES;
 export type Position = { lat: number; lon: number };
-export type TransitStop = Position & { id: string; name: string; city: TransitCity; distance: number | null };
+export type TransitRoute = { name: string; direction: string; destination: string };
+export type TransitStop = Position & {
+  id: string; name: string; city: TransitCity; distance: number | null;
+  source?: 'taichung-open-data'; catalogDate?: string; routes?: TransitRoute[];
+};
+export const TAICHUNG_BUS_URL = 'https://citybus.taichung.gov.tw/';
+export const TAICHUNG_CATALOG_URL = 'https://data.gov.tw/dataset/81555';
+export const isStaticTransitStop = (stop: TransitStop): boolean => stop.source === 'taichung-open-data';
 export type TransitArrival = {
   id: string; route: string; direction: number | null; destination: string;
   status: number | null; seconds: number | null; updatedAt: string | null;
@@ -135,19 +142,42 @@ export function directionLabel(arrival: TransitArrival): string {
 export function stopMapUrl(stop: TransitStop): string {
   return `https://www.google.com/maps/dir/?api=1&destination=${stop.lat},${stop.lon}&travelmode=walking`;
 }
+function readStop(value: unknown): TransitStop | null {
+  if (!isPosition(value) || !isStopId(value.id) || !isCity(value.city) ||
+    typeof value.name !== 'string' || !value.name.trim() || value.name.length > 120) return null;
+  const stop: TransitStop = { id: value.id, name: value.name, city: value.city, lat: value.lat, lon: value.lon, distance: null };
+  if (value.source === undefined && !value.id.startsWith('TCOD_')) return stop;
+  // Static identifiers must never lose their provider marker and enter TDX arrival polling.
+  if (value.source !== 'taichung-open-data' || value.city !== 'Taichung' || !/^TCOD_[A-Za-z0-9_-]+$/.test(value.id) ||
+    typeof value.catalogDate !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value.catalogDate) ||
+    !Number.isFinite(Date.parse(value.catalogDate)) || Date.parse(value.catalogDate) > Date.now() + 5 * 60_000 ||
+    new Date(value.catalogDate).toISOString().replace('.000Z', 'Z') !== value.catalogDate.replace('.000Z', 'Z') ||
+    !Array.isArray(value.routes) || value.routes.length > 200) return null;
+  const routes: TransitRoute[] = [];
+  for (const route of value.routes) {
+    if (!isRecord(route) || typeof route.name !== 'string' || !route.name.trim() || route.name.length > 120 ||
+      typeof route.direction !== 'string' || route.direction.length > 40 ||
+      typeof route.destination !== 'string' || route.destination.length > 120) return null;
+    routes.push({ name: route.name, direction: route.direction, destination: route.destination });
+  }
+  return { ...stop, source: 'taichung-open-data', catalogDate: value.catalogDate, routes };
+}
 export function readSavedStops(raw: string | null): TransitStop[] {
   try {
     const rows: unknown = JSON.parse(raw ?? '[]');
     if (!Array.isArray(rows)) return [];
     const seen = new Set<string>();
-    return rows.filter((row): row is TransitStop => {
-      if (!isPosition(row) || !isRecord(row) || !isStopId(row.id) || !isCity(row.city) ||
-        typeof row.name !== 'string' || !row.name.trim() || row.name.length > 120) return false;
-      const key = `${row.city}:${row.id}`;
-      if (seen.has(key)) return false;
+    const stops: TransitStop[] = [];
+    for (const row of rows) {
+      const stop = readStop(row);
+      if (!stop) continue;
+      const key = `${stop.city}:${stop.id}`;
+      if (seen.has(key)) continue;
       seen.add(key);
-      return true;
-    }).slice(0, 16).map((row) => ({ id: row.id, name: row.name, city: row.city, lat: row.lat, lon: row.lon, distance: null }));
+      stops.push(stop);
+      if (stops.length === 16) break;
+    }
+    return stops;
   } catch { return []; }
 }
 export async function queryTransit(query: TransitQuery, signal: AbortSignal): Promise<TransitResult> {
