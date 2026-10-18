@@ -76,3 +76,20 @@ test('no quick link is offered for a revoked or non-student membership', async (
   expect(screen.queryByText(/選擇已核准課班：/)).toBeNull();
   expect(choose).not.toHaveBeenCalled();
 });
+
+test.each(['grades', 'events'] as const)('%s can look up a course without sending private import data', async kind => {
+  mockRequest.mockResolvedValue({ candidates: [], truncated: false });
+  const screen = render(<CourseAccessPanel row={{ ...row, kind, grade: '95', date: '2026-10-15', source: { type: 'paste', line: 1, rawText: 'private' } }} workspaces={[]} />);
+  fireEvent.press(screen.getByText('查找課班與申請加入'));
+  fireEvent.press(screen.getByText('查找可能對應課班'));
+  await waitFor(() => expect(mockRequest).toHaveBeenCalled());
+  expect(mockRequest.mock.calls[0][2]).toEqual(approval.metadata);
+});
+test('linked course readback uses reviewed server teacher data, not the personal teacher hint', async () => {
+  mockRequest.mockResolvedValue({ status: 'reviewed', workspaceId: workspace.id, memberRole: 'student', membershipActive: true, course: { ...approval.metadata, teacher: '經核對的老師', id: id('ccd'), workspaceId: workspace.id, version: 1, verification: 'administrator-reviewed' } });
+  const screen = render(<CourseAccessPanel row={{ ...row, linkedCourseId: workspace.id }} workspaces={[workspace]} />);
+  fireEvent.press(screen.getByText('查找課班與申請加入'));
+  fireEvent.press(screen.getByText('核對目前課班與教師資料'));
+  await waitFor(() => expect(screen.getByText('經管理員核對的授課者：經核對的老師')).toBeTruthy());
+  expect(row.teacher).toBe('王老師');
+});

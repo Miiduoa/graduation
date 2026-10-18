@@ -1,5 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
+  parsePersonalImportSnapshot,
+  type PersonalImportSyncState,
+} from '@campus/shared/src/imports/sync';
+import {
   createPersonalImportId,
   planPersonalImport,
   preparePersonalImportBackupRestore,
@@ -17,11 +21,20 @@ export type PersonalImportLedger = {
   version: 1;
   records: PersonalImportRecord[];
   batches: Array<{ id: string; createdAt: string; count: number }>;
+  sync?: PersonalImportSyncState;
 };
 export const personalImportStorageKey = (scope: PersonalImportScope) =>
   `campus.personal-imports.v1:${encodeURIComponent(scope.owner)}:${encodeURIComponent(scope.schoolId)}`;
 const empty = (): PersonalImportLedger => ({ version: 1, records: [], batches: [] });
 const locks = new Map<string, Promise<unknown>>();
+type ImportChange = { scope: PersonalImportScope; source: 'local' | 'sync' };
+const listeners = new Set<(change: ImportChange) => void>();
+export function subscribePersonalImports(listener: (change: ImportChange) => void) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
 
 function retainActiveBatches(
   batches: PersonalImportLedger['batches'],
@@ -87,13 +100,33 @@ export async function loadPersonalImports(
   ) {
     throw new Error('儲存的匯入資料無法讀取，請保留此裝置上的資料並稍後重試。');
   }
+  if (value.sync !== undefined) {
+    if (
+      !value.sync ||
+      typeof value.sync.enabled !== 'boolean' ||
+      !Object.hasOwn(value.sync, 'base')
+    )
+      throw new Error('同步紀錄無法讀取，原有資料仍保留，請先匯出備份。');
+    value.sync = {
+      enabled: value.sync.enabled,
+      base:
+        value.sync.base === null
+          ? null
+          : parsePersonalImportSnapshot(value.sync.base, scope.schoolId),
+    };
+  }
   return value;
 }
 
-function mutate<T>(
+export function mutatePersonalImportLedger<T>(
   scope: PersonalImportScope,
   active: () => boolean,
-  update: (ledger: PersonalImportLedger) => { ledger: PersonalImportLedger; result: T },
+  update: (
+    ledger: PersonalImportLedger,
+  ) =>
+    | { ledger: PersonalImportLedger; result: T }
+    | Promise<{ ledger: PersonalImportLedger; result: T }>,
+  source: ImportChange['source'] = 'local',
 ): Promise<T> {
   const key = personalImportStorageKey(scope);
   const previous = locks.get(key) || Promise.resolve();
@@ -103,8 +136,16 @@ function mutate<T>(
       if (!active()) throw new Error('帳號或學校已切換，請重新開啟匯入。');
       const current = await loadPersonalImports(scope);
       if (!active()) throw new Error('帳號或學校已切換，請重新開啟匯入。');
-      const { ledger, result } = update(current);
+      const { ledger, result } = await update(current);
+      if (!active()) throw new Error('帳號或學校已切換，請重新開啟匯入。');
       await AsyncStorage.setItem(key, JSON.stringify(ledger));
+      for (const listener of listeners) {
+        try {
+          listener({ scope, source });
+        } catch {
+          /* A view cannot invalidate a durable write. */
+        }
+      }
       return result;
     });
   locks.set(key, task);
@@ -115,6 +156,7 @@ function mutate<T>(
     .catch(() => undefined);
   return task;
 }
+const mutate = mutatePersonalImportLedger;
 
 export function appendPersonalImports(
   scope: PersonalImportScope,
@@ -142,6 +184,7 @@ export function appendPersonalImports(
     if (planned.records.length > PERSONAL_IMPORT_BACKUP_MAX_RECORDS)
       throw new Error('這台裝置已達 2,000 筆上限，請先備份並移除不需要的紀錄。');
     const ledger: PersonalImportLedger = {
+      ...current,
       version: 1,
       records: planned.records,
       batches: planned.added.length

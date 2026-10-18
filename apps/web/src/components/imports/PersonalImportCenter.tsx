@@ -26,6 +26,7 @@ import {
   type PersonalImportSource,
   type ImportIssue,
   type PersonalImportBackupPreview,
+  type PersonalImportDocument,
 } from '@campus/shared';
 import { createNuniClasses, type NuniWorkspace } from '@campus/shared/src/nuni';
 import { browserRequest, useOptionalNuniSession } from '@/features/nuni/Session';
@@ -40,6 +41,9 @@ import { usePersonalImportScope, usePersonalImports } from '@/lib/usePersonalImp
 import { recognizePersonalImportImage } from '@/lib/personalImportOcr';
 import styles from './PersonalImport.module.css';
 import { CourseAccessPanel } from './CourseAccessPanel';
+import { DocumentSelection } from './DocumentSelection';
+import { PersonalImportSyncPanel } from './PersonalImportSync';
+import { readPersonalImportDocumentFile } from '@/lib/personalImportDocuments';
 
 const KINDS: { value: PersonalImportKind; title: string; detail: string }[] = [
   { value: 'timetable', title: '課表與選課結果', detail: '上課日、時間、教室與老師' },
@@ -321,6 +325,7 @@ function ImportWorkspace({
   });
   const [rows, setRows] = useState<PersonalImportRow[]>([]);
   const [backup, setBackup] = useState<Omit<PersonalImportBackupPreview, 'rows'> | null>(null);
+  const [importDocument, setDocument] = useState<PersonalImportDocument | null>(null);
   const [reviewPage, setReviewPage] = useState(0);
   const [excluded, setExcluded] = useState<string[]>([]);
   const [parseIssues, setParseIssues] = useState<ImportIssue[]>([]);
@@ -461,6 +466,14 @@ function ImportWorkspace({
       name: file.name,
     };
     try {
+      if (/\.(pdf|xlsx)$/i.test(file.name)) {
+        setProgress('正在這台裝置讀取文件；掃描頁會進行文字辨識…');
+        const document = await readPersonalImportDocumentFile(file, controller.signal);
+        if (!active.current || suspended.current || controller.signal.aborted) return;
+        setDocument(document);
+        setNotice('文件已讀取，請選擇內容與標題列。');
+        return;
+      }
       if (/\.json$/i.test(file.name)) {
         if (file.size > PERSONAL_IMPORT_BACKUP_MAX_BYTES)
           throw new Error('備份檔超過 8 MB，請確認是否為 Campus One 匯出的備份。');
@@ -494,7 +507,7 @@ function ImportWorkspace({
       } else {
         if (!/\.(csv|tsv|txt|ics)$/i.test(file.name))
           throw new Error(
-            '目前可讀圖片、CSV、TSV、TXT、ICS 與 Campus One JSON 備份。PDF、Excel 請先匯出成 CSV 或截圖。',
+            '可讀圖片、PDF、XLSX、CSV、TSV、TXT、ICS 與 Campus One JSON 備份。舊版 XLS 請先另存為 XLSX。',
           );
         if (file.size > 400_000) throw new Error('文字檔超過 400 KB，請分成較小的檔案再匯入。');
         input = await file.text();
@@ -626,18 +639,19 @@ function ImportWorkspace({
         <p className={styles.storage}>
           {schoolName}
           <br />
-          {scope.owner === 'guest' ? '未登入 · 這個瀏覽器專用' : '目前帳號 · 這台裝置專用'}
+          {scope.owner === 'guest' ? '未登入 · 這個瀏覽器專用' : '目前帳號 · 個人紀錄'}
           <br />
-          <small>尚未雲端同步。換裝置或清除瀏覽器資料前，請先匯出備份。</small>
+          <small>同步狀態見下方。清除瀏覽器資料前，請先確認已同步或下載完整備份。</small>
         </p>
       </section>
+      <PersonalImportSyncPanel scope={scope} available={!paused && !saving} />
       <div className={styles.kinds} role="group" aria-label="選擇匯入內容">
         {KINDS.map((item) => (
           <button
             key={item.value}
             type="button"
             aria-pressed={kind === item.value}
-            disabled={reading || saving || rows.length > 0 || !!editing}
+            disabled={reading || saving || rows.length > 0 || !!editing || !!importDocument}
             onClick={() => {
               setKind(item.value);
               setText('');
@@ -673,7 +687,7 @@ function ImportWorkspace({
             這份資料的校園
             <select
               value={schoolSelection.selectedSchoolId || ''}
-              disabled={reading || saving || rows.length > 0 || !!editing}
+              disabled={reading || saving || rows.length > 0 || !!editing || !!importDocument}
               onChange={(event) => schoolSelection.selectSchool(event.target.value || null)}
             >
               <option value="">個人資料（不限校園）</option>
@@ -685,7 +699,7 @@ function ImportWorkspace({
             </select>
           </label>
         )}
-        <fieldset disabled={reading || saving || rows.length > 0} className={styles.fieldset}>
+        <fieldset disabled={reading || saving || rows.length > 0 || !!importDocument} className={styles.fieldset}>
           {kind !== 'events' && (
             <div className={styles.fields}>
               <label className={styles.field}>
@@ -712,13 +726,13 @@ function ImportWorkspace({
             onDragOver={(event) => event.preventDefault()}
             onDrop={(event) => {
               event.preventDefault();
-              if (!rows.length) void readFile(event.dataTransfer.files[0]);
+              if (!rows.length && !importDocument) void readFile(event.dataTransfer.files[0]);
             }}
           >
             <input
               ref={fileInput}
               type="file"
-              accept="image/png,image/jpeg,image/webp,.csv,.tsv,.txt,.ics,.json,application/json"
+              accept="image/png,image/jpeg,image/webp,.pdf,.xlsx,.csv,.tsv,.txt,.ics,.json,application/json"
               className={styles.file}
               aria-label="選擇截圖或檔案"
               onChange={(event) => {
@@ -734,7 +748,7 @@ function ImportWorkspace({
               選截圖或檔案
             </button>
             <span>也可以拖曳到這裡</span>
-            <small>PNG／JPEG／WebP，單張 10 MB 內；CSV／TSV／TXT／ICS，400 KB 內</small>
+            <small>PNG／JPEG／WebP，單張 10 MB 內；PDF／XLSX，8 MiB 內；CSV／TSV／TXT／ICS，400 KB 內</small>
             <small>
               換裝置：也可選擇 Campus One 完整備份（JSON，8 MB 內），一次帶回三類資料與所有學期。
             </small>
@@ -801,6 +815,13 @@ function ImportWorkspace({
           </details>
         )}
       </section>
+      {importDocument && <DocumentSelection document={importDocument} options={options} onCancel={() => { setDocument(null); setNotice('已取消這份文件，個人紀錄沒有改變。'); }} onConfirm={(nextRows, issues) => {
+        setRows(nextRows); setBackup(null); setReviewPage(0); setExcluded([]);
+        setParseIssues(issues.filter((issue) => issue.severity === 'error' && !nextRows.some((row) => row.id === issue.rowId && validatePersonalImportRow(row, { periodProfile }).some((validation) => validation.code === issue.code && validation.field === issue.field))));
+        setText(''); setPreview(''); setDocument(null);
+        setNotice(`整理出 ${nextRows.length} 筆，請逐筆核對再匯入。${[...new Set(issues.filter((issue) => issue.severity === 'warning').map((issue) => issue.message))].join(' ')}`);
+        requestAnimationFrame(() => review.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      }} />}
       <section ref={review} className={styles.panel} aria-label="核對匯入資料">
         <div className={styles.heading}>
           <h2>
@@ -808,7 +829,7 @@ function ImportWorkspace({
           </h2>
           <button
             className="btn"
-            disabled={saving || reading}
+            disabled={saving || reading || !!importDocument}
             type="button"
             onClick={() => {
               setRows((current) => [
