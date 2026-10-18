@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
 import { createPersonalImportId, type PersonalImportRow } from '@campus/shared';
-import { approvedCourseLinks, courseHints, courseAccessErrorMessage, courseRequestCopy, type CourseMatch, type CourseRequest } from '@campus/shared/src/courseAccess';
+import { approvedCourseLinks, courseHints, courseAccessErrorMessage, courseRequestCopy, type CourseMatch, type CourseRequest, type CourseWorkspace } from '@campus/shared/src/courseAccess';
 import { createCourseAccess, type CourseTransport } from '@campus/shared/src/courseAccessClient';
 import { type NuniWorkspace } from '@campus/shared/src/nuni';
 import { useNuniSession } from '../state/nuniSession';
@@ -16,7 +16,6 @@ const textStyle = { color: theme.colors.text, lineHeight: 23 };
 const inputStyle = { borderWidth: 1, borderColor: theme.colors.border, borderRadius: 8, padding: 12, color: theme.colors.text };
 export function CourseAccessPanel(props: Props) {
   const auth = useNuniSession();
-  if (props.row.kind !== 'timetable') return null;
   if (!auth.session || auth.loading || auth.pendingLogout || props.disabled)
     return <Text style={textStyle}>登入課班帳號且完成目前操作後，可查找已核對的課班。</Text>;
   const context = auth.session.context;
@@ -54,7 +53,9 @@ function CourseAccessSession({ row, workspaces, request, onRefreshWorkspaces, on
   return <View style={{ gap: 12 }}>
     <Button text={open ? '收合課班申請' : '查找課班與申請加入'} disabled={busy} onPress={() => setOpen(!open)} />
     {open && <>
+      {row.linkedCourseId && <LinkedCourseDetails key={`${row.linkedCourseId}:${row.schoolId}`} request={request} workspaceId={row.linkedCourseId} schoolId={row.schoolId} />}
       <Text style={textStyle}>學校代號 {row.schoolId} · {row.academicYear}/{row.semester}。只傳送課程欄位，不傳截圖、成績或整份課表；推薦不代表身分已認證。</Text>
+      {row.kind === 'events' && <Text style={textStyle}>活動也可連結授課課班。請先補上學年度、學期與課號；活動名稱會保留，不會改成課程名稱。</Text>}
       <Button text="查找可能對應課班" disabled={busy} onPress={() => void run(async () => {
         const result = await client.match(courseHints(row)); if (alive.current) { setMatches(result.matches); setSelected(''); setConfirmed(false); setTruncated(result.truncated); }
       })} />
@@ -109,5 +110,34 @@ function CourseAccessSession({ row, workspaces, request, onRefreshWorkspaces, on
       {busy && <Text style={textStyle} accessibilityLiveRegion="polite">正在確認伺服器狀態…</Text>}
       {!!message && <Text style={textStyle} accessibilityLiveRegion="polite">{message}</Text>}
     </>}
+  </View>;
+}
+
+function LinkedCourseDetails({ request, workspaceId, schoolId }: { request: CourseTransport; workspaceId: string; schoolId: string }) {
+  const alive = useRef(true), locked = useRef(false);
+  const [result, setResult] = useState<CourseWorkspace | null>(null);
+  const [message, setMessage] = useState(''), [busy, setBusy] = useState(false);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  async function refresh() {
+    if (locked.current) return;
+    locked.current = true; setBusy(true); setResult(null); setMessage('');
+    try {
+      const value = await createCourseAccess(request).workspace(workspaceId, schoolId);
+      if (alive.current) setResult(value);
+    } catch (error) { if (alive.current) setMessage(courseAccessErrorMessage(error)); }
+    finally { locked.current = false; if (alive.current) setBusy(false); }
+  }
+  return <View style={{ gap: 8 }}>
+    <Text style={textStyle}>已連結的課班</Text>
+    <Button text={busy ? '正在核對課班資料…' : '核對目前課班與教師資料'} disabled={busy} onPress={() => void refresh()} />
+    <Text style={textStyle}>以下資料由伺服器重新確認；匯入的教師姓名仍是個人提示，不會改寫授課者身分。</Text>
+    {result?.status === 'reviewed' && <>
+      <Text style={textStyle}>{result.course.title} · 課號 {result.course.courseCode} · 班別 {result.course.className || '未提供'}</Text>
+      <Text style={textStyle}>學校 {result.course.schoolId} · {result.course.academicYear} 學年度 · {result.course.semester} 學期</Text>
+      <Text style={textStyle}>經管理員核對的授課者：{result.course.teacher}</Text>
+      <Text style={textStyle}>目前成員資格有效；這是平台管理員核對結果，不是校方單一登入認證。</Text>
+    </>}
+    {result?.status === 'unreviewed' && <Text style={textStyle}>目前仍是此工作區的成員，但課班與教師資料尚未經獨立核對。個人連結不代表授課或修課認證。</Text>}
+    {!!message && <Text style={textStyle} accessibilityLiveRegion="polite">{message}</Text>}
   </View>;
 }

@@ -9,6 +9,8 @@ import {
   type PersonalImportRecord,
   type PersonalImportRow,
 } from '@campus/shared';
+import { parsePersonalImportSnapshot, type PersonalImportSyncState } from '@campus/shared/src/imports/sync';
+import type { PersonalImportLocalState } from '@campus/shared/src/imports/syncEngine';
 
 export type PersonalImportScope = { owner: string; schoolId: string };
 export const PERSONAL_IMPORT_CHANGE = 'campus-personal-imports-change';
@@ -55,6 +57,34 @@ export function readPersonalImports(scope: PersonalImportScope): PersonalImportR
   }
 }
 
+export function readPersonalImportSyncState(scope: PersonalImportScope): PersonalImportSyncState {
+  const raw = localStorage.getItem(personalImportsStorageKey(scope));
+  const value = raw ? JSON.parse(raw).sync : undefined;
+  if (value === undefined) return { enabled: false, base: null };
+  if (!value || typeof value.enabled !== 'boolean' || !('base' in value))
+    throw new Error('同步紀錄暫時讀不到，裝置資料仍保留，請勿清除瀏覽器資料。');
+  return { enabled: value.enabled, base: value.base === null ? null : parsePersonalImportSnapshot(value.base, scope.schoolId) };
+}
+
+export async function withPersonalImportSyncLock<T>(scope: PersonalImportScope,
+  action: (state: PersonalImportLocalState) => Promise<{ state: PersonalImportLocalState; result: T }>,
+  active = () => true,
+): Promise<T> {
+  if (!navigator.locks) throw new Error('目前瀏覽器無法安全同步，請使用最新版瀏覽器。');
+  return navigator.locks.request(personalImportsStorageKey(scope), async () => {
+    if (!active()) throw new Error('帳號或校園已切換，這次同步已停止。');
+    const previous = { records: readPersonalImports(scope), sync: readPersonalImportSyncState(scope) };
+    const { state, result } = await action(previous);
+    if (!active()) throw new Error('帳號或校園已切換，這次同步已停止。');
+    if (JSON.stringify(previous) !== JSON.stringify(state)) {
+      try { localStorage.setItem(personalImportsStorageKey(scope), JSON.stringify({ version: 1, ...state })); }
+      catch { throw new Error('裝置空間不足，這次同步未能保存；原資料仍保留，請先下載備份。'); }
+      window.dispatchEvent(new Event(PERSONAL_IMPORT_CHANGE));
+    }
+    return result;
+  });
+}
+
 async function mutate<T>(
   scope: PersonalImportScope,
   action: (rows: PersonalImportRecord[]) => { rows: PersonalImportRecord[]; result: T },
@@ -71,7 +101,7 @@ async function mutate<T>(
     try {
       localStorage.setItem(
         personalImportsStorageKey(scope),
-        JSON.stringify({ version: 1, records: rows }),
+        JSON.stringify({ version: 1, records: rows, sync: readPersonalImportSyncState(scope) }),
       );
     } catch {
       throw new Error('這次沒有存成，可能是裝置空間不足或瀏覽器禁止儲存。草稿還在，請稍後再試。');

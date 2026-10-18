@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createPersonalImportId, type PersonalImportRow } from '@campus/shared';
-import { approvedCourseLinks, courseHints, courseAccessErrorMessage, courseRequestCopy, type CourseMatch, type CourseRequest } from '@campus/shared/src/courseAccess';
+import { approvedCourseLinks, courseHints, courseAccessErrorMessage, courseRequestCopy, type CourseMatch, type CourseRequest, type CourseWorkspace } from '@campus/shared/src/courseAccess';
 import { createCourseAccess } from '@campus/shared/src/courseAccessClient';
 import { type NuniWorkspace } from '@campus/shared/src/nuni';
 import { browserRequest, useOptionalNuniSession } from '@/features/nuni/Session';
@@ -14,7 +14,6 @@ type Props = { row: PersonalImportRow; workspaces: NuniWorkspace[];
 };
 export function CourseAccessPanel(props: Props) {
   const auth = useOptionalNuniSession();
-  if (props.row.kind !== 'timetable') return null;
   if (!auth?.session || auth.loading || auth.pendingLogout) return <p>登入課班帳號後，可查找經管理員核對的課班。個人匯入不受影響。</p>;
   const { context, isPlatformOperator } = auth.session;
   // An account, school or metadata change invalidates selections and in-flight callbacks.
@@ -55,7 +54,9 @@ function CourseAccessSession({ row, workspaces, context, operator, onRefreshWork
   const hasApprovedMembership = requests.some(item => item.kind === 'student' && item.state === 'approved' && item.membershipActive);
   return <details className={styles.source}>
     <summary>查找課班與申請加入</summary>
+    {row.linkedCourseId && <LinkedCourseDetails key={`${context}:${row.linkedCourseId}:${row.schoolId}`} context={context} workspaceId={row.linkedCourseId} schoolId={row.schoolId} />}
     <p>只查詢管理員已核對、已連結學校正式班次的課班。比對不代表修課資格或教師身分已獲認證。</p>
+    {row.kind === 'events' && <p>活動也可連結授課課班。請先補上學年度、學期與課號；活動名稱會保留，不會改成課程名稱。</p>}
     <p>學校代號：{row.schoolId} · {row.academicYear} 學年度 · {row.semester} 學期。僅傳送課程欄位，不傳截圖、成績或整份課表。</p>
     <button type="button" disabled={busy} onClick={() => void run(async () => {
       const result = await client.match(courseHints(row));
@@ -97,7 +98,7 @@ function CourseAccessSession({ row, workspaces, context, operator, onRefreshWork
         if (result.requests.some(item => item.kind === 'student' && item.state === 'approved' && item.membershipActive)) onRefreshWorkspaces?.(); }
     })}>重新查詢申請狀態</button>
     {hasApprovedMembership && <div className={styles.source}>
-      <p>申請已有核准結果。請重新核對你目前擁有的課班成員資格，再決定是否連結到這筆個人課表。</p>
+      <p>申請已有核准結果。請重新核對你目前擁有的課班成員資格，再決定是否連結到這筆個人紀錄。</p>
       {onRefreshWorkspaces && <button type="button" disabled={busy} onClick={onRefreshWorkspaces}>更新已加入的課班</button>}
       {approvedLinks.map(item => <button key={item.id} type="button" disabled={busy || !onSelectLinkedCourse || row.linkedCourseId === item.id}
         onClick={() => onSelectLinkedCourse?.(item.id)}>
@@ -115,6 +116,35 @@ function CourseAccessSession({ row, workspaces, context, operator, onRefreshWork
     {busy && <p role="status">正在確認伺服器狀態…</p>}
     {operator && <CourseReviewPanel context={context} schoolId={row.schoolId} />}
   </details>;
+}
+
+function LinkedCourseDetails({ context, workspaceId, schoolId }: { context: string; workspaceId: string; schoolId: string }) {
+  const alive = useRef(true), locked = useRef(false);
+  const [result, setResult] = useState<CourseWorkspace | null>(null);
+  const [message, setMessage] = useState(''), [busy, setBusy] = useState(false);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  async function refresh() {
+    if (locked.current) return;
+    locked.current = true; setBusy(true); setResult(null); setMessage('');
+    try {
+      const value = await createCourseAccess((path, input) => browserRequest(path, context, input)).workspace(workspaceId, schoolId);
+      if (alive.current) setResult(value);
+    } catch (error) { if (alive.current) setMessage(courseAccessErrorMessage(error)); }
+    finally { locked.current = false; if (alive.current) setBusy(false); }
+  }
+  return <section aria-label="已連結課班資料">
+    <h4>已連結的課班</h4>
+    <button type="button" disabled={busy} onClick={() => void refresh()}>{busy ? '正在核對課班資料…' : '核對目前課班與教師資料'}</button>
+    <p>以下資料由伺服器重新確認；匯入的教師姓名仍是個人提示，不會改寫授課者身分。</p>
+    {result?.status === 'reviewed' && <>
+      <p>{result.course.title} · 課號 {result.course.courseCode} · 班別 {result.course.className || '未提供'}</p>
+      <p>學校 {result.course.schoolId} · {result.course.academicYear} 學年度 · {result.course.semester} 學期</p>
+      <p>經管理員核對的授課者：{result.course.teacher}</p>
+      <p>目前成員資格有效；這是平台管理員核對結果，不是校方單一登入認證。</p>
+    </>}
+    {result?.status === 'unreviewed' && <p>目前仍是此工作區的成員，但課班與教師資料尚未經獨立核對。請自行確認；個人連結不代表授課或修課認證。</p>}
+    {message && <p role="status">{message}</p>}
+  </section>;
 }
 
 function CourseReviewPanel({ context, schoolId }: { context: string; schoolId: string }) {

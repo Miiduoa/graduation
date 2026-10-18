@@ -1,11 +1,7 @@
 /* eslint-disable */
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {
-  NavigationContainer,
-  DefaultTheme,
-  type LinkingOptions,
-} from '@react-navigation/native';
+import { NavigationContainer, DefaultTheme, type LinkingOptions } from '@react-navigation/native';
 import { createBottomTabNavigator, BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { AppActionIcon } from './src/ui/AppActionIcon';
 import {
@@ -29,6 +25,7 @@ import { DemoProvider } from './src/state/demo';
 import { DemoRoleProvider } from './src/state/demoRole';
 import { DemoStoreProvider } from './src/state/demoStore';
 import { AuthProvider, useAuth } from './src/state/auth';
+import { PersonalImportSyncBridge } from './src/components/PersonalImportSyncBridge';
 import { NuniSessionProvider } from './src/state/nuniSession';
 import { ThemeProvider, useThemeMode } from './src/state/theme';
 import { NotificationsProvider } from './src/state/notifications';
@@ -84,7 +81,10 @@ import {
   parseGroupCourseHubDeepLink,
   isInterceptedMessagingDeepLink,
 } from './src/app/assignmentDeepLink';
-import { navigateFromInboxTask, inboxTaskFromLegacyAssignmentActionTarget } from './src/services/inboxActions';
+import {
+  navigateFromInboxTask,
+  inboxTaskFromLegacyAssignmentActionTarget,
+} from './src/services/inboxActions';
 import { isTeachingRole } from './src/utils/campusOs';
 import type { InboxTask } from './src/data/types';
 import { navigateToCourseScreen } from './src/utils/courseNavigation';
@@ -560,7 +560,7 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const visibleTabKeys = permissions.tabs.map((t) => t.key);
   const visibleRoutes = state.routes.filter((r) => visibleTabKeys.includes(r.name));
 
-  const renderTab = (route: typeof visibleRoutes[number]) => {
+  const renderTab = (route: (typeof visibleRoutes)[number]) => {
     const originalIndex = state.routes.findIndex((r) => r.key === route.key);
     const { options } = descriptors[route.key];
     const focused = state.index === originalIndex;
@@ -628,9 +628,7 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
                   borderColor: theme.colors.chromeTabBar,
                 }}
               >
-                <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800' }}>
-                  {badgeLabel}
-                </Text>
+                <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800' }}>{badgeLabel}</Text>
               </View>
             ) : null}
           </View>
@@ -720,11 +718,7 @@ function AppTabNavigator() {
       <Tab.Screen name="Today" component={HomeStack} />
       <Tab.Screen name="學習" component={LearnStack} />
       <Tab.Screen name="校園" component={MapStack} />
-      <Tab.Screen
-        name="訊息"
-        component={MessagesStack}
-        options={{ tabBarButton: () => null }}
-      />
+      <Tab.Screen name="訊息" component={MessagesStack} options={{ tabBarButton: () => null }} />
       <Tab.Screen name="我的" component={MeStack} />
     </Tab.Navigator>
   );
@@ -1056,6 +1050,7 @@ function AppInner() {
     <SchoolProvider>
       <NuniSessionProvider>
         <AuthProvider>
+          <PersonalImportSyncBridge />
           <NotificationsProvider>
             <ToastProvider>
               <AuthAwareStateProviders>

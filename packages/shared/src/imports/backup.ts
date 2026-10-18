@@ -215,6 +215,14 @@ function validatedRecords(
   return records;
 }
 
+/** Strict transport validation without restoring IDs or accepting extra authority fields. */
+export function validatePersonalImportBackupRecords(value: unknown, schoolId: string): PersonalImportRecord[] {
+  if (!validSchoolId(schoolId)) invalid('請先選擇資料所屬校園。');
+  const records = validatedRecords(value, schoolId);
+  utf8Bytes(JSON.stringify(records));
+  return records;
+}
+
 /** One school's complete personal ledger. Account identity and permissions are never exported. */
 export function serializePersonalImportBackup(
   records: readonly PersonalImportRecord[],
