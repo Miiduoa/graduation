@@ -45,6 +45,7 @@ it.each(['ncku', 'ntpu', 'feu', 'mmc'] as const)(
     vi.mocked(getDocsFromServer).mockImplementation(productionEmptySchoolRead(schoolId) as never);
     await expect(loadAnnouncementFeed(schoolId)).resolves.toEqual({
       announcements: [],
+      officialAnnouncements: [],
       sources: [],
       allUnavailable: false,
     });
@@ -74,6 +75,7 @@ it('does not mix leftover root-collection rows from another school into an empty
   }) as never);
   await expect(loadAnnouncementFeed('ncku')).resolves.toEqual({
     announcements: [],
+    officialAnnouncements: [],
     sources: [],
     allUnavailable: false,
   });
