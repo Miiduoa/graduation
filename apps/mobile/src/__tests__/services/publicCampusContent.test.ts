@@ -19,7 +19,6 @@ import {
   isPublicWebUrl,
 } from '../../services/publicCampusContent';
 import { getRawAppEnv } from '../../services/release';
-import { announcementSourceIdsForSchool } from '@campus/shared/src/campusAnnouncements';
 
 jest.mock('firebase/firestore', () => ({
   collection: jest.fn((...args) => args),
@@ -142,17 +141,15 @@ function productionEmptySchoolRead(schoolId: string) {
   return async (input: unknown) => {
     const encoded = JSON.stringify(input ?? '');
     if (encoded.includes('announcement-sources')) return { empty: true, docs: [] };
-    if (encoded.includes('"where":"sourceId"') && !encoded.includes(`"schools","${schoolId}"`)) {
-      throw missingIndexError();
-    }
+    if (encoded.includes(`"schools","${schoolId}","announcements"`)) return { empty: true, docs: [] };
+    if (encoded.includes('["db","announcements"]')) throw missingIndexError();
     return { empty: true, docs: [] };
   };
 }
 
-test.each(['ncku', 'ntpu'] as const)(
-  'treats a successfully empty %s feed as unpublished even when extras would hit a missing legacy sourceId index',
+test.each(['ncku', 'ntpu', 'feu', 'mmc'] as const)(
+  'keeps a successfully empty %s feed when the school-scoped legacy fallback lacks an index',
   async (schoolId) => {
-    expect(announcementSourceIdsForSchool(schoolId).length).toBeGreaterThan(0);
     jest.mocked(getDocsFromServer).mockImplementation(productionEmptySchoolRead(schoolId) as never);
     await expect(loadCampusAnnouncementFeed(schoolId)).resolves.toEqual({
       announcements: [],
@@ -160,10 +157,27 @@ test.each(['ncku', 'ntpu'] as const)(
       allUnavailable: false,
     });
     expect(collection).toHaveBeenCalledWith('db', 'schools', schoolId, 'announcements');
-    expect(collection).toHaveBeenCalledWith('db', 'schools', schoolId, 'announcement-sources');
-    expect(where).not.toHaveBeenCalledWith('sourceId', '==', expect.anything());
+    expect(collection).toHaveBeenCalledWith('db', 'announcements');
+    expect(where).toHaveBeenCalledWith('schoolId', '==', schoolId);
+    expect(orderBy).toHaveBeenCalledWith('publishedAt', 'desc');
   },
 );
+
+test('drops fallback rows that belong to another school', async () => {
+  jest
+    .mocked(getDocsFromServer)
+    .mockResolvedValueOnce({ empty: true, docs: [] } as never)
+    .mockResolvedValueOnce({
+      empty: false,
+      docs: [document({ ...row, schoolId: 'ntu', title: '臺大稿' })],
+    } as never)
+    .mockImplementation(async (input) => docsForPath(input, []) as never);
+  await expect(loadCampusAnnouncementFeed('ncku')).resolves.toEqual({
+    announcements: [],
+    sources: [],
+    allUnavailable: false,
+  });
+});
 
 test.each(['ncku', 'ntpu'] as const)(
   'still rejects %s when the canonical dated query actually fails',
