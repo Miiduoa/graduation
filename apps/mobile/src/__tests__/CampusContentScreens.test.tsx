@@ -116,7 +116,7 @@ test.each([
     const view = render(<AnnouncementsScreen navigation={navigation} />);
     await view.findByText('暫時讀不到資料，請稍後再試');
     expect(view.getByText('再試一次')).toBeTruthy();
-    expect(view.queryByText('這間學校的公告還沒上架。')).toBeNull();
+    expect(view.queryByText('本站還沒接上這間學校的公告。')).toBeNull();
     expect(view.queryByText('請確認網路')).toBeNull();
     expect(view.queryByText('目前無法讀取，請確認網路連線後重試。')).toBeNull();
     expect(view.queryByText('目前沒有公告')).toBeNull();
@@ -151,7 +151,7 @@ test.each([
     const view = render(<AnnouncementScreen route={{ params: { id: 'a1' } }} />);
     await view.findByText('暫時讀不到資料，請稍後再試');
     expect(view.getByText('再試一次')).toBeTruthy();
-    expect(view.queryByText('這間學校的公告還沒上架。')).toBeNull();
+    expect(view.queryByText('本站還沒接上這間學校的公告。')).toBeNull();
     expect(view.queryByText('請確認網路')).toBeNull();
     expect(view.queryByText('目前無法讀取，請確認網路連線後重試。')).toBeNull();
     expect(view.queryByText('找不到這則公告，可能已移除或不屬於目前學校。')).toBeNull();
@@ -175,7 +175,7 @@ test('keeps cached announcements when a later Firestore read fails', async () =>
   expect(view.getByText('最後更新 10/8 08:00，暫時讀不到新公告')).toBeTruthy();
   expect(view.queryByText('學校網站暫時連不上')).toBeNull();
   expect(view.queryByText('請確認網路')).toBeNull();
-  expect(view.queryByText('這間學校的公告還沒上架。')).toBeNull();
+  expect(view.queryByText('本站還沒接上這間學校的公告。')).toBeNull();
 });
 
 test('does not show unpublished copy before the first feed returns', async () => {
@@ -183,7 +183,7 @@ test('does not show unpublished copy before the first feed returns', async () =>
   jest.mocked(loadCampusAnnouncementFeed).mockReturnValueOnce(pending.promise);
   const view = render(<AnnouncementsScreen navigation={navigation} />);
   expect(view.getByText('正在讀取')).toBeTruthy();
-  expect(view.queryByText('這間學校的公告還沒上架。')).toBeNull();
+  expect(view.queryByText('本站還沒接上這間學校的公告。')).toBeNull();
   expect(view.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
   expect(view.queryByText('目前沒有公告')).toBeNull();
   await act(async () =>
@@ -194,7 +194,7 @@ test('does not show unpublished copy before the first feed returns', async () =>
     }),
   );
   await view.findByText('校方的新公告');
-  expect(view.queryByText('這間學校的公告還沒上架。')).toBeNull();
+  expect(view.queryByText('本站還沒接上這間學校的公告。')).toBeNull();
 });
 
 test('shows unpublished copy only after an empty feed has finished loading', async () => {
@@ -202,7 +202,7 @@ test('shows unpublished copy only after an empty feed has finished loading', asy
   jest.mocked(loadCampusAnnouncementFeed).mockReturnValueOnce(pending.promise);
   const view = render(<AnnouncementsScreen navigation={navigation} />);
   expect(view.getByText('正在讀取')).toBeTruthy();
-  expect(view.queryByText('這間學校的公告還沒上架。')).toBeNull();
+  expect(view.queryByText('本站還沒接上這間學校的公告。')).toBeNull();
   expect(view.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
   expect(view.queryByText('目前沒有公告')).toBeNull();
   await act(async () =>
@@ -212,7 +212,7 @@ test('shows unpublished copy only after an empty feed has finished loading', asy
       allUnavailable: false,
     }),
   );
-  await view.findByText('這間學校的公告還沒上架。');
+  await view.findByText('本站還沒接上這間學校的公告。');
   expect(view.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
 });
 
@@ -225,7 +225,7 @@ test('switching schools shows loading instead of the previous list or an empty s
   view.rerender(<AnnouncementsScreen navigation={navigation} />);
   expect(view.queryByText('校方的新公告')).toBeNull();
   expect(view.getByText('正在讀取')).toBeTruthy();
-  expect(view.queryByText('這間學校的公告還沒上架。')).toBeNull();
+  expect(view.queryByText('本站還沒接上這間學校的公告。')).toBeNull();
   expect(view.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
   expect(view.queryByText('目前沒有公告')).toBeNull();
   await act(async () =>
@@ -248,7 +248,7 @@ test('switching schools hides the previous announcement list and does not keep i
   expect(view.queryByText('校方的新公告')).toBeNull();
   await view.findByText('暫時讀不到資料，請稍後再試');
   expect(view.getByText('再試一次')).toBeTruthy();
-  expect(view.queryByText('這間學校的公告還沒上架。')).toBeNull();
+  expect(view.queryByText('本站還沒接上這間學校的公告。')).toBeNull();
   expect(loadCampusAnnouncementFeed).toHaveBeenLastCalledWith('nthu');
 });
 
@@ -287,7 +287,7 @@ test('hides stale scrape rows when the school site is down and links the office 
   });
   const empty = render(<AnnouncementsScreen navigation={navigation} />);
   await empty.findByText('學校網站暫時連不上，可以先到學校網站看最新消息');
-  expect(empty.queryByText('這間學校的公告還沒上架。')).toBeNull();
+  expect(empty.queryByText('本站還沒接上這間學校的公告。')).toBeNull();
   expect(empty.queryByText('目前沒有公告')).toBeNull();
   const openUrl = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined as never);
   fireEvent.press(empty.getByText('教務處'));
@@ -315,9 +315,11 @@ test.each([
       allUnavailable: false,
     });
     const view = render(<AnnouncementsScreen navigation={navigation} />);
-    await view.findByText('這間學校的公告還沒上架。');
+    await view.findByText('本站還沒接上這間學校的公告。');
     expect(view.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
     const openUrl = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined as never);
+    fireEvent.press(view.getByText('前往學校官方公告'));
+    expect(openUrl).toHaveBeenCalledWith(url);
     fireEvent.press(view.getByText(office));
     expect(openUrl).toHaveBeenCalledWith(url);
     openUrl.mockRestore();
@@ -331,11 +333,13 @@ test('links catalog office sites when the school has never been fetched', async 
     allUnavailable: false,
   });
   const view = render(<AnnouncementsScreen navigation={navigation} />);
-  await view.findByText('這間學校的公告還沒上架。');
+  await view.findByText('本站還沒接上這間學校的公告。');
   expect(view.queryByText('目前沒有公告')).toBeNull();
   expect(view.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
   expect(view.queryByText('學校網站暫時連不上')).toBeNull();
   const openUrl = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined as never);
+  fireEvent.press(view.getByText('前往學校官方公告'));
+  expect(openUrl).toHaveBeenCalledWith('https://dorac.pu.edu.tw/p/403-1059-719-1.php');
   fireEvent.press(view.getByText('教務處'));
   expect(openUrl).toHaveBeenCalledWith('https://acd.pu.edu.tw/p/403-1042-885-1.php');
   openUrl.mockRestore();
@@ -357,7 +361,7 @@ test('retry after a failed feed can show the unpublished empty state', async () 
       allUnavailable: false,
     }),
   );
-  await view.findByText('這間學校的公告還沒上架。');
+  await view.findByText('本站還沒接上這間學校的公告。');
   expect(view.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
   expect(view.getByText('教務處')).toBeTruthy();
 });
@@ -378,11 +382,14 @@ test('shows an empty success only after a successful empty fetch', async () => {
     allUnavailable: false,
   });
   const view = render(<AnnouncementsScreen navigation={navigation} />);
-  await view.findByText('這間學校的公告還沒上架。');
+  await view.findByText('目前沒有學生日常公告。');
   expect(view.queryByText('目前沒有公告')).toBeNull();
+  expect(view.queryByText('本站還沒接上這間學校的公告。')).toBeNull();
   expect(view.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
   expect(view.queryByText('學校網站暫時連不上')).toBeNull();
   const openUrl = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined as never);
+  fireEvent.press(view.getByText('前往學校官方公告'));
+  expect(openUrl).toHaveBeenCalledWith('https://dorac.pu.edu.tw/p/403-1059-719-1.php');
   fireEvent.press(view.getByText('教務處'));
   expect(openUrl).toHaveBeenCalledWith('https://acd.pu.edu.tw/p/403-1042-885-1.php');
   openUrl.mockRestore();
@@ -397,7 +404,7 @@ test.each(['', 'staging', 'production'])(
     expect(view.getByText('目前沒有公告')).toBeTruthy();
     expect(view.queryByText('示範大學')).toBeNull();
     expect(view.queryByText('暫時抓不到')).toBeNull();
-    expect(view.queryByText('這間學校的公告還沒上架。')).toBeNull();
+    expect(view.queryByText('本站還沒接上這間學校的公告。')).toBeNull();
     expect(view.queryByText('學校網站暫時連不上')).toBeNull();
   },
 );
@@ -529,13 +536,58 @@ test('mounted announcement content and event content follow theme changes withou
   );
 });
 
+test('does not show 前往學校官方公告 when the school has no verified official list', async () => {
+  mockSchool = { id: 'cgu' };
+  jest.mocked(loadCampusAnnouncementFeed).mockResolvedValue({
+    announcements: [],
+    sources: [],
+    allUnavailable: false,
+  });
+  const view = render(<AnnouncementsScreen navigation={navigation} />);
+  await view.findByText('本站還沒接上這間學校的公告。');
+  expect(view.queryByText('前往學校官方公告')).toBeNull();
+  expect(view.queryByText('這間學校的公告還沒上架。')).toBeNull();
+});
+
+test('keeps staff and security posts in 全部公告 and hides undated or future rows', async () => {
+  jest.mocked(loadCampusAnnouncementFeed).mockResolvedValue({
+    announcements: [announcement],
+    officialAnnouncements: [
+      announcement,
+      {
+        ...announcement,
+        id: 'sec',
+        title: '【漏洞預警】Cisco License 存在重大資安漏洞',
+        source: '計算機與網路中心',
+        category: 'system' as const,
+      },
+      {
+        ...announcement,
+        id: 'staff',
+        title: '點名計分單(for教師)',
+        source: '教務處',
+      },
+    ],
+    sources: [],
+    allUnavailable: false,
+  });
+  const view = render(<AnnouncementsScreen navigation={navigation} />);
+  await view.findByText('校方的新公告');
+  expect(view.getByText('學生公告')).toBeTruthy();
+  expect(view.getByText('全部公告')).toBeTruthy();
+  expect(view.queryByText(/Cisco/)).toBeNull();
+  fireEvent.press(view.getByText('全部公告'));
+  expect(view.getByText(/Cisco/)).toBeTruthy();
+  expect(view.getByText('點名計分單(for教師)')).toBeTruthy();
+});
+
 test('mounted read errors follow theme changes without reloading or remounting', async () => {
   jest.mocked(loadCampusAnnouncementFeed).mockRejectedValue(new Error('offline'));
   const view = render(<AnnouncementsScreen navigation={navigation} />);
   const failedText = '暫時讀不到資料，請稍後再試';
   await view.findByText(failedText);
   expect(view.getByText('再試一次')).toBeTruthy();
-  expect(view.queryByText('這間學校的公告還沒上架。')).toBeNull();
+  expect(view.queryByText('本站還沒接上這間學校的公告。')).toBeNull();
   expect(view.queryByText('請確認網路')).toBeNull();
   act(() => applyTheme('dark'));
   expect(view.getByText(failedText)).toBeTruthy();

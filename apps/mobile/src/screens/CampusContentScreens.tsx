@@ -22,9 +22,15 @@ import {
   loadCampusEvent,
 } from '../services/publicCampusContent';
 import {
+  ANNOUNCEMENT_ALL_VIEW_LABEL,
+  ANNOUNCEMENT_EMPTY_CONNECTED_TEXT,
   ANNOUNCEMENT_EMPTY_SCHOOL_TEXT,
+  ANNOUNCEMENT_OFFICIAL_SITE_BUTTON,
   ANNOUNCEMENT_READ_FAILURE_TEXT,
   ANNOUNCEMENT_RETRY_TEXT,
+  ANNOUNCEMENT_STUDENT_WALL_LABEL,
+  announcementEmptyHeading,
+  announcementEmptyKind,
   announcementViewPhase,
   formatStaleAnnouncementNotice,
   isAnnouncementSchoolVisibleToPublic,
@@ -32,6 +38,7 @@ import {
   SOURCE_DOWN_EMPTY_TEXT,
   staleAnnouncementUpdatedAt,
   SUMMARY_NOTICE,
+  verifiedOfficialAnnouncementUrl,
 } from '@campus/shared/src/campusAnnouncements';
 import { getRawAppEnv } from '../services/release';
 import { safeNavigate } from '../utils/safeNavigate';
@@ -176,6 +183,7 @@ function useAnnouncementFeed() {
     reload,
     current,
     announcements: loading ? [] : (feed?.announcements ?? []),
+    officialAnnouncements: loading ? [] : (feed?.officialAnnouncements ?? []),
     sources: loading ? [] : (feed?.sources ?? []),
   };
 }
@@ -238,12 +246,18 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
   );
   const content = useAnnouncementFeed();
   const [category, setCategory] = useState<AnnouncementCategory | 'all'>('all');
-  const rows = content.announcements;
+  const [listView, setListView] = useState<'student' | 'all'>('student');
+  const student = content.announcements;
+  const official = content.officialAnnouncements;
+  const rows = listView === 'all' ? official : student;
   const sources = content.sources;
+  const showFeed = official.length > 0 || student.length > 0;
   const visible = rows.filter((row) => category === 'all' || row.category === category);
   const down = sources.filter((item) => item.status === 'unavailable');
   const downLinks = down.filter((item) => item.listUrl);
-  const phase = announcementViewPhase(content.loading, rows, sources, content.failed);
+  const officialUrl = verifiedOfficialAnnouncementUrl(school.id);
+  const catalogLinks = officialUrl ? listAnnouncementCatalogLinks(school.id) : [];
+  const phase = announcementViewPhase(content.loading, student, sources, content.failed);
   const showStaleNotice = rows.length > 0 && (content.stale || down.length > 0);
   const staleSources =
     content.stale && !down.length
@@ -272,25 +286,40 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
         <AICard title={ANNOUNCEMENT_READ_FAILURE_TEXT}>
           <AIButton label={ANNOUNCEMENT_RETRY_TEXT} onPress={() => void content.reload()} />
         </AICard>
-      ) : phase === 'source_down' ? (
+      ) : !showFeed && phase === 'source_down' ? (
         <AICard title={SOURCE_DOWN_EMPTY_TEXT}>
           <View style={{ gap: 12 }}>
             <Text>暫時抓不到</Text>
-            {(downLinks.length ? downLinks : listAnnouncementCatalogLinks(school.id)).map(
-              (item) => (
-                <AIButton
-                  key={item.sourceId}
-                  label={item.office}
-                  onPress={() => void Linking.openURL(item.listUrl!)}
-                />
-              ),
-            )}
+            {officialUrl ? (
+              <AIButton
+                label={ANNOUNCEMENT_OFFICIAL_SITE_BUTTON}
+                onPress={() => void Linking.openURL(officialUrl)}
+              />
+            ) : null}
+            {(downLinks.length ? downLinks : catalogLinks).map((item) => (
+              <AIButton
+                key={item.sourceId}
+                label={item.office}
+                onPress={() => void Linking.openURL(item.listUrl!)}
+              />
+            ))}
           </View>
         </AICard>
-      ) : phase !== 'has_items' ? (
-        <AICard title={ANNOUNCEMENT_EMPTY_SCHOOL_TEXT}>
+      ) : !showFeed ? (
+        <AICard
+          title={
+            announcementEmptyHeading(announcementEmptyKind(student, sources)) ??
+            ANNOUNCEMENT_EMPTY_SCHOOL_TEXT
+          }
+        >
           <View style={{ gap: 12 }}>
-            {listAnnouncementCatalogLinks(school.id).map((item) => (
+            {officialUrl ? (
+              <AIButton
+                label={ANNOUNCEMENT_OFFICIAL_SITE_BUTTON}
+                onPress={() => void Linking.openURL(officialUrl)}
+              />
+            ) : null}
+            {catalogLinks.map((item) => (
               <AIButton
                 key={item.sourceId}
                 label={item.office}
@@ -316,6 +345,16 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
             style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, margin: aiTokens.space.md }}
           >
             <AIChip
+              label={ANNOUNCEMENT_STUDENT_WALL_LABEL}
+              active={listView === 'student'}
+              onPress={() => setListView('student')}
+            />
+            <AIChip
+              label={ANNOUNCEMENT_ALL_VIEW_LABEL}
+              active={listView === 'all'}
+              onPress={() => setListView('all')}
+            />
+            <AIChip
               label={`全部 ${rows.length}`}
               active={category === 'all'}
               onPress={() => setCategory('all')}
@@ -331,7 +370,10 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
                 />
               ))}
           </View>
-          <AISection title="學校公告" subtitle="各處室公開公告">
+          <AISection
+            title={listView === 'all' ? ANNOUNCEMENT_ALL_VIEW_LABEL : '學校公告'}
+            subtitle={listView === 'all' ? '含教師向與資安轉知等正式公告' : '各處室公開公告'}
+          >
             {visible.length ? (
               visible.map((row) => (
                 <AIRow
@@ -346,6 +388,10 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
                   }}
                 />
               ))
+            ) : listView === 'student' && student.length === 0 ? (
+              <AICard title={ANNOUNCEMENT_EMPTY_CONNECTED_TEXT}>
+                <Text>教師向、資安轉知等正式公告可到「{ANNOUNCEMENT_ALL_VIEW_LABEL}」查看。</Text>
+              </AICard>
             ) : (
               <AICard title="這個分類目前沒有公告">{null}</AICard>
             )}
