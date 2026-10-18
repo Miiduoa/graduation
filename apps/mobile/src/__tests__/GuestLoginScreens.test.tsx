@@ -33,6 +33,7 @@ jest.mock('@react-navigation/native', () => ({
   },
 }));
 jest.mock('../utils/safeNavigate', () => ({ safeNavigate: jest.fn() }));
+jest.mock('../components/TodayTimetablePanel', () => ({ TodayTimetablePanel: () => null }));
 jest.mock('../state/auth', () => ({ useAuth: () => ({ refreshProfile: mockRefreshProfile }) }));
 jest.mock('../state/nuniSession', () => ({ useNuniSession: () => mockPlatformAuth }));
 jest.mock('../state/school', () => ({

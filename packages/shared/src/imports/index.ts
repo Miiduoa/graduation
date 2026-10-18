@@ -6,3 +6,4 @@ export * from './csv';
 export * from './copy';
 export * from './backup';
 export * from './documents';
+export * from './today';
