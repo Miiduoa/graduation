@@ -70,7 +70,8 @@ it('formats the stale banner in Taiwan time and keeps the empty-state copy', () 
   );
   expect(formatStaleAnnouncementNotice(null)).toBe('學校網站暫時連不上');
   expect(SOURCE_DOWN_WITH_CACHE_TEXT).toBe('學校網站暫時連不上');
-  expect(SOURCE_DOWN_EMPTY_TEXT).toBe('學校網站暫時連不上，可以先到學校網站看最新消息');
+  expect(SOURCE_DOWN_EMPTY_TEXT).toBe(ANNOUNCEMENT_READ_FAILURE_TEXT);
+  expect(SOURCE_DOWN_EMPTY_TEXT).not.toContain('學校網站暫時連不上');
   expect(ANNOUNCEMENT_EMPTY_SCHOOL_TEXT).toBe('本站還沒接上這間學校的公告。');
   expect(SOURCE_NOT_CONNECTED_TEXT).toBe('本站還沒接上這間學校的公告。');
   expect(ANNOUNCEMENT_EMPTY_CONNECTED_TEXT).toBe('目前沒有學生日常公告。');
@@ -121,7 +122,8 @@ it('classifies empty feeds as never connected, source down, or confirmed empty',
   expect(announcementEmptyKind([{ title: '舊稿' }], [{ status: 'unavailable' }])).toBe('has_items');
   expect(announcementEmptyHeading('not_connected')).toBe(SOURCE_NOT_CONNECTED_TEXT);
   expect(announcementEmptyHeading('empty')).toBe(ANNOUNCEMENT_EMPTY_CONNECTED_TEXT);
-  expect(announcementEmptyHeading('source_down')).toBe(SOURCE_DOWN_EMPTY_TEXT);
+  expect(announcementEmptyHeading('source_down')).toBe(ANNOUNCEMENT_READ_FAILURE_TEXT);
+  expect(announcementEmptyHeading('source_down')).not.toBe(SOURCE_NOT_CONNECTED_TEXT);
   expect(announcementEmptyHeading('has_items')).toBeNull();
   expect(announcementViewPhase(true, [], [])).toBe('loading');
   expect(announcementViewPhase(true, [{ title: '舊稿' }], [])).toBe('loading');

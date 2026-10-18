@@ -268,8 +268,10 @@ test('hides stale scrape rows when the school site is down and links the office 
     allUnavailable: true,
   });
   const list = render(<AnnouncementsScreen navigation={navigation} />);
-  await list.findByText('學校網站暫時連不上，可以先到學校網站看最新消息');
-  expect(list.getByText('暫時抓不到')).toBeTruthy();
+  await list.findByText('暫時讀不到資料，請稍後再試');
+  expect(list.getByText('再試一次')).toBeTruthy();
+  expect(list.queryByText('學校網站暫時連不上')).toBeNull();
+  expect(list.queryByText('本站還沒接上這間學校的公告。')).toBeNull();
   expect(list.queryByText('校方的新公告')).toBeNull();
   expect(list.queryByText('暫時讀不到新公告')).toBeNull();
   jest.mocked(loadCampusAnnouncementFeed).mockResolvedValue({
@@ -279,19 +281,23 @@ test('hides stale scrape rows when the school site is down and links the office 
         sourceId: 'pu-acd',
         office: '教務處',
         status: 'unavailable',
-        message: '學校網站暫時連不上，可以先到學校網站看最新消息',
+        message: '暫時抓不到',
         listUrl: 'https://acd.pu.edu.tw/p/403-1042-885-1.php',
       },
     ],
     allUnavailable: true,
   });
   const empty = render(<AnnouncementsScreen navigation={navigation} />);
-  await empty.findByText('學校網站暫時連不上，可以先到學校網站看最新消息');
+  await empty.findByText('暫時讀不到資料，請稍後再試');
+  expect(empty.getByText('再試一次')).toBeTruthy();
   expect(empty.queryByText('本站還沒接上這間學校的公告。')).toBeNull();
   expect(empty.queryByText('目前沒有公告')).toBeNull();
+  expect(empty.queryByText('學校網站暫時連不上')).toBeNull();
   const openUrl = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined as never);
   fireEvent.press(empty.getByText('教務處'));
   expect(openUrl).toHaveBeenCalledWith('https://acd.pu.edu.tw/p/403-1042-885-1.php');
+  fireEvent.press(empty.getByText('再試一次'));
+  expect(loadCampusAnnouncementFeed).toHaveBeenCalled();
   openUrl.mockRestore();
   jest.mocked(loadCampusAnnouncement).mockResolvedValue({
     ...announcement,
@@ -301,6 +307,42 @@ test('hides stale scrape rows when the school site is down and links the office 
   const detail = render(<AnnouncementScreen route={{ params: { id: 'a1' } }} />);
   await detail.findByText('看原文');
 });
+
+test.each([
+  ['cycu', '全校最新消息', 'https://www.cycu.edu.tw/'],
+  ['tmu', '全校最新消息', 'https://www.tmu.edu.tw/news'],
+] as const)(
+  'shows a retryable unread message when %s sources are unavailable and the list is empty',
+  async (school, office, url) => {
+    mockSchool = { id: school };
+    jest.mocked(loadCampusAnnouncementFeed).mockResolvedValue({
+      announcements: [],
+      officialAnnouncements: [],
+      sources: [
+        {
+          sourceId: `${school}-campus`,
+          office,
+          status: 'unavailable',
+          message: '暫時抓不到',
+          listUrl: url,
+        },
+      ],
+      allUnavailable: true,
+    });
+    const view = render(<AnnouncementsScreen navigation={navigation} />);
+    await view.findByText('暫時讀不到資料，請稍後再試');
+    expect(view.getByText('再試一次')).toBeTruthy();
+    expect(view.queryByText('本站還沒接上這間學校的公告。')).toBeNull();
+    expect(view.queryByText('學校網站暫時連不上')).toBeNull();
+    expect(view.queryByText('前往學校官方公告')).toBeNull();
+    const openUrl = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined as never);
+    fireEvent.press(view.getByText(office));
+    expect(openUrl).toHaveBeenCalledWith(url);
+    fireEvent.press(view.getByText('再試一次'));
+    expect(loadCampusAnnouncementFeed).toHaveBeenCalled();
+    openUrl.mockRestore();
+  },
+);
 
 test.each([
   ['ncku', '全校最新消息', 'https://web.ncku.edu.tw/p/422-1000-1026.php?Lang=zh-tw'],
@@ -317,6 +359,7 @@ test.each([
     const view = render(<AnnouncementsScreen navigation={navigation} />);
     await view.findByText('本站還沒接上這間學校的公告。');
     expect(view.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
+    expect(view.queryByText('再試一次')).toBeNull();
     const openUrl = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined as never);
     fireEvent.press(view.getByText('前往學校官方公告'));
     expect(openUrl).toHaveBeenCalledWith(url);
@@ -546,6 +589,8 @@ test('does not show 前往學校官方公告 when the school has no verified off
   const view = render(<AnnouncementsScreen navigation={navigation} />);
   await view.findByText('本站還沒接上這間學校的公告。');
   expect(view.queryByText('前往學校官方公告')).toBeNull();
+  expect(view.queryByText('再試一次')).toBeNull();
+  expect(view.queryByText('學校網站暫時連不上')).toBeNull();
   expect(view.queryByText('這間學校的公告還沒上架。')).toBeNull();
 });
 

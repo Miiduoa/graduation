@@ -13,7 +13,7 @@ const PARSER_PRESETS = {
 };
 
 const SOURCE_UNAVAILABLE = '暫時抓不到';
-const SOURCE_DOWN_EMPTY = '學校網站暫時連不上，可以先到學校網站看最新消息';
+const SOURCE_DOWN_EMPTY = '暫時讀不到資料，請稍後再試';
 const PLACEHOLDER_SCHOOL_IDS = ['tw-demo-uni', 'tw-taichung-uni-a', 'tw-taichung-uni-b'];
 
 function source(schoolId, sourceId, office, scope, listUrl, parsers, extra = {}) {
