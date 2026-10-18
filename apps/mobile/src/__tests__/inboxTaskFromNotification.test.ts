@@ -38,6 +38,16 @@ describe('inboxTaskFromAssignmentNotification', () => {
     expect(t?.kind).toBe('quiz');
   });
 
+  test('成績通知也帶到那份作業', () => {
+    const t = inboxTaskFromAssignmentNotification({
+      ...base,
+      type: 'grade',
+      title: '成績已發布',
+    });
+    expect(t?.kind).toBe('assignment');
+    expect(t?.assignmentId).toBe('a1');
+  });
+
   test('缺 assignmentId → null', () => {
     expect(
       inboxTaskFromAssignmentNotification({

@@ -610,6 +610,14 @@ jest.mock('../screens/NotificationSettingsScreen', () => {
     NotificationSettingsScreen: () => React.createElement(Text, null, 'NotificationSettingsScreen'),
   };
 });
+jest.mock('../screens/NotificationsAiFirstScreen', () => {
+  const React = require('react');
+  const { Text } = require('react-native');
+  return {
+    __esModule: true,
+    default: () => React.createElement(Text, null, 'NotificationsAiFirstScreen'),
+  };
+});
 jest.mock('../screens/OnBusModeScreen', () => {
   const React = require('react');
   const { Text } = require('react-native');
@@ -1104,11 +1112,17 @@ test.each([
 });
 test.each([
   ['MerchantHub', '這間店還沒接到訂單系統'],
-  ['Notifications', '通知彙整尚未開放'],
 ])('Me %s no longer shows fictitious account data', async (route, explanation) => {
   const { view, navigation } = await mount(MeStack);
   act(() => navigation.navigate(route));
   expect(view.getByText(new RegExp(explanation))).toBeTruthy();
+});
+test('Notifications mounts the live inbox instead of hardcoded samples', async () => {
+  const { view, navigation } = await mount(MeStack);
+  act(() => navigation.navigate('Notifications'));
+  expect(view.getByText('NotificationsAiFirstScreen')).toBeTruthy();
+  expect(view.queryByText(/通知彙整尚未開放/)).toBeNull();
+  expect(view.queryByText('陳老師（資料庫）')).toBeNull();
 });
 test('message landing reaches live private conversations and its old alias has no synthetic people', async () => {
   const { view, navigation } = await mount(MessagesStack);
