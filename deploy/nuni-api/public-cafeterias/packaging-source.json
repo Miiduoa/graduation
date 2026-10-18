@@ -1,6 +1,6 @@
 {
-  "apps/api/src/public-cafeterias/cafeteriaCatalog.ts": "d36b57403a5a71f72d382462fe60d4ea690eb7bcb6abdbc3a5607c6f3ffc3d3f",
-  "apps/api/src/public-cafeterias/merchantMode.ts": "2d319085ab800369dabaebd10445ac49ddaaff109a416e425844b9ced3869ff8",
+  "apps/api/src/public-cafeterias/cafeteriaCatalog.ts": "dc4227149729515884d417c443a4df71615ac93d95b7cc0d3deee2f90f26dcba",
+  "apps/api/src/public-cafeterias/merchantMode.ts": "b43477b444d7b1dafaaca9d844b9b68b89e454548510dcf2f9efc853ceb8f06f",
   "apps/api/src/public-cafeterias/service.ts": "4c4e735113da1f3f5c474fb228dc5814f8d85ea95ad21f7770af46af58e226e4",
   "apps/api/src/public-cafeterias/routes.ts": "4f40ac73aaf58fdf5fd3a932f0d74669a955153b8b0778a6edcc6eba32412b5e"
 }
