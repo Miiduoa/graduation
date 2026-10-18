@@ -66,22 +66,26 @@ async function querySchoolAnnouncements(
   schoolId: string,
   extra: Array<ReturnType<typeof where> | ReturnType<typeof orderBy>>,
   maxItems: number,
+  allowLegacyFallback = true,
 ) {
   const db = getDb();
   const constraints = [...extra, limit(maxItems)];
-  let snapshot = await getDocsFromServer(
+  const snapshot = await getDocsFromServer(
     query(collection(db, 'schools', schoolId, 'announcements'), ...constraints),
   );
-  if (snapshot.empty) {
-    snapshot = await getDocsFromServer(
-      query(
-        collection(db, 'announcements'),
-        where('schoolId', '==', schoolId),
-        ...constraints,
-      ),
-    );
+  if (!snapshot.empty || !allowLegacyFallback) {
+    return snapshot.docs.flatMap((document) => {
+      try {
+        return [normalizeAnnouncement(document, schoolId)];
+      } catch {
+        return [];
+      }
+    });
   }
-  return snapshot.docs.flatMap((document) => {
+  const legacy = await getDocsFromServer(
+    query(collection(db, 'announcements'), where('schoolId', '==', schoolId), ...constraints),
+  );
+  return legacy.docs.flatMap((document) => {
     try {
       return [normalizeAnnouncement(document, schoolId)];
     } catch {
@@ -122,15 +126,20 @@ export async function loadAnnouncementFeed(schoolId: string): Promise<Announceme
   const missing = announcementSourceIdsForSchool(schoolId, sources).filter(
     (sourceId) => !present.has(sourceId),
   );
-  const extras = await Promise.all(
-    missing.map((sourceId) =>
-      querySchoolAnnouncements(
-        schoolId,
-        [where('sourceId', '==', sourceId)],
-        ANNOUNCEMENT_SOURCE_LIMIT,
-      ),
-    ),
-  );
+  // 最近一頁已是空的就不必再依處室補查；補查若再走舊路會用到沒有索引的 schoolId+sourceId。
+  const extras =
+    recent.length === 0 || missing.length === 0
+      ? []
+      : await Promise.all(
+          missing.map((sourceId) =>
+            querySchoolAnnouncements(
+              schoolId,
+              [where('sourceId', '==', sourceId)],
+              ANNOUNCEMENT_SOURCE_LIMIT,
+              false,
+            ),
+          ),
+        );
   return {
     announcements: mergeAnnouncementsById([recent, ...extras]),
     sources,
