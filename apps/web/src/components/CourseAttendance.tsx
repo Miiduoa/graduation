@@ -13,11 +13,14 @@ import {
   attendanceCsv,
   attendanceError,
   endCourseAttendance,
+  hasOwnActiveAttendance,
   joinCourseAttendance,
   loadAttendanceCode,
   loadAttendanceRecords,
   loadCourseAttendance,
   startCourseAttendance,
+  studentAttendanceHeading,
+  studentCheckInSession,
   watchCourseMembership,
   type AttendanceRecord,
   type AttendanceSession,
@@ -35,16 +38,20 @@ function date(value: string | null) {
 function Session({
   session,
   courseId,
+  courseName,
   uid,
   canReadRoster,
   canStart,
+  checkInEnabled,
   reload,
 }: {
   session: AttendanceSession;
   courseId: string;
+  courseName: string;
   uid: string;
   canReadRoster: boolean;
   canStart: boolean;
+  checkInEnabled: boolean;
   reload: () => Promise<void>;
 }) {
   const [token, setToken] = useState('');
@@ -111,7 +118,7 @@ function Session({
     <article className={styles.session}>
       <div className={styles.sessionHeading}>
         <div>
-          <p className={styles.label}>{session.active ? '點名進行中' : '點名已結束'}</p>
+          <p className={styles.label}>{studentAttendanceHeading(courseName, session.active)}</p>
           <h3>{date(session.startedAt)}</h3>
         </div>
         {canReadRoster && (
@@ -128,7 +135,7 @@ function Session({
       )}
       {!canReadRoster &&
         !confirmed &&
-        (session.active ? (
+        (session.active && checkInEnabled ? (
           <form
             className={styles.form}
             onSubmit={(event) => {
@@ -389,28 +396,39 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
                 disabled={
                   starting ||
                   loading ||
-                  data.sessions.some((session) => session.active && session.teacherId === uid)
+                  hasOwnActiveAttendance(data.sessions, uid)
                 }
                 onClick={() => void start()}
               >
                 {starting ? '開啟中…' : '開啟點名'}
               </Button>
-              {data.sessions.some((session) => session.active && session.teacherId === uid) && (
+              {hasOwnActiveAttendance(data.sessions, uid) ? (
                 <p className={styles.detail}>請先結束你開啟的點名，再開啟下一次。</p>
-              )}
+              ) : data.sessions.some((session) => session.active) ? (
+                <p className={styles.detail}>這堂課已有進行中的點名，開啟新場次會先結束舊場。</p>
+              ) : null}
             </section>
           )}
           <h2 className={styles.history}>點名紀錄</h2>
           <p className={styles.detail}>顯示最近 50 次已保存的點名。</p>
           {data.sessions.length ? (
-            data.sessions.map((session) => (
+            data.sessions
+              .filter(
+                (session) =>
+                  data.canReadRoster ||
+                  !session.active ||
+                  session.id === studentCheckInSession(data.sessions)?.id,
+              )
+              .map((session) => (
               <Session
                 key={`${session.id}:${data.canStart}:${data.canReadRoster}`}
                 session={session}
                 courseId={courseId}
+                courseName={data.courseName}
                 uid={uid}
                 canStart={data.canStart}
                 canReadRoster={data.canReadRoster}
+                checkInEnabled={studentCheckInSession(data.sessions)?.id === session.id}
                 reload={reload}
               />
             ))

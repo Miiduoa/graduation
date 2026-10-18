@@ -65,6 +65,16 @@ it('sends a platform credential only to the fixed HTTPS API and refuses paths th
   }
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
+it('retries a waking API failure once before giving up', async () => {
+  const fetchMock = jest
+    .fn()
+    .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    .mockResolvedValueOnce({ ok: true, text: async () => '{"ready":true}' });
+  global.fetch = fetchMock as unknown as typeof fetch;
+  await expect(nuniPlatformRequest('session')).resolves.toEqual({ ready: true });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
 it('maps bounded API errors without reflecting arbitrary server messages', async () => {
   global.fetch = jest.fn(async () => ({
     ok: false,
@@ -182,4 +192,39 @@ it('permits large import snapshots only on the two exact sync endpoints', async 
   await expect(nuniPlatformRequest('personal-imports/read', handle, {})).rejects.toMatchObject({
     code: 'INVALID_RESPONSE',
   });
+});
+
+it('keeps wake retry on personal-import sync while still aborting via external signal', async () => {
+  const fetchMock = jest
+    .fn()
+    .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    .mockResolvedValueOnce({
+      ok: true,
+      text: async () => JSON.stringify({ records: [] }),
+    });
+  global.fetch = fetchMock as unknown as typeof fetch;
+  await expect(nuniPlatformRequest('personal-imports/read', handle, {})).resolves.toEqual({
+    records: [],
+  });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+
+  let sentSignal: AbortSignal | undefined;
+  global.fetch = jest.fn(
+    (_url, options) =>
+      new Promise((_resolve, reject) => {
+        sentSignal = options?.signal as AbortSignal;
+        sentSignal.addEventListener('abort', () => reject(new Error('aborted')));
+      }),
+  ) as unknown as typeof fetch;
+  const controller = new AbortController();
+  const work = nuniPlatformRequest(
+    'personal-imports/write',
+    handle,
+    { records: [] },
+    controller.signal,
+  );
+  const rejection = expect(work).rejects.toMatchObject({ code: 'REQUEST_CANCELLED' });
+  controller.abort();
+  await rejection;
+  expect(sentSignal?.aborted).toBe(true);
 });

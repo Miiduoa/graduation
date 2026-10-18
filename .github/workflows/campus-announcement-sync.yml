@@ -1,10 +1,12 @@
-# 晉瑋已核准：每小時第 17 分（UTC）同步 pu 公告；只寫 schools/{schoolId}/announcements 與 announcement-sources。
+# 晉瑋已核准：每天兩次同步 pu 公告（台北 07:00、11:30）；只寫 schools/{schoolId}/announcements 與 announcement-sources。
+# 成大／北大預設只探測、不寫入。要寫入需先 dry-run 通過，再把 schoolId 加進 CAMPUS_ANNOUNCEMENT_SYNC_SCHOOLS。
 # 要停：拿掉 schedule，或刪掉 production 環境的 CAMPUS_ANNOUNCEMENT_SYNC_ENABLED。
 name: Campus announcement sync
 
 on:
   schedule:
-    - cron: '17 * * * *'
+    - cron: '0 23 * * *' # 07:00 Taipei，早上第一堂前
+    - cron: '30 3 * * *' # 11:30 Taipei，中午尖峰前
   workflow_dispatch:
     inputs:
       school:
@@ -16,6 +18,11 @@ on:
         description: 'Write to Firestore. Keep false unless production write is approved.'
         required: false
         default: false
+        type: boolean
+      probe:
+        description: 'Also dry-run NCKU and NTPU sources without writing.'
+        required: false
+        default: true
         type: boolean
 
 permissions:
@@ -69,3 +76,27 @@ jobs:
           umask 077
           printf '%s' "$ANNOUNCEMENT_SYNC_SA_JSON" > "$GOOGLE_APPLICATION_CREDENTIALS"
           pnpm --filter functions sync:announcements --school "$SCHOOL_ID" --write
+
+  probe:
+    name: Probe NCKU and NTPU sources
+    if: ${{ github.event_name == 'schedule' || inputs.probe != false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter functions...
+
+      - name: Dry-run NCKU and NTPU without writing
+        run: pnpm --filter functions sync:announcements:probe -- --schools ncku,ntpu

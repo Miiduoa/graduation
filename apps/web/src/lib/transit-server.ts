@@ -3,6 +3,7 @@ import {
   type TransitArrival, type TransitCity, type TransitFailure, type TransitQuery,
   type TransitResult, type TransitStop,
 } from './transit';
+import { searchTaichungCatalog } from './transit-catalog';
 
 const BASE = 'https://tdx.transportdata.tw';
 const text = (value: unknown) => typeof value === 'string' ? value.trim().slice(0, 120) : '';
@@ -144,6 +145,16 @@ export function createTransitService(options: {
       const input = validateTransitQuery(value);
       const campus = input.action === 'campus' ? CAMPUS_TRANSIT[input.schoolId] : null;
       const city = campus ? campus.city : (input as Exclude<TransitQuery, { action: 'campus' }>).city;
+      // Catalog IDs identify static source records, never TDX StopUIDs. In
+      // particular, an old App must not receive made-up or mismatched arrivals.
+      if (input.action === 'arrivals' && input.stopId.startsWith('TCOD_'))
+        return { status: 'unavailable', reason: 'not-configured' };
+      const credentials = options.credentials();
+      if (city === 'Taichung' && input.action !== 'arrivals' &&
+          credentials.clientId === undefined && credentials.clientSecret === undefined) {
+        return { status: 'ready', kind: 'stops', ...searchTaichungCatalog(input),
+          fetchedAt: new Date(now()).toISOString() };
+      }
       const params = new URLSearchParams({ '$format': 'JSON', '$top': '200' });
       if (input.action === 'arrivals') {
         params.set('$filter', `StopUID eq ${literal(input.stopId)}`);

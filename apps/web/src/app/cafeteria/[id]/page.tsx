@@ -11,14 +11,17 @@ import type { MenuItem } from '@/lib/firebase';
 import {
   CAFETERIA_BACK_TO_LIST_TEXT,
   CAFETERIA_NOT_FOUND_TEXT,
+  STOREFRONT_EMPTY_MENU_TEXT,
   STOREFRONT_PAGE_SUBTITLE,
   cafeteriaListHref,
   cafeteriaReviewNotice,
+  cafeteriaShowsMenuAvailability,
 } from '@campus/shared/src/cafeteriaCatalog';
 import {
   LOGIN_REQUIRED_COMMENTS_TEXT,
   isPermissionDeniedError,
 } from '@campus/shared/src/signedInSocialReads';
+import { SERVICE_PAUSED_TEXT } from '@campus/shared/src/loadFailureCopy';
 import { fetchCafeteriaDetail, type CatalogCafeteria } from '@/lib/cafeteriaCatalog';
 import {
   addStorefrontComment,
@@ -32,6 +35,7 @@ import {
 } from '@/lib/storefront';
 import {
   MENU_STALE_TEXT,
+  SHOWCASE_EXTERNAL_ORDER_HINT,
   SHOWCASE_ORDER_BUTTON_TEXT,
   SHOWCASE_ORDER_CAPTION,
   isMenuStale,
@@ -82,7 +86,7 @@ function StorefrontContent({ id, context }: {
         if (!active) return;
         setShop(null);
         setMenus([]);
-        setError('暫時讀不到這間店。');
+        setError(SERVICE_PAUSED_TEXT);
       },
     );
     void loadStorefrontPosts(context.schoolId, id, signedIn ? user?.uid : undefined).then(
@@ -160,6 +164,9 @@ function StorefrontContent({ id, context }: {
                 </a>
               </p>
             )}
+            {action.kind === 'showcase' && (
+              <p className={social.muted}>{SHOWCASE_EXTERNAL_ORDER_HINT}</p>
+            )}
             <div className={social.actions}>
               {action.kind === 'showcase' && (
                 <Link
@@ -191,14 +198,16 @@ function StorefrontContent({ id, context }: {
               <p className={social.muted}>{MENU_STALE_TEXT}</p>
             )}
             {menus.length === 0 ? (
-              <p className={social.muted}>還沒有菜單。沒串接的店也可以只放訂餐連結。</p>
+              <p className={social.muted}>{STOREFRONT_EMPTY_MENU_TEXT}</p>
             ) : (
               <ul>
                 {menus.map((item) => (
                   <li key={item.id}>
                     {item.name}
                     {typeof item.price === 'number' ? ` · NT$${item.price}` : ''}
-                    {item.soldOut ? '（售完）' : ''}
+                    {cafeteriaShowsMenuAvailability(shop.reviewStatus) && item.soldOut
+                      ? '（售完）'
+                      : ''}
                   </li>
                 ))}
               </ul>

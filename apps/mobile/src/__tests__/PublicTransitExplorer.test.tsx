@@ -1,10 +1,12 @@
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import * as Location from 'expo-location';
-import { View } from 'react-native';
+import { AppState, Linking, View } from 'react-native';
 import { PublicTransitExplorer } from '../components/PublicTransitExplorer';
 import {
   queryPublicTransit,
+  TAICHUNG_BUS_CATALOG_SOURCE,
+  TAICHUNG_BUS_OFFICIAL,
   type PublicTransitResult,
 } from '../features/publicTransit';
 
@@ -112,6 +114,56 @@ test('only a selected verified stop requests live TDX arrivals', async () => {
     expect.any(AbortSignal),
   );
   expect(view.getByText(/83 往 火車站/)).toBeTruthy();
+});
+
+test('static catalog stops show provenance, routes and actions without ever polling arrivals', async () => {
+  jest.useFakeTimers();
+  const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+  const originalState = AppState.currentState;
+  AppState.currentState = 'active';
+  try {
+    jest.mocked(queryPublicTransit).mockResolvedValue({
+      status: 'ready', kind: 'stops', limited: false, fetchedAt: fetchedAt(), stops: [{
+        id: 'TCOD_static001', name: '靜宜大學', city: 'Taichung', lat: 24.23, lon: 120.57, distance: 120,
+        source: 'taichung-open-data', catalogDate: '2026-01-01T00:00:00.000Z',
+        routes: [{ name: '300', direction: '去', destination: '臺中車站' }],
+      }, {
+        id: 'TCOD_static002', name: '靜宜大學', city: 'Taichung', lat: 24.231, lon: 120.571, distance: 160,
+        source: 'taichung-open-data', catalogDate: '2026-01-01T00:00:00.000Z',
+        routes: [{ name: '300', direction: '返', destination: '靜宜大學' }],
+      }],
+    });
+    const view = render(<View><PublicTransitExplorer key="pu" schoolId="pu" /></View>);
+    fireEvent.changeText(view.getByLabelText('搜尋公車站名'), '靜宜大學');
+    await act(async () => fireEvent.press(view.getByText('搜尋官方站牌')));
+    expect(view.getByText('靜宜大學 · 300 路線 · 去程 · 約 120 公尺 · 無即時到站')).toBeTruthy();
+    expect(view.getByText('靜宜大學 · 300 路線 · 返程 · 約 160 公尺 · 無即時到站')).toBeTruthy();
+    expect(view.queryByText(/TCOD_/)).toBeNull();
+    await act(async () => fireEvent.press(view.getByText('靜宜大學 · 300 路線 · 去程 · 約 120 公尺 · 無即時到站')));
+    expect(view.getByText('即時到站尚未接通')).toBeTruthy();
+    expect(view.getByText(/臺中市政府交通局 · 站牌資料快照：2026/)).toBeTruthy();
+    expect(view.getByText('300 · 去程 · 往 臺中車站')).toBeTruthy();
+    expect(view.queryByText('更新此站到站時間')).toBeNull();
+    expect(view.queryByText(/TDX 公開資料/)).toBeNull();
+    await act(async () => jest.advanceTimersByTime(60_000));
+    expect(queryPublicTransit).toHaveBeenCalledTimes(1);
+    expect(AppState.addEventListener).not.toHaveBeenCalled();
+    fireEvent.press(view.getByText('到臺中公車網站查即時動態'));
+    expect(openURL).toHaveBeenLastCalledWith(TAICHUNG_BUS_OFFICIAL);
+    fireEvent.press(view.getByText('查看站牌資料來源'));
+    expect(openURL).toHaveBeenLastCalledWith(TAICHUNG_BUS_CATALOG_SOURCE);
+    fireEvent.press(view.getByText('步行前往此站牌'));
+    expect(openURL).toHaveBeenLastCalledWith('https://www.google.com/maps/dir/?api=1&destination=24.23%2C120.57&travelmode=walking');
+    await act(async () => view.rerender(<View><PublicTransitExplorer key="nthu" schoolId="nthu" /></View>));
+    expect(view.getByText('查詢縣市：新竹市')).toBeTruthy();
+    expect(view.queryByText('即時到站尚未接通')).toBeNull();
+    expect(view.queryByText(/靜宜大學/)).toBeNull();
+    view.unmount();
+  } finally {
+    AppState.currentState = originalState;
+    openURL.mockRestore();
+    jest.useRealTimers();
+  }
 });
 
 test('switching school cancels previous searches and clears the old station list', async () => {

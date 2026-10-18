@@ -96,26 +96,10 @@ it('shows a retry when the backend catalog fails and does not keep old rows afte
   await act(async () => {
     render(<CafeteriaPage />);
   });
-  expect(screen.getByRole('alert').textContent).toContain('暫時讀不到資料，請稍後再試');
+  expect(screen.getByRole('alert').textContent).toContain('服務暫時停止，我們正在處理，請稍後再來。');
   expect(screen.getByRole('alert').textContent).not.toContain('請確認網路後再試');
+  expect(screen.queryByRole('button', { name: '重新整理' })).toBeNull();
   expect(screen.queryByText(/示範資料/)).toBeNull();
-  state.fail = false;
-  state.catalog = {
-    cafeterias: [{ id: 'stall', name: '校內咖啡店', reviewStatus: 'verified' }],
-    menus: [
-      {
-        id: 'meal',
-        cafeteriaId: 'stall',
-        cafeteria: '校內咖啡店',
-        name: '蔬菜吐司',
-        price: 60,
-        availableOn: '2026-10-08',
-        available: true,
-      },
-    ],
-  };
-  fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
-  expect(await screen.findByText('蔬菜吐司')).toBeTruthy();
 });
 
 it('keeps the offline copy when the device has no network', async () => {
@@ -163,9 +147,40 @@ it('marks unverified and demo shops beside the shop name and leaves verified unm
   expect(screen.queryByText(UNVERIFIED_CAFETERIA_NOTICE)).toBeNull();
 });
 
+it('hides availability marks on unverified and demo menus', async () => {
+  await receive({
+    cafeterias: [
+      { id: 'stall', name: '校內咖啡店', reviewStatus: 'unverified' },
+      { id: 'cafe-1', name: '校園小棧', reviewStatus: 'demo' },
+    ],
+    menus: [
+      { id: 'sold-out', cafeteriaId: 'stall', name: '售完餐點', available: true, soldOut: true },
+      { id: 'available', cafeteriaId: 'stall', name: '現有餐點', available: true },
+      { id: 'demo-sold', cafeteriaId: 'cafe-1', name: '示範售完', available: true, soldOut: true },
+    ],
+  });
+  const unverified = within(screen.getByRole('region', { name: '校內咖啡店' }));
+  expect(unverified.getByText('2 道餐點')).toBeTruthy();
+  expect(unverified.queryByText(/標記供應中/)).toBeNull();
+  expect(unverified.queryByText('供應中')).toBeNull();
+  expect(unverified.queryByText('已售完')).toBeNull();
+  const demo = within(screen.getByRole('region', { name: '校園小棧' }));
+  expect(demo.queryByText('已售完')).toBeNull();
+  expect(demo.queryByText('供應中')).toBeNull();
+  expect(screen.queryByText(/標記為售完/)).toBeNull();
+});
+
 it('distinguishes unknown availability, paused supply and sold-out meals without claiming ordering is available', async () => {
   await receive({
-    cafeterias: [{ id: 'stall', name: '校內咖啡店', orderingEnabled: true, pilotStatus: 'live' }],
+    cafeterias: [
+      {
+        id: 'stall',
+        name: '校內咖啡店',
+        orderingEnabled: true,
+        pilotStatus: 'live',
+        reviewStatus: 'verified',
+      },
+    ],
     menus: [
       { id: 'unknown', cafeteriaId: 'stall', name: '未知供應餐點' },
       { id: 'paused', cafeteriaId: 'stall', name: '暫停餐點', available: false },

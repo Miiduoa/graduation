@@ -1,7 +1,15 @@
 'use client';
 
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
-import { PERIOD_TIMES, WEEKDAY_LABELS, courseTimeLabel, type PersonalCourse } from '@campus/shared';
+import {
+  WEEKDAY_LABELS,
+  courseTimeLabel,
+  periodCount,
+  periodDisplayLabel,
+  periodSlots,
+  type PeriodProfileId,
+  type PersonalCourse,
+} from '@campus/shared';
 import { ConfirmModal, Modal } from '@/components/ui/Modal';
 import { draftConflicts, hasCourseChanges, validateCourseDraft, type CourseIssues } from './courseEditorModel';
 import styles from './timetable.module.css';
@@ -16,9 +24,10 @@ type CourseEditorProps = {
   onSave: () => void;
   onRemove: () => void;
   onCancel: () => void;
+  periodProfile?: PeriodProfileId;
 };
 
-export function CourseEditor({ course, courses, existing, busy, feedback, onChange, onSave, onRemove, onCancel }: CourseEditorProps) {
+export function CourseEditor({ course, courses, existing, busy, feedback, onChange, onSave, onRemove, onCancel, periodProfile = 'pu' }: CourseEditorProps) {
   const [initial] = useState(() => courses.find((item) => item.id === course.id) || course);
   const [submitted, setSubmitted] = useState(false);
   const [confirmation, setConfirmation] = useState<'delete' | 'discard' | null>(null);
@@ -27,8 +36,8 @@ export function CourseEditor({ course, courses, existing, busy, feedback, onChan
   const id = useId();
   const dirty = hasCourseChanges(initial, course);
   const moved = existing && (initial.day !== course.day || initial.start !== course.start || initial.end !== course.end);
-  const issues = validateCourseDraft(course, PERIOD_TIMES.length, WEEKDAY_LABELS.length);
-  const conflicts = draftConflicts(course, courses, PERIOD_TIMES.length, WEEKDAY_LABELS.length);
+  const issues = validateCourseDraft(course, periodCount(periodProfile), WEEKDAY_LABELS.length);
+  const conflicts = draftConflicts(course, courses, periodCount(periodProfile), WEEKDAY_LABELS.length);
   const visibleIssues: CourseIssues = submitted ? issues : {};
 
   useEffect(() => {
@@ -75,7 +84,7 @@ export function CourseEditor({ course, courses, existing, busy, feedback, onChan
       >
         <section aria-label="編輯課程">
           <form ref={formRef} onSubmit={submit} noValidate className={styles.editor}>
-            {moved && <p className={styles.feedback}>時間變更：{courseTimeLabel(initial)} → {courseTimeLabel(course)}。儲存後才會更新個人課表。</p>}
+            {moved && <p className={styles.feedback}>時間變更：{courseTimeLabel(initial, periodProfile)} → {courseTimeLabel(course, periodProfile)}。儲存後才會更新個人課表。</p>}
             <fieldset disabled={busy} className={styles.fields}>
               <legend className={styles.srOnly}>課程資料</legend>
               <label className={`${styles.field} ${styles.fullWidth}`}>
@@ -101,7 +110,7 @@ export function CourseEditor({ course, courses, existing, busy, feedback, onChan
                 <select name="start" disabled={course.day === 0} value={course.start || 1}
                   aria-invalid={Boolean(visibleIssues.start)} aria-describedby={visibleIssues.start ? `${id}-start-error` : undefined}
                   onChange={(event) => onChange({ ...course, start: Number(event.target.value) })}>
-                  {PERIOD_TIMES.map((time, index) => <option key={time[0]} value={index + 1}>第 {index + 1} 節 · {time[0]}</option>)}
+                  {periodSlots(periodProfile).map((slot) => <option key={slot.start} value={slot.index}>{periodDisplayLabel(slot.index, periodProfile)}</option>)}
                 </select>
                 {visibleIssues.start && <span id={`${id}-start-error`} className={styles.error}>{visibleIssues.start}</span>}
               </label>
@@ -110,7 +119,7 @@ export function CourseEditor({ course, courses, existing, busy, feedback, onChan
                 <select name="end" disabled={course.day === 0} value={course.end || course.start || 1}
                   aria-invalid={Boolean(visibleIssues.end)} aria-describedby={visibleIssues.end ? `${id}-end-error` : undefined}
                   onChange={(event) => onChange({ ...course, end: Number(event.target.value) })}>
-                  {PERIOD_TIMES.map((time, index) => <option key={time[1]} value={index + 1}>第 {index + 1} 節 · {time[1]}</option>)}
+                  {periodSlots(periodProfile).map((slot) => <option key={slot.end} value={slot.index}>{periodDisplayLabel(slot.index, periodProfile)} · {slot.end}</option>)}
                 </select>
                 {visibleIssues.end && <span id={`${id}-end-error`} className={styles.error}>{visibleIssues.end}</span>}
               </label>

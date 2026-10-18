@@ -1,5 +1,9 @@
 import { cleanCourse, createCourseId, type PersonalCourse } from './course';
-import { WEEKDAYS } from './periods';
+import {
+  WEEKDAYS,
+  parsePeriodRange,
+  type PeriodProfileId,
+} from './periods';
 
 const DAY_MAP: Record<string, number> = {
   一: 1,
@@ -20,23 +24,11 @@ function parseDay(value: string): number {
   return DAY_MAP[match[1]] || 0;
 }
 
-function parsePeriods(value: string): { start: number; end: number; text: string } | null {
-  const range = value.match(/第?\s*(\d{1,2})\s*[-–~到至]\s*第?\s*(\d{1,2})\s*節?/);
-  if (range) {
-    const start = Number(range[1]);
-    const end = Number(range[2]);
-    if (start >= 1 && end >= start && end <= 13) return { start, end, text: range[0] };
-  }
-  const single = value.match(/第?\s*(\d{1,2})\s*節/);
-  if (single) {
-    const start = Number(single[1]);
-    if (start >= 1 && start <= 13) return { start, end: start, text: single[0] };
-  }
-  return null;
-}
-
 /** 把貼上的課表文字變成待確認草稿。不會寫入現有課表。 */
-export function parseTimetableText(text: string): PersonalCourse[] {
+export function parseTimetableText(
+  text: string,
+  profile: PeriodProfileId = 'pu',
+): PersonalCourse[] {
   const lines = String(text || '')
     .split(/\r?\n/)
     .map((line) => line.replace(/[｜|]/g, '/').replace(/\s+/g, ' ').trim())
@@ -44,9 +36,13 @@ export function parseTimetableText(text: string): PersonalCourse[] {
   const courses: PersonalCourse[] = [];
   for (const line of lines) {
     const day = parseDay(line);
-    const periods = parsePeriods(line);
+    const ncku = profile === 'ncku'
+      ? line.match(
+          /第\s*(?:0|[1-9]|[NABCD])(?:\s*節)?\s*[-–~到至]\s*(?:第\s*)?(?:0|[1-9]|[NABCD])\s*節?|第\s*(?:0|[1-9]|[NABCD])\s*節|\[(?:0|[1-9]|[NABCD])\](?:\s*\[(?:0|[1-9]|[NABCD])\])+/i,
+        )
+      : line.match(/第?\s*\d{1,2}\s*[-–~到至]\s*第?\s*\d{1,2}\s*節?|第?\s*\d{1,2}\s*節/);
+    const periods = ncku ? parsePeriodRange(ncku[0], profile) : parsePeriodRange(line, profile);
     if (!periods && /^(星期|節次|課表|注意|學年度)/.test(line) && line.length < 12) continue;
-    // 只拿掉認出來的那一段節次，教室號碼（例如主顧303）要留著
     let rest = line.replace(/\b\d{1,2}:\d{2}\s*[-–~]\s*\d{1,2}:\d{2}\b/g, ' ');
     if (periods) rest = rest.replace(periods.text, ' ');
     rest = rest.replace(/(?:星期|週|禮拜)?[一二三四五]/, ' ').trim();

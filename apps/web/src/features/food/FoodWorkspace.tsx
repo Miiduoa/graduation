@@ -11,6 +11,8 @@ import { Select } from '@/components/ui/Input';
 import { FoodMenu } from './FoodMenu';
 import { FoodOrders } from './FoodOrders';
 import { useFoodDraft, useFoodRead, type FoodDraftCache } from './foodState';
+import { isWebOnlineOrderingEnabled } from '@/lib/onlineOrdering';
+import { foodPageSubtitle } from '@campus/shared/src/foodPageCopy';
 import styles from './Food.module.css';
 
 export type FoodClient = ReturnType<typeof createNuniFoodClient>;
@@ -34,7 +36,7 @@ export function FoodWorkspace({
     return null;
   }
   return (
-    <SiteShell title="點餐與取餐" subtitle="先看菜單與金額，確認後才送出訂單。">
+    <SiteShell title="點餐與取餐" subtitle={foodPageSubtitle(isWebOnlineOrderingEnabled())}>
       <div className={styles.stack}>
         <nav className={styles.bar} aria-label="餐飲服務">
           <Link href="/cafeteria">餐廳資訊</Link>

@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TransitExplorer } from './TransitExplorer';
 import { queryTransit, type TransitResult, type TransitStop } from '@/lib/transit';
 
@@ -73,7 +73,7 @@ it('uses the selected city and radius when location succeeds', async () => {
   fireEvent.click(screen.getByRole('button', { name: '使用我的位置' }));
   await waitFor(() => expect(queryTransit).toHaveBeenCalledWith({ action: 'nearby', city: 'Taipei', lat: 24.22, lon: 120.58, radius: 300 }, expect.any(AbortSignal)));
   fireEvent.click(screen.getByRole('button', { name: '學校站牌' }));
-  expect(screen.getByRole('link', { name: '官方公車網站 ↗' }).getAttribute('href')).toBe('https://citybus-free.taichung.gov.tw/');
+  expect(screen.getByRole('link', { name: '官方公車網站 ↗' }).getAttribute('href')).toBe('https://citybus.taichung.gov.tw/');
 });
 
 it('does not send a station-name query for every keystroke', async () => {
@@ -185,7 +185,84 @@ it('resets the entire transit search when changing campuses', async () => {
     { action: 'search', city: 'Hsinchu', text: '清華大學' }, expect.any(AbortSignal),
   ));
   view.rerender(<TransitExplorer schoolId="ncku" schoolName="國立成功大學" />);
-  expect((screen.getByLabelText('查詢縣市') as HTMLSelectElement).value).toBe('Tainan');
-  expect((screen.getByLabelText('站名或學校名稱') as HTMLInputElement).value).toBe('');
-  expect(screen.queryByText(/站牌代碼 TXG001/)).toBeNull();
+  expect(screen.getByRole('button', { name: '學校站牌' }).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByText(/尋找名稱含「成大」的站牌/)).toBeTruthy();
+  expect(screen.queryByLabelText('查詢縣市')).toBeNull();
+  expect(screen.queryByLabelText('站名或學校名稱')).toBeNull();
+  await waitFor(() => expect(queryTransit).toHaveBeenCalledWith(
+    { action: 'campus', schoolId: 'ncku' }, expect.any(AbortSignal),
+  ));
+});
+
+
+describe('static catalog stops', () => {
+  beforeEach(() => { vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-18T08:00:00.000Z')); });
+
+const catalogStop: TransitStop = {
+  id: 'TCOD_pu_outbound', name: '靜宜大學', city: 'Taichung', lat: 24.226, lon: 120.576, distance: 120,
+  source: 'taichung-open-data', catalogDate: '2026-10-18T04:00:00.000Z',
+  routes: [{ name: '300', direction: '去', destination: '臺中車站' }],
+};
+const catalogResult = (): TransitResult => ({ ...stopResult(), status: 'ready', kind: 'stops', stops: [catalogStop], limited: false, fetchedAt: new Date().toISOString() });
+
+it('shows catalog directions and source instead of polling or presenting the snapshot as a live arrival', async () => {
+  vi.useFakeTimers();
+  vi.mocked(queryTransit).mockResolvedValue(catalogResult());
+  await act(async () => { renderExplorer(); });
+  expect(screen.getByText('即時到站尚未接通')).toBeTruthy();
+  expect(screen.getByText('去程 · 往 臺中車站')).toBeTruthy();
+  expect(screen.getByText(/資料快照：2026\/10\/18/)).toBeTruthy();
+  expect(screen.getByRole('link', { name: '臺中市政府公車路線站牌資料 ↗' }).getAttribute('href')).toBe('https://data.gov.tw/dataset/81555');
+  expect(screen.getByRole('link', { name: '前往臺中公車查即時到站 ↗' }).getAttribute('href')).toBe('https://citybus.taichung.gov.tw/');
+  expect(screen.getByRole('link', { name: '開啟步行導航 ↗' }).getAttribute('href')).toContain('destination=24.226,120.576');
+  expect(screen.queryByRole('button', { name: '更新班次' })).toBeNull();
+  expect(screen.queryByText(/站牌代碼 TCOD_/)).toBeNull();
+  await act(async () => {
+    vi.advanceTimersByTime(180_000);
+    window.dispatchEvent(new Event('online'));
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  expect(vi.mocked(queryTransit).mock.calls.map(([query]) => query.action)).toEqual(['campus']);
+});
+
+it('preserves static provider metadata across browser favorites and does not turn a restored stop into a TDX query', async () => {
+  vi.mocked(queryTransit).mockResolvedValue(catalogResult());
+  const view = renderExplorer();
+  fireEvent.click(await screen.findByRole('button', { name: '收藏 靜宜大學 300 路線 · 去程 · 靜態站牌資料 第 1 站牌' }));
+  const saved = JSON.parse(localStorage.getItem('campus-one:transit-stops:v1') || '[]');
+  expect(saved[0]).toMatchObject({ source: 'taichung-open-data', catalogDate: catalogStop.catalogDate, routes: catalogStop.routes, distance: null });
+  view.unmount();
+  vi.clearAllMocks();
+  render(<TransitExplorer schoolId="nthu" schoolName="國立清華大學" />);
+  fireEvent.click(screen.getByRole('button', { name: '常用站牌 1' }));
+  fireEvent.click(screen.getByRole('button', { name: /01\s*靜宜大學.*300 路線.*去程/ }));
+  expect(screen.getByText('即時到站尚未接通')).toBeTruthy();
+  expect(screen.getByText('去程 · 往 臺中車站')).toBeTruthy();
+  expect(queryTransit).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '取消收藏 靜宜大學 300 路線 · 去程 · 靜態站牌資料 第 1 站牌' }));
+  expect(screen.getByText(/在站牌旁按「收藏」/)).toBeTruthy();
+});
+
+it('aborts in-flight arrivals when switching to a static stop and resumes only when a TDX stop is selected', async () => {
+  let finish!: (result: TransitResult) => void;
+  let arrivalSignal!: AbortSignal;
+  vi.mocked(queryTransit).mockImplementation(async (query, signal) => {
+    if (query.action !== 'arrivals') return { ...catalogResult(), status: 'ready', kind: 'stops', stops: [stops[0], catalogStop], limited: false, fetchedAt: new Date().toISOString() };
+    arrivalSignal = signal;
+    return new Promise((resolve) => { finish = resolve; });
+  });
+  renderExplorer();
+  await waitFor(() => expect(queryTransit).toHaveBeenCalledWith({ action: 'arrivals', city: 'Taichung', stopId: 'TXG001' }, expect.any(AbortSignal)));
+  fireEvent.click(screen.getByRole('button', { name: /02\s*靜宜大學.*300 路線.*去程/ }));
+  expect(arrivalSignal.aborted).toBe(true);
+  expect(screen.getByText('即時到站尚未接通')).toBeTruthy();
+  await act(async () => finish({ status: 'ready', kind: 'arrivals', fetchedAt: new Date().toISOString(), arrivals: [{ id: 'old', route: '舊路線', direction: 0, destination: '', status: 0, seconds: 600, updatedAt: new Date().toISOString() }] }));
+  expect(screen.queryByText('舊路線')).toBeNull();
+  expect(vi.mocked(queryTransit).mock.calls.filter(([query]) => query.action === 'arrivals')).toHaveLength(1);
+  vi.mocked(queryTransit).mockResolvedValue(emptyArrivals());
+  fireEvent.click(screen.getByRole('button', { name: /站牌代碼 TXG001/ }));
+  await screen.findByText(/目前沒有班次預估/);
+  expect(vi.mocked(queryTransit).mock.calls.filter(([query]) => query.action === 'arrivals')).toHaveLength(2);
+});
+
 });

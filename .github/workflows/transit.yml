@@ -6,6 +6,8 @@ on:
       - 'apps/web/src/lib/transit*.ts'
       - 'apps/web/src/app/api/transit/**'
       - 'scripts/test-transit.cjs'
+      - 'scripts/refresh-transit-catalog*'
+      - 'apps/web/src/data/taichung-transit-catalog.json'
       - '.github/workflows/transit.yml'
   push:
     branches: [main]
@@ -13,6 +15,8 @@ on:
       - 'apps/web/src/lib/transit*.ts'
       - 'apps/web/src/app/api/transit/**'
       - 'scripts/test-transit.cjs'
+      - 'scripts/refresh-transit-catalog*'
+      - 'apps/web/src/data/taichung-transit-catalog.json'
       - '.github/workflows/transit.yml'
   workflow_dispatch:
 
@@ -33,9 +37,9 @@ jobs:
       - name: Strict transit module types
         run: >-
           "$RUNNER_TEMP/transit-tools/node_modules/.bin/tsc"
-          --noEmit --strict --target es2022 --lib es2022,dom --module commonjs
+          --noEmit --strict --target es2022 --lib es2022,dom --module commonjs --resolveJsonModule --esModuleInterop --moduleResolution node
           apps/web/src/lib/transit.ts apps/web/src/lib/transit-server.ts
       - name: Transit API and data contract tests
         env:
           NODE_PATH: ${{ runner.temp }}/transit-tools/node_modules
-        run: node --test scripts/test-transit.cjs
+        run: node --test scripts/test-transit.cjs scripts/refresh-transit-catalog.test.mjs
