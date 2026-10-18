@@ -96,6 +96,62 @@ test('shows existing submitted text instead of a second write', async () => {
   expect(mockSource.submitAssignment).not.toHaveBeenCalled();
 });
 
+test('shows published gradeScore and gradeFeedback on the assignment page', async () => {
+  mockSource.getAssignment.mockResolvedValue({
+    id: 'work',
+    groupId: 'course',
+    title: '期末報告',
+    description: '請寫摘要',
+    dueAt: '2099-12-31T16:00:00Z',
+    type: 'homework',
+    points: 100,
+    createdBy: 'teacher',
+    createdAt: '2026-10-01T00:00:00Z',
+  });
+  mockSource.getSubmission.mockResolvedValue({
+    id: 'alice',
+    assignmentId: 'work',
+    userId: 'alice',
+    content: '先前繳交的內容',
+    status: 'submitted',
+    submittedAt: '2026-10-18T00:00:00Z',
+    gradePublished: true,
+    gradeScore: 86,
+    gradeFeedback: '結構清楚',
+    gradePublishedAt: '2026-10-19T02:00:00.000Z',
+  });
+  const view = render(
+    <HomeworkSubmitScreen route={{ params: { courseId: 'course', hwId: 'work' } }} />,
+  );
+  expect(await view.findByLabelText('作業評分')).toBeTruthy();
+  expect(view.getByText('教師已評分：86 / 100 分')).toBeTruthy();
+  expect(view.getByText('結構清楚')).toBeTruthy();
+  expect(view.queryByText('課內成績')).toBeNull();
+});
+
+test('hides unpublished teacher drafts and old grade fields', async () => {
+  mockSource.getSubmission.mockResolvedValue({
+    id: 'alice',
+    assignmentId: 'work',
+    userId: 'alice',
+    content: '先前繳交的內容',
+    status: 'graded',
+    submittedAt: '2026-10-18T00:00:00Z',
+    grade: 100,
+    feedback: '舊欄位不該出現',
+    gradeScore: 72,
+    gradeFeedback: '尚未發布',
+    gradePublished: false,
+  });
+  const view = render(
+    <HomeworkSubmitScreen route={{ params: { courseId: 'course', hwId: 'work' } }} />,
+  );
+  expect(await view.findByText('先前繳交的內容')).toBeTruthy();
+  expect(view.queryByLabelText('作業評分')).toBeNull();
+  expect(view.queryByText('尚未發布')).toBeNull();
+  expect(view.queryByText('舊欄位不該出現')).toBeNull();
+});
+
 test('does not offer text submit for a quiz assignment', async () => {
   mockSource.getAssignment.mockResolvedValue({
     id: 'quiz-1',
