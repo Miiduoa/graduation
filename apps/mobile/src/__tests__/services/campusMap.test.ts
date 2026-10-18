@@ -85,6 +85,9 @@ test('map uses provided school center and retains attribution without fake navig
   expect(html).toContain('setView(campusCenter,16)');
   expect(html).toContain('failedTiles>=4');
   expect(html).toContain('campusCenter.distanceTo');
+  expect(html).toContain("data.type==='route'");
+  expect(html).toContain("data.type==='clearRoute'");
+  expect(html).toContain("dashArray:'6 9'");
   expect(html).toContain('OpenStreetMap');
   expect(html).toContain('label.textContent=place.name');
   expect(html).not.toMatch(/simulate|busTick|setInterval|buildMock/);
@@ -126,4 +129,24 @@ test('rejects a wrong-school nested coordinate even when the values are valid', 
     schoolId: 'another-school',
   }]));
   await expect(loadCampusMapPlaces('pu')).rejects.toThrow('Invalid map school');
+});
+
+test('hides historical demo POIs without hiding legitimate published places', async () => {
+  const docs = [
+    {
+      id: 'tw-nchu-poi-1',
+      data: () => ({ schoolId: 'tw-nchu', name: '工程館', category: 'building', location: { lat: 24.1234, lng: 120.789 } }),
+    },
+    {
+      id: 'tagged',
+      data: () => ({ schoolId: 'tw-nchu', name: '測試校舍', isDemo: true, lat: 24.2, lng: 120.5 }),
+    },
+    {
+      id: 'official',
+      data: () => ({ schoolId: 'tw-nchu', name: '學校提供的校舍', lat: 24.13, lng: 120.67 }),
+    },
+  ];
+  jest.mocked(getDocsFromServer).mockResolvedValueOnce({ empty: false, docs } as never);
+  const places = await loadCampusMapPlaces('tw-nchu');
+  expect(places.map((place) => place.name)).toEqual(['學校提供的校舍']);
 });

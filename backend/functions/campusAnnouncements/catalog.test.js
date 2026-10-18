@@ -13,6 +13,8 @@ const {
   formatCoverageTable,
   SOURCE_UNAVAILABLE,
   PLACEHOLDER_SCHOOL_IDS,
+  parseSyncSchoolIds,
+  DEFAULT_SYNC_SCHOOLS,
 } = require('./catalog');
 
 const schoolsSrc = fs.readFileSync(
@@ -103,6 +105,43 @@ test('shared catalog links stay aligned with backend sources', () => {
   }
   expect(shared).not.toContain('tw-demo-uni');
   expect(shared).not.toContain('tw-taichung-uni-a');
+});
+
+test('NCKU and NTPU keep school-scoped public lists and do not share sources', () => {
+  const ncku = listSources('ncku');
+  const ntpu = listSources('ntpu');
+  expect(ncku.map((item) => item.office)).toEqual(['全校最新消息', '教務處', '學務處']);
+  expect(ncku.every((item) => item.schoolId === 'ncku')).toBe(true);
+  expect(ncku).toHaveLength(3);
+  expect(ncku.every((item) => item.parsers.length >= 2)).toBe(true);
+  expect(ncku.find((item) => item.sourceId === 'ncku-aca').listUrl).toBe(
+    'https://acad.ncku.edu.tw/p/403-1025-397-1.php',
+  );
+  expect(ntpu.every((item) => item.schoolId === 'ntpu')).toBe(true);
+  expect(ntpu.map((item) => item.office)).toEqual([
+    '電子公文一般公告（含教務處）',
+    '總務處',
+    '學生會',
+  ]);
+  expect(ntpu.map((item) => item.parsers)).toEqual([
+    PARSER_PRESETS.iweb,
+    PARSER_PRESETS.iweb,
+    PARSER_PRESETS.iweb,
+  ]);
+  expect(ntpu.find((item) => item.sourceId === 'ntpu-campus').listUrl).toBe(
+    'https://fms.ntpu.edu.tw/km/24662',
+  );
+  expect(ntpu.every((item) => item.fragile !== 'spa')).toBe(true);
+  expect(ntpu.map((item) => item.listUrl).some((url) => url.includes('ncku.edu.tw'))).toBe(false);
+  expect(ncku.map((item) => item.listUrl).some((url) => url.includes('ntpu.edu.tw'))).toBe(false);
+});
+
+test('sync school allowlist defaults to pu and never invents extra schools', () => {
+  expect(DEFAULT_SYNC_SCHOOLS).toEqual(['pu']);
+  expect(parseSyncSchoolIds(undefined)).toEqual(['pu']);
+  expect(parseSyncSchoolIds('')).toEqual(['pu']);
+  expect(parseSyncSchoolIds('ncku, ntpu')).toEqual(['ncku', 'ntpu']);
+  expect(parseSyncSchoolIds('pu,pu,ncku')).toEqual(['pu', 'ncku']);
 });
 
 test('adding a school only requires a catalog entry with shared parsers', () => {

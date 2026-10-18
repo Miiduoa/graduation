@@ -39,6 +39,29 @@ function trimmedText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+const LEGACY_SEED_LOCATIONS = [
+  { number: 1, name: '工程館', lat: 24.1234, lng: 120.789 },
+  { number: 2, name: '圖書館', lat: 24.124, lng: 120.7885 },
+  { number: 3, name: '學生餐廳', lat: 24.122, lng: 120.79 },
+] as const;
+
+/** Historical demo seed documents had no flag; match the exact known fixture. */
+function isLegacySeedPlace(
+  schoolId: string,
+  id: string,
+  name: string,
+  coordinate: { lat: number; lng: number },
+): boolean {
+  if (schoolId !== 'tw-nchu' && schoolId !== 'tw-demo-uni') return false;
+  return LEGACY_SEED_LOCATIONS.some(
+    (fixture) =>
+      id === `${schoolId}-poi-${fixture.number}` &&
+      fixture.name === name &&
+      fixture.lat === coordinate.lat &&
+      fixture.lng === coordinate.lng,
+  );
+}
+
 function getPosition(value: Record<string, unknown>): { lat: number; lng: number } | null {
   const lat = value.lat ?? value.latitude;
   const lng = value.lng ?? value.longitude;
@@ -76,6 +99,7 @@ export function parseCampusMapRecord(
     : asObject(data.location) ?? asObject(data.coordinates);
   const position = source ? getPosition(source) : null;
   if (!position) return null;
+  if (data.isDemo === true || isLegacySeedPlace(schoolId, id, name, position)) return null;
 
   const category = trimmedText(data.category);
   const building = trimmedText(data.building) || undefined;

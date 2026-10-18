@@ -13,10 +13,14 @@ import {
   CAFETERIA_PAYMENT_DISCLAIMER,
   CAFETERIA_REVIEW_STATUS_DEFAULT,
   cafeteriaReviewBadge,
+  cafeteriaShowsMenuAvailability,
 } from '@campus/shared/src/cafeteriaCatalog';
 import { ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
 import { fetchCafeteriaCatalog, type CatalogCafeteria } from '@/lib/cafeteriaCatalog';
-import { loadFailureCopy } from '@campus/shared/src/loadFailureCopy';
+import {
+  loadServiceFailureCopy,
+  shouldOfferLoadRetry,
+} from '@campus/shared/src/loadFailureCopy';
 import type { MenuItem } from '@/lib/firebase';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import styles from './cafeteria.module.css';
@@ -225,16 +229,19 @@ function CafeteriaContent({
           cafeteria,
           items,
           totalCount: allItems.length,
-          availableCount: allItems.filter(
-            (item) => item.available === true && item.soldOut !== true,
-          ).length,
+          availableCount: cafeteriaShowsMenuAvailability(cafeteria.reviewStatus)
+            ? allItems.filter((item) => item.available === true && item.soldOut !== true).length
+            : 0,
         };
       })
       .filter((section): section is NonNullable<typeof section> => section !== null);
   }, [cafeterias, menusByCafeteria, search, selectedCafeteria]);
 
   const stats = useMemo(() => {
-    const soldOutMenus = menuRows.filter((menu) => menu.soldOut === true).length;
+    const soldOutMenus = menuRows.filter((menu) => {
+      const shop = cafeterias.find((row) => getCafeteriaKey(row) === getMenuCafeteriaKey(menu, cafeteriaRows));
+      return cafeteriaShowsMenuAvailability(shop?.reviewStatus) && menu.soldOut === true;
+    }).length;
 
     return {
       cafeterias: cafeterias.length,
@@ -259,18 +266,17 @@ function CafeteriaContent({
   }, [cafeterias, menuRows]);
 
   const sourceLabel = '餐廳資料';
+  const online = typeof navigator === 'undefined' ? true : navigator.onLine;
   if (loading || failed) {
     return (
       <SiteShell title="餐廳" subtitle="查看校內餐廳與菜單" schoolName={schoolName}>
         <section className="card" role={failed ? 'alert' : 'status'}>
           <h2>
             {failed
-              ? loadFailureCopy(failed, {
-                  online: typeof navigator === 'undefined' ? true : navigator.onLine,
-                })
+              ? loadServiceFailureCopy(failed, { online })
               : '正在讀取餐廳與菜單…'}
           </h2>
-          {failed ? (
+          {failed && shouldOfferLoadRetry(failed, { online }) ? (
             <button className="btn primary" onClick={() => setAttempt((value) => value + 1)}>
               重新整理
             </button>
@@ -385,7 +391,9 @@ function CafeteriaContent({
                   </div>
                 </div>
                 <p className={styles.count}>
-                  {totalCount} 道餐點 · {availableCount} 道標記供應中
+                  {cafeteriaShowsMenuAvailability(cafeteria.reviewStatus)
+                    ? `${totalCount} 道餐點 · ${availableCount} 道標記供應中`
+                    : `${totalCount} 道餐點`}
                 </p>
                 <p className={styles.details}>
                   <Link href={`/cafeteria/${encodeURIComponent(key)}?schoolId=${encodeURIComponent(schoolId)}`}>
@@ -414,15 +422,19 @@ function CafeteriaContent({
               ) : (
                 <ul className={styles.menu}>
                   {items.map((item) => {
-                    const availability = getMenuAvailability(item);
+                    const availability = cafeteriaShowsMenuAvailability(cafeteria.reviewStatus)
+                      ? getMenuAvailability(item)
+                      : null;
                     return (
                       <li key={item.id} className={styles.menuItem}>
                         <div className={styles.menuContent}>
                           <div className={styles.menuHeading}>
                             <h3>{item.name}</h3>
-                            <span className={styles.status} data-tone={availability.tone}>
-                              {availability.label}
-                            </span>
+                            {availability ? (
+                              <span className={styles.status} data-tone={availability.tone}>
+                                {availability.label}
+                              </span>
+                            ) : null}
                           </div>
                           {item.description && (
                             <p className={styles.description}>{item.description}</p>
