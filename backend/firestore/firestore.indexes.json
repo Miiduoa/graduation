@@ -191,6 +191,20 @@
       ]
     },
     {
+      "collectionGroup": "directory",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "isDiscoverable",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "displayName",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "attendanceSessions",
       "queryScope": "COLLECTION",
       "fields": [

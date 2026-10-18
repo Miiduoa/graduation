@@ -9,6 +9,7 @@ export type ServiceCategory = (typeof SERVICE_CATEGORIES)[number]['id'];
 
 export const SERVICE_ACCESS = {
   public: '可直接瀏覽',
+  device: '可直接使用，資料保存在這台裝置',
   platform: 'Google 帳號',
   school: '學校帳號',
   account: '依帳號查看',
@@ -20,7 +21,7 @@ export const CAMPUS_SERVICES = [
     name: '個人行事曆',
     text: '查看自行匯入的活動、考試與行程',
     href: '/calendar',
-    access: 'public',
+    access: 'device',
     keywords: '行事曆 活動 考試 日期 calendar',
     category: 'study',
   },
@@ -138,7 +139,7 @@ export const CAMPUS_SERVICES = [
   },
   {
     name: '找人',
-    text: '用找人代號加好友，加好友後才看課表',
+    text: '用找人代號加好友；對方開放分享後可查看課表',
     href: '/friends',
     access: 'school',
     keywords: '好友 朋友 空堂 friend',
@@ -289,6 +290,16 @@ export function searchCampusServices(query: string, category: ServiceCategory | 
       terms.every((term) => content.includes(term))
     );
   });
+}
+
+export function serviceAccessLabel(
+  access: keyof typeof SERVICE_ACCESS,
+  options: { loading: boolean; error?: boolean; studentId: boolean },
+) {
+  if (access !== 'school') return SERVICE_ACCESS[access];
+  if (options.loading) return '學校帳號 · 正在確認登入方式';
+  if (options.error) return '學校帳號 · 暫時無法確認登入方式';
+  return options.studentId ? '學校帳號' : '學校帳號 · 尚未開放登入';
 }
 
 export function serviceContextSearch(params: URLSearchParams) {

@@ -78,7 +78,11 @@ export async function unsubscribeFromBoard(uid: string, schoolId: string, boardI
   await deleteDoc(doc(db, 'schools', schoolId, 'boardSubs', boardSubscriptionId(uid, boardId)));
 }
 
-export async function isSubscribedToBoard(uid: string, schoolId: string, boardId: string): Promise<boolean> {
+export async function isSubscribedToBoard(
+  uid: string,
+  schoolId: string,
+  boardId: string,
+): Promise<boolean> {
   const db = getDb();
   const snap = await getDocs(
     query(
@@ -92,7 +96,11 @@ export async function isSubscribedToBoard(uid: string, schoolId: string, boardId
 }
 
 /** 取得使用者所有訂閱看板 ID（用於 Feed 的「我訂閱」過濾） */
-export async function listSubscribedBoardIds(uid: string, schoolId: string): Promise<string[]> {
+export async function listSubscribedBoardIds(
+  uid: string,
+  schoolId: string,
+  options: { throwOnError?: boolean } = {},
+): Promise<string[]> {
   const db = getDb();
   try {
     const snap = await getDocs(
@@ -102,8 +110,11 @@ export async function listSubscribedBoardIds(uid: string, schoolId: string): Pro
         limit(100),
       ),
     );
-    return snap.docs.map((d) => (d.data() as { boardId?: string }).boardId).filter((x): x is string => !!x);
-  } catch {
+    return snap.docs
+      .map((d) => (d.data() as { boardId?: string }).boardId)
+      .filter((x): x is string => !!x);
+  } catch (error) {
+    if (options.throwOnError) throw error;
     return [];
   }
 }

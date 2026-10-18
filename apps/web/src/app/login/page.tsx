@@ -56,7 +56,7 @@ function LoginForm({
   const schoolTask = reconnect || platformDestination(destination) !== destination;
   const schoolAvailable = options.studentId;
   const schoolRequired = schoolTask && schoolAvailable;
-  const hideGoogle = schoolRequired || (schoolTask && options.loading);
+  const hideGoogle = schoolRequired || (schoolTask && (options.loading || options.error));
   const publicDestination = isPublicCampusPath(
     new URL(destination, 'https://campus.local').pathname,
   );
@@ -169,6 +169,11 @@ function LoginForm({
           <h2>學校帳號</h2>
           {options.loading ? (
             <p role="status">正在確認登入方式…</p>
+          ) : options.error ? (
+            <div role="alert">
+              <p>暫時無法確認登入方式，請重新連線後再試。</p>
+              <button type="button" className="btn" onClick={options.retry}>重新確認登入方式</button>
+            </div>
           ) : schoolAvailable ? (
             <>
               <p>

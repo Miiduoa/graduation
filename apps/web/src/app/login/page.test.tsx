@@ -10,6 +10,8 @@ const { replace, signIn, state } = vi.hoisted(() => ({
     user: { uid: 'one' } as { uid: string } | null,
     studentId: false,
     loading: false,
+    optionsError: false,
+    retryOptions: vi.fn(),
   },
 }));
 vi.mock('next/navigation', () => ({
@@ -49,7 +51,8 @@ vi.mock('@/lib/signInOptions', async (original) => ({
     google: true,
     studentId: state.studentId,
     loading: false,
-    retry: vi.fn(),
+    error: state.optionsError,
+    retry: state.retryOptions,
   }),
 }));
 beforeEach(() => {
@@ -58,7 +61,19 @@ beforeEach(() => {
   state.user = { uid: 'one' };
   state.studentId = false;
   state.loading = false;
+  state.optionsError = false;
   signIn.mockResolvedValue({ uid: 'one' });
+});
+it('keeps a school return destination during an availability failure instead of offering the wrong account', () => {
+  state.user = null;
+  state.optionsError = true;
+  render(<LoginPage />);
+  expect(screen.queryByTestId('platform-sign-in')).toBeNull();
+  expect(screen.queryByText(STUDENT_ID_PREPARING_COPY)).toBeNull();
+  expect(screen.queryByLabelText('學號')).toBeNull();
+  expect(replace).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '重新確認登入方式' }));
+  expect(state.retryOptions).toHaveBeenCalledOnce();
 });
 it('returns an already signed-in school user to the requested page only when student ID is available', async () => {
   state.studentId = true;
