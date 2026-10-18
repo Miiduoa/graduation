@@ -9,8 +9,9 @@ const { toJsDate } = require('./assistantFormat');
 const {
   schoolConfig,
   isPublicAnnouncementSchool,
-  SOURCE_DOWN_EMPTY,
+  SOURCE_UNAVAILABLE,
 } = require('../campusAnnouncements/catalog');
+const { selectStudentAnnouncements } = require('../campusAnnouncements/quality');
 
 const EMPTY = Object.freeze([]);
 
@@ -66,7 +67,7 @@ async function fetchAnnouncementSources(schoolId, deps = {}) {
       sourceId: data.sourceId || entry.id,
       office: typeof data.office === 'string' ? data.office : entry.id,
       status: data.status === 'unavailable' ? 'unavailable' : 'healthy',
-      message: data.status === 'unavailable' ? SOURCE_DOWN_EMPTY : '',
+      message: data.status === 'unavailable' ? SOURCE_UNAVAILABLE : '',
       listUrl: typeof data.listUrl === 'string' ? data.listUrl : '',
     };
   });
@@ -79,9 +80,9 @@ async function fetchAssistantAnnouncements(schoolId, deps = {}) {
     order: ['publishedAt', 'desc'], limit: 20, requiredField: 'title', deps,
   });
   const sources = await fetchAnnouncementSources(schoolId, deps);
-  const announcements = rows.filter((row) => row.visible !== false);
+  const announcements = selectStudentAnnouncements(rows, sources);
   if (sources.length && sources.every((item) => item.status === 'unavailable') && announcements.length === 0) {
-    const error = new HttpsError('unavailable', SOURCE_DOWN_EMPTY);
+    const error = new HttpsError('unavailable', SOURCE_UNAVAILABLE);
     error.details = { sources };
     throw error;
   }

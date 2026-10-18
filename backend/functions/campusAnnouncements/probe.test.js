@@ -9,6 +9,7 @@ const { parseProbe, sourceSeverity, runProbe } = require('./probe');
 
 test('probe never writes and treats SPA empty parse as a warning', () => {
   expect(parseProbe(['--schools', 'ncku,ntpu']).schoolIds).toEqual(['ncku', 'ntpu']);
+  expect(parseProbe(['--', '--schools', 'ncku,ntpu']).schoolIds).toEqual(['ncku', 'ntpu']);
   expect(
     sourceSeverity({ fragile: 'spa' }, { status: 'unavailable', reason: 'parse_empty' }),
   ).toBe('warn');

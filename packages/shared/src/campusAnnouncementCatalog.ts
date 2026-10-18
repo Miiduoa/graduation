@@ -25,17 +25,7 @@ const ANNOUNCEMENT_CATALOG_LINKS: Record<string, readonly AnnouncementCatalogLin
     {
       sourceId: 'ncku-campus',
       office: '全校最新消息',
-      listUrl: 'https://web.ncku.edu.tw/p/403-1000-14-1.php',
-    },
-    {
-      sourceId: 'ncku-aca',
-      office: '教務處',
-      listUrl: 'https://acad.ncku.edu.tw/p/403-1025-397-1.php',
-    },
-    {
-      sourceId: 'ncku-osa',
-      office: '學務處',
-      listUrl: 'https://osa.ncku.edu.tw/p/403-1026-40-1.php',
+      listUrl: 'https://web.ncku.edu.tw/p/422-1000-1026.php?Lang=zh-tw',
     },
   ],
   nycu: [
@@ -99,16 +89,6 @@ const ANNOUNCEMENT_CATALOG_LINKS: Record<string, readonly AnnouncementCatalogLin
       sourceId: 'ntpu-campus',
       office: '電子公文一般公告（含教務處）',
       listUrl: 'https://fms.ntpu.edu.tw/km/24662',
-    },
-    {
-      sourceId: 'ntpu-oga',
-      office: '總務處',
-      listUrl: 'https://oga.ntpu.edu.tw/p/403-1008-39-1.php',
-    },
-    {
-      sourceId: 'ntpu-su',
-      office: '學生會',
-      listUrl: 'https://ntpusu.ntpu.edu.tw/p/403-1015-39-1.php',
     },
   ],
   tmu: [

@@ -70,10 +70,10 @@ test('iWeb links skip navigation and keep news-list articles', () => {
   <a href="https://c039.pu.edu.tw/p/406-1072-73284,r13.php">暑修學生進校之收費規定</a>
 </div><div class="mdate before">2026-07-01</div></div>
 `;
-  const titles = parseIwebLinks(html, 'https://acd.pu.edu.tw/p/403-1042-885-1.php').map(
-    (row) => row.title,
-  );
+  const rows = parseIwebLinks(html, 'https://acd.pu.edu.tw/p/403-1042-885-1.php');
+  const titles = rows.map((row) => row.title);
   expect(titles).toEqual(['選課公告', '[115.09.18]機車通行證抽籤結果', '暑修學生進校之收費規定']);
+  expect(rows[1].publishedAt.startsWith('2026-09-18')).toBe(true);
   expect(titles).not.toContain('行政單位');
   expect(titles).not.toContain('最新消息');
   expect(titles).not.toContain('教務Q&A');
@@ -88,6 +88,34 @@ test('iWeb links ignore homepage shortcut tiles that reuse mtitle markup', () =>
   <a href="https://osachc.pu.edu.tw/var/file/67/1067/img/map.pdf">校園無障礙地圖</a>
 </div></div>`;
   expect(parseIwebLinks(html, 'https://osa.pu.edu.tw/')).toEqual([]);
+});
+
+test('NCKU campus table keeps 公告單位 and does not invent a scrape date', () => {
+  const html = `
+<table class="listTB table">
+<thead><tr><th>日期</th><th>標題</th><th>公告單位</th></tr></thead>
+<tbody>
+<tr>
+  <td data-th="日期"><div class="d-txt">2026-10-16</div></td>
+  <td data-th="標題"><div class="mtitle"><a title="原頁面開啟" href="https://oia.ncku.edu.tw/p/404-1032-306703.php">【公告】國立成功大學116學年第1學期校級薦外交換學生計畫簡章</a></div></td>
+  <td data-th="公告單位"><div class="d-txt">國際教育組</div></td>
+</tr>
+<tr>
+  <td data-th="日期"><div class="d-txt">2026-10-16</div></td>
+  <td data-th="標題"><div class="mtitle"><a title="原頁面開啟" href="/var/file/213/1213/img/4803/780946787.pdf">【漏洞預警】Cisco License On-Prem 存在4個重大資安漏洞。(開啟PDF檔)</a></div></td>
+  <td data-th="公告單位"><div class="d-txt">計算機與網路中心</div></td>
+</tr>
+</tbody>
+</table>`;
+  const rows = parseIwebTable(html, 'https://web.ncku.edu.tw/p/422-1000-1026.php?Lang=zh-tw');
+  expect(rows[0]).toMatchObject({
+    title: '國立成功大學116學年第1學期校級薦外交換學生計畫簡章',
+    office: '國際教育組',
+    originalUrl: 'https://oia.ncku.edu.tw/p/404-1032-306703.php',
+  });
+  expect(rows[0].publishedAt.startsWith('2026-10-16')).toBe(true);
+  expect(rows[1].office).toBe('計算機與網路中心');
+  expect(rows[1].title).toContain('漏洞預警');
 });
 
 test('NTPU FMS public bulletin table extracts numbered media links', () => {
