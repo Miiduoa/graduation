@@ -9,7 +9,7 @@ export const PERSONAL_IMPORT_IMAGE_UNREADABLE =
 export const PERSONAL_IMPORT_SYNCING = '正在同步到你的帳號…';
 export const PERSONAL_IMPORT_SYNCED = '已同步到你的帳號，換裝置登入同一個帳號並開啟同步就能看到。';
 export const PERSONAL_IMPORT_SYNC_NETWORK_FAILURE = '還沒同步到你的帳號，請確認網路後再試。';
-export const PERSONAL_IMPORT_SYNC_CONFLICT = '另一台裝置剛更新資料，請重新同步並核對差異。';
+export const PERSONAL_IMPORT_SYNC_CONFLICT = '另一台裝置剛更新資料，請重新同步。';
 export const PERSONAL_IMPORT_SYNC_SESSION_EXPIRED =
   '登入狀態已變更，請重新登入後同步；這台裝置的資料仍保留。';
 
