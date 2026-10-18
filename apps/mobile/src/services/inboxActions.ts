@@ -172,10 +172,15 @@ export function navigateFromInboxTask(
       if (typeof hwId !== 'string' || !hwId) {
         return fallBackToCourseHub();
       }
+      const dueAt =
+        task.dueAt instanceof Date && Number.isFinite(task.dueAt.getTime())
+          ? task.dueAt.toISOString()
+          : undefined;
       navigateToCourseScreen(navigation, role, 'HomeworkSubmit', {
         courseId,
         hwId,
         hwTitle: task.title,
+        ...(dueAt ? { dueAt } : {}),
       });
       emitInboxNavigationSignal(resolved);
       return true;

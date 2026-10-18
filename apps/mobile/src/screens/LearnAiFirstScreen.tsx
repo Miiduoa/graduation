@@ -6,6 +6,7 @@ import { useAuth } from '../state/auth';
 import { loadStudentHome } from '../data/studentHome';
 import type { InboxTask } from '../data/types';
 import { safeNavigate } from '../utils/safeNavigate';
+import { navigateFromInboxTask } from '../services/inboxActions';
 
 type LearningData = Awaited<ReturnType<typeof loadStudentHome>>;
 
@@ -61,15 +62,18 @@ export default function LearnAiFirstScreen() {
   );
 
   const openTask = (task: InboxTask) => {
-    if (task.kind === 'live' && task.sessionId) {
-      safeNavigate(navigation, 'Classroom', {
-        groupId: task.groupId,
-        groupName: task.groupName,
-        sessionId: task.sessionId,
-      });
-    } else {
-      safeNavigate(navigation, 'GroupDetail', { groupId: task.groupId });
+    if (
+      navigateFromInboxTask(navigation, task, {
+        role: auth.profile?.role,
+        isTeachingRole: false,
+      })
+    ) {
+      return;
     }
+    safeNavigate(navigation, 'CourseHub', {
+      groupId: task.groupId,
+      groupName: task.groupName,
+    });
   };
 
   return (
