@@ -11,6 +11,7 @@ import {
   makeSenseCardId,
   SENSE_EMPTY_TEXT,
   SENSE_HANDLE_PREVIEW,
+  SENSE_SAVE_FAILED_TEXT,
   SENSE_SECTION_TITLE,
   SENSE_UNSIGNED_TEXT,
   senseStorageKey,
@@ -374,6 +375,52 @@ it('reads a previously saved handle on first mount instead of showing the card a
   render(<HomePage />);
   expect(await screen.findByText(SENSE_EMPTY_TEXT)).toBeTruthy();
   expect(screen.queryByText(/依據作業「期末報告」已過截止時間/)).toBeNull();
+});
+
+it('keeps the card and says it did not save when local write fails', async () => {
+  vi.mocked(loadHomeData).mockResolvedValue(overdueHome());
+  const key = senseStorageKey('school:alice');
+  const memory: Record<string, string> = {};
+  const previous = Object.getOwnPropertyDescriptor(window, 'localStorage');
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem(name: string) {
+        return Object.prototype.hasOwnProperty.call(memory, name) ? memory[name] : null;
+      },
+      setItem(name: string, value: string) {
+        if (name === key) {
+          throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+        }
+        memory[name] = String(value);
+      },
+      removeItem(name: string) {
+        delete memory[name];
+      },
+      clear() {
+        for (const name of Object.keys(memory)) delete memory[name];
+      },
+      key(index: number) {
+        return Object.keys(memory)[index] ?? null;
+      },
+      get length() {
+        return Object.keys(memory).length;
+      },
+    },
+  });
+  try {
+    render(<HomePage />);
+    expect(await screen.findByText(/依據作業「期末報告」已過截止時間/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '從清單移出' }));
+    fireEvent.click(screen.getByRole('button', { name: '確認移出' }));
+    expect(await screen.findByText(SENSE_SAVE_FAILED_TEXT)).toBeTruthy();
+    expect(screen.getByText(/依據作業「期末報告」已過截止時間/)).toBeTruthy();
+    expect(screen.queryByText(SENSE_EMPTY_TEXT)).toBeNull();
+    expect(screen.queryByRole('button', { name: '撤銷上次操作' })).toBeNull();
+    expect(window.localStorage.getItem(key)).toBeNull();
+  } finally {
+    if (previous) Object.defineProperty(window, 'localStorage', previous);
+  }
 });
 
 it('says there is nothing to handle when loaded tasks are not due soon, without filling sample cards', async () => {
