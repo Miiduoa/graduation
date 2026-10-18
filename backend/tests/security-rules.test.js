@@ -2154,6 +2154,50 @@ test('handles can be looked up one at a time but never listed', async () => {
   await assertFails(stranger.doc('schools/pu/handles/alice_01').get());
 });
 
+test('handle rename and removal commit with the private school pointer or not at all', async () => {
+  const assert = require('node:assert/strict');
+  await seedFirestore(async (db) => {
+    await db.doc('users/alice').set({ displayName: 'Alice' });
+    await db.doc('users/bob').set({ displayName: 'Bob' });
+    for (const schoolId of ['pu', 'other']) {
+      await db.doc(`schools/${schoolId}/members/alice`).set({ status: 'active', role: 'student' });
+    }
+    await db.doc('schools/pu/handles/alice_old').set({ uid: 'alice', name: 'Alice', handle: 'alice_old' });
+    await db.doc('schools/pu/handles/taken').set({ uid: 'bob', name: 'Bob', handle: 'taken' });
+    await db.doc('schools/other/handles/alice_other').set({ uid: 'alice', name: 'Alice', handle: 'alice_other' });
+    await db.doc('users/alice/settings/friendHandle:pu').set({ handle: 'alice_old' });
+    await db.doc('users/alice/settings/friendHandle:other').set({ handle: 'alice_other' });
+  });
+  const db = testEnv.authenticatedContext('alice').firestore();
+  const pointer = db.doc('users/alice/settings/friendHandle:pu');
+  const rename = (next) => db.runTransaction(async (transaction) => {
+    const current = await transaction.get(pointer);
+    const old = db.doc(`schools/pu/handles/${current.data().handle}`);
+    await transaction.get(old);
+    transaction.set(db.doc(`schools/pu/handles/${next}`), { uid: 'alice', name: 'Alice', handle: next });
+    transaction.delete(old);
+    transaction.set(pointer, { handle: next });
+  });
+  await assertFails(rename('taken'));
+  assert.equal((await pointer.get()).data().handle, 'alice_old');
+  assert.equal((await db.doc('schools/pu/handles/alice_old').get()).exists, true);
+  await assertSucceeds(rename('alice_new'));
+  assert.equal((await db.doc('schools/pu/handles/alice_old').get()).exists, false);
+  assert.equal((await pointer.get()).data().handle, 'alice_new');
+  await assertSucceeds(db.runTransaction(async (transaction) => {
+    const current = await transaction.get(pointer);
+    const alias = db.doc(`schools/pu/handles/${current.data().handle}`);
+    await transaction.get(alias);
+    transaction.delete(alias);
+    transaction.set(pointer, { handle: '' });
+  }));
+  assert.equal((await db.doc('schools/pu/handles/alice_new').get()).exists, false);
+  assert.equal((await pointer.get()).data().handle, '');
+  assert.equal((await db.doc('schools/other/handles/alice_other').get()).exists, true);
+  assert.equal((await db.doc('users/alice/settings/friendHandle:other').get()).data().handle, 'alice_other');
+  await assertFails(testEnv.authenticatedContext('bob').firestore().doc(pointer.path).get());
+});
+
 test('assistant replies can only be written by the server, never by a student', async () => {
   await seedFirestore(async (db) => {
     for (const uid of ['alice', 'bob', 'tina']) {
