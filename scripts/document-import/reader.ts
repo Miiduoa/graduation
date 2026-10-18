@@ -11,6 +11,7 @@ import {
   normalizePersonalImportPdfText,
   type PersonalImportDocument,
   type PersonalImportDocumentSection,
+  type PersonalImportDocumentReadOptions,
 } from '../../packages/shared/src/imports/documents';
 
 // Run the parser inside a disposable iframe/WebView, including PDF's worker handler.
@@ -182,9 +183,11 @@ class LocalPdfAssets {
 export async function readDocumentBytes(
   bytes: Uint8Array,
   name: string,
-  options: { signal?: AbortSignal; ocrAssetBase?: string } = {},
+  options: PersonalImportDocumentReadOptions & { signal?: AbortSignal; ocrAssetBase?: string } = {},
 ): Promise<PersonalImportDocument> {
   const format = validatePersonalImportDocumentFile(name, bytes.length);
+  if (options.pdfMode !== undefined && !['auto', 'ocr'].includes(options.pdfMode))
+    fail('文件讀取方式不正確，請重新選擇。', 'format');
   check(options.signal);
   if (format === 'xlsx') return readWorkbook(bytes, name);
   if (new TextDecoder().decode(bytes.subarray(0, 5)) !== '%PDF-') corrupt();
@@ -232,8 +235,13 @@ export async function readDocumentBytes(
       const warnings = [
         'PDF 的空白欄位與跨欄排版可能影響對齊，請核對原檔；週格課表不會自動猜測節次。',
       ];
-      if (!rows.length) {
+      if (!rows.length || options.pdfMode === 'ocr') {
         if (typeof document === 'undefined' || !(globalThis as any).Tesseract) {
+          if (options.pdfMode === 'ocr')
+            fail(
+              '整頁辨識工具未能載入，請重新開啟後再試，或將需要的頁面截圖辨識。',
+              'ocr-unavailable',
+            );
           warnings.push('這一頁是掃描影像，需要以截圖辨識後才能匯入。');
         } else {
           const base = options.ocrAssetBase ?? '../ocr/';

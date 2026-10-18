@@ -14,7 +14,8 @@ def extension_files():
     # Keep shared-module relative imports intact in the isolated API packaging source.
     for name in ['sync', 'backup', 'records', 'validation', 'types']:
         sources[f'apps/api/src/personal-import-sync/imports/{name}.ts'] = ROOT / f'packages/shared/src/imports/{name}.ts'
-    sources['apps/api/src/personal-import-sync/timetable/periods.ts'] = ROOT / 'packages/shared/src/timetable/periods.ts'
+    for name in ['periods', 'schoolPeriods']:
+        sources[f'apps/api/src/personal-import-sync/timetable/{name}.ts'] = ROOT / f'packages/shared/src/timetable/{name}.ts'
     return sources
 
 

@@ -35,24 +35,34 @@ const describe = (rows: PersonalImportRecord[]) =>
     ? rows
         .map((row) =>
           [
-            row.title,
-            `${row.academicYear}/${row.semester}`,
-            row.grade && `成績 ${row.grade}`,
-            row.credits !== undefined && `${row.credits} 學分`,
-            row.date,
-            row.startTime,
-            row.endTime,
-            row.dayOfWeek && `星期${row.dayOfWeek}`,
-            row.startPeriod && `${row.startPeriod}–${row.endPeriod}節`,
-            row.location,
-            row.teacher,
-            row.className,
-            row.linkedCourseId && '含個人課班連結',
-          ]
-            .filter(Boolean)
-            .join(' · '),
+            `名稱：${row.title}`,
+            `資料類型：${{ timetable: '課表', grades: '成績', events: '活動' }[row.kind]}`,
+            `學年度：${row.academicYear || '未填'}`,
+            `學期：${row.semester || '未填'}`,
+            `課程代碼：${row.courseCode || '未填'}`,
+            `教師：${row.teacher || '未填'}`,
+            `班別：${row.className || '未填'}`,
+            `地點：${row.location || '未填'}`,
+            `星期：${row.dayOfWeek ?? '未填'}`,
+            `開始節次：${row.startPeriod ?? '未填'}`,
+            `結束節次：${row.endPeriod ?? '未填'}`,
+            `原始節次：${row.periodLabel || '未填'}`,
+            `開始時間：${row.startTime || '未填'}`,
+            `結束時間：${row.endTime || '未填'}`,
+            `學分：${row.credits ?? '未填'}`,
+            `成績：${row.grade || '未填'}`,
+            `日期：${row.date || '未填'}`,
+            `結束日期：${row.endDate || '未填'}`,
+            `全天：${row.allDay === undefined ? '未填' : row.allDay ? '是' : '否'}`,
+            `課班連結：${row.linkedCourseId || '未填'}`,
+            `來源類型：${{ paste: '貼上文字', file: '檔案', screenshot: '截圖' }[row.source.type]}`,
+            `來源檔名：${row.source.name || '未填'}`,
+            `來源列：${row.source.line}`,
+            `來源文字：${row.source.rawText || '未填'}`,
+            `匯入時間：${row.importedAt}`,
+          ].join('\n'),
         )
-        .join('\n')
+        .join('\n\n')
     : '已刪除這筆資料';
 
 export function PersonalImportSyncPanel(props: Props) {
@@ -202,16 +212,21 @@ export function PersonalImportSyncPanel(props: Props) {
           }}
         >
           <Text style={{ ...textStyle, fontWeight: '700' }}>需要核對：{conflict.title}</Text>
+          {conflict.reason === 'unconfirmed' && (
+            <Text style={textStyle}>
+              無法確認上次同步是否已送達。請先匯出完整備份，再核對這個校園的全部紀錄。保留這台裝置會取代帳號上的完整內容；保留帳號資料會取代本機完整內容。未選擇前，兩邊的資料都會保留。
+            </Text>
+          )}
           <Text style={textStyle}>這台裝置：{describe(conflict.local)}</Text>
           <Text style={textStyle}>帳號中的資料：{describe(conflict.remote)}</Text>
           <Button
             text={choices[conflict.key] === 'local' ? '已選：保留這台裝置' : '保留這台裝置'}
-            disabled={busy || status.running}
+            disabled={busy || status.running || !active()}
             onPress={() => setChoices((value) => ({ ...value, [conflict.key]: 'local' }))}
           />
           <Button
             text={choices[conflict.key] === 'remote' ? '已選：保留帳號資料' : '保留帳號資料'}
-            disabled={busy || status.running}
+            disabled={busy || status.running || !active()}
             onPress={() => setChoices((value) => ({ ...value, [conflict.key]: 'remote' }))}
           />
         </View>
@@ -222,6 +237,7 @@ export function PersonalImportSyncPanel(props: Props) {
           disabled={
             busy ||
             status.running ||
+            !active() ||
             !ledger?.sync?.enabled ||
             conflicts.some((item) => !choices[item.key])
           }
