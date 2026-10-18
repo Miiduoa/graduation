@@ -12,12 +12,13 @@ on:
         required: true
         type: string
       transit_profile:
-        description: 'live-tdx requires real arrivals; official-links-only requires both TDX variables absent and truthful unavailable UI'
+        description: 'live-tdx requires live arrivals; static-catalog verifies free Taichung stations without TDX keys; official-links-only is for legacy releases'
         required: true
         type: choice
         default: live-tdx
         options:
           - live-tdx
+          - static-catalog
           - official-links-only
   pull_request:
     paths:
