@@ -6,11 +6,15 @@ import { loadNuniHomeData } from '@/lib/nuniHomeOverview';
 import { NuniError } from '@campus/shared/src/nuni';
 import { IDENTITY_LOOKUP_FAILED_COPY, IDENTITY_LOOKUP_FAILED_HINT } from '@/lib/accountIdentity';
 import {
+  applySenseAction,
+  emptySenseState,
+  makeSenseCardId,
   SENSE_EMPTY_TEXT,
   SENSE_HANDLE_PREVIEW,
   SENSE_SECTION_TITLE,
   SENSE_UNSIGNED_TEXT,
   senseStorageKey,
+  serializeSenseState,
 } from '@campus/shared/src/todaySense';
 const state = vi.hoisted(() => ({
   uid: 'alice' as string | null,
@@ -324,6 +328,52 @@ it('builds a sense card from the real overdue task, writes local state after pre
   expect(window.localStorage.getItem(senseStorageKey('school:alice'))).toContain('"handle"');
   fireEvent.click(screen.getByRole('button', { name: '撤銷上次操作' }));
   expect(await screen.findByText(/依據作業「期末報告」已過截止時間/)).toBeTruthy();
+});
+
+const overdueHome = (): HomeData => ({
+  ...data('資料結構'),
+  tasks: [
+    {
+      id: 'hw-1',
+      courseId: 'cs101',
+      courseName: '資料結構',
+      title: '期末報告',
+      dueAt: '2020-01-02T12:30:00Z',
+      href: '/course/cs101#assignment-hw-1',
+    },
+  ],
+});
+
+it.each([
+  ['從清單移出', '確認移出', '"handle"'],
+  ['稍後一小時', '確認稍後', '"snooze"'],
+] as const)('keeps %s after remounting from saved local state', async (action, confirm, token) => {
+  vi.mocked(loadHomeData).mockResolvedValue(overdueHome());
+  const view = render(<HomePage />);
+  expect(await screen.findByText(/依據作業「期末報告」已過截止時間/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: action }));
+  fireEvent.click(screen.getByRole('button', { name: confirm }));
+  expect(await screen.findByText(SENSE_EMPTY_TEXT)).toBeTruthy();
+  expect(window.localStorage.getItem(senseStorageKey('school:alice'))).toContain(token);
+  view.unmount();
+  render(<HomePage />);
+  expect(await screen.findByText(SENSE_EMPTY_TEXT)).toBeTruthy();
+  expect(screen.queryByText(/依據作業「期末報告」已過截止時間/)).toBeNull();
+  expect(screen.queryByRole('button', { name: action })).toBeNull();
+});
+
+it('reads a previously saved handle on first mount instead of showing the card again', async () => {
+  vi.mocked(loadHomeData).mockResolvedValue(overdueHome());
+  const cardId = makeSenseCardId('overdue', { courseId: 'cs101', id: 'hw-1' });
+  window.localStorage.setItem(
+    senseStorageKey('school:alice'),
+    serializeSenseState(
+      applySenseAction(emptySenseState(), 'handle', { id: cardId, title: '期末報告' }, new Date()),
+    ),
+  );
+  render(<HomePage />);
+  expect(await screen.findByText(SENSE_EMPTY_TEXT)).toBeTruthy();
+  expect(screen.queryByText(/依據作業「期末報告」已過截止時間/)).toBeNull();
 });
 
 it('says there is nothing to handle when loaded tasks are not due soon, without filling sample cards', async () => {
