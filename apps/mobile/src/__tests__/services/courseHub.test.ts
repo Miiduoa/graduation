@@ -73,29 +73,31 @@ test('course identifiers have explicit provenance and no default course or infer
     expect(resolveCourseHubTarget(params)).toBeNull();
 });
 test('loads authoritative same-course content, hides drafts and rejects unsafe material links', async () => {
-  jest.mocked(getDocsFromServer).mockImplementation(async (ref) =>
-    String(ref).endsWith('/modules')
-      ? collectionResult([
-          {
-            title: '第二單元',
-            published: true,
-            resourceUrl: 'https://school.test/reading',
-            order: 2,
-          },
-          { title: '第一單元', published: true, resourceUrl: 'javascript:alert(1)', order: 1 },
-          { title: '草稿教材', published: false },
-        ])
-      : collectionResult([
-          {
-            title: '閱讀心得',
-            type: 'assignment',
-            published: true,
-            status: 'published',
-            dueAt: '2026-10-10T10:00:00Z',
-          },
-          { title: '草稿作業', status: 'draft' },
-        ]),
-  );
+  jest.mocked(getDocsFromServer).mockImplementation(async (ref) => {
+    const path = String(ref);
+    if (path.endsWith('/materials')) return collectionResult([]);
+    if (path.endsWith('/modules'))
+      return collectionResult([
+        {
+          title: '第二單元',
+          published: true,
+          resourceUrl: 'https://school.test/reading',
+          order: 2,
+        },
+        { title: '第一單元', published: true, resourceUrl: 'javascript:alert(1)', order: 1 },
+        { title: '草稿教材', published: false },
+      ]);
+    return collectionResult([
+      {
+        title: '閱讀心得',
+        type: 'assignment',
+        published: true,
+        status: 'published',
+        dueAt: '2026-10-10T10:00:00Z',
+      },
+      { title: '草稿作業', status: 'draft' },
+    ]);
+  });
   const result = await loadCourseHub(scope);
   expect(result.name).toBe('資訊倫理');
   expect(result.materials.items.map((item) => item.url)).toEqual([
@@ -106,7 +108,10 @@ test('loads authoritative same-course content, hides drafts and rejects unsafe m
   expect(result.assignments.items[0].dueAt).toBe('2026-10-10T10:00:00.000Z');
   expect(getDocsFromServer).toHaveBeenCalledWith('groups/course-a/assignments');
   expect(getDocsFromServer).toHaveBeenCalledWith('groups/course-a/modules');
-  expect(getDocFromServer).toHaveBeenCalledTimes(6);
+  expect(getDocsFromServer).toHaveBeenCalledWith('groups/course-a/modules/0/materials');
+  expect(getDocsFromServer).toHaveBeenCalledWith('groups/course-a/modules/1/materials');
+  expect(getDocsFromServer).not.toHaveBeenCalledWith('groups/course-a/modules/2/materials');
+  expect(getDocFromServer).toHaveBeenCalledTimes(9);
   expect(JSON.stringify(result)).not.toMatch(/13\/15|6\/7|88|A-/);
 });
 test('confirmed empty and rejected sections stay distinct', async () => {
@@ -231,4 +236,35 @@ test('unpublished, withdrawn, sample and wrong-school modules never surface as r
     );
   const result = await loadCourseHub(scope);
   expect(result.materials.items).toHaveLength(1);
+});
+test('nested module files replace the unit link and drop unsafe or unpublished files', async () => {
+  jest.mocked(getDocsFromServer).mockImplementation(async (ref) => {
+    const path = String(ref);
+    if (path === 'groups/course-a/modules/0/materials')
+      return collectionResult([
+        { label: '講義 PDF', url: 'https://school.test/week1.pdf' },
+        { label: '草稿檔', url: 'https://school.test/draft.pdf', published: false },
+        { label: '危險連結', url: 'javascript:alert(1)' },
+      ]);
+    if (path.endsWith('/modules'))
+      return collectionResult([
+        {
+          title: '第一週',
+          published: true,
+          resourceUrl: 'https://school.test/week1-overview',
+          order: 1,
+        },
+      ]);
+    return collectionResult([]);
+  });
+  const result = await loadCourseHub(scope);
+  expect(result.materials.items).toEqual([
+    {
+      id: '0:0',
+      title: '講義 PDF',
+      description: '',
+      url: 'https://school.test/week1.pdf',
+      order: 1,
+    },
+  ]);
 });

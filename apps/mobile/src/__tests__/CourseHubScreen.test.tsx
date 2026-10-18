@@ -67,32 +67,36 @@ test('read failures offer retry and are not described as empty coursework', asyn
   fireEvent.press(view.getByText('重新讀取課程'));
   await view.findByText('資訊倫理');
 });
-test('partial read failures stay distinct and an attachment opening failure never reports success', async () => {
-  jest
-    .mocked(loadCourseHub)
-    .mockResolvedValue({
-      ...data,
-      assignments: { status: 'error', items: [] },
-      materials: {
-        status: 'ready',
-        items: [
-          {
-            id: 'm1',
-            title: '課堂閱讀',
-            description: '',
-            url: 'https://school.test/reading',
-            order: 1,
-          },
-        ],
-      },
-    });
-  jest.mocked(webBrowserOpenWithPuTronClassGate).mockResolvedValue(false);
-  const view = render(<CourseHub route={route} />);
+test('partial read failures stay distinct and published files open in the existing viewer', async () => {
+  const navigation = { navigate: jest.fn() };
+  jest.mocked(loadCourseHub).mockResolvedValue({
+    ...data,
+    assignments: { status: 'error', items: [] },
+    materials: {
+      status: 'ready',
+      items: [
+        {
+          id: 'm1',
+          title: '課堂閱讀',
+          description: '',
+          url: 'https://school.test/reading',
+          order: 1,
+        },
+      ],
+    },
+  });
+  const view = render(<CourseHub route={route} navigation={navigation} />);
   await view.findByText('課堂閱讀');
   expect(view.getByText('作業讀取失敗，請更新課程資料後重試。')).toBeTruthy();
+  expect(view.getByText(/目前沒有課程檔案上傳路徑/)).toBeTruthy();
   fireEvent.press(view.getByText('開啟教材：課堂閱讀'));
-  await view.findByText('目前無法開啟連結，請稍後再試。');
-  expect(webBrowserOpenWithPuTronClassGate).toHaveBeenCalledWith('https://school.test/reading');
+  expect(safeNavigate).toHaveBeenCalledWith(navigation, 'CourseMaterialViewer', {
+    url: 'https://school.test/reading',
+    title: '課堂閱讀',
+    kind: 'material',
+    courseName: '資訊倫理',
+  });
+  expect(webBrowserOpenWithPuTronClassGate).not.toHaveBeenCalled();
 });
 test('TronClass route opens exactly the selected official course and never Firestore quiz', async () => {
   const view = render(<CourseHub route={{ params: { source: 'tronclass', courseId: 321 } }} />);
