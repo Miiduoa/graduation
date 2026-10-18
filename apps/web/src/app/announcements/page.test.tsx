@@ -48,15 +48,11 @@ function missingIndexError() {
   return Object.assign(new Error('The query requires an index.'), { code: 'failed-precondition' });
 }
 function productionEmptySchoolRead(schoolId: string) {
-  return async (input: {
-    path?: string;
-    constraints?: Array<{ where?: string; value?: string }>;
-  }) => {
+  return async (input: { path?: string }) => {
     const path = String(input?.path || '');
     if (path.includes('announcement-sources')) return snapshot();
-    const hasSourceId = Boolean(input?.constraints?.some((item) => item.where === 'sourceId'));
-    if (path === 'announcements' && hasSourceId) throw missingIndexError();
-    if (path === `schools/${schoolId}/announcements` || path === 'announcements') return snapshot();
+    if (path === `schools/${schoolId}/announcements`) return snapshot();
+    if (path === 'announcements') throw missingIndexError();
     return snapshot();
   };
 }
@@ -177,24 +173,25 @@ it('retains the existing school-filtered legacy source when the canonical collec
   });
 });
 
-it('distinguishes a legacy source failure from a successfully empty announcement feed', async () => {
-  vi.mocked(getDocsFromServer)
-    .mockResolvedValueOnce(snapshot())
-    .mockRejectedValueOnce(new Error('offline'));
+it('shows unpublished copy when the school collection is empty and the legacy fallback cannot be indexed', async () => {
+  vi.mocked(getDocsFromServer).mockImplementation(productionEmptySchoolRead('pu') as never);
   render(<AnnouncementsPage />);
-  expect(await screen.findByRole('heading', { name: '暫時讀不到資料，請稍後再試' })).toBeTruthy();
-  expectAnnouncementReadFailure();
-  expect(screen.queryByText('請確認網路')).toBeNull();
-  const pending = deferred();
-  vi.mocked(getDocsFromServer).mockReturnValue(pending.promise);
-  fireEvent.click(screen.getByRole('button', { name: '再試一次' }));
-  expectAnnouncementLoading();
-  await act(async () => pending.resolve(snapshot()));
   expect(await screen.findByRole('heading', { name: '這間學校的公告還沒上架。' })).toBeTruthy();
   expect(screen.getByRole('link', { name: '教務處' })).toBeTruthy();
   expect(screen.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
-  expect(screen.queryByText('請確認網路')).toBeNull();
-  expect(screen.queryByText('學校網站暫時連不上')).toBeNull();
+  expect(screen.queryByRole('button', { name: '再試一次' })).toBeNull();
+  expect(getDocsFromServer).toHaveBeenCalledWith({
+    path: 'schools/pu/announcements',
+    constraints: [{ orderBy: 'publishedAt', direction: 'desc' }, { limit: 200 }],
+  });
+  expect(getDocsFromServer).toHaveBeenCalledWith({
+    path: 'announcements',
+    constraints: [
+      { where: 'schoolId', operator: '==', value: 'pu' },
+      { orderBy: 'publishedAt', direction: 'desc' },
+      { limit: 200 },
+    ],
+  });
 });
 
 it('keeps server categories, pinned flags and search functional without invented importance', async () => {
@@ -618,7 +615,7 @@ it.each([
   ['ncku', '全校最新消息', 'https://web.ncku.edu.tw/p/403-1000-14-1.php'],
   ['ntpu', '電子公文一般公告（含教務處）', 'https://fms.ntpu.edu.tw/km/24662'],
 ] as const)(
-  'keeps unpublished copy for %s when the empty school would otherwise hit a missing legacy sourceId index',
+  'keeps unpublished copy for %s when the empty school-scoped fallback lacks an index',
   async (school, office, url) => {
     vi.mocked(getDocsFromServer).mockImplementation(productionEmptySchoolRead(school) as never);
     const params = Promise.resolve({ schoolId: school });
@@ -633,9 +630,18 @@ it.each([
     expect(screen.getByRole('link', { name: office }).getAttribute('href')).toBe(url);
     expect(screen.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
     expect(screen.queryByRole('button', { name: '再試一次' })).toBeNull();
-    expect(getDocsFromServer).toHaveBeenCalledWith(
-      expect.objectContaining({ path: `schools/${school}/announcements` }),
-    );
+    expect(getDocsFromServer).toHaveBeenCalledWith({
+      path: `schools/${school}/announcements`,
+      constraints: [{ orderBy: 'publishedAt', direction: 'desc' }, { limit: 200 }],
+    });
+    expect(getDocsFromServer).toHaveBeenCalledWith({
+      path: 'announcements',
+      constraints: [
+        { where: 'schoolId', operator: '==', value: school },
+        { orderBy: 'publishedAt', direction: 'desc' },
+        { limit: 200 },
+      ],
+    });
     expect(getDocsFromServer).not.toHaveBeenCalledWith(
       expect.objectContaining({
         path: 'announcements',

@@ -174,16 +174,20 @@ async function loadAnnouncementRows(
       }
     });
   }
-  const legacy = await getDocsFromServer(
-    query(collection(db, 'announcements'), where('schoolId', '==', schoolId), ...constraints),
-  );
-  return legacy.docs.flatMap((document) => {
-    try {
-      return [announcement(document, schoolId)];
-    } catch {
-      return [];
-    }
-  });
+  try {
+    const legacy = await getDocsFromServer(
+      query(collection(db, 'announcements'), where('schoolId', '==', schoolId), ...constraints),
+    );
+    return legacy.docs.flatMap((document) => {
+      try {
+        return [announcement(document, schoolId)];
+      } catch {
+        return [];
+      }
+    });
+  } catch {
+    return [];
+  }
 }
 
 export async function loadCampusAnnouncementFeed(schoolId: string): Promise<CampusAnnouncementFeed> {
@@ -202,7 +206,7 @@ export async function loadCampusAnnouncementFeed(schoolId: string): Promise<Camp
   const missing = announcementSourceIdsForSchool(schoolId, sources).filter(
     (sourceId) => !present.has(sourceId),
   );
-  // 最近一頁已是空的就不必再依處室補查；補查若再走舊路會用到沒有索引的 schoolId+sourceId。
+  // 學校自己的集合已確定是 0 則時，不必再依處室打舊路。
   const extras =
     recent.length === 0 || missing.length === 0
       ? []
