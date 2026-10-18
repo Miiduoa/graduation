@@ -15,15 +15,16 @@ process.on('exit', () => fs.rmSync(output, { recursive: true, force: true }));
 for (const [source, name] of [
   ['apps/web/src/lib/transit.ts', 'transit'],
   ['apps/web/src/lib/transit-server.ts', 'transit-server'],
+  ['apps/web/src/lib/transit-catalog.ts', 'transit-catalog'],
   ['apps/web/src/app/api/transit/route.ts', 'route'],
 ]) {
   const result = ts.transpileModule(fs.readFileSync(path.join(root, source), 'utf8'), {
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true },
     fileName: source,
     reportDiagnostics: true,
   });
   assert.equal((result.diagnostics || []).filter((entry) => entry.category === ts.DiagnosticCategory.Error).length, 0);
-  fs.writeFileSync(path.join(output, `${name}.js`), result.outputText.replace('"@/lib/transit-server"', '"./transit-server"'));
+  fs.writeFileSync(path.join(output, `${name}.js`), result.outputText.replace('"@/lib/transit-server"', '"./transit-server"').replace('"../data/taichung-transit-catalog.json"', JSON.stringify(path.join(root, 'apps/web/src/data/taichung-transit-catalog.json'))));
 }
 const client = require(path.join(output, 'transit.js'));
 const server = require(path.join(output, 'transit-server.js'));
@@ -147,10 +148,33 @@ test('walking link contains only the public station location, never an origin or
   assert.equal(link.searchParams.has('origin'), false);
   assert.equal(link.searchParams.has('key'), false);
 });
-test('missing server credentials return an explicit state and never generate sample stops', async () => {
+test('absent credentials use verified Taichung catalog without network; other cities and arrivals remain unavailable', async () => {
   const mock = service([], { credentials: () => ({}) });
-  assert.deepEqual(await mock.execute(campusQuery), { status: 'unavailable', reason: 'not-configured' });
+  const result = await mock.execute(campusQuery);
+  assert.equal(result.status, 'ready');
+  assert.equal(result.kind, 'stops');
+  assert.ok(result.stops.length > 0);
+  assert.ok(result.stops.every(row => row.source === 'taichung-open-data' && row.id.startsWith('TCOD_') && row.name.includes('靜宜大學') && row.routes.length));
+  assert.deepEqual(await mock.execute({ action:'search', city:'Taichung', text:'靜宜大學' }), result);
+  assert.deepEqual(await mock.execute({ action:'search', city:'Taipei', text:'靜宜大學' }), { status:'unavailable', reason:'not-configured' });
+  const first = result.stops[0];
+  const nearby = await mock.execute({action:'nearby',city:'Taichung',lat:first.lat,lon:first.lon,radius:300});
+  assert.ok(nearby.stops.some(row => row.id === first.id));
+  assert.ok(nearby.stops.every(row => row.distance >= 0 && row.distance <= 300));
+  assert.deepEqual(await mock.execute({action:'arrivals',city:'Taichung',stopId:first.id}), {status:'unavailable',reason:'not-configured'});
   assert.equal(mock.calls.length, 0);
+});
+test('static catalog IDs are never forwarded to TDX even after credentials are configured', async () => {
+  const mock = service();
+  assert.deepEqual(await mock.execute({action:'arrivals',city:'Taichung',stopId:'TCOD_valid'}), {status:'unavailable',reason:'not-configured'});
+  assert.equal(mock.calls.length, 0);
+});
+test('partial or blank credentials do not silently select static mode', async () => {
+  for (const credentials of [{clientId:'x'}, {clientSecret:'x'}, {clientId:'',clientSecret:''}]) {
+    const mock=service([], {credentials:()=>credentials});
+    assert.deepEqual(await mock.execute(campusQuery),{status:'unavailable',reason:'not-configured'});
+    assert.equal(mock.calls.length,0);
+  }
 });
 test('OAuth single-flight and query cache collapse concurrent requests without exposing credentials', async () => {
   const mock = service();
