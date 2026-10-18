@@ -1,9 +1,16 @@
 import React from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { RefreshControl } from 'react-native';
 import StudentTodayScreen from '../screens/StudentTodayScreen';
 import { loadStudentHome } from '../data/studentHome';
 import type { CourseSpace, InboxTask } from '../data/types';
+import {
+  SENSE_EMPTY_TEXT,
+  SENSE_HANDLE_PREVIEW,
+  SENSE_SECTION_TITLE,
+  senseStorageKey,
+} from '@campus/shared/src/todaySense';
 
 let mockAuth = {
   user: { uid: 'student-a' },
@@ -62,6 +69,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockAuth = { user: { uid: 'student-a' }, profile: { schoolId: 'school-a', role: 'student' } };
   jest.mocked(loadStudentHome).mockResolvedValue(result());
+  void AsyncStorage.clear();
 });
 
 test('opens the real platform workspace and school services even while school data is unavailable', async () => {
@@ -119,6 +127,8 @@ test('a failed refresh hides old records and never turns the failure into an emp
   await view.findByText('無法讀取校務課程。請確認登入狀態與網路連線後重試。');
   expect(view.queryByText('繳交期末報告')).toBeNull();
   expect(view.queryByText(/目前沒有校務待辦/)).toBeNull();
+  expect(view.queryByText(SENSE_EMPTY_TEXT)).toBeNull();
+  expect(view.queryByText(SENSE_SECTION_TITLE)).toBeNull();
   fireEvent.press(view.getByText('重新讀取'));
   await view.findByText('繳交期末報告');
 });
@@ -145,3 +155,45 @@ test.each(['account', 'school'])(
     expect(view.getByText(/Campus One 作業與測驗請到「課程與作業」查看/)).toBeTruthy();
   },
 );
+
+test('handles an overdue inbox item locally after preview and undoes it', async () => {
+  const data = result();
+  data.tasks[0] = {
+    ...data.tasks[0],
+    dueAt: new Date(Date.now() - 60 * 60 * 1000),
+  };
+  jest.mocked(loadStudentHome).mockResolvedValue(data);
+  const view = render(<StudentTodayScreen />);
+  expect(await view.findByText(SENSE_SECTION_TITLE)).toBeTruthy();
+  expect(view.getByText(/已過截止時間/)).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '從清單移出' }));
+  expect(view.getByText(SENSE_HANDLE_PREVIEW)).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '確認移出' }));
+  expect(await view.findByText(SENSE_EMPTY_TEXT)).toBeTruthy();
+  expect(await AsyncStorage.getItem(senseStorageKey('student-a', 'school-a'))).toContain(
+    '"handle"',
+  );
+  fireEvent.press(view.getByRole('button', { name: '撤銷上次操作' }));
+  expect(await view.findByText(/已過截止時間/)).toBeTruthy();
+});
+
+test('opens the live session from a sense card', async () => {
+  const data = result();
+  data.tasks[0] = { ...data.tasks[0], kind: 'live', sessionId: 'attendance-a', dueAt: null };
+  jest.mocked(loadStudentHome).mockResolvedValue(data);
+  const view = render(<StudentTodayScreen />);
+  fireEvent.press(await view.findByRole('button', { name: '前往簽到' }));
+  expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    screen: 'AttendanceMultiMethod',
+    params: { courseId: 'course-a', sessionId: 'attendance-a' },
+  });
+});
+
+test('shows an honest empty sense state when loaded tasks are not due soon', async () => {
+  const data = result();
+  data.tasks[0] = { ...data.tasks[0], dueAt: new Date('2099-01-02T12:30:00.000Z') };
+  jest.mocked(loadStudentHome).mockResolvedValue(data);
+  const view = render(<StudentTodayScreen />);
+  expect(await view.findByText(SENSE_EMPTY_TEXT)).toBeTruthy();
+  expect(view.queryByRole('button', { name: '從清單移出' })).toBeNull();
+});

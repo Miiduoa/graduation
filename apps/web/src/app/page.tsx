@@ -13,6 +13,8 @@ import { loadNuniHomeData } from '@/lib/nuniHomeOverview';
 import { publicCampusServices } from '@/lib/publicCampusServices';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { isTeacherRole, useSchoolRole } from '@/lib/useSchoolRole';
+import { TodaySensePanel } from '@/components/TodaySensePanel';
+import type { SenseInputItem, SensePhase } from '@campus/shared/src/todaySense';
 import styles from './home.module.css';
 
 const teachingRoles = ['owner', 'instructor', 'moderator', 'owner-teacher', 'co-teacher'];
@@ -127,6 +129,25 @@ export default function HomePage() {
     ) ?? data?.tasks[0];
   const signedIn = !!owner && !blocked;
   const busy = sessionLoading || (!!owner && loading);
+  const sensePhase: SensePhase = blocked
+    ? 'hidden'
+    : !signedIn
+      ? 'unsigned'
+      : busy
+        ? 'loading'
+        : error
+          ? 'error'
+          : 'ready';
+  const senseItems: SenseInputItem[] =
+    data?.tasks.map((task) => ({
+      id: task.id,
+      kind: task.kind === 'quiz' ? 'quiz' : 'assignment',
+      courseId: task.courseId,
+      courseName: task.courseName,
+      title: task.title,
+      dueAt: task.dueAt,
+      href: taskHref(task),
+    })) ?? [];
   const courseSections = [
     { title: '修習課程', items: studying, description: '查看教材、繳交作業與老師回饋。' },
     {
@@ -290,6 +311,13 @@ export default function HomePage() {
                 </div>
               </section>
             )}
+            <TodaySensePanel
+              ownerId={owner}
+              schoolId={school?.selectedSchoolId}
+              items={senseItems}
+              now={now}
+              phase={sensePhase}
+            />
             {data && (
               <>
                 {!!studying.length && (
