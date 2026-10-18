@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   applySenseAction,
@@ -49,16 +49,23 @@ export function TodaySensePanel({
   phase: SensePhase;
 }) {
   const storageKey = ownerId ? senseStorageKey(ownerId, schoolId) : '';
-  const [state, setState] = useState<SenseState>(() => readSenseState(storageKey));
+  const [state, setState] = useState<SenseState>(() => parseSenseState(null));
   const [loadedKey, setLoadedKey] = useState(storageKey);
+  const [hydrated, setHydrated] = useState(false);
   const [pending, setPending] = useState<{ cardId: string; action: 'handle' | 'snooze' } | null>(
     null,
   );
   if (loadedKey !== storageKey) {
     setLoadedKey(storageKey);
-    setState(readSenseState(storageKey));
+    setState(parseSenseState(null));
     setPending(null);
+    setHydrated(false);
   }
+  useEffect(() => {
+    setPending(null);
+    setState(readSenseState(storageKey));
+    setHydrated(true);
+  }, [storageKey]);
 
   const clock = now ?? null;
   const { cards, hiddenCount } = useMemo(
@@ -70,6 +77,7 @@ export function TodaySensePanel({
   );
 
   if (phase === 'hidden' || phase === 'loading' || phase === 'error' || !clock) return null;
+  if (phase === 'ready' && !hydrated) return null;
 
   const write = (next: SenseState) => {
     setState(next);
