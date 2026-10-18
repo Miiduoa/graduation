@@ -8,7 +8,7 @@ const {
   UNAVAILABLE,
   assertSchoolScopedWrite,
 } = require('./sync');
-const { SOURCE_DOWN_EMPTY } = require('./catalog');
+const { SOURCE_UNAVAILABLE } = require('./catalog');
 const { robotsAllows, resetPoliteFetch } = require('./politeFetch');
 const { countDrop } = require('./extract');
 
@@ -131,23 +131,36 @@ test('a failed fetch keeps previous scrape rows and does not clear lastSuccessAt
   expect(db.docs.get('schools/pu/announcements/manual').title).toBe('校方自行發布');
   expect(db.docs.get('schools/pu/announcement-sources/pu-acd').status).toBe(UNAVAILABLE);
   expect(db.docs.get('schools/pu/announcement-sources/pu-acd').lastSuccessAt).toBe('kept');
-  expect(db.docs.get('schools/pu/announcement-sources/pu-acd').message).toBe(SOURCE_DOWN_EMPTY);
+  expect(db.docs.get('schools/pu/announcement-sources/pu-acd').message).toBe(SOURCE_UNAVAILABLE);
 });
 
-test('visible feed keeps stale scrape rows and only labels a total outage when nothing remains', () => {
+test('visible feed hides stale scrape rows from a down source and labels a total outage', () => {
+  const now = new Date('2026-10-18T00:00:00.000Z');
   const rows = [
-    { id: 'a', sourceId: 'pu-acd', origin: 'public_scrape', title: '舊稿' },
-    { id: 'b', sourceId: 'pu-osa', origin: 'public_scrape', title: '學務處' },
+    {
+      id: 'a',
+      sourceId: 'pu-acd',
+      origin: 'public_scrape',
+      title: '選課公告',
+      publishedAt: '2026-10-01T00:00:00.000Z',
+    },
+    {
+      id: 'b',
+      sourceId: 'pu-osa',
+      origin: 'public_scrape',
+      title: '學務處住宿申請',
+      publishedAt: '2026-10-08T00:00:00.000Z',
+    },
   ];
   const sources = [
     { sourceId: 'pu-acd', status: UNAVAILABLE },
     { sourceId: 'pu-osa', status: 'healthy' },
   ];
-  expect(visibleAnnouncements(rows, sources).map((row) => row.id)).toEqual(['a', 'b']);
-  expect(feedStatus(rows, sources).status).toBe('ready');
+  expect(visibleAnnouncements(rows, sources, now).map((row) => row.id)).toEqual(['b']);
+  expect(feedStatus(visibleAnnouncements(rows, sources, now), sources).status).toBe('ready');
   expect(feedStatus([], [{ status: UNAVAILABLE }, { status: UNAVAILABLE }])).toEqual({
     status: UNAVAILABLE,
-    message: SOURCE_DOWN_EMPTY,
+    message: SOURCE_UNAVAILABLE,
   });
 });
 
@@ -204,6 +217,36 @@ test('dry-run does not need Firestore', async () => {
   });
   expect(result.status).toBe('healthy');
   expect(result.items).toHaveLength(1);
+});
+
+test('missing dates stay empty and leftover scrape rows are hidden instead of deleted', async () => {
+  const db = memoryDb();
+  db.docs.set('schools/pu/announcements/old', {
+    sourceId: 'pu-acd',
+    origin: 'public_scrape',
+    title: '過期稿',
+    visible: true,
+    studentFeed: true,
+  });
+  const html = `<table><tr><td><a href="/p/412-1042-1.php">選課公告</a></td></tr></table>`;
+  const result = await syncSource(source, {
+    db,
+    fetchImpl: async (url) =>
+      String(url).endsWith('robots.txt')
+        ? htmlResponse('User-agent: *\nAllow: /\n')
+        : htmlResponse(html),
+    now: () => 1_000,
+    wait: async () => {},
+  });
+  expect(result.status).toBe('healthy');
+  const written = [...db.docs.entries()].filter(([path]) => path.includes('/announcements/'));
+  const current = written.find(([path]) => path !== 'schools/pu/announcements/old');
+  expect(current[1].publishedAt).toBeNull();
+  expect(db.docs.get('schools/pu/announcements/old')).toMatchObject({
+    title: '過期稿',
+    visible: false,
+    studentFeed: false,
+  });
 });
 
 test('writes stay inside the selected school announcement collections', () => {

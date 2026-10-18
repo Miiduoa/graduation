@@ -15,7 +15,8 @@ import {
   announcementSourceIdsForSchool,
   isAnnouncementSchoolVisibleToPublic,
   mergeAnnouncementsById,
-  SOURCE_DOWN_EMPTY_TEXT,
+  selectStudentAnnouncements,
+  SOURCE_UNAVAILABLE_TEXT,
 } from '@campus/shared/src/campusAnnouncements';
 import { getAnnouncementVisibilityEnv } from '@/lib/runtime';
 
@@ -101,7 +102,7 @@ export async function loadAnnouncementFeed(schoolId: string): Promise<Announceme
       sourceId: typeof data.sourceId === 'string' ? data.sourceId : document.id,
       office: typeof data.office === 'string' ? data.office : document.id,
       status: unavailable ? 'unavailable' : 'healthy',
-      message: unavailable ? SOURCE_DOWN_EMPTY_TEXT : '',
+      message: unavailable ? SOURCE_UNAVAILABLE_TEXT : '',
       listUrl: originalUrl(data.listUrl),
       lastSuccessAt: publishedDate(data.lastSuccessAt) || undefined,
     };
@@ -125,8 +126,10 @@ export async function loadAnnouncementFeed(schoolId: string): Promise<Announceme
             ),
           ),
         );
+  const merged = mergeAnnouncementsById([recent, ...extras]);
+  const announcements = selectStudentAnnouncements(merged, sources);
   return {
-    announcements: mergeAnnouncementsById([recent, ...extras]),
+    announcements,
     sources,
     allUnavailable: sources.length > 0 && sources.every((item) => item.status === 'unavailable'),
   };
@@ -164,11 +167,15 @@ function normalizeAnnouncement(
     category: typeof data.category === 'string' ? data.category : undefined,
     pinned: data.pinned === true,
     schoolId,
-  };
+    studentFeed: data.studentFeed !== false,
+    visible: data.visible !== false,
+    audience: typeof data.audience === 'string' ? data.audience : undefined,
+  } as Announcement;
 }
 
 export async function loadAnnouncement(schoolId: string, id: string): Promise<Announcement | null> {
-  if (!isAnnouncementSchoolVisibleToPublic({ schoolId }, getAnnouncementVisibilityEnv())) return null;
+  if (!isAnnouncementSchoolVisibleToPublic({ schoolId }, getAnnouncementVisibilityEnv()))
+    return null;
   if (!isFirebaseConfigured()) throw new Error('Announcement source unavailable');
   if (!id || id.includes('/')) return null;
   const db = getDb();

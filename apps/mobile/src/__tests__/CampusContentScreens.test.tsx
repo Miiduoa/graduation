@@ -252,15 +252,15 @@ test('switching schools hides the previous announcement list and does not keep i
   expect(loadCampusAnnouncementFeed).toHaveBeenLastCalledWith('nthu');
 });
 
-test('keeps old announcements when the school site is down and links the office when empty', async () => {
+test('hides stale scrape rows when the school site is down and links the office when empty', async () => {
   jest.mocked(loadCampusAnnouncementFeed).mockResolvedValue({
-    announcements: [announcement],
+    announcements: [],
     sources: [
       {
         sourceId: 'pu-acd',
         office: '教務處',
         status: 'unavailable',
-        message: '學校網站暫時連不上，可以先到學校網站看最新消息',
+        message: '暫時抓不到',
         lastSuccessAt: '2026-10-12T10:05:00.000Z',
         listUrl: 'https://acd.pu.edu.tw/p/403-1042-885-1.php',
       },
@@ -268,10 +268,10 @@ test('keeps old announcements when the school site is down and links the office 
     allUnavailable: true,
   });
   const list = render(<AnnouncementsScreen navigation={navigation} />);
-  await list.findByText('最後更新 10/12 18:05，學校網站暫時連不上');
-  expect(list.getByText('校方的新公告')).toBeTruthy();
+  await list.findByText('學校網站暫時連不上，可以先到學校網站看最新消息');
+  expect(list.getByText('暫時抓不到')).toBeTruthy();
+  expect(list.queryByText('校方的新公告')).toBeNull();
   expect(list.queryByText('暫時讀不到新公告')).toBeNull();
-  expect(list.queryByText('暫時抓不到')).toBeNull();
   jest.mocked(loadCampusAnnouncementFeed).mockResolvedValue({
     announcements: [],
     sources: [
@@ -303,7 +303,7 @@ test('keeps old announcements when the school site is down and links the office 
 });
 
 test.each([
-  ['ncku', '全校最新消息', 'https://web.ncku.edu.tw/p/403-1000-14-1.php'],
+  ['ncku', '全校最新消息', 'https://web.ncku.edu.tw/p/422-1000-1026.php?Lang=zh-tw'],
   ['ntpu', '電子公文一般公告（含教務處）', 'https://fms.ntpu.edu.tw/km/24662'],
 ] as const)(
   'shows unpublished copy and the official %s announcement page when that school has no items',

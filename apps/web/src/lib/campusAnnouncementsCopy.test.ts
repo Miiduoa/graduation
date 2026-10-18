@@ -8,8 +8,11 @@ import {
   formatStaleAnnouncementNotice,
   isAnnouncementSchoolVisibleToPublic,
   isPlaceholderAnnouncementSchool,
+  chineseDisplayTitle,
   listAnnouncementCatalogLinks,
   mergeAnnouncementsById,
+  parseAnnouncementDate,
+  selectStudentAnnouncements,
   PLACEHOLDER_ANNOUNCEMENT_SCHOOL_IDS,
   FIRESTORE_UNAVAILABLE_WITH_CACHE_TEXT,
   SOURCE_DOWN_EMPTY_TEXT,
@@ -141,7 +144,7 @@ it('exposes official NCKU and NTPU announcement pages already connected in the c
       {
         sourceId: 'ncku-campus',
         office: '全校最新消息',
-        listUrl: 'https://web.ncku.edu.tw/p/403-1000-14-1.php',
+        listUrl: 'https://web.ncku.edu.tw/p/422-1000-1026.php?Lang=zh-tw',
       },
     ]),
   );
@@ -195,4 +198,29 @@ it('finds office announcements by 學務處 or 住宿 even when source is missin
       ],
     ]).map((item) => item.id),
   ).toEqual(['b', 'a']);
+});
+
+it('keeps Chinese titles, parses ROC dates, and hides stale scrape rows from a down source', () => {
+  const now = new Date('2026-10-18T00:00:00.000Z');
+  expect(parseAnnouncementDate('[115.09.18]機車通行證抽籤結果')).toBe('2026-09-18T00:00:00.000Z');
+  expect(
+    chineseDisplayTitle(
+      '115學年度第1學期學生選課清單列印及相關規定Printout of the Course Registration List',
+    ),
+  ).toBe('115學年度第1學期學生選課清單列印及相關規定');
+  expect(
+    selectStudentAnnouncements(
+      [
+        {
+          id: 'old',
+          title: '選課公告',
+          publishedAt: '2026-10-01T00:00:00.000Z',
+          origin: 'public_scrape',
+          sourceId: 'pu-acd',
+        },
+      ],
+      [{ sourceId: 'pu-acd', status: 'unavailable' }],
+      now,
+    ),
+  ).toEqual([]);
 });

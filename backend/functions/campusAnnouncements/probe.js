@@ -6,7 +6,7 @@ const { syncSchool } = require('./sync');
 
 function parseProbe(argv) {
   const { values } = parseArgs({
-    args: argv,
+    args: argv.filter((item) => item !== '--'),
     options: {
       schools: { type: 'string' },
     },

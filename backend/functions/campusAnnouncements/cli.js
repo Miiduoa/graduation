@@ -49,6 +49,8 @@ function summarize(result) {
         title: row.title,
         originalUrl: row.originalUrl,
         publishedAt: row.publishedAt,
+        office: row.office,
+        studentFeed: row.studentFeed,
         path: row.path,
       })),
     })),

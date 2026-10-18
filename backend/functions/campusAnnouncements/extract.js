@@ -3,8 +3,9 @@
 const { runParser } = require('./parsers');
 const { htmlFingerprint } = require('./url');
 const { classifyAnnouncement, summarizeAnnouncement } = require('./classify');
+const { announcementQualityFlags } = require('./quality');
 
-async function extractFromHtml(html, source) {
+async function extractFromHtml(html, source, now = new Date()) {
   const parsers = Array.isArray(source.parsers) && source.parsers.length ? source.parsers : ['htmlLinks'];
   let items = [];
   let used = '';
@@ -17,15 +18,35 @@ async function extractFromHtml(html, source) {
     }
   }
   return {
-    items: items.map((item) => ({
-      ...item,
-      sourceId: source.sourceId,
-      office: source.office,
-      scope: source.scope,
-      category: classifyAnnouncement(item.title, source.office),
-      summary: item.summary || summarizeAnnouncement(item.title),
-      body: summarizeAnnouncement(item.summary || item.title),
-    })),
+    parsedCount: items.length,
+    items: items.map((item) => {
+      const flags = announcementQualityFlags(
+        {
+          title: item.rawTitle || item.title,
+          publishedAt: item.publishedAt,
+          office: item.office,
+          schoolId: source.schoolId,
+          sourceOffice: source.office,
+        },
+        now,
+      );
+      const office = flags.office;
+      return {
+        ...item,
+        title: flags.title || item.title,
+        publishedAt: flags.publishedAt || '',
+        sourceId: source.sourceId,
+        office,
+        scope: source.scope,
+        category: classifyAnnouncement(flags.title || item.title, office),
+        summary: item.summary || summarizeAnnouncement(flags.title || item.title),
+        body: summarizeAnnouncement(item.summary || flags.title || item.title),
+        audience: flags.audience,
+        studentFeed: flags.studentFeed,
+        rank: flags.rank,
+        visible: flags.visible,
+      };
+    }),
     parser: used || parsers[0],
     fingerprint: htmlFingerprint(html),
   };

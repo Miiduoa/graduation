@@ -264,6 +264,7 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
           {emptyKind === 'source_down' ? (
             <>
               <h2>{SOURCE_DOWN_EMPTY_TEXT}</h2>
+              <p>暫時抓不到</p>
               <OfficeSourceLinks
                 links={downLinks.length ? downLinks : listAnnouncementCatalogLinks(schoolId)}
               />

@@ -2,8 +2,24 @@ import {
   listAnnouncementCatalogLinks,
   type AnnouncementCatalogLink,
 } from './campusAnnouncementCatalog';
+import {
+  announcementQualityFlags,
+  chineseDisplayTitle,
+  parseAnnouncementDate,
+  selectStudentAnnouncements,
+  studentWallStartUtc,
+  type StudentAnnouncementRow,
+} from './campusAnnouncementQuality';
 
 export { listAnnouncementCatalogLinks, type AnnouncementCatalogLink };
+export {
+  announcementQualityFlags,
+  chineseDisplayTitle,
+  parseAnnouncementDate,
+  selectStudentAnnouncements,
+  studentWallStartUtc,
+  type StudentAnnouncementRow,
+};
 
 export const ANNOUNCEMENT_SCOPES = ['campus', 'office', 'department'] as const;
 export type AnnouncementScope = (typeof ANNOUNCEMENT_SCOPES)[number];
