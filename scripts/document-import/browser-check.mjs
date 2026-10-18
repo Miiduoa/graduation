@@ -9,7 +9,7 @@ const adapter = await build({
   absWorkingDir: root,
   stdin: {
     contents:
-      "import { readPersonalImportDocumentFile } from './apps/web/src/lib/personalImportDocuments'; window.readFixtureDocument = readPersonalImportDocumentFile;",
+      "import { readPersonalImportDocumentFile } from './apps/web/src/lib/personalImportDocuments'; import { parsePersonalImportDocument } from './packages/shared/src/imports/documents'; window.readFixtureDocument = readPersonalImportDocumentFile; window.parseFixtureDocument = parsePersonalImportDocument;",
     resolveDir: root,
   },
   bundle: true,

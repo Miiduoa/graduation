@@ -4,12 +4,14 @@ import {
   validatePersonalImportDocumentFile,
   validatePersonalImportDocument,
   type PersonalImportDocument,
+  type PersonalImportDocumentReadOptions,
 } from '@campus/shared';
 
 /** File bytes stay in a disposable, same-origin reader. No document is uploaded. */
 export async function readPersonalImportDocumentFile(
   file: File,
   signal?: AbortSignal,
+  options: PersonalImportDocumentReadOptions = {},
 ): Promise<PersonalImportDocument> {
   validatePersonalImportDocumentFile(file.name, file.size);
   if (signal?.aborted) throw new PersonalImportDocumentError('已取消讀取。', 'cancelled');
@@ -48,7 +50,13 @@ export async function readPersonalImportDocumentFile(
           .then((bytes) => {
             if (!settled)
               iframe.contentWindow?.postMessage(
-                { channel: 'campus-document', id, name: file.name, bytes },
+                {
+                  channel: 'campus-document',
+                  id,
+                  name: file.name,
+                  bytes,
+                  pdfMode: options.pdfMode,
+                },
                 window.location.origin,
                 [bytes],
               );

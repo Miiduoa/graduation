@@ -5,6 +5,7 @@ import {
   deletePersonalImport,
   editPersonalImport,
   loadPersonalImports,
+  personalImportStorageKey,
   subscribePersonalImports,
 } from '../services/personalImports';
 import {
@@ -27,18 +28,28 @@ const row = (id: string, title = '英文'): PersonalImportRow => ({
 });
 let remote: PersonalImportSnapshot;
 let transport: jest.Mock;
+let accepted: Map<string, unknown>;
 beforeEach(async () => {
   await AsyncStorage.clear();
   cancelPersonalImportSync(scope);
   remote = { schoolId: 'pu', revision: 0, records: [], updatedAt: null };
+  accepted = new Map();
   transport = jest.fn(
     async (
       path: string,
-      input: { records?: PersonalImportRecord[]; expectedRevision?: number },
+      input: { records?: PersonalImportRecord[]; expectedRevision?: number; mutationId?: string },
     ) => {
       if (path === 'personal-imports/read') return remote;
       expect(path).toBe('personal-imports/write');
-      expect(input.expectedRevision).toBe(remote.revision);
+      if (accepted.has(input.mutationId!)) {
+        expect(accepted.get(input.mutationId!)).toEqual(input);
+        return remote;
+      }
+      if (input.expectedRevision !== remote.revision)
+        throw Object.assign(new Error('revision conflict'), {
+          code: 'PERSONAL_IMPORT_REVISION_CONFLICT',
+        });
+      accepted.set(input.mutationId!, JSON.parse(JSON.stringify(input)));
       remote = {
         ...remote,
         revision: remote.revision + 1,
@@ -176,5 +187,130 @@ test('network failure preserves records and base, while notifications distinguis
   await appendPersonalImports(scope, [row('two', '統計')]);
   await sync();
   stop();
-  expect(sources).toEqual(['local', 'sync']);
+  expect(sources[0]).toBe('local');
+  expect(sources.slice(1)).toEqual(['sync', 'sync']);
+});
+
+test('reload and pause retain the exact pending request and do not resurrect a newer remote deletion', async () => {
+  await appendPersonalImports(scope, [row('one')]);
+  await setPersonalImportSyncEnabled(scope, true, () => true);
+  const send = transport.getMockImplementation()!;
+  transport.mockImplementation(async (path, input) => {
+    const result = await send(path, input);
+    if (path.endsWith('/write')) throw new Error('ack lost');
+    return result;
+  });
+  await expect(sync()).rejects.toThrow('ack lost');
+  const stored = (await AsyncStorage.getItem(personalImportStorageKey(scope)))!;
+  const originalPending = JSON.parse(stored).sync.pending;
+  expect(originalPending).toBeDefined();
+  remote = { ...remote, revision: 2, records: [] };
+  cancelPersonalImportSync(scope);
+  await AsyncStorage.clear();
+  await AsyncStorage.setItem(personalImportStorageKey(scope), stored);
+  await setPersonalImportSyncEnabled(scope, false, () => true);
+  expect((await loadPersonalImports(scope)).sync?.pending).toEqual(originalPending);
+  await setPersonalImportSyncEnabled(scope, true, () => true);
+  transport.mockImplementation(send).mockClear();
+  await sync();
+  expect(transport.mock.calls[0]).toEqual([
+    'personal-imports/write',
+    { schoolId: 'pu', ...originalPending },
+  ]);
+  expect((await loadPersonalImports(scope)).records).toEqual([]);
+  expect((await loadPersonalImports(scope)).sync?.pending).toBeUndefined();
+  expect(remote.revision).toBe(2);
+});
+
+test('local changes after an unacknowledged write survive replay and conflict with remote deletion', async () => {
+  await appendPersonalImports(scope, [row('one')]);
+  await setPersonalImportSyncEnabled(scope, true, () => true);
+  const send = transport.getMockImplementation()!;
+  transport.mockImplementation(async (path, input) => {
+    const result = await send(path, input);
+    if (path.endsWith('/write')) throw new Error('ack lost');
+    return result;
+  });
+  await expect(sync()).rejects.toThrow('ack lost');
+  const original = (await loadPersonalImports(scope)).records[0];
+  await editPersonalImport(scope, original, { ...original, grade: '99' });
+  remote = { ...remote, revision: 2, records: [] };
+  transport.mockImplementation(send);
+  const result = await sync();
+  expect(result.conflicts).toHaveLength(1);
+  expect((await loadPersonalImports(scope)).records[0].grade).toBe('99');
+  expect((await loadPersonalImports(scope)).sync?.base?.records[0].grade).toBe('85');
+  expect(remote.records).toEqual([]);
+});
+
+test('a failed pre-send checkpoint prevents upload, while failed ACK persistence recovers from durable pending', async () => {
+  await appendPersonalImports(scope, [row('one')]);
+  await setPersonalImportSyncEnabled(scope, true, () => true);
+  const write = AsyncStorage.setItem as jest.Mock;
+  const original = write.getMockImplementation()!;
+  write.mockRejectedValueOnce(new Error('quota'));
+  await expect(sync()).rejects.toThrow('quota');
+  expect(transport.mock.calls.filter(([path]) => path.endsWith('/write'))).toHaveLength(0);
+  expect((await loadPersonalImports(scope)).sync?.pending).toBeUndefined();
+  write.mockImplementation(async (key: string, value: string) => {
+    const syncState = JSON.parse(value).sync;
+    if (syncState?.base && !syncState.pending) throw new Error('quota after ACK');
+    return original(key, value);
+  });
+  try {
+    await expect(sync()).rejects.toThrow('quota after ACK');
+    expect(remote.revision).toBe(1);
+    expect((await loadPersonalImports(scope)).sync?.pending).toBeDefined();
+  } finally {
+    write.mockImplementation(original);
+  }
+  remote = { ...remote, revision: 2, records: [] };
+  await sync();
+  expect((await loadPersonalImports(scope)).records).toEqual([]);
+  expect(remote.revision).toBe(2);
+});
+
+test('account switch after sending leaves pending durable for a later safe replay', async () => {
+  await appendPersonalImports(scope, [row('one')]);
+  await setPersonalImportSyncEnabled(scope, true, () => true);
+  let active = true;
+  const send = transport.getMockImplementation()!;
+  transport.mockImplementation(async (path, input) => {
+    const result = await send(path, input);
+    if (path.endsWith('/write')) active = false;
+    return result;
+  });
+  await expect(syncPersonalImports(scope, transport, () => active)).rejects.toThrow('切換');
+  expect((await loadPersonalImports(scope)).sync?.pending).toBeDefined();
+  remote = { ...remote, revision: 2, records: [] };
+  transport.mockImplementation(send);
+  await sync();
+  expect((await loadPersonalImports(scope)).records).toEqual([]);
+  expect(remote.revision).toBe(2);
+});
+
+test('a pruned or never-accepted pending mutation requires review before adopting account data', async () => {
+  await appendPersonalImports(scope, [row('one')]);
+  await setPersonalImportSyncEnabled(scope, true, () => true);
+  const send = transport.getMockImplementation()!;
+  transport.mockImplementation(async (path, input) => {
+    const result = await send(path, input);
+    if (path.endsWith('/write')) throw new Error('ack lost');
+    return result;
+  });
+  await expect(sync()).rejects.toThrow('ack lost');
+  accepted.clear();
+  remote = { ...remote, revision: 2, records: [] };
+  transport.mockImplementation(send);
+  const conflict = await sync();
+  expect(conflict.conflicts[0].reason).toBe('unconfirmed');
+  expect((await loadPersonalImports(scope)).records).toHaveLength(1);
+  expect((await loadPersonalImports(scope)).sync?.pending).toBeDefined();
+  await syncPersonalImports(scope, transport, () => true, {
+    ...conflict.review!,
+    choices: { [conflict.conflicts[0].key]: 'remote' },
+  });
+  expect((await loadPersonalImports(scope)).records).toEqual([]);
+  expect((await loadPersonalImports(scope)).sync?.pending).toBeUndefined();
+  expect(remote.revision).toBe(2);
 });

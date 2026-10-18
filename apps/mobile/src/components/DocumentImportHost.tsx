@@ -6,6 +6,7 @@ import {
   PersonalImportDocumentError,
   validatePersonalImportDocumentFile,
   type PersonalImportDocument,
+  type PersonalImportDocumentReadOptions,
 } from '@campus/shared';
 import { DocumentCoordinator } from '../services/imports/documentCoordinator';
 import { DOCUMENT_IMPORT_HTML, prepareDocumentBaseUrl } from '../services/imports/documentAssets';
@@ -13,6 +14,7 @@ export type DocumentImportHandle = {
   read: (
     file: { uri: string; name: string; size?: number },
     signal?: AbortSignal,
+    options?: PersonalImportDocumentReadOptions,
   ) => Promise<PersonalImportDocument>;
   cancel: () => void;
 };
@@ -57,7 +59,7 @@ export const DocumentImportHost = forwardRef<DocumentImportHandle>(
     useImperativeHandle(
       ref,
       () => ({
-        read: async (input, signal) => {
+        read: async (input, signal, options = {}) => {
           request.current?.abort();
           instance.cancel();
           const controller = new AbortController();
@@ -80,7 +82,7 @@ export const DocumentImportHost = forwardRef<DocumentImportHandle>(
             if (alive.current) setBaseUrl(url);
             const base64 = await file.base64();
             check();
-            return await instance.read(input.name, base64, controller.signal);
+            return await instance.read(input.name, base64, controller.signal, options);
           } finally {
             signal?.removeEventListener('abort', abort);
             if (request.current === controller) request.current = null;

@@ -18,7 +18,7 @@ export function personalImportUndoBody(count: number): string {
 }
 
 export function personalImportSavedNotice(added: number): string {
-  return `已在這台裝置新增 ${added} 筆，原有資料保留。資料只存在這台裝置，換手機或清除資料就會不見。`;
+  return `已在這台裝置新增 ${added} 筆，原有資料保留。換裝置或清除資料前，請確認同步成功，或下載完整備份。`;
 }
 
 export function personalImportUndoneNotice(removed: number): string {

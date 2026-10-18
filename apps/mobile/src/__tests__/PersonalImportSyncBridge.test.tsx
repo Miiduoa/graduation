@@ -39,7 +39,11 @@ const flush = async () => {
   });
 };
 beforeEach(async () => {
-  jest.useFakeTimers();
+  // RNTL cleanup uses a setImmediate fallback through setTimeout. Only the
+  // bridge interval needs virtual time; keep cleanup's microtask drain live.
+  jest.useFakeTimers({
+    doNotFake: ['setTimeout', 'clearTimeout', 'setImmediate', 'clearImmediate'],
+  });
   await AsyncStorage.clear();
   cancelPersonalImportSync(scope);
   mockScope = scope;

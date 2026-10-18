@@ -29,7 +29,9 @@ export const PERIOD_PROFILE_TITLES: Record<PeriodProfileId, string> = {
   ntpu: '國立臺北大學',
 };
 
-function slots(rows: ReadonlyArray<readonly [string, string, string]>): readonly SchoolPeriodSlot[] {
+function slots(
+  rows: ReadonlyArray<readonly [string, string, string]>,
+): readonly SchoolPeriodSlot[] {
   return rows.map(([label, start, end], index) => ({
     index: index + 1,
     label,
@@ -168,14 +170,14 @@ export function parsePeriodRange(
     `^(?:第\\s*)?(${token})(?:\\s*節)?\\s*[-–—~～至到]\\s*(?:第\\s*)?(${token})(?:\\s*節)?$`,
     'i',
   ).exec(clean);
-  if (range) {
+  if (range?.[1] && range[2]) {
     const start = slotIndexForLabel(range[1], profile);
     const end = slotIndexForLabel(range[2], profile);
     if (start && end && end >= start) return { start, end, text: range[0] };
     return null;
   }
   const single = new RegExp(`^(?:第\\s*)?(${token})(?:\\s*節)?$`, 'i').exec(clean);
-  if (single) {
+  if (single?.[1]) {
     const start = slotIndexForLabel(single[1], profile);
     if (start) return { start, end: start, text: single[0] };
   }
@@ -184,8 +186,17 @@ export function parsePeriodRange(
     const indexes = brackets
       .map((item) => slotIndexForLabel(item.replace(/[\[\]]/g, ''), profile))
       .filter((item): item is number => typeof item === 'number');
-    if (indexes.length && indexes.every((item, i) => i === 0 || item === indexes[i - 1] + 1)) {
-      return { start: indexes[0], end: indexes[indexes.length - 1], text: clean };
+    const first = indexes[0],
+      last = indexes[indexes.length - 1];
+    if (
+      first !== undefined &&
+      last !== undefined &&
+      indexes.every((item, i) => {
+        const previous = indexes[i - 1];
+        return i === 0 || (previous !== undefined && item === previous + 1);
+      })
+    ) {
+      return { start: first, end: last, text: clean };
     }
   }
   return null;
