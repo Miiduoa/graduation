@@ -7,6 +7,8 @@ import { AICard, AIButton, AIChip } from '../ui/aiFirst';
 import {
   BUS_CITIES,
   PUBLIC_BUS_OFFICIAL_FALLBACK,
+  TAICHUNG_BUS_CATALOG_SOURCE,
+  TAICHUNG_BUS_OFFICIAL,
   primaryBusCity,
   publicArrivalLabel,
   queryPublicTransit,
@@ -17,6 +19,39 @@ import {
 } from '../features/publicTransit';
 
 const RADII = [300, 600, 1000] as const;
+const catalogDirection = (direction: string) => direction === '去' ? '去程' : direction === '返' ? '返程' : direction || '方向未提供';
+
+function catalogSummary(stop: PublicBusStop): string {
+  if (!stop.routes?.length) return '靜態站牌資料';
+  const names = [...new Set(stop.routes.map((route) => route.name))];
+  const directions = [...new Set(stop.routes.map((route) => catalogDirection(route.direction)))];
+  return names.slice(0, 3).join('、') + (names.length > 3 ? ' 等路線' : ' 路線') + ' · ' + directions.join('／');
+}
+
+function CatalogStop({ stop, openLink }: { stop: PublicBusStop; openLink: (url: string) => void }) {
+  const theme = useTheme();
+  const body = { ...theme.typography.bodySmall, color: theme.colors.muted };
+  return (
+    <AICard title={stop.name + ' · 經過路線'}>
+      <View style={{ gap: theme.space.sm }}>
+        <Text style={body}>即時到站尚未接通</Text>
+        <Text style={body}>
+          臺中市政府交通局 · 站牌資料快照：{stop.catalogDate ? new Date(stop.catalogDate).toLocaleDateString('zh-TW', {
+            timeZone: 'Asia/Taipei',
+          }) : '日期未提供'}
+        </Text>
+        <Text style={body}>以下是站牌與路線資料，並非即時車況；班次與營運異動請查官方網站。</Text>
+        {stop.routes?.length ? stop.routes.map((route, index) => (
+          <Text key={index} style={{ ...theme.typography.body, color: theme.colors.text }}>
+            {route.name} · {catalogDirection(route.direction)} · {route.destination ? '往 ' + route.destination : '目的地未提供'}
+          </Text>
+        )) : <Text style={body}>這個站牌的路線資料尚未提供。</Text>}
+        <AIButton label="到臺中公車網站查即時動態" variant="ghost" onPress={() => openLink(TAICHUNG_BUS_OFFICIAL)} />
+        <AIButton label="查看站牌資料來源" variant="ghost" onPress={() => openLink(TAICHUNG_BUS_CATALOG_SOURCE)} />
+      </View>
+    </AICard>
+  );
+}
 
 function Arrivals({ stop }: { stop: PublicBusStop }) {
   const theme = useTheme();
@@ -159,7 +194,7 @@ export function PublicTransitExplorer({
       setStatus('unavailable');
       setMessage(
         result.status === 'unavailable' && result.reason === 'not-configured'
-          ? '即時公車服務尚未啟用，可先查看公路客運官方網站。'
+          ? '目前尚未接通這個縣市的站牌資料，可先查看官方公車網站。'
           : '目前無法取得公車站牌，請確認網路、縣市或稍後再試。',
       );
     }
@@ -207,9 +242,9 @@ export function PublicTransitExplorer({
     }
   };
 
-  const official = () => {
-    void Linking.openURL(PUBLIC_BUS_OFFICIAL_FALLBACK).catch(() => {
-      if (mounted.current) setMessage('無法開啟公路客運官方網站，請確認網路連線。');
+  const openLink = (url: string) => {
+    void Linking.openURL(url).catch(() => {
+      if (mounted.current) setMessage('無法開啟連結，請確認網路連線後再試。');
     });
   };
 
@@ -218,7 +253,7 @@ export function PublicTransitExplorer({
     <AICard title="公開公車站牌">
       <View style={{ gap: theme.space.md }}>
         <Text style={body}>
-          {schoolName ? schoolName + ' · ' : ''}依目前選擇縣市查 TDX 真實站牌；不會用上一所學校的路線代替。跨縣市校區可自行更換縣市。
+          {schoolName ? schoolName + ' · ' : ''}依目前選擇縣市查詢官方站牌資料。跨縣市校區可自行更換縣市；不需登入學校帳號。
         </Text>
         <AIButton
           label={city ? '查詢縣市：' + BUS_CITIES[city] : '選擇查詢縣市'}
@@ -290,18 +325,34 @@ export function PublicTransitExplorer({
         {stops.map((stop) => (
           <AIButton
             key={stop.city + ':' + stop.id}
-            label={stop.name + '（' + stop.id + '）' +
-              (stop.distance !== null ? ' · 約 ' + Math.round(stop.distance) + ' 公尺' : '')}
+            label={stop.name + (stop.source === 'taichung-open-data' ? ' · ' + catalogSummary(stop) : '（' + stop.id + '）') +
+              (stop.distance !== null ? ' · 約 ' + Math.round(stop.distance) + ' 公尺' : '') +
+              (stop.source === 'taichung-open-data' ? ' · 無即時到站' : '')}
             variant={selected?.id === stop.id ? 'primary' : 'ghost'}
             onPress={() => setSelected(stop)}
           />
         ))}
-        {selected && <Arrivals key={selected.city + ':' + selected.id} stop={selected} />}
+        {selected && (
+          <>
+            {selected.source === 'taichung-open-data'
+              ? <CatalogStop stop={selected} openLink={openLink} />
+              : <Arrivals key={selected.city + ':' + selected.id} stop={selected} />}
+            <AIButton
+              label="步行前往此站牌"
+              variant="ghost"
+              onPress={() => openLink('https://www.google.com/maps/dir/?api=1&destination=' +
+                encodeURIComponent(selected.lat + ',' + selected.lon) + '&travelmode=walking')}
+            />
+          </>
+        )}
         <Text style={body}>
-          到站時間為交通部公開資料的預估值，請核對站牌方向、現場車況與營運公告。
-          找不到市區公車時，以下官方公路客運查詢可作為另一個入口。
+          請核對站牌方向與現場營運公告。有提供到站時間時，預估值仍可能隨車況變動。
         </Text>
-        <AIButton label="公路客運官方網站" variant="ghost" onPress={official} />
+        <AIButton
+          label={city === 'Taichung' ? '臺中公車官方網站' : '公路客運官方網站'}
+          variant="ghost"
+          onPress={() => openLink(city === 'Taichung' ? TAICHUNG_BUS_OFFICIAL : PUBLIC_BUS_OFFICIAL_FALLBACK)}
+        />
       </View>
     </AICard>
   );

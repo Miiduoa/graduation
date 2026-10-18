@@ -167,3 +167,48 @@ test('remote source executes the chosen links profile without loading local envi
   const output=execFileSync('/bin/sh',['-c',buildRemoteCommand(source,linksProfile)],{encoding:'utf8'});
   assert.equal(parseRemoteReport(output,linksProfile).transitReady,false);
 });
+
+const catalogProfile='static-catalog';
+const catalogStop={...stop,id:'TCOD_1',source:'taichung-open-data',catalogDate:stamp,distance:null,
+  routes:[{name:'300',direction:'去',destination:'靜宜大學'}]};
+const catalogNotice='<aside data-transit-mode="static-catalog">臺中站牌可查詢，即時到站尚未接通<a href="https://citybus.taichung.gov.tw/">臺中市官方公車查詢</a></aside>';
+function catalogPublic({stops=[catalogStop],notice=catalogNotice,arrivals={status:'unavailable',reason:'not-configured'},arrivalStatus=503,wrongNearby=false,fetchedAt=stamp}={}) {
+  return async(url,init)=>{
+    assert.equal(new URL(url).origin,ORIGIN);
+    assert.equal(init.redirect,'error');assert.equal(init.credentials,'omit');
+    if(url.endsWith('/health/ready')) return Response.json({service:'campus-one-web',status:'ready',legacy:'ready',revision:sha});
+    if(url.endsWith('/bus')) return new Response(shell+notice,{headers:{'Content-Type':'text/html','Permissions-Policy':'geolocation=(self)'}});
+    const query=JSON.parse(init.body);
+    if(query.action==='arrivals')return Response.json(arrivals,{status:arrivalStatus});
+    if(query.city==='Taipei')return Response.json({status:'unavailable',reason:'not-configured'},{status:503});
+    return Response.json({status:'ready',kind:'stops',stops:query.action==='nearby'?stops.map(row=>({...row,distance:wrongNearby?301:0})):stops,limited:false,fetchedAt});
+  };
+}
+test('catalog runtime needs absent credentials and cannot be confused with a live arrival proof',async()=>{
+  const report=await probeRuntime(catalogProfile,{credentials:{},fetcher:()=>assert.fail('no provider request')});
+  assert.equal(report.mode,catalogProfile);assert.equal(report.transitReady,false);
+  assert.equal(parseRemoteReport('CAMPUS_TRANSIT_PROBE:'+JSON.stringify(report),catalogProfile).credentialsAbsent,true);
+  assert.throws(()=>parseRemoteReport('CAMPUS_TRANSIT_PROBE:'+JSON.stringify(report)),/runtime-transit-not-ready/);
+  await assert.rejects(probeRuntime(catalogProfile,{credentials:{clientId:'x'}}),/tdx-partial-configuration/);
+});
+test('catalog public verification checks real source shape, campus/search/nearby and unavailable arrivals independently',async()=>{
+  const report=await probePublic(sha,{profile:catalogProfile,fetcher:catalogPublic(),now});
+  assert.equal(report.stationCatalogReady,true);assert.equal(report.liveArrivalsVerified,false);
+  assert.equal(report.nearbyVerified,true);assert.equal(report.catalogDate,stamp);
+  assert.equal(report.transitReady,false);assert.equal(report.physicalDeviceVerified,false);
+});
+test('catalog certification rejects missing metadata, wrong city, duplicate IDs, stale snapshots and fabricated arrivals',async()=>{
+  for(const stops of [[],[{...catalogStop,source:'TDX'}],[{...catalogStop,id:'TCOD_'}],[{...catalogStop,catalogDate:'2026-02-31T00:00:00Z'}],[{...catalogStop,city:'Taipei'}],
+    [{...catalogStop,catalogDate:null}],[{...catalogStop,catalogDate:new Date(now()-181*86400_000).toISOString()}],
+    [{...catalogStop,catalogDate:new Date(now()+31_000).toISOString()}],[{...catalogStop,routes:[]}],[catalogStop,catalogStop]])
+    await assert.rejects(probePublic(sha,{profile:catalogProfile,fetcher:catalogPublic({stops}),now}),/static-catalog-(station-invalid|not-ready)/);
+  await assert.rejects(probePublic(sha,{profile:catalogProfile,fetcher:catalogPublic({wrongNearby:true}),now}),/static-catalog-nearby-mismatch/);
+  await assert.rejects(probePublic(sha,{profile:catalogProfile,fetcher:catalogPublic({arrivalStatus:200,arrivals:{status:'ready',kind:'arrivals',arrivals:[]}}),now}),/static-catalog-response-invalid/);
+  await assert.rejects(probePublic(sha,{profile:catalogProfile,fetcher:catalogPublic({arrivals:{status:'unavailable',reason:'upstream'}}),now}),/static-catalog-unavailable-state-invalid/);
+  await assert.rejects(probePublic(sha,{profile:catalogProfile,fetcher:catalogPublic({notice:catalogNotice.replace('https://citybus.taichung.gov.tw/','https://evil.example/')}),now}),/static-catalog-notice-missing/);
+});
+
+test('catalog proof rejects missing or stale response timestamps that the App cannot consume',async()=>{
+  for(const fetchedAt of [null,'invalid',new Date(now()-301_000).toISOString()])
+    await assert.rejects(probePublic(sha,{profile:catalogProfile,fetcher:catalogPublic({fetchedAt}),now}),/static-catalog-not-ready/);
+});

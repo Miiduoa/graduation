@@ -1,5 +1,5 @@
 /**
- * Public bus-stop discovery through the existing Campus One TDX gateway.
+ * Public bus-stop discovery through the Campus One transit gateway.
  * No transport credentials are stored on the device.
  */
 export const BUS_CITIES = {
@@ -35,6 +35,9 @@ export type PublicBusStop = {
   lat: number;
   lon: number;
   distance: number | null;
+  source?: 'taichung-open-data';
+  catalogDate?: string;
+  routes?: Array<{ name: string; direction: string; destination: string }>;
 };
 export type PublicBusArrival = {
   id: string;
@@ -57,6 +60,8 @@ export type PublicTransitResult =
 const TRANSIT_GATEWAY = 'https://nuni.tw/api/transit';
 export const PUBLIC_TRANSIT_FRESHNESS_MS = 90_000;
 export const PUBLIC_BUS_OFFICIAL_FALLBACK = 'https://www.taiwanbus.tw/eBUSPage/Query/NearbyQuery.aspx?lan=C';
+export const TAICHUNG_BUS_OFFICIAL = 'https://citybus.taichung.gov.tw/';
+export const TAICHUNG_BUS_CATALOG_SOURCE = 'https://data.gov.tw/dataset/81555';
 
 /** Primary-campus search hints. These are not verified route or bus-stop IDs. */
 const PRIMARY_CITY: Readonly<Record<string, BusCity>> = {
@@ -99,6 +104,28 @@ function validPoint(lat: unknown, lon: unknown): lat is number {
   return typeof lat === 'number' && Number.isFinite(lat) && Math.abs(lat) <= 90 &&
     typeof lon === 'number' && Number.isFinite(lon) && Math.abs(lon) <= 180;
 }
+
+function catalogMetadata(row: Record<string, unknown>): Pick<PublicBusStop, 'source' | 'catalogDate' | 'routes'> | null {
+  const hasCatalogMetadata = row.source !== undefined || row.catalogDate !== undefined || row.routes !== undefined ||
+    (typeof row.id === 'string' && row.id.startsWith('TCOD_'));
+  if (!hasCatalogMetadata) return {};
+  if (row.source !== 'taichung-open-data' || row.city !== 'Taichung' ||
+    typeof row.id !== 'string' || !row.id.startsWith('TCOD_') ||
+    typeof row.catalogDate !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(row.catalogDate) ||
+    !Number.isFinite(Date.parse(row.catalogDate)) || Date.parse(row.catalogDate) > Date.now() + 5 * 60_000 ||
+    !Array.isArray(row.routes) || row.routes.length > 200) return null;
+  if (new Date(row.catalogDate).toISOString().replace('.000Z', 'Z') !== row.catalogDate.replace('.000Z', 'Z')) return null;
+  const routes: NonNullable<PublicBusStop['routes']> = [];
+  for (const item of row.routes) {
+    const route = record(item);
+    if (!route || typeof route.name !== 'string' || !route.name.trim() || route.name.length > 120 ||
+      typeof route.direction !== 'string' || route.direction.length > 40 ||
+      typeof route.destination !== 'string' || route.destination.length > 120) return null;
+    routes.push({ name: route.name.trim(), direction: route.direction.trim(), destination: route.destination.trim() });
+  }
+  return { source: 'taichung-open-data', catalogDate: row.catalogDate, routes };
+}
+
 function validQuery(input: PublicTransitQuery): boolean {
   if (!isCity(input.city)) return false;
   if (input.action === 'search') {
@@ -174,6 +201,8 @@ export async function queryPublicTransit(
           typeof row.id !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(row.id) ||
           typeof row.name !== 'string' || !row.name.trim() || row.name.length > 120 ||
           !validPoint(row.lat, row.lon) || seen.has(row.id)) return [];
+        const metadata = catalogMetadata(row);
+        if (!metadata) return [];
         seen.add(row.id);
         return [{
           id: row.id,
@@ -183,6 +212,7 @@ export async function queryPublicTransit(
           lon: row.lon as number,
           distance: typeof row.distance === 'number' && Number.isFinite(row.distance) &&
             row.distance >= 0 ? row.distance : null,
+          ...metadata,
         }];
       }).slice(0, 16);
       return { status: 'ready', kind: 'stops', stops, limited: data.limited === true, fetchedAt: data.fetchedAt as string };
