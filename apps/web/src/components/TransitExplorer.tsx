@@ -165,15 +165,20 @@ function StopResults({ query, saved, toggleSaved }: {
   }, [query, retry]);
   const stops = query ? (result?.status === 'ready' && result.kind === 'stops' ? result.stops : []) : saved;
   const current = selected ? stops.find((stop) => stopKey(stop) === stopKey(selected)) ?? null : null;
+  const failed = result?.status === 'unavailable';
+  const waiting = Boolean(query) && busy && !failed;
+  const emptyCopy = !query ? '在站牌旁按「收藏」，下次便能直接查詢，不必再次定位。'
+    : query.action === 'campus' ? '這間學校附近還沒有站牌資料。'
+    : '沒有找到站牌。可以擴大搜尋範圍、確認縣市，或改用較短的站名。';
   return (
     <div className={css.workspace}>
       <section className={css.stops} aria-labelledby="transit-stops-title" aria-busy={busy}>
-        <div className={css.sectionHeading}><h3 id="transit-stops-title">{query?.action === 'nearby' ? '附近站牌' : query ? '可搭乘站牌' : '我的常用站牌'}</h3><span className={css.count}>{stops.length} 站</span></div>
-        {query?.action === 'nearby' && <p className={css.note}>{TRANSIT_CITIES[query.city]} · {query.radius} 公尺內，依直線距離排序。實際步行路線請看導航。</p>}
-        {busy && <p className={css.empty} role="status">正在尋找站牌…</p>}
-        {result?.status === 'unavailable' && <div className={css.message} role="status"><p>{TRANSIT_MESSAGES[result.reason]}</p><button type="button" className={css.secondary} disabled={busy} onClick={() => { setBusy(true); setResult(null); setSelected(null); setRetry((value) => value + 1); }}>重新查詢</button></div>}
-        {!busy && result?.status !== 'unavailable' && !stops.length && <p className={css.empty}>{query ? '沒有找到站牌。可以擴大搜尋範圍、確認縣市，或改用較短的站名。' : '在站牌旁按「收藏」，下次便能直接查詢，不必再次定位。'}</p>}
-        <ul className={css.stopList}>{stops.map((stop, index) => {
+        <div className={css.sectionHeading}><h3 id="transit-stops-title">{query?.action === 'nearby' ? '附近站牌' : query ? '可搭乘站牌' : '我的常用站牌'}</h3>{!waiting && !failed && (stops.length > 0 || !query) && <span className={css.count}>{stops.length} 站</span>}</div>
+        {query?.action === 'nearby' && !waiting && !failed && <p className={css.note}>{TRANSIT_CITIES[query.city]} · {query.radius} 公尺內，依直線距離排序。實際步行路線請看導航。</p>}
+        {waiting && <p className={css.empty} role="status">正在讀取站牌…</p>}
+        {failed && <div className={css.message} role="status"><p>暫時讀不到資料，請稍後再試</p><button type="button" className={css.secondary} disabled={busy} onClick={() => { setBusy(true); setResult(null); setSelected(null); setRetry((value) => value + 1); }}>再試一次</button></div>}
+        {!waiting && !failed && !stops.length && <p className={css.empty}>{emptyCopy}</p>}
+        {!waiting && !failed && stops.length > 0 && <ul className={css.stopList}>{stops.map((stop, index) => {
           const isSaved = saved.some((entry) => stopKey(entry) === stopKey(stop));
           const accessibleName = isStaticTransitStop(stop) ? `${stop.name} ${catalogSummary(stop.routes)} 第 ${index + 1} 站牌` : `${stop.name} ${stop.id}`;
           return <li key={stopKey(stop)} data-selected={current && stopKey(current) === stopKey(stop) ? 'true' : undefined}>
@@ -182,10 +187,10 @@ function StopResults({ query, saved, toggleSaved }: {
             </button>
             <button type="button" className={css.saveButton} aria-label={`${isSaved ? '取消收藏' : '收藏'} ${accessibleName}`} aria-pressed={isSaved} onClick={() => toggleSaved(stop)}>{isSaved ? '已收藏' : '收藏'}</button>
           </li>;
-        })}</ul>
-        {result?.status === 'ready' && result.kind === 'stops' && result.limited && <p className={css.note}>此範圍資料較多，僅列出部分站牌；請縮小範圍確認。</p>}
+        })}</ul>}
+        {result?.status === 'ready' && result.kind === 'stops' && result.limited && !waiting && !failed && <p className={css.note}>此範圍資料較多，僅列出部分站牌；請縮小範圍確認。</p>}
       </section>
-      {current ? isStaticTransitStop(current) ? <StaticStopDetails key={stopKey(current)} stop={current} /> : <StopArrivals key={stopKey(current)} stop={current} /> : <div className={css.placeholder}><span aria-hidden="true">→</span><h3>選好站牌，再確認方向</h3><p>點選站牌，查看路線資料與步行導航；有接通動態資料的站牌會顯示到站預估。</p></div>}
+      {current ? isStaticTransitStop(current) ? <StaticStopDetails key={stopKey(current)} stop={current} /> : <StopArrivals key={stopKey(current)} stop={current} /> : !waiting && !failed && (stops.length > 0 || !query) ? <div className={css.placeholder}><span aria-hidden="true">→</span><h3>選好站牌，再確認方向</h3><p>點選站牌，查看路線資料與步行導航；有接通動態資料的站牌會顯示到站預估。</p></div> : null}
     </div>
   );
 }

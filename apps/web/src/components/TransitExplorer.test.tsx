@@ -30,6 +30,17 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it('shows only the loading copy while campus stops are being fetched', () => {
+  vi.mocked(queryTransit).mockImplementation(() => new Promise(() => {}));
+  renderExplorer();
+  expect(screen.getByText('正在讀取站牌…')).toBeTruthy();
+  expect(screen.queryByText('0 站')).toBeNull();
+  expect(screen.queryByText('這間學校附近還沒有站牌資料。')).toBeNull();
+  expect(screen.queryByText(/沒有找到站牌/)).toBeNull();
+  expect(screen.queryByText(/到站時間/)).toBeNull();
+  expect(screen.queryByText(/預估/)).toBeNull();
+});
+
 it('starts with school stops without requesting the user location', async () => {
   const locate = vi.fn();
   vi.stubGlobal('navigator', { onLine: true, geolocation: { getCurrentPosition: locate } });
@@ -120,10 +131,26 @@ it('saves public stops, never the location-derived distance, and supports removi
 it('shows a missing integration honestly with retry and official fallback', async () => {
   vi.mocked(queryTransit).mockResolvedValue({ status: 'unavailable', reason: 'not-configured' });
   renderExplorer();
-  expect(await screen.findByText(/附近站牌服務尚未啟用/)).toBeTruthy();
-  expect(screen.getByRole('button', { name: '重新查詢' })).toBeTruthy();
+  expect(await screen.findByText('暫時讀不到資料，請稍後再試')).toBeTruthy();
+  expect(screen.getByRole('button', { name: '再試一次' })).toBeTruthy();
   expect(screen.getByRole('link', { name: '官方公車網站 ↗' })).toBeTruthy();
+  expect(screen.queryByText('正在讀取站牌…')).toBeNull();
+  expect(screen.queryByText('這間學校附近還沒有站牌資料。')).toBeNull();
   expect(screen.queryByText(/約 8 分鐘/)).toBeNull();
+  expect(screen.queryByText(/到站時間/)).toBeNull();
+  expect(screen.queryByText(/預估/)).toBeNull();
+});
+
+it('shows the school empty copy when campus stops load with none', async () => {
+  vi.mocked(queryTransit).mockResolvedValue({ status: 'ready', kind: 'stops', stops: [], limited: false, fetchedAt: new Date().toISOString() });
+  renderExplorer();
+  expect(await screen.findByText('這間學校附近還沒有站牌資料。')).toBeTruthy();
+  expect(screen.queryByText('正在讀取站牌…')).toBeNull();
+  expect(screen.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
+  expect(screen.queryByRole('button', { name: '再試一次' })).toBeNull();
+  expect(screen.queryByText('0 站')).toBeNull();
+  expect(screen.queryByText(/到站時間/)).toBeNull();
+  expect(screen.queryByText(/預估/)).toBeNull();
 });
 
 it('expires countdowns while hidden without continuing to poll the provider', async () => {
