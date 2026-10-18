@@ -6,7 +6,7 @@ import { CourseAccessService } from './service';
 import { CourseAccessError, courseAccessErrorMessage } from './courseAccess';
 
 const prefix = '/v1/auth/platform/course-access';
-const actions = ['match', 'student-requests', 'teacher-requests', 'requests', 'reviews'];
+const actions = ['match', 'workspace-course', 'student-requests', 'teacher-requests', 'requests', 'reviews'];
 const requestAction = /^\/requests\/car_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/(?:withdraw|decide)$/u;
 export function isCourseAccessRoute(method: string, path: string) {
   if (method !== 'POST' || !path.startsWith(prefix)) return false;
@@ -33,6 +33,7 @@ export function registerCourseAccessRoutes(app: FastifyInstance, db: CampusDatab
       }
     };
   app.post(`${prefix}/match`, options, run((request, actor) => service.match(actor, request.body)));
+  app.post(`${prefix}/workspace-course`, options, run((request, actor) => service.workspace(actor, request.body)));
   app.post(`${prefix}/student-requests`, options, run((request, actor) => service.student(actor, request.body)));
   app.post(`${prefix}/teacher-requests`, options, run((request, actor) => service.teacher(actor, request.body)));
   app.post(`${prefix}/requests`, options, run((request, actor) => service.list(actor, request.body)));

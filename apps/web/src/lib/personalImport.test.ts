@@ -776,7 +776,7 @@ describe('iCalendar import keeps dates and recurrence semantics explicit', () =>
 describe('personal import notices', () => {
   it('uses the same save, undo, and broken-image sentences on every surface', () => {
     expect(personalImportSavedNotice(3)).toBe(
-      '已在這台裝置新增 3 筆，原有資料保留。資料只存在這台裝置，換手機或清除資料就會不見。',
+      '已在這台裝置新增 3 筆，原有資料保留。換裝置或清除資料前，請確認同步成功，或下載完整備份。',
     );
     expect(PERSONAL_IMPORT_UNDO_LABEL).toBe('撤銷上次匯入');
     expect(personalImportUndoBody(2)).toBe(

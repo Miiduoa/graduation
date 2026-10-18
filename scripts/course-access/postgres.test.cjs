@@ -28,7 +28,7 @@ if (!process.env.COURSE_TEST_DATABASE_URL) {
       CREATE TABLE class_workspace_members (workspace_id text REFERENCES class_workspaces(id), platform_account_id text REFERENCES platform_accounts(id),
         role text NOT NULL, state text NOT NULL, joined_at timestamptz DEFAULT now(), removed_at timestamptz, updated_at timestamptz DEFAULT now(), PRIMARY KEY(workspace_id,platform_account_id));
       CREATE TABLE class_workspace_affiliations (workspace_id text PRIMARY KEY REFERENCES class_workspaces(id), tenant_id text REFERENCES tenants(id), section_id text, state text NOT NULL);`);
-    await pool.query(readFileSync(resolve('deploy/nuni-api/course-access/277_course_access_review.sql'), 'utf8'));
+    await pool.query(readFileSync(resolve('deploy/nuni-api/course-access/278_course_access_review.sql'), 'utf8'));
   });
   after(async () => { await pool.end(); await control.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`); await control.end(); });
   async function actor(operator = false) {
@@ -174,6 +174,29 @@ if (!process.env.COURSE_TEST_DATABASE_URL) {
     const f = await fixture({ schoolId: 'closed-school' }); await pool.query("UPDATE tenants SET state='closed' WHERE id='closed-school'");
     assert.equal((await pool.query('SELECT state FROM class_workspaces WHERE id=$1', [f.workspaceId])).rows[0].state, 'archived');
     await assert.rejects(service.match(f.student, f.hints), { statusCode: 404 });
+  });
+  test('readback requires current membership, reviewed authority and requested school', async () => {
+    const f = await fixture();
+    const input = { workspaceId: f.workspaceId, schoolId: 'pu' };
+    await assert.rejects(service.workspace(f.student, input), { statusCode: 404 });
+    const teacher = await service.workspace(f.teacher, input);
+    assert.equal(teacher.status, 'reviewed'); assert.equal(teacher.course.teacher, metadata.teacher);
+    assert.equal('teacher_id' in teacher.course, false);
+    const request = await service.student(f.student, studentInput(f));
+    await assert.rejects(service.workspace(f.student, input), { statusCode: 404 });
+    const approved = await service.decide(f.operator, request.id, decision(request));
+    assert.equal((await service.workspace(f.student, input)).memberRole, 'student');
+    await assert.rejects(service.workspace(f.student, { ...input, schoolId: 'other' }), { statusCode: 404 });
+    await service.decide(f.operator, approved.id, decision(approved, { decision: 'revoke' }));
+    await assert.rejects(service.workspace(f.student, input), { statusCode: 404 });
+  });
+  test('unreviewed member workspace remains explicitly unreviewed; revoked directory never downgrades', async () => {
+    const f = await fixture({ approved: false });
+    assert.deepEqual(await service.workspace(f.teacher, { workspaceId: f.workspaceId, schoolId: 'pu' }),
+      { workspaceId: f.workspaceId, memberRole: 'owner-teacher', membershipActive: true, status: 'unreviewed', course: null });
+    const reviewed = await fixture();
+    await service.decide(reviewed.operator, reviewed.request.id, decision(reviewed.request, { decision: 'revoke' }));
+    await assert.rejects(service.workspace(reviewed.teacher, { workspaceId: reviewed.workspaceId, schoolId: 'pu' }), { statusCode: 404 });
   });
   test('withdrawal creates no membership and requires a fresh request afterwards', async () => {
     const f = await fixture(), input = studentInput(f), request = await service.student(f.student, input);

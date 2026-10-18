@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { CourseAccessError, courseIdentifier, courseKeys, courseMetadata, courseRecord, courseScope,
   courseText, courseVersion, courseFold, sameCourseScope, type CourseCandidate, type CourseMetadata,
-  type CourseRequest, type CourseRequestState } from './courseAccess';
+  type CourseRequest, type CourseRequestState, type CourseWorkspace } from './courseAccess';
 
 export type CourseActor = { platformAccountId: string; credentialId: string; expiresAt: number };
 export interface CourseSql { query<Row = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: Row[] }> }
@@ -101,6 +101,38 @@ export class CourseAccessService {
       WHERE d.id=$1 AND d.state='active' FOR SHARE OF d,r,w,a`, [id])).rows[0];
     if (!row) throw notFound();
     return row;
+  }
+  async workspace(actor: CourseActor, raw: unknown): Promise<CourseWorkspace> {
+    const input = courseRecord(raw);
+    courseKeys(input, ['workspaceId', 'schoolId']);
+    const workspaceId = courseIdentifier(input.workspaceId, 'cw');
+    const schoolId = courseScope({ schoolId: input.schoolId, academicYear: '115', semester: '1' }).schoolId;
+    return this.db.transaction(async tx => {
+      await this.actor(tx, actor);
+      const member = (await tx.query<{ role: CourseWorkspace['memberRole'] }>(`SELECT m.role
+        FROM class_workspace_members m JOIN class_workspaces w ON w.id=m.workspace_id
+        WHERE m.workspace_id=$1 AND m.platform_account_id=$2 AND m.state='active' AND w.state='active'
+        FOR SHARE OF m,w`, [workspaceId, actor.platformAccountId])).rows[0];
+      if (!member) throw notFound();
+      const membership = { workspaceId, memberRole: member.role, membershipActive: true as const };
+      const entry = (await tx.query<{ id: string }>(`SELECT id FROM course_access_directory WHERE workspace_id=$1`, [workspaceId])).rows[0];
+      if (!entry) return { ...membership, status: 'unreviewed', course: null };
+      // An inactive/revoked directory is never downgraded into an unreviewed but usable course.
+      const directory = await this.directory(tx, entry.id);
+      if (directory.metadata.schoolId !== schoolId) throw notFound();
+      await this.school(tx, directory.metadata);
+      const proof = (await tx.query(`SELECT id FROM course_access_requests
+        WHERE workspace_id=$1 AND applicant_id=$2 AND state='approved'
+          AND school_id=$3 AND academic_year=$4 AND semester=$5
+          AND ((kind='student' AND $6='student' AND course_id=$7 AND course_version=$8)
+            OR (kind='teacher' AND $6='owner-teacher' AND id=$9 AND applicant_id=$10)) FOR SHARE`,
+      [workspaceId, actor.platformAccountId, schoolId, directory.metadata.academicYear,
+        directory.metadata.semester, member.role, directory.id, directory.version,
+        directory.teacher_request_id, directory.teacher_id])).rows[0];
+      if (!proof) throw notFound();
+      return { ...membership, status: 'reviewed', course: { ...directory.metadata,
+        id: directory.id, workspaceId, version: directory.version, verification: 'administrator-reviewed' } };
+    });
   }
   async match(actor: CourseActor, raw: unknown): Promise<{ candidates: CourseCandidate[]; truncated: boolean }> {
     const input = courseMetadata(raw);
