@@ -7,8 +7,17 @@ import {
   resolveInboxAction,
   resolveInboxActions,
   inboxTaskFromLegacyAssignmentActionTarget,
+  navigateFromInboxTask,
 } from '../services/inboxActions';
 import type { InboxTask } from '../data/types';
+import { navigateToCourseScreen } from '../utils/courseNavigation';
+
+jest.mock('../utils/courseNavigation', () => ({
+  navigateToCourseScreen: jest.fn(),
+}));
+jest.mock('../services/companionSignalRecorder', () => ({
+  recordCompanionEvent: jest.fn(),
+}));
 
 const baseTask = (overrides: Partial<InboxTask>): InboxTask =>
   ({
@@ -127,5 +136,46 @@ describe('inboxTaskFromLegacyAssignmentActionTarget', () => {
         actionTarget: { tab: '學習', screen: 'CourseHub', params: { groupId: 'g1' } },
       }),
     ).toBeNull();
+  });
+});
+
+describe('navigateFromInboxTask', () => {
+  beforeEach(() => {
+    jest.mocked(navigateToCourseScreen).mockClear();
+  });
+
+  test('assignment opens HomeworkSubmit with assignment id and due date', () => {
+    const dueAt = new Date('2026-10-20T16:00:00.000Z');
+    const ok = navigateFromInboxTask(
+      {},
+      baseTask({ assignmentId: 'a1', dueAt }),
+      { role: 'student', isTeachingRole: false },
+    );
+    expect(ok).toBe(true);
+    expect(navigateToCourseScreen).toHaveBeenCalledWith(
+      {},
+      'student',
+      'HomeworkSubmit',
+      {
+        courseId: 'cs1',
+        hwId: 'a1',
+        hwTitle: '繳交期中報告',
+        dueAt: '2026-10-20T16:00:00.000Z',
+      },
+    );
+  });
+
+  test('assignment without id does not open the class feed', () => {
+    const ok = navigateFromInboxTask({}, baseTask({ assignmentId: undefined }), {
+      role: 'student',
+      isTeachingRole: false,
+    });
+    expect(ok).toBe(true);
+    expect(navigateToCourseScreen).toHaveBeenCalledWith(
+      {},
+      'student',
+      'CourseHub',
+      { groupId: 'cs1', groupName: 'DB' },
+    );
   });
 });
