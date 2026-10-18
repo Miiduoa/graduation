@@ -53,7 +53,11 @@ it('does not lose old data on failed persistence or conflicting grades', async (
   await expect(
     savePersonalImportBatch(scope, rows('課程名稱,學分,成績\n資料庫,3,60')),
   ).rejects.toThrow('成績或學分不同');
-  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+  // The test setup may supply an own-method storage shim on newer Node versions.
+  const storageMethods = Object.hasOwn(localStorage, 'setItem')
+    ? localStorage
+    : Object.getPrototypeOf(localStorage);
+  vi.spyOn(storageMethods, 'setItem').mockImplementation(() => {
     throw new Error('quota');
   });
   await expect(
