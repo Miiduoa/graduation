@@ -2,6 +2,8 @@
 
 一句話：**接 Qwen3-4B，只聰明在「判斷今天先處理哪一件」；課名、時間、截止仍由程式鎖住照原樣顯示。** 自由改寫卡片那條路（第 9 節）已經證明會改壞事實，所以模型改成只能選、只能排。0.6B／1.7B 排序仍跟規則一樣把已過期作業排在兩小時內的測驗前面；4B 會把測驗提前，並排出先點名、再去小考。公告抽取 4B 仍會把「繳交「臺灣」現代詩習作」收成非原文連續字，所以**不接抽取、不改公告三態**。Web 第一步：有 WebGPU、至少兩張卡、使用者同意才下載約 2.8 GB（請用 Wi-Fi）；輸出驗不過就退回規則版。
 
+手機另見第 11 節。晉瑋問學生不是每個人都隨時用電腦：**手機第一步不押系統內建模型**，沿用開發版已有的 `llama.rn` 下載同一顆 4B（GGUF Q4_K_M 約 2.50 GB）只做排序；系統內建當免下載加分項，A7 沒在該權重上考過就不接。跑不動或驗不過維持規則版。**第 11 節只定案、不接模型、不改產品行為。**
+
 本文件含規格比較與 2026-10-19 本機實測。**沒有部署、沒有付費、不寫正式資料庫、不開聊天窗、不碰點餐。** 架構仍遵守 [ADR 0003](../adr/0003-ai-as-advisory-layer.md) 與 [today-sense-agent.md](./today-sense-agent.md)。
 
 查閱日期：2026-10-19。下列只寫有網址與日期的來源；查不到的會標明。
@@ -227,9 +229,8 @@ Gemma-4-E2B 峰值 CPU 記憶體：S26 Ultra CPU 1733 MB、GPU 676 MB；iPhone 1
 ### 4.4 哪些裝置先支援（接通以後，不是現在）
 
 1. **Web，桌面 Chrome／Edge 且 `navigator.gpu` 可用、至少兩張規則卡、使用者同意下載約 2.8 GB（請用 Wi-Fi）。** 這是本輪唯一接通的路徑。
-2. **iPhone：** Apple Intelligence 合格且語言含繁中／簡中，並已接原生模組之後。
-3. **Android：** 在 ML Kit Prompt 清單內、AICore 可用、前景，並已接原生模組之後。
-4. **其餘（含無 WebGPU 的瀏覽器、舊 Android、未開 Apple Intelligence、iOS WebView）：** 維持 `95091124`／`a90a8452`／`1b3ec1f3` 規則版，畫面不提模型。
+2. **iPhone／Android 原生 App：** 見第 11 節。本輪仍不接。
+3. **其餘（含無 WebGPU 的瀏覽器、舊 Android、未開 Apple Intelligence、iOS WebView、載入 4B 失敗的手機）：** 維持規則版，畫面不提模型。
 
 ### 4.5 模型只負責什麼；規則仍把關什麼
 
@@ -259,7 +260,7 @@ Gemma-4-E2B 峰值 CPU 記憶體：S26 Ultra CPU 1733 MB、GPU 676 MB；iPhone 1
 2. 使用者同意才下載 Qwen3-4B；模型只輸出已算出卡片的 id 排列；課名、時間、why、理由句由程式鎖住。
 3. 不支援／拒絕下載／輸出驗不過時畫面與現在完全相同（含原來的 `SENSE_SECTION_NOTE`）。
 4. 不開聊天窗、不部署、不寫正式資料庫、不碰點餐與公告三態、不把公告抽成新卡。
-5. 輸出驗證見 `packages/shared/src/todaySenseAgent.ts`。Mobile 本輪不接。
+5. 輸出驗證見 `packages/shared/src/todaySenseAgent.ts`。Mobile 接線計畫見第 11 節；**本輪仍不接、不改 Mobile UI。**
 
 ---
 
@@ -272,8 +273,13 @@ Gemma-4-E2B 峰值 CPU 記憶體：S26 Ultra CPU 1733 MB、GPU 676 MB；iPhone 1
 - Qwen3-0.6B／1.7B／4B 在 Chrome／iPhone Safari 的實測 tk/s 與 RAM（本輪用 GGUF Q4_K_M、CPU 4 threads 當 4-bit 類比，沒在瀏覽器跑 ONNX）。
 - 瀏覽器能否穩定載入 2.8 GB 的 Qwen3-4B ONNX（視學生電腦記憶體；失敗則退回規則版）。
 - WebLLM 預建 Qwen3-0.6B q4f16_1 的官方 MB。
-- Expo 54 對 Foundation Models／ML Kit／llama.cpp 的官方一等支援。
+- Expo 54 對 Foundation Models／ML Kit／llama.cpp 的官方一等支援。官方 `expo-ai` 文件標「next SDK」、alpha，**SDK 54 參考目錄沒有這頁**。
 - 「2025–2026 端側模型市場佔有」類數字。
+- 台灣學生手機機型市佔、各機官方 RAM 數字（Apple 規格頁不公布 RAM）。
+- Apple Foundation Models／Gemini Nano 在 A7 四卡排序題上的輸出（本環境沒有合格 iPhone／Pixel）。
+- Qwen3-4B 在任何實體手機上的 tk/s、OOM 與否、發熱（第 11 節只有 Linux CPU 類比）。
+- 手機 Safari／Chrome 穩定載入 2.8 GB ONNX 或 2.5 GB GGUF。
+- Transformers.js 官方支援 React Native（v4 PR 仍列 React Native support 未完成）。
 
 ---
 
@@ -319,6 +325,24 @@ Gemma-4-E2B 峰值 CPU 記憶體：S26 Ultra CPU 1733 MB、GPU 676 MB；iPhone 1
 | https://github.com/ggml-org/llama.cpp/blob/master/docs/android.md | 查於 2026-10-19 |
 | https://github.com/ggml-org/llama.cpp/blob/master/docs/xcframework.md | 查於 2026-10-19 |
 | 本機考題：llama-cpp-python、CPU 4 threads、`/no_think`、ChatML JSON 改寫 | 2026-10-19T06:30:00Z |
+| https://developer.apple.com/foundation-models-framework/ | 查於 2026-10-19 |
+| https://developer.apple.com/videos/play/wwdc2026/339/ | WWDC26 |
+| https://support.apple.com/en-us/124025 | Published 2025-09-15 |
+| https://www.apple.com/newsroom/2025/09/new-apple-intelligence-features-are-available-today/ | 2025-09-15 |
+| https://developers.google.com/ml-kit/genai/prompt/android/get-started | 查於 2026-10-19（`genai-prompt:1.0.0-beta4`） |
+| https://docs.expo.dev/versions/unversioned/sdk/ai | 查於 2026-10-19（標 next SDK、alpha） |
+| https://docs.expo.dev/versions/v54.0.0 | 查於 2026-10-19（無 expo-ai 頁） |
+| https://github.com/mybigday/llama.rn | MIT；本倉 lock `llama.rn@0.4.8` |
+| https://raw.githubusercontent.com/mybigday/llama.rn/v0.4.8/README.md | 該版 Android 無 GPU 後端 |
+| https://web.dev/blog/webgpu-supported-major-browsers | Published 2025-11-25 |
+| https://github.com/gpuweb/gpuweb/wiki/Implementation-Status | 查於 2026-10-19 |
+| https://huggingface.co/docs/transformers.js/guides/webgpu | 查於 2026-10-19 |
+| https://github.com/huggingface/transformers.js/pull/1700 | Merged 2026-06-08（Safari／iOS 26 WebGPU） |
+| https://github.com/huggingface/transformers.js/pull/1382 | Transformers.js v4；React Native support 未勾 |
+| https://llm.mlc.ai/docs/deploy/ios.html | 查於 2026-10-19 |
+| https://llm.mlc.ai/docs/get_started/quick_start.html | 查於 2026-10-19 |
+| https://wcandillon.github.io/react-native-webgpu/docs/getting-started/installation | 查於 2026-10-19 |
+| 本機 A7 補跑：llama-cpp-python、CPU 4 threads、`n_gpu_layers=0`、temperature=0、對齊 `buildOrderPrompt` | 2026-10-19 |
 
 ---
 
@@ -502,4 +526,164 @@ Gemma-4-E2B 峰值 CPU 記憶體：S26 Ultra CPU 1733 MB、GPU 676 MB；iPhone 1
 
 4B 第一包約 2.8 GB，預設不抓，文案寫請用 Wi-Fi；沒有 WebGPU、不到兩張卡、拒絕、載入失敗，畫面與規則版相同。Gemma 4 E2B（2.58 GB）本輪未跑。
 
-Web 實作：`todaySenseAgent.ts` 驗證、`TodaySensePanel` 同意後才下載、驗不過不顯示建議順序。Mobile 不接。
+Web 實作：`todaySenseAgent.ts` 驗證、`TodaySensePanel` 同意後才下載、驗不過不顯示建議順序。Mobile 接線計畫見第 11 節；**本輪仍不接、不改 Mobile UI。**
+
+---
+
+## 11. 手機專章（2026-10-19）：學生不是每個人都隨時用電腦
+
+一句定案：**手機第一步沿用現有 Expo 開發版裡的 `llama.rn`，同意後下載 Qwen3-4B Q4_K_M（約 2.50 GB）只排今天待辦；先支援載得動這顆權重的 iPhone（Metal）與 RAM 夠的 64-bit Android，其餘與載入失敗、輸出驗不過一律維持規則版。系統內建模型當免下載加分項，A7 沒在該權重上考過就不接。**
+
+硬條件不變：用戶裝置端跑、免費、繁中、不要笨東西；模型只做判斷（排先後），課名／時間由程式鎖住，驗不過退回規則版。Granola 此環境仍未授權，**沒有會議原文**，以任務文字為準。
+
+本節只寫研究定案。**沒有接模型、沒有改 TodaySensePanel／規則引擎／寫回、沒有部署、沒有開分支。** 現有聊天用的本機 LLM（`Qwen2.5-7B` 等）也不拿來當今天殼排序——那幾顆沒考過 A7，而且 7B Q4 約 4.7 GB，比 4B 更大。
+
+### 11.1 沒有一條路能讓「學生手上常見中階機」免下載又夠聰明
+
+查不到台灣學生機型市佔的一手調查，因此不編「學生都用哪一款」。能確定的是官方清單本身：
+
+| 路線 | 官方涵蓋 | 常見中階機（iPhone 13／14／15 非 Pro、Galaxy A、Redmi Note 一類） |
+| ---- | -------- | -------------------------------------------------------------- |
+| Apple Foundation Models | 須 Apple Intelligence 合格機 | **多數不在清單**（iOS 26 能裝 ≠ Intelligence 能開） |
+| Gemini Nano Prompt API | 官方列的幾乎是 2025–2026 旗艦 | **不在清單** |
+| App 內 4B GGUF | 理論上任何 64-bit 機能下載 | 下載約 2.5 GB；RAM 不夠或 OOM → 規則版 |
+| 手機瀏覽器 WebGPU | iOS 26 Safari、Android 12+ Chrome（Qualcomm／ARM） | 2.8 GB ONNX 在手機分頁記憶體裡**沒有實測**；舊 iOS／無 WebGPU 直接沒有 |
+
+所以「免下載的系統模型」覆蓋的是新旗艦，不是「每個學生的手機」。要讓沒有電腦的學生有機會用到跟 Web 同一種判斷，只能走**可下載的 4B**，並對跑不動的機誠實降級。
+
+### 11.2 各路線（2025–2026 一手來源）
+
+下列「中文與判斷」若沒有在該權重上跑 A7，就只寫規格與缺口，不當接線證據。A7 題目與及格線沿用第 10.1／10.2 節：點名必須第一；幾小時內的測驗必須排在已過期作業前面。
+
+#### 11.2.1 iOS 系統內建：Apple Foundation Models
+
+- **是什麼：** Swift API 呼叫驅動 Apple Intelligence 的裝置端 LLM。WWDC25 講者說明約 **30 億參數、2-bit 量化**；為摘要、擷取、分類等裝置級工作優化，**不是**伺服器級世界知識。內建於系統，不增加 app 體積，可離線。Guided Generation（`@Generable`）用 constrained decoding 保證結構。  
+  來源：[Meet the Foundation Models framework](https://developer.apple.com/videos/play/wwdc2025/286/)，WWDC25。
+- **支援哪些手機／系統：** Foundation Models 隨 iOS 26+／iPadOS 26+／macOS 26+。Apple Intelligence 機型（支援頁 121115，Published 2026-09-14）：iPhone 16 系列或更新、iPhone 15 Pro／Pro Max、iPhone Air；iPad mini (A17 Pro)；M1 或更新的 iPad／Mac 等。Apple 支援頁 [124025](https://support.apple.com/en-us/124025)（2025-09-15）寫明 Intelligence 在 iPhone 15 Pro、15 Pro Max、所有 iPhone 16 及更新機。**iPhone 11–15 非 Pro 可裝 iOS 26，但不在 Intelligence 清單。** 裝置語言與 Siri 語言須相同且受支援。中國大陸購買或帳號／所在地限制見 121115，不在此編造。
+- **下載多大：** 不進 nuni 包體。系統端：iOS 27 支援頁寫新機最多約 14 GB、其他合格機最多約 8 GB 給整套 Apple Intelligence（不是單顆模型檔）。app 本身不必再下一包 4B。
+- **免費與授權：** 裝置端推論官方寫明對開發者無雲端 API 費（香港新聞稿 2025-11-04：third-party apps tap the on-device model, inference free of cost to developers）。支援頁另寫：**依賴伺服器端**的功能（Siri AI、Image Playground、AFM 3 Cloud 等）有每日用量、未來可能收費——那不是本定案要的裝置端路徑。WWDC26 把 Private Cloud Compute、Claude、Gemini 接進同一套 Swift API；那些落到雲端，**不符硬條件，不當今天殼備案。**
+- **繁中：** Apple Intelligence 語言清單含 Chinese (traditional)。香港新聞稿 2025-11-04 起含繁體中文。Foundation Models 與 Apple Intelligence 同一語言集合（既有第 3.3 節）。這是系統模型裡繁中寫得最清楚的一手聲明。
+- **判斷考題：** **本環境沒有合格 iPhone，沒跑 A7。** 約 3B 裝置級模型是否會把 15:00 小考排到過期作業前面，查不到實測。未考過就不能接今天殼。
+- **要不要原生／Expo：** 要原生 Swift。官方 [`expo-ai`](https://docs.expo.dev/versions/unversioned/sdk/ai) 可包 Foundation Models，但文件標 **next SDK、alpha**，建置要 Xcode 26.4+，**不在 Expo SDK 54 參考目錄**。nuni Mobile 是 Expo ~54、`newArchEnabled: true`。社群 `@react-native-ai/apple`／`expo-local-llm` 存在，不是 Expo 一等套件。Expo Go **不能**跑。社群 [`expo-ai-kit`](https://expo-ai-kit.dev/guides/platform-support) 自稱 SDK 54+ 可開 built-in LLM，仍要原生開發版，A7 沒測。
+- **對 nuni：** 合格 iPhone 上最強的**免下載加分項**。不能當手機第一步（大量學生機不在清單、A7 沒證據）。
+
+#### 11.2.2 Android 系統內建：Gemini Nano／AICore／ML Kit Prompt API
+
+- **是什麼：** Gemini Nano 跑在系統服務 AICore；app 經 ML Kit GenAI Prompt API 呼叫。資料留在裝置，官方強調不必為每次推論付雲端費。只准**前景**；背景含前景服務會 `BACKGROUND_USE_BLOCKED`。未解鎖 bootloader。  
+  來源：[ML Kit GenAI overview](https://developers.google.com/ml-kit/genai)；[Get started with Prompt API](https://developers.google.com/ml-kit/genai/prompt/android/get-started)，依賴 `genai-prompt:1.0.0-beta4`，查於 2026-10-19。
+- **支援哪些手機：** Prompt API 另分 nano-v2／v3／v4，官方清單幾乎是 Pixel 9–11、部分 Galaxy S26／摺疊機、部分小米／vivo／OPPO／OnePlus 旗艦（完整型號見該頁，此處不抄成保證表——清單會改，接線時以該頁加 `checkStatus()` 為準）。**Android 版本號本身不能證明支援。** Galaxy A、Redmi Note 等常見中階機**沒列在 Prompt API 清單**。
+- **下載多大：** 模型由 AICore 管理，不進 app 包體。狀態可為 `AVAILABLE`／`DOWNLOADABLE`／`DOWNLOADING`／`UNAVAILABLE`。官方**沒寫** Nano 權重 MB。AICore Developer Preview 只寫「相對大、須 Wi-Fi」。
+- **免費與授權：** 推論無雲端 API 計費。須遵守 ML Kit GenAI API Additional Terms of Service；本環境仍**抓不到 ToS 全文**。Firebase AI Logic Hybrid 落到雲端 Gemini，不當本定案。
+- **繁中：** 功能 API 寫「特定語言支援視裝置設定與已下載模型而異」。**查不到**繁體中文品質數字或保證。
+- **判斷考題：** **本環境沒有 Pixel／清單內 Android，沒跑 A7。** 不同 `getBaseModelName()` 版本對同一 prompt 可能不同答案。未考過就不接。
+- **限制：** 輸入須低於 4000 tokens；長輸出（>4K）應避免；有 per-app 配額（`BUSY`、`PER_APP_BATTERY_USE_QUOTA_EXCEEDED`）。Structured Output 為 alpha。
+- **Expo：** 官方 `expo-ai` 預覽用 ML Kit Prompt `1.0.0-beta4`，同樣是 next SDK／alpha，且 Android 推論離開前景會 `ERR_APP_BACKGROUND`。要 `minSdk` 26、Kotlin 2.2.21+。現有模組 `campus-google-credential` 預設 minSdk 24——若將來接 expo-ai 必須升 minSdk，本輪不動。
+- **對 nuni：** 合格 Android 的免下載加分項。覆蓋比 Apple 更窄、繁中無保證、API 仍 beta，**不能當第一步**。
+
+#### 11.2.3 App 內小型模型：llama.cpp／`llama.rn`（本倉已有）
+
+- **是什麼：** `llama.rn` 是 llama.cpp 的 React Native 綁定。nuni Mobile **已經依賴** `llama.rn@0.4.8`（`pnpm-lock.yaml` 釘死），聊天設定頁可下載 GGUF；Expo Go 不行，必須開發版／正式包。iOS 該版可用 Metal（`n_gpu_layers`）；README 寫 Metal 需 **Apple7 GPU**，模擬器不行。**該版 Android「No integrated any GPU backend yet」，即 CPU only。** 上游較新的 llama.rn README（查於 2026-10-19）才提到 OpenCL（Adreno 700+）與實驗性 Hexagon（SM8450+）；那是升級後的能力，**不是 0.4.8 現況**。
+- **授權：** llama.rn MIT（Copyright 2023 Jhen-Jie Hong）；llama.cpp MIT。Qwen3-4B 權重 Apache 2.0。
+- **下載多大：** 本機實測檔 `unsloth/Qwen3-4B-Q4_K_M.gguf` **2,497,281,312 bytes ≈ 2.50 GB**（Hugging Face 目錄列 2.5 GB）。不要把 Web 用的 ONNX q4f16（2.83 GB）跟手機 GGUF 混成同一個數字。0.6B／1.7B 同系列 Q4_K_M 為 396,705,472／1,107,409,472 bytes，但第 10 節與下面 11.3 證明排序不比規則聰明，不當第一包。
+- **支援哪些手機：** iOS 開發版＋64-bit（arm64）；Android 0.4.8 README 只寫 arm64-v8a／x86_64，32-bit 不能建 context。不是「所有能裝 nuni 的機都能跑 4B」——還要空間與 RAM。
+- **Expo：** **已經接上原生模組**，這是各手機路線裡唯一不必從零寫 JNI／Swift 的。仍要 development build，不能靠 Expo Go。JSON 可用該版 `convertJsonSchemaToGrammar`（GBNF）把 `order` 鎖成完整 id 排列，再交給現有 `todaySenseAgent.ts` 驗證。
+- **中文與判斷：** 見 11.3。同一顆 Qwen3-4B Q4_K_M，用與產品相同的 `buildOrderPrompt` 類比，**A7 關鍵判斷通過**（點名第一、小考在過期作業前）。這不是手機實測。
+- **對 nuni：** **手機第一步。** 與 Web 同一判斷能力、授權免費、模組已在倉。代價是約 2.5 GB 下載，以及中階機可能 OOM。
+
+#### 11.2.4 LiteRT-LM／MediaPipe
+
+- **MediaPipe LLM Inference：** 2026-10-01 起 **maintenance-only**，官方建議遷 LiteRT-LM。不選為新接線。  
+  來源：[LLM Inference guide](https://ai.google.dev/edge/mediapipe/solutions/genai/llm_inference)。
+- **LiteRT-LM：** Android／iOS／Web；Kotlin Stable、**Swift Early Preview**、**JavaScript Early Preview**。官方表：Qwen3-0.6B 586 MB（Vivo X300 Pro GPU decode 21 tk/s）；Gemma4-E2B 2583 MB（S26 Ultra／iPhone 17 Pro）。**表上沒有 Qwen3-4B。** Gemma 4 Apache 2.0；舊 Gemma 走 Gemma ToU。  
+  來源：[LiteRT-LM Overview](https://ai.google.dev/edge/litert-lm/overview)，Last updated 2026-10-06。
+- **Expo：** 官方沒有 LiteRT 一等模組。`expo-ai` 預覽**不含**可下載第三方後端。社群 expo-ai-kit 宣稱 SDK 54+ 可用 LiteRT-LM 下載模型（iOS 有記憶體門檻；Android 限 arm64，x86 模擬器會停用），**不是 Expo 官方**，A7 沒測，本輪不當第一。
+- **對 nuni：** 以後若放棄 llama.rn、改原生 Kotlin／Swift，可當執行層備案。現在多一條原生棧，沒有 4B 官方表，不比 llama.rn 更近。
+
+#### 11.2.5 MLC LLM
+
+- **原生：** iOS Swift SDK、Android SDK 文件都在。Android 官方：模擬器不行，要實體 GPU；建置要 NDK、Rust、TVM、`mlc_llm package`。預建 APK 寫明以 Samsung S23（Snapdragon 8 Gen 2）為準；quick start 另提到 Redmi Note 12 Pro（Snapdragon 685）與 Pixel，**沒有給 4B 的官方 MB／RAM 表**。iOS 有 App Store 預建 MLC Chat，那是別人的 app，不是 nuni 可直接呼叫的 API。  
+  來源：[Android SDK](https://llm.mlc.ai/docs/deploy/android.html)、[iOS Swift SDK](https://llm.mlc.ai/docs/deploy/ios.html)、[Quick Start](https://llm.mlc.ai/docs/get_started/quick_start.html)，查於 2026-10-19。
+- **Expo：** 沒有一等模組。要把 TVM runtime 編進 CNG，建置鏈比 llama.rn 重一個數量級。
+- **授權：** Apache-2.0（執行層）；權重另遵模型授權。
+- **判斷考題：** 本輪沒在 MLC 執行檔上跑 A7。
+- **對 nuni：** 不當第一步。
+
+#### 11.2.6 手機瀏覽器 WebGPU（含 App 內 WebView）
+
+- **瀏覽器可用性（一手）：**  
+  - Chrome／Edge Android：**Chrome 121+**、**Android 12+**、**Qualcomm 或 ARM GPU**（web.dev 2025-11-25；gpuweb Implementation Status 另列 Imagination 自 Android 16／Chrome 139，Samsung Xclipse 仍 TBD）。  
+  - Safari：**iOS 26／iPadOS 26 預設開啟**（gpuweb wiki；Transformers.js #1700，2026-06-08 合併，明確分 iOS <26 與 >=26）。  
+  - Firefox Android：仍 flag，Mozilla 預期 2026 才做。  
+  - Chrome 內建 Prompt API：**不含手機**（既有第 3.2 節）。
+- **權重：** 若沿用 Web 那包 ONNX q4f16，約 **2.83 GB**，還要進瀏覽器 Cache。手機分頁記憶體通常比桌面緊。
+- **Expo／WebView：** nuni 有 `react-native-webview`，**查不到** WKWebView／Android WebView 對 4B ONNX 的官方保證。Transformers.js v4 PR 仍把 **React Native support 列為未完成**。`react-native-webgpu`（Dawn）可在 RN 0.81+ 提供 `navigator.gpu`，但把 Transformers.js 接上去仍是社群 PoC，不是產品路徑。
+- **判斷考題：** 沒有在 iOS Safari 或 Chrome Android 上跑 A7。
+- **對 nuni：** 只適合作「學生用手機 Chrome／Safari 開 nuni.tw」的**遠端備案**，且必須偵測 `navigator.gpu`、同意下載、失敗回規則。不當原生 App 第一步——App 裡已有 llama.rn，不必再繞 WebView 塞 2.8 GB。
+
+### 11.3 A7 四卡排序：能實測的就實測
+
+沿用第 10.2 節 A7（台灣時間 2026-10-19 13:00）：點名進行中（`live`）、國文習作已過期（`overdue`）、普物小考 15:00（`quiz`）、資料結構習題三明天 09:00（`later`）。規則會排 `live, overdue, quiz, later`。及格線：點名第一，且 `quiz` 在 `overdue` 前面。
+
+2026-10-19 本環境補跑：llama-cpp-python 0.3.36、CPU 4 threads、`n_gpu_layers=0`、temperature=0、ChatML、提示對齊 `packages/shared/src/todaySenseAgent.ts` 的 `buildOrderPrompt`。權重即先前 unsloth Q4_K_M。**這是 llama.rn 會載的同一類 GGUF，不是 iPhone Metal、不是 AICore、不是手機瀏覽器。**
+
+| 模型 | 檔案 bytes | 載入 | 推論 | 行程峰值 RSS | 輸出 order | 判定 |
+| ---- | ---------- | ---- | ---- | ------------ | ---------- | ---- |
+| Qwen3-0.6B | 396,705,472 | 1.59 s | 1.01 s | 1103.2 MiB | `live, overdue, quiz, later` | **不及格**（跟規則一樣） |
+| Qwen3-1.7B | 1,107,409,472 | 3.30 s | 2.21 s | 2480.5 MiB | `live, overdue, quiz, later` | **不及格**（跟規則一樣） |
+| Qwen3-4B | 2,497,281,312 | 6.08 s | 4.34 s | 5243.7 MiB | `live, quiz, overdue, later` | **過**（點名第一、小考在過期前） |
+
+4B 這次把明天作業放在過期作業後面（`… overdue, later`），與第 10 節當日第一次的 `live, quiz, later, overdue` 不完全相同；**關鍵判斷沒變**：小考仍在過期作業前面，這是規則做不到的。峰值 RSS 是同一行程先後載三顆的 `ru_maxrss`，4B 最後載，約 5.2 GiB 代表這顆在 Linux CPU 上的行程高峰，**不是**手機官方 RAM 表，也不是 Metal／NPU 數字。它只說明：4B Q4 的工作集明顯大於 2.5 GB 檔案本身，6 GB 檔中階機有 OOM 風險，必須真機測，失敗就退回規則版。
+
+Apple Foundation Models、Gemini Nano、手機 Safari／Chrome **沒跑 A7**，上面三行不能套到它們頭上。
+
+### 11.4 學生中階機跑不跑得動（不編 RAM 表）
+
+Apple 規格頁不公布各 iPhone RAM，本文件不引用第三方拆機數字當定案。能寫的只有：
+
+1. **系統內建：** 中階機大多根本進不了官方清單，不是「跑得慢」，是 **API 直接 `UNAVAILABLE`／`isAvailable == false`**。
+2. **4B GGUF：** 檔案 2.50 GB，還要加上 KV cache 與 App 本身。Linux CPU 類比高峰約 5.2 GiB。iPhone 12 起的 Metal（llama.rn 0.4.8 寫 Apple7 GPU）較有機會用 GPU 卸載；**Android 在 0.4.8 是 CPU only**，同檔在中階 Android 會更慢、更吃記憶體。空間不足、載入丟例外、推論逾時 → 規則版。
+3. **0.6B／1.7B：** 較可能塞進中階機，但 A7 不及格，接上去只是多一次下載、順序與現在相同，稱不上 agent。
+4. **現有聊天 7B（約 4.7 GB）：** 不當今天殼排序。沒考 A7，體積比 4B 更大。
+
+沒有「中階機保證能跑 4B」這句話。產品句只能是：同意後試試；不行就跟現在一樣。
+
+### 11.5 Expo 現況（對應本倉 Expo ~54）
+
+| 能力 | 本倉現況 | 官方一等？ |
+| ---- | -------- | ---------- |
+| llama.cpp GGUF | 已有 `llama.rn@0.4.8`，開發版可用 | 社群模組，MIT；Expo 文件不當它是 SDK 一部分 |
+| Apple Foundation Models | 未接 | `expo-ai` 為 **next SDK alpha**，SDK 54 目錄沒有 |
+| Gemini Nano Prompt API | 未接 | 同上；且要 minSdk 26 |
+| LiteRT-LM | 未接 | 無官方 Expo 模組 |
+| MLC | 未接 | 無 |
+| 手機 WebGPU 在 RN | 未接 | Transformers.js 官方尚未支援 RN |
+
+結論：要在**不升級 Expo SDK、不重寫原生執行層**的前提下做手機第一步，只剩把今天殼排序接到已經存在的 `llama.rn`。若將來要系統內建免下載，再單開一輪升 SDK／寫 Swift／Kotlin，並先在真機跑 A7。
+
+### 11.6 定案
+
+**第一步做哪條：** 開發版／正式包的 `llama.rn` + Qwen3-4B Q4_K_M，只輸出已存在卡片 id 的排列。同意畫面沿用 Web 已鎖的事實句（體積改寫 **約 2.5 GB**、占這台裝置空間、建議 Wi-Fi、只排先後不改課名與時間）。下載可取消、設定可刪、沒同意就用規則版。輸出走既有 `todaySenseAgent.ts` 驗證。
+
+**哪些手機先支援（接通以後，不是現在）：**
+
+1. nuni **開發版或商店包**（不是 Expo Go），64-bit，使用者同意下載約 2.5 GB，載入成功，且至少兩張規則卡。
+2. iOS：實體機、llama.rn Metal 可用時優先（README：Apple7 GPU；模擬器不行）。
+3. Android：arm64；在升級 llama.rn 之前預期走 CPU，只對「載得動且等得完」的機顯示建議順序。
+
+**跑不動怎麼退回規則版（必須偵測，不要先畫下載鈕再失敗）：**
+
+- 不是開發版／模組 `require` 失敗。
+- 剩餘空間明顯小於約 2.5 GB，或使用者拒絕。
+- 下載取消、校驗失敗。
+- `initLlama` 丟例外、OOM、背景被殺、逾時。
+- `order` 不是完整排列、點名不是第一、或程式驗證失敗。
+
+以上畫面與現在完全相同，不顯示「AI 失敗」。
+
+**大概要多少開發量（不估日曆）：** 比 Web 那輪小、比從零接 Apple／Nano 大。執行層與下載／刪除 UI 已在聊天模型管理裡，今天殼只要：獨立同意鍵與快取（不要跟 7B 聊天模型共用檔）、`buildOrderPrompt` + GBNF／JSON 驗證、OOM／前景處理、iOS Metal 與一台中階 Android 的真機 A7。風險在 **Android 0.4.8 無 GPU**——若真機慢到不能用，下一步才是升 llama.rn（新版要求 New Architecture，本倉已開）或放棄該機。不包含：改規則引擎、改寫回、接聊天窗、把 4B 打進 ipa／apk、開系統內建、部署。
+
+**明確不當第一步：** 只押 Apple Intelligence；只押 Gemini Nano；手機 Chrome Prompt API；MediaPipe LLM Inference；MLC 從零接入；App 內 WebView 跑 2.8 GB ONNX；把現有 Qwen2.5-7B 聊天權重拿來排序；雲端／Private Cloud Compute／Firebase Hybrid。
+
+### 11.7 接通時仍不准做的事（與 Web 相同）
+
+模型不得改課名、時間、`kind`，不得自己寫回 handled／snooze，不得從公告發明新卡。未登入／讀取中／失敗三態不准用模型填空。`SENSE_SECTION_NOTE` 在拒絕或不支援時維持現況。
