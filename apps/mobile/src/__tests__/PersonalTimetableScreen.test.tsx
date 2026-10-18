@@ -1,0 +1,154 @@
+import React from 'react';
+import { fireEvent, render } from '@testing-library/react-native';
+import type { PersonalImportRecord } from '@campus/shared';
+import PersonalTimetableScreen from '../screens/PersonalTimetableScreen';
+import { loadPersonalTimetable } from '../services/personalTimetable';
+import { loadPersonalImports } from '../services/personalImports';
+
+let mockSchool = { id: 'ncku', name: '國立成功大學' };
+let mockRoute: { params?: { term: string } } = {};
+let mockScope: { owner: string; schoolId: string } | null = {
+  owner: 'nuni:account-a',
+  schoolId: 'ncku',
+};
+const mockNavigation = { navigate: jest.fn(), goBack: jest.fn(), canGoBack: () => false };
+jest.mock('../state/auth', () => ({ useAuth: () => ({ user: null }) }));
+jest.mock('../state/school', () => ({ useSchool: () => ({ school: mockSchool }) }));
+jest.mock('../state/personalImportScope', () => ({ usePersonalImportScope: () => mockScope }));
+jest.mock('../services/personalImports', () => ({
+  ...jest.requireActual('../services/personalImports'),
+  loadPersonalImports: jest.fn(),
+}));
+jest.mock('../firebase', () => ({ getDb: jest.fn(), getFunctionsInstance: jest.fn() }));
+jest.mock('../services/personalTimetable', () => ({
+  ...jest.requireActual('../services/personalTimetable'),
+  loadPersonalTimetable: jest.fn(),
+  savePersonalTimetable: jest.fn(),
+}));
+jest.mock('../components/PersonalImportSummary', () => ({ PersonalImportSummary: () => null }));
+jest.mock('../services/friends', () => ({
+  listAcceptedFriends: jest.fn(),
+  opponentUidFromFriendship: jest.fn(),
+}));
+jest.mock('@react-navigation/native', () => ({
+  useNavigation: () => mockNavigation,
+  useRoute: () => mockRoute,
+  useFocusEffect: (callback: () => void) => require('react').useEffect(callback, [callback]),
+}));
+
+const record = (overrides: Partial<PersonalImportRecord> = {}): PersonalImportRecord => ({
+  id: 'course-a',
+  batchId: 'batch-a',
+  importedAt: '2026-10-18T00:00:00Z',
+  kind: 'timetable',
+  schoolId: 'ncku',
+  academicYear: '115',
+  semester: '1',
+  title: '成大課程',
+  dayOfWeek: 1,
+  startPeriod: 2,
+  endPeriod: 3,
+  location: '教室 303',
+  source: { type: 'paste', line: 1, rawText: '' },
+  ...overrides,
+});
+beforeEach(() => {
+  jest.clearAllMocks();
+  mockSchool = { id: 'ncku', name: '國立成功大學' };
+  mockScope = { owner: 'nuni:account-a', schoolId: 'ncku' };
+  mockRoute = {};
+  jest
+    .mocked(loadPersonalTimetable)
+    .mockReset()
+    .mockResolvedValue({
+      courses: [],
+      schoolId: 'ncku',
+      shareWithFriends: false,
+      updatedAt: '2026-10-18T00:00:00Z',
+      meta: { year: '', semester: '', school: '', className: '', credits: 0, title: '' },
+    });
+  jest
+    .mocked(loadPersonalImports)
+    .mockReset()
+    .mockResolvedValue({ version: 1, records: [record()], batches: [] });
+});
+
+test('the full timetable and editor use NCKU period labels and times, without inheriting a guest timetable', async () => {
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText('成大課程');
+  expect(view.getByText('星期一 · 08:00–09:50')).toBeTruthy();
+  expect(view.queryByText(/09:10–11:00/)).toBeNull();
+  expect(loadPersonalTimetable).toHaveBeenCalledWith(null, 'ncku', 'nuni:account-a');
+  fireEvent.press(view.getByText('新增'));
+  fireEvent.press(view.getByText('開始 N'));
+  fireEvent.press(view.getByText('結束 5'));
+  expect(view.getByText('12:10–14:00')).toBeTruthy();
+  fireEvent.press(view.getByText('開始 0'));
+  fireEvent.press(view.getByText('結束 0'));
+  expect(view.getByText('07:00–07:50')).toBeTruthy();
+  fireEvent.press(view.getByText('開始 A'));
+  fireEvent.press(view.getByText('結束 D'));
+  expect(view.getByText('18:20–21:55')).toBeTruthy();
+});
+
+test('the term selected on Today remains selected in the complete timetable', async () => {
+  mockRoute = { params: { term: '114|1' } };
+  jest
+    .mocked(loadPersonalImports)
+    .mockResolvedValue({
+      version: 1,
+      records: [record(), record({ id: 'old', academicYear: '114', title: '前學期課程' })],
+      batches: [],
+    });
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText('前學期課程');
+  expect(view.queryByText('成大課程')).toBeNull();
+});
+
+test('unknown school clock times remain readable without borrowing another school period table', async () => {
+  mockSchool = { id: 'unknown', name: '其他學校' };
+  mockScope = { owner: 'guest:device', schoolId: 'unknown' };
+  jest
+    .mocked(loadPersonalImports)
+    .mockResolvedValue({
+      version: 1,
+      records: [
+        record({
+          schoolId: 'unknown',
+          title: '週末課程',
+          dayOfWeek: 6,
+          startPeriod: undefined,
+          endPeriod: undefined,
+          startTime: '09:00',
+          endTime: '10:00',
+        }),
+      ],
+      batches: [],
+    });
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText('週末課程');
+  expect(view.getByText(/週六 · 09:00–10:00/)).toBeTruthy();
+  expect(view.getByRole('button', { name: '格子' })).toBeDisabled();
+  expect(view.getByRole('button', { name: '今天空堂' })).toBeDisabled();
+});
+
+test('unresolved logout never loads a guest or account timetable', () => {
+  mockScope = null;
+  const view = render(<PersonalTimetableScreen />);
+  expect(view.getByText(/正在確認帳號/)).toBeTruthy();
+  expect(loadPersonalTimetable).not.toHaveBeenCalled();
+  expect(loadPersonalImports).not.toHaveBeenCalled();
+});
+
+test('a manual course without a semester opens the same manual timetable from Today', async () => {
+  mockRoute = { params: { term: '未填|未填' } };
+  jest.mocked(loadPersonalTimetable).mockResolvedValue({
+    courses: [{ id: 'manual-a', name: '手排課程', day: 1, start: 2, end: 3, teacher: '', room: '', color: 'blue' }],
+    schoolId: 'ncku', shareWithFriends: false, updatedAt: '2026-10-18T00:00:00Z',
+    meta: { year: '', semester: '', school: '', className: '', credits: 0, title: '' },
+  });
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText('手排課程');
+  expect(view.queryByText('成大課程')).toBeNull();
+  expect(view.getByText('星期一 · 08:00–09:50')).toBeTruthy();
+});

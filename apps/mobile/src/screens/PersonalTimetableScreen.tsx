@@ -8,9 +8,13 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import {
-  PERIOD_TIMES,
+  periodProfileForSchool,
+  periodTimes,
+  periodSlots,
+  periodCount,
+  personalTimetableTerms,
   SchedulePlanner,
   WEEKDAY_LABELS,
   studySlots,
@@ -30,7 +34,7 @@ import { useSchool } from '../state/school';
 import { usePersonalImportScope } from '../state/personalImportScope';
 import { loadPersonalImports, selectPersonalTimetableCourses } from '../services/personalImports';
 import { PersonalImportSummary } from '../components/PersonalImportSummary';
-import { rootNavigateNested } from '../app/rootNavigation';
+import { safeNavigate } from '../utils/safeNavigate';
 import type { PersonalImportRecord } from '@campus/shared';
 import {
   createMeetup,
@@ -41,6 +45,7 @@ import {
   loadFriendTimetable,
   loadPersonalTimetable,
   savePersonalTimetable,
+  personalTimetableRecords,
   type StoredTimetable,
 } from '../services/personalTimetable';
 import { listAcceptedFriends, opponentUidFromFriendship } from '../services/friends';
@@ -49,15 +54,21 @@ export default function PersonalTimetableScreen() {
   const auth = useAuth();
   const { school } = useSchool();
   const scope = usePersonalImportScope();
-  return <PersonalTimetableWorkspace key={`${auth.user?.uid || 'guest'}:${school?.id || 'pu'}:${scope?.owner || 'pending'}`} />;
+  const route = useRoute();
+  const term = (route.params as { term?: string } | undefined)?.term;
+  return <PersonalTimetableWorkspace initialTerm={term} key={`${auth.user?.uid || 'guest'}:${school?.id || 'pu'}:${scope?.owner || 'pending'}:${term || ''}`} />;
 }
 
-function PersonalTimetableWorkspace() {
+function PersonalTimetableWorkspace({ initialTerm }: { initialTerm?: string }) {
+  const navigation = useNavigation();
   const auth = useAuth();
   const { school } = useSchool();
-  const uid = auth.user?.uid || null;
   const schoolId = school?.id || 'pu';
+  const profile = periodProfileForSchool(schoolId);
+  const periods = profile ? periodSlots(profile) : [];
+  const times = profile ? periodTimes(profile) : [];
   const [timetable, setTimetable] = useState<StoredTimetable | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const [view, setView] = useState<'week' | 'day' | 'grid'>('week');
   const [day, setDay] = useState(() => {
     const today = new Date().getDay();
@@ -65,19 +76,29 @@ function PersonalTimetableWorkspace() {
   });
   const [editing, setEditing] = useState<PersonalCourse | null>(null);
   const importScope = usePersonalImportScope();
+  const localOwner = importScope?.owner.startsWith('nuni:') ? importScope.owner : undefined;
+  const uid = localOwner ? null : auth.user?.uid || null;
   const importScopeKey = importScope ? JSON.stringify(importScope) : '';
   const loadGeneration = useRef(0);
   const scopeRef = useRef(importScopeKey);
   scopeRef.current = importScopeKey;
   const [importState, setImportState] = useState<{ scope: string; records: PersonalImportRecord[] } | null>(null);
-  const [importTerm, setImportTerm] = useState('');
+  const [importTerm, setImportTerm] = useState(initialTerm || '');
   const importedRecords = useMemo(() => importState?.scope === importScopeKey ? importState.records : [], [importState, importScopeKey]);
-  const importTerms = [...new Set(importedRecords.filter((row) => row.kind === 'timetable').map((row) => `${row.academicYear}／${row.semester}`))].reverse();
-  const selectedView = importTerm === 'legacy' || (!importTerm && timetable?.courses.length)
-    ? 'legacy' : (importTerms.includes(importTerm) ? importTerm : importTerms[0]);
+  const allTerms = personalTimetableTerms([
+    ...(timetable ? personalTimetableRecords(timetable) : []), ...importedRecords,
+  ], schoolId);
+  const importTerms = allTerms.map((term) => term.key);
+  const activeTerm = importTerms.includes(importTerm) ? importTerm : importTerms[0];
+  const manualTerm = timetable ? `${timetable.meta.year || '未填'}|${timetable.meta.semester || '未填'}` : '';
+  const selectedView = importTerm === 'legacy' || activeTerm === manualTerm
+    ? 'legacy' : activeTerm?.replace('|', '／');
   const displayCourses = useMemo(() => selectPersonalTimetableCourses(timetable, importedRecords, schoolId, selectedView), [timetable, importedRecords, schoolId, selectedView]);
   const openCourse = (course: PersonalCourse) => course.id.startsWith('import:')
-    ? rootNavigateNested('學習', 'PersonalImport', { kind: 'timetable' }) : setEditing(course);
+    || !profile ? safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' }) : setEditing(course);
+  const listedImports = importedRecords.filter((row) => row.kind === 'timetable' && row.schoolId === schoolId &&
+    `${row.academicYear}|${row.semester}` === (selectedView === 'legacy' ? manualTerm : activeTerm) &&
+    !displayCourses.some((course) => course.id === `import:${row.id}`));
   const [answer, setAnswer] = useState<string[]>([]);
   const [studyDay, setStudyDay] = useState(() => {
     const today = new Date().getDay();
@@ -96,11 +117,15 @@ function PersonalTimetableWorkspace() {
     const run = ++loadGeneration.current;
     const active = () => scopeRef.current === requestScope && loadGeneration.current === run;
     setFriends([]); setFriendId(null); setFriendCourses([]); setInvites([]);
+    setLoadError(false);
+    if (!importScope) return;
     if (importScope) {
       try { const imported = await loadPersonalImports(importScope); if (active()) setImportState({ scope: requestScope, records: imported.records }); }
       catch { if (active()) setNotice('匯入資料暫時讀不到，請至「匯入我的資料」重試。'); }
     }
-    const next = await loadPersonalTimetable(uid, schoolId);
+    let next: StoredTimetable;
+    try { next = await loadPersonalTimetable(uid, schoolId, localOwner); }
+    catch { if (active()) setLoadError(true); return; }
     if (!active()) return;
     setTimetable(next);
     if (!uid) return;
@@ -114,7 +139,7 @@ function PersonalTimetableWorkspace() {
     );
     const incoming = await listIncomingMeetups(schoolId, uid).catch(() => []);
     if (active()) setInvites(incoming);
-  }, [uid, schoolId, importScopeKey, importScope]);
+  }, [uid, schoolId, importScopeKey, importScope, localOwner]);
 
   useFocusEffect(
     useCallback(() => {
@@ -124,28 +149,35 @@ function PersonalTimetableWorkspace() {
   );
 
   const planner = useMemo(
-    () => new SchedulePlanner(displayCourses, friendId ? [{ id: friendId, name: '好友', courses: friendCourses }] : [], friendId),
-    [displayCourses, friendId, friendCourses],
+    () => profile && !listedImports.length ? new SchedulePlanner(displayCourses, friendId ? [{ id: friendId, name: '好友', courses: friendCourses }] : [], friendId, profile) : null,
+    [displayCourses, friendId, friendCourses, profile, listedImports.length],
   );
 
   if (!timetable) {
     return (
       <Screen title="我的課表">
-        <Text style={{ color: theme.colors.muted, padding: 16 }}>正在讀取課表…</Text>
+        <Text style={{ color: theme.colors.muted, padding: 16 }}>{loadError ? '課表暫時讀不到，請重新讀取。' : !importScope ? '正在確認帳號，暫時不顯示個人課表。' : '正在讀取課表…'}</Text>
+        {loadError ? <Button text="重試課表" onPress={() => void load()} /> : null}
       </Screen>
     );
   }
 
   const persist = async (next: StoredTimetable, message: string) => {
-    const saved = await savePersonalTimetable(uid, { ...next, schoolId });
-    setTimetable({ ...next, schoolId });
-    setNotice(saved.stored === 'cloud' ? message : `已記在本站。${message}`);
+    try {
+      const saved = await savePersonalTimetable(uid, { ...next, schoolId }, localOwner);
+      setTimetable({ ...next, schoolId });
+      setNotice(saved.stored === 'cloud' ? message : `已記在這台裝置。${message}`);
+      return true;
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : '未完成儲存，請稍後重試。');
+      return false;
+    }
   };
 
   const visible = displayCourses
     .filter((course) => (view === 'day' ? course.day === day : course.day >= 1))
     .sort((a, b) => a.day - b.day || a.start - b.start);
-  const windows = friendId ? meetupWindows(displayCourses, friendCourses) : [];
+  const windows = friendId && profile && !listedImports.length ? meetupWindows(displayCourses, friendCourses, profile) : [];
   const nameOf = (id: string) => friends.find((friend) => friend.uid === id)?.name || '同學';
 
   const sendMeetup = async (kind: 'meal' | 'study', dayOfWeek: number, startMinute: number) => {
@@ -191,7 +223,7 @@ function PersonalTimetableWorkspace() {
         <PersonalImportSummary kind="timetable" />
         {importTerms.length ? <View style={{ gap: 8 }}>
           <Text style={{ color: theme.colors.muted }}>正在查看：{selectedView === 'legacy' ? `原有課表（${timetable.meta.year && timetable.meta.semester ? `${timetable.meta.year}／${timetable.meta.semester}` : '學期未填'}）` : selectedView}。匯入課程只存在這台裝置，不會透過好友課表分享。</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}><Button text="原有課表" kind={selectedView === 'legacy' ? 'primary' : 'outline'} onPress={() => setImportTerm('legacy')} />{importTerms.map((term) => <Button key={term} text={term} kind={term === selectedView ? 'primary' : 'outline'} onPress={() => setImportTerm(term)} />)}</View>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}><Button text="自行編輯的課表" kind={selectedView === 'legacy' ? 'primary' : 'outline'} onPress={() => setImportTerm('legacy')} />{allTerms.map((term) => <Button key={term.key} text={`${term.academicYear}／${term.semester}`} kind={term.key === activeTerm && importTerm !== 'legacy' ? 'primary' : 'outline'} onPress={() => setImportTerm(term.key)} />)}</View>
         </View> : null}
         {invites.length > 0 ? (
           <View accessibilityLabel="有人約你" style={{ gap: 8 }}>
@@ -229,9 +261,14 @@ function PersonalTimetableWorkspace() {
         <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
           <Button text="一週" onPress={() => setView('week')} />
           <Button text="單日" onPress={() => setView('day')} />
-          <Button text="格子" onPress={() => setView('grid')} />
-          <Button text="新增" onPress={() => { setImportTerm('legacy'); setEditing(cleanCourse({ day, start: 1, end: 1 })); }} />
+          <Button text="格子" disabled={!profile} onPress={() => setView('grid')} />
+          <Button text="新增" disabled={!profile} onPress={() => { setImportTerm('legacy'); setEditing(cleanCourse({ day, start: 1, end: 1 }, { periodCount: periods.length })); }} />
         </View>
+        {!profile ? <Text style={{ color: theme.colors.muted }}>這所學校尚未提供節次時間表。可在匯入紀錄填寫實際時間；不套用其他學校的節次。</Text> : null}
+        {listedImports.map((row) => <Pressable key={row.id} onPress={() => safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })} style={{ gap: 6, paddingVertical: 12 }}>
+          <Text style={{ color: theme.colors.text, fontWeight: '600' }}>{row.title}</Text>
+          <Text style={{ color: theme.colors.muted }}>週{['', '一', '二', '三', '四', '五', '六', '日'][row.dayOfWeek || 0] || '未填'} · {row.startTime && row.endTime ? `${row.startTime}–${row.endTime}` : '時間未確認'} · {row.location || '教室未填'} · 個人匯入</Text>
+        </Pressable>)}
         {view === 'day' ? (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             {WEEKDAY_LABELS.map((label, index) => (
@@ -251,12 +288,12 @@ function PersonalTimetableWorkspace() {
                 </Text>
               ))}
             </View>
-            {PERIOD_TIMES.map((time, index) => {
+            {times.map((time, index) => {
               const period = index + 1;
               return (
                 <View key={period} style={{ flexDirection: 'row', minHeight: 36, alignItems: 'stretch' }}>
                   <Text style={{ width: 44, color: theme.colors.muted, fontSize: 10 }}>
-                    {period}
+                    {periods[index].label}
                     {'\n'}
                     {time[0]}
                   </Text>
@@ -289,7 +326,7 @@ function PersonalTimetableWorkspace() {
             })}
           </View>
         ) : visible.length === 0 ? (
-          <Text style={{ color: theme.colors.muted }}>這段時間沒有課。可以用下面的匯入或新增。</Text>
+          <Text style={{ color: theme.colors.muted }}>{listedImports.length ? '以上課程保留原始時間，未放入節次格子。' : '這份課表目前沒有可列出的課程。可匯入或新增自己的資料。'}</Text>
         ) : (
           visible.map((course) => (
             <Pressable
@@ -304,7 +341,7 @@ function PersonalTimetableWorkspace() {
               }}
             >
               <Text style={{ color: theme.colors.muted }}>
-                {WEEKDAY_LABELS[course.day - 1] || '未排定'} · {periodRangeLabel(course.start, course.end)}
+                {WEEKDAY_LABELS[course.day - 1] || '未排定'} · {profile ? periodRangeLabel(course.start, course.end, profile) : '節次時間未確認'}
               </Text>
               <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>{course.name}</Text>
               <Text style={{ color: theme.colors.muted }}>
@@ -330,20 +367,15 @@ function PersonalTimetableWorkspace() {
               keyboardType="number-pad"
               style={inputStyle}
             />
-            <TextInput
-              value={String(editing.start)}
-              onChangeText={(value) => setEditing({ ...editing, start: Number(value) || 1 })}
-              placeholder="開始節次"
-              keyboardType="number-pad"
-              style={inputStyle}
-            />
-            <TextInput
-              value={String(editing.end)}
-              onChangeText={(value) => setEditing({ ...editing, end: Number(value) || 1 })}
-              placeholder="結束節次"
-              keyboardType="number-pad"
-              style={inputStyle}
-            />
+            <Text style={{ color: theme.colors.text }}>開始節次</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+              {periods.map((slot) => <Button key={slot.index} text={`開始 ${slot.label}`} kind={editing.start === slot.index ? 'primary' : 'outline'} onPress={() => setEditing({ ...editing, start: slot.index, end: Math.max(slot.index, editing.end) })} />)}
+            </View>
+            <Text style={{ color: theme.colors.text }}>結束節次</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+              {periods.map((slot) => <Button key={slot.index} text={`結束 ${slot.label}`} disabled={slot.index < editing.start} kind={editing.end === slot.index ? 'primary' : 'outline'} onPress={() => setEditing({ ...editing, end: slot.index })} />)}
+            </View>
+            <Text style={{ color: theme.colors.muted }}>{profile ? periodRangeLabel(editing.start, editing.end, profile) : '節次時間未確認'}</Text>
             <TextInput
               value={editing.room}
               onChangeText={(room) => setEditing({ ...editing, room })}
@@ -352,13 +384,13 @@ function PersonalTimetableWorkspace() {
             />
             <Button
               text="儲存"
-              onPress={() => {
-                const cleaned = cleanCourse(editing);
+              onPress={async () => {
+                if (!profile) return;
+                const cleaned = cleanCourse(editing, { periodCount: periodCount(profile) });
                 const next = timetable.courses.some((item) => item.id === cleaned.id)
                   ? timetable.courses.map((item) => (item.id === cleaned.id ? cleaned : item))
                   : [...timetable.courses, cleaned];
-                void persist({ ...timetable, courses: next }, '課程已更新。');
-                setEditing(null);
+                if (await persist({ ...timetable, courses: next }, '課程已更新。')) setEditing(null);
               }}
             />
             <Button text="取消" onPress={() => setEditing(null)} />
@@ -366,16 +398,18 @@ function PersonalTimetableWorkspace() {
         ) : null}
 
         <Text style={{ fontWeight: '700', color: theme.colors.text }}>幫我安排</Text>
+        {!planner ? <Text style={{ color: theme.colors.muted }}>部分課程無法對應節次，暫不推算空堂。請先核對上課時間。</Text> : null}
         <View style={{ flexDirection: 'row', gap: 8 }}>
-          <Button text="下一堂" onPress={() => setAnswer([planner.ask('下一堂') || '課表上還沒有排課。'])} />
+          <Button text="下一堂" disabled={!planner} onPress={() => setAnswer([planner?.ask('下一堂') || '課表上還沒有排課。'])} />
           <Button
             text="今天空堂"
+            disabled={!planner}
             onPress={() => {
               const today = new Date().getDay();
               setAnswer(
                 today >= 1 && today <= 5
-                  ? [planner.ask('今天空堂') || '今天沒有空堂。']
-                  : ['今天是週末，課表上沒有排課。'],
+                  ? [planner?.ask('今天空堂') || '今天沒有空堂。']
+                  : ['空堂試算僅支援週一至週五，週末課程請查看匯入紀錄。'],
               );
             }}
           />
@@ -401,8 +435,10 @@ function PersonalTimetableWorkspace() {
           ))}
           <Button
             text="排讀書時間"
+            disabled={!planner}
             onPress={() => {
-              const slots = studySlots(displayCourses, studyDay, studyHours);
+              if (!profile || !planner) return;
+              const slots = studySlots(displayCourses, studyDay, studyHours, profile);
               setAnswer(slots.length ? slots : ['這天的空堂都不夠長，換一天或少排一點。']);
             }}
           />
@@ -473,7 +509,7 @@ function PersonalTimetableWorkspace() {
           />
         ))}
         <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-          靜宜第 1 節 {PERIOD_TIMES[0][0]}，第 13 節 {PERIOD_TIMES[12][1]}。
+          {times.length ? `${school.name}節次時間：${times[0][0]}–${times[times.length - 1][1]}。` : '未取得這所學校的節次時間表。'}
         </Text>
       </ScrollView>
     </Screen>

@@ -68,6 +68,7 @@ const record = (schoolId: string, id: string, title: string) => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.history.replaceState({}, '', '/timetable');
   context.schoolId = 'nthu';
   context.owner = 'guest';
   context.records = [];
@@ -111,4 +112,23 @@ it('does not silently load Providence data when no campus is selected', () => {
   render(<PersonalTimetable />);
   expect(screen.getByRole('status').textContent).toContain('請先選擇一所學校');
   expect(context.load).not.toHaveBeenCalled();
+});
+
+it('shows the newest academic term even when an older term was imported later', async () => {
+  context.records = [record('nthu', 'new', '本學期課程'), {
+    ...record('nthu', 'old', '舊學期課程'), academicYear: '114', semester: '2',
+  }];
+  render(<PersonalTimetable />);
+  expect((await screen.findAllByText('本學期課程')).length).toBeGreaterThan(0);
+  expect(screen.queryByText('舊學期課程')).toBeNull();
+});
+
+it('keeps the academic term selected on Today when opening the full timetable', async () => {
+  window.history.replaceState({}, '', '/timetable?term=114%7C2');
+  context.records = [record('nthu', 'new', '本學期課程'), {
+    ...record('nthu', 'old', '舊學期課程'), academicYear: '114', semester: '2',
+  }];
+  render(<PersonalTimetable />);
+  expect((await screen.findAllByText('舊學期課程')).length).toBeGreaterThan(0);
+  expect(screen.queryByText('本學期課程')).toBeNull();
 });
