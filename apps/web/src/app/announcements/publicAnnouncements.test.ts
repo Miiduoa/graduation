@@ -1,7 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { getDocsFromServer } from 'firebase/firestore';
 import { isFirebaseConfigured } from '@/lib/firebase';
-import { announcementSourceIdsForSchool } from '@campus/shared/src/campusAnnouncements';
 import { loadAnnouncementFeed } from './publicAnnouncements';
 
 vi.mock('@/lib/firebase', () => ({ getDb: () => ({}), isFirebaseConfigured: vi.fn(() => true) }));
@@ -25,17 +24,12 @@ function missingIndexError() {
 function productionEmptySchoolRead(schoolId: string) {
   return async (input: {
     path?: string;
-    constraints?: Array<{ where?: string; value?: string }>;
+    constraints?: Array<{ where?: string; value?: string; orderBy?: string }>;
   }) => {
     const path = String(input?.path || '');
     if (path.includes('announcement-sources')) return snapshot();
-    if (
-      path === 'announcements' &&
-      input?.constraints?.some((item) => item.where === 'sourceId')
-    ) {
-      throw missingIndexError();
-    }
-    if (path === `schools/${schoolId}/announcements` || path === 'announcements') return snapshot();
+    if (path === `schools/${schoolId}/announcements`) return snapshot();
+    if (path === 'announcements') throw missingIndexError();
     return snapshot();
   };
 }
@@ -45,10 +39,9 @@ beforeEach(() => {
   vi.mocked(isFirebaseConfigured).mockReturnValue(true);
 });
 
-it.each(['ncku', 'ntpu'] as const)(
-  'treats a successfully empty %s feed as unpublished even when extras would hit a missing legacy sourceId index',
+it.each(['ncku', 'ntpu', 'feu', 'mmc'] as const)(
+  'keeps a successfully empty %s feed when the school-scoped legacy fallback lacks an index',
   async (schoolId) => {
-    expect(announcementSourceIdsForSchool(schoolId).length).toBeGreaterThan(0);
     vi.mocked(getDocsFromServer).mockImplementation(productionEmptySchoolRead(schoolId) as never);
     await expect(loadAnnouncementFeed(schoolId)).resolves.toEqual({
       announcements: [],
@@ -56,21 +49,41 @@ it.each(['ncku', 'ntpu'] as const)(
       allUnavailable: false,
     });
     expect(getDocsFromServer).toHaveBeenCalledWith(
-      expect.objectContaining({ path: `schools/${schoolId}/announcements` }),
+      expect.objectContaining({
+        path: `schools/${schoolId}/announcements`,
+        constraints: expect.arrayContaining([
+          expect.objectContaining({ orderBy: 'publishedAt', direction: 'desc' }),
+        ]),
+      }),
     );
     expect(getDocsFromServer).toHaveBeenCalledWith(
-      expect.objectContaining({ path: `schools/${schoolId}/announcement-sources` }),
-    );
-    expect(getDocsFromServer).not.toHaveBeenCalledWith(
       expect.objectContaining({
         path: 'announcements',
         constraints: expect.arrayContaining([
-          expect.objectContaining({ where: 'sourceId' }),
+          { where: 'schoolId', operator: '==', value: schoolId },
+          { orderBy: 'publishedAt', direction: 'desc' },
         ]),
       }),
     );
   },
 );
+
+it('drops fallback rows that belong to another school', async () => {
+  vi.mocked(getDocsFromServer).mockImplementation((async (input: { path?: string }) => {
+    const path = String(input?.path || '');
+    if (path.includes('announcement-sources')) return snapshot();
+    if (path === 'schools/ncku/announcements') return snapshot();
+    return snapshot({
+      id: 'ntu-1',
+      data: () => ({ title: '臺大稿', schoolId: 'ntu', publishedAt: '2026-10-08T00:00:00.000Z' }),
+    });
+  }) as never);
+  await expect(loadAnnouncementFeed('ncku')).resolves.toEqual({
+    announcements: [],
+    sources: [],
+    allUnavailable: false,
+  });
+});
 
 it.each(['ncku', 'ntpu'] as const)(
   'still rejects %s when the canonical dated query actually fails',
