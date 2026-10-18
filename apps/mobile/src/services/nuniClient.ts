@@ -1,6 +1,8 @@
 import { NuniError, nuniRecord, parseNuniPrincipal } from '@campus/shared/src/nuni';
 import { WAKE_REQUEST_TIMEOUT_MS, withWakeRetry } from '@campus/shared/src/wakeAwareRequest';
 
+import { PERSONAL_IMPORT_SYNC_BODY_LIMIT } from '@campus/shared/src/imports/sync';
+
 const API = 'https://api.nuni.tw/v1/auth/platform/';
 const PUBLIC_API = 'https://api.nuni.tw/v1/public/';
 export const NUNI_HANDLE = /^ps_[A-Za-z0-9_-]{43}$/;
@@ -57,7 +59,11 @@ export const nuniPlatformRequest: NuniTransport = async (
           ...(input ? { body: JSON.stringify(input) } : {}),
         });
         const body = await response.text();
-        if (body.length > 2_000_000) throw new NuniError(502, 'INVALID_RESPONSE');
+        const limit =
+          path === 'personal-imports/read' || path === 'personal-imports/write'
+            ? PERSONAL_IMPORT_SYNC_BODY_LIMIT
+            : 2_000_000;
+        if (body.length > limit) throw new NuniError(502, 'INVALID_RESPONSE');
         let value: unknown;
         try {
           value = JSON.parse(body);

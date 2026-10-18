@@ -5,6 +5,7 @@ import { nuniRecord } from '@campus/shared/src/nuni';
 import { NuniSessionProvider, useNuniSession } from '@/features/nuni/Session';
 import { useAuth } from './AuthGuard';
 import { SelectedSchoolProvider, type BrowseSchool } from './SelectedSchoolProvider';
+import { PersonalImportSyncBridge } from './imports/PersonalImportSync';
 
 type Catalog = { schools: BrowseSchool[]; status: 'loading' | 'ready' | 'error' };
 function SchoolPreferences({ children }: { children: ReactNode }) {
@@ -68,6 +69,7 @@ function SchoolPreferences({ children }: { children: ReactNode }) {
       catalogError="目前無法取得校園目錄，請重新讀取。"
       onRetryCatalog={() => void refresh()}
     >
+      <PersonalImportSyncBridge />
       {children}
     </SelectedSchoolProvider>
   );

@@ -101,7 +101,7 @@ function objectWithFields(
       invalid('備份含有不支援的欄位，請使用 Campus One 匯出的原始備份。');
     }
     const descriptor = descriptors[key];
-    if (!('value' in descriptor)) invalid();
+    if (!descriptor || !('value' in descriptor)) invalid();
     result[key] = descriptor.value;
   }
   return result;
@@ -127,9 +127,19 @@ function validTimestamp(value: unknown): value is string {
   const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}):(\d{2})(?:\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$/.exec(
     value,
   );
-  if (!match || !isPersonalImportDate(match[1]) || !isPersonalImportTime(match[2])) return false;
-  if (Number(match[3]) > 59) return false;
-  if (match[4] !== 'Z' && !isPersonalImportTime(match[4].slice(1))) return false;
+  if (!match) return false;
+  const [, date, time, seconds, zone] = match;
+  if (
+    !date ||
+    !time ||
+    !seconds ||
+    !zone ||
+    !isPersonalImportDate(date) ||
+    !isPersonalImportTime(time)
+  )
+    return false;
+  if (Number(seconds) > 59) return false;
+  if (zone !== 'Z' && !isPersonalImportTime(zone.slice(1))) return false;
   return Number.isFinite(Date.parse(value));
 }
 
@@ -186,12 +196,11 @@ function validatedRecord(
     ]),
   );
   const typed = copy as PersonalImportRecord;
+  const periodProfile = periodProfileForSchool(schoolId);
   if (
     validatePersonalImportRow(typed, {
-      periodProfile: periodProfileForSchool(schoolId),
-    }).some(
-      (issue) => issue.severity === 'error',
-    )
+      ...(periodProfile ? { periodProfile } : {}),
+    }).some((issue) => issue.severity === 'error')
   )
     rowError();
   return typed;
@@ -218,6 +227,17 @@ function validatedRecords(
   return records;
 }
 
+/** Strict transport validation without restoring IDs or accepting extra authority fields. */
+export function validatePersonalImportBackupRecords(
+  value: unknown,
+  schoolId: string,
+): PersonalImportRecord[] {
+  if (!validSchoolId(schoolId)) invalid('請先選擇資料所屬校園。');
+  const records = validatedRecords(value, schoolId);
+  utf8Bytes(JSON.stringify(records));
+  return records;
+}
+
 /** One school's complete personal ledger. Account identity and permissions are never exported. */
 export function serializePersonalImportBackup(
   records: readonly PersonalImportRecord[],
@@ -230,7 +250,7 @@ export function serializePersonalImportBackup(
   const chunks = [
     `{"format":${JSON.stringify(FORMAT)},"version":1,"exportedAt":${JSON.stringify(exportedAt)},"schoolId":${JSON.stringify(options.schoolId)},"records":[`,
   ];
-  let bytes = utf8Bytes(chunks[0]) + 2;
+  let bytes = utf8Bytes(chunks.join('')) + 2;
   for (const [index, record] of validated.entries()) {
     const chunk = `${index ? ',' : ''}${JSON.stringify(record)}`;
     bytes += utf8Bytes(chunk);
