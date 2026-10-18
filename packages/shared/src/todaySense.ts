@@ -23,6 +23,7 @@ export const SENSE_UNDO_ACTION = '撤銷上次操作';
 export const SENSE_CANCEL_ACTION = '取消';
 export const SENSE_RECORD_NOT_REVERSIBLE = '此筆紀錄不能再撤銷。';
 export const SENSE_SAVE_FAILED_TEXT = '這次沒有存成功，清單維持原樣。';
+export const SENSE_MOBILE_SAVE_FAILED_TEXT = '沒存成功，已恢復原來的清單。';
 
 export type SenseItemKind = 'live' | 'assignment' | 'quiz';
 export type SenseKind = 'live_now' | 'overdue' | 'due_soon';

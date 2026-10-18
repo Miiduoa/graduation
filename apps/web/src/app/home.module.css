@@ -780,6 +780,13 @@
 .senseAgent {
   margin-top: 12px;
 }
+.senseAgent progress {
+  display: block;
+  width: 100%;
+  max-width: 320px;
+  margin: 8px 0 0;
+  height: 8px;
+}
 .sensePlan {
   margin: 8px 0 0;
   padding-left: 1.2em;
