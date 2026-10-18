@@ -725,6 +725,52 @@
   text-decoration: underline;
   text-underline-offset: 4px;
 }
+.senseList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.senseCard {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  padding: 18px;
+  margin-bottom: 12px;
+}
+.senseCard h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.senseMeta {
+  font-size: 12px;
+  color: var(--soft);
+  margin: 6px 0 0;
+}
+.senseWhy,
+.sensePreview {
+  font-size: 13px;
+  color: var(--ink);
+  line-height: 1.7;
+  margin: 10px 0 0;
+}
+.sensePreview {
+  color: var(--text);
+}
+.senseActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 14px;
+}
+.senseRecord {
+  font-size: 12px;
+  color: var(--soft);
+  line-height: 1.7;
+  margin: 12px 0 0;
+}
 .schoolAccess {
   border-top: 1px solid var(--line);
   padding-top: 20px;

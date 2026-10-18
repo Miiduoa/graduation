@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -20,6 +20,7 @@ import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { navigateFromInboxTask, resolveInboxAction } from '../services/inboxActions';
+import { TodaySensePanel } from '../components/TodaySensePanel';
 
 type HomeState =
   | { scope: string; status: 'loading' | 'error' }
@@ -36,6 +37,7 @@ export default function StudentTodayScreen() {
   const currentScope = useRef(scope);
   currentScope.current = scope;
   const [state, setState] = useState<HomeState>({ scope, status: 'loading' });
+  const [now, setNow] = useState<Date | null>(null);
   const generation = useRef(0);
   const current = state.scope === scope ? state : null;
   const data = current?.status === 'ready' ? current : null;
@@ -63,6 +65,12 @@ export default function StudentTodayScreen() {
       };
     }, [load]),
   );
+  useEffect(() => {
+    const tick = () => setNow(new Date());
+    tick();
+    const timer = setInterval(tick, 60_000);
+    return () => clearInterval(timer);
+  }, []);
 
   const openCourse = (courseId: string) =>
     safeNavigate(navigation, 'CourseHub', { courseSpaceId: courseId, groupId: courseId });
@@ -118,6 +126,15 @@ export default function StudentTodayScreen() {
           <ActivityIndicator color={theme.colors.accent} style={{ marginVertical: 36 }} />
         ) : (
           <>
+            <TodaySensePanel
+              uid={uid}
+              schoolId={schoolId}
+              tasks={data?.tasks ?? []}
+              phase={error ? 'error' : !uid ? 'unsigned' : data ? 'ready' : 'hidden'}
+              now={now}
+              navigation={navigation}
+              role={auth.profile?.role}
+            />
             {data && (
               <>
                 <Text accessibilityRole="header" style={s.sectionTitle}>

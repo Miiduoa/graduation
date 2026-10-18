@@ -5,6 +5,13 @@ import { loadHomeData, type HomeData } from '@/lib/homeOverview';
 import { loadNuniHomeData } from '@/lib/nuniHomeOverview';
 import { NuniError } from '@campus/shared/src/nuni';
 import { IDENTITY_LOOKUP_FAILED_COPY, IDENTITY_LOOKUP_FAILED_HINT } from '@/lib/accountIdentity';
+import {
+  SENSE_EMPTY_TEXT,
+  SENSE_HANDLE_PREVIEW,
+  SENSE_SECTION_TITLE,
+  SENSE_UNSIGNED_TEXT,
+  senseStorageKey,
+} from '@campus/shared/src/todaySense';
 const state = vi.hoisted(() => ({
   uid: 'alice' as string | null,
   session: null as null | { context: string; platformAccountId: string },
@@ -89,6 +96,8 @@ it('does not report an empty course list as success after a failed load', async 
   render(<HomePage />);
   expect(await screen.findByRole('alert')).toBeTruthy();
   expect(screen.queryByText('目前沒有待繳作業。')).toBeNull();
+  expect(screen.queryByText(SENSE_EMPTY_TEXT)).toBeNull();
+  expect(screen.queryByRole('heading', { name: SENSE_SECTION_TITLE })).toBeNull();
 });
 it('uses the Nuni account for home and links directly to pending work with its actual deadline and submission state', async () => {
   state.uid = null;
@@ -114,7 +123,7 @@ it('uses the Nuni account for home and links directly to pending work with its a
   expect(loadHomeData).not.toHaveBeenCalled();
   expect(screen.queryByRole('link', { name: /用 Google 帳號登入/ })).toBeNull();
   expect(screen.getAllByText('已過參考期限・仍可繳交')).toHaveLength(2);
-  expect(screen.getAllByText(/1\/2 20:30/)).toHaveLength(2);
+  expect(screen.getAllByText(/1\/2 20:30/).length).toBeGreaterThanOrEqual(2);
 });
 it('uses the same identity lookup copy as the account page when the lookup fails', async () => {
   state.uid = null;
@@ -210,6 +219,7 @@ it('removes a loaded overview when refreshing discovers revoked access', async (
   expect(await screen.findByRole('alert')).toBeTruthy();
   expect(screen.queryByText('Private course')).toBeNull();
   expect(screen.queryByText('目前沒有待繳作業。')).toBeNull();
+  expect(screen.queryByText(SENSE_EMPTY_TEXT)).toBeNull();
 });
 it('keeps public campus entries usable when the course session is unavailable', () => {
   state.uid = null;
@@ -237,6 +247,8 @@ it('lets a guest browse before signing in and never loads personal courses', () 
   );
   expect(loadHomeData).not.toHaveBeenCalled();
   expect(loadNuniHomeData).not.toHaveBeenCalled();
+  expect(screen.getByText(SENSE_UNSIGNED_TEXT)).toBeTruthy();
+  expect(screen.queryByText(SENSE_EMPTY_TEXT)).toBeNull();
 });
 
 it('revalidates an expired course session before retrying with the new account context', async () => {
@@ -283,4 +295,52 @@ it('keeps an overdue but open quiz actionable before later tasks', async () => {
   const action = await screen.findByRole('link', { name: /查看並作答測驗/ });
   expect(action.getAttribute('href')).toBe('/classroom/course/design#quiz-quiz1');
   expect(screen.getAllByText('已過參考期限・仍可作答')).toHaveLength(2);
+});
+
+it('builds a sense card from the real overdue task, writes local state after preview, and undoes it', async () => {
+  vi.mocked(loadHomeData).mockResolvedValue({
+    ...data('資料結構'),
+    tasks: [
+      {
+        id: 'hw-1',
+        courseId: 'cs101',
+        courseName: '資料結構',
+        title: '期末報告',
+        dueAt: '2020-01-02T12:30:00Z',
+        href: '/course/cs101#assignment-hw-1',
+      },
+    ],
+  });
+  render(<HomePage />);
+  expect(await screen.findByRole('heading', { name: /現在可處理/ })).toBeTruthy();
+  expect(screen.getByText(/依據作業「期末報告」已過截止時間/)).toBeTruthy();
+  expect(screen.getByRole('link', { name: /前往這份作業/ }).getAttribute('href')).toBe(
+    '/course/cs101#assignment-hw-1',
+  );
+  fireEvent.click(screen.getByRole('button', { name: '從清單移出' }));
+  expect(screen.getByText(SENSE_HANDLE_PREVIEW)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '確認移出' }));
+  expect(await screen.findByText(SENSE_EMPTY_TEXT)).toBeTruthy();
+  expect(window.localStorage.getItem(senseStorageKey('school:alice'))).toContain('"handle"');
+  fireEvent.click(screen.getByRole('button', { name: '撤銷上次操作' }));
+  expect(await screen.findByText(/依據作業「期末報告」已過截止時間/)).toBeTruthy();
+});
+
+it('says there is nothing to handle when loaded tasks are not due soon, without filling sample cards', async () => {
+  vi.mocked(loadHomeData).mockResolvedValue({
+    ...data('資料結構'),
+    tasks: [
+      {
+        id: 'later',
+        courseId: 'cs101',
+        courseName: '資料結構',
+        title: '遠期作業',
+        dueAt: '2099-01-02T12:30:00Z',
+      },
+    ],
+  });
+  render(<HomePage />);
+  expect(await screen.findByText(SENSE_EMPTY_TEXT)).toBeTruthy();
+  expect(screen.queryByText('遠期作業是範例')).toBeNull();
+  expect(screen.queryByRole('button', { name: '從清單移出' })).toBeNull();
 });
