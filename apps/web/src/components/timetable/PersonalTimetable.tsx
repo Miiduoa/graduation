@@ -8,6 +8,7 @@ import {
   IMPORT_CONFIRM_COPY,
   periodCount,
   periodProfileForSchool,
+  personalTimetableTerms,
   SchedulePlanner,
   studySlots,
   WEEKDAY_LABELS,
@@ -118,23 +119,15 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
   const router = useRouter();
   const importScope = usePersonalImportScope();
   const imported = usePersonalImports(importScope.scope, !importScope.loading);
-  const [importTerm, setImportTerm] = useState('');
-  const terms = [
-    ...new Set(
-      imported.records
-        .filter((row) => row.kind === 'timetable')
-        .map((row) => `${row.academicYear}|${row.semester}`),
-    ),
-  ];
-  const latestTerm = [...imported.records].reverse().find((row) => row.kind === 'timetable');
+  const [importTerm, setImportTerm] = useState(() => typeof window === 'undefined'
+    ? '' : new URLSearchParams(window.location.search).get('term') || '');
+  const terms = personalTimetableTerms(imported.records, schoolId).map((term) => term.key);
   const activeTerm =
     importTerm === 'manual'
       ? 'manual'
       : terms.includes(importTerm)
         ? importTerm
-        : latestTerm
-          ? `${latestTerm.academicYear}|${latestTerm.semester}`
-          : '';
+        : terms[0] || '';
   const importedCourses: PersonalCourse[] = imported.records
     .filter(
       (row) =>

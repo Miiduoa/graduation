@@ -13,6 +13,7 @@ import {
 import { httpsCallable } from 'firebase/functions';
 import {
   MEETUP_DURATION_MINUTES,
+  MAX_PERIOD_SLOTS,
   cleanCourses,
   cleanMeta,
   courseOfferingId,
@@ -20,6 +21,7 @@ import {
   periodAt,
   timetableIndex,
   type PersonalCourse,
+  type PersonalImportRecord,
   type TimetableMeta,
 } from '@campus/shared';
 import { getDb, getFunctionsInstance } from '../firebase';
@@ -44,16 +46,36 @@ function empty(schoolId: string): StoredTimetable {
   };
 }
 
+async function readLocalTimetable(owner: string, schoolId: string, allowLegacy: boolean) {
+  const scoped = await AsyncStorage.getItem(`${KEY}:${owner}:${schoolId}`);
+  const raw = scoped !== null ? scoped : allowLegacy ? await AsyncStorage.getItem(`${KEY}:${owner}`) : null;
+  if (raw === null) return empty(schoolId);
+  const invalid = () => new Error('儲存的課表無法讀取，已保留原始資料。請稍後重試，或先備份再處理。');
+  let parsed: StoredTimetable;
+  try { parsed = JSON.parse(raw) as StoredTimetable; } catch { throw invalid(); }
+  // Only an explicitly different-school legacy record may be ignored.
+  if (scoped === null && typeof parsed?.schoolId === 'string' && parsed.schoolId !== schoolId) return empty(schoolId);
+  if (!parsed || parsed.schoolId !== schoolId || !Array.isArray(parsed.courses) ||
+    !parsed.meta || typeof parsed.meta !== 'object' || Array.isArray(parsed.meta) ||
+    typeof parsed.meta.year !== 'string' || typeof parsed.meta.semester !== 'string' ||
+    typeof parsed.shareWithFriends !== 'boolean' ||
+    parsed.courses.some((course) => !course || typeof course.id !== 'string' ||
+      typeof course.name !== 'string' || !Number.isInteger(course.day) || course.day < 0 || course.day > 5 ||
+      !Number.isInteger(course.start) || !Number.isInteger(course.end) ||
+      (course.day === 0 ? course.start !== 0 || course.end !== 0 : course.start < 1 || course.end < course.start || course.end > MAX_PERIOD_SLOTS))) {
+    throw invalid();
+  }
+  return { ...parsed, courses: cleanCourses(parsed.courses), meta: cleanMeta(parsed.meta) };
+}
+
 export async function loadPersonalTimetable(
   uid: string | null,
   schoolId: string,
+  localOwner?: string,
 ): Promise<StoredTimetable> {
-  const local = await AsyncStorage.getItem(`${KEY}:${uid || 'local'}:${schoolId}`) || await AsyncStorage.getItem(`${KEY}:${uid || 'local'}`);
-  let fallback = empty(schoolId);
-  if (local) {
-    try { const parsed = JSON.parse(local) as StoredTimetable; if (parsed.schoolId === schoolId) fallback = parsed; } catch { /* Keep malformed or unscoped legacy data out of this school. */ }
-  }
-  if (!uid) return { ...empty(schoolId), ...fallback, courses: cleanCourses(fallback.courses) };
+  const owner = localOwner || uid || 'local';
+  const fallback = await readLocalTimetable(owner, schoolId, !localOwner);
+  if (!uid || localOwner) return { ...empty(schoolId), ...fallback, courses: cleanCourses(fallback.courses) };
   try {
     const snap = await getDoc(doc(getDb(), 'users', uid, 'personalTimetable', 'current'));
     if (!snap.exists())
@@ -71,15 +93,17 @@ export async function loadPersonalTimetable(
   }
 }
 
-export async function savePersonalTimetable(uid: string | null, timetable: StoredTimetable) {
+export async function savePersonalTimetable(uid: string | null, timetable: StoredTimetable, localOwner?: string) {
+  // A failed read must not be replaced by a newly created empty timetable.
+  await readLocalTimetable(localOwner || uid || 'local', timetable.schoolId, !localOwner);
   const next = {
     ...timetable,
     courses: cleanCourses(timetable.courses),
     meta: cleanMeta(timetable.meta),
     updatedAt: new Date().toISOString(),
   };
-  await AsyncStorage.setItem(`${KEY}:${uid || 'local'}:${timetable.schoolId}`, JSON.stringify(next));
-  if (!uid) return { stored: 'local' as const };
+  await AsyncStorage.setItem(`${KEY}:${localOwner || uid || 'local'}:${timetable.schoolId}`, JSON.stringify(next));
+  if (!uid || localOwner) return { stored: 'local' as const };
   await setDoc(doc(getDb(), 'users', uid, 'personalTimetable', 'current'), {
     ...next,
     // 送申訴時規則用這兩個清單確認課在自己的課表裡
@@ -87,6 +111,18 @@ export async function savePersonalTimetable(uid: string | null, timetable: Store
     updatedAt: serverTimestamp(),
   });
   return { stored: 'cloud' as const };
+}
+
+/** Projection only: the user's saved courses remain in their original storage. */
+export function personalTimetableRecords(timetable: StoredTimetable): PersonalImportRecord[] {
+  return timetable.courses.map((course) => ({
+    id: `manual:${course.id}`, batchId: 'manual-timetable', importedAt: timetable.updatedAt,
+    kind: 'timetable', schoolId: timetable.schoolId,
+    academicYear: timetable.meta.year || '未填', semester: timetable.meta.semester || '未填',
+    title: course.name, teacher: course.teacher, location: course.room,
+    dayOfWeek: course.day, startPeriod: course.start, endPeriod: course.end,
+    source: { type: 'paste', line: 1, rawText: '' },
+  }));
 }
 
 export async function loadFriendTimetable(friendUid: string) {

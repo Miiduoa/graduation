@@ -4,6 +4,7 @@ import { RefreshControl } from 'react-native';
 import StudentTodayScreen from '../screens/StudentTodayScreen';
 import { loadStudentHome } from '../data/studentHome';
 import type { CourseSpace, InboxTask } from '../data/types';
+import { rootNavigateNested } from '../app/rootNavigation';
 
 let mockAuth = {
   user: { uid: 'student-a' },
@@ -18,6 +19,16 @@ jest.mock('../services/companionSignalRecorder', () => ({ recordCompanionEvent: 
 jest.mock('../app/useAIOverlay', () => ({ aiOverlay: { open: jest.fn() } }));
 jest.mock('../app/rootNavigation', () => ({ rootNavigateNested: jest.fn() }));
 jest.mock('../components/OpenOrderCard', () => ({ OpenOrderCard: () => null }));
+jest.mock('../components/TodayTimetablePanel', () => ({
+  TodayTimetablePanel: ({ onOpenImport, onOpenTimetable }: { onOpenImport(): void; onOpenTimetable(): void }) => {
+    const React = require('react');
+    const { Pressable, Text, View } = require('react-native');
+    return React.createElement(View, null,
+      React.createElement(Pressable, { onPress: onOpenImport }, React.createElement(Text, null, '匯入我的課表')),
+      React.createElement(Pressable, { onPress: onOpenTimetable }, React.createElement(Text, null, '查看整週課表')),
+    );
+  },
+}));
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => mockNavigation,
   useFocusEffect: (callback: () => void) => require('react').useEffect(callback, [callback]),
@@ -67,6 +78,10 @@ test('opens the real platform workspace and school services even while school da
   const pending = deferred<ReturnType<typeof result>>();
   jest.mocked(loadStudentHome).mockReturnValueOnce(pending.promise);
   const view = render(<StudentTodayScreen />);
+  fireEvent.press(view.getByText('匯入我的課表'));
+  expect(rootNavigateNested).toHaveBeenCalledWith('學習', 'PersonalImport', { kind: 'timetable' });
+  fireEvent.press(view.getByText('查看整週課表'));
+  expect(rootNavigateNested).toHaveBeenCalledWith('學習', 'PersonalTimetable', undefined);
   fireEvent.press(view.getByRole('button', { name: 'Campus One 課程與作業' }));
   expect(mockNavigate).toHaveBeenCalledWith('我的', { screen: 'NuniWorkspace', params: undefined });
   fireEvent.press(view.getByRole('button', { name: '校務服務' }));

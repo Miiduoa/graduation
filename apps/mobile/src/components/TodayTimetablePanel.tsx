@@ -1,0 +1,219 @@
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import { buildPersonalToday, type PersonalImportRecord } from '@campus/shared';
+import { usePersonalImportScope } from '../state/personalImportScope';
+import { loadPersonalImports } from '../services/personalImports';
+import { loadPersonalTimetable, personalTimetableRecords } from '../services/personalTimetable';
+import { theme } from '../ui/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
+
+type Props = {
+  onOpenImport(): void;
+  onOpenTimetable(termKey?: string): void;
+  refreshKey?: number;
+};
+type Snapshot = {
+  scope: string;
+  status: 'loading' | 'ready' | 'error';
+  records: PersonalImportRecord[];
+};
+
+/** An imported weekly plan is useful without granting school-account access. */
+export function TodayTimetablePanel({ onOpenImport, onOpenTimetable, refreshKey = 0 }: Props) {
+  const s = useThemeStyleSheet(createStyles);
+  const scope = usePersonalImportScope();
+  const scopeKey = scope ? JSON.stringify(scope) : '';
+  const currentScope = useRef(scopeKey);
+  currentScope.current = scopeKey;
+  const generation = useRef(0);
+  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [selection, setSelection] = useState({ scope: '', term: '' });
+  const [now, setNow] = useState(() => new Date(Date.now()));
+  const visible = scopeKey && snapshot?.scope === scopeKey ? snapshot : null;
+  const load = useCallback(async () => {
+    const run = ++generation.current;
+    setNow(new Date(Date.now()));
+    if (!scopeKey) return;
+    setSnapshot({ scope: scopeKey, status: 'loading', records: [] });
+    try {
+      const current = JSON.parse(scopeKey) as { owner: string; schoolId: string };
+      const [ledger, timetable] = await Promise.all([
+        loadPersonalImports(current),
+        loadPersonalTimetable(
+          current.owner.startsWith('firebase:') ? current.owner.slice('firebase:'.length) : null,
+          current.schoolId,
+          current.owner.startsWith('nuni:') ? current.owner : undefined,
+        ),
+      ]);
+      if (run === generation.current && currentScope.current === scopeKey)
+        setSnapshot({
+          scope: scopeKey,
+          status: 'ready',
+          records: [...personalTimetableRecords(timetable), ...ledger.records],
+        });
+    } catch {
+      if (run === generation.current && currentScope.current === scopeKey)
+        setSnapshot({ scope: scopeKey, status: 'error', records: [] });
+    }
+  }, [scopeKey]);
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+      const timer = setInterval(() => setNow(new Date(Date.now())), 30_000);
+      const subscription = AppState.addEventListener('change', (state) => {
+        if (state === 'active') void load();
+      });
+      return () => {
+        generation.current += 1;
+        clearInterval(timer);
+        subscription.remove();
+      };
+    }, [load, refreshKey]),
+  );
+  const plan = useMemo(
+    () =>
+      buildPersonalToday(visible?.status === 'ready' ? visible.records : [], {
+        schoolId: scope?.schoolId || '',
+        termKey: selection.scope === scopeKey ? selection.term : undefined,
+        now,
+      }),
+    [visible, scope?.schoolId, scopeKey, selection, now],
+  );
+  const openButton = (label: string, onPress: () => void) => (
+    <Pressable accessibilityRole="button" onPress={onPress} style={s.button}>
+      <Text style={s.buttonText}>{label}</Text>
+    </Pressable>
+  );
+  const selectedTerm = plan.terms.find((term) => term.key === plan.termKey);
+  return (
+    <View style={s.panel} testID="today-timetable">
+      <Text accessibilityRole="header" style={s.heading}>
+        今天的課表
+      </Text>
+      {!scopeKey ? (
+        <Text style={s.detail}>正在確認帳號，暫時不顯示個人課表。</Text>
+      ) : !visible || visible.status === 'loading' ? (
+        <Text accessibilityLiveRegion="polite" style={s.detail}>
+          正在讀取這台裝置的課表…
+        </Text>
+      ) : visible.status === 'error' ? (
+        <>
+          <Text accessibilityRole="alert" style={s.detail}>
+            課表暫時讀不到，請重新讀取。這不代表今天沒有課。
+          </Text>
+          {openButton('重試課表', () => void load())}
+        </>
+      ) : plan.terms.length ? (
+        <>
+          <Text style={s.detail}>
+            目前課表：{selectedTerm?.academicYear}／{selectedTerm?.semester} · 個人課表
+          </Text>
+          {plan.terms.length > 1 ? (
+            <View style={s.terms}>
+              {plan.terms.map((term) => (
+                <Pressable
+                  key={term.key}
+                  accessibilityRole="button"
+                  accessibilityLabel={`查看 ${term.academicYear}／${term.semester} 課表`}
+                  accessibilityState={{ selected: plan.termKey === term.key }}
+                  onPress={() => setSelection({ scope: scopeKey, term: term.key })}
+                  style={[s.term, plan.termKey === term.key && s.selectedTerm]}
+                >
+                  <Text style={s.buttonText}>
+                    {term.academicYear}／{term.semester}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+          {plan.today.length ? (
+            plan.today.map((item) => (
+              <View key={item.row.id} style={s.course}>
+                <Text style={s.time}>
+                  {item.startTime}–{item.endTime} ·{' '}
+                  {item.status === 'ongoing'
+                    ? '上課時段'
+                    : item.status === 'ended'
+                      ? '已過下課時間'
+                      : item.row.id === plan.nextId
+                        ? '下一堂'
+                        : '待上課'}
+                </Text>
+                <Text style={s.courseTitle}>{item.row.title}</Text>
+                <Text style={s.detail}>
+                  {item.row.location || '教室未填'}
+                  {item.row.teacher ? ` · ${item.row.teacher}` : ''}
+                </Text>
+                <Text style={s.note}>
+                  {item.row.id.startsWith('manual:') ? '來源：自行編輯' : '來源：個人匯入'}
+                </Text>
+                {item.conflict ? <Text style={s.warning}>上課時間重疊，請核對課表。</Text> : null}
+              </View>
+            ))
+          ) : (
+            <Text style={s.detail}>
+              {plan.unplacedCount ? '目前沒有可確認時間的今日課程。' : '這份課表今天沒有排課。'}
+            </Text>
+          )}
+          {plan.unplacedCount ? (
+            <Text style={s.warning}>
+              {plan.unplacedCount} 門課的上課時間未確認，請到匯入紀錄補齊。
+            </Text>
+          ) : null}
+          <Text style={s.note}>
+            依每週課表顯示；停課與補課請確認學校通知。個人課表尚未經學校確認，匯入資料只儲存在這台裝置。
+          </Text>
+          <View style={s.actions}>
+            {openButton('查看整週課表', () => onOpenTimetable(plan.termKey))}
+            {openButton('檢查匯入紀錄', onOpenImport)}
+          </View>
+        </>
+      ) : (
+        <>
+          <Text style={s.detail}>
+            匯入課表後，就能在這裡查看上課時間與教室。資料只儲存在這台裝置。
+          </Text>
+          {openButton('匯入我的課表', onOpenImport)}
+          {openButton('自行編輯課表', () => onOpenTimetable())}
+        </>
+      )}
+    </View>
+  );
+}
+
+const createStyles = () =>
+  StyleSheet.create({
+    panel: {
+      gap: 12,
+      paddingVertical: 20,
+      marginBottom: 12,
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border,
+    },
+    heading: { color: theme.colors.text, fontSize: 20, fontWeight: '600' },
+    detail: { color: theme.colors.textSecondary, fontSize: 14, lineHeight: 22 },
+    note: { color: theme.colors.muted, fontSize: 12, lineHeight: 19 },
+    course: {
+      paddingVertical: 12,
+      gap: 6,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    time: { color: theme.colors.accent, fontSize: 13, fontWeight: '600' },
+    courseTitle: { color: theme.colors.text, fontSize: 18, fontWeight: '600', lineHeight: 26 },
+    warning: { color: theme.colors.danger, fontSize: 13, lineHeight: 21 },
+    actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 18 },
+    terms: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    term: {
+      minHeight: 44,
+      paddingHorizontal: 12,
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: 6,
+    },
+    selectedTerm: { backgroundColor: theme.colors.focusSurface, borderColor: theme.colors.accent },
+    button: { minHeight: 44, justifyContent: 'center' },
+    buttonText: { color: theme.colors.accent, fontSize: 14, fontWeight: '600' },
+  });

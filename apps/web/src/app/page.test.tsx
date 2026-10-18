@@ -21,6 +21,7 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>Campus One</header> }));
 vi.mock('@/components/SiteFooter', () => ({ SiteFooter: () => null }));
+vi.mock('@/components/timetable/TodayTimetable', () => ({ TodayTimetable: () => null }));
 vi.mock('@/features/nuni/Session', () => ({
   useNuniSession: () => ({
     session: state.session,

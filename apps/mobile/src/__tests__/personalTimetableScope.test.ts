@@ -40,3 +40,26 @@ test('new saves keep per-school local schedules and reject a mismatched cloud fa
   jest.mocked(getDoc).mockResolvedValue({ exists: () => true, data: () => make('pu') } as never);
   expect((await loadPersonalTimetable('account', 'ntu')).courses).toEqual([]);
 });
+
+test('platform accounts never inherit guest or another platform account timetable', async () => {
+  await savePersonalTimetable(null, make('pu'));
+  expect((await loadPersonalTimetable(null, 'pu', 'nuni:account-a')).courses).toEqual([]);
+  await savePersonalTimetable(null, make('pu'), 'nuni:account-a');
+  expect((await loadPersonalTimetable(null, 'pu', 'nuni:account-a')).courses).toHaveLength(1);
+  expect((await loadPersonalTimetable(null, 'pu', 'nuni:account-b')).courses).toEqual([]);
+  expect((await loadPersonalTimetable(null, 'ntu', 'nuni:account-a')).courses).toEqual([]);
+  expect(getDoc).not.toHaveBeenCalled();
+});
+
+test.each([
+  '{broken-json',
+  JSON.stringify({ ...make('pu'), courses: {} }),
+  JSON.stringify({ ...make('pu'), courses: [null] }),
+  JSON.stringify({ ...make('pu'), meta: null }),
+])('an unreadable stored timetable is reported and cannot be overwritten: %s', async (raw) => {
+  const key = 'campus-one-personal-timetable:nuni:account-a:pu';
+  await AsyncStorage.setItem(key, raw);
+  await expect(loadPersonalTimetable(null, 'pu', 'nuni:account-a')).rejects.toThrow('已保留原始資料');
+  await expect(savePersonalTimetable(null, make('pu'), 'nuni:account-a')).rejects.toThrow('已保留原始資料');
+  expect(await AsyncStorage.getItem(key)).toBe(raw);
+});

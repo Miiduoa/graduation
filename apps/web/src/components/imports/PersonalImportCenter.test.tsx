@@ -10,6 +10,7 @@ import { PersonalImportCenter } from './PersonalImportCenter';
 import { readPersonalImports, savePersonalImportBatch } from '@/lib/personalImports';
 import { serializePersonalImportBackup, type PersonalImportRecord } from '@campus/shared';
 import { browserRequest } from '@/features/nuni/Session';
+import { personalImportDraftKey } from '@/lib/personalImportDrafts';
 const context = vi.hoisted(() => ({
   owner: 'guest',
   schoolId: 'pu',
@@ -35,7 +36,9 @@ vi.mock('@/features/nuni/Session', () => ({
 }));
 vi.mock('@/lib/personalImportOcr', () => ({ recognizePersonalImportImage: vi.fn() }));
 beforeEach(() => {
+  vi.restoreAllMocks();
   localStorage.clear();
+  sessionStorage.clear();
   context.owner = 'guest';
   context.session = null;
   vi.mocked(browserRequest).mockReset();
@@ -47,6 +50,81 @@ beforeEach(() => {
     value: { request: (_key: string, fn: () => unknown) => Promise.resolve().then(fn) },
   });
   Element.prototype.scrollIntoView = vi.fn();
+});
+it('restores reviewed edits and excluded rows after returning to the same tab without importing them', async () => {
+  const view = render(<PersonalImportCenter />);
+  await prepare('課程名稱,學分,成績\n資料庫,3,85\n英文,2,90');
+  fireEvent.change(screen.getAllByLabelText('成績')[0], { target: { value: '88' } });
+  fireEvent.click(screen.getByRole('checkbox', { name: /第 2 筆/ }));
+  view.unmount();
+  render(<PersonalImportCenter />);
+  expect((screen.getAllByLabelText('成績')[0] as HTMLInputElement).value).toBe('88');
+  expect((screen.getByRole('checkbox', { name: /第 2 筆/ }) as HTMLInputElement).checked).toBe(
+    false,
+  );
+  expect(readPersonalImports(context)).toHaveLength(0);
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
+  await screen.findByText(personalImportSavedNotice(1));
+  expect(readPersonalImports(context)[0].grade).toBe('88');
+  expect(sessionStorage.getItem(personalImportDraftKey(context))).toBeNull();
+});
+
+it('preserves structural parse errors when restoring a draft', async () => {
+  const view = render(<PersonalImportCenter />);
+  await prepare('課程名稱,學分,成績\n資料庫,3,85,錯位欄位');
+  view.unmount();
+  render(<PersonalImportCenter />);
+  expect(
+    (screen.getByRole('button', { name: '確認匯入 1 筆' }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+  expect(screen.getByText(/欄位數與標題不同/)).toBeTruthy();
+});
+
+it('keeps saved drafts isolated by account and school while allowing the original owner to resume', async () => {
+  const view = render(<PersonalImportCenter />);
+  await prepare();
+  context.owner = 'platform:two';
+  view.rerender(<PersonalImportCenter />);
+  expect(screen.queryByLabelText('成績')).toBeNull();
+  context.owner = 'guest';
+  context.schoolId = 'ntu';
+  view.rerender(<PersonalImportCenter />);
+  expect(screen.queryByLabelText('成績')).toBeNull();
+  context.schoolId = 'pu';
+  view.rerender(<PersonalImportCenter />);
+  expect((screen.getByLabelText('成績') as HTMLInputElement).value).toBe('85');
+});
+
+it('keeps a damaged stored draft until the user explicitly clears it', async () => {
+  const key = personalImportDraftKey(context);
+  sessionStorage.setItem(key, '{damaged');
+  render(<PersonalImportCenter />);
+  expect(screen.getByText(/上次的暫存草稿無法還原/)).toBeTruthy();
+  await prepare();
+  expect(sessionStorage.getItem(key)).toBe('{damaged');
+  fireEvent.click(screen.getByRole('button', { name: '清除暫存草稿' }));
+  fireEvent.click(screen.getByRole('button', { name: '繼續核對' }));
+  expect(sessionStorage.getItem(key)).toBe('{damaged');
+  fireEvent.click(screen.getByRole('button', { name: '清除暫存草稿' }));
+  fireEvent.click(screen.getByRole('button', { name: '確認清除草稿' }));
+  expect(sessionStorage.getItem(key)).toBeNull();
+  expect((screen.getByLabelText('原始文字') as HTMLTextAreaElement).value).toBe('');
+});
+
+it('warns when draft storage fails and preserves edits for a later successful retry', async () => {
+  render(<PersonalImportCenter />);
+  const write = vi
+    .spyOn(Object.getPrototypeOf(sessionStorage), 'setItem')
+    .mockImplementation(() => {
+      throw new Error('quota');
+    });
+  await prepare();
+  expect(screen.getByText(/草稿暫存沒有成功/)).toBeTruthy();
+  expect((screen.getByLabelText('成績') as HTMLInputElement).value).toBe('85');
+  write.mockRestore();
+  fireEvent.change(screen.getByLabelText('成績'), { target: { value: '88' } });
+  expect(screen.queryByText(/草稿暫存沒有成功/)).toBeNull();
+  expect(sessionStorage.getItem(personalImportDraftKey(context))).toContain('88');
 });
 async function prepare(text = '課程名稱,學分,成績\n資料庫,3,85') {
   fireEvent.change(screen.getByLabelText('這份資料的學年度'), { target: { value: '115' } });
