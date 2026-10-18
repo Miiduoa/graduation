@@ -145,6 +145,21 @@ export type AnnouncementQualityFlags = {
   visible: boolean;
 };
 
+export function isFutureAnnouncementDate(publishedAt: string, now = new Date()): boolean {
+  return new Date(publishedAt).getTime() > now.getTime();
+}
+
+export function isListableAnnouncementDate(
+  publishedAt?: string | Date | { toDate?: () => Date } | null,
+  now = new Date(),
+): publishedAt is string {
+  const parsed =
+    typeof publishedAt === 'string' && publishedAt
+      ? parseAnnouncementDate(publishedAt)
+      : parseAnnouncementDate(publishedAt);
+  return Boolean(parsed) && !isFutureAnnouncementDate(parsed as string, now);
+}
+
 export function announcementQualityFlags(
   input: {
     title: string;
@@ -166,17 +181,21 @@ export function announcementQualityFlags(
   );
   const staff = staffAudienceOf(rawTitle);
   const offSeason = isOffSeasonControl(rawTitle, now);
+  const listable = isListableAnnouncementDate(publishedAt, now);
   const outsideWall =
     Boolean(publishedAt) &&
+    !isFutureAnnouncementDate(publishedAt as string, now) &&
     new Date(publishedAt as string).getTime() < studentWallStartUtc(now).getTime();
-  const studentFeed = !(
-    isStaticOrNavAnnouncement(rawTitle) ||
-    isBroadcastOrAdmissionAnnouncement(rawTitle) ||
-    isComputerCenterSecurityAlert(rawTitle, office) ||
-    staff ||
-    offSeason ||
-    outsideWall
-  );
+  const studentFeed =
+    listable &&
+    !(
+      isStaticOrNavAnnouncement(rawTitle) ||
+      isBroadcastOrAdmissionAnnouncement(rawTitle) ||
+      isComputerCenterSecurityAlert(rawTitle, office) ||
+      staff ||
+      offSeason ||
+      outsideWall
+    );
   return {
     title,
     publishedAt,
@@ -184,13 +203,15 @@ export function announcementQualityFlags(
     audience: staff ? 'staff' : 'student',
     studentFeed,
     rank: offSeason ? 'demoted' : 'normal',
-    visible: studentFeed,
+    visible: listable,
   };
 }
 
 export type StudentAnnouncementRow = {
+  id?: string | null;
   title?: string | null;
   publishedAt?: string | Date | { toDate?: () => Date } | null;
+  originalUrl?: string | null;
   office?: string | null;
   source?: string | null;
   origin?: string | null;
@@ -200,30 +221,147 @@ export type StudentAnnouncementRow = {
   audience?: string | null;
 };
 
-export function selectStudentAnnouncements<T extends StudentAnnouncementRow>(
-  rows: T[] | null | undefined,
-  sources: Array<{ sourceId?: string | null; status?: string | null }> = [],
-  now = new Date(),
-): T[] {
-  const down = new Set(
+export type StudentWallDropReason =
+  | 'duplicate'
+  | 'no_date'
+  | 'future_date'
+  | 'stale_source'
+  | 'non_announcement'
+  | 'staff'
+  | 'security'
+  | 'off_season'
+  | 'outside_wall';
+
+export const STUDENT_WALL_DROP_REASON_LABELS: Record<StudentWallDropReason, string> = {
+  duplicate: '重複',
+  no_date: '無日期',
+  future_date: '未來日期',
+  stale_source: '失效',
+  non_announcement: '非公告資料',
+  staff: '教師/學系向',
+  security: '資安轉知',
+  off_season: '過季',
+  outside_wall: '超過近90天',
+};
+
+export type StudentWallFilterTally = {
+  input: number;
+  kept: number;
+} & Record<StudentWallDropReason, number>;
+
+function downSourceIds(sources: Array<{ sourceId?: string | null; status?: string | null }>) {
+  return new Set(
     sources
       .filter((item) => item.status === 'unavailable')
       .map((item) => item.sourceId)
       .filter((value): value is string => Boolean(value)),
   );
-  return (rows || []).filter((row) => {
-    if (row.visible === false || row.studentFeed === false) return false;
-    if (row.audience === 'staff') return false;
-    if (row.origin && row.origin !== 'public_scrape') return true;
-    if (row.origin === 'public_scrape' && row.sourceId && down.has(row.sourceId)) return false;
-    const flags = announcementQualityFlags(
-      {
-        title: row.title || '',
-        publishedAt: row.publishedAt,
-        office: row.office || row.source,
-      },
-      now,
-    );
-    return flags.studentFeed;
+}
+
+function rowFlags(row: StudentAnnouncementRow, now: Date) {
+  return announcementQualityFlags(
+    {
+      title: row.title || '',
+      publishedAt: row.publishedAt,
+      office: row.office || row.source,
+    },
+    now,
+  );
+}
+
+function duplicateKey(row: StudentAnnouncementRow, flags: AnnouncementQualityFlags) {
+  return [flags.title, flags.publishedAt || '', row.originalUrl || row.id || ''].join('\u0001');
+}
+
+export function studentWallDropReason(
+  row: StudentAnnouncementRow,
+  now = new Date(),
+  down: Set<string> = new Set(),
+  seen: Set<string> = new Set(),
+): StudentWallDropReason | null {
+  const flags = rowFlags(row, now);
+  const key = duplicateKey(row, flags);
+  if (seen.has(key)) return 'duplicate';
+  seen.add(key);
+  const parsed = flags.publishedAt;
+  if (!parsed) return 'no_date';
+  if (isFutureAnnouncementDate(parsed, now)) return 'future_date';
+  if (row.origin === 'public_scrape' && row.sourceId && down.has(row.sourceId)) return 'stale_source';
+  if (staffAudienceOf(row.title || '')) return 'staff';
+  if (isComputerCenterSecurityAlert(row.title || '', flags.office)) return 'security';
+  if (
+    isStaticOrNavAnnouncement(row.title || '') ||
+    isBroadcastOrAdmissionAnnouncement(row.title || '')
+  ) {
+    return 'non_announcement';
+  }
+  if (isOffSeasonControl(row.title || '', now)) return 'off_season';
+  if (new Date(parsed).getTime() < studentWallStartUtc(now).getTime()) return 'outside_wall';
+  return null;
+}
+
+export function tallyStudentWallFilter(
+  rows: StudentAnnouncementRow[] | null | undefined,
+  sources: Array<{ sourceId?: string | null; status?: string | null }> = [],
+  now = new Date(),
+): StudentWallFilterTally {
+  const down = downSourceIds(sources);
+  const seen = new Set<string>();
+  const tally: StudentWallFilterTally = {
+    input: (rows || []).length,
+    kept: 0,
+    duplicate: 0,
+    no_date: 0,
+    future_date: 0,
+    stale_source: 0,
+    non_announcement: 0,
+    staff: 0,
+    security: 0,
+    off_season: 0,
+    outside_wall: 0,
+  };
+  for (const row of rows || []) {
+    const reason = studentWallDropReason(row, now, down, seen);
+    if (reason) tally[reason] += 1;
+    else tally.kept += 1;
+  }
+  return tally;
+}
+
+function sortByPublishedAtDesc<T extends StudentAnnouncementRow>(rows: T[], now: Date): T[] {
+  return [...rows].sort((left, right) => {
+    const leftTime = Date.parse(rowFlags(left, now).publishedAt || '') || 0;
+    const rightTime = Date.parse(rowFlags(right, now).publishedAt || '') || 0;
+    return rightTime - leftTime;
   });
+}
+
+export function selectStudentAnnouncements<T extends StudentAnnouncementRow>(
+  rows: T[] | null | undefined,
+  sources: Array<{ sourceId?: string | null; status?: string | null }> = [],
+  now = new Date(),
+): T[] {
+  const down = downSourceIds(sources);
+  const seen = new Set<string>();
+  return sortByPublishedAtDesc(
+    (rows || []).filter((row) => studentWallDropReason(row, now, down, seen) == null),
+    now,
+  );
+}
+
+export function selectOfficialAnnouncements<T extends StudentAnnouncementRow>(
+  rows: T[] | null | undefined,
+  sources: Array<{ sourceId?: string | null; status?: string | null }> = [],
+  now = new Date(),
+): T[] {
+  const down = downSourceIds(sources);
+  return sortByPublishedAtDesc(
+    (rows || []).filter((row) => {
+      const flags = rowFlags(row, now);
+      if (!flags.publishedAt || isFutureAnnouncementDate(flags.publishedAt, now)) return false;
+      if (row.origin === 'public_scrape' && row.sourceId && down.has(row.sourceId)) return false;
+      return true;
+    }),
+    now,
+  );
 }

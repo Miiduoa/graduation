@@ -17,11 +17,16 @@ import {
   FIRESTORE_UNAVAILABLE_WITH_CACHE_TEXT,
   SOURCE_DOWN_EMPTY_TEXT,
   SOURCE_DOWN_WITH_CACHE_TEXT,
+  ANNOUNCEMENT_EMPTY_CONNECTED_TEXT,
   ANNOUNCEMENT_EMPTY_SCHOOL_TEXT,
+  ANNOUNCEMENT_OFFICIAL_SITE_BUTTON,
   ANNOUNCEMENT_READ_FAILURE_TEXT,
   ANNOUNCEMENT_RETRY_TEXT,
   announcementEmptyHeading,
   SOURCE_NOT_CONNECTED_TEXT,
+  selectOfficialAnnouncements,
+  tallyStudentWallFilter,
+  verifiedOfficialAnnouncementUrl,
   staleAnnouncementUpdatedAt,
 } from '@campus/shared/src/campusAnnouncements';
 import { TEMPORARY_UNAVAILABLE_TEXT } from '@campus/shared/src/loadFailureCopy';
@@ -66,8 +71,12 @@ it('formats the stale banner in Taiwan time and keeps the empty-state copy', () 
   expect(formatStaleAnnouncementNotice(null)).toBe('學校網站暫時連不上');
   expect(SOURCE_DOWN_WITH_CACHE_TEXT).toBe('學校網站暫時連不上');
   expect(SOURCE_DOWN_EMPTY_TEXT).toBe('學校網站暫時連不上，可以先到學校網站看最新消息');
-  expect(ANNOUNCEMENT_EMPTY_SCHOOL_TEXT).toBe('這間學校的公告還沒上架。');
+  expect(ANNOUNCEMENT_EMPTY_SCHOOL_TEXT).toBe('本站還沒接上這間學校的公告。');
+  expect(SOURCE_NOT_CONNECTED_TEXT).toBe('本站還沒接上這間學校的公告。');
+  expect(ANNOUNCEMENT_EMPTY_CONNECTED_TEXT).toBe('目前沒有學生日常公告。');
+  expect(ANNOUNCEMENT_OFFICIAL_SITE_BUTTON).toBe('前往學校官方公告');
   expect(SOURCE_NOT_CONNECTED_TEXT).toBe(ANNOUNCEMENT_EMPTY_SCHOOL_TEXT);
+  expect(ANNOUNCEMENT_EMPTY_SCHOOL_TEXT).not.toBe('這間學校的公告還沒上架。');
   expect(ANNOUNCEMENT_READ_FAILURE_TEXT).toBe('暫時讀不到資料，請稍後再試');
   expect(ANNOUNCEMENT_READ_FAILURE_TEXT).toBe(TEMPORARY_UNAVAILABLE_TEXT);
   expect(ANNOUNCEMENT_RETRY_TEXT).toBe('再試一次');
@@ -110,8 +119,8 @@ it('classifies empty feeds as never connected, source down, or confirmed empty',
     announcementEmptyKind([], [{ status: 'healthy', lastSuccessAt: '2026-10-12T10:05:00.000Z' }]),
   ).toBe('empty');
   expect(announcementEmptyKind([{ title: '舊稿' }], [{ status: 'unavailable' }])).toBe('has_items');
-  expect(announcementEmptyHeading('not_connected')).toBe(ANNOUNCEMENT_EMPTY_SCHOOL_TEXT);
-  expect(announcementEmptyHeading('empty')).toBe(ANNOUNCEMENT_EMPTY_SCHOOL_TEXT);
+  expect(announcementEmptyHeading('not_connected')).toBe(SOURCE_NOT_CONNECTED_TEXT);
+  expect(announcementEmptyHeading('empty')).toBe(ANNOUNCEMENT_EMPTY_CONNECTED_TEXT);
   expect(announcementEmptyHeading('source_down')).toBe(SOURCE_DOWN_EMPTY_TEXT);
   expect(announcementEmptyHeading('has_items')).toBeNull();
   expect(announcementViewPhase(true, [], [])).toBe('loading');
@@ -223,4 +232,47 @@ it('keeps Chinese titles, parses ROC dates, and hides stale scrape rows from a d
       now,
     ),
   ).toEqual([]);
+});
+
+it('only exposes verified official announcement URLs and keeps categorized posts in the official list', () => {
+  const now = new Date('2026-10-18T00:00:00.000Z');
+  expect(verifiedOfficialAnnouncementUrl('pu')).toBe(
+    'https://dorac.pu.edu.tw/p/403-1059-719-1.php',
+  );
+  expect(verifiedOfficialAnnouncementUrl('ncku')).toBe(
+    'https://web.ncku.edu.tw/p/422-1000-1026.php?Lang=zh-tw',
+  );
+  expect(verifiedOfficialAnnouncementUrl('ntpu')).toBe('https://fms.ntpu.edu.tw/km/24662');
+  expect(verifiedOfficialAnnouncementUrl('cgu')).toBeNull();
+  expect(verifiedOfficialAnnouncementUrl('nthu')).toBeNull();
+  const rows = [
+    { id: 'keep', title: '選課公告', publishedAt: '2026-10-08T00:00:00.000Z' },
+    { id: 'none', title: '無日期稿', publishedAt: '' },
+    { id: 'future', title: '未來稿', publishedAt: '2099-01-01T00:00:00.000Z' },
+    {
+      id: 'sec',
+      title: '【漏洞預警】Cisco License 存在重大資安漏洞',
+      publishedAt: '2026-10-08T00:00:00.000Z',
+      office: '計算機與網路中心',
+    },
+    {
+      id: 'staff',
+      title: '點名計分單(for教師)',
+      publishedAt: '2026-10-08T00:00:00.000Z',
+    },
+  ];
+  expect(selectStudentAnnouncements(rows, [], now).map((row) => row.id)).toEqual(['keep']);
+  expect(selectOfficialAnnouncements(rows, [], now).map((row) => row.id)).toEqual([
+    'keep',
+    'sec',
+    'staff',
+  ]);
+  expect(tallyStudentWallFilter(rows, [], now)).toMatchObject({
+    input: 5,
+    kept: 1,
+    no_date: 1,
+    future_date: 1,
+    security: 1,
+    staff: 1,
+  });
 });

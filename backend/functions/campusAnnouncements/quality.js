@@ -34,7 +34,9 @@ function rocSchoolYear(now = new Date()) {
 function parseAnnouncementDate(value) {
   if (value == null || value === '') return null;
   if (value instanceof Date) {
-    return Number.isFinite(value.getTime()) ? new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate())).toISOString() : null;
+    return Number.isFinite(value.getTime())
+      ? new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate())).toISOString()
+      : null;
   }
   if (typeof value === 'object' && typeof value.toDate === 'function') {
     try {
@@ -126,12 +128,23 @@ function resolveAnnouncementOffice(schoolId, sourceOffice, itemOffice) {
   return sourceOffice;
 }
 
+function isFutureAnnouncementDate(publishedAt, now = new Date()) {
+  return new Date(publishedAt).getTime() > now.getTime();
+}
+
+function isListableAnnouncementDate(publishedAt, now = new Date()) {
+  const parsed =
+    typeof publishedAt === 'string' && publishedAt
+      ? parseAnnouncementDate(publishedAt)
+      : parseAnnouncementDate(publishedAt);
+  return Boolean(parsed) && !isFutureAnnouncementDate(parsed, now);
+}
+
 function announcementQualityFlags(input, now = new Date()) {
   const rawTitle = String(input.title || '').trim();
   const stripped = rawTitle.replace(/^【(?!漏洞預警|資安轉知).*?】/, '').trim() || rawTitle;
   const title = chineseDisplayTitle(stripped);
-  const publishedAt =
-    parseAnnouncementDate(input.publishedAt) || parseAnnouncementDate(rawTitle);
+  const publishedAt = parseAnnouncementDate(input.publishedAt) || parseAnnouncementDate(rawTitle);
   const office = resolveAnnouncementOffice(
     input.schoolId || '',
     input.sourceOffice || input.office || '',
@@ -139,16 +152,21 @@ function announcementQualityFlags(input, now = new Date()) {
   );
   const staff = staffAudienceOf(rawTitle);
   const offSeason = isOffSeasonControl(rawTitle, now);
+  const listable = isListableAnnouncementDate(publishedAt, now);
   const outsideWall =
-    Boolean(publishedAt) && new Date(publishedAt).getTime() < studentWallStartUtc(now).getTime();
-  const studentFeed = !(
-    isStaticOrNavAnnouncement(rawTitle) ||
-    isBroadcastOrAdmissionAnnouncement(rawTitle) ||
-    isComputerCenterSecurityAlert(rawTitle, office) ||
-    staff ||
-    offSeason ||
-    outsideWall
-  );
+    Boolean(publishedAt) &&
+    !isFutureAnnouncementDate(publishedAt, now) &&
+    new Date(publishedAt).getTime() < studentWallStartUtc(now).getTime();
+  const studentFeed =
+    listable &&
+    !(
+      isStaticOrNavAnnouncement(rawTitle) ||
+      isBroadcastOrAdmissionAnnouncement(rawTitle) ||
+      isComputerCenterSecurityAlert(rawTitle, office) ||
+      staff ||
+      offSeason ||
+      outsideWall
+    );
   return {
     title,
     publishedAt,
@@ -156,35 +174,126 @@ function announcementQualityFlags(input, now = new Date()) {
     audience: staff ? 'staff' : 'student',
     studentFeed,
     rank: offSeason ? 'demoted' : 'normal',
-    visible: studentFeed,
+    visible: listable,
   };
 }
 
-function selectStudentAnnouncements(rows, sources = [], now = new Date()) {
-  const down = new Set(
+const STUDENT_WALL_DROP_REASON_LABELS = {
+  duplicate: '重複',
+  no_date: '無日期',
+  future_date: '未來日期',
+  stale_source: '失效',
+  non_announcement: '非公告資料',
+  staff: '教師/學系向',
+  security: '資安轉知',
+  off_season: '過季',
+  outside_wall: '超過近90天',
+};
+
+function downSourceIds(sources) {
+  return new Set(
     (sources || [])
       .filter((item) => item.status === 'unavailable')
       .map((item) => item.sourceId)
       .filter(Boolean),
   );
-  return (rows || []).filter((row) => {
-    if (row.visible === false || row.studentFeed === false) return false;
-    if (row.audience === 'staff') return false;
-    if (row.origin && row.origin !== 'public_scrape') return true;
-    if (row.origin === 'public_scrape' && row.sourceId && down.has(row.sourceId)) return false;
-    return announcementQualityFlags(
-      {
-        title: row.title || '',
-        publishedAt: row.publishedAt,
-        office: row.office || row.source,
-      },
-      now,
-    ).studentFeed;
+}
+
+function rowFlags(row, now) {
+  return announcementQualityFlags(
+    {
+      title: row.title || '',
+      publishedAt: row.publishedAt,
+      office: row.office || row.source,
+    },
+    now,
+  );
+}
+
+function duplicateKey(row, flags) {
+  return [flags.title, flags.publishedAt || '', row.originalUrl || row.id || ''].join('\u0001');
+}
+
+function studentWallDropReason(row, now = new Date(), down = new Set(), seen = new Set()) {
+  const flags = rowFlags(row, now);
+  const key = duplicateKey(row, flags);
+  if (seen.has(key)) return 'duplicate';
+  seen.add(key);
+  const parsed = flags.publishedAt;
+  if (!parsed) return 'no_date';
+  if (isFutureAnnouncementDate(parsed, now)) return 'future_date';
+  if (row.origin === 'public_scrape' && row.sourceId && down.has(row.sourceId)) return 'stale_source';
+  if (staffAudienceOf(row.title || '')) return 'staff';
+  if (isComputerCenterSecurityAlert(row.title || '', flags.office)) return 'security';
+  if (isStaticOrNavAnnouncement(row.title || '') || isBroadcastOrAdmissionAnnouncement(row.title || '')) {
+    return 'non_announcement';
+  }
+  if (isOffSeasonControl(row.title || '', now)) return 'off_season';
+  if (new Date(parsed).getTime() < studentWallStartUtc(now).getTime()) return 'outside_wall';
+  return null;
+}
+
+function emptyTally(input) {
+  return {
+    input,
+    kept: 0,
+    duplicate: 0,
+    no_date: 0,
+    future_date: 0,
+    stale_source: 0,
+    non_announcement: 0,
+    staff: 0,
+    security: 0,
+    off_season: 0,
+    outside_wall: 0,
+  };
+}
+
+function tallyStudentWallFilter(rows, sources = [], now = new Date()) {
+  const down = downSourceIds(sources);
+  const seen = new Set();
+  const tally = emptyTally((rows || []).length);
+  for (const row of rows || []) {
+    const reason = studentWallDropReason(row, now, down, seen);
+    if (reason) tally[reason] += 1;
+    else tally.kept += 1;
+  }
+  return tally;
+}
+
+function sortByPublishedAtDesc(rows, now) {
+  return [...rows].sort((left, right) => {
+    const leftTime = Date.parse(rowFlags(left, now).publishedAt || '') || 0;
+    const rightTime = Date.parse(rowFlags(right, now).publishedAt || '') || 0;
+    return rightTime - leftTime;
   });
+}
+
+function selectStudentAnnouncements(rows, sources = [], now = new Date()) {
+  const down = downSourceIds(sources);
+  const seen = new Set();
+  return sortByPublishedAtDesc(
+    (rows || []).filter((row) => studentWallDropReason(row, now, down, seen) == null),
+    now,
+  );
+}
+
+function selectOfficialAnnouncements(rows, sources = [], now = new Date()) {
+  const down = downSourceIds(sources);
+  return sortByPublishedAtDesc(
+    (rows || []).filter((row) => {
+      const flags = rowFlags(row, now);
+      if (!flags.publishedAt || isFutureAnnouncementDate(flags.publishedAt, now)) return false;
+      if (row.origin === 'public_scrape' && row.sourceId && down.has(row.sourceId)) return false;
+      return true;
+    }),
+    now,
+  );
 }
 
 module.exports = {
   STUDENT_WALL_DAYS,
+  STUDENT_WALL_DROP_REASON_LABELS,
   currentSemesterStartUtc,
   studentWallStartUtc,
   rocSchoolYear,
@@ -196,6 +305,11 @@ module.exports = {
   isComputerCenterSecurityAlert,
   isOffSeasonControl,
   resolveAnnouncementOffice,
+  isFutureAnnouncementDate,
+  isListableAnnouncementDate,
   announcementQualityFlags,
+  studentWallDropReason,
+  tallyStudentWallFilter,
   selectStudentAnnouncements,
+  selectOfficialAnnouncements,
 };

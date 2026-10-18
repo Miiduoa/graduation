@@ -19,6 +19,7 @@ import {
   announcementSourceIdsForSchool,
   isAnnouncementSchoolVisibleToPublic,
   mergeAnnouncementsById,
+  selectOfficialAnnouncements,
   selectStudentAnnouncements,
   SOURCE_UNAVAILABLE_TEXT,
 } from '@campus/shared/src/campusAnnouncements';
@@ -136,6 +137,7 @@ export type AnnouncementSourceHealth = {
 
 export type CampusAnnouncementFeed = {
   announcements: Announcement[];
+  officialAnnouncements?: Announcement[];
   sources: AnnouncementSourceHealth[];
   allUnavailable: boolean;
 };
@@ -180,7 +182,7 @@ export async function loadCampusAnnouncementFeed(
   schoolId: string,
 ): Promise<CampusAnnouncementFeed> {
   if (!isAnnouncementSchoolVisibleToPublic({ schoolId }, getRawAppEnv())) {
-    return { announcements: [], sources: [], allUnavailable: false };
+    return { announcements: [], officialAnnouncements: [], sources: [], allUnavailable: false };
   }
   const recent = await loadAnnouncementRows(
     schoolId,
@@ -209,8 +211,10 @@ export async function loadCampusAnnouncementFeed(
         );
   const merged = mergeAnnouncementsById([recent, ...extras]);
   const announcements = selectStudentAnnouncements(merged, sources);
+  const officialAnnouncements = selectOfficialAnnouncements(merged, sources);
   return {
     announcements,
+    officialAnnouncements,
     sources,
     allUnavailable: sources.length > 0 && sources.every((item) => item.status === 'unavailable'),
   };
