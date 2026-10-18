@@ -730,3 +730,28 @@ test('oversize PDF is rejected before the native document host runs', async () =
   expect(mockDocumentRead).not.toHaveBeenCalled();
   expect(mockFileText).not.toHaveBeenCalled();
 });
+
+test.each([
+  ['pu', '目前使用靜宜大學 13 節'],
+  ['ncku', '目前使用國立成功大學 15 節'],
+  ['ntpu', '目前使用國立臺北大學 13 節'],
+] as const)(
+  'timetable copy follows school period profile for %s without inventing enrollments',
+  async (schoolId, banner) => {
+    mockScope = { owner: scope.owner, schoolId };
+    const view = render(<PersonalImportScreen />);
+    await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
+    expect(view.getByText(new RegExp(banner))).toBeTruthy();
+    expect(view.queryByText(/自動加入|自動註冊|已完成教師核對/)).toBeNull();
+    expect(mockRequest).not.toHaveBeenCalled();
+  },
+);
+
+test('unknown school keeps raw times and still does not contact course access', async () => {
+  mockScope = { owner: scope.owner, schoolId: 'unknown-school' };
+  const view = render(<PersonalImportScreen />);
+  await waitFor(() => expect(view.queryByLabelText('讀取匯入紀錄')).toBeNull());
+  expect(view.getByText(/這所學校尚未設定課表格線，請保留原始時間/)).toBeTruthy();
+  expect(view.queryByText(/目前使用/)).toBeNull();
+  expect(mockRequest).not.toHaveBeenCalled();
+});

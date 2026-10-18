@@ -18,10 +18,13 @@ export const ANNOUNCEMENT_CATEGORIES = [
 ] as const;
 export type PublicAnnouncementCategory = (typeof ANNOUNCEMENT_CATEGORIES)[number];
 export const SOURCE_UNAVAILABLE_TEXT = '暫時抓不到';
-export const SOURCE_NOT_CONNECTED_TEXT = '這裡還沒接上學校公告，請先到學校網站看最新消息';
+export const ANNOUNCEMENT_EMPTY_SCHOOL_TEXT = '這間學校的公告還沒上架。';
+export const SOURCE_NOT_CONNECTED_TEXT = ANNOUNCEMENT_EMPTY_SCHOOL_TEXT;
 export const SOURCE_DOWN_EMPTY_TEXT = '學校網站暫時連不上，可以先到學校網站看最新消息';
 export const SOURCE_DOWN_WITH_CACHE_TEXT = '學校網站暫時連不上';
 export const FIRESTORE_UNAVAILABLE_WITH_CACHE_TEXT = '暫時讀不到新公告';
+export const ANNOUNCEMENT_READ_FAILURE_TEXT = '暫時讀不到資料，請稍後再試';
+export const ANNOUNCEMENT_RETRY_TEXT = '再試一次';
 export const STALE_ANNOUNCEMENT_REASONS = ['source_down', 'firestore'] as const;
 export type StaleAnnouncementReason = (typeof STALE_ANNOUNCEMENT_REASONS)[number];
 export type AnnouncementEmptyKind = 'not_connected' | 'source_down' | 'empty' | 'has_items';
@@ -195,6 +198,43 @@ export function announcementEmptyKind(
   return 'not_connected';
 }
 
+export type AnnouncementViewPhase = 'loading' | 'failed' | AnnouncementEmptyKind;
+
+export function announcementViewPhase(
+  loading: true,
+  announcements?: Array<unknown>,
+  sources?: Array<{ status?: string; lastSuccessAt?: string | null }>,
+  failed?: boolean,
+): 'loading';
+export function announcementViewPhase(
+  loading: false,
+  announcements?: Array<unknown>,
+  sources?: Array<{ status?: string; lastSuccessAt?: string | null }>,
+  failed?: boolean,
+): Exclude<AnnouncementViewPhase, 'loading'>;
+export function announcementViewPhase(
+  loading: boolean,
+  announcements?: Array<unknown>,
+  sources?: Array<{ status?: string; lastSuccessAt?: string | null }>,
+  failed?: boolean,
+): AnnouncementViewPhase;
+export function announcementViewPhase(
+  loading: boolean,
+  announcements: Array<unknown> = [],
+  sources: Array<{ status?: string; lastSuccessAt?: string | null }> = [],
+  failed = false,
+): AnnouncementViewPhase {
+  if (loading) return 'loading';
+  if (failed && announcements.length === 0) return 'failed';
+  return announcementEmptyKind(announcements, sources);
+}
+
+export function announcementEmptyHeading(kind: AnnouncementEmptyKind): string | null {
+  if (kind === 'has_items') return null;
+  if (kind === 'source_down') return SOURCE_DOWN_EMPTY_TEXT;
+  return ANNOUNCEMENT_EMPTY_SCHOOL_TEXT;
+}
+
 export const ANNOUNCEMENT_RECENT_LIMIT = 200;
 export const ANNOUNCEMENT_SOURCE_LIMIT = 50;
 
@@ -214,10 +254,7 @@ export function announcementSearchText(item: AnnouncementSearchFields): string {
     .toLocaleLowerCase('zh-TW');
 }
 
-export function announcementMatchesSearch(
-  item: AnnouncementSearchFields,
-  needle: string,
-): boolean {
+export function announcementMatchesSearch(item: AnnouncementSearchFields, needle: string): boolean {
   const query = needle.trim().toLocaleLowerCase('zh-TW');
   return !query || announcementSearchText(item).includes(query);
 }

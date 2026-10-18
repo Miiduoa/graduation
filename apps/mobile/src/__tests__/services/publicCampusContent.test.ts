@@ -27,9 +27,9 @@ jest.mock('firebase/firestore', () => ({
   startAfter: jest.fn((snapshot) => ({ after: snapshot })),
   getDocFromServer: jest.fn(),
   getDocsFromServer: jest.fn(),
-  limit: jest.fn(),
-  orderBy: jest.fn(),
-  where: jest.fn(),
+  limit: jest.fn((count) => ({ limit: count })),
+  orderBy: jest.fn((field, direction) => ({ orderBy: field, direction })),
+  where: jest.fn((field, operator, value) => ({ where: field, operator, value })),
   query: jest.fn((...args) => args),
 }));
 jest.mock('../../firebase', () => ({
@@ -61,16 +61,17 @@ test('reads school canonical server documents without a mock or cache fallback',
   ]);
   expect(collection).toHaveBeenCalledWith('db', 'schools', 'pu', 'announcements');
   expect(collection).toHaveBeenCalledWith('db', 'schools', 'pu', 'announcement-sources');
+  expect(collection).not.toHaveBeenCalledWith('db', 'announcements');
 });
 
-test('legacy content is only consulted after a successful empty canonical result', async () => {
+test('an empty school collection is not filled from the root announcements collection', async () => {
   jest
     .mocked(getDocsFromServer)
     .mockResolvedValueOnce({ empty: true, docs: [] } as never)
-    .mockResolvedValueOnce({ empty: false, docs: [document()] } as never)
-    .mockResolvedValueOnce({ empty: true, docs: [] } as never);
-  await expect(loadCampusAnnouncements('pu')).resolves.toHaveLength(1);
-  expect(collection).toHaveBeenCalledWith('db', 'announcements');
+    .mockImplementation(async (input) => docsForPath(input, [document()]) as never);
+  await expect(loadCampusAnnouncements('pu')).resolves.toEqual([]);
+  expect(collection).toHaveBeenCalledWith('db', 'schools', 'pu', 'announcements');
+  expect(collection).not.toHaveBeenCalledWith('db', 'announcements');
   jest.clearAllMocks();
   jest.mocked(getDocsFromServer).mockRejectedValueOnce(new Error('permission-denied'));
   await expect(loadCampusAnnouncements('pu')).rejects.toThrow('permission-denied');
@@ -121,15 +122,67 @@ test('attachment links require safe web URLs and malformed dates are not invente
   expect(isPublicWebUrl('https://user:password@school.edu')).toBe(false);
 });
 
-test.each([[loadCampusAnnouncements, 'announcements', 'publishedAt']] as const)(
-  'legacy queries keep the school filter and an explicit bounded date ordering (%s)',
-  async (load, collectionName, dateField) => {
-    jest.mocked(getDocsFromServer).mockResolvedValue({ empty: true, docs: [] } as never);
-    await expect(load('pu')).resolves.toEqual([]);
-    expect(collection).toHaveBeenCalledWith('db', collectionName);
-    expect(where).toHaveBeenCalledWith('schoolId', '==', 'pu');
-    expect(orderBy).toHaveBeenCalledWith(dateField, 'desc');
-    expect(limit).toHaveBeenCalledWith(200);
+test('empty announcement lists stay on the school collection with a bounded date ordering', async () => {
+  jest.mocked(getDocsFromServer).mockResolvedValue({ empty: true, docs: [] } as never);
+  await expect(loadCampusAnnouncements('pu')).resolves.toEqual([]);
+  expect(collection).toHaveBeenCalledWith('db', 'schools', 'pu', 'announcements');
+  expect(collection).not.toHaveBeenCalledWith('db', 'announcements');
+  expect(orderBy).toHaveBeenCalledWith('publishedAt', 'desc');
+  expect(limit).toHaveBeenCalledWith(200);
+});
+
+function missingIndexError() {
+  return Object.assign(new Error('The query requires an index.'), { code: 'failed-precondition' });
+}
+
+function productionEmptySchoolRead(schoolId: string) {
+  return async (input: unknown) => {
+    const encoded = JSON.stringify(input ?? '');
+    if (encoded.includes('announcement-sources')) return { empty: true, docs: [] };
+    if (encoded.includes(`"schools","${schoolId}","announcements"`)) return { empty: true, docs: [] };
+    if (encoded.includes('["db","announcements"]')) throw missingIndexError();
+    return { empty: true, docs: [] };
+  };
+}
+
+test.each(['ncku', 'ntpu', 'feu', 'mmc'] as const)(
+  'keeps a successfully empty %s feed without querying the root announcements collection',
+  async (schoolId) => {
+    jest.mocked(getDocsFromServer).mockImplementation(productionEmptySchoolRead(schoolId) as never);
+    await expect(loadCampusAnnouncementFeed(schoolId)).resolves.toEqual({
+      announcements: [],
+      sources: [],
+      allUnavailable: false,
+    });
+    expect(collection).toHaveBeenCalledWith('db', 'schools', schoolId, 'announcements');
+    expect(collection).not.toHaveBeenCalledWith('db', 'announcements');
+    expect(orderBy).toHaveBeenCalledWith('publishedAt', 'desc');
+  },
+);
+
+test('does not mix leftover root-collection rows from another school into an empty feed', async () => {
+  jest
+    .mocked(getDocsFromServer)
+    .mockResolvedValueOnce({ empty: true, docs: [] } as never)
+    .mockImplementation(async (input) =>
+      docsForPath(input, [document({ ...row, schoolId: 'ntu', title: '臺大稿' })]) as never,
+    );
+  await expect(loadCampusAnnouncementFeed('ncku')).resolves.toEqual({
+    announcements: [],
+    sources: [],
+    allUnavailable: false,
+  });
+  expect(collection).not.toHaveBeenCalledWith('db', 'announcements');
+});
+
+test.each(['ncku', 'ntpu'] as const)(
+  'still rejects %s when the canonical dated query actually fails',
+  async (schoolId) => {
+    jest.mocked(getDocsFromServer).mockRejectedValueOnce(missingIndexError());
+    await expect(loadCampusAnnouncementFeed(schoolId)).rejects.toMatchObject({
+      code: 'failed-precondition',
+    });
+    expect(getDocsFromServer).toHaveBeenCalledTimes(1);
   },
 );
 

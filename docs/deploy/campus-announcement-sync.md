@@ -5,7 +5,7 @@
 - `schools/{schoolId}/announcements/{docId}`
 - `schools/{schoolId}/announcement-sources/{sourceId}`
 
-2026-10-13 已啟用：服務帳戶 `campus-announcement-sync`（只有 `roles/datastore.user`）、GitHub Environment `production` 的 `ANNOUNCEMENT_SYNC_SA_JSON` 與 `CAMPUS_ANNOUNCEMENT_SYNC_ENABLED=true`、workflow 每小時第 17 分（UTC）同步 `pu`。點餐開關維持關。
+2026-10-13 已啟用：服務帳戶 `campus-announcement-sync`（只有 `roles/datastore.user`）、GitHub Environment `production` 的 `ANNOUNCEMENT_SYNC_SA_JSON` 與 `CAMPUS_ANNOUNCEMENT_SYNC_ENABLED=true`、workflow 每天兩次同步 `pu`（台北 07:00、11:30）。點餐開關維持關。
 
 現況：CLI 預設 dry-run；`.github/workflows/campus-announcement-sync.yml` 只有手動試跑，寫入步驟固定失敗。
 
@@ -45,14 +45,15 @@ Admin SDK 會略過 Firestore Security Rules，IAM 也不能鎖到單一 subcoll
 ```yaml
 on:
   schedule:
-    - cron: '17 * * * *' # 每小時第 17 分，避開整點尖峰
+    - cron: '0 23 * * *' # 07:00 Taipei，早上第一堂前
+    - cron: '30 3 * * *' # 11:30 Taipei，中午尖峰前
   workflow_dispatch:
 ```
 
 | 項目 | 建議 |
 | --- | --- |
-| 頻率 | 先每小時一次。15–20 分太密；有停課／選課再考慮半小時 |
-| 時區 | cron 是 UTC。`17 * * * *` 即可，不必對齊台北整點 |
+| 頻率 | 每天兩次，排在學生常用時段前。不要每小時或每 20 分 |
+| 時區 | cron 是 UTC。07:00 Taipei = `0 23 * * *`，11:30 Taipei = `30 3 * * *` |
 | 併發 | 維持 `concurrency: campus-announcement-sync`、`cancel-in-progress: true` |
 | 超時 | 20 分鐘夠用 |
 | 範圍 | 一次一校或只跑已核准的 `schoolId`；不要一次掃完全部示範校 |

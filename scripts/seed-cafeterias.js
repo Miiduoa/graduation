@@ -108,6 +108,207 @@ function assertSafeCafeteriaSeedTarget(env = process.env) {
 }
 
 const SCHOOL_ID = process.env.SCHOOL_ID || 'pu';
+
+const NCKU_HOUSING_URL = 'https://housing-osa.ncku.edu.tw/p/412-1052-4084.php';
+const NCKU_HOURS_URL = 'https://sites.google.com/view/ncku-cafeteria';
+
+function publicDiningRow(schoolId, slug, name, location, openingHours, description, sourceLabel, sourceUrl) {
+  return {
+    id: `${schoolId}-${slug}`,
+    name,
+    description,
+    location,
+    openingHours,
+    orderingEnabled: false,
+    merchantMode: 'info_only',
+    reviewStatus: 'unverified',
+    sourceLabel,
+    sourceUrl,
+    websiteUrl: sourceUrl,
+  };
+}
+
+const PUBLIC_DINING = {
+  ncku: [
+    publicDiningRow(
+      'ncku',
+      'kuangfu',
+      '光復餐廳',
+      '光復校區光二舍地下一樓',
+      '待補',
+      '學生宿舍餐廳。得標廠商為周氏蝦捲有限公司。營業時間見住宿服務組公告的顧客資訊網。',
+      '國立成功大學住宿服務組｜學生宿舍餐廳（115.8.28 更新）；營業時間見國立成功大學學生宿舍餐廳顧客資訊網',
+      NCKU_HOURS_URL,
+    ),
+    publicDiningRow(
+      'ncku',
+      'chingyeh',
+      '敬業餐廳',
+      '敬業校區敬一舍地下一樓',
+      '待補',
+      '學生宿舍餐廳。得標廠商為晨露朝食坊。營業時間見住宿服務組公告的顧客資訊網。',
+      '國立成功大學住宿服務組｜學生宿舍餐廳（115.8.28 更新）；營業時間見國立成功大學學生宿舍餐廳顧客資訊網',
+      NCKU_HOURS_URL,
+    ),
+    publicDiningRow(
+      'ncku',
+      'yunping-cafe',
+      '雲平咖啡',
+      '光復校區雲平大樓 1 樓',
+      '待補',
+      '校內其他餐飲資訊所列據點。菜單與營業時間待補。',
+      '國立成功大學住宿服務組｜學生宿舍餐廳（115.8.28 更新）',
+      NCKU_HOUSING_URL,
+    ),
+    publicDiningRow(
+      'ncku',
+      'ncku-hall-mall',
+      '成大會館 BOT 附設商場',
+      '勝利校區成大會館',
+      '待補',
+      '校內其他餐飲資訊所列據點。櫃位與營業時間待補。',
+      '國立成功大學住宿服務組｜學生宿舍餐廳（115.8.28 更新）',
+      NCKU_HOUSING_URL,
+    ),
+    publicDiningRow(
+      'ncku',
+      'med-4f',
+      '醫學院 4 樓簡易餐廳',
+      '成杏校區醫學院 4 樓',
+      '待補',
+      '校內其他餐飲資訊所列據點。菜單與營業時間待補。',
+      '國立成功大學住宿服務組｜學生宿舍餐廳（115.8.28 更新）',
+      NCKU_HOUSING_URL,
+    ),
+    publicDiningRow(
+      'ncku',
+      'youyang',
+      '優氧食光',
+      '生醫卓群大樓 1 樓',
+      '待補',
+      '校內其他餐飲資訊所列據點。菜單與營業時間待補。',
+      '國立成功大學住宿服務組｜學生宿舍餐廳（115.8.28 更新）',
+      NCKU_HOUSING_URL,
+    ),
+    publicDiningRow(
+      'ncku',
+      'chimei-mall',
+      '奇美樓 1 樓附設商場',
+      '自強校區奇美樓 1 樓',
+      '待補',
+      '校內其他餐飲資訊所列據點。櫃位與營業時間待補。',
+      '國立成功大學住宿服務組｜學生宿舍餐廳（115.8.28 更新）',
+      NCKU_HOUSING_URL,
+    ),
+    publicDiningRow(
+      'ncku',
+      'shinyuan',
+      '新園春室',
+      '成功校區',
+      '待補',
+      '校內其他餐飲資訊所列據點。菜單與營業時間待補。',
+      '國立成功大學住宿服務組｜學生宿舍餐廳（115.8.28 更新）',
+      NCKU_HOUSING_URL,
+    ),
+    publicDiningRow(
+      'ncku',
+      'hospital-mall',
+      '成大醫學院附設醫院地下商場',
+      '成大醫學院附設醫院地下商場',
+      '待補',
+      '校內其他餐飲資訊所列據點。櫃位與營業時間待補。',
+      '國立成功大學住宿服務組｜學生宿舍餐廳（115.8.28 更新）',
+      NCKU_HOUSING_URL,
+    ),
+  ],
+  ntpu: [
+    publicDiningRow(
+      'ntpu',
+      'youmi',
+      '優米自助餐',
+      '三峽校區心湖會館 1F（A 區）',
+      '週一至週五 10:30–14:00、16:30–19:30；週日 10:30–14:00；週六公休',
+      '自助餐、團體便當。',
+      '國立臺北大學總務處事務組｜饗樂北大｜美食 A 區',
+      'https://life.ntpu.edu.tw/gourmet/3_6/1',
+    ),
+    publicDiningRow(
+      'ntpu',
+      'bozhi',
+      '波之家石鍋料理',
+      '三峽校區心湖會館 1F（A 區）',
+      '週一至週五 11:00–19:00；週日 11:00–14:00；週六公休',
+      '韓式石鍋料理。',
+      '國立臺北大學總務處事務組｜饗樂北大｜美食 A 區',
+      'https://life.ntpu.edu.tw/gourmet/3_6/1',
+    ),
+    publicDiningRow(
+      'ntpu',
+      'thaile',
+      'Thai Le 泰料',
+      '三峽校區心湖會館 1F（A 區）',
+      '週一至週五 11:00–19:00；週日 11:00–14:00；週六公休',
+      '泰式料理。',
+      '國立臺北大學總務處事務組｜饗樂北大｜美食 A 區',
+      'https://life.ntpu.edu.tw/gourmet/3_6/1',
+    ),
+    publicDiningRow(
+      'ntpu',
+      '24ratio',
+      '24 個比例手搖飲／輕食',
+      '三峽校區心湖會館 1F（A 區）',
+      '週一至週五 10:00–19:00；週日 10:30–17:30；週六公休',
+      '手搖飲、輕食小點。',
+      '國立臺北大學總務處事務組｜饗樂北大｜美食 A 區',
+      'https://life.ntpu.edu.tw/gourmet/3_6/1',
+    ),
+    publicDiningRow(
+      'ntpu',
+      'chubao',
+      '初飽快餐',
+      '三峽校區心湖會館 1F（B 區）',
+      '週一至週五 11:00–19:00；週日 11:00–14:00；週六公休',
+      '中式快餐。',
+      '國立臺北大學總務處事務組｜饗樂北大｜初飽快餐',
+      'https://life.ntpu.edu.tw/gourmet_detail/63',
+    ),
+    publicDiningRow(
+      'ntpu',
+      'ahua',
+      'A 華加湯滷味',
+      '三峽校區心湖會館 1F（B 區）',
+      '週一至週五 10:30–19:30；週日 11:30–14:30；週六公休',
+      '滷味。特色餐點含藥燉鴨血、招牌滷蘿蔔。',
+      '國立臺北大學總務處事務組｜饗樂北大｜A華加湯滷味',
+      'https://life.ntpu.edu.tw/gourmet_detail/44',
+    ),
+    publicDiningRow(
+      'ntpu',
+      'chuqing',
+      '初晴食堂',
+      '三峽校區心湖會館 1F（B 區）',
+      '週一至週五 11:00–19:00；週日 10:00–14:00；週六公休',
+      '日式咖哩飯、丼飯。',
+      '國立臺北大學總務處事務組｜饗樂北大｜初晴食堂',
+      'https://life.ntpu.edu.tw/gourmet_detail/78',
+    ),
+    publicDiningRow(
+      'ntpu',
+      'papershoot',
+      'PaperShoot Café',
+      '三峽校區心湖會館 2F',
+      '週三至週一 10:30–18:00；週二公休',
+      '輕食、甜點、咖啡飲品。',
+      '國立臺北大學總務處事務組｜饗樂北大｜PaperShoot Café',
+      'https://life.ntpu.edu.tw/gourmet_detail/37',
+    ),
+  ],
+};
+
+function cafeteriasForSchool(schoolId) {
+  if (schoolId === 'pu') return CAFETERIAS;
+  return PUBLIC_DINING[schoolId] || [];
+}
 const PROJECT_ID = resolveSeedProjectId();
 
 function init() {
@@ -248,7 +449,11 @@ async function main() {
   init();
   const db = admin.firestore();
   console.log(`[seed] schoolId=${SCHOOL_ID} project=${PROJECT_ID}`);
-  for (const c of CAFETERIAS) {
+  const rows = cafeteriasForSchool(SCHOOL_ID);
+  if (!rows.length) {
+    throw new Error(`[seed] 沒有 ${SCHOOL_ID} 的餐廳種子資料`);
+  }
+  for (const c of rows) {
     await seedOne(db, c);
   }
   console.log('[seed] DONE.');
@@ -266,4 +471,5 @@ module.exports = {
   assertSafeCafeteriaSeedTarget,
   resolveSeedProjectId,
   DEFAULT_TEST_PROJECT,
+  cafeteriasForSchool,
 };
