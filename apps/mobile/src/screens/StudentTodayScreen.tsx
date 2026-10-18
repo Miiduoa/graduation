@@ -126,15 +126,6 @@ export default function StudentTodayScreen() {
           <ActivityIndicator color={theme.colors.accent} style={{ marginVertical: 36 }} />
         ) : (
           <>
-            <TodaySensePanel
-              uid={uid}
-              schoolId={schoolId}
-              tasks={data?.tasks ?? []}
-              phase={error ? 'error' : !uid ? 'unsigned' : data ? 'ready' : 'hidden'}
-              now={now}
-              navigation={navigation}
-              role={auth.profile?.role}
-            />
             {data && (
               <>
                 <Text accessibilityRole="header" style={s.sectionTitle}>
@@ -173,6 +164,15 @@ export default function StudentTodayScreen() {
                     目前沒有校務待辦。Campus One 作業與測驗請到「課程與作業」查看。
                   </Text>
                 )}
+                <TodaySensePanel
+                  uid={uid}
+                  schoolId={schoolId}
+                  tasks={data.tasks}
+                  phase="ready"
+                  now={now}
+                  navigation={navigation}
+                  role={auth.profile?.role}
+                />
                 <Text style={s.sectionTitle}>校務課程</Text>
                 {data.courses.length ? (
                   data.courses.map((course) => (
