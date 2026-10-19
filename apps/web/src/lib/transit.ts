@@ -137,8 +137,9 @@ export function arrivalLabel(arrival: TransitArrival, now: number): string {
 }
 export function directionLabel(arrival: TransitArrival): string {
   if (arrival.destination) return `往 ${arrival.destination}`;
-  // TDX 臺中到站資料實查未提供終點站名；只寫「去程／返程」學生無法判斷往哪裡，
-  // 明講終點未提供，避免把方向代碼假裝成可判斷的方向。
+  // 到站資料本身常未提供終點，伺服器會以 TDX 路線站序的各方向末站補上；
+  // 兩者都沒有時只寫「去程／返程」學生無法判斷往哪裡，明講終點未提供，
+  // 避免把方向代碼假裝成可判斷的方向。
   return arrival.direction === 0 ? '去程（終點未提供）' : arrival.direction === 1 ? '返程（終點未提供）' : '方向未提供';
 }
 export type ArrivalKind = 'live' | 'not-started' | 'ended' | 'stale' | 'other';
