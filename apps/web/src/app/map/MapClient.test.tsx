@@ -77,13 +77,23 @@ it('shows a retryable source error without fabricated places or opening hours', 
   expect(await screen.findByRole('button', { name: '查看蓋夏圖書館' })).toBeTruthy();
 });
 
-it('distinguishes a confirmed empty source from an unavailable source', async () => {
+it('uses bundled Providence places when the confirmed source is empty', async () => {
   vi.mocked(loadMapLocations).mockResolvedValue([]);
   render(<MapClient school="pu" />);
-  expect(await screen.findByText('目前沒有可顯示的校園地點')).toBeTruthy();
-  expect(screen.queryByLabelText('地圖狀態')).toBeNull();
-  expect(screen.getByRole('link', { name: '查看校方校區平面圖' }).getAttribute('href')).toBe(
-    'https://gnl.pu.edu.tw/p/426-1007-8.php?Lang=zh-tw',
+  expect(await screen.findByRole('button', { name: '查看主顧樓' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '查看靜宜大學（校門）' })).toBeTruthy();
+  expect(screen.getByText(/OpenStreetMap 貢獻者資料/)).toBeTruthy();
+  expect(screen.queryByText('目前沒有可顯示的校園地點')).toBeNull();
+});
+
+it('links a selected Providence bus stop to the live bus page', async () => {
+  vi.mocked(loadMapLocations).mockResolvedValue([]);
+  render(<MapClient school="pu" />);
+  fireEvent.click(await screen.findByRole('button', { name: '查看靜宜大學（校門）' }));
+  const live = screen.getByRole('link', { name: '查看即時到站' });
+  expect(live.getAttribute('href')).toBe('/bus?schoolId=pu');
+  expect(screen.getByRole('link', { name: '查看地點來源 ↗' }).getAttribute('href')).toBe(
+    'https://data.gov.tw/dataset/81555',
   );
 });
 

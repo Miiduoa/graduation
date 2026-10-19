@@ -17,6 +17,12 @@ import {
 } from './mapService';
 import styles from './map.module.css';
 import {
+  isBusStopLocation,
+  PROVIDENCE_CAMPUS_SOURCE,
+  providencePlaceSourceUrl,
+  withProvidenceCampusPlaces,
+} from './providenceCampus';
+import {
   buildCampusMapSearchUrl,
   getOfficialCampusMapUrl,
   hasOfficialProvidenceLibraryGuide,
@@ -74,8 +80,9 @@ function MapContent({
   useEffect(() => {
     let active = true;
     void loadMapLocations(school).then(
-      (locations) => {
-        if (active) setPlaceState({ status: 'ready', locations });
+      (loaded) => {
+        if (active)
+          setPlaceState({ status: 'ready', locations: withProvidenceCampusPlaces(school, loaded) });
       },
       () => {
         if (active) setPlaceState({ status: 'error', locations: [] });
@@ -392,6 +399,24 @@ function MapContent({
           ))}
         </div>
       </div>
+      {school === 'pu' && (
+        <section className={`card ${styles.state}`} aria-label="地圖資料來源">
+          <h2>靜宜地圖資料來源</h2>
+          <p>
+            建築與設施位置取自{' '}
+            <a href={PROVIDENCE_CAMPUS_SOURCE.mapDataUrl} target="_blank" rel="noopener noreferrer">
+              OpenStreetMap 貢獻者資料
+            </a>
+            （查詢日期 {PROVIDENCE_CAMPUS_SOURCE.retrievedAt}），底圖上也保留 OpenStreetMap 署名；
+            公車站牌取自{' '}
+            <a href={PROVIDENCE_CAMPUS_SOURCE.transitDatasetUrl} target="_blank" rel="noopener noreferrer">
+              臺中市公車站牌資料
+            </a>
+            （快照 {PROVIDENCE_CAMPUS_SOURCE.transitCatalogDate}）。點公車站可到公車頁看即時到站；
+            出入口目前只有一筆標記、名稱待補，其他學校的地點待補，不會先用靜宜資料代替。
+          </p>
+        </section>
+      )}
       <MapCanvas
         locations={mapLocations}
         selected={selected}
@@ -423,6 +448,21 @@ function MapContent({
               >
                 從目前位置導航
               </a>
+              {isBusStopLocation(selected) && (
+                <Link className="btn primary" href={`/bus?schoolId=${encodeURIComponent(school)}`}>
+                  查看即時到站
+                </Link>
+              )}
+              {providencePlaceSourceUrl(selected) && (
+                <a
+                  className="btn"
+                  href={providencePlaceSourceUrl(selected)!}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  查看地點來源 ↗
+                </a>
+              )}
               {hasOfficialProvidenceLibraryGuide(school, selected) && (
                 <a
                   className="btn"
