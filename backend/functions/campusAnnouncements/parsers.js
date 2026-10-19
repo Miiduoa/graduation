@@ -116,6 +116,22 @@ function takeItem(baseUrl, href, title, dateText, summary, options = {}) {
   };
 }
 
+const GREGORIAN_DATE_RE = /20\d{2}[./-]\d{1,2}[./-]\d{1,2}/;
+const ROC_DATE_RE = /\d{2,3}[./年]\d{1,2}[./月]\d{1,2}/;
+
+function firstDateInText(text) {
+  return (String(text).match(GREGORIAN_DATE_RE) || String(text).match(ROC_DATE_RE) || [])[0] || '';
+}
+
+/** Prefer the labeled/last-cell list date so titles like「115年11月20日舉辦」do not become publishedAt. */
+function tableRowDateText(row, title) {
+  const labeled = cellByTh(row, '日期');
+  if (labeled) return labeled;
+  const cells = String(row).match(/<td\b[\s\S]*?<\/td>/gi) || [];
+  const lastCell = decodeHtml((cells[cells.length - 1] || '').replace(/<[^>]+>/g, ' '));
+  return firstDateInText(lastCell) || firstDateInText(row) || title;
+}
+
 function parseIwebTable(html, baseUrl) {
   const rows = [];
   const tableRows = String(html || '').match(/<tr[\s\S]*?<\/tr>/gi) || [];
@@ -127,11 +143,7 @@ function parseIwebTable(html, baseUrl) {
     const innerTitle = link[3].replace(/<[^>]+>/g, ' ');
     const title = usableTitle(innerTitle) ? innerTitle : link[2] || innerTitle;
     if (looksLikeNavTitle(usableTitle(title) || title)) continue;
-    const dateText =
-      cellByTh(row, '日期') ||
-      (row.match(/20\d{2}[./-]\d{1,2}[./-]\d{1,2}|\d{2,3}[./年]\d{1,2}[./月]\d{1,2}/) || [])[0] ||
-      title;
-    const item = takeItem(baseUrl, link[1], title, dateText, '', {
+    const item = takeItem(baseUrl, link[1], title, tableRowDateText(row, title), '', {
       allowAttachment: true,
       office: cellByTh(row, '公告單位'),
     });
