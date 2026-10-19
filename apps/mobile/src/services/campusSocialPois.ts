@@ -34,20 +34,19 @@ export type SocialPoiCategory =
   | 'social'
   | 'transit';
 
+// 只列已核對清單（puCampusData）裡還存在的地點；舊清單已移除的地點不再拿來打卡。
 const PREFERRED_IDS: { id: string; category: SocialPoiCategory; hint?: string }[] = [
-  { id: 'pu-library', category: 'library', hint: '主圖書館' },
-  { id: 'pu-providence', category: 'academic', hint: '主顧樓' },
+  { id: 'pu-library', category: 'library', hint: '蓋夏圖書館' },
+  { id: 'pu-zhugu', category: 'academic', hint: '主顧樓' },
   { id: 'pu-renyuan', category: 'academic', hint: '任垣樓 · 計中' },
   { id: 'pu-boduo', category: 'academic', hint: '伯鐸樓' },
   { id: 'pu-jingan', category: 'academic', hint: '靜安樓 · 管院' },
   { id: 'pu-gelun', category: 'academic', hint: '格倫樓 · 法律' },
-  { id: 'pu-gym', category: 'sports', hint: '體育館' },
-  { id: 'pu-track', category: 'sports', hint: '田徑場' },
-  { id: 'pu-student-center', category: 'social', hint: '學生中心' },
-  { id: 'pu-arts', category: 'academic', hint: '藝術中心' },
-  { id: 'pu-7eleven', category: 'cafeteria', hint: '7-ELEVEN' },
-  { id: 'pu-ok-mart', category: 'cafeteria', hint: 'OK mart' },
-  { id: 'pu-bus-stop', category: 'transit', hint: '校門公車站' },
+  { id: 'pu-gym', category: 'sports', hint: '若望保祿二世體育館' },
+  { id: 'pu-pool', category: 'sports', hint: '溫水游泳池' },
+  { id: 'pu-jingyuan', category: 'cafeteria', hint: '靜園餐廳' },
+  { id: 'pu-yiyuan', category: 'cafeteria', hint: '宜園餐廳' },
+  { id: 'pu-bus-gate', category: 'transit', hint: '靜宜大學（校門）公車站' },
 ];
 
 const SYNTHETIC_FALLBACK: SocialPoi[] = [
