@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
-import {TDX,ORIGIN,probeTdx,probePublic,verifiedArrival,buildRemoteCommand,parseRemoteReport,probeRuntime,validateProfile,hasBusShell,verifyOfficialNotice} from './transit-release-gate.mjs';
+import {TDX,ORIGIN,probeTdx,probePublic,verifiedArrival,buildRemoteCommand,parseRemoteReport,probeRuntime,validateProfile,hasBusShell,verifyOfficialNotice,sanitizedRemoteFailure,failureFromFlyExecError} from './transit-release-gate.mjs';
 const stamp = '2026-10-12T16:00:00Z';
 const now = () => Date.parse(stamp);
 const sha = 'a'.repeat(40);
@@ -36,7 +36,7 @@ test('both server credential fields are mandatory before network access',async()
   for(const c of [{},{clientId:'x'},{clientSecret:'x'},{clientId:' ',clientSecret:'x'}]) await assert.rejects(probeTdx({credentials:c,fetcher:()=>assert.fail('must not request')}),/tdx-not-configured/);
 });
 test('authorization, quota and arbitrary provider errors are sanitized',async()=>{
-  for(const [status,code] of [[401,'not-authorized'],[403,'not-authorized'],[429,'rate-limited'],[500,'service-unavailable']]) await assert.rejects(probeTdx({credentials,fetcher:mock({errorStatus:status}),now}),new RegExp(`^Error: ${code}$`));
+  for(const [status,code] of [[401,'not-authorized'],[403,'not-authorized'],[429,'rate-limited'],[500,'service-unavailable']]) await assert.rejects(probeTdx({credentials,fetcher:mock({errorStatus:status}),now,rateLimitDelays:[]}),new RegExp(`^Error: ${code}$`));
 });
 test('station absence, wrong campus and invalid coordinates cannot pass',async()=>{
   for(const stops of [[],[{...stop,name:'別校'}],[{...stop,lat:0}]]) await assert.rejects(probeTdx({credentials,fetcher:mock({stops}),now}),/no-verified-campus-station/);
@@ -78,6 +78,40 @@ test('remote stdout is allowlisted and cannot masquerade as a passing check',()=
   for(const line of ['', 'CAMPUS_TRANSIT_PROBE:{}','CAMPUS_TRANSIT_PROBE:broken','CAMPUS_TRANSIT_PROBE:{}\nCAMPUS_TRANSIT_PROBE:{}']) assert.throws(()=>parseRemoteReport(line));
 });
 
+test('a single 429 is retried on the same request and can still verify fresh data',async()=>{
+  let tokenCalls=0; const sleeps=[];
+  const base=mock(); let etaCalls=0;
+  const fetcher=async(url,init)=>{
+    if(url.includes('/openid-connect/token')) { tokenCalls+=1; if(tokenCalls===1) return Response.json({},{status:429}); }
+    if(url.includes('EstimatedTimeOfArrival')) { etaCalls+=1; }
+    return base(url,init);
+  };
+  const result=await probeTdx({credentials,fetcher,now,sleep:async(ms)=>{sleeps.push(ms);},rateLimitDelays:[123,456]});
+  assert.equal(result.ready,true); assert.deepEqual(sleeps,[123]); assert.equal(tokenCalls,2); assert.equal(etaCalls,1);
+});
+test('persistent 429 still fails closed as rate-limited after bounded retries',async()=>{
+  const sleeps=[];
+  await assert.rejects(probeTdx({credentials,fetcher:mock({errorStatus:429}),now,sleep:async(ms)=>{sleeps.push(ms);},rateLimitDelays:[1,2]}),/rate-limited/);
+  assert.deepEqual(sleeps,[1,2]);
+});
+test('remote failures keep only sanitized codes and never provider or credential detail',()=>{
+  assert.equal(sanitizedRemoteFailure(new Error('rate-limited')),'rate-limited');
+  assert.equal(sanitizedRemoteFailure(new Error('client-secret-must-not-appear')),'runtime-transit-preflight-failed');
+  const failing='export async function probeRuntime(){throw new Error("rate-limited")} export function sanitizedRemoteFailure(e){return e.message==="rate-limited"?"rate-limited":"runtime-transit-preflight-failed"}';
+  let execError;
+  try { execFileSync('/bin/sh',['-c',buildRemoteCommand(failing)],{encoding:'utf8'}); } catch (error) { execError=error; }
+  assert.ok(execError?.stdout?.includes('"reason":"rate-limited"'));
+  assert.equal(failureFromFlyExecError(execError),'rate-limited');
+});
+test('remote ready:false report surfaces its sanitized code through parsing and fly exec errors',()=>{
+  const stdout='CAMPUS_TRANSIT_PROBE:'+JSON.stringify({ready:false,reason:'rate-limited'});
+  assert.throws(()=>parseRemoteReport(stdout),/rate-limited/);
+  assert.equal(failureFromFlyExecError({stdout}),'rate-limited');
+  assert.equal(failureFromFlyExecError({stdout:'CAMPUS_TRANSIT_PROBE:'+JSON.stringify({ready:false,reason:'secret-detail'})}),'runtime-transit-preflight-failed');
+  assert.equal(failureFromFlyExecError({}),'fly-runtime-probe-failed');
+  assert.equal(failureFromFlyExecError({stdout:'not-a-probe'}),'runtime-probe-output-invalid');
+});
+
 const linksProfile = 'official-links-only';
 const shell = '<div data-campus-bus-shell="true">公車與交通</div>';
 const officialNotice = '<aside data-transit-mode="official-links"><h2>即時到站尚未啟用</h2><a href="https://citybus-free.taichung.gov.tw/" target="_blank">臺中市官方公車查詢 ↗</a></aside>';
@@ -116,7 +150,7 @@ test('official links runtime requires complete absence and never requests TDX',a
 });
 test('default runtime remains strict and never falls back after a provider failure',async()=>{
   await assert.rejects(probeRuntime(undefined,{credentials:{},fetcher:()=>assert.fail('must not request')}), /tdx-not-configured/);
-  await assert.rejects(probeRuntime('live-tdx',{credentials,fetcher:mock({errorStatus:429}),now}), /rate-limited/);
+  await assert.rejects(probeRuntime('live-tdx',{credentials,fetcher:mock({errorStatus:429}),now,rateLimitDelays:[]}), /rate-limited/);
   const report=await probeRuntime('live-tdx',{credentials,fetcher:mock(),now});
   assert.equal(report.transitReady,true);
   assert.equal(report.profile,'live-tdx');
