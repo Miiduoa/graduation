@@ -97,6 +97,16 @@ it('links a selected Providence bus stop to the live bus page', async () => {
   );
 });
 
+it('marks single-source places as pending and can reset to the whole campus', async () => {
+  vi.mocked(loadMapLocations).mockResolvedValue([]);
+  render(<MapClient school="pu" />);
+  fireEvent.click(await screen.findByRole('button', { name: '查看P1 停車場' }));
+  expect(await screen.findByText(/只有單一資料來源，位置待再次確認/)).toBeTruthy();
+  expect(screen.getAllByText('待確認').length).toBeGreaterThan(0);
+  fireEvent.click(screen.getByRole('button', { name: '看整個校園' }));
+  expect(screen.queryByRole('region', { name: '地點詳情' })).toBeNull();
+});
+
 it('never points an empty non-Providence map back to Providence', async () => {
   vi.mocked(loadMapLocations).mockResolvedValue([]);
   render(<MapClient school="remote-university-12" />);

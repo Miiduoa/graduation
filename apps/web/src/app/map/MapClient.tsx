@@ -18,8 +18,10 @@ import {
 import styles from './map.module.css';
 import {
   isBusStopLocation,
+  isProvidencePendingVerification,
   PROVIDENCE_CAMPUS_SOURCE,
   providencePlaceSourceUrl,
+  walkingEstimateLabel,
   withProvidenceCampusPlaces,
 } from './providenceCampus';
 import {
@@ -347,7 +349,7 @@ function MapContent({
           <input
             className="input"
             type="search"
-            placeholder="輸入建築、設施或關鍵字"
+            placeholder="輸入建築、設施，或公車路線（例如 300）"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
@@ -360,6 +362,16 @@ function MapContent({
           )}
           <button className="btn" onClick={locate} disabled={positionStatus === 'loading'}>
             {positionStatus === 'loading' ? '正在定位…' : myLocation ? '更新我的位置' : '查看我的位置'}
+          </button>
+          <button
+            className="btn"
+            onClick={() => {
+              setSelection('');
+              setSearch('');
+              setCategory('全部');
+            }}
+          >
+            看整個校園
           </button>
           <button
             className="btn"
@@ -437,7 +449,13 @@ function MapContent({
               <p>提供設施：{selected.facilities!.join('、')}</p>
             )}
             {myLocation && (
-              <p>距離我的位置約 {formatDistance(distanceMeters(myLocation, selected))}（直線距離）</p>
+              <p>
+                距離我的位置約 {formatDistance(distanceMeters(myLocation, selected))}（直線距離）；
+                {walkingEstimateLabel(distanceMeters(myLocation, selected))}
+              </p>
+            )}
+            {isProvidencePendingVerification(selected) && (
+              <p role="status">這個地點目前只有單一資料來源，位置待再次確認，先不要把它當成已核對的導航點。</p>
             )}
             <div className={styles.actions}>
               <a
@@ -568,10 +586,15 @@ function MapContent({
                   aria-pressed={selected?.id === location.id}
                   onClick={() => selectLocation(location)}
                 >
-                  <span className={styles.locationName}>{location.name}</span>
+                  <span className={styles.locationName}>
+                    {location.name}
+                    {isProvidencePendingVerification(location) && (
+                      <span className={styles.pending}>待確認</span>
+                    )}
+                  </span>
                   <span className={styles.note}>
                     {[location.category, location.building, location.floor && `樓層：${location.floor}`].filter(Boolean).join(' · ')}
-                    {myLocation && ` · 直線距離 ${formatDistance(distanceMeters(myLocation, location))}`}
+                    {myLocation && ` · 直線距離 ${formatDistance(distanceMeters(myLocation, location))} · ${walkingEstimateLabel(distanceMeters(myLocation, location))}`}
                   </span>
                   {location.description && (
                     <span className={styles.description}>{location.description}</span>
