@@ -222,6 +222,49 @@ it('resets the entire transit search when changing campuses', async () => {
 });
 
 
+
+it('highlights the next live bus and separates buses without a live estimate', async () => {
+  const now = new Date().toISOString();
+  vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'arrivals' ? {
+    status: 'ready', kind: 'arrivals', fetchedAt: now,
+    arrivals: [
+      { id: 'live', route: '162', direction: 1, destination: '', status: 0, seconds: 180, updatedAt: now },
+      { id: 'ended', route: '326', direction: 0, destination: '', status: 3, seconds: null, updatedAt: now },
+    ],
+  } : stopResult());
+  renderExplorer();
+  expect(await screen.findByText(/162 路 · 約 3 分鐘/)).toBeTruthy();
+  expect(screen.getByText('下一班')).toBeTruthy();
+  expect(screen.getAllByText('返程（終點未提供）')).toHaveLength(2);
+  expect(screen.getByText('其他班次（目前沒有即時預估）')).toBeTruthy();
+  expect(screen.getByText('末班車已駛離')).toBeTruthy();
+});
+
+it('keeps the last good arrivals and blocks repeated refreshes when rate limited', async () => {
+  const now = new Date().toISOString();
+  let arrivalCalls = 0;
+  vi.mocked(queryTransit).mockImplementation(async (query) => {
+    if (query.action !== 'arrivals') return stopResult();
+    arrivalCalls += 1;
+    return arrivalCalls === 1 ? {
+      status: 'ready', kind: 'arrivals', fetchedAt: now,
+      arrivals: [{ id: 'live', route: '162', direction: 1, destination: '', status: 0, seconds: 600, updatedAt: now }],
+    } : { status: 'unavailable', reason: 'rate-limited' };
+  });
+  renderExplorer();
+  expect(await screen.findByText(/162 路 · 約 10 分鐘/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '更新班次' }));
+  expect(await screen.findByText(/查詢的人較多，先顯示/)).toBeTruthy();
+  expect(screen.getByText(/162 路 · 約 10 分鐘/)).toBeTruthy();
+  const button = screen.getByRole('button', { name: '稍後自動再試' }) as HTMLButtonElement;
+  expect(button.disabled).toBe(true);
+});
+
+it('warns that same-name stops cannot be told apart by stop code alone', async () => {
+  renderExplorer();
+  expect(await screen.findByText(/同名站牌不只一個，可能是道路兩側或行經路線不同/)).toBeTruthy();
+});
+
 describe('static catalog stops', () => {
   beforeEach(() => { vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-18T08:00:00.000Z')); });
 

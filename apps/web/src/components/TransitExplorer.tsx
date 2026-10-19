@@ -2,10 +2,10 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  CAMPUS_TRANSIT, TRANSIT_CITIES, TRANSIT_MESSAGES, arrivalLabel, directionLabel, preferredTransitCity,
+  CAMPUS_TRANSIT, TRANSIT_CITIES, TRANSIT_MESSAGES, arrivalKind, arrivalLabel, directionLabel, nextLiveArrival, preferredTransitCity,
   formatDistance, isCity, isPosition, isStaticTransitStop, queryTransit, readSavedStops, stopMapUrl,
   TAICHUNG_BUS_URL, TAICHUNG_CATALOG_URL,
-  type TransitCity, type TransitQuery, type TransitResult, type TransitRoute, type TransitStop,
+  type TransitArrival, type TransitCity, type TransitFailure, type TransitQuery, type TransitResult, type TransitRoute, type TransitStop,
 } from '@/lib/transit';
 import css from './transit.module.css';
 
@@ -29,6 +29,9 @@ function StopArrivals({ stop }: { stop: TransitStop }) {
   const [filter, setFilter] = useState('');
   const [direction, setDirection] = useState('all');
   const [offline, setOffline] = useState(false);
+  const [failure, setFailure] = useState<TransitFailure | null>(null);
+  const [retryAt, setRetryAt] = useState(0);
+  const readyRef = useRef<TransitResult | null>(null);
   useEffect(() => {
     let active = true;
     let controller: AbortController | null = null;
@@ -46,12 +49,25 @@ function StopArrivals({ stop }: { stop: TransitStop }) {
       try {
         const next = await queryTransit({ action: 'arrivals', city: stop.city, stopId: stop.id }, current.signal);
         if (!active || current.signal.aborted) return;
-        setResult(next);
+        if (next.status === 'ready') {
+          readyRef.current = next;
+          setResult(next);
+          setFailure(null);
+          setRetryAt(0);
+        } else {
+          // 忙碌或暫時失敗時保留上次成功班次，不讓畫面整片消失；舊資料逾時後
+          // arrivalLabel 會自動改顯示「資料待更新」，不會假裝還在倒數。
+          setFailure(next.reason);
+          setRetryAt(Date.now() + 60_000);
+          if (!readyRef.current) setResult(next);
+          delay = 60_000;
+        }
         setClock(Date.now());
-        if (next.status === 'unavailable') delay = 60_000;
       } catch {
         if (active && controller === current) {
-          setResult({ status: 'unavailable', reason: 'network' });
+          setFailure('network');
+          setRetryAt(Date.now() + 60_000);
+          if (!readyRef.current) setResult({ status: 'unavailable', reason: 'network' });
           delay = 60_000;
         }
       } finally {
@@ -87,29 +103,43 @@ function StopArrivals({ stop }: { stop: TransitStop }) {
   const rows = result?.status === 'ready' && result.kind === 'arrivals' ? result.arrivals : [];
   const shown = rows.filter((row) => row.route.toLocaleLowerCase().includes(filter.trim().toLocaleLowerCase()) &&
     (direction === 'all' || String(row.direction) === direction));
+  const liveRows = shown.filter((row) => arrivalKind(row, clock) === 'live');
+  const otherRows = shown.filter((row) => arrivalKind(row, clock) !== 'live');
+  const nextBus = nextLiveArrival(shown, clock);
+  const coolingDown = failure !== null && clock < retryAt;
+  const fetchedTime = result?.status === 'ready' ? new Date(result.fetchedAt).toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit' }) : '';
+  const renderRow = (row: TransitArrival, secondary: boolean) => <li key={row.id} className={secondary ? css.secondaryRow : undefined}>
+    <div><strong className={css.route}>{row.route}</strong><span className={css.note}>{directionLabel(row)}</span></div>
+    <strong className={css.eta}>{offline ? '離線，待更新' : arrivalLabel(row, clock)}</strong>
+  </li>;
   return (
     <section className={css.arrivals} aria-labelledby="transit-arrivals-title" aria-busy={busy}>
       <div className={css.sectionHeading}>
         <div><p className={css.eyebrow}>候車站牌 · {TRANSIT_CITIES[stop.city]}</p><h3 id="transit-arrivals-title">{stop.name}</h3></div>
-        <button type="button" className={css.secondary} disabled={busy || offline} onClick={() => { setBusy(true); setRevision((value) => value + 1); }}>
-          {busy ? '查詢中…' : '更新班次'}
+        <button type="button" className={css.secondary} disabled={busy || offline || coolingDown} onClick={() => { setBusy(true); setRevision((value) => value + 1); }}>
+          {busy ? '查詢中…' : coolingDown ? '稍後自動再試' : '更新班次'}
         </button>
       </div>
       <p className={css.note}>同名站牌可能位於道路兩側。上車前請核對車頭方向，勿只看站名。</p>
       <a className={css.mapLink} href={stopMapUrl(stop)} target="_blank" rel="noopener noreferrer">開啟步行導航 ↗</a>
       {offline && <p className={css.message} role="status">目前離線，恢復網路後會重新查詢。請勿依舊資料趕車。</p>}
       {!result && <p className={css.empty} role="status">正在取得這個站牌的班次…</p>}
-      {result?.status === 'unavailable' && <p className={css.message} role="status">{TRANSIT_MESSAGES[result.reason]}</p>}
+      {result?.status === 'unavailable' && <p className={css.message} role="status">{TRANSIT_MESSAGES[result.reason]}{result.reason === 'rate-limited' ? ' 約 1 分鐘後會自動再查，這段時間先不要連續按更新。' : ''}</p>}
+      {failure && result?.status === 'ready' && <p className={css.message} role="status">{failure === 'rate-limited' ? `查詢的人較多，先顯示 ${fetchedTime} 查到的班次，約 1 分鐘後會自動再查；請先不要連續按更新。` : `這次更新沒有成功，先顯示 ${fetchedTime} 查到的班次；資料太舊時會改顯示「資料待更新」。`}</p>}
       {result?.status === 'ready' && result.kind === 'arrivals' && <>
+        {nextBus ? <p className={css.nextBus} role="status"><span>下一班</span><strong>{nextBus.route} 路 · {offline ? '離線，待更新' : arrivalLabel(nextBus, clock)}</strong><span>{directionLabel(nextBus)}</span></p> : shown.length > 0 && <p className={css.message} role="status">目前沒有可用的即時到站預估。下方班次多是末班已駛離或尚未發車，請勿依這些狀態趕車；出發前可再查官方網站。</p>}
         <div className={css.filters}>
           <label>篩選路線<input type="search" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="例如 300" /></label>
           <label>行車方向<select value={direction} onChange={(event) => setDirection(event.target.value)}><option value="all">所有方向</option><option value="0">去程</option><option value="1">返程</option></select></label>
         </div>
-        {shown.length ? <ul className={css.arrivalList}>{shown.map((row) => <li key={row.id}>
-          <div><strong className={css.route}>{row.route}</strong><span className={css.note}>{directionLabel(row)}</span></div>
-          <strong className={css.eta}>{offline ? '離線，待更新' : arrivalLabel(row, clock)}</strong>
-        </li>)}</ul> : <p className={css.empty}>{rows.length ? '沒有符合篩選條件的路線，請清除路線或方向篩選。' : '目前沒有班次預估。這不代表今天沒有公車，請再向官方查詢確認。'}</p>}
-        <p className={css.note}>TDX 提供資料 · 查詢於 {new Date(result.fetchedAt).toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit' })}。每筆預估依來源更新時間判斷，逾時不顯示倒數。</p>
+        {shown.length ? <>
+          {liveRows.length > 0 && <ul className={css.arrivalList}>{liveRows.map((row) => renderRow(row, false))}</ul>}
+          {otherRows.length > 0 && <>
+            {liveRows.length > 0 && <h4 className={css.otherHeading}>其他班次（目前沒有即時預估）</h4>}
+            <ul className={`${css.arrivalList} ${css.secondaryList}`}>{otherRows.map((row) => renderRow(row, true))}</ul>
+          </>}
+        </> : <p className={css.empty}>{rows.length ? '沒有符合篩選條件的路線，請清除路線或方向篩選。' : '目前沒有班次預估。這不代表今天沒有公車，請再向官方查詢確認。'}</p>}
+        <p className={css.note}>TDX 提供資料 · 查詢於 {fetchedTime}。每筆預估依來源更新時間判斷，逾時不顯示倒數。</p>
       </>}
     </section>
   );
@@ -176,7 +206,8 @@ function StopResults({ query, saved, toggleSaved }: {
         <div className={css.sectionHeading}><h3 id="transit-stops-title">{query?.action === 'nearby' ? '附近站牌' : query ? '可搭乘站牌' : '我的常用站牌'}</h3>{!waiting && !failed && (stops.length > 0 || !query) && <span className={css.count}>{stops.length} 站</span>}</div>
         {query?.action === 'nearby' && !waiting && !failed && <p className={css.note}>{TRANSIT_CITIES[query.city]} · {query.radius} 公尺內，依直線距離排序。實際步行路線請看導航。</p>}
         {waiting && <p className={css.empty} role="status">正在讀取站牌…</p>}
-        {failed && <div className={css.message} role="status"><p>暫時讀不到資料，請稍後再試</p><button type="button" className={css.secondary} disabled={busy} onClick={() => { setBusy(true); setResult(null); setSelected(null); setRetry((value) => value + 1); }}>再試一次</button></div>}
+        {!waiting && !failed && stops.length > 1 && new Set(stops.map((stop) => stop.name)).size < stops.length && <p className={css.note}>同名站牌不只一個，可能是道路兩側或行經路線不同；站牌代碼只是編號，點開後先看路線與方向，再決定在哪裡上車。</p>}
+        {failed && <div className={css.message} role="status"><p>{result?.status === 'unavailable' && result.reason === 'rate-limited' ? '查詢的人較多，服務忙碌中。請等約 1 分鐘再試一次，或先看下方官方公車網站。' : '暫時讀不到資料，請稍後再試'}</p><button type="button" className={css.secondary} disabled={busy} onClick={() => { setBusy(true); setResult(null); setSelected(null); setRetry((value) => value + 1); }}>再試一次</button></div>}
         {!waiting && !failed && !stops.length && <p className={css.empty}>{emptyCopy}</p>}
         {!waiting && !failed && stops.length > 0 && <ul className={css.stopList}>{stops.map((stop, index) => {
           const isSaved = saved.some((entry) => stopKey(entry) === stopKey(stop));
@@ -188,7 +219,7 @@ function StopResults({ query, saved, toggleSaved }: {
             <button type="button" className={css.saveButton} aria-label={`${isSaved ? '取消收藏' : '收藏'} ${accessibleName}`} aria-pressed={isSaved} onClick={() => toggleSaved(stop)}>{isSaved ? '已收藏' : '收藏'}</button>
           </li>;
         })}</ul>}
-        {result?.status === 'ready' && result.kind === 'stops' && result.limited && !waiting && !failed && <p className={css.note}>此範圍資料較多，僅列出部分站牌；請縮小範圍確認。</p>}
+        {result?.status === 'ready' && result.kind === 'stops' && result.limited && !waiting && !failed && <p className={css.note}>{query?.action === 'campus' ? '學校附近站牌較多，目前先列出前 16 站；找不到要搭的站牌時，改用「搜尋站名」輸入完整站名。' : '此範圍資料較多，僅列出部分站牌；請縮小範圍確認。'}</p>}
       </section>
       {current ? isStaticTransitStop(current) ? <StaticStopDetails key={stopKey(current)} stop={current} /> : <StopArrivals key={stopKey(current)} stop={current} /> : !waiting && !failed && (stops.length > 0 || !query) ? <div className={css.placeholder}><span aria-hidden="true">→</span><h3>選好站牌，再確認方向</h3><p>點選站牌，查看路線資料與步行導航；有接通動態資料的站牌會顯示到站預估。</p></div> : null}
     </div>
