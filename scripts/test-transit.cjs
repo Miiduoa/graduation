@@ -127,9 +127,14 @@ test('newer source data wins over an old or timestamp-less duplicate', () => {
 });
 test('does not invent a destination from a generic route headsign', () => {
   const [row] = server.normalizeTransitArrivals([arrival({ HeadSign: 'A－B' })], 'TXG123');
-  assert.equal(client.directionLabel(row), '去程');
-  assert.equal(client.directionLabel({ ...row, direction: 1 }), '返程');
+  // 來源沒有給終點時不編造目的地，也不拿通用路線牌充當終點；
+  // 標示必須明講終點未提供，讓學生知道要再核對車頭方向。
+  assert.equal(row.destination, '');
+  assert.equal(client.directionLabel(row), '去程（終點未提供）');
+  assert.equal(client.directionLabel({ ...row, direction: 1 }), '返程（終點未提供）');
   assert.equal(client.directionLabel({ ...row, direction: null }), '方向未提供');
+  assert.ok(!client.directionLabel(row).includes('A－B'));
+  assert.ok(!client.directionLabel(row).includes('往'));
   assert.equal(client.directionLabel({ ...row, destination: '臺中車站' }), '往 臺中車站');
 });
 test('saved stops tolerate corruption, deduplicate, cap size, and strip location-derived distance', () => {
