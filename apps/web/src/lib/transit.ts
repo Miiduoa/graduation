@@ -137,7 +137,29 @@ export function arrivalLabel(arrival: TransitArrival, now: number): string {
 }
 export function directionLabel(arrival: TransitArrival): string {
   if (arrival.destination) return `往 ${arrival.destination}`;
-  return arrival.direction === 0 ? '去程' : arrival.direction === 1 ? '返程' : '方向未提供';
+  // TDX 臺中到站資料實查未提供終點站名；只寫「去程／返程」學生無法判斷往哪裡，
+  // 明講終點未提供，避免把方向代碼假裝成可判斷的方向。
+  return arrival.direction === 0 ? '去程（終點未提供）' : arrival.direction === 1 ? '返程（終點未提供）' : '方向未提供';
+}
+export type ArrivalKind = 'live' | 'not-started' | 'ended' | 'stale' | 'other';
+export function arrivalKind(arrival: TransitArrival, now: number): ArrivalKind {
+  const timestamp = arrival.updatedAt ? Date.parse(arrival.updatedAt) : NaN;
+  if (!Number.isFinite(timestamp) || timestamp > now + 30_000 || now - timestamp >= TRANSIT_FRESHNESS_MS) return 'stale';
+  if (arrival.status === 1) return 'not-started';
+  if (arrival.status === 3 || arrival.status === 4) return 'ended';
+  if (arrival.status !== 0 || arrival.seconds === null || !Number.isFinite(arrival.seconds) || arrival.seconds < 0) return 'other';
+  const remaining = arrival.seconds - Math.max(0, now - timestamp) / 1000;
+  return remaining < -30 ? 'stale' : 'live';
+}
+export function nextLiveArrival(arrivals: TransitArrival[], now: number): TransitArrival | null {
+  let best: TransitArrival | null = null;
+  let bestRemaining = Infinity;
+  for (const arrival of arrivals) {
+    if (arrivalKind(arrival, now) !== 'live' || arrival.seconds === null || !arrival.updatedAt) continue;
+    const remaining = arrival.seconds - Math.max(0, now - Date.parse(arrival.updatedAt)) / 1000;
+    if (remaining < bestRemaining) { best = arrival; bestRemaining = remaining; }
+  }
+  return best;
 }
 export function stopMapUrl(stop: TransitStop): string {
   return `https://www.google.com/maps/dir/?api=1&destination=${stop.lat},${stop.lon}&travelmode=walking`;
