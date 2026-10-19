@@ -44,21 +44,48 @@ export function normalizeTransitStops(rows: unknown[], city: TransitCity, query:
   return [...stops.values()].sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0) || a.name.localeCompare(b.name, 'zh-Hant') || a.id.localeCompare(b.id)).slice(0, limit);
 }
 
-export function normalizeTransitArrivals(rows: unknown[], stopId: string): TransitArrival[] {
+/**
+ * 每條路線各方向的真終點：TDX 路線站序（StopOfRoute）中該方向的最後一站。
+ * 路線基本資料（Route）的 DestinationStopNameZh 只對去程與站序末站一致，
+ * 返程訖站名稱與實際末站有出入（實查 162、301），故不拿起站名或路線牌
+ * （Headsign）充當終點；站序沒給的方向就留空，維持「終點未提供」。
+ */
+export function normalizeRouteDestinations(rows: unknown[]): Map<string, string> {
+  const destinations = new Map<string, string>();
+  for (const row of rows) {
+    if (!isRecord(row)) continue;
+    const direction = typeof row.Direction === 'number' && Number.isInteger(row.Direction) ? row.Direction : null;
+    if (direction === null || !Array.isArray(row.Stops) || !row.Stops.length) continue;
+    const last = row.Stops[row.Stops.length - 1];
+    const destination = isRecord(last) ? localName(last.StopName) : '';
+    if (!destination) continue;
+    for (const uid of [text(row.RouteUID), text(row.SubRouteUID)]) {
+      if (uid) destinations.set(`${uid}:${direction}`, destination);
+    }
+  }
+  return destinations;
+}
+
+export function normalizeTransitArrivals(rows: unknown[], stopId: string, destinations?: Map<string, string>): TransitArrival[] {
   const arrivals = new Map<string, TransitArrival>();
   for (const row of rows) {
     if (!isRecord(row) || row.StopUID !== stopId) continue;
     const route = localName(row.RouteName);
     if (!route) continue;
     const direction = typeof row.Direction === 'number' && Number.isInteger(row.Direction) ? row.Direction : null;
-    const id = `${text(row.RouteUID) || route}:${text(row.SubRouteUID)}:${direction}:${stopId}`;
+    const routeUid = text(row.RouteUID);
+    const subRouteUid = text(row.SubRouteUID);
+    const id = `${routeUid || route}:${subRouteUid}:${direction}:${stopId}`;
     // Source time is authoritative. A new HTTP fetch does not make old vehicle data fresh.
     const stamp = text(row.SrcUpdateTime) || text(row.UpdateTime);
     const timestamp = Date.parse(stamp);
     const current = arrivals.get(id);
     if (current?.updatedAt && (!Number.isFinite(timestamp) || Date.parse(current.updatedAt) > timestamp)) continue;
+    // 到站資料本身給的終點優先；沒給才用站序末站補，兩者都沒有就留空不編造。
+    const destination = text(row.DestinationStopNameZh) ||
+      (direction !== null ? destinations?.get(`${subRouteUid}:${direction}`) || destinations?.get(`${routeUid}:${direction}`) || '' : '');
     arrivals.set(id, {
-      id, route, direction, destination: text(row.DestinationStopNameZh),
+      id, route, direction, destination,
       status: typeof row.StopStatus === 'number' && Number.isInteger(row.StopStatus) ? row.StopStatus : null,
       seconds: typeof row.EstimateTime === 'number' && Number.isFinite(row.EstimateTime) && row.EstimateTime >= 0 ? row.EstimateTime : null,
       updatedAt: Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null,
@@ -159,7 +186,27 @@ export function createTransitService(options: {
       if (input.action === 'arrivals') {
         params.set('$filter', `StopUID eq ${literal(input.stopId)}`);
         const rows = await query(`EstimatedTimeOfArrival/City/${city}`, params, 15_000);
-        return { status: 'ready', kind: 'arrivals', arrivals: normalizeTransitArrivals(rows, input.stopId), fetchedAt: new Date(now()).toISOString() };
+        // 只為「到站資料沒給終點」的路線補查站序末站；查不到或上游忙碌就留空，
+        // 不能因為補終點失敗就把整份即時到站丟掉，也不能拿路線牌文字充數。
+        const missing = new Set<string>();
+        for (const row of rows) {
+          if (!isRecord(row) || row.StopUID !== input.stopId || text(row.DestinationStopNameZh)) continue;
+          const direction = typeof row.Direction === 'number' && Number.isInteger(row.Direction) ? row.Direction : null;
+          const routeUid = text(row.RouteUID);
+          if (direction === null || !routeUid || missing.has(routeUid)) continue;
+          missing.add(routeUid);
+          if (missing.size >= 8) break;
+        }
+        const destinations = new Map<string, string>();
+        for (const routeUid of missing) {
+          try {
+            const routeParams = new URLSearchParams({ '$format': 'JSON', '$top': '20' });
+            routeParams.set('$filter', `RouteUID eq ${literal(routeUid)}`);
+            const routeRows = await query(`StopOfRoute/City/${city}`, routeParams, 6 * 60 * 60_000);
+            for (const [key, value] of normalizeRouteDestinations(routeRows)) destinations.set(key, value);
+          } catch { /* 補不到終點就維持未提供，不影響即時到站本身。 */ }
+        }
+        return { status: 'ready', kind: 'arrivals', arrivals: normalizeTransitArrivals(rows, input.stopId, destinations), fetchedAt: new Date(now()).toISOString() };
       }
       if (input.action === 'nearby') {
         // Round only the cache centre; pad the query and filter exact distances afterward.
