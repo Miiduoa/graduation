@@ -137,6 +137,52 @@ test('does not invent a destination from a generic route headsign', () => {
   assert.ok(!client.directionLabel(row).includes('往'));
   assert.equal(client.directionLabel({ ...row, destination: '臺中車站' }), '往 臺中車站');
 });
+test('route stop order gives the real terminus per direction, never the headsign', () => {
+  const destinations = server.normalizeRouteDestinations([
+    { RouteUID: 'TXG162', SubRouteUID: 'TXG162', Direction: 0, Headsign: '靜宜大學-嘉陽高中-靜宜大學',
+      Stops: [{ StopName: { Zh_tw: '靜宜大學主顧聖母堂' } }, { StopName: { Zh_tw: '嘉陽高中' } }] },
+    { RouteUID: 'TXG162', SubRouteUID: 'TXG162', Direction: 1,
+      Stops: [{ StopName: { Zh_tw: '嘉陽高中' } }, { StopName: { Zh_tw: '靜宜大學主顧聖母堂' } }] },
+    { RouteUID: 'TXG999', Direction: 0, Stops: [] },
+    { RouteUID: 'TXG998', Direction: null, Stops: [{ StopName: { Zh_tw: '某站' } }] },
+  ]);
+  assert.equal(destinations.get('TXG162:0'), '嘉陽高中');
+  assert.equal(destinations.get('TXG162:1'), '靜宜大學主顧聖母堂');
+  assert.equal(destinations.size, 2);
+  const [outbound, inbound] = server.normalizeTransitArrivals([
+    arrival({ RouteUID: 'TXG162', SubRouteUID: 'TXG162', RouteName: { Zh_tw: '162' }, Direction: 0 }),
+    arrival({ RouteUID: 'TXG162', SubRouteUID: 'TXG162', RouteName: { Zh_tw: '162' }, Direction: 1 }),
+  ], 'TXG123', destinations);
+  assert.equal(client.directionLabel(outbound), '往 嘉陽高中');
+  assert.equal(client.directionLabel(inbound), '往 靜宜大學主顧聖母堂');
+  // 到站資料自己給的終點優先，站序不能蓋掉它；方向不明時不補。
+  const [own] = server.normalizeTransitArrivals([
+    arrival({ RouteUID: 'TXG162', Direction: 0, DestinationStopNameZh: '來源終點' }),
+    arrival({ RouteUID: 'TXG162', Direction: null }),
+  ], 'TXG123', destinations);
+  assert.equal(own.destination, '來源終點');
+});
+test('arrivals fill destinations from stop order and keep arrivals when that lookup fails', async () => {
+  const stopOrder = (uid, last) => [{ RouteUID: uid, SubRouteUID: uid, Direction: 1, Stops: [{ StopName: { Zh_tw: '起站' } }, { StopName: { Zh_tw: last } }] }];
+  const mock = service((url) => {
+    if (url.includes('/StopOfRoute/')) return Response.json(stopOrder('TXG300', '靜宜大學主顧聖母堂'));
+    return Response.json([arrival({ Direction: 1 })]);
+  });
+  const result = await mock.execute({ action: 'arrivals', city: 'Taichung', stopId: 'TXG123' });
+  assert.equal(result.arrivals[0].destination, '靜宜大學主顧聖母堂');
+  assert.equal(client.directionLabel(result.arrivals[0]), '往 靜宜大學主顧聖母堂');
+  assert.ok(mock.calls.some((call) => new URL(call.url).pathname.endsWith('/StopOfRoute/City/Taichung') &&
+    new URL(call.url).searchParams.get('$filter') === "RouteUID eq 'TXG300'"));
+  // 站序快取 6 小時：15 秒後重查到站不應再打站序。
+  mock.tick(15_000); await mock.execute({ action: 'arrivals', city: 'Taichung', stopId: 'TXG123' });
+  assert.equal(mock.calls.filter((call) => call.url.includes('/StopOfRoute/')).length, 1);
+  const failing = service((url) => url.includes('/StopOfRoute/')
+    ? new Response('', { status: 500 }) : Response.json([arrival({ Direction: 1 })]));
+  const fallback = await failing.execute({ action: 'arrivals', city: 'Taichung', stopId: 'TXG123' });
+  assert.equal(fallback.status, 'ready');
+  assert.equal(fallback.arrivals[0].destination, '');
+  assert.equal(client.directionLabel(fallback.arrivals[0]), '返程（終點未提供）');
+});
 test('saved stops tolerate corruption, deduplicate, cap size, and strip location-derived distance', () => {
   assert.deepEqual(client.readSavedStops('{broken'), []);
   assert.deepEqual(client.readSavedStops('{}'), []);
@@ -256,7 +302,8 @@ test('arrival queries use exact StopUID with a shorter cache and still preserve 
   const result = await mock.execute(query);
   assert.equal(new URL(mock.calls[1].url).searchParams.get('$filter'), "StopUID eq 'TXG123'");
   assert.equal(client.arrivalLabel(result.arrivals[0], NOW), '資料待更新');
-  mock.tick(15_000); await mock.execute(query); assert.equal(mock.calls.length, 3);
+  // 首次查詢另含一次站序補終點；15 秒後只有到站重查，站序快取 6 小時不重打。
+  mock.tick(15_000); await mock.execute(query); assert.equal(mock.calls.length, 4);
 });
 test('POST enforces content type, cross-site rejection, malformed JSON and a bounded body', async () => {
   const request = (body, headers = {}) => new Request('https://campus.example/api/transit', {
