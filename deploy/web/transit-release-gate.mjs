@@ -18,6 +18,24 @@ const text = (v) => typeof v === 'string' ? v.trim().slice(0, 120) : '';
 const id = (v) => typeof v === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(v);
 class GateError extends Error {}
 const fail = (code) => { throw new GateError(code); };
+// Only these sanitized codes may cross the Fly SSH boundary. They are fixed
+// identifiers produced above, never provider response bodies or credential data.
+const REMOTE_FAILURE_CODES = new Set(['tdx-not-configured','not-authorized','rate-limited','network-unavailable',
+  'service-unavailable','invalid-response','invalid-token-response','no-verified-campus-station',
+  'no-fresh-directional-arrival','invalid-station-response','invalid-arrival-response','tdx-credentials-present',
+  'tdx-partial-configuration','unknown-transit-profile','runtime-transit-preflight-failed',
+  'runtime-probe-output-invalid','runtime-transit-not-ready','runtime-official-links-not-ready']);
+export function sanitizedRemoteFailure(error) {
+  return REMOTE_FAILURE_CODES.has(error?.message) ? error.message : 'runtime-transit-preflight-failed';
+}
+export function failureFromFlyExecError(error, profile = LIVE_PROFILE) {
+  const stdout = typeof error?.stdout === 'string' ? error.stdout :
+    Buffer.isBuffer(error?.stdout) ? error.stdout.toString('utf8') : '';
+  if (!stdout) return 'fly-runtime-probe-failed';
+  try { parseRemoteReport(stdout, profile); } catch (failure) { return sanitizedRemoteFailure(failure); }
+  return 'fly-runtime-probe-failed';
+}
+const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function validateProfile(profile = LIVE_PROFILE) {
   if (![LIVE_PROFILE, LINKS_PROFILE, CATALOG_PROFILE].includes(profile)) fail('unknown-transit-profile');
@@ -90,18 +108,31 @@ async function collect(stops, queryArrivals, provider, now) {
 }
 
 export async function probeTdx({ credentials = {clientId: process.env.TDX_CLIENT_ID, clientSecret: process.env.TDX_CLIENT_SECRET},
-  fetcher = fetch, now = Date.now } = {}) {
+  fetcher = fetch, now = Date.now, sleep = defaultSleep, rateLimitDelays = [20_000, 40_000] } = {}) {
   const {clientId, clientSecret} = credentials;
   if (!text(clientId) || !text(clientSecret)) fail('tdx-not-configured');
-  const auth = await json(`${TDX}/auth/realms/TDXConnect/protocol/openid-connect/token`, {
+  const delays = Array.isArray(rateLimitDelays) ? rateLimitDelays.filter((value) => Number.isFinite(value) && value >= 0) : [];
+  // TDX limits each API key, and every Web machine shares that quota with the
+  // public server. Retry only a 429, on the same already-issued token and for
+  // the same single request; other failures stay fail-closed and immediate.
+  const callJson = async (url, init) => {
+    for (let attempt = 0; ; attempt += 1) {
+      try { return await json(url, init, fetcher); }
+      catch (error) {
+        if (error?.message !== 'rate-limited' || attempt >= delays.length) throw error;
+        await sleep(delays[attempt]);
+      }
+    }
+  };
+  const auth = await callJson(`${TDX}/auth/realms/TDXConnect/protocol/openid-connect/token`, {
     method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'},
     body: new URLSearchParams({grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret}).toString(),
-  }, fetcher);
+  });
   if (!record(auth) || typeof auth.access_token !== 'string' || !auth.access_token ||
       !Number.isFinite(auth.expires_in) || auth.expires_in <= 0) fail('invalid-token-response');
   const headers = {Authorization: `Bearer ${auth.access_token}`, Accept: 'application/json'};
-  const request = (path, filter, top) => json(`${TDX}/api/basic/v2/Bus/${path}/City/${CITY}?${new URLSearchParams({
-    '$filter': filter, '$top': String(top), '$format': 'JSON'})}`, {headers}, fetcher);
+  const request = (path, filter, top) => callJson(`${TDX}/api/basic/v2/Bus/${path}/City/${CITY}?${new URLSearchParams({
+    '$filter': filter, '$top': String(top), '$format': 'JSON'})}`, {headers});
   const stops = stopsFrom(await request('Stop', "contains(StopName/Zh_tw,'靜宜大學')", 32), true);
   return collect(stops, (stopId) => request('EstimatedTimeOfArrival', `StopUID eq '${stopId}'`, 200), true, now);
 }
@@ -219,7 +250,7 @@ async function probeStaticCatalog(revision, html, fetcher, now) {
 export function buildRemoteCommand(source, profile = LIVE_PROFILE) {
   validateProfile(profile);
   const moduleUrl = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
-  const program = `import(${JSON.stringify(moduleUrl)}).then(m=>m.probeRuntime(${JSON.stringify(profile)})).then(r=>console.log(${JSON.stringify(MARKER)}+JSON.stringify(r))).catch(()=>{console.log(${JSON.stringify(MARKER)}+JSON.stringify({ready:false,reason:'runtime-transit-preflight-failed'}));process.exitCode=1})`;
+  const program = `import(${JSON.stringify(moduleUrl)}).then(async(m)=>{try{const r=await m.probeRuntime(${JSON.stringify(profile)});console.log(${JSON.stringify(MARKER)}+JSON.stringify(r))}catch(e){console.log(${JSON.stringify(MARKER)}+JSON.stringify({ready:false,reason:m.sanitizedRemoteFailure(e)}));process.exitCode=1}})`;
   return `node --input-type=module -e '${program.replaceAll("'", "'\\''")}'`;
 }
 
@@ -229,6 +260,7 @@ export function parseRemoteReport(stdout, profile = LIVE_PROFILE) {
   if (lines.length !== 1) fail('runtime-probe-output-invalid');
   let value;
   try { value = JSON.parse(lines[0].slice(MARKER.length)); } catch { fail('runtime-probe-output-invalid'); }
+  if (value?.ready === false) fail(sanitizedRemoteFailure({message: value.reason}));
   if (profile === LINKS_PROFILE || profile === CATALOG_PROFILE) {
     const mode = profile === CATALOG_PROFILE ? 'static-catalog' : 'official-links';
     if (value?.ready !== true || value.profile !== profile || value.mode !== mode || value.transitReady !== false ||
@@ -267,8 +299,8 @@ async function main() {
       let stdout;
       try {
         stdout = execFileSync('flyctl',['ssh','console','--app','nuni-web','--machine',row.id,'--quiet','--command',command],
-          {encoding:'utf8',timeout:90_000,maxBuffer:256*1024,stdio:['ignore','pipe','pipe']});
-      } catch { fail('fly-runtime-probe-failed'); }
+          {encoding:'utf8',timeout:300_000,maxBuffer:256*1024,stdio:['ignore','pipe','pipe']});
+      } catch (error) { fail(failureFromFlyExecError(error, profile)); }
       reports.push({machineId:row.id,...parseRemoteReport(stdout, profile)});
     }
     await writeFile(output ?? 'release-evidence/transit-preflight.json',JSON.stringify({checkedAt:new Date().toISOString(),profile,transitReady:profile === LIVE_PROFILE,machines:reports},null,2)+'\n');
