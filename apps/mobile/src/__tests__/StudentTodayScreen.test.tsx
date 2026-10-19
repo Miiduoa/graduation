@@ -53,7 +53,9 @@ function result(name = '資料結構'): Awaited<ReturnType<typeof loadStudentHom
     subtitle: '報告尚未繳交',
     assignmentId: 'homework-a',
     priority: 1,
-    dueAt: new Date('2026-10-20T16:00:00.000Z'),
+    // 截止時間設在現在 3 天後：寫死日期曾在 2026-10-20 凌晨跨入「24 小時內截止」窗口，
+    // 讓「現在可處理」卡與校務待辦同時列出同一作業標題，3 項遮罩測試因此誤失敗。
+    dueAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
   };
   return { courses: [course], tasks: [task] };
 }
@@ -93,7 +95,6 @@ test.each([
       courseId: 'course-a',
       hwId: 'homework-a',
       hwTitle: '繳交期末報告',
-      dueAt: '2026-10-20T16:00:00.000Z',
     },
   ],
   [
@@ -104,7 +105,6 @@ test.each([
       groupId: 'course-a',
       groupName: '資料結構',
       quizId: 'homework-a',
-      dueAt: '2026-10-20T16:00:00.000Z',
     },
   ],
   ['live', '去簽到', 'AttendanceMultiMethod', { courseId: 'course-a', sessionId: 'attendance-a' }],
@@ -116,7 +116,9 @@ test.each([
     jest.mocked(loadStudentHome).mockResolvedValue(data);
     const view = render(<StudentTodayScreen />);
     fireEvent.press(await view.findByRole('button', { name: `繳交期末報告，${label}` }));
-    expect(mockNavigate).toHaveBeenCalledWith('學習', { screen, params });
+    const expectedParams =
+      kind === 'live' ? params : { ...params, dueAt: data.tasks[0].dueAt?.toISOString() };
+    expect(mockNavigate).toHaveBeenCalledWith('學習', { screen, params: expectedParams });
   },
 );
 

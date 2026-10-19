@@ -49,7 +49,7 @@ describe('puCampusData 靜宜 POI 逐筆翻修', () => {
     expect(CAMPUS_POIS).toHaveLength(AUDITED.length);
     for (const expected of AUDITED) {
       const poi = getCampusPoi(expected.id);
-      expect(poi, expected.id).toBeDefined();
+      expect(poi).toBeDefined();
       expect(poi?.name).toBe(expected.name);
       expect(poi?.lat).toBe(expected.lat);
       expect(poi?.lng).toBe(expected.lng);
@@ -89,7 +89,7 @@ describe('puCampusData 靜宜 POI 逐筆翻修', () => {
       'pu-arts',
       'pu-greenhouse',
     ]) {
-      expect(getCampusPoi(removedId), removedId).toBeUndefined();
+      expect(getCampusPoi(removedId)).toBeUndefined();
     }
   });
 });
