@@ -1,8 +1,9 @@
 import { expect, it } from 'vitest';
 import {
-  campusEtaView, campusGroupForRow, campusGroupLabel, campusPlaceLabel, campusStopGroupLabels, fetchedAgoLabel,
-  groupCampusStops, headingAfterBoarding, headingBucket, listedCampusStops, pickCampusNext,
-  publicHeadingFromStops, publicPlaceName, waitingStopLabel,
+  campusDirectionEnded, campusEtaView, campusGroupForRow, campusGroupLabel, campusHomeSummary,
+  campusLiveUnavailable, campusPlaceLabel, campusSegmentRows, campusStopGroupLabels, campusUpdatedLabel,
+  fetchedAgoLabel, groupCampusStops, headingAfterBoarding, headingBucket, listedCampusStops, pickCampusNext,
+  publicHeadingFromStops, publicPlaceName, waitingPlaceLine, waitingStopLabel,
   type RouteStopSequence, type TransitArrival, type TransitStop,
 } from './transit';
 
@@ -68,23 +69,59 @@ it('groups Providence stops into at most four student-facing labels without stop
   expect(listed.extra.some((group) => group.label === '校內')).toBe(true);
 });
 
-it('sorts campus-next by soonest arrival and keeps empty rows last', () => {
+it('sorts campus-next live, scheduled, empty, then ended', () => {
   const rows = pickCampusNext([
     arrival({ id: 'slow', route: '301', seconds: 900, destination: '台中車站', stopName: '靜宜大學(專用道)' }),
     arrival({ id: 'fast', route: '162', seconds: 180, destination: '沙鹿火車站', stopName: '靜宜大學(英才路)' }),
     arrival({
-      id: 'timed', route: '326', status: 3, seconds: null, destination: '新民高中', stopName: '靜宜大學',
+      id: 'timed', route: '326', status: 0, seconds: null, destination: '新民高中', stopName: '靜宜大學',
       scheduledAt: new Date(now + 12 * 60_000).toISOString(),
     }),
+    arrival({ id: 'done', route: '368', status: 3, seconds: null, destination: '校內', stopName: '靜宜大學(校門)' }),
   ], now, ['162', '301', '368', '326']);
   expect(rows.map((row) => row.route)).toEqual(['162', '301', '326', '368']);
-  expect(campusEtaView(rows[0].arrival, now)).toEqual({ kind: 'live', text: '3 分' });
+  expect(campusEtaView(rows[0].arrival, now)).toEqual({ kind: 'live', text: '3 分', minutes: 3 });
   expect(campusEtaView(rows[2].arrival, now).kind).toBe('scheduled');
   expect(campusEtaView(rows[2].arrival, now).text).toMatch(/^表定 \d{2}:\d{2}$/);
-  expect(campusEtaView(rows[3].arrival, now)).toEqual({ kind: 'empty', text: '沒有班次' });
-  expect(campusEtaView(arrival({ seconds: 40 }), now)).toEqual({ kind: 'soon', text: '即將進站' });
+  expect(campusEtaView(rows[3].arrival, now)).toEqual({ kind: 'ended', text: '今天收班' });
+  expect(campusEtaView(arrival({ seconds: 40 }), now)).toEqual({ kind: 'soon', text: '進站中' });
+  expect(campusEtaView(arrival({ seconds: 90 }), now)).toEqual({ kind: 'soon', text: '進站中' });
+  expect(campusEtaView(null, now)).toEqual({ kind: 'empty', text: '暫無班次資訊' });
   expect(campusGroupForRow(rows[0])).toBe('校門口・往沙鹿');
   expect(waitingStopLabel('靜宜大學(英才路)')).toBe('在英才路側等');
+  expect(waitingPlaceLine('靜宜大學(英才路)')).toBe('校門口站牌・英才路側');
+  expect(waitingPlaceLine('靜宜大學(校門)')).toBe('校門口站牌・臺灣大道側');
   expect(fetchedAgoLabel(new Date(now).toISOString(), now)).toBe('剛剛更新');
   expect(fetchedAgoLabel(new Date(now - 30_000).toISOString(), now)).toBe('30 秒前');
+  expect(campusUpdatedLabel(new Date(now).toISOString(), now)).toMatch(/^\d{2}:\d{2} 更新$/);
+  expect(campusUpdatedLabel(new Date(now - 150_000).toISOString(), now)).toMatch(/^最後更新 \d{2}:\d{2}$/);
+  expect(campusUpdatedLabel(new Date(now).toISOString(), now, true)).toBe('讀不到即時資料，先顯示表定時間');
+  expect(campusHomeSummary(rows, now)).toBe('162 往沙鹿 3 分');
+});
+
+it('keeps a direction’s rows when switching segments and marks a fully ended direction', () => {
+  const arrivals = [
+    arrival({ id: 'live', route: '162', seconds: 180, destination: '沙鹿火車站', stopName: '靜宜大學(英才路)' }),
+    arrival({
+      id: 'timed', route: '301', status: 0, seconds: null, destination: '沙鹿火車站', stopName: '靜宜大學(英才路)',
+      scheduledAt: new Date(now + 12 * 60_000).toISOString(),
+    }),
+    arrival({ id: 'none', route: '326', status: 0, seconds: null, destination: '嘉陽高中', stopName: '靜宜大學(英才路)' }),
+    arrival({ id: 'done', route: '368', status: 3, seconds: null, destination: '巨業沙鹿站', stopName: '靜宜大學(英才路)' }),
+    arrival({ id: 'in', route: '368', status: 3, seconds: null, destination: '校內', stopName: '靜宜大學(校門)' }),
+  ];
+  const outbound = campusSegmentRows(arrivals, '校門口・往沙鹿', now);
+  expect(outbound.map((row) => [row.route, campusEtaView(row.arrival, now).kind])).toEqual([
+    ['162', 'live'],
+    ['301', 'scheduled'],
+    ['326', 'empty'],
+    ['368', 'ended'],
+  ]);
+  expect(campusLiveUnavailable(outbound, now)).toBe(false);
+  const inbound = campusSegmentRows(arrivals, '校門口・往校內', now);
+  expect(inbound.map((row) => campusEtaView(row.arrival, now).kind)).toEqual(['ended']);
+  expect(campusDirectionEnded(inbound, now)).toBe(true);
+  expect(campusHomeSummary(inbound, now)).toBe('今天收班');
+  const scheduledOnly = campusSegmentRows([arrivals[1]], '校門口・往沙鹿', now);
+  expect(campusLiveUnavailable(scheduledOnly, now)).toBe(true);
 });

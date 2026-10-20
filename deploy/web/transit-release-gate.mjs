@@ -208,7 +208,8 @@ export async function probePublic(expectedRevision, {fetcher = fetch, now = Date
 }
 
 export function hasBusShell(html) {
-  return typeof html === 'string' && /<[^>]+data-campus-bus-shell=["']true["'][^>]*>/.test(html) && html.includes('公車與交通');
+  return typeof html === 'string' && /<[^>]+data-campus-bus-shell=["']true["'][^>]*>/.test(html) &&
+    (html.includes('往沙鹿') || html.includes('公車與交通'));
 }
 
 export function verifyOfficialNotice(html) {
@@ -225,7 +226,7 @@ export function verifyOfficialNotice(html) {
 
 async function probeStaticCatalog(revision, html, fetcher, now) {
   const notice = html.match(/<aside\b[^>]*data-transit-mode=["']static-catalog["'][^>]*>([\s\S]*?)<\/aside>/)?.[1];
-  if (!notice?.includes('即時到站尚未接通') ||
+  if (!notice?.includes('臺中站牌可查詢，班次時間請至官方網站確認') ||
       !/<a\b[^>]*href=["']https:\/\/citybus\.taichung\.gov\.tw\/["'][^>]*>/.test(notice)) fail('static-catalog-notice-missing');
   const request = async (query, expectedStatus = 200) => {
     let response;
