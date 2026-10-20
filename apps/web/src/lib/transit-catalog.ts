@@ -14,6 +14,27 @@ export const TAICHUNG_CATALOG_METADATA = Object.freeze({ ...catalog.metadata, so
 const normalizeName = (name: string) => name.normalize('NFKC').trim().replaceAll('台', '臺').toLocaleLowerCase('zh-TW');
 const indexedStops = catalog.stops.map((stop) => ({ ...stop, normalizedName: normalizeName(stop.name) }));
 
+/** 靜宜大學(專用道) 各路線去／返終點，取自已打包的臺中靜態目錄，不另打 TDX。 */
+const PROVIDENCE_LANE_DESTINATIONS = (() => {
+  const map = new Map<string, string>();
+  for (const stop of indexedStops) {
+    if (!stop.name.includes('專用道') || !stop.name.includes('靜宜')) continue;
+    for (const route of stop.routes) {
+      const key = `${route.name}:${route.direction}`;
+      if (route.destination && !map.has(key)) map.set(key, route.destination);
+    }
+  }
+  return map;
+})();
+
+export function catalogProvidenceLaneDestination(route: string, direction: number | null): string {
+  const name = route.trim();
+  if (!name) return '';
+  if (direction === 0) return PROVIDENCE_LANE_DESTINATIONS.get(`${name}:去`) ?? '';
+  if (direction === 1) return PROVIDENCE_LANE_DESTINATIONS.get(`${name}:返`) ?? '';
+  return PROVIDENCE_LANE_DESTINATIONS.get(`${name}:去`) || PROVIDENCE_LANE_DESTINATIONS.get(`${name}:返`) || '';
+}
+
 /** Server-side bundled snapshot lookup. No credentials, runtime download, or arrival estimates. */
 export function searchTaichungCatalog(query: TaichungCatalogQuery): { stops: TaichungCatalogStop[]; limited: boolean } {
   if (query.action === 'campus' && query.schoolId !== 'pu') return { stops: [], limited: false };

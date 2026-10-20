@@ -3,7 +3,7 @@ import {
   isCity, isPosition, isRecord, isStopId, publicPlaceName, type RouteStopSequence, type TransitArrival,
   type TransitCity, type TransitFailure, type TransitQuery, type TransitResult, type TransitRoute, type TransitStop,
 } from './transit';
-import { searchTaichungCatalog } from './transit-catalog';
+import { catalogProvidenceLaneDestination, searchTaichungCatalog } from './transit-catalog';
 
 const BASE = 'https://tdx.transportdata.tw';
 const text = (value: unknown) => typeof value === 'string' ? value.trim().slice(0, 120) : '';
@@ -115,7 +115,16 @@ function arrivalDestination(
   if (sequence && sequence.stops.some((stop) => stop.id && stop.id === boardingId)) {
     return headingAfterBoarding(sequence, boardingId, localName(row.StopName)) || publicPlaceName(raw) || raw;
   }
-  return publicPlaceName(raw) || raw;
+  const named = publicPlaceName(raw) || raw;
+  if (named) return named;
+  const stopName = localName(row.StopName);
+  if (isCampusStopName(stopName) && stopName.includes('專用道')) {
+    const catalogDest = catalogProvidenceLaneDestination(localName(row.RouteName), direction);
+    const heading = publicPlaceName(catalogDest) || catalogDest;
+    if (!heading || heading === '校內') return heading ? '本站' : '';
+    return heading;
+  }
+  return '';
 }
 
 export function routesAtCampusStop(stopId: string, sequences: RouteStopSequence[]): TransitRoute[] {

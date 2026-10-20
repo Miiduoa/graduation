@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   CAMPUS_NEXT, CAMPUS_NEXT_ROUTES, CAMPUS_SEGMENTS, campusDirectionEnded,
-  campusLiveUnavailable, campusSegmentRows, campusSegmentWaitLine, campusUpdatedLabel,
-  hasCampusNext, queryTransit,
+  campusLaneDisplay, campusLiveUnavailable, campusSegmentRows, campusSegmentWaitLine,
+  campusUpdatedLabel, hasCampusNext, queryTransit,
   type CampusSegmentKey, type TransitResult,
 } from '@/lib/transit';
 import { CampusArrivalRow } from './CampusArrivalRow';
@@ -121,9 +121,10 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
   const current = CAMPUS_SEGMENTS.find((item) => item.key === segment) ?? CAMPUS_SEGMENTS[0];
   const arrivals = result?.status === 'ready' && result.kind === 'arrivals' ? result.arrivals : [];
   const rows = campusSegmentRows(arrivals, current.group, clock, CAMPUS_NEXT_ROUTES);
+  const lane = current.group === '專用道' ? campusLaneDisplay(rows, clock) : { shown: rows, extra: [] };
   const waitLine = campusSegmentWaitLine(current, rows);
   const allEnded = campusDirectionEnded(rows, clock);
-  const liveUnavailable = campusLiveUnavailable(rows, clock);
+  const liveUnavailable = campusLiveUnavailable(rows, clock, result?.status === 'ready' && result.stale === true);
   const fetchedAt = result?.status === 'ready' ? result.fetchedAt : '';
   const stamp = fetchedAt ? campusUpdatedLabel(fetchedAt, clock, liveUnavailable) : busy ? '' : '';
   const missing = result?.status === 'unavailable';
@@ -179,7 +180,7 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
         <SkeletonList />
       ) : (
         <ul key={segment} className={`${css.boardList} ${css.boardListEnter}`}>
-          {rows.length ? rows.map((row) => (
+          {lane.shown.length ? lane.shown.map((row) => (
             <li key={`${row.route}:${row.heading}`}>
               <CampusArrivalRow row={row} now={clock} />
             </li>
@@ -188,6 +189,20 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
               <p className={css.emptyGroup} role="status">暫無班次資訊</p>
             </li>
           )}
+          {lane.extra.length ? (
+            <li className={css.laneMore}>
+              <details>
+                <summary>還有 {lane.extra.length} 班</summary>
+                <ul>
+                  {lane.extra.map((row) => (
+                    <li key={`${row.route}:${row.heading}`}>
+                      <CampusArrivalRow row={row} now={clock} />
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            </li>
+          ) : null}
         </ul>
       )}
     </section>

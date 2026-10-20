@@ -133,6 +133,32 @@ test('campus-next includes 專用道 in the same ETA query and does not fetch ex
   const rows = client.campusSegmentRows(result.arrivals, '專用道', NOW);
   assert.deepEqual(rows.map((row) => row.route), ['300']);
 });
+test('campus-next fills 專用道 termini from the static catalog without extra StopOfRoute', async () => {
+  const mock = service((url) => Response.json(url.includes('/StopOfRoute/') ? [] : [
+    arrival({ StopUID: 'TXG-BRT-300', RouteUID: 'TXG300', RouteName: { Zh_tw: '300' }, StopName: { Zh_tw: '靜宜大學(專用道)' }, Direction: 0, EstimateTime: 240 }),
+    arrival({ StopUID: 'TXG-BRT-306', RouteUID: 'TXG306', RouteName: { Zh_tw: '306' }, StopName: { Zh_tw: '靜宜大學(專用道)' }, Direction: 1, EstimateTime: 1080 }),
+    arrival({ StopUID: 'TXG-BRT-305', RouteUID: 'TXG305', RouteName: { Zh_tw: '305' }, StopName: { Zh_tw: '靜宜大學(專用道)' }, Direction: 0, EstimateTime: 1200 }),
+  ]));
+  const result = await mock.execute({ action: 'campus-next', schoolId: 'pu' });
+  assert.equal(result.status, 'ready');
+  assert.equal(mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/')).length, 1);
+  assert.equal(mock.calls.filter((call) => call.url.includes('/StopOfRoute/')).some((call) => {
+    const filter = new URL(call.url).searchParams.get('$filter') ?? '';
+    return /TXG300|TXG305|TXG306/.test(filter);
+  }), false);
+  const outbound = result.arrivals.find((row) => row.route === '300');
+  const coastal = result.arrivals.find((row) => row.route === '306');
+  assert.equal(outbound.destination, '台中車站');
+  assert.equal(coastal.destination, '清水');
+  const rows = client.campusSegmentRows(result.arrivals, '專用道', NOW);
+  assert.equal(rows.every((row) => !client.campusHeadingText(row).includes('終點未提供')), true);
+  const display = client.campusLaneDisplay(rows, NOW);
+  assert.deepEqual(display.shown.map((row) => [row.route, client.campusHeadingText(row)]), [
+    ['300', '往 台中車站'],
+    ['306', '往 清水'],
+  ]);
+  assert.deepEqual(display.extra.map((row) => row.route), ['305']);
+});
 test('campus-next never lists other 專用道 stops such as 市政府 in segments or home', async () => {
   const cityHall = arrival({
     StopUID: 'TXG-CITY-HALL', RouteUID: 'TXG301', RouteName: { Zh_tw: '301' }, StopName: { Zh_tw: '市政府(專用道)' },
