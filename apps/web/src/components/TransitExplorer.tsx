@@ -2,13 +2,13 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  CAMPUS_NEXT, CAMPUS_TRANSIT, TRANSIT_CITIES, TRANSIT_MESSAGES, arrivalKind, arrivalLabel, arrivalMatchesCampusGroup,
-  campusGroupForRow, directionLabel, fetchedAgoLabel, formatDistance, hasCampusNext, isCity, isPosition, isStaticTransitStop,
-  listedCampusStops, nextLiveArrival, pickCampusNext, preferredTransitCity, publicPlaceName, queryTransit,
+  CAMPUS_TRANSIT, TRANSIT_CITIES, TRANSIT_MESSAGES, arrivalKind, arrivalLabel, arrivalMatchesCampusGroup,
+  directionLabel, formatDistance, hasCampusNext, isCity, isPosition, isStaticTransitStop,
+  listedCampusStops, nextLiveArrival, preferredTransitCity, publicPlaceName, queryTransit,
   readSavedStops, stopMapUrl, TAICHUNG_BUS_URL, TAICHUNG_CATALOG_URL,
-  type CampusNextRow, type TransitArrival, type TransitCity, type TransitFailure, type TransitQuery, type TransitResult, type TransitRoute, type TransitStop,
+  type TransitArrival, type TransitCity, type TransitFailure, type TransitQuery, type TransitResult, type TransitRoute, type TransitStop,
 } from '@/lib/transit';
-import { CampusArrivalRow } from './CampusArrivalRow';
+import { CampusBusBoard } from './CampusBusBoard';
 import css from './transit.module.css';
 
 const SAVED_KEY = 'campus-one:transit-stops:v1';
@@ -159,117 +159,6 @@ function StopArrivals({ stop, groupLabel }: { stop: TransitStop; groupLabel?: st
   );
 }
 
-function CampusNextBoard({ schoolId, onPickRow }: {
-  schoolId: string;
-  onPickRow?: (row: CampusNextRow) => void;
-}) {
-  const spec = hasCampusNext(schoolId) ? CAMPUS_NEXT[schoolId] : null;
-  const [result, setResult] = useState<TransitResult | null>(null);
-  const [busy, setBusy] = useState(true);
-  const [revision, setRevision] = useState(0);
-  const [clock, setClock] = useState(() => Date.now());
-  const [offline, setOffline] = useState(false);
-  const [failure, setFailure] = useState<TransitFailure | null>(null);
-  const [retryAt, setRetryAt] = useState(0);
-  const readyRef = useRef<TransitResult | null>(null);
-  useEffect(() => {
-    if (!spec) return;
-    let active = true;
-    let controller: AbortController | null = null;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    async function refresh() {
-      if (!active || controller || document.visibilityState === 'hidden' || !navigator.onLine) {
-        if (active && !navigator.onLine) { setOffline(true); setBusy(false); }
-        return;
-      }
-      const current = new AbortController();
-      controller = current;
-      const timeout = setTimeout(() => current.abort(), 20_000);
-      setBusy(true);
-      let delay = 30_000;
-      try {
-        const next = await queryTransit({ action: 'campus-next', schoolId }, current.signal);
-        if (!active || current.signal.aborted) return;
-        if (next.status === 'ready') {
-          readyRef.current = next;
-          setResult(next);
-          setFailure(null);
-          setRetryAt(0);
-        } else {
-          setFailure(next.reason);
-          setRetryAt(Date.now() + 60_000);
-          if (!readyRef.current) setResult(next);
-          delay = 60_000;
-        }
-        setClock(Date.now());
-      } catch {
-        if (active && controller === current) {
-          setFailure('network');
-          setRetryAt(Date.now() + 60_000);
-          if (!readyRef.current) setResult({ status: 'unavailable', reason: 'network' });
-          delay = 60_000;
-        }
-      } finally {
-        clearTimeout(timeout);
-        if (controller === current) controller = null;
-        if (active) {
-          setBusy(false);
-          if (document.visibilityState === 'visible' && navigator.onLine) timer = setTimeout(() => void refresh(), delay);
-        }
-      }
-    }
-    const resume = () => {
-      clearTimeout(timer);
-      setOffline(!navigator.onLine);
-      setClock(Date.now());
-      if (document.visibilityState === 'visible' && navigator.onLine) void refresh();
-    };
-    const clockTimer = setInterval(() => setClock(Date.now()), 15_000);
-    void refresh();
-    document.addEventListener('visibilitychange', resume);
-    window.addEventListener('online', resume);
-    window.addEventListener('offline', resume);
-    return () => {
-      active = false;
-      controller?.abort();
-      clearTimeout(timer);
-      clearInterval(clockTimer);
-      document.removeEventListener('visibilitychange', resume);
-      window.removeEventListener('online', resume);
-      window.removeEventListener('offline', resume);
-    };
-  }, [schoolId, spec, revision]);
-  if (!spec) return null;
-  const arrivals = result?.status === 'ready' && result.kind === 'arrivals' ? result.arrivals : [];
-  const rows = pickCampusNext(arrivals, clock, spec.routes.map((route) => route.name));
-  const coolingDown = failure !== null && clock < retryAt;
-  const fetchedTime = result?.status === 'ready' ? new Date(result.fetchedAt).toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit' }) : '';
-  return (
-    <section className={css.campusNext} aria-labelledby="campus-next-title" aria-busy={busy} data-testid="campus-next">
-      <div className={css.sectionHeading}>
-        <h3 id="campus-next-title">校門口下一班</h3>
-        <button type="button" className={css.refreshStamp} disabled={busy || offline || coolingDown} onClick={() => { setBusy(true); setRevision((value) => value + 1); }}>
-          {busy ? '查詢中…' : coolingDown ? '稍後再試' : result?.status === 'ready' ? fetchedAgoLabel(result.fetchedAt, clock) : '重新整理'}
-        </button>
-      </div>
-      {offline && <p className={css.message} role="status">目前離線，恢復網路後會重新查詢。請勿依舊資料趕車。</p>}
-      {result?.status === 'unavailable' && <p className={css.message} role="status">{TRANSIT_MESSAGES[result.reason]}{result.reason === 'rate-limited' ? ' 約 1 分鐘後會自動再查，這段時間先不要連續按更新。' : result.reason === 'not-configured' ? ' 先看下方站牌，出發前也可開官方網站確認。' : ''}</p>}
-      {failure && result?.status === 'ready' && <p className={css.message} role="status">{failure === 'rate-limited' ? `查詢的人較多，先顯示 ${fetchedTime} 查到的班次，約 1 分鐘後會自動再查；請先不要連續按更新。` : `這次更新沒有成功，先顯示 ${fetchedTime} 查到的班次；資料太舊時會改顯示「資料待更新」。`}</p>}
-      {!result && busy ? <p className={css.empty} role="status">正在查詢班次…</p> : (
-        <ul className={css.campusNextList}>
-          {rows.map((row) => (
-            <li key={`${row.route}:${row.heading}`}>
-              <CampusArrivalRow row={row} now={clock} onSelect={onPickRow ? () => onPickRow(row) : undefined} />
-            </li>
-          ))}
-        </ul>
-      )}
-      {result?.status === 'ready' && result.kind === 'arrivals' && (
-        <p className={css.note}>{result.stale ? `查詢的人較多，先顯示 ${fetchedTime} 向 TDX 取得的最近一份資料，稍後會自動更新。` : `TDX 提供資料 · 查詢於 ${fetchedTime}。`}沒有即時資料時會標「表定（非即時）」，時間以來源為準。</p>
-      )}
-    </section>
-  );
-}
 
 function StaticStopDetails({ stop }: { stop: TransitStop }) {
   return <section className={css.arrivals} aria-labelledby="transit-static-title">
@@ -280,7 +169,7 @@ function StaticStopDetails({ stop }: { stop: TransitStop }) {
     <p className={css.note}>同名站牌可能位於道路兩側。上車前請核對車頭方向，勿只看站名。</p>
     <a className={css.mapLink} href={stopMapUrl(stop)} target="_blank" rel="noopener noreferrer">開啟步行導航 ↗</a>
     <div className={css.message} role="status">
-      <strong>即時到站尚未接通</strong>
+      <strong>班次時間請至官方網站確認</strong>
       <p>以下是站牌與行經路線資料，沒有班次時間或到站倒數。出發前請到官方網站確認目前營運與到站情況。</p>
       <a href={TAICHUNG_BUS_URL} target="_blank" rel="noopener noreferrer">前往臺中公車查即時到站 ↗</a>
     </div>
@@ -296,11 +185,10 @@ function StaticStopDetails({ stop }: { stop: TransitStop }) {
   </section>;
 }
 
-function StopResults({ query, saved, toggleSaved, campusNextSchoolId }: {
+function StopResults({ query, saved, toggleSaved }: {
   query: TransitQuery | null;
   saved: TransitStop[];
   toggleSaved: (stop: TransitStop) => void;
-  campusNextSchoolId?: string;
 }) {
   const [result, setResult] = useState<TransitResult | null>(null);
   const [selected, setSelected] = useState<TransitStop | null>(null);
@@ -314,14 +202,14 @@ function StopResults({ query, saved, toggleSaved, campusNextSchoolId }: {
     queryTransit(query, controller.signal).then((next) => {
       if (!active || controller.signal.aborted) return;
       setResult(next);
-      if (next.status === 'ready' && next.kind === 'stops' && !campusNextSchoolId) setSelected(next.stops[0] ?? null);
+      if (next.status === 'ready' && next.kind === 'stops' && query.action !== 'campus') setSelected(next.stops[0] ?? null);
     }).catch((error: unknown) => {
       if (active) setResult({ status: 'unavailable', reason: isAborted(error) ? 'upstream' : 'network' });
     }).finally(() => { clearTimeout(timeout); if (active) setBusy(false); });
     return () => { active = false; clearTimeout(timeout); controller.abort(); };
-  }, [query, retry, campusNextSchoolId]);
+  }, [query, retry]);
   const stops = query ? (result?.status === 'ready' && result.kind === 'stops' ? result.stops : []) : saved;
-  const grouped = Boolean(campusNextSchoolId && query?.action === 'campus' && stops.length);
+  const grouped = Boolean(query?.action === 'campus' && stops.length);
   const campusList = grouped ? listedCampusStops(stops) : null;
   const shownStops = campusList ? campusList.listed : stops;
   const current = selected ? shownStops.find((stop) => listedKey(stop) === listedKey(selected)) ??
@@ -363,13 +251,7 @@ function StopResults({ query, saved, toggleSaved, campusNextSchoolId }: {
         </details>}
         {result?.status === 'ready' && result.kind === 'stops' && result.limited && !waiting && !failed && !grouped && <p className={css.note}>{query?.action === 'campus' ? '學校附近站牌較多，目前先列出前 16 站；找不到要搭的站牌時，改用「搜尋站名」輸入完整站名。' : '此範圍資料較多，僅列出部分站牌；請縮小範圍確認。'}</p>}
       </section>
-      {current ? isStaticTransitStop(current) ? <StaticStopDetails key={listedKey(current)} stop={current} /> : <StopArrivals key={listedKey(current)} stop={current} groupLabel={grouped ? current.name : undefined} /> : campusNextSchoolId && (!query || query.action === 'campus') ? <CampusNextBoard schoolId={campusNextSchoolId} onPickRow={(row) => {
-        const label = campusGroupForRow(row);
-        const listed = shownStops.find((stop) => stop.name === label);
-        if (listed) { setSelected(listed); return; }
-        const extra = campusList?.extra.find((group) => group.label === label);
-        if (extra) setSelected({ ...extra.representative, name: extra.label });
-      }} /> : !waiting && !failed && (stops.length > 0 || !query) ? <div className={css.placeholder}><span aria-hidden="true">→</span><h3>選好站牌，再確認方向</h3><p>點選站牌，查看路線資料與步行導航；有接通動態資料的站牌會顯示到站預估。</p></div> : null}
+      {current ? isStaticTransitStop(current) ? <StaticStopDetails key={listedKey(current)} stop={current} /> : <StopArrivals key={listedKey(current)} stop={current} groupLabel={grouped ? current.name : undefined} /> : !waiting && !failed && (stops.length > 0 || !query) ? <div className={css.placeholder}><span aria-hidden="true">→</span><h3>選好站牌，再確認方向</h3><p>點選站牌，查看路線資料與步行導航；有接通動態資料的站牌會顯示到站預估。</p></div> : null}
     </div>
   );
 }
@@ -384,7 +266,10 @@ function TransitExplorerContent({ schoolId, schoolName, legacy }: { schoolId: st
   const [city, setCity] = useState<TransitCity | ''>(campus?.city ?? preferredTransitCity(schoolId) ?? '');
   const [radius, setRadius] = useState(600);
   const [term, setTerm] = useState('');
-  const [lookup, setLookup] = useState<{ query: TransitQuery | null; revision: number }>({ query: campus ? { action: 'campus', schoolId } : null, revision: 0 });
+  const [lookup, setLookup] = useState<{ query: TransitQuery | null; revision: number }>({
+    query: campus && !hasCampusNext(schoolId) ? { action: 'campus', schoolId } : null,
+    revision: 0,
+  });
   const [saved, setSaved] = useState<TransitStop[]>([]);
   const [message, setMessage] = useState('');
   const [locating, setLocating] = useState(false);
@@ -402,7 +287,7 @@ function TransitExplorerContent({ schoolId, schoolName, legacy }: { schoolId: st
     setMessage('');
     setMode(next);
     if (next === 'campus' && campus) setCity(campus.city);
-    search(next === 'campus' ? { action: 'campus', schoolId } : null);
+    search(next === 'campus' && campus && !hasCampusNext(schoolId) ? { action: 'campus', schoolId } : null);
   }
   function locate() {
     const current = ++generation.current;
@@ -439,28 +324,32 @@ function TransitExplorerContent({ schoolId, schoolName, legacy }: { schoolId: st
     try { localStorage.setItem(SAVED_KEY, JSON.stringify(next)); setMessage(existing ? '已取消收藏。' : '已收藏在這個瀏覽器；不會儲存你目前的位置。'); }
     catch { setMessage('瀏覽器不允許儲存，這次收藏僅在目前頁面有效。'); }
   }
-  return <div className={`${css.explorer}${hasCampusNext(schoolId) && mode === 'campus' ? ` ${css.campusFirst}` : ''}`}>
-    {!(hasCampusNext(schoolId) && mode === 'campus') && <header className={css.intro}><div><p className={css.eyebrow}>公車與交通</p><h2>找到上車站牌</h2><p>先找上車地點，再確認路線和方向。沒有開啟定位，也能查詢。</p></div></header>}
+  const board = hasCampusNext(schoolId) && mode === 'campus';
+  return <div className={`${css.explorer}${board ? ` ${css.campusFirst}` : ''}`}>
+    {board && <CampusBusBoard schoolId={schoolId} schoolName={schoolName} />}
+    {!board && <header className={css.intro}><div><p className={css.eyebrow}>公車與交通</p><h2>找到上車站牌</h2><p>先找上車地點，再確認路線和方向。沒有開啟定位，也能查詢。</p></div></header>}
     <div className={css.modeBar} role="group" aria-label="站牌查詢方式">
       {campus && <button type="button" aria-pressed={mode === 'campus'} onClick={() => switchMode('campus')}>學校站牌</button>}
       <button type="button" aria-pressed={mode === 'nearby'} onClick={() => switchMode('nearby')}>找我附近</button>
       <button type="button" aria-pressed={mode === 'search'} onClick={() => switchMode('search')}>搜尋站名</button>
       <button type="button" aria-pressed={mode === 'saved'} onClick={() => switchMode('saved')}>常用站牌{saved.length > 0 ? ` ${saved.length}` : ''}</button>
     </div>
-    <div className={css.controls}>
-      {mode === 'campus' && <p className={css.scope}><strong>{schoolName}</strong> · 尋找名稱含「{campus?.stopName}」的站牌，不需要先記住路線號碼。</p>}
-      {(mode === 'nearby' || mode === 'search') && <label>查詢縣市<select value={city} onChange={(event) => {
-        if (!isCity(event.target.value)) return;
-        generation.current += 1; setLocating(false); setCity(event.target.value); setMessage(''); search(null);
-      }}><option value="" disabled>請先選擇縣市</option>{Object.entries(TRANSIT_CITIES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
-      {mode === 'nearby' && <><label>搜尋半徑<select value={radius} onChange={(event) => { generation.current += 1; setLocating(false); setRadius(Number(event.target.value)); search(null); }}><option value={300}>300 公尺</option><option value={600}>600 公尺</option><option value={1000}>1 公里</option></select></label><button type="button" className={css.primary} disabled={locating} onClick={locate}>{locating ? '正在取得位置…' : '使用我的位置'}</button></>}
-      {mode === 'search' && <form className={css.searchForm} onSubmit={(event) => { event.preventDefault(); if (term.trim().length < 2) { setMessage('請輸入至少兩個字的站名。'); return; } if (!isCity(city)) { setMessage('請先選擇要查詢的縣市。'); return; } setMessage(''); search({ action: 'search', city, text: term.trim() }); }}><label>站名或學校名稱<input type="search" value={term} maxLength={40} minLength={2} required placeholder="例如 靜宜大學、臺中車站" onChange={(event) => setTerm(event.target.value)} /></label><button type="submit" className={css.primary}>尋找站牌</button></form>}
-      {mode === 'saved' && <p className={css.scope}>收藏只保存在目前瀏覽器。清除瀏覽器資料後，收藏也會移除。</p>}
-    </div>
-    {(mode === 'nearby' || mode === 'search') && <p className={css.privacy}>縣市僅決定查詢範圍；同一大學若有跨縣市校區，請切換到實際搭車地點的縣市。</p>}
-    {mode === 'nearby' && <p className={css.privacy}>只查詢所選縣市。定位僅在你按下按鈕後使用，不會寫入個人檔案；不會持續追蹤。跨縣市旅行時請切換查詢縣市。</p>}
-    {message && <p className={css.message} role="status">{message}</p>}
-    {lookup.query || mode === 'saved' ? <StopResults key={`${mode}:${lookup.revision}`} query={lookup.query} saved={saved} toggleSaved={toggleSaved} campusNextSchoolId={hasCampusNext(schoolId) && mode === 'campus' ? schoolId : undefined} /> : <p className={css.empty}>{locating ? '正在取得你的位置；也可以切回學校站牌，不需等待定位。' : mode === 'nearby' ? '選好縣市與範圍後，按「使用我的位置」查詢。' : '輸入站名後按搜尋，不會在每次打字時傳送查詢。'}</p>}
+    {!board && <>
+      <div className={css.controls}>
+        {mode === 'campus' && <p className={css.scope}><strong>{schoolName}</strong> · 尋找名稱含「{campus?.stopName}」的站牌，不需要先記住路線號碼。</p>}
+        {(mode === 'nearby' || mode === 'search') && <label>查詢縣市<select value={city} onChange={(event) => {
+          if (!isCity(event.target.value)) return;
+          generation.current += 1; setLocating(false); setCity(event.target.value); setMessage(''); search(null);
+        }}><option value="" disabled>請先選擇縣市</option>{Object.entries(TRANSIT_CITIES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
+        {mode === 'nearby' && <><label>搜尋半徑<select value={radius} onChange={(event) => { generation.current += 1; setLocating(false); setRadius(Number(event.target.value)); search(null); }}><option value={300}>300 公尺</option><option value={600}>600 公尺</option><option value={1000}>1 公里</option></select></label><button type="button" className={css.primary} disabled={locating} onClick={locate}>{locating ? '正在取得位置…' : '使用我的位置'}</button></>}
+        {mode === 'search' && <form className={css.searchForm} onSubmit={(event) => { event.preventDefault(); if (term.trim().length < 2) { setMessage('請輸入至少兩個字的站名。'); return; } if (!isCity(city)) { setMessage('請先選擇要查詢的縣市。'); return; } setMessage(''); search({ action: 'search', city, text: term.trim() }); }}><label>站名或學校名稱<input type="search" value={term} maxLength={40} minLength={2} required placeholder="例如 靜宜大學、臺中車站" onChange={(event) => setTerm(event.target.value)} /></label><button type="submit" className={css.primary}>尋找站牌</button></form>}
+        {mode === 'saved' && <p className={css.scope}>收藏只保存在目前瀏覽器。清除瀏覽器資料後，收藏也會移除。</p>}
+      </div>
+      {(mode === 'nearby' || mode === 'search') && <p className={css.privacy}>縣市僅決定查詢範圍；同一大學若有跨縣市校區，請切換到實際搭車地點的縣市。</p>}
+      {mode === 'nearby' && <p className={css.privacy}>只查詢所選縣市。定位僅在你按下按鈕後使用，不會寫入個人檔案；不會持續追蹤。跨縣市旅行時請切換查詢縣市。</p>}
+      {message && <p className={css.message} role="status">{message}</p>}
+      {lookup.query || mode === 'saved' ? <StopResults key={`${mode}:${lookup.revision}`} query={lookup.query} saved={saved} toggleSaved={toggleSaved} /> : <p className={css.empty}>{locating ? '正在取得你的位置；也可以切回學校站牌，不需等待定位。' : mode === 'nearby' ? '選好縣市與範圍後，按「使用我的位置」查詢。' : '輸入站名後按搜尋，不會在每次打字時傳送查詢。'}</p>}
+    </>}
     <footer className={css.footer}><a href={city === 'Taichung' ? TAICHUNG_BUS_URL : 'https://www.taiwanbus.tw/'} target="_blank" rel="noopener noreferrer">官方公車網站 ↗</a></footer>
     {legacy && <details className={css.legacy}><summary>已登錄校園路線 · 備用查詢</summary>{legacy}</details>}
   </div>;

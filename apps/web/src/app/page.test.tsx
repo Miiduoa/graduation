@@ -177,7 +177,7 @@ it('does not tell a teacher they have no homework and opens the teaching course 
     unreadCount: 0,
   });
   render(<HomePage />);
-  expect(await screen.findByRole('heading', { name: '今天的教學' })).toBeTruthy();
+  expect(await screen.findByRole('link', { name: /查看授課課程/ })).toBeTruthy();
   expect(screen.getByRole('link', { name: /查看授課課程/ }).getAttribute('href')).toBe(
     '#teaching-courses',
   );
@@ -240,7 +240,7 @@ it('keeps public campus entries usable when the course session is unavailable', 
   render(<HomePage />);
   expect(screen.getByRole('alert')).toBeTruthy();
   expect(screen.getByRole('link', { name: /校園地圖/ }).getAttribute('href')).toBe('/map');
-  expect(screen.getByRole('link', { name: /公車資訊/ }).getAttribute('href')).toBe('/bus');
+  expect(screen.getByRole('link', { name: /校門口公車/ }).getAttribute('href')).toBe('/bus');
   expect(screen.getByRole('link', { name: /公開公告/ }).getAttribute('href')).toBe(
     '/announcements',
   );
@@ -252,7 +252,7 @@ it('lets a guest browse before signing in and never loads personal courses', () 
   render(<HomePage />);
   const bus = screen.getByTestId('home-bus-entry');
   expect(bus.textContent).toContain('校門口公車');
-  expect(screen.getByRole('link', { name: /看全部/ }).getAttribute('href')).toBe('/bus');
+  expect(screen.getByRole('link', { name: /校門口公車/ }).getAttribute('href')).toBe('/bus');
   expect(screen.queryByText('162、301、368、326')).toBeNull();
   expect(screen.getByRole('link', { name: '先瀏覽校園資訊' }).getAttribute('href')).toBe(
     '#public-services',
@@ -268,7 +268,7 @@ it('lets a guest browse before signing in and never loads personal courses', () 
   expect(screen.queryByText(SENSE_EMPTY_TEXT)).toBeNull();
 });
 
-it('shows the two soonest campus-gate buses on the home card with the same row style', async () => {
+it('shows the fastest campus-gate bus on one home row', async () => {
   state.uid = null;
   const now = new Date().toISOString();
   vi.mocked(queryTransit).mockResolvedValue({
@@ -280,13 +280,10 @@ it('shows the two soonest campus-gate buses on the home card with the same row s
     ],
   });
   render(<HomePage />);
-  expect(await screen.findByText('3 分')).toBeTruthy();
-  expect(screen.getByText(/表定 \d{1,2}:\d{2}/)).toBeTruthy();
-  expect(screen.getByText('往 沙鹿火車站')).toBeTruthy();
-  expect(screen.getByText('往 台中車站')).toBeTruthy();
+  expect(await screen.findByText(/162 往沙鹿 3 分/)).toBeTruthy();
   expect(screen.queryByText('沒有班次')).toBeNull();
   expect(screen.queryByText('暫時沒資料')).toBeNull();
-  expect(screen.getByRole('link', { name: /看全部/ }).getAttribute('href')).toBe('/bus');
+  expect(screen.getByRole('link', { name: /校門口公車/ }).getAttribute('href')).toBe('/bus');
 });
 
 it('revalidates an expired course session before retrying with the new account context', async () => {

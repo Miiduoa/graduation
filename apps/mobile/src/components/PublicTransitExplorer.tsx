@@ -34,7 +34,7 @@ function CatalogStop({ stop, openLink }: { stop: PublicBusStop; openLink: (url: 
   return (
     <AICard title={stop.name + ' · 經過路線'}>
       <View style={{ gap: theme.space.sm }}>
-        <Text style={body}>即時到站尚未接通</Text>
+        <Text style={body}>班次時間請至官方網站確認</Text>
         <Text style={body}>
           臺中市政府交通局 · 站牌資料快照：{stop.catalogDate ? new Date(stop.catalogDate).toLocaleDateString('zh-TW', {
             timeZone: 'Asia/Taipei',

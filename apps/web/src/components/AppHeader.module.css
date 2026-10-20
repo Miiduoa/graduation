@@ -8,7 +8,7 @@
   max-width: 360px;
   font-size: 13px;
 }
-.account > :first-child {
+.account > details {
   flex-basis: 100%;
 }
 @media (max-width: 760px) {
@@ -18,7 +18,7 @@
     flex-basis: 100%;
     justify-content: flex-start;
   }
-  .account > :first-child {
+  .account > details {
     flex-basis: auto;
     flex-grow: 1;
   }

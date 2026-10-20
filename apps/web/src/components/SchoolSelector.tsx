@@ -7,7 +7,7 @@ import { Button } from './ui/Button';
 import { Input, Select } from './ui/Input';
 import styles from './SchoolSelector.module.css';
 
-export function SchoolSelector({ compact = false }: { compact?: boolean }) {
+export function SchoolSelector({ compact = false, variant = 'browse' }: { compact?: boolean; variant?: 'browse' | 'name' }) {
   const selection = useSelectedSchool();
   const [query, setQuery] = useState('');
   const menu = useRef<HTMLDetailsElement>(null);
@@ -114,8 +114,10 @@ export function SchoolSelector({ compact = false }: { compact?: boolean }) {
         }
       }}
     >
-      <summary>
-        瀏覽校園：{selection.selectedSchool?.shortName || selection.selectedSchool?.name || '不限校園'}
+      <summary className={variant === 'name' ? styles.compactName : undefined} aria-label={variant === 'name' ? '切換校園' : undefined}>
+        {variant === 'name'
+          ? (selection.selectedSchool?.name || '不限校園')
+          : `瀏覽校園：${selection.selectedSchool?.shortName || selection.selectedSchool?.name || '不限校園'}`}
         {selection.selectedSchool?.status === 'not-open' ? '（校務尚未開通）' : ''}
       </summary>
       <div className={styles.popover}>{content}</div>

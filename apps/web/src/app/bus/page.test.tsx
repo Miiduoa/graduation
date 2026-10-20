@@ -64,7 +64,7 @@ it('keeps the selected campus in the registered-routes deep link', () => {
 it('keeps official transit access visible even before a campus is selected', () => {
   navigation.query = '?campus=all';
   render(<BusPage />);
-  expect(screen.getByRole('heading', { name: '臺中站牌可查詢，即時到站尚未接通' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '臺中站牌可查詢，班次時間請至官方網站確認' })).toBeTruthy();
   expect(screen.getByRole('link', { name: '臺中市官方公車查詢 ↗' }).getAttribute('href')).toBe('https://citybus.taichung.gov.tw/');
   expect(screen.getByRole('link', { name: '其他縣市與公路客運查詢 ↗' }).getAttribute('href')).toBe('https://www.taiwanbus.tw/');
   expect(screen.getByTestId('bus-school').textContent).toBe('pu');
@@ -80,7 +80,7 @@ it.each([
   vi.stubEnv('TDX_CLIENT_ID', clientId);
   vi.stubEnv('TDX_CLIENT_SECRET', clientSecret);
   render(<BusPage />);
-  expect(screen.queryByRole('heading', { name: '臺中站牌可查詢，即時到站尚未接通' })).toBeNull();
+  expect(screen.queryByRole('heading', { name: '臺中站牌可查詢，班次時間請至官方網站確認' })).toBeNull();
   expect(document.body.textContent).not.toContain('configured-secret');
   expect(document.body.textContent).not.toContain('configured-id');
 });

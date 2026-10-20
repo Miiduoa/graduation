@@ -185,6 +185,7 @@ test('links profile requires real server notice and exact official destination r
   }
   assert.equal(verifyOfficialNotice(officialNotice.replace('https://citybus-free.taichung.gov.tw/','https://citybus.taichung.gov.tw/')),'https://citybus.taichung.gov.tw/');
   assert.equal(hasBusShell('<div>data-campus-bus-shell="true" 公車與交通</div>'),false);
+  assert.equal(hasBusShell('<div data-campus-bus-shell="true">往沙鹿</div>'),true);
 });
 test('remote profile reports cannot be confused or persist arbitrary provider content',()=>{
   const links={ready:true,profile:linksProfile,mode:'official-links',transitReady:false,credentialsAbsent:true,reason:'not-configured',privateDetail:'must-not-persist'};
@@ -205,7 +206,7 @@ test('remote source executes the chosen links profile without loading local envi
 const catalogProfile='static-catalog';
 const catalogStop={...stop,id:'TCOD_1',source:'taichung-open-data',catalogDate:stamp,distance:null,
   routes:[{name:'300',direction:'去',destination:'靜宜大學'}]};
-const catalogNotice='<aside data-transit-mode="static-catalog">臺中站牌可查詢，即時到站尚未接通<a href="https://citybus.taichung.gov.tw/">臺中市官方公車查詢</a></aside>';
+const catalogNotice='<aside data-transit-mode="static-catalog">臺中站牌可查詢，班次時間請至官方網站確認<a href="https://citybus.taichung.gov.tw/">臺中市官方公車查詢</a></aside>';
 function catalogPublic({stops=[catalogStop],notice=catalogNotice,arrivals={status:'unavailable',reason:'not-configured'},arrivalStatus=503,wrongNearby=false,fetchedAt=stamp}={}) {
   return async(url,init)=>{
     assert.equal(new URL(url).origin,ORIGIN);
