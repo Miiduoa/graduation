@@ -51,6 +51,7 @@ import {
   clearPersonalImportDraft,
   readPersonalImportDraft,
   writePersonalImportDraft,
+  type PersonalImportDraft,
 } from '@/lib/personalImportDrafts';
 import { recognizePersonalImportImage } from '@/lib/personalImportOcr';
 import styles from './PersonalImport.module.css';
@@ -378,6 +379,8 @@ function ImportWorkspace({
   const [rows, setRows] = useState<PersonalImportRow[]>([]);
   const [backup, setBackup] = useState<Omit<PersonalImportBackupPreview, 'rows'> | null>(null);
   const [importDocument, setDocument] = useState<PersonalImportDocument | null>(null);
+  const [hasDocumentFile, setHasDocumentFile] = useState(false);
+  const [documentSelection, setDocumentSelection] = useState<PersonalImportDraft['documentSelection']>(null);
   const [documentVersion, setDocumentVersion] = useState(0);
   const [reviewPage, setReviewPage] = useState(0);
   const [excluded, setExcluded] = useState<string[]>([]);
@@ -406,6 +409,7 @@ function ImportWorkspace({
   const active = useRef(true);
   const writing = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const pdfInput = useRef<HTMLInputElement>(null);
   const review = useRef<HTMLElement>(null);
   const undoKeep = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -426,9 +430,13 @@ function ImportWorkspace({
         setExcluded(draft.excluded);
         setParseIssues(draft.parseIssues);
         setBackup(draft.backup);
+        setDocument(draft.document ?? null);
+        setDocumentSelection(draft.documentSelection ?? null);
         setNotice(
           '已找回這個分頁尚未匯入的草稿，請繼續核對。' +
-            (draft.source.type === 'screenshot' ? '原始圖片未暫存，需開啟原圖對照。' : ''),
+            (draft.document
+              ? '文件文字與選取內容已保留；重新辨識時請再選擇原始檔案。'
+              : draft.source.type === 'screenshot' ? '原始圖片未暫存，需開啟原圖對照。' : ''),
         );
       }
     } catch (error) {
@@ -458,6 +466,8 @@ function ImportWorkspace({
         excluded,
         parseIssues,
         backup,
+        document: importDocument,
+        documentSelection,
       });
       setDraftStorageError('');
     } catch (error) {
@@ -477,16 +487,18 @@ function ImportWorkspace({
     excluded,
     parseIssues,
     backup,
+    importDocument,
+    documentSelection,
   ]);
   useEffect(() => {
-    if (!draftStorageError || (!text && !rows.length)) return;
+    if (!draftStorageError || (!text && !rows.length && !importDocument)) return;
     const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', warnBeforeLeaving);
     return () => window.removeEventListener('beforeunload', warnBeforeLeaving);
-  }, [draftStorageError, text, rows.length]);
+  }, [draftStorageError, text, rows.length, importDocument]);
   useEffect(
     () => () => {
       if (preview) URL.revokeObjectURL(preview);
@@ -600,7 +612,9 @@ function ImportWorkspace({
         const document = await readPersonalImportDocumentFile(file, controller.signal, { pdfMode });
         if (!active.current || suspended.current || controller.signal.aborted) return;
         documentFile.current = file;
+        setHasDocumentFile(true);
         setDocument(document);
+        setDocumentSelection(null);
         setDocumentVersion((current) => current + 1);
         setNotice('文件已讀取，請選擇內容與標題列。');
         return;
@@ -666,6 +680,10 @@ function ImportWorkspace({
       setText('');
       setSource({ type: 'paste' });
       setBackup(null);
+      setDocument(null);
+      setDocumentSelection(null);
+      documentFile.current = null;
+      setHasDocumentFile(false);
       setExcluded([]);
       setParseIssues([]);
       setReviewPage(0);
@@ -827,13 +845,13 @@ function ImportWorkspace({
           {ledger.error}
         </p>
       )}
-      {(text || rows.length > 0 || draftStorageError) && (
+      {(text || rows.length > 0 || importDocument || draftStorageError) && (
         <section className={styles.notice} aria-label="匯入草稿暫存">
           {draftStorageError ? (
             <p role="alert">{draftStorageError}</p>
           ) : (
             <p>
-              草稿已暫存在這個分頁，重新整理或離開後回來可繼續核對。關閉分頁可能清除暫存；圖片不會暫存，確認匯入後才會加入個人紀錄。
+              草稿已暫存在這個分頁，重新整理或離開後回來可繼續核對。關閉分頁可能清除暫存；只保留文字與選取內容，原始圖片與檔案不會暫存。確認匯入後才會加入個人紀錄。
             </p>
           )}
           {confirmDiscard ? (
@@ -1013,10 +1031,24 @@ function ImportWorkspace({
           {importDocument.format === 'pdf' && (
             <div className={styles.panel}>
               <p>預覽只有標題，或表格文字不完整？可以重新辨識整頁，再核對一次。</p>
+              {!hasDocumentFile && <p>請重新選擇原始 PDF，辨識完成前會保留目前的預覽。</p>}
+              <input
+                ref={pdfInput}
+                type="file"
+                accept=".pdf,application/pdf"
+                className={styles.file}
+                aria-label="重新選擇原始 PDF"
+                onChange={(event) => {
+                  void readFile(event.target.files?.[0], 'ocr');
+                  event.target.value = '';
+                }}
+              />
               <button
                 type="button"
                 className="btn"
-                onClick={() => void readFile(documentFile.current ?? undefined, 'ocr')}
+                onClick={() => documentFile.current
+                  ? void readFile(documentFile.current, 'ocr')
+                  : pdfInput.current?.click()}
               >
                 重新辨識 PDF 整頁
               </button>
@@ -1025,10 +1057,14 @@ function ImportWorkspace({
           <DocumentSelection
             key={documentVersion}
             document={importDocument}
+            initialSelection={documentSelection}
+            onSelectionChange={setDocumentSelection}
             options={options}
             onCancel={() => {
               documentFile.current = null;
+              setHasDocumentFile(false);
               setDocument(null);
+              setDocumentSelection(null);
               setNotice('已取消這份文件，個人紀錄沒有改變。');
             }}
             onConfirm={(nextRows, issues) => {
@@ -1053,7 +1089,9 @@ function ImportWorkspace({
               setText('');
               setPreview('');
               documentFile.current = null;
+              setHasDocumentFile(false);
               setDocument(null);
+              setDocumentSelection(null);
               setNotice(
                 `${personalImportPreviewNotice(nextRows.length)}${[...new Set(issues.filter((issue) => issue.severity === 'warning').map((issue) => issue.message))].join(' ')}`,
               );

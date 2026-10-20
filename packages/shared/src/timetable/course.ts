@@ -23,6 +23,15 @@ export type TimetableMeta = {
   title: string;
 };
 
+/** Only suppress an imported/manual duplicate when every displayed detail agrees. */
+export function samePersonalCourse(left: PersonalCourse, right: PersonalCourse): boolean {
+  const text = (value: string) => value.trim().normalize('NFKC');
+  return left.day === right.day && left.start === right.start && left.end === right.end &&
+    text(left.name) === text(right.name) &&
+    text(left.teacher) === text(right.teacher) &&
+    text(left.room) === text(right.room);
+}
+
 const COLOR_SET = new Set<string>(COURSE_COLORS);
 
 function cleanText(value: unknown, max = 100): string {

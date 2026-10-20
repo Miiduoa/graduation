@@ -9,6 +9,7 @@ import {
   periodCount,
   periodProfileForSchool,
   personalTimetableTerms,
+  samePersonalCourse,
   SchedulePlanner,
   studySlots,
   WEEKDAY_LABELS,
@@ -158,7 +159,10 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
     !terms.length || activeTerm === 'manual' || legacyTerm === activeTerm
       ? timetable?.courses || []
       : [];
-  const visibleCourses = [...legacyCourses, ...importedCourses];
+  const visibleCourses = [
+    ...legacyCourses,
+    ...importedCourses.filter((course) => !legacyCourses.some((manual) => samePersonalCourse(manual, course))),
+  ];
   const missingImportTimes = imported.records.filter((row) =>
     row.kind === 'timetable' &&
     row.schoolId === schoolId &&

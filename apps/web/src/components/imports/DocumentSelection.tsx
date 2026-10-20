@@ -14,18 +14,22 @@ import styles from './PersonalImport.module.css';
 export function DocumentSelection({
   document,
   options,
+  initialSelection,
+  onSelectionChange,
   onConfirm,
   onCancel,
 }: {
   document: PersonalImportDocument;
   options: PersonalImportOptions;
+  initialSelection?: { selected: string[]; headers: Record<string, number> } | null;
+  onSelectionChange?: (selection: { selected: string[]; headers: Record<string, number> }) => void;
   onConfirm: (rows: PersonalImportRow[], issues: ImportIssue[]) => void;
   onCancel: () => void;
 }) {
   const first = document.sections.find((section) => !section.needsOcr && section.rows.length);
-  const [selected, setSelected] = useState<string[]>(first ? [first.id] : []);
+  const [selected, setSelected] = useState<string[]>(initialSelection?.selected ?? (first ? [first.id] : []));
   const [headers, setHeaders] = useState<Record<string, number>>(() =>
-    Object.fromEntries(
+    initialSelection?.headers ?? Object.fromEntries(
       document.sections.map((section) => [section.id, section.rows[0]?.line ?? 1]),
     ),
   );
@@ -49,13 +53,13 @@ export function DocumentSelection({
               type="checkbox"
               checked={selected.includes(section.id)}
               disabled={section.needsOcr || !section.rows.length}
-              onChange={(event) =>
-                setSelected((current) =>
-                  event.target.checked
-                    ? [...current, section.id]
-                    : current.filter((id) => id !== section.id),
-                )
-              }
+              onChange={(event) => {
+                const next = event.target.checked
+                  ? [...selected, section.id]
+                  : selected.filter((id) => id !== section.id);
+                setSelected(next);
+                onSelectionChange?.({ selected: next, headers });
+              }}
             />
             {section.label} · {section.rows.length} 列
           </label>
@@ -69,12 +73,14 @@ export function DocumentSelection({
                 「{section.label}」的標題列
                 <select
                   value={headers[section.id]}
-                  onChange={(event) =>
-                    setHeaders((current) => ({
-                      ...current,
+                  onChange={(event) => {
+                    const next = {
+                      ...headers,
                       [section.id]: Number(event.target.value),
-                    }))
-                  }
+                    };
+                    setHeaders(next);
+                    onSelectionChange?.({ selected, headers: next });
+                  }}
                 >
                   {section.rows.map((row) => (
                     <option key={row.line} value={row.line}>

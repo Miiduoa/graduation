@@ -37,6 +37,16 @@ it('retains an incomplete manual row so required fields can be completed after r
   expect(readPersonalImportDraft(scope)).toEqual(input);
 });
 
+it('counts multibyte text toward the 8 MiB limit and preserves the previous draft on failure', () => {
+  const input = draft();
+  writePersonalImportDraft(scope, input);
+  const key = personalImportDraftKey(scope);
+  const previous = sessionStorage.getItem(key);
+  input.text = '課'.repeat(3 * 1024 * 1024);
+  expect(() => writePersonalImportDraft(scope, input)).toThrow('草稿暫存沒有成功');
+  expect(sessionStorage.getItem(key)).toBe(previous);
+});
+
 it.each([
   (input: PersonalImportDraft) => {
     input.rows[0].schoolId = 'ntu';
@@ -77,3 +87,30 @@ it('keeps backup restore mode and proposed links across recovery', () => {
   writePersonalImportDraft(scope, input);
   expect(readPersonalImportDraft(scope)?.backup).toEqual(input.backup);
 });
+
+it.each(['invalid-document', 'unknown-section', 'missing-header', 'unknown-header'])(
+  'retains the original draft when document selection is corrupt: %s',
+  (damage) => {
+    const input = draft();
+    input.rows = [];
+    input.document = {
+      name: 'grades.xlsx',
+      format: 'xlsx',
+      warnings: [],
+      sections: [{
+        id: 'sheet-1', label: '成績', needsOcr: false, warnings: [],
+        rows: [{ line: 1, cells: ['課程名稱', '學分', '成績'] }],
+      }],
+    };
+    input.documentSelection = { selected: ['sheet-1'], headers: { 'sheet-1': 1 } };
+    if (damage === 'invalid-document') input.document.sections[0].rows[0].cells = [null as never];
+    if (damage === 'unknown-section') input.documentSelection.selected = ['sheet-2'];
+    if (damage === 'missing-header') input.documentSelection.headers = {};
+    if (damage === 'unknown-header') input.documentSelection.headers['sheet-1'] = 9;
+    const raw = JSON.stringify({ version: 1, draft: input });
+    const key = personalImportDraftKey(scope);
+    sessionStorage.setItem(key, raw);
+    expect(() => readPersonalImportDraft(scope)).toThrow('上次的暫存草稿無法還原');
+    expect(sessionStorage.getItem(key)).toBe(raw);
+  },
+);

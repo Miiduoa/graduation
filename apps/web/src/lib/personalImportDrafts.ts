@@ -3,10 +3,12 @@
 import type {
   ImportIssue,
   PersonalImportBackupPreview,
+  PersonalImportDocument,
   PersonalImportKind,
   PersonalImportRow,
   PersonalImportSource,
 } from '@campus/shared';
+import { validatePersonalImportDocument } from '@campus/shared';
 import { personalImportsStorageKey, type PersonalImportScope } from './personalImports';
 
 export type PersonalImportDraft = {
@@ -19,10 +21,14 @@ export type PersonalImportDraft = {
   excluded: string[];
   parseIssues: ImportIssue[];
   backup: Omit<PersonalImportBackupPreview, 'rows'> | null;
+  document?: PersonalImportDocument | null;
+  documentSelection?: { selected: string[]; headers: Record<string, number> } | null;
 };
 
 const KINDS = ['timetable', 'grades', 'events'];
-const MAX_LENGTH = 8 * 1024 * 1024;
+const MAX_BYTES = 8 * 1024 * 1024;
+const tooLarge = (text: string) =>
+  text.length > MAX_BYTES || new TextEncoder().encode(text).byteLength > MAX_BYTES;
 const object = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
 const string = (value: unknown): value is string => typeof value === 'string';
@@ -121,6 +127,39 @@ function validDraft(value: unknown, schoolId: string): value is PersonalImportDr
     )
       return false;
   }
+  if (value.document != null) {
+    let document: PersonalImportDocument;
+    try {
+      document = validatePersonalImportDocument(value.document);
+    } catch {
+      return false;
+    }
+    if (value.rows.length || value.backup) return false;
+    const selection = value.documentSelection;
+    if (selection != null) {
+      if (
+        !object(selection) ||
+        !Array.isArray(selection.selected) ||
+        !selection.selected.every(string) ||
+        new Set(selection.selected).size !== selection.selected.length ||
+        !object(selection.headers)
+      ) return false;
+      const headers = selection.headers;
+      for (const id of selection.selected) {
+        const section = document.sections.find((item) => item.id === id);
+        if (!section || section.needsOcr || !section.rows.length) return false;
+      }
+      for (const [id, line] of Object.entries(headers)) {
+        const section = document.sections.find((item) => item.id === id);
+        if (!section || !Number.isSafeInteger(line) ||
+          (section.rows.length ? !section.rows.some((row) => row.line === line) : line !== 1))
+          return false;
+      }
+      if (!selection.selected.every((id) => id in headers)) return false;
+    }
+  } else if (value.documentSelection != null) {
+    return false;
+  }
   return true;
 }
 
@@ -133,7 +172,7 @@ export function readPersonalImportDraft(scope: PersonalImportScope): PersonalImp
   }
   if (!raw) return null;
   try {
-    if (raw.length > MAX_LENGTH) throw new Error();
+    if (tooLarge(raw)) throw new Error();
     const saved: unknown = JSON.parse(raw);
     if (!object(saved) || saved.version !== 1 || !validDraft(saved.draft, scope.schoolId))
       throw new Error();
@@ -147,12 +186,12 @@ export function readPersonalImportDraft(scope: PersonalImportScope): PersonalImp
 
 export function writePersonalImportDraft(scope: PersonalImportScope, draft: PersonalImportDraft) {
   try {
-    if (!draft.text && !draft.rows.length) {
+    if (!draft.text && !draft.rows.length && !draft.document) {
       sessionStorage.removeItem(personalImportDraftKey(scope));
       return;
     }
     const content = JSON.stringify({ version: 1, draft });
-    if (content.length > MAX_LENGTH) throw new Error();
+    if (tooLarge(content)) throw new Error();
     sessionStorage.setItem(personalImportDraftKey(scope), content);
   } catch {
     throw new Error('草稿暫存沒有成功。內容仍在本頁，請完成匯入或另存原始文字後再離開。');
