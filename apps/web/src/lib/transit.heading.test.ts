@@ -154,3 +154,18 @@ it('keeps a direction’s rows when switching segments and marks a fully ended d
   const scheduledOnly = campusSegmentRows([arrivals[1]], '校門口・往沙鹿', now);
   expect(campusLiveUnavailable(scheduledOnly, now)).toBe(true);
 });
+
+it('does not list other 專用道 stops such as 市政府 in any campus segment or home', () => {
+  const cityHall = arrival({
+    id: 'city-301', route: '301', seconds: 60, destination: '沙鹿火車站', stopName: '市政府(專用道)',
+  });
+  const gate = arrival({
+    id: 'gate-162', route: '162', seconds: 180, destination: '沙鹿火車站', stopName: '靜宜大學(校門)',
+  });
+  expect(campusSegmentRows([cityHall, gate], '校門口・往沙鹿', now).map((row) => row.route)).toEqual(['162']);
+  expect(campusSegmentRows([cityHall], '專用道', now)).toEqual([]);
+  expect(campusSegmentRows([cityHall], '校門口・往市區', now)).toEqual([]);
+  const home = pickCampusNext([cityHall, gate], now, ['162', '301', '368', '326']);
+  expect(home.find((row) => row.route === '301')?.arrival).toBeNull();
+  expect(campusHomeSummary(home, now)).toBe('162 往沙鹿 3 分');
+});

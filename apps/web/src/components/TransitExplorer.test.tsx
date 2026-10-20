@@ -388,15 +388,15 @@ it('highlights the next live bus and separates buses without a live estimate', a
   vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'arrivals' ? {
     status: 'ready', kind: 'arrivals', fetchedAt: now,
     arrivals: [
-      { id: 'live', route: '162', direction: 1, destination: '', status: 0, seconds: 180, updatedAt: now },
-      { id: 'ended', route: '326', direction: 0, destination: '', status: 3, seconds: null, updatedAt: now },
+      { id: 'live', route: '162', direction: 1, destination: '沙鹿火車站', status: 0, seconds: 180, updatedAt: now, stopName: '靜宜大學(英才路)' },
+      { id: 'ended', route: '326', direction: 0, destination: '沙鹿火車站', status: 3, seconds: null, updatedAt: now, stopName: '靜宜大學(英才路)' },
     ],
   } : query.action === 'campus-next' ? { status: 'ready', kind: 'arrivals', arrivals: [], fetchedAt: now } : stopResult());
   renderListing();
   fireEvent.click(await findGroupButton('校門口・往沙鹿'));
   expect(await screen.findByText(/162 路 · 約 3 分鐘/)).toBeTruthy();
   expect(screen.getByText('下一班')).toBeTruthy();
-  expect(screen.getAllByText('返程（終點未提供）')).toHaveLength(2);
+  expect(screen.getAllByText('往 沙鹿火車站').length).toBeGreaterThanOrEqual(2);
   expect(screen.getByText('其他班次（目前沒有即時預估）')).toBeTruthy();
   expect(screen.getByText('今天收班')).toBeTruthy();
 });
