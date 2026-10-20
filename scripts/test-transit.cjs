@@ -317,3 +317,86 @@ test('POST enforces content type, cross-site rejection, malformed JSON and a bou
   assert.equal(invalid.status, 400);
   assert.equal(invalid.headers.get('cache-control'), 'private, no-store');
 });
+
+// 多人同時查與 TDX 限流：共用快取、合併相同請求，被擋時回最近一份並標當時資料時間。
+const etaQuery = (stopId = 'TXG123') => ({ action: 'arrivals', city: 'Taichung', stopId });
+test('concurrent viewers of the same stop share one upstream arrival request', async () => {
+  const mock = service((url) => Response.json(url.includes('/StopOfRoute/') ? [] : [arrival()]));
+  const results = await Promise.all(Array.from({ length: 20 }, () => mock.execute(etaQuery())));
+  assert.equal(results.every((result) => result.status === 'ready' && !result.stale), true);
+  assert.equal(mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/')).length, 1);
+});
+test('a TDX 429 after the cache expires returns the last arrivals with their original time and stale flag', async () => {
+  let limited = false;
+  const mock = service((url) => {
+    if (limited) return new Response('', { status: 429, headers: { 'Retry-After': '60' } });
+    return Response.json(url.includes('/StopOfRoute/') ? [] : [arrival()]);
+  });
+  const first = await mock.execute(etaQuery());
+  assert.equal(first.fetchedAt, at());
+  limited = true;
+  mock.tick(20_000);
+  const busy = await mock.execute(etaQuery());
+  assert.equal(busy.status, 'ready');
+  assert.equal(busy.stale, true);
+  assert.equal(busy.fetchedAt, at(), 'data time is when TDX was really queried, not now');
+  assert.equal(busy.arrivals[0].updatedAt, at());
+  assert.notEqual(client.arrivalLabel(busy.arrivals[0], NOW + 20_000), '資料待更新');
+  // 90 秒規則維持：保留資料超過來源時間 90 秒就不再顯示倒數。
+  assert.equal(client.arrivalLabel(busy.arrivals[0], NOW + 90_000), '資料待更新');
+  // 封鎖期間不再打 TDX，保護不放寬。
+  const before = mock.calls.length;
+  mock.tick(10_000); await mock.execute(etaQuery());
+  assert.equal(mock.calls.length, before);
+});
+test('own budget exhaustion also falls back to the last good copy, but never invents data for a new stop', async () => {
+  const mock = service((url) => Response.json(url.includes('/StopOfRoute/') ? [] : url.includes('/EstimatedTimeOfArrival/') ? [arrival()] : []));
+  await mock.execute(etaQuery());
+  for (let i = 0; i < 60; i++) await mock.execute({ action: 'search', city: 'Taichung', text: `stop${i}` });
+  mock.tick(20_000);
+  const kept = await mock.execute(etaQuery());
+  assert.equal(kept.status, 'ready'); assert.equal(kept.stale, true);
+  assert.deepEqual(await mock.execute(etaQuery('TXG999')), { status: 'unavailable', reason: 'rate-limited' });
+});
+test('a kept copy older than the retention window is not served', async () => {
+  let limited = false;
+  const mock = service((url) => limited ? new Response('', { status: 429 }) : Response.json(url.includes('/StopOfRoute/') ? [] : [arrival()]));
+  await mock.execute(etaQuery());
+  limited = true;
+  mock.tick(server.TRANSIT_STALE_RETENTION_MS + 1);
+  assert.deepEqual(await mock.execute(etaQuery()), { status: 'unavailable', reason: 'rate-limited' });
+});
+test('more simultaneous different stops than the concurrency cap queue briefly instead of failing', async () => {
+  let running = 0; let peak = 0;
+  const mock = service(async (url) => {
+    running += 1; peak = Math.max(peak, running);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    running -= 1;
+    return Response.json(url.includes('/StopOfRoute/') ? [] : [arrival({ StopUID: new URL(url).searchParams.get('$filter').slice(11, -1) })]);
+  });
+  const stops = Array.from({ length: 8 }, (_, index) => `TXG${200 + index}`);
+  await mock.execute(etaQuery('TXG100')); // 先取得 token
+  const results = await Promise.all(stops.map((id) => mock.execute(etaQuery(id))));
+  assert.equal(results.every((result) => result.status === 'ready'), true);
+  assert.ok(peak <= 4, `peak concurrency ${peak} must stay within the cap`);
+});
+test('a queued request that cannot get a slot in time is reported busy rather than overloading TDX', async () => {
+  const hang = new Promise(() => {});
+  const mock = service((url) => url.includes('/openid-connect/token') ? undefined : hang, { wait: async () => {} });
+  const stuck = Array.from({ length: 4 }, (_, index) => mock.execute(etaQuery(`TXG30${index}`)));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(await mock.execute(etaQuery('TXG399')), { status: 'unavailable', reason: 'rate-limited' });
+  assert.equal(mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/')).length, 4);
+  void stuck;
+});
+test('client keeps the stale marker only when the server sends it', async () => {
+  const original = globalThis.fetch;
+  try {
+    for (const [stale, expected] of [[true, true], [undefined, undefined], ['yes', undefined]]) {
+      globalThis.fetch = async () => Response.json({ status: 'ready', kind: 'arrivals', arrivals: [], fetchedAt: at(), ...(stale === undefined ? {} : { stale }) });
+      const result = await client.queryTransit(etaQuery(), new AbortController().signal);
+      assert.equal(result.stale, expected);
+      assert.equal(result.fetchedAt, at());
+    }
+  } finally { globalThis.fetch = original; }
+});

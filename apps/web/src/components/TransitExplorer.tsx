@@ -139,7 +139,7 @@ function StopArrivals({ stop }: { stop: TransitStop }) {
             <ul className={`${css.arrivalList} ${css.secondaryList}`}>{otherRows.map((row) => renderRow(row, true))}</ul>
           </>}
         </> : <p className={css.empty}>{rows.length ? '沒有符合篩選條件的路線，請清除路線或方向篩選。' : '目前沒有班次預估。這不代表今天沒有公車，請再向官方查詢確認。'}</p>}
-        <p className={css.note}>TDX 提供資料 · 查詢於 {fetchedTime}。每筆預估依來源更新時間判斷，逾時不顯示倒數。</p>
+        <p className={css.note}>{result.stale ? `查詢的人較多，先顯示 ${fetchedTime} 向 TDX 取得的最近一份資料，稍後會自動更新。` : `TDX 提供資料 · 查詢於 ${fetchedTime}。`}每筆預估依來源更新時間判斷，逾時不顯示倒數。</p>
       </>}
     </section>
   );
