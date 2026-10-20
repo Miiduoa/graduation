@@ -1,21 +1,9 @@
 :global([data-campus-bus-shell='true']) .page {
   background: #f7f5f0;
 }
-:global([data-campus-bus-shell='true']) .header {
-  padding: 8px 20px;
-  gap: 12px;
-}
-:global([data-campus-bus-shell='true']) .brand {
-  font-size: 0;
-  gap: 0;
-}
 :global([data-campus-bus-shell='true']) .mark {
-  width: 28px;
-  height: 28px;
-  font-size: 16px;
-}
-:global([data-campus-bus-shell='true']) .mark span {
-  font-size: 10px;
+  align-items: center;
+  overflow: visible;
 }
 :global([data-campus-bus-shell='true']) .nav {
   flex-wrap: nowrap;
@@ -84,14 +72,16 @@
 }
 .mark {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: center;
   width: 36px;
   height: 36px;
+  overflow: visible;
   color: var(--on-brand);
   background: var(--brand);
   border-radius: 8px;
   font-size: 23px;
+  line-height: 1;
 }
 .mark span {
   font-size: 13px;
@@ -667,6 +657,10 @@
   color: var(--soft);
   cursor: pointer;
   padding: 8px 0;
+  list-style: none;
+}
+.menu summary::-webkit-details-marker {
+  display: none;
 }
 .menu summary:focus-visible {
   outline: 3px solid var(--focus-ring);

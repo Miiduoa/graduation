@@ -65,6 +65,9 @@ it('starts with school stops without requesting the user location', async () => 
   expect(screen.getByRole('tab', { name: '往市區' })).toBeTruthy();
   expect(screen.getByRole('tab', { name: '專用道' })).toBeTruthy();
   expect(screen.queryByText(/TXG/)).toBeNull();
+  fireEvent.click(screen.getByRole('tab', { name: '專用道' }));
+  expect(await screen.findByText('暫無班次資訊')).toBeTruthy();
+  expect(screen.getByText('專用道站牌')).toBeTruthy();
 });
 
 it('shows Providence gate routes from campus-next without querying a default stop', async () => {
@@ -77,7 +80,7 @@ it('shows Providence gate routes from campus-next without querying a default sto
           { id: '162', route: '162', direction: 1, destination: '沙鹿火車站', status: 0, seconds: 180, updatedAt: now, stopName: '靜宜大學(英才路)' },
           { id: '301', route: '301', direction: 1, destination: '台中車站', status: 0, seconds: null, updatedAt: now, stopName: '靜宜大學(校門)', scheduledAt: new Date(Date.now() + 12 * 60_000).toISOString() },
           { id: '326', route: '326', direction: 1, destination: '新民高中', status: 3, seconds: null, updatedAt: now, stopName: '靜宜大學' },
-          { id: '368', route: '368', direction: 0, destination: '校內', status: 0, seconds: 600, updatedAt: now, stopName: '靜宜大學(校門)' },
+          { id: '368', route: '368', direction: 0, destination: '主顧聖母堂', status: 0, seconds: 600, updatedAt: now, stopName: '靜宜大學(校門)' },
         ],
       };
     }
@@ -101,8 +104,28 @@ it('shows Providence gate routes from campus-next without querying a default sto
   expect(screen.getByText('今天收班')).toBeTruthy();
   fireEvent.click(screen.getByRole('tab', { name: '往校內' }));
   expect(screen.getByText('10')).toBeTruthy();
+  expect(screen.getByText('往 主顧聖母堂')).toBeTruthy();
+  expect(screen.queryByText('往 校內')).toBeNull();
   expect(vi.mocked(queryTransit).mock.calls.some(([query]) => query.action === 'arrivals')).toBe(false);
   expect(vi.mocked(queryTransit).mock.calls.filter(([query]) => query.action === 'campus-next')).toHaveLength(1);
+});
+
+it('lists BRT arrivals on 專用道 and shows empty copy when that stop has no buses', async () => {
+  const now = new Date().toISOString();
+  vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next' ? {
+    status: 'ready', kind: 'arrivals', fetchedAt: now,
+    arrivals: [
+      { id: '162', route: '162', direction: 1, destination: '沙鹿火車站', status: 0, seconds: 180, updatedAt: now, stopName: '靜宜大學(英才路)' },
+      { id: '300', route: '300', direction: 0, destination: '台中車站', status: 0, seconds: 240, updatedAt: now, stopName: '靜宜大學(專用道)' },
+    ],
+  } : emptyArrivals());
+  renderExplorer();
+  expect(await screen.findByText('往 沙鹿火車站')).toBeTruthy();
+  fireEvent.click(screen.getByRole('tab', { name: '專用道' }));
+  expect(screen.getByText('300')).toBeTruthy();
+  expect(screen.getByText('往 台中車站')).toBeTruthy();
+  expect(screen.getByText('專用道站牌')).toBeTruthy();
+  expect(screen.queryByText('162')).toBeNull();
 });
 
 it('shows live, scheduled, empty and ended rows together on one direction', async () => {

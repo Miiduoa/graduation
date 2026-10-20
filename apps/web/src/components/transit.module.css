@@ -224,9 +224,27 @@
 .campusFirst > .modeBar,
 .campusFirst > .footer,
 .campusFirst > .legacy { margin-top: 28px; }
-.campusFirst > .modeBar { border-bottom: 0; padding: 0 16px 8px; }
-.campusFirst > .modeBar button { color: #5f6b64; }
+.campusFirst > .modeBar {
+  border-bottom: 0;
+  padding: 0 16px 8px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 4px;
+}
+.campusFirst > .modeBar button {
+  color: #5f6b64;
+  flex: 0 0 auto;
+  padding: 10px 8px;
+  white-space: nowrap;
+}
 .campusFirst > .modeBar button[aria-pressed='true'] { background: #2f4a3c; color: #fff; }
+.emptyGroup {
+  margin: 0;
+  padding: 20px 16px;
+  color: var(--bus-faint, #8a938d);
+  font-size: 15px;
+  line-height: 22px;
+}
 .explorer button:disabled { opacity: .55; cursor: not-allowed; }
 .explorer button:focus-visible, .explorer a:focus-visible, .explorer input:focus-visible, .explorer select:focus-visible, .explorer summary:focus-visible { outline: 3px solid var(--focus-ring, #b08930); outline-offset: 3px; }
 .controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px; padding: 24px 0 16px; }
