@@ -76,6 +76,46 @@ test('campus lookup uses the registered school and unknown schools do not silent
   assert.throws(() => server.validateTransitQuery({ action: 'campus', schoolId: 'unknown' }));
   assert.equal(client.isCity('toString'), false);
 });
+test('campus-next is limited to Providence and unknown schools stay invalid', () => {
+  assert.deepEqual(server.validateTransitQuery({ action: 'campus-next', schoolId: 'pu' }), { action: 'campus-next', schoolId: 'pu' });
+  assert.throws(() => server.validateTransitQuery({ action: 'campus-next', schoolId: 'nthu' }));
+  assert.throws(() => server.validateTransitQuery({ action: 'campus-next', schoolId: 'unknown' }));
+});
+test('campus-next uses one arrival query for the four Providence routes and keeps the 15 second cache', async () => {
+  const mock = service((url) => Response.json(url.includes('/StopOfRoute/') ? [] : [
+    arrival({ StopUID: 'TXG-GATE', RouteUID: 'TXG162', RouteName: { Zh_tw: '162' }, StopName: { Zh_tw: '靜宜大學(校門)' }, EstimateTime: 180 }),
+    arrival({ StopUID: 'TXG-GATE', RouteUID: 'TXG301', RouteName: { Zh_tw: '301' }, StopName: { Zh_tw: '靜宜大學(校門)' }, StopStatus: 3, EstimateTime: null, NextBusTime: at(45 * 60_000) }),
+  ]));
+  const query = { action: 'campus-next', schoolId: 'pu' };
+  const first = await mock.execute(query);
+  assert.equal(first.status, 'ready');
+  assert.equal(first.kind, 'arrivals');
+  const etaUrls = mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/'));
+  assert.equal(etaUrls.length, 1);
+  assert.equal(mock.calls.filter((call) => call.url.includes('/Stop/City/')).length, 0);
+  const filter = new URL(etaUrls[0].url).searchParams.get('$filter');
+  assert.match(filter, /contains\(StopName\/Zh_tw,'靜宜大學'\)/);
+  assert.match(filter, /RouteUID eq 'TXG162'/);
+  assert.match(filter, /RouteUID eq 'TXG301'/);
+  assert.match(filter, /RouteUID eq 'TXG368'/);
+  assert.match(filter, /RouteUID eq 'TXG326'/);
+  mock.tick(14_999); await mock.execute(query);
+  assert.equal(mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/')).length, 1);
+  mock.tick(1); await mock.execute(query);
+  assert.equal(mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/')).length, 2);
+  const gate = first.arrivals.find((row) => row.route === '162');
+  assert.equal(gate.stopName, '靜宜大學(校門)');
+  const scheduled = first.arrivals.find((row) => row.route === '301');
+  assert.equal(scheduled.scheduledAt, at(45 * 60_000));
+  assert.match(client.arrivalLabel(scheduled, NOW), /表定/);
+  assert.match(client.arrivalLabel(scheduled, NOW), /非即時/);
+  assert.equal(client.pickCampusNext(first.arrivals, NOW).map((row) => row.route).join(','), '162,301,368,326');
+});
+test('campus-next without credentials stays unavailable and does not invent times', async () => {
+  const mock = service([], { credentials: () => ({}) });
+  assert.deepEqual(await mock.execute({ action: 'campus-next', schoolId: 'pu' }), { status: 'unavailable', reason: 'not-configured' });
+  assert.equal(mock.calls.length, 0);
+});
 test('same-named stops on opposite sides remain separate and invalid positions are excluded', () => {
   const rows = [stop('TXG123'), stop('TXG124'), stop('TXG123'), stop('TXG999', 999), { StopName: { Zh_tw: '靜宜大學' } }];
   assert.deepEqual(server.normalizeTransitStops(rows, 'Taichung', campusQuery).map((row) => row.id), ['TXG123', 'TXG124']);
@@ -326,6 +366,24 @@ test('concurrent viewers of the same stop share one upstream arrival request', a
   const results = await Promise.all(Array.from({ length: 20 }, () => mock.execute(etaQuery())));
   assert.equal(results.every((result) => result.status === 'ready' && !result.stale), true);
   assert.equal(mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/')).length, 1);
+});
+test('campus-next keeps the last copy when TDX is busy, using the same retention window as other arrivals', async () => {
+  let limited = false;
+  const mock = service((url) => {
+    if (limited) return new Response('', { status: 429, headers: { 'Retry-After': '60' } });
+    return Response.json(url.includes('/StopOfRoute/') ? [] : [arrival({ RouteName: { Zh_tw: '162' }, StopName: { Zh_tw: '靜宜大學(校門)' } })]);
+  });
+  const query = { action: 'campus-next', schoolId: 'pu' };
+  const first = await mock.execute(query);
+  limited = true;
+  mock.tick(20_000);
+  const busy = await mock.execute(query);
+  assert.equal(busy.status, 'ready');
+  assert.equal(busy.stale, true);
+  assert.equal(busy.fetchedAt, first.fetchedAt);
+  const before = mock.calls.length;
+  mock.tick(10_000); await mock.execute(query);
+  assert.equal(mock.calls.length, before);
 });
 test('a TDX 429 after the cache expires returns the last arrivals with their original time and stale flag', async () => {
   let limited = false;

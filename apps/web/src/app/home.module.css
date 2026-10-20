@@ -148,6 +148,30 @@
   border-radius: 50%;
   background: #a98342;
 }
+.busEntry {
+  margin: 0 0 20px;
+}
+.busEntryLink {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 72px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.busEntryLink strong {
+  font-size: 16px;
+  font-weight: 600;
+}
+.busEntryLink small {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--soft);
+  line-height: 1.5;
+}
 .columns {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 290px;

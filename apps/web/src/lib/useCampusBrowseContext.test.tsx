@@ -60,7 +60,16 @@ it('uses the selected campus rather than a stale schoolId on the page', () => {
   });
 });
 
-it('does not silently replace no campus or unavailable selection with Providence', () => {
+it('defaults to Providence when the person has not chosen a campus yet', () => {
+  render(<Directory />);
+  expect(JSON.parse(screen.getByTestId('campus-scope').textContent || '{}')).toEqual({
+    id: 'pu',
+    name: '靜宜大學',
+    status: 'ready',
+  });
+});
+
+it('does not silently replace an explicit all-campus or unavailable selection with Providence', () => {
   navigation.search = 'campus=all';
   const view = render(<Directory />);
   expect(JSON.parse(screen.getByTestId('campus-scope').textContent || '{}')).toMatchObject({

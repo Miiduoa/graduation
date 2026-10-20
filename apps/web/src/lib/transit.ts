@@ -20,9 +20,11 @@ export const isStaticTransitStop = (stop: TransitStop): boolean => stop.source =
 export type TransitArrival = {
   id: string; route: string; direction: number | null; destination: string;
   status: number | null; seconds: number | null; updatedAt: string | null;
+  stopName?: string; scheduledAt?: string | null;
 };
 export type TransitQuery =
   | { action: 'campus'; schoolId: string }
+  | { action: 'campus-next'; schoolId: string }
   | { action: 'search'; city: TransitCity; text: string }
   | { action: 'nearby'; city: TransitCity; lat: number; lon: number; radius: number }
   | { action: 'arrivals'; city: TransitCity; stopId: string };
@@ -37,6 +39,23 @@ export const CAMPUS_TRANSIT: Record<string, { city: TransitCity; stopName: strin
   ncku: { city: 'Tainan', stopName: '成大' },
   ntpu: { city: 'NewTaipei', stopName: '臺北大學' },
 };
+/** 靜宜校門口這四班：查詢仍走 TDX 到站，不寫死分鐘數。 */
+export const CAMPUS_NEXT = {
+  pu: {
+    city: 'Taichung' as TransitCity,
+    stopName: '靜宜大學',
+    routes: [
+      { name: '162', routeUid: 'TXG162' },
+      { name: '301', routeUid: 'TXG301' },
+      { name: '368', routeUid: 'TXG368' },
+      { name: '326', routeUid: 'TXG326' },
+    ],
+  },
+} as const;
+export type CampusNextSchoolId = keyof typeof CAMPUS_NEXT;
+export const hasCampusNext = (schoolId: string): schoolId is CampusNextSchoolId =>
+  Object.hasOwn(CAMPUS_NEXT, schoolId);
+export const CAMPUS_NEXT_ROUTES = CAMPUS_NEXT.pu.routes.map((route) => route.name);
 
 /** TDX 公開站名與路線代碼，供校園搜尋 contains(StopName/Zh_tw) 對過後再寫進 CAMPUS_TRANSIT.stopName。 */
 export const CAMPUS_TRANSIT_PUBLIC = {
@@ -123,17 +142,36 @@ export function distanceMetres(a: Position, b: Position): number {
 export function formatDistance(distance: number): string {
   return distance < 1000 ? `約 ${Math.max(10, Math.round(distance / 10) * 10)} 公尺` : `約 ${(distance / 1000).toFixed(1)} 公里`;
 }
+export function taipeiClock(iso: string): string | null {
+  const timestamp = Date.parse(iso);
+  if (!Number.isFinite(timestamp)) return null;
+  return new Date(timestamp).toLocaleTimeString('zh-TW', {
+    timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false,
+  });
+}
+export function scheduledLabel(arrival: TransitArrival, now: number): string | null {
+  if (!arrival.scheduledAt) return null;
+  const timestamp = Date.parse(arrival.scheduledAt);
+  if (!Number.isFinite(timestamp) || timestamp < now - 30_000) return null;
+  const clock = taipeiClock(arrival.scheduledAt);
+  return clock ? `表定 ${clock}（非即時）` : null;
+}
 export function arrivalLabel(arrival: TransitArrival, now: number): string {
   const timestamp = arrival.updatedAt ? Date.parse(arrival.updatedAt) : NaN;
-  if (!Number.isFinite(timestamp) || timestamp > now + 30_000 || now - timestamp >= TRANSIT_FRESHNESS_MS)
-    return '資料待更新';
+  const fresh = Number.isFinite(timestamp) && timestamp <= now + 30_000 && now - timestamp < TRANSIT_FRESHNESS_MS;
+  if (fresh && arrival.status === 0 && arrival.seconds !== null && Number.isFinite(arrival.seconds) && arrival.seconds >= 0) {
+    const remaining = arrival.seconds - Math.max(0, now - timestamp) / 1000;
+    if (remaining >= -30) return remaining <= 60 ? '即將到站' : `約 ${Math.ceil(remaining / 60)} 分鐘`;
+    const liveScheduled = scheduledLabel(arrival, now);
+    if (liveScheduled) return liveScheduled;
+    return '等待更新';
+  }
+  const scheduled = scheduledLabel(arrival, now);
+  if (scheduled) return scheduled;
+  if (!fresh) return '資料待更新';
   const statuses: Record<number, string> = { 1: '尚未發車', 2: '交管不停靠', 3: '末班車已駛離', 4: '今日未營運' };
   if (arrival.status !== null && statuses[arrival.status]) return statuses[arrival.status];
-  if (arrival.status !== 0 || arrival.seconds === null || !Number.isFinite(arrival.seconds) || arrival.seconds < 0)
-    return '暫無到站預估';
-  const remaining = arrival.seconds - Math.max(0, now - timestamp) / 1000;
-  if (remaining < -30) return '等待更新';
-  return remaining <= 60 ? '即將到站' : `約 ${Math.ceil(remaining / 60)} 分鐘`;
+  return '暫無到站預估';
 }
 export function directionLabel(arrival: TransitArrival): string {
   if (arrival.destination) return `往 ${arrival.destination}`;
@@ -161,6 +199,46 @@ export function nextLiveArrival(arrivals: TransitArrival[], now: number): Transi
     if (remaining < bestRemaining) { best = arrival; bestRemaining = remaining; }
   }
   return best;
+}
+export function campusStopRank(name: string): number {
+  if (name.includes('校門')) return 0;
+  if (/英才|專用道|主顧|靜園/.test(name)) return 2;
+  if (name.includes('靜宜大學')) return 1;
+  return 3;
+}
+export type CampusNextRow = { route: string; arrival: TransitArrival | null };
+function liveRemaining(arrival: TransitArrival, now: number): number | null {
+  if (arrivalKind(arrival, now) !== 'live' || arrival.seconds === null || !arrival.updatedAt) return null;
+  return arrival.seconds - Math.max(0, now - Date.parse(arrival.updatedAt)) / 1000;
+}
+function pickCampusArrival(candidates: TransitArrival[], now: number): TransitArrival | null {
+  if (!candidates.length) return null;
+  const scored = candidates.map((arrival) => ({
+    arrival,
+    rank: campusStopRank(arrival.stopName ?? ''),
+    live: liveRemaining(arrival, now),
+    scheduled: arrival.scheduledAt ? Date.parse(arrival.scheduledAt) : NaN,
+  }));
+  const live = scored.filter((row) => row.live !== null).sort((a, b) => a.rank - b.rank || a.live! - b.live!);
+  if (live[0]) return live[0].arrival;
+  const scheduled = scored
+    .filter((row) => Number.isFinite(row.scheduled) && row.scheduled >= now - 30_000)
+    .sort((a, b) => a.rank - b.rank || a.scheduled - b.scheduled);
+  if (scheduled[0]) return scheduled[0].arrival;
+  const stale = scored
+    .filter((row) => arrivalKind(row.arrival, now) === 'stale')
+    .sort((a, b) => a.rank - b.rank);
+  return stale[0]?.arrival ?? null;
+}
+export function pickCampusNext(
+  arrivals: TransitArrival[],
+  now: number,
+  routes: readonly string[] = CAMPUS_NEXT_ROUTES,
+): CampusNextRow[] {
+  return routes.map((route) => {
+    const exact = arrivals.filter((row) => row.route === route);
+    return { route, arrival: pickCampusArrival(exact, now) };
+  });
 }
 export function stopMapUrl(stop: TransitStop): string {
   return `https://www.google.com/maps/dir/?api=1&destination=${stop.lat},${stop.lon}&travelmode=walking`;
@@ -229,7 +307,9 @@ export async function queryTransit(query: TransitQuery, signal: AbortSignal): Pr
       typeof row.id === 'string' && typeof row.route === 'string' && typeof row.destination === 'string' &&
       (row.direction === null || Number.isInteger(row.direction)) && (row.status === null || Number.isInteger(row.status)) &&
       (row.seconds === null || (typeof row.seconds === 'number' && Number.isFinite(row.seconds))) &&
-      (row.updatedAt === null || typeof row.updatedAt === 'string')).slice(0, 100);
+      (row.updatedAt === null || typeof row.updatedAt === 'string') &&
+      (row.stopName === undefined || typeof row.stopName === 'string') &&
+      (row.scheduledAt === undefined || row.scheduledAt === null || typeof row.scheduledAt === 'string')).slice(0, 200);
     return { status: 'ready', kind: 'arrivals', arrivals, fetchedAt: result.fetchedAt,
       ...(result.stale === true ? { stale: true as const } : {}) };
   }

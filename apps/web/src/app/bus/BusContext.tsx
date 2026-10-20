@@ -5,24 +5,32 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
 import { TransitExplorer } from '@/components/TransitExplorer';
+import { fallbackBusSchool } from '@/lib/defaultBrowseSchool';
+import { hasCampusNext } from '@/lib/transit';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 
 export function BusContext({ availabilityNotice }: { availabilityNotice?: ReactNode }) {
   const search = useSearchParams();
-  const { schoolId, schoolName, schoolSearch, status } = useCampusBrowseContext({
+  const browse = useCampusBrowseContext({
     school: search.get('school') ?? undefined,
     schoolId: search.get('schoolId') ?? undefined,
     campus: search.get('campus') ?? undefined,
   });
+  const { schoolId, schoolName } = fallbackBusSchool(browse.schoolId, browse.schoolName, browse.status);
+  const schoolSearch = browse.schoolId
+    ? browse.schoolSearch
+    : schoolId
+      ? `?${new URLSearchParams({ schoolId, campus: schoolId }).toString()}`
+      : browse.schoolSearch;
   return (
-    <SiteShell title="公車與交通" subtitle="找站牌、確認方向，再出發。" schoolName={schoolName}>
+    <SiteShell title="公車與交通" subtitle={schoolId && hasCampusNext(schoolId) ? '校門口這四班現在幾分到。' : '找站牌、確認方向，再出發。'} schoolName={schoolName}>
       {availabilityNotice}
-      {status !== 'ready' || !schoolId ? (
+      {browse.status === 'loading' || browse.status === 'error' || !schoolId ? (
         <section className="card" role="status">
           <h2>
-            {status === 'loading'
+            {browse.status === 'loading'
               ? '正在確認所選校園…'
-              : status === 'error'
+              : browse.status === 'error'
                 ? '無法確認所選校園'
                 : '請先選擇一所學校'}
           </h2>
@@ -30,9 +38,9 @@ export function BusContext({ availabilityNotice }: { availabilityNotice?: ReactN
         </section>
       ) : (
         <TransitExplorer
-          key={schoolId ?? 'all'}
+          key={schoolId}
           schoolId={schoolId}
-          schoolName={schoolName || '不限校園'}
+          schoolName={schoolName}
           legacy={
             <p>
               <Link href={`/bus/registered${schoolSearch}`}>開啟已登錄的校園路線查詢 →</Link>
