@@ -70,7 +70,8 @@ test('bus shell recognition follows the server marker rather than hydrated route
     '<div data-campus-bus-shell="false">公車與交通</div>',
     '<div data-campus-bus-shell="true-ish">公車與交通</div>',
     '<div x-data-campus-bus-shell="true">公車與交通</div>',
-    '&lt;div data-campus-bus-shell="true"&gt;公車與交通&lt;/div&gt;']) {
+    '&lt;div data-campus-bus-shell="true"&gt;公車與交通&lt;/div&gt;',
+    '<div data-campus-bus-shell="true">公車與交通往沙鹿</div>']) {
     assert.equal(hasBusShell(html),false,JSON.stringify(html));
   }
 });
@@ -129,7 +130,7 @@ test('remote ready:false report surfaces its sanitized code through parsing and 
 });
 
 const linksProfile = 'official-links-only';
-const shell = '<div data-campus-bus-shell="true">公車與交通</div>';
+const shell = '<div data-campus-bus-shell="true" data-campus-bus-spec="v1">公車</div>';
 const officialNotice = '<aside data-transit-mode="official-links"><h2>即時到站尚未啟用</h2><a href="https://citybus-free.taichung.gov.tw/" target="_blank">臺中市官方公車查詢 ↗</a></aside>';
 function unconfiguredPublic({status=503, body={status:'unavailable',reason:'not-configured'}, contentType='application/json', notice=officialNotice, health={}}={}) {
   return async (url, init) => {
@@ -200,8 +201,12 @@ test('links profile requires real server notice and exact official destination r
     await assert.rejects(probePublic(sha,{profile:linksProfile,fetcher:unconfiguredPublic({notice}),now}), /official-transit-notice-missing/);
   }
   assert.equal(verifyOfficialNotice(officialNotice.replace('https://citybus-free.taichung.gov.tw/','https://citybus.taichung.gov.tw/')),'https://citybus.taichung.gov.tw/');
-  assert.equal(hasBusShell('<div>data-campus-bus-shell="true" 公車與交通</div>'),false);
-  assert.equal(hasBusShell('<div data-campus-bus-shell="true">往沙鹿</div>'),true);
+  assert.equal(hasBusShell('<div>data-campus-bus-shell="true" data-campus-bus-spec="v1" 公車與交通</div>'),false);
+  assert.equal(hasBusShell('<div data-campus-bus-shell="true">往沙鹿</div>'),false);
+  assert.equal(hasBusShell('<div data-campus-bus-shell="true">公車與交通</div>'),false);
+  assert.equal(hasBusShell('<div data-campus-bus-shell="true">公車</div>'),false);
+  assert.equal(hasBusShell('<div data-campus-bus-shell="true" data-campus-bus-spec="v1"></div>'),true);
+  assert.equal(hasBusShell('<div data-campus-bus-spec="v1" data-campus-bus-shell="true">讀取校園交通資料…</div>'),true);
 });
 test('remote profile reports cannot be confused or persist arbitrary provider content',()=>{
   const links={ready:true,profile:linksProfile,mode:'official-links',transitReady:false,credentialsAbsent:true,reason:'not-configured',privateDetail:'must-not-persist'};

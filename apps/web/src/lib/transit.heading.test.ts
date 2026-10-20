@@ -1,9 +1,10 @@
 import { expect, it } from 'vitest';
 import {
   campusDirectionEnded, campusEtaView, campusGroupForRow, campusGroupLabel, campusHomeSummary,
-  campusLiveUnavailable, campusPlaceLabel, campusSegmentRows, campusStopGroupLabels, campusUpdatedLabel,
-  fetchedAgoLabel, groupCampusStops, headingAfterBoarding, headingBucket, listedCampusStops, pickCampusNext,
-  publicHeadingFromStops, publicPlaceName, waitingPlaceLine, waitingStopLabel,
+  campusHeadingText, campusInboundPlace, campusLiveUnavailable, campusPlaceLabel, campusSegmentRows,
+  campusStopGroupLabels, campusUpdatedLabel, fetchedAgoLabel, groupCampusStops, headingAfterBoarding,
+  headingBeforeBoarding, headingBucket, listedCampusStops, pickCampusNext, publicHeadingFromStops,
+  publicPlaceName, waitingPlaceLine, waitingStopLabel,
   type RouteStopSequence, type TransitArrival, type TransitStop,
 } from './transit';
 
@@ -16,12 +17,14 @@ const arrival = (overrides: Partial<TransitArrival> = {}): TransitArrival => ({
   updatedAt: new Date(now).toISOString(), ...overrides,
 });
 
-it('rewrites campus buildings to 校內 and maps familiar landmarks after leaving campus', () => {
-  expect(publicPlaceName('靜宜大學主顧聖母堂')).toBe('校內');
+it('rewrites campus buildings to named inbound termini and maps familiar landmarks after leaving campus', () => {
+  expect(publicPlaceName('靜宜大學主顧聖母堂')).toBe('主顧聖母堂');
+  expect(campusInboundPlace('靜宜大學靜園餐廳')).toBe('靜園餐廳');
+  expect(publicPlaceName('靜宜大學(校門)')).toBe('校內');
   expect(publicPlaceName('沙鹿車站')).toBe('沙鹿火車站');
   expect(publicPlaceName('巨業沙鹿站')).toBe('巨業沙鹿站');
   expect(publicPlaceName('臺中車站(A月台)')).toBe('台中車站');
-  expect(publicHeadingFromStops(['靜宜大學主顧樓', '靜宜大學主顧聖母堂'])).toBe('校內');
+  expect(publicHeadingFromStops(['靜宜大學主顧樓', '靜宜大學主顧聖母堂'])).toBe('主顧聖母堂');
   expect(publicHeadingFromStops(['英才路', '沙鹿車站', '嘉陽高中'])).toBe('沙鹿火車站');
   expect(publicHeadingFromStops(['靜宜大學(專用道)', '朝馬', '臺中車站', '新光里'])).toBe('台中車站');
 });
@@ -45,7 +48,27 @@ it('uses remaining stops after the boarding stop, not the inbound campus terminu
     ],
   };
   expect(headingAfterBoarding(outbound, 'YING', '靜宜大學(英才路)')).toBe('沙鹿火車站');
-  expect(headingAfterBoarding(inbound, 'GATE', '靜宜大學(校門)')).toBe('校內');
+  expect(headingAfterBoarding(inbound, 'GATE', '靜宜大學(校門)')).toBe('主顧聖母堂');
+  expect(headingBeforeBoarding(inbound, 'GATE', '靜宜大學(校門)')).toBe('');
+  expect(headingBucket('主顧聖母堂')).toBe('往校內');
+  expect(headingBucket('從沙鹿火車站')).toBe('往校內');
+  expect(campusHeadingText({ route: '368', heading: '主顧聖母堂', arrival: null })).toBe('往 主顧聖母堂');
+  expect(campusHeadingText({ route: '301', heading: '從沙鹿火車站', arrival: null })).toBe('從 沙鹿火車站');
+});
+
+it('does not regroup an inbound origin as 往沙鹿', () => {
+  const inbound: RouteStopSequence = {
+    routeUid: 'TXG301', subRouteUid: 'TXG301', routeName: '301', direction: 1,
+    stops: [
+      { id: 'SHA', name: '沙鹿車站' },
+      { id: 'YING', name: '靜宜大學(英才路)' },
+      { id: 'GATE', name: '靜宜大學(校門)' },
+      { id: 'HALL', name: '靜宜大學(會館)' },
+    ],
+  };
+  expect(headingAfterBoarding(inbound, 'GATE', '靜宜大學(校門)')).toBe('從沙鹿火車站');
+  expect(headingBucket(headingAfterBoarding(inbound, 'GATE', '靜宜大學(校門)'))).toBe('往校內');
+  expect(campusGroupLabel('校門口', headingBucket('從沙鹿火車站'))).toBe('校門口・往校內');
 });
 
 it('groups Providence stops into at most four student-facing labels without stop codes', () => {
@@ -121,6 +144,12 @@ it('keeps a direction’s rows when switching segments and marks a fully ended d
   const inbound = campusSegmentRows(arrivals, '校門口・往校內', now);
   expect(inbound.map((row) => campusEtaView(row.arrival, now).kind)).toEqual(['ended']);
   expect(campusDirectionEnded(inbound, now)).toBe(true);
+  const brt = campusSegmentRows([
+    arrival({ id: 'brt', route: '300', seconds: 240, destination: '台中車站', stopName: '靜宜大學(專用道)' }),
+    arrival({ id: 'gate', route: '162', seconds: 180, destination: '沙鹿火車站', stopName: '靜宜大學(英才路)' }),
+  ], '專用道', now);
+  expect(brt.map((row) => row.route)).toEqual(['300']);
+  expect(campusSegmentRows([], '專用道', now)).toEqual([]);
   expect(campusHomeSummary(inbound, now)).toBe('今天收班');
   const scheduledOnly = campusSegmentRows([arrivals[1]], '校門口・往沙鹿', now);
   expect(campusLiveUnavailable(scheduledOnly, now)).toBe(true);
