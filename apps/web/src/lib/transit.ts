@@ -67,6 +67,13 @@ export const CAMPUS_GROUP_LIMIT = 4;
 export const CAMPUS_GROUP_ORDER = [
   '校門口・往沙鹿', '校門口・往市區', '英才路側', '專用道', '校門口・往校內', '校內',
 ] as const;
+export const CAMPUS_SEGMENTS = [
+  { key: '往沙鹿', group: '校門口・往沙鹿', wait: '校門口站牌・臺灣大道側' },
+  { key: '往市區', group: '校門口・往市區', wait: '校門口站牌・臺灣大道側' },
+  { key: '專用道', group: '專用道', wait: '專用道站牌' },
+  { key: '往校內', group: '校門口・往校內', wait: '校門口站牌・臺灣大道側' },
+] as const;
+export type CampusSegmentKey = typeof CAMPUS_SEGMENTS[number]['key'];
 export type CampusStopGroup = { label: string; stops: TransitStop[]; representative: TransitStop };
 
 const CAMPUS_NAME = /靜宜/;
@@ -299,24 +306,28 @@ export function scheduledLabel(arrival: TransitArrival, now: number): string | n
   const timestamp = Date.parse(arrival.scheduledAt);
   if (!Number.isFinite(timestamp) || timestamp < now - 30_000) return null;
   const clock = taipeiClock(arrival.scheduledAt);
-  return clock ? `表定 ${clock}（非即時）` : null;
+  return clock ? `表定 ${clock}` : null;
+}
+function isEndedStatus(status: number | null): boolean {
+  return status === 3 || status === 4;
 }
 export function arrivalLabel(arrival: TransitArrival, now: number): string {
   const timestamp = arrival.updatedAt ? Date.parse(arrival.updatedAt) : NaN;
   const fresh = Number.isFinite(timestamp) && timestamp <= now + 30_000 && now - timestamp < TRANSIT_FRESHNESS_MS;
   if (fresh && arrival.status === 0 && arrival.seconds !== null && Number.isFinite(arrival.seconds) && arrival.seconds >= 0) {
     const remaining = arrival.seconds - Math.max(0, now - timestamp) / 1000;
-    if (remaining >= -30) return remaining <= 60 ? '即將到站' : `約 ${Math.ceil(remaining / 60)} 分鐘`;
+    if (remaining >= -30) return remaining < 120 ? '進站中' : `約 ${Math.ceil(remaining / 60)} 分鐘`;
     const liveScheduled = scheduledLabel(arrival, now);
     if (liveScheduled) return liveScheduled;
     return '等待更新';
   }
+  if (isEndedStatus(arrival.status)) return '今天收班';
   const scheduled = scheduledLabel(arrival, now);
   if (scheduled) return scheduled;
   if (!fresh) return '資料待更新';
-  const statuses: Record<number, string> = { 1: '尚未發車', 2: '交管不停靠', 3: '末班車已駛離', 4: '今日未營運' };
+  const statuses: Record<number, string> = { 1: '尚未發車', 2: '交管不停靠' };
   if (arrival.status !== null && statuses[arrival.status]) return statuses[arrival.status];
-  return '暫無到站預估';
+  return '暫無班次資訊';
 }
 export function directionLabel(arrival: TransitArrival): string {
   const heading = publicPlaceName(arrival.destination) || arrival.destination;
@@ -368,9 +379,13 @@ function pickCampusArrival(candidates: TransitArrival[], now: number): TransitAr
   const live = scored.filter((row) => row.live !== null).sort((a, b) => a.rank - b.rank || a.live! - b.live!);
   if (live[0]) return live[0].arrival;
   const scheduled = scored
-    .filter((row) => Number.isFinite(row.scheduled) && row.scheduled >= now - 30_000)
+    .filter((row) => !isEndedStatus(row.arrival.status) && Number.isFinite(row.scheduled) && row.scheduled >= now - 30_000)
     .sort((a, b) => a.rank - b.rank || a.scheduled - b.scheduled);
   if (scheduled[0]) return scheduled[0].arrival;
+  const ended = scored
+    .filter((row) => isEndedStatus(row.arrival.status))
+    .sort((a, b) => a.rank - b.rank);
+  if (ended[0]) return ended[0].arrival;
   const stale = scored
     .filter((row) => arrivalKind(row.arrival, now) === 'stale')
     .sort((a, b) => a.rank - b.rank);
@@ -419,20 +434,50 @@ export function waitingStopLabel(name: string): string {
   if (place === '校內') return '在校內等';
   return name ? `在${name}等` : '';
 }
-export type CampusEtaView = { kind: 'live' | 'soon' | 'scheduled' | 'empty'; text: string };
+export function waitingPlaceLine(name: string): string {
+  const place = campusPlaceLabel(name);
+  if (place === '專用道') return '專用道站牌';
+  if (place === '英才路側') return '校門口站牌・英才路側';
+  if (place === '校內') return '校內站牌';
+  return '校門口站牌・臺灣大道側';
+}
+export function campusHeadingText(row: CampusNextRow): string {
+  if (row.heading) return row.heading.startsWith('往') ? row.heading : `往 ${row.heading}`;
+  return row.arrival ? directionLabel(row.arrival) : '';
+}
+export function nextScheduledClock(arrival: TransitArrival | null, now: number): string | null {
+  if (!arrival?.scheduledAt) return null;
+  const remaining = liveRemaining(arrival, now);
+  if (remaining === null) return null;
+  const at = Date.parse(arrival.scheduledAt);
+  if (!Number.isFinite(at) || at <= now + remaining * 1000 + 60_000) return null;
+  return taipeiClock(arrival.scheduledAt);
+}
+export type CampusEtaKind = 'live' | 'soon' | 'scheduled' | 'ended' | 'empty';
+export type CampusEtaView = { kind: CampusEtaKind; text: string; minutes?: number; clock?: string };
 export function campusEtaView(arrival: TransitArrival | null, now: number): CampusEtaView {
-  if (!arrival) return { kind: 'empty', text: '沒有班次' };
+  if (!arrival) return { kind: 'empty', text: '暫無班次資訊' };
   const remaining = liveRemaining(arrival, now);
   if (remaining !== null) {
-    if (remaining <= 60) return { kind: 'soon', text: '即將進站' };
-    return { kind: 'live', text: `${Math.ceil(remaining / 60)} 分` };
+    if (remaining < 120) return { kind: 'soon', text: '進站中' };
+    const minutes = Math.ceil(remaining / 60);
+    return { kind: 'live', text: `${minutes} 分`, minutes };
   }
+  if (isEndedStatus(arrival.status)) return { kind: 'ended', text: '今天收班' };
   const clock = arrival.scheduledAt ? taipeiClock(arrival.scheduledAt) : null;
   const scheduledAt = arrival.scheduledAt ? Date.parse(arrival.scheduledAt) : NaN;
   if (clock && Number.isFinite(scheduledAt) && scheduledAt >= now - 30_000) {
-    return { kind: 'scheduled', text: `表定 ${clock}` };
+    return { kind: 'scheduled', text: `表定 ${clock}`, clock };
   }
-  return { kind: 'empty', text: '沒有班次' };
+  return { kind: 'empty', text: '暫無班次資訊' };
+}
+export function campusUpdatedLabel(fetchedAt: string, now: number, liveUnavailable = false): string {
+  if (liveUnavailable) return '讀不到即時資料，先顯示表定時間';
+  const clock = taipeiClock(fetchedAt);
+  const timestamp = Date.parse(fetchedAt);
+  if (!clock || !Number.isFinite(timestamp)) return '';
+  if (now - timestamp >= 120_000) return `最後更新 ${clock}`;
+  return `${clock} 更新`;
 }
 export function fetchedAgoLabel(fetchedAt: string, now: number): string {
   const timestamp = Date.parse(fetchedAt);
@@ -448,6 +493,8 @@ export function sortCampusNextRows(rows: CampusNextRow[], now: number): CampusNe
     const view = campusEtaView(row.arrival, now);
     if ((view.kind === 'soon' || view.kind === 'live') && row.arrival) return [0, liveRemaining(row.arrival, now) ?? 0];
     if (view.kind === 'scheduled' && row.arrival?.scheduledAt) return [1, Date.parse(row.arrival.scheduledAt)];
+    if (view.kind === 'empty') return [2, 0];
+    if (view.kind === 'ended') return [3, 0];
     return [2, 0];
   };
   return [...rows].sort((a, b) => {
@@ -456,6 +503,54 @@ export function sortCampusNextRows(rows: CampusNextRow[], now: number): CampusNe
     return left[0] - right[0] || left[1] - right[1] ||
       a.route.localeCompare(b.route, 'zh-Hant', { numeric: true }) || a.heading.localeCompare(b.heading, 'zh-Hant');
   });
+}
+export function campusSegmentRows(
+  arrivals: TransitArrival[],
+  group: string,
+  now: number,
+  routes: readonly string[] = CAMPUS_NEXT_ROUTES,
+): CampusNextRow[] {
+  const matched = arrivals.filter((arrival) => arrivalMatchesCampusGroup(arrival, group));
+  const names = [...new Set([
+    ...matched.map((row) => row.route),
+  ])].filter((name) => routes.includes(name));
+  if (!names.length) return [];
+  return pickCampusNext(matched, now, names);
+}
+export function campusSegmentWaitLine(segment: typeof CAMPUS_SEGMENTS[number], rows: CampusNextRow[]): string {
+  const stopName = rows.find((row) => row.arrival?.stopName)?.arrival?.stopName;
+  return stopName ? waitingPlaceLine(stopName) : segment.wait;
+}
+export function campusDirectionEnded(rows: CampusNextRow[], now: number): boolean {
+  return rows.length > 0 && rows.every((row) => campusEtaView(row.arrival, now).kind === 'ended');
+}
+export function campusLiveUnavailable(rows: CampusNextRow[], now: number): boolean {
+  if (campusDirectionEnded(rows, now) || !rows.length) return false;
+  const views = rows.map((row) => campusEtaView(row.arrival, now));
+  return views.some((view) => view.kind === 'scheduled') &&
+    views.every((view) => view.kind !== 'live' && view.kind !== 'soon');
+}
+export function campusHomeSummary(rows: CampusNextRow[], now: number): string {
+  const views = rows.map((row) => campusEtaView(row.arrival, now));
+  if (views.length > 0 && views.every((view) => view.kind === 'ended' || view.kind === 'empty') &&
+    views.some((view) => view.kind === 'ended')) {
+    return '今天收班';
+  }
+  const actionable = sortCampusNextRows(
+    rows.filter((row) => {
+      const kind = campusEtaView(row.arrival, now).kind;
+      return kind === 'live' || kind === 'soon' || kind === 'scheduled';
+    }),
+    now,
+  );
+  const top = actionable[0];
+  if (!top) return '';
+  const view = campusEtaView(top.arrival, now);
+  const bucket = headingBucket(top.heading) || (top.heading ? `往${top.heading.replace(/^往\s*/, '')}` : '');
+  if (view.kind === 'live' && view.minutes != null) return `${top.route} ${bucket} ${view.minutes} 分`;
+  if (view.kind === 'soon') return `${top.route} ${bucket} 進站中`;
+  if (view.kind === 'scheduled' && view.clock) return `${top.route} ${bucket} 表定 ${view.clock}`;
+  return '';
 }
 export function stopMapUrl(stop: TransitStop): string {
   return `https://www.google.com/maps/dir/?api=1&destination=${stop.lat},${stop.lon}&travelmode=walking`;

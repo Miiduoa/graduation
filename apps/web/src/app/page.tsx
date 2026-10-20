@@ -166,32 +166,15 @@ export default function HomePage() {
       </a>
       <AppHeader />
       <main id="today-content" className={styles.main} tabIndex={-1}>
-        <div className={styles.heading}>
-          <div>
-            <p className={styles.eyebrow}>CAMPUS ONE</p>
-            <h1>
-              {signedIn
-                ? teaching.length && !studying.length
-                  ? '今天的教學'
-                  : '今天的課程與待辦'
-                : '課程與校園生活'}
-            </h1>
-            <p className={styles.intro}>
-              {signedIn
-                ? '查看待辦、回到課程，查找今天要用的校園服務。'
-                : '先查校園資訊，需要課程與個人服務時再登入。'}
-            </p>
-          </div>
-          <div className={styles.date}>
+        <div className={styles.dateLine}>
+          <h1>
             {now?.toLocaleDateString('zh-TW', {
               timeZone: 'Asia/Taipei',
               month: 'long',
               day: 'numeric',
+              weekday: 'long',
             }) ?? '今日'}
-            <span>
-              {now?.toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei', weekday: 'long' })}
-            </span>
-          </div>
+          </h1>
         </div>
         {isTeacherRole(role) && (
           <p className={styles.notice}>
