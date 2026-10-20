@@ -29,7 +29,8 @@ it('picks the soonest live arrival and never treats an ended bus as next', () =>
 
 it('says the destination is not provided instead of leaving only 去程／返程 jargon', () => {
   expect(directionLabel(row({ destination: '臺中車站' }))).toBe('往 台中車站');
-  expect(directionLabel(row({ destination: '靜宜大學主顧聖母堂' }))).toBe('往 校內');
+  expect(directionLabel(row({ destination: '靜宜大學主顧聖母堂' }))).toBe('往 主顧聖母堂');
+  expect(directionLabel(row({ destination: '靜宜大學(校門)' }))).toBe('往 校內');
   expect(directionLabel(row({ destination: '', direction: 0 }))).toBe('去程（終點未提供）');
   expect(directionLabel(row({ destination: '', direction: 1 }))).toBe('返程（終點未提供）');
   expect(directionLabel(row({ destination: '', direction: null }))).toBe('方向未提供');

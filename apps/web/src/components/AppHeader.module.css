@@ -18,6 +18,12 @@
     flex-basis: 100%;
     justify-content: flex-start;
   }
+  :global([data-campus-bus-shell='true']) .account {
+    flex-basis: auto;
+    max-width: 62%;
+    margin-left: auto;
+    justify-content: flex-end;
+  }
   .account > details {
     flex-basis: auto;
     flex-grow: 1;
