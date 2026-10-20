@@ -94,8 +94,9 @@ test('campus-next uses one arrival query for the four Providence routes and keep
   assert.equal(etaUrls.length, 1);
   assert.equal(mock.calls.filter((call) => call.url.includes('/Stop/City/')).length, 0);
   const filter = new URL(etaUrls[0].url).searchParams.get('$filter');
-  assert.match(filter, /contains\(StopName\/Zh_tw,'靜宜大學'\)/);
+  assert.equal(filter.startsWith("contains(StopName/Zh_tw,'靜宜大學') and ("), true);
   assert.match(filter, /contains\(StopName\/Zh_tw,'專用道'\)/);
+  assert.equal(/\) or contains\(StopName\/Zh_tw,'專用道'\)\s*$/.test(filter), false);
   assert.match(filter, /RouteUID eq 'TXG162'/);
   assert.match(filter, /RouteUID eq 'TXG301'/);
   assert.match(filter, /RouteUID eq 'TXG368'/);
@@ -121,7 +122,9 @@ test('campus-next includes 專用道 in the same ETA query and does not fetch ex
   const etaUrls = mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/'));
   assert.equal(etaUrls.length, 1);
   const filter = new URL(etaUrls[0].url).searchParams.get('$filter');
+  assert.equal(filter.startsWith("contains(StopName/Zh_tw,'靜宜大學') and ("), true);
   assert.match(filter, /contains\(StopName\/Zh_tw,'專用道'\)/);
+  assert.equal(/\) or contains\(StopName\/Zh_tw,'專用道'\)\s*$/.test(filter), false);
   const stopOrder = mock.calls.filter((call) => call.url.includes('/StopOfRoute/'));
   assert.equal(stopOrder.some((call) => new URL(call.url).searchParams.get('$filter').includes('TXG300')), false);
   const brt = result.arrivals.find((row) => row.route === '300');
@@ -129,6 +132,66 @@ test('campus-next includes 專用道 in the same ETA query and does not fetch ex
   assert.equal(brt.destination, '台中車站');
   const rows = client.campusSegmentRows(result.arrivals, '專用道', NOW);
   assert.deepEqual(rows.map((row) => row.route), ['300']);
+});
+test('campus-next never lists other 專用道 stops such as 市政府 in segments or home', async () => {
+  const cityHall = arrival({
+    StopUID: 'TXG-CITY-HALL', RouteUID: 'TXG301', RouteName: { Zh_tw: '301' }, StopName: { Zh_tw: '市政府(專用道)' },
+    DestinationStopNameZh: '沙鹿車站', EstimateTime: 60,
+  });
+  const gate = arrival({
+    StopUID: 'TXG-GATE', RouteUID: 'TXG162', RouteName: { Zh_tw: '162' }, StopName: { Zh_tw: '靜宜大學(校門)' },
+    DestinationStopNameZh: '沙鹿車站', EstimateTime: 180,
+  });
+  const brt = arrival({
+    StopUID: 'TXG-BRT', RouteUID: 'TXG300', RouteName: { Zh_tw: '300' }, StopName: { Zh_tw: '靜宜大學(專用道)' },
+    DestinationStopNameZh: '臺中車站', EstimateTime: 240,
+  });
+  const mock = service((url) => Response.json(url.includes('/StopOfRoute/') ? [] : [cityHall, gate, brt]));
+  const result = await mock.execute({ action: 'campus-next', schoolId: 'pu' });
+  assert.equal(result.status, 'ready');
+  const etaUrls = mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/'));
+  assert.equal(etaUrls.length, 1);
+  const filter = new URL(etaUrls[0].url).searchParams.get('$filter');
+  assert.equal(filter.startsWith("contains(StopName/Zh_tw,'靜宜大學') and ("), true);
+  assert.equal(result.arrivals.some((row) => (row.stopName ?? '').includes('市政府')), false);
+  assert.equal(result.arrivals.some((row) => row.route === '162' && row.stopName === '靜宜大學(校門)'), true);
+  const leaked = { ...cityHall, id: 'city-301', route: '301', destination: '沙鹿火車站', stopName: '市政府(專用道)', seconds: 60, updatedAt: at() };
+  const mixed = [...result.arrivals, leaked];
+  for (const segment of client.CAMPUS_SEGMENTS) {
+    const rows = client.campusSegmentRows(mixed, segment.group, NOW);
+    assert.equal(rows.some((row) => (row.arrival?.stopName ?? '').includes('市政府')), false);
+  }
+  const shaLu = client.campusSegmentRows(mixed, '校門口・往沙鹿', NOW);
+  assert.equal(shaLu[0]?.route, '162');
+  assert.equal(shaLu.some((row) => row.route === '301' && row.arrival), false);
+  const home = client.pickCampusNext(mixed, NOW);
+  assert.equal(home.some((row) => (row.arrival?.stopName ?? '').includes('市政府')), false);
+  assert.match(client.campusHomeSummary(home, NOW), /^162 /);
+  assert.equal(client.campusHomeSummary(home, NOW).includes('301'), false);
+  assert.equal(client.arrivalMatchesCampusGroup(leaked, '校門口・往沙鹿'), false);
+  assert.equal(client.arrivalMatchesCampusGroup(leaked, '專用道'), false);
+});
+test('campus-next keeps gate routes when other 專用道 rows would fill the 200 cap', async () => {
+  const cityLane = Array.from({ length: 220 }, (_, index) => arrival({
+    StopUID: `TXG-CITY-${index}`, RouteUID: 'TXG301', SubRouteUID: `TXG301-${index}`,
+    RouteName: { Zh_tw: '301' }, StopName: { Zh_tw: '市政府(專用道)' },
+    DestinationStopNameZh: '沙鹿車站', EstimateTime: 30,
+  }));
+  const gate = [
+    arrival({ StopUID: 'TXG-GATE-162', RouteUID: 'TXG162', RouteName: { Zh_tw: '162' }, StopName: { Zh_tw: '靜宜大學(校門)' }, DestinationStopNameZh: '沙鹿車站', EstimateTime: 180 }),
+    arrival({ StopUID: 'TXG-GATE-301', RouteUID: 'TXG301', RouteName: { Zh_tw: '301' }, StopName: { Zh_tw: '靜宜大學(校門)' }, DestinationStopNameZh: '沙鹿車站', EstimateTime: 240 }),
+    arrival({ StopUID: 'TXG-GATE-368', RouteUID: 'TXG368', RouteName: { Zh_tw: '368' }, StopName: { Zh_tw: '靜宜大學(校門)' }, DestinationStopNameZh: '沙鹿車站', EstimateTime: 300 }),
+    arrival({ StopUID: 'TXG-GATE-326', RouteUID: 'TXG326', RouteName: { Zh_tw: '326' }, StopName: { Zh_tw: '靜宜大學(校門)' }, DestinationStopNameZh: '沙鹿車站', EstimateTime: 360 }),
+  ];
+  const mock = service((url) => Response.json(url.includes('/StopOfRoute/') ? [] : [...cityLane, ...gate]));
+  const result = await mock.execute({ action: 'campus-next', schoolId: 'pu' });
+  assert.equal(result.status, 'ready');
+  assert.equal(mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/')).length, 1);
+  assert.equal(result.arrivals.length <= 200, true);
+  assert.equal(result.arrivals.some((row) => (row.stopName ?? '').includes('市政府')), false);
+  assert.deepEqual(['162', '301', '368', '326'].filter((route) => result.arrivals.some((row) => row.route === route && row.stopName === '靜宜大學(校門)')), ['162', '301', '368', '326']);
+  const shaLu = client.campusSegmentRows(result.arrivals, '校門口・往沙鹿', NOW);
+  assert.deepEqual(shaLu.map((row) => row.route).sort(), ['162', '301', '326', '368']);
 });
 test('campus-next without credentials stays unavailable and does not invent times', async () => {
   const mock = service([], { credentials: () => ({}) });

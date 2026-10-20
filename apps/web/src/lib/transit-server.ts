@@ -1,7 +1,7 @@
 import {
-  CAMPUS_NEXT, CAMPUS_TRANSIT, distanceMetres, hasCampusNext, headingAfterBoarding, isCity, isPosition, isRecord, isStopId,
-  publicPlaceName, type RouteStopSequence, type TransitArrival, type TransitCity, type TransitFailure,
-  type TransitQuery, type TransitResult, type TransitRoute, type TransitStop,
+  CAMPUS_NEXT, CAMPUS_TRANSIT, distanceMetres, hasCampusNext, headingAfterBoarding, isCampusStopName,
+  isCity, isPosition, isRecord, isStopId, publicPlaceName, type RouteStopSequence, type TransitArrival,
+  type TransitCity, type TransitFailure, type TransitQuery, type TransitResult, type TransitRoute, type TransitStop,
 } from './transit';
 import { searchTaichungCatalog } from './transit-catalog';
 
@@ -176,10 +176,13 @@ export function normalizeTransitArrivals(
       scheduledAt: Number.isFinite(scheduledStamp) ? new Date(scheduledStamp).toISOString() : null,
     });
   }
-  return [...arrivals.values()].sort((a, b) => {
+  const ranked = [...arrivals.values()].sort((a, b) => {
     const rank = (row: TransitArrival) => row.status === 0 && row.seconds !== null ? row.seconds : Infinity;
     return rank(a) - rank(b) || a.route.localeCompare(b.route, 'zh-Hant', { numeric: true }) || (a.direction ?? 9) - (b.direction ?? 9);
-  }).slice(0, stopId ? 100 : 200);
+  });
+  // campus-next 沒有指定 StopUID；先丢掉非靜宜站，避免 $top=200 被台灣大道其他專用道擠掉校門口。
+  const scoped = stopId ? ranked : ranked.filter((row) => isCampusStopName(row.stopName ?? ''));
+  return scoped.slice(0, stopId ? 100 : 200);
 }
 
 /** 被 TDX 限流或自身用量保護擋下時，可改回最近一份成功資料的保留時間。 */
@@ -395,7 +398,8 @@ export function createTransitService(options: {
         } else {
           if (!campusNext) throw new TransitError('invalid-query');
           const routeFilter = campusNext.routes.map((route) => `RouteUID eq ${literal(route.routeUid)}`).join(' or ');
-          params.set('$filter', `(contains(StopName/Zh_tw,${literal(campusNext.stopName)}) and (${routeFilter})) or contains(StopName/Zh_tw,'專用道')`);
+          // 專用道只查靜宜大學(專用道)，不可用全市 contains「專用道」（會抓到市政府、秋紅谷、科博館）。
+          params.set('$filter', `contains(StopName/Zh_tw,${literal(campusNext.stopName)}) and ((${routeFilter}) or contains(StopName/Zh_tw,'專用道'))`);
         }
         const eta = await query(`EstimatedTimeOfArrival/City/${city}`, params, 15_000);
         const rows = eta.rows;

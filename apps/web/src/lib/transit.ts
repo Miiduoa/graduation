@@ -191,9 +191,11 @@ export function campusStopGroupLabels(stop: TransitStop): string[] {
   return [...new Set(headings.map((heading) => campusGroupLabel(place, headingBucket(heading))).filter(Boolean))];
 }
 export function arrivalMatchesCampusGroup(arrival: TransitArrival, label: string): boolean {
+  const stopName = arrival.stopName ?? '';
+  if (!isCampusStopName(stopName)) return false;
   const heading = publicPlaceName(arrival.destination);
-  const place = campusPlaceLabel(arrival.stopName ?? '');
-  if (!place) return publicPlaceName(label) === heading || label.includes(headingBucket(heading));
+  const place = campusPlaceLabel(stopName);
+  if (!place) return false;
   return campusGroupLabel(place, headingBucket(heading)) === label;
 }
 function pickGroupRepresentative(label: string, stops: TransitStop[]): TransitStop {
@@ -441,7 +443,7 @@ export function pickCampusNext(
   };
   const rows: CampusNextRow[] = [];
   for (const route of routes) {
-    const exact = arrivals.filter((row) => row.route === route);
+    const exact = arrivals.filter((row) => row.route === route && isCampusStopName(row.stopName ?? ''));
     if (!exact.length) {
       rows.push({ route, heading: '', arrival: null });
       continue;
