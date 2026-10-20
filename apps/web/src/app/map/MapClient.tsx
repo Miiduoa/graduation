@@ -17,6 +17,7 @@ import {
 } from './mapService';
 import styles from './map.module.css';
 import {
+  hasBundledCampusPlaces,
   isBusStopLocation,
   isProvidencePendingVerification,
   PROVIDENCE_CAMPUS_SOURCE,
@@ -67,16 +68,29 @@ function MapContent({
   const hash = useLocationHash();
   const fallbackMapUrl = buildCampusMapSearchUrl(schoolName);
   const officialMapUrl = getOfficialCampusMapUrl(school);
+  // 有內建地點的學校先直接顯示，外部來源只是補充；外部卡住或失敗都不擋住清單。
+  const bundled = hasBundledCampusPlaces(school);
+  const initialPlaces = () => ({
+    status: bundled ? ('ready' as const) : ('loading' as const),
+    source: 'loading' as const,
+    locations: bundled ? withProvidenceCampusPlaces(school, []) : [],
+  });
   const [placeState, setPlaceState] = useState<{
     status: 'loading' | 'error' | 'ready';
+    source: 'loading' | 'error' | 'ready';
     locations: MapLocation[];
-  }>({ status: 'loading', locations: [] });
+  }>(initialPlaces);
   const [placeAttempt, setPlaceAttempt] = useState(0);
   const { locations } = placeState;
   const loading = placeState.status === 'loading';
   const error = placeState.status === 'error';
+  const sourcePending = placeState.source === 'loading';
   function retry() {
-    setPlaceState({ status: 'loading', locations: [] });
+    setPlaceState((previous) =>
+      previous.status === 'ready'
+        ? { ...previous, source: 'loading' }
+        : { status: 'loading', source: 'loading', locations: [] },
+    );
     setPlaceAttempt((value) => value + 1);
   }
   useEffect(() => {
@@ -84,16 +98,25 @@ function MapContent({
     void loadMapLocations(school).then(
       (loaded) => {
         if (active)
-          setPlaceState({ status: 'ready', locations: withProvidenceCampusPlaces(school, loaded) });
+          setPlaceState({
+            status: 'ready',
+            source: 'ready',
+            locations: withProvidenceCampusPlaces(school, loaded),
+          });
       },
       () => {
-        if (active) setPlaceState({ status: 'error', locations: [] });
+        if (!active) return;
+        setPlaceState((previous) =>
+          bundled
+            ? { status: 'ready', source: 'error', locations: previous.locations.length ? previous.locations : withProvidenceCampusPlaces(school, []) }
+            : { status: 'error', source: 'error', locations: [] },
+        );
       },
     );
     return () => {
       active = false;
     };
-  }, [school, placeAttempt]);
+  }, [school, placeAttempt, bundled]);
   const [category, setCategory] = useState('全部');
   const [search, setSearch] = useState('');
   const [selection, setSelection] = useState<string | null>(null);
@@ -252,14 +275,14 @@ function MapContent({
   if (loading)
     return (
       <div className="card" role="status">
-        正在載入校園地點…
+        正在載入校園地點…（最多約 8 秒，讀不到會提示並可重試）
       </div>
     );
   if (error)
     return (
       <div className={`card ${styles.state}`} role="alert">
         <h2>暫時無法取得校園地點</h2>
-        <p>請稍後重新載入。確認地點資料後，就能搜尋設施與開啟導航。</p>
+        <p>地點資料連線逾時或失敗，請檢查網路後重新載入。確認地點資料後，就能搜尋設施與開啟導航。</p>
         <div className={styles.actions}>
           <button className="btn" onClick={retry}>
             重新載入地點
@@ -301,12 +324,25 @@ function MapContent({
 
   return (
     <div className={`pageStack ${styles.page}`}>
-      {route && !deepLinkRoute && routeDraft === null && (
+      {placeState.source === 'error' && (
+        <div className={styles.notice} role="alert">
+          <p>校方地點資料暫時讀不到，先顯示已核對過的靜宜建築與公車站牌，收藏與部分地點可能缺少。</p>
+          <button className="btn" onClick={retry}>
+            重新讀取地點資料
+          </button>
+        </div>
+      )}
+      {sourcePending && bundled && (
+        <p className={styles.notice} role="status">
+          正在同步校方地點資料，已先顯示核對過的靜宜地點。
+        </p>
+      )}
+      {!sourcePending && route && !deepLinkRoute && routeDraft === null && (
         <p className={styles.notice} role="status">
           這個連結的起點或終點已不在目前地點資料中，請從下方列表重新選擇。
         </p>
       )}
-      {focus && !locations.some((location) => location.id === focus) && (
+      {!sourcePending && focus && !locations.some((location) => location.id === focus) && (
         <p className={styles.notice} role="status">
           找不到連結指定的地點，請搜尋地點名稱。
         </p>

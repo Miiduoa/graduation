@@ -49,6 +49,10 @@ const gate: MapLocation = {
   lat: 24.22495,
   lng: 120.56535,
 };
+/** 靜宜會先顯示內建地點，等校方來源同步完成再操作，避免點到即將被換掉的項目。 */
+async function sourceSettled() {
+  await waitFor(() => expect(screen.queryByText(/正在同步校方地點資料/)).toBeNull());
+}
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => {
@@ -69,7 +73,7 @@ beforeEach(() => {
 
 it('shows a retryable source error without fabricated places or opening hours', async () => {
   vi.mocked(loadMapLocations).mockRejectedValueOnce(new Error('offline'));
-  render(<MapClient school="pu" />);
+  render(<MapClient school="nthu" />);
   expect(await screen.findByText('暫時無法取得校園地點')).toBeTruthy();
   expect(screen.queryByLabelText('地圖狀態')).toBeNull();
   expect(screen.queryByText(/工程館|開放中|示範/)).toBeNull();
@@ -158,6 +162,7 @@ it('uses an explicit school flow for legacy favorites while keeping public navig
   state.user = null;
   window.history.replaceState({}, '', '/map?schoolId=pu&route=gate%2Clibrary#directions');
   render(<MapClient school="pu" route="gate,library" focus="gate" />);
+  await sourceSettled();
   fireEvent.click(await screen.findByRole('button', { name: '查看蓋夏圖書館' }));
   const login = new URL(
     screen.getByRole('link', { name: '連線學校帳號以收藏' }).getAttribute('href')!,
@@ -177,6 +182,7 @@ it('uses an explicit school flow for legacy favorites while keeping public navig
 it('does not mark a failed or uncertain favorite as saved and reloads before retrying', async () => {
   vi.mocked(setMapFavorite).mockRejectedValueOnce(new Error('connection lost'));
   render(<MapClient school="pu" />);
+  await sourceSettled();
   const favorite = await screen.findByRole('button', { name: '收藏蓋夏圖書館' });
   await waitFor(() => expect(favorite.hasAttribute('disabled')).toBe(false));
   fireEvent.click(favorite);
@@ -192,6 +198,7 @@ it('locks duplicate favorite changes and ignores completion after account switch
   const operation = deferred<void>();
   vi.mocked(setMapFavorite).mockReturnValueOnce(operation.promise);
   const view = render(<MapClient school="pu" />);
+  await sourceSettled();
   const favorite = await screen.findByRole('button', { name: '收藏蓋夏圖書館' });
   await waitFor(() => expect(favorite.hasAttribute('disabled')).toBe(false));
   fireEvent.click(favorite);
@@ -261,6 +268,7 @@ it('does not produce a public map search for an unresolved campus name', async (
 it('lets visitors choose a campus starting point and destination without location permission', async () => {
   state.user = null;
   render(<MapClient school="pu" />);
+  await sourceSettled();
   fireEvent.click(await screen.findByRole('button', { name: '查看蓋夏圖書館' }));
   fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
   expect(screen.getByText(/已設定「蓋夏圖書館」為起點/)).toBeTruthy();
@@ -389,6 +397,7 @@ it('ignores a stale position callback after a newer location attempt', async () 
 it('offers the official floor guide only for the Providence library', async () => {
   state.user = null;
   const view = render(<MapClient school="pu" />);
+  await sourceSettled();
   fireEvent.click(await screen.findByRole('button', { name: '查看蓋夏圖書館' }));
   const link = screen.getByRole('link', { name: '查看校方樓層導覽' });
   expect(link.getAttribute('href')).toBe('https://b028.pu.edu.tw/p/426-1054-34.php?Lang=zh-tw');
@@ -401,12 +410,44 @@ it('offers the official floor guide only for the Providence library', async () =
 
 it('keeps the official campus plan available when published POIs fail to load', async () => {
   vi.mocked(loadMapLocations).mockRejectedValueOnce(new Error('offline'));
-  render(<MapClient school="pu" schoolName="靜宜大學" />);
+  render(<MapClient school="nthu" schoolName="國立清華大學" />);
   expect(await screen.findByText('暫時無法取得校園地點')).toBeTruthy();
   const link = screen.getByRole('link', { name: '查看校方校區平面圖' });
-  expect(link.getAttribute('href')).toBe('https://gnl.pu.edu.tw/p/426-1007-8.php?Lang=zh-tw');
+  expect(link.getAttribute('href')).toBe('https://www.nthu.edu.tw/campusmap');
   expect(link.getAttribute('rel')).toBe('noopener noreferrer');
   expect(screen.queryByRole('button', { name: '查看蓋夏圖書館' })).toBeNull();
+});
+
+it('shows bundled Providence places before the published source answers', async () => {
+  vi.mocked(loadMapLocations).mockReturnValueOnce(new Promise(() => {}));
+  render(<MapClient school="pu" schoolName="靜宜大學" />);
+  expect(screen.queryByText(/正在載入校園地點/)).toBeNull();
+  expect(screen.getByRole('button', { name: '查看文興樓' })).toBeTruthy();
+  expect(screen.getByText(/正在同步校方地點資料/)).toBeTruthy();
+  expect(screen.getByRole('link', { name: '校方校區平面圖' })).toBeTruthy();
+});
+
+it('keeps bundled Providence places with a clear retry when the published source fails or times out', async () => {
+  vi.mocked(loadMapLocations).mockRejectedValueOnce(new Error('Map source timed out'));
+  render(<MapClient school="pu" schoolName="靜宜大學" />);
+  expect(await screen.findByText(/校方地點資料暫時讀不到/)).toBeTruthy();
+  expect(screen.getByRole('button', { name: '查看文興樓' })).toBeTruthy();
+  expect(screen.queryByText('暫時無法取得校園地點')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取地點資料' }));
+  expect(screen.getByRole('button', { name: '查看文興樓' })).toBeTruthy();
+  await sourceSettled();
+  expect(screen.queryByText(/校方地點資料暫時讀不到/)).toBeNull();
+  expect(await screen.findByRole('button', { name: '查看蓋夏圖書館' })).toBeTruthy();
+  expect(loadMapLocations).toHaveBeenCalledTimes(2);
+});
+
+it('does not report a deep-link place as missing while the published source is still syncing', async () => {
+  const loading = deferred<MapLocation[]>();
+  vi.mocked(loadMapLocations).mockReturnValueOnce(loading.promise);
+  render(<MapClient school="pu" route="gate,library" focus="library" />);
+  expect(screen.queryByText(/已不在目前地點資料中|找不到連結指定的地點/)).toBeNull();
+  await act(async () => loading.resolve([library, gate]));
+  expect(screen.getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
 it('lets visitors compare mapped Providence points with the official campus plan without selecting a pin', async () => {
