@@ -1,3 +1,30 @@
+:global([data-campus-bus-shell='true']) .page {
+  background: #f7f5f0;
+}
+:global([data-campus-bus-shell='true']) .header {
+  padding: 8px 20px;
+  gap: 12px;
+}
+:global([data-campus-bus-shell='true']) .brand {
+  font-size: 0;
+  gap: 0;
+}
+:global([data-campus-bus-shell='true']) .mark {
+  width: 28px;
+  height: 28px;
+  font-size: 16px;
+}
+:global([data-campus-bus-shell='true']) .mark span {
+  font-size: 10px;
+}
+:global([data-campus-bus-shell='true']) .nav {
+  flex-wrap: nowrap;
+  gap: 16px;
+}
+:global([data-campus-bus-shell='true']) .main {
+  padding-top: 8px;
+  padding-bottom: 24px;
+}
 .page {
   --ink: var(--text);
   --paper: var(--bg);
@@ -94,6 +121,17 @@
   margin: auto;
   padding: var(--page-padding-block) var(--page-padding-inline) 28px;
 }
+.dateLine {
+  margin-bottom: 12px;
+}
+.dateLine h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 22px;
+  letter-spacing: 0;
+  color: var(--soft);
+}
 .heading {
   display: flex;
   justify-content: space-between;
@@ -149,30 +187,38 @@
   background: #a98342;
 }
 .busEntry {
-  margin: 0 0 20px;
-  padding: 14px 16px 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
+  margin: 0 0 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: #fffdf8;
 }
-.busEntryHead {
+.busEntryLink {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 4px;
+  height: 56px;
+  padding: 0 16px;
+  min-height: 56px;
 }
-.busEntryHead strong {
-  display: block;
-  font-size: 16px;
+.busEntryLink strong {
+  font-size: 17px;
   font-weight: 600;
+  line-height: 22px;
+  color: #1f2a24;
+  white-space: nowrap;
 }
-.busEntryHead small {
-  display: block;
-  margin-top: 4px;
-  font-size: 13px;
-  color: var(--soft);
-  line-height: 1.5;
+.busEntryMeta {
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 20px;
+  color: #5f6b64;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
 }
 .busEntryAll {
   flex-shrink: 0;
@@ -181,17 +227,6 @@
   align-items: center;
   padding: 10px 0;
   font-size: 13px;
-  font-weight: 600;
-}
-.busEntryLink {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  min-height: 44px;
-  padding: 4px 0 8px;
-}
-.busEntryLink strong {
-  font-size: 16px;
   font-weight: 600;
 }
 .busEntryLink small {

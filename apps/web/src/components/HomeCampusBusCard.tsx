@@ -3,11 +3,9 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
-  CAMPUS_NEXT_ROUTES, campusEtaView, hasCampusNext, pickCampusNext, queryTransit,
+  CAMPUS_NEXT_ROUTES, campusHomeSummary, hasCampusNext, pickCampusNext, queryTransit,
   type TransitArrival,
 } from '@/lib/transit';
-import { CampusArrivalRow } from './CampusArrivalRow';
-import css from './transit.module.css';
 import styles from '@/app/home.module.css';
 
 export function HomeCampusBusCard({ schoolId }: { schoolId: string }) {
@@ -34,32 +32,14 @@ export function HomeCampusBusCard({ schoolId }: { schoolId: string }) {
       clearInterval(timer);
     };
   }, [schoolId]);
-  const rows = pickCampusNext(arrivals ?? [], clock, CAMPUS_NEXT_ROUTES)
-    .filter((row) => campusEtaView(row.arrival, clock).kind !== 'empty')
-    .slice(0, 2);
-  const showRows = ready && rows.length > 0;
+  const summary = campusHomeSummary(pickCampusNext(arrivals ?? [], clock, CAMPUS_NEXT_ROUTES), clock);
+  const line = !ready ? '正在查看…' : summary || '看全部';
   return (
-    <section className={styles.busEntry} aria-label="公車" data-testid="home-bus-entry">
-      <div className={styles.busEntryHead}>
-        <div>
-          <strong>校門口公車</strong>
-          <small>最快的兩班，點進去看全部。</small>
-        </div>
-        <Link className={styles.busEntryAll} href="/bus">看全部 →</Link>
-      </div>
-      {showRows ? (
-        <ul className={css.campusNextList}>
-          {rows.map((row) => (
-            <li key={`${row.route}:${row.heading}`}>
-              <CampusArrivalRow row={row} now={clock} href="/bus" />
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <Link className={styles.busEntryLink} href="/bus">
-          <small>{ready ? '到站資料還沒接通，先看站牌和方向。' : '正在查看校門口班次…'}</small>
-        </Link>
-      )}
-    </section>
+    <nav className={styles.busEntry} aria-label="公車" data-testid="home-bus-entry">
+      <Link className={styles.busEntryLink} href="/bus">
+        <strong>校門口公車</strong>
+        <span className={styles.busEntryMeta}>{line}</span>
+      </Link>
+    </nav>
   );
 }
