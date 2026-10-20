@@ -99,6 +99,22 @@ export function normalizeTransitArrivals(rows: unknown[], stopId: string, destin
 
 /** 被 TDX 限流或自身用量保護擋下時，可改回最近一份成功資料的保留時間。 */
 export const TRANSIT_STALE_RETENTION_MS = 10 * 60_000;
+/** 路線站序（各方向真終點）很少變動，被限流時可沿用最近一份 TDX 站序較久。 */
+export const ROUTE_STOPS_RETENTION_MS = 24 * 60 * 60_000;
+const ROUTE_STOPS_TTL_MS = 6 * 60 * 60_000;
+/**
+ * 靜宜站牌常見路線的 TDX RouteUID。只是代碼清單：啟動後背景向 TDX 預載站序，
+ * 終點仍取自 TDX 真資料；預載失敗就維持「終點未提供」，不寫死任何站名。
+ */
+export const PROVIDENCE_PRELOAD_ROUTES = {
+  city: 'Taichung' as TransitCity,
+  routeUids: ['TXG162', 'TXG301', 'TXG368', 'TXG326'] as const,
+};
+function routeStopsQuery(city: TransitCity, routeUid: string): [string, URLSearchParams] {
+  const params = new URLSearchParams({ '$format': 'JSON', '$top': '20' });
+  params.set('$filter', `RouteUID eq ${literal(routeUid)}`);
+  return [`StopOfRoute/City/${city}`, params];
+}
 /** 同時對 TDX 的請求上限；超過時短暫排隊，而不是立刻回忙碌。 */
 const MAX_RUNNING = 4;
 const SLOT_WAIT_MS = 3_000;
@@ -110,6 +126,7 @@ export function createTransitService(options: {
   fetcher?: typeof fetch;
   now?: () => number;
   wait?: (milliseconds: number) => Promise<void>;
+  preloadRoutes?: { city: TransitCity; routeUids: readonly string[] };
 }) {
   const fetcher = options.fetcher ?? fetch;
   const now = options.now ?? Date.now;
@@ -122,7 +139,8 @@ export function createTransitService(options: {
   const waiters: Array<() => void> = [];
   const cache = new Map<string, { expires: number; fetchedAt: number; value: unknown[] }>();
   // 最近一份成功資料，只在被限流時拿來回覆並如實標資料時間；不會讓舊預估重新變新鮮。
-  const lastGood = new Map<string, { fetchedAt: number; value: unknown[] }>();
+  const lastGood = new Map<string, { fetchedAt: number; retainUntil: number; value: unknown[] }>();
+  let preloadStarted = false;
   const pending = new Map<string, Promise<QueryResult>>();
 
   // 用量保護不放寬：最多 MAX_RUNNING 個同時請求、每分鐘 60 次、遇 429 依 Retry-After 暫停。
@@ -185,7 +203,7 @@ export function createTransitService(options: {
 
   function staleOrThrow(key: string, error: unknown): QueryResult {
     const last = lastGood.get(key);
-    if (error instanceof TransitError && error.reason === 'rate-limited' && last && now() - last.fetchedAt <= TRANSIT_STALE_RETENTION_MS)
+    if (error instanceof TransitError && error.reason === 'rate-limited' && last && now() <= last.retainUntil)
       return { rows: last.value, fetchedAt: last.fetchedAt, stale: true };
     throw error;
   }
@@ -207,10 +225,11 @@ export function createTransitService(options: {
         for (const [cacheKey, entry] of cache) if (entry.expires <= fetchedAt) cache.delete(cacheKey);
         if (cache.size >= 128) cache.delete(cache.keys().next().value!);
         cache.set(key, { expires: fetchedAt + ttl, fetchedAt, value: rows });
-        for (const [lastKey, entry] of lastGood) if (fetchedAt - entry.fetchedAt > TRANSIT_STALE_RETENTION_MS) lastGood.delete(lastKey);
+        for (const [lastKey, entry] of lastGood) if (fetchedAt > entry.retainUntil) lastGood.delete(lastKey);
         lastGood.delete(key);
         if (lastGood.size >= 256) lastGood.delete(lastGood.keys().next().value!);
-        lastGood.set(key, { fetchedAt, value: rows });
+        const retention = path.startsWith('StopOfRoute/') ? ROUTE_STOPS_RETENTION_MS : TRANSIT_STALE_RETENTION_MS;
+        lastGood.set(key, { fetchedAt, retainUntil: fetchedAt + retention, value: rows });
         return { rows, fetchedAt, stale: false };
       } catch (error) {
         return staleOrThrow(key, error);
@@ -220,8 +239,24 @@ export function createTransitService(options: {
     try { return await work; } finally { pending.delete(key); }
   }
 
+  // 只在第一次有人查詢時於背景依序預載，走同一套用量保護；失敗不影響任何回應。
+  function startPreload() {
+    const plan = options.preloadRoutes;
+    if (preloadStarted || !plan || !plan.routeUids.length) return;
+    const { clientId, clientSecret } = options.credentials();
+    if (!clientId?.trim() || !clientSecret?.trim()) return;
+    preloadStarted = true;
+    void (async () => {
+      for (const routeUid of plan.routeUids.slice(0, 8)) {
+        try { await query(...routeStopsQuery(plan.city, routeUid), ROUTE_STOPS_TTL_MS); }
+        catch { /* 預載失敗就等真正查詢時再補，終點維持未提供。 */ }
+      }
+    })();
+  }
+
   return async function execute(value: unknown): Promise<TransitResult> {
     try {
+      startPreload();
       const input = validateTransitQuery(value);
       const campus = input.action === 'campus' ? CAMPUS_TRANSIT[input.schoolId] : null;
       const city = campus ? campus.city : (input as Exclude<TransitQuery, { action: 'campus' }>).city;
@@ -254,9 +289,7 @@ export function createTransitService(options: {
         const destinations = new Map<string, string>();
         for (const routeUid of missing) {
           try {
-            const routeParams = new URLSearchParams({ '$format': 'JSON', '$top': '20' });
-            routeParams.set('$filter', `RouteUID eq ${literal(routeUid)}`);
-            const { rows: routeRows } = await query(`StopOfRoute/City/${city}`, routeParams, 6 * 60 * 60_000);
+            const { rows: routeRows } = await query(...routeStopsQuery(city, routeUid), ROUTE_STOPS_TTL_MS);
             for (const [key, value] of normalizeRouteDestinations(routeRows)) destinations.set(key, value);
           } catch { /* 補不到終點就維持未提供，不影響即時到站本身。 */ }
         }
