@@ -28,8 +28,8 @@ export type TransitQuery =
   | { action: 'arrivals'; city: TransitCity; stopId: string };
 export type TransitFailure = 'not-configured' | 'invalid-query' | 'rate-limited' | 'upstream' | 'network';
 export type TransitResult =
-  | { status: 'ready'; kind: 'stops'; stops: TransitStop[]; limited: boolean; fetchedAt: string }
-  | { status: 'ready'; kind: 'arrivals'; arrivals: TransitArrival[]; fetchedAt: string }
+  | { status: 'ready'; kind: 'stops'; stops: TransitStop[]; limited: boolean; fetchedAt: string; stale?: true }
+  | { status: 'ready'; kind: 'arrivals'; arrivals: TransitArrival[]; fetchedAt: string; stale?: true }
   | { status: 'unavailable'; reason: TransitFailure };
 export const TRANSIT_FRESHNESS_MS = 90_000;
 export const CAMPUS_TRANSIT: Record<string, { city: TransitCity; stopName: string }> = {
@@ -218,6 +218,7 @@ export async function queryTransit(query: TransitQuery, signal: AbortSignal): Pr
     const stops = readSavedStops(JSON.stringify(result.stops));
     // Preserve only verified distances; a saved stop never retains a user's distance.
     return { status: 'ready', kind: 'stops', fetchedAt: result.fetchedAt, limited: result.limited === true,
+      ...(result.stale === true ? { stale: true as const } : {}),
       stops: stops.map((stop) => {
         const raw = (result.stops as unknown[]).find((row) => isRecord(row) && row.id === stop.id && row.city === stop.city);
         return { ...stop, distance: isRecord(raw) && typeof raw.distance === 'number' && Number.isFinite(raw.distance) && raw.distance >= 0 ? raw.distance : null };
@@ -229,7 +230,8 @@ export async function queryTransit(query: TransitQuery, signal: AbortSignal): Pr
       (row.direction === null || Number.isInteger(row.direction)) && (row.status === null || Number.isInteger(row.status)) &&
       (row.seconds === null || (typeof row.seconds === 'number' && Number.isFinite(row.seconds))) &&
       (row.updatedAt === null || typeof row.updatedAt === 'string')).slice(0, 100);
-    return { status: 'ready', kind: 'arrivals', arrivals, fetchedAt: result.fetchedAt };
+    return { status: 'ready', kind: 'arrivals', arrivals, fetchedAt: result.fetchedAt,
+      ...(result.stale === true ? { stale: true as const } : {}) };
   }
   throw new Error('invalid-response');
 }
