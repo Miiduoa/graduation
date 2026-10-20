@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
-import {TDX,ORIGIN,probeTdx,probePublic,verifiedArrival,buildRemoteCommand,parseRemoteReport,probeRuntime,validateProfile,hasBusShell,verifyOfficialNotice,sanitizedRemoteFailure,failureFromFlyExecError} from './transit-release-gate.mjs';
+import {TDX,ORIGIN,probeTdx,probePublic,verifiedArrival,buildRemoteCommand,parseRemoteReport,probeRuntime,validateProfile,hasBusShell,verifyOfficialNotice,sanitizedRemoteFailure,failureFromFlyExecError,retryAfterMs,withRateLimitRetry} from './transit-release-gate.mjs';
 const stamp = '2026-10-12T16:00:00Z';
 const now = () => Date.parse(stamp);
 const sha = 'a'.repeat(40);
@@ -245,4 +245,85 @@ test('catalog certification rejects missing metadata, wrong city, duplicate IDs,
 test('catalog proof rejects missing or stale response timestamps that the App cannot consume',async()=>{
   for(const fetchedAt of [null,'invalid',new Date(now()-301_000).toISOString()])
     await assert.rejects(probePublic(sha,{profile:catalogProfile,fetcher:catalogPublic({fetchedAt}),now}),/static-catalog-not-ready/);
+});
+
+// The public server answers 429 with Retry-After while the shared TDX key is cooling down.
+function publicWith429({failTimes=1,retryAfter='60',onAction='campus',status=429}={}) {
+  const base=mock({provider:false}); let failures=0; const calls=[];
+  const fetcher=async(url,init)=>{
+    if(url.endsWith('/api/transit')) {
+      const action=JSON.parse(init.body).action; calls.push(action);
+      if(action===onAction && failures<failTimes) {
+        failures+=1;
+        return Response.json({status:'unavailable',reason:'rate-limited'},{status,headers:retryAfter===null?{}:{'Retry-After':retryAfter}});
+      }
+    }
+    return base(url,init);
+  };
+  return {fetcher,calls};
+}
+test('public check waits out a 429 using Retry-After and still verifies the same request',async()=>{
+  const sleeps=[]; const {fetcher,calls}=publicWith429();
+  const result=await probePublic(sha,{fetcher,now,sleep:async(ms)=>{sleeps.push(ms);}});
+  assert.equal(result.ready,true); assert.deepEqual(sleeps,[60_000]);
+  assert.deepEqual(calls,['campus','campus','arrivals']);
+});
+test('public check uses its own delay when Retry-After is missing or shorter, and retries arrivals too',async()=>{
+  const sleeps=[]; const {fetcher}=publicWith429({retryAfter:null,onAction:'arrivals'});
+  assert.equal((await probePublic(sha,{fetcher,now,sleep:async(ms)=>{sleeps.push(ms);}})).ready,true);
+  assert.deepEqual(sleeps,[30_000]);
+  const short=[]; const second=publicWith429({retryAfter:'1'});
+  await probePublic(sha,{fetcher:second.fetcher,now,sleep:async(ms)=>{short.push(ms);}});
+  assert.deepEqual(short,[30_000]);
+});
+test('a provider-chosen Retry-After is capped so a release cannot hang',async()=>{
+  const sleeps=[]; const {fetcher}=publicWith429({retryAfter:'99999'});
+  await probePublic(sha,{fetcher,now,sleep:async(ms)=>{sleeps.push(ms);},maxRateLimitWaitMs:1_000_000});
+  assert.deepEqual(sleeps,[120_000]);
+});
+test('persistent public 429 fails closed as rate-limited within the bounded attempts and total wait',async()=>{
+  const sleeps=[]; const {fetcher,calls}=publicWith429({failTimes:99});
+  await assert.rejects(probePublic(sha,{fetcher,now,sleep:async(ms)=>{sleeps.push(ms);}}),/^Error: rate-limited$/);
+  assert.deepEqual(sleeps,[60_000,60_000,60_000]); assert.equal(calls.length,4);
+  const budget=[]; const tight=publicWith429({failTimes:99});
+  await assert.rejects(probePublic(sha,{fetcher:tight.fetcher,now,sleep:async(ms)=>{budget.push(ms);},maxRateLimitWaitMs:100_000}),/rate-limited/);
+  assert.deepEqual(budget,[60_000]);
+});
+test('the total wait budget is shared across every public request',async()=>{
+  const base=mock({provider:false}); const seen=new Map(); const sleeps=[];
+  const fetcher=async(url,init)=>{
+    if(url.endsWith('/api/transit')) {
+      const action=JSON.parse(init.body).action; const n=(seen.get(action)??0)+1; seen.set(action,n);
+      if(n===1) return Response.json({status:'unavailable',reason:'rate-limited'},{status:429,headers:{'Retry-After':'60'}});
+    }
+    return base(url,init);
+  };
+  await assert.rejects(probePublic(sha,{fetcher,now,sleep:async(ms)=>{sleeps.push(ms);},maxRateLimitWaitMs:90_000}),/rate-limited/);
+  assert.deepEqual(sleeps,[60_000]);
+});
+test('other public failures are never retried',async()=>{
+  const sleeps=[]; const {fetcher,calls}=publicWith429({status:503});
+  await assert.rejects(probePublic(sha,{fetcher,now,sleep:async(ms)=>{sleeps.push(ms);}}),/service-unavailable/);
+  assert.deepEqual(sleeps,[]); assert.deepEqual(calls,['campus']);
+});
+test('Retry-After parsing accepts seconds or HTTP dates only and is capped',()=>{
+  assert.equal(retryAfterMs('60'),60_000);
+  assert.equal(retryAfterMs(' 0 '),0);
+  assert.equal(retryAfterMs('99999'),120_000);
+  assert.equal(retryAfterMs(new Date(now()+45_000).toUTCString(),now),45_000);
+  for (const value of [null,undefined,'',' ','-5','1.5','soon',new Date(now()-1000).toUTCString()]) assert.equal(retryAfterMs(value,now),null);
+});
+test('the in-machine TDX probe keeps fixed delays and ignores a provider Retry-After',async()=>{
+  const base=mock(); let tokenCalls=0; const sleeps=[];
+  const fetcher=async(url,init)=>{
+    if(url.includes('/openid-connect/token')&&++tokenCalls===1) return Response.json({},{status:429,headers:{'Retry-After':'300'}});
+    return base(url,init);
+  };
+  assert.equal((await probeTdx({credentials,fetcher,now,sleep:async(ms)=>{sleeps.push(ms);},rateLimitDelays:[123]})).ready,true);
+  assert.deepEqual(sleeps,[123]);
+});
+test('rate-limit retry helper rethrows non-429 errors immediately',async()=>{
+  let calls=0;
+  await assert.rejects(withRateLimitRetry(async()=>{calls+=1; throw new Error('not-authorized');},{delays:[1,1],sleep:async()=>assert.fail('must not wait')}),/not-authorized/);
+  assert.equal(calls,1);
 });

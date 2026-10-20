@@ -36,6 +36,31 @@ export function failureFromFlyExecError(error, profile = LIVE_PROFILE) {
   return 'fly-runtime-probe-failed';
 }
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const MAX_RETRY_AFTER_MS = 120_000;
+// Accept only delta-seconds or an HTTP date; anything else falls back to our own delay.
+export function retryAfterMs(value, now = Date.now) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const trimmed = value.trim();
+  const ms = /^\d{1,6}$/.test(trimmed) ? Number(trimmed) * 1000 : Date.parse(trimmed) - now();
+  return Number.isFinite(ms) && ms >= 0 ? Math.min(ms, MAX_RETRY_AFTER_MS) : null;
+}
+// Retry only a 429, for the same single request, a bounded number of times and
+// within a total wait budget. The wait honours the server's Retry-After (capped)
+// but never goes below our own delay; every other failure stays immediate.
+export async function withRateLimitRetry(work, {delays = [], sleep = defaultSleep, maxTotalWaitMs = Infinity, honorRetryAfter = true} = {}) {
+  const steps = Array.isArray(delays) ? delays.filter((value) => Number.isFinite(value) && value >= 0) : [];
+  let waited = 0;
+  for (let attempt = 0; ; attempt += 1) {
+    try { return await work(); }
+    catch (error) {
+      if (error?.message !== 'rate-limited' || attempt >= steps.length) throw error;
+      const wait = Math.max(steps[attempt], honorRetryAfter && Number.isFinite(error.retryAfterMs) ? error.retryAfterMs : 0);
+      if (waited + wait > maxTotalWaitMs) throw error;
+      waited += wait;
+      await sleep(wait);
+    }
+  }
+}
 
 export function validateProfile(profile = LIVE_PROFILE) {
   if (![LIVE_PROFILE, LINKS_PROFILE, CATALOG_PROFILE].includes(profile)) fail('unknown-transit-profile');
@@ -59,8 +84,12 @@ async function json(url, init = {}, fetcher = fetch) {
     response = await fetcher(url, { ...init, cache: 'no-store', redirect: 'error',
       credentials: 'omit', signal: AbortSignal.timeout(10_000) });
   } catch { fail('network-unavailable'); }
-  if (!response.ok) fail(response.status === 401 || response.status === 403 ? 'not-authorized' :
-    response.status === 429 ? 'rate-limited' : 'service-unavailable');
+  if (response.status === 429) {
+    const error = new GateError('rate-limited');
+    error.retryAfterMs = retryAfterMs(response.headers.get('retry-after'));
+    throw error;
+  }
+  if (!response.ok) fail(response.status === 401 || response.status === 403 ? 'not-authorized' : 'service-unavailable');
   if (!response.headers.get('content-type')?.includes('application/json')) fail('invalid-response');
   try { return await response.json(); } catch { fail('invalid-response'); }
 }
@@ -111,19 +140,13 @@ export async function probeTdx({ credentials = {clientId: process.env.TDX_CLIENT
   fetcher = fetch, now = Date.now, sleep = defaultSleep, rateLimitDelays = [20_000, 40_000] } = {}) {
   const {clientId, clientSecret} = credentials;
   if (!text(clientId) || !text(clientSecret)) fail('tdx-not-configured');
-  const delays = Array.isArray(rateLimitDelays) ? rateLimitDelays.filter((value) => Number.isFinite(value) && value >= 0) : [];
   // TDX limits each API key, and every Web machine shares that quota with the
   // public server. Retry only a 429, on the same already-issued token and for
   // the same single request; other failures stay fail-closed and immediate.
-  const callJson = async (url, init) => {
-    for (let attempt = 0; ; attempt += 1) {
-      try { return await json(url, init, fetcher); }
-      catch (error) {
-        if (error?.message !== 'rate-limited' || attempt >= delays.length) throw error;
-        await sleep(delays[attempt]);
-      }
-    }
-  };
+  // Inside a machine the whole probe must finish within the Fly SSH timeout, so
+  // keep the fixed delays here rather than a provider-chosen Retry-After.
+  const callJson = (url, init) => withRateLimitRetry(() => json(url, init, fetcher),
+    {delays: rateLimitDelays, sleep, honorRetryAfter: false});
   const auth = await callJson(`${TDX}/auth/realms/TDXConnect/protocol/openid-connect/token`, {
     method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'},
     body: new URLSearchParams({grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret}).toString(),
@@ -137,9 +160,16 @@ export async function probeTdx({ credentials = {clientId: process.env.TDX_CLIENT
   return collect(stops, (stopId) => request('EstimatedTimeOfArrival', `StopUID eq '${stopId}'`, 200), true, now);
 }
 
-export async function probePublic(expectedRevision, {fetcher = fetch, now = Date.now, profile = LIVE_PROFILE} = {}) {
+// The public server guards the shared TDX key and answers 429 with Retry-After
+// (60 s) right after the in-machine probes spend that quota. Waiting it out is
+// the only honest option: no bypass header, the public limit is never relaxed.
+export async function probePublic(expectedRevision, {fetcher = fetch, now = Date.now, profile = LIVE_PROFILE,
+  sleep = defaultSleep, rateLimitDelays = [30_000, 60_000, 60_000], maxRateLimitWaitMs = 240_000} = {}) {
   validateProfile(profile);
   if (!/^[a-f0-9]{40}$/.test(expectedRevision ?? '')) fail('exact-revision-required');
+  let budgetLeft = Number.isFinite(maxRateLimitWaitMs) && maxRateLimitWaitMs >= 0 ? maxRateLimitWaitMs : 0;
+  const retryPublic = (work) => withRateLimitRetry(work, {delays: rateLimitDelays, maxTotalWaitMs: budgetLeft,
+    sleep: async (ms) => { budgetLeft -= ms; await sleep(ms); }});
   const health = await json(`${ORIGIN}/health/ready`, {}, fetcher);
   if (health?.service !== 'campus-one-web' || health.status !== 'ready' || health.legacy !== 'ready' ||
       health.revision !== expectedRevision) fail('public-revision-not-ready');
@@ -168,7 +198,7 @@ export async function probePublic(expectedRevision, {fetcher = fetch, now = Date
       serverNoticeVerified:true, browserControlsVerified:false, liveArrivalsVerified:false, physicalDeviceVerified:false };
   }
   const query = async (body, kind) => {
-    const result = await json(`${ORIGIN}/api/transit`, {method:'POST',headers:{'Content-Type':'application/json',Origin:ORIGIN},body:JSON.stringify(body)},fetcher);
+    const result = await retryPublic(() => json(`${ORIGIN}/api/transit`, {method:'POST',headers:{'Content-Type':'application/json',Origin:ORIGIN},body:JSON.stringify(body)},fetcher));
     if (result?.status !== 'ready' || result.kind !== kind) fail('public-transit-not-ready');
     return result[kind];
   };
