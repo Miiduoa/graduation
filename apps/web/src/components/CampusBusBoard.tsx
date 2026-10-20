@@ -53,6 +53,7 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
   const [revision, setRevision] = useState(0);
   const [clock, setClock] = useState(() => Date.now());
   const [offline, setOffline] = useState(false);
+  const [laneOpen, setLaneOpen] = useState(false);
   const inFlight = useRef(false);
   useEffect(() => {
     if (!spec) return;
@@ -117,6 +118,9 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
       window.removeEventListener('offline', resume);
     };
   }, [schoolId, spec, revision]);
+  useEffect(() => {
+    setLaneOpen(false);
+  }, [segment]);
   if (!spec) return null;
   const current = CAMPUS_SEGMENTS.find((item) => item.key === segment) ?? CAMPUS_SEGMENTS[0];
   const arrivals = result?.status === 'ready' && result.kind === 'arrivals' ? result.arrivals : [];
@@ -191,8 +195,15 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
           )}
           {lane.extra.length ? (
             <li className={css.laneMore}>
-              <details>
-                <summary>還有 {lane.extra.length} 班</summary>
+              <button
+                type="button"
+                className={css.laneMoreToggle}
+                aria-expanded={laneOpen}
+                onClick={() => setLaneOpen((open) => !open)}
+              >
+                {laneOpen ? '收合' : `還有 ${lane.extra.length} 班`}
+              </button>
+              {laneOpen ? (
                 <ul>
                   {lane.extra.map((row) => (
                     <li key={`${row.route}:${row.heading}`}>
@@ -200,7 +211,7 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
                     </li>
                   ))}
                 </ul>
-              </details>
+              ) : null}
             </li>
           ) : null}
         </ul>

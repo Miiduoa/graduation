@@ -92,12 +92,6 @@ const HEADING_LANDMARKS: ReadonlyArray<{ test: RegExp; label: string }> = [
   { test: /機場/, label: '機場' },
   { test: /港區藝術/, label: '港區藝術中心' },
 ];
-function isKnownPublicPlace(name: string): boolean {
-  if (!name) return false;
-  if (name === '校內' || name === '本站' || name === '進校園' || campusInboundPlace(name)) return true;
-  return HEADING_LANDMARKS.some((item) => item.label === name || item.test.test(name));
-}
-
 export function isCampusStopName(name: string): boolean {
   return CAMPUS_NAME.test(name);
 }
@@ -159,11 +153,7 @@ export function headingAfterBoarding(
 ): string {
   const index = boardingIndex(sequence, boardingId, boardingName);
   if (index >= 0) {
-    const after = publicHeadingFromStops(sequence.stops.slice(index + 1).map((stop) => stop.name));
-    if (after && after !== '校內') return after;
-    const origin = headingBeforeBoarding(sequence, boardingId, boardingName);
-    if (origin && !origin.startsWith('從')) return `從${origin}`;
-    return after;
+    return publicHeadingFromStops(sequence.stops.slice(index + 1).map((stop) => stop.name));
   }
   const last = sequence.stops[sequence.stops.length - 1]?.name ?? '';
   return campusInboundPlace(last) || publicPlaceName(last);
@@ -490,14 +480,9 @@ export function waitingPlaceLine(name: string): string {
 }
 export function campusHeadingText(row: CampusNextRow): string {
   const heading = row.heading || (row.arrival ? publicPlaceName(row.arrival.destination) : '');
-  if (!heading) return row.arrival ? directionLabel(row.arrival) : '';
+  if (!heading || heading === '本站' || heading === '到本站') return '';
   if (heading === '校內' || heading === '往校內' || heading === '進校園') return '進校園';
-  if (heading === '本站' || heading === '到本站') return '到本站';
-  if (heading.startsWith('從')) {
-    const place = heading.replace(/^從\s*/, '').trim();
-    if (!place || !isKnownPublicPlace(place)) return '進校園';
-    return `從 ${place}`;
-  }
+  if (heading.startsWith('從')) return '進校園';
   if (heading.startsWith('往')) return heading;
   return `往 ${heading}`;
 }

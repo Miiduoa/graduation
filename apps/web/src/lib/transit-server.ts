@@ -3,7 +3,7 @@ import {
   isCity, isPosition, isRecord, isStopId, publicPlaceName, type RouteStopSequence, type TransitArrival,
   type TransitCity, type TransitFailure, type TransitQuery, type TransitResult, type TransitRoute, type TransitStop,
 } from './transit';
-import { catalogProvidenceLaneDestination, searchTaichungCatalog } from './transit-catalog';
+import { catalogProvidenceLaneDestination, catalogProvidenceLaneFarEnd, searchTaichungCatalog } from './transit-catalog';
 
 const BASE = 'https://tdx.transportdata.tw';
 const text = (value: unknown) => typeof value === 'string' ? value.trim().slice(0, 120) : '';
@@ -101,6 +101,23 @@ function sequenceForArrival(row: Record<string, unknown>, sequences: RouteStopSe
       sequence.subRouteUid && sequence.subRouteUid === routeUid));
 }
 
+function isUsefulLaneHeading(name: string): boolean {
+  const heading = publicPlaceName(name) || name.trim();
+  if (!heading) return false;
+  if (heading === '校內' || heading === '本站' || heading === '到本站' || heading === '進校園') return false;
+  if (isCampusStopName(heading)) return false;
+  return true;
+}
+
+function providenceLaneHeading(route: string, direction: number | null, current: string): string {
+  if (isUsefulLaneHeading(current)) return publicPlaceName(current) || current;
+  const catalogThis = catalogProvidenceLaneDestination(route, direction);
+  if (isUsefulLaneHeading(catalogThis)) return publicPlaceName(catalogThis) || catalogThis;
+  const farEnd = catalogProvidenceLaneFarEnd(route);
+  if (isUsefulLaneHeading(farEnd)) return publicPlaceName(farEnd) || farEnd;
+  return '';
+}
+
 function arrivalDestination(
   row: Record<string, unknown>,
   destinations?: Map<string, string>,
@@ -112,19 +129,15 @@ function arrivalDestination(
       destinations?.get(`${text(row.RouteUID)}:${direction}`) || '' : '');
   const sequence = sequenceForArrival(row, sequences);
   const boardingId = isStopId(row.StopUID) ? row.StopUID : '';
-  if (sequence && sequence.stops.some((stop) => stop.id && stop.id === boardingId)) {
-    return headingAfterBoarding(sequence, boardingId, localName(row.StopName)) || publicPlaceName(raw) || raw;
-  }
-  const named = publicPlaceName(raw) || raw;
-  if (named) return named;
+  const fromStops = sequence && sequence.stops.some((stop) => stop.id && stop.id === boardingId)
+    ? headingAfterBoarding(sequence, boardingId, localName(row.StopName)) || publicPlaceName(raw) || raw
+    : '';
+  const named = fromStops || publicPlaceName(raw) || raw;
   const stopName = localName(row.StopName);
   if (isCampusStopName(stopName) && stopName.includes('專用道')) {
-    const catalogDest = catalogProvidenceLaneDestination(localName(row.RouteName), direction);
-    const heading = publicPlaceName(catalogDest) || catalogDest;
-    if (!heading || heading === '校內') return heading ? '本站' : '';
-    return heading;
+    return providenceLaneHeading(localName(row.RouteName), direction, named);
   }
-  return '';
+  return named;
 }
 
 export function routesAtCampusStop(stopId: string, sequences: RouteStopSequence[]): TransitRoute[] {
@@ -175,13 +188,16 @@ export function normalizeTransitArrivals(
     const current = arrivals.get(id);
     if (current?.updatedAt && (!Number.isFinite(timestamp) || Date.parse(current.updatedAt) > timestamp)) continue;
     const destination = arrivalDestination(row, destinations, sequences);
+    const stopName = localName(row.StopName);
+    // 專用道終點進站、去程另一端也沒有學生能懂的站名：不列，避免寫「到本站」。
+    if (isCampusStopName(stopName) && stopName.includes('專用道') && !destination) continue;
     const scheduledStamp = Date.parse(text(row.NextBusTime));
     arrivals.set(id, {
       id, route, direction, destination,
       status: typeof row.StopStatus === 'number' && Number.isInteger(row.StopStatus) ? row.StopStatus : null,
       seconds: typeof row.EstimateTime === 'number' && Number.isFinite(row.EstimateTime) && row.EstimateTime >= 0 ? row.EstimateTime : null,
       updatedAt: Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null,
-      stopName: localName(row.StopName),
+      stopName,
       scheduledAt: Number.isFinite(scheduledStamp) ? new Date(scheduledStamp).toISOString() : null,
     });
   }

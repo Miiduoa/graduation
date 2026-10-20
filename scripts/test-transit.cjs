@@ -159,6 +159,41 @@ test('campus-next fills 專用道 termini from the static catalog without extra 
   ]);
   assert.deepEqual(display.extra.map((row) => row.route), ['305']);
 });
+test('campus-next 專用道 inbound uses the outbound terminus instead of 到本站', async () => {
+  const mock = service((url) => Response.json(url.includes('/StopOfRoute/') ? [] : [
+    arrival({
+      StopUID: 'TXG-BRT-300', RouteUID: 'TXG300', RouteName: { Zh_tw: '300' },
+      StopName: { Zh_tw: '靜宜大學(專用道)' }, Direction: 1, DestinationStopNameZh: '靜宜大學(專用道)', EstimateTime: 240,
+    }),
+    arrival({
+      StopUID: 'TXG-BRT-310', RouteUID: 'TXG310', SubRouteUID: 'TXG310B', RouteName: { Zh_tw: '310區2' },
+      StopName: { Zh_tw: '靜宜大學(專用道)' }, Direction: 1, EstimateTime: 360,
+    }),
+    arrival({
+      StopUID: 'TXG-BRT-DEAD', RouteUID: 'TXG999', RouteName: { Zh_tw: '專用道終點班' },
+      StopName: { Zh_tw: '靜宜大學(專用道)' }, Direction: 1, DestinationStopNameZh: '靜宜大學(專用道)', EstimateTime: 90,
+    }),
+  ]));
+  const result = await mock.execute({ action: 'campus-next', schoolId: 'pu' });
+  assert.equal(result.status, 'ready');
+  assert.equal(mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/')).length, 1);
+  assert.equal(mock.calls.filter((call) => call.url.includes('/StopOfRoute/')).some((call) => {
+    const filter = new URL(call.url).searchParams.get('$filter') ?? '';
+    return /TXG300|TXG310|TXG999/.test(filter);
+  }), false);
+  const downtown = result.arrivals.find((row) => row.route === '300');
+  const branch = result.arrivals.find((row) => row.route === '310區2');
+  assert.equal(downtown.destination, '台中車站');
+  assert.equal(branch.destination, '台中車站');
+  assert.equal(result.arrivals.some((row) => row.route === '專用道終點班'), false);
+  const rows = client.campusSegmentRows(result.arrivals, '專用道', NOW);
+  assert.deepEqual(rows.map((row) => [row.route, client.campusHeadingText(row)]), [
+    ['300', '往 台中車站'],
+    ['310區2', '往 台中車站'],
+  ]);
+  assert.equal(rows.every((row) => !client.campusHeadingText(row).includes('到本站')), true);
+  assert.equal(rows.every((row) => !client.campusHeadingText(row).startsWith('從')), true);
+});
 test('campus-next never lists other 專用道 stops such as 市政府 in segments or home', async () => {
   const cityHall = arrival({
     StopUID: 'TXG-CITY-HALL', RouteUID: 'TXG301', RouteName: { Zh_tw: '301' }, StopName: { Zh_tw: '市政府(專用道)' },
