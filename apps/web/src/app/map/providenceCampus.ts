@@ -131,6 +131,11 @@ export function withProvidenceCampusPlaces(
   return merged.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
 }
 
+/** 有內建、已核對地點的學校；這些地點不必等外部資料就能先顯示。 */
+export function hasBundledCampusPlaces(schoolId: string): boolean {
+  return schoolId === 'pu';
+}
+
 export function providencePlaceSourceUrl(location: MapLocation): string | null {
   const place = [...PROVIDENCE_CAMPUS_PLACES, ...PROVIDENCE_BUS_STOPS].find(
     (entry) => entry.id === location.id,

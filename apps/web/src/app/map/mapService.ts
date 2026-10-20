@@ -31,8 +31,41 @@ function validId(value: string) {
   return value.length > 0 && !value.includes('/');
 }
 
-export async function loadMapLocations(schoolId: string): Promise<MapLocation[]> {
+/** 地點來源最多等這麼久；連線卡住時不能讓畫面永遠停在「正在載入」。 */
+export const MAP_SOURCE_TIMEOUT_MS = 8000;
+
+export class MapSourceTimeoutError extends Error {
+  constructor() {
+    super('Map source timed out');
+    this.name = 'MapSourceTimeoutError';
+  }
+}
+
+export function withTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new MapSourceTimeoutError()), timeoutMs);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+export async function loadMapLocations(
+  schoolId: string,
+  { timeoutMs = MAP_SOURCE_TIMEOUT_MS }: { timeoutMs?: number } = {},
+): Promise<MapLocation[]> {
   if (!isFirebaseConfigured() || !validId(schoolId)) throw new Error('Map source unavailable');
+  return withTimeout(readMapLocations(schoolId), timeoutMs);
+}
+
+async function readMapLocations(schoolId: string): Promise<MapLocation[]> {
   const db = getDb();
   let snapshot = await getDocsFromServer(collection(db, 'schools', schoolId, 'pois'));
   // Only use the migration source after the canonical source confirms it is empty.
