@@ -44,8 +44,8 @@ test('non-demo schools at least configure campus news and academic affairs', () 
   for (const school of SCHOOLS.filter((item) => item.demo !== true)) {
     const sources = listSources(school.schoolId);
     expect(sources.some((item) => item.scope === 'campus')).toBe(true);
-    if (school.schoolId === 'ncku') {
-      expect(sources.map((item) => item.sourceId)).toEqual(['ncku-campus']);
+    if (school.schoolId === 'ncku' || school.schoolId === 'scu') {
+      expect(sources.map((item) => item.sourceId)).toEqual([`${school.schoolId}-campus`]);
       continue;
     }
     expect(sources.some((item) => /教務/.test(item.office))).toBe(true);
@@ -110,6 +110,27 @@ test('shared catalog links stay aligned with backend sources', () => {
   }
   expect(shared).not.toContain('tw-demo-uni');
   expect(shared).not.toContain('tw-taichung-uni-a');
+});
+
+test('SCU keeps the verified campus-only 一般公告 list', () => {
+  const scu = listSources('scu');
+  expect(scu.map((item) => item.office)).toEqual(['全校最新消息']);
+  expect(scu.every((item) => item.schoolId === 'scu')).toBe(true);
+  expect(scu).toHaveLength(1);
+  expect(scu[0].listUrl).toBe('https://news.scu.edu.tw/news-3');
+  expect(scu[0].parsers).toEqual(PARSER_PRESETS.iweb);
+  expect(scu.some((item) => item.sourceId === 'scu-aca')).toBe(false);
+  expect(JSON.stringify(scu)).not.toContain('www.scu.edu.tw');
+  expect(JSON.stringify(scu)).not.toContain('/news"');
+});
+
+test('NCHU catalog identity stays tw-nchu and does not alias the Nuni tenant id nchu', () => {
+  expect(SCHOOLS.map((item) => item.schoolId)).toContain('tw-nchu');
+  expect(SCHOOLS.map((item) => item.schoolId)).not.toContain('nchu');
+  expect(listSources('nchu')).toEqual([]);
+  expect(listSources('tw-nchu').every((item) => item.schoolId === 'tw-nchu')).toBe(true);
+  expect(schoolsSrc).toMatch(/id: 'tw-nchu'/);
+  expect(schoolsSrc).not.toMatch(/id: 'nchu'/);
 });
 
 test('NCKU and NTPU keep school-scoped public lists and do not share sources', () => {

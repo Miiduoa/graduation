@@ -245,8 +245,13 @@ it('only exposes verified official announcement URLs and keeps categorized posts
     'https://web.ncku.edu.tw/p/422-1000-1026.php?Lang=zh-tw',
   );
   expect(verifiedOfficialAnnouncementUrl('ntpu')).toBe('https://fms.ntpu.edu.tw/km/24662');
+  expect(verifiedOfficialAnnouncementUrl('scu')).toBe('https://news.scu.edu.tw/news-3');
   expect(verifiedOfficialAnnouncementUrl('cgu')).toBeNull();
   expect(verifiedOfficialAnnouncementUrl('nthu')).toBeNull();
+  expect(verifiedOfficialAnnouncementUrl('tmu')).toBeNull();
+  expect(verifiedOfficialAnnouncementUrl('thu')).toBeNull();
+  expect(verifiedOfficialAnnouncementUrl('nchu')).toBeNull();
+  expect(verifiedOfficialAnnouncementUrl('tw-nchu')).toBeNull();
   const rows = [
     { id: 'keep', title: '選課公告', publishedAt: '2026-10-08T00:00:00.000Z' },
     { id: 'none', title: '無日期稿', publishedAt: '' },

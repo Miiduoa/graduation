@@ -1646,6 +1646,19 @@ describe('course assignment submissions', () => {
       await assertFails(pathTo(testEnv.authenticatedContext('alice').firestore()).set(answer()));
     }
   });
+  test('unpublished, closed and overdue quizzes reject answer writes', async () => {
+    const quizAnswer = answer({ content: '', answers: { q1: 'b' } });
+    for (const overrides of [
+      { type: 'quiz', published: false },
+      { type: 'quiz', status: 'draft' },
+      { type: 'quiz', status: 'closed' },
+      { type: 'quiz', dueAt: Timestamp.fromMillis(0) },
+      { type: 'quiz', dueAt: '2000-01-01T00:00:00Z' },
+    ]) {
+      await seedAssignment(overrides);
+      await assertFails(pathTo(testEnv.authenticatedContext('alice').firestore()).set(quizAnswer));
+    }
+  });
   test('explicit late allowance accepts an overdue submission', async () => {
     await seedAssignment({ dueAt: Timestamp.fromMillis(0), allowLateSubmission: true });
     await assertSucceeds(pathTo(testEnv.authenticatedContext('alice').firestore()).set(answer()));
