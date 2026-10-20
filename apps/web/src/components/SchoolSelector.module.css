@@ -43,6 +43,15 @@
   outline: 3px solid var(--focus-ring);
   outline-offset: 3px;
 }
+.compactName {
+  min-height: 44px;
+  padding-block: 12px;
+  color: #5f6b64;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 18px;
+  list-style: none;
+}
 .popover {
   position: absolute;
   z-index: 210;

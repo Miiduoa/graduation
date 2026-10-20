@@ -16,8 +16,9 @@ const stops: TransitStop[] = [
 const stopResult = (): TransitResult => ({ status: 'ready', kind: 'stops', stops, limited: false, fetchedAt: new Date().toISOString() });
 const emptyArrivals = (): TransitResult => ({ status: 'ready', kind: 'arrivals', arrivals: [], fetchedAt: new Date().toISOString() });
 const renderExplorer = () => render(<TransitExplorer schoolId="pu" schoolName="靜宜大學" />);
+const renderListing = () => render(<TransitExplorer schoolId="ncku" schoolName="國立成功大學" />);
 const groupName = (label: string) => (name: string) =>
-  /^\d{2}/.test(name) && name.includes(label) && !name.includes('收藏');
+  name.includes(label) && !name.includes('收藏');
 const groupButton = (label: string) => screen.getByRole('button', { name: groupName(label) });
 const findGroupButton = (label: string) => screen.findByRole('button', { name: groupName(label) });
 
@@ -44,7 +45,7 @@ afterEach(() => {
 it('shows only the loading copy while campus stops are being fetched', () => {
   vi.mocked(queryTransit).mockImplementation(() => new Promise(() => {}));
   renderExplorer();
-  expect(screen.getByText('正在讀取站牌…')).toBeTruthy();
+  expect(screen.getByTestId('campus-skeleton')).toBeTruthy();
   expect(screen.queryByText('0 站')).toBeNull();
   expect(screen.queryByText('這間學校附近還沒有站牌資料。')).toBeNull();
   expect(screen.queryByText(/沒有找到站牌/)).toBeNull();
@@ -56,11 +57,13 @@ it('starts with school stops without requesting the user location', async () => 
   const locate = vi.fn();
   vi.stubGlobal('navigator', { onLine: true, geolocation: { getCurrentPosition: locate } });
   renderExplorer();
-  await screen.findByText('校門口・往沙鹿');
-  expect(queryTransit).toHaveBeenCalledWith({ action: 'campus', schoolId: 'pu' }, expect.any(AbortSignal));
+  expect(await screen.findByRole('tab', { name: '往沙鹿' })).toBeTruthy();
   expect(queryTransit).toHaveBeenCalledWith({ action: 'campus-next', schoolId: 'pu' }, expect.any(AbortSignal));
+  expect(vi.mocked(queryTransit).mock.calls.some(([query]) => query.action === 'campus')).toBe(false);
   expect(locate).not.toHaveBeenCalled();
-  expect(screen.getByText('校門口・往校內')).toBeTruthy();
+  expect(screen.getByRole('tab', { name: '往校內' })).toBeTruthy();
+  expect(screen.getByRole('tab', { name: '往市區' })).toBeTruthy();
+  expect(screen.getByRole('tab', { name: '專用道' })).toBeTruthy();
   expect(screen.queryByText(/TXG/)).toBeNull();
 });
 
@@ -72,7 +75,8 @@ it('shows Providence gate routes from campus-next without querying a default sto
         status: 'ready', kind: 'arrivals', fetchedAt: now,
         arrivals: [
           { id: '162', route: '162', direction: 1, destination: '沙鹿火車站', status: 0, seconds: 180, updatedAt: now, stopName: '靜宜大學(英才路)' },
-          { id: '301', route: '301', direction: 1, destination: '台中車站', status: 3, seconds: null, updatedAt: now, stopName: '靜宜大學(校門)', scheduledAt: new Date(Date.now() + 12 * 60_000).toISOString() },
+          { id: '301', route: '301', direction: 1, destination: '台中車站', status: 0, seconds: null, updatedAt: now, stopName: '靜宜大學(校門)', scheduledAt: new Date(Date.now() + 12 * 60_000).toISOString() },
+          { id: '326', route: '326', direction: 1, destination: '新民高中', status: 3, seconds: null, updatedAt: now, stopName: '靜宜大學' },
           { id: '368', route: '368', direction: 0, destination: '校內', status: 0, seconds: 600, updatedAt: now, stopName: '靜宜大學(校門)' },
         ],
       };
@@ -81,22 +85,103 @@ it('shows Providence gate routes from campus-next without querying a default sto
     return stopResult();
   });
   renderExplorer();
-  expect(await screen.findByText('3 分')).toBeTruthy();
-  expect(screen.getAllByRole('heading', { name: '校門口下一班' }).length).toBeGreaterThan(0);
-  expect(screen.getByRole('button', { name: '剛剛更新' })).toBeTruthy();
+  expect(await screen.findByText('3')).toBeTruthy();
+  expect(screen.getByText('分')).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '公車' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '重新整理' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: '更新班次' })).toBeNull();
-  expect(screen.getByText(/表定 \d{1,2}:\d{2}/)).toBeTruthy();
-  expect(screen.getByText('10 分')).toBeTruthy();
-  expect(screen.getByText('沒有班次')).toBeTruthy();
   expect(screen.getByText('往 沙鹿火車站')).toBeTruthy();
-  expect(screen.getByText('往 台中車站')).toBeTruthy();
-  expect(screen.getByText('在英才路側等')).toBeTruthy();
+  expect(screen.getByText('校門口站牌・英才路側')).toBeTruthy();
   expect(screen.queryByText('暫時沒資料')).toBeNull();
-  expect(['162', '301', '368', '326'].every((route) => screen.getByText(route))).toBe(true);
+  expect(screen.queryByText('即時到站尚未接通')).toBeNull();
+  expect(screen.queryByText('到站時間為預估值')).toBeNull();
+  fireEvent.click(screen.getByRole('tab', { name: '往市區' }));
+  expect(screen.getByText('往 台中車站')).toBeTruthy();
+  expect(screen.getByText(/表定 \d{1,2}:\d{2}/)).toBeTruthy();
+  expect(screen.getByText('今天收班')).toBeTruthy();
+  fireEvent.click(screen.getByRole('tab', { name: '往校內' }));
+  expect(screen.getByText('10')).toBeTruthy();
   expect(vi.mocked(queryTransit).mock.calls.some(([query]) => query.action === 'arrivals')).toBe(false);
-  fireEvent.click(screen.getByRole('button', { name: /162，往 沙鹿火車站/ }));
-  expect(await screen.findByText(/目前沒有班次預估/)).toBeTruthy();
-  expect(vi.mocked(queryTransit).mock.calls.some(([query]) => query.action === 'arrivals' && query.stopId === 'TXG001')).toBe(true);
+  expect(vi.mocked(queryTransit).mock.calls.filter(([query]) => query.action === 'campus-next')).toHaveLength(1);
+});
+
+it('shows live, scheduled, empty and ended rows together on one direction', async () => {
+  const now = new Date().toISOString();
+  vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next' ? {
+    status: 'ready', kind: 'arrivals', fetchedAt: now,
+    arrivals: [
+      { id: '162', route: '162', direction: 1, destination: '沙鹿火車站', status: 0, seconds: 180, updatedAt: now, stopName: '靜宜大學(英才路)' },
+      { id: '301', route: '301', direction: 1, destination: '嘉陽高中', status: 0, seconds: null, updatedAt: now, stopName: '靜宜大學(英才路)', scheduledAt: new Date(Date.now() + 12 * 60_000).toISOString() },
+      { id: '326', route: '326', direction: 1, destination: '巨業沙鹿站', status: 0, seconds: null, updatedAt: now, stopName: '靜宜大學(英才路)' },
+      { id: '368', route: '368', direction: 1, destination: '沙鹿火車站', status: 3, seconds: null, updatedAt: now, stopName: '靜宜大學(英才路)' },
+    ],
+  } : query.action === 'arrivals' ? emptyArrivals() : stopResult());
+  renderExplorer();
+  expect(await screen.findByText('3')).toBeTruthy();
+  expect(screen.getByText('分')).toBeTruthy();
+  expect(screen.getByText(/表定 \d{1,2}:\d{2}/)).toBeTruthy();
+  expect(screen.getByText('暫無班次資訊')).toBeTruthy();
+  expect(screen.getByText('今天收班')).toBeTruthy();
+  expect(screen.queryByText('這個方向今天的班次都結束了')).toBeNull();
+  expect(screen.queryByText('即時到站尚未接通')).toBeNull();
+  expect(screen.queryByText('到站時間為預估值')).toBeNull();
+});
+
+it('keeps scheduled times when live data is down and says so in the stamp', async () => {
+  const now = new Date().toISOString();
+  vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next' ? {
+    status: 'ready', kind: 'arrivals', fetchedAt: now,
+    arrivals: [
+      { id: '162', route: '162', direction: 1, destination: '沙鹿火車站', status: 0, seconds: null, updatedAt: now, stopName: '靜宜大學(英才路)', scheduledAt: new Date(Date.now() + 8 * 60_000).toISOString() },
+      { id: '301', route: '301', direction: 1, destination: '嘉陽高中', status: 0, seconds: null, updatedAt: now, stopName: '靜宜大學(英才路)', scheduledAt: new Date(Date.now() + 18 * 60_000).toISOString() },
+    ],
+  } : emptyArrivals());
+  renderExplorer();
+  expect(await screen.findByText('讀不到即時資料，先顯示表定時間')).toBeTruthy();
+  expect(screen.getAllByText(/表定 \d{1,2}:\d{2}/).length).toBeGreaterThan(1);
+  expect(screen.queryByText('分')).toBeNull();
+});
+
+it('keeps ended rows and adds the whole-direction hint', async () => {
+  const now = new Date().toISOString();
+  vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next' ? {
+    status: 'ready', kind: 'arrivals', fetchedAt: now,
+    arrivals: [
+      { id: '162', route: '162', direction: 1, destination: '沙鹿火車站', status: 3, seconds: null, updatedAt: now, stopName: '靜宜大學(英才路)' },
+      { id: '368', route: '368', direction: 1, destination: '巨業沙鹿站', status: 4, seconds: null, updatedAt: now, stopName: '靜宜大學(英才路)' },
+    ],
+  } : emptyArrivals());
+  renderExplorer();
+  expect(await screen.findByText('這個方向今天的班次都結束了')).toBeTruthy();
+  expect(screen.getAllByText('今天收班')).toHaveLength(2);
+});
+
+it('blocks another manual refresh until the in-flight request finishes', async () => {
+  let finish!: (result: TransitResult) => void;
+  let calls = 0;
+  const now = new Date().toISOString();
+  vi.mocked(queryTransit).mockImplementation(async (query) => {
+    if (query.action !== 'campus-next') return emptyArrivals();
+    calls += 1;
+    if (calls === 1) {
+      return {
+        status: 'ready', kind: 'arrivals', fetchedAt: now,
+        arrivals: [{ id: '162', route: '162', direction: 1, destination: '沙鹿火車站', status: 0, seconds: 600, updatedAt: now, stopName: '靜宜大學(英才路)' }],
+      };
+    }
+    return new Promise((resolve) => { finish = resolve; });
+  });
+  renderExplorer();
+  expect(await screen.findByText('10')).toBeTruthy();
+  const button = screen.getByRole('button', { name: '重新整理' }) as HTMLButtonElement;
+  fireEvent.click(button);
+  expect(button.disabled).toBe(true);
+  await act(async () => finish({
+    status: 'ready', kind: 'arrivals', fetchedAt: now,
+    arrivals: [{ id: '162', route: '162', direction: 1, destination: '沙鹿火車站', status: 0, seconds: 300, updatedAt: now, stopName: '靜宜大學(英才路)' }],
+  }));
+  expect(await screen.findByText('5')).toBeTruthy();
+  expect(button.disabled).toBe(false);
 });
 
 it('keeps school and manual search available when location permission is denied', async () => {
@@ -107,7 +192,7 @@ it('keeps school and manual search available when location permission is denied'
   fireEvent.click(screen.getByRole('button', { name: '使用我的位置' }));
   expect(await screen.findByText(/你尚未允許定位/)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '學校站牌' }));
-  await screen.findByText('校門口・往沙鹿');
+  expect(await screen.findByRole('tab', { name: '往沙鹿' })).toBeTruthy();
   expect(screen.getByRole('button', { name: '搜尋站名' })).toBeTruthy();
 });
 
@@ -154,7 +239,7 @@ it('abort and selection identity prevent an old station response from replacing 
     firstSignal = signal;
     return new Promise((resolve) => { finish = resolve; });
   });
-  renderExplorer();
+  renderListing();
   fireEvent.click(await findGroupButton('校門口・往沙鹿'));
   await waitFor(() => expect(queryTransit).toHaveBeenCalledWith(
     { action: 'arrivals', city: 'Taichung', stopId: 'TXG001' }, expect.any(AbortSignal),
@@ -167,7 +252,7 @@ it('abort and selection identity prevent an old station response from replacing 
 });
 
 it('saves public stops, never the location-derived distance, and supports removing a favorite', async () => {
-  renderExplorer();
+  renderListing();
   fireEvent.click(await screen.findByRole('button', { name: /收藏 校門口・往沙鹿/ }));
   const saved = JSON.parse(localStorage.getItem('campus-one:transit-stops:v1') || '[]');
   expect(saved).toHaveLength(1);
@@ -194,7 +279,7 @@ it('shows a missing integration honestly with retry and official fallback', asyn
 
 it('shows the school empty copy when campus stops load with none', async () => {
   vi.mocked(queryTransit).mockResolvedValue({ status: 'ready', kind: 'stops', stops: [], limited: false, fetchedAt: new Date().toISOString() });
-  renderExplorer();
+  renderListing();
   expect(await screen.findByText('這間學校附近還沒有站牌資料。')).toBeTruthy();
   expect(screen.queryByText('正在讀取站牌…')).toBeNull();
   expect(screen.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
@@ -209,18 +294,18 @@ it('expires countdowns while hidden without continuing to poll the provider', as
   const fetchedAt = new Date().toISOString();
   vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next' ? {
     status: 'ready', kind: 'arrivals', fetchedAt,
-    arrivals: [{ id: 'a', route: '162', direction: 0, destination: '', status: 0, seconds: 480, updatedAt: fetchedAt, stopName: '靜宜大學(校門)' }],
+    arrivals: [{ id: 'a', route: '162', direction: 0, destination: '沙鹿火車站', status: 0, seconds: 480, updatedAt: fetchedAt, stopName: '靜宜大學(英才路)' }],
   } : query.action === 'arrivals' ? emptyArrivals() : stopResult());
   await act(async () => { renderExplorer(); });
-  expect(screen.getByText('8 分')).toBeTruthy();
+  expect(screen.getByText('8')).toBeTruthy();
   const calls = vi.mocked(queryTransit).mock.calls.length;
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
   await act(async () => {
     document.dispatchEvent(new Event('visibilitychange'));
     vi.advanceTimersByTime(90_000);
   });
-  expect(screen.queryByText('8 分')).toBeNull();
-  expect(screen.getAllByText('沒有班次').length).toBeGreaterThan(0);
+  expect(screen.queryByText('8')).toBeNull();
+  expect(screen.getAllByText('暫無班次資訊').length).toBeGreaterThan(0);
   expect(vi.mocked(queryTransit).mock.calls.length).toBe(calls);
 });
 
@@ -284,13 +369,13 @@ it('highlights the next live bus and separates buses without a live estimate', a
       { id: 'ended', route: '326', direction: 0, destination: '', status: 3, seconds: null, updatedAt: now },
     ],
   } : query.action === 'campus-next' ? { status: 'ready', kind: 'arrivals', arrivals: [], fetchedAt: now } : stopResult());
-  renderExplorer();
+  renderListing();
   fireEvent.click(await findGroupButton('校門口・往沙鹿'));
   expect(await screen.findByText(/162 路 · 約 3 分鐘/)).toBeTruthy();
   expect(screen.getByText('下一班')).toBeTruthy();
   expect(screen.getAllByText('返程（終點未提供）')).toHaveLength(2);
   expect(screen.getByText('其他班次（目前沒有即時預估）')).toBeTruthy();
-  expect(screen.getByText('末班車已駛離')).toBeTruthy();
+  expect(screen.getByText('今天收班')).toBeTruthy();
 });
 
 it('keeps the last good arrivals and blocks repeated refreshes when rate limited', async () => {
@@ -302,23 +387,22 @@ it('keeps the last good arrivals and blocks repeated refreshes when rate limited
     nextCalls += 1;
     return nextCalls === 1 ? {
       status: 'ready', kind: 'arrivals', fetchedAt: now,
-      arrivals: [{ id: 'live', route: '162', direction: 1, destination: '', status: 0, seconds: 600, updatedAt: now, stopName: '靜宜大學(校門)' }],
+      arrivals: [{ id: 'live', route: '162', direction: 1, destination: '沙鹿火車站', status: 0, seconds: 600, updatedAt: now, stopName: '靜宜大學(英才路)' }],
     } : { status: 'unavailable', reason: 'rate-limited' };
   });
   renderExplorer();
-  expect(await screen.findByText('10 分')).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: '剛剛更新' }));
-  expect(await screen.findByText(/查詢的人較多，先顯示/)).toBeTruthy();
-  expect(screen.getByText('10 分')).toBeTruthy();
-  const button = screen.getByRole('button', { name: '稍後再試' }) as HTMLButtonElement;
-  expect(button.disabled).toBe(true);
+  expect(await screen.findByText('10')).toBeTruthy();
+  const button = screen.getByRole('button', { name: '重新整理' }) as HTMLButtonElement;
+  fireEvent.click(button);
+  await waitFor(() => expect(nextCalls).toBe(2));
+  expect(screen.getByText('10')).toBeTruthy();
+  expect(button.disabled).toBe(false);
 });
 
 it('groups campus stops with student names and never shows stop codes', async () => {
   renderExplorer();
-  expect(await screen.findByText('校門口・往沙鹿')).toBeTruthy();
-  expect(screen.getByText('校門口・往校內')).toBeTruthy();
-  expect(screen.getByText(/依站序和位置分成學生常用的幾組/)).toBeTruthy();
+  expect(await screen.findByRole('tab', { name: '往沙鹿' })).toBeTruthy();
+  expect(screen.getByRole('tab', { name: '往校內' })).toBeTruthy();
   expect(screen.queryByText(/TXG/)).toBeNull();
   expect(screen.queryByText(/站牌代碼/)).toBeNull();
 });
@@ -338,9 +422,9 @@ it('shows catalog directions and source instead of polling or presenting the sna
   vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next'
     ? { status: 'unavailable', reason: 'not-configured' }
     : catalogResult());
-  await act(async () => { renderExplorer(); });
+  await act(async () => { renderListing(); });
   fireEvent.click(groupButton('校門口・往市區'));
-  expect(screen.getByText('即時到站尚未接通')).toBeTruthy();
+  expect(screen.getByText('班次時間請至官方網站確認')).toBeTruthy();
   expect(screen.queryByText(/到站時間為預估值/)).toBeNull();
   expect(screen.getByText('去程 · 往 台中車站')).toBeTruthy();
   expect(screen.getByText(/資料快照：2026\/10\/18/)).toBeTruthy();
@@ -362,7 +446,7 @@ it('preserves static provider metadata across browser favorites and does not tur
   vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next'
     ? { status: 'unavailable', reason: 'not-configured' }
     : catalogResult());
-  const view = renderExplorer();
+  const view = renderListing();
   fireEvent.click(await screen.findByRole('button', { name: /收藏 校門口・往市區/ }));
   const saved = JSON.parse(localStorage.getItem('campus-one:transit-stops:v1') || '[]');
   expect(saved[0]).toMatchObject({
@@ -374,7 +458,7 @@ it('preserves static provider metadata across browser favorites and does not tur
   render(<TransitExplorer schoolId="nthu" schoolName="國立清華大學" />);
   fireEvent.click(screen.getByRole('button', { name: '常用站牌 1' }));
   fireEvent.click(groupButton('校門口・往市區'));
-  expect(screen.getByText('即時到站尚未接通')).toBeTruthy();
+  expect(screen.getByText('班次時間請至官方網站確認')).toBeTruthy();
   expect(screen.getByText('去程 · 往 台中車站')).toBeTruthy();
   expect(queryTransit).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: /取消收藏 校門口・往市區/ }));
@@ -390,12 +474,12 @@ it('aborts in-flight arrivals when switching to a static stop and resumes only w
     arrivalSignal = signal;
     return new Promise((resolve) => { finish = resolve; });
   });
-  renderExplorer();
+  renderListing();
   fireEvent.click(await findGroupButton('校門口・往沙鹿'));
   await waitFor(() => expect(queryTransit).toHaveBeenCalledWith({ action: 'arrivals', city: 'Taichung', stopId: 'TXG001' }, expect.any(AbortSignal)));
   fireEvent.click(groupButton('校門口・往市區'));
   expect(arrivalSignal.aborted).toBe(true);
-  expect(screen.getByText('即時到站尚未接通')).toBeTruthy();
+  expect(screen.getByText('班次時間請至官方網站確認')).toBeTruthy();
   await act(async () => finish({ status: 'ready', kind: 'arrivals', fetchedAt: new Date().toISOString(), arrivals: [{ id: 'old', route: '舊路線', direction: 0, destination: '', status: 0, seconds: 600, updatedAt: new Date().toISOString() }] }));
   expect(screen.queryByText('舊路線')).toBeNull();
   expect(vi.mocked(queryTransit).mock.calls.filter(([query]) => query.action === 'arrivals')).toHaveLength(1);

@@ -140,7 +140,7 @@ test('static catalog stops show provenance, routes and actions without ever poll
     expect(view.getByText('靜宜大學 · 300 路線 · 返程 · 約 160 公尺 · 無即時到站')).toBeTruthy();
     expect(view.queryByText(/TCOD_/)).toBeNull();
     await act(async () => fireEvent.press(view.getByText('靜宜大學 · 300 路線 · 去程 · 約 120 公尺 · 無即時到站')));
-    expect(view.getByText('即時到站尚未接通')).toBeTruthy();
+    expect(view.getByText('班次時間請至官方網站確認')).toBeTruthy();
     expect(view.getByText(/臺中市政府交通局 · 站牌資料快照：2026/)).toBeTruthy();
     expect(view.getByText('300 · 去程 · 往 臺中車站')).toBeTruthy();
     expect(view.queryByText('更新此站到站時間')).toBeNull();
@@ -156,7 +156,7 @@ test('static catalog stops show provenance, routes and actions without ever poll
     expect(openURL).toHaveBeenLastCalledWith('https://www.google.com/maps/dir/?api=1&destination=24.23%2C120.57&travelmode=walking');
     await act(async () => view.rerender(<View><PublicTransitExplorer key="nthu" schoolId="nthu" /></View>));
     expect(view.getByText('查詢縣市：新竹市')).toBeTruthy();
-    expect(view.queryByText('即時到站尚未接通')).toBeNull();
+    expect(view.queryByText('班次時間請至官方網站確認')).toBeNull();
     expect(view.queryByText(/靜宜大學/)).toBeNull();
     view.unmount();
   } finally {
