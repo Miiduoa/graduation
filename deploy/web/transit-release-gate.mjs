@@ -208,8 +208,9 @@ export async function probePublic(expectedRevision, {fetcher = fetch, now = Date
 }
 
 export function hasBusShell(html) {
-  return typeof html === 'string' && /<[^>]+data-campus-bus-shell=["']true["'][^>]*>/.test(html) &&
-    (html.includes('往沙鹿') || html.includes('公車與交通'));
+  // BusPage owns this server-rendered marker. Campus selection and route copy
+  // resolve after hydration; the shell does not certify browser controls or TDX.
+  return typeof html === 'string' && /<[^>]+\sdata-campus-bus-shell=["']true["'][^>]*>/.test(html);
 }
 
 export function verifyOfficialNotice(html) {

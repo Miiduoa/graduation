@@ -1,7 +1,9 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
+import {readFileSync} from 'node:fs';
 import {TDX,ORIGIN,probeTdx,probePublic,verifiedArrival,buildRemoteCommand,parseRemoteReport,probeRuntime,validateProfile,hasBusShell,verifyOfficialNotice,sanitizedRemoteFailure,failureFromFlyExecError,retryAfterMs,withRateLimitRetry} from './transit-release-gate.mjs';
+const busLoadingHtml = readFileSync(new URL('./fixtures/bus-loading.html', import.meta.url), 'utf8');
 const stamp = '2026-10-12T16:00:00Z';
 const now = () => Date.parse(stamp);
 const sha = 'a'.repeat(40);
@@ -17,7 +19,7 @@ function mock({provider=true,stops=[stop],rows=[arrival],page=true,healthRevisio
       return errorStatus ? Response.json({secret:'must-not-appear'},{status:errorStatus}) : Response.json({access_token:'test-bearer',expires_in:300});
     }
     if (!provider && url.endsWith('/health/ready')) return Response.json({service:'campus-one-web',status:'ready',legacy:'ready',revision:healthRevision});
-    if (!provider && url.endsWith('/bus')) return new Response(page ? '<div data-campus-bus-shell="true">公車與交通</div>' : 'Old bus page',{headers:{'Content-Type':'text/html','Permissions-Policy':'geolocation=(self)'}});
+    if (!provider && url.endsWith('/bus')) return new Response(page ? busLoadingHtml : 'Old bus page',{headers:{'Content-Type':'text/html','Permissions-Policy':'geolocation=(self)'}});
     const stationQuery = provider ? url.includes('/Stop/City/') : JSON.parse(init.body).action === 'campus';
     if (provider) {
       assert.equal(init.headers.Authorization,'Bearer test-bearer');
@@ -54,9 +56,23 @@ test('fresh end-of-service information is distinct from a countdown',async()=>{
   const result=await probeTdx({credentials,fetcher:mock({rows:[{...arrival,status:3,seconds:null}]}),now});
   assert.equal(result.ready,true);assert.equal(result.countdownVerified,false);assert.equal(result.checked[0].arrivals[0].status,3);
 });
-test('public check uses only same-origin POST and verifies the exact revision',async()=>{
+test('public check accepts the campus loading shell and still verifies live data separately',async()=>{
   const result=await probePublic(sha,{fetcher:mock({provider:false}),now});
   assert.equal(result.ready,true);assert.equal(result.revision,sha);assert.equal(result.physicalDeviceVerified,false);
+  assert.equal(result.browserControlsVerified,false);
+  assert.equal(result.directionVerified,true);assert.equal(result.sourceFreshnessVerified,true);
+});
+test('bus shell recognition follows the server marker rather than hydrated route copy',()=>{
+  assert.equal(busLoadingHtml.includes('往沙鹿'),false);
+  assert.equal(busLoadingHtml.includes('公車與交通'),false);
+  assert.equal(hasBusShell(busLoadingHtml),true);
+  for(const html of [null,'','<h1>公車與交通</h1>','<div>data-campus-bus-shell="true" 往沙鹿</div>',
+    '<div data-campus-bus-shell="false">公車與交通</div>',
+    '<div data-campus-bus-shell="true-ish">公車與交通</div>',
+    '<div x-data-campus-bus-shell="true">公車與交通</div>',
+    '&lt;div data-campus-bus-shell="true"&gt;公車與交通&lt;/div&gt;']) {
+    assert.equal(hasBusShell(html),false,JSON.stringify(html));
+  }
 });
 test('an old revision and old bus page stop public certification',async()=>{
   await assert.rejects(probePublic(sha,{fetcher:mock({provider:false,healthRevision:'b'.repeat(40)}),now}),/public-revision-not-ready/);
