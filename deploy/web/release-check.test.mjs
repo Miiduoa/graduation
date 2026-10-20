@@ -96,6 +96,20 @@ test('a healthy Web revision without the current bus shell cannot pass', async (
   assert.equal((await inspectPublic(sha, fetcher)).webDeployed, false);
 });
 
+test('a rate-limited campus query does not fail the Web deploy check', async () => {
+  const report = await inspectPublic(sha, fakeFetch({}, { status: 'unavailable', reason: 'rate-limited' }));
+  assert.equal(report.webDeployed, true);
+  assert.equal(report.transit.status, 'rate-limited');
+});
+
+test('the previous bus shell without the spec marker cannot pass as a new page', async () => {
+  const healthy = fakeFetch();
+  const fetcher = (url, init) => url.endsWith('/bus')
+    ? Promise.resolve(new Response('<html><div data-campus-bus-shell="true">公車與交通往沙鹿</div></html>', {headers:{'Content-Type':'text/html','Permissions-Policy':'geolocation=(self)'}}))
+    : healthy(url, init);
+  assert.equal((await inspectPublic(sha, fetcher)).webDeployed, false);
+});
+
 test('an explicit links profile is recorded without claiming live transit or browser verification',async()=>{
   const report=await inspectPublic(sha,fakeFetch(),'official-links-only');
   assert.equal(report.profile,'official-links-only');
