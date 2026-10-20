@@ -53,9 +53,11 @@ it('uses remaining stops after the boarding stop, not the inbound campus terminu
   expect(headingBucket('主顧聖母堂')).toBe('往校內');
   expect(headingBucket('從沙鹿火車站')).toBe('往校內');
   expect(campusHeadingText({ route: '368', heading: '主顧聖母堂', arrival: null })).toBe('往 主顧聖母堂');
-  expect(campusHeadingText({ route: '301', heading: '從沙鹿火車站', arrival: null })).toBe('從 沙鹿火車站');
+  expect(campusHeadingText({ route: '301', heading: '從沙鹿火車站', arrival: null })).toBe('進校園');
   expect(campusHeadingText({ route: '326', heading: '從下晉江', arrival: null })).toBe('進校園');
+  expect(campusHeadingText({ route: '326', heading: '從臺中榮總', arrival: null })).toBe('進校園');
   expect(campusHeadingText({ route: '326', heading: '校內', arrival: null })).toBe('進校園');
+  expect(campusHeadingText({ route: '326', heading: '', arrival: null })).toBe('');
 });
 
 it('does not regroup an inbound origin as 往沙鹿', () => {
@@ -68,9 +70,12 @@ it('does not regroup an inbound origin as 往沙鹿', () => {
       { id: 'HALL', name: '靜宜大學(會館)' },
     ],
   };
-  expect(headingAfterBoarding(inbound, 'GATE', '靜宜大學(校門)')).toBe('從沙鹿火車站');
+  expect(headingAfterBoarding(inbound, 'GATE', '靜宜大學(校門)')).toBe('校內');
   expect(headingBucket(headingAfterBoarding(inbound, 'GATE', '靜宜大學(校門)'))).toBe('往校內');
   expect(campusGroupLabel('校門口', headingBucket('從沙鹿火車站'))).toBe('校門口・往校內');
+  expect(campusHeadingText({
+    route: '301', heading: headingAfterBoarding(inbound, 'GATE', '靜宜大學(校門)'), arrival: null,
+  })).toBe('進校園');
 });
 
 it('does not use an unfamiliar village as the inbound origin', () => {
@@ -87,6 +92,9 @@ it('does not use an unfamiliar village as the inbound origin', () => {
   expect(campusHeadingText({
     route: '326', heading: headingAfterBoarding(inbound, 'GATE', '靜宜大學(校門)'), arrival: null,
   })).toBe('進校園');
+  expect(campusHeadingText({
+    route: '326', heading: headingAfterBoarding(inbound, 'GATE', '靜宜大學(校門)'), arrival: null,
+  })).not.toMatch(/^從/);
 });
 
 it('groups Providence stops into at most four student-facing labels without stop codes', () => {
@@ -188,6 +196,33 @@ it('does not list other 專用道 stops such as 市政府 in any campus segment 
   const home = pickCampusNext([cityHall, gate], now, ['162', '301', '368', '326']);
   expect(home.find((row) => row.route === '301')?.arrival).toBeNull();
   expect(campusHomeSummary(home, now)).toBe('162 往沙鹿 3 分');
+});
+
+it('keeps 往校內 copy as a destination and never as 從', () => {
+  const arrivals = [
+    arrival({ id: '368', route: '368', seconds: 600, destination: '主顧聖母堂', stopName: '靜宜大學(校門)' }),
+    arrival({ id: '326', route: '326', seconds: 240, destination: '從臺中榮總', stopName: '靜宜大學(校門)' }),
+    arrival({ id: '301', route: '301', seconds: 420, destination: '從沙鹿火車站', stopName: '靜宜大學(校門)' }),
+  ];
+  const rows = campusSegmentRows(arrivals, '校門口・往校內', now);
+  expect(rows.map((row) => [row.route, campusHeadingText(row)])).toEqual([
+    ['326', '進校園'],
+    ['301', '進校園'],
+    ['368', '往 主顧聖母堂'],
+  ]);
+  expect(rows.every((row) => !campusHeadingText(row).includes('從'))).toBe(true);
+});
+
+it('keeps long 專用道 route names as a single heading line', () => {
+  const arrivals = [
+    arrival({ id: '310-2', route: '310區2', seconds: 240, destination: '台中車站', stopName: '靜宜大學(專用道)' }),
+    arrival({ id: '306w', route: '306繞', seconds: 480, destination: '清水', stopName: '靜宜大學(專用道)' }),
+    arrival({ id: '310-1', route: '310區1', seconds: 720, destination: '臺中港', stopName: '靜宜大學(專用道)' }),
+  ];
+  const rows = campusSegmentRows(arrivals, '專用道', now);
+  expect(rows.map((row) => row.route)).toEqual(['310區2', '306繞', '310區1']);
+  expect(rows.every((row) => !row.route.includes('\n'))).toBe(true);
+  expect(campusHeadingText(rows[0])).toBe('往 台中車站');
 });
 
 it('merges 專用道 routes that share a destination and keeps the soonest buses first', () => {

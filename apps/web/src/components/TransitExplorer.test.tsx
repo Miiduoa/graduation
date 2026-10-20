@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TransitExplorer } from './TransitExplorer';
@@ -125,11 +127,40 @@ it('lists BRT arrivals on 專用道 and shows empty copy when that stop has no b
   expect(await screen.findByText('往 沙鹿火車站')).toBeTruthy();
   fireEvent.click(screen.getByRole('tab', { name: '專用道' }));
   expect(screen.getByText('300')).toBeTruthy();
-  expect(screen.getAllByText('往 台中車站').length).toBeGreaterThan(0);
-  expect(screen.getByText('還有 1 班')).toBeTruthy();
+  expect(screen.getByText('往 台中車站')).toBeTruthy();
+  expect(screen.queryByText('305')).toBeNull();
+  const more = screen.getByRole('button', { name: '還有 1 班' });
+  expect(more.getAttribute('aria-expanded')).toBe('false');
+  fireEvent.click(more);
+  expect(screen.getByRole('button', { name: '收合' }).getAttribute('aria-expanded')).toBe('true');
+  expect(screen.getByText('305')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '收合' }));
+  expect(screen.getByRole('button', { name: '還有 1 班' }).getAttribute('aria-expanded')).toBe('false');
+  expect(screen.queryByText('305')).toBeNull();
   expect(screen.queryByText('去程（終點未提供）')).toBeNull();
   expect(screen.getByText('專用道站牌')).toBeTruthy();
   expect(screen.queryByText('162')).toBeNull();
+});
+
+it('shows inbound campus rows as destinations and never as 從', async () => {
+  const now = new Date().toISOString();
+  vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next' ? {
+    status: 'ready', kind: 'arrivals', fetchedAt: now,
+    arrivals: [
+      { id: '368', route: '368', direction: 0, destination: '主顧聖母堂', status: 0, seconds: 600, updatedAt: now, stopName: '靜宜大學(校門)' },
+      { id: '326', route: '326', direction: 1, destination: '從臺中榮總', status: 0, seconds: 240, updatedAt: now, stopName: '靜宜大學(校門)' },
+      { id: '301', route: '301', direction: 1, destination: '從沙鹿火車站', status: 0, seconds: 420, updatedAt: now, stopName: '靜宜大學(校門)' },
+    ],
+  } : emptyArrivals());
+  renderExplorer();
+  fireEvent.click(await screen.findByRole('tab', { name: '往校內' }));
+  expect(screen.getByText('往 主顧聖母堂')).toBeTruthy();
+  expect(screen.getByText('326')).toBeTruthy();
+  expect(screen.getAllByText('進校園').length).toBeGreaterThan(0);
+  expect(screen.queryByText(/^從/)).toBeNull();
+  expect(screen.queryByText('從 臺中榮總')).toBeNull();
+  expect(screen.queryByText('從 沙鹿火車站')).toBeNull();
+  expect(screen.queryByText('從臺中榮總')).toBeNull();
 });
 
 it('shows live, scheduled, empty and ended rows together on one direction', async () => {
@@ -447,6 +478,13 @@ it('groups campus stops with student names and never shows stop codes', async ()
   expect(screen.getByRole('tab', { name: '往校內' })).toBeTruthy();
   expect(screen.queryByText(/TXG/)).toBeNull();
   expect(screen.queryByText(/站牌代碼/)).toBeNull();
+});
+
+it('keeps long route badges on one line and fits the stop-mode bar on a 350px board', () => {
+  const css = readFileSync(path.join(process.cwd(), 'src/components/transit.module.css'), 'utf8');
+  expect(css).toMatch(/\.routeBadge \{[\s\S]*?white-space: nowrap;/);
+  expect(css).toMatch(/grid-template-columns: 56px minmax\(0, 1fr\) auto;/);
+  expect(css).toMatch(/\.campusFirst > \.modeBar button \{[\s\S]*?flex: 1 1 0;/);
 });
 
 describe('static catalog stops', () => {
