@@ -1,9 +1,10 @@
 'use client';
 
-import { use, useCallback, useEffect, useRef, useState } from 'react';
+import { use, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
+import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import {
   loadCourseWork,
   submitCourseText,
@@ -36,8 +37,15 @@ function Assignment({
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const [error, setError] = useState('');
-  const [saved, setSaved] = useState(false);
-  const submitted = saved || !!assignment.submittedAt;
+  const [savedText, setSavedText] = useState<string | null>(null);
+  const active = useRef(false);
+  useLayoutEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
+    };
+  }, []);
+  const submitted = savedText !== null || !!assignment.submittedAt;
   const closed =
     assignment.closed ||
     (!!assignment.dueAt &&
@@ -46,25 +54,32 @@ function Assignment({
       !assignment.allowLateSubmission);
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (busyRef.current) return;
+    if (!active.current || busyRef.current) return;
+    const answer = text.trim();
     busyRef.current = true;
     setBusy(true);
     setError('');
     try {
-      await submitCourseText(courseId, assignment.id, uid, text);
-      setSaved(true);
+      await submitCourseText(courseId, assignment.id, uid, answer);
+      if (!active.current) return;
+      setSavedText(answer);
       onSaved();
     } catch {
+      if (!active.current) return;
       setError('未能確認繳交結果。內容已保留；請重新整理確認紀錄，或稍後重試。');
     } finally {
       busyRef.current = false;
-      setBusy(false);
+      if (active.current) setBusy(false);
     }
   }
   return (
-    <section className={styles.section} id={`assignment-${assignment.id}`}>
+    <section
+      className={styles.section}
+      id={`assignment-${assignment.id}`}
+      aria-labelledby={`assignment-title-${assignment.id}`}
+    >
       <div className={styles.sectionHeading}>
-        <h2>{assignment.title}</h2>
+        <h2 id={`assignment-title-${assignment.id}`}>{assignment.title}</h2>
         <span>
           {assignment.dueAt
             ? new Date(assignment.dueAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })
@@ -80,7 +95,7 @@ function Assignment({
               ? ` · ${new Date(assignment.submittedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}`
               : ''}
           </p>
-          <p style={{ whiteSpace: 'pre-wrap' }}>{assignment.submittedText ?? text}</p>
+          <p style={{ whiteSpace: 'pre-wrap' }}>{assignment.submittedText ?? savedText}</p>
           {assignment.grade ? (
             <div
               aria-label="作業評分"
@@ -149,116 +164,160 @@ function Assignment({
 export default function CoursePage({ params }: { params: Promise<{ courseId: string }> }) {
   const { courseId } = use(params);
   const { user, loading: authLoading } = useAuth();
-  const uid = user?.uid;
-  const [result, setResult] = useState<{ uid: string; course: CourseWork } | null>(null);
+  const school = useOptionalSelectedSchool();
+  const scopeLoading = authLoading || school?.loading;
+
+  if (scopeLoading || !user) {
+    return (
+      <SiteShell title="課程內容" subtitle="查看課程教材、作業與出席紀錄。">
+        {scopeLoading ? (
+          <p role="status">確認登入與校園…</p>
+        ) : (
+          <section className={styles.section}>
+            <h2>登入後查看課程</h2>
+            <p>使用這門課的學校帳號登入，即可查看教材與繳交作業。</p>
+            <Link
+              className={styles.primary}
+              href={`/login?redirect=${encodeURIComponent(`/course/${courseId}`)}`}
+            >
+              登入帳號
+            </Link>
+          </section>
+        )}
+      </SiteShell>
+    );
+  }
+
+  return (
+    <CourseContent
+      key={JSON.stringify([user.uid, courseId, school?.selectedSchoolId ?? null])}
+      uid={user.uid}
+      courseId={courseId}
+    />
+  );
+}
+
+function accessDenied(error: unknown) {
+  const code = error && typeof error === 'object' && 'code' in error ? error.code : null;
+  if (code === 'permission-denied' || code === 'unauthenticated') return true;
+  return error instanceof Error && [
+    'permission-denied',
+    'unauthenticated',
+    '找不到課程，或你尚未加入這門課。',
+    '登入身分已變更，請重新開啟課程。',
+    '請先登入。',
+  ].includes(error.message);
+}
+
+function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
+  const [course, setCourse] = useState<CourseWork | null>(null);
   const [error, setError] = useState('');
+  const [refreshing, setRefreshing] = useState(true);
   const generation = useRef(0);
-  const course = result?.uid === user?.uid && result?.course.id === courseId ? result.course : null;
-  const load = useCallback(async () => {
+  const active = useRef(false);
+  useLayoutEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
+      generation.current += 1;
+    };
+  }, []);
+  const load = useCallback(() => {
+    if (!active.current) return;
     const request = ++generation.current;
-    // A refresh must not leave previously authorized student records on screen.
-    setResult(null);
-    if (!uid) return;
-    setError('');
-    try {
-      const next = await loadCourseWork(courseId, uid);
-      if (request === generation.current) setResult({ uid, course: next });
-    } catch {
-      if (request === generation.current)
-        setError('無法讀取課程。請確認連線與課程成員資格後重試。');
-    }
+    return loadCourseWork(courseId, uid)
+      .then((next) => {
+        if (active.current && request === generation.current) setCourse(next);
+      })
+      .catch((cause: unknown) => {
+        if (active.current && request === generation.current) {
+          // A rejected membership check must remove previously authorized records and drafts.
+          if (accessDenied(cause)) setCourse(null);
+          setError('無法讀取課程。請確認連線與課程成員資格後重試。');
+        }
+      })
+      .finally(() => {
+        if (active.current && request === generation.current) setRefreshing(false);
+      });
   }, [courseId, uid]);
   useEffect(() => {
     void load();
-    return () => {
-      generation.current += 1;
-    };
   }, [load]);
-  const visibleCourse = authLoading ? null : course;
+  function refresh() {
+    if (!active.current) return;
+    // Keep same-scope forms mounted while the server refreshes sibling submissions.
+    setRefreshing(true);
+    setError('');
+    void load();
+  }
   return (
     <SiteShell
-      title={visibleCourse?.name ?? '課程內容'}
-      subtitle={visibleCourse?.description || '查看課程教材、作業與出席紀錄。'}
-      schoolName={visibleCourse ? (visibleCourse.canTeach ? '教學課程' : '修習課程') : undefined}
+      title={course?.name ?? '課程內容'}
+      subtitle={course?.description || '查看課程教材、作業與出席紀錄。'}
+      schoolName={course ? (course.canTeach ? '教學課程' : '修習課程') : undefined}
     >
-      {authLoading ? (
-        <p role="status">確認登入狀態…</p>
-      ) : !user ? (
-        <section className={styles.section}>
-          <h2>登入後查看課程</h2>
-          <p>使用這門課的學校帳號登入，即可查看教材與繳交作業。</p>
-          <Link
-            className={styles.primary}
-            href={`/login?redirect=${encodeURIComponent(`/course/${courseId}`)}`}
-          >
-            登入帳號
-          </Link>
-        </section>
-      ) : (
+      {error && (
+        <div role="alert">
+          {error}
+          <button type="button" onClick={refresh} disabled={refreshing}>
+            重試
+          </button>
+        </div>
+      )}
+      {!course && !error && <p role="status">讀取課程…</p>}
+      {course && refreshing && <p role="status">更新課程中，未送出的內容會保留。</p>}
+      {course && (
         <>
-          {error && (
-            <div role="alert">
-              {error}
-              <button type="button" onClick={load}>
-                重試
-              </button>
-            </div>
-          )}
-          {!course && !error && <p role="status">讀取課程…</p>}
-          {course && (
-            <>
-              <div className={styles.heading}>
-                <Link
-                  href={`/course/${encodeURIComponent(courseId)}/attendance`}
-                  className={styles.secondary}
-                >
-                  {course.canTeach ? '管理課堂點名' : '簽到與出席紀錄'}
-                </Link>
-                <button type="button" className={styles.secondary} onClick={load}>
-                  重新整理
-                </button>
-              </div>
-              <section className={styles.section}>
-                <h2>課程單元</h2>
-                {course.modules.length ? (
-                  course.modules.map((module) => (
-                    <article key={module.id} className={styles.section}>
-                      <h3>{module.title}</h3>
-                      <p style={{ whiteSpace: 'pre-wrap' }}>{module.description}</p>
-                      {module.resourceUrl && (
-                        <a
-                          href={module.resourceUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className={styles.secondary}
-                        >
-                          {module.resourceLabel} ↗
-                        </a>
-                      )}
-                    </article>
-                  ))
-                ) : (
-                  <p>尚未發布課程單元。</p>
-                )}
-              </section>
-              <h2 id="assignments" className={styles.section}>
-                作業與評量
-              </h2>
-              {course.assignments.length ? (
-                course.assignments.map((assignment) => (
-                  <Assignment
-                    key={`${user.uid}-${courseId}-${assignment.id}`}
-                    assignment={assignment}
-                    courseId={courseId}
-                    uid={user.uid}
-                    canTeach={course.canTeach}
-                    onSaved={() => void load()}
-                  />
-                ))
-              ) : (
-                <p>尚未發布作業。</p>
-              )}
-            </>
+          <div className={styles.heading}>
+            <Link
+              href={`/course/${encodeURIComponent(courseId)}/attendance`}
+              className={styles.secondary}
+            >
+              {course.canTeach ? '管理課堂點名' : '簽到與出席紀錄'}
+            </Link>
+            <button type="button" className={styles.secondary} onClick={refresh} disabled={refreshing}>
+              重新整理
+            </button>
+          </div>
+          <section className={styles.section}>
+            <h2>課程單元</h2>
+            {course.modules.length ? (
+              course.modules.map((module) => (
+                <article key={module.id} className={styles.section}>
+                  <h3>{module.title}</h3>
+                  <p style={{ whiteSpace: 'pre-wrap' }}>{module.description}</p>
+                  {module.resourceUrl && (
+                    <a
+                      href={module.resourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={styles.secondary}
+                    >
+                      {module.resourceLabel} ↗
+                    </a>
+                  )}
+                </article>
+              ))
+            ) : (
+              <p>尚未發布課程單元。</p>
+            )}
+          </section>
+          <h2 id="assignments" className={styles.section}>
+            作業與評量
+          </h2>
+          {course.assignments.length ? (
+            course.assignments.map((assignment) => (
+              <Assignment
+                key={assignment.id}
+                assignment={assignment}
+                courseId={courseId}
+                uid={uid}
+                canTeach={course.canTeach}
+                onSaved={refresh}
+              />
+            ))
+          ) : (
+            <p>尚未發布作業。</p>
           )}
         </>
       )}

@@ -15,6 +15,7 @@ import { loadStudentHome } from '../data/studentHome';
 import type { CourseSpace, InboxTask } from '../data/types';
 import { safeNavigate } from '../utils/safeNavigate';
 import { OpenOrderCard } from '../components/OpenOrderCard';
+import { TodayTimetablePanel } from '../components/TodayTimetablePanel';
 import { rootNavigateNested } from '../app/rootNavigation';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
@@ -38,6 +39,7 @@ export default function StudentTodayScreen() {
   currentScope.current = scope;
   const [state, setState] = useState<HomeState>({ scope, status: 'loading' });
   const [now, setNow] = useState<Date | null>(null);
+  const [timetableRefresh, setTimetableRefresh] = useState(0);
   const generation = useRef(0);
   const current = state.scope === scope ? state : null;
   const data = current?.status === 'ready' ? current : null;
@@ -79,7 +81,11 @@ export default function StudentTodayScreen() {
       <ScrollView
         contentContainerStyle={{ padding: 22, paddingBottom: bottom + 24 }}
         refreshControl={
-          <RefreshControl refreshing={loading} onRefresh={load} tintColor={theme.colors.accent} />
+          <RefreshControl
+            refreshing={loading}
+            onRefresh={() => { setTimetableRefresh((key) => key + 1); void load(); }}
+            tintColor={theme.colors.accent}
+          />
         }
       >
         <Text style={s.brand}>CAMPUS ONE</Text>
@@ -87,6 +93,11 @@ export default function StudentTodayScreen() {
           今天
         </Text>
         <Text style={s.caption}>從課程、作業或校務服務開始。</Text>
+        <TodayTimetablePanel
+          refreshKey={timetableRefresh}
+          onOpenImport={() => rootNavigateNested('學習', 'PersonalImport', { kind: 'timetable' })}
+          onOpenTimetable={(term) => rootNavigateNested('學習', 'PersonalTimetable', term ? { term } : undefined)}
+        />
         <OpenOrderCard navigation={navigation} />
         <View style={s.entry}>
           <Pressable

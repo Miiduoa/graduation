@@ -8,6 +8,7 @@ import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { useNuniSession } from '../state/nuniSession';
 import { useSchool } from '../state/school';
 import { SchoolBrowsingControl } from '../components/SchoolBrowsingControl';
+import { TodayTimetablePanel } from '../components/TodayTimetablePanel';
 import {
   SCHOOL_LOGIN_BIND_HINT,
   isSchoolLoginEntryAvailable,
@@ -40,6 +41,10 @@ export default function LoginLandingScreen() {
           <Text style={s.body}>不必登入學校帳號，就能查看各校地圖、公車、圖書館與公開公告。</Text>
         </View>
         <SchoolBrowsingControl />
+        <TodayTimetablePanel
+          onOpenImport={() => safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })}
+          onOpenTimetable={(term) => safeNavigate(navigation, 'PersonalTimetable', term ? { term } : undefined)}
+        />
         <View style={s.publicPanel}>
           <Text style={s.title}>先找需要的資訊</Text>
           {(

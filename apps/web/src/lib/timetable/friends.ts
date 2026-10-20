@@ -7,10 +7,12 @@ import {
   getDoc,
   getDocs,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
   where,
+  type Transaction,
 } from 'firebase/firestore';
 import { canResendFriendRequest } from '@campus/shared';
 import { getDb } from '@/lib/firebase';
@@ -45,13 +47,20 @@ export type SentState =
   | { kind: 'declined'; declinedAtMs: number };
 
 /** 我送給對方的邀請現在是什麼狀態（只看我送出的那份）。 */
-export async function sentRequestState(schoolId: string, fromUid: string, toUid: string): Promise<SentState> {
-  const snap = await getDoc(doc(getDb(), 'friendships', friendshipId(schoolId, fromUid, toUid))).catch(() => null);
+export async function sentRequestState(
+  schoolId: string,
+  fromUid: string,
+  toUid: string,
+): Promise<SentState> {
+  const snap = await getDoc(
+    doc(getDb(), 'friendships', friendshipId(schoolId, fromUid, toUid)),
+  ).catch(() => null);
   if (!snap?.exists()) return { kind: 'none' };
   const data = snap.data() as FriendshipDoc;
   if (data.status === 'declined') {
     const declinedAtMs = millis(data.declinedAt);
-    if (declinedAtMs && !canResendFriendRequest(declinedAtMs)) return { kind: 'declined', declinedAtMs };
+    if (declinedAtMs && !canResendFriendRequest(declinedAtMs))
+      return { kind: 'declined', declinedAtMs };
     return { kind: 'none' };
   }
   if (data.status === 'accepted') return { kind: 'accepted' };
@@ -78,7 +87,8 @@ function toRow(id: string, data: FriendshipDoc, me: string): FriendRow {
     id,
     uid: incoming ? data.fromUid : data.toUid,
     name: (incoming ? data.fromName : data.toName) || '同學',
-    status: data.status === 'accepted' ? 'accepted' : data.status === 'blocked' ? 'blocked' : 'pending',
+    status:
+      data.status === 'accepted' ? 'accepted' : data.status === 'blocked' ? 'blocked' : 'pending',
     incoming,
   };
 }
@@ -86,10 +96,26 @@ function toRow(id: string, data: FriendshipDoc, me: string): FriendRow {
 async function listByStatus(schoolId: string, uid: string, status: string) {
   const col = collection(getDb(), 'friendships');
   const [sent, received] = await Promise.all([
-    getDocs(query(col, where('schoolId', '==', schoolId), where('status', '==', status), where('fromUid', '==', uid))),
-    getDocs(query(col, where('schoolId', '==', schoolId), where('status', '==', status), where('toUid', '==', uid))),
+    getDocs(
+      query(
+        col,
+        where('schoolId', '==', schoolId),
+        where('status', '==', status),
+        where('fromUid', '==', uid),
+      ),
+    ),
+    getDocs(
+      query(
+        col,
+        where('schoolId', '==', schoolId),
+        where('status', '==', status),
+        where('toUid', '==', uid),
+      ),
+    ),
   ]);
-  return [...sent.docs, ...received.docs].map((item) => toRow(item.id, item.data() as FriendshipDoc, uid));
+  return [...sent.docs, ...received.docs].map((item) =>
+    toRow(item.id, item.data() as FriendshipDoc, uid),
+  );
 }
 
 export async function listAcceptedFriends(schoolId: string, uid: string): Promise<FriendRow[]> {
@@ -110,44 +136,64 @@ export async function findByHandle(schoolId: string, raw: string) {
   return { uid: data.uid, name: data.name || '同學', handle };
 }
 
-function myHandleRef(uid: string) {
-  return doc(getDb(), 'users', uid, 'settings', 'friendHandle');
+function myHandleRef(schoolId: string, uid: string) {
+  return doc(getDb(), 'users', uid, 'settings', `friendHandle:${schoolId}`);
 }
 
-export async function loadMyHandle(uid: string) {
-  const [setting, profile] = await Promise.all([
-    getDoc(myHandleRef(uid)).catch(() => null),
-    getDoc(doc(getDb(), 'users', uid)).catch(() => null),
-  ]);
-  const handle = (setting?.data() as { handle?: string } | undefined)?.handle || '';
-  const name = (profile?.data() as { displayName?: string } | undefined)?.displayName || '';
-  return { handle, name };
+async function ownedHandle(transaction: Transaction, schoolId: string, uid: string) {
+  const setting = await transaction.get(myHandleRef(schoolId, uid));
+  // Older clients kept a single pointer for every school. Only adopt it after
+  // checking ownership in this school; keep it for other schools to recover.
+  const source = setting.exists()
+    ? setting
+    : await transaction.get(doc(getDb(), 'users', uid, 'settings', 'friendHandle'));
+  const handle: unknown = source.data()?.handle;
+  if (!handle) return '';
+  if (typeof handle !== 'string' || !isValidHandle(handle)) throw new Error('invalid-saved-handle');
+  const published = await transaction.get(doc(getDb(), 'schools', schoolId, 'handles', handle));
+  return published.exists() && published.data().uid === uid ? handle : '';
 }
 
-export async function publishHandle(schoolId: string, uid: string, raw: string, name: string) {
+export async function loadMyHandle(schoolId: string, uid: string) {
+  return runTransaction(getDb(), async (transaction) => {
+    const handle = await ownedHandle(transaction, schoolId, uid);
+    const profile = await transaction.get(doc(getDb(), 'users', uid));
+    const name = String(profile.data()?.displayName ?? '');
+    return { handle, name };
+  });
+}
+
+export async function publishHandle(schoolId: string, uid: string, raw: string) {
   const handle = normalizeHandle(raw);
   if (!isValidHandle(handle)) throw new Error('invalid-handle');
-  const previous = await loadMyHandle(uid);
-  await setDoc(doc(getDb(), 'schools', schoolId, 'handles', handle), {
-    uid,
-    // 規則要求跟自己個人資料上的名字一樣
-    name,
-    handle,
-    updatedAt: serverTimestamp(),
+  await runTransaction(getDb(), async (transaction) => {
+    const previous = await ownedHandle(transaction, schoolId, uid);
+    const target = doc(getDb(), 'schools', schoolId, 'handles', handle);
+    const existing = await transaction.get(target);
+    const profile = await transaction.get(doc(getDb(), 'users', uid));
+    if (existing.exists() && existing.data().uid !== uid) throw new Error('handle-taken');
+    // Reading the pointer inside the transaction serializes changes from other
+    // tabs, so a retry removes the latest old alias instead of leaving it public.
+    transaction.set(target, {
+      uid,
+      name: String(profile.data()?.displayName ?? ''),
+      handle,
+      updatedAt: serverTimestamp(),
+    });
+    if (previous && previous !== handle)
+      transaction.delete(doc(getDb(), 'schools', schoolId, 'handles', previous));
+    transaction.set(myHandleRef(schoolId, uid), { handle, updatedAt: serverTimestamp() });
   });
-  if (previous.handle && previous.handle !== handle) {
-    await deleteDoc(doc(getDb(), 'schools', schoolId, 'handles', previous.handle)).catch(() => undefined);
-  }
-  await setDoc(myHandleRef(uid), { handle, updatedAt: serverTimestamp() });
   return handle;
 }
 
 export async function unpublishHandle(schoolId: string, uid: string) {
-  const previous = await loadMyHandle(uid);
-  if (previous.handle) {
-    await deleteDoc(doc(getDb(), 'schools', schoolId, 'handles', previous.handle)).catch(() => undefined);
-  }
-  await deleteDoc(myHandleRef(uid));
+  await runTransaction(getDb(), async (transaction) => {
+    const previous = await ownedHandle(transaction, schoolId, uid);
+    if (previous) transaction.delete(doc(getDb(), 'schools', schoolId, 'handles', previous));
+    // An explicit empty pointer prevents a legacy alias being adopted again.
+    transaction.set(myHandleRef(schoolId, uid), { handle: '', updatedAt: serverTimestamp() });
+  });
 }
 
 export async function sendFriendRequest(
@@ -171,7 +217,14 @@ export async function sendFriendRequest(
     } else throw new Error('blocked');
   }
   // 名字只能用雙方個人資料上的名字；對方改過名就先留空，等對方接受時補上
-  const payload = { schoolId, fromUid, toUid, fromName, status: 'pending', createdAt: serverTimestamp() };
+  const payload = {
+    schoolId,
+    fromUid,
+    toUid,
+    fromName,
+    status: 'pending',
+    createdAt: serverTimestamp(),
+  };
   try {
     await setDoc(ref, { ...payload, toName });
   } catch (error) {
@@ -190,7 +243,10 @@ export async function acceptFriendRequest(id: string, myName = '') {
 }
 
 export async function declineFriendRequest(id: string) {
-  await updateDoc(doc(getDb(), 'friendships', id), { status: 'declined', declinedAt: serverTimestamp() });
+  await updateDoc(doc(getDb(), 'friendships', id), {
+    status: 'declined',
+    declinedAt: serverTimestamp(),
+  });
 }
 
 export async function cancelFriendRequest(id: string) {
