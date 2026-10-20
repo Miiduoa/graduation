@@ -601,6 +601,7 @@ it('keeps official links secondary when the school site is down and there is no 
 it.each([
   ['cycu', '全校最新消息', 'https://www.cycu.edu.tw/'],
   ['tmu', '全校最新消息', 'https://www.tmu.edu.tw/news'],
+  ['thu', '全校最新消息', 'https://www.thu.edu.tw/'],
 ] as const)(
   'shows a retryable unread message when %s sources are unavailable and the list is empty',
   async (school, office, url) => {
@@ -646,6 +647,7 @@ it.each([
 it.each([
   ['ncku', '全校最新消息', 'https://web.ncku.edu.tw/p/422-1000-1026.php?Lang=zh-tw'],
   ['ntpu', '電子公文一般公告（含教務處）', 'https://fms.ntpu.edu.tw/km/24662'],
+  ['scu', '全校最新消息', 'https://news.scu.edu.tw/news-3'],
 ] as const)(
   'shows unpublished copy and the official %s announcement page when that school has no items',
   async (school, office, url) => {
@@ -669,6 +671,7 @@ it.each([
 it.each([
   ['ncku', '全校最新消息', 'https://web.ncku.edu.tw/p/422-1000-1026.php?Lang=zh-tw'],
   ['ntpu', '電子公文一般公告（含教務處）', 'https://fms.ntpu.edu.tw/km/24662'],
+  ['scu', '全校最新消息', 'https://news.scu.edu.tw/news-3'],
 ] as const)(
   'keeps unpublished copy for %s without querying the root announcements collection',
   async (school, office, url) => {
@@ -695,7 +698,26 @@ it.each([
   },
 );
 
-it.each(['ncku', 'ntpu'] as const)(
+it.each(['tmu', 'thu'] as const)(
+  'keeps %s unconnected without a verified official announcement button',
+  async (school) => {
+    vi.mocked(getDocsFromServer).mockImplementation(productionEmptySchoolRead(school) as never);
+    const params = Promise.resolve({ schoolId: school });
+    await act(async () => {
+      render(
+        <Suspense fallback={<p>載入學校</p>}>
+          <AnnouncementsPage searchParams={params} />
+        </Suspense>,
+      );
+    });
+    expect(await screen.findByRole('heading', { name: '本站還沒接上這間學校的公告。' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: '前往學校官方公告' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '再試一次' })).toBeNull();
+    expect(screen.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
+  },
+);
+
+it.each(['ncku', 'ntpu', 'scu'] as const)(
   'still shows a retryable unread message when the canonical %s announcement query actually fails',
   async (school) => {
     vi.mocked(getDocsFromServer).mockRejectedValueOnce(missingIndexError());
