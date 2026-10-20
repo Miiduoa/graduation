@@ -242,6 +242,10 @@ it('keeps public campus entries usable when the course session is unavailable', 
 it('lets a guest browse before signing in and never loads personal courses', () => {
   state.uid = null;
   render(<HomePage />);
+  const bus = screen.getByTestId('home-bus-entry');
+  expect(bus.getAttribute('href')).toBe('/bus');
+  expect(bus.textContent).toContain('校門口公車');
+  expect(bus.textContent).toContain('162、301、368、326');
   expect(screen.getByRole('link', { name: '先瀏覽校園資訊' }).getAttribute('href')).toBe(
     '#public-services',
   );
