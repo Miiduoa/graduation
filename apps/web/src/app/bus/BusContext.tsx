@@ -6,7 +6,6 @@ import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
 import { TransitExplorer } from '@/components/TransitExplorer';
 import { fallbackBusSchool } from '@/lib/defaultBrowseSchool';
-import { hasCampusNext } from '@/lib/transit';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 
 export function BusContext({ availabilityNotice }: { availabilityNotice?: ReactNode }) {
@@ -23,7 +22,7 @@ export function BusContext({ availabilityNotice }: { availabilityNotice?: ReactN
       ? `?${new URLSearchParams({ schoolId, campus: schoolId }).toString()}`
       : browse.schoolSearch;
   return (
-    <SiteShell title="公車與交通" subtitle={schoolId && hasCampusNext(schoolId) ? '校門口這四班現在幾分到。' : '找站牌、確認方向，再出發。'} schoolName={schoolName}>
+    <SiteShell schoolName={schoolName}>
       {availabilityNotice}
       {browse.status === 'loading' || browse.status === 'error' || !schoolId ? (
         <section className="card" role="status">

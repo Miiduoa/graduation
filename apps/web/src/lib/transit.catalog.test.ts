@@ -16,16 +16,20 @@ it('keeps catalog metadata through API parsing and favorites while discarding UR
       routes: [{ ...stop.routes![0], url: 'https://untrusted.invalid/' }] }],
   })));
   const result = await queryTransit({ action: 'campus', schoolId: 'pu' }, new AbortController().signal);
-  expect(result.status === 'ready' && result.kind === 'stops' ? result.stops : []).toEqual([stop]);
+  expect(result.status === 'ready' && result.kind === 'stops' ? result.stops : []).toEqual([
+    { ...stop, routes: [{ name: '300', direction: '去', destination: '台中車站' }] },
+  ]);
   if (result.status !== 'ready' || result.kind !== 'stops') throw new Error('expected stops');
-  expect(readSavedStops(JSON.stringify(result.stops))).toEqual([{ ...stop, distance: null }]);
+  expect(readSavedStops(JSON.stringify(result.stops))).toEqual([
+    { ...stop, distance: null, routes: [{ name: '300', direction: '去', destination: '台中車站' }] },
+  ]);
 });
 
 it.each([
   { source: undefined }, { source: 'unknown-provider' }, { catalogDate: undefined },
   { catalogDate: 'invalid' }, { catalogDate: '2026-10-18T08:05:00.001Z' },
   { routes: Array.from({ length: 201 }, () => ({ name: '300', direction: '去', destination: '臺中車站' })) }, { catalogDate: '2026-02-30T04:00:00.000Z' },
-  { catalogDate: '2026-10-18T12:00:00+08:00' }, { routes: undefined },
+  { catalogDate: '2026-10-18T12:00:00+08:00' },
   { routes: [{ name: '', direction: '去', destination: '臺中車站' }] },
   { routes: [{ name: '300', direction: null, destination: '臺中車站' }] },
   { city: 'Taipei' }, { id: 'TXG001' },

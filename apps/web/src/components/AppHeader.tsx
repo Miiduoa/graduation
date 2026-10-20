@@ -76,7 +76,7 @@ function Header() {
           <CampusServiceMenu />
         </nav>
         <div className={`${styles.account} ${headerStyles.account}`}>
-          <SchoolSelector compact />
+          {pathname !== '/bus' && !pathname?.startsWith('/bus/') ? <SchoolSelector compact /> : null}
           {!checking && nuni.session?.isPlatformOperator && <Link href="/admin">平台管理</Link>}
           {!checking && (user || nuni.session) && <Link href="/profile">我的帳號</Link>}
           {user || nuni.session || nuni.pendingLogout ? (

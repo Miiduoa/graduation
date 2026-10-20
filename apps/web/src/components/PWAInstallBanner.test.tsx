@@ -23,12 +23,11 @@ afterEach(() => {
 });
 
 describe('home screen installation', () => {
-  it('keeps the bus page hint compact so arrivals stay in view', () => {
+  it('does not show the install card on the bus page', () => {
     browser(true);
     window.history.pushState({}, '', '/bus');
     render(<PWAInstallBanner />);
-    expect(screen.getByRole('heading', { name: '加入主畫面' })).toBeTruthy();
-    expect(screen.queryByText(/在瀏覽器選單/)).toBeNull();
+    expect(screen.queryByRole('region', { name: '加入主畫面' })).toBeNull();
     window.history.pushState({}, '', '/');
   });
 

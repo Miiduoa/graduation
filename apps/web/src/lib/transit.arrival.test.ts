@@ -37,10 +37,10 @@ it('says the destination is not provided instead of leaving only 去程／返程
 
 it('uses the timetable clock from the source when there is no live countdown', () => {
   const scheduled = row({
-    status: 3, seconds: null, scheduledAt: new Date(now + 20 * 60_000).toISOString(), stopName: '靜宜大學(校門)',
+    status: 0, seconds: null, scheduledAt: new Date(now + 20 * 60_000).toISOString(), stopName: '靜宜大學(校門)',
   });
-  expect(arrivalLabel(scheduled, now)).toBe('表定 23:00（非即時）');
-  expect(arrivalLabel(row({ status: 3, seconds: null }), now)).toBe('末班車已駛離');
+  expect(arrivalLabel(scheduled, now)).toBe('表定 23:00');
+  expect(arrivalLabel(row({ status: 3, seconds: null }), now)).toBe('今天收班');
 });
 
 it('picks the campus-gate arrival per route and does not invent a missing route', () => {
@@ -61,8 +61,8 @@ it('picks the campus-gate arrival per route and does not invent a missing route'
   expect(rows.map((item) => [item.route, item.arrival?.id ?? null])).toEqual([
     ['162', 'gate'],
     ['301', 'later'],
-    ['326', null],
     ['368', null],
+    ['326', 'ended'],
   ]);
   const stale = row({
     id: 'stale-162', route: '162', seconds: 120, updatedAt: new Date(now - 120_000).toISOString(),
