@@ -16,6 +16,7 @@ for (const [source, name] of [
   ['apps/web/src/lib/transit.ts', 'transit'],
   ['apps/web/src/lib/transit-server.ts', 'transit-server'],
   ['apps/web/src/lib/transit-catalog.ts', 'transit-catalog'],
+  ['apps/web/src/lib/transit-replay.ts', 'transit-replay'],
   ['apps/web/src/app/api/transit/route.ts', 'route'],
 ]) {
   const result = ts.transpileModule(fs.readFileSync(path.join(root, source), 'utf8'), {
@@ -24,7 +25,7 @@ for (const [source, name] of [
     reportDiagnostics: true,
   });
   assert.equal((result.diagnostics || []).filter((entry) => entry.category === ts.DiagnosticCategory.Error).length, 0);
-  fs.writeFileSync(path.join(output, `${name}.js`), result.outputText.replace('"@/lib/transit-server"', '"./transit-server"').replace('"../data/taichung-transit-catalog.json"', JSON.stringify(path.join(root, 'apps/web/src/data/taichung-transit-catalog.json'))));
+  fs.writeFileSync(path.join(output, `${name}.js`), result.outputText.replace('"@/lib/transit-server"', '"./transit-server"').replace('"@/lib/transit-replay"', '"./transit-replay"').replace('"../data/taichung-transit-catalog.json"', JSON.stringify(path.join(root, 'apps/web/src/data/taichung-transit-catalog.json'))));
 }
 const client = require(path.join(output, 'transit.js'));
 const server = require(path.join(output, 'transit-server.js'));
@@ -399,4 +400,92 @@ test('client keeps the stale marker only when the server sends it', async () => 
       assert.equal(result.fetchedAt, at());
     }
   } finally { globalThis.fetch = original; }
+});
+
+// 兩台機器共用快取：集中到第一台處理，主機不在時退回本機，不形成單點故障。
+const replay = require(path.join(output, 'transit-replay.js'));
+const noHeaders = { get: () => null };
+const withHeader = (name, value = 'x') => ({ get: (key) => key.toLowerCase() === name ? value : null });
+test('the second machine replays transit queries to the first with a timeout and self fallback', () => {
+  const [leader, other] = replay.TRANSIT_LEADER_MACHINES;
+  assert.equal(replay.transitReplayHeader(other, noHeaders), `instance=${leader};timeout=3s;fallback=prefer_self`);
+  assert.equal(replay.transitReplayHeader(leader, noHeaders), null);
+});
+test('replayed, fallback and reassigned requests are handled locally so nothing loops', () => {
+  const other = replay.TRANSIT_LEADER_MACHINES[1];
+  for (const name of ['fly-replay-src', 'fly-replay-failed', 'fly-preferred-instance-unavailable'])
+    assert.equal(replay.transitReplayHeader(other, withHeader(name)), null, name);
+});
+test('outside Fly or on an unknown machine nothing is replayed', () => {
+  for (const id of [undefined, '', 'unknownmachine1', 'BAD ID;instance=x']) assert.equal(replay.transitReplayHeader(id, noHeaders), null);
+});
+test('the route answers a replay before reading the body and still serves locally on the leader or after fallback', async () => {
+  const original = process.env.FLY_MACHINE_ID;
+  const [leader, other] = replay.TRANSIT_LEADER_MACHINES;
+  const make = (extra = {}) => new Request('https://nuni.tw/api/transit', { method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...extra }, body: JSON.stringify({ action: 'nope' }) });
+  try {
+    process.env.FLY_MACHINE_ID = other;
+    const replayed = await route.POST(make());
+    assert.equal(replayed.status, 204);
+    assert.equal(replayed.headers.get('fly-replay'), `instance=${leader};timeout=3s;fallback=prefer_self`);
+    assert.equal(replayed.headers.get('cache-control'), 'private, no-store');
+    assert.equal((await route.POST(make({ 'fly-replay-failed': 'reason=timeout' }))).status, 400);
+    process.env.FLY_MACHINE_ID = leader;
+    const local = await route.POST(make());
+    assert.equal(local.status, 400);
+    assert.equal(local.headers.get('fly-replay'), null);
+  } finally {
+    if (original === undefined) delete process.env.FLY_MACHINE_ID; else process.env.FLY_MACHINE_ID = original;
+  }
+});
+test('Providence route stop orders are preloaded once in the background through the same protections', async () => {
+  const stopOrder = (uid) => [{ RouteUID: uid, SubRouteUID: uid, Direction: 1, Stops: [{ StopName: { Zh_tw: '起站' } }, { StopName: { Zh_tw: `${uid}末站` } }] }];
+  const mock = service((url) => url.includes('/StopOfRoute/')
+    ? Response.json(stopOrder(new URL(url).searchParams.get('$filter').slice(13, -1)))
+    : Response.json([arrival({ RouteUID: 'TXG162', SubRouteUID: 'TXG162', Direction: 1 })]),
+  { preloadRoutes: server.PROVIDENCE_PRELOAD_ROUTES });
+  await mock.execute(campusQuery);
+  for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve));
+  const preloaded = mock.calls.filter((call) => call.url.includes('/StopOfRoute/')).map((call) => new URL(call.url).searchParams.get('$filter'));
+  assert.deepEqual(preloaded, server.PROVIDENCE_PRELOAD_ROUTES.routeUids.map((uid) => `RouteUID eq '${uid}'`));
+  await mock.execute(campusQuery);
+  assert.equal(mock.calls.filter((call) => call.url.includes('/StopOfRoute/')).length, preloaded.length, 'preload runs once');
+  // 之後查到站直接用預載的 TDX 站序補終點，不再打站序。
+  const result = await mock.execute(etaQuery());
+  assert.equal(result.arrivals[0].destination, 'TXG162末站');
+  assert.equal(mock.calls.filter((call) => call.url.includes('/StopOfRoute/')).length, preloaded.length);
+});
+test('route stop orders survive a rate limit far longer than arrivals, but arrivals keep the short window', async () => {
+  let limited = false;
+  const stopOrder = [{ RouteUID: 'TXG300', SubRouteUID: 'TXG300A', Direction: 0, Stops: [{ StopName: { Zh_tw: '起站' } }, { StopName: { Zh_tw: '真終點' } }] }];
+  const mock = service((url) => limited ? new Response('', { status: 429 })
+    : Response.json(url.includes('/StopOfRoute/') ? stopOrder : [arrival()]));
+  await mock.execute(etaQuery());
+  limited = true;
+  mock.tick(7 * 60 * 60_000); // 站序 6 小時快取已過期，到站保留也已過期
+  assert.deepEqual(await mock.execute(etaQuery()), { status: 'unavailable', reason: 'rate-limited' });
+  limited = false;
+  mock.tick(61_000); // 429 後依預設暫停 60 秒，保護不放寬
+  const fresh = await mock.execute(etaQuery());
+  assert.equal(fresh.status, 'ready');
+  // 到站重新取得、站序再被擋：仍用 24 小時內的最近一份 TDX 站序補終點。
+  const mixed = service((url) => url.includes('/StopOfRoute/') ? (limited ? new Response('', { status: 429 }) : Response.json(stopOrder)) : Response.json([arrival({ SrcUpdateTime: new Date(NOW + 7 * 60 * 60_000).toISOString() })]));
+  await mixed.execute(etaQuery());
+  limited = true;
+  mixed.tick(7 * 60 * 60_000);
+  const kept = await mixed.execute(etaQuery());
+  assert.equal(kept.status, 'ready');
+  assert.equal(kept.arrivals[0].destination, '真終點');
+  mixed.tick(server.ROUTE_STOPS_RETENTION_MS);
+  const expired = await mixed.execute(etaQuery());
+  assert.equal(expired.arrivals[0].destination, '');
+});
+test('preload is skipped without credentials and never blocks the static catalog', async () => {
+  const calls = [];
+  const execute = server.createTransitService({ credentials: () => ({}), fetcher: async (url) => { calls.push(url); return Response.json([]); },
+    now: () => NOW, preloadRoutes: server.PROVIDENCE_PRELOAD_ROUTES });
+  assert.equal((await execute(campusQuery)).status, 'ready');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls.length, 0);
 });

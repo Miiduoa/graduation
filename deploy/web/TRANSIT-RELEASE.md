@@ -31,3 +31,9 @@
 ## 驗證邊界
 
 `node --test deploy/web/transit-release-gate.test.mjs` 使用明確的本機傳輸替身，不能當作正式 TDX 連線紀錄。機內檢查失敗時只回固定錯誤代碼（如 `rate-limited`、`tdx-not-configured`），不回供應商回應內容或憑證資料；Fly SSH 本身失敗則另記 `fly-runtime-probe-failed`。發布最後的公開驗證會在機內檢查剛用過同一把 TDX 金鑰後執行，正式站可能因保護共用額度回 429 與 `Retry-After`；公開驗證只對 429 依 `Retry-After`（上限 120 秒、且不短於自身 30／60／60 秒間隔）有界重試，整次最多等 240 秒，仍被擋就以 `rate-limited` 停止。不設白名單標頭、不放寬一般使用者限流；機內檢查則維持固定間隔，避免超過 Fly SSH 時限。手機實機定位、道路兩側現場方向與多機器共享配額仍須另行驗收。只有正式機器、憑證、TDX 及發布流程都通過實際檢查，才可宣稱即時公車已啟用；官方入口模式的 Web 發布必須另外註明即時公車尚未啟用。
+
+## 兩台機器共用公車快取
+
+`/api/transit` 由第一台 Web 機器集中處理：另一台回 `fly-replay: instance=<第一台>;timeout=3s;fallback=prefer_self`，由 Fly Proxy 轉送；第一台不在或逾時就退回原機器本機處理，不形成單點故障。已轉送或退回的請求（帶 `fly-replay-src`、`fly-replay-failed`、`fly-preferred-instance-unavailable`）一律本機處理，不會來回轉送；不在名單內的機器也本機處理。機器名單與 `release-check.mjs` 的 `EXPECTED_MACHINES`、`transit-release-gate.mjs` 的 `MACHINE_IDS` 相同，換機時三處要一起改。對 TDX 的保護（同時 4、每分 60、Retry-After）不變，集中後整站仍受這些上限約束。
+
+靜宜常見路線（162、301、368、326）的 TDX 站序會在第一次有人查詢後於背景預載；被限流時沿用最近一份 TDX 站序最多 24 小時補終點，超過就維持「終點未提供」，不寫死站名。部署閘門的機內檢查直接查 TDX、公開檢查經 Fly Proxy 轉送，流程不需調整。
