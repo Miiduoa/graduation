@@ -117,13 +117,17 @@ it('lists BRT arrivals on 專用道 and shows empty copy when that stop has no b
     arrivals: [
       { id: '162', route: '162', direction: 1, destination: '沙鹿火車站', status: 0, seconds: 180, updatedAt: now, stopName: '靜宜大學(英才路)' },
       { id: '300', route: '300', direction: 0, destination: '台中車站', status: 0, seconds: 240, updatedAt: now, stopName: '靜宜大學(專用道)' },
+      { id: '305', route: '305', direction: 0, destination: '台中車站', status: 0, seconds: 1200, updatedAt: now, stopName: '靜宜大學(專用道)' },
+      { id: '306', route: '306', direction: 1, destination: '清水', status: 0, seconds: 1080, updatedAt: now, stopName: '靜宜大學(專用道)' },
     ],
   } : emptyArrivals());
   renderExplorer();
   expect(await screen.findByText('往 沙鹿火車站')).toBeTruthy();
   fireEvent.click(screen.getByRole('tab', { name: '專用道' }));
   expect(screen.getByText('300')).toBeTruthy();
-  expect(screen.getByText('往 台中車站')).toBeTruthy();
+  expect(screen.getAllByText('往 台中車站').length).toBeGreaterThan(0);
+  expect(screen.getByText('還有 1 班')).toBeTruthy();
+  expect(screen.queryByText('去程（終點未提供）')).toBeNull();
   expect(screen.getByText('專用道站牌')).toBeTruthy();
   expect(screen.queryByText('162')).toBeNull();
 });
@@ -150,7 +154,7 @@ it('shows live, scheduled, empty and ended rows together on one direction', asyn
   expect(screen.queryByText('到站時間為預估值')).toBeNull();
 });
 
-it('keeps scheduled times when live data is down and says so in the stamp', async () => {
+it('keeps scheduled times when this direction has no live bus without saying live data is down', async () => {
   const now = new Date().toISOString();
   vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next' ? {
     status: 'ready', kind: 'arrivals', fetchedAt: now,
@@ -160,9 +164,24 @@ it('keeps scheduled times when live data is down and says so in the stamp', asyn
     ],
   } : emptyArrivals());
   renderExplorer();
-  expect(await screen.findByText('讀不到即時資料，先顯示表定時間')).toBeTruthy();
+  expect(await screen.findAllByText(/表定 \d{1,2}:\d{2}/)).toHaveLength(2);
+  expect(screen.queryByText('讀不到即時資料，先顯示表定時間')).toBeNull();
+  expect(screen.getByText(/\d{1,2}:\d{2} 更新/)).toBeTruthy();
   expect(screen.getAllByText(/表定 \d{1,2}:\d{2}/).length).toBeGreaterThan(1);
   expect(screen.queryByText('分')).toBeNull();
+});
+
+it('says live data is down only when the campus-next payload is stale', async () => {
+  const now = new Date().toISOString();
+  vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next' ? {
+    status: 'ready', kind: 'arrivals', fetchedAt: now, stale: true,
+    arrivals: [
+      { id: '162', route: '162', direction: 1, destination: '主顧聖母堂', status: 0, seconds: null, updatedAt: now, stopName: '靜宜大學(校門)', scheduledAt: new Date(Date.now() + 8 * 60_000).toISOString() },
+    ],
+  } : emptyArrivals());
+  renderExplorer();
+  fireEvent.click(await screen.findByRole('tab', { name: '往校內' }));
+  expect(await screen.findByText('讀不到即時資料，先顯示表定時間')).toBeTruthy();
 });
 
 it('keeps ended rows and adds the whole-direction hint', async () => {

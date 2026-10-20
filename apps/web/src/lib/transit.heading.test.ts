@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import {
   campusDirectionEnded, campusEtaView, campusGroupForRow, campusGroupLabel, campusHomeSummary,
-  campusHeadingText, campusInboundPlace, campusLiveUnavailable, campusPlaceLabel, campusSegmentRows,
+  campusHeadingText, campusInboundPlace, campusLaneDisplay, campusLiveUnavailable, campusPlaceLabel, campusSegmentRows,
   campusStopGroupLabels, campusUpdatedLabel, fetchedAgoLabel, groupCampusStops, headingAfterBoarding,
   headingBeforeBoarding, headingBucket, listedCampusStops, pickCampusNext, publicHeadingFromStops,
   publicPlaceName, waitingPlaceLine, waitingStopLabel,
@@ -54,6 +54,8 @@ it('uses remaining stops after the boarding stop, not the inbound campus terminu
   expect(headingBucket('從沙鹿火車站')).toBe('往校內');
   expect(campusHeadingText({ route: '368', heading: '主顧聖母堂', arrival: null })).toBe('往 主顧聖母堂');
   expect(campusHeadingText({ route: '301', heading: '從沙鹿火車站', arrival: null })).toBe('從 沙鹿火車站');
+  expect(campusHeadingText({ route: '326', heading: '從下晉江', arrival: null })).toBe('進校園');
+  expect(campusHeadingText({ route: '326', heading: '校內', arrival: null })).toBe('進校園');
 });
 
 it('does not regroup an inbound origin as 往沙鹿', () => {
@@ -69,6 +71,22 @@ it('does not regroup an inbound origin as 往沙鹿', () => {
   expect(headingAfterBoarding(inbound, 'GATE', '靜宜大學(校門)')).toBe('從沙鹿火車站');
   expect(headingBucket(headingAfterBoarding(inbound, 'GATE', '靜宜大學(校門)'))).toBe('往校內');
   expect(campusGroupLabel('校門口', headingBucket('從沙鹿火車站'))).toBe('校門口・往校內');
+});
+
+it('does not use an unfamiliar village as the inbound origin', () => {
+  const inbound: RouteStopSequence = {
+    routeUid: 'TXG326', subRouteUid: 'TXG326', routeName: '326', direction: 1,
+    stops: [
+      { id: 'VILLAGE', name: '下晉江' },
+      { id: 'GATE', name: '靜宜大學(校門)' },
+      { id: 'HALL', name: '靜宜大學(會館)' },
+    ],
+  };
+  expect(headingBeforeBoarding(inbound, 'GATE', '靜宜大學(校門)')).toBe('');
+  expect(headingAfterBoarding(inbound, 'GATE', '靜宜大學(校門)')).toBe('校內');
+  expect(campusHeadingText({
+    route: '326', heading: headingAfterBoarding(inbound, 'GATE', '靜宜大學(校門)'), arrival: null,
+  })).toBe('進校園');
 });
 
 it('groups Providence stops into at most four student-facing labels without stop codes', () => {
@@ -152,7 +170,9 @@ it('keeps a direction’s rows when switching segments and marks a fully ended d
   expect(campusSegmentRows([], '專用道', now)).toEqual([]);
   expect(campusHomeSummary(inbound, now)).toBe('今天收班');
   const scheduledOnly = campusSegmentRows([arrivals[1]], '校門口・往沙鹿', now);
-  expect(campusLiveUnavailable(scheduledOnly, now)).toBe(true);
+  expect(campusLiveUnavailable(scheduledOnly, now)).toBe(false);
+  expect(campusLiveUnavailable(scheduledOnly, now, true)).toBe(true);
+  expect(campusUpdatedLabel(new Date(now).toISOString(), now, false)).toMatch(/^\d{2}:\d{2} 更新$/);
 });
 
 it('does not list other 專用道 stops such as 市政府 in any campus segment or home', () => {
@@ -168,4 +188,22 @@ it('does not list other 專用道 stops such as 市政府 in any campus segment 
   const home = pickCampusNext([cityHall, gate], now, ['162', '301', '368', '326']);
   expect(home.find((row) => row.route === '301')?.arrival).toBeNull();
   expect(campusHomeSummary(home, now)).toBe('162 往沙鹿 3 分');
+});
+
+it('merges 專用道 routes that share a destination and keeps the soonest buses first', () => {
+  const arrivals = [
+    arrival({ id: '300', route: '300', seconds: 240, destination: '台中車站', stopName: '靜宜大學(專用道)' }),
+    arrival({ id: '305', route: '305', seconds: 1200, destination: '台中車站', stopName: '靜宜大學(專用道)' }),
+    arrival({ id: '306', route: '306', seconds: 1080, destination: '清水', stopName: '靜宜大學(專用道)' }),
+    arrival({ id: '302', route: '302', seconds: 360, destination: '新光里', stopName: '靜宜大學(專用道)' }),
+  ];
+  const rows = campusSegmentRows(arrivals, '專用道', now);
+  const display = campusLaneDisplay(rows, now);
+  expect(display.shown.map((row) => [row.route, campusHeadingText(row)])).toEqual([
+    ['300', '往 台中車站'],
+    ['302', '往 新光里'],
+    ['306', '往 清水'],
+  ]);
+  expect(display.extra.map((row) => row.route)).toEqual(['305']);
+  expect(display.shown.every((row) => !campusHeadingText(row).includes('終點未提供'))).toBe(true);
 });
