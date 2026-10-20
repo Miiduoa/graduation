@@ -129,8 +129,11 @@ const ANNOUNCEMENT_CATALOG_LINKS: Record<string, readonly AnnouncementCatalogLin
     },
   ],
   scu: [
-    { sourceId: 'scu-campus', office: '全校最新消息', listUrl: 'https://www.scu.edu.tw/' },
-    { sourceId: 'scu-aca', office: '教務處', listUrl: 'https://www.scu.edu.tw/acade/' },
+    {
+      sourceId: 'scu-campus',
+      office: '全校最新消息',
+      listUrl: 'https://news.scu.edu.tw/news-3',
+    },
   ],
   ntub: [
     { sourceId: 'ntub-campus', office: '全校最新消息', listUrl: 'https://www.ntub.edu.tw/' },
@@ -147,6 +150,7 @@ export const VERIFIED_OFFICIAL_ANNOUNCEMENT_URLS: Record<string, string> = {
   pu: 'https://dorac.pu.edu.tw/p/403-1059-719-1.php',
   ncku: 'https://web.ncku.edu.tw/p/422-1000-1026.php?Lang=zh-tw',
   ntpu: 'https://fms.ntpu.edu.tw/km/24662',
+  scu: 'https://news.scu.edu.tw/news-3',
 };
 
 export function verifiedOfficialAnnouncementUrl(schoolId: string): string | null {

@@ -118,6 +118,35 @@ test('NCKU campus table keeps 公告單位 and does not invent a scrape date', (
   expect(rows[1].title).toContain('漏洞預警');
 });
 
+test('SCU news-3 table uses the last-cell list date instead of ROC dates inside titles', () => {
+  const html = `
+<table class="table table-striped whitespace-nowrap">
+<thead><tr class="border-t"><td>類別</td><td>標題</td><td>登刊日期</td></tr></thead>
+<tbody>
+<tr>
+  <td><span>一般公告</span></td>
+  <td><a href="https://news.scu.edu.tw/news/373391" title="開啟「[評鑑組轉知] 活動訊息」頁面">[評鑑組轉知] 「2026全球企業永續論壇」活動訊息</a></td>
+  <td>2026/10/19</td>
+</tr>
+<tr>
+  <td><span>一般公告</span></td>
+  <td><a href="https://news.scu.edu.tw/news/370277">【教學資源中心】轉知：將於115年11月20日、12月16日舉辦「人工智慧代理人基礎實作」</a></td>
+  <td>2026/10/16</td>
+</tr>
+</tbody>
+</table>`;
+  const rows = parseIwebTable(html, 'https://news.scu.edu.tw/news-3');
+  expect(rows).toHaveLength(2);
+  expect(rows[0]).toMatchObject({
+    title: '[評鑑組轉知] 「2026全球企業永續論壇」活動訊息',
+    originalUrl: 'https://news.scu.edu.tw/news/373391',
+  });
+  expect(rows[0].publishedAt.startsWith('2026-10-19')).toBe(true);
+  expect(rows[1].originalUrl).toBe('https://news.scu.edu.tw/news/370277');
+  expect(rows[1].publishedAt.startsWith('2026-10-16')).toBe(true);
+  expect(rows[1].publishedAt.startsWith('2026-11-20')).toBe(false);
+});
+
 test('NTPU FMS public bulletin table extracts numbered media links', () => {
   const html = `
 <table>

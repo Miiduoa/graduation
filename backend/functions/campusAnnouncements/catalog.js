@@ -214,9 +214,8 @@ const SCHOOLS = [
     ],
   }),
   school('scu', '東吳大學', {
-    cms: 'html',
-    campus: { url: 'https://www.scu.edu.tw/' },
-    academic: { url: 'https://www.scu.edu.tw/acade/' },
+    cms: 'iweb',
+    campus: { url: 'https://news.scu.edu.tw/news-3' },
   }),
   school('ntub', '國立臺北商業大學', {
     cms: 'html',
@@ -299,6 +298,10 @@ function coverageRows() {
     if (entry.schoolId === 'ntpu') {
       note =
         '只接 FMS 電子公文一般公告；總務空頁與學生會這波不寫。寫入仍要列進 CAMPUS_ANNOUNCEMENT_SYNC_SCHOOLS';
+    }
+    if (entry.schoolId === 'scu') {
+      note =
+        '只接 news.scu.edu.tw/news-3 一般公告；官網 SSL 失敗與混合 /news 不寫。寫入仍要列進 CAMPUS_ANNOUNCEMENT_SYNC_SCHOOLS';
     }
     if (entry.demo && sources.length === 0) {
       status = 'unavailable';
