@@ -279,6 +279,16 @@ test('reads the same database and index file as Firebase deploy', () => {
   for (const index of actual.indexes) assert.ok(indexKey(index, index.collectionGroup, true));
 });
 
+test('checked-in composite indexes contain at least two fields', () => {
+  const actual = loadDeployment(path.resolve(__dirname, '../firebase.json'));
+  for (const index of actual.indexes) {
+    assert.ok(
+      index.fields.length >= 2,
+      `${index.collectionGroup} single-field indexes belong in fieldOverrides.`,
+    );
+  }
+});
+
 test('rejects unsupported multiple databases and malformed field overrides', (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'campus-index-gate-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
@@ -594,4 +604,17 @@ test('the deployed activity deletion override is loaded and validated rather tha
     override,
   );
   assert.equal(fieldRequirements(actual.fieldOverrides)[0].keys.length, 4);
+});
+
+test('directory display-name group queries use a single-field override without losing collection defaults', () => {
+  const actual = loadDeployment(path.resolve(__dirname, '../firebase.json'));
+  const directory = actual.fieldOverrides.filter(
+    (field) => field.collectionGroup === 'directory' && field.fieldPath === 'displayName',
+  );
+  assert.deepEqual(directory, [{
+    ...override,
+    collectionGroup: 'directory',
+    fieldPath: 'displayName',
+  }]);
+  assert.equal(fieldRequirements(directory)[0].keys.length, 4);
 });
