@@ -1,9 +1,9 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { SchoolAccountRequired, SCHOOL_FEATURE_CLOSED_COPY } from './SchoolAccountRequired';
 
 const nuni: { value: { session: unknown } | null } = { value: null };
-const options = { studentId: false, loading: false };
+const options = { studentId: false, loading: false, error: false, retry: vi.fn() };
 vi.mock('@/features/nuni/Session', () => ({ useOptionalNuniSession: () => nuni.value }));
 vi.mock('@/lib/signInOptions', () => ({
   useSignInOptions: () => options,
@@ -13,6 +13,18 @@ beforeEach(() => {
   nuni.value = null;
   options.studentId = false;
   options.loading = false;
+  options.error = false;
+  options.retry.mockClear();
+});
+
+it('offers retry on a lookup failure instead of announcing the feature is closed', () => {
+  options.error = true;
+  render(<SchoolAccountRequired returnUrl="/friends" alternative="先向同學確認。" />);
+  expect(screen.getByRole('alert').textContent).toContain('暫時無法確認學校服務');
+  expect(screen.queryByText(SCHOOL_FEATURE_CLOSED_COPY)).toBeNull();
+  expect(screen.queryByRole('link', { name: /學校帳號登入/ })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重新確認' }));
+  expect(options.retry).toHaveBeenCalledOnce();
 });
 
 it('does not open a school login form when student ID is unavailable', () => {

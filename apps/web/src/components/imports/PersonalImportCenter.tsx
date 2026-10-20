@@ -47,6 +47,12 @@ import {
   type PersonalImportScope,
 } from '@/lib/personalImports';
 import { usePersonalImportScope, usePersonalImports } from '@/lib/usePersonalImports';
+import {
+  clearPersonalImportDraft,
+  readPersonalImportDraft,
+  writePersonalImportDraft,
+  type PersonalImportDraft,
+} from '@/lib/personalImportDrafts';
 import { recognizePersonalImportImage } from '@/lib/personalImportOcr';
 import styles from './PersonalImport.module.css';
 import { CourseAccessPanel } from './CourseAccessPanel';
@@ -373,6 +379,8 @@ function ImportWorkspace({
   const [rows, setRows] = useState<PersonalImportRow[]>([]);
   const [backup, setBackup] = useState<Omit<PersonalImportBackupPreview, 'rows'> | null>(null);
   const [importDocument, setDocument] = useState<PersonalImportDocument | null>(null);
+  const [hasDocumentFile, setHasDocumentFile] = useState(false);
+  const [documentSelection, setDocumentSelection] = useState<PersonalImportDraft['documentSelection']>(null);
   const [documentVersion, setDocumentVersion] = useState(0);
   const [reviewPage, setReviewPage] = useState(0);
   const [excluded, setExcluded] = useState<string[]>([]);
@@ -392,11 +400,16 @@ function ImportWorkspace({
     row: PersonalImportRow;
   } | null>(null);
   const [search, setSearch] = useState('');
+  const [draftReady, setDraftReady] = useState(false);
+  const [draftReadFailed, setDraftReadFailed] = useState(false);
+  const [draftStorageError, setDraftStorageError] = useState('');
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const job = useRef<AbortController | null>(null);
   const documentFile = useRef<File | null>(null);
   const active = useRef(true);
   const writing = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const pdfInput = useRef<HTMLInputElement>(null);
   const review = useRef<HTMLElement>(null);
   const undoKeep = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -405,13 +418,87 @@ function ImportWorkspace({
   useEffect(() => {
     const value = new URLSearchParams(window.location.search).get('kind');
     if (KINDS.some((entry) => entry.value === value)) setKind(value as PersonalImportKind);
+    try {
+      const draft = readPersonalImportDraft(scope);
+      if (draft) {
+        setKind(draft.kind);
+        setYear(draft.year);
+        setSemester(draft.semester);
+        setText(draft.text);
+        setSource(draft.source);
+        setRows(draft.rows);
+        setExcluded(draft.excluded);
+        setParseIssues(draft.parseIssues);
+        setBackup(draft.backup);
+        setDocument(draft.document ?? null);
+        setDocumentSelection(draft.documentSelection ?? null);
+        setNotice(
+          '已找回這個分頁尚未匯入的草稿，請繼續核對。' +
+            (draft.document
+              ? '文件文字與選取內容已保留；重新辨識時請再選擇原始檔案。'
+              : draft.source.type === 'screenshot' ? '原始圖片未暫存，需開啟原圖對照。' : ''),
+        );
+      }
+    } catch (error) {
+      setDraftReadFailed(true);
+      setDraftStorageError(errorMessage(error));
+    }
+    setDraftReady(true);
     active.current = true;
     return () => {
       active.current = false;
       job.current?.abort();
       documentFile.current = null;
     };
+    // Account or school changes remount this workspace with its own storage key.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  useEffect(() => {
+    if (!draftReady || draftReadFailed || paused) return;
+    try {
+      writePersonalImportDraft(scope, {
+        kind,
+        year,
+        semester,
+        text,
+        source,
+        rows,
+        excluded,
+        parseIssues,
+        backup,
+        document: importDocument,
+        documentSelection,
+      });
+      setDraftStorageError('');
+    } catch (error) {
+      setDraftStorageError(errorMessage(error));
+    }
+  }, [
+    draftReady,
+    draftReadFailed,
+    paused,
+    scope,
+    kind,
+    year,
+    semester,
+    text,
+    source,
+    rows,
+    excluded,
+    parseIssues,
+    backup,
+    importDocument,
+    documentSelection,
+  ]);
+  useEffect(() => {
+    if (!draftStorageError || (!text && !rows.length && !importDocument)) return;
+    const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeLeaving);
+    return () => window.removeEventListener('beforeunload', warnBeforeLeaving);
+  }, [draftStorageError, text, rows.length, importDocument]);
   useEffect(
     () => () => {
       if (preview) URL.revokeObjectURL(preview);
@@ -525,7 +612,9 @@ function ImportWorkspace({
         const document = await readPersonalImportDocumentFile(file, controller.signal, { pdfMode });
         if (!active.current || suspended.current || controller.signal.aborted) return;
         documentFile.current = file;
+        setHasDocumentFile(true);
         setDocument(document);
+        setDocumentSelection(null);
         setDocumentVersion((current) => current + 1);
         setNotice('文件已讀取，請選擇內容與標題列。');
         return;
@@ -584,6 +673,29 @@ function ImportWorkspace({
     }
   };
   const selected = rows.filter((row) => !excluded.includes(row.id));
+  const discardDraft = () => {
+    try {
+      clearPersonalImportDraft(scope);
+      setRows([]);
+      setText('');
+      setSource({ type: 'paste' });
+      setBackup(null);
+      setDocument(null);
+      setDocumentSelection(null);
+      documentFile.current = null;
+      setHasDocumentFile(false);
+      setExcluded([]);
+      setParseIssues([]);
+      setReviewPage(0);
+      setPreview('');
+      setDraftReadFailed(false);
+      setDraftStorageError('');
+      setConfirmDiscard(false);
+      setNotice('草稿已清除，已匯入的個人紀錄仍保留。');
+    } catch (error) {
+      setDraftStorageError(errorMessage(error));
+    }
+  };
   const errors = [
     ...selected.flatMap((row) =>
       validatePersonalImportRow(row, { periodProfile }).filter(
@@ -690,9 +802,9 @@ function ImportWorkspace({
       </nav>
       <section className={styles.intro}>
         <div>
-          <p className={styles.eyebrow}>從你手上的資料開始</p>
-          <h2>不用等學校串接，也能先整理好。</h2>
-          <p>選截圖、貼上文字，或帶入學校匯出的檔案。看過內容、改好錯字，再存進自己的資料。</p>
+          <p className={styles.eyebrow}>自行匯入</p>
+          <h2>匯入課表、成績或活動</h2>
+          <p>選擇截圖或檔案，也可以貼上文字。核對課名、日期與成績後，再加入個人紀錄。</p>
         </div>
         <p className={styles.storage}>
           {schoolName}
@@ -732,6 +844,42 @@ function ImportWorkspace({
         <p className={styles.error} role="alert">
           {ledger.error}
         </p>
+      )}
+      {(text || rows.length > 0 || importDocument || draftStorageError) && (
+        <section className={styles.notice} aria-label="匯入草稿暫存">
+          {draftStorageError ? (
+            <p role="alert">{draftStorageError}</p>
+          ) : (
+            <p>
+              草稿已暫存在這個分頁，重新整理或離開後回來可繼續核對。關閉分頁可能清除暫存；只保留文字與選取內容，原始圖片與檔案不會暫存。確認匯入後才會加入個人紀錄。
+            </p>
+          )}
+          {confirmDiscard ? (
+            <div className={styles.actions}>
+              <p>清除這份草稿與原始文字？已匯入的紀錄會保留。</p>
+              <button
+                type="button"
+                className="btn"
+                disabled={reading || saving}
+                onClick={discardDraft}
+              >
+                確認清除草稿
+              </button>
+              <button type="button" className="btn" onClick={() => setConfirmDiscard(false)}>
+                繼續核對
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="btn"
+              disabled={reading || saving}
+              onClick={() => setConfirmDiscard(true)}
+            >
+              清除暫存草稿
+            </button>
+          )}
+        </section>
       )}
       <section className={styles.panel} aria-label="選擇資料來源">
         <div className={styles.heading}>
@@ -883,10 +1031,24 @@ function ImportWorkspace({
           {importDocument.format === 'pdf' && (
             <div className={styles.panel}>
               <p>預覽只有標題，或表格文字不完整？可以重新辨識整頁，再核對一次。</p>
+              {!hasDocumentFile && <p>請重新選擇原始 PDF，辨識完成前會保留目前的預覽。</p>}
+              <input
+                ref={pdfInput}
+                type="file"
+                accept=".pdf,application/pdf"
+                className={styles.file}
+                aria-label="重新選擇原始 PDF"
+                onChange={(event) => {
+                  void readFile(event.target.files?.[0], 'ocr');
+                  event.target.value = '';
+                }}
+              />
               <button
                 type="button"
                 className="btn"
-                onClick={() => void readFile(documentFile.current ?? undefined, 'ocr')}
+                onClick={() => documentFile.current
+                  ? void readFile(documentFile.current, 'ocr')
+                  : pdfInput.current?.click()}
               >
                 重新辨識 PDF 整頁
               </button>
@@ -895,10 +1057,14 @@ function ImportWorkspace({
           <DocumentSelection
             key={documentVersion}
             document={importDocument}
+            initialSelection={documentSelection}
+            onSelectionChange={setDocumentSelection}
             options={options}
             onCancel={() => {
               documentFile.current = null;
+              setHasDocumentFile(false);
               setDocument(null);
+              setDocumentSelection(null);
               setNotice('已取消這份文件，個人紀錄沒有改變。');
             }}
             onConfirm={(nextRows, issues) => {
@@ -923,7 +1089,9 @@ function ImportWorkspace({
               setText('');
               setPreview('');
               documentFile.current = null;
+              setHasDocumentFile(false);
               setDocument(null);
+              setDocumentSelection(null);
               setNotice(
                 `${personalImportPreviewNotice(nextRows.length)}${[...new Set(issues.filter((issue) => issue.severity === 'warning').map((issue) => issue.message))].join(' ')}`,
               );
@@ -1010,7 +1178,7 @@ function ImportWorkspace({
                   setReviewPage(0);
                   setExcluded([]);
                   setParseIssues([]);
-                  setNotice('草稿已取消，原本的紀錄沒有改變。');
+                  setNotice('已取消待確認清單，原始文字仍保留，可修改後重新整理。');
                 }}
               >
                 取消這份草稿
