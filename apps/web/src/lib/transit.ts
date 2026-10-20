@@ -89,7 +89,14 @@ const HEADING_LANDMARKS: ReadonlyArray<{ test: RegExp; label: string }> = [
   { test: /清水/, label: '清水' },
   { test: /梧棲/, label: '梧棲' },
   { test: /臺中港|台中港/, label: '臺中港' },
+  { test: /機場/, label: '機場' },
+  { test: /港區藝術/, label: '港區藝術中心' },
 ];
+function isKnownPublicPlace(name: string): boolean {
+  if (!name) return false;
+  if (name === '校內' || name === '本站' || name === '進校園' || campusInboundPlace(name)) return true;
+  return HEADING_LANDMARKS.some((item) => item.label === name || item.test.test(name));
+}
 
 export function isCampusStopName(name: string): boolean {
   return CAMPUS_NAME.test(name);
@@ -144,7 +151,6 @@ export function headingBeforeBoarding(
     for (const landmark of HEADING_LANDMARKS) {
       if (landmark.test.test(name)) return landmark.label;
     }
-    return publicPlaceName(name);
   }
   return '';
 }
@@ -164,7 +170,7 @@ export function headingAfterBoarding(
 }
 export function headingBucket(heading: string): CampusHeadingBucket {
   if (!heading) return '';
-  if (heading.startsWith('從') || heading === '校內' || campusInboundPlace(heading)) return '往校內';
+  if (heading.startsWith('從') || heading === '校內' || heading === '進校園' || campusInboundPlace(heading)) return '往校內';
   if (/沙鹿|嘉陽/.test(heading)) return '往沙鹿';
   if (/台中車站|臺中車站|新民高中|新光里|榮總/.test(heading)) return '往市區';
   return '';
@@ -485,9 +491,12 @@ export function waitingPlaceLine(name: string): string {
 export function campusHeadingText(row: CampusNextRow): string {
   const heading = row.heading || (row.arrival ? publicPlaceName(row.arrival.destination) : '');
   if (!heading) return row.arrival ? directionLabel(row.arrival) : '';
+  if (heading === '校內' || heading === '往校內' || heading === '進校園') return '進校園';
+  if (heading === '本站' || heading === '到本站') return '到本站';
   if (heading.startsWith('從')) {
     const place = heading.replace(/^從\s*/, '').trim();
-    return place ? `從 ${place}` : heading;
+    if (!place || !isKnownPublicPlace(place)) return '進校園';
+    return `從 ${place}`;
   }
   if (heading.startsWith('往')) return heading;
   return `往 ${heading}`;
@@ -570,11 +579,31 @@ export function campusSegmentWaitLine(segment: typeof CAMPUS_SEGMENTS[number], r
 export function campusDirectionEnded(rows: CampusNextRow[], now: number): boolean {
   return rows.length > 0 && rows.every((row) => campusEtaView(row.arrival, now).kind === 'ended');
 }
-export function campusLiveUnavailable(rows: CampusNextRow[], now: number): boolean {
-  if (campusDirectionEnded(rows, now) || !rows.length) return false;
-  const views = rows.map((row) => campusEtaView(row.arrival, now));
-  return views.some((view) => view.kind === 'scheduled') &&
-    views.every((view) => view.kind !== 'live' && view.kind !== 'soon');
+export function campusLiveUnavailable(_rows: CampusNextRow[], _now: number, stale = false): boolean {
+  return stale;
+}
+export const CAMPUS_LANE_VISIBLE = 6;
+export function campusLaneDisplay(
+  rows: CampusNextRow[],
+  now: number,
+): { shown: CampusNextRow[]; extra: CampusNextRow[] } {
+  const byHeading = new Map<string, CampusNextRow[]>();
+  for (const row of rows) {
+    const heading = campusHeadingText(row) || row.heading || row.route;
+    const list = byHeading.get(heading) ?? [];
+    list.push(row);
+    byHeading.set(heading, list);
+  }
+  const groups = [...byHeading.values()].map((list) => sortCampusNextRows(list, now));
+  const representatives = sortCampusNextRows(groups.map((list) => list[0]!).filter(Boolean), now);
+  const rest = groups.flatMap((list) => list.slice(1));
+  if (representatives.length <= CAMPUS_LANE_VISIBLE) {
+    return { shown: representatives, extra: sortCampusNextRows(rest, now) };
+  }
+  return {
+    shown: representatives.slice(0, CAMPUS_LANE_VISIBLE),
+    extra: sortCampusNextRows([...representatives.slice(CAMPUS_LANE_VISIBLE), ...rest], now),
+  };
 }
 export function campusHomeSummary(rows: CampusNextRow[], now: number): string {
   const views = rows.map((row) => campusEtaView(row.arrival, now));

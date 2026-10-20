@@ -155,7 +155,15 @@
   text-align: center;
 }
 .rowCopy { display: grid; gap: 2px; min-width: 0; }
-.rowCopy strong { font-size: 17px; font-weight: 600; line-height: 22px; color: #1f2a24; overflow-wrap: anywhere; }
+.rowCopy strong {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 22px;
+  color: #1f2a24;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .rowCopy small { color: #5f6b64; font-size: 13px; font-weight: 400; line-height: 18px; }
 .rowEta {
   display: inline-flex;
@@ -228,9 +236,10 @@
   border-bottom: 0;
   padding: 0 16px 8px;
   flex-wrap: nowrap;
-  overflow-x: auto;
+  overflow: hidden;
   gap: 4px;
 }
+.campusFirst > .modeBar::-webkit-scrollbar { display: none; height: 0; }
 .campusFirst > .modeBar button {
   color: #5f6b64;
   flex: 0 0 auto;
@@ -245,6 +254,20 @@
   font-size: 15px;
   line-height: 22px;
 }
+.laneMore { padding: 0; }
+.laneMore details { padding: 4px 16px 12px; }
+.laneMore summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  color: #5f6b64;
+  font-size: 15px;
+  line-height: 22px;
+  cursor: pointer;
+  list-style: none;
+}
+.laneMore summary::-webkit-details-marker { display: none; }
+.laneMore ul { list-style: none; margin: 0; padding: 0; }
 .explorer button:disabled { opacity: .55; cursor: not-allowed; }
 .explorer button:focus-visible, .explorer a:focus-visible, .explorer input:focus-visible, .explorer select:focus-visible, .explorer summary:focus-visible { outline: 3px solid var(--focus-ring, #b08930); outline-offset: 3px; }
 .controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px; padding: 24px 0 16px; }
