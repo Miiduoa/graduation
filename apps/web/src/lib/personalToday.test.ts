@@ -90,4 +90,23 @@ describe('personal timetable on Today', () => {
     ];
     expect(view(records)).toMatchObject({ today: [], unplacedCount: 2 });
   });
+  it('does not report a manual copy of an imported class as a timetable conflict', () => {
+    const manual = row({ id: 'manual:course', teacher: '王老師', location: '教室 303' });
+    const imported = row({
+      id: 'imported', teacher: '王老師', location: '教室 303',
+      startPeriod: undefined, endPeriod: undefined, startTime: '08:00', endTime: '09:50',
+    });
+    expect(view([manual, imported])).toMatchObject({
+      nextId: 'imported',
+      today: [{ row: { id: 'imported' }, conflict: false }],
+    });
+    expect(view([imported, manual]).today).toHaveLength(1);
+  });
+  it('still reports same-name classes with different teachers or rooms as conflicts', () => {
+    for (const details of [{ teacher: '另一位老師' }, { location: '另一間教室' }]) {
+      const result = view([row({ id: 'manual:course' }), row({ id: 'imported', ...details })]);
+      expect(result.today).toHaveLength(2);
+      expect(result.today.every((entry) => entry.conflict)).toBe(true);
+    }
+  });
 });

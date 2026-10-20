@@ -75,7 +75,7 @@ it('restores reviewed edits and excluded rows after returning to the same tab wi
   fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
   await screen.findByText(personalImportSavedNotice(1));
   expect(readPersonalImports(context)[0].grade).toBe('88');
-  expect(sessionStorage.getItem(personalImportDraftKey(context))).toBeNull();
+  await waitFor(() => expect(sessionStorage.getItem(personalImportDraftKey(context))).toBeNull());
 });
 
 it('preserves structural parse errors when restoring a draft', async () => {
@@ -568,6 +568,73 @@ const pdfDocument: PersonalImportDocument = {
     },
   ],
 };
+it('restores document text, selected sheets and header rows without saving records or the source file', async () => {
+  const document: PersonalImportDocument = {
+    ...pdfDocument,
+    name: 'grades.xlsx',
+    format: 'xlsx',
+    sections: [
+      { ...pdfDocument.sections[0], id: 'sheet-1', label: '說明' },
+      {
+        ...pdfDocument.sections[0],
+        id: 'sheet-2',
+        label: '成績',
+        rows: [
+          { line: 1, cells: ['115 學年度成績'] },
+          { line: 2, cells: ['課程名稱', '學分', '成績'] },
+          { line: 3, cells: ['英文', '2', '90'] },
+        ],
+      },
+    ],
+  };
+  vi.mocked(readPersonalImportDocumentFile).mockResolvedValue(document);
+  const view = render(<PersonalImportCenter />);
+  fireEvent.change(screen.getByLabelText('這份資料的學年度'), { target: { value: '115' } });
+  fireEvent.change(screen.getByLabelText('學期'), { target: { value: '1' } });
+  fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), {
+    target: { files: [new File(['private-source-bytes'], 'grades.xlsx')] },
+  });
+  await screen.findByText('grades.xlsx');
+  fireEvent.click(screen.getByRole('checkbox', { name: '說明 · 2 列' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: '成績 · 3 列' }));
+  fireEvent.change(screen.getByLabelText('「成績」的標題列'), { target: { value: '2' } });
+  view.unmount();
+  render(<PersonalImportCenter />);
+  expect((screen.getByRole('checkbox', { name: '說明 · 2 列' }) as HTMLInputElement).checked).toBe(false);
+  expect((screen.getByRole('checkbox', { name: '成績 · 3 列' }) as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByLabelText('「成績」的標題列') as HTMLSelectElement).value).toBe('2');
+  expect(readPersonalImports(context)).toHaveLength(0);
+  expect(sessionStorage.getItem(personalImportDraftKey(context))).not.toContain('private-source-bytes');
+  expect(readPersonalImportDocumentFile).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name: '整理選取內容' }));
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
+  await screen.findByText(personalImportSavedNotice(1));
+  expect(readPersonalImports(context)[0]).toMatchObject({ title: '英文', grade: '90' });
+  expect(sessionStorage.getItem(personalImportDraftKey(context))).toBeNull();
+});
+
+it('restores PDF preview and requests the original file only when re-running OCR', async () => {
+  vi.mocked(readPersonalImportDocumentFile).mockResolvedValue(pdfDocument);
+  const view = render(<PersonalImportCenter />);
+  fireEvent.change(screen.getByLabelText('選擇截圖或檔案'), {
+    target: { files: [new File(['pdf'], 'grades.pdf', { type: 'application/pdf' })] },
+  });
+  await screen.findByText('grades.pdf');
+  view.unmount();
+  render(<PersonalImportCenter />);
+  expect(screen.getByText('資料庫')).toBeTruthy();
+  const file = new File(['pdf'], 'grades.pdf', { type: 'application/pdf' });
+  fireEvent.change(screen.getByLabelText('重新選擇原始 PDF'), { target: { files: [file] } });
+  await waitFor(() => expect(readPersonalImportDocumentFile).toHaveBeenLastCalledWith(
+    file, expect.any(AbortSignal), { pdfMode: 'ocr' },
+  ));
+  expect(readPersonalImports(context)).toHaveLength(0);
+  fireEvent.click(screen.getByRole('button', { name: '清除暫存草稿' }));
+  fireEvent.click(screen.getByRole('button', { name: '確認清除草稿' }));
+  expect(screen.queryByText('grades.pdf')).toBeNull();
+  expect(sessionStorage.getItem(personalImportDraftKey(context))).toBeNull();
+});
+
 it('re-reads the same PDF locally and requires review before saving the recovered rows', async () => {
   vi.mocked(readPersonalImportDocumentFile)
     .mockResolvedValueOnce({

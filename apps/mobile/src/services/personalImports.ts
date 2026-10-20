@@ -12,6 +12,7 @@ import {
   PERSONAL_IMPORT_BACKUP_MAX_RECORDS,
   personalImportKey,
   mapPersonalImportPeriods,
+  samePersonalCourse,
   validatePersonalImportRow,
   type PersonalImportRow,
   type PersonalImportRecord,
@@ -329,13 +330,7 @@ export function selectPersonalTimetableCourses(
     ...legacy,
     ...projected.filter(
       (course) =>
-        !legacy.some(
-          (old) =>
-            old.name === course.name &&
-            old.day === course.day &&
-            old.start === course.start &&
-            old.end === course.end,
-        ),
+        !legacy.some((old) => samePersonalCourse(old, course)),
     ),
   ];
 }
