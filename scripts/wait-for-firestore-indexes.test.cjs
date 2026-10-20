@@ -155,10 +155,23 @@ test('supports array indexes and an explicit __name__ order', () => {
   assert.equal(indexKey(explicit, explicit.collectionGroup, true), indexKey(explicit));
 });
 
-test('consumes paginated results before declaring any required index missing', async () => {
+test('lists wildcard indexes without a page size and follows every page token', async () => {
   const f = fixture([
-    { indexes: [], nextPageToken: 'second-page' },
     (request) => {
+      assert.equal(
+        request.url.pathname,
+        `/v1/projects/${project}/databases/(default)/collectionGroups/-/indexes`,
+      );
+      assert.equal(request.url.searchParams.has('pageSize'), false);
+      assert.equal(request.url.searchParams.has('pageToken'), false);
+      return reply({ indexes: [], nextPageToken: 'second-page' });
+    },
+    (request) => {
+      assert.equal(
+        request.url.pathname,
+        `/v1/projects/${project}/databases/(default)/collectionGroups/-/indexes`,
+      );
+      assert.equal(request.url.searchParams.has('pageSize'), false);
       assert.equal(request.url.searchParams.get('pageToken'), 'second-page');
       return reply({ indexes: [remote()] });
     },
@@ -369,12 +382,19 @@ test('supports field-only deployments and protobuf-omitted single-field paths wi
   assert.match(f.logs.at(-1), /0 required indexes and 1 field configurations/);
 });
 
-test('consumes every field page before checking a required field', async () => {
-  const f = fieldFixture((request) =>
-    request.url.searchParams.get('pageToken') === 'fields-next'
+test('lists wildcard fields without a page size and preserves the filter across pages', async () => {
+  const f = fieldFixture((request, count) => {
+    assert.equal(request.url.pathname, `/v1/${fieldParent}-/fields`);
+    assert.equal(request.url.searchParams.has('pageSize'), false);
+    assert.equal(
+      request.url.searchParams.get('filter'),
+      'indexConfig.usesAncestorConfig=false OR ttlConfig:*',
+    );
+    assert.equal(request.url.searchParams.get('pageToken'), count === 1 ? null : 'fields-next');
+    return count === 2
       ? reply({ fields: [remoteField()] })
-      : reply({ fields: [], nextPageToken: 'fields-next' }),
-  );
+      : reply({ fields: [], nextPageToken: 'fields-next' });
+  });
   await waitForIndexes(f.options);
   assert.equal(f.fieldRequests.length, 2);
 });
