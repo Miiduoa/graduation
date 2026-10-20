@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { validateTarget, validateFirebase, summarizeMachines, requireStable, inspectPublic, getJson, EXPECTED_MACHINES } from './release-check.mjs';
+// Reduced from the public /bus SSR response: campus selection resolves after hydration.
+const busLoadingHtml = readFileSync(new URL('./fixtures/bus-loading.html', import.meta.url), 'utf8');
 const sha = 'a'.repeat(40);
 const target = { GITHUB_REPOSITORY: 'Miiduoa/graduation', GITHUB_REF: 'refs/heads/main', CONFIRM_APP: 'nuni-web', EXPECTED_RELEASE_SHA: sha, GITHUB_SHA: sha };
 const config = { projectId: 'campus-one-tw', apiKey: `AIza${'a'.repeat(35)}`, authDomain: 'campus-one-tw.firebaseapp.com', storageBucket: 'campus-one-tw.firebasestorage.app', messagingSenderId: '123456789', appId: '1:123456789:web:abcdef' };
@@ -55,12 +58,13 @@ function fakeFetch(health = {}, transit = { status: 'unavailable', reason: 'not-
       assert.deepEqual(JSON.parse(init.body), { action: 'campus', schoolId: 'pu' });
       return Response.json(transit, { status: transit.status === 'ready' ? 200 : 503 });
     }
-    return new Response('<html><div data-campus-bus-shell="true">公車與交通</div></html>', { status: pageStatus, headers: { 'Content-Type': 'text/html', 'Permissions-Policy': policy } });
+    return new Response(busLoadingHtml, { status: pageStatus, headers: { 'Content-Type': 'text/html', 'Permissions-Policy': policy } });
   };
 }
-test('distinguishes Web deployment from missing TDX and unverified browser interaction', async () => {
+test('accepts the campus loading shell without claiming TDX or browser interaction', async () => {
   const report = await inspectPublic(sha, fakeFetch());
   assert.equal(report.webDeployed, true);
+  assert.equal(report.pages.find((page) => page.path === '/bus').newBusPage, true);
   assert.equal(report.transit.status, 'not-configured');
   assert.equal(report.browserControlsVerified, false);
   assert.equal(report.liveArrivalsVerified, false);
