@@ -179,11 +179,15 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
         <SkeletonList />
       ) : (
         <ul key={segment} className={`${css.boardList} ${css.boardListEnter}`}>
-          {rows.map((row) => (
+          {rows.length ? rows.map((row) => (
             <li key={`${row.route}:${row.heading}`}>
               <CampusArrivalRow row={row} now={clock} />
             </li>
-          ))}
+          )) : (
+            <li>
+              <p className={css.emptyGroup} role="status">暫無班次資訊</p>
+            </li>
+          )}
         </ul>
       )}
     </section>

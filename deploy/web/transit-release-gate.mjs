@@ -208,9 +208,12 @@ export async function probePublic(expectedRevision, {fetcher = fetch, now = Date
 }
 
 export function hasBusShell(html) {
-  // BusPage owns this server-rendered marker. Campus selection and route copy
-  // resolve after hydration; the shell does not certify browser controls or TDX.
-  return typeof html === 'string' && /<[^>]+\sdata-campus-bus-shell=["']true["'][^>]*>/.test(html);
+  if (typeof html !== 'string') return false;
+  // SSR of /bus is a Suspense fallback: the client title「公車」and segment
+  // labels are not in the first HTML. Require the server wrapper itself.
+  // The previous shell (data-campus-bus-shell only) must not pass.
+  const open = html.match(/<[^>]+data-campus-bus-shell=["']true["'][^>]*>/g) ?? [];
+  return open.some((tag) => /\sdata-campus-bus-spec=["']v1["']/.test(tag));
 }
 
 export function verifyOfficialNotice(html) {

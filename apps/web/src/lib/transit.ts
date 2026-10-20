@@ -94,38 +94,77 @@ const HEADING_LANDMARKS: ReadonlyArray<{ test: RegExp; label: string }> = [
 export function isCampusStopName(name: string): boolean {
   return CAMPUS_NAME.test(name);
 }
+export function campusInboundPlace(name: string): string {
+  if (/主顧聖母堂/.test(name)) return '主顧聖母堂';
+  if (/靜園餐廳/.test(name)) return '靜園餐廳';
+  if (/主顧樓/.test(name)) return '主顧樓';
+  return '';
+}
 export function publicPlaceName(name: string): string {
   const value = name.trim();
   if (!value) return '';
-  if (isCampusStopName(value)) return '校內';
+  if (value.startsWith('從')) return value;
+  if (isCampusStopName(value)) return campusInboundPlace(value) || '校內';
   for (const landmark of HEADING_LANDMARKS) {
     if (landmark.test.test(value)) return landmark.label;
   }
   return value.replace(/[（(].*$/, '').trim() || value;
 }
-export function publicHeadingFromStops(remainingNames: readonly string[]): string {
-  const afterCampus = remainingNames.filter((stop) => !isCampusStopName(stop));
-  if (!afterCampus.length) return remainingNames.length ? '校內' : '';
-  for (const landmark of HEADING_LANDMARKS) {
-    if (afterCampus.some((stop) => landmark.test.test(stop))) return landmark.label;
-  }
-  return publicPlaceName(afterCampus[afterCampus.length - 1] ?? '');
-}
-export function headingAfterBoarding(
-  sequence: RouteStopSequence, boardingId: string, boardingName = '',
-): string {
+function boardingIndex(sequence: RouteStopSequence, boardingId: string, boardingName = ''): number {
   let index = boardingId ? sequence.stops.findIndex((stop) => stop.id === boardingId) : -1;
   if (index < 0 && boardingName) {
     index = sequence.stops.findIndex((stop) => stop.name === boardingName ||
       (isCampusStopName(boardingName) && stop.name === boardingName));
   }
-  if (index >= 0) return publicHeadingFromStops(sequence.stops.slice(index + 1).map((stop) => stop.name));
+  return index;
+}
+export function publicHeadingFromStops(remainingNames: readonly string[]): string {
+  const afterCampus = remainingNames.filter((stop) => !isCampusStopName(stop));
+  if (!afterCampus.length) {
+    for (let i = remainingNames.length - 1; i >= 0; i -= 1) {
+      const inbound = campusInboundPlace(remainingNames[i] ?? '');
+      if (inbound) return inbound;
+    }
+    return remainingNames.length ? '校內' : '';
+  }
+  for (const landmark of HEADING_LANDMARKS) {
+    if (afterCampus.some((stop) => landmark.test.test(stop))) return landmark.label;
+  }
+  return publicPlaceName(afterCampus[afterCampus.length - 1] ?? '');
+}
+export function headingBeforeBoarding(
+  sequence: RouteStopSequence, boardingId: string, boardingName = '',
+): string {
+  const index = boardingIndex(sequence, boardingId, boardingName);
+  if (index <= 0) return '';
+  const before = sequence.stops.slice(0, index).map((stop) => stop.name);
+  for (let i = before.length - 1; i >= 0; i -= 1) {
+    const name = before[i] ?? '';
+    if (isCampusStopName(name)) continue;
+    for (const landmark of HEADING_LANDMARKS) {
+      if (landmark.test.test(name)) return landmark.label;
+    }
+    return publicPlaceName(name);
+  }
+  return '';
+}
+export function headingAfterBoarding(
+  sequence: RouteStopSequence, boardingId: string, boardingName = '',
+): string {
+  const index = boardingIndex(sequence, boardingId, boardingName);
+  if (index >= 0) {
+    const after = publicHeadingFromStops(sequence.stops.slice(index + 1).map((stop) => stop.name));
+    if (after && after !== '校內') return after;
+    const origin = headingBeforeBoarding(sequence, boardingId, boardingName);
+    if (origin && !origin.startsWith('從')) return `從${origin}`;
+    return after;
+  }
   const last = sequence.stops[sequence.stops.length - 1]?.name ?? '';
-  return publicPlaceName(last);
+  return campusInboundPlace(last) || publicPlaceName(last);
 }
 export function headingBucket(heading: string): CampusHeadingBucket {
   if (!heading) return '';
-  if (heading === '校內') return '往校內';
+  if (heading.startsWith('從') || heading === '校內' || campusInboundPlace(heading)) return '往校內';
   if (/沙鹿|嘉陽/.test(heading)) return '往沙鹿';
   if (/台中車站|臺中車站|新民高中|新光里|榮總/.test(heading)) return '往市區';
   return '';
@@ -442,8 +481,14 @@ export function waitingPlaceLine(name: string): string {
   return '校門口站牌・臺灣大道側';
 }
 export function campusHeadingText(row: CampusNextRow): string {
-  if (row.heading) return row.heading.startsWith('往') ? row.heading : `往 ${row.heading}`;
-  return row.arrival ? directionLabel(row.arrival) : '';
+  const heading = row.heading || (row.arrival ? publicPlaceName(row.arrival.destination) : '');
+  if (!heading) return row.arrival ? directionLabel(row.arrival) : '';
+  if (heading.startsWith('從')) {
+    const place = heading.replace(/^從\s*/, '').trim();
+    return place ? `從 ${place}` : heading;
+  }
+  if (heading.startsWith('往')) return heading;
+  return `往 ${heading}`;
 }
 export function nextScheduledClock(arrival: TransitArrival | null, now: number): string | null {
   if (!arrival?.scheduledAt) return null;
@@ -511,11 +556,10 @@ export function campusSegmentRows(
   routes: readonly string[] = CAMPUS_NEXT_ROUTES,
 ): CampusNextRow[] {
   const matched = arrivals.filter((arrival) => arrivalMatchesCampusGroup(arrival, group));
-  const names = [...new Set([
-    ...matched.map((row) => row.route),
-  ])].filter((name) => routes.includes(name));
-  if (!names.length) return [];
-  return pickCampusNext(matched, now, names);
+  const names = [...new Set(matched.map((row) => row.route))];
+  const allowed = group === '專用道' ? names : names.filter((name) => routes.includes(name));
+  if (!allowed.length) return [];
+  return pickCampusNext(matched, now, allowed);
 }
 export function campusSegmentWaitLine(segment: typeof CAMPUS_SEGMENTS[number], rows: CampusNextRow[]): string {
   const stopName = rows.find((row) => row.arrival?.stopName)?.arrival?.stopName;

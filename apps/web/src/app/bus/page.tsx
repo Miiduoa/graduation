@@ -19,7 +19,7 @@ export default function BusPage() {
   const unavailable = process.env.TDX_CLIENT_ID === undefined && process.env.TDX_CLIENT_SECRET === undefined;
   const notice = unavailable ? <OfficialTransitNotice /> : undefined;
   return (
-    <div data-campus-bus-shell="true">
+    <div data-campus-bus-shell="true" data-campus-bus-spec="v1">
       <Suspense fallback={<SiteShell>{notice}<p role="status">讀取校園交通資料…</p></SiteShell>}>
         <BusContext availabilityNotice={notice} />
       </Suspense>

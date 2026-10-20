@@ -395,7 +395,7 @@ export function createTransitService(options: {
         } else {
           if (!campusNext) throw new TransitError('invalid-query');
           const routeFilter = campusNext.routes.map((route) => `RouteUID eq ${literal(route.routeUid)}`).join(' or ');
-          params.set('$filter', `contains(StopName/Zh_tw,${literal(campusNext.stopName)}) and (${routeFilter})`);
+          params.set('$filter', `(contains(StopName/Zh_tw,${literal(campusNext.stopName)}) and (${routeFilter})) or contains(StopName/Zh_tw,'專用道')`);
         }
         const eta = await query(`EstimatedTimeOfArrival/City/${city}`, params, 15_000);
         const rows = eta.rows;
@@ -409,8 +409,9 @@ export function createTransitService(options: {
           missing.add(routeUid);
           if (missing.size >= 8) break;
         }
-        const fetchUids = new Set(missing);
-        if (campusNext) for (const route of campusNext.routes) fetchUids.add(route.routeUid);
+        const fetchUids = campusNext
+          ? new Set(campusNext.routes.map((route) => route.routeUid))
+          : missing;
         const cachedUids = city === PROVIDENCE_PRELOAD_ROUTES.city ? PROVIDENCE_PRELOAD_ROUTES.routeUids : [];
         const fetched = await loadRouteSequences(city, fetchUids, true);
         const cached = await loadRouteSequences(city, cachedUids, false);
