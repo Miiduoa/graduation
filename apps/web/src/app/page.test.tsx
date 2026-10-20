@@ -3,6 +3,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import HomePage from './page';
 import { loadHomeData, type HomeData } from '@/lib/homeOverview';
 import { loadNuniHomeData } from '@/lib/nuniHomeOverview';
+import { queryTransit } from '@/lib/transit';
 import { NuniError } from '@campus/shared/src/nuni';
 import { IDENTITY_LOOKUP_FAILED_COPY, IDENTITY_LOOKUP_FAILED_HINT } from '@/lib/accountIdentity';
 import {
@@ -53,6 +54,13 @@ vi.mock('@/components/AuthGuard', () => ({
 }));
 vi.mock('@/lib/homeOverview', () => ({ loadHomeData: vi.fn() }));
 vi.mock('@/lib/nuniHomeOverview', () => ({ loadNuniHomeData: vi.fn() }));
+vi.mock('@/lib/transit', async (original) => {
+  const actual = await original<typeof import('@/lib/transit')>();
+  return {
+    ...actual,
+    queryTransit: vi.fn(async () => ({ status: 'unavailable' as const, reason: 'not-configured' as const })),
+  };
+});
 const data = (name: string): HomeData => ({
   courses: [{ id: name, name, role: 'member', unreadCount: 0 }],
   tasks: [],
@@ -243,9 +251,9 @@ it('lets a guest browse before signing in and never loads personal courses', () 
   state.uid = null;
   render(<HomePage />);
   const bus = screen.getByTestId('home-bus-entry');
-  expect(bus.getAttribute('href')).toBe('/bus');
   expect(bus.textContent).toContain('校門口公車');
-  expect(bus.textContent).toContain('162、301、368、326');
+  expect(screen.getByRole('link', { name: /看全部/ }).getAttribute('href')).toBe('/bus');
+  expect(screen.queryByText('162、301、368、326')).toBeNull();
   expect(screen.getByRole('link', { name: '先瀏覽校園資訊' }).getAttribute('href')).toBe(
     '#public-services',
   );
@@ -258,6 +266,27 @@ it('lets a guest browse before signing in and never loads personal courses', () 
   expect(loadNuniHomeData).not.toHaveBeenCalled();
   expect(screen.getByText(SENSE_UNSIGNED_TEXT)).toBeTruthy();
   expect(screen.queryByText(SENSE_EMPTY_TEXT)).toBeNull();
+});
+
+it('shows the two soonest campus-gate buses on the home card with the same row style', async () => {
+  state.uid = null;
+  const now = new Date().toISOString();
+  vi.mocked(queryTransit).mockResolvedValue({
+    status: 'ready', kind: 'arrivals', fetchedAt: now,
+    arrivals: [
+      { id: '162', route: '162', direction: 1, destination: '沙鹿火車站', status: 0, seconds: 180, updatedAt: now, stopName: '靜宜大學(英才路)' },
+      { id: '301', route: '301', direction: 1, destination: '台中車站', status: 3, seconds: null, updatedAt: now, stopName: '靜宜大學(專用道)', scheduledAt: new Date(Date.now() + 12 * 60_000).toISOString() },
+      { id: '368', route: '368', direction: 0, destination: '校內', status: 3, seconds: null, updatedAt: now, stopName: '靜宜大學(校門)' },
+    ],
+  });
+  render(<HomePage />);
+  expect(await screen.findByText('3 分')).toBeTruthy();
+  expect(screen.getByText(/表定 \d{1,2}:\d{2}/)).toBeTruthy();
+  expect(screen.getByText('往 沙鹿火車站')).toBeTruthy();
+  expect(screen.getByText('往 台中車站')).toBeTruthy();
+  expect(screen.queryByText('沒有班次')).toBeNull();
+  expect(screen.queryByText('暫時沒資料')).toBeNull();
+  expect(screen.getByRole('link', { name: /看全部/ }).getAttribute('href')).toBe('/bus');
 });
 
 it('revalidates an expired course session before retrying with the new account context', async () => {

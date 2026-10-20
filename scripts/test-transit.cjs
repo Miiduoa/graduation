@@ -109,7 +109,7 @@ test('campus-next uses one arrival query for the four Providence routes and keep
   assert.equal(scheduled.scheduledAt, at(45 * 60_000));
   assert.match(client.arrivalLabel(scheduled, NOW), /表定/);
   assert.match(client.arrivalLabel(scheduled, NOW), /非即時/);
-  assert.equal(client.pickCampusNext(first.arrivals, NOW).map((row) => row.route).join(','), '162,301,368,326');
+  assert.equal(client.pickCampusNext(first.arrivals, NOW).map((row) => row.route).join(','), '162,301,326,368');
 });
 test('campus-next without credentials stays unavailable and does not invent times', async () => {
   const mock = service([], { credentials: () => ({}) });
@@ -176,7 +176,7 @@ test('does not invent a destination from a generic route headsign', () => {
   assert.equal(client.directionLabel({ ...row, direction: null }), '方向未提供');
   assert.ok(!client.directionLabel(row).includes('A－B'));
   assert.ok(!client.directionLabel(row).includes('往'));
-  assert.equal(client.directionLabel({ ...row, destination: '臺中車站' }), '往 臺中車站');
+  assert.equal(client.directionLabel({ ...row, destination: '臺中車站' }), '往 台中車站');
 });
 test('route stop order gives the real terminus per direction, never the headsign', () => {
   const destinations = server.normalizeRouteDestinations([
@@ -188,20 +188,64 @@ test('route stop order gives the real terminus per direction, never the headsign
     { RouteUID: 'TXG998', Direction: null, Stops: [{ StopName: { Zh_tw: '某站' } }] },
   ]);
   assert.equal(destinations.get('TXG162:0'), '嘉陽高中');
-  assert.equal(destinations.get('TXG162:1'), '靜宜大學主顧聖母堂');
+  assert.equal(destinations.get('TXG162:1'), '校內');
   assert.equal(destinations.size, 2);
   const [outbound, inbound] = server.normalizeTransitArrivals([
     arrival({ RouteUID: 'TXG162', SubRouteUID: 'TXG162', RouteName: { Zh_tw: '162' }, Direction: 0 }),
     arrival({ RouteUID: 'TXG162', SubRouteUID: 'TXG162', RouteName: { Zh_tw: '162' }, Direction: 1 }),
   ], 'TXG123', destinations);
   assert.equal(client.directionLabel(outbound), '往 嘉陽高中');
-  assert.equal(client.directionLabel(inbound), '往 靜宜大學主顧聖母堂');
+  assert.equal(client.directionLabel(inbound), '往 校內');
   // 到站資料自己給的終點優先，站序不能蓋掉它；方向不明時不補。
   const [own] = server.normalizeTransitArrivals([
     arrival({ RouteUID: 'TXG162', Direction: 0, DestinationStopNameZh: '來源終點' }),
     arrival({ RouteUID: 'TXG162', Direction: null }),
   ], 'TXG123', destinations);
   assert.equal(own.destination, '來源終點');
+});
+test('remaining stops after boarding rewrite campus termini to public headings', () => {
+  const outbound = {
+    RouteUID: 'TXG162', SubRouteUID: 'TXG162', Direction: 0,
+    Stops: [
+      { StopUID: 'GATE', StopName: { Zh_tw: '靜宜大學(校門)' } },
+      { StopUID: 'YING', StopName: { Zh_tw: '靜宜大學(英才路)' } },
+      { StopUID: 'SHA', StopName: { Zh_tw: '沙鹿車站' } },
+      { StopUID: 'END', StopName: { Zh_tw: '嘉陽高中' } },
+    ],
+  };
+  const inbound368 = {
+    RouteUID: 'TXG368', SubRouteUID: 'TXG368', Direction: 0,
+    Stops: [
+      { StopUID: 'YING', StopName: { Zh_tw: '靜宜大學(英才路)' } },
+      { StopUID: 'GATE', StopName: { Zh_tw: '靜宜大學(校門)' } },
+      { StopUID: 'CHAPEL', StopName: { Zh_tw: '靜宜大學主顧聖母堂' } },
+    ],
+  };
+  const outbound368 = {
+    RouteUID: 'TXG368', SubRouteUID: 'TXG368', Direction: 1,
+    Stops: [
+      { StopUID: 'CHAPEL', StopName: { Zh_tw: '靜宜大學主顧聖母堂' } },
+      { StopUID: 'HALL', StopName: { Zh_tw: '靜宜大學(會館)' } },
+      { StopUID: 'YING', StopName: { Zh_tw: '靜宜大學(英才路)' } },
+      { StopUID: 'BUS', StopName: { Zh_tw: '巨業沙鹿站' } },
+    ],
+  };
+  const sequences = server.normalizeRouteSequences([outbound, inbound368, outbound368]);
+  const [fromYing] = server.normalizeTransitArrivals([
+    arrival({ StopUID: 'YING', RouteUID: 'TXG162', SubRouteUID: 'TXG162', RouteName: { Zh_tw: '162' }, Direction: 0, DestinationStopNameZh: '嘉陽高中', StopName: { Zh_tw: '靜宜大學(英才路)' } }),
+  ], 'YING', new Map(), sequences);
+  const [fromGate] = server.normalizeTransitArrivals([
+    arrival({ StopUID: 'GATE', RouteUID: 'TXG368', SubRouteUID: 'TXG368', RouteName: { Zh_tw: '368' }, Direction: 0, DestinationStopNameZh: '靜宜大學主顧聖母堂', StopName: { Zh_tw: '靜宜大學(校門)' } }),
+  ], 'GATE', new Map(), sequences);
+  assert.equal(fromYing.destination, '沙鹿火車站');
+  assert.equal(fromGate.destination, '校內');
+  const inboundStops = sequences.find((row) => row.routeUid === 'TXG368' && row.direction === 0)?.stops.map((stop) => stop.id);
+  const outboundStops = sequences.find((row) => row.routeUid === 'TXG368' && row.direction === 1)?.stops.map((stop) => stop.id);
+  assert.deepEqual(inboundStops, ['YING', 'GATE', 'CHAPEL']);
+  assert.equal(outboundStops.includes('GATE'), false);
+  assert.equal(outboundStops.includes('YING'), true);
+  assert.equal(server.routesAtCampusStop('GATE', sequences).some((route) => route.name === '368' && route.destination === '校內'), true);
+  assert.equal(server.routesAtCampusStop('YING', sequences).some((route) => route.name === '368' && route.destination === '巨業沙鹿站'), true);
 });
 test('arrivals fill destinations from stop order and keep arrivals when that lookup fails', async () => {
   const stopOrder = (uid, last) => [{ RouteUID: uid, SubRouteUID: uid, Direction: 1, Stops: [{ StopName: { Zh_tw: '起站' } }, { StopName: { Zh_tw: last } }] }];
@@ -210,8 +254,8 @@ test('arrivals fill destinations from stop order and keep arrivals when that loo
     return Response.json([arrival({ Direction: 1 })]);
   });
   const result = await mock.execute({ action: 'arrivals', city: 'Taichung', stopId: 'TXG123' });
-  assert.equal(result.arrivals[0].destination, '靜宜大學主顧聖母堂');
-  assert.equal(client.directionLabel(result.arrivals[0]), '往 靜宜大學主顧聖母堂');
+  assert.equal(result.arrivals[0].destination, '校內');
+  assert.equal(client.directionLabel(result.arrivals[0]), '往 校內');
   assert.ok(mock.calls.some((call) => new URL(call.url).pathname.endsWith('/StopOfRoute/City/Taichung') &&
     new URL(call.url).searchParams.get('$filter') === "RouteUID eq 'TXG300'"));
   // 站序快取 6 小時：15 秒後重查到站不應再打站序。
@@ -271,7 +315,8 @@ test('partial or blank credentials do not silently select static mode', async ()
 test('OAuth single-flight and query cache collapse concurrent requests without exposing credentials', async () => {
   const mock = service();
   const results = await Promise.all(Array.from({ length: 8 }, () => mock.execute(campusQuery)));
-  assert.equal(mock.calls.length, 2);
+  // token + campus stops + the four preloaded Providence StopOfRoute queries
+  assert.equal(mock.calls.length, 6);
   assert.equal(results.every((result) => result.status === 'ready'), true);
   assert.equal(JSON.stringify(results).includes('test-only-secret'), false);
   assert.equal(mock.calls[0].init.method, 'POST');
@@ -282,8 +327,8 @@ test('OAuth single-flight and query cache collapse concurrent requests without e
 test('stop cache expires and OAuth is renewed before token expiry', async () => {
   const mock = service();
   await mock.execute(campusQuery);
-  mock.tick(119_999); await mock.execute(campusQuery); assert.equal(mock.calls.length, 2);
-  mock.tick(1); await mock.execute(campusQuery); assert.equal(mock.calls.length, 3);
+  mock.tick(119_999); await mock.execute(campusQuery); assert.equal(mock.calls.length, 6);
+  mock.tick(1); await mock.execute(campusQuery); assert.equal(mock.calls.length, 7);
   mock.tick(3_420_001); await mock.execute(campusQuery);
   assert.equal(mock.calls.filter((call) => call.url.includes('/openid-connect/token')).length, 2);
 });

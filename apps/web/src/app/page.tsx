@@ -14,6 +14,8 @@ import { publicCampusServices } from '@/lib/publicCampusServices';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { isTeacherRole, useSchoolRole } from '@/lib/useSchoolRole';
 import { TodaySensePanel } from '@/components/TodaySensePanel';
+import { HomeCampusBusCard } from '@/components/HomeCampusBusCard';
+import { hasCampusNext } from '@/lib/transit';
 import type { SenseInputItem, SensePhase } from '@campus/shared/src/todaySense';
 import styles from './home.module.css';
 
@@ -196,20 +198,16 @@ export default function HomePage() {
             <Link href="/teacher">老師工作台 →</Link> 看學生送來的課程申訴。
           </p>
         )}
-        <nav className={styles.busEntry} aria-label="公車">
-          <Link className={styles.busEntryLink} href="/bus" data-testid="home-bus-entry">
-            <strong>
-              {!school?.selectedSchoolId || school.selectedSchoolId === 'pu'
-                ? '校門口公車'
-                : '公車資訊'}
-            </strong>
-            <small>
-              {!school?.selectedSchoolId || school.selectedSchoolId === 'pu'
-                ? '162、301、368、326 下一班幾分到'
-                : '查站牌和到站時間'}
-            </small>
-          </Link>
-        </nav>
+        {!school?.selectedSchoolId || hasCampusNext(school.selectedSchoolId) ? (
+          <HomeCampusBusCard schoolId={school?.selectedSchoolId || 'pu'} />
+        ) : (
+          <nav className={styles.busEntry} aria-label="公車">
+            <Link className={styles.busEntryLink} href="/bus" data-testid="home-bus-entry">
+              <strong>公車資訊</strong>
+              <small>查站牌和到站時間</small>
+            </Link>
+          </nav>
+        )}
         <div className={styles.columns}>
           <div>
             {blocked ? (

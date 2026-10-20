@@ -26,6 +26,7 @@ export function PWAInstallBanner() {
   const [canPrompt, setCanPrompt] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [compact, setCompact] = useState(false);
   const prompt = useRef<BeforeInstallPromptEvent | null>(null);
   const mounted = useRef(false);
   const requesting = useRef(false);
@@ -42,6 +43,7 @@ export function PWAInstallBanner() {
       (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     setIsIOS(ios);
     setIsVisible(ios && !standalone() && !dismissed.current);
+    setCompact(/^\/bus(\/|$)/.test(window.location.pathname));
 
     const handlePrompt = (event: Event) => {
       event.preventDefault();
@@ -107,14 +109,16 @@ export function PWAInstallBanner() {
   if (!isVisible) return null;
 
   return (
-    <section className={styles.notice} aria-label="加入主畫面">
+    <section className={`${styles.notice}${compact ? ` ${styles.noticeCompact}` : ''}`} aria-label="加入主畫面">
       <div className={styles.content}>
-        <h2 className={styles.title}>把 Campus One 加入主畫面</h2>
-        <p className={styles.description}>
-          {isIOS
-            ? '在瀏覽器選單選擇「分享」，再選「加入主畫面」。'
-            : '下次從主畫面直接開啟。課程與個人資料仍需網路連線。'}
-        </p>
+        <h2 className={styles.title}>{compact ? '加入主畫面' : '把 Campus One 加入主畫面'}</h2>
+        {compact ? null : (
+          <p className={styles.description}>
+            {isIOS
+              ? '在瀏覽器選單選擇「分享」，再選「加入主畫面」。'
+              : '下次從主畫面直接開啟。課程與個人資料仍需網路連線。'}
+          </p>
+        )}
       </div>
       <div className={styles.actions}>
         {canPrompt && (
