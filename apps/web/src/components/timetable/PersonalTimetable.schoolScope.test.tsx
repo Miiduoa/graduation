@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanMeta } from '@campus/shared';
 import { PersonalTimetable } from './PersonalTimetable';
@@ -90,6 +90,23 @@ it('shows only imported courses belonging to the selected university', async () 
   expect(screen.getAllByText('清大新課表').length).toBeGreaterThan(0);
   expect(screen.queryByText('靜宜舊課表')).toBeNull();
   expect(context.academic).toHaveBeenCalledWith('courses', false);
+});
+
+it('does not show a manual and imported copy of the same class as conflicting courses', async () => {
+  context.schoolId = 'pu';
+  context.records = [record('pu', 'imported', '同一門課')];
+  context.load.mockResolvedValue({
+    schoolId: 'pu',
+    courses: [{ id: 'manual', name: '同一門課', day: 1, start: 3, end: 4, teacher: '', room: '', color: 'blue' }],
+    meta: cleanMeta({ year: '115', semester: '1' }),
+    shareWithFriends: false,
+    updatedAt: '2026-10-20T00:00:00Z',
+  });
+  render(<PersonalTimetable />);
+  await screen.findAllByText('同一門課');
+  fireEvent.click(screen.getByRole('button', { name: '一週' }));
+  expect(screen.getAllByText('同一門課')).toHaveLength(1);
+  expect(screen.queryByRole('region', { name: '衝堂' })).toBeNull();
 });
 
 it('resets the timetable and importer when the browsing school changes', async () => {

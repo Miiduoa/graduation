@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render } from '@testing-library/react-native';
+import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import type { PersonalImportRecord } from '@campus/shared';
 import PersonalTimetableScreen from '../screens/PersonalTimetableScreen';
 import { loadPersonalTimetable } from '../services/personalTimetable';
@@ -151,4 +151,41 @@ test('a manual course without a semester opens the same manual timetable from To
   await view.findByText('手排課程');
   expect(view.queryByText('成大課程')).toBeNull();
   expect(view.getByText('星期一 · 08:00–09:50')).toBeTruthy();
+});
+
+test('a failed import read cannot be treated as free time and can be retried in place', async () => {
+  jest.mocked(loadPersonalImports).mockRejectedValueOnce(new Error('storage unavailable'));
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText('匯入課表暫時讀不到，目前不能確認空堂，請重新讀取。');
+  expect(view.getByRole('button', { name: '今天空堂' })).toBeDisabled();
+  expect(view.getByRole('button', { name: '排讀書時間' })).toBeDisabled();
+  fireEvent.press(view.getByRole('button', { name: '重試匯入課表' }));
+  await view.findByText('成大課程');
+  expect(view.getByRole('button', { name: '今天空堂' })).not.toBeDisabled();
+  expect(view.queryByText('匯入課表暫時讀不到，目前不能確認空堂，請重新讀取。')).toBeNull();
+});
+
+test('a matching manual and imported class appears once and does not disable free-time planning', async () => {
+  jest.mocked(loadPersonalTimetable).mockResolvedValue({
+    courses: [{ id: 'manual-a', name: '成大課程', day: 1, start: 2, end: 3, teacher: '', room: '教室 303', color: 'blue' }],
+    schoolId: 'ncku', shareWithFriends: false, updatedAt: '2026-10-18T00:00:00Z',
+    meta: { year: '115', semester: '1', school: '', className: '', credits: 0, title: '' },
+  });
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText('成大課程');
+  expect(view.getAllByText('成大課程')).toHaveLength(1);
+  expect(view.getByRole('button', { name: '今天空堂' })).not.toBeDisabled();
+  expect(view.queryByText(/部分課程無法對應節次/)).toBeNull();
+});
+
+test('a later manual timetable read failure keeps its prior data but blocks free-time calculations', async () => {
+  jest.mocked(loadPersonalImports).mockRejectedValueOnce(new Error('storage unavailable'));
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText('匯入課表暫時讀不到，目前不能確認空堂，請重新讀取。');
+  jest.mocked(loadPersonalTimetable).mockRejectedValueOnce(new Error('manual unavailable'));
+  fireEvent.press(view.getByRole('button', { name: '重試匯入課表' }));
+  await view.findByText('手動課表暫時讀不到，先保留上次讀取的內容；目前不能確認空堂。');
+  expect(view.getByRole('button', { name: '今天空堂' })).toBeDisabled();
+  fireEvent.press(view.getByRole('button', { name: '重試課表' }));
+  await waitFor(() => expect(view.getByRole('button', { name: '今天空堂' })).not.toBeDisabled());
 });

@@ -471,7 +471,7 @@ function readTransitRoutes(value: unknown): TransitRoute[] | null {
     routes.push({
       name: route.name,
       direction: route.direction,
-      destination: publicPlaceName(route.destination) || route.destination,
+      destination: route.destination,
     });
   }
   return routes;
@@ -488,7 +488,8 @@ function readStop(value: unknown): TransitStop | null {
   if (value.source !== 'taichung-open-data' || value.city !== 'Taichung' || !/^TCOD_[A-Za-z0-9_-]+$/.test(value.id) ||
     typeof value.catalogDate !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value.catalogDate) ||
     !Number.isFinite(Date.parse(value.catalogDate)) || Date.parse(value.catalogDate) > Date.now() + 5 * 60_000 ||
-    new Date(value.catalogDate).toISOString().replace('.000Z', 'Z') !== value.catalogDate.replace('.000Z', 'Z')) return null;
+    new Date(value.catalogDate).toISOString().replace('.000Z', 'Z') !== value.catalogDate.replace('.000Z', 'Z') ||
+    !Array.isArray(value.routes)) return null;
   const routes = readTransitRoutes(value.routes);
   if (!routes) return null;
   return { ...stop, source: 'taichung-open-data', catalogDate: value.catalogDate, routes };

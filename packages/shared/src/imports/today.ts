@@ -88,14 +88,29 @@ export function buildPersonalToday(
       status: currentMinute >= end ? 'ended' : currentMinute >= start ? 'ongoing' : 'upcoming',
     });
   }
-  today.sort(
+  // A course entered by hand and later imported is one class when its complete
+  // displayed details agree. Keep the imported record's provenance; differing
+  // teachers or rooms still require the user's conflict review.
+  const sameText = (left?: string, right?: string) =>
+    (left ?? '').trim().normalize('NFKC') === (right ?? '').trim().normalize('NFKC');
+  const distinctToday = today.filter((entry) =>
+    !entry.row.id.startsWith('manual:') || !today.some((other) =>
+      !other.row.id.startsWith('manual:') &&
+      entry.startTime === other.startTime &&
+      entry.endTime === other.endTime &&
+      sameText(entry.row.title, other.row.title) &&
+      sameText(entry.row.teacher, other.row.teacher) &&
+      sameText(entry.row.location, other.row.location),
+    ),
+  );
+  distinctToday.sort(
     (a, b) =>
       a.startTime.localeCompare(b.startTime) ||
       a.endTime.localeCompare(b.endTime) ||
       a.row.id.localeCompare(b.row.id),
   );
-  for (const entry of today) {
-    entry.conflict = today.some(
+  for (const entry of distinctToday) {
+    entry.conflict = distinctToday.some(
       (other) =>
         other !== entry && entry.startTime < other.endTime && other.startTime < entry.endTime,
     );
@@ -103,9 +118,9 @@ export function buildPersonalToday(
   return {
     terms,
     termKey: activeTerm,
-    today,
+    today: distinctToday,
     unplacedCount,
     weekday,
-    nextId: today.find((entry) => entry.status !== 'ended')?.row.id ?? null,
+    nextId: distinctToday.find((entry) => entry.status !== 'ended')?.row.id ?? null,
   };
 }

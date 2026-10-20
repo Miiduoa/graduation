@@ -62,7 +62,7 @@ describe('感知觸發條件', () => {
   it('沒有符合規則的資料時是空清單，不是範例卡', () => {
     const { cards } = selectSenseCards({ now, state: emptySenseState(), items: [] });
     expect(cards).toEqual([]);
-    expect(SENSE_EMPTY_TEXT).toContain('不是範例');
+    expect(SENSE_EMPTY_TEXT).toContain('目前載入的課程');
     expect(SENSE_UNSIGNED_TEXT).toContain('登入後');
   });
 });
