@@ -232,9 +232,10 @@ function StopResults({ query, saved, toggleSaved }: {
         {!waiting && !failed && shownStops.length > 0 && <ul className={`${css.stopList}${grouped ? ` ${css.groupedStops}` : ''}`}>{shownStops.map((stop, index) => {
           const isSaved = saved.some((entry) => stopKey(entry) === stopKey(stop));
           const accessibleName = `${stop.name} ${stopSubtitle(stop)} 第 ${index + 1} 站牌`;
+          const repeatsCity = stop.distance === null && stopSubtitle(stop) === TRANSIT_CITIES[stop.city];
           return <li key={listedKey(stop)} data-selected={current && listedKey(current) === listedKey(stop) ? 'true' : undefined}>
             <button type="button" className={css.stopButton} aria-pressed={Boolean(current && listedKey(current) === listedKey(stop))} onClick={() => setSelected(stop)}>
-              <span className={css.stopNumber}>{String(index + 1).padStart(2, '0')}</span><span><strong>{stop.name}</strong><small>{stop.distance !== null && !grouped ? `${formatDistance(stop.distance)} · 直線距離` : grouped ? stopSubtitle(stop) : TRANSIT_CITIES[stop.city]}{grouped ? null : <><br />{stopSubtitle(stop)}</>}</small></span>
+              <span className={css.stopNumber}>{String(index + 1).padStart(2, '0')}</span><span><strong>{stop.name}</strong><small>{stop.distance !== null && !grouped ? `${formatDistance(stop.distance)} · 直線距離` : grouped ? stopSubtitle(stop) : TRANSIT_CITIES[stop.city]}{grouped || repeatsCity ? null : <><br />{stopSubtitle(stop)}</>}</small></span>
             </button>
             <button type="button" className={css.saveButton} aria-label={`${isSaved ? '取消收藏' : '收藏'} ${accessibleName}`} aria-pressed={isSaved} onClick={() => toggleSaved(stop)}>{isSaved ? '已收藏' : '收藏'}</button>
           </li>;
