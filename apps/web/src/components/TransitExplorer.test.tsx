@@ -8,12 +8,18 @@ vi.mock('@/lib/transit', async (original) => ({
   queryTransit: vi.fn(),
 }));
 const stops: TransitStop[] = [
-  { id: 'TXG001', name: '靜宜大學', city: 'Taichung', lat: 24.22, lon: 120.58, distance: null },
-  { id: 'TXG002', name: '靜宜大學', city: 'Taichung', lat: 24.221, lon: 120.58, distance: null },
+  { id: 'TXG001', name: '靜宜大學(英才路)', city: 'Taichung', lat: 24.2266, lon: 120.5748, distance: null,
+    routes: [{ name: '162', direction: '去', destination: '嘉陽高中' }] },
+  { id: 'TXG002', name: '靜宜大學(校門)', city: 'Taichung', lat: 24.2253, lon: 120.5778, distance: null,
+    routes: [{ name: '301', direction: '返', destination: '靜宜大學靜園餐廳' }] },
 ];
 const stopResult = (): TransitResult => ({ status: 'ready', kind: 'stops', stops, limited: false, fetchedAt: new Date().toISOString() });
 const emptyArrivals = (): TransitResult => ({ status: 'ready', kind: 'arrivals', arrivals: [], fetchedAt: new Date().toISOString() });
 const renderExplorer = () => render(<TransitExplorer schoolId="pu" schoolName="靜宜大學" />);
+const groupName = (label: string) => (name: string) =>
+  /^\d{2}/.test(name) && name.includes(label) && !name.includes('收藏');
+const groupButton = (label: string) => screen.getByRole('button', { name: groupName(label) });
+const findGroupButton = (label: string) => screen.findByRole('button', { name: groupName(label) });
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -50,11 +56,12 @@ it('starts with school stops without requesting the user location', async () => 
   const locate = vi.fn();
   vi.stubGlobal('navigator', { onLine: true, geolocation: { getCurrentPosition: locate } });
   renderExplorer();
-  await screen.findByText(/站牌代碼 TXG001/);
+  await screen.findByText('校門口・往沙鹿');
   expect(queryTransit).toHaveBeenCalledWith({ action: 'campus', schoolId: 'pu' }, expect.any(AbortSignal));
   expect(queryTransit).toHaveBeenCalledWith({ action: 'campus-next', schoolId: 'pu' }, expect.any(AbortSignal));
   expect(locate).not.toHaveBeenCalled();
-  expect(screen.getByText(/站牌代碼 TXG002/)).toBeTruthy();
+  expect(screen.getByText('校門口・往校內')).toBeTruthy();
+  expect(screen.queryByText(/TXG/)).toBeNull();
 });
 
 it('shows Providence gate routes from campus-next without querying a default stop', async () => {
@@ -64,9 +71,9 @@ it('shows Providence gate routes from campus-next without querying a default sto
       return {
         status: 'ready', kind: 'arrivals', fetchedAt: now,
         arrivals: [
-          { id: '162', route: '162', direction: 1, destination: '嘉陽高中', status: 0, seconds: 180, updatedAt: now, stopName: '靜宜大學(校門)' },
-          { id: '301', route: '301', direction: 1, destination: '', status: 3, seconds: null, updatedAt: now, stopName: '靜宜大學(校門)', scheduledAt: new Date(Date.now() + 12 * 60_000).toISOString() },
-          { id: '368', route: '368', direction: 0, destination: '', status: 0, seconds: 600, updatedAt: now, stopName: '靜宜大學(校門)' },
+          { id: '162', route: '162', direction: 1, destination: '沙鹿火車站', status: 0, seconds: 180, updatedAt: now, stopName: '靜宜大學(英才路)' },
+          { id: '301', route: '301', direction: 1, destination: '台中車站', status: 3, seconds: null, updatedAt: now, stopName: '靜宜大學(校門)', scheduledAt: new Date(Date.now() + 12 * 60_000).toISOString() },
+          { id: '368', route: '368', direction: 0, destination: '校內', status: 0, seconds: 600, updatedAt: now, stopName: '靜宜大學(校門)' },
         ],
       };
     }
@@ -74,13 +81,22 @@ it('shows Providence gate routes from campus-next without querying a default sto
     return stopResult();
   });
   renderExplorer();
-  expect(await screen.findByText('約 3 分鐘')).toBeTruthy();
+  expect(await screen.findByText('3 分')).toBeTruthy();
   expect(screen.getAllByRole('heading', { name: '校門口下一班' }).length).toBeGreaterThan(0);
-  expect(screen.getByText(/表定 \d{1,2}:\d{2}（非即時）/)).toBeTruthy();
-  expect(screen.getByText('約 10 分鐘')).toBeTruthy();
-  expect(screen.getByText('暫時沒資料')).toBeTruthy();
+  expect(screen.getByRole('button', { name: '剛剛更新' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '更新班次' })).toBeNull();
+  expect(screen.getByText(/表定 \d{1,2}:\d{2}/)).toBeTruthy();
+  expect(screen.getByText('10 分')).toBeTruthy();
+  expect(screen.getByText('沒有班次')).toBeTruthy();
+  expect(screen.getByText('往 沙鹿火車站')).toBeTruthy();
+  expect(screen.getByText('往 台中車站')).toBeTruthy();
+  expect(screen.getByText('在英才路側等')).toBeTruthy();
+  expect(screen.queryByText('暫時沒資料')).toBeNull();
   expect(['162', '301', '368', '326'].every((route) => screen.getByText(route))).toBe(true);
   expect(vi.mocked(queryTransit).mock.calls.some(([query]) => query.action === 'arrivals')).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: /162，往 沙鹿火車站/ }));
+  expect(await screen.findByText(/目前沒有班次預估/)).toBeTruthy();
+  expect(vi.mocked(queryTransit).mock.calls.some(([query]) => query.action === 'arrivals' && query.stopId === 'TXG001')).toBe(true);
 });
 
 it('keeps school and manual search available when location permission is denied', async () => {
@@ -91,7 +107,7 @@ it('keeps school and manual search available when location permission is denied'
   fireEvent.click(screen.getByRole('button', { name: '使用我的位置' }));
   expect(await screen.findByText(/你尚未允許定位/)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '學校站牌' }));
-  await screen.findByText(/站牌代碼 TXG001/);
+  await screen.findByText('校門口・往沙鹿');
   expect(screen.getByRole('button', { name: '搜尋站名' })).toBeTruthy();
 });
 
@@ -139,11 +155,11 @@ it('abort and selection identity prevent an old station response from replacing 
     return new Promise((resolve) => { finish = resolve; });
   });
   renderExplorer();
-  fireEvent.click(await screen.findByRole('button', { name: /站牌代碼 TXG001/ }));
+  fireEvent.click(await findGroupButton('校門口・往沙鹿'));
   await waitFor(() => expect(queryTransit).toHaveBeenCalledWith(
     { action: 'arrivals', city: 'Taichung', stopId: 'TXG001' }, expect.any(AbortSignal),
   ));
-  fireEvent.click(await screen.findByRole('button', { name: /站牌代碼 TXG002/ }));
+  fireEvent.click(await findGroupButton('校門口・往校內'));
   await screen.findByText(/目前沒有班次預估/);
   expect(firstSignal.aborted).toBe(true);
   await act(async () => finish({ status: 'ready', kind: 'arrivals', fetchedAt: new Date().toISOString(), arrivals: [{ id: 'old', route: '舊站路線', direction: 0, destination: '', status: 0, seconds: 480, updatedAt: new Date().toISOString() }] }));
@@ -152,13 +168,14 @@ it('abort and selection identity prevent an old station response from replacing 
 
 it('saves public stops, never the location-derived distance, and supports removing a favorite', async () => {
   renderExplorer();
-  fireEvent.click(await screen.findByRole('button', { name: '收藏 靜宜大學 TXG001' }));
+  fireEvent.click(await screen.findByRole('button', { name: /收藏 校門口・往沙鹿/ }));
   const saved = JSON.parse(localStorage.getItem('campus-one:transit-stops:v1') || '[]');
   expect(saved).toHaveLength(1);
   expect(saved[0].distance).toBeNull();
+  expect(saved[0].name).toBe('校門口・往沙鹿');
   fireEvent.click(screen.getByRole('button', { name: '常用站牌 1' }));
-  expect(screen.getByRole('button', { name: '取消收藏 靜宜大學 TXG001' })).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: '取消收藏 靜宜大學 TXG001' }));
+  expect(screen.getByRole('button', { name: /取消收藏 校門口・往沙鹿/ })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: /取消收藏 校門口・往沙鹿/ }));
   expect(screen.getByText(/在站牌旁按「收藏」/)).toBeTruthy();
 });
 
@@ -195,15 +212,15 @@ it('expires countdowns while hidden without continuing to poll the provider', as
     arrivals: [{ id: 'a', route: '162', direction: 0, destination: '', status: 0, seconds: 480, updatedAt: fetchedAt, stopName: '靜宜大學(校門)' }],
   } : query.action === 'arrivals' ? emptyArrivals() : stopResult());
   await act(async () => { renderExplorer(); });
-  expect(screen.getByText('約 8 分鐘')).toBeTruthy();
+  expect(screen.getByText('8 分')).toBeTruthy();
   const calls = vi.mocked(queryTransit).mock.calls.length;
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
   await act(async () => {
     document.dispatchEvent(new Event('visibilitychange'));
     vi.advanceTimersByTime(90_000);
   });
-  expect(screen.queryByText('約 8 分鐘')).toBeNull();
-  expect(screen.getByText('資料待更新')).toBeTruthy();
+  expect(screen.queryByText('8 分')).toBeNull();
+  expect(screen.getAllByText('沒有班次').length).toBeGreaterThan(0);
   expect(vi.mocked(queryTransit).mock.calls.length).toBe(calls);
 });
 
@@ -268,7 +285,7 @@ it('highlights the next live bus and separates buses without a live estimate', a
     ],
   } : query.action === 'campus-next' ? { status: 'ready', kind: 'arrivals', arrivals: [], fetchedAt: now } : stopResult());
   renderExplorer();
-  fireEvent.click(await screen.findByRole('button', { name: /站牌代碼 TXG001/ }));
+  fireEvent.click(await findGroupButton('校門口・往沙鹿'));
   expect(await screen.findByText(/162 路 · 約 3 分鐘/)).toBeTruthy();
   expect(screen.getByText('下一班')).toBeTruthy();
   expect(screen.getAllByText('返程（終點未提供）')).toHaveLength(2);
@@ -289,17 +306,21 @@ it('keeps the last good arrivals and blocks repeated refreshes when rate limited
     } : { status: 'unavailable', reason: 'rate-limited' };
   });
   renderExplorer();
-  expect(await screen.findByText('約 10 分鐘')).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: '更新班次' }));
+  expect(await screen.findByText('10 分')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '剛剛更新' }));
   expect(await screen.findByText(/查詢的人較多，先顯示/)).toBeTruthy();
-  expect(screen.getByText('約 10 分鐘')).toBeTruthy();
-  const button = screen.getByRole('button', { name: '稍後自動再試' }) as HTMLButtonElement;
+  expect(screen.getByText('10 分')).toBeTruthy();
+  const button = screen.getByRole('button', { name: '稍後再試' }) as HTMLButtonElement;
   expect(button.disabled).toBe(true);
 });
 
-it('warns that same-name stops cannot be told apart by stop code alone', async () => {
+it('groups campus stops with student names and never shows stop codes', async () => {
   renderExplorer();
-  expect(await screen.findByText(/同名站牌不只一個，可能是道路兩側或行經路線不同/)).toBeTruthy();
+  expect(await screen.findByText('校門口・往沙鹿')).toBeTruthy();
+  expect(screen.getByText('校門口・往校內')).toBeTruthy();
+  expect(screen.getByText(/依站序和位置分成學生常用的幾組/)).toBeTruthy();
+  expect(screen.queryByText(/TXG/)).toBeNull();
+  expect(screen.queryByText(/站牌代碼/)).toBeNull();
 });
 
 describe('static catalog stops', () => {
@@ -318,10 +339,10 @@ it('shows catalog directions and source instead of polling or presenting the sna
     ? { status: 'unavailable', reason: 'not-configured' }
     : catalogResult());
   await act(async () => { renderExplorer(); });
-  fireEvent.click(screen.getByRole('button', { name: /01\s*靜宜大學.*300 路線.*去程/ }));
+  fireEvent.click(groupButton('校門口・往市區'));
   expect(screen.getByText('即時到站尚未接通')).toBeTruthy();
   expect(screen.queryByText(/到站時間為預估值/)).toBeNull();
-  expect(screen.getByText('去程 · 往 臺中車站')).toBeTruthy();
+  expect(screen.getByText('去程 · 往 台中車站')).toBeTruthy();
   expect(screen.getByText(/資料快照：2026\/10\/18/)).toBeTruthy();
   expect(screen.getByRole('link', { name: '臺中市政府公車路線站牌資料 ↗' }).getAttribute('href')).toBe('https://data.gov.tw/dataset/81555');
   expect(screen.getByRole('link', { name: '前往臺中公車查即時到站 ↗' }).getAttribute('href')).toBe('https://citybus.taichung.gov.tw/');
@@ -342,18 +363,21 @@ it('preserves static provider metadata across browser favorites and does not tur
     ? { status: 'unavailable', reason: 'not-configured' }
     : catalogResult());
   const view = renderExplorer();
-  fireEvent.click(await screen.findByRole('button', { name: '收藏 靜宜大學 300 路線 · 去程 · 靜態站牌資料 第 1 站牌' }));
+  fireEvent.click(await screen.findByRole('button', { name: /收藏 校門口・往市區/ }));
   const saved = JSON.parse(localStorage.getItem('campus-one:transit-stops:v1') || '[]');
-  expect(saved[0]).toMatchObject({ source: 'taichung-open-data', catalogDate: catalogStop.catalogDate, routes: catalogStop.routes, distance: null });
+  expect(saved[0]).toMatchObject({
+    source: 'taichung-open-data', catalogDate: catalogStop.catalogDate, distance: null,
+    routes: [{ name: '300', direction: '去', destination: '台中車站' }],
+  });
   view.unmount();
   vi.clearAllMocks();
   render(<TransitExplorer schoolId="nthu" schoolName="國立清華大學" />);
   fireEvent.click(screen.getByRole('button', { name: '常用站牌 1' }));
-  fireEvent.click(screen.getByRole('button', { name: /01\s*靜宜大學.*300 路線.*去程/ }));
+  fireEvent.click(groupButton('校門口・往市區'));
   expect(screen.getByText('即時到站尚未接通')).toBeTruthy();
-  expect(screen.getByText('去程 · 往 臺中車站')).toBeTruthy();
+  expect(screen.getByText('去程 · 往 台中車站')).toBeTruthy();
   expect(queryTransit).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: '取消收藏 靜宜大學 300 路線 · 去程 · 靜態站牌資料 第 1 站牌' }));
+  fireEvent.click(screen.getByRole('button', { name: /取消收藏 校門口・往市區/ }));
   expect(screen.getByText(/在站牌旁按「收藏」/)).toBeTruthy();
 });
 
@@ -367,16 +391,16 @@ it('aborts in-flight arrivals when switching to a static stop and resumes only w
     return new Promise((resolve) => { finish = resolve; });
   });
   renderExplorer();
-  fireEvent.click(await screen.findByRole('button', { name: /站牌代碼 TXG001/ }));
+  fireEvent.click(await findGroupButton('校門口・往沙鹿'));
   await waitFor(() => expect(queryTransit).toHaveBeenCalledWith({ action: 'arrivals', city: 'Taichung', stopId: 'TXG001' }, expect.any(AbortSignal)));
-  fireEvent.click(screen.getByRole('button', { name: /02\s*靜宜大學.*300 路線.*去程/ }));
+  fireEvent.click(groupButton('校門口・往市區'));
   expect(arrivalSignal.aborted).toBe(true);
   expect(screen.getByText('即時到站尚未接通')).toBeTruthy();
   await act(async () => finish({ status: 'ready', kind: 'arrivals', fetchedAt: new Date().toISOString(), arrivals: [{ id: 'old', route: '舊路線', direction: 0, destination: '', status: 0, seconds: 600, updatedAt: new Date().toISOString() }] }));
   expect(screen.queryByText('舊路線')).toBeNull();
   expect(vi.mocked(queryTransit).mock.calls.filter(([query]) => query.action === 'arrivals')).toHaveLength(1);
   vi.mocked(queryTransit).mockResolvedValue(emptyArrivals());
-  fireEvent.click(screen.getByRole('button', { name: /站牌代碼 TXG001/ }));
+  fireEvent.click(groupButton('校門口・往沙鹿'));
   await screen.findByText(/目前沒有班次預估/);
   expect(vi.mocked(queryTransit).mock.calls.filter(([query]) => query.action === 'arrivals')).toHaveLength(2);
 });

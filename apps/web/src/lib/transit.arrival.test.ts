@@ -28,7 +28,8 @@ it('picks the soonest live arrival and never treats an ended bus as next', () =>
 });
 
 it('says the destination is not provided instead of leaving only 去程／返程 jargon', () => {
-  expect(directionLabel(row({ destination: '臺中車站' }))).toBe('往 臺中車站');
+  expect(directionLabel(row({ destination: '臺中車站' }))).toBe('往 台中車站');
+  expect(directionLabel(row({ destination: '靜宜大學主顧聖母堂' }))).toBe('往 校內');
   expect(directionLabel(row({ destination: '', direction: 0 }))).toBe('去程（終點未提供）');
   expect(directionLabel(row({ destination: '', direction: 1 }))).toBe('返程（終點未提供）');
   expect(directionLabel(row({ destination: '', direction: null }))).toBe('方向未提供');
@@ -60,8 +61,8 @@ it('picks the campus-gate arrival per route and does not invent a missing route'
   expect(rows.map((item) => [item.route, item.arrival?.id ?? null])).toEqual([
     ['162', 'gate'],
     ['301', 'later'],
-    ['368', null],
     ['326', null],
+    ['368', null],
   ]);
   const stale = row({
     id: 'stale-162', route: '162', seconds: 120, updatedAt: new Date(now - 120_000).toISOString(),

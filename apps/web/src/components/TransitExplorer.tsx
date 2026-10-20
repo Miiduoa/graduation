@@ -2,12 +2,13 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  CAMPUS_NEXT, CAMPUS_TRANSIT, TRANSIT_CITIES, TRANSIT_MESSAGES, arrivalKind, arrivalLabel, directionLabel, hasCampusNext,
-  nextLiveArrival, pickCampusNext, preferredTransitCity,
-  formatDistance, isCity, isPosition, isStaticTransitStop, queryTransit, readSavedStops, stopMapUrl,
-  TAICHUNG_BUS_URL, TAICHUNG_CATALOG_URL,
-  type TransitArrival, type TransitCity, type TransitFailure, type TransitQuery, type TransitResult, type TransitRoute, type TransitStop,
+  CAMPUS_NEXT, CAMPUS_TRANSIT, TRANSIT_CITIES, TRANSIT_MESSAGES, arrivalKind, arrivalLabel, arrivalMatchesCampusGroup,
+  campusGroupForRow, directionLabel, fetchedAgoLabel, formatDistance, hasCampusNext, isCity, isPosition, isStaticTransitStop,
+  listedCampusStops, nextLiveArrival, pickCampusNext, preferredTransitCity, publicPlaceName, queryTransit,
+  readSavedStops, stopMapUrl, TAICHUNG_BUS_URL, TAICHUNG_CATALOG_URL,
+  type CampusNextRow, type TransitArrival, type TransitCity, type TransitFailure, type TransitQuery, type TransitResult, type TransitRoute, type TransitStop,
 } from '@/lib/transit';
+import { CampusArrivalRow } from './CampusArrivalRow';
 import css from './transit.module.css';
 
 const SAVED_KEY = 'campus-one:transit-stops:v1';
@@ -21,8 +22,19 @@ function catalogSummary(routes: TransitRoute[] = []): string {
   const directions = [...new Set(routes.map((route) => catalogDirection(route.direction)))];
   return `${names.slice(0, 3).join('、')}${names.length > 3 ? ' 等路線' : ' 路線'} · ${directions.join('／')} · 靜態站牌資料`;
 }
+function stopSubtitle(stop: TransitStop): string {
+  if (isStaticTransitStop(stop)) return catalogSummary(stop.routes);
+  if (stop.routes?.length) {
+    const names = [...new Set(stop.routes.map((route) => route.name))];
+    return `${names.slice(0, 3).join('、')}${names.length > 3 ? ' 等路線' : ' 路線'}`;
+  }
+  return stop.distance !== null ? `${formatDistance(stop.distance)} · 直線距離` : TRANSIT_CITIES[stop.city];
+}
+function listedKey(stop: TransitStop) {
+  return `${stop.city}:${stop.id}:${stop.name}`;
+}
 
-function StopArrivals({ stop }: { stop: TransitStop }) {
+function StopArrivals({ stop, groupLabel }: { stop: TransitStop; groupLabel?: string }) {
   const [result, setResult] = useState<TransitResult | null>(null);
   const [busy, setBusy] = useState(true);
   const [revision, setRevision] = useState(0);
@@ -103,7 +115,8 @@ function StopArrivals({ stop }: { stop: TransitStop }) {
   }, [stop.city, stop.id, revision]);
   const rows = result?.status === 'ready' && result.kind === 'arrivals' ? result.arrivals : [];
   const shown = rows.filter((row) => row.route.toLocaleLowerCase().includes(filter.trim().toLocaleLowerCase()) &&
-    (direction === 'all' || String(row.direction) === direction));
+    (direction === 'all' || String(row.direction) === direction) &&
+    (!groupLabel || arrivalMatchesCampusGroup(row, groupLabel)));
   const liveRows = shown.filter((row) => arrivalKind(row, clock) === 'live');
   const otherRows = shown.filter((row) => arrivalKind(row, clock) !== 'live');
   const nextBus = nextLiveArrival(shown, clock);
@@ -146,7 +159,10 @@ function StopArrivals({ stop }: { stop: TransitStop }) {
   );
 }
 
-function CampusNextBoard({ schoolId }: { schoolId: string }) {
+function CampusNextBoard({ schoolId, onPickRow }: {
+  schoolId: string;
+  onPickRow?: (row: CampusNextRow) => void;
+}) {
   const spec = hasCampusNext(schoolId) ? CAMPUS_NEXT[schoolId] : null;
   const [result, setResult] = useState<TransitResult | null>(null);
   const [busy, setBusy] = useState(true);
@@ -232,28 +248,22 @@ function CampusNextBoard({ schoolId }: { schoolId: string }) {
     <section className={css.campusNext} aria-labelledby="campus-next-title" aria-busy={busy} data-testid="campus-next">
       <div className={css.sectionHeading}>
         <h3 id="campus-next-title">校門口下一班</h3>
-        <button type="button" className={css.secondary} disabled={busy || offline || coolingDown} onClick={() => { setBusy(true); setRevision((value) => value + 1); }}>
-          {busy ? '查詢中…' : coolingDown ? '稍後自動再試' : '更新班次'}
+        <button type="button" className={css.refreshStamp} disabled={busy || offline || coolingDown} onClick={() => { setBusy(true); setRevision((value) => value + 1); }}>
+          {busy ? '查詢中…' : coolingDown ? '稍後再試' : result?.status === 'ready' ? fetchedAgoLabel(result.fetchedAt, clock) : '重新整理'}
         </button>
       </div>
       {offline && <p className={css.message} role="status">目前離線，恢復網路後會重新查詢。請勿依舊資料趕車。</p>}
       {result?.status === 'unavailable' && <p className={css.message} role="status">{TRANSIT_MESSAGES[result.reason]}{result.reason === 'rate-limited' ? ' 約 1 分鐘後會自動再查，這段時間先不要連續按更新。' : result.reason === 'not-configured' ? ' 先看下方站牌，出發前也可開官方網站確認。' : ''}</p>}
       {failure && result?.status === 'ready' && <p className={css.message} role="status">{failure === 'rate-limited' ? `查詢的人較多，先顯示 ${fetchedTime} 查到的班次，約 1 分鐘後會自動再查；請先不要連續按更新。` : `這次更新沒有成功，先顯示 ${fetchedTime} 查到的班次；資料太舊時會改顯示「資料待更新」。`}</p>}
-      <ul className={css.campusNextList}>
-        {rows.map((row) => {
-          const waiting = !result && busy;
-          const text = waiting ? '查詢中…' : offline ? '離線，待更新' : row.arrival ? arrivalLabel(row.arrival, clock) : '暫時沒資料';
-          return (
-            <li key={row.route}>
-              <div>
-                <strong className={css.route}>{row.route}</strong>
-                <span className={css.note}>{row.arrival ? directionLabel(row.arrival) : '校門口'}</span>
-              </div>
-              <strong className={css.eta}>{text}</strong>
+      {!result && busy ? <p className={css.empty} role="status">正在查詢班次…</p> : (
+        <ul className={css.campusNextList}>
+          {rows.map((row) => (
+            <li key={`${row.route}:${row.heading}`}>
+              <CampusArrivalRow row={row} now={clock} onSelect={onPickRow ? () => onPickRow(row) : undefined} />
             </li>
-          );
-        })}
-      </ul>
+          ))}
+        </ul>
+      )}
       {result?.status === 'ready' && result.kind === 'arrivals' && (
         <p className={css.note}>{result.stale ? `查詢的人較多，先顯示 ${fetchedTime} 向 TDX 取得的最近一份資料，稍後會自動更新。` : `TDX 提供資料 · 查詢於 ${fetchedTime}。`}沒有即時資料時會標「表定（非即時）」，時間以來源為準。</p>
       )}
@@ -277,7 +287,7 @@ function StaticStopDetails({ stop }: { stop: TransitStop }) {
     <h4 className={css.routeHeading}>行經路線與方向</h4>
     {stop.routes?.length ? <ul className={css.catalogRoutes}>{stop.routes.map((route, index) => <li key={`${route.name}:${route.direction}:${route.destination}:${index}`}>
       <strong>{route.name}</strong>
-      <span>{[catalogDirection(route.direction), route.destination ? `往 ${route.destination}` : '目的地未提供'].filter(Boolean).join(' · ')}</span>
+      <span>{[catalogDirection(route.direction), route.destination ? `往 ${publicPlaceName(route.destination) || route.destination}` : '目的地未提供'].filter(Boolean).join(' · ')}</span>
     </li>)}</ul> : <p className={css.empty}>來源未提供行經路線，請至官方網站查詢。</p>}
     <p className={css.note}><a href={TAICHUNG_CATALOG_URL} target="_blank" rel="noopener noreferrer">臺中市政府公車路線站牌資料 ↗</a><br />
       {stop.catalogDate && <>資料快照：{new Date(stop.catalogDate).toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' })}。</>}
@@ -311,7 +321,11 @@ function StopResults({ query, saved, toggleSaved, campusNextSchoolId }: {
     return () => { active = false; clearTimeout(timeout); controller.abort(); };
   }, [query, retry, campusNextSchoolId]);
   const stops = query ? (result?.status === 'ready' && result.kind === 'stops' ? result.stops : []) : saved;
-  const current = selected ? stops.find((stop) => stopKey(stop) === stopKey(selected)) ?? null : null;
+  const grouped = Boolean(campusNextSchoolId && query?.action === 'campus' && stops.length);
+  const campusList = grouped ? listedCampusStops(stops) : null;
+  const shownStops = campusList ? campusList.listed : stops;
+  const current = selected ? shownStops.find((stop) => listedKey(stop) === listedKey(selected)) ??
+    stops.find((stop) => stopKey(stop) === stopKey(selected)) ?? null : null;
   const failed = result?.status === 'unavailable';
   const waiting = Boolean(query) && busy && !failed;
   const emptyCopy = !query ? '在站牌旁按「收藏」，下次便能直接查詢，不必再次定位。'
@@ -319,26 +333,43 @@ function StopResults({ query, saved, toggleSaved, campusNextSchoolId }: {
     : '沒有找到站牌。可以擴大搜尋範圍、確認縣市，或改用較短的站名。';
   return (
     <div className={css.workspace}>
-      <section className={css.stops} aria-labelledby="transit-stops-title" aria-busy={busy}>
-        <div className={css.sectionHeading}><h3 id="transit-stops-title">{query?.action === 'nearby' ? '附近站牌' : query ? '可搭乘站牌' : '我的常用站牌'}</h3>{!waiting && !failed && (stops.length > 0 || !query) && <span className={css.count}>{stops.length} 站</span>}</div>
+      <section className={css.stops} aria-labelledby="transit-stops-title" aria-busy={busy} data-testid="stop-groups">
+        <div className={css.sectionHeading}><h3 id="transit-stops-title">{query?.action === 'nearby' ? '附近站牌' : query ? '可搭乘站牌' : '我的常用站牌'}</h3>{!waiting && !failed && (shownStops.length > 0 || !query) && <span className={css.count}>{grouped ? `${shownStops.length} 組` : `${stops.length} 站`}</span>}</div>
         {query?.action === 'nearby' && !waiting && !failed && <p className={css.note}>{TRANSIT_CITIES[query.city]} · {query.radius} 公尺內，依直線距離排序。實際步行路線請看導航。</p>}
         {waiting && <p className={css.empty} role="status">正在讀取站牌…</p>}
-        {!waiting && !failed && stops.length > 1 && new Set(stops.map((stop) => stop.name)).size < stops.length && <p className={css.note}>同名站牌不只一個，可能是道路兩側或行經路線不同；站牌代碼只是編號，點開後先看路線與方向，再決定在哪裡上車。</p>}
+        {!waiting && !failed && grouped && shownStops.length > 0 && <p className={css.note}>依站序和位置分成學生常用的幾組。點開後再確認路線與方向。</p>}
+        {!waiting && !failed && !grouped && stops.length > 1 && new Set(stops.map((stop) => stop.name)).size < stops.length && <p className={css.note}>同名站牌不只一個，可能是道路兩側或行經路線不同；點開後先看路線與方向，再決定在哪裡上車。</p>}
         {failed && <div className={css.message} role="status"><p>{result?.status === 'unavailable' && result.reason === 'rate-limited' ? '查詢的人較多，服務忙碌中。請等約 1 分鐘再試一次，或先看下方官方公車網站。' : '暫時讀不到資料，請稍後再試'}</p><button type="button" className={css.secondary} disabled={busy} onClick={() => { setBusy(true); setResult(null); setSelected(null); setRetry((value) => value + 1); }}>再試一次</button></div>}
         {!waiting && !failed && !stops.length && <p className={css.empty}>{emptyCopy}</p>}
-        {!waiting && !failed && stops.length > 0 && <ul className={css.stopList}>{stops.map((stop, index) => {
+        {!waiting && !failed && shownStops.length > 0 && <ul className={`${css.stopList}${grouped ? ` ${css.groupedStops}` : ''}`}>{shownStops.map((stop, index) => {
           const isSaved = saved.some((entry) => stopKey(entry) === stopKey(stop));
-          const accessibleName = isStaticTransitStop(stop) ? `${stop.name} ${catalogSummary(stop.routes)} 第 ${index + 1} 站牌` : `${stop.name} ${stop.id}`;
-          return <li key={stopKey(stop)} data-selected={current && stopKey(current) === stopKey(stop) ? 'true' : undefined}>
-            <button type="button" className={css.stopButton} aria-pressed={Boolean(current && stopKey(current) === stopKey(stop))} onClick={() => setSelected(stop)}>
-              <span className={css.stopNumber}>{String(index + 1).padStart(2, '0')}</span><span><strong>{stop.name}</strong><small>{stop.distance !== null ? `${formatDistance(stop.distance)} · 直線距離` : TRANSIT_CITIES[stop.city]}<br />{isStaticTransitStop(stop) ? catalogSummary(stop.routes) : `站牌代碼 ${stop.id}`}</small></span>
+          const accessibleName = `${stop.name} ${stopSubtitle(stop)} 第 ${index + 1} 站牌`;
+          return <li key={listedKey(stop)} data-selected={current && listedKey(current) === listedKey(stop) ? 'true' : undefined}>
+            <button type="button" className={css.stopButton} aria-pressed={Boolean(current && listedKey(current) === listedKey(stop))} onClick={() => setSelected(stop)}>
+              <span className={css.stopNumber}>{String(index + 1).padStart(2, '0')}</span><span><strong>{stop.name}</strong><small>{stop.distance !== null && !grouped ? `${formatDistance(stop.distance)} · 直線距離` : grouped ? stopSubtitle(stop) : TRANSIT_CITIES[stop.city]}{grouped ? null : <><br />{stopSubtitle(stop)}</>}</small></span>
             </button>
             <button type="button" className={css.saveButton} aria-label={`${isSaved ? '取消收藏' : '收藏'} ${accessibleName}`} aria-pressed={isSaved} onClick={() => toggleSaved(stop)}>{isSaved ? '已收藏' : '收藏'}</button>
           </li>;
         })}</ul>}
-        {result?.status === 'ready' && result.kind === 'stops' && result.limited && !waiting && !failed && <p className={css.note}>{query?.action === 'campus' ? '學校附近站牌較多，目前先列出前 16 站；找不到要搭的站牌時，改用「搜尋站名」輸入完整站名。' : '此範圍資料較多，僅列出部分站牌；請縮小範圍確認。'}</p>}
+        {campusList && campusList.extra.length > 0 && !waiting && !failed && <details className={css.extraStops}><summary>其他站牌 {campusList.extra.length} 組</summary>
+          <ul className={css.stopList}>{campusList.extra.map((group, index) => {
+            const stop = { ...group.representative, name: group.label };
+            return <li key={listedKey(stop)}>
+              <button type="button" className={css.stopButton} onClick={() => setSelected(stop)}>
+                <span className={css.stopNumber}>{String(index + 1).padStart(2, '0')}</span><span><strong>{stop.name}</strong><small>{stopSubtitle(stop)}</small></span>
+              </button>
+            </li>;
+          })}</ul>
+        </details>}
+        {result?.status === 'ready' && result.kind === 'stops' && result.limited && !waiting && !failed && !grouped && <p className={css.note}>{query?.action === 'campus' ? '學校附近站牌較多，目前先列出前 16 站；找不到要搭的站牌時，改用「搜尋站名」輸入完整站名。' : '此範圍資料較多，僅列出部分站牌；請縮小範圍確認。'}</p>}
       </section>
-      {current ? isStaticTransitStop(current) ? <StaticStopDetails key={stopKey(current)} stop={current} /> : <StopArrivals key={stopKey(current)} stop={current} /> : campusNextSchoolId && (!query || query.action === 'campus') ? <CampusNextBoard schoolId={campusNextSchoolId} /> : !waiting && !failed && (stops.length > 0 || !query) ? <div className={css.placeholder}><span aria-hidden="true">→</span><h3>選好站牌，再確認方向</h3><p>點選站牌，查看路線資料與步行導航；有接通動態資料的站牌會顯示到站預估。</p></div> : null}
+      {current ? isStaticTransitStop(current) ? <StaticStopDetails key={listedKey(current)} stop={current} /> : <StopArrivals key={listedKey(current)} stop={current} groupLabel={grouped ? current.name : undefined} /> : campusNextSchoolId && (!query || query.action === 'campus') ? <CampusNextBoard schoolId={campusNextSchoolId} onPickRow={(row) => {
+        const label = campusGroupForRow(row);
+        const listed = shownStops.find((stop) => stop.name === label);
+        if (listed) { setSelected(listed); return; }
+        const extra = campusList?.extra.find((group) => group.label === label);
+        if (extra) setSelected({ ...extra.representative, name: extra.label });
+      }} /> : !waiting && !failed && (stops.length > 0 || !query) ? <div className={css.placeholder}><span aria-hidden="true">→</span><h3>選好站牌，再確認方向</h3><p>點選站牌，查看路線資料與步行導航；有接通動態資料的站牌會顯示到站預估。</p></div> : null}
     </div>
   );
 }
