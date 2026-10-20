@@ -97,27 +97,62 @@ export function normalizeTransitArrivals(rows: unknown[], stopId: string, destin
   }).slice(0, 100);
 }
 
+/** 被 TDX 限流或自身用量保護擋下時，可改回最近一份成功資料的保留時間。 */
+export const TRANSIT_STALE_RETENTION_MS = 10 * 60_000;
+/** 同時對 TDX 的請求上限；超過時短暫排隊，而不是立刻回忙碌。 */
+const MAX_RUNNING = 4;
+const SLOT_WAIT_MS = 3_000;
+
+type QueryResult = { rows: unknown[]; fetchedAt: number; stale: boolean };
+
 export function createTransitService(options: {
   credentials: () => { clientId?: string; clientSecret?: string };
   fetcher?: typeof fetch;
   now?: () => number;
+  wait?: (milliseconds: number) => Promise<void>;
 }) {
   const fetcher = options.fetcher ?? fetch;
   const now = options.now ?? Date.now;
+  const wait = options.wait ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
   let token: { value: string; expires: number } | null = null;
   let tokenPending: Promise<string> | null = null;
   let blockedUntil = 0;
   let budget = { window: 0, count: 0 };
   let running = 0;
-  const cache = new Map<string, { expires: number; value: unknown[] }>();
-  const pending = new Map<string, Promise<unknown[]>>();
+  const waiters: Array<() => void> = [];
+  const cache = new Map<string, { expires: number; fetchedAt: number; value: unknown[] }>();
+  // 最近一份成功資料，只在被限流時拿來回覆並如實標資料時間；不會讓舊預估重新變新鮮。
+  const lastGood = new Map<string, { fetchedAt: number; value: unknown[] }>();
+  const pending = new Map<string, Promise<QueryResult>>();
+
+  // 用量保護不放寬：最多 MAX_RUNNING 個同時請求、每分鐘 60 次、遇 429 依 Retry-After 暫停。
+  // 只是在名額滿時最多排隊 SLOT_WAIT_MS，排不到才回忙碌。
+  async function acquireSlot(): Promise<void> {
+    if (running < MAX_RUNNING) { running += 1; return; }
+    let granted = false;
+    let release!: () => void;
+    const turn = new Promise<void>((resolve) => { release = () => { granted = true; resolve(); }; });
+    waiters.push(release);
+    await Promise.race([turn, wait(SLOT_WAIT_MS)]);
+    if (!granted) {
+      const index = waiters.indexOf(release);
+      if (index >= 0) waiters.splice(index, 1);
+      throw new TransitError('rate-limited');
+    }
+  }
+  function releaseSlot() {
+    const next = waiters.shift();
+    if (next) next(); // 名額直接交給排隊中的請求，running 不變。
+    else running -= 1;
+  }
 
   async function request(url: string, init: RequestInit): Promise<unknown> {
-    if (now() < blockedUntil || running >= 4) throw new TransitError('rate-limited');
-    if (now() - budget.window >= 60_000) budget = { window: now(), count: 0 };
-    if (++budget.count > 60) throw new TransitError('rate-limited');
-    running += 1;
+    if (now() < blockedUntil) throw new TransitError('rate-limited');
+    await acquireSlot();
     try {
+      if (now() < blockedUntil) throw new TransitError('rate-limited');
+      if (now() - budget.window >= 60_000) budget = { window: now(), count: 0 };
+      if (++budget.count > 60) throw new TransitError('rate-limited');
       const response = await fetcher(url, { ...init, redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(8000) });
       if (response.status === 429) {
         const seconds = Number(response.headers.get('retry-after'));
@@ -127,7 +162,7 @@ export function createTransitService(options: {
       if (response.status === 401) { token = null; throw new TransitError('upstream'); }
       if (!response.ok) throw new TransitError('upstream');
       return await response.json();
-    } finally { running -= 1; }
+    } finally { releaseSlot(); }
   }
 
   async function accessToken(): Promise<string> {
@@ -148,20 +183,38 @@ export function createTransitService(options: {
     try { return await tokenPending; } finally { tokenPending = null; }
   }
 
-  async function query(path: string, params: URLSearchParams, ttl: number): Promise<unknown[]> {
+  function staleOrThrow(key: string, error: unknown): QueryResult {
+    const last = lastGood.get(key);
+    if (error instanceof TransitError && error.reason === 'rate-limited' && last && now() - last.fetchedAt <= TRANSIT_STALE_RETENTION_MS)
+      return { rows: last.value, fetchedAt: last.fetchedAt, stale: true };
+    throw error;
+  }
+
+  async function query(path: string, params: URLSearchParams, ttl: number): Promise<QueryResult> {
     const key = `${path}?${params}`;
     const hit = cache.get(key);
-    if (hit && hit.expires > now()) return hit.value;
-    if (pending.has(key)) return pending.get(key)!;
-    if (pending.size >= 8) throw new TransitError('rate-limited');
-    const work = (async () => {
-      const bearer = await accessToken();
-      const rows = await request(`${BASE}/api/basic/v2/Bus/${key}`, { headers: { Authorization: `Bearer ${bearer}`, Accept: 'application/json' } });
-      if (!Array.isArray(rows)) throw new TransitError('upstream');
-      for (const [cacheKey, entry] of cache) if (entry.expires <= now()) cache.delete(cacheKey);
-      if (cache.size >= 128) cache.delete(cache.keys().next().value!);
-      cache.set(key, { expires: now() + ttl, value: rows });
-      return rows;
+    if (hit && hit.expires > now()) return { rows: hit.value, fetchedAt: hit.fetchedAt, stale: false };
+    // 同一站牌同時進來的查詢共用同一次上游請求。
+    const inFlight = pending.get(key);
+    if (inFlight) return inFlight;
+    if (pending.size >= 8) return staleOrThrow(key, new TransitError('rate-limited'));
+    const work = (async (): Promise<QueryResult> => {
+      try {
+        const bearer = await accessToken();
+        const rows = await request(`${BASE}/api/basic/v2/Bus/${key}`, { headers: { Authorization: `Bearer ${bearer}`, Accept: 'application/json' } });
+        if (!Array.isArray(rows)) throw new TransitError('upstream');
+        const fetchedAt = now();
+        for (const [cacheKey, entry] of cache) if (entry.expires <= fetchedAt) cache.delete(cacheKey);
+        if (cache.size >= 128) cache.delete(cache.keys().next().value!);
+        cache.set(key, { expires: fetchedAt + ttl, fetchedAt, value: rows });
+        for (const [lastKey, entry] of lastGood) if (fetchedAt - entry.fetchedAt > TRANSIT_STALE_RETENTION_MS) lastGood.delete(lastKey);
+        lastGood.delete(key);
+        if (lastGood.size >= 256) lastGood.delete(lastGood.keys().next().value!);
+        lastGood.set(key, { fetchedAt, value: rows });
+        return { rows, fetchedAt, stale: false };
+      } catch (error) {
+        return staleOrThrow(key, error);
+      }
     })();
     pending.set(key, work);
     try { return await work; } finally { pending.delete(key); }
@@ -185,7 +238,8 @@ export function createTransitService(options: {
       const params = new URLSearchParams({ '$format': 'JSON', '$top': '200' });
       if (input.action === 'arrivals') {
         params.set('$filter', `StopUID eq ${literal(input.stopId)}`);
-        const rows = await query(`EstimatedTimeOfArrival/City/${city}`, params, 15_000);
+        const eta = await query(`EstimatedTimeOfArrival/City/${city}`, params, 15_000);
+        const rows = eta.rows;
         // 只為「到站資料沒給終點」的路線補查站序末站；查不到或上游忙碌就留空，
         // 不能因為補終點失敗就把整份即時到站丟掉，也不能拿路線牌文字充數。
         const missing = new Set<string>();
@@ -202,11 +256,13 @@ export function createTransitService(options: {
           try {
             const routeParams = new URLSearchParams({ '$format': 'JSON', '$top': '20' });
             routeParams.set('$filter', `RouteUID eq ${literal(routeUid)}`);
-            const routeRows = await query(`StopOfRoute/City/${city}`, routeParams, 6 * 60 * 60_000);
+            const { rows: routeRows } = await query(`StopOfRoute/City/${city}`, routeParams, 6 * 60 * 60_000);
             for (const [key, value] of normalizeRouteDestinations(routeRows)) destinations.set(key, value);
           } catch { /* 補不到終點就維持未提供，不影響即時到站本身。 */ }
         }
-        return { status: 'ready', kind: 'arrivals', arrivals: normalizeTransitArrivals(rows, input.stopId, destinations), fetchedAt: new Date(now()).toISOString() };
+        // 保留資料的 fetchedAt 是當時真正向 TDX 取得的時間；倒數仍依每筆來源時間，逾 90 秒不顯示。
+        return { status: 'ready', kind: 'arrivals', arrivals: normalizeTransitArrivals(rows, input.stopId, destinations),
+          fetchedAt: new Date(eta.stale ? eta.fetchedAt : now()).toISOString(), ...(eta.stale ? { stale: true as const } : {}) };
       }
       if (input.action === 'nearby') {
         // Round only the cache centre; pad the query and filter exact distances afterward.
@@ -215,9 +271,11 @@ export function createTransitService(options: {
         const name = campus ? campus.stopName : (input as Extract<TransitQuery, { action: 'search' }>).text;
         params.set('$filter', `contains(StopName/Zh_tw,${literal(name)})`);
       }
-      const rows = await query(`Stop/City/${city}`, params, 120_000);
+      const station = await query(`Stop/City/${city}`, params, 120_000);
+      const rows = station.rows;
       const stops = normalizeTransitStops(rows, city, input, 17);
-      return { status: 'ready', kind: 'stops', stops: stops.slice(0, 16), limited: rows.length >= 200 || stops.length > 16, fetchedAt: new Date(now()).toISOString() };
+      return { status: 'ready', kind: 'stops', stops: stops.slice(0, 16), limited: rows.length >= 200 || stops.length > 16,
+        fetchedAt: new Date(station.stale ? station.fetchedAt : now()).toISOString(), ...(station.stale ? { stale: true as const } : {}) };
     } catch (error) {
       return { status: 'unavailable', reason: error instanceof TransitError ? error.reason : 'upstream' };
     }
