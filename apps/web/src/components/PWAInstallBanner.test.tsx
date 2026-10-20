@@ -23,6 +23,15 @@ afterEach(() => {
 });
 
 describe('home screen installation', () => {
+  it('keeps the bus page hint compact so arrivals stay in view', () => {
+    browser(true);
+    window.history.pushState({}, '', '/bus');
+    render(<PWAInstallBanner />);
+    expect(screen.getByRole('heading', { name: '加入主畫面' })).toBeTruthy();
+    expect(screen.queryByText(/在瀏覽器選單/)).toBeNull();
+    window.history.pushState({}, '', '/');
+  });
+
   it('keeps the server render independent of iOS and blocked storage', () => {
     browser(true);
     vi.spyOn(localStorage, 'getItem').mockImplementation(() => {

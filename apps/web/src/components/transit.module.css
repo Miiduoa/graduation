@@ -48,10 +48,63 @@
 .message a, .note a { text-decoration: underline !important; text-underline-offset: 3px; }
 .route { font-size: 20px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .campusNext { min-width: 0; padding: 24px; }
-.campusNextList { list-style: none; padding: 0; margin: 8px 0 0; }
-.campusNextList li { display: flex; gap: 16px; align-items: center; justify-content: space-between; min-height: 52px; padding: 14px 0; border-bottom: 1px solid var(--border, #dae1dc); }
-.campusNextList li > div { display: grid; gap: 4px; }
-.campusNextList .eta { white-space: normal; line-height: 1.35; }
+.campusNextList { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 0; }
+.campusNextList li { min-width: 0; }
+.refreshStamp { appearance: none; border: 0; background: none; color: var(--muted, #5f6d68); font: inherit; font-size: 13px; min-height: 44px; min-width: 44px; padding: 10px 8px; cursor: pointer; }
+.arrivalRow {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 56px;
+  width: 100%;
+  padding: 10px 2px;
+  border: 0;
+  border-bottom: 1px solid var(--border, #dae1dc);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.routeBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  min-height: 32px;
+  border-radius: 8px;
+  background: var(--brand, #245d50);
+  color: var(--on-brand, #fff);
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.rowCopy { display: grid; gap: 2px; min-width: 0; }
+.rowCopy strong { font-size: 16px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+.rowCopy small { color: var(--muted, #5f6d68); font-size: 12px; font-weight: 400; line-height: 1.4; }
+.rowEta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-align: right;
+}
+.rowEta[data-kind='scheduled'] { font-size: 14px; font-weight: 500; color: var(--muted, #5f6d68); }
+.liveMark { width: 5px; height: 5px; border-radius: 50%; background: var(--brand, #245d50); flex-shrink: 0; }
+.arrivalRowEmpty { min-height: 44px; opacity: .55; }
+.arrivalRowEmpty .routeBadge { min-height: 28px; font-size: 14px; font-weight: 600; background: var(--muted, #5f6d68); }
+.arrivalRowEmpty .rowCopy strong { font-size: 14px; font-weight: 500; }
+.arrivalRowEmpty .rowEta { font-size: 13px; font-weight: 400; color: var(--muted, #5f6d68); }
+.extraStops { margin: 12px 0 0; }
+.extraStops > summary { cursor: pointer; min-height: 44px; padding: 12px 0; color: var(--muted, #5f6d68); font-size: 14px; }
 .nextBus { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; border: 1px solid var(--border, #dae1dc); border-left: 3px solid var(--brand, #245d50); border-radius: 8px; background: var(--bg, #f7f8f5); padding: 14px 16px; margin: 16px 0 4px; font-size: 14px; line-height: 1.6; }
 .nextBus strong { font-size: 22px; font-variant-numeric: tabular-nums; }
 .otherHeading { margin: 22px 0 4px; font-size: 14px; color: var(--muted, #5f6d68); }
@@ -88,22 +141,9 @@
   .stops { border-right: 0; border-bottom: 0; }
   .stops, .arrivals, .campusNext { padding: 14px 16px 16px; }
   .campusFirst .campusNext { padding-top: 4px; }
-  .campusNextList {
-    margin-top: 4px;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0 12px;
-  }
-  .campusNextList li {
-    min-height: 56px;
-    padding: 10px 0;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 2px;
-  }
-  .campusNextList .route { font-size: 22px; }
-  .campusNextList .eta { font-size: 16px; text-align: left; }
+  .campusNextList { margin-top: 4px; }
   .stopList { max-height: 280px; overflow-y: auto; padding: 3px; }
+  .groupedStops { max-height: none; overflow: visible; }
   .searchForm { flex-basis: 100%; }
   .searchForm label { min-width: 0; }
   .controls > label { flex: 1 1 130px; min-width: 0; }

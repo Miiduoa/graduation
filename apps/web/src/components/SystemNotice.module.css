@@ -24,6 +24,24 @@
   color: var(--text);
 }
 
+.noticeCompact {
+  min-height: 44px;
+  padding: 6px 12px;
+  gap: 8px 12px;
+}
+.noticeCompact .title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.noticeCompact .actions {
+  margin-left: auto;
+}
+.noticeCompact .actions > button {
+  min-height: 44px;
+}
+
 .content {
   flex: 1 1 240px;
   min-width: 0;

@@ -150,16 +150,45 @@
 }
 .busEntry {
   margin: 0 0 20px;
+  padding: 14px 16px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.busEntryHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.busEntryHead strong {
+  display: block;
+  font-size: 16px;
+  font-weight: 600;
+}
+.busEntryHead small {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--soft);
+  line-height: 1.5;
+}
+.busEntryAll {
+  flex-shrink: 0;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  padding: 10px 0;
+  font-size: 13px;
+  font-weight: 600;
 }
 .busEntryLink {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  min-height: 72px;
-  padding: 14px 16px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
+  min-height: 44px;
+  padding: 4px 0 8px;
 }
 .busEntryLink strong {
   font-size: 16px;

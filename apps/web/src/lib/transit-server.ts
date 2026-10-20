@@ -1,7 +1,7 @@
 import {
-  CAMPUS_NEXT, CAMPUS_TRANSIT, distanceMetres, hasCampusNext, isCity, isPosition, isRecord, isStopId,
-  type TransitArrival, type TransitCity, type TransitFailure, type TransitQuery,
-  type TransitResult, type TransitStop,
+  CAMPUS_NEXT, CAMPUS_TRANSIT, distanceMetres, hasCampusNext, headingAfterBoarding, isCity, isPosition, isRecord, isStopId,
+  publicPlaceName, type RouteStopSequence, type TransitArrival, type TransitCity, type TransitFailure,
+  type TransitQuery, type TransitResult, type TransitRoute, type TransitStop,
 } from './transit';
 import { searchTaichungCatalog } from './transit-catalog';
 
@@ -54,21 +54,103 @@ export function normalizeTransitStops(rows: unknown[], city: TransitCity, query:
  */
 export function normalizeRouteDestinations(rows: unknown[]): Map<string, string> {
   const destinations = new Map<string, string>();
-  for (const row of rows) {
-    if (!isRecord(row)) continue;
-    const direction = typeof row.Direction === 'number' && Number.isInteger(row.Direction) ? row.Direction : null;
-    if (direction === null || !Array.isArray(row.Stops) || !row.Stops.length) continue;
-    const last = row.Stops[row.Stops.length - 1];
-    const destination = isRecord(last) ? localName(last.StopName) : '';
+  for (const sequence of normalizeRouteSequences(rows)) {
+    const last = sequence.stops[sequence.stops.length - 1]?.name ?? '';
+    const destination = publicPlaceName(last) || last;
     if (!destination) continue;
-    for (const uid of [text(row.RouteUID), text(row.SubRouteUID)]) {
-      if (uid) destinations.set(`${uid}:${direction}`, destination);
+    for (const uid of [sequence.routeUid, sequence.subRouteUid]) {
+      if (uid) destinations.set(`${uid}:${sequence.direction}`, destination);
     }
   }
   return destinations;
 }
 
-export function normalizeTransitArrivals(rows: unknown[], stopId: string | null, destinations?: Map<string, string>): TransitArrival[] {
+export function normalizeRouteSequences(rows: unknown[]): RouteStopSequence[] {
+  const sequences: RouteStopSequence[] = [];
+  for (const row of rows) {
+    if (!isRecord(row)) continue;
+    const direction = typeof row.Direction === 'number' && Number.isInteger(row.Direction) ? row.Direction : null;
+    if (direction === null || !Array.isArray(row.Stops) || !row.Stops.length) continue;
+    const stops: RouteStopSequence['stops'] = [];
+    for (const entry of row.Stops) {
+      if (!isRecord(entry)) continue;
+      const name = localName(entry.StopName);
+      if (!name) continue;
+      stops.push({ id: isStopId(entry.StopUID) ? entry.StopUID : '', name });
+    }
+    if (!stops.length) continue;
+    sequences.push({
+      routeUid: text(row.RouteUID),
+      subRouteUid: text(row.SubRouteUID),
+      routeName: localName(row.RouteName) || text(row.RouteUID).replace(/^TXG/i, ''),
+      direction,
+      stops,
+    });
+  }
+  return sequences;
+}
+
+function sequenceForArrival(row: Record<string, unknown>, sequences: RouteStopSequence[]): RouteStopSequence | undefined {
+  const direction = typeof row.Direction === 'number' && Number.isInteger(row.Direction) ? row.Direction : null;
+  if (direction === null) return undefined;
+  const routeUid = text(row.RouteUID);
+  const subRouteUid = text(row.SubRouteUID);
+  return sequences.find((sequence) => sequence.direction === direction &&
+    (sequence.subRouteUid && sequence.subRouteUid === subRouteUid ||
+      sequence.routeUid && sequence.routeUid === routeUid ||
+      sequence.subRouteUid && sequence.subRouteUid === routeUid));
+}
+
+function arrivalDestination(
+  row: Record<string, unknown>,
+  destinations?: Map<string, string>,
+  sequences: RouteStopSequence[] = [],
+): string {
+  const direction = typeof row.Direction === 'number' && Number.isInteger(row.Direction) ? row.Direction : null;
+  const raw = text(row.DestinationStopNameZh) ||
+    (direction !== null ? destinations?.get(`${text(row.SubRouteUID)}:${direction}`) ||
+      destinations?.get(`${text(row.RouteUID)}:${direction}`) || '' : '');
+  const sequence = sequenceForArrival(row, sequences);
+  const boardingId = isStopId(row.StopUID) ? row.StopUID : '';
+  if (sequence && sequence.stops.some((stop) => stop.id && stop.id === boardingId)) {
+    return headingAfterBoarding(sequence, boardingId, localName(row.StopName)) || publicPlaceName(raw) || raw;
+  }
+  return publicPlaceName(raw) || raw;
+}
+
+export function routesAtCampusStop(stopId: string, sequences: RouteStopSequence[]): TransitRoute[] {
+  const routes: TransitRoute[] = [];
+  const seen = new Set<string>();
+  for (const sequence of sequences) {
+    if (!sequence.stops.some((stop) => stop.id === stopId)) continue;
+    const destination = headingAfterBoarding(sequence, stopId);
+    const route: TransitRoute = {
+      name: sequence.routeName || sequence.routeUid.replace(/^TXG/i, ''),
+      direction: sequence.direction === 0 ? '去' : sequence.direction === 1 ? '返' : '',
+      destination,
+    };
+    const key = `${route.name}:${route.direction}:${route.destination}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    routes.push(route);
+  }
+  return routes;
+}
+
+export function withCampusRouteHeadings(stops: TransitStop[], sequences: RouteStopSequence[]): TransitStop[] {
+  if (!sequences.length) return stops;
+  return stops.map((stop) => {
+    const routes = routesAtCampusStop(stop.id, sequences);
+    return routes.length ? { ...stop, routes } : stop;
+  });
+}
+
+export function normalizeTransitArrivals(
+  rows: unknown[],
+  stopId: string | null,
+  destinations?: Map<string, string>,
+  sequences: RouteStopSequence[] = [],
+): TransitArrival[] {
   const arrivals = new Map<string, TransitArrival>();
   for (const row of rows) {
     if (!isRecord(row) || !isStopId(row.StopUID) || (stopId && row.StopUID !== stopId)) continue;
@@ -83,9 +165,7 @@ export function normalizeTransitArrivals(rows: unknown[], stopId: string | null,
     const timestamp = Date.parse(stamp);
     const current = arrivals.get(id);
     if (current?.updatedAt && (!Number.isFinite(timestamp) || Date.parse(current.updatedAt) > timestamp)) continue;
-    // 到站資料本身給的終點優先；沒給才用站序末站補，兩者都沒有就留空不編造。
-    const destination = text(row.DestinationStopNameZh) ||
-      (direction !== null ? destinations?.get(`${subRouteUid}:${direction}`) || destinations?.get(`${routeUid}:${direction}`) || '' : '');
+    const destination = arrivalDestination(row, destinations, sequences);
     const scheduledStamp = Date.parse(text(row.NextBusTime));
     arrivals.set(id, {
       id, route, direction, destination,
@@ -244,6 +324,35 @@ export function createTransitService(options: {
     try { return await work; } finally { pending.delete(key); }
   }
 
+  async function loadRouteStopRows(city: TransitCity, routeUid: string, fetchIfMissing: boolean): Promise<unknown[]> {
+    const [path, params] = routeStopsQuery(city, routeUid);
+    const key = `${path}?${params}`;
+    const hit = cache.get(key);
+    if (hit && hit.expires > now()) return hit.value;
+    const last = lastGood.get(key);
+    const inflight = pending.get(key);
+    if (inflight) return (await inflight).rows;
+    if (!fetchIfMissing) return last && now() <= last.retainUntil ? last.value : [];
+    try {
+      return (await query(path, params, ROUTE_STOPS_TTL_MS)).rows;
+    } catch {
+      return last && now() <= last.retainUntil ? last.value : [];
+    }
+  }
+  async function loadRouteSequences(city: TransitCity, routeUids: Iterable<string>, fetchIfMissing: boolean) {
+    const sequences: RouteStopSequence[] = [];
+    const destinations = new Map<string, string>();
+    const seen = new Set<string>();
+    for (const routeUid of routeUids) {
+      if (!routeUid || seen.has(routeUid)) continue;
+      seen.add(routeUid);
+      const rows = await loadRouteStopRows(city, routeUid, fetchIfMissing);
+      sequences.push(...normalizeRouteSequences(rows));
+      for (const [key, value] of normalizeRouteDestinations(rows)) destinations.set(key, value);
+    }
+    return { sequences, destinations };
+  }
+
   // 只在第一次有人查詢時於背景依序預載，走同一套用量保護；失敗不影響任何回應。
   function startPreload() {
     const plan = options.preloadRoutes;
@@ -290,8 +399,7 @@ export function createTransitService(options: {
         }
         const eta = await query(`EstimatedTimeOfArrival/City/${city}`, params, 15_000);
         const rows = eta.rows;
-        // 只為「到站資料沒給終點」的路線補查站序末站；查不到或上游忙碌就留空，
-        // 不能因為補終點失敗就把整份即時到站丟掉，也不能拿路線牌文字充數。
+        // 到站沒給終點時才向 TDX 補站序；靜宜四條預載路線可再用已在快取的站序改寫離開校園後的方向。
         const missing = new Set<string>();
         for (const row of rows) {
           if (!isRecord(row) || (stopId && row.StopUID !== stopId) || text(row.DestinationStopNameZh)) continue;
@@ -301,15 +409,15 @@ export function createTransitService(options: {
           missing.add(routeUid);
           if (missing.size >= 8) break;
         }
-        const destinations = new Map<string, string>();
-        for (const routeUid of missing) {
-          try {
-            const { rows: routeRows } = await query(...routeStopsQuery(city, routeUid), ROUTE_STOPS_TTL_MS);
-            for (const [key, value] of normalizeRouteDestinations(routeRows)) destinations.set(key, value);
-          } catch { /* 補不到終點就維持未提供，不影響即時到站本身。 */ }
-        }
+        const fetchUids = new Set(missing);
+        if (campusNext) for (const route of campusNext.routes) fetchUids.add(route.routeUid);
+        const cachedUids = city === PROVIDENCE_PRELOAD_ROUTES.city ? PROVIDENCE_PRELOAD_ROUTES.routeUids : [];
+        const fetched = await loadRouteSequences(city, fetchUids, true);
+        const cached = await loadRouteSequences(city, cachedUids, false);
+        const destinations = new Map([...cached.destinations, ...fetched.destinations]);
+        const sequences = [...cached.sequences, ...fetched.sequences];
         // 保留資料的 fetchedAt 是當時真正向 TDX 取得的時間；倒數仍依每筆來源時間，逾 90 秒不顯示。
-        return { status: 'ready', kind: 'arrivals', arrivals: normalizeTransitArrivals(rows, stopId, destinations),
+        return { status: 'ready', kind: 'arrivals', arrivals: normalizeTransitArrivals(rows, stopId, destinations, sequences),
           fetchedAt: new Date(eta.stale ? eta.fetchedAt : now()).toISOString(), ...(eta.stale ? { stale: true as const } : {}) };
       }
       if (input.action === 'nearby') {
@@ -321,8 +429,12 @@ export function createTransitService(options: {
       }
       const station = await query(`Stop/City/${city}`, params, 120_000);
       const rows = station.rows;
-      const stops = normalizeTransitStops(rows, city, input, 17);
-      return { status: 'ready', kind: 'stops', stops: stops.slice(0, 16), limited: rows.length >= 200 || stops.length > 16,
+      const matched = normalizeTransitStops(rows, city, input, 17);
+      const campusHeadings = input.action === 'campus' && input.schoolId === 'pu'
+        ? await loadRouteSequences(city, PROVIDENCE_PRELOAD_ROUTES.routeUids, true)
+        : { sequences: [] as RouteStopSequence[] };
+      const stops = withCampusRouteHeadings(matched.slice(0, 16), campusHeadings.sequences);
+      return { status: 'ready', kind: 'stops', stops, limited: rows.length >= 200 || matched.length > 16,
         fetchedAt: new Date(station.stale ? station.fetchedAt : now()).toISOString(), ...(station.stale ? { stale: true as const } : {}) };
     } catch (error) {
       return { status: 'unavailable', reason: error instanceof TransitError ? error.reason : 'upstream' };
