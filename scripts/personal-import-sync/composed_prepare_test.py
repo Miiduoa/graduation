@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from copy import deepcopy
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -35,6 +36,26 @@ class ComposedPrepareTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256((ROOT / item['source']).read_bytes()).hexdigest(), item['sha256'], target)
         for name, checksum in manifest['adapters'].items():
             self.assertEqual(hashlib.sha256((prepare.API / name / 'prepare.py').read_bytes()).hexdigest(), checksum)
+        self.assertEqual(len(manifest['afterOverlayPatches']), 1)
+        self.assertEqual(
+            [str((prepare.API / name).relative_to(ROOT)) for name in prepare.AFTER_OVERLAY_PATCHES],
+            [item['source'] for item in manifest['afterOverlayPatches']],
+        )
+        for item in manifest['afterOverlayPatches']:
+            self.assertEqual(hashlib.sha256((ROOT / item['source']).read_bytes()).hexdigest(), item['sha256'])
+        self.assertNotEqual(manifest['patchedAppSha256'], manifest['appSha256'])
+        self.assertNotEqual(manifest['overlayTree'], manifest['candidateTree'])
+
+    def test_patch_drift_is_rejected_before_any_checkout_write(self):
+        expected = deepcopy(json.loads((prepare.HERE / 'source.json').read_text()))
+        expected['afterOverlayPatches'][0]['sha256'] = '0' * 64
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(prepare, 'plan', return_value=({}, 'must-not-write', expected)), \
+                patch.object(prepare.subprocess, 'run') as command:
+            with self.assertRaisesRegex(ValueError, 'Composed source drift: afterOverlayPatches'):
+                prepare.apply_extension(Path(directory))
+            self.assertEqual(list(Path(directory).iterdir()), [])
+            command.assert_not_called()
 
     def test_rollback_preserves_immutable_production_image_and_only_adds_sql(self):
         manifest = json.loads((prepare.HERE / 'rollback-source.json').read_text())

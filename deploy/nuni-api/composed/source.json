@@ -90,6 +90,14 @@
     }
   },
   "appSha256": "2d503c14cd76c30e8e057074697eb5d6eff8b79899efa82b6106425ca2b27c5a",
+  "afterOverlayPatches": [
+    {
+      "source": "deploy/nuni-api/materials-pagination/0001-stable-material-pages.patch",
+      "sha256": "03bd7b3497d39758d52a04fd33603c15abd4cfe9bc606499a7246c70cc0c2a0e"
+    }
+  ],
+  "overlayTree": "c9746b456b56aee6b6d1ff067a6627fa281890fc",
+  "patchedAppSha256": "ebab4626e20f64204db95528e2cd2819c6270c0d2f0efa6f440aaac9f71a5636",
   "runtimeInventoryScope": "Pinned base analysis only; not a composed API grant receipt",
-  "candidateTree": "fb8ff281facd3d9167db0750c51c9936d1511463"
+  "candidateTree": "b0a10ac814cd03fbfb45132566035acce8339f17"
 }

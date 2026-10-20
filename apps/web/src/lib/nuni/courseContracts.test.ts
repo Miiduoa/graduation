@@ -72,6 +72,53 @@ const quiz = { ...common, id: quizId, prompt: '說明你的理由', responseCoun
 const invalidResponse = { status: 502, code: 'INVALID_RESPONSE' };
 
 describe('Nuni course response contracts', () => {
+  it('keeps legacy materials unchanged and reads bounded pages with query outside the path', async () => {
+    const transport = vi.fn(async (): Promise<unknown> => ({ materials: [material], nextCursor: 'next_page' }));
+    const classes = createNuniClasses(transport);
+    expect(await classes.materials(workspaceId)).toEqual([material]);
+    expect(transport).toHaveBeenLastCalledWith(`class-workspaces/${workspaceId}/materials`);
+    expect(await classes.materialsPage(workspaceId)).toEqual({
+      materials: [material], nextCursor: 'next_page',
+    });
+    expect(transport).toHaveBeenLastCalledWith(`class-workspaces/${workspaceId}/materials/page`);
+    transport.mockResolvedValueOnce({ materials: [material], nextCursor: null });
+    expect(await classes.materialsPage(workspaceId, 'next_page')).toEqual({
+      materials: [material], nextCursor: null,
+    });
+    expect(transport).toHaveBeenLastCalledWith(
+      `class-workspaces/${workspaceId}/materials/page`, undefined, { cursor: 'next_page' },
+    );
+  });
+
+  it('rejects malformed cursor inputs before making a request', async () => {
+    const transport = vi.fn();
+    for (const cursor of ['', 'a'.repeat(501), '../other', 'cursor&owner=other', 'base64='])
+      await expect(createNuniClasses(transport).materialsPage(workspaceId, cursor))
+        .rejects.toMatchObject({ code: 'CLASS_WORKSPACE_MATERIAL_CURSOR_INVALID' });
+    expect(transport).not.toHaveBeenCalled();
+  });
+
+  it('rejects truncated pagination metadata, repeated cursors and mixed or duplicate records', async () => {
+    for (const value of [
+      { materials: [material] },
+      { materials: [material], nextCursor: '' },
+      { materials: [material], nextCursor: 'a'.repeat(501) },
+      { materials: [material], nextCursor: 'bad=value' },
+      { materials: [material], nextCursor: 'used_cursor' },
+      { materials: [], nextCursor: 'next_page' },
+      { materials: [material, material], nextCursor: null },
+      { materials: [{ ...material, workspaceId: otherWorkspace }], nextCursor: null },
+      { materials: Array.from({ length: 51 }, (_, i) => ({
+        ...material, id: `cwm_00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+      })), nextCursor: null },
+    ]) {
+      await expect(createNuniClasses(async () => value).materialsPage(workspaceId, 'used_cursor'))
+        .rejects.toMatchObject(invalidResponse);
+    }
+    expect(await createNuniClasses(async () => ({ materials: [], nextCursor: null }))
+      .materialsPage(workspaceId)).toEqual({ materials: [], nextCursor: null });
+  });
+
   it('keeps exact server projections and omits unsupported grade or privilege fields', () => {
     expect(parseNuniUnit(unit)).toEqual(unit);
     expect(parseNuniMaterial({ ...material, accessToken: 'unrelated' })).toEqual(material);

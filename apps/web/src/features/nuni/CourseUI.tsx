@@ -28,11 +28,13 @@ export function CourseAccessBoundary({
 export function useClasses(beginRequest?: BeginCourseRequest) {
   const { session, refresh } = useNuniSession();
   const inheritedRequest = useContext(CourseAccess);
-  return createNuniClasses(async (path, input) => {
+  return createNuniClasses(async (path, input, query) => {
     if (!session) return Promise.reject(new NuniError(401, 'SIGN_IN_REQUIRED'));
     const onAccessDenied = (beginRequest ?? inheritedRequest)?.();
     try {
-      return await browserRequest(path, session.context, input);
+      return await (query
+        ? browserRequest(path, session.context, input, undefined, query)
+        : browserRequest(path, session.context, input));
     } catch (error) {
       if (error instanceof NuniError && (error.status === 401 || error.code === 'SESSION_CHANGED'))
         void refresh();
