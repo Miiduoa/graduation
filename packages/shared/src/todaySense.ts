@@ -7,10 +7,10 @@ export const SENSE_CARD_LIMIT = 8;
 
 export const SENSE_SECTION_TITLE = '現在可處理';
 export const SENSE_SECTION_NOTE =
-  '依現在時間與已讀到的課程待辦即時計算。沒有接模型，也不會在背景持續感知。';
-export const SENSE_UNSIGNED_TEXT = '登入後才會依你已讀到的待辦顯示可處理事項。';
+  '先看進行中、已逾期和一天內到期的課程待辦。';
+export const SENSE_UNSIGNED_TEXT = '登入後，這裡會列出近期要處理的課程待辦。';
 export const SENSE_EMPTY_TEXT =
-  '目前沒有需要立即處理的事項。這是依現在時間與已讀到的待辦算出來的，不是範例。';
+  '目前載入的課程中，沒有進行中、已逾期或一天內到期的待辦。';
 export const SENSE_HANDLE_PREVIEW =
   '只從今天這份處理清單移出，不會幫你繳交作業、作答測驗或完成點名。';
 export const SENSE_SNOOZE_PREVIEW =

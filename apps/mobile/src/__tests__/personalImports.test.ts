@@ -240,6 +240,21 @@ test('deleting one saved record is durable and does not remove its batch sibling
   expect((await loadPersonalImports(scope)).records).toEqual(updated.records);
 });
 
+test('same-name courses with different teachers or rooms are not hidden by manual-import deduplication', () => {
+  const manual = {
+    id: 'manual', name: '微積分', day: 1, start: 1, end: 2,
+    teacher: '王老師', room: 'A101', color: 'blue' as const,
+  };
+  const base = { courses: [manual], meta: { year: '115', semester: '1' } };
+  const imported = {
+    ...row('imported'), batchId: 'batch', importedAt: '2026-10-20T00:00:00Z',
+    teacher: manual.teacher, location: manual.room,
+  };
+  expect(selectPersonalTimetableCourses(base, [imported], 'pu', '115／1')).toHaveLength(1);
+  expect(selectPersonalTimetableCourses(base, [{ ...imported, teacher: '林老師' }], 'pu', '115／1')).toHaveLength(2);
+  expect(selectPersonalTimetableCourses(base, [{ ...imported, location: 'A102' }], 'pu', '115／1')).toHaveLength(2);
+});
+
 test('a stale deletion, an account change and damaged storage never erase a newer revision', async () => {
   const saved = await appendPersonalImports(scope, [row('a')]);
   const original = saved.ledger.records[0];

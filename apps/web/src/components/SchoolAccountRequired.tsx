@@ -34,6 +34,15 @@ export function SchoolAccountRequired({
       </section>
     );
   }
+  if (options.error) {
+    return (
+      <section className={styles.panel} role="alert">
+        <Heading>暫時無法確認學校服務</Heading>
+        <p className={styles.notice}>沒有取得登入服務的回應，還不能確認這項功能是否開放。</p>
+        <button type="button" className="btn" onClick={options.retry}>重新確認</button>
+      </section>
+    );
+  }
   if (!options.studentId) {
     return (
       <section className={styles.panel} aria-label="功能還沒接通">

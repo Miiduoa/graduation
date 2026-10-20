@@ -7,6 +7,7 @@ import { AppHeader } from '@/components/AppHeader';
 import { SiteFooter } from '@/components/SiteFooter';
 import { useAuth } from '@/components/AuthGuard';
 import { AccountIdentity } from '@/components/AccountIdentity';
+import { TodayTimetable } from '@/components/timetable/TodayTimetable';
 import { browserRequest, useNuniSession } from '@/features/nuni/Session';
 import { loadHomeData, type HomeCourse, type HomeData, type HomeTask } from '@/lib/homeOverview';
 import { loadNuniHomeData } from '@/lib/nuniHomeOverview';
@@ -193,6 +194,7 @@ export default function HomePage() {
         )}
         <div className={styles.columns}>
           <div>
+            <TodayTimetable now={now} />
             {blocked ? (
               <section className={styles.focus} aria-labelledby="session-title">
                 <h2 id="session-title">
@@ -247,7 +249,7 @@ export default function HomePage() {
                             ? '目前沒有待完成的作業或測驗'
                             : '目前沒有待繳作業'
                           : '加入你的第一門課'
-                      : '先回到你的課程'}
+                      : '教材、作業與老師回饋'}
                 </h2>
                 {nextTask ? (
                   <p>
@@ -455,9 +457,9 @@ export default function HomePage() {
               />
             ) : null}
             <section className={styles.schoolAccess}>
-              <h2>學校課表與成績</h2>
-              <p>這個功能還沒接通。課表可以先在這台瀏覽器整理；成績請先到學校的 e 校園查看。</p>
-              <Link href="/timetable">查看這台瀏覽器上的課表 →</Link>
+              <h2>課表與成績紀錄</h2>
+              <p>可匯入課表或成績，核對後存在這台瀏覽器。學校資料尚未自動同步，正式紀錄請到校方系統確認。</p>
+              <Link href="/import">匯入與備份個人資料 →</Link>
             </section>
             <Link className={styles.supportLink} href="/ai-assistant">
               校園助理 →

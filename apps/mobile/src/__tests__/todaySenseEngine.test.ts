@@ -54,5 +54,5 @@ test('write-back, preview copy, undo and empty input stay honest', () => {
   }
   expect(selectSenseCards({ now, state: emptySenseState(), items: [] }).cards).toEqual([]);
   expect(parseSenseState('{not-json')).toEqual(emptySenseState());
-  expect(SENSE_EMPTY_TEXT).toContain('不是範例');
+  expect(SENSE_EMPTY_TEXT).toContain('目前載入的課程');
 });
