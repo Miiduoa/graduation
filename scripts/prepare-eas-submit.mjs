@@ -40,6 +40,8 @@ function validEmail(value) {
 }
 
 export function prepareSubmitConfig(config, env) {
+  if (env.BUILD_PROFILE === 'production-device')
+    throw new Error('production-device APKs are for device acceptance and cannot be submitted.');
   const platform = env.BUILD_PLATFORM;
   if (!['ios', 'android'].includes(platform))
     throw new Error('BUILD_PLATFORM must be ios or android.');

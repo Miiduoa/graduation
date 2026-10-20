@@ -34,6 +34,12 @@
         "buildType": "apk"
       }
     },
+    "production-device": {
+      "extends": "production",
+      "android": {
+        "buildType": "apk"
+      }
+    },
     "production": {
       "extends": "base",
       "channel": "production",
