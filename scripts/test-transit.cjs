@@ -84,7 +84,7 @@ test('campus-next is limited to Providence and unknown schools stay invalid', ()
 test('campus-next uses one arrival query for the four Providence routes and keeps the 15 second cache', async () => {
   const mock = service((url) => Response.json(url.includes('/StopOfRoute/') ? [] : [
     arrival({ StopUID: 'TXG-GATE', RouteUID: 'TXG162', RouteName: { Zh_tw: '162' }, StopName: { Zh_tw: '靜宜大學(校門)' }, EstimateTime: 180 }),
-    arrival({ StopUID: 'TXG-GATE', RouteUID: 'TXG301', RouteName: { Zh_tw: '301' }, StopName: { Zh_tw: '靜宜大學(校門)' }, StopStatus: 3, EstimateTime: null, NextBusTime: at(45 * 60_000) }),
+    arrival({ StopUID: 'TXG-GATE', RouteUID: 'TXG301', RouteName: { Zh_tw: '301' }, StopName: { Zh_tw: '靜宜大學(校門)' }, StopStatus: 0, EstimateTime: null, NextBusTime: at(45 * 60_000) }),
   ]));
   const query = { action: 'campus-next', schoolId: 'pu' };
   const first = await mock.execute(query);
@@ -107,8 +107,7 @@ test('campus-next uses one arrival query for the four Providence routes and keep
   assert.equal(gate.stopName, '靜宜大學(校門)');
   const scheduled = first.arrivals.find((row) => row.route === '301');
   assert.equal(scheduled.scheduledAt, at(45 * 60_000));
-  assert.match(client.arrivalLabel(scheduled, NOW), /表定/);
-  assert.match(client.arrivalLabel(scheduled, NOW), /非即時/);
+  assert.match(client.arrivalLabel(scheduled, NOW), /^表定 \d{2}:\d{2}$/);
   assert.equal(client.pickCampusNext(first.arrivals, NOW).map((row) => row.route).join(','), '162,301,326,368');
 });
 test('campus-next without credentials stays unavailable and does not invent times', async () => {
@@ -143,13 +142,13 @@ test('source timestamps, not a fresh HTTP response, decide whether an estimate c
 });
 test('unknown or passed estimates never become misleading imminent-arrival labels', () => {
   const [fresh] = server.normalizeTransitArrivals([arrival({ EstimateTime: 0 })], 'TXG123');
-  assert.equal(client.arrivalLabel(fresh, NOW), '即將到站');
+  assert.equal(client.arrivalLabel(fresh, NOW), '進站中');
   assert.equal(client.arrivalLabel(fresh, NOW + 31_000), '等待更新');
-  for (const seconds of [null, -10, Infinity, NaN]) assert.equal(client.arrivalLabel({ ...fresh, seconds }, NOW), '暫無到站預估');
+  for (const seconds of [null, -10, Infinity, NaN]) assert.equal(client.arrivalLabel({ ...fresh, seconds }, NOW), '暫無班次資訊');
 });
 test('each stop status remains distinct, including no service today', () => {
   const [fresh] = server.normalizeTransitArrivals([arrival()], 'TXG123');
-  const labels = { 1: '尚未發車', 2: '交管不停靠', 3: '末班車已駛離', 4: '今日未營運' };
+  const labels = { 1: '尚未發車', 2: '交管不停靠', 3: '今天收班', 4: '今天收班' };
   for (const [status, label] of Object.entries(labels)) assert.equal(client.arrivalLabel({ ...fresh, status: Number(status) }, NOW), label);
 });
 test('filters exact StopUID and retains direction/subroute identity instead of mixing platforms', () => {
