@@ -47,6 +47,11 @@
 .catalogRoutes li > span { color: var(--muted, #5f6d68); font-size: 14px; }
 .message a, .note a { text-decoration: underline !important; text-underline-offset: 3px; }
 .route { font-size: 20px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.campusNext { min-width: 0; padding: 24px; }
+.campusNextList { list-style: none; padding: 0; margin: 8px 0 0; }
+.campusNextList li { display: flex; gap: 16px; align-items: center; justify-content: space-between; min-height: 52px; padding: 14px 0; border-bottom: 1px solid var(--border, #dae1dc); }
+.campusNextList li > div { display: grid; gap: 4px; }
+.campusNextList .eta { white-space: normal; line-height: 1.35; }
 .nextBus { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; border: 1px solid var(--border, #dae1dc); border-left: 3px solid var(--brand, #245d50); border-radius: 8px; background: var(--bg, #f7f8f5); padding: 14px 16px; margin: 16px 0 4px; font-size: 14px; line-height: 1.6; }
 .nextBus strong { font-size: 22px; font-variant-numeric: tabular-nums; }
 .otherHeading { margin: 22px 0 4px; font-size: 14px; color: var(--muted, #5f6d68); }
@@ -67,12 +72,37 @@
 .legacy { padding: 20px 0; border-top: 1px solid var(--border, #dae1dc); }
 .legacy > summary { cursor: pointer; padding: 12px 0; min-height: 44px; font-size: 14px; color: var(--muted, #5f6d68); }
 @media (max-width: 760px) {
-  .intro { flex-direction: column; gap: 12px; }
+  .intro { flex-direction: column; gap: 12px; padding-bottom: 16px; }
+  .campusFirst { display: flex; flex-direction: column; }
+  .campusFirst .intro { order: 0; }
+  .campusFirst .workspace { order: 1; }
+  .campusFirst .modeBar { order: 2; }
+  .campusFirst .controls { order: 3; }
+  .campusFirst .privacy { order: 4; }
+  .campusFirst .message { order: 5; }
+  .campusFirst .footer { order: 6; }
+  .campusFirst .legacy { order: 7; }
   .workspace { grid-template-columns: 1fr; }
   /* 手機先看到已選站牌的班次與分鐘，換站牌的清單在下方，不必先捲過整份清單。 */
-  .arrivals { order: -1; border-bottom: 1px solid var(--border, #dae1dc); }
+  .arrivals, .campusNext { order: -1; border-bottom: 1px solid var(--border, #dae1dc); }
   .stops { border-right: 0; border-bottom: 0; }
-  .stops, .arrivals { padding: 18px; }
+  .stops, .arrivals, .campusNext { padding: 14px 16px 16px; }
+  .campusFirst .campusNext { padding-top: 4px; }
+  .campusNextList {
+    margin-top: 4px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0 12px;
+  }
+  .campusNextList li {
+    min-height: 56px;
+    padding: 10px 0;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+  .campusNextList .route { font-size: 22px; }
+  .campusNextList .eta { font-size: 16px; text-align: left; }
   .stopList { max-height: 280px; overflow-y: auto; padding: 3px; }
   .searchForm { flex-basis: 100%; }
   .searchForm label { min-width: 0; }

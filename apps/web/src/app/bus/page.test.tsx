@@ -44,12 +44,12 @@ it('keeps a not-yet-integrated university isolated from the previous school', ()
   expect(screen.getByText('所選校園尚未接入')).toBeTruthy();
 });
 
-it('prompts for a school rather than querying any campus when none is chosen', () => {
+it('opens Providence buses when no school has been chosen yet', () => {
   navigation.query = '?campus=all&schoolId=pu';
   render(<BusPage />);
-  expect(screen.getByText('請先選擇一所學校')).toBeTruthy();
-  expect(screen.queryByTestId('bus-school')).toBeNull();
-  expect(screen.queryByText('靜宜大學')).toBeNull();
+  expect(screen.getByTestId('bus-school').textContent).toBe('pu');
+  expect(screen.getByText('靜宜大學')).toBeTruthy();
+  expect(screen.queryByText('請先選擇一所學校')).toBeNull();
 });
 
 it('keeps the selected campus in the registered-routes deep link', () => {
@@ -67,7 +67,8 @@ it('keeps official transit access visible even before a campus is selected', () 
   expect(screen.getByRole('heading', { name: '臺中站牌可查詢，即時到站尚未接通' })).toBeTruthy();
   expect(screen.getByRole('link', { name: '臺中市官方公車查詢 ↗' }).getAttribute('href')).toBe('https://citybus.taichung.gov.tw/');
   expect(screen.getByRole('link', { name: '其他縣市與公路客運查詢 ↗' }).getAttribute('href')).toBe('https://www.taiwanbus.tw/');
-  expect(screen.getByText('請先選擇一所學校')).toBeTruthy();
+  expect(screen.getByTestId('bus-school').textContent).toBe('pu');
+  expect(screen.queryByText('請先選擇一所學校')).toBeNull();
 });
 
 it.each([

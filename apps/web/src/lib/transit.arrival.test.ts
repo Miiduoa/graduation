@@ -1,5 +1,8 @@
 import { expect, it } from 'vitest';
-import { arrivalKind, directionLabel, nextLiveArrival, type TransitArrival } from './transit';
+import {
+  arrivalKind, arrivalLabel, campusStopRank, directionLabel, nextLiveArrival, pickCampusNext,
+  type TransitArrival,
+} from './transit';
 
 const now = Date.parse('2026-10-19T14:40:00.000Z');
 const row = (overrides: Partial<TransitArrival> = {}): TransitArrival => ({
@@ -29,4 +32,40 @@ it('says the destination is not provided instead of leaving only 去程／返程
   expect(directionLabel(row({ destination: '', direction: 0 }))).toBe('去程（終點未提供）');
   expect(directionLabel(row({ destination: '', direction: 1 }))).toBe('返程（終點未提供）');
   expect(directionLabel(row({ destination: '', direction: null }))).toBe('方向未提供');
+});
+
+it('uses the timetable clock from the source when there is no live countdown', () => {
+  const scheduled = row({
+    status: 3, seconds: null, scheduledAt: new Date(now + 20 * 60_000).toISOString(), stopName: '靜宜大學(校門)',
+  });
+  expect(arrivalLabel(scheduled, now)).toBe('表定 23:00（非即時）');
+  expect(arrivalLabel(row({ status: 3, seconds: null }), now)).toBe('末班車已駛離');
+});
+
+it('picks the campus-gate arrival per route and does not invent a missing route', () => {
+  expect(campusStopRank('靜宜大學(校門)')).toBeLessThan(campusStopRank('靜宜大學'));
+  const gate = row({
+    id: 'gate', route: '162', seconds: 240, stopName: '靜宜大學(校門)',
+  });
+  const side = row({
+    id: 'side', route: '162', seconds: 60, stopName: '靜宜大學(英才路)',
+  });
+  const later = row({
+    id: 'later', route: '301', seconds: 900, stopName: '靜宜大學(校門)',
+  });
+  const ended = row({
+    id: 'ended', route: '326', status: 3, seconds: null, stopName: '靜宜大學',
+  });
+  const rows = pickCampusNext([side, gate, later, ended], now, ['162', '301', '368', '326']);
+  expect(rows.map((item) => [item.route, item.arrival?.id ?? null])).toEqual([
+    ['162', 'gate'],
+    ['301', 'later'],
+    ['368', null],
+    ['326', null],
+  ]);
+  const stale = row({
+    id: 'stale-162', route: '162', seconds: 120, updatedAt: new Date(now - 120_000).toISOString(),
+    stopName: '靜宜大學(校門)',
+  });
+  expect(pickCampusNext([stale], now, ['162'])[0]?.arrival?.id).toBe('stale-162');
 });

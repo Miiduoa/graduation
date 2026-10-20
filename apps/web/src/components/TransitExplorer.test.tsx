@@ -21,7 +21,12 @@ beforeEach(() => {
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
   vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
   vi.stubGlobal('isSecureContext', true);
-  vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'arrivals' ? emptyArrivals() : stopResult());
+  vi.mocked(queryTransit).mockImplementation(async (query) => {
+    if (query.action === 'campus-next') {
+      return { status: 'ready', kind: 'arrivals', arrivals: [], fetchedAt: new Date().toISOString() };
+    }
+    return query.action === 'arrivals' ? emptyArrivals() : stopResult();
+  });
 });
 afterEach(() => {
   cleanup();
@@ -47,8 +52,35 @@ it('starts with school stops without requesting the user location', async () => 
   renderExplorer();
   await screen.findByText(/站牌代碼 TXG001/);
   expect(queryTransit).toHaveBeenCalledWith({ action: 'campus', schoolId: 'pu' }, expect.any(AbortSignal));
+  expect(queryTransit).toHaveBeenCalledWith({ action: 'campus-next', schoolId: 'pu' }, expect.any(AbortSignal));
   expect(locate).not.toHaveBeenCalled();
   expect(screen.getByText(/站牌代碼 TXG002/)).toBeTruthy();
+});
+
+it('shows Providence gate routes from campus-next without querying a default stop', async () => {
+  const now = new Date().toISOString();
+  vi.mocked(queryTransit).mockImplementation(async (query) => {
+    if (query.action === 'campus-next') {
+      return {
+        status: 'ready', kind: 'arrivals', fetchedAt: now,
+        arrivals: [
+          { id: '162', route: '162', direction: 1, destination: '嘉陽高中', status: 0, seconds: 180, updatedAt: now, stopName: '靜宜大學(校門)' },
+          { id: '301', route: '301', direction: 1, destination: '', status: 3, seconds: null, updatedAt: now, stopName: '靜宜大學(校門)', scheduledAt: new Date(Date.now() + 12 * 60_000).toISOString() },
+          { id: '368', route: '368', direction: 0, destination: '', status: 0, seconds: 600, updatedAt: now, stopName: '靜宜大學(校門)' },
+        ],
+      };
+    }
+    if (query.action === 'arrivals') return emptyArrivals();
+    return stopResult();
+  });
+  renderExplorer();
+  expect(await screen.findByText('約 3 分鐘')).toBeTruthy();
+  expect(screen.getAllByRole('heading', { name: '校門口下一班' }).length).toBeGreaterThan(0);
+  expect(screen.getByText(/表定 \d{1,2}:\d{2}（非即時）/)).toBeTruthy();
+  expect(screen.getByText('約 10 分鐘')).toBeTruthy();
+  expect(screen.getByText('暫時沒資料')).toBeTruthy();
+  expect(['162', '301', '368', '326'].every((route) => screen.getByText(route))).toBe(true);
+  expect(vi.mocked(queryTransit).mock.calls.some(([query]) => query.action === 'arrivals')).toBe(false);
 });
 
 it('keeps school and manual search available when location permission is denied', async () => {
@@ -100,12 +132,14 @@ it('abort and selection identity prevent an old station response from replacing 
   let finish!: (result: TransitResult) => void;
   let firstSignal!: AbortSignal;
   vi.mocked(queryTransit).mockImplementation(async (query, signal) => {
+    if (query.action === 'campus-next') return { status: 'ready', kind: 'arrivals', arrivals: [], fetchedAt: new Date().toISOString() };
     if (query.action !== 'arrivals') return stopResult();
     if (query.stopId === 'TXG002') return emptyArrivals();
     firstSignal = signal;
     return new Promise((resolve) => { finish = resolve; });
   });
   renderExplorer();
+  fireEvent.click(await screen.findByRole('button', { name: /站牌代碼 TXG001/ }));
   await waitFor(() => expect(queryTransit).toHaveBeenCalledWith(
     { action: 'arrivals', city: 'Taichung', stopId: 'TXG001' }, expect.any(AbortSignal),
   ));
@@ -155,10 +189,11 @@ it('shows the school empty copy when campus stops load with none', async () => {
 
 it('expires countdowns while hidden without continuing to poll the provider', async () => {
   vi.useFakeTimers();
-  vi.mocked(queryTransit).mockImplementation(async (query) => query.action !== 'arrivals' ? stopResult() : {
-    status: 'ready', kind: 'arrivals', fetchedAt: new Date().toISOString(),
-    arrivals: [{ id: 'a', route: '300', direction: 0, destination: '', status: 0, seconds: 480, updatedAt: new Date().toISOString() }],
-  });
+  const fetchedAt = new Date().toISOString();
+  vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next' ? {
+    status: 'ready', kind: 'arrivals', fetchedAt,
+    arrivals: [{ id: 'a', route: '162', direction: 0, destination: '', status: 0, seconds: 480, updatedAt: fetchedAt, stopName: '靜宜大學(校門)' }],
+  } : query.action === 'arrivals' ? emptyArrivals() : stopResult());
   await act(async () => { renderExplorer(); });
   expect(screen.getByText('約 8 分鐘')).toBeTruthy();
   const calls = vi.mocked(queryTransit).mock.calls.length;
@@ -231,8 +266,9 @@ it('highlights the next live bus and separates buses without a live estimate', a
       { id: 'live', route: '162', direction: 1, destination: '', status: 0, seconds: 180, updatedAt: now },
       { id: 'ended', route: '326', direction: 0, destination: '', status: 3, seconds: null, updatedAt: now },
     ],
-  } : stopResult());
+  } : query.action === 'campus-next' ? { status: 'ready', kind: 'arrivals', arrivals: [], fetchedAt: now } : stopResult());
   renderExplorer();
+  fireEvent.click(await screen.findByRole('button', { name: /站牌代碼 TXG001/ }));
   expect(await screen.findByText(/162 路 · 約 3 分鐘/)).toBeTruthy();
   expect(screen.getByText('下一班')).toBeTruthy();
   expect(screen.getAllByText('返程（終點未提供）')).toHaveLength(2);
@@ -242,20 +278,21 @@ it('highlights the next live bus and separates buses without a live estimate', a
 
 it('keeps the last good arrivals and blocks repeated refreshes when rate limited', async () => {
   const now = new Date().toISOString();
-  let arrivalCalls = 0;
+  let nextCalls = 0;
   vi.mocked(queryTransit).mockImplementation(async (query) => {
-    if (query.action !== 'arrivals') return stopResult();
-    arrivalCalls += 1;
-    return arrivalCalls === 1 ? {
+    if (query.action === 'arrivals') return emptyArrivals();
+    if (query.action !== 'campus-next') return stopResult();
+    nextCalls += 1;
+    return nextCalls === 1 ? {
       status: 'ready', kind: 'arrivals', fetchedAt: now,
-      arrivals: [{ id: 'live', route: '162', direction: 1, destination: '', status: 0, seconds: 600, updatedAt: now }],
+      arrivals: [{ id: 'live', route: '162', direction: 1, destination: '', status: 0, seconds: 600, updatedAt: now, stopName: '靜宜大學(校門)' }],
     } : { status: 'unavailable', reason: 'rate-limited' };
   });
   renderExplorer();
-  expect(await screen.findByText(/162 路 · 約 10 分鐘/)).toBeTruthy();
+  expect(await screen.findByText('約 10 分鐘')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '更新班次' }));
   expect(await screen.findByText(/查詢的人較多，先顯示/)).toBeTruthy();
-  expect(screen.getByText(/162 路 · 約 10 分鐘/)).toBeTruthy();
+  expect(screen.getByText('約 10 分鐘')).toBeTruthy();
   const button = screen.getByRole('button', { name: '稍後自動再試' }) as HTMLButtonElement;
   expect(button.disabled).toBe(true);
 });
@@ -277,8 +314,11 @@ const catalogResult = (): TransitResult => ({ ...stopResult(), status: 'ready', 
 
 it('shows catalog directions and source instead of polling or presenting the snapshot as a live arrival', async () => {
   vi.useFakeTimers();
-  vi.mocked(queryTransit).mockResolvedValue(catalogResult());
+  vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next'
+    ? { status: 'unavailable', reason: 'not-configured' }
+    : catalogResult());
   await act(async () => { renderExplorer(); });
+  fireEvent.click(screen.getByRole('button', { name: /01\s*靜宜大學.*300 路線.*去程/ }));
   expect(screen.getByText('即時到站尚未接通')).toBeTruthy();
   expect(screen.queryByText(/到站時間為預估值/)).toBeNull();
   expect(screen.getByText('去程 · 往 臺中車站')).toBeTruthy();
@@ -293,11 +333,14 @@ it('shows catalog directions and source instead of polling or presenting the sna
     window.dispatchEvent(new Event('online'));
     document.dispatchEvent(new Event('visibilitychange'));
   });
-  expect(vi.mocked(queryTransit).mock.calls.map(([query]) => query.action)).toEqual(['campus']);
+  expect(vi.mocked(queryTransit).mock.calls.some(([query]) => query.action === 'arrivals')).toBe(false);
+  expect(vi.mocked(queryTransit).mock.calls.map(([query]) => query.action).includes('campus')).toBe(true);
 });
 
 it('preserves static provider metadata across browser favorites and does not turn a restored stop into a TDX query', async () => {
-  vi.mocked(queryTransit).mockResolvedValue(catalogResult());
+  vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next'
+    ? { status: 'unavailable', reason: 'not-configured' }
+    : catalogResult());
   const view = renderExplorer();
   fireEvent.click(await screen.findByRole('button', { name: '收藏 靜宜大學 300 路線 · 去程 · 靜態站牌資料 第 1 站牌' }));
   const saved = JSON.parse(localStorage.getItem('campus-one:transit-stops:v1') || '[]');
@@ -318,11 +361,13 @@ it('aborts in-flight arrivals when switching to a static stop and resumes only w
   let finish!: (result: TransitResult) => void;
   let arrivalSignal!: AbortSignal;
   vi.mocked(queryTransit).mockImplementation(async (query, signal) => {
+    if (query.action === 'campus-next') return { status: 'unavailable', reason: 'not-configured' };
     if (query.action !== 'arrivals') return { ...catalogResult(), status: 'ready', kind: 'stops', stops: [stops[0], catalogStop], limited: false, fetchedAt: new Date().toISOString() };
     arrivalSignal = signal;
     return new Promise((resolve) => { finish = resolve; });
   });
   renderExplorer();
+  fireEvent.click(await screen.findByRole('button', { name: /站牌代碼 TXG001/ }));
   await waitFor(() => expect(queryTransit).toHaveBeenCalledWith({ action: 'arrivals', city: 'Taichung', stopId: 'TXG001' }, expect.any(AbortSignal)));
   fireEvent.click(screen.getByRole('button', { name: /02\s*靜宜大學.*300 路線.*去程/ }));
   expect(arrivalSignal.aborted).toBe(true);
