@@ -36,6 +36,19 @@ permissions:
   contents: read
 
 jobs:
+  reject-non-main:
+    if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail unless this is main
+        run: |
+          set -euo pipefail
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "::error::正式環境（production）的 Web 發布只能從 main 觸發。目前 ref 是 ${{ github.ref }}。"
+            exit 1
+          fi
+
   guards:
     runs-on: ubuntu-latest
     timeout-minutes: 5
