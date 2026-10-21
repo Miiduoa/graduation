@@ -42,6 +42,14 @@ jobs:
       SCHOOL_ID: ${{ inputs.school || '' }}
       WRITE: ${{ github.event_name == 'schedule' || inputs.write == true }}
     steps:
+      - name: Require main for production announcement sync
+        run: |
+          set -euo pipefail
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "::error::正式環境公告同步只能從 main 觸發。目前 ref 是 ${{ github.ref }}。"
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
 
