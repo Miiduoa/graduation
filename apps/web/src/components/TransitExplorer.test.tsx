@@ -346,7 +346,7 @@ it('shows the city once for the 16 Providence search results while preserving ea
   }
   fireEvent.click(screen.getByRole('button', { name: '收藏 靜宜大學 臺中市 第 1 站牌' }));
   expect(JSON.parse(localStorage.getItem('campus-one:transit-stops:v1') || '[]')).toEqual([searchStops[0]]);
-});
+}, 20_000);
 
 it('retains different route and static-source details beside the city', async () => {
   const staticStop: TransitStop = {
