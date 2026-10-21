@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import {
-  campusDirectionEnded, campusEtaView, campusGroupForRow, campusGroupLabel, campusHomeSummary,
+  arrivalLabel, campusDirectionEnded, campusEtaView, campusGroupForRow, campusGroupLabel, campusHomeSummary,
   campusHeadingText, campusInboundPlace, campusLaneDisplay, campusLiveUnavailable, campusPlaceLabel, campusSegmentRows,
   campusStopGroupLabels, campusUpdatedLabel, fetchedAgoLabel, groupCampusStops, headingAfterBoarding,
   headingBeforeBoarding, headingBucket, listedCampusStops, pickCampusNext, publicHeadingFromStops,
@@ -223,6 +223,53 @@ it('keeps long 專用道 route names as a single heading line', () => {
   expect(rows.map((row) => row.route)).toEqual(['310區2', '306繞', '310區1']);
   expect(rows.every((row) => !row.route.includes('\n'))).toBe(true);
   expect(campusHeadingText(rows[0])).toBe('往 台中車站');
+});
+
+it('keeps a long destination as the full heading instead of a truncated label', () => {
+  expect(campusHeadingText({
+    route: '300', heading: '大勇四維東路口', arrival: null,
+  })).toBe('往 大勇四維東路口');
+  expect(campusHeadingText({
+    route: '300', heading: '大勇四維東路口', arrival: null,
+  })).not.toMatch(/…|\.\.\./);
+});
+
+it('uses the first late-night scheduled hour for daytime night-bus copy, not the route name', () => {
+  const afternoon = Date.parse('2026-10-19T06:41:00.000Z');
+  const nightFirst = '2026-10-19T16:05:00.000Z';
+  const morningFirst = '2026-10-19T22:00:00.000Z';
+  const sameDayLater = '2026-10-19T10:00:00.000Z';
+  const lateNightNow = Date.parse('2026-10-19T16:30:00.000Z');
+  const laterTonight = '2026-10-19T17:10:00.000Z';
+  const night = arrival({
+    id: 'night-a', route: '900', status: 3, seconds: null, destination: '新民高中',
+    stopName: '靜宜大學', scheduledAt: nightFirst, updatedAt: new Date(afternoon).toISOString(),
+  });
+  const otherNight = arrival({
+    id: 'night-b', route: '168', status: 3, seconds: null, destination: '新民高中',
+    stopName: '靜宜大學(校門)', scheduledAt: '2026-10-19T16:40:00.000Z', updatedAt: new Date(afternoon).toISOString(),
+  });
+  expect(campusEtaView(night, afternoon)).toEqual({ kind: 'night', text: '夜間公車，00:05 起', clock: '00:05' });
+  expect(arrivalLabel(night, afternoon)).toBe('夜間公車，00:05 起');
+  expect(campusEtaView(otherNight, afternoon)).toEqual({ kind: 'night', text: '夜間公車，00:40 起', clock: '00:40' });
+  expect(campusDirectionEnded([{ route: '900', heading: '新民高中', arrival: night }], afternoon)).toBe(false);
+  expect(campusHomeSummary([{ route: '900', heading: '新民高中', arrival: night }], afternoon))
+    .toBe('900 往市區 夜間公車，00:05 起');
+  expect(campusEtaView(arrival({
+    id: 'day-done', route: '301', status: 3, seconds: null, destination: '台中車站',
+    stopName: '靜宜大學(校門)', scheduledAt: morningFirst, updatedAt: new Date(afternoon).toISOString(),
+  }), afternoon)).toEqual({ kind: 'ended', text: '今天收班' });
+  expect(campusEtaView(arrival({
+    id: 'false-end', route: '162', status: 3, seconds: null, destination: '沙鹿火車站',
+    stopName: '靜宜大學(英才路)', scheduledAt: sameDayLater, updatedAt: new Date(afternoon).toISOString(),
+  }), afternoon)).toEqual({ kind: 'scheduled', text: '表定 18:00', clock: '18:00' });
+  expect(campusEtaView(arrival({
+    id: 'running-night', route: '900', status: 0, seconds: null, destination: '新民高中',
+    stopName: '靜宜大學', scheduledAt: laterTonight, updatedAt: new Date(lateNightNow).toISOString(),
+  }), lateNightNow)).toEqual({ kind: 'scheduled', text: '表定 01:10', clock: '01:10' });
+  const picked = pickCampusNext([night], afternoon, ['900']);
+  expect(picked[0]?.arrival?.id).toBe('night-a');
+  expect(campusEtaView(picked[0]?.arrival ?? null, afternoon).kind).toBe('night');
 });
 
 it('merges 專用道 routes that share a destination and keeps the soonest buses first', () => {

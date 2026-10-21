@@ -295,6 +295,16 @@ test('each stop status remains distinct, including no service today', () => {
   const labels = { 1: '尚未發車', 2: '交管不停靠', 3: '今天收班', 4: '今天收班' };
   for (const [status, label] of Object.entries(labels)) assert.equal(client.arrivalLabel({ ...fresh, status: Number(status) }, NOW), label);
 });
+test('daytime copy uses the first late-night scheduled hour instead of 今天收班', () => {
+  const [fresh] = server.normalizeTransitArrivals([arrival({ StopStatus: 3, EstimateTime: null, NextBusTime: '2026-10-12T16:05:00Z' })], 'TXG123');
+  assert.equal(fresh.scheduledAt, '2026-10-12T16:05:00.000Z');
+  assert.equal(client.arrivalLabel(fresh, NOW), '夜間公車，00:05 起');
+  assert.equal(client.campusEtaView(fresh, NOW).text, '夜間公車，00:05 起');
+  const [morning] = server.normalizeTransitArrivals([arrival({ StopStatus: 3, EstimateTime: null, NextBusTime: '2026-10-12T22:00:00Z' })], 'TXG123');
+  assert.equal(client.arrivalLabel(morning, NOW), '今天收班');
+  const [sameDay] = server.normalizeTransitArrivals([arrival({ StopStatus: 3, EstimateTime: null, NextBusTime: at(2 * 3600_000) })], 'TXG123');
+  assert.match(client.arrivalLabel(sameDay, NOW), /^表定 \d{2}:\d{2}$/);
+});
 test('filters exact StopUID and retains direction/subroute identity instead of mixing platforms', () => {
   const rows = server.normalizeTransitArrivals([
     arrival(), arrival({ Direction: 1 }), arrival({ SubRouteUID: 'variant' }), arrival({ StopUID: 'other' }),

@@ -134,8 +134,10 @@ it('lists BRT arrivals on 專用道 and shows empty copy when that stop has no b
   const more = screen.getByRole('button', { name: '還有 1 班' });
   expect(more.getAttribute('aria-expanded')).toBe('false');
   fireEvent.click(more);
-  expect(screen.getByRole('button', { name: '收合' }).getAttribute('aria-expanded')).toBe('true');
+  const collapse = screen.getByRole('button', { name: '收合' });
+  expect(collapse.getAttribute('aria-expanded')).toBe('true');
   expect(screen.getByText('305')).toBeTruthy();
+  expect(screen.getByText('305').compareDocumentPosition(collapse) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '收合' }));
   expect(screen.getByRole('button', { name: '還有 1 班' }).getAttribute('aria-expanded')).toBe('false');
   expect(screen.queryByText('305')).toBeNull();
@@ -163,6 +165,27 @@ it('shows inbound campus rows as destinations and never as 從', async () => {
   expect(screen.queryByText('從 臺中榮總')).toBeNull();
   expect(screen.queryByText('從 沙鹿火車站')).toBeNull();
   expect(screen.queryByText('從臺中榮總')).toBeNull();
+});
+
+it('shows night-first scheduled copy instead of 今天收班 during the day', async () => {
+  const afternoon = Date.parse('2026-10-19T06:41:00.000Z');
+  vi.spyOn(Date, 'now').mockReturnValue(afternoon);
+  const now = new Date(afternoon).toISOString();
+  vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next' ? {
+    status: 'ready', kind: 'arrivals', fetchedAt: now,
+    arrivals: [
+      {
+        id: '326', route: '326', direction: 0, destination: '新民高中', status: 3, seconds: null,
+        updatedAt: now, stopName: '靜宜大學', scheduledAt: '2026-10-19T16:05:00.000Z',
+      },
+    ],
+  } : emptyArrivals());
+  renderExplorer();
+  fireEvent.click(await screen.findByRole('tab', { name: '往市區' }));
+  expect(await screen.findByText('夜間公車，00:05 起')).toBeTruthy();
+  expect(screen.getByText('往 新民高中')).toBeTruthy();
+  expect(screen.queryByText('今天收班')).toBeNull();
+  expect(screen.queryByText('這個方向今天的班次都結束了')).toBeNull();
 });
 
 it('shows live, scheduled, empty and ended rows together on one direction', async () => {
@@ -548,6 +571,9 @@ it('keeps long route badges on one line and fits the stop-mode bar on a 350px bo
   expect(css).toMatch(/\.routeBadge \{[\s\S]*?white-space: nowrap;/);
   expect(css).toMatch(/grid-template-columns: 56px minmax\(0, 1fr\) auto;/);
   expect(css).toMatch(/\.campusFirst > \.modeBar button \{[\s\S]*?flex: 1 1 0;/);
+  expect(css).toMatch(/\.rowCopy strong \{[\s\S]*?white-space: normal;/);
+  expect(css).toMatch(/\.rowCopy strong \{[\s\S]*?overflow-wrap: anywhere;/);
+  expect(css).not.toMatch(/\.rowCopy strong \{[\s\S]*?text-overflow: ellipsis;/);
 });
 
 describe('static catalog stops', () => {
