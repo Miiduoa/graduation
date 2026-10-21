@@ -1012,12 +1012,7 @@ function ActivityCard({
           </View>
         ) : null}
         {focused ? (
-          <Text
-            accessibilityLabel={`作業繳交區：${item.title}`}
-            accessibilityRole="summary"
-          >
-            作業繳交區
-          </Text>
+          <Text accessibilityLabel={`作業繳交區：${item.title}`}>作業繳交區</Text>
         ) : null}
         {canSubmit && fileSubmit ? (
           <View style={{ gap: 8 }}>

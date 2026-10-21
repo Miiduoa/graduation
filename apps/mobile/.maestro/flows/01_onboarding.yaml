@@ -22,6 +22,7 @@ tags:
     element:
       id: login-start
     direction: DOWN
+    centerElement: true
 - assertVisible: 'Google 帳號'
 - tapOn:
     id: login-start
