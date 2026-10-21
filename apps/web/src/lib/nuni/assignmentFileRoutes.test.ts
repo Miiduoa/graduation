@@ -106,28 +106,32 @@ describe('assignment file BFF flag and contracts', () => {
   it('accepts a late photo, keeps the receipt after reload, and does not fake success', async () => {
     vi.stubEnv('ASSIGNMENT_FILE_SUBMIT_ENABLED', 'true');
     const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
+    let mine: unknown = null;
     fetcher.mockImplementation(async (url: string, init?: RequestInit) => {
       const target = String(url);
       if (target.endsWith('/sessions/current')) return response(principal);
       if (target.endsWith(`/class-workspaces/${id}`) && (!init?.method || init.method === 'GET'))
         return response(workspace);
       if (target.endsWith(`/assignments`) && (!init?.method || init.method === 'GET'))
-        return response({ assignments: [assignment] });
+        return response({
+          assignments: [mine ? { ...assignment, submissionCount: 1, mySubmission: mine } : assignment],
+        });
       if (target.endsWith(`/assignments/${assignmentId}/submit`)) {
         const body = JSON.parse(String(init?.body ?? '{}')) as { body: string };
+        mine = {
+          assignmentId,
+          platformAccountId: accountId,
+          displayName: '同學',
+          body: body.body,
+          state: 'submitted',
+          submittedAt: '2026-10-21T13:00:00.000Z',
+          teacherFeedback: null,
+          reviewedAt: null,
+        };
         return response({
           ...assignment,
           submissionCount: 1,
-          mySubmission: {
-            assignmentId,
-            platformAccountId: accountId,
-            displayName: '同學',
-            body: body.body,
-            state: 'submitted',
-            submittedAt: '2026-10-21T13:00:00.000Z',
-            teacherFeedback: null,
-            reviewedAt: null,
-          },
+          mySubmission: mine,
         });
       }
       return response({ error: { code: 'NOT_FOUND' } }, 404);
@@ -147,6 +151,15 @@ describe('assignment file BFF flag and contracts', () => {
       { method: 'PUT', body: jpeg, contentType: 'image/jpeg' },
     );
     expect(uploaded.status).toBe(200);
+    expect(
+      (
+        await invoke(created.uploadPath.replace(`class-workspaces/${id}/`, ''), {
+          method: 'GET',
+          query: '?exp=1&sig=nope',
+          cookie: false,
+        })
+      ).status,
+    ).toBe(403);
     const submitted = await invoke(`assignments/${assignmentId}/submit-files`, {
       input: { fileIds: [created.id], idempotencyKey: 'submit-late-ok' },
     });
@@ -236,6 +249,6 @@ describe('assignment file BFF flag and contracts', () => {
       `assignments/${assignmentId}/files/cwf_99999999-9999-4999-8999-999999999999/content`,
       { method: 'GET', query: '?exp=1&sig=nope', cookie: false },
     );
-    expect(guessed.status).toBe(403);
+    expect(guessed.status).toBe(404);
   });
 });

@@ -4,6 +4,7 @@ import {
   NuniError,
   createNuniClasses,
   nuniId,
+  nuniRecord,
   parseNuniPrincipal,
   type NuniAssignment,
   type NuniSubmission,
@@ -24,7 +25,6 @@ import {
   readPlatformAuthorization,
   requireSameOrigin,
   requireSession,
-  nuniRecord,
   type PlatformSession,
 } from './server';
 
