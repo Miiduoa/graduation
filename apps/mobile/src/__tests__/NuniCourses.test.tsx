@@ -17,6 +17,10 @@ let mockSession = {
 const mockRequest = jest.fn();
 let mockUuid = 0;
 const fileSubmitFlag = { on: false };
+const mockScrollAssignment = { reveal: jest.fn() };
+jest.mock('../screens/nuni/scrollAssignment', () => ({
+  revealAssignmentSubmitArea: (...args: unknown[]) => mockScrollAssignment.reveal(...args),
+}));
 jest.mock('../screens/nuni/assignmentFileSubmit', () => {
   const actual = jest.requireActual('../screens/nuni/assignmentFileSubmit') as Record<
     string,
@@ -115,6 +119,7 @@ async function response(
 beforeEach(() => {
   mockUuid = 0;
   fileSubmitFlag.on = false;
+  mockScrollAssignment.reveal.mockReset();
   mockRequest.mockReset();
   mockSession = {
     platformAccountId: accountId,
@@ -1169,10 +1174,23 @@ it('opens the deep-linked assignment submit area even if drafts hid that card', 
     </NuniDraftProvider>,
   );
   const card = await view.findByTestId(`assignment-${assignmentId}`);
+  const submit = await view.findByTestId(`assignment-submit-${assignmentId}`);
   expect(within(card).getByLabelText('作業繳交區：校園訪談')).toBeTruthy();
   expect(within(card).getByLabelText('作業內容：校園訪談')).toBeTruthy();
   expect(within(card).getByRole('button', { name: '拍照' })).toBeTruthy();
   expect(within(card).getByRole('button', { name: '更新作業繳交' })).toBeTruthy();
   expect(view.queryByLabelText('作業繳交區：另一份待繳')).toBeNull();
+  expect(view.queryByTestId(`assignment-submit-${otherId}`)).toBeNull();
   expect(view.queryByText('老師尚未發布教材。')).toBeNull();
+  fireEvent(submit, 'layout');
+  expect(mockScrollAssignment.reveal).toHaveBeenCalled();
+  expect(mockScrollAssignment.reveal.mock.calls[0][0]).toBeTruthy();
+  expect(mockScrollAssignment.reveal.mock.calls[0][1]).toBeTruthy();
+  expect(view.getByTestId('nuni-courses-scroll')).toBeTruthy();
+});
+
+it('does not scroll a submit area when no assignment is deep-linked', async () => {
+  const view = await openCourse();
+  expect(view.queryByTestId(`assignment-submit-${assignmentId}`)).toBeNull();
+  expect(mockScrollAssignment.reveal).not.toHaveBeenCalled();
 });
