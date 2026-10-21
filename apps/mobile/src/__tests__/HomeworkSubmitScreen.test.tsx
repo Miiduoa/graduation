@@ -27,6 +27,7 @@ jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 
 beforeEach(() => {
   jest.clearAllMocks();
+  delete process.env.EXPO_PUBLIC_ASSIGNMENT_FILE_SUBMIT_ENABLED;
   jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
   mockSource.getAssignment.mockResolvedValue({
     id: 'work',
@@ -55,7 +56,8 @@ test('loads the assignment from Firestore and submits the same text path as web'
   );
   expect(await view.findByText('期末報告')).toBeTruthy();
   expect(view.getByText('請寫摘要')).toBeTruthy();
-  expect(view.queryByText(/無法從 App 傳檔/)).toBeNull();
+  expect(view.getByText(/無法從 App 傳檔/)).toBeTruthy();
+  expect(view.getByText(/目前只支援文字繳交/)).toBeTruthy();
   expect(view.queryByText('+ 加檔案')).toBeNull();
   fireEvent.changeText(view.getByLabelText('文字作業內容'), '  我的答案  ');
   await act(async () => fireEvent.press(view.getByLabelText('繳交作業')));
@@ -65,6 +67,22 @@ test('loads the assignment from Firestore and submits the same text path as web'
     groupId: 'course',
     content: '我的答案',
   });
+});
+
+test('hides the text-only copy when the Expo file-submit flag is on', async () => {
+  const previous = process.env.EXPO_PUBLIC_ASSIGNMENT_FILE_SUBMIT_ENABLED;
+  process.env.EXPO_PUBLIC_ASSIGNMENT_FILE_SUBMIT_ENABLED = 'true';
+  try {
+    const view = render(
+      <HomeworkSubmitScreen route={{ params: { courseId: 'course', hwId: 'work' } }} />,
+    );
+    expect(await view.findByText('期末報告')).toBeTruthy();
+    expect(view.queryByText(/無法從 App 傳檔/)).toBeNull();
+    expect(view.queryByText(/目前只支援文字繳交/)).toBeNull();
+  } finally {
+    if (previous === undefined) delete process.env.EXPO_PUBLIC_ASSIGNMENT_FILE_SUBMIT_ENABLED;
+    else process.env.EXPO_PUBLIC_ASSIGNMENT_FILE_SUBMIT_ENABLED = previous;
+  }
 });
 
 test('maps assignment deep-link params onto the same submit screen', async () => {

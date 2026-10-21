@@ -101,8 +101,9 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
     const method = request.method;
     if (method !== 'GET' && method !== 'POST' && method !== 'PUT')
       throw new NuniError(405, 'METHOD_NOT_ALLOWED');
-    const fileMutation = isAssignmentFileMutation(method, segments);
-    const fileContent = isAssignmentFileQuery(segments);
+    const fileEnabled = assignmentFileSubmitEnabled();
+    const fileMutation = fileEnabled && isAssignmentFileMutation(method, segments);
+    const fileContent = fileEnabled && isAssignmentFileQuery(segments);
     if (
       method === 'PUT' &&
       !fileMutation &&
@@ -304,7 +305,8 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
       throw new NuniError(405, 'METHOD_NOT_ALLOWED');
     }
     if (segments[0] !== 'class-workspaces') throw new NuniError(404, 'NOT_FOUND');
-    const session = readPlatformAuthorization(request) ?? requireSession(request);
+    const session =
+      (fileEnabled ? readPlatformAuthorization(request) : null) ?? requireSession(request);
     let principal: Promise<string> | undefined;
     const classes = createNuniClasses(
       (resource, input, query) => platformRequest(resource, session, input, query),

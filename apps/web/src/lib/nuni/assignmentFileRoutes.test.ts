@@ -65,7 +65,7 @@ function invoke(
           : {}),
       },
       ...(options.input ? { body: JSON.stringify(options.input) } : {}),
-      ...(options.body ? { body: options.body } : {}),
+      ...(options.body ? { body: Buffer.from(options.body) } : {}),
     }),
     path,
   );
@@ -100,6 +100,19 @@ describe('assignment file BFF flag and contracts', () => {
         })
       ).status,
     ).toBe(404);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('keeps flag-off PUT, signed query and Platform classroom session identical to main', async () => {
+    const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
+    const guessed = `assignments/${assignmentId}/files/cwf_99999999-9999-4999-8999-999999999999/content`;
+    expect(
+      (await invoke(guessed, { method: 'PUT', body: jpeg, contentType: 'image/jpeg' })).status,
+    ).toBe(405);
+    expect(
+      (await invoke(guessed, { method: 'GET', query: '?exp=1&sig=nope', cookie: false })).status,
+    ).toBe(400);
+    expect((await invoke('assignments', { cookie: false, platform: true })).status).toBe(401);
     expect(fetcher).not.toHaveBeenCalled();
   });
 

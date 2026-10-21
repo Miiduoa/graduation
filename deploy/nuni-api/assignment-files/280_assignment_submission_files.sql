@@ -1,7 +1,8 @@
 -- Additive file-object table for class-workspace assignment submissions.
 -- Do not apply until the product owner explicitly says to go live.
 -- Does not alter or drop existing tables or columns.
-CREATE TABLE class_assignment_submission_files (
+-- Rerunnable: CREATE IF NOT EXISTS so a second apply does not fail.
+CREATE TABLE IF NOT EXISTS class_assignment_submission_files (
   id text PRIMARY KEY,
   workspace_id text NOT NULL REFERENCES class_workspaces(id),
   assignment_id text NOT NULL REFERENCES class_workspace_assignments(id),
@@ -19,11 +20,11 @@ CREATE TABLE class_assignment_submission_files (
   late boolean NOT NULL DEFAULT false
 );
 
-CREATE INDEX class_assignment_submission_files_visible
+CREATE INDEX IF NOT EXISTS class_assignment_submission_files_visible
   ON class_assignment_submission_files (assignment_id, platform_account_id, submitted_at)
   WHERE superseded_at IS NULL;
 
-CREATE TABLE class_assignment_file_idempotency (
+CREATE TABLE IF NOT EXISTS class_assignment_file_idempotency (
   actor_id text NOT NULL REFERENCES platform_accounts(id),
   key text NOT NULL CHECK (length(key) BETWEEN 8 AND 100),
   request_hash text NOT NULL,

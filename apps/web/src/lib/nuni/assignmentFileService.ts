@@ -1,6 +1,4 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import {
   ASSIGNMENT_FILE_URL_TTL_MS,
   FILE_ONLY_SUBMISSION_BODY,
@@ -12,7 +10,6 @@ import {
   assignmentSubmissionLate,
   classifyAssignmentFile,
   sanitizeAssignmentFileName,
-  type AssignmentFileKind,
 } from '@campus/shared/src/assignmentFiles';
 import {
   NuniError,
@@ -25,36 +22,27 @@ import {
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
 import type { PlatformSession } from './server';
+import {
+  defaultAssignmentFileStores,
+  resetAssignmentFileStores,
+  resolveAssignmentFileStores,
+  type AssignmentFileRuntimeStores,
+  type FileRecord,
+  type SqlQuery,
+} from './assignmentFileStore';
 
 export type AssignmentFileActor = {
   platformAccountId: string;
   session: PlatformSession;
 };
 
-type FileRecord = {
+export type AssignmentFileIntent = {
   id: string;
-  workspaceId: string;
-  assignmentId: string;
-  platformAccountId: string;
   originalName: string;
   contentType: string;
   byteSize: number;
-  sha256: string;
-  kind: AssignmentFileKind;
-  storageKey: string;
-  createdAt: string;
-  uploadedAt: string | null;
-  submittedAt: string | null;
-  supersededAt: string | null;
-  late: boolean;
-};
-
-type IdempotencyRow = { hash: string; payload: unknown };
-
-export type AssignmentFileStores = {
-  blobs: Map<string, Uint8Array>;
-  files: Map<string, FileRecord>;
-  idempotency: Map<string, IdempotencyRow>;
+  kind: FileRecord['kind'];
+  uploadPath: string;
 };
 
 export type AssignmentFilePlatform = {
@@ -67,12 +55,6 @@ export type AssignmentFilePlatform = {
     body: string,
     idempotencyKey: string,
   ): Promise<NuniAssignment>;
-};
-
-const memoryStores: AssignmentFileStores = {
-  blobs: new Map(),
-  files: new Map(),
-  idempotency: new Map(),
 };
 
 function nowIso(now: () => Date) {
@@ -99,27 +81,6 @@ function equal(left: string, right: string) {
   const a = Buffer.from(left);
   const b = Buffer.from(right);
   return a.length === b.length && timingSafeEqual(a, b);
-}
-
-function visibleFiles(store: AssignmentFileStores, assignmentId: string, accountId: string) {
-  return [...store.files.values()].filter(
-    (file) =>
-      file.assignmentId === assignmentId &&
-      file.platformAccountId === accountId &&
-      file.submittedAt &&
-      !file.supersededAt,
-  );
-}
-
-function stagedFiles(store: AssignmentFileStores, assignmentId: string, accountId: string) {
-  return [...store.files.values()].filter(
-    (file) =>
-      file.assignmentId === assignmentId &&
-      file.platformAccountId === accountId &&
-      file.uploadedAt &&
-      !file.submittedAt &&
-      !file.supersededAt,
-  );
 }
 
 function downloadDescriptor(
@@ -161,77 +122,26 @@ function teacherRole(role: NuniRole) {
   return role === 'owner-teacher' || role === 'co-teacher';
 }
 
-async function persistBlob(storageKey: string, bytes: Uint8Array) {
-  const dir = process.env.ASSIGNMENT_FILE_STORE_DIR?.trim();
-  if (!dir) {
-    memoryStores.blobs.set(storageKey, bytes);
-    return;
-  }
-  const full = path.join(dir, storageKey);
-  await mkdir(path.dirname(full), { recursive: true });
-  await writeFile(full, bytes);
-}
-
-async function readBlob(storageKey: string): Promise<Uint8Array | null> {
-  const dir = process.env.ASSIGNMENT_FILE_STORE_DIR?.trim();
-  if (!dir) return memoryStores.blobs.get(storageKey) ?? null;
-  try {
-    return await readFile(path.join(dir, storageKey));
-  } catch {
-    return null;
-  }
-}
-
-async function persistSupabase(storageKey: string, bytes: Uint8Array, contentType: string) {
-  const base = process.env.SUPABASE_URL?.trim();
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-  if (!base || !key) return false;
-  const response = await fetch(`${base.replace(/\/$/, '')}/storage/v1/object/assignment-submissions/${storageKey}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${key}`,
-      apikey: key,
-      'Content-Type': contentType,
-      'x-upsert': 'true',
-    },
-    body: Buffer.from(bytes),
-  });
-  if (!response.ok) throw new NuniError(503, 'ASSIGNMENT_FILE_UPLOAD_UNAVAILABLE');
-  return true;
-}
-
-async function readSupabase(storageKey: string): Promise<Uint8Array | null> {
-  const base = process.env.SUPABASE_URL?.trim();
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-  if (!base || !key) return null;
-  const response = await fetch(
-    `${base.replace(/\/$/, '')}/storage/v1/object/assignment-submissions/${storageKey}`,
-    { headers: { Authorization: `Bearer ${key}`, apikey: key } },
-  );
-  if (response.status === 404) return null;
-  if (!response.ok) throw new NuniError(503, 'ASSIGNMENT_FILE_UPLOAD_UNAVAILABLE');
-  return new Uint8Array(await response.arrayBuffer());
-}
-
-export function resetAssignmentFileStores(stores = memoryStores) {
-  stores.blobs.clear();
-  stores.files.clear();
-  stores.idempotency.clear();
-}
-
 export function createAssignmentFileService(options?: {
-  stores?: AssignmentFileStores;
+  stores?: AssignmentFileRuntimeStores;
+  query?: SqlQuery;
+  env?: Record<string, string | undefined>;
   platform: AssignmentFilePlatform;
   secret: string;
   now?: () => Date;
   id?: () => string;
 }) {
-  const stores = options?.stores ?? memoryStores;
+  const env = options?.env ?? process.env;
+  const stores =
+    options?.stores ??
+    (options?.query || env.NODE_ENV === 'production'
+      ? resolveAssignmentFileStores(env, options?.query)
+      : defaultAssignmentFileStores());
   const now = options?.now ?? (() => new Date());
   const id = options?.id ?? (() => randomUUID());
-  const secret = options?.secret;
-  const platform = options?.platform;
-  if (!secret || !platform) throw new NuniError(503, 'CONFIGURATION_REQUIRED');
+  if (!options?.secret || !options.platform) throw new NuniError(503, 'CONFIGURATION_REQUIRED');
+  const secret = options.secret;
+  const platform = options.platform;
 
   async function requireStudent(actor: AssignmentFileActor, workspaceId: string, assignmentId: string) {
     const [workspace, assignment] = await Promise.all([
@@ -244,23 +154,15 @@ export function createAssignmentFileService(options?: {
     return { workspace, assignment };
   }
 
-  async function requireMember(actor: AssignmentFileActor, workspaceId: string, assignmentId: string) {
-    const [workspace, assignment] = await Promise.all([
-      platform.workspace(actor, workspaceId),
-      platform.assignment(actor, workspaceId, assignmentId),
-    ]);
-    return { workspace, assignment };
-  }
-
-  function replay(actor: AssignmentFileActor, key: string, hash: string) {
-    const row = stores.idempotency.get(`${actor.platformAccountId}:${key}`);
+  async function replay(actor: AssignmentFileActor, key: string, hash: string) {
+    const row = await stores.index.getIdempotency(actor.platformAccountId, key);
     if (!row) return null;
     if (row.hash !== hash) throw new NuniError(409, 'IDEMPOTENCY_CONFLICT');
     return row.payload;
   }
 
-  function remember(actor: AssignmentFileActor, key: string, hash: string, payload: unknown) {
-    stores.idempotency.set(`${actor.platformAccountId}:${key}`, { hash, payload });
+  async function remember(actor: AssignmentFileActor, key: string, hash: string, payload: unknown) {
+    await stores.index.putIdempotency(actor.platformAccountId, key, { hash, payload });
   }
 
   return {
@@ -269,7 +171,7 @@ export function createAssignmentFileService(options?: {
       workspaceId: string,
       assignmentId: string,
       input: { originalName: string; contentType: string; byteSize: number; idempotencyKey: string },
-    ) {
+    ): Promise<AssignmentFileIntent> {
       const { assignment } = await requireStudent(actor, workspaceId, assignmentId);
       const originalName = sanitizeAssignmentFileName(input.originalName);
       const classified = classifyAssignmentFile(originalName, input.contentType);
@@ -285,9 +187,9 @@ export function createAssignmentFileService(options?: {
           }),
         ),
       );
-      const existing = replay(actor, input.idempotencyKey, hash);
-      if (existing) return existing;
-      const current = stagedFiles(stores, assignment.id, actor.platformAccountId);
+      const existing = await replay(actor, input.idempotencyKey, hash);
+      if (existing) return existing as AssignmentFileIntent;
+      const current = await stores.index.listStaged(assignment.id, actor.platformAccountId);
       const nextImages =
         current.filter((file) => file.kind === 'image').length + (classified.kind === 'image' ? 1 : 0);
       const nextDocs =
@@ -310,7 +212,7 @@ export function createAssignmentFileService(options?: {
         supersededAt: null,
         late: false,
       };
-      stores.files.set(record.id, record);
+      await stores.index.putFile(record);
       const payload = {
         id: record.id,
         originalName: record.originalName,
@@ -319,7 +221,7 @@ export function createAssignmentFileService(options?: {
         kind: record.kind,
         uploadPath: `class-workspaces/${workspaceId}/assignments/${assignmentId}/files/${record.id}/content`,
       };
-      remember(actor, input.idempotencyKey, hash, payload);
+      await remember(actor, input.idempotencyKey, hash, payload);
       return payload;
     },
 
@@ -331,7 +233,7 @@ export function createAssignmentFileService(options?: {
       bytes: Uint8Array,
     ) {
       await requireStudent(actor, workspaceId, assignmentId);
-      const record = stores.files.get(fileRecordId);
+      const record = await stores.index.getFile(fileRecordId);
       if (
         !record ||
         record.workspaceId !== workspaceId ||
@@ -344,10 +246,11 @@ export function createAssignmentFileService(options?: {
       assertAssignmentFileMagic(record.kind, record.contentType, bytes);
       record.sha256 = sha256(bytes);
       record.uploadedAt = nowIso(now);
-      if (!(await persistSupabase(record.storageKey, bytes, record.contentType))) {
-        await persistBlob(record.storageKey, bytes);
-      }
-      stores.files.set(record.id, record);
+      await stores.blobs.put(record.storageKey, bytes, record.contentType);
+      const stored = await stores.blobs.get(record.storageKey);
+      if (!stored || stored.byteLength !== bytes.byteLength)
+        throw new NuniError(503, 'ASSIGNMENT_FILE_UPLOAD_UNAVAILABLE');
+      await stores.index.putFile(record);
       return downloadDescriptor(record, secret, now);
     },
 
@@ -356,14 +259,15 @@ export function createAssignmentFileService(options?: {
       workspaceId: string,
       assignmentId: string,
       input: { body?: string; fileIds: string[]; idempotencyKey: string },
-    ) {
+    ): Promise<NuniAssignment> {
       const { assignment } = await requireStudent(actor, workspaceId, assignmentId);
       const fileIds = [...new Set(input.fileIds.map((value) => nuniId(value, 'cwf')))];
       const hash = sha256(Buffer.from(JSON.stringify({ body: input.body ?? '', fileIds })));
-      const existing = replay(actor, input.idempotencyKey, hash);
-      if (existing) return existing;
-      const records = fileIds.map((value) => {
-        const record = stores.files.get(value);
+      const existing = await replay(actor, input.idempotencyKey, hash);
+      if (existing) return existing as NuniAssignment;
+      const records = [];
+      for (const value of fileIds) {
+        const record = await stores.index.getFile(value);
         if (
           !record ||
           record.workspaceId !== workspaceId ||
@@ -372,8 +276,8 @@ export function createAssignmentFileService(options?: {
           !record.uploadedAt
         )
           throw new NuniError(422, 'ASSIGNMENT_FILE_REQUIRED');
-        return record;
-      });
+        records.push(record);
+      }
       const images = records.filter((file) => file.kind === 'image').length;
       const documents = records.filter((file) => file.kind === 'file').length;
       const body = (input.body ?? '').trim();
@@ -382,50 +286,87 @@ export function createAssignmentFileService(options?: {
       const submittedAt = nowIso(now);
       const late = assignmentSubmissionLate(assignment.dueAt, submittedAt);
       const text = body || (records.length ? FILE_ONLY_SUBMISSION_BODY : '');
-      const confirmed = await platform.submitText(
-        actor,
-        workspaceId,
-        assignmentId,
-        text,
-        `${input.idempotencyKey}:text`,
+      const previous = records.length
+        ? await stores.index.listVisible(assignmentId, actor.platformAccountId)
+        : [];
+      const pending = records.map((record) => ({
+        ...record,
+        submittedAt,
+        late: assignmentSubmissionLate(assignment.dueAt, submittedAt),
+        supersededAt: null,
+      }));
+      try {
+        for (const record of pending) await stores.index.putFile(record);
+      } catch {
+        throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
+      }
+      let confirmed: NuniAssignment;
+      try {
+        confirmed = await platform.submitText(
+          actor,
+          workspaceId,
+          assignmentId,
+          text,
+          `${input.idempotencyKey}:text`,
+        );
+      } catch (error) {
+        for (const record of records) {
+          record.submittedAt = null;
+          record.late = false;
+          await stores.index.putFile(record);
+        }
+        throw error;
+      }
+      const confirmedAt = confirmed.mySubmission?.submittedAt ?? submittedAt;
+      try {
+        for (const record of previous) {
+          record.supersededAt = confirmedAt;
+          await stores.index.putFile(record);
+        }
+        for (const record of pending) {
+          record.submittedAt = confirmedAt;
+          record.late = assignmentSubmissionLate(assignment.dueAt, record.submittedAt);
+          record.supersededAt = null;
+          await stores.index.putFile(record);
+        }
+      } catch {
+        throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
+      }
+      const visible = records.length
+        ? await stores.index.listVisible(assignmentId, actor.platformAccountId)
+        : [];
+      if (records.length && visible.length < records.length)
+        throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
+      const files = visible.map((file) => downloadDescriptor(file, secret, now));
+      if (records.length && !files.length) throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
+      const payload = withFiles(
+        confirmed,
+        files,
+        late || visible.some((file) => file.late),
       );
-      for (const previous of visibleFiles(stores, assignmentId, actor.platformAccountId)) {
-        previous.supersededAt = submittedAt;
-        stores.files.set(previous.id, previous);
-      }
-      for (const record of records) {
-        record.submittedAt = confirmed.mySubmission?.submittedAt ?? submittedAt;
-        record.late = assignmentSubmissionLate(assignment.dueAt, record.submittedAt);
-        record.supersededAt = null;
-        stores.files.set(record.id, record);
-      }
-      const files = records.map((file) => downloadDescriptor(file, secret, now));
-      const payload = withFiles(confirmed, files, late || files.some((file) => file && recordLate(file.id)));
-      remember(actor, input.idempotencyKey, hash, payload);
+      if (records.length && !payload.mySubmission)
+        throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
+      await remember(actor, input.idempotencyKey, hash, payload);
       return payload;
-
-      function recordLate(idValue: string) {
-        return stores.files.get(idValue)?.late === true;
-      }
     },
 
-    hydrateSubmission(
+    async hydrateSubmission(
       actor: AssignmentFileActor,
       workspace: NuniWorkspace,
       assignment: NuniAssignment,
       submission: NuniSubmission | null,
       viewerAccountId: string,
-    ): NuniSubmission | null {
+    ): Promise<NuniSubmission | null> {
       if (!submission) return submission;
       const canRead =
         submission.platformAccountId === viewerAccountId || teacherRole(workspace.memberRole);
       if (!canRead) throw new NuniError(403, 'CLASS_WORKSPACE_FORBIDDEN');
-      const files = visibleFiles(stores, assignment.id, submission.platformAccountId).map((file) =>
-        downloadDescriptor(file, secret, now),
-      );
+      const stored = await stores.index.listVisible(assignment.id, submission.platformAccountId);
+      const files = stored.map((file) => downloadDescriptor(file, secret, now));
+      if (submission.body === FILE_ONLY_SUBMISSION_BODY && files.length === 0) return null;
       const computedLate =
         assignmentSubmissionLate(assignment.dueAt, submission.submittedAt) ||
-        files.some((file) => stores.files.get(file.id)?.late === true);
+        stored.some((file) => file.late);
       const late = submission.late ?? computedLate;
       return { ...submission, late, files };
     },
@@ -437,7 +378,7 @@ export function createAssignmentFileService(options?: {
       exp: string,
       sig: string,
     ) {
-      const record = stores.files.get(fileRecordId);
+      const record = await stores.index.getFile(fileRecordId);
       if (
         !record ||
         record.workspaceId !== workspaceId ||
@@ -450,7 +391,7 @@ export function createAssignmentFileService(options?: {
       if (!equal(expected, sig)) throw new NuniError(403, 'ASSIGNMENT_FILE_SIGNATURE_INVALID');
       if (!/^\d+$/.test(exp) || Number(exp) < now().getTime())
         throw new NuniError(403, 'ASSIGNMENT_FILE_EXPIRED');
-      const bytes = (await readSupabase(record.storageKey)) ?? (await readBlob(record.storageKey));
+      const bytes = await stores.blobs.get(record.storageKey);
       if (!bytes) throw new NuniError(404, 'NOT_FOUND');
       return { bytes, contentType: record.contentType, originalName: record.originalName };
     },
@@ -473,4 +414,4 @@ export function assignmentFilePlatformFromClasses(
   };
 }
 
-export { assignmentFileSubmitEnabled };
+export { assignmentFileSubmitEnabled, resetAssignmentFileStores };

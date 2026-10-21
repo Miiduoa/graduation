@@ -83,18 +83,28 @@ const nextConfig: NextConfig = {
           { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=(self)' },
         ],
       },
-      {
-        source: '/classroom',
-        headers: [
-          { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=(self)' },
-        ],
-      },
-      {
-        source: '/classroom/:path*',
-        headers: [
-          { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=(self)' },
-        ],
-      },
+      ...(process.env.ASSIGNMENT_FILE_SUBMIT_ENABLED === 'true'
+        ? [
+            {
+              source: '/classroom',
+              headers: [
+                {
+                  key: 'Permissions-Policy',
+                  value: 'camera=(self), microphone=(), geolocation=(self)',
+                },
+              ],
+            },
+            {
+              source: '/classroom/:path*',
+              headers: [
+                {
+                  key: 'Permissions-Policy',
+                  value: 'camera=(self), microphone=(), geolocation=(self)',
+                },
+              ],
+            },
+          ]
+        : []),
       {
         source: '/sso-callback',
         headers: [

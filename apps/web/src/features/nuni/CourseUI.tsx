@@ -46,7 +46,9 @@ export function useClasses(beginRequest?: BeginCourseRequest) {
     session?.platformAccountId,
     async (path, body, contentType) => {
       if (!session) return Promise.reject(new NuniError(401, 'SIGN_IN_REQUIRED'));
-      return browserUpload(path, session.context, new Blob([body]), contentType);
+      const copy = new ArrayBuffer(body.byteLength);
+      new Uint8Array(copy).set(body);
+      return browserUpload(path, session.context, new Blob([copy]), contentType);
     },
   );
 }

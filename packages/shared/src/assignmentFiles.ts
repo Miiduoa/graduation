@@ -42,8 +42,13 @@ const DOCUMENT_EXTENSIONS: Record<string, (typeof ASSIGNMENT_DOCUMENT_TYPES)[num
 export type AssignmentFileKind = 'image' | 'file';
 export type AssignmentSubmitStatus = 'submitted' | 'late';
 
+function runtimeEnv(): Record<string, string | undefined> {
+  const runtime = globalThis as { process?: { env?: Record<string, string | undefined> } };
+  return runtime.process?.env ?? {};
+}
+
 export function assignmentFileSubmitEnabled(
-  env: Record<string, string | undefined> = typeof process === 'undefined' ? {} : process.env,
+  env: Record<string, string | undefined> = runtimeEnv(),
 ): boolean {
   return env[ASSIGNMENT_FILE_SUBMIT_FLAG] === 'true';
 }
@@ -88,9 +93,28 @@ function extensionOf(name: string): string {
   return index > 0 ? base.slice(index + 1).toLowerCase() : '';
 }
 
+function stripControlCharacters(value: string): string {
+  let result = '';
+  for (let index = 0; index < value.length; index += 1) {
+    if (value.charCodeAt(index) >= 32) result += value.charAt(index);
+  }
+  return result;
+}
+
 export function sanitizeAssignmentFileName(name: string): string {
-  const base = name.trim().split(/[/\\]/).pop()?.replace(/[\u0000-\u001f]/g, '') ?? '';
-  if (!base || base === '.' || base === '..' || base.length > 200) {
+  const trimmed = name.trim();
+  if (
+    !trimmed ||
+    trimmed === '.' ||
+    trimmed === '..' ||
+    trimmed.includes('..') ||
+    trimmed.includes('/') ||
+    trimmed.includes('\\')
+  ) {
+    throw new NuniError(422, 'ASSIGNMENT_FILE_NAME_INVALID');
+  }
+  const base = stripControlCharacters(trimmed);
+  if (!base || base === '.' || base === '..' || base.length > 200 || base.includes('..')) {
     throw new NuniError(422, 'ASSIGNMENT_FILE_NAME_INVALID');
   }
   return base;
@@ -150,6 +174,45 @@ function startsWith(bytes: Uint8Array, signature: number[]): boolean {
   return signature.length <= bytes.length && signature.every((value, index) => bytes[index] === value);
 }
 
+const HEIF_BRANDS = new Set([
+  'heic',
+  'heix',
+  'hevc',
+  'hevx',
+  'heim',
+  'heis',
+  'hevm',
+  'hevs',
+  'mif1',
+  'msf1',
+  'miaf',
+]);
+
+function isoBrands(bytes: Uint8Array): string[] {
+  if (
+    bytes.length < 12 ||
+    bytes[4] !== 0x66 ||
+    bytes[5] !== 0x74 ||
+    bytes[6] !== 0x79 ||
+    bytes[7] !== 0x70
+  ) {
+    return [];
+  }
+  const size = ((bytes[0] ?? 0) << 24) | ((bytes[1] ?? 0) << 16) | ((bytes[2] ?? 0) << 8) | (bytes[3] ?? 0);
+  const end = Math.min(bytes.length, size > 8 ? size : bytes.length);
+  const brands = [String.fromCharCode(bytes[8] ?? 0, bytes[9] ?? 0, bytes[10] ?? 0, bytes[11] ?? 0)];
+  for (let index = 16; index + 4 <= end; index += 4) {
+    brands.push(
+      String.fromCharCode(bytes[index] ?? 0, bytes[index + 1] ?? 0, bytes[index + 2] ?? 0, bytes[index + 3] ?? 0),
+    );
+  }
+  return brands;
+}
+
+function isHeifContainer(bytes: Uint8Array): boolean {
+  return isoBrands(bytes).some((brand) => HEIF_BRANDS.has(brand));
+}
+
 export function assertAssignmentFileMagic(kind: AssignmentFileKind, contentType: string, bytes: Uint8Array): void {
   if (bytes.length === 0) throw new NuniError(422, 'ASSIGNMENT_FILE_SIZE_REJECTED');
   if (contentType === 'image/jpeg' && startsWith(bytes, [0xff, 0xd8, 0xff])) return;
@@ -164,15 +227,7 @@ export function assertAssignmentFileMagic(kind: AssignmentFileKind, contentType:
     bytes[11] === 0x50
   )
     return;
-  if (
-    (contentType === 'image/heic' || contentType === 'image/heif') &&
-    bytes.length >= 12 &&
-    bytes[4] === 0x66 &&
-    bytes[5] === 0x74 &&
-    bytes[6] === 0x79 &&
-    bytes[7] === 0x70
-  )
-    return;
+  if ((contentType === 'image/heic' || contentType === 'image/heif') && isHeifContainer(bytes)) return;
   if (contentType === 'application/pdf' && startsWith(bytes, [0x25, 0x50, 0x44, 0x46])) return;
   if (contentType === 'application/zip' && startsWith(bytes, [0x50, 0x4b])) return;
   if (

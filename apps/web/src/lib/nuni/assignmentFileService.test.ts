@@ -8,6 +8,13 @@ import {
   type AssignmentFileActor,
   type AssignmentFilePlatform,
 } from './assignmentFileService';
+import {
+  createFakeAssignmentFileSql,
+  createMemoryIndexStore,
+  createSqlIndexStore,
+  createTtlMemoryBlobStore,
+  resolveAssignmentFileStores,
+} from './assignmentFileStore';
 
 const workspaceId = 'cw_11111111-1111-4111-8111-111111111111';
 const assignmentId = 'cwa_22222222-2222-4222-8222-222222222222';
@@ -87,7 +94,10 @@ function service(options?: Parameters<typeof platform>[0] & { now?: () => Date }
 }
 
 beforeEach(() => resetAssignmentFileStores());
-afterEach(() => resetAssignmentFileStores());
+afterEach(() => {
+  resetAssignmentFileStores();
+  vi.unstubAllEnvs();
+});
 
 describe('assignment file service', () => {
   it('rejects non-students, closed assignments, bad types, and oversize files', async () => {
@@ -234,7 +244,7 @@ describe('assignment file service', () => {
       fileIds: [intent.id],
       idempotencyKey: 'submit-key-read-1',
     });
-    const teacherView = api.hydrateSubmission(
+    const teacherView = await api.hydrateSubmission(
       actor(teacherId),
       workspace('owner-teacher'),
       assignment(),
@@ -242,7 +252,7 @@ describe('assignment file service', () => {
       teacherId,
     );
     expect(teacherView?.files?.[0]?.originalName).toBe('shot.jpg');
-    expect(() =>
+    await expect(
       api.hydrateSubmission(
         actor(outsiderId),
         workspace('student'),
@@ -250,6 +260,186 @@ describe('assignment file service', () => {
         submitted.mySubmission,
         outsiderId,
       ),
-    ).toThrowError(/CLASS_WORKSPACE_FORBIDDEN/);
+    ).rejects.toMatchObject({ status: 403, code: 'CLASS_WORKSPACE_FORBIDDEN' });
+  });
+
+  it('lets intent, PUT and submit succeed across different service instances sharing durable stores', async () => {
+    const stores = {
+      index: createSqlIndexStore(createFakeAssignmentFileSql()),
+      blobs: createTtlMemoryBlobStore(),
+    };
+    const student = actor(studentId);
+    const intentApi = createAssignmentFileService({
+      stores,
+      platform: platform(),
+      secret,
+      now: () => new Date('2026-10-21T13:00:00.000Z'),
+      id: () => 'bbbbbbbb-1111-4111-8111-111111111111',
+    });
+    const putApi = createAssignmentFileService({
+      stores,
+      platform: platform(),
+      secret,
+      now: () => new Date('2026-10-21T13:00:00.000Z'),
+    });
+    const created = await intentApi.createIntent(student, workspaceId, assignmentId, {
+      originalName: 'shot.jpg',
+      contentType: 'image/jpeg',
+      byteSize: 64,
+      idempotencyKey: 'intent-key-multi-1',
+    });
+    await putApi.putContent(student, workspaceId, assignmentId, created.id, jpeg());
+    const submitApi = createAssignmentFileService({
+      stores,
+      platform: platform(),
+      secret,
+      now: () => new Date('2026-10-21T13:00:00.000Z'),
+    });
+    const result = await submitApi.submitFiles(student, workspaceId, assignmentId, {
+      fileIds: [created.id],
+      idempotencyKey: 'submit-key-multi-1',
+    });
+    expect(result.mySubmission?.files?.[0]?.originalName).toBe('shot.jpg');
+    const hydrated = await submitApi.hydrateSubmission(
+      student,
+      workspace('student'),
+      assignment({
+        submissionCount: 1,
+        mySubmission: result.mySubmission,
+      }),
+      result.mySubmission,
+      studentId,
+    );
+    expect(hydrated?.files?.[0]?.originalName).toBe('shot.jpg');
+  });
+
+  it('rejects PNG bytes sent as a jpg, a renamed MP4 HEIC, path traversal, and an expired signature', async () => {
+    const api = service();
+    const student = actor(studentId);
+    await expect(
+      api.createIntent(student, workspaceId, assignmentId, {
+        originalName: '../secret.jpg',
+        contentType: 'image/jpeg',
+        byteSize: 8,
+        idempotencyKey: 'intent-key-path',
+      }),
+    ).rejects.toMatchObject({ status: 422, code: 'ASSIGNMENT_FILE_NAME_INVALID' });
+
+    const pngIntent = await api.createIntent(student, workspaceId, assignmentId, {
+      originalName: 'shot.jpg',
+      contentType: 'image/jpeg',
+      byteSize: 8,
+      idempotencyKey: 'intent-key-png-jpg',
+    });
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    await expect(
+      api.putContent(student, workspaceId, assignmentId, pngIntent.id, png),
+    ).rejects.toMatchObject({ status: 422, code: 'ASSIGNMENT_FILE_TYPE_REJECTED' });
+
+    const heicIntent = await api.createIntent(student, workspaceId, assignmentId, {
+      originalName: 'clip.heic',
+      contentType: 'image/heic',
+      byteSize: 12,
+      idempotencyKey: 'intent-key-fake-heic',
+    });
+    const mp4 = Uint8Array.from([0x00, 0x00, 0x00, 0x0c, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]);
+    await expect(
+      api.putContent(student, workspaceId, assignmentId, heicIntent.id, mp4),
+    ).rejects.toMatchObject({ status: 422, code: 'ASSIGNMENT_FILE_TYPE_REJECTED' });
+
+    const lateNow = { current: Date.parse('2026-10-21T13:00:00.000Z') };
+    const timed = createAssignmentFileService({
+      platform: platform(),
+      secret,
+      now: () => new Date(lateNow.current),
+      id: () => 'cccccccc-1111-4111-8111-111111111111',
+    });
+    const intent = await timed.createIntent(student, workspaceId, assignmentId, {
+      originalName: 'shot.jpg',
+      contentType: 'image/jpeg',
+      byteSize: 64,
+      idempotencyKey: 'intent-key-expired',
+    });
+    const uploaded = await timed.putContent(student, workspaceId, assignmentId, intent.id, jpeg());
+    lateNow.current += 11 * 60 * 1000;
+    await expect(
+      timed.readContent(
+        workspaceId,
+        assignmentId,
+        intent.id,
+        uploaded.downloadExp,
+        uploaded.downloadSig,
+      ),
+    ).rejects.toMatchObject({ status: 403, code: 'ASSIGNMENT_FILE_EXPIRED' });
+  });
+
+  it('does not fake a production upload when Supabase Storage is missing, and hides file-only receipts without an index row', async () => {
+    const student = actor(studentId);
+    const stores = {
+      index: createMemoryIndexStore(),
+      blobs: resolveAssignmentFileStores({ NODE_ENV: 'production' }).blobs,
+    };
+    const production = createAssignmentFileService({
+      stores,
+      platform: platform(),
+      secret,
+      now: () => new Date('2026-10-21T13:00:00.000Z'),
+      id: () => 'dddddddd-1111-4111-8111-111111111111',
+    });
+    const intent = await production.createIntent(student, workspaceId, assignmentId, {
+      originalName: 'shot.jpg',
+      contentType: 'image/jpeg',
+      byteSize: 64,
+      idempotencyKey: 'intent-key-prod-blob',
+    });
+    await expect(
+      production.putContent(student, workspaceId, assignmentId, intent.id, jpeg()),
+    ).rejects.toMatchObject({ status: 503, code: 'ASSIGNMENT_FILE_UPLOAD_UNAVAILABLE' });
+    expect(await stores.index.getFile(intent.id)).toMatchObject({ uploadedAt: null });
+
+    const failingIndex = createMemoryIndexStore();
+    const originalPut = failingIndex.putFile.bind(failingIndex);
+    failingIndex.putFile = async (record) => {
+      if (record.submittedAt) throw new Error('index down');
+      await originalPut(record);
+    };
+    const api = createAssignmentFileService({
+      stores: { index: failingIndex, blobs: createTtlMemoryBlobStore() },
+      platform: platform(),
+      secret,
+      now: () => new Date('2026-10-21T13:00:00.000Z'),
+      id: () => 'eeeeeeee-1111-4111-8111-111111111111',
+    });
+    const created = await api.createIntent(student, workspaceId, assignmentId, {
+      originalName: 'shot.jpg',
+      contentType: 'image/jpeg',
+      byteSize: 64,
+      idempotencyKey: 'intent-key-index-fail',
+    });
+    await api.putContent(student, workspaceId, assignmentId, created.id, jpeg());
+    await expect(
+      api.submitFiles(student, workspaceId, assignmentId, {
+        fileIds: [created.id],
+        idempotencyKey: 'submit-key-index-fail',
+      }),
+    ).rejects.toMatchObject({ status: 503, code: 'ASSIGNMENT_FILE_STORE_UNAVAILABLE' });
+    expect(
+      await api.hydrateSubmission(
+        student,
+        workspace('student'),
+        assignment(),
+        {
+          assignmentId,
+          platformAccountId: studentId,
+          displayName: '同學',
+          body: FILE_ONLY_SUBMISSION_BODY,
+          state: 'submitted',
+          submittedAt: '2026-10-21T13:00:00.000Z',
+          teacherFeedback: null,
+          reviewedAt: null,
+        },
+        studentId,
+      ),
+    ).toBeNull();
   });
 });

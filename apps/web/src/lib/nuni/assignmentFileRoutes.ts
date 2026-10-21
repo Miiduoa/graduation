@@ -190,16 +190,18 @@ export async function hydrateAssignmentFiles(
   if (!assignmentFileSubmitEnabled()) return assignments;
   const actor = await actorFor(request);
   const service = serviceFor(actor);
-  return assignments.map((item) => ({
-    ...item,
-    mySubmission: service.hydrateSubmission(
-      actor,
-      workspace,
-      item,
-      item.mySubmission,
-      actor.platformAccountId,
-    ),
-  }));
+  return Promise.all(
+    assignments.map(async (item) => ({
+      ...item,
+      mySubmission: await service.hydrateSubmission(
+        actor,
+        workspace,
+        item,
+        item.mySubmission,
+        actor.platformAccountId,
+      ),
+    })),
+  );
 }
 
 export async function hydrateSubmissionFiles(
@@ -211,9 +213,16 @@ export async function hydrateSubmissionFiles(
   if (!assignmentFileSubmitEnabled()) return submissions;
   const actor = await actorFor(request);
   const service = serviceFor(actor);
-  return submissions.map((entry) => {
-    const hydrated = service.hydrateSubmission(actor, workspace, assignment, entry, actor.platformAccountId);
-    if (!hydrated) throw new NuniError(502, 'INVALID_RESPONSE');
-    return hydrated;
-  });
+  const hydrated: NuniSubmission[] = [];
+  for (const entry of submissions) {
+    const item = await service.hydrateSubmission(
+      actor,
+      workspace,
+      assignment,
+      entry,
+      actor.platformAccountId,
+    );
+    if (item) hydrated.push(item);
+  }
+  return hydrated;
 }

@@ -10,6 +10,7 @@ import {
   assignmentReceiptStatusLabel,
   assignmentSubmissionLate,
   classifyAssignmentFile,
+  sanitizeAssignmentFileName,
 } from '@campus/shared/src/assignmentFiles';
 import { NuniError } from '@campus/shared/src/nuni';
 
@@ -66,5 +67,27 @@ describe('assignment file domain', () => {
     expect(() =>
       assertAssignmentFileMagic('image', 'image/jpeg', Uint8Array.from([0x00, 0x01])),
     ).toThrowError(/ASSIGNMENT_FILE_TYPE_REJECTED/);
+  });
+
+  it('rejects a .jpg that is actually PNG, a renamed MP4 pretending to be HEIC, and path traversal', () => {
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    expect(() => assertAssignmentFileMagic('image', 'image/jpeg', png)).toThrowError(
+      /ASSIGNMENT_FILE_TYPE_REJECTED/,
+    );
+    const mp4 = new Uint8Array(32);
+    mp4.set([0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d], 0);
+    expect(classifyAssignmentFile('clip.heic', 'image/heic')).toEqual({
+      kind: 'image',
+      contentType: 'image/heic',
+    });
+    expect(() => assertAssignmentFileMagic('image', 'image/heic', mp4)).toThrowError(
+      /ASSIGNMENT_FILE_TYPE_REJECTED/,
+    );
+    const heic = new Uint8Array(32);
+    heic.set([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63], 0);
+    expect(() => assertAssignmentFileMagic('image', 'image/heic', heic)).not.toThrow();
+    expect(() => sanitizeAssignmentFileName('../secret.jpg')).toThrow(NuniError);
+    expect(() => sanitizeAssignmentFileName('..\\secret.jpg')).toThrow(NuniError);
+    expect(() => sanitizeAssignmentFileName('foo/../../etc/passwd.jpg')).toThrow(NuniError);
   });
 });
