@@ -331,19 +331,68 @@ export function distanceMetres(a: Position, b: Position): number {
 export function formatDistance(distance: number): string {
   return distance < 1000 ? `約 ${Math.max(10, Math.round(distance / 10) * 10)} 公尺` : `約 ${(distance / 1000).toFixed(1)} 公里`;
 }
+const TAIPEI_DATE_TIME = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'Asia/Taipei',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+function taipeiDateTime(ms: number): { date: string; hour: number; minute: number } | null {
+  if (!Number.isFinite(ms)) return null;
+  const parts = TAIPEI_DATE_TIME.formatToParts(new Date(ms));
+  const read = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value;
+  const year = read('year');
+  const month = read('month');
+  const day = read('day');
+  const hour = Number(read('hour'));
+  const minute = Number(read('minute'));
+  if (!year || !month || !day || !Number.isInteger(hour) || !Number.isInteger(minute)) return null;
+  return { date: `${year}-${month}-${day}`, hour, minute };
+}
 export function taipeiClock(iso: string): string | null {
   const timestamp = Date.parse(iso);
-  if (!Number.isFinite(timestamp)) return null;
-  return new Date(timestamp).toLocaleTimeString('zh-TW', {
-    timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false,
-  });
+  const parts = taipeiDateTime(timestamp);
+  if (!parts) return null;
+  return `${String(parts.hour).padStart(2, '0')}:${String(parts.minute).padStart(2, '0')}`;
 }
-export function scheduledLabel(arrival: TransitArrival, now: number): string | null {
+function futureScheduledAt(arrival: TransitArrival, now: number): number | null {
   if (!arrival.scheduledAt) return null;
   const timestamp = Date.parse(arrival.scheduledAt);
   if (!Number.isFinite(timestamp) || timestamp < now - 30_000) return null;
+  return timestamp;
+}
+/** 表定首班落在台北時間 00:00–04:59，且現在已是白天時，當作夜間公車而不是收班。 */
+function isNightFirstSchedule(scheduledAt: number, now: number): boolean {
+  const scheduled = taipeiDateTime(scheduledAt);
+  const current = taipeiDateTime(now);
+  if (!scheduled || !current) return false;
+  return current.hour >= 5 && scheduled.hour <= 4;
+}
+function isSameTaipeiDay(scheduledAt: number, now: number): boolean {
+  const scheduled = taipeiDateTime(scheduledAt);
+  const current = taipeiDateTime(now);
+  return Boolean(scheduled && current && scheduled.date === current.date);
+}
+function scheduledView(arrival: TransitArrival, now: number): { clock: string; night: boolean; sameDay: boolean } | null {
+  const scheduledAt = futureScheduledAt(arrival, now);
+  if (scheduledAt === null || !arrival.scheduledAt) return null;
   const clock = taipeiClock(arrival.scheduledAt);
-  return clock ? `表定 ${clock}` : null;
+  if (!clock) return null;
+  return {
+    clock,
+    night: isNightFirstSchedule(scheduledAt, now),
+    sameDay: isSameTaipeiDay(scheduledAt, now),
+  };
+}
+export function scheduledLabel(arrival: TransitArrival, now: number): string | null {
+  const scheduled = scheduledView(arrival, now);
+  if (!scheduled) return null;
+  if (scheduled.night) return `夜間公車，${scheduled.clock} 起`;
+  if (!isEndedStatus(arrival.status) || scheduled.sameDay) return `表定 ${scheduled.clock}`;
+  return null;
 }
 function isEndedStatus(status: number | null): boolean {
   return status === 3 || status === 4;
@@ -358,9 +407,9 @@ export function arrivalLabel(arrival: TransitArrival, now: number): string {
     if (liveScheduled) return liveScheduled;
     return '等待更新';
   }
-  if (isEndedStatus(arrival.status)) return '今天收班';
   const scheduled = scheduledLabel(arrival, now);
   if (scheduled) return scheduled;
+  if (isEndedStatus(arrival.status)) return '今天收班';
   if (!fresh) return '資料待更新';
   const statuses: Record<number, string> = { 1: '尚未發車', 2: '交管不停靠' };
   if (arrival.status !== null && statuses[arrival.status]) return statuses[arrival.status];
@@ -416,7 +465,11 @@ function pickCampusArrival(candidates: TransitArrival[], now: number): TransitAr
   const live = scored.filter((row) => row.live !== null).sort((a, b) => a.rank - b.rank || a.live! - b.live!);
   if (live[0]) return live[0].arrival;
   const scheduled = scored
-    .filter((row) => !isEndedStatus(row.arrival.status) && Number.isFinite(row.scheduled) && row.scheduled >= now - 30_000)
+    .filter((row) => {
+      if (!Number.isFinite(row.scheduled) || row.scheduled < now - 30_000) return false;
+      if (!isEndedStatus(row.arrival.status)) return true;
+      return isNightFirstSchedule(row.scheduled, now) || isSameTaipeiDay(row.scheduled, now);
+    })
     .sort((a, b) => a.rank - b.rank || a.scheduled - b.scheduled);
   if (scheduled[0]) return scheduled[0].arrival;
   const ended = scored
@@ -494,7 +547,7 @@ export function nextScheduledClock(arrival: TransitArrival | null, now: number):
   if (!Number.isFinite(at) || at <= now + remaining * 1000 + 60_000) return null;
   return taipeiClock(arrival.scheduledAt);
 }
-export type CampusEtaKind = 'live' | 'soon' | 'scheduled' | 'ended' | 'empty';
+export type CampusEtaKind = 'live' | 'soon' | 'scheduled' | 'night' | 'ended' | 'empty';
 export type CampusEtaView = { kind: CampusEtaKind; text: string; minutes?: number; clock?: string };
 export function campusEtaView(arrival: TransitArrival | null, now: number): CampusEtaView {
   if (!arrival) return { kind: 'empty', text: '暫無班次資訊' };
@@ -504,12 +557,12 @@ export function campusEtaView(arrival: TransitArrival | null, now: number): Camp
     const minutes = Math.ceil(remaining / 60);
     return { kind: 'live', text: `${minutes} 分`, minutes };
   }
-  if (isEndedStatus(arrival.status)) return { kind: 'ended', text: '今天收班' };
-  const clock = arrival.scheduledAt ? taipeiClock(arrival.scheduledAt) : null;
-  const scheduledAt = arrival.scheduledAt ? Date.parse(arrival.scheduledAt) : NaN;
-  if (clock && Number.isFinite(scheduledAt) && scheduledAt >= now - 30_000) {
-    return { kind: 'scheduled', text: `表定 ${clock}`, clock };
+  const scheduled = scheduledView(arrival, now);
+  if (scheduled?.night) return { kind: 'night', text: `夜間公車，${scheduled.clock} 起`, clock: scheduled.clock };
+  if (scheduled && (!isEndedStatus(arrival.status) || scheduled.sameDay)) {
+    return { kind: 'scheduled', text: `表定 ${scheduled.clock}`, clock: scheduled.clock };
   }
+  if (isEndedStatus(arrival.status)) return { kind: 'ended', text: '今天收班' };
   return { kind: 'empty', text: '暫無班次資訊' };
 }
 export function campusUpdatedLabel(fetchedAt: string, now: number, liveUnavailable = false): string {
@@ -533,7 +586,9 @@ export function sortCampusNextRows(rows: CampusNextRow[], now: number): CampusNe
   const rank = (row: CampusNextRow): [number, number] => {
     const view = campusEtaView(row.arrival, now);
     if ((view.kind === 'soon' || view.kind === 'live') && row.arrival) return [0, liveRemaining(row.arrival, now) ?? 0];
-    if (view.kind === 'scheduled' && row.arrival?.scheduledAt) return [1, Date.parse(row.arrival.scheduledAt)];
+    if ((view.kind === 'scheduled' || view.kind === 'night') && row.arrival?.scheduledAt) {
+      return [1, Date.parse(row.arrival.scheduledAt)];
+    }
     if (view.kind === 'empty') return [2, 0];
     if (view.kind === 'ended') return [3, 0];
     return [2, 0];
@@ -599,7 +654,7 @@ export function campusHomeSummary(rows: CampusNextRow[], now: number): string {
   const actionable = sortCampusNextRows(
     rows.filter((row) => {
       const kind = campusEtaView(row.arrival, now).kind;
-      return kind === 'live' || kind === 'soon' || kind === 'scheduled';
+      return kind === 'live' || kind === 'soon' || kind === 'scheduled' || kind === 'night';
     }),
     now,
   );
@@ -610,6 +665,7 @@ export function campusHomeSummary(rows: CampusNextRow[], now: number): string {
   if (view.kind === 'live' && view.minutes != null) return `${top.route} ${bucket} ${view.minutes} 分`;
   if (view.kind === 'soon') return `${top.route} ${bucket} 進站中`;
   if (view.kind === 'scheduled' && view.clock) return `${top.route} ${bucket} 表定 ${view.clock}`;
+  if (view.kind === 'night' && view.clock) return `${top.route} ${bucket} 夜間公車，${view.clock} 起`;
   return '';
 }
 export function stopMapUrl(stop: TransitStop): string {

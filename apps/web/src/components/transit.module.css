@@ -128,7 +128,7 @@
   display: grid;
   grid-template-columns: 56px minmax(0, 1fr) auto;
   gap: 16px;
-  align-items: center;
+  align-items: start;
   min-height: 64px;
   width: 100%;
   padding: 12px 16px;
@@ -145,6 +145,7 @@
   width: 100%;
   min-width: 0;
   height: 28px;
+  margin-top: 3px;
   padding: 0 4px;
   border-radius: 6px;
   background: #2f4a3c;
@@ -157,17 +158,17 @@
   text-align: center;
   white-space: nowrap;
 }
-.rowCopy { display: grid; gap: 2px; min-width: 0; }
+.rowCopy { display: grid; gap: 2px; min-width: 0; padding-top: 3px; }
 .rowCopy strong {
   font-size: 17px;
   font-weight: 600;
   line-height: 22px;
   color: #1f2a24;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
-.rowCopy small { color: #5f6b64; font-size: 13px; font-weight: 400; line-height: 18px; }
+.rowCopy small { color: #5f6b64; font-size: 12px; font-weight: 400; line-height: 16px; }
 .rowEta {
   display: inline-flex;
   align-items: baseline;
@@ -189,8 +190,14 @@
 .liveSignal { width: 12px; height: 12px; color: #5f6b64; flex-shrink: 0; align-self: center; }
 .rowEta[data-kind='soon'] { font-size: 17px; font-weight: 600; line-height: 22px; color: #2f4a3c; }
 .rowEta[data-kind='scheduled'],
+.rowEta[data-kind='night'],
 .rowEta[data-kind='ended'],
 .rowEta[data-kind='empty'] { font-size: 15px; font-weight: 400; line-height: 20px; color: #8a938d; }
+.rowEta[data-kind='night'] {
+  white-space: normal;
+  max-width: 7.2em;
+  padding-top: 3px;
+}
 .arrivalRowEnded .routeBadge { background: #c9c4b8; color: #5f6b64; }
 .arrivalRowEnded .rowCopy strong { color: #8a938d; font-weight: 600; }
 .skeletonRow {
@@ -269,7 +276,7 @@
   width: 100%;
   min-height: 44px;
   margin: 0;
-  padding: 4px 16px 12px;
+  padding: 12px 16px;
   border: 0;
   background: none;
   color: #5f6b64;
@@ -279,7 +286,6 @@
   text-align: left;
   cursor: pointer;
 }
-.laneMore ul { list-style: none; margin: 0; padding: 0; }
 .explorer button:disabled { opacity: .55; cursor: not-allowed; }
 .explorer button:focus-visible, .explorer a:focus-visible, .explorer input:focus-visible, .explorer select:focus-visible, .explorer summary:focus-visible { outline: 3px solid var(--focus-ring, #b08930); outline-offset: 3px; }
 .controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px; padding: 24px 0 16px; }

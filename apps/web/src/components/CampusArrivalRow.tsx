@@ -25,15 +25,9 @@ function Eta(props: { view: ReturnType<typeof campusEtaView> }) {
     );
   }
   if (view.kind === 'soon') {
-    return <span className={css.rowEta} data-kind="soon">進站中</span>;
+    return <span className={css.rowEta} data-kind="soon">{view.text}</span>;
   }
-  if (view.kind === 'scheduled') {
-    return <span className={css.rowEta} data-kind="scheduled">{view.text}</span>;
-  }
-  if (view.kind === 'ended') {
-    return <span className={css.rowEta} data-kind="ended">今天收班</span>;
-  }
-  return <span className={css.rowEta} data-kind="empty">暫無班次資訊</span>;
+  return <span className={css.rowEta} data-kind={view.kind}>{view.text}</span>;
 }
 
 export function CampusArrivalRow(props: {

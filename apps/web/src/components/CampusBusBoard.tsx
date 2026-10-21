@@ -193,6 +193,11 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
               <p className={css.emptyGroup} role="status">暫無班次資訊</p>
             </li>
           )}
+          {laneOpen ? lane.extra.map((row) => (
+            <li key={`${row.route}:${row.heading}`}>
+              <CampusArrivalRow row={row} now={clock} />
+            </li>
+          )) : null}
           {lane.extra.length ? (
             <li className={css.laneMore}>
               <button
@@ -203,15 +208,6 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
               >
                 {laneOpen ? '收合' : `還有 ${lane.extra.length} 班`}
               </button>
-              {laneOpen ? (
-                <ul>
-                  {lane.extra.map((row) => (
-                    <li key={`${row.route}:${row.heading}`}>
-                      <CampusArrivalRow row={row} now={clock} />
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
             </li>
           ) : null}
         </ul>
