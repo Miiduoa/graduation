@@ -84,6 +84,18 @@ const nextConfig: NextConfig = {
         ],
       },
       {
+        source: '/classroom',
+        headers: [
+          { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=(self)' },
+        ],
+      },
+      {
+        source: '/classroom/:path*',
+        headers: [
+          { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=(self)' },
+        ],
+      },
+      {
         source: '/sso-callback',
         headers: [
           { key: 'Cache-Control', value: 'no-store, max-age=0' },

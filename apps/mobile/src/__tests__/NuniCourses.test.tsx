@@ -16,6 +16,17 @@ let mockSession = {
 };
 const mockRequest = jest.fn();
 let mockUuid = 0;
+const fileSubmitFlag = { on: false };
+jest.mock('../screens/nuni/assignmentFileSubmit', () => {
+  const actual = jest.requireActual('../screens/nuni/assignmentFileSubmit') as Record<
+    string,
+    unknown
+  >;
+  return {
+    ...actual,
+    assignmentFileSubmitEnabledNative: () => fileSubmitFlag.on,
+  };
+});
 jest.mock('../state/nuniSession', () => ({
   useNuniSession: () => ({
     session: mockSession,
@@ -103,6 +114,7 @@ async function response(
 }
 beforeEach(() => {
   mockUuid = 0;
+  fileSubmitFlag.on = false;
   mockRequest.mockReset();
   mockSession = {
     platformAccountId: accountId,
@@ -1106,4 +1118,23 @@ it('does not show a student pending filter to a course teacher', async () => {
   const view = await openCourse();
   expect(view.queryByRole('button', { name: /待完成/ })).toBeNull();
   expect(view.getByRole('button', { name: '查看收件：校園訪談' })).toBeTruthy();
+});
+
+it('hides camera and file buttons while the assignment file flag is off', async () => {
+  const view = await openCourse();
+  expect(view.queryByRole('button', { name: '拍照' })).toBeNull();
+  expect(view.getByLabelText('作業內容：校園訪談')).toBeTruthy();
+});
+
+it('shows camera, album and file actions when the assignment file flag is on', async () => {
+  fileSubmitFlag.on = true;
+  assignment = {
+    ...assignment,
+    dueAt: '2026-10-08T03:00:00.000Z',
+  };
+  const view = await openCourse();
+  expect(view.getByRole('button', { name: '拍照' })).toBeTruthy();
+  expect(view.getByRole('button', { name: '相簿' })).toBeTruthy();
+  expect(view.getByRole('button', { name: '檔案' })).toBeTruthy();
+  expect(view.getByText('遲交、仍可繳')).toBeTruthy();
 });

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Image, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { randomUUID } from 'expo-crypto';
 import {
   createNuniClasses,
@@ -12,6 +12,23 @@ import {
   type NuniSubmission,
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
+import {
+  assignmentLateOpenLabel,
+  assignmentReceiptStatusLabel,
+  assignmentSubmissionLate,
+} from '@campus/shared/src/assignmentFiles';
+import {
+  assignmentFileDownloadUrl,
+  assignmentFileSubmitEnabledNative,
+  localFileSizeLabel,
+  nativeFileBytes,
+  pickAssignmentAlbum,
+  pickAssignmentCamera,
+  pickAssignmentDocuments,
+  requireAssignmentPayload,
+  usesAssignmentFileBff,
+  type LocalNativeFile,
+} from './assignmentFileSubmit';
 import { courseRoleLabels } from '@campus/shared/src/nuniCourseTasks';
 import { useNuniSession } from '../../state/nuniSession';
 import { useNuniDraftState } from '../../state/nuniDrafts';
@@ -397,26 +414,48 @@ function useLoad<T>(load: () => Promise<T>, automatic = true, clearOnDenied = fa
 export function NuniCourses() {
   const auth = useNuniSession();
   if (!auth.session || auth.loading || auth.pendingLogout) return null;
-  return <CourseScope key={auth.session.context} session={auth.session} request={auth.request} />;
+  return (
+    <CourseScope
+      key={auth.session.context}
+      session={auth.session}
+      request={auth.request}
+      upload={auth.upload}
+      bffRequest={auth.bffRequest}
+    />
+  );
 }
 function CourseScope({
   session,
   request,
+  upload,
+  bffRequest,
 }: {
   session: NativeNuniSession;
   request: ReturnType<typeof useNuniSession>['request'];
+  upload?: ReturnType<typeof useNuniSession>['upload'];
+  bffRequest?: ReturnType<typeof useNuniSession>['bffRequest'];
 }) {
   const theme = useTheme();
   const classes = useMemo(
     () =>
       createNuniClasses(
-        (path, input, query) =>
-          query
-            ? request(path, session.context, input, undefined, query)
-            : request(path, session.context, input),
+        (path, input, query) => {
+          const send =
+            assignmentFileSubmitEnabledNative() &&
+            bffRequest &&
+            usesAssignmentFileBff(path, input)
+              ? bffRequest
+              : request;
+          return query
+            ? send(path, session.context, input, undefined, query)
+            : send(path, session.context, input);
+        },
         session.platformAccountId,
+        upload
+          ? (path, body, contentType) => upload(path, session.context, body, contentType)
+          : undefined,
       ),
-    [request, session.context, session.platformAccountId],
+    [bffRequest, request, session.context, session.platformAccountId, upload],
   );
   const [selected, setSelected] = useNuniDraftState<string | null>('courses:selected', null);
   return (
@@ -865,6 +904,11 @@ function ActivityCard({
   const active = course.state === 'active';
   const canSubmit = student && active && item.state === 'open';
   const kind = assignment ? '作業' : '測驗';
+  const fileSubmit = assignment && assignmentFileSubmitEnabledNative();
+  const [localFiles, setLocalFiles] = useState<LocalNativeFile[]>([]);
+  const lateOpen = assignment
+    ? assignmentLateOpenLabel(item.dueAt, item.state, course.state)
+    : null;
   return (
     <View
       style={{ display: hidden ? 'none' : 'flex' }}
@@ -881,10 +925,37 @@ function ActivityCard({
         {item.dueAt && item.state === 'open' && active ? (
           <Copy>目前仍開放繳交，收件狀態以老師是否停止收件為準。</Copy>
         ) : null}
+        {fileSubmit && lateOpen ? <Copy alert>{lateOpen}</Copy> : null}
         {receipt ? (
           <View style={{ gap: 8 }}>
-            <Copy title>已繳交</Copy>
+            <Copy title>
+              {assignment && 'late' in receipt
+                ? assignmentReceiptStatusLabel(
+                    receipt.late === true ||
+                      assignmentSubmissionLate(item.dueAt, receipt.submittedAt),
+                  )
+                : '已繳交'}
+            </Copy>
             <Copy>{time(receipt.submittedAt)}</Copy>
+            {assignment && 'files' in receipt && receipt.files?.length
+              ? receipt.files.map((file) => (
+                  <View
+                    key={file.id}
+                    style={{ flexDirection: 'row', gap: 10, alignItems: 'center', minWidth: 0 }}
+                  >
+                    {file.kind === 'image' ? (
+                      <Image
+                        source={{ uri: assignmentFileDownloadUrl(file) }}
+                        accessibilityLabel={file.originalName}
+                        style={{ width: 56, height: 56, borderRadius: 8 }}
+                      />
+                    ) : null}
+                    <Copy>
+                      {file.originalName} · {file.kind === 'image' ? '照片' : '檔案'}
+                    </Copy>
+                  </View>
+                ))
+              : null}
             <Copy>{'body' in receipt ? receipt.body : receipt.answer}</Copy>
             <Copy>
               {receipt.teacherFeedback
@@ -895,6 +966,31 @@ function ActivityCard({
             {feedbackPredatesSubmission(receipt) ? (
               <Copy>這則回饋早於最近一次繳交，可請老師確認是否仍適用。</Copy>
             ) : null}
+          </View>
+        ) : null}
+        {canSubmit && fileSubmit ? (
+          <View style={{ gap: 8 }}>
+            <Button label="拍照" onPress={() => void pickAssignmentCamera(localFiles).then(setLocalFiles)} />
+            <Button label="相簿" onPress={() => void pickAssignmentAlbum(localFiles).then(setLocalFiles)} />
+            <Button
+              label="檔案"
+              onPress={() => void pickAssignmentDocuments(localFiles).then(setLocalFiles)}
+            />
+            {localFiles.map((file) => (
+              <View
+                key={file.key}
+                style={{ flexDirection: 'row', gap: 10, alignItems: 'center', minWidth: 0 }}
+              >
+                {file.kind === 'image' ? (
+                  <Image
+                    source={{ uri: file.uri }}
+                    accessibilityLabel={file.name}
+                    style={{ width: 56, height: 56, borderRadius: 8 }}
+                  />
+                ) : null}
+                <Copy>{localFileSizeLabel(file)}</Copy>
+              </View>
+            ))}
           </View>
         ) : null}
         {canSubmit ? (
@@ -913,14 +1009,44 @@ function ActivityCard({
                 name: 'body',
                 label: `${kind}內容：${item.title}`,
                 max: assignment ? 8000 : QUIZ_ANSWER_LIMIT,
+                min: fileSubmit ? 0 : 1,
                 multiline: true,
                 hint: assignment
-                  ? undefined
+                  ? fileSubmit
+                    ? '可寫說明，或直接拍照／選檔後送出。'
+                    : undefined
                   : `最多 ${QUIZ_ANSWER_LIMIT} 字。老師停止收件前仍可修改。`,
               },
             ]}
             label={receipt ? `更新${kind}繳交` : `繳交${kind}`}
             submit={async ({ body }, key, stillActive) => {
+              if (assignment && fileSubmit) {
+                requireAssignmentPayload(body, localFiles);
+              }
+              if (assignment && fileSubmit && localFiles.length) {
+                const fileIds: string[] = [];
+                for (const [index, file] of localFiles.entries()) {
+                  const bytes = await nativeFileBytes(file);
+                  const intent = await classes.createAssignmentFileIntent(course.id, item.id, {
+                    originalName: file.name,
+                    contentType: file.contentType,
+                    byteSize: bytes.byteLength,
+                    idempotencyKey: `${key}:file:${index}`,
+                  });
+                  await classes.uploadAssignmentFile(intent.uploadPath, bytes, intent.contentType);
+                  fileIds.push(intent.id);
+                }
+                const confirmed = await classes.submitFiles(course.id, item.id, {
+                  body: body.trim() || undefined,
+                  fileIds,
+                  idempotencyKey: key,
+                });
+                if (stillActive()) {
+                  setLocalFiles([]);
+                  saved(confirmed);
+                }
+                return '已收到伺服器繳交紀錄。';
+              }
               const confirmed = assignment
                 ? await classes.submit(course.id, item.id, body, key)
                 : await classes.submitQuiz(course.id, item.id, body, key);
@@ -978,6 +1104,23 @@ function TeacherReceipts({
             <Copy title>{receipt.displayName}</Copy>
             <Copy>{time(receipt.submittedAt)}</Copy>
             <Copy>{'body' in receipt ? receipt.body : receipt.answer}</Copy>
+            {'files' in receipt && receipt.files?.length
+              ? receipt.files.map((file) => (
+                  <View
+                    key={file.id}
+                    style={{ flexDirection: 'row', gap: 10, alignItems: 'center', minWidth: 0 }}
+                  >
+                    {file.kind === 'image' ? (
+                      <Image
+                        source={{ uri: assignmentFileDownloadUrl(file) }}
+                        accessibilityLabel={file.originalName}
+                        style={{ width: 56, height: 56, borderRadius: 8 }}
+                      />
+                    ) : null}
+                    <Copy>{file.originalName}</Copy>
+                  </View>
+                ))
+              : null}
             {receipt.teacherFeedback ? (
               <Copy>已回饋：{receipt.teacherFeedback}</Copy>
             ) : (

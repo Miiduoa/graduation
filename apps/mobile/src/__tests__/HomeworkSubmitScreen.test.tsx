@@ -55,7 +55,7 @@ test('loads the assignment from Firestore and submits the same text path as web'
   );
   expect(await view.findByText('期末報告')).toBeTruthy();
   expect(view.getByText('請寫摘要')).toBeTruthy();
-  expect(view.getByText(/目前只支援文字繳交/)).toBeTruthy();
+  expect(view.queryByText(/無法從 App 傳檔/)).toBeNull();
   expect(view.queryByText('+ 加檔案')).toBeNull();
   fireEvent.changeText(view.getByLabelText('文字作業內容'), '  我的答案  ');
   await act(async () => fireEvent.press(view.getByLabelText('繳交作業')));

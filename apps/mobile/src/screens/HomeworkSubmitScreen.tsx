@@ -220,21 +220,6 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
           </View>
         ) : (
           <>
-            <View
-              style={{
-                marginTop: 12,
-                backgroundColor: '#fff',
-                borderRadius: 12,
-                padding: 16,
-              }}
-            >
-              <Text style={{ fontSize: 14, fontWeight: '600', color: '#1C1C1E' }}>繳交方式</Text>
-              <Text style={{ marginTop: 6, fontSize: 13, color: '#3C3C43', lineHeight: 20 }}>
-                目前只支援文字繳交，與網站寫入同一份作業紀錄。作業檔案還沒接到上傳流程，無法從
-                App 傳檔。
-              </Text>
-            </View>
-
             {quizLike ? (
               <Text style={{ marginTop: 16, fontSize: 14, color: '#3C3C43', lineHeight: 22 }}>
                 請透過評量頁面作答。
