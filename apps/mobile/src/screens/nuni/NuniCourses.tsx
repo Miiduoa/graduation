@@ -411,7 +411,13 @@ function useLoad<T>(load: () => Promise<T>, automatic = true, clearOnDenied = fa
   };
 }
 
-export function NuniCourses({ initialWorkspaceId }: { initialWorkspaceId?: string } = {}) {
+export function NuniCourses({
+  initialWorkspaceId,
+  initialAssignmentId,
+}: {
+  initialWorkspaceId?: string;
+  initialAssignmentId?: string;
+} = {}) {
   const auth = useNuniSession();
   if (!auth.session || auth.loading || auth.pendingLogout) return null;
   return (
@@ -422,6 +428,7 @@ export function NuniCourses({ initialWorkspaceId }: { initialWorkspaceId?: strin
       upload={auth.upload}
       bffRequest={auth.bffRequest}
       initialWorkspaceId={initialWorkspaceId}
+      initialAssignmentId={initialAssignmentId}
     />
   );
 }
@@ -431,12 +438,14 @@ function CourseScope({
   upload,
   bffRequest,
   initialWorkspaceId,
+  initialAssignmentId,
 }: {
   session: NativeNuniSession;
   request: ReturnType<typeof useNuniSession>['request'];
   upload?: ReturnType<typeof useNuniSession>['upload'];
   bffRequest?: ReturnType<typeof useNuniSession>['bffRequest'];
   initialWorkspaceId?: string;
+  initialAssignmentId?: string;
 }) {
   const theme = useTheme();
   const classes = useMemo(
@@ -479,6 +488,7 @@ function CourseScope({
           id={selected}
           classes={classes}
           onBack={() => setSelected(null)}
+          initialAssignmentId={initialAssignmentId}
         />
       ) : (
         <CourseList classes={classes} open={setSelected} />
@@ -578,7 +588,17 @@ type CourseData = {
   assignments: NuniAssignment[];
   quizzes: NuniQuiz[];
 };
-function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; onBack(): void }) {
+function CourseDetail({
+  id,
+  classes,
+  onBack,
+  initialAssignmentId,
+}: {
+  id: string;
+  classes: Classes;
+  onBack(): void;
+  initialAssignmentId?: string;
+}) {
   const pageGeneration = useRef(0);
   const pagePending = useRef(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -623,6 +643,11 @@ function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; o
     `course:${id}:activity-filter`,
     'all',
   );
+  useEffect(() => {
+    if (!initialAssignmentId) return;
+    setTab('assignments');
+    setActivityFilter('all');
+  }, [initialAssignmentId, setActivityFilter, setTab]);
   const data = result.data;
   const loadOlderMaterials = async () => {
     if (
@@ -762,7 +787,12 @@ function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; o
                   course={data.course}
                   classes={classes}
                   saved={saveActivity}
-                  hidden={!teacher && !matchesActivityFilter(item, data.course, activityFilter)}
+                  hidden={
+                    !teacher &&
+                    !matchesActivityFilter(item, data.course, activityFilter) &&
+                    item.id !== initialAssignmentId
+                  }
+                  focused={item.id === initialAssignmentId}
                 />
               ))
             )}
@@ -899,12 +929,14 @@ function ActivityCard({
   classes,
   saved,
   hidden = false,
+  focused = false,
 }: {
   item: Activity;
   course: NuniWorkspace;
   classes: Classes;
   saved(item: Activity): void;
   hidden?: boolean;
+  focused?: boolean;
 }) {
   const assignment = 'instructions' in item;
   const receipt = assignment ? item.mySubmission : item.myResponse;
@@ -920,6 +952,8 @@ function ActivityCard({
     : null;
   return (
     <View
+      nativeID={assignment ? `assignment-${item.id}` : undefined}
+      testID={assignment ? `assignment-${item.id}` : undefined}
       style={{ display: hidden ? 'none' : 'flex' }}
       accessibilityElementsHidden={hidden}
       importantForAccessibility={hidden ? 'no-hide-descendants' : 'auto'}
@@ -976,6 +1010,14 @@ function ActivityCard({
               <Copy>這則回饋早於最近一次繳交，可請老師確認是否仍適用。</Copy>
             ) : null}
           </View>
+        ) : null}
+        {focused ? (
+          <Text
+            accessibilityLabel={`作業繳交區：${item.title}`}
+            accessibilityRole="summary"
+          >
+            作業繳交區
+          </Text>
         ) : null}
         {canSubmit && fileSubmit ? (
           <View style={{ gap: 8 }}>

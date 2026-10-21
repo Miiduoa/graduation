@@ -111,19 +111,21 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
 
   const fileSubmit =
     process.env.EXPO_PUBLIC_ASSIGNMENT_FILE_SUBMIT_ENABLED === 'true';
+  const classWorkspaceFileSubmit =
+    fileSubmit && courseId.startsWith('cw_') && hwId.startsWith('cwa_');
 
   useFocusEffect(
     useCallback(() => {
-      if (fileSubmit) {
+      if (classWorkspaceFileSubmit) {
         safeNavigate(navigation, 'NuniWorkspace', {
           tab: 'courses',
-          ...(courseId.startsWith('cw_') ? { workspaceId: courseId } : {}),
-          ...(hwId.startsWith('cwa_') ? { assignmentId: hwId } : {}),
+          workspaceId: courseId,
+          assignmentId: hwId,
         });
         return;
       }
       void load();
-    }, [courseId, fileSubmit, hwId, load, navigation]),
+    }, [classWorkspaceFileSubmit, courseId, hwId, load, navigation]),
   );
 
   const dueText = useMemo(() => {
@@ -215,7 +217,7 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
           )}
         </View>
 
-        {fileSubmit ? (
+        {classWorkspaceFileSubmit ? (
           <View
             style={{
               marginTop: 16,

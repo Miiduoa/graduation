@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native';
 import { NuniError, type NuniMaterial, type NuniWorkspace } from '@campus/shared/src/nuni';
 import { NuniCourses } from '../screens/nuni/NuniCourses';
 import { NuniDraftProvider } from '../state/nuniDrafts';
@@ -1137,4 +1137,42 @@ it('shows camera, album and file actions when the assignment file flag is on', a
   expect(view.getByRole('button', { name: '相簿' })).toBeTruthy();
   expect(view.getByRole('button', { name: '檔案' })).toBeTruthy();
   expect(view.getByText('遲交、仍可繳')).toBeTruthy();
+});
+
+it('opens the deep-linked assignment submit area even if drafts hid that card', async () => {
+  fileSubmitFlag.on = true;
+  const otherId = 'cwa_55555555-5555-4555-8555-555555555555';
+  assignment = { ...assignment, mySubmission: receipt(), submissionCount: 1 };
+  mockRequest.mockImplementation((path, context, input) =>
+    path.endsWith('/assignments') && !input
+      ? {
+          assignments: [
+            assignment,
+            {
+              ...assignment,
+              id: otherId,
+              title: '另一份待繳',
+              mySubmission: null,
+              submissionCount: 0,
+            },
+          ],
+        }
+      : response(path, context, input),
+  );
+  const cache = new Map<string, unknown>([
+    [`course:${courseId}:tab`, 'materials'],
+    [`course:${courseId}:activity-filter`, 'pending'],
+  ]);
+  const view = render(
+    <NuniDraftProvider cache={cache}>
+      <NuniCourses initialWorkspaceId={courseId} initialAssignmentId={assignmentId} />
+    </NuniDraftProvider>,
+  );
+  const card = await view.findByTestId(`assignment-${assignmentId}`);
+  expect(within(card).getByLabelText('作業繳交區：校園訪談')).toBeTruthy();
+  expect(within(card).getByLabelText('作業內容：校園訪談')).toBeTruthy();
+  expect(within(card).getByRole('button', { name: '拍照' })).toBeTruthy();
+  expect(within(card).getByRole('button', { name: '更新作業繳交' })).toBeTruthy();
+  expect(view.queryByLabelText('作業繳交區：另一份待繳')).toBeNull();
+  expect(view.queryByText('老師尚未發布教材。')).toBeNull();
 });

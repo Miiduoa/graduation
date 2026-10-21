@@ -280,10 +280,12 @@ function SignedInWorkspace({
   onLogout,
   initialTab,
   initialWorkspaceId,
+  initialAssignmentId,
 }: {
   onLogout: () => void;
   initialTab?: Tab;
   initialWorkspaceId?: string;
+  initialAssignmentId?: string;
 }) {
   const s = useThemeStyleSheet(createStyles);
   const [tab, setTab] = useNuniDraftState<Tab>('workspace:tab', 'courses');
@@ -320,7 +322,10 @@ function SignedInWorkspace({
         accessibilityElementsHidden={tab !== 'courses'}
         importantForAccessibility={tab === 'courses' ? 'auto' : 'no-hide-descendants'}
       >
-        <NuniCourses initialWorkspaceId={initialWorkspaceId} />
+        <NuniCourses
+          initialWorkspaceId={initialWorkspaceId}
+          initialAssignmentId={initialAssignmentId}
+        />
       </View>
       <View
         style={[s.page, tab !== 'merchant' && s.hidden]}
@@ -419,6 +424,7 @@ export function NuniWorkspaceScreen({
           onLogout={logout}
           initialTab={route?.params?.tab}
           initialWorkspaceId={route?.params?.workspaceId}
+          initialAssignmentId={route?.params?.assignmentId}
         />
       </NuniDraftProvider>
     );
