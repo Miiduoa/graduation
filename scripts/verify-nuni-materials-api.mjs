@@ -158,14 +158,14 @@ try {
   const student = await login('materials-student');
   const outsider = await login('materials-outsider');
   const workspace = await request('POST', `${base}/class-workspaces`, teacher,
-    { title: '完整教材分頁驗收', idempotencyKey: 'materials-workspace-001' }, 201);
+    { title: '完整教材分頁驗收', idempotencyKey: 'ws1' }, 201);
   const course = `${base}/class-workspaces/${workspace.id}`;
   const invite = await request('POST', `${course}/invites`, teacher,
-    { idempotencyKey: 'materials-invite-001' }, 201);
+    { idempotencyKey: 'inv1' }, 201);
   await request('POST', `${base}/class-workspaces/join`, student,
-    { code: invite.code, idempotencyKey: 'materials-join-001' }, 201);
+    { code: invite.code, idempotencyKey: 'jn1' }, 201);
   const other = await request('POST', `${base}/class-workspaces`, teacher,
-    { title: '另一個課程', idempotencyKey: 'materials-workspace-002' }, 201);
+    { title: '另一個課程', idempotencyKey: 'ws2' }, 201);
   const otherPage = `${base}/class-workspaces/${other.id}/materials/page`;
   assert.deepEqual(await request('GET', otherPage, teacher), { materials: [], nextCursor: null });
   passed('Signed teacher/student sessions use the real course membership and empty page HTTP path');
@@ -192,7 +192,7 @@ try {
   const cursorState = JSON.parse(Buffer.from(first.nextCursor,'base64url').toString('utf8'));
   assert.equal(cursorState.t, '2026-01-01T00:00:00.123057Z');
   const newer = await request('POST', `${course}/materials`, teacher,
-    { title: '翻頁期間新發布', body: '下一次更新首屏顯示', idempotencyKey: 'materials-interleaved-001' },201);
+    { title: '翻頁期間新發布', body: '下一次更新首屏顯示', idempotencyKey: 'ilv1' },201);
   let page = first;
   const ids = first.materials.map(row => row.id);
   let pageCount = 1;
