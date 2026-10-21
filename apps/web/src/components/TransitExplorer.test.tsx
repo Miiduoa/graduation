@@ -23,6 +23,8 @@ const groupName = (label: string) => (name: string) =>
   name.includes(label) && !name.includes('收藏');
 const groupButton = (label: string) => screen.getByRole('button', { name: groupName(label) });
 const findGroupButton = (label: string) => screen.findByRole('button', { name: groupName(label) });
+const compactName = (expected: string) => (name: string) =>
+  name.replace(/\s/g, '') === expected.replace(/\s/g, '');
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -300,6 +302,67 @@ it('does not send a station-name query for every keystroke', async () => {
   expect(vi.mocked(queryTransit).mock.calls.some(([query]) => query.action === 'search')).toBe(false);
   fireEvent.click(screen.getByRole('button', { name: '尋找站牌' }));
   await waitFor(() => expect(queryTransit).toHaveBeenCalledWith({ action: 'search', city: 'Taichung', text: '臺中車站' }, expect.any(AbortSignal)));
+});
+
+it('shows the city once for the 16 Providence search results while preserving each station identity', async () => {
+  // Public /api/transit search for 靜宜大學, captured 2026-10-20.
+  const rows: Array<[string, string, number, number]> = [
+    ['TXG11711', '靜宜大學', 24.22497, 120.57703],
+    ['TXG17731', '靜宜大學', 24.22497, 120.57703],
+    ['TXG18643', '靜宜大學', 24.22637, 120.57662],
+    ['TXG19385', '靜宜大學(英才路)', 24.22665, 120.57484],
+    ['TXG19386', '靜宜大學(英才路)', 24.22704, 120.57536],
+    ['TXG24488', '靜宜大學(英才路)', 24.22704, 120.57536],
+    ['TXG24521', '靜宜大學(英才路)', 24.22665, 120.57484],
+    ['TXG20091', '靜宜大學(校門)', 24.2253, 120.5778],
+    ['TXG24503', '靜宜大學(校門)', 24.2253, 120.5778],
+    ['TXG13567', '靜宜大學(專用道)', 24.2259, 120.57654],
+    ['TXG19438', '靜宜大學(專用道)', 24.22532, 120.5772],
+    ['TXG21478', '靜宜大學(專用道)', 24.22532, 120.5772],
+    ['TXG20093', '靜宜大學主顧聖母堂', 24.2273, 120.5807],
+    ['TXG20094', '靜宜大學主顧聖母堂', 24.2273, 120.5807],
+    ['TXG24505', '靜宜大學主顧聖母堂', 24.2273, 120.5807],
+    ['TXG24506', '靜宜大學主顧聖母堂', 24.2273, 120.5807],
+  ];
+  const searchStops: TransitStop[] = rows.map(([id, name, lat, lon]) => ({
+    id, name, lat, lon, city: 'Taichung', distance: null,
+  }));
+  vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'search'
+    ? { status: 'ready', kind: 'stops', stops: searchStops, limited: true, fetchedAt: new Date().toISOString() }
+    : emptyArrivals());
+  renderExplorer();
+  fireEvent.click(screen.getByRole('button', { name: '搜尋站名' }));
+  fireEvent.change(screen.getByLabelText('站名或學校名稱'), { target: { value: '靜宜大學' } });
+  fireEvent.click(screen.getByRole('button', { name: '尋找站牌' }));
+  await screen.findByText('16 站');
+  for (const [index, stop] of searchStops.entries()) {
+    const button = screen.getByRole('button', {
+      name: compactName(`${String(index + 1).padStart(2, '0')} ${stop.name} 臺中市`),
+    });
+    fireEvent.click(button);
+    await waitFor(() => expect(queryTransit).toHaveBeenCalledWith(
+      { action: 'arrivals', city: 'Taichung', stopId: stop.id }, expect.any(AbortSignal),
+    ));
+  }
+  fireEvent.click(screen.getByRole('button', { name: '收藏 靜宜大學 臺中市 第 1 站牌' }));
+  expect(JSON.parse(localStorage.getItem('campus-one:transit-stops:v1') || '[]')).toEqual([searchStops[0]]);
+});
+
+it('retains different route and static-source details beside the city', async () => {
+  const staticStop: TransitStop = {
+    ...stops[1], source: 'taichung-open-data', catalogDate: '2026-10-20T00:00:00.000Z',
+  };
+  vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'search'
+    ? { status: 'ready', kind: 'stops', stops: [stops[0], staticStop], limited: false, fetchedAt: new Date().toISOString() }
+    : emptyArrivals());
+  renderExplorer();
+  fireEvent.click(screen.getByRole('button', { name: '搜尋站名' }));
+  fireEvent.change(screen.getByLabelText('站名或學校名稱'), { target: { value: '靜宜大學' } });
+  fireEvent.click(screen.getByRole('button', { name: '尋找站牌' }));
+  expect(await screen.findByRole('button', { name: compactName('01 靜宜大學(英才路) 臺中市 162 路線') })).toBeTruthy();
+  expect(screen.getByRole('button', { name: compactName('02 靜宜大學(校門) 臺中市 301 路線 · 返程 · 靜態站牌資料') })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '收藏 靜宜大學(校門) 301 路線 · 返程 · 靜態站牌資料 第 2 站牌' }));
+  expect(JSON.parse(localStorage.getItem('campus-one:transit-stops:v1') || '[]')).toEqual([staticStop]);
 });
 
 it('abort and selection identity prevent an old station response from replacing the current one', async () => {

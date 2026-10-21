@@ -14,6 +14,7 @@ HERE = Path(__file__).resolve().parent
 API = HERE.parent
 ROOT = API.parents[1]
 ORDER = ['public-cafeterias', 'course-access', 'personal-import-sync']
+AFTER_OVERLAY_PATCHES = ['materials-pagination/0001-stable-material-pages.patch']
 
 
 def sha(value):
@@ -60,6 +61,10 @@ def plan(checkout):
         'sourceFiles': {target: {'source': str(source.relative_to(ROOT)), 'sha256': sha(source.read_bytes())}
                         for target, source in sorted(sources.items())},
         'appSha256': sha(app.encode()),
+        'afterOverlayPatches': [
+            {'source': str((API / name).relative_to(ROOT)), 'sha256': sha((API / name).read_bytes())}
+            for name in AFTER_OVERLAY_PATCHES
+        ],
     }
 
 
@@ -78,11 +83,20 @@ def apply_extension(checkout, refresh=False):
         destination.write_bytes(source.read_bytes())
     (checkout / 'apps/api/src/app.ts').write_text(app)
     subprocess.run(['git', 'add', 'apps/api/src/app.ts', *sources.keys()], cwd=checkout, check=True)
+    expected['overlayTree'] = git(checkout, 'write-tree')
+    if pinned and expected['overlayTree'] != pinned['overlayTree']:
+        raise ValueError('Composed overlay tree mismatch')
+    # Extend the complete composed API, preserving every existing overlay and migration.
+    for name in AFTER_OVERLAY_PATCHES:
+        subprocess.run(['git', 'apply', '--index', str(API / name)], cwd=checkout, check=True)
+    expected['patchedAppSha256'] = sha((checkout / 'apps/api/src/app.ts').read_bytes())
     expected['runtimeInventoryScope'] = 'Pinned base analysis only; not a composed API grant receipt'
     expected['candidateTree'] = git(checkout, 'write-tree')
     if refresh:
         manifest_path.write_text(json.dumps(expected, ensure_ascii=False, indent=2) + '\n')
         pinned = expected
+    if expected['patchedAppSha256'] != pinned['patchedAppSha256']:
+        raise ValueError('Composed patched app mismatch')
     if git(checkout, 'write-tree') != pinned['candidateTree']:
         raise ValueError('Composed final tree mismatch')
     return {'candidateTree': pinned['candidateTree'], 'baseTree': pinned['baseTree'],
