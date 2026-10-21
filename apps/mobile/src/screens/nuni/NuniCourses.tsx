@@ -315,7 +315,7 @@ function MutationForm({
   );
 }
 
-function useLoad<T>(load: () => Promise<T>, automatic = true) {
+function useLoad<T>(load: () => Promise<T>, automatic = true, clearOnDenied = false) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(automatic);
@@ -333,7 +333,15 @@ function useLoad<T>(load: () => Promise<T>, automatic = true) {
         const value = await load();
         if (mounted.current && run === generation.current) setData(value);
       } catch (failure) {
-        if (mounted.current && run === generation.current) setError(nuniErrorMessage(failure));
+        if (mounted.current && run === generation.current) {
+          setError(nuniErrorMessage(failure));
+          if (
+            clearOnDenied &&
+            failure instanceof NuniError &&
+            (failure.status === 403 || failure.status === 404)
+          )
+            setData(null);
+        }
       } finally {
         if (mounted.current && run === generation.current) {
           reading.current = false;
@@ -346,7 +354,7 @@ function useLoad<T>(load: () => Promise<T>, automatic = true) {
         }
       }
     },
-    [load],
+    [load, clearOnDenied],
   );
   useEffect(() => {
     mounted.current = true;
@@ -370,7 +378,20 @@ function useLoad<T>(load: () => Promise<T>, automatic = true) {
     },
     [refresh],
   );
-  return { data, commit, error, loading, refresh, version: generation.current };
+  const reloadAfterMutation = useCallback(() => {
+    if (!mounted.current) return;
+    if (reading.current) confirmedDuringRead.current = true;
+    else void refresh();
+  }, [refresh]);
+  return {
+    data,
+    commit,
+    error,
+    loading,
+    refresh,
+    reloadAfterMutation,
+    version: generation.current,
+  };
 }
 
 export function NuniCourses() {
@@ -389,7 +410,10 @@ function CourseScope({
   const classes = useMemo(
     () =>
       createNuniClasses(
-        (path, input) => request(path, session.context, input),
+        (path, input, query) =>
+          query
+            ? request(path, session.context, input, undefined, query)
+            : request(path, session.context, input),
         session.platformAccountId,
       ),
     [request, session.context, session.platformAccountId],
@@ -502,20 +526,47 @@ function CourseList({ classes, open }: { classes: Classes; open(id: string): voi
 type CourseData = {
   course: NuniWorkspace;
   materials: NuniMaterial[];
+  materialsCursor: string | null;
   assignments: NuniAssignment[];
   quizzes: NuniQuiz[];
 };
 function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; onBack(): void }) {
+  const pageGeneration = useRef(0);
+  const pagePending = useRef(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [materialsError, setMaterialsError] = useState('');
+  const [materialsDenied, setMaterialsDenied] = useState(false);
+  const [cursorInvalid, setCursorInvalid] = useState(false);
+  useEffect(
+    () => () => {
+      pageGeneration.current += 1;
+    },
+    [classes, id],
+  );
   const load = useCallback(async (): Promise<CourseData> => {
+    // Reloads and confirmed publication restart at the newest page. An older
+    // pending page must never append into this new authority snapshot.
+    pageGeneration.current += 1;
+    pagePending.current = false;
+    setLoadingMore(false);
+    setMaterialsError('');
+    setMaterialsDenied(false);
+    setCursorInvalid(false);
     const course = await classes.get(id);
-    const [materials, assignments, quizzes] = await Promise.all([
-      classes.materials(id),
+    const [page, assignments, quizzes] = await Promise.all([
+      classes.materialsPage(id),
       classes.assignments(id),
       classes.quizzes(id),
     ]);
-    return { course, materials, assignments, quizzes };
+    return {
+      course,
+      materials: page.materials,
+      materialsCursor: page.nextCursor,
+      assignments,
+      quizzes,
+    };
   }, [classes, id]);
-  const result = useLoad(load);
+  const result = useLoad(load, true, true);
   const [tab, setTab] = useNuniDraftState<'assignments' | 'materials' | 'quizzes'>(
     `course:${id}:tab`,
     'assignments',
@@ -525,6 +576,57 @@ function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; o
     'all',
   );
   const data = result.data;
+  const loadOlderMaterials = async () => {
+    if (
+      !data?.materialsCursor ||
+      result.loading ||
+      result.error ||
+      cursorInvalid ||
+      materialsDenied ||
+      pagePending.current
+    )
+      return;
+    const run = pageGeneration.current;
+    pagePending.current = true;
+    setLoadingMore(true);
+    setMaterialsError('');
+    try {
+      const page = await classes.materialsPage(id, data.materialsCursor);
+      if (run !== pageGeneration.current) return;
+      result.commit((current) => {
+        if (!current || run !== pageGeneration.current) return current;
+        const loaded = new Set(current.materials.map((item) => item.id));
+        return {
+          ...current,
+          materials: [
+            ...current.materials,
+            ...page.materials.filter((item) => !loaded.has(item.id)),
+          ],
+          materialsCursor: page.nextCursor,
+        };
+      }, result.version);
+    } catch (failure) {
+      if (run !== pageGeneration.current) return;
+      setMaterialsError(nuniErrorMessage(failure));
+      if (failure instanceof NuniError && (failure.status === 403 || failure.status === 404)) {
+        pageGeneration.current += 1;
+        pagePending.current = false;
+        setLoadingMore(false);
+        setMaterialsDenied(true);
+        result.commit(() => null, result.version);
+      } else if (
+        failure instanceof NuniError &&
+        failure.code === 'CLASS_WORKSPACE_MATERIAL_CURSOR_INVALID'
+      ) {
+        setCursorInvalid(true);
+      }
+    } finally {
+      if (run === pageGeneration.current) {
+        pagePending.current = false;
+        setLoadingMore(false);
+      }
+    }
+  };
   const saveActivity = (item: Activity) => {
     result.commit(
       (current) =>
@@ -552,6 +654,7 @@ function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; o
       <Button label="返回我的課程" onPress={onBack} />
       {result.loading ? <Copy>正在讀取課程內容…</Copy> : null}
       {result.error ? <Copy alert>{result.error}</Copy> : null}
+      {materialsDenied ? <Copy alert>{materialsError}</Copy> : null}
       <Button label="更新內容" onPress={() => void result.refresh()} disabled={result.loading} />
       {data ? (
         <View style={{ gap: 16, display: result.loading || result.error ? 'none' : 'flex' }}>
@@ -572,7 +675,7 @@ function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; o
               selected={tab === 'assignments'}
             />
             <Button
-              label={`教材 ${data.materials.length}`}
+              label={`教材 ${data.materials.length}${data.materialsCursor ? '+' : ''}`}
               onPress={() => setTab('materials')}
               selected={tab === 'materials'}
             />
@@ -628,6 +731,13 @@ function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; o
             ) : null}
           </View>
           <View style={{ display: tab === 'materials' ? 'flex' : 'none', gap: 16 }}>
+            {data.materials.length > 0 ? (
+              <Copy>
+                {data.materialsCursor
+                  ? `已載入 ${data.materials.length} 筆教材，還有較早內容。`
+                  : `共 ${data.materials.length} 筆教材。`}
+              </Copy>
+            ) : null}
             {data.materials.length === 0 ? (
               <Copy>老師尚未發布教材。</Copy>
             ) : (
@@ -639,6 +749,22 @@ function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; o
                 </Section>
               ))
             )}
+            {materialsError ? <Copy alert>{materialsError}</Copy> : null}
+            {cursorInvalid ? (
+              <Button label="更新教材" onPress={() => void result.refresh()} />
+            ) : data.materialsCursor ? (
+              <Button
+                label={
+                  loadingMore
+                    ? '正在載入教材…'
+                    : materialsError
+                      ? '重試載入較早教材'
+                      : '載入較早教材'
+                }
+                onPress={() => void loadOlderMaterials()}
+                disabled={loadingMore}
+              />
+            ) : null}
           </View>
           <View style={{ display: tab === 'quizzes' ? 'flex' : 'none', gap: 16 }}>
             {data.quizzes.length === 0 ? (
@@ -673,7 +799,11 @@ function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; o
               tab={tab}
               classes={classes}
               course={data.course}
-              created={(item) =>
+              created={(item) => {
+                if (!('instructions' in item) && !('prompt' in item)) {
+                  result.reloadAfterMutation();
+                  return;
+                }
                 result.commit((current) => {
                   if (!current) return current;
                   if ('instructions' in item)
@@ -689,12 +819,9 @@ function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; o
                       ...current,
                       quizzes: [...current.quizzes.filter((entry) => entry.id !== item.id), item],
                     };
-                  return {
-                    ...current,
-                    materials: [...current.materials.filter((entry) => entry.id !== item.id), item],
-                  };
-                }, result.version)
-              }
+                  return current;
+                }, result.version);
+              }}
             />
           ) : null}
           {data.course.memberRole === 'owner-teacher' && data.course.state === 'active' ? (

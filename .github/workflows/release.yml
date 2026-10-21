@@ -17,6 +17,7 @@ on:
         type: choice
         options:
           - production
+          - production-device
           - preview
       submit:
         description: 'Submit to app stores after build'
@@ -55,6 +56,13 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
+
+      - name: Validate release request
+        run: node scripts/verify-eas-build.mjs --dispatch
+        env:
+          BUILD_PLATFORM: ${{ inputs.platform }}
+          BUILD_PROFILE: ${{ inputs.profile }}
+          SUBMIT_TO_STORE: ${{ inputs.submit }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -162,7 +170,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: preflight
     if: inputs.platform == 'all' || inputs.platform == 'android'
-    environment: ${{ inputs.profile }}
+    environment: ${{ inputs.profile == 'production-device' && 'production' || inputs.profile }}
     env:
       BUILD_PLATFORM: android
       BUILD_PROFILE: ${{ inputs.profile }}

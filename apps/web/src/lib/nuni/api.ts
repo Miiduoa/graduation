@@ -101,7 +101,17 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
       )
     )
       throw new NuniError(405, 'METHOD_NOT_ALLOWED');
-    if (request.nextUrl.search && !isFoodResource(segments))
+    const isMaterialsPage =
+      method === 'GET' &&
+      segments.length === 4 &&
+      segments[0] === 'class-workspaces' &&
+      segments[2] === 'materials' &&
+      segments[3] === 'page';
+    if (isMaterialsPage &&
+      (Array.from(request.nextUrl.searchParams.keys()).some((key) => key !== 'cursor') ||
+        request.nextUrl.searchParams.getAll('cursor').length > 1))
+      throw new NuniError(400, 'INVALID_INPUT');
+    if (request.nextUrl.search && !isFoodResource(segments) && !isMaterialsPage)
       throw new NuniError(400, 'INVALID_INPUT');
     if (method !== 'GET') requireSameOrigin(request);
     if (isFoodResource(segments)) return await handleFood(request, segments);
@@ -281,7 +291,7 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
     const session = requireSession(request);
     let principal: Promise<string> | undefined;
     const classes = createNuniClasses(
-      (resource, input) => platformRequest(resource, session, input),
+      (resource, input, query) => platformRequest(resource, session, input, query),
       () =>
         (principal ??= platformRequest('sessions/current', session).then(
           (value) => parseNuniPrincipal(value).platformAccountId,
@@ -295,6 +305,10 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
       if (segments.length === 1) return jsonResponse({ workspaces: await classes.list() });
       if (!WORKSPACE.test(id || '')) throw new NuniError(404, 'NOT_FOUND');
       if (segments.length === 2) return jsonResponse(await classes.get(id));
+      if (isMaterialsPage)
+        return jsonResponse(
+          await classes.materialsPage(id, request.nextUrl.searchParams.get('cursor') ?? undefined),
+        );
       if (segments.length === 3) {
         if (segments[2] === 'units') return jsonResponse({ units: await classes.units(id) });
         if (segments[2] === 'materials')

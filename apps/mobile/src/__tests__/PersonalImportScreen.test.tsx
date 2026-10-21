@@ -62,6 +62,8 @@ jest.mock('../components/TimetableOcrHost', () => ({
     return null;
   }),
 }));
+// This real module may already be resolved by navigation tests in the same Jest worker.
+// A virtual mock uses a different module ID and can leave the native host unmocked.
 jest.mock(
   '../components/DocumentImportHost',
   () => ({
@@ -73,7 +75,6 @@ jest.mock(
       return null;
     }),
   }),
-  { virtual: true },
 );
 jest.mock('../ui/components', () => {
   const React = require('react');

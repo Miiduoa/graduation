@@ -3,6 +3,23 @@ import { pathToFileURL } from 'node:url';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+export function releaseEnvironment(profile) {
+  return profile === 'production-device' ? 'production' : profile;
+}
+
+export function verifyReleaseRequest(env) {
+  if (!['preview', 'production', 'production-device'].includes(env.BUILD_PROFILE))
+    throw new Error('BUILD_PROFILE must be preview, production or production-device');
+  if (!['ios', 'android', 'all'].includes(env.BUILD_PLATFORM))
+    throw new Error('BUILD_PLATFORM must be ios, android or all');
+  if (env.BUILD_PROFILE === 'production-device') {
+    if (env.BUILD_PLATFORM !== 'android')
+      throw new Error('production-device is only available for Android APK acceptance.');
+    if (env.SUBMIT_TO_STORE !== 'false')
+      throw new Error('production-device cannot submit to an app store; submit must be false.');
+  }
+}
+
 export function releaseTarget(env) {
   const target = {
     platform: env.BUILD_PLATFORM,
@@ -13,8 +30,10 @@ export function releaseTarget(env) {
   };
   if (!['ios', 'android'].includes(target.platform))
     throw new Error('BUILD_PLATFORM must be ios or android');
-  if (!['preview', 'production'].includes(target.profile))
-    throw new Error('BUILD_PROFILE must be preview or production');
+  if (!['preview', 'production', 'production-device'].includes(target.profile))
+    throw new Error('BUILD_PROFILE must be preview, production or production-device');
+  if (target.profile === 'production-device' && target.platform !== 'android')
+    throw new Error('production-device is only available for Android APK acceptance.');
   if (!uuid.test(target.projectId ?? ''))
     throw new Error(
       'Set EAS_PROJECT_ID to the verified EAS project UUID in the release environment',
@@ -25,7 +44,7 @@ export function releaseTarget(env) {
     );
   }
   if (
-    target.profile === 'production' &&
+    releaseEnvironment(target.profile) === 'production' &&
     /(?:^|\.)(?:dev|demo|test|preview|staging)$/i.test(target.appIdentifier)
   ) {
     throw new Error('Production cannot use a development app identifier');
@@ -51,7 +70,7 @@ export function verifyBuild(records, target) {
     status: 'FINISHED',
     gitCommitHash: target.commit,
     appIdentifier: target.appIdentifier,
-    distribution: target.profile === 'production' ? 'STORE' : 'INTERNAL',
+    distribution: releaseEnvironment(target.profile) === 'production' ? 'STORE' : 'INTERNAL',
   };
   for (const [key, value] of Object.entries(expected)) {
     if (build[key] !== value)
@@ -70,10 +89,17 @@ export function verifyBuild(records, target) {
   }
   if (archiveUrl.protocol !== 'https:' || archiveUrl.username || archiveUrl.password)
     throw new Error('EAS artifact must use HTTPS without embedded credentials');
+  if (target.profile === 'production-device' && !archiveUrl.pathname.endsWith('.apk'))
+    throw new Error('production-device requires a downloadable APK artifact.');
   return build.id;
 }
 
 export function main(args, env = process.env) {
+  if (args.length === 1 && args[0] === '--dispatch') {
+    verifyReleaseRequest(env);
+    console.log('Release request has a supported platform and submission policy.');
+    return;
+  }
   const target = releaseTarget(env);
   if (args.length === 1 && args[0] === '--preflight') {
     console.log(
@@ -82,7 +108,7 @@ export function main(args, env = process.env) {
     return;
   }
   if (args.length !== 1)
-    throw new Error('Usage: verify-eas-build.mjs <build-result.json> | --preflight');
+    throw new Error('Usage: verify-eas-build.mjs <build-result.json> | --preflight | --dispatch');
   const id = verifyBuild(JSON.parse(readFileSync(args[0], 'utf8')), target);
   if (env.GITHUB_OUTPUT) appendFileSync(env.GITHUB_OUTPUT, `build_id=${id}\n`);
   console.log(`Verified ${target.platform} build ${id} for source ${target.commit}`);
