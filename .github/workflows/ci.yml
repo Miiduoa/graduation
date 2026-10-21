@@ -451,6 +451,14 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
     environment: production
     steps:
+      - name: Require main for production Firebase deploy
+        run: |
+          set -euo pipefail
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "::error::正式環境 Firebase 佈署只能從 main 觸發。目前 ref 是 ${{ github.ref }}。"
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v7
 

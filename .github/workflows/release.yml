@@ -45,6 +45,18 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       build_number: ${{ steps.version.outputs.build_number }}
     steps:
+      - name: Require main for production profiles
+        run: |
+          set -euo pipefail
+          case "${{ inputs.profile }}" in
+            production|production-device)
+              if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+                echo "::error::正式環境（production）建置只能從 main 觸發。目前 ref 是 ${{ github.ref }}，profile 是 ${{ inputs.profile }}。"
+                exit 1
+              fi
+              ;;
+          esac
+
       - name: Checkout
         uses: actions/checkout@v7
 
@@ -104,6 +116,18 @@ jobs:
       EXPECTED_APP_IDENTIFIER: ${{ vars.IOS_BUNDLE_IDENTIFIER }}
       IOS_BUNDLE_IDENTIFIER: ${{ vars.IOS_BUNDLE_IDENTIFIER }}
     steps:
+      - name: Require main for production profiles
+        run: |
+          set -euo pipefail
+          case "${{ inputs.profile }}" in
+            production|production-device)
+              if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+                echo "::error::正式環境（production）建置只能從 main 觸發。目前 ref 是 ${{ github.ref }}，profile 是 ${{ inputs.profile }}。"
+                exit 1
+              fi
+              ;;
+          esac
+
       - name: Checkout
         uses: actions/checkout@v7
 
@@ -179,6 +203,18 @@ jobs:
       EXPECTED_APP_IDENTIFIER: ${{ vars.ANDROID_PACKAGE_NAME }}
       ANDROID_PACKAGE_NAME: ${{ vars.ANDROID_PACKAGE_NAME }}
     steps:
+      - name: Require main for production profiles
+        run: |
+          set -euo pipefail
+          case "${{ inputs.profile }}" in
+            production|production-device)
+              if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+                echo "::error::正式環境（production）建置只能從 main 觸發。目前 ref 是 ${{ github.ref }}，profile 是 ${{ inputs.profile }}。"
+                exit 1
+              fi
+              ;;
+          esac
+
       - name: Checkout
         uses: actions/checkout@v7
 
@@ -242,6 +278,14 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Require main for production profiles
+        run: |
+          set -euo pipefail
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "::error::正式環境（production）建置只能從 main 觸發。目前 ref 是 ${{ github.ref }}，profile 是 ${{ inputs.profile }}。"
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v7
 
