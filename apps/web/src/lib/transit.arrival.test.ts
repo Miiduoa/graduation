@@ -42,6 +42,9 @@ it('uses the timetable clock from the source when there is no live countdown', (
   });
   expect(arrivalLabel(scheduled, now)).toBe('表定 23:00');
   expect(arrivalLabel(row({ status: 3, seconds: null }), now)).toBe('今天收班');
+  expect(arrivalLabel(row({
+    route: '168', status: 3, seconds: null, scheduledAt: '2026-10-19T16:05:00.000Z',
+  }), now)).toBe('夜間公車，00:05 起');
 });
 
 it('picks the campus-gate arrival per route and does not invent a missing route', () => {
