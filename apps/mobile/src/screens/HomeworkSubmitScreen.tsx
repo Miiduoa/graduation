@@ -20,6 +20,7 @@ import {
   type PublishedAssignmentGrade,
 } from '../data/assignmentGrade';
 import { onAssignmentSubmitted } from '../services/companionHooks';
+import { safeNavigate } from '../utils/safeNavigate';
 
 type RouteParams = {
   courseId?: string;
@@ -108,10 +109,21 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
     }
   }, [courseId, ds, hwId, params.description, params.hwTitle, params.title, params.dueAt, uid]);
 
+  const fileSubmit =
+    process.env.EXPO_PUBLIC_ASSIGNMENT_FILE_SUBMIT_ENABLED === 'true';
+
   useFocusEffect(
     useCallback(() => {
+      if (fileSubmit) {
+        safeNavigate(navigation, 'NuniWorkspace', {
+          tab: 'courses',
+          ...(courseId.startsWith('cw_') ? { workspaceId: courseId } : {}),
+          ...(hwId.startsWith('cwa_') ? { assignmentId: hwId } : {}),
+        });
+        return;
+      }
       void load();
-    }, [load]),
+    }, [courseId, fileSubmit, hwId, load, navigation]),
   );
 
   const dueText = useMemo(() => {
@@ -203,7 +215,20 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
           )}
         </View>
 
-        {loading ? (
+        {fileSubmit ? (
+          <View
+            style={{
+              marginTop: 16,
+              backgroundColor: '#fff',
+              borderRadius: 12,
+              padding: 16,
+            }}
+          >
+            <Text style={{ fontSize: 14, color: '#3C3C43', lineHeight: 22 }}>
+              正在前往可傳檔的作業繳交…
+            </Text>
+          </View>
+        ) : loading ? (
           <View style={{ marginTop: 24, alignItems: 'center' }}>
             <ActivityIndicator color="#003F8A" />
             <Text style={{ marginTop: 8, color: '#8E8E93' }}>讀取作業中</Text>
@@ -220,22 +245,20 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
           </View>
         ) : (
           <>
-            {process.env.EXPO_PUBLIC_ASSIGNMENT_FILE_SUBMIT_ENABLED !== 'true' ? (
-              <View
-                style={{
-                  marginTop: 16,
-                  backgroundColor: '#fff',
-                  borderRadius: 12,
-                  padding: 16,
-                }}
-              >
-                <Text style={{ fontSize: 14, fontWeight: '600', color: '#1C1C1E' }}>繳交方式</Text>
-                <Text style={{ marginTop: 6, fontSize: 13, color: '#3C3C43', lineHeight: 20 }}>
-                  目前只支援文字繳交，與網站寫入同一份作業紀錄。作業檔案還沒接到上傳流程，無法從
-                  App 傳檔。
-                </Text>
-              </View>
-            ) : null}
+            <View
+              style={{
+                marginTop: 16,
+                backgroundColor: '#fff',
+                borderRadius: 12,
+                padding: 16,
+              }}
+            >
+              <Text style={{ fontSize: 14, fontWeight: '600', color: '#1C1C1E' }}>繳交方式</Text>
+              <Text style={{ marginTop: 6, fontSize: 13, color: '#3C3C43', lineHeight: 20 }}>
+                目前只支援文字繳交，與網站寫入同一份作業紀錄。作業檔案還沒接到上傳流程，無法從
+                App 傳檔。
+              </Text>
+            </View>
             {quizLike ? (
               <Text style={{ marginTop: 16, fontSize: 14, color: '#3C3C43', lineHeight: 22 }}>
                 請透過評量頁面作答。

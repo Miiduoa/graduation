@@ -411,7 +411,7 @@ function useLoad<T>(load: () => Promise<T>, automatic = true, clearOnDenied = fa
   };
 }
 
-export function NuniCourses() {
+export function NuniCourses({ initialWorkspaceId }: { initialWorkspaceId?: string } = {}) {
   const auth = useNuniSession();
   if (!auth.session || auth.loading || auth.pendingLogout) return null;
   return (
@@ -421,6 +421,7 @@ export function NuniCourses() {
       request={auth.request}
       upload={auth.upload}
       bffRequest={auth.bffRequest}
+      initialWorkspaceId={initialWorkspaceId}
     />
   );
 }
@@ -429,11 +430,13 @@ function CourseScope({
   request,
   upload,
   bffRequest,
+  initialWorkspaceId,
 }: {
   session: NativeNuniSession;
   request: ReturnType<typeof useNuniSession>['request'];
   upload?: ReturnType<typeof useNuniSession>['upload'];
   bffRequest?: ReturnType<typeof useNuniSession>['bffRequest'];
+  initialWorkspaceId?: string;
 }) {
   const theme = useTheme();
   const classes = useMemo(
@@ -457,7 +460,13 @@ function CourseScope({
       ),
     [bffRequest, request, session.context, session.platformAccountId, upload],
   );
-  const [selected, setSelected] = useNuniDraftState<string | null>('courses:selected', null);
+  const [selected, setSelected] = useNuniDraftState<string | null>(
+    'courses:selected',
+    initialWorkspaceId ?? null,
+  );
+  useEffect(() => {
+    if (initialWorkspaceId) setSelected(initialWorkspaceId);
+  }, [initialWorkspaceId, setSelected]);
   return (
     <ScrollView
       keyboardShouldPersistTaps="handled"

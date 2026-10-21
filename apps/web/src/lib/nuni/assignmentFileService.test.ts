@@ -373,7 +373,7 @@ describe('assignment file service', () => {
     ).rejects.toMatchObject({ status: 403, code: 'ASSIGNMENT_FILE_EXPIRED' });
   });
 
-  it('does not fake a production upload when Supabase Storage is missing, and hides file-only receipts without an index row', async () => {
+  it('does not fake a production upload when Supabase Storage is missing, and writes the file index before text', async () => {
     const student = actor(studentId);
     const stores = {
       index: createMemoryIndexStore(),
@@ -403,9 +403,10 @@ describe('assignment file service', () => {
       if (record.submittedAt) throw new Error('index down');
       await originalPut(record);
     };
+    const submit = vi.fn();
     const api = createAssignmentFileService({
       stores: { index: failingIndex, blobs: createTtlMemoryBlobStore() },
-      platform: platform(),
+      platform: platform({ submit }),
       secret,
       now: () => new Date('2026-10-21T13:00:00.000Z'),
       id: () => 'eeeeeeee-1111-4111-8111-111111111111',
@@ -423,23 +424,26 @@ describe('assignment file service', () => {
         idempotencyKey: 'submit-key-index-fail',
       }),
     ).rejects.toMatchObject({ status: 503, code: 'ASSIGNMENT_FILE_STORE_UNAVAILABLE' });
-    expect(
-      await api.hydrateSubmission(
-        student,
-        workspace('student'),
-        assignment(),
-        {
-          assignmentId,
-          platformAccountId: studentId,
-          displayName: '同學',
-          body: FILE_ONLY_SUBMISSION_BODY,
-          state: 'submitted',
-          submittedAt: '2026-10-21T13:00:00.000Z',
-          teacherFeedback: null,
-          reviewedAt: null,
-        },
-        studentId,
-      ),
-    ).toBeNull();
+    expect(submit).not.toHaveBeenCalled();
+
+    const hydrated = await api.hydrateSubmission(
+      student,
+      workspace('student'),
+      assignment(),
+      {
+        assignmentId,
+        platformAccountId: studentId,
+        displayName: '同學',
+        body: FILE_ONLY_SUBMISSION_BODY,
+        state: 'submitted',
+        submittedAt: '2026-10-21T13:00:00.000Z',
+        teacherFeedback: null,
+        reviewedAt: null,
+      },
+      studentId,
+    );
+    expect(hydrated).not.toBeNull();
+    expect(hydrated?.body).toBe(FILE_ONLY_SUBMISSION_BODY);
+    expect(hydrated?.files).toEqual([]);
   });
 });

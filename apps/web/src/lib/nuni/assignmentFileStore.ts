@@ -351,26 +351,65 @@ function productionBlobUnavailable(): AssignmentBlobStore {
   return { put: fail, get: fail };
 }
 
-export function postgresQuery(connectionString: string): SqlQuery {
-  type Pool = { query: (text: string, params?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> };
-  let pool: Pool | undefined;
-  return async (text, params) => {
-    if (!pool) {
-      try {
-        const required = createRequire(import.meta.url);
-        const pg = required('pg') as { Pool: new (config: { connectionString: string; max: number }) => Pool };
-        pool = new pg.Pool({ connectionString, max: 4 });
-      } catch {
-        throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
-      }
-    }
-    const result = await pool.query(text, params);
-    return result.rows;
-  };
+type Pool = { query: (text: string, params?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> };
+export type AssignmentFilePoolFactory = (connectionString: string) => Pool;
+
+const pools = new Map<string, Pool>();
+const queries = new Map<string, SqlQuery>();
+const resolvedByKey = new Map<string, AssignmentFileRuntimeStores>();
+let poolFactory: AssignmentFilePoolFactory | undefined;
+
+export function setAssignmentFilePoolFactory(factory?: AssignmentFilePoolFactory) {
+  poolFactory = factory;
 }
 
-export function resolveAssignmentFileStores(
-  env: Record<string, string | undefined> = process.env,
+export function cachedAssignmentFilePoolCount() {
+  return pools.size;
+}
+
+function defaultPool(connectionString: string): Pool {
+  try {
+    const required = createRequire(import.meta.url);
+    const pg = required('pg') as { Pool: new (config: { connectionString: string; max: number }) => Pool };
+    return new pg.Pool({ connectionString, max: 4 });
+  } catch {
+    throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
+  }
+}
+
+function poolFor(connectionString: string): Pool {
+  const existing = pools.get(connectionString);
+  if (existing) return existing;
+  const pool = (poolFactory ?? defaultPool)(connectionString);
+  pools.set(connectionString, pool);
+  return pool;
+}
+
+export function postgresQuery(connectionString: string): SqlQuery {
+  const cached = queries.get(connectionString);
+  if (cached) return cached;
+  const query: SqlQuery = async (text, params) => {
+    const result = await poolFor(connectionString).query(text, params);
+    return result.rows;
+  };
+  queries.set(connectionString, query);
+  return query;
+}
+
+function storesKey(env: Record<string, string | undefined>, query?: SqlQuery) {
+  if (query) return '';
+  return [
+    env.NODE_ENV ?? '',
+    env.ASSIGNMENT_FILE_DATABASE_URL?.trim() ?? '',
+    env.DATABASE_URL?.trim() ?? '',
+    env.SUPABASE_URL?.trim() ?? '',
+    env.SUPABASE_SERVICE_ROLE_KEY?.trim() ?? '',
+    env.ASSIGNMENT_FILE_STORE_DIR?.trim() ?? '',
+  ].join('\0');
+}
+
+function buildAssignmentFileStores(
+  env: Record<string, string | undefined>,
   query?: SqlQuery,
 ): AssignmentFileRuntimeStores {
   const production = env.NODE_ENV === 'production';
@@ -403,6 +442,20 @@ export function resolveAssignmentFileStores(
   return { index, blobs };
 }
 
+export function resolveAssignmentFileStores(
+  env: Record<string, string | undefined> = process.env,
+  query?: SqlQuery,
+): AssignmentFileRuntimeStores {
+  const key = storesKey(env, query);
+  if (key) {
+    const cached = resolvedByKey.get(key);
+    if (cached) return cached;
+  }
+  const stores = buildAssignmentFileStores(env, query);
+  if (key) resolvedByKey.set(key, stores);
+  return stores;
+}
+
 const defaultStores = {
   index: createMemoryIndexStore(),
   blobs: createTtlMemoryBlobStore(),
@@ -415,4 +468,8 @@ export function defaultAssignmentFileStores(): AssignmentFileRuntimeStores {
 export function resetAssignmentFileStores() {
   defaultStores.index = createMemoryIndexStore();
   defaultStores.blobs = createTtlMemoryBlobStore();
+  pools.clear();
+  queries.clear();
+  resolvedByKey.clear();
+  poolFactory = undefined;
 }

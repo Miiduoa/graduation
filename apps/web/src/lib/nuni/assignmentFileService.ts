@@ -296,10 +296,19 @@ export function createAssignmentFileService(options?: {
         supersededAt: null,
       }));
       try {
+        for (const record of previous) {
+          record.supersededAt = submittedAt;
+          await stores.index.putFile(record);
+        }
         for (const record of pending) await stores.index.putFile(record);
       } catch {
         throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
       }
+      const indexed = records.length
+        ? await stores.index.listVisible(assignmentId, actor.platformAccountId)
+        : [];
+      if (records.length && indexed.length < records.length)
+        throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
       let confirmed: NuniAssignment;
       try {
         confirmed = await platform.submitText(
@@ -310,9 +319,14 @@ export function createAssignmentFileService(options?: {
           `${input.idempotencyKey}:text`,
         );
       } catch (error) {
+        for (const record of previous) {
+          record.supersededAt = null;
+          await stores.index.putFile(record);
+        }
         for (const record of records) {
           record.submittedAt = null;
           record.late = false;
+          record.supersededAt = null;
           await stores.index.putFile(record);
         }
         throw error;
@@ -330,21 +344,18 @@ export function createAssignmentFileService(options?: {
           await stores.index.putFile(record);
         }
       } catch {
-        throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
+        // 文字已寫入且檔案索引已先落地；時間戳對齊失敗仍可回執，重試同一冪等鍵可補齊。
       }
       const visible = records.length
         ? await stores.index.listVisible(assignmentId, actor.platformAccountId)
-        : [];
-      if (records.length && visible.length < records.length)
-        throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
+        : indexed;
       const files = visible.map((file) => downloadDescriptor(file, secret, now));
-      if (records.length && !files.length) throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
       const payload = withFiles(
         confirmed,
         files,
         late || visible.some((file) => file.late),
       );
-      if (records.length && !payload.mySubmission)
+      if (records.length && (!payload.mySubmission || !files.length))
         throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
       await remember(actor, input.idempotencyKey, hash, payload);
       return payload;
@@ -363,7 +374,6 @@ export function createAssignmentFileService(options?: {
       if (!canRead) throw new NuniError(403, 'CLASS_WORKSPACE_FORBIDDEN');
       const stored = await stores.index.listVisible(assignment.id, submission.platformAccountId);
       const files = stored.map((file) => downloadDescriptor(file, secret, now));
-      if (submission.body === FILE_ONLY_SUBMISSION_BODY && files.length === 0) return null;
       const computedLate =
         assignmentSubmissionLate(assignment.dueAt, submission.submittedAt) ||
         stored.some((file) => file.late);

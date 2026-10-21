@@ -58,7 +58,34 @@
 | `ASSIGNMENT_FILE_SUBMIT_ENABLED` | 未設＝關 | BFF／API 露出檔案路由、Platform 課班權杖、檔案 PUT／query、`/classroom*` camera |
 | `EXPO_PUBLIC_ASSIGNMENT_FILE_SUBMIT_ENABLED` | `false` | App 顯示拍照／相簿／檔案；關閉時恢復「只支援文字繳交」文案 |
 | `ASSIGNMENT_FILE_DATABASE_URL` | 空 | BFF 讀寫檔案索引與冪等鍵表；正式未設時不可用記憶體頂替 |
+| `DATABASE_URL` | 正式才當後援 | 僅當 `NODE_ENV=production` 且未設 `ASSIGNMENT_FILE_DATABASE_URL` 時使用 |
 | `ASSIGNMENT_FILE_STORE_DIR` | 空 | 本機磁碟（非正式） |
 | `ASSIGNMENT_FILE_SIGNING_SECRET` | 可沿用 `BFF_SESSION_SECRET` | 短效下載簽章，至少 32 字 |
 
 不要設定 `ONLINE_ORDERING_ENABLED`。
+
+## BFF 資料庫連線（就是 nuni-api 那套庫）
+
+nuni.tw BFF **沒有自己的作業庫**。檔案索引與冪等鍵表掛在 **nuni-api 的 PostgreSQL**（有 `class_workspaces`、`class_workspace_assignments`、`platform_accounts` 的那套），因為 overlay SQL 對這些表有外鍵。
+
+- 優先讀 `ASSIGNMENT_FILE_DATABASE_URL`
+- 正式環境若沒設上面那個，才用 `DATABASE_URL`
+- 這兩個都必須指向 **api.nuni.tw / nuni-api 正在用的那套 Postgres**，不是 Supabase 專案的資料庫
+- Supabase 只負責 Storage bucket `assignment-submissions`（blob），不拿來當檔案索引庫
+
+## `/classroom*` 相機 header（建置時寫進映像）
+
+`apps/web/next.config.ts` 在 **Next 建置當下** 讀 `ASSIGNMENT_FILE_SUBMIT_ENABLED`。只在已跑著的機器上改環境變數、不重建 `nuni-web` 映像，相機 Permissions-Policy **不會**變成 `camera=(self)`。開開關時必須重建並部署 Web 映像。
+
+## 上線步驟（尚未執行，需本人說「上」）
+
+1. 不要合這支 PR，直到產品負責人明確說「上」
+2. 在 **nuni-api 正式 Postgres** 套用 `280_assignment_submission_files.sql`（可重複執行；不要跑在 Supabase DB）
+3. 依上文手動建立非公開 bucket `assignment-submissions`（不要用 CI／此 PR 建）
+4. 給 nuni.tw BFF 設定：
+   - `ASSIGNMENT_FILE_SUBMIT_ENABLED=true`
+   - `ASSIGNMENT_FILE_DATABASE_URL`＝nuni-api 的 `DATABASE_URL`（同一套庫）
+   - `SUPABASE_URL` 與 `SUPABASE_SERVICE_ROLE_KEY`（只為 Storage）
+5. **重建 Web 映像**（相機 header 與 BFF 程式）後再滾動部署 nuni-web；不要只改 Fly secrets 卻沿用舊映像
+6. App 重建並帶 `EXPO_PUBLIC_ASSIGNMENT_FILE_SUBMIT_ENABLED=true`（HomeworkSubmit 會導到課班可傳檔流程）
+7. 不要設定 `ONLINE_ORDERING_ENABLED`

@@ -12,6 +12,7 @@ afterEach(() => {
 
 it('only opens classroom camera when ASSIGNMENT_FILE_SUBMIT_ENABLED is the literal true', async () => {
   expect(source).toContain("process.env.ASSIGNMENT_FILE_SUBMIT_ENABLED === 'true'");
+  expect(source).toContain('必須重建 Web 映像');
   expect(source).toContain("source: '/classroom'");
   expect(source).toContain("source: '/classroom/:path*'");
 

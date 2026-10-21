@@ -1,6 +1,6 @@
 import Constants from 'expo-constants';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import { File } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import {
   MAX_ASSIGNMENT_DOCUMENTS,
@@ -38,8 +38,8 @@ async function fromUri(
   contentType: string,
   kind: 'image' | 'file',
 ): Promise<LocalNativeFile> {
-  const info = await FileSystem.getInfoAsync(uri);
-  const byteSize = info.exists && 'size' in info && typeof info.size === 'number' ? info.size : 0;
+  const file = new File(uri);
+  const byteSize = file.exists ? file.size : 0;
   return {
     key: `${uri}:${byteSize}`,
     name,
@@ -109,13 +109,7 @@ export async function pickAssignmentDocuments(current: LocalNativeFile[]): Promi
 }
 
 export async function nativeFileBytes(file: LocalNativeFile): Promise<Uint8Array> {
-  const base64 = await FileSystem.readAsStringAsync(file.uri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-  const binary = globalThis.atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-  return bytes;
+  return new Uint8Array(await new File(file.uri).arrayBuffer());
 }
 
 export function localFileSizeLabel(file: LocalNativeFile): string {

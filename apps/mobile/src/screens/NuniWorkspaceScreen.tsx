@@ -276,7 +276,15 @@ function Account({ onLogout }: { onLogout: () => void }) {
   );
 }
 
-function SignedInWorkspace({ onLogout, initialTab }: { onLogout: () => void; initialTab?: Tab }) {
+function SignedInWorkspace({
+  onLogout,
+  initialTab,
+  initialWorkspaceId,
+}: {
+  onLogout: () => void;
+  initialTab?: Tab;
+  initialWorkspaceId?: string;
+}) {
   const s = useThemeStyleSheet(createStyles);
   const [tab, setTab] = useNuniDraftState<Tab>('workspace:tab', 'courses');
   useEffect(() => {
@@ -312,7 +320,7 @@ function SignedInWorkspace({ onLogout, initialTab }: { onLogout: () => void; ini
         accessibilityElementsHidden={tab !== 'courses'}
         importantForAccessibility={tab === 'courses' ? 'auto' : 'no-hide-descendants'}
       >
-        <NuniCourses />
+        <NuniCourses initialWorkspaceId={initialWorkspaceId} />
       </View>
       <View
         style={[s.page, tab !== 'merchant' && s.hidden]}
@@ -332,7 +340,9 @@ function SignedInWorkspace({ onLogout, initialTab }: { onLogout: () => void; ini
   );
 }
 
-export function NuniWorkspaceScreen({ route }: { route?: { params?: { tab?: Tab } } } = {}) {
+export function NuniWorkspaceScreen({
+  route,
+}: { route?: { params?: { tab?: Tab; workspaceId?: string; assignmentId?: string } } } = {}) {
   const auth = useNuniSession();
   const s = useThemeStyleSheet(createStyles);
   const [action, setAction] = useState('');
@@ -408,6 +418,7 @@ export function NuniWorkspaceScreen({ route }: { route?: { params?: { tab?: Tab 
           key={`${auth.session.platformAccountId}:${auth.session.context}`}
           onLogout={logout}
           initialTab={route?.params?.tab}
+          initialWorkspaceId={route?.params?.workspaceId}
         />
       </NuniDraftProvider>
     );
