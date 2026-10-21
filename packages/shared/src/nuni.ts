@@ -22,6 +22,7 @@ export type NuniMaterial = {
   createdByPlatformAccountId: string;
   createdAt: string;
 };
+export type NuniMaterialPage = { materials: NuniMaterial[]; nextCursor: string | null };
 export type NuniSubmission = {
   assignmentId: string;
   platformAccountId: string;
@@ -273,7 +274,11 @@ export function parseNuniQuiz(value: unknown): NuniQuiz {
   };
 }
 
-export type NuniTransport = (path: string, input?: Record<string, unknown>) => Promise<unknown>;
+export type NuniTransport = (
+  path: string,
+  input?: Record<string, unknown>,
+  query?: Record<string, string>,
+) => Promise<unknown>;
 export type NuniAccountContext = string | (() => Promise<string>);
 
 export function createNuniClasses(transport: NuniTransport, accountContext?: NuniAccountContext) {
@@ -382,6 +387,28 @@ export function createNuniClasses(transport: NuniTransport, accountContext?: Nun
         nuniRecord(await transport(`${path(id)}/materials`)).materials,
         parseNuniMaterial,
       ).map((item) => workspace(item, id));
+    },
+    async materialsPage(id: string, cursor?: string): Promise<NuniMaterialPage> {
+      if (cursor !== undefined && !/^[A-Za-z0-9_-]{1,500}$/.test(cursor))
+        throw new NuniError(422, 'CLASS_WORKSPACE_MATERIAL_CURSOR_INVALID');
+      const endpoint = `${path(id)}/materials/page`;
+      const value = nuniRecord(
+        await (cursor === undefined
+          ? transport(endpoint)
+          : transport(endpoint, undefined, { cursor })),
+      );
+      const materials = array(value.materials, parseNuniMaterial).map((item) => workspace(item, id));
+      if (
+        materials.length > 50 ||
+        new Set(materials.map((item) => item.id)).size !== materials.length ||
+        (value.nextCursor !== null &&
+          (typeof value.nextCursor !== 'string' ||
+            !/^[A-Za-z0-9_-]{1,500}$/.test(value.nextCursor) ||
+            value.nextCursor === cursor ||
+            materials.length === 0))
+      )
+        throw new NuniError(502, 'INVALID_RESPONSE');
+      return { materials, nextCursor: value.nextCursor as string | null };
     },
     async createMaterial(
       id: string,
@@ -503,6 +530,8 @@ export function createNuniClasses(transport: NuniTransport, accountContext?: Nun
 export function nuniErrorMessage(error: unknown): string {
   if (error instanceof NuniError) {
     if (error.code === 'SESSION_CHANGED') return '帳號已變更，請重新整理後再操作。';
+    if (error.code === 'CLASS_WORKSPACE_MATERIAL_CURSOR_INVALID')
+      return '教材頁面已失效，請更新教材後再試。';
     if (error.status === 401) return '登入已逾時，請重新登入。';
     if (error.status === 403) return '你目前沒有這項操作的權限。';
     if (error.status === 404) return '找不到這筆資料，可能已被移除。';

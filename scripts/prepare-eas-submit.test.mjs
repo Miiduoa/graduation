@@ -41,6 +41,17 @@ test('writes verified iOS values without touching build or Android settings', ()
   assert.deepEqual(result.submit.production.android, base.submit.production.android);
   assert.deepEqual(base, original, 'Input configuration must not be mutated.');
 });
+test('refuses production-device submission even when production credentials are available', () => {
+  assert.throws(
+    () =>
+      prepareSubmitConfig(base, {
+        ...iosEnv,
+        BUILD_PLATFORM: 'android',
+        BUILD_PROFILE: 'production-device',
+      }),
+    /cannot be submitted/,
+  );
+});
 
 for (const name of ['APPLE_ID', 'ASC_APP_ID', 'APPLE_TEAM_ID']) {
   test(`requires explicit ${name}, even if a previous profile has a value`, () => {
