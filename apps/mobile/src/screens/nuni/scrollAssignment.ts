@@ -1,31 +1,31 @@
-type MeasureNode = {
-  measure(
-    callback: (
-      x: number,
-      y: number,
-      width: number,
-      height: number,
-      pageX: number,
-      pageY: number,
-    ) => void,
-  ): void;
-};
+type MeasureCallback = (
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  pageX: number,
+  pageY: number,
+) => void;
 
-export type AssignmentScrollView = MeasureNode & {
-  scrollTo(options: { x?: number; y?: number; animated?: boolean }): void;
+export type AssignmentScrollHost = {
+  measure?(callback: MeasureCallback): void;
+  scrollTo?(options: { x?: number; y?: number; animated?: boolean }): void;
 };
 
 /** Scroll the course list so the linked assignment submit area sits at the top. */
 export function revealAssignmentSubmitArea(
-  scroll: AssignmentScrollView | null | undefined,
-  target: MeasureNode | null | undefined,
+  scroll: AssignmentScrollHost | null | undefined,
+  target: AssignmentScrollHost | null | undefined,
 ) {
-  if (!scroll || !target) return;
-  target.measure((_x, _y, _width, _height, _pageX, pageY) => {
-    scroll.measure((_sx, _sy, _sw, _sh, _sPageX, scrollPageY) => {
+  const measureScroll = scroll?.measure;
+  const measureTarget = target?.measure;
+  const scrollTo = scroll?.scrollTo;
+  if (!scroll || !target || !measureScroll || !measureTarget || !scrollTo) return;
+  measureTarget.call(target, (_x, _y, _width, _height, _pageX, pageY) => {
+    measureScroll.call(scroll, (_sx, _sy, _sw, _sh, _sPageX, scrollPageY) => {
       const y = pageY - scrollPageY;
       if (!Number.isFinite(y)) return;
-      scroll.scrollTo({ y: Math.max(0, y), animated: false });
+      scrollTo.call(scroll, { y: Math.max(0, y), animated: false });
     });
   });
 }
