@@ -10,6 +10,9 @@ const auth = vi.hoisted(() => ({
   pendingLogout: false,
   logout: vi.fn(),
 }));
+const firebase = vi.hoisted(() => ({
+  user: null as { uid: string } | null,
+}));
 vi.mock('./SchoolSelector', () => ({ SchoolSelector: () => null }));
 vi.mock('@/features/nuni/Session', () => ({
   useNuniSession: () => auth,
@@ -19,7 +22,7 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(navigation.search),
 }));
 vi.mock('./AuthGuard', () => ({
-  useAuth: () => ({ user: null, signOutUser: vi.fn() }),
+  useAuth: () => ({ user: firebase.user, signOutUser: vi.fn() }),
 }));
 
 const originalServices = [
@@ -54,6 +57,7 @@ beforeEach(() => {
   auth.session = null;
   auth.loading = false;
   auth.pendingLogout = false;
+  firebase.user = null;
 });
 
 it('retains all existing services and search while adding a separate classroom entry', () => {
@@ -83,6 +87,25 @@ it('preserves school context without copying unrelated session or return paramet
       ['campus', 'other-campus'],
     ]);
   }
+});
+
+it('sends a signed-in firebase user to profile from 我', () => {
+  firebase.user = { uid: 'u1' };
+  render(<AppHeader />);
+  expect(screen.getByRole('link', { name: '我' }).getAttribute('href')).toBe('/profile');
+});
+
+it('sends a signed-in nuni student to profile from 我 instead of login', () => {
+  auth.session = { platformAccountId: 'a', isPlatformOperator: false };
+  render(<AppHeader />);
+  expect(screen.getByRole('link', { name: '我' }).getAttribute('href')).toBe('/profile');
+});
+
+it('keeps 我 on login when neither firebase nor nuni session is present', () => {
+  render(<AppHeader />);
+  expect(screen.getByRole('link', { name: '我' }).getAttribute('href')).toBe(
+    '/login?returnUrl=%2Fprofile',
+  );
 });
 
 it('routes the Nuni account to its courses and hides operator links during revalidation', () => {
