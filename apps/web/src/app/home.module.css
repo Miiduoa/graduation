@@ -183,7 +183,8 @@
   margin: 0 0 16px;
   min-width: 0;
 }
-.todayFacts:empty {
+.todayFacts:empty,
+.todayFacts:not(:has(*)) {
   display: none;
   margin: 0;
 }

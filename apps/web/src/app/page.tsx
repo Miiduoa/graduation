@@ -297,7 +297,7 @@ export default function HomePage() {
                 <p className={styles.sectionNote}>{signedIn ? TODAY_WORK_NOTE : TODAY_WORK_UNSIGNED}</p>
                 {!signedIn ? (
                   <div className={styles.focusActions}>
-                    <Link className={styles.primary} href="/classroom/login">
+                    <Link className={styles.primary} href="/classroom/login?returnUrl=%2F">
                       用 Google 帳號登入 <span aria-hidden>→</span>
                     </Link>
                     <Link className={styles.secondary} href="#public-services">

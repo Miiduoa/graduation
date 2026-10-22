@@ -280,6 +280,9 @@ it('lets a guest browse before signing in and never loads personal courses', () 
   expect(screen.getByRole('link', { name: /公開公告/ }).getAttribute('href')).toBe(
     '/announcements',
   );
+  expect(screen.getByRole('link', { name: /用 Google 帳號登入/ }).getAttribute('href')).toBe(
+    '/classroom/login?returnUrl=%2F',
+  );
   expect(loadHomeData).not.toHaveBeenCalled();
   expect(loadNuniHomeData).not.toHaveBeenCalled();
   expect(screen.getByText(TODAY_WORK_UNSIGNED)).toBeTruthy();
@@ -605,6 +608,7 @@ it('keeps today-work and next-class rows wrapping on a 390-wide phone', async ()
   const { join } = await import('node:path');
   const css = readFileSync(join(process.cwd(), 'src/app/home.module.css'), 'utf8');
   expect(css).toMatch(/\.todayFacts \{[^}]*min-width: 0/);
+  expect(css).toMatch(/\.todayFacts:not\(:has\(\*\)\)/);
   expect(css).toMatch(/\.nextClassBody \{[^}]*overflow-wrap: anywhere/);
   expect(css).toMatch(/\.busEntryMeta \{[^}]*overflow-wrap: anywhere/);
   expect(css).toMatch(/\.taskContent strong,\s*\.course h3 \{\s*overflow-wrap: anywhere;/);

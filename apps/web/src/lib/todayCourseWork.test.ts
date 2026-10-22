@@ -79,6 +79,7 @@ it('does not invent sample work or rewrite deadlines when the list is empty', ()
 it('drops a due timestamp that cannot be read instead of filling a fake day', () => {
   const broken = task({ dueAt: 'not-a-date' });
   expect(selectTodayCourseWork([broken], now)).toEqual([]);
+  expect(selectLaterCourseWork([broken], now)).toEqual([]);
   expect(broken.dueAt).toBe('not-a-date');
 });
 
@@ -119,3 +120,26 @@ it('opens the real assignment or quiz hash and never swaps a quiz onto an assign
     }),
   ).toBe('/course/phys#quiz-q1');
 });
+
+it.each(['https://evil.test', '//evil.test', '/\\evil.test', '/login?returnUrl=https://evil.test'])(
+  'does not open an off-site or login path from a task href: %s',
+  (href) => {
+    expect(
+      courseTaskHref(
+        task({
+          href,
+        }),
+      ),
+    ).toBe('/course/cs101#assignment-hw-1');
+    expect(
+      courseTaskHref(
+        task({
+          kind: 'quiz',
+          id: 'q1',
+          courseId: 'phys',
+          href,
+        }),
+      ),
+    ).toBe('/course/phys#quiz-q1');
+  },
+);

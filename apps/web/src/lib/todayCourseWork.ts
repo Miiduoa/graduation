@@ -1,5 +1,6 @@
 import { taipeiParts } from '@campus/shared/src/taipeiTime';
 import type { HomeTask } from './homeOverview';
+import { sanitizeInternalPath } from './navigation';
 
 export const TODAY_WORK_TITLE = '今天要交';
 export const TODAY_WORK_UNSIGNED =
@@ -10,10 +11,25 @@ export const TODAY_WORK_NOTE =
   '來源是各課作業與測驗；截止時間和已繳狀態依課程資料鎖定，不會被整理改寫。';
 export const LATER_WORK_TITLE = '稍後要交';
 
-export function courseTaskHref(task: HomeTask): string {
-  if (task.href) return task.href;
+function courseTaskFallback(task: HomeTask): string {
   const hash = task.kind === 'quiz' ? 'quiz' : 'assignment';
   return `/course/${encodeURIComponent(task.courseId)}#${hash}-${encodeURIComponent(task.id)}`;
+}
+
+/** Only same-origin course paths with an assignment or quiz hash. Off-site values fall back. */
+export function courseTaskHref(task: HomeTask): string {
+  const fallback = courseTaskFallback(task);
+  if (!task.href) return fallback;
+  const safe = sanitizeInternalPath(task.href, '');
+  if (!safe) return fallback;
+  try {
+    const url = new URL(safe, 'https://campus.local');
+    const coursePath =
+      /^\/course\/[^/]+$/.test(url.pathname) || /^\/classroom\/course\/[^/]+$/.test(url.pathname);
+    return coursePath && /^#(assignment|quiz)-.+/.test(url.hash) ? safe : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 function taipeiDayKey(value: string | Date): string | null {
@@ -39,8 +55,12 @@ export function selectTodayCourseWork(tasks: readonly HomeTask[], now: Date): Ho
 }
 
 export function selectLaterCourseWork(tasks: readonly HomeTask[], now: Date): HomeTask[] {
-  const todayKeys = new Set(
-    selectTodayCourseWork(tasks, now).map((task) => `${task.courseId}:${task.id}`),
-  );
-  return tasks.filter((task) => !todayKeys.has(`${task.courseId}:${task.id}`));
+  const today = taipeiDayKey(now);
+  if (!today) return [];
+  return tasks.filter((task) => {
+    if (!task.dueAt) return false;
+    const due = dueDayKey(task);
+    if (!due) return false;
+    return due > today;
+  });
 }
