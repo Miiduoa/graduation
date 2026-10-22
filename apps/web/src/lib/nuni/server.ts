@@ -158,6 +158,62 @@ export function requireSession(request: NextRequest): PlatformSession {
   return session;
 }
 
+export async function boundedBytes(source: Request, limit: number): Promise<Uint8Array> {
+  const declared = source.headers.get('content-length');
+  if (declared && Number(declared) > limit) throw new NuniError(413, 'BODY_TOO_LARGE');
+  if (!source.body) throw new NuniError(400, 'INVALID_INPUT');
+  const reader = source.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new NuniError(503, 'READ_TIMEOUT')), WAKE_REQUEST_TIMEOUT_MS);
+  });
+  try {
+    while (true) {
+      const result = await Promise.race([reader.read(), deadline]);
+      if (result.done) break;
+      size += result.value.byteLength;
+      if (size > limit) throw new NuniError(413, 'BODY_TOO_LARGE');
+      chunks.push(result.value);
+    }
+    return Buffer.concat(chunks);
+  } catch (error) {
+    void reader.cancel().catch(() => {});
+    if (error instanceof NuniError) throw error;
+    throw new NuniError(400, 'INVALID_INPUT');
+  } finally {
+    clearTimeout(timer);
+    reader.releaseLock();
+  }
+}
+
+export function binaryResponse(
+  bytes: Uint8Array,
+  contentType: string,
+  fileName: string,
+): NextResponse {
+  const safeName = fileName.replace(/["\r\n]/g, '_');
+  return new NextResponse(Buffer.from(bytes), {
+    status: 200,
+    headers: {
+      'Content-Type': contentType,
+      'Content-Length': String(bytes.byteLength),
+      'Content-Disposition': `inline; filename="${safeName}"`,
+      'Cache-Control': 'no-store, private',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'no-referrer',
+    },
+  });
+}
+
+export function readPlatformAuthorization(request: NextRequest): PlatformSession | null {
+  const header = request.headers.get('authorization') ?? '';
+  const match = /^Platform (ps_[A-Za-z0-9_-]{43})$/.exec(header);
+  if (!match) return null;
+  return { sessionHandle: match[1], expiresAt: Date.now() + 3600_000 };
+}
+
 export async function boundedJson(
   source: Request | Response,
   limit = 1024 * 1024,

@@ -20,6 +20,7 @@ import {
   type PublishedAssignmentGrade,
 } from '../data/assignmentGrade';
 import { onAssignmentSubmitted } from '../services/companionHooks';
+import { safeNavigate } from '../utils/safeNavigate';
 
 type RouteParams = {
   courseId?: string;
@@ -108,10 +109,23 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
     }
   }, [courseId, ds, hwId, params.description, params.hwTitle, params.title, params.dueAt, uid]);
 
+  const fileSubmit =
+    process.env.EXPO_PUBLIC_ASSIGNMENT_FILE_SUBMIT_ENABLED === 'true';
+  const classWorkspaceFileSubmit =
+    fileSubmit && courseId.startsWith('cw_') && hwId.startsWith('cwa_');
+
   useFocusEffect(
     useCallback(() => {
+      if (classWorkspaceFileSubmit) {
+        safeNavigate(navigation, 'NuniWorkspace', {
+          tab: 'courses',
+          workspaceId: courseId,
+          assignmentId: hwId,
+        });
+        return;
+      }
       void load();
-    }, [load]),
+    }, [classWorkspaceFileSubmit, courseId, hwId, load, navigation]),
   );
 
   const dueText = useMemo(() => {
@@ -203,7 +217,20 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
           )}
         </View>
 
-        {loading ? (
+        {classWorkspaceFileSubmit ? (
+          <View
+            style={{
+              marginTop: 16,
+              backgroundColor: '#fff',
+              borderRadius: 12,
+              padding: 16,
+            }}
+          >
+            <Text style={{ fontSize: 14, color: '#3C3C43', lineHeight: 22 }}>
+              正在前往可傳檔的作業繳交…
+            </Text>
+          </View>
+        ) : loading ? (
           <View style={{ marginTop: 24, alignItems: 'center' }}>
             <ActivityIndicator color="#003F8A" />
             <Text style={{ marginTop: 8, color: '#8E8E93' }}>讀取作業中</Text>
@@ -222,7 +249,7 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
           <>
             <View
               style={{
-                marginTop: 12,
+                marginTop: 16,
                 backgroundColor: '#fff',
                 borderRadius: 12,
                 padding: 16,
@@ -234,7 +261,6 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
                 App 傳檔。
               </Text>
             </View>
-
             {quizLike ? (
               <Text style={{ marginTop: 16, fontSize: 14, color: '#3C3C43', lineHeight: 22 }}>
                 請透過評量頁面作答。

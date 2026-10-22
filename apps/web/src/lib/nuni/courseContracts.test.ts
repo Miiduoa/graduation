@@ -415,6 +415,50 @@ describe('Nuni course response contracts', () => {
     expect(conflict).toHaveBeenCalledTimes(1);
   });
 
+  it('submits assignment files through a dedicated endpoint without changing text submit', async () => {
+    const files = [
+      {
+        id: 'cwf_77777777-7777-4777-8777-777777777777',
+        originalName: 'shot.jpg',
+        contentType: 'image/jpeg',
+        byteSize: 12,
+        kind: 'image',
+        downloadPath: `class-workspaces/${workspaceId}/assignments/${assignmentId}/files/cwf_77777777-7777-4777-8777-777777777777/content`,
+        downloadExp: '1',
+        downloadSig: 'sig',
+      },
+    ];
+    const withFiles = {
+      ...assignment,
+      submissionCount: 1,
+      mySubmission: { ...submission, late: true, files },
+    };
+    const transport = vi.fn(async () => withFiles);
+    const upload = vi.fn(async () => files[0]);
+    expect(
+      (
+        await createNuniClasses(transport, accountId, upload).submitFiles(workspaceId, assignmentId, {
+          fileIds: [files[0].id],
+          idempotencyKey: key,
+        })
+      ).mySubmission?.files,
+    ).toEqual(files);
+    expect(transport).toHaveBeenCalledWith(
+      `class-workspaces/${workspaceId}/assignments/${assignmentId}/submit-files`,
+      { fileIds: [files[0].id], idempotencyKey: key },
+    );
+    const text = vi.fn(async () => ({
+      ...assignment,
+      submissionCount: 1,
+      mySubmission: submission,
+    }));
+    await createNuniClasses(text, accountId).submit(workspaceId, assignmentId, '我的觀察', key);
+    expect(text).toHaveBeenCalledWith(
+      `class-workspaces/${workspaceId}/assignments/${assignmentId}/submit`,
+      { body: '我的觀察', idempotencyKey: key },
+    );
+  });
+
   it('rejects IDs that could escape the selected resource before transport', async () => {
     const transport = vi.fn();
     const classes = createNuniClasses(transport, accountId);

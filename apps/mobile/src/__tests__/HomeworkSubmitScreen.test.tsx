@@ -4,6 +4,7 @@ import { Alert } from 'react-native';
 import HomeworkSubmitScreen from '../screens/HomeworkSubmitScreen';
 
 const mockNavigate = { goBack: jest.fn() };
+const mockSafeNavigate = jest.fn();
 const mockSource = {
   getAssignment: jest.fn(),
   getSubmission: jest.fn(),
@@ -24,9 +25,13 @@ jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (callback: () => void) => require('react').useEffect(callback, [callback]),
 }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
+jest.mock('../utils/safeNavigate', () => ({
+  safeNavigate: (...args: unknown[]) => mockSafeNavigate(...args),
+}));
 
 beforeEach(() => {
   jest.clearAllMocks();
+  delete process.env.EXPO_PUBLIC_ASSIGNMENT_FILE_SUBMIT_ENABLED;
   jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
   mockSource.getAssignment.mockResolvedValue({
     id: 'work',
@@ -55,6 +60,7 @@ test('loads the assignment from Firestore and submits the same text path as web'
   );
   expect(await view.findByText('期末報告')).toBeTruthy();
   expect(view.getByText('請寫摘要')).toBeTruthy();
+  expect(view.getByText(/無法從 App 傳檔/)).toBeTruthy();
   expect(view.getByText(/目前只支援文字繳交/)).toBeTruthy();
   expect(view.queryByText('+ 加檔案')).toBeNull();
   fireEvent.changeText(view.getByLabelText('文字作業內容'), '  我的答案  ');
@@ -66,6 +72,48 @@ test('loads the assignment from Firestore and submits the same text path as web'
     content: '我的答案',
   });
 });
+
+test('opens the class-workspace file submit flow when the Expo flag is on', async () => {
+  process.env.EXPO_PUBLIC_ASSIGNMENT_FILE_SUBMIT_ENABLED = 'true';
+  const view = render(
+    <HomeworkSubmitScreen
+      route={{
+        params: {
+          courseId: 'cw_11111111-1111-4111-8111-111111111111',
+          hwId: 'cwa_22222222-2222-4222-8222-222222222222',
+        },
+      }}
+    />,
+  );
+  expect(await view.findByText('正在前往可傳檔的作業繳交…')).toBeTruthy();
+  expect(view.queryByText(/無法從 App 傳檔/)).toBeNull();
+  expect(view.queryByLabelText('繳交作業')).toBeNull();
+  expect(mockSafeNavigate).toHaveBeenCalledWith(mockNavigate, 'NuniWorkspace', {
+    tab: 'courses',
+    workspaceId: 'cw_11111111-1111-4111-8111-111111111111',
+    assignmentId: 'cwa_22222222-2222-4222-8222-222222222222',
+  });
+  expect(mockSource.getAssignment).not.toHaveBeenCalled();
+});
+
+test.each([
+  { courseId: 'course', hwId: 'work' },
+  { courseId: 'cw_11111111-1111-4111-8111-111111111111', hwId: 'work' },
+  { courseId: 'course', hwId: 'cwa_22222222-2222-4222-8222-222222222222' },
+])(
+  'keeps Firestore/TronClass text submit when the Expo flag is on %j',
+  async (params) => {
+    process.env.EXPO_PUBLIC_ASSIGNMENT_FILE_SUBMIT_ENABLED = 'true';
+    const view = render(<HomeworkSubmitScreen route={{ params }} />);
+    expect(await view.findByText('期末報告')).toBeTruthy();
+    expect(view.getByText(/目前只支援文字繳交/)).toBeTruthy();
+    expect(view.getByText(/無法從 App 傳檔/)).toBeTruthy();
+    expect(view.getByLabelText('文字作業內容')).toBeTruthy();
+    expect(view.queryByText('正在前往可傳檔的作業繳交…')).toBeNull();
+    expect(mockSafeNavigate).not.toHaveBeenCalled();
+    expect(mockSource.getAssignment).toHaveBeenCalledWith(params.hwId, params.courseId);
+  },
+);
 
 test('maps assignment deep-link params onto the same submit screen', async () => {
   const view = render(

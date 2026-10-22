@@ -78,6 +78,7 @@ jest.mock('expo-constants', () => ({
 jest.mock('expo-file-system', () => ({
   documentDirectory: 'file:///mock/documents/',
   cacheDirectory: 'file:///mock/cache/',
+  EncodingType: { Base64: 'base64' },
   writeAsStringAsync: jest.fn(() => Promise.resolve()),
   readAsStringAsync: jest.fn(() => Promise.resolve('{}')),
   deleteAsync: jest.fn(() => Promise.resolve()),
@@ -91,6 +92,18 @@ jest.mock('expo-file-system', () => ({
       return '';
     }
   },
+}));
+
+jest.mock('expo-image-picker', () => ({
+  MediaTypeOptions: { Images: 'Images' },
+  requestCameraPermissionsAsync: jest.fn(async () => ({ granted: false })),
+  requestMediaLibraryPermissionsAsync: jest.fn(async () => ({ granted: false })),
+  launchCameraAsync: jest.fn(async () => ({ canceled: true, assets: [] })),
+  launchImageLibraryAsync: jest.fn(async () => ({ canceled: true, assets: [] })),
+}));
+
+jest.mock('expo-document-picker', () => ({
+  getDocumentAsync: jest.fn(async () => ({ canceled: true, assets: [] })),
 }));
 
 // Mock Firebase
