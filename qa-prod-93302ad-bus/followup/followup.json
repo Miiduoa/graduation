@@ -1,0 +1,140 @@
+{
+  "health": "{\"service\":\"campus-one-web\",\"status\":\"ready\",\"revision\":\"93302ad606d10b8d4097620dc2012e2824d8b3c5\",\"legacy\":\"ready\"}",
+  "at": "2026-10-22T08:07:38.295Z",
+  "ebus411": {
+    "routeId": 411,
+    "name": "310區2",
+    "departure": "靜宜大學",
+    "destination": "臺中車站",
+    "pu": [
+      {
+        "goBack": 1,
+        "stop": "靜宜大學(專用道)",
+        "stopId": "1387",
+        "comeTime": "21:59",
+        "etaMin": null,
+        "text": "表定 21:59"
+      },
+      {
+        "goBack": 2,
+        "stop": "靜宜大學(專用道)",
+        "stopId": "1388",
+        "comeTime": "23:18",
+        "etaMin": null,
+        "text": "表定 23:18"
+      }
+    ],
+    "at": "2026-10-22T08:07:23.006Z"
+  },
+  "ebus310": {
+    "routeId": 310,
+    "name": "310",
+    "departure": "臺中港旅客服務中心",
+    "destination": "臺中車站",
+    "pu": [
+      {
+        "goBack": 1,
+        "stop": "靜宜大學(專用道)",
+        "stopId": "1387",
+        "comeTime": "16:57",
+        "etaMin": 8,
+        "text": "8 分"
+      },
+      {
+        "goBack": 2,
+        "stop": "靜宜大學(專用道)",
+        "stopId": "1388",
+        "comeTime": "17:02",
+        "etaMin": 1,
+        "text": "1 分"
+      }
+    ],
+    "at": "2026-10-22T08:07:24.021Z"
+  },
+  "ebus907": {
+    "routeId": 907,
+    "name": "307副",
+    "departure": "八德東大勇路口",
+    "destination": "臺中車站(臺灣大道)",
+    "pu": [
+      {
+        "goBack": 1,
+        "stop": "靜宜大學(專用道)",
+        "stopId": "1387",
+        "comeTime": "16:17",
+        "etaMin": 10,
+        "text": "10 分"
+      },
+      {
+        "goBack": 2,
+        "stop": "靜宜大學(專用道)",
+        "stopId": "1388",
+        "comeTime": "17:58",
+        "etaMin": 111,
+        "text": "111 分"
+      }
+    ],
+    "at": "2026-10-22T08:07:25.249Z"
+  },
+  "ebus300": {
+    "routeId": 300,
+    "name": "300",
+    "departure": "靜宜大學",
+    "destination": "臺中車站",
+    "pu": [
+      {
+        "goBack": 1,
+        "stop": "靜宜大學(專用道)",
+        "stopId": "1387",
+        "comeTime": "16:16",
+        "etaMin": null,
+        "text": "表定 16:16"
+      },
+      {
+        "goBack": 2,
+        "stop": "靜宜大學(專用道)",
+        "stopId": "1388",
+        "comeTime": "17:08",
+        "etaMin": 25,
+        "text": "25 分"
+      }
+    ],
+    "at": "2026-10-22T08:07:26.268Z"
+  },
+  "foundLong": true,
+  "panel": {
+    "heading": "往 八德東大勇路口",
+    "title": "往 八德東大勇路口",
+    "whiteSpace": "nowrap",
+    "textOverflow": "ellipsis",
+    "rectCount": 1,
+    "height": 22,
+    "truncated": true,
+    "wrapped": false,
+    "ariaLabel": "307副 往 八德東大勇路口 111 分",
+    "panelText": "終點 八德東大勇路口專用道站牌",
+    "panelHtml": "<p>終點 八德東大勇路口</p><p>專用道站牌</p>",
+    "fullInHeading": true,
+    "fullInAria": true,
+    "fullInPanel": true,
+    "fullInTitle": true
+  },
+  "layout350": {
+    "viewport": {
+      "w": 350,
+      "h": 844
+    },
+    "horizontalScroll": false,
+    "scrollWidth": 350,
+    "stars": [
+      {
+        "aria": "重新整理",
+        "text": "",
+        "w": 44,
+        "h": 44,
+        "ok": true
+      }
+    ],
+    "badgeWraps": []
+  }
+}
