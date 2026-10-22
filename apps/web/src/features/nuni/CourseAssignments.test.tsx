@@ -153,7 +153,7 @@ it('updates task counts only from an acknowledged submission, even before a list
   expect(screen.getByRole('button', { name: '待繳交 0' })).toBeTruthy();
   expect(screen.getByRole('button', { name: '已繳交 1' })).toBeTruthy();
   expect(screen.getByText('繳交內容已儲存，老師現在可以查看。')).toBeTruthy();
-  expect(reload).toHaveBeenCalledOnce();
+  expect(reload).not.toHaveBeenCalled();
 });
 
 it('does not remove work from pending or issue a receipt after a failed submission', async () => {

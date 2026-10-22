@@ -5,6 +5,14 @@ import { afterEach, expect, it, vi } from 'vitest';
 import nextConfig from '../../../next.config';
 
 const source = readFileSync(path.resolve(__dirname, '../../../next.config.ts'), 'utf8');
+const dockerfile = readFileSync(
+  path.resolve(__dirname, '../../../../../deploy/web/Dockerfile.nuni'),
+  'utf8',
+);
+const workflow = readFileSync(
+  path.resolve(__dirname, '../../../../../.github/workflows/web-release.yml'),
+  'utf8',
+);
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -29,4 +37,10 @@ it('only opens classroom camera when ASSIGNMENT_FILE_SUBMIT_ENABLED is the liter
   expect(on.some((entry) => entry.source === '/classroom/:path*')).toBe(true);
   const classroom = on.find((entry) => entry.source === '/classroom');
   expect(classroom?.headers[0]?.value).toContain('camera=(self)');
+
+  expect(dockerfile).toContain('ARG ASSIGNMENT_FILE_SUBMIT_ENABLED=false');
+  expect(dockerfile).toContain('ENV ASSIGNMENT_FILE_SUBMIT_ENABLED=$ASSIGNMENT_FILE_SUBMIT_ENABLED');
+  expect(workflow).toContain('assignment_file_submit_enabled');
+  expect(workflow).toContain("default: 'false'");
+  expect(workflow).toContain('--build-arg ASSIGNMENT_FILE_SUBMIT_ENABLED');
 });

@@ -112,6 +112,15 @@ describe('assignment file BFF flag and contracts', () => {
     expect(
       (await invoke(guessed, { method: 'GET', query: '?exp=1&sig=nope', cookie: false })).status,
     ).toBe(400);
+    expect(
+      (
+        await invoke(guessed, {
+          method: 'GET',
+          query: '?exp=1&sig=nope&download=1',
+          cookie: false,
+        })
+      ).status,
+    ).toBe(400);
     expect((await invoke('assignments', { cookie: false, platform: true })).status).toBe(401);
     expect(fetcher).not.toHaveBeenCalled();
   });
@@ -232,6 +241,95 @@ describe('assignment file BFF flag and contracts', () => {
         })
       ).status,
     ).toBe(422);
+  });
+
+  it('creates a batch of intents, serves inline content, and attaches download=1', async () => {
+    vi.stubEnv('ASSIGNMENT_FILE_SUBMIT_ENABLED', 'true');
+    const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
+    let mine: unknown = null;
+    fetcher.mockImplementation(async (url: string, init?: RequestInit) => {
+      const target = String(url);
+      if (target.endsWith('/sessions/current')) return response(principal);
+      if (target.endsWith(`/class-workspaces/${id}`) && (!init?.method || init.method === 'GET'))
+        return response(workspace);
+      if (target.endsWith(`/assignments`) && (!init?.method || init.method === 'GET'))
+        return response({
+          assignments: [mine ? { ...assignment, submissionCount: 1, mySubmission: mine } : assignment],
+        });
+      if (target.endsWith(`/assignments/${assignmentId}/submit`)) {
+        mine = {
+          assignmentId,
+          platformAccountId: accountId,
+          displayName: '同學',
+          body: '（附檔繳交）',
+          state: 'submitted',
+          submittedAt: '2026-10-21T13:00:00.000Z',
+          teacherFeedback: null,
+          reviewedAt: null,
+        };
+        return response({ ...assignment, submissionCount: 1, mySubmission: mine });
+      }
+      return response({ error: { code: 'NOT_FOUND' } }, 404);
+    });
+    const created = await invoke(`assignments/${assignmentId}/files/intents`, {
+      input: {
+        idempotencyKey: 'batch-intents-ok',
+        files: [
+          {
+            originalName: 'shot.jpg',
+            contentType: 'image/jpeg',
+            byteSize: jpeg.byteLength,
+            idempotencyKey: 'batch-file-aaaa',
+          },
+        ],
+      },
+    });
+    expect(created.status).toBe(201);
+    const payload = (await created.json()) as {
+      intents: { id: string; uploadPath: string }[];
+    };
+    expect(payload.intents).toHaveLength(1);
+    const uploaded = await invoke(payload.intents[0]!.uploadPath.replace(`class-workspaces/${id}/`, ''), {
+      method: 'PUT',
+      body: jpeg,
+      contentType: 'image/jpeg',
+    });
+    expect(uploaded.status).toBe(200);
+    const submitted = await invoke(`assignments/${assignmentId}/submit-files`, {
+      input: { fileIds: [payload.intents[0]!.id], idempotencyKey: 'batch-submit-ok' },
+    });
+    expect(submitted.status).toBe(200);
+    const listed = await invoke('assignments');
+    const page = (await listed.json()) as {
+      assignments: {
+        mySubmission: { files: { downloadPath: string; downloadExp: string; downloadSig: string }[] };
+      }[];
+    };
+    const file = page.assignments[0]!.mySubmission.files[0]!;
+    const suffix = file.downloadPath.replace(`class-workspaces/${id}/`, '');
+    const inline = await invoke(suffix, {
+      method: 'GET',
+      query: `?exp=${file.downloadExp}&sig=${file.downloadSig}`,
+      cookie: false,
+    });
+    expect(inline.status).toBe(200);
+    expect(inline.headers.get('Content-Disposition')).toMatch(/^inline;/);
+    const download = await invoke(suffix, {
+      method: 'GET',
+      query: `?exp=${file.downloadExp}&sig=${file.downloadSig}&download=1`,
+      cookie: false,
+    });
+    expect(download.status).toBe(200);
+    expect(download.headers.get('Content-Disposition')).toMatch(/^attachment;/);
+    expect(
+      (
+        await invoke(suffix, {
+          method: 'GET',
+          query: `?exp=${file.downloadExp}&sig=${file.downloadSig}&download=yes`,
+          cookie: false,
+        })
+      ).status,
+    ).toBe(400);
   });
 
   it('rejects a closed assignment and a guessed unsigned file URL', async () => {

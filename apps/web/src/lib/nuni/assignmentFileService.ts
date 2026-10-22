@@ -225,6 +225,20 @@ export function createAssignmentFileService(options?: {
       return payload;
     },
 
+    async createIntents(
+      actor: AssignmentFileActor,
+      workspaceId: string,
+      assignmentId: string,
+      files: { originalName: string; contentType: string; byteSize: number; idempotencyKey: string }[],
+    ): Promise<AssignmentFileIntent[]> {
+      if (files.length < 1 || files.length > 10) throw new NuniError(422, 'INVALID_INPUT');
+      const intents: AssignmentFileIntent[] = [];
+      for (const file of files) {
+        intents.push(await this.createIntent(actor, workspaceId, assignmentId, file));
+      }
+      return intents;
+    },
+
     async putContent(
       actor: AssignmentFileActor,
       workspaceId: string,

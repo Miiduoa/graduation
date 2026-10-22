@@ -415,6 +415,45 @@ describe('Nuni course response contracts', () => {
     expect(conflict).toHaveBeenCalledTimes(1);
   });
 
+  it('creates a batch of assignment file intents in one request', async () => {
+    const intent = {
+      id: 'cwf_77777777-7777-4777-8777-777777777777',
+      uploadPath: `class-workspaces/${workspaceId}/assignments/${assignmentId}/files/cwf_77777777-7777-4777-8777-777777777777/content`,
+      originalName: 'shot.jpg',
+      contentType: 'image/jpeg',
+      byteSize: 12,
+      kind: 'image',
+    };
+    const transport = vi.fn(async () => ({ intents: [intent] }));
+    expect(
+      await createNuniClasses(transport).createAssignmentFileIntents(workspaceId, assignmentId, {
+        files: [
+          {
+            originalName: 'shot.jpg',
+            contentType: 'image/jpeg',
+            byteSize: 12,
+            idempotencyKey: 'file-key-1',
+          },
+        ],
+        idempotencyKey: key,
+      }),
+    ).toEqual([intent]);
+    expect(transport).toHaveBeenCalledWith(
+      `class-workspaces/${workspaceId}/assignments/${assignmentId}/files/intents`,
+      {
+        files: [
+          {
+            originalName: 'shot.jpg',
+            contentType: 'image/jpeg',
+            byteSize: 12,
+            idempotencyKey: 'file-key-1',
+          },
+        ],
+        idempotencyKey: key,
+      },
+    );
+  });
+
   it('submits assignment files through a dedicated endpoint without changing text submit', async () => {
     const files = [
       {

@@ -152,13 +152,60 @@
   min-width: 0;
 }
 .filePreview img,
-.fileGlyph {
+.fileGlyph,
+.fileThumb {
   width: 56px;
   height: 56px;
   object-fit: cover;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--panel);
+}
+.fileThumb {
+  padding: 0;
+  cursor: zoom-in;
+}
+.fileThumb img {
+  display: block;
+  width: 56px;
+  height: 56px;
+}
+.fileEdit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+.fileEdit button,
+.fileEdit a {
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--brand);
+  font-size: 13px;
+}
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.72);
+}
+.lightbox img {
+  width: min(100%, 720px);
+  max-height: 80vh;
+  object-fit: contain;
+  justify-self: center;
+  background: #111;
+}
+.lightbox button {
+  justify-self: end;
+  min-height: 40px;
 }
 .fileGlyph {
   display: flex;

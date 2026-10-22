@@ -7,7 +7,7 @@ import React, {
   type ReactNode,
   type RefObject,
 } from 'react';
-import { Image, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Image, Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { revealAssignmentSubmitArea } from './scrollAssignment';
 import { randomUUID } from 'expo-crypto';
 import {
@@ -26,17 +26,20 @@ import {
   assignmentReceiptStatusLabel,
   assignmentSubmissionLate,
 } from '@campus/shared/src/assignmentFiles';
+import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
 import {
   assignmentFileDownloadUrl,
   assignmentFileSubmitEnabledNative,
   localFileSizeLabel,
-  nativeFileBytes,
+  moveNativeFile,
   pickAssignmentAlbum,
   pickAssignmentCamera,
   pickAssignmentDocuments,
-  requireAssignmentPayload,
+  removeNativeFile,
+  submitNativeAssignmentFiles,
   usesAssignmentFileBff,
   type LocalNativeFile,
+  type NativeUploadProgress,
 } from './assignmentFileSubmit';
 import { courseRoleLabels } from '@campus/shared/src/nuniCourseTasks';
 import { useNuniSession } from '../../state/nuniSession';
@@ -63,8 +66,7 @@ type Activity = NuniAssignment | NuniQuiz;
 type Receipt = NuniSubmission | NuniQuizResponse;
 // Matches parseNuniQuizResponse and the platform quiz submission endpoint.
 const QUIZ_ANSWER_LIMIT = 2000;
-const time = (value: string) =>
-  new Date(value).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
+const time = (value: string) => formatTaipeiDateTime(value);
 const feedbackPredatesSubmission = (receipt: Receipt) =>
   !!receipt.teacherFeedback &&
   !!receipt.reviewedAt &&
@@ -965,6 +967,8 @@ function ActivityCard({
   const kind = assignment ? '作業' : '測驗';
   const fileSubmit = assignment && assignmentFileSubmitEnabledNative();
   const [localFiles, setLocalFiles] = useState<LocalNativeFile[]>([]);
+  const [previewUri, setPreviewUri] = useState<string | null>(null);
+  const [progress, setProgress] = useState<NativeUploadProgress | null>(null);
   const lateOpen = assignment
     ? assignmentLateOpenLabel(item.dueAt, item.state, course.state)
     : null;
@@ -991,21 +995,56 @@ function ActivityCard({
             label="檔案"
             onPress={() => void pickAssignmentDocuments(localFiles).then(setLocalFiles)}
           />
-          {localFiles.map((file) => (
+          <Copy>網路不穩時再送一次，不會重複交。選好的照片可以刪除或調整順序後再送出。</Copy>
+          {progress ? <Copy>上傳中 {progress.completed}/{progress.total}，請保持網路連線。</Copy> : null}
+          {localFiles.map((file, index) => (
             <View
               key={file.key}
               style={{ flexDirection: 'row', gap: 10, alignItems: 'center', minWidth: 0 }}
             >
               {file.kind === 'image' ? (
-                <Image
-                  source={{ uri: file.uri }}
-                  accessibilityLabel={file.name}
-                  style={{ width: 56, height: 56, borderRadius: 8 }}
-                />
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`放大預覽 ${file.name}`}
+                  onPress={() => setPreviewUri(file.uri)}
+                >
+                  <Image
+                    source={{ uri: file.uri }}
+                    accessibilityLabel={file.name}
+                    style={{ width: 56, height: 56, borderRadius: 8 }}
+                  />
+                </Pressable>
               ) : null}
-              <Copy>{localFileSizeLabel(file)}</Copy>
+              <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+                <Copy>{localFileSizeLabel(file)}</Copy>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                  <Button
+                    label="上移"
+                    onPress={() => setLocalFiles(moveNativeFile(localFiles, index, -1))}
+                  />
+                  <Button
+                    label="下移"
+                    onPress={() => setLocalFiles(moveNativeFile(localFiles, index, 1))}
+                  />
+                  <Button
+                    label="刪除"
+                    onPress={() => setLocalFiles(removeNativeFile(localFiles, file.key))}
+                  />
+                </View>
+              </View>
             </View>
           ))}
+          {previewUri ? (
+            <View>
+              <Button label="關閉預覽" onPress={() => setPreviewUri(null)} />
+              <Image
+                source={{ uri: previewUri }}
+                accessibilityLabel="放大預覽"
+                style={{ width: '100%', height: 280, borderRadius: 8 }}
+                resizeMode="contain"
+              />
+            </View>
+          ) : null}
         </View>
       ) : null}
       {canSubmit ? (
@@ -1028,39 +1067,33 @@ function ActivityCard({
               multiline: true,
               hint: assignment
                 ? fileSubmit
-                  ? '可寫說明，或直接拍照／選檔後送出。'
+                  ? '可寫說明，或直接拍照／選檔後送出。網路不穩時再送一次，不會重複交。'
                   : undefined
                 : `最多 ${QUIZ_ANSWER_LIMIT} 字。老師停止收件前仍可修改。`,
             },
           ]}
           label={receipt ? `更新${kind}繳交` : `繳交${kind}`}
           submit={async ({ body }, key, stillActive) => {
-            if (assignment && fileSubmit) {
-              requireAssignmentPayload(body, localFiles);
-            }
             if (assignment && fileSubmit && localFiles.length) {
-              const fileIds: string[] = [];
-              for (const [index, file] of localFiles.entries()) {
-                const bytes = await nativeFileBytes(file);
-                const intent = await classes.createAssignmentFileIntent(course.id, item.id, {
-                  originalName: file.name,
-                  contentType: file.contentType,
-                  byteSize: bytes.byteLength,
-                  idempotencyKey: `${key}:file:${index}`,
-                });
-                await classes.uploadAssignmentFile(intent.uploadPath, bytes, intent.contentType);
-                fileIds.push(intent.id);
+              try {
+                const confirmed = await submitNativeAssignmentFiles(
+                  classes,
+                  course.id,
+                  item.id,
+                  body,
+                  localFiles,
+                  key,
+                  setProgress,
+                );
+                if (stillActive()) {
+                  setLocalFiles([]);
+                  setPreviewUri(null);
+                  saved(confirmed);
+                }
+                return '已收到伺服器繳交紀錄。';
+              } finally {
+                if (stillActive()) setProgress(null);
               }
-              const confirmed = await classes.submitFiles(course.id, item.id, {
-                body: body.trim() || undefined,
-                fileIds,
-                idempotencyKey: key,
-              });
-              if (stillActive()) {
-                setLocalFiles([]);
-                saved(confirmed);
-              }
-              return '已收到伺服器繳交紀錄。';
             }
             const confirmed = assignment
               ? await classes.submit(course.id, item.id, body, key)
@@ -1094,12 +1127,14 @@ function ActivityCard({
         {receipt ? (
           <View style={{ gap: 8 }}>
             <Copy title>
-              {assignment && 'late' in receipt
+              {assignment
                 ? assignmentReceiptStatusLabel(
-                    receipt.late === true ||
-                      assignmentSubmissionLate(item.dueAt, receipt.submittedAt),
+                    'late' in receipt
+                      ? receipt.late === true ||
+                        assignmentSubmissionLate(item.dueAt, receipt.submittedAt)
+                      : false,
                   )
-                : '已繳交'}
+                : '已作答'}
             </Copy>
             <Copy>{time(receipt.submittedAt)}</Copy>
             {assignment && 'files' in receipt && receipt.files?.length
@@ -1192,6 +1227,16 @@ function TeacherReceipts({
         {receipts?.map((receipt) => (
           <Section key={receipt.platformAccountId}>
             <Copy title>{receipt.displayName}</Copy>
+            <Copy>
+              {assignment
+                ? assignmentReceiptStatusLabel(
+                    'late' in receipt
+                      ? receipt.late === true ||
+                        assignmentSubmissionLate(item.dueAt, receipt.submittedAt)
+                      : false,
+                  )
+                : '已作答'}
+            </Copy>
             <Copy>{time(receipt.submittedAt)}</Copy>
             <Copy>{'body' in receipt ? receipt.body : receipt.answer}</Copy>
             {'files' in receipt && receipt.files?.length
@@ -1207,7 +1252,17 @@ function TeacherReceipts({
                         style={{ width: 56, height: 56, borderRadius: 8 }}
                       />
                     ) : null}
-                    <Copy>{file.originalName}</Copy>
+                    <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+                      <Copy>{file.originalName}</Copy>
+                      <Button
+                        label="查看"
+                        onPress={() => void Linking.openURL(assignmentFileDownloadUrl(file))}
+                      />
+                      <Button
+                        label="下載"
+                        onPress={() => void Linking.openURL(assignmentFileDownloadUrl(file, true))}
+                      />
+                    </View>
                   </View>
                 ))
               : null}

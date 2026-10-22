@@ -87,9 +87,14 @@ jest.mock('expo-file-system', () => ({
   File: class {
     constructor(uri) {
       this.uri = uri;
+      this.exists = true;
+      this.size = 12;
     }
     async base64() {
       return '';
+    }
+    async arrayBuffer() {
+      return new Uint8Array([1, 2, 3]).buffer;
     }
   },
 }));

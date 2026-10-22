@@ -439,7 +439,7 @@ it('adds a server-confirmed receipt and removes the assignment from pending work
   fireEvent.press(view.getByRole('button', { name: '繳交作業' }));
   await view.findByText('已收到伺服器繳交紀錄。');
   expect(view.getByText('待繳作業 0 · 待答測驗 1')).toBeTruthy();
-  expect(view.getByText('已繳交')).toBeTruthy();
+  expect(view.getByText('準時')).toBeTruthy();
   expect(view.getByText('我的訪談內容')).toBeTruthy();
 });
 it('locks a double tap and preserves the payload and idempotency key after an unknown response', async () => {
@@ -508,7 +508,7 @@ it('rejects an over-limit quiz answer before sending and retains it for correcti
   expect(view.getByText('測驗內容：需求練習最多 2000 字，請縮短內容後再送出。')).toBeTruthy();
   expect(mockRequest.mock.calls.some(([path]) => path.endsWith('/submit'))).toBe(false);
   expect(view.getByLabelText('測驗內容：需求練習').props.value).toBe(answer);
-  expect(view.queryByText('已繳交')).toBeNull();
+  expect(view.queryByText('已作答')).toBeNull();
 });
 it.each(['assignment', 'quiz'] as const)(
   'hydrates a saved %s before editing and replaces it only with a confirmed receipt',
@@ -774,7 +774,7 @@ it('does not turn a denied submission into success or remove pending work', asyn
   fireEvent.changeText(view.getByLabelText('作業內容：校園訪談'), '保留未確認的內容');
   fireEvent.press(view.getByRole('button', { name: '繳交作業' }));
   await view.findByText('你目前沒有這項操作的權限。');
-  expect(view.queryByText('已繳交')).toBeNull();
+  expect(view.queryByText('準時')).toBeNull();
   expect(view.getByText('待繳作業 1 · 待答測驗 1')).toBeTruthy();
   expect(view.getByLabelText('作業內容：校園訪談').props.value).toBe('保留未確認的內容');
 });
@@ -900,7 +900,7 @@ it('keeps newer archive verification masked when an older submission receipt arr
     authority.resolve(course);
   });
   await view.findByText('這門課已封存，現在只能查看保留的紀錄。');
-  expect(view.getByText('已繳交')).toBeTruthy();
+  expect(view.getByText('準時')).toBeTruthy();
   expect(view.queryByRole('button', { name: '更新作業繳交' })).toBeNull();
 });
 
@@ -1141,7 +1141,10 @@ it('shows camera, album and file actions when the assignment file flag is on', a
   expect(view.getByRole('button', { name: '拍照' })).toBeTruthy();
   expect(view.getByRole('button', { name: '相簿' })).toBeTruthy();
   expect(view.getByRole('button', { name: '檔案' })).toBeTruthy();
-  expect(view.getByText('遲交、仍可繳')).toBeTruthy();
+  expect(view.getByText('已過截止時間，現在送出會標為遲交')).toBeTruthy();
+  expect(
+    view.getByText('網路不穩時再送一次，不會重複交。選好的照片可以刪除或調整順序後再送出。'),
+  ).toBeTruthy();
 });
 
 it('opens the deep-linked assignment submit area even if drafts hid that card', async () => {
@@ -1193,4 +1196,42 @@ it('does not scroll a submit area when no assignment is deep-linked', async () =
   const view = await openCourse();
   expect(view.queryByTestId(`assignment-submit-${assignmentId}`)).toBeNull();
   expect(mockScrollAssignment.reveal).not.toHaveBeenCalled();
+});
+
+it('shows 遲交, Taipei time, and download on teacher receipts', async () => {
+  course = { ...course, memberRole: 'owner-teacher' };
+  fileSubmitFlag.on = true;
+  const fileId = 'cwf_77777777-7777-4777-8777-777777777777';
+  mockRequest.mockImplementation((path: string, context?: string, input?: Record<string, unknown>) => {
+    if (path.endsWith('/submissions')) {
+      return {
+        submissions: [
+          {
+            ...receipt(),
+            submittedAt: '2026-10-22T03:49:43.000Z',
+            late: true,
+            files: [
+              {
+                id: fileId,
+                originalName: 'shot.jpg',
+                contentType: 'image/jpeg',
+                byteSize: 12,
+                kind: 'image',
+                downloadPath: `class-workspaces/${courseId}/assignments/${assignmentId}/files/${fileId}/content`,
+                downloadExp: '1',
+                downloadSig: 'sig',
+              },
+            ],
+          },
+        ],
+      };
+    }
+    return response(path, context, input);
+  });
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '查看收件：校園訪談' }));
+  expect(await view.findByText('遲交')).toBeTruthy();
+  expect(view.getByText('2026/10/22 上午11:49:43')).toBeTruthy();
+  expect(view.getByRole('button', { name: '查看' })).toBeTruthy();
+  expect(view.getByRole('button', { name: '下載' })).toBeTruthy();
 });
