@@ -15,7 +15,11 @@ import { CourseUnitSelect } from './CourseUnitSelect';
 import { selectCourseUnit } from './courseOutline';
 import { CourseText } from './CourseMaterials';
 import { matchesQuizFilter, quizStatus, type QuizFilter } from './courseTasks';
-import { formatTaipeiDateTime, taipeiWallTimeToIso } from '@campus/shared/src/taipeiTime';
+import {
+  formatTaipeiDateTime,
+  parseTaipeiInstant,
+  taipeiWallTimeToIso,
+} from '@campus/shared/src/taipeiTime';
 import { useNuniSession } from './Session';
 import styles from './NuniApp.module.css';
 import quizStyles from './CourseQuizzes.module.css';
@@ -278,7 +282,7 @@ function QuizList({ workspace, accountId, units, onChanged }: { workspace: NuniW
               <input name="dueAt" type="datetime-local" />
             </label>
             <p className={styles.muted}>
-              時間依目前裝置時區顯示。時間到了仍可作答；需要停止收件時，請使用「結束測驗」。
+              時間依台北時間顯示。時間到了仍可作答；需要停止收件時，請使用「結束測驗」。
             </p>
           </MutationForm>
         </details>
@@ -321,7 +325,8 @@ function Quiz({
   const teacher = workspace.memberRole === 'owner-teacher' || workspace.memberRole === 'co-teacher';
   const writable = workspace.state === 'active';
   const student = workspace.memberRole === 'student';
-  const passedDue = item.dueAt !== null && Date.parse(item.dueAt) < now;
+  const dueAtMs = item.dueAt ? parseTaipeiInstant(item.dueAt) : null;
+  const passedDue = dueAtMs !== null && dueAtMs < now;
   useEffect(() => {
     mounted.current = true;
     return () => {

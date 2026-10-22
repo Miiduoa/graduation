@@ -1,3 +1,5 @@
+import { parseTaipeiInstant } from './taipeiTime';
+
 export type NuniRole = 'owner-teacher' | 'co-teacher' | 'student';
 export type NuniWorkspace = {
   id: string;
@@ -136,12 +138,17 @@ function choice<T extends string>(value: unknown, choices: readonly T[]): T {
 
 function date(value: unknown): string {
   const result = string(value, 40);
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(result)) {
+    if (!Number.isFinite(Date.parse(result))) throw new NuniError(502, 'INVALID_RESPONSE');
+    return result;
+  }
   if (
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(result) ||
-    !Number.isFinite(Date.parse(result))
-  )
-    throw new NuniError(502, 'INVALID_RESPONSE');
-  return result;
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(result) &&
+    parseTaipeiInstant(result) !== null
+  ) {
+    return result;
+  }
+  throw new NuniError(502, 'INVALID_RESPONSE');
 }
 
 function count(value: unknown): number {

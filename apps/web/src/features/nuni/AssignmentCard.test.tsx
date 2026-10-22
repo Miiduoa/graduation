@@ -643,6 +643,53 @@ it('lets a student delete or reorder selected photos before submit', () => {
   expect(preview.textContent).not.toContain('second.jpg');
 });
 
+it('keeps the original assignment submit key when SESSION_CHANGED leaves the result uncertain', async () => {
+  const mine = {
+    ...submission,
+    platformAccountId: 'pa_11111111-1111-4111-8111-111111111111',
+    body: '第一次送出',
+  };
+  state.request
+    .mockRejectedValueOnce(new NuniError(409, 'SESSION_CHANGED'))
+    .mockResolvedValueOnce({ ...assignment, mySubmission: mine, submissionCount: 1 });
+  render(
+    <AssignmentCard
+      item={assignment}
+      workspace={{ ...workspace, memberRole: 'student' }}
+      reload={reload}
+    />,
+  );
+  fireEvent.change(screen.getByLabelText('作業內容'), { target: { value: mine.body } });
+  fireEvent.submit(screen.getByLabelText('作業內容').closest('form')!);
+  await screen.findByRole('button', { name: '確認送出結果' });
+  const first = state.request.mock.calls[0][2];
+  fireEvent.click(screen.getByRole('button', { name: '確認送出結果' }));
+  expect(await screen.findByText('繳交內容已儲存，老師現在可以查看。')).toBeTruthy();
+  expect(state.request.mock.calls[1][2]).toEqual(first);
+});
+
+it('treats a dueAt without offset as Taipei time for display and 遲交', async () => {
+  state.request.mockResolvedValueOnce({
+    submissions: [
+      {
+        ...submission,
+        submittedAt: '2026-10-22T16:00:00.000Z',
+      },
+    ],
+  });
+  render(
+    <AssignmentCard
+      item={{ ...assignment, dueAt: '2026-10-22T23:59:00' }}
+      workspace={workspace}
+      reload={reload}
+    />,
+  );
+  expect(screen.getByText('2026/10/22 下午11:59')).toBeTruthy();
+  await openSubmissions();
+  expect(screen.getByText('遲交')).toBeTruthy();
+  expect(screen.getByText('2026/10/23 上午12:00:00')).toBeTruthy();
+});
+
 it('shows Taipei time, 準時／遲交, and a download link on teacher receipts', async () => {
   state.fileSubmit = true;
   const fileId = 'cwf_11111111-1111-4111-8111-111111111111';

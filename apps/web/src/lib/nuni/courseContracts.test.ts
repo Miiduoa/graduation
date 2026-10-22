@@ -126,6 +126,12 @@ describe('Nuni course response contracts', () => {
     expect(parseNuniSubmission({ ...submission, grade: 100 })).toEqual(submission);
     expect(parseNuniQuiz(quiz)).toEqual(quiz);
     expect(parseNuniQuizResponse({ ...answer, grade: 100 })).toEqual(answer);
+    expect(parseNuniQuiz({ ...quiz, dueAt: '2026-10-07T16:00:00' }).dueAt).toBe(
+      '2026-10-07T16:00:00',
+    );
+    expect(parseNuniAssignment({ ...assignment, dueAt: '2026-10-22T23:59:00' }).dueAt).toBe(
+      '2026-10-22T23:59:00',
+    );
   });
 
   it.each([

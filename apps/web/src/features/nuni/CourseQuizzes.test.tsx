@@ -133,6 +133,7 @@ it('preserves the original publish payload and key across an uncertain response 
   render(<CourseQuizzes workspace={workspace('owner-teacher')} />);
   await screen.findByText('還沒有測驗。可以先發布一個文字題目。');
   openPublish();
+  expect(screen.getByText(/時間依台北時間顯示/)).toBeTruthy();
   fireEvent.change(screen.getByLabelText('建議完成時間（選填）'), {
     target: { value: '2026-10-09T14:00' },
   });
@@ -303,6 +304,13 @@ it('shows a passed suggested date truthfully while an open quiz remains answerab
   render(<CourseQuizzes workspace={workspace()} />);
   await screen.findByText('已過建議完成時間，老師尚未結束測驗，目前仍可送出作答。');
   expect(screen.getByLabelText('你的回答')).toBeTruthy();
+});
+
+it('treats a quiz dueAt without offset as Taipei time', async () => {
+  replyList([quiz({ dueAt: '2026-10-07T16:00:00' })]);
+  render(<CourseQuizzes workspace={workspace()} />);
+  await screen.findByText('已過建議完成時間，老師尚未結束測驗，目前仍可送出作答。');
+  expect(screen.getByText('2026/10/7 下午4:00')).toBeTruthy();
 });
 
 it('closed quizzes show the absence of an answer and cannot be submitted', async () => {

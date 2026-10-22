@@ -1,4 +1,5 @@
 import { NuniError } from './nuni';
+import { parseTaipeiInstant } from './taipeiTime';
 
 export const ASSIGNMENT_FILE_SUBMIT_FLAG = 'ASSIGNMENT_FILE_SUBMIT_ENABLED';
 export const MAX_ASSIGNMENT_IMAGES = 8;
@@ -6,6 +7,7 @@ export const MAX_ASSIGNMENT_DOCUMENTS = 2;
 export const MAX_ASSIGNMENT_IMAGE_BYTES = 10 * 1024 * 1024;
 export const MAX_ASSIGNMENT_DOCUMENT_BYTES = 20 * 1024 * 1024;
 export const ASSIGNMENT_FILE_URL_TTL_MS = 10 * 60 * 1000;
+export const ASSIGNMENT_FILE_INTENT_TTL_MS = 30 * 60 * 1000;
 export const FILE_ONLY_SUBMISSION_BODY = '（附檔繳交）';
 
 export const ASSIGNMENT_IMAGE_TYPES = [
@@ -58,9 +60,19 @@ export function assignmentSubmissionLate(
   submittedAt: string,
 ): boolean {
   if (!dueAt) return false;
-  const due = Date.parse(dueAt);
-  const submitted = Date.parse(submittedAt);
-  return Number.isFinite(due) && Number.isFinite(submitted) && submitted > due;
+  const due = parseTaipeiInstant(dueAt);
+  const submitted = parseTaipeiInstant(submittedAt);
+  return due !== null && submitted !== null && submitted > due;
+}
+
+export function assignmentFileIntentCountsTowardQuota(
+  file: { uploadedAt: string | null; createdAt: string },
+  now = Date.now(),
+  ttlMs = ASSIGNMENT_FILE_INTENT_TTL_MS,
+): boolean {
+  if (file.uploadedAt) return true;
+  const created = parseTaipeiInstant(file.createdAt);
+  return created !== null && now - created <= ttlMs;
 }
 
 export function assignmentAcceptsSubmissions(state: 'open' | 'closed', workspaceState: string): boolean {
@@ -74,8 +86,8 @@ export function assignmentLateOpenLabel(
   now = Date.now(),
 ): string | null {
   if (!assignmentAcceptsSubmissions(state, workspaceState) || !dueAt) return null;
-  const due = Date.parse(dueAt);
-  if (!Number.isFinite(due) || due >= now) return null;
+  const due = parseTaipeiInstant(dueAt);
+  if (due === null || due >= now) return null;
   return '已過截止時間，現在送出會標為遲交';
 }
 
