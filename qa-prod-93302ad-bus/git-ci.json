@@ -1,0 +1,109 @@
+{
+  "expected": "93302ad606d10b8d4097620dc2012e2824d8b3c5",
+  "healthUrl": "https://nuni.tw/health/ready",
+  "range": "ec9a490437c1d14fe43b0220911a7b3604432349..93302ad606d10b8d4097620dc2012e2824d8b3c5",
+  "commitCount": 1,
+  "commits": [
+    {
+      "sha": "93302ad606d10b8d4097620dc2012e2824d8b3c5",
+      "author": "Miiduoa <107848266+Miiduoa@users.noreply.github.com>",
+      "committer": "GitHub <noreply@github.com>",
+      "authorDate": "2026-10-22T15:22:36+08:00",
+      "committerDate": "2026-10-22T15:22:36+08:00",
+      "subject": "公車頁：專用道方向對齊 TDX 去返程，162 往校內改英才路，長終點改單行省略 (#131)",
+      "body": "即時資料方向對不上官方去返程時退回表定；162 往校內改採英才路返程；長終點單行加省略，完整終點移到班次面板與 VoiceOver。",
+      "trailers": [],
+      "coAuthoredBy": [],
+      "parent": "ec9a490437c1d14fe43b0220911a7b3604432349"
+    }
+  ],
+  "pr": {
+    "number": 131,
+    "url": "https://github.com/Miiduoa/graduation/pull/131",
+    "title": "修正公車頁專用道方向、162 到站時間與長終點斷行",
+    "headRefName": "cursor/fix-bus-direction-eta-ba00",
+    "mergedAt": "2026-10-22T07:22:37Z",
+    "author": "Miiduoa",
+    "featureCommit": "2c6e1a8080ee3374f1ba08b099260cccefca1b0b",
+    "aiTraces": [
+      "headRefName cursor/fix-bus-direction-eta-ba00",
+      "PR body wrapped in <!-- CURSOR_AGENT_PR_BODY_BEGIN --> … <!-- CURSOR_AGENT_PR_BODY_END -->",
+      "PR footer Cursor agent images (open-in-web / open-in-cursor) bc-521bd54a-3a06-5e6e-8e31-63eca356ba00",
+      "merge committer GitHub; no Co-authored-by on merge or feature commit"
+    ]
+  },
+  "diffstat": {
+    "files": 11,
+    "insertions": 474,
+    "deletions": 41,
+    "paths": [
+      ".github/workflows/transit.yml",
+      "apps/web/src/components/CampusArrivalRow.tsx",
+      "apps/web/src/components/TransitExplorer.test.tsx",
+      "apps/web/src/components/transit.module.css",
+      "apps/web/src/lib/fixtures/tdx-providence-student-report.json",
+      "apps/web/src/lib/transit-catalog.ts",
+      "apps/web/src/lib/transit-server.ts",
+      "apps/web/src/lib/transit.heading.test.ts",
+      "apps/web/src/lib/transit.student-report.test.ts",
+      "apps/web/src/lib/transit.ts",
+      "scripts/test-transit.cjs"
+    ]
+  },
+  "ci": {
+    "runId": 39740063232,
+    "url": "https://github.com/Miiduoa/graduation/actions/runs/39740063232",
+    "event": "push",
+    "headSha": "93302ad606d10b8d4097620dc2012e2824d8b3c5",
+    "conclusion": "success",
+    "startedAt": "2026-10-22T07:22:39Z",
+    "updatedAt": "2026-10-22T07:27:32Z",
+    "jobs": [
+      { "name": "Mobile Tests", "conclusion": "success" },
+      { "name": "Functions Tests", "conclusion": "success" },
+      { "name": "Firestore Rules Tests", "conclusion": "success" },
+      { "name": "Security Gates", "conclusion": "success" },
+      { "name": "Web Tests", "conclusion": "success" },
+      { "name": "Lint & Type Check", "conclusion": "success" },
+      { "name": "Build Web", "conclusion": "success" },
+      { "name": "Build Mobile", "conclusion": "success" },
+      { "name": "CI Summary", "conclusion": "success" },
+      { "name": "Deploy Firebase backend", "conclusion": "skipped", "countsAsGreen": false }
+    ]
+  },
+  "transitContract": {
+    "runId": 39740062949,
+    "url": "https://github.com/Miiduoa/graduation/actions/runs/39740062949",
+    "event": "push",
+    "conclusion": "success",
+    "startedAt": "2026-10-22T07:22:39Z",
+    "updatedAt": "2026-10-22T07:23:03Z"
+  },
+  "webReleaseFailedFirst": {
+    "runId": 39740083245,
+    "url": "https://github.com/Miiduoa/graduation/actions/runs/39740083245",
+    "event": "workflow_dispatch",
+    "conclusion": "failure",
+    "startedAt": "2026-10-22T07:22:50Z",
+    "updatedAt": "2026-10-22T07:23:13Z",
+    "reason": "The latest full CI for this exact main revision has not passed.",
+    "jobs": [
+      { "name": "guards", "conclusion": "success" },
+      { "name": "reject-non-main", "conclusion": "skipped" },
+      { "name": "release", "conclusion": "failure" }
+    ]
+  },
+  "webReleasePublished": {
+    "runId": 39740660449,
+    "url": "https://github.com/Miiduoa/graduation/actions/runs/39740660449",
+    "event": "workflow_dispatch",
+    "conclusion": "success",
+    "startedAt": "2026-10-22T07:27:53Z",
+    "updatedAt": "2026-10-22T07:32:32Z",
+    "jobs": [
+      { "name": "guards", "conclusion": "success" },
+      { "name": "reject-non-main", "conclusion": "skipped" },
+      { "name": "release", "conclusion": "success" }
+    ]
+  }
+}
