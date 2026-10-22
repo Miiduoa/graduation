@@ -1,0 +1,13 @@
+# 匯出檔、密鑰、演練工作目錄不進 repo
+*.dump
+*.sql.gz
+*.env
+*.env.*
+!*.env.example
+secrets/
+inventory/
+work/
+rehearsal-work/
+receipts/
+*.receipt.json
+*.log
