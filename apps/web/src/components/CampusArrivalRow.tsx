@@ -1,5 +1,9 @@
+'use client';
+
+import { useState } from 'react';
 import {
-  campusEtaView, campusHeadingText, nextScheduledClock,
+  campusArrivalA11yLabel, campusDestinationFull, campusEtaView, campusHeadingText,
+  nextScheduledClock, waitingPlaceLine,
   type CampusNextRow,
 } from '@/lib/transit';
 import css from './transit.module.css';
@@ -34,18 +38,37 @@ export function CampusArrivalRow(props: {
   row: CampusNextRow;
   now: number;
 }) {
+  const [open, setOpen] = useState(false);
   const view = campusEtaView(props.row.arrival, props.now);
   const heading = campusHeadingText(props.row);
+  const destination = campusDestinationFull(props.row);
   const nextClock = nextScheduledClock(props.row.arrival, props.now);
   const ended = view.kind === 'ended';
+  const stopName = props.row.arrival?.stopName ?? '';
+  const wait = stopName ? waitingPlaceLine(stopName) : '';
+  const label = campusArrivalA11yLabel(props.row, props.now);
   return (
-    <div className={`${css.arrivalRow}${ended ? ` ${css.arrivalRowEnded}` : ''}`}>
-      <span className={css.routeBadge}>{props.row.route}</span>
-      <span className={css.rowCopy}>
-        {heading ? <strong>{heading}</strong> : null}
-        {nextClock ? <small>下一班表定 {nextClock}</small> : null}
-      </span>
-      <Eta view={view} />
+    <div>
+      <button
+        type="button"
+        className={`${css.arrivalRow}${ended ? ` ${css.arrivalRowEnded}` : ''}`}
+        aria-expanded={open}
+        aria-label={label}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className={css.routeBadge}>{props.row.route}</span>
+        <span className={css.rowCopy}>
+          {heading ? <strong title={heading}>{heading}</strong> : null}
+          {nextClock ? <small>下一班表定 {nextClock}</small> : null}
+        </span>
+        <Eta view={view} />
+      </button>
+      {open ? (
+        <div className={css.rowPanel}>
+          {destination ? <p>終點 {destination}</p> : <p>終點未提供</p>}
+          {wait ? <p>{wait}</p> : null}
+        </div>
+      ) : null}
     </div>
   );
 }

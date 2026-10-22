@@ -35,11 +35,6 @@ export function catalogProvidenceLaneDestination(route: string, direction: numbe
   return PROVIDENCE_LANE_DESTINATIONS.get(`${name}:去`) || PROVIDENCE_LANE_DESTINATIONS.get(`${name}:返`) || '';
 }
 
-/** 專用道學生要看的另一端：一律用去程終點，不另打 TDX。 */
-export function catalogProvidenceLaneFarEnd(route: string): string {
-  return catalogProvidenceLaneDestination(route, 0);
-}
-
 /** Server-side bundled snapshot lookup. No credentials, runtime download, or arrival estimates. */
 export function searchTaichungCatalog(query: TaichungCatalogQuery): { stops: TaichungCatalogStop[]; limited: boolean } {
   if (query.action === 'campus' && query.schoolId !== 'pu') return { stops: [], limited: false };
