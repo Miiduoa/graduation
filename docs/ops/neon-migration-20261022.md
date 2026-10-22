@@ -11,9 +11,10 @@
 | 幾乎全部讀寫 | Fly `nuni-api`（`api.nuni.tw`） | `DATABASE_URL` | Neon `neondb`。啟動會核對 `schema_migrations` checksum（`migrate.ts`／`database-deployment-contract.mjs`），並做 role readiness（`database-role-readiness.ts`：`has_table_privilege`）。`/health/live` 不碰 DB；`/health/ready` 會 `SELECT 1`。機器 `min_machines_running=1`、`auto_stop=false`，health 每 15 秒打 live。 |
 | 作業檔索引 | Fly `nuni-web`（`nuni.tw`） | `ASSIGNMENT_FILE_DATABASE_URL`，正式未設時才退回 `DATABASE_URL` | 同一套庫的 `class_assignment_submission_files`／`class_assignment_file_idempotency`。pool `max: 4`。Blob 在 Supabase bucket `assignment-submissions`，**不是** Neon。`/health/live`、`/health/ready` 都不碰 DB。 |
 | 課班／登入／社群／點餐 | `nuni-web` BFF | `NUNI_API_BASE_URL=https://api.nuni.tw` | HTTP 到 nuni-api，不直連 Postgres。 |
-| 公告、Functions | Fly `nuni-functions` | 無 DATABASE_URL | Firestore。用量調查時 0 台、suspended。 |
-| GitHub Actions | — | 無 DB secret | 不連正式庫。 |
-| Render `nuni-staging-api` | 可疑 | 本機 env 曾指向**同一個正式 host** | 用量調查建議先 Suspend。沒有 Render 權限，執行前要在後台確認。 |
+| 公告、Functions | Fly `nuni-functions` | 無 DATABASE_URL | Firestore。用量調查時 0 台、suspended。停寫時仍要看一眼，確認沒被重開。 |
+| GitHub Actions | — | 無正式 `DATABASE_URL` secret | `.github/workflows` 只有 loopback 測試庫（`127.0.0.1`／`localhost`）。不連正式庫。 |
+| Render `nuni-staging-api`／`nuni-staging-web` | 可疑寫入來源 | 本機 env 曾指向**同一個正式 host** | 用量調查建議先 Suspend。沒有 Render 權限，執行前要在後台確認。 |
+| nuni-api 進程內 worker | 隨 `nuni-api` | 同一 `DATABASE_URL` | `outbox-worker`、`food-expiry-worker`、`notification-delivery-worker` 等與 API 同機。停 nuni-api 就停。 |
 
 遷移紀錄表：
 
@@ -49,8 +50,9 @@ API 映像內嵌的 SQL 檔 checksum 必須與這張表一致，否則**重啟�
 建議順序：
 
 1. `fly machine list -a nuni-api`、`fly machine list -a nuni-web`，記下 machine id 與**目前映像 digest**（回滾用）。
-2. **先停 `nuni-api` 全部機器**（`fly machine stop`）。`min_machines_running=1` 可能把機器拉起來，若發生就暫時 `fly scale count 0 -a nuni-api`。
-3. **再停 `nuni-web`**。否則 BFF 在 `ASSIGNMENT_FILE_SUBMIT_ENABLED=true` 時仍會用 `ASSIGNMENT_FILE_DATABASE_URL` 寫 Neon。
+2. **先停 `nuni-api` 全部機器**（`fly machine stop`）。`min_machines_running=1` 可能把機器拉起來，若發生就暫時 `fly scale count 0 -a nuni-api`（web 同樣）。
+3. **再停 `nuni-web`**。否則 BFF 在 `ASSIGNMENT_FILE_SUBMIT_ENABLED=true` 時仍會用 `ASSIGNMENT_FILE_DATABASE_URL` 寫 Neon。文字課班寫入走 API，所以只停 web、留 api 仍會寫入。
+4. 確認 Render staging 已 Suspend、沒有本機／agent／Cursor cloud 還拿著舊 `DATABASE_URL`。GitHub Actions 沒有正式庫密鑰，但不要在停寫窗口另外跑會連 DB 的手動 workflow。
 
 學生端（停機期間）：
 
@@ -84,9 +86,12 @@ pg_dump --dbname="$SOURCE_DATABASE_URL" \
 
 為什麼 `--no-owner --no-acl`：
 
-- Neon 內建角色（`cloud_admin`、`neon_superuser`、`neon_auth`…）**不能**在新 project `CREATE ROLE`。帶 ACL 的 restore 常在這裡失敗。
+- Neon 內建角色（`cloud_admin`、`neon_superuser`、`neon_auth`…）**不能**在新 project `CREATE ROLE`，也不能建 PostgreSQL superuser。帶 ACL 的 restore 常在這裡失敗。
+- `pg_dump --no-owner` 對 **custom 格式會被忽略**；真正不改 owner 的是 `pg_restore --no-owner`。腳本兩邊都帶。
 - 新 project 的 `neondb_owner` 與舊的同名不同憑證；`--no-owner` 讓物件落到還原時的角色（請用新庫的 `neondb_owner` 連）。
-- **權限不是丟掉**：同一腳本會另外寫 `inventory/grants.sql`、`roles.txt`、`extensions.tsv`、`sequences.tsv`、`schema_migrations.tsv`、每張表精確列數。還原後只重放**非 Neon 內建**的 GRANT。
+- **權限不是丟掉**：同一腳本會另外寫可重放的 `inventory/grants.sql`（表／sequence／**帶參數的函式**／schema USAGE／default privileges）、`login_roles.txt`、`functions.tsv`、`triggers.tsv`。還原後只重放**非 Neon 內建、非擁有者自己**的 GRANT。角色不存在只跳過該行並留下 `grants-skipped.txt`；`relation does not exist` 會整段失敗。
+- `pg_restore` 加 `--no-comments`：Neon 上 extension 多半屬 `neon_superuser`，`COMMENT ON EXTENSION` 會讓 `--exit-on-error` 在資料進來之前就停。
+- nuni-api 啟動核對（來源在封存的 `nuni-prod`：`migrate.ts`、`database-deployment-contract.mjs`、`database-role-readiness.ts`）是 `schema_migrations` 的 `(id, checksum)` 以及 `has_table_privilege`／function EXECUTE。本倉庫對得上的實作是 `scripts/verify-nuni-import-api.mjs` 與 `deploy/nuni-api/composed/README.md`。這次 API **繼續用 `neondb_owner`**：該角色在 Neon 繼承 `neon_superuser` 的 `pg_read_all_data`／`pg_write_all_data`，缺額外 GRANT 通常仍能過 readiness；缺的是**自訂 LOGIN 角色**（例如只靠 SQL 建的 `nuni_web_files`，沒有 schema USAGE 就會 `permission denied for schema public`）。`03-verify.sh` 會查目前連線角色對 public 表／函式的 privilege，LOGIN 角色少了就失敗（除非 `IGNORE_MISSING_ROLES=yes`）。
 
 另外會再 dump 一份 plain `--schema-only` 方便 diff。custom 格式本身包含：
 
@@ -134,9 +139,12 @@ COMPARE_INVENTORY=yes DEST_DATABASE_URL_FILE=… DUMP_DIR=… ./03-verify.sh
 
 - public 表清單與每一張的列數
 - `schema_migrations` 的 `(id, checksum)`（`applied_at` 可能因還原時間略差，腳本比 id+checksum）
-- `pg_sequences.last_value`／`is_called`
+- `pg_sequences.last_value`（PG 18 沒有 `is_called`；`NULL` 代表還沒 nextval）
 - extension 名稱與版本
-- 應用程式角色對 public 表的 GRANT（Neon 內建角色允許不同）
+- public 函式簽名、非內部 trigger
+- 應用程式角色對 public 表的 GRANT（目標必須包含來源的每一條；Neon 內建角色允許不同）
+- 來源有、目標沒有的 LOGIN 角色（可 `IGNORE_MISSING_ROLES=yes`，預設失敗）
+- 目前連線角色對每張 public 表的 `has_table_privilege(SELECT)`，以及 public 函式 `EXECUTE`
 
 人工再看：
 
@@ -149,7 +157,7 @@ SELECT has_table_privilege(current_user, 'public.class_workspaces', 'SELECT');
 
 ## 5. 換 Fly secrets（先 api、再 web）
 
-兩個 URL 都要 `sslmode=require`。腳本讀 stdin，不印值。
+兩個 URL 都要 `sslmode=require`，而且必須是**直連**（host 不得含 `-pooler`）。腳本讀 stdin，只接受該 app 的那一個鍵，不印值。`STAGE=no` 會建新 Fly release、可能把機器拉起來，必須再設 `CONFIRM_RESTART=yes`。
 
 ```sh
 printf 'DATABASE_URL=%s\n' "$(cat /path/outside/repo/new-api.url)" \
@@ -170,7 +178,7 @@ printf 'ASSIGNMENT_FILE_DATABASE_URL=%s\n' "$(cat /path/outside/repo/new-web.url
 
 不要 `fly deploy` 新映像。這次只換 secret，沿用記下的 digest。
 
-若 `fly secrets import --stage` 之後機器起來仍用舊 URL：再查 `fly ssh console` 的環境變數名稱（不要 `echo` 值），必要時不帶 `--stage` 再 import 一次讓 Fly 滾一次。
+若 `fly secrets import --stage` 之後機器起來仍用舊 URL：再查 `fly ssh console` 的環境變數名稱（不要 `echo` 值），必要時設 `STAGE=no CONFIRM_RESTART=yes` 再 import 一次讓 Fly 滾一次。機器必須仍是你要的那一台 app。
 
 ## 6. 上線後抽查
 
@@ -205,6 +213,8 @@ Health：
 
 grant／role readiness 失敗時會拉長；那種情況應回滾舊庫，不要在停機中改 API 程式。最糟先預留 45 分。流量低，但課班繳交是同步寫入，沒有「只讀模式」可縮短。
 
+**15–30 分合理，前提是舊庫 dump 一次成功。** 最大風險是舊 project CU 只剩約 2%：dump 與精確 `count(*)` 會叫醒 compute，失敗重試會把額度燒光。本機用精簡 schema 演練約數秒，**不能**拿來證明 43 MB／539 張表的牆鐘時間。
+
 ## 回滾
 
 任何一步失敗，原則是：**還沒換 Fly 就不算切換；換了以後以 Fly 指到誰為準。**
@@ -227,7 +237,7 @@ WORKDIR=/path/outside/repo/delta \
 APPLY_DELTA=yes ./06-replay-delta.sh
 ```
 
-只自動處理有 `updated_at`／`created_at`／`applied_at`／`occurred_at`／`submitted_at` 且有主鍵的表。沒有時間欄的表會列在 `delta-report.json` 的 `no_timestamp`，要人工看（冪等鍵表通常有 `created_at`）。補完再把 Fly 指回舊庫。
+只自動處理有 `updated_at`／`created_at`／`applied_at`／`occurred_at`／`submitted_at` 且有主鍵的表。預設**略過 `schema_migrations`**，避免把 checksum 寫回舊庫害舊映像起不來。沒有時間欄的表會列在 `delta-report.json` 的 `no_timestamp`，要人工看。不會重放 DELETE，也不保證 FK 順序；缺主鍵或 COPY 失敗會停，不要當完整 logical replication。必須先乾跑出報告，再 `APPLY_DELTA=yes`。補完再把 Fly 指回舊庫。
 
 舊 project **先留著、不要刪**。免費 CU 用完只是 compute 暫停，資料還在。至少留到 11 月帳期、確認新庫穩定。
 
@@ -335,7 +345,7 @@ Free 的 scale-to-zero 固定 5 分鐘，改不了。每叫醒一次至少約 0.
    切換後學生交的作業留在新庫，Fly 指回舊庫就「繳了卻沒了」。回滾前跑 `06-replay-delta.sh`。
 
 9. **這份本機演練的盲點**  
-   只用 schema-only 備份＋人造 QA 列。沒測 43 MB 資料還原時間、Neon TLS、Fly 重啟、真實 GRANT 集合、280 之後才寫入的列。正式 dump 必須現場重做。
+   審查後改用 `neondb_owner` NOSUPERUSER＋精簡 schema，證明工具鏈、權限重放、失敗即停、QA 條件與 delta 安全閥。**沒有**早上那份 537 張表備份（不在此環境），也沒測 43 MB 資料還原時間、Neon TLS、Fly 重啟。正式 dump 必須現場重做。先前用 SUPERUSER 跑 539 張表的演練**不能**代表 Neon。
 
 10. **沒有正式庫密碼，所以沒有驗證 production 的 `pg_roles`**  
     若正式其實還有第二個 LOGIN 角色（報表、readonly、舊 Render），還原後那個角色不存在，對應服務會掛。執行當日 inventory 的 `roles.txt` 是最後一道。
