@@ -95,7 +95,10 @@ export function MutationForm({
       form.reset();
     } catch (failure) {
       if (!mounted.current) return;
-      const unknown = !(failure instanceof NuniError) || failure.status >= 500;
+      const unknown =
+        !(failure instanceof NuniError) ||
+        failure.status >= 500 ||
+        failure.code === 'SESSION_CHANGED';
       setUncertain(unknown);
       if (!unknown) attempt.current = null;
       setError(nuniErrorMessage(failure));

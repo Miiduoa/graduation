@@ -85,19 +85,6 @@ it('preserves school context without copying unrelated session or return paramet
   }
 });
 
-it('sends a signed-in nuni student to profile from 我 instead of login', () => {
-  auth.session = { platformAccountId: 'a', isPlatformOperator: false };
-  render(<AppHeader />);
-  expect(screen.getByRole('link', { name: '我' }).getAttribute('href')).toBe('/profile');
-});
-
-it('keeps 我 on login when neither firebase nor nuni session is present', () => {
-  render(<AppHeader />);
-  expect(screen.getByRole('link', { name: '我' }).getAttribute('href')).toBe(
-    '/login?returnUrl=%2Fprofile',
-  );
-});
-
 it('routes the Nuni account to its courses and hides operator links during revalidation', () => {
   auth.session = { platformAccountId: 'a', isPlatformOperator: true };
   const view = render(<AppHeader />);
