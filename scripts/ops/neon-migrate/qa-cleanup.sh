@@ -19,6 +19,7 @@ require_sslmode "$DATABASE_URL" DATABASE_URL
 RECEIPT_DIR="${RECEIPT_DIR:-./receipts}"
 mkdir_private "$RECEIPT_DIR"
 PREFIX='cw_b7db89dd-4abe-4cfa-80f3-8bead74f58c2/cwa_b5d32f94-a23a-4df5-899c-a070d63d2ec1/'
+[[ "$PREFIX" == cw_*/cwa_*/ ]] || die "Storage 前綴不是精確的課班／作業 id，拒絕執行"
 
 run_sql() {
   local apply_flag="$1"
@@ -69,6 +70,7 @@ delete_storage() {
   local url="${SUPABASE_URL:-}"
   local key="${SUPABASE_SERVICE_ROLE_KEY:-}"
   [[ -n "$url" && -n "$key" ]] || return 0
+  [[ -n "$PREFIX" && "$PREFIX" == */ ]] || die "Storage 前綴為空或不以 / 結尾，拒絕刪除"
   python3 - "$url" "$key" "$PREFIX" <<'PY'
 import json, sys, urllib.request
 base, key, prefix = sys.argv[1].rstrip("/"), sys.argv[2], sys.argv[3]

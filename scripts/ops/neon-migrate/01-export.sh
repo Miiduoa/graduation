@@ -14,6 +14,7 @@ require_pg18
 
 SOURCE_DATABASE_URL="$(read_url SOURCE_DATABASE_URL)"
 require_sslmode "$SOURCE_DATABASE_URL" SOURCE_DATABASE_URL
+require_direct_host "$SOURCE_DATABASE_URL" SOURCE_DATABASE_URL
 
 DUMP_DIR="${DUMP_DIR:?請設 DUMP_DIR}"
 mkdir_private "$DUMP_DIR"
@@ -23,6 +24,7 @@ printf '來源 host：%s\n' "$(redacted_host "$SOURCE_DATABASE_URL")"
 printf '寫入目錄：%s\n' "$DUMP_DIR"
 
 # 1) 資料 + schema。不帶 owner／ACL：Neon 內建角色不能在新 project 重建。
+#    --no-owner 對 custom 格式會被忽略，還原時 02-import.sh 仍會帶 --no-owner。
 #    權限另存 inventory，還原後由 02-import.sh 只套用應用程式角色。
 #    custom 格式會帶 sequence 目前值、extension、函式、觸發器。
 pg_dump \
@@ -49,7 +51,7 @@ pg_dump \
 # 3) 盤點：角色、權限、extension、sequence、migration、列數。
 psql_url "$SOURCE_DATABASE_URL" \
   --file ./capture-inventory.sql \
-  --output "$DUMP_DIR/inventory/raw.txt"
+  >"$DUMP_DIR/inventory/raw.txt"
 
 # 精確列數另存 TSV，給 03-verify.sh 比對。
 psql_url "$SOURCE_DATABASE_URL" -At -F $'\t' -c "
@@ -62,53 +64,76 @@ WHERE n.nspname = 'public' AND c.relkind = 'r'
 ORDER BY n.nspname, c.relname
 " >"$DUMP_DIR/inventory/table_counts.tsv"
 
+# 缺 schema_migrations 必須失敗，不能 || true 讓後面用空檔「核對通過」。
 psql_url "$SOURCE_DATABASE_URL" -At -F $'\t' -c \
-  "SELECT id || E'\t' || checksum || E'\t' || applied_at::text FROM public.schema_migrations ORDER BY id" \
-  >"$DUMP_DIR/inventory/schema_migrations.tsv" || true
+  "SELECT id, checksum, applied_at::text FROM public.schema_migrations ORDER BY id" \
+  >"$DUMP_DIR/inventory/schema_migrations.tsv"
 
+# PG 18 的 pg_sequences 沒有 is_called；last_value 為 NULL 代表還沒 nextval。
 psql_url "$SOURCE_DATABASE_URL" -At -F $'\t' -c \
-  "SELECT schemaname, sequencename, last_value::text FROM pg_sequences ORDER BY 1,2" \
+  "SELECT schemaname, sequencename, COALESCE(last_value::text, '') FROM pg_sequences ORDER BY 1,2" \
   >"$DUMP_DIR/inventory/sequences.tsv"
 
 psql_url "$SOURCE_DATABASE_URL" -At -F $'\t' -c \
-  "SELECT extname || E'\t' || extversion FROM pg_extension ORDER BY 1" \
+  "SELECT extname, extversion FROM pg_extension ORDER BY 1" \
   >"$DUMP_DIR/inventory/extensions.tsv"
 
 psql_url "$SOURCE_DATABASE_URL" -At -F $'\t' -c \
   "SELECT rolname FROM pg_roles ORDER BY 1" \
   >"$DUMP_DIR/inventory/roles.txt"
 
-# 應用程式 GRANT（排除 Neon／系統角色）。還原後可重放。
-psql_url "$SOURCE_DATABASE_URL" -At -c "
-SELECT format(
-  'GRANT %s ON TABLE %I.%I TO %I;',
-  string_agg(privilege_type, ', '),
-  table_schema, table_name, grantee
-)
-FROM information_schema.role_table_grants
-WHERE table_schema = 'public'
-  AND grantee NOT IN ('PUBLIC','postgres','cloud_admin','neon_superuser','neon_admin','neon_auth','neon_authenticator')
-  AND grantee !~ '^pg_'
-GROUP BY table_schema, table_name, grantee
-ORDER BY 1;
-" >"$DUMP_DIR/inventory/grants.sql"
+psql_url "$SOURCE_DATABASE_URL" -At -F $'\t' -c "
+SELECT rolname
+  FROM pg_roles
+ WHERE rolcanlogin
+   AND rolname !~ '^pg_'
+   AND rolname NOT IN (
+     'postgres','cloud_admin','neon_superuser','neon_admin',
+     'neon_auth','neon_authenticator','neon_service'
+   )
+ ORDER BY 1
+" >"$DUMP_DIR/inventory/login_roles.txt"
 
-psql_url "$SOURCE_DATABASE_URL" -At -c "
-SELECT format(
-  'GRANT %s ON FUNCTION %I.%I TO %I;',
-  string_agg(privilege_type, ', '),
-  routine_schema, routine_name, grantee
-)
-FROM information_schema.routine_privileges
-WHERE routine_schema = 'public'
-  AND grantee NOT IN ('PUBLIC','postgres','cloud_admin','neon_superuser','neon_admin','neon_auth','neon_authenticator')
-  AND grantee !~ '^pg_'
-GROUP BY routine_schema, routine_name, grantee
-ORDER BY 1;
-" >>"$DUMP_DIR/inventory/grants.sql"
+psql_url "$SOURCE_DATABASE_URL" -At -F $'\t' -c "
+SELECT n.nspname, p.proname, pg_get_function_identity_arguments(p.oid)
+  FROM pg_proc p
+  JOIN pg_namespace n ON n.oid = p.pronamespace
+ WHERE n.nspname = 'public' AND p.prokind IN ('f','p')
+ ORDER BY 1,2,3
+" >"$DUMP_DIR/inventory/functions.tsv"
+
+psql_url "$SOURCE_DATABASE_URL" -At -F $'\t' -c "
+SELECT n.nspname, c.relname, t.tgname
+  FROM pg_trigger t
+  JOIN pg_class c ON c.oid = t.tgrelid
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE n.nspname = 'public' AND NOT t.tgisinternal
+ ORDER BY 1,2,3
+" >"$DUMP_DIR/inventory/triggers.tsv"
+
+psql_url "$SOURCE_DATABASE_URL" -At -F $'\t' -c "
+SELECT n.nspname, c.relname, r.rolname, a.privilege_type
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  JOIN LATERAL aclexplode(c.relacl) a ON true
+  JOIN pg_roles r ON r.oid = a.grantee
+ WHERE n.nspname = 'public'
+   AND c.relkind IN ('r','p','v','m')
+   AND c.relacl IS NOT NULL
+   AND r.rolname NOT IN (
+     'postgres','cloud_admin','neon_superuser','neon_admin',
+     'neon_auth','neon_authenticator','neon_service'
+   )
+   AND r.rolname !~ '^pg_'
+   AND a.grantee <> c.relowner
+ ORDER BY 1,2,3,4
+" >"$DUMP_DIR/inventory/table_grants.tsv"
+
+psql_url "$SOURCE_DATABASE_URL" -At --file ./render-grants.sql \
+  >"$DUMP_DIR/inventory/grants.sql"
 
 python3 - "$DUMP_DIR" <<'PY'
-import hashlib, os, pathlib, json, sys
+import hashlib, pathlib, json, sys
 dump_dir = pathlib.Path(sys.argv[1])
 payload = {"files": {}}
 for path in sorted(dump_dir.rglob("*")):
@@ -119,8 +144,13 @@ for path in sorted(dump_dir.rglob("*")):
 (dump_dir / "manifest.json").write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
 PY
 
+if grep -E 'ERROR' "$DUMP_DIR/pg_dump.log" >/dev/null; then
+  die "pg_dump.log 含 ERROR，停止。請看 $DUMP_DIR/pg_dump.log"
+fi
+
 printf '匯出完成。dump 位元組：%s\n' "$(wc -c <"$DUMP_DIR/neondb.dump" | tr -d ' ')"
 printf '表數量（public）：%s\n' "$(wc -l <"$DUMP_DIR/inventory/table_counts.tsv" | tr -d ' ')"
 printf 'migration 列數：%s\n' "$(wc -l <"$DUMP_DIR/inventory/schema_migrations.tsv" | tr -d ' ')"
 printf 'sequence 列數：%s\n' "$(wc -l <"$DUMP_DIR/inventory/sequences.tsv" | tr -d ' ')"
+printf 'LOGIN 應用角色：%s\n' "$(wc -l <"$DUMP_DIR/inventory/login_roles.txt" | tr -d ' ')"
 printf '請核對 pg_dump.log 沒有 ERROR 再進行匯入。\n'

@@ -2,7 +2,8 @@
 INSERT INTO public.platform_accounts (id, state, display_name, primary_email)
 VALUES
   ('pa_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'active', 'QA 老師', 'qa-teacher@example.test'),
-  ('pa_2e7c9b14-8a5f-4d31-9c6a-0b4e8f17d2c3', 'active', 'qa-student-nocard', 'qa-student-nocard@example.test')
+  ('pa_2e7c9b14-8a5f-4d31-9c6a-0b4e8f17d2c3', 'active', 'qa-student-nocard', 'qa-student-nocard@example.test'),
+  ('pa_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'active', '真實學生', 'real-student@example.test')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.class_workspaces (id, owner_platform_account_id, title, state)
@@ -12,7 +13,8 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.class_workspace_members (workspace_id, platform_account_id, role, state)
 VALUES
   ('cw_b7db89dd-4abe-4cfa-80f3-8bead74f58c2', 'pa_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'owner-teacher', 'active'),
-  ('cw_b7db89dd-4abe-4cfa-80f3-8bead74f58c2', 'pa_2e7c9b14-8a5f-4d31-9c6a-0b4e8f17d2c3', 'student', 'active')
+  ('cw_b7db89dd-4abe-4cfa-80f3-8bead74f58c2', 'pa_2e7c9b14-8a5f-4d31-9c6a-0b4e8f17d2c3', 'student', 'active'),
+  ('cw_b7db89dd-4abe-4cfa-80f3-8bead74f58c2', 'pa_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'student', 'active')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO public.class_workspace_invites (
@@ -114,6 +116,31 @@ VALUES
   ('pa_2e7c9b14-8a5f-4d31-9c6a-0b4e8f17d2c3', 'smoke-03', repeat('e', 64), '{}'::jsonb),
   ('pa_2e7c9b14-8a5f-4d31-9c6a-0b4e8f17d2c3', 'smoke-04', repeat('f', 64), '{}'::jsonb)
 ON CONFLICT DO NOTHING;
+
+INSERT INTO public.class_workspace_assignments (
+  id, workspace_id, title, instructions, state, created_by_platform_account_id, due_at
+) VALUES (
+  'cwa_cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  'cw_b7db89dd-4abe-4cfa-80f3-8bead74f58c2',
+  '週三小考',
+  '真實作業，清理時必須留下。',
+  'open',
+  'pa_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  TIMESTAMPTZ '2026-11-05 15:59:00+00'
+) ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.class_workspace_assignment_submissions (
+  assignment_id, platform_account_id, body, state
+) VALUES (
+  'cwa_cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  'pa_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+  '真實學生的繳交，不可刪。',
+  'submitted'
+) ON CONFLICT DO NOTHING;
+
+INSERT INTO public.lookup_codes (code, label)
+VALUES ('keep-me', 'no timestamp table')
+ON CONFLICT (code) DO NOTHING;
 
 INSERT INTO public.schema_migrations (id, checksum)
 VALUES

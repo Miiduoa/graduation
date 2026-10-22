@@ -1,52 +1,40 @@
-# Neon 搬遷腳本本機演練結果（2026-10-22）
+# Neon 搬遷腳本本機演練結果（2026-10-22 審查後重跑）
 
-環境：Ubuntu 24.04，PostgreSQL **18.6**（套件 18.6-1.pgdg24.04+2，與正式庫 18.6 同版）。沒有連 Neon、Fly、Supabase。整段工具鏈約 22 秒（schema-only＋少量種子列，不是 43 MB 正式資料）。
+環境：Ubuntu 24.04，PostgreSQL **18.6**。沒有連 Neon、Fly、Supabase。還原身分是 `neondb_owner` **NOSUPERUSER**，不是本機 superuser。
 
 ## 做了什麼
 
-1. 把早上的 schema-only 備份還原到本機 `nuni_old`。
-2. 套用 `280_assignment_submission_files.sql`（正式庫在 dump 之後已建這些表）。
-3. 插入 CLEANUP.md 的 QA id、一條 `rehearsal_only_seq`（值 42）、以及 `nuni_web_files` 最小權限 GRANT。
-4. 跑 `01-export.sh` → `02-import.sh` → `03-verify.sh`。
-5. Fly secrets 腳本乾跑（`APPLY_SECRETS=no`）。另測 Neon host 缺少 `sslmode=require` 會被拒絕。
-6. 在新庫跑 QA `MODE=list`（transaction ROLLBACK）再 `MODE=apply`（COMMIT）。
+1. 建立本機 `nuni_old`／`nuni_new`，owner 為 `neondb_owner`（NOSUPERUSER）。
+2. 套用精簡課班 schema、函式／觸發器、sequence、QA 與一筆真實學生作業。
+3. 跑 `01-export.sh` → `02-import.sh` → `03-verify.sh`。
+4. 故意改列數確認核對失敗；Fly 乾跑並拒絕 pooler／缺 sslmode／錯 app。
+5. QA `MODE=list`（ROLLBACK）再 `MODE=apply`；有其他學生繳交時 apply 必須失敗。
+6. `06-replay-delta.sh` 乾跑不寫入，套用後只補有時間欄且有主鍵的列；略過 `schema_migrations`。
 
 ## 結果
 
 | 項目 | 結果 |
 | --- | --- |
-| public 表數 | 539（schema dump 537 + 280 的 2 張） |
-| schema_migrations 列 | 2（279、280 種子） |
-| sequences | 1（`rehearsal_only_seq` last_value=42；PG 18 的 `pg_sequences` 已無 `is_called`） |
-| custom dump 大小 | 2 768 127 bytes |
-| 列數／migration／sequence／extension 核對 | 通過（缺 0、多 0、列數不符 0） |
-| GRANT 重放 | 547 條套用、0 條跳過 |
-| Fly secrets 乾跑 | 通過（未呼叫 flyctl）；缺 sslmode 的 Neon URL 會失敗 |
-| QA list | 見下表；list 結束為 `ROLLBACK` |
-| QA apply 後作業列 | 0 |
-| QA apply 後課班列 | 1（課班本身保留） |
-| QA apply 後老師成員 | 1 |
-| QA apply 後 nocard 學生成員 | 0 |
-
-QA list 預覽（apply 前）：
-
-| 表 | 列數 |
-| --- | --- |
-| class_assignment_file_idempotency | 4 |
-| class_assignment_submission_files | 2 |
-| class_workspace_assignment_idempotency | 1 |
-| class_workspace_assignment_submissions | 1 |
-| class_workspace_assignments | 1 |
-| class_workspace_invite_idempotency | 1 |
-| class_workspace_invites | 1 |
-| class_workspace_join_idempotency | 1 |
-| class_workspace_members（nocard 學生） | 1 |
-| class_workspace_submission_feedback_idempotency | 0 |
-| class_workspace_submission_idempotency | 2 |
+| public 表數 | 15 |
+| schema_migrations 列 | 2 |
+| sequences | 1（含 rehearsal_only_seq=42） |
+| 函式／觸發器 | 38／1 |
+| custom dump 大小 | 39833 bytes |
+| 列數／migration／sequence／extension／函式／觸發器／GRANT | 通過 |
+| 列數被改時核對 | 失敗（exit 1） |
+| Fly secrets 乾跑 | 通過；pooler／缺 sslmode／多餘鍵／錯 app 被拒；未印密碼 |
+| QA list 後作業列 | 1（應為 1） |
+| QA apply 後 QA 作業列 | 0（應為 0） |
+| QA apply 後課班列 | 1（應為 1） |
+| QA apply 後老師成員 | 1（應為 1） |
+| QA apply 後 nocard 學生成員 | 0（應為 0） |
+| QA apply 後真實學生／真實作業／真實繳交 | 1／1／1（皆應為 1） |
+| nuni_web_files 讀作業檔 | 0（應為 0，表還在且有 USAGE） |
+| delta 乾跑後舊庫新帳號 | 0（應為 0） |
+| delta 套用後舊庫新帳號 | 1（應為 1） |
 
 ## 限制
 
-- 早上的檔是 **schema-only**，沒有正式列資料，所以演練證明的是工具鏈與權限／sequence／migration 核對，不是 43 MB 正式資料的還原時間。
-- schema dump 沒有 GRANT／extension／owner；演練另外補了應用程式角色。正式匯出必須用 `01-export.sh` 在停寫後現抓。
-- 沒有測 Neon pooler、TLS、Fly 重啟，也沒有刪正式 Supabase 物件。
-- 本機用 SUPERUSER 角色做 dump／restore。正式新 project 請用 console 建好的 `neondb_owner`（以及可選的 `nuni_web_files`），不要把密碼寫進指令歷史。
+- 這次沒有早上那份 537 張表的 schema-only 備份（不在此環境），所以**不能**重現「539 張表／43 MB」的還原時間。本演練證明的是工具鏈、非 superuser 還原、權限／sequence／migration／失敗即停、QA 條件與 delta 安全閥。
+- 沒有測 Neon TLS、Fly 重啟、真實 43 MB 資料、也沒有刪正式 Supabase 物件。
+- 本機 CREATE EXTENSION 仍由 unix peer 的 postgres 先做；正式新 project 請確認 console 已啟用來源有的 extension。
