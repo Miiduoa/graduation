@@ -8,6 +8,7 @@ import {
   assignmentImageTargetSize,
   assignmentLateOpenLabel,
   assignmentReceiptStatusLabel,
+  assignmentSubmissionLate,
   classifyAssignmentFile,
   formatAssignmentFileSize,
   moveAssignmentFile,
@@ -246,7 +247,7 @@ export function SubmissionReceipt({
   submission: NuniSubmission;
   dueAt: string | null;
 }) {
-  const late = submission.late === true || (dueAt ? Date.parse(submission.submittedAt) > Date.parse(dueAt) : false);
+  const late = submission.late === true || assignmentSubmissionLate(dueAt, submission.submittedAt);
   return (
     <section className={shared.receipt} aria-label="我的繳交紀錄">
       <strong>{assignmentReceiptStatusLabel(late)}</strong>

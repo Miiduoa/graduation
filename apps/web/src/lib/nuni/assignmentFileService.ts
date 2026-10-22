@@ -6,6 +6,7 @@ import {
   assertAssignmentFileCounts,
   assertAssignmentFileMagic,
   assertAssignmentFileSize,
+  assignmentFileIntentCountsTowardQuota,
   assignmentFileSubmitEnabled,
   assignmentSubmissionLate,
   classifyAssignmentFile,
@@ -163,6 +164,10 @@ export function createAssignmentFileService(options?: {
 
   async function remember(actor: AssignmentFileActor, key: string, hash: string, payload: unknown) {
     await stores.index.putIdempotency(actor.platformAccountId, key, { hash, payload });
+    const stored = await stores.index.getIdempotency(actor.platformAccountId, key);
+    if (!stored) throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
+    if (stored.hash !== hash) throw new NuniError(409, 'IDEMPOTENCY_CONFLICT');
+    return stored.payload;
   }
 
   return {
@@ -189,7 +194,9 @@ export function createAssignmentFileService(options?: {
       );
       const existing = await replay(actor, input.idempotencyKey, hash);
       if (existing) return existing as AssignmentFileIntent;
-      const current = await stores.index.listStaged(assignment.id, actor.platformAccountId);
+      const current = (await stores.index.listStaged(assignment.id, actor.platformAccountId)).filter(
+        (file) => assignmentFileIntentCountsTowardQuota(file, now().getTime()),
+      );
       const nextImages =
         current.filter((file) => file.kind === 'image').length + (classified.kind === 'image' ? 1 : 0);
       const nextDocs =
@@ -221,8 +228,7 @@ export function createAssignmentFileService(options?: {
         kind: record.kind,
         uploadPath: `class-workspaces/${workspaceId}/assignments/${assignmentId}/files/${record.id}/content`,
       };
-      await remember(actor, input.idempotencyKey, hash, payload);
-      return payload;
+      return (await remember(actor, input.idempotencyKey, hash, payload)) as AssignmentFileIntent;
     },
 
     async createIntents(
@@ -371,8 +377,7 @@ export function createAssignmentFileService(options?: {
       );
       if (records.length && (!payload.mySubmission || !files.length))
         throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
-      await remember(actor, input.idempotencyKey, hash, payload);
-      return payload;
+      return (await remember(actor, input.idempotencyKey, hash, payload)) as NuniAssignment;
     },
 
     async hydrateSubmission(

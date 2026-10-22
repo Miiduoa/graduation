@@ -465,9 +465,6 @@ describe('assignment file service', () => {
     expect(intents.map((item) => item.originalName)).toEqual(
       Array.from({ length: 8 }, (_, index) => `shot-${index}.jpg`),
     );
-    for (const intent of intents) {
-      await api.putContent(student, workspaceId, assignmentId, intent.id, jpeg());
-    }
     await expect(
       api.createIntent(student, workspaceId, assignmentId, {
         originalName: 'overflow.jpg',
@@ -476,5 +473,99 @@ describe('assignment file service', () => {
         idempotencyKey: 'intent-batch-overflow-1',
       }),
     ).rejects.toMatchObject({ status: 422, code: 'ASSIGNMENT_FILE_LIMIT' });
+  });
+
+  it('counts unuploaded staged intents toward the budget until they expire', async () => {
+    const clock = { current: Date.parse('2026-10-21T13:00:00.000Z') };
+    const api = service({ now: () => new Date(clock.current) });
+    const student = actor(studentId);
+    for (let index = 0; index < 8; index += 1) {
+      await api.createIntent(student, workspaceId, assignmentId, {
+        originalName: `pending-${index}.jpg`,
+        contentType: 'image/jpeg',
+        byteSize: 64,
+        idempotencyKey: `intent-pending-${index}`,
+      });
+    }
+    await expect(
+      api.createIntent(student, workspaceId, assignmentId, {
+        originalName: 'ninth.jpg',
+        contentType: 'image/jpeg',
+        byteSize: 64,
+        idempotencyKey: 'intent-pending-ninth',
+      }),
+    ).rejects.toMatchObject({ status: 422, code: 'ASSIGNMENT_FILE_LIMIT' });
+    clock.current += 30 * 60 * 1000 + 1;
+    await expect(
+      api.createIntent(student, workspaceId, assignmentId, {
+        originalName: 'after-ttl.jpg',
+        contentType: 'image/jpeg',
+        byteSize: 64,
+        idempotencyKey: 'intent-pending-after-ttl',
+      }),
+    ).resolves.toMatchObject({ originalName: 'after-ttl.jpg' });
+  });
+
+  it('keeps the first idempotent payload when a later write races', async () => {
+    const index = createMemoryIndexStore();
+    await index.putIdempotency(studentId, 'first-wins', { hash: 'h1', payload: { winner: 1 } });
+    await index.putIdempotency(studentId, 'first-wins', { hash: 'h2', payload: { winner: 2 } });
+    expect(await index.getIdempotency(studentId, 'first-wins')).toEqual({
+      hash: 'h1',
+      payload: { winner: 1 },
+    });
+
+    const sql = createSqlIndexStore(createFakeAssignmentFileSql());
+    await sql.putIdempotency(studentId, 'first-wins', { hash: 'h1', payload: { winner: 1 } });
+    await sql.putIdempotency(studentId, 'first-wins', { hash: 'h2', payload: { winner: 2 } });
+    expect(await sql.getIdempotency(studentId, 'first-wins')).toEqual({
+      hash: 'h1',
+      payload: { winner: 1 },
+    });
+
+    const api = service();
+    const student = actor(studentId);
+    const first = await api.createIntent(student, workspaceId, assignmentId, {
+      originalName: 'first.jpg',
+      contentType: 'image/jpeg',
+      byteSize: 64,
+      idempotencyKey: 'intent-first-wins',
+    });
+    await expect(
+      api.createIntent(student, workspaceId, assignmentId, {
+        originalName: 'second.jpg',
+        contentType: 'image/jpeg',
+        byteSize: 64,
+        idempotencyKey: 'intent-first-wins',
+      }),
+    ).rejects.toMatchObject({ status: 409, code: 'IDEMPOTENCY_CONFLICT' });
+    expect(
+      await api.createIntent(student, workspaceId, assignmentId, {
+        originalName: 'first.jpg',
+        contentType: 'image/jpeg',
+        byteSize: 64,
+        idempotencyKey: 'intent-first-wins',
+      }),
+    ).toEqual(first);
+  });
+
+  it('treats a dueAt without offset as Taipei time when marking 遲交', async () => {
+    const api = service({
+      item: assignment({ dueAt: '2026-10-21T20:59:00' }),
+      now: () => new Date('2026-10-21T13:00:00.000Z'),
+    });
+    const student = actor(studentId);
+    const intent = await api.createIntent(student, workspaceId, assignmentId, {
+      originalName: 'shot.jpg',
+      contentType: 'image/jpeg',
+      byteSize: 64,
+      idempotencyKey: 'intent-naive-due',
+    });
+    await api.putContent(student, workspaceId, assignmentId, intent.id, jpeg());
+    const result = await api.submitFiles(student, workspaceId, assignmentId, {
+      fileIds: [intent.id],
+      idempotencyKey: 'submit-naive-due',
+    });
+    expect(result.mySubmission?.late).toBe(true);
   });
 });

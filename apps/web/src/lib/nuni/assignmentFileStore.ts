@@ -71,12 +71,12 @@ export const ASSIGNMENT_FILE_SQL = {
       AND submitted_at IS NOT NULL AND superseded_at IS NULL`,
   listStaged: `SELECT ${FILE_COLUMNS} FROM class_assignment_submission_files
     WHERE assignment_id = $1 AND platform_account_id = $2
-      AND uploaded_at IS NOT NULL AND submitted_at IS NULL AND superseded_at IS NULL`,
+      AND submitted_at IS NULL AND superseded_at IS NULL`,
   getIdempotency: `SELECT request_hash, payload FROM class_assignment_file_idempotency
     WHERE actor_id = $1 AND key = $2`,
   putIdempotency: `INSERT INTO class_assignment_file_idempotency (actor_id, key, request_hash, payload)
     VALUES ($1, $2, $3, $4::jsonb)
-    ON CONFLICT (actor_id, key) DO UPDATE SET request_hash = EXCLUDED.request_hash, payload = EXCLUDED.payload`,
+    ON CONFLICT (actor_id, key) DO NOTHING`,
 } as const;
 
 function cloneFile(record: FileRecord): FileRecord {
@@ -144,7 +144,6 @@ export function createMemoryIndexStore(): AssignmentFileIndexStore {
           (file) =>
             file.assignmentId === assignmentId &&
             file.platformAccountId === accountId &&
-            file.uploadedAt &&
             !file.submittedAt &&
             !file.supersededAt,
         )
@@ -155,7 +154,8 @@ export function createMemoryIndexStore(): AssignmentFileIndexStore {
       return row ? { hash: row.hash, payload: row.payload } : null;
     },
     async putIdempotency(actorId, key, row) {
-      idempotency.set(`${actorId}:${key}`, { hash: row.hash, payload: row.payload });
+      const id = `${actorId}:${key}`;
+      if (!idempotency.has(id)) idempotency.set(id, { hash: row.hash, payload: row.payload });
     },
   };
 }
@@ -243,7 +243,7 @@ export function createFakeAssignmentFileSql(): SqlQuery {
       return [...files.values()].filter((row) => {
         if (row.assignment_id !== assignmentId || row.platform_account_id !== accountId) return false;
         if (sql === ASSIGNMENT_FILE_SQL.listVisible) return Boolean(row.submitted_at) && !row.superseded_at;
-        return Boolean(row.uploaded_at) && !row.submitted_at && !row.superseded_at;
+        return !row.submitted_at && !row.superseded_at;
       });
     }
     if (sql === ASSIGNMENT_FILE_SQL.getIdempotency) {
@@ -251,10 +251,13 @@ export function createFakeAssignmentFileSql(): SqlQuery {
       return row ? [row] : [];
     }
     if (sql === ASSIGNMENT_FILE_SQL.putIdempotency) {
-      idempotency.set(`${params[0]}:${params[1]}`, {
-        request_hash: params[2],
-        payload: JSON.parse(String(params[3])),
-      });
+      const id = `${params[0]}:${params[1]}`;
+      if (!idempotency.has(id)) {
+        idempotency.set(id, {
+          request_hash: params[2],
+          payload: JSON.parse(String(params[3])),
+        });
+      }
       return [];
     }
     throw new Error(`unexpected assignment file SQL: ${sql}`);

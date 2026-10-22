@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   MAX_ASSIGNMENT_IMAGES,
+  ASSIGNMENT_FILE_INTENT_TTL_MS,
   assignmentFileContentQuery,
+  assignmentFileIntentCountsTowardQuota,
   assignmentImageTargetSize,
   assertAssignmentFileBudget,
   assertAssignmentFileCounts,
@@ -16,7 +18,11 @@ import {
   moveAssignmentFile,
   sanitizeAssignmentFileName,
 } from '@campus/shared/src/assignmentFiles';
-import { formatTaipeiDateTime, taipeiWallTimeToIso } from '@campus/shared/src/taipeiTime';
+import {
+  formatTaipeiDateTime,
+  parseTaipeiInstant,
+  taipeiWallTimeToIso,
+} from '@campus/shared/src/taipeiTime';
 import { NuniError } from '@campus/shared/src/nuni';
 
 const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
@@ -59,6 +65,47 @@ describe('assignment file domain', () => {
     expect(new Date(taipeiWallTimeToIso('2026-10-29T23:59')!).toISOString()).toBe(
       '2026-10-29T15:59:00.000Z',
     );
+    expect(parseTaipeiInstant('2026-10-22T11:49:43')).toBe(
+      Date.parse('2026-10-22T11:49:43+08:00'),
+    );
+    expect(parseTaipeiInstant('2026-10-22T11:49:43.000')).toBe(
+      Date.parse('2026-10-22T11:49:43+08:00'),
+    );
+    expect(parseTaipeiInstant('2026-10-22')).toBe(Date.parse('2026-10-22T00:00:00+08:00'));
+    expect(parseTaipeiInstant('2026-10-22T03:49:43.000Z')).toBe(
+      Date.parse('2026-10-22T03:49:43.000Z'),
+    );
+    expect(formatTaipeiDateTime('2026-10-22T11:49:43')).toBe('2026/10/22 上午11:49:43');
+    expect(formatTaipeiDateTime('2026-10-29T23:59:00', { seconds: false })).toBe(
+      '2026/10/29 下午11:59',
+    );
+    expect(assignmentSubmissionLate('2026-10-21T23:59:00', '2026-10-21T15:59:00.000Z')).toBe(
+      false,
+    );
+    expect(assignmentSubmissionLate('2026-10-21T23:59:00', '2026-10-21T16:00:00.000Z')).toBe(true);
+    expect(
+      assignmentLateOpenLabel(
+        '2026-10-21T23:59:00',
+        'open',
+        'active',
+        Date.parse('2026-10-21T16:00:00.000Z'),
+      ),
+    ).toBe('已過截止時間，現在送出會標為遲交');
+    const pending = { uploadedAt: null, createdAt: '2026-10-21T13:00:00.000Z' };
+    const now = Date.parse('2026-10-21T13:10:00.000Z');
+    expect(assignmentFileIntentCountsTowardQuota(pending, now)).toBe(true);
+    expect(
+      assignmentFileIntentCountsTowardQuota(
+        pending,
+        now + ASSIGNMENT_FILE_INTENT_TTL_MS,
+      ),
+    ).toBe(false);
+    expect(
+      assignmentFileIntentCountsTowardQuota(
+        { uploadedAt: '2026-10-21T13:00:00.000Z', createdAt: pending.createdAt },
+        now + ASSIGNMENT_FILE_INTENT_TTL_MS,
+      ),
+    ).toBe(true);
   });
 
   it('scales photos to a 2000px edge, labels sizes, and reorders files', () => {
