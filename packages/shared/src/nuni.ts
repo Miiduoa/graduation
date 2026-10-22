@@ -245,6 +245,18 @@ export function parseNuniSubmissionFile(value: unknown): NuniSubmissionFile {
   };
 }
 
+function parseAssignmentFileIntent(value: unknown) {
+  const item = nuniRecord(value);
+  return {
+    id: nuniId(item.id, 'cwf'),
+    uploadPath: content(item.uploadPath, 300),
+    originalName: content(item.originalName, 200),
+    contentType: content(item.contentType, 120),
+    byteSize: count(item.byteSize),
+    kind: choice(item.kind, ['image', 'file']),
+  };
+}
+
 function optionalSubmissionFiles(item: Record<string, unknown>): NuniSubmissionFile[] | undefined {
   if (item.files === undefined) return undefined;
   const files = array(item.files, parseNuniSubmissionFile);
@@ -517,14 +529,30 @@ export function createNuniClasses(
           input,
         ),
       );
-      return {
-        id: nuniId(value.id, 'cwf'),
-        uploadPath: content(value.uploadPath, 300),
-        originalName: content(value.originalName, 200),
-        contentType: content(value.contentType, 120),
-        byteSize: count(value.byteSize),
-        kind: choice(value.kind, ['image', 'file']),
-      };
+      return parseAssignmentFileIntent(value);
+    },
+    async createAssignmentFileIntents(
+      id: string,
+      assignmentId: string,
+      input: {
+        files: {
+          originalName: string;
+          contentType: string;
+          byteSize: number;
+          idempotencyKey?: string;
+        }[];
+        idempotencyKey: string;
+      },
+    ) {
+      const value = nuniRecord(
+        await transport(`${path(id)}/assignments/${nuniId(assignmentId, 'cwa')}/files/intents`, {
+          files: input.files,
+          idempotencyKey: input.idempotencyKey,
+        }),
+      );
+      const intents = array(value.intents, parseAssignmentFileIntent);
+      if (intents.length !== input.files.length) throw new NuniError(502, 'INVALID_RESPONSE');
+      return intents;
     },
     async uploadAssignmentFile(uploadPath: string, body: Uint8Array, contentType: string) {
       if (!upload || !/^[a-z0-9-]+(?:\/[A-Za-z0-9_-]+)*$/.test(uploadPath))

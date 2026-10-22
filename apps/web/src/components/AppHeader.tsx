@@ -68,7 +68,7 @@ function Header() {
             生活
           </Link>
           <Link
-            href={user ? '/profile' : '/login?returnUrl=%2Fprofile'}
+            href={user || nuni.session ? '/profile' : '/login?returnUrl=%2Fprofile'}
             aria-current={pathname === '/profile' || pathname === '/me' ? 'page' : undefined}
           >
             我

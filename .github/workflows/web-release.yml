@@ -20,6 +20,14 @@ on:
           - live-tdx
           - static-catalog
           - official-links-only
+      assignment_file_submit_enabled:
+        description: 'Bake ASSIGNMENT_FILE_SUBMIT_ENABLED into the Web image so /classroom gets camera=(self). Default false; repo variable ASSIGNMENT_FILE_SUBMIT_ENABLED=true also enables it.'
+        required: false
+        type: choice
+        default: 'false'
+        options:
+          - 'false'
+          - 'true'
   pull_request:
     paths:
       - 'deploy/web/release-check*'
@@ -80,6 +88,7 @@ jobs:
       CAMPUS_RELEASE_SHA: ${{ inputs.expected_revision }}
       NEXT_PUBLIC_SITE_URL: https://nuni.tw
       NEXT_PUBLIC_FUNCTIONS_BASE_URL: ${{ vars.NEXT_PUBLIC_FUNCTIONS_BASE_URL }}
+      ASSIGNMENT_FILE_SUBMIT_ENABLED: ${{ inputs.assignment_file_submit_enabled == 'true' && 'true' || vars.ASSIGNMENT_FILE_SUBMIT_ENABLED == 'true' && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -129,7 +138,8 @@ jobs:
             --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID \
             --build-arg NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET \
             --build-arg NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID \
-            --build-arg NEXT_PUBLIC_FIREBASE_APP_ID .
+            --build-arg NEXT_PUBLIC_FIREBASE_APP_ID \
+            --build-arg ASSIGNMENT_FILE_SUBMIT_ENABLED .
           docker run -d --name campus-web-release-check -p 127.0.0.1:18080:3000 \
             -e CAMPUS_LEGACY_ENABLED=false "$IMAGE"
           trap 'docker rm -f campus-web-release-check >/dev/null 2>&1 || true' EXIT
