@@ -2,7 +2,7 @@
 # 共用函式。密鑰只從環境變數或檔案讀，絕不印出連線字串或密碼。
 set -euo pipefail
 
-NEON_SYSTEM_ROLES_REGEX='^(cloud_admin|neon_superuser|neon_admin|neon_auth|neon_authenticator|pg_.*|postgres)$'
+NEON_SYSTEM_ROLES_REGEX='^(cloud_admin|neon_superuser|neon_admin|neon_auth|neon_authenticator|neon_service|pg_.*|postgres)$'
 
 die() {
   printf '%s\n' "$*" >&2
@@ -19,6 +19,10 @@ require_pg18() {
   [[ "$ver" == *' 18.'* ]] || die "需要 PostgreSQL 18 用戶端（目前：${ver:-無}）"
   ver="$(pg_dump --version 2>/dev/null || true)"
   [[ "$ver" == *' 18.'* ]] || die "需要 pg_dump 18（目前：${ver:-無}）"
+  if command -v pg_restore >/dev/null 2>&1; then
+    ver="$(pg_restore --version 2>/dev/null || true)"
+    [[ "$ver" == *' 18.'* ]] || die "需要 pg_restore 18（目前：${ver:-無}）"
+  fi
 }
 
 # 從環境變數或檔案讀取 URL。檔案路徑由 *_FILE 指定。
@@ -70,6 +74,13 @@ is_local_host() {
   esac
 }
 
+is_pooler_host() {
+  case "$1" in
+    *-pooler.* | *-pooler | *pooler.*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 require_sslmode() {
   local url="$1"
   local label="$2"
@@ -82,6 +93,16 @@ require_sslmode() {
   mode="$(url_query_param "$url" sslmode)"
   [[ "$mode" == "require" || "$mode" == "verify-full" || "$mode" == "verify-ca" ]] \
     || die "$label 必須帶 sslmode=require（或更嚴的 verify-full／verify-ca）"
+}
+
+require_direct_host() {
+  local url="$1"
+  local label="$2"
+  local host
+  host="$(url_host "$url")"
+  if is_pooler_host "$host"; then
+    die "$label 的 host（$host）是 Neon pooler。pg_dump／nuni-api／node-pg 請用直連（不要含 -pooler）"
+  fi
 }
 
 redacted_host() {

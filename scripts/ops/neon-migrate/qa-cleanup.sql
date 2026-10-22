@@ -30,6 +30,35 @@ END AS assignment_title_ok
 SELECT CASE WHEN :assignment_title_ok = 1 THEN 1
             ELSE (SELECT 1 / 0) END AS assignment_title_guard;
 -- 上面在標題不符時除以零中止，避免誤刪真實作業。
+-- 注意：ELSE (SELECT 1/0) 只有在 WHEN 是常數時才安全；runtime EXISTS
+-- 會被 planner 拉去執行 ELSE，所以下面改成 \gset 後再除以零。
+
+-- 若這份 QA 作業上還有其他學生的繳交／檔案，停止。預設 FK 是 NO ACTION，
+-- 沒有這道檢查也可能刪失敗；有 CASCADE 時沒檢查會連帶刪掉別人的資料。
+SELECT CASE WHEN NOT EXISTS (
+  SELECT 1 FROM public.class_workspace_assignment_submissions
+   WHERE assignment_id = :'assignment_id'
+     AND platform_account_id <> :'student_id'
+) AND NOT EXISTS (
+  SELECT 1 FROM public.class_assignment_submission_files
+   WHERE assignment_id = :'assignment_id'
+     AND platform_account_id <> :'student_id'
+) THEN 1 ELSE 0 END AS other_student_ok
+\gset
+SELECT CASE WHEN :other_student_ok = 1 THEN 1
+            ELSE (SELECT 1 / 0) END AS other_student_guard;
+
+SELECT count(*) AS other_assignments_before
+  FROM public.class_workspace_assignments
+ WHERE workspace_id = :'workspace_id'
+   AND id <> :'assignment_id'
+\gset
+
+SELECT count(*) AS teacher_members_before
+  FROM public.class_workspace_members
+ WHERE workspace_id = :'workspace_id'
+   AND role = 'owner-teacher'
+\gset
 
 CREATE TEMP TABLE qa_preview (
   relation text PRIMARY KEY,
@@ -167,11 +196,19 @@ DELETE FROM public.class_workspace_invites
  WHERE id = :'invite_id'
    AND workspace_id = :'workspace_id';
 
--- 刪完必須是 0。課班列必須還在。
+-- 刪完必須是 0。課班列必須還在。其他作業與老師成員數量不得變。
 SELECT 1 / CASE WHEN EXISTS (SELECT 1 FROM public.class_workspaces WHERE id = :'workspace_id') THEN 1 ELSE 0 END;
 SELECT 1 / CASE WHEN NOT EXISTS (SELECT 1 FROM public.class_workspace_assignments WHERE id = :'assignment_id') THEN 1 ELSE 0 END;
 SELECT 1 / CASE WHEN NOT EXISTS (
   SELECT 1 FROM public.class_workspace_members
    WHERE workspace_id = :'workspace_id' AND platform_account_id = :'student_id'
 ) THEN 1 ELSE 0 END;
+SELECT 1 / CASE WHEN (
+  SELECT count(*) FROM public.class_workspace_assignments
+   WHERE workspace_id = :'workspace_id' AND id <> :'assignment_id'
+) = :other_assignments_before THEN 1 ELSE 0 END;
+SELECT 1 / CASE WHEN (
+  SELECT count(*) FROM public.class_workspace_members
+   WHERE workspace_id = :'workspace_id' AND role = 'owner-teacher'
+) = :teacher_members_before AND :teacher_members_before >= 1 THEN 1 ELSE 0 END;
 \endif
