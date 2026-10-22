@@ -8,13 +8,21 @@ import {
 } from '@campus/shared/src/nuni';
 import { AssignmentCard } from './AssignmentCard';
 
-const state = vi.hoisted(() => ({ context: 'session-a', request: vi.fn(), refresh: vi.fn() }));
+const state = vi.hoisted(() => ({
+  context: 'session-a',
+  request: vi.fn(),
+  upload: vi.fn(),
+  refresh: vi.fn(),
+  fileSubmit: false,
+}));
 vi.mock('./Session', () => ({
   browserRequest: state.request,
+  browserUpload: state.upload,
   useNuniSession: () => ({
     session: {
       context: state.context,
       platformAccountId: 'pa_11111111-1111-4111-8111-111111111111',
+      assignmentFileSubmit: state.fileSubmit,
     },
     pendingLogout: false,
     refresh: state.refresh,
@@ -64,7 +72,9 @@ const reload = vi.fn();
 beforeEach(() => {
   vi.clearAllMocks();
   state.context = 'session-a';
+  state.fileSubmit = false;
   state.request.mockReset().mockResolvedValue({ submissions: [submission] });
+  state.upload.mockReset();
 });
 async function openSubmissions() {
   fireEvent.click(screen.getByRole('button', { name: '查看繳交內容' }));
@@ -496,3 +506,104 @@ it('does not reconcile or display an old close response in a new session', async
   expect(screen.queryByText(/目前已停止收件/)).toBeNull();
   expect(screen.getByText('開放繳交')).toBeTruthy();
 });
+
+it('keeps the text-only form when file submit is off', () => {
+  render(
+    <AssignmentCard
+      item={assignment}
+      workspace={{ ...workspace, memberRole: 'student' }}
+      reload={reload}
+    />,
+  );
+  expect(screen.queryByRole('button', { name: '拍照' })).toBeNull();
+  expect(screen.getByLabelText('作業內容')).toBeTruthy();
+});
+
+it('previews a photo and shows a late receipt after a confirmed file submit', async () => {
+  state.fileSubmit = true;
+  const fileId = 'cwf_11111111-1111-4111-8111-111111111111';
+  const mine = {
+    ...submission,
+    platformAccountId: 'pa_11111111-1111-4111-8111-111111111111',
+    late: true,
+    files: [
+      {
+        id: fileId,
+        originalName: 'shot.jpg',
+        contentType: 'image/jpeg',
+        byteSize: 12,
+        kind: 'image' as const,
+        downloadPath: `class-workspaces/${workspace.id}/assignments/${assignment.id}/files/${fileId}/content`,
+        downloadExp: '1',
+        downloadSig: 'sig',
+      },
+    ],
+  };
+  state.request
+    .mockResolvedValueOnce({
+      id: fileId,
+      uploadPath: `class-workspaces/${workspace.id}/assignments/${assignment.id}/files/${fileId}/content`,
+      originalName: 'shot.jpg',
+      contentType: 'image/jpeg',
+      byteSize: 12,
+      kind: 'image',
+    })
+    .mockResolvedValueOnce({ ...assignment, mySubmission: mine, submissionCount: 1 });
+  state.upload.mockResolvedValue(mine.files[0]);
+  render(
+    <AssignmentCard
+      item={{ ...assignment, dueAt: '2026-10-08T07:00:00.000Z' }}
+      workspace={{ ...workspace, memberRole: 'student' }}
+      reload={reload}
+    />,
+  );
+  expect(screen.getByText('遲交、仍可繳')).toBeTruthy();
+  const photo = new File([new Uint8Array([0xff, 0xd8, 0xff, 0x00])], 'shot.jpg', {
+    type: 'image/jpeg',
+  });
+  const camera = document.querySelector('input[capture="environment"]') as HTMLInputElement;
+  fireEvent.change(camera, { target: { files: [photo] } });
+  expect(screen.getByRole('list', { name: '即將繳交的檔案' }).textContent).toContain('shot.jpg');
+  fireEvent.submit(screen.getByLabelText('作業內容').closest('form')!);
+  expect(await screen.findByText('遲交')).toBeTruthy();
+  expect(state.request.mock.calls[0][0]).toContain('/files/intents');
+  expect(state.request.mock.calls[1][0]).toContain('/submit-files');
+  expect(state.upload).toHaveBeenCalled();
+  expect(screen.getByRole('region', { name: '我的繳交紀錄' }).textContent).toContain('shot.jpg');
+});
+
+it('keeps selected files and does not claim success when the network fails', async () => {
+  state.fileSubmit = true;
+  state.request.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+  render(
+    <AssignmentCard
+      item={assignment}
+      workspace={{ ...workspace, memberRole: 'student' }}
+      reload={reload}
+    />,
+  );
+  const photo = new File([new Uint8Array([0xff, 0xd8, 0xff, 0x00])], 'keep.jpg', {
+    type: 'image/jpeg',
+  });
+  fireEvent.change(document.querySelector('input[capture="environment"]') as HTMLInputElement, {
+    target: { files: [photo] },
+  });
+  fireEvent.submit(screen.getByLabelText('作業內容').closest('form')!);
+  expect(await screen.findByRole('alert')).toBeTruthy();
+  expect(screen.queryByText('繳交內容已儲存，老師現在可以查看。')).toBeNull();
+  expect(screen.getByRole('list', { name: '即將繳交的檔案' }).textContent).toContain('keep.jpg');
+});
+
+it('hides the file picker after the teacher stops accepting work', () => {
+  state.fileSubmit = true;
+  render(
+    <AssignmentCard
+      item={closed}
+      workspace={{ ...workspace, memberRole: 'student' }}
+      reload={reload}
+    />,
+  );
+  expect(screen.queryByRole('button', { name: '拍照' })).toBeNull();
+  expect(screen.getByText('已停止收件')).toBeTruthy();
+});
+

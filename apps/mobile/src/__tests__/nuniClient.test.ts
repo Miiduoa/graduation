@@ -1,4 +1,6 @@
 import {
+  nuniBffFilePut,
+  nuniBffRequest,
   nuniPlatformRequest,
   parseNuniLoginSession,
   parseNuniLoginTransaction,
@@ -227,4 +229,47 @@ it('keeps wake retry on personal-import sync while still aborting via external s
   controller.abort();
   await rejection;
   expect(sentSignal?.aborted).toBe(true);
+});
+
+it('sends assignment file JSON and bytes only to the nuni.tw BFF', async () => {
+  const fetchMock = jest.fn(async () => ({
+    ok: true,
+    text: async () => JSON.stringify({ id: 'cwf_11111111-1111-4111-8111-111111111111' }),
+  }));
+  global.fetch = fetchMock as unknown as typeof fetch;
+  await nuniBffRequest(
+    'class-workspaces/cw_11111111-1111-4111-8111-111111111111/assignments/cwa_22222222-2222-4222-8222-222222222222/files/intents',
+    handle,
+    {
+      originalName: 'shot.jpg',
+      contentType: 'image/jpeg',
+      byteSize: 8,
+      idempotencyKey: 'intent-key',
+    },
+  );
+  expect(fetchMock.mock.calls[0]?.[0]).toBe(
+    'https://nuni.tw/api/nuni/class-workspaces/cw_11111111-1111-4111-8111-111111111111/assignments/cwa_22222222-2222-4222-8222-222222222222/files/intents',
+  );
+  expect(fetchMock.mock.calls[0]?.[1]).toEqual(
+    expect.objectContaining({
+      method: 'POST',
+      headers: expect.objectContaining({ Authorization: `Platform ${handle}` }),
+    }),
+  );
+  await nuniBffFilePut(
+    'class-workspaces/cw_11111111-1111-4111-8111-111111111111/assignments/cwa_22222222-2222-4222-8222-222222222222/files/cwf_11111111-1111-4111-8111-111111111111/content',
+    handle,
+    Uint8Array.from([0xff, 0xd8, 0xff]),
+    'image/jpeg',
+  );
+  expect(String(fetchMock.mock.calls[1]?.[0])).toContain('https://nuni.tw/api/nuni/');
+  expect(fetchMock.mock.calls[1]?.[1]).toEqual(
+    expect.objectContaining({
+      method: 'PUT',
+      headers: expect.objectContaining({ Authorization: `Platform ${handle}` }),
+    }),
+  );
+  await expect(nuniBffRequest('https://foreign.invalid', handle)).rejects.toMatchObject({
+    code: 'INVALID_REQUEST',
+  });
 });

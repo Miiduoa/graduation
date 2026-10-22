@@ -83,6 +83,29 @@ const nextConfig: NextConfig = {
           { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=(self)' },
         ],
       },
+      // classroom camera 是建置時讀進映像的；開 ASSIGNMENT_FILE_SUBMIT_ENABLED 必須重建 Web 映像。
+      ...(process.env.ASSIGNMENT_FILE_SUBMIT_ENABLED === 'true'
+        ? [
+            {
+              source: '/classroom',
+              headers: [
+                {
+                  key: 'Permissions-Policy',
+                  value: 'camera=(self), microphone=(), geolocation=(self)',
+                },
+              ],
+            },
+            {
+              source: '/classroom/:path*',
+              headers: [
+                {
+                  key: 'Permissions-Policy',
+                  value: 'camera=(self), microphone=(), geolocation=(self)',
+                },
+              ],
+            },
+          ]
+        : []),
       {
         source: '/sso-callback',
         headers: [
