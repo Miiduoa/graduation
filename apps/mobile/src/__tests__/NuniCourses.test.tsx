@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native';
 import { NuniError, type NuniMaterial, type NuniWorkspace } from '@campus/shared/src/nuni';
 import { NuniCourses } from '../screens/nuni/NuniCourses';
 import { NuniDraftProvider } from '../state/nuniDrafts';
@@ -16,6 +16,21 @@ let mockSession = {
 };
 const mockRequest = jest.fn();
 let mockUuid = 0;
+const fileSubmitFlag = { on: false };
+const mockScrollAssignment = { reveal: jest.fn() };
+jest.mock('../screens/nuni/scrollAssignment', () => ({
+  revealAssignmentSubmitArea: (...args: unknown[]) => mockScrollAssignment.reveal(...args),
+}));
+jest.mock('../screens/nuni/assignmentFileSubmit', () => {
+  const actual = jest.requireActual('../screens/nuni/assignmentFileSubmit') as Record<
+    string,
+    unknown
+  >;
+  return {
+    ...actual,
+    assignmentFileSubmitEnabledNative: () => fileSubmitFlag.on,
+  };
+});
 jest.mock('../state/nuniSession', () => ({
   useNuniSession: () => ({
     session: mockSession,
@@ -103,6 +118,8 @@ async function response(
 }
 beforeEach(() => {
   mockUuid = 0;
+  fileSubmitFlag.on = false;
+  mockScrollAssignment.reveal.mockReset();
   mockRequest.mockReset();
   mockSession = {
     platformAccountId: accountId,
@@ -1106,4 +1123,74 @@ it('does not show a student pending filter to a course teacher', async () => {
   const view = await openCourse();
   expect(view.queryByRole('button', { name: /待完成/ })).toBeNull();
   expect(view.getByRole('button', { name: '查看收件：校園訪談' })).toBeTruthy();
+});
+
+it('hides camera and file buttons while the assignment file flag is off', async () => {
+  const view = await openCourse();
+  expect(view.queryByRole('button', { name: '拍照' })).toBeNull();
+  expect(view.getByLabelText('作業內容：校園訪談')).toBeTruthy();
+});
+
+it('shows camera, album and file actions when the assignment file flag is on', async () => {
+  fileSubmitFlag.on = true;
+  assignment = {
+    ...assignment,
+    dueAt: '2026-10-08T03:00:00.000Z',
+  };
+  const view = await openCourse();
+  expect(view.getByRole('button', { name: '拍照' })).toBeTruthy();
+  expect(view.getByRole('button', { name: '相簿' })).toBeTruthy();
+  expect(view.getByRole('button', { name: '檔案' })).toBeTruthy();
+  expect(view.getByText('遲交、仍可繳')).toBeTruthy();
+});
+
+it('opens the deep-linked assignment submit area even if drafts hid that card', async () => {
+  fileSubmitFlag.on = true;
+  const otherId = 'cwa_55555555-5555-4555-8555-555555555555';
+  assignment = { ...assignment, mySubmission: receipt(), submissionCount: 1 };
+  mockRequest.mockImplementation((path, context, input) =>
+    path.endsWith('/assignments') && !input
+      ? {
+          assignments: [
+            assignment,
+            {
+              ...assignment,
+              id: otherId,
+              title: '另一份待繳',
+              mySubmission: null,
+              submissionCount: 0,
+            },
+          ],
+        }
+      : response(path, context, input),
+  );
+  const cache = new Map<string, unknown>([
+    [`course:${courseId}:tab`, 'materials'],
+    [`course:${courseId}:activity-filter`, 'pending'],
+  ]);
+  const view = render(
+    <NuniDraftProvider cache={cache}>
+      <NuniCourses initialWorkspaceId={courseId} initialAssignmentId={assignmentId} />
+    </NuniDraftProvider>,
+  );
+  const card = await view.findByTestId(`assignment-${assignmentId}`);
+  const submit = await view.findByTestId(`assignment-submit-${assignmentId}`);
+  expect(within(card).getByLabelText('作業繳交區：校園訪談')).toBeTruthy();
+  expect(within(card).getByLabelText('作業內容：校園訪談')).toBeTruthy();
+  expect(within(card).getByRole('button', { name: '拍照' })).toBeTruthy();
+  expect(within(card).getByRole('button', { name: '更新作業繳交' })).toBeTruthy();
+  expect(view.queryByLabelText('作業繳交區：另一份待繳')).toBeNull();
+  expect(view.queryByTestId(`assignment-submit-${otherId}`)).toBeNull();
+  expect(view.queryByText('老師尚未發布教材。')).toBeNull();
+  fireEvent(submit, 'layout');
+  expect(mockScrollAssignment.reveal).toHaveBeenCalled();
+  expect(mockScrollAssignment.reveal.mock.calls[0][0]).toBeTruthy();
+  expect(mockScrollAssignment.reveal.mock.calls[0][1]).toBeTruthy();
+  expect(view.getByTestId('nuni-courses-scroll')).toBeTruthy();
+});
+
+it('does not scroll a submit area when no assignment is deep-linked', async () => {
+  const view = await openCourse();
+  expect(view.queryByTestId(`assignment-submit-${assignmentId}`)).toBeNull();
+  expect(mockScrollAssignment.reveal).not.toHaveBeenCalled();
 });

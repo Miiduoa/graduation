@@ -23,6 +23,16 @@ export type NuniMaterial = {
   createdAt: string;
 };
 export type NuniMaterialPage = { materials: NuniMaterial[]; nextCursor: string | null };
+export type NuniSubmissionFile = {
+  id: string;
+  originalName: string;
+  contentType: string;
+  byteSize: number;
+  kind: 'image' | 'file';
+  downloadPath: string;
+  downloadExp: string;
+  downloadSig: string;
+};
 export type NuniSubmission = {
   assignmentId: string;
   platformAccountId: string;
@@ -30,6 +40,8 @@ export type NuniSubmission = {
   body: string;
   state: 'submitted';
   submittedAt: string;
+  late?: boolean;
+  files?: NuniSubmissionFile[];
   teacherFeedback: string | null;
   reviewedAt: string | null;
 };
@@ -104,7 +116,7 @@ function content(value: unknown, limit = 8000): string {
 
 export function nuniId(
   value: unknown,
-  prefix: 'cw' | 'cwu' | 'cwm' | 'cwa' | 'cwq' | 'pa',
+  prefix: 'cw' | 'cwu' | 'cwm' | 'cwa' | 'cwq' | 'cwf' | 'pa',
 ): string {
   const result = string(value, 40);
   if (
@@ -219,8 +231,33 @@ export function parseNuniMaterial(value: unknown): NuniMaterial {
   };
 }
 
+export function parseNuniSubmissionFile(value: unknown): NuniSubmissionFile {
+  const item = nuniRecord(value);
+  return {
+    id: nuniId(item.id, 'cwf'),
+    originalName: content(item.originalName, 200),
+    contentType: content(item.contentType, 120),
+    byteSize: count(item.byteSize),
+    kind: choice(item.kind, ['image', 'file']),
+    downloadPath: content(item.downloadPath, 300),
+    downloadExp: content(item.downloadExp, 40),
+    downloadSig: content(item.downloadSig, 128),
+  };
+}
+
+function optionalSubmissionFiles(item: Record<string, unknown>): NuniSubmissionFile[] | undefined {
+  if (item.files === undefined) return undefined;
+  const files = array(item.files, parseNuniSubmissionFile);
+  if (new Set(files.map((file) => file.id)).size !== files.length)
+    throw new NuniError(502, 'INVALID_RESPONSE');
+  return files;
+}
+
 export function parseNuniSubmission(value: unknown): NuniSubmission {
   const item = nuniRecord(value);
+  const files = optionalSubmissionFiles(item);
+  if (item.late !== undefined && typeof item.late !== 'boolean')
+    throw new NuniError(502, 'INVALID_RESPONSE');
   return {
     assignmentId: nuniId(item.assignmentId, 'cwa'),
     platformAccountId: nuniId(item.platformAccountId, 'pa'),
@@ -228,6 +265,8 @@ export function parseNuniSubmission(value: unknown): NuniSubmission {
     body: content(item.body),
     state: choice(item.state, ['submitted']),
     submittedAt: date(item.submittedAt),
+    ...(typeof item.late === 'boolean' ? { late: item.late } : {}),
+    ...(files ? { files } : {}),
     ...feedbackFields(item),
   };
 }
@@ -279,9 +318,18 @@ export type NuniTransport = (
   input?: Record<string, unknown>,
   query?: Record<string, string>,
 ) => Promise<unknown>;
+export type NuniBinaryUpload = (
+  path: string,
+  body: Uint8Array,
+  contentType: string,
+) => Promise<unknown>;
 export type NuniAccountContext = string | (() => Promise<string>);
 
-export function createNuniClasses(transport: NuniTransport, accountContext?: NuniAccountContext) {
+export function createNuniClasses(
+  transport: NuniTransport,
+  accountContext?: NuniAccountContext,
+  upload?: NuniBinaryUpload,
+) {
   const path = (id: string) => `class-workspaces/${nuniId(id, 'cw')}`;
   const account = async () =>
     nuniId(typeof accountContext === 'function' ? await accountContext() : accountContext, 'pa');
@@ -453,6 +501,54 @@ export function createNuniClasses(transport: NuniTransport, accountContext?: Nun
       if (!item.mySubmission) throw new NuniError(502, 'INVALID_RESPONSE');
       return item;
     },
+    async createAssignmentFileIntent(
+      id: string,
+      assignmentId: string,
+      input: {
+        originalName: string;
+        contentType: string;
+        byteSize: number;
+        idempotencyKey: string;
+      },
+    ) {
+      const value = nuniRecord(
+        await transport(
+          `${path(id)}/assignments/${nuniId(assignmentId, 'cwa')}/files/intents`,
+          input,
+        ),
+      );
+      return {
+        id: nuniId(value.id, 'cwf'),
+        uploadPath: content(value.uploadPath, 300),
+        originalName: content(value.originalName, 200),
+        contentType: content(value.contentType, 120),
+        byteSize: count(value.byteSize),
+        kind: choice(value.kind, ['image', 'file']),
+      };
+    },
+    async uploadAssignmentFile(uploadPath: string, body: Uint8Array, contentType: string) {
+      if (!upload || !/^[a-z0-9-]+(?:\/[A-Za-z0-9_-]+)*$/.test(uploadPath))
+        throw new NuniError(503, 'ASSIGNMENT_FILE_UPLOAD_UNAVAILABLE');
+      const value = nuniRecord(await upload(uploadPath, body, contentType));
+      return parseNuniSubmissionFile(value);
+    },
+    async submitFiles(
+      id: string,
+      assignmentId: string,
+      input: { body?: string; fileIds: string[]; idempotencyKey: string },
+    ) {
+      const item = await assignment(
+        await transport(`${path(id)}/assignments/${nuniId(assignmentId, 'cwa')}/submit-files`, {
+          ...(input.body !== undefined ? { body: input.body } : {}),
+          fileIds: input.fileIds,
+          idempotencyKey: input.idempotencyKey,
+        }),
+        id,
+        assignmentId,
+      );
+      if (!item.mySubmission) throw new NuniError(502, 'INVALID_RESPONSE');
+      return item;
+    },
     async submissions(id: string, assignmentId: string) {
       const result = nuniRecord(
         await transport(`${path(id)}/assignments/${nuniId(assignmentId, 'cwa')}/submissions`),
@@ -532,6 +628,18 @@ export function nuniErrorMessage(error: unknown): string {
     if (error.code === 'SESSION_CHANGED') return '帳號已變更，請重新整理後再操作。';
     if (error.code === 'CLASS_WORKSPACE_MATERIAL_CURSOR_INVALID')
       return '教材頁面已失效，請更新教材後再試。';
+    if (error.code === 'ASSIGNMENT_FILE_TYPE_REJECTED')
+      return '這個檔案類型不能繳交。請改傳照片、PDF、Word、文字或 ZIP。';
+    if (error.code === 'ASSIGNMENT_FILE_TOO_LARGE')
+      return '檔案太大。照片上限 10 MB，其他檔案上限 20 MB。';
+    if (error.code === 'ASSIGNMENT_FILE_LIMIT') return '最多 8 張照片、2 個檔案，對齊課堂實務用量。';
+    if (error.code === 'ASSIGNMENT_FILE_REQUIRED') return '請先拍照、選相簿或選檔，再送出。';
+    if (error.code === 'ASSIGNMENT_FILE_NAME_INVALID') return '檔名無法使用，請重新命名後再選一次。';
+    if (error.code === 'ASSIGNMENT_FILE_SIZE_REJECTED') return '檔案大小不正確，請重新選擇。';
+    if (error.code === 'ASSIGNMENT_CLOSED') return '老師已停止收件，目前不能再繳交。';
+    if (error.code === 'ASSIGNMENT_FILE_SUBMIT_DISABLED') return '檔案繳交尚未開放。';
+    if (error.code === 'ASSIGNMENT_FILE_UPLOAD_UNAVAILABLE')
+      return '目前無法上傳檔案。請保留已選內容，稍後重試。';
     if (error.status === 401) return '登入已逾時，請重新登入。';
     if (error.status === 403) return '你目前沒有這項操作的權限。';
     if (error.status === 404) return '找不到這筆資料，可能已被移除。';

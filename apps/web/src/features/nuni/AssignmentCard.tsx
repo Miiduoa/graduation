@@ -8,9 +8,20 @@ import {
   type NuniSubmission,
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
+import {
+  assignmentReceiptStatusLabel,
+  assignmentSubmissionLate,
+} from '@campus/shared/src/assignmentFiles';
 import { MutationForm, useClasses } from './CourseUI';
 import { CourseText } from './CourseMaterials';
 import { useNuniSession } from './Session';
+import {
+  AssignmentFilePicker,
+  AssignmentLateBanner,
+  SubmittedFileList,
+  uploadAndSubmitFiles,
+  type LocalAssignmentFile,
+} from './AssignmentFileFields';
 import shared from './NuniApp.module.css';
 import styles from './CourseLearning.module.css';
 
@@ -52,8 +63,11 @@ export function AssignmentCard(props: Props) {
 }
 
 function Assignment({ item, workspace, reload, onConfirmed }: Props) {
+  const { session } = useNuniSession();
   const classes = useClasses();
+  const fileSubmit = session?.assignmentFileSubmit === true;
   const [saved, setSaved] = useState<NuniAssignment | null>(null);
+  const [localFiles, setLocalFiles] = useState<LocalAssignmentFile[]>([]);
   const assignment = latestAssignment(item, saved);
   const [submissions, setSubmissions] = useState<NuniSubmission[] | null>(null);
   const [error, setError] = useState('');
@@ -153,11 +167,25 @@ function Assignment({ item, workspace, reload, onConfirmed }: Props) {
       {assignment.dueAt && active && open && (
         <p className={styles.note}>目前仍開放繳交；實際收件狀態以老師是否停止收件為準。</p>
       )}
+      {fileSubmit ? (
+        <AssignmentLateBanner
+          dueAt={assignment.dueAt}
+          state={assignment.state}
+          workspaceState={workspace.state}
+        />
+      ) : null}
       <CourseText text={assignment.instructions} />
       {!active && <p className={styles.note}>課程已封存，目前只能查看已保留的作業資料。</p>}
       {assignment.mySubmission && (
         <section className={shared.receipt} aria-label="我的繳交紀錄">
-          <strong>已繳交</strong>
+          <strong>
+            {fileSubmit
+              ? assignmentReceiptStatusLabel(
+                  assignment.mySubmission.late === true ||
+                    assignmentSubmissionLate(assignment.dueAt, assignment.mySubmission.submittedAt),
+                )
+              : '已繳交'}
+          </strong>
           <p>
             <time dateTime={assignment.mySubmission.submittedAt}>
               {new Date(assignment.mySubmission.submittedAt).toLocaleString('zh-TW', {
@@ -165,6 +193,9 @@ function Assignment({ item, workspace, reload, onConfirmed }: Props) {
               })}
             </time>
           </p>
+          {assignment.mySubmission.files?.length ? (
+            <SubmittedFileList files={assignment.mySubmission.files} />
+          ) : null}
           <CourseText text={assignment.mySubmission.body} />
           {assignment.mySubmission.teacherFeedback ? (
             <div className={styles.feedback}>
@@ -197,26 +228,33 @@ function Assignment({ item, workspace, reload, onConfirmed }: Props) {
             label={assignment.mySubmission ? '更新繳交內容' : '繳交作業'}
             success="繳交內容已儲存，老師現在可以查看。"
             submit={async (data, key) => {
-              const result = await classes.submit(
-                workspace.id,
-                item.id,
-                String(data.get('body') ?? ''),
-                key,
-              );
+              const body = String(data.get('body') ?? '');
+              const result =
+                fileSubmit && localFiles.length
+                  ? await uploadAndSubmitFiles(classes, workspace.id, item.id, body, localFiles, key)
+                  : await classes.submit(workspace.id, item.id, body, key);
               if (!mounted.current) throw new NuniError(409, 'SESSION_CHANGED');
               setSaved(result);
+              setLocalFiles([]);
               onConfirmed?.(result);
               reload();
             }}
           >
+            {fileSubmit ? (
+              <AssignmentFilePicker files={localFiles} onChange={setLocalFiles} />
+            ) : null}
             <label>
               作業內容
               <textarea
                 name="body"
-                required
+                required={!fileSubmit || localFiles.length === 0}
                 maxLength={8000}
                 defaultValue={assignment.mySubmission?.body ?? ''}
-                placeholder="填寫內容，或附上作品連結。"
+                placeholder={
+                  fileSubmit
+                    ? '可寫說明；或直接拍照／選檔後送出。'
+                    : '填寫內容，或附上作品連結。'
+                }
               />
             </label>
           </MutationForm>
@@ -356,6 +394,7 @@ function FeedbackRow({
             {new Date(entry.submittedAt).toLocaleString('zh-TW')}
           </time>
         </div>
+        {entry.files?.length ? <SubmittedFileList files={entry.files} /> : null}
         <CourseText text={entry.body} />
         {entry.teacherFeedback && (
           <section className={styles.feedback} aria-label="目前老師回饋">
