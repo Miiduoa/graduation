@@ -1,10 +1,10 @@
 import { expect, it } from 'vitest';
 import {
-  arrivalLabel, campusDirectionEnded, campusEtaView, campusGroupForRow, campusGroupLabel, campusHomeSummary,
-  campusHeadingText, campusInboundPlace, campusLaneDisplay, campusLiveUnavailable, campusPlaceLabel, campusSegmentRows,
-  campusStopGroupLabels, campusUpdatedLabel, fetchedAgoLabel, groupCampusStops, headingAfterBoarding,
-  headingBeforeBoarding, headingBucket, listedCampusStops, pickCampusNext, publicHeadingFromStops,
-  publicPlaceName, waitingPlaceLine, waitingStopLabel,
+  arrivalLabel, campusArrivalA11yLabel, campusDestinationFull, campusDirectionEnded, campusEtaView, campusGroupForRow,
+  campusGroupLabel, campusHomeSummary, campusHeadingText, campusInboundPlace, campusLaneDisplay, campusLiveUnavailable,
+  campusPlaceLabel, campusSegmentRows, campusStopGroupLabels, campusUpdatedLabel, fetchedAgoLabel, groupCampusStops,
+  headingAfterBoarding, headingBeforeBoarding, headingBucket, listedCampusStops, pickCampusNext,
+  publicHeadingFromStops, publicPlaceName, waitingPlaceLine, waitingStopLabel,
   type RouteStopSequence, type TransitArrival, type TransitStop,
 } from './transit';
 
@@ -110,6 +110,7 @@ it('groups Providence stops into at most four student-facing labels without stop
   expect(campusPlaceLabel('靜宜大學(校門)')).toBe('校門口');
   expect(headingBucket('沙鹿火車站')).toBe('往沙鹿');
   expect(campusGroupLabel('英才路側', '往沙鹿')).toBe('校門口・往沙鹿');
+  expect(campusGroupLabel('英才路側', headingBucket('主顧聖母堂'))).toBe('校門口・往校內');
   expect(campusStopGroupLabels(stops[0])).toEqual(['校門口・往校內']);
   const listed = listedCampusStops(stops);
   expect(listed.listed.map((row) => row.name)).toEqual(['校門口・往沙鹿', '校門口・往市區', '專用道', '校門口・往校內']);
@@ -226,12 +227,14 @@ it('keeps long 專用道 route names as a single heading line', () => {
 });
 
 it('keeps a long destination as the full heading instead of a truncated label', () => {
-  expect(campusHeadingText({
-    route: '300', heading: '大勇四維東路口', arrival: null,
-  })).toBe('往 大勇四維東路口');
-  expect(campusHeadingText({
-    route: '300', heading: '大勇四維東路口', arrival: null,
-  })).not.toMatch(/…|\.\.\./);
+  const row = {
+    route: '307副', heading: '八德東大勇路口',
+    arrival: arrival({ route: '307副', destination: '八德東大勇路口', stopName: '靜宜大學(專用道)', seconds: 720 }),
+  };
+  expect(campusHeadingText(row)).toBe('往 八德東大勇路口');
+  expect(campusHeadingText(row)).not.toMatch(/…|\.\.\.|\n|／/);
+  expect(campusDestinationFull(row)).toBe('八德東大勇路口');
+  expect(campusArrivalA11yLabel(row, now)).toBe('307副 往 八德東大勇路口 12 分');
 });
 
 it('uses the first late-night scheduled hour for daytime night-bus copy, not the route name', () => {

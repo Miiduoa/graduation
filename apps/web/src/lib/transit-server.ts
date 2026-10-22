@@ -3,7 +3,7 @@ import {
   isCity, isPosition, isRecord, isStopId, publicPlaceName, type RouteStopSequence, type TransitArrival,
   type TransitCity, type TransitFailure, type TransitQuery, type TransitResult, type TransitRoute, type TransitStop,
 } from './transit';
-import { catalogProvidenceLaneDestination, catalogProvidenceLaneFarEnd, searchTaichungCatalog } from './transit-catalog';
+import { catalogProvidenceLaneDestination, searchTaichungCatalog } from './transit-catalog';
 
 const BASE = 'https://tdx.transportdata.tw';
 const text = (value: unknown) => typeof value === 'string' ? value.trim().slice(0, 120) : '';
@@ -113,8 +113,8 @@ function providenceLaneHeading(route: string, direction: number | null, current:
   if (isUsefulLaneHeading(current)) return publicPlaceName(current) || current;
   const catalogThis = catalogProvidenceLaneDestination(route, direction);
   if (isUsefulLaneHeading(catalogThis)) return publicPlaceName(catalogThis) || catalogThis;
-  const farEnd = catalogProvidenceLaneFarEnd(route);
-  if (isUsefulLaneHeading(farEnd)) return publicPlaceName(farEnd) || farEnd;
+  // 目錄寫明此方向終點就是本校專用道時，對得上官方「往靜宜」。不拿去程終點改寫返程。
+  if (catalogThis && isCampusStopName(catalogThis)) return '靜宜';
   return '';
 }
 
