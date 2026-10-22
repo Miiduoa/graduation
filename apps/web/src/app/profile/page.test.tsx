@@ -131,6 +131,8 @@ it('recognizes a course-only account without inventing school records or a globa
   state.user = null;
   state.nuni.session = { platformAccountId: 'pa_a', context: 'a', isPlatformOperator: false };
   render(<ProfilePage />);
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.getByRole('region', { name: 'Google 帳號' })).toBeTruthy();
   expect(screen.getByText('Google 帳號已登入')).toBeTruthy();
   expect(screen.getByRole('link', { name: '查看我的課程' }).getAttribute('href')).toBe(
     '/classroom',
