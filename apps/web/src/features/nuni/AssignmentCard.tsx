@@ -12,6 +12,7 @@ import {
   assignmentReceiptStatusLabel,
   assignmentSubmissionLate,
 } from '@campus/shared/src/assignmentFiles';
+import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
 import { MutationForm, useClasses } from './CourseUI';
 import { CourseText } from './CourseMaterials';
 import { useNuniSession } from './Session';
@@ -20,6 +21,7 @@ import {
   AssignmentLateBanner,
   SubmittedFileList,
   uploadAndSubmitFiles,
+  type AssignmentUploadProgress,
   type LocalAssignmentFile,
 } from './AssignmentFileFields';
 import shared from './NuniApp.module.css';
@@ -45,6 +47,7 @@ function latestAssignment(item: NuniAssignment, saved: NuniAssignment | null): N
           Date.parse(incoming.reviewedAt ?? incoming.submittedAt)));
   return {
     ...item,
+    submissionCount: saved.submissionCount ?? item.submissionCount,
     ...(saved.state === 'closed' ? { state: 'closed', closedAt: saved.closedAt } : {}),
     mySubmission: keepSubmission ? confirmed : incoming,
   };
@@ -62,12 +65,13 @@ export function AssignmentCard(props: Props) {
   );
 }
 
-function Assignment({ item, workspace, reload, onConfirmed }: Props) {
+function Assignment({ item, workspace, onConfirmed }: Props) {
   const { session } = useNuniSession();
   const classes = useClasses();
   const fileSubmit = session?.assignmentFileSubmit === true;
   const [saved, setSaved] = useState<NuniAssignment | null>(null);
   const [localFiles, setLocalFiles] = useState<LocalAssignmentFile[]>([]);
+  const [progress, setProgress] = useState<AssignmentUploadProgress | null>(null);
   const assignment = latestAssignment(item, saved);
   const [submissions, setSubmissions] = useState<NuniSubmission[] | null>(null);
   const [error, setError] = useState('');
@@ -156,9 +160,7 @@ function Assignment({ item, workspace, reload, onConfirmed }: Props) {
         {assignment.dueAt ? (
           <>
             參考期限：
-            <time dateTime={assignment.dueAt}>
-              {new Date(assignment.dueAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}
-            </time>
+            <time dateTime={assignment.dueAt}>{formatTaipeiDateTime(assignment.dueAt, { seconds: false })}</time>
           </>
         ) : (
           '未設定參考期限'
@@ -179,18 +181,14 @@ function Assignment({ item, workspace, reload, onConfirmed }: Props) {
       {assignment.mySubmission && (
         <section className={shared.receipt} aria-label="我的繳交紀錄">
           <strong>
-            {fileSubmit
-              ? assignmentReceiptStatusLabel(
-                  assignment.mySubmission.late === true ||
-                    assignmentSubmissionLate(assignment.dueAt, assignment.mySubmission.submittedAt),
-                )
-              : '已繳交'}
+            {assignmentReceiptStatusLabel(
+              assignment.mySubmission.late === true ||
+                assignmentSubmissionLate(assignment.dueAt, assignment.mySubmission.submittedAt),
+            )}
           </strong>
           <p>
             <time dateTime={assignment.mySubmission.submittedAt}>
-              {new Date(assignment.mySubmission.submittedAt).toLocaleString('zh-TW', {
-                timeZone: 'Asia/Taipei',
-              })}
+              {formatTaipeiDateTime(assignment.mySubmission.submittedAt)}
             </time>
           </p>
           {assignment.mySubmission.files?.length ? (
@@ -209,9 +207,7 @@ function Assignment({ item, workspace, reload, onConfirmed }: Props) {
               {assignment.mySubmission.reviewedAt && (
                 <p className={shared.muted}>
                   <time dateTime={assignment.mySubmission.reviewedAt}>
-                    {new Date(assignment.mySubmission.reviewedAt).toLocaleString('zh-TW', {
-                      timeZone: 'Asia/Taipei',
-                    })}
+                    {formatTaipeiDateTime(assignment.mySubmission.reviewedAt)}
                   </time>
                 </p>
               )}
@@ -229,17 +225,34 @@ function Assignment({ item, workspace, reload, onConfirmed }: Props) {
             success="繳交內容已儲存，老師現在可以查看。"
             submit={async (data, key) => {
               const body = String(data.get('body') ?? '');
-              const result =
-                fileSubmit && localFiles.length
-                  ? await uploadAndSubmitFiles(classes, workspace.id, item.id, body, localFiles, key)
-                  : await classes.submit(workspace.id, item.id, body, key);
-              if (!mounted.current) throw new NuniError(409, 'SESSION_CHANGED');
-              setSaved(result);
-              setLocalFiles([]);
-              onConfirmed?.(result);
-              reload();
+              try {
+                const result =
+                  fileSubmit && localFiles.length
+                    ? await uploadAndSubmitFiles(
+                        classes,
+                        workspace.id,
+                        item.id,
+                        body,
+                        localFiles,
+                        key,
+                        setProgress,
+                      )
+                    : await classes.submit(workspace.id, item.id, body, key);
+                if (!mounted.current) throw new NuniError(409, 'SESSION_CHANGED');
+                setSaved(result);
+                setLocalFiles([]);
+                setProgress(null);
+                onConfirmed?.(result);
+              } finally {
+                if (mounted.current) setProgress(null);
+              }
             }}
           >
+            {progress ? (
+              <p role="status">
+                上傳中 {progress.completed}/{progress.total}，請保持網路連線。
+              </p>
+            ) : null}
             {fileSubmit ? (
               <AssignmentFilePicker files={localFiles} onChange={setLocalFiles} />
             ) : null}
@@ -289,6 +302,7 @@ function Assignment({ item, workspace, reload, onConfirmed }: Props) {
                   <FeedbackRow
                     key={entry.platformAccountId}
                     entry={entry}
+                    dueAt={assignment.dueAt}
                     save={async (feedback, key) => {
                       const receipt = await classes.assignmentFeedback(
                         workspace.id,
@@ -360,9 +374,11 @@ function Assignment({ item, workspace, reload, onConfirmed }: Props) {
 
 function FeedbackRow({
   entry,
+  dueAt,
   save,
 }: {
   entry: NuniSubmission;
+  dueAt: string | null;
   save: (feedback: string, key: string) => Promise<NuniSubmission>;
 }) {
   const [notice, setNotice] = useState('');
@@ -390,9 +406,14 @@ function FeedbackRow({
       <article aria-label={`${entry.displayName || '課程成員'}的繳交`}>
         <div className={styles.heading}>
           <h4>{entry.displayName || '課程成員'}</h4>
-          <time className={styles.metadata} dateTime={entry.submittedAt}>
-            {new Date(entry.submittedAt).toLocaleString('zh-TW')}
-          </time>
+          <span className={styles.metadata}>
+            <strong>
+              {assignmentReceiptStatusLabel(
+                entry.late === true || assignmentSubmissionLate(dueAt, entry.submittedAt),
+              )}
+            </strong>
+            <time dateTime={entry.submittedAt}>{formatTaipeiDateTime(entry.submittedAt)}</time>
+          </span>
         </div>
         {entry.files?.length ? <SubmittedFileList files={entry.files} /> : null}
         <CourseText text={entry.body} />

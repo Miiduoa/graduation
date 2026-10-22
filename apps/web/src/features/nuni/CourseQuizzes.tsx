@@ -15,12 +15,13 @@ import { CourseUnitSelect } from './CourseUnitSelect';
 import { selectCourseUnit } from './courseOutline';
 import { CourseText } from './CourseMaterials';
 import { matchesQuizFilter, quizStatus, type QuizFilter } from './courseTasks';
+import { formatTaipeiDateTime, taipeiWallTimeToIso } from '@campus/shared/src/taipeiTime';
 import { useNuniSession } from './Session';
 import styles from './NuniApp.module.css';
 import quizStyles from './CourseQuizzes.module.css';
 
 function dateLabel(value: string) {
-  return new Date(value).toLocaleString('zh-TW', { dateStyle: 'medium', timeStyle: 'short' });
+  return formatTaipeiDateTime(value, { seconds: false });
 }
 
 export function CourseQuizzes({ workspace, units, onChanged }: { workspace: NuniWorkspace; units?: NuniUnit[] | null; onChanged?: () => void }) {
@@ -251,7 +252,7 @@ function QuizList({ workspace, accountId, units, onChanged }: { workspace: NuniW
               const item = await classes.createQuiz(workspace.id, {
                 title: String(form.get('title') || '').trim(),
                 prompt: String(form.get('prompt') || '').trim(),
-                dueAt: due ? new Date(due).toISOString() : null,
+                dueAt: taipeiWallTimeToIso(due),
                 unitId: units === undefined ? undefined : selectCourseUnit(form, units),
                 idempotencyKey: key,
               });

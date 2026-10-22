@@ -76,7 +76,7 @@ export function assignmentLateOpenLabel(
   if (!assignmentAcceptsSubmissions(state, workspaceState) || !dueAt) return null;
   const due = Date.parse(dueAt);
   if (!Number.isFinite(due) || due >= now) return null;
-  return '遲交、仍可繳';
+  return '已過截止時間，現在送出會標為遲交';
 }
 
 export function assignmentReceiptStatus(late: boolean): AssignmentSubmitStatus {
@@ -84,7 +84,42 @@ export function assignmentReceiptStatus(late: boolean): AssignmentSubmitStatus {
 }
 
 export function assignmentReceiptStatusLabel(late: boolean): string {
-  return late ? '遲交' : '已繳';
+  return late ? '遲交' : '準時';
+}
+
+export const MAX_ASSIGNMENT_IMAGE_EDGE = 2000;
+
+export function assignmentImageTargetSize(
+  width: number,
+  height: number,
+  maxEdge = MAX_ASSIGNMENT_IMAGE_EDGE,
+): { width: number; height: number } {
+  if (
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width <= 0 ||
+    height <= 0 ||
+    Math.max(width, height) <= maxEdge
+  ) {
+    return { width, height };
+  }
+  const scale = maxEdge / Math.max(width, height);
+  return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
+}
+
+export function assignmentFileContentQuery(exp: string, sig: string, download = false): string {
+  const query = `exp=${encodeURIComponent(exp)}&sig=${encodeURIComponent(sig)}`;
+  return download ? `${query}&download=1` : query;
+}
+
+export function moveAssignmentFile<T>(items: T[], from: number, delta: number): T[] {
+  const to = from + delta;
+  if (from < 0 || from >= items.length || to < 0 || to >= items.length) return items;
+  const next = [...items];
+  const [item] = next.splice(from, 1);
+  if (item === undefined) return items;
+  next.splice(to, 0, item);
+  return next;
 }
 
 function extensionOf(name: string): string {

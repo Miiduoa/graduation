@@ -105,8 +105,15 @@ export async function handleAssignmentFileRequest(
   if (mutating && !readPlatformAuthorization(request)) requireSameOrigin(request);
   if (request.method === 'GET' && fileQuery) {
     const keys = Array.from(request.nextUrl.searchParams.keys());
-    if (keys.some((key) => key !== 'exp' && key !== 'sig') || request.nextUrl.searchParams.getAll('exp').length !== 1 || request.nextUrl.searchParams.getAll('sig').length !== 1)
+    if (
+      keys.some((key) => key !== 'exp' && key !== 'sig' && key !== 'download') ||
+      request.nextUrl.searchParams.getAll('exp').length !== 1 ||
+      request.nextUrl.searchParams.getAll('sig').length !== 1 ||
+      request.nextUrl.searchParams.getAll('download').length > 1
+    )
       throw new NuniError(400, 'INVALID_INPUT');
+    const download = request.nextUrl.searchParams.get('download');
+    if (download !== null && download !== '1') throw new NuniError(400, 'INVALID_INPUT');
     const secret =
       process.env.ASSIGNMENT_FILE_SIGNING_SECRET?.trim() || process.env.BFF_SESSION_SECRET?.trim();
     if (!secret || secret.length < 32) throw new NuniError(503, 'CONFIGURATION_REQUIRED');
@@ -131,7 +138,7 @@ export async function handleAssignmentFileRequest(
       request.nextUrl.searchParams.get('exp') ?? '',
       request.nextUrl.searchParams.get('sig') ?? '',
     );
-    return binaryResponse(file.bytes, file.contentType, file.originalName);
+    return binaryResponse(file.bytes, file.contentType, file.originalName, download === '1');
   }
   const actor = await actorFor(request);
   const service = serviceFor(actor);
@@ -148,6 +155,24 @@ export async function handleAssignmentFileRequest(
   }
   const idempotencyKey = field(input, 'idempotencyKey', 8, 100);
   if (segments[5] === 'intents') {
+    if (Array.isArray(input.files)) {
+      if (input.files.length < 1 || input.files.length > 10) throw new NuniError(422, 'INVALID_INPUT');
+      const files = input.files.map((entry, index) => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry))
+          throw new NuniError(422, 'INVALID_INPUT');
+        const file = entry as Record<string, unknown>;
+        const byteSize = file.byteSize;
+        if (!Number.isSafeInteger(byteSize)) throw new NuniError(422, 'INVALID_INPUT');
+        const key = file.idempotencyKey === undefined ? `${idempotencyKey}:${index}` : field(file, 'idempotencyKey', 8, 100);
+        return {
+          originalName: field(file, 'originalName', 1, 200),
+          contentType: field(file, 'contentType', 1, 120),
+          byteSize: Number(byteSize),
+          idempotencyKey: key,
+        };
+      });
+      return jsonResponse({ intents: await service.createIntents(actor, segments[1], segments[3], files) }, 201);
+    }
     const byteSize = input.byteSize;
     if (!Number.isSafeInteger(byteSize)) throw new NuniError(422, 'INVALID_INPUT');
     return jsonResponse(

@@ -446,4 +446,35 @@ describe('assignment file service', () => {
     expect(hydrated?.body).toBe(FILE_ONLY_SUBMISSION_BODY);
     expect(hydrated?.files).toEqual([]);
   });
+
+  it('creates a batch of intents sequentially so the file budget cannot race', async () => {
+    const api = service();
+    const student = actor(studentId);
+    const intents = await api.createIntents(
+      student,
+      workspaceId,
+      assignmentId,
+      Array.from({ length: 8 }, (_, index) => ({
+        originalName: `shot-${index}.jpg`,
+        contentType: 'image/jpeg',
+        byteSize: 64,
+        idempotencyKey: `intent-batch-${index}-unique`,
+      })),
+    );
+    expect(intents).toHaveLength(8);
+    expect(intents.map((item) => item.originalName)).toEqual(
+      Array.from({ length: 8 }, (_, index) => `shot-${index}.jpg`),
+    );
+    for (const intent of intents) {
+      await api.putContent(student, workspaceId, assignmentId, intent.id, jpeg());
+    }
+    await expect(
+      api.createIntent(student, workspaceId, assignmentId, {
+        originalName: 'overflow.jpg',
+        contentType: 'image/jpeg',
+        byteSize: 64,
+        idempotencyKey: 'intent-batch-overflow-1',
+      }),
+    ).rejects.toMatchObject({ status: 422, code: 'ASSIGNMENT_FILE_LIMIT' });
+  });
 });

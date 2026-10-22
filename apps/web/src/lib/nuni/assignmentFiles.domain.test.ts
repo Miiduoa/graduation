@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   MAX_ASSIGNMENT_IMAGES,
+  assignmentFileContentQuery,
+  assignmentImageTargetSize,
   assertAssignmentFileBudget,
   assertAssignmentFileCounts,
   assertAssignmentFileMagic,
@@ -10,8 +12,11 @@ import {
   assignmentReceiptStatusLabel,
   assignmentSubmissionLate,
   classifyAssignmentFile,
+  formatAssignmentFileSize,
+  moveAssignmentFile,
   sanitizeAssignmentFileName,
 } from '@campus/shared/src/assignmentFiles';
+import { formatTaipeiDateTime, taipeiWallTimeToIso } from '@campus/shared/src/taipeiTime';
 import { NuniError } from '@campus/shared/src/nuni';
 
 const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
@@ -32,16 +37,39 @@ describe('assignment file domain', () => {
       true,
     );
     expect(assignmentReceiptStatusLabel(true)).toBe('遲交');
-    expect(assignmentReceiptStatusLabel(false)).toBe('已繳');
+    expect(assignmentReceiptStatusLabel(false)).toBe('準時');
   });
 
   it('shows a late-but-open banner only while the teacher still accepts work', () => {
     const now = Date.parse('2026-10-21T13:00:00.000Z');
     expect(
       assignmentLateOpenLabel('2026-10-21T12:00:00.000Z', 'open', 'active', now),
-    ).toBe('遲交、仍可繳');
+    ).toBe('已過截止時間，現在送出會標為遲交');
     expect(assignmentLateOpenLabel('2026-10-21T12:00:00.000Z', 'closed', 'active', now)).toBeNull();
     expect(assignmentLateOpenLabel('2026-10-21T14:00:00.000Z', 'open', 'active', now)).toBeNull();
+  });
+
+  it('formats Taipei wall time from UTC without using the host timezone', () => {
+    expect(formatTaipeiDateTime('2026-10-22T03:49:43.000Z')).toBe('2026/10/22 上午11:49:43');
+    expect(formatTaipeiDateTime('2026-10-21T15:49:43.000Z')).toBe('2026/10/21 下午11:49:43');
+    expect(formatTaipeiDateTime('2026-10-29T15:59:00.000Z', { seconds: false })).toBe(
+      '2026/10/29 下午11:59',
+    );
+    expect(taipeiWallTimeToIso('2026-10-29T23:59')).toBe('2026-10-29T23:59:00+08:00');
+    expect(new Date(taipeiWallTimeToIso('2026-10-29T23:59')!).toISOString()).toBe(
+      '2026-10-29T15:59:00.000Z',
+    );
+  });
+
+  it('scales photos to a 2000px edge, labels sizes, and reorders files', () => {
+    expect(assignmentImageTargetSize(4000, 3000)).toEqual({ width: 2000, height: 1500 });
+    expect(assignmentImageTargetSize(1600, 900)).toEqual({ width: 1600, height: 900 });
+    expect(formatAssignmentFileSize(512)).toBe('512 B');
+    expect(formatAssignmentFileSize(2048)).toBe('2.0 KB');
+    expect(assignmentFileContentQuery('1', 'sig')).toBe('exp=1&sig=sig');
+    expect(assignmentFileContentQuery('1', 'sig', true)).toBe('exp=1&sig=sig&download=1');
+    expect(moveAssignmentFile(['a', 'b', 'c'], 2, -1)).toEqual(['a', 'c', 'b']);
+    expect(moveAssignmentFile(['a', 'b'], 0, -1)).toEqual(['a', 'b']);
   });
 
   it('rejects disallowed types and oversize payloads', () => {

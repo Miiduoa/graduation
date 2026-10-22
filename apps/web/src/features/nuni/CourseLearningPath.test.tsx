@@ -32,7 +32,7 @@ const assignment: NuniAssignment = {
   state: 'open',
   createdAt: '2026-10-10T00:00:00Z',
   closedAt: null,
-  dueAt: '2026-10-18T00:00:00Z',
+  dueAt: '2026-10-29T15:59:00.000Z',
   unitId: unit.id,
   unitTitle: unit.title,
   submissionCount: 0,
@@ -81,6 +81,7 @@ it('organizes real lessons by unit, shows receipt-based pending work and links t
   expect(await screen.findByText('0 / 1')).toBeTruthy();
   expect(screen.getByText('可處理的待辦').previousElementSibling?.textContent).toBe('1');
   expect(screen.getByText(/教材閱讀不會自動標記完成/)).toBeTruthy();
+  expect(link.textContent).toContain('2026/10/29 下午11:59');
 });
 
 it('creates a unit using the authenticated course API and only reports success after a receipt', async () => {

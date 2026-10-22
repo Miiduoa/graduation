@@ -192,6 +192,7 @@ export function binaryResponse(
   bytes: Uint8Array,
   contentType: string,
   fileName: string,
+  download = false,
 ): NextResponse {
   const safeName = fileName.replace(/["\r\n]/g, '_');
   return new NextResponse(Buffer.from(bytes), {
@@ -199,7 +200,7 @@ export function binaryResponse(
     headers: {
       'Content-Type': contentType,
       'Content-Length': String(bytes.byteLength),
-      'Content-Disposition': `inline; filename="${safeName}"`,
+      'Content-Disposition': `${download ? 'attachment' : 'inline'}; filename="${safeName}"`,
       'Cache-Control': 'no-store, private',
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'no-referrer',

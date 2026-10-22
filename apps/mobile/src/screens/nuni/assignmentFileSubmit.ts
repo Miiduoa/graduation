@@ -5,7 +5,10 @@ import * as ImagePicker from 'expo-image-picker';
 import {
   MAX_ASSIGNMENT_DOCUMENTS,
   MAX_ASSIGNMENT_IMAGES,
+  assignmentFileContentQuery,
+  assignmentImageTargetSize,
   formatAssignmentFileSize,
+  moveAssignmentFile,
 } from '@campus/shared/src/assignmentFiles';
 import { NuniError, type NuniSubmissionFile } from '@campus/shared/src/nuni';
 
@@ -16,6 +19,8 @@ export type LocalNativeFile = {
   byteSize: number;
   kind: 'image' | 'file';
   uri: string;
+  width?: number;
+  height?: number;
 };
 
 export function assignmentFileSubmitEnabledNative(): boolean {
@@ -37,17 +42,51 @@ async function fromUri(
   name: string,
   contentType: string,
   kind: 'image' | 'file',
+  size?: { width?: number; height?: number },
 ): Promise<LocalNativeFile> {
   const file = new File(uri);
   const byteSize = file.exists ? file.size : 0;
   return {
-    key: `${uri}:${byteSize}`,
+    key: `${uri}:${byteSize}:${Date.now()}`,
     name,
     contentType,
     byteSize,
     kind,
     uri,
+    width: size?.width,
+    height: size?.height,
   };
+}
+
+export async function compressNativeAssignmentImage(file: LocalNativeFile): Promise<LocalNativeFile> {
+  if (file.kind !== 'image') return file;
+  const width = file.width ?? 0;
+  const height = file.height ?? 0;
+  const target = assignmentImageTargetSize(width || 2000, height || 2000);
+  if (width && height && target.width === width && target.height === height && file.byteSize <= 1.5 * 1024 * 1024)
+    return file;
+  try {
+    const ImageManipulator = await import('expo-image-manipulator');
+    const result = await ImageManipulator.manipulateAsync(
+      file.uri,
+      width && height ? [{ resize: { width: target.width, height: target.height } }] : [{ resize: { width: 2000 } }],
+      { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG },
+    );
+    return fromUri(result.uri, file.name.replace(/\.[^.]+$/, '.jpg'), 'image/jpeg', 'image', {
+      width: result.width,
+      height: result.height,
+    });
+  } catch {
+    return file;
+  }
+}
+
+export function removeNativeFile(files: LocalNativeFile[], key: string): LocalNativeFile[] {
+  return files.filter((item) => item.key !== key);
+}
+
+export function moveNativeFile(files: LocalNativeFile[], from: number, delta: number): LocalNativeFile[] {
+  return moveAssignmentFile(files, from, delta);
 }
 
 export async function pickAssignmentCamera(current: LocalNativeFile[]): Promise<LocalNativeFile[]> {
@@ -61,7 +100,10 @@ export async function pickAssignmentCamera(current: LocalNativeFile[]): Promise<
   const asset = result.assets[0];
   return pushFile(
     current,
-    await fromUri(asset.uri, asset.fileName || 'photo.jpg', asset.mimeType || 'image/jpeg', 'image'),
+    await fromUri(asset.uri, asset.fileName || 'photo.jpg', asset.mimeType || 'image/jpeg', 'image', {
+      width: asset.width,
+      height: asset.height,
+    }),
   );
 }
 
@@ -79,7 +121,10 @@ export async function pickAssignmentAlbum(current: LocalNativeFile[]): Promise<L
   for (const asset of result.assets) {
     next = pushFile(
       next,
-      await fromUri(asset.uri, asset.fileName || 'photo.jpg', asset.mimeType || 'image/jpeg', 'image'),
+      await fromUri(asset.uri, asset.fileName || 'photo.jpg', asset.mimeType || 'image/jpeg', 'image', {
+        width: asset.width,
+        height: asset.height,
+      }),
     );
   }
   return next;
@@ -120,8 +165,66 @@ export function requireAssignmentPayload(body: string, files: LocalNativeFile[])
   if (!body.trim() && !files.length) throw new NuniError(422, 'ASSIGNMENT_FILE_REQUIRED');
 }
 
-export function assignmentFileDownloadUrl(file: NuniSubmissionFile): string {
-  return `https://nuni.tw/api/nuni/${file.downloadPath}?exp=${encodeURIComponent(file.downloadExp)}&sig=${encodeURIComponent(file.downloadSig)}`;
+export type NativeUploadProgress = { completed: number; total: number };
+
+export async function submitNativeAssignmentFiles<T>(
+  classes: {
+    createAssignmentFileIntents(
+      workspaceId: string,
+      assignmentId: string,
+      input: {
+        files: { originalName: string; contentType: string; byteSize: number; idempotencyKey?: string }[];
+        idempotencyKey: string;
+      },
+    ): Promise<{ id: string; uploadPath: string; contentType: string }[]>;
+    uploadAssignmentFile(uploadPath: string, body: Uint8Array, contentType: string): Promise<unknown>;
+    submitFiles(
+      workspaceId: string,
+      assignmentId: string,
+      input: { body?: string; fileIds: string[]; idempotencyKey: string },
+    ): Promise<T>;
+  },
+  workspaceId: string,
+  assignmentId: string,
+  body: string,
+  files: LocalNativeFile[],
+  key: string,
+  onProgress?: (progress: NativeUploadProgress) => void,
+) {
+  requireAssignmentPayload(body, files);
+  const prepared: LocalNativeFile[] = [];
+  for (const file of files) prepared.push(await compressNativeAssignmentImage(file));
+  onProgress?.({ completed: 0, total: prepared.length });
+  const intents = prepared.length
+    ? await classes.createAssignmentFileIntents(workspaceId, assignmentId, {
+        idempotencyKey: `${key}:intents`,
+        files: prepared.map((file, index) => ({
+          originalName: file.name,
+          contentType: file.contentType,
+          byteSize: file.byteSize,
+          idempotencyKey: `${key}:file:${index}`,
+        })),
+      })
+    : [];
+  let completed = 0;
+  await Promise.all(
+    intents.map(async (intent, index) => {
+      const file = prepared[index];
+      if (!file) throw new NuniError(502, 'INVALID_RESPONSE');
+      await classes.uploadAssignmentFile(intent.uploadPath, await nativeFileBytes(file), intent.contentType);
+      completed += 1;
+      onProgress?.({ completed, total: prepared.length });
+    }),
+  );
+  return classes.submitFiles(workspaceId, assignmentId, {
+    body: body.trim() || undefined,
+    fileIds: intents.map((intent) => intent.id),
+    idempotencyKey: key,
+  });
+}
+
+export function assignmentFileDownloadUrl(file: NuniSubmissionFile, download = false): string {
+  return `https://nuni.tw/api/nuni/${file.downloadPath}?${assignmentFileContentQuery(file.downloadExp, file.downloadSig, download)}`;
 }
 
 export function usesAssignmentFileBff(path: string, input?: Record<string, unknown>): boolean {
