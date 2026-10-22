@@ -146,6 +146,28 @@ it('lists BRT arrivals on 專用道 and shows empty copy when that stop has no b
   expect(screen.queryByText('162')).toBeNull();
 });
 
+it('keeps a long 專用道 terminus on one spoken line and shows the full name in the opened panel', async () => {
+  const now = new Date().toISOString();
+  vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next' ? {
+    status: 'ready', kind: 'arrivals', fetchedAt: now,
+    arrivals: [
+      {
+        id: '307-branch', route: '307副', direction: 1, destination: '八德東大勇路口',
+        status: 0, seconds: 720, updatedAt: now, stopName: '靜宜大學(專用道)',
+      },
+    ],
+  } : emptyArrivals());
+  renderExplorer();
+  fireEvent.click(await screen.findByRole('tab', { name: '專用道' }));
+  const row = await screen.findByRole('button', { name: '307副 往 八德東大勇路口 12 分' });
+  expect(row.textContent).toContain('往 八德東大勇路口');
+  expect(row.textContent).not.toMatch(/往 八德東大勇路／口|往 八德東大勇路\n口/);
+  expect(screen.queryByText('終點 八德東大勇路口')).toBeNull();
+  fireEvent.click(row);
+  expect(row.getAttribute('aria-expanded')).toBe('true');
+  expect(screen.getByText('終點 八德東大勇路口')).toBeTruthy();
+});
+
 it('shows inbound campus rows as destinations and never as 從', async () => {
   const now = new Date().toISOString();
   vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next' ? {
@@ -571,9 +593,9 @@ it('keeps long route badges on one line and fits the stop-mode bar on a 350px bo
   expect(css).toMatch(/\.routeBadge \{[\s\S]*?white-space: nowrap;/);
   expect(css).toMatch(/grid-template-columns: 56px minmax\(0, 1fr\) auto;/);
   expect(css).toMatch(/\.campusFirst > \.modeBar button \{[\s\S]*?flex: 1 1 0;/);
-  expect(css).toMatch(/\.rowCopy strong \{[\s\S]*?white-space: normal;/);
-  expect(css).toMatch(/\.rowCopy strong \{[\s\S]*?overflow-wrap: anywhere;/);
-  expect(css).not.toMatch(/\.rowCopy strong \{[\s\S]*?text-overflow: ellipsis;/);
+  expect(css).toMatch(/\.rowCopy strong \{[^}]*white-space: nowrap;/);
+  expect(css).toMatch(/\.rowCopy strong \{[^}]*text-overflow: ellipsis;/);
+  expect(css).not.toMatch(/\.rowCopy strong \{[^}]*overflow-wrap: anywhere;/);
 });
 
 describe('static catalog stops', () => {

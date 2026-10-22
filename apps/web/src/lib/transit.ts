@@ -105,6 +105,7 @@ export function publicPlaceName(name: string): string {
   const value = name.trim();
   if (!value) return '';
   if (value.startsWith('從')) return value;
+  if (value === '靜宜') return '靜宜';
   if (isCampusStopName(value)) return campusInboundPlace(value) || '校內';
   for (const landmark of HEADING_LANDMARKS) {
     if (landmark.test.test(value)) return landmark.label;
@@ -177,6 +178,7 @@ export function campusGroupLabel(place: CampusPlaceLabel | '', bucket: CampusHea
   if (place === '校門口' && bucket === '往市區') return '校門口・往市區';
   if (place === '英才路側' && bucket === '往沙鹿') return '校門口・往沙鹿';
   if (place === '校門口' && bucket === '往校內') return '校門口・往校內';
+  if (place === '英才路側' && bucket === '往校內') return '校門口・往校內';
   return place || '';
 }
 export function campusStopGroupLabels(stop: TransitStop): string[] {
@@ -400,7 +402,7 @@ function isEndedStatus(status: number | null): boolean {
 export function arrivalLabel(arrival: TransitArrival, now: number): string {
   const timestamp = arrival.updatedAt ? Date.parse(arrival.updatedAt) : NaN;
   const fresh = Number.isFinite(timestamp) && timestamp <= now + 30_000 && now - timestamp < TRANSIT_FRESHNESS_MS;
-  if (fresh && arrival.status === 0 && arrival.seconds !== null && Number.isFinite(arrival.seconds) && arrival.seconds >= 0) {
+  if (fresh && liveMinutesTrusted(arrival) && arrival.status === 0 && arrival.seconds !== null && Number.isFinite(arrival.seconds) && arrival.seconds >= 0) {
     const remaining = arrival.seconds - Math.max(0, now - timestamp) / 1000;
     if (remaining >= -30) return remaining < 120 ? '進站中' : `約 ${Math.ceil(remaining / 60)} 分鐘`;
     const liveScheduled = scheduledLabel(arrival, now);
@@ -429,6 +431,7 @@ export function arrivalKind(arrival: TransitArrival, now: number): ArrivalKind {
   if (!Number.isFinite(timestamp) || timestamp > now + 30_000 || now - timestamp >= TRANSIT_FRESHNESS_MS) return 'stale';
   if (arrival.status === 1) return 'not-started';
   if (arrival.status === 3 || arrival.status === 4) return 'ended';
+  if (!liveMinutesTrusted(arrival)) return 'other';
   if (arrival.status !== 0 || arrival.seconds === null || !Number.isFinite(arrival.seconds) || arrival.seconds < 0) return 'other';
   const remaining = arrival.seconds - Math.max(0, now - timestamp) / 1000;
   return remaining < -30 ? 'stale' : 'live';
@@ -449,8 +452,33 @@ export function campusStopRank(name: string): number {
   if (name.includes('靜宜大學')) return 1;
   return 3;
 }
+/**
+ * 162 返程官方對照是英才路，校門是同一班車晚到的下一站。
+ * 368 去程進校園仍以校門為準，避免把已對得上的校門時刻改掉。
+ */
+export function campusArrivalRank(arrival: TransitArrival): number {
+  const stopName = arrival.stopName ?? '';
+  const place = campusPlaceLabel(stopName);
+  const inbound = headingBucket(publicPlaceName(arrival.destination)) === '往校內';
+  if (inbound && arrival.direction === 1 && place === '英才路側') return -1;
+  return campusStopRank(stopName);
+}
+/**
+ * 即時分鐘數必須對得上該筆 TDX Direction 的終點。
+ * 專用道返程（Direction 1）終點是本校時，不可把去程市區終點的倒數掛在「往台中車站」。
+ */
+export function liveMinutesTrusted(arrival: TransitArrival): boolean {
+  const heading = publicPlaceName(arrival.destination) || arrival.destination.trim();
+  if (!heading) return true;
+  const place = campusPlaceLabel(arrival.stopName ?? '');
+  const bucket = headingBucket(heading);
+  if (place === '專用道' && arrival.direction === 1 && bucket === '往市區') return false;
+  if (place === '專用道' && arrival.direction === 0 && (bucket === '往校內' || heading === '靜宜')) return false;
+  return true;
+}
 export type CampusNextRow = { route: string; heading: string; arrival: TransitArrival | null };
 function liveRemaining(arrival: TransitArrival, now: number): number | null {
+  if (!liveMinutesTrusted(arrival)) return null;
   if (arrivalKind(arrival, now) !== 'live' || arrival.seconds === null || !arrival.updatedAt) return null;
   return arrival.seconds - Math.max(0, now - Date.parse(arrival.updatedAt)) / 1000;
 }
@@ -458,7 +486,7 @@ function pickCampusArrival(candidates: TransitArrival[], now: number): TransitAr
   if (!candidates.length) return null;
   const scored = candidates.map((arrival) => ({
     arrival,
-    rank: campusStopRank(arrival.stopName ?? ''),
+    rank: campusArrivalRank(arrival),
     live: liveRemaining(arrival, now),
     scheduled: arrival.scheduledAt ? Date.parse(arrival.scheduledAt) : NaN,
   }));
@@ -538,6 +566,22 @@ export function campusHeadingText(row: CampusNextRow): string {
   if (heading.startsWith('從')) return '進校園';
   if (heading.startsWith('往')) return heading;
   return `往 ${heading}`;
+}
+export function campusDestinationFull(row: CampusNextRow): string {
+  const raw = (row.arrival?.destination || row.heading || '').trim();
+  if (!raw) return campusHeadingText(row).replace(/^往\s*/, '');
+  const inbound = campusInboundPlace(raw);
+  if (inbound) return inbound;
+  const named = publicPlaceName(raw) || raw;
+  if (named === '校內' || named === '進校園' || named === '本站' || named === '到本站') return '靜宜';
+  return named;
+}
+export function campusArrivalA11yLabel(row: CampusNextRow, now: number): string {
+  const heading = campusHeadingText(row);
+  const full = campusDestinationFull(row);
+  const view = campusEtaView(row.arrival, now);
+  const spokenHeading = heading === '進校園' && full && full !== '靜宜' ? `往 ${full}` : heading || (full ? `往 ${full}` : '');
+  return [row.route, spokenHeading, view.text].filter(Boolean).join(' ');
 }
 export function nextScheduledClock(arrival: TransitArrival | null, now: number): string | null {
   if (!arrival?.scheduledAt) return null;

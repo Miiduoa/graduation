@@ -30,6 +30,7 @@ for (const [source, name] of [
 const client = require(path.join(output, 'transit.js'));
 const server = require(path.join(output, 'transit-server.js'));
 const route = require(path.join(output, 'route.js'));
+const studentReport = require(path.join(root, 'apps/web/src/lib/fixtures/tdx-providence-student-report.json'));
 const NOW = Date.parse('2026-10-12T08:00:00Z');
 const at = (offset = 0) => new Date(NOW + offset).toISOString();
 const point = { lat: 24.22, lon: 120.58 };
@@ -159,7 +160,7 @@ test('campus-next fills 專用道 termini from the static catalog without extra 
   ]);
   assert.deepEqual(display.extra.map((row) => row.route), ['305']);
 });
-test('campus-next 專用道 inbound uses the outbound terminus instead of 到本站', async () => {
+test('campus-next 專用道 inbound keeps 往靜宜 and does not reuse the outbound terminus', async () => {
   const mock = service((url) => Response.json(url.includes('/StopOfRoute/') ? [] : [
     arrival({
       StopUID: 'TXG-BRT-300', RouteUID: 'TXG300', RouteName: { Zh_tw: '300' },
@@ -181,18 +182,70 @@ test('campus-next 專用道 inbound uses the outbound terminus instead of 到本
     const filter = new URL(call.url).searchParams.get('$filter') ?? '';
     return /TXG300|TXG310|TXG999/.test(filter);
   }), false);
-  const downtown = result.arrivals.find((row) => row.route === '300');
+  const inbound = result.arrivals.find((row) => row.route === '300');
   const branch = result.arrivals.find((row) => row.route === '310區2');
-  assert.equal(downtown.destination, '台中車站');
-  assert.equal(branch.destination, '台中車站');
+  assert.equal(inbound.destination, '靜宜');
+  assert.equal(branch.destination, '靜宜');
   assert.equal(result.arrivals.some((row) => row.route === '專用道終點班'), false);
   const rows = client.campusSegmentRows(result.arrivals, '專用道', NOW);
   assert.deepEqual(rows.map((row) => [row.route, client.campusHeadingText(row)]), [
-    ['300', '往 台中車站'],
-    ['310區2', '往 台中車站'],
+    ['300', '往 靜宜'],
+    ['310區2', '往 靜宜'],
   ]);
   assert.equal(rows.every((row) => !client.campusHeadingText(row).includes('到本站')), true);
+  assert.equal(rows.every((row) => !client.campusHeadingText(row).includes('台中車站')), true);
   assert.equal(rows.every((row) => !client.campusHeadingText(row).startsWith('從')), true);
+});
+test('recorded TDX fixture: 專用道 300 inbound stays 往靜宜 8 分 and downtown falls back to 表定 14:38', async () => {
+  const now = Date.parse(studentReport.nowIso.directionBug);
+  const rows = studentReport.estimatedTimeOfArrival.filter((row) => row.scenario === 'direction-reversed-300' || row.scenario === 'wrap-307-branch');
+  const mock = service((url) => Response.json(url.includes('/StopOfRoute/')
+    ? studentReport.stopOfRoute.filter((row) => row.RouteUID === 'TXG300')
+    : rows), { now: () => now });
+  const result = await mock.execute({ action: 'campus-next', schoolId: 'pu' });
+  assert.equal(result.status, 'ready');
+  const inbound = result.arrivals.find((row) => row.route === '300' && row.direction === 1);
+  const outbound = result.arrivals.find((row) => row.route === '300' && row.direction === 0);
+  assert.equal(inbound.destination, '靜宜');
+  assert.equal(client.campusEtaView(inbound, now).text, '8 分');
+  assert.equal(outbound.destination, '台中車站');
+  assert.equal(client.campusEtaView(outbound, now).text, '表定 14:38');
+  const lane = client.campusSegmentRows(result.arrivals, '專用道', now);
+  assert.deepEqual(lane.map((row) => [row.route, client.campusHeadingText(row), client.campusEtaView(row.arrival, now).text]), [
+    ['300', '往 靜宜', '8 分'],
+    ['307副', '往 八德東大勇路口', '12 分'],
+    ['300', '往 台中車站', '表定 14:38'],
+  ]);
+  const long = lane.find((row) => row.route === '307副');
+  assert.equal(client.campusDestinationFull(long), '八德東大勇路口');
+  assert.equal(client.campusArrivalA11yLabel(long, now), '307副 往 八德東大勇路口 12 分');
+  assert.equal(client.campusHeadingText(long).includes('\n'), false);
+});
+test('recorded TDX fixture: 162 往校內 uses 英才路 11 分, not the gate 17 分', async () => {
+  const now = Date.parse(studentReport.nowIso.etaBug);
+  const rows = studentReport.estimatedTimeOfArrival.filter((row) =>
+    ['eta-gap-162', 'matched-368', 'matched-301', 'matched-326-ended'].includes(row.scenario));
+  const mock = service((url) => {
+    if (!url.includes('/StopOfRoute/')) return Response.json(rows);
+    const uid = (new URL(url).searchParams.get('$filter') ?? '').match(/'(TXG[^']+)'/)?.[1];
+    return Response.json(studentReport.stopOfRoute.filter((row) => row.RouteUID === uid));
+  }, { now: () => now });
+  const result = await mock.execute({ action: 'campus-next', schoolId: 'pu' });
+  assert.equal(result.status, 'ready');
+  const inbound = client.campusSegmentRows(result.arrivals, '校門口・往校內', now);
+  const oneSixTwo = inbound.find((row) => row.route === '162');
+  assert.equal(oneSixTwo.arrival.stopName, '靜宜大學(英才路)');
+  assert.equal(oneSixTwo.arrival.seconds, 660);
+  assert.deepEqual(client.campusEtaView(oneSixTwo.arrival, now), { kind: 'live', text: '11 分', minutes: 11 });
+  const chapel = inbound.find((row) => row.route === '368');
+  assert.equal(chapel.arrival.stopName, '靜宜大學(校門)');
+  const campus301 = inbound.find((row) => row.route === '301');
+  assert.deepEqual(client.campusEtaView(campus301.arrival, now), { kind: 'live', text: '7 分', minutes: 7 });
+  const outbound = client.campusSegmentRows(result.arrivals, '校門口・往沙鹿', now);
+  assert.equal(outbound[0].route, '162');
+  assert.deepEqual(client.campusEtaView(outbound[0].arrival, now), { kind: 'live', text: '3 分', minutes: 3 });
+  const city = client.campusSegmentRows(result.arrivals, '校門口・往市區', now);
+  assert.equal(client.campusEtaView(city[0].arrival, now).text, '今天收班');
 });
 test('campus-next never lists other 專用道 stops such as 市政府 in segments or home', async () => {
   const cityHall = arrival({
