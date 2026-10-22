@@ -155,7 +155,7 @@ it('preserves the original publish payload and key across an uncertain response 
     expect.objectContaining({
       title: '新的題目',
       prompt: '請提出一個研究問題。',
-      dueAt: new Date('2026-10-09T14:00').toISOString(),
+      dueAt: '2026-10-09T14:00:00+08:00',
     }),
   );
   expect(screen.getAllByRole('article')).toHaveLength(1);
