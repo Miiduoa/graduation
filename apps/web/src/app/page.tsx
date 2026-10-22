@@ -7,7 +7,7 @@ import { AppHeader } from '@/components/AppHeader';
 import { SiteFooter } from '@/components/SiteFooter';
 import { useAuth } from '@/components/AuthGuard';
 import { AccountIdentity } from '@/components/AccountIdentity';
-import { TodayTimetable } from '@/components/timetable/TodayTimetable';
+import { NextClassCard, TodayTimetable } from '@/components/timetable/TodayTimetable';
 import { browserRequest, useNuniSession } from '@/features/nuni/Session';
 import { loadHomeData, type HomeCourse, type HomeData, type HomeTask } from '@/lib/homeOverview';
 import { loadNuniHomeData } from '@/lib/nuniHomeOverview';
@@ -17,15 +17,54 @@ import { isTeacherRole, useSchoolRole } from '@/lib/useSchoolRole';
 import { TodaySensePanel } from '@/components/TodaySensePanel';
 import { HomeCampusBusCard } from '@/components/HomeCampusBusCard';
 import { hasCampusNext } from '@/lib/transit';
+import {
+  LATER_WORK_TITLE,
+  TODAY_WORK_EMPTY,
+  TODAY_WORK_NO_CLASS,
+  TODAY_WORK_NOTE,
+  TODAY_WORK_TITLE,
+  TODAY_WORK_UNSIGNED,
+  courseTaskHref,
+  selectLaterCourseWork,
+  selectTodayCourseWork,
+} from '@/lib/todayCourseWork';
 import type { SenseInputItem, SensePhase } from '@campus/shared/src/todaySense';
 import styles from './home.module.css';
 
 const teachingRoles = ['owner', 'instructor', 'moderator', 'owner-teacher', 'co-teacher'];
 const courseHref = (course: HomeCourse) =>
   course.href ?? `/course/${encodeURIComponent(course.id)}`;
-const taskHref = (task: HomeTask) =>
-  task.href ??
-  `/course/${encodeURIComponent(task.courseId)}#assignment-${encodeURIComponent(task.id)}`;
+
+function WorkList({
+  tasks,
+  now,
+  testId,
+}: {
+  tasks: HomeTask[];
+  now: Date | null;
+  testId: string;
+}) {
+  return (
+    <ul className={styles.list} data-testid={testId}>
+      {tasks.map((task) => (
+        <li key={`${task.courseId}-${task.id}`}>
+          <Link href={courseTaskHref(task)} className={styles.task}>
+            <span className={styles.taskContent}>
+              <strong>{task.title}</strong>
+              <span>
+                {task.courseName} · {task.kind === 'quiz' ? '測驗' : '作業'}
+              </span>
+            </span>
+            <Deadline task={task} now={now} />
+            <span aria-hidden className={styles.arrow}>
+              →
+            </span>
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 function Deadline({ task, now }: { task: HomeTask; now: Date | null }) {
   const due = task.dueAt ? new Date(task.dueAt) : null;
@@ -126,12 +165,11 @@ export default function HomePage() {
 
   const teaching = data?.courses.filter((course) => teachingRoles.includes(course.role)) ?? [];
   const studying = data?.courses.filter((course) => !teachingRoles.includes(course.role)) ?? [];
-  const nextTask =
-    data?.tasks.find(
-      (task) => task.acceptsLate || !task.dueAt || !now || Date.parse(task.dueAt) >= now.getTime(),
-    ) ?? data?.tasks[0];
   const signedIn = !!owner && !blocked;
   const busy = sessionLoading || (!!owner && loading);
+  const todayTasks = data ? selectTodayCourseWork(data.tasks, now ?? new Date()) : [];
+  const laterTasks = data ? selectLaterCourseWork(data.tasks, now ?? new Date()) : [];
+  const teacherOnly = !!teaching.length && !studying.length;
   const sensePhase: SensePhase = blocked
     ? 'hidden'
     : !signedIn
@@ -149,7 +187,7 @@ export default function HomePage() {
       courseName: task.courseName,
       title: task.title,
       dueAt: task.dueAt,
-      href: taskHref(task),
+      href: courseTaskHref(task),
     })) ?? [];
   const courseSections = [
     { title: '修習課程', items: studying, description: '查看教材、繳交作業與老師回饋。' },
@@ -182,19 +220,14 @@ export default function HomePage() {
             <Link href="/teacher">老師工作台 →</Link> 看學生送來的課程申訴。
           </p>
         )}
-        {!school?.selectedSchoolId || hasCampusNext(school.selectedSchoolId) ? (
-          <HomeCampusBusCard schoolId={school?.selectedSchoolId || 'pu'} />
-        ) : (
-          <nav className={styles.busEntry} aria-label="公車">
-            <Link className={styles.busEntryLink} href="/bus" data-testid="home-bus-entry">
-              <strong>公車資訊</strong>
-              <small>查站牌和到站時間</small>
-            </Link>
-          </nav>
-        )}
+        <div className={styles.todayFacts}>
+          <NextClassCard now={now} />
+          {!school?.selectedSchoolId || hasCampusNext(school.selectedSchoolId) ? (
+            <HomeCampusBusCard schoolId={school?.selectedSchoolId || 'pu'} />
+          ) : null}
+        </div>
         <div className={styles.columns}>
           <div>
-            <TodayTimetable now={now} />
             {blocked ? (
               <section className={styles.focus} aria-labelledby="session-title">
                 <h2 id="session-title">
@@ -213,7 +246,7 @@ export default function HomePage() {
                 </div>
               </section>
             ) : busy ? (
-              <section className={styles.focus} aria-busy="true">
+              <section className={styles.focus} aria-busy="true" data-testid="today-work">
                 <p role="status">正在讀取課程與待辦…</p>
               </section>
             ) : error ? (
@@ -229,85 +262,68 @@ export default function HomePage() {
                   </Link>
                 </div>
               </section>
-            ) : (
+            ) : teacherOnly ? (
               <section className={styles.focus} aria-labelledby="focus-title">
-                <div className={styles.focusLabel}>
-                  {nextTask
-                    ? '接下來要處理'
-                    : teaching.length && !studying.length
-                      ? '教學安排'
-                      : '課程與待辦'}
-                </div>
-                <h2 id="focus-title">
-                  {nextTask
-                    ? nextTask.title
-                    : signedIn
-                      ? teaching.length && !studying.length
-                        ? `${teaching.length} 門課正在進行`
-                        : data?.courses.length
-                          ? context
-                            ? '目前沒有待完成的作業或測驗'
-                            : '目前沒有待繳作業'
-                          : '加入你的第一門課'
-                      : '教材、作業與老師回饋'}
-                </h2>
-                {nextTask ? (
-                  <p>
-                    {nextTask.courseName}
-                    <span className={styles.focusDeadline}>
-                      <Deadline task={nextTask} now={now} />
-                    </span>
-                  </p>
-                ) : (
-                  <p>
-                    {signedIn
-                      ? teaching.length && !studying.length
-                        ? '從授課課程查看學生繳交內容，安排教材與下一次作業。'
-                        : data?.courses.length
-                          ? '可以回到課程查看教材與回饋，或安排今天的上課路線。'
-                          : context
-                            ? '向老師取得邀請碼後加入課程；授課者也可以建立課程。'
-                            : '前往課程空間加入課程，或查看學校課表。'
-                      : '使用 Google 帳號查看教材、作業與回饋，不需要先連線學校帳號。'}
-                  </p>
-                )}
+                <div className={styles.focusLabel}>教學安排</div>
+                <h2 id="focus-title">{`${teaching.length} 門課正在進行`}</h2>
+                <p>從授課課程查看學生繳交內容，安排教材與下一次作業。</p>
                 <div className={styles.focusActions}>
-                  <Link
-                    className={styles.primary}
-                    href={
-                      nextTask
-                        ? taskHref(nextTask)
-                        : teaching.length && !studying.length
-                          ? '#teaching-courses'
-                          : signedIn
-                            ? context || !data?.courses.length
-                              ? '/classroom'
-                              : '#courses'
-                            : '/classroom/login'
-                    }
-                  >
-                    {nextTask
-                      ? nextTask.kind === 'quiz'
-                        ? '查看並作答測驗'
-                        : '查看並繳交作業'
-                      : teaching.length && !studying.length
-                        ? '查看授課課程'
-                        : signedIn
-                          ? context || !data?.courses.length
-                            ? '進入課程空間'
-                            : '查看我的課程'
-                          : '用 Google 帳號登入'}{' '}
-                    <span aria-hidden>→</span>
+                  <Link className={styles.primary} href="#teaching-courses">
+                    查看授課課程 <span aria-hidden>→</span>
                   </Link>
-                  <Link
-                    className={styles.secondary}
-                    href={signedIn ? '/timetable' : '#public-services'}
-                  >
-                    {signedIn ? '查看課表' : '先瀏覽校園資訊'}
+                  <Link className={styles.secondary} href="/timetable">
+                    查看課表
                   </Link>
                 </div>
               </section>
+            ) : (
+              <section className={styles.section} aria-labelledby="today-work-title" data-testid="today-work">
+                <div className={styles.sectionHeading}>
+                  <h2 id="today-work-title">
+                    {TODAY_WORK_TITLE}
+                    {signedIn ? <span>{todayTasks.length}</span> : null}
+                  </h2>
+                  {signedIn ? (
+                    <button
+                      type="button"
+                      className={styles.textButton}
+                      onClick={() => void refresh()}
+                      disabled={loading}
+                    >
+                      更新課程
+                    </button>
+                  ) : null}
+                </div>
+                <p className={styles.sectionNote}>{signedIn ? TODAY_WORK_NOTE : TODAY_WORK_UNSIGNED}</p>
+                {!signedIn ? (
+                  <div className={styles.focusActions}>
+                    <Link className={styles.primary} href="/classroom/login">
+                      用 Google 帳號登入 <span aria-hidden>→</span>
+                    </Link>
+                    <Link className={styles.secondary} href="#public-services">
+                      先瀏覽校園資訊
+                    </Link>
+                  </div>
+                ) : todayTasks.length ? (
+                  <WorkList tasks={todayTasks} now={now} testId="today-work-list" />
+                ) : (
+                  <p className={styles.empty}>
+                    {data?.courses.length ? TODAY_WORK_EMPTY : TODAY_WORK_NO_CLASS}
+                  </p>
+                )}
+                {signedIn && !data?.courses.length ? (
+                  <div className={styles.focusActions}>
+                    <Link className={styles.primary} href="/classroom">
+                      進入課程空間 <span aria-hidden>→</span>
+                    </Link>
+                    <Link className={styles.secondary} href="/import?kind=timetable">
+                      匯入課表
+                    </Link>
+                  </div>
+                ) : null}
+              </section>
             )}
+            <TodayTimetable now={now} />
             <TodaySensePanel
               ownerId={owner}
               schoolId={school?.selectedSchoolId}
@@ -317,50 +333,15 @@ export default function HomePage() {
             />
             {data && (
               <>
-                {!!studying.length && (
-                  <section className={styles.section} aria-labelledby="tasks-title">
+                {!!laterTasks.length && (
+                  <section className={styles.section} aria-labelledby="later-work-title">
                     <div className={styles.sectionHeading}>
-                      <h2 id="tasks-title">
-                        {context ? '作業與測驗' : '待繳作業'} <span>{data.tasks.length}</span>
+                      <h2 id="later-work-title">
+                        {LATER_WORK_TITLE} <span>{laterTasks.length}</span>
                       </h2>
-                      <button
-                        type="button"
-                        className={styles.textButton}
-                        onClick={() => void refresh()}
-                        disabled={loading}
-                      >
-                        更新課程
-                      </button>
                     </div>
-                    <p className={styles.sectionNote}>
-                      {context
-                        ? '依參考期限排列仍開放的作業與測驗，已送出後更新即可移除。每門課的測驗為最近 100 筆；更早紀錄請向授課老師確認。時間皆為台灣時間。'
-                        : '依截止時間排序；已繳交的作業會在更新後移除。時間皆為台灣時間。'}
-                    </p>
-                    {data.tasks.length ? (
-                      <ul className={styles.list}>
-                        {data.tasks.map((task) => (
-                          <li key={`${task.courseId}-${task.id}`}>
-                            <Link href={taskHref(task)} className={styles.task}>
-                              <span className={styles.taskContent}>
-                                <strong>{task.title}</strong>
-                                <span>
-                                  {task.courseName} · {task.kind === 'quiz' ? '測驗' : '作業'}
-                                </span>
-                              </span>
-                              <Deadline task={task} now={now} />
-                              <span aria-hidden className={styles.arrow}>
-                                →
-                              </span>
-                            </Link>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className={styles.empty}>
-                        {context ? '目前載入的作業與測驗沒有待完成事項。' : '目前沒有待繳作業。'}
-                      </p>
-                    )}
+                    <p className={styles.sectionNote}>{TODAY_WORK_NOTE}</p>
+                    <WorkList tasks={laterTasks} now={now} testId="later-work-list" />
                   </section>
                 )}
                 {courseSections.map(

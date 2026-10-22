@@ -188,6 +188,18 @@ describe('裝置端輸出驗證', () => {
     expect(plan?.[1].reasonText).toContain('15:00');
     expect(orderedSenseCards(set, judged.value)[0].title).toBe('課堂點名');
     expect(orderedSenseCards(set, judged.value)[0].why).toContain('進行中的點名時段');
+    expect(orderedSenseCards(set, judged.value).map((card) => card.dueAt)).toEqual([
+      live.dueAt,
+      quiz.dueAt,
+      later.dueAt,
+      overdue.dueAt,
+    ]);
+    expect(orderedSenseCards(set, judged.value).map((card) => card.title)).toEqual([
+      live.title,
+      quiz.title,
+      later.title,
+      overdue.title,
+    ]);
   });
 });
 
