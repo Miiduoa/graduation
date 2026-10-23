@@ -230,7 +230,7 @@ it('keeps the assignment hash through sign-in so the student returns to the same
   window.history.replaceState(null, '', '/course/course#assignment-A');
   await mount();
   expect(screen.getByRole('link', { name: '登入帳號' }).getAttribute('href')).toBe(
-    '/login?returnUrl=%2Fcourse%2Fcourse%23assignment-A',
+    '/login?returnUrl=%2Fcourse%2Fcourse%23assignment-A#',
   );
 });
 
@@ -250,12 +250,48 @@ it('reads the live hash on click if the sign-in link was rendered before it arri
   try {
     fireEvent.click(link);
     expect(link.getAttribute('href')).toBe(
-      '/login?returnUrl=%2Fcourse%2Fcourse%23assignment-A',
+      '/login?returnUrl=%2Fcourse%2Fcourse%23assignment-A#',
     );
-    expect(assign).toHaveBeenCalledWith('/login?returnUrl=%2Fcourse%2Fcourse%23assignment-A');
+    expect(assign).toHaveBeenCalledWith('/login?returnUrl=%2Fcourse%2Fcourse%23assignment-A#');
   } finally {
     vi.unstubAllGlobals();
   }
+});
+
+it('does not stack the course hash onto login when the guest taps 登入帳號', async () => {
+  auth.user = null;
+  window.history.replaceState(null, '', '/course/course#assignment-A#assignment-A');
+  await mount();
+  const link = screen.getByRole('link', { name: '登入帳號' });
+  expect(link.getAttribute('href')).toBe(
+    '/login?returnUrl=%2Fcourse%2Fcourse%23assignment-A#',
+  );
+  const assign = vi.fn();
+  vi.stubGlobal('location', {
+    ...window.location,
+    hash: '#assignment-A#assignment-A',
+    assign,
+  });
+  try {
+    fireEvent.click(link);
+    expect(assign).toHaveBeenCalledOnce();
+    expect(assign).toHaveBeenCalledWith('/login?returnUrl=%2Fcourse%2Fcourse%23assignment-A#');
+    expect(String(assign.mock.calls[0][0]).includes('#assignment-A#assignment-A')).toBe(false);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it('lands on the assignment even if the URL hash was stacked twice after sign-in', async () => {
+  vi.mocked(loadCourseWork).mockResolvedValue(
+    coursework({
+      assignments: [assignment('A'), assignment('B')],
+    }),
+  );
+  window.history.replaceState(null, '', '/course/course#assignment-B#assignment-B');
+  await mount();
+  const card = await screen.findByRole('region', { name: '作業 B' });
+  await waitFor(() => expect(card.getAttribute(COURSE_WORK_LANDING_ATTR)).toBe('true'));
 });
 
 it('lands on the assignment submit area with top space and shows submitted work', async () => {

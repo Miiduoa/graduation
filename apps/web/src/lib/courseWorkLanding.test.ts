@@ -3,6 +3,7 @@ import {
   COURSE_WORK_LANDING_ATTR,
   COURSE_WORK_OPEN_COURSE,
   courseHrefFromData,
+  coursePageReturnPath,
   courseWorkElementId,
   courseWorkHrefFromData,
   courseWorkOpenLabel,
@@ -22,8 +23,24 @@ it('reads assignment and quiz hashes and rejects path-like ids', () => {
     kind: 'quiz',
     id: 'cwq_11111111-1111-4111-8111-111111111111',
   });
+  expect(parseCourseWorkHash('#assignment-hw-3#assignment-hw-3')).toEqual({
+    kind: 'assignment',
+    id: 'hw-3',
+  });
   expect(parseCourseWorkHash('#assignment-a%2Fb')).toBeNull();
   expect(parseCourseWorkHash('#material-1')).toBeNull();
+});
+
+it('attaches at most one course-work hash when building a school course return path', () => {
+  expect(coursePageReturnPath('cs101', '#assignment-hw-3')).toBe('/course/cs101#assignment-hw-3');
+  expect(coursePageReturnPath('cs101', '#assignment-hw-3#assignment-hw-3')).toBe(
+    '/course/cs101#assignment-hw-3',
+  );
+  expect(coursePageReturnPath('cs101', '#quiz-midterm#quiz-midterm')).toBe(
+    '/course/cs101#quiz-midterm',
+  );
+  expect(coursePageReturnPath('cs101', '#')).toBe('/course/cs101');
+  expect(coursePageReturnPath('cs101')).toBe('/course/cs101');
 });
 
 it('builds a one-click classroom or school course hash and ignores off-site urls', () => {

@@ -14,6 +14,7 @@ import {
 import {
   COURSE_WORK_MISSING_ASSIGNMENT,
   COURSE_WORK_MISSING_QUIZ,
+  coursePageReturnPath,
   landOnCourseWork,
   parseCourseWorkHash,
 } from '@/lib/courseWorkLanding';
@@ -180,7 +181,7 @@ export default function CoursePage({ params }: { params: Promise<{ courseId: str
   const school = useOptionalSelectedSchool();
   const hash = useLocationHash();
   const scopeLoading = authLoading || school?.loading;
-  const returnPath = `/course/${encodeURIComponent(courseId)}${hash}`;
+  const returnPath = coursePageReturnPath(courseId, hash);
 
   if (scopeLoading || !user) {
     return (
@@ -191,21 +192,18 @@ export default function CoursePage({ params }: { params: Promise<{ courseId: str
           <section className={styles.section}>
             <h2>登入後查看課程</h2>
             <p>使用這門課的學校帳號登入，即可查看教材與繳交作業。</p>
-            <Link
+            <a
               className={styles.primary}
               href={loginHref(returnPath)}
               onClick={(event) => {
-                const next = loginHref(
-                  `/course/${encodeURIComponent(courseId)}${window.location.hash}`,
-                );
-                if (event.currentTarget.getAttribute('href') === next) return;
+                const next = loginHref(coursePageReturnPath(courseId, window.location.hash));
                 event.preventDefault();
                 event.currentTarget.setAttribute('href', next);
                 window.location.assign(next);
               }}
             >
               登入帳號
-            </Link>
+            </a>
           </section>
         )}
       </SiteShell>

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   appendSchoolContext,
   buildSsoCallbackPath,
+  collapseInternalPathHash,
   extractSchoolContextFromPath,
   loginHref,
   readLoginReturnParam,
@@ -73,6 +74,20 @@ it('builds a login href that returns to the original storefront', () => {
   expect(loginHref('/cafeteria/stall?schoolId=pu')).toBe(
     '/login?returnUrl=%2Fcafeteria%2Fstall%3FschoolId%3Dpu',
   );
+});
+
+it('keeps a single return fragment and ends the login href with # so client routing cannot keep the page hash', () => {
+  expect(collapseInternalPathHash('/course/cs101#assignment-hw-3#assignment-hw-3')).toBe(
+    '/course/cs101#assignment-hw-3',
+  );
+  expect(loginHref('/course/cs101#assignment-hw-3')).toBe(
+    '/login?returnUrl=%2Fcourse%2Fcs101%23assignment-hw-3#',
+  );
+  expect(loginHref('/course/cs101#assignment-hw-3#assignment-hw-3')).toBe(
+    '/login?returnUrl=%2Fcourse%2Fcs101%23assignment-hw-3#',
+  );
+  expect(sanitizeInternalPath('https://evil.test#assignment-hw-3')).toBe('/');
+  expect(loginHref('https://evil.test#assignment-hw-3')).toBe('/login?returnUrl=%2F');
 });
 
 it('reads returnUrl, returnTo or redirect and drops off-site values', () => {

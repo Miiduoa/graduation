@@ -8,7 +8,11 @@ import { Button } from '@/components/ui/Button';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/components/AuthGuard';
 import { isFirebaseConfigured, signInWithPuStudentId } from '@/features/auth/client';
-import { readLoginReturnParam, sanitizeInternalPath } from '@/lib/navigation';
+import {
+  collapseInternalPathHash,
+  readLoginReturnParam,
+  sanitizeInternalPath,
+} from '@/lib/navigation';
 import styles from '../servicePages.module.css';
 import { NuniSignIn } from '@/components/NuniSignIn';
 import { platformDestination } from '@/lib/accountDestination';
@@ -16,7 +20,9 @@ import { isPublicCampusPath, publicCampusServices } from '@/lib/publicCampusServ
 import { STUDENT_ID_PREPARING_COPY, useSignInOptions } from '@/lib/signInOptions';
 
 function loginDestination(value: string | null): string {
-  const safe = sanitizeInternalPath(value && value.length <= 1200 ? value : null);
+  const safe = collapseInternalPathHash(
+    sanitizeInternalPath(value && value.length <= 1200 ? value : null),
+  );
   try {
     const path = decodeURIComponent(new URL(safe, 'https://campus.local').pathname).replace(
       /\/+$/,
@@ -31,6 +37,17 @@ function loginDestination(value: string | null): string {
   } catch {
     return '/';
   }
+}
+
+function goAfterLogin(router: { replace: (href: string) => void }, destination: string) {
+  if (typeof window !== 'undefined' && window.location.hash) {
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${window.location.pathname}${window.location.search}`,
+    );
+  }
+  router.replace(destination);
 }
 
 function LoginForm({
@@ -84,7 +101,7 @@ function LoginForm({
       !reconnect
     ) {
       returning.current = true;
-      router.replace(destination);
+      goAfterLogin(router, destination);
     }
   }, [user, schoolLoading, router, destination, reconnect, schoolRequired]);
   async function login(event: FormEvent) {
@@ -109,7 +126,7 @@ function LoginForm({
       if (!authenticated) throw new Error('登入服務尚未連線。');
       setPassword('');
       returning.current = true;
-      router.replace(destination);
+      goAfterLogin(router, destination);
     } catch {
       if (controller.signal.aborted) return;
       setError('登入失敗。請確認學號與密碼，或稍後再試。');

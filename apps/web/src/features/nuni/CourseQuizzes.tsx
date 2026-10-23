@@ -11,6 +11,7 @@ import {
 } from '@campus/shared/src/nuni';
 import {
   COURSE_WORK_MISSING_QUIZ,
+  courseWorkElementId,
   landOnCourseWork,
   parseCourseWorkHash,
 } from '@/lib/courseWorkLanding';
@@ -90,18 +91,19 @@ function QuizList({ workspace, accountId, units, onChanged }: { workspace: NuniW
     linked?.kind === 'quiz' &&
     !items.some((item) => item.id === linked.id);
   useEffect(() => {
-    const target = hash.slice(1);
+    if (!linked || linked.kind !== 'quiz') return;
+    const target = courseWorkElementId(linked.kind, linked.id);
     if (
       filter !== 'all' ||
       revealed.current === target ||
-      !items?.some((item) => `quiz-${item.id}` === target)
+      !items?.some((item) => item.id === linked.id)
     )
       return;
     const frame = window.requestAnimationFrame(() => {
       if (landOnCourseWork(target)) revealed.current = target;
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [filter, hash, items]);
+  }, [filter, items, linked?.id, linked?.kind]);
   useEffect(() => {
     mounted.current = true;
     return () => {

@@ -21,7 +21,7 @@ export type CourseWorkLink = {
 };
 
 export function parseCourseWorkHash(hash: string | null | undefined): CourseWorkLink | null {
-  const value = (hash || '').replace(/^#/, '');
+  const value = (hash || '').replace(/^#/, '').split('#')[0];
   const match = /^(assignment|quiz)-(.+)$/.exec(value);
   if (!match) return null;
   try {
@@ -30,6 +30,12 @@ export function parseCourseWorkHash(hash: string | null | undefined): CourseWork
   } catch {
     return null;
   }
+}
+
+export function coursePageReturnPath(courseId: string, hash?: string | null): string {
+  const path = `/course/${encodeURIComponent(courseId)}`;
+  const linked = parseCourseWorkHash(hash);
+  return linked ? `${path}#${courseWorkElementId(linked.kind, linked.id)}` : path;
 }
 
 export function courseWorkElementId(kind: CourseWorkKind, id: string): string {
