@@ -3316,6 +3316,10 @@ exports.createGroup = onCall(
 const groupMembershipHandlers = createGroupMembershipHandlers({ db });
 exports.joinGroupByCode = onCall({ region: REGION }, groupMembershipHandlers.joinGroupByCode);
 exports.leaveGroup = onCall({ region: REGION }, groupMembershipHandlers.leaveGroup);
+exports.transferGroupOwnership = onCall(
+  { region: REGION },
+  groupMembershipHandlers.transferGroupOwnership,
+);
 
 // =====================================================
 // 圖書館 API
