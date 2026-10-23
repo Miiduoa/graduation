@@ -172,6 +172,44 @@ it('opens the course page when an old assignment push only has a course id', asy
   await waitUntil.mock.calls[0][0];
   expect(openWindow).toHaveBeenCalledWith('https://campus.test/course/cs101');
 });
+it('opens the material cabinet from a new-material push', async () => {
+  const openWindow = vi.fn();
+  const waitUntil = vi.fn();
+  vm.runInNewContext(source, {
+    URL,
+    Response,
+    fetch: fetchMock,
+    caches: cachesMock,
+    self: {
+      location: { origin: 'https://campus.test' },
+      addEventListener: (name: string, handler: (typeof handlers)[string]) => {
+        handlers[name] = handler;
+      },
+      skipWaiting,
+      clients: {
+        claim: vi.fn(),
+        matchAll: vi.fn().mockResolvedValue([]),
+        openWindow,
+      },
+    },
+  });
+  handlers.notificationclick({
+    notification: {
+      close: vi.fn(),
+      data: {
+        type: 'material',
+        workspaceId: 'cw_11111111-1111-4111-8111-111111111111',
+        materialId: 'cwm_33333333-3333-4333-8333-333333333333',
+        url: 'https://evil.test/phish',
+      },
+    },
+    waitUntil,
+  });
+  await waitUntil.mock.calls[0][0];
+  expect(openWindow).toHaveBeenCalledWith(
+    'https://campus.test/classroom/course/cw_11111111-1111-4111-8111-111111111111#material-cwm_33333333-3333-4333-8333-333333333333',
+  );
+});
 it('ignores a path-like course id from a push tap', async () => {
   const openWindow = vi.fn();
   const waitUntil = vi.fn();

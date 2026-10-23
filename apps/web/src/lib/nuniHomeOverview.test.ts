@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
-import { loadNuniHomeData } from './nuniHomeOverview';
+import { loadNuniHomeData, loadNuniHomeMaterials } from './nuniHomeOverview';
 
 const accountId = 'pa_00000000-0000-0000-0000-000000000001';
 const studentId = 'cw_00000000-0000-0000-0000-000000000001';
@@ -27,6 +27,7 @@ function assignment(suffix: string, extra: Record<string, unknown> = {}) {
 beforeEach(() => {
   transport.mockReset().mockImplementation(async (path: string) => {
     if (path.endsWith('/quizzes')) return { quizzes: [] };
+    if (path.endsWith('/materials')) return { materials: [] };
     throw new Error(`Unexpected request: ${path}`);
   });
 });
@@ -69,10 +70,18 @@ it('uses each course membership role and only includes open, unsubmitted work fr
     href: `/classroom/course/${studentId}#assignment-cwa_00000000-0000-0000-0000-000000000002`,
   });
   expect(result.recentFeedback).toEqual([]);
+  expect(result.materials).toEqual([]);
+  expect(result.materialsError).toBeNull();
+  expect(result.materialSearchSeed).toEqual({
+    items: [],
+    courseIds: [studentId],
+    truncated: false,
+  });
   expect(transport.mock.calls.map(([path]) => path)).toEqual([
     'class-workspaces',
     `class-workspaces/${studentId}/assignments`,
     `class-workspaces/${studentId}/quizzes`,
+    `class-workspaces/${studentId}/materials`,
   ]);
 });
 it('lists recent teacher feedback with deep links even after the todo disappears', async () => {
@@ -184,6 +193,9 @@ it('returns a verified empty account without requesting assignments or inventing
   expect(await loadNuniHomeData(transport, accountId)).toEqual({
     courses: [],
     tasks: [],
+    materials: [],
+    materialsError: null,
+    materialSearchSeed: { items: [], courseIds: [], truncated: false },
     recentFeedback: [],
     unreadCount: 0,
     archivedCount: 0,
@@ -217,6 +229,7 @@ it('includes pending quizzes among assignments in deadline order and opens their
       };
     if (path.endsWith('/assignments'))
       return { assignments: [assignment('1', { dueAt: '2026-10-10T00:00:00Z' })] };
+    if (path.endsWith('/materials')) return { materials: [] };
     return {
       quizzes: [
         quiz('1', { dueAt: '2026-10-09T00:00:00Z' }),
@@ -255,6 +268,7 @@ it('does not present completed work when the quiz request fails', async () => {
         workspaces: [{ id: studentId, title: '課程', state: 'active', memberRole: 'student' }],
       };
     if (path.endsWith('/assignments')) return { assignments: [] };
+    if (path.endsWith('/materials')) return { materials: [] };
     throw new NuniError(503, 'UNAVAILABLE');
   });
   await expect(loadNuniHomeData(transport, accountId)).rejects.toMatchObject({ status: 503 });
@@ -267,6 +281,7 @@ it('rejects quiz completion receipts belonging to another account', async () => 
         workspaces: [{ id: studentId, title: '課程', state: 'active', memberRole: 'student' }],
       };
     if (path.endsWith('/assignments')) return { assignments: [] };
+    if (path.endsWith('/materials')) return { materials: [] };
     return {
       quizzes: [
         {
@@ -288,4 +303,141 @@ it('rejects quiz completion receipts belonging to another account', async () => 
   await expect(loadNuniHomeData(transport, accountId)).rejects.toMatchObject({
     code: 'INVALID_RESPONSE',
   });
+});
+it('lists recent course materials with a one-click cabinet hash and ignores older files', async () => {
+  const recent = {
+    id: 'cwm_00000000-0000-4000-8000-000000000001',
+    workspaceId: studentId,
+    title: '本週講義',
+    body: 'https://example.test/week.pdf',
+    unitId: 'cwu_00000000-0000-4000-8000-000000000001',
+    unitTitle: '第 03 週',
+    createdByPlatformAccountId: accountId,
+    createdAt: new Date().toISOString(),
+  };
+  const stale = {
+    ...recent,
+    id: 'cwm_00000000-0000-4000-8000-000000000002',
+    title: '去年講義',
+    createdAt: '2020-01-01T00:00:00.000Z',
+  };
+  transport.mockImplementation(async (path: string) => {
+    if (path === 'class-workspaces')
+      return {
+        workspaces: [{ id: studentId, title: '資料庫', state: 'active', memberRole: 'student' }],
+      };
+    if (path.endsWith('/assignments')) return { assignments: [] };
+    if (path.endsWith('/quizzes')) return { quizzes: [] };
+    return { materials: [recent, stale] };
+  });
+  const result = await loadNuniHomeData(transport, accountId);
+  expect(result.materials).toEqual([
+    {
+      id: recent.id,
+      courseId: studentId,
+      courseName: '資料庫',
+      title: '本週講義',
+      unitTitle: '第 03 週',
+      createdAt: recent.createdAt,
+      href: `/classroom/course/${studentId}#material-${recent.id}`,
+    },
+  ]);
+  expect(result.materialsError).toBeNull();
+  expect(result.materialSearchSeed?.courseIds).toEqual([studentId]);
+  expect(result.materialSearchSeed?.items.map((item) => item.title)).toEqual(['本週講義', '去年講義']);
+});
+it('keeps assignments and published feedback when materials cannot be read', async () => {
+  const pending = assignment('1', { dueAt: '2026-10-10T00:00:00Z' });
+  const reviewed = assignment('2');
+  transport.mockImplementation(async (path: string) => {
+    if (path === 'class-workspaces')
+      return {
+        workspaces: [{ id: studentId, title: '修習課程', state: 'active', memberRole: 'student' }],
+      };
+    if (path.endsWith('/assignments'))
+      return {
+        assignments: [
+          pending,
+          {
+            ...reviewed,
+            mySubmission: {
+              assignmentId: reviewed.id,
+              platformAccountId: accountId,
+              displayName: '學生',
+              body: '已完成',
+              state: 'submitted',
+              submittedAt: '2026-10-08T00:00:00Z',
+              teacherFeedback: '請補充資料來源',
+              reviewedAt: '2026-10-09T04:00:00Z',
+            },
+          },
+        ],
+      };
+    if (path.endsWith('/quizzes')) return { quizzes: [] };
+    throw new NuniError(503, 'UNAVAILABLE');
+  });
+  const result = await loadNuniHomeData(transport, accountId);
+  expect(result.tasks.map((task) => task.title)).toEqual(['作業 1']);
+  expect(result.recentFeedback?.map((entry) => entry.feedback)).toEqual(['請補充資料來源']);
+  expect(result.materials).toEqual([]);
+  expect(result.materialsError).toBe('目前無法連線。請保留填寫內容，稍後重試。');
+  expect(result.materialSearchSeed).toEqual({ items: [], courseIds: [], truncated: false });
+});
+it('keeps materials from a readable course when another course materials read is offline', async () => {
+  const other = 'cw_00000000-0000-0000-0000-000000000009';
+  const recent = {
+    id: 'cwm_00000000-0000-4000-8000-000000000001',
+    workspaceId: studentId,
+    title: '本週講義',
+    body: 'https://example.test/week.pdf',
+    unitId: 'cwu_00000000-0000-4000-8000-000000000001',
+    unitTitle: '第 03 週',
+    createdByPlatformAccountId: accountId,
+    createdAt: new Date().toISOString(),
+  };
+  transport.mockImplementation(async (path: string) => {
+    if (path === 'class-workspaces')
+      return {
+        workspaces: [
+          { id: studentId, title: '資料庫', state: 'active', memberRole: 'student' },
+          { id: other, title: '離線課', state: 'active', memberRole: 'student' },
+        ],
+      };
+    if (path.endsWith('/assignments') || path.endsWith('/quizzes'))
+      return path.endsWith('/quizzes') ? { quizzes: [] } : { assignments: [] };
+    if (path.endsWith(`${other}/materials`)) throw new TypeError('Failed to fetch');
+    return { materials: [recent] };
+  });
+  const result = await loadNuniHomeData(transport, accountId);
+  expect(result.tasks).toEqual([]);
+  expect(result.materials?.map((item) => item.title)).toEqual(['本週講義']);
+  expect(result.materialsError).toBe('目前無法連線。請保留填寫內容，稍後重試。');
+  expect(result.materialSearchSeed?.courseIds).toEqual([studentId]);
+});
+it('retries only materials and does not request assignments or quizzes', async () => {
+  const recent = {
+    id: 'cwm_00000000-0000-4000-8000-000000000001',
+    workspaceId: studentId,
+    title: '補讀講義',
+    body: 'https://example.test/retry.pdf',
+    unitId: null,
+    unitTitle: null,
+    createdByPlatformAccountId: accountId,
+    createdAt: new Date().toISOString(),
+  };
+  transport.mockImplementation(async (path: string) => {
+    if (path.endsWith('/materials')) return { materials: [recent] };
+    throw new Error(`Unexpected ${path}`);
+  });
+  const result = await loadNuniHomeMaterials(transport, accountId, [
+    { id: studentId, name: '資料庫', role: 'student', unreadCount: 0 },
+    { id: teacherId, name: '授課', role: 'co-teacher', unreadCount: 0 },
+  ]);
+  expect(result.materialsError).toBeNull();
+  expect(result.materials).toEqual([
+    expect.objectContaining({ title: '補讀講義', courseId: studentId }),
+  ]);
+  expect(transport.mock.calls.map(([path]) => path)).toEqual([
+    `class-workspaces/${studentId}/materials`,
+  ]);
 });

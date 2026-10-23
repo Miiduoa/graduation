@@ -14,11 +14,13 @@ import {
 import { LoginLink } from '@/components/LoginLink';
 import {
   COURSE_WORK_MISSING_ASSIGNMENT,
+  COURSE_WORK_MISSING_MATERIAL,
   COURSE_WORK_MISSING_QUIZ,
   coursePageReturnPath,
   landOnCourseWork,
   parseCourseWorkHash,
 } from '@/lib/courseWorkLanding';
+import { describeMaterial, isMaterialUnread, markMaterialRead } from '@/lib/courseMaterials';
 import { useLocationHash } from '@/lib/useLocationHash';
 import styles from '../../home.module.css';
 
@@ -239,6 +241,7 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
   const active = useRef(false);
   const hash = useLocationHash();
   const revealed = useRef('');
+  const [readTick, setReadTick] = useState(0);
   const linked = parseCourseWorkHash(hash);
   useLayoutEffect(() => {
     active.current = true;
@@ -271,13 +274,26 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
   useEffect(() => {
     if (!course || !linked) return;
     const target = `${linked.kind}-${linked.id}`;
-    if (revealed.current === target || !course.assignments.some((item) => item.id === linked.id))
-      return;
+    const exists =
+      linked.kind === 'material'
+        ? course.modules.some((item) => item.id === linked.id)
+        : course.assignments.some((item) => item.id === linked.id);
+    if (revealed.current === target || !exists) return;
     const frame = window.requestAnimationFrame(() => {
-      if (landOnCourseWork(target)) revealed.current = target;
+      if (landOnCourseWork(target)) {
+        revealed.current = target;
+        if (linked.kind === 'material') {
+          markMaterialRead(
+            uid,
+            linked.id,
+            typeof localStorage === 'undefined' ? null : localStorage,
+          );
+          setReadTick((value) => value + 1);
+        }
+      }
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [course, linked]);
+  }, [course, linked, uid]);
   function refresh() {
     if (!active.current) return;
     // Keep same-scope forms mounted while the server refreshes sibling submissions.
@@ -314,25 +330,70 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
               重新整理
             </button>
           </div>
-          <section className={styles.section}>
-            <h2>課程單元</h2>
+          <section className={styles.section} aria-labelledby="course-materials-title">
+            <h2 id="course-materials-title">教材櫃</h2>
+            <p className={styles.sectionNote}>
+              依單元或週次排列。類型從連結判斷；學校課沒有檔案大小欄位時會明說。
+            </p>
+            {linked?.kind === 'material' && !course.modules.some((item) => item.id === linked.id) ? (
+              <p role="status" className={styles.notice}>
+                {COURSE_WORK_MISSING_MATERIAL}
+              </p>
+            ) : null}
             {course.modules.length ? (
-              course.modules.map((module) => (
-                <article key={module.id} className={styles.section}>
-                  <h3>{module.title}</h3>
-                  <p style={{ whiteSpace: 'pre-wrap' }}>{module.description}</p>
-                  {module.resourceUrl && (
-                    <a
-                      href={module.resourceUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={styles.secondary}
-                    >
-                      {module.resourceLabel} ↗
-                    </a>
-                  )}
-                </article>
-              ))
+              course.modules.map((module) => {
+                const described = describeMaterial({
+                  title: module.title,
+                  body: [module.description, module.resourceUrl].filter(Boolean).join('\n'),
+                });
+                const unread =
+                  readTick >= 0 &&
+                  isMaterialUnread(
+                    uid,
+                    module.id,
+                    typeof localStorage === 'undefined' ? null : localStorage,
+                  );
+                return (
+                  <article
+                    key={module.id}
+                    className={`${styles.section} ${styles.courseWorkTarget}`}
+                    id={`material-${module.id}`}
+                    tabIndex={-1}
+                    aria-labelledby={`material-title-${module.id}`}
+                  >
+                    <div className={styles.sectionHeading}>
+                      <h3 id={`material-title-${module.id}`}>{module.title}</h3>
+                      <span>
+                        {described.kindLabel} · {described.sizeLabel}
+                        {unread ? ' · 未讀' : ''}
+                      </span>
+                    </div>
+                    <p style={{ whiteSpace: 'pre-wrap' }}>
+                      {module.description || '教師尚未填寫單元說明。'}
+                    </p>
+                    {module.resourceUrl ? (
+                      <a
+                        href={module.resourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={styles.primary}
+                        onClick={() => {
+                          markMaterialRead(
+                            uid,
+                            module.id,
+                            typeof localStorage === 'undefined' ? null : localStorage,
+                          );
+                          setReadTick((value) => value + 1);
+                        }}
+                      >
+                        {module.resourceLabel || described.open.label}
+                      </a>
+                    ) : (
+                      <p>這則單元沒有可開啟的連結。</p>
+                    )}
+                  </article>
+                );
+              })
             ) : (
               <p>尚未發布課程單元。</p>
             )}
@@ -340,7 +401,9 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
           <h2 id="assignments" className={styles.section}>
             作業與評量
           </h2>
-          {linked && !course.assignments.some((item) => item.id === linked.id) ? (
+          {linked &&
+          linked.kind !== 'material' &&
+          !course.assignments.some((item) => item.id === linked.id) ? (
             <p role="status" className={styles.notice}>
               {linked.kind === 'quiz' ? COURSE_WORK_MISSING_QUIZ : COURSE_WORK_MISSING_ASSIGNMENT}
             </p>

@@ -28,7 +28,10 @@ it('reads assignment and quiz hashes and rejects path-like ids', () => {
     id: 'hw-3',
   });
   expect(parseCourseWorkHash('#assignment-a%2Fb')).toBeNull();
-  expect(parseCourseWorkHash('#material-1')).toBeNull();
+  expect(parseCourseWorkHash('#material-cwm_11111111-1111-4111-8111-111111111111')).toEqual({
+    kind: 'material',
+    id: 'cwm_11111111-1111-4111-8111-111111111111',
+  });
 });
 
 it('attaches at most one course-work hash when building a school course return path', () => {
@@ -69,6 +72,17 @@ it('builds a one-click classroom or school course hash and ignores off-site urls
   expect(courseWorkHrefFromData({ url: 'javascript:alert(1)' })).toBeNull();
   expect(courseWorkHrefFromData({ courseId: '../other', assignmentId: 'hw-1' })).toBeNull();
   expect(courseWorkHrefFromData({ courseId: '..', assignmentId: 'hw-1' })).toBeNull();
+  expect(
+    courseWorkHrefFromData(
+      {
+        workspaceId: 'cw_11111111-1111-4111-8111-111111111111',
+        materialId: 'cwm_33333333-3333-4333-8333-333333333333',
+      },
+      'material',
+    ),
+  ).toBe(
+    '/classroom/course/cw_11111111-1111-4111-8111-111111111111#material-cwm_33333333-3333-4333-8333-333333333333',
+  );
 });
 
 it('falls back to the in-site course page when the notice only has a course id', () => {
@@ -79,6 +93,7 @@ it('falls back to the in-site course page when the notice only has a course id',
   expect(courseHrefFromData({ courseId: '..' })).toBeNull();
   expect(courseWorkHrefFromData({ courseId: 'cs101' })).toBeNull();
   expect(courseWorkOpenLabel('/course/cs101')).toBe(COURSE_WORK_OPEN_COURSE);
+  expect(courseWorkOpenLabel('/classroom/course/cw_1#material-cwm_1')).toBe('開啟這份教材');
 });
 
 it('keeps only in-site course work paths', () => {

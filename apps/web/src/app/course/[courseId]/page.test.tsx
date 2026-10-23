@@ -5,6 +5,7 @@ import { loadCourseWork, submitCourseText, type CourseAssignment, type CourseWor
 import {
   COURSE_WORK_LANDING_ATTR,
   COURSE_WORK_MISSING_ASSIGNMENT,
+  COURSE_WORK_MISSING_MATERIAL,
   COURSE_WORK_MISSING_QUIZ,
 } from '@/lib/courseWorkLanding';
 
@@ -327,4 +328,16 @@ it('explains a missing quiz instead of a blank screen', async () => {
   await mount();
   expect(await screen.findByText(COURSE_WORK_MISSING_QUIZ)).toBeTruthy();
   expect(screen.getByRole('region', { name: '作業 A' })).toBeTruthy();
+});
+
+it('lands on a school-course material and explains a missing one', async () => {
+  window.history.replaceState(null, '', '/course/course#material-m1');
+  await mount();
+  const card = await screen.findByRole('article', { name: '私人教材' });
+  await waitFor(() => expect(card.getAttribute(COURSE_WORK_LANDING_ATTR)).toBe('true'));
+  await act(async () => {
+    window.history.replaceState(null, '', '/course/course#material-gone');
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  expect(await screen.findByText(COURSE_WORK_MISSING_MATERIAL)).toBeTruthy();
 });
