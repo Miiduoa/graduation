@@ -115,9 +115,10 @@ function StopArrivals({ stop, groupLabel }: { stop: TransitStop; groupLabel?: st
       window.removeEventListener('offline', resume);
     };
   }, [stop.city, stop.id, revision]);
+  const arrivalsReady = result?.status === 'ready';
   useEffect(() => {
     revealStopResult(pane.current);
-  }, [stop.city, stop.id]);
+  }, [stop.city, stop.id, arrivalsReady]);
   const rows = result?.status === 'ready' && result.kind === 'arrivals' ? result.arrivals : [];
   const shown = rows.filter((row) => row.route.toLocaleLowerCase().includes(filter.trim().toLocaleLowerCase()) &&
     (direction === 'all' || String(row.direction) === direction) &&

@@ -1,5 +1,5 @@
 import {
-  CAMPUS_NEXT, CAMPUS_TRANSIT, distanceMetres, hasCampusNext, headingAfterBoarding, isCampusStopName,
+  CAMPUS_NEXT, CAMPUS_TRANSIT, compactCampusRouteStops, distanceMetres, hasCampusNext, headingAfterBoarding, isCampusStopName,
   isCity, isPosition, isRecord, isStopId, publicPlaceName, type RouteStopSequence, type TransitArrival,
   type TransitCity, type TransitFailure, type TransitQuery, type TransitResult, type TransitRoute, type TransitStop,
 } from './transit';
@@ -447,8 +447,11 @@ export function createTransitService(options: {
         const destinations = new Map([...cached.destinations, ...fetched.destinations]);
         const sequences = [...cached.sequences, ...fetched.sequences];
         // 保留資料的 fetchedAt 是當時真正向 TDX 取得的時間；倒數仍依每筆來源時間，逾 90 秒不顯示。
+        // 站序已為終點補查載入，這裡只附上校園附近一小段給畫面畫站牌線，不再向 TDX 多打一次。
+        const routeStops = input.action === 'campus-next' ? compactCampusRouteStops(sequences) : [];
         return { status: 'ready', kind: 'arrivals', arrivals: normalizeTransitArrivals(rows, stopId, destinations, sequences),
-          fetchedAt: new Date(eta.stale ? eta.fetchedAt : now()).toISOString(), ...(eta.stale ? { stale: true as const } : {}) };
+          fetchedAt: new Date(eta.stale ? eta.fetchedAt : now()).toISOString(), ...(eta.stale ? { stale: true as const } : {}),
+          ...(routeStops.length ? { routeStops } : {}) };
       }
       if (input.action === 'nearby') {
         // Round only the cache centre; pad the query and filter exact distances afterward.

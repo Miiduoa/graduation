@@ -2,11 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import {
-  CAMPUS_NEXT, CAMPUS_NEXT_ROUTES, CAMPUS_SEGMENTS, campusDirectionEnded,
-  campusLaneDisplay, campusLiveUnavailable, campusSegmentRows, campusSegmentWaitLine,
-  campusUpdatedLabel, hasCampusNext, queryTransit,
+  CAMPUS_NEXT, CAMPUS_NEXT_ROUTES, CAMPUS_SEGMENTS, campusApproachModel,
+  campusDirectionEnded, campusLaneDisplay, campusLiveUnavailable, campusRowKey,
+  campusSegmentRows, campusSegmentWaitLine, campusUpdatedLabel, hasCampusNext,
+  pickCampusApproachRow, queryTransit,
   type CampusSegmentKey, type TransitResult,
 } from '@/lib/transit';
+import { CampusApproachTrack } from './CampusApproachTrack';
 import { CampusArrivalRow } from './CampusArrivalRow';
 import { SchoolSelector } from './SchoolSelector';
 import { useOptionalSelectedSchool } from './SelectedSchoolProvider';
@@ -54,6 +56,7 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
   const [clock, setClock] = useState(() => Date.now());
   const [offline, setOffline] = useState(false);
   const [laneOpen, setLaneOpen] = useState(false);
+  const [focusedKey, setFocusedKey] = useState<string | null>(null);
   const inFlight = useRef(false);
   useEffect(() => {
     if (!spec) return;
@@ -118,15 +121,15 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
       window.removeEventListener('offline', resume);
     };
   }, [schoolId, spec, revision]);
-  useEffect(() => {
-    setLaneOpen(false);
-  }, [segment]);
   if (!spec) return null;
   const current = CAMPUS_SEGMENTS.find((item) => item.key === segment) ?? CAMPUS_SEGMENTS[0];
   const arrivals = result?.status === 'ready' && result.kind === 'arrivals' ? result.arrivals : [];
   const rows = campusSegmentRows(arrivals, current.group, clock, CAMPUS_NEXT_ROUTES);
   const lane = current.group === '專用道' ? campusLaneDisplay(rows, clock) : { shown: rows, extra: [] };
   const waitLine = campusSegmentWaitLine(current, rows);
+  const routeStops = result?.status === 'ready' && result.kind === 'arrivals' ? result.routeStops ?? [] : [];
+  const approachRow = pickCampusApproachRow([...lane.shown, ...lane.extra], focusedKey, clock);
+  const approach = campusApproachModel(approachRow, clock, routeStops);
   const allEnded = campusDirectionEnded(rows, clock);
   const liveUnavailable = campusLiveUnavailable(rows, clock, result?.status === 'ready' && result.stale === true);
   const fetchedAt = result?.status === 'ready' ? result.fetchedAt : '';
@@ -158,7 +161,7 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
           <RefreshIcon />
         </button>
       </header>
-      <div className={css.segmentWrap} ref={(node) => { if (node) node.dataset.campusSegments = 'true'; }}>
+      <div className={css.segmentWrap} data-campus-segments="true" data-sticky-cover="true">
         <div className={css.segmentBar} role="tablist" aria-label="站牌方向">
           {CAMPUS_SEGMENTS.map((item) => (
             <button
@@ -167,7 +170,11 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
               role="tab"
               aria-selected={segment === item.key}
               className={css.segment}
-              onClick={() => setSegment(item.key)}
+              onClick={() => {
+                setSegment(item.key);
+                setLaneOpen(false);
+                setFocusedKey(null);
+              }}
             >
               {item.key}
             </button>
@@ -175,6 +182,7 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
         </div>
       </div>
       <p className={css.waitLine}>{waitLine}</p>
+      {approach && !missing && !showSkeleton ? <CampusApproachTrack model={approach} /> : null}
       {missing ? (
         <div className={css.boardError} role="status">
           <p>暫時讀不到資料，請稍後再試</p>
@@ -186,7 +194,12 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
         <ul key={segment} className={`${css.boardList} ${css.boardListEnter}`}>
           {lane.shown.length ? lane.shown.map((row) => (
             <li key={`${row.route}:${row.heading}`}>
-              <CampusArrivalRow row={row} now={clock} />
+              <CampusArrivalRow
+                row={row}
+                now={clock}
+                active={approachRow ? campusRowKey(row) === campusRowKey(approachRow) : false}
+                onSelect={() => setFocusedKey(campusRowKey(row))}
+              />
             </li>
           )) : (
             <li>
@@ -195,7 +208,12 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
           )}
           {laneOpen ? lane.extra.map((row) => (
             <li key={`${row.route}:${row.heading}`}>
-              <CampusArrivalRow row={row} now={clock} />
+              <CampusArrivalRow
+                row={row}
+                now={clock}
+                active={approachRow ? campusRowKey(row) === campusRowKey(approachRow) : false}
+                onSelect={() => setFocusedKey(campusRowKey(row))}
+              />
             </li>
           )) : null}
           {lane.extra.length ? (
