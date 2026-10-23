@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  awaitingFeedbackPosition,
   feedbackQueueLabel,
   gradeQueueLabel,
   matchesFeedbackQueueFilter,
   matchesGradeQueueFilter,
   needsFeedbackReview,
+  nextAwaitingFeedbackReview,
   sortFeedbackQueue,
   sortGradeQueue,
 } from '@campus/shared/src/lmsReviewQueue';
@@ -115,5 +117,50 @@ describe('lmsReviewQueue', () => {
     ];
     expect(sortGradeQueue(rows).map((row) => row.id)).toEqual(['latest', 'newer', 'older']);
     expect(sortFeedbackQueue(rows).map((row) => row.id)).toEqual(['latest', 'newer', 'older']);
+  });
+
+  it('advances to the next awaiting receipt after a successful save snapshot', () => {
+    const rows = [
+      {
+        platformAccountId: 'pa_done',
+        teacherFeedback: '已回',
+        submittedAt: '2026-10-10T00:00:00Z',
+        reviewedAt: '2026-10-10T01:00:00Z',
+      },
+      {
+        platformAccountId: 'pa_a',
+        teacherFeedback: null,
+        submittedAt: '2026-10-12T00:00:00Z',
+      },
+      {
+        platformAccountId: 'pa_b',
+        teacherFeedback: null,
+        submittedAt: '2026-10-11T00:00:00Z',
+      },
+    ];
+    expect(nextAwaitingFeedbackReview(rows, 'pa_a')?.platformAccountId).toBe('pa_b');
+    expect(nextAwaitingFeedbackReview(rows, 'pa_b')).toBeNull();
+    expect(awaitingFeedbackPosition(rows, 'pa_a')).toEqual({ index: 1, total: 2 });
+  });
+
+  it('returns resubmitted work to the awaiting queue ahead of current reviews', () => {
+    const afterResubmit = [
+      {
+        platformAccountId: 'pa_stale',
+        teacherFeedback: '舊回饋',
+        submittedAt: '2026-10-12T00:00:00Z',
+        reviewedAt: '2026-10-10T00:00:00Z',
+      },
+      {
+        platformAccountId: 'pa_done',
+        teacherFeedback: '已回',
+        submittedAt: '2026-10-11T00:00:00Z',
+        reviewedAt: '2026-10-11T01:00:00Z',
+      },
+    ];
+    expect(nextAwaitingFeedbackReview(afterResubmit, 'pa_other')?.platformAccountId).toBe(
+      'pa_stale',
+    );
+    expect(needsFeedbackReview(afterResubmit[0]!)).toBe(true);
   });
 });

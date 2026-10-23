@@ -1337,3 +1337,326 @@ it('shows 遲交, Taipei time, and download on teacher receipts', async () => {
   expect(view.getByRole('button', { name: '查看' })).toBeTruthy();
   expect(view.getByRole('button', { name: '下載' })).toBeTruthy();
 });
+
+it('shows cross-course recent teacher feedback on the Nuni courses landing and opens the activity', async () => {
+  assignment = {
+    ...assignment,
+    mySubmission: {
+      ...receipt(),
+      teacherFeedback: '訪談重點清楚',
+      reviewedAt: '2026-10-10T02:00:00.000Z',
+    },
+  };
+  const view = render(
+    <NuniDraftProvider>
+      <NuniCourses />
+    </NuniDraftProvider>,
+  );
+  expect(await view.findByText('最近老師回饋 · 1')).toBeTruthy();
+  expect(view.getByText('訪談重點清楚')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '開啟「校園訪談」完整回饋' }));
+  expect(await view.findByText('請記錄訪談重點。')).toBeTruthy();
+  expect(view.getByText(/老師回饋：訪談重點清楚/)).toBeTruthy();
+});
+
+it('marks earlier feedback after resubmission on the courses landing', async () => {
+  assignment = {
+    ...assignment,
+    mySubmission: {
+      ...receipt(),
+      teacherFeedback: '針對舊稿',
+      reviewedAt: '2026-10-08T02:00:00.000Z',
+      submittedAt: '2026-10-09T04:00:00.000Z',
+    },
+  };
+  const view = render(
+    <NuniDraftProvider>
+      <NuniCourses />
+    </NuniDraftProvider>,
+  );
+  expect(await view.findByText(/早於最近繳交/)).toBeTruthy();
+  expect(
+    view.getByText('這則回饋早於你最近一次繳交，請到作業頁確認是否仍適用。'),
+  ).toBeTruthy();
+});
+
+it('reports partial feedback load failure with retry instead of false empty success', async () => {
+  mockRequest.mockImplementation((path: string, context?: string, input?: Record<string, unknown>) => {
+    if (path.endsWith('/assignments') && !input) {
+      throw new NuniError(500, 'REQUEST_FAILED');
+    }
+    return response(path, context, input);
+  });
+  const view = render(
+    <NuniDraftProvider>
+      <NuniCourses />
+    </NuniDraftProvider>,
+  );
+  expect(await view.findByText(/有 1 門課程的回饋讀取失敗/)).toBeTruthy();
+  expect(view.getByRole('button', { name: '重試讀取回饋' })).toBeTruthy();
+  expect(view.queryByText('目前還沒有跨課程的老師回饋。')).toBeNull();
+});
+
+it('ignores stale recent-feedback responses after the Nuni session account changes', async () => {
+  const slow = deferred<{ assignments: unknown[] }>();
+  mockRequest.mockImplementation((path: string, context?: string, input?: Record<string, unknown>) => {
+    if (path === 'class-workspaces' && !input) {
+      if (context === 'context-second') {
+        return {
+          workspaces: [
+            {
+              ...course,
+              id: 'cw_99999999-9999-4999-8999-999999999999',
+              title: '新帳號課',
+            },
+          ],
+        };
+      }
+      return { workspaces: [course] };
+    }
+    if (path.endsWith('/assignments') && !input) {
+      if (context === 'context-first') {
+        return slow.promise.then(() => ({
+          assignments: [
+            {
+              ...assignment,
+              mySubmission: {
+                ...receipt(),
+                teacherFeedback: '舊帳號回饋不應顯示',
+                reviewedAt: date,
+              },
+            },
+          ],
+        }));
+      }
+      return { assignments: [] };
+    }
+    if (path.endsWith('/quizzes') && !input) return { quizzes: [] };
+    return response(path, context, input);
+  });
+  const view = render(
+    <NuniDraftProvider>
+      <NuniCourses />
+    </NuniDraftProvider>,
+  );
+  await view.findByText('服務設計課程');
+  mockSession = {
+    platformAccountId: 'pa_99999999-9999-4999-8999-999999999999',
+    isPlatformOperator: false,
+    context: 'context-second',
+  };
+  view.rerender(
+    <NuniDraftProvider>
+      <NuniCourses />
+    </NuniDraftProvider>,
+  );
+  await view.findByText('新帳號課');
+  await act(async () => {
+    slow.resolve({ assignments: [] });
+  });
+  expect(view.queryByText('舊帳號回饋不應顯示')).toBeNull();
+});
+
+it('saves teacher feedback and advances to the next awaiting receipt after success', async () => {
+  course = { ...course, memberRole: 'owner-teacher' };
+  const peerId = 'pa_55555555-5555-4555-8555-555555555555';
+  mockScrollAssignment.reveal.mockClear();
+  mockRequest.mockImplementation((path: string, context?: string, input?: Record<string, unknown>) => {
+    if (path.endsWith('/submissions')) {
+      return {
+        submissions: [
+          receipt(),
+          {
+            ...receipt(),
+            platformAccountId: peerId,
+            displayName: '陳同學',
+            body: '第二份',
+            submittedAt: '2026-10-08T01:00:00.000Z',
+          },
+        ],
+      };
+    }
+    if (path.endsWith('/feedback')) {
+      return {
+        ...receipt(),
+        teacherFeedback: input!.feedback,
+        reviewedAt: date,
+      };
+    }
+    return response(path, context, input);
+  });
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '查看收件：校園訪談' }));
+  expect(await view.findByText('待回饋第 1／2 份')).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText('給 測試學生 的回饋'), '第一份回饋');
+  fireEvent.press(view.getAllByRole('button', { name: '儲存回饋並查看下一份' })[0]!);
+  expect(await view.findByText(/已移到 陳同學 的繳交/)).toBeTruthy();
+  expect(view.getByText(/目前批改這一份/)).toBeTruthy();
+  await waitFor(() => expect(mockScrollAssignment.reveal).toHaveBeenCalled());
+});
+
+it('retains draft feedback when save-and-next fails', async () => {
+  course = { ...course, memberRole: 'owner-teacher' };
+  mockRequest.mockImplementation((path: string, context?: string, input?: Record<string, unknown>) => {
+    if (path.endsWith('/submissions')) return { submissions: [receipt()] };
+    if (path.endsWith('/feedback')) throw new NuniError(500, 'REQUEST_FAILED');
+    return response(path, context, input);
+  });
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '查看收件：校園訪談' }));
+  const editor = await view.findByLabelText('給 測試學生 的回饋');
+  fireEvent.changeText(editor, '失敗仍應保留');
+  fireEvent.press(view.getByRole('button', { name: '儲存回饋並查看下一份' }));
+  expect(await view.findByText(/尚未確認這次送出結果/)).toBeTruthy();
+  expect(view.getByDisplayValue('失敗仍應保留')).toBeTruthy();
+  expect(view.queryByText(/已移到/)).toBeNull();
+});
+
+it('reveals an earlier awaiting receipt after save-and-next on a long queue', async () => {
+  course = { ...course, memberRole: 'owner-teacher' };
+  mockScrollAssignment.reveal.mockClear();
+  const earlyId = 'pa_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const midId = accountId;
+  const lateId = 'pa_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  mockRequest.mockImplementation((path: string, context?: string, input?: Record<string, unknown>) => {
+    if (path.endsWith('/submissions')) {
+      return {
+        submissions: [
+          {
+            ...receipt(),
+            platformAccountId: earlyId,
+            displayName: '早交同學',
+            body: '最早待回饋',
+            submittedAt: '2026-10-08T01:00:00.000Z',
+          },
+          {
+            ...receipt(),
+            platformAccountId: midId,
+            displayName: '測試學生',
+            body: '中間待回饋',
+            submittedAt: '2026-10-08T02:00:00.000Z',
+          },
+          {
+            ...receipt(),
+            platformAccountId: lateId,
+            displayName: '晚交同學',
+            body: '最晚待回饋',
+            submittedAt: '2026-10-08T03:00:00.000Z',
+          },
+        ],
+      };
+    }
+    if (path.endsWith('/feedback')) {
+      return {
+        ...receipt(),
+        platformAccountId: midId,
+        displayName: '測試學生',
+        teacherFeedback: input!.feedback,
+        reviewedAt: date,
+      };
+    }
+    return response(path, context, input);
+  });
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '查看收件：校園訪談' }));
+  await view.findByText('待回饋第 1／3 份');
+  // Sorted pending newest-first: 晚交、測試學生、早交 — mid is the second save-next button.
+  fireEvent.changeText(view.getByLabelText('給 測試學生 的回饋'), '中間回饋');
+  fireEvent.press(view.getAllByRole('button', { name: '儲存回饋並查看下一份' })[1]!);
+  // After mid leaves the awaiting list, nextAwaiting returns the first remaining (晚交, above).
+  expect(await view.findByText(/已移到 晚交同學 的繳交/)).toBeTruthy();
+  await waitFor(() => expect(mockScrollAssignment.reveal).toHaveBeenCalled());
+  expect(view.getByTestId(`teacher-receipt-${assignmentId}-${lateId}`)).toBeTruthy();
+});
+
+it('does not advance or reveal when save-and-next replay returns different feedback', async () => {
+  course = { ...course, memberRole: 'owner-teacher' };
+  mockScrollAssignment.reveal.mockClear();
+  const peerId = 'pa_55555555-5555-4555-8555-555555555555';
+  let feedbackCalls = 0;
+  mockRequest.mockImplementation((path: string, context?: string, input?: Record<string, unknown>) => {
+    if (path.endsWith('/submissions')) {
+      return {
+        submissions: [
+          receipt(),
+          {
+            ...receipt(),
+            platformAccountId: peerId,
+            displayName: '陳同學',
+            body: '第二份',
+            submittedAt: '2026-10-08T01:00:00.000Z',
+          },
+        ],
+      };
+    }
+    if (path.endsWith('/feedback')) {
+      feedbackCalls += 1;
+      if (feedbackCalls === 1) throw new NuniError(0, 'REQUEST_FAILED');
+      return {
+        ...receipt(),
+        teacherFeedback: '另一位老師已補充新的回饋',
+        reviewedAt: date,
+      };
+    }
+    return response(path, context, input);
+  });
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '查看收件：校園訪談' }));
+  fireEvent.changeText(await view.findByLabelText('給 測試學生 的回饋'), '原本送出的回饋');
+  fireEvent.press(view.getAllByRole('button', { name: '儲存回饋並查看下一份' })[0]!);
+  expect(await view.findByText(/尚未確認這次送出結果/)).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '重試確認這次送出' }));
+  expect(await view.findByText('這份回饋已有新的內容，上方顯示目前儲存的版本。')).toBeTruthy();
+  expect(view.queryByText(/已移到 陳同學/)).toBeNull();
+  expect(mockScrollAssignment.reveal).not.toHaveBeenCalled();
+  expect(view.getByDisplayValue('另一位老師已補充新的回饋')).toBeTruthy();
+});
+
+it('drops a pending receipt reveal when the course session context changes', async () => {
+  course = { ...course, memberRole: 'owner-teacher' };
+  mockScrollAssignment.reveal.mockClear();
+  const peerId = 'pa_55555555-5555-4555-8555-555555555555';
+  const slow = deferred<{
+    assignmentId: string;
+    platformAccountId: string;
+    displayName: string;
+    body: string;
+    state: string;
+    submittedAt: string;
+    teacherFeedback: string;
+    reviewedAt: string;
+  }>();
+  mockRequest.mockImplementation((path: string, context?: string, input?: Record<string, unknown>) => {
+    if (path.endsWith('/submissions')) {
+      return {
+        submissions: [
+          receipt(),
+          {
+            ...receipt(),
+            platformAccountId: peerId,
+            displayName: '陳同學',
+            body: '第二份',
+            submittedAt: '2026-10-08T01:00:00.000Z',
+          },
+        ],
+      };
+    }
+    if (path.endsWith('/feedback')) return slow.promise;
+    return response(path, context, input);
+  });
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '查看收件：校園訪談' }));
+  fireEvent.changeText(await view.findByLabelText('給 測試學生 的回饋'), '第一份回饋');
+  fireEvent.press(view.getAllByRole('button', { name: '儲存回饋並查看下一份' })[0]!);
+  mockSession = { ...mockSession, context: 'context-second' };
+  view.rerender(<NuniCourses />);
+  await act(async () => {
+    slow.resolve({
+      ...receipt(),
+      teacherFeedback: '第一份回饋',
+      reviewedAt: date,
+    });
+  });
+  expect(view.queryByText(/已移到 陳同學/)).toBeNull();
+  expect(mockScrollAssignment.reveal).not.toHaveBeenCalled();
+});

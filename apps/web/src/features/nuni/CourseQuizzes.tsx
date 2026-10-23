@@ -16,11 +16,20 @@ import {
   parseCourseWorkHash,
 } from '@/lib/courseWorkLanding';
 import { useLocationHash } from '@/lib/useLocationHash';
-import { MutationForm, useClasses } from './CourseUI';
+import { MutationForm, useClasses, type MutationFormIntent } from './CourseUI';
 import { CourseUnitSelect } from './CourseUnitSelect';
 import { selectCourseUnit } from './courseOutline';
 import { CourseText } from './CourseMaterials';
 import { matchesQuizFilter, quizStatus, type QuizFilter } from './courseTasks';
+import {
+  awaitingFeedbackPosition,
+  feedbackQueueLabel,
+  matchesFeedbackQueueFilter,
+  needsFeedbackReview,
+  nextAwaitingFeedbackReview,
+  sortFeedbackQueue,
+  type FeedbackQueueFilter,
+} from '@campus/shared/src/lmsReviewQueue';
 import {
   formatTaipeiDateTime,
   parseTaipeiInstant,
@@ -32,6 +41,22 @@ import quizStyles from './CourseQuizzes.module.css';
 
 function dateLabel(value: string) {
   return formatTaipeiDateTime(value, { seconds: false });
+}
+
+/** Scoped so parallel mounted quizzes never collide on platformAccountId alone. */
+export function quizReceiptDomId(
+  workspaceId: string,
+  quizId: string,
+  platformAccountId: string,
+): string {
+  return `quiz-receipt-${workspaceId}-${quizId}-${platformAccountId}`;
+}
+
+function feedbackMatchesSubmitted(
+  receipt: { teacherFeedback: string | null },
+  submitted: string,
+): boolean {
+  return (receipt.teacherFeedback ?? '').trim() === submitted.trim();
 }
 
 export function CourseQuizzes({ workspace, units, onChanged }: { workspace: NuniWorkspace; units?: NuniUnit[] | null; onChanged?: () => void }) {
@@ -318,9 +343,14 @@ function Quiz({
   const [responses, setResponses] = useState<NuniQuizResponse[] | null>(null);
   const [reading, setReading] = useState(false);
   const [error, setError] = useState('');
+  const [feedbackFilter, setFeedbackFilter] = useState<FeedbackQueueFilter>('needs_feedback');
+  const [focusReceiptId, setFocusReceiptId] = useState<string | null>(null);
+  const [queueNotice, setQueueNotice] = useState('');
   const mounted = useRef(true);
   const readGeneration = useRef(0);
   const readLocked = useRef(false);
+  const responsesRef = useRef<NuniQuizResponse[] | null>(null);
+  const receiptNodes = useRef(new Map<string, HTMLElement | null>());
   const closeAttempts = useRef(new Set<string>());
   const currentAnswer = item.myResponse?.answer ?? '';
   const answerVersion = JSON.stringify([item.myResponse?.answer, item.myResponse?.submittedAt]);
@@ -339,12 +369,32 @@ function Quiz({
   const student = workspace.memberRole === 'student';
   const dueAtMs = item.dueAt ? parseTaipeiInstant(item.dueAt) : null;
   const passedDue = dueAtMs !== null && dueAtMs < now;
+  const FEEDBACK_FILTERS: FeedbackQueueFilter[] = ['all', 'needs_feedback', 'reviewed'];
+  const orderedResponses = responses === null ? null : sortFeedbackQueue(responses);
+  const visibleResponseCount =
+    orderedResponses?.filter((entry) => matchesFeedbackQueueFilter(entry, feedbackFilter)).length ??
+    0;
+  useEffect(() => {
+    responsesRef.current = responses;
+  }, [responses]);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
     };
   }, []);
+  useEffect(() => {
+    if (!focusReceiptId) return;
+    const node = receiptNodes.current.get(focusReceiptId);
+    if (!node) return;
+    if (typeof node.scrollIntoView === 'function') {
+      node.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+    const focusTarget =
+      node.querySelector<HTMLElement>('textarea[name="feedback"]') ??
+      node.querySelector<HTMLElement>('summary');
+    focusTarget?.focus({ preventScroll: true });
+  }, [focusReceiptId, orderedResponses, feedbackFilter]);
 
   const readResponses = async () => {
     if (readLocked.current) return;
@@ -354,7 +404,12 @@ function Quiz({
     setError('');
     try {
       const result = await classes.quizResponses(workspace.id, item.id);
-      if (mounted.current && run === readGeneration.current) setResponses(result);
+      if (mounted.current && run === readGeneration.current) {
+        setResponses(result);
+        setFeedbackFilter(
+          result.some((entry) => needsFeedbackReview(entry)) ? 'needs_feedback' : 'all',
+        );
+      }
     } catch (failure) {
       if (mounted.current && run === readGeneration.current) setError(nuniErrorMessage(failure));
     } finally {
@@ -423,8 +478,7 @@ function Quiz({
               <h4>老師回饋</h4>
               <CourseText text={item.myResponse.teacherFeedback} />
               {item.myResponse.reviewedAt &&
-                Date.parse(item.myResponse.reviewedAt) <
-                  Date.parse(item.myResponse.submittedAt) && (
+                needsFeedbackReview(item.myResponse) && (
                   <p className={styles.note}>這則回饋早於最近一次繳交，請老師確認是否仍適用。</p>
                 )}
               {item.myResponse.reviewedAt && (
@@ -563,27 +617,108 @@ function Quiz({
           {reading && <p role="status">正在讀取學生作答…</p>}
           {responses &&
             (responses.length ? (
-              <ul className={styles.list}>
-                {responses.map((entry) => (
-                  <QuizFeedbackRow
-                    key={entry.platformAccountId}
-                    entry={entry}
-                    writable={writable}
-                    save={async (feedback, key) => {
-                      const updated = await classes.quizFeedback(
-                        workspace.id,
-                        item.id,
-                        entry.platformAccountId,
-                        feedback,
-                        key,
-                      );
-                      if (!mounted.current) throw new NuniError(409, 'SESSION_CHANGED');
-                      updateResponse(updated);
-                      return updated;
-                    }}
-                  />
-                ))}
-              </ul>
+              <div>
+                <div className={styles.filters} role="group" aria-label="篩選回饋狀態">
+                  {FEEDBACK_FILTERS.map((value) => {
+                    const count = responses.filter((entry) =>
+                      matchesFeedbackQueueFilter(entry, value),
+                    ).length;
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        aria-pressed={feedbackFilter === value}
+                        onClick={() => setFeedbackFilter(value)}
+                      >
+                        {feedbackQueueLabel(value)} {count}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className={styles.muted}>
+                  預設先看尚未回饋的作答。儲存後，學生才看得到。
+                </p>
+                {queueNotice ? (
+                  <p role="status" className={styles.receipt}>
+                    {queueNotice}
+                  </p>
+                ) : null}
+                {visibleResponseCount === 0 ? (
+                  <p role="status" className={styles.muted}>
+                    「{feedbackQueueLabel(feedbackFilter)}」目前沒有作答。可改選「全部」查看其他狀態。
+                  </p>
+                ) : null}
+                <ul className={styles.list}>
+                  {(orderedResponses ?? []).map((entry) => (
+                    <QuizFeedbackRow
+                      key={entry.platformAccountId}
+                      entry={entry}
+                      workspaceId={workspace.id}
+                      quizId={item.id}
+                      queue={orderedResponses ?? []}
+                      expanded={focusReceiptId === entry.platformAccountId}
+                      hidden={!matchesFeedbackQueueFilter(entry, feedbackFilter)}
+                      writable={writable}
+                      rowRef={(node) => {
+                        if (node) receiptNodes.current.set(entry.platformAccountId, node);
+                        else receiptNodes.current.delete(entry.platformAccountId);
+                      }}
+                      save={async (feedback, key, intent) => {
+                        const updated = await classes.quizFeedback(
+                          workspace.id,
+                          item.id,
+                          entry.platformAccountId,
+                          feedback,
+                          key,
+                        );
+                        if (!mounted.current) throw new NuniError(409, 'SESSION_CHANGED');
+                        const latest = (responsesRef.current ?? []).map((row) =>
+                          row.platformAccountId === updated.platformAccountId ? updated : row,
+                        );
+                        const nextList = latest.length ? latest : [updated];
+                        responsesRef.current = nextList;
+                        updateResponse(updated);
+                        setResponses(nextList);
+                        const matched = feedbackMatchesSubmitted(updated, feedback);
+                        if (intent === 'secondary') {
+                          if (!matched) {
+                            setFocusReceiptId(entry.platformAccountId);
+                            setFeedbackFilter((current) =>
+                              matchesFeedbackQueueFilter(updated, current) ? current : 'all',
+                            );
+                            setQueueNotice('');
+                            return updated;
+                          }
+                          const next = nextAwaitingFeedbackReview(
+                            nextList,
+                            updated.platformAccountId,
+                          );
+                          if (!next) {
+                            setFocusReceiptId(null);
+                            setFeedbackFilter((current) =>
+                              matchesFeedbackQueueFilter(updated, current) ? current : 'all',
+                            );
+                            setQueueNotice('回饋已儲存。目前沒有下一份尚未回饋的作答。');
+                          } else {
+                            setFeedbackFilter('needs_feedback');
+                            setFocusReceiptId(next.platformAccountId);
+                            setQueueNotice(
+                              `回饋已儲存。已移到 ${next.displayName || '下一位同學'} 的作答。`,
+                            );
+                          }
+                          return updated;
+                        }
+                        setQueueNotice('');
+                        setFocusReceiptId(null);
+                        setFeedbackFilter((current) =>
+                          matchesFeedbackQueueFilter(updated, current) ? current : 'all',
+                        );
+                        return updated;
+                      }}
+                    />
+                  ))}
+                </ul>
+              </div>
             ) : (
               <p className={styles.muted}>尚未收到作答。</p>
             ))}
@@ -630,14 +765,32 @@ function Quiz({
 
 function QuizFeedbackRow({
   entry,
+  workspaceId,
+  quizId,
+  queue,
+  expanded,
+  hidden,
   writable,
+  rowRef,
   save,
 }: {
   entry: NuniQuizResponse;
+  workspaceId: string;
+  quizId: string;
+  queue: NuniQuizResponse[];
+  expanded: boolean;
+  hidden: boolean;
   writable: boolean;
-  save: (feedback: string, key: string) => Promise<NuniQuizResponse>;
+  rowRef: (node: HTMLLIElement | null) => void;
+  save: (
+    feedback: string,
+    key: string,
+    intent: MutationFormIntent,
+  ) => Promise<NuniQuizResponse>;
 }) {
   const [notice, setNotice] = useState('');
+  const [manualOpen, setManualOpen] = useState(false);
+  const detailsOpen = expanded || manualOpen;
   const currentText = entry.teacherFeedback ?? '';
   const version = JSON.stringify([
     entry.answer,
@@ -651,6 +804,7 @@ function QuizFeedbackRow({
   const changed = !pristine && editor.version !== version;
   const dispatched = useRef<string | null>(null);
   const mounted = useRef(true);
+  const position = awaitingFeedbackPosition(queue, entry.platformAccountId);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -658,17 +812,30 @@ function QuizFeedbackRow({
     };
   }, []);
   return (
-    <li className={quizStyles.response}>
+    <li
+      className={quizStyles.response}
+      hidden={hidden}
+      id={quizReceiptDomId(workspaceId, quizId, entry.platformAccountId)}
+      ref={rowRef}
+    >
       <p>
         <strong>{entry.displayName || '課程成員'}</strong> ·{' '}
         <time dateTime={entry.submittedAt}>{dateLabel(entry.submittedAt)}</time>
       </p>
+      {position ? (
+        <p className={styles.muted}>
+          待回饋第 {position.index}／{position.total} 份
+          {expanded ? ' · 目前批改這一份' : ''}
+        </p>
+      ) : expanded ? (
+        <p className={styles.muted}>目前批改這一份</p>
+      ) : null}
       <CourseText text={entry.answer} />
       {entry.teacherFeedback && (
         <div className={styles.receipt}>
           <strong>已儲存的回饋</strong>
           <CourseText text={entry.teacherFeedback} />
-          {entry.reviewedAt && Date.parse(entry.reviewedAt) < Date.parse(entry.submittedAt) && (
+          {entry.reviewedAt && needsFeedbackReview(entry) && (
             <p className={styles.note}>這則回饋早於最近一次繳交，請老師確認是否仍適用。</p>
           )}
         </div>
@@ -679,17 +846,28 @@ function QuizFeedbackRow({
         </p>
       )}
       {writable && (
-        <details className={quizStyles.feedback}>
+        <details
+          className={quizStyles.feedback}
+          open={detailsOpen}
+          onToggle={(event) => {
+            if (expanded) {
+              event.currentTarget.open = true;
+              return;
+            }
+            setManualOpen(event.currentTarget.open);
+          }}
+        >
           <summary>{entry.teacherFeedback ? '修改回饋' : '填寫回饋'}</summary>
           <MutationForm
             label="儲存回饋"
-            submit={async (form, key) => {
+            secondaryLabel="儲存回饋並查看下一份"
+            submit={async (form, key, intent) => {
               if (changed && dispatched.current !== key)
                 throw new NuniError(409, 'FEEDBACK_CHANGED');
               setNotice('');
               const feedback = String(form.get('feedback') || '').trim();
               dispatched.current = key;
-              const receipt = await save(feedback, key);
+              const receipt = await save(feedback, key, intent);
               if (!mounted.current) throw new NuniError(409, 'SESSION_CHANGED');
               const text = receipt.teacherFeedback ?? '';
               setEditor({
@@ -702,8 +880,13 @@ function QuizFeedbackRow({
                 original: text,
                 text,
               });
+              const matched = feedbackMatchesSubmitted(receipt, feedback);
+              if (intent === 'secondary' && matched) {
+                setNotice('');
+                return;
+              }
               setNotice(
-                receipt.teacherFeedback === feedback
+                matched
                   ? '回饋已儲存，學生現在可以查看。'
                   : '這份回饋已有新的內容，上方顯示目前儲存的版本。',
               );
