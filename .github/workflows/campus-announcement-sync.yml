@@ -1,19 +1,26 @@
-# 晉瑋已核准：每小時第 17 分（UTC）同步 pu 公告；只寫 schools/{schoolId}/announcements 與 announcement-sources。
+# 晉瑋已核准：每天兩次同步目錄內全部可抓學校公告（台北 07:00、11:30）；只寫 schools/{schoolId}/announcements 與 announcement-sources。
+# 排程與手動共用同一份目錄名單（排除三間示範校）；單一學校失敗就略過並記錄，不要停整批。
 # 要停：拿掉 schedule，或刪掉 production 環境的 CAMPUS_ANNOUNCEMENT_SYNC_ENABLED。
 name: Campus announcement sync
 
 on:
   schedule:
-    - cron: '17 * * * *'
+    - cron: '0 23 * * *' # 07:00 Taipei，早上第一堂前
+    - cron: '30 3 * * *' # 11:30 Taipei，中午尖峰前
   workflow_dispatch:
     inputs:
       school:
-        description: 'schoolId to scrape, for example pu'
-        required: true
-        default: 'pu'
+        description: 'schoolId；留空則同步目錄內全部可抓學校'
+        required: false
+        default: ''
         type: string
       write:
         description: 'Write to Firestore. Keep false unless production write is approved.'
+        required: false
+        default: false
+        type: boolean
+      probe:
+        description: 'Also dry-run extra schools without writing.'
         required: false
         default: false
         type: boolean
@@ -29,12 +36,20 @@ jobs:
   sync:
     name: Preview or sync campus announcements
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     environment: production
     env:
-      SCHOOL_ID: ${{ inputs.school || 'pu' }}
+      SCHOOL_ID: ${{ inputs.school || '' }}
       WRITE: ${{ github.event_name == 'schedule' || inputs.write == true }}
     steps:
+      - name: Require main for production announcement sync
+        run: |
+          set -euo pipefail
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "::error::正式環境公告同步只能從 main 觸發。目前 ref 是 ${{ github.ref }}。"
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -52,7 +67,12 @@ jobs:
 
       - name: Dry-run
         if: ${{ env.WRITE != 'true' }}
-        run: pnpm --filter functions sync:announcements --school "$SCHOOL_ID"
+        run: |
+          if [ -n "$SCHOOL_ID" ]; then
+            pnpm --filter functions sync:announcements --school "$SCHOOL_ID"
+          else
+            pnpm --filter functions sync:announcements --all
+          fi
 
       - name: Sync to Firestore
         if: ${{ env.WRITE == 'true' }}
@@ -68,4 +88,32 @@ jobs:
           trap 'rm -f "$GOOGLE_APPLICATION_CREDENTIALS"' EXIT
           umask 077
           printf '%s' "$ANNOUNCEMENT_SYNC_SA_JSON" > "$GOOGLE_APPLICATION_CREDENTIALS"
-          pnpm --filter functions sync:announcements --school "$SCHOOL_ID" --write
+          if [ -n "$SCHOOL_ID" ]; then
+            pnpm --filter functions sync:announcements --school "$SCHOOL_ID" --write
+          else
+            pnpm --filter functions sync:announcements --all --write
+          fi
+
+  probe:
+    name: Probe extra schools
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.probe == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter functions...
+
+      - name: Dry-run extra schools without writing
+        run: pnpm --filter functions sync:announcements:probe -- --schools ncku,ntpu

@@ -313,6 +313,7 @@ async function openOrder(view: ReturnType<typeof render>) {
   await view.findByText('取餐號碼 A001');
 }
 beforeEach(async () => {
+  process.env.EXPO_PUBLIC_ONLINE_ORDERING = 'true';
   jest.spyOn(AppState, 'addEventListener').mockImplementation(() => ({ remove: jest.fn() }));
   Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'active' });
   mockAuth = {
@@ -337,7 +338,22 @@ beforeEach(async () => {
   await clearAllFoodPendingForAccount('pa-a');
   await clearAllFoodPendingForAccount('pa-b');
 });
+afterEach(() => {
+  delete process.env.EXPO_PUBLIC_ONLINE_ORDERING;
+});
 
+test('closed online ordering keeps existing orders and does not open a new meal', async () => {
+  process.env.EXPO_PUBLIC_ONLINE_ORDERING = 'false';
+  hasOrder = true;
+  const view = render(ui());
+  expect(view.getByText('目前還不能線上點餐')).toBeTruthy();
+  expect(view.queryByText('選擇門市、確認金額後送出，到店付款。取餐前可隨時查看進度。')).toBeNull();
+  expect(view.queryByRole('button', { name: /查看餐點/ })).toBeNull();
+  fireEvent.press(await view.findByRole('button', { name: '訂單紀錄：第一校區' }));
+  expect(await view.findByRole('button', { name: '查看訂單 order-one' })).toBeTruthy();
+  expect(view.queryByRole('button', { name: '餐點門市' })).toBeNull();
+  expect(view.queryByRole('button', { name: /選餐/ })).toBeNull();
+});
 test('student selects required options, reviews whole TWD quote and explicitly places an onsite order', async () => {
   const view = render(ui());
   await fillQuote(view);

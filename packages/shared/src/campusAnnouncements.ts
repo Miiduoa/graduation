@@ -1,9 +1,40 @@
 import {
   listAnnouncementCatalogLinks,
+  verifiedOfficialAnnouncementUrl,
   type AnnouncementCatalogLink,
 } from './campusAnnouncementCatalog';
+import {
+  announcementQualityFlags,
+  chineseDisplayTitle,
+  parseAnnouncementDate,
+  selectOfficialAnnouncements,
+  selectStudentAnnouncements,
+  studentWallStartUtc,
+  tallyStudentWallFilter,
+  STUDENT_WALL_DROP_REASON_LABELS,
+  type StudentAnnouncementRow,
+  type StudentWallDropReason,
+  type StudentWallFilterTally,
+} from './campusAnnouncementQuality';
 
-export { listAnnouncementCatalogLinks, type AnnouncementCatalogLink };
+export {
+  listAnnouncementCatalogLinks,
+  verifiedOfficialAnnouncementUrl,
+  type AnnouncementCatalogLink,
+};
+export {
+  announcementQualityFlags,
+  chineseDisplayTitle,
+  parseAnnouncementDate,
+  selectOfficialAnnouncements,
+  selectStudentAnnouncements,
+  studentWallStartUtc,
+  tallyStudentWallFilter,
+  STUDENT_WALL_DROP_REASON_LABELS,
+  type StudentAnnouncementRow,
+  type StudentWallDropReason,
+  type StudentWallFilterTally,
+};
 
 export const ANNOUNCEMENT_SCOPES = ['campus', 'office', 'department'] as const;
 export type AnnouncementScope = (typeof ANNOUNCEMENT_SCOPES)[number];
@@ -18,8 +49,15 @@ export const ANNOUNCEMENT_CATEGORIES = [
 ] as const;
 export type PublicAnnouncementCategory = (typeof ANNOUNCEMENT_CATEGORIES)[number];
 export const SOURCE_UNAVAILABLE_TEXT = '暫時抓不到';
-export const SOURCE_NOT_CONNECTED_TEXT = '這裡還沒接上學校公告，請先到學校網站看最新消息';
-export const SOURCE_DOWN_EMPTY_TEXT = '學校網站暫時連不上，可以先到學校網站看最新消息';
+export const SOURCE_NOT_CONNECTED_TEXT = '本站還沒接上這間學校的公告。';
+export const ANNOUNCEMENT_EMPTY_SCHOOL_TEXT = SOURCE_NOT_CONNECTED_TEXT;
+export const ANNOUNCEMENT_EMPTY_CONNECTED_TEXT = '目前沒有學生日常公告。';
+export const ANNOUNCEMENT_OFFICIAL_SITE_BUTTON = '前往學校官方公告';
+export const ANNOUNCEMENT_STUDENT_WALL_LABEL = '學生公告';
+export const ANNOUNCEMENT_ALL_VIEW_LABEL = '全部公告';
+export const ANNOUNCEMENT_READ_FAILURE_TEXT = '暫時讀不到資料，請稍後再試';
+export const ANNOUNCEMENT_RETRY_TEXT = '再試一次';
+export const SOURCE_DOWN_EMPTY_TEXT = ANNOUNCEMENT_READ_FAILURE_TEXT;
 export const SOURCE_DOWN_WITH_CACHE_TEXT = '學校網站暫時連不上';
 export const FIRESTORE_UNAVAILABLE_WITH_CACHE_TEXT = '暫時讀不到新公告';
 export const STALE_ANNOUNCEMENT_REASONS = ['source_down', 'firestore'] as const;
@@ -195,6 +233,44 @@ export function announcementEmptyKind(
   return 'not_connected';
 }
 
+export type AnnouncementViewPhase = 'loading' | 'failed' | AnnouncementEmptyKind;
+
+export function announcementViewPhase(
+  loading: true,
+  announcements?: Array<unknown>,
+  sources?: Array<{ status?: string; lastSuccessAt?: string | null }>,
+  failed?: boolean,
+): 'loading';
+export function announcementViewPhase(
+  loading: false,
+  announcements?: Array<unknown>,
+  sources?: Array<{ status?: string; lastSuccessAt?: string | null }>,
+  failed?: boolean,
+): Exclude<AnnouncementViewPhase, 'loading'>;
+export function announcementViewPhase(
+  loading: boolean,
+  announcements?: Array<unknown>,
+  sources?: Array<{ status?: string; lastSuccessAt?: string | null }>,
+  failed?: boolean,
+): AnnouncementViewPhase;
+export function announcementViewPhase(
+  loading: boolean,
+  announcements: Array<unknown> = [],
+  sources: Array<{ status?: string; lastSuccessAt?: string | null }> = [],
+  failed = false,
+): AnnouncementViewPhase {
+  if (loading) return 'loading';
+  if (failed && announcements.length === 0) return 'failed';
+  return announcementEmptyKind(announcements, sources);
+}
+
+export function announcementEmptyHeading(kind: AnnouncementEmptyKind): string | null {
+  if (kind === 'has_items') return null;
+  if (kind === 'source_down') return ANNOUNCEMENT_READ_FAILURE_TEXT;
+  if (kind === 'not_connected') return SOURCE_NOT_CONNECTED_TEXT;
+  return ANNOUNCEMENT_EMPTY_CONNECTED_TEXT;
+}
+
 export const ANNOUNCEMENT_RECENT_LIMIT = 200;
 export const ANNOUNCEMENT_SOURCE_LIMIT = 50;
 
@@ -214,10 +290,7 @@ export function announcementSearchText(item: AnnouncementSearchFields): string {
     .toLocaleLowerCase('zh-TW');
 }
 
-export function announcementMatchesSearch(
-  item: AnnouncementSearchFields,
-  needle: string,
-): boolean {
+export function announcementMatchesSearch(item: AnnouncementSearchFields, needle: string): boolean {
   const query = needle.trim().toLocaleLowerCase('zh-TW');
   return !query || announcementSearchText(item).includes(query);
 }

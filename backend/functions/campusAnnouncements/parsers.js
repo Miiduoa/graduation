@@ -2,16 +2,34 @@
 
 const xml2js = require('xml2js');
 const { decodeHtml, normalizeAnnouncementUrl, parseDate, isLoginPortalUrl } = require('./url');
+const { chineseDisplayTitle } = require('./quality');
 
 const TITLE_MIN = 4;
 const TITLE_MAX = 180;
 
 function usableTitle(value) {
-  const title = decodeHtml(value).replace(/^【.*?】/, '').trim() || decodeHtml(value);
+  const decoded = decodeHtml(value);
+  const stripped = decoded.replace(/^【(?!漏洞預警|資安轉知).*?】/, '').trim() || decoded;
+  const title = chineseDisplayTitle(stripped);
   if (title.length < TITLE_MIN || title.length > TITLE_MAX) return '';
   if (/^https?:/i.test(title)) return '';
-  if (/^(home|more|more\.\.\.|下一頁|上一頁|回首頁|English|RSS)$/i.test(title)) return '';
+  if (/^(home|more|more\.\.\.|下一頁|上一頁|回首頁|原頁面開啟|English|RSS)$/i.test(title)) return '';
   return title;
+}
+
+function cellByTh(row, label) {
+  const match = String(row).match(
+    new RegExp(`<td[^>]*data-th=["']${label}["'][^>]*>([\\s\\S]*?)</td>`, 'i'),
+  );
+  return match ? decodeHtml(match[1].replace(/<[^>]+>/g, ' ')) : '';
+}
+
+function nearbyDateText(html, index, length, title) {
+  const nearby = String(html).slice(Math.max(0, index - 80), index + length + 160);
+  const match =
+    nearby.match(/20\d{2}[./-]\d{1,2}[./-]\d{1,2}|\d{2,3}[./年]\d{1,2}[./月]\d{1,2}/) ||
+    String(title || '').match(/\[(\d{2,3})[./](\d{1,2})[./](\d{1,2})\]/);
+  return match ? match[0] : '';
 }
 
 const IWEB_ARTICLE_HREF = /\/p\/(?:405|406)-\d+-\d+,[cr]\d+/i;
@@ -83,16 +101,35 @@ function isNavContext(html, index) {
 
 function takeItem(baseUrl, href, title, dateText, summary, options = {}) {
   const originalUrl = normalizeAnnouncementUrl(href, baseUrl);
+  const rawTitle = decodeHtml(title);
   const cleanTitle = usableTitle(title);
   if (!originalUrl || !cleanTitle || isLoginPortalUrl(originalUrl)) return null;
   if (/\.(jpe?g|png|gif|zip|docx?)(?:$|[?#])/i.test(originalUrl)) return null;
   if (/\.pdf(?:$|[?#])/i.test(originalUrl) && !options.allowAttachment) return null;
   return {
     title: cleanTitle,
+    rawTitle,
     originalUrl,
-    publishedAt: parseDate(dateText),
+    publishedAt: parseDate(dateText) || parseDate(rawTitle) || '',
+    office: decodeHtml(options.office || '').trim(),
     summary: decodeHtml(summary).slice(0, 160),
   };
+}
+
+const GREGORIAN_DATE_RE = /20\d{2}[./-]\d{1,2}[./-]\d{1,2}/;
+const ROC_DATE_RE = /\d{2,3}[./年]\d{1,2}[./月]\d{1,2}/;
+
+function firstDateInText(text) {
+  return (String(text).match(GREGORIAN_DATE_RE) || String(text).match(ROC_DATE_RE) || [])[0] || '';
+}
+
+/** Prefer the labeled/last-cell list date so titles like「115年11月20日舉辦」do not become publishedAt. */
+function tableRowDateText(row, title) {
+  const labeled = cellByTh(row, '日期');
+  if (labeled) return labeled;
+  const cells = String(row).match(/<td\b[\s\S]*?<\/td>/gi) || [];
+  const lastCell = decodeHtml((cells[cells.length - 1] || '').replace(/<[^>]+>/g, ' '));
+  return firstDateInText(lastCell) || firstDateInText(row) || title;
 }
 
 function parseIwebTable(html, baseUrl) {
@@ -103,10 +140,13 @@ function parseIwebTable(html, baseUrl) {
       /<a[^>]+href=["']([^"']+)["'][^>]*(?:title=["']([^"']+)["'])?[^>]*>([\s\S]*?)<\/a>/i,
     );
     if (!link || IWEB_SECTION_HREF.test(link[1])) continue;
-    const title = link[2] || link[3].replace(/<[^>]+>/g, ' ');
+    const innerTitle = link[3].replace(/<[^>]+>/g, ' ');
+    const title = usableTitle(innerTitle) ? innerTitle : link[2] || innerTitle;
     if (looksLikeNavTitle(usableTitle(title) || title)) continue;
-    const dateMatch = row.match(/20\d{2}[./-]\d{1,2}[./-]\d{1,2}|\d{2,3}[./年]\d{1,2}[./月]\d{1,2}/);
-    const item = takeItem(baseUrl, link[1], title, dateMatch?.[0], '', { allowAttachment: true });
+    const item = takeItem(baseUrl, link[1], title, tableRowDateText(row, title), '', {
+      allowAttachment: true,
+      office: cellByTh(row, '公告單位'),
+    });
     if (item) rows.push(item);
   }
   return dedupe(rows);
@@ -123,14 +163,14 @@ function parseIwebLinks(html, baseUrl) {
     if (!IWEB_DOC_HREF.test(href) && !/\.pdf(?:$|[?#])/i.test(href)) continue;
     const news = inNewsList(html, match.index);
     if (!news && isNavContext(html, match.index)) continue;
-    const title = match[2] || match[3].replace(/<[^>]+>/g, ' ');
+    const innerTitle = match[3].replace(/<[^>]+>/g, ' ');
+    const title = usableTitle(innerTitle) ? innerTitle : match[2] || innerTitle;
     const clean = usableTitle(title);
     if (!clean || (!news && looksLikeNavTitle(clean))) continue;
     const article = IWEB_ARTICLE_HREF.test(href);
-    const nearby = String(html).slice(Math.max(0, match.index - 80), match.index + match[0].length + 120);
-    const dateMatch = nearby.match(/20\d{2}[./-]\d{1,2}[./-]\d{1,2}/);
-    if (!news && !article && !dateMatch) continue;
-    const item = takeItem(baseUrl, href, title, dateMatch?.[0], '', { allowAttachment: news });
+    const dateText = nearbyDateText(html, match.index, match[0].length, title);
+    if (!news && !article && !dateText) continue;
+    const item = takeItem(baseUrl, href, title, dateText, '', { allowAttachment: news });
     if (item) rows.push(item);
   }
   return dedupe(rows);

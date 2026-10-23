@@ -9,18 +9,29 @@ import {
   type NuniUnit,
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
+import {
+  COURSE_WORK_MISSING_QUIZ,
+  courseWorkElementId,
+  landOnCourseWork,
+  parseCourseWorkHash,
+} from '@/lib/courseWorkLanding';
 import { useLocationHash } from '@/lib/useLocationHash';
 import { MutationForm, useClasses } from './CourseUI';
 import { CourseUnitSelect } from './CourseUnitSelect';
 import { selectCourseUnit } from './courseOutline';
 import { CourseText } from './CourseMaterials';
 import { matchesQuizFilter, quizStatus, type QuizFilter } from './courseTasks';
+import {
+  formatTaipeiDateTime,
+  parseTaipeiInstant,
+  taipeiWallTimeToIso,
+} from '@campus/shared/src/taipeiTime';
 import { useNuniSession } from './Session';
 import styles from './NuniApp.module.css';
 import quizStyles from './CourseQuizzes.module.css';
 
 function dateLabel(value: string) {
-  return new Date(value).toLocaleString('zh-TW', { dateStyle: 'medium', timeStyle: 'short' });
+  return formatTaipeiDateTime(value, { seconds: false });
 }
 
 export function CourseQuizzes({ workspace, units, onChanged }: { workspace: NuniWorkspace; units?: NuniUnit[] | null; onChanged?: () => void }) {
@@ -74,24 +85,25 @@ function QuizList({ workspace, accountId, units, onChanged }: { workspace: NuniW
     window.addEventListener('hashchange', revealLinkedQuiz);
     return () => window.removeEventListener('hashchange', revealLinkedQuiz);
   }, []);
+  const linked = parseCourseWorkHash(hash);
+  const missingLinked =
+    items !== null &&
+    linked?.kind === 'quiz' &&
+    !items.some((item) => item.id === linked.id);
   useEffect(() => {
-    const target = hash.slice(1);
+    if (!linked || linked.kind !== 'quiz') return;
+    const target = courseWorkElementId(linked.kind, linked.id);
     if (
       filter !== 'all' ||
       revealed.current === target ||
-      !items?.some((item) => `quiz-${item.id}` === target)
+      !items?.some((item) => item.id === linked.id)
     )
       return;
     const frame = window.requestAnimationFrame(() => {
-      const element = document.getElementById(target);
-      if (element) {
-        element.scrollIntoView?.({ block: 'start' });
-        element.focus({ preventScroll: true });
-        revealed.current = target;
-      }
+      if (landOnCourseWork(target)) revealed.current = target;
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [filter, hash, items]);
+  }, [filter, items, linked?.id, linked?.kind]);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -182,6 +194,11 @@ function QuizList({ workspace, accountId, units, onChanged }: { workspace: NuniW
       {!writable && (
         <p className={styles.note}>課程已封存，這裡僅供查看已發布的測驗與自己的作答。</p>
       )}
+      {missingLinked ? (
+        <p role="status" className={styles.notice}>
+          {COURSE_WORK_MISSING_QUIZ}
+        </p>
+      ) : null}
       {error && (
         <div className={styles.notice} role="alert">
           {error}
@@ -251,7 +268,7 @@ function QuizList({ workspace, accountId, units, onChanged }: { workspace: NuniW
               const item = await classes.createQuiz(workspace.id, {
                 title: String(form.get('title') || '').trim(),
                 prompt: String(form.get('prompt') || '').trim(),
-                dueAt: due ? new Date(due).toISOString() : null,
+                dueAt: taipeiWallTimeToIso(due),
                 unitId: units === undefined ? undefined : selectCourseUnit(form, units),
                 idempotencyKey: key,
               });
@@ -277,7 +294,7 @@ function QuizList({ workspace, accountId, units, onChanged }: { workspace: NuniW
               <input name="dueAt" type="datetime-local" />
             </label>
             <p className={styles.muted}>
-              時間依目前裝置時區顯示。時間到了仍可作答；需要停止收件時，請使用「結束測驗」。
+              時間依台北時間顯示。時間到了仍可作答；需要停止收件時，請使用「結束測驗」。
             </p>
           </MutationForm>
         </details>
@@ -320,7 +337,8 @@ function Quiz({
   const teacher = workspace.memberRole === 'owner-teacher' || workspace.memberRole === 'co-teacher';
   const writable = workspace.state === 'active';
   const student = workspace.memberRole === 'student';
-  const passedDue = item.dueAt !== null && Date.parse(item.dueAt) < now;
+  const dueAtMs = item.dueAt ? parseTaipeiInstant(item.dueAt) : null;
+  const passedDue = dueAtMs !== null && dueAtMs < now;
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -368,7 +386,7 @@ function Quiz({
 
   return (
     <article
-      className={styles.panel}
+      className={`${styles.panel} ${styles.courseWorkTarget}`}
       id={`quiz-${item.id}`}
       tabIndex={-1}
       aria-label={`測驗：${item.title}`}

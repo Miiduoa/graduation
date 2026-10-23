@@ -70,10 +70,10 @@ test('iWeb links skip navigation and keep news-list articles', () => {
   <a href="https://c039.pu.edu.tw/p/406-1072-73284,r13.php">暑修學生進校之收費規定</a>
 </div><div class="mdate before">2026-07-01</div></div>
 `;
-  const titles = parseIwebLinks(html, 'https://acd.pu.edu.tw/p/403-1042-885-1.php').map(
-    (row) => row.title,
-  );
+  const rows = parseIwebLinks(html, 'https://acd.pu.edu.tw/p/403-1042-885-1.php');
+  const titles = rows.map((row) => row.title);
   expect(titles).toEqual(['選課公告', '[115.09.18]機車通行證抽籤結果', '暑修學生進校之收費規定']);
+  expect(rows[1].publishedAt.startsWith('2026-09-18')).toBe(true);
   expect(titles).not.toContain('行政單位');
   expect(titles).not.toContain('最新消息');
   expect(titles).not.toContain('教務Q&A');
@@ -88,6 +88,94 @@ test('iWeb links ignore homepage shortcut tiles that reuse mtitle markup', () =>
   <a href="https://osachc.pu.edu.tw/var/file/67/1067/img/map.pdf">校園無障礙地圖</a>
 </div></div>`;
   expect(parseIwebLinks(html, 'https://osa.pu.edu.tw/')).toEqual([]);
+});
+
+test('NCKU campus table keeps 公告單位 and does not invent a scrape date', () => {
+  const html = `
+<table class="listTB table">
+<thead><tr><th>日期</th><th>標題</th><th>公告單位</th></tr></thead>
+<tbody>
+<tr>
+  <td data-th="日期"><div class="d-txt">2026-10-16</div></td>
+  <td data-th="標題"><div class="mtitle"><a title="原頁面開啟" href="https://oia.ncku.edu.tw/p/404-1032-306703.php">【公告】國立成功大學116學年第1學期校級薦外交換學生計畫簡章</a></div></td>
+  <td data-th="公告單位"><div class="d-txt">國際教育組</div></td>
+</tr>
+<tr>
+  <td data-th="日期"><div class="d-txt">2026-10-16</div></td>
+  <td data-th="標題"><div class="mtitle"><a title="原頁面開啟" href="/var/file/213/1213/img/4803/780946787.pdf">【漏洞預警】Cisco License On-Prem 存在4個重大資安漏洞。(開啟PDF檔)</a></div></td>
+  <td data-th="公告單位"><div class="d-txt">計算機與網路中心</div></td>
+</tr>
+</tbody>
+</table>`;
+  const rows = parseIwebTable(html, 'https://web.ncku.edu.tw/p/422-1000-1026.php?Lang=zh-tw');
+  expect(rows[0]).toMatchObject({
+    title: '國立成功大學116學年第1學期校級薦外交換學生計畫簡章',
+    office: '國際教育組',
+    originalUrl: 'https://oia.ncku.edu.tw/p/404-1032-306703.php',
+  });
+  expect(rows[0].publishedAt.startsWith('2026-10-16')).toBe(true);
+  expect(rows[1].office).toBe('計算機與網路中心');
+  expect(rows[1].title).toContain('漏洞預警');
+});
+
+test('SCU news-3 table uses the last-cell list date instead of ROC dates inside titles', () => {
+  const html = `
+<table class="table table-striped whitespace-nowrap">
+<thead><tr class="border-t"><td>類別</td><td>標題</td><td>登刊日期</td></tr></thead>
+<tbody>
+<tr>
+  <td><span>一般公告</span></td>
+  <td><a href="https://news.scu.edu.tw/news/373391" title="開啟「[評鑑組轉知] 活動訊息」頁面">[評鑑組轉知] 「2026全球企業永續論壇」活動訊息</a></td>
+  <td>2026/10/19</td>
+</tr>
+<tr>
+  <td><span>一般公告</span></td>
+  <td><a href="https://news.scu.edu.tw/news/370277">【教學資源中心】轉知：將於115年11月20日、12月16日舉辦「人工智慧代理人基礎實作」</a></td>
+  <td>2026/10/16</td>
+</tr>
+</tbody>
+</table>`;
+  const rows = parseIwebTable(html, 'https://news.scu.edu.tw/news-3');
+  expect(rows).toHaveLength(2);
+  expect(rows[0]).toMatchObject({
+    title: '[評鑑組轉知] 「2026全球企業永續論壇」活動訊息',
+    originalUrl: 'https://news.scu.edu.tw/news/373391',
+  });
+  expect(rows[0].publishedAt.startsWith('2026-10-19')).toBe(true);
+  expect(rows[1].originalUrl).toBe('https://news.scu.edu.tw/news/370277');
+  expect(rows[1].publishedAt.startsWith('2026-10-16')).toBe(true);
+  expect(rows[1].publishedAt.startsWith('2026-11-20')).toBe(false);
+});
+
+test('NTPU FMS public bulletin table extracts numbered media links', () => {
+  const html = `
+<table>
+<tr><th>Name</th><th>Upload Date</th></tr>
+<tr><td><a href="/media/32913">115/10/15-人事室-教師聘任暨升等評審辦法修正公告</a></td><td>2026-10-15</td></tr>
+<tr><td><a href="/media/32801">115/07/22-教務處-公告學生實習辦法修正</a></td><td>2026-07-22</td></tr>
+</table>`;
+  const extracted = parseIwebTable(html, 'https://fms.ntpu.edu.tw/km/24662');
+  expect(extracted).toHaveLength(2);
+  expect(extracted[0]).toMatchObject({
+    title: '115/10/15-人事室-教師聘任暨升等評審辦法修正公告',
+    originalUrl: 'https://fms.ntpu.edu.tw/media/32913',
+  });
+  expect(extracted[1].title).toContain('教務處');
+});
+
+test('NTPU student union iWeb news list extracts article links', () => {
+  const html = `
+<div id="pageptlist">
+  <div class="mtitle"><a href="/p/406-1015-1969,r39.php">學生自治展新頁，北大學生會聯合辦公空間啟用</a></div>
+  <div class="mdate">2026-03-01</div>
+  <div class="mtitle"><a href="/p/406-1015-1573,r39.php">北聯大系統交流—與北科學生會自治交流</a></div>
+  <div class="mdate">2025-11-20</div>
+</div>`;
+  const extracted = parseIwebLinks(html, 'https://ntpusu.ntpu.edu.tw/p/403-1015-39-1.php');
+  expect(extracted.map((row) => row.title)).toEqual([
+    '學生自治展新頁，北大學生會聯合辦公空間啟用',
+    '北聯大系統交流—與北科學生會自治交流',
+  ]);
 });
 
 test('iWeb table keeps dated PDF notices and drops section index links', () => {

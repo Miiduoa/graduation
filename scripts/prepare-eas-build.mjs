@@ -3,7 +3,7 @@ import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'nod
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { releaseTarget } from './verify-eas-build.mjs';
+import { releaseEnvironment, releaseTarget } from './verify-eas-build.mjs';
 
 const receiptName = '.release-build-target.json';
 const guardCommand = `node ../../scripts/prepare-eas-build.mjs --worker ${receiptName}`;
@@ -11,7 +11,7 @@ const object = (value) => value && typeof value === 'object' && !Array.isArray(v
 
 export function identityEnvironment(target) {
   return {
-    APP_ENV: target.profile,
+    APP_ENV: releaseEnvironment(target.profile),
     EXPO_PUBLIC_EAS_PROJECT_ID: target.projectId,
     [target.platform === 'ios' ? 'IOS_BUNDLE_IDENTIFIER' : 'ANDROID_PACKAGE_NAME']:
       target.appIdentifier,
@@ -34,11 +34,11 @@ export function prepareBuildConfig(config, target) {
     throw new Error('Invalid platform environment.');
   // Platform env is merged after shared env, including inherited platform settings.
   const identity = identityEnvironment(target);
-  profile.environment = target.profile;
+  profile.environment = releaseEnvironment(target.profile);
   profile.env = { ...profile.env, ...identity };
   profile[target.platform] = {
     ...platform,
-    environment: target.profile,
+    environment: releaseEnvironment(target.profile),
     env: { ...platform.env, ...identity },
   };
   return result;
@@ -68,7 +68,7 @@ export function verifyAppConfig(appConfig, target) {
     throw new Error('Resolved Expo app identifier does not match the release target.');
   if (appConfig?.extra?.eas?.projectId !== target.projectId)
     throw new Error('Resolved Expo project ID does not match the release target.');
-  if (appConfig?.extra?.appEnv !== target.profile)
+  if (appConfig?.extra?.appEnv !== releaseEnvironment(target.profile))
     throw new Error('Resolved Expo environment does not match the release profile.');
   if (appConfig?.updates?.url !== `https://u.expo.dev/${target.projectId}`)
     throw new Error('Resolved update URL does not match the release project.');
@@ -76,13 +76,21 @@ export function verifyAppConfig(appConfig, target) {
 
 export function verifyResolvedBuildConfig(result, target) {
   const profile = result?.buildProfile;
-  if (!object(profile) || profile.environment !== target.profile)
+  if (!object(profile) || profile.environment !== releaseEnvironment(target.profile))
     throw new Error('Resolved EAS environment does not match the release profile.');
   for (const [key, value] of Object.entries(identityEnvironment(target))) {
     if (profile.env?.[key] !== value) throw new Error(`Resolved EAS profile does not bind ${key}.`);
   }
-  if (profile.distribution !== (target.profile === 'production' ? 'store' : 'internal'))
+  if (
+    profile.distribution !==
+    (releaseEnvironment(target.profile) === 'production' ? 'store' : 'internal')
+  )
     throw new Error('Resolved EAS distribution does not match the release profile.');
+  if (
+    target.profile === 'production-device' &&
+    (profile.buildType !== 'apk' || profile.gradleCommand)
+  )
+    throw new Error('production-device requires the standard signed release APK build.');
   if (profile.developmentClient || profile.withoutCredentials || profile.simulator)
     throw new Error('Release requires a signed device build.');
   verifyAppConfig(result.appConfig, target);

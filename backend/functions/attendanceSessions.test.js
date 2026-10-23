@@ -16,21 +16,48 @@ function memoryStore() {
       { role: 'student', status: 'active', displayName: '陳同學', studentId: 'S123' },
     ],
   ]);
+  const collectionRef = (colPath) => ({
+    doc: (id) => ref(`${colPath}/${id}`),
+    where: (field, op, value) => ({
+      __query: true,
+      colPath,
+      field,
+      op,
+      value,
+    }),
+  });
   const ref = (path) => ({
     path,
-    collection: (name) => ({ doc: (id) => ref(`${path}/${name}/${id}`) }),
+    collection: (name) => collectionRef(`${path}/${name}`),
   });
+  function snapshot(reference) {
+    const value = docs.get(reference.path);
+    return {
+      id: reference.path.split('/').pop(),
+      exists: value !== undefined,
+      data: () => value,
+      ref: reference,
+    };
+  }
+  function querySnapshot(query) {
+    const prefix = `${query.colPath}/`;
+    const matches = [];
+    for (const [path, value] of docs) {
+      if (!path.startsWith(prefix) || path.slice(prefix.length).includes('/')) continue;
+      if (query.op === '==' && value?.[query.field] === query.value) {
+        matches.push(snapshot(ref(path)));
+      }
+    }
+    return { docs: matches, empty: matches.length === 0, size: matches.length };
+  }
   let failCommit = false;
   const db = {
-    collection: (name) => ({ doc: (id) => ref(`${name}/${id}`) }),
+    collection: (name) => collectionRef(name),
     async runTransaction(callback) {
       const writes = [];
       const transaction = {
-        getAll: async (...refs) =>
-          refs.map((reference) => {
-            const value = docs.get(reference.path);
-            return { exists: value !== undefined, data: () => value };
-          }),
+        get: async (reference) => (reference.__query ? querySnapshot(reference) : snapshot(reference)),
+        getAll: async (...refs) => refs.map((reference) => snapshot(reference)),
         create: (reference, value) => writes.push({ type: 'create', reference, value }),
         update: (reference, value) => writes.push({ type: 'update', reference, value }),
       };
@@ -182,6 +209,67 @@ describe('live attendance session handlers', () => {
     const second = await handlers.startLiveSession(startRequest({}, 'other-teacher'));
     const oldClient = await handlers.startLiveSession(startRequest({ requestId: undefined }));
     expect(new Set([first.sessionId, second.sessionId, oldClient.sessionId]).size).toBe(3);
+    expect(store.docs.get(path(first, 'liveSessions')).active).toBe(false);
+    expect(store.docs.get(path(second, 'liveSessions')).active).toBe(false);
+    expect(store.docs.get(path(oldClient, 'liveSessions')).active).toBe(true);
+  });
+
+  test('opening a new session for the same class ends the previous one and leaves other classes open', async () => {
+    store.docs.set('groups/class-2', { name: '資料結構' });
+    store.docs.set('groups/class-2/members/teacher', { role: 'instructor', status: 'active' });
+    const classA = await handlers.startLiveSession(startRequest({ requestId: 'class-a' }));
+    const classB = await handlers.startLiveSession(
+      startRequest({ groupId: 'class-2', requestId: 'class-b' }),
+    );
+    const nextA = await handlers.startLiveSession(startRequest({ requestId: 'class-a-next' }));
+    expect(store.docs.get(path(classA, 'liveSessions')).active).toBe(false);
+    expect(store.docs.get(path(classA, 'attendanceSessions')).active).toBe(false);
+    expect(store.docs.get(path(classA, 'liveSessions')).endedAt.toMillis()).toBe(
+      store.docs.get(path(classA, 'attendanceSessions')).endedAt.toMillis(),
+    );
+    expect(store.docs.get(`groups/class-2/liveSessions/${classB.sessionId}`).active).toBe(true);
+    expect(store.docs.get(`groups/class-2/attendanceSessions/${classB.sessionId}`).active).toBe(
+      true,
+    );
+    expect(store.docs.get(path(nextA, 'liveSessions')).active).toBe(true);
+    expect(store.docs.get(path(nextA, 'attendanceSessions')).active).toBe(true);
+  });
+
+  test('ending one session does not close another class or another leftover session', async () => {
+    store.docs.set('groups/class-2', { name: '資料結構' });
+    store.docs.set('groups/class-2/members/teacher', { role: 'instructor', status: 'active' });
+    const classA = await handlers.startLiveSession(startRequest({ requestId: 'class-a' }));
+    const leftover = {
+      schemaVersion: 2,
+      sessionId: 'session_leftover',
+      groupId: 'class-1',
+      teacherId: 'teacher',
+      startedAt: { toMillis: () => time - 1000 },
+      endedAt: null,
+      active: true,
+      qrExpiresAt: { toMillis: () => time + 300_000 },
+      attendeeCount: 0,
+    };
+    store.docs.set('groups/class-1/liveSessions/session_leftover', { ...leftover, reactions: {} });
+    store.docs.set('groups/class-1/attendanceSessions/session_leftover', {
+      ...leftover,
+      liveSessionId: 'session_leftover',
+      attendanceMode: 'qr',
+      source: 'live_session',
+      qrEnabled: true,
+    });
+    const classB = await handlers.startLiveSession(
+      startRequest({ groupId: 'class-2', requestId: 'class-b' }),
+    );
+    await handlers.endLiveSession(sessionRequest(classA, {}, 'teacher'));
+    expect(store.docs.get(path(classA, 'liveSessions')).active).toBe(false);
+    expect(store.docs.get(path(classA, 'attendanceSessions')).active).toBe(false);
+    expect(store.docs.get('groups/class-1/liveSessions/session_leftover').active).toBe(true);
+    expect(store.docs.get('groups/class-1/attendanceSessions/session_leftover').active).toBe(true);
+    expect(store.docs.get(`groups/class-2/liveSessions/${classB.sessionId}`).active).toBe(true);
+    expect(store.docs.get(`groups/class-2/attendanceSessions/${classB.sessionId}`).active).toBe(
+      true,
+    );
   });
 
   test('end is atomic and repeated starts and ends never reopen or retime a completed session', async () => {

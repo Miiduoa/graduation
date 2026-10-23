@@ -12,6 +12,8 @@ import { FoodMenu } from './FoodMenu';
 import { FoodOrders } from './FoodOrders';
 import { clearAllFoodPendingForAccount } from './foodPersistence';
 import { useFoodDraft, useFoodRead, type FoodDraftCache } from './foodState';
+import { isWebOnlineOrderingEnabled } from '@/lib/onlineOrdering';
+import { foodPageSubtitle } from '@campus/shared/src/foodPageCopy';
 import styles from './Food.module.css';
 
 export type FoodClient = ReturnType<typeof createNuniFoodClient>;
@@ -42,8 +44,9 @@ export function FoodWorkspace({
     setScope({ account, drafts: new Map() });
     return null;
   }
+  const orderingOn = isWebOnlineOrderingEnabled();
   return (
-    <SiteShell title="點餐與取餐" subtitle="先看菜單與金額，確認後才送出訂單。">
+    <SiteShell title="點餐與取餐" subtitle={foodPageSubtitle(orderingOn)}>
       <div className={styles.stack}>
         {cleanupError ? <p role="alert">{cleanupError}</p> : null}
         <nav className={styles.bar} aria-label="餐飲服務">
@@ -101,11 +104,13 @@ function FoodAccount({
       ),
     [context],
   );
-  const [tab, setTab] = useFoodDraft<'menu' | 'orders'>(
+  const orderingOn = isWebOnlineOrderingEnabled();
+  const [storedTab, setTab] = useFoodDraft<'menu' | 'orders'>(
     cache,
     'food:tab',
     initialOrder ? 'orders' : 'menu',
   );
+  const tab = orderingOn ? storedTab : 'orders';
   const [tenant, setTenant] = useFoodDraft(cache, 'food:tenant', initialTenant);
   const realmsLoad = useCallback(
     () => (tab === 'orders' ? client.listOrderRealms() : client.listRealms()),
@@ -125,9 +130,11 @@ function FoodAccount({
   return (
     <div className={styles.stack}>
       <div className={styles.bar}>
-        <Button aria-pressed={tab === 'menu'} onClick={() => setTab('menu')}>
-          我要點餐
-        </Button>
+        {orderingOn ? (
+          <Button aria-pressed={tab === 'menu'} onClick={() => setTab('menu')}>
+            我要點餐
+          </Button>
+        ) : null}
         <Button aria-pressed={tab === 'orders'} onClick={() => setTab('orders')}>
           我的訂單與取餐
         </Button>

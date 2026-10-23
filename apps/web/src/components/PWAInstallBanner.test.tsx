@@ -23,6 +23,14 @@ afterEach(() => {
 });
 
 describe('home screen installation', () => {
+  it('does not show the install card on the bus page', () => {
+    browser(true);
+    window.history.pushState({}, '', '/bus');
+    render(<PWAInstallBanner />);
+    expect(screen.queryByRole('region', { name: '加入主畫面' })).toBeNull();
+    window.history.pushState({}, '', '/');
+  });
+
   it('keeps the server render independent of iOS and blocked storage', () => {
     browser(true);
     vi.spyOn(localStorage, 'getItem').mockImplementation(() => {

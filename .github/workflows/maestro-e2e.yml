@@ -34,6 +34,7 @@ jobs:
     env:
       CI: '1'
       APP_ENV: development
+      EXPO_PUBLIC_MAESTRO: '1'
       EXPO_PUBLIC_ALLOW_LOCAL_MOCK_AUTH: 'false'
       EXPO_PUBLIC_ENABLE_UNIVERSAL_DEV_ACCOUNTS: 'false'
 
@@ -160,6 +161,12 @@ jobs:
             --debug-output .maestro/results/debug \
             --format junit \
             --output .maestro/results/smoke-onboarding.xml \
+            --env APP_ID="$APP_ID"
+          maestro --device "$SIMULATOR_UDID" test .maestro/flows/05_map.yaml \
+            --test-output-dir .maestro/screenshots \
+            --debug-output .maestro/results/debug-map \
+            --format junit \
+            --output .maestro/results/smoke-campus-map.xml \
             --env APP_ID="$APP_ID"
 
       - name: Run Full Test Suite

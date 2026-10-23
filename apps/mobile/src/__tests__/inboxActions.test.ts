@@ -7,8 +7,21 @@ import {
   resolveInboxAction,
   resolveInboxActions,
   inboxTaskFromLegacyAssignmentActionTarget,
+  navigateFromInboxTask,
 } from '../services/inboxActions';
 import type { InboxTask } from '../data/types';
+import { navigateToCourseScreen } from '../utils/courseNavigation';
+import { safeNavigate } from '../utils/safeNavigate';
+
+jest.mock('../utils/courseNavigation', () => ({
+  navigateToCourseScreen: jest.fn(),
+}));
+jest.mock('../utils/safeNavigate', () => ({
+  safeNavigate: jest.fn(() => true),
+}));
+jest.mock('../services/companionSignalRecorder', () => ({
+  recordCompanionEvent: jest.fn(),
+}));
 
 const baseTask = (overrides: Partial<InboxTask>): InboxTask =>
   ({
@@ -127,5 +140,128 @@ describe('inboxTaskFromLegacyAssignmentActionTarget', () => {
         actionTarget: { tab: '學習', screen: 'CourseHub', params: { groupId: 'g1' } },
       }),
     ).toBeNull();
+  });
+});
+
+describe('navigateFromInboxTask', () => {
+  beforeEach(() => {
+    jest.mocked(navigateToCourseScreen).mockClear();
+  });
+
+  test('assignment opens HomeworkSubmit with assignment id and due date', () => {
+    const dueAt = new Date('2026-10-20T16:00:00.000Z');
+    const ok = navigateFromInboxTask(
+      {},
+      baseTask({ assignmentId: 'a1', dueAt }),
+      { role: 'student', isTeachingRole: false },
+    );
+    expect(ok).toBe(true);
+    expect(navigateToCourseScreen).toHaveBeenCalledWith(
+      {},
+      'student',
+      'HomeworkSubmit',
+      {
+        courseId: 'cs1',
+        hwId: 'a1',
+        hwTitle: '繳交期中報告',
+        dueAt: '2026-10-20T16:00:00.000Z',
+      },
+    );
+  });
+
+  test('quiz opens QuizTaking with quiz id and due date', () => {
+    const dueAt = new Date('2026-10-20T16:00:00.000Z');
+    const ok = navigateFromInboxTask(
+      {},
+      baseTask({ kind: 'quiz', assignmentId: 'q1', dueAt }),
+      { role: 'student', isTeachingRole: false },
+    );
+    expect(ok).toBe(true);
+    expect(navigateToCourseScreen).toHaveBeenCalledWith(
+      {},
+      'student',
+      'QuizTaking',
+      {
+        groupId: 'cs1',
+        groupName: 'DB',
+        quizId: 'q1',
+        dueAt: '2026-10-20T16:00:00.000Z',
+      },
+    );
+  });
+
+  test('nuni assignment opens the course submit area in one tap', () => {
+    const workspaceId = 'cw_11111111-1111-4111-8111-111111111111';
+    const assignmentId = 'cwa_22222222-2222-4222-8222-222222222222';
+    const ok = navigateFromInboxTask(
+      {},
+      baseTask({ groupId: workspaceId, assignmentId }),
+      { role: 'student', isTeachingRole: false },
+    );
+    expect(ok).toBe(true);
+    expect(safeNavigate).toHaveBeenCalledWith(
+      {},
+      'NuniWorkspace',
+      {
+        tab: 'courses',
+        workspaceId,
+        assignmentId,
+      },
+    );
+    expect(navigateToCourseScreen).not.toHaveBeenCalled();
+  });
+
+  test('nuni quiz opens the course answer area in one tap', () => {
+    const workspaceId = 'cw_11111111-1111-4111-8111-111111111111';
+    const quizId = 'cwq_33333333-3333-4333-8333-333333333333';
+    const ok = navigateFromInboxTask(
+      {},
+      baseTask({ kind: 'quiz', groupId: workspaceId, assignmentId: quizId }),
+      { role: 'student', isTeachingRole: false },
+    );
+    expect(ok).toBe(true);
+    expect(safeNavigate).toHaveBeenCalledWith(
+      {},
+      'NuniWorkspace',
+      {
+        tab: 'courses',
+        workspaceId,
+        assignmentId: quizId,
+      },
+    );
+    expect(navigateToCourseScreen).not.toHaveBeenCalled();
+  });
+
+  test('nuni assignment without work id still opens the course', () => {
+    const workspaceId = 'cw_11111111-1111-4111-8111-111111111111';
+    const ok = navigateFromInboxTask(
+      {},
+      baseTask({ groupId: workspaceId, assignmentId: undefined }),
+      { role: 'student', isTeachingRole: false },
+    );
+    expect(ok).toBe(true);
+    expect(safeNavigate).toHaveBeenCalledWith(
+      {},
+      'NuniWorkspace',
+      {
+        tab: 'courses',
+        workspaceId,
+      },
+    );
+    expect(navigateToCourseScreen).not.toHaveBeenCalled();
+  });
+
+  test('assignment without id does not open the class feed', () => {
+    const ok = navigateFromInboxTask({}, baseTask({ assignmentId: undefined }), {
+      role: 'student',
+      isTeachingRole: false,
+    });
+    expect(ok).toBe(true);
+    expect(navigateToCourseScreen).toHaveBeenCalledWith(
+      {},
+      'student',
+      'CourseHub',
+      { groupId: 'cs1', groupName: 'DB' },
+    );
   });
 });

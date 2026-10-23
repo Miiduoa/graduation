@@ -10,7 +10,7 @@ import {
   type FormEvent,
 } from 'react';
 import { createNuniClasses, NuniError, nuniErrorMessage } from '@campus/shared/src/nuni';
-import { browserRequest, useNuniSession } from './Session';
+import { browserRequest, browserUpload, useNuniSession } from './Session';
 import styles from './NuniApp.module.css';
 
 type BeginCourseRequest = () => () => void;
@@ -28,18 +28,29 @@ export function CourseAccessBoundary({
 export function useClasses(beginRequest?: BeginCourseRequest) {
   const { session, refresh } = useNuniSession();
   const inheritedRequest = useContext(CourseAccess);
-  return createNuniClasses(async (path, input) => {
-    if (!session) return Promise.reject(new NuniError(401, 'SIGN_IN_REQUIRED'));
-    const onAccessDenied = (beginRequest ?? inheritedRequest)?.();
-    try {
-      return await browserRequest(path, session.context, input);
-    } catch (error) {
-      if (error instanceof NuniError && (error.status === 401 || error.code === 'SESSION_CHANGED'))
-        void refresh();
-      if (error instanceof NuniError && [403, 404].includes(error.status)) onAccessDenied?.();
-      throw error;
-    }
-  }, session?.platformAccountId);
+  return createNuniClasses(
+    async (path, input, query) => {
+      if (!session) return Promise.reject(new NuniError(401, 'SIGN_IN_REQUIRED'));
+      const onAccessDenied = (beginRequest ?? inheritedRequest)?.();
+      try {
+        return await (query
+          ? browserRequest(path, session.context, input, undefined, query)
+          : browserRequest(path, session.context, input));
+      } catch (error) {
+        if (error instanceof NuniError && (error.status === 401 || error.code === 'SESSION_CHANGED'))
+          void refresh();
+        if (error instanceof NuniError && [403, 404].includes(error.status)) onAccessDenied?.();
+        throw error;
+      }
+    },
+    session?.platformAccountId,
+    async (path, body, contentType) => {
+      if (!session) return Promise.reject(new NuniError(401, 'SIGN_IN_REQUIRED'));
+      const copy = new ArrayBuffer(body.byteLength);
+      new Uint8Array(copy).set(body);
+      return browserUpload(path, session.context, new Blob([copy]), contentType);
+    },
+  );
 }
 
 export function MutationForm({
@@ -84,7 +95,10 @@ export function MutationForm({
       form.reset();
     } catch (failure) {
       if (!mounted.current) return;
-      const unknown = !(failure instanceof NuniError) || failure.status >= 500;
+      const unknown =
+        !(failure instanceof NuniError) ||
+        failure.status >= 500 ||
+        failure.code === 'SESSION_CHANGED';
       setUncertain(unknown);
       if (!unknown) attempt.current = null;
       setError(nuniErrorMessage(failure));

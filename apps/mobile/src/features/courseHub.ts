@@ -138,6 +138,65 @@ export async function loadCourseHub(
     !/^demo-/i.test(id) &&
     (row.schoolId == null || row.schoolId === scope.schoolId) &&
     (row.groupId == null || row.groupId === groupId);
+  const releasedFile = (id: string, row: Record<string, unknown>) =>
+    row.published !== false &&
+    !['draft', 'retracted', 'archived', 'deleted'].includes(String(row.status ?? '')) &&
+    row.isDemo !== true &&
+    row.source !== 'demo' &&
+    !/^demo-/i.test(id);
+  const modules =
+    materials.status === 'fulfilled'
+      ? materials.value.docs
+          .filter((entry) => visible(entry.id, entry.data()))
+          .map((entry) => {
+            const row = entry.data();
+            return {
+              id: entry.id,
+              title: text(row.title) || '課程單元',
+              description: text(row.description),
+              url: courseResourceUrl(row.resourceUrl),
+              order: typeof row.order === 'number' ? row.order : 999,
+            };
+          })
+          .sort((a, b) => a.order - b.order)
+      : [];
+  const nested =
+    materials.status === 'fulfilled'
+      ? await Promise.all(
+          modules.map(async (module) => {
+            try {
+              const snap = await getDocsFromServer(
+                collection(db, 'groups', groupId, 'modules', module.id, 'materials'),
+              );
+              return { moduleId: module.id, ok: true as const, docs: snap.docs };
+            } catch {
+              return { moduleId: module.id, ok: false as const, docs: [] };
+            }
+          }),
+        )
+      : [];
+  if (nested.length) {
+    assertCurrent(scope, current);
+    await authorize(scope, current);
+  }
+  const files = modules.flatMap((module) => {
+    const folder = nested.find((row) => row.moduleId === module.id);
+    const cabinet = (folder?.docs ?? [])
+      .filter((entry) => releasedFile(entry.id, entry.data()))
+      .map((entry, index) => {
+        const row = entry.data();
+        return {
+          id: `${module.id}:${entry.id}`,
+          title: text(row.label) || text(row.title) || module.title,
+          description: text(row.description) || module.description,
+          url: courseResourceUrl(row.url) ?? courseResourceUrl(row.resourceUrl),
+          order: module.order + index / 1000,
+        };
+      })
+      .filter((item) => item.url);
+    if (cabinet.length) return cabinet;
+    return [module];
+  });
   return {
     name: text(group?.name) || '未命名課程',
     description: text(group?.description),
@@ -168,21 +227,6 @@ export async function loadCourseHub(
     materials:
       materials.status === 'rejected'
         ? { status: 'error', items: [] }
-        : {
-            status: 'ready',
-            items: materials.value.docs
-              .filter((entry) => visible(entry.id, entry.data()))
-              .map((entry) => {
-                const row = entry.data();
-                return {
-                  id: entry.id,
-                  title: text(row.title) || '課程單元',
-                  description: text(row.description),
-                  url: courseResourceUrl(row.resourceUrl),
-                  order: typeof row.order === 'number' ? row.order : 999,
-                };
-              })
-              .sort((a, b) => a.order - b.order),
-          },
+        : { status: 'ready', items: files },
   };
 }

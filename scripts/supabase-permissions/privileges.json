@@ -1,0 +1,2722 @@
+{
+  "base_commit": "bcb33b260a3afb97f0ede58e9e476873f7ba8178",
+  "policy": "No anonymous base-table access. Per-table authenticated commands preserve existing RLS contracts; sensitive writes use existing RPCs/triggers. Service access is limited to reviewed workers and profile role administration. No sequences are created.",
+  "tables": [
+    {
+      "name": "profiles",
+      "created_in": "supabase/migrations/20260117120001_core.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "UPDATE"
+      ],
+      "service_role": [
+        "SELECT",
+        "UPDATE"
+      ],
+      "anon": [],
+      "reason": "Auth trigger creates profiles. Service UPDATE is retained for trusted role administration; the role-protection trigger blocks self-promotion.",
+      "call_sites": {
+        "staged": [
+          "select",
+          "upsert"
+        ],
+        "service": [
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "courses",
+      "created_in": "supabase/migrations/20260117120001_core.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [
+        "SELECT"
+      ],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "web": [
+          "select"
+        ],
+        "staged": [
+          "insert",
+          "select"
+        ],
+        "mobile": [
+          "select"
+        ],
+        "service": [
+          "select"
+        ],
+        "disabled-service": [
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "course_members",
+      "created_in": "supabase/migrations/20260117120001_core.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "web": [
+          "select"
+        ],
+        "staged": [
+          "insert",
+          "select"
+        ],
+        "mobile": [
+          "insert",
+          "select",
+          "upsert"
+        ],
+        "disabled-service": [
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "course_materials",
+      "created_in": "supabase/migrations/20260117120001_core.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [
+        "SELECT"
+      ],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "staged": [
+          "insert",
+          "select"
+        ],
+        "mobile": [
+          "select"
+        ],
+        "service": [
+          "select"
+        ],
+        "disabled-service": [
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "announcements",
+      "created_in": "supabase/migrations/20260117120001_core.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "web": [
+          "insert"
+        ],
+        "staged": [
+          "insert",
+          "select"
+        ],
+        "mobile": [
+          "delete",
+          "insert",
+          "select",
+          "update"
+        ]
+      }
+    },
+    {
+      "name": "assignments",
+      "created_in": "supabase/migrations/20260117120002_assignments_quizzes.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [
+        "SELECT"
+      ],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "mobile": [
+          "delete",
+          "insert",
+          "select"
+        ],
+        "staged": [
+          "insert",
+          "select"
+        ],
+        "service": [
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "submissions",
+      "created_in": "supabase/migrations/20260117120002_assignments_quizzes.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "mobile": [
+          "select",
+          "update",
+          "upsert"
+        ],
+        "staged": [
+          "select",
+          "update",
+          "upsert"
+        ]
+      }
+    },
+    {
+      "name": "quizzes",
+      "created_in": "supabase/migrations/20260117120002_assignments_quizzes.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [
+        "SELECT"
+      ],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "mobile": [
+          "select"
+        ],
+        "staged": [
+          "insert",
+          "select",
+          "update"
+        ],
+        "service": [
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "quiz_questions",
+      "created_in": "supabase/migrations/20260117120002_assignments_quizzes.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "mobile": [
+          "select"
+        ],
+        "staged": [
+          "insert",
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "quiz_question_solutions",
+      "created_in": "supabase/migrations/20260117120002_assignments_quizzes.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "staged": [
+          "insert"
+        ]
+      }
+    },
+    {
+      "name": "quiz_attempts",
+      "created_in": "supabase/migrations/20260117120002_assignments_quizzes.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Create/score attempts through start_quiz_attempt, submit_quiz_attempt and teacher scoring RPCs.",
+      "call_sites": {
+        "mobile": [
+          "insert",
+          "select",
+          "update"
+        ],
+        "staged": [
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "quiz_answers",
+      "created_in": "supabase/migrations/20260117120002_assignments_quizzes.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "mobile": [
+          "upsert"
+        ],
+        "staged": [
+          "select",
+          "upsert"
+        ]
+      }
+    },
+    {
+      "name": "forum_topics",
+      "created_in": "supabase/migrations/20260117120003_forum_grades.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "mobile": [
+          "select"
+        ],
+        "staged": [
+          "insert",
+          "select",
+          "update"
+        ]
+      }
+    },
+    {
+      "name": "forum_posts",
+      "created_in": "supabase/migrations/20260117120003_forum_grades.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "mobile": [
+          "delete",
+          "insert",
+          "select",
+          "update"
+        ],
+        "staged": [
+          "delete",
+          "insert",
+          "select",
+          "update"
+        ]
+      }
+    },
+    {
+      "name": "grade_categories",
+      "created_in": "supabase/migrations/20260117120003_forum_grades.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "staged": [
+          "insert",
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "grade_items",
+      "created_in": "supabase/migrations/20260117120003_forum_grades.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "mobile": [
+          "select"
+        ],
+        "staged": [
+          "insert",
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "grade_scores",
+      "created_in": "supabase/migrations/20260117120003_forum_grades.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "SELECT follows student/grader RLS; INSERT/UPDATE/DELETE are retained for authorized graders. Student quiz self-write policies are removed; students sync server-calculated scores through the validated RPC.",
+      "call_sites": {
+        "staged": [
+          "delete",
+          "select",
+          "upsert"
+        ]
+      }
+    },
+    {
+      "name": "live_sessions",
+      "created_in": "supabase/migrations/20260117120004_live.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "mobile": [
+          "insert",
+          "select",
+          "update"
+        ],
+        "staged": [
+          "insert",
+          "select",
+          "update"
+        ]
+      }
+    },
+    {
+      "name": "live_buzzer_state",
+      "created_in": "supabase/migrations/20260117120004_live.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "staged": [
+          "delete"
+        ]
+      }
+    },
+    {
+      "name": "live_attendance",
+      "created_in": "supabase/migrations/20260201090000_tronclass_extend.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Direct INSERT remains denied; students use record_live_attendance for window enforcement.",
+      "call_sites": {
+        "mobile": [
+          "insert",
+          "select",
+          "upsert"
+        ],
+        "staged": [
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "live_chat_messages",
+      "created_in": "supabase/migrations/20260201090000_tronclass_extend.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "staged": [
+          "insert",
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "notifications",
+      "created_in": "supabase/migrations/20260201090000_tronclass_extend.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [
+        "SELECT",
+        "UPDATE"
+      ],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "web": [
+          "select"
+        ],
+        "staged": [
+          "select",
+          "update"
+        ],
+        "service": [
+          "select",
+          "update"
+        ]
+      }
+    },
+    {
+      "name": "push_tokens",
+      "created_in": "supabase/migrations/20260201090000_tronclass_extend.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [
+        "SELECT"
+      ],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "staged": [
+          "upsert"
+        ],
+        "service": [
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "material_progress",
+      "created_in": "supabase/migrations/20260201090000_tronclass_extend.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "staged": [
+          "select",
+          "upsert"
+        ]
+      }
+    },
+    {
+      "name": "forum_reports",
+      "created_in": "supabase/migrations/20260217100200_forum_moderation.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "staged": [
+          "insert",
+          "select",
+          "update"
+        ]
+      }
+    },
+    {
+      "name": "forum_post_edits",
+      "created_in": "supabase/migrations/20260217100200_forum_moderation.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Written by a trigger; direct INSERT policy is deliberately false.",
+      "call_sites": {
+        "staged": [
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "audit_logs",
+      "created_in": "supabase/migrations/20260218120000_p2_enterprise.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Written by privileged database triggers, not clients.",
+      "call_sites": {
+        "web": [
+          "select"
+        ],
+        "staged": [
+          "select"
+        ],
+        "mobile": [
+          "insert",
+          "select",
+          "update"
+        ]
+      }
+    },
+    {
+      "name": "ai_usage_daily",
+      "created_in": "supabase/migrations/20260218120000_p2_enterprise.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "disabled-service": [
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "quiz_pool_entries",
+      "created_in": "supabase/migrations/20260218120200_wave2_commercial_gap.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "staged": [
+          "delete",
+          "insert",
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "course_question_bank",
+      "created_in": "supabase/migrations/20260218120200_wave2_commercial_gap.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "staged": [
+          "delete",
+          "insert",
+          "select",
+          "update"
+        ]
+      }
+    },
+    {
+      "name": "notification_push_logs",
+      "created_in": "supabase/migrations/20260218120200_wave2_commercial_gap.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT"
+      ],
+      "service_role": [
+        "INSERT"
+      ],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "web": [
+          "select"
+        ],
+        "staged": [
+          "select"
+        ],
+        "service": [
+          "insert"
+        ]
+      }
+    },
+    {
+      "name": "course_role_capabilities",
+      "created_in": "supabase/migrations/20260517120000_wave3_wave6_plan_expansion.sql",
+      "prior_explicit_grants": [
+        "grant select on public.course_role_capabilities to authenticated;"
+      ],
+      "authenticated": [
+        "SELECT"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Read the matrix; modify through the admin capability RPCs.",
+      "call_sites": {
+        "web": [
+          "select"
+        ],
+        "staged": [
+          "select"
+        ],
+        "mobile": [
+          "select",
+          "upsert"
+        ]
+      }
+    },
+    {
+      "name": "material_ai_enrichment",
+      "created_in": "supabase/migrations/20260517120000_wave3_wave6_plan_expansion.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Staff-edit RLS contract retained; the disabled AI worker receives no service table grant.",
+      "call_sites": {
+        "disabled-service": [
+          "upsert"
+        ]
+      }
+    },
+    {
+      "name": "alert_dispatch_outbox",
+      "created_in": "supabase/migrations/20260520120000_gap_p1_04_dlq_dashboard.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "disabled-service": [
+          "insert"
+        ]
+      }
+    },
+    {
+      "name": "report_export_jobs",
+      "created_in": "supabase/migrations/20260520120200_gap_p2_08b_reporting_visualization.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "web": [
+          "insert",
+          "select"
+        ],
+        "staged": [
+          "insert",
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "ai_compliance_policies",
+      "created_in": "supabase/migrations/20260520120300_gap_p2_09_ai_compliance.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "web": [
+          "select",
+          "update"
+        ],
+        "staged": [
+          "select",
+          "update"
+        ],
+        "disabled-service": [
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "ai_consent_log",
+      "created_in": "supabase/migrations/20260520120300_gap_p2_09_ai_compliance.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Append through record_ai_consent.",
+      "call_sites": {}
+    },
+    {
+      "name": "media_play_tokens",
+      "created_in": "supabase/migrations/20260520120400_drm_alt_signed_media_tokens.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "course_units",
+      "created_in": "supabase/migrations/20260520130000_wave5_units_calendar.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [
+        "SELECT"
+      ],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "mobile": [
+          "select"
+        ],
+        "service": [
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "course_unit_items",
+      "created_in": "supabase/migrations/20260520130000_wave5_units_calendar.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "calendar_events",
+      "created_in": "supabase/migrations/20260520130000_wave5_units_calendar.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "web": [
+          "insert"
+        ],
+        "staged": [
+          "insert"
+        ]
+      }
+    },
+    {
+      "name": "course_groups",
+      "created_in": "supabase/migrations/20260520130100_wave5_groups_peer_review.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "web": [
+          "select"
+        ],
+        "staged": [
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "course_group_members",
+      "created_in": "supabase/migrations/20260520130100_wave5_groups_peer_review.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "peer_review_assignments",
+      "created_in": "supabase/migrations/20260520130100_wave5_groups_peer_review.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "peer_review_pairs",
+      "created_in": "supabase/migrations/20260520130100_wave5_groups_peer_review.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "peer_review_responses",
+      "created_in": "supabase/migrations/20260520130100_wave5_groups_peer_review.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Append through the reviewer-scoped submit_peer_review RPC.",
+      "call_sites": {}
+    },
+    {
+      "name": "surveys",
+      "created_in": "supabase/migrations/20260520130200_wave5_surveys_badges_dashboard.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "web": [
+          "insert",
+          "select"
+        ],
+        "staged": [
+          "insert",
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "survey_questions",
+      "created_in": "supabase/migrations/20260520130200_wave5_surveys_badges_dashboard.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "survey_responses",
+      "created_in": "supabase/migrations/20260520130200_wave5_surveys_badges_dashboard.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Submit through submit_survey_response for respondent and anonymous-survey checks.",
+      "call_sites": {}
+    },
+    {
+      "name": "course_badges",
+      "created_in": "supabase/migrations/20260520130200_wave5_surveys_badges_dashboard.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "web": [
+          "insert",
+          "select"
+        ],
+        "staged": [
+          "insert",
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "course_badge_awards",
+      "created_in": "supabase/migrations/20260520130200_wave5_surveys_badges_dashboard.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "scorm_packages",
+      "created_in": "supabase/migrations/20260520140000_wave6_scorm_lti_rubric.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "scorm_attempts",
+      "created_in": "supabase/migrations/20260520140000_wave6_scorm_lti_rubric.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "xapi_statements",
+      "created_in": "supabase/migrations/20260520140000_wave6_scorm_lti_rubric.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Append through record_xapi_statement.",
+      "call_sites": {}
+    },
+    {
+      "name": "lti_tools",
+      "created_in": "supabase/migrations/20260520140000_wave6_scorm_lti_rubric.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "web": [
+          "insert",
+          "select"
+        ],
+        "staged": [
+          "insert",
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "lti_resource_links",
+      "created_in": "supabase/migrations/20260520140000_wave6_scorm_lti_rubric.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "lti_launches",
+      "created_in": "supabase/migrations/20260520140000_wave6_scorm_lti_rubric.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "rubrics",
+      "created_in": "supabase/migrations/20260520140000_wave6_scorm_lti_rubric.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "web": [
+          "insert",
+          "select"
+        ],
+        "staged": [
+          "insert",
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "rubric_criteria",
+      "created_in": "supabase/migrations/20260520140000_wave6_scorm_lti_rubric.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "rubric_scores",
+      "created_in": "supabase/migrations/20260520140000_wave6_scorm_lti_rubric.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Score through submit_rubric_score after course, target binding and grader-capability checks.",
+      "call_sites": {}
+    },
+    {
+      "name": "material_notes",
+      "created_in": "supabase/migrations/20260520140100_wave6_notes_versions_chapters_meeting.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "material_bookmarks",
+      "created_in": "supabase/migrations/20260520140100_wave6_notes_versions_chapters_meeting.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "material_versions",
+      "created_in": "supabase/migrations/20260520140100_wave6_notes_versions_chapters_meeting.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "material_chapter_markers",
+      "created_in": "supabase/migrations/20260520140100_wave6_notes_versions_chapters_meeting.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "course_meetings",
+      "created_in": "supabase/migrations/20260520140100_wave6_notes_versions_chapters_meeting.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "web": [
+          "insert",
+          "select"
+        ],
+        "staged": [
+          "insert",
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "livestream_sessions",
+      "created_in": "supabase/migrations/20260520140100_wave6_notes_versions_chapters_meeting.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "web": [
+          "insert",
+          "select"
+        ],
+        "staged": [
+          "insert",
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "learning_time_entries",
+      "created_in": "supabase/migrations/20260520140200_wave6_learning_time_workload.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Append through record_learning_time, including its duration checks.",
+      "call_sites": {}
+    },
+    {
+      "name": "course_export_packages",
+      "created_in": "supabase/migrations/20260520150000_wave7_export_richtext_preview.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "badge_issuer_config",
+      "created_in": "supabase/migrations/20260520150000_wave7_export_richtext_preview.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "badge_assertions",
+      "created_in": "supabase/migrations/20260520150000_wave7_export_richtext_preview.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "html_sanitize_policy",
+      "created_in": "supabase/migrations/20260520150000_wave7_export_richtext_preview.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "material_previews",
+      "created_in": "supabase/migrations/20260520150000_wave7_export_richtext_preview.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "staged": [
+          "select",
+          "upsert"
+        ]
+      }
+    },
+    {
+      "name": "whiteboard_sessions",
+      "created_in": "supabase/migrations/20260520150000_wave7_export_richtext_preview.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "staged": [
+          "insert",
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "whiteboard_annotations",
+      "created_in": "supabase/migrations/20260520150000_wave7_export_richtext_preview.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "announcement_reads",
+      "created_in": "supabase/migrations/20260520150100_wave7_leaderboard_duplicate_reads_tags.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Record through mark_announcement_read.",
+      "call_sites": {}
+    },
+    {
+      "name": "course_tags",
+      "created_in": "supabase/migrations/20260520150100_wave7_leaderboard_duplicate_reads_tags.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "course_material_tag_map",
+      "created_in": "supabase/migrations/20260520150100_wave7_leaderboard_duplicate_reads_tags.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "teacher_private_notes",
+      "created_in": "supabase/migrations/20260520150100_wave7_leaderboard_duplicate_reads_tags.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "course_feedback",
+      "created_in": "supabase/migrations/20260520150100_wave7_leaderboard_duplicate_reads_tags.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "grade_approval_requests",
+      "created_in": "supabase/migrations/20260520150100_wave7_leaderboard_duplicate_reads_tags.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "enrollment_history",
+      "created_in": "supabase/migrations/20260520150100_wave7_leaderboard_duplicate_reads_tags.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "webhook_subscriptions",
+      "created_in": "supabase/migrations/20260520150200_wave7_webhooks_offline_packs.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "webhook_deliveries",
+      "created_in": "supabase/migrations/20260520150200_wave7_webhooks_offline_packs.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "material_offline_packs",
+      "created_in": "supabase/migrations/20260520150200_wave7_webhooks_offline_packs.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "staged": [
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "material_offline_downloads",
+      "created_in": "supabase/migrations/20260520150200_wave7_webhooks_offline_packs.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "staged": [
+          "insert"
+        ]
+      }
+    },
+    {
+      "name": "academic_terms",
+      "created_in": "supabase/migrations/20260520160000_wave8_academic_catalog.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "staged": [
+          "insert",
+          "select",
+          "update"
+        ]
+      }
+    },
+    {
+      "name": "departments",
+      "created_in": "supabase/migrations/20260520160000_wave8_academic_catalog.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {
+        "staged": [
+          "insert",
+          "select"
+        ]
+      }
+    },
+    {
+      "name": "course_sections",
+      "created_in": "supabase/migrations/20260520160000_wave8_academic_catalog.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "course_prerequisites",
+      "created_in": "supabase/migrations/20260520160000_wave8_academic_catalog.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "course_subscriptions",
+      "created_in": "supabase/migrations/20260520160000_wave8_academic_catalog.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "quiz_proctor_settings",
+      "created_in": "supabase/migrations/20260520160100_wave8_at_risk_group_proctor_publish.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "quiz_proctor_events",
+      "created_in": "supabase/migrations/20260520160100_wave8_at_risk_group_proctor_publish.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "ai_chat_threads",
+      "created_in": "supabase/migrations/20260520160200_wave8_ai_search_outcomes_prefs.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "ai_chat_messages",
+      "created_in": "supabase/migrations/20260520160200_wave8_ai_search_outcomes_prefs.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "material_ai_summary",
+      "created_in": "supabase/migrations/20260520160200_wave8_ai_search_outcomes_prefs.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "push_notification_preferences",
+      "created_in": "supabase/migrations/20260520160200_wave8_ai_search_outcomes_prefs.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "user_favorites",
+      "created_in": "supabase/migrations/20260520160200_wave8_ai_search_outcomes_prefs.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "email_digest_preferences",
+      "created_in": "supabase/migrations/20260520160200_wave8_ai_search_outcomes_prefs.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "program_outcomes",
+      "created_in": "supabase/migrations/20260520160200_wave8_ai_search_outcomes_prefs.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "course_outcomes",
+      "created_in": "supabase/migrations/20260520160200_wave8_ai_search_outcomes_prefs.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "outcome_item_map",
+      "created_in": "supabase/migrations/20260520160200_wave8_ai_search_outcomes_prefs.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "teacher_office_hours",
+      "created_in": "supabase/migrations/20260520160200_wave8_ai_search_outcomes_prefs.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    },
+    {
+      "name": "office_hour_bookings",
+      "created_in": "supabase/migrations/20260520160200_wave8_ai_search_outcomes_prefs.sql",
+      "prior_explicit_grants": [],
+      "authenticated": [
+        "SELECT",
+        "INSERT",
+        "UPDATE"
+      ],
+      "service_role": [],
+      "anon": [],
+      "reason": "Preserve the existing RLS-scoped database API contract; no privilege beyond a permitted policy command.",
+      "call_sites": {}
+    }
+  ],
+  "views": [
+    {
+      "name": "course_grade_rollups",
+      "created_in": "supabase/migrations/20260117120003_forum_grades.sql",
+      "authenticated": [
+        "SELECT"
+      ],
+      "anon": [],
+      "service_role": [],
+      "security_invoker": true
+    },
+    {
+      "name": "reporting_grade_course_item_scores",
+      "created_in": "supabase/migrations/20260518110000_tronclass_parity_round2.sql",
+      "authenticated": [
+        "SELECT"
+      ],
+      "anon": [],
+      "service_role": [],
+      "security_invoker": true
+    },
+    {
+      "name": "reporting_push_dispatch_retry_curve",
+      "created_in": "supabase/migrations/20260520120000_gap_p1_04_dlq_dashboard.sql",
+      "authenticated": [
+        "SELECT"
+      ],
+      "anon": [],
+      "service_role": [],
+      "security_invoker": true
+    },
+    {
+      "name": "reporting_quiz_overview",
+      "created_in": "supabase/migrations/20260520120200_gap_p2_08b_reporting_visualization.sql",
+      "authenticated": [
+        "SELECT"
+      ],
+      "anon": [],
+      "service_role": [],
+      "security_invoker": true
+    },
+    {
+      "name": "reporting_live_attendance_overview",
+      "created_in": "supabase/migrations/20260520120200_gap_p2_08b_reporting_visualization.sql",
+      "authenticated": [
+        "SELECT"
+      ],
+      "anon": [],
+      "service_role": [],
+      "security_invoker": true
+    },
+    {
+      "name": "reporting_course_engagement_7d",
+      "created_in": "supabase/migrations/20260520120200_gap_p2_08b_reporting_visualization.sql",
+      "authenticated": [],
+      "anon": [],
+      "service_role": [],
+      "security_invoker": false
+    },
+    {
+      "name": "reporting_ai_quota_overview",
+      "created_in": "supabase/migrations/20260520120300_gap_p2_09_ai_compliance.sql",
+      "authenticated": [
+        "SELECT"
+      ],
+      "anon": [],
+      "service_role": [],
+      "security_invoker": true
+    },
+    {
+      "name": "reporting_student_dashboard",
+      "created_in": "supabase/migrations/20260520130200_wave5_surveys_badges_dashboard.sql",
+      "authenticated": [
+        "SELECT"
+      ],
+      "anon": [],
+      "service_role": [],
+      "security_invoker": true
+    },
+    {
+      "name": "reporting_learning_time_monthly",
+      "created_in": "supabase/migrations/20260520140200_wave6_learning_time_workload.sql",
+      "authenticated": [
+        "SELECT"
+      ],
+      "anon": [],
+      "service_role": [],
+      "security_invoker": true
+    },
+    {
+      "name": "reporting_teacher_workload",
+      "created_in": "supabase/migrations/20260520140200_wave6_learning_time_workload.sql",
+      "authenticated": [
+        "SELECT"
+      ],
+      "anon": [],
+      "service_role": [],
+      "security_invoker": true
+    },
+    {
+      "name": "reporting_course_leaderboard",
+      "created_in": "supabase/migrations/20260520150100_wave7_leaderboard_duplicate_reads_tags.sql",
+      "authenticated": [
+        "SELECT"
+      ],
+      "anon": [],
+      "service_role": [],
+      "security_invoker": true
+    },
+    {
+      "name": "reporting_announcement_read_ratio",
+      "created_in": "supabase/migrations/20260520150100_wave7_leaderboard_duplicate_reads_tags.sql",
+      "authenticated": [
+        "SELECT"
+      ],
+      "anon": [],
+      "service_role": [],
+      "security_invoker": true
+    },
+    {
+      "name": "public_course_catalog",
+      "created_in": "supabase/migrations/20260520160000_wave8_academic_catalog.sql",
+      "authenticated": [
+        "SELECT"
+      ],
+      "anon": [
+        "SELECT"
+      ],
+      "service_role": [],
+      "security_invoker": false
+    },
+    {
+      "name": "reporting_at_risk_students",
+      "created_in": "supabase/migrations/20260520160100_wave8_at_risk_group_proctor_publish.sql",
+      "authenticated": [
+        "SELECT"
+      ],
+      "anon": [],
+      "service_role": [],
+      "security_invoker": true
+    },
+    {
+      "name": "reporting_participation_score",
+      "created_in": "supabase/migrations/20260520160100_wave8_at_risk_group_proctor_publish.sql",
+      "authenticated": [
+        "SELECT"
+      ],
+      "anon": [],
+      "service_role": [],
+      "security_invoker": true
+    },
+    {
+      "name": "course_search_index",
+      "created_in": "supabase/migrations/20260520160200_wave8_ai_search_outcomes_prefs.sql",
+      "authenticated": [
+        "SELECT"
+      ],
+      "anon": [],
+      "service_role": [],
+      "security_invoker": true
+    }
+  ],
+  "functions": [
+    {
+      "signature": "_quiz_answer_correct(text,jsonb,jsonb)",
+      "name": "_quiz_answer_correct",
+      "trigger": false,
+      "authenticated": false,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "_quiz_normalize_answer(text,jsonb)",
+      "name": "_quiz_normalize_answer",
+      "trigger": false,
+      "authenticated": false,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "add_owner_as_course_teacher()",
+      "name": "add_owner_as_course_teacher",
+      "trigger": true,
+      "authenticated": false,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "admin_ai_quota_overview()",
+      "name": "admin_ai_quota_overview",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "admin_bulk_cancel_notification_dispatch(uuid[])",
+      "name": "admin_bulk_cancel_notification_dispatch",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "admin_bulk_retry_notification_dispatch(uuid[])",
+      "name": "admin_bulk_retry_notification_dispatch",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "admin_bulk_set_course_role_capabilities(jsonb)",
+      "name": "admin_bulk_set_course_role_capabilities",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "admin_course_engagement_7d()",
+      "name": "admin_course_engagement_7d",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "admin_dlq_summary()",
+      "name": "admin_dlq_summary",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "admin_purge_expired_ai()",
+      "name": "admin_purge_expired_ai",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "admin_purge_expired_dlq()",
+      "name": "admin_purge_expired_dlq",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "admin_push_retry_curve(integer)",
+      "name": "admin_push_retry_curve",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "admin_retry_notification_dispatch(uuid)",
+      "name": "admin_retry_notification_dispatch",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "admin_set_course_role_capability(text,text,boolean)",
+      "name": "admin_set_course_role_capability",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "admin_teacher_workload()",
+      "name": "admin_teacher_workload",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "apply_late_penalty(uuid)",
+      "name": "apply_late_penalty",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "audit_forum_posts_touch()",
+      "name": "audit_forum_posts_touch",
+      "trigger": true,
+      "authenticated": false,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "audit_grade_scores_touch()",
+      "name": "audit_grade_scores_touch",
+      "trigger": true,
+      "authenticated": false,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "auto_assign_course_groups(uuid,integer)",
+      "name": "auto_assign_course_groups",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "auto_pair_peer_review(uuid)",
+      "name": "auto_pair_peer_review",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "bulk_import_course_members(uuid,jsonb)",
+      "name": "bulk_import_course_members",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "claim_live_buzzer(uuid)",
+      "name": "claim_live_buzzer",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "consume_media_play_token(text,text)",
+      "name": "consume_media_play_token",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "course_export_jobs_claim_next()",
+      "name": "course_export_jobs_claim_next",
+      "trigger": false,
+      "authenticated": false,
+      "service_role": true,
+      "anon": false
+    },
+    {
+      "signature": "course_export_jobs_complete(uuid,text,text,jsonb,text)",
+      "name": "course_export_jobs_complete",
+      "trigger": false,
+      "authenticated": false,
+      "service_role": true,
+      "anon": false
+    },
+    {
+      "signature": "course_member_has_capability(uuid,text)",
+      "name": "course_member_has_capability",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "course_members_audit_touch()",
+      "name": "course_members_audit_touch",
+      "trigger": true,
+      "authenticated": false,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "decide_grade_approval(uuid,text,text)",
+      "name": "decide_grade_approval",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "duplicate_course(uuid,text)",
+      "name": "duplicate_course",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "enqueue_webhook_event(text,jsonb)",
+      "name": "enqueue_webhook_event",
+      "trigger": false,
+      "authenticated": false,
+      "service_role": true,
+      "anon": false
+    },
+    {
+      "signature": "enroll_by_code(text)",
+      "name": "enroll_by_code",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "forum_posts_audit_edit()",
+      "name": "forum_posts_audit_edit",
+      "trigger": true,
+      "authenticated": false,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "handle_new_user()",
+      "name": "handle_new_user",
+      "trigger": true,
+      "authenticated": false,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "import_bank_questions_to_quiz(uuid,uuid[],boolean)",
+      "name": "import_bank_questions_to_quiz",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "increment_ai_usage(uuid)",
+      "name": "increment_ai_usage",
+      "trigger": false,
+      "authenticated": false,
+      "service_role": true,
+      "anon": false
+    },
+    {
+      "signature": "is_course_member(uuid)",
+      "name": "is_course_member",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "is_course_moderator(uuid)",
+      "name": "is_course_moderator",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "is_course_staff(uuid)",
+      "name": "is_course_staff",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "is_course_teacher(uuid)",
+      "name": "is_course_teacher",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "is_platform_admin()",
+      "name": "is_platform_admin",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "issue_media_play_token(uuid,text,integer)",
+      "name": "issue_media_play_token",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "mark_announcement_read(uuid)",
+      "name": "mark_announcement_read",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "material_ai_enrichment_apply_policy()",
+      "name": "material_ai_enrichment_apply_policy",
+      "trigger": true,
+      "authenticated": false,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "maybe_auto_award_badges(uuid)",
+      "name": "maybe_auto_award_badges",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "my_calendar_events(timestamp with time zone,timestamp with time zone)",
+      "name": "my_calendar_events",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "my_course_capabilities(uuid)",
+      "name": "my_course_capabilities",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "my_course_rank(uuid)",
+      "name": "my_course_rank",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "my_dashboard()",
+      "name": "my_dashboard",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "notify_course_members(uuid,text,text)",
+      "name": "notify_course_members",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "pick_random_student(uuid)",
+      "name": "pick_random_student",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "protect_profile_role()",
+      "name": "protect_profile_role",
+      "trigger": true,
+      "authenticated": false,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "protect_quiz_answer_grading()",
+      "name": "protect_quiz_answer_grading",
+      "trigger": true,
+      "authenticated": false,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "protect_submission_grading()",
+      "name": "protect_submission_grading",
+      "trigger": true,
+      "authenticated": false,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "push_notification_abandon_alert()",
+      "name": "push_notification_abandon_alert",
+      "trigger": true,
+      "authenticated": false,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "quiz_attempts_before_insert_guard()",
+      "name": "quiz_attempts_before_insert_guard",
+      "trigger": true,
+      "authenticated": false,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "quiz_pool_entry_same_quiz()",
+      "name": "quiz_pool_entry_same_quiz",
+      "trigger": true,
+      "authenticated": false,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "record_ai_consent(text,text,boolean,text,text)",
+      "name": "record_ai_consent",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "record_learning_time(uuid,text,uuid,integer)",
+      "name": "record_learning_time",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "record_live_attendance(uuid)",
+      "name": "record_live_attendance",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "record_xapi_statement(uuid,text,text,jsonb,jsonb)",
+      "name": "record_xapi_statement",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "refresh_reporting_course_engagement_7d()",
+      "name": "refresh_reporting_course_engagement_7d",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "reorder_course_units(uuid,uuid[])",
+      "name": "reorder_course_units",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "report_export_jobs_claim_next()",
+      "name": "report_export_jobs_claim_next",
+      "trigger": false,
+      "authenticated": false,
+      "service_role": true,
+      "anon": false
+    },
+    {
+      "signature": "report_export_jobs_complete(uuid,text,text,integer,text)",
+      "name": "report_export_jobs_complete",
+      "trigger": false,
+      "authenticated": false,
+      "service_role": true,
+      "anon": false
+    },
+    {
+      "signature": "revoke_media_play_tokens(uuid,uuid)",
+      "name": "revoke_media_play_tokens",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "search_course(uuid,text)",
+      "name": "search_course",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "set_quiz_manual_score(uuid,uuid,numeric)",
+      "name": "set_quiz_manual_score",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "set_updated_at()",
+      "name": "set_updated_at",
+      "trigger": true,
+      "authenticated": false,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "snapshot_material_on_update()",
+      "name": "snapshot_material_on_update",
+      "trigger": true,
+      "authenticated": false,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "start_quiz_attempt(uuid)",
+      "name": "start_quiz_attempt",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "submit_peer_review(uuid,jsonb,text)",
+      "name": "submit_peer_review",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "submit_quiz_attempt(uuid)",
+      "name": "submit_quiz_attempt",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "submit_rubric_score(uuid,text,uuid,jsonb,text)",
+      "name": "submit_rubric_score",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "submit_survey_response(uuid,jsonb)",
+      "name": "submit_survey_response",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "sync_assignment_calendar()",
+      "name": "sync_assignment_calendar",
+      "trigger": true,
+      "authenticated": false,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "sync_quiz_gradebook_from_attempt(uuid)",
+      "name": "sync_quiz_gradebook_from_attempt",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "user_meets_course_prerequisites(uuid)",
+      "name": "user_meets_course_prerequisites",
+      "trigger": false,
+      "authenticated": true,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "webhook_badge_awarded()",
+      "name": "webhook_badge_awarded",
+      "trigger": true,
+      "authenticated": false,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "webhook_deliveries_claim_next()",
+      "name": "webhook_deliveries_claim_next",
+      "trigger": false,
+      "authenticated": false,
+      "service_role": true,
+      "anon": false
+    },
+    {
+      "signature": "webhook_deliveries_mark(uuid,integer,text,boolean,boolean)",
+      "name": "webhook_deliveries_mark",
+      "trigger": false,
+      "authenticated": false,
+      "service_role": true,
+      "anon": false
+    },
+    {
+      "signature": "webhook_grade_score_changed()",
+      "name": "webhook_grade_score_changed",
+      "trigger": true,
+      "authenticated": false,
+      "service_role": false,
+      "anon": false
+    }
+  ]
+}

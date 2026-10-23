@@ -157,3 +157,18 @@ test('selecting another campus changes browsing identity without changing the si
   });
   expect(view.getByText('student-a@example.edu')).toBeTruthy();
 });
+
+test('school search can be cleared and dismissed without changing the selected campus', async () => {
+  const view = render(<SettingsAiFirstScreen navigation={navigation} />);
+  fireEvent.press(view.getByText('選擇其他學校'));
+  await view.findByText('國立清華大學');
+  fireEvent.changeText(view.getByLabelText('搜尋學校'), '不存在的校名');
+  expect(view.getByText('找不到符合的學校，請換個關鍵字。')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '清除學校搜尋' }));
+  expect(view.getByLabelText('搜尋學校').props.value).toBe('');
+  expect(view.getByText('國立清華大學')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '完成校園選擇' }));
+  expect(view.queryByText('選擇瀏覽校園')).toBeNull();
+  expect(view.getByText('靜宜大學')).toBeTruthy();
+  expect(mockSelectSchool).not.toHaveBeenCalled();
+});

@@ -9,6 +9,7 @@ import {
   LOGIN_COOKIE,
   SESSION_COOKIE,
   boundedJson,
+  fetchJson,
   openCookie,
   nuniEnabled,
   publicOrigin,
@@ -55,6 +56,24 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+});
+
+it('waits at least ten seconds and retries a waking API once', async () => {
+  fetcher
+    .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    .mockResolvedValueOnce(response({ ok: true }));
+  await expect(fetchJson('https://api.nuni.tw/v1/public/schools/pu/cafeterias', {})).resolves.toEqual(
+    { ok: true },
+  );
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+it('does not retry a 4xx API failure', async () => {
+  fetcher.mockResolvedValueOnce(response({ error: { code: 'AUTH_REQUIRED' } }, 401));
+  await expect(fetchJson('https://api.nuni.tw/v1/public/schools/pu/cafeterias', {})).rejects.toMatchObject({
+    status: 401,
+  });
+  expect(fetcher).toHaveBeenCalledTimes(1);
 });
 
 describe('Nuni additive classroom configuration', () => {
@@ -275,7 +294,7 @@ describe('Nuni browser session boundary', () => {
   });
   it('blocks ordinary reads after logout revocation fails, while allowing a retry', async () => {
     const value = session();
-    fetcher.mockRejectedValueOnce(new TypeError('offline'));
+    fetcher.mockRejectedValue(new TypeError('offline'));
     const failed = await handleNuni(
       request('api/nuni/logout', {
         post: {},
@@ -295,7 +314,7 @@ describe('Nuni browser session boundary', () => {
       ['class-workspaces'],
     );
     expect(blocked.status).toBe(401);
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledTimes(2);
     fetcher.mockResolvedValueOnce(response({ signedOut: true }));
     const done = await handleNuni(
       request('api/nuni/logout', {

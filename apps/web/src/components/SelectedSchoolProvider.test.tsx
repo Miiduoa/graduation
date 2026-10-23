@@ -217,6 +217,18 @@ it('distinguishes a listed campus from an opened school service', () => {
   expect(navigation.search).toBe('?schoolId=school-a&campus=school-a&school=A');
 });
 
+it('uses Providence on a first visit when the directory includes it, without writing a choice', () => {
+  render(<View ownerKey={null} schools={[{ id: 'pu', name: '靜宜大學' }, ...schools]} />);
+  expect(screen.getByTestId('selected-school').textContent).toBe('靜宜大學');
+  expect(localStorage.getItem(schoolPreferenceKey(null))).toBeNull();
+});
+
+it('keeps an explicit all-campus choice instead of forcing Providence', () => {
+  localStorage.setItem(schoolPreferenceKey(defaults.ownerKey), JSON.stringify({ schoolId: null }));
+  render(<View schools={[{ id: 'pu', name: '靜宜大學' }, ...schools]} />);
+  expect(screen.getByTestId('selected-school').textContent).toBe('不限校園');
+});
+
 it('uses an explicit schoolId deep link ahead of a saved browsing preference', () => {
   localStorage.setItem(schoolPreferenceKey(defaults.ownerKey), JSON.stringify({ schoolId: 'school-a' }));
   navigation.search = '?schoolId=school-b';

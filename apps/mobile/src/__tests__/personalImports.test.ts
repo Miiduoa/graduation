@@ -48,6 +48,25 @@ test('append is durable, duplicate-safe, and isolated by account and school', as
   expect((await loadPersonalImports({ ...scope, schoolId: 'ntu' })).records).toHaveLength(0);
 });
 
+test('NCKU and NTPU accounts do not see each other’s timetable imports', async () => {
+  const ncku = { owner: 'nuni:chengda', schoolId: 'ncku' };
+  const ntpu = { owner: 'nuni:beida', schoolId: 'ntpu' };
+  await appendPersonalImports(ncku, [
+    { ...row('ncku-1', '微積分'), schoolId: 'ncku', startPeriod: 1, endPeriod: 1 },
+  ]);
+  await appendPersonalImports(ntpu, [
+    { ...row('ntpu-1', '進階會計'), schoolId: 'ntpu', startPeriod: 10, endPeriod: 13 },
+  ]);
+  expect((await loadPersonalImports(ncku)).records.map((item) => item.title)).toEqual(['微積分']);
+  expect((await loadPersonalImports(ntpu)).records.map((item) => item.title)).toEqual(['進階會計']);
+  expect((await loadPersonalImports({ owner: ncku.owner, schoolId: 'ntpu' })).records).toHaveLength(
+    0,
+  );
+  expect((await loadPersonalImports({ owner: ntpu.owner, schoolId: 'ncku' })).records).toHaveLength(
+    0,
+  );
+});
+
 test('simultaneous saves serialize and do not lose either record', async () => {
   await Promise.all([
     appendPersonalImports(scope, [row('a')]),
@@ -100,6 +119,18 @@ test('projection accepts only explicit supported PU periods without changing sav
     end: 2,
   });
   expect(personalImportCourses(records, 'ntu')).toEqual([]);
+  expect(
+    personalImportCourses(
+      [{ ...records[0], schoolId: 'ncku', startPeriod: 12, endPeriod: 15 }],
+      'ncku',
+    )[0],
+  ).toMatchObject({ start: 12, end: 15 });
+  expect(
+    personalImportCourses(
+      [{ ...records[0], schoolId: 'ntpu', startPeriod: 10, endPeriod: 13 }],
+      'ntpu',
+    )[0],
+  ).toMatchObject({ start: 10, end: 13 });
   expect(personalImportCourses([{ ...records[0], dayOfWeek: 6 }], 'pu')).toEqual([]);
   expect(personalImportCourses([{ ...records[0], startPeriod: undefined }], 'pu')).toEqual([]);
   expect(records[0].id).toBe('a');
@@ -207,6 +238,21 @@ test('deleting one saved record is durable and does not remove its batch sibling
   expect(updated.batches).toHaveLength(1);
   await expect(deletePersonalImport(scope, original)).rejects.toThrow('已變更');
   expect((await loadPersonalImports(scope)).records).toEqual(updated.records);
+});
+
+test('same-name courses with different teachers or rooms are not hidden by manual-import deduplication', () => {
+  const manual = {
+    id: 'manual', name: '微積分', day: 1, start: 1, end: 2,
+    teacher: '王老師', room: 'A101', color: 'blue' as const,
+  };
+  const base = { courses: [manual], meta: { year: '115', semester: '1' } };
+  const imported = {
+    ...row('imported'), batchId: 'batch', importedAt: '2026-10-20T00:00:00Z',
+    teacher: manual.teacher, location: manual.room,
+  };
+  expect(selectPersonalTimetableCourses(base, [imported], 'pu', '115／1')).toHaveLength(1);
+  expect(selectPersonalTimetableCourses(base, [{ ...imported, teacher: '林老師' }], 'pu', '115／1')).toHaveLength(2);
+  expect(selectPersonalTimetableCourses(base, [{ ...imported, location: 'A102' }], 'pu', '115／1')).toHaveLength(2);
 });
 
 test('a stale deletion, an account change and damaged storage never erase a newer revision', async () => {

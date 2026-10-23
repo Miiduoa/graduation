@@ -25,6 +25,7 @@ import {
 } from '../services/storefront';
 import {
   MENU_STALE_TEXT,
+  SHOWCASE_EXTERNAL_ORDER_HINT,
   SHOWCASE_ORDER_BUTTON_TEXT,
   SHOWCASE_ORDER_CAPTION,
   isMenuStale,
@@ -34,9 +35,12 @@ import {
 import {
   CAFETERIA_BACK_TO_LIST_TEXT,
   CAFETERIA_NOT_FOUND_TEXT,
+  STOREFRONT_EMPTY_MENU_TEXT,
   STOREFRONT_PAGE_SUBTITLE,
   cafeteriaReviewNotice,
+  cafeteriaShowsMenuAvailability,
 } from '@campus/shared/src/cafeteriaCatalog';
+import { SERVICE_PAUSED_TEXT } from '@campus/shared/src/loadFailureCopy';
 
 type Props = {
   navigation?: {
@@ -74,7 +78,7 @@ export default function StorefrontScreen({ navigation, route }: Props) {
         if (active) setShop(nextShop);
       },
       () => {
-        if (active) setError('暫時讀不到這間店。');
+        if (active) setError(SERVICE_PAUSED_TEXT);
       },
     );
     void loadStorefrontMenus(school.id, cafeteriaId).then(
@@ -156,6 +160,11 @@ export default function StorefrontScreen({ navigation, route }: Props) {
             {isMenuStale(shop.menuSyncedAt) ? (
               <Text style={{ color: theme.colors.muted }}>{MENU_STALE_TEXT}</Text>
             ) : null}
+            {action.kind === 'showcase' && shop.orderingUrl ? (
+              <Text style={{ color: theme.colors.muted, lineHeight: 20 }}>
+                {SHOWCASE_EXTERNAL_ORDER_HINT}
+              </Text>
+            ) : null}
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
               {action.kind === 'showcase' && shop.orderingUrl ? (
                 <Button
@@ -194,13 +203,15 @@ export default function StorefrontScreen({ navigation, route }: Props) {
             ) : null}
             <Text style={{ color: theme.colors.text, fontWeight: '700' }}>菜單</Text>
             {menus.length === 0 ? (
-              <Text style={{ color: theme.colors.muted }}>還沒有菜單。沒串接的店也可以只放訂餐連結。</Text>
+              <Text style={{ color: theme.colors.muted }}>{STOREFRONT_EMPTY_MENU_TEXT}</Text>
             ) : (
               menus.map((item) => (
                 <Text key={item.id} style={{ color: theme.colors.text }}>
                   {item.name}
                   {typeof item.price === 'number' ? ` · NT$${item.price}` : ''}
-                  {item.soldOut ? '（售完）' : ''}
+                  {cafeteriaShowsMenuAvailability(shop.reviewStatus) && item.soldOut
+                    ? '（售完）'
+                    : ''}
                 </Text>
               ))
             )}

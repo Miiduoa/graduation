@@ -8,7 +8,12 @@ import { Button } from '@/components/ui/Button';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/components/AuthGuard';
 import { isFirebaseConfigured, signInWithPuStudentId } from '@/features/auth/client';
-import { readLoginReturnParam, sanitizeInternalPath } from '@/lib/navigation';
+import {
+  collapseInternalPathHash,
+  navigateAfterLogin,
+  readLoginReturnParam,
+  sanitizeInternalPath,
+} from '@/lib/navigation';
 import styles from '../servicePages.module.css';
 import { NuniSignIn } from '@/components/NuniSignIn';
 import { platformDestination } from '@/lib/accountDestination';
@@ -16,7 +21,9 @@ import { isPublicCampusPath, publicCampusServices } from '@/lib/publicCampusServ
 import { STUDENT_ID_PREPARING_COPY, useSignInOptions } from '@/lib/signInOptions';
 
 function loginDestination(value: string | null): string {
-  const safe = sanitizeInternalPath(value && value.length <= 1200 ? value : null);
+  const safe = collapseInternalPathHash(
+    sanitizeInternalPath(value && value.length <= 1200 ? value : null),
+  );
   try {
     const path = decodeURIComponent(new URL(safe, 'https://campus.local').pathname).replace(
       /\/+$/,
@@ -31,6 +38,10 @@ function loginDestination(value: string | null): string {
   } catch {
     return '/';
   }
+}
+
+function goAfterLogin(router: { replace: (href: string) => void }, destination: string) {
+  navigateAfterLogin((href) => router.replace(href), destination);
 }
 
 function LoginForm({
@@ -56,7 +67,7 @@ function LoginForm({
   const schoolTask = reconnect || platformDestination(destination) !== destination;
   const schoolAvailable = options.studentId;
   const schoolRequired = schoolTask && schoolAvailable;
-  const hideGoogle = schoolRequired || (schoolTask && options.loading);
+  const hideGoogle = schoolRequired || (schoolTask && (options.loading || options.error));
   const publicDestination = isPublicCampusPath(
     new URL(destination, 'https://campus.local').pathname,
   );
@@ -84,7 +95,7 @@ function LoginForm({
       !reconnect
     ) {
       returning.current = true;
-      router.replace(destination);
+      goAfterLogin(router, destination);
     }
   }, [user, schoolLoading, router, destination, reconnect, schoolRequired]);
   async function login(event: FormEvent) {
@@ -109,7 +120,7 @@ function LoginForm({
       if (!authenticated) throw new Error('登入服務尚未連線。');
       setPassword('');
       returning.current = true;
-      router.replace(destination);
+      goAfterLogin(router, destination);
     } catch {
       if (controller.signal.aborted) return;
       setError('登入失敗。請確認學號與密碼，或稍後再試。');
@@ -169,6 +180,11 @@ function LoginForm({
           <h2>學校帳號</h2>
           {options.loading ? (
             <p role="status">正在確認登入方式…</p>
+          ) : options.error ? (
+            <div role="alert">
+              <p>暫時無法確認登入方式，請重新連線後再試。</p>
+              <button type="button" className="btn" onClick={options.retry}>重新確認登入方式</button>
+            </div>
           ) : schoolAvailable ? (
             <>
               <p>

@@ -176,3 +176,48 @@ test('both successful and failed attempts retain versioned reports without weake
   assert.ok(readiness.run.includes('scripts/firebase-ci-workflow.test.cjs'));
   assert.ok(readiness.run.includes('scripts/nuni-merchant-api-boundary.test.mjs'));
 });
+
+function parseWorkflow(name) {
+  return firebaseRequire('yaml').parse(
+    fs.readFileSync(path.join(__dirname, '../.github/workflows', name), 'utf8'),
+  );
+}
+
+function assertFailsOffMain(step) {
+  assert.ok(step, 'missing require-main step');
+  assert.match(step.run, /refs\/heads\/main/);
+  assert.match(step.run, /::error::/);
+  assert.match(step.run, /exit 1/);
+}
+
+test('production workflows fail closed unless the run is on main', () => {
+  assert.equal(job.if, "github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'");
+  assertFailsOffMain(job.steps[0]);
+
+  const release = parseWorkflow('release.yml');
+  for (const name of ['preflight', 'build-ios', 'build-android', 'create-release']) {
+    assertFailsOffMain(release.jobs[name].steps[0]);
+  }
+
+  const webRelease = parseWorkflow('web-release.yml');
+  const reject = webRelease.jobs['reject-non-main'];
+  assert.equal(
+    reject.if,
+    "github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'",
+  );
+  assertFailsOffMain(reject.steps[0]);
+  assert.equal(
+    webRelease.jobs.release.if,
+    "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'",
+  );
+  assert.equal(webRelease.on.workflow_dispatch.inputs.expected_revision.required, true);
+  assert.equal(webRelease.on.workflow_dispatch.inputs.confirm_app.required, true);
+  assert.ok(
+    webRelease.jobs.release.steps.some(
+      (step) => typeof step.run === 'string' && step.run.includes('release-check.mjs gate'),
+    ),
+  );
+
+  const announcements = parseWorkflow('campus-announcement-sync.yml');
+  assertFailsOffMain(announcements.jobs.sync.steps[0]);
+});

@@ -1,8 +1,21 @@
 import { CourseAccessError, courseIdentifier, courseMetadata, courseRecord, courseText, courseVersion,
   parseCourseCandidate, recommendCourses, sameCourseScope, type CourseMetadata, type CourseRequest,
-  type CourseRequestState } from './courseAccess';
+  type CourseRequestState, type CourseWorkspace } from './courseAccess';
 export type CourseTransport = (path: string, input?: Record<string, unknown>) => Promise<unknown>;
 const states: CourseRequestState[] = ['pending', 'approved', 'rejected', 'withdrawn', 'revoked'];
+export function parseCourseWorkspace(value: unknown, workspaceId: string, schoolId: string): CourseWorkspace {
+  const row = courseRecord(value);
+  if (row.workspaceId !== courseIdentifier(workspaceId, 'cw') || row.membershipActive !== true ||
+      !['student', 'owner-teacher', 'co-teacher'].includes(String(row.memberRole)))
+    throw new CourseAccessError('COURSE_INVALID_RESPONSE', 502);
+  const membership = { workspaceId, memberRole: row.memberRole as CourseWorkspace['memberRole'], membershipActive: true as const };
+  if (row.status === 'unreviewed' && row.course === null) return { ...membership, status: 'unreviewed', course: null };
+  if (row.status !== 'reviewed') throw new CourseAccessError('COURSE_INVALID_RESPONSE', 502);
+  const course = parseCourseCandidate(row.course);
+  if (course.workspaceId !== workspaceId || course.schoolId !== schoolId || row.memberRole === 'co-teacher')
+    throw new CourseAccessError('COURSE_INVALID_RESPONSE', 502);
+  return { ...membership, status: 'reviewed', course };
+}
 export function parseCourseRequest(value: unknown): CourseRequest {
   const row = courseRecord(value);
   if (!['student', 'teacher'].includes(String(row.kind)) || !states.includes(row.state as CourseRequestState) ||
@@ -25,6 +38,10 @@ export function parseCourseRequests(value: unknown): { requests: CourseRequest[]
 }
 export function createCourseAccess(transport: CourseTransport) {
   return {
+    async workspace(workspaceId: string, schoolId: string) {
+      courseIdentifier(workspaceId, 'cw');
+      return parseCourseWorkspace(await transport('course-access/workspace-course', { workspaceId, schoolId }), workspaceId, schoolId);
+    },
     async match(metadata: CourseMetadata) {
       const hints = courseMetadata(metadata);
       const result = courseRecord(await transport('course-access/match', hints));
@@ -71,6 +88,6 @@ export function createCourseAccess(transport: CourseTransport) {
 
 /** Exact allowlist shared by the browser BFF; no generic authenticated proxy. */
 export function isCourseAccessPath(path: string): boolean {
-  return ['match', 'student-requests', 'teacher-requests', 'requests', 'reviews'].some(action => path === `course-access/${action}`) ||
+  return ['match', 'workspace-course', 'student-requests', 'teacher-requests', 'requests', 'reviews'].some(action => path === `course-access/${action}`) ||
     /^course-access\/requests\/car_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/(?:withdraw|decide)$/u.test(path);
 }

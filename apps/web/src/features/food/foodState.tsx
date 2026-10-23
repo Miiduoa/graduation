@@ -226,7 +226,8 @@ export function useFoodMutation({
     };
   }, [accountId]);
 
-  useEffect(() => {
+  const recoverStorage = useCallback(() => {
+    if (!active.current || lock.current) return;
     if (!accountId) return;
     try {
       const stored = loadFoodPending(accountId, scope);
@@ -236,6 +237,7 @@ export function useFoodMutation({
         setPending(stored);
       }
       setStorageBlocked(false);
+      setError('');
     } catch (failure) {
       if (!active.current || accountRef.current !== accountId) return;
       setStorageBlocked(true);
@@ -247,8 +249,12 @@ export function useFoodMutation({
     }
   }, [accountId, scope, cache, pendingKey, setPending]);
 
+  useEffect(() => {
+    recoverStorage();
+  }, [recoverStorage]);
+
   async function send(intent: FoodIntent, retry = false) {
-    if (!active.current || lock.current || (!retry && (!enabled || pending || storageBlocked)))
+    if (!active.current || lock.current || storageBlocked || (!retry && (!enabled || pending)))
       return;
     if (!accountId) {
       setError('目前無法確認帳號，請重新確認後再操作。');
@@ -325,6 +331,7 @@ export function useFoodMutation({
     error,
     notice,
     storageBlocked,
+    recoverStorage,
     send,
     retry: () => pending && void send(pending, true),
   };
@@ -335,10 +342,15 @@ export function FoodMutationStatus({ task }: { task: ReturnType<typeof useFoodMu
     <>
       {task.error && <p role="alert">{task.error}</p>}
       {task.notice && <p role="status">{task.notice}</p>}
+      {task.storageBlocked && (
+        <Button disabled={task.busy} onClick={task.recoverStorage}>
+          重新確認分頁儲存
+        </Button>
+      )}
       {task.pending && (
         <div role="status">
           <p>{task.busy ? '正在確認這次操作…' : '尚未確認是否成功，請用下方按鈕重試。'}</p>
-          <Button disabled={task.busy} onClick={task.retry}>
+          <Button disabled={task.busy || task.storageBlocked} onClick={task.retry}>
             重試同一份操作
           </Button>
         </div>
