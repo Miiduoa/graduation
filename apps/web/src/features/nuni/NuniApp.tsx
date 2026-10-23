@@ -377,7 +377,17 @@ function NuniContent() {
         </Link>
       </section>
     );
-  else if (pathname === '/classroom') content = <WorkspaceList key={session.context} />;
+  else if (pathname === '/classroom')
+    content = (
+      <>
+        <p>
+          <Link href="/classroom/grades" className={styles.button}>
+            課業成績與回饋
+          </Link>
+        </p>
+        <WorkspaceList key={session.context} />
+      </>
+    );
   else if (/^\/classroom\/course\/cw_[0-9a-f-]{36}$/.test(pathname))
     content = <Workspace key={`${session.context}:${pathname}`} id={pathname.split('/')[3]} />;
   else

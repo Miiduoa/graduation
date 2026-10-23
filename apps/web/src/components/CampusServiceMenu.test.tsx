@@ -64,16 +64,21 @@ it('retains all existing services and search while adding a separate classroom e
   render(<CampusServiceMenu />);
   fireEvent.click(screen.getByText('所有服務'));
   for (const [href, label] of originalServices) {
-    expect(screen.getByRole('link', { name: label }).getAttribute('href')).toBe(href);
+    expect(
+      screen.getByRole('link', { name: label === '成績' ? /^成績$/ : label }).getAttribute('href'),
+    ).toBe(href);
   }
   expect(screen.getByRole('link', { name: /尋找校園服務/ }).getAttribute('href')).toBe('/search');
   expect(screen.getByRole('link', { name: '課程空間' }).getAttribute('href')).toBe('/classroom');
+  expect(screen.getByRole('link', { name: '課業成績與回饋' }).getAttribute('href')).toBe(
+    '/classroom/grades',
+  );
   expect(screen.getByRole('link', { name: '跨校交流' }).getAttribute('href')).toBe('/social');
   expect(screen.getByRole('link', { name: '店家合作' }).getAttribute('href')).toBe('/merchant');
   expect(screen.getByRole('link', { name: '點餐與取餐' }).getAttribute('href')).toBe('/food');
   expect(screen.getByText('目前還不能線上點餐')).toBeTruthy();
   expect(screen.queryByText('選餐點、查訂單、出示取餐憑證')).toBeNull();
-  expect(screen.getAllByRole('link')).toHaveLength(32);
+  expect(screen.getAllByRole('link')).toHaveLength(33);
 });
 
 it('preserves school context without copying unrelated session or return parameters', () => {
@@ -136,7 +141,7 @@ it('keeps the Campus One header and original school login around the complete sh
   render(<AppHeader />);
   fireEvent.click(screen.getByText('所有服務'));
   for (const [, label] of originalServices)
-    expect(screen.getByRole('link', { name: label })).toBeTruthy();
+    expect(screen.getByRole('link', { name: label === '成績' ? /^成績$/ : label })).toBeTruthy();
   expect(screen.getByRole('link', { name: '課程空間' })).toBeTruthy();
   expect(screen.getByRole('link', { name: '登入' }).getAttribute('href')).toBe(
     '/login?returnUrl=%2Fmap%3FschoolId%3Dtw-pu',

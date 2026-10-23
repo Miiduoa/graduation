@@ -57,6 +57,12 @@ async def check_mobile_navigation(page):
     }'''), 'Bottom navigation covers the last footer action'
 
 
+async def goto_path(page, path):
+    # Home/life keep session and transit probes alive, so networkidle can hang
+    # after the page is already interactive.
+    await page.goto(BASE + path, wait_until='load')
+
+
 async def check_oled(page):
     assert await page.evaluate('''() => {
         return getComputedStyle(document.body).backgroundColor === 'rgb(0, 0, 0)'
@@ -88,7 +94,7 @@ async def main():
         try:
             for width, label in [(1440, 'desktop'), (768, 'tablet'), (390, 'mobile'), (320, 'small')]:
                 await page.set_viewport_size({'width': width, 'height': 1000 if width > 768 else 844})
-                await page.goto(BASE + '/?campus=pu', wait_until='networkidle')
+                await goto_path(page, '/?campus=pu')
                 await expect(page.get_by_role('heading', name='今天的校園日常')).to_be_visible()
                 await expect(page.get_by_role('link', name='用 Google 帳號登入')).to_be_visible()
                 await expect(page.locator('time[aria-current="date"]')).to_have_count(1)
@@ -100,7 +106,7 @@ async def main():
                     await check_mobile_navigation(page)
                 results.append(f'home reflows at {width}px')
 
-                await page.goto(BASE + '/life?campus=pu', wait_until='networkidle')
+                await goto_path(page, '/life?campus=pu')
                 await expect(page.get_by_role('heading', name='生活', exact=True)).to_be_visible()
                 await expect(page.get_by_role('heading', name='常用查詢', exact=True)).to_be_visible()
                 await no_overflow(page)
@@ -126,7 +132,7 @@ async def main():
             results.append('service search, empty recovery and category filtering work on mobile')
 
             await page.set_viewport_size({'width': 390, 'height': 844})
-            await page.goto(BASE + '/?campus=pu', wait_until='networkidle')
+            await goto_path(page, '/?campus=pu')
             services = page.locator('header summary[aria-label="所有服務"]')
             await services.click()
             await expect(page.get_by_role('link', name='尋找校園服務')).to_be_visible()
@@ -152,7 +158,7 @@ async def main():
 
             for route, heading in [('/', '今天的校園日常'), ('/life', '生活')]:
                 await page.emulate_media(color_scheme='dark', reduced_motion='reduce')
-                await page.goto(BASE + route + '?campus=pu', wait_until='networkidle')
+                await goto_path(page, route + '?campus=pu')
                 await expect(page.get_by_role('heading', name=heading, exact=True)).to_be_visible()
                 await check_oled(page)
                 await no_overflow(page)
@@ -162,7 +168,7 @@ async def main():
             results.append('home and life use OLED black with matching browser chrome')
 
             await page.set_viewport_size({'width': 1440, 'height': 1000})
-            await page.goto(BASE + '/?campus=pu', wait_until='networkidle')
+            await goto_path(page, '/?campus=pu')
             await check_oled(page)
             await page.screenshot(path=str(OUT / 'home-oled-desktop.png'), full_page=True, animations='disabled')
             await page.set_viewport_size({'width': 390, 'height': 844})
@@ -174,10 +180,10 @@ async def main():
             await page.evaluate('''() => localStorage.setItem('campus-web-preferences', JSON.stringify({
                 appearance: {theme: 'dark'}
             }))''')
-            await page.goto(BASE + '/?campus=pu', wait_until='networkidle')
+            await goto_path(page, '/?campus=pu')
             await check_oled(page)
             for route in ['/bus?campus=pu', '/offline.html']:
-                await page.goto(BASE + route, wait_until='networkidle')
+                await page.goto(BASE + route, wait_until='load')
                 assert await page.locator('body').evaluate(
                     'el => getComputedStyle(el).backgroundColor === "rgb(0, 0, 0)"'
                 ), f'{route} does not preserve the OLED background'
@@ -189,7 +195,7 @@ async def main():
                 appearance: {theme: 'light', fontSize: 'large', animations: false}
             }))''')
             await page.set_viewport_size({'width': 320, 'height': 844})
-            await page.goto(BASE + '/?campus=pu', wait_until='networkidle')
+            await goto_path(page, '/?campus=pu')
             await expect(page.locator('html')).to_have_attribute('data-reduced-motion', 'true')
             assert await page.locator('body').evaluate(
                 'el => getComputedStyle(el).backgroundColor === "rgb(248, 247, 243)"'
@@ -197,7 +203,7 @@ async def main():
             await no_overflow(page)
             await page.screenshot(path=str(OUT / 'home-large-text.png'), full_page=True, animations='disabled')
             await check_mobile_navigation(page)
-            await page.goto(BASE + '/life?campus=pu', wait_until='networkidle')
+            await goto_path(page, '/life?campus=pu')
             await no_overflow(page)
             await check_mobile_navigation(page)
             results.append('320px large-text preference has no overflow')
