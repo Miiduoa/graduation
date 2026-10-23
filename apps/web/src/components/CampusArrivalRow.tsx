@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { revealStopResult } from '@/lib/revealStopResult';
 import {
   campusArrivalA11yLabel, campusDestinationFull, campusEtaView, campusHeadingText,
   nextScheduledClock, waitingPlaceLine,
@@ -39,6 +40,10 @@ export function CampusArrivalRow(props: {
   now: number;
 }) {
   const [open, setOpen] = useState(false);
+  const panel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (open) revealStopResult(panel.current);
+  }, [open]);
   const view = campusEtaView(props.row.arrival, props.now);
   const heading = campusHeadingText(props.row);
   const destination = campusDestinationFull(props.row);
@@ -64,7 +69,7 @@ export function CampusArrivalRow(props: {
         <Eta view={view} />
       </button>
       {open ? (
-        <div className={css.rowPanel}>
+        <div ref={panel} className={css.rowPanel} data-testid="opened-route-panel">
           {destination ? <p>終點 {destination}</p> : <p>終點未提供</p>}
           {wait ? <p>{wait}</p> : null}
         </div>
