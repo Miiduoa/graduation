@@ -27,12 +27,8 @@ import { theme, softShadowStyle } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { getDb, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
 import { httpsCallable } from 'firebase/functions';
-import {
-  joinClassroomAttendance,
-  readAttendanceQr,
-  subscribeClassroomAttendance,
-} from '../services/liveAttendance';
-import { toDate } from '../services/courseWorkspace';
+import { joinClassroomAttendance, readAttendanceQr } from '../services/liveAttendance';
+import { useClassroomSession, type LiveClassroomSession } from '../hooks/useClassroomSession';
 import {
   doc,
   collection,
@@ -45,15 +41,6 @@ import {
   orderBy,
   limit,
 } from 'firebase/firestore';
-
-type LiveSession = {
-  sessionId: string;
-  teacherId: string;
-  active: boolean;
-  qrExpiresAt?: any;
-  reactions: { understood: number; partial: number; confused: number };
-  attendeeCount: number;
-};
 
 type AnonQuestion = {
   id: string;
@@ -87,7 +74,7 @@ function ReactionBar({
   userReaction,
   onReact,
 }: {
-  reactions: LiveSession['reactions'];
+  reactions: LiveClassroomSession['reactions'];
   totalCount: number;
   userReaction: ReactionKey | null;
   onReact: (r: ReactionKey) => void;
@@ -280,30 +267,39 @@ export function ClassroomScreen(props: any) {
   const db = getDb();
   const functions = getFunctionsInstance();
 
-  const [session, setSession] = useState<LiveSession | null>(null);
-  const [teacherAccess, setIsTeacher] = useState(false);
-  const [activeMembership, setActiveMembership] = useState(false);
-  const [privateQrToken, setQrToken] = useState<string | null>(null);
-  const [accessIdentity, setAccessIdentity] = useState<string | null>(null);
+  const {
+    session,
+    loading,
+    isTeacher,
+    canAttend,
+    qrToken,
+    qrExpiresAt,
+    joined,
+    error: accessError,
+    refresh,
+  } = useClassroomSession(
+    db,
+    {
+      groupId,
+      sessionId,
+      userId: auth.user?.uid,
+      schoolId: auth.profile?.schoolId,
+    },
+    auth.user,
+    !isFirebaseMockMode() && !auth.loading && !auth.tokenExpired && !auth.tokenError,
+  );
   const [attendanceCode, setAttendanceCode] = useState('');
   const [joining, setJoining] = useState(false);
   const [attendanceError, setAttendanceError] = useState<string | null>(null);
-  const identityKey = `${auth.user?.uid ?? ''}:${groupId ?? ''}:${sessionId ?? ''}`;
-  const identityRef = useRef(identityKey);
-  identityRef.current = identityKey;
+  const identityKey = JSON.stringify([auth.user?.uid, auth.profile?.schoolId, groupId, sessionId]);
+  const identityRef = useRef({ key: identityKey, user: auth.user });
+  identityRef.current = { key: identityKey, user: auth.user };
   const [questions, setQuestions] = useState<AnonQuestion[]>([]);
   const [polls, setPolls] = useState<Poll[]>([]);
-  const [loading, setLoading] = useState(true);
   const [newQuestion, setNewQuestion] = useState('');
   const [submittingQ, setSubmittingQ] = useState(false);
   const [userReaction, setUserReaction] = useState<ReactionKey | null>(null);
   const [myPollAnswers, setMyPollAnswers] = useState<Record<string, number>>({});
-  const [refreshing, setRefreshing] = useState(false);
-  const [confirmedJoined, setJoined] = useState(false);
-  const isTeacher = accessIdentity === identityKey && teacherAccess;
-  const qrToken = accessIdentity === identityKey ? privateQrToken : null;
-  const joined = accessIdentity === identityKey && confirmedJoined;
-  const canAttend = accessIdentity === identityKey && activeMembership;
   const [showQRScanner, setShowQRScanner] = useState(false);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const scanLockRef = useRef(false);
@@ -328,63 +324,13 @@ export function ClassroomScreen(props: any) {
   const [, setQuizStartTime] = useState<number | null>(null);
   const quizTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // 訂閱 Session 狀態
   useEffect(() => {
-    setSession(null);
-    setLoading(true);
     setAttendanceError(null);
-    if (isFirebaseMockMode()) {
-      setLoading(false);
-      return;
-    }
-    if (!groupId || !sessionId || !auth.user?.uid) {
-      setLoading(false);
-      return;
-    }
-    let active = true;
-    const ref = doc(db, 'groups', groupId, 'liveSessions', sessionId);
-    const unsub = onSnapshot(
-      ref,
-      (snap) => {
-        if (!active) return;
-        setSession(snap.exists() ? { sessionId, ...(snap.data() as any) } : null);
-        setLoading(false);
-      },
-      () => {
-        if (!active) return;
-        setSession(null);
-        setLoading(false);
-        setAttendanceError('無法讀取這場課堂，請確認課程權限並重新進入。');
-      },
-    );
-    return () => {
-      active = false;
-      unsub();
-    };
-  }, [db, groupId, sessionId, auth.user?.uid]);
-
-  useEffect(() => {
-    setAccessIdentity(identityKey);
-    setIsTeacher(false);
-    setActiveMembership(false);
-    setQrToken(null);
-    setJoined(false);
     setAttendanceCode('');
     setJoining(false);
     setShowQRScanner(false);
-    if (isFirebaseMockMode() || !groupId || !sessionId || !auth.user?.uid) return;
-    return subscribeClassroomAttendance(
-      db,
-      { groupId, sessionId, userId: auth.user.uid },
-      {
-        onActive: setActiveMembership,
-        onTeacher: setIsTeacher,
-        onToken: setQrToken,
-        onJoined: setJoined,
-        onError: setAttendanceError,
-      },
-    );
-  }, [db, groupId, sessionId, auth.user?.uid]);
+    scanLockRef.current = false;
+  }, [identityKey, auth.user]);
 
   // 訂閱問答
   useEffect(() => {
@@ -420,18 +366,29 @@ export function ClassroomScreen(props: any) {
   const handleJoin = useCallback(
     async (token: string) => {
       if (!groupId || !sessionId || !auth.user || !session?.active || !canAttend || joining) return;
-      const requestIdentity = identityKey;
+      const requestIdentity = identityRef.current;
       setJoining(true);
       setAttendanceError(null);
       try {
         await joinClassroomAttendance(functions, { groupId, sessionId, qrToken: token });
-        if (identityRef.current !== requestIdentity) return;
+        if (
+          identityRef.current.key !== requestIdentity.key ||
+          identityRef.current.user !== requestIdentity.user
+        )
+          return;
         setAttendanceCode('');
       } catch (e: any) {
-        if (identityRef.current === requestIdentity)
+        if (
+          identityRef.current.key === requestIdentity.key &&
+          identityRef.current.user === requestIdentity.user
+        )
           setAttendanceError(e.message ?? '無法完成簽到，請稍後再試。');
       } finally {
-        if (identityRef.current === requestIdentity) setJoining(false);
+        if (
+          identityRef.current.key === requestIdentity.key &&
+          identityRef.current.user === requestIdentity.user
+        )
+          setJoining(false);
       }
     },
     [groupId, sessionId, auth.user, functions, identityKey, joining, session?.active, canAttend],
@@ -674,7 +631,7 @@ export function ClassroomScreen(props: any) {
       <ErrorState
         title="課堂"
         subtitle="找不到課堂"
-        hint={attendanceError ?? '課堂可能已結束或不存在'}
+        hint={attendanceError ?? accessError ?? '課堂可能已結束或不存在'}
       />
     );
 
@@ -684,11 +641,7 @@ export function ClassroomScreen(props: any) {
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => setRefreshing(false)}
-            tintColor={theme.colors.accent}
-          />
+          <RefreshControl refreshing={false} onRefresh={refresh} tintColor={theme.colors.accent} />
         }
       >
         {/* 課堂狀態標頭 */}
@@ -731,11 +684,13 @@ export function ClassroomScreen(props: any) {
 
         <View style={{ padding: 16, gap: 16 }}>
           {isTeacher && session.active && session.teacherId !== auth.user.uid && (
-            <Text style={{ color: theme.colors.muted }}>這場課堂由另一位老師開始，請由該老師結束點名。</Text>
+            <Text style={{ color: theme.colors.muted }}>
+              這場課堂由另一位老師開始，請由該老師結束點名。
+            </Text>
           )}
-          {attendanceError && (
+          {(attendanceError || accessError) && (
             <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>
-              {attendanceError}
+              {attendanceError || accessError}
             </Text>
           )}
           {!isTeacher && joined && <Pill text="已完成簽到" kind="success" />}
@@ -790,12 +745,19 @@ export function ClassroomScreen(props: any) {
                   簽到碼：{qrToken}
                 </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 12, textAlign: 'center' }}>
-                  {toDate(session.qrExpiresAt)
-                    ? `有效至 ${toDate(session.qrExpiresAt)!.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })}；逾時請結束後重新開始點名。`
-                    : '簽到碼的有效期限由老師設定。'}
+                  {`有效至 ${new Date(qrExpiresAt!).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })}；逾時請結束後重新開始點名。`}
                 </Text>
               </View>
             </AnimatedCard>
+          )}
+
+          {isTeacher && session.active && !qrToken && (
+            <Card
+              title="簽到碼暫時無法顯示"
+              subtitle="確認連線後重新讀取；若已到期，請結束後重新開始點名。"
+            >
+              <Button text="重新確認課堂" kind="ghost" onPress={refresh} />
+            </Card>
           )}
 
           {/* 理解度反饋（學生） */}

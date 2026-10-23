@@ -2,7 +2,7 @@
 
 const MERCHANT_MODES = ['native_order', 'showcase_link', 'info_only'];
 const PRICE_DISCLAIMER =
-  '價格、是否賣完、是否接單以店家訂餐頁為準。Nuni 不處理這筆的付款與退款。';
+  '價格、是否賣完、是否接單以店家訂餐頁為準，付款與退款由店家處理。';
 const EXTERNAL_ORDER_HONEST_TEXT =
   '訂單在店家系統，請到店家查看。我們沒有這筆的訂單號碼、餐點明細或付款狀態。';
 const MENU_STALE_TEXT = '菜單可能過期，價格以店家頁面為準。';

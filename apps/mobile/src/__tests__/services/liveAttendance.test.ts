@@ -2,6 +2,7 @@
 import { doc, onSnapshot, type Firestore } from 'firebase/firestore';
 import { httpsCallable, type Functions } from 'firebase/functions';
 import {
+  attendanceExpiryMillis,
   joinClassroomAttendance,
   readAttendanceQr,
   subscribeClassroomAttendance,
@@ -19,22 +20,33 @@ let listeners: Listener[];
 const db = {} as Firestore;
 const functions = {} as Functions;
 const identity = { groupId: 'course', sessionId: 'session', userId: 'student' };
-const snapshot = (data?: Record<string, unknown>) => ({ exists: () => !!data, data: () => data });
+const token = 'A'.repeat(43);
+const expiresAt = Date.parse('2026-10-23T10:10:00Z');
+const snapshot = (data?: Record<string, unknown>, fromCache = false, hasPendingWrites = false) => ({
+  exists: () => !!data,
+  data: () => data,
+  metadata: { fromCache, hasPendingWrites },
+});
+const secretData = (qrToken = token) => ({ qrToken, qrExpiresAt: { toMillis: () => expiresAt } });
 const observer = () => ({
   onTeacher: jest.fn(),
   onToken: jest.fn(),
+  onQrExpiresAt: jest.fn(),
   onJoined: jest.fn(),
   onError: jest.fn(),
 });
 
 beforeEach(() => {
   jest.clearAllMocks();
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2026-10-23T10:00:00Z'));
   listeners = [];
   jest
     .mocked(doc)
     .mockImplementation(((_db: unknown, ...parts: string[]) => parts.join('/')) as never);
   jest.mocked(onSnapshot).mockImplementation(((
     path: string,
+    _options: unknown,
     next: Listener['next'],
     error: Listener['error'],
   ) => {
@@ -42,6 +54,11 @@ beforeEach(() => {
     listeners.push({ path, next, error, stop });
     return stop;
   }) as never);
+});
+
+afterEach(() => {
+  jest.clearAllTimers();
+  jest.useRealTimers();
 });
 
 test('students recover their own attendance without reading a token or any other attendee', () => {
@@ -62,9 +79,9 @@ test.each(['instructor', 'owner'])('active %s can read the protected token', (ro
   subscribeClassroomAttendance(db, identity, state);
   listeners[0].next(snapshot({ role, status: 'active' }));
   expect(listeners[1].path).toBe('groups/course/liveSessionSecrets/session');
-  listeners[1].next(snapshot({ qrToken: 'secret' }));
+  listeners[1].next(snapshot(secretData()));
   expect(state.onTeacher).toHaveBeenLastCalledWith(true);
-  expect(state.onToken).toHaveBeenLastCalledWith('secret');
+  expect(state.onToken).toHaveBeenLastCalledWith(token);
 });
 
 test.each([
@@ -84,9 +101,9 @@ test('revocation clears private state and rejects already queued secret and atte
   listeners[0].next(snapshot({ role: 'instructor', status: 'active' }));
   const secret = listeners[1];
   const record = listeners[2];
-  secret.next(snapshot({ qrToken: 'before-revocation' }));
+  secret.next(snapshot(secretData()));
   listeners[0].next(snapshot({ role: 'instructor', status: 'removed' }));
-  secret.next(snapshot({ qrToken: 'stale-secret' }));
+  secret.next(snapshot(secretData('B'.repeat(43))));
   record.next(snapshot({ status: 'present' }));
   expect(secret.stop).toHaveBeenCalledTimes(1);
   expect(record.stop).toHaveBeenCalledTimes(1);
@@ -102,7 +119,7 @@ test('cleanup ignores callbacks from the prior account or classroom', () => {
   stop();
   jest.clearAllMocks();
   listeners[0].next(snapshot({ role: 'instructor', status: 'active' }));
-  listeners[1].next(snapshot({ qrToken: 'stale' }));
+  listeners[1].next(snapshot(secretData('B'.repeat(43))));
   listeners[2].next(snapshot({ status: 'present' }));
   expect(state.onToken).not.toHaveBeenCalled();
   expect(state.onJoined).not.toHaveBeenCalled();
@@ -113,7 +130,7 @@ test('failed membership or secret subscriptions clear permission-sensitive state
   const state = observer();
   subscribeClassroomAttendance(db, identity, state);
   listeners[0].next(snapshot({ role: 'instructor', status: 'active' }));
-  listeners[1].next(snapshot({ qrToken: 'secret' }));
+  listeners[1].next(snapshot(secretData()));
   listeners[1].error();
   expect(state.onToken).toHaveBeenLastCalledWith(null);
   listeners[0].error();
@@ -176,4 +193,89 @@ test('accepts only this classroom attendance QR format and rejects other classro
     JSON.stringify({ groupId: 'course', sessionId: 'session', qrToken: 123456 }),
   ])
     expect(() => readAttendanceQr(qr, 'course', 'session')).toThrow();
+});
+
+test('cached or pending membership and secret data cannot expose a QR token', () => {
+  const state = observer();
+  subscribeClassroomAttendance(db, identity, state);
+  const membership = { role: 'instructor', status: 'active' };
+  listeners[0].next(snapshot(membership, true));
+  expect(listeners).toHaveLength(1);
+  listeners[0].next(snapshot(membership, false, true));
+  expect(listeners).toHaveLength(1);
+  listeners[0].next(snapshot(membership));
+  listeners[1].next(snapshot(secretData(), true));
+  expect(state.onToken).toHaveBeenLastCalledWith(null);
+  listeners[1].next(snapshot(secretData(), false, true));
+  expect(state.onToken).toHaveBeenLastCalledWith(null);
+  listeners[1].next(snapshot(secretData()));
+  expect(state.onToken).toHaveBeenLastCalledWith(token);
+  listeners[0].next(snapshot(membership, true));
+  expect(state.onTeacher).toHaveBeenLastCalledWith(false);
+  expect(state.onToken).toHaveBeenLastCalledWith(null);
+});
+
+test('the QR disappears at its server expiry without another snapshot', () => {
+  const state = observer();
+  subscribeClassroomAttendance(db, identity, state);
+  listeners[0].next(snapshot({ role: 'instructor', status: 'active' }));
+  listeners[1].next(snapshot(secretData()));
+  jest.advanceTimersByTime(10 * 60_000 - 1);
+  expect(state.onToken).toHaveBeenLastCalledWith(token);
+  jest.advanceTimersByTime(1);
+  expect(state.onToken).toHaveBeenLastCalledWith(null);
+  expect(state.onError).toHaveBeenLastCalledWith(expect.stringContaining('已到期'));
+  listeners[1].next(snapshot(secretData()));
+  expect(state.onToken).toHaveBeenLastCalledWith(null);
+});
+
+test.each([
+  { qrToken: '123456', qrExpiresAt: new Date(expiresAt) },
+  { qrToken: 'A'.repeat(32), qrExpiresAt: new Date(expiresAt) },
+  { qrToken: token },
+  { qrToken: token, qrExpiresAt: 'invalid' },
+  { qrToken: token, qrExpiresAt: { toMillis: () => NaN } },
+  {
+    qrToken: token,
+    qrExpiresAt: {
+      toMillis: () => {
+        throw new Error('invalid');
+      },
+    },
+  },
+])('invalid QR credentials fail closed: %j', (data) => {
+  const state = observer();
+  subscribeClassroomAttendance(db, identity, state);
+  listeners[0].next(snapshot({ role: 'owner', status: 'active' }));
+  listeners[1].next(snapshot(data));
+  expect(state.onToken).toHaveBeenLastCalledWith(null);
+  expect(state.onError).toHaveBeenCalledTimes(1);
+});
+
+test('an ended classroom keeps membership and receipt access without reading its QR secret', () => {
+  const state = observer();
+  subscribeClassroomAttendance(db, identity, state, false);
+  listeners[0].next(snapshot({ role: 'instructor', status: 'active' }));
+  expect(state.onTeacher).toHaveBeenLastCalledWith(true);
+  expect(listeners.some((listener) => listener.path.includes('liveSessionSecrets'))).toBe(false);
+});
+
+test('cached or locally pending attendance does not become server-confirmed attendance', () => {
+  const state = observer();
+  subscribeClassroomAttendance(db, identity, state);
+  listeners[0].next(snapshot({ role: 'member', status: 'active' }));
+  listeners[1].next(snapshot({ status: 'present' }, true));
+  expect(state.onJoined).toHaveBeenLastCalledWith(false);
+  listeners[1].next(snapshot({ status: 'present' }, false, true));
+  expect(state.onJoined).toHaveBeenLastCalledWith(false);
+  listeners[1].next(snapshot({ status: 'present' }));
+  expect(state.onJoined).toHaveBeenLastCalledWith(true);
+});
+
+test('the expiry reader accepts the existing Firestore and ISO contracts', () => {
+  expect(attendanceExpiryMillis({ toMillis: () => expiresAt })).toBe(expiresAt);
+  expect(attendanceExpiryMillis({ toDate: () => new Date(expiresAt) })).toBe(expiresAt);
+  expect(attendanceExpiryMillis(new Date(expiresAt).toISOString())).toBe(expiresAt);
+  expect(attendanceExpiryMillis(new Date(expiresAt))).toBe(expiresAt);
+  expect(attendanceExpiryMillis(undefined)).toBeNull();
 });

@@ -5,6 +5,7 @@ import { CampusIcon } from './CampusIcon';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useEffect, useId, useRef } from 'react';
 import { CAMPUS_SERVICES, SERVICE_CATEGORIES } from '@/lib/campusServices';
+import { isWebOnlineOrderingEnabled, ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
 import styles from './CampusServiceMenu.module.css';
 import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
 
@@ -105,10 +106,21 @@ export function CampusServiceMenu() {
                   <Link
                     href={href(service.href)}
                     key={service.href}
+                    aria-label={service.name}
+                    aria-describedby={
+                      service.href === '/food' && !isWebOnlineOrderingEnabled()
+                        ? `${id}-food-status`
+                        : undefined
+                    }
                     aria-current={currentService === service.href ? 'page' : undefined}
                     onClick={closeMenu}
                   >
-                    {service.name}
+                    <span className={styles.serviceName}>
+                      {service.name}
+                      {service.href === '/food' && !isWebOnlineOrderingEnabled() ? (
+                        <small id={`${id}-food-status`}>{ONLINE_ORDERING_OFF_TEXT}</small>
+                      ) : null}
+                    </span>
                     <span aria-hidden="true">→</span>
                   </Link>
                 ),

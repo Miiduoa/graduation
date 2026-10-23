@@ -14,10 +14,13 @@ import type {
 import { useNuniSession } from '../../state/nuniSession';
 import { useNuniDraftState } from '../../state/nuniDrafts';
 import {
+  FOOD_POLL_MS,
+  FOOD_TERMINAL_STATES,
   FoodButton,
   FoodCard,
   FoodField,
   FoodReadState,
+  FoodStorageRecovery,
   FoodText,
   foodTime,
   money,
@@ -51,12 +54,14 @@ function FoodAccount({ context }: { context: string }) {
     [client],
   );
   const resource = useFoodLoad(loader);
-  if (selected)
+  const orderingOn = isMobileOnlineOrderingEnabled();
+  const active = selected && (orderingOn || selected.mode === 'orders') ? selected : null;
+  if (active)
     return (
       <FoodRealm
-        key={`${selected.tenantId}:${selected.mode}`}
+        key={`${active.tenantId}:${active.mode}`}
         context={context}
-        selection={selected}
+        selection={active}
         onBack={() => select(null)}
       />
     );
@@ -67,17 +72,21 @@ function FoodAccount({ context }: { context: string }) {
       <FoodReadState resource={resource} />
       {resource.data ? (
         <>
-          <FoodText title>選擇用餐校區</FoodText>
-          {resource.data.public
-            .filter((realm) => realm.services.includes('food'))
-            .map((realm) => (
-              <FoodButton
-                key={realm.tenantId}
-                onPress={() => select({ ...realm, mode: 'menu' })}
-              >{`查看餐點：${realm.name}`}</FoodButton>
-            ))}
-          {!resource.data.public.some((realm) => realm.services.includes('food')) ? (
-            <FoodText>目前沒有開放接單的門市。</FoodText>
+          {orderingOn ? (
+            <>
+              <FoodText title>選擇用餐校區</FoodText>
+              {resource.data.public
+                .filter((realm) => realm.services.includes('food'))
+                .map((realm) => (
+                  <FoodButton
+                    key={realm.tenantId}
+                    onPress={() => select({ ...realm, mode: 'menu' })}
+                  >{`查看餐點：${realm.name}`}</FoodButton>
+                ))}
+              {!resource.data.public.some((realm) => realm.services.includes('food')) ? (
+                <FoodText>目前沒有開放接單的門市。</FoodText>
+              ) : null}
+            </>
           ) : null}
           <FoodText title>我的訂單</FoodText>
           <FoodText>店家暫停接新單時，仍可從這裡查看原有訂單。</FoodText>
@@ -111,7 +120,9 @@ function FoodRealm({
     `food:${selection.tenantId}:order`,
     null,
   );
-  const [mode, setMode] = useState(selection.mode);
+  const orderingOn = isMobileOnlineOrderingEnabled();
+  const [storedMode, setMode] = useState(selection.mode);
+  const mode = orderingOn ? storedMode : 'orders';
   const [cursor, setCursor] = useState<string | undefined>();
   const loader = useCallback(
     async () =>
@@ -132,7 +143,9 @@ function FoodRealm({
           },
     [client, selection.tenantId, mode, cursor],
   );
-  const resource = useFoodLoad(loader);
+  const resource = useFoodLoad(loader, {
+    pollMs: mode === 'orders' ? FOOD_POLL_MS : undefined,
+  });
   if (orderId)
     return (
       <FoodOrder
@@ -163,15 +176,17 @@ function FoodRealm({
       <FoodButton onPress={onBack}>返回用餐校區</FoodButton>
       <FoodText title>{selection.name}</FoodText>
       <View style={{ flexDirection: 'row', gap: 10 }}>
-        <FoodButton
-          selected={mode === 'menu'}
-          onPress={() => {
-            setCursor(undefined);
-            setMode('menu');
-          }}
-        >
-          餐點門市
-        </FoodButton>
+        {orderingOn ? (
+          <FoodButton
+            selected={mode === 'menu'}
+            onPress={() => {
+              setCursor(undefined);
+              setMode('menu');
+            }}
+          >
+            餐點門市
+          </FoodButton>
+        ) : null}
         <FoodButton
           selected={mode === 'orders'}
           onPress={() => {
@@ -423,11 +438,18 @@ function FoodMenu({
       <FoodText title>{resource.data?.location.name ?? '選擇餐點'}</FoodText>
       <FoodReadState resource={resource} disabled={mutation.busy} />
       {mutation.error ? <FoodText alert>{mutation.error}</FoodText> : null}
+      <FoodStorageRecovery mutation={mutation} />
       {mutation.pending ? (
         <>
           <FoodText>這次送出內容已保留。返回後仍會使用同一次操作確認。</FoodText>
           <FoodButton
-            disabled={mutation.busy || resource.loading || !!resource.error}
+            disabled={
+              mutation.busy ||
+              mutation.storageBlocked ||
+              !mutation.hydrated ||
+              resource.loading ||
+              !!resource.error
+            }
             onPress={() => void mutation.send()}
           >
             重試確認這次送出
@@ -513,7 +535,10 @@ function FoodOrder({
 }) {
   const client = useFoodClient(context);
   const loader = useCallback(() => client.getOrder(tenantId, orderId), [client, tenantId, orderId]);
-  const resource = useFoodLoad(loader);
+  const resource = useFoodLoad(loader, {
+    pollMs: FOOD_POLL_MS,
+    shouldPoll: (data) => !data || !FOOD_TERMINAL_STATES.has(data.state),
+  });
   const [reason, setReason] = useNuniDraftState<NuniFoodCancelInput['reason']>(
     `food:${tenantId}:${orderId}:cancel-reason`,
     'changed-mind',
@@ -551,9 +576,16 @@ function FoodOrder({
       <FoodReadState resource={resource} />
       {notice ? <FoodText>{notice}</FoodText> : null}
       {mutation.error ? <FoodText alert>{mutation.error}</FoodText> : null}
+      <FoodStorageRecovery mutation={mutation} />
       {mutation.pending ? (
         <FoodButton
-          disabled={mutation.busy || resource.loading || !!resource.error}
+          disabled={
+            mutation.busy ||
+            mutation.storageBlocked ||
+            !mutation.hydrated ||
+            resource.loading ||
+            !!resource.error
+          }
           onPress={() => void mutation.send()}
         >
           重試確認取消

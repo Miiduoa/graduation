@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import { NuniError } from '@campus/shared/src/nuni';
@@ -9,10 +9,12 @@ import type {
 import { useNuniDraftState } from '../../state/nuniDrafts';
 import { NuniPickupScanner } from './NuniPickupScanner';
 import {
+  FOOD_POLL_MS,
   FoodButton,
   FoodCard,
   FoodField,
   FoodReadState,
+  FoodStorageRecovery,
   FoodText,
   foodTime,
   money,
@@ -23,7 +25,14 @@ import {
 } from './NuniFoodUi';
 
 type Intent =
-  | { kind: 'open' | 'handover'; cash: number; note: string; idempotencyKey: string; label: string }
+  | {
+      kind: 'open' | 'handover';
+      cash: number;
+      note: string;
+      idempotencyKey: string;
+      label: string;
+      shiftId?: string;
+    }
   | {
       kind: 'counter' | 'accept' | 'start' | 'ready' | 'fulfill' | 'refund' | 'reject' | 'cancel';
       reason: NuniFoodStaffRejectReason;
@@ -95,7 +104,7 @@ export function NuniMerchantOrders({
     ]);
     return { queue, shift };
   }, [client, tenantId, locationId, cursor]);
-  const resource = useFoodLoad(loader);
+  const resource = useFoodLoad(loader, { pollMs: FOOD_POLL_MS });
   const mutation = useFoodMutation<Intent>(
     `${scope}:intent`,
     (intent) => {
@@ -153,10 +162,60 @@ export function NuniMerchantOrders({
       void resource.load();
     },
   );
+  useEffect(() => {
+    if (!scanOrder || !resource.data || mutation.locked || review) return;
+    const stillAllowed = resource.data.queue.orders.some(
+      (order) => order.id === scanOrder && order.allowedActions.includes('fulfill-pickup'),
+    );
+    if (!stillAllowed) setScanOrder(null);
+  }, [scanOrder, resource.data, mutation.locked, review]);
+  const reviewAllowed = (() => {
+    if (!review || !resource.data) return false;
+    if (review.kind === 'open') return resource.data.shift.kind === 'none';
+    if (review.kind === 'handover')
+      return (
+        resource.data.shift.kind === 'open' &&
+        resource.data.shift.value.id === review.shiftId &&
+        resource.data.shift.value.allowedActions.includes('handover')
+      );
+    if (!('orderId' in review)) return false;
+    const order = resource.data.queue.orders.find((entry) => entry.id === review.orderId);
+    const ticket = order?.kitchenTickets?.find((entry) => entry.id === review.ticketId);
+    return !!(review.kind === 'counter'
+      ? order?.allowedActions.includes('record-counter-payment')
+      : review.kind === 'accept'
+        ? order?.allowedActions.includes('accept')
+        : review.kind === 'fulfill'
+          ? order?.allowedActions.includes('fulfill-pickup')
+          : review.kind === 'refund'
+            ? order?.allowedActions.includes('confirm-counter-refund')
+            : review.kind === 'reject'
+              ? order?.allowedActions.includes('reject')
+              : review.kind === 'cancel'
+                ? order?.allowedActions.includes('cancel-accepted')
+                : review.kind === 'start'
+                  ? ticket?.allowedActions.includes('start-preparation')
+                  : review.kind === 'ready'
+                    ? ticket?.allowedActions.includes('mark-ready')
+                    : false);
+  })();
+  useEffect(() => {
+    // A submitted intent keeps its original key even if the queue advances.
+    // Only an unsent confirmation can be invalidated by newer permissions.
+    if (!review || !resource.data || mutation.busy || mutation.pending) return;
+    if (!reviewAllowed) setReview(null);
+  }, [review, resource.data, reviewAllowed, mutation.busy, mutation.pending]);
   const disabled =
     mutation.locked || !!review || resource.loading || !!resource.error || !resource.data;
   const prepareShift = (kind: 'open' | 'handover') => {
-    if (disabled) return;
+    if (disabled || !resource.data) return;
+    const shift = resource.data.shift;
+    if (
+      kind === 'open'
+        ? shift.kind !== 'none'
+        : shift.kind !== 'open' || !shift.value.allowedActions.includes('handover')
+    )
+      return;
     const amount = Number(cash);
     if (!/^\d+$/.test(cash) || !Number.isSafeInteger(amount) || amount > 10_000_000) {
       setError('請輸入實際清點的現金整數金額（0–10,000,000 元）。');
@@ -169,6 +228,7 @@ export function NuniMerchantOrders({
       note: note.trim(),
       label: kind === 'open' ? `開班，起始現金 ${amount} 元` : `交班，實點現金 ${amount} 元`,
       idempotencyKey: `food-${Crypto.randomUUID()}`,
+      ...(shift.kind === 'open' ? { shiftId: shift.value.id } : {}),
     });
   };
   const prepareOrder = (
@@ -233,13 +293,20 @@ export function NuniMerchantOrders({
       {notice ? <FoodText>{notice}</FoodText> : null}
       {error ? <FoodText alert>{error}</FoodText> : null}
       {mutation.error ? <FoodText alert>{mutation.error}</FoodText> : null}
+      <FoodStorageRecovery mutation={mutation} />
       {mutation.pending ? (
         <FoodCard>
           <FoodText title>確認上一筆操作</FoodText>
           {resource.data ? <FoodText>{mutation.pending.label}</FoodText> : null}
           <FoodText>尚未確認結果，其他操作暫時鎖定；重試會使用原本內容。</FoodText>
           <FoodButton
-            disabled={mutation.busy || resource.loading || !!resource.error}
+            disabled={
+              mutation.busy ||
+              mutation.storageBlocked ||
+              !mutation.hydrated ||
+              resource.loading ||
+              !!resource.error
+            }
             onPress={() => void mutation.send()}
           >
             重試確認上一筆操作
@@ -266,8 +333,10 @@ export function NuniMerchantOrders({
             <FoodText>這會結束目前班次，不會自動開下一班。</FoodText>
           ) : null}
           <FoodButton
-            disabled={mutation.busy || resource.loading || !!resource.error}
-            onPress={() => void mutation.send(review)}
+            disabled={mutation.locked || !reviewAllowed || resource.loading || !!resource.error}
+            onPress={() => {
+              if (reviewAllowed) void mutation.send(review);
+            }}
           >
             {review.kind === 'counter'
               ? '我已實際收到款項，確認登記'

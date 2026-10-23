@@ -3,6 +3,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { NuniError } from '@campus/shared/src/nuni';
 import { Button } from '@/components/ui/Button';
+import {
+  FoodStorageError,
+  clearFoodPending,
+  loadFoodPending,
+  saveFoodPending,
+} from './foodPersistence';
 
 export type FoodDraftCache = Map<string, unknown>;
 export type FoodIntent = {
@@ -43,42 +49,147 @@ export function useFoodDraft<T>(cache: FoodDraftCache, key: string, initial: T |
   return [value, update] as const;
 }
 
-export function useFoodRead<T>(load: () => Promise<T>) {
+function readErrorMessage(failure: unknown) {
+  return failure instanceof NuniError && [401, 403].includes(failure.status)
+    ? '目前無法確認使用權限，請重新確認帳號或再讀取一次。'
+    : '目前無法讀取最新資料。請重新讀取，已填寫的內容仍保留。';
+}
+
+export function useFoodRead<T>(
+  load: () => Promise<T>,
+  options?: {
+    pollMs?: number;
+    /** Return false to stop periodic polling (e.g. terminal order detail). */
+    shouldPoll?: (data: T | null) => boolean;
+  },
+) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  const generation = useRef(0);
-  const reload = useCallback(async () => {
-    const run = ++generation.current;
-    setLoading(true);
-    setData(null);
-    setError('');
-    try {
-      const next = await load();
-      if (run === generation.current) setData(next);
-    } catch (failure) {
-      if (run === generation.current)
-        setError(
-          failure instanceof NuniError && [401, 403].includes(failure.status)
-            ? '目前無法確認使用權限，請重新確認帳號或再讀取一次。'
-            : '目前無法讀取最新資料。請重新讀取，已填寫的內容仍保留。',
-        );
-    } finally {
-      if (run === generation.current) setLoading(false);
+  const dataRef = useRef<T | null>(null);
+  const shouldPollRef = useRef(options?.shouldPoll);
+  const pollMs = options?.pollMs;
+  shouldPollRef.current = options?.shouldPoll;
+  const scopeRef = useRef<{
+    active: boolean;
+    loader: () => Promise<T>;
+    revision: number;
+    inFlight: Promise<void> | null;
+    queued: Promise<void> | null;
+  } | null>(null);
+
+  const read = useCallback(function read(quiet: boolean): Promise<void> {
+    const scope = scopeRef.current;
+    if (!scope?.active) return Promise.resolve();
+    if (scope.inFlight) {
+      // A post-mutation/manual refresh must run after the older read. Quiet
+      // refreshes join it, so polling and returning to the tab cannot overlap.
+      if (quiet) return scope.queued ?? scope.inFlight;
+      if (scope.queued) return scope.queued;
+      ++scope.revision;
+      dataRef.current = null;
+      setData(null);
+      setError('');
+      setLoading(true);
+      scope.queued = scope.inFlight.then(() => {
+        scope.queued = null;
+        if (!scope.active || scopeRef.current !== scope) return;
+        return read(false);
+      });
+      return scope.queued;
     }
-  }, [load]);
-  useEffect(() => {
+    const revision = ++scope.revision;
+    if (!quiet) {
+      dataRef.current = null;
+      setData(null);
+      setError('');
+      setLoading(true);
+    }
+    const current = () => scope.active && scopeRef.current === scope && revision === scope.revision;
+    const pending = Promise.resolve()
+      .then(() => scope.loader())
+      .then(
+        (next) => {
+          if (!current()) return;
+          dataRef.current = next;
+          setData(next);
+          setError('');
+        },
+        (failure: unknown) => {
+          if (!current()) return;
+          // Stale permissions and pickup credentials must disappear on failure.
+          dataRef.current = null;
+          setData(null);
+          setError(readErrorMessage(failure));
+        },
+      )
+      .finally(() => {
+        if (scope.inFlight === pending) scope.inFlight = null;
+        if (current()) setLoading(false);
+      });
+    scope.inFlight = pending;
+    return pending;
+  }, []);
+  const reload = useCallback(() => read(false), [read]);
+  const quietReload = useCallback(() => read(true), [read]);
+
+  useLayoutEffect(() => {
+    const scope = { active: true, loader: load, revision: 0, inFlight: null, queued: null };
+    scopeRef.current = scope;
     void reload();
     return () => {
-      ++generation.current;
+      scope.active = false;
     };
-  }, [reload]);
-  return { data, error, loading, reload };
+  }, [reload, load]);
+
+  useEffect(() => {
+    if (!pollMs || pollMs <= 0) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let inflight = false;
+
+    const visible = () => typeof document === 'undefined' || document.visibilityState === 'visible';
+
+    const schedule = () => {
+      clearTimeout(timer);
+      if (!active || !visible()) return;
+      timer = setTimeout(() => void tick(), pollMs);
+    };
+
+    async function tick() {
+      if (!active || inflight || !visible()) return;
+      if (shouldPollRef.current && !shouldPollRef.current(dataRef.current)) return;
+      inflight = true;
+      try {
+        await quietReload();
+      } finally {
+        inflight = false;
+        if (active && visible()) schedule();
+      }
+    }
+
+    const onVisibility = () => {
+      clearTimeout(timer);
+      if (!active) return;
+      if (visible()) void tick();
+    };
+
+    document.addEventListener('visibilitychange', onVisibility);
+    schedule();
+    return () => {
+      active = false;
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [pollMs, quietReload, load]);
+
+  return { data, error, loading, reload, quietReload };
 }
 
 export function useFoodMutation({
   cache,
   scope,
+  accountId,
   execute,
   onSuccess,
   onRejected,
@@ -87,45 +198,105 @@ export function useFoodMutation({
 }: {
   cache: FoodDraftCache;
   scope: string;
+  accountId: string;
   enabled: boolean;
   execute(intent: FoodIntent): Promise<unknown>;
   onSuccess(result: unknown, intent: FoodIntent): void;
   onRejected?(): void;
   reload(): Promise<unknown>;
 }) {
-  const [pending, setPending] = useFoodDraft<FoodIntent | null>(cache, `${scope}:pending`, null);
+  const pendingKey = `${scope}:pending`;
+  const [pending, setPending] = useFoodDraft<FoodIntent | null>(cache, pendingKey, null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [storageBlocked, setStorageBlocked] = useState(false);
   const active = useRef(false);
   const lock = useRef(false);
+  const accountRef = useRef(accountId);
   const callbacks = useRef({ execute, onSuccess, onRejected, reload });
   useLayoutEffect(() => {
     callbacks.current = { execute, onSuccess, onRejected, reload };
   }, [execute, onSuccess, onRejected, reload]);
   useLayoutEffect(() => {
     active.current = true;
+    accountRef.current = accountId;
     return () => {
       active.current = false;
     };
-  }, []);
+  }, [accountId]);
+
+  const recoverStorage = useCallback(() => {
+    if (!active.current || lock.current) return;
+    if (!accountId) return;
+    try {
+      const stored = loadFoodPending(accountId, scope);
+      if (!active.current || accountRef.current !== accountId) return;
+      if (stored) {
+        cache.set(pendingKey, stored);
+        setPending(stored);
+      }
+      setStorageBlocked(false);
+      setError('');
+    } catch (failure) {
+      if (!active.current || accountRef.current !== accountId) return;
+      setStorageBlocked(true);
+      setError(
+        failure instanceof FoodStorageError
+          ? failure.message
+          : '目前無法安全保存這次訂餐操作，請稍後再試。',
+      );
+    }
+  }, [accountId, scope, cache, pendingKey, setPending]);
+
+  useEffect(() => {
+    recoverStorage();
+  }, [recoverStorage]);
+
   async function send(intent: FoodIntent, retry = false) {
-    if (!active.current || lock.current || (!retry && (!enabled || pending))) return;
+    if (!active.current || lock.current || storageBlocked || (!retry && (!enabled || pending)))
+      return;
+    if (!accountId) {
+      setError('目前無法確認帳號，請重新確認後再操作。');
+      return;
+    }
     lock.current = true;
     setBusy(true);
     setError('');
     setNotice('');
     const frozen = structuredClone(intent);
-    setPending(frozen);
+    const owner = accountId;
+    try {
+      saveFoodPending(owner, scope, frozen);
+      if (!active.current || accountRef.current !== owner) return;
+      setPending(frozen);
+      setStorageBlocked(false);
+    } catch (failure) {
+      if (!active.current || accountRef.current !== owner) return;
+      setStorageBlocked(true);
+      setError(
+        failure instanceof FoodStorageError
+          ? failure.message
+          : '目前無法安全保存這次訂餐操作，請稍後再試。',
+      );
+      lock.current = false;
+      setBusy(false);
+      return;
+    }
     try {
       const result = await callbacks.current.execute(frozen);
-      if (!active.current) return;
+      if (!active.current || accountRef.current !== owner) return;
+      try {
+        clearFoodPending(owner, scope);
+      } catch {
+        /* Clear is best-effort after a confirmed result. */
+      }
       setPending(null);
       callbacks.current.onSuccess(result, frozen);
       setNotice('已完成。');
       await callbacks.current.reload();
     } catch (failure) {
-      if (!active.current) return;
+      if (!active.current || accountRef.current !== owner) return;
       if (
         !retry &&
         failure instanceof NuniError &&
@@ -133,6 +304,11 @@ export function useFoodMutation({
         failure.status < 500 &&
         failure.status !== 408
       ) {
+        try {
+          clearFoodPending(owner, scope);
+        } catch {
+          /* ignore */
+        }
         setPending(null);
         callbacks.current.onRejected?.();
         setError(
@@ -146,10 +322,19 @@ export function useFoodMutation({
       }
     } finally {
       lock.current = false;
-      if (active.current) setBusy(false);
+      if (active.current && accountRef.current === owner) setBusy(false);
     }
   }
-  return { pending, busy, error, notice, send, retry: () => pending && void send(pending, true) };
+  return {
+    pending,
+    busy,
+    error,
+    notice,
+    storageBlocked,
+    recoverStorage,
+    send,
+    retry: () => pending && void send(pending, true),
+  };
 }
 
 export function FoodMutationStatus({ task }: { task: ReturnType<typeof useFoodMutation> }) {
@@ -157,10 +342,15 @@ export function FoodMutationStatus({ task }: { task: ReturnType<typeof useFoodMu
     <>
       {task.error && <p role="alert">{task.error}</p>}
       {task.notice && <p role="status">{task.notice}</p>}
+      {task.storageBlocked && (
+        <Button disabled={task.busy} onClick={task.recoverStorage}>
+          重新確認分頁儲存
+        </Button>
+      )}
       {task.pending && (
         <div role="status">
           <p>{task.busy ? '正在確認這次操作…' : '尚未確認是否成功，請用下方按鈕重試。'}</p>
-          <Button disabled={task.busy} onClick={task.retry}>
+          <Button disabled={task.busy || task.storageBlocked} onClick={task.retry}>
             重試同一份操作
           </Button>
         </div>
@@ -194,3 +384,5 @@ export const foodStateLabels: Record<string, string> = {
   'cancellation-pending-refund': '取消中，待退款',
   'rejection-pending-refund': '未接單，待退款',
 };
+
+export { FOOD_POLL_MS, FOOD_TERMINAL_STATES } from './foodPersistence';

@@ -26,12 +26,14 @@ type Cart = Record<string, { quantity: number; options: string[]; note: string }
 export function FoodMenu({
   client,
   cache,
+  accountId,
   tenantId,
   locationId,
   onOrder,
 }: {
   client: FoodClient;
   cache: FoodDraftCache;
+  accountId: string;
   tenantId: string;
   locationId: string;
   onOrder(orderId: string): void;
@@ -57,6 +59,7 @@ export function FoodMenu({
   const task = useFoodMutation({
     cache,
     scope,
+    accountId,
     enabled: !!menu.data,
     reload: menu.reload,
     onRejected: () => {
@@ -78,7 +81,7 @@ export function FoodMenu({
       }
     },
   });
-  const locked = !menu.data || task.busy || !!task.pending;
+  const locked = !menu.data || task.busy || !!task.pending || task.storageBlocked;
   const items = menu.data?.sections.flatMap((section) => section.items) ?? [];
   function update(id: string, next: Partial<Cart[string]>) {
     if (locked) return;
