@@ -11,7 +11,11 @@ import { NextClassCard, TodayTimetable } from '@/components/timetable/TodayTimet
 import { browserRequest, useNuniSession } from '@/features/nuni/Session';
 import { FeedbackList } from '@/components/home/FeedbackList';
 import { loadHomeData, type HomeCourse, type HomeData, type HomeMaterial, type HomeTask } from '@/lib/homeOverview';
-import { loadNuniHomeData } from '@/lib/nuniHomeOverview';
+import {
+  HOME_MATERIALS_UNAVAILABLE,
+  loadNuniHomeData,
+  loadNuniHomeMaterials,
+} from '@/lib/nuniHomeOverview';
 import { CourseMaterialSearch } from '@/features/nuni/CourseMaterialSearch';
 import { isMaterialNew, isMaterialUnread } from '@/lib/courseMaterials';
 import { publicCampusServices } from '@/lib/publicCampusServices';
@@ -157,9 +161,11 @@ export default function HomePage() {
   const blocked = nuni.pendingLogout || (!!nuni.error && !uid);
   const [result, setResult] = useState<{ owner: string; data: HomeData } | null>(null);
   const [loading, setLoading] = useState(false);
+  const [materialsRetrying, setMaterialsRetrying] = useState(false);
   const [error, setError] = useState('');
   const [now, setNow] = useState<Date | null>(null);
   const generation = useRef(0);
+  const materialsGeneration = useRef(0);
   const data = !sessionLoading && !blocked && result?.owner === owner ? result?.data : null;
   const refresh = useCallback(async () => {
     const request = ++generation.current;
@@ -190,6 +196,36 @@ export default function HomePage() {
       if (request === generation.current) setLoading(false);
     }
   }, [owner, context, accountId, uid, sessionLoading, blocked, refreshSession]);
+  const retryMaterials = useCallback(async () => {
+    if (!context || !accountId || !data) return;
+    const request = ++materialsGeneration.current;
+    setMaterialsRetrying(true);
+    try {
+      const next = await loadNuniHomeMaterials(
+        (path, input) => browserRequest(path, context, input),
+        accountId,
+        data.courses,
+      );
+      if (request !== materialsGeneration.current) return;
+      setResult((current) =>
+        current && current.owner === owner ? { ...current, data: { ...current.data, ...next } } : current,
+      );
+    } catch (failure) {
+      if (request !== materialsGeneration.current) return;
+      setResult((current) =>
+        current && current.owner === owner
+          ? {
+              ...current,
+              data: { ...current.data, materialsError: nuniErrorMessage(failure) },
+            }
+          : current,
+      );
+      if (failure instanceof NuniError && (failure.status === 401 || failure.code === 'SESSION_CHANGED'))
+        void refreshSession();
+    } finally {
+      if (request === materialsGeneration.current) setMaterialsRetrying(false);
+    }
+  }, [accountId, context, data, owner, refreshSession]);
   useEffect(() => {
     void refresh();
     return () => {
@@ -419,8 +455,28 @@ export default function HomePage() {
                 ) : null}
               </section>
             )}
-            {signedIn && !!context && !busy && !error ? <CourseMaterialSearch compact /> : null}
-            {signedIn && newMaterials.length > 0 ? (
+            {signedIn && !!context && !busy && !error ? (
+              <CourseMaterialSearch compact seed={data?.materialSearchSeed} />
+            ) : null}
+            {signedIn && data?.materialsError ? (
+              <section className={styles.section} aria-labelledby="materials-unavailable-title">
+                <div className={styles.sectionHeading}>
+                  <h2 id="materials-unavailable-title">{HOME_MATERIALS_UNAVAILABLE}</h2>
+                </div>
+                <p role="alert" className={styles.sectionNote}>
+                  {data.materialsError} 作業、測驗和老師回饋仍可使用。
+                </p>
+                <button
+                  type="button"
+                  className={styles.textButton}
+                  onClick={() => void retryMaterials()}
+                  disabled={materialsRetrying}
+                >
+                  {materialsRetrying ? '正在重試載入教材…' : '重試載入教材'}
+                </button>
+                {newMaterials.length > 0 ? <MaterialList items={newMaterials} /> : null}
+              </section>
+            ) : signedIn && newMaterials.length > 0 ? (
               <section className={styles.section} aria-labelledby="new-materials-title">
                 <div className={styles.sectionHeading}>
                   <h2 id="new-materials-title">

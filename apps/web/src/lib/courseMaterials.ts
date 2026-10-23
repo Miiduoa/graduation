@@ -34,6 +34,27 @@ export type SearchableMaterial = {
   createdAt: string;
 };
 
+export type MaterialSearchSeed = {
+  items: SearchableMaterial[];
+  courseIds: string[];
+  truncated: boolean;
+};
+
+export function toSearchableMaterial(
+  course: { id: string; title: string },
+  item: NuniMaterial,
+): SearchableMaterial {
+  return {
+    id: item.id,
+    workspaceId: item.workspaceId || course.id,
+    courseTitle: course.title,
+    title: item.title,
+    body: item.body,
+    unitTitle: item.unitTitle,
+    createdAt: item.createdAt,
+  };
+}
+
 export type MaterialOpenAction = {
   href: string | null;
   label: string;
@@ -364,27 +385,25 @@ type MaterialClient = {
 export async function loadSearchableMaterials(
   classes: MaterialClient,
   workspaces: NuniWorkspace[],
+  seed?: MaterialSearchSeed | null,
 ): Promise<{ items: SearchableMaterial[]; skipped: number; truncated: boolean }> {
   const catalog: SearchableMaterial[] = [];
   let skipped = 0;
-  let truncated = false;
+  let truncated = seed?.truncated === true;
+  const seeded = new Set(seed?.courseIds ?? []);
+  const seededItems = seed?.items ?? [];
   const active = workspaces.filter((course) => course.state === 'active');
   const batchSize = 4;
   for (let start = 0; start < active.length; start += batchSize) {
     const batch = await Promise.all(
       active.slice(start, start + batchSize).map(async (course) => {
+        if (seeded.has(course.id)) {
+          return seededItems.filter((item) => item.workspaceId === course.id);
+        }
         try {
           const materials = await classes.materials(course.id);
           if (materials.length >= 100) truncated = true;
-          return materials.map((item) => ({
-            id: item.id,
-            workspaceId: item.workspaceId,
-            courseTitle: course.title,
-            title: item.title,
-            body: item.body,
-            unitTitle: item.unitTitle,
-            createdAt: item.createdAt,
-          }));
+          return materials.map((item) => toSearchableMaterial({ id: course.id, title: course.title }, item));
         } catch (error) {
           if (error instanceof NuniError && [403, 404].includes(error.status)) {
             skipped += 1;

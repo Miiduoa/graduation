@@ -10,6 +10,7 @@ import {
   isMaterialNew,
   loadSearchableMaterials,
   searchCourseMaterials,
+  type MaterialSearchSeed,
   type SearchableMaterial,
 } from '@/lib/courseMaterials';
 import { useClasses } from './CourseUI';
@@ -17,13 +18,19 @@ import { useNuniSession } from './Session';
 import shared from './NuniApp.module.css';
 import styles from './CourseLearning.module.css';
 
-export function CourseMaterialSearch({ compact = false }: { compact?: boolean }) {
+export function CourseMaterialSearch({
+  compact = false,
+  seed = null,
+}: {
+  compact?: boolean;
+  seed?: MaterialSearchSeed | null;
+}) {
   const { session, pendingLogout } = useNuniSession();
   if (!session || pendingLogout) return null;
-  return <Search key={session.context} compact={compact} />;
+  return <Search key={session.context} compact={compact} seed={seed} />;
 }
 
-function Search({ compact }: { compact: boolean }) {
+function Search({ compact, seed }: { compact: boolean; seed: MaterialSearchSeed | null }) {
   const classes = useClasses();
   const courseApi = useRef(classes);
   const inputId = useId();
@@ -67,7 +74,7 @@ function Search({ compact }: { compact: boolean }) {
     const api = courseApi.current;
     void api
       .list()
-      .then((workspaces) => loadSearchableMaterials(api, workspaces))
+      .then((workspaces) => loadSearchableMaterials(api, workspaces, seed))
       .then((result) => {
         if (!mounted.current || run !== request.current) return;
         setCatalog(result.items);
@@ -82,7 +89,7 @@ function Search({ compact }: { compact: boolean }) {
       .finally(() => {
         if (mounted.current && run === request.current) setReading(false);
       });
-  }, [catalog, query]);
+  }, [catalog, query, seed]);
 
   const hits = catalog && query.trim() ? searchCourseMaterials(query, catalog) : [];
 

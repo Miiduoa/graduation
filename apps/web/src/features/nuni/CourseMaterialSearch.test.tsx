@@ -99,6 +99,31 @@ it('skips a course without permission and still searches the rest', async () => 
   expect(screen.getByText(/有 1 門課目前沒有權限/)).toBeTruthy();
 });
 
+it('reuses today-page materials and does not fetch those courses again', async () => {
+  render(
+    <CourseMaterialSearch
+      seed={{
+        items: [
+          {
+            id: material.id,
+            workspaceId,
+            courseTitle: '資料庫系統',
+            title: material.title,
+            body: material.body,
+            unitTitle: material.unitTitle,
+            createdAt: material.createdAt,
+          },
+        ],
+        courseIds: [workspaceId],
+        truncated: false,
+      }}
+    />,
+  );
+  fireEvent.change(screen.getByLabelText('搜尋教材'), { target: { value: '主鍵' } });
+  expect(await screen.findByRole('link', { name: /關聯與主鍵/ })).toBeTruthy();
+  expect(state.request.mock.calls.map(([path]) => path)).toEqual(['class-workspaces']);
+});
+
 it('does not keep a pending catalogue after the account changes', async () => {
   let finish!: (value: unknown) => void;
   state.request.mockImplementation(

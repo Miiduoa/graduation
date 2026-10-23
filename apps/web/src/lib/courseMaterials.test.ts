@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { NuniError, type NuniMaterial, type NuniUnit, type NuniWorkspace } from '@campus/shared/src/nuni';
 import {
   MATERIAL_SIZE_UNKNOWN,
@@ -155,6 +155,34 @@ it('loads searchable materials from enrolled courses and skips a revoked course 
   expect(result.items).toEqual([
     expect.objectContaining({ courseTitle: '資料庫系統', title: '關聯與主鍵' }),
   ]);
+});
+
+it('reuses a today-page seed and does not request those courses again', async () => {
+  const seeded = {
+    id: material().id,
+    workspaceId: course,
+    courseTitle: '資料庫系統',
+    title: '關聯與主鍵',
+    body: '第三正規化',
+    unitTitle: '第 03 週',
+    createdAt: '2026-10-20T08:00:00.000Z',
+  };
+  const materials = vi.fn(async (id: string) => {
+    if (id === other)
+      return [material({ id: 'cwm_22222222-2222-4222-8222-222222222222', title: '設計講義', workspaceId: other })];
+    throw new Error(`unexpected ${id}`);
+  });
+  const result = await loadSearchableMaterials(
+    { materials },
+    [
+      { id: course, title: '資料庫系統', state: 'active', memberRole: 'student' },
+      { id: other, title: '設計專題', state: 'active', memberRole: 'student' },
+    ],
+    { items: [seeded], courseIds: [course], truncated: false },
+  );
+  expect(materials).toHaveBeenCalledTimes(1);
+  expect(materials).toHaveBeenCalledWith(other);
+  expect(result.items.map((item) => item.title)).toEqual(['關聯與主鍵', '設計講義']);
 });
 
 it('does not invent a complete catalogue when a course read is offline', async () => {
