@@ -357,7 +357,9 @@ test('runtime probe uses the existing Machines API target and token without SSH 
   const execute=(file,args,options)=>{
     calls.push({file,args,options});
     // The local fixture interprets the command as the remote shell would.
-    return execFileSync('/bin/sh',['-c',args.at(-1)],{encoding:'utf8'});
+    const stdout=execFileSync('/bin/sh',['-c',args.at(-1)],{encoding:'utf8'});
+    // fly-go omits exit_code=0 and an empty stderr from its JSON response.
+    return JSON.stringify({stdout});
   };
   for (const machine of MACHINE_IDS) {
     const report=probeFlyMachine(machine,command,catalogProfile,execute);
@@ -367,7 +369,7 @@ test('runtime probe uses the existing Machines API target and token without SSH 
   assert.equal(calls.length,2);
   for (let i=0;i<calls.length;i+=1) {
     assert.equal(calls[i].file,'flyctl');
-    assert.deepEqual(calls[i].args,['machine','exec',MACHINE_IDS[i],'--app','nuni-web','--timeout','300',command]);
+    assert.deepEqual(calls[i].args,['machine','exec',MACHINE_IDS[i],'--app','nuni-web','--timeout','300','--json',command]);
     assert.equal(calls[i].options.timeout,310_000);
     assert.deepEqual(calls[i].options.stdio,['ignore','pipe','pipe']);
     assert.equal(calls[i].options.env,undefined);
@@ -383,4 +385,63 @@ test('machine transport rejects other targets and preserves sanitized failure be
     [{stderr:'private-value'},'fly-runtime-probe-failed'],
   ]) assert.throws(()=>probeFlyMachine(MACHINE_IDS[0],'command',catalogProfile,()=>{throw error;}),new RegExp(`^Error: ${code}$`));
   assert.throws(()=>probeFlyMachine(MACHINE_IDS[0],'command',catalogProfile,()=> 'arbitrary-output'),/runtime-probe-output-invalid/);
+});
+
+const successfulMachineStdout='CAMPUS_TRANSIT_PROBE:'+JSON.stringify({ready:true,profile:catalogProfile,
+  mode:catalogProfile,transitReady:false,credentialsAbsent:true,reason:'not-configured'})+'\n';
+
+test('machine JSON accepts actual omitted-zero and explicit-zero success without persisting stderr',()=>{
+  for (const fields of [{},{exit_code:0},{exit_code:0,stderr:''},{stderr:'private-value'}]) {
+    const result=probeFlyMachine(MACHINE_IDS[0],'command',catalogProfile,
+      ()=>JSON.stringify({stdout:successfulMachineStdout,...fields}));
+    assert.equal(result.ready,true);
+    assert.equal(result.machineId,MACHINE_IDS[0]);
+    assert.ok(!JSON.stringify(result).includes('private-value'));
+    assert.equal(Object.hasOwn(result,'stderr'),false);
+  }
+});
+
+test('a successful marker cannot override a nonzero remote exit code',()=>{
+  for (const exit_code of [1,9,137,-1]) {
+    assert.throws(()=>probeFlyMachine(MACHINE_IDS[0],'command',catalogProfile,
+      ()=>JSON.stringify({exit_code,stdout:successfulMachineStdout,stderr:'private-value'})),
+    /^Error: fly-runtime-probe-failed$/);
+  }
+});
+
+test('machine transport refuses malformed JSON, wrong response shapes and noninteger exit codes',()=>{
+  const replies=[null,[],{},'private-value',0,
+    {stdout:null},{stdout:0},{stdout:{}},{stdout:['CAMPUS_TRANSIT_PROBE:']},
+    {stdout:successfulMachineStdout,stderr:null},{stdout:successfulMachineStdout,stderr:{}},
+    {stdout:successfulMachineStdout,exitCode:0},
+    {stdout:successfulMachineStdout,extra:'private-value'},
+    ...[null,false,true,'0',0.5,{},[]].map(exit_code=>({stdout:successfulMachineStdout,exit_code}))];
+  for (const reply of replies) {
+    assert.throws(()=>probeFlyMachine(MACHINE_IDS[0],'command',catalogProfile,()=>JSON.stringify(reply)),
+      /^Error: runtime-probe-output-invalid$/);
+  }
+  for (const reply of ['', '{', successfulMachineStdout, 'Exit code: 1\n'+successfulMachineStdout,
+    JSON.stringify({stdout:successfulMachineStdout})+'\n'+JSON.stringify({stdout:successfulMachineStdout})]) {
+    assert.throws(()=>probeFlyMachine(MACHINE_IDS[0],'command',catalogProfile,()=>reply),
+      /^Error: runtime-probe-output-invalid$/);
+  }
+});
+
+test('machine JSON requires one valid stdout report and never accepts a stderr success marker',()=>{
+  for (const stdout of ['', 'private-value', successfulMachineStdout+successfulMachineStdout,
+    'CAMPUS_TRANSIT_PROBE:{"ready":true}\n']) {
+    assert.throws(()=>probeFlyMachine(MACHINE_IDS[0],'command',catalogProfile,
+      ()=>JSON.stringify({stdout,stderr:successfulMachineStdout})),
+    /^Error: runtime-(?:probe-output-invalid|official-links-not-ready)$/);
+  }
+});
+
+test('remote failure JSON retains only allowlisted reasons and never reveals either stderr stream',()=>{
+  for (const [reason,code] of [['rate-limited','rate-limited'],['private-value','runtime-transit-preflight-failed']]) {
+    assert.throws(()=>probeFlyMachine(MACHINE_IDS[0],'command',catalogProfile,()=>JSON.stringify({exit_code:1,
+      stdout:'CAMPUS_TRANSIT_PROBE:'+JSON.stringify({ready:false,reason}),stderr:'private-value'})),
+    (error)=>error.message===code && !String(error).includes('private-value'));
+  }
+  assert.throws(()=>probeFlyMachine(MACHINE_IDS[0],'command',catalogProfile,()=>{throw {stderr:successfulMachineStdout+'private-value'};}),
+    /^Error: fly-runtime-probe-failed$/);
 });

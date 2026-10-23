@@ -1,6 +1,6 @@
 # Node and CA security update — 2026-10-23
 
-This is a tested candidate, not a production deployment. Integration base: `20df7c84a77a156382af44fde8ccecd1efde8082`. The existing working directories and uncommitted changes were preserved in a separate checkout. No applicable `AGENTS.md` was present in this checkout or its ancestors.
+This is a tested candidate, not a production deployment. Integration base: `20df7c84a77a156382af44fde8ccecd1efde8082`.
 
 ## Changes
 
@@ -8,7 +8,7 @@ This is a tested candidate, not a production deployment. Integration base: `20df
 - Legacy Web: retain Node 24 and its application artifact; replace only the old copied executable with official Node 24.22.1. Both old and new Node 24 use ABI 137. The current Web uses ABI 127.
 - Install patched OS CA packages before dependency downloads, shared by build and runtime stages: Alpine `ca-certificates` and `ca-certificates-bundle` at least `20261020-r0`; Debian `ca-certificates` at least `20250419~deb12u2`.
 - Pin GitHub jobs, `.nvmrc`, and EAS `base.node` to 22.23.4. The EAS configuration assertion follows the same version. No EAS build was started.
-- Use the existing Fly Machines API for the transit release check instead of obtaining an SSH certificate. Machine allowlists, profile checks, failure handling and output filtering remain in place. The CI deployment token's permission for this operation still needs verification in the approved release run.
+- Use the existing Fly Machines API for the transit release check instead of obtaining an SSH certificate. Machine allowlists, profile checks, failure handling and output filtering remain in place. The check reads the structured remote exit status: flyctl omits a zero `exit_code`; any nonzero or invalid value stops the release even if stdout contains a success report. The CI deployment token's permission for this operation still needs verification in the approved release run.
 - Add `deploy/security/verify-tls.cjs`, which sends no application credentials and does not alter TLS or CA configuration. Missing optional modules are recorded; non-certificate transport failures remain inconclusive and cause a nonzero exit.
 
 ## Read-only production baseline
