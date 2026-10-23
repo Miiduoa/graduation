@@ -86,6 +86,20 @@ beforeEach(() => {
   });
 });
 
+it('offers the all-course gradebook from the classroom list', async () => {
+  mocks.pathname = '/classroom';
+  window.history.replaceState({}, '', '/classroom');
+  mocks.request.mockImplementation(async (path: string) => {
+    if (path === 'sign-in-options') return { google: true };
+    if (path === 'class-workspaces') return { workspaces: [] };
+    throw new Error(`Unexpected request: ${path}`);
+  });
+  render(<NuniApp />);
+  expect((await screen.findByRole('link', { name: '課業成績與回饋' })).getAttribute('href')).toBe(
+    '/classroom/grades',
+  );
+});
+
 it('keeps the guest course query and linked assignment through Google sign-in', async () => {
   mocks.signedIn = false;
   mocks.search = 'campus=tw-pu';

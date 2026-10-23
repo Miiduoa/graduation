@@ -100,6 +100,14 @@ export const CAMPUS_SERVICES = [
     category: 'study',
   },
   {
+    name: '課業成績與回饋',
+    text: '一頁看各門課已評分、等待公布與缺交，點進去看老師評語和自己交的內容',
+    href: '/classroom/grades',
+    access: 'platform',
+    keywords: '成績 回饋 分數 評分 缺交 作業 測驗 評語 grade feedback',
+    category: 'study',
+  },
+  {
     name: '公告',
     text: '查詢校園公開公告',
     href: '/announcements',

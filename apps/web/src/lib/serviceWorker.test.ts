@@ -105,6 +105,43 @@ it('activates a waiting update only after an explicit update message', async () 
   await waitUntil.mock.calls[0][0];
   expect(skipWaiting).toHaveBeenCalledOnce();
 });
+it('opens a published grade push on the assignment instead of the transcript page', async () => {
+  const openWindow = vi.fn();
+  const waitUntil = vi.fn();
+  vm.runInNewContext(source, {
+    URL,
+    Response,
+    fetch: fetchMock,
+    caches: cachesMock,
+    self: {
+      location: { origin: 'https://campus.test' },
+      addEventListener: (name: string, handler: (typeof handlers)[string]) => {
+        handlers[name] = handler;
+      },
+      skipWaiting,
+      clients: {
+        claim: vi.fn(),
+        matchAll: vi.fn().mockResolvedValue([]),
+        openWindow,
+      },
+    },
+  });
+  handlers.notificationclick({
+    notification: {
+      close: vi.fn(),
+      data: {
+        type: 'grade',
+        courseId: 'cs101',
+        assignmentId: 'hw-1',
+        url: 'https://evil.test/phish',
+      },
+    },
+    waitUntil,
+  });
+  await waitUntil.mock.calls[0][0];
+  expect(openWindow).toHaveBeenCalledWith('https://campus.test/course/cs101#assignment-hw-1');
+});
+
 it('opens the assignment from a push tap instead of the course list', async () => {
   const openWindow = vi.fn();
   const waitUntil = vi.fn();
@@ -240,4 +277,35 @@ it('ignores a path-like course id from a push tap', async () => {
   });
   await waitUntil.mock.calls[0][0];
   expect(openWindow).toHaveBeenCalledWith('https://campus.test/');
+});
+it('opens the gradebook when a feedback push has no assignment id', async () => {
+  const openWindow = vi.fn();
+  const waitUntil = vi.fn();
+  vm.runInNewContext(source, {
+    URL,
+    Response,
+    fetch: fetchMock,
+    caches: cachesMock,
+    self: {
+      location: { origin: 'https://campus.test' },
+      addEventListener: (name: string, handler: (typeof handlers)[string]) => {
+        handlers[name] = handler;
+      },
+      skipWaiting,
+      clients: {
+        claim: vi.fn(),
+        matchAll: vi.fn().mockResolvedValue([]),
+        openWindow,
+      },
+    },
+  });
+  handlers.notificationclick({
+    notification: {
+      close: vi.fn(),
+      data: { type: 'feedback', url: 'https://evil.test/phish' },
+    },
+    waitUntil,
+  });
+  await waitUntil.mock.calls[0][0];
+  expect(openWindow).toHaveBeenCalledWith('https://campus.test/classroom/grades');
 });

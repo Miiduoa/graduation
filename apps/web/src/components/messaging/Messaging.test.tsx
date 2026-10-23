@@ -310,7 +310,9 @@ it('read-marker errors remain visible without clearing unread content optimistic
 it('notifications contain real task links and no local approval, purchase or reply simulation', async () => {
   render(<MessagesPage />);
   await screen.findByText('成績已公布');
-  expect(screen.getByRole('link', { name: '查看成績' }).getAttribute('href')).toBe('/grades');
+  expect(screen.getByRole('link', { name: '查看課業成績與回饋' }).getAttribute('href')).toBe(
+    '/classroom/grades',
+  );
   expect(screen.getByText('部分通知尚未標示學校，未列入本頁。')).toBeTruthy();
   expect(screen.queryByRole('button', { name: /核准|退回|訂單|回覆|加好友/ })).toBeNull();
 });

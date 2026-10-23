@@ -566,11 +566,15 @@ export function notificationDestination(
   notification: AccountNotification,
 ): { href: string; label: string } | null {
   if (notification.type === 'announcement') return { href: '/announcements', label: '查看公告' };
-  if (notification.type === 'grade') {
-    const work = courseWorkHrefFromData(notification.data, notification.type);
-    return work
-      ? { href: work, label: courseWorkOpenLabel(work) }
-      : { href: '/grades', label: '查看成績' };
+  if (notification.type === 'grade' || notification.type === 'feedback') {
+    const work = courseWorkHrefFromData(
+      notification.data,
+      notification.type === 'feedback' ? 'assignment' : notification.type,
+    );
+    if (work) return { href: work, label: courseWorkOpenLabel(work) };
+    const course = courseHrefFromData(notification.data);
+    if (course) return { href: course, label: courseWorkOpenLabel(course) };
+    return { href: '/classroom/grades', label: '查看課業成績與回饋' };
   }
   if (
     notification.type === 'message' &&

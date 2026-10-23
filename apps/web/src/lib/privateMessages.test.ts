@@ -338,8 +338,28 @@ it.each(['global', 'user'] as const)(
 );
 it('notification destinations only use supported local tasks and never arbitrary URL or approval actions', () => {
   expect(notificationDestination({ ...notice, data: { url: 'javascript:alert(1)' } })).toEqual({
-    href: '/grades',
-    label: '查看成績',
+    href: '/classroom/grades',
+    label: '查看課業成績與回饋',
+  });
+  expect(
+    notificationDestination({
+      ...notice,
+      type: 'grade',
+      data: { courseId: 'cs101', assignmentId: 'hw-1' },
+    }),
+  ).toEqual({ href: '/course/cs101#assignment-hw-1', label: '前往這份作業' });
+  expect(
+    notificationDestination({
+      ...notice,
+      type: 'feedback',
+      data: {
+        workspaceId: 'cw_11111111-1111-4111-8111-111111111111',
+        assignmentId: 'cwa_22222222-2222-4222-8222-222222222222',
+      },
+    }),
+  ).toEqual({
+    href: '/classroom/course/cw_11111111-1111-4111-8111-111111111111#assignment-cwa_22222222-2222-4222-8222-222222222222',
+    label: '前往這份作業',
   });
   expect(
     notificationDestination({ ...notice, type: 'leave', data: { url: '/fake-approve' } }),
