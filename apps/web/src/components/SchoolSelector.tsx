@@ -45,7 +45,7 @@ export function SchoolSelector({
   function closeMenu() {
     if (menu.current?.open) {
       menu.current.open = false;
-      menu.current.querySelector('summary')?.focus();
+      menu.current.querySelector('summary')?.focus({ preventScroll: true });
     }
   }
 
@@ -172,6 +172,7 @@ export function SchoolSelector({
     >
       <summary
         className={variant === 'name' ? styles.compactName : undefined}
+        aria-controls={`${id}-picker`}
         aria-label={
           variant === 'name'
             ? `切換校園：${selection.selectedSchool?.name || '不限校園'}`
@@ -183,7 +184,32 @@ export function SchoolSelector({
           : `瀏覽校園：${selection.selectedSchool?.shortName || selection.selectedSchool?.name || '不限校園'}`}
         {selection.selectedSchool?.status === 'not-open' ? '（校務尚未開通）' : ''}
       </summary>
-      <div className={styles.popover}>{content}</div>
+      <div className={styles.popover} id={`${id}-picker`}>
+        <div className={styles.popoverHead}>
+          <h2>瀏覽校園</h2>
+          <button
+            type="button"
+            className={styles.closeButton}
+            aria-label="關閉校園選擇"
+            onClick={closeMenu}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="19"
+              height="19"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path d="m6 6 12 12M18 6 6 18" />
+            </svg>
+          </button>
+        </div>
+        {content}
+      </div>
     </details>
   ) : (
     <section className={styles.panel} aria-labelledby={`${id}-title`}>

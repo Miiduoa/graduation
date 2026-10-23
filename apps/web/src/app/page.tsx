@@ -315,11 +315,11 @@ export default function HomePage() {
               >
                 <div className={styles.panelLabel}>
                   <CampusIcon name="calendar" size={17} />
-                  <span>課程待辦</span>
+                  <span>{signedIn ? '課程待辦' : '課程空間'}</span>
                 </div>
                 <div className={styles.sectionHeading}>
                   <h2 id="today-work-title">
-                    {TODAY_WORK_TITLE}
+                    {signedIn ? TODAY_WORK_TITLE : '課程與作業'}
                     {signedIn ? <span>{todayTasks.length}</span> : null}
                   </h2>
                   {signedIn ? (
@@ -345,10 +345,6 @@ export default function HomePage() {
                       <Link className={styles.secondary} href="#public-services">
                         先瀏覽校園資訊
                       </Link>
-                    </div>
-                    <div className={styles.guestNote}>
-                      <span>教材 · 作業 · 測驗</span>
-                      加入課程，接續每一天的學習。
                     </div>
                   </div>
                 ) : todayTasks.length ? (

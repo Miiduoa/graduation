@@ -33,56 +33,13 @@ function Header() {
   const checking = loading || nuni.loading;
   return (
     <>
-      <header className={headerStyles.header}>
+      <header className={headerStyles.header} data-campus-navigation="true">
         <Link href={href('/')} className={headerStyles.brand} aria-label="Campus One">
           <span className={headerStyles.mark} aria-hidden>
             C<span>1</span>
           </span>
           <span className={headerStyles.wordmark}>Campus One</span>
         </Link>
-        <nav aria-label="主要導覽" className={headerStyles.nav}>
-          <Link href={href('/')} aria-current={pathname === '/' ? 'page' : undefined}>
-            <CampusIcon name="calendar" size={17} />
-            今天
-          </Link>
-          <Link
-            href={href('/timetable')}
-            aria-current={
-              pathname === '/timetable' ||
-              pathname === '/classroom' ||
-              pathname?.startsWith('/classroom/course/') ||
-              pathname?.startsWith('/course/') ||
-              pathname?.startsWith('/teacher/course/')
-                ? 'page'
-                : undefined
-            }
-          >
-            <CampusIcon name="library" size={17} />
-            課務
-          </Link>
-          <Link
-            href={href('/life')}
-            aria-current={
-              pathname === '/life' ||
-              pathname?.startsWith('/lost-found') ||
-              ['/map', '/bus', '/cafeteria', '/food', '/community', '/friends'].includes(
-                pathname || '',
-              )
-                ? 'page'
-                : undefined
-            }
-          >
-            <CampusIcon name="map" size={17} />
-            生活
-          </Link>
-          <Link
-            href={user || nuni.session ? '/profile' : '/login?returnUrl=%2Fprofile'}
-            aria-current={pathname === '/profile' || pathname === '/me' ? 'page' : undefined}
-          >
-            <CampusIcon name="profile" size={17} />我
-          </Link>
-          <CampusServiceMenu />
-        </nav>
         <div className={headerStyles.campus}>
           {pathname !== '/bus' && !pathname?.startsWith('/bus/') ? (
             <SchoolSelector compact variant="name" />
@@ -139,6 +96,49 @@ function Header() {
             </LoginLink>
           ) : null}
         </div>
+        <nav aria-label="主要導覽" className={headerStyles.nav}>
+          <Link href={href('/')} aria-current={pathname === '/' ? 'page' : undefined}>
+            <CampusIcon name="calendar" size={17} />
+            今天
+          </Link>
+          <Link
+            href={href('/timetable')}
+            aria-current={
+              pathname === '/timetable' ||
+              pathname === '/classroom' ||
+              pathname?.startsWith('/classroom/course/') ||
+              pathname?.startsWith('/course/') ||
+              pathname?.startsWith('/teacher/course/')
+                ? 'page'
+                : undefined
+            }
+          >
+            <CampusIcon name="library" size={17} />
+            課務
+          </Link>
+          <Link
+            href={href('/life')}
+            aria-current={
+              pathname === '/life' ||
+              pathname?.startsWith('/lost-found') ||
+              ['/map', '/bus', '/cafeteria', '/food', '/community', '/friends'].includes(
+                pathname || '',
+              )
+                ? 'page'
+                : undefined
+            }
+          >
+            <CampusIcon name="map" size={17} />
+            生活
+          </Link>
+          <Link
+            href={user || nuni.session ? '/profile' : '/login?returnUrl=%2Fprofile'}
+            aria-current={pathname === '/profile' || pathname === '/me' ? 'page' : undefined}
+          >
+            <CampusIcon name="profile" size={17} />我
+          </Link>
+          <CampusServiceMenu />
+        </nav>
       </header>
       {error && (
         <p role="alert" className={headerStyles.error}>
@@ -152,7 +152,7 @@ export function AppHeader() {
   return (
     <Suspense
       fallback={
-        <header className={headerStyles.header}>
+        <header className={headerStyles.header} data-campus-navigation="true">
           <Link href="/" className={headerStyles.brand} aria-label="Campus One">
             <span className={headerStyles.mark} aria-hidden="true">
               C<span>1</span>

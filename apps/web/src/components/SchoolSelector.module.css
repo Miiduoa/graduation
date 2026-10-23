@@ -101,16 +101,66 @@
 
 .popover {
   position: absolute;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
   z-index: 210;
   right: 0;
   top: calc(100% + 10px);
   width: min(360px, calc(100vw - 40px));
   max-height: 70dvh;
+  overflow: hidden;
+  box-shadow: var(--shadow-lg);
+  animation: reveal 180ms ease-out both;
+}
+
+.popoverHead {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px 12px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.popoverHead h2 {
+  margin: 0;
+  font-size: var(--font-h3-size);
+  font-weight: 600;
+}
+
+.popover .closeButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--bg);
+  cursor: pointer;
+}
+
+.popover .closeButton:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.popover > .content {
+  min-height: 0;
+  padding: 20px 24px 24px;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
-  box-shadow: 0 16px 48px color-mix(in srgb, var(--text) 12%, transparent);
-  animation: reveal 180ms ease-out both;
+}
+
+.content :is(input, select) {
+  min-height: 48px;
+  font-size: max(16px, var(--font-body-size));
 }
 
 .searchFeedback {
@@ -136,9 +186,17 @@
 }
 
 @media (max-width: 760px) {
-  .panel,
-  .popover {
+  .panel {
     padding: 20px;
+  }
+
+  .content {
+    gap: 14px;
+  }
+
+  .description,
+  .state {
+    font-size: var(--font-body-sm-size);
   }
 
   .compact {
@@ -146,9 +204,23 @@
   }
 
   .popover {
+    position: absolute;
     top: auto;
     right: 20px;
+    width: min(360px, calc(100vw - 40px));
     margin-top: 8px;
+    max-height: calc(
+      100dvh - var(--mobile-nav-offset, 72px) - env(safe-area-inset-top, 0px) - 88px
+    );
+    border-radius: 14px;
+  }
+
+  .popoverHead {
+    padding: 10px 12px 10px 20px;
+  }
+
+  .popover > .content {
+    padding: 18px 20px 20px;
   }
 }
 
@@ -156,11 +228,6 @@
   .compact summary {
     padding-left: 5px;
     font-size: 12px;
-  }
-
-  .popover {
-    right: 16px;
-    width: calc(100vw - 32px);
   }
 }
 
@@ -173,6 +240,11 @@
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+:global([data-reduced-motion='true']) .compact * {
+  animation: none !important;
+  transition: none !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

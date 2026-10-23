@@ -45,27 +45,29 @@ export default function LoginLandingScreen() {
             </Text>
           </View>
           <Text style={s.brand}>Campus One</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="開啟課程與作業"
+            onPress={() => safeNavigate(navigation, 'NuniWorkspace')}
+            style={({ pressed }) => [s.workspaceShortcut, pressed && s.rowPressed]}
+          >
+            <Text style={s.workspaceShortcutText}>課程與作業</Text>
+          </Pressable>
         </View>
         <View style={s.intro}>
           <Text style={s.school}>課程・校園・每天的事</Text>
           <Text accessibilityRole="header" style={s.heading}>
-            校園資訊，{'\n'}打開就能查看。
+            校園生活
           </Text>
           <Text style={s.body}>不必登入學校帳號，就能查看各校地圖、公車、圖書館與公開公告。</Text>
         </View>
         <SchoolBrowsingControl />
-        <TodayTimetablePanel
-          onOpenImport={() => safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })}
-          onOpenTimetable={(term) =>
-            safeNavigate(navigation, 'PersonalTimetable', term ? { term } : undefined)
-          }
-        />
         <View style={s.publicPanel}>
           <View style={s.sectionHeading}>
             <Text accessibilityRole="header" style={s.title}>
               先找需要的資訊
             </Text>
-            <Text style={s.sectionCaption}>校園生活</Text>
+            <Text style={s.sectionCaption}>公開資訊</Text>
           </View>
           {(
             [
@@ -104,6 +106,12 @@ export default function LoginLandingScreen() {
             </Pressable>
           ))}
         </View>
+        <TodayTimetablePanel
+          onOpenImport={() => safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })}
+          onOpenTimetable={(term) =>
+            safeNavigate(navigation, 'PersonalTimetable', term ? { term } : undefined)
+          }
+        />
         <View style={s.panel}>
           <Text accessibilityRole="header" style={s.title}>
             Google 帳號
@@ -169,7 +177,7 @@ const createStyles = () =>
       maxWidth: 640,
       alignSelf: 'center',
     },
-    brandRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    brandRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 9 },
     brandMark: {
       width: 34,
       height: 34,
@@ -184,10 +192,20 @@ const createStyles = () =>
       color: theme.colors.text,
       letterSpacing: -0.4,
       fontWeight: '700',
-      fontSize: 19,
+      fontSize: 17,
     },
-    intro: { paddingTop: 34, paddingBottom: 30 },
-    publicPanel: { marginTop: 12, marginBottom: 32 },
+    workspaceShortcut: {
+      marginLeft: 'auto',
+      paddingHorizontal: 10,
+      minHeight: 44,
+      justifyContent: 'center',
+      borderRadius: 7,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    workspaceShortcutText: { color: theme.colors.accent, fontSize: 12, fontWeight: '600' },
+    intro: { paddingTop: 24, paddingBottom: 24 },
+    publicPanel: { marginTop: 24, marginBottom: 8 },
     sectionHeading: {
       flexDirection: 'row',
       flexWrap: 'wrap',
@@ -200,11 +218,11 @@ const createStyles = () =>
     },
     sectionCaption: { color: theme.colors.muted, fontSize: 12 },
     publicButton: {
-      minHeight: 84,
+      minHeight: 76,
       flexDirection: 'row',
       alignItems: 'center',
       gap: 14,
-      paddingVertical: 18,
+      paddingVertical: 14,
       borderBottomWidth: 1,
       borderBottomColor: theme.colors.border,
     },
@@ -216,30 +234,31 @@ const createStyles = () =>
     },
     serviceCopy: { flex: 1, minWidth: 0 },
     serviceArrow: { color: theme.colors.accent, fontSize: 22 },
-    rowPressed: { backgroundColor: theme.colors.accentSoft },
-    buttonPressed: { opacity: 0.82 },
+    rowPressed: { backgroundColor: theme.colors.surfaceInteractive },
+    buttonPressed: { backgroundColor: theme.colors.accentHover },
     publicTitle: { color: theme.colors.text, fontSize: 16, fontWeight: '600', lineHeight: 23 },
     publicDetail: { color: theme.colors.muted, fontSize: 13, lineHeight: 21, marginTop: 4 },
     school: {
       color: theme.colors.textSecondary,
       fontSize: 12,
       letterSpacing: 0.5,
-      marginBottom: 14,
+      marginBottom: 10,
     },
     heading: {
       color: theme.colors.text,
-      fontSize: 34,
+      fontSize: 32,
       fontWeight: '600',
-      lineHeight: 47,
+      lineHeight: 42,
       letterSpacing: -0.6,
     },
-    body: { color: theme.colors.muted, fontSize: 14, lineHeight: 25, marginTop: 16 },
+    body: { color: theme.colors.muted, fontSize: 14, lineHeight: 24, marginTop: 12 },
     panel: {
       padding: 22,
       backgroundColor: theme.colors.focusSurface,
       borderColor: theme.colors.border,
       borderWidth: 1,
       borderRadius: 14,
+      marginTop: 10,
     },
     title: { color: theme.colors.text, fontSize: 18, lineHeight: 26, fontWeight: '600' },
     button: {

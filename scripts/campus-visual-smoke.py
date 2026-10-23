@@ -42,6 +42,31 @@ async def no_overflow(page):
     ), 'Page overflows horizontally'
 
 
+async def check_mobile_navigation(page):
+    navigation = page.get_by_role('navigation', name='主要導覽')
+    assert await navigation.evaluate('''el => {
+        const rect = el.getBoundingClientRect();
+        return getComputedStyle(el).position === 'fixed'
+            && Math.abs(rect.bottom - innerHeight) < 1;
+    }'''), 'Mobile navigation is not docked to the viewport'
+    footer = page.get_by_role('navigation', name='網站資訊').get_by_role('link', name='設定')
+    await footer.scroll_into_view_if_needed()
+    assert await footer.evaluate('''el => {
+        const navigation = document.querySelector('nav[aria-label="主要導覽"]');
+        return el.getBoundingClientRect().bottom <= navigation.getBoundingClientRect().top;
+    }'''), 'Bottom navigation covers the last footer action'
+
+
+async def check_oled(page):
+    assert await page.evaluate('''() => {
+        return getComputedStyle(document.body).backgroundColor === 'rgb(0, 0, 0)'
+            && getComputedStyle(document.documentElement).backgroundColor === 'rgb(0, 0, 0)';
+    }'''), 'Dark page background must be OLED black'
+    assert await page.locator('meta[name="theme-color"]').evaluate_all(
+        'metas => metas.length > 0 && metas.every(meta => meta.content === "#000000")'
+    ), 'Browser chrome does not match the OLED theme'
+
+
 async def main():
     results = []
     errors = []
@@ -69,6 +94,10 @@ async def main():
                 await expect(page.locator('time[aria-current="date"]')).to_have_count(1)
                 await no_overflow(page)
                 await page.screenshot(path=str(OUT / f'home-{label}.png'), full_page=True, animations='disabled')
+                if width == 390:
+                    await page.screenshot(path=str(OUT / 'home-mobile-viewport.png'), animations='disabled')
+                if width <= 760:
+                    await check_mobile_navigation(page)
                 results.append(f'home reflows at {width}px')
 
                 await page.goto(BASE + '/life?campus=pu', wait_until='networkidle')
@@ -76,13 +105,32 @@ async def main():
                 await expect(page.get_by_role('heading', name='常用查詢', exact=True)).to_be_visible()
                 await no_overflow(page)
                 await page.screenshot(path=str(OUT / f'life-{label}.png'), full_page=True, animations='disabled')
+                if width <= 760:
+                    await check_mobile_navigation(page)
                 results.append(f'life directory reflows at {width}px')
+            results.append('mobile bottom navigation leaves footer actions reachable')
+
+            search = page.get_by_role('searchbox', name='快速找服務')
+            await search.fill('借書')
+            await expect(page.locator('#life-service-results a')).to_have_count(1)
+            await expect(page.locator('#life-service-results a')).to_contain_text('圖書館')
+            await search.fill('找不到的服務')
+            await expect(page.get_by_role('heading', name='沒有找到符合的服務')).to_be_visible()
+            await page.get_by_role('button', name='顯示全部服務').click()
+            await expect(search).to_be_focused()
+            await expect(page.get_by_role('heading', name='常用查詢', exact=True)).to_be_visible()
+            await page.get_by_role('button', name='個人安排', exact=True).click()
+            await expect(page.locator('#life-service-results a')).to_have_count(1)
+            await expect(page.get_by_role('heading', name='報修 尚未開放')).to_be_visible()
+            await page.get_by_role('button', name='全部', exact=True).click()
+            results.append('service search, empty recovery and category filtering work on mobile')
 
             await page.set_viewport_size({'width': 390, 'height': 844})
             await page.goto(BASE + '/?campus=pu', wait_until='networkidle')
-            services = page.locator('header summary').filter(has_text='所有服務')
+            services = page.locator('header summary[aria-label="所有服務"]')
             await services.click()
             await expect(page.get_by_role('link', name='尋找校園服務')).to_be_visible()
+            await expect(page.get_by_role('button', name='關閉所有服務')).to_be_in_viewport()
             await no_overflow(page)
             await page.screenshot(path=str(OUT / 'mobile-services.png'), animations='disabled')
             await page.keyboard.press('Escape')
@@ -106,21 +154,52 @@ async def main():
                 await page.emulate_media(color_scheme='dark', reduced_motion='reduce')
                 await page.goto(BASE + route + '?campus=pu', wait_until='networkidle')
                 await expect(page.get_by_role('heading', name=heading, exact=True)).to_be_visible()
+                await check_oled(page)
                 await no_overflow(page)
                 name = 'home' if route == '/' else 'life'
                 await page.screenshot(path=str(OUT / f'{name}-dark.png'), full_page=True, animations='disabled')
-            results.append('home and life render in dark mode')
+                await page.screenshot(path=str(OUT / f'{name}-oled-mobile.png'), animations='disabled')
+            results.append('home and life use OLED black with matching browser chrome')
 
+            await page.set_viewport_size({'width': 1440, 'height': 1000})
+            await page.goto(BASE + '/?campus=pu', wait_until='networkidle')
+            await check_oled(page)
+            await page.screenshot(path=str(OUT / 'home-oled-desktop.png'), full_page=True, animations='disabled')
+            await page.set_viewport_size({'width': 390, 'height': 844})
+            await page.locator('header summary[aria-label="所有服務"]').click()
+            await page.screenshot(path=str(OUT / 'services-oled-mobile.png'), animations='disabled')
+            await page.get_by_role('button', name='關閉所有服務').click()
+
+            await page.emulate_media(color_scheme='light')
+            await page.evaluate('''() => localStorage.setItem('campus-web-preferences', JSON.stringify({
+                appearance: {theme: 'dark'}
+            }))''')
+            await page.goto(BASE + '/?campus=pu', wait_until='networkidle')
+            await check_oled(page)
+            for route in ['/bus?campus=pu', '/offline.html']:
+                await page.goto(BASE + route, wait_until='networkidle')
+                assert await page.locator('body').evaluate(
+                    'el => getComputedStyle(el).backgroundColor === "rgb(0, 0, 0)"'
+                ), f'{route} does not preserve the OLED background'
+                await no_overflow(page)
+            results.append('explicit dark preference stays black in light system mode, transit and offline pages')
+
+            await page.emulate_media(color_scheme='dark')
             await page.evaluate('''() => localStorage.setItem('campus-web-preferences', JSON.stringify({
                 appearance: {theme: 'light', fontSize: 'large', animations: false}
             }))''')
             await page.set_viewport_size({'width': 320, 'height': 844})
             await page.goto(BASE + '/?campus=pu', wait_until='networkidle')
             await expect(page.locator('html')).to_have_attribute('data-reduced-motion', 'true')
+            assert await page.locator('body').evaluate(
+                'el => getComputedStyle(el).backgroundColor === "rgb(248, 247, 243)"'
+            ), 'Explicit light theme must remain light'
             await no_overflow(page)
             await page.screenshot(path=str(OUT / 'home-large-text.png'), full_page=True, animations='disabled')
+            await check_mobile_navigation(page)
             await page.goto(BASE + '/life?campus=pu', wait_until='networkidle')
             await no_overflow(page)
+            await check_mobile_navigation(page)
             results.append('320px large-text preference has no overflow')
             assert not errors, errors
         except Exception:

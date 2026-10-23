@@ -1,6 +1,6 @@
 .header {
   position: relative;
-  z-index: 220;
+  z-index: 30;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto auto;
   grid-template-areas: 'brand navigation campus account';
@@ -252,19 +252,15 @@
   }
 }
 
-@media (max-width: 600px) {
+@media (max-width: 760px) {
   .header {
-    gap: 8px 10px;
-    padding: 12px 20px 8px;
+    grid-template-areas: 'brand campus account';
+    gap: 10px;
+    padding: calc(12px + env(safe-area-inset-top, 0px)) 20px 12px;
   }
 
   .wordmark {
     display: none;
-  }
-
-  .campus > details > div {
-    top: 60px;
-    margin-top: 0;
   }
 
   .campus {
@@ -273,24 +269,54 @@
     width: 100%;
   }
 
+  .campus > details > div {
+    position: fixed;
+    top: calc(76px + env(safe-area-inset-top, 0px));
+    left: max(12px, env(safe-area-inset-left, 0px));
+    right: max(12px, env(safe-area-inset-right, 0px));
+    width: auto;
+    margin-top: 0;
+  }
+
   .nav {
+    position: fixed;
+    z-index: 30;
+    inset: auto 0 0;
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(80px, 1.3fr);
-    gap: 3px;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    align-items: stretch;
+    gap: 4px;
+    height: var(--mobile-nav-offset, calc(72px + env(safe-area-inset-bottom, 0px)));
+    padding: 4px max(12px, env(safe-area-inset-right, 0px))
+      calc(4px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+    border-top: 1px solid var(--border);
+    background: var(--bg);
   }
 
   .nav > a {
     flex-direction: column;
     gap: 4px;
     min-width: 0;
-    min-height: 54px;
-    padding: 7px 2px 8px;
-    font-size: 12px;
-    line-height: 16px;
+    min-height: 56px;
+    height: 100%;
+    padding: 5px 2px 7px;
+    border-radius: 9px;
+    font-size: var(--font-label-size);
+    line-height: 1.2;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .nav > a > svg {
+    width: 22px;
+    height: 22px;
   }
 
   .nav > a[aria-current='page']::after {
-    bottom: 2px;
+    bottom: 3px;
+  }
+
+  .nav > a:active {
+    background: var(--panel);
   }
 
   .account {
@@ -321,6 +347,12 @@
   .account > a,
   .account > button {
     padding-inline: 7px;
+  }
+}
+
+@media print {
+  .nav {
+    display: none;
   }
 }
 

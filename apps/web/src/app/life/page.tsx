@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRef, useState } from 'react';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { buildCampusNavigationSearch, campusServiceHref } from '@/lib/campusNavigation';
 import { SiteShell } from '@/components/SiteShell';
@@ -15,6 +16,7 @@ type LifeService = {
   action: string;
   icon: CampusIconName;
   group: 'public' | 'community' | 'personal';
+  keywords: string;
 };
 
 const ITEMS: LifeService[] = [
@@ -25,6 +27,7 @@ const ITEMS: LifeService[] = [
     action: '找地點',
     icon: 'map',
     group: 'public',
+    keywords: '地點 教室 大樓 建築 行政 地圖 map classroom',
   },
   {
     href: '/bus',
@@ -33,6 +36,7 @@ const ITEMS: LifeService[] = [
     action: '查公車',
     icon: 'bus',
     group: 'public',
+    keywords: '搭車 交通 車站 車班 時刻表 巴士 bus transit',
   },
   {
     href: '/cafeteria',
@@ -41,6 +45,7 @@ const ITEMS: LifeService[] = [
     action: '看餐廳',
     icon: 'cafeteria',
     group: 'public',
+    keywords: '吃飯 午餐 晚餐 食堂 飲食 美食 menu food restaurant',
   },
   {
     href: '/library',
@@ -49,6 +54,7 @@ const ITEMS: LifeService[] = [
     action: '查館藏',
     icon: 'library',
     group: 'public',
+    keywords: '借書 還書 續借 找書 書籍 閱讀 library book',
   },
   {
     href: '/announcements',
@@ -57,6 +63,7 @@ const ITEMS: LifeService[] = [
     action: '看公告',
     icon: 'announcements',
     group: 'public',
+    keywords: '消息 通知 最新 校方 news announcement',
   },
   {
     href: '/lost-found',
@@ -65,6 +72,7 @@ const ITEMS: LifeService[] = [
     action: '找失物',
     icon: 'lost-found',
     group: 'community',
+    keywords: '遺失 拾獲 掉東西 撿到 尋物 lost found',
   },
   {
     href: '/orders',
@@ -73,6 +81,7 @@ const ITEMS: LifeService[] = [
     action: '查訂單',
     icon: 'orders',
     group: 'personal',
+    keywords: '取餐 餐點 進度 點餐 order pickup',
   },
   {
     href: '/social',
@@ -81,6 +90,7 @@ const ITEMS: LifeService[] = [
     action: '看公開看板',
     icon: 'social',
     group: 'community',
+    keywords: '社群 看板 文章 分享 social board',
   },
   {
     href: '/community',
@@ -89,6 +99,7 @@ const ITEMS: LifeService[] = [
     action: '看校內話題',
     icon: 'community',
     group: 'community',
+    keywords: '社群 校內 同校 討論 community',
   },
   {
     href: '/friends',
@@ -97,6 +108,7 @@ const ITEMS: LifeService[] = [
     action: '找同學',
     icon: 'friends',
     group: 'community',
+    keywords: '同學 好友 朋友 代號 friends people',
   },
   {
     href: '/timetable',
@@ -105,8 +117,36 @@ const ITEMS: LifeService[] = [
     action: '找共同空堂',
     icon: 'timetable',
     group: 'personal',
+    keywords: '課表 課程 時間 安排 約時間 timetable schedule',
   },
 ];
+
+const CATEGORIES = [
+  { value: 'all', label: '全部' },
+  { value: 'public', label: '免登入' },
+  { value: 'community', label: '交流與互助' },
+  { value: 'personal', label: '個人安排' },
+] as const;
+
+type ServiceCategory = (typeof CATEGORIES)[number]['value'];
+
+function normalizeSearch(value: string) {
+  return value.normalize('NFKC').toLowerCase().trim();
+}
+
+function RepairNotice() {
+  return (
+    <aside className={styles.repair} aria-labelledby="repair-title">
+      <CampusIcon name="repair" size={22} />
+      <div>
+        <h3 id="repair-title">
+          報修 <span>尚未開放</span>
+        </h3>
+        <p>報修還沒開，有問題先找系辦或總務處。</p>
+      </div>
+    </aside>
+  );
+}
 
 function ServiceLink({ item, href }: { item: LifeService; href: string }) {
   return (
@@ -119,7 +159,7 @@ function ServiceLink({ item, href }: { item: LifeService; href: string }) {
         <p>{item.text}</p>
       </div>
       <span className={styles.action}>
-        {item.action}
+        <span className={styles.actionText}>{item.action}</span>
         <CampusIcon name="arrow" size={18} />
       </span>
     </Link>
@@ -127,6 +167,9 @@ function ServiceLink({ item, href }: { item: LifeService; href: string }) {
 }
 
 export default function LifePage() {
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState<ServiceCategory>('all');
+  const searchInput = useRef<HTMLInputElement>(null);
   const selection = useOptionalSelectedSchool();
   const scope = buildCampusNavigationSearch(
     null,
@@ -134,66 +177,173 @@ export default function LifePage() {
     Boolean(selection && !selection.loading && selection.catalogStatus === 'ready'),
   );
   const items = ITEMS.filter((item) => item.href !== '/orders' || isWebOnlineOrderingEnabled());
+  const terms = normalizeSearch(query).split(/\s+/).filter(Boolean);
+  const filtered = terms.length > 0 || category !== 'all';
+  const matches = items.filter((item) => {
+    if (category !== 'all' && item.group !== category) return false;
+    const content = normalizeSearch(
+      `${item.title} ${item.text} ${item.action} ${item.keywords} ${item.group === 'public' ? '免登入 不需登入 訪客' : ''}`,
+    );
+    return terms.every((term) => content.includes(term));
+  });
+  const showRepair =
+    (category === 'all' || category === 'personal') &&
+    terms.every((term) => normalizeSearch('報修 維修 設備 壞了 系辦 總務處 repair').includes(term));
+  const resetFilters = () => {
+    setQuery('');
+    setCategory('all');
+    searchInput.current?.focus();
+  };
+
   return (
     <SiteShell title="生活" subtitle="找教室、搭公車、查館藏，先選你要做的事。">
-      <div className={styles.directory}>
-        <section aria-labelledby="public-service-title">
-          <div className={styles.sectionHeading}>
-            <h2 id="public-service-title">常用查詢</h2>
-            <span className={styles.accessNote}>不需登入</span>
+      <div className={styles.finder}>
+        <form role="search" aria-label="校園服務搜尋" onSubmit={(event) => event.preventDefault()}>
+          <label className={styles.searchLabel} htmlFor="life-service-search">
+            快速找服務
+          </label>
+          <div className={styles.searchField}>
+            <CampusIcon name="search" size={21} />
+            <input
+              ref={searchInput}
+              id="life-service-search"
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape' && !event.nativeEvent.isComposing && query) {
+                  event.preventDefault();
+                  setQuery('');
+                }
+              }}
+              placeholder="借書、教室、公車…"
+              autoComplete="off"
+              enterKeyHint="search"
+              maxLength={80}
+              aria-describedby="life-search-hint"
+              aria-controls="life-service-results"
+            />
+            {query && (
+              <button
+                type="button"
+                className={styles.clearSearch}
+                onClick={() => {
+                  setQuery('');
+                  searchInput.current?.focus();
+                }}
+                aria-label="清除搜尋"
+              >
+                清除
+              </button>
+            )}
           </div>
-          <ul className={styles.publicGrid}>
-            {items
-              .filter((item) => item.group === 'public')
-              .map((item) => (
-                <li key={item.href}>
-                  <ServiceLink item={item} href={campusServiceHref(item.href, scope)} />
-                </li>
-              ))}
-          </ul>
-        </section>
-
-        <div className={styles.secondarySections}>
-          <section aria-labelledby="community-service-title">
-            <div className={styles.sectionHeading}>
-              <h2 id="community-service-title">交流與互助</h2>
-              <span className={styles.sectionDetail}>與同學保持聯繫</span>
-            </div>
-            <ul className={styles.serviceList}>
-              {items
-                .filter((item) => item.group === 'community')
-                .map((item) => (
-                  <li key={item.href}>
-                    <ServiceLink item={item} href={campusServiceHref(item.href, scope)} />
-                  </li>
-                ))}
-            </ul>
-          </section>
-
-          <section aria-labelledby="personal-service-title">
-            <div className={styles.sectionHeading}>
-              <h2 id="personal-service-title">個人安排</h2>
-            </div>
-            <ul className={styles.serviceList}>
-              {items
-                .filter((item) => item.group === 'personal')
-                .map((item) => (
-                  <li key={item.href}>
-                    <ServiceLink item={item} href={campusServiceHref(item.href, scope)} />
-                  </li>
-                ))}
-            </ul>
-            <aside className={styles.repair} aria-labelledby="repair-title">
-              <CampusIcon name="repair" size={22} />
-              <div>
-                <h3 id="repair-title">
-                  報修 <span>尚未開放</span>
-                </h3>
-                <p>報修還沒開，有問題先找系辦或總務處。</p>
-              </div>
-            </aside>
-          </section>
+          <p id="life-search-hint" className={styles.searchHint}>
+            搜尋服務名稱或想做的事。
+          </p>
+        </form>
+        <div className={styles.filterBar}>
+          <div className={styles.categories} role="group" aria-label="服務分類">
+            {CATEGORIES.map((entry) => (
+              <button
+                key={entry.value}
+                type="button"
+                aria-pressed={category === entry.value}
+                aria-controls="life-service-results"
+                onClick={() => setCategory(entry.value)}
+              >
+                {entry.label}
+              </button>
+            ))}
+          </div>
+          <p className={styles.resultCount} role="status" aria-live="polite" aria-atomic="true">
+            {filtered ? '找到' : '共'} {matches.length} 項服務
+            {filtered && showRepair ? '，報修尚未開放' : ''}
+          </p>
         </div>
+      </div>
+      <div id="life-service-results">
+        {filtered ? (
+          <section aria-labelledby="service-results-title" className={styles.results}>
+            <div className={styles.sectionHeading}>
+              <h2 id="service-results-title">
+                {terms.length
+                  ? '搜尋結果'
+                  : CATEGORIES.find((entry) => entry.value === category)?.label}
+              </h2>
+              <button type="button" className={styles.resetFilters} onClick={resetFilters}>
+                顯示全部服務
+              </button>
+            </div>
+            {matches.length ? (
+              <ul className={styles.serviceList}>
+                {matches.map((item) => (
+                  <li key={item.href}>
+                    <ServiceLink item={item} href={campusServiceHref(item.href, scope)} />
+                  </li>
+                ))}
+              </ul>
+            ) : !showRepair ? (
+              <div className={styles.emptyResults}>
+                <CampusIcon name="search" size={26} />
+                <h3>沒有找到符合的服務</h3>
+                <p>試試「借書」「搭車」，或切換上方分類。</p>
+              </div>
+            ) : null}
+            {showRepair && <RepairNotice />}
+          </section>
+        ) : (
+          <div className={styles.directory}>
+            <section aria-labelledby="public-service-title">
+              <div className={styles.sectionHeading}>
+                <h2 id="public-service-title">常用查詢</h2>
+                <span className={styles.accessNote}>不需登入</span>
+              </div>
+              <ul className={styles.publicGrid}>
+                {items
+                  .filter((item) => item.group === 'public')
+                  .map((item) => (
+                    <li key={item.href}>
+                      <ServiceLink item={item} href={campusServiceHref(item.href, scope)} />
+                    </li>
+                  ))}
+              </ul>
+            </section>
+
+            <div className={styles.secondarySections}>
+              <section aria-labelledby="community-service-title">
+                <div className={styles.sectionHeading}>
+                  <h2 id="community-service-title">交流與互助</h2>
+                  <span className={styles.sectionDetail}>與同學保持聯繫</span>
+                </div>
+                <ul className={styles.serviceList}>
+                  {items
+                    .filter((item) => item.group === 'community')
+                    .map((item) => (
+                      <li key={item.href}>
+                        <ServiceLink item={item} href={campusServiceHref(item.href, scope)} />
+                      </li>
+                    ))}
+                </ul>
+              </section>
+
+              <section aria-labelledby="personal-service-title">
+                <div className={styles.sectionHeading}>
+                  <h2 id="personal-service-title">個人安排</h2>
+                </div>
+                <ul className={styles.serviceList}>
+                  {items
+                    .filter((item) => item.group === 'personal')
+                    .map((item) => (
+                      <li key={item.href}>
+                        <ServiceLink item={item} href={campusServiceHref(item.href, scope)} />
+                      </li>
+                    ))}
+                </ul>
+                <RepairNotice />
+              </section>
+            </div>
+          </div>
+        )}
       </div>
     </SiteShell>
   );
