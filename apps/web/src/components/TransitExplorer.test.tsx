@@ -31,6 +31,7 @@ beforeEach(() => {
   localStorage.clear();
   Element.prototype.scrollIntoView = vi.fn();
   vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
+  vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
   vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
   vi.stubGlobal('isSecureContext', true);
@@ -460,12 +461,12 @@ it('scrolls arrival results into view as soon as a stop is selected', async () =
   renderListing();
   fireEvent.click(await findGroupButton('校門口・往沙鹿'));
   const pane = await screen.findByTestId('stop-arrivals-pane');
-  expect(window.scrollBy).toHaveBeenCalled();
+  expect(window.scrollTo).toHaveBeenCalled();
   expect(document.activeElement).toBe(pane);
   expect(await screen.findByText(/正在取得這個站牌的班次|目前沒有班次預估/)).toBeTruthy();
 });
 
-it('scrolls the opened route panel into view instead of leaving it below the fold', async () => {
+it('scrolls the opened route and destination below the sticky stop line', async () => {
   const now = new Date().toISOString();
   vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next' ? {
     status: 'ready', kind: 'arrivals', fetchedAt: now,
@@ -478,11 +479,75 @@ it('scrolls the opened route panel into view instead of leaving it below the fol
   } : emptyArrivals());
   renderExplorer();
   const row = await screen.findByRole('button', { name: '162 往 沙鹿火車站 3 分' });
-  vi.mocked(window.scrollBy).mockClear();
+  vi.mocked(window.scrollTo).mockClear();
   fireEvent.click(row);
   expect(row.getAttribute('aria-expanded')).toBe('true');
   expect(screen.getByTestId('opened-route-panel')).toBeTruthy();
-  expect(window.scrollBy).toHaveBeenCalled();
+  expect(screen.getByTestId('campus-arrival-block').contains(screen.getByTestId('opened-route-panel'))).toBe(true);
+  expect(window.scrollTo).toHaveBeenCalled();
+  expect(screen.getByTestId('campus-approach').getAttribute('data-sticky-cover')).toBe('true');
+  expect(document.querySelector('[data-campus-segments="true"]')?.getAttribute('data-sticky-cover')).toBe('true');
+});
+
+it('keeps the stop heading in view after arrivals load', async () => {
+  let finish!: (result: TransitResult) => void;
+  vi.mocked(queryTransit).mockImplementation(async (query) => {
+    if (query.action === 'campus-next') return { status: 'ready', kind: 'arrivals', arrivals: [], fetchedAt: new Date().toISOString() };
+    if (query.action !== 'arrivals') return stopResult();
+    return new Promise((resolve) => { finish = resolve; });
+  });
+  renderListing();
+  fireEvent.click(await findGroupButton('校門口・往沙鹿'));
+  const pane = await screen.findByTestId('stop-arrivals-pane');
+  expect(pane.querySelector('#transit-arrivals-title')?.textContent).toBe('校門口・往沙鹿');
+  vi.mocked(window.scrollTo).mockClear();
+  await act(async () => finish({
+    status: 'ready', kind: 'arrivals', fetchedAt: new Date().toISOString(),
+    arrivals: [{
+      id: '162', route: '162', direction: 1, destination: '沙鹿火車站',
+      status: 0, seconds: 180, updatedAt: new Date().toISOString(), stopName: '靜宜大學(英才路)',
+    }],
+  }));
+  expect(await screen.findByText('下一班')).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '校門口・往沙鹿' })).toBeTruthy();
+  expect(window.scrollTo).toHaveBeenCalled();
+});
+
+it('reveals 靜宜大學(校門) heading after searching a stop name', async () => {
+  let finish!: (result: TransitResult) => void;
+  vi.mocked(queryTransit).mockImplementation(async (query) => {
+    if (query.action === 'campus-next') return { status: 'ready', kind: 'arrivals', arrivals: [], fetchedAt: new Date().toISOString() };
+    if (query.action === 'search') {
+      return {
+        status: 'ready', kind: 'stops', limited: false, fetchedAt: new Date().toISOString(),
+        stops: [
+          { id: 'TXG11711', name: '靜宜大學', city: 'Taichung', lat: 24.22497, lon: 120.57703, distance: null },
+          { id: 'TXG20091', name: '靜宜大學(校門)', city: 'Taichung', lat: 24.2253, lon: 120.5778, distance: null },
+        ],
+      };
+    }
+    if (query.action === 'arrivals' && query.stopId === 'TXG20091') {
+      return new Promise((resolve) => { finish = resolve; });
+    }
+    return emptyArrivals();
+  });
+  renderExplorer();
+  fireEvent.click(await screen.findByRole('button', { name: '搜尋站名' }));
+  fireEvent.change(screen.getByLabelText('站名或學校名稱'), { target: { value: '靜宜大學' } });
+  fireEvent.click(screen.getByRole('button', { name: '尋找站牌' }));
+  fireEvent.click(await screen.findByRole('button', { name: compactName('02 靜宜大學(校門) 臺中市') }));
+  expect((await screen.findByTestId('stop-arrivals-pane')).querySelector('#transit-arrivals-title')?.textContent).toBe('靜宜大學(校門)');
+  vi.mocked(window.scrollTo).mockClear();
+  await act(async () => finish({
+    status: 'ready', kind: 'arrivals', fetchedAt: new Date().toISOString(),
+    arrivals: [{
+      id: '301', route: '301', direction: 1, destination: '嘉陽高中',
+      status: 0, seconds: 120, updatedAt: new Date().toISOString(),
+    }],
+  }));
+  expect(await screen.findByText('下一班')).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '靜宜大學(校門)' })).toBeTruthy();
+  expect(window.scrollTo).toHaveBeenCalled();
 });
 
 it('abort and selection identity prevent an old station response from replacing the current one', async () => {
@@ -672,6 +737,10 @@ it('keeps long route badges on one line and fits the stop-mode bar on a 350px bo
   expect(css).toMatch(/\.rowCopy strong \{[^}]*text-overflow: ellipsis;/);
   expect(css).not.toMatch(/\.rowCopy strong \{[^}]*overflow-wrap: anywhere;/);
   expect(css).toMatch(/\.arrivals \{[^}]*scroll-margin-top: 24px;/);
+  expect(css).toMatch(/\.arrivals \{[^}]*overflow-anchor: none;/);
+  expect(css).toMatch(/\.arrivalBlock \{[^}]*scroll-margin-top: 24px;/);
+  expect(css).toMatch(/\.approach \{[^}]*position: sticky;/);
+  expect(css).toMatch(/\.approach \{[^}]*top: 44px;/);
 });
 
 describe('static catalog stops', () => {

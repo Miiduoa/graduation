@@ -42,9 +42,9 @@ export function CampusArrivalRow(props: {
   onSelect?: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const panel = useRef<HTMLDivElement>(null);
+  const block = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (open) revealStopResult(panel.current);
+    if (open) revealStopResult(block.current);
   }, [open]);
   const view = campusEtaView(props.row.arrival, props.now);
   const heading = campusHeadingText(props.row);
@@ -55,7 +55,7 @@ export function CampusArrivalRow(props: {
   const wait = stopName ? waitingPlaceLine(stopName) : '';
   const label = campusArrivalA11yLabel(props.row, props.now);
   return (
-    <div>
+    <div ref={block} className={css.arrivalBlock} data-testid="campus-arrival-block">
       <button
         type="button"
         className={`${css.arrivalRow}${ended ? ` ${css.arrivalRowEnded}` : ''}`}
@@ -75,7 +75,7 @@ export function CampusArrivalRow(props: {
         <Eta view={view} />
       </button>
       {open ? (
-        <div ref={panel} className={css.rowPanel} data-testid="opened-route-panel">
+        <div className={css.rowPanel} data-testid="opened-route-panel">
           {destination ? <p>終點 {destination}</p> : <p>終點未提供</p>}
           {wait ? <p>{wait}</p> : null}
         </div>

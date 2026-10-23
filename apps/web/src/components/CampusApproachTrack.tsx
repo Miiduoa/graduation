@@ -28,6 +28,7 @@ export function CampusApproachTrack(props: { model: CampusApproachModel }) {
     <section
       className={css.approach}
       data-testid="campus-approach"
+      data-sticky-cover="true"
       data-status={model.status}
       aria-label={model.a11y}
     >

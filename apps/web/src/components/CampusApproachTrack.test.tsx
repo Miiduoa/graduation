@@ -34,6 +34,7 @@ it('renders the live bus on the stop line and speaks remaining stops', () => {
   expect(screen.getByText('你在這裡')).toBeTruthy();
   expect(screen.getByText('英才路')).toBeTruthy();
   expect(screen.getByTestId('campus-approach-bus')).toBeTruthy();
+  expect(track.getAttribute('data-sticky-cover')).toBe('true');
 });
 
 it('calls arriving buses 進站中 and keeps the icon on the waiting stop', () => {

@@ -161,7 +161,7 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
           <RefreshIcon />
         </button>
       </header>
-      <div className={css.segmentWrap} ref={(node) => { if (node) node.dataset.campusSegments = 'true'; }}>
+      <div className={css.segmentWrap} data-campus-segments="true" data-sticky-cover="true">
         <div className={css.segmentBar} role="tablist" aria-label="站牌方向">
           {CAMPUS_SEGMENTS.map((item) => (
             <button
