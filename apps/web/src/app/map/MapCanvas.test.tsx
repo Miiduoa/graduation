@@ -90,13 +90,19 @@ it('requests retina tiles and invalidates size after the map is created', async 
   const invalidateSize = vi.spyOn(L.Map.prototype, 'invalidateSize');
   render(<MapCanvas locations={[library]} selected={null} route={null} onSelect={vi.fn()} />);
   await waitFor(() => expect(vi.mocked(L.map)).toHaveBeenCalled());
+  expect(vi.mocked(L.map).mock.calls.at(-1)?.[1]).toMatchObject({ fadeAnimation: false });
   const map = vi.mocked(L.map).mock.results.at(-1)!.value as L.Map;
   let tiles: L.TileLayer | undefined;
   map.eachLayer((layer) => {
     if (layer instanceof L.TileLayer) tiles = layer;
   });
   expect(tiles?.options.detectRetina).toBe(true);
+  expect(tiles?.options.maxNativeZoom).toBe(19);
+  expect(tiles?.options.maxZoom).toBe(19);
   expect(invalidateSize).toHaveBeenCalled();
+  expect(screen.getByRole('region', { name: '校園地點地圖' }).getAttribute('data-map-canvas')).toBe(
+    'true',
+  );
 });
 
 it('keeps the location list usable when tiles fail and recreates the map on retry', async () => {

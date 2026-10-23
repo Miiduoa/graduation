@@ -29,14 +29,19 @@ export default function MapCanvas({
     if (!container) return;
     let active = true;
     let map: LeafletMap | null = null;
+    let resize: ResizeObserver | null = null;
     void import('leaflet')
       .then((L) => {
         if (!active) return;
-        map = L.map(container, { zoomControl: false });
+        map = L.map(container, { zoomControl: false, fadeAnimation: false });
         L.control.zoom({ zoomInTitle: '放大地圖', zoomOutTitle: '縮小地圖' }).addTo(map);
+        // OSM raster is free and keyless. detectRetina loads z+1 tiles at 2x.
+        // 3x screens still only get 2x bitmaps; a sharp vector layer would need a
+        // new engine (for example OpenFreeMap + MapLibre) rather than a paid key.
         const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
           attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
           maxZoom: 19,
+          maxNativeZoom: 19,
           detectRetina: true,
         });
         tiles.on('tileerror', () => {
@@ -44,6 +49,12 @@ export default function MapCanvas({
         });
         tiles.addTo(map);
         map.invalidateSize();
+        if (typeof ResizeObserver !== 'undefined') {
+          resize = new ResizeObserver(() => {
+            map?.invalidateSize();
+          });
+          resize.observe(container);
+        }
         setRuntime({ map, L });
       })
       .catch(() => {
@@ -51,6 +62,7 @@ export default function MapCanvas({
       });
     return () => {
       active = false;
+      resize?.disconnect();
       map?.remove();
     };
   }, [container, attempt]);
@@ -128,7 +140,13 @@ export default function MapCanvas({
 
   return (
     <div className={styles.mapFrame}>
-      <div ref={setContainer} className={styles.map} role="region" aria-label="校園地點地圖" />
+      <div
+        ref={setContainer}
+        className={styles.map}
+        role="region"
+        aria-label="校園地點地圖"
+        data-map-canvas="true"
+      />
       {error && (
         <div className={styles.mapNotice} role="status">
           <p>底圖暫時無法載入。仍可使用下方地點列表與步行導航。</p>

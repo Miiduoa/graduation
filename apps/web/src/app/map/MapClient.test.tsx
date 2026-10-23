@@ -457,12 +457,24 @@ it('lets visitors compare mapped Providence points with the official campus plan
   expect(await screen.findByRole('link', { name: '校方校區平面圖' })).toBeTruthy();
 });
 
-it('puts the map above the source card so the campus is on the first screen', async () => {
+it('puts search then the map on the first screen, with source collapsed below', async () => {
   vi.mocked(loadMapLocations).mockResolvedValue([]);
   render(<MapClient school="pu" />);
-  const map = await screen.findByLabelText('地圖狀態');
+  const root = await screen.findByLabelText('地圖狀態');
+  expect(root.closest('[data-map-first-screen="true"]')).toBeTruthy();
+  const search = screen.getByRole('searchbox', { name: '搜尋地點' });
+  const locate = screen.getByRole('button', { name: '查看我的位置' });
   const source = screen.getByRole('region', { name: '地圖資料來源' });
-  expect(map.compareDocumentPosition(source) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const categories = screen.getByLabelText('地點分類');
+  expect(search.compareDocumentPosition(root) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(locate.compareDocumentPosition(root) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(root.compareDocumentPosition(source) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(source.compareDocumentPosition(categories) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const details = source.querySelector('details');
+  expect(details).toBeTruthy();
+  expect(details?.open).toBe(false);
+  expect(screen.getByText('靜宜地圖資料來源與步行分鐘算法')).toBeTruthy();
+  expect(screen.getByText(/OpenStreetMap 貢獻者資料/)).toBeTruthy();
 });
 
 it('finds verified dorm, restroom and print places without guessed pins', async () => {
