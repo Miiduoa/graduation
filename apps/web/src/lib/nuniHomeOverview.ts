@@ -18,10 +18,13 @@ export async function loadNuniHomeData(
   const tasks: HomeTask[] = [];
   // Bound requests when an account belongs to many courses. A failed course read
   // rejects the overview so an incomplete list never claims all work is done.
+  // Four at a time keeps the home first screen inside a couple of seconds for a
+  // typical student without opening every course in one burst.
   const studying = courses.filter((course) => course.role === 'student');
-  for (let start = 0; start < studying.length; start += 2) {
+  const batchSize = 4;
+  for (let start = 0; start < studying.length; start += batchSize) {
     const batch = await Promise.all(
-      studying.slice(start, start + 2).map(async (course) => {
+      studying.slice(start, start + batchSize).map(async (course) => {
         const [assignments, quizzes] = await Promise.all([
           classes.assignments(course.id),
           classes.quizzes(course.id),

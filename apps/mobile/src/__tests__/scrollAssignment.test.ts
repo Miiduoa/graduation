@@ -10,11 +10,11 @@ function node(
   };
 }
 
-test('scrolls the submit area to the top of the course list', () => {
+test('scrolls the submit area below a top gap instead of flushing it to the edge', () => {
   const scroll = node(80);
   const target = node(520);
   revealAssignmentSubmitArea(scroll, target);
-  expect(scroll.scrollTo).toHaveBeenCalledWith({ y: 440, animated: false });
+  expect(scroll.scrollTo).toHaveBeenCalledWith({ y: 392, animated: false });
 });
 
 test('does not scroll above the top of the list', () => {

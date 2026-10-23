@@ -171,9 +171,37 @@ it('keeps the linked course assignment and query when using the header login', (
   expect(new URL(login.href).searchParams.get('returnUrl')).toBe(nextDestination);
 });
 
+it('does not stack the school course hash when the header 登入 link is used', () => {
+  navigation.pathname = '/course/cs101';
+  window.history.replaceState({}, '', '/course/cs101#assignment-hw-3#assignment-hw-3');
+  render(<AppHeader />);
+  const login = screen.getByRole('link', { name: '登入' });
+  expect(login.getAttribute('href')).toBe(
+    '/login?returnUrl=%2Fcourse%2Fcs101%23assignment-hw-3#',
+  );
+  const assign = vi.fn();
+  vi.stubGlobal('location', {
+    ...window.location,
+    pathname: '/course/cs101',
+    search: '',
+    hash: '#assignment-hw-3#assignment-hw-3',
+    assign,
+  });
+  try {
+    fireEvent.click(login);
+    expect(assign).toHaveBeenCalledOnce();
+    expect(assign).toHaveBeenCalledWith('/login?returnUrl=%2Fcourse%2Fcs101%23assignment-hw-3#');
+    expect(String(assign.mock.calls[0][0]).includes('#assignment-hw-3#assignment-hw-3')).toBe(
+      false,
+    );
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
 it('closes on Escape and returns keyboard focus to the service control', () => {
   render(<CampusServiceMenu />);
-  const summary = screen.getByText('所有服務');
+  const summary = screen.getByText('所有服務').closest('summary')!;
   const menu = summary.closest('details')!;
   menu.open = true;
   const link = screen.getByRole('link', { name: '課表' });
@@ -205,7 +233,7 @@ it('closes after choosing the current service and when keyboard focus leaves', (
   fireEvent.click(screen.getByRole('link', { name: '校園地圖' }));
   expect(menu.open).toBe(false);
   menu.open = true;
-  fireEvent.blur(menu, { relatedTarget: screen.getByRole('button') });
+  fireEvent.blur(menu, { relatedTarget: screen.getByRole('button', { name: '下一個控制項' }) });
   expect(menu.open).toBe(false);
 });
 
@@ -232,4 +260,15 @@ it('selects only the specific account service and closes its overview link on th
   menu.open = true;
   fireEvent.click(screen.getByRole('link', { name: /尋找校園服務/ }));
   expect(menu.open).toBe(false);
+});
+
+it('closes from the touch control and restores focus to the service disclosure', () => {
+  render(<CampusServiceMenu />);
+  const summary = screen.getByText('所有服務').closest('summary')!;
+  const menu = summary.closest('details')!;
+  menu.open = true;
+  expect(summary.getAttribute('aria-label')).toBe('所有服務');
+  fireEvent.click(screen.getByRole('button', { name: '關閉所有服務' }));
+  expect(menu.open).toBe(false);
+  expect(document.activeElement).toBe(summary);
 });

@@ -11,3 +11,5 @@ rehearsal-work/
 receipts/
 *.receipt.json
 *.log
+
+__pycache__/

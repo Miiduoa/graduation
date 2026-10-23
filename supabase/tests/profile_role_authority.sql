@@ -11,6 +11,8 @@ update public.profiles set role = 'admin' where id = 'a8000000-0000-4000-8000-00
 delete from public.profiles where id = 'a8000000-0000-4000-8000-000000000003';
 
 -- Deliberately permissive test-only policies prove the trigger protects the role column itself.
+-- Production clients only SELECT/UPDATE profiles; this grant rolls back with the test.
+grant insert on public.profiles to authenticated;
 create policy profile_role_test_insert on public.profiles for insert to authenticated with check (id = auth.uid());
 create policy profile_role_test_admin_update on public.profiles for update to authenticated
   using (public.is_platform_admin()) with check (public.is_platform_admin());

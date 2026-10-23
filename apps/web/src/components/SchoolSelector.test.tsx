@@ -7,10 +7,22 @@ const { selection } = vi.hoisted(() => {
     { id: 'pu', name: '靜宜大學', shortName: '靜宜', code: 'PU', status: 'open' },
     { id: 'ntu', name: '國立臺灣大學', shortName: '臺大', code: 'NTU', status: 'not-open' },
   ];
-  return { selection: { schools, selectedSchool: schools[0], selectedSchoolId: 'pu', selectSchool: vi.fn(), loading: false, catalogStatus: 'ready', selectionError: null } };
+  return {
+    selection: {
+      schools,
+      selectedSchool: schools[0],
+      selectedSchoolId: 'pu',
+      selectSchool: vi.fn(),
+      loading: false,
+      catalogStatus: 'ready',
+      selectionError: null,
+    },
+  };
 });
 vi.mock('./SelectedSchoolProvider', () => ({ useSelectedSchool: () => selection }));
-beforeEach(() => { selection.selectSchool.mockClear(); });
+beforeEach(() => {
+  selection.selectSchool.mockClear();
+});
 
 describe('school selector usability', () => {
   it('supports full-width input and reports the number of actual matches', () => {
@@ -46,7 +58,12 @@ describe('school selector usability', () => {
     expect(document.activeElement).toBe(details.querySelector('summary'));
   });
   it('closes when keyboard focus leaves without stealing that focus', () => {
-    const { container } = render(<><SchoolSelector compact /><button>下一個操作</button></>);
+    const { container } = render(
+      <>
+        <SchoolSelector compact />
+        <button>下一個操作</button>
+      </>,
+    );
     const details = container.querySelector('details')!;
     details.open = true;
     const next = screen.getByRole('button', { name: '下一個操作' });
@@ -65,4 +82,14 @@ describe('school selector usability', () => {
     expect(details.open).toBe(false);
     expect(document.activeElement).toBe(details.querySelector('summary'));
   });
+});
+
+it('closes the school picker without changing the selected school', () => {
+  const { container } = render(<SchoolSelector compact />);
+  const details = container.querySelector('details')!;
+  details.open = true;
+  fireEvent.click(screen.getByRole('button', { name: '關閉校園選擇' }));
+  expect(details.open).toBe(false);
+  expect(selection.selectSchool).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(details.querySelector('summary'));
 });

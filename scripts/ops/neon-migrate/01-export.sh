@@ -27,8 +27,7 @@ printf '寫入目錄：%s\n' "$DUMP_DIR"
 #    --no-owner 對 custom 格式會被忽略，還原時 02-import.sh 仍會帶 --no-owner。
 #    權限另存 inventory，還原後由 02-import.sh 只套用應用程式角色。
 #    custom 格式會帶 sequence 目前值、extension、函式、觸發器。
-pg_dump \
-  --dbname="$SOURCE_DATABASE_URL" \
+postgres_url "$SOURCE_DATABASE_URL" pg_dump \
   --format=custom \
   --compress=9 \
   --encoding=UTF8 \
@@ -39,8 +38,7 @@ pg_dump \
   2>"$DUMP_DIR/pg_dump.log"
 
 # 2) 純文字 schema 備份（不含資料、不含密鑰），方便人工 diff。
-pg_dump \
-  --dbname="$SOURCE_DATABASE_URL" \
+postgres_url "$SOURCE_DATABASE_URL" pg_dump \
   --format=plain \
   --schema-only \
   --no-owner \
@@ -129,6 +127,8 @@ SELECT n.nspname, c.relname, r.rolname, a.privilege_type
  ORDER BY 1,2,3,4
 " >"$DUMP_DIR/inventory/table_grants.tsv"
 
+psql_url "$SOURCE_DATABASE_URL" -At -F $'\t' --file ./public-acl.sql >"$DUMP_DIR/inventory/public_acl.tsv"
+
 psql_url "$SOURCE_DATABASE_URL" -At --file ./render-grants.sql \
   >"$DUMP_DIR/inventory/grants.sql"
 
@@ -137,7 +137,7 @@ import hashlib, pathlib, json, sys
 dump_dir = pathlib.Path(sys.argv[1])
 payload = {"files": {}}
 for path in sorted(dump_dir.rglob("*")):
-    if path.is_file():
+    if path.is_file() and path.name != "manifest.json":
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         rel = str(path.relative_to(dump_dir))
         payload["files"][rel] = {"sha256": digest, "bytes": path.stat().st_size}

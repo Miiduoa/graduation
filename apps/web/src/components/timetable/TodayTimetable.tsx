@@ -6,9 +6,11 @@ import { buildPersonalToday, type PersonalImportRecord } from '@campus/shared';
 import { usePersonalImportScope, usePersonalImports } from '@/lib/usePersonalImports';
 import { useAuth } from '@/components/AuthGuard';
 import { SchoolSelector } from '@/components/SchoolSelector';
+import { CampusIcon } from '@/components/CampusIcon';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { useOptionalNuniSession } from '@/features/nuni/Session';
 import { loadPersonalTimetable, type StoredTimetable } from '@/lib/timetable/store';
+import home from '@/app/home.module.css';
 import styles from './TodayTimetable.module.css';
 
 function manualRecords(timetable: StoredTimetable): PersonalImportRecord[] {
@@ -30,31 +32,13 @@ function manualRecords(timetable: StoredTimetable): PersonalImportRecord[] {
   }));
 }
 
-export function TodayTimetable({ now }: { now: Date | null }) {
-  const context = usePersonalImportScope();
-  const school = useOptionalSelectedSchool();
-  const nuni = useOptionalNuniSession();
-  const { user } = useAuth();
-  if (context.loading || !now || nuni?.pendingLogout || nuni?.error) return null;
-  if (context.scope.schoolId === 'personal')
-    return (
-      <section className={styles.panel} aria-label="今天的課表">
-        <h2>今天去哪上課？</h2>
-        <p>先選校園，就能匯入或手動排課。不用學校帳號，資料存在這台瀏覽器。</p>
-        {school && <SchoolSelector compact />}
-      </section>
-    );
-  return <Schedule key={`${context.scopeKey}:${user?.uid ?? ''}`} now={now} />;
-}
-
-function Schedule({ now }: { now: Date }) {
+function usePersonalTodayRecords() {
   const context = usePersonalImportScope();
   const { user } = useAuth();
   const imported = usePersonalImports(context.scope);
   const [manual, setManual] = useState<PersonalImportRecord[] | null>(null);
   const [loadError, setLoadError] = useState('');
   const [attempt, setAttempt] = useState(0);
-  const [term, setTerm] = useState('');
   const { owner, schoolId } = context.scope;
   const uid = user?.uid ?? null;
   const retry = useCallback(() => setAttempt((value) => value + 1), []);
@@ -90,6 +74,61 @@ function Schedule({ now }: { now: Date }) {
       document.removeEventListener('visibilitychange', visible);
     };
   }, [uid, owner, schoolId, attempt]);
+  const loaded = !imported.loading && (manual !== null || !!loadError);
+  const error = imported.error || loadError;
+  return { context, imported, manual, retry, loaded, error, schoolId };
+}
+
+export function TodayTimetable({ now }: { now: Date | null }) {
+  const context = usePersonalImportScope();
+  const school = useOptionalSelectedSchool();
+  const nuni = useOptionalNuniSession();
+  const { user } = useAuth();
+  if (context.loading || !now || nuni?.pendingLogout || nuni?.error) return null;
+  if (context.scope.schoolId === 'personal')
+    return (
+      <section className={styles.panel} aria-label="今天的課表">
+        <h2>今天去哪上課？</h2>
+        <p>先選校園，就能匯入或手動排課。不用學校帳號，資料存在這台瀏覽器。</p>
+        {school && <SchoolSelector compact />}
+      </section>
+    );
+  return <Schedule key={`${context.scopeKey}:${user?.uid ?? ''}`} now={now} />;
+}
+
+export function NextClassCard({ now }: { now: Date | null }) {
+  const context = usePersonalImportScope();
+  const nuni = useOptionalNuniSession();
+  if (context.loading || !now || nuni?.pendingLogout || nuni?.error) return null;
+  if (context.scope.schoolId === 'personal') return null;
+  return <NextClassStrip key={context.scopeKey} now={now} />;
+}
+
+function NextClassStrip({ now }: { now: Date }) {
+  const { imported, manual, loaded, error, schoolId } = usePersonalTodayRecords();
+  if (!loaded || error || manual === null) return null;
+  const schedule = buildPersonalToday([...imported.records, ...manual], {
+    schoolId,
+    now,
+  });
+  const next = schedule.today.find((entry) => entry.row.id === schedule.nextId);
+  if (!next) return null;
+  const room = next.row.location?.trim();
+  return (
+    <aside className={home.nextClass} data-testid="home-next-class" aria-label="下一堂課">
+      <strong>下一堂課</strong>
+      <span className={home.nextClassBody}>
+        {next.row.title}
+        {room ? ` · ${room}` : ''}
+        <small>{next.startTime}</small>
+      </span>
+    </aside>
+  );
+}
+
+function Schedule({ now }: { now: Date }) {
+  const { context, imported, manual, retry, loaded, error, schoolId } = usePersonalTodayRecords();
+  const [term, setTerm] = useState('');
   const schedule = buildPersonalToday([...imported.records, ...(manual ?? [])], {
     schoolId,
     termKey: term,
@@ -100,8 +139,6 @@ function Schedule({ now }: { now: Date }) {
       ? '手動課表（未填學期）'
       : `${year} 學年度 · ${semester} 學期`;
   const selected = schedule.terms.find((item) => item.key === schedule.termKey);
-  const loaded = !imported.loading && (manual !== null || !!loadError);
-  const error = imported.error || loadError;
   const query = `campus=${encodeURIComponent(schoolId)}`;
   const manualOnly =
     selected &&
@@ -112,8 +149,13 @@ function Schedule({ now }: { now: Date }) {
   return (
     <section className={styles.panel} aria-labelledby="today-timetable-title">
       <div className={styles.heading}>
-        <h2 id="today-timetable-title">今天的課表</h2>
-        <Link href={timetableHref}>完整課表</Link>
+        <h2 id="today-timetable-title">
+          <CampusIcon name="timetable" size={21} />
+          今天的課表
+        </h2>
+        <Link href={timetableHref}>
+          完整課表 <span aria-hidden="true">↗</span>
+        </Link>
       </div>
       <p className={styles.note}>{context.schoolName} · 個人整理的週課表</p>
       {!loaded && <p role="status">正在讀取課表…</p>}
@@ -132,7 +174,7 @@ function Schedule({ now }: { now: Date }) {
         </div>
       )}
       {loaded && !error && !selected && (
-        <>
+        <div className={styles.emptyState}>
           <p>把課表帶進來，這裡就會顯示今天的時間與教室。</p>
           <div className={styles.actions}>
             <Link className="btn primary" href={`/import?kind=timetable&${query}`}>
@@ -140,7 +182,7 @@ function Schedule({ now }: { now: Date }) {
             </Link>
             <Link href={`/timetable?${query}`}>手動排課</Link>
           </div>
-        </>
+        </div>
       )}
       {loaded && !error && selected && (
         <>
@@ -168,7 +210,15 @@ function Schedule({ now }: { now: Date }) {
               {schedule.today.map((entry) => (
                 <li
                   key={entry.row.id}
-                  className={entry.status === 'ended' ? styles.ended : undefined}
+                  className={
+                    entry.status === 'ended'
+                      ? styles.ended
+                      : entry.status === 'ongoing'
+                        ? styles.ongoing
+                        : entry.row.id === schedule.nextId
+                          ? styles.upcoming
+                          : undefined
+                  }
                 >
                   <div className={styles.time}>
                     {entry.startTime}
