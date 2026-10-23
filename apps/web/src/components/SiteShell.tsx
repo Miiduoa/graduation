@@ -16,6 +16,7 @@ export function SiteShell(props: {
   subtitle?: string;
   schoolName?: string;
   schoolCode?: string;
+  compactHeading?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -29,9 +30,13 @@ export function SiteShell(props: {
         <UpdateBanner />
         <PWAInstallBanner />
       </div>
-      <main id="page-content" className={styles.main} tabIndex={-1}>
+      <main
+        id="page-content"
+        className={props.compactHeading ? `${styles.main} ${styles.mainMap}` : styles.main}
+        tabIndex={-1}
+      >
         {props.title && (
-          <div className={styles.heading}>
+          <div className={props.compactHeading ? `${styles.heading} ${styles.headingMap}` : styles.heading}>
             <div>
               {props.schoolName && <p className={styles.eyebrow}>{props.schoolName}</p>}
               <h1>{props.title}</h1>

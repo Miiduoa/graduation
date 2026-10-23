@@ -112,6 +112,16 @@
   padding: var(--page-padding-block) var(--page-padding-inline) 28px;
   min-width: 0;
 }
+.mainMap {
+  padding-top: 12px;
+}
+.headingMap {
+  margin-bottom: 10px;
+  gap: 8px;
+}
+.headingMap h1 {
+  margin-bottom: 0;
+}
 .dateLine {
   margin-bottom: 12px;
 }
@@ -853,6 +863,16 @@
   }
   .heading {
     align-items: flex-start;
+  }
+  .headingMap .intro {
+    display: none;
+  }
+  .headingMap h1 {
+    font-size: 22px;
+    letter-spacing: -0.6px;
+  }
+  .headingMap .eyebrow {
+    margin-bottom: 4px;
   }
   .intro {
     font-size: 12px;
