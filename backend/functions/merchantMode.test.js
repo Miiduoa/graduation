@@ -9,6 +9,7 @@ const {
   parseMenuCsv,
   studentCafeteriaAction,
   NATIVE_ORDERING_CLOSED_TEXT,
+  PRICE_DISCLAIMER,
   EXTERNAL_ORDER_HONEST_TEXT,
   SHOWCASE_ORDER_BUTTON_TEXT,
   SHOWCASE_ORDER_CAPTION,
@@ -37,9 +38,9 @@ test('showcase stores keep https ordering URLs with a source tag', () => {
   expect(isHttpsOrderingUrl('https://shop.example/order')).toBe(true);
   expect(isHttpsOrderingUrl('http://shop.example/order')).toBe(false);
   expect(isHttpsOrderingUrl('https://user:pass@shop.example/order')).toBe(false);
-  expect(
-    buildShowcaseOrderingUrl('https://shop.example/order?x=1', 'pu', 'cafe-1'),
-  ).toBe('https://shop.example/order?x=1&utm_source=nuni&utm_campaign=campus&ref=nuni-pu-cafe-1');
+  expect(buildShowcaseOrderingUrl('https://shop.example/order?x=1', 'pu', 'cafe-1')).toBe(
+    'https://shop.example/order?x=1&utm_source=nuni&utm_campaign=campus&ref=nuni-pu-cafe-1',
+  );
 });
 
 test('shared storefront URL check rejects javascript, userinfo, overlong, spaces, http and data', () => {
@@ -96,7 +97,9 @@ test('native_order stays closed when the global switch is off and is not rewritt
       orderingUrl: 'https://shop.example/order',
     }),
   ).toEqual({ kind: 'native_closed', label: NATIVE_ORDERING_CLOSED_TEXT });
-  expect(isOnlineOrderingEnabled({ ONLINE_ORDERING_ENABLED: 'false', JEST_WORKER_ID: '1' })).toBe(false);
+  expect(isOnlineOrderingEnabled({ ONLINE_ORDERING_ENABLED: 'false', JEST_WORKER_ID: '1' })).toBe(
+    false,
+  );
 });
 
 test('showcase stores use outbound-order copy and stay info-only without an https URL', () => {
@@ -147,4 +150,6 @@ test('CSV menus and stale hints stay honest', () => {
   expect(isMenuStale('2026-10-10T00:00:00.000Z', new Date('2026-10-12T01:00:00.000Z'))).toBe(true);
   expect(isMenuStale('2026-10-12T00:00:00.000Z', new Date('2026-10-12T01:00:00.000Z'))).toBe(false);
   expect(EXTERNAL_ORDER_HONEST_TEXT).toContain('請到店家查看');
+  expect(PRICE_DISCLAIMER).toBe('價格、是否賣完、是否接單以店家訂餐頁為準，付款與退款由店家處理。');
+  expect(PRICE_DISCLAIMER).not.toMatch(/nuni/i);
 });
