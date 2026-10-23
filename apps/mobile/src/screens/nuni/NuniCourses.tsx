@@ -77,7 +77,7 @@ const time = (value: string) => formatTaipeiDateTime(value);
 const feedbackPredatesSubmission = (receipt: Receipt) =>
   !!receipt.teacherFeedback &&
   !!receipt.reviewedAt &&
-  Date.parse(receipt.reviewedAt) < Date.parse(receipt.submittedAt);
+  needsFeedbackReview(receipt);
 
 function Copy({
   children,
@@ -1280,6 +1280,7 @@ function TeacherReceipts({
               <Button
                 key={value}
                 label={`${feedbackQueueLabel(value)} ${count}`}
+                selected={feedbackFilter === value}
                 onPress={() => setFeedbackFilter(value)}
               />
             );

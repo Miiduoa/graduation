@@ -1,5 +1,7 @@
 /** Shared filters for teacher grading / feedback queues (Firebase + Nuni). */
 
+import { parseTaipeiInstant } from './taipeiTime';
+
 export type GradeQueueFilter = 'all' | 'needs_grade' | 'graded';
 export type FeedbackQueueFilter = 'all' | 'needs_feedback' | 'reviewed';
 
@@ -30,7 +32,10 @@ export function sortGradeQueue<T extends { score: number | null; submittedAt: st
   return [...rows].sort((a, b) => {
     const pending = Number(a.score !== null) - Number(b.score !== null);
     if (pending !== 0) return pending;
-    return (b.submittedAt ?? '').localeCompare(a.submittedAt ?? '');
+    return (
+      (b.submittedAt ? parseTaipeiInstant(b.submittedAt) ?? 0 : 0) -
+      (a.submittedAt ? parseTaipeiInstant(a.submittedAt) ?? 0 : 0)
+    );
   });
 }
 
@@ -42,9 +47,9 @@ export function needsFeedbackReview(entry: FeedbackQueueEntry): boolean {
   const feedback = typeof entry.teacherFeedback === 'string' ? entry.teacherFeedback.trim() : '';
   if (!feedback) return true;
   if (!entry.reviewedAt) return true;
-  const reviewed = Date.parse(entry.reviewedAt);
-  const submitted = Date.parse(entry.submittedAt);
-  if (!Number.isFinite(reviewed) || !Number.isFinite(submitted)) return true;
+  const reviewed = parseTaipeiInstant(entry.reviewedAt);
+  const submitted = parseTaipeiInstant(entry.submittedAt);
+  if (reviewed === null || submitted === null) return true;
   return reviewed < submitted;
 }
 
@@ -68,7 +73,7 @@ export function sortFeedbackQueue<T extends FeedbackQueueEntry>(rows: readonly T
   return [...rows].sort((a, b) => {
     const pending = Number(!needsFeedbackReview(a)) - Number(!needsFeedbackReview(b));
     if (pending !== 0) return pending;
-    return b.submittedAt.localeCompare(a.submittedAt);
+    return (parseTaipeiInstant(b.submittedAt) ?? 0) - (parseTaipeiInstant(a.submittedAt) ?? 0);
   });
 }
 

@@ -1,4 +1,5 @@
 import { collection, doc, getDoc, getDocs } from 'firebase/firestore';
+import { parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
 import { getDb, isFirebaseConfigured } from './firebase';
 
 export interface HomeCourse {
@@ -50,9 +51,9 @@ export function feedbackPredatesSubmission(
   submittedAt: string | null | undefined,
 ): boolean {
   if (!reviewedAt || !submittedAt) return false;
-  const reviewed = Date.parse(reviewedAt);
-  const submitted = Date.parse(submittedAt);
-  return Number.isFinite(reviewed) && Number.isFinite(submitted) && reviewed < submitted;
+  const reviewed = parseTaipeiInstant(reviewedAt);
+  const submitted = parseTaipeiInstant(submittedAt);
+  return reviewed !== null && submitted !== null && reviewed < submitted;
 }
 export interface HomeData {
   courses: HomeCourse[];
@@ -86,8 +87,8 @@ function sortFeedback(rows: HomeFeedback[]): HomeFeedback[] {
   return rows
     .sort(
       (a, b) =>
-        (b.reviewedAt ? Date.parse(b.reviewedAt) : 0) -
-        (a.reviewedAt ? Date.parse(a.reviewedAt) : 0),
+        (b.reviewedAt ? parseTaipeiInstant(b.reviewedAt) ?? 0 : 0) -
+        (a.reviewedAt ? parseTaipeiInstant(a.reviewedAt) ?? 0 : 0),
     )
     .slice(0, FEEDBACK_LIMIT);
 }

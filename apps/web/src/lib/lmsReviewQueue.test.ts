@@ -89,4 +89,31 @@ describe('lmsReviewQueue', () => {
     expect(gradeQueueLabel('needs_grade')).toBe('尚未評分');
     expect(feedbackQueueLabel('needs_feedback')).toBe('尚未回饋');
   });
+
+  it('classifies mixed Taipei wall times and UTC feedback by the actual instant', () => {
+    const current = {
+      teacherFeedback: '已看過新稿',
+      submittedAt: '2026-10-11T10:00:00',
+      reviewedAt: '2026-10-11T03:00:00Z',
+    };
+    const stale = {
+      teacherFeedback: '針對舊稿',
+      submittedAt: '2026-10-11T03:00:00Z',
+      reviewedAt: '2026-10-11T10:00:00',
+    };
+    expect(needsFeedbackReview(current)).toBe(false);
+    expect(matchesFeedbackQueueFilter(current, 'reviewed')).toBe(true);
+    expect(needsFeedbackReview(stale)).toBe(true);
+    expect(matchesFeedbackQueueFilter(stale, 'needs_feedback')).toBe(true);
+  });
+
+  it('orders both review queues by instants when timestamp offsets differ', () => {
+    const rows = [
+      { id: 'older', score: null, teacherFeedback: null, submittedAt: '2026-10-11T10:00:00' },
+      { id: 'newer', score: null, teacherFeedback: null, submittedAt: '2026-10-11T03:00:00Z' },
+      { id: 'latest', score: null, teacherFeedback: null, submittedAt: '2026-10-11T12:00:00+08:00' },
+    ];
+    expect(sortGradeQueue(rows).map((row) => row.id)).toEqual(['latest', 'newer', 'older']);
+    expect(sortFeedbackQueue(rows).map((row) => row.id)).toEqual(['latest', 'newer', 'older']);
+  });
 });
