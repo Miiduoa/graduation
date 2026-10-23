@@ -17,6 +17,7 @@ on:
         type: choice
         options:
           - production
+          - production-device
           - preview
       submit:
         description: 'Submit to app stores after build'
@@ -44,6 +45,18 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       build_number: ${{ steps.version.outputs.build_number }}
     steps:
+      - name: Require main for production profiles
+        run: |
+          set -euo pipefail
+          case "${{ inputs.profile }}" in
+            production|production-device)
+              if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+                echo "::error::正式環境（production）建置只能從 main 觸發。目前 ref 是 ${{ github.ref }}，profile 是 ${{ inputs.profile }}。"
+                exit 1
+              fi
+              ;;
+          esac
+
       - name: Checkout
         uses: actions/checkout@v7
 
@@ -55,6 +68,13 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
+
+      - name: Validate release request
+        run: node scripts/verify-eas-build.mjs --dispatch
+        env:
+          BUILD_PLATFORM: ${{ inputs.platform }}
+          BUILD_PROFILE: ${{ inputs.profile }}
+          SUBMIT_TO_STORE: ${{ inputs.submit }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -96,6 +116,18 @@ jobs:
       EXPECTED_APP_IDENTIFIER: ${{ vars.IOS_BUNDLE_IDENTIFIER }}
       IOS_BUNDLE_IDENTIFIER: ${{ vars.IOS_BUNDLE_IDENTIFIER }}
     steps:
+      - name: Require main for production profiles
+        run: |
+          set -euo pipefail
+          case "${{ inputs.profile }}" in
+            production|production-device)
+              if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+                echo "::error::正式環境（production）建置只能從 main 觸發。目前 ref 是 ${{ github.ref }}，profile 是 ${{ inputs.profile }}。"
+                exit 1
+              fi
+              ;;
+          esac
+
       - name: Checkout
         uses: actions/checkout@v7
 
@@ -162,7 +194,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: preflight
     if: inputs.platform == 'all' || inputs.platform == 'android'
-    environment: ${{ inputs.profile }}
+    environment: ${{ inputs.profile == 'production-device' && 'production' || inputs.profile }}
     env:
       BUILD_PLATFORM: android
       BUILD_PROFILE: ${{ inputs.profile }}
@@ -171,6 +203,18 @@ jobs:
       EXPECTED_APP_IDENTIFIER: ${{ vars.ANDROID_PACKAGE_NAME }}
       ANDROID_PACKAGE_NAME: ${{ vars.ANDROID_PACKAGE_NAME }}
     steps:
+      - name: Require main for production profiles
+        run: |
+          set -euo pipefail
+          case "${{ inputs.profile }}" in
+            production|production-device)
+              if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+                echo "::error::正式環境（production）建置只能從 main 觸發。目前 ref 是 ${{ github.ref }}，profile 是 ${{ inputs.profile }}。"
+                exit 1
+              fi
+              ;;
+          esac
+
       - name: Checkout
         uses: actions/checkout@v7
 
@@ -234,6 +278,14 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Require main for production profiles
+        run: |
+          set -euo pipefail
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "::error::正式環境（production）建置只能從 main 觸發。目前 ref 是 ${{ github.ref }}，profile 是 ${{ inputs.profile }}。"
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v7
 

@@ -7,6 +7,7 @@ module.exports = {
   moduleNameMapper: {
     '^@firebase/auth/dist/rn/index\\.js$': '<rootDir>/jest/firebase-auth-rn-mock.js',
     '^@/(.*)$': '<rootDir>/src/$1',
+    '\\.(bin|gz)$': '<rootDir>/jest/assetFileMock.js',
   },
   collectCoverageFrom: ['src/**/*.{ts,tsx}', '!src/**/*.d.ts', '!src/**/index.ts'],
   coverageThreshold: {

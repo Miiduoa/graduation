@@ -1,170 +1,181 @@
-/**
- * Homework Submit Screen — 本地作業繳交，取代 TronClass webview。
- *
- * 對應 TronClass 端點：POST /courses/{id}/homework/{hwId}/submissions
- * 本地能做：看題目 / 寫文字答案 / 附加檔案 / 看附件 / 看分數與回饋 / 重交 / 撤回
- */
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
-  ScrollView,
-  View,
-  Text,
-  TextInput,
-  Pressable,
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 
 import { useAuth } from '../state/auth';
-import { simulateStudentSubmit } from '../services/demoActionSimulator';
-import { getTeacherUidForCourse } from '../data/demoUserStories';
+import { useDataSource } from '../hooks/useDataSource';
+import type { Assignment, Submission } from '../data/types';
+import {
+  publishedAssignmentGrade,
+  type PublishedAssignmentGrade,
+} from '../data/assignmentGrade';
+import { onAssignmentSubmitted } from '../services/companionHooks';
+import { safeNavigate } from '../utils/safeNavigate';
+
+type RouteParams = {
+  courseId?: string;
+  groupId?: string;
+  hwId?: string;
+  assignmentId?: string;
+  hwTitle?: string;
+  title?: string;
+  dueAt?: string;
+  description?: string;
+};
 
 type RouteProps = {
   route?: {
-    params?: {
-      courseId?: string;
-      hwId?: string;
-      hwTitle?: string;
-      dueAt?: string;
-      description?: string;
-      currentScore?: number | null;
-      feedback?: string | null;
-    };
+    params?: RouteParams;
   };
 };
 
-interface Attachment {
-  id: string;
-  name: string;
-  uri: string;
-  size?: number;
-  type?: string;
+type AssignmentRecord = Assignment & {
+  published?: boolean;
+  status?: string;
+  allowLateSubmission?: boolean;
+};
+
+function asText(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback;
 }
 
 export default function HomeworkSubmitScreen(props: RouteProps) {
   const navigation = useNavigation<any>();
   const auth = useAuth();
-  const courseId = props.route?.params?.courseId ?? '';
-  const hwId = props.route?.params?.hwId ?? '';
-  const hwTitle = props.route?.params?.hwTitle ?? '作業繳交';
-  const dueAt = props.route?.params?.dueAt;
-  const description = props.route?.params?.description ?? '';
-  const currentScore = props.route?.params?.currentScore ?? null;
-  const feedback = props.route?.params?.feedback ?? '';
+  const ds = useDataSource();
+  const params = props.route?.params ?? {};
+  const courseId = asText(params.courseId || params.groupId);
+  const hwId = asText(params.hwId || params.assignmentId);
+  const uid = auth.user?.uid ?? '';
 
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [title, setTitle] = useState(asText(params.hwTitle || params.title, '作業繳交'));
+  const [description, setDescription] = useState(asText(params.description));
+  const [dueAt, setDueAt] = useState(asText(params.dueAt) || null);
+  const [allowLate, setAllowLate] = useState(false);
+  const [closed, setClosed] = useState(false);
+  const [unpublished, setUnpublished] = useState(false);
+  const [quizLike, setQuizLike] = useState(false);
   const [answer, setAnswer] = useState('');
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [submittedAt, setSubmittedAt] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [submitted, setSubmitted] = useState(currentScore !== null);
+  const [points, setPoints] = useState<number | null>(null);
+  const [grade, setGrade] = useState<PublishedAssignmentGrade | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      if (!courseId || !hwId) throw new Error('找不到這份作業。');
+      if (!uid) throw new Error('請先登入。');
+      const [assignment, submission] = await Promise.all([
+        ds.getAssignment(hwId, courseId) as Promise<AssignmentRecord | null>,
+        ds.getSubmission(hwId, uid, courseId) as Promise<Submission | null>,
+      ]);
+      if (!assignment) throw new Error('找不到這份作業，或你尚未加入這門課。');
+      const status = asText(assignment.status);
+      const type = asText(assignment.type);
+      setTitle(asText(assignment.title, asText(params.hwTitle || params.title, '作業繳交')));
+      setDescription(asText(assignment.description, asText(params.description)));
+      setDueAt(asText(assignment.dueAt) || asText(params.dueAt) || null);
+      setAllowLate(assignment.allowLateSubmission === true);
+      setUnpublished(assignment.published === false || status === 'draft');
+      setClosed(status === 'closed');
+      setQuizLike(['quiz', 'exam'].includes(type));
+      setPoints(
+        typeof assignment.points === 'number' && Number.isFinite(assignment.points)
+          ? assignment.points
+          : null,
+      );
+      setGrade(publishedAssignmentGrade(submission as unknown as Record<string, unknown>));
+      const already = asText(submission?.submittedAt) || null;
+      setSubmittedAt(already);
+      setAnswer(already ? asText(submission?.content) : '');
+    } catch (e) {
+      setError(String((e as Error)?.message ?? e));
+    } finally {
+      setLoading(false);
+    }
+  }, [courseId, ds, hwId, params.description, params.hwTitle, params.title, params.dueAt, uid]);
+
+  const fileSubmit =
+    process.env.EXPO_PUBLIC_ASSIGNMENT_FILE_SUBMIT_ENABLED === 'true';
+  const classWorkspaceFileSubmit =
+    fileSubmit && courseId.startsWith('cw_') && hwId.startsWith('cwa_');
+
+  useFocusEffect(
+    useCallback(() => {
+      if (classWorkspaceFileSubmit) {
+        safeNavigate(navigation, 'NuniWorkspace', {
+          tab: 'courses',
+          workspaceId: courseId,
+          assignmentId: hwId,
+        });
+        return;
+      }
+      void load();
+    }, [classWorkspaceFileSubmit, courseId, hwId, load, navigation]),
+  );
 
   const dueText = useMemo(() => {
     if (!dueAt) return '';
-    const d = new Date(dueAt);
-    const now = new Date();
-    const diffH = (d.getTime() - now.getTime()) / (1000 * 60 * 60);
-    if (diffH < 0) return `已截止 ${Math.abs(Math.round(diffH))} 小時`;
-    if (diffH < 24) return `${Math.round(diffH)} 小時後截止`;
+    const due = Date.parse(dueAt);
+    if (!Number.isFinite(due)) return '';
+    const diffH = (due - Date.now()) / (1000 * 60 * 60);
+    if (diffH < 0) return `已截止`;
+    if (diffH < 24) return `${Math.max(1, Math.round(diffH))} 小時後截止`;
     return `${Math.round(diffH / 24)} 天後截止`;
   }, [dueAt]);
 
+  const overdueLocked = useMemo(() => {
+    if (!dueAt) return false;
+    const due = Date.parse(dueAt);
+    return Number.isFinite(due) && due < Date.now() && !allowLate;
+  }, [allowLate, dueAt]);
+
+  const blocked = unpublished || closed || overdueLocked || quizLike || !!submittedAt;
   const overdue = useMemo(() => {
     if (!dueAt) return false;
-    return new Date(dueAt).getTime() < Date.now();
+    const due = Date.parse(dueAt);
+    return Number.isFinite(due) && due < Date.now();
   }, [dueAt]);
 
-  const handlePickFile = useCallback(async () => {
-    try {
-      // 動態載入 expo-document-picker，避免 build 期 import
-      const DocumentPicker = await import('expo-document-picker').catch(() => null);
-      if (!DocumentPicker) {
-        Alert.alert('檔案選取功能尚未安裝', '請聯絡開發者執行 npx expo install expo-document-picker');
-        return;
-      }
-      const result = await DocumentPicker.getDocumentAsync({
-        type: '*/*',
-        multiple: false,
-        copyToCacheDirectory: true,
-      });
-      if (result.canceled) return;
-      const asset = result.assets?.[0];
-      if (!asset) return;
-      const att: Attachment = {
-        id: `att_${Date.now()}`,
-        name: asset.name,
-        uri: asset.uri,
-        size: asset.size,
-        type: asset.mimeType ?? undefined,
-      };
-      setAttachments((a) => [...a, att]);
-    } catch (e) {
-      Alert.alert('附加檔案失敗', String((e as Error)?.message ?? e));
-    }
-  }, []);
-
-  const handleRemoveAttachment = (id: string) => {
-    setAttachments((a) => a.filter((x) => x.id !== id));
-  };
-
   const handleSubmit = useCallback(async () => {
-    if (!answer.trim() && attachments.length === 0) {
-      Alert.alert('還沒有內容', '請至少寫一段文字或附加一個檔案再送出。');
+    const text = answer.trim();
+    if (!text || text.length > 20000) {
+      Alert.alert('請先寫作業內容', '請輸入 1 至 20,000 字，再送出。');
       return;
     }
-    if (overdue) {
-      Alert.alert(
-        '此作業已截止',
-        '系統仍會嘗試送出，但老師收到的紀錄會標記為「遲交」。確定要送出嗎？',
-        [
-          { text: '再想想', style: 'cancel' },
-          { text: '仍然送出', style: 'destructive', onPress: () => doSubmit() },
-        ],
-      );
-      return;
-    }
-    doSubmit();
-  }, [answer, attachments, overdue]);
-
-  const doSubmit = useCallback(async () => {
     setSubmitting(true);
     try {
-      // ─ Demo 模式：emit cross-role event 給老師（取代 TronClass 提交）─
-      const numericCourseId = Number(String(courseId).replace(/^tc:/, '')) || 0;
-      const numericHwId = Number(String(hwId).replace(/^tc:/, '')) || 0;
-      await simulateStudentSubmit({
-        studentUid: auth.user?.uid ?? 'demo_student_kuchih',
-        studentName: auth.profile?.displayName ?? '顧晉瑋',
-        teacherUid: getTeacherUidForCourse(courseId),
-        courseId: numericCourseId,
-        courseName: hwTitle.split(' ')[0] ?? '課程',
-        homeworkId: numericHwId,
-        homeworkTitle: hwTitle,
-        isLate: !!overdue,
+      await ds.submitAssignment({
+        assignmentId: hwId,
+        userId: uid,
+        groupId: courseId,
+        content: text,
       });
-
-      // 紀錄 companion signal
-      try {
-        const { onAssignmentSubmitted } = await import('../services/companionHooks');
-        onAssignmentSubmitted({ assignmentId: hwId });
-      } catch {
-        /* swallow */
-      }
-
-      setSubmitted(true);
-      Alert.alert(
-        '✅ 已送出',
-        `${hwTitle} 已成功繳交${overdue ? '（標記為遲交）' : ''}。\n老師端會收到即時通知。`,
-        [{ text: '回課程', onPress: () => navigation.goBack() }],
-      );
+      onAssignmentSubmitted({ uid, assignmentId: hwId });
+      setSubmittedAt(new Date().toISOString());
+      Alert.alert('已繳交', '這份作業已寫入與網站相同的繳交紀錄。', [
+        { text: '返回', onPress: () => navigation.goBack() },
+      ]);
     } catch (e) {
       Alert.alert('送出失敗', String((e as Error)?.message ?? e));
     } finally {
       setSubmitting(false);
     }
-  }, [answer, attachments, courseId, hwId, hwTitle, navigation, overdue, auth.user?.uid, auth.profile?.displayName]);
+  }, [answer, courseId, ds, hwId, navigation, uid]);
 
   return (
     <KeyboardAvoidingView
@@ -172,7 +183,6 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 80 }}>
-        {/* ── 作業標題 ── */}
         <View
           style={{
             backgroundColor: '#fff',
@@ -182,7 +192,7 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
             borderLeftColor: overdue ? '#D70015' : '#003F8A',
           }}
         >
-          <Text style={{ fontSize: 18, fontWeight: '700', color: '#1C1C1E' }}>{hwTitle}</Text>
+          <Text style={{ fontSize: 18, fontWeight: '700', color: '#1C1C1E' }}>{title}</Text>
           {dueText ? (
             <Text
               style={{
@@ -191,145 +201,190 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
                 marginTop: 4,
               }}
             >
-              {overdue ? '⏰ ' : '📅 '}
               {dueText}
             </Text>
-          ) : null}
+          ) : (
+            <Text style={{ fontSize: 13, color: '#8E8E93', marginTop: 4 }}>未設截止時間</Text>
+          )}
           {description ? (
             <Text style={{ marginTop: 12, fontSize: 14, color: '#3C3C43', lineHeight: 22 }}>
               {description}
             </Text>
-          ) : null}
-        </View>
-
-        {/* ── 已批改回饋 ── */}
-        {currentScore !== null && (
-          <View
-            style={{
-              marginTop: 12,
-              backgroundColor: currentScore >= 60 ? '#dcfce7' : '#fee2e2',
-              borderRadius: 12,
-              padding: 16,
-            }}
-          >
-            <Text style={{ fontSize: 14, fontWeight: '700', color: '#1C1C1E' }}>
-              老師已批改：{currentScore} 分
-            </Text>
-            {feedback ? (
-              <Text style={{ marginTop: 6, fontSize: 13, color: '#3C3C43' }}>
-                💬 {feedback}
-              </Text>
-            ) : null}
-          </View>
-        )}
-
-        {/* ── 答案輸入區 ── */}
-        <View style={{ marginTop: 16 }}>
-          <Text style={{ fontSize: 14, fontWeight: '600', color: '#1C1C1E', marginBottom: 6 }}>
-            你的答案
-          </Text>
-          <TextInput
-            value={answer}
-            onChangeText={setAnswer}
-            placeholder="在這裡寫下你的答案、論述、心得⋯⋯"
-            multiline
-            numberOfLines={8}
-            editable={!submitted}
-            style={{
-              backgroundColor: '#fff',
-              borderRadius: 12,
-              padding: 12,
-              fontSize: 14,
-              color: '#1C1C1E',
-              minHeight: 160,
-              textAlignVertical: 'top',
-              borderWidth: 1,
-              borderColor: '#E5E5EA',
-            }}
-          />
-        </View>
-
-        {/* ── 附件 ── */}
-        <View style={{ marginTop: 16 }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: '#1C1C1E' }}>
-              附加檔案 ({attachments.length})
-            </Text>
-            {!submitted && (
-              <Pressable onPress={handlePickFile} hitSlop={8}>
-                <Text style={{ color: '#003F8A', fontSize: 13, fontWeight: '600' }}>
-                  + 加檔案
-                </Text>
-              </Pressable>
-            )}
-          </View>
-          {attachments.map((att) => (
-            <View
-              key={att.id}
-              style={{
-                backgroundColor: '#fff',
-                padding: 10,
-                borderRadius: 8,
-                marginTop: 6,
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 8,
-                borderWidth: 1,
-                borderColor: '#E5E5EA',
-              }}
-            >
-              <Ionicons name="document-outline" size={18} color="#8E8E93" />
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 13, color: '#1C1C1E' }} numberOfLines={1}>
-                  {att.name}
-                </Text>
-                <Text style={{ fontSize: 11, color: '#8E8E93' }}>
-                  {att.type ?? '檔案'} {att.size ? `・ ${Math.round(att.size / 1024)} KB` : ''}
-                </Text>
-              </View>
-              {!submitted && (
-                <Pressable onPress={() => handleRemoveAttachment(att.id)} hitSlop={8}>
-                  <Ionicons name="close-circle" size={20} color="#D70015" />
-                </Pressable>
-              )}
-            </View>
-          ))}
-          {attachments.length === 0 && (
-            <Text style={{ fontSize: 12, color: '#8E8E93', fontStyle: 'italic', marginTop: 4 }}>
-              還沒附加任何檔案。可附 PDF、Word、圖片等。
+          ) : (
+            <Text style={{ marginTop: 12, fontSize: 14, color: '#8E8E93', lineHeight: 22 }}>
+              教師尚未填寫作業說明。
             </Text>
           )}
         </View>
 
-        {/* ── 送出鈕 ── */}
-        {!submitted && (
-          <Pressable
-            onPress={handleSubmit}
-            disabled={submitting}
+        {classWorkspaceFileSubmit ? (
+          <View
             style={{
-              marginTop: 24,
-              padding: 14,
+              marginTop: 16,
+              backgroundColor: '#fff',
               borderRadius: 12,
-              backgroundColor: overdue ? '#FF9500' : '#003F8A',
-              alignItems: 'center',
-              opacity: submitting ? 0.6 : 1,
+              padding: 16,
             }}
           >
-            {submitting ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>
-                {overdue ? '⏰ 仍然送出（標記遲交）' : '✅ 送出作業'}
-              </Text>
-            )}
-          </Pressable>
-        )}
-        {submitted && (
-          <View style={{ marginTop: 24, padding: 14, backgroundColor: '#dcfce7', borderRadius: 12 }}>
-            <Text style={{ color: '#166534', fontSize: 14, fontWeight: '600', textAlign: 'center' }}>
-              ✅ 你已繳交此作業
+            <Text style={{ fontSize: 14, color: '#3C3C43', lineHeight: 22 }}>
+              正在前往可傳檔的作業繳交…
             </Text>
           </View>
+        ) : loading ? (
+          <View style={{ marginTop: 24, alignItems: 'center' }}>
+            <ActivityIndicator color="#003F8A" />
+            <Text style={{ marginTop: 8, color: '#8E8E93' }}>讀取作業中</Text>
+          </View>
+        ) : error ? (
+          <View style={{ marginTop: 16, backgroundColor: '#fff', borderRadius: 12, padding: 16 }}>
+            <Text style={{ color: '#D70015', lineHeight: 22 }}>{error}</Text>
+            <Pressable
+              onPress={() => void load()}
+              style={{ marginTop: 12, alignItems: 'center', padding: 12 }}
+            >
+              <Text style={{ color: '#003F8A', fontWeight: '600' }}>重新讀取</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <>
+            <View
+              style={{
+                marginTop: 16,
+                backgroundColor: '#fff',
+                borderRadius: 12,
+                padding: 16,
+              }}
+            >
+              <Text style={{ fontSize: 14, fontWeight: '600', color: '#1C1C1E' }}>繳交方式</Text>
+              <Text style={{ marginTop: 6, fontSize: 13, color: '#3C3C43', lineHeight: 20 }}>
+                目前只支援文字繳交，與網站寫入同一份作業紀錄。作業檔案還沒接到上傳流程，無法從
+                App 傳檔。
+              </Text>
+            </View>
+            {quizLike ? (
+              <Text style={{ marginTop: 16, fontSize: 14, color: '#3C3C43', lineHeight: 22 }}>
+                請透過評量頁面作答。
+              </Text>
+            ) : unpublished ? (
+              <Text style={{ marginTop: 16, fontSize: 14, color: '#3C3C43', lineHeight: 22 }}>
+                此作業尚未開放。
+              </Text>
+            ) : submittedAt ? (
+              <View style={{ marginTop: 16 }}>
+                <Text style={{ fontSize: 14, fontWeight: '600', color: '#1C1C1E', marginBottom: 6 }}>
+                  已繳交內容
+                </Text>
+                <Text
+                  style={{
+                    backgroundColor: '#fff',
+                    borderRadius: 12,
+                    padding: 12,
+                    fontSize: 14,
+                    color: '#1C1C1E',
+                    lineHeight: 22,
+                  }}
+                >
+                  {answer || '（無文字內容）'}
+                </Text>
+                {grade ? (
+                  <View
+                    accessibilityLabel="作業評分"
+                    style={{
+                      marginTop: 16,
+                      backgroundColor: '#fff',
+                      borderRadius: 12,
+                      padding: 16,
+                      borderWidth: 1,
+                      borderColor: '#E5E5EA',
+                    }}
+                  >
+                    <Text style={{ fontSize: 15, fontWeight: '700', color: '#1C1C1E' }}>
+                      教師已評分：{grade.score}
+                      {points !== null ? ` / ${points}` : ''} 分
+                    </Text>
+                    {grade.revisionCount > 0 ? (
+                      <Text style={{ marginTop: 8, fontSize: 13, color: '#3C3C43', lineHeight: 20 }}>
+                        此筆評分已更正 {grade.revisionCount} 次，顯示目前已發布的結果。
+                      </Text>
+                    ) : null}
+                    {grade.feedback ? (
+                      <Text style={{ marginTop: 8, fontSize: 14, color: '#3C3C43', lineHeight: 22 }}>
+                        {grade.feedback}
+                      </Text>
+                    ) : null}
+                    {grade.publishedAt ? (
+                      <Text style={{ marginTop: 8, fontSize: 12, color: '#8E8E93' }}>
+                        發布時間：
+                        {new Date(grade.publishedAt).toLocaleString('zh-TW', {
+                          timeZone: 'Asia/Taipei',
+                        })}
+                      </Text>
+                    ) : null}
+                  </View>
+                ) : null}
+                <View
+                  style={{ marginTop: 16, padding: 14, backgroundColor: '#dcfce7', borderRadius: 12 }}
+                >
+                  <Text style={{ color: '#166534', fontSize: 14, fontWeight: '600', textAlign: 'center' }}>
+                    你已繳交此作業
+                  </Text>
+                </View>
+              </View>
+            ) : closed || overdueLocked ? (
+              <Text style={{ marginTop: 16, fontSize: 14, color: '#3C3C43', lineHeight: 22 }}>
+                作業已截止。如需補交，請聯絡授課教師。
+              </Text>
+            ) : (
+              <>
+                <View style={{ marginTop: 16 }}>
+                  <Text style={{ fontSize: 14, fontWeight: '600', color: '#1C1C1E', marginBottom: 6 }}>
+                    文字作業內容
+                  </Text>
+                  <TextInput
+                    value={answer}
+                    onChangeText={setAnswer}
+                    placeholder="在這裡寫下作業內容"
+                    multiline
+                    numberOfLines={8}
+                    maxLength={20000}
+                    editable={!blocked && !submitting}
+                    accessibilityLabel="文字作業內容"
+                    style={{
+                      backgroundColor: '#fff',
+                      borderRadius: 12,
+                      padding: 12,
+                      fontSize: 14,
+                      color: '#1C1C1E',
+                      minHeight: 160,
+                      textAlignVertical: 'top',
+                      borderWidth: 1,
+                      borderColor: '#E5E5EA',
+                    }}
+                  />
+                </View>
+                <Pressable
+                  onPress={handleSubmit}
+                  disabled={submitting || !answer.trim()}
+                  accessibilityRole="button"
+                  accessibilityLabel="繳交作業"
+                  style={{
+                    marginTop: 24,
+                    padding: 14,
+                    borderRadius: 12,
+                    backgroundColor: '#003F8A',
+                    alignItems: 'center',
+                    opacity: submitting || !answer.trim() ? 0.6 : 1,
+                  }}
+                >
+                  {submitting ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>繳交作業</Text>
+                  )}
+                </Pressable>
+              </>
+            )}
+          </>
         )}
       </ScrollView>
     </KeyboardAvoidingView>

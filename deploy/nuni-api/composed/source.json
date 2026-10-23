@@ -1,0 +1,103 @@
+{
+  "schema": "campus.nuni-composed-source/v1",
+  "baseTree": "6776b19a7cea998728469c3091c0ea7c264f6aa3",
+  "overlayOrder": [
+    "public-cafeterias",
+    "course-access",
+    "personal-import-sync"
+  ],
+  "adapters": {
+    "public-cafeterias": "df277892a55935d66cbabe856f0f578ae90e83a52e469020bc1c929c09f4cf7b",
+    "course-access": "8fb5841ffd51c257b74148ff2484b13ccc296a6b917dc007f21a92259a9e74a0",
+    "personal-import-sync": "98c69ddd3f66717cfccd2f8312257262e353dca141d43be4ab26611b1085719c"
+  },
+  "sourceFiles": {
+    "apps/api/src/course-access/courseAccess.ts": {
+      "source": "packages/shared/src/courseAccess.ts",
+      "sha256": "122c8a27fd23e2830bd07fda31283af0986783d5441a9af1e91237cb868780e0"
+    },
+    "apps/api/src/course-access/routes.ts": {
+      "source": "deploy/nuni-api/course-access/routes.ts",
+      "sha256": "550556c0bd10338f518e4a96db7289db1537d6165f4b029f2d97ed4aa3216c3d"
+    },
+    "apps/api/src/course-access/service.ts": {
+      "source": "deploy/nuni-api/course-access/service.ts",
+      "sha256": "ab69907d06af48bbed02ded3635b42d80f756a8e250a1ece85ae7db33666b0e2"
+    },
+    "apps/api/src/migrations/278_course_access_review.sql": {
+      "source": "deploy/nuni-api/course-access/278_course_access_review.sql",
+      "sha256": "c382b69b63e10dff4cbe1a8f1b34b0980ed9a85b2d0aea402cb25bc81b91e103"
+    },
+    "apps/api/src/migrations/279_personal_import_sync.sql": {
+      "source": "deploy/nuni-api/personal-import-sync/279_personal_import_sync.sql",
+      "sha256": "0d825aa890c240ae4a0f496116d4507b3e014878402642bd54bed2046a44118c"
+    },
+    "apps/api/src/personal-import-sync/imports/backup.ts": {
+      "source": "packages/shared/src/imports/backup.ts",
+      "sha256": "3e651bc0f71ae0d07713b71b69e274ba990281dc71c1ec52747668595adf1287"
+    },
+    "apps/api/src/personal-import-sync/imports/copy.ts": {
+      "source": "packages/shared/src/imports/copy.ts",
+      "sha256": "f6a4d299ddff0abea25d453c7f1385810afbb8f04c83641009eee8a0bbff6e9b"
+    },
+    "apps/api/src/personal-import-sync/imports/records.ts": {
+      "source": "packages/shared/src/imports/records.ts",
+      "sha256": "cfdf52eedddcac89a30e9576a450b320a611b10afcda9042fc6cefbb9b3a48a7"
+    },
+    "apps/api/src/personal-import-sync/imports/sync.ts": {
+      "source": "packages/shared/src/imports/sync.ts",
+      "sha256": "b28abfe37280742a0e275e3d14e2a6e1ac43190ae56ba8d682edba6cd9859d7c"
+    },
+    "apps/api/src/personal-import-sync/imports/types.ts": {
+      "source": "packages/shared/src/imports/types.ts",
+      "sha256": "4ba6a60495660c788e54b6f016cc6dd860811dedad2b9571902188cfcd23bb29"
+    },
+    "apps/api/src/personal-import-sync/imports/validation.ts": {
+      "source": "packages/shared/src/imports/validation.ts",
+      "sha256": "6a317a5022574e0b4a29101bb1f77fa419e5dadc5d5195c9fa6b9ffce276fbac"
+    },
+    "apps/api/src/personal-import-sync/routes.ts": {
+      "source": "deploy/nuni-api/personal-import-sync/routes.ts",
+      "sha256": "4970c5d11917d655eceb5559d0c60d855fdc182e65c5132e1e7e7f156c28922a"
+    },
+    "apps/api/src/personal-import-sync/service.ts": {
+      "source": "deploy/nuni-api/personal-import-sync/service.ts",
+      "sha256": "72bacad84d2e6dcedc7aa98586cae9ab226622fa75d843901750fcdee06e7eaf"
+    },
+    "apps/api/src/personal-import-sync/timetable/periods.ts": {
+      "source": "packages/shared/src/timetable/periods.ts",
+      "sha256": "58b5dc858c0b7172687c2b2635720f06852dbd3a281f5345c14b6a67cb1dc833"
+    },
+    "apps/api/src/personal-import-sync/timetable/schoolPeriods.ts": {
+      "source": "packages/shared/src/timetable/schoolPeriods.ts",
+      "sha256": "f37202b6ccbc2eafa915a8e1b8debade6186a61d1878a49b91bdfd243ca017f3"
+    },
+    "apps/api/src/public-cafeterias/cafeteriaCatalog.ts": {
+      "source": "packages/shared/src/cafeteriaCatalog.ts",
+      "sha256": "dc4227149729515884d417c443a4df71615ac93d95b7cc0d3deee2f90f26dcba"
+    },
+    "apps/api/src/public-cafeterias/merchantMode.ts": {
+      "source": "packages/shared/src/merchantMode.ts",
+      "sha256": "b43477b444d7b1dafaaca9d844b9b68b89e454548510dcf2f9efc853ceb8f06f"
+    },
+    "apps/api/src/public-cafeterias/routes.ts": {
+      "source": "deploy/nuni-api/public-cafeterias/routes.ts",
+      "sha256": "4f40ac73aaf58fdf5fd3a932f0d74669a955153b8b0778a6edcc6eba32412b5e"
+    },
+    "apps/api/src/public-cafeterias/service.ts": {
+      "source": "deploy/nuni-api/public-cafeterias/service.ts",
+      "sha256": "4c4e735113da1f3f5c474fb228dc5814f8d85ea95ad21f7770af46af58e226e4"
+    }
+  },
+  "appSha256": "2d503c14cd76c30e8e057074697eb5d6eff8b79899efa82b6106425ca2b27c5a",
+  "afterOverlayPatches": [
+    {
+      "source": "deploy/nuni-api/materials-pagination/0001-stable-material-pages.patch",
+      "sha256": "03bd7b3497d39758d52a04fd33603c15abd4cfe9bc606499a7246c70cc0c2a0e"
+    }
+  ],
+  "overlayTree": "c9746b456b56aee6b6d1ff067a6627fa281890fc",
+  "patchedAppSha256": "ebab4626e20f64204db95528e2cd2819c6270c0d2f0efa6f440aaac9f71a5636",
+  "runtimeInventoryScope": "Pinned base analysis only; not a composed API grant receipt",
+  "candidateTree": "b0a10ac814cd03fbfb45132566035acce8339f17"
+}

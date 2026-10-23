@@ -9,13 +9,12 @@ const { createAccountGuardedOnCall } = require('./accountLifecycle');
 const onCall = createAccountGuardedOnCall({ onCall: firebaseOnCall, getDb: () => db });
 const { defineSecret } = require('firebase-functions/params');
 const { initializeApp } = require('firebase-admin/app');
-const { getFirestore, FieldPath, FieldValue, Timestamp } = require('firebase-admin/firestore');
+const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { getMessaging } = require('firebase-admin/messaging');
 const https = require('https');
 const nodeCrypto = require('crypto');
 const {
   SERVICE_ROLE_DOMAINS,
-  buildSchoolDirectoryProfile,
   createAuthzHelpers,
   normalizeServiceRoleRecord,
   toSchoolMemberRole,
@@ -39,6 +38,7 @@ const { createPuCampusDataHandler, createGetMyAcademicRecords } = require('./aca
 const { createCalendarSubscriptionHandler } = require('./calendarSubscription');
 const { createExportUserDataHandler } = require('./userDataExport');
 const { createDeleteUserAccountHandler } = require('./accountDeletion');
+const directorySync = require('./directorySync');
 const { getAuth: getAdminAuth } = require('firebase-admin/auth');
 const {
   decryptSecretConfig,
@@ -119,6 +119,13 @@ const {
 } = require('./tronClassScraper');
 const { runFinalizePostLogin } = require('./postLogin/finalizePostLogin');
 const { buildPuSignInAcademicFields } = require('./lib/puSignInAcademicFields');
+const {
+  createUserProfileChangedHandler,
+  createSchoolMembershipChangedHandler,
+  createCafeteriaOperatorChangedHandler,
+  createGroupQuestionAssistantReplyTrigger,
+  createGradePublishedNotificationHandler,
+} = require('./firestoreTriggerHandlers');
 
 // TDX API 金鑰（透過 firebase functions:secrets:set 設定）
 const TDX_CLIENT_ID = defineSecret('TDX_CLIENT_ID');
@@ -926,90 +933,20 @@ async function getGroupMemberUids(groupId) {
 }
 
 function getSchoolDirectoryRef(schoolId, uid) {
-  return db.collection('schools').doc(schoolId).collection('directory').doc(uid);
+  return directorySync.getSchoolDirectoryRef(db, schoolId, uid);
 }
 
-async function syncSchoolDirectoryEntry({ schoolId, uid, userData = null, membership = null }) {
-  if (!schoolId || !uid) return;
-
-  const [resolvedUserData, resolvedMembership] = await Promise.all([
-    userData
-      ? Promise.resolve(userData)
-      : db
-          .collection('users')
-          .doc(uid)
-          .get()
-          .then((docSnap) => (docSnap.exists ? docSnap.data() : null)),
-    membership ? Promise.resolve(membership) : getActiveSchoolMembership(schoolId, uid),
-  ]);
-
-  const directoryRef = getSchoolDirectoryRef(schoolId, uid);
-
-  if (!resolvedUserData || !resolvedMembership) {
-    await directoryRef.delete().catch(() => null);
-    return;
-  }
-
-  const profile = buildSchoolDirectoryProfile({
-    uid,
-    userData: resolvedUserData,
-    membership: resolvedMembership,
+async function syncSchoolDirectoryEntry(args) {
+  return directorySync.syncSchoolDirectoryEntry(db, {
+    ...args,
+    getActiveSchoolMembership,
   });
-
-  await directoryRef.set(
-    {
-      ...profile,
-      updatedAt: FieldValue.serverTimestamp(),
-      updatedBy: 'system-sync',
-    },
-    { merge: true },
-  );
 }
 
 async function syncDirectoryEntriesForUser(uid, userData = null) {
-  if (!uid) return;
-
-  const membershipsSnap = await db
-    .collectionGroup('members')
-    .where(FieldPath.documentId(), '==', uid)
-    .get()
-    .catch(() => null);
-
-  if (!membershipsSnap) return;
-
-  const activeSchoolIds = [];
-  for (const membershipDoc of membershipsSnap.docs) {
-    const schoolId = membershipDoc.ref.parent.parent?.id;
-    const membership = membershipDoc.data() || {};
-    if (!schoolId) continue;
-
-    if (membership.status && membership.status !== 'active') {
-      await getSchoolDirectoryRef(schoolId, uid)
-        .delete()
-        .catch(() => null);
-      continue;
-    }
-
-    activeSchoolIds.push(schoolId);
-    await syncSchoolDirectoryEntry({
-      schoolId,
-      uid,
-      userData,
-      membership,
-    });
-  }
-
-  if (activeSchoolIds.length === 0) {
-    const schoolsSnap = await db
-      .collection('schools')
-      .get()
-      .catch(() => null);
-    for (const schoolDoc of schoolsSnap?.docs ?? []) {
-      await getSchoolDirectoryRef(schoolDoc.id, uid)
-        .delete()
-        .catch(() => null);
-    }
-  }
+  return directorySync.syncDirectoryEntriesForUser(db, uid, userData, {
+    getActiveSchoolMembership,
+  });
 }
 
 async function logAdminAction({ schoolId, action, details = '', actorUid = '', actorEmail = '' }) {
@@ -2600,27 +2537,10 @@ exports.onUserProfileChanged = onDocumentWritten(
     region: REGION,
     document: 'users/{uid}',
   },
-  async (event) => {
-    const uid = event.params.uid;
-    const afterData = event.data.after?.data();
-
-    if (!afterData) {
-      await syncDirectoryEntriesForUser(uid, null);
-      return;
-    }
-
-    try {
-      await syncAuthClaims(uid, afterData);
-    } catch (error) {
-      console.error('Failed to sync auth claims:', error);
-    }
-
-    try {
-      await syncDirectoryEntriesForUser(uid, afterData);
-    } catch (error) {
-      console.error('Failed to sync school directory entries:', error);
-    }
-  },
+  createUserProfileChangedHandler({
+    syncAuthClaims,
+    syncDirectoryEntriesForUser,
+  }),
 );
 
 exports.onSchoolMembershipChanged = onDocumentWritten(
@@ -2628,20 +2548,9 @@ exports.onSchoolMembershipChanged = onDocumentWritten(
     region: REGION,
     document: 'schools/{schoolId}/members/{uid}',
   },
-  async (event) => {
-    const { schoolId, uid } = event.params;
-    const membership = event.data.after?.data() || null;
-
-    try {
-      await syncSchoolDirectoryEntry({
-        schoolId,
-        uid,
-        membership,
-      });
-    } catch (error) {
-      console.error('Failed to sync school directory membership:', error);
-    }
-  },
+  createSchoolMembershipChangedHandler({
+    syncSchoolDirectoryEntry,
+  }),
 );
 
 exports.onCafeteriaOperatorChanged = onDocumentWritten(
@@ -2649,15 +2558,9 @@ exports.onCafeteriaOperatorChanged = onDocumentWritten(
     region: REGION,
     document: 'schools/{schoolId}/cafeterias/{cafeteriaId}/operators/{uid}',
   },
-  async (event) => {
-    const { schoolId, cafeteriaId } = event.params;
-
-    try {
-      await syncCafeteriaOperatorCount(schoolId, cafeteriaId);
-    } catch (error) {
-      console.error('Failed to sync cafeteria operator count:', error);
-    }
-  },
+  createCafeteriaOperatorChangedHandler({
+    syncCafeteriaOperatorCount,
+  }),
 );
 
 // =====================================================
@@ -3374,7 +3277,8 @@ exports.createGroup = onCall(
       schoolId,
       isPrivate: !!isPrivate,
       isPublished: Boolean(isPublished),
-      verification: verification || { status: 'unverified' },
+      // Imported names and caller-supplied flags never constitute teacher verification.
+      verification: { status: 'unverified' },
       joinCode,
       createdBy: uid,
       createdAt: FieldValue.serverTimestamp(),
@@ -4850,10 +4754,7 @@ exports.groupQuestionAssistantReply = onDocumentCreated(
     timeoutSeconds: 120,
     memory: '1GiB',
   },
-  async (event) => {
-    const { groupId, postId } = event.params;
-    await handleGroupQuestion({ groupId, postId, post: event.data?.data() });
-  },
+  createGroupQuestionAssistantReplyTrigger({ handleGroupQuestion }),
 );
 
 // =====================================================
@@ -4865,28 +4766,7 @@ exports.gradePublishedNotification = onDocumentCreated(
     document: 'schools/{schoolId}/grades/{gradeId}',
     region: REGION,
   },
-  async (event) => {
-    const { schoolId, gradeId } = event.params;
-    const grade = event.data?.data();
-
-    if (!grade) return;
-
-    console.log(`New grade published for user ${grade.userId}: ${grade.courseName}`);
-
-    await sendPushToUser(
-      grade.userId,
-      {
-        title: '📊 成績已公布',
-        body: `${grade.courseName} 成績已公布：${grade.letterGrade}`,
-      },
-      {
-        type: 'grade',
-        gradeId,
-        schoolId,
-        channel: 'grades',
-      },
-    );
-  },
+  createGradePublishedNotificationHandler({ sendPushToUser }),
 );
 
 // =====================================================
@@ -6347,5 +6227,16 @@ exports.puFetchTronClassData = onRequest(
 );
 
 exports.scheduledPushReceiptSweep = require('./pushReceiptSweep').scheduledPushReceiptSweep;
+exports.syncCampusAnnouncements = require('./campusAnnouncements/scheduled').syncCampusAnnouncements;
+exports.onCafeteriaStorefrontPostCreated = onDocumentCreated(
+  {
+    document: 'schools/{schoolId}/cafeterias/{cafeteriaId}/posts/{postId}',
+    region: REGION,
+  },
+  require('./storefront/notifyFollowers').createCafeteriaStorefrontPostHandler({
+    db,
+    sendPushToUser,
+  }),
+);
 
 console.log('Firebase Cloud Functions loaded successfully');

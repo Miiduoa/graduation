@@ -8,8 +8,25 @@
 import type { InboxTask, NextBestAction } from '../data/types';
 import type { CourseNavigationRole, NavigationLike } from '../utils/courseNavigation';
 import { navigateToCourseScreen } from '../utils/courseNavigation';
+import { safeNavigate } from '../utils/safeNavigate';
 import { aiOverlay } from '../app/useAIOverlay';
 import { recordCompanionEvent } from './companionSignalRecorder';
+
+function isNuniCourseId(id: string): boolean {
+  return /^cw_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+}
+
+function openNuniWork(
+  navigation: NavigationLike | null | undefined,
+  workspaceId: string,
+  workId: string,
+): boolean {
+  return safeNavigate(navigation, 'NuniWorkspace', {
+    tab: 'courses',
+    workspaceId,
+    assignmentId: workId,
+  });
+}
 
 export type InboxActionTarget =
   | 'submit_assignment'
@@ -158,6 +175,14 @@ export function navigateFromInboxTask(
   const role = navCtx.role;
 
   const fallBackToCourseHub = () => {
+    if (isNuniCourseId(courseId)) {
+      const opened = safeNavigate(navigation, 'NuniWorkspace', {
+        tab: 'courses',
+        workspaceId: courseId,
+      });
+      if (opened) emitInboxNavigationSignal(resolved);
+      return opened;
+    }
     navigateToCourseScreen(navigation, role, 'CourseHub', {
       groupId: task.groupId,
       groupName: task.groupName,
@@ -172,10 +197,20 @@ export function navigateFromInboxTask(
       if (typeof hwId !== 'string' || !hwId) {
         return fallBackToCourseHub();
       }
+      if (isNuniCourseId(courseId)) {
+        const opened = openNuniWork(navigation, courseId, hwId);
+        if (opened) emitInboxNavigationSignal(resolved);
+        return opened;
+      }
+      const dueAt =
+        task.dueAt instanceof Date && Number.isFinite(task.dueAt.getTime())
+          ? task.dueAt.toISOString()
+          : undefined;
       navigateToCourseScreen(navigation, role, 'HomeworkSubmit', {
         courseId,
         hwId,
         hwTitle: task.title,
+        ...(dueAt ? { dueAt } : {}),
       });
       emitInboxNavigationSignal(resolved);
       return true;
@@ -190,13 +225,29 @@ export function navigateFromInboxTask(
       emitInboxNavigationSignal(resolved);
       return true;
     }
-    case 'start_quiz':
-      navigateToCourseScreen(navigation, role, 'QuizCenter', {
+    case 'start_quiz': {
+      const quizId = resolved.params?.quizId ?? task.assignmentId;
+      if (typeof quizId !== 'string' || !quizId) {
+        return fallBackToCourseHub();
+      }
+      if (isNuniCourseId(courseId)) {
+        const opened = openNuniWork(navigation, courseId, quizId);
+        if (opened) emitInboxNavigationSignal(resolved);
+        return opened;
+      }
+      const dueAt =
+        task.dueAt instanceof Date && Number.isFinite(task.dueAt.getTime())
+          ? task.dueAt.toISOString()
+          : undefined;
+      navigateToCourseScreen(navigation, role, 'QuizTaking', {
         groupId: courseId,
         groupName: task.groupName,
+        quizId,
+        ...(dueAt ? { dueAt } : {}),
       });
       emitInboxNavigationSignal(resolved);
       return true;
+    }
 
     case 'attendance_checkin': {
       const sessionId = resolved.params?.sessionId;

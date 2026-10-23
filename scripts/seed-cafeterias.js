@@ -6,8 +6,11 @@
  *   schools/{schoolId}/cafeterias/{cafeteriaId}/menuItems  # 菜單品項
  *
  * 用法：
- *   GOOGLE_APPLICATION_CREDENTIALS=/path/to/sa.json node scripts/seed-cafeterias.js
- *   或設 FIRESTORE_EMULATOR_HOST=localhost:8080 後執行
+ *   FIRESTORE_EMULATOR_HOST=localhost:8080 node scripts/seed-cafeterias.js
+ *   或 NODE_ENV=test 且專案是 demo- / test- / campus-demo- 的明確測試環境
+ *
+ * 偵測到正式庫（campus-one-tw、正式 DATABASE_URL、NODE_ENV=production、
+ * 非本機模擬器）會直接停止。沒有繞過開關。
  *
  * 可選環境變數：
  *   SCHOOL_ID（預設 'pu'）
@@ -17,9 +20,296 @@
 
 const admin = require('firebase-admin');
 
+const DEFAULT_TEST_PROJECT = 'campus-demo-3a869';
+const PRODUCTION_PROJECTS = new Set(['campus-one-tw']);
+const PROJECT_ENV_KEYS = [
+  'GCLOUD_PROJECT',
+  'GOOGLE_CLOUD_PROJECT',
+  'FIREBASE_PROJECT_ID',
+  'FIREBASE_PROJECT',
+];
+const PRODUCTION_ENV_KEYS = ['NODE_ENV', 'APP_ENV', 'NEXT_PUBLIC_APP_ENV'];
+
+function text(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function listedProjectIds(env) {
+  const ids = PROJECT_ENV_KEYS.map((key) => text(env[key])).filter(Boolean);
+  return ids.length ? ids : [DEFAULT_TEST_PROJECT];
+}
+
+function resolveSeedProjectId(env = process.env) {
+  return (
+    text(env.GCLOUD_PROJECT) ||
+    text(env.GOOGLE_CLOUD_PROJECT) ||
+    text(env.FIREBASE_PROJECT_ID) ||
+    text(env.FIREBASE_PROJECT) ||
+    DEFAULT_TEST_PROJECT
+  );
+}
+
+function isTestProjectId(projectId) {
+  return /^(demo-|test-|campus-demo-)/.test(projectId);
+}
+
+function hostOf(value) {
+  const raw = text(value);
+  if (!raw) return '';
+  if (raw.startsWith('[')) {
+    const end = raw.indexOf(']');
+    return end > 1 ? raw.slice(1, end) : raw;
+  }
+  return raw.split('/')[0].split(':')[0];
+}
+
+function isLocalHost(host) {
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+}
+
+function databaseUrlIsLocal(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  if (url.hash) return false;
+  if (!isLocalHost(url.hostname)) return false;
+  const hostParam = url.searchParams.get('host');
+  return !hostParam || isLocalHost(hostParam);
+}
+
+function refuse(reason) {
+  throw new Error(`[seed] 拒絕寫入正式資料庫：${reason}。只允許本機模擬器或明確的測試環境。`);
+}
+
+function assertSafeCafeteriaSeedTarget(env = process.env) {
+  for (const key of PRODUCTION_ENV_KEYS) {
+    if (text(env[key]).toLowerCase() === 'production') {
+      refuse(`${key}=production`);
+    }
+  }
+  const projectIds = listedProjectIds(env);
+  const productionProject = projectIds.find((id) => PRODUCTION_PROJECTS.has(id));
+  if (productionProject) refuse(`Firebase 專案 ${productionProject}`);
+  const databaseUrl = text(env.DATABASE_URL);
+  if (databaseUrl && !databaseUrlIsLocal(databaseUrl)) {
+    refuse('DATABASE_URL 指向正式或遠端資料庫');
+  }
+  const emulator = text(env.FIRESTORE_EMULATOR_HOST);
+  if (emulator) {
+    if (!isLocalHost(hostOf(emulator))) refuse(`模擬器位址不是本機（${emulator}）`);
+    return;
+  }
+  const projectId = resolveSeedProjectId(env);
+  if (text(env.NODE_ENV).toLowerCase() === 'test' && isTestProjectId(projectId)) return;
+  refuse('沒有本機模擬器，也不是明確的測試環境');
+}
+
 const SCHOOL_ID = process.env.SCHOOL_ID || 'pu';
-const PROJECT_ID =
-  process.env.GCLOUD_PROJECT || process.env.FIREBASE_PROJECT_ID || 'campus-demo-3a869';
+
+const NCKU_HOUSING_URL = 'https://housing-osa.ncku.edu.tw/p/412-1052-4084.php';
+const NCKU_HOURS_URL = 'https://sites.google.com/view/ncku-cafeteria';
+
+function publicDiningRow(schoolId, slug, name, location, openingHours, description, sourceLabel, sourceUrl) {
+  return {
+    id: `${schoolId}-${slug}`,
+    name,
+    description,
+    location,
+    openingHours,
+    orderingEnabled: false,
+    merchantMode: 'info_only',
+    reviewStatus: 'unverified',
+    sourceLabel,
+    sourceUrl,
+    websiteUrl: sourceUrl,
+  };
+}
+
+const PUBLIC_DINING = {
+  ncku: [
+    publicDiningRow(
+      'ncku',
+      'kuangfu',
+      '光復餐廳',
+      '光復校區光二舍地下一樓',
+      '待補',
+      '學生宿舍餐廳。得標廠商為周氏蝦捲有限公司。營業時間見住宿服務組公告的顧客資訊網。',
+      '國立成功大學住宿服務組｜學生宿舍餐廳（115.8.28 更新）；營業時間見國立成功大學學生宿舍餐廳顧客資訊網',
+      NCKU_HOURS_URL,
+    ),
+    publicDiningRow(
+      'ncku',
+      'chingyeh',
+      '敬業餐廳',
+      '敬業校區敬一舍地下一樓',
+      '待補',
+      '學生宿舍餐廳。得標廠商為晨露朝食坊。營業時間見住宿服務組公告的顧客資訊網。',
+      '國立成功大學住宿服務組｜學生宿舍餐廳（115.8.28 更新）；營業時間見國立成功大學學生宿舍餐廳顧客資訊網',
+      NCKU_HOURS_URL,
+    ),
+    publicDiningRow(
+      'ncku',
+      'yunping-cafe',
+      '雲平咖啡',
+      '光復校區雲平大樓 1 樓',
+      '待補',
+      '校內其他餐飲資訊所列據點。菜單與營業時間待補。',
+      '國立成功大學住宿服務組｜學生宿舍餐廳（115.8.28 更新）',
+      NCKU_HOUSING_URL,
+    ),
+    publicDiningRow(
+      'ncku',
+      'ncku-hall-mall',
+      '成大會館 BOT 附設商場',
+      '勝利校區成大會館',
+      '待補',
+      '校內其他餐飲資訊所列據點。櫃位與營業時間待補。',
+      '國立成功大學住宿服務組｜學生宿舍餐廳（115.8.28 更新）',
+      NCKU_HOUSING_URL,
+    ),
+    publicDiningRow(
+      'ncku',
+      'med-4f',
+      '醫學院 4 樓簡易餐廳',
+      '成杏校區醫學院 4 樓',
+      '待補',
+      '校內其他餐飲資訊所列據點。菜單與營業時間待補。',
+      '國立成功大學住宿服務組｜學生宿舍餐廳（115.8.28 更新）',
+      NCKU_HOUSING_URL,
+    ),
+    publicDiningRow(
+      'ncku',
+      'youyang',
+      '優氧食光',
+      '生醫卓群大樓 1 樓',
+      '待補',
+      '校內其他餐飲資訊所列據點。菜單與營業時間待補。',
+      '國立成功大學住宿服務組｜學生宿舍餐廳（115.8.28 更新）',
+      NCKU_HOUSING_URL,
+    ),
+    publicDiningRow(
+      'ncku',
+      'chimei-mall',
+      '奇美樓 1 樓附設商場',
+      '自強校區奇美樓 1 樓',
+      '待補',
+      '校內其他餐飲資訊所列據點。櫃位與營業時間待補。',
+      '國立成功大學住宿服務組｜學生宿舍餐廳（115.8.28 更新）',
+      NCKU_HOUSING_URL,
+    ),
+    publicDiningRow(
+      'ncku',
+      'shinyuan',
+      '新園春室',
+      '成功校區',
+      '待補',
+      '校內其他餐飲資訊所列據點。菜單與營業時間待補。',
+      '國立成功大學住宿服務組｜學生宿舍餐廳（115.8.28 更新）',
+      NCKU_HOUSING_URL,
+    ),
+    publicDiningRow(
+      'ncku',
+      'hospital-mall',
+      '成大醫學院附設醫院地下商場',
+      '成大醫學院附設醫院地下商場',
+      '待補',
+      '校內其他餐飲資訊所列據點。櫃位與營業時間待補。',
+      '國立成功大學住宿服務組｜學生宿舍餐廳（115.8.28 更新）',
+      NCKU_HOUSING_URL,
+    ),
+  ],
+  ntpu: [
+    publicDiningRow(
+      'ntpu',
+      'youmi',
+      '優米自助餐',
+      '三峽校區心湖會館 1F（A 區）',
+      '週一至週五 10:30–14:00、16:30–19:30；週日 10:30–14:00；週六公休',
+      '自助餐、團體便當。',
+      '國立臺北大學總務處事務組｜饗樂北大｜美食 A 區',
+      'https://life.ntpu.edu.tw/gourmet/3_6/1',
+    ),
+    publicDiningRow(
+      'ntpu',
+      'bozhi',
+      '波之家石鍋料理',
+      '三峽校區心湖會館 1F（A 區）',
+      '週一至週五 11:00–19:00；週日 11:00–14:00；週六公休',
+      '韓式石鍋料理。',
+      '國立臺北大學總務處事務組｜饗樂北大｜美食 A 區',
+      'https://life.ntpu.edu.tw/gourmet/3_6/1',
+    ),
+    publicDiningRow(
+      'ntpu',
+      'thaile',
+      'Thai Le 泰料',
+      '三峽校區心湖會館 1F（A 區）',
+      '週一至週五 11:00–19:00；週日 11:00–14:00；週六公休',
+      '泰式料理。',
+      '國立臺北大學總務處事務組｜饗樂北大｜美食 A 區',
+      'https://life.ntpu.edu.tw/gourmet/3_6/1',
+    ),
+    publicDiningRow(
+      'ntpu',
+      '24ratio',
+      '24 個比例手搖飲／輕食',
+      '三峽校區心湖會館 1F（A 區）',
+      '週一至週五 10:00–19:00；週日 10:30–17:30；週六公休',
+      '手搖飲、輕食小點。',
+      '國立臺北大學總務處事務組｜饗樂北大｜美食 A 區',
+      'https://life.ntpu.edu.tw/gourmet/3_6/1',
+    ),
+    publicDiningRow(
+      'ntpu',
+      'chubao',
+      '初飽快餐',
+      '三峽校區心湖會館 1F（B 區）',
+      '週一至週五 11:00–19:00；週日 11:00–14:00；週六公休',
+      '中式快餐。',
+      '國立臺北大學總務處事務組｜饗樂北大｜初飽快餐',
+      'https://life.ntpu.edu.tw/gourmet_detail/63',
+    ),
+    publicDiningRow(
+      'ntpu',
+      'ahua',
+      'A 華加湯滷味',
+      '三峽校區心湖會館 1F（B 區）',
+      '週一至週五 10:30–19:30；週日 11:30–14:30；週六公休',
+      '滷味。特色餐點含藥燉鴨血、招牌滷蘿蔔。',
+      '國立臺北大學總務處事務組｜饗樂北大｜A華加湯滷味',
+      'https://life.ntpu.edu.tw/gourmet_detail/44',
+    ),
+    publicDiningRow(
+      'ntpu',
+      'chuqing',
+      '初晴食堂',
+      '三峽校區心湖會館 1F（B 區）',
+      '週一至週五 11:00–19:00；週日 10:00–14:00；週六公休',
+      '日式咖哩飯、丼飯。',
+      '國立臺北大學總務處事務組｜饗樂北大｜初晴食堂',
+      'https://life.ntpu.edu.tw/gourmet_detail/78',
+    ),
+    publicDiningRow(
+      'ntpu',
+      'papershoot',
+      'PaperShoot Café',
+      '三峽校區心湖會館 2F',
+      '週三至週一 10:30–18:00；週二公休',
+      '輕食、甜點、咖啡飲品。',
+      '國立臺北大學總務處事務組｜饗樂北大｜PaperShoot Café',
+      'https://life.ntpu.edu.tw/gourmet_detail/37',
+    ),
+  ],
+};
+
+function cafeteriasForSchool(schoolId) {
+  if (schoolId === 'pu') return CAFETERIAS;
+  return PUBLIC_DINING[schoolId] || [];
+}
+const PROJECT_ID = resolveSeedProjectId();
 
 function init() {
   if (admin.apps.length > 0) return;
@@ -50,6 +340,7 @@ const CAFETERIAS = [
     openTime: '07:00',
     closeTime: '19:00',
     orderingEnabled: true,
+    reviewStatus: 'unverified',
     merchantId: 'jingyuan',
     features: ['自助餐', '壽司', '滷味', '炸物', '蔬食'],
   },
@@ -64,6 +355,7 @@ const CAFETERIAS = [
     openTime: '07:00',
     closeTime: '19:00',
     orderingEnabled: true,
+    reviewStatus: 'unverified',
     merchantId: 'yiyuan',
     features: ['自助餐', '簡餐', '麵食', '蔬食'],
   },
@@ -78,6 +370,7 @@ const CAFETERIAS = [
     openTime: '07:30',
     closeTime: '20:00',
     orderingEnabled: true,
+    reviewStatus: 'unverified',
     merchantId: 'zhishan',
     features: ['便利商店', '滷味', '水果', '鬆餅'],
   },
@@ -152,17 +445,31 @@ async function seedOne(db, cafeteria) {
 }
 
 async function main() {
+  assertSafeCafeteriaSeedTarget(process.env);
   init();
   const db = admin.firestore();
   console.log(`[seed] schoolId=${SCHOOL_ID} project=${PROJECT_ID}`);
-  for (const c of CAFETERIAS) {
+  const rows = cafeteriasForSchool(SCHOOL_ID);
+  if (!rows.length) {
+    throw new Error(`[seed] 沒有 ${SCHOOL_ID} 的餐廳種子資料`);
+  }
+  for (const c of rows) {
     await seedOne(db, c);
   }
   console.log('[seed] DONE.');
   process.exit(0);
 }
 
-main().catch((e) => {
-  console.error('[seed] FAILED:', e?.message || e);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((e) => {
+    console.error('[seed] FAILED:', e?.message || e);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  assertSafeCafeteriaSeedTarget,
+  resolveSeedProjectId,
+  DEFAULT_TEST_PROJECT,
+  cafeteriasForSchool,
+};

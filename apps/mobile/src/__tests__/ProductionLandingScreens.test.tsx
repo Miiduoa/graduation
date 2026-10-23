@@ -26,6 +26,7 @@ let mockAuth: {
     studentId?: string;
   } | null;
   profileLoading: boolean;
+  error: string | null;
   signOutWithWarning: jest.Mock;
 };
 
@@ -98,6 +99,7 @@ beforeEach(() => {
       studentId: 'A123',
     },
     profileLoading: false,
+    error: null,
     signOutWithWarning: jest.fn().mockResolvedValue(true),
   };
   mockRoute = {
@@ -185,10 +187,9 @@ test('learning excludes tasks outside current memberships and opens a verified s
   await view.findByText('進行中的點名');
   expect(view.queryByText('不可列出的任務')).toBeNull();
   fireEvent.press(view.getByText('進行中的點名'));
-  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'Classroom', {
-    groupId: 'group-1',
-    groupName: '實際課程',
-    sessionId: 'session-1',
+  expect(mockNavigation.navigate).toHaveBeenCalledWith('學習', {
+    screen: 'AttendanceMultiMethod',
+    params: { courseId: 'group-1', sessionId: 'session-1' },
   });
 });
 
@@ -234,6 +235,17 @@ test('mock Firebase mode cannot turn on bus tracking or read live routes', async
   await view.findByText('目前無法讀取這條路線，請確認登入狀態與網路後重試。');
   expect(firebaseSource.listBusRoutes).not.toHaveBeenCalled();
   expect(Haptics.notificationAsync).not.toHaveBeenCalled();
+});
+
+test('my account shows the shared load-failure copy when the signed-in profile cannot be read', () => {
+  mockAuth.profile = null;
+  mockAuth.error = '暫時讀不到資料，請稍後再試';
+  const view = render(<MeAiFirstScreen />);
+  expect(view.getByText('暫時讀不到資料，請稍後再試')).toBeTruthy();
+  expect(view.queryByText('目前無法讀取個人檔案，請確認登入狀態。')).toBeNull();
+  mockAuth.error = '請確認網路後再試';
+  view.rerender(<MeAiFirstScreen />);
+  expect(view.getByText('請確認網路後再試')).toBeTruthy();
 });
 
 test('my account uses the signed-in profile without invented grades, identity or demo tools', () => {

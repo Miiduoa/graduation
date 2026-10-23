@@ -1,4 +1,4 @@
-import { buildUserSchoolCollectionPath } from '@campus/shared/src';
+import { buildUserSchoolCollectionPath, permissionDeniedError } from '@campus/shared/src';
 import {
   getDoc,
   getDocs,
@@ -12,7 +12,7 @@ import {
 } from 'firebase/firestore';
 
 import { collectionFromSegments, docFromSegments } from '../../data/firestorePath';
-import { getDb } from '../../firebase';
+import { getAuthInstance, getDb } from '../../firebase';
 import { loadPersistedValue, savePersistedValue } from '../../services/persistedStorage';
 import { getScopedStorageKey } from '../../services/scopedStorage';
 
@@ -180,6 +180,7 @@ export async function loadLeaderboardSnapshot(
   schoolId: string,
   queryLimit = 10,
 ): Promise<LeaderboardSnapshotRow[]> {
+  if (!getAuthInstance().currentUser) throw permissionDeniedError();
   const db = getDb();
   const snapshot = await getDocs(
     query(
@@ -204,6 +205,10 @@ export function subscribeLeaderboard(params: {
   queryLimit?: number;
   onChange: (rows: LeaderboardSnapshotRow[]) => void;
 }): Unsubscribe {
+  if (!getAuthInstance().currentUser) {
+    params.onChange([]);
+    return () => undefined;
+  }
   const db = getDb();
 
   return onSnapshot(

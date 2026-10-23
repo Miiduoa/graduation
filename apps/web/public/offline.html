@@ -9,6 +9,10 @@
       try {
         var preferences = JSON.parse(localStorage.getItem('campus-web-preferences') || 'null');
         var selectedTheme = preferences && preferences.appearance && preferences.appearance.theme;
+        var dark =
+          selectedTheme === 'dark' ||
+          (selectedTheme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.querySelector('meta[name="theme-color"]').content = dark ? '#000000' : '#f8f7f3';
         if (selectedTheme === 'light' || selectedTheme === 'dark') {
           document.documentElement.setAttribute('data-theme', selectedTheme);
         }
@@ -31,25 +35,25 @@
       @media (prefers-color-scheme: dark) {
         :root:not([data-theme='light']) {
           color-scheme: dark;
-          --bg: #171f1b;
-          --surface: #202b24;
-          --text: #e5eee3;
-          --muted: #a5b5a6;
-          --border: #37463b;
+          --bg: #000000;
+          --surface: #111111;
+          --text: #f2f3f1;
+          --muted: #a5aaa7;
+          --border: #2b2b2b;
           --brand: #a9c6a3;
-          --on-brand: #17291d;
+          --on-brand: #0b140e;
           --focus-ring: #d6b16a;
         }
       }
       :root[data-theme='dark'] {
         color-scheme: dark;
-        --bg: #171f1b;
-        --surface: #202b24;
-        --text: #e5eee3;
-        --muted: #a5b5a6;
-        --border: #37463b;
+        --bg: #000000;
+        --surface: #111111;
+        --text: #f2f3f1;
+        --muted: #a5aaa7;
+        --border: #2b2b2b;
         --brand: #a9c6a3;
-        --on-brand: #17291d;
+        --on-brand: #0b140e;
         --focus-ring: #d6b16a;
       }
       * {

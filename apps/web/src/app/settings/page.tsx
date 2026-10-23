@@ -9,11 +9,19 @@ import {
   defaultNotificationPreferences,
   normalizeNotificationPreferences,
 } from '@campus/shared/src';
+import {
+  AGENT_DELETE_MODEL_ACTION,
+  AGENT_MODEL_EVENT,
+  listAcceptedAgentConsentKeys,
+  notifyAgentModelChanged,
+} from '@campus/shared/src/todaySenseAgent';
+import { deleteTodaySenseModelCache } from '@/lib/todaySenseAgentRuntime';
 
 import { SiteShell } from '@/components/SiteShell';
 import { NuniAccountPanel } from '@/components/NuniAccountPanel';
 import { useNuniSession } from '@/features/nuni/Session';
 import { useToast } from '@/components/ui';
+import { useSignInOptions } from '@/lib/signInOptions';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import {
   getAuth,
@@ -157,7 +165,7 @@ export default function SettingsPage(props: {
   searchParams?: Promise<{ school?: string; schoolId?: string }>;
 }) {
   const searchParams = props.searchParams ? use(props.searchParams) : undefined;
-  const { schoolName, schoolSearch } = resolveSchoolPageContext(searchParams);
+  const { schoolSearch } = resolveSchoolPageContext(searchParams);
   const { user, loading } = useAuth();
   if (loading)
     return (
@@ -165,27 +173,13 @@ export default function SettingsPage(props: {
         <p role="status">確認帳號…</p>
       </SiteShell>
     );
-  return (
-    <SettingsContent
-      key={user?.uid ?? 'guest'}
-      user={user}
-      schoolName={schoolName}
-      schoolSearch={schoolSearch}
-    />
-  );
+  return <SettingsContent key={user?.uid ?? 'guest'} user={user} schoolSearch={schoolSearch} />;
 }
 
-function SettingsContent({
-  user,
-  schoolName,
-  schoolSearch,
-}: {
-  user: User | null;
-  schoolName: string;
-  schoolSearch: string;
-}) {
+function SettingsContent({ user, schoolSearch }: { user: User | null; schoolSearch: string }) {
   const { signOutUser } = useAuth();
   const nuni = useNuniSession();
+  const schoolLoginReady = useSignInOptions().studentId;
   const mounted = useRef(true);
   const profileLock = useRef(false);
   const notificationLock = useRef(false);
@@ -217,6 +211,26 @@ function SettingsContent({
   );
   const [localPrefsReady, setLocalPrefsReady] = useState(false);
   const [localPrefsSaved, setLocalPrefsSaved] = useState(true);
+  const [agentModelInstalled, setAgentModelInstalled] = useState(false);
+  const [agentModelMessage, setAgentModelMessage] = useState('');
+  const [deletingAgentModel, setDeletingAgentModel] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const refreshAgentModel = () => {
+      setAgentModelInstalled(listAcceptedAgentConsentKeys(window.localStorage).length > 0);
+    };
+    refreshAgentModel();
+    window.addEventListener('storage', refreshAgentModel);
+    window.addEventListener(AGENT_MODEL_EVENT, refreshAgentModel);
+    return () => {
+      window.removeEventListener('storage', refreshAgentModel);
+      window.removeEventListener(AGENT_MODEL_EVENT, refreshAgentModel);
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -479,7 +493,7 @@ function SettingsContent({
         <section className={styles.group} aria-label="校園與語言">
           <SettingRow
             title="校園服務資料來源"
-            subtitle={`${schoolName}。這是服務目前提供的資料來源，不代表你的帳號學籍或所屬學校。`}
+            subtitle="目前提供的是校園服務資料，不代表你的帳號學籍或所屬學校。"
           >
             <span className={styles.value}>校園服務</span>
           </SettingRow>
@@ -540,13 +554,15 @@ function SettingsContent({
               </Link>
             </section>
           )}
-          <section className={styles.notice}>
-            <h3>學校通知</h3>
-            <p>連線學校帳號後，可以調整學校公告、成績與校園訊息的通知偏好。</p>
-            <Link href="/login?reconnect=school&returnUrl=%2Fsettings" className="btn">
-              連線學校帳號
-            </Link>
-          </section>
+          {schoolLoginReady ? (
+            <section className={styles.notice}>
+              <h3>學校通知</h3>
+              <p>連線學校帳號後，可以調整學校公告、成績與校園訊息的通知偏好。</p>
+              <Link href="/login?reconnect=school&returnUrl=%2Fsettings" className="btn">
+                連線學校帳號
+              </Link>
+            </section>
+          ) : null}
         </div>
       );
     const notificationRows: Array<{
@@ -702,7 +718,7 @@ function SettingsContent({
           </button>
         </div>
         <div className={styles.group}>
-          <SettingRow title="色彩模式" subtitle="可跟隨裝置的明暗設定。">
+          <SettingRow title="色彩模式" subtitle="深色使用純黑背景，也可跟隨裝置的明暗設定。">
             <div className={styles.segmented} role="group" aria-label="色彩模式">
               {(
                 [
@@ -828,7 +844,37 @@ function SettingsContent({
           >
             <span className={styles.value}>本機保存</span>
           </SettingRow>
+          {agentModelInstalled ? (
+            <SettingRow
+              title="裝置端模型"
+              subtitle="刪除後自動退回規則版，不再用已下載的模型排序。"
+            >
+              <button
+                type="button"
+                className="btn"
+                disabled={deletingAgentModel}
+                onClick={async () => {
+                  if (deletingAgentModel) return;
+                  setDeletingAgentModel(true);
+                  try {
+                    for (const key of listAcceptedAgentConsentKeys(window.localStorage)) {
+                      window.localStorage.removeItem(key);
+                    }
+                    const result = await deleteTodaySenseModelCache();
+                    notifyAgentModelChanged();
+                    setAgentModelInstalled(false);
+                    setAgentModelMessage(result.message);
+                  } finally {
+                    setDeletingAgentModel(false);
+                  }
+                }}
+              >
+                {AGENT_DELETE_MODEL_ACTION}
+              </button>
+            </SettingRow>
+          ) : null}
         </div>
+        {agentModelMessage ? <p role="status">{agentModelMessage}</p> : null}
         <div>
           <Link className="btn" href={`/privacy${schoolSearch}`}>
             查看隱私政策
@@ -879,15 +925,17 @@ function SettingsContent({
               </Link>
             </section>
           )}
-          <section className={styles.notice}>
-            <h3>校園個人資料</h3>
-            <p>
-              學校帳號尚未連線。連線後可查看與編輯校園個人資料；填寫學號或系所不會取得學校權限。
-            </p>
-            <Link href="/login?reconnect=school&returnUrl=%2Fsettings" className="btn">
-              連線學校帳號
-            </Link>
-          </section>
+          {schoolLoginReady ? (
+            <section className={styles.notice}>
+              <h3>校園個人資料</h3>
+              <p>
+                學校帳號尚未連線。連線後可查看與編輯校園個人資料；填寫學號或系所不會取得學校權限。
+              </p>
+              <Link href="/login?reconnect=school&returnUrl=%2Fsettings" className="btn">
+                連線學校帳號
+              </Link>
+            </section>
+          ) : null}
           {logoutControl}
         </div>
       );

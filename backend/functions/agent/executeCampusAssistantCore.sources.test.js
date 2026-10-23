@@ -539,7 +539,11 @@ test('a school change between runtime and core discards prefetched private data 
     row('today', { schoolId: 'pu', content: '先前學校的私人摘要' }),
   ]);
   mockDocuments.set('schools/nthu/announcements', [
-    row('notice-new', { schoolId: 'nthu', title: '目前學校的正式公告' }),
+    row('notice-new', {
+      schoolId: 'nthu',
+      title: '目前學校的正式公告',
+      publishedAt: new Date('2026-10-08T00:00:00Z'),
+    }),
   ]);
   let profileReads = 0;
   mockReadHook = (path) => {

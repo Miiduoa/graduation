@@ -65,7 +65,12 @@ it('uses real directory state and does not transfer an account school choice to 
       response(
         url === '/api/nuni/session'
           ? { authenticated: false }
-          : { schools: [{ id: 'pu', name: '靜宜大學', status: 'not-open' }] },
+          : {
+              schools: [
+                { id: 'pu', name: '靜宜大學', status: 'not-open' },
+                { id: 'nthu', name: '國立清華大學', status: 'open' },
+              ],
+            },
       ),
     ),
   );
@@ -75,8 +80,8 @@ it('uses real directory state and does not transfer an account school choice to 
     </CampusProviders>,
   );
   await screen.findByRole('combobox', { name: '瀏覽校園' });
-  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'pu' } });
-  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('pu'));
+  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'nthu' } });
+  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('nthu'));
   expect(screen.getByRole('option', { name: /靜宜大學.*校務尚未開通/ })).toBeTruthy();
   user.uid = 'bob';
   view.rerender(
@@ -84,6 +89,5 @@ it('uses real directory state and does not transfer an account school choice to 
       <View />
     </CampusProviders>,
   );
-  await act(async () => {});
-  expect(screen.getByRole('status').textContent).toBe('all');
+  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('pu'));
 });

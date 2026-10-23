@@ -1,4 +1,8 @@
+import { CourseAccessError, courseMetadata, courseRecord, parseCourseCandidate, sameCourseScope } from '@campus/shared/src/courseAccess';
+import { parseCourseRequest, parseCourseRequests, parseCourseWorkspace, isCourseAccessPath } from '@campus/shared/src/courseAccessClient';
 import { NextRequest, NextResponse } from 'next/server';
+import { handleFood, isFoodResource } from './food';
+import { handlePersonalImportSync } from './personalImportSync';
 import {
   createNuniClasses,
   NuniError,
@@ -11,6 +15,10 @@ import {
   parseMerchantWorkspaces,
   validateMerchantApplicationInput,
 } from '@campus/shared/src/nuniMerchant';
+import {
+  createMerchantOperations,
+  validateMerchantAvailabilityInput,
+} from '@campus/shared/src/nuniMerchantOperations';
 import {
   parseNuniMemberships,
   parseMembershipRequestReceipt,
@@ -25,6 +33,7 @@ import {
   nuniEnabled,
   platformRequest,
   publicOrigin,
+  readPlatformAuthorization,
   readSession,
   requireSameOrigin,
   requireSession,
@@ -32,6 +41,14 @@ import {
   sessionContext,
   setCookie,
 } from './server';
+import {
+  handleAssignmentFileRequest,
+  hydrateAssignmentFiles,
+  hydrateSubmissionFiles,
+  isAssignmentFileMutation,
+  isAssignmentFileQuery,
+} from './assignmentFileRoutes';
+import { assignmentFileSubmitEnabled } from './assignmentFileService';
 
 const WORKSPACE = /^cw_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const ASSIGNMENT = /^cwa_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -77,26 +94,58 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
     if (!nuniEnabled() && path !== 'session' && path !== 'logout') {
       // Existing sessions still need verification and revocation when courses are disabled.
       if (request.method === 'GET' && !request.nextUrl.search) {
-        if (path === 'sign-in-options') return jsonResponse({ google: false });
+        if (path === 'sign-in-options') return jsonResponse({ google: false, studentId: false });
       }
       throw new NuniError(404, 'NOT_FOUND');
     }
     const method = request.method;
-    if (method !== 'GET' && method !== 'POST') throw new NuniError(405, 'METHOD_NOT_ALLOWED');
-    if (request.nextUrl.search) throw new NuniError(400, 'INVALID_INPUT');
-    if (method === 'POST') requireSameOrigin(request);
+    if (method !== 'GET' && method !== 'POST' && method !== 'PUT')
+      throw new NuniError(405, 'METHOD_NOT_ALLOWED');
+    const fileEnabled = assignmentFileSubmitEnabled();
+    const fileMutation = fileEnabled && isAssignmentFileMutation(method, segments);
+    const fileContent = fileEnabled && isAssignmentFileQuery(segments);
+    if (
+      method === 'PUT' &&
+      !fileMutation &&
+      !(
+        segments.length === 4 &&
+        segments[0] === 'merchant-workspaces' &&
+        segments[3] === 'settings'
+      )
+    )
+      throw new NuniError(405, 'METHOD_NOT_ALLOWED');
+    const isMaterialsPage =
+      method === 'GET' &&
+      segments.length === 4 &&
+      segments[0] === 'class-workspaces' &&
+      segments[2] === 'materials' &&
+      segments[3] === 'page';
+    if (isMaterialsPage &&
+      (Array.from(request.nextUrl.searchParams.keys()).some((key) => key !== 'cursor') ||
+        request.nextUrl.searchParams.getAll('cursor').length > 1))
+      throw new NuniError(400, 'INVALID_INPUT');
+    if (request.nextUrl.search && !isFoodResource(segments) && !isMaterialsPage && !(method === 'GET' && fileContent))
+      throw new NuniError(400, 'INVALID_INPUT');
+    if (method !== 'GET' && !(fileMutation && readPlatformAuthorization(request)))
+      requireSameOrigin(request);
+    const fileResponse = await handleAssignmentFileRequest(request, segments);
+    if (fileResponse) return fileResponse;
+    if (isFoodResource(segments)) return await handleFood(request, segments);
+    if (path === 'personal-imports/read' || path === 'personal-imports/write')
+      return await handlePersonalImportSync(request, path.endsWith('/read') ? 'read' : 'write');
     if (method === 'GET' && path === 'sign-in-options') {
       publicOrigin();
-      if (
-        process.env.PLATFORM_GOOGLE_LOGIN_ENABLED !== 'true' ||
-        !process.env.PLATFORM_GOOGLE_CLIENT_SECRET?.trim() ||
-        (process.env.BFF_SESSION_SECRET?.trim().length ?? 0) < 32
-      ) {
-        return jsonResponse({ google: false });
-      }
+      const googleReady =
+        process.env.PLATFORM_GOOGLE_LOGIN_ENABLED === 'true' &&
+        !!process.env.PLATFORM_GOOGLE_CLIENT_SECRET?.trim() &&
+        (process.env.BFF_SESSION_SECRET?.trim().length ?? 0) >= 32;
       const result = nuniRecord(await platformRequest('providers'));
-      if (!Array.isArray(result.kinds)) throw new NuniError(502, 'INVALID_RESPONSE');
-      return jsonResponse({ google: result.kinds.includes('google-consumer') });
+      if (!Array.isArray(result.kinds) || result.kinds.some((kind) => typeof kind !== 'string'))
+        throw new NuniError(502, 'INVALID_RESPONSE');
+      return jsonResponse({
+        google: googleReady && result.kinds.includes('google-consumer'),
+        studentId: result.kinds.includes('school-issued') || result.kinds.includes('student-id'),
+      });
     }
     if (method === 'GET' && path === 'session') {
       const session = readSession(request);
@@ -113,6 +162,7 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
           authenticated: true,
           ...principal,
           context: sessionContext(session),
+          ...(assignmentFileSubmitEnabled() ? { assignmentFileSubmit: true } : {}),
         });
       } catch (error) {
         if (error instanceof NuniError && error.status === 401)
@@ -178,11 +228,88 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
         throw new NuniError(502, 'INVALID_RESPONSE');
       return jsonResponse(result, 201);
     }
+    if (segments[0] === 'course-access') {
+      if (method !== 'POST' || !isCourseAccessPath(path)) throw new NuniError(404, 'NOT_FOUND');
+      const session = requireSession(request);
+      const input = courseRecord(await boundedJson(request, 8192));
+      const result = await platformRequest(path, session, input);
+      if (path === 'course-access/workspace-course') {
+        if (typeof input.workspaceId !== 'string' || typeof input.schoolId !== 'string')
+          throw new NuniError(422, 'INVALID_INPUT');
+        return jsonResponse(parseCourseWorkspace(result, input.workspaceId, input.schoolId));
+      }
+      if (path === 'course-access/match') {
+        const scope = courseMetadata(input), response = courseRecord(result);
+        if (!Array.isArray(response.candidates) || response.candidates.length > 200 || typeof response.truncated !== 'boolean')
+          throw new NuniError(502, 'INVALID_RESPONSE');
+        const candidates = response.candidates.map(parseCourseCandidate);
+        if (candidates.some(item => !sameCourseScope(item, scope)) || new Set(candidates.map(item => item.id)).size !== candidates.length)
+          throw new NuniError(502, 'INVALID_RESPONSE');
+        return jsonResponse({ candidates, truncated: response.truncated });
+      }
+      if (path === 'course-access/requests' || path === 'course-access/reviews') {
+        const response = parseCourseRequests(result);
+        if (path.endsWith('/reviews') && response.requests.some(item => item.metadata.schoolId !== input.schoolId))
+          throw new NuniError(502, 'INVALID_RESPONSE');
+        // Never return reviewer-only identity fields on the applicant endpoint.
+        if (path.endsWith('/requests')) response.requests = response.requests.map(({ applicantId: _applicantId, ...item }) => item);
+        return jsonResponse(response);
+      }
+      const response = parseCourseRequest(result);
+      if ((segments.length === 4 && response.id !== segments[2]) ||
+          (path.endsWith('/student-requests') && (response.kind !== 'student' || response.courseId !== input.courseId)) ||
+          (path.endsWith('/teacher-requests') && (response.kind !== 'teacher' || response.workspaceId !== input.workspaceId)))
+        throw new NuniError(502, 'INVALID_RESPONSE');
+      return jsonResponse(response);
+    }
+    if (segments[0] === 'merchant-workspaces' && segments.length > 1) {
+      const session = requireSession(request);
+      const operations = createMerchantOperations((resource, input, verb) =>
+        platformRequest(resource, session, input, undefined, verb),
+      );
+      const identity = { tenantId: segments[1], locationId: segments[2] };
+      if (method === 'GET' && segments.length === 3)
+        return jsonResponse(await operations.get(identity.tenantId, identity.locationId));
+      if (segments.length !== 4) throw new NuniError(404, 'NOT_FOUND');
+      const action = segments[3];
+      if (method === 'PUT' && action === 'settings')
+        return jsonResponse(
+          await operations.updateSettings(
+            identity.tenantId,
+            identity.locationId,
+            await boundedJson(request, 4096),
+          ),
+        );
+      if (method === 'POST' && action === 'initial-menu')
+        return jsonResponse(
+          await operations.createInitialMenu(
+            identity.tenantId,
+            identity.locationId,
+            await boundedJson(request, 512 * 1024),
+          ),
+          201,
+        );
+      if (method === 'POST' && action === 'activate') {
+        const body = nuniRecord(await boundedJson(request, 1024));
+        if (Object.keys(body).length) throw new NuniError(422, 'INVALID_INPUT');
+        return jsonResponse(await operations.activate(identity.tenantId, identity.locationId));
+      }
+      if (method === 'POST' && action === 'availability')
+        return jsonResponse(
+          await operations.setAvailability(
+            identity.tenantId,
+            identity.locationId,
+            validateMerchantAvailabilityInput(await boundedJson(request, 1024)).acceptingOrders,
+          ),
+        );
+      throw new NuniError(405, 'METHOD_NOT_ALLOWED');
+    }
     if (segments[0] !== 'class-workspaces') throw new NuniError(404, 'NOT_FOUND');
-    const session = requireSession(request);
+    const session =
+      (fileEnabled ? readPlatformAuthorization(request) : null) ?? requireSession(request);
     let principal: Promise<string> | undefined;
     const classes = createNuniClasses(
-      (resource, input) => platformRequest(resource, session, input),
+      (resource, input, query) => platformRequest(resource, session, input, query),
       () =>
         (principal ??= platformRequest('sessions/current', session).then(
           (value) => parseNuniPrincipal(value).platformAccountId,
@@ -196,16 +323,34 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
       if (segments.length === 1) return jsonResponse({ workspaces: await classes.list() });
       if (!WORKSPACE.test(id || '')) throw new NuniError(404, 'NOT_FOUND');
       if (segments.length === 2) return jsonResponse(await classes.get(id));
+      if (isMaterialsPage)
+        return jsonResponse(
+          await classes.materialsPage(id, request.nextUrl.searchParams.get('cursor') ?? undefined),
+        );
       if (segments.length === 3) {
         if (segments[2] === 'units') return jsonResponse({ units: await classes.units(id) });
         if (segments[2] === 'materials')
           return jsonResponse({ materials: await classes.materials(id) });
-        if (segments[2] === 'assignments')
-          return jsonResponse({ assignments: await classes.assignments(id) });
+        if (segments[2] === 'assignments') {
+          const items = await classes.assignments(id);
+          if (!assignmentFileSubmitEnabled()) return jsonResponse({ assignments: items });
+          const workspace = await classes.get(id);
+          return jsonResponse({
+            assignments: await hydrateAssignmentFiles(request, workspace, items),
+          });
+        }
         if (segments[2] === 'quizzes') return jsonResponse({ quizzes: await classes.quizzes(id) });
       }
-      if (segments.length === 5 && isAssignment && segments[4] === 'submissions')
-        return jsonResponse({ submissions: await classes.submissions(id, activityId) });
+      if (segments.length === 5 && isAssignment && segments[4] === 'submissions') {
+        const submissions = await classes.submissions(id, activityId);
+        if (!assignmentFileSubmitEnabled()) return jsonResponse({ submissions });
+        const [workspace, assignments] = await Promise.all([classes.get(id), classes.assignments(id)]);
+        const assignment = assignments.find((item) => item.id === activityId);
+        if (!assignment) throw new NuniError(404, 'NOT_FOUND');
+        return jsonResponse({
+          submissions: await hydrateSubmissionFiles(request, workspace, assignment, submissions),
+        });
+      }
       if (segments.length === 5 && isQuiz && segments[4] === 'responses')
         return jsonResponse({ responses: await classes.quizResponses(id, activityId) });
     } else {
@@ -323,6 +468,6 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
     }
     throw new NuniError(404, 'NOT_FOUND');
   } catch (error) {
-    return errorResponse(error);
+    return errorResponse(error instanceof CourseAccessError ? new NuniError(error.statusCode, error.code) : error);
   }
 }

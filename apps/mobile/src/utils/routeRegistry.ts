@@ -47,6 +47,7 @@ export const ROUTE_TO_TAB: Record<string, TabName> = {
   CourseModules: '學習',
   CourseCatalog: '學習',
   CourseSchedule: '學習',
+  PersonalImport: '學習',
   CourseMaterialViewer: '學習',
   CourseDiscussion: '學習',
   DiscussionThreadDetail: '學習',
@@ -124,6 +125,9 @@ export const ROUTE_TO_TAB: Record<string, TabName> = {
   LostFoundPost: '校園',
   PrintService: '校園',
   餐廳總覽: '校園',
+  Cafeteria: '校園',
+  Storefront: '校園',
+  HonestOrder: '校園',
   MenuDetail: '校園',
   MenuSubscription: '校園',
   Ordering: '校園',
@@ -147,6 +151,7 @@ export const ROUTE_TO_TAB: Record<string, TabName> = {
 
   // ── 我的 tab（hidden tab，drawer 進入）─────────────────
   MeHome: '我的',
+  SSOLogin: '我的',
   NuniWorkspace: '我的',
   ProfileEdit: '我的',
   Settings: '我的',

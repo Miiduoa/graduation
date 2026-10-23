@@ -7,6 +7,7 @@ RUN npm install --global pnpm@10.28.2 --ignore-scripts --no-audit --no-fund
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/web/package.json ./apps/web/package.json
 COPY packages/shared/package.json ./packages/shared/package.json
+COPY vendor/xlsx-0.20.3.tgz ./vendor/xlsx-0.20.3.tgz
 RUN pnpm install --frozen-lockfile --filter web... --ignore-scripts
 COPY tsconfig.json ./
 COPY apps/web/ ./apps/web/
@@ -20,6 +21,8 @@ ARG NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
 ARG NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
 ARG NEXT_PUBLIC_FIREBASE_APP_ID
 ARG NEXT_PUBLIC_SITE_URL=https://nuni.tw
+ARG NEXT_PUBLIC_FUNCTIONS_BASE_URL
+ENV NEXT_PUBLIC_FUNCTIONS_BASE_URL=$NEXT_PUBLIC_FUNCTIONS_BASE_URL
 ENV NEXT_PUBLIC_CLOUD_FUNCTION_REGION=asia-east1
 ENV NEXT_PUBLIC_DEFAULT_SCHOOL_ID=pu
 ENV NEXT_PUBLIC_ALLOW_LOCAL_MOCK_AUTH=false

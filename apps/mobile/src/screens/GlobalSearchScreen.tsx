@@ -162,7 +162,8 @@ export function GlobalSearchScreen(props: any) {
 
     if (category === 'all' || category === 'announcements') {
       announcements.forEach((a) => {
-        const text = `${a.title ?? ''} ${a.body ?? ''} ${a.source ?? ''}`.toLowerCase();
+        const text =
+          `${a.title ?? ''} ${a.body ?? ''} ${a.summary ?? ''} ${a.source ?? ''} ${a.office ?? ''} ${a.sourceId ?? ''}`.toLowerCase();
         if (text.includes(q)) {
           allResults.push({
             id: a.id,

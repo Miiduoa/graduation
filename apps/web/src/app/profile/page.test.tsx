@@ -25,7 +25,17 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock('@/features/nuni/Session', () => ({
   useNuniSession: () => state.nuni,
-  browserRequest: vi.fn(async () => ({ memberships: [] })),
+  browserRequest: vi.fn(async (path: string) => {
+    if (path === 'memberships') return { memberships: [] };
+    if (path === 'class-workspaces') return { workspaces: [] };
+    if (path === 'merchant-applications') return { applications: [] };
+    if (path === 'merchant-workspaces') return { workspaces: [] };
+    throw new Error(path);
+  }),
+}));
+vi.mock('@/lib/signInOptions', () => ({
+  useSignInOptions: () => ({ google: true, studentId: false, loading: false, retry: vi.fn() }),
+  STUDENT_ID_PREPARING_COPY: '學號登入還在準備，目前請用 Google 帳號登入',
 }));
 vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({ user: state.user, loading: state.loading, error: null }),
@@ -67,9 +77,20 @@ it('shows a retryable failure without presenting empty records as success', asyn
   state.read.mockRejectedValueOnce(new Error('offline'));
   render(<ProfilePage />);
   await screen.findByRole('alert');
+  expect(screen.getByText(/暫時讀不到資料，請稍後再試/)).toBeTruthy();
+  expect(screen.queryByText(/請確認網路後再試/)).toBeNull();
   expect(screen.queryByText('尚未填寫個人資料，可以到帳號設定補上。')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '重新讀取' }));
   await screen.findByText('私人資料 A');
+});
+
+it('asks to check the network only when a profile read fails at the network layer', async () => {
+  Object.defineProperty(window.navigator, 'onLine', { configurable: true, value: true });
+  state.read.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+  render(<ProfilePage />);
+  await screen.findByRole('alert');
+  expect(screen.getByText(/請確認網路後再試/)).toBeTruthy();
+  expect(screen.queryByText(/暫時讀不到資料，請稍後再試/)).toBeNull();
 });
 it('distinguishes a missing profile from a failed read', async () => {
   state.read.mockResolvedValue({ exists: () => false });
@@ -95,8 +116,8 @@ it('clears the prior account immediately and ignores a response after logout', a
   rerender(<ProfilePage />);
   await act(async () => finish(snapshot('私人資料 B')));
   expect(screen.queryByText('私人資料 B')).toBeNull();
-  expect(screen.getByRole('link', { name: '登入帳號' }).getAttribute('href')).toContain(
-    'returnUrl=%2Fprofile',
+  expect(screen.getByRole('link', { name: '登入帳號' }).getAttribute('href')).toBe(
+    '/classroom/login?returnUrl=%2Fprofile',
   );
 });
 it('does not read personal data before authentication resolves', () => {
@@ -110,6 +131,8 @@ it('recognizes a course-only account without inventing school records or a globa
   state.user = null;
   state.nuni.session = { platformAccountId: 'pa_a', context: 'a', isPlatformOperator: false };
   render(<ProfilePage />);
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.getByRole('region', { name: 'Google 帳號' })).toBeTruthy();
   expect(screen.getByText('Google 帳號已登入')).toBeTruthy();
   expect(screen.getByRole('link', { name: '查看我的課程' }).getAttribute('href')).toBe(
     '/classroom',
@@ -117,9 +140,8 @@ it('recognizes a course-only account without inventing school records or a globa
   expect(screen.getByRole('link', { name: '學校資格' }).getAttribute('href')).toBe(
     '/classroom/account',
   );
-  expect(screen.getByRole('link', { name: '連線學校帳號' }).getAttribute('href')).toContain(
-    'reconnect=school',
-  );
+  expect(screen.queryByRole('link', { name: '連線學校帳號' })).toBeNull();
+  expect(screen.queryByText('連線學校帳號，查看學校資料')).toBeNull();
   expect(screen.queryByText('登入後，查看你的資料')).toBeNull();
   expect(screen.queryByRole('link', { name: /平台管理/ })).toBeNull();
   expect(screen.queryByText('學號')).toBeNull();

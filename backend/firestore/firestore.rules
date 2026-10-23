@@ -64,10 +64,29 @@ service cloud.firestore {
       return isSignedIn() && isCafeteriaOperator(schoolId, cafeteriaId, request.auth.uid);
     }
 
+    function isHttpsStorefrontUrl(value) {
+      return value is string
+        && value.size() > 0
+        && value.size() <= 2048
+        && value.matches('^[Hh][Tt][Tt][Pp][Ss]://[^\\s]+$')
+        && !value.matches('^[Hh][Tt][Tt][Pp][Ss]://[^/]*@.*')
+        && !value.matches('.*\\p{Cc}.*');
+    }
+
+    function isOptionalStorefrontUrl(value) {
+      return value is string && (value == '' || isHttpsStorefrontUrl(value));
+    }
+
+    function cafeteriaStorefrontUrlsAllowed() {
+      return (!('websiteUrl' in request.resource.data) || isOptionalStorefrontUrl(request.resource.data.websiteUrl))
+        && (!('orderingUrl' in request.resource.data) || isOptionalStorefrontUrl(request.resource.data.orderingUrl));
+    }
+
     function isActiveGroupMember(groupId) {
       return isSignedIn()
         && exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid))
-        && get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.status == 'active';
+        && get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.status == 'active'
+        && isSchoolMember(get(/databases/$(database)/documents/groups/$(groupId)).data.schoolId);
     }
 
     function canManageGroup(groupId) {
@@ -442,17 +461,66 @@ service cloud.firestore {
 
       match /cafeterias/{cafeteriaId} {
         allow read: if true;
-        allow create, delete: if hasEditorRole(schoolId);
-        allow update: if hasEditorRole(schoolId) || (
+        allow create: if hasEditorRole(schoolId) && cafeteriaStorefrontUrlsAllowed();
+        allow delete: if hasEditorRole(schoolId);
+        allow update: if cafeteriaStorefrontUrlsAllowed() && (
+          hasEditorRole(schoolId) || (
           requesterIsCafeteriaOperator(schoolId, cafeteriaId)
           && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['openingHours', 'updatedAt', 'sourceLabel'])
-        );
+            .hasOnly([
+              'openingHours', 'updatedAt', 'sourceLabel', 'intro', 'coverUrl',
+              'location', 'websiteUrl', 'orderingUrl', 'merchantMode', 'menuSource',
+              'menuSyncedAt'
+            ])
+          && request.resource.data.orderingEnabled == resource.data.orderingEnabled
+          && request.resource.data.pilotStatus == resource.data.pilotStatus
+          && (
+            !('merchantMode' in request.resource.data)
+            || request.resource.data.merchantMode in ['showcase_link', 'info_only']
+            || (
+              request.resource.data.merchantMode == 'native_order'
+              && resource.data.get('merchantMode', 'native_order') == 'native_order'
+            )
+          )
+        ));
 
         match /operators/{uid} {
           allow read: if isSelf(uid) || hasEditorRole(schoolId);
           allow create, update, delete: if hasEditorRole(schoolId);
         }
+
+        match /posts/{postId} {
+          allow read: if true;
+          allow create, update, delete: if hasEditorRole(schoolId)
+            || requesterIsCafeteriaOperator(schoolId, cafeteriaId);
+
+          match /likes/{uid} {
+            allow read: if isSignedIn();
+            allow create, delete: if isSelf(uid);
+            allow update: if false;
+          }
+
+          match /comments/{commentId} {
+            allow read: if isSignedIn();
+            allow create: if isSignedIn()
+              && request.resource.data.authorId == request.auth.uid
+              && request.resource.data.text is string
+              && request.resource.data.text.size() >= 1
+              && request.resource.data.text.size() <= 2000;
+            allow update, delete: if isSignedIn() && resource.data.authorId == request.auth.uid;
+          }
+        }
+
+        match /followers/{uid} {
+          allow read: if isSignedIn();
+          allow create, delete: if isSelf(uid);
+          allow update: if false;
+        }
+      }
+
+      match /announcement-sources/{sourceId} {
+        allow read: if true;
+        allow write: if false;
       }
 
       match /announcements/{docId} {
@@ -465,7 +533,7 @@ service cloud.firestore {
         allow create, update, delete: if hasEditorRole(schoolId);
 
         match /reviews/{reviewId} {
-          allow read: if true;
+          allow read: if isSignedIn();
           allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
           allow update, delete: if hasEditorRole(schoolId)
             || (isSignedIn() && resource.data.uid == request.auth.uid);
@@ -499,7 +567,7 @@ service cloud.firestore {
         }
 
         match /reviews/{reviewId} {
-          allow read: if true;
+          allow read: if isSignedIn();
           allow create: if isSignedIn()
             && reviewId == request.auth.uid
             && request.resource.data.uid == request.auth.uid;
@@ -536,7 +604,7 @@ service cloud.firestore {
         );
 
         match /reviews/{reviewId} {
-          allow read: if true;
+          allow read: if isSignedIn();
           allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
           allow update, delete: if hasEditorRole(schoolId)
             || (isSignedIn() && resource.data.uid == request.auth.uid);
@@ -593,7 +661,7 @@ service cloud.firestore {
       }
 
       match /lostFound/{docId} {
-        allow read: if true;
+        allow read: if isSignedIn();
         allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
         allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
       }
@@ -613,7 +681,7 @@ service cloud.firestore {
       }
 
       match /leaderboard/{docId} {
-        allow read: if true;
+        allow read: if isSignedIn();
         allow write: if false;
       }
 
@@ -668,7 +736,7 @@ service cloud.firestore {
       }
 
       match /pulseAggregates/{aggregateId} {
-        allow read: if true;
+        allow read: if isSignedIn();
         allow write: if false;
       }
 
@@ -810,14 +878,18 @@ service cloud.firestore {
       allow read: if isActiveGroupMember(groupId);
       allow create: if isSignedIn()
         && request.resource.data.schoolId != null
-        && isSchoolMember(request.resource.data.schoolId);
-      allow update: if canManageGroup(groupId) && request.resource.data.schoolId == resource.data.schoolId;
+        && isSchoolMember(request.resource.data.schoolId)
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.get('verification', {'status': 'unverified'}) == {'status': 'unverified'};
+      allow update: if canManageGroup(groupId)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['schoolId', 'createdBy', 'verification', 'type']);
       allow delete: if canManageGroup(groupId);
 
       match /members/{uid} {
         allow read: if isActiveGroupMember(groupId);
         allow create: if false;
-        allow update: if canManageGroup(groupId);
+        allow update: if canManageGroup(groupId)
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['uid', 'role', 'joinedAt']);
         allow delete: if canManageGroup(groupId);
       }
 
@@ -1139,6 +1211,18 @@ service cloud.firestore {
         match /orders/{orderId} {
           allow read: if isSelf(uid);
           allow write: if false;
+        }
+
+        match /externalOrders/{orderId} {
+          allow read: if isSelf(uid);
+          allow create: if isSelf(uid)
+            && request.resource.data.fulfillment == 'external'
+            && request.resource.data.schoolId == schoolId
+            && request.resource.data.cafeteriaId is string
+            && isHttpsStorefrontUrl(request.resource.data.orderingUrl)
+            && !('queueNumber' in request.resource.data)
+            && !('paymentStatus' in request.resource.data);
+          allow update, delete: if false;
         }
 
         match /transactions/{transactionId} {
@@ -1560,7 +1644,7 @@ service cloud.firestore {
     }
 
     match /menuRatings/{docId} {
-      allow read: if true;
+      allow read: if isSignedIn();
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
       allow update: if isSignedIn()
         && resource.data.userId == request.auth.uid
@@ -1659,7 +1743,7 @@ service cloud.firestore {
 
     // Lost & Found (global)
     match /lostFoundItems/{docId} {
-      allow read: if true;
+      allow read: if isSignedIn();
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
       allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
       allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;

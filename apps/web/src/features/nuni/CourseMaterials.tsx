@@ -5,9 +5,13 @@ import {
   NuniError,
   nuniErrorMessage,
   type NuniMaterial,
+  type NuniUnit,
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
 import { MutationForm, useClasses } from './CourseUI';
+import { CourseUnitSelect } from './CourseUnitSelect';
+import { selectCourseUnit } from './courseOutline';
+import { useLocationHash } from '@/lib/useLocationHash';
 import { useNuniSession } from './Session';
 import shared from './NuniApp.module.css';
 import styles from './CourseLearning.module.css';
@@ -48,47 +52,106 @@ export function CourseText({ text }: { text: string }) {
   return <div className={`${shared.prose} ${styles.body}`}>{parts}</div>;
 }
 
-export function CourseMaterials({ workspace }: { workspace: NuniWorkspace }) {
+export function CourseMaterials({ workspace, units, onChanged }: { workspace: NuniWorkspace; units?: NuniUnit[] | null; onChanged?: () => void }) {
   const { session, pendingLogout } = useNuniSession();
   if (!session || pendingLogout) return null;
   return (
     <Materials
       key={`${session.context}:${workspace.id}:${workspace.memberRole}:${workspace.state}`}
       workspace={workspace}
+      units={units}
+      onChanged={onChanged}
     />
   );
 }
 
-function Materials({ workspace }: { workspace: NuniWorkspace }) {
+function Materials({ workspace, units, onChanged }: { workspace: NuniWorkspace; units?: NuniUnit[] | null; onChanged?: () => void }) {
   const classes = useClasses();
   const [items, setItems] = useState<NuniMaterial[] | null>(null);
+  const hash = useLocationHash();
+  const revealed = useRef('');
   const [reading, setReading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [accessDenied, setAccessDenied] = useState(false);
+  const denied = useRef(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [readingMore, setReadingMore] = useState(false);
+  const [moreError, setMoreError] = useState('');
+  const moreRequest = useRef<symbol | null>(null);
   const request = useRef(0);
   const mounted = useRef(true);
   const editable =
     !accessDenied && workspace.state === 'active' && workspace.memberRole !== 'student';
 
   async function load() {
+    if (denied.current) return;
     const run = ++request.current;
+    moreRequest.current = null;
+    setReadingMore(false);
+    setMoreError('');
+    setNextCursor(null);
     setReading(true);
     setError('');
     try {
-      const result = await classes.materials(workspace.id);
-      if (mounted.current && run === request.current) setItems(result);
+      const result = await classes.materialsPage(workspace.id);
+      if (mounted.current && run === request.current) {
+        setItems(result.materials);
+        setNextCursor(result.nextCursor);
+      }
     } catch (failure) {
       if (mounted.current && run === request.current) {
         if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
           setItems(null);
           setNotice('');
+          denied.current = true;
           setAccessDenied(true);
         }
         setError(nuniErrorMessage(failure));
       }
     } finally {
       if (mounted.current && run === request.current) setReading(false);
+    }
+  }
+
+  async function loadMore() {
+    if (reading || denied.current || !nextCursor || moreRequest.current) return;
+    const run = request.current;
+    const token = Symbol();
+    moreRequest.current = token;
+    setReadingMore(true);
+    setMoreError('');
+    try {
+      const result = await classes.materialsPage(workspace.id, nextCursor);
+      if (!mounted.current || run !== request.current || moreRequest.current !== token) return;
+      setItems((previous) => {
+        const existing = new Set(previous?.map((item) => item.id));
+        return [...(previous ?? []), ...result.materials.filter((item) => !existing.has(item.id))];
+      });
+      setNextCursor(result.nextCursor);
+    } catch (failure) {
+      if (!mounted.current || run !== request.current || moreRequest.current !== token) return;
+      if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
+        denied.current = true;
+        setAccessDenied(true);
+        setItems(null);
+        setNextCursor(null);
+        setNotice('');
+        setError(nuniErrorMessage(failure));
+      } else if (failure instanceof NuniError && failure.code === 'CLASS_WORKSPACE_MATERIAL_CURSOR_INVALID') {
+        ++request.current;
+        moreRequest.current = null;
+        setReadingMore(false);
+        setNextCursor(null);
+        setError(nuniErrorMessage(failure));
+      } else {
+        setMoreError(nuniErrorMessage(failure));
+      }
+    } finally {
+      if (mounted.current && run === request.current && moreRequest.current === token) {
+        moreRequest.current = null;
+        setReadingMore(false);
+      }
     }
   }
 
@@ -103,6 +166,20 @@ function Materials({ workspace }: { workspace: NuniWorkspace }) {
     // The parent key changes with session, workspace, role and archive status.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const target = hash.slice(1);
+    if (!target.startsWith('material-') || revealed.current === target ||
+      !items?.some((item) => `material-${item.id}` === target)) return;
+    const frame = window.requestAnimationFrame(() => {
+      const element = document.getElementById(target);
+      if (!element) return;
+      element.scrollIntoView?.({ block: 'start' });
+      element.focus({ preventScroll: true });
+      revealed.current = target;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [hash, items]);
 
   return (
     <section className={shared.panel} aria-labelledby={`materials-${workspace.id}`}>
@@ -140,14 +217,14 @@ function Materials({ workspace }: { workspace: NuniWorkspace }) {
           <ul className={`${shared.list} ${styles.materials}`}>
             {items.map((item) => (
               <li key={item.id}>
-                <article aria-labelledby={`material-${item.id}`}>
+                <article id={`material-${item.id}`} tabIndex={-1} aria-labelledby={`material-heading-${item.id}`}>
                   <div className={styles.metadata}>
                     {item.unitTitle && <span>{item.unitTitle}</span>}
                     <time dateTime={item.createdAt}>
                       {new Date(item.createdAt).toLocaleDateString('zh-TW')}
                     </time>
                   </div>
-                  <h3 id={`material-${item.id}`}>{item.title}</h3>
+                  <h3 id={`material-heading-${item.id}`}>{item.title}</h3>
                   <CourseText text={item.body} />
                 </article>
               </li>
@@ -159,7 +236,21 @@ function Materials({ workspace }: { workspace: NuniWorkspace }) {
             {editable ? '可在下方發布課程說明或參考連結。' : '老師發布後會顯示在這裡。'}
           </p>
         ))}
-      {items && items.length >= 100 && <p className={styles.note}>目前顯示最近 100 則教材。</p>}
+      {moreError && (
+        <p role="alert" className={shared.notice}>
+          {moreError} 已讀取的教材仍保留。請重試載入較早教材，或使用「更新教材」重新讀取。
+        </p>
+      )}
+      {nextCursor && !accessDenied && (
+        <button
+          type="button"
+          className={`${shared.button} ${shared.secondary}`}
+          disabled={reading || readingMore}
+          onClick={() => void loadMore()}
+        >
+          {readingMore ? '讀取較早教材中…' : moreError ? '重試載入較早教材' : '載入較早教材'}
+        </button>
+      )}
       {editable && (
         <details className={`${shared.compose} ${styles.compose}`}>
           <summary>發布教材</summary>
@@ -171,15 +262,17 @@ function Materials({ workspace }: { workspace: NuniWorkspace }) {
               const receipt = await classes.createMaterial(workspace.id, {
                 title: String(data.get('title') ?? ''),
                 body: String(data.get('body') ?? ''),
+                unitId: units === undefined ? undefined : selectCourseUnit(data, units),
                 idempotencyKey: key,
               });
-              if (!mounted.current) throw new NuniError(409, 'SESSION_CHANGED');
+              if (!mounted.current || denied.current) throw new NuniError(409, 'SESSION_CHANGED');
               ++request.current;
               setItems((previous) => [
                 receipt,
                 ...(previous ?? []).filter((item) => item.id !== receipt.id),
               ]);
               setNotice(`已發布「${receipt.title}」。`);
+              onChanged?.();
               void load();
             }}
           >
@@ -187,6 +280,7 @@ function Materials({ workspace }: { workspace: NuniWorkspace }) {
               教材標題
               <input name="title" required maxLength={160} placeholder="例如：本週閱讀與課前準備" />
             </label>
+            {units !== undefined && <CourseUnitSelect units={units} />}
             <label>
               教材內容或參考連結
               <textarea

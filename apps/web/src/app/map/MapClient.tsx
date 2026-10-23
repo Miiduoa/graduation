@@ -10,11 +10,29 @@ import {
   loadMapLocations,
   setMapFavorite,
   walkingDirectionsUrl,
+  distanceMeters,
+  formatDistance,
+  type MapCoordinate,
   type MapLocation,
 } from './mapService';
 import styles from './map.module.css';
+import {
+  hasBundledCampusPlaces,
+  isBusStopLocation,
+  isProvidencePendingVerification,
+  PROVIDENCE_CAMPUS_SOURCE,
+  providencePlaceSourceUrl,
+  walkingEstimateLabel,
+  withProvidenceCampusPlaces,
+} from './providenceCampus';
+import {
+  buildCampusMapSearchUrl,
+  getOfficialCampusMapUrl,
+  hasOfficialProvidenceLibraryGuide,
+  PROVIDENCE_LIBRARY_FLOOR_GUIDE_URL,
+} from '@campus/shared/src/campusMapLookup';
 
-type MapProps = { school: string; route?: string; focus?: string };
+type MapProps = { school: string; schoolName?: string; route?: string; focus?: string };
 type FavoritesState = { status: 'loading' | 'error' | 'ready'; ids: Set<string> };
 
 export default function MapClient(props: MapProps) {
@@ -38,6 +56,7 @@ export default function MapClient(props: MapProps) {
 
 function MapContent({
   school,
+  schoolName,
   route,
   focus,
   uid,
@@ -47,40 +66,72 @@ function MapContent({
   authLoading: boolean;
 }) {
   const hash = useLocationHash();
+  const fallbackMapUrl = buildCampusMapSearchUrl(schoolName);
+  const officialMapUrl = getOfficialCampusMapUrl(school);
+  // 有內建地點的學校先直接顯示，外部來源只是補充；外部卡住或失敗都不擋住清單。
+  const bundled = hasBundledCampusPlaces(school);
+  const initialPlaces = () => ({
+    status: bundled ? ('ready' as const) : ('loading' as const),
+    source: 'loading' as const,
+    locations: bundled ? withProvidenceCampusPlaces(school, []) : [],
+  });
   const [placeState, setPlaceState] = useState<{
     status: 'loading' | 'error' | 'ready';
+    source: 'loading' | 'error' | 'ready';
     locations: MapLocation[];
-  }>({ status: 'loading', locations: [] });
+  }>(initialPlaces);
   const [placeAttempt, setPlaceAttempt] = useState(0);
   const { locations } = placeState;
   const loading = placeState.status === 'loading';
   const error = placeState.status === 'error';
+  const sourcePending = placeState.source === 'loading';
   function retry() {
-    setPlaceState({ status: 'loading', locations: [] });
+    setPlaceState((previous) =>
+      previous.status === 'ready'
+        ? { ...previous, source: 'loading' }
+        : { status: 'loading', source: 'loading', locations: [] },
+    );
     setPlaceAttempt((value) => value + 1);
   }
   useEffect(() => {
     let active = true;
     void loadMapLocations(school).then(
-      (locations) => {
-        if (active) setPlaceState({ status: 'ready', locations });
+      (loaded) => {
+        if (active)
+          setPlaceState({
+            status: 'ready',
+            source: 'ready',
+            locations: withProvidenceCampusPlaces(school, loaded),
+          });
       },
       () => {
-        if (active) setPlaceState({ status: 'error', locations: [] });
+        if (!active) return;
+        setPlaceState((previous) =>
+          bundled
+            ? { status: 'ready', source: 'error', locations: previous.locations.length ? previous.locations : withProvidenceCampusPlaces(school, []) }
+            : { status: 'error', source: 'error', locations: [] },
+        );
       },
     );
     return () => {
       active = false;
     };
-  }, [school, placeAttempt]);
+  }, [school, placeAttempt, bundled]);
   const [category, setCategory] = useState('全部');
   const [search, setSearch] = useState('');
   const [selection, setSelection] = useState<string | null>(null);
+  const [onlyFavorites, setOnlyFavorites] = useState(false);
+  const [nearbyOnly, setNearbyOnly] = useState(false);
+  const [myLocation, setMyLocation] = useState<MapCoordinate | null>(null);
+  const [positionStatus, setPositionStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [positionError, setPositionError] = useState('');
+  const [routeDraft, setRouteDraft] = useState<{ from: string | null; to: string | null } | null>(null);
   const [favorites, setFavorites] = useState<FavoritesState>({ status: 'loading', ids: new Set() });
   const [favoriteAttempt, setFavoriteAttempt] = useState(0);
   const [pending, setPending] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
   const mounted = useRef(false);
+  const positionGeneration = useRef(0);
   const writing = useRef(false);
   const favoriteGeneration = useRef(0);
   useEffect(() => {
@@ -88,6 +139,7 @@ function MapContent({
     return () => {
       mounted.current = false;
       favoriteGeneration.current += 1;
+      positionGeneration.current += 1;
     };
   }, []);
 
@@ -112,24 +164,45 @@ function MapContent({
   );
   const filtered = useMemo(() => {
     const term = search.trim().toLocaleLowerCase('zh-TW');
-    return locations.filter(
+    const matched = locations.filter(
       (location) =>
         (category === '全部' || location.category === category) &&
-        `${location.name} ${location.description}`.toLocaleLowerCase('zh-TW').includes(term),
+        [
+          location.name,
+          location.category,
+          location.description,
+          location.building,
+          location.floor,
+          ...(location.facilities ?? []),
+        ].filter(Boolean).join(' ').toLocaleLowerCase('zh-TW').includes(term) &&
+        (!onlyFavorites || favorites.status !== 'ready' || favorites.ids.has(location.id)) &&
+        (!nearbyOnly || !myLocation || distanceMeters(myLocation, location) <= 1000),
     );
-  }, [locations, category, search]);
+    if (myLocation)
+      matched.sort((a, b) => distanceMeters(myLocation, a) - distanceMeters(myLocation, b));
+    return matched;
+  }, [locations, category, search, onlyFavorites, favorites, nearbyOnly, myLocation]);
   const selected = locations.find((location) => location.id === (selection ?? focus)) ?? null;
   const returnParams = new URLSearchParams({ schoolId: school });
   if (route) returnParams.set('route', route);
   if (selection ?? focus) returnParams.set('focus', (selection ?? focus)!);
   const schoolLoginHref = `/login?reconnect=school&returnUrl=${encodeURIComponent(`/map?${returnParams}${hash}`)}`;
-  const routeLocations = useMemo<[MapLocation, MapLocation] | null>(() => {
+  const deepLinkRoute = useMemo<[MapLocation, MapLocation] | null>(() => {
     const ids = route?.split(',').map((id) => id.trim());
     if (!ids || ids.length !== 2 || ids[0] === ids[1]) return null;
     const from = locations.find((location) => location.id === ids[0]);
     const to = locations.find((location) => location.id === ids[1]);
     return from && to ? [from, to] : null;
   }, [route, locations]);
+  const routeLocations = useMemo<[MapLocation, MapLocation] | null>(() => {
+    if (routeDraft === null) return deepLinkRoute;
+    const from = locations.find((location) => location.id === routeDraft.from);
+    const to = locations.find((location) => location.id === routeDraft.to);
+    return from && to && from.id !== to.id ? [from, to] : null;
+  }, [deepLinkRoute, routeDraft, locations]);
+  const routeStart = routeDraft?.from
+    ? locations.find((location) => location.id === routeDraft.from)
+    : null;
   const selectLocation = useCallback((location: MapLocation) => setSelection(location.id), []);
   const mapLocations = useMemo(() => {
     const visible = new Map(filtered.map((location) => [location.id, location]));
@@ -137,6 +210,40 @@ function MapContent({
       visible.set(location.id, location);
     return [...visible.values()];
   }, [filtered, selected, routeLocations]);
+
+  function locate() {
+    const request = ++positionGeneration.current;
+    setMyLocation(null);
+    setPositionError('');
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setPositionStatus('error');
+      setPositionError('此瀏覽器無法取得位置。你仍可從地點列表指定步行起點。');
+      return;
+    }
+    setPositionStatus('loading');
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        if (!mounted.current || request !== positionGeneration.current) return;
+        if (!Number.isFinite(coords.latitude) || !Number.isFinite(coords.longitude)) {
+          setPositionStatus('error');
+          setPositionError('定位結果無效，請重新取得位置。');
+          return;
+        }
+        setMyLocation({ lat: coords.latitude, lng: coords.longitude });
+        setPositionStatus('idle');
+      },
+      (positionError) => {
+        if (!mounted.current || request !== positionGeneration.current) return;
+        setPositionStatus('error');
+        setPositionError(
+          positionError.code === 1
+            ? '未取得位置權限。你仍可從地點列表指定步行起點。'
+            : '目前無法取得位置，請確認定位與網路後再試一次。',
+        );
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 },
+    );
+  }
 
   async function toggleFavorite(location: MapLocation) {
     if (!uid || favorites.status !== 'ready' || writing.current) return;
@@ -168,17 +275,24 @@ function MapContent({
   if (loading)
     return (
       <div className="card" role="status">
-        正在載入校園地點…
+        正在載入校園地點…（最多約 8 秒，讀不到會提示並可重試）
       </div>
     );
   if (error)
     return (
       <div className={`card ${styles.state}`} role="alert">
         <h2>暫時無法取得校園地點</h2>
-        <p>請稍後重新載入。確認地點資料後，就能搜尋設施與開啟導航。</p>
-        <button className="btn" onClick={retry}>
-          重新載入地點
-        </button>
+        <p>地點資料連線逾時或失敗，請檢查網路後重新載入。確認地點資料後，就能搜尋設施與開啟導航。</p>
+        <div className={styles.actions}>
+          <button className="btn" onClick={retry}>
+            重新載入地點
+          </button>
+          {officialMapUrl && (
+            <a className="btn" href={officialMapUrl} target="_blank" rel="noopener noreferrer">
+              查看校方校區平面圖
+            </a>
+          )}
+        </div>
       </div>
     );
   if (!locations.length)
@@ -186,22 +300,56 @@ function MapContent({
       <div className={`card ${styles.state}`}>
         <h2>目前沒有可顯示的校園地點</h2>
         <p>地點需要有完整的名稱與座標才能顯示。你也可以先查詢校方提供的校園資訊。</p>
-        <a className="btn" href="https://www.pu.edu.tw/" target="_blank" rel="noopener noreferrer">
-          開啟靜宜大學網站
-        </a>
+        <p>目前還沒有這所校園可顯示的地點清單，不會改用其他學校的建築或導航位置。</p>
+        <div className={styles.actions}>
+          {officialMapUrl && (
+            <a className="btn" href={officialMapUrl} target="_blank" rel="noopener noreferrer">
+              查看校方校區平面圖
+            </a>
+          )}
+          {fallbackMapUrl && (
+            <a className="btn" href={fallbackMapUrl} target="_blank" rel="noopener noreferrer">
+              在 Google 地圖搜尋{schoolName} ↗
+            </a>
+          )}
+        </div>
+        {officialMapUrl && (
+          <p>校方發布的平面圖可用來核對校舍位置，不代表已有可用於程式導航的建築座標。</p>
+        )}
+        {fallbackMapUrl && (
+          <p>第三方地圖搜尋的地點及路線仍需核對，不能視為校方已發布的資料。</p>
+        )}
       </div>
     );
 
   return (
     <div className={`pageStack ${styles.page}`}>
-      {route && !routeLocations && (
+      {placeState.source === 'error' && (
+        <div className={styles.notice} role="alert">
+          <p>校方地點資料暫時讀不到，先顯示已核對過的靜宜建築與公車站牌，收藏與部分地點可能缺少。</p>
+          <button className="btn" onClick={retry}>
+            重新讀取地點資料
+          </button>
+        </div>
+      )}
+      {sourcePending && bundled && (
+        <p className={styles.notice} role="status">
+          正在同步校方地點資料，已先顯示核對過的靜宜地點。
+        </p>
+      )}
+      {!sourcePending && route && !deepLinkRoute && routeDraft === null && (
         <p className={styles.notice} role="status">
           這個連結的起點或終點已不在目前地點資料中，請從下方列表重新選擇。
         </p>
       )}
-      {focus && !locations.some((location) => location.id === focus) && (
+      {!sourcePending && focus && !locations.some((location) => location.id === focus) && (
         <p className={styles.notice} role="status">
           找不到連結指定的地點，請搜尋地點名稱。
+        </p>
+      )}
+      {routeStart && !routeLocations && (
+        <p className={styles.notice} role="status">
+          已設定「{routeStart.name}」為起點。請選擇其他地點，再按「設為終點」。
         </p>
       )}
       {routeLocations && (
@@ -211,16 +359,24 @@ function MapContent({
             <h2>
               {routeLocations[0].name} → {routeLocations[1].name}
             </h2>
-            <p>開啟 Google 地圖查詢可通行的步行路線與時間。</p>
+            <p>
+              兩地直線距離約 {formatDistance(distanceMeters(routeLocations[0], routeLocations[1]))}；
+              實際步行路線與時間以地圖服務為準。
+            </p>
           </div>
-          <a
-            className="btn primary"
-            href={walkingDirectionsUrl(routeLocations[1], routeLocations[0])}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            開啟步行導航
-          </a>
+          <div className={styles.actions}>
+            <a
+              className="btn primary"
+              href={walkingDirectionsUrl(routeLocations[1], routeLocations[0])}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              開啟步行導航
+            </a>
+            <button className="btn" onClick={() => setRouteDraft({ from: null, to: null })}>
+              清除路線
+            </button>
+          </div>
         </section>
       )}
       <div className={styles.toolbar}>
@@ -229,11 +385,55 @@ function MapContent({
           <input
             className="input"
             type="search"
-            placeholder="輸入建築、設施或關鍵字"
+            placeholder="輸入建築、設施，或公車路線（例如 300）"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
         </label>
+        <div className={styles.tools}>
+          {officialMapUrl && (
+            <a className="btn" href={officialMapUrl} target="_blank" rel="noopener noreferrer">
+              校方校區平面圖
+            </a>
+          )}
+          <button className="btn" onClick={locate} disabled={positionStatus === 'loading'}>
+            {positionStatus === 'loading' ? '正在定位…' : myLocation ? '更新我的位置' : '查看我的位置'}
+          </button>
+          <button
+            className="btn"
+            onClick={() => {
+              setSelection('');
+              setSearch('');
+              setCategory('全部');
+            }}
+          >
+            看整個校園
+          </button>
+          <button
+            className="btn"
+            aria-pressed={nearbyOnly}
+            disabled={!myLocation}
+            onClick={() => setNearbyOnly((value) => !value)}
+          >
+            附近 1 公里
+          </button>
+          {uid && (
+            <button
+              className="btn"
+              aria-pressed={onlyFavorites}
+              disabled={favorites.status !== 'ready'}
+              onClick={() => setOnlyFavorites((value) => !value)}
+            >
+              只看收藏
+            </button>
+          )}
+        </div>
+        {positionError && <p className={styles.notice} role="alert">{positionError}</p>}
+        {myLocation && (
+          <p className={styles.note} role="status">
+            已定位，地點依直線距離由近到遠排序；校園步道與路口請以實際路線為準。
+          </p>
+        )}
         <div className={styles.categories} aria-label="地點分類">
           {categories.map((value) => (
             <button
@@ -247,10 +447,29 @@ function MapContent({
           ))}
         </div>
       </div>
+      {school === 'pu' && (
+        <section className={`card ${styles.state}`} aria-label="地圖資料來源">
+          <h2>靜宜地圖資料來源</h2>
+          <p>
+            建築與設施位置取自{' '}
+            <a href={PROVIDENCE_CAMPUS_SOURCE.mapDataUrl} target="_blank" rel="noopener noreferrer">
+              OpenStreetMap 貢獻者資料
+            </a>
+            （查詢日期 {PROVIDENCE_CAMPUS_SOURCE.retrievedAt}），底圖上也保留 OpenStreetMap 署名；
+            公車站牌取自{' '}
+            <a href={PROVIDENCE_CAMPUS_SOURCE.transitDatasetUrl} target="_blank" rel="noopener noreferrer">
+              臺中市公車站牌資料
+            </a>
+            （快照 {PROVIDENCE_CAMPUS_SOURCE.transitCatalogDate}）。點公車站可到公車頁看即時到站；
+            出入口目前只有一筆標記、名稱待補，其他學校的地點待補，不會先用靜宜資料代替。
+          </p>
+        </section>
+      )}
       <MapCanvas
         locations={mapLocations}
         selected={selected}
         route={routeLocations}
+        myLocation={myLocation}
         onSelect={selectLocation}
       />
       {selected && (
@@ -259,14 +478,76 @@ function MapContent({
             <p className={styles.eyebrow}>{selected.category}</p>
             <h2>{selected.name}</h2>
             {selected.description && <p>{selected.description}</p>}
-            <a
-              className="btn"
-              href={walkingDirectionsUrl(selected)}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              從目前位置導航
-            </a>
+            {(selected.building || selected.floor) && (
+              <p>{[selected.building, selected.floor && `樓層：${selected.floor}`].filter(Boolean).join(' · ')}</p>
+            )}
+            {Boolean(selected.facilities?.length) && (
+              <p>提供設施：{selected.facilities!.join('、')}</p>
+            )}
+            {myLocation && (
+              <p>
+                距離我的位置約 {formatDistance(distanceMeters(myLocation, selected))}（直線距離）；
+                {walkingEstimateLabel(distanceMeters(myLocation, selected))}
+              </p>
+            )}
+            {isProvidencePendingVerification(selected) && (
+              <p role="status">這個地點目前只有單一資料來源，位置待再次確認，先不要把它當成已核對的導航點。</p>
+            )}
+            <div className={styles.actions}>
+              <a
+                className="btn"
+                href={walkingDirectionsUrl(selected, myLocation ?? undefined)}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                從目前位置導航
+              </a>
+              {isBusStopLocation(selected) && (
+                <Link className="btn primary" href={`/bus?schoolId=${encodeURIComponent(school)}`}>
+                  查看即時到站
+                </Link>
+              )}
+              {providencePlaceSourceUrl(selected) && (
+                <a
+                  className="btn"
+                  href={providencePlaceSourceUrl(selected)!}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  查看地點來源 ↗
+                </a>
+              )}
+              {hasOfficialProvidenceLibraryGuide(school, selected) && (
+                <a
+                  className="btn"
+                  href={PROVIDENCE_LIBRARY_FLOOR_GUIDE_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  查看校方樓層導覽
+                </a>
+              )}
+              <button
+                className="btn"
+                onClick={() => {
+                  setRouteDraft({ from: selected.id, to: null });
+                  setNotice('');
+                }}
+              >
+                設為起點
+              </button>
+              {routeStart && routeStart.id !== selected.id && (
+                <button
+                  className="btn"
+                  onClick={() => {
+                    setRouteDraft({ from: routeStart.id, to: selected.id });
+                    setNotice('');
+                  }}
+                >
+                  設為終點
+                </button>
+              )}
+            </div>
           </div>
           <button
             className={styles.close}
@@ -321,6 +602,8 @@ function MapContent({
               onClick={() => {
                 setSearch('');
                 setCategory('全部');
+                setNearbyOnly(false);
+                setOnlyFavorites(false);
               }}
             >
               清除搜尋條件
@@ -339,8 +622,16 @@ function MapContent({
                   aria-pressed={selected?.id === location.id}
                   onClick={() => selectLocation(location)}
                 >
-                  <span className={styles.locationName}>{location.name}</span>
-                  <span className={styles.note}>{location.category}</span>
+                  <span className={styles.locationName}>
+                    {location.name}
+                    {isProvidencePendingVerification(location) && (
+                      <span className={styles.pending}>待確認</span>
+                    )}
+                  </span>
+                  <span className={styles.note}>
+                    {[location.category, location.building, location.floor && `樓層：${location.floor}`].filter(Boolean).join(' · ')}
+                    {myLocation && ` · 直線距離 ${formatDistance(distanceMeters(myLocation, location))} · ${walkingEstimateLabel(distanceMeters(myLocation, location))}`}
+                  </span>
                   {location.description && (
                     <span className={styles.description}>{location.description}</span>
                   )}

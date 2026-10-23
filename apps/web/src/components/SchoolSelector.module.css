@@ -1,43 +1,255 @@
 .panel,
 .popover {
-  box-sizing: border-box;
   min-width: 0;
   padding: 24px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 12px;
   background: var(--surface);
   color: var(--text);
 }
-.panel h2 { margin: 0 0 16px; font-size: 18px; font-weight: 600; }
-.content { display: grid; gap: 16px; }
-.content input, .content select { font-size: 16px; }
-.description, .state {
+
+.panel h2 {
+  margin: 0 0 16px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.content {
+  display: grid;
+  gap: 16px;
+}
+
+.description,
+.state {
   margin: 0;
   color: var(--muted);
   font-size: 13px;
   line-height: 1.7;
   overflow-wrap: anywhere;
 }
-.state p { margin: 0 0 12px; }
-.searchFeedback { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
-.searchFeedback > p { flex: 1 1 140px; }
-.searchFeedback > button { flex-shrink: 0; }
-.compact { position: relative; min-width: 0; }
-.compact summary { min-height: 44px; padding-block: 10px; color: var(--text); font-size: 13px; cursor: pointer; overflow-wrap: anywhere; }
-.compact summary:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 3px; }
+
+.description {
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.state p {
+  margin: 0 0 12px;
+}
+
+.compact {
+  position: relative;
+  min-width: 0;
+  width: 100%;
+}
+
+.compact summary {
+  position: relative;
+  min-height: 44px;
+  padding: 11px 28px 11px 10px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  list-style: none;
+  cursor: pointer;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease;
+}
+
+.compact summary::-webkit-details-marker {
+  display: none;
+}
+
+.compact summary::after {
+  content: '';
+  position: absolute;
+  right: 12px;
+  top: 17px;
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 160ms ease;
+}
+
+.compact[open] > summary {
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.compact[open] > summary::after {
+  top: 20px;
+  transform: rotate(225deg);
+}
+
+.compact summary:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.compact summary.compactName {
+  color: var(--muted);
+}
+
 .popover {
   position: absolute;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
   z-index: 210;
   right: 0;
+  top: calc(100% + 10px);
   width: min(360px, calc(100vw - 40px));
-  max-height: calc(100vh - 160px);
-  max-height: min(560px, calc(100dvh - 160px));
+  max-height: 70dvh;
+  overflow: hidden;
+  box-shadow: var(--shadow-lg);
+  animation: reveal 180ms ease-out both;
+}
+
+.popoverHead {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px 12px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.popoverHead h2 {
+  margin: 0;
+  font-size: var(--font-h3-size);
+  font-weight: 600;
+}
+
+.popover .closeButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--bg);
+  cursor: pointer;
+}
+
+.popover .closeButton:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.popover > .content {
+  min-height: 0;
+  padding: 20px 24px 24px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  box-shadow: 0 6px 16px color-mix(in srgb, var(--text) 8%, transparent);
+  scrollbar-width: thin;
 }
+
+.content :is(input, select) {
+  min-height: 48px;
+  font-size: max(16px, var(--font-body-size));
+}
+
+.searchFeedback {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.searchFeedback > p {
+  flex: 1 1 140px;
+}
+
+.searchFeedback > button {
+  flex-shrink: 0;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .compact summary:hover {
+    background: var(--panel);
+  }
+}
+
 @media (max-width: 760px) {
-  .panel, .popover { padding: 20px; }
-  .compact { position: static; }
-  .popover { right: 20px; }
+  .panel {
+    padding: 20px;
+  }
+
+  .content {
+    gap: 14px;
+  }
+
+  .description,
+  .state {
+    font-size: var(--font-body-sm-size);
+  }
+
+  .compact {
+    position: static;
+  }
+
+  .popover {
+    position: absolute;
+    top: auto;
+    right: 20px;
+    width: min(360px, calc(100vw - 40px));
+    margin-top: 8px;
+    max-height: calc(
+      100dvh - var(--mobile-nav-offset, 72px) - env(safe-area-inset-top, 0px) - 88px
+    );
+    border-radius: 14px;
+  }
+
+  .popoverHead {
+    padding: 10px 12px 10px 20px;
+  }
+
+  .popover > .content {
+    padding: 18px 20px 20px;
+  }
+}
+
+@media (max-width: 360px) {
+  .compact summary {
+    padding-left: 5px;
+    font-size: 12px;
+  }
+}
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+:global([data-reduced-motion='true']) .compact * {
+  animation: none !important;
+  transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .compact * {
+    animation: none !important;
+    transition: none !important;
+  }
 }

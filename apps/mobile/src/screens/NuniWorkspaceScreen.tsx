@@ -26,8 +26,9 @@ import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { NuniCourses } from './nuni/NuniCourses';
 import { NuniMerchant } from './nuni/NuniMerchant';
+import { NuniFood } from './nuni/NuniFood';
 
-type Tab = 'courses' | 'merchant' | 'account';
+type Tab = 'courses' | 'food' | 'merchant' | 'account';
 
 function Action({
   label,
@@ -275,15 +276,30 @@ function Account({ onLogout }: { onLogout: () => void }) {
   );
 }
 
-function SignedInWorkspace({ onLogout }: { onLogout: () => void }) {
+function SignedInWorkspace({
+  onLogout,
+  initialTab,
+  initialWorkspaceId,
+  initialAssignmentId,
+}: {
+  onLogout: () => void;
+  initialTab?: Tab;
+  initialWorkspaceId?: string;
+  initialAssignmentId?: string;
+}) {
   const s = useThemeStyleSheet(createStyles);
   const [tab, setTab] = useNuniDraftState<Tab>('workspace:tab', 'courses');
+  useEffect(() => {
+    if (initialTab && ['courses', 'food', 'merchant', 'account'].includes(initialTab))
+      setTab(initialTab);
+  }, [initialTab, setTab]);
   return (
-    <View style={s.page}>
+    <View testID="nuni-workspace" style={s.page}>
       <View accessibilityRole="tablist" style={s.tabs}>
         {(
           [
             ['courses', '課程'],
+            ['food', '點餐'],
             ['merchant', '店家'],
             ['account', '帳號'],
           ] as const
@@ -300,19 +316,23 @@ function SignedInWorkspace({ onLogout }: { onLogout: () => void }) {
           </Pressable>
         ))}
       </View>
+      {tab === 'food' ? <NuniFood /> : null}
       <View
         style={[s.page, tab !== 'courses' && s.hidden]}
         accessibilityElementsHidden={tab !== 'courses'}
         importantForAccessibility={tab === 'courses' ? 'auto' : 'no-hide-descendants'}
       >
-        <NuniCourses />
+        <NuniCourses
+          initialWorkspaceId={initialWorkspaceId}
+          initialAssignmentId={initialAssignmentId}
+        />
       </View>
       <View
         style={[s.page, tab !== 'merchant' && s.hidden]}
         accessibilityElementsHidden={tab !== 'merchant'}
         importantForAccessibility={tab === 'merchant' ? 'auto' : 'no-hide-descendants'}
       >
-        <NuniMerchant />
+        {tab === 'merchant' ? <NuniMerchant /> : null}
       </View>
       <View
         style={[s.page, tab !== 'account' && s.hidden]}
@@ -325,7 +345,9 @@ function SignedInWorkspace({ onLogout }: { onLogout: () => void }) {
   );
 }
 
-export function NuniWorkspaceScreen() {
+export function NuniWorkspaceScreen({
+  route,
+}: { route?: { params?: { tab?: Tab; workspaceId?: string; assignmentId?: string } } } = {}) {
   const auth = useNuniSession();
   const s = useThemeStyleSheet(createStyles);
   const [action, setAction] = useState('');
@@ -368,6 +390,7 @@ export function NuniWorkspaceScreen() {
   if (auth.loading || action)
     return (
       <View
+        testID="nuni-workspace"
         style={s.center}
         accessibilityRole="progressbar"
         accessibilityLabel={action || '正在確認 Google 帳號'}
@@ -378,7 +401,7 @@ export function NuniWorkspaceScreen() {
     );
   if (auth.pendingLogout || auth.error || actionError)
     return (
-      <View style={s.center}>
+      <View testID="nuni-workspace" style={s.center}>
         <Text accessibilityRole="header" style={s.heading}>
           {auth.pendingLogout ? '登出尚未完成' : '目前無法確認登入狀態'}
         </Text>
@@ -399,12 +422,15 @@ export function NuniWorkspaceScreen() {
         <SignedInWorkspace
           key={`${auth.session.platformAccountId}:${auth.session.context}`}
           onLogout={logout}
+          initialTab={route?.params?.tab}
+          initialWorkspaceId={route?.params?.workspaceId}
+          initialAssignmentId={route?.params?.assignmentId}
         />
       </NuniDraftProvider>
     );
   const capability = getGoogleCredentialCapability();
   return (
-    <ScrollView contentContainerStyle={s.content}>
+    <ScrollView testID="nuni-workspace" contentContainerStyle={s.content}>
       <Text style={s.eyebrow}>CAMPUS ONE</Text>
       <Text accessibilityRole="header" style={s.heading}>
         登入或建立帳號

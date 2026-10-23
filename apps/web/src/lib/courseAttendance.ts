@@ -42,6 +42,20 @@ export interface StartAttendanceResult {
   qrToken: string;
   qrExpiresAt: string;
 }
+export function studentCheckInSession(sessions: AttendanceSession[]): AttendanceSession | null {
+  const active = sessions.filter((session) => session.active);
+  if (active.length === 0) return null;
+  return [...active].sort((left, right) =>
+    String(right.startedAt ?? '').localeCompare(String(left.startedAt ?? '')),
+  )[0];
+}
+export function studentAttendanceHeading(courseName: string, active: boolean): string {
+  const name = courseName.trim() || '課程';
+  return active ? `${name} · 點名進行中` : `${name} · 點名已結束`;
+}
+export function hasOwnActiveAttendance(sessions: AttendanceSession[], uid: string): boolean {
+  return sessions.some((session) => session.active && session.teacherId === uid);
+}
 export function watchCourseMembership(
   courseId: string,
   uid: string,

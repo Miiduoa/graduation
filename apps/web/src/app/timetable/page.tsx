@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { PersonalTimetable } from '@/components/timetable/PersonalTimetable';
-import { TimetableSyncStatus } from '@/components/timetable/TimetableSyncStatus';
 import styles from '@/components/academic/academic.module.css';
 
 export default function TimetablePage() {
@@ -12,7 +11,6 @@ export default function TimetablePage() {
       <p className={styles.notice}>
         老師在 Nuni 開的課、教材和作業在這裡：<Link href="/classroom">Nuni 課程 →</Link>
       </p>
-      <TimetableSyncStatus />
       <PersonalTimetable />
     </SiteShell>
   );

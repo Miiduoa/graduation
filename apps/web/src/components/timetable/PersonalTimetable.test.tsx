@@ -1,5 +1,11 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => '/timetable',
+}));
+
 import { cleanCourse, cleanMeta, shareCopiedCopy, WEEKDAY_LABELS } from '@campus/shared';
 import { PersonalTimetable } from './PersonalTimetable';
 
@@ -10,8 +16,24 @@ const mocks = vi.hoisted(() => ({
   friends: vi.fn(), invites: vi.fn(), friendTimetable: vi.fn(), meetup: vi.fn(),
 }));
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => mocks.auth }));
-vi.mock('@/components/SelectedSchoolProvider', () => ({ useSelectedSchool: () => mocks.school }));
+vi.mock('@/components/SelectedSchoolProvider', () => ({
+  useSelectedSchool: () => mocks.school,
+  useOptionalSelectedSchool: () => ({ ...mocks.school, selectedSchool: mocks.school.selectedSchoolId ? { id: mocks.school.selectedSchoolId, name: '靜宜大學' } : null, catalogStatus: 'ready' }),
+}));
+vi.mock('@/lib/usePersonalImports', () => ({
+  usePersonalImportScope: () => {
+    const owner = mocks.auth.user ? `school:${mocks.auth.user.uid}` : 'guest';
+    const schoolId = mocks.school.selectedSchoolId || 'personal';
+    return { scope: { owner, schoolId }, scopeKey: `${owner}:${schoolId}`,
+      loading: mocks.auth.loading || mocks.school.loading, schoolName: '靜宜大學' };
+  },
+  usePersonalImports: () => ({ records: [], error: '', loading: false }),
+}));
 vi.mock('@/lib/timetable/store', () => ({
+  CLOUD_NOT_READY_COPY: '這個功能還沒接通，雲端備份先不用。',
+  TIMETABLE_DEVICE_ONLY_STORED_COPY: '已存在這台裝置，換手機或清除瀏覽器資料就會不見',
+  TIMETABLE_DEVICE_ONLY_SUBMIT_COPY: '存在這台裝置',
+  TimetableCloudSaveError: class TimetableCloudSaveError extends Error {},
   loadPersonalTimetable: mocks.load,
   savePersonalTimetable: mocks.save,
   createServerShare: mocks.share,
@@ -21,7 +43,7 @@ vi.mock('@/lib/timetable/store', () => ({
 }));
 vi.mock('@/lib/timetable/friends', () => ({ listAcceptedFriends: mocks.friends }));
 vi.mock('@/lib/useAcademicRecords', () => ({
-  useAcademicRecords: () => ({ state: { snapshot: { records: { courses: [
+  useAcademicRecords: () => ({ state: { snapshot: { schoolId: 'pu', records: { courses: [
     { id: 'school-course', name: '匯入資料庫', periods: [3, 4], dayOfWeek: 2, teacherName: '林老師', location: '主顧303' },
   ] } } } }),
 }));
@@ -112,21 +134,21 @@ describe('personal timetable data retention', () => {
     fireEvent.click(within(screen.getByRole('region', { name: '編輯課程' })).getByRole('button', { name: '刪除' }));
     expect(mocks.save).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '確認刪除' }));
-    await screen.findByText(/無法確認儲存結果/);
+    await waitFor(() => expect(within(screen.getByRole('region', { name: '編輯課程' })).getByRole('status').textContent).toMatch(/無法確認儲存結果/));
     expect(screen.getByRole('region', { name: '編輯課程' })).toBeTruthy();
     expect(existingCourseButton()).toBeTruthy();
   });
 
-  it('retains both imported drafts and pasted text when persistence fails', async () => {
+  it('retains imported drafts when persistence fails and preserves the dedicated import entry point', async () => {
     mocks.save.mockRejectedValue(new Error('offline'));
     await ready();
     const section = within(screen.getByRole('region', { name: '匯入課表' }));
-    fireEvent.change(section.getByRole('textbox'), { target: { value: '我的原始課表文字' } });
+    expect(section.getByRole('link', { name: '匯入截圖或檔案' }).getAttribute('href')).toBe('/import?kind=timetable');
     fireEvent.click(section.getByRole('button', { name: '從學校課表帶入' }));
-    fireEvent.click(section.getByRole('button', { name: '確認匯入' }));
-    await screen.findByText(/無法確認儲存結果/);
     expect(section.getByText('匯入資料庫')).toBeTruthy();
-    expect((section.getByRole('textbox') as HTMLTextAreaElement).value).toBe('我的原始課表文字');
+    fireEvent.click(section.getByRole('button', { name: '存在這台裝置' }));
+    await waitFor(() => expect(screen.getAllByText(/無法確認儲存結果/).length).toBeGreaterThan(0));
+    expect(section.getByText('匯入資料庫')).toBeTruthy();
     expect(existingCourseButton()).toBeTruthy();
   });
 
@@ -135,7 +157,7 @@ describe('personal timetable data retention', () => {
     const section = within(screen.getByRole('region', { name: '匯入課表' }));
     fireEvent.click(section.getByRole('button', { name: '從學校課表帶入' }));
     fireEvent.click(section.getByRole('checkbox'));
-    const confirm = section.getByRole('button', { name: '確認匯入' }) as HTMLButtonElement;
+    const confirm = section.getByRole('button', { name: '存在這台裝置' }) as HTMLButtonElement;
     expect(confirm.disabled).toBe(true);
     fireEvent.click(confirm);
     expect(mocks.save).not.toHaveBeenCalled();
@@ -188,7 +210,7 @@ describe('personal timetable data retention', () => {
   it('does not load private or guest data while identity is unresolved', () => {
     mocks.auth.loading = true;
     render(<PersonalTimetable />);
-    expect(screen.getByRole('status').textContent).toContain('正在確認帳號');
+    expect(screen.getByRole('status').textContent).toMatch(/正在確認(帳號|課表)/);
     expect(mocks.load).not.toHaveBeenCalled();
   });
 });
@@ -201,7 +223,7 @@ describe('timetable share feedback', () => {
     });
     await ready();
     fireEvent.click(screen.getByRole('button', { name: '複製分享連結' }));
-    await screen.findByText(/瀏覽器未完成複製/);
+    await screen.findByText(/瀏覽器(未完成|無法自動)複製/);
     const input = screen.getByRole('textbox', { name: '分享連結' }) as HTMLInputElement;
     expect(input.value).toBe(`${window.location.origin}/timetable/share/test`);
     expect(input.readOnly).toBe(true);
@@ -365,7 +387,7 @@ describe('direct timetable editing', () => {
     await ready();
     const select = await screen.findByRole('combobox', { name: '朋友' });
     fireEvent.change(select, { target: { value: 'bob' } });
-    expect(screen.getByText(/不會將缺少資料當作整天空堂/)).toBeTruthy();
+    expect(screen.getByText(/不會把缺少資料誤判為整天空堂/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: '約吃飯' })).toBeNull();
     expect(screen.queryByRole('button', { name: '約讀書' })).toBeNull();
     expect(mocks.meetup).not.toHaveBeenCalled();

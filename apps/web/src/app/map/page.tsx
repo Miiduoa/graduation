@@ -5,7 +5,7 @@ import { use } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { PageLoadingCard } from '@/components/PageLoadingCard';
 
 // 使用 dynamic import 並關閉 SSR（Leaflet 需要 browser API）
@@ -18,12 +18,13 @@ export default function MapPage(props: {
   searchParams?: Promise<{
     school?: string;
     schoolId?: string;
+    campus?: string;
     route?: string | string[];
     focus?: string | string[];
   }>;
 }) {
   const searchParams = props.searchParams ? use(props.searchParams) : undefined;
-  const { schoolId, schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
+  const { schoolId, schoolName, schoolSearch: q, status } = useCampusBrowseContext(searchParams);
   const route = Array.isArray(searchParams?.route) ? searchParams.route[0] : searchParams?.route;
   const focus = Array.isArray(searchParams?.focus) ? searchParams.focus[0] : searchParams?.focus;
 
@@ -33,7 +34,14 @@ export default function MapPage(props: {
       subtitle="找教室、查設施，規劃前往目的地的路線"
       schoolName={schoolName}
     >
-      <MapClient school={schoolId} route={route} focus={focus} />
+      {status === 'ready' && schoolId ? (
+        <MapClient key={schoolId} school={schoolId} schoolName={schoolName} route={route} focus={focus} />
+      ) : (
+        <section className="card" role="status">
+          <h2>{status === 'loading' ? '正在讀取校園目錄…' : status === 'error' ? '無法確認所選學校' : '先選擇一所學校'}</h2>
+          <p>選擇校園後才讀取該校的建築與設施，不會沿用上一所學校的地點。</p>
+        </section>
+      )}
 
       <div
         style={{

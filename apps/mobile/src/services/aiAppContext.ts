@@ -1246,12 +1246,14 @@ export async function loadAIAppRuntimeData(params: {
           loadIssues,
         )
       : Promise.resolve(base.healthRecords),
-    safeLoad(
-      'lostFoundItems',
-      () => dataSource.listLostFoundItems(schoolId ?? undefined, { limit: 20 }),
-      base.lostFoundItems,
-      loadIssues,
-    ),
+    userId
+      ? safeLoad(
+          'lostFoundItems',
+          () => dataSource.listLostFoundItems(schoolId ?? undefined, { limit: 20 }),
+          base.lostFoundItems,
+          loadIssues,
+        )
+      : Promise.resolve(base.lostFoundItems),
     safeLoad(
       'librarySeats',
       () => dataSource.listSeats(schoolId ?? undefined),

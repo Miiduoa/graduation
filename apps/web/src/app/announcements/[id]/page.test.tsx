@@ -71,6 +71,7 @@ async function mount(input = props()) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
   vi.mocked(getDocFromServer).mockReset().mockResolvedValue(snapshot());
   account.user = { uid: 'alice' };
   account.loading = false;
@@ -136,34 +137,76 @@ it('renders not-found only after both public documents are confirmed absent', as
   expect(screen.queryByRole('alert')).toBeNull();
 });
 
-it('does not turn a canonical permission or network failure into absence or a legacy fallback', async () => {
-  vi.mocked(getDocFromServer).mockRejectedValue(new Error('permission-denied'));
-  await mount();
-  await screen.findByRole('alert');
+function expectAnnouncementDetailFailure() {
+  expect(screen.getByRole('heading', { name: '暫時讀不到資料，請稍後再試' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '再試一次' })).toBeTruthy();
+  expect(screen.queryByText('這間學校的公告還沒上架。')).toBeNull();
   expect(screen.queryByText('找不到這則公告')).toBeNull();
-  expect(getDocFromServer).toHaveBeenCalledTimes(1);
-});
+  expect(screen.queryByRole('link', { name: '教務處' })).toBeNull();
+}
+
+it.each([
+  [
+    'permission-denied',
+    Object.assign(new Error('Missing or insufficient permissions.'), { code: 'permission-denied' }),
+  ],
+  ['unavailable', Object.assign(new Error('offline'), { code: 'unavailable' })],
+])(
+  'shows a retryable unread message when Firestore detail read fails with %s',
+  async (_code, error) => {
+    vi.mocked(getDocFromServer).mockRejectedValueOnce(error);
+    await mount();
+    expect(await screen.findByRole('heading', { name: '暫時讀不到資料，請稍後再試' })).toBeTruthy();
+    expectAnnouncementDetailFailure();
+    expect(screen.queryByText('請確認網路')).toBeNull();
+    expect(screen.queryByText('暫時無法讀取這則公告')).toBeNull();
+    expect(getDocFromServer).toHaveBeenCalledTimes(1);
+    const pending = deferred();
+    vi.mocked(getDocFromServer).mockReturnValueOnce(pending.promise);
+    fireEvent.click(screen.getByRole('button', { name: '再試一次' }));
+    expect(screen.getByText('正在讀取公告…')).toBeTruthy();
+    expect(screen.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
+    await act(async () => pending.resolve(snapshot()));
+    await screen.findByText('實際公告詳情');
+    expect(screen.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
+  },
+);
 
 it('reports a legacy source failure separately from a missing document', async () => {
   vi.mocked(getDocFromServer)
     .mockResolvedValueOnce(snapshot(null))
     .mockRejectedValueOnce(new Error('unavailable'));
   await mount();
-  await screen.findByRole('alert');
-  expect(screen.queryByText('找不到這則公告')).toBeNull();
+  expect(await screen.findByRole('heading', { name: '暫時讀不到資料，請稍後再試' })).toBeTruthy();
+  expectAnnouncementDetailFailure();
+  expect(screen.queryByText('請確認網路')).toBeNull();
 });
 
 it('rejects inconsistent canonical school metadata', async () => {
   vi.mocked(getDocFromServer).mockResolvedValue(snapshot({ schoolId: 'nthu', title: '錯校公告' }));
   await mount();
-  await screen.findByRole('alert');
+  expect(await screen.findByRole('heading', { name: '暫時讀不到資料，請稍後再試' })).toBeTruthy();
+  expectAnnouncementDetailFailure();
   expect(screen.queryByText('錯校公告')).toBeNull();
+  expect(screen.queryByText('請確認網路')).toBeNull();
 });
 
 it('never uses a crafted announcement ID as a Firestore subcollection path', async () => {
   await mount(props('notice-1/private/secret'));
   await screen.findByText('找不到這則公告');
   expect(getDocFromServer).not.toHaveBeenCalled();
+});
+
+it('does not show unpublished copy before the first detail document returns', async () => {
+  const pending = deferred();
+  vi.mocked(getDocFromServer).mockReturnValueOnce(pending.promise);
+  await mount();
+  expect(screen.getByText('正在讀取公告…')).toBeTruthy();
+  expect(screen.queryByText('這間學校的公告還沒上架。')).toBeNull();
+  expect(screen.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
+  expect(screen.queryByText('找不到這則公告')).toBeNull();
+  await act(async () => pending.resolve(snapshot()));
+  await screen.findByText('實際公告詳情');
 });
 
 it('hides the previous detail immediately when changing to another account', async () => {
@@ -211,13 +254,77 @@ it('discards responses from before logout even when the same UID signs back in',
   expect(screen.queryByText('登出前晚回應')).toBeNull();
 });
 
-it('clears stale content during refresh and can recover from a failed request', async () => {
+it('keeps the cached announcement when a later Firestore read fails', async () => {
   await mount();
   await screen.findByText('實際公告詳情');
-  vi.mocked(getDocFromServer).mockRejectedValueOnce(new Error('offline'));
+  vi.mocked(getDocFromServer).mockRejectedValueOnce(new Error('permission-denied'));
   fireEvent.click(screen.getByRole('button', { name: '更新公告' }));
-  expect(screen.queryByText('實際公告詳情')).toBeNull();
-  await screen.findByRole('alert');
-  fireEvent.click(screen.getByRole('button', { name: '重新讀取' }));
   await screen.findByText('實際公告詳情');
+  expect(screen.getByText(/最後更新 \d+\/\d+ \d{2}:\d{2}，暫時讀不到新公告/)).toBeTruthy();
+  expect(screen.queryByText('學校網站暫時連不上')).toBeNull();
+  expect(screen.queryByText('請確認網路')).toBeNull();
+  expect(screen.queryByText('這間學校的公告還沒上架。')).toBeNull();
+});
+
+it.each(['', 'staging', 'production'])(
+  'hides cms-none demo school details when NEXT_PUBLIC_APP_ENV is %s',
+  async (env) => {
+    vi.stubEnv('NEXT_PUBLIC_APP_ENV', env);
+    await mount(props('notice-1', 'tw-demo-uni'));
+    expect(screen.queryByText('示範大學')).toBeNull();
+    expect(screen.getByRole('heading', { name: '目前沒有公開公告' })).toBeTruthy();
+    expect(getDocFromServer).not.toHaveBeenCalled();
+  },
+);
+
+it('hides cms-none demo school details when NEXT_PUBLIC_APP_ENV is unset', async () => {
+  await mount(props('notice-1', 'tw-demo-uni'));
+  expect(screen.queryByText('示範大學')).toBeNull();
+  expect(screen.getByRole('heading', { name: '目前沒有公開公告' })).toBeTruthy();
+  expect(getDocFromServer).not.toHaveBeenCalled();
+  expect(screen.getByRole('link', { name: '← 返回公告列表' }).getAttribute('href')).toBe(
+    '/announcements',
+  );
+});
+
+it('shows cms-none demo school details in an explicit test environment', async () => {
+  vi.stubEnv('NEXT_PUBLIC_APP_ENV', 'test');
+  await mount(props('notice-1', 'tw-demo-uni'));
+  expect(getDocFromServer).toHaveBeenCalled();
+});
+
+it('reads announcement details from the selected campus, not a stale schoolId', async () => {
+  vi.mocked(getDocFromServer).mockResolvedValue(
+    snapshot({ schoolId: 'nthu', title: '清華公告詳情' }),
+  );
+  await mount({
+    params: Promise.resolve({ id: 'notice-1' }),
+    searchParams: Promise.resolve({ campus: 'nthu', schoolId: 'pu' }),
+  });
+  await screen.findByText('清華公告詳情');
+  expect(getDocFromServer).toHaveBeenCalledExactlyOnceWith({
+    path: 'schools/nthu/announcements/notice-1',
+  });
+  expect(screen.getByRole('link', { name: '← 返回公告列表' }).getAttribute('href')).toBe(
+    '/announcements?schoolId=nthu',
+  );
+});
+
+it('does not query any announcement when the campus is unselected or invalid', async () => {
+  const { view } = await mount({
+    params: Promise.resolve({ id: 'notice-1' }),
+    searchParams: Promise.resolve({ campus: 'all', schoolId: 'pu' }),
+  });
+  expect(screen.getByText('先選擇一所學校')).toBeTruthy();
+  expect(getDocFromServer).not.toHaveBeenCalled();
+  await act(async () => {
+    view.rerender(
+      subject({
+        params: Promise.resolve({ id: 'notice-1' }),
+        searchParams: Promise.resolve({ campus: 'INVALID', schoolId: 'pu' }),
+      }),
+    );
+  });
+  expect(screen.getByText('先選擇一所學校')).toBeTruthy();
+  expect(getDocFromServer).not.toHaveBeenCalled();
 });

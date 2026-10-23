@@ -1,4 +1,4 @@
-import { UnavailableFeatureScreen } from './UnavailableFeatureScreen';
+import HomeworkSubmitScreen from './HomeworkSubmitScreen';
 import { MessagesLandingScreen } from './MessagesLandingScreen';
 /* eslint-disable */
 import React from 'react';
@@ -65,8 +65,8 @@ export function MessagesStack() {
       />
       <Stack.Screen
         name="AssignmentDetail"
-        component={UnavailableFeatureScreen}
-        options={{ title: '作業' }}
+        component={HomeworkSubmitScreen}
+        options={{ title: '作業', headerShown: false }}
       />
       <Stack.Screen
         name="AdminCourseVerify"

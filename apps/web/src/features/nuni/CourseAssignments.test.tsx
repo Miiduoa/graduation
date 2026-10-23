@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { NuniError, type NuniAssignment, type NuniWorkspace } from '@campus/shared/src/nuni';
+import { COURSE_WORK_LANDING_ATTR, COURSE_WORK_MISSING_ASSIGNMENT } from '@/lib/courseWorkLanding';
 import { CourseAssignments } from './CourseAssignments';
 
 const request = vi.hoisted(() => vi.fn());
@@ -63,8 +64,41 @@ it('scrolls to an incoming assignment link after its data arrives without jumpin
   const scroll = vi.fn();
   element.scrollIntoView = scroll;
   await waitFor(() => expect(scroll).toHaveBeenCalledWith({ block: 'start' }));
+  expect(element.getAttribute(COURSE_WORK_LANDING_ATTR)).toBe('true');
   view.rerender(<CourseAssignments {...props} assignments={[{ ...task }]} />);
   expect(scroll).toHaveBeenCalledTimes(1);
+});
+
+it('explains a deleted or unauthorized assignment instead of leaving a blank landing', async () => {
+  window.history.replaceState(null, '', `#assignment-missing`);
+  render(
+    <CourseAssignments
+      assignments={[task]}
+      workspace={workspace}
+      reload={vi.fn()}
+      onConfirmed={vi.fn()}
+    />,
+  );
+  expect(screen.getByRole('status').textContent).toBe(COURSE_WORK_MISSING_ASSIGNMENT);
+  expect(screen.queryByRole('article', { name: task.title })).toBeTruthy();
+});
+
+it('shows the submitted state when a deep link opens an already submitted assignment', async () => {
+  window.history.replaceState(null, '', `#assignment-${submitted.id}`);
+  render(
+    <CourseAssignments
+      assignments={[task, submitted]}
+      workspace={workspace}
+      reload={vi.fn()}
+      onConfirmed={vi.fn()}
+    />,
+  );
+  const card = screen.getByRole('article', { name: submitted.title });
+  card.scrollIntoView = vi.fn();
+  await waitFor(() => expect(card.getAttribute(COURSE_WORK_LANDING_ATTR)).toBe('true'));
+  expect(within(card).getByRole('region', { name: '我的繳交紀錄' }).textContent).toContain(
+    '我的文獻整理',
+  );
 });
 
 it('counts a passed reference deadline as pending while excluding closed or submitted work', () => {
@@ -153,7 +187,7 @@ it('updates task counts only from an acknowledged submission, even before a list
   expect(screen.getByRole('button', { name: '待繳交 0' })).toBeTruthy();
   expect(screen.getByRole('button', { name: '已繳交 1' })).toBeTruthy();
   expect(screen.getByText('繳交內容已儲存，老師現在可以查看。')).toBeTruthy();
-  expect(reload).toHaveBeenCalledOnce();
+  expect(reload).not.toHaveBeenCalled();
 });
 
 it('does not remove work from pending or issue a receipt after a failed submission', async () => {

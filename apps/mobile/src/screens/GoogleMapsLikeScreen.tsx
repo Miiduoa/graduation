@@ -3,6 +3,7 @@ import { ActivityIndicator, Linking, ScrollView, Text, TextInput, View } from 'r
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as Location from 'expo-location';
 import type { WebView } from 'react-native-webview';
+import { centerOfCoordinates, distanceMeters, formatDistance } from '@campus/shared/src/campusGeo';
 import { PuWebView } from '../ui/PuWebView';
 import {
   AIDetailScreen,
@@ -16,6 +17,12 @@ import {
 import { useTheme } from '../state/theme';
 import { useSchool } from '../state/school';
 import { useAuth } from '../state/auth';
+import { safeNavigate } from '../utils/safeNavigate';
+import {
+  buildCampusMapSearchUrl,
+  getOfficialCampusMapUrl,
+  hasOfficialProvidenceLibraryGuide,
+} from '@campus/shared/src/campusMapLookup';
 import {
   buildCampusMapHtml,
   buildWalkingDirectionsUrl,
@@ -25,7 +32,12 @@ import {
   type MapCoordinate,
 } from '../features/campusMap';
 
-type MapNavigation = { goBack?: () => void };
+type MapNavigation = {
+  goBack?: () => void;
+  navigate?: (...args: unknown[]) => void;
+  getState?: () => unknown;
+  getParent?: () => unknown;
+};
 type MapParams = {
   poiId?: string;
   focusPoiId?: string;
@@ -40,26 +52,39 @@ export function GoogleMapsLikeScreen() {
   const { school } = useSchool();
   const { user } = useAuth();
   const params = (route.params ?? {}) as MapParams;
+  const signature = JSON.stringify([params.poiId, params.focusPoiId, params.toPoiId, params.fromPoiId]);
+  const linkedSchool = useRef({ id: school.id, signature, invalidated: false });
+  if (linkedSchool.current.signature !== signature) {
+    linkedSchool.current = { id: school.id, signature, invalidated: false };
+  } else if (linkedSchool.current.id !== school.id) {
+    linkedSchool.current.invalidated = true;
+  }
+  const schoolScopedParams = linkedSchool.current.invalidated ? {} : params;
   return (
     <CampusMapContent
-      key={JSON.stringify([user?.uid, school.id])}
+      key={JSON.stringify([user?.uid, school.id, school.name])}
       schoolId={school.id}
+      schoolName={school.name}
       navigation={navigation}
-      params={params}
+      params={schoolScopedParams}
     />
   );
 }
 
 function CampusMapContent({
   schoolId,
+  schoolName,
   navigation,
   params,
 }: {
   schoolId: string;
+  schoolName?: string;
   navigation: MapNavigation;
   params: MapParams;
 }) {
   const theme = useTheme();
+  const mapSearchUrl = buildCampusMapSearchUrl(schoolName);
+  const officialMapUrl = getOfficialCampusMapUrl(schoolId);
   const webRef = useRef<WebView>(null);
   const scrollRef = useRef<ScrollView>(null);
   const mounted = useRef(true);
@@ -70,7 +95,9 @@ function CampusMapContent({
   const [loadError, setLoadError] = useState(false);
   const generation = useRef(0);
   const [category, setCategory] = useState<string>('all');
+  const [nearbyOnly, setNearbyOnly] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [originId, setOriginId] = useState<string | null | undefined>(undefined);
   const [ready, setReady] = useState(false);
   const [mapFailed, setMapFailed] = useState(false);
   const [mapAttempt, setMapAttempt] = useState(0);
@@ -78,6 +105,7 @@ function CampusMapContent({
   const [locating, setLocating] = useState(false);
   const [locationError, setLocationError] = useState('');
   const [directionsError, setDirectionsError] = useState('');
+  const [officialMapError, setOfficialMapError] = useState('');
 
   useEffect(() => {
     mounted.current = true;
@@ -104,24 +132,38 @@ function CampusMapContent({
     void load();
   }, [load]);
   const selected = catalog.find((place) => place.id === selectedId);
-  const origin = catalog.find((place) => place.id === params.fromPoiId);
+  const origin = catalog.find((place) => place.id === (originId === undefined ? params.fromPoiId : originId));
+  const missingDeepLink =
+    selectedId !== null &&
+    selectedId === (params.focusPoiId ?? params.toPoiId ?? params.poiId) &&
+    !selected;
   const categories = useMemo(
     () => Array.from(new Set(catalog.map((place) => place.category))),
     [catalog],
   );
   const places = useMemo(() => {
     const keyword = query.trim().toLowerCase();
-    return catalog.filter(
+    const matches = catalog.filter(
       (place) =>
         (category === 'all' || place.category === category) &&
-        [place.name, place.category, place.description, place.building, ...place.facilities].some(
+        [place.name, place.category, place.description, place.building, place.floor, ...place.facilities].some(
           (value) => value?.toLowerCase().includes(keyword),
-        ),
+        ) &&
+        (!nearbyOnly || !location || distanceMeters(location, place) <= 1000),
     );
-  }, [query, category, catalog]);
+    if (location) matches.sort((a, b) => distanceMeters(location, a) - distanceMeters(location, b));
+    return matches;
+  }, [query, category, catalog, location, nearbyOnly]);
+  const visiblePlaces = useMemo(() => {
+    const visible = new Map(places.map((place) => [place.id, place]));
+    if (origin) visible.set(origin.id, origin);
+    if (selected) visible.set(selected.id, selected);
+    return [...visible.values()];
+  }, [places, origin, selected]);
+  const campusCenter = useMemo(() => centerOfCoordinates(catalog), [catalog]);
   const html = useMemo(
     () =>
-      catalog[0]
+      campusCenter
         ? buildCampusMapHtml(
             {
               background: theme.colors.bg,
@@ -130,11 +172,12 @@ function CampusMapContent({
               text: theme.colors.text,
             },
             theme.mode === 'dark',
-            catalog[0],
+            campusCenter,
           )
         : '',
-    [theme, catalog],
+    [theme, campusCenter],
   );
+  const mapSource = useMemo(() => ({ html }), [html]);
 
   const post = useCallback((payload: object) => {
     const serialized = JSON.stringify(JSON.stringify(payload)).replace(/</g, '\\u003c');
@@ -161,11 +204,17 @@ function CampusMapContent({
   }, [schoolId, ready, mapFailed, html, mapAttempt]);
 
   useEffect(() => {
-    if (ready) post(mapPlacesPayload(places, selectedId));
-  }, [ready, places, selectedId, post]);
+    if (ready) post(mapPlacesPayload(visiblePlaces, selectedId));
+  }, [ready, visiblePlaces, selectedId, post]);
   useEffect(() => {
     if (ready && selected) post({ type: 'focus', lat: selected.lat, lng: selected.lng });
   }, [ready, selected, post]);
+  useEffect(() => {
+    if (!ready) return;
+    post(selected && origin && selected.id !== origin.id
+      ? { type: 'route', start: { lat: origin.lat, lng: origin.lng }, end: { lat: selected.lat, lng: selected.lng } }
+      : { type: 'clearRoute' });
+  }, [ready, selected, origin, post]);
   useEffect(() => {
     if (ready) post(location ? { type: 'location', ...location } : { type: 'clearLocation' });
   }, [ready, location, post]);
@@ -176,6 +225,7 @@ function CampusMapContent({
     setLocating(true);
     setLocationError('');
     setLocation(null);
+    setNearbyOnly(false);
     try {
       const permission = await Location.requestForegroundPermissionsAsync();
       if (!mounted.current) return;
@@ -199,12 +249,41 @@ function CampusMapContent({
   const openDirections = async () => {
     if (!selected || !mounted.current) return;
     setDirectionsError('');
+    if (origin?.id === selected.id) {
+      setDirectionsError('起點與終點不能相同，請從下方清單選擇另一個地點。');
+      return;
+    }
     try {
-      await Linking.openURL(buildWalkingDirectionsUrl(selected, origin));
+      await Linking.openURL(buildWalkingDirectionsUrl(selected, origin ?? location ?? undefined));
     } catch {
       if (mounted.current) setDirectionsError('無法開啟地圖服務，請確認網路連線後重試。');
     }
   };
+
+  const openOfficialMap = async () => {
+    if (!officialMapUrl) return;
+    setOfficialMapError('');
+    try {
+      await Linking.openURL(officialMapUrl);
+    } catch {
+      if (mounted.current) setOfficialMapError('無法開啟校方校區平面圖，請確認網路連線後重試。');
+    }
+  };
+
+  const officialPlanAction = officialMapUrl ? (
+    <View style={{ gap: theme.space.sm }}>
+      <AIButton
+        label="查看校方校區平面圖"
+        variant="ghost"
+        onPress={() => void openOfficialMap()}
+      />
+      {officialMapError ? (
+        <Text accessibilityRole="alert" style={{ ...theme.typography.bodySmall, color: theme.colors.danger }}>
+          {officialMapError}
+        </Text>
+      ) : null}
+    </View>
+  ) : null;
 
   const textStyle = { ...theme.typography.bodySmall, color: theme.colors.muted };
 
@@ -225,14 +304,43 @@ function CampusMapContent({
             請確認登入狀態與網路連線後重試。
           </Text>
           <AIButton label="重新讀取地點" onPress={() => void load()} />
+          {officialPlanAction}
         </AICard>
       ) : catalog.length === 0 ? (
         <AICard title="尚未提供校園地點">
-          <Text style={textStyle}>目前沒有可顯示的地點資料。你可以先從學校官網查詢校區地圖。</Text>
+          <Text style={textStyle}>目前沒有可顯示的地點資料，不會改用其他學校的建築或導航位置。</Text>
+          {officialPlanAction}
+          {mapSearchUrl ? (
+            <>
+              <AIButton
+                label={`在 Google 地圖搜尋${schoolName}`}
+                variant="ghost"
+                onPress={() => {
+                  if (!mounted.current) return;
+                  setDirectionsError('');
+                  void Linking.openURL(mapSearchUrl).catch(() => {
+                    if (mounted.current)
+                      setDirectionsError('無法開啟地圖服務，請確認網路連線後重試。');
+                  });
+                }}
+              />
+              <Text style={textStyle}>第三方地圖搜尋結果尚未由校方核對，請確認校區名稱及位置。</Text>
+            </>
+          ) : null}
+          {directionsError ? (
+            <Text accessibilityRole="alert" style={{ ...textStyle, color: theme.colors.danger }}>
+              {directionsError}
+            </Text>
+          ) : null}
           <AIButton label="重新讀取地點" variant="ghost" onPress={() => void load()} />
         </AICard>
       ) : (
         <>
+          {missingDeepLink ? (
+            <AICard title="找不到連結指定的地點">
+              <Text style={textStyle}>這個地點不在目前學校的資料中，請從下方清單重新選擇。</Text>
+            </AICard>
+          ) : null}
           <AICard>
             <View style={{ gap: theme.space.md }}>
               <TextInput
@@ -267,6 +375,13 @@ function CampusMapContent({
                     onPress={() => setCategory(value)}
                   />
                 ))}
+                {location ? (
+                  <AIChip
+                    label="附近 1 公里"
+                    active={nearbyOnly}
+                    onPress={() => setNearbyOnly((value) => !value)}
+                  />
+                ) : null}
               </View>
             </View>
           </AICard>
@@ -283,7 +398,7 @@ function CampusMapContent({
                 <PuWebView
                   key={`${theme.mode}-${mapAttempt}`}
                   ref={webRef}
-                  source={{ html }}
+                  source={mapSource}
                   applicationNameForUserAgent="CampusOne/1.0 (+https://nuni.tw)"
                   testID="campus-map-webview"
                   accessibilityLabel="校區地圖；下方也提供地點清單"
@@ -368,6 +483,7 @@ function CampusMapContent({
               <Text style={textStyle}>
                 依目前校園地點資料顯示。開放時間與出入口請以現場公告為準。
               </Text>
+              {officialPlanAction}
             </View>
           </AICard>
           {selected ? (
@@ -382,7 +498,7 @@ function CampusMapContent({
                     {[
                       selected.category,
                       selected.building,
-                      selected.floor ? `${selected.floor} 樓` : null,
+                      selected.floor ? `樓層：${selected.floor}` : null,
                     ]
                       .filter(Boolean)
                       .join(' · ')}
@@ -395,11 +511,42 @@ function CampusMapContent({
                   {selected.facilities.length > 0 ? (
                     <Text style={textStyle}>設施：{selected.facilities.join('、')}</Text>
                   ) : null}
+                  {location ? (
+                    <Text style={textStyle}>
+                      與目前位置直線相距約 {formatDistance(distanceMeters(location, selected))}。
+                    </Text>
+                  ) : null}
+                  {origin && origin.id !== selected.id ? (
+                    <Text style={textStyle}>
+                      從{origin.name}出發；兩地直線距離約 {formatDistance(distanceMeters(origin, selected))}（地圖虛線僅為位置示意）。
+                    </Text>
+                  ) : null}
                   <Text style={textStyle}>
-                    {origin ? `從${origin.name}出發。` : ''}將開啟 Google
-                    地圖確認步行路線與出發位置。
+                    將開啟 Google 地圖確認實際步行路線與所需時間。
                   </Text>
                   <AIButton label="查看步行路線" onPress={() => void openDirections()} />
+                  {hasOfficialProvidenceLibraryGuide(schoolId, selected) ? (
+                    <AIButton
+                      label="查看校方樓層導覽"
+                      variant="ghost"
+                      onPress={() => safeNavigate(navigation, 'IndoorFloorMap', { poiId: 'pu-library' })}
+                    />
+                  ) : null}
+                  <AIButton
+                    label={originId === selected.id ? '已設為起點' : '設為步行起點'}
+                    variant="ghost"
+                    onPress={() => {
+                      setOriginId(selected.id);
+                      setDirectionsError('');
+                    }}
+                  />
+                  {origin ? (
+                    <AIButton
+                      label="清除步行起點"
+                      variant="ghost"
+                      onPress={() => { setOriginId(null); setDirectionsError(""); }}
+                    />
+                  ) : null}
                   {directionsError ? (
                     <Text
                       accessibilityRole="alert"
@@ -420,12 +567,19 @@ function CampusMapContent({
               </AICard>
             </View>
           ) : null}
-          <AISection title="地點清單" subtitle={`${places.length} 個地點`}>
+          <AISection
+            title="地點清單"
+            subtitle={location ? `${places.length} 個地點，依直線距離排序` : `${places.length} 個地點`}
+          >
             {places.map((place) => (
               <AIRow
                 key={place.id}
                 title={place.name}
-                subtitle={[place.category, place.building].filter(Boolean).join(' · ')}
+                subtitle={[
+                  place.category,
+                  place.building,
+                  location ? `直線距離 ${formatDistance(distanceMeters(location, place))}` : null,
+                ].filter(Boolean).join(' · ')}
                 onPress={() => {
                   setSelectedId(place.id);
                   setDirectionsError('');
@@ -434,10 +588,21 @@ function CampusMapContent({
             ))}
           </AISection>
           {places.length === 0 ? (
-            <AIEmptyState
-              title="找不到符合的地點"
-              subtitle="換個關鍵字，或選擇「全部」再找一次。"
-            />
+            <AICard>
+              <AIEmptyState
+                title="找不到符合的地點"
+                subtitle="換個關鍵字，或清除篩選條件再找一次。"
+              />
+              <AIButton
+                label="清除篩選條件"
+                variant="ghost"
+                onPress={() => {
+                  setQuery('');
+                  setCategory('all');
+                  setNearbyOnly(false);
+                }}
+              />
+            </AICard>
           ) : null}
         </>
       )}

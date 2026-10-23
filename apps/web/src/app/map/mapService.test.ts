@@ -1,5 +1,15 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import { loadMapFavorites, loadMapLocations, setMapFavorite, type MapLocation } from './mapService';
+import {
+  distanceMeters,
+  formatDistance,
+  loadMapFavorites,
+  loadMapLocations,
+  MapSourceTimeoutError,
+  withTimeout,
+  setMapFavorite,
+  type MapLocation,
+} from './mapService';
+import { centerOfCoordinates } from '@campus/shared/src/campusGeo';
 import { getDocsFromServer } from 'firebase/firestore';
 
 const state = vi.hoisted(() => ({
@@ -144,4 +154,108 @@ it('does not write after the page scope is revoked during the transaction read',
     'Account changed',
   );
   expect(state.set).not.toHaveBeenCalled();
+});
+
+
+it('shows only measured straight-line distances and uses a robust campus viewport', () => {
+  expect(distanceMeters(location, location)).toBe(0);
+  expect(distanceMeters(location, { lat: 24.22495, lng: 120.56535 })).toBeGreaterThan(200);
+  expect(formatDistance(56)).toBe('60 公尺');
+  expect(formatDistance(1600)).toBe('1.6 公里');
+  expect(centerOfCoordinates([
+    { lat: 24.225, lng: 120.563 },
+    { lat: 24.226, lng: 120.564 },
+    { lat: 24.227, lng: 120.565 },
+    { lat: 25.1, lng: 121.2 },
+  ])).toEqual({ lat: 24.2265, lng: 120.5645 });
+  expect(centerOfCoordinates([])).toBeNull();
+});
+
+it('reads valid latitude/longitude and nested school POIs without borrowing other schools', async () => {
+  respond(snapshot(
+    entry('library', {
+      schoolId: 'pu',
+      name: '蓋夏圖書館',
+      category: 'library',
+      location: { latitude: 24.2275, longitude: 120.5635 },
+      building: '圖書館',
+      floor: 'B1~5F',
+      facilities: ['閱覽室', '討論室', '閱覽室', '  '],
+    }),
+    entry('entrance', {
+      name: '大門',
+      category: 'gate',
+      latitude: 24.22495,
+      longitude: 120.56535,
+    }),
+    entry('missing', { name: '未提供座標', location: '校園中心' }),
+    entry('zero', { name: '無效原點', lat: 0, lng: 0 }),
+  ));
+  const locations = await loadMapLocations('pu');
+  expect(locations).toHaveLength(2);
+  expect(locations.find((location) => location.id === 'library')).toEqual({
+    id: 'library',
+    name: '蓋夏圖書館',
+    category: '圖書館',
+    description: '',
+    lat: 24.2275,
+    lng: 120.5635,
+    building: '圖書館',
+    floor: 'B1~5F',
+    facilities: ['閱覽室', '討論室'],
+  });
+  expect(locations.find((location) => location.id === 'entrance')).toEqual({
+    id: 'entrance',
+    name: '大門',
+    category: '交通',
+    description: '',
+    lat: 24.22495,
+    lng: 120.56535,
+  });
+});
+
+it('does not promote malformed primary coordinates over a second nested coordinate', async () => {
+  respond(snapshot(entry('wrong-coordinates', {
+    name: '無法定位',
+    lat: Number.NaN,
+    lng: 120.56,
+    location: { lat: 24.22, lng: 120.56 },
+  })));
+  expect(await loadMapLocations('pu')).toEqual([]);
+});
+
+it('does not publish locations from historical unflagged demo seed documents', async () => {
+  respond(snapshot(
+    entry('tw-nchu-poi-1', { schoolId: 'tw-nchu', name: '工程館', category: 'building', location: { lat: 24.1234, lng: 120.789 } }),
+    entry('tw-nchu-poi-2', { schoolId: 'tw-nchu', name: '圖書館', category: 'library', location: { lat: 24.124, lng: 120.7885 } }),
+    entry('tw-nchu-poi-3', { schoolId: 'tw-nchu', name: '學生餐廳', category: 'cafeteria', location: { lat: 24.122, lng: 120.79 } }),
+    entry('official', { schoolId: 'tw-nchu', name: '圖書館', category: 'library', lat: 24.12, lng: 120.67 }),
+  ));
+  expect((await loadMapLocations('tw-nchu')).map((place) => place.id)).toEqual(['official']);
+});
+
+it('excludes explicitly marked demo data but does not discard verified POIs merely for sharing a name', async () => {
+  respond(snapshot(
+    entry('marked', { name: '第一圖書館', isDemo: true, lat: 24.2, lng: 120.5 }),
+    entry('tw-nchu-poi-2', { name: '圖書館', lat: 24.12, lng: 120.67 }),
+  ));
+  expect((await loadMapLocations('tw-nchu')).map((place) => place.id)).toEqual(['tw-nchu-poi-2']);
+});
+
+it('fails a stuck map source after the timeout instead of loading forever', async () => {
+  vi.useFakeTimers();
+  try {
+    vi.mocked(getDocsFromServer).mockReturnValueOnce(new Promise(() => {}) as never);
+    const result = loadMapLocations('pu', { timeoutMs: 50 });
+    const settled = expect(result).rejects.toBeInstanceOf(MapSourceTimeoutError);
+    await vi.advanceTimersByTimeAsync(50);
+    await settled;
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('passes through a source answer that arrives before the timeout', async () => {
+  await expect(withTimeout(Promise.resolve(['ok']), 1000)).resolves.toEqual(['ok']);
+  await expect(withTimeout(Promise.reject(new Error('denied')), 1000)).rejects.toThrow('denied');
 });

@@ -38,13 +38,51 @@ describe('inboxTaskFromAssignmentNotification', () => {
     expect(t?.kind).toBe('quiz');
   });
 
-  test('缺 assignmentId → null', () => {
-    expect(
-      inboxTaskFromAssignmentNotification({
-        ...base,
-        data: { groupId: 'g1' },
-      }),
-    ).toBeNull();
+  test('isQuiz 字串 true 也當測驗', () => {
+    const t = inboxTaskFromAssignmentNotification({
+      ...base,
+      data: { ...base.data, isQuiz: 'true' },
+    });
+    expect(t?.kind).toBe('quiz');
+  });
+
+  test('assignment_due 通知也直達作業', () => {
+    const t = inboxTaskFromAssignmentNotification({
+      ...base,
+      type: 'assignment_due' as Notification['type'],
+      data: { courseId: 'cs101', assignmentId: 'hw-1', groupName: '資料結構' },
+    });
+    expect(t?.kind).toBe('assignment');
+    expect(t?.groupId).toBe('cs101');
+    expect(t?.assignmentId).toBe('hw-1');
+  });
+
+  test('成績通知也帶到那份作業', () => {
+    const t = inboxTaskFromAssignmentNotification({
+      ...base,
+      type: 'grade',
+      title: '成績已發布',
+    });
+    expect(t?.kind).toBe('assignment');
+    expect(t?.assignmentId).toBe('a1');
+  });
+
+  test('courseId 也直達作業', () => {
+    const t = inboxTaskFromAssignmentNotification({
+      ...base,
+      data: { courseId: 'cs101', assignmentId: 'hw-1', groupName: '資料結構' },
+    });
+    expect(t?.groupId).toBe('cs101');
+    expect(t?.assignmentId).toBe('hw-1');
+  });
+
+  test('缺 assignmentId 仍能進課程', () => {
+    const t = inboxTaskFromAssignmentNotification({
+      ...base,
+      data: { groupId: 'g1' },
+    });
+    expect(t?.groupId).toBe('g1');
+    expect(t?.assignmentId).toBeUndefined();
   });
 });
 
@@ -59,6 +97,16 @@ describe('inboxTaskFromAssignmentPushData', () => {
     expect(t?.kind).toBe('assignment');
     expect(t?.groupId).toBe('g1');
     expect(t?.title).toBe('HW1');
+  });
+
+  test('只有 courseId 的 assignment_due 仍能進課程', () => {
+    const t = inboxTaskFromAssignmentPushData({
+      type: 'assignment_due',
+      courseId: 'cs101',
+      groupName: '資料結構',
+    });
+    expect(t?.groupId).toBe('cs101');
+    expect(t?.assignmentId).toBeUndefined();
   });
 });
 

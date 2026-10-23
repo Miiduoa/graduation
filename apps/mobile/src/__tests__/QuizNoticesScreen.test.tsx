@@ -1,7 +1,6 @@
 import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import QuizCenterAiFirstScreen from '../screens/QuizCenterAiFirstScreen';
-import { QuizTakingScreen } from '../screens/QuizTakingScreen';
 import { loadCourseQuizNotices, type CourseQuizNotices } from '../features/courseQuizzes';
 
 let mockUser: { uid: string } | null = { uid: 'alice' };
@@ -39,25 +38,9 @@ test('shows only verified announcements and makes the response boundary clear', 
   const view = render(<QuizCenterAiFirstScreen route={route} />);
   await waitFor(() => expect(view.getByText('教師發布的測驗')).toBeTruthy());
   expect(load).toHaveBeenCalledWith('alice', 'pu', 'course');
-  expect(view.getByText(/未提供 App 內作答與成績回傳/)).toBeTruthy();
-  expect(view.queryByText(/提交測驗|測驗成績|開始模擬考|本學期錯題|72%|85|92/)).toBeNull();
-});
-
-test('a legacy taking link displays only the selected actual notice', async () => {
-  load.mockResolvedValue({
-    ...result,
-    notices: [...result.notices, { ...result.notices[0], id: 'two', title: '另一份測驗' }],
-  });
-  const view = render(
-    <QuizTakingScreen route={{ params: { groupId: 'course', quizId: 'one' } }} />,
-  );
-  await waitFor(() => expect(view.getByText('教師發布的測驗')).toBeTruthy());
-  expect(view.queryByText('另一份測驗')).toBeNull();
-  expect(
-    view
-      .queryAllByRole('button')
-      .filter((button) => /提交|作答/.test(String(button.props.accessibilityLabel))),
-  ).toHaveLength(0);
+  expect(view.getByText(/有題目的評量可在 App 內作答/)).toBeTruthy();
+  expect(view.getByText('前往作答')).toBeTruthy();
+  expect(view.queryByText(/開始模擬考|本學期錯題|72%|85|92/)).toBeNull();
 });
 
 test('keeps failure retryable and distinct from confirmed emptiness', async () => {
@@ -72,7 +55,7 @@ test('keeps failure retryable and distinct from confirmed emptiness', async () =
 
 test('never substitutes an invented notice for a missing requested quiz', async () => {
   const view = render(
-    <QuizTakingScreen route={{ params: { groupId: 'course', quizId: 'missing' } }} />,
+    <QuizCenterAiFirstScreen route={{ params: { groupId: 'course', quizId: 'missing' } }} />,
   );
   await waitFor(() => expect(view.getByText('找不到這份測驗通知')).toBeTruthy());
   expect(view.queryByText('教師發布的測驗')).toBeNull();

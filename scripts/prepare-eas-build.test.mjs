@@ -121,6 +121,81 @@ test('prepares both shared and platform env without changing unrelated profiles 
     base.build.production.env.IOS_BUNDLE_IDENTIFIER,
   );
 });
+test('production-device inherits production settings and binds its worker to production', (t) => {
+  const project = fixture(t);
+  const device = releaseTarget({ ...env, BUILD_PROFILE: 'production-device' });
+  const prepared = prepareBuildConfig(base, device);
+  const profile = prepared.build['production-device'];
+  assert.equal(profile.extends, 'production');
+  assert.equal(profile.android.buildType, 'apk');
+  assert.equal(profile.environment, 'production');
+  assert.equal(profile.android.environment, 'production');
+  assert.equal(profile.env.APP_ENV, 'production');
+  assert.equal(profile.android.env.APP_ENV, 'production');
+  assert.deepEqual(prepared.build.production, base.build.production);
+  assert.deepEqual(prepared.submit, base.submit);
+  assert.equal(Object.hasOwn(prepared.submit, 'production-device'), false);
+  const appConfig = actualExpoConfig(project, profile.android.env);
+  const config = {
+    appConfig,
+    buildProfile: {
+      environment: 'production',
+      distribution: 'store',
+      env: identityEnvironment(device),
+      buildType: 'apk',
+    },
+  };
+  verifyResolvedBuildConfig(config, device);
+  for (const patch of [
+    { environment: 'preview' },
+    { buildType: 'app-bundle' },
+    { gradleCommand: ':app:bundleRelease' },
+    { withoutCredentials: true },
+    { env: { ...identityEnvironment(device), APP_ENV: 'production-device' } },
+  ])
+    assert.throws(() =>
+      verifyResolvedBuildConfig(
+        {
+          ...config,
+          buildProfile: { ...config.buildProfile, ...patch },
+        },
+        device,
+      ),
+    );
+  assert.equal(
+    run(['--prepare', project], { ...env, BUILD_PROFILE: 'production-device' }).status,
+    0,
+  );
+  writeAndroid(project);
+  const worker = run(
+    ['--worker', join(project, '.release-build-target.json')],
+    {
+      ...fixtureEnv,
+      ...identityEnvironment(device),
+    },
+    project,
+  );
+  assert.equal(worker.status, 0, worker.stderr);
+});
+
+test('the release workflow binds device APKs to production and blocks submission before building', () => {
+  const workflow = readFileSync(join(root, '.github/workflows/release.yml'), 'utf8');
+  const android = workflow.split('  build-android:')[1].split('  create-release:')[0];
+  assert.match(
+    android,
+    /environment: \$\{\{ inputs\.profile == 'production-device' && 'production' \|\| inputs\.profile \}\}/,
+  );
+  assert.ok(
+    workflow.indexOf('node scripts/verify-eas-build.mjs --dispatch') <
+      workflow.indexOf('pnpm install'),
+  );
+  assert.match(workflow, /SUBMIT_TO_STORE: \$\{\{ inputs\.submit \}\}/);
+  assert.match(android, /if: inputs\.submit && inputs\.profile == 'production'/);
+  assert.match(
+    workflow.split('  create-release:')[1],
+    /always\(\) && inputs\.profile == 'production'/,
+  );
+});
 
 test('actual dynamic Expo config reproduces the original gap and receives the prepared identity', (t) => {
   const project = fixture(t);
@@ -186,11 +261,12 @@ test('the Expo resolver rejects public provider credentials in every release pro
   const project = fixture(t);
   for (const appEnv of ['preview', 'production']) {
     assert.throws(
-      () => actualExpoConfig(project, {
-        ...identityEnvironment(target),
-        APP_ENV: appEnv,
-        EXPO_PUBLIC_GEMINI_API_KEY: 'development-only-provider-key',
-      }),
+      () =>
+        actualExpoConfig(project, {
+          ...identityEnvironment(target),
+          APP_ENV: appEnv,
+          EXPO_PUBLIC_GEMINI_API_KEY: 'development-only-provider-key',
+        }),
       /Remove EXPO_PUBLIC_GEMINI_API_KEY from release builds/,
     );
   }
@@ -201,11 +277,12 @@ test('the Expo resolver refuses release provider overrides except the backend', 
   for (const appEnv of ['preview', 'production']) {
     for (const provider of ['gemini', 'offline', 'unknown']) {
       assert.throws(
-        () => actualExpoConfig(project, {
-          ...identityEnvironment(target),
-          APP_ENV: appEnv,
-          EXPO_PUBLIC_RELEASE_AI_PROVIDER: provider,
-        }),
+        () =>
+          actualExpoConfig(project, {
+            ...identityEnvironment(target),
+            APP_ENV: appEnv,
+            EXPO_PUBLIC_RELEASE_AI_PROVIDER: provider,
+          }),
         /Release AI provider must be cloud/,
       );
     }
@@ -412,7 +489,9 @@ test(
       projectId: base.build.production.env.EXPO_PUBLIC_EAS_PROJECT_ID,
     };
     for (const platform of ['android', 'ios']) {
-      for (const profile of ['production', 'preview']) {
+      for (const profile of platform === 'android'
+        ? ['production', 'preview', 'production-device']
+        : ['production', 'preview']) {
         const expected = { ...registeredTarget, platform, profile };
         const prepared = prepareBuildConfig(inherited, expected);
         assert.equal(
@@ -431,6 +510,16 @@ test(
           expected.appIdentifier,
         );
         assert.equal(appConfig.extra.eas.projectId, expected.projectId);
+        if (profile === 'production-device') {
+          const production = resolveBuildProfile({
+            easJson: prepareBuildConfig(inherited, { ...expected, profile: 'production' }),
+            platform,
+            profileName: 'production',
+          });
+          assert.equal(buildProfile.credentialsSource, 'remote');
+          assert.deepEqual(buildProfile, { ...production, buildType: 'apk' });
+          assert.deepEqual(appConfig, actualExpoConfig(project, production.env));
+        }
       }
     }
   },

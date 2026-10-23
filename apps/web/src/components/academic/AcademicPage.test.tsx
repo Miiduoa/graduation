@@ -14,11 +14,40 @@ const account = vi.hoisted(() => ({
   user: { uid: 'one' } as { uid: string } | null,
   loading: false,
   error: null,
+  studentId: true,
 }));
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => account }));
-vi.mock('next/navigation', () => ({ usePathname: () => '/grades' }));
+vi.mock('@/lib/signInOptions', () => ({
+  useSignInOptions: () => ({
+    google: true,
+    studentId: account.studentId,
+    loading: false,
+    retry: vi.fn(),
+  }),
+}));
+vi.mock('@/features/nuni/Session', () => ({
+  useOptionalNuniSession: () => null,
+}));
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/grades',
+  useRouter: () => ({ push: vi.fn() }),
+}));
 vi.mock('@/components/SiteShell', () => ({
-  SiteShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main>,
+  SiteShell: ({
+    children,
+    title,
+    schoolName,
+  }: {
+    children: React.ReactNode;
+    title?: string;
+    schoolName?: string;
+  }) => (
+    <main>
+      {schoolName ? <p>{schoolName}</p> : null}
+      {title ? <h1>{title}</h1> : null}
+      {children}
+    </main>
+  ),
 }));
 vi.mock('@/lib/academicClient', async (original) => ({
   ...(await original<typeof import('@/lib/academicClient')>()),
@@ -33,12 +62,16 @@ const timetableApi = vi.hoisted(() => ({
   listMyMeetups: vi.fn(async () => []),
   respondMeetup: vi.fn(),
 }));
-vi.mock('@/lib/timetable/store', () => timetableApi);
+vi.mock('@/lib/timetable/store', async (original) => ({
+  ...(await original<typeof import('@/lib/timetable/store')>()),
+  ...timetableApi,
+}));
 vi.mock('@/lib/timetable/friends', () => ({
   listAcceptedFriends: vi.fn(async () => []),
 }));
 vi.mock('@/components/SelectedSchoolProvider', () => ({
   useSelectedSchool: () => ({ selectedSchoolId: 'pu' }),
+  useOptionalSelectedSchool: () => ({ selectedSchoolId: 'pu' }),
 }));
 function emptyTimetable() {
   return {
@@ -69,9 +102,17 @@ beforeEach(() => {
   vi.clearAllMocks();
   account.user = { uid: 'one' };
   account.loading = false;
+  account.studentId = true;
   vi.mocked(loadAcademicRecords).mockResolvedValue(grades());
   timetableApi.loadPersonalTimetable.mockResolvedValue(emptyTimetable());
-  timetableApi.savePersonalTimetable.mockResolvedValue({ stored: 'cloud' });
+  timetableApi.savePersonalTimetable.mockResolvedValue({ stored: 'local' });
+});
+it('uses the function name in the header instead of a school name before the school account is connected', async () => {
+  account.studentId = false;
+  vi.mocked(loadAcademicRecords).mockRejectedValue(new AcademicConnectionError('reconnect'));
+  render(<GradesPage />);
+  expect(await screen.findByRole('heading', { level: 1, name: '成績' })).toBeTruthy();
+  expect(screen.queryByText('靜宜大學')).toBeNull();
 });
 it('preserves unknown grades and a real zero without manufacturing GPA or rank', async () => {
   render(<GradesPage />);
@@ -89,19 +130,32 @@ it('shows failure and retries without falling back to demo or previously loaded 
   vi.mocked(loadAcademicRecords).mockRejectedValueOnce(new AcademicConnectionError('unavailable'));
   fireEvent.click(screen.getByRole('button', { name: '更新資料' }));
   expect(await screen.findByText('暫時無法讀取學校資料')).toBeTruthy();
+  expect(screen.getByText(/暫時讀不到資料，請稍後再試/)).toBeTruthy();
+  expect(screen.queryByText(/請確認網路後再試/)).toBeNull();
   expect(screen.queryByText('真實來源科目')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '重新讀取' }));
   await screen.findByText('真實來源科目');
+});
+
+it('asks to check the network only when the academic fetch fails at the network layer', async () => {
+  vi.mocked(loadAcademicRecords).mockRejectedValueOnce(
+    new AcademicConnectionError('unavailable', new TypeError('Failed to fetch')),
+  );
+  render(<GradesPage />);
+  expect(await screen.findByText('暫時無法讀取學校資料')).toBeTruthy();
+  expect(screen.getByText(/請確認網路後再試/)).toBeTruthy();
+  expect(screen.queryByText(/暫時讀不到資料，請稍後再試/)).toBeNull();
 });
 it('clears private records synchronously when signing out', async () => {
   const view = render(<GradesPage />);
   await screen.findByText('真實來源科目');
   account.user = null;
+  account.studentId = false;
   view.rerender(<GradesPage />);
   expect(screen.queryByText('真實來源科目')).toBeNull();
-  expect(screen.getByRole('link', { name: '登入學校帳號' }).getAttribute('href')).toBe(
-    '/login?returnUrl=%2Fgrades',
-  );
+  expect(screen.getByRole('heading', { name: '這個功能還沒接通' })).toBeTruthy();
+  expect(screen.getByText('成績請先到學校的 e 校園查看。')).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /學校帳號/ })).toBeNull();
 });
 it('ignores an old account response even after logging out and back into the same UID', async () => {
   let finish!: (value: AcademicSnapshot<'grades'>) => void;
@@ -135,6 +189,14 @@ it('offers reconnection without pretending an expired session has an empty trans
   const link = await screen.findByRole('link', { name: '連線學校帳號' });
   expect(link.getAttribute('href')).toContain('reconnect=school');
   expect(screen.queryByText('課程紀錄')).toBeNull();
+});
+it('does not open a school login form when student ID is unavailable', async () => {
+  account.studentId = false;
+  vi.mocked(loadAcademicRecords).mockRejectedValue(new AcademicConnectionError('reconnect'));
+  render(<GradesPage />);
+  expect(await screen.findByRole('heading', { name: '這個功能還沒接通' })).toBeTruthy();
+  expect(screen.getByText('成績請先到學校的 e 校園查看。')).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /學校帳號/ })).toBeNull();
 });
 it('keeps weekend and unrecognized school courses as drafts until confirm', async () => {
   const course = {
@@ -181,8 +243,13 @@ it('keeps weekend and unrecognized school courses as drafts until confirm', asyn
   expect(screen.getByText('另約時間')).toBeTruthy();
   expect(screen.getAllByText(/時間待定/).length).toBeGreaterThan(0);
   expect(timetableApi.savePersonalTimetable).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: '確認匯入' }));
+  expect(screen.queryByRole('button', { name: '確認匯入' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '存在這台裝置' }));
   await waitFor(() => expect(timetableApi.savePersonalTimetable).toHaveBeenCalled());
+  expect(screen.getByRole('status').textContent).toBe(
+    '已存在這台裝置，換手機或清除瀏覽器資料就會不見',
+  );
+  expect(screen.queryByText(/已儲存|已同步/)).toBeNull();
 });
 it('requires personal input for credit planning and clears it when the account changes', async () => {
   const view = render(<CreditPlannerPage />);

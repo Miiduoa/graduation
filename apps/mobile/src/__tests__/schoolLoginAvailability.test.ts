@@ -1,5 +1,10 @@
 import Constants from 'expo-constants';
-import { isStudentIdLoginAvailable } from '../services/schoolLoginAvailability';
+import {
+  isSchoolLoginEntryAvailable,
+  isStudentIdLoginAvailable,
+  resetSchoolLoginProviderCache,
+  setSchoolLoginProviderKinds,
+} from '../services/schoolLoginAvailability';
 import { signInWithStudentId } from '../services/studentIdAuth';
 import { setTCSavedCredentials } from '../services/tronClassClient';
 
@@ -26,7 +31,10 @@ jest.mock('../services/testSeedData', () => ({ seedTestData: jest.fn() }));
 jest.mock('../services/postLoginContextFromCaches', () => ({}));
 jest.mock('../services/postLoginDataRouter', () => ({}));
 
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  resetSchoolLoginProviderCache();
+});
 test.each([
   { appEnv: 'production', release: { releasedSchoolIds: [], features: { sso: true } } },
   { appEnv: 'production', release: { releasedSchoolIds: ['pu'], features: { sso: false } } },
@@ -62,6 +70,11 @@ test('accepted SSO still refuses to send a different school credentials to Provi
     },
   });
   expect(isStudentIdLoginAvailable('pu')).toBe(true);
+  expect(isSchoolLoginEntryAvailable('pu')).toBe(false);
+  setSchoolLoginProviderKinds(['google-consumer']);
+  expect(isSchoolLoginEntryAvailable('pu')).toBe(false);
+  setSchoolLoginProviderKinds(['school-issued']);
+  expect(isSchoolLoginEntryAvailable('pu')).toBe(true);
   expect(isStudentIdLoginAvailable('other-school')).toBe(false);
   await expect(
     signInWithStudentId({ schoolId: 'other-school', studentId: 's123', password: 'secret' }),

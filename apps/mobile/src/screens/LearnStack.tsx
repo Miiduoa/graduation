@@ -49,6 +49,7 @@ import { AdminCourseVerifyScreen } from './AdminCourseVerifyScreen';
 import CourseDiscussionScreen from './CourseDiscussionScreen';
 import DiscussionThreadDetailScreen from './DiscussionThreadDetailScreen';
 import CourseMaterialViewerScreen from './CourseMaterialViewerScreen';
+import HomeworkSubmitScreen from './HomeworkSubmitScreen';
 import VideoMaterialScreen from './VideoMaterialScreen';
 import SurveyScreen from './SurveyScreen';
 import PeerReviewSubmitScreen from './PeerReviewSubmitScreen';
@@ -88,6 +89,7 @@ import { UnavailableFeatureScreen } from './UnavailableFeatureScreen';
 import MyOrdersScreen from './MyOrdersScreen';
 import { CampusAssistantScreen } from './CampusAssistantScreen';
 import PersonalTimetableScreen from './PersonalTimetableScreen';
+import PersonalImportScreen from './PersonalImportScreen';
 import CourseAppealsScreen from './CourseAppealsScreen';
 import ShopDockScreen from './ShopDockScreen';
 import { isDevelopmentDemoSession } from '../services/release';
@@ -556,6 +558,7 @@ export function LearnStack() {
         component={UnifiedCalendarScreen}
         options={{ title: '行事曆', headerShown: false }}
       />
+      <Stack.Screen name="PersonalImport" component={PersonalImportScreen} options={{ title: '匯入我的資料', headerShown: false }} />
       <Stack.Screen
         name="PersonalTimetable"
         component={PersonalTimetableScreen}
@@ -620,7 +623,7 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="HomeworkSubmit"
-        component={UnavailableFeatureScreen}
+        component={guardCourseView(HomeworkSubmitScreen)}
         options={{ title: '繳交作業', headerShown: false }}
       />
       <Stack.Screen

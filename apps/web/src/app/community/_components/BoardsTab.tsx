@@ -191,7 +191,7 @@ export function BoardsTab(props: { schoolId: string; schoolSearch: string }) {
                         {TYPE_ICON[(b.type ?? 'topic') as CampusBoardType]}
                       </div>
                       <Link
-                        href={`/community/board/${b.id}`}
+                        href={`/community/board/${b.id}?schoolId=${encodeURIComponent(schoolId)}`}
                         style={{
                           flex: 1,
                           minWidth: 0,

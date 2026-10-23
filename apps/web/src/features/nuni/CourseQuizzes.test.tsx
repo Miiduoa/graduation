@@ -6,6 +6,7 @@ import {
   type NuniQuizResponse,
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
+import { COURSE_WORK_LANDING_ATTR, COURSE_WORK_MISSING_QUIZ } from '@/lib/courseWorkLanding';
 import { CourseQuizzes } from './CourseQuizzes';
 
 const mocks = vi.hoisted(() => ({
@@ -133,6 +134,7 @@ it('preserves the original publish payload and key across an uncertain response 
   render(<CourseQuizzes workspace={workspace('owner-teacher')} />);
   await screen.findByText('還沒有測驗。可以先發布一個文字題目。');
   openPublish();
+  expect(screen.getByText(/時間依台北時間顯示/)).toBeTruthy();
   fireEvent.change(screen.getByLabelText('建議完成時間（選填）'), {
     target: { value: '2026-10-09T14:00' },
   });
@@ -155,10 +157,33 @@ it('preserves the original publish payload and key across an uncertain response 
     expect.objectContaining({
       title: '新的題目',
       prompt: '請提出一個研究問題。',
-      dueAt: new Date('2026-10-09T14:00').toISOString(),
+      dueAt: '2026-10-09T14:00:00+08:00',
     }),
   );
   expect(screen.getAllByRole('article')).toHaveLength(1);
+});
+
+it('links a new quiz to its selected teaching chapter without replacing text quiz behavior', async () => {
+  session(teacherId);
+  const unitId = 'cwu_11111111-1111-4111-8111-111111111111';
+  const unit = { id: unitId, workspaceId, title: '第三章', position: 2, createdAt: timestamp };
+  mocks.request.mockImplementation(async (path, _context, input) => {
+    if (path === listPath && !input) return { quizzes: [] };
+    if (path === listPath && input) {
+      return quiz({ title: input.title, prompt: input.prompt, unitId, unitTitle: unit.title });
+    }
+    throw new Error('Unexpected route');
+  });
+  render(<CourseQuizzes workspace={workspace('owner-teacher')} units={[unit]} />);
+  await screen.findByText('還沒有測驗。可以先發布一個文字題目。');
+  openPublish();
+  fireEvent.change(screen.getByLabelText('所屬章節（選填）'), { target: { value: unitId } });
+  fireEvent.click(screen.getByRole('button', { name: '發布測驗' }));
+  await screen.findByText('測驗已發布。');
+  expect(requestsTo('/quizzes')[0][2]).toEqual(
+    expect.objectContaining({ unitId, idempotencyKey: expect.any(String) }),
+  );
+  expect(screen.getByText('章節：第三章')).toBeTruthy();
 });
 
 it('treats teacher permission rejection as a failed publish, retaining editable input', async () => {
@@ -280,6 +305,13 @@ it('shows a passed suggested date truthfully while an open quiz remains answerab
   render(<CourseQuizzes workspace={workspace()} />);
   await screen.findByText('已過建議完成時間，老師尚未結束測驗，目前仍可送出作答。');
   expect(screen.getByLabelText('你的回答')).toBeTruthy();
+});
+
+it('treats a quiz dueAt without offset as Taipei time', async () => {
+  replyList([quiz({ dueAt: '2026-10-07T16:00:00' })]);
+  render(<CourseQuizzes workspace={workspace()} />);
+  await screen.findByText('已過建議完成時間，老師尚未結束測驗，目前仍可送出作答。');
+  expect(screen.getByText('2026/10/7 下午4:00')).toBeTruthy();
 });
 
 it('closed quizzes show the absence of an answer and cannot be submitted', async () => {
@@ -703,6 +735,25 @@ it('positions and focuses incoming quiz links after loading, and responds to ano
   await waitFor(() => expect(second.scrollIntoView).toHaveBeenCalledWith({ block: 'start' }));
   expect(document.activeElement).toBe(second);
   expect(first.scrollIntoView).toHaveBeenCalledTimes(1);
+});
+
+it('shows the submitted answer when a deep link opens an already answered quiz', async () => {
+  window.history.replaceState(null, '', `#quiz-${quizId}`);
+  replyList([quiz({ myResponse: answer(), responseCount: 1 })]);
+  render(<CourseQuizzes workspace={workspace()} />);
+  const card = await screen.findByRole('article', { name: '測驗：說明研究方法' });
+  card.scrollIntoView = vi.fn();
+  await waitFor(() => expect(card.getAttribute(COURSE_WORK_LANDING_ATTR)).toBe('true'));
+  expect(within(card).getByText('已送出作答')).toBeTruthy();
+  expect(within(card).getByDisplayValue('先觀察使用情境，再確認問題。')).toBeTruthy();
+});
+
+it('explains a missing quiz link instead of a blank panel', async () => {
+  window.history.replaceState(null, '', '#quiz-missing');
+  replyList([quiz()]);
+  render(<CourseQuizzes workspace={workspace()} />);
+  expect(await screen.findByText(COURSE_WORK_MISSING_QUIZ)).toBeTruthy();
+  expect(screen.getByRole('article', { name: '測驗：說明研究方法' })).toBeTruthy();
 });
 
 it('a linked quiz leaves a filtered view without erasing an answer draft', async () => {

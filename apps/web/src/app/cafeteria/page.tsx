@@ -1,18 +1,28 @@
 'use client';
 
-import { use, useMemo, useState } from 'react';
+import { use, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
-import { useAuth } from '@/components/AuthGuard';
 import {
-  fetchCafeterias,
-  fetchMenus,
-  subscribeCafeterias,
-  subscribeMenus,
-  type Cafeteria,
-  type MenuItem,
-} from '@/lib/firebase';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
-import { useSchoolCollectionData } from '@/lib/useSchoolCollectionData';
+  SHOWCASE_ORDER_BUTTON_TEXT,
+  isMenuStale,
+  studentCafeteriaAction,
+} from '@campus/shared/src/merchantMode';
+import {
+  CAFETERIA_EMPTY_SCHOOL_TEXT,
+  CAFETERIA_PAYMENT_DISCLAIMER,
+  CAFETERIA_REVIEW_STATUS_DEFAULT,
+  cafeteriaReviewBadge,
+  cafeteriaShowsMenuAvailability,
+} from '@campus/shared/src/cafeteriaCatalog';
+import { ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
+import { fetchCafeteriaCatalog, type CatalogCafeteria } from '@/lib/cafeteriaCatalog';
+import {
+  loadServiceFailureCopy,
+  shouldOfferLoadRetry,
+} from '@campus/shared/src/loadFailureCopy';
+import type { MenuItem } from '@/lib/firebase';
+import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import styles from './cafeteria.module.css';
 
 const ALL_CAFETERIAS_KEY = 'all';
@@ -26,7 +36,7 @@ function getCafeteriaKey(input: {
   return input.id || input.cafeteriaId || input.name || input.cafeteria || '';
 }
 
-function getMenuCafeteriaKey(menu: MenuItem, cafeterias: Cafeteria[]) {
+function getMenuCafeteriaKey(menu: MenuItem, cafeterias: CatalogCafeteria[]) {
   if (menu.cafeteriaId) return menu.cafeteriaId;
   const matching = cafeterias.filter((row) => row.name === menu.cafeteria);
   return matching.length === 1 ? matching[0].id : menu.cafeteria || '';
@@ -65,18 +75,26 @@ function getMenuAvailability(item: MenuItem) {
 }
 
 export default function CafeteriaPage(props: {
-  searchParams?: Promise<{ school?: string; schoolId?: string }>;
+  searchParams?: Promise<{ school?: string; schoolId?: string; campus?: string }>;
 }) {
   const searchParams = props.searchParams ? use(props.searchParams) : undefined;
-  const context = resolveSchoolPageContext(searchParams);
-  const { user, loading: authLoading } = useAuth();
-  const scopeKey = JSON.stringify([user?.uid ?? null, authLoading]);
+  const context = useCampusBrowseContext(searchParams);
+  if (context.status !== 'ready' || !context.schoolId) {
+    return (
+      <SiteShell title="餐廳">
+        <section className="card" role="status">
+          <h2>{context.status === 'loading' ? '正在讀取校園目錄…' : context.status === 'error' ? '無法確認所選校園' : '先選擇一所學校'}</h2>
+          <p>選擇校園後才讀取該校的餐廳與菜單，不會顯示另一所學校的餐點。</p>
+        </section>
+      </SiteShell>
+    );
+  }
   return (
     <CafeteriaContent
-      key={JSON.stringify([context.schoolId, scopeKey])}
-      {...context}
-      scopeKey={scopeKey}
-      authLoading={authLoading}
+      key={context.schoolId}
+      schoolId={context.schoolId}
+      schoolName={context.schoolName}
+      schoolSearch={context.schoolSearch}
     />
   );
 }
@@ -84,43 +102,45 @@ export default function CafeteriaPage(props: {
 function CafeteriaContent({
   schoolId,
   schoolName,
-  schoolSearch: q,
-  scopeKey,
-  authLoading,
 }: {
   schoolId: string;
   schoolName: string;
   schoolSearch: string;
-  scopeKey: string;
-  authLoading: boolean;
 }) {
   const [selectedCafeteria, setSelectedCafeteria] = useState(ALL_CAFETERIAS_KEY);
   const [search, setSearch] = useState('');
+  const [cafeteriaRows, setCafeteriaRows] = useState<CatalogCafeteria[]>([]);
+  const [menuRows, setMenuRows] = useState<MenuItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState<unknown>(null);
+  const [attempt, setAttempt] = useState(0);
 
-  const {
-    data: cafeteriaRows,
-    loading: cafeteriaLoading,
-    error: cafeteriaError,
-    retry: retryCafeterias,
-  } = useSchoolCollectionData<Cafeteria>(schoolId, fetchCafeterias, {
-    subscribeLive: subscribeCafeterias,
-    scopeKey,
-  });
-
-  const {
-    data: menuRows,
-    loading: menuLoading,
-    error: menuError,
-    retry: retryMenus,
-  } = useSchoolCollectionData<MenuItem>(schoolId, fetchMenus, {
-    subscribeLive: subscribeMenus,
-    scopeKey,
-  });
-
-  const loading = cafeteriaLoading || menuLoading;
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setFailed(null);
+    setCafeteriaRows([]);
+    setMenuRows([]);
+    void fetchCafeteriaCatalog(schoolId).then(
+      (catalog) => {
+        if (!active) return;
+        setCafeteriaRows(catalog.cafeterias);
+        setMenuRows(catalog.menus);
+        setLoading(false);
+      },
+      (reason) => {
+        if (!active) return;
+        setFailed(reason);
+        setLoading(false);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [attempt, schoolId]);
 
   const cafeterias = useMemo(() => {
-    const merged = new Map<string, Cafeteria>();
+    const merged = new Map<string, CatalogCafeteria>();
 
     cafeteriaRows.forEach((cafeteria) => {
       const key = getCafeteriaKey(cafeteria);
@@ -139,6 +159,7 @@ function CafeteriaContent({
       merged.set(key, {
         id: menu.cafeteriaId || key,
         name: menu.cafeteria || '未命名餐廳',
+        reviewStatus: CAFETERIA_REVIEW_STATUS_DEFAULT,
       });
     });
 
@@ -208,16 +229,19 @@ function CafeteriaContent({
           cafeteria,
           items,
           totalCount: allItems.length,
-          availableCount: allItems.filter(
-            (item) => item.available === true && item.soldOut !== true,
-          ).length,
+          availableCount: cafeteriaShowsMenuAvailability(cafeteria.reviewStatus)
+            ? allItems.filter((item) => item.available === true && item.soldOut !== true).length
+            : 0,
         };
       })
       .filter((section): section is NonNullable<typeof section> => section !== null);
   }, [cafeterias, menusByCafeteria, search, selectedCafeteria]);
 
   const stats = useMemo(() => {
-    const soldOutMenus = menuRows.filter((menu) => menu.soldOut === true).length;
+    const soldOutMenus = menuRows.filter((menu) => {
+      const shop = cafeterias.find((row) => getCafeteriaKey(row) === getMenuCafeteriaKey(menu, cafeteriaRows));
+      return cafeteriaShowsMenuAvailability(shop?.reviewStatus) && menu.soldOut === true;
+    }).length;
 
     return {
       cafeterias: cafeterias.length,
@@ -242,26 +266,21 @@ function CafeteriaContent({
   }, [cafeterias, menuRows]);
 
   const sourceLabel = '餐廳資料';
-  if (authLoading || loading || cafeteriaError || menuError) {
-    const failed = !authLoading && (cafeteriaError || menuError);
+  const online = typeof navigator === 'undefined' ? true : navigator.onLine;
+  if (loading || failed) {
     return (
       <SiteShell title="餐廳" subtitle="查看校內餐廳與菜單" schoolName={schoolName}>
         <section className="card" role={failed ? 'alert' : 'status'}>
-          <h2>{failed ? '暫時無法讀取餐廳資料' : '正在讀取餐廳與菜單…'}</h2>
-          {failed && (
-            <>
-              <p>這次沒有取得完整資料，請稍後重試。餐點供應仍以店家現場資訊為準。</p>
-              <button
-                className="btn primary"
-                onClick={() => {
-                  retryCafeterias();
-                  retryMenus();
-                }}
-              >
-                重新讀取
-              </button>
-            </>
-          )}
+          <h2>
+            {failed
+              ? loadServiceFailureCopy(failed, { online })
+              : '正在讀取餐廳與菜單…'}
+          </h2>
+          {failed && shouldOfferLoadRetry(failed, { online }) ? (
+            <button className="btn primary" onClick={() => setAttempt((value) => value + 1)}>
+              重新整理
+            </button>
+          ) : null}
         </section>
       </SiteShell>
     );
@@ -279,7 +298,8 @@ function CafeteriaContent({
           </div>
         </div>
         <p className={styles.notice}>
-          依店家提供的資料顯示；實際營業與餐點供應請向店家確認。本頁提供菜單查詢，目前還不能線上點餐。
+          {ONLINE_ORDERING_OFF_TEXT}。依店家提供的資料顯示；實際營業與餐點供應請向店家確認。一般帳號即可看店面與菜單。
+          {CAFETERIA_PAYMENT_DISCLAIMER}
         </p>
 
         <section className={styles.toolbar} aria-label="尋找餐點">
@@ -321,12 +341,12 @@ function CafeteriaContent({
             <h2>
               {search.trim() || selectedCafeteria !== ALL_CAFETERIAS_KEY
                 ? '找不到符合的餐廳或菜單'
-                : '目前沒有餐廳資料'}
+                : CAFETERIA_EMPTY_SCHOOL_TEXT}
             </h2>
             <p>
               {search.trim() || selectedCafeteria !== ALL_CAFETERIAS_KEY
                 ? '試試其他菜名，或清除篩選查看全部餐廳。'
-                : '店家提供餐廳與菜單資料後，會顯示在這裡。'}
+                : '這間學校還沒提供餐廳資料，不會沿用其他學校的店家。'}
             </p>
             {(search.trim() || selectedCafeteria !== ALL_CAFETERIAS_KEY) && (
               <button
@@ -346,7 +366,14 @@ function CafeteriaContent({
             <section key={key} className={styles.restaurant} aria-label={cafeteria.name}>
               <header className={styles.restaurantHeader}>
                 <div>
-                  <h2>{cafeteria.name}</h2>
+                  <h2>
+                    {cafeteria.name}
+                    {cafeteriaReviewBadge(cafeteria.reviewStatus) ? (
+                      <span className={styles.reviewBadge}>
+                        {cafeteriaReviewBadge(cafeteria.reviewStatus)}
+                      </span>
+                    ) : null}
+                  </h2>
                   <div className={styles.details}>
                     {cafeteria.location && <span>位置：{cafeteria.location}</span>}
                     {cafeteria.openingHours && <span>營業時間：{cafeteria.openingHours}</span>}
@@ -364,24 +391,50 @@ function CafeteriaContent({
                   </div>
                 </div>
                 <p className={styles.count}>
-                  {totalCount} 道餐點 · {availableCount} 道標記供應中
+                  {cafeteriaShowsMenuAvailability(cafeteria.reviewStatus)
+                    ? `${totalCount} 道餐點 · ${availableCount} 道標記供應中`
+                    : `${totalCount} 道餐點`}
+                </p>
+                <p className={styles.details}>
+                  <Link href={`/cafeteria/${encodeURIComponent(key)}?schoolId=${encodeURIComponent(schoolId)}`}>
+                    進入店面
+                  </Link>
+                  {studentCafeteriaAction({
+                    merchantMode: cafeteria.merchantMode,
+                    orderingEnabled: cafeteria.orderingEnabled,
+                    onlineOrderingEnabled: false,
+                    orderingUrl: cafeteria.orderingUrl,
+                  }).kind === 'showcase' && (
+                    <Link
+                      href={`/cafeteria/${encodeURIComponent(key)}/order?schoolId=${encodeURIComponent(schoolId)}`}
+                    >
+                      {SHOWCASE_ORDER_BUTTON_TEXT}
+                    </Link>
+                  )}
                 </p>
               </header>
+              {isMenuStale(cafeteria.menuSyncedAt) && items.length > 0 && (
+                <p className={styles.menuEmpty}>菜單可能過期，價格以店家頁面為準。</p>
+              )}
 
               {items.length === 0 ? (
                 <p className={styles.menuEmpty}>店家尚未提供菜單，請至現場確認餐點。</p>
               ) : (
                 <ul className={styles.menu}>
                   {items.map((item) => {
-                    const availability = getMenuAvailability(item);
+                    const availability = cafeteriaShowsMenuAvailability(cafeteria.reviewStatus)
+                      ? getMenuAvailability(item)
+                      : null;
                     return (
                       <li key={item.id} className={styles.menuItem}>
                         <div className={styles.menuContent}>
                           <div className={styles.menuHeading}>
                             <h3>{item.name}</h3>
-                            <span className={styles.status} data-tone={availability.tone}>
-                              {availability.label}
-                            </span>
+                            {availability ? (
+                              <span className={styles.status} data-tone={availability.tone}>
+                                {availability.label}
+                              </span>
+                            ) : null}
                           </div>
                           {item.description && (
                             <p className={styles.description}>{item.description}</p>

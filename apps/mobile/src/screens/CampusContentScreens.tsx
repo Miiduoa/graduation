@@ -17,10 +17,29 @@ import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useSchool } from '../state/school';
 import { useCampusEvents } from '../hooks/useCampusEvents';
 import {
-  loadCampusAnnouncements,
+  loadCampusAnnouncementFeed,
   loadCampusAnnouncement,
   loadCampusEvent,
 } from '../services/publicCampusContent';
+import {
+  ANNOUNCEMENT_ALL_VIEW_LABEL,
+  ANNOUNCEMENT_EMPTY_CONNECTED_TEXT,
+  ANNOUNCEMENT_EMPTY_SCHOOL_TEXT,
+  ANNOUNCEMENT_OFFICIAL_SITE_BUTTON,
+  ANNOUNCEMENT_READ_FAILURE_TEXT,
+  ANNOUNCEMENT_RETRY_TEXT,
+  ANNOUNCEMENT_STUDENT_WALL_LABEL,
+  announcementEmptyHeading,
+  announcementEmptyKind,
+  announcementViewPhase,
+  formatStaleAnnouncementNotice,
+  isAnnouncementSchoolVisibleToPublic,
+  listAnnouncementCatalogLinks,
+  staleAnnouncementUpdatedAt,
+  SUMMARY_NOTICE,
+  verifiedOfficialAnnouncementUrl,
+} from '@campus/shared/src/campusAnnouncements';
+import { getRawAppEnv } from '../services/release';
 import { safeNavigate } from '../utils/safeNavigate';
 import { exportAndShareICalFile } from '../services/ical';
 import type { AnnouncementCategory } from '../data/types';
@@ -33,7 +52,12 @@ type Props = {
   route?: { params?: { id?: string; announcementId?: string; eventId?: string; source?: string } };
 };
 
-function useContent<T>(loader: (schoolId: string, id: string) => Promise<T>, id = '', source = '') {
+function useContent<T>(
+  loader: (schoolId: string, id: string) => Promise<T>,
+  id = '',
+  source = '',
+  keepOnError = false,
+) {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const { user } = useAuth();
   const { school } = useSchool();
@@ -51,21 +75,30 @@ function useContent<T>(loader: (schoolId: string, id: string) => Promise<T>, id 
   const current = () => mounted.current && activeScope.current === scope;
   const reload = useCallback(async () => {
     const request = ++generation.current;
-    setState({ scope, value: null, error: '', loading: true });
+    setState((prev) => ({
+      scope,
+      value: keepOnError && prev.scope === scope ? prev.value : null,
+      error: '',
+      loading: !(keepOnError && prev.scope === scope && prev.value),
+    }));
     try {
       const value = await loader(school.id, id);
       if (mounted.current && activeScope.current === scope && generation.current === request)
         setState({ scope, value, error: '', loading: false });
     } catch {
       if (mounted.current && activeScope.current === scope && generation.current === request)
-        setState({
+        setState((prev) => ({
           scope,
-          value: null,
-          error: '目前無法讀取，請確認網路連線後重試。',
+          value: keepOnError && prev.scope === scope ? prev.value : null,
+          error: keepOnError
+            ? prev.scope === scope && prev.value
+              ? 'stale'
+              : 'failed'
+            : '目前無法讀取，請確認網路連線後重試。',
           loading: false,
-        });
+        }));
     }
-  }, [loader, school.id, id, scope]);
+  }, [loader, school.id, id, scope, keepOnError]);
   useEffect(() => {
     mounted.current = true;
     void reload();
@@ -79,6 +112,78 @@ function useContent<T>(loader: (schoolId: string, id: string) => Promise<T>, id 
     reload,
     current,
     scope,
+  };
+}
+
+function useAnnouncementFeed() {
+  useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
+  const { user } = useAuth();
+  const { school } = useSchool();
+  const scope = JSON.stringify([user?.uid, school.id]);
+  const activeScope = useRef(scope);
+  activeScope.current = scope;
+  const generation = useRef(0);
+  const mounted = useRef(true);
+  const [state, setState] = useState<{
+    scope: string;
+    feed: Awaited<ReturnType<typeof loadCampusAnnouncementFeed>> | null;
+    loading: boolean;
+    stale: boolean;
+    failed: boolean;
+  }>({ scope, feed: null, loading: true, stale: false, failed: false });
+  const current = () => mounted.current && activeScope.current === scope;
+  const reload = useCallback(async () => {
+    const request = ++generation.current;
+    setState((prev) => ({
+      scope,
+      feed: prev.scope === scope ? prev.feed : null,
+      loading: !(prev.scope === scope && (prev.feed?.announcements.length ?? 0) > 0),
+      stale: prev.scope === scope ? prev.stale : false,
+      failed: false,
+    }));
+    try {
+      const feed = await loadCampusAnnouncementFeed(school.id);
+      if (mounted.current && activeScope.current === scope && generation.current === request)
+        setState({ scope, feed, loading: false, stale: false, failed: false });
+    } catch {
+      if (mounted.current && activeScope.current === scope && generation.current === request) {
+        setState((prev) => {
+          const cached =
+            prev.scope === scope && prev.feed && prev.feed.announcements.length > 0
+              ? prev.feed
+              : null;
+          return {
+            scope,
+            feed: cached,
+            loading: false,
+            stale: Boolean(cached),
+            failed: !cached,
+          };
+        });
+      }
+    }
+  }, [school.id, scope]);
+  useEffect(() => {
+    mounted.current = true;
+    void reload();
+    return () => {
+      mounted.current = false;
+      generation.current += 1;
+    };
+  }, [reload]);
+  const scoped = state.scope === scope;
+  const feed = scoped ? state.feed : null;
+  const failed = scoped && !state.loading && state.failed;
+  const loading = !scoped || state.loading || (feed == null && !failed);
+  return {
+    loading,
+    failed,
+    stale: scoped ? state.stale : false,
+    reload,
+    current,
+    announcements: loading ? [] : (feed?.announcements ?? []),
+    officialAnnouncements: loading ? [] : (feed?.officialAnnouncements ?? []),
+    sources: loading ? [] : (feed?.sources ?? []),
   };
 }
 
@@ -133,23 +238,123 @@ function ReadState({
 }
 
 export function CampusAnnouncementsScreen({ navigation }: Props) {
-  const content = useContent(loadCampusAnnouncements);
+  const { school } = useSchool();
+  const schoolVisible = isAnnouncementSchoolVisibleToPublic(
+    { schoolId: school.id },
+    getRawAppEnv(),
+  );
+  const content = useAnnouncementFeed();
   const [category, setCategory] = useState<AnnouncementCategory | 'all'>('all');
-  const rows = content.value ?? [];
+  const [listView, setListView] = useState<'student' | 'all'>('student');
+  const student = content.announcements;
+  const official = content.officialAnnouncements;
+  const rows = listView === 'all' ? official : student;
+  const sources = content.sources;
+  const showFeed = official.length > 0 || student.length > 0;
   const visible = rows.filter((row) => category === 'all' || row.category === category);
+  const down = sources.filter((item) => item.status === 'unavailable');
+  const downLinks = down.filter((item) => item.listUrl);
+  const officialUrl = verifiedOfficialAnnouncementUrl(school.id);
+  const catalogLinks = officialUrl ? listAnnouncementCatalogLinks(school.id) : [];
+  const phase = announcementViewPhase(content.loading, student, sources, content.failed);
+  const showStaleNotice = rows.length > 0 && (content.stale || down.length > 0);
+  const staleSources =
+    content.stale && !down.length
+      ? [{ status: 'unavailable' as const, lastSuccessAt: undefined }]
+      : sources;
+  if (!schoolVisible) {
+    return (
+      <AIDetailScreen
+        title="公告"
+        subtitle="公開處室公告的摘要與原文連結。一般帳號即可查看。"
+        onBack={() => navigation?.goBack?.()}
+      >
+        <AICard title="目前沒有公告">{null}</AICard>
+      </AIDetailScreen>
+    );
+  }
   return (
     <AIDetailScreen
       title="公告"
-      subtitle="查看學校發布的最新消息。"
+      subtitle="公開處室公告的摘要與原文連結。一般帳號即可查看。"
       onBack={() => navigation?.goBack?.()}
     >
-      {content.loading || content.error || !rows.length ? (
-        <ReadState {...content} empty="目前沒有公告" />
+      {phase === 'loading' ? (
+        <ReadState loading error="" empty="目前沒有公告" reload={content.reload} />
+      ) : phase === 'failed' ? (
+        <AICard title={ANNOUNCEMENT_READ_FAILURE_TEXT}>
+          <AIButton label={ANNOUNCEMENT_RETRY_TEXT} onPress={() => void content.reload()} />
+        </AICard>
+      ) : !showFeed && phase === 'source_down' ? (
+        <AICard title={ANNOUNCEMENT_READ_FAILURE_TEXT}>
+          <View style={{ gap: 12 }}>
+            <AIButton label={ANNOUNCEMENT_RETRY_TEXT} onPress={() => void content.reload()} />
+            {officialUrl ? (
+              <AIButton
+                label={ANNOUNCEMENT_OFFICIAL_SITE_BUTTON}
+                variant="ghost"
+                onPress={() => void Linking.openURL(officialUrl)}
+              />
+            ) : null}
+            {(downLinks.length ? downLinks : catalogLinks).map((item) => (
+              <AIButton
+                key={item.sourceId}
+                label={item.office}
+                variant="ghost"
+                onPress={() => void Linking.openURL(item.listUrl!)}
+              />
+            ))}
+          </View>
+        </AICard>
+      ) : !showFeed ? (
+        <AICard
+          title={
+            announcementEmptyHeading(announcementEmptyKind(student, sources)) ??
+            ANNOUNCEMENT_EMPTY_SCHOOL_TEXT
+          }
+        >
+          <View style={{ gap: 12 }}>
+            {officialUrl ? (
+              <AIButton
+                label={ANNOUNCEMENT_OFFICIAL_SITE_BUTTON}
+                onPress={() => void Linking.openURL(officialUrl)}
+              />
+            ) : null}
+            {catalogLinks.map((item) => (
+              <AIButton
+                key={item.sourceId}
+                label={item.office}
+                onPress={() => void Linking.openURL(item.listUrl)}
+              />
+            ))}
+            <AIButton label="更新公告" variant="ghost" onPress={() => void content.reload()} />
+          </View>
+        </AICard>
       ) : (
         <>
+          {showStaleNotice ? (
+            <AICard
+              title={formatStaleAnnouncementNotice(
+                staleAnnouncementUpdatedAt(staleSources, rows),
+                content.stale ? 'firestore' : 'source_down',
+              )}
+            >
+              {null}
+            </AICard>
+          ) : null}
           <View
             style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, margin: aiTokens.space.md }}
           >
+            <AIChip
+              label={ANNOUNCEMENT_STUDENT_WALL_LABEL}
+              active={listView === 'student'}
+              onPress={() => setListView('student')}
+            />
+            <AIChip
+              label={ANNOUNCEMENT_ALL_VIEW_LABEL}
+              active={listView === 'all'}
+              onPress={() => setListView('all')}
+            />
             <AIChip
               label={`全部 ${rows.length}`}
               active={category === 'all'}
@@ -166,19 +371,28 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
                 />
               ))}
           </View>
-          <AISection title="學校公告" subtitle="最近發布的 100 則以內">
+          <AISection
+            title={listView === 'all' ? ANNOUNCEMENT_ALL_VIEW_LABEL : '學校公告'}
+            subtitle={listView === 'all' ? '含教師向與資安轉知等正式公告' : '各處室公開公告'}
+          >
             {visible.length ? (
               visible.map((row) => (
                 <AIRow
                   key={row.id}
                   title={row.title}
-                  subtitle={[row.source, dateLabel(row.publishedAt)].filter(Boolean).join(' · ')}
+                  subtitle={[row.source || row.office, dateLabel(row.publishedAt)]
+                    .filter(Boolean)
+                    .join(' · ')}
                   tag={row.pinned ? '置頂' : undefined}
                   onPress={() => {
                     if (content.current()) safeNavigate(navigation, '公告詳情', { id: row.id });
                   }}
                 />
               ))
+            ) : listView === 'student' && student.length === 0 ? (
+              <AICard title={ANNOUNCEMENT_EMPTY_CONNECTED_TEXT}>
+                <Text>教師向、資安轉知等正式公告可到「{ANNOUNCEMENT_ALL_VIEW_LABEL}」查看。</Text>
+              </AICard>
             ) : (
               <AICard title="這個分類目前沒有公告">{null}</AICard>
             )}
@@ -197,7 +411,7 @@ export function CampusAnnouncementsScreen({ navigation }: Props) {
 
 export function CampusAnnouncementDetailScreen({ navigation, route }: Props) {
   const id = route?.params?.id ?? route?.params?.announcementId ?? '';
-  const content = useContent(loadCampusAnnouncement, id);
+  const content = useContent(loadCampusAnnouncement, id, '', true);
   const announcement = content.value;
   const [actionError, setActionError] = useState<{ scope: string; text: string } | null>(null);
   const openAttachment = async (url: string) => {
@@ -212,10 +426,30 @@ export function CampusAnnouncementDetailScreen({ navigation, route }: Props) {
   };
   return (
     <AIDetailScreen title="公告詳情" onBack={() => navigation?.goBack?.()}>
-      {content.loading || content.error || !announcement ? (
+      {content.loading ? (
+        <ReadState {...content} empty="找不到這則公告，可能已移除或不屬於目前學校。" />
+      ) : content.error === 'failed' ||
+        (content.error && content.error !== 'stale' && !announcement) ? (
+        <AICard title={ANNOUNCEMENT_READ_FAILURE_TEXT}>
+          <AIButton label={ANNOUNCEMENT_RETRY_TEXT} onPress={() => void content.reload()} />
+        </AICard>
+      ) : !announcement ? (
         <ReadState {...content} empty="找不到這則公告，可能已移除或不屬於目前學校。" />
       ) : (
         <>
+          {content.error === 'stale' ? (
+            <AICard
+              title={formatStaleAnnouncementNotice(
+                staleAnnouncementUpdatedAt(
+                  [{ status: 'unavailable', lastSuccessAt: announcement.publishedAt }],
+                  [announcement],
+                ),
+                'firestore',
+              )}
+            >
+              {null}
+            </AICard>
+          ) : null}
           <AICard title={announcement.title}>
             <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
               {[announcement.source, dateLabel(announcement.publishedAt)]
@@ -225,9 +459,20 @@ export function CampusAnnouncementDetailScreen({ navigation, route }: Props) {
           </AICard>
           <AICard title="公告內容">
             <Text selectable style={{ color: aiTokens.text, lineHeight: 25 }}>
-              {announcement.body || '此公告沒有提供內文。'}
+              {announcement.summary || announcement.body || '此公告沒有提供內文。'}
             </Text>
+            {announcement.originalUrl || announcement.summary ? (
+              <Text style={{ color: aiTokens.muted, lineHeight: 22, marginTop: 8 }}>
+                {SUMMARY_NOTICE}
+              </Text>
+            ) : null}
           </AICard>
+          {announcement.originalUrl ? (
+            <AIButton
+              label="看原文"
+              onPress={() => void openAttachment(announcement.originalUrl!)}
+            />
+          ) : null}
           {announcement.attachments?.length ? (
             <AISection title="附件">
               {announcement.attachments.map((attachment) => (

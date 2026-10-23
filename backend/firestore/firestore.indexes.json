@@ -182,8 +182,12 @@
     },
     {
       "collectionGroup": "directory",
-      "queryScope": "COLLECTION_GROUP",
+      "queryScope": "COLLECTION",
       "fields": [
+        {
+          "fieldPath": "isDiscoverable",
+          "order": "ASCENDING"
+        },
         {
           "fieldPath": "displayName",
           "order": "ASCENDING"
@@ -384,6 +388,28 @@
     }
   ],
   "fieldOverrides": [
+    {
+      "collectionGroup": "directory",
+      "fieldPath": "displayName",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "DESCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "arrayConfig": "CONTAINS",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    },
     {
       "collectionGroup": "registrations",
       "fieldPath": "userId",

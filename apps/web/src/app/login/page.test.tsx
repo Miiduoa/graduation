@@ -1,14 +1,17 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import LoginPage from './page';
+import { STUDENT_ID_PREPARING_COPY } from '@/lib/signInOptions';
 const { replace, signIn, state } = vi.hoisted(() => ({
   replace: vi.fn(),
   signIn: vi.fn(),
   state: {
     params: new URLSearchParams('returnUrl=%2Fgrades'),
     user: { uid: 'one' } as { uid: string } | null,
-    schoolAvailable: true,
+    studentId: false,
     loading: false,
+    optionsError: false,
+    retryOptions: vi.fn(),
   },
 }));
 vi.mock('next/navigation', () => ({
@@ -39,22 +42,56 @@ vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({ user: state.user, loading: state.loading }),
 }));
 vi.mock('@/features/auth/client', () => ({
-  isFirebaseConfigured: () => state.schoolAvailable,
+  isFirebaseConfigured: () => true,
   signInWithPuStudentId: signIn,
+}));
+vi.mock('@/lib/signInOptions', async (original) => ({
+  ...(await original<typeof import('@/lib/signInOptions')>()),
+  useSignInOptions: () => ({
+    google: true,
+    studentId: state.studentId,
+    loading: false,
+    error: state.optionsError,
+    retry: state.retryOptions,
+  }),
 }));
 beforeEach(() => {
   vi.clearAllMocks();
   state.params = new URLSearchParams('returnUrl=%2Fgrades');
   state.user = { uid: 'one' };
-  state.schoolAvailable = true;
+  state.studentId = false;
   state.loading = false;
+  state.optionsError = false;
   signIn.mockResolvedValue({ uid: 'one' });
 });
-it('returns an already signed-in user to the requested page for a normal login', async () => {
+it('keeps a school return destination during an availability failure instead of offering the wrong account', () => {
+  state.user = null;
+  state.optionsError = true;
+  render(<LoginPage />);
+  expect(screen.queryByTestId('platform-sign-in')).toBeNull();
+  expect(screen.queryByText(STUDENT_ID_PREPARING_COPY)).toBeNull();
+  expect(screen.queryByLabelText('學號')).toBeNull();
+  expect(replace).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '重新確認登入方式' }));
+  expect(state.retryOptions).toHaveBeenCalledOnce();
+});
+it('returns an already signed-in school user to the requested page only when student ID is available', async () => {
+  state.studentId = true;
   render(<LoginPage />);
   await waitFor(() => expect(replace).toHaveBeenCalledWith('/grades'));
 });
+it('does not send a Google-only session into a school form that cannot sign in', () => {
+  render(<LoginPage />);
+  expect(replace).not.toHaveBeenCalled();
+  expect(screen.getByText(STUDENT_ID_PREPARING_COPY)).toBeTruthy();
+  expect(screen.queryByLabelText('學號')).toBeNull();
+  expect(screen.queryByRole('button', { name: '連線學校帳號' })).toBeNull();
+  expect(screen.queryByText('使用靜宜大學學號登入')).toBeNull();
+  expect(screen.getByTestId('platform-sign-in')).toBeTruthy();
+  expect(screen.getByRole('link', { name: '不登入，繼續瀏覽' })).toBeTruthy();
+});
 it('allows a signed-in user to reconnect to school before returning', async () => {
+  state.studentId = true;
   state.params.set('reconnect', 'school');
   render(<LoginPage />);
   expect(replace).not.toHaveBeenCalled();
@@ -74,6 +111,7 @@ it('lets a school-only user choose the platform account for a social or classroo
   expect(screen.getByText('課程與跨校交流')).toBeTruthy();
 });
 it('retains the reconnection form after a rejected school login', async () => {
+  state.studentId = true;
   state.params.set('reconnect', 'school');
   signIn.mockRejectedValue(new Error('school unavailable'));
   render(<LoginPage />);
@@ -86,6 +124,7 @@ it('retains the reconnection form after a rejected school login', async () => {
 
 it('offers school verification for an academic task without a misleading Google alternative', () => {
   state.user = null;
+  state.studentId = true;
   render(<LoginPage />);
   expect(screen.queryByTestId('platform-sign-in')).toBeNull();
   expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('連線學校帳號');
@@ -96,11 +135,21 @@ it('offers school verification for an academic task without a misleading Google 
   );
 });
 
+it('keeps Google visible for an academic task when student ID is not available', () => {
+  state.user = null;
+  render(<LoginPage />);
+  expect(screen.getByTestId('platform-sign-in').getAttribute('data-return-url')).toBe('/grades');
+  expect(screen.getByText(STUDENT_ID_PREPARING_COPY)).toBeTruthy();
+  expect(screen.queryByLabelText('學號')).toBeNull();
+  expect(screen.getByRole('link', { name: '不登入，繼續瀏覽' })).toBeTruthy();
+});
+
 it.each([
   '/map?school=pu&focus=library#route',
   '/bus?schoolId=tw-pu',
   '/announcements/news-123?schoolId=tw-pu',
   '/cafeteria',
+  '/cafeteria/stall?schoolId=pu',
   '/library',
 ])(
   'keeps public destination %s optional and preserves the task with either account or guest browsing',
@@ -123,7 +172,6 @@ it.each([
 it('keeps guest services accessible while school identity is loading or unavailable', () => {
   state.user = null;
   state.loading = true;
-  state.schoolAvailable = false;
   render(<LoginPage />);
   expect(screen.getByRole('link', { name: '校園地圖' }).getAttribute('href')).toBe('/map');
   expect(screen.getByRole('link', { name: '公車資訊' }).getAttribute('href')).toBe('/bus');
@@ -137,6 +185,7 @@ it('keeps guest services accessible while school identity is loading or unavaila
 
 it('uses school identity only for the explicit legacy map favorite action and returns to that place', async () => {
   state.user = null;
+  state.studentId = true;
   const destination = '/map?schoolId=pu&route=gate%2Clibrary&focus=library#directions';
   state.params = new URLSearchParams({ returnUrl: destination, reconnect: 'school' });
   render(<LoginPage />);
@@ -151,6 +200,64 @@ it('uses school identity only for the explicit legacy map favorite action and re
   await waitFor(() => expect(replace).toHaveBeenCalledWith(destination));
   expect(signIn).toHaveBeenCalledOnce();
 });
+it('returns to the original assignment after school sign-in', async () => {
+  state.user = null;
+  state.studentId = true;
+  const destination = '/course/cs101#assignment-hw-1';
+  state.params = new URLSearchParams({ returnUrl: destination });
+  render(<LoginPage />);
+  expect(screen.queryByTestId('platform-sign-in')).toBeNull();
+  fillSchoolLogin();
+  fireEvent.submit(screen.getByLabelText('學號').closest('form')!);
+  await waitFor(() => expect(replace).toHaveBeenCalledWith(destination));
+  expect(signIn).toHaveBeenCalledOnce();
+});
+
+it('returns to the assignment once when the course page stacked the hash onto login', async () => {
+  state.user = null;
+  state.studentId = true;
+  window.history.replaceState(
+    null,
+    '',
+    '/login?returnUrl=%2Fcourse%2Fcs101%23assignment-hw-3#assignment-hw-3',
+  );
+  state.params = new URLSearchParams({
+    returnUrl: '/course/cs101#assignment-hw-3#assignment-hw-3',
+  });
+  try {
+    render(<LoginPage />);
+    fillSchoolLogin();
+    fireEvent.submit(screen.getByLabelText('學號').closest('form')!);
+    await waitFor(() => expect(replace).toHaveBeenCalledWith('/course/cs101#assignment-hw-3'));
+    expect(replace.mock.calls[0][0]).not.toContain('#assignment-hw-3#assignment-hw-3');
+    expect(window.location.hash).toBe('');
+  } finally {
+    window.history.replaceState(null, '', '/');
+  }
+});
+
+it('returns to the same storefront after a platform login', () => {
+  state.user = null;
+  const destination = '/cafeteria/stall?schoolId=pu';
+  state.params = new URLSearchParams({ returnUrl: destination });
+  render(<LoginPage />);
+  expect(screen.getByTestId('platform-sign-in').getAttribute('data-return-url')).toBe(destination);
+  expect(screen.getByRole('link', { name: '不登入，繼續瀏覽' }).getAttribute('href')).toBe(
+    destination,
+  );
+});
+
+it.each(['https://evil.test', '//evil.test', '/\\evil.test'])(
+  'does not honor an off-site returnUrl %s',
+  (target) => {
+    state.user = null;
+    state.params = new URLSearchParams({ returnUrl: target });
+    render(<LoginPage />);
+    expect(screen.getByTestId('platform-sign-in').getAttribute('data-return-url')).toBe('/');
+    expect(replace).not.toHaveBeenCalled();
+  },
+);
+
 it.each([
   '/login',
   '/login/',
@@ -168,6 +275,7 @@ it.each([
 });
 it('retains the full original academic task after school verification', async () => {
   state.user = null;
+  state.studentId = true;
   state.params = new URLSearchParams({ returnUrl: '/timetable?school=pu&schoolId=tw-pu#today' });
   render(<LoginPage />);
   fireEvent.change(screen.getByLabelText('學號'), { target: { value: ' a1234567 ' } });
@@ -177,13 +285,13 @@ it('retains the full original academic task after school verification', async ()
     expect(replace).toHaveBeenCalledWith('/timetable?school=pu&schoolId=tw-pu#today'),
   );
 });
-it('does not accept school credentials while school login is unavailable', () => {
+it('does not accept school credentials while student ID is unavailable', () => {
   state.user = null;
-  state.schoolAvailable = false;
   render(<LoginPage />);
-  expect(screen.getByRole('status').textContent).toContain('學校登入服務尚未開通');
+  expect(screen.getByText(STUDENT_ID_PREPARING_COPY)).toBeTruthy();
   expect(screen.queryByLabelText('密碼')).toBeNull();
-  expect(screen.queryByTestId('platform-sign-in')).toBeNull();
+  expect(screen.queryByText('使用靜宜大學學號登入')).toBeNull();
+  expect(screen.getByTestId('platform-sign-in')).toBeTruthy();
   expect(signIn).not.toHaveBeenCalled();
 });
 
@@ -192,6 +300,7 @@ function fillSchoolLogin() {
   fireEvent.change(screen.getByLabelText('密碼'), { target: { value: 'test-only-password' } });
 }
 it('waits for restored school identity before redirecting or accepting credentials', () => {
+  state.studentId = true;
   state.loading = true;
   const view = render(<LoginPage />);
   expect(replace).not.toHaveBeenCalled();
@@ -209,6 +318,7 @@ it.each(['unmount', 'change task'])(
   'does not navigate from a late school response after %s',
   async (action) => {
     state.user = null;
+    state.studentId = true;
     let finish!: (value: unknown) => void;
     signIn.mockImplementationOnce(
       () =>
@@ -233,6 +343,7 @@ it.each(['unmount', 'change task'])(
 );
 it('admits one school request and waits for its completion before redirecting', async () => {
   state.user = null;
+  state.studentId = true;
   let finish!: (value: unknown) => void;
   signIn.mockImplementationOnce(
     () =>
@@ -254,6 +365,7 @@ it('admits one school request and waits for its completion before redirecting', 
 });
 it('blocks Google while school credentials are being checked and permits retry on failure', async () => {
   state.user = null;
+  state.studentId = true;
   state.params = new URLSearchParams('returnUrl=%2Fsocial');
   let fail!: (reason: unknown) => void;
   signIn.mockImplementationOnce(
@@ -275,6 +387,7 @@ it('blocks Google while school credentials are being checked and permits retry o
 });
 it('blocks school submission during Google navigation and unlocks on browser return', () => {
   state.user = null;
+  state.studentId = true;
   state.params = new URLSearchParams('returnUrl=%2Fsocial');
   render(<LoginPage />);
   fillSchoolLogin();

@@ -181,6 +181,7 @@ function generatePois(schoolId: string) {
     {
       id: createId(schoolId, 'poi', 1),
       schoolId,
+      isDemo: true,
       name: '工程館',
       description: '資訊工程系主要教學大樓',
       category: 'building',
@@ -191,6 +192,7 @@ function generatePois(schoolId: string) {
     {
       id: createId(schoolId, 'poi', 2),
       schoolId,
+      isDemo: true,
       name: '圖書館',
       description: '校園中央圖書館',
       category: 'library',
@@ -201,6 +203,7 @@ function generatePois(schoolId: string) {
     {
       id: createId(schoolId, 'poi', 3),
       schoolId,
+      isDemo: true,
       name: '學生餐廳',
       description: '提供平價餐飲服務',
       category: 'cafeteria',
