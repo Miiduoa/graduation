@@ -28,7 +28,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '22.23.4'
       - uses: supabase/setup-cli@v1
         with:
           version: 2.121.0

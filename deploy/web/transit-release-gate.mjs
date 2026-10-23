@@ -18,7 +18,7 @@ const text = (v) => typeof v === 'string' ? v.trim().slice(0, 120) : '';
 const id = (v) => typeof v === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(v);
 class GateError extends Error {}
 const fail = (code) => { throw new GateError(code); };
-// Only these sanitized codes may cross the Fly SSH boundary. They are fixed
+// Only these sanitized codes may cross the Fly Machines exec boundary. They are fixed
 // identifiers produced above, never provider response bodies or credential data.
 const REMOTE_FAILURE_CODES = new Set(['tdx-not-configured','not-authorized','rate-limited','network-unavailable',
   'service-unavailable','invalid-response','invalid-token-response','no-verified-campus-station',
@@ -143,7 +143,7 @@ export async function probeTdx({ credentials = {clientId: process.env.TDX_CLIENT
   // TDX limits each API key, and every Web machine shares that quota with the
   // public server. Retry only a 429, on the same already-issued token and for
   // the same single request; other failures stay fail-closed and immediate.
-  // Inside a machine the whole probe must finish within the Fly SSH timeout, so
+  // Inside a machine the whole probe must finish within the Fly Machines exec timeout, so
   // keep the fixed delays here rather than a provider-chosen Retry-After.
   const callJson = (url, init) => withRateLimitRetry(() => json(url, init, fetcher),
     {delays: rateLimitDelays, sleep, honorRetryAfter: false});
@@ -310,6 +310,19 @@ export function parseRemoteReport(stdout, profile = LIVE_PROFILE) {
     sourceFreshnessVerified:true,countdownVerified:value.countdownVerified === true,physicalDeviceVerified:false};
 }
 
+export function probeFlyMachine(machineId, command, profile = LIVE_PROFILE, execute = execFileSync) {
+  validateProfile(profile);
+  if (!MACHINE_IDS.includes(machineId)) fail('unexpected-machine-target');
+  let stdout;
+  try {
+    // Use the existing deployment token through the Machines API. SSH would
+    // create an additional certificate for a read-only runtime probe.
+    stdout = execute('flyctl',['machine','exec',machineId,'--app','nuni-web','--timeout','300',command],
+      {encoding:'utf8',timeout:310_000,maxBuffer:256*1024,stdio:['ignore','pipe','pipe']});
+  } catch (error) { fail(failureFromFlyExecError(error, profile)); }
+  return {machineId,...parseRemoteReport(stdout, profile)};
+}
+
 async function main() {
   const [mode, input, output] = process.argv.slice(2);
   const profile = validateProfile(process.env.TRANSIT_RELEASE_PROFILE);
@@ -330,14 +343,7 @@ async function main() {
         !rows.every((row) => MACHINE_IDS.includes(row?.id) && row.state === 'started')) fail('unexpected-machine-target');
     const command = buildRemoteCommand(await readFile(new URL(import.meta.url),'utf8'), profile);
     const reports = [];
-    for (const row of rows) {
-      let stdout;
-      try {
-        stdout = execFileSync('flyctl',['ssh','console','--app','nuni-web','--machine',row.id,'--quiet','--command',command],
-          {encoding:'utf8',timeout:300_000,maxBuffer:256*1024,stdio:['ignore','pipe','pipe']});
-      } catch (error) { fail(failureFromFlyExecError(error, profile)); }
-      reports.push({machineId:row.id,...parseRemoteReport(stdout, profile)});
-    }
+    for (const row of rows) reports.push(probeFlyMachine(row.id, command, profile));
     await writeFile(output ?? 'release-evidence/transit-preflight.json',JSON.stringify({checkedAt:new Date().toISOString(),profile,transitReady:profile === LIVE_PROFILE,machines:reports},null,2)+'\n');
     console.log(profile === LIVE_PROFILE ? 'Verified TDX inside every existing Web machine; credential values never left the machines.' : 'Verified both TDX variables are absent inside every existing Web machine; live transit remains unavailable.');
     return;

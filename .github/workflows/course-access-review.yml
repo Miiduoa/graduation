@@ -33,7 +33,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '22.23.4'
       - name: Install isolated test tools (no application secrets)
         run: npm install --prefix "$RUNNER_TEMP/course-tools" --ignore-scripts --no-audit --no-fund typescript@5.5.4 @types/node@22.10.2 pg@8.16.3
       - name: Compile contracts and run policy and PostgreSQL integration tests
