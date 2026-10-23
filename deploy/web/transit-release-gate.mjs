@@ -288,7 +288,7 @@ export function buildRemoteCommand(source, profile = LIVE_PROFILE) {
   // The full source exceeds the Machines exec request limit. Transfer it compressed
   // and restore the exact module in memory, without files or additional packages.
   const compressedSource = gzipSync(source).toString('base64');
-  const program = `import("node:zlib").then(({gunzipSync})=>import("data:text/javascript;base64,"+gunzipSync(Buffer.from(${JSON.stringify(compressedSource)},"base64")).toString("base64"))).then(async(m)=>{try{const r=await m.probeRuntime(${JSON.stringify(profile)});console.log(${JSON.stringify(MARKER)}+JSON.stringify(r))}catch(e){console.log(${JSON.stringify(MARKER)}+JSON.stringify({ready:false,reason:m.sanitizedRemoteFailure(e)}));process.exitCode=1}})`;
+  const program = `import("node:zlib").then(({gunzipSync})=>import("data:text/javascript;base64,"+gunzipSync(Buffer.from(${JSON.stringify(compressedSource)},"base64")).toString("base64"))).then(async(m)=>{try{const r=await m.probeRuntime(${JSON.stringify(profile)});console.log(${JSON.stringify(MARKER)}+JSON.stringify(r))}catch(e){console.log(${JSON.stringify(MARKER)}+JSON.stringify({ready:false,reason:m.sanitizedRemoteFailure(e)}));process.exitCode=1}}).catch(()=>{console.log(${JSON.stringify(MARKER)}+JSON.stringify({ready:false,reason:"runtime-transit-preflight-failed"}));process.exitCode=1})`;
   return `node --input-type=module -e '${program.replaceAll("'", "'\\''")}'`;
 }
 
@@ -313,9 +313,27 @@ export function parseRemoteReport(stdout, profile = LIVE_PROFILE) {
     sourceFreshnessVerified:true,countdownVerified:value.countdownVerified === true,physicalDeviceVerified:false};
 }
 
-export function probeFlyMachine(machineId, command, profile = LIVE_PROFILE, execute = execFileSync) {
+export function probeFlyMachine(machineId, command, profile = LIVE_PROFILE, execute = execFileSync, options = {}) {
   validateProfile(profile);
   if (!MACHINE_IDS.includes(machineId)) fail('unexpected-machine-target');
+  const retries = Number.isInteger(options.retries) && options.retries >= 0 ? options.retries : 0;
+  const delays = Array.isArray(options.retryDelays) ? options.retryDelays : [];
+  const wait = typeof options.wait === 'function' ? options.wait : () => {};
+  let lastError;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return readFlyMachineReport(machineId, command, profile, execute);
+    } catch (error) {
+      lastError = error;
+      if (error?.message !== 'fly-runtime-probe-failed' || attempt >= retries) throw error;
+      const delay = delays[attempt];
+      if (Number.isFinite(delay) && delay > 0) wait(delay);
+    }
+  }
+  throw lastError;
+}
+
+function readFlyMachineReport(machineId, command, profile, execute) {
   let stdout;
   try {
     // Use the existing deployment token through the Machines API. SSH would
@@ -358,7 +376,13 @@ async function main() {
         !rows.every((row) => MACHINE_IDS.includes(row?.id) && row.state === 'started')) fail('unexpected-machine-target');
     const command = buildRemoteCommand(await readFile(new URL(import.meta.url),'utf8'), profile);
     const reports = [];
-    for (const row of rows) reports.push(probeFlyMachine(row.id, command, profile));
+    const wait = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+    // Rolling deploys clear machine leases immediately before verification. A single
+    // Machines exec miss becomes fly-runtime-probe-failed with empty stdout; retry only
+    // that transport failure, never application codes such as rate-limited.
+    for (const row of rows) reports.push(probeFlyMachine(row.id, command, profile, execFileSync, {
+      retries: 2, retryDelays: [3_000, 7_000], wait,
+    }));
     await writeFile(output ?? 'release-evidence/transit-preflight.json',JSON.stringify({checkedAt:new Date().toISOString(),profile,transitReady:profile === LIVE_PROFILE,machines:reports},null,2)+'\n');
     console.log(profile === LIVE_PROFILE ? 'Verified TDX inside every existing Web machine; credential values never left the machines.' : 'Verified both TDX variables are absent inside every existing Web machine; live transit remains unavailable.');
     return;
