@@ -1,0 +1,47 @@
+name: Neon migration tools
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/ops/neon-migrate/**'
+      - 'docs/ops/neon-migration-20261022.md'
+      - '.github/workflows/neon-migration-tools.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/ops/neon-migrate/**'
+      - '.github/workflows/neon-migration-tools.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-rehearsal:
+    name: Offline checks and PostgreSQL 18 rehearsal
+    runs-on: ubuntu-latest
+    container: postgres:18
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Python for local validation
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends python3
+      - name: Check shell syntax and offline failure paths
+        shell: bash
+        run: |
+          for script in scripts/ops/neon-migrate/*.sh; do bash -n "$script"; done
+          python3 -m unittest discover -s scripts/ops/neon-migrate -p 'test_*.py' -v
+      - name: Restore and verify in two throwaway local clusters
+        shell: bash
+        run: |
+          WORK="$RUNNER_TEMP/neon-rehearsal" \
+          REPORT="$RUNNER_TEMP/neon-rehearsal/report.md" \
+            scripts/ops/neon-migrate/rehearsal.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: neon-local-rehearsal
+          path: ${{ runner.temp }}/neon-rehearsal/report.md
+          if-no-files-found: ignore
