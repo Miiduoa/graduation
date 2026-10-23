@@ -156,7 +156,17 @@ it('does not offer an unsupported leave action to the actual group owner', async
   render(<ClubsPage />);
   await screen.findByText('本人社團');
   expect(screen.queryByRole('button', { name: '退出群組' })).toBeNull();
-  expect(screen.getByText('擁有者需先移轉管理權，才能退出。')).toBeTruthy();
+  expect(screen.getByText(/需先完成交接/)).toBeTruthy();
+});
+
+it('links club and study groups to the real discussion page instead of an App-only stub', async () => {
+  render(<GroupsPage />);
+  await screen.findByText('本人社團');
+  const discussion = screen.getAllByRole('link', { name: '開啟討論' });
+  expect(discussion.some((link) => link.getAttribute('href') === '/groups/firestore-club?schoolId=pu')).toBe(
+    true,
+  );
+  expect(screen.queryByText('網頁版討論尚未開放。')).toBeNull();
 });
 
 it('removes the old account data and ignores its pending join result after switching accounts', async () => {
