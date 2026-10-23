@@ -11,6 +11,7 @@ import {
   type CourseAssignment,
   type CourseWork,
 } from '@/lib/courseWork';
+import { LoginLink } from '@/components/LoginLink';
 import {
   COURSE_WORK_MISSING_ASSIGNMENT,
   COURSE_WORK_MISSING_QUIZ,
@@ -18,7 +19,6 @@ import {
   landOnCourseWork,
   parseCourseWorkHash,
 } from '@/lib/courseWorkLanding';
-import { loginHref } from '@/lib/navigation';
 import { useLocationHash } from '@/lib/useLocationHash';
 import styles from '../../home.module.css';
 
@@ -192,18 +192,13 @@ export default function CoursePage({ params }: { params: Promise<{ courseId: str
           <section className={styles.section}>
             <h2>登入後查看課程</h2>
             <p>使用這門課的學校帳號登入，即可查看教材與繳交作業。</p>
-            <a
+            <LoginLink
               className={styles.primary}
-              href={loginHref(returnPath)}
-              onClick={(event) => {
-                const next = loginHref(coursePageReturnPath(courseId, window.location.hash));
-                event.preventDefault();
-                event.currentTarget.setAttribute('href', next);
-                window.location.assign(next);
-              }}
+              returnPath={returnPath}
+              liveReturnPath={() => coursePageReturnPath(courseId, window.location.hash)}
             >
               登入帳號
-            </a>
+            </LoginLink>
           </section>
         )}
       </SiteShell>

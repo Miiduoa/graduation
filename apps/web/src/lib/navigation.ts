@@ -26,12 +26,54 @@ export function readLoginReturnParam(params: { get(name: string): string | null 
   return params.get('returnUrl') || params.get('returnTo') || params.get('redirect');
 }
 
+export function currentReturnPath(
+  pathname?: string | null,
+  search?: string | null,
+  hash?: string | null,
+): string {
+  const path = pathname && pathname.startsWith('/') ? pathname : '/';
+  const rawSearch = (search || '').replace(/^\?/, '');
+  const query = rawSearch ? `?${rawSearch}` : '';
+  const fragment = hash ? (hash.startsWith('#') ? hash : `#${hash}`) : '';
+  return collapseInternalPathHash(`${path}${query}${fragment}`);
+}
+
 export function loginHref(returnPath: string): string {
   const safe = collapseInternalPathHash(sanitizeInternalPath(returnPath));
   const href = `/login?returnUrl=${encodeURIComponent(safe)}`;
   // Next.js <Link> keeps the current document fragment when the target has none.
   // Encoded %23 in returnUrl is not a fragment, so end with # to replace it.
   return safe.includes('#') ? `${href}#` : href;
+}
+
+export function followLoginHref(
+  event: {
+    preventDefault(): void;
+    stopPropagation?(): void;
+    currentTarget: { setAttribute(name: string, value: string): void };
+  },
+  returnPath: string,
+): void {
+  const next = loginHref(returnPath);
+  event.preventDefault();
+  event.stopPropagation?.();
+  event.currentTarget.setAttribute('href', next);
+  window.location.assign(next);
+}
+
+export function navigateAfterLogin(
+  replace: (href: string) => void,
+  destination: string,
+): void {
+  const target = collapseInternalPathHash(destination);
+  if (typeof window !== 'undefined' && window.location.hash) {
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${window.location.pathname}${window.location.search}`,
+    );
+  }
+  replace(target);
 }
 
 export function extractSchoolContextFromPath(path?: string | null): {

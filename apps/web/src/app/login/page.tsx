@@ -10,6 +10,7 @@ import { useAuth } from '@/components/AuthGuard';
 import { isFirebaseConfigured, signInWithPuStudentId } from '@/features/auth/client';
 import {
   collapseInternalPathHash,
+  navigateAfterLogin,
   readLoginReturnParam,
   sanitizeInternalPath,
 } from '@/lib/navigation';
@@ -40,14 +41,7 @@ function loginDestination(value: string | null): string {
 }
 
 function goAfterLogin(router: { replace: (href: string) => void }, destination: string) {
-  if (typeof window !== 'undefined' && window.location.hash) {
-    window.history.replaceState(
-      window.history.state,
-      '',
-      `${window.location.pathname}${window.location.search}`,
-    );
-  }
-  router.replace(destination);
+  navigateAfterLogin((href) => router.replace(href), destination);
 }
 
 function LoginForm({
