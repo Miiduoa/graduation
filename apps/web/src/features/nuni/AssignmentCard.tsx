@@ -13,14 +13,16 @@ import {
   assignmentSubmissionLate,
 } from '@campus/shared/src/assignmentFiles';
 import {
+  awaitingFeedbackPosition,
   feedbackQueueLabel,
   matchesFeedbackQueueFilter,
   needsFeedbackReview,
+  nextAwaitingFeedbackReview,
   sortFeedbackQueue,
   type FeedbackQueueFilter,
 } from '@campus/shared/src/lmsReviewQueue';
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
-import { MutationForm, useClasses } from './CourseUI';
+import { MutationForm, useClasses, type MutationFormIntent } from './CourseUI';
 import { CourseText } from './CourseMaterials';
 import { useNuniSession } from './Session';
 import {
@@ -40,6 +42,22 @@ type Props = {
   reload: () => void;
   onConfirmed?: (assignment: NuniAssignment) => void;
 };
+
+/** Scoped so parallel mounted assignments never collide on platformAccountId alone. */
+export function assignmentReceiptDomId(
+  workspaceId: string,
+  assignmentId: string,
+  platformAccountId: string,
+): string {
+  return `assignment-receipt-${workspaceId}-${assignmentId}-${platformAccountId}`;
+}
+
+function feedbackMatchesSubmitted(
+  receipt: { teacherFeedback: string | null },
+  submitted: string,
+): boolean {
+  return (receipt.teacherFeedback ?? '').trim() === submitted.trim();
+}
 
 function latestAssignment(item: NuniAssignment, saved: NuniAssignment | null): NuniAssignment {
   if (!saved) return item;
@@ -87,19 +105,38 @@ function Assignment({ item, workspace, onConfirmed }: Props) {
   const [closeNotice, setCloseNotice] = useState('');
   const [accessDenied, setAccessDenied] = useState(false);
   const [feedbackFilter, setFeedbackFilter] = useState<FeedbackQueueFilter>('needs_feedback');
+  const [focusReceiptId, setFocusReceiptId] = useState<string | null>(null);
+  const [queueNotice, setQueueNotice] = useState('');
   const mounted = useRef(true);
   const request = useRef(0);
+  const submissionsRef = useRef<NuniSubmission[] | null>(null);
+  const receiptNodes = useRef(new Map<string, HTMLElement | null>());
   const FEEDBACK_FILTERS: FeedbackQueueFilter[] = ['all', 'needs_feedback', 'reviewed'];
   const orderedSubmissions = submissions === null ? null : sortFeedbackQueue(submissions);
   const visibleCount =
     orderedSubmissions?.filter((entry) => matchesFeedbackQueueFilter(entry, feedbackFilter))
       .length ?? 0;
   useEffect(() => {
+    submissionsRef.current = submissions;
+  }, [submissions]);
+  useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
     };
   }, []);
+  useEffect(() => {
+    if (!focusReceiptId) return;
+    const node = receiptNodes.current.get(focusReceiptId);
+    if (!node) return;
+    if (typeof node.scrollIntoView === 'function') {
+      node.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+    const focusTarget =
+      node.querySelector<HTMLElement>('textarea[name="feedback"]') ??
+      node.querySelector<HTMLElement>('summary');
+    focusTarget?.focus({ preventScroll: true });
+  }, [focusReceiptId, orderedSubmissions, feedbackFilter]);
   const student = workspace.memberRole === 'student';
   const active = workspace.state === 'active';
   const open = assignment.state === 'open';
@@ -335,6 +372,11 @@ function Assignment({ item, workspace, onConfirmed }: Props) {
                 <p className={styles.note}>
                   預設先看尚未回饋的繳交。儲存後，學生才看得到。
                 </p>
+                {queueNotice ? (
+                  <p role="status" className={shared.receipt}>
+                    {queueNotice}
+                  </p>
+                ) : null}
                 {visibleCount === 0 ? (
                   <p role="status" className={shared.muted}>
                     「{feedbackQueueLabel(feedbackFilter)}」目前沒有繳交。可改選「全部」查看其他狀態。
@@ -346,11 +388,18 @@ function Assignment({ item, workspace, onConfirmed }: Props) {
                     <li
                       key={entry.platformAccountId}
                       hidden={!matchesFeedbackQueueFilter(entry, feedbackFilter)}
+                      id={assignmentReceiptDomId(workspace.id, item.id, entry.platformAccountId)}
+                      ref={(node) => {
+                        if (node) receiptNodes.current.set(entry.platformAccountId, node);
+                        else receiptNodes.current.delete(entry.platformAccountId);
+                      }}
                     >
                       <FeedbackRow
                         entry={entry}
                         dueAt={assignment.dueAt}
-                        save={async (feedback, key) => {
+                        queue={orderedSubmissions ?? []}
+                        expanded={focusReceiptId === entry.platformAccountId}
+                        save={async (feedback, key, intent) => {
                           const receipt = await classes.assignmentFeedback(
                             workspace.id,
                             item.id,
@@ -361,15 +410,47 @@ function Assignment({ item, workspace, onConfirmed }: Props) {
                           if (!mounted.current) throw new NuniError(409, 'SESSION_CHANGED');
                           ++request.current;
                           setReading(false);
-                          setSubmissions(
-                            (previous) =>
-                              previous?.map((value) =>
-                                value.platformAccountId === receipt.platformAccountId
-                                  ? receipt
-                                  : value,
-                              ) ?? [receipt],
-                          );
-                          // Keep the just-saved row visible so the receipt/status stays on screen.
+                          const latest =
+                            (submissionsRef.current ?? []).map((value) =>
+                              value.platformAccountId === receipt.platformAccountId
+                                ? receipt
+                                : value,
+                            );
+                          const nextList = latest.length ? latest : [receipt];
+                          submissionsRef.current = nextList;
+                          setSubmissions(nextList);
+                          const matched = feedbackMatchesSubmitted(receipt, feedback);
+                          if (intent === 'secondary') {
+                            // Authoritative replay may differ after a lost response; never advance then.
+                            if (!matched) {
+                              setFocusReceiptId(entry.platformAccountId);
+                              setFeedbackFilter((current) =>
+                                matchesFeedbackQueueFilter(receipt, current) ? current : 'all',
+                              );
+                              setQueueNotice('');
+                              return receipt;
+                            }
+                            const next = nextAwaitingFeedbackReview(
+                              nextList,
+                              receipt.platformAccountId,
+                            );
+                            if (!next) {
+                              setFocusReceiptId(null);
+                              setFeedbackFilter((current) =>
+                                matchesFeedbackQueueFilter(receipt, current) ? current : 'all',
+                              );
+                              setQueueNotice('回饋已儲存。目前沒有下一份尚未回饋的繳交。');
+                            } else {
+                              setFeedbackFilter('needs_feedback');
+                              setFocusReceiptId(next.platformAccountId);
+                              setQueueNotice(
+                                `回饋已儲存。已移到 ${next.displayName || '下一位同學'} 的繳交。`,
+                              );
+                            }
+                            return receipt;
+                          }
+                          setQueueNotice('');
+                          setFocusReceiptId(null);
                           setFeedbackFilter((current) =>
                             matchesFeedbackQueueFilter(receipt, current) ? current : 'all',
                           );
@@ -430,13 +511,23 @@ function Assignment({ item, workspace, onConfirmed }: Props) {
 function FeedbackRow({
   entry,
   dueAt,
+  queue,
+  expanded,
   save,
 }: {
   entry: NuniSubmission;
   dueAt: string | null;
-  save: (feedback: string, key: string) => Promise<NuniSubmission>;
+  queue: NuniSubmission[];
+  expanded: boolean;
+  save: (
+    feedback: string,
+    key: string,
+    intent: MutationFormIntent,
+  ) => Promise<NuniSubmission>;
 }) {
   const [notice, setNotice] = useState('');
+  const [manualOpen, setManualOpen] = useState(false);
+  const detailsOpen = expanded || manualOpen;
   const currentText = entry.teacherFeedback ?? '';
   const version = JSON.stringify([
     entry.body,
@@ -450,6 +541,7 @@ function FeedbackRow({
   const changed = !pristine && editor.version !== version;
   const dispatched = useRef<string | null>(null);
   const mounted = useRef(true);
+  const position = awaitingFeedbackPosition(queue, entry.platformAccountId);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -469,6 +561,14 @@ function FeedbackRow({
           <time dateTime={entry.submittedAt}>{formatTaipeiDateTime(entry.submittedAt)}</time>
         </span>
       </div>
+      {position ? (
+        <p className={styles.note}>
+          待回饋第 {position.index}／{position.total} 份
+          {expanded ? ' · 目前批改這一份' : ''}
+        </p>
+      ) : expanded ? (
+        <p className={styles.note}>目前批改這一份</p>
+      ) : null}
       {entry.files?.length ? <SubmittedFileList files={entry.files} /> : null}
       <CourseText text={entry.body} />
       {entry.teacherFeedback && (
@@ -485,17 +585,28 @@ function FeedbackRow({
           {notice}
         </p>
       )}
-      <details className={`${shared.compose} ${styles.compose}`}>
+      <details
+        className={`${shared.compose} ${styles.compose}`}
+        open={detailsOpen}
+        onToggle={(event) => {
+          if (expanded) {
+            event.currentTarget.open = true;
+            return;
+          }
+          setManualOpen(event.currentTarget.open);
+        }}
+      >
         <summary>{entry.teacherFeedback ? '編輯回饋' : '留下回饋'}</summary>
           <MutationForm
             label="儲存回饋"
-            submit={async (data, key) => {
+            secondaryLabel="儲存回饋並查看下一份"
+            submit={async (data, key, intent) => {
               if (changed && dispatched.current !== key)
                 throw new NuniError(409, 'FEEDBACK_CHANGED');
               setNotice('');
               const feedback = String(data.get('feedback') ?? '');
               dispatched.current = key;
-              const receipt = await save(feedback, key);
+              const receipt = await save(feedback, key, intent);
               if (!mounted.current) throw new NuniError(409, 'SESSION_CHANGED');
               const text = receipt.teacherFeedback ?? '';
               setEditor({
@@ -508,8 +619,13 @@ function FeedbackRow({
                 original: text,
                 text,
               });
+              const matched = feedbackMatchesSubmitted(receipt, feedback);
+              if (intent === 'secondary' && matched) {
+                setNotice('');
+                return;
+              }
               setNotice(
-                receipt.teacherFeedback === feedback.trim()
+                matched
                   ? '回饋已儲存，學生現在可以查看。'
                   : '這份回饋已有新的內容，上方顯示目前儲存的版本。',
               );
