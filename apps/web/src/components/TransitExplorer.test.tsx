@@ -29,6 +29,8 @@ const compactName = (expected: string) => (name: string) =>
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
+  Element.prototype.scrollIntoView = vi.fn();
+  vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
   vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
   vi.stubGlobal('isSecureContext', true);
@@ -410,6 +412,35 @@ it('retains different route and static-source details beside the city', async ()
   expect(JSON.parse(localStorage.getItem('campus-one:transit-stops:v1') || '[]')).toEqual([staticStop]);
 });
 
+it('scrolls arrival results into view as soon as a stop is selected', async () => {
+  renderListing();
+  fireEvent.click(await findGroupButton('校門口・往沙鹿'));
+  const pane = await screen.findByTestId('stop-arrivals-pane');
+  expect(window.scrollBy).toHaveBeenCalled();
+  expect(document.activeElement).toBe(pane);
+  expect(await screen.findByText(/正在取得這個站牌的班次|目前沒有班次預估/)).toBeTruthy();
+});
+
+it('scrolls the opened route panel into view instead of leaving it below the fold', async () => {
+  const now = new Date().toISOString();
+  vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next' ? {
+    status: 'ready', kind: 'arrivals', fetchedAt: now,
+    arrivals: [
+      {
+        id: '162', route: '162', direction: 1, destination: '沙鹿火車站',
+        status: 0, seconds: 180, updatedAt: now, stopName: '靜宜大學(英才路)',
+      },
+    ],
+  } : emptyArrivals());
+  renderExplorer();
+  const row = await screen.findByRole('button', { name: '162 往 沙鹿火車站 3 分' });
+  vi.mocked(window.scrollBy).mockClear();
+  fireEvent.click(row);
+  expect(row.getAttribute('aria-expanded')).toBe('true');
+  expect(screen.getByTestId('opened-route-panel')).toBeTruthy();
+  expect(window.scrollBy).toHaveBeenCalled();
+});
+
 it('abort and selection identity prevent an old station response from replacing the current one', async () => {
   let finish!: (result: TransitResult) => void;
   let firstSignal!: AbortSignal;
@@ -596,6 +627,7 @@ it('keeps long route badges on one line and fits the stop-mode bar on a 350px bo
   expect(css).toMatch(/\.rowCopy strong \{[^}]*white-space: nowrap;/);
   expect(css).toMatch(/\.rowCopy strong \{[^}]*text-overflow: ellipsis;/);
   expect(css).not.toMatch(/\.rowCopy strong \{[^}]*overflow-wrap: anywhere;/);
+  expect(css).toMatch(/\.arrivals \{[^}]*scroll-margin-top: 24px;/);
 });
 
 describe('static catalog stops', () => {
