@@ -1,6 +1,20 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import SettingsPage from './page';
+import {
+  AGENT_DELETE_MODEL_ACTION,
+  AGENT_MODEL_DELETED_TEXT,
+  agentConsentStorageKey,
+  parseAgentConsent,
+  serializeAgentConsent,
+} from '@campus/shared/src/todaySenseAgent';
+const agentRuntime = vi.hoisted(() => ({
+  deleteTodaySenseModelCache: vi.fn(async () => ({
+    released: true,
+    message: '模型已刪除，已改回規則版。',
+  })),
+}));
+vi.mock('@/lib/todaySenseAgentRuntime', () => agentRuntime);
 const state = vi.hoisted(() => ({
   user: { uid: 'a', displayName: 'Account A', email: 'a@example.test' } as {
     uid: string;
@@ -31,7 +45,17 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock('@/features/nuni/Session', () => ({
   useNuniSession: () => state.nuni,
-  browserRequest: vi.fn(async () => ({ memberships: [] })),
+  browserRequest: vi.fn(async (path: string) => {
+    if (path === 'memberships') return { memberships: [] };
+    if (path === 'class-workspaces') return { workspaces: [] };
+    if (path === 'merchant-applications') return { applications: [] };
+    if (path === 'merchant-workspaces') return { workspaces: [] };
+    throw new Error(path);
+  }),
+}));
+vi.mock('@/lib/signInOptions', () => ({
+  useSignInOptions: () => ({ google: true, studentId: false, loading: false, retry: vi.fn() }),
+  STUDENT_ID_PREPARING_COPY: '學號登入還在準備，目前請用 Google 帳號登入',
 }));
 vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({ user: state.user, loading: false, signOutUser: state.signOut }),
@@ -60,6 +84,10 @@ vi.mock('firebase/firestore', () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
+  agentRuntime.deleteTodaySenseModelCache.mockResolvedValue({
+    released: true,
+    message: '模型已刪除，已改回規則版。',
+  });
   state.user = { uid: 'a', displayName: 'Account A', email: 'a@example.test' };
   state.nuni.session = null;
   state.nuni.loading = false;
@@ -202,7 +230,20 @@ it('does not offer ineffective privacy or background-sync switches', async () =>
   expect(screen.queryByText('自動同步')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '隱私' }));
   expect(screen.queryByRole('switch')).toBeNull();
+  expect(screen.queryByRole('button', { name: AGENT_DELETE_MODEL_ACTION })).toBeNull();
   expect(screen.getByRole('link', { name: '查看隱私政策' })).toBeTruthy();
+});
+it('shows delete-model in privacy after download and returns to the rule list', async () => {
+  localStorage.setItem(agentConsentStorageKey('school:a'), serializeAgentConsent('accepted'));
+  render(<SettingsPage />);
+  fireEvent.click(screen.getByRole('button', { name: '隱私' }));
+  expect(await screen.findByRole('button', { name: AGENT_DELETE_MODEL_ACTION })).toBeTruthy();
+  expect(screen.queryByRole('switch')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: AGENT_DELETE_MODEL_ACTION }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: AGENT_DELETE_MODEL_ACTION })).toBeNull());
+  expect(agentRuntime.deleteTodaySenseModelCache).toHaveBeenCalled();
+  expect(parseAgentConsent(localStorage.getItem(agentConsentStorageKey('school:a')))).toBe('unset');
+  expect(screen.getByText(AGENT_MODEL_DELETED_TEXT)).toBeTruthy();
 });
 it('locks profile fields while a save is pending so readback cannot erase a newer draft', async () => {
   state.saveProfile.mockImplementation(() => new Promise(() => {}));
@@ -294,13 +335,15 @@ it('offers useful account and notification next steps for a course-only account'
   state.nuni.session = { platformAccountId: 'pa_a', context: 'a', isPlatformOperator: false };
   render(<SettingsPage />);
   expect(screen.getByRole('heading', { name: '校園服務資料來源' })).toBeTruthy();
-  expect(screen.getByText(/靜宜大學。.*不代表你的帳號學籍或所屬學校/)).toBeTruthy();
+  expect(screen.getByText(/目前提供的是校園服務資料，不代表你的帳號學籍或所屬學校/)).toBeTruthy();
+  expect(screen.queryByText(/靜宜/)).toBeNull();
   expect(screen.queryByText('目前校園')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '帳號' }));
   expect(screen.getByText('Google 帳號已登入')).toBeTruthy();
   expect(screen.getByRole('link', { name: '學校資格' }).getAttribute('href')).toBe(
     '/classroom/account',
   );
+  expect(screen.queryByRole('link', { name: '連線學校帳號' })).toBeNull();
   expect(screen.queryByText('訪客')).toBeNull();
   expect(screen.queryByLabelText('姓名')).toBeNull();
   expect(screen.queryByRole('button', { name: '儲存資料' })).toBeNull();

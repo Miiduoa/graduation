@@ -14,7 +14,7 @@ export default function CareerPage() {
         <section>
           <h2>還沒接到校方資料</h2>
           <p>
-            職涯資料還沒接到學校，先到靜宜職涯發展暨校友服務處查職缺、實習與履歷諮詢。
+            職涯資料還沒接到學校，先到學校職涯或校友服務單位查職缺、實習與履歷諮詢。
           </p>
         </section>
         <section>

@@ -1,5 +1,7 @@
 import { collection, getDocsFromServer, query, where } from 'firebase/firestore';
 import { getDb, isFirebaseMockMode } from '../firebase';
+import type { CampusCoordinate } from '@campus/shared/src/campusGeo';
+import { parseCampusMapRecord } from '@campus/shared/src/campusMapRecords';
 
 export type CampusMapPlace = {
   id: string;
@@ -12,26 +14,6 @@ export type CampusMapPlace = {
   floor?: string;
   facilities: string[];
 };
-const categoryNames: Record<string, string> = {
-  academic: '教學',
-  building: '大樓',
-  research: '研究',
-  lab: '實驗室',
-  library: '圖書館',
-  admin: '行政',
-  office: '行政',
-  cafeteria: '餐飲',
-  food: '餐飲',
-  dormitory: '住宿',
-  sports: '運動',
-  parking: '停車',
-  convenience: '生活',
-  medical: '健康',
-  religious: '宗教',
-  gate: '交通',
-  other: '其他',
-};
-
 export async function loadCampusMapPlaces(schoolId: string): Promise<CampusMapPlace[]> {
   if (!schoolId || schoolId.includes('/') || isFirebaseMockMode())
     throw new Error('Map source unavailable');
@@ -44,46 +26,13 @@ export async function loadCampusMapPlaces(schoolId: string): Promise<CampusMapPl
     );
   return snapshot.docs
     .flatMap((entry) => {
-      const data = entry.data();
-      if (data.schoolId != null && data.schoolId !== schoolId)
-        throw new Error('Invalid map school');
-      if (
-        typeof data.name !== 'string' ||
-        !data.name.trim() ||
-        typeof data.lat !== 'number' ||
-        !Number.isFinite(data.lat) ||
-        Math.abs(data.lat) > 90 ||
-        typeof data.lng !== 'number' ||
-        !Number.isFinite(data.lng) ||
-        Math.abs(data.lng) > 180
-      )
-        return [];
-      const category = typeof data.category === 'string' ? data.category.trim() : '';
-      return [
-        {
-          id: entry.id,
-          name: data.name.trim(),
-          category: categoryNames[category] ?? (category || '其他'),
-          description: typeof data.description === 'string' ? data.description : '',
-          lat: data.lat,
-          lng: data.lng,
-          building: typeof data.building === 'string' ? data.building : undefined,
-          floor:
-            typeof data.floor === 'string' || typeof data.floor === 'number'
-              ? String(data.floor)
-              : undefined,
-          facilities: Array.isArray(data.facilities)
-            ? data.facilities.filter(
-                (value): value is string => typeof value === 'string' && Boolean(value.trim()),
-              )
-            : [],
-        },
-      ];
+      const place = parseCampusMapRecord(entry.id, entry.data(), schoolId);
+      return place ? [place] : [];
     })
     .sort((left, right) => left.name.localeCompare(right.name, 'zh-Hant'));
 }
 
-export type MapCoordinate = { lat: number; lng: number };
+export type MapCoordinate = CampusCoordinate;
 export type CampusMapPalette = {
   background: string;
   accent: string;
@@ -121,10 +70,13 @@ window.onerror=function(){send({type:'error'});};
 <script>
 if(typeof L!=='undefined'){
 var colors=${colors};
-var map=L.map('map').setView([${center.lat},${center.lng}],16);
+var campusCenter=L.latLng(${center.lat},${center.lng});
+var map=L.map('map').setView(campusCenter,16);
 var tileLayer=L.tileLayer('${tile}',{maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'}).addTo(map);
-tileLayer.on('tileerror',function(){send({type:'error'});});
-var markers=L.layerGroup().addTo(map),userMarker=null;
+var failedTiles=0;
+tileLayer.on('tileerror',function(){if(++failedTiles>=4)send({type:'error'});});
+tileLayer.on('tileload',function(){failedTiles=0;});
+var markers=L.layerGroup().addTo(map),userMarker=null,routeLine=null;
 document.addEventListener('message',function(event){
  try{
   var data=JSON.parse(event.data);
@@ -137,12 +89,21 @@ document.addEventListener('message',function(event){
     marker.on('click',function(){send({type:'select',id:place.id});});
    });
   }
+  if(data.type==='clearRoute'&&routeLine){map.removeLayer(routeLine);routeLine=null;}
+  if(data.type==='route'){
+   if(routeLine){map.removeLayer(routeLine);routeLine=null;}
+   var start=data.start,end=data.end;
+   if(start&&end&&[start.lat,start.lng,end.lat,end.lng].every(Number.isFinite)){
+    routeLine=L.polyline([[start.lat,start.lng],[end.lat,end.lng]],{color:colors.accent,weight:3,opacity:.85,dashArray:'6 9',interactive:false}).addTo(map);
+   }
+  }
   if(data.type==='focus')map.setView([data.lat,data.lng],18);
   if(data.type==='clearLocation'&&userMarker){map.removeLayer(userMarker);userMarker=null;}
   if(data.type==='location'){
    if(userMarker)map.removeLayer(userMarker);
-   userMarker=L.circleMarker([data.lat,data.lng],{radius:8,color:colors.surface,weight:3,fillColor:colors.accent,fillOpacity:1}).addTo(map);
-   userMarker.bindTooltip('目前位置');map.setView([data.lat,data.lng],17);
+   userMarker=L.circleMarker([data.lat,data.lng],{radius:8,color:colors.surface,weight:3,fillColor:'#2563eb',fillOpacity:1}).addTo(map);
+   userMarker.bindTooltip('目前位置');
+   if(campusCenter.distanceTo([data.lat,data.lng])<=2000)map.setView([data.lat,data.lng],17);
   }
  }catch(error){}
 });

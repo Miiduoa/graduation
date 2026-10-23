@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { use } from 'react';
 import { SiteShell } from '@/components/SiteShell';
+import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import { useTeacherCourse } from '@/lib/useTeacherCourse';
 import styles from '../../../../home.module.css';
@@ -14,7 +15,7 @@ export default function TeacherGradebookPage(props: {
 }) {
   const { courseId } = use(props.params);
   const searchParams = props.searchParams ? use(props.searchParams) : undefined;
-  const { schoolId, schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
+  const { schoolId, schoolSearch: q } = resolveSchoolPageContext(searchParams);
   const { state, refresh, authLoading, signedIn } = useTeacherCourse(
     schoolId,
     courseId,
@@ -32,7 +33,6 @@ export default function TeacherGradebookPage(props: {
     <SiteShell
       title={gradebook ? `${gradebook.course.name} · 成績簿` : '成績簿'}
       subtitle="查看課程已儲存的成績與發布狀態。"
-      schoolName={`${schoolName} · 教學工作台`}
     >
       <nav className={local.actions}>
         <Link className={styles.secondary} href={`${path}${q}`}>
@@ -42,15 +42,10 @@ export default function TeacherGradebookPage(props: {
       {authLoading ? (
         <p role="status">確認登入狀態…</p>
       ) : !signedIn ? (
-        <section className={styles.section}>
-          <h2>請登入課程教師帳號</h2>
-          <Link
-            className={styles.primary}
-            href={`/login?redirect=${encodeURIComponent(path + '/gradebook' + q)}`}
-          >
-            前往登入
-          </Link>
-        </section>
+        <SchoolAccountRequired
+          returnUrl={`${path}/gradebook${q}`}
+          alternative="授課請先到課程空間，從你負責的那門課進去。"
+        />
       ) : state?.status === 'error' ? (
         <section className={styles.section}>
           <p role="alert">{state.error}</p>

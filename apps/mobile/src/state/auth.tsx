@@ -28,6 +28,7 @@ import { findSchoolById, resolveSchoolByEmail } from '@campus/shared/src/schools
 import { buildPostLoginContext } from '../data/postLoginDataRouter';
 import { clearAllCache } from '../data/cachedSource';
 import { clearAllOfflineData, getOfflineQueue } from '../services/offline';
+import { loadFailureCopy } from '@campus/shared/src/loadFailureCopy';
 import { getCachedPushToken, removePushTokenFromFirestore } from '../services/notifications';
 import { clearMockAuthSession, loadMockAuthSession } from '../services/mockAuth';
 import { clearUserScopedStorage } from '../services/scopedStorage';
@@ -41,7 +42,11 @@ import {
   getAnyCachedTCCourses,
 } from '../services/puDataCache';
 import { clearPUSession } from '../services/studentIdAuth';
-import { clearTCSession, purgeLegacyTCSensitiveStorage, type TCCourse } from '../services/tronClassClient';
+import {
+  clearTCSession,
+  purgeLegacyTCSensitiveStorage,
+  type TCCourse,
+} from '../services/tronClassClient';
 
 import type { UserRole as DataUserRole } from '../data/types';
 import type { MerchantAssignment } from '../data/types';
@@ -283,25 +288,7 @@ async function loadProfile(u: User | null): Promise<UserProfile | null> {
     };
   } catch (error) {
     console.error('[auth] Failed to load profile:', error);
-    return {
-      uid: u.uid,
-      email: u.email,
-      schoolId: null,
-      primarySchoolId: null,
-      role: 'student',
-      postLoginRoles: null,
-      schoolMembershipRole: null,
-      displayName: u.displayName ?? null,
-      department: null,
-      studentId: null,
-      bio: null,
-      phone: null,
-      avatarUrl: u.photoURL ?? null,
-      isPublicProfile: null,
-      roleGroup: 'student',
-      serviceRoles: [],
-      merchantAssignments: [],
-    };
+    throw error;
   }
 }
 
@@ -634,7 +621,7 @@ export function AuthProvider(props: { children: React.ReactNode }) {
     } catch (e) {
       if (requestIdRef.current === currentRequestId) {
         console.error('[auth] refreshProfile failed:', e);
-        setError('無法載入使用者資料');
+        setError(loadFailureCopy(e));
       }
     } finally {
       if (requestIdRef.current === currentRequestId) {
@@ -752,7 +739,7 @@ export function AuthProvider(props: { children: React.ReactNode }) {
       } catch (e) {
         if (!isCancelled && requestIdRef.current === currentRequestId) {
           console.error('[auth] onAuthStateChanged profile load failed:', e);
-          setError('無法載入使用者資料');
+          setError(loadFailureCopy(e));
           setProfile(null);
         }
       } finally {
@@ -800,125 +787,130 @@ export function AuthProvider(props: { children: React.ReactNode }) {
     return () => clearInterval(interval);
   }, []);
 
-  const handleSignOut = useCallback(async (expectedUid?: string): Promise<{
-    success: boolean;
-    hadCleanupErrors: boolean;
-  }> => {
-    const assertExpectedAccount = (allowSignedOut = false) => {
-      if (!expectedUid) return;
-      const currentUid = hasUsableFirebaseConfig()
-        ? getAuthInstance().currentUser?.uid
-        : currentUserRef.current?.uid;
-      if (currentUid !== expectedUid && !(allowSignedOut && !currentUid)) {
-        throw new Error('The account changed before sign out completed');
+  const handleSignOut = useCallback(
+    async (
+      expectedUid?: string,
+    ): Promise<{
+      success: boolean;
+      hadCleanupErrors: boolean;
+    }> => {
+      const assertExpectedAccount = (allowSignedOut = false) => {
+        if (!expectedUid) return;
+        const currentUid = hasUsableFirebaseConfig()
+          ? getAuthInstance().currentUser?.uid
+          : currentUserRef.current?.uid;
+        if (currentUid !== expectedUid && !(allowSignedOut && !currentUid)) {
+          throw new Error('The account changed before sign out completed');
+        }
+      };
+      assertExpectedAccount();
+      if (isSigningOutRef.current) {
+        if (expectedUid) throw new Error('Sign out is already in progress');
+        console.log('[auth] Sign out already in progress');
+        return { success: false, hadCleanupErrors: false };
       }
-    };
-    assertExpectedAccount();
-    if (isSigningOutRef.current) {
-      if (expectedUid) throw new Error('Sign out is already in progress');
-      console.log('[auth] Sign out already in progress');
-      return { success: false, hadCleanupErrors: false };
-    }
 
-    isSigningOutRef.current = true;
-    const currentUserId = hasUsableFirebaseConfig()
-      ? getAuthInstance().currentUser?.uid
-      : user?.uid;
+      isSigningOutRef.current = true;
+      const currentUserId = hasUsableFirebaseConfig()
+        ? getAuthInstance().currentUser?.uid
+        : user?.uid;
 
-    // 先清理本地資料，再登出
-    // 這解決了登出後清理過程中發生錯誤時，使用者已登出但本地還有上一個使用者資料殘留的問題
-    const cleanupErrors: Error[] = [];
-    const cleanupTasks: Promise<unknown>[] = [
-      clearAllCache().catch((e) => {
-        console.warn('[auth] clearAllCache failed:', e);
-        throw e;
-      }),
-      clearAllOfflineData().catch((e) => {
-        console.warn('[auth] clearAllOfflineData failed:', e);
-        throw e;
-      }),
-      clearUserScopedStorage({
-        uid: currentUserId ?? null,
-        schoolId: profile?.schoolId ?? null,
-      }).catch((e) => {
-        console.warn('[auth] Scoped storage cleanup failed:', e);
-        throw e;
-      }),
-      clearMockAuthSession().catch((e) => {
-        console.warn('[auth] clearMockAuthSession failed:', e);
-        throw e;
-      }),
-      clearTCSession().catch((e) => {
-        console.warn('[auth] clearTCSession failed:', e);
-        throw e;
-      }),
-    ];
+      // 先清理本地資料，再登出
+      // 這解決了登出後清理過程中發生錯誤時，使用者已登出但本地還有上一個使用者資料殘留的問題
+      const cleanupErrors: Error[] = [];
+      const cleanupTasks: Promise<unknown>[] = [
+        clearAllCache().catch((e) => {
+          console.warn('[auth] clearAllCache failed:', e);
+          throw e;
+        }),
+        clearAllOfflineData().catch((e) => {
+          console.warn('[auth] clearAllOfflineData failed:', e);
+          throw e;
+        }),
+        clearUserScopedStorage({
+          uid: currentUserId ?? null,
+          schoolId: profile?.schoolId ?? null,
+        }).catch((e) => {
+          console.warn('[auth] Scoped storage cleanup failed:', e);
+          throw e;
+        }),
+        clearMockAuthSession().catch((e) => {
+          console.warn('[auth] clearMockAuthSession failed:', e);
+          throw e;
+        }),
+        clearTCSession().catch((e) => {
+          console.warn('[auth] clearTCSession failed:', e);
+          throw e;
+        }),
+      ];
 
-    if (currentUserId && hasUsableFirebaseConfig()) {
-      cleanupTasks.push(
-        getCachedPushToken()
-          .then((token) => {
-            if (!token) return;
-            return removePushTokenFromFirestore(currentUserId, token);
-          })
-          .catch((e) => {
-            console.warn('[auth] Failed to remove push token during sign out:', e);
-            throw e;
-          }),
-      );
-    }
-
-    // 使用 Promise.allSettled 來確保所有清理操作都嘗試執行
-    const cleanupResults = await Promise.allSettled(cleanupTasks);
-
-    cleanupResults.forEach((result, index) => {
-      if (result.status === 'rejected') {
-        cleanupErrors.push(
-          result.reason instanceof Error ? result.reason : new Error(String(result.reason)),
+      if (currentUserId && hasUsableFirebaseConfig()) {
+        cleanupTasks.push(
+          getCachedPushToken()
+            .then((token) => {
+              if (!token) return;
+              return removePushTokenFromFirestore(currentUserId, token);
+            })
+            .catch((e) => {
+              console.warn('[auth] Failed to remove push token during sign out:', e);
+              throw e;
+            }),
         );
       }
-    });
 
-    const hadCleanupErrors = cleanupErrors.length > 0;
-    if (hadCleanupErrors) {
-      console.warn('[auth] Some cleanup operations failed:', cleanupErrors);
-    }
+      // 使用 Promise.allSettled 來確保所有清理操作都嘗試執行
+      const cleanupResults = await Promise.allSettled(cleanupTasks);
 
-    try {
-      assertExpectedAccount();
-      if (hasUsableFirebaseConfig()) {
-        const auth = getAuthInstance();
-        await signOut(auth);
+      cleanupResults.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          cleanupErrors.push(
+            result.reason instanceof Error ? result.reason : new Error(String(result.reason)),
+          );
+        }
+      });
+
+      const hadCleanupErrors = cleanupErrors.length > 0;
+      if (hadCleanupErrors) {
+        console.warn('[auth] Some cleanup operations failed:', cleanupErrors);
       }
-      assertExpectedAccount(true);
-      // 即使 Firebase 已 signOut，若使用者原本是 mockAuth 登入，
-      // onAuthStateChanged 不會 fire（沒有 Firebase user 變化），
-      // 所以這裡必須**主動清空 React state**，否則 App.tsx 不會跳回 LoginLanding。
-      await clearMockAuthSession();
-      assertExpectedAccount(true);
-      setUser(null);
-      setProfile(null);
 
-      // 清除靜宜大學快取和 session
-      clearPUSession();
-      setInMemoryPostLoginContext(null);
-      await clearPUCache().catch(() => {});
-      assertExpectedAccount(true);
-      await puCacheClearAll().catch(() => {});
-      assertExpectedAccount(true);
+      try {
+        assertExpectedAccount();
+        if (hasUsableFirebaseConfig()) {
+          const auth = getAuthInstance();
+          await signOut(auth);
+        }
+        assertExpectedAccount(true);
+        // 即使 Firebase 已 signOut，若使用者原本是 mockAuth 登入，
+        // onAuthStateChanged 不會 fire（沒有 Firebase user 變化），
+        // 所以這裡必須**主動清空 React state**，否則 App.tsx 不會跳回 LoginLanding。
+        await clearMockAuthSession();
+        assertExpectedAccount(true);
+        setUser(null);
+        setProfile(null);
 
-      setTokenError(null);
-      setTokenExpired(false);
-      setError(null);
+        // 清除靜宜大學快取和 session
+        clearPUSession();
+        setInMemoryPostLoginContext(null);
+        await clearPUCache().catch(() => {});
+        assertExpectedAccount(true);
+        await puCacheClearAll().catch(() => {});
+        assertExpectedAccount(true);
 
-      return { success: true, hadCleanupErrors };
-    } catch (e) {
-      console.error('[auth] Sign out failed:', e);
-      throw e;
-    } finally {
-      isSigningOutRef.current = false;
-    }
-  }, [profile?.schoolId, user?.uid]);
+        setTokenError(null);
+        setTokenExpired(false);
+        setError(null);
+
+        return { success: true, hadCleanupErrors };
+      } catch (e) {
+        console.error('[auth] Sign out failed:', e);
+        throw e;
+      } finally {
+        isSigningOutRef.current = false;
+      }
+    },
+    [profile?.schoolId, user?.uid],
+  );
 
   const handleSignOutWithWarning = useCallback(async (): Promise<boolean> => {
     const pendingQueue = await getOfflineQueue();

@@ -9,6 +9,7 @@ export type ServiceCategory = (typeof SERVICE_CATEGORIES)[number]['id'];
 
 export const SERVICE_ACCESS = {
   public: '可直接瀏覽',
+  device: '可直接使用，資料保存在這台裝置',
   platform: 'Google 帳號',
   school: '學校帳號',
   account: '依帳號查看',
@@ -16,6 +17,22 @@ export const SERVICE_ACCESS = {
 } as const;
 
 export const CAMPUS_SERVICES = [
+  {
+    name: '個人行事曆',
+    text: '查看自行匯入的活動、考試與行程',
+    href: '/calendar',
+    access: 'device',
+    keywords: '行事曆 活動 考試 日期 calendar',
+    category: 'study',
+  },
+  {
+    name: '匯入我的資料',
+    text: '從截圖、文字或檔案整理課表、成績與行程',
+    href: '/import',
+    access: 'public',
+    keywords: '截圖 匯入 課表 成績 學分 活動 考試 行事曆 import',
+    category: 'study',
+  },
   {
     name: '跨校交流',
     text: '在公開看板分享近況，認識其他校園的人',
@@ -28,7 +45,7 @@ export const CAMPUS_SERVICES = [
     name: '課表',
     text: '查看、編輯與匯入本學期課表',
     href: '/timetable',
-    access: 'school',
+    access: 'public',
     keywords: '上課 行事曆 schedule 空堂',
     category: 'study',
   },
@@ -122,7 +139,7 @@ export const CAMPUS_SERVICES = [
   },
   {
     name: '找人',
-    text: '用找人代號加好友，加好友後才看課表',
+    text: '用找人代號加好友；對方開放分享後可查看課表',
     href: '/friends',
     access: 'school',
     keywords: '好友 朋友 空堂 friend',
@@ -150,6 +167,22 @@ export const CAMPUS_SERVICES = [
     href: '/cafeteria',
     access: 'public',
     keywords: '午餐 晚餐 餐點 food',
+    category: 'campus',
+  },
+  {
+    name: '失物招領',
+    text: '查看本校遺失與拾獲刊登',
+    href: '/lost-found',
+    access: 'platform',
+    keywords: '失物 招領 遺失 拾獲 lost found',
+    category: 'campus',
+  },
+  {
+    name: '點餐與取餐',
+    text: '選餐點、查訂單、出示取餐憑證',
+    href: '/food',
+    access: 'platform',
+    keywords: '點餐 訂單 取餐 外帶 food order pickup',
     category: 'campus',
   },
   {
@@ -257,6 +290,16 @@ export function searchCampusServices(query: string, category: ServiceCategory | 
       terms.every((term) => content.includes(term))
     );
   });
+}
+
+export function serviceAccessLabel(
+  access: keyof typeof SERVICE_ACCESS,
+  options: { loading: boolean; error?: boolean; studentId: boolean },
+) {
+  if (access !== 'school') return SERVICE_ACCESS[access];
+  if (options.loading) return '學校帳號 · 正在確認登入方式';
+  if (options.error) return '學校帳號 · 暫時無法確認登入方式';
+  return options.studentId ? '學校帳號' : '學校帳號 · 尚未開放登入';
 }
 
 export function serviceContextSearch(params: URLSearchParams) {

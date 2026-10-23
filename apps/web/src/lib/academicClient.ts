@@ -16,8 +16,12 @@ export type AcademicSnapshot<K extends AcademicKind> = {
   records: AcademicData[K];
 };
 export class AcademicConnectionError extends Error {
-  constructor(public readonly reason: 'reconnect' | 'unavailable' | 'permission') {
-    super(reason);
+  constructor(
+    public readonly reason: 'reconnect' | 'unavailable' | 'permission',
+    cause?: unknown,
+  ) {
+    super(reason, cause === undefined ? undefined : { cause });
+    this.name = 'AcademicConnectionError';
   }
 }
 
@@ -59,9 +63,11 @@ export async function loadAcademicRecords<K extends AcademicKind>(
   } catch (error) {
     const code = (error as { code?: string })?.code;
     if (code === 'functions/failed-precondition' || code === 'functions/unauthenticated') {
-      throw new AcademicConnectionError('reconnect');
+      throw new AcademicConnectionError('reconnect', error);
     }
-    if (code === 'functions/permission-denied') throw new AcademicConnectionError('permission');
-    throw new AcademicConnectionError('unavailable');
+    if (code === 'functions/permission-denied') {
+      throw new AcademicConnectionError('permission', error);
+    }
+    throw new AcademicConnectionError('unavailable', error);
   }
 }

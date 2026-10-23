@@ -1,0 +1,95 @@
+name: Campus One — genuine click-through video
+on:
+  push:
+    branches:
+      - media/campus-one-interactive-demo-20261014
+    paths:
+      - .github/workflows/campus-one-promo.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: campus-one-live-interaction-video-20261014
+  cancel-in-progress: false
+
+jobs:
+  real-usage-demo:
+    name: Record real user interactions and edit MP4
+    runs-on: ubuntu-latest
+    timeout-minutes: 27
+    steps:
+      - name: Checkout separate video-only branch
+        uses: actions/checkout@v4
+
+      - name: Install Node.js for live browser tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install browser recorder
+        run: |
+          npm install --no-save --no-audit --no-fund --prefix tools/campus-one-promo playwright@1.56.1
+          cd tools/campus-one-promo
+          npx playwright install --with-deps chromium
+
+      - name: Record visible clicks, route transitions, search typing on live site
+        run: |
+          node --check tools/campus-one-promo/capture-actions.cjs
+          node tools/campus-one-promo/capture-actions.cjs
+
+      - name: Install Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install professional video encoding dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-cjk ffmpeg
+          python -m pip install --disable-pip-version-check pillow numpy
+          python -m py_compile tools/campus-one-promo/render-actions.py
+
+      - name: Render interactions into Instagram Reels / Shorts
+        run: python tools/campus-one-promo/render-actions.py
+
+      - name: Validate actual video file and multi-step capture log
+        run: |
+          test -s tools/campus-one-promo/output/Campus_One_2026-10-14_Real_Click_Demo.mp4
+          ffprobe -v error -show_entries stream=codec_name,width,height -show_entries format=duration,size -of default=noprint_wrappers=1 tools/campus-one-promo/output/Campus_One_2026-10-14_Real_Click_Demo.mp4
+          python - <<'PY'
+          import json
+          p='tools/campus-one-promo/interactive/click_log.json'
+          data=json.load(open(p))
+          chapters=[x for x in data['chapters'] if x.get('valid_clicks',0)>0 and not x.get('critical_failure')]
+          assert len(chapters)>=3
+          assert sum(x.get('valid_clicks',0) for x in chapters)>=5
+          print('Verified real clicks:',sum(x['valid_clicks'] for x in chapters))
+          PY
+
+      - name: Upload MP4, newly recorded browser clips and action evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: Campus-One-2026-10-14-REAL-CLICK-DEMO
+          path: |
+            tools/campus-one-promo/output/Campus_One_2026-10-14_Real_Click_Demo.mp4
+            tools/campus-one-promo/output/Campus_One_Interactive_Cover.jpg
+            tools/campus-one-promo/output/INTERACTIVE_SOURCE.txt
+            tools/campus-one-promo/output/interactive_edit_manifest.json
+            tools/campus-one-promo/interactive/*.webm
+            tools/campus-one-promo/interactive/*-end.png
+            tools/campus-one-promo/interactive/click_log.json
+          retention-days: 30
+
+      - name: Publish only finished MP4 and evidence to media branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tools/campus-one-promo/output/Campus_One_2026-10-14_Real_Click_Demo.mp4
+          git add tools/campus-one-promo/output/Campus_One_Interactive_Cover.jpg
+          git add tools/campus-one-promo/output/INTERACTIVE_SOURCE.txt
+          git add tools/campus-one-promo/output/interactive_edit_manifest.json
+          git add tools/campus-one-promo/interactive/click_log.json
+          git diff --cached --quiet || git commit -m "Publish real live click-through Campus One reel"
+          git push origin HEAD:media/campus-one-interactive-demo-20261014

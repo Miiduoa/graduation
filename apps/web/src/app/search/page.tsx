@@ -4,12 +4,14 @@ import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
+import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
+import { browsingSchoolSearch } from '@/lib/navigation';
+import { useSignInOptions } from '@/lib/signInOptions';
 import styles from './search.module.css';
 import {
-  SERVICE_ACCESS,
+  serviceAccessLabel,
   SERVICE_CATEGORIES,
   searchCampusServices,
-  serviceContextSearch,
   type ServiceCategory,
 } from '@/lib/campusServices';
 
@@ -25,6 +27,8 @@ function readFilters(params: URLSearchParams) {
 
 function ServiceDirectory() {
   const params = useSearchParams();
+  const school = useOptionalSelectedSchool();
+  const options = useSignInOptions();
   const queryString = params.toString();
   const [{ query, category }, setFilters] = useState(() =>
     readFilters(new URLSearchParams(queryString)),
@@ -36,7 +40,7 @@ function ServiceDirectory() {
   }, [queryString]);
   const term = query.trim();
   const matches = searchCampusServices(query, category);
-  const schoolSearch = serviceContextSearch(new URLSearchParams(queryString));
+  const schoolSearch = browsingSchoolSearch(params, school?.selectedSchoolId ?? null);
   function updateFilters(next: { query: string; category: ServiceCategory | 'all' }) {
     setFilters(next);
     const url = new URL(window.location.href);
@@ -55,7 +59,7 @@ function ServiceDirectory() {
     updateFilters({ query: '', category: 'all' });
   }
   return (
-    <SiteShell title="所有服務" subtitle="搜尋要做的事，或依分類查找。每項服務都標示需要的帳號。">
+    <SiteShell title="所有服務" subtitle="搜尋要做的事，或依分類查找。學校帳號與 Google 帳號可使用的服務不同。">
       <div className={styles.directory}>
         <section className={styles.searchPanel} aria-label="尋找服務">
           <label htmlFor="service-search">想找什麼？</label>
@@ -83,6 +87,12 @@ function ServiceDirectory() {
             ))}
           </div>
         </section>
+        {options.error && (
+          <div role="alert">
+            <p>暫時無法確認學校登入方式，公開資訊仍可瀏覽。</p>
+            <button type="button" className="btn" onClick={options.retry}>重新確認登入方式</button>
+          </div>
+        )}
         <div className={styles.resultSummary}>
           <p role="status" aria-live="polite">
             找到 {matches.length} 項服務
@@ -117,7 +127,7 @@ function ServiceDirectory() {
                       <div>
                         <h3>{service.name}</h3>
                         <p>{service.text}</p>
-                        <small className={styles.access}>{SERVICE_ACCESS[service.access]}</small>
+                        <small className={styles.access}>{serviceAccessLabel(service.access, options)}</small>
                       </div>
                       <span aria-hidden="true">→</span>
                     </Link>

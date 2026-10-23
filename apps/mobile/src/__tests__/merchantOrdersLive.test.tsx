@@ -37,11 +37,21 @@ jest.mock('../services/demoMerchantOrders', () => ({
 }));
 jest.mock('../services/demoStore', () => ({ updateOrderStatus: jest.fn() }));
 jest.mock('../services/shopCatalog', () => ({
+  createShopPost: jest.fn(),
   deleteShopMenuItem: jest.fn(),
   loadShopHours: jest.fn(async () => ({})),
   loadShopMenu: jest.fn(async () => []),
+  loadShopStorefront: jest.fn(async () => ({
+    openingHours: '',
+    intro: '',
+    location: '',
+    websiteUrl: '',
+    orderingUrl: '',
+    merchantMode: 'info_only',
+  })),
   saveShopHours: jest.fn(),
   saveShopMenuItem: jest.fn(),
+  saveShopStorefront: jest.fn(),
 }));
 jest.mock('../services/companionEngine', () => ({ recordCompanionFeatureSignal: jest.fn() }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));

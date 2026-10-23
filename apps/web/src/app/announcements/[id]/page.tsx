@@ -2,34 +2,70 @@
 
 import { use, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { findSchoolById, findSchoolsByCode } from '@campus/shared/src/schools';
 import { useAuth } from '@/components/AuthGuard';
 import { SiteShell } from '@/components/SiteShell';
 import type { Announcement } from '@/lib/firebase';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
 import { loadAnnouncement } from '../publicAnnouncements';
+import {
+  ANNOUNCEMENT_READ_FAILURE_TEXT,
+  ANNOUNCEMENT_RETRY_TEXT,
+  formatStaleAnnouncementNotice,
+  staleAnnouncementUpdatedAt,
+} from '@campus/shared/src/campusAnnouncements';
+import { isAnnouncementSchoolVisibleToPublic } from '@campus/shared/src/campusAnnouncements';
+import { getAnnouncementVisibilityEnv } from '@/lib/runtime';
+import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import styles from '../announcements.module.css';
 
 type LoadState =
-  | { status: 'loading' }
-  | { status: 'error' }
-  | { status: 'ready'; announcement: Announcement | null };
+  | { status: 'loading'; schoolId: string; id: string }
+  | { status: 'failed'; schoolId: string; id: string }
+  | {
+      status: 'ready';
+      schoolId: string;
+      id: string;
+      announcement: Announcement | null;
+      fetchedAt: string;
+      stale: boolean;
+    };
+
+function detailForRequest(state: LoadState, schoolId: string, id: string): LoadState {
+  return state.schoolId === schoolId && state.id === id
+    ? state
+    : { status: 'loading', schoolId, id };
+}
 
 function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) {
-  const [state, setState] = useState<LoadState>({ status: 'loading' });
+  const [state, setState] = useState<LoadState>({ status: 'loading', schoolId, id });
   const [notice, setNotice] = useState('');
   const generation = useRef(0);
   const mounted = useRef(false);
+  const view = detailForRequest(state, schoolId, id);
   const load = useCallback(() => {
     const request = ++generation.current;
     return loadAnnouncement(schoolId, id).then(
       (announcement) => {
         if (mounted.current && request === generation.current) {
-          setState({ status: 'ready', announcement });
+          setState({
+            status: 'ready',
+            schoolId,
+            id,
+            announcement,
+            fetchedAt: new Date().toISOString(),
+            stale: false,
+          });
         }
       },
       () => {
-        if (mounted.current && request === generation.current) setState({ status: 'error' });
+        if (!mounted.current || request !== generation.current) return;
+        setState((current) =>
+          current.schoolId === schoolId &&
+          current.id === id &&
+          current.status === 'ready' &&
+          current.announcement
+            ? { ...current, stale: true }
+            : { status: 'failed', schoolId, id },
+        );
       },
     );
   }, [schoolId, id]);
@@ -44,8 +80,15 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
   }, [load]);
 
   function refresh() {
-    setState({ status: 'loading' });
     setNotice('');
+    setState((current) =>
+      current.schoolId === schoolId &&
+      current.id === id &&
+      current.status === 'ready' &&
+      current.announcement
+        ? current
+        : { status: 'loading', schoolId, id },
+    );
     void load();
   }
 
@@ -63,24 +106,23 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
     }
   }
 
-  if (state.status === 'loading')
+  if (view.status === 'loading')
     return (
       <p className={styles.status} role="status">
         正在讀取公告…
       </p>
     );
-  if (state.status === 'error') {
+  if (view.status === 'failed') {
     return (
-      <section className={styles.status} role="alert">
-        <h2>暫時無法讀取這則公告</h2>
-        <p>請確認網路後再試一次。</p>
-        <button className="btn primary" onClick={refresh}>
-          重新讀取
+      <section className={styles.status}>
+        <h2>{ANNOUNCEMENT_READ_FAILURE_TEXT}</h2>
+        <button className="btn" type="button" onClick={refresh}>
+          {ANNOUNCEMENT_RETRY_TEXT}
         </button>
       </section>
     );
   }
-  if (!state.announcement) {
+  if (!view.announcement) {
     return (
       <section className={styles.status}>
         <h2>找不到這則公告</h2>
@@ -88,7 +130,7 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
       </section>
     );
   }
-  const announcement = state.announcement;
+  const announcement = view.announcement;
   return (
     <article className={styles.announcement}>
       <div className={styles.meta}>
@@ -108,8 +150,31 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
           <span>未提供發布日期</span>
         )}
       </div>
+      {view.stale ? (
+        <p role="status" className={styles.notice}>
+          {formatStaleAnnouncementNotice(
+            staleAnnouncementUpdatedAt(
+              [{ status: 'unavailable', lastSuccessAt: view.fetchedAt }],
+              [announcement],
+            ),
+            'firestore',
+          )}
+        </p>
+      ) : null}
       <h2>{announcement.title}</h2>
-      {announcement.body && <p className={styles.body}>{announcement.body}</p>}
+      {(announcement.summary || announcement.body) && (
+        <p className={styles.body}>{announcement.summary || announcement.body}</p>
+      )}
+      {announcement.originalUrl && (
+        <a
+          className={styles.share}
+          href={announcement.originalUrl}
+          rel="noreferrer"
+          target="_blank"
+        >
+          看原文
+        </a>
+      )}
       <div className={styles.detailActions}>
         <button className="btn" onClick={() => void copyLink()}>
           複製連結
@@ -129,32 +194,51 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
 
 export default function AnnouncementDetailPage(props: {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ school?: string; schoolId?: string }>;
+  searchParams?: Promise<{ school?: string; schoolId?: string; campus?: string }>;
 }) {
   const { id } = use(props.params);
   const params = props.searchParams ? use(props.searchParams) : undefined;
-  const matches = findSchoolsByCode(params?.school);
-  const school =
-    findSchoolById(params?.schoolId) ??
-    (matches.length === 1 ? matches[0] : resolveSchoolPageContext().school);
+  const context = useCampusBrowseContext(params);
+  const schoolId = context.schoolId;
+  const visible =
+    context.status === 'ready' &&
+    Boolean(
+      schoolId && isAnnouncementSchoolVisibleToPublic({ schoolId }, getAnnouncementVisibilityEnv()),
+    );
   const { user, loading } = useAuth();
   return (
-    <SiteShell schoolName={school.name} schoolCode={school.code} title="公告詳情">
+    <SiteShell schoolName={visible ? context.schoolName : undefined} title="公告詳情">
       <div className={styles.page}>
         <Link
           className={styles.back}
-          href={`/announcements?schoolId=${encodeURIComponent(school.id)}`}
+          href={
+            visible && schoolId
+              ? `/announcements?schoolId=${encodeURIComponent(schoolId)}`
+              : '/announcements'
+          }
         >
           ← 返回公告列表
         </Link>
-        {loading ? (
+        {!visible ? (
+          <section className={styles.status}>
+            <h2>
+              {context.status === 'loading'
+                ? '正在確認所選校園…'
+                : context.status === 'error'
+                  ? '無法取得校園目錄'
+                  : context.status === 'unselected'
+                    ? '先選擇一所學校'
+                    : '目前沒有公開公告'}
+            </h2>
+          </section>
+        ) : loading ? (
           <p className={styles.status} role="status">
             正在準備公告…
           </p>
         ) : (
           <AnnouncementDetail
-            key={JSON.stringify([school.id, id, user?.uid ?? null])}
-            schoolId={school.id}
+            key={JSON.stringify([schoolId, id, user?.uid ?? null])}
+            schoolId={schoolId!}
             id={id}
           />
         )}

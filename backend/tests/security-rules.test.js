@@ -293,6 +293,331 @@ describe('firestore security rules', () => {
     await assertSucceeds(
       db.collection('schools').doc('tw-demo-uni').collection('menus').doc('menu-1').delete(),
     );
+    await assertSucceeds(
+      db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .update({
+          intro: '紙感小店',
+          merchantMode: 'showcase_link',
+          orderingUrl: 'https://shop.example/order',
+          updatedAt: new Date(),
+        }),
+    );
+    await assertFails(
+      db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .update({
+          merchantMode: 'native_order',
+        }),
+    );
+    await assertFails(
+      db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .update({
+          orderingUrl: ' https://shop.example/order',
+        }),
+    );
+    await assertFails(
+      db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .update({
+          websiteUrl: 'https://shop.example/order ',
+        }),
+    );
+    await assertFails(
+      db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .update({
+          orderingUrl: 'http://shop.example/order',
+        }),
+    );
+    await assertFails(
+      db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .update({
+          websiteUrl: 'https://user:pass@shop.example',
+        }),
+    );
+    await assertSucceeds(
+      db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .update({
+          websiteUrl: 'https://shop.example',
+          orderingUrl: '',
+        }),
+    );
+    await assertSucceeds(
+      db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .collection('posts')
+        .doc('post-1')
+        .set({ text: '週四折抵', authorId: 'merchant-1' }),
+    );
+    const student = testEnv.authenticatedContext('alice').firestore();
+    await assertSucceeds(
+      student
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .collection('followers')
+        .doc('alice')
+        .set({ createdAt: new Date() }),
+    );
+    await assertSucceeds(
+      student
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .collection('posts')
+        .doc('post-1')
+        .collection('likes')
+        .doc('alice')
+        .set({ createdAt: new Date() }),
+    );
+    await assertSucceeds(
+      student
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .collection('posts')
+        .doc('post-1')
+        .collection('comments')
+        .doc('c1')
+        .set({ authorId: 'alice', text: '收到' }),
+    );
+    await assertFails(
+      student
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('announcement-sources')
+        .doc('pu-acd')
+        .set({ status: 'healthy' }),
+    );
+    await assertSucceeds(
+      student
+        .collection('users')
+        .doc('alice')
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('externalOrders')
+        .doc('click-1')
+        .set({
+          fulfillment: 'external',
+          schoolId: 'tw-demo-uni',
+          cafeteriaId: 'cafeteria-1',
+          orderingUrl: 'https://shop.example/order',
+        }),
+    );
+    await assertFails(
+      student
+        .collection('users')
+        .doc('alice')
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('externalOrders')
+        .doc('click-2')
+        .set({
+          fulfillment: 'external',
+          schoolId: 'tw-demo-uni',
+          cafeteriaId: 'cafeteria-1',
+          orderingUrl: 'https://shop.example/order',
+          paymentStatus: 'paid',
+        }),
+    );
+    const rejectedStorefrontUrls = [
+      'javascript:alert(1)',
+      'https://a@evil.com',
+      `https://shop.example/${'a'.repeat(2048)}`,
+      ' https://shop.example/order',
+      'https://shop.example/order ',
+      'http://shop.example/order',
+      'data:text/html,hi',
+      'https://shop.example/order\u0000',
+    ];
+    for (const orderingUrl of rejectedStorefrontUrls) {
+      await assertFails(
+        db
+          .collection('schools')
+          .doc('tw-demo-uni')
+          .collection('cafeterias')
+          .doc('cafeteria-1')
+          .update({ orderingUrl }),
+      );
+      await assertFails(
+        db
+          .collection('schools')
+          .doc('tw-demo-uni')
+          .collection('cafeterias')
+          .doc('cafeteria-1')
+          .update({ websiteUrl: orderingUrl }),
+      );
+      await assertFails(
+        student
+          .collection('users')
+          .doc('alice')
+          .collection('schools')
+          .doc('tw-demo-uni')
+          .collection('externalOrders')
+          .doc(`bad-${Buffer.from(orderingUrl).toString('hex').slice(0, 24)}`)
+          .set({
+            fulfillment: 'external',
+            schoolId: 'tw-demo-uni',
+            cafeteriaId: 'cafeteria-1',
+            orderingUrl,
+          }),
+      );
+    }
+    await assertFails(
+      student
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .update({
+          websiteUrl: 'https://evil.example',
+          orderingUrl: 'https://evil.example/order',
+        }),
+    );
+    await assertSucceeds(
+      db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .update({
+          websiteUrl: 'HTTPS://shop.example',
+          orderingUrl: 'HTTPS://shop.example/order',
+          updatedAt: new Date(),
+        }),
+    );
+    await assertSucceeds(
+      student
+        .collection('users')
+        .doc('alice')
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('externalOrders')
+        .doc('click-https')
+        .set({
+          fulfillment: 'external',
+          schoolId: 'tw-demo-uni',
+          cafeteriaId: 'cafeteria-1',
+          orderingUrl: 'HTTPS://shop.example/order',
+        }),
+    );
+  });
+
+  test('學生和別家店改不了別人的外連網址', async () => {
+    await seedFirestore(async (db) => {
+      await db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .set({
+          name: '第一餐廳',
+          orderingEnabled: true,
+          pilotStatus: 'live',
+          websiteUrl: 'https://shop.example',
+          orderingUrl: 'https://shop.example/order',
+        });
+      await db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .collection('operators')
+        .doc('merchant-1')
+        .set({
+          status: 'active',
+          role: 'manager',
+        });
+      await db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-2')
+        .set({
+          name: '第二餐廳',
+          orderingEnabled: true,
+          pilotStatus: 'live',
+        });
+      await db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-2')
+        .collection('operators')
+        .doc('merchant-2')
+        .set({
+          status: 'active',
+          role: 'staff',
+        });
+    });
+    const student = testEnv.authenticatedContext('alice').firestore();
+    const otherShop = testEnv.authenticatedContext('merchant-2').firestore();
+    const owner = testEnv.authenticatedContext('merchant-1').firestore();
+    await assertFails(
+      student
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .update({
+          websiteUrl: 'https://evil.example',
+          orderingUrl: 'https://evil.example/order',
+        }),
+    );
+    await assertFails(
+      otherShop
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .update({
+          websiteUrl: 'https://other.example',
+          orderingUrl: 'https://other.example/order',
+        }),
+    );
+    await assertSucceeds(
+      owner
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('cafeterias')
+        .doc('cafeteria-1')
+        .update({
+          websiteUrl: 'https://shop.example/home',
+          orderingUrl: 'https://shop.example/menu',
+          updatedAt: new Date(),
+        }),
+    );
   });
 
   test("deny other cafeteria reads and require server writes even for administrators", async () => {
@@ -804,7 +1129,7 @@ describe('firestore security rules', () => {
     );
   });
 
-  test('allow public pulse aggregate reads but deny raw pulse reports and aggregate writes', async () => {
+  test('signed-in users can read pulse aggregates; guests and writers cannot', async () => {
     await seedFirestore(async (db) => {
       await db
         .collection('schools')
@@ -829,7 +1154,7 @@ describe('firestore security rules', () => {
     });
 
     const publicDb = testEnv.unauthenticatedContext().firestore();
-    await assertSucceeds(
+    await assertFails(
       publicDb
         .collection('schools')
         .doc('tw-demo-uni')
@@ -847,6 +1172,14 @@ describe('firestore security rules', () => {
     );
 
     const aliceDb = testEnv.authenticatedContext('alice').firestore();
+    await assertSucceeds(
+      aliceDb
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('pulseAggregates')
+        .doc('library')
+        .get(),
+    );
     await assertFails(
       aliceDb
         .collection('schools')
@@ -857,6 +1190,102 @@ describe('firestore security rules', () => {
           currentLevel: 5,
         }),
     );
+  });
+
+  test('guests can read campus announcements but not lost-and-found or reviews', async () => {
+    await seedFirestore(async (db) => {
+      const school = db.collection('schools').doc('pu');
+      await school.set({ name: '靜宜大學' });
+      await school.collection('announcements').doc('notice-1').set({
+        title: '停課通知',
+        schoolId: 'pu',
+      });
+      await school.collection('lostFound').doc('item-1').set({
+        title: '遺失學生證',
+        userId: 'alice',
+        phone: '0900000000',
+      });
+      await school.collection('pois').doc('lib').set({ name: '圖書館' });
+      await school.collection('pois').doc('lib').collection('reviews').doc('rev-1').set({
+        uid: 'alice',
+        text: '很安靜',
+      });
+      await school.collection('cafeterias').doc('cafe-1').set({ name: '一餐' });
+      await school
+        .collection('cafeterias')
+        .doc('cafe-1')
+        .collection('posts')
+        .doc('post-1')
+        .set({ text: '今日特餐' });
+      await school
+        .collection('cafeterias')
+        .doc('cafe-1')
+        .collection('posts')
+        .doc('post-1')
+        .collection('comments')
+        .doc('c1')
+        .set({ authorId: 'alice', text: '收到' });
+      await school
+        .collection('cafeterias')
+        .doc('cafe-1')
+        .collection('posts')
+        .doc('post-1')
+        .collection('likes')
+        .doc('alice')
+        .set({ createdAt: '2026-10-13' });
+      await school.collection('cafeterias').doc('cafe-1').collection('followers').doc('alice').set({
+        createdAt: '2026-10-13',
+      });
+      await school.collection('leaderboard').doc('weekly').set({ uid: 'alice', score: 12 });
+      await school.collection('pulseAggregates').doc('library').set({ currentLevel: 2 });
+      await school.collection('menus').doc('bento').set({ name: '便當' });
+      await school.collection('busRoutes').doc('route-1').set({ name: '校車' });
+      await school.collection('events').doc('event-1').set({ title: '迎新' });
+      await db.collection('courses').doc('cs101').set({ name: '程式設計' });
+      await db.collection('lostFoundItems').doc('item-2').set({
+        userId: 'alice',
+        title: '雨傘',
+      });
+      await db.collection('menuRatings').doc('rate-1').set({
+        userId: 'alice',
+        menuItemId: 'bento',
+        score: 5,
+      });
+    });
+
+    const guest = testEnv.unauthenticatedContext().firestore();
+    await assertSucceeds(guest.doc('schools/pu/announcements/notice-1').get());
+    await assertSucceeds(guest.doc('schools/pu').get());
+    await assertSucceeds(guest.doc('schools/pu/menus/bento').get());
+    await assertSucceeds(guest.doc('schools/pu/busRoutes/route-1').get());
+    await assertSucceeds(guest.doc('schools/pu/events/event-1').get());
+    await assertSucceeds(guest.doc('schools/pu/pois/lib').get());
+    await assertSucceeds(guest.doc('schools/pu/cafeterias/cafe-1').get());
+    await assertSucceeds(guest.collection('schools/pu/cafeterias').get());
+    await assertSucceeds(guest.collection('schools/pu/menus').get());
+    await assertSucceeds(guest.doc('courses/cs101').get());
+    await assertFails(guest.doc('schools/pu/lostFound/item-1').get());
+    await assertFails(guest.collection('schools/pu/lostFound').get());
+    await assertFails(guest.doc('lostFoundItems/item-2').get());
+    await assertFails(guest.doc('schools/pu/pois/lib/reviews/rev-1').get());
+    await assertFails(guest.collection('schools/pu/cafeterias/cafe-1/posts/post-1/comments').get());
+    await assertFails(guest.doc('schools/pu/cafeterias/cafe-1/posts/post-1/comments/c1').get());
+    await assertFails(guest.doc('schools/pu/cafeterias/cafe-1/posts/post-1/likes/alice').get());
+    await assertFails(guest.doc('schools/pu/cafeterias/cafe-1/followers/alice').get());
+    await assertFails(guest.doc('menuRatings/rate-1').get());
+    await assertFails(guest.doc('schools/pu/leaderboard/weekly').get());
+    await assertFails(guest.doc('schools/pu/pulseAggregates/library').get());
+    await assertFails(guest.doc('schools/pu/announcements/notice-1').set({ title: '竄改' }));
+
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    await assertSucceeds(alice.doc('schools/pu/announcements/notice-1').get());
+    await assertSucceeds(alice.doc('schools/pu/lostFound/item-1').get());
+    await assertSucceeds(alice.doc('lostFoundItems/item-2').get());
+    await assertSucceeds(alice.doc('schools/pu/pois/lib/reviews/rev-1').get());
+    await assertSucceeds(alice.doc('schools/pu/cafeterias/cafe-1/posts/post-1/comments/c1').get());
+    await assertSucceeds(alice.doc('menuRatings/rate-1').get());
+    await assertFails(alice.doc('schools/pu/announcements/notice-1').set({ title: '竄改' }));
+    await assertFails(alice.doc('schools/pu/leaderboard/weekly').set({ score: 99 }));
   });
 
   test('protect Campus Agent OS private risk snapshots and action queue', async () => {
@@ -1082,6 +1511,8 @@ describe('course assignment submissions', () => {
   async function seedAssignment(overrides = {}) {
     await seedFirestore(async (db) => {
       await db.doc('groups/course-1').set({ name: 'Course', schoolId: 'school-1', type: 'course' });
+      await db.doc('schools/school-1/members/alice').set({ role: 'student', status: 'active' });
+      await db.doc('schools/school-1/members/bob').set({ role: 'faculty', status: 'active' });
       await db.doc('schools/school-1/members/teacher').set({ role: 'faculty', status: 'active' });
       await db.doc('groups/course-1/members/alice').set({ role: 'member', status: 'active' });
       await db.doc('groups/course-1/members/teacher').set({ role: 'instructor', status: 'active' });
@@ -1215,6 +1646,19 @@ describe('course assignment submissions', () => {
       await assertFails(pathTo(testEnv.authenticatedContext('alice').firestore()).set(answer()));
     }
   });
+  test('unpublished, closed and overdue quizzes reject answer writes', async () => {
+    const quizAnswer = answer({ content: '', answers: { q1: 'b' } });
+    for (const overrides of [
+      { type: 'quiz', published: false },
+      { type: 'quiz', status: 'draft' },
+      { type: 'quiz', status: 'closed' },
+      { type: 'quiz', dueAt: Timestamp.fromMillis(0) },
+      { type: 'quiz', dueAt: '2000-01-01T00:00:00Z' },
+    ]) {
+      await seedAssignment(overrides);
+      await assertFails(pathTo(testEnv.authenticatedContext('alice').firestore()).set(quizAnswer));
+    }
+  });
   test('explicit late allowance accepts an overdue submission', async () => {
     await seedAssignment({ dueAt: Timestamp.fromMillis(0), allowLateSubmission: true });
     await assertSucceeds(pathTo(testEnv.authenticatedContext('alice').firestore()).set(answer()));
@@ -1313,6 +1757,7 @@ describe('protected attendance records', () => {
         ['alice', 'student'], ['bob', 'student'], ['teacher', 'instructor'],
         ['owner', 'owner'], ['admin', 'admin'], ['removed', 'instructor', 'inactive'],
       ]) {
+        await db.doc(`schools/tw-demo-uni/members/${uid}`).set({ role: 'student', status });
         await group.collection('members').doc(uid).set({ role, status });
       }
       for (const collection of ['liveSessions', 'attendanceSessions']) {
@@ -1709,8 +2154,55 @@ test('handles can be looked up one at a time but never listed', async () => {
   await assertFails(stranger.doc('schools/pu/handles/alice_01').get());
 });
 
+test('handle rename and removal commit with the private school pointer or not at all', async () => {
+  const assert = require('node:assert/strict');
+  await seedFirestore(async (db) => {
+    await db.doc('users/alice').set({ displayName: 'Alice' });
+    await db.doc('users/bob').set({ displayName: 'Bob' });
+    for (const schoolId of ['pu', 'other']) {
+      await db.doc(`schools/${schoolId}/members/alice`).set({ status: 'active', role: 'student' });
+    }
+    await db.doc('schools/pu/handles/alice_old').set({ uid: 'alice', name: 'Alice', handle: 'alice_old' });
+    await db.doc('schools/pu/handles/taken').set({ uid: 'bob', name: 'Bob', handle: 'taken' });
+    await db.doc('schools/other/handles/alice_other').set({ uid: 'alice', name: 'Alice', handle: 'alice_other' });
+    await db.doc('users/alice/settings/friendHandle:pu').set({ handle: 'alice_old' });
+    await db.doc('users/alice/settings/friendHandle:other').set({ handle: 'alice_other' });
+  });
+  const db = testEnv.authenticatedContext('alice').firestore();
+  const pointer = db.doc('users/alice/settings/friendHandle:pu');
+  const rename = (next) => db.runTransaction(async (transaction) => {
+    const current = await transaction.get(pointer);
+    const old = db.doc(`schools/pu/handles/${current.data().handle}`);
+    await transaction.get(old);
+    transaction.set(db.doc(`schools/pu/handles/${next}`), { uid: 'alice', name: 'Alice', handle: next });
+    transaction.delete(old);
+    transaction.set(pointer, { handle: next });
+  });
+  await assertFails(rename('taken'));
+  assert.equal((await pointer.get()).data().handle, 'alice_old');
+  assert.equal((await db.doc('schools/pu/handles/alice_old').get()).exists, true);
+  await assertSucceeds(rename('alice_new'));
+  assert.equal((await db.doc('schools/pu/handles/alice_old').get()).exists, false);
+  assert.equal((await pointer.get()).data().handle, 'alice_new');
+  await assertSucceeds(db.runTransaction(async (transaction) => {
+    const current = await transaction.get(pointer);
+    const alias = db.doc(`schools/pu/handles/${current.data().handle}`);
+    await transaction.get(alias);
+    transaction.delete(alias);
+    transaction.set(pointer, { handle: '' });
+  }));
+  assert.equal((await db.doc('schools/pu/handles/alice_new').get()).exists, false);
+  assert.equal((await pointer.get()).data().handle, '');
+  assert.equal((await db.doc('schools/other/handles/alice_other').get()).exists, true);
+  assert.equal((await db.doc('users/alice/settings/friendHandle:other').get()).data().handle, 'alice_other');
+  await assertFails(testEnv.authenticatedContext('bob').firestore().doc(pointer.path).get());
+});
+
 test('assistant replies can only be written by the server, never by a student', async () => {
   await seedFirestore(async (db) => {
+    for (const uid of ['alice', 'bob', 'tina']) {
+      await db.doc(`schools/pu/members/${uid}`).set({ role: 'student', status: 'active' });
+    }
     await db.doc('groups/g1').set({ schoolId: 'pu', name: '課' });
     await db.doc('groups/g1/members/alice').set({ status: 'active', role: 'member' });
     await db.doc('groups/g1/members/bob').set({ status: 'active', role: 'member' });
@@ -1961,5 +2453,56 @@ test('線上點餐關著時，學生或店員也不能直接在資料庫寫出�
       const snap = await db.collection(target).get();
       if (!snap.empty) throw new Error(`${target} has ${snap.size} docs`);
     }
+  });
+});
+
+
+describe('reviewed course legacy access boundaries', () => {
+  async function seedCourse() {
+    await seedFirestore(async (db) => {
+      await db.doc('groups/review-boundary').set({ schoolId: 'pu', createdBy: 'owner', type: 'course', verification: { status: 'unverified' }, name: 'Course' });
+      for (const uid of ['owner', 'student']) {
+        await db.doc(`schools/pu/members/${uid}`).set({ status: 'active', role: 'student' });
+        await db.doc(`groups/review-boundary/members/${uid}`).set({ status: 'active', role: uid === 'owner' ? 'owner' : 'member', uid });
+      }
+    });
+  }
+  test('active same-school members retain access and descriptive editing', async () => {
+    await seedCourse();
+    const owner = testEnv.authenticatedContext('owner').firestore();
+    const student = testEnv.authenticatedContext('student').firestore();
+    await assertSucceeds(student.doc('groups/review-boundary').get());
+    await assertSucceeds(owner.doc('groups/review-boundary').update({ name: 'Updated title' }));
+  });
+  test('stale group membership cannot cross schools or survive revoked enrollment', async () => {
+    await seedCourse();
+    const student = testEnv.authenticatedContext('student').firestore();
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/student').delete();
+      await db.doc('schools/other/members/student').set({ status: 'active', role: 'admin' });
+    });
+    await assertFails(student.doc('groups/review-boundary').get());
+    await seedFirestore(async (db) => db.doc('schools/pu/members/student').set({ status: 'inactive', role: 'student' }));
+    await assertFails(student.doc('groups/review-boundary').get());
+    await assertFails(student.collection('groups/review-boundary/posts').add({ authorId: 'student', kind: 'question', title: 'Denied' }));
+  });
+  test('workspace management does not grant direct verification or role promotion', async () => {
+    await seedCourse();
+    const owner = testEnv.authenticatedContext('owner', { role: 'teacher', verified: true }).firestore();
+    const course = owner.doc('groups/review-boundary');
+    await assertFails(course.update({ verification: { status: 'verified' } }));
+    await assertFails(course.update({ schoolId: 'other' }));
+    await assertFails(course.update({ createdBy: 'student' }));
+    await assertFails(owner.doc('groups/review-boundary/members/student').update({ role: 'instructor' }));
+    await assertFails(owner.doc('groups/review-boundary/members/new-teacher').set({ role: 'instructor', status: 'active' }));
+  });
+  test('client-created courses cannot claim verification or somebody else as creator', async () => {
+    await seedCourse();
+    const student = testEnv.authenticatedContext('student', { role: 'teacher' }).firestore();
+    const base = { schoolId: 'pu', createdBy: 'student', type: 'course', name: 'Personal course', verification: { status: 'unverified' } };
+    await assertSucceeds(student.doc('groups/personal-course').set(base));
+    await assertFails(student.doc('groups/fake-verified').set({ ...base, verification: { status: 'verified' } }));
+    await assertFails(student.doc('groups/fake-creator').set({ ...base, createdBy: 'owner' }));
+    await assertFails(student.doc('groups/fake-school').set({ ...base, schoolId: 'other' }));
   });
 });

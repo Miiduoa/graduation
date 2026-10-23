@@ -6,12 +6,18 @@ import { SiteShell } from '@/components/SiteShell';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
 import { useAuth } from '@/components/AuthGuard';
 import { useSelectedSchool } from '@/components/SelectedSchoolProvider';
-import { decideCourseAppeal, listTeacherAppeals, type TeacherAppealRow } from '@/lib/timetable/store';
+import {
+  decideCourseAppeal,
+  listTeacherAppeals,
+  type TeacherAppealRow,
+} from '@/lib/timetable/store';
 import styles from '@/components/academic/academic.module.css';
 
 /** 「測試學生甲（S0000001）· 資料庫 · 期中考成績」 */
 function appealHeading(item: TeacherAppealRow) {
-  const who = item.studentNumber ? `${item.studentName}（${item.studentNumber}）` : item.studentName;
+  const who = item.studentNumber
+    ? `${item.studentName}（${item.studentNumber}）`
+    : item.studentName;
   return `${who} · ${item.courseName} · ${item.title}`;
 }
 
@@ -49,7 +55,11 @@ export default function TeacherDeskPage() {
       const result = await listTeacherAppeals(schoolId);
       const rows = [...result.rows];
       setCourses(result.courses);
-      rows.sort((a, b) => Date.parse(b.updatedAt || b.createdAt || '') - Date.parse(a.updatedAt || a.createdAt || ''));
+      rows.sort(
+        (a, b) =>
+          Date.parse(b.updatedAt || b.createdAt || '') -
+          Date.parse(a.updatedAt || a.createdAt || ''),
+      );
       setItems(rows);
       setDenied(false);
       setLoadError(false);
@@ -67,7 +77,10 @@ export default function TeacherDeskPage() {
   if (!user) {
     return (
       <SiteShell title="老師工作台" subtitle="看學生的課程申訴，核准或不核准。">
-        <SchoolAccountRequired returnUrl="/teacher" />
+        <SchoolAccountRequired
+          returnUrl="/teacher"
+          alternative="授課請先到課程空間，從你負責的那門課進去。"
+        />
       </SiteShell>
     );
   }
@@ -85,7 +98,9 @@ export default function TeacherDeskPage() {
     setBusyId(id);
     try {
       await decideCourseAppeal(id, status, notes[id] || '');
-      setNotice(status === 'approved' ? '已核准，學生那邊會看到「老師已核准。」' : '已標成不核准。');
+      setNotice(
+        status === 'approved' ? '已核准，學生那邊會看到「老師已核准。」' : '已標成不核准。',
+      );
       await load();
     } catch {
       setNotice('這次沒有存成，請稍後再試。');
@@ -94,8 +109,12 @@ export default function TeacherDeskPage() {
     }
   };
 
-  const open = (items || []).filter((item) => item.status === 'pending' || item.status === 'reviewing');
-  const done = (items || []).filter((item) => item.status === 'approved' || item.status === 'rejected');
+  const open = (items || []).filter(
+    (item) => item.status === 'pending' || item.status === 'reviewing',
+  );
+  const done = (items || []).filter(
+    (item) => item.status === 'approved' || item.status === 'rejected',
+  );
 
   return (
     <SiteShell title="老師工作台" subtitle="看學生的課程申訴，核准或不核准。">
@@ -106,13 +125,17 @@ export default function TeacherDeskPage() {
       )}
       <section className={styles.panel} aria-label="待處理申訴">
         <h2>待處理申訴</h2>
-        {courses && courses.length > 0 && <p className={styles.notice}>你教的課：{courses.join('、')}</p>}
+        {courses && courses.length > 0 && (
+          <p className={styles.notice}>你教的課：{courses.join('、')}</p>
+        )}
         {loadError ? (
           <p className={styles.notice}>現在讀不到申訴，請稍後再試。</p>
         ) : items === null ? (
           <p className={styles.notice}>讀取中…</p>
         ) : courses && courses.length === 0 ? (
-          <p className={styles.notice}>你還沒有對應到任何一門課，所以看不到申訴。請學校管理者把你加到你教的課。</p>
+          <p className={styles.notice}>
+            你還沒有對應到任何一門課，所以看不到申訴。請學校管理者把你加到你教的課。
+          </p>
         ) : items === null ? (
           <p className={styles.notice}>讀取中…</p>
         ) : open.length === 0 ? (
@@ -131,7 +154,9 @@ export default function TeacherDeskPage() {
                     給學生的話（可不填）
                     <input
                       value={notes[item.id] || ''}
-                      onChange={(event) => setNotes((current) => ({ ...current, [item.id]: event.target.value }))}
+                      onChange={(event) =>
+                        setNotes((current) => ({ ...current, [item.id]: event.target.value }))
+                      }
                     />
                   </label>
                 </div>

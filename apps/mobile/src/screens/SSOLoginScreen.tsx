@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -15,8 +15,13 @@ import { PROVIDENCE_UNIVERSITY_SCHOOL_ID } from '@campus/shared/src';
 
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
+import { finishLoginReturn } from '../utils/loginReturn';
 import { signInWithStudentId, type LoginProgress } from '../services/studentIdAuth';
-import { isStudentIdLoginAvailable } from '../services/schoolLoginAvailability';
+import {
+  SCHOOL_LOGIN_BIND_HINT,
+  isSchoolLoginEntryAvailable,
+  loadSchoolLoginProviderKinds,
+} from '../services/schoolLoginAvailability';
 import { Screen, Button, AnimatedCard } from '../ui/components';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
@@ -34,22 +39,32 @@ type LoginStep =
 type SSOLoginScreenProps = {
   navigation?: {
     goBack?: () => void;
-    navigate?: (screen: 'NuniWorkspace') => void;
+    navigate?: (screen: string, params?: Record<string, unknown>) => void;
   };
+  route?: { params?: { returnTo?: string } };
 };
 
 type LoginAttempt = { provider: 'school' | 'platform' };
 
 export function SSOLoginScreen(props: SSOLoginScreenProps) {
+  const { school } = useSchool();
+  return <SchoolLoginContent key={school.id} school={school} {...props} />;
+}
+
+function SchoolLoginContent(
+  props: SSOLoginScreenProps & { school: ReturnType<typeof useSchool>['school'] },
+) {
+  const { school } = props;
   const styles = useThemeStyleSheet(createStyles);
   const bottomPadding = useTabBarContentBottomPadding();
   const passwordInput = useRef<TextInput>(null);
   const routeNavigation = useNavigation<NavigationProp<Record<string, undefined>>>();
   const nav = props?.navigation ?? routeNavigation;
   const auth = useAuth();
-  const { school } = useSchool();
 
-  const schoolLoginAvailable = isStudentIdLoginAvailable();
+  const [schoolLoginAvailable, setSchoolLoginAvailable] = useState(
+    isSchoolLoginEntryAvailable(school.id),
+  );
 
   const [studentIdInput, setStudentIdInput] = useState('');
   const [studentPwInput, setStudentPwInput] = useState('');
@@ -64,6 +79,9 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
 
   useEffect(() => {
     mounted.current = true;
+    void loadSchoolLoginProviderKinds().then(() => {
+      if (mounted.current) setSchoolLoginAvailable(isSchoolLoginEntryAvailable(school.id));
+    });
     return () => {
       mounted.current = false;
       // Authentication may still finish; only this screen's callbacks are invalidated.
@@ -93,7 +111,6 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
           onPress: () => {
             if (!isCurrent(attempt)) return;
             onConfirm?.();
-            nav?.goBack?.();
           },
         },
       ]);
@@ -115,10 +132,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
     nav.navigate('NuniWorkspace');
   };
 
-  const schoolName = useMemo(
-    () => (school.id === PROVIDENCE_UNIVERSITY_SCHOOL_ID ? school.name : '靜宜大學'),
-    [school.id, school.name],
-  );
+  const schoolName = school.name;
 
   const stepLabels: Record<LoginStep, string> = {
     idle: '等待登入',
@@ -131,7 +145,12 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
   };
 
   const handleStudentIdLogin = async () => {
-    if (!schoolLoginAvailable || !studentIdInput.trim() || !studentPwInput.trim()) return;
+    if (
+      !schoolLoginAvailable ||
+      school.id !== PROVIDENCE_UNIVERSITY_SCHOOL_ID ||
+      !studentIdInput.trim() ||
+      !studentPwInput.trim()
+    ) return;
     const attempt = beginAttempt('school');
     if (!attempt) return;
     setError(null);
@@ -149,7 +168,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
       const result = await signInWithStudentId({
         studentId: studentIdInput,
         password: studentPwInput,
-        schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
+        schoolId: school.id,
         schoolName,
         onProgress,
       });
@@ -166,6 +185,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
         void import('../services/companionEngine')
           .then((m) => m.recordCompanionFeatureSignal('sso_login'))
           .catch(() => undefined);
+        finishLoginReturn(nav, props.route?.params?.returnTo);
       });
     } catch (loginError) {
       if (!isCurrent(attempt)) return;
@@ -270,10 +290,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
           </AnimatedCard>
         ) : (
           <AnimatedCard title="學校連線尚未開放">
-            <Text style={styles.body}>
-              目前無法連線學校帳號。你仍可查看公開資訊，或使用 Campus One
-              帳號加入課程、繳交作業及管理店家。
-            </Text>
+            <Text style={styles.body}>{SCHOOL_LOGIN_BIND_HINT}</Text>
           </AnimatedCard>
         )}
 

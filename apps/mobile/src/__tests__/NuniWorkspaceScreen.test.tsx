@@ -16,11 +16,31 @@ jest.mock('../services/nuniGoogle', () => ({
   getGoogleCredentialCapability: () => mockCapability(),
 }));
 jest.mock('../screens/nuni/NuniCourses', () => ({
-  NuniCourses: () => {
-    const { TextInput } = require('react-native');
+  NuniCourses: ({
+    initialWorkspaceId,
+    initialAssignmentId,
+  }: {
+    initialWorkspaceId?: string;
+    initialAssignmentId?: string;
+  }) => {
+    const { Text, TextInput } = require('react-native');
     const { useNuniDraftState } = jest.requireActual('../state/nuniDrafts');
     const [draft, setDraft] = useNuniDraftState('test:course-draft', '');
-    return <TextInput testID="course-draft" value={draft} onChangeText={setDraft} />;
+    return (
+      <>
+        {initialWorkspaceId ? <Text>{`workspace:${initialWorkspaceId}`}</Text> : null}
+        {initialAssignmentId ? <Text>{`assignment:${initialAssignmentId}`}</Text> : null}
+        <TextInput testID="course-draft" value={draft} onChangeText={setDraft} />
+      </>
+    );
+  },
+}));
+jest.mock('../screens/nuni/NuniFood', () => ({
+  NuniFood: () => {
+    const { TextInput } = require('react-native');
+    const { useNuniDraftState } = jest.requireActual('../state/nuniDrafts');
+    const [draft, setDraft] = useNuniDraftState('test:food-intent', '');
+    return <TextInput testID="food-intent" value={draft} onChangeText={setDraft} />;
   },
 }));
 jest.mock('../screens/nuni/NuniMerchant', () => ({
@@ -347,4 +367,58 @@ test('explicit logout drops same-account drafts before that account signs in aga
   mockAuth.session = { ...principal, context: 'same-account-new-login' };
   view.rerender(<NuniWorkspaceScreen />);
   expect(view.getByTestId('course-draft').props.value).toBe('');
+});
+
+test('forwards class-workspace and assignment ids into the courses tab', () => {
+  mockAuth.session = principal;
+  const view = render(
+    <NuniWorkspaceScreen
+      route={{
+        params: {
+          tab: 'courses',
+          workspaceId: 'cw_11111111-1111-4111-8111-111111111111',
+          assignmentId: 'cwa_22222222-2222-4222-8222-222222222222',
+        },
+      }}
+    />,
+  );
+  expect(view.getByText('workspace:cw_11111111-1111-4111-8111-111111111111')).toBeTruthy();
+  expect(view.getByText('assignment:cwa_22222222-2222-4222-8222-222222222222')).toBeTruthy();
+});
+
+test('restaurant entry selects food and retains its retry intent through temporary validation only', async () => {
+  mockAuth.session = principal;
+  const view = render(<NuniWorkspaceScreen route={{ params: { tab: 'food' } }} />);
+  const input = await view.findByTestId('food-intent');
+  fireEvent.changeText(input, 'same-order-key');
+  mockAuth.session = null;
+  mockAuth.error = 'temporary';
+  view.rerender(<NuniWorkspaceScreen route={{ params: { tab: 'food' } }} />);
+  expect(view.queryByTestId('food-intent')).toBeNull();
+  mockAuth.error = '';
+  mockAuth.session = { ...principal, context: 'renewed' };
+  view.rerender(<NuniWorkspaceScreen route={{ params: { tab: 'food' } }} />);
+  expect((await view.findByTestId('food-intent')).props.value).toBe('same-order-key');
+  mockAuth.pendingLogout = true;
+  view.rerender(<NuniWorkspaceScreen route={{ params: { tab: 'food' } }} />);
+  mockAuth.pendingLogout = false;
+  mockAuth.session = { ...principal, platformAccountId: 'pa-new', context: 'new' };
+  view.rerender(<NuniWorkspaceScreen route={{ params: { tab: 'food' } }} />);
+  expect((await view.findByTestId('food-intent')).props.value).toBe('');
+});
+
+test.each([
+  ['signed out', { session: null, loading: false, error: '', pendingLogout: false }],
+  ['checking account', { session: null, loading: true, error: '', pendingLogout: false }],
+  ['unconfirmed session', { session: null, loading: false, error: '無法確認登入狀態', pendingLogout: false }],
+  ['signed in', { session: principal, loading: false, error: '', pendingLogout: false }],
+])('identifies the platform account destination even when %s', (_label, state) => {
+  Object.assign(mockAuth, state);
+  const view = render(<NuniWorkspaceScreen />);
+  expect(view.getByTestId('nuni-workspace')).toBeTruthy();
+  // A status check that failed must not show a false Google sign-in success.
+  if (state.error) {
+    expect(view.getByText('目前無法確認登入狀態')).toBeTruthy();
+    expect(view.queryByText('登入或建立帳號')).toBeNull();
+  }
 });

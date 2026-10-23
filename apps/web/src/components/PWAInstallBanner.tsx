@@ -41,14 +41,15 @@ export function PWAInstallBanner() {
       /iPad|iPhone|iPod/.test(navigator.userAgent) ||
       (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     setIsIOS(ios);
-    setIsVisible(ios && !standalone() && !dismissed.current);
+    const onBus = /^\/bus(\/|$)/.test(window.location.pathname);
+    setIsVisible(ios && !standalone() && !dismissed.current && !onBus);
 
     const handlePrompt = (event: Event) => {
       event.preventDefault();
       prompt.current = event as BeforeInstallPromptEvent;
       setCanPrompt(true);
       setError('');
-      if (!standalone() && !dismissed.current) setIsVisible(true);
+      if (!standalone() && !dismissed.current && !/^\/bus(\/|$)/.test(window.location.pathname)) setIsVisible(true);
     };
     const handleInstalled = () => {
       prompt.current = null;

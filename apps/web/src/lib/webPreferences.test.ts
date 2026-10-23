@@ -79,7 +79,9 @@ describe('accent readability', () => {
         '#32ADE6',
       ]) {
         const { brand, brand2, onBrand } = resolveAccentPalette(color, dark);
-        expect(colorContrast(brand, dark ? '#202B24' : '#FFFFFF')).toBeGreaterThanOrEqual(4.5);
+        for (const background of dark ? ['#000000', '#111111', '#232323'] : ['#FFFFFF']) {
+          expect(colorContrast(brand, background)).toBeGreaterThanOrEqual(4.5);
+        }
         expect(colorContrast(brand, onBrand)).toBeGreaterThanOrEqual(4.5);
         expect(colorContrast(brand2, onBrand)).toBeGreaterThanOrEqual(4.5);
       }

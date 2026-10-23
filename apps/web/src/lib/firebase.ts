@@ -51,19 +51,23 @@ import {
   connectFunctionsEmulator,
   type Functions,
 } from 'firebase/functions';
+import { getCloudFunctionUrl as resolveCloudFunctionUrl, getFunctionsBaseUrl } from './cloudFunctions';
 import {
   findUniversalDevAccountByEmail,
   buildGroupCollectionPath,
   buildSchoolCollectionPath,
   buildUserSchoolCollectionPath,
   defaultNotificationPreferences,
+  isPermissionDeniedError,
   normalizeNotificationPreferences,
+  permissionDeniedError,
   type PuStudentLoginResponse,
   normalizeSchoolSSOConfig,
   type NotificationPreferences,
   type SchoolSSOConfig,
   type SSOCallbackResult,
   type SSOProvider,
+  safeStorefrontUrl,
 } from '@campus/shared/src';
 
 export type {
@@ -176,14 +180,28 @@ export function getAuth(): Auth | null {
   return auth;
 }
 
+export { getFunctionsBaseUrl };
+
+export function getCloudFunctionUrl(functionName: string): string {
+  return resolveCloudFunctionUrl(functionName, {
+    projectId: firebaseConfig.projectId,
+    region: process.env.NEXT_PUBLIC_CLOUD_FUNCTION_REGION || 'asia-east1',
+  });
+}
+
 export function getFunctionsInstance(): Functions {
   if (typeof window === "undefined") {
     throw new Error("Firebase Functions can only be used in the browser.");
   }
 
   if (!functionsInstance) {
-    const region = process.env.NEXT_PUBLIC_CLOUD_FUNCTION_REGION || "asia-east1";
-    functionsInstance = getFunctions(getApp(), region);
+    const customDomain = getFunctionsBaseUrl();
+    if (customDomain) {
+      functionsInstance = getFunctions(getApp(), customDomain);
+    } else {
+      const region = process.env.NEXT_PUBLIC_CLOUD_FUNCTION_REGION || "asia-east1";
+      functionsInstance = getFunctions(getApp(), region);
+    }
   }
   if (USE_FIREBASE_EMULATOR && !_emulatorWired.functions) {
     try {
@@ -398,15 +416,6 @@ export function getCurrentUser(): User | null {
 
 export { onAuthStateChanged };
 
-function getCloudFunctionUrl(functionName: string): string {
-  if (!firebaseConfig.projectId) {
-    throw new Error('Firebase projectId is missing. Check your web environment variables.');
-  }
-
-  const region = process.env.NEXT_PUBLIC_CLOUD_FUNCTION_REGION || 'asia-east1';
-  return `https://${region}-${firebaseConfig.projectId}.cloudfunctions.net/${functionName}`;
-}
-
 function parseDocument<T extends { id: string }>(docSnap: {
   id: string;
   data: () => Record<string, unknown> | undefined;
@@ -490,6 +499,11 @@ export type Announcement = {
   category?: string;
   pinned?: boolean;
   schoolId?: string;
+  summary?: string;
+  originalUrl?: string;
+  sourceId?: string;
+  origin?: string;
+  office?: string;
   /** 若公告綁定到某課程，可從這裡跳到 /course/[id] */
   relatedCourseId?: string;
   /** 若公告綁定到某社團，可從這裡跳到 /clubs */
@@ -538,10 +552,18 @@ export type Cafeteria = {
   currentOccupancy?: number;
   activeOperatorCount?: number;
   orderingEnabled?: boolean;
+  merchantMode?: 'native_order' | 'showcase_link' | 'info_only';
+  orderingUrl?: string;
+  intro?: string;
+  coverUrl?: string;
+  websiteUrl?: string;
+  menuSource?: string;
+  menuSyncedAt?: string;
   pilotStatus?: CafeteriaPilotStatus;
   rating?: number;
   reviewCount?: number;
   schoolId?: string;
+  reviewStatus?: 'verified' | 'unverified' | 'demo';
   createdAt?: string;
   updatedAt?: string;
 };
@@ -662,6 +684,20 @@ function normalizeCafeteriaRecord(row: Record<string, unknown>): Cafeteria {
     currentOccupancy: toOptionalNumber(row.currentOccupancy),
     activeOperatorCount: toOptionalNumber(row.activeOperatorCount),
     orderingEnabled: row.orderingEnabled === true,
+    merchantMode:
+      row.merchantMode === 'native_order' ||
+      row.merchantMode === 'showcase_link' ||
+      row.merchantMode === 'info_only'
+        ? row.merchantMode
+        : row.orderingEnabled === true
+          ? 'native_order'
+          : 'info_only',
+    orderingUrl: safeStorefrontUrl(row.orderingUrl),
+    intro: toOptionalString(row.intro),
+    coverUrl: toOptionalString(row.coverUrl),
+    websiteUrl: safeStorefrontUrl(row.websiteUrl),
+    menuSource: toOptionalString(row.menuSource),
+    menuSyncedAt: toOptionalString(row.menuSyncedAt),
     pilotStatus: normalizeCafeteriaPilotStatus(row.pilotStatus),
     rating: toOptionalNumber(row.rating),
     reviewCount: toOptionalNumber(row.reviewCount),
@@ -2007,6 +2043,9 @@ export async function fetchComments(
   if (!isFirebaseConfigured()) {
     return [];
   }
+  if (!getAuth()?.currentUser) {
+    throw permissionDeniedError();
+  }
 
   try {
     const firestore = getDb();
@@ -2034,7 +2073,8 @@ export async function fetchComments(
       limit(maxItems),
     );
 
-    const snap = await getDocs(q).catch(async () => {
+    const snap = await getDocs(q).catch(async (error) => {
+      if (isPermissionDeniedError(error)) throw error;
       if (!schoolId || targetType === 'announcement') {
         throw new Error('comments query failed');
       }
@@ -2061,6 +2101,7 @@ export async function fetchComments(
       };
     });
   } catch (error) {
+    if (isPermissionDeniedError(error)) throw error;
     console.error('[Firebase] Failed to fetch comments:', error);
     return [];
   }

@@ -8,14 +8,22 @@ import { Button } from '@/components/ui/Button';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/components/AuthGuard';
 import { isFirebaseConfigured, signInWithPuStudentId } from '@/features/auth/client';
-import { sanitizeInternalPath } from '@/lib/navigation';
+import {
+  collapseInternalPathHash,
+  navigateAfterLogin,
+  readLoginReturnParam,
+  sanitizeInternalPath,
+} from '@/lib/navigation';
 import styles from '../servicePages.module.css';
 import { NuniSignIn } from '@/components/NuniSignIn';
 import { platformDestination } from '@/lib/accountDestination';
 import { isPublicCampusPath, publicCampusServices } from '@/lib/publicCampusServices';
+import { STUDENT_ID_PREPARING_COPY, useSignInOptions } from '@/lib/signInOptions';
 
 function loginDestination(value: string | null): string {
-  const safe = sanitizeInternalPath(value && value.length <= 1200 ? value : null);
+  const safe = collapseInternalPathHash(
+    sanitizeInternalPath(value && value.length <= 1200 ? value : null),
+  );
   try {
     const path = decodeURIComponent(new URL(safe, 'https://campus.local').pathname).replace(
       /\/+$/,
@@ -32,6 +40,10 @@ function loginDestination(value: string | null): string {
   }
 }
 
+function goAfterLogin(router: { replace: (href: string) => void }, destination: string) {
+  navigateAfterLogin((href) => router.replace(href), destination);
+}
+
 function LoginForm({
   destination,
   reconnect,
@@ -43,6 +55,7 @@ function LoginForm({
 }) {
   const router = useRouter();
   const { user, loading: schoolLoading } = useAuth();
+  const options = useSignInOptions();
   const [studentId, setStudentId] = useState('');
   const [password, setPassword] = useState('');
   const busyRef = useRef<'school' | 'platform' | null>(null);
@@ -51,8 +64,10 @@ function LoginForm({
   const [busy, setBusy] = useState(false);
   const [platformBusy, setPlatformBusy] = useState(false);
   const [error, setError] = useState('');
-  const schoolRequired = reconnect || platformDestination(destination) !== destination;
-  const schoolAvailable = isFirebaseConfigured();
+  const schoolTask = reconnect || platformDestination(destination) !== destination;
+  const schoolAvailable = options.studentId;
+  const schoolRequired = schoolTask && schoolAvailable;
+  const hideGoogle = schoolRequired || (schoolTask && (options.loading || options.error));
   const publicDestination = isPublicCampusPath(
     new URL(destination, 'https://campus.local').pathname,
   );
@@ -80,12 +95,12 @@ function LoginForm({
       !reconnect
     ) {
       returning.current = true;
-      router.replace(destination);
+      goAfterLogin(router, destination);
     }
   }, [user, schoolLoading, router, destination, reconnect, schoolRequired]);
   async function login(event: FormEvent) {
     event.preventDefault();
-    if (busyRef.current || returning.current || schoolLoading) return;
+    if (busyRef.current || returning.current || schoolLoading || !schoolAvailable) return;
     setError('');
     if (!isFirebaseConfigured()) {
       setError('登入服務尚未連線，請稍後再試。');
@@ -105,7 +120,7 @@ function LoginForm({
       if (!authenticated) throw new Error('登入服務尚未連線。');
       setPassword('');
       returning.current = true;
-      router.replace(destination);
+      goAfterLogin(router, destination);
     } catch {
       if (controller.signal.aborted) return;
       setError('登入失敗。請確認學號與密碼，或稍後再試。');
@@ -119,12 +134,16 @@ function LoginForm({
   return (
     <SiteShell
       title={
-        reconnect && user ? '重新連線學校帳號' : schoolRequired ? '連線學校帳號' : '登入'
+        reconnect && user && schoolAvailable
+          ? '重新連線學校帳號'
+          : schoolRequired
+            ? '連線學校帳號'
+            : '登入'
       }
       subtitle={
         schoolRequired
           ? '驗證學校帳號後，返回你原本的頁面。'
-          : '不登入也能看校園資訊。需要課程、交流或店家服務時，用 Google 帳號登入；課表、成績和申訴用學校帳號登入。'
+          : '不登入也能看校園資訊。需要課程、交流或店家服務時，用 Google 帳號登入。'
       }
     >
       <section className={styles.guestAccess} aria-labelledby="guest-access-title">
@@ -144,7 +163,7 @@ function LoginForm({
         </nav>
       </section>
       <div className={styles.loginLayout}>
-        {!schoolRequired && (
+        {!hideGoogle && (
           <NuniSignIn
             returnUrl={destination}
             issue={issue}
@@ -159,17 +178,26 @@ function LoginForm({
         )}
         <section className={styles.loginHelp} aria-label="學校帳號登入">
           <h2>學校帳號</h2>
-          <p>讀取個人課表、成績、校務紀錄與既有地圖收藏時使用。目前支援靜宜大學，用 e 校園的學號和密碼登入。</p>
-          {schoolRequired && (
-            <p>
-              {publicDestination
-                ? '你選擇的個人功能仍使用學校帳號；瀏覽校園資訊不需登入。'
-                : '你要開啟的頁面要用學校帳號登入，Google 帳號不會自動取得校務權限。'}
-            </p>
-          )}
-          {schoolAvailable ? (
-            <details open={schoolRequired}>
-              <summary>使用靜宜大學學號登入</summary>
+          {options.loading ? (
+            <p role="status">正在確認登入方式…</p>
+          ) : options.error ? (
+            <div role="alert">
+              <p>暫時無法確認登入方式，請重新連線後再試。</p>
+              <button type="button" className="btn" onClick={options.retry}>重新確認登入方式</button>
+            </div>
+          ) : schoolAvailable ? (
+            <>
+              <p>
+                讀取個人課表、成績、校務紀錄與既有地圖收藏時使用。目前支援靜宜大學，用 e
+                校園的學號和密碼登入。
+              </p>
+              {schoolRequired && (
+                <p>
+                  {publicDestination
+                    ? '你選擇的個人功能仍使用學校帳號；瀏覽校園資訊不需登入。'
+                    : '你要開啟的頁面要用學校帳號登入，Google 帳號不會自動取得校務權限。'}
+                </p>
+              )}
               <form className={styles.loginForm} onSubmit={login} aria-busy={busy}>
                 <Input
                   id="student-id"
@@ -209,14 +237,10 @@ function LoginForm({
                   {schoolLoading ? '正在確認學校帳號…' : busy ? '連線中…' : '連線學校帳號'}
                 </Button>
               </form>
-            </details>
+              <p>請輸入你登入 e 校園時使用的資料。若忘記密碼，請透過學校的帳號服務處理。</p>
+            </>
           ) : (
-            <p role="status">
-              學校登入服務尚未開通。你仍可使用課程空間與公開交流；校務資料請先由學校原有服務查詢。
-            </p>
-          )}
-          {schoolAvailable && (
-            <p>請輸入你登入 e 校園時使用的資料。若忘記密碼，請透過學校的帳號服務處理。</p>
+            <p role="status">{STUDENT_ID_PREPARING_COPY}</p>
           )}
           <div className={styles.helpLinks}>
             <Link href="/privacy">
@@ -241,7 +265,7 @@ function LoginForm({
 }
 function LoginRoute() {
   const params = useSearchParams();
-  const destination = loginDestination(params.get('redirect') || params.get('returnUrl'));
+  const destination = loginDestination(readLoginReturnParam(params));
   const reconnect = params.get('reconnect') === 'school';
   return (
     <LoginForm

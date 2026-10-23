@@ -103,6 +103,55 @@ test('lists real school records, filters text and type, and navigates using the 
   expect(navigation.navigate).toHaveBeenCalledWith('LostFoundPost', { type: 'lost' });
 });
 
+test('unsigned visitors do not read listings and see a login prompt with a login button', async () => {
+  mockUser = null;
+  const view = render(<LostFoundScreen navigation={navigation} />);
+  expect(await view.findByText('登入後才能看失物招領和評論')).toBeTruthy();
+  expect(mockSource.listLostFoundItems).not.toHaveBeenCalled();
+  expect(view.queryByText('目前沒有本校刊登資訊')).toBeNull();
+  expect(view.queryByText('暫時無法讀取')).toBeNull();
+  expect(view.queryByText('請確認網路')).toBeNull();
+  fireEvent.press(view.getByText('登入'));
+  expect(navigation.navigate).toHaveBeenCalledWith('SSOLogin', { returnTo: '/lost-found' });
+});
+
+test('permission-denied list reads show the login prompt instead of a network or empty state', async () => {
+  mockSource.listLostFoundItems.mockRejectedValueOnce(
+    Object.assign(new Error('Missing or insufficient permissions.'), { code: 'permission-denied' }),
+  );
+  const view = render(<LostFoundScreen navigation={navigation} />);
+  expect(await view.findByText('登入後才能看失物招領和評論')).toBeTruthy();
+  expect(view.getByText('登入')).toBeTruthy();
+  expect(view.queryByText('暫時無法讀取')).toBeNull();
+  expect(view.queryByText('目前沒有本校刊登資訊')).toBeNull();
+  expect(view.queryByText('請確認網路')).toBeNull();
+});
+
+test('unsigned detail and post screens show the same login prompt without reading', async () => {
+  mockUser = null;
+  const detail = render(<LostFoundDetailScreen navigation={navigation} route={route} />);
+  expect(await detail.findByText('登入後才能看失物招領和評論')).toBeTruthy();
+  expect(mockSource.getLostFoundItem).not.toHaveBeenCalled();
+  expect(detail.queryByText('暫時無法讀取物品')).toBeNull();
+  expect(detail.queryByText('找不到物品')).toBeNull();
+  fireEvent.press(detail.getByText('登入'));
+  expect(navigation.navigate).toHaveBeenCalledWith('SSOLogin', { returnTo: '/lost-found/item-1' });
+  detail.unmount();
+  const post = render(<LostFoundPostScreen navigation={navigation} />);
+  expect(await post.findByText('登入後才能看失物招領和評論')).toBeTruthy();
+  expect(post.getByText('登入')).toBeTruthy();
+});
+
+test('permission-denied detail reads show the login prompt instead of a network error', async () => {
+  mockSource.getLostFoundItem.mockRejectedValueOnce(
+    Object.assign(new Error('permission-denied'), { code: 'permission-denied' }),
+  );
+  const view = render(<LostFoundDetailScreen navigation={navigation} route={route} />);
+  expect(await view.findByText('登入後才能看失物招領和評論')).toBeTruthy();
+  expect(view.queryByText('暫時無法讀取物品')).toBeNull();
+  expect(view.queryByText('請確認網路')).toBeNull();
+});
+
 test('list errors expose retry, while an empty successful list stays empty', async () => {
   mockSource.listLostFoundItems
     .mockRejectedValueOnce(new Error('offline'))

@@ -22,18 +22,219 @@ import {
   periodAt,
   timetableIndex,
   type PersonalCourse,
+  type TimetableMeta,
 } from '@campus/shared';
 import { getAuth, getDb, getFunctionsInstance, isFirebaseConfigured } from '@/lib/firebase';
-import { emptyTimetable, type StoredTimetable } from './persistence';
 
-export {
-  CLOUD_NEEDS_SCHOOL_COPY,
-  TimetableCloudSaveError,
-  loadPersonalTimetable,
-  savePersonalTimetable,
-  retryPersonalTimetableSync,
-  type StoredTimetable,
-} from './persistence';
+const LOCAL_KEY = 'campus-one-personal-timetable';
+
+export type StoredTimetable = {
+  courses: PersonalCourse[];
+  meta: TimetableMeta;
+  shareWithFriends: boolean;
+  updatedAt: string;
+  schoolId: string;
+};
+
+function emptyTimetable(schoolId: string): StoredTimetable {
+  return {
+    courses: [],
+    meta: cleanMeta({}),
+    shareWithFriends: true,
+    updatedAt: new Date().toISOString(),
+    schoolId,
+  };
+}
+
+/** Corrupted on-device records are not an empty timetable. Never overwrite them silently. */
+export class TimetableLocalReadError extends Error {
+  constructor(readonly reason: 'corrupt' | 'unavailable') {
+    super(reason === 'corrupt'
+      ? '這台裝置的課表資料格式異常，原始資料仍保留。請勿清除瀏覽器資料。'
+      : '目前無法讀取這台裝置的課表，請確認瀏覽器儲存權限。');
+    this.name = 'TimetableLocalReadError';
+  }
+}
+
+type LocalTimetableRead = {
+  timetable: StoredTimetable;
+  // Only an actual current-school record may compete with a cloud copy.
+  found: boolean;
+  scoped: boolean;
+  recordedAt: number;
+};
+
+function hasTimetableContent(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const data = value as Partial<StoredTimetable>;
+  return Array.isArray(data.courses) && data.courses.length <= 80 &&
+    data.courses.every((row) => row && typeof row === 'object' && !Array.isArray(row)) &&
+    (data.meta === undefined || !!data.meta && typeof data.meta === 'object' && !Array.isArray(data.meta));
+}
+
+function readLocalSnapshot(ownerKey: string, schoolId: string): LocalTimetableRead {
+  let scopedRaw: string | null;
+  let legacyRaw: string | null;
+  try {
+    scopedRaw = localStorage.getItem(`${LOCAL_KEY}:${ownerKey}:${schoolId}`);
+    legacyRaw = scopedRaw === null ? localStorage.getItem(`${LOCAL_KEY}:${ownerKey}`) : null;
+  } catch {
+    throw new TimetableLocalReadError('unavailable');
+  }
+  const raw = scopedRaw ?? legacyRaw;
+  if (raw === null) return { timetable: emptyTimetable(schoolId), found: false, scoped: false, recordedAt: 0 };
+  let parsed: StoredTimetable;
+  try {
+    parsed = JSON.parse(raw) as StoredTimetable;
+  } catch {
+    throw new TimetableLocalReadError('corrupt');
+  }
+  if (!hasTimetableContent(parsed)) {
+    throw new TimetableLocalReadError('corrupt');
+  }
+  // An unscoped legacy copy without an explicit school must never be claimed.
+  // A mismatched scoped copy is potentially damaged and must remain untouched.
+  if (parsed.schoolId !== schoolId) {
+    if (scopedRaw !== null) throw new TimetableLocalReadError('corrupt');
+    return { timetable: emptyTimetable(schoolId), found: false, scoped: false, recordedAt: 0 };
+  }
+  return {
+    timetable: {
+      ...emptyTimetable(schoolId),
+      ...parsed,
+      courses: cleanCourses(parsed.courses),
+      meta: cleanMeta(parsed.meta),
+      schoolId: parsed.schoolId || schoolId,
+    },
+    found: true,
+    scoped: scopedRaw !== null,
+    // Missing timestamps from old records must not inherit the fresh default date.
+    recordedAt: savedAtMillis(parsed.updatedAt),
+  };
+}
+
+function readLocal(ownerKey: string, schoolId: string): StoredTimetable {
+  return readLocalSnapshot(ownerKey, schoolId).timetable;
+}
+
+export const CLOUD_NEEDS_SCHOOL_COPY = '登入學校帳號後才能存到雲端';
+export const CLOUD_NOT_READY_COPY = '這個功能還沒接通，雲端備份先不用。';
+export const TIMETABLE_DEVICE_ONLY_SUBMIT_COPY = '存在這台裝置';
+export const TIMETABLE_DEVICE_ONLY_STORED_COPY = '已存在這台裝置，換手機或清除瀏覽器資料就會不見';
+
+/** 本機那份已經寫好，只有雲端沒存成。 */
+export class TimetableCloudSaveError extends Error {
+  constructor(readonly reason: unknown) {
+    super('timetable-cloud-save-failed');
+    this.name = 'TimetableCloudSaveError';
+  }
+}
+
+function hasLocal(ownerKey: string, schoolId: string): boolean {
+  try {
+    return (
+      !!localStorage.getItem(`${LOCAL_KEY}:${ownerKey}:${schoolId}`) ||
+      !!localStorage.getItem(`${LOCAL_KEY}:${ownerKey}`)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function savedAtMillis(value: unknown): number {
+  if (typeof value === 'string') return Date.parse(value) || 0;
+  if (value && typeof (value as { toMillis?: unknown }).toMillis === 'function') {
+    return (value as { toMillis: () => number }).toMillis();
+  }
+  return 0;
+}
+
+function writeLocal(ownerKey: string, timetable: StoredTimetable) {
+  localStorage.setItem(`${LOCAL_KEY}:${ownerKey}:${timetable.schoolId}`, JSON.stringify(timetable));
+}
+
+export async function loadPersonalTimetable(
+  uid: string | null,
+  schoolId: string,
+  localOwner?: string,
+): Promise<StoredTimetable> {
+  const ownerKey = localOwner === 'guest' ? 'local' : localOwner || uid || 'local';
+  // The school-account namespace replaces the older uid key. Only that exact
+  // identity may read its old copy, and an existing new copy (even empty) wins.
+  const readCurrentLocal = () => {
+    const readOwnerKey =
+      uid && localOwner === `school:${uid}` && !hasLocal(ownerKey, schoolId) ? uid : ownerKey;
+    return readLocalSnapshot(readOwnerKey, schoolId);
+  };
+  const initial = readCurrentLocal();
+  if (!uid || !isFirebaseConfigured() || (localOwner && localOwner !== `school:${uid}`)) {
+    return initial.timetable;
+  }
+  // Scoped records are explicit device-only saves, not a cloud cache. A newer
+  // legacy cloud timestamp must not replace edits or revive a deleted course.
+  if (initial.scoped) return initial.timetable;
+  let snap;
+  try {
+    snap = await getDoc(doc(getDb(), 'users', uid, 'personalTimetable', 'current'));
+  } catch (error) {
+    const latest = readCurrentLocal();
+    if (latest.found) return latest.timetable;
+    throw error;
+  }
+  // Another tab can save while the request is pending. Re-read the exact owner
+  // and school before using a response, including a confirmed missing record.
+  const localSnapshot = readCurrentLocal();
+  const local = localSnapshot.timetable;
+  if (localSnapshot.scoped) return local;
+  if (!snap.exists()) {
+    if (localSnapshot.found || localOwner) return local;
+    // Compatibility for old callers: adopt a guest copy only after the account
+    // is confirmed empty. Scoped platform and school accounts stay isolated.
+    return readLocal('local', schoolId);
+  }
+  const data = snap.data() as StoredTimetable & { updatedAt?: unknown };
+  if (!hasTimetableContent(data) ||
+      (data.schoolId !== undefined && typeof data.schoolId !== 'string')) {
+    if (localSnapshot.found) return local;
+    throw new Error('雲端課表格式異常，無法確認課表內容。請保留本機資料並重新讀取。');
+  }
+  // Early cloud timetables had no school marker because the timetable only
+  // supported PU. Allow that legacy copy only when PU is explicitly selected;
+  // an untagged remote document cannot become a different university's data.
+  if (data.schoolId && data.schoolId !== schoolId) return local;
+  if (!data.schoolId && schoolId !== 'pu') return local;
+  // Unscoped legacy copies still use their original timestamps for recovery.
+  if (localSnapshot.found && localSnapshot.recordedAt > savedAtMillis(data.updatedAt)) {
+    return local;
+  }
+  return {
+    ...emptyTimetable(schoolId),
+    ...data,
+    updatedAt: new Date(savedAtMillis(data.updatedAt) || Date.now()).toISOString(),
+    courses: cleanCourses(data.courses),
+    meta: cleanMeta(data.meta),
+    schoolId: data.schoolId || schoolId,
+  };
+}
+
+export async function savePersonalTimetable(
+  uid: string | null,
+  timetable: StoredTimetable,
+  localOwner?: string,
+): Promise<{ stored: 'cloud' | 'local' }> {
+  const next = {
+    ...timetable,
+    courses: cleanCourses(timetable.courses),
+    meta: cleanMeta(timetable.meta),
+    updatedAt: new Date().toISOString(),
+  };
+  const ownerKey = localOwner === 'guest' ? 'local' : localOwner || uid || 'local';
+  // A failed read, damaged JSON or cross-school scoped record must not be overwritten.
+  readLocal(ownerKey, timetable.schoolId);
+  writeLocal(ownerKey, next);
+  // 課表匯入與本機整理目前只留在這台裝置，不送到雲端。
+  return { stored: 'local' };
+}
 
 export async function loadFriendTimetable(friendUid: string): Promise<StoredTimetable | null> {
   if (!isFirebaseConfigured()) return null;

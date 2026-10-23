@@ -1110,6 +1110,22 @@ function CourseListView(props: { courses: TCCourse[]; nav: any; onRefresh: () =>
 
 // ─── Homework Tab ────────────────────────────────────────
 
+export function homeworkSubmitParams(item: {
+  id: string | number;
+  course_id: string | number;
+  title: string;
+  end_time?: string | null;
+  description?: string | null;
+}) {
+  return {
+    courseId: String(item.course_id),
+    hwId: String(item.id),
+    hwTitle: item.title,
+    dueAt: item.end_time ?? undefined,
+    description: item.description ?? undefined,
+  };
+}
+
 function HomeworkView(props: {
   activities: Record<number, TCActivity[]>;
   courses: TCCourse[];
@@ -1216,18 +1232,7 @@ function HomeworkView(props: {
       <Pressable
         key={`${item.course_id}-${item.id}`}
         onPress={() =>
-          isSubmitted
-            ? props.nav?.navigate?.('CourseModules', {
-                groupId: String(item.course_id),
-                groupName: item.courseName,
-              })
-            : props.nav?.navigate?.('HomeworkSubmit', {
-                courseId: String(item.course_id),
-                hwId: String(item.id),
-                hwTitle: item.title,
-                dueAt: item.end_time ?? undefined,
-                description: item.description,
-              })
+          props.nav?.navigate?.('HomeworkSubmit', homeworkSubmitParams(item))
         }
         style={({ pressed }) => ({
           padding: 14,

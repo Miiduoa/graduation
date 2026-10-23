@@ -209,23 +209,19 @@ async function syncSessionToFirestore(session: AttendanceSession): Promise<void>
 }
 
 /** 從 Firestore 讀取進行中的場次（學生端用） */
-async function fetchActiveSessionsFromFirestore(courseIds?: string[]): Promise<AttendanceSession[]> {
-  if (isFirebaseMockMode()) return [];
+async function fetchActiveSessionsFromFirestore(courseIds: string[]): Promise<AttendanceSession[]> {
+  if (isFirebaseMockMode() || courseIds.length === 0) return [];
   try {
     const db = getDb();
     const col = collection(db, FIRESTORE_COLLECTION);
     const q = query(col, where('status', '==', 'active'));
     const snap = await getDocs(q);
-    let sessions: AttendanceSession[] = [];
+    const idSet = new Set(courseIds);
+    const sessions: AttendanceSession[] = [];
     snap.forEach((d) => {
       const data = d.data() as AttendanceSession;
-      sessions.push({ ...data, id: d.id });
+      if (idSet.has(data.courseId)) sessions.push({ ...data, id: d.id });
     });
-    // 如果有課程 ID 過濾
-    if (courseIds && courseIds.length > 0) {
-      const idSet = new Set(courseIds);
-      sessions = sessions.filter((s) => idSet.has(s.courseId));
-    }
     return sessions;
   } catch (e) {
     console.warn('[Attendance] Firestore fetch failed:', e);
@@ -285,10 +281,14 @@ export function subscribeToActiveSessions(
   courseIds: string[],
   callback: (sessions: AttendanceSession[]) => void,
 ): Unsubscribe {
+  if (!courseIds.length) {
+    callback([]);
+    return () => {};
+  }
   if (isFirebaseMockMode()) {
     const interval = setInterval(async () => {
       const s = await getActiveSessions();
-      callback(s);
+      callback(filterActiveSessionsForStudent(s, courseIds));
     }, 5000);
     return () => clearInterval(interval);
   }
@@ -296,15 +296,12 @@ export function subscribeToActiveSessions(
   const col = collection(db, FIRESTORE_COLLECTION);
   const q = query(col, where('status', '==', 'active'));
   return onSnapshot(q, (snap) => {
-    const idSet = new Set(courseIds);
     const sessions: AttendanceSession[] = [];
     snap.forEach((d) => {
       const data = d.data() as AttendanceSession;
-      if (idSet.size === 0 || idSet.has(data.courseId)) {
-        sessions.push({ ...data, id: d.id });
-      }
+      sessions.push({ ...data, id: d.id });
     });
-    callback(sessions);
+    callback(filterActiveSessionsForStudent(sessions, courseIds));
   }, (err) => {
     console.warn('[Attendance] subscribeToActiveSessions error:', err);
   });
@@ -591,11 +588,23 @@ export async function createSession(config: {
   };
 
   const sessions = await getAllSessions();
+  const closed: AttendanceSession[] = [];
+  for (const existing of sessions) {
+    if (existing.courseId === config.courseId && existing.status === 'active') {
+      existing.status = 'completed';
+      existing.endTime = now;
+      existing.presentCount = existing.records.filter((r) => r.status === 'present').length;
+      existing.lateCount = existing.records.filter((r) => r.status === 'late').length;
+      existing.absentCount = existing.records.filter((r) => r.status === 'absent').length;
+      existing.excusedCount = existing.records.filter((r) => r.status === 'excused').length;
+      closed.push(existing);
+    }
+  }
   sessions.push(session);
   await AsyncStorage.setItem(STORAGE.SESSIONS, JSON.stringify(sessions));
 
   // 同步到 Firestore — 讓學生端即時看到
-  await syncSessionToFirestore(session);
+  await Promise.all([syncSessionToFirestore(session), ...closed.map((row) => syncSessionToFirestore(row))]);
 
   // Emit event → 行事曆 + 推播引擎會自動反應
   campusEventBus.emit('session:started', {
@@ -637,6 +646,27 @@ export async function getActiveSessions(): Promise<AttendanceSession[]> {
 }
 
 /**
+ * 學生可簽到的場次：只顯示自己修的課，且同一課只留最新一場開著的點名。
+ * 沒有選課名單時不回傳任何場次，避免看到別班的簽到框。
+ */
+export function filterActiveSessionsForStudent(
+  sessions: AttendanceSession[],
+  enrolledCourseIds: string[],
+): AttendanceSession[] {
+  if (!enrolledCourseIds.length) return [];
+  const allowed = new Set(enrolledCourseIds);
+  const latestByCourse = new Map<string, AttendanceSession>();
+  for (const session of sessions) {
+    if (session.status !== 'active' || !allowed.has(session.courseId)) continue;
+    const current = latestByCourse.get(session.courseId);
+    if (!current || session.startTime > current.startTime) {
+      latestByCourse.set(session.courseId, session);
+    }
+  }
+  return Array.from(latestByCourse.values());
+}
+
+/**
  * 取得學生可簽到的場次 — 只回傳「我有修的課 + 老師已啟動點名」的場次
  *
  * 規則：
@@ -658,11 +688,12 @@ export async function getActiveSessionsForStudent(
       }
     } catch (_) {}
   }
+  if (courseIdFilter.length === 0) return [];
 
   // 2. 同時查詢本機 + Firestore（教師場次在雲端）
   const [localSessions, firestoreSessions] = await Promise.all([
     getAllSessions().then((s) => s.filter((ss) => ss.status === 'active')),
-    fetchActiveSessionsFromFirestore(courseIdFilter.length > 0 ? courseIdFilter : undefined),
+    fetchActiveSessionsFromFirestore(courseIdFilter),
   ]);
 
   // 3. 合併去重（以 session.id 為主鍵，Firestore 版本優先）
@@ -670,15 +701,7 @@ export async function getActiveSessionsForStudent(
   localSessions.forEach((s) => merged.set(s.id, s));
   firestoreSessions.forEach((s) => merged.set(s.id, s)); // Firestore 覆蓋本地
 
-  let results = Array.from(merged.values());
-
-  // 4. 嚴格過濾：只回傳學生修的課
-  if (courseIdFilter.length > 0) {
-    const idSet = new Set(courseIdFilter);
-    results = results.filter((s) => idSet.has(s.courseId));
-  }
-
-  return results;
+  return filterActiveSessionsForStudent(Array.from(merged.values()), courseIdFilter);
 }
 
 /** 結束點名場次 */

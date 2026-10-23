@@ -13,8 +13,12 @@ it.each([
   '/announcements?school=pu',
   '/announcements/news-123?schoolId=tw-pu',
   '/cafeteria',
+  '/cafeteria/stall?schoolId=pu',
+  '/lost-found',
+  '/lost-found/item-1?schoolId=pu',
+  '/lost-found/post',
   '/library',
-  '/classroom/course/cw_11111111-1111-4111-8111-111111111111#assignments',
+  '/classroom/course/cw_11111111-1111-4111-8111-111111111111#assignment-cwa_22222222-2222-4222-8222-222222222222',
 ])('returns to platform task %s', (path) => {
   expect(platformDestination(path)).toBe(path);
 });
@@ -26,6 +30,7 @@ it.each([
   '/classroom/login',
   '/auth/platform/start',
   '/timetable',
+  '/course/cs101#assignment-hw-1',
   '/grades',
   '/map/../grades',
   '/announcements/../../grades',

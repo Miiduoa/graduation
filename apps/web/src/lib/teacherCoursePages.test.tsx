@@ -105,6 +105,7 @@ it('shows source course content and working destinations with a dedicated permis
     '/teacher/course/course-a/attendance',
   );
   expect(screen.getByText('教師作業管理')).toBeTruthy();
+  expect(screen.queryByText('靜宜大學')).toBeNull();
 });
 it('does not render records or tool links while access is denied', async () => {
   vi.mocked(useTeacherCourse).mockReturnValue({

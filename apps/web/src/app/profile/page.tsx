@@ -9,6 +9,8 @@ import { SiteShell } from '@/components/SiteShell';
 import { NuniAccountPanel } from '@/components/NuniAccountPanel';
 import { useNuniSession } from '@/features/nuni/Session';
 import { getAuth, getDb } from '@/lib/firebase';
+import { useSignInOptions } from '@/lib/signInOptions';
+import { loadFailureCopy } from '@campus/shared/src/loadFailureCopy';
 import styles from './profile.module.css';
 
 type Profile = Partial<
@@ -16,7 +18,7 @@ type Profile = Partial<
 >;
 type ProfileState =
   | { status: 'loading' }
-  | { status: 'error' }
+  | { status: 'error'; error: unknown }
   | { status: 'ready'; profile: Profile | null };
 
 function readProfile(data: Record<string, unknown>): Profile {
@@ -43,8 +45,8 @@ function PersonalProfile({ user }: { user: User }) {
             status: 'ready',
             profile: snapshot.exists() ? readProfile(snapshot.data()) : null,
           });
-      } catch {
-        if (current()) setState({ status: 'error' });
+      } catch (error) {
+        if (current()) setState({ status: 'error', error });
       }
     }
     void load();
@@ -63,7 +65,7 @@ function PersonalProfile({ user }: { user: User }) {
     return (
       <section className={styles.panel} role="alert">
         <h2>暫時無法讀取個人資料</h2>
-        <p>請確認網路後再試一次。這次未取得資料。</p>
+        <p>{loadFailureCopy(state.error, { online: navigator.onLine })}。這次未取得資料。</p>
         <button
           className="btn primary"
           onClick={() => {
@@ -127,7 +129,9 @@ const services = [
 export default function ProfilePage() {
   const { user, loading, error } = useAuth();
   const nuni = useNuniSession();
+  const options = useSignInOptions();
   const hasCourseAccount = !nuni.loading && !nuni.pendingLogout && !nuni.error && !!nuni.session;
+  const schoolLoginReady = options.studentId;
   return (
     <SiteShell title="個人資料" subtitle="管理你的帳號，接著處理課務與校園生活。">
       <div className={styles.layout}>
@@ -139,15 +143,21 @@ export default function ProfilePage() {
             </div>
           ) : user ? (
             <PersonalProfile key={user.uid} user={user} />
-          ) : (
+          ) : error ? (
             <section className={styles.panel}>
-              <h2>
-                {error
-                  ? '暫時無法確認學校帳號'
-                  : hasCourseAccount
-                    ? '連線學校帳號，查看學校資料'
-                    : '登入後，查看你的資料'}
-              </h2>
+              <h2>暫時無法確認學校帳號</h2>
+              <p>{loadFailureCopy(error, { online: navigator.onLine })}。</p>
+            </section>
+          ) : options.loading ? (
+            <p role="status">正在確認學校登入方式…</p>
+          ) : options.error ? (
+            <section className={styles.panel} role="alert">
+              <h2>暫時無法確認學校登入方式</h2>
+              <button type="button" className="btn" onClick={options.retry}>重新確認</button>
+            </section>
+          ) : schoolLoginReady ? (
+            <section className={styles.panel}>
+              <h2>{hasCourseAccount ? '連線學校帳號，查看學校資料' : '登入後，查看你的資料'}</h2>
               <p>
                 {hasCourseAccount
                   ? 'Google 帳號已登入。若要查看學校提供的課表、成績與校園個人資料，請另外連線學校帳號。'
@@ -155,6 +165,14 @@ export default function ProfilePage() {
               </p>
               <Link className="btn primary" href="/login?reconnect=school&returnUrl=%2Fprofile">
                 {hasCourseAccount ? '連線學校帳號' : '登入帳號'}
+              </Link>
+            </section>
+          ) : hasCourseAccount ? null : (
+            <section className={styles.panel}>
+              <h2>登入後，查看你的資料</h2>
+              <p>使用 Google 帳號查看課程與個人資料。學號登入還在準備。</p>
+              <Link className="btn primary" href="/classroom/login?returnUrl=%2Fprofile">
+                登入帳號
               </Link>
             </section>
           )}

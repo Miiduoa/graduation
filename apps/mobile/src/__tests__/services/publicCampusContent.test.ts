@@ -12,11 +12,13 @@ import {
 import { isFirebaseMockMode } from '../../firebase';
 import {
   loadCampusAnnouncements,
+  loadCampusAnnouncementFeed,
   loadCampusAnnouncement,
   loadCampusEvent,
   loadCampusEventPage,
   isPublicWebUrl,
 } from '../../services/publicCampusContent';
+import { getRawAppEnv } from '../../services/release';
 
 jest.mock('firebase/firestore', () => ({
   collection: jest.fn((...args) => args),
@@ -25,14 +27,17 @@ jest.mock('firebase/firestore', () => ({
   startAfter: jest.fn((snapshot) => ({ after: snapshot })),
   getDocFromServer: jest.fn(),
   getDocsFromServer: jest.fn(),
-  limit: jest.fn(),
-  orderBy: jest.fn(),
-  where: jest.fn(),
+  limit: jest.fn((count) => ({ limit: count })),
+  orderBy: jest.fn((field, direction) => ({ orderBy: field, direction })),
+  where: jest.fn((field, operator, value) => ({ where: field, operator, value })),
   query: jest.fn((...args) => args),
 }));
 jest.mock('../../firebase', () => ({
   getDb: jest.fn(() => 'db'),
   isFirebaseMockMode: jest.fn(() => false),
+}));
+jest.mock('../../services/release', () => ({
+  getRawAppEnv: jest.fn(() => 'development'),
 }));
 const row = { title: '校方公告', body: '真實內文', publishedAt: '2026-10-08T00:00:00Z' };
 const document = (data = row) => ({ id: 'a1', exists: () => true, data: () => data });
@@ -40,24 +45,33 @@ const document = (data = row) => ({ id: 'a1', exists: () => true, data: () => da
 beforeEach(() => {
   jest.clearAllMocks();
   jest.mocked(isFirebaseMockMode).mockReturnValue(false);
+  jest.mocked(getRawAppEnv).mockReturnValue('development');
 });
 
+function docsForPath(input: unknown, announcements: unknown[], sources: unknown[] = []) {
+  const path = JSON.stringify(input);
+  if (path.includes('announcement-sources')) return { empty: sources.length === 0, docs: sources };
+  return { empty: announcements.length === 0, docs: announcements };
+}
+
 test('reads school canonical server documents without a mock or cache fallback', async () => {
-  jest.mocked(getDocsFromServer).mockResolvedValue({ empty: false, docs: [document()] } as never);
+  jest.mocked(getDocsFromServer).mockImplementation(async (input) => docsForPath(input, [document()]) as never);
   await expect(loadCampusAnnouncements('pu')).resolves.toMatchObject([
     { id: 'a1', schoolId: 'pu', title: '校方公告' },
   ]);
   expect(collection).toHaveBeenCalledWith('db', 'schools', 'pu', 'announcements');
-  expect(getDocsFromServer).toHaveBeenCalledTimes(1);
+  expect(collection).toHaveBeenCalledWith('db', 'schools', 'pu', 'announcement-sources');
+  expect(collection).not.toHaveBeenCalledWith('db', 'announcements');
 });
 
-test('legacy content is only consulted after a successful empty canonical result', async () => {
+test('an empty school collection is not filled from the root announcements collection', async () => {
   jest
     .mocked(getDocsFromServer)
     .mockResolvedValueOnce({ empty: true, docs: [] } as never)
-    .mockResolvedValueOnce({ empty: false, docs: [document()] } as never);
-  await expect(loadCampusAnnouncements('pu')).resolves.toHaveLength(1);
-  expect(collection).toHaveBeenLastCalledWith('db', 'announcements');
+    .mockImplementation(async (input) => docsForPath(input, [document()]) as never);
+  await expect(loadCampusAnnouncements('pu')).resolves.toEqual([]);
+  expect(collection).toHaveBeenCalledWith('db', 'schools', 'pu', 'announcements');
+  expect(collection).not.toHaveBeenCalledWith('db', 'announcements');
   jest.clearAllMocks();
   jest.mocked(getDocsFromServer).mockRejectedValueOnce(new Error('permission-denied'));
   await expect(loadCampusAnnouncements('pu')).rejects.toThrow('permission-denied');
@@ -108,20 +122,136 @@ test('attachment links require safe web URLs and malformed dates are not invente
   expect(isPublicWebUrl('https://user:password@school.edu')).toBe(false);
 });
 
-test.each([[loadCampusAnnouncements, 'announcements', 'publishedAt']] as const)(
-  'legacy queries keep the school filter and an explicit bounded date ordering (%s)',
-  async (load, collectionName, dateField) => {
-    jest
-      .mocked(getDocsFromServer)
-      .mockResolvedValueOnce({ empty: true, docs: [] } as never)
-      .mockResolvedValueOnce({ empty: true, docs: [] } as never);
-    await expect(load('pu')).resolves.toEqual([]);
-    expect(collection).toHaveBeenLastCalledWith('db', collectionName);
-    expect(where).toHaveBeenCalledWith('schoolId', '==', 'pu');
-    expect(orderBy).toHaveBeenCalledWith(dateField, 'desc');
-    expect(limit).toHaveBeenCalledWith(100);
+test('empty announcement lists stay on the school collection with a bounded date ordering', async () => {
+  jest.mocked(getDocsFromServer).mockResolvedValue({ empty: true, docs: [] } as never);
+  await expect(loadCampusAnnouncements('pu')).resolves.toEqual([]);
+  expect(collection).toHaveBeenCalledWith('db', 'schools', 'pu', 'announcements');
+  expect(collection).not.toHaveBeenCalledWith('db', 'announcements');
+  expect(orderBy).toHaveBeenCalledWith('publishedAt', 'desc');
+  expect(limit).toHaveBeenCalledWith(200);
+});
+
+function missingIndexError() {
+  return Object.assign(new Error('The query requires an index.'), { code: 'failed-precondition' });
+}
+
+function productionEmptySchoolRead(schoolId: string) {
+  return async (input: unknown) => {
+    const encoded = JSON.stringify(input ?? '');
+    if (encoded.includes('announcement-sources')) return { empty: true, docs: [] };
+    if (encoded.includes(`"schools","${schoolId}","announcements"`)) return { empty: true, docs: [] };
+    if (encoded.includes('["db","announcements"]')) throw missingIndexError();
+    return { empty: true, docs: [] };
+  };
+}
+
+test.each(['ncku', 'ntpu', 'feu', 'mmc'] as const)(
+  'keeps a successfully empty %s feed without querying the root announcements collection',
+  async (schoolId) => {
+    jest.mocked(getDocsFromServer).mockImplementation(productionEmptySchoolRead(schoolId) as never);
+    await expect(loadCampusAnnouncementFeed(schoolId)).resolves.toEqual({
+      announcements: [],
+      officialAnnouncements: [],
+      sources: [],
+      allUnavailable: false,
+    });
+    expect(collection).toHaveBeenCalledWith('db', 'schools', schoolId, 'announcements');
+    expect(collection).not.toHaveBeenCalledWith('db', 'announcements');
+    expect(orderBy).toHaveBeenCalledWith('publishedAt', 'desc');
   },
 );
+
+test('does not mix leftover root-collection rows from another school into an empty feed', async () => {
+  jest
+    .mocked(getDocsFromServer)
+    .mockResolvedValueOnce({ empty: true, docs: [] } as never)
+    .mockImplementation(async (input) =>
+      docsForPath(input, [document({ ...row, schoolId: 'ntu', title: '臺大稿' })]) as never,
+    );
+  await expect(loadCampusAnnouncementFeed('ncku')).resolves.toEqual({
+    announcements: [],
+    officialAnnouncements: [],
+    sources: [],
+    allUnavailable: false,
+  });
+  expect(collection).not.toHaveBeenCalledWith('db', 'announcements');
+});
+
+test.each(['ncku', 'ntpu'] as const)(
+  'still rejects %s when the canonical dated query actually fails',
+  async (schoolId) => {
+    jest.mocked(getDocsFromServer).mockRejectedValueOnce(missingIndexError());
+    await expect(loadCampusAnnouncementFeed(schoolId)).rejects.toMatchObject({
+      code: 'failed-precondition',
+    });
+    expect(getDocsFromServer).toHaveBeenCalledTimes(1);
+  },
+);
+
+test('hides scrape rows from dead sources and exposes the office url', async () => {
+  const scrape = document({
+    ...row,
+    origin: 'public_scrape',
+    sourceId: 'pu-acd',
+    originalUrl: 'https://acd.pu.edu.tw/p/412-1042-1.php',
+    summary: '選課摘要',
+  });
+  jest.mocked(getDocsFromServer).mockImplementation(async (input) =>
+    docsForPath(
+      input,
+      [scrape],
+      [
+        {
+          id: 'pu-acd',
+          data: () => ({
+            sourceId: 'pu-acd',
+            office: '教務處',
+            status: 'unavailable',
+            listUrl: 'https://acd.pu.edu.tw/p/403-1042-885-1.php',
+            lastSuccessAt: '2026-10-12T10:05:00.000Z',
+          }),
+        },
+      ],
+    ) as never,
+  );
+  await expect(loadCampusAnnouncementFeed('pu')).resolves.toMatchObject({
+    announcements: [],
+    officialAnnouncements: [],
+    allUnavailable: true,
+    sources: [
+      {
+        office: '教務處',
+        status: 'unavailable',
+        message: '暫時抓不到',
+        listUrl: 'https://acd.pu.edu.tw/p/403-1042-885-1.php',
+        lastSuccessAt: '2026-10-12T10:05:00.000Z',
+      },
+    ],
+  });
+});
+
+test.each(['', 'staging', 'production'])(
+  'does not load cms-none demo school announcement feeds when app env is %s',
+  async (env) => {
+    jest.mocked(getRawAppEnv).mockReturnValue(env);
+    await expect(loadCampusAnnouncementFeed('tw-demo-uni')).resolves.toEqual({
+      announcements: [],
+      officialAnnouncements: [],
+      sources: [],
+      allUnavailable: false,
+    });
+    expect(getDocsFromServer).not.toHaveBeenCalled();
+  },
+);
+
+test('loads cms-none demo school announcement feeds in an explicit test environment', async () => {
+  jest.mocked(getRawAppEnv).mockReturnValue('test');
+  jest.mocked(getDocsFromServer).mockImplementation(async (input) => docsForPath(input, [document()]) as never);
+  await expect(loadCampusAnnouncementFeed('tw-demo-uni')).resolves.toMatchObject({
+    announcements: [{ id: 'a1', schoolId: 'tw-demo-uni' }],
+    officialAnnouncements: [{ id: 'a1', schoolId: 'tw-demo-uni' }],
+  });
+});
 
 function eventDocument(id: string, path: string, data: Record<string, unknown> = {}) {
   return {

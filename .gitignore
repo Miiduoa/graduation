@@ -2,11 +2,19 @@
 node_modules/
 .pnpm-store/
 
-# Env
-.env
-.env.*
+# Env（保留範本）
+.env*
 !.env.example
 !**/.env.example
+
+# 服務帳戶與金鑰（永遠不要進 repo；Fly secret 從 repo 外寫入）
+serviceAccount*.json
+*-service-account*.json
+*.pem
+*.key
+# Native Firebase / Google client configs may include secrets; none are committed.
+google-services.json
+GoogleService-Info.plist
 
 # Logs
 *.log
@@ -72,3 +80,4 @@ backend/ai-server/data/
 outputs/
 tmp/
 .test-env/
+artifacts/campus-visual/

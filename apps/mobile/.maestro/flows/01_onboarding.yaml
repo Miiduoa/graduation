@@ -5,7 +5,7 @@ tags:
   - onboarding
 
 ---
-# A fresh installation starts signed out. Authenticated navigation needs a separate test account.
+# Guest access must not depend on a Google or university login.
 - launchApp
 - extendedWaitUntil:
     visible:
@@ -16,19 +16,50 @@ tags:
 - assertNotVisible:
     id: tab-Today
 - takeScreenshot: guest_startup
+
+# The platform account is the path for courses, assignments and merchant work.
 - scrollUntilVisible:
     element:
-      id: school-login-start
+      id: login-start
     direction: DOWN
-- assertVisible: 'Campus One 帳號'
+- assertVisible: 'Google 帳號'
 - tapOn:
-    id: school-login-start
+    id: login-start
+# The navigation target is valid even when the remote session check fails.
+# The offline/error state must not pretend that a Google login succeeded.
 - extendedWaitUntil:
-    visible: '學校登入'
+    visible:
+      id: nuni-workspace
     timeout: 20000
-- assertVisible:
-    id: student-id-input
-- assertVisible:
-    id: student-password-input
-- assertVisible: '使用學號登入'
-- takeScreenshot: school_login
+- takeScreenshot: platform_account_state
+
+# On iOS the navigation header owns the back action; a device-level back gesture
+# does not reliably pop the React Navigation stack.
+- tapOn:
+    id: BackButton
+- extendedWaitUntil:
+    visible:
+      id: login-landing
+    timeout: 20000
+- scrollUntilVisible:
+    element:
+      text: '只有讀取學校提供的個人課表與成績，才需要連線學校帳號。|目前只能用 Google 帳號登入，登入後再綁定你的學校。'
+    direction: DOWN
+- assertVisible: '連線學校帳號'
+# School-issued sign-in is hidden unless a verified provider is available.
+# Both states must show a truthful explanation; never assume school login works.
+- runFlow:
+    when:
+      visible:
+        id: school-login-start
+    commands:
+      - assertNotVisible:
+          id: school-login-hint
+- runFlow:
+    when:
+      visible:
+        id: school-login-hint
+    commands:
+      - assertNotVisible:
+          id: school-login-start
+- takeScreenshot: school_login_availability

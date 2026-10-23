@@ -1,13 +1,35 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => '/timetable',
+}));
+
 import { cleanCourse, cleanMeta, WEEKDAY_LABELS, PERIOD_TIMES } from '@campus/shared';
 import { TimetableGrid } from './TimetableGrid';
 import { PersonalTimetable } from './PersonalTimetable';
 
 const mocks = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn(), friends: vi.fn(), friend: vi.fn(), meetups: vi.fn() }));
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => ({ user: { uid: 'alice' }, loading: false }) }));
-vi.mock('@/components/SelectedSchoolProvider', () => ({ useSelectedSchool: () => ({ selectedSchoolId: 'pu', loading: false }) }));
-vi.mock('@/lib/timetable/store', () => ({ loadPersonalTimetable: mocks.load, savePersonalTimetable: mocks.save,
+vi.mock('@/components/SelectedSchoolProvider', () => ({
+  useSelectedSchool: () => ({ selectedSchoolId: 'pu', loading: false }),
+  useOptionalSelectedSchool: () => ({ selectedSchoolId: 'pu', selectedSchool: { id: 'pu', name: '靜宜大學' }, loading: false, catalogStatus: 'ready' }),
+}));
+vi.mock('@/lib/usePersonalImports', () => ({
+  usePersonalImportScope: () => ({
+    scope: { owner: 'school:alice', schoolId: 'pu' },
+    scopeKey: 'school:alice:pu',
+    loading: false,
+    schoolName: '靜宜大學',
+  }),
+  usePersonalImports: () => ({ records: [], error: '', loading: false }),
+}));
+vi.mock('@/lib/timetable/store', () => ({
+  CLOUD_NOT_READY_COPY: '這個功能還沒接通，雲端備份先不用。',
+  TIMETABLE_DEVICE_ONLY_STORED_COPY: '已存在這台裝置，換手機或清除瀏覽器資料就會不見',
+  TIMETABLE_DEVICE_ONLY_SUBMIT_COPY: '存在這台裝置',
+  TimetableCloudSaveError: class TimetableCloudSaveError extends Error {}, loadPersonalTimetable: mocks.load, savePersonalTimetable: mocks.save,
   loadFriendTimetable: mocks.friend, createMeetup: mocks.meetups, createServerShare: vi.fn(),
   listMyMeetups: vi.fn(async () => []), respondMeetup: vi.fn() }));
 vi.mock('@/lib/timetable/friends', () => ({ listAcceptedFriends: mocks.friends }));

@@ -13,6 +13,17 @@ import {
 } from 'firebase/firestore';
 import { getDb, isFirebaseMockMode } from '../firebase';
 import type { Announcement, AnnouncementCategory, Attachment, ClubEvent } from '../data/types';
+import {
+  ANNOUNCEMENT_RECENT_LIMIT,
+  ANNOUNCEMENT_SOURCE_LIMIT,
+  announcementSourceIdsForSchool,
+  isAnnouncementSchoolVisibleToPublic,
+  mergeAnnouncementsById,
+  selectOfficialAnnouncements,
+  selectStudentAnnouncements,
+  SOURCE_UNAVAILABLE_TEXT,
+} from '@campus/shared/src/campusAnnouncements';
+import { getRawAppEnv } from './release';
 
 type SourceDocument = { id: string; data: () => Record<string, unknown> };
 
@@ -86,11 +97,22 @@ function announcement(document: SourceDocument, schoolId: string): Announcement 
         ];
       })
     : [];
+  const summary =
+    typeof data.summary === 'string' && data.summary.trim()
+      ? data.summary
+      : typeof data.body === 'string'
+        ? data.body
+        : '';
   return {
     id: document.id,
     schoolId,
     title: data.title as string,
-    body: typeof data.body === 'string' ? data.body : '',
+    body: summary,
+    summary,
+    originalUrl: isPublicWebUrl(data.originalUrl) ? data.originalUrl : undefined,
+    sourceId: typeof data.sourceId === 'string' ? data.sourceId : undefined,
+    origin: typeof data.origin === 'string' ? data.origin : undefined,
+    office: typeof data.office === 'string' ? data.office : undefined,
     publishedAt: dateString(data.publishedAt),
     source: typeof data.source === 'string' ? data.source : undefined,
     category: categories.includes(data.category as AnnouncementCategory)
@@ -98,6 +120,103 @@ function announcement(document: SourceDocument, schoolId: string): Announcement 
       : 'general',
     pinned: data.pinned === true,
     attachments,
+    studentFeed: data.studentFeed !== false,
+    visible: data.visible !== false,
+    audience: typeof data.audience === 'string' ? data.audience : undefined,
+  } as Announcement;
+}
+
+export type AnnouncementSourceHealth = {
+  sourceId: string;
+  office: string;
+  status: 'healthy' | 'unavailable';
+  message: string;
+  listUrl?: string;
+  lastSuccessAt?: string;
+};
+
+export type CampusAnnouncementFeed = {
+  announcements: Announcement[];
+  officialAnnouncements?: Announcement[];
+  sources: AnnouncementSourceHealth[];
+  allUnavailable: boolean;
+};
+
+async function loadAnnouncementSources(schoolId: string): Promise<AnnouncementSourceHealth[]> {
+  const snapshot = await getDocsFromServer(
+    collection(sourceDb(schoolId), 'schools', schoolId, 'announcement-sources'),
+  );
+  return snapshot.docs.map((document) => {
+    const data = document.data();
+    const unavailable = data.status === 'unavailable';
+    return {
+      sourceId: typeof data.sourceId === 'string' ? data.sourceId : document.id,
+      office: typeof data.office === 'string' ? data.office : document.id,
+      status: unavailable ? 'unavailable' : 'healthy',
+      message: unavailable ? SOURCE_UNAVAILABLE_TEXT : '',
+      listUrl: isPublicWebUrl(data.listUrl) ? data.listUrl : undefined,
+      lastSuccessAt: dateString(data.lastSuccessAt) || undefined,
+    };
+  });
+}
+
+async function loadAnnouncementRows(
+  schoolId: string,
+  extra: Array<ReturnType<typeof where> | ReturnType<typeof orderBy>>,
+  maxItems: number,
+) {
+  const db = sourceDb(schoolId);
+  const snapshot = await getDocsFromServer(
+    query(collection(db, 'schools', schoolId, 'announcements'), ...extra, limit(maxItems)),
+  );
+  return snapshot.docs.flatMap((document) => {
+    try {
+      return [announcement(document, schoolId)];
+    } catch {
+      return [];
+    }
+  });
+}
+
+export async function loadCampusAnnouncementFeed(
+  schoolId: string,
+): Promise<CampusAnnouncementFeed> {
+  if (!isAnnouncementSchoolVisibleToPublic({ schoolId }, getRawAppEnv())) {
+    return { announcements: [], officialAnnouncements: [], sources: [], allUnavailable: false };
+  }
+  const recent = await loadAnnouncementRows(
+    schoolId,
+    [orderBy('publishedAt', 'desc')],
+    ANNOUNCEMENT_RECENT_LIMIT,
+  );
+  const sources = await loadAnnouncementSources(schoolId);
+  const present = new Set(
+    recent.map((item) => item.sourceId).filter((value): value is string => Boolean(value)),
+  );
+  const missing = announcementSourceIdsForSchool(schoolId, sources).filter(
+    (sourceId) => !present.has(sourceId),
+  );
+  // 學校自己的集合已確定是 0 則時，不必再依處室補查。
+  const extras =
+    recent.length === 0 || missing.length === 0
+      ? []
+      : await Promise.all(
+          missing.map((sourceId) =>
+            loadAnnouncementRows(
+              schoolId,
+              [where('sourceId', '==', sourceId)],
+              ANNOUNCEMENT_SOURCE_LIMIT,
+            ),
+          ),
+        );
+  const merged = mergeAnnouncementsById([recent, ...extras]);
+  const announcements = selectStudentAnnouncements(merged, sources);
+  const officialAnnouncements = selectOfficialAnnouncements(merged, sources);
+  return {
+    announcements,
+    officialAnnouncements,
+    sources,
+    allUnavailable: sources.length > 0 && sources.every((item) => item.status === 'unavailable'),
   };
 }
 
@@ -125,27 +244,6 @@ function event(document: SourceDocument, schoolId: string): ClubEvent {
   };
 }
 
-async function loadList<T>(
-  schoolId: string,
-  name: 'announcements' | 'events',
-  normalize: (document: SourceDocument, schoolId: string) => T,
-) {
-  const db = sourceDb(schoolId);
-  const constraints = [
-    orderBy(name === 'announcements' ? 'publishedAt' : 'startsAt', 'desc'),
-    limit(100),
-  ];
-  let snapshot = await getDocsFromServer(
-    query(collection(db, 'schools', schoolId, name), ...constraints),
-  );
-  // Legacy data is read only after an authoritative empty result; failed reads remain failures.
-  if (snapshot.empty)
-    snapshot = await getDocsFromServer(
-      query(collection(db, name), where('schoolId', '==', schoolId), ...constraints),
-    );
-  return snapshot.docs.map((document) => normalize(document, schoolId));
-}
-
 async function loadDetail<T>(
   schoolId: string,
   id: string,
@@ -162,8 +260,8 @@ async function loadDetail<T>(
   return normalize({ id: snapshot.id, data: () => snapshot.data()! }, schoolId);
 }
 
-export const loadCampusAnnouncements = (schoolId: string) =>
-  loadList(schoolId, 'announcements', announcement);
+export const loadCampusAnnouncements = async (schoolId: string) =>
+  (await loadCampusAnnouncementFeed(schoolId)).announcements;
 export const loadCampusAnnouncement = (schoolId: string, id: string) =>
   loadDetail(schoolId, id, 'announcements', announcement);
 export type CampusEventSource = 'school-club-events' | 'school-events' | 'legacy-events';

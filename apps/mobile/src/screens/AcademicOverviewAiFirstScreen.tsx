@@ -7,6 +7,7 @@ import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { usePermissions } from '../hooks/usePermissions';
 import { loadStudentHome } from '../data/studentHome';
 import { safeNavigate } from '../utils/safeNavigate';
+import { loadFailureOrLoginCopy } from '../utils/loadFailureCopy';
 
 type AcademicData = Awaited<ReturnType<typeof loadStudentHome>>;
 
@@ -26,12 +27,12 @@ export default function AcademicOverviewAiFirstScreen() {
     scope: string;
     data: AcademicData | null;
     loading: boolean;
-    error: boolean;
+    error: unknown | null;
   } | null>(null);
   const visible = state?.scope === scope ? state : null;
   const load = useCallback(async () => {
     const request = ++generation.current;
-    setState({ scope, data: null, loading: true, error: false });
+    setState({ scope, data: null, loading: true, error: null });
     try {
       if (!uid || !schoolId || uid.startsWith('demo_')) throw new Error('missing-account');
       const data = await loadStudentHome(uid, schoolId);
@@ -40,11 +41,11 @@ export default function AcademicOverviewAiFirstScreen() {
         (task) => task.kind !== 'assistant_queue' && courseIds.has(task.groupId),
       );
       if (currentScope.current === scope && generation.current === request) {
-        setState({ scope, data: { courses: data.courses, tasks }, loading: false, error: false });
+        setState({ scope, data: { courses: data.courses, tasks }, loading: false, error: null });
       }
-    } catch {
+    } catch (error) {
       if (currentScope.current === scope && generation.current === request) {
-        setState({ scope, data: null, loading: false, error: true });
+        setState({ scope, data: null, loading: false, error });
       }
     }
   }, [uid, schoolId, scope]);
@@ -88,7 +89,10 @@ export default function AcademicOverviewAiFirstScreen() {
         <AISection title="課程資料">
           <View accessibilityRole="alert" style={{ padding: 16, gap: 12 }}>
             <Text style={{ color: aiTokens.text }}>
-              無法讀取學業資料，請確認登入狀態與網路後重試。
+              {loadFailureOrLoginCopy(
+                visible.error,
+                '無法讀取學業資料，請確認登入狀態與網路後重試。',
+              )}
             </Text>
             <AIButton label="重新讀取" onPress={() => void load()} />
           </View>

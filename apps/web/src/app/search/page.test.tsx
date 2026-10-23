@@ -2,10 +2,19 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import SearchPage from './page';
 
+const options = { studentId: false, loading: false, error: false, retry: vi.fn() };
+vi.mock('@/lib/signInOptions', () => ({ useSignInOptions: () => options }));
+
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(window.location.search),
 }));
-beforeEach(() => window.history.replaceState({}, '', '/search'));
+beforeEach(() => {
+  window.history.replaceState({}, '', '/search');
+  options.studentId = false;
+  options.loading = false;
+  options.error = false;
+  options.retry.mockClear();
+});
 
 vi.mock('@/components/SiteShell', () => ({
   SiteShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main>,
@@ -13,7 +22,7 @@ vi.mock('@/components/SiteShell', () => ({
 
 it('keeps every service discoverable without inventing a school selection', () => {
   render(<SearchPage />);
-  expect(screen.getAllByRole('link')).toHaveLength(27);
+  expect(screen.getAllByRole('link')).toHaveLength(31);
   const profile = screen.getByRole('link', { name: /個人資料 查看帳號資料/ });
   const destination = new URL(profile.getAttribute('href')!, 'https://campus.example');
   expect(destination.pathname).toBe('/profile');
@@ -25,7 +34,7 @@ it('combines category filters with keyword search and restores all services afte
   render(<SearchPage />);
   fireEvent.click(screen.getByRole('button', { name: '校園生活' }));
   expect(screen.queryByRole('link', { name: /^課表/ })).toBeNull();
-  expect(screen.getAllByRole('link')).toHaveLength(6);
+  expect(screen.getAllByRole('link')).toHaveLength(8);
   fireEvent.change(screen.getByRole('searchbox', { name: '想找什麼？' }), {
     target: { value: '借書' },
   });
@@ -33,7 +42,7 @@ it('combines category filters with keyword search and restores all services afte
   expect(screen.getByRole('link', { name: /^圖書館/ })).toBeTruthy();
   expect(screen.getByRole('status').textContent).toBe('找到 1 項服務');
   fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
-  expect(screen.getAllByRole('link')).toHaveLength(27);
+  expect(screen.getAllByRole('link')).toHaveLength(31);
   expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
 });
 
@@ -43,7 +52,7 @@ it('offers a recovery action when a query has no matching service', () => {
   expect(screen.queryAllByRole('link')).toHaveLength(0);
   expect(screen.getByRole('heading', { name: '沒有符合的服務' })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '查看所有服務' }));
-  expect(screen.getAllByRole('link')).toHaveLength(27);
+  expect(screen.getAllByRole('link')).toHaveLength(31);
 });
 
 it('matches search aliases without case or surrounding-space sensitivity', () => {
@@ -57,9 +66,13 @@ it('keeps the existing course directory alongside the added Nuni classroom', () 
   render(<SearchPage />);
   const paths = screen.getAllByRole('link').map((link) => link.getAttribute('href')?.split('?')[0]);
   expect(paths).toContain('/groups');
+  expect(paths).toContain('/cafeteria');
+  expect(paths).toContain('/food');
   expect(paths).toContain('/classroom');
   expect(paths).toContain('/timetable');
   expect(paths).toContain('/grades');
+  expect(paths).toContain('/import');
+  expect(paths).toContain('/calendar');
 });
 
 it('restores a shareable search and preserves only browsing context in service links', () => {
@@ -108,4 +121,23 @@ it('restores filters after navigation and ignores unsupported categories', () =>
   expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
   expect(screen.getByRole('button', { name: '全部' }).getAttribute('aria-pressed')).toBe('true');
   expect(screen.getByRole('link', { name: /^圖書館/ })).toBeTruthy();
+});
+
+it('shows a school login limitation before opening a service without hiding its entry', () => {
+  const view = render(<SearchPage />);
+  expect(screen.getByRole('link', { name: /^成績/ }).textContent).toContain('尚未開放登入');
+  options.studentId = true;
+  view.rerender(<SearchPage />);
+  expect(screen.getByRole('link', { name: /^成績/ }).textContent).not.toContain('尚未開放登入');
+});
+
+it('retains a search and public destinations when login availability fails, and offers retry', () => {
+  window.history.replaceState({}, '', '/search?schoolId=pu&q=公車');
+  options.error = true;
+  render(<SearchPage />);
+  expect(screen.queryByText(/尚未開放登入/)).toBeNull();
+  expect(screen.getByRole('link', { name: /^公車/ }).getAttribute('href')).toContain('schoolId=pu');
+  fireEvent.click(screen.getByRole('button', { name: '重新確認登入方式' }));
+  expect(options.retry).toHaveBeenCalledOnce();
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('公車');
 });

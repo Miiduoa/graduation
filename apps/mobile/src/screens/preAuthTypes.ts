@@ -2,9 +2,17 @@
 export type PreAuthStackParamList = {
   LoginLanding: undefined;
   Map: undefined;
+  Library: undefined;
+  LibraryCatalog: { initialQuery?: string } | undefined;
   BusSchedule: undefined;
   公告總覽: undefined;
   公告詳情: { id: string };
   SSOLogin: undefined;
-  NuniWorkspace: undefined;
+  PersonalImport: { kind?: 'timetable' | 'grades' | 'events' } | undefined;
+  PersonalTimetable: { term?: string } | undefined;
+  NuniWorkspace: {
+    tab?: 'courses' | 'food' | 'merchant' | 'account';
+    workspaceId?: string;
+    assignmentId?: string;
+  } | undefined;
 };

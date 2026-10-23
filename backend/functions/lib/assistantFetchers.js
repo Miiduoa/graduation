@@ -6,6 +6,12 @@ const { getFirestore } = require('firebase-admin/firestore');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { createAuthzHelpers } = require('../authz');
 const { toJsDate } = require('./assistantFormat');
+const {
+  schoolConfig,
+  isPublicAnnouncementSchool,
+  SOURCE_UNAVAILABLE,
+} = require('../campusAnnouncements/catalog');
+const { selectStudentAnnouncements } = require('../campusAnnouncements/quality');
 
 const EMPTY = Object.freeze([]);
 
@@ -47,10 +53,40 @@ async function readSchoolRows(schoolId, collections, { order, limit, requiredFie
   return [];
 }
 
+async function fetchAnnouncementSources(schoolId, deps = {}) {
+  assertId(schoolId, 'schoolId');
+  const snapshot = await database(deps)
+    .collection('schools')
+    .doc(schoolId)
+    .collection('announcement-sources')
+    .get();
+  return snapshot.docs.map((entry) => {
+    const data = entry.data() || {};
+    return {
+      id: entry.id,
+      sourceId: data.sourceId || entry.id,
+      office: typeof data.office === 'string' ? data.office : entry.id,
+      status: data.status === 'unavailable' ? 'unavailable' : 'healthy',
+      message: data.status === 'unavailable' ? SOURCE_UNAVAILABLE : '',
+      listUrl: typeof data.listUrl === 'string' ? data.listUrl : '',
+    };
+  });
+}
+
 async function fetchAssistantAnnouncements(schoolId, deps = {}) {
-  return readSchoolRows(schoolId, ['announcements', 'announcements'], {
+  const school = schoolConfig(schoolId);
+  if (school && !isPublicAnnouncementSchool(school)) return [];
+  const rows = await readSchoolRows(schoolId, ['announcements', 'announcements'], {
     order: ['publishedAt', 'desc'], limit: 20, requiredField: 'title', deps,
   });
+  const sources = await fetchAnnouncementSources(schoolId, deps);
+  const announcements = selectStudentAnnouncements(rows, sources);
+  if (sources.length && sources.every((item) => item.status === 'unavailable') && announcements.length === 0) {
+    const error = new HttpsError('unavailable', SOURCE_UNAVAILABLE);
+    error.details = { sources };
+    throw error;
+  }
+  return announcements;
 }
 
 async function fetchAssistantEvents(schoolId, deps = {}) {
@@ -226,6 +262,7 @@ module.exports = {
   fetchAssistantTodaySchedule,
   fetchAssistantPendingAssignments,
   fetchAssistantAnnouncements,
+  fetchAnnouncementSources,
   fetchAssistantEvents,
   fetchAssistantMenus,
   fetchAssistantPois,

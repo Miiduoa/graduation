@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import QRCode from 'qrcode';
 import { useAuth } from './AuthGuard';
+import { SchoolAccountRequired } from './SchoolAccountRequired';
 import { SiteShell } from './SiteShell';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
@@ -12,17 +13,19 @@ import {
   attendanceCsv,
   attendanceError,
   endCourseAttendance,
+  hasOwnActiveAttendance,
   joinCourseAttendance,
   loadAttendanceCode,
   loadAttendanceRecords,
   loadCourseAttendance,
   startCourseAttendance,
+  studentAttendanceHeading,
+  studentCheckInSession,
   watchCourseMembership,
   type AttendanceRecord,
   type AttendanceSession,
   type CourseAttendance as AttendanceData,
 } from '@/lib/courseAttendance';
-import home from '@/app/home.module.css';
 import service from '@/app/servicePages.module.css';
 import styles from './course-attendance.module.css';
 
@@ -35,16 +38,20 @@ function date(value: string | null) {
 function Session({
   session,
   courseId,
+  courseName,
   uid,
   canReadRoster,
   canStart,
+  checkInEnabled,
   reload,
 }: {
   session: AttendanceSession;
   courseId: string;
+  courseName: string;
   uid: string;
   canReadRoster: boolean;
   canStart: boolean;
+  checkInEnabled: boolean;
   reload: () => Promise<void>;
 }) {
   const [token, setToken] = useState('');
@@ -111,7 +118,7 @@ function Session({
     <article className={styles.session}>
       <div className={styles.sessionHeading}>
         <div>
-          <p className={styles.label}>{session.active ? '點名進行中' : '點名已結束'}</p>
+          <p className={styles.label}>{studentAttendanceHeading(courseName, session.active)}</p>
           <h3>{date(session.startedAt)}</h3>
         </div>
         {canReadRoster && (
@@ -128,7 +135,7 @@ function Session({
       )}
       {!canReadRoster &&
         !confirmed &&
-        (session.active ? (
+        (session.active && checkInEnabled ? (
           <form
             className={styles.form}
             onSubmit={(event) => {
@@ -389,28 +396,39 @@ function Workspace({ courseId, uid }: { courseId: string; uid: string }) {
                 disabled={
                   starting ||
                   loading ||
-                  data.sessions.some((session) => session.active && session.teacherId === uid)
+                  hasOwnActiveAttendance(data.sessions, uid)
                 }
                 onClick={() => void start()}
               >
                 {starting ? '開啟中…' : '開啟點名'}
               </Button>
-              {data.sessions.some((session) => session.active && session.teacherId === uid) && (
+              {hasOwnActiveAttendance(data.sessions, uid) ? (
                 <p className={styles.detail}>請先結束你開啟的點名，再開啟下一次。</p>
-              )}
+              ) : data.sessions.some((session) => session.active) ? (
+                <p className={styles.detail}>這堂課已有進行中的點名，開啟新場次會先結束舊場。</p>
+              ) : null}
             </section>
           )}
           <h2 className={styles.history}>點名紀錄</h2>
           <p className={styles.detail}>顯示最近 50 次已保存的點名。</p>
           {data.sessions.length ? (
-            data.sessions.map((session) => (
+            data.sessions
+              .filter(
+                (session) =>
+                  data.canReadRoster ||
+                  !session.active ||
+                  session.id === studentCheckInSession(data.sessions)?.id,
+              )
+              .map((session) => (
               <Session
                 key={`${session.id}:${data.canStart}:${data.canReadRoster}`}
                 session={session}
                 courseId={courseId}
+                courseName={data.courseName}
                 uid={uid}
                 canStart={data.canStart}
                 canReadRoster={data.canReadRoster}
+                checkInEnabled={studentCheckInSession(data.sessions)?.id === session.id}
                 reload={reload}
               />
             ))
@@ -439,14 +457,10 @@ export function CourseAttendance({
   searchParams?: SchoolSearchParams;
 }) {
   const { user, loading } = useAuth();
-  const { schoolName, schoolSearch } = resolveSchoolPageContext(searchParams);
+  const { schoolSearch } = resolveSchoolPageContext(searchParams);
   const path = `${audience === 'teacher' ? '/teacher' : ''}/course/${encodeURIComponent(courseId)}`;
   return (
-    <SiteShell
-      title="點名與簽到"
-      subtitle="查看課堂簽到與已保存的出席紀錄。"
-      schoolName={audience === 'teacher' ? `${schoolName} · 教學工作台` : schoolName}
-    >
+    <SiteShell title="點名" subtitle="查看課堂簽到與已保存的出席紀錄。">
       <nav className={styles.navigation} aria-label="課程導覽">
         <Link href={`${path}${schoolSearch}`}>
           <span aria-hidden="true">←</span>
@@ -461,18 +475,10 @@ export function CourseAttendance({
         ) : user ? (
           <Workspace key={`${user.uid}:${courseId}`} uid={user.uid} courseId={courseId} />
         ) : (
-          <section className={service.stateCard}>
-            <h2>登入後查看課堂出席</h2>
-            <p>使用這門課的學校帳號登入，即可簽到或查看紀錄。</p>
-            <div className={service.actions}>
-              <Link
-                className={home.primary}
-                href={`/login?redirect=${encodeURIComponent(`${path}/attendance${schoolSearch}`)}`}
-              >
-                登入帳號
-              </Link>
-            </div>
-          </section>
+          <SchoolAccountRequired
+            returnUrl={`${path}/attendance${schoolSearch}`}
+            alternative="出缺席請先在課堂上向老師確認。"
+          />
         )}
       </div>
     </SiteShell>

@@ -16,6 +16,10 @@ const auth = vi.hoisted(() => ({ uid: 'student' as string | null }));
 vi.mock('@/components/SchoolSelector', () => ({ SchoolSelector: () => null }));
 vi.mock('@/features/nuni/Session', () => ({
   useNuniSession: () => ({ session: null, loading: false, pendingLogout: false, logout: vi.fn() }),
+  useOptionalNuniSession: () => null,
+}));
+vi.mock('@/lib/signInOptions', () => ({
+  useSignInOptions: () => ({ google: false, studentId: false, loading: false, retry: vi.fn() }),
 }));
 vi.mock('./AuthGuard', () => ({
   useAuth: () => ({ user: auth.uid ? { uid: auth.uid } : null, loading: false }),
@@ -171,6 +175,52 @@ it('lets an instructor open a session when another instructor left one active', 
   expect((await screen.findByRole('button', { name: '開啟點名' })).hasAttribute('disabled')).toBe(
     false,
   );
+  expect(screen.getByText('這堂課已有進行中的點名，開啟新場次會先結束舊場。')).toBeTruthy();
+});
+
+it('shows a student only one check-in box when two sessions of the same course are still open', async () => {
+  vi.mocked(loadCourseAttendance).mockResolvedValue({
+    ...data(),
+    sessions: [
+      {
+        id: 'session-a',
+        teacherId: 'teacher-a',
+        active: false,
+        startedAt: '2026-10-16T01:00:00Z',
+        endedAt: '2026-10-16T01:20:00Z',
+        qrExpiresAt: '2026-10-16T01:10:00Z',
+        attendeeCount: 0,
+        ownRecord: null,
+      },
+      {
+        id: 'session-b',
+        teacherId: 'teacher-b',
+        active: true,
+        startedAt: '2026-10-16T02:00:00Z',
+        endedAt: null,
+        qrExpiresAt: '2026-10-16T02:10:00Z',
+        attendeeCount: 0,
+        ownRecord: null,
+      },
+      {
+        id: 'session-c',
+        teacherId: 'teacher-c',
+        active: true,
+        startedAt: '2026-10-16T01:30:00Z',
+        endedAt: null,
+        qrExpiresAt: '2026-10-16T01:40:00Z',
+        attendeeCount: 0,
+        ownRecord: null,
+      },
+    ],
+  });
+  render(<CourseAttendance courseId="course" />);
+  expect(await screen.findByLabelText('教師提供的簽到碼')).toBeTruthy();
+  expect(screen.getAllByRole('button', { name: '確認簽到' })).toHaveLength(1);
+  expect(screen.getByLabelText('教師提供的簽到碼').id).toBe('code-session-b');
+  expect(document.getElementById('code-session-c')).toBeNull();
+  expect(screen.getByText('資料結構 · 點名進行中')).toBeTruthy();
+  expect(screen.getByText('資料結構 · 點名已結束')).toBeTruthy();
 });
 
 it('keeps the teacher route and school context when returning to the course or signing in', () => {
@@ -181,8 +231,10 @@ it('keeps the teacher route and school context when returning to the course or s
   expect(screen.getByRole('link', { name: '回課程工作台' }).getAttribute('href')).toBe(
     `/teacher/course/course%2Fid${schoolSearch}`,
   );
-  expect(screen.getByRole('link', { name: '登入帳號' }).getAttribute('href')).toBe(
-    `/login?redirect=${encodeURIComponent(`/teacher/course/course%2Fid/attendance${schoolSearch}`)}`,
-  );
+  expect(screen.getByRole('heading', { name: '這個功能還沒接通' })).toBeTruthy();
+  expect(screen.getByRole('heading', { level: 1, name: '點名' })).toBeTruthy();
+  expect(screen.queryByText('靜宜大學')).toBeNull();
+  expect(screen.getByText('出缺席請先在課堂上向老師確認。')).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '登入帳號' })).toBeNull();
   expect(screen.getByRole('main').id).toBe('page-content');
 });

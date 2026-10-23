@@ -1,11 +1,13 @@
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { Linking } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import CafeteriaAiFirstScreen from '../screens/CafeteriaAiFirstScreen';
 import MenuDetailAiFirstScreen from '../screens/MenuDetailAiFirstScreen';
 import LibraryAiFirstScreen from '../screens/LibraryAiFirstScreen';
 import {
   loadDiningCatalog,
+  loadPublicDiningCatalog,
   loadDiningIntent,
   prepareDiningIntent,
   submitDiningIntent,
@@ -13,15 +15,18 @@ import {
   DiningError,
 } from '../features/dining';
 import type { DiningReceipt } from '../features/dining';
+import { UNVERIFIED_CAFETERIA_BADGE } from '@campus/shared/src/cafeteriaCatalog';
 
 let mockUser: { uid: string } | null = { uid: 'student-a' };
 let mockSchool = { id: 'pu' };
+jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn(async () => {}) }));
 jest.mock('../state/auth', () => ({ useAuth: () => ({ user: mockUser }) }));
 jest.mock('../state/school', () => ({ useSchool: () => ({ school: mockSchool }) }));
 jest.mock('../ui/navigationTheme', () => ({ useTabBarContentBottomPadding: () => 80 }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('../features/dining', () => ({
   loadDiningCatalog: jest.fn(),
+  loadPublicDiningCatalog: jest.fn(),
   loadDiningIntent: jest.fn(),
   prepareDiningIntent: jest.fn(),
   submitDiningIntent: jest.fn(),
@@ -61,7 +66,15 @@ const menu = {
   orderable: true,
 };
 const catalog = {
-  venues: [{ id: 'venue-a', name: '校園餐廳甲', location: '一樓', orderingEnabled: true }],
+  venues: [
+    {
+      id: 'venue-a',
+      name: '校園餐廳甲',
+      location: '一樓',
+      orderingEnabled: true,
+      reviewStatus: 'verified' as const,
+    },
+  ],
   menus: [menu],
 };
 function deferred<T>() {
@@ -76,6 +89,7 @@ beforeEach(() => {
   mockUser = { uid: 'student-a' };
   mockSchool = { id: 'pu' };
   jest.mocked(loadDiningCatalog).mockResolvedValue(catalog);
+  jest.mocked(loadPublicDiningCatalog).mockResolvedValue(catalog);
   jest.mocked(loadDiningIntent).mockResolvedValue(null);
   jest.mocked(prepareDiningIntent).mockResolvedValue(intent);
   jest
@@ -152,9 +166,7 @@ test('給了號碼之後店家取消：寫「這張單店家取消了」，號�
   await act(async () => push!({ queueNumber: 7, status: 'confirmed' }));
   expect(view.getByText('取餐號碼 7')).toBeTruthy();
   expect(stop).not.toHaveBeenCalled();
-  await act(async () =>
-    push!({ queueNumber: null, status: 'cancelled', cancelledBy: 'merchant' }),
-  );
+  await act(async () => push!({ queueNumber: null, status: 'cancelled', cancelledBy: 'merchant' }));
   expect(view.getByText('這張單店家取消了')).toBeTruthy();
   expect(view.getByText('訂單已取消')).toBeTruthy();
   expect(view.queryByText(/取餐號碼/)).toBeNull();
@@ -264,7 +276,13 @@ test('沒送出去後連點「再試一次」：只再送一次，而且是同�
   const ids = jest.mocked(submitDiningIntent).mock.calls.map(([sent]) => sent.orderId);
   expect(new Set(ids)).toEqual(new Set([intent.orderId]));
   await act(async () =>
-    retry.resolve({ id: intent.orderId, label: menu.name, total: 84, status: 'pending', queueNumber: 6 }),
+    retry.resolve({
+      id: intent.orderId,
+      label: menu.name,
+      total: 84,
+      status: 'pending',
+      queueNumber: 6,
+    }),
   );
   expect(view.getByText('取餐號碼 6')).toBeTruthy();
   expect(submitDiningIntent).toHaveBeenCalledTimes(2);
@@ -299,12 +317,88 @@ test.each(['account', 'school'] as const)(
     expect(view.queryByText('等店家接單')).toBeNull();
   },
 );
+test('marks unverified and demo venues and leaves verified unmarked', async () => {
+  jest.mocked(loadDiningCatalog).mockResolvedValueOnce({
+    venues: [
+      {
+        id: 'cafe-1',
+        name: '校園小棧',
+        location: '活動中心',
+        orderingEnabled: false,
+        reviewStatus: 'demo',
+      },
+      {
+        id: 'stall',
+        name: '校內咖啡店',
+        location: '學生餐廳',
+        orderingEnabled: false,
+        reviewStatus: 'unverified',
+      },
+      {
+        id: 'jingyuan',
+        name: '靜園餐廳',
+        location: '文興樓對面',
+        orderingEnabled: false,
+        reviewStatus: 'verified',
+      },
+    ],
+    menus: [],
+  });
+  const view = render(<CafeteriaAiFirstScreen />);
+  await act(async () => {});
+  expect(view.getByText('示範')).toBeTruthy();
+  expect(view.getByText(UNVERIFIED_CAFETERIA_BADGE)).toBeTruthy();
+  expect(view.getByText('靜園餐廳')).toBeTruthy();
+  expect(view.queryAllByText('示範')).toHaveLength(1);
+  expect(view.queryAllByText(UNVERIFIED_CAFETERIA_BADGE)).toHaveLength(1);
+});
+
+test('restaurant list payment copy does not mention Nuni', async () => {
+  const view = render(<CafeteriaAiFirstScreen />);
+  await act(async () => {});
+  expect(view.queryByText(/Nuni|nuni/)).toBeNull();
+  expect(
+    view.queryByText('價格、是否賣完、是否接單以店家訂餐頁為準。Nuni 不處理這筆的付款與退款。'),
+  ).toBeNull();
+});
+
+test('uses an honest empty state when this school has no restaurants', async () => {
+  jest.mocked(loadDiningCatalog).mockResolvedValueOnce({ venues: [], menus: [] });
+  const view = render(<CafeteriaAiFirstScreen />);
+  await act(async () => {});
+  expect(view.getByText('這間學校的餐廳還沒上架')).toBeTruthy();
+  expect(view.queryByText('今日餐點')).toBeNull();
+  expect(view.queryByText('校園餐廳甲')).toBeNull();
+});
+
 test('a failed menu read shows retry without fabricated restaurants', async () => {
   jest.mocked(loadDiningCatalog).mockRejectedValueOnce(new Error('offline'));
   const view = render(<CafeteriaAiFirstScreen />);
   await act(async () => {});
   expect(view.queryByText('今日餐點')).toBeNull();
-  expect(view.getByText('目前無法取得餐廳資料，請確認連線後重試。')).toBeTruthy();
+  expect(view.getByText('服務暫時停止，我們正在處理，請稍後再來。')).toBeTruthy();
+  expect(view.queryByText('請確認網路後再試')).toBeNull();
+  expect(view.queryByText('重新整理')).toBeNull();
+});
+test('lets a guest read restaurants without asking them to sign in first', async () => {
+  mockUser = null;
+  const view = render(<CafeteriaAiFirstScreen />);
+  await act(async () => {});
+  expect(loadPublicDiningCatalog).toHaveBeenCalledWith('pu');
+  expect(loadDiningCatalog).not.toHaveBeenCalled();
+  expect(view.getAllByText('校園餐廳甲').length).toBeGreaterThan(0);
+  expect(view.queryByText('登入後查看菜單')).toBeNull();
+  expect(view.queryByText('請先登入學校帳號，再查看餐廳與訂單。')).toBeNull();
+  expect(view.queryByText('我的訂單')).toBeNull();
+});
+test('keeps the offline copy when the device has no network', async () => {
+  jest.mocked(loadDiningCatalog).mockRejectedValueOnce(new TypeError('Network request failed'));
+  const view = render(<CafeteriaAiFirstScreen />);
+  await act(async () => {});
+  expect(view.getByText('請確認網路後再試')).toBeTruthy();
+  expect(view.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
+  expect(view.getByText('重新整理')).toBeTruthy();
+  expect(view.queryByText('今日餐點')).toBeNull();
 });
 test('library search opens the existing real catalog with the typed query', () => {
   const navigate = jest.fn();
@@ -350,7 +444,9 @@ test('斷線後連查都查不出結果：寫「還在確認訂單有沒有送�
   const navigate = jest.fn();
   jest
     .mocked(submitDiningIntent)
-    .mockRejectedValueOnce(new DiningError('還在確認訂單有沒有送出，請到『我的訂單』看。', 'checking'));
+    .mockRejectedValueOnce(
+      new DiningError('還在確認訂單有沒有送出，請到『我的訂單』看。', 'checking'),
+    );
   const view = render(<CafeteriaAiFirstScreen navigation={{ navigate }} />);
   await act(async () => {});
   fireEvent.press(view.getByText('選擇今日餐點'));
@@ -361,4 +457,113 @@ test('斷線後連查都查不出結果：寫「還在確認訂單有沒有送�
   const buttons = view.getAllByText('我的訂單');
   fireEvent.press(buttons[buttons.length - 1]);
   expect(navigate).toHaveBeenCalledWith('StudentOrders');
+});
+
+test('restaurant keeps the school catalog and links directly to the platform food tab', async () => {
+  const navigate = jest.fn();
+  const view = render(<CafeteriaAiFirstScreen navigation={{ navigate }} />);
+  await act(async () => {});
+  fireEvent.press(view.getByText('前往平台點餐'));
+  expect(navigate).toHaveBeenCalledWith('我的', {
+    screen: 'NuniWorkspace',
+    params: { tab: 'food' },
+  });
+  expect(view.getByText('選擇今日餐點')).toBeTruthy();
+});
+
+test('switching universities opens that university official library instead of Providence OPAC', async () => {
+  mockSchool = { id: 'ntu' };
+  const navigate = jest.fn();
+  const view = render(<LibraryAiFirstScreen navigation={{ navigate }} />);
+  expect(view.getByText('國立臺灣大學圖書館')).toBeTruthy();
+  expect(view.queryByText('在圖書館網站搜尋')).toBeNull();
+  fireEvent.changeText(view.getByLabelText('館藏關鍵字'), ' 分散式系統 ');
+  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
+  const opened = jest.mocked(Linking.openURL).mock.calls.at(-1)?.[0];
+  expect(opened).toBeTruthy();
+  const url = new URL(opened!);
+  expect(url.hostname).toBe('ntu.primo.exlibrisgroup.com');
+  expect(url.searchParams.get('vid')).toBe('886NTU_INST:886NTU_INST');
+  expect(url.searchParams.get('query')).toBe('any,contains,分散式系統');
+  expect(navigate).not.toHaveBeenCalledWith('LibraryCatalog', expect.anything());
+  expect(view.queryByText('蓋夏圖書館')).toBeNull();
+});
+
+test('a campus switch resets library search and never carries the previous OPAC account link', async () => {
+  const view = render(<LibraryAiFirstScreen />);
+  fireEvent.changeText(view.getByLabelText('館藏關鍵字'), 'private search');
+  mockSchool = { id: 'ncue' };
+  view.rerender(<LibraryAiFirstScreen />);
+  expect(view.getByLabelText('館藏關鍵字').props.value).toBe('');
+  expect(view.getByText('國立彰化師範大學圖書與資訊處')).toBeTruthy();
+  expect(view.queryByText('開啟我的借閱紀錄')).toBeNull();
+  await act(async () => fireEvent.press(view.getByText('圖書館官網')));
+  expect(Linking.openURL).toHaveBeenCalledWith('https://olis.ncue.edu.tw/');
+});
+
+test('changing the university replaces both the catalog destination and previous search', async () => {
+  mockSchool = { id: 'nthu' };
+  const view = render(<LibraryAiFirstScreen />);
+  fireEvent.changeText(view.getByLabelText('館藏關鍵字'), 'old query');
+  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  const first = new URL(jest.mocked(Linking.openURL).mock.calls.at(-1)![0]);
+  expect(first.hostname).toBe('nthu.primo.exlibrisgroup.com');
+  expect(first.searchParams.get('query')).toBe('any,contains,old query');
+  mockSchool = { id: 'ncku' };
+  view.rerender(<LibraryAiFirstScreen />);
+  expect(view.getByLabelText('館藏關鍵字').props.value).toBe('');
+  fireEvent.changeText(view.getByLabelText('館藏關鍵字'), 'new query');
+  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  const second = new URL(jest.mocked(Linking.openURL).mock.calls.at(-1)![0]);
+  expect(second.hostname).toBe('ncku.primo.exlibrisgroup.com');
+  expect(second.searchParams.get('vid')).toBe('886NCKU_INST:886NCKU_INST');
+  expect(second.searchParams.get('query')).toBe('any,contains,new query');
+  expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
+});
+
+
+test('Soochow library search uses its verified Primo view instead of a different campus', async () => {
+  mockSchool = { id: 'scu' };
+  const view = render(<LibraryAiFirstScreen />);
+  fireEvent.changeText(view.getByLabelText('館藏關鍵字'), '閱讀教育');
+  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  const url = new URL(jest.mocked(Linking.openURL).mock.calls.at(-1)![0]);
+  expect(url.hostname).toBe('uco-scu.primo.exlibrisgroup.com');
+  expect(url.searchParams.get('vid')).toBe('886UCO_SCU:886SCU_INST');
+  expect(url.searchParams.get('query')).toBe('any,contains,閱讀教育');
+  expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
+});
+
+test('Chang Gung library uses its official iGrid catalog rather than Providence', async () => {
+  mockSchool = { id: 'cgu' };
+  const view = render(<LibraryAiFirstScreen />);
+  fireEvent.changeText(view.getByLabelText('館藏關鍵字'), '護理');
+  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  expect(jest.mocked(Linking.openURL)).toHaveBeenCalledWith('https://web20.lib.cgu.edu.tw/');
+  expect(Clipboard.setStringAsync).toHaveBeenCalledWith('護理');
+  expect(view.queryByText('蓋夏圖書館')).toBeNull();
+});
+
+
+test('Chung Yuan library account and catalog stay on its official domain', async () => {
+  mockSchool = { id: 'cycu' };
+  const view = render(<LibraryAiFirstScreen />);
+  fireEvent.changeText(view.getByLabelText('館藏關鍵字'), '企業管理');
+  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  expect(Linking.openURL).toHaveBeenCalledWith('https://cylis.lib.cycu.edu.tw/search*cht');
+  expect(Clipboard.setStringAsync).toHaveBeenCalledWith('企業管理');
+  await act(async () => fireEvent.press(view.getByText('開啟我的借閱紀錄')));
+  expect(Linking.openURL).toHaveBeenCalledWith('https://cylis.lib.cycu.edu.tw/patroninfo*cht');
+  expect(view.queryByText('蓋夏圖書館')).toBeNull();
+});
+
+test('Taipei Medical library uses its own WebPAC catalog rather than a Providence search', async () => {
+  mockSchool = { id: 'tmu' };
+  const view = render(<LibraryAiFirstScreen />);
+  fireEvent.changeText(view.getByLabelText('館藏關鍵字'), '醫學');
+  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  expect(Linking.openURL).toHaveBeenCalledWith('https://libelis.tmu.edu.tw/webpacIndex.jsp');
+  expect(Clipboard.setStringAsync).toHaveBeenCalledWith('醫學');
+  expect(view.queryByText('蓋夏圖書館')).toBeNull();
 });
