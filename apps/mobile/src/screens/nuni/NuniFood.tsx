@@ -14,10 +14,13 @@ import type {
 import { useNuniSession } from '../../state/nuniSession';
 import { useNuniDraftState } from '../../state/nuniDrafts';
 import {
+  FOOD_POLL_MS,
+  FOOD_TERMINAL_STATES,
   FoodButton,
   FoodCard,
   FoodField,
   FoodReadState,
+  FoodStorageRecovery,
   FoodText,
   foodTime,
   money,
@@ -140,7 +143,9 @@ function FoodRealm({
           },
     [client, selection.tenantId, mode, cursor],
   );
-  const resource = useFoodLoad(loader);
+  const resource = useFoodLoad(loader, {
+    pollMs: mode === 'orders' ? FOOD_POLL_MS : undefined,
+  });
   if (orderId)
     return (
       <FoodOrder
@@ -433,11 +438,18 @@ function FoodMenu({
       <FoodText title>{resource.data?.location.name ?? '選擇餐點'}</FoodText>
       <FoodReadState resource={resource} disabled={mutation.busy} />
       {mutation.error ? <FoodText alert>{mutation.error}</FoodText> : null}
+      <FoodStorageRecovery mutation={mutation} />
       {mutation.pending ? (
         <>
           <FoodText>這次送出內容已保留。返回後仍會使用同一次操作確認。</FoodText>
           <FoodButton
-            disabled={mutation.busy || resource.loading || !!resource.error}
+            disabled={
+              mutation.busy ||
+              mutation.storageBlocked ||
+              !mutation.hydrated ||
+              resource.loading ||
+              !!resource.error
+            }
             onPress={() => void mutation.send()}
           >
             重試確認這次送出
@@ -523,7 +535,10 @@ function FoodOrder({
 }) {
   const client = useFoodClient(context);
   const loader = useCallback(() => client.getOrder(tenantId, orderId), [client, tenantId, orderId]);
-  const resource = useFoodLoad(loader);
+  const resource = useFoodLoad(loader, {
+    pollMs: FOOD_POLL_MS,
+    shouldPoll: (data) => !data || !FOOD_TERMINAL_STATES.has(data.state),
+  });
   const [reason, setReason] = useNuniDraftState<NuniFoodCancelInput['reason']>(
     `food:${tenantId}:${orderId}:cancel-reason`,
     'changed-mind',
@@ -561,9 +576,16 @@ function FoodOrder({
       <FoodReadState resource={resource} />
       {notice ? <FoodText>{notice}</FoodText> : null}
       {mutation.error ? <FoodText alert>{mutation.error}</FoodText> : null}
+      <FoodStorageRecovery mutation={mutation} />
       {mutation.pending ? (
         <FoodButton
-          disabled={mutation.busy || resource.loading || !!resource.error}
+          disabled={
+            mutation.busy ||
+            mutation.storageBlocked ||
+            !mutation.hydrated ||
+            resource.loading ||
+            !!resource.error
+          }
           onPress={() => void mutation.send()}
         >
           重試確認取消

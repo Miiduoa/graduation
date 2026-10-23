@@ -1,12 +1,19 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, Text, TextInput, View } from 'react-native';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { AppState, Pressable, Text, TextInput, View } from 'react-native';
 import { NuniError } from '@campus/shared/src/nuni';
 import { createNuniFoodClient } from '@campus/shared/src/nuniFood';
 import { useNuniSession } from '../../state/nuniSession';
 import { useNuniDraftState } from '../../state/nuniDrafts';
+import {
+  FoodStorageError,
+  clearFoodPending,
+  loadFoodPending,
+  saveFoodPending,
+} from '../../state/foodPersistence';
 import { useTheme } from '../../state/theme';
 
 export type FoodClient = ReturnType<typeof createNuniFoodClient>;
+export { FOOD_POLL_MS, FOOD_TERMINAL_STATES } from '../../state/foodPersistence';
 export const money = (value: { amountMinor: number; currency: string }) =>
   `${value.amountMinor.toLocaleString('zh-TW')} 元`;
 export const foodTime = (value: string) =>
@@ -147,47 +154,150 @@ export function useFoodClient(context: string) {
     [request, context],
   );
 }
-export function useFoodLoad<T>(loader: () => Promise<T>) {
+
+function readErrorMessage(failure: unknown) {
+  return failure instanceof NuniError && [401, 403, 404].includes(failure.status)
+    ? '目前無法取得這份資料，請重新確認帳號與權限。'
+    : '目前無法讀取，請確認連線後重試。';
+}
+
+export function useFoodLoad<T>(
+  loader: () => Promise<T>,
+  options?: {
+    pollMs?: number;
+    shouldPoll?: (data: T | null) => boolean;
+  },
+) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  const alive = useRef(false);
-  const sequence = useRef(0);
   const { refresh } = useNuniSession();
-  const load = useCallback(async () => {
-    const run = ++sequence.current;
-    setLoading(true);
-    setError('');
-    setData(null);
-    try {
-      const result = await loader();
-      if (alive.current && run === sequence.current) setData(result);
-    } catch (failure) {
-      if (alive.current && run === sequence.current) {
-        setError(
-          failure instanceof NuniError && [401, 403, 404].includes(failure.status)
-            ? '目前無法取得這份資料，請重新確認帳號與權限。'
-            : '目前無法讀取，請確認連線後重試。',
-        );
-        if (
-          failure instanceof NuniError &&
-          (failure.status === 401 || failure.code === 'SESSION_CHANGED')
-        )
-          void refresh();
-      }
-    } finally {
-      if (alive.current && run === sequence.current) setLoading(false);
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+  const dataRef = useRef<T | null>(null);
+  const shouldPollRef = useRef(options?.shouldPoll);
+  const pollMs = options?.pollMs;
+  shouldPollRef.current = options?.shouldPoll;
+  const scopeRef = useRef<{
+    active: boolean;
+    loader: () => Promise<T>;
+    revision: number;
+    inFlight: Promise<void> | null;
+    queued: Promise<void> | null;
+  } | null>(null);
+
+  const read = useCallback(function read(quiet: boolean): Promise<void> {
+    const scope = scopeRef.current;
+    if (!scope?.active) return Promise.resolve();
+    if (scope.inFlight) {
+      // A post-mutation/manual refresh must run after the older read. Quiet
+      // refreshes join it, so polling and returning to the tab cannot overlap.
+      if (quiet) return scope.queued ?? scope.inFlight;
+      if (scope.queued) return scope.queued;
+      ++scope.revision;
+      dataRef.current = null;
+      setData(null);
+      setError('');
+      setLoading(true);
+      scope.queued = scope.inFlight.then(() => {
+        scope.queued = null;
+        if (!scope.active || scopeRef.current !== scope) return;
+        return read(false);
+      });
+      return scope.queued;
     }
-  }, [loader, refresh]);
-  useEffect(() => {
-    alive.current = true;
+    const revision = ++scope.revision;
+    if (!quiet) {
+      dataRef.current = null;
+      setData(null);
+      setError('');
+      setLoading(true);
+    }
+    const current = () => scope.active && scopeRef.current === scope && revision === scope.revision;
+    const pending = Promise.resolve()
+      .then(() => scope.loader())
+      .then(
+        (next) => {
+          if (!current()) return;
+          dataRef.current = next;
+          setData(next);
+          setError('');
+        },
+        (failure: unknown) => {
+          if (!current()) return;
+          // Stale permissions and pickup credentials must disappear on failure.
+          dataRef.current = null;
+          setData(null);
+          setError(readErrorMessage(failure));
+          if (
+            failure instanceof NuniError &&
+            (failure.status === 401 || failure.code === 'SESSION_CHANGED')
+          )
+            void refreshRef.current();
+        },
+      )
+      .finally(() => {
+        if (scope.inFlight === pending) scope.inFlight = null;
+        if (current()) setLoading(false);
+      });
+    scope.inFlight = pending;
+    return pending;
+  }, []);
+  const load = useCallback(() => read(false), [read]);
+  const quietLoad = useCallback(() => read(true), [read]);
+
+  useLayoutEffect(() => {
+    const scope = { active: true, loader, revision: 0, inFlight: null, queued: null };
+    scopeRef.current = scope;
     void load();
     return () => {
-      alive.current = false;
-      ++sequence.current;
+      scope.active = false;
     };
-  }, [load]);
-  return { data, error, loading, load };
+  }, [load, loader]);
+
+  useEffect(() => {
+    if (!pollMs || pollMs <= 0) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let inflight = false;
+
+    let appState = AppState.currentState;
+    const foreground = () => appState === 'active';
+
+    const schedule = () => {
+      clearTimeout(timer);
+      if (!active || !foreground()) return;
+      timer = setTimeout(() => void tick(), pollMs);
+    };
+
+    async function tick() {
+      if (!active || inflight || !foreground()) return;
+      if (shouldPollRef.current && !shouldPollRef.current(dataRef.current)) return;
+      inflight = true;
+      try {
+        await quietLoad();
+      } finally {
+        inflight = false;
+        if (active && foreground()) schedule();
+      }
+    }
+
+    const subscription = AppState.addEventListener('change', (next) => {
+      appState = next;
+      clearTimeout(timer);
+      if (!active) return;
+      if (next === 'active') void tick();
+    });
+
+    schedule();
+    return () => {
+      active = false;
+      clearTimeout(timer);
+      subscription.remove();
+    };
+  }, [pollMs, quietLoad, loader]);
+
+  return { data, error, loading, load, quietLoad };
 }
 
 /** Draft cache holds an immutable retry intent, never order data or permissions. */
@@ -196,39 +306,135 @@ export function useFoodMutation<I>(
   execute: (intent: I) => Promise<unknown>,
   onReceipt: (receipt: unknown, intent: I) => void,
 ) {
+  const auth = useNuniSession();
+  const accountId = auth.session?.platformAccountId ?? '';
   const [pending, setPending] = useNuniDraftState<I | null>(key, null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [hydrated, setHydrated] = useState(false);
+  const [storageBlocked, setStorageBlocked] = useState(false);
+  const [storageRevision, setStorageRevision] = useState(0);
   const mounted = useRef(false);
   const lock = useRef(false);
+  const accountRef = useRef(accountId);
   const { refresh } = useNuniSession();
   useEffect(() => {
     mounted.current = true;
+    accountRef.current = accountId;
     return () => {
       mounted.current = false;
     };
-  }, []);
+  }, [accountId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setHydrated(false);
+    if (!accountId) {
+      setHydrated(true);
+      setStorageBlocked(true);
+      setError('目前無法確認帳號，請重新確認後再操作。');
+      return () => {
+        cancelled = true;
+      };
+    }
+    void (async () => {
+      try {
+        const stored = (await loadFoodPending(accountId, key)) as I | null;
+        if (cancelled || !mounted.current || accountRef.current !== accountId) return;
+        if (stored) setPending(stored);
+        setStorageBlocked(false);
+        setError('');
+      } catch (failure) {
+        if (cancelled || !mounted.current || accountRef.current !== accountId) return;
+        setStorageBlocked(true);
+        setError(
+          failure instanceof FoodStorageError
+            ? failure.message
+            : '目前無法安全保存這次訂餐操作，請稍後再試。',
+        );
+      } finally {
+        if (!cancelled && mounted.current && accountRef.current === accountId) setHydrated(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [accountId, key, setPending, storageRevision]);
+
+  const recoverStorage = () => {
+    if (!mounted.current || lock.current || !hydrated) return;
+    // Read the durable record again before enabling any new operation. A failed
+    // save may have written the original intent before its verification failed.
+    setHydrated(false);
+    setStorageBlocked(true);
+    setError('');
+    setStorageRevision((revision) => revision + 1);
+  };
+
   const send = async (fresh?: I) => {
     if (lock.current || !mounted.current) return;
+    if (!hydrated || storageBlocked) {
+      setError(
+        !hydrated
+          ? '正在恢復尚未確認的訂餐操作，請稍候。'
+          : '目前無法安全保存這次訂餐操作，請稍後再試。',
+      );
+      return;
+    }
+    if (!accountId) {
+      setError('目前無法確認帳號，請重新確認後再操作。');
+      return;
+    }
     const intent = pending ?? fresh;
     if (!intent) return;
     const retry = pending !== null;
     lock.current = true;
     setBusy(true);
     setError('');
-    setPending(intent);
+    const owner = accountId;
+    try {
+      await saveFoodPending(owner, key, intent);
+      if (!mounted.current || accountRef.current !== owner) return;
+      setPending(intent);
+      setStorageBlocked(false);
+    } catch (failure) {
+      if (!mounted.current || accountRef.current !== owner) return;
+      setStorageBlocked(true);
+      setError(
+        failure instanceof FoodStorageError
+          ? failure.message
+          : '目前無法安全保存這次訂餐操作，請稍後再試。',
+      );
+      lock.current = false;
+      setBusy(false);
+      return;
+    }
     try {
       const receipt = await execute(intent);
-      if (!mounted.current) return;
+      if (!mounted.current || accountRef.current !== owner) return;
+      try {
+        await clearFoodPending(owner, key);
+      } catch {
+        /* best-effort after confirmed result */
+      }
+      if (!mounted.current || accountRef.current !== owner) return;
       setPending(null);
       onReceipt(receipt, intent);
     } catch (failure) {
-      if (!mounted.current) return;
+      if (!mounted.current || accountRef.current !== owner) return;
       const rejected =
         !retry &&
         failure instanceof NuniError &&
         [400, 403, 404, 409, 422, 429].includes(failure.status);
-      if (rejected) setPending(null);
+      if (rejected) {
+        try {
+          await clearFoodPending(owner, key);
+        } catch {
+          /* ignore */
+        }
+        if (!mounted.current || accountRef.current !== owner) return;
+        setPending(null);
+      }
       setError(
         rejected
           ? '這次操作未被接受。請重新讀取最新狀態後再確認。'
@@ -241,11 +447,39 @@ export function useFoodMutation<I>(
         void refresh();
     } finally {
       lock.current = false;
-      if (mounted.current) setBusy(false);
+      if (mounted.current && accountRef.current === owner) setBusy(false);
     }
   };
-  return { pending, busy, error, send, locked: busy || pending !== null };
+  return {
+    pending,
+    busy,
+    error,
+    send,
+    hydrated,
+    storageBlocked,
+    recoverStorage,
+    locked: busy || pending !== null || !hydrated || storageBlocked,
+  };
 }
+
+export function FoodStorageRecovery({
+  mutation,
+}: {
+  mutation: {
+    busy: boolean;
+    hydrated: boolean;
+    storageBlocked: boolean;
+    recoverStorage(): void;
+  };
+}) {
+  if (!mutation.storageBlocked) return null;
+  return (
+    <FoodButton disabled={mutation.busy || !mutation.hydrated} onPress={mutation.recoverStorage}>
+      {mutation.hydrated ? '重新確認裝置儲存' : '正在確認裝置儲存…'}
+    </FoodButton>
+  );
+}
+
 export function FoodReadState({
   resource,
   disabled = false,

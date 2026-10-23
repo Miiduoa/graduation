@@ -1,7 +1,11 @@
 import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
 
-/** Only unsent input and retry intents belong here, never server data or permissions. */
+/**
+ * Only unsent input and retry intents belong here, never server data or permissions.
+ * Food mutation intents that still need confirmation are also mirrored into SecureStore
+ * (see foodPersistence); this Map alone must not be treated as durable across cold start.
+ */
 export type NuniDraftCache = Map<string, unknown>;
 const Context = createContext<NuniDraftCache | null>(null);
 
