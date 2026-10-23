@@ -71,10 +71,42 @@ self.addEventListener('push', (event) => {
   );
 });
 
+function textId(value) {
+  return typeof value === 'string' &&
+    value &&
+    value !== '.' &&
+    value !== '..' &&
+    /^[\w.-]{1,200}$/.test(value)
+    ? value
+    : null;
+}
+
+function coursePathFromId(courseId) {
+  const path = /^cw_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(courseId)
+    ? `/classroom/course/${encodeURIComponent(courseId)}`
+    : `/course/${encodeURIComponent(courseId)}`;
+  try {
+    const url = new URL(path, self.location.origin);
+    if (url.origin !== self.location.origin) return null;
+    if (
+      !/^\/course\/[^/]+$/.test(url.pathname) &&
+      !/^\/classroom\/course\/cw_[0-9a-f-]{36}$/i.test(url.pathname)
+    ) {
+      return null;
+    }
+    return url.pathname;
+  } catch {
+    return null;
+  }
+}
+
 function courseWorkPath(data) {
-  const courseId = data.workspaceId || data.courseId || data.groupId;
-  const quizId = data.quizId;
-  const assignmentId = data.assignmentId;
+  const courseId = textId(data.workspaceId) || textId(data.courseId) || textId(data.groupId);
+  if (!courseId) return null;
+  const path = coursePathFromId(courseId);
+  if (!path) return null;
+  const quizId = textId(data.quizId);
+  const assignmentId = textId(data.assignmentId);
   const quiz =
     data.isQuiz === true ||
     data.isQuiz === 'true' ||
@@ -82,21 +114,8 @@ function courseWorkPath(data) {
     data.type === 'quiz' ||
     data.category === 'exam';
   const workId = quiz ? quizId || assignmentId : assignmentId || quizId;
-  if (
-    typeof courseId !== 'string' ||
-    typeof workId !== 'string' ||
-    !courseId ||
-    !workId ||
-    courseId.includes('/') ||
-    workId.includes('/')
-  ) {
-    return null;
-  }
-  const hash = `${quiz ? 'quiz' : 'assignment'}-${encodeURIComponent(workId)}`;
-  if (/^cw_[0-9a-f-]{36}$/i.test(courseId)) {
-    return `/classroom/course/${encodeURIComponent(courseId)}#${hash}`;
-  }
-  return `/course/${encodeURIComponent(courseId)}#${hash}`;
+  if (!workId) return path;
+  return `${path}#${quiz ? 'quiz' : 'assignment'}-${encodeURIComponent(workId)}`;
 }
 
 self.addEventListener('notificationclick', (event) => {

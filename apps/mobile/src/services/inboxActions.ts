@@ -175,6 +175,14 @@ export function navigateFromInboxTask(
   const role = navCtx.role;
 
   const fallBackToCourseHub = () => {
+    if (isNuniCourseId(courseId)) {
+      const opened = safeNavigate(navigation, 'NuniWorkspace', {
+        tab: 'courses',
+        workspaceId: courseId,
+      });
+      if (opened) emitInboxNavigationSignal(resolved);
+      return opened;
+    }
     navigateToCourseScreen(navigation, role, 'CourseHub', {
       groupId: task.groupId,
       groupName: task.groupName,

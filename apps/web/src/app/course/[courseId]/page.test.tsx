@@ -234,6 +234,30 @@ it('keeps the assignment hash through sign-in so the student returns to the same
   );
 });
 
+it('reads the live hash on click if the sign-in link was rendered before it arrived', async () => {
+  auth.user = null;
+  window.history.replaceState(null, '', '/course/course');
+  await mount();
+  const link = screen.getByRole('link', { name: '登入帳號' });
+  expect(link.getAttribute('href')).toBe('/login?returnUrl=%2Fcourse%2Fcourse');
+  window.history.replaceState(null, '', '/course/course#assignment-A');
+  const assign = vi.fn();
+  vi.stubGlobal('location', {
+    ...window.location,
+    hash: '#assignment-A',
+    assign,
+  });
+  try {
+    fireEvent.click(link);
+    expect(link.getAttribute('href')).toBe(
+      '/login?returnUrl=%2Fcourse%2Fcourse%23assignment-A',
+    );
+    expect(assign).toHaveBeenCalledWith('/login?returnUrl=%2Fcourse%2Fcourse%23assignment-A');
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
 it('lands on the assignment submit area with top space and shows submitted work', async () => {
   vi.mocked(loadCourseWork).mockResolvedValue(
     coursework({

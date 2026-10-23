@@ -347,6 +347,7 @@ export default function HomePage() {
                 items={senseItems}
                 now={now}
                 phase={sensePhase}
+                hideWhenEmpty={todayTasks.length > 0}
               />
             ) : null}
             {data && (

@@ -17,6 +17,7 @@ import {
 } from 'firebase/firestore';
 import { getAuth, getDb, isFirebaseConfigured } from './firebase';
 import {
+  courseHrefFromData,
   courseWorkHrefFromData,
   courseWorkOpenLabel,
   isAssignmentNotificationType,
@@ -581,7 +582,9 @@ export function notificationDestination(
       label: '開啟對話',
     };
   if (isAssignmentNotificationType(notification.type)) {
-    const href = courseWorkHrefFromData(notification.data, notification.type);
+    const href =
+      courseWorkHrefFromData(notification.data, notification.type) ||
+      courseHrefFromData(notification.data);
     return href ? { href, label: courseWorkOpenLabel(href) } : null;
   }
   return null;

@@ -232,6 +232,25 @@ describe('navigateFromInboxTask', () => {
     expect(navigateToCourseScreen).not.toHaveBeenCalled();
   });
 
+  test('nuni assignment without work id still opens the course', () => {
+    const workspaceId = 'cw_11111111-1111-4111-8111-111111111111';
+    const ok = navigateFromInboxTask(
+      {},
+      baseTask({ groupId: workspaceId, assignmentId: undefined }),
+      { role: 'student', isTeachingRole: false },
+    );
+    expect(ok).toBe(true);
+    expect(safeNavigate).toHaveBeenCalledWith(
+      {},
+      'NuniWorkspace',
+      {
+        tab: 'courses',
+        workspaceId,
+      },
+    );
+    expect(navigateToCourseScreen).not.toHaveBeenCalled();
+  });
+
   test('assignment without id does not open the class feed', () => {
     const ok = navigateFromInboxTask({}, baseTask({ assignmentId: undefined }), {
       role: 'student',

@@ -362,6 +362,42 @@ function dueSoonTomorrow() {
   return new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 }
 
+it('hides 現在可處理 when later work was already handled and today work exists', async () => {
+  const cardId = makeSenseCardId('due_soon', { courseId: 'cs101', id: 'later' });
+  window.localStorage.setItem(
+    senseStorageKey('school:alice'),
+    serializeSenseState(
+      applySenseAction(emptySenseState(), 'handle', { id: cardId, title: '遠期作業' }, new Date()),
+    ),
+  );
+  vi.mocked(loadHomeData).mockResolvedValue({
+    ...data('資料結構'),
+    tasks: [
+      {
+        id: 'hw-1',
+        courseId: 'cs101',
+        courseName: '資料結構',
+        title: '期末報告',
+        dueAt: '2020-01-02T12:30:00Z',
+        href: '/course/cs101#assignment-hw-1',
+      },
+      {
+        id: 'later',
+        courseId: 'cs101',
+        courseName: '資料結構',
+        title: '遠期作業',
+        dueAt: dueSoonTomorrow(),
+        href: '/course/cs101#assignment-later',
+      },
+    ],
+  });
+  render(<HomePage />);
+  expect(await screen.findByTestId('today-work-list')).toBeTruthy();
+  await waitFor(() => {
+    expect(screen.queryByRole('heading', { name: /現在可處理/ })).toBeNull();
+  });
+});
+
 it('does not repeat today-due work under 現在可處理', async () => {
   vi.mocked(loadHomeData).mockResolvedValue(overdueHome());
   render(<HomePage />);

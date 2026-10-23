@@ -1,8 +1,11 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import {
   COURSE_WORK_LANDING_ATTR,
+  COURSE_WORK_OPEN_COURSE,
+  courseHrefFromData,
   courseWorkElementId,
   courseWorkHrefFromData,
+  courseWorkOpenLabel,
   isAssignmentNotificationType,
   isCourseWorkPath,
   landOnCourseWork,
@@ -48,6 +51,17 @@ it('builds a one-click classroom or school course hash and ignores off-site urls
   ).toBe('/course/cs101#assignment-hw-1');
   expect(courseWorkHrefFromData({ url: 'javascript:alert(1)' })).toBeNull();
   expect(courseWorkHrefFromData({ courseId: '../other', assignmentId: 'hw-1' })).toBeNull();
+  expect(courseWorkHrefFromData({ courseId: '..', assignmentId: 'hw-1' })).toBeNull();
+});
+
+it('falls back to the in-site course page when the notice only has a course id', () => {
+  expect(courseHrefFromData({ courseId: 'cs101' })).toBe('/course/cs101');
+  expect(
+    courseHrefFromData({ workspaceId: 'cw_11111111-1111-4111-8111-111111111111' }),
+  ).toBe('/classroom/course/cw_11111111-1111-4111-8111-111111111111');
+  expect(courseHrefFromData({ courseId: '..' })).toBeNull();
+  expect(courseWorkHrefFromData({ courseId: 'cs101' })).toBeNull();
+  expect(courseWorkOpenLabel('/course/cs101')).toBe(COURSE_WORK_OPEN_COURSE);
 });
 
 it('keeps only in-site course work paths', () => {

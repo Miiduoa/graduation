@@ -381,4 +381,21 @@ it('notification destinations only use supported local tasks and never arbitrary
       data: { courseId: '../other', assignmentId: 'hw-1' },
     }),
   ).toBeNull();
+  expect(
+    notificationDestination({
+      ...notice,
+      type: 'assignment',
+      data: { courseId: 'cs101' },
+    }),
+  ).toEqual({ href: '/course/cs101', label: '開啟課程' });
+  expect(
+    notificationDestination({
+      ...notice,
+      type: 'assignment_due',
+      data: { workspaceId: 'cw_11111111-1111-4111-8111-111111111111' },
+    }),
+  ).toEqual({
+    href: '/classroom/course/cw_11111111-1111-4111-8111-111111111111',
+    label: '開啟課程',
+  });
 });

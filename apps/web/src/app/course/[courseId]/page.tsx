@@ -191,7 +191,19 @@ export default function CoursePage({ params }: { params: Promise<{ courseId: str
           <section className={styles.section}>
             <h2>登入後查看課程</h2>
             <p>使用這門課的學校帳號登入，即可查看教材與繳交作業。</p>
-            <Link className={styles.primary} href={loginHref(returnPath)}>
+            <Link
+              className={styles.primary}
+              href={loginHref(returnPath)}
+              onClick={(event) => {
+                const next = loginHref(
+                  `/course/${encodeURIComponent(courseId)}${window.location.hash}`,
+                );
+                if (event.currentTarget.getAttribute('href') === next) return;
+                event.preventDefault();
+                event.currentTarget.setAttribute('href', next);
+                window.location.assign(next);
+              }}
+            >
               登入帳號
             </Link>
           </section>
