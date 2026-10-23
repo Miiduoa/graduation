@@ -133,7 +133,8 @@ it('resolves deep links from loaded places and hands walking directions to a rea
   expect(destination.searchParams.get('origin')).toBe('24.22495,120.56535');
   expect(destination.searchParams.get('destination')).toBe('24.2275,120.5635');
   expect(destination.searchParams.get('travelmode')).toBe('walking');
-  expect(screen.queryByText(/分鐘|AI 規劃路線|開放中/)).toBeNull();
+  expect(screen.queryByText(/AI 規劃路線|開放中/)).toBeNull();
+  expect(screen.getAllByText(/每分鐘 80 公尺/).length).toBeGreaterThan(0);
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected.id).toBe('library');
   fireEvent.click(screen.getByRole('button', { name: '關閉地點詳情' }));
   expect(screen.queryByRole('region', { name: '地點詳情' })).toBeNull();
@@ -454,6 +455,42 @@ it('lets visitors compare mapped Providence points with the official campus plan
   state.user = null;
   render(<MapClient school="pu" schoolName="靜宜大學" />);
   expect(await screen.findByRole('link', { name: '校方校區平面圖' })).toBeTruthy();
+});
+
+it('puts the map above the source card so the campus is on the first screen', async () => {
+  vi.mocked(loadMapLocations).mockResolvedValue([]);
+  render(<MapClient school="pu" />);
+  const map = await screen.findByLabelText('地圖狀態');
+  const source = screen.getByRole('region', { name: '地圖資料來源' });
+  expect(map.compareDocumentPosition(source) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+it('finds verified dorm, restroom and print places without guessed pins', async () => {
+  vi.mocked(loadMapLocations).mockResolvedValue([]);
+  render(<MapClient school="pu" />);
+  const input = await screen.findByRole('searchbox', { name: '搜尋地點' });
+  fireEvent.change(input, { target: { value: '宿舍' } });
+  expect(screen.getByRole('button', { name: '查看希嘉學苑' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '查看思高學苑' })).toBeTruthy();
+  expect(screen.queryByText('善牧學苑')).toBeNull();
+  fireEvent.change(input, { target: { value: '廁所' } });
+  expect(screen.getByRole('button', { name: '查看希嘉學苑' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '查看思高學苑' })).toBeTruthy();
+  fireEvent.change(input, { target: { value: '影印' } });
+  expect(screen.getByRole('button', { name: '查看蓋夏圖書館' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '查看至善樓' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '查看主顧樓' })).toBeNull();
+});
+
+it('explains walking minutes from the campus gate using a straight-line formula', async () => {
+  vi.mocked(loadMapLocations).mockResolvedValue([]);
+  render(<MapClient school="pu" />);
+  fireEvent.click(await screen.findByRole('button', { name: '查看希嘉學苑' }));
+  expect(screen.getAllByText(/從校園出入口（OpenStreetMap 閘門標記）直線約/).length).toBeGreaterThan(
+    0,
+  );
+  expect(screen.getAllByText(/每分鐘 80 公尺/).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/不是導航路線時間/).length).toBeGreaterThan(0);
 });
 
 it('shows each school its own official map rather than reusing Providence', async () => {
