@@ -15,12 +15,23 @@ tags:
 - assertVisible:
     id: public-Map
 
+# Keep the tap target clear of the development warning banner at the screen edge.
+- scrollUntilVisible:
+    element:
+      id: public-Map
+    direction: DOWN
+    centerElement: true
+
 - tapOn:
     id: public-Map
 
+# The landing-page button also says "校園地圖"; require the map-only subtitle.
 - extendedWaitUntil:
-    visible: '校園地圖'
+    visible: '找到校園地點，再安排怎麼過去。'
     timeout: 20000
+
+- assertNotVisible:
+    id: login-landing
 
 - takeScreenshot: map_guest_opened
 

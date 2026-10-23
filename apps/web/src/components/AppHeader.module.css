@@ -1,25 +1,364 @@
-.account {
+.header {
+  position: relative;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-areas: 'brand navigation campus account';
+  align-items: center;
+  gap: 20px;
+  width: 100%;
+  max-width: var(--page-width);
+  margin-inline: auto;
+  padding: 20px var(--page-padding-inline);
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  background: var(--bg);
+}
+
+.brand {
+  grid-area: brand;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  min-height: 44px;
+  color: var(--text);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.wordmark {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.6px;
+}
+
+.mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 35px;
+  height: 38px;
+  border: 1px solid color-mix(in srgb, var(--brand) 85%, var(--text));
+  border-radius: 10px 10px 10px 3px;
+  background: var(--brand);
+  color: var(--on-brand);
+  font-size: 23px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -1.5px;
+}
+
+.mark span {
+  align-self: flex-end;
+  margin-bottom: 9px;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.nav {
+  grid-area: navigation;
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.nav > a {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 48px;
+  min-height: 44px;
+  padding: 10px 11px;
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 20px;
+  white-space: nowrap;
+  text-decoration: none;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
+.nav > a > svg {
+  flex-shrink: 0;
+  width: 17px;
+  height: 17px;
+}
+
+.nav > a[aria-current='page'] {
+  color: var(--brand);
+  background: var(--accent-soft);
+  font-weight: 700;
+}
+
+.nav > a[aria-current='page']::after {
+  content: '';
+  position: absolute;
+  bottom: 4px;
+  left: calc(50% - 7px);
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+.campus {
+  grid-area: campus;
+  min-width: 0;
+  max-width: 190px;
+}
+
+.account {
+  grid-area: account;
+  display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 4px 16px;
+  gap: 8px;
   min-width: 0;
-  max-width: 360px;
   font-size: 13px;
+  line-height: 20px;
 }
-.account > :first-child {
-  flex-basis: 100%;
+
+.account > a,
+.account > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease;
 }
-@media (max-width: 760px) {
-  .account {
-    max-width: 100%;
-    margin-left: 0;
-    flex-basis: 100%;
-    justify-content: flex-start;
+
+.account > .login {
+  border-color: var(--brand);
+  background: var(--brand);
+  color: var(--on-brand);
+  font-weight: 600;
+}
+
+.account > .profileLink,
+.account > .operatorLink {
+  border-color: transparent;
+  background: transparent;
+  padding-inline: 4px;
+}
+
+.account > [role='status'] {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.account > button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.header :is(a, button, summary):focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.error {
+  max-width: var(--page-width);
+  margin: 12px auto 0;
+  padding: 12px var(--page-padding-inline);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .nav > a:hover {
+    color: var(--text);
+    background: var(--panel);
   }
-  .account > :first-child {
-    flex-basis: auto;
-    flex-grow: 1;
+
+  .account > a:hover,
+  .account > button:not(:disabled):hover {
+    border-color: var(--border-strong);
+    background: var(--panel);
+  }
+
+  .account > .login:hover {
+    border-color: var(--brand2);
+    background: var(--brand2);
+  }
+}
+
+@media (max-width: 1150px) {
+  .header {
+    gap: 12px;
+  }
+
+  .nav > a {
+    padding-inline: 9px;
+  }
+
+  .nav > a > svg {
+    display: none;
+  }
+
+  .account > .profileLink {
+    display: none;
+  }
+}
+
+@media (max-width: 940px) {
+  .header {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      'brand campus account'
+      'navigation navigation navigation';
+    gap: 10px 16px;
+    padding-block: 16px 10px;
+  }
+
+  .campus {
+    justify-self: end;
+  }
+
+  .nav {
+    justify-content: flex-start;
+    gap: 8px;
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+  }
+
+  .nav > a {
+    gap: 7px;
+    padding-inline: 16px;
+  }
+
+  .nav > a > svg {
+    display: block;
+  }
+}
+
+@media (max-width: 760px) {
+  .header {
+    grid-template-areas: 'brand campus account';
+    gap: 10px;
+    padding: calc(12px + env(safe-area-inset-top, 0px)) 20px 12px;
+  }
+
+  .wordmark {
+    display: none;
+  }
+
+  .campus {
+    justify-self: start;
+    max-width: 100%;
+    width: 100%;
+  }
+
+  .campus > details > div {
+    position: fixed;
+    top: calc(76px + env(safe-area-inset-top, 0px));
+    left: max(12px, env(safe-area-inset-left, 0px));
+    right: max(12px, env(safe-area-inset-right, 0px));
+    width: auto;
+    margin-top: 0;
+  }
+
+  .nav {
+    position: fixed;
+    z-index: 30;
+    inset: auto 0 0;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    align-items: stretch;
+    gap: 4px;
+    height: var(--mobile-nav-offset, calc(72px + env(safe-area-inset-bottom, 0px)));
+    padding: 4px max(12px, env(safe-area-inset-right, 0px))
+      calc(4px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+    border-top: 1px solid var(--border);
+    background: var(--bg);
+  }
+
+  .nav > a {
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    min-height: 56px;
+    height: 100%;
+    padding: 5px 2px 7px;
+    border-radius: 9px;
+    font-size: var(--font-label-size);
+    line-height: 1.2;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .nav > a > svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .nav > a[aria-current='page']::after {
+    bottom: 3px;
+  }
+
+  .nav > a:active {
+    background: var(--panel);
+  }
+
+  .account {
+    gap: 6px;
+  }
+
+  .account > a,
+  .account > button {
+    padding-inline: 10px;
+  }
+
+  .account > [role='status'] {
+    max-width: 65px;
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 360px) {
+  .header {
+    padding-inline: 16px;
+    column-gap: 6px;
+  }
+
+  .account {
+    font-size: 12px;
+  }
+
+  .account > a,
+  .account > button {
+    padding-inline: 7px;
+  }
+}
+
+@media print {
+  .nav {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .header * {
+    animation: none !important;
+    transition: none !important;
   }
 }

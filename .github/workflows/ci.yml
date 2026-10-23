@@ -73,7 +73,7 @@ jobs:
         run: |
           npm install --prefix "$RUNNER_TEMP/eas-config-schema" --ignore-scripts --no-audit --no-fund @expo/eas-json@24.9.0
           node --test scripts/firebase-ci-workflow.test.cjs scripts/wait-for-firestore-indexes.test.cjs scripts/firebase-release-preflight.test.cjs scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs scripts/prepare-eas-build.test.mjs scripts/verify-nuni-integration.test.mjs
-          node --test scripts/nuni-course-source.test.mjs scripts/nuni-course-api-boundary.test.mjs scripts/nuni-merchant-api-boundary.test.mjs scripts/seed-cafeterias.test.cjs
+          node --test scripts/nuni-course-source.test.mjs scripts/nuni-course-api-boundary.test.mjs scripts/nuni-materials-api-boundary.test.mjs scripts/nuni-merchant-api-boundary.test.mjs scripts/seed-cafeterias.test.cjs
 
       - name: Test public cafeteria HTTP and PostgreSQL contracts
         env:
@@ -85,6 +85,22 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/public-cafeteria-test" --ignore-scripts --no-audit --no-fund fastify@5.10.0 pg@8.22.0 typescript@5.9.3 @types/node@22.20.5
           node scripts/test-public-cafeterias.mjs
           python3 -m unittest discover -s scripts/public-cafeterias -p '*_test.py'
+
+      - name: Test personal imports and course access against PostgreSQL
+        env:
+          IMPORT_SYNC_TEST_DATABASE_URL: postgresql://cafeteria_test:cafeteria_test_only@127.0.0.1:5432/cafeteria_test
+          IMPORT_SYNC_TEST_DEPS: ${{ runner.temp }}/public-cafeteria-test/node_modules
+          IMPORT_SYNC_TEST_TYPE_ROOTS: ${{ runner.temp }}/public-cafeteria-test/node_modules/@types
+          IMPORT_SYNC_TEST_TSC: ${{ runner.temp }}/public-cafeteria-test/node_modules/.bin/tsc
+          COURSE_TEST_DATABASE_URL: postgresql://cafeteria_test:cafeteria_test_only@127.0.0.1:5432/cafeteria_test
+          COURSE_TEST_DEPS: ${{ runner.temp }}/public-cafeteria-test/node_modules
+          COURSE_TEST_TYPE_ROOTS: ${{ runner.temp }}/public-cafeteria-test/node_modules/@types
+          COURSE_TEST_TSC: ${{ runner.temp }}/public-cafeteria-test/node_modules/.bin/tsc
+        run: |
+          node scripts/test-personal-import-sync.mjs
+          node scripts/test-course-access.mjs
+          python3 -m unittest discover -s scripts/course-access -p '*_test.py'
+          python3 -m unittest discover -s scripts/personal-import-sync -p '*_test.py'
 
       - name: Audit Functions deployment dependencies
         working-directory: backend/functions
@@ -126,6 +142,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Verify Web and App document reader assets match their source
+        run: pnpm documents:check
 
       - name: Lint
         run: pnpm lint
@@ -223,6 +242,9 @@ jobs:
 
       - name: Test shared ordering contracts
         run: pnpm --filter @campus/shared test:food
+
+      - name: Test PDF and Excel readers with real document fixtures
+        run: pnpm test:documents
 
       - name: Run web tests
         # vitest 4 不接受 --ci flag（vitest run 已預設 CI-friendly）；
@@ -429,6 +451,14 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
     environment: production
     steps:
+      - name: Require main for production Firebase deploy
+        run: |
+          set -euo pipefail
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "::error::正式環境 Firebase 佈署只能從 main 觸發。目前 ref 是 ${{ github.ref }}。"
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v7
 

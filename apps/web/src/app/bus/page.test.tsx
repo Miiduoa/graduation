@@ -44,12 +44,12 @@ it('keeps a not-yet-integrated university isolated from the previous school', ()
   expect(screen.getByText('所選校園尚未接入')).toBeTruthy();
 });
 
-it('prompts for a school rather than querying any campus when none is chosen', () => {
+it('opens Providence buses when no school has been chosen yet', () => {
   navigation.query = '?campus=all&schoolId=pu';
   render(<BusPage />);
-  expect(screen.getByText('請先選擇一所學校')).toBeTruthy();
-  expect(screen.queryByTestId('bus-school')).toBeNull();
-  expect(screen.queryByText('靜宜大學')).toBeNull();
+  expect(screen.getByTestId('bus-school').textContent).toBe('pu');
+  expect(screen.getByText('靜宜大學')).toBeTruthy();
+  expect(screen.queryByText('請先選擇一所學校')).toBeNull();
 });
 
 it('keeps the selected campus in the registered-routes deep link', () => {
@@ -64,10 +64,11 @@ it('keeps the selected campus in the registered-routes deep link', () => {
 it('keeps official transit access visible even before a campus is selected', () => {
   navigation.query = '?campus=all';
   render(<BusPage />);
-  expect(screen.getByRole('heading', { name: '即時到站尚未啟用' })).toBeTruthy();
-  expect(screen.getByRole('link', { name: '臺中市官方公車查詢 ↗' }).getAttribute('href')).toBe('https://citybus-free.taichung.gov.tw/');
+  expect(screen.getByRole('heading', { name: '臺中站牌可查詢，班次時間請至官方網站確認' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '臺中市官方公車查詢 ↗' }).getAttribute('href')).toBe('https://citybus.taichung.gov.tw/');
   expect(screen.getByRole('link', { name: '其他縣市與公路客運查詢 ↗' }).getAttribute('href')).toBe('https://www.taiwanbus.tw/');
-  expect(screen.getByText('請先選擇一所學校')).toBeTruthy();
+  expect(screen.getByTestId('bus-school').textContent).toBe('pu');
+  expect(screen.queryByText('請先選擇一所學校')).toBeNull();
 });
 
 it.each([
@@ -75,11 +76,11 @@ it.each([
   { clientId: undefined, clientSecret: 'configured-secret' },
   { clientId: 'configured-id', clientSecret: 'configured-secret' },
   { clientId: '', clientSecret: '' },
-])('does not disguise a configured or partially configured transit provider as an intentional links-only mode: %o', ({ clientId, clientSecret }) => {
+])('does not disguise a configured or partially configured transit provider as an intentional static-catalog mode: %o', ({ clientId, clientSecret }) => {
   vi.stubEnv('TDX_CLIENT_ID', clientId);
   vi.stubEnv('TDX_CLIENT_SECRET', clientSecret);
   render(<BusPage />);
-  expect(screen.queryByRole('heading', { name: '即時到站尚未啟用' })).toBeNull();
+  expect(screen.queryByRole('heading', { name: '臺中站牌可查詢，班次時間請至官方網站確認' })).toBeNull();
   expect(document.body.textContent).not.toContain('configured-secret');
   expect(document.body.textContent).not.toContain('configured-id');
 });

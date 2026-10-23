@@ -7,6 +7,12 @@ export type CourseCandidate = CourseMetadata & {
   id: string; workspaceId: string; version: number;
   verification: 'administrator-reviewed';
 };
+/** Read back from the server for this account's active workspace membership only. */
+export type CourseWorkspace = {
+  workspaceId: string;
+  memberRole: 'student' | 'owner-teacher' | 'co-teacher';
+  membershipActive: true;
+} & ({ status: 'reviewed'; course: CourseCandidate } | { status: 'unreviewed'; course: null });
 export type CourseMatch = { course: CourseCandidate; reasons: string[]; conflicts: string[]; rank: number };
 export type CourseRequestState = 'pending' | 'approved' | 'rejected' | 'withdrawn' | 'revoked';
 export type CourseRequest = {

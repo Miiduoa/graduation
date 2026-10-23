@@ -16,7 +16,7 @@ import {
   type NuniPrincipal,
 } from '@campus/shared/src/nuni';
 
-type Session = NuniPrincipal & { context: string };
+type Session = NuniPrincipal & { context: string; assignmentFileSubmit?: boolean };
 type SessionState = {
   session: Session | null;
   loading: boolean;
@@ -27,6 +27,36 @@ type Auth = SessionState & { refresh: () => Promise<void>; logout: () => Promise
 const Context = createContext<Auth | null>(null);
 const LOGOUT_KEY = 'campus-one.nuni.logout-pending';
 const CHANGE_KEY = 'campus-one.nuni.session-change';
+
+export async function browserUpload(
+  path: string,
+  context: string,
+  body: Blob,
+  contentType: string,
+): Promise<unknown> {
+  if (!/^[a-z0-9-]+(?:\/[A-Za-z0-9_-]+)*$/.test(path)) throw new NuniError(400, 'INVALID_REQUEST');
+  const response = await fetch(`/api/nuni/${path}`, {
+    method: 'PUT',
+    cache: 'no-store',
+    credentials: 'same-origin',
+    redirect: 'error',
+    signal: AbortSignal.timeout(60000),
+    headers: {
+      'X-Campus-Session': context,
+      'Content-Type': contentType,
+    },
+    body,
+  });
+  if (!response.ok) {
+    let code = 'REQUEST_FAILED';
+    try {
+      const value = nuniRecord(await response.json());
+      if (typeof value.error === 'string') code = value.error;
+    } catch {}
+    throw new NuniError(response.status, code);
+  }
+  return response.json() as Promise<unknown>;
+}
 
 export async function browserRequest(
   path: string,
@@ -137,7 +167,11 @@ export function NuniSessionProvider({ children }: { children: ReactNode }) {
         if (typeof result.context !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(result.context))
           throw new NuniError(502, 'INVALID_RESPONSE');
         setState({
-          session: { ...parseNuniPrincipal(result), context: result.context },
+          session: {
+            ...parseNuniPrincipal(result),
+            context: result.context,
+            assignmentFileSubmit: result.assignmentFileSubmit === true,
+          },
           loading: false,
           error: '',
           pendingLogout: false,

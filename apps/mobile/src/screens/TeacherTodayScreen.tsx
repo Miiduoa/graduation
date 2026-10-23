@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -15,6 +15,7 @@ import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { loadTeacherHome, type TeacherHomeData } from '../data/teacherHome';
 import { startAttendanceSession } from '../data/courseSpaceSource';
+import { createTeacherLiveSessionStarter } from '../services/teacherLiveSessionStarter';
 import type { InboxTask } from '../data/types';
 import { safeNavigate } from '../utils/safeNavigate';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
@@ -36,13 +37,25 @@ export default function TeacherTodayScreen() {
   const scope = JSON.stringify([uid, schoolId, auth.profile?.role, auth.profile?.roleGroup]);
   const currentScope = useRef(scope);
   currentScope.current = scope;
+  const identity = useRef({ uid, schoolId });
+  identity.current = { uid, schoolId };
   const generation = useRef(0);
-  const attendanceRequests = useRef<{ scope: string; keys: Map<string, string> }>({
-    scope,
-    keys: new Map(),
-  });
-  if (attendanceRequests.current.scope !== scope)
-    attendanceRequests.current = { scope, keys: new Map() };
+  const starter = useRef<ReturnType<typeof createTeacherLiveSessionStarter> | null>(null);
+  const liveStarter = () => {
+    if (!starter.current) {
+      starter.current = createTeacherLiveSessionStarter({
+        send: (input) =>
+          startAttendanceSession({
+            courseSpaceId: input.groupId,
+            requestId: input.requestId,
+            qrExpiryMinutes: input.qrExpiryMinutes,
+          }),
+        newRequestId: () => randomUUID(),
+        currentScope: () => identity.current,
+      });
+    }
+    return starter.current;
+  };
   const inFlight = useRef<{ scope: string; groupId: string } | null>(null);
   const [starting, setStarting] = useState<{ scope: string; groupId: string } | null>(null);
   const [actionError, setActionError] = useState<{ scope: string; message: string } | null>(null);
@@ -75,30 +88,38 @@ export default function TeacherTodayScreen() {
     }, [load]),
   );
 
+  useEffect(() => {
+    liveStarter();
+    return () => {
+      starter.current?.dispose();
+      starter.current = null;
+    };
+  }, []);
+
   const openClassroom = (groupId: string, groupName: string, sessionId?: string) =>
     safeNavigate(navigation, 'Classroom', { groupId, groupName, sessionId });
   const openGradebook = (groupId: string, groupName: string) =>
     safeNavigate(navigation, 'CourseGradebook', { groupId, groupName, sourceSystem: 'workspace' });
-  const startClassroom = async (groupId: string, groupName: string) => {
+  const startClassroom = async (
+    groupId: string,
+    groupName: string,
+    role: string | null | undefined,
+  ) => {
     if (inFlight.current?.scope === scope) return;
     const requestGeneration = generation.current;
     const operation = { scope, groupId };
     inFlight.current = operation;
     setStarting(operation);
     setActionError(null);
-    const keys = attendanceRequests.current.keys;
-    const requestId = keys.get(groupId) ?? randomUUID();
-    keys.set(groupId, requestId);
     try {
-      const session = await startAttendanceSession({ courseSpaceId: groupId, requestId });
-      if (!session.success || !session.sessionId) throw new Error('attendance-session-unconfirmed');
+      const session = await liveStarter().start({ uid, schoolId, groupId, role });
       if (currentScope.current !== scope || generation.current !== requestGeneration) return;
-      keys.delete(groupId);
-      openClassroom(groupId, groupName, session.sessionId);
-    } catch {
-      if (currentScope.current === scope && generation.current === requestGeneration) {
-        setActionError({ scope, message: `無法開始「${groupName}」的點名，請確認連線後重試。` });
+      if (!session || session.status === 'busy' || session.status === 'stale') return;
+      if (session.status === 'started') {
+        openClassroom(groupId, groupName, session.sessionId);
+        return;
       }
+      setActionError({ scope, message: `無法開始「${groupName}」的點名，請確認連線後重試。` });
     } finally {
       if (inFlight.current === operation) {
         inFlight.current = null;
@@ -213,7 +234,7 @@ export default function TeacherTodayScreen() {
                           onPress={() =>
                             activeSession?.sessionId
                               ? openClassroom(course.groupId, course.name, activeSession.sessionId)
-                              : void startClassroom(course.groupId, course.name)
+                              : void startClassroom(course.groupId, course.name, course.role)
                           }
                           style={[s.primary, starting?.scope === scope && s.disabled]}
                         >

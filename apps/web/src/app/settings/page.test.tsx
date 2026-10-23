@@ -1,6 +1,20 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import SettingsPage from './page';
+import {
+  AGENT_DELETE_MODEL_ACTION,
+  AGENT_MODEL_DELETED_TEXT,
+  agentConsentStorageKey,
+  parseAgentConsent,
+  serializeAgentConsent,
+} from '@campus/shared/src/todaySenseAgent';
+const agentRuntime = vi.hoisted(() => ({
+  deleteTodaySenseModelCache: vi.fn(async () => ({
+    released: true,
+    message: '模型已刪除，已改回規則版。',
+  })),
+}));
+vi.mock('@/lib/todaySenseAgentRuntime', () => agentRuntime);
 const state = vi.hoisted(() => ({
   user: { uid: 'a', displayName: 'Account A', email: 'a@example.test' } as {
     uid: string;
@@ -70,6 +84,10 @@ vi.mock('firebase/firestore', () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
+  agentRuntime.deleteTodaySenseModelCache.mockResolvedValue({
+    released: true,
+    message: '模型已刪除，已改回規則版。',
+  });
   state.user = { uid: 'a', displayName: 'Account A', email: 'a@example.test' };
   state.nuni.session = null;
   state.nuni.loading = false;
@@ -212,7 +230,20 @@ it('does not offer ineffective privacy or background-sync switches', async () =>
   expect(screen.queryByText('自動同步')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '隱私' }));
   expect(screen.queryByRole('switch')).toBeNull();
+  expect(screen.queryByRole('button', { name: AGENT_DELETE_MODEL_ACTION })).toBeNull();
   expect(screen.getByRole('link', { name: '查看隱私政策' })).toBeTruthy();
+});
+it('shows delete-model in privacy after download and returns to the rule list', async () => {
+  localStorage.setItem(agentConsentStorageKey('school:a'), serializeAgentConsent('accepted'));
+  render(<SettingsPage />);
+  fireEvent.click(screen.getByRole('button', { name: '隱私' }));
+  expect(await screen.findByRole('button', { name: AGENT_DELETE_MODEL_ACTION })).toBeTruthy();
+  expect(screen.queryByRole('switch')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: AGENT_DELETE_MODEL_ACTION }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: AGENT_DELETE_MODEL_ACTION })).toBeNull());
+  expect(agentRuntime.deleteTodaySenseModelCache).toHaveBeenCalled();
+  expect(parseAgentConsent(localStorage.getItem(agentConsentStorageKey('school:a')))).toBe('unset');
+  expect(screen.getByText(AGENT_MODEL_DELETED_TEXT)).toBeTruthy();
 });
 it('locks profile fields while a save is pending so readback cannot erase a newer draft', async () => {
   state.saveProfile.mockImplementation(() => new Promise(() => {}));

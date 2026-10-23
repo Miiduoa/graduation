@@ -24,6 +24,8 @@ class PrepareTests(unittest.TestCase):
     def test_candidate_copies_only_reviewed_sources(self):
         paths = prepare.extension_files()
         self.assertEqual(len(paths), 4)
+        self.assertIn('apps/api/src/migrations/278_course_access_review.sql', paths)
+        self.assertNotIn('apps/api/migrations/278_course_access_review.sql', paths)
         self.assertTrue(all(path.is_file() for path in paths.values()))
         self.assertNotIn('source.json', paths)
 

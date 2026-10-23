@@ -28,6 +28,13 @@ function result(name = '教師 A 的課程') {
     tasks: [],
   };
 }
+const liveQr = {
+  success: true,
+  active: true,
+  sessionId: 'live-1',
+  qrToken: 'A'.repeat(43),
+  qrExpiresAt: '2099-01-01T00:00:00.000Z',
+} as const;
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: Error) => void;
@@ -110,7 +117,7 @@ test('starting attendance prevents duplicate taps, retries the same request and 
     attempt.reject(new Error('timeout'));
   });
   await view.findByText('無法開始「教師 A 的課程」的點名，請確認連線後重試。');
-  jest.mocked(startAttendanceSession).mockResolvedValueOnce({ success: true, sessionId: 'live-1' });
+  jest.mocked(startAttendanceSession).mockResolvedValueOnce(liveQr);
   fireEvent.press(view.getByRole('button', { name: '教師 A 的課程，開始點名' }));
   await waitFor(() =>
     expect(safeNavigate).toHaveBeenCalledWith({}, 'Classroom', {
@@ -119,6 +126,11 @@ test('starting attendance prevents duplicate taps, retries the same request and 
       sessionId: 'live-1',
     }),
   );
+  expect(jest.mocked(startAttendanceSession).mock.calls[0][0]).toEqual({
+    courseSpaceId: '教師 A 的課程',
+    requestId: 'attendance-request-1',
+    qrExpiryMinutes: 10,
+  });
   expect(jest.mocked(startAttendanceSession).mock.calls[0][0]).toEqual(
     jest.mocked(startAttendanceSession).mock.calls[1][0],
   );
@@ -134,7 +146,7 @@ test('a late attendance response after account switch never opens the old teache
   view.rerender(<TeacherTodayScreen />);
   await view.findByText('教師 B 的課程');
   await act(async () => {
-    pending.resolve({ success: true, sessionId: 'old-live' });
+    pending.resolve({ ...liveQr, sessionId: 'old-live' });
   });
   expect(safeNavigate).not.toHaveBeenCalled();
 });

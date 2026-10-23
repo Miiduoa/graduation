@@ -1,4 +1,13 @@
-import { PERIOD_TIMES } from '../timetable/periods';
+import {
+  PERIOD_PROFILE_TITLES,
+  isPeriodProfileId,
+  mapClockToPeriodSlots,
+  periodCount,
+  periodLabelAt,
+  periodSlots,
+  periodTimes,
+  type PeriodProfileId,
+} from '../timetable/periods';
 import type { ImportIssue, PersonalImportOptions, PersonalImportRow } from './types';
 
 export function normalizePersonalImportText(value: string): string {
@@ -23,18 +32,29 @@ export function isPersonalImportTime(value: string): boolean {
   return /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value);
 }
 
+function profileOf(
+  options: Pick<PersonalImportOptions, 'periodProfile'> = {},
+): PeriodProfileId | undefined {
+  return isPeriodProfileId(options.periodProfile) ? options.periodProfile : undefined;
+}
+
+function periodGuide(profile: PeriodProfileId): string {
+  const labels = periodSlots(profile).map((slot) => slot.label).join('、');
+  return `${PERIOD_PROFILE_TITLES[profile]}節次 ${labels}`;
+}
+
 /** Only exact period boundaries are converted; a nearby clock time is not evidence of a period. */
 export function mapPersonalImportPeriods(
   row: PersonalImportRow,
   options: Pick<PersonalImportOptions, 'periodProfile'> = {},
 ): PersonalImportRow {
-  if (row.kind !== 'timetable' || options.periodProfile !== 'pu') return row;
-  const start = PERIOD_TIMES.findIndex(([time]) => time === row.startTime);
-  const end = PERIOD_TIMES.findIndex(([, time]) => time === row.endTime);
+  const profile = profileOf(options);
+  if (row.kind !== 'timetable' || !profile) return row;
+  const mapped = mapClockToPeriodSlots(row.startTime, row.endTime, profile);
   return {
     ...row,
-    ...(row.startPeriod === undefined && start >= 0 ? { startPeriod: start + 1 } : {}),
-    ...(row.endPeriod === undefined && end >= 0 ? { endPeriod: end + 1 } : {}),
+    ...(row.startPeriod === undefined && mapped.start ? { startPeriod: mapped.start } : {}),
+    ...(row.endPeriod === undefined && mapped.end ? { endPeriod: mapped.end } : {}),
   };
 }
 
@@ -97,26 +117,30 @@ export function validatePersonalImportRow(
   }
   if (row.kind === 'timetable') {
     const mapped = mapPersonalImportPeriods(row, options);
-    const pu = options.periodProfile === 'pu';
-    if (!Number.isInteger(row.dayOfWeek) || row.dayOfWeek! < 1 || row.dayOfWeek! > (pu ? 5 : 7))
+    const profile = profileOf(options);
+    const slots = profile ? periodCount(profile) : undefined;
+    const weekdays = profile ? 5 : 7;
+    if (!Number.isInteger(row.dayOfWeek) || row.dayOfWeek! < 1 || row.dayOfWeek! > weekdays)
       error(
         'invalid-weekday',
         'dayOfWeek',
-        pu ? '靜宜課表目前支援星期一至五，請確認上課日。' : '請確認上課日（星期一至日）。',
+        profile
+          ? `${PERIOD_PROFILE_TITLES[profile]}課表目前支援星期一至五，請確認上課日。`
+          : '請確認上課日（星期一至日）。',
       );
     const hasPeriods = mapped.startPeriod !== undefined || mapped.endPeriod !== undefined;
-    if (pu || hasPeriods || (!row.startTime && !row.endTime && !row.periodLabel?.trim())) {
+    if (profile || hasPeriods || (!row.startTime && !row.endTime && !row.periodLabel?.trim())) {
       for (const field of ['startPeriod', 'endPeriod'] as const) {
         if (
           !Number.isInteger(mapped[field]) ||
           mapped[field]! < 1 ||
-          mapped[field]! > (pu ? 13 : 99)
+          mapped[field]! > (slots ?? 99)
         )
           error(
             'invalid-period',
             field,
-            pu
-              ? '請確認第 1 至 13 節；時間不符節次時需要手動修正。'
+            profile
+              ? `請確認${periodGuide(profile)}；時間不符節次時需要手動修正。`
               : '請確認學校原始節次，或改填完整上課時間。',
           );
       }
@@ -130,30 +154,39 @@ export function validatePersonalImportRow(
     for (const field of ['startTime', 'endTime'] as const) {
       if (row[field] && !isPersonalImportTime(row[field]!))
         error('invalid-time', field, '時間格式請使用 24 小時制，例如 09:10。');
-      if (!pu && !hasPeriods && !row.periodLabel?.trim() && !row[field])
+      if (!profile && !hasPeriods && !row.periodLabel?.trim() && !row[field])
         error('missing-time', field, '請填寫完整的開始與結束時間。');
     }
     if (row.startTime && row.endTime && row.endTime <= row.startTime)
       error('reversed-times', 'endTime', '結束時間必須晚於開始時間。');
-    if (options.periodProfile === 'pu') {
+    if (profile) {
+      const times = periodTimes(profile);
       if (
         row.startTime &&
         mapped.startPeriod &&
-        PERIOD_TIMES[mapped.startPeriod - 1]?.[0] !== row.startTime
+        times[mapped.startPeriod - 1]?.[0] !== row.startTime
       )
-        error('period-time-conflict', 'startTime', '開始時間與所選節次不一致，請確認。');
+        error(
+          'period-time-conflict',
+          'startTime',
+          `開始時間與所選節次（${periodLabelAt(mapped.startPeriod, profile)}）不一致，請確認。`,
+        );
       if (
         row.endTime &&
         mapped.endPeriod &&
-        PERIOD_TIMES[mapped.endPeriod - 1]?.[1] !== row.endTime
+        times[mapped.endPeriod - 1]?.[1] !== row.endTime
       )
-        error('period-time-conflict', 'endTime', '結束時間與所選節次不一致，請確認。');
+        error(
+          'period-time-conflict',
+          'endTime',
+          `結束時間與所選節次（${periodLabelAt(mapped.endPeriod, profile)}）不一致，請確認。`,
+        );
     } else {
       issues.push({
         code: 'personal-timetable-only',
         severity: 'warning',
         rowId: row.id,
-        message: '已保留原始時間與節次；這所學校尚未設定課表格線，不會換算成靜宜節次。',
+        message: '已保留原始時間與節次；這所學校尚未設定課表格線，不會換算成節次格子。',
       });
     }
   }

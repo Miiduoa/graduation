@@ -53,6 +53,42 @@ it('updates all open pages after another tab changes or clears preferences', () 
   expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
   expect(document.documentElement.dataset.density).toBe('comfortable');
 });
+it('matches the browser chrome to the chosen theme and follows later system changes', () => {
+  const metas = ['light', 'dark'].map((mode) => {
+    const meta = document.createElement('meta');
+    meta.name = 'theme-color';
+    meta.media = `(prefers-color-scheme: ${mode})`;
+    meta.content = '#ffffff';
+    document.head.append(meta);
+    return meta;
+  });
+  try {
+    setPreferences({ theme: 'dark' });
+    render(<AppearancePreferences />);
+    for (const meta of metas) {
+      expect(meta.content).toBe('#000000');
+      expect(meta.hasAttribute('media')).toBe(false);
+    }
+    act(() => {
+      systemDark = true;
+      setPreferences({ theme: 'light' });
+      window.dispatchEvent(new StorageEvent('storage', { key: webPreferencesStorageKey }));
+    });
+    expect(metas.every((meta) => meta.content === '#f8f7f3')).toBe(true);
+    act(() => {
+      setPreferences({ theme: 'system' });
+      window.dispatchEvent(new StorageEvent('storage', { key: webPreferencesStorageKey }));
+    });
+    expect(metas.every((meta) => meta.content === '#000000')).toBe(true);
+    act(() => {
+      systemDark = false;
+      change?.();
+    });
+    expect(metas.every((meta) => meta.content === '#f8f7f3')).toBe(true);
+  } finally {
+    metas.forEach((meta) => meta.remove());
+  }
+});
 it('recalculates a custom accent when the system theme changes and releases listeners', () => {
   setPreferences({ themeColor: '#FF6B35' });
   const { unmount } = render(<AppearancePreferences />);

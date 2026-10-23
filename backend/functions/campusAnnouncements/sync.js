@@ -1,10 +1,18 @@
 'use strict';
 
 const { FieldValue, Timestamp } = require('firebase-admin/firestore');
-const { schoolConfig, listSources, allSources, SOURCE_DOWN_EMPTY } = require('./catalog');
+const { schoolConfig, listSources, listSyncSchoolIds, SOURCE_UNAVAILABLE } = require('./catalog');
 const { extractFromHtml, countDrop } = require('./extract');
 const { politeFetch } = require('./politeFetch');
 const { announcementDocId, isLoginPortalUrl } = require('./url');
+const {
+  parseAnnouncementDate,
+  selectStudentAnnouncements,
+  selectOfficialAnnouncements,
+  tallyStudentWallFilter,
+} = require('./quality');
+
+const RETENTION_DAYS = 180;
 
 const UNAVAILABLE = 'unavailable';
 const HEALTHY = 'healthy';
@@ -45,25 +53,40 @@ function previewItems(source, items) {
     summary: item.summary,
     originalUrl: item.originalUrl,
     publishedAt: item.publishedAt || null,
-    office: source.office,
+    office: item.office || source.office,
+    studentFeed: item.studentFeed !== false,
+    audience: item.audience || 'student',
     path: schoolAnnouncementPath(source.schoolId, announcementDocId(source.schoolId, item.originalUrl)),
   }));
+}
+
+async function hideAnnouncementDoc(schoolId, doc) {
+  assertSchoolScopedWrite(schoolId, doc.ref);
+  await doc.ref.set(
+    {
+      studentFeed: false,
+      visible: false,
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
+function shouldHideLeftoverScrape(data, now = new Date()) {
+  if (data.origin !== 'public_scrape') return false;
+  const published = parseAnnouncementDate(data.publishedAt);
+  if (!published) return false;
+  return now.getTime() - new Date(published).getTime() > RETENTION_DAYS * 24 * 60 * 60 * 1000;
 }
 
 async function hideSourceAnnouncements(db, source, deps = {}) {
   if (isDryRun(deps) || !db) return;
   const snap = await announcementsCol(db, source.schoolId).where('sourceId', '==', source.sourceId).get();
-  const batch = db.batch ? db.batch() : null;
-  const writes = [];
   for (const doc of snap.docs || []) {
     const data = doc.data();
     if (data.origin !== 'public_scrape') continue;
-    assertSchoolScopedWrite(source.schoolId, doc.ref);
-    if (batch) batch.delete(doc.ref);
-    else writes.push(doc.ref.delete());
+    await hideAnnouncementDoc(source.schoolId, doc);
   }
-  if (batch && (snap.docs || []).length) await batch.commit();
-  else await Promise.all(writes);
 }
 
 async function writeHealth(db, source, health, deps = {}) {
@@ -81,7 +104,7 @@ async function writeHealth(db, source, health, deps = {}) {
     parser: health.parser || '',
     fingerprint: health.fingerprint || '',
     lastCheckedAt: FieldValue.serverTimestamp(),
-    message: health.status === UNAVAILABLE ? SOURCE_DOWN_EMPTY : '',
+    message: health.status === UNAVAILABLE ? SOURCE_UNAVAILABLE : '',
   };
   if (health.lastSuccessAt) payload.lastSuccessAt = health.lastSuccessAt;
   if (isDryRun(deps) || !db) return;
@@ -120,13 +143,16 @@ async function writeAnnouncement(db, source, item, deps = {}) {
     body: item.body,
     summary: item.summary,
     originalUrl: item.originalUrl,
-    source: source.office,
-    office: source.office,
+    source: item.office || source.office,
+    office: item.office || source.office,
     scope: item.scope,
     category: item.category,
-    publishedAt: item.publishedAt ? Timestamp.fromDate(new Date(item.publishedAt)) : Timestamp.now(),
+    publishedAt: item.publishedAt ? Timestamp.fromDate(new Date(item.publishedAt)) : null,
     pinned: false,
-    visible: true,
+    visible: item.visible !== false,
+    studentFeed: item.studentFeed !== false,
+    audience: item.audience || 'student',
+    rank: item.rank || 'normal',
     updatedAt: FieldValue.serverTimestamp(),
   });
   return id;
@@ -162,22 +188,20 @@ async function syncSource(source, deps = {}) {
       };
     }
     const extracted = await extractFromHtml(fetched.html, source);
+    const parsedCount = extracted.parsedCount ?? extracted.items.length;
     const items = previewItems(source, extracted.items);
-    if (
-      extracted.items.length === 0 ||
-      countDrop(previous.itemCount, extracted.items.length)
-    ) {
+    if (parsedCount === 0 || countDrop(previous.itemCount, parsedCount)) {
       await writeHealth(db, source, {
         status: UNAVAILABLE,
-        reason: extracted.items.length === 0 ? 'parse_empty' : 'count_drop',
-        itemCount: extracted.items.length,
+        reason: parsedCount === 0 ? 'parse_empty' : 'count_drop',
+        itemCount: parsedCount,
         parser: extracted.parser,
         fingerprint: extracted.fingerprint,
       }, deps);
       return {
         status: UNAVAILABLE,
-        reason: extracted.items.length === 0 ? 'parse_empty' : 'count_drop',
-        itemCount: extracted.items.length,
+        reason: parsedCount === 0 ? 'parse_empty' : 'count_drop',
+        itemCount: parsedCount,
         items,
         dryRun,
       };
@@ -191,23 +215,22 @@ async function syncSource(source, deps = {}) {
         .where('sourceId', '==', source.sourceId)
         .get();
       for (const doc of existing.docs || []) {
-        if (!keep.has(doc.id) && doc.data().origin === 'public_scrape') {
-          assertSchoolScopedWrite(source.schoolId, doc.ref);
-          await doc.ref.delete();
+        if (!keep.has(doc.id) && shouldHideLeftoverScrape(doc.data() || {}, new Date())) {
+          await hideAnnouncementDoc(source.schoolId, doc);
         }
       }
     }
     await writeHealth(db, source, {
       status: HEALTHY,
       reason: '',
-      itemCount: extracted.items.length,
+      itemCount: parsedCount,
       parser: extracted.parser,
       fingerprint: extracted.fingerprint,
       lastSuccessAt: Timestamp.now(),
     }, deps);
     return {
       status: HEALTHY,
-      itemCount: extracted.items.length,
+      itemCount: parsedCount,
       parser: extracted.parser,
       items,
       dryRun,
@@ -228,45 +251,95 @@ async function syncSource(source, deps = {}) {
   }
 }
 
+function schoolFilterTally(results, now) {
+  const items = (results || []).flatMap((item) => item.items || []);
+  return tallyStudentWallFilter(items, results, now);
+}
+
 async function syncSchool(schoolId, deps = {}) {
   const school = schoolConfig(schoolId);
-  if (!school) return { schoolId, status: UNAVAILABLE, sources: [] };
+  if (!school) return { schoolId, status: UNAVAILABLE, sources: [], fetched: 0, written: 0 };
   if (!school.sources.length) {
-    return { schoolId, status: UNAVAILABLE, reason: 'no_public_sources', sources: [] };
+    return {
+      schoolId,
+      status: UNAVAILABLE,
+      reason: 'no_public_sources',
+      sources: [],
+      fetched: 0,
+      written: 0,
+    };
   }
   const results = [];
   for (const source of listSources(schoolId)) {
-    results.push({ sourceId: source.sourceId, office: source.office, ...(await syncSource(source, deps)) });
+    try {
+      results.push({
+        sourceId: source.sourceId,
+        office: source.office,
+        ...(await syncSource(source, deps)),
+      });
+    } catch (error) {
+      const reason = error.message || 'sync_failed';
+      console.error(`Announcement sync skipped ${schoolId}/${source.sourceId}: ${reason}`);
+      results.push({
+        sourceId: source.sourceId,
+        office: source.office,
+        status: UNAVAILABLE,
+        reason,
+        itemCount: 0,
+        items: [],
+        dryRun: isDryRun(deps),
+      });
+    }
   }
   const healthy = results.filter((item) => item.status === HEALTHY);
+  const items = results.flatMap((item) => item.items || []);
+  const fetched = results.reduce((sum, item) => sum + (item.itemCount || 0), 0);
+  const written = isDryRun(deps)
+    ? 0
+    : results.filter((item) => item.status === HEALTHY).reduce((sum, item) => sum + (item.itemCount || 0), 0);
   return {
     schoolId,
     status: healthy.length ? HEALTHY : UNAVAILABLE,
     sources: results,
+    fetched,
+    written,
+    studentWallCount: selectStudentAnnouncements(items, results).length,
+    officialCount: selectOfficialAnnouncements(items, results).length,
+    filterTally: schoolFilterTally(results),
   };
 }
 
 async function syncConfiguredSchools(deps = {}) {
-  const bySchool = new Map();
-  for (const source of allSources()) {
-    if (!bySchool.has(source.schoolId)) bySchool.set(source.schoolId, []);
-    bySchool.get(source.schoolId).push(source);
-  }
+  const schoolIds =
+    Array.isArray(deps.schoolIds) && deps.schoolIds.length ? deps.schoolIds : listSyncSchoolIds();
   const results = [];
-  for (const schoolId of bySchool.keys()) {
-    results.push(await syncSchool(schoolId, deps));
+  for (const schoolId of schoolIds) {
+    try {
+      results.push(await syncSchool(schoolId, deps));
+    } catch (error) {
+      const reason = error.message || 'sync_failed';
+      console.error(`Announcement sync skipped ${schoolId}: ${reason}`);
+      results.push({
+        schoolId,
+        status: UNAVAILABLE,
+        reason,
+        sources: [],
+        fetched: 0,
+        written: 0,
+      });
+    }
   }
   return results;
 }
 
-function visibleAnnouncements(rows, _sources) {
-  return (rows || []).filter((row) => row.visible !== false);
+function visibleAnnouncements(rows, sources, now) {
+  return selectStudentAnnouncements(rows, sources, now);
 }
 
 function feedStatus(announcements, sources) {
   const listed = sources || [];
   if (listed.length && listed.every((item) => item.status === UNAVAILABLE) && announcements.length === 0) {
-    return { status: UNAVAILABLE, message: SOURCE_DOWN_EMPTY };
+    return { status: UNAVAILABLE, message: SOURCE_UNAVAILABLE };
   }
   return { status: 'ready', message: '' };
 }
@@ -277,7 +350,9 @@ module.exports = {
   isDryRun,
   schoolAnnouncementPath,
   assertSchoolScopedWrite,
+  RETENTION_DAYS,
   previewItems,
+  shouldHideLeftoverScrape,
   syncSource,
   syncSchool,
   syncConfiguredSchools,

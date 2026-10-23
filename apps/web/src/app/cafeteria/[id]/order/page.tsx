@@ -25,12 +25,19 @@ export default function HonestOrderPage(props: {
   const search = props.searchParams ? use(props.searchParams) : undefined;
   const context = useBrowsingSchoolPageContext(search);
   if (!context.ready) {
-    return <SiteShell title="餐廳"><SchoolScopePlaceholder /></SiteShell>;
+    return (
+      <SiteShell title="餐廳">
+        <SchoolScopePlaceholder />
+      </SiteShell>
+    );
   }
   return <OrderContent key={`${context.schoolId}:${id}`} id={id} context={context} />;
 }
 
-function OrderContent({ id, context }: {
+function OrderContent({
+  id,
+  context,
+}: {
   id: string;
   context: ReturnType<typeof useBrowsingSchoolPageContext>;
 }) {
@@ -40,10 +47,16 @@ function OrderContent({ id, context }: {
   useEffect(() => {
     let active = true;
     void loadStorefront(context.schoolId, id).then(
-      (value) => { if (active) setShop(value); },
-      () => { if (active) setShop(null); },
+      (value) => {
+        if (active) setShop(value);
+      },
+      () => {
+        if (active) setShop(null);
+      },
     );
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [context.schoolId, id]);
   const action = studentCafeteriaAction({
     merchantMode: shop?.merchantMode,
@@ -66,7 +79,10 @@ function OrderContent({ id, context }: {
         <section>
           <h2>目前沒有可使用的店家訂餐連結</h2>
           <p>此店家可能尚未提供訂餐資訊，請回店面查看其他服務。</p>
-          <Link className="btn" href={`/cafeteria/${encodeURIComponent(id)}?schoolId=${encodeURIComponent(context.schoolId)}`}>
+          <Link
+            className="btn"
+            href={`/cafeteria/${encodeURIComponent(id)}?schoolId=${encodeURIComponent(context.schoolId)}`}
+          >
             返回店面
           </Link>
         </section>
@@ -75,7 +91,10 @@ function OrderContent({ id, context }: {
         <section>
           <h2>這間店還沒有可打開的訂餐連結</h2>
           <p>沒串接的店可以先上架成只有連結；目前這間還沒提供 https 訂餐網址。</p>
-          <Link className="btn" href={`/cafeteria/${encodeURIComponent(id)}?schoolId=${encodeURIComponent(context.schoolId)}`}>
+          <Link
+            className="btn"
+            href={`/cafeteria/${encodeURIComponent(id)}?schoolId=${encodeURIComponent(context.schoolId)}`}
+          >
             返回店面
           </Link>
         </section>
@@ -108,7 +127,10 @@ function OrderContent({ id, context }: {
             </a>
           </p>
           <p>{SHOWCASE_ORDER_CAPTION}</p>
-          <Link className="btn" href={`/cafeteria/${encodeURIComponent(id)}?schoolId=${encodeURIComponent(context.schoolId)}`}>
+          <Link
+            className="btn"
+            href={`/cafeteria/${encodeURIComponent(id)}?schoolId=${encodeURIComponent(context.schoolId)}`}
+          >
             返回店面
           </Link>
         </section>

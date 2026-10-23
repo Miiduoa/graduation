@@ -12,13 +12,22 @@ on:
         required: true
         type: string
       transit_profile:
-        description: 'live-tdx requires real arrivals; official-links-only requires both TDX variables absent and truthful unavailable UI'
+        description: 'live-tdx requires live arrivals; static-catalog verifies free Taichung stations without TDX keys; official-links-only is for legacy releases'
         required: true
         type: choice
         default: live-tdx
         options:
           - live-tdx
+          - static-catalog
           - official-links-only
+      assignment_file_submit_enabled:
+        description: 'Bake ASSIGNMENT_FILE_SUBMIT_ENABLED into the Web image so /classroom gets camera=(self). Default false; repo variable ASSIGNMENT_FILE_SUBMIT_ENABLED=true also enables it.'
+        required: false
+        type: choice
+        default: 'false'
+        options:
+          - 'false'
+          - 'true'
   pull_request:
     paths:
       - 'deploy/web/release-check*'
@@ -35,6 +44,19 @@ permissions:
   contents: read
 
 jobs:
+  reject-non-main:
+    if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail unless this is main
+        run: |
+          set -euo pipefail
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "::error::正式環境（production）的 Web 發布只能從 main 觸發。目前 ref 是 ${{ github.ref }}。"
+            exit 1
+          fi
+
   guards:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -66,6 +88,7 @@ jobs:
       CAMPUS_RELEASE_SHA: ${{ inputs.expected_revision }}
       NEXT_PUBLIC_SITE_URL: https://nuni.tw
       NEXT_PUBLIC_FUNCTIONS_BASE_URL: ${{ vars.NEXT_PUBLIC_FUNCTIONS_BASE_URL }}
+      ASSIGNMENT_FILE_SUBMIT_ENABLED: ${{ inputs.assignment_file_submit_enabled == 'true' && 'true' || vars.ASSIGNMENT_FILE_SUBMIT_ENABLED == 'true' && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -115,7 +138,8 @@ jobs:
             --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID \
             --build-arg NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET \
             --build-arg NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID \
-            --build-arg NEXT_PUBLIC_FIREBASE_APP_ID .
+            --build-arg NEXT_PUBLIC_FIREBASE_APP_ID \
+            --build-arg ASSIGNMENT_FILE_SUBMIT_ENABLED .
           docker run -d --name campus-web-release-check -p 127.0.0.1:18080:3000 \
             -e CAMPUS_LEGACY_ENABLED=false "$IMAGE"
           trap 'docker rm -f campus-web-release-check >/dev/null 2>&1 || true' EXIT

@@ -7,6 +7,8 @@ import {
 } from '@campus/shared/src/nuni';
 import {
   NUNI_HANDLE,
+  nuniBffFilePut,
+  nuniBffRequest,
   parseNuniLoginSession,
   parseNuniLoginTransaction,
   type NuniTransport,
@@ -340,6 +342,94 @@ export class NuniSessionController {
         });
     } finally {
       this.loggingOut = false;
+    }
+  };
+  bffRequest = async (
+    path: string,
+    expectedContext: string,
+    input?: Record<string, unknown>,
+    _method?: 'PUT',
+    _query?: Record<string, string>,
+  ): Promise<unknown> => {
+    const session = this.state.session;
+    if (
+      !session ||
+      session.context !== expectedContext ||
+      this.state.loading ||
+      this.state.pendingLogout ||
+      !this.record
+    ) {
+      throw new NuniError(409, 'SESSION_CHANGED');
+    }
+    if (this.record.expiresAt <= this.now()) {
+      await this.refresh();
+      throw new NuniError(401, 'SESSION_EXPIRED');
+    }
+    const run = this.generation;
+    try {
+      const controller = new AbortController();
+      this.controllers.add(controller);
+      try {
+        const result = await nuniBffRequest(
+          path,
+          this.record.sessionHandle,
+          input,
+          controller.signal,
+        );
+        if (!this.current(run) || this.state.session?.context !== expectedContext)
+          throw new NuniError(409, 'SESSION_CHANGED');
+        return result;
+      } finally {
+        this.controllers.delete(controller);
+      }
+    } catch (error) {
+      if (!this.current(run)) throw new NuniError(409, 'SESSION_CHANGED');
+      if (error instanceof NuniError && error.status === 401) await this.refresh();
+      throw error;
+    }
+  };
+  upload = async (
+    path: string,
+    expectedContext: string,
+    body: Uint8Array,
+    contentType: string,
+  ): Promise<unknown> => {
+    const session = this.state.session;
+    if (
+      !session ||
+      session.context !== expectedContext ||
+      this.state.loading ||
+      this.state.pendingLogout ||
+      !this.record
+    ) {
+      throw new NuniError(409, 'SESSION_CHANGED');
+    }
+    if (this.record.expiresAt <= this.now()) {
+      await this.refresh();
+      throw new NuniError(401, 'SESSION_EXPIRED');
+    }
+    const run = this.generation;
+    try {
+      const controller = new AbortController();
+      this.controllers.add(controller);
+      try {
+        const result = await nuniBffFilePut(
+          path,
+          this.record.sessionHandle,
+          body,
+          contentType,
+          controller.signal,
+        );
+        if (!this.current(run) || this.state.session?.context !== expectedContext)
+          throw new NuniError(409, 'SESSION_CHANGED');
+        return result;
+      } finally {
+        this.controllers.delete(controller);
+      }
+    } catch (error) {
+      if (!this.current(run)) throw new NuniError(409, 'SESSION_CHANGED');
+      if (error instanceof NuniError && error.status === 401) await this.refresh();
+      throw error;
     }
   };
   request = async (

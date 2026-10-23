@@ -1,10 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   appendSchoolContext,
   buildSsoCallbackPath,
+  collapseInternalPathHash,
+  currentReturnPath,
   extractSchoolContextFromPath,
+  followLoginHref,
   loginHref,
+  navigateAfterLogin,
   readLoginReturnParam,
   sanitizeInternalPath,
 } from './navigation';
@@ -73,6 +77,68 @@ it('builds a login href that returns to the original storefront', () => {
   expect(loginHref('/cafeteria/stall?schoolId=pu')).toBe(
     '/login?returnUrl=%2Fcafeteria%2Fstall%3FschoolId%3Dpu',
   );
+});
+
+it('keeps a single return fragment and ends the login href with # so client routing cannot keep the page hash', () => {
+  expect(collapseInternalPathHash('/course/cs101#assignment-hw-3#assignment-hw-3')).toBe(
+    '/course/cs101#assignment-hw-3',
+  );
+  expect(currentReturnPath('/course/cs101', '', '#assignment-hw-3')).toBe(
+    '/course/cs101#assignment-hw-3',
+  );
+  expect(currentReturnPath('/course/cs101', '', '#assignment-hw-3#assignment-hw-3')).toBe(
+    '/course/cs101#assignment-hw-3',
+  );
+  expect(currentReturnPath('/course/cs101', 'view=work', 'assignment-hw-3')).toBe(
+    '/course/cs101?view=work#assignment-hw-3',
+  );
+  expect(loginHref('/course/cs101#assignment-hw-3')).toBe(
+    '/login?returnUrl=%2Fcourse%2Fcs101%23assignment-hw-3#',
+  );
+  expect(loginHref('/course/cs101#assignment-hw-3#assignment-hw-3')).toBe(
+    '/login?returnUrl=%2Fcourse%2Fcs101%23assignment-hw-3#',
+  );
+  expect(sanitizeInternalPath('https://evil.test#assignment-hw-3')).toBe('/');
+  expect(loginHref('https://evil.test#assignment-hw-3')).toBe('/login?returnUrl=%2F');
+});
+
+it('follows a login href with a full navigation so the current page hash cannot stack', () => {
+  const assign = vi.fn();
+  const setAttribute = vi.fn();
+  vi.stubGlobal('location', { ...window.location, assign });
+  try {
+    followLoginHref(
+      { preventDefault() {}, currentTarget: { setAttribute } },
+      currentReturnPath('/course/cs101', '', '#assignment-hw-3#assignment-hw-3'),
+    );
+    expect(setAttribute).toHaveBeenCalledWith(
+      'href',
+      '/login?returnUrl=%2Fcourse%2Fcs101%23assignment-hw-3#',
+    );
+    expect(assign).toHaveBeenCalledWith('/login?returnUrl=%2Fcourse%2Fcs101%23assignment-hw-3#');
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it('clears a leftover login fragment before returning to a single course-work hash', () => {
+  const replace = vi.fn();
+  window.history.replaceState(
+    null,
+    '',
+    '/login?returnUrl=%2Fcourse%2Fcs101%23assignment-hw-3#assignment-hw-3',
+  );
+  try {
+    navigateAfterLogin(replace, '/course/cs101#assignment-hw-3#assignment-hw-3');
+    expect(replace).toHaveBeenCalledWith('/course/cs101#assignment-hw-3');
+    expect(window.location.hash).toBe('');
+  } finally {
+    window.history.replaceState(null, '', '/');
+  }
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 it('reads returnUrl, returnTo or redirect and drops off-site values', () => {

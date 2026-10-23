@@ -1,4 +1,4 @@
-import { PERIOD_COUNT, periodEnd, periodStart } from './periods';
+import { MAX_PERIOD_SLOTS, periodEnd, periodStart, type PeriodProfileId } from './periods';
 
 export const COURSE_COLORS = ['violet', 'blue', 'mint', 'orange', 'pink', 'lime', 'gray'] as const;
 export type CourseColor = (typeof COURSE_COLORS)[number];
@@ -22,6 +22,15 @@ export type TimetableMeta = {
   credits: number;
   title: string;
 };
+
+/** Only suppress an imported/manual duplicate when every displayed detail agrees. */
+export function samePersonalCourse(left: PersonalCourse, right: PersonalCourse): boolean {
+  const text = (value: string) => value.trim().normalize('NFKC');
+  return left.day === right.day && left.start === right.start && left.end === right.end &&
+    text(left.name) === text(right.name) &&
+    text(left.teacher) === text(right.teacher) &&
+    text(left.room) === text(right.room);
+}
 
 const COLOR_SET = new Set<string>(COURSE_COLORS);
 
@@ -54,17 +63,21 @@ export function createCourseId(): string {
   return `local-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function cleanCourse(input: Partial<PersonalCourse> | Record<string, unknown> = {}): PersonalCourse {
+export function cleanCourse(
+  input: Partial<PersonalCourse> | Record<string, unknown> = {},
+  options: { periodCount?: number } = {},
+): PersonalCourse {
   let day = Number(input.day);
   let start = Number(input.start);
   let end = Number(input.end);
+  const slots = options.periodCount ?? MAX_PERIOD_SLOTS;
   if (!Number.isInteger(day) || day < 0 || day > 5) day = 0;
   if (day === 0) {
     start = 0;
     end = 0;
   } else {
-    if (!Number.isInteger(start) || start < 1 || start > PERIOD_COUNT) start = 1;
-    if (!Number.isInteger(end) || end < start || end > PERIOD_COUNT) end = start;
+    if (!Number.isInteger(start) || start < 1 || start > slots) start = 1;
+    if (!Number.isInteger(end) || end < start || end > slots) end = start;
   }
   const color = COLOR_SET.has(String(input.color)) ? (input.color as CourseColor) : 'gray';
   return {
@@ -94,9 +107,12 @@ export function cleanMeta(value: Partial<TimetableMeta> | Record<string, unknown
   };
 }
 
-export function courseTimeLabel(course: Pick<PersonalCourse, 'day' | 'start' | 'end'>): string {
+export function courseTimeLabel(
+  course: Pick<PersonalCourse, 'day' | 'start' | 'end'>,
+  profile: PeriodProfileId = 'pu',
+): string {
   if (course.day === 0 || course.start === 0) return '時間待定';
-  return `${periodStart(course.start)}–${periodEnd(course.end)}`;
+  return `${periodStart(course.start, profile)}–${periodEnd(course.end, profile)}`;
 }
 
 export function normalizeCourseName(name: string): string {

@@ -4,6 +4,8 @@ import {
   formatDistance,
   loadMapFavorites,
   loadMapLocations,
+  MapSourceTimeoutError,
+  withTimeout,
   setMapFavorite,
   type MapLocation,
 } from './mapService';
@@ -238,4 +240,22 @@ it('excludes explicitly marked demo data but does not discard verified POIs mere
     entry('tw-nchu-poi-2', { name: '圖書館', lat: 24.12, lng: 120.67 }),
   ));
   expect((await loadMapLocations('tw-nchu')).map((place) => place.id)).toEqual(['tw-nchu-poi-2']);
+});
+
+it('fails a stuck map source after the timeout instead of loading forever', async () => {
+  vi.useFakeTimers();
+  try {
+    vi.mocked(getDocsFromServer).mockReturnValueOnce(new Promise(() => {}) as never);
+    const result = loadMapLocations('pu', { timeoutMs: 50 });
+    const settled = expect(result).rejects.toBeInstanceOf(MapSourceTimeoutError);
+    await vi.advanceTimersByTimeAsync(50);
+    await settled;
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('passes through a source answer that arrives before the timeout', async () => {
+  await expect(withTimeout(Promise.resolve(['ok']), 1000)).resolves.toEqual(['ok']);
+  await expect(withTimeout(Promise.reject(new Error('denied')), 1000)).rejects.toThrow('denied');
 });

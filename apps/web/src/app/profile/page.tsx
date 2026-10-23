@@ -148,6 +148,13 @@ export default function ProfilePage() {
               <h2>暫時無法確認學校帳號</h2>
               <p>{loadFailureCopy(error, { online: navigator.onLine })}。</p>
             </section>
+          ) : options.loading ? (
+            <p role="status">正在確認學校登入方式…</p>
+          ) : options.error ? (
+            <section className={styles.panel} role="alert">
+              <h2>暫時無法確認學校登入方式</h2>
+              <button type="button" className="btn" onClick={options.retry}>重新確認</button>
+            </section>
           ) : schoolLoginReady ? (
             <section className={styles.panel}>
               <h2>{hasCourseAccount ? '連線學校帳號，查看學校資料' : '登入後，查看你的資料'}</h2>

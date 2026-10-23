@@ -26,7 +26,8 @@ import {
   useFoodLoad,
   useFoodMutation,
 } from './NuniFoodUi';
-import { isAppOnlineOrderingEnabled, ONLINE_ORDERING_OFF_TEXT } from '../../features/onlineOrdering';
+import { foodPageIntro } from '@campus/shared/src/foodPageCopy';
+import { isMobileOnlineOrderingEnabled } from '../../utils/onlineOrdering';
 
 const page = { padding: 20, paddingBottom: 48, gap: 16 };
 const key = () => `food-${Crypto.randomUUID()}`;
@@ -50,7 +51,7 @@ function FoodAccount({ context }: { context: string }) {
     [client],
   );
   const resource = useFoodLoad(loader);
-  const orderingOn = isAppOnlineOrderingEnabled();
+  const orderingOn = isMobileOnlineOrderingEnabled();
   const active = selected && (orderingOn || selected.mode === 'orders') ? selected : null;
   if (active)
     return (
@@ -64,11 +65,7 @@ function FoodAccount({ context }: { context: string }) {
   return (
     <ScrollView contentContainerStyle={page}>
       <FoodText title>點餐與取餐</FoodText>
-      {orderingOn ? (
-        <FoodText>選擇門市、確認金額後送出，到店付款。取餐前可隨時查看進度。</FoodText>
-      ) : (
-        <FoodText>{ONLINE_ORDERING_OFF_TEXT}</FoodText>
-      )}
+      <FoodText>{foodPageIntro(isMobileOnlineOrderingEnabled())}</FoodText>
       <FoodReadState resource={resource} />
       {resource.data ? (
         <>
@@ -120,7 +117,7 @@ function FoodRealm({
     `food:${selection.tenantId}:order`,
     null,
   );
-  const orderingOn = isAppOnlineOrderingEnabled();
+  const orderingOn = isMobileOnlineOrderingEnabled();
   const [storedMode, setMode] = useState(selection.mode);
   const mode = orderingOn ? storedMode : 'orders';
   const [cursor, setCursor] = useState<string | undefined>();

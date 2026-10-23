@@ -216,6 +216,19 @@
 }
 .locationName {
   font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pending {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--warning);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: var(--warning-soft);
 }
 .description {
   color: var(--muted);
@@ -242,6 +255,15 @@
   background: var(--surface);
 }
 @media (max-width: 600px) {
+  .categories button,
+  .tools .btn,
+  .actions .btn,
+  .actions button {
+    min-height: 44px;
+  }
+  .location {
+    padding: 6px 0;
+  }
   .route {
     flex-direction: column;
   }
