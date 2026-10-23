@@ -97,6 +97,156 @@
   font-size: 13px;
   line-height: 18px;
 }
+.approach {
+  margin: 0 16px 12px;
+  padding: 14px 12px 12px;
+  border-radius: 12px;
+  background: var(--bus-group);
+  color: var(--bus-ink);
+  overflow: hidden;
+}
+.approachCaption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 8px;
+  margin: 0 0 12px;
+  color: var(--bus-muted);
+  font-size: 13px;
+  line-height: 18px;
+}
+.approachCaption strong {
+  color: var(--bus-ink);
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.approachStatus {
+  font-weight: 700;
+}
+.approachStatus[data-kind='arriving'],
+.approachStatus[data-kind='soon'] { color: var(--brand); }
+.approachStatus[data-kind='far'] { color: var(--bus-muted); }
+.approachStatus[data-kind='scheduled'] { color: var(--muted-light); }
+.approachTrack {
+  --stop-count: 4;
+  --bus-left: 0%;
+  min-width: 0;
+}
+.approachRail {
+  position: relative;
+  height: 36px;
+  margin: 0 10px 8px;
+}
+.approachRail::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 3px;
+  border-radius: 99px;
+  background: var(--bus-line);
+  transform: translateY(-50%);
+}
+.approachRail[data-kind='scheduled']::before {
+  height: 0;
+  background: transparent;
+  border-top: 2px dashed var(--bus-line);
+  transform: translateY(-1px);
+}
+.approachDot {
+  position: absolute;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 99px;
+  background: var(--bus-line);
+  transform: translate(-50%, -50%);
+  z-index: 1;
+}
+.approachDot[data-here='true'] {
+  width: 12px;
+  height: 12px;
+  background: var(--brand);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 22%, transparent);
+}
+.approachBus {
+  position: absolute;
+  top: 50%;
+  left: var(--bus-left);
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 99px;
+  background: var(--brand);
+  color: var(--on-brand);
+  transform: translate(-50%, -50%);
+}
+.approachBusReady {
+  transition: left 700ms cubic-bezier(.2, .7, .2, 1);
+}
+.approachBus[data-kind='arriving'] {
+  animation: busPulse 1.6s ease-in-out infinite;
+}
+.approachBus[data-kind='far'] {
+  background: var(--muted);
+  color: var(--surface);
+}
+.approachStops {
+  display: grid;
+  grid-template-columns: repeat(var(--stop-count), minmax(0, 1fr));
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.approachStops li {
+  min-width: 0;
+  text-align: center;
+  color: var(--bus-muted);
+  font-size: 11px;
+  line-height: 14px;
+}
+.approachStops li strong {
+  display: block;
+  overflow: hidden;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.approachStops li[data-here='true'] {
+  color: var(--bus-ink);
+}
+.approachStops li[data-here='true'] strong { font-weight: 700; }
+.approachStops small {
+  display: block;
+  margin-top: 2px;
+  color: var(--brand);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 12px;
+}
+.arrivalRow[aria-current='true'] { background: var(--bus-wash); }
+@keyframes busPulse {
+  50% { transform: translate(-50%, -50%) scale(1.08); }
+}
+@media (min-width: 900px) {
+  .approach { padding: 18px 16px 16px; }
+  .approachCaption { font-size: 14px; }
+  .approachRail { height: 44px; margin: 0 16px 10px; }
+  .approachBus { width: 32px; height: 32px; }
+  .approachStops li { font-size: 13px; line-height: 18px; }
+  .approachStops small { font-size: 11px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .approachBusReady { transition: none; }
+  .approachBus[data-kind='arriving'] { animation: none; }
+}
+:global([data-reduced-motion='true']) .approachBusReady { transition: none; }
+:global([data-reduced-motion='true']) .approachBus[data-kind='arriving'] { animation: none; }
 .boardList {
   list-style: none;
   margin: 0 16px;
@@ -241,6 +391,8 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .boardListEnter { animation: none; }
+  .approachBusReady { transition: none; }
+  .approachBus[data-kind='arriving'] { animation: none; }
 }
 .intro { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding: 4px 0 28px; }
 .intro h2 { margin: 4px 0 12px; font-size: clamp(24px, 3vw, 34px); font-weight: 650; letter-spacing: -.8px; line-height: 1.35; }

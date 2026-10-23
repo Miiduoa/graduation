@@ -116,6 +116,50 @@ it('shows Providence gate routes from campus-next without querying a default sto
   expect(vi.mocked(queryTransit).mock.calls.filter(([query]) => query.action === 'campus-next')).toHaveLength(1);
 });
 
+it('draws the next live bus on a stop line and does not invent a bus for timetable-only rows', async () => {
+  const now = new Date().toISOString();
+  vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next' ? {
+    status: 'ready', kind: 'arrivals', fetchedAt: now,
+    arrivals: [
+      { id: '162', route: '162', direction: 1, destination: '沙鹿火車站', status: 0, seconds: 180, updatedAt: now, stopName: '靜宜大學(英才路)' },
+      { id: '301', route: '301', direction: 1, destination: '嘉陽高中', status: 0, seconds: 720, updatedAt: now, stopName: '靜宜大學(英才路)' },
+      { id: '326', route: '326', direction: 1, destination: '巨業沙鹿站', status: 0, seconds: null, updatedAt: now, stopName: '靜宜大學(英才路)', scheduledAt: new Date(Date.now() + 12 * 60_000).toISOString() },
+    ],
+    routeStops: [{
+      routeUid: 'TXG162', subRouteUid: 'TXG162', routeName: '162', direction: 1,
+      stops: [
+        { id: 'SHA', name: '沙鹿車站' },
+        { id: 'YING', name: '靜宜大學(英才路)' },
+        { id: 'GATE', name: '靜宜大學(校門)' },
+      ],
+    }],
+  } : emptyArrivals());
+  renderExplorer();
+  const track = await screen.findByTestId('campus-approach');
+  expect(track.getAttribute('data-status')).toBe('soon');
+  expect(track.getAttribute('aria-label')).toMatch(/162 號公車，往 沙鹿火車站，還有 \d+ 站，約 3 分/);
+  expect(screen.getByText('快到')).toBeTruthy();
+  expect(screen.getByText('你在這裡')).toBeTruthy();
+  expect(screen.getByText('英才路')).toBeTruthy();
+  expect(screen.getByTestId('campus-approach-bus')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '301 往 嘉陽高中 12 分' }));
+  expect(screen.getByTestId('campus-approach').getAttribute('data-status')).toBe('far');
+  expect(screen.getByText('還很久')).toBeTruthy();
+  expect(screen.getByTestId('campus-approach').getAttribute('aria-label')).toMatch(/301 號公車/);
+  fireEvent.click(screen.getByRole('button', { name: /326 往 巨業沙鹿站 表定 / }));
+  expect(screen.getByTestId('campus-approach').getAttribute('data-status')).toBe('scheduled');
+  expect(screen.getByText('沒有即時位置')).toBeTruthy();
+  expect(screen.queryByTestId('campus-approach-bus')).toBeNull();
+});
+
+it('keeps the approach track off the first campus paint so SSR markup stays on the skeleton', () => {
+  vi.mocked(queryTransit).mockImplementation(() => new Promise(() => {}));
+  renderExplorer();
+  expect(screen.getByTestId('campus-skeleton')).toBeTruthy();
+  expect(screen.queryByTestId('campus-approach')).toBeNull();
+  expect(screen.queryByTestId('campus-approach-bus')).toBeNull();
+});
+
 it('lists BRT arrivals on 專用道 and shows empty copy when that stop has no buses', async () => {
   const now = new Date().toISOString();
   vi.mocked(queryTransit).mockImplementation(async (query) => query.action === 'campus-next' ? {

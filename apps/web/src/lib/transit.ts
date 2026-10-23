@@ -31,7 +31,7 @@ export type TransitQuery =
 export type TransitFailure = 'not-configured' | 'invalid-query' | 'rate-limited' | 'upstream' | 'network';
 export type TransitResult =
   | { status: 'ready'; kind: 'stops'; stops: TransitStop[]; limited: boolean; fetchedAt: string; stale?: true }
-  | { status: 'ready'; kind: 'arrivals'; arrivals: TransitArrival[]; fetchedAt: string; stale?: true }
+  | { status: 'ready'; kind: 'arrivals'; arrivals: TransitArrival[]; fetchedAt: string; stale?: true; routeStops?: RouteStopSequence[] }
   | { status: 'unavailable'; reason: TransitFailure };
 export const TRANSIT_FRESHNESS_MS = 90_000;
 export const CAMPUS_TRANSIT: Record<string, { city: TransitCity; stopName: string }> = {
@@ -689,6 +689,183 @@ export function campusLaneDisplay(
     extra: sortCampusNextRows([...representatives.slice(CAMPUS_LANE_VISIBLE), ...rest], now),
   };
 }
+export const CAMPUS_ARRIVING_SECONDS = 120;
+export const CAMPUS_SOON_SECONDS = 180;
+export const CAMPUS_SECONDS_PER_STOP = 90;
+export const CAMPUS_LINE_BEFORE = 3;
+export const CAMPUS_LINE_AFTER = 1;
+export type CampusApproachStatus = 'arriving' | 'soon' | 'far' | 'scheduled';
+export type CampusLineStop = { key: string; name: string; here: boolean };
+export type CampusApproachModel = {
+  status: CampusApproachStatus;
+  route: string;
+  heading: string;
+  stops: CampusLineStop[];
+  hereIndex: number;
+  busIndex: number | null;
+  stopsAway: number | null;
+  minutes: number | null;
+  clock: string | null;
+  caption: string;
+  a11y: string;
+};
+export function campusRowKey(row: CampusNextRow): string {
+  return `${row.route}:${row.heading}`;
+}
+export function campusLineStopName(name: string): string {
+  const inbound = campusInboundPlace(name);
+  if (inbound === '主顧聖母堂') return '主顧堂';
+  if (inbound) return inbound;
+  const place = campusPlaceLabel(name);
+  if (place === '校門口') return '校門';
+  if (place === '英才路側') return '英才路';
+  if (place === '專用道') return '專用道';
+  if (place === '校內') return '校內';
+  const named = publicPlaceName(name);
+  if (named === '沙鹿火車站') return '沙鹿車站';
+  if (named === '台中車站') return '台中車站';
+  return named || name.replace(/[（(].*$/, '').trim() || name;
+}
+export function compactCampusRouteStops(sequences: readonly RouteStopSequence[]): RouteStopSequence[] {
+  const compact: RouteStopSequence[] = [];
+  const seen = new Set<string>();
+  for (const sequence of sequences) {
+    const key = `${sequence.routeUid}:${sequence.subRouteUid}:${sequence.direction}`;
+    if (seen.has(key) || !sequence.routeName) continue;
+    const campusAt = sequence.stops.flatMap((stop, index) => isCampusStopName(stop.name) ? [index] : []);
+    if (!campusAt.length) continue;
+    seen.add(key);
+    const start = Math.max(0, Math.min(...campusAt) - CAMPUS_LINE_BEFORE);
+    const end = Math.min(sequence.stops.length, Math.max(...campusAt) + 1 + CAMPUS_LINE_AFTER);
+    const stops = sequence.stops.slice(start, end).filter((stop) => stop.name).slice(0, 8);
+    if (stops.length < 2) continue;
+    compact.push({
+      routeUid: sequence.routeUid.slice(0, 40),
+      subRouteUid: sequence.subRouteUid.slice(0, 40),
+      routeName: sequence.routeName.slice(0, 40),
+      direction: sequence.direction,
+      stops: stops.map((stop) => ({ id: stop.id.slice(0, 80), name: stop.name.slice(0, 80) })),
+    });
+    if (compact.length >= 16) break;
+  }
+  return compact;
+}
+export function sequenceForCampusRow(
+  row: CampusNextRow,
+  sequences: readonly RouteStopSequence[],
+): RouteStopSequence | null {
+  const stopName = row.arrival?.stopName ?? '';
+  const direction = row.arrival?.direction ?? null;
+  const matchesRoute = (sequence: RouteStopSequence) =>
+    sequence.routeName === row.route || sequence.routeUid.replace(/^TXG/i, '') === row.route;
+  const ranked = sequences.filter((sequence) => {
+    if (!matchesRoute(sequence)) return false;
+    if (direction !== null && sequence.direction !== direction) return false;
+    return true;
+  });
+  const withStop = stopName
+    ? ranked.filter((sequence) => sequence.stops.some((stop) => stop.name === stopName))
+    : ranked;
+  return withStop[0] ?? ranked[0] ?? null;
+}
+export function campusApproachStatus(arrival: TransitArrival | null, now: number): CampusApproachStatus | 'hidden' {
+  const view = campusEtaView(arrival, now);
+  if (view.kind === 'soon') return 'arriving';
+  if (view.kind === 'live') {
+    const remaining = arrival ? liveRemaining(arrival, now) : null;
+    return remaining !== null && remaining <= CAMPUS_SOON_SECONDS ? 'soon' : 'far';
+  }
+  if (view.kind === 'scheduled' || view.kind === 'night') return 'scheduled';
+  return 'hidden';
+}
+function campusLineStops(row: CampusNextRow, sequences: readonly RouteStopSequence[]): CampusLineStop[] {
+  const stopName = row.arrival?.stopName ?? '';
+  const sequence = sequenceForCampusRow(row, sequences);
+  if (sequence) {
+    let hereIndex = stopName ? sequence.stops.findIndex((stop) => stop.name === stopName) : -1;
+    if (hereIndex < 0) hereIndex = sequence.stops.findIndex((stop) => isCampusStopName(stop.name));
+    if (hereIndex >= 0) {
+      const start = Math.max(0, hereIndex - CAMPUS_LINE_BEFORE);
+      const end = Math.min(sequence.stops.length, hereIndex + 1 + CAMPUS_LINE_AFTER);
+      const sliced = sequence.stops.slice(start, end);
+      const localHere = hereIndex - start;
+      const stops = sliced.map((stop, index) => ({
+        key: stop.id || `${stop.name}:${index}`,
+        name: campusLineStopName(stop.name),
+        here: index === localHere,
+      }));
+      if (localHere === 0) return [{ key: 'incoming', name: '更遠', here: false }, ...stops];
+      return stops;
+    }
+  }
+  const hereName = campusLineStopName(stopName) || '校門';
+  return [
+    { key: 'incoming', name: '更遠', here: false },
+    { key: 'prev', name: '前一站', here: false },
+    { key: 'here', name: hereName, here: true },
+    { key: 'next', name: '下一站', here: false },
+  ];
+}
+export function pickCampusApproachRow(
+  rows: CampusNextRow[],
+  focusedKey: string | null,
+  now: number,
+): CampusNextRow | null {
+  const focused = focusedKey ? rows.find((row) => campusRowKey(row) === focusedKey) : undefined;
+  if (focused && campusApproachStatus(focused.arrival, now) !== 'hidden') return focused;
+  return sortCampusNextRows(rows.filter((row) => campusApproachStatus(row.arrival, now) !== 'hidden'), now)[0] ?? null;
+}
+export function campusApproachModel(
+  row: CampusNextRow | null,
+  now: number,
+  sequences: readonly RouteStopSequence[] = [],
+): CampusApproachModel | null {
+  if (!row) return null;
+  const status = campusApproachStatus(row.arrival, now);
+  if (status === 'hidden') return null;
+  const heading = campusHeadingText(row);
+  const view = campusEtaView(row.arrival, now);
+  const stops = campusLineStops(row, sequences);
+  const hereIndex = Math.max(0, stops.findIndex((stop) => stop.here));
+  const remaining = row.arrival ? liveRemaining(row.arrival, now) : null;
+  let busIndex: number | null = null;
+  let stopsAway: number | null = null;
+  const minutes = view.minutes ?? (remaining !== null && remaining >= CAMPUS_ARRIVING_SECONDS
+    ? Math.ceil(remaining / 60) : null);
+  if ((status === 'arriving' || status === 'soon' || status === 'far') && remaining !== null) {
+    const away = remaining / CAMPUS_SECONDS_PER_STOP;
+    stopsAway = status === 'arriving' ? 0 : Math.max(1, Math.round(away));
+    if (status === 'arriving') busIndex = hereIndex;
+    else if (status === 'soon') busIndex = Math.max(0, hereIndex - Math.min(0.85, away / 2));
+    else {
+      const span = Math.max(0, hereIndex - 1);
+      const t = Math.min(1, Math.max(0, (remaining - CAMPUS_SOON_SECONDS) / 540));
+      busIndex = (1 - t) * span;
+    }
+  }
+  const clock = view.clock ?? null;
+  const headingBit = heading ? ` ${heading}` : '';
+  const statusLabel = status === 'arriving' ? '進站中' : status === 'soon' ? '快到' : status === 'far' ? '還很久' : '表定';
+  let caption = `${row.route}${headingBit} · ${statusLabel}`;
+  if (status === 'scheduled') {
+    caption = `${row.route}${headingBit} · 表定 · 沒有即時位置${clock ? ` · ${clock}` : ''}`;
+  } else if (status === 'arriving') {
+    caption = `${row.route}${headingBit} · 進站中`;
+  } else if (minutes != null) {
+    caption = `${row.route}${headingBit} · ${statusLabel} · 約 ${minutes} 分`;
+  }
+  let a11y = `${row.route} 號公車`;
+  if (heading) a11y += `，${heading}`;
+  if (status === 'arriving') a11y += '，進站中';
+  else if (status === 'scheduled') a11y += `，表定${clock ? ` ${clock}` : ''}，沒有即時位置`;
+  else {
+    if (stopsAway != null) a11y += `，還有 ${stopsAway} 站`;
+    if (minutes != null) a11y += `，約 ${minutes} 分`;
+  }
+  return {
+    status, route: row.route, heading, stops, hereIndex, busIndex, stopsAway, minutes, clock, caption, a11y,
+  };
+}
 export function campusHomeSummary(rows: CampusNextRow[], now: number): string {
   const views = rows.map((row) => campusEtaView(row.arrival, now));
   if (views.length > 0 && views.every((view) => view.kind === 'ended' || view.kind === 'empty') &&
@@ -748,6 +925,37 @@ function readStop(value: unknown): TransitStop | null {
   if (!routes) return null;
   return { ...stop, source: 'taichung-open-data', catalogDate: value.catalogDate, routes };
 }
+function readRouteStops(value: unknown): RouteStopSequence[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > 16) return undefined;
+  const sequences: RouteStopSequence[] = [];
+  for (const row of value) {
+    if (!isRecord(row) || typeof row.routeUid !== 'string' || row.routeUid.length > 40 ||
+      typeof row.subRouteUid !== 'string' || row.subRouteUid.length > 40 ||
+      typeof row.routeName !== 'string' || !row.routeName.trim() || row.routeName.length > 40 ||
+      typeof row.direction !== 'number' || !Number.isInteger(row.direction) ||
+      !Array.isArray(row.stops) || row.stops.length < 2 || row.stops.length > 8) {
+      continue;
+    }
+    const stops: RouteStopPoint[] = [];
+    for (const stop of row.stops) {
+      if (!isRecord(stop) || typeof stop.name !== 'string' || !stop.name.trim() || stop.name.length > 80) continue;
+      stops.push({
+        id: typeof stop.id === 'string' && isStopId(stop.id) ? stop.id : '',
+        name: stop.name.trim(),
+      });
+    }
+    if (stops.length < 2) continue;
+    sequences.push({
+      routeUid: row.routeUid,
+      subRouteUid: row.subRouteUid,
+      routeName: row.routeName.trim(),
+      direction: row.direction,
+      stops,
+    });
+  }
+  return sequences.length ? sequences : undefined;
+}
 export function readSavedStops(raw: string | null): TransitStop[] {
   try {
     const rows: unknown = JSON.parse(raw ?? '[]');
@@ -795,8 +1003,10 @@ export async function queryTransit(query: TransitQuery, signal: AbortSignal): Pr
       (row.updatedAt === null || typeof row.updatedAt === 'string') &&
       (row.stopName === undefined || typeof row.stopName === 'string') &&
       (row.scheduledAt === undefined || row.scheduledAt === null || typeof row.scheduledAt === 'string')).slice(0, 200);
+    const routeStops = readRouteStops(result.routeStops);
     return { status: 'ready', kind: 'arrivals', arrivals, fetchedAt: result.fetchedAt,
-      ...(result.stale === true ? { stale: true as const } : {}) };
+      ...(result.stale === true ? { stale: true as const } : {}),
+      ...(routeStops ? { routeStops } : {}) };
   }
   throw new Error('invalid-response');
 }

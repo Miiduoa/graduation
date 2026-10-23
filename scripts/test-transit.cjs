@@ -113,6 +113,41 @@ test('campus-next uses one arrival query for the four Providence routes and keep
   assert.match(client.arrivalLabel(scheduled, NOW), /^表定 \d{2}:\d{2}$/);
   assert.equal(client.pickCampusNext(first.arrivals, NOW).map((row) => row.route).join(','), '162,301,326,368');
 });
+test('campus-next reuses cached StopOfRoute for the approach line and does not add TDX calls', async () => {
+  const sequence = (routeUid, names) => ({
+    RouteUID: routeUid, SubRouteUID: routeUid, RouteName: { Zh_tw: routeUid.replace(/^TXG/, '') },
+    Direction: 1, Stops: names.map((name, index) => ({
+      StopUID: `${routeUid}-${index}`, StopName: { Zh_tw: name }, StopSequence: index + 1,
+    })),
+  });
+  const mock = service((url) => {
+    if (url.includes('/StopOfRoute/')) {
+      const filter = new URL(url).searchParams.get('$filter') ?? '';
+      if (filter.includes('TXG162')) return Response.json([sequence('TXG162', ['沙鹿車站', '靜宜大學(英才路)', '靜宜大學(校門)', '嘉陽高中'])]);
+      if (filter.includes('TXG300')) return Response.json([{ RouteUID: 'TXG300', Direction: 0, Stops: [] }]);
+      return Response.json([]);
+    }
+    return Response.json([
+      arrival({ StopUID: 'TXG-GATE', RouteUID: 'TXG162', RouteName: { Zh_tw: '162' }, Direction: 1, StopName: { Zh_tw: '靜宜大學(英才路)' }, EstimateTime: 180 }),
+      arrival({ StopUID: 'TXG-BRT', RouteUID: 'TXG300', RouteName: { Zh_tw: '300' }, StopName: { Zh_tw: '靜宜大學(專用道)' }, DestinationStopNameZh: '臺中車站', EstimateTime: 240 }),
+    ]);
+  });
+  const result = await mock.execute({ action: 'campus-next', schoolId: 'pu' });
+  assert.equal(result.status, 'ready');
+  assert.equal(mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/')).length, 1);
+  assert.equal(mock.calls.filter((call) => call.url.includes('/StopOfRoute/')).some((call) => {
+    return (new URL(call.url).searchParams.get('$filter') ?? '').includes('TXG300');
+  }), false);
+  const names = (result.routeStops ?? []).flatMap((sequence) => sequence.stops.map((stop) => stop.name));
+  assert.equal(names.includes('靜宜大學(英才路)'), true);
+  assert.equal(names.includes('沙鹿車站'), true);
+  assert.equal(names.some((name) => name.includes('市政府')), false);
+  const model = client.campusApproachModel(client.campusSegmentRows(result.arrivals, '校門口・往沙鹿', NOW)[0], NOW, result.routeStops ?? []);
+  assert.equal(model.status, 'soon');
+  assert.match(model.a11y, /162 號公車/);
+  assert.match(model.a11y, /還有 \d+ 站/);
+  assert.match(model.a11y, /約 3 分/);
+});
 test('campus-next includes 專用道 in the same ETA query and does not fetch extra StopOfRoute', async () => {
   const mock = service((url) => Response.json(url.includes('/StopOfRoute/') ? [] : [
     arrival({ StopUID: 'TXG-BRT', RouteUID: 'TXG300', RouteName: { Zh_tw: '300' }, StopName: { Zh_tw: '靜宜大學(專用道)' }, DestinationStopNameZh: '臺中車站', EstimateTime: 240 }),

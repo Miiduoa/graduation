@@ -38,6 +38,8 @@ function Eta(props: { view: ReturnType<typeof campusEtaView> }) {
 export function CampusArrivalRow(props: {
   row: CampusNextRow;
   now: number;
+  active?: boolean;
+  onSelect?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const panel = useRef<HTMLDivElement>(null);
@@ -58,8 +60,12 @@ export function CampusArrivalRow(props: {
         type="button"
         className={`${css.arrivalRow}${ended ? ` ${css.arrivalRowEnded}` : ''}`}
         aria-expanded={open}
+        aria-current={props.active ? 'true' : undefined}
         aria-label={label}
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => {
+          props.onSelect?.();
+          setOpen((value) => !value);
+        }}
       >
         <span className={css.routeBadge}>{props.row.route}</span>
         <span className={css.rowCopy}>
