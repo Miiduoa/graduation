@@ -177,6 +177,7 @@
   color: var(--muted);
   font-size: 13px;
   line-height: 18px;
+  scroll-margin-top: 24px;
 }
 .rowPanel p { margin: 0; overflow-wrap: break-word; word-break: keep-all; }
 .rowPanel p + p { margin-top: 4px; }
@@ -323,7 +324,9 @@
 .stopNumber { font-size: 12px; color: var(--muted, #5f6d68); padding-top: 3px; font-variant-numeric: tabular-nums; }
 .saveButton { padding: 6px 8px; flex-shrink: 0; border: 0; font-size: 12px; min-height: 44px; min-width: 44px; }
 .saveButton[aria-pressed='true'] { color: var(--brand, #245d50); font-weight: 650; }
-.arrivals { min-width: 0; padding: 24px; }
+.arrivals { min-width: 0; padding: 24px; scroll-margin-top: 24px; }
+.arrivals:focus { outline: none; }
+.arrivals:focus-visible { outline: 3px solid var(--focus-ring, #b08930); outline-offset: 3px; }
 .mapLink { display: inline-block; margin: 0 0 14px; font-size: 14px; font-weight: 600; padding: 8px 0; text-decoration: underline !important; text-underline-offset: 4px; }
 .filters { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; border-top: 1px solid var(--border, #dae1dc); padding-top: 20px; }
 .arrivalList li { display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 20px 0; border-bottom: 1px solid var(--border, #dae1dc); }
