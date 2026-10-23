@@ -28,12 +28,28 @@ jest.mock('../app/useAIOverlay', () => ({ aiOverlay: { open: jest.fn() } }));
 jest.mock('../app/rootNavigation', () => ({ rootNavigateNested: jest.fn() }));
 jest.mock('../components/OpenOrderCard', () => ({ OpenOrderCard: () => null }));
 jest.mock('../components/TodayTimetablePanel', () => ({
-  TodayTimetablePanel: ({ onOpenImport, onOpenTimetable }: { onOpenImport(): void; onOpenTimetable(): void }) => {
+  TodayTimetablePanel: ({
+    onOpenImport,
+    onOpenTimetable,
+  }: {
+    onOpenImport(): void;
+    onOpenTimetable(): void;
+  }) => {
     const React = require('react');
     const { Pressable, Text, View } = require('react-native');
-    return React.createElement(View, null,
-      React.createElement(Pressable, { onPress: onOpenImport }, React.createElement(Text, null, '匯入我的課表')),
-      React.createElement(Pressable, { onPress: onOpenTimetable }, React.createElement(Text, null, '查看整週課表')),
+    return React.createElement(
+      View,
+      null,
+      React.createElement(
+        Pressable,
+        { onPress: onOpenImport },
+        React.createElement(Text, null, '匯入我的課表'),
+      ),
+      React.createElement(
+        Pressable,
+        { onPress: onOpenTimetable },
+        React.createElement(Text, null, '查看整週課表'),
+      ),
     );
   },
 }));
@@ -98,6 +114,9 @@ test('opens the real platform workspace and school services even while school da
   expect(mockNavigate).toHaveBeenCalledWith('我的', { screen: 'NuniWorkspace', params: undefined });
   fireEvent.press(view.getByRole('button', { name: '校務服務' }));
   expect(mockNavigate).toHaveBeenCalledWith('學習', { screen: 'CoursesHome', params: undefined });
+  fireEvent.press(view.getByRole('button', { name: '我的課表' }));
+  expect(rootNavigateNested).toHaveBeenLastCalledWith('學習', 'PersonalTimetable');
+  expect(view.getByRole('button', { name: '校園地圖' })).toBeTruthy();
   await act(async () => pending.resolve(result()));
 });
 

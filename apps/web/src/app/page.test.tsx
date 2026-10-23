@@ -18,11 +18,7 @@ import {
   senseStorageKey,
   serializeSenseState,
 } from '@campus/shared/src/todaySense';
-import {
-  TODAY_WORK_EMPTY,
-  TODAY_WORK_NO_CLASS,
-  TODAY_WORK_UNSIGNED,
-} from '@/lib/todayCourseWork';
+import { TODAY_WORK_EMPTY, TODAY_WORK_NO_CLASS, TODAY_WORK_UNSIGNED } from '@/lib/todayCourseWork';
 const state = vi.hoisted(() => ({
   uid: 'alice' as string | null,
   session: null as null | { context: string; platformAccountId: string },
@@ -69,7 +65,10 @@ vi.mock('@/lib/transit', async (original) => {
   const actual = await original<typeof import('@/lib/transit')>();
   return {
     ...actual,
-    queryTransit: vi.fn(async () => ({ status: 'unavailable' as const, reason: 'not-configured' as const })),
+    queryTransit: vi.fn(async () => ({
+      status: 'unavailable' as const,
+      reason: 'not-configured' as const,
+    })),
   };
 });
 const data = (name: string): HomeData => ({
@@ -295,11 +294,41 @@ it('shows the fastest campus-gate bus on one home row', async () => {
   state.uid = null;
   const now = new Date().toISOString();
   vi.mocked(queryTransit).mockResolvedValue({
-    status: 'ready', kind: 'arrivals', fetchedAt: now,
+    status: 'ready',
+    kind: 'arrivals',
+    fetchedAt: now,
     arrivals: [
-      { id: '162', route: '162', direction: 1, destination: '沙鹿火車站', status: 0, seconds: 180, updatedAt: now, stopName: '靜宜大學(英才路)' },
-      { id: '301', route: '301', direction: 1, destination: '台中車站', status: 3, seconds: null, updatedAt: now, stopName: '靜宜大學(專用道)', scheduledAt: new Date(Date.now() + 12 * 60_000).toISOString() },
-      { id: '368', route: '368', direction: 0, destination: '校內', status: 3, seconds: null, updatedAt: now, stopName: '靜宜大學(校門)' },
+      {
+        id: '162',
+        route: '162',
+        direction: 1,
+        destination: '沙鹿火車站',
+        status: 0,
+        seconds: 180,
+        updatedAt: now,
+        stopName: '靜宜大學(英才路)',
+      },
+      {
+        id: '301',
+        route: '301',
+        direction: 1,
+        destination: '台中車站',
+        status: 3,
+        seconds: null,
+        updatedAt: now,
+        stopName: '靜宜大學(專用道)',
+        scheduledAt: new Date(Date.now() + 12 * 60_000).toISOString(),
+      },
+      {
+        id: '368',
+        route: '368',
+        direction: 0,
+        destination: '校內',
+        status: 3,
+        seconds: null,
+        updatedAt: now,
+        stopName: '靜宜大學(校門)',
+      },
     ],
   });
   render(<HomePage />);

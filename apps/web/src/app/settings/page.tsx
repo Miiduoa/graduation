@@ -173,22 +173,10 @@ export default function SettingsPage(props: {
         <p role="status">確認帳號…</p>
       </SiteShell>
     );
-  return (
-    <SettingsContent
-      key={user?.uid ?? 'guest'}
-      user={user}
-      schoolSearch={schoolSearch}
-    />
-  );
+  return <SettingsContent key={user?.uid ?? 'guest'} user={user} schoolSearch={schoolSearch} />;
 }
 
-function SettingsContent({
-  user,
-  schoolSearch,
-}: {
-  user: User | null;
-  schoolSearch: string;
-}) {
+function SettingsContent({ user, schoolSearch }: { user: User | null; schoolSearch: string }) {
   const { signOutUser } = useAuth();
   const nuni = useNuniSession();
   const schoolLoginReady = useSignInOptions().studentId;
@@ -730,7 +718,7 @@ function SettingsContent({
           </button>
         </div>
         <div className={styles.group}>
-          <SettingRow title="色彩模式" subtitle="可跟隨裝置的明暗設定。">
+          <SettingRow title="色彩模式" subtitle="深色使用純黑背景，也可跟隨裝置的明暗設定。">
             <div className={styles.segmented} role="group" aria-label="色彩模式">
               {(
                 [
@@ -886,9 +874,7 @@ function SettingsContent({
             </SettingRow>
           ) : null}
         </div>
-        {agentModelMessage ? (
-          <p role="status">{agentModelMessage}</p>
-        ) : null}
+        {agentModelMessage ? <p role="status">{agentModelMessage}</p> : null}
         <div>
           <Link className="btn" href={`/privacy${schoolSearch}`}>
             查看隱私政策

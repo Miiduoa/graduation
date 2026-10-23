@@ -196,3 +196,40 @@ test('manually edited courses appear under the same platform account without que
   fireEvent.press(view.getByRole('button', { name: '查看整週課表' }));
   expect(onOpenTimetable).toHaveBeenCalledWith('未填|未填');
 });
+
+test('keeps the next class visible while completed classes can be expanded and collapsed', async () => {
+  nowMs = Date.parse('2026-10-19T02:30:00Z');
+  jest
+    .mocked(loadPersonalImports)
+    .mockResolvedValue(
+      ledger([
+        record(),
+        record({ id: 'course-b', title: '資料庫', startTime: '11:00', endTime: '12:00' }),
+      ]),
+    );
+  const view = render(panel());
+  await view.findByText('資料庫');
+  expect(view.getByText('11:00–12:00 · 下一堂')).toBeTruthy();
+  expect(view.queryByText('資料結構')).toBeNull();
+  const disclosure = view.getByRole('button', { name: '查看已結束的 1 堂課' });
+  expect(disclosure).toHaveAccessibilityState({ expanded: false });
+  fireEvent.press(disclosure);
+  expect(view.getByText('資料結構')).toBeTruthy();
+  expect(view.getByText('09:00–10:00 · 已過下課時間')).toBeTruthy();
+  expect(view.getByText('資料庫')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '收合已結束課程' }));
+  expect(view.queryByText('資料結構')).toBeNull();
+  expect(view.getByText('資料庫')).toBeTruthy();
+});
+
+test('finishing the last class preserves access to its details instead of claiming no timetable', async () => {
+  nowMs = Date.parse('2026-10-19T02:30:00Z');
+  const view = render(panel());
+  await view.findByText('今天的上課時段已結束。');
+  expect(view.queryByText('這份課表今天沒有排課。')).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '查看已結束的 1 堂課' }));
+  expect(view.getByText('資料結構')).toBeTruthy();
+  expect(view.getByText('主顧 303 · 林老師')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '查看整週課表' }));
+  expect(onOpenTimetable).toHaveBeenCalledWith('115|1');
+});
