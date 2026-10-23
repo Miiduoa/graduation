@@ -1,9 +1,11 @@
 import React, {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type MutableRefObject,
   type ReactNode,
   type RefObject,
 } from 'react';
@@ -43,9 +45,11 @@ import {
 } from './assignmentFileSubmit';
 import { courseRoleLabels } from '@campus/shared/src/nuniCourseTasks';
 import {
+  awaitingFeedbackPosition,
   feedbackQueueLabel,
   matchesFeedbackQueueFilter,
   needsFeedbackReview,
+  nextAwaitingFeedbackReview,
   sortFeedbackQueue,
   type FeedbackQueueFilter,
 } from '@campus/shared/src/lmsReviewQueue';
@@ -53,6 +57,10 @@ import { useNuniSession } from '../../state/nuniSession';
 import { useNuniDraftState } from '../../state/nuniDrafts';
 import { useTheme } from '../../state/theme';
 import type { NativeNuniSession } from '../../services/nuniSessionController';
+import {
+  loadNuniRecentTeacherFeedback,
+  type NuniRecentTeacherFeedback,
+} from '../../services/nuniRecentFeedback';
 import {
   isPendingActivity,
   matchesActivityFilter,
@@ -74,7 +82,7 @@ type Receipt = NuniSubmission | NuniQuizResponse;
 // Matches parseNuniQuizResponse and the platform quiz submission endpoint.
 const QUIZ_ANSWER_LIMIT = 2000;
 const time = (value: string) => formatTaipeiDateTime(value);
-const feedbackPredatesSubmission = (receipt: Receipt) =>
+const receiptFeedbackIsStale = (receipt: Receipt) =>
   !!receipt.teacherFeedback &&
   !!receipt.reviewedAt &&
   needsFeedbackReview(receipt);
@@ -153,22 +161,114 @@ function Section({ children }: { children: ReactNode }) {
   );
 }
 
+function truncateFeedback(text: string, max = 120): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= max) return trimmed;
+  return `${trimmed.slice(0, max - 1)}…`;
+}
+
+function RecentTeacherFeedbackPanel({
+  loading,
+  error,
+  data,
+  onRetry,
+  open,
+}: {
+  loading: boolean;
+  error: string;
+  data: Awaited<ReturnType<typeof loadNuniRecentTeacherFeedback>> | null;
+  onRetry(): void;
+  open(courseId: string, activityId?: string): void;
+}) {
+  const items = data?.items ?? [];
+  const failed = data?.failedCourseIds.length ?? 0;
+  const studied = data?.studiedCourseCount ?? 0;
+  // List failure: do not claim an empty success. Partial course failures keep loaded rows.
+  if (!loading && !error && !data) return null;
+  return (
+    <Section>
+      <Copy title>最近老師回饋{items.length ? ` · ${items.length}` : ''}</Copy>
+      <Copy>跨課程已留下的回饋，依時間由新到舊。點進去可看完整內容。</Copy>
+      {loading ? <Copy>正在讀取老師回饋…</Copy> : null}
+      {error ? (
+        <>
+          <Copy alert>{error}</Copy>
+          <Button label="重試讀取回饋" onPress={onRetry} />
+        </>
+      ) : null}
+      {!loading && !error && data && failed > 0 ? (
+        <>
+          <Copy alert>
+            有 {failed} 門課程的回饋讀取失敗
+            {items.length ? '；以下為已成功載入的部分。' : '，目前無法顯示回饋。'}
+          </Copy>
+          <Button label="重試讀取回饋" onPress={onRetry} />
+        </>
+      ) : null}
+      {!loading && !error && data && items.length === 0 && failed === 0 ? (
+        <Copy>
+          {studied === 0
+            ? '加入修習課程後，老師留下的回饋會顯示在這裡。'
+            : '目前還沒有跨課程的老師回饋。'}
+        </Copy>
+      ) : null}
+      {!loading && !error
+        ? items.map((item) => (
+            <RecentTeacherFeedbackRow key={`${item.courseId}-${item.kind}-${item.id}`} item={item} open={open} />
+          ))
+        : null}
+    </Section>
+  );
+}
+
+function RecentTeacherFeedbackRow({
+  item,
+  open,
+}: {
+  item: NuniRecentTeacherFeedback;
+  open(courseId: string, activityId?: string): void;
+}) {
+  const kindLabel = item.kind === 'quiz' ? '測驗回饋' : '作業回饋';
+  const label = `開啟「${item.title}」完整回饋`;
+  return (
+    <View style={{ gap: 6 }}>
+      <Copy title>{item.title}</Copy>
+      <Copy>
+        {item.courseName} · {kindLabel}
+        {item.stale ? ' · 早於最近繳交' : ''}
+      </Copy>
+      <Copy>{truncateFeedback(item.feedback)}</Copy>
+      {item.stale ? (
+        <Copy>這則回饋早於你最近一次繳交，請到作業頁確認是否仍適用。</Copy>
+      ) : null}
+      {item.reviewedAt ? <Copy>{time(item.reviewedAt)}</Copy> : null}
+      <Button label={label} onPress={() => open(item.courseId, item.id)} />
+    </View>
+  );
+}
+
+type MutationIntent = 'primary' | 'secondary';
+
 /** Retry preserves the submitted payload and key until the server confirms the outcome. */
 function MutationForm({
   draftKey,
   fields,
   label,
+  secondaryLabel,
   submit,
   savedContent,
 }: {
   draftKey: string;
   fields: Field[];
   label: string;
+  /** Optional second action (e.g. save feedback and open next awaiting review). */
+  secondaryLabel?: string;
   savedContent?: { values: Record<string, string>; revision: string };
   submit(
     values: Record<string, string>,
     key: string,
     active: () => boolean,
+    intent: MutationIntent,
   ): Promise<string | void>;
 }) {
   const theme = useTheme();
@@ -187,6 +287,7 @@ function MutationForm({
     values: Record<string, string>;
     signature: string;
     key: string;
+    action: MutationIntent;
   } | null>(`${draftKey}:intent`, null);
   const [busy, setBusy] = useState(false);
   const [uncertain, setUncertain] = useState(!!storedIntent);
@@ -194,16 +295,19 @@ function MutationForm({
   const [notice, setNotice] = useState('');
   const mounted = useRef(true);
   const lock = useRef(false);
-  const intent = useRef<{ values: Record<string, string>; signature: string; key: string } | null>(
-    storedIntent,
-  );
+  const intent = useRef<{
+    values: Record<string, string>;
+    signature: string;
+    key: string;
+    action: MutationIntent;
+  } | null>(storedIntent);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
     };
   }, []);
-  const send = async () => {
+  const send = async (action: MutationIntent) => {
     if (lock.current || !mounted.current) return;
     if (changed && !uncertain) {
       setError('請先選擇使用最新內容，或保留草稿後再儲存。');
@@ -227,9 +331,9 @@ function MutationForm({
       setError('請填妥內容，再送出。');
       return;
     }
-    const signature = JSON.stringify(payload);
+    const signature = JSON.stringify({ payload, action });
     if (!intent.current || (!uncertain && intent.current.signature !== signature))
-      intent.current = { values: payload, signature, key: randomUUID() };
+      intent.current = { values: payload, signature, key: randomUUID(), action };
     setStoredIntent(intent.current);
     lock.current = true;
     setBusy(true);
@@ -240,6 +344,7 @@ function MutationForm({
         intent.current.values,
         intent.current.key,
         () => mounted.current,
+        intent.current.action,
       );
       if (mounted.current) {
         intent.current = null;
@@ -342,10 +447,25 @@ function MutationForm({
       {error ? <Copy alert>{error}</Copy> : null}
       {notice ? <Copy>{notice}</Copy> : null}
       <Button
-        label={busy ? '正在確認…' : uncertain ? '重試確認這次送出' : label}
+        label={
+          busy
+            ? '正在確認…'
+            : uncertain
+              ? '重試確認這次送出'
+              : intent.current?.action === 'secondary' && uncertain
+                ? '重試確認這次送出'
+                : label
+        }
         disabled={busy}
-        onPress={() => void send()}
+        onPress={() => void send(uncertain && intent.current ? intent.current.action : 'primary')}
       />
+      {secondaryLabel && !uncertain ? (
+        <Button
+          label={busy ? '正在確認…' : secondaryLabel}
+          disabled={busy}
+          onPress={() => void send('secondary')}
+        />
+      ) : null}
     </View>
   );
 }
@@ -488,18 +608,34 @@ function CourseScope({
     [bffRequest, request, session.context, session.platformAccountId, upload],
   );
   const scrollRef = useRef<ScrollView>(null);
+  const contentOffsetYRef = useRef(0);
   const [selected, setSelected] = useNuniDraftState<string | null>(
     'courses:selected',
     initialWorkspaceId ?? null,
   );
+  const [focusActivityId, setFocusActivityId] = useState<string | undefined>(initialAssignmentId);
   useEffect(() => {
     if (initialWorkspaceId) setSelected(initialWorkspaceId);
   }, [initialWorkspaceId, setSelected]);
+  useEffect(() => {
+    if (initialAssignmentId) setFocusActivityId(initialAssignmentId);
+  }, [initialAssignmentId]);
+  const openCourse = useCallback(
+    (id: string, activityId?: string) => {
+      setFocusActivityId(activityId);
+      setSelected(id);
+    },
+    [setSelected],
+  );
   return (
     <ScrollView
       ref={scrollRef}
       testID="nuni-courses-scroll"
       keyboardShouldPersistTaps="handled"
+      scrollEventThrottle={16}
+      onScroll={(event) => {
+        contentOffsetYRef.current = event.nativeEvent.contentOffset.y;
+      }}
       contentContainerStyle={{ padding: 20, paddingBottom: 48, gap: 16 }}
       style={{ backgroundColor: theme.colors.bg }}
     >
@@ -508,21 +644,37 @@ function CourseScope({
           key={selected}
           id={selected}
           classes={classes}
-          onBack={() => setSelected(null)}
-          initialAssignmentId={initialAssignmentId}
+          onBack={() => {
+            setFocusActivityId(undefined);
+            setSelected(null);
+          }}
+          initialAssignmentId={focusActivityId}
           scrollRef={scrollRef}
+          contentOffsetYRef={contentOffsetYRef}
         />
       ) : (
-        <CourseList classes={classes} open={setSelected} />
+        <CourseList classes={classes} open={openCourse} />
       )}
     </ScrollView>
   );
 }
 
-function CourseList({ classes, open }: { classes: Classes; open(id: string): void }) {
+function CourseList({
+  classes,
+  open,
+}: {
+  classes: Classes;
+  open(id: string, activityId?: string): void;
+}) {
   const load = useCallback(() => classes.list(), [classes]);
   const result = useLoad(load);
+  const loadFeedback = useCallback(() => loadNuniRecentTeacherFeedback(classes), [classes]);
+  const feedback = useLoad(loadFeedback);
   const [action, setAction] = useNuniDraftState<'join' | 'create' | null>('courses:entry', null);
+  const refreshAll = () => {
+    void result.refresh();
+    void feedback.refresh();
+  };
   return (
     <>
       <Copy title>我的課程</Copy>
@@ -530,8 +682,19 @@ function CourseList({ classes, open }: { classes: Classes; open(id: string): voi
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         <Button label="加入課程" onPress={() => setAction('join')} />
         <Button label="建立課程" onPress={() => setAction('create')} />
-        <Button label="更新課程" onPress={() => void result.refresh()} disabled={result.loading} />
+        <Button
+          label="更新課程"
+          onPress={refreshAll}
+          disabled={result.loading || feedback.loading}
+        />
       </View>
+      <RecentTeacherFeedbackPanel
+        loading={feedback.loading}
+        error={feedback.error}
+        data={feedback.data}
+        onRetry={() => void feedback.refresh()}
+        open={open}
+      />
       <View style={{ display: action === 'join' ? 'flex' : 'none' }}>
         <MutationForm
           draftKey="courses:join"
@@ -616,12 +779,14 @@ function CourseDetail({
   onBack,
   initialAssignmentId,
   scrollRef,
+  contentOffsetYRef,
 }: {
   id: string;
   classes: Classes;
   onBack(): void;
   initialAssignmentId?: string;
   scrollRef: RefObject<ScrollView | null>;
+  contentOffsetYRef: MutableRefObject<number>;
 }) {
   const pageGeneration = useRef(0);
   const pagePending = useRef(false);
@@ -834,6 +999,7 @@ function CourseDetail({
                   }
                   focused={item.id === initialAssignmentId}
                   scrollRef={scrollRef}
+                  contentOffsetYRef={contentOffsetYRef}
                 />
               ))
             )}
@@ -903,6 +1069,7 @@ function CourseDetail({
                   }
                   focused={item.id === initialAssignmentId}
                   scrollRef={scrollRef}
+                  contentOffsetYRef={contentOffsetYRef}
                 />
               ))
             )}
@@ -978,6 +1145,7 @@ function ActivityCard({
   hidden = false,
   focused = false,
   scrollRef,
+  contentOffsetYRef,
 }: {
   item: Activity;
   course: NuniWorkspace;
@@ -986,6 +1154,7 @@ function ActivityCard({
   hidden?: boolean;
   focused?: boolean;
   scrollRef?: RefObject<ScrollView | null>;
+  contentOffsetYRef?: MutableRefObject<number>;
 }) {
   const assignment = 'instructions' in item;
   const receipt = assignment ? item.mySubmission : item.myResponse;
@@ -1009,7 +1178,13 @@ function ActivityCard({
     const target = submitRef.current;
     if (!scroll || !target) return;
     revealed.current = true;
-    revealAssignmentSubmitArea(scroll, target);
+    revealAssignmentSubmitArea(scroll, target, {
+      contentOffsetY: contentOffsetYRef?.current ?? 0,
+      isActive: () =>
+        focused &&
+        scrollRef?.current === scroll &&
+        submitRef.current === target,
+    });
   };
   const landKind = assignment ? 'assignment' : 'quiz';
   const landLabel = assignment ? '作業繳交區' : '測驗作答區';
@@ -1194,7 +1369,7 @@ function ActivityCard({
                 : '老師尚未留下回饋。'}
             </Copy>
             {receipt.reviewedAt ? <Copy>回饋時間：{time(receipt.reviewedAt)}</Copy> : null}
-            {feedbackPredatesSubmission(receipt) ? (
+            {receiptFeedbackIsStale(receipt) ? (
               <Copy>這則回饋早於最近一次繳交，可請老師確認是否仍適用。</Copy>
             ) : null}
           </View>
@@ -1218,6 +1393,8 @@ function ActivityCard({
             classes={classes}
             course={course}
             item={item}
+            scrollRef={scrollRef}
+            contentOffsetYRef={contentOffsetYRef}
           />
         ) : null}
       </Section>
@@ -1229,14 +1406,25 @@ function TeacherReceipts({
   classes,
   course,
   item,
+  scrollRef,
+  contentOffsetYRef,
 }: {
   classes: Classes;
   course: NuniWorkspace;
   item: Activity;
+  scrollRef?: RefObject<ScrollView | null>;
+  contentOffsetYRef?: MutableRefObject<number>;
 }) {
   const assignment = 'instructions' in item;
   const [feedbackFilter, setFeedbackFilter] = useState<FeedbackQueueFilter>('needs_feedback');
+  const [focusReceiptId, setFocusReceiptId] = useState<string | null>(null);
+  const [queueNotice, setQueueNotice] = useState('');
   const seededFilter = useRef(false);
+  const receiptsRef = useRef<Receipt[] | null>(null);
+  const rowRefs = useRef(new Map<string, View | null>());
+  const pendingRevealId = useRef<string | null>(null);
+  const revealGeneration = useRef(0);
+  const mountedRef = useRef(true);
   const load = useCallback(
     async (): Promise<Receipt[]> =>
       assignment
@@ -1246,6 +1434,21 @@ function TeacherReceipts({
   );
   const resource = useLoad(load, false);
   const { data: receipts, loading: busy, error } = resource;
+  useEffect(() => {
+    receiptsRef.current = receipts;
+  }, [receipts]);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      pendingRevealId.current = null;
+      revealGeneration.current += 1;
+    };
+  }, []);
+  useEffect(() => {
+    pendingRevealId.current = null;
+    revealGeneration.current += 1;
+  }, [course.id, item.id, classes]);
   useEffect(() => {
     if (!receipts || seededFilter.current) return;
     seededFilter.current = true;
@@ -1261,6 +1464,68 @@ function TeacherReceipts({
     matchesFeedbackQueueFilter(entry, feedbackFilter),
   ).length;
   const filterOptions: FeedbackQueueFilter[] = ['all', 'needs_feedback', 'reviewed'];
+  const tryReveal = useCallback(
+    (accountId: string) => {
+      if (!mountedRef.current || pendingRevealId.current !== accountId) return false;
+      const scroll = scrollRef?.current;
+      const target = rowRefs.current.get(accountId) ?? null;
+      if (!scroll || !target) return false;
+      const generation = revealGeneration.current;
+      const scrollNode = scroll;
+      const targetNode = target;
+      // Generation + node identity cancel in-flight measures; do not clear pending
+      // until scheduling succeeds so a late layout can retry if refs were missing.
+      revealAssignmentSubmitArea(scrollNode, targetNode, {
+        contentOffsetY: contentOffsetYRef?.current ?? 0,
+        isActive: () =>
+          mountedRef.current &&
+          revealGeneration.current === generation &&
+          scrollRef?.current === scrollNode &&
+          rowRefs.current.get(accountId) === targetNode,
+      });
+      return true;
+    },
+    [contentOffsetYRef, scrollRef],
+  );
+  /** Queue reveal after React commits filter/focus; never measure the pre-save layout. */
+  const requestReveal = (accountId: string) => {
+    revealGeneration.current += 1;
+    pendingRevealId.current = accountId;
+  };
+  useLayoutEffect(() => {
+    const accountId = pendingRevealId.current;
+    if (!accountId || accountId !== focusReceiptId) return;
+    const generation = revealGeneration.current;
+    let frame2 = 0;
+    const frame1 = requestAnimationFrame(() => {
+      frame2 = requestAnimationFrame(() => {
+        if (revealGeneration.current !== generation) return;
+        if (pendingRevealId.current !== accountId) return;
+        if (tryReveal(accountId)) pendingRevealId.current = null;
+      });
+    });
+    return () => {
+      cancelAnimationFrame(frame1);
+      cancelAnimationFrame(frame2);
+    };
+  }, [focusReceiptId, feedbackFilter, ordered, tryReveal]);
+  const advanceAfterSave = (saved: Receipt, latest: Receipt[]) => {
+    const next = nextAwaitingFeedbackReview(latest, saved.platformAccountId);
+    if (!next) {
+      pendingRevealId.current = null;
+      revealGeneration.current += 1;
+      setFocusReceiptId(null);
+      setFeedbackFilter((current) =>
+        matchesFeedbackQueueFilter(saved, current) ? current : 'all',
+      );
+      setQueueNotice('回饋已儲存。目前沒有下一份尚未回饋的繳交。');
+      return;
+    }
+    setFeedbackFilter('needs_feedback');
+    setFocusReceiptId(next.platformAccountId);
+    setQueueNotice(`回饋已儲存。已移到 ${next.displayName} 的繳交。`);
+    requestReveal(next.platformAccountId);
+  };
   return (
     <View style={{ gap: 12 }}>
       <Copy>{assignment ? item.submissionCount : item.responseCount} 份繳交</Copy>
@@ -1273,6 +1538,7 @@ function TeacherReceipts({
       {!busy && !error && receipts?.length === 0 ? <Copy>還沒有收到繳交內容。</Copy> : null}
       <View style={{ display: busy || error || !receipts?.length ? 'none' : 'flex', gap: 14 }}>
         <Copy>預設先看尚未回饋的繳交。儲存後，學生才看得到。</Copy>
+        {queueNotice ? <Copy>{queueNotice}</Copy> : null}
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
           {filterOptions.map((value) => {
             const count = receipts?.filter((entry) => matchesFeedbackQueueFilter(entry, value)).length ?? 0;
@@ -1291,21 +1557,40 @@ function TeacherReceipts({
             「{feedbackQueueLabel(feedbackFilter)}」目前沒有繳交。可改選「全部」查看其他狀態。
           </Copy>
         ) : null}
-        {ordered.map((receipt) => (
+        {ordered.map((receipt) => {
+          const position = awaitingFeedbackPosition(ordered, receipt.platformAccountId);
+          const focused = focusReceiptId === receipt.platformAccountId;
+          const visible = matchesFeedbackQueueFilter(receipt, feedbackFilter);
+          return (
           <View
             key={receipt.platformAccountId}
+            ref={(node) => {
+              if (node) rowRefs.current.set(receipt.platformAccountId, node);
+              else rowRefs.current.delete(receipt.platformAccountId);
+            }}
+            onLayout={() => {
+              if (pendingRevealId.current !== receipt.platformAccountId) return;
+              if (tryReveal(receipt.platformAccountId)) pendingRevealId.current = null;
+            }}
+            testID={`teacher-receipt-${item.id}-${receipt.platformAccountId}`}
             style={{
-              display: matchesFeedbackQueueFilter(receipt, feedbackFilter) ? 'flex' : 'none',
+              display: visible ? 'flex' : 'none',
               gap: 14,
             }}
             // Keep mounted so scoped draftKey editors survive filter switches.
-            accessibilityElementsHidden={!matchesFeedbackQueueFilter(receipt, feedbackFilter)}
-            importantForAccessibility={
-              matchesFeedbackQueueFilter(receipt, feedbackFilter) ? 'auto' : 'no-hide-descendants'
-            }
+            accessibilityElementsHidden={!visible}
+            importantForAccessibility={visible ? 'auto' : 'no-hide-descendants'}
           >
           <Section>
             <Copy title>{receipt.displayName}</Copy>
+            {position ? (
+              <Copy>
+                待回饋第 {position.index}／{position.total} 份
+                {focused ? ' · 目前批改這一份' : ''}
+              </Copy>
+            ) : focused ? (
+              <Copy>目前批改這一份</Copy>
+            ) : null}
             <Copy>
               {assignment
                 ? assignmentReceiptStatusLabel(
@@ -1351,7 +1636,7 @@ function TeacherReceipts({
               <Copy>尚未回饋</Copy>
             )}
             {receipt.reviewedAt ? <Copy>回饋時間：{time(receipt.reviewedAt)}</Copy> : null}
-            {feedbackPredatesSubmission(receipt) ? (
+            {receiptFeedbackIsStale(receipt) ? (
               <Copy>學生在這則回饋之後更新了繳交內容，請確認回饋是否仍適用。</Copy>
             ) : null}
             {course.state === 'active' ? (
@@ -1375,7 +1660,8 @@ function TeacherReceipts({
                   },
                 ]}
                 label="儲存老師回饋"
-                submit={async ({ feedback }, key, active) => {
+                secondaryLabel="儲存回饋並查看下一份"
+                submit={async ({ feedback }, key, active, intent) => {
                   const result = assignment
                     ? await classes.assignmentFeedback(
                         course.id,
@@ -1391,20 +1677,37 @@ function TeacherReceipts({
                         feedback,
                         key,
                       );
-                  if (active()) {
-                    resource.commit(
-                      (current) =>
-                        current?.map((entry) =>
-                          entry.platformAccountId === result.platformAccountId ? result : entry,
-                        ) ?? null,
-                      resource.version,
+                  if (!active()) return;
+                  const latest =
+                    (receiptsRef.current ?? []).map((entry) =>
+                      entry.platformAccountId === result.platformAccountId ? result : entry,
                     );
-                    // Keep the just-saved receipt on screen with its status line.
-                    setFeedbackFilter((current) =>
-                      matchesFeedbackQueueFilter(result, current) ? current : 'all',
-                    );
+                  const nextList = latest.length ? latest : [result];
+                  resource.commit(() => nextList, resource.version);
+                  receiptsRef.current = nextList;
+                  const matched = (result.teacherFeedback ?? '').trim() === feedback.trim();
+                  if (intent === 'secondary') {
+                    if (!matched) {
+                      // Keep this receipt visible with the conflict notice; do not move.
+                      setFocusReceiptId(result.platformAccountId);
+                      setFeedbackFilter((current) =>
+                        matchesFeedbackQueueFilter(result, current) ? current : 'all',
+                      );
+                      setQueueNotice('');
+                      pendingRevealId.current = null;
+                      revealGeneration.current += 1;
+                      return '這份回饋已有新的內容，上方顯示目前儲存的版本。';
+                    }
+                    // Advance only after authoritative text matches; other drafts stay mounted.
+                    advanceAfterSave(result, nextList);
+                    return undefined;
                   }
-                  return result.teacherFeedback === feedback.trim()
+                  setQueueNotice('');
+                  setFocusReceiptId(null);
+                  setFeedbackFilter((current) =>
+                    matchesFeedbackQueueFilter(result, current) ? current : 'all',
+                  );
+                  return matched
                     ? '老師回饋已儲存。'
                     : '這份回饋已有新的內容，上方顯示目前儲存的版本。';
                 }}
@@ -1412,7 +1715,8 @@ function TeacherReceipts({
             ) : null}
           </Section>
           </View>
-        ))}
+          );
+        })}
       </View>
     </View>
   );
