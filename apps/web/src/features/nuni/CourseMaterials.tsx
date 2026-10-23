@@ -19,10 +19,14 @@ import {
   describeMaterial,
   groupMaterialsByUnit,
   isMaterialNew,
-  isMaterialUnread,
   markMaterialRead,
   searchCourseMaterials,
 } from '@/lib/courseMaterials';
+import {
+  materialBrowserStorage,
+  useClientNow,
+  useMaterialReadIds,
+} from '@/lib/useMaterialClientState';
 import { MutationForm, useClasses } from './CourseUI';
 import { CourseUnitSelect } from './CourseUnitSelect';
 import { selectCourseUnit } from './courseOutline';
@@ -105,8 +109,8 @@ function Materials({
   const [readingMore, setReadingMore] = useState(false);
   const [moreError, setMoreError] = useState('');
   const [query, setQuery] = useState('');
-  const [now, setNow] = useState(() => Date.now());
-  const [readTick, setReadTick] = useState(0);
+  const now = useClientNow();
+  const readIds = useMaterialReadIds(accountId);
   const moreRequest = useRef<symbol | null>(null);
   const request = useRef(0);
   const mounted = useRef(true);
@@ -187,8 +191,7 @@ function Materials({
   }
 
   function rememberRead(materialId: string) {
-    markMaterialRead(accountId, materialId, typeof localStorage === 'undefined' ? null : localStorage);
-    setReadTick((value) => value + 1);
+    markMaterialRead(accountId, materialId, materialBrowserStorage());
   }
 
   useEffect(() => {
@@ -201,11 +204,6 @@ function Materials({
     };
     // The parent key changes with session, workspace, role and archive status.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 60_000);
-    return () => clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -324,14 +322,8 @@ function Materials({
                   <ul className={`${shared.list} ${styles.materials}`}>
                     {group.materials.map((item) => {
                       const described = describeMaterial(item);
-                      const unread =
-                        readTick >= 0 &&
-                        isMaterialUnread(
-                          accountId,
-                          item.id,
-                          typeof localStorage === 'undefined' ? null : localStorage,
-                        );
-                      const fresh = isMaterialNew(item.createdAt, now);
+                      const unread = readIds != null && !readIds.has(item.id);
+                      const fresh = now != null && isMaterialNew(item.createdAt, now);
                       return (
                         <li key={item.id}>
                           <article

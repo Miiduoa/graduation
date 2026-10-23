@@ -1,6 +1,9 @@
 vi.mock('@/components/SchoolSelector', () => ({ SchoolSelector: () => null }));
 vi.mock('@/components/PWAInstallBanner', () => ({ PWAInstallBanner: () => null }));
+vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>Campus One</header> }));
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { renderToString } from 'react-dom/server';
+import { hydrateRoot, type Root } from 'react-dom/client';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
 import { NuniApp } from './NuniApp';
@@ -9,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   request: vi.fn(),
   refresh: vi.fn(),
   signedIn: true,
+  loading: false,
   pathname: '/classroom/course/cw_11111111-1111-4111-8111-111111111111',
   search: '',
 }));
@@ -29,7 +33,7 @@ vi.mock('./Session', () => ({
     session: mocks.signedIn
       ? { platformAccountId: principalId, context: 'a'.repeat(43), isPlatformOperator: false }
       : null,
-    loading: false,
+    loading: mocks.loading,
     error: '',
     pendingLogout: false,
     refresh: mocks.refresh,
@@ -64,6 +68,7 @@ beforeEach(() => {
   failure = null;
   memberRole = 'owner-teacher';
   mocks.signedIn = true;
+  mocks.loading = false;
   mocks.pathname = `/classroom/course/${workspaceId}`;
   mocks.search = '';
   window.history.replaceState({}, '', mocks.pathname);
@@ -234,4 +239,36 @@ it('opens linked quizzes on initial load and follows same-course task history wi
   );
   fireEvent.click(screen.getByRole('tab', { name: '測驗' }));
   expect((screen.getByLabelText('測驗草稿') as HTMLInputElement).value).toBe('我的作答');
+});
+
+it('hydrates a logged-in course hash against the server loading markup', async () => {
+  mocks.signedIn = false;
+  mocks.loading = true;
+  window.history.replaceState(
+    {},
+    '',
+    `${mocks.pathname}#material-cwm_11111111-1111-4111-8111-111111111111`,
+  );
+  const app = <NuniApp />;
+  const container = document.createElement('div');
+  container.innerHTML = renderToString(app);
+  document.body.append(container);
+  expect(container.textContent).toContain('正在確認登入狀態…');
+  mocks.signedIn = true;
+  mocks.loading = false;
+  const onRecoverableError = vi.fn();
+  let root: Root | undefined;
+  try {
+    await act(async () => {
+      root = hydrateRoot(container, app, { onRecoverableError });
+    });
+    expect(onRecoverableError).not.toHaveBeenCalled();
+    await screen.findByRole('heading', { name: '設計專題' });
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: '教材' }).getAttribute('aria-selected')).toBe('true'),
+    );
+  } finally {
+    await act(async () => root?.unmount());
+    container.remove();
+  }
 });

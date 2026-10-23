@@ -8,6 +8,7 @@ import { CampusServiceMenu } from './CampusServiceMenu';
 import { CampusIcon } from './CampusIcon';
 import { SchoolSelector } from './SchoolSelector';
 import { useNuniSession } from '@/features/nuni/Session';
+import { useClientHydrated } from '@/lib/useClientHydrated';
 import { useLocationHash } from '@/lib/useLocationHash';
 import headerStyles from './AppHeader.module.css';
 import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
@@ -20,6 +21,7 @@ function Header() {
   const hash = useLocationHash();
   const { user, loading, signOutUser } = useAuth();
   const nuni = useNuniSession();
+  const hydrated = useClientHydrated();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const context = useCampusNavigationSearch(params);
@@ -30,7 +32,7 @@ function Header() {
     hash,
   );
   const loginPage = ['/login', '/classroom/login', '/admin/login'].includes(pathname || '');
-  const checking = loading || nuni.loading;
+  const checking = !hydrated || loading || nuni.loading;
   return (
     <>
       <header className={headerStyles.header} data-campus-navigation="true">

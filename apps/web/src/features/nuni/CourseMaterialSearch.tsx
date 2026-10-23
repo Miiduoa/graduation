@@ -13,6 +13,7 @@ import {
   type MaterialSearchSeed,
   type SearchableMaterial,
 } from '@/lib/courseMaterials';
+import { useClientNow } from '@/lib/useMaterialClientState';
 import { useClasses } from './CourseUI';
 import { useNuniSession } from './Session';
 import shared from './NuniApp.module.css';
@@ -40,7 +41,7 @@ function Search({ compact, seed }: { compact: boolean; seed: MaterialSearchSeed 
   const [truncated, setTruncated] = useState(false);
   const [reading, setReading] = useState(false);
   const [error, setError] = useState('');
-  const [now, setNow] = useState(() => Date.now());
+  const now = useClientNow();
   const request = useRef(0);
   const loadStarted = useRef(false);
   const mounted = useRef(true);
@@ -51,10 +52,8 @@ function Search({ compact, seed }: { compact: boolean; seed: MaterialSearchSeed 
 
   useEffect(() => {
     mounted.current = true;
-    const timer = setInterval(() => setNow(Date.now()), 60_000);
     return () => {
       mounted.current = false;
-      clearInterval(timer);
     };
   }, []);
 
@@ -147,7 +146,7 @@ function Search({ compact, seed }: { compact: boolean; seed: MaterialSearchSeed 
                     {item.courseTitle}
                     {item.unitTitle ? ` · ${item.unitTitle}` : ''}
                     {` · ${described.kindLabel}`}
-                    {isMaterialNew(item.createdAt, now) ? ' · 新教材' : ''}
+                    {now != null && isMaterialNew(item.createdAt, now) ? ' · 新教材' : ''}
                   </span>
                   <small>
                     發布 {formatTaipeiDateTime(item.createdAt, { seconds: false })} · 開啟這份教材
