@@ -6,6 +6,7 @@ import { buildPersonalToday, type PersonalImportRecord } from '@campus/shared';
 import { usePersonalImportScope, usePersonalImports } from '@/lib/usePersonalImports';
 import { useAuth } from '@/components/AuthGuard';
 import { SchoolSelector } from '@/components/SchoolSelector';
+import { CampusIcon } from '@/components/CampusIcon';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { useOptionalNuniSession } from '@/features/nuni/Session';
 import { loadPersonalTimetable, type StoredTimetable } from '@/lib/timetable/store';
@@ -148,8 +149,13 @@ function Schedule({ now }: { now: Date }) {
   return (
     <section className={styles.panel} aria-labelledby="today-timetable-title">
       <div className={styles.heading}>
-        <h2 id="today-timetable-title">今天的課表</h2>
-        <Link href={timetableHref}>完整課表</Link>
+        <h2 id="today-timetable-title">
+          <CampusIcon name="timetable" size={21} />
+          今天的課表
+        </h2>
+        <Link href={timetableHref}>
+          完整課表 <span aria-hidden="true">↗</span>
+        </Link>
       </div>
       <p className={styles.note}>{context.schoolName} · 個人整理的週課表</p>
       {!loaded && <p role="status">正在讀取課表…</p>}
@@ -168,7 +174,7 @@ function Schedule({ now }: { now: Date }) {
         </div>
       )}
       {loaded && !error && !selected && (
-        <>
+        <div className={styles.emptyState}>
           <p>把課表帶進來，這裡就會顯示今天的時間與教室。</p>
           <div className={styles.actions}>
             <Link className="btn primary" href={`/import?kind=timetable&${query}`}>
@@ -176,7 +182,7 @@ function Schedule({ now }: { now: Date }) {
             </Link>
             <Link href={`/timetable?${query}`}>手動排課</Link>
           </div>
-        </>
+        </div>
       )}
       {loaded && !error && selected && (
         <>
@@ -204,7 +210,15 @@ function Schedule({ now }: { now: Date }) {
               {schedule.today.map((entry) => (
                 <li
                   key={entry.row.id}
-                  className={entry.status === 'ended' ? styles.ended : undefined}
+                  className={
+                    entry.status === 'ended'
+                      ? styles.ended
+                      : entry.status === 'ongoing'
+                        ? styles.ongoing
+                        : entry.row.id === schedule.nextId
+                          ? styles.upcoming
+                          : undefined
+                  }
                 >
                   <div className={styles.time}>
                     {entry.startTime}
