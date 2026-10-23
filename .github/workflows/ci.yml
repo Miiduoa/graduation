@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
-  NODE_VERSION: '22'
+  NODE_VERSION: '22.23.4'
   PNPM_VERSION: '10'
 
 jobs:
@@ -73,7 +73,8 @@ jobs:
         run: |
           npm install --prefix "$RUNNER_TEMP/eas-config-schema" --ignore-scripts --no-audit --no-fund @expo/eas-json@24.9.0
           node --test scripts/firebase-ci-workflow.test.cjs scripts/wait-for-firestore-indexes.test.cjs scripts/firebase-release-preflight.test.cjs scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs scripts/prepare-eas-build.test.mjs scripts/verify-nuni-integration.test.mjs
-          node --test scripts/nuni-course-source.test.mjs scripts/nuni-course-api-boundary.test.mjs scripts/nuni-materials-api-boundary.test.mjs scripts/nuni-merchant-api-boundary.test.mjs scripts/seed-cafeterias.test.cjs
+          node --test scripts/nuni-course-source.test.mjs scripts/nuni-course-api-boundary.test.mjs scripts/nuni-materials-api-boundary.test.mjs scripts/nuni-merchant-api-boundary.test.mjs scripts/nuni-merchant-source.test.mjs scripts/nuni-merchant-native-transport.test.mjs scripts/seed-cafeterias.test.cjs
+          python3 deploy/nuni-api/food-ordering/build_test.py
 
       - name: Test public cafeteria HTTP and PostgreSQL contracts
         env:
@@ -362,8 +363,8 @@ jobs:
             }
           }
 
-          if (config.build?.base?.node !== '22.12.0') {
-            throw new Error('EAS base Node must be 22.12.0');
+          if (config.build?.base?.node !== '22.23.4') {
+            throw new Error('EAS base Node must be 22.23.4');
           }
           if (config.build?.base?.pnpm !== '10.28.2') {
             throw new Error('EAS base pnpm must be 10.28.2');

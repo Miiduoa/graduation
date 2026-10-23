@@ -6,9 +6,25 @@ import type {
   NuniFoodStaffOrderQueueItem,
 } from '@campus/shared/src/nuniFood';
 import { future, money, queueFixture, shiftFixture } from '@/features/food/foodTestFixtures';
+import { loadFoodPending } from '@/features/food/foodPersistence';
 import { MerchantOrderDesk } from './MerchantOrderDesk';
-const mocks = vi.hoisted(() => ({ request: vi.fn() }));
-vi.mock('@/features/nuni/Session', () => ({ browserRequest: mocks.request }));
+const mocks = vi.hoisted(() => ({
+  request: vi.fn(),
+  session: {
+    platformAccountId: 'account-a',
+    context: 'context-a',
+  } as { platformAccountId: string; context: string } | null,
+}));
+vi.mock('@/features/nuni/Session', () => ({
+  browserRequest: mocks.request,
+  useNuniSession: () => ({
+    session: mocks.session,
+    loading: false,
+    error: '',
+    pendingLogout: false,
+    refresh: vi.fn(),
+  }),
+}));
 vi.mock('./PickupScanner', () => ({
   PickupScanner: ({
     onToken,
@@ -123,11 +139,17 @@ async function respond(path: string, _context: string, input?: Record<string, un
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  sessionStorage.clear();
+  mocks.session = { platformAccountId: 'account-a', context: 'context-a' };
   shift = shiftFixture();
   queue = [queueFixture()];
   mocks.request.mockImplementation(respond);
 });
 const button = (name: string) => screen.getByRole('button', { name }) as HTMLButtonElement;
+async function quietRefresh() {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+}
 function mount(cache = new Map<string, unknown>(), context = 'context-a', locationId = 'store-1') {
   return render(
     <MerchantOrderDesk
@@ -145,6 +167,73 @@ async function confirm(name: string, label: string) {
   fireEvent.click(screen.getByLabelText(label));
   fireEvent.click(button(`確認：${name}`));
 }
+
+it('requires a new cash confirmation when polling finds a different shift', async () => {
+  mount();
+  await screen.findByText('目前收銀班別');
+  fireEvent.change(screen.getByLabelText('交班實點現金（元）'), { target: { value: '620' } });
+  fireEvent.click(screen.getByLabelText('我已清點現金，確認交班內容'));
+  expect(button('確認交班').disabled).toBe(false);
+  shift = { ...shift!, id: 'shift-replacement' };
+  await quietRefresh();
+  await waitFor(() => expect(button('確認交班').disabled).toBe(true));
+  expect((screen.getByLabelText('我已清點現金，確認交班內容') as HTMLInputElement).checked).toBe(
+    false,
+  );
+  expect((screen.getByLabelText('交班實點現金（元）') as HTMLInputElement).value).toBe('620');
+  expect(mocks.request.mock.calls.some(([path]) => path.endsWith('/handover'))).toBe(false);
+});
+
+it('does not restore a previous handover confirmation after permissions are revoked and granted again', async () => {
+  mount();
+  await screen.findByText('目前收銀班別');
+  fireEvent.change(screen.getByLabelText('交班實點現金（元）'), { target: { value: '620' } });
+  fireEvent.click(screen.getByLabelText('我已清點現金，確認交班內容'));
+  shift = { ...shift!, allowedActions: ['view'] };
+  await quietRefresh();
+  await waitFor(() => expect(screen.queryByLabelText('我已清點現金，確認交班內容')).toBeNull());
+  shift = { ...shift!, allowedActions: ['view', 'handover'] };
+  await quietRefresh();
+  expect((screen.getByLabelText('我已清點現金，確認交班內容') as HTMLInputElement).checked).toBe(
+    false,
+  );
+  expect(button('確認交班').disabled).toBe(true);
+});
+
+it('does not carry an open-shift confirmation into a shift opened elsewhere', async () => {
+  shift = null;
+  mount();
+  await screen.findByText('開始收銀');
+  fireEvent.click(screen.getByLabelText('我已清點這一班的期初現金'));
+  expect(button('確認開班').disabled).toBe(false);
+  shift = shiftFixture();
+  await quietRefresh();
+  await screen.findByText('目前收銀班別');
+  expect((screen.getByLabelText('我已清點現金，確認交班內容') as HTMLInputElement).checked).toBe(
+    false,
+  );
+});
+
+it('retains an uncertain handover with its original key when a newer shift is observed', async () => {
+  mocks.request.mockImplementation((path, context, input) =>
+    path.endsWith('/handover')
+      ? Promise.reject(new NuniError(0, 'NETWORK_ERROR'))
+      : respond(path, context, input),
+  );
+  mount();
+  await screen.findByText('目前收銀班別');
+  fireEvent.change(screen.getByLabelText('交班實點現金（元）'), { target: { value: '620' } });
+  fireEvent.click(screen.getByLabelText('我已清點現金，確認交班內容'));
+  fireEvent.click(button('確認交班'));
+  await screen.findByText(/尚未確認這次操作的結果/);
+  const original = loadFoodPending('account-a', 'merchant-food:campus-one:store-1');
+  expect(original?.action).toBe('handover');
+  shift = { ...shift!, id: 'shift-replacement' };
+  await quietRefresh();
+  expect(loadFoodPending('account-a', 'merchant-food:campus-one:store-1')).toEqual(original);
+  expect(screen.getByRole('button', { name: '重試同一份操作' })).toBeTruthy();
+  expect(mocks.request.mock.calls.filter(([path]) => path.endsWith('/handover'))).toHaveLength(1);
+});
 
 it('completes real cashier, preparation, token handoff and counted-cash handover with explicit confirmations', async () => {
   shift = null;
@@ -289,6 +378,79 @@ it('requires an actual refund acknowledgment and a meaningful other rejection re
     reason: 'other',
     reasonDetail: '設備臨時故障',
   });
+});
+
+it('quietly polls the merchant queue without clearing an open confirm panel, and ignores background ticks', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  mount();
+  fireEvent.click(await screen.findByRole('button', { name: '登記櫃檯收款：A101' }));
+  fireEvent.click(screen.getByLabelText('我已實際收到這筆訂單的款項'));
+  expect(button('確認：登記櫃檯收款').disabled).toBe(false);
+  const before = mocks.request.mock.calls.filter(([path]) => path.endsWith('/orders')).length;
+  Object.defineProperty(document, 'visibilityState', {
+    configurable: true,
+    get: () => 'hidden',
+  });
+  await act(async () => {
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10_000);
+  });
+  expect(mocks.request.mock.calls.filter(([path]) => path.endsWith('/orders')).length).toBe(before);
+  Object.defineProperty(document, 'visibilityState', {
+    configurable: true,
+    get: () => 'visible',
+  });
+  queue = [{ ...queueFixture(), state: 'paid', allowedActions: ['accept', 'reject'] }];
+  await act(async () => {
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await screen.findByText('取餐 A101 · 已付款，待店家接單');
+  await waitFor(() => expect(screen.queryByLabelText('我已實際收到這筆訂單的款項')).toBeNull());
+  expect(screen.getByRole('button', { name: '接單：A101' })).toBeTruthy();
+  vi.useRealTimers();
+});
+
+it('persists an uncertain cash write across a new Map and rejects storage failure before the network', async () => {
+  let attempts = 0;
+  mocks.request.mockImplementation((path, context, input) =>
+    path.endsWith('/counter-payment') && ++attempts === 1
+      ? Promise.reject(new NuniError(0, 'NETWORK_ERROR'))
+      : respond(path, context, input),
+  );
+  const first = mount(new Map());
+  await confirm('登記櫃檯收款', '我已實際收到這筆訂單的款項');
+  await screen.findByText(/尚未確認這次操作的結果/);
+  const original = mocks.request.mock.calls.find(([path]) => path.endsWith('/counter-payment'))![2];
+  // Cold start with an empty Map; durable sessionStorage must restore the same key.
+  first.unmount();
+  const second = mount(new Map(), 'context-renewed');
+  await screen.findByText('目前收銀班別');
+  fireEvent.click(button('重試同一份操作'));
+  await screen.findByText('取餐 A101 · 已付款，待店家接單');
+  const writes = mocks.request.mock.calls.filter(([path]) => path.endsWith('/counter-payment'));
+  expect(writes[1][2]).toEqual(original);
+
+  second.unmount();
+  queue = [queueFixture()];
+  mocks.request.mockClear();
+  mount(new Map());
+  await screen.findByText('目前收銀班別');
+  fireEvent.click(await screen.findByRole('button', { name: '登記櫃檯收款：A101' }));
+  fireEvent.click(screen.getByLabelText('我已實際收到這筆訂單的款項'));
+  const blocked = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    throw new Error('quota');
+  });
+  try {
+    fireEvent.click(button('確認：登記櫃檯收款'));
+    await screen.findByText(/目前無法安全保存/);
+    expect(mocks.request.mock.calls.some(([path]) => path.endsWith('/counter-payment'))).toBe(
+      false,
+    );
+  } finally {
+    blocked.mockRestore();
+  }
 });
 
 it.each([401, 403, 409])(

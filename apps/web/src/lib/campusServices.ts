@@ -1,3 +1,5 @@
+import { isWebOnlineOrderingEnabled, ONLINE_ORDERING_OFF_TEXT } from './onlineOrdering';
+
 export const SERVICE_CATEGORIES = [
   { id: 'study', label: '學習與課務', description: '查課表、整理學分，接續課堂上的事。' },
   { id: 'campus', label: '校園生活', description: '找教室、看公車，安排課堂以外的時間。' },
@@ -274,6 +276,13 @@ export const CAMPUS_SERVICES = [
   access: keyof typeof SERVICE_ACCESS;
 }[];
 
+export function presentCampusService<T extends { href: string; text: string }>(service: T): T {
+  if (service.href === '/food' && !isWebOnlineOrderingEnabled()) {
+    return { ...service, text: ONLINE_ORDERING_OFF_TEXT };
+  }
+  return service;
+}
+
 export function searchCampusServices(query: string, category: ServiceCategory | 'all' = 'all') {
   const terms = query
     .normalize('NFKC')
@@ -281,7 +290,7 @@ export function searchCampusServices(query: string, category: ServiceCategory | 
     .toLocaleLowerCase('zh-TW')
     .split(/\s+/)
     .filter(Boolean);
-  return CAMPUS_SERVICES.filter((service) => {
+  return CAMPUS_SERVICES.map(presentCampusService).filter((service) => {
     const content = `${service.name} ${service.text} ${service.keywords}`
       .normalize('NFKC')
       .toLocaleLowerCase('zh-TW');
