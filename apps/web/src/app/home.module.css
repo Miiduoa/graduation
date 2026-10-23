@@ -1,5 +1,5 @@
 :global([data-campus-bus-shell='true']) .page {
-  background: #f7f5f0;
+  background: var(--bg);
 }
 :global([data-campus-bus-shell='true']) .mark {
   align-items: center;
@@ -120,7 +120,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 32px;
-  margin-bottom: 32px;
+  margin-bottom: 24px;
 }
 .homeDate {
   display: flex;
@@ -152,8 +152,8 @@
 }
 .week,
 .weekPlaceholder {
-  width: 346px;
-  min-height: 93px;
+  width: 322px;
+  min-height: 82px;
   flex-shrink: 0;
 }
 .week {
@@ -204,18 +204,17 @@
 .dayContent {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 20px;
 }
 .dayContent > .section {
   margin-top: 8px;
 }
 .workPanel {
   min-width: 0;
-  padding: 26px 28px;
-  border: 1px solid color-mix(in srgb, var(--brand) 18%, var(--line));
-  border-top: 3px solid var(--brand);
-  border-radius: 4px 4px 12px 12px;
-  background: var(--accent-soft);
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
 }
 .panelLabel {
   display: flex;
@@ -225,15 +224,15 @@
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.08em;
-  margin-bottom: 16px;
+  margin-bottom: 10px;
 }
 .workPanel .sectionHeading h2 {
-  font-size: 24px;
+  font-size: var(--font-h2-size);
   letter-spacing: -0.03em;
 }
 .workPanel .sectionNote {
-  font-size: 14px;
-  line-height: 1.75;
+  font-size: var(--font-body-sm-size);
+  line-height: 1.7;
   margin-bottom: 0;
 }
 .workPanel .list {
@@ -243,23 +242,11 @@
   border-bottom: 0;
 }
 .guestWelcome .focusActions {
-  margin-top: 22px;
+  margin-top: 18px;
 }
-.guestNote {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 18px;
-  margin-top: 24px;
-  padding-top: 16px;
-  border-top: 1px solid color-mix(in srgb, var(--brand) 16%, transparent);
-  color: var(--soft);
-  font-size: 11px;
-}
-.guestNote span {
-  color: var(--brand);
-  font-size: 12px;
-  font-weight: 500;
+.guestWelcome .primary {
+  gap: 12px;
+  padding-inline: 14px;
 }
 .loadingLines {
   display: grid;
@@ -488,7 +475,7 @@
   gap: 25px;
   background: var(--brand);
   color: var(--on-brand) !important;
-  border-radius: 7px;
+  border-radius: 9px;
   min-height: 46px;
   padding: 10px 18px;
   font-weight: 600;
@@ -709,7 +696,7 @@
 }
 .services {
   padding-top: 4px;
-  scroll-margin-top: 24px;
+  scroll-margin-top: 84px;
 }
 .servicesHeading {
   display: flex;
@@ -1252,8 +1239,8 @@
   .homeHeading {
     align-items: stretch;
     flex-direction: column;
-    gap: 22px;
-    margin-bottom: 24px;
+    gap: 18px;
+    margin-bottom: 20px;
   }
   .homeHeading h1 {
     font-size: calc(var(--font-h1-size) + 5px);
@@ -1269,7 +1256,7 @@
   .week,
   .weekPlaceholder {
     width: 100%;
-    min-height: 83px;
+    min-height: 74px;
   }
   .weekDay,
   .weekToday {
@@ -1277,17 +1264,62 @@
     gap: 5px;
   }
   .workPanel {
-    padding: 22px 20px;
+    padding: 20px;
   }
   .workPanel .sectionHeading h2 {
-    font-size: 22px;
+    font-size: var(--font-h2-size);
   }
   .guestWelcome .focusActions {
     gap: 8px 16px;
   }
   .sidebar {
-    padding-top: 24px;
-    border-top: 1px solid var(--line);
+    padding-top: 8px;
+    border-top: 0;
+  }
+  .services {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .servicesHeading,
+  .services > .sectionNote {
+    grid-column: 1 / -1;
+  }
+  .services > .sectionNote {
+    margin: -4px 0 4px;
+  }
+  .services > a {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
+    padding: 14px 12px;
+    min-height: 88px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface);
+  }
+  .serviceIcon {
+    width: 32px;
+    height: 32px;
+    border: 0;
+    background: var(--panel);
+    border-radius: 8px;
+  }
+  .serviceIcon svg {
+    width: 19px;
+    height: 19px;
+  }
+  .services strong {
+    font-size: var(--font-body-sm-size);
+  }
+  .services small {
+    font-size: 11px;
+    line-height: 1.5;
+    margin-top: 4px;
+  }
+  .services .serviceArrow {
+    display: none;
   }
 }
 :global([data-reduced-motion='true']) .page *,
