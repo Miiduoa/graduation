@@ -29,7 +29,11 @@ function verifyMirror(data: Record<string, unknown>, id: string, schoolId: strin
     throw new Error('Membership could not be confirmed');
   }
 }
-async function readMemberGroup(uid: string, schoolId: string, id: string): Promise<MemberGroup> {
+export async function readMemberGroup(
+  uid: string,
+  schoolId: string,
+  id: string,
+): Promise<MemberGroup> {
   assertCurrent(uid);
   if (!validId(id)) throw new Error('Invalid group identifier');
   const db = getDb();

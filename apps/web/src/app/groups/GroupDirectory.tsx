@@ -239,11 +239,17 @@ function MemberDirectory({ uid, schoolId, mode }: { uid: string; schoolId: strin
                   >
                     查看課程
                   </Link>
-                ) : (
-                  <p>網頁版討論尚未開放。</p>
-                )}
+                ) : null}
+                <Link
+                  className="btn"
+                  href={`/groups/${encodeURIComponent(group.id)}?schoolId=${encodeURIComponent(schoolId)}`}
+                >
+                  開啟討論
+                </Link>
                 {group.role === 'owner' ? (
-                  <p>擁有者需先移轉管理權，才能退出。</p>
+                  <p>
+                    擁有者需先完成交接，才能退出群組。
+                  </p>
                 ) : confirmLeave === group.id ? (
                   <div className={styles.confirm}>
                     <p>確定退出「{group.name}」？再次加入需要邀請碼。</p>
