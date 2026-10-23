@@ -1,5 +1,18 @@
 import { createNuniClasses, type NuniTransport } from '@campus/shared/src/nuni';
-import type { HomeData, HomeTask } from './homeOverview';
+import { parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
+import type { HomeData, HomeFeedback, HomeTask } from './homeOverview';
+
+const FEEDBACK_LIMIT = 8;
+
+function sortFeedback(rows: HomeFeedback[]): HomeFeedback[] {
+  return rows
+    .sort(
+      (a, b) =>
+        (b.reviewedAt ? parseTaipeiInstant(b.reviewedAt) ?? 0 : 0) -
+        (a.reviewedAt ? parseTaipeiInstant(a.reviewedAt) ?? 0 : 0),
+    )
+    .slice(0, FEEDBACK_LIMIT);
+}
 
 export async function loadNuniHomeData(
   transport: NuniTransport,
@@ -16,6 +29,7 @@ export async function loadNuniHomeData(
     href: `/classroom/course/${encodeURIComponent(course.id)}`,
   }));
   const tasks: HomeTask[] = [];
+  const recentFeedback: HomeFeedback[] = [];
   // Bound requests when an account belongs to many courses. A failed course read
   // rejects the overview so an incomplete list never claims all work is done.
   // Four at a time keeps the home first screen inside a couple of seconds for a
@@ -29,30 +43,66 @@ export async function loadNuniHomeData(
           classes.assignments(course.id),
           classes.quizzes(course.id),
         ]);
-        const assignmentTasks: HomeTask[] = assignments
-          .filter((assignment) => assignment.state === 'open' && !assignment.mySubmission)
-          .map((assignment) => ({
-            kind: 'assignment',
-            id: assignment.id,
-            courseId: course.id,
-            courseName: course.name,
-            title: assignment.title,
-            dueAt: assignment.dueAt,
-            href: `${course.href}#assignment-${encodeURIComponent(assignment.id)}`,
-            acceptsLate: true,
-          }));
-        const quizTasks: HomeTask[] = quizzes
-          .filter((quiz) => quiz.state === 'open' && !quiz.myResponse)
-          .map((quiz) => ({
-            kind: 'quiz',
-            id: quiz.id,
-            courseId: course.id,
-            courseName: course.name,
-            title: quiz.title,
-            dueAt: quiz.dueAt,
-            href: `${course.href}#quiz-${encodeURIComponent(quiz.id)}`,
-            acceptsLate: true,
-          }));
+        const assignmentTasks: HomeTask[] = [];
+        for (const assignment of assignments) {
+          const href = `${course.href}#assignment-${encodeURIComponent(assignment.id)}`;
+          if (assignment.mySubmission?.teacherFeedback) {
+            recentFeedback.push({
+              kind: 'assignment',
+              id: assignment.id,
+              courseId: course.id,
+              courseName: course.name,
+              title: assignment.title,
+              feedback: assignment.mySubmission.teacherFeedback,
+              score: null,
+              reviewedAt: assignment.mySubmission.reviewedAt,
+              submittedAt: assignment.mySubmission.submittedAt,
+              href,
+            });
+          }
+          if (assignment.state === 'open' && !assignment.mySubmission) {
+            assignmentTasks.push({
+              kind: 'assignment',
+              id: assignment.id,
+              courseId: course.id,
+              courseName: course.name,
+              title: assignment.title,
+              dueAt: assignment.dueAt,
+              href,
+              acceptsLate: true,
+            });
+          }
+        }
+        const quizTasks: HomeTask[] = [];
+        for (const quiz of quizzes) {
+          const href = `${course.href}#quiz-${encodeURIComponent(quiz.id)}`;
+          if (quiz.myResponse?.teacherFeedback) {
+            recentFeedback.push({
+              kind: 'quiz',
+              id: quiz.id,
+              courseId: course.id,
+              courseName: course.name,
+              title: quiz.title,
+              feedback: quiz.myResponse.teacherFeedback,
+              score: null,
+              reviewedAt: quiz.myResponse.reviewedAt,
+              submittedAt: quiz.myResponse.submittedAt,
+              href,
+            });
+          }
+          if (quiz.state === 'open' && !quiz.myResponse) {
+            quizTasks.push({
+              kind: 'quiz',
+              id: quiz.id,
+              courseId: course.id,
+              courseName: course.name,
+              title: quiz.title,
+              dueAt: quiz.dueAt,
+              href,
+              acceptsLate: true,
+            });
+          }
+        }
         return [...assignmentTasks, ...quizTasks];
       }),
     );
@@ -66,6 +116,7 @@ export async function loadNuniHomeData(
   return {
     courses,
     tasks,
+    recentFeedback: sortFeedback(recentFeedback),
     unreadCount: 0,
     archivedCount: memberships.length - active.length,
   };
