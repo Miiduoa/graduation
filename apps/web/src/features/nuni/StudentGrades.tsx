@@ -25,7 +25,6 @@ import {
   markPublishedGradeRead,
   matchesGradeFilter,
   subscribeGradeRead,
-  summarizeGradeItems,
 } from '@/lib/lmsStudentGrades';
 import { isNuniSessionError, loadNuniStudentGrades } from '@/lib/nuniStudentGrades';
 import { loadSchoolStudentGrades } from '@/lib/schoolStudentGrades';
@@ -54,6 +53,14 @@ function useGradeReadEpoch() {
   return useSyncExternalStore(subscribeGradeRead, getGradeReadEpoch, () => 0);
 }
 
+function useStorageReady() {
+  return useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
+}
+
 export function StudentGradesBoard({
   nuni,
   school,
@@ -74,6 +81,7 @@ export function StudentGradesBoard({
   onOpen: (item: GradeItem, ownerId: string) => void;
 }) {
   useGradeReadEpoch();
+  const storageReady = useStorageReady();
   const ownerFor = (item: GradeItem) =>
     gradeOwnerForSource(item.source, nuniAccountId, schoolUid) || ownerId || '';
   const courses = [...(nuni?.courses ?? []), ...(school?.courses ?? [])];
@@ -85,16 +93,20 @@ export function StudentGradesBoard({
     unread: 0,
   };
   for (const item of items) {
-    const counts = summarizeGradeItems([item], ownerFor(item));
-    summary.graded += counts.graded;
-    summary.waiting += counts.waiting;
-    summary.missing += counts.missing;
-    summary.unread += counts.unread;
+    if (item.status === 'graded') summary.graded += 1;
+    if (item.status === 'waiting') summary.waiting += 1;
+    if (item.status === 'missing') summary.missing += 1;
+    if (storageReady && isPublishedGradeUnread(ownerFor(item), item)) summary.unread += 1;
   }
   const visibleCourses = courses
     .map((course) => ({
       ...course,
-      visible: course.items.filter((item) => matchesGradeFilter(item, filter, ownerFor(item))),
+      visible: course.items.filter((item) => {
+        if (filter === 'unread') {
+          return storageReady && isPublishedGradeUnread(ownerFor(item), item);
+        }
+        return matchesGradeFilter(item, filter, ownerFor(item));
+      }),
     }))
     .filter(
       (course) =>
@@ -169,6 +181,7 @@ export function StudentGradesBoard({
           ownerId={ownerId}
           nuniAccountId={nuniAccountId}
           schoolUid={schoolUid}
+          storageReady={storageReady}
           filter={filter}
           onOpen={onOpen}
         />
@@ -189,6 +202,7 @@ function CourseSection({
   ownerId,
   nuniAccountId,
   schoolUid,
+  storageReady,
   filter,
   onOpen,
 }: {
@@ -197,6 +211,7 @@ function CourseSection({
   ownerId?: string;
   nuniAccountId?: string | null;
   schoolUid?: string | null;
+  storageReady: boolean;
   filter: GradeFilter;
   onOpen: (item: GradeItem, ownerId: string) => void;
 }) {
@@ -242,6 +257,7 @@ function CourseSection({
               key={gradeRowKey(item)}
               item={item}
               ownerId={gradeOwnerForSource(item.source, nuniAccountId, schoolUid) || ownerId || ''}
+              storageReady={storageReady}
               onOpen={onOpen}
             />
           ))}
@@ -258,13 +274,15 @@ function gradeRowKey(item: GradeItem) {
 function GradeRow({
   item,
   ownerId,
+  storageReady,
   onOpen,
 }: {
   item: GradeItem;
   ownerId: string;
+  storageReady: boolean;
   onOpen: (item: GradeItem, ownerId: string) => void;
 }) {
-  const unread = isPublishedGradeUnread(ownerId, item);
+  const unread = storageReady && isPublishedGradeUnread(ownerId, item);
   const when = item.publishedAt || item.submittedAt;
   return (
     <li>

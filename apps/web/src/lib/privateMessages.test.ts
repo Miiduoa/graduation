@@ -418,4 +418,17 @@ it('notification destinations only use supported local tasks and never arbitrary
     href: '/classroom/course/cw_11111111-1111-4111-8111-111111111111',
     label: '開啟課程',
   });
+  expect(
+    notificationDestination({
+      ...notice,
+      type: 'material',
+      data: {
+        workspaceId: 'cw_11111111-1111-4111-8111-111111111111',
+        materialId: 'cwm_33333333-3333-4333-8333-333333333333',
+      },
+    }),
+  ).toEqual({
+    href: '/classroom/course/cw_11111111-1111-4111-8111-111111111111#material-cwm_33333333-3333-4333-8333-333333333333',
+    label: '開啟這份教材',
+  });
 });

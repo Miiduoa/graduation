@@ -63,6 +63,11 @@ export function FeedbackList({
   schoolUid?: string | null;
 }) {
   useSyncExternalStore(subscribeGradeRead, getGradeReadEpoch, () => 0);
+  const storageReady = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
   return (
     <ul className={styles.list} data-testid="recent-feedback-list">
       {items.map((item) => {
@@ -71,7 +76,8 @@ export function FeedbackList({
         const source = gradeSourceFromHref(item.href);
         const itemOwner = gradeOwnerForSource(source, nuniAccountId, schoolUid) || ownerId || '';
         const grade = asGradeItem(item, source);
-        const unread = itemOwner ? isPublishedGradeUnread(itemOwner, grade) : false;
+        const unread =
+          storageReady && itemOwner ? isPublishedGradeUnread(itemOwner, grade) : false;
         return (
           <li key={`${item.courseId}-${item.kind}-${item.id}`}>
             <Link

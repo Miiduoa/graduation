@@ -5,8 +5,14 @@ import { loadCourseWork, submitCourseText, type CourseAssignment, type CourseWor
 import {
   COURSE_WORK_LANDING_ATTR,
   COURSE_WORK_MISSING_ASSIGNMENT,
+  COURSE_WORK_MISSING_MATERIAL,
   COURSE_WORK_MISSING_QUIZ,
 } from '@/lib/courseWorkLanding';
+import { isMaterialUnread } from '@/lib/courseMaterials';
+import {
+  gradeReadOwner,
+  isPublishedGradeUnread,
+} from '@/lib/lmsStudentGrades';
 
 const auth = vi.hoisted(() => ({
   user: { uid: 'alice' } as { uid: string } | null,
@@ -63,6 +69,7 @@ function submit(id: string) {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  window.localStorage.clear();
   auth.user = { uid: 'alice' };
   auth.loading = false;
   school.selectedSchoolId = 'school-a';
@@ -327,4 +334,82 @@ it('explains a missing quiz instead of a blank screen', async () => {
   await mount();
   expect(await screen.findByText(COURSE_WORK_MISSING_QUIZ)).toBeTruthy();
   expect(screen.getByRole('region', { name: '作業 A' })).toBeTruthy();
+});
+
+it('lands on a school-course material and explains a missing one', async () => {
+  window.history.replaceState(null, '', '/course/course#material-m1');
+  await mount();
+  const card = await screen.findByRole('article', { name: '私人教材' });
+  await waitFor(() => expect(card.getAttribute(COURSE_WORK_LANDING_ATTR)).toBe('true'));
+  await act(async () => {
+    window.history.replaceState(null, '', '/course/course#material-gone');
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  expect(await screen.findByText(COURSE_WORK_MISSING_MATERIAL)).toBeTruthy();
+});
+
+it('lands on material and published assignment or quiz hashes and marks each as read', async () => {
+  const published = {
+    score: 88,
+    feedback: '清楚',
+    publishedAt: '2026-10-09T04:00:00.000Z',
+    revisionCount: 0,
+  };
+  vi.mocked(loadCourseWork).mockResolvedValue(
+    coursework({
+      assignments: [
+        assignment('hw-1', {
+          submittedAt: '2026-10-08T03:00:00.000Z',
+          submittedText: '作業稿',
+          grade: published,
+        }),
+        assignment('quiz-1', {
+          title: '小考 quiz-1',
+          type: 'quiz',
+          submittedAt: '2026-10-08T03:00:00.000Z',
+          submittedText: '測驗作答',
+          grade: published,
+        }),
+      ],
+    }),
+  );
+  window.history.replaceState(null, '', '/course/course#material-m1');
+  await mount();
+  const material = await screen.findByRole('article', { name: '私人教材' });
+  await waitFor(() => expect(material.getAttribute(COURSE_WORK_LANDING_ATTR)).toBe('true'));
+  expect(isMaterialUnread('alice', 'm1', window.localStorage)).toBe(false);
+
+  await act(async () => {
+    window.history.replaceState(null, '', '/course/course#assignment-hw-1');
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  const homework = await screen.findByRole('region', { name: '作業 hw-1' });
+  await waitFor(() => expect(homework.getAttribute(COURSE_WORK_LANDING_ATTR)).toBe('true'));
+  expect(
+    isPublishedGradeUnread(gradeReadOwner('school', 'alice'), {
+      source: 'school',
+      courseId: 'course',
+      kind: 'assignment',
+      id: 'hw-1',
+      status: 'graded',
+      publishedAt: published.publishedAt,
+    }),
+  ).toBe(false);
+
+  await act(async () => {
+    window.history.replaceState(null, '', '/course/course#quiz-quiz-1');
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  const quiz = await screen.findByRole('region', { name: '小考 quiz-1' });
+  await waitFor(() => expect(quiz.getAttribute(COURSE_WORK_LANDING_ATTR)).toBe('true'));
+  expect(
+    isPublishedGradeUnread(gradeReadOwner('school', 'alice'), {
+      source: 'school',
+      courseId: 'course',
+      kind: 'quiz',
+      id: 'quiz-1',
+      status: 'graded',
+      publishedAt: published.publishedAt,
+    }),
+  ).toBe(false);
 });

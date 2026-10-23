@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, it, vi } from 'vitest';
 import HomePage from './page';
 import { loadHomeData, type HomeData } from '@/lib/homeOverview';
-import { loadNuniHomeData } from '@/lib/nuniHomeOverview';
+import { HOME_MATERIALS_UNAVAILABLE, loadNuniHomeData, loadNuniHomeMaterials } from '@/lib/nuniHomeOverview';
 import { queryTransit } from '@/lib/transit';
 import { NuniError } from '@campus/shared/src/nuni';
 import { IDENTITY_LOOKUP_FAILED_COPY, IDENTITY_LOOKUP_FAILED_HINT } from '@/lib/accountIdentity';
@@ -63,7 +63,10 @@ vi.mock('@/lib/homeOverview', async (original) => {
   const actual = await original<typeof import('@/lib/homeOverview')>();
   return { ...actual, loadHomeData: vi.fn() };
 });
-vi.mock('@/lib/nuniHomeOverview', () => ({ loadNuniHomeData: vi.fn() }));
+vi.mock('@/lib/nuniHomeOverview', async (original) => {
+  const actual = await original<typeof import('@/lib/nuniHomeOverview')>();
+  return { ...actual, loadNuniHomeData: vi.fn(), loadNuniHomeMaterials: vi.fn() };
+});
 vi.mock('@/lib/transit', async (original) => {
   const actual = await original<typeof import('@/lib/transit')>();
   return {
@@ -772,4 +775,112 @@ it('keeps today-work and next-class rows wrapping on a 390-wide phone', async ()
   expect(css).toMatch(/grid-template-columns: minmax\(0, 1fr\)/);
   expect(css).toMatch(/\.courseWorkTarget \{[^}]*scroll-margin-top: 48px/);
   expect(css).toMatch(/@media \(max-width: 480px\) \{[\s\S]*?\.task \{[\s\S]*?padding: 12px 0/);
+});
+
+it('lists new materials on today and opens the cabinet hash', async () => {
+  state.uid = null;
+  state.session = { context: 'session-a', platformAccountId: 'student-a' };
+  const materialId = 'cwm_11111111-1111-4111-8111-111111111111';
+  const courseId = 'cw_11111111-1111-4111-8111-111111111111';
+  vi.mocked(loadNuniHomeData).mockResolvedValue({
+    ...data('資料庫系統'),
+    courses: [{ id: courseId, name: '資料庫系統', role: 'student', unreadCount: 0, href: `/classroom/course/${courseId}` }],
+    materials: [
+      {
+        id: materialId,
+        courseId,
+        courseName: '資料庫系統',
+        title: '本週講義',
+        unitTitle: '第 03 週',
+        createdAt: new Date().toISOString(),
+        href: `/classroom/course/${courseId}#material-${materialId}`,
+      },
+    ],
+  });
+  render(<HomePage />);
+  const link = await screen.findByRole('link', { name: /本週講義/ });
+  expect(link.getAttribute('href')).toBe(`/classroom/course/${courseId}#material-${materialId}`);
+  expect(link.textContent).toContain('資料庫系統');
+  expect(link.textContent).toContain('第 03 週');
+  expect(screen.getByLabelText('找所有課的教材')).toBeTruthy();
+});
+
+it('keeps today work and feedback when materials fail, and retries only materials', async () => {
+  state.uid = null;
+  state.session = { context: 'session-a', platformAccountId: 'student-a' };
+  const courseId = 'cw_11111111-1111-4111-8111-111111111111';
+  const materialId = 'cwm_11111111-1111-4111-8111-111111111111';
+  vi.mocked(loadNuniHomeData).mockResolvedValue({
+    courses: [{ id: courseId, name: '資料庫系統', role: 'student', unreadCount: 0, href: `/classroom/course/${courseId}` }],
+    tasks: [
+      {
+        kind: 'assignment',
+        id: 'hw-1',
+        courseId,
+        courseName: '資料庫系統',
+        title: '週五提案',
+        dueAt: '2020-01-02T12:30:00Z',
+        acceptsLate: true,
+        href: `/classroom/course/${courseId}#assignment-hw-1`,
+      },
+    ],
+    recentFeedback: [
+      {
+        kind: 'assignment',
+        id: 'hw-2',
+        courseId,
+        courseName: '資料庫系統',
+        title: '期末報告',
+        feedback: '結構清楚',
+        score: 88,
+        reviewedAt: '2026-10-08T02:00:00.000Z',
+        submittedAt: '2026-10-07T10:00:00.000Z',
+        href: `/classroom/course/${courseId}#assignment-hw-2`,
+      },
+    ],
+    materials: [],
+    materialsError: '目前無法連線。請保留填寫內容，稍後重試。',
+    materialSearchSeed: { items: [], courseIds: [], truncated: false },
+    unreadCount: 0,
+  });
+  vi.mocked(loadNuniHomeMaterials).mockResolvedValue({
+    materials: [
+      {
+        id: materialId,
+        courseId,
+        courseName: '資料庫系統',
+        title: '本週講義',
+        unitTitle: '第 03 週',
+        createdAt: new Date().toISOString(),
+        href: `/classroom/course/${courseId}#material-${materialId}`,
+      },
+    ],
+    materialsError: null,
+    materialSearchSeed: {
+      items: [
+        {
+          id: materialId,
+          workspaceId: courseId,
+          courseTitle: '資料庫系統',
+          title: '本週講義',
+          body: 'https://example.test/week.pdf',
+          unitTitle: '第 03 週',
+          createdAt: new Date().toISOString(),
+        },
+      ],
+      courseIds: [courseId],
+      truncated: false,
+    },
+  });
+  render(<HomePage />);
+  expect(await screen.findByRole('heading', { name: HOME_MATERIALS_UNAVAILABLE })).toBeTruthy();
+  expect(screen.getByRole('link', { name: /週五提案/ })).toBeTruthy();
+  expect(screen.getByTestId('recent-feedback').textContent).toContain('結構清楚');
+  expect(screen.queryByRole('link', { name: /本週講義/ })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重試載入教材' }));
+  expect(await screen.findByRole('link', { name: /本週講義/ })).toBeTruthy();
+  expect(loadNuniHomeMaterials).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole('heading', { name: HOME_MATERIALS_UNAVAILABLE })).toBeNull();
+  expect(screen.getByRole('link', { name: /週五提案/ })).toBeTruthy();
+  expect(screen.getByTestId('recent-feedback').textContent).toContain('結構清楚');
 });

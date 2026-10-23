@@ -8,6 +8,21 @@ import {
   type NuniUnit,
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
+import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
+import {
+  COURSE_WORK_MISSING_MATERIAL,
+  courseWorkElementId,
+  landOnCourseWork,
+  parseCourseWorkHash,
+} from '@/lib/courseWorkLanding';
+import {
+  describeMaterial,
+  groupMaterialsByUnit,
+  isMaterialNew,
+  isMaterialUnread,
+  markMaterialRead,
+  searchCourseMaterials,
+} from '@/lib/courseMaterials';
 import { MutationForm, useClasses } from './CourseUI';
 import { CourseUnitSelect } from './CourseUnitSelect';
 import { selectCourseUnit } from './courseOutline';
@@ -61,11 +76,22 @@ export function CourseMaterials({ workspace, units, onChanged }: { workspace: Nu
       workspace={workspace}
       units={units}
       onChanged={onChanged}
+      accountId={session.platformAccountId}
     />
   );
 }
 
-function Materials({ workspace, units, onChanged }: { workspace: NuniWorkspace; units?: NuniUnit[] | null; onChanged?: () => void }) {
+function Materials({
+  workspace,
+  units,
+  onChanged,
+  accountId,
+}: {
+  workspace: NuniWorkspace;
+  units?: NuniUnit[] | null;
+  onChanged?: () => void;
+  accountId: string;
+}) {
   const classes = useClasses();
   const [items, setItems] = useState<NuniMaterial[] | null>(null);
   const hash = useLocationHash();
@@ -78,11 +104,16 @@ function Materials({ workspace, units, onChanged }: { workspace: NuniWorkspace; 
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [readingMore, setReadingMore] = useState(false);
   const [moreError, setMoreError] = useState('');
+  const [query, setQuery] = useState('');
+  const [now, setNow] = useState(() => Date.now());
+  const [readTick, setReadTick] = useState(0);
   const moreRequest = useRef<symbol | null>(null);
   const request = useRef(0);
   const mounted = useRef(true);
   const editable =
     !accessDenied && workspace.state === 'active' && workspace.memberRole !== 'student';
+  const linked = parseCourseWorkHash(hash);
+  const linkedMaterial = linked?.kind === 'material' ? linked.id : null;
 
   async function load() {
     if (denied.current) return;
@@ -155,6 +186,11 @@ function Materials({ workspace, units, onChanged }: { workspace: NuniWorkspace; 
     }
   }
 
+  function rememberRead(materialId: string) {
+    markMaterialRead(accountId, materialId, typeof localStorage === 'undefined' ? null : localStorage);
+    setReadTick((value) => value + 1);
+  }
+
   useEffect(() => {
     mounted.current = true;
     // Start the course read on mount; the same loader also manages explicit refreshes.
@@ -168,25 +204,68 @@ function Materials({ workspace, units, onChanged }: { workspace: NuniWorkspace; 
   }, []);
 
   useEffect(() => {
-    const target = hash.slice(1);
-    if (!target.startsWith('material-') || revealed.current === target ||
-      !items?.some((item) => `material-${item.id}` === target)) return;
+    const timer = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!linkedMaterial) return;
+    setQuery('');
+  }, [linkedMaterial]);
+
+  useEffect(() => {
+    if (!linkedMaterial || reading || readingMore || accessDenied || moreError || !nextCursor) return;
+    if (items?.some((item) => item.id === linkedMaterial)) return;
+    void loadMore();
+    // loadMore closes over the current cursor; the effect re-runs after each page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessDenied, items, linkedMaterial, moreError, nextCursor, reading, readingMore]);
+
+  useEffect(() => {
+    if (!linkedMaterial || revealed.current === `material-${linkedMaterial}` ||
+      !items?.some((item) => item.id === linkedMaterial)) return;
+    const target = courseWorkElementId('material', linkedMaterial);
     const frame = window.requestAnimationFrame(() => {
-      const element = document.getElementById(target);
-      if (!element) return;
-      element.scrollIntoView?.({ block: 'start' });
-      element.focus({ preventScroll: true });
-      revealed.current = target;
+      if (landOnCourseWork(target)) {
+        revealed.current = target;
+        rememberRead(linkedMaterial);
+      }
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [hash, items]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, linkedMaterial]);
+
+  const filtered = !query.trim()
+    ? items
+    : items &&
+      searchCourseMaterials(
+        query,
+        items.map((item) => ({
+          id: item.id,
+          workspaceId: item.workspaceId,
+          courseTitle: workspace.title,
+          title: item.title,
+          body: item.body,
+          unitTitle: item.unitTitle,
+          createdAt: item.createdAt,
+        })),
+      ).flatMap((hit) => items.filter((item) => item.id === hit.id));
+  const visible = filtered ?? [];
+  const groups = groupMaterialsByUnit(visible, units);
+  const missingLinked =
+    items !== null &&
+    !reading &&
+    !readingMore &&
+    !nextCursor &&
+    !!linkedMaterial &&
+    !items.some((item) => item.id === linkedMaterial);
 
   return (
     <section className={shared.panel} aria-labelledby={`materials-${workspace.id}`}>
       <div className={styles.heading}>
         <div>
           <p className={shared.eyebrow}>課程內容</p>
-          <h2 id={`materials-${workspace.id}`}>教材與參考資料</h2>
+          <h2 id={`materials-${workspace.id}`}>教材櫃</h2>
         </div>
         <button
           type="button"
@@ -197,7 +276,9 @@ function Materials({ workspace, units, onChanged }: { workspace: NuniWorkspace; 
           {reading ? '讀取中…' : '更新教材'}
         </button>
       </div>
-      <p className={shared.muted}>閱讀老師發布的說明與參考連結。</p>
+      <p className={shared.muted}>
+        依週次或單元分組。類型從連結副檔名判斷；大小未寫在教材資料裡時會明說，不會假裝有檔案容量。
+      </p>
       {workspace.state === 'archived' && (
         <p className={styles.note}>課程已封存，教材保留供成員閱讀。</p>
       )}
@@ -211,25 +292,102 @@ function Materials({ workspace, units, onChanged }: { workspace: NuniWorkspace; 
           {error} {accessDenied ? '請回到課程列表，重新確認課程權限。' : '請使用「更新教材」重試。'}
         </p>
       )}
-      {reading && items === null && <p role="status">正在讀取教材…</p>}
+      {reading && items === null && <p role="status">正在讀取教材櫃…</p>}
+      {items !== null && (
+        <label className={styles.cabinetSearch}>
+          在這門課找教材
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="課名、週次、檔名或關鍵字"
+            autoComplete="off"
+          />
+        </label>
+      )}
+      {missingLinked ? (
+        <p role="status" className={shared.notice}>
+          {COURSE_WORK_MISSING_MATERIAL}
+        </p>
+      ) : null}
       {items !== null &&
         (items.length ? (
-          <ul className={`${shared.list} ${styles.materials}`}>
-            {items.map((item) => (
-              <li key={item.id}>
-                <article id={`material-${item.id}`} tabIndex={-1} aria-labelledby={`material-heading-${item.id}`}>
-                  <div className={styles.metadata}>
-                    {item.unitTitle && <span>{item.unitTitle}</span>}
-                    <time dateTime={item.createdAt}>
-                      {new Date(item.createdAt).toLocaleDateString('zh-TW')}
-                    </time>
-                  </div>
-                  <h3 id={`material-heading-${item.id}`}>{item.title}</h3>
-                  <CourseText text={item.body} />
-                </article>
-              </li>
-            ))}
-          </ul>
+          visible.length ? (
+            <div className={styles.cabinet}>
+              {groups.map((group) => (
+                <section
+                  key={group.id ?? 'unassigned'}
+                  className={styles.cabinetGroup}
+                  aria-labelledby={`material-group-${group.id ?? 'loose'}-${workspace.id}`}
+                >
+                  <h3 id={`material-group-${group.id ?? 'loose'}-${workspace.id}`}>{group.title}</h3>
+                  <ul className={`${shared.list} ${styles.materials}`}>
+                    {group.materials.map((item) => {
+                      const described = describeMaterial(item);
+                      const unread =
+                        readTick >= 0 &&
+                        isMaterialUnread(
+                          accountId,
+                          item.id,
+                          typeof localStorage === 'undefined' ? null : localStorage,
+                        );
+                      const fresh = isMaterialNew(item.createdAt, now);
+                      return (
+                        <li key={item.id}>
+                          <article
+                            id={`material-${item.id}`}
+                            tabIndex={-1}
+                            aria-labelledby={`material-heading-${item.id}`}
+                            className={`${shared.courseWorkTarget} ${styles.cabinetCard}`}
+                          >
+                            <div className={styles.metadata}>
+                              {item.unitTitle && <span>{item.unitTitle}</span>}
+                              <span>{described.kindLabel}</span>
+                              <span>{described.sizeLabel}</span>
+                              <time dateTime={item.createdAt}>
+                                發布 {formatTaipeiDateTime(item.createdAt, { seconds: false })}
+                              </time>
+                              {fresh ? <span className={styles.fresh}>新教材</span> : null}
+                              {unread ? <span className={styles.unread}>未讀</span> : null}
+                            </div>
+                            <h3 id={`material-heading-${item.id}`}>{item.title}</h3>
+                            <CourseText text={item.body} />
+                            {described.open.href ? (
+                              <a
+                                className={`${shared.button} ${styles.openAction}`}
+                                href={described.open.href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                download={described.open.downloadName || undefined}
+                                onClick={() => rememberRead(item.id)}
+                              >
+                                {described.open.label}
+                              </a>
+                            ) : (
+                              <button
+                                type="button"
+                                className={`${shared.button} ${shared.secondary} ${styles.openAction}`}
+                                onClick={() => {
+                                  rememberRead(item.id);
+                                  landOnCourseWork(`material-${item.id}`);
+                                }}
+                              >
+                                閱讀
+                              </button>
+                            )}
+                          </article>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </section>
+              ))}
+            </div>
+          ) : (
+            <p className={shared.muted}>
+              找不到符合「{query.trim()}」的教材。可改打週次、檔名或課文關鍵字。
+            </p>
+          )
         ) : (
           <p className={shared.muted}>
             目前還沒有教材。
