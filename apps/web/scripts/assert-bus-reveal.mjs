@@ -61,16 +61,30 @@ const campusNext = {
   }],
 };
 
+const searchRows = [
+  ['TXG11711', '靜宜大學', 24.22497, 120.57703],
+  ['TXG17731', '靜宜大學', 24.22497, 120.57703],
+  ['TXG18643', '靜宜大學', 24.22637, 120.57662],
+  ['TXG19385', '靜宜大學(英才路)', 24.22665, 120.57484],
+  ['TXG19386', '靜宜大學(英才路)', 24.22704, 120.57536],
+  ['TXG24488', '靜宜大學(英才路)', 24.22704, 120.57536],
+  ['TXG24521', '靜宜大學(英才路)', 24.22665, 120.57484],
+  ['TXG20091', '靜宜大學(校門)', 24.2253, 120.5778],
+  ['TXG24503', '靜宜大學(校門)', 24.2253, 120.5778],
+  ['TXG13567', '靜宜大學(專用道)', 24.2259, 120.57654],
+  ['TXG19438', '靜宜大學(專用道)', 24.22532, 120.5772],
+  ['TXG21478', '靜宜大學(專用道)', 24.22532, 120.5772],
+  ['TXG20093', '靜宜大學主顧聖母堂', 24.2273, 120.5807],
+  ['TXG20094', '靜宜大學主顧聖母堂', 24.2273, 120.5807],
+  ['TXG24505', '靜宜大學主顧聖母堂', 24.2273, 120.5807],
+  ['TXG24506', '靜宜大學主顧聖母堂', 24.2273, 120.5807],
+];
 const searchStops = {
   status: 'ready',
   kind: 'stops',
   limited: true,
   fetchedAt,
-  stops: [
-    { id: 'TXG11711', name: '靜宜大學', city: 'Taichung', lat: 24.22497, lon: 120.57703, distance: null },
-    { id: 'TXG20091', name: '靜宜大學(校門)', city: 'Taichung', lat: 24.2253, lon: 120.5778, distance: null },
-    { id: 'TXG19385', name: '靜宜大學(英才路)', city: 'Taichung', lat: 24.22665, lon: 120.57484, distance: null },
-  ],
+  stops: searchRows.map(([id, name, lat, lon]) => ({ id, name, lat, lon, city: 'Taichung', distance: null })),
 };
 
 const gateArrivals = {
@@ -88,8 +102,12 @@ async function fulfillTransit(route) {
   try { body = route.request().postDataJSON() || {}; } catch { body = {}; }
   if (body.action === 'campus-next') return route.fulfill({ json: campusNext });
   if (body.action === 'search') return route.fulfill({ json: searchStops });
-  if (body.action === 'arrivals' && body.stopId === 'TXG20091') return route.fulfill({ json: gateArrivals });
+  if (body.action === 'arrivals' && body.stopId === 'TXG20091') {
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    return route.fulfill({ json: gateArrivals });
+  }
   if (body.action === 'arrivals') {
+    await new Promise((resolve) => setTimeout(resolve, 400));
     return route.fulfill({ json: { status: 'ready', kind: 'arrivals', fetchedAt, arrivals: gateArrivals.arrivals } });
   }
   return route.fulfill({ json: { status: 'unavailable', reason: 'not-configured' } });
@@ -201,7 +219,7 @@ for (const viewport of viewports) {
     await page.getByRole('button', { name: '搜尋站名' }).click();
     await page.getByLabel('站名或學校名稱').fill('靜宜大學');
     await page.getByRole('button', { name: '尋找站牌' }).click();
-    await page.getByRole('button', { name: /02\s*靜宜大學\(校門\)/ }).click();
+    await page.getByRole('button', { name: /08\s*靜宜大學\(校門\)/ }).click();
     await page.getByRole('heading', { name: '靜宜大學(校門)' }).waitFor({ state: 'visible', timeout: 20_000 });
     await page.getByText('下一班', { exact: true }).waitFor({ state: 'visible', timeout: 20_000 });
     await page.waitForTimeout(900);
