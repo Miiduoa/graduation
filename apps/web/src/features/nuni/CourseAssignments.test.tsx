@@ -96,8 +96,9 @@ it('shows the submitted state when a deep link opens an already submitted assign
   const card = screen.getByRole('article', { name: submitted.title });
   card.scrollIntoView = vi.fn();
   await waitFor(() => expect(card.getAttribute(COURSE_WORK_LANDING_ATTR)).toBe('true'));
-  expect(within(card).getByRole('region', { name: '我的繳交紀錄' })).toBeTruthy();
-  expect(within(card).getByText('我的文獻整理')).toBeTruthy();
+  expect(within(card).getByRole('region', { name: '我的繳交紀錄' }).textContent).toContain(
+    '我的文獻整理',
+  );
 });
 
 it('counts a passed reference deadline as pending while excluding closed or submitted work', () => {

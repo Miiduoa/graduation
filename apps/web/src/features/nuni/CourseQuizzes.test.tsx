@@ -745,7 +745,7 @@ it('shows the submitted answer when a deep link opens an already answered quiz',
   card.scrollIntoView = vi.fn();
   await waitFor(() => expect(card.getAttribute(COURSE_WORK_LANDING_ATTR)).toBe('true'));
   expect(within(card).getByText('已送出作答')).toBeTruthy();
-  expect(within(card).getByText('先觀察使用情境，再確認問題。')).toBeTruthy();
+  expect(within(card).getByDisplayValue('先觀察使用情境，再確認問題。')).toBeTruthy();
 });
 
 it('explains a missing quiz link instead of a blank panel', async () => {
