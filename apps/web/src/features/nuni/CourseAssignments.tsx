@@ -11,6 +11,8 @@ import {
 import { useLocationHash } from '@/lib/useLocationHash';
 import { AssignmentCard } from './AssignmentCard';
 import { assignmentStatus, matchesAssignmentFilter, type AssignmentFilter } from './courseTasks';
+import { gradeReadOwner, markPublishedGradeReadByLanding } from '@/lib/lmsStudentGrades';
+import { useNuniSession } from './Session';
 import styles from './NuniApp.module.css';
 
 type Props = {
@@ -24,6 +26,7 @@ export function CourseAssignments({ assignments, workspace, reload, onConfirmed 
   const [filter, setFilter] = useState<AssignmentFilter>('all');
   const hash = useLocationHash();
   const revealed = useRef('');
+  const { session } = useNuniSession();
   const student = workspace.memberRole === 'student';
   const filters: [AssignmentFilter, string][] = student
     ? [
@@ -62,10 +65,21 @@ export function CourseAssignments({ assignments, workspace, reload, onConfirmed 
     )
       return;
     const frame = window.requestAnimationFrame(() => {
-      if (landOnCourseWork(target)) revealed.current = target;
+      if (!landOnCourseWork(target)) return;
+      revealed.current = target;
+      const current = assignments.find((entry) => entry.id === linked.id);
+      if (session && current?.mySubmission?.reviewedAt) {
+        markPublishedGradeReadByLanding(gradeReadOwner('nuni', session.platformAccountId), {
+          source: 'nuni',
+          courseId: workspace.id,
+          kind: 'assignment',
+          id: current.id,
+          publishedAt: current.mySubmission.reviewedAt,
+        });
+      }
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [assignments, filter, linked?.id, linked?.kind]);
+  }, [assignments, filter, linked?.id, linked?.kind, session, workspace.id]);
 
   return (
     <section aria-label="課程作業">

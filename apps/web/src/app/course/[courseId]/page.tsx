@@ -20,6 +20,7 @@ import {
   parseCourseWorkHash,
 } from '@/lib/courseWorkLanding';
 import { useLocationHash } from '@/lib/useLocationHash';
+import { gradeReadOwner, markPublishedGradeReadByLanding } from '@/lib/lmsStudentGrades';
 import styles from '../../home.module.css';
 
 function workKind(assignment: CourseAssignment) {
@@ -274,10 +275,21 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
     if (revealed.current === target || !course.assignments.some((item) => item.id === linked.id))
       return;
     const frame = window.requestAnimationFrame(() => {
-      if (landOnCourseWork(target)) revealed.current = target;
+      if (!landOnCourseWork(target)) return;
+      revealed.current = target;
+      const current = course.assignments.find((entry) => entry.id === linked.id);
+      if (current?.grade?.publishedAt) {
+        markPublishedGradeReadByLanding(gradeReadOwner('school', uid), {
+          source: 'school',
+          courseId,
+          kind: workKind(current),
+          id: current.id,
+          publishedAt: current.grade.publishedAt,
+        });
+      }
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [course, linked]);
+  }, [course, courseId, linked, uid]);
   function refresh() {
     if (!active.current) return;
     // Keep same-scope forms mounted while the server refreshes sibling submissions.

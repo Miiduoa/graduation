@@ -464,6 +464,11 @@ it('lists recent published feedback with a deep link into the assignment', async
   expect(section.textContent).toContain('結構清楚，請補結論');
   const link = screen.getByRole('link', { name: /期末報告/ });
   expect(link.getAttribute('href')).toBe('/course/cs101#assignment-hw-1');
+  const grades = await screen.findByTestId('course-grades');
+  expect(grades.textContent).toContain('課業成績與回饋');
+  expect(screen.getByRole('link', { name: '查看全部 →' }).getAttribute('href')).toBe(
+    '/classroom/grades',
+  );
 });
 
 it('labels homepage feedback that predates a later student resubmission', async () => {

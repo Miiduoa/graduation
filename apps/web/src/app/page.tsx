@@ -31,6 +31,7 @@ import {
   selectLaterCourseWork,
   selectTodayCourseWork,
 } from '@/lib/todayCourseWork';
+import { LMS_GRADES_HREF, LMS_GRADES_TITLE } from '@/lib/lmsStudentGrades';
 import {
   emptySenseState,
   selectSenseCards,
@@ -417,9 +418,33 @@ export default function HomePage() {
                     <p className={styles.sectionNote}>
                       只顯示已公布的評分或回饋；點進去可看完整內容。
                     </p>
-                    <FeedbackList items={recentFeedback} />
+                    <FeedbackList
+                      items={recentFeedback}
+                      nuniAccountId={accountId}
+                      schoolUid={uid}
+                    />
                   </section>
                 )}
+                {signedIn && !teacherOnly ? (
+                  <section
+                    className={styles.section}
+                    aria-labelledby="course-grades-title"
+                    data-testid="course-grades"
+                  >
+                    <div className={styles.sectionHeading}>
+                      <h2 id="course-grades-title">{LMS_GRADES_TITLE}</h2>
+                      <Link href={LMS_GRADES_HREF}>查看全部 →</Link>
+                    </div>
+                    <p className={styles.sectionNote}>
+                      各門課已評分、等待公布與缺交集中在一頁。還沒公布的分數不會出現。
+                    </p>
+                    <div className={styles.focusActions}>
+                      <Link className={styles.secondary} href={LMS_GRADES_HREF}>
+                        打開成績與回饋
+                      </Link>
+                    </div>
+                  </section>
+                ) : null}
                 {courseSections.map(
                   ({ title, items, description }, index) =>
                     items.length > 0 && (

@@ -3,10 +3,21 @@
 import Link from 'next/link';
 import { parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
 import { CampusIcon } from '@/components/CampusIcon';
+import { useSyncExternalStore } from 'react';
 import {
   feedbackPredatesSubmission,
   type HomeFeedback,
 } from '@/lib/homeOverview';
+import {
+  GRADE_COPY,
+  getGradeReadEpoch,
+  gradeOwnerForSource,
+  gradeSourceFromHref,
+  isPublishedGradeUnread,
+  markPublishedGradeRead,
+  subscribeGradeRead,
+  type GradeItem,
+} from '@/lib/lmsStudentGrades';
 import { sanitizeInternalPath } from '@/lib/navigation';
 import { courseTaskHref } from '@/lib/todayCourseWork';
 import styles from '@/app/home.module.css';
@@ -26,15 +37,50 @@ function feedbackHref(item: HomeFeedback): string {
   );
 }
 
-export function FeedbackList({ items }: { items: HomeFeedback[] }) {
+function asGradeItem(item: HomeFeedback, source: 'nuni' | 'school'): Pick<
+  GradeItem,
+  'source' | 'courseId' | 'kind' | 'id' | 'status' | 'publishedAt'
+> {
+  return {
+    source,
+    courseId: item.courseId,
+    kind: item.kind,
+    id: item.id,
+    status: 'graded',
+    publishedAt: item.reviewedAt,
+  };
+}
+
+export function FeedbackList({
+  items,
+  ownerId,
+  nuniAccountId,
+  schoolUid,
+}: {
+  items: HomeFeedback[];
+  ownerId?: string | null;
+  nuniAccountId?: string | null;
+  schoolUid?: string | null;
+}) {
+  useSyncExternalStore(subscribeGradeRead, getGradeReadEpoch, () => 0);
   return (
     <ul className={styles.list} data-testid="recent-feedback-list">
       {items.map((item) => {
         const stale = feedbackPredatesSubmission(item.reviewedAt, item.submittedAt);
         const reviewedTime = item.reviewedAt ? parseTaipeiInstant(item.reviewedAt) : null;
+        const source = gradeSourceFromHref(item.href);
+        const itemOwner = gradeOwnerForSource(source, nuniAccountId, schoolUid) || ownerId || '';
+        const grade = asGradeItem(item, source);
+        const unread = itemOwner ? isPublishedGradeUnread(itemOwner, grade) : false;
         return (
           <li key={`${item.courseId}-${item.kind}-${item.id}`}>
-            <Link href={feedbackHref(item)} className={styles.task}>
+            <Link
+              href={feedbackHref(item)}
+              className={styles.task}
+              onClick={() => {
+                if (itemOwner) markPublishedGradeRead(itemOwner, grade);
+              }}
+            >
               <span className={styles.taskMarker} aria-hidden="true">
                 <CampusIcon name="course" size={20} />
               </span>
@@ -44,6 +90,7 @@ export function FeedbackList({ items }: { items: HomeFeedback[] }) {
                   {item.courseName} · {item.kind === 'quiz' ? '測驗回饋' : '作業回饋'}
                   {item.score !== null ? ` · ${item.score} 分` : ''}
                   {stale ? ' · 早於最近繳交' : ''}
+                  {unread ? ` · ${GRADE_COPY.unread}` : ''}
                 </span>
                 {item.feedback ? (
                   <span className={styles.feedbackPreview}>{item.feedback}</span>
