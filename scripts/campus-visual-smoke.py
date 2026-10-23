@@ -7,7 +7,6 @@ Screenshots use a local school-directory fixture, never a signed-in account.
 import asyncio
 import json
 import os
-import re
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -59,6 +58,7 @@ async def main():
         )
         await context.route('**/*', fixtures)
         page = await context.new_page()
+        page.set_default_timeout(10000)
         page.on('pageerror', lambda error: errors.append(str(error)))
         try:
             for width, label in [(1440, 'desktop'), (768, 'tablet'), (390, 'mobile'), (320, 'small')]:
@@ -90,7 +90,7 @@ async def main():
             await expect(page.get_by_role('link', name='尋找校園服務')).not_to_be_visible()
             results.append('service menu opens within viewport and Escape restores focus')
 
-            campus = page.get_by_role('button', name=re.compile(r'^切換校園：'))
+            campus = page.locator('header summary[aria-label^="切換校園："]')
             await campus.click()
             await expect(page.get_by_role('combobox', name='瀏覽校園', exact=True)).to_be_visible()
             await no_overflow(page)
@@ -125,6 +125,7 @@ async def main():
             assert not errors, errors
         except Exception:
             await page.screenshot(path=str(OUT / 'failure.png'), full_page=True, animations='disabled')
+            (OUT / 'failure-dom.txt').write_text(await page.locator('body').aria_snapshot(), encoding='utf-8')
             raise
         finally:
             (OUT / 'results.json').write_text(json.dumps({
@@ -134,4 +135,5 @@ async def main():
     print(json.dumps({'passed': len(results), 'checks': results}, ensure_ascii=False))
 
 
-asyncio.run(main())
+if __name__ == '__main__':
+    asyncio.run(main())
