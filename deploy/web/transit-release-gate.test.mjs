@@ -363,6 +363,15 @@ test('the complete runtime module fits a small exec request and runs after in-me
   assert.equal(report.ready,true);
   assert.equal(report.credentialsAbsent,true);
 });
+test('a module that fails to load still reports a sanitized marker instead of empty stdout',()=>{
+  let execError;
+  try { execFileSync('/bin/sh',['-c',buildRemoteCommand('this is not javascript {',catalogProfile)],{encoding:'utf8'}); }
+  catch (error) { execError=error; }
+  assert.ok(execError);
+  assert.equal(failureFromFlyExecError(execError,catalogProfile),'runtime-transit-preflight-failed');
+  assert.ok(String(execError.stdout||'').includes('CAMPUS_TRANSIT_PROBE:'));
+  assert.ok(!String(execError.stdout||'').includes('this is not javascript'));
+});
 
 test('runtime probe uses the existing Machines API target and token without SSH or a shell on the runner',()=>{
   const command=buildRemoteCommand('export async function probeRuntime(){return {ready:true,profile:"static-catalog",mode:"static-catalog",transitReady:false,credentialsAbsent:true,reason:"not-configured"}}',catalogProfile);
@@ -447,6 +456,29 @@ test('machine JSON requires one valid stdout report and never accepts a stderr s
       ()=>JSON.stringify({stdout,stderr:successfulMachineStdout})),
     /^Error: runtime-(?:probe-output-invalid|official-links-not-ready)$/);
   }
+});
+
+test('Machines API transport retries only fly-runtime-probe-failed and then succeeds',()=>{
+  const waits=[]; let calls=0;
+  const execute=()=>{
+    calls+=1;
+    if (calls<3) throw {stderr:'private-value'};
+    return JSON.stringify({stdout:successfulMachineStdout});
+  };
+  const report=probeFlyMachine(MACHINE_IDS[0],'command',catalogProfile,execute,{
+    retries:2,retryDelays:[11,22],wait:(ms)=>waits.push(ms),
+  });
+  assert.equal(report.ready,true);
+  assert.equal(calls,3);
+  assert.deepEqual(waits,[11,22]);
+});
+test('transport retries never wait for sanitized application failures',()=>{
+  let calls=0;
+  assert.throws(()=>probeFlyMachine(MACHINE_IDS[0],'command',catalogProfile,()=>{
+    calls+=1;
+    throw {stdout:'CAMPUS_TRANSIT_PROBE:'+JSON.stringify({ready:false,reason:'rate-limited'})};
+  },{retries:2,retryDelays:[1],wait:()=>assert.fail('must not wait')}),/^Error: rate-limited$/);
+  assert.equal(calls,1);
 });
 
 test('remote failure JSON retains only allowlisted reasons and never reveals either stderr stream',()=>{

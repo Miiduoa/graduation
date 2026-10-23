@@ -178,6 +178,7 @@ jobs:
           flyctl deploy --app nuni-web --config deploy/web/fly.nuni.toml \
             --image "$RELEASE_IMAGE" --strategy rolling --update-only --ha=false --yes
       - name: Verify both machines and public release
+        id: verify
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_NUNI_WEB_DEPLOY_TOKEN }}
         run: |
@@ -193,6 +194,11 @@ jobs:
           node deploy/web/transit-release-gate.mjs fly release-evidence/after.json release-evidence/transit-after-rollout.json
           node deploy/web/release-check.mjs verify
           node deploy/web/transit-release-gate.mjs public
+      - name: Restore previous Web image after failed verification
+        if: failure() && steps.rollout.outcome == 'success'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_NUNI_WEB_DEPLOY_TOKEN }}
+        run: node deploy/web/release-check.mjs rollback release-evidence/before.json
       - name: Preserve sanitized release evidence
         if: always()
         uses: actions/upload-artifact@v4
