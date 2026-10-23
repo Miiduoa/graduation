@@ -22,6 +22,7 @@ import {
 } from '@/lib/courseWorkLanding';
 import { describeMaterial, markMaterialRead } from '@/lib/courseMaterials';
 import { useLocationHash } from '@/lib/useLocationHash';
+import { gradeReadOwner, markPublishedGradeReadByLanding } from '@/lib/lmsStudentGrades';
 import { useClientHydrated } from '@/lib/useClientHydrated';
 import { materialBrowserStorage, useMaterialReadIds } from '@/lib/useMaterialClientState';
 import styles from '../../home.module.css';
@@ -283,15 +284,25 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
         : course.assignments.some((item) => item.id === linked.id);
     if (revealed.current === target || !exists) return;
     const frame = window.requestAnimationFrame(() => {
-      if (landOnCourseWork(target)) {
-        revealed.current = target;
-        if (linked.kind === 'material') {
-          markMaterialRead(uid, linked.id, materialBrowserStorage());
-        }
+      if (!landOnCourseWork(target)) return;
+      revealed.current = target;
+      if (linked.kind === 'material') {
+        markMaterialRead(uid, linked.id, materialBrowserStorage());
+        return;
+      }
+      const current = course.assignments.find((entry) => entry.id === linked.id);
+      if (current?.grade?.publishedAt) {
+        markPublishedGradeReadByLanding(gradeReadOwner('school', uid), {
+          source: 'school',
+          courseId,
+          kind: workKind(current),
+          id: current.id,
+          publishedAt: current.grade.publishedAt,
+        });
       }
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [course, linked, uid]);
+  }, [course, courseId, linked, uid]);
   function refresh() {
     if (!active.current) return;
     // Keep same-scope forms mounted while the server refreshes sibling submissions.

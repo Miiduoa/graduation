@@ -30,7 +30,9 @@ export function NuniSignIn({
       ? '登入後確認管理權限，再回到管理台。'
       : taskPath.startsWith('/classroom/course/')
         ? '登入後回到這門課，繼續查看或繳交作業。'
-        : '使用 Google 帳號，繼續課程、作業與公開看板。';
+        : taskPath === '/classroom/grades'
+          ? '登入後查看各門課目前的成績、等待公布與老師回饋。'
+          : '使用 Google 帳號，繼續課程、作業與公開看板。';
   useEffect(() => {
     const restore = () => {
       submitting.current = false;

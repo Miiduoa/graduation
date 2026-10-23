@@ -1,7 +1,8 @@
-import { render, screen, within } from '@testing-library/react';
-import { expect, it } from 'vitest';
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import { afterEach, expect, it } from 'vitest';
 import { FeedbackList } from './FeedbackList';
 import type { HomeFeedback } from '@/lib/homeOverview';
+import { GRADE_COPY, gradeReadOwner } from '@/lib/lmsStudentGrades';
 
 const feedback: HomeFeedback = {
   kind: 'assignment',
@@ -15,6 +16,10 @@ const feedback: HomeFeedback = {
   submittedAt: '2026-10-11T03:00:00Z',
   href: '/course/course-1#assignment-hw-1',
 };
+
+afterEach(() => {
+  window.localStorage.clear();
+});
 
 it('shows accepted Taipei wall times without a device-timezone shift and labels older feedback', () => {
   const { container } = render(<FeedbackList items={[feedback]} />);
@@ -43,4 +48,12 @@ it('renders equivalent UTC and Taipei timestamps identically without a false sta
   const links = screen.getAllByRole('link');
   expect(links[0].querySelector('time')?.textContent).toBe(links[1].querySelector('time')?.textContent);
   for (const link of links) expect(within(link).queryByText(/早於最近繳交/)).toBeNull();
+});
+
+it('marks new published feedback unread until the student opens it', () => {
+  const ownerId = gradeReadOwner('school', 'alice');
+  render(<FeedbackList items={[feedback]} ownerId={ownerId} />);
+  expect(screen.getByText(new RegExp(GRADE_COPY.unread))).toBeTruthy();
+  fireEvent.click(screen.getByRole('link', { name: /期末報告/ }));
+  expect(screen.queryByText(new RegExp(`· ${GRADE_COPY.unread}`))).toBeNull();
 });

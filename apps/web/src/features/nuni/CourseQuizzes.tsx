@@ -27,6 +27,7 @@ import {
   taipeiWallTimeToIso,
 } from '@campus/shared/src/taipeiTime';
 import { useNuniSession } from './Session';
+import { gradeReadOwner, markPublishedGradeReadByLanding } from '@/lib/lmsStudentGrades';
 import styles from './NuniApp.module.css';
 import quizStyles from './CourseQuizzes.module.css';
 
@@ -100,10 +101,21 @@ function QuizList({ workspace, accountId, units, onChanged }: { workspace: NuniW
     )
       return;
     const frame = window.requestAnimationFrame(() => {
-      if (landOnCourseWork(target)) revealed.current = target;
+      if (!landOnCourseWork(target)) return;
+      revealed.current = target;
+      const current = items?.find((entry) => entry.id === linked.id);
+      if (current?.myResponse?.reviewedAt) {
+        markPublishedGradeReadByLanding(gradeReadOwner('nuni', accountId), {
+          source: 'nuni',
+          courseId: workspace.id,
+          kind: 'quiz',
+          id: current.id,
+          publishedAt: current.myResponse.reviewedAt,
+        });
+      }
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [filter, items, linked?.id, linked?.kind]);
+  }, [accountId, filter, items, linked?.id, linked?.kind, workspace.id]);
   useEffect(() => {
     mounted.current = true;
     return () => {
