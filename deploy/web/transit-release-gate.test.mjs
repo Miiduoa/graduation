@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {readFileSync} from 'node:fs';
-import {TDX,ORIGIN,probeTdx,probePublic,verifiedArrival,buildRemoteCommand,parseRemoteReport,probeRuntime,validateProfile,hasBusShell,verifyOfficialNotice,sanitizedRemoteFailure,failureFromFlyExecError,retryAfterMs,withRateLimitRetry} from './transit-release-gate.mjs';
+import {TDX,ORIGIN,probeTdx,probePublic,verifiedArrival,buildRemoteCommand,parseRemoteReport,probeRuntime,validateProfile,hasBusShell,verifyOfficialNotice,sanitizedRemoteFailure,failureFromFlyExecError,retryAfterMs,withRateLimitRetry,probeFlyMachine,MACHINE_IDS} from './transit-release-gate.mjs';
 const busLoadingHtml = readFileSync(new URL('./fixtures/bus-loading.html', import.meta.url), 'utf8');
 const stamp = '2026-10-12T16:00:00Z';
 const now = () => Date.parse(stamp);
@@ -348,4 +348,39 @@ test('rate-limit retry helper rethrows non-429 errors immediately',async()=>{
   let calls=0;
   await assert.rejects(withRateLimitRetry(async()=>{calls+=1; throw new Error('not-authorized');},{delays:[1,1],sleep:async()=>assert.fail('must not wait')}),/not-authorized/);
   assert.equal(calls,1);
+});
+
+
+test('runtime probe uses the existing Machines API target and token without SSH or a shell on the runner',()=>{
+  const command=buildRemoteCommand('export async function probeRuntime(){return {ready:true,profile:"static-catalog",mode:"static-catalog",transitReady:false,credentialsAbsent:true,reason:"not-configured"}}',catalogProfile);
+  const calls=[];
+  const execute=(file,args,options)=>{
+    calls.push({file,args,options});
+    // The local fixture interprets the command as the remote shell would.
+    return execFileSync('/bin/sh',['-c',args.at(-1)],{encoding:'utf8'});
+  };
+  for (const machine of MACHINE_IDS) {
+    const report=probeFlyMachine(machine,command,catalogProfile,execute);
+    assert.equal(report.machineId,machine);
+    assert.equal(report.credentialsAbsent,true);
+  }
+  assert.equal(calls.length,2);
+  for (let i=0;i<calls.length;i+=1) {
+    assert.equal(calls[i].file,'flyctl');
+    assert.deepEqual(calls[i].args,['machine','exec',MACHINE_IDS[i],'--app','nuni-web','--timeout','300',command]);
+    assert.equal(calls[i].options.timeout,310_000);
+    assert.deepEqual(calls[i].options.stdio,['ignore','pipe','pipe']);
+    assert.equal(calls[i].options.env,undefined);
+  }
+});
+test('machine transport rejects other targets and preserves sanitized failure behavior',()=>{
+  const forbidden=()=>assert.fail('must not execute');
+  assert.throws(()=>probeFlyMachine('other','command',catalogProfile,forbidden),/unexpected-machine-target/);
+  assert.throws(()=>probeFlyMachine(MACHINE_IDS[0],'command','other',forbidden),/unknown-transit-profile/);
+  for (const [error,code] of [
+    [{stdout:'CAMPUS_TRANSIT_PROBE:{"ready":false,"reason":"rate-limited"}'},'rate-limited'],
+    [{stdout:'CAMPUS_TRANSIT_PROBE:{"ready":false,"reason":"private-value"}',stderr:'private-value'},'runtime-transit-preflight-failed'],
+    [{stderr:'private-value'},'fly-runtime-probe-failed'],
+  ]) assert.throws(()=>probeFlyMachine(MACHINE_IDS[0],'command',catalogProfile,()=>{throw error;}),new RegExp(`^Error: ${code}$`));
+  assert.throws(()=>probeFlyMachine(MACHINE_IDS[0],'command',catalogProfile,()=> 'arbitrary-output'),/runtime-probe-output-invalid/);
 });
