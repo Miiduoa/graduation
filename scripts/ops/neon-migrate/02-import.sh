@@ -32,22 +32,8 @@ if [[ -f "$DUMP_DIR/inventory/extensions.tsv" ]]; then
     case "$name" in
       plpgsql) continue ;;
     esac
-    python3 - "$DEST_DATABASE_URL" "$name" <<'PY'
-import os, subprocess, sys
-url, name = sys.argv[1], sys.argv[2]
-if not all(c.isalnum() or c in "-_" for c in name) or not name:
-    raise SystemExit(f"extension 名稱不合法")
-ident = '"' + name.replace('"', '') + '"'
-sql = f"CREATE EXTENSION IF NOT EXISTS {ident};"
-env = {**os.environ, "PSQL_HISTORY": "/dev/null"}
-result = subprocess.run(
-    ["psql", "--no-psqlrc", "--dbname", url, "-v", "ON_ERROR_STOP=1", "-c", sql],
-    env=env, capture_output=True, text=True,
-)
-if result.returncode != 0:
-    sys.stderr.write(result.stderr)
-    raise SystemExit(f"無法建立 extension {name}。請在 Neon console 先啟用後重試。")
-PY
+    [[ "$name" =~ ^[a-zA-Z0-9_-]+$ ]] || die "extension 名稱不合法"
+    psql_url "$DEST_DATABASE_URL" -c "CREATE EXTENSION IF NOT EXISTS \"$name\";"
   done <"$DUMP_DIR/inventory/extensions.tsv"
 fi
 
@@ -57,32 +43,13 @@ if [[ "${CREATE_WEB_ROLE:-}" == "yes" ]]; then
   WEB_ROLE_NAME="${WEB_ROLE_NAME:-nuni_web_files}"
   WEB_ROLE_PASSWORD="${WEB_ROLE_PASSWORD:-}"
   [[ -n "$WEB_ROLE_PASSWORD" ]] || die "CREATE_WEB_ROLE=yes 時請設 WEB_ROLE_PASSWORD（不要寫進 repo）"
-  python3 - "$DEST_DATABASE_URL" "$WEB_ROLE_NAME" "$WEB_ROLE_PASSWORD" <<'PY'
-import os, subprocess, sys
-url, role, password = sys.argv[1], sys.argv[2], sys.argv[3]
-if not role.replace("_", "").isalnum():
-    raise SystemExit("WEB_ROLE_NAME 不合法")
-role_literal = role.replace("'", "''")
-password_literal = password.replace("'", "''")
-payload = (
-    "DO $$ BEGIN "
-    f"IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{role_literal}') THEN "
-    f"EXECUTE format('CREATE ROLE %%I LOGIN PASSWORD %%L', '{role_literal}', '{password_literal}'); "
-    "END IF; END $$;"
-)
-env = {**os.environ, "PSQL_HISTORY": "/dev/null"}
-subprocess.run(
-    ["psql", "--no-psqlrc", "--dbname", url, "-v", "ON_ERROR_STOP=1", "-c", payload],
-    check=True, env=env,
-)
-print("web role ready", file=sys.stderr)
-PY
+  NEON_MIGRATION_DATABASE_URL="$DEST_DATABASE_URL" WEB_ROLE_NAME="$WEB_ROLE_NAME" \
+    WEB_ROLE_PASSWORD="$WEB_ROLE_PASSWORD" python3 ./safety.py role
 fi
 
 # --no-comments：Neon 上 extension 多半屬 neon_superuser，COMMENT ON EXTENSION 會讓
 # --exit-on-error 整段還原失敗；註解不影響資料或啟動檢查。
-pg_restore \
-  --dbname="$DEST_DATABASE_URL" \
+postgres_url "$DEST_DATABASE_URL" pg_restore \
   --no-owner \
   --no-acl \
   --no-comments \
@@ -97,12 +64,11 @@ fi
 
 if [[ -s "$DUMP_DIR/inventory/grants.sql" ]]; then
   # 只有「角色不存在」可以跳過。relation does not exist、permission denied 必須失敗。
-  python3 - "$DEST_DATABASE_URL" "$DUMP_DIR/inventory/grants.sql" <<'PY'
-import os, subprocess, sys, re
-url, path = sys.argv[1], sys.argv[2]
-skip_roles = re.compile(r'\b(cloud_admin|neon_superuser|neon_admin|neon_auth|neon_authenticator|neon_service|postgres)\b')
+  NEON_MIGRATION_DATABASE_URL="$DEST_DATABASE_URL" python3 - "$DUMP_DIR/inventory/grants.sql" <<'PY'
+import os, sys, re
+from safety import postgres, redact
+url, path = os.environ["NEON_MIGRATION_DATABASE_URL"], sys.argv[1]
 missing_role = re.compile(r'role ".*?" does not exist', re.I)
-env = {**os.environ, "PSQL_HISTORY": "/dev/null"}
 applied = 0
 skipped = 0
 skipped_roles = []
@@ -110,17 +76,9 @@ for raw in open(path, encoding="utf-8"):
     line = raw.strip()
     if not line or line.startswith("--"):
         continue
-    if skip_roles.search(line):
-        skipped += 1
-        continue
-    result = subprocess.run(
-        ["psql", "--no-psqlrc", "--dbname", url, "-v", "ON_ERROR_STOP=1", "-c", line],
-        env=env,
-        capture_output=True,
-        text=True,
-    )
+    result = postgres(url, ["-c", line], check=False)
     if result.returncode != 0:
-        err = result.stderr
+        err = redact(result.stderr, url)
         if missing_role.search(err):
             skipped += 1
             skipped_roles.append(line)
@@ -129,47 +87,42 @@ for raw in open(path, encoding="utf-8"):
         sys.stderr.write(err)
         raise SystemExit("套用 GRANT 失敗，已停止。不要繼續換 Fly。")
     applied += 1
-print(f"GRANT 已套用 {applied} 條，跳過 {skipped} 條（角色不存在或為 Neon 內建）", file=sys.stderr)
+print(f"GRANT 已套用 {applied} 條，跳過 {skipped} 條（角色不存在；系統角色已由匯出器排除）", file=sys.stderr)
 if skipped_roles:
     print(
         "有應用程式 GRANT 因角色不存在被跳過。請對照 inventory/login_roles.txt，"
-        "在新 project 建好角色後重跑 02-import.sh，或確認那些角色已不再使用。",
+        "停止切換。建好角色後只重放 inventory/grants-skipped.txt，再跑 03-verify.sh；不要對非空目標重跑整份匯入。",
         file=sys.stderr,
     )
     open(os.path.join(os.path.dirname(path), "grants-skipped.txt"), "w", encoding="utf-8").write(
         "\n".join(skipped_roles) + "\n"
     )
+    raise SystemExit("匯入尚未完成：有應用程式角色缺失，禁止切換 Fly。")
 PY
 fi
 
 if [[ "${CREATE_WEB_ROLE:-}" == "yes" ]]; then
   WEB_ROLE_NAME="${WEB_ROLE_NAME:-nuni_web_files}"
-  python3 - "$DEST_DATABASE_URL" "$WEB_ROLE_NAME" <<'PY'
-import os, subprocess, sys
-url, role = sys.argv[1], sys.argv[2]
-if not role.replace("_", "").isalnum():
+  NEON_MIGRATION_DATABASE_URL="$DEST_DATABASE_URL" WEB_ROLE_NAME="$WEB_ROLE_NAME" python3 - <<'PYTHON'
+import os, re, sys
+from safety import SafetyError, postgres, literal
+url, role = os.environ["NEON_MIGRATION_DATABASE_URL"], os.environ["WEB_ROLE_NAME"]
+if not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", role):
     raise SystemExit("WEB_ROLE_NAME 不合法")
-ident = role.replace('"', "")
-env = {**os.environ, "PSQL_HISTORY": "/dev/null"}
-lookup = subprocess.run(
-    ["psql", "--no-psqlrc", "--dbname", url, "-v", "ON_ERROR_STOP=1", "-At",
-     "-c", f"SELECT format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), '{ident}')"],
-    env=env, capture_output=True, text=True, check=True,
-)
-connect_sql = lookup.stdout.strip()
-grants = f"""
+try:
+    connect_sql = postgres(url, ["-At", "-c", "SELECT format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), " + literal(role) + ")"]).stdout.strip()
+    grants = f"""
 {connect_sql};
-GRANT USAGE ON SCHEMA public TO "{ident}";
-GRANT SELECT ON public.class_workspaces, public.class_workspace_assignments, public.platform_accounts TO "{ident}";
-GRANT SELECT, INSERT, UPDATE ON public.class_assignment_submission_files TO "{ident}";
-GRANT SELECT, INSERT ON public.class_assignment_file_idempotency TO "{ident}";
+GRANT USAGE ON SCHEMA public TO "{role}";
+GRANT SELECT ON public.class_workspaces, public.class_workspace_assignments, public.platform_accounts TO "{role}";
+GRANT SELECT, INSERT, UPDATE ON public.class_assignment_submission_files TO "{role}";
+GRANT SELECT, INSERT ON public.class_assignment_file_idempotency TO "{role}";
 """
-subprocess.run(
-    ["psql", "--no-psqlrc", "--dbname", url, "-v", "ON_ERROR_STOP=1", "-c", grants],
-    env=env, check=True,
-)
+    postgres(url, [], input=grants)
+except SafetyError as exc:
+    raise SystemExit(str(exc)) from None
 print("web role grants ready", file=sys.stderr)
-PY
+PYTHON
 fi
 
 printf '匯入完成。請接著跑 03-verify.sh。\n'

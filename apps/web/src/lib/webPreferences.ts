@@ -170,7 +170,7 @@ export function colorContrast(first: string, second: string): number {
 // An accent is also used for text links. Keep it readable on the page and
 // choose its button foreground independently from the selected color scheme.
 export function resolveAccentPalette(color: string, dark: boolean) {
-  const background = dark ? '#202B24' : '#FFFFFF';
+  const background = dark ? '#232323' : '#FFFFFF';
   const source = hexToRgb(color);
   let brand = normalizeHexColor(color);
   for (let step = 1; colorContrast(brand, background) < 4.5 && step <= 100; step++) {
@@ -178,7 +178,7 @@ export function resolveAccentPalette(color: string, dark: boolean) {
     brand = `#${toHex(mix(source.r))}${toHex(mix(source.g))}${toHex(mix(source.b))}`.toUpperCase();
   }
   const onBrand =
-    colorContrast(brand, '#17291D') >= colorContrast(brand, '#FFFFFF') ? '#17291D' : '#FFFFFF';
+    colorContrast(brand, '#0B140E') >= colorContrast(brand, '#FFFFFF') ? '#0B140E' : '#FFFFFF';
   const secondary = deriveSecondaryThemeColor(brand);
   const brand2 = colorContrast(secondary, onBrand) >= 4.5 ? secondary : brand;
   return { brand, brand2, onBrand };
@@ -248,7 +248,7 @@ export function writeStoredWebPreferences(
 }
 
 export function applyWebAppearancePreferences(
-  doc: Pick<Document, 'documentElement'>,
+  doc: Pick<Document, 'documentElement'> & Partial<Pick<Document, 'querySelectorAll'>>,
   appearance: WebAppearancePreferences,
   systemDark = typeof window !== 'undefined' &&
     !!window.matchMedia?.('(prefers-color-scheme: dark)').matches,
@@ -256,6 +256,7 @@ export function applyWebAppearancePreferences(
   const root = doc.documentElement;
   const themeColor = normalizeHexColor(appearance.themeColor);
   const fontScale = fontScaleMap[appearance.fontSize];
+  const dark = appearance.theme === 'dark' || (appearance.theme === 'system' && systemDark);
 
   if (appearance.theme === 'system') {
     root.removeAttribute('data-theme');
@@ -269,7 +270,6 @@ export function applyWebAppearancePreferences(
     // Let the shared light/dark stylesheet own the Campus One palette.
     for (const token of ['--brand', '--brand2', '--on-brand']) root.style.removeProperty(token);
   } else {
-    const dark = appearance.theme === 'dark' || (appearance.theme === 'system' && systemDark);
     const palette = resolveAccentPalette(themeColor, dark);
     root.style.setProperty('--brand', palette.brand);
     root.style.setProperty('--brand2', palette.brand2);
@@ -282,4 +282,8 @@ export function applyWebAppearancePreferences(
   root.style.setProperty('--font-h3-size', fontScale.h3);
   root.style.setProperty('--font-label-size', fontScale.label);
   root.style.setProperty('--font-label-sm-size', fontScale.labelSm);
+  doc.querySelectorAll?.('meta[name="theme-color"]').forEach((meta) => {
+    meta.setAttribute('content', dark ? '#000000' : '#f8f7f3');
+    meta.removeAttribute('media');
+  });
 }

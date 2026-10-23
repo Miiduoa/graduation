@@ -6,6 +6,9 @@ set -euo pipefail
 cd "$(dirname "$0")"
 # shellcheck source=lib.sh
 source ./lib.sh
+# Ambient operator credentials must never redirect this local-only rehearsal.
+unset SOURCE_DATABASE_URL_FILE DEST_DATABASE_URL_FILE DATABASE_URL_FILE NEW_DATABASE_URL_FILE OLD_DATABASE_URL_FILE
+unset SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY RECEIPT RECEIPT_DIR WORKDIR
 
 need_cmd psql
 need_cmd pg_dump
@@ -21,44 +24,74 @@ mkdir_private "$WORK"
 [[ -f "$SCHEMA_FIXTURE" ]] || die "找不到演練 schema：$SCHEMA_FIXTURE"
 [[ -f "$PWD/rehearsal-seed.sql" ]] || die "找不到 rehearsal-seed.sql"
 
-PASSWORD_FILE="$WORK/password"
-if [[ ! -f "$PASSWORD_FILE" ]]; then
-  python3 -c 'import secrets; print(secrets.token_urlsafe(24))' | write_private "$PASSWORD_FILE"
+# Each run owns two throwaway clusters. Never reuse or drop databases on port 5432.
+need_cmd initdb
+need_cmd pg_ctl
+PG_WORK="$(mktemp -d "${TMPDIR:-/tmp}/neon-rehearsal.XXXXXX")"
+pg_run() {
+  if [[ "$(id -u)" == "0" ]]; then
+    runuser -u nobody -- "$@"
+  else
+    "$@"
+  fi
+}
+cleanup_clusters() {
+  for cluster in old new; do
+    if [[ -f "$PG_WORK/$cluster/postmaster.pid" ]]; then
+      pg_run pg_ctl -D "$PG_WORK/$cluster" -m immediate -w stop >/dev/null 2>&1 || true
+    fi
+  done
+  rm -rf "$PG_WORK"
+}
+trap cleanup_clusters EXIT
+if [[ "$(id -u)" == "0" ]]; then
+  need_cmd runuser
+  chown nobody "$PG_WORK"
 fi
+PASSWORD_FILE="$PG_WORK/password"
+python3 -c 'import secrets; print(secrets.token_urlsafe(24))' | write_private "$PASSWORD_FILE"
+[[ "$(id -u)" != "0" ]] || chown nobody "$PASSWORD_FILE"
 PASSWORD="$(cat "$PASSWORD_FILE")"
-OLD_URL="postgresql://neondb_owner:${PASSWORD}@127.0.0.1:5432/nuni_old"
-NEW_URL="postgresql://neondb_owner:${PASSWORD}@127.0.0.1:5432/nuni_new"
-WEB_URL="postgresql://nuni_web_files:${PASSWORD}@127.0.0.1:5432/nuni_new"
+read -r OLD_PORT NEW_PORT < <(python3 - <<'PYTHON'
+import socket
+with socket.socket() as old, socket.socket() as new:
+    old.bind(('127.0.0.1', 0)); new.bind(('127.0.0.1', 0))
+    print(old.getsockname()[1], new.getsockname()[1])
+PYTHON
+)
+for cluster in old new; do
+  pg_run initdb -D "$PG_WORK/$cluster" --auth-local=trust --auth-host=scram-sha-256 \
+    --no-locale --encoding=UTF8 --username=postgres --pwfile="$PASSWORD_FILE" >"$WORK/initdb-$cluster.log"
+  port="$OLD_PORT"
+  [[ "$cluster" != "new" ]] || port="$NEW_PORT"
+  pg_run pg_ctl -D "$PG_WORK/$cluster" -l "$PG_WORK/$cluster.log" \
+    -o "-h 127.0.0.1 -p $port -k $PG_WORK" -w start >/dev/null
+done
+OLD_ADMIN_URL="postgresql://postgres:${PASSWORD}@127.0.0.1:$OLD_PORT/postgres"
+NEW_ADMIN_URL="postgresql://postgres:${PASSWORD}@127.0.0.1:$NEW_PORT/postgres"
+OLD_URL="postgresql://neondb_owner:${PASSWORD}@127.0.0.1:$OLD_PORT/nuni_old"
+NEW_URL="postgresql://neondb_owner:${PASSWORD}@127.0.0.1:$NEW_PORT/nuni_new"
+WEB_URL="postgresql://nuni_web_files:${PASSWORD}@127.0.0.1:$NEW_PORT/nuni_new"
 
-printf '本機 PostgreSQL：%s\n' "$(psql --version)"
-
-SQL_STAGE=/tmp/neon-rehearsal-sql
-mkdir -p "$SQL_STAGE"
-chmod 755 "$SQL_STAGE"
+printf '本機 PostgreSQL：%s；兩個一次性 cluster。\n' "$(psql --version)"
+for url in "$OLD_ADMIN_URL" "$NEW_ADMIN_URL"; do
+  psql_url "$url" <<SQL
+CREATE ROLE neondb_owner LOGIN CREATEDB CREATEROLE NOSUPERUSER PASSWORD '$PASSWORD';
+SQL
+done
+psql_url "$OLD_ADMIN_URL" <<SQL
+CREATE ROLE nuni_web_files LOGIN NOSUPERUSER PASSWORD '$PASSWORD';
+CREATE DATABASE nuni_old OWNER neondb_owner;
+SQL
+psql_url "$NEW_ADMIN_URL" -c "CREATE DATABASE nuni_new OWNER neondb_owner;"
+# Extension creation is isolated bootstrap work; restores still use NOSUPERUSER.
+psql_url "${OLD_ADMIN_URL%/postgres}/nuni_old" -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+psql_url "${NEW_ADMIN_URL%/postgres}/nuni_new" -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+psql_url "$OLD_URL" -c "REVOKE ALL ON SCHEMA public FROM PUBLIC; GRANT USAGE ON SCHEMA public TO nuni_web_files;"
+psql_url "$NEW_URL" -c "REVOKE ALL ON SCHEMA public FROM PUBLIC;"
+SQL_STAGE="$PG_WORK"
 cp "$SCHEMA_FIXTURE" "$SQL_STAGE/schema.sql"
 cp "$PWD/rehearsal-seed.sql" "$SQL_STAGE/seed.sql"
-chmod 644 "$SQL_STAGE"/*.sql
-
-sudo -u postgres psql -v ON_ERROR_STOP=1 -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname IN ('nuni_old','nuni_new') AND pid <> pg_backend_pid();" >/dev/null || true
-sudo -u postgres psql -v ON_ERROR_STOP=1 -v pw="$PASSWORD" <<'SQL'
-DROP DATABASE IF EXISTS nuni_old;
-DROP DATABASE IF EXISTS nuni_new;
-DROP ROLE IF EXISTS nuni_web_files;
-DROP ROLE IF EXISTS neondb_owner;
-DROP ROLE IF EXISTS neon_rehearsal;
-CREATE ROLE neondb_owner LOGIN CREATEDB CREATEROLE NOSUPERUSER PASSWORD :'pw';
-CREATE ROLE nuni_web_files LOGIN NOSUPERUSER PASSWORD :'pw';
-CREATE DATABASE nuni_old OWNER neondb_owner;
-CREATE DATABASE nuni_new OWNER neondb_owner;
-SQL
-
-# 擴充套件在本機需要 superuser；正式 Neon 的 neondb_owner 因 neon_superuser 可建允許的 extension。
-sudo -u postgres psql -v ON_ERROR_STOP=1 --dbname=nuni_old -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
-sudo -u postgres psql -v ON_ERROR_STOP=1 --dbname=nuni_new -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
-sudo -u postgres psql -v ON_ERROR_STOP=1 --dbname=nuni_old -c "GRANT ALL ON SCHEMA public TO neondb_owner; GRANT ALL ON SCHEMA public TO nuni_web_files;"
-sudo -u postgres psql -v ON_ERROR_STOP=1 --dbname=nuni_new -c "GRANT ALL ON SCHEMA public TO neondb_owner;"
-# 模擬 Neon：PUBLIC 沒有 schema USAGE，web 角色必須靠重放的 GRANT。
-sudo -u postgres psql -v ON_ERROR_STOP=1 --dbname=nuni_new -c "REVOKE ALL ON SCHEMA public FROM PUBLIC; GRANT ALL ON SCHEMA public TO neondb_owner;"
 
 printf '套用演練 schema 與種子到 nuni_old（身分 neondb_owner，非 superuser）…\n'
 psql_url "$OLD_URL" --file "$SQL_STAGE/schema.sql" >"$WORK/schema-restore.log"
@@ -72,6 +105,13 @@ ALTER DEFAULT PRIVILEGES FOR ROLE neondb_owner IN SCHEMA public GRANT SELECT ON 
 REVOKE ALL ON FUNCTION public.nuni_touch_updated_at() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.nuni_touch_updated_at() TO neondb_owner;
 "
+
+# Cover both PUBLIC grants and revokes, grant options, and global default ACLs.
+psql_url "$OLD_URL" <<'SQL'
+CREATE FUNCTION public.rehearsal_public_function() RETURNS integer LANGUAGE sql AS 'SELECT 1';
+GRANT SELECT ON public.lookup_codes TO nuni_web_files WITH GRANT OPTION;
+ALTER DEFAULT PRIVILEGES FOR ROLE neondb_owner REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+SQL
 
 export SOURCE_DATABASE_URL="$OLD_URL"
 export DEST_DATABASE_URL="$NEW_URL"
@@ -94,12 +134,26 @@ if grep -F "$PASSWORD" "$DUMP_DIR/pg_dump.log" >/dev/null; then
   die "pg_dump.log 含密碼"
 fi
 
-printf '跑 02-import.sh…\n'
+missing_role_before="$(psql_url "$NEW_URL" -At -c "SELECT count(*) FROM pg_roles WHERE rolname='nuni_web_files'")"
+[[ "$missing_role_before" == "0" ]] || die "目標 web role 必須真的不存在，否則沒有測到 CREATE ROLE"
+printf '跑 02-import.sh（目標 web role 不存在）…\n'
 ./02-import.sh | tee "$WORK/import-stdout.txt"
 if grep -F "$PASSWORD" "$WORK/import-stdout.txt" >/dev/null; then
   die "02-import.sh stdout 含密碼"
 fi
 
+missing_role_after="$(psql_url "$NEW_URL" -At -c "SELECT count(*) FROM pg_roles WHERE rolname='nuni_web_files' AND rolcanlogin")"
+[[ "$missing_role_after" == "1" ]] || die "匯入未建立可登入 web role"
+psql_url "$WEB_URL" -At -c "SELECT current_user" | grep -x nuni_web_files >/dev/null
+private_fn="$(psql_url "$WEB_URL" -At -c "SELECT has_function_privilege(current_user, 'public.nuni_touch_updated_at()', 'EXECUTE')")"
+[[ "$private_fn" == "f" ]] || die "原本私有的函式在還原後被 PUBLIC 開放"
+public_fn="$(psql_url "$WEB_URL" -At -c "SELECT has_function_privilege(current_user, 'public.rehearsal_public_function()', 'EXECUTE')")"
+grant_option="$(psql_url "$WEB_URL" -At -c "SELECT has_table_privilege(current_user, 'public.lookup_codes', 'SELECT WITH GRANT OPTION')")"
+[[ "$public_fn" == "t" && "$grant_option" == "t" ]] || die "來源 PUBLIC grant／GRANT OPTION 未保留"
+psql_url "$NEW_URL" -c "CREATE FUNCTION public.rehearsal_future_function() RETURNS integer LANGUAGE sql AS 'SELECT 1';"
+future_fn="$(psql_url "$WEB_URL" -At -c "SELECT has_function_privilege(current_user, 'public.rehearsal_future_function()', 'EXECUTE')")"
+[[ "$future_fn" == "f" ]] || die "全域 default privileges 的 PUBLIC REVOKE 未保留"
+psql_url "$NEW_URL" -c "DROP FUNCTION public.rehearsal_future_function();"
 printf '跑 03-verify.sh…\n'
 ./03-verify.sh | tee "$WORK/verify-stdout.txt"
 
@@ -167,7 +221,7 @@ INSERT INTO class_workspace_assignment_submissions (assignment_id, platform_acco
 VALUES ('cwa_b5d32f94-a23a-4df5-899c-a070d63d2ec1','pa_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb','不該被刪','submitted')
 "
 set +e
-DATABASE_URL="$NEW_URL" MODE=apply CONFIRM=yes RECEIPT_DIR="$WORK/receipts" RECEIPT="$WORK/receipts/qa-list.receipt.json" \
+DATABASE_URL="$NEW_URL" MODE=apply CONFIRM=yes CONFIRM_WRITES_STOPPED=yes RECEIPT_DIR="$WORK/receipts" RECEIPT="$WORK/receipts/qa-list.receipt.json" \
   ./qa-cleanup.sh >"$WORK/qa-blocked.txt" 2>&1
 blocked_rc=$?
 set -e
@@ -180,8 +234,19 @@ DELETE FROM class_workspace_assignment_submissions
 real_assignment="$(psql_url "$NEW_URL" -At -c "SELECT count(*) FROM class_workspace_assignments WHERE id='cwa_cccccccc-cccc-4ccc-8ccc-cccccccccccc'")"
 [[ "$real_assignment" == "1" ]] || die "阻擋 apply 時誤刪了真實作業"
 
+# An edit to an existing row must invalidate the earlier receipt, even if counts are unchanged.
+psql_url "$NEW_URL" -c "UPDATE class_workspace_assignment_submissions SET body = body || ' changed' WHERE assignment_id='cwa_b5d32f94-a23a-4df5-899c-a070d63d2ec1';"
+set +e
+DATABASE_URL="$NEW_URL" MODE=apply CONFIRM=yes CONFIRM_WRITES_STOPPED=yes RECEIPT_DIR="$WORK/receipts" \
+  ./qa-cleanup.sh >"$WORK/qa-stale.txt" 2>&1
+stale_rc=$?
+set -e
+[[ "$stale_rc" -ne 0 ]] || die "SQL rows 改變後舊 receipt 應該失敗"
+[[ "$(psql_url "$NEW_URL" -At -c "SELECT count(*) FROM class_workspace_assignments WHERE id='cwa_b5d32f94-a23a-4df5-899c-a070d63d2ec1'")" == "1" ]] || die "過期 receipt 不得刪除資料"
+DATABASE_URL="$NEW_URL" MODE=list RECEIPT_DIR="$WORK/receipts" ./qa-cleanup.sh
+
 printf 'QA apply…\n'
-DATABASE_URL="$NEW_URL" MODE=apply CONFIRM=yes RECEIPT_DIR="$WORK/receipts" RECEIPT="$WORK/receipts/qa-list.receipt.json" ./qa-cleanup.sh
+DATABASE_URL="$NEW_URL" MODE=apply CONFIRM=yes CONFIRM_WRITES_STOPPED=yes RECEIPT_DIR="$WORK/receipts" RECEIPT="$WORK/receipts/qa-list.receipt.json" ./qa-cleanup.sh
 
 left="$(psql_url "$NEW_URL" -At -c "SELECT count(*) FROM class_workspace_assignments WHERE id='cwa_b5d32f94-a23a-4df5-899c-a070d63d2ec1'")"
 workspace="$(psql_url "$NEW_URL" -At -c "SELECT count(*) FROM class_workspaces WHERE id='cw_b7db89dd-4abe-4cfa-80f3-8bead74f58c2'")"
@@ -218,7 +283,7 @@ assert "schema_migrations" in rep["skipped"], rep
 assert rep["applied"] is False
 print("delta 乾跑有 no_timestamp=lookup_codes，且略過 schema_migrations")
 PY
-APPLY_DELTA=yes ./06-replay-delta.sh | tee "$WORK/delta-apply.txt"
+APPLY_DELTA=yes CONFIRM_WRITES_STOPPED=yes ./06-replay-delta.sh | tee "$WORK/delta-apply.txt"
 old_delta_after="$(psql_url "$OLD_URL" -At -c "SELECT count(*) FROM platform_accounts WHERE id='pa_delta-0000-4000-8000-000000000001'")"
 [[ "$old_delta_after" == "1" ]] || die "delta apply 之後舊庫應有新帳號"
 old_lookup="$(psql_url "$OLD_URL" -At -c "SELECT count(*) FROM lookup_codes WHERE code='delta-no-ts'")"
@@ -232,14 +297,14 @@ functions="$(wc -l <"$DUMP_DIR/inventory/functions.tsv" | tr -d ' ')"
 triggers="$(wc -l <"$DUMP_DIR/inventory/triggers.tsv" | tr -d ' ')"
 
 write_private "$REPORT" <<EOF
-# Neon 搬遷腳本本機演練結果（2026-10-22 審查後重跑）
+# Neon 搬遷腳本本機演練結果（$(date -u +%Y-%m-%d) 隔離演練）
 
-環境：Ubuntu 24.04，PostgreSQL **18.6**。沒有連 Neon、Fly、Supabase。還原身分是 \`neondb_owner\` **NOSUPERUSER**，不是本機 superuser。
+環境：$(uname -s)，$(psql --version)。沒有連 Neon、Fly、Supabase。還原身分是 \`neondb_owner\` **NOSUPERUSER**，不是本機 superuser。
 
 ## 做了什麼
 
-1. 建立本機 \`nuni_old\`／\`nuni_new\`，owner 為 \`neondb_owner\`（NOSUPERUSER）。
-2. 套用精簡課班 schema、函式／觸發器、sequence、QA 與一筆真實學生作業。
+1. 建立兩個一次性本機 cluster 的 \`nuni_old\`／\`nuni_new\`，owner 為 \`neondb_owner\`（NOSUPERUSER）。
+2. 套用精簡課班 schema、函式／觸發器、sequence、QA 與一筆一般學生作業的固定測試資料。
 3. 跑 \`01-export.sh\` → \`02-import.sh\` → \`03-verify.sh\`。
 4. 故意改列數確認核對失敗；Fly 乾跑並拒絕 pooler／缺 sslmode／錯 app。
 5. QA \`MODE=list\`（ROLLBACK）再 \`MODE=apply\`；有其他學生繳交時 apply 必須失敗。
@@ -256,6 +321,11 @@ write_private "$REPORT" <<EOF
 | custom dump 大小 | ${dump_bytes} bytes |
 | 列數／migration／sequence／extension／函式／觸發器／GRANT | 通過 |
 | 列數被改時核對 | 失敗（exit ${mismatch_rc}） |
+| 目標 web role 從不存在到可登入 | ${missing_role_before} → ${missing_role_after}；SCRAM 驗證登入通過 |
+| 私有函式對 web role 的 EXECUTE | ${private_fn}（應為 f） |
+| PUBLIC grant／GRANT OPTION | ${public_fn}／${grant_option}（皆應為 t） |
+| 全域 default privileges 的 PUBLIC REVOKE | 新函式 EXECUTE=${future_fn}（應為 f） |
+| 過期 SQL receipt | 失敗（exit ${stale_rc}），未刪資料 |
 | Fly secrets 乾跑 | 通過；pooler／缺 sslmode／多餘鍵／錯 app 被拒；未印密碼 |
 | QA list 後作業列 | ${qa_after_list}（應為 1） |
 | QA apply 後 QA 作業列 | ${left}（應為 0） |
@@ -269,9 +339,9 @@ write_private "$REPORT" <<EOF
 
 ## 限制
 
-- 這次沒有早上那份 537 張表的 schema-only 備份（不在此環境），所以**不能**重現「539 張表／43 MB」的還原時間。本演練證明的是工具鏈、非 superuser 還原、權限／sequence／migration／失敗即停、QA 條件與 delta 安全閥。
+- 既有計畫提到的 537 張表 schema-only 備份未包含於此 repo，所以**不能**重現「539 張表／43 MB」的還原時間。本演練證明的是工具鏈、非 superuser 還原、權限／sequence／migration／失敗即停、QA 條件與 delta 安全閥。
 - 沒有測 Neon TLS、Fly 重啟、真實 43 MB 資料、也沒有刪正式 Supabase 物件。
-- 本機 CREATE EXTENSION 仍由 unix peer 的 postgres 先做；正式新 project 請確認 console 已啟用來源有的 extension。
+- 本機 CREATE EXTENSION 由一次性 cluster 的 postgres 先做；正式新 project 請確認 console 已啟用來源有的 extension。
 EOF
 
 printf '演練報告已寫入 %s\n' "$REPORT"

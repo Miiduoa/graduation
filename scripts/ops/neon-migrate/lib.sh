@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # 共用函式。密鑰只從環境變數或檔案讀，絕不印出連線字串或密碼。
+# Disable tracing before reading any credentials, including when invoked with bash -x.
+set +x
 set -euo pipefail
+umask 077
+NEON_MIGRATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 NEON_SYSTEM_ROLES_REGEX='^(cloud_admin|neon_superuser|neon_admin|neon_auth|neon_authenticator|neon_service|pg_.*|postgres)$'
 
@@ -39,87 +43,34 @@ read_url() {
   printf '%s' "$value"
 }
 
-# 只回傳 host，不帶帳密。失敗時回空字串。
+# Validate every URL before any PostgreSQL process starts. Credentials travel in
+# environment variables, never process arguments or exception tracebacks.
 url_host() {
-  python3 - "$1" <<'PY'
-import sys
-from urllib.parse import urlparse
-raw = sys.argv[1]
-try:
-    parsed = urlparse(raw)
-except Exception:
-    sys.exit(0)
-host = parsed.hostname or ""
-print(host)
-PY
-}
-
-url_query_param() {
-  python3 - "$1" "$2" <<'PY'
-import sys
-from urllib.parse import parse_qs, urlparse
-raw, key = sys.argv[1], sys.argv[2]
-try:
-    parsed = urlparse(raw)
-except Exception:
-    sys.exit(0)
-print((parse_qs(parsed.query).get(key) or [""])[0])
-PY
-}
-
-is_local_host() {
-  case "$1" in
-    localhost | 127.0.0.1 | ::1 | '') return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-is_pooler_host() {
-  case "$1" in
-    *-pooler.* | *-pooler | *pooler.*) return 0 ;;
-    *) return 1 ;;
-  esac
+  NEON_MIGRATION_DATABASE_URL="$1" python3 "$NEON_MIGRATE_DIR/safety.py" host
 }
 
 require_sslmode() {
-  local url="$1"
-  local label="$2"
-  local host
-  host="$(url_host "$url")"
-  if is_local_host "$host"; then
-    return 0
-  fi
-  local mode
-  mode="$(url_query_param "$url" sslmode)"
-  [[ "$mode" == "require" || "$mode" == "verify-full" || "$mode" == "verify-ca" ]] \
-    || die "$label 必須帶 sslmode=require（或更嚴的 verify-full／verify-ca）"
+  NEON_MIGRATION_DATABASE_URL="$1" python3 "$NEON_MIGRATE_DIR/safety.py" validate
 }
 
 require_direct_host() {
-  local url="$1"
-  local label="$2"
-  local host
-  host="$(url_host "$url")"
-  if is_pooler_host "$host"; then
-    die "$label 的 host（$host）是 Neon pooler。pg_dump／nuni-api／node-pg 請用直連（不要含 -pooler）"
-  fi
+  require_sslmode "$1" "$2"
 }
 
 redacted_host() {
-  local host
-  host="$(url_host "$1")"
-  if [[ -z "$host" ]]; then
-    printf '(無法解析的連線字串)'
-  else
-    printf '%s' "$host"
-  fi
+  url_host "$1"
+}
+
+postgres_url() {
+  local url="$1"
+  shift
+  NEON_MIGRATION_DATABASE_URL="$url" python3 "$NEON_MIGRATE_DIR/safety.py" pg "$@"
 }
 
 psql_url() {
   local url="$1"
   shift
-  # --no-psqlrc 避免本機設定把密鑰寫進歷史
-  PSQL_HISTORY=/dev/null psql --no-psqlrc --dbname="$url" --set ON_ERROR_STOP=1 "$@"
+  postgres_url "$url" psql --no-psqlrc --set ON_ERROR_STOP=1 "$@"
 }
 
 mkdir_private() {
