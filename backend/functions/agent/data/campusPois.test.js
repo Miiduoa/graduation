@@ -11,6 +11,10 @@ describe('campusPois 靜宜 POI 逐筆翻修', () => {
       lng: 120.58067,
       sourceUrl: 'https://www.openstreetmap.org/relation/9246899',
     });
+    expect(searchPois('宿舍').map((p) => p.id).sort()).toEqual(['pu-sigao', 'pu-xijia']);
+    expect(searchPois('廁所').map((p) => p.id).sort()).toEqual(['pu-sigao', 'pu-xijia']);
+    expect(searchPois('影印').map((p) => p.id).sort()).toEqual(['pu-library', 'pu-zhishan']);
+    expect(searchPois('善牧')).toEqual([]);
     for (const poi of CAMPUS_POIS) {
       expect(poi.lat).toBeGreaterThan(24.22);
       expect(poi.lat).toBeLessThan(24.235);
