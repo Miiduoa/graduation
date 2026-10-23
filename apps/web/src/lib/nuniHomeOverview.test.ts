@@ -68,10 +68,51 @@ it('uses each course membership role and only includes open, unsubmitted work fr
     acceptsLate: true,
     href: `/classroom/course/${studentId}#assignment-cwa_00000000-0000-0000-0000-000000000002`,
   });
+  expect(result.recentFeedback).toEqual([]);
   expect(transport.mock.calls.map(([path]) => path)).toEqual([
     'class-workspaces',
     `class-workspaces/${studentId}/assignments`,
     `class-workspaces/${studentId}/quizzes`,
+  ]);
+});
+it('lists recent teacher feedback with deep links even after the todo disappears', async () => {
+  const reviewed = assignment('5');
+  transport
+    .mockResolvedValueOnce({
+      workspaces: [{ id: studentId, title: '修習課程', state: 'active', memberRole: 'student' }],
+    })
+    .mockResolvedValueOnce({
+      assignments: [
+        {
+          ...reviewed,
+          mySubmission: {
+            assignmentId: reviewed.id,
+            platformAccountId: accountId,
+            displayName: '學生',
+            body: '已完成',
+            state: 'submitted',
+            submittedAt: '2026-10-08T00:00:00Z',
+            teacherFeedback: '請補充資料來源',
+            reviewedAt: '2026-10-09T04:00:00Z',
+          },
+        },
+      ],
+    });
+  const result = await loadNuniHomeData(transport, accountId);
+  expect(result.tasks).toEqual([]);
+  expect(result.recentFeedback).toEqual([
+    {
+      kind: 'assignment',
+      id: reviewed.id,
+      courseId: studentId,
+      courseName: '修習課程',
+      title: reviewed.title,
+      feedback: '請補充資料來源',
+      score: null,
+      reviewedAt: '2026-10-09T04:00:00Z',
+      submittedAt: '2026-10-08T00:00:00Z',
+      href: `/classroom/course/${studentId}#assignment-${reviewed.id}`,
+    },
   ]);
 });
 it('rejects an incomplete overview when any course is no longer accessible', async () => {
@@ -114,6 +155,7 @@ it('returns a verified empty account without requesting assignments or inventing
   expect(await loadNuniHomeData(transport, accountId)).toEqual({
     courses: [],
     tasks: [],
+    recentFeedback: [],
     unreadCount: 0,
     archivedCount: 0,
   });

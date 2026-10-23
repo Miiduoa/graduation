@@ -59,7 +59,10 @@ vi.mock('@/components/AuthGuard', () => ({
     signOutUser: vi.fn(),
   }),
 }));
-vi.mock('@/lib/homeOverview', () => ({ loadHomeData: vi.fn() }));
+vi.mock('@/lib/homeOverview', async (original) => {
+  const actual = await original<typeof import('@/lib/homeOverview')>();
+  return { ...actual, loadHomeData: vi.fn() };
+});
 vi.mock('@/lib/nuniHomeOverview', () => ({ loadNuniHomeData: vi.fn() }));
 vi.mock('@/lib/transit', async (original) => {
   const actual = await original<typeof import('@/lib/transit')>();
@@ -434,6 +437,60 @@ it('does not repeat today-due work under 現在可處理', async () => {
   expect(screen.getByTestId('today-work-list').textContent).toContain('期末報告');
   expect(screen.queryByRole('heading', { name: /現在可處理/ })).toBeNull();
   expect(screen.queryByText(/依據作業「期末報告」已過截止時間/)).toBeNull();
+});
+
+it('lists recent published feedback with a deep link into the assignment', async () => {
+  vi.mocked(loadHomeData).mockResolvedValue({
+    ...data('資料結構'),
+    tasks: [],
+    recentFeedback: [
+      {
+        kind: 'assignment',
+        id: 'hw-1',
+        courseId: 'cs101',
+        courseName: '資料結構',
+        title: '期末報告',
+        feedback: '結構清楚，請補結論',
+        score: 88,
+        reviewedAt: '2026-10-08T02:00:00.000Z',
+        submittedAt: '2026-10-07T10:00:00.000Z',
+        href: '/course/cs101#assignment-hw-1',
+      },
+    ],
+  });
+  render(<HomePage />);
+  const section = await screen.findByTestId('recent-feedback');
+  expect(section.textContent).toContain('最近老師回饋');
+  expect(section.textContent).toContain('結構清楚，請補結論');
+  const link = screen.getByRole('link', { name: /期末報告/ });
+  expect(link.getAttribute('href')).toBe('/course/cs101#assignment-hw-1');
+});
+
+it('labels homepage feedback that predates a later student resubmission', async () => {
+  vi.mocked(loadHomeData).mockResolvedValue({
+    ...data('資料結構'),
+    tasks: [],
+    recentFeedback: [
+      {
+        kind: 'assignment',
+        id: 'hw-1',
+        courseId: 'cs101',
+        courseName: '資料結構',
+        title: '期末報告',
+        feedback: '針對舊稿',
+        score: null,
+        reviewedAt: '2026-10-08T02:00:00.000Z',
+        submittedAt: '2026-10-09T04:00:00.000Z',
+        href: '/course/cs101#assignment-hw-1',
+      },
+    ],
+  });
+  render(<HomePage />);
+  const section = await screen.findByTestId('recent-feedback');
+  expect(section.textContent).toContain('早於最近繳交');
+  expect(section.textContent).toContain(
+    '這則回饋早於你最近一次繳交，請到作業頁確認是否仍適用。',
+  );
 });
 
 it('builds a sense card from later work due within a day, writes local state after preview, and undoes it', async () => {
