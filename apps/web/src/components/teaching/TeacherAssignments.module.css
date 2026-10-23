@@ -34,6 +34,12 @@
 .reviewHeading span { min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
 .submissions { padding: 12px 0; }
 .submissionList { display: grid; gap: 14px; }
+.queueFilters { display: flex; flex-wrap: wrap; gap: 8px; }
+.queueFilters button[aria-pressed='true'] {
+  border-color: var(--brand);
+  color: var(--brand);
+  font-weight: 650;
+}
 .submission { padding: 16px; border: 1px solid var(--border); border-radius: 9px; min-width: 0; }
 .submission .form { padding: 0; }
 .answer { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }

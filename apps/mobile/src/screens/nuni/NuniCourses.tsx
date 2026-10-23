@@ -42,6 +42,13 @@ import {
   type NativeUploadProgress,
 } from './assignmentFileSubmit';
 import { courseRoleLabels } from '@campus/shared/src/nuniCourseTasks';
+import {
+  feedbackQueueLabel,
+  matchesFeedbackQueueFilter,
+  needsFeedbackReview,
+  sortFeedbackQueue,
+  type FeedbackQueueFilter,
+} from '@campus/shared/src/lmsReviewQueue';
 import { useNuniSession } from '../../state/nuniSession';
 import { useNuniDraftState } from '../../state/nuniDrafts';
 import { useTheme } from '../../state/theme';
@@ -1228,6 +1235,8 @@ function TeacherReceipts({
   item: Activity;
 }) {
   const assignment = 'instructions' in item;
+  const [feedbackFilter, setFeedbackFilter] = useState<FeedbackQueueFilter>('needs_feedback');
+  const seededFilter = useRef(false);
   const load = useCallback(
     async (): Promise<Receipt[]> =>
       assignment
@@ -1237,6 +1246,21 @@ function TeacherReceipts({
   );
   const resource = useLoad(load, false);
   const { data: receipts, loading: busy, error } = resource;
+  useEffect(() => {
+    if (!receipts || seededFilter.current) return;
+    seededFilter.current = true;
+    setFeedbackFilter(
+      receipts.some((entry) => needsFeedbackReview(entry)) ? 'needs_feedback' : 'all',
+    );
+  }, [receipts]);
+  const ordered = useMemo(
+    () => (receipts ? sortFeedbackQueue(receipts) : []),
+    [receipts],
+  );
+  const visibleCount = ordered.filter((entry) =>
+    matchesFeedbackQueueFilter(entry, feedbackFilter),
+  ).length;
+  const filterOptions: FeedbackQueueFilter[] = ['all', 'needs_feedback', 'reviewed'];
   return (
     <View style={{ gap: 12 }}>
       <Copy>{assignment ? item.submissionCount : item.responseCount} 份繳交</Copy>
@@ -1247,9 +1271,39 @@ function TeacherReceipts({
       />
       {error ? <Copy alert>{error}</Copy> : null}
       {!busy && !error && receipts?.length === 0 ? <Copy>還沒有收到繳交內容。</Copy> : null}
-      <View style={{ display: busy || error ? 'none' : 'flex', gap: 14 }}>
-        {receipts?.map((receipt) => (
-          <Section key={receipt.platformAccountId}>
+      <View style={{ display: busy || error || !receipts?.length ? 'none' : 'flex', gap: 14 }}>
+        <Copy>預設先看尚未回饋的繳交。儲存後，學生才看得到。</Copy>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          {filterOptions.map((value) => {
+            const count = receipts?.filter((entry) => matchesFeedbackQueueFilter(entry, value)).length ?? 0;
+            return (
+              <Button
+                key={value}
+                label={`${feedbackQueueLabel(value)} ${count}`}
+                onPress={() => setFeedbackFilter(value)}
+              />
+            );
+          })}
+        </View>
+        {visibleCount === 0 ? (
+          <Copy>
+            「{feedbackQueueLabel(feedbackFilter)}」目前沒有繳交。可改選「全部」查看其他狀態。
+          </Copy>
+        ) : null}
+        {ordered.map((receipt) => (
+          <View
+            key={receipt.platformAccountId}
+            style={{
+              display: matchesFeedbackQueueFilter(receipt, feedbackFilter) ? 'flex' : 'none',
+              gap: 14,
+            }}
+            // Keep mounted so scoped draftKey editors survive filter switches.
+            accessibilityElementsHidden={!matchesFeedbackQueueFilter(receipt, feedbackFilter)}
+            importantForAccessibility={
+              matchesFeedbackQueueFilter(receipt, feedbackFilter) ? 'auto' : 'no-hide-descendants'
+            }
+          >
+          <Section>
             <Copy title>{receipt.displayName}</Copy>
             <Copy>
               {assignment
@@ -1344,6 +1398,10 @@ function TeacherReceipts({
                         ) ?? null,
                       resource.version,
                     );
+                    // Keep the just-saved receipt on screen with its status line.
+                    setFeedbackFilter((current) =>
+                      matchesFeedbackQueueFilter(result, current) ? current : 'all',
+                    );
                   }
                   return result.teacherFeedback === feedback.trim()
                     ? '老師回饋已儲存。'
@@ -1352,6 +1410,7 @@ function TeacherReceipts({
               />
             ) : null}
           </Section>
+          </View>
         ))}
       </View>
     </View>

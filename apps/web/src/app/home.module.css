@@ -604,6 +604,17 @@
   margin-top: 3px;
   overflow-wrap: anywhere;
 }
+.feedbackPreview {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: 6px !important;
+  color: var(--ink) !important;
+  font-size: 13px !important;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
 .deadline,
 .overdue {
   text-align: right;

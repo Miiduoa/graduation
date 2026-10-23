@@ -157,6 +157,84 @@ it('lets teachers read submissions and displays feedback only after a verified s
   expect(reload).not.toHaveBeenCalled();
 });
 
+it('keeps an unsaved feedback draft when the teacher switches filters away and back', async () => {
+  const peer = {
+    ...reviewed('已回饋同學'),
+    platformAccountId: 'pa_33333333-3333-4333-8333-333333333333',
+    displayName: '已回同學',
+    reviewedAt: '2026-10-08T09:30:00.000Z',
+  };
+  state.request.mockResolvedValueOnce({ submissions: [submission, peer] });
+  render(<AssignmentCard item={assignment} workspace={workspace} reload={reload} />);
+  const feedback = await openSubmissions();
+  fireEvent.change(feedback, { target: { value: '尚未儲存的篩選測試草稿' } });
+  expect(feedback.value).toBe('尚未儲存的篩選測試草稿');
+  fireEvent.click(screen.getByRole('button', { name: '已回饋 1' }));
+  expect(screen.getByRole('button', { name: '已回饋 1' }).getAttribute('aria-pressed')).toBe(
+    'true',
+  );
+  fireEvent.click(screen.getByRole('button', { name: '尚未回饋 1' }));
+  const restored = screen.getByLabelText('給林同學的回饋') as HTMLTextAreaElement;
+  expect(restored.value).toBe('尚未儲存的篩選測試草稿');
+});
+
+it('does not submit feedback twice after filtering during a pending save', async () => {
+  let finish!: (value: unknown) => void;
+  const peer = {
+    ...reviewed('已回饋同學'),
+    platformAccountId: 'pa_33333333-3333-4333-8333-333333333333',
+    displayName: '已回同學',
+    reviewedAt: '2026-10-08T09:30:00.000Z',
+  };
+  state.request.mockResolvedValueOnce({ submissions: [submission, peer] }).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  render(<AssignmentCard item={assignment} workspace={workspace} reload={reload} />);
+  const feedback = await openSubmissions();
+  fireEvent.change(feedback, { target: { value: '排隊中的回饋' } });
+  fireEvent.submit(feedback.closest('form')!);
+  expect(feedback.closest('fieldset')?.disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '已回饋 1' }));
+  fireEvent.click(screen.getByRole('button', { name: '尚未回饋 1' }));
+  const stillPending = screen.getByLabelText('給林同學的回饋') as HTMLTextAreaElement;
+  expect(stillPending.value).toBe('排隊中的回饋');
+  expect(stillPending.closest('fieldset')?.disabled).toBe(true);
+  fireEvent.submit(stillPending.closest('form')!);
+  await act(async () =>
+    finish({
+      ...submission,
+      teacherFeedback: '排隊中的回饋',
+      reviewedAt: '2026-10-08T09:00:00.000Z',
+    }),
+  );
+  await screen.findByText('回饋已儲存，學生現在可以查看。');
+  expect(
+    state.request.mock.calls.filter((call) => String(call[0]).endsWith('/feedback')),
+  ).toHaveLength(1);
+});
+
+it('keeps resubmitted work in the pending-review queue while preserving the older feedback text', async () => {
+  const revised = {
+    ...reviewed('針對舊稿的回饋'),
+    body: '學生新稿',
+    submittedAt: '2026-10-08T10:00:00.000Z',
+  };
+  state.request.mockResolvedValueOnce({ submissions: [revised] });
+  render(<AssignmentCard item={assignment} workspace={workspace} reload={reload} />);
+  await openSubmissions();
+  expect(screen.getByRole('button', { name: '尚未回饋 1' }).getAttribute('aria-pressed')).toBe(
+    'true',
+  );
+  expect(screen.getByText('學生新稿')).toBeTruthy();
+  expect(
+    within(screen.getByRole('region', { name: '目前老師回饋' })).getByText('針對舊稿的回饋'),
+  ).toBeTruthy();
+  expect(screen.getByText('這則回饋早於最近一次繳交，請老師確認是否仍適用。')).toBeTruthy();
+});
+
 it('preserves a feedback draft when rejected and does not fabricate a grade or save receipt', async () => {
   state.request
     .mockResolvedValueOnce({ submissions: [submission] })
