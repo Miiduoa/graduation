@@ -6,10 +6,13 @@ import css from './transit.module.css';
 
 function BusMark() {
   return (
-    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-      <rect x="4" y="5" width="16" height="12" rx="3" fill="currentColor" />
-      <path d="M7 17v2M17 17v2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      <path d="M7 9h10" fill="none" stroke="var(--on-brand, #fff)" strokeWidth="1.4" strokeLinecap="round" />
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+      <rect x="3.5" y="5" width="17" height="11" rx="2.4" fill="currentColor" />
+      <rect x="5.2" y="7.1" width="3.4" height="3" rx="0.6" fill="var(--brand)" />
+      <rect x="9.8" y="7.1" width="4.4" height="3" rx="0.6" fill="var(--brand)" />
+      <rect x="15.4" y="7.1" width="3.4" height="3" rx="0.6" fill="var(--brand)" />
+      <circle cx="8" cy="16.6" r="1.55" fill="currentColor" />
+      <circle cx="16" cy="16.6" r="1.55" fill="currentColor" />
     </svg>
   );
 }

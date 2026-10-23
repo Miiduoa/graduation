@@ -98,12 +98,15 @@
   line-height: 18px;
 }
 .approach {
+  position: sticky;
+  top: 44px;
+  z-index: 2;
   margin: 0 16px 12px;
   padding: 14px 12px 12px;
   border-radius: 12px;
   background: var(--bus-group);
   color: var(--bus-ink);
-  overflow: hidden;
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--bg) 55%, transparent);
 }
 .approachCaption {
   display: flex;
