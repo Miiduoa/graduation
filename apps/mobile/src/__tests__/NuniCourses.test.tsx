@@ -1,6 +1,6 @@
 import React from 'react';
-import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
-import { NuniError, type NuniWorkspace } from '@campus/shared/src/nuni';
+import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native';
+import { NuniError, type NuniMaterial, type NuniWorkspace } from '@campus/shared/src/nuni';
 import { NuniCourses } from '../screens/nuni/NuniCourses';
 import { NuniDraftProvider } from '../state/nuniDrafts';
 
@@ -16,6 +16,21 @@ let mockSession = {
 };
 const mockRequest = jest.fn();
 let mockUuid = 0;
+const fileSubmitFlag = { on: false };
+const mockScrollAssignment = { reveal: jest.fn() };
+jest.mock('../screens/nuni/scrollAssignment', () => ({
+  revealAssignmentSubmitArea: (...args: unknown[]) => mockScrollAssignment.reveal(...args),
+}));
+jest.mock('../screens/nuni/assignmentFileSubmit', () => {
+  const actual = jest.requireActual('../screens/nuni/assignmentFileSubmit') as Record<
+    string,
+    unknown
+  >;
+  return {
+    ...actual,
+    assignmentFileSubmitEnabledNative: () => fileSubmitFlag.on,
+  };
+});
 jest.mock('../state/nuniSession', () => ({
   useNuniSession: () => ({
     session: mockSession,
@@ -72,6 +87,7 @@ async function response(
       : { workspaces: [course] };
   if (path === 'class-workspaces/join') return course;
   if (path === `class-workspaces/${courseId}`) return course;
+  if (path.endsWith('/materials/page')) return { materials: [], nextCursor: null };
   if (path.endsWith('/materials')) return { materials: [] };
   if (path.endsWith('/assignments'))
     return input
@@ -102,6 +118,8 @@ async function response(
 }
 beforeEach(() => {
   mockUuid = 0;
+  fileSubmitFlag.on = false;
+  mockScrollAssignment.reveal.mockReset();
   mockRequest.mockReset();
   mockSession = {
     platformAccountId: accountId,
@@ -143,6 +161,269 @@ async function openCourse() {
   return view;
 }
 
+function material(number: number, title = `第 ${number} 份教材`): NuniMaterial {
+  return {
+    id: `cwm_66666666-6666-4666-8666-${String(number).padStart(12, '0')}`,
+    workspaceId: courseId,
+    title,
+    body: `教材內容 ${number}`,
+    unitId: null,
+    unitTitle: null,
+    createdByPlatformAccountId: accountId,
+    createdAt: date,
+  };
+}
+
+it('appends older materials once, deduplicates overlapping pages and reports a partial count', async () => {
+  const older = deferred<unknown>();
+  mockRequest.mockImplementation((path, context, input, _method, query) =>
+    path.endsWith('/materials/page')
+      ? query
+        ? older.promise
+        : Promise.resolve({ materials: [material(1)], nextCursor: 'older_page' })
+      : response(path, context, input),
+  );
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '教材 1+' }));
+  expect(view.getByText('已載入 1 筆教材，還有較早內容。')).toBeTruthy();
+  const more = view.getByRole('button', { name: '載入較早教材' });
+  act(() => {
+    fireEvent.press(more);
+    fireEvent.press(more);
+  });
+  expect(
+    mockRequest.mock.calls.filter(
+      ([path, , , , query]) => path.endsWith('/materials/page') && query,
+    ),
+  ).toHaveLength(1);
+  expect(mockRequest).toHaveBeenCalledWith(
+    `class-workspaces/${courseId}/materials/page`,
+    'context-first',
+    undefined,
+    undefined,
+    { cursor: 'older_page' },
+  );
+  await act(async () => older.resolve({ materials: [material(1), material(2)], nextCursor: null }));
+  expect(view.getAllByText('第 1 份教材')).toHaveLength(1);
+  expect(view.getByText('第 2 份教材')).toBeTruthy();
+  expect(view.getByText('共 2 筆教材。')).toBeTruthy();
+  expect(view.getByRole('button', { name: '教材 2' })).toBeTruthy();
+  expect(view.queryByRole('button', { name: '載入較早教材' })).toBeNull();
+  expect(mockRequest.mock.calls.some(([path]) => path.endsWith('/materials'))).toBe(false);
+});
+
+it('keeps the loaded materials and retries the same cursor after a network failure', async () => {
+  let olderAttempts = 0;
+  mockRequest.mockImplementation((path, context, input, _method, query) => {
+    if (!path.endsWith('/materials/page')) return response(path, context, input);
+    if (!query) return Promise.resolve({ materials: [material(1)], nextCursor: 'retry_cursor' });
+    if (++olderAttempts === 1) return Promise.reject(new NuniError(0, 'NETWORK_ERROR'));
+    return Promise.resolve({ materials: [material(2)], nextCursor: null });
+  });
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '教材 1+' }));
+  fireEvent.press(view.getByRole('button', { name: '載入較早教材' }));
+  await view.findByRole('button', { name: '重試載入較早教材' });
+  expect(view.getByText('第 1 份教材')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '重試載入較早教材' }));
+  await view.findByText('第 2 份教材');
+  const cursors = mockRequest.mock.calls.filter(
+    ([path, , , , query]) => path.endsWith('/materials/page') && query,
+  );
+  expect(cursors.map((call) => call[4])).toEqual([
+    { cursor: 'retry_cursor' },
+    { cursor: 'retry_cursor' },
+  ]);
+});
+
+it('offers a fresh first page for an invalid cursor instead of retrying that cursor', async () => {
+  let firstPages = 0;
+  mockRequest.mockImplementation((path, context, input, _method, query) => {
+    if (!path.endsWith('/materials/page')) return response(path, context, input);
+    if (query) return Promise.reject(new NuniError(422, 'CLASS_WORKSPACE_MATERIAL_CURSOR_INVALID'));
+    return Promise.resolve({
+      materials: [material(++firstPages)],
+      nextCursor: firstPages === 1 ? 'expired_cursor' : null,
+    });
+  });
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '教材 1+' }));
+  fireEvent.press(view.getByRole('button', { name: '載入較早教材' }));
+  await view.findByText('教材頁面已失效，請更新教材後再試。');
+  expect(view.getByText('第 1 份教材')).toBeTruthy();
+  expect(view.queryByRole('button', { name: '重試載入較早教材' })).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '更新教材' }));
+  await view.findByText('第 2 份教材');
+  expect(view.queryByText('第 1 份教材')).toBeNull();
+  expect(firstPages).toBe(2);
+});
+
+it.each([403, 404])(
+  'removes loaded course data and teacher controls after page access returns %s',
+  async (status) => {
+    course = { ...course, memberRole: 'owner-teacher' };
+    mockRequest.mockImplementation((path, context, input, _method, query) =>
+      path.endsWith('/materials/page')
+        ? query
+          ? Promise.reject(new NuniError(status, status === 403 ? 'FORBIDDEN' : 'NOT_FOUND'))
+          : Promise.resolve({ materials: [material(1)], nextCursor: 'older_page' })
+        : response(path, context, input),
+    );
+    const view = await openCourse();
+    fireEvent.press(view.getByRole('button', { name: '教材 1+' }));
+    fireEvent.press(view.getByRole('button', { name: '新增教材' }));
+    fireEvent.changeText(view.getByLabelText('教材標題'), '不再有權限的草稿');
+    fireEvent.press(view.getByRole('button', { name: '載入較早教材' }));
+    await waitFor(() => expect(view.queryByText('第 1 份教材')).toBeNull());
+    expect(view.queryByText('校園訪談', { includeHiddenElements: true })).toBeNull();
+    expect(
+      view.queryByRole('button', { name: '發布教材', includeHiddenElements: true }),
+    ).toBeNull();
+    expect(view.queryByRole('button', { name: '產生學生邀請碼' })).toBeNull();
+    expect(view.queryByRole('button', { name: '載入較早教材' })).toBeNull();
+    expect(view.getByRole('button', { name: '更新內容' })).toBeTruthy();
+  },
+);
+
+it('ignores a pending older page when a reload starts a fresh page chain', async () => {
+  const older = deferred<unknown>();
+  let firstPages = 0;
+  mockRequest.mockImplementation((path, context, input, _method, query) =>
+    path.endsWith('/materials/page')
+      ? query
+        ? older.promise
+        : Promise.resolve({
+            materials: [material(++firstPages)],
+            nextCursor: firstPages === 1 ? 'old_cursor' : 'fresh_cursor',
+          })
+      : response(path, context, input),
+  );
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '教材 1+' }));
+  fireEvent.press(view.getByRole('button', { name: '載入較早教材' }));
+  fireEvent.press(view.getByRole('button', { name: '更新內容' }));
+  await view.findByText('第 2 份教材');
+  await act(async () => older.resolve({ materials: [material(3)], nextCursor: null }));
+  expect(view.queryByText('第 1 份教材')).toBeNull();
+  expect(view.queryByText('第 3 份教材')).toBeNull();
+  expect(view.getByRole('button', { name: '教材 1+' })).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '載入較早教材' }));
+  await view.findByText('第 3 份教材');
+  expect(mockRequest.mock.calls.at(-1)?.[4]).toEqual({ cursor: 'fresh_cursor' });
+});
+
+it('reloads the newest page after confirmed material publication and rejects an earlier page reply', async () => {
+  course = { ...course, memberRole: 'owner-teacher' };
+  const older = deferred<unknown>();
+  let published = false;
+  mockRequest.mockImplementation((path, context, input, _method, query) => {
+    if (path.endsWith('/materials') && input) {
+      published = true;
+      return Promise.resolve(material(2, input.title));
+    }
+    if (path.endsWith('/materials/page'))
+      return query
+        ? older.promise
+        : Promise.resolve({
+            materials: [material(published ? 2 : 1)],
+            nextCursor: published ? 'after_publish' : 'before_publish',
+          });
+    return response(path, context, input);
+  });
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '教材 1+' }));
+  fireEvent.press(view.getByRole('button', { name: '載入較早教材' }));
+  fireEvent.press(view.getByRole('button', { name: '新增教材' }));
+  fireEvent.changeText(view.getByLabelText('教材標題'), '新教材');
+  fireEvent.changeText(view.getByLabelText('教材說明'), '新教材說明');
+  fireEvent.press(view.getByRole('button', { name: '發布教材' }));
+  await view.findByText('第 2 份教材');
+  await act(async () => older.resolve({ materials: [material(3)], nextCursor: null }));
+  expect(view.queryByText('第 1 份教材')).toBeNull();
+  expect(view.queryByText('第 3 份教材')).toBeNull();
+  expect(view.getByRole('button', { name: '教材 1+' })).toBeTruthy();
+  expect(
+    mockRequest.mock.calls.filter(
+      ([path, , , , query]) => path.endsWith('/materials/page') && !query,
+    ),
+  ).toHaveLength(2);
+});
+
+it.each(['student', 'archived'] as const)(
+  'waits for newer %s authority verification when an earlier material publication finishes',
+  async (change) => {
+    course = { ...course, memberRole: 'owner-teacher' };
+    const view = await openCourse();
+    fireEvent.press(view.getByRole('button', { name: '教材 0' }));
+    fireEvent.press(view.getByRole('button', { name: '新增教材' }));
+    fireEvent.changeText(view.getByLabelText('教材標題'), '等待確認教材');
+    fireEvent.changeText(view.getByLabelText('教材說明'), '等待伺服器的內容');
+    const writing = deferred<unknown>();
+    const authority = deferred<unknown>();
+    let firstAuthorityRead = true;
+    mockRequest.mockImplementation((path, context, input) => {
+      if (path.endsWith('/materials') && input) return writing.promise;
+      if (path === `class-workspaces/${courseId}` && firstAuthorityRead) {
+        firstAuthorityRead = false;
+        return authority.promise;
+      }
+      return response(path, context, input);
+    });
+    fireEvent.press(view.getByRole('button', { name: '發布教材' }));
+    fireEvent.press(view.getByRole('button', { name: '更新內容' }));
+    await act(async () => writing.resolve(material(1)));
+    expect(view.getByText('正在讀取課程內容…')).toBeTruthy();
+    expect(view.queryByRole('button', { name: '發布教材' })).toBeNull();
+    expect(
+      mockRequest.mock.calls.filter(([path]) => path === `class-workspaces/${courseId}`),
+    ).toHaveLength(2);
+    course =
+      change === 'student'
+        ? { ...course, memberRole: 'student' }
+        : { ...course, state: 'archived' };
+    await act(async () => authority.resolve(course));
+    await waitFor(() => expect(view.queryByText('正在讀取課程內容…')).toBeNull());
+    expect(view.queryByRole('button', { name: '發布教材' })).toBeNull();
+    expect(view.queryByRole('button', { name: '新增教材' })).toBeNull();
+    expect(view.queryByRole('button', { name: '產生學生邀請碼' })).toBeNull();
+  },
+);
+
+it.each(['account', 'course'])(
+  'ignores an older material page after replacing the account or reopening the course (%s)',
+  async (change) => {
+    const older = deferred<unknown>();
+    mockRequest.mockImplementation((path, context, input, _method, query) =>
+      path.endsWith('/materials/page')
+        ? query
+          ? older.promise
+          : Promise.resolve({ materials: [material(1)], nextCursor: 'older_page' })
+        : response(path, context, input),
+    );
+    const view = await openCourse();
+    fireEvent.press(view.getByRole('button', { name: '教材 1+' }));
+    fireEvent.press(view.getByRole('button', { name: '載入較早教材' }));
+    if (change === 'account') {
+      mockSession = {
+        ...mockSession,
+        context: 'other-account',
+        platformAccountId: 'pa_55555555-5555-4555-8555-555555555555',
+      };
+      mockRequest.mockResolvedValue({ workspaces: [] });
+      view.rerender(<NuniCourses />);
+      await view.findByText('尚未加入修習課程。請向老師取得邀請碼。');
+    } else {
+      fireEvent.press(view.getByRole('button', { name: '返回我的課程' }));
+      fireEvent.press(await view.findByRole('button', { name: '服務設計課程' }));
+      await view.findByText('校園訪談');
+      fireEvent.press(view.getByRole('button', { name: '教材 1+' }));
+    }
+    await act(async () => older.resolve({ materials: [material(2)], nextCursor: null }));
+    expect(view.queryByText('第 2 份教材')).toBeNull();
+    if (change === 'course') expect(view.getByRole('button', { name: '教材 1+' })).toBeTruthy();
+  },
+);
+
 it('groups real roles and opens the same platform course contract using captured session context', async () => {
   const view = render(<NuniCourses />);
   await view.findByText('修習課程 · 1');
@@ -158,7 +439,7 @@ it('adds a server-confirmed receipt and removes the assignment from pending work
   fireEvent.press(view.getByRole('button', { name: '繳交作業' }));
   await view.findByText('已收到伺服器繳交紀錄。');
   expect(view.getByText('待繳作業 0 · 待答測驗 1')).toBeTruthy();
-  expect(view.getByText('已繳交')).toBeTruthy();
+  expect(view.getByText('準時')).toBeTruthy();
   expect(view.getByText('我的訪談內容')).toBeTruthy();
 });
 it('locks a double tap and preserves the payload and idempotency key after an unknown response', async () => {
@@ -227,7 +508,7 @@ it('rejects an over-limit quiz answer before sending and retains it for correcti
   expect(view.getByText('測驗內容：需求練習最多 2000 字，請縮短內容後再送出。')).toBeTruthy();
   expect(mockRequest.mock.calls.some(([path]) => path.endsWith('/submit'))).toBe(false);
   expect(view.getByLabelText('測驗內容：需求練習').props.value).toBe(answer);
-  expect(view.queryByText('已繳交')).toBeNull();
+  expect(view.queryByText('已作答')).toBeNull();
 });
 it.each(['assignment', 'quiz'] as const)(
   'hydrates a saved %s before editing and replaces it only with a confirmed receipt',
@@ -493,7 +774,7 @@ it('does not turn a denied submission into success or remove pending work', asyn
   fireEvent.changeText(view.getByLabelText('作業內容：校園訪談'), '保留未確認的內容');
   fireEvent.press(view.getByRole('button', { name: '繳交作業' }));
   await view.findByText('你目前沒有這項操作的權限。');
-  expect(view.queryByText('已繳交')).toBeNull();
+  expect(view.queryByText('準時')).toBeNull();
   expect(view.getByText('待繳作業 1 · 待答測驗 1')).toBeTruthy();
   expect(view.getByLabelText('作業內容：校園訪談').props.value).toBe('保留未確認的內容');
 });
@@ -619,7 +900,7 @@ it('keeps newer archive verification masked when an older submission receipt arr
     authority.resolve(course);
   });
   await view.findByText('這門課已封存，現在只能查看保留的紀錄。');
-  expect(view.getByText('已繳交')).toBeTruthy();
+  expect(view.getByText('準時')).toBeTruthy();
   expect(view.queryByRole('button', { name: '更新作業繳交' })).toBeNull();
 });
 
@@ -842,4 +1123,152 @@ it('does not show a student pending filter to a course teacher', async () => {
   const view = await openCourse();
   expect(view.queryByRole('button', { name: /待完成/ })).toBeNull();
   expect(view.getByRole('button', { name: '查看收件：校園訪談' })).toBeTruthy();
+});
+
+it('hides camera and file buttons while the assignment file flag is off', async () => {
+  const view = await openCourse();
+  expect(view.queryByRole('button', { name: '拍照' })).toBeNull();
+  expect(view.getByLabelText('作業內容：校園訪談')).toBeTruthy();
+});
+
+it('shows camera, album and file actions when the assignment file flag is on', async () => {
+  fileSubmitFlag.on = true;
+  assignment = {
+    ...assignment,
+    dueAt: '2026-10-08T03:00:00.000Z',
+  };
+  const view = await openCourse();
+  expect(view.getByRole('button', { name: '拍照' })).toBeTruthy();
+  expect(view.getByRole('button', { name: '相簿' })).toBeTruthy();
+  expect(view.getByRole('button', { name: '檔案' })).toBeTruthy();
+  expect(view.getByText('已過截止時間，現在送出會標為遲交')).toBeTruthy();
+  expect(
+    view.getByText('網路不穩時再送一次，不會重複交。選好的照片可以刪除或調整順序後再送出。'),
+  ).toBeTruthy();
+});
+
+it('opens the deep-linked assignment submit area even if drafts hid that card', async () => {
+  fileSubmitFlag.on = true;
+  const otherId = 'cwa_55555555-5555-4555-8555-555555555555';
+  assignment = { ...assignment, mySubmission: receipt(), submissionCount: 1 };
+  mockRequest.mockImplementation((path, context, input) =>
+    path.endsWith('/assignments') && !input
+      ? {
+          assignments: [
+            assignment,
+            {
+              ...assignment,
+              id: otherId,
+              title: '另一份待繳',
+              mySubmission: null,
+              submissionCount: 0,
+            },
+          ],
+        }
+      : response(path, context, input),
+  );
+  const cache = new Map<string, unknown>([
+    [`course:${courseId}:tab`, 'materials'],
+    [`course:${courseId}:activity-filter`, 'pending'],
+  ]);
+  const view = render(
+    <NuniDraftProvider cache={cache}>
+      <NuniCourses initialWorkspaceId={courseId} initialAssignmentId={assignmentId} />
+    </NuniDraftProvider>,
+  );
+  const card = await view.findByTestId(`assignment-${assignmentId}`);
+  const submit = await view.findByTestId(`assignment-submit-${assignmentId}`);
+  expect(within(card).getByLabelText('作業繳交區：校園訪談')).toBeTruthy();
+  expect(within(card).getByLabelText('作業內容：校園訪談')).toBeTruthy();
+  expect(within(card).getByRole('button', { name: '拍照' })).toBeTruthy();
+  expect(within(card).getByRole('button', { name: '更新作業繳交' })).toBeTruthy();
+  expect(view.queryByLabelText('作業繳交區：另一份待繳')).toBeNull();
+  expect(view.queryByTestId(`assignment-submit-${otherId}`)).toBeNull();
+  expect(view.queryByText('老師尚未發布教材。')).toBeNull();
+  fireEvent(submit, 'layout');
+  expect(mockScrollAssignment.reveal).toHaveBeenCalled();
+  expect(mockScrollAssignment.reveal.mock.calls[0][0]).toBeTruthy();
+  expect(mockScrollAssignment.reveal.mock.calls[0][1]).toBeTruthy();
+  expect(view.getByTestId('nuni-courses-scroll')).toBeTruthy();
+});
+
+it('does not scroll a submit area when no assignment is deep-linked', async () => {
+  const view = await openCourse();
+  expect(view.queryByTestId(`assignment-submit-${assignmentId}`)).toBeNull();
+  expect(mockScrollAssignment.reveal).not.toHaveBeenCalled();
+});
+
+it('opens the deep-linked quiz answer area and keeps the submitted receipt visible', async () => {
+  quiz = { ...quiz, myResponse: quizReceipt('已交測驗'), responseCount: 1 };
+  const cache = new Map<string, unknown>([
+    [`course:${courseId}:tab`, 'materials'],
+    [`course:${courseId}:activity-filter`, 'pending'],
+  ]);
+  const view = render(
+    <NuniDraftProvider cache={cache}>
+      <NuniCourses initialWorkspaceId={courseId} initialAssignmentId={quizId} />
+    </NuniDraftProvider>,
+  );
+  const card = await view.findByTestId(`quiz-${quizId}`);
+  const submit = await view.findByTestId(`quiz-submit-${quizId}`);
+  expect(within(card).getByLabelText('測驗作答區：需求練習')).toBeTruthy();
+  expect(within(card).getByText('已作答')).toBeTruthy();
+  expect(within(card).getByText('已交測驗')).toBeTruthy();
+  expect(view.queryByText('老師尚未發布教材。')).toBeNull();
+  fireEvent(submit, 'layout');
+  expect(mockScrollAssignment.reveal).toHaveBeenCalled();
+});
+
+it('explains a missing linked assignment instead of a blank course page', async () => {
+  const view = render(
+    <NuniCourses
+      initialWorkspaceId={courseId}
+      initialAssignmentId="cwa_99999999-9999-4999-8999-999999999999"
+    />,
+  );
+  expect(
+    await view.findByText(
+      '找不到這份作業。可能已被老師刪除，或你沒有查看權限。請從作業列表選擇其他作業。',
+    ),
+  ).toBeTruthy();
+  expect(view.getByText('校園訪談')).toBeTruthy();
+  expect(mockScrollAssignment.reveal).not.toHaveBeenCalled();
+});
+
+it('shows 遲交, Taipei time, and download on teacher receipts', async () => {
+  course = { ...course, memberRole: 'owner-teacher' };
+  fileSubmitFlag.on = true;
+  const fileId = 'cwf_77777777-7777-4777-8777-777777777777';
+  mockRequest.mockImplementation((path: string, context?: string, input?: Record<string, unknown>) => {
+    if (path.endsWith('/submissions')) {
+      return {
+        submissions: [
+          {
+            ...receipt(),
+            submittedAt: '2026-10-22T03:49:43.000Z',
+            late: true,
+            files: [
+              {
+                id: fileId,
+                originalName: 'shot.jpg',
+                contentType: 'image/jpeg',
+                byteSize: 12,
+                kind: 'image',
+                downloadPath: `class-workspaces/${courseId}/assignments/${assignmentId}/files/${fileId}/content`,
+                downloadExp: '1',
+                downloadSig: 'sig',
+              },
+            ],
+          },
+        ],
+      };
+    }
+    return response(path, context, input);
+  });
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '查看收件：校園訪談' }));
+  expect(await view.findByText('遲交')).toBeTruthy();
+  expect(view.getByText('2026/10/22 上午11:49:43')).toBeTruthy();
+  expect(view.getByRole('button', { name: '查看' })).toBeTruthy();
+  expect(view.getByRole('button', { name: '下載' })).toBeTruthy();
 });

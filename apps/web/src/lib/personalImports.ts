@@ -2,6 +2,7 @@
 
 import {
   createPersonalImportId,
+  periodProfileForSchool,
   planPersonalImport,
   preparePersonalImportBackupRestore,
   undoPersonalImportBatch,
@@ -9,6 +10,11 @@ import {
   type PersonalImportRecord,
   type PersonalImportRow,
 } from '@campus/shared';
+import {
+  parsePersonalImportSyncState,
+  type PersonalImportSyncState,
+} from '@campus/shared/src/imports/sync';
+import type { PersonalImportLocalState } from '@campus/shared/src/imports/syncEngine';
 
 export type PersonalImportScope = { owner: string; schoolId: string };
 export const PERSONAL_IMPORT_CHANGE = 'campus-personal-imports-change';
@@ -44,7 +50,9 @@ export function readPersonalImports(scope: PersonalImportScope): PersonalImportR
         typeof row.importedAt !== 'string' ||
         !row.source ||
         typeof row.source.rawText !== 'string' ||
-        validatePersonalImportRow(row).some((issue) => issue.severity === 'error')
+        validatePersonalImportRow(row, {
+          periodProfile: periodProfileForSchool(scope.schoolId),
+        }).some((issue) => issue.severity === 'error')
       )
         throw new Error();
       ids.add(row.id);
@@ -53,6 +61,48 @@ export function readPersonalImports(scope: PersonalImportScope): PersonalImportR
   } catch {
     throw new Error('這份匯入紀錄暫時讀不到，原始資料仍保留。請勿清除瀏覽器資料，稍後再試。');
   }
+}
+
+export function readPersonalImportSyncState(scope: PersonalImportScope): PersonalImportSyncState {
+  const raw = localStorage.getItem(personalImportsStorageKey(scope));
+  const value = raw ? JSON.parse(raw).sync : undefined;
+  if (value === undefined) return { enabled: false, base: null };
+  return parsePersonalImportSyncState(value, scope.schoolId);
+}
+
+export async function withPersonalImportSyncLock<T>(
+  scope: PersonalImportScope,
+  action: (
+    state: PersonalImportLocalState,
+    checkpoint: (state: PersonalImportLocalState) => Promise<void>,
+  ) => Promise<{ state: PersonalImportLocalState; result: T }>,
+  active = () => true,
+): Promise<T> {
+  if (!navigator.locks) throw new Error('目前瀏覽器無法安全同步，請使用最新版瀏覽器。');
+  return navigator.locks.request(personalImportsStorageKey(scope), async () => {
+    if (!active()) throw new Error('帳號或校園已切換，這次同步已停止。');
+    let persisted: PersonalImportLocalState = {
+      records: readPersonalImports(scope),
+      sync: readPersonalImportSyncState(scope),
+    };
+    const checkpoint = async (state: PersonalImportLocalState) => {
+      if (!active()) throw new Error('帳號或校園已切換，這次同步已停止。');
+      if (JSON.stringify(persisted) === JSON.stringify(state)) return;
+      try {
+        localStorage.setItem(
+          personalImportsStorageKey(scope),
+          JSON.stringify({ version: 1, ...state }),
+        );
+      } catch {
+        throw new Error('裝置空間不足，這次同步未能保存；原資料仍保留，請先下載備份。');
+      }
+      persisted = state;
+      window.dispatchEvent(new Event(PERSONAL_IMPORT_CHANGE));
+    };
+    const { state, result } = await action(persisted, checkpoint);
+    await checkpoint(state);
+    return result;
+  });
 }
 
 async function mutate<T>(
@@ -71,7 +121,7 @@ async function mutate<T>(
     try {
       localStorage.setItem(
         personalImportsStorageKey(scope),
-        JSON.stringify({ version: 1, records: rows }),
+        JSON.stringify({ version: 1, records: rows, sync: readPersonalImportSyncState(scope) }),
       );
     } catch {
       throw new Error('這次沒有存成，可能是裝置空間不足或瀏覽器禁止儲存。草稿還在，請稍後再試。');
@@ -99,7 +149,7 @@ export async function savePersonalImportBatch(
       const plan = planPersonalImport(existing, drafts, {
         batchId,
         importedAt: new Date().toISOString(),
-        ...(scope.schoolId === 'pu' ? { periodProfile: 'pu' as const } : {}),
+        periodProfile: periodProfileForSchool(scope.schoolId),
       });
       const error = plan.issues.find(
         (issue) => issue.severity === 'error' || issue.code === 'duplicate-metadata-conflict',
@@ -147,7 +197,7 @@ export async function changePersonalImport(
       const plan = planPersonalImport(rest, [{ ...revised, id: original.id }], {
         batchId: createPersonalImportId(),
         importedAt: new Date().toISOString(),
-        ...(scope.schoolId === 'pu' ? { periodProfile: 'pu' as const } : {}),
+        periodProfile: periodProfileForSchool(scope.schoolId),
       });
       const error = plan.issues.find(
         (issue) => issue.severity === 'error' || issue.code === 'duplicate-metadata-conflict',

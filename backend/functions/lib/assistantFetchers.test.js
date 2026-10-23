@@ -57,23 +57,33 @@ test('reads current announcement producers and preserves document identity and t
   ]);
 });
 
-test('keeps stale scrape rows when a source is down and only fails when nothing remains', async () => {
+test('hides stale scrape rows when a source is down and fails with 暫時抓不到 when nothing remains', async () => {
   mockDocuments.set('schools/pu/announcements', [
-    row('stale', { title: '過期稿', origin: 'public_scrape', sourceId: 'pu-acd' }),
-    row('other', { title: '學務處', origin: 'public_scrape', sourceId: 'pu-osa' }),
+    row('stale', {
+      title: '選課公告',
+      origin: 'public_scrape',
+      sourceId: 'pu-acd',
+      publishedAt: '2026-10-01T00:00:00.000Z',
+    }),
+    row('other', {
+      title: '宿舍申請',
+      origin: 'public_scrape',
+      sourceId: 'pu-osa',
+      publishedAt: '2026-10-08T00:00:00.000Z',
+    }),
   ]);
   mockDocuments.set('schools/pu/announcement-sources', [
     row('pu-acd', { sourceId: 'pu-acd', office: '教務處', status: 'unavailable' }),
     row('pu-osa', { sourceId: 'pu-osa', office: '學務處', status: 'healthy' }),
   ]);
-  expect((await fetchAssistantAnnouncements('pu')).map((row) => row.id)).toEqual(['stale', 'other']);
+  expect((await fetchAssistantAnnouncements('pu')).map((row) => row.id)).toEqual(['other']);
   mockDocuments.set('schools/pu/announcements', []);
   mockDocuments.set('schools/pu/announcement-sources', [
     row('pu-acd', { sourceId: 'pu-acd', status: 'unavailable' }),
     row('pu-osa', { sourceId: 'pu-osa', status: 'unavailable' }),
   ]);
   await expect(fetchAssistantAnnouncements('pu')).rejects.toMatchObject({
-    message: '學校網站暫時連不上，可以先到學校網站看最新消息',
+    message: '暫時抓不到',
   });
 });
 
@@ -108,7 +118,12 @@ test('exposes cms-none demo schools to the assistant in an explicit test environ
   const previous = process.env.APP_ENV;
   process.env.APP_ENV = 'test';
   mockDocuments.set('schools/tw-demo-uni/announcements', [
-    row('demo', { title: '示範公告', origin: 'public_scrape', sourceId: 'demo' }),
+    row('demo', {
+      title: '示範公告',
+      origin: 'public_scrape',
+      sourceId: 'demo',
+      publishedAt: '2026-10-08T00:00:00.000Z',
+    }),
   ]);
   await expect(fetchAssistantAnnouncements('tw-demo-uni')).resolves.toEqual([
     expect.objectContaining({ id: 'demo', title: '示範公告' }),
@@ -178,8 +193,12 @@ test('announcement tools cannot override the caller school or create one from mo
   await expect(getAnnouncements.execute({ schoolId: 'pu' }, { schoolId: 'nthu' })).rejects.toMatchObject({ code: 'permission-denied' });
   await expect(getAnnouncements.execute({}, { schoolId: 'pu' })).rejects.toMatchObject({ code: 'permission-denied' });
   expect(mockReads).toEqual([]);
-  mockDocuments.set('schools/pu/announcements', [row('one', { title: '校方公告' })]);
-  expect(await getAnnouncements.execute({ schoolId: 'pu' }, {})).toEqual([{ id: 'one', title: '校方公告', schoolId: 'pu' }]);
+  mockDocuments.set('schools/pu/announcements', [
+    row('one', { title: '校方公告', publishedAt: '2026-10-08T00:00:00.000Z' }),
+  ]);
+  expect(await getAnnouncements.execute({ schoolId: 'pu' }, {})).toEqual([
+    { id: 'one', title: '校方公告', schoolId: 'pu', publishedAt: '2026-10-08T00:00:00.000Z' },
+  ]);
 });
 
 test('loads only the authenticated profile fields used to resolve the school context', async () => {

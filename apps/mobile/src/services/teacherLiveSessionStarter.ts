@@ -32,7 +32,8 @@ export function createTeacherLiveSessionStarter(ports: {
 
   const validId = (value: string): boolean =>
     value.length > 0 && value.length <= 128 && value.trim() === value &&
-    !/[\/\u0000-\u001f\u007f]/u.test(value) && value !== '.' && value !== '..' &&
+    !Array.from(value).some((c) => c === '/' || c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127) &&
+    value !== '.' && value !== '..' &&
     !/^__.*__$/u.test(value);
   const stillCurrent = (scope: TeacherSessionScope) => {
     const current = ports.currentScope();
@@ -58,7 +59,7 @@ export function createTeacherLiveSessionStarter(ports: {
       const response = (await ports.send({
         groupId: scope.groupId,
         requestId,
-        qrExpiryMinutes: 5,
+        qrExpiryMinutes: 10,
       })) as StartResponse | null;
 
       if (!stillCurrent(scope)) return { status: 'stale' };

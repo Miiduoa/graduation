@@ -8,6 +8,7 @@ import {
   serializePersonalImportsCsv,
   parsePersonalImport,
   personalImportErrorMessage,
+  personalImportPreviewNotice,
   personalImportSavedNotice,
   personalImportUndoBody,
   personalImportUndoneNotice,
@@ -19,27 +20,45 @@ import {
   parsePersonalImportBackup,
   serializePersonalImportBackup,
   PERSONAL_IMPORT_BACKUP_MAX_BYTES,
+  periodCount,
+  periodDisplayLabel,
+  periodLabelAt,
+  periodProfileForSchool,
+  periodSlots,
+  PERIOD_PROFILE_TITLES,
   validatePersonalImportRow,
+  type PeriodProfileId,
   type PersonalImportKind,
   type PersonalImportRow,
   type PersonalImportRecord,
   type PersonalImportSource,
   type ImportIssue,
   type PersonalImportBackupPreview,
+  type PersonalImportDocument,
 } from '@campus/shared';
 import { createNuniClasses, type NuniWorkspace } from '@campus/shared/src/nuni';
 import { browserRequest, useOptionalNuniSession } from '@/features/nuni/Session';
 import {
   changePersonalImport,
   readPersonalImports,
+  readPersonalImportSyncState,
   savePersonalImportBatch,
   undoPersonalImports,
   type PersonalImportScope,
 } from '@/lib/personalImports';
 import { usePersonalImportScope, usePersonalImports } from '@/lib/usePersonalImports';
+import {
+  clearPersonalImportDraft,
+  readPersonalImportDraft,
+  writePersonalImportDraft,
+  type PersonalImportDraft,
+} from '@/lib/personalImportDrafts';
 import { recognizePersonalImportImage } from '@/lib/personalImportOcr';
 import styles from './PersonalImport.module.css';
 import { CourseAccessPanel } from './CourseAccessPanel';
+import { DocumentSelection } from './DocumentSelection';
+import { PersonalImportSyncPanel } from './PersonalImportSync';
+import { readPersonalImportDocumentFile } from '@/lib/personalImportDocuments';
 
 const KINDS: { value: PersonalImportKind; title: string; detail: string }[] = [
   { value: 'timetable', title: '課表與選課結果', detail: '上課日、時間、教室與老師' },
@@ -55,12 +74,23 @@ const REVIEW_PAGE_SIZE = 25;
 function errorMessage(error: unknown, fallback = '這次沒有完成，草稿仍保留，請再試一次。') {
   return personalImportErrorMessage(error, fallback);
 }
-function rowSummary(row: PersonalImportRow) {
+function periodSummary(row: PersonalImportRow, periodProfile?: PeriodProfileId) {
+  if (row.startTime && row.endTime) return `${row.startTime}–${row.endTime}`;
+  if (row.periodLabel) return row.periodLabel;
+  if (periodProfile && row.startPeriod) {
+    const start = periodLabelAt(row.startPeriod, periodProfile);
+    const end = periodLabelAt(row.endPeriod ?? row.startPeriod, periodProfile);
+    return start === end ? `第 ${start} 節` : `第 ${start}–${end} 節`;
+  }
+  return `第 ${row.startPeriod ?? '?'}–${row.endPeriod ?? '?'} 節`;
+}
+
+function rowSummary(row: PersonalImportRow, periodProfile?: PeriodProfileId) {
   if (row.kind === 'grades')
     return `${row.academicYear} 學年度 ${row.semester} 學期 · ${row.credits} 學分 · ${row.grade}`;
   if (row.kind === 'events')
     return `${row.date} ${row.startTime || '全天'}${row.endTime ? `–${row.endTime}` : ''}${row.endDate && row.endDate !== row.date ? `（至 ${row.endDate}）` : ''}`;
-  return `星期${['', '一', '二', '三', '四', '五', '六', '日'][row.dayOfWeek || 0] || '待確認'} · ${row.startTime && row.endTime ? `${row.startTime}–${row.endTime}` : row.periodLabel || `第 ${row.startPeriod ?? '?'}–${row.endPeriod ?? '?'} 節`} · ${row.teacher || '老師未填'} · ${row.location || '教室未填'}`;
+  return `星期${['', '一', '二', '三', '四', '五', '六', '日'][row.dayOfWeek || 0] || '待確認'} · ${periodSummary(row, periodProfile)} · ${row.teacher || '老師未填'} · ${row.location || '教室未填'}`;
 }
 
 function RowFields({
@@ -73,7 +103,7 @@ function RowFields({
   row: PersonalImportRow;
   onChange: (row: PersonalImportRow) => void;
   workspaces: NuniWorkspace[];
-  periodProfile?: 'pu';
+  periodProfile?: PeriodProfileId;
   onRefreshWorkspaces?: () => void;
 }) {
   const update = (field: keyof PersonalImportRow, value: string | number | boolean | undefined) =>
@@ -139,8 +169,35 @@ function RowFields({
                 ))}
               </select>
             </label>
-            {number('startPeriod', '開始節次', periodProfile ? 13 : 99)}
-            {number('endPeriod', '結束節次', periodProfile ? 13 : 99)}
+            {periodProfile
+              ? ['startPeriod', 'endPeriod'].map((name) => (
+                  <label className={styles.field} key={name}>
+                    {name === 'startPeriod' ? '開始節次' : '結束節次'}
+                    <select
+                      value={row[name as 'startPeriod' | 'endPeriod'] ?? ''}
+                      onChange={(event) =>
+                        update(
+                          name as 'startPeriod' | 'endPeriod',
+                          event.target.value ? Number(event.target.value) : undefined,
+                        )
+                      }
+                    >
+                      <option value="">請選擇</option>
+                      {periodSlots(periodProfile).map((slot) => (
+                        <option key={slot.index} value={slot.index}>
+                          {periodDisplayLabel(slot.index, periodProfile)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ))
+              : null}
+            {!periodProfile ? (
+              <>
+                {number('startPeriod', '開始節次', 99)}
+                {number('endPeriod', '結束節次', 99)}
+              </>
+            ) : null}
             {field('teacher', '老師')}
             {field('location', '教室／地點')}
             {!periodProfile && (
@@ -311,7 +368,7 @@ function ImportWorkspace({
     suspended.current = paused;
   }, [paused]);
   const nuni = useOptionalNuniSession();
-  const periodProfile = scope.schoolId === 'pu' ? ('pu' as const) : undefined;
+  const periodProfile = periodProfileForSchool(scope.schoolId);
   const [kind, setKind] = useState<PersonalImportKind>('timetable');
   const [year, setYear] = useState('');
   const [semester, setSemester] = useState('');
@@ -321,6 +378,10 @@ function ImportWorkspace({
   });
   const [rows, setRows] = useState<PersonalImportRow[]>([]);
   const [backup, setBackup] = useState<Omit<PersonalImportBackupPreview, 'rows'> | null>(null);
+  const [importDocument, setDocument] = useState<PersonalImportDocument | null>(null);
+  const [hasDocumentFile, setHasDocumentFile] = useState(false);
+  const [documentSelection, setDocumentSelection] = useState<PersonalImportDraft['documentSelection']>(null);
+  const [documentVersion, setDocumentVersion] = useState(0);
   const [reviewPage, setReviewPage] = useState(0);
   const [excluded, setExcluded] = useState<string[]>([]);
   const [parseIssues, setParseIssues] = useState<ImportIssue[]>([]);
@@ -339,10 +400,16 @@ function ImportWorkspace({
     row: PersonalImportRow;
   } | null>(null);
   const [search, setSearch] = useState('');
+  const [draftReady, setDraftReady] = useState(false);
+  const [draftReadFailed, setDraftReadFailed] = useState(false);
+  const [draftStorageError, setDraftStorageError] = useState('');
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const job = useRef<AbortController | null>(null);
+  const documentFile = useRef<File | null>(null);
   const active = useRef(true);
   const writing = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const pdfInput = useRef<HTMLInputElement>(null);
   const review = useRef<HTMLElement>(null);
   const undoKeep = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -351,12 +418,87 @@ function ImportWorkspace({
   useEffect(() => {
     const value = new URLSearchParams(window.location.search).get('kind');
     if (KINDS.some((entry) => entry.value === value)) setKind(value as PersonalImportKind);
+    try {
+      const draft = readPersonalImportDraft(scope);
+      if (draft) {
+        setKind(draft.kind);
+        setYear(draft.year);
+        setSemester(draft.semester);
+        setText(draft.text);
+        setSource(draft.source);
+        setRows(draft.rows);
+        setExcluded(draft.excluded);
+        setParseIssues(draft.parseIssues);
+        setBackup(draft.backup);
+        setDocument(draft.document ?? null);
+        setDocumentSelection(draft.documentSelection ?? null);
+        setNotice(
+          '已找回這個分頁尚未匯入的草稿，請繼續核對。' +
+            (draft.document
+              ? '文件文字與選取內容已保留；重新辨識時請再選擇原始檔案。'
+              : draft.source.type === 'screenshot' ? '原始圖片未暫存，需開啟原圖對照。' : ''),
+        );
+      }
+    } catch (error) {
+      setDraftReadFailed(true);
+      setDraftStorageError(errorMessage(error));
+    }
+    setDraftReady(true);
     active.current = true;
     return () => {
       active.current = false;
       job.current?.abort();
+      documentFile.current = null;
     };
+    // Account or school changes remount this workspace with its own storage key.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  useEffect(() => {
+    if (!draftReady || draftReadFailed || paused) return;
+    try {
+      writePersonalImportDraft(scope, {
+        kind,
+        year,
+        semester,
+        text,
+        source,
+        rows,
+        excluded,
+        parseIssues,
+        backup,
+        document: importDocument,
+        documentSelection,
+      });
+      setDraftStorageError('');
+    } catch (error) {
+      setDraftStorageError(errorMessage(error));
+    }
+  }, [
+    draftReady,
+    draftReadFailed,
+    paused,
+    scope,
+    kind,
+    year,
+    semester,
+    text,
+    source,
+    rows,
+    excluded,
+    parseIssues,
+    backup,
+    importDocument,
+    documentSelection,
+  ]);
+  useEffect(() => {
+    if (!draftStorageError || (!text && !rows.length && !importDocument)) return;
+    const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeLeaving);
+    return () => window.removeEventListener('beforeunload', warnBeforeLeaving);
+  }, [draftStorageError, text, rows.length, importDocument]);
   useEffect(
     () => () => {
       if (preview) URL.revokeObjectURL(preview);
@@ -424,7 +566,7 @@ function ImportWorkspace({
     const warnings = parsed.issues.filter((issue) => !issue.rowId).map((issue) => issue.message);
     setNotice(
       parsed.rows.length
-        ? `整理出 ${parsed.rows.length} 筆，請逐筆核對再匯入。${warnings.join(' ')}`
+        ? `${personalImportPreviewNotice(parsed.rows.length)}${warnings.join(' ')}`
         : `沒有整理出資料。可以修正下方文字，或手動加一筆。${warnings.join(' ')}`,
     );
     requestAnimationFrame(() =>
@@ -448,8 +590,8 @@ function ImportWorkspace({
       ),
     );
   };
-  const readFile = async (file?: File) => {
-    if (!file || reading || saving || rows.length) return;
+  const readFile = async (file?: File, pdfMode?: 'ocr') => {
+    if (!file || suspended.current || reading || saving || rows.length) return;
     const controller = new AbortController();
     job.current?.abort();
     job.current = controller;
@@ -461,6 +603,22 @@ function ImportWorkspace({
       name: file.name,
     };
     try {
+      if (/\.(pdf|xlsx)$/i.test(file.name)) {
+        setProgress(
+          pdfMode === 'ocr'
+            ? '正在這台裝置重新辨識 PDF 每一頁，原本的預覽會保留到讀取完成…'
+            : '正在這台裝置讀取文件；掃描頁會進行文字辨識…',
+        );
+        const document = await readPersonalImportDocumentFile(file, controller.signal, { pdfMode });
+        if (!active.current || suspended.current || controller.signal.aborted) return;
+        documentFile.current = file;
+        setHasDocumentFile(true);
+        setDocument(document);
+        setDocumentSelection(null);
+        setDocumentVersion((current) => current + 1);
+        setNotice('文件已讀取，請選擇內容與標題列。');
+        return;
+      }
       if (/\.json$/i.test(file.name)) {
         if (file.size > PERSONAL_IMPORT_BACKUP_MAX_BYTES)
           throw new Error('備份檔超過 8 MB，請確認是否為 Campus One 匯出的備份。');
@@ -494,7 +652,7 @@ function ImportWorkspace({
       } else {
         if (!/\.(csv|tsv|txt|ics)$/i.test(file.name))
           throw new Error(
-            '目前可讀圖片、CSV、TSV、TXT、ICS 與 Campus One JSON 備份。PDF、Excel 請先匯出成 CSV 或截圖。',
+            '可讀圖片、PDF、XLSX、CSV、TSV、TXT、ICS 與 Campus One JSON 備份。舊版 XLS 請先另存為 XLSX。',
           );
         if (file.size > 400_000) throw new Error('文字檔超過 400 KB，請分成較小的檔案再匯入。');
         input = await file.text();
@@ -515,6 +673,29 @@ function ImportWorkspace({
     }
   };
   const selected = rows.filter((row) => !excluded.includes(row.id));
+  const discardDraft = () => {
+    try {
+      clearPersonalImportDraft(scope);
+      setRows([]);
+      setText('');
+      setSource({ type: 'paste' });
+      setBackup(null);
+      setDocument(null);
+      setDocumentSelection(null);
+      documentFile.current = null;
+      setHasDocumentFile(false);
+      setExcluded([]);
+      setParseIssues([]);
+      setReviewPage(0);
+      setPreview('');
+      setDraftReadFailed(false);
+      setDraftStorageError('');
+      setConfirmDiscard(false);
+      setNotice('草稿已清除，已匯入的個人紀錄仍保留。');
+    } catch (error) {
+      setDraftStorageError(errorMessage(error));
+    }
+  };
   const errors = [
     ...selected.flatMap((row) =>
       validatePersonalImportRow(row, { periodProfile }).filter(
@@ -540,7 +721,9 @@ function ImportWorkspace({
         { restoreBackup: !!backup },
       );
       if (!active.current) return;
-      setNotice(personalImportSavedNotice(result.added));
+      setNotice(
+        personalImportSavedNotice(result.added, readPersonalImportSyncState(scope).enabled),
+      );
       if (result.added) setLastBatch(result.batchId);
       setRows([]);
       setBackup(null);
@@ -619,25 +802,26 @@ function ImportWorkspace({
       </nav>
       <section className={styles.intro}>
         <div>
-          <p className={styles.eyebrow}>從你手上的資料開始</p>
-          <h2>不用等學校串接，也能先整理好。</h2>
-          <p>選截圖、貼上文字，或帶入學校匯出的檔案。看過內容、改好錯字，再存進自己的資料。</p>
+          <p className={styles.eyebrow}>自行匯入</p>
+          <h2>匯入課表、成績或活動</h2>
+          <p>選擇截圖或檔案，也可以貼上文字。核對課名、日期與成績後，再加入個人紀錄。</p>
         </div>
         <p className={styles.storage}>
           {schoolName}
           <br />
-          {scope.owner === 'guest' ? '未登入 · 這個瀏覽器專用' : '目前帳號 · 這台裝置專用'}
+          {scope.owner === 'guest' ? '未登入 · 這個瀏覽器專用' : '目前帳號 · 個人紀錄'}
           <br />
-          <small>尚未雲端同步。換裝置或清除瀏覽器資料前，請先匯出備份。</small>
+          <small>同步狀態見下方。清除瀏覽器資料前，請先確認已同步或下載完整備份。</small>
         </p>
       </section>
+      <PersonalImportSyncPanel scope={scope} available={!paused && !saving} />
       <div className={styles.kinds} role="group" aria-label="選擇匯入內容">
         {KINDS.map((item) => (
           <button
             key={item.value}
             type="button"
             aria-pressed={kind === item.value}
-            disabled={reading || saving || rows.length > 0 || !!editing}
+            disabled={reading || saving || rows.length > 0 || !!editing || !!importDocument}
             onClick={() => {
               setKind(item.value);
               setText('');
@@ -661,19 +845,55 @@ function ImportWorkspace({
           {ledger.error}
         </p>
       )}
+      {(text || rows.length > 0 || importDocument || draftStorageError) && (
+        <section className={styles.notice} aria-label="匯入草稿暫存">
+          {draftStorageError ? (
+            <p role="alert">{draftStorageError}</p>
+          ) : (
+            <p>
+              草稿已暫存在這個分頁，重新整理或離開後回來可繼續核對。關閉分頁可能清除暫存；只保留文字與選取內容，原始圖片與檔案不會暫存。確認匯入後才會加入個人紀錄。
+            </p>
+          )}
+          {confirmDiscard ? (
+            <div className={styles.actions}>
+              <p>清除這份草稿與原始文字？已匯入的紀錄會保留。</p>
+              <button
+                type="button"
+                className="btn"
+                disabled={reading || saving}
+                onClick={discardDraft}
+              >
+                確認清除草稿
+              </button>
+              <button type="button" className="btn" onClick={() => setConfirmDiscard(false)}>
+                繼續核對
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="btn"
+              disabled={reading || saving}
+              onClick={() => setConfirmDiscard(true)}
+            >
+              清除暫存草稿
+            </button>
+          )}
+        </section>
+      )}
       <section className={styles.panel} aria-label="選擇資料來源">
         <div className={styles.heading}>
           <h2>
             <span>1</span> 帶入資料
           </h2>
-          <small>原始圖片只用來辨識，不會儲存到帳號</small>
+          <small>原始截圖與文件只在這台裝置讀取</small>
         </div>
         {schoolSelection && (
           <label className={styles.field}>
             這份資料的校園
             <select
               value={schoolSelection.selectedSchoolId || ''}
-              disabled={reading || saving || rows.length > 0 || !!editing}
+              disabled={reading || saving || rows.length > 0 || !!editing || !!importDocument}
               onChange={(event) => schoolSelection.selectSchool(event.target.value || null)}
             >
               <option value="">個人資料（不限校園）</option>
@@ -685,7 +905,10 @@ function ImportWorkspace({
             </select>
           </label>
         )}
-        <fieldset disabled={reading || saving || rows.length > 0} className={styles.fieldset}>
+        <fieldset
+          disabled={reading || saving || rows.length > 0 || !!importDocument}
+          className={styles.fieldset}
+        >
           {kind !== 'events' && (
             <div className={styles.fields}>
               <label className={styles.field}>
@@ -712,13 +935,13 @@ function ImportWorkspace({
             onDragOver={(event) => event.preventDefault()}
             onDrop={(event) => {
               event.preventDefault();
-              if (!rows.length) void readFile(event.dataTransfer.files[0]);
+              if (!rows.length && !importDocument) void readFile(event.dataTransfer.files[0]);
             }}
           >
             <input
               ref={fileInput}
               type="file"
-              accept="image/png,image/jpeg,image/webp,.csv,.tsv,.txt,.ics,.json,application/json"
+              accept="image/png,image/jpeg,image/webp,.pdf,.xlsx,.csv,.tsv,.txt,.ics,.json,application/json"
               className={styles.file}
               aria-label="選擇截圖或檔案"
               onChange={(event) => {
@@ -734,7 +957,9 @@ function ImportWorkspace({
               選截圖或檔案
             </button>
             <span>也可以拖曳到這裡</span>
-            <small>PNG／JPEG／WebP，單張 10 MB 內；CSV／TSV／TXT／ICS，400 KB 內</small>
+            <small>
+              PNG／JPEG／WebP，單張 10 MB 內；PDF／XLSX，8 MiB 內；CSV／TSV／TXT／ICS，400 KB 內
+            </small>
             <small>
               換裝置：也可選擇 Campus One 完整備份（JSON，8 MB 內），一次帶回三類資料與所有學期。
             </small>
@@ -789,7 +1014,7 @@ function ImportWorkspace({
         {kind === 'timetable' && (
           <p className={styles.note}>
             {periodProfile
-              ? '目前使用靜宜大學節次表；星期一至五的課程可顯示在「我的課表」。'
+              ? `目前使用${PERIOD_PROFILE_TITLES[periodProfile]}節次表（${periodCount(periodProfile)} 節）；星期一至五的課程可顯示在「我的課表」。`
               : '尚未選用學校節次表。請保留原始上課時間；其他學校與週末課程會顯示在下方個人紀錄。'}
           </p>
         )}
@@ -801,6 +1026,82 @@ function ImportWorkspace({
           </details>
         )}
       </section>
+      {importDocument && (
+        <fieldset disabled={reading} className={styles.fieldset}>
+          {importDocument.format === 'pdf' && (
+            <div className={styles.panel}>
+              <p>預覽只有標題，或表格文字不完整？可以重新辨識整頁，再核對一次。</p>
+              {!hasDocumentFile && <p>請重新選擇原始 PDF，辨識完成前會保留目前的預覽。</p>}
+              <input
+                ref={pdfInput}
+                type="file"
+                accept=".pdf,application/pdf"
+                className={styles.file}
+                aria-label="重新選擇原始 PDF"
+                onChange={(event) => {
+                  void readFile(event.target.files?.[0], 'ocr');
+                  event.target.value = '';
+                }}
+              />
+              <button
+                type="button"
+                className="btn"
+                onClick={() => documentFile.current
+                  ? void readFile(documentFile.current, 'ocr')
+                  : pdfInput.current?.click()}
+              >
+                重新辨識 PDF 整頁
+              </button>
+            </div>
+          )}
+          <DocumentSelection
+            key={documentVersion}
+            document={importDocument}
+            initialSelection={documentSelection}
+            onSelectionChange={setDocumentSelection}
+            options={options}
+            onCancel={() => {
+              documentFile.current = null;
+              setHasDocumentFile(false);
+              setDocument(null);
+              setDocumentSelection(null);
+              setNotice('已取消這份文件，個人紀錄沒有改變。');
+            }}
+            onConfirm={(nextRows, issues) => {
+              setRows(nextRows);
+              setBackup(null);
+              setReviewPage(0);
+              setExcluded([]);
+              setParseIssues(
+                issues.filter(
+                  (issue) =>
+                    issue.severity === 'error' &&
+                    !nextRows.some(
+                      (row) =>
+                        row.id === issue.rowId &&
+                        validatePersonalImportRow(row, { periodProfile }).some(
+                          (validation) =>
+                            validation.code === issue.code && validation.field === issue.field,
+                        ),
+                    ),
+                ),
+              );
+              setText('');
+              setPreview('');
+              documentFile.current = null;
+              setHasDocumentFile(false);
+              setDocument(null);
+              setDocumentSelection(null);
+              setNotice(
+                `${personalImportPreviewNotice(nextRows.length)}${[...new Set(issues.filter((issue) => issue.severity === 'warning').map((issue) => issue.message))].join(' ')}`,
+              );
+              requestAnimationFrame(() =>
+                review.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+              );
+            }}
+          />
+        </fieldset>
+      )}
       <section ref={review} className={styles.panel} aria-label="核對匯入資料">
         <div className={styles.heading}>
           <h2>
@@ -808,7 +1109,7 @@ function ImportWorkspace({
           </h2>
           <button
             className="btn"
-            disabled={saving || reading}
+            disabled={saving || reading || !!importDocument}
             type="button"
             onClick={() => {
               setRows((current) => [
@@ -877,7 +1178,7 @@ function ImportWorkspace({
                   setReviewPage(0);
                   setExcluded([]);
                   setParseIssues([]);
-                  setNotice('草稿已取消，原本的紀錄沒有改變。');
+                  setNotice('已取消待確認清單，原始文字仍保留，可修改後重新整理。');
                 }}
               >
                 取消這份草稿
@@ -1050,7 +1351,7 @@ function ImportWorkspace({
               <li key={row.id}>
                 <div>
                   <strong>{row.title}</strong>
-                  <p>{rowSummary(row)}</p>
+                  <p>{rowSummary(row, periodProfile)}</p>
                   <small>自行匯入 · {row.source.name || '手動／貼上文字'}</small>
                   {row.linkedCourseId &&
                     workspaces.some((item) => item.id === row.linkedCourseId) && (

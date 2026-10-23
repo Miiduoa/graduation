@@ -30,3 +30,21 @@ test('announcement cache keys include schoolId and do not leak across schools', 
   await expect(cached.getAnnouncement('a1', 'pu')).resolves.toMatchObject({ title: '靜宜公告' });
   expect(getAnnouncement).not.toHaveBeenCalled();
 });
+
+test('NCKU announcement cache does not serve NTPU copy', async () => {
+  const getAnnouncement = jest
+    .fn()
+    .mockImplementation(async (_id: string, schoolId?: string) =>
+      schoolId === 'ncku'
+        ? { id: 'a1', title: '成大選課', schoolId: 'ncku' }
+        : { id: 'a1', title: '北大實習辦法', schoolId: 'ntpu' },
+    );
+  const cached = createCachedSource(source(getAnnouncement));
+  await expect(cached.getAnnouncement('a1', 'ncku')).resolves.toMatchObject({ title: '成大選課' });
+  await expect(cached.getAnnouncement('a1', 'ntpu')).resolves.toMatchObject({
+    title: '北大實習辦法',
+  });
+  getAnnouncement.mockClear();
+  await expect(cached.getAnnouncement('a1', 'ncku')).resolves.toMatchObject({ title: '成大選課' });
+  expect(getAnnouncement).not.toHaveBeenCalled();
+});

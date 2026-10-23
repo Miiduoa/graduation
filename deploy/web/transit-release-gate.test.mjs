@@ -1,7 +1,9 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
-import {TDX,ORIGIN,probeTdx,probePublic,verifiedArrival,buildRemoteCommand,parseRemoteReport,probeRuntime,validateProfile,hasBusShell,verifyOfficialNotice} from './transit-release-gate.mjs';
+import {readFileSync} from 'node:fs';
+import {TDX,ORIGIN,probeTdx,probePublic,verifiedArrival,buildRemoteCommand,parseRemoteReport,probeRuntime,validateProfile,hasBusShell,verifyOfficialNotice,sanitizedRemoteFailure,failureFromFlyExecError,retryAfterMs,withRateLimitRetry} from './transit-release-gate.mjs';
+const busLoadingHtml = readFileSync(new URL('./fixtures/bus-loading.html', import.meta.url), 'utf8');
 const stamp = '2026-10-12T16:00:00Z';
 const now = () => Date.parse(stamp);
 const sha = 'a'.repeat(40);
@@ -17,7 +19,7 @@ function mock({provider=true,stops=[stop],rows=[arrival],page=true,healthRevisio
       return errorStatus ? Response.json({secret:'must-not-appear'},{status:errorStatus}) : Response.json({access_token:'test-bearer',expires_in:300});
     }
     if (!provider && url.endsWith('/health/ready')) return Response.json({service:'campus-one-web',status:'ready',legacy:'ready',revision:healthRevision});
-    if (!provider && url.endsWith('/bus')) return new Response(page ? '<div data-campus-bus-shell="true">公車與交通</div>' : 'Old bus page',{headers:{'Content-Type':'text/html','Permissions-Policy':'geolocation=(self)'}});
+    if (!provider && url.endsWith('/bus')) return new Response(page ? busLoadingHtml : 'Old bus page',{headers:{'Content-Type':'text/html','Permissions-Policy':'geolocation=(self)'}});
     const stationQuery = provider ? url.includes('/Stop/City/') : JSON.parse(init.body).action === 'campus';
     if (provider) {
       assert.equal(init.headers.Authorization,'Bearer test-bearer');
@@ -36,7 +38,7 @@ test('both server credential fields are mandatory before network access',async()
   for(const c of [{},{clientId:'x'},{clientSecret:'x'},{clientId:' ',clientSecret:'x'}]) await assert.rejects(probeTdx({credentials:c,fetcher:()=>assert.fail('must not request')}),/tdx-not-configured/);
 });
 test('authorization, quota and arbitrary provider errors are sanitized',async()=>{
-  for(const [status,code] of [[401,'not-authorized'],[403,'not-authorized'],[429,'rate-limited'],[500,'service-unavailable']]) await assert.rejects(probeTdx({credentials,fetcher:mock({errorStatus:status}),now}),new RegExp(`^Error: ${code}$`));
+  for(const [status,code] of [[401,'not-authorized'],[403,'not-authorized'],[429,'rate-limited'],[500,'service-unavailable']]) await assert.rejects(probeTdx({credentials,fetcher:mock({errorStatus:status}),now,rateLimitDelays:[]}),new RegExp(`^Error: ${code}$`));
 });
 test('station absence, wrong campus and invalid coordinates cannot pass',async()=>{
   for(const stops of [[],[{...stop,name:'別校'}],[{...stop,lat:0}]]) await assert.rejects(probeTdx({credentials,fetcher:mock({stops}),now}),/no-verified-campus-station/);
@@ -54,9 +56,24 @@ test('fresh end-of-service information is distinct from a countdown',async()=>{
   const result=await probeTdx({credentials,fetcher:mock({rows:[{...arrival,status:3,seconds:null}]}),now});
   assert.equal(result.ready,true);assert.equal(result.countdownVerified,false);assert.equal(result.checked[0].arrivals[0].status,3);
 });
-test('public check uses only same-origin POST and verifies the exact revision',async()=>{
+test('public check accepts the campus loading shell and still verifies live data separately',async()=>{
   const result=await probePublic(sha,{fetcher:mock({provider:false}),now});
   assert.equal(result.ready,true);assert.equal(result.revision,sha);assert.equal(result.physicalDeviceVerified,false);
+  assert.equal(result.browserControlsVerified,false);
+  assert.equal(result.directionVerified,true);assert.equal(result.sourceFreshnessVerified,true);
+});
+test('bus shell recognition follows the server marker rather than hydrated route copy',()=>{
+  assert.equal(busLoadingHtml.includes('往沙鹿'),false);
+  assert.equal(busLoadingHtml.includes('公車與交通'),false);
+  assert.equal(hasBusShell(busLoadingHtml),true);
+  for(const html of [null,'','<h1>公車與交通</h1>','<div>data-campus-bus-shell="true" 往沙鹿</div>',
+    '<div data-campus-bus-shell="false">公車與交通</div>',
+    '<div data-campus-bus-shell="true-ish">公車與交通</div>',
+    '<div x-data-campus-bus-shell="true">公車與交通</div>',
+    '&lt;div data-campus-bus-shell="true"&gt;公車與交通&lt;/div&gt;',
+    '<div data-campus-bus-shell="true">公車與交通往沙鹿</div>']) {
+    assert.equal(hasBusShell(html),false,JSON.stringify(html));
+  }
 });
 test('an old revision and old bus page stop public certification',async()=>{
   await assert.rejects(probePublic(sha,{fetcher:mock({provider:false,healthRevision:'b'.repeat(40)}),now}),/public-revision-not-ready/);
@@ -78,8 +95,42 @@ test('remote stdout is allowlisted and cannot masquerade as a passing check',()=
   for(const line of ['', 'CAMPUS_TRANSIT_PROBE:{}','CAMPUS_TRANSIT_PROBE:broken','CAMPUS_TRANSIT_PROBE:{}\nCAMPUS_TRANSIT_PROBE:{}']) assert.throws(()=>parseRemoteReport(line));
 });
 
+test('a single 429 is retried on the same request and can still verify fresh data',async()=>{
+  let tokenCalls=0; const sleeps=[];
+  const base=mock(); let etaCalls=0;
+  const fetcher=async(url,init)=>{
+    if(url.includes('/openid-connect/token')) { tokenCalls+=1; if(tokenCalls===1) return Response.json({},{status:429}); }
+    if(url.includes('EstimatedTimeOfArrival')) { etaCalls+=1; }
+    return base(url,init);
+  };
+  const result=await probeTdx({credentials,fetcher,now,sleep:async(ms)=>{sleeps.push(ms);},rateLimitDelays:[123,456]});
+  assert.equal(result.ready,true); assert.deepEqual(sleeps,[123]); assert.equal(tokenCalls,2); assert.equal(etaCalls,1);
+});
+test('persistent 429 still fails closed as rate-limited after bounded retries',async()=>{
+  const sleeps=[];
+  await assert.rejects(probeTdx({credentials,fetcher:mock({errorStatus:429}),now,sleep:async(ms)=>{sleeps.push(ms);},rateLimitDelays:[1,2]}),/rate-limited/);
+  assert.deepEqual(sleeps,[1,2]);
+});
+test('remote failures keep only sanitized codes and never provider or credential detail',()=>{
+  assert.equal(sanitizedRemoteFailure(new Error('rate-limited')),'rate-limited');
+  assert.equal(sanitizedRemoteFailure(new Error('client-secret-must-not-appear')),'runtime-transit-preflight-failed');
+  const failing='export async function probeRuntime(){throw new Error("rate-limited")} export function sanitizedRemoteFailure(e){return e.message==="rate-limited"?"rate-limited":"runtime-transit-preflight-failed"}';
+  let execError;
+  try { execFileSync('/bin/sh',['-c',buildRemoteCommand(failing)],{encoding:'utf8'}); } catch (error) { execError=error; }
+  assert.ok(execError?.stdout?.includes('"reason":"rate-limited"'));
+  assert.equal(failureFromFlyExecError(execError),'rate-limited');
+});
+test('remote ready:false report surfaces its sanitized code through parsing and fly exec errors',()=>{
+  const stdout='CAMPUS_TRANSIT_PROBE:'+JSON.stringify({ready:false,reason:'rate-limited'});
+  assert.throws(()=>parseRemoteReport(stdout),/rate-limited/);
+  assert.equal(failureFromFlyExecError({stdout}),'rate-limited');
+  assert.equal(failureFromFlyExecError({stdout:'CAMPUS_TRANSIT_PROBE:'+JSON.stringify({ready:false,reason:'secret-detail'})}),'runtime-transit-preflight-failed');
+  assert.equal(failureFromFlyExecError({}),'fly-runtime-probe-failed');
+  assert.equal(failureFromFlyExecError({stdout:'not-a-probe'}),'runtime-probe-output-invalid');
+});
+
 const linksProfile = 'official-links-only';
-const shell = '<div data-campus-bus-shell="true">公車與交通</div>';
+const shell = '<div data-campus-bus-shell="true" data-campus-bus-spec="v1">公車</div>';
 const officialNotice = '<aside data-transit-mode="official-links"><h2>即時到站尚未啟用</h2><a href="https://citybus-free.taichung.gov.tw/" target="_blank">臺中市官方公車查詢 ↗</a></aside>';
 function unconfiguredPublic({status=503, body={status:'unavailable',reason:'not-configured'}, contentType='application/json', notice=officialNotice, health={}}={}) {
   return async (url, init) => {
@@ -116,7 +167,7 @@ test('official links runtime requires complete absence and never requests TDX',a
 });
 test('default runtime remains strict and never falls back after a provider failure',async()=>{
   await assert.rejects(probeRuntime(undefined,{credentials:{},fetcher:()=>assert.fail('must not request')}), /tdx-not-configured/);
-  await assert.rejects(probeRuntime('live-tdx',{credentials,fetcher:mock({errorStatus:429}),now}), /rate-limited/);
+  await assert.rejects(probeRuntime('live-tdx',{credentials,fetcher:mock({errorStatus:429}),now,rateLimitDelays:[]}), /rate-limited/);
   const report=await probeRuntime('live-tdx',{credentials,fetcher:mock(),now});
   assert.equal(report.transitReady,true);
   assert.equal(report.profile,'live-tdx');
@@ -150,7 +201,12 @@ test('links profile requires real server notice and exact official destination r
     await assert.rejects(probePublic(sha,{profile:linksProfile,fetcher:unconfiguredPublic({notice}),now}), /official-transit-notice-missing/);
   }
   assert.equal(verifyOfficialNotice(officialNotice.replace('https://citybus-free.taichung.gov.tw/','https://citybus.taichung.gov.tw/')),'https://citybus.taichung.gov.tw/');
-  assert.equal(hasBusShell('<div>data-campus-bus-shell="true" 公車與交通</div>'),false);
+  assert.equal(hasBusShell('<div>data-campus-bus-shell="true" data-campus-bus-spec="v1" 公車與交通</div>'),false);
+  assert.equal(hasBusShell('<div data-campus-bus-shell="true">往沙鹿</div>'),false);
+  assert.equal(hasBusShell('<div data-campus-bus-shell="true">公車與交通</div>'),false);
+  assert.equal(hasBusShell('<div data-campus-bus-shell="true">公車</div>'),false);
+  assert.equal(hasBusShell('<div data-campus-bus-shell="true" data-campus-bus-spec="v1"></div>'),true);
+  assert.equal(hasBusShell('<div data-campus-bus-spec="v1" data-campus-bus-shell="true">讀取校園交通資料…</div>'),true);
 });
 test('remote profile reports cannot be confused or persist arbitrary provider content',()=>{
   const links={ready:true,profile:linksProfile,mode:'official-links',transitReady:false,credentialsAbsent:true,reason:'not-configured',privateDetail:'must-not-persist'};
@@ -166,4 +222,130 @@ test('remote source executes the chosen links profile without loading local envi
   const source='export async function probeRuntime(profile){if(profile!=="official-links-only")throw new Error("bad-profile");return {ready:true,profile,mode:"official-links",transitReady:false,credentialsAbsent:true,reason:"not-configured"}}';
   const output=execFileSync('/bin/sh',['-c',buildRemoteCommand(source,linksProfile)],{encoding:'utf8'});
   assert.equal(parseRemoteReport(output,linksProfile).transitReady,false);
+});
+
+const catalogProfile='static-catalog';
+const catalogStop={...stop,id:'TCOD_1',source:'taichung-open-data',catalogDate:stamp,distance:null,
+  routes:[{name:'300',direction:'去',destination:'靜宜大學'}]};
+const catalogNotice='<aside data-transit-mode="static-catalog">臺中站牌可查詢，班次時間請至官方網站確認<a href="https://citybus.taichung.gov.tw/">臺中市官方公車查詢</a></aside>';
+function catalogPublic({stops=[catalogStop],notice=catalogNotice,arrivals={status:'unavailable',reason:'not-configured'},arrivalStatus=503,wrongNearby=false,fetchedAt=stamp}={}) {
+  return async(url,init)=>{
+    assert.equal(new URL(url).origin,ORIGIN);
+    assert.equal(init.redirect,'error');assert.equal(init.credentials,'omit');
+    if(url.endsWith('/health/ready')) return Response.json({service:'campus-one-web',status:'ready',legacy:'ready',revision:sha});
+    if(url.endsWith('/bus')) return new Response(shell+notice,{headers:{'Content-Type':'text/html','Permissions-Policy':'geolocation=(self)'}});
+    const query=JSON.parse(init.body);
+    if(query.action==='arrivals')return Response.json(arrivals,{status:arrivalStatus});
+    if(query.city==='Taipei')return Response.json({status:'unavailable',reason:'not-configured'},{status:503});
+    return Response.json({status:'ready',kind:'stops',stops:query.action==='nearby'?stops.map(row=>({...row,distance:wrongNearby?301:0})):stops,limited:false,fetchedAt});
+  };
+}
+test('catalog runtime needs absent credentials and cannot be confused with a live arrival proof',async()=>{
+  const report=await probeRuntime(catalogProfile,{credentials:{},fetcher:()=>assert.fail('no provider request')});
+  assert.equal(report.mode,catalogProfile);assert.equal(report.transitReady,false);
+  assert.equal(parseRemoteReport('CAMPUS_TRANSIT_PROBE:'+JSON.stringify(report),catalogProfile).credentialsAbsent,true);
+  assert.throws(()=>parseRemoteReport('CAMPUS_TRANSIT_PROBE:'+JSON.stringify(report)),/runtime-transit-not-ready/);
+  await assert.rejects(probeRuntime(catalogProfile,{credentials:{clientId:'x'}}),/tdx-partial-configuration/);
+});
+test('catalog public verification checks real source shape, campus/search/nearby and unavailable arrivals independently',async()=>{
+  const report=await probePublic(sha,{profile:catalogProfile,fetcher:catalogPublic(),now});
+  assert.equal(report.stationCatalogReady,true);assert.equal(report.liveArrivalsVerified,false);
+  assert.equal(report.nearbyVerified,true);assert.equal(report.catalogDate,stamp);
+  assert.equal(report.transitReady,false);assert.equal(report.physicalDeviceVerified,false);
+});
+test('catalog certification rejects missing metadata, wrong city, duplicate IDs, stale snapshots and fabricated arrivals',async()=>{
+  for(const stops of [[],[{...catalogStop,source:'TDX'}],[{...catalogStop,id:'TCOD_'}],[{...catalogStop,catalogDate:'2026-02-31T00:00:00Z'}],[{...catalogStop,city:'Taipei'}],
+    [{...catalogStop,catalogDate:null}],[{...catalogStop,catalogDate:new Date(now()-181*86400_000).toISOString()}],
+    [{...catalogStop,catalogDate:new Date(now()+31_000).toISOString()}],[{...catalogStop,routes:[]}],[catalogStop,catalogStop]])
+    await assert.rejects(probePublic(sha,{profile:catalogProfile,fetcher:catalogPublic({stops}),now}),/static-catalog-(station-invalid|not-ready)/);
+  await assert.rejects(probePublic(sha,{profile:catalogProfile,fetcher:catalogPublic({wrongNearby:true}),now}),/static-catalog-nearby-mismatch/);
+  await assert.rejects(probePublic(sha,{profile:catalogProfile,fetcher:catalogPublic({arrivalStatus:200,arrivals:{status:'ready',kind:'arrivals',arrivals:[]}}),now}),/static-catalog-response-invalid/);
+  await assert.rejects(probePublic(sha,{profile:catalogProfile,fetcher:catalogPublic({arrivals:{status:'unavailable',reason:'upstream'}}),now}),/static-catalog-unavailable-state-invalid/);
+  await assert.rejects(probePublic(sha,{profile:catalogProfile,fetcher:catalogPublic({notice:catalogNotice.replace('https://citybus.taichung.gov.tw/','https://evil.example/')}),now}),/static-catalog-notice-missing/);
+});
+
+test('catalog proof rejects missing or stale response timestamps that the App cannot consume',async()=>{
+  for(const fetchedAt of [null,'invalid',new Date(now()-301_000).toISOString()])
+    await assert.rejects(probePublic(sha,{profile:catalogProfile,fetcher:catalogPublic({fetchedAt}),now}),/static-catalog-not-ready/);
+});
+
+// The public server answers 429 with Retry-After while the shared TDX key is cooling down.
+function publicWith429({failTimes=1,retryAfter='60',onAction='campus',status=429}={}) {
+  const base=mock({provider:false}); let failures=0; const calls=[];
+  const fetcher=async(url,init)=>{
+    if(url.endsWith('/api/transit')) {
+      const action=JSON.parse(init.body).action; calls.push(action);
+      if(action===onAction && failures<failTimes) {
+        failures+=1;
+        return Response.json({status:'unavailable',reason:'rate-limited'},{status,headers:retryAfter===null?{}:{'Retry-After':retryAfter}});
+      }
+    }
+    return base(url,init);
+  };
+  return {fetcher,calls};
+}
+test('public check waits out a 429 using Retry-After and still verifies the same request',async()=>{
+  const sleeps=[]; const {fetcher,calls}=publicWith429();
+  const result=await probePublic(sha,{fetcher,now,sleep:async(ms)=>{sleeps.push(ms);}});
+  assert.equal(result.ready,true); assert.deepEqual(sleeps,[60_000]);
+  assert.deepEqual(calls,['campus','campus','arrivals']);
+});
+test('public check uses its own delay when Retry-After is missing or shorter, and retries arrivals too',async()=>{
+  const sleeps=[]; const {fetcher}=publicWith429({retryAfter:null,onAction:'arrivals'});
+  assert.equal((await probePublic(sha,{fetcher,now,sleep:async(ms)=>{sleeps.push(ms);}})).ready,true);
+  assert.deepEqual(sleeps,[30_000]);
+  const short=[]; const second=publicWith429({retryAfter:'1'});
+  await probePublic(sha,{fetcher:second.fetcher,now,sleep:async(ms)=>{short.push(ms);}});
+  assert.deepEqual(short,[30_000]);
+});
+test('a provider-chosen Retry-After is capped so a release cannot hang',async()=>{
+  const sleeps=[]; const {fetcher}=publicWith429({retryAfter:'99999'});
+  await probePublic(sha,{fetcher,now,sleep:async(ms)=>{sleeps.push(ms);},maxRateLimitWaitMs:1_000_000});
+  assert.deepEqual(sleeps,[120_000]);
+});
+test('persistent public 429 fails closed as rate-limited within the bounded attempts and total wait',async()=>{
+  const sleeps=[]; const {fetcher,calls}=publicWith429({failTimes:99});
+  await assert.rejects(probePublic(sha,{fetcher,now,sleep:async(ms)=>{sleeps.push(ms);}}),/^Error: rate-limited$/);
+  assert.deepEqual(sleeps,[60_000,60_000,60_000]); assert.equal(calls.length,4);
+  const budget=[]; const tight=publicWith429({failTimes:99});
+  await assert.rejects(probePublic(sha,{fetcher:tight.fetcher,now,sleep:async(ms)=>{budget.push(ms);},maxRateLimitWaitMs:100_000}),/rate-limited/);
+  assert.deepEqual(budget,[60_000]);
+});
+test('the total wait budget is shared across every public request',async()=>{
+  const base=mock({provider:false}); const seen=new Map(); const sleeps=[];
+  const fetcher=async(url,init)=>{
+    if(url.endsWith('/api/transit')) {
+      const action=JSON.parse(init.body).action; const n=(seen.get(action)??0)+1; seen.set(action,n);
+      if(n===1) return Response.json({status:'unavailable',reason:'rate-limited'},{status:429,headers:{'Retry-After':'60'}});
+    }
+    return base(url,init);
+  };
+  await assert.rejects(probePublic(sha,{fetcher,now,sleep:async(ms)=>{sleeps.push(ms);},maxRateLimitWaitMs:90_000}),/rate-limited/);
+  assert.deepEqual(sleeps,[60_000]);
+});
+test('other public failures are never retried',async()=>{
+  const sleeps=[]; const {fetcher,calls}=publicWith429({status:503});
+  await assert.rejects(probePublic(sha,{fetcher,now,sleep:async(ms)=>{sleeps.push(ms);}}),/service-unavailable/);
+  assert.deepEqual(sleeps,[]); assert.deepEqual(calls,['campus']);
+});
+test('Retry-After parsing accepts seconds or HTTP dates only and is capped',()=>{
+  assert.equal(retryAfterMs('60'),60_000);
+  assert.equal(retryAfterMs(' 0 '),0);
+  assert.equal(retryAfterMs('99999'),120_000);
+  assert.equal(retryAfterMs(new Date(now()+45_000).toUTCString(),now),45_000);
+  for (const value of [null,undefined,'',' ','-5','1.5','soon',new Date(now()-1000).toUTCString()]) assert.equal(retryAfterMs(value,now),null);
+});
+test('the in-machine TDX probe keeps fixed delays and ignores a provider Retry-After',async()=>{
+  const base=mock(); let tokenCalls=0; const sleeps=[];
+  const fetcher=async(url,init)=>{
+    if(url.includes('/openid-connect/token')&&++tokenCalls===1) return Response.json({},{status:429,headers:{'Retry-After':'300'}});
+    return base(url,init);
+  };
+  assert.equal((await probeTdx({credentials,fetcher,now,sleep:async(ms)=>{sleeps.push(ms);},rateLimitDelays:[123]})).ready,true);
+  assert.deepEqual(sleeps,[123]);
+});
+test('rate-limit retry helper rethrows non-429 errors immediately',async()=>{
+  let calls=0;
+  await assert.rejects(withRateLimitRetry(async()=>{calls+=1; throw new Error('not-authorized');},{delays:[1,1],sleep:async()=>assert.fail('must not wait')}),/not-authorized/);
+  assert.equal(calls,1);
 });

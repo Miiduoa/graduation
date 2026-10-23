@@ -430,6 +430,7 @@ export function CalendarPanel(props: any) {
           subtitle: '',
           assignmentId,
           priority: 50,
+          dueAt: e.date,
         };
         const navigated = navigateFromInboxTask(nav, task, {
           role: auth.profile?.role,

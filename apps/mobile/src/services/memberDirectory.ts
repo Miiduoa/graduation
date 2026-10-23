@@ -6,6 +6,7 @@ import {
   limit,
   orderBy,
   query,
+  where,
   startAt,
   endAt,
   type Firestore,
@@ -84,7 +85,22 @@ export async function fetchSchoolDirectoryProfileMap(
   return Object.fromEntries(profiles.map((profile) => [profile.uid, profile]));
 }
 
-/** Firestore 字首搜尋：依 displayName。亦支援貼上完整 Firebase UID（精準查一人）。 */
+function searchableProfile(
+  uid: string,
+  data: Record<string, unknown>,
+): SchoolDirectoryProfile | null {
+  if (data.isDiscoverable !== true) return null;
+  return {
+    uid,
+    displayName: typeof data.displayName === 'string' ? data.displayName : uid.slice(0, 8),
+    avatarUrl: typeof data.avatarUrl === 'string' ? data.avatarUrl : null,
+    department: typeof data.department === 'string' ? data.department : null,
+    roleLabel: typeof data.roleLabel === 'string' ? data.roleLabel : null,
+    isDiscoverable: true,
+  };
+}
+
+/** 搜尋本人允許被找到的同校成員；查詢失敗交由畫面提供重試。 */
 export async function searchSchoolDirectoryByDisplayNamePrefix(
   schoolId: string,
   prefix: string,
@@ -96,33 +112,24 @@ export async function searchSchoolDirectoryByDisplayNamePrefix(
 
   const uidLike = /^[a-zA-Z0-9_-]{18,}$/.test(q);
   if (uidLike) {
-    const [p] = await fetchSchoolDirectoryProfiles(schoolId, [q], db);
-    return p ? [p] : [];
+    // 作者姓名的顯示備援不代表帳號存在，找人必須確認實際的通訊錄資料。
+    const snap = await getDoc(doc(db, 'schools', schoolId, 'directory', q));
+    if (!snap.exists()) return [];
+    const profile = searchableProfile(snap.id, snap.data() as Record<string, unknown>);
+    return profile ? [profile] : [];
   }
 
-  try {
-    const dir = collection(db, 'schools', schoolId, 'directory');
-    const qy = query(
-      dir,
-      orderBy('displayName'),
-      startAt(q),
-      endAt(`${q}\uf8ff`),
-      limit(Math.min(Math.max(maxResults, 4), 40)),
-    );
-    const snap = await getDocs(qy);
-    return snap.docs.map((d) => {
-      const data = d.data() as Record<string, unknown>;
-      const uid = d.id;
-      return {
-        uid,
-        displayName: typeof data.displayName === 'string' ? data.displayName : uid.slice(0, 8),
-        avatarUrl: typeof data.avatarUrl === 'string' ? data.avatarUrl : null,
-        department: typeof data.department === 'string' ? data.department : null,
-        roleLabel: typeof data.roleLabel === 'string' ? data.roleLabel : null,
-        isDiscoverable: data.isDiscoverable === true,
-      } satisfies SchoolDirectoryProfile;
-    });
-  } catch {
-    return [];
-  }
+  const dir = collection(db, 'schools', schoolId, 'directory');
+  const qy = query(
+    dir,
+    where('isDiscoverable', '==', true),
+    orderBy('displayName'),
+    startAt(q),
+    endAt(`${q}\uf8ff`),
+    limit(Math.min(Math.max(maxResults, 4), 40)),
+  );
+  const snap = await getDocs(qy);
+  return snap.docs
+    .map((entry) => searchableProfile(entry.id, entry.data() as Record<string, unknown>))
+    .filter((profile): profile is SchoolDirectoryProfile => profile !== null);
 }

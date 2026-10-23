@@ -6,7 +6,10 @@ import { useRouter } from 'next/navigation';
 import { usePersonalImportScope, usePersonalImports } from '@/lib/usePersonalImports';
 import {
   IMPORT_CONFIRM_COPY,
-  PERIOD_TIMES,
+  periodCount,
+  periodProfileForSchool,
+  personalTimetableTerms,
+  samePersonalCourse,
   SchedulePlanner,
   studySlots,
   WEEKDAY_LABELS,
@@ -77,6 +80,8 @@ export function PersonalTimetable() {
 }
 
 function TimetableWorkspace({ schoolId }: { schoolId: string }) {
+  const periodProfile = periodProfileForSchool(schoolId) ?? 'pu';
+  const periodTotal = periodCount(periodProfile);
   const { user } = useAuth();
   const [timetable, setTimetable] = useState<StoredTimetable | null>(null);
   const [view, setView] = useState<'grid' | 'week' | 'day'>('grid');
@@ -115,23 +120,15 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
   const router = useRouter();
   const importScope = usePersonalImportScope();
   const imported = usePersonalImports(importScope.scope, !importScope.loading);
-  const [importTerm, setImportTerm] = useState('');
-  const terms = [
-    ...new Set(
-      imported.records
-        .filter((row) => row.kind === 'timetable')
-        .map((row) => `${row.academicYear}|${row.semester}`),
-    ),
-  ];
-  const latestTerm = [...imported.records].reverse().find((row) => row.kind === 'timetable');
+  const [importTerm, setImportTerm] = useState(() => typeof window === 'undefined'
+    ? '' : new URLSearchParams(window.location.search).get('term') || '');
+  const terms = personalTimetableTerms(imported.records, schoolId).map((term) => term.key);
   const activeTerm =
     importTerm === 'manual'
       ? 'manual'
       : terms.includes(importTerm)
         ? importTerm
-        : latestTerm
-          ? `${latestTerm.academicYear}|${latestTerm.semester}`
-          : '';
+        : terms[0] || '';
   const importedCourses: PersonalCourse[] = imported.records
     .filter(
       (row) =>
@@ -162,7 +159,10 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
     !terms.length || activeTerm === 'manual' || legacyTerm === activeTerm
       ? timetable?.courses || []
       : [];
-  const visibleCourses = [...legacyCourses, ...importedCourses];
+  const visibleCourses = [
+    ...legacyCourses,
+    ...importedCourses.filter((course) => !legacyCourses.some((manual) => samePersonalCourse(manual, course))),
+  ];
   const missingImportTimes = imported.records.filter((row) =>
     row.kind === 'timetable' &&
     row.schoolId === schoolId &&
@@ -173,7 +173,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
   const planningCourses = [...visibleCourses, ...missingImportTimes.map((row) =>
     cleanCourse({ id: `unplaced-import:${row.id}`, name: row.title, day: 0 }),
   )];
-  const planning = planningReadiness(planningCourses, PERIOD_TIMES.length, WEEKDAY_LABELS.length);
+  const planning = planningReadiness(planningCourses, periodTotal, WEEKDAY_LABELS.length);
   const openCourse = (course: PersonalCourse) => {
     if (busy || savingRef.current) return;
     if (course.id.startsWith('import:')) router.push('/import?kind=timetable');
@@ -182,7 +182,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
       setEditing({ ...course });
     }
   };
-  const planner = new SchedulePlanner(visibleCourses, friends, selectedFriend);
+  const planner = new SchedulePlanner(visibleCourses, friends, selectedFriend, periodProfile);
 
   const refresh = useCallback(async () => {
     try {
@@ -318,10 +318,10 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
   const conflicts = findCourseConflicts(visibleCourses);
   const selected = friends.find((friend) => friend.id === selectedFriend);
   const friendPlanning = selected
-    ? planningReadiness(selected.courses, PERIOD_TIMES.length, WEEKDAY_LABELS.length)
+    ? planningReadiness(selected.courses, periodTotal, WEEKDAY_LABELS.length)
     : null;
   const windows = planning.ready && selected && friendPlanning?.ready
-    ? meetupWindows(visibleCourses, selected.courses)
+    ? meetupWindows(visibleCourses, selected.courses, periodProfile)
     : [];
   const sendMeetup = async (kind: 'meal' | 'study', day: number, startMinute: number) => {
     if (!uid || !selected || !planning.ready || !friendPlanning?.ready || meetupBusy || savingRef.current) return;
@@ -352,7 +352,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
 
   const saveCourse = async (course: PersonalCourse) => {
     if (course.id.startsWith('import:')) return;
-    const issues = validateCourseDraft(course, PERIOD_TIMES.length, WEEKDAY_LABELS.length);
+    const issues = validateCourseDraft(course, periodTotal, WEEKDAY_LABELS.length);
     if (Object.keys(issues).length) {
       setNotice(Object.values(issues).join(' '));
       return;
@@ -605,7 +605,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
         </div>
       )}
       {view === 'grid' ? (
-        <TimetableGrid courses={visibleCourses} disabled={busy} onEdit={openCourse} />
+        <TimetableGrid courses={visibleCourses} disabled={busy} onEdit={openCourse} periodProfile={periodProfile} />
       ) : view === 'week' ? (
         <div className={styles.week}>
           {WEEKDAY_LABELS.map((label, index) => {
@@ -623,7 +623,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
                       key={course.id}
                       onClick={() => openCourse(course)}
                     >
-                      <time>{courseTimeLabel(course)}</time>
+                      <time>{courseTimeLabel(course, periodProfile)}</time>
                       <h4>{course.name}</h4>
                       <p>{course.room || '教室未填'}</p>
                     </button>
@@ -646,7 +646,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
             .map((course) => (
               <li key={course.id}>
                 <button type="button" className={styles.course} onClick={() => openCourse(course)}>
-                  <time>{periodRangeLabel(course.start, course.end)}</time>
+                  <time>{periodRangeLabel(course.start, course.end, periodProfile)}</time>
                   <h4>{course.name}</h4>
                   <p>
                     {course.teacher || '教師未填'} · {course.room || '教室未填'}
@@ -657,7 +657,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
         </ul>
       )}
 
-      <UnscheduledCourses courses={legacyCourses} disabled={busy} onEdit={openCourse} />
+      <UnscheduledCourses courses={legacyCourses} disabled={busy} onEdit={openCourse} periodProfile={periodProfile} />
       {editing && (
         <EditableCourseDialog
           key={editing.id}
@@ -670,6 +670,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
           onSave={() => void saveCourse(editing)}
           onRemove={() => void removeCourse(editing.id)}
           onCancel={() => { if (!savingRef.current) setEditing(null); }}
+          periodProfile={periodProfile}
         />
       )}
 
@@ -703,7 +704,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
                 />
                 <strong>{draft.name}</strong>
                 <p>
-                  {courseTimeLabel(draft)} · {draft.teacher} · {draft.room}
+                  {courseTimeLabel(draft, periodProfile)} · {draft.teacher} · {draft.room}
                 </p>
                 {draft.flags?.map((flag) => (
                   <span key={flag.label}>{flag.label} </span>
@@ -765,7 +766,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
             disabled={busy || !planning.ready}
             onClick={() => {
               if (!planning.ready || savingRef.current) return;
-              const slots = studySlots(visibleCourses, studyDay, studyHours);
+              const slots = studySlots(visibleCourses, studyDay, studyHours, periodProfile);
               setPlanResult({
                 title: `${WEEKDAY_LABELS[studyDay - 1]}排 ${studyHours} 小時讀書`,
                 lines: slots.length ? slots : ['這天的空堂都不夠長，換一天或少排一點。'],

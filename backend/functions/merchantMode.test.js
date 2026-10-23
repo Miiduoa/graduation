@@ -38,9 +38,9 @@ test('showcase stores keep https ordering URLs with a source tag', () => {
   expect(isHttpsOrderingUrl('https://shop.example/order')).toBe(true);
   expect(isHttpsOrderingUrl('http://shop.example/order')).toBe(false);
   expect(isHttpsOrderingUrl('https://user:pass@shop.example/order')).toBe(false);
-  expect(
-    buildShowcaseOrderingUrl('https://shop.example/order?x=1', 'pu', 'cafe-1'),
-  ).toBe('https://shop.example/order?x=1&utm_source=nuni&utm_campaign=campus&ref=nuni-pu-cafe-1');
+  expect(buildShowcaseOrderingUrl('https://shop.example/order?x=1', 'pu', 'cafe-1')).toBe(
+    'https://shop.example/order?x=1&utm_source=nuni&utm_campaign=campus&ref=nuni-pu-cafe-1',
+  );
 });
 
 test('shared storefront URL check rejects javascript, userinfo, overlong, spaces, http and data', () => {
@@ -97,7 +97,9 @@ test('native_order stays closed when the global switch is off and is not rewritt
       orderingUrl: 'https://shop.example/order',
     }),
   ).toEqual({ kind: 'native_closed', label: NATIVE_ORDERING_CLOSED_TEXT });
-  expect(isOnlineOrderingEnabled({ ONLINE_ORDERING_ENABLED: 'false', JEST_WORKER_ID: '1' })).toBe(false);
+  expect(isOnlineOrderingEnabled({ ONLINE_ORDERING_ENABLED: 'false', JEST_WORKER_ID: '1' })).toBe(
+    false,
+  );
 });
 
 test('showcase stores use outbound-order copy and stay info-only without an https URL', () => {

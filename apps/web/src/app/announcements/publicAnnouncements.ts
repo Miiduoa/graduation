@@ -15,7 +15,9 @@ import {
   announcementSourceIdsForSchool,
   isAnnouncementSchoolVisibleToPublic,
   mergeAnnouncementsById,
-  SOURCE_DOWN_EMPTY_TEXT,
+  selectOfficialAnnouncements,
+  selectStudentAnnouncements,
+  SOURCE_UNAVAILABLE_TEXT,
 } from '@campus/shared/src/campusAnnouncements';
 import { getAnnouncementVisibilityEnv } from '@/lib/runtime';
 
@@ -30,6 +32,7 @@ export type AnnouncementSourceHealth = {
 
 export type AnnouncementFeed = {
   announcements: Announcement[];
+  officialAnnouncements: Announcement[];
   sources: AnnouncementSourceHealth[];
   allUnavailable: boolean;
 };
@@ -68,19 +71,9 @@ async function querySchoolAnnouncements(
   maxItems: number,
 ) {
   const db = getDb();
-  const constraints = [...extra, limit(maxItems)];
-  let snapshot = await getDocsFromServer(
-    query(collection(db, 'schools', schoolId, 'announcements'), ...constraints),
+  const snapshot = await getDocsFromServer(
+    query(collection(db, 'schools', schoolId, 'announcements'), ...extra, limit(maxItems)),
   );
-  if (snapshot.empty) {
-    snapshot = await getDocsFromServer(
-      query(
-        collection(db, 'announcements'),
-        where('schoolId', '==', schoolId),
-        ...constraints,
-      ),
-    );
-  }
   return snapshot.docs.flatMap((document) => {
     try {
       return [normalizeAnnouncement(document, schoolId)];
@@ -92,7 +85,7 @@ async function querySchoolAnnouncements(
 
 export async function loadAnnouncementFeed(schoolId: string): Promise<AnnouncementFeed> {
   if (!isAnnouncementSchoolVisibleToPublic({ schoolId }, getAnnouncementVisibilityEnv())) {
-    return { announcements: [], sources: [], allUnavailable: false };
+    return { announcements: [], officialAnnouncements: [], sources: [], allUnavailable: false };
   }
   if (!isFirebaseConfigured()) throw new Error('Announcement source unavailable');
   const db = getDb();
@@ -111,7 +104,7 @@ export async function loadAnnouncementFeed(schoolId: string): Promise<Announceme
       sourceId: typeof data.sourceId === 'string' ? data.sourceId : document.id,
       office: typeof data.office === 'string' ? data.office : document.id,
       status: unavailable ? 'unavailable' : 'healthy',
-      message: unavailable ? SOURCE_DOWN_EMPTY_TEXT : '',
+      message: unavailable ? SOURCE_UNAVAILABLE_TEXT : '',
       listUrl: originalUrl(data.listUrl),
       lastSuccessAt: publishedDate(data.lastSuccessAt) || undefined,
     };
@@ -122,17 +115,25 @@ export async function loadAnnouncementFeed(schoolId: string): Promise<Announceme
   const missing = announcementSourceIdsForSchool(schoolId, sources).filter(
     (sourceId) => !present.has(sourceId),
   );
-  const extras = await Promise.all(
-    missing.map((sourceId) =>
-      querySchoolAnnouncements(
-        schoolId,
-        [where('sourceId', '==', sourceId)],
-        ANNOUNCEMENT_SOURCE_LIMIT,
-      ),
-    ),
-  );
+  // 學校自己的集合已確定是 0 則時，不必再依處室補查。
+  const extras =
+    recent.length === 0 || missing.length === 0
+      ? []
+      : await Promise.all(
+          missing.map((sourceId) =>
+            querySchoolAnnouncements(
+              schoolId,
+              [where('sourceId', '==', sourceId)],
+              ANNOUNCEMENT_SOURCE_LIMIT,
+            ),
+          ),
+        );
+  const merged = mergeAnnouncementsById([recent, ...extras]);
+  const announcements = selectStudentAnnouncements(merged, sources);
+  const officialAnnouncements = selectOfficialAnnouncements(merged, sources);
   return {
-    announcements: mergeAnnouncementsById([recent, ...extras]),
+    announcements,
+    officialAnnouncements,
     sources,
     allUnavailable: sources.length > 0 && sources.every((item) => item.status === 'unavailable'),
   };
@@ -170,11 +171,15 @@ function normalizeAnnouncement(
     category: typeof data.category === 'string' ? data.category : undefined,
     pinned: data.pinned === true,
     schoolId,
-  };
+    studentFeed: data.studentFeed !== false,
+    visible: data.visible !== false,
+    audience: typeof data.audience === 'string' ? data.audience : undefined,
+  } as Announcement;
 }
 
 export async function loadAnnouncement(schoolId: string, id: string): Promise<Announcement | null> {
-  if (!isAnnouncementSchoolVisibleToPublic({ schoolId }, getAnnouncementVisibilityEnv())) return null;
+  if (!isAnnouncementSchoolVisibleToPublic({ schoolId }, getAnnouncementVisibilityEnv()))
+    return null;
   if (!isFirebaseConfigured()) throw new Error('Announcement source unavailable');
   if (!id || id.includes('/')) return null;
   const db = getDb();

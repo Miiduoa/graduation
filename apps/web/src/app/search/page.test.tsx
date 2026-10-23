@@ -2,10 +2,19 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import SearchPage from './page';
 
+const options = { studentId: false, loading: false, error: false, retry: vi.fn() };
+vi.mock('@/lib/signInOptions', () => ({ useSignInOptions: () => options }));
+
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(window.location.search),
 }));
-beforeEach(() => window.history.replaceState({}, '', '/search'));
+beforeEach(() => {
+  window.history.replaceState({}, '', '/search');
+  options.studentId = false;
+  options.loading = false;
+  options.error = false;
+  options.retry.mockClear();
+});
 
 vi.mock('@/components/SiteShell', () => ({
   SiteShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main>,
@@ -112,4 +121,23 @@ it('restores filters after navigation and ignores unsupported categories', () =>
   expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
   expect(screen.getByRole('button', { name: '全部' }).getAttribute('aria-pressed')).toBe('true');
   expect(screen.getByRole('link', { name: /^圖書館/ })).toBeTruthy();
+});
+
+it('shows a school login limitation before opening a service without hiding its entry', () => {
+  const view = render(<SearchPage />);
+  expect(screen.getByRole('link', { name: /^成績/ }).textContent).toContain('尚未開放登入');
+  options.studentId = true;
+  view.rerender(<SearchPage />);
+  expect(screen.getByRole('link', { name: /^成績/ }).textContent).not.toContain('尚未開放登入');
+});
+
+it('retains a search and public destinations when login availability fails, and offers retry', () => {
+  window.history.replaceState({}, '', '/search?schoolId=pu&q=公車');
+  options.error = true;
+  render(<SearchPage />);
+  expect(screen.queryByText(/尚未開放登入/)).toBeNull();
+  expect(screen.getByRole('link', { name: /^公車/ }).getAttribute('href')).toContain('schoolId=pu');
+  fireEvent.click(screen.getByRole('button', { name: '重新確認登入方式' }));
+  expect(options.retry).toHaveBeenCalledOnce();
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('公車');
 });

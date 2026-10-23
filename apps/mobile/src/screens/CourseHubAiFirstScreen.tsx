@@ -105,6 +105,16 @@ function CourseContent({
       pending.current = false;
     }
   };
+  const openMaterial = (title: string, url: string) => {
+    if (!isCurrent() || !data) return;
+    setLinkError('');
+    safeNavigate(navigation, 'CourseMaterialViewer', {
+      url,
+      title,
+      kind: 'material',
+      courseName: data.name,
+    });
+  };
   const go = (screen: string) => {
     if (isCurrent() && data && target?.source === 'group')
       safeNavigate(navigation, screen, { groupId: target.groupId, groupName: data.name });
@@ -187,8 +197,11 @@ function CourseContent({
                   />
                 </View>
               </AICard>
-              <AICard title="教材與單元">
+              <AICard title="教材檔案">
                 <View style={gap}>
+                  <Text style={body}>
+                    列出教師已發布的教材連結。目前沒有課程檔案上傳路徑，無法在 App 內傳檔。
+                  </Text>
                   {data.materials.status === 'error' ? (
                     <Text accessibilityRole="alert" style={body}>
                       教材讀取失敗，請更新課程資料後重試。
@@ -212,8 +225,7 @@ function CourseContent({
                           <AIButton
                             label={`開啟教材：${item.title}`}
                             variant="ghost"
-                            disabled={opening}
-                            onPress={() => void open(item.url!)}
+                            onPress={() => openMaterial(item.title, item.url!)}
                           />
                         ) : (
                           <Text style={body}>這個單元未附教材連結。</Text>
