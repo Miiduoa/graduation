@@ -4,7 +4,13 @@ import { expect, it, vi } from 'vitest';
 import MapPage from './page';
 
 vi.mock('@/components/SiteShell', () => ({
-  SiteShell: ({ children }: { children: ReactNode }) => <main>{children}</main>,
+  SiteShell: ({
+    children,
+    compactHeading,
+  }: {
+    children: ReactNode;
+    compactHeading?: boolean;
+  }) => <main data-compact-heading={compactHeading ? 'true' : undefined}>{children}</main>,
 }));
 vi.mock('next/dynamic', () => ({
   default: () =>
@@ -37,6 +43,7 @@ it('waits for Next route search parameters and passes the requested route and fo
   expect(url.searchParams.get('q')).toContain('地點');
   expect(url.searchParams.get('schoolId')).toBe('another-school');
   expect(screen.queryByText(/最快路線|AI 校園導航/)).toBeNull();
+  expect(screen.getByRole('main').getAttribute('data-compact-heading')).toBe('true');
 });
 
 it('handles repeated map search parameters without passing arrays to route parsing', async () => {

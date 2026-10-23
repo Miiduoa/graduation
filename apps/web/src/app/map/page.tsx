@@ -31,8 +31,9 @@ export default function MapPage(props: {
   return (
     <SiteShell
       title="校園地圖"
-      subtitle="找教室、查設施，規劃前往目的地的路線"
+      subtitle="搜尋宿舍、廁所、影印，並顯示走路分鐘"
       schoolName={schoolName}
+      compactHeading
     >
       {status === 'ready' && schoolId ? (
         <MapClient key={schoolId} school={schoolId} schoolName={schoolName} route={route} focus={focus} />

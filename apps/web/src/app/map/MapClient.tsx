@@ -319,30 +319,7 @@ function MapContent({
     );
 
   return (
-    <div className={`pageStack ${styles.page}`}>
-      {placeState.source === 'error' && (
-        <div className={styles.notice} role="alert">
-          <p>校方地點資料暫時讀不到，先顯示已核對過的靜宜建築與公車站牌，收藏與部分地點可能缺少。</p>
-          <button className="btn" onClick={retry}>
-            重新讀取地點資料
-          </button>
-        </div>
-      )}
-      {sourcePending && bundled && (
-        <p className={styles.notice} role="status">
-          正在同步校方地點資料，已先顯示核對過的靜宜地點。
-        </p>
-      )}
-      {!sourcePending && route && !deepLinkRoute && routeDraft === null && (
-        <p className={styles.notice} role="status">
-          這個連結的起點或終點已不在目前地點資料中，請從下方列表重新選擇。
-        </p>
-      )}
-      {!sourcePending && focus && !locations.some((location) => location.id === focus) && (
-        <p className={styles.notice} role="status">
-          找不到連結指定的地點，請搜尋地點名稱。
-        </p>
-      )}
+    <div className={`pageStack ${styles.page}`} data-map-first-screen="true">
       {routeStart && !routeLocations && (
         <p className={styles.notice} role="status">
           已設定「{routeStart.name}」為起點。請選擇其他地點，再按「設為終點」。
@@ -376,53 +353,26 @@ function MapContent({
         </section>
       )}
       <div className={styles.toolbar}>
-        <label className={styles.search}>
-          搜尋地點
-          <input
-            className="input"
-            type="search"
-            placeholder="搜尋宿舍、廁所、影印，或公車路線（例如 300）"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-          />
-        </label>
-        <div className={styles.tools}>
-          {officialMapUrl && (
-            <a className="btn" href={officialMapUrl} target="_blank" rel="noopener noreferrer">
-              校方校區平面圖
-            </a>
-          )}
-          <button className="btn" onClick={locate} disabled={positionStatus === 'loading'}>
-            {positionStatus === 'loading' ? '正在定位…' : myLocation ? '更新我的位置' : '查看我的位置'}
-          </button>
+        <div className={styles.searchRow}>
+          <label className={styles.search}>
+            <span className={styles.searchLabel}>搜尋地點</span>
+            <input
+              className="input"
+              type="search"
+              aria-label="搜尋地點"
+              placeholder="宿舍、廁所、影印或公車"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </label>
           <button
             className="btn"
-            onClick={() => {
-              setSelection('');
-              setSearch('');
-              setCategory('全部');
-            }}
+            onClick={locate}
+            disabled={positionStatus === 'loading'}
+            aria-label={myLocation ? '更新我的位置' : '查看我的位置'}
           >
-            看整個校園
+            {positionStatus === 'loading' ? '定位中…' : myLocation ? '更新定位' : '定位'}
           </button>
-          <button
-            className="btn"
-            aria-pressed={nearbyOnly}
-            disabled={!myLocation}
-            onClick={() => setNearbyOnly((value) => !value)}
-          >
-            附近 1 公里
-          </button>
-          {uid && (
-            <button
-              className="btn"
-              aria-pressed={onlyFavorites}
-              disabled={favorites.status !== 'ready'}
-              onClick={() => setOnlyFavorites((value) => !value)}
-            >
-              只看收藏
-            </button>
-          )}
         </div>
         {positionError && <p className={styles.notice} role="alert">{positionError}</p>}
         {myLocation && (
@@ -430,18 +380,6 @@ function MapContent({
             已定位，地點依直線距離由近到遠排序；校園步道與路口請以實際路線為準。
           </p>
         )}
-        <div className={styles.categories} aria-label="地點分類">
-          {categories.map((value) => (
-            <button
-              key={value}
-              className={category === value ? styles.active : ''}
-              aria-pressed={category === value}
-              onClick={() => setCategory(value)}
-            >
-              {value}
-            </button>
-          ))}
-        </div>
       </div>
       <MapCanvas
         locations={mapLocations}
@@ -450,29 +388,101 @@ function MapContent({
         myLocation={myLocation}
         onSelect={selectLocation}
       />
+      {placeState.source === 'error' && (
+        <div className={styles.notice} role="alert">
+          <p>校方地點資料暫時讀不到，先顯示已核對過的靜宜建築與公車站牌，收藏與部分地點可能缺少。</p>
+          <button className="btn" onClick={retry}>
+            重新讀取地點資料
+          </button>
+        </div>
+      )}
+      {sourcePending && bundled && (
+        <p className={styles.note} role="status">
+          正在同步校方地點資料，已先顯示核對過的靜宜地點。
+        </p>
+      )}
+      {!sourcePending && route && !deepLinkRoute && routeDraft === null && (
+        <p className={styles.notice} role="status">
+          這個連結的起點或終點已不在目前地點資料中，請從下方列表重新選擇。
+        </p>
+      )}
+      {!sourcePending && focus && !locations.some((location) => location.id === focus) && (
+        <p className={styles.notice} role="status">
+          找不到連結指定的地點，請搜尋地點名稱。
+        </p>
+      )}
       {school === 'pu' && (
-        <section className={`card ${styles.state}`} aria-label="地圖資料來源">
-          <h2>靜宜地圖資料來源</h2>
-          <p>
-            建築與設施位置取自{' '}
-            <a href={PROVIDENCE_CAMPUS_SOURCE.mapDataUrl} target="_blank" rel="noopener noreferrer">
-              OpenStreetMap 貢獻者資料
-            </a>
-            （查詢日期 {PROVIDENCE_CAMPUS_SOURCE.retrievedAt}），並與{' '}
-            <a href={PROVIDENCE_CAMPUS_SOURCE.officialCampusTourUrl} target="_blank" rel="noopener noreferrer">
-              校方校園地圖實境導覽
-            </a>
-            交叉核對名稱；底圖上也保留 OpenStreetMap 署名。宿舍、廁所、影印只掛在已核對建築，沒有獨立、對不上的座標就不放。
-            公車站牌取自{' '}
-            <a href={PROVIDENCE_CAMPUS_SOURCE.transitDatasetUrl} target="_blank" rel="noopener noreferrer">
-              臺中市公車站牌資料
-            </a>
-            （快照 {PROVIDENCE_CAMPUS_SOURCE.transitCatalogDate}）。點公車站可到公車頁看即時到站；
-            出入口目前只有一筆標記、名稱待補，其他學校的地點待補，不會先用靜宜資料代替。
-            步行分鐘是直線公尺 ÷ 每分鐘 80 公尺後四捨五入，不是導航路線時間。
-          </p>
+        <section className={`card ${styles.source}`} aria-label="地圖資料來源">
+          <details>
+            <summary>靜宜地圖資料來源與步行分鐘算法</summary>
+            <p>
+              建築與設施位置取自{' '}
+              <a href={PROVIDENCE_CAMPUS_SOURCE.mapDataUrl} target="_blank" rel="noopener noreferrer">
+                OpenStreetMap 貢獻者資料
+              </a>
+              （查詢日期 {PROVIDENCE_CAMPUS_SOURCE.retrievedAt}），並與{' '}
+              <a href={PROVIDENCE_CAMPUS_SOURCE.officialCampusTourUrl} target="_blank" rel="noopener noreferrer">
+                校方校園地圖實境導覽
+              </a>
+              交叉核對名稱；底圖上也保留 OpenStreetMap 署名。宿舍、廁所、影印只掛在已核對建築，沒有獨立、對不上的座標就不放。
+              公車站牌取自{' '}
+              <a href={PROVIDENCE_CAMPUS_SOURCE.transitDatasetUrl} target="_blank" rel="noopener noreferrer">
+                臺中市公車站牌資料
+              </a>
+              （快照 {PROVIDENCE_CAMPUS_SOURCE.transitCatalogDate}）。點公車站可到公車頁看即時到站；
+              出入口目前只有一筆標記、名稱待補，其他學校的地點待補，不會先用靜宜資料代替。
+              步行分鐘是直線公尺 ÷ 每分鐘 80 公尺後四捨五入，不是導航路線時間。
+            </p>
+          </details>
         </section>
       )}
+      <div className={styles.tools}>
+        {officialMapUrl && (
+          <a className="btn" href={officialMapUrl} target="_blank" rel="noopener noreferrer">
+            校方校區平面圖
+          </a>
+        )}
+        <button
+          className="btn"
+          onClick={() => {
+            setSelection('');
+            setSearch('');
+            setCategory('全部');
+          }}
+        >
+          看整個校園
+        </button>
+        <button
+          className="btn"
+          aria-pressed={nearbyOnly}
+          disabled={!myLocation}
+          onClick={() => setNearbyOnly((value) => !value)}
+        >
+          附近 1 公里
+        </button>
+        {uid && (
+          <button
+            className="btn"
+            aria-pressed={onlyFavorites}
+            disabled={favorites.status !== 'ready'}
+            onClick={() => setOnlyFavorites((value) => !value)}
+          >
+            只看收藏
+          </button>
+        )}
+      </div>
+      <div className={styles.categories} aria-label="地點分類">
+        {categories.map((value) => (
+          <button
+            key={value}
+            className={category === value ? styles.active : ''}
+            aria-pressed={category === value}
+            onClick={() => setCategory(value)}
+          >
+            {value}
+          </button>
+        ))}
+      </div>
       {selected && (
         <section className={`card ${styles.detail}`} aria-label="地點詳情">
           <div>

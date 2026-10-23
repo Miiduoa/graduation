@@ -1,5 +1,6 @@
 .page {
   min-width: 0;
+  --map-first-screen-chrome: 314px;
 }
 .state h2,
 .route h2,
@@ -43,10 +44,25 @@
   flex-direction: column;
   gap: 14px;
 }
+.searchRow {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+.searchRow .search {
+  flex: 1;
+  min-width: 0;
+}
+.searchRow > button {
+  flex-shrink: 0;
+}
 .search {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  font-weight: 600;
+}
+.searchLabel {
   font-weight: 600;
 }
 .categories,
@@ -102,6 +118,21 @@
   width: 100%;
   z-index: 1;
   background: var(--panel);
+}
+.source summary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 16px;
+  line-height: 1.5;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+.source p {
+  margin-top: 12px;
+  color: var(--muted);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
 }
 .pin {
   display: block;
@@ -255,11 +286,27 @@
   background: var(--surface);
 }
 @media (max-width: 600px) {
+  .toolbar {
+    gap: 8px;
+  }
   .categories button,
   .tools .btn,
   .actions .btn,
   .actions button {
     min-height: 44px;
+  }
+  .searchRow {
+    align-items: stretch;
+  }
+  .searchLabel {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .search {
+    position: relative;
   }
   .location {
     padding: 6px 0;
@@ -268,7 +315,16 @@
     flex-direction: column;
   }
   .map {
-    height: 300px;
+    height: max(240px, calc(100dvh - var(--map-first-screen-chrome)));
+  }
+  .categories {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+  }
+  .categories button {
+    flex-shrink: 0;
   }
   .list li {
     gap: 10px;
