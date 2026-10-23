@@ -7,6 +7,7 @@ import { useAuth } from '@/components/AuthGuard';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { joinByCode, leaveMemberGroup, loadMyGroups, type MemberGroup } from './groupService';
+import { GroupOwnershipTransfer } from './GroupOwnershipTransfer';
 import styles from './groups.module.css';
 
 type Mode = 'groups' | 'clubs';
@@ -247,9 +248,30 @@ function MemberDirectory({ uid, schoolId, mode }: { uid: string; schoolId: strin
                   開啟討論
                 </Link>
                 {group.role === 'owner' ? (
-                  <p>
-                    擁有者需先完成交接，才能退出群組。
-                  </p>
+                  <>
+                    <p>擁有者須先完成擁有權轉讓，才能退出群組。</p>
+                    <GroupOwnershipTransfer
+                      key={`${uid}:${schoolId}:${group.id}`}
+                      uid={uid}
+                      schoolId={schoolId}
+                      groupId={group.id}
+                      groupName={group.name}
+                      disabled={pending !== null || mustRefresh}
+                      onTransferred={() => {
+                        if (!mounted.current) return;
+                        setState((previous) =>
+                          previous.status === 'ready'
+                            ? {
+                                status: 'ready',
+                                groups: previous.groups.map((item) =>
+                                  item.id === group.id ? { ...item, role: 'member' } : item,
+                                ),
+                              }
+                            : previous,
+                        );
+                      }}
+                    />
+                  </>
                 ) : confirmLeave === group.id ? (
                   <div className={styles.confirm}>
                     <p>確定退出「{group.name}」？再次加入需要邀請碼。</p>
