@@ -143,7 +143,7 @@
 }
 
 .menuOverview > span,
-.menuGroup a > span {
+.menuGroup a > span[aria-hidden] {
   transition: transform 160ms ease;
 }
 
@@ -176,7 +176,7 @@
     background-color 160ms ease;
 }
 
-.menuGroup a > span {
+.menuGroup a > span[aria-hidden] {
   flex-shrink: 0;
   color: var(--muted);
   font-size: 12px;
@@ -337,4 +337,16 @@
     animation: none !important;
     transition: none !important;
   }
+}
+
+.serviceName {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.serviceName small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
 }

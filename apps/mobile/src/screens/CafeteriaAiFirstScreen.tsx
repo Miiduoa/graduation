@@ -32,6 +32,7 @@ import {
 } from '@campus/shared/src/cafeteriaCatalog';
 import { MY_ORDER_STATUS_LABELS as statuses } from './MyOrdersScreen';
 import { safeNavigate } from '../utils/safeNavigate';
+import { isMobileOnlineOrderingEnabled, ONLINE_ORDERING_OFF_TEXT } from '../utils/onlineOrdering';
 
 type Props = {
   navigation?: { goBack?: () => void; navigate?: (route: string) => void };
@@ -95,9 +96,7 @@ function DiningContent({
       }
     } catch (reason) {
       if (isCurrent() && request === generation.current)
-        setError(
-          reason instanceof DiningError ? reason.message : loadServiceFailureCopy(reason),
-        );
+        setError(reason instanceof DiningError ? reason.message : loadServiceFailureCopy(reason));
     } finally {
       if (isCurrent() && request === generation.current) setLoading(false);
     }
@@ -184,260 +183,252 @@ function DiningContent({
       onBack={() => navigation?.goBack?.()}
     >
       <AICard title="平台點餐與取餐">
-        <Text style={{ color: aiTokens.textSecondary, lineHeight: 24 }}>
-          使用 Google 帳號選餐、查看訂單與出示取餐憑證。學校原有餐廳服務仍保留在下方。
-        </Text>
-        <AIButton
-          label="前往平台點餐"
-          onPress={() => safeNavigate(navigation, 'NuniWorkspace', { tab: 'food' })}
-        />
+        {isMobileOnlineOrderingEnabled() ? (
+          <>
+            <Text style={{ color: aiTokens.textSecondary, lineHeight: 24 }}>
+              使用 Google 帳號選餐、查看訂單與出示取餐憑證。學校原有餐廳服務仍保留在下方。
+            </Text>
+            <AIButton
+              label="前往平台點餐"
+              onPress={() => safeNavigate(navigation, 'NuniWorkspace', { tab: 'food' })}
+            />
+          </>
+        ) : (
+          <Text style={{ color: aiTokens.textSecondary, lineHeight: 24 }}>
+            {ONLINE_ORDERING_OFF_TEXT}
+          </Text>
+        )}
       </AICard>
       {scope.userId && navigation?.navigate ? (
-            <View style={{ alignItems: 'flex-start' }}>
+        <View style={{ alignItems: 'flex-start' }}>
+          <AIButton
+            label="我的訂單"
+            variant="ghost"
+            onPress={() => navigation.navigate?.('StudentOrders')}
+          />
+        </View>
+      ) : null}
+      {receipt ? (
+        <AICard title={statuses[receipt.status] ?? '訂單紀錄'}>
+          <Text style={{ color: aiTokens.text }}>
+            {receipt.label} · 訂單金額 NT${receipt.total}
+          </Text>
+          {pickup?.state === 'assigned' ? (
+            <Text
+              accessibilityLabel={pickup.text}
+              style={{ color: aiTokens.text, fontSize: 20, fontWeight: '700', marginTop: 8 }}
+            >
+              {pickup.text}
+            </Text>
+          ) : pickup?.state === 'cancelled' ? (
+            <Text style={{ color: aiTokens.danger, fontWeight: '700', marginTop: 8 }}>
+              {pickup.text}
+            </Text>
+          ) : pickup ? (
+            <View style={{ marginTop: 8, gap: 4 }}>
+              <Text style={{ color: aiTokens.text, fontWeight: '700' }}>{pickup.text}</Text>
+              {pickup.detail ? (
+                <Text selectable style={{ color: aiTokens.text }}>
+                  {pickup.detail}
+                </Text>
+              ) : null}
+              <Text style={{ color: aiTokens.muted }}>狀態：{pickup.label}</Text>
+            </View>
+          ) : null}
+          <Text selectable style={{ color: aiTokens.muted, marginTop: 8 }}>
+            {formatShortOrderCode(receipt.id)}
+          </Text>
+          {navigation?.navigate ? (
+            <View style={{ marginTop: 12 }}>
               <AIButton
-                label="我的訂單"
+                label="看我的訂單"
                 variant="ghost"
                 onPress={() => navigation.navigate?.('StudentOrders')}
               />
             </View>
           ) : null}
-          {receipt ? (
-            <AICard title={statuses[receipt.status] ?? '訂單紀錄'}>
-              <Text style={{ color: aiTokens.text }}>
-                {receipt.label} · 訂單金額 NT${receipt.total}
+        </AICard>
+      ) : null}
+      {pending ? (
+        <AICard
+          title={
+            busy ? '訂單送出中' : error === ORDER_CHECKING_TEXT ? '還在確認訂單' : '訂單沒送出去'
+          }
+        >
+          <View style={{ gap: 12 }}>
+            {busy ? null : (
+              <Text accessibilityRole="alert" style={{ color: aiTokens.text, fontWeight: '700' }}>
+                {error || ORDER_NOT_SENT_TEXT}
               </Text>
-              {pickup?.state === 'assigned' ? (
-                <Text
-                  accessibilityLabel={pickup.text}
-                  style={{ color: aiTokens.text, fontSize: 20, fontWeight: '700', marginTop: 8 }}
-                >
-                  {pickup.text}
-                </Text>
-              ) : pickup?.state === 'cancelled' ? (
-                <Text style={{ color: aiTokens.danger, fontWeight: '700', marginTop: 8 }}>
-                  {pickup.text}
-                </Text>
-              ) : pickup ? (
-                <View style={{ marginTop: 8, gap: 4 }}>
-                  <Text style={{ color: aiTokens.text, fontWeight: '700' }}>{pickup.text}</Text>
-                  {pickup.detail ? (
-                    <Text selectable style={{ color: aiTokens.text }}>
-                      {pickup.detail}
-                    </Text>
-                  ) : null}
-                  <Text style={{ color: aiTokens.muted }}>狀態：{pickup.label}</Text>
-                </View>
-              ) : null}
-              <Text selectable style={{ color: aiTokens.muted, marginTop: 8 }}>
-                {formatShortOrderCode(receipt.id)}
+            )}
+            <Text style={{ color: aiTokens.text }}>
+              {pending.label} · 到店應付 NT${pending.expectedTotal}
+            </Text>
+            <Text style={{ color: aiTokens.muted }}>
+              再試一次會沿用同一個訂單編號，不會重複下單。
+            </Text>
+            {!busy && error === ORDER_CHECKING_TEXT ? (
+              navigation?.navigate ? (
+                <AIButton label="我的訂單" onPress={() => navigation.navigate?.('StudentOrders')} />
+              ) : null
+            ) : (
+              <AIButton
+                label={busy ? '送出中' : '再試一次'}
+                disabled={busy}
+                onPress={() => void submit()}
+              />
+            )}
+          </View>
+        </AICard>
+      ) : null}
+      <AICard title="找餐點">
+        <View style={{ gap: 12 }}>
+          <TextInput
+            accessibilityLabel="餐點或店名"
+            value={keyword}
+            maxLength={100}
+            onChangeText={setKeyword}
+            placeholder="搜尋餐點或店名"
+            placeholderTextColor={aiTokens.muted}
+            style={{
+              color: aiTokens.text,
+              borderColor: aiTokens.border,
+              borderWidth: 1,
+              borderRadius: 12,
+              padding: 12,
+              minHeight: 48,
+            }}
+          />
+          <AIButton
+            label={loading ? '讀取中' : '更新菜單'}
+            variant="ghost"
+            disabled={loading || busy}
+            onPress={() => void load()}
+          />
+          <Text style={{ color: aiTokens.muted }}>
+            目前僅提供已開通店家的到店付款。線上付款尚未開放。
+          </Text>
+          {loading ? <ActivityIndicator accessibilityLabel="讀取餐廳" color={aiTokens.ai} /> : null}
+          {error && !pending ? (
+            <View style={{ gap: 12 }}>
+              <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>
+                {error}
               </Text>
-              {navigation?.navigate ? (
-                <View style={{ marginTop: 12 }}>
-                  <AIButton
-                    label="看我的訂單"
-                    variant="ghost"
-                    onPress={() => navigation.navigate?.('StudentOrders')}
-                  />
-                </View>
+              {error === NETWORK_RETRY_TEXT ? (
+                <AIButton label="重新整理" variant="ghost" onPress={() => void load()} />
               ) : null}
-            </AICard>
+            </View>
           ) : null}
-          {pending ? (
+        </View>
+      </AICard>
+      {catalog ? (
+        <>
+          {visibleMenus.length === 0 ? (
             <AICard
               title={
-                busy
-                  ? '訂單送出中'
-                  : error === ORDER_CHECKING_TEXT
-                    ? '還在確認訂單'
-                    : '訂單沒送出去'
+                !keyword.trim() && catalog.venues.length === 0
+                  ? CAFETERIA_EMPTY_SCHOOL_TEXT
+                  : '目前沒有符合的餐點'
               }
             >
-              <View style={{ gap: 12 }}>
-                {busy ? null : (
-                  <Text
-                    accessibilityRole="alert"
-                    style={{ color: aiTokens.text, fontWeight: '700' }}
-                  >
-                    {error || ORDER_NOT_SENT_TEXT}
-                  </Text>
-                )}
-                <Text style={{ color: aiTokens.text }}>
-                  {pending.label} · 到店應付 NT${pending.expectedTotal}
-                </Text>
-                <Text style={{ color: aiTokens.muted }}>
-                  再試一次會沿用同一個訂單編號，不會重複下單。
-                </Text>
-                {!busy && error === ORDER_CHECKING_TEXT ? (
-                  navigation?.navigate ? (
-                    <AIButton
-                      label="我的訂單"
-                      onPress={() => navigation.navigate?.('StudentOrders')}
-                    />
-                  ) : null
-                ) : (
-                  <AIButton
-                    label={busy ? '送出中' : '再試一次'}
-                    disabled={busy}
-                    onPress={() => void submit()}
-                  />
-                )}
-              </View>
-            </AICard>
-          ) : null}
-          <AICard title="找餐點">
-            <View style={{ gap: 12 }}>
-              <TextInput
-                accessibilityLabel="餐點或店名"
-                value={keyword}
-                maxLength={100}
-                onChangeText={setKeyword}
-                placeholder="搜尋餐點或店名"
-                placeholderTextColor={aiTokens.muted}
-                style={{
-                  color: aiTokens.text,
-                  borderColor: aiTokens.border,
-                  borderWidth: 1,
-                  borderRadius: 12,
-                  padding: 12,
-                  minHeight: 48,
-                }}
-              />
-              <AIButton
-                label={loading ? '讀取中' : '更新菜單'}
-                variant="ghost"
-                disabled={loading || busy}
-                onPress={() => void load()}
-              />
               <Text style={{ color: aiTokens.muted }}>
-                目前僅提供已開通店家的到店付款。線上付款尚未開放。
+                {!keyword.trim() && catalog.venues.length === 0
+                  ? '這間學校還沒提供餐廳資料，不會沿用其他學校的店家。'
+                  : '試著換個關鍵字，或稍後更新菜單。'}
               </Text>
-              {loading ? (
-                <ActivityIndicator accessibilityLabel="讀取餐廳" color={aiTokens.ai} />
-              ) : null}
-              {error && !pending ? (
-                <View style={{ gap: 12 }}>
-                  <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>
-                    {error}
+            </AICard>
+          ) : (
+            visibleMenus.map((menu) => (
+              <AICard key={menu.id} title={menu.name} source={venueName(menu)}>
+                <View style={{ gap: 10 }}>
+                  <Text style={{ color: aiTokens.text }}>
+                    {menu.price === null ? '價格未提供' : `NT$${menu.price}`}
                   </Text>
-                  {error === NETWORK_RETRY_TEXT ? (
-                    <AIButton label="重新整理" variant="ghost" onPress={() => void load()} />
+                  {menu.description ? (
+                    <Text style={{ color: aiTokens.muted }}>{menu.description}</Text>
                   ) : null}
-                </View>
-              ) : null}
-            </View>
-          </AICard>
-          {catalog ? (
-            <>
-              {visibleMenus.length === 0 ? (
-                <AICard
-                  title={
-                    !keyword.trim() && catalog.venues.length === 0
-                      ? CAFETERIA_EMPTY_SCHOOL_TEXT
-                      : '目前沒有符合的餐點'
-                  }
-                >
-                  <Text style={{ color: aiTokens.muted }}>
-                    {!keyword.trim() && catalog.venues.length === 0
-                      ? '這間學校還沒提供餐廳資料，不會沿用其他學校的店家。'
-                      : '試著換個關鍵字，或稍後更新菜單。'}
-                  </Text>
-                </AICard>
-              ) : (
-                visibleMenus.map((menu) => (
-                  <AICard key={menu.id} title={menu.name} source={venueName(menu)}>
-                    <View style={{ gap: 10 }}>
-                      <Text style={{ color: aiTokens.text }}>
-                        {menu.price === null ? '價格未提供' : `NT$${menu.price}`}
-                      </Text>
-                      {menu.description ? (
-                        <Text style={{ color: aiTokens.muted }}>{menu.description}</Text>
-                      ) : null}
-                      {menu.orderable && scope.userId ? (
-                        <AIButton
-                          label={`選擇${menu.name}`}
-                          disabled={busy || Boolean(pending)}
-                          onPress={() => {
-                            if (isCurrent()) setSelected(menu);
-                          }}
-                        />
-                      ) : (
-                        <Text style={{ color: aiTokens.muted }}>
-                          此餐點目前未開放線上訂購，請向店家確認。
-                        </Text>
-                      )}
-                    </View>
-                  </AICard>
-                ))
-              )}
-              {catalog.venues.map((venue) => (
-                <AICard key={venue.id} title={venue.name}>
-                  {cafeteriaReviewBadge(venue.reviewStatus) ? (
+                  {menu.orderable && scope.userId ? (
+                    <AIButton
+                      label={`選擇${menu.name}`}
+                      disabled={busy || Boolean(pending)}
+                      onPress={() => {
+                        if (isCurrent()) setSelected(menu);
+                      }}
+                    />
+                  ) : (
                     <Text style={{ color: aiTokens.muted }}>
-                      {cafeteriaReviewBadge(venue.reviewStatus)}
+                      此餐點目前未開放線上訂購，請向店家確認。
                     </Text>
-                  ) : null}
-                  <Text style={{ color: aiTokens.muted }}>
-                    {venue.location || '位置資訊未提供'}
-                  </Text>
-                </AICard>
-              ))}
-            </>
-          ) : null}
-          <Modal
-            visible={Boolean(selected)}
-            transparent
-            animationType="fade"
-            onRequestClose={() => {
-              if (!busy) setSelected(null);
+                  )}
+                </View>
+              </AICard>
+            ))
+          )}
+          {catalog.venues.map((venue) => (
+            <AICard key={venue.id} title={venue.name}>
+              {cafeteriaReviewBadge(venue.reviewStatus) ? (
+                <Text style={{ color: aiTokens.muted }}>
+                  {cafeteriaReviewBadge(venue.reviewStatus)}
+                </Text>
+              ) : null}
+              <Text style={{ color: aiTokens.muted }}>{venue.location || '位置資訊未提供'}</Text>
+            </AICard>
+          ))}
+        </>
+      ) : null}
+      <Modal
+        visible={Boolean(selected)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!busy) setSelected(null);
+        }}
+      >
+        <View
+          style={{
+            flex: 1,
+            justifyContent: 'center',
+            backgroundColor: 'rgba(0,0,0,0.35)',
+            padding: 20,
+          }}
+        >
+          <View
+            accessibilityViewIsModal
+            style={{
+              backgroundColor: aiTokens.surface,
+              borderRadius: 16,
+              padding: 24,
+              gap: 16,
             }}
           >
-            <View
-              style={{
-                flex: 1,
-                justifyContent: 'center',
-                backgroundColor: 'rgba(0,0,0,0.35)',
-                padding: 20,
-              }}
-            >
-              <View
-                accessibilityViewIsModal
-                style={{
-                  backgroundColor: aiTokens.surface,
-                  borderRadius: 16,
-                  padding: 24,
-                  gap: 16,
-                }}
-              >
-                <Text style={{ color: aiTokens.text, fontSize: 20, fontWeight: '600' }}>
-                  確認餐點
-                </Text>
-                <Text style={{ color: aiTokens.text }}>{selected?.name} · 1 份</Text>
-                <Text style={{ color: aiTokens.muted }}>{selected ? venueName(selected) : ''}</Text>
-                <Text style={{ color: aiTokens.text }}>
-                  餐點 NT${quote?.subtotal} + 稅額 NT${quote?.tax}
-                </Text>
-                <Text style={{ color: aiTokens.text, fontWeight: '600' }}>
-                  到店付款合計 NT${quote?.total}
-                </Text>
-                {error ? (
-                  <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>
-                    {error}
-                  </Text>
-                ) : null}
-                <AIButton
-                  label={busy ? '送出中' : '送出訂單，到店付款'}
-                  disabled={busy}
-                  onPress={() => void submit()}
-                />
-                <AIButton
-                  label="返回菜單"
-                  variant="ghost"
-                  disabled={busy}
-                  onPress={() => setSelected(null)}
-                />
-              </View>
-            </View>
-          </Modal>
+            <Text style={{ color: aiTokens.text, fontSize: 20, fontWeight: '600' }}>確認餐點</Text>
+            <Text style={{ color: aiTokens.text }}>{selected?.name} · 1 份</Text>
+            <Text style={{ color: aiTokens.muted }}>{selected ? venueName(selected) : ''}</Text>
+            <Text style={{ color: aiTokens.text }}>
+              餐點 NT${quote?.subtotal} + 稅額 NT${quote?.tax}
+            </Text>
+            <Text style={{ color: aiTokens.text, fontWeight: '600' }}>
+              到店付款合計 NT${quote?.total}
+            </Text>
+            {error ? (
+              <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>
+                {error}
+              </Text>
+            ) : null}
+            <AIButton
+              label={busy ? '送出中' : '送出訂單，到店付款'}
+              disabled={busy}
+              onPress={() => void submit()}
+            />
+            <AIButton
+              label="返回菜單"
+              variant="ghost"
+              disabled={busy}
+              onPress={() => setSelected(null)}
+            />
+          </View>
+        </View>
+      </Modal>
     </AIDetailScreen>
   );
 }

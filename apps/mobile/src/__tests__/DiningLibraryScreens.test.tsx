@@ -459,16 +459,19 @@ test('斷線後連查都查不出結果：寫「還在確認訂單有沒有送�
   expect(navigate).toHaveBeenCalledWith('StudentOrders');
 });
 
-test('restaurant keeps the school catalog and links directly to the platform food tab', async () => {
+test('restaurant keeps the school catalog and does not invite platform ordering while it is off', async () => {
   const navigate = jest.fn();
   const view = render(<CafeteriaAiFirstScreen navigation={{ navigate }} />);
   await act(async () => {});
-  fireEvent.press(view.getByText('前往平台點餐'));
-  expect(navigate).toHaveBeenCalledWith('我的', {
-    screen: 'NuniWorkspace',
-    params: { tab: 'food' },
-  });
+  expect(view.getByText('目前還不能線上點餐')).toBeTruthy();
+  expect(view.queryByText('前往平台點餐')).toBeNull();
+  expect(
+    view.queryByText(
+      '使用 Google 帳號選餐、查看訂單與出示取餐憑證。學校原有餐廳服務仍保留在下方。',
+    ),
+  ).toBeNull();
   expect(view.getByText('選擇今日餐點')).toBeTruthy();
+  expect(navigate).not.toHaveBeenCalled();
 });
 
 test('switching universities opens that university official library instead of Providence OPAC', async () => {
@@ -522,7 +525,6 @@ test('changing the university replaces both the catalog destination and previous
   expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
 });
 
-
 test('Soochow library search uses its verified Primo view instead of a different campus', async () => {
   mockSchool = { id: 'scu' };
   const view = render(<LibraryAiFirstScreen />);
@@ -544,7 +546,6 @@ test('Chang Gung library uses its official iGrid catalog rather than Providence'
   expect(Clipboard.setStringAsync).toHaveBeenCalledWith('護理');
   expect(view.queryByText('蓋夏圖書館')).toBeNull();
 });
-
 
 test('Chung Yuan library account and catalog stay on its official domain', async () => {
   mockSchool = { id: 'cycu' };
