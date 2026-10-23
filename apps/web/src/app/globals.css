@@ -12,6 +12,8 @@ textarea::placeholder {
   color-scheme: light;
   --on-brand: #ffffff;
   --page-width: 1264px;
+  --mobile-nav-height: 72px;
+  --mobile-nav-offset: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px));
   --page-padding-inline: 48px;
   --page-padding-block: 46px;
   --page-title-size: clamp(25px, 3vw, 38px);
@@ -136,21 +138,21 @@ textarea::placeholder {
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --on-brand: #17291d;
+    --on-brand: #0b140e;
     color-scheme: dark;
-    --bg: #171f1b;
-    --bg-soft: #1d2721;
-    --surface: #202b24;
-    --surface-strong: #29382e;
-    --surface-raised: #324638;
+    --bg: #000000;
+    --bg-soft: #080808;
+    --surface: #111111;
+    --surface-strong: #191919;
+    --surface-raised: #232323;
     --surface-tint: rgba(255, 255, 255, 0.06);
-    --panel: #202b24;
-    --panel2: #37463b;
-    --text: #e5eee3;
-    --muted: #a5b5a6;
-    --muted-light: #a1b09e;
-    --border: #37463b;
-    --border-strong: #53654f;
+    --panel: #141414;
+    --panel2: #1e1e1e;
+    --text: #f2f3f1;
+    --muted: #a5aaa7;
+    --muted-light: #929994;
+    --border: #2b2b2b;
+    --border-strong: #464646;
     --brand: #a9c6a3;
     --brand2: #a9c6a3;
     --accent-soft: rgba(169, 198, 163, 0.16);
@@ -189,21 +191,21 @@ textarea::placeholder {
 }
 
 :root[data-theme='dark'] {
-  --on-brand: #17291d;
+  --on-brand: #0b140e;
   color-scheme: dark;
-  --bg: #171f1b;
-  --bg-soft: #1d2721;
-  --surface: #202b24;
-  --surface-strong: #29382e;
-  --surface-raised: #324638;
+  --bg: #000000;
+  --bg-soft: #080808;
+  --surface: #111111;
+  --surface-strong: #191919;
+  --surface-raised: #232323;
   --surface-tint: rgba(255, 255, 255, 0.06);
-  --panel: #202b24;
-  --panel2: #37463b;
-  --text: #e5eee3;
-  --muted: #a5b5a6;
-  --muted-light: #a1b09e;
-  --border: #37463b;
-  --border-strong: #53654f;
+  --panel: #141414;
+  --panel2: #1e1e1e;
+  --text: #f2f3f1;
+  --muted: #a5aaa7;
+  --muted-light: #929994;
+  --border: #2b2b2b;
+  --border-strong: #464646;
   --brand: #a9c6a3;
   --brand2: #a9c6a3;
   --accent-soft: rgba(169, 198, 163, 0.16);
@@ -256,6 +258,18 @@ body {
 
 html {
   scroll-behavior: smooth;
+  scroll-padding-top: 24px;
+  background: var(--bg);
+}
+
+@media (max-width: 760px) {
+  body:has([data-campus-navigation='true']) {
+    padding-bottom: var(--mobile-nav-offset);
+  }
+  html:has([data-campus-navigation='true']) {
+    scroll-padding-top: 80px;
+    scroll-padding-bottom: calc(var(--mobile-nav-offset) + 16px);
+  }
 }
 
 body {

@@ -144,6 +144,28 @@ export default function StudentTodayScreen() {
             </Text>
           </Pressable>
         </View>
+        <View style={s.tools}>
+          {(
+            [
+              ['Map', '校園地圖'],
+              ['PersonalTimetable', '我的課表'],
+              ['AIAgentConsole', '校園助理'],
+            ] as const
+          ).map(([route, label]) => (
+            <Pressable
+              key={route}
+              accessibilityRole="button"
+              onPress={() =>
+                route === 'PersonalTimetable'
+                  ? rootNavigateNested('學習', 'PersonalTimetable')
+                  : safeNavigate(navigation, route)
+              }
+              style={({ pressed }) => [s.quickTool, pressed && s.pressed]}
+            >
+              <Text style={s.quickToolText}>{label}</Text>
+            </Pressable>
+          ))}
+        </View>
         {!!error && (
           <View accessibilityRole="alert" style={s.error}>
             <Text style={s.errorText}>{error}</Text>
@@ -245,31 +267,6 @@ export default function StudentTodayScreen() {
                 )}
               </>
             )}
-            <View style={s.tools}>
-              {(
-                [
-                  ['Map', '校園地圖'],
-                  ['PersonalTimetable', '我的課表'],
-                  ['AIAgentConsole', '校園助理'],
-                ] as const
-              ).map(([route, label]) => (
-                <Pressable
-                  key={route}
-                  accessibilityRole="button"
-                  onPress={() =>
-                    route === 'PersonalTimetable'
-                      ? rootNavigateNested('學習', 'PersonalTimetable')
-                      : safeNavigate(navigation, route)
-                  }
-                  style={({ pressed }) => [s.tool, pressed && s.pressed]}
-                >
-                  <Text style={s.toolText}>{label}</Text>
-                  <Text accessibilityElementsHidden importantForAccessibility="no" style={s.arrow}>
-                    →
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
           </>
         )}
       </ScrollView>
@@ -292,7 +289,7 @@ const createStyles = () =>
       justifyContent: 'space-between',
       alignItems: 'center',
       gap: 10,
-      marginBottom: 26,
+      marginBottom: 18,
     },
     brand: {
       fontSize: 11,
@@ -308,8 +305,8 @@ const createStyles = () =>
     },
     heading: {
       color: theme.colors.text,
-      fontSize: 34,
-      lineHeight: 44,
+      fontSize: 32,
+      lineHeight: 42,
       fontWeight: '600',
       letterSpacing: -0.6,
     },
@@ -318,25 +315,27 @@ const createStyles = () =>
       fontSize: 14,
       lineHeight: 23,
       marginTop: 8,
-      marginBottom: 10,
+      marginBottom: 6,
     },
     entry: { marginTop: 10, marginBottom: 10 },
     entryCopy: { flex: 1, gap: 4, minWidth: 0 },
     workspaceEntry: {
-      backgroundColor: theme.colors.accentSoft,
+      backgroundColor: theme.colors.focusSurface,
       paddingHorizontal: 18,
       borderWidth: 1,
       borderColor: theme.colors.border,
+      borderLeftWidth: 3,
+      borderLeftColor: theme.colors.accent,
       borderRadius: 10,
       marginBottom: 6,
     },
-    pressed: { opacity: 0.68 },
+    pressed: { backgroundColor: theme.colors.surfaceInteractive },
     label: { color: theme.colors.textSecondary, fontSize: 11, letterSpacing: 1 },
     sectionTitle: {
       color: theme.colors.text,
       fontSize: 18,
       fontWeight: '600',
-      marginTop: 32,
+      marginTop: 26,
       marginBottom: 14,
       lineHeight: 26,
     },
@@ -375,7 +374,27 @@ const createStyles = () =>
       marginTop: 8,
     },
     empty: { color: theme.colors.muted, fontSize: 13, lineHeight: 23, paddingVertical: 16 },
-    tools: { borderTopWidth: 1, borderTopColor: theme.colors.border, marginTop: 30 },
+    tools: { flexDirection: 'row', gap: 8, marginTop: 2, marginBottom: 16 },
+    quickTool: {
+      flex: 1,
+      minWidth: 0,
+      minHeight: 48,
+      paddingHorizontal: 6,
+      paddingVertical: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: 8,
+      backgroundColor: theme.colors.surface,
+    },
+    quickToolText: {
+      color: theme.colors.text,
+      fontSize: 13,
+      lineHeight: 20,
+      fontWeight: '600',
+      textAlign: 'center',
+    },
     tool: {
       paddingVertical: 18,
       flexDirection: 'row',
