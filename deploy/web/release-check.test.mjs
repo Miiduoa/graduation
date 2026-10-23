@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { validateTarget, validateFirebase, summarizeMachines, requireStable, inspectPublic, getJson, EXPECTED_MACHINES } from './release-check.mjs';
+import { validateTarget, validateFirebase, summarizeMachines, requireStable, inspectPublic, getJson, EXPECTED_MACHINES, rollbackImage, rollbackDeployArgs, requireRolledBack } from './release-check.mjs';
 // Reduced from the public /bus SSR response: campus selection resolves after hydration.
 const busLoadingHtml = readFileSync(new URL('./fixtures/bus-loading.html', import.meta.url), 'utf8');
 const sha = 'a'.repeat(40);
@@ -108,6 +108,24 @@ test('the previous bus shell without the spec marker cannot pass as a new page',
     ? Promise.resolve(new Response('<html><div data-campus-bus-shell="true">公車與交通往沙鹿</div></html>', {headers:{'Content-Type':'text/html','Permissions-Policy':'geolocation=(self)'}}))
     : healthy(url, init);
   assert.equal((await inspectPublic(sha, fetcher)).webDeployed, false);
+});
+
+test('rollback restores the recorded previous image and refuses to redeploy the failed one', () => {
+  const before = summarizeMachines(machines());
+  const previous = before[0].image;
+  const failed = `registry.fly.io/nuni-web@sha256:${'c'.repeat(64)}`;
+  assert.equal(rollbackImage(before, failed), previous);
+  assert.deepEqual(rollbackDeployArgs(previous), ['deploy', '--app', 'nuni-web', '--config', 'deploy/web/fly.nuni.toml',
+    '--image', previous, '--strategy', 'rolling', '--update-only', '--ha=false', '--yes']);
+  assert.ok(!JSON.stringify(rollbackDeployArgs(previous)).includes('SECRET_VALUE'));
+  assert.ok(!JSON.stringify(rollbackDeployArgs(previous)).includes('never-copy-this'));
+  assert.throws(() => rollbackImage(before, previous));
+  assert.throws(() => rollbackImage([], failed));
+  assert.throws(() => rollbackImage([{ ...before[0], image: 'registry.fly.io/nuni-web:latest' }, before[1]], failed));
+  requireRolledBack(before, previous);
+  const stillNew = machines();
+  for (const row of stillNew) row.config.image = failed;
+  assert.throws(() => requireRolledBack(summarizeMachines(stillNew), previous));
 });
 
 test('an explicit links profile is recorded without claiming live transit or browser verification',async()=>{
