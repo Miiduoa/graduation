@@ -166,6 +166,31 @@
 .confirm button {
   margin-right: 10px;
 }
+.ownershipPanel {
+  width: 100%;
+  margin-top: 8px;
+  padding: 16px 0 0;
+  border-top: 1px solid var(--border);
+}
+.ownershipPanel h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.ownershipPanel > p {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.ownershipList {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
 .page input:focus-visible,
 .page select:focus-visible,
 .page button:focus-visible {
