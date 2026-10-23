@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { cleanMeta, cleanCourse, type PersonalImportRecord } from '@campus/shared';
-import { TodayTimetable } from './TodayTimetable';
+import { NextClassCard, TodayTimetable } from './TodayTimetable';
 import { loadPersonalTimetable, type StoredTimetable } from '@/lib/timetable/store';
 
 const state = vi.hoisted(() => ({
@@ -148,6 +148,29 @@ it('takes the selected term into the full timetable instead of whichever term wa
   fireEvent.change(screen.getByRole('combobox', { name: '查看學期' }), { target: { value: '114|1' } });
   expect(screen.getByText('114的課程')).toBeTruthy();
   expect(screen.getByRole('link', { name: '完整課表' }).getAttribute('href')).toBe('/timetable?campus=ncku&term=114%7C1');
+});
+
+it('shows the next class and room only after the timetable read succeeds', async () => {
+  vi.mocked(loadPersonalTimetable).mockResolvedValue(saved('資料庫'));
+  render(<NextClassCard now={now} />);
+  const card = await screen.findByTestId('home-next-class');
+  expect(card.textContent).toContain('資料庫');
+  expect(card.textContent).toContain('資工101');
+  expect(screen.queryByText('教室未填')).toBeNull();
+});
+
+it('hides the next-class row when there is no upcoming class to show', async () => {
+  render(<NextClassCard now={now} />);
+  await waitFor(() => expect(loadPersonalTimetable).toHaveBeenCalled());
+  expect(screen.queryByTestId('home-next-class')).toBeNull();
+});
+
+it('does not invent a next class while personal data is blocked', async () => {
+  vi.mocked(loadPersonalTimetable).mockResolvedValue(saved('資料庫'));
+  state.pendingLogout = true;
+  render(<NextClassCard now={now} />);
+  expect(screen.queryByTestId('home-next-class')).toBeNull();
+  expect(loadPersonalTimetable).not.toHaveBeenCalled();
 });
 
 it('does not present an incomplete combined read as a complete day', async () => {

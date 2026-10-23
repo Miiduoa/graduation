@@ -110,6 +110,7 @@
   max-width: var(--page-width);
   margin: auto;
   padding: var(--page-padding-block) var(--page-padding-inline) 28px;
+  min-width: 0;
 }
 .dateLine {
   margin-bottom: 12px;
@@ -176,12 +177,57 @@
   border-radius: 50%;
   background: #a98342;
 }
-.busEntry {
+.todayFacts {
+  display: grid;
+  gap: 8px;
   margin: 0 0 16px;
+  min-width: 0;
+}
+.todayFacts:empty,
+.todayFacts:not(:has(*)) {
+  display: none;
+  margin: 0;
+}
+.nextClass,
+.busEntry {
+  margin: 0;
   padding: 0;
   border: 0;
   border-radius: 12px;
   background: #fffdf8;
+  min-width: 0;
+}
+.nextClass {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 56px;
+  padding: 8px 16px;
+}
+.nextClass strong,
+.busEntryLink strong {
+  flex-shrink: 0;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 22px;
+  color: #1f2a24;
+}
+.nextClassBody {
+  min-width: 0;
+  text-align: right;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 20px;
+  color: #5f6b64;
+  overflow-wrap: anywhere;
+}
+.nextClassBody small {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #5f6b64;
 }
 .busEntryLink {
   display: flex;
@@ -197,7 +243,6 @@
   font-weight: 600;
   line-height: 22px;
   color: #1f2a24;
-  white-space: nowrap;
 }
 .busEntryMeta {
   min-width: 0;
@@ -205,9 +250,7 @@
   font-weight: 500;
   line-height: 20px;
   color: #5f6b64;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
   text-align: right;
 }
 .busEntryAll {
@@ -230,6 +273,11 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) 290px;
   gap: 40px;
+}
+.columns > div,
+.list li,
+.task {
+  min-width: 0;
 }
 .focus {
   background: var(--accent-soft);
@@ -914,6 +962,18 @@
   overflow-wrap: anywhere;
 }
 @media (max-width: 480px) {
+  .todayFacts,
+  .nextClass,
+  .busEntryLink,
+  .task {
+    max-width: 100%;
+  }
+  .busEntryLink {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 56px;
+    padding: 10px 16px;
+  }
   .task {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
