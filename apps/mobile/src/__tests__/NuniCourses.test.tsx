@@ -740,6 +740,71 @@ it('offers owner invites and records real teacher feedback', async () => {
   fireEvent.press(view.getByRole('button', { name: '儲存老師回饋' }));
   await view.findByText('已回饋：請補上受訪者的具體例子。');
 });
+it('keeps scoped teacher feedback drafts when switching receipt filters', async () => {
+  course = { ...course, memberRole: 'owner-teacher' };
+  const pending = receipt('待回饋內容');
+  const done = {
+    ...receipt('已回饋內容'),
+    platformAccountId: 'pa_55555555-5555-4555-8555-555555555555',
+    displayName: '已回同學',
+    teacherFeedback: '先前已回',
+    reviewedAt: date,
+  };
+  mockRequest.mockImplementation((path, context, input) =>
+    path.endsWith('/submissions')
+      ? { submissions: [pending, done] }
+      : response(path, context, input),
+  );
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '查看收件：校園訪談' }));
+  await view.findByText('測試學生');
+  fireEvent.changeText(view.getByLabelText('給 測試學生 的回饋'), '篩選後仍應留下的草稿');
+  expect(view.getByRole('button', { name: '尚未回饋 1' }).props.accessibilityState.selected).toBe(true);
+  fireEvent.press(view.getByRole('button', { name: '已回饋 1' }));
+  expect(view.getByRole('button', { name: '已回饋 1' }).props.accessibilityState.selected).toBe(true);
+  expect(view.getByRole('button', { name: '尚未回饋 1' }).props.accessibilityState.selected).toBe(false);
+  fireEvent.press(view.getByRole('button', { name: '尚未回饋 1' }));
+  expect(view.getByLabelText('給 測試學生 的回饋').props.value).toBe('篩選後仍應留下的草稿');
+});
+it('places resubmitted work with older feedback into the pending-review filter', async () => {
+  course = { ...course, memberRole: 'owner-teacher' };
+  const revised = {
+    ...receipt('學生新稿'),
+    teacherFeedback: '針對舊稿',
+    reviewedAt: '2026-10-08T03:00:00.000Z',
+    submittedAt: '2026-10-09T04:00:00.000Z',
+  };
+  mockRequest.mockImplementation((path, context, input) =>
+    path.endsWith('/submissions') ? { submissions: [revised] } : response(path, context, input),
+  );
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '查看收件：校園訪談' }));
+  await view.findByText('學生新稿');
+  expect(view.getByText('已回饋：針對舊稿')).toBeTruthy();
+  expect(
+    view.getByText('學生在這則回饋之後更新了繳交內容，請確認回饋是否仍適用。'),
+  ).toBeTruthy();
+  expect(view.getByRole('button', { name: '尚未回饋 1' })).toBeTruthy();
+});
+it('keeps mixed-offset current feedback reviewed without showing a stale warning', async () => {
+  course = { ...course, memberRole: 'owner-teacher' };
+  const current = {
+    ...receipt('學生新稿'),
+    teacherFeedback: '已看過新稿',
+    submittedAt: '2026-10-11T10:00:00',
+    reviewedAt: '2026-10-11T03:00:00Z',
+  };
+  mockRequest.mockImplementation((path, context, input) =>
+    path.endsWith('/submissions') ? { submissions: [current] } : response(path, context, input),
+  );
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '查看收件：校園訪談' }));
+  await view.findByText('學生新稿');
+  expect(view.getByRole('button', { name: '已回饋 1' })).toBeTruthy();
+  expect(
+    view.queryByText('學生在這則回饋之後更新了繳交內容，請確認回饋是否仍適用。'),
+  ).toBeNull();
+});
 it('permits co-teacher teaching work without granting owner invitations', async () => {
   course = { ...course, memberRole: 'co-teacher' };
   const view = await openCourse();

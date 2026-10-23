@@ -9,6 +9,7 @@ import { useAuth } from '@/components/AuthGuard';
 import { AccountIdentity } from '@/components/AccountIdentity';
 import { NextClassCard, TodayTimetable } from '@/components/timetable/TodayTimetable';
 import { browserRequest, useNuniSession } from '@/features/nuni/Session';
+import { FeedbackList } from '@/components/home/FeedbackList';
 import { loadHomeData, type HomeCourse, type HomeData, type HomeTask } from '@/lib/homeOverview';
 import { loadNuniHomeData } from '@/lib/nuniHomeOverview';
 import { publicCampusServices } from '@/lib/publicCampusServices';
@@ -166,6 +167,17 @@ export default function HomePage() {
     };
   }, [refresh]);
   useEffect(() => {
+    const onShow = () => {
+      if (document.visibilityState === 'visible') void refresh();
+    };
+    window.addEventListener('pageshow', onShow);
+    document.addEventListener('visibilitychange', onShow);
+    return () => {
+      window.removeEventListener('pageshow', onShow);
+      document.removeEventListener('visibilitychange', onShow);
+    };
+  }, [refresh]);
+  useEffect(() => {
     const tick = () => setNow(new Date());
     tick();
     const timer = setInterval(tick, 60_000);
@@ -178,6 +190,7 @@ export default function HomePage() {
   const busy = sessionLoading || (!!owner && loading);
   const todayTasks = data ? selectTodayCourseWork(data.tasks, now ?? new Date()) : [];
   const laterTasks = data ? selectLaterCourseWork(data.tasks, now ?? new Date()) : [];
+  const recentFeedback = data?.recentFeedback ?? [];
   const teacherOnly = !!teaching.length && !studying.length;
   const sensePhase: SensePhase = blocked
     ? 'hidden'
@@ -388,6 +401,23 @@ export default function HomePage() {
                     </div>
                     <p className={styles.sectionNote}>{TODAY_WORK_NOTE}</p>
                     <WorkList tasks={laterTasks} now={now} testId="later-work-list" />
+                  </section>
+                )}
+                {!!recentFeedback.length && (
+                  <section
+                    className={styles.section}
+                    aria-labelledby="recent-feedback-title"
+                    data-testid="recent-feedback"
+                  >
+                    <div className={styles.sectionHeading}>
+                      <h2 id="recent-feedback-title">
+                        最近老師回饋 <span>{recentFeedback.length}</span>
+                      </h2>
+                    </div>
+                    <p className={styles.sectionNote}>
+                      只顯示已公布的評分或回饋；點進去可看完整內容。
+                    </p>
+                    <FeedbackList items={recentFeedback} />
                   </section>
                 )}
                 {courseSections.map(

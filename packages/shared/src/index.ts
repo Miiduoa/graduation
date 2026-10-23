@@ -77,6 +77,7 @@ export * from './lms/notificationPlanner';
 export * from './lms/mistakeRepertoire';
 export * from './lms/socraticCoach';
 export * from './lms/feedbackDrafter';
+export * from './lmsReviewQueue';
 export * from './companion/spriteEngine';
 export * from './companion/gardenEngine';
 export * from './companion/achievements';

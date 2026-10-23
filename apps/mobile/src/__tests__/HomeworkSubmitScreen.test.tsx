@@ -139,7 +139,8 @@ test('shows existing submitted text instead of a second write', async () => {
     <HomeworkSubmitScreen route={{ params: { courseId: 'course', hwId: 'work' } }} />,
   );
   expect(await view.findByText('先前繳交的內容')).toBeTruthy();
-  expect(view.getByText('你已繳交此作業')).toBeTruthy();
+  expect(view.getByText('已繳交 · 等待老師評分')).toBeTruthy();
+  expect(view.getByText('作業已收到；老師公布評分後，會顯示在這裡。')).toBeTruthy();
   expect(view.queryByLabelText('繳交作業')).toBeNull();
   expect(mockSource.submitAssignment).not.toHaveBeenCalled();
 });
@@ -174,6 +175,7 @@ test('shows published gradeScore and gradeFeedback on the assignment page', asyn
   expect(await view.findByLabelText('作業評分')).toBeTruthy();
   expect(view.getByText('教師已評分：86 / 100 分')).toBeTruthy();
   expect(view.getByText('結構清楚')).toBeTruthy();
+  expect(view.getByText('已繳交 · 教師已發布評分')).toBeTruthy();
   expect(view.queryByText('課內成績')).toBeNull();
 });
 
@@ -196,6 +198,7 @@ test('hides unpublished teacher drafts and old grade fields', async () => {
   );
   expect(await view.findByText('先前繳交的內容')).toBeTruthy();
   expect(view.queryByLabelText('作業評分')).toBeNull();
+  expect(view.getByText('已繳交 · 等待老師評分')).toBeTruthy();
   expect(view.queryByText('尚未發布')).toBeNull();
   expect(view.queryByText('舊欄位不該出現')).toBeNull();
 });
