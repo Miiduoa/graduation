@@ -16,6 +16,8 @@ import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { isTeacherRole, useSchoolRole } from '@/lib/useSchoolRole';
 import { TodaySensePanel } from '@/components/TodaySensePanel';
 import { HomeCampusBusCard } from '@/components/HomeCampusBusCard';
+import { CampusIcon, type CampusIconName } from '@/components/CampusIcon';
+import { CampusWeek } from '@/components/CampusWeek';
 import { hasCampusNext } from '@/lib/transit';
 import {
   LATER_WORK_TITLE,
@@ -39,21 +41,23 @@ import styles from './home.module.css';
 const teachingRoles = ['owner', 'instructor', 'moderator', 'owner-teacher', 'co-teacher'];
 const courseHref = (course: HomeCourse) =>
   course.href ?? `/course/${encodeURIComponent(course.id)}`;
+const serviceIcons: Record<string, CampusIconName> = {
+  '/map': 'map',
+  '/bus': 'bus',
+  '/announcements': 'announcements',
+  '/cafeteria': 'cafeteria',
+  '/library': 'library',
+};
 
-function WorkList({
-  tasks,
-  now,
-  testId,
-}: {
-  tasks: HomeTask[];
-  now: Date | null;
-  testId: string;
-}) {
+function WorkList({ tasks, now, testId }: { tasks: HomeTask[]; now: Date | null; testId: string }) {
   return (
     <ul className={styles.list} data-testid={testId}>
       {tasks.map((task) => (
         <li key={`${task.courseId}-${task.id}`}>
           <Link href={courseTaskHref(task)} className={styles.task}>
+            <span className={styles.taskMarker} aria-hidden="true">
+              <CampusIcon name={task.kind === 'quiz' ? 'course' : 'calendar'} size={20} />
+            </span>
             <span className={styles.taskContent}>
               <strong>{task.title}</strong>
               <span>
@@ -221,16 +225,22 @@ export default function HomePage() {
       </a>
       <AppHeader />
       <main id="today-content" className={styles.main} tabIndex={-1}>
-        <div className={styles.dateLine}>
-          <h1>
-            {now?.toLocaleDateString('zh-TW', {
-              timeZone: 'Asia/Taipei',
-              month: 'long',
-              day: 'numeric',
-              weekday: 'long',
-            }) ?? '今日'}
-          </h1>
-        </div>
+        <header className={styles.homeHeading}>
+          <div>
+            <p className={styles.homeDate}>
+              <span className={styles.dayDot} aria-hidden="true" />
+              {now?.toLocaleDateString('zh-TW', {
+                timeZone: 'Asia/Taipei',
+                month: 'long',
+                day: 'numeric',
+                weekday: 'long',
+              }) ?? '今日'}
+            </p>
+            <h1>今天的校園日常</h1>
+            <p className={styles.homeIntro}>課表、待辦，還有校園裡的大小事。</p>
+          </div>
+          <CampusWeek now={now} />
+        </header>
         {isTeacherRole(role) && (
           <p className={styles.notice}>
             <Link href="/teacher">老師工作台 →</Link> 看學生送來的課程申訴。
@@ -243,7 +253,7 @@ export default function HomePage() {
           ) : null}
         </div>
         <div className={styles.columns}>
-          <div>
+          <div className={styles.dayContent}>
             {blocked ? (
               <section className={styles.focus} aria-labelledby="session-title">
                 <h2 id="session-title">
@@ -264,6 +274,11 @@ export default function HomePage() {
             ) : busy ? (
               <section className={styles.focus} aria-busy="true" data-testid="today-work">
                 <p role="status">正在讀取課程與待辦…</p>
+                <div className={styles.loadingLines} aria-hidden="true">
+                  <span />
+                  <span />
+                  <span />
+                </div>
               </section>
             ) : error ? (
               <section className={styles.focus}>
@@ -293,7 +308,15 @@ export default function HomePage() {
                 </div>
               </section>
             ) : (
-              <section className={styles.section} aria-labelledby="today-work-title" data-testid="today-work">
+              <section
+                className={styles.workPanel}
+                aria-labelledby="today-work-title"
+                data-testid="today-work"
+              >
+                <div className={styles.panelLabel}>
+                  <CampusIcon name="calendar" size={17} />
+                  <span>課程待辦</span>
+                </div>
                 <div className={styles.sectionHeading}>
                   <h2 id="today-work-title">
                     {TODAY_WORK_TITLE}
@@ -310,15 +333,23 @@ export default function HomePage() {
                     </button>
                   ) : null}
                 </div>
-                <p className={styles.sectionNote}>{signedIn ? TODAY_WORK_NOTE : TODAY_WORK_UNSIGNED}</p>
+                <p className={styles.sectionNote}>
+                  {signedIn ? TODAY_WORK_NOTE : TODAY_WORK_UNSIGNED}
+                </p>
                 {!signedIn ? (
-                  <div className={styles.focusActions}>
-                    <Link className={styles.primary} href="/classroom/login?returnUrl=%2F">
-                      用 Google 帳號登入 <span aria-hidden>→</span>
-                    </Link>
-                    <Link className={styles.secondary} href="#public-services">
-                      先瀏覽校園資訊
-                    </Link>
+                  <div className={styles.guestWelcome}>
+                    <div className={styles.focusActions}>
+                      <Link className={styles.primary} href="/classroom/login?returnUrl=%2F">
+                        用 Google 帳號登入 <CampusIcon name="arrow" size={18} />
+                      </Link>
+                      <Link className={styles.secondary} href="#public-services">
+                        先瀏覽校園資訊
+                      </Link>
+                    </div>
+                    <div className={styles.guestNote}>
+                      <span>教材 · 作業 · 測驗</span>
+                      加入課程，接續每一天的學習。
+                    </div>
                   </div>
                 ) : todayTasks.length ? (
                   <WorkList tasks={todayTasks} now={now} testId="today-work-list" />
@@ -437,15 +468,23 @@ export default function HomePage() {
               className={styles.services}
               aria-labelledby="daily-links-title"
             >
-              <h2 id="daily-links-title">校園生活</h2>
+              <div className={styles.servicesHeading}>
+                <h2 id="daily-links-title">校園生活</h2>
+                <Link href="/life" aria-label="查看所有校園生活服務">
+                  所有服務 <span aria-hidden="true">↗</span>
+                </Link>
+              </div>
               <p className={styles.sectionNote}>這些入口不需登入；個人校務資料需另行驗證。</p>
               {publicCampusServices.map(({ href, title, detail }) => (
                 <Link key={href} href={href}>
+                  <span className={styles.serviceIcon}>
+                    <CampusIcon name={serviceIcons[href] ?? 'support'} size={21} />
+                  </span>
                   <span>
                     <strong>{title}</strong>
                     <small>{detail}</small>
                   </span>
-                  <span aria-hidden>→</span>
+                  <CampusIcon name="arrow" size={17} className={styles.serviceArrow} />
                 </Link>
               ))}
             </section>
@@ -457,8 +496,13 @@ export default function HomePage() {
               />
             ) : null}
             <section className={styles.schoolAccess}>
+              <span className={styles.recordIcon}>
+                <CampusIcon name="import" size={22} />
+              </span>
               <h2>課表與成績紀錄</h2>
-              <p>可匯入課表或成績，核對後存在這台瀏覽器。學校資料尚未自動同步，正式紀錄請到校方系統確認。</p>
+              <p>
+                可匯入課表或成績，核對後存在這台瀏覽器。學校資料尚未自動同步，正式紀錄請到校方系統確認。
+              </p>
               <Link href="/import">匯入與備份個人資料 →</Link>
             </section>
             <Link className={styles.supportLink} href="/ai-assistant">

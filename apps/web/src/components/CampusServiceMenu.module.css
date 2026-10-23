@@ -1,0 +1,237 @@
+.menu {
+  position: relative;
+  min-width: 0;
+}
+
+.menu summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 20px;
+  white-space: nowrap;
+  list-style: none;
+  cursor: pointer;
+  transition:
+    color 160ms ease,
+    background-color 160ms ease;
+}
+
+.menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.menu summary > svg {
+  flex-shrink: 0;
+  width: 17px;
+  height: 17px;
+}
+
+.menu summary::after {
+  content: '';
+  width: 5px;
+  height: 5px;
+  margin-top: -3px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 160ms ease;
+}
+
+.menu[open] > summary {
+  color: var(--brand);
+  background: var(--accent-soft);
+}
+
+.menu[open] > summary::after {
+  margin-top: 3px;
+  transform: rotate(225deg);
+}
+
+.menu :is(summary, a):focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.menuPanel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 200;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px 24px;
+  width: 480px;
+  max-height: min(70dvh, 640px);
+  padding: 24px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 16px 48px color-mix(in srgb, var(--text) 12%, transparent);
+  animation: reveal 180ms ease-out both;
+}
+
+.menuPanel a {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.menuOverview {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  margin: -8px -8px 0;
+  padding: 12px 14px;
+  border-radius: 7px;
+  background: var(--accent-soft);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.menuOverview > span,
+.menuGroup a > span {
+  transition: transform 160ms ease;
+}
+
+.menuGroup {
+  min-width: 0;
+}
+
+.menuGroup h2 {
+  margin: 0 10px 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 20px;
+  letter-spacing: 0.1em;
+}
+
+.menuGroup a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  padding: 10px;
+  border-radius: 6px;
+  font-size: 14px;
+  line-height: 20px;
+  transition:
+    color 160ms ease,
+    background-color 160ms ease;
+}
+
+.menuGroup a > span {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.menuGroup a[aria-current='page'] {
+  color: var(--brand);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .menu summary:hover,
+  .menuPanel a:hover {
+    color: var(--text);
+    background: var(--panel);
+  }
+
+  .menuPanel a:hover > span {
+    transform: translateX(3px);
+  }
+}
+
+@media (max-width: 1150px) {
+  .menu summary {
+    padding-inline: 9px;
+  }
+
+  .menu summary > svg {
+    display: none;
+  }
+}
+
+@media (max-width: 940px) {
+  .menu {
+    position: static;
+  }
+
+  .menu summary > svg {
+    display: block;
+  }
+
+  .menuPanel {
+    top: calc(100% - 2px);
+    right: var(--page-padding-inline);
+    width: min(480px, calc(100vw - 40px));
+  }
+}
+
+@media (max-width: 600px) {
+  .menu summary {
+    flex-direction: column;
+    gap: 4px;
+    min-height: 54px;
+    padding: 7px 2px 8px;
+    font-size: 12px;
+    line-height: 16px;
+  }
+
+  .menu summary::after {
+    display: none;
+  }
+
+  .menuPanel {
+    right: 20px;
+    padding: 20px 16px;
+    gap: 18px 12px;
+    max-height: min(68dvh, 640px);
+  }
+}
+
+@media (max-width: 360px) {
+  .menuPanel {
+    right: 16px;
+    width: calc(100vw - 32px);
+    padding-inline: 12px;
+    column-gap: 6px;
+  }
+
+  .menuGroup a {
+    padding-inline: 8px;
+    font-size: 13px;
+  }
+}
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

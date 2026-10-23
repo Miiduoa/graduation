@@ -1,10 +1,11 @@
 'use client';
 
 import Link from 'next/link';
+import { CampusIcon } from './CampusIcon';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useEffect, useRef } from 'react';
 import { CAMPUS_SERVICES, SERVICE_CATEGORIES } from '@/lib/campusServices';
-import styles from '@/app/home.module.css';
+import styles from './CampusServiceMenu.module.css';
 import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
 
 export function CampusServiceMenu() {
@@ -29,10 +30,11 @@ export function CampusServiceMenu() {
   return (
     <details
       ref={menu}
+      name="campus-navigation-popover"
       className={styles.menu}
       key={pathname}
       onKeyDown={(event) => {
-        if (event.key === 'Escape' && event.currentTarget.open) {
+        if (event.key === 'Escape' && !event.nativeEvent.isComposing && event.currentTarget.open) {
           event.preventDefault();
           event.currentTarget.open = false;
           event.currentTarget.querySelector('summary')?.focus();
@@ -47,7 +49,10 @@ export function CampusServiceMenu() {
         }
       }}
     >
-      <summary>所有服務</summary>
+      <summary>
+        <CampusIcon name="services" size={17} />
+        所有服務
+      </summary>
       <div className={styles.menuPanel}>
         <Link
           href={href('/search')}

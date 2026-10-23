@@ -80,3 +80,4 @@ backend/ai-server/data/
 outputs/
 tmp/
 .test-env/
+artifacts/campus-visual/
