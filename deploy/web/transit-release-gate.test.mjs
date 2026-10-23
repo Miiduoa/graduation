@@ -351,6 +351,19 @@ test('rate-limit retry helper rethrows non-429 errors immediately',async()=>{
 });
 
 
+test('the complete runtime module fits a small exec request and runs after in-memory decompression',()=>{
+  const source=readFileSync(new URL('./transit-release-gate.mjs',import.meta.url),'utf8');
+  const command=buildRemoteCommand(source,catalogProfile);
+  assert.ok(Buffer.byteLength(JSON.stringify({cmd:command,timeout:300})) < 12*1024,
+    'keep the real module comfortably below the observed exec payload rejection size');
+  const env={...process.env};
+  delete env.TDX_CLIENT_ID; delete env.TDX_CLIENT_SECRET;
+  const stdout=execFileSync('/bin/sh',['-c',command],{encoding:'utf8',env});
+  const report=parseRemoteReport(stdout,catalogProfile);
+  assert.equal(report.ready,true);
+  assert.equal(report.credentialsAbsent,true);
+});
+
 test('runtime probe uses the existing Machines API target and token without SSH or a shell on the runner',()=>{
   const command=buildRemoteCommand('export async function probeRuntime(){return {ready:true,profile:"static-catalog",mode:"static-catalog",transitReady:false,credentialsAbsent:true,reason:"not-configured"}}',catalogProfile);
   const calls=[];
