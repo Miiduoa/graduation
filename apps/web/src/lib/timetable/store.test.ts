@@ -33,6 +33,7 @@ import {
   TIMETABLE_DEVICE_ONLY_SUBMIT_COPY,
   loadPersonalTimetable,
   savePersonalTimetable,
+  type StoredTimetable,
 } from './store';
 
 const course: PersonalCourse = {
@@ -45,6 +46,14 @@ const course: PersonalCourse = {
   room: '',
   color: 'blue',
 };
+
+const storedTimetable = (courses: PersonalCourse[] = [course]): StoredTimetable => ({
+  courses,
+  meta: {} as never,
+  shareWithFriends: true,
+  updatedAt: '2026-10-01T00:00:00.000Z',
+  schoolId: 'pu',
+});
 
 beforeEach(() => {
   localStorage.clear();
@@ -312,4 +321,107 @@ it('does not treat a foreign legacy timetable or a missing timestamp as a fresh 
   localStorage.setItem(key, JSON.stringify({ courses: [course], schoolId: 'pu' }));
   expect((await loadPersonalTimetable('u-1', 'pu', 'school:u-1')).courses).toEqual([remote]);
   expect(firestore.setDoc).not.toHaveBeenCalled();
+});
+
+it('surfaces an uncached account read failure without adopting guest data or claiming an empty timetable', async () => {
+  const guest = JSON.stringify(storedTimetable());
+  localStorage.setItem('campus-one-personal-timetable:local:pu', guest);
+  firestore.getDoc.mockRejectedValue(new Error('offline'));
+  await expect(loadPersonalTimetable('u-1', 'pu', 'school:u-1')).rejects.toThrow('offline');
+  await expect(loadPersonalTimetable('u-1', 'pu')).rejects.toThrow('offline');
+  expect(localStorage.getItem('campus-one-personal-timetable:local:pu')).toBe(guest);
+  expect(localStorage.getItem('campus-one-personal-timetable:school:u-1:pu')).toBeNull();
+  expect(firestore.setDoc).not.toHaveBeenCalled();
+});
+
+it('preserves an intentional device-only deletion without comparing it to legacy cloud timestamps', async () => {
+  await savePersonalTimetable('u-1', storedTimetable([]), 'school:u-1');
+  const key = 'campus-one-personal-timetable:school:u-1:pu';
+  const saved = localStorage.getItem(key);
+  firestore.getDoc.mockResolvedValue({
+    exists: () => true,
+    data: () => ({ ...storedTimetable(), updatedAt: '2099-01-01T00:00:00.000Z' }),
+  });
+  expect((await loadPersonalTimetable('u-1', 'pu', 'school:u-1')).courses).toEqual([]);
+  expect(localStorage.getItem(key)).toBe(saved);
+  expect(firestore.getDoc).not.toHaveBeenCalled();
+  expect(firestore.setDoc).not.toHaveBeenCalled();
+});
+
+it.each(['found', 'missing', 'offline'])(
+  'retains a device edit made while a legacy cloud read is pending (%s)',
+  async (outcome) => {
+    let finish!: (value: unknown) => void;
+    let fail!: (error: Error) => void;
+    firestore.getDoc.mockImplementation(() => new Promise((resolve, reject) => {
+      finish = resolve;
+      fail = reject;
+    }));
+    const loading = loadPersonalTimetable('u-1', 'pu', 'school:u-1');
+    await savePersonalTimetable('u-1', storedTimetable([]), 'school:u-1');
+    const key = 'campus-one-personal-timetable:school:u-1:pu';
+    const saved = localStorage.getItem(key);
+    if (outcome === 'offline') fail(new Error('offline'));
+    else finish({
+      exists: () => outcome === 'found',
+      data: () => storedTimetable(),
+    });
+    expect((await loading).courses).toEqual([]);
+    expect(localStorage.getItem(key)).toBe(saved);
+    expect(firestore.setDoc).not.toHaveBeenCalled();
+  },
+);
+
+it.each([
+  ['missing payload', null],
+  ['non-array courses', { ...storedTimetable(), courses: 'not-a-course-list' }],
+  ['invalid course row', { ...storedTimetable(), courses: [null] }],
+  ['oversized course list', { ...storedTimetable(), courses: Array.from({ length: 81 }, () => course) }],
+  ['invalid metadata', { ...storedTimetable(), meta: [] }],
+  ['invalid school marker', { ...storedTimetable(), schoolId: { id: 'pu' } }],
+])('refuses %s in an uncached cloud record without turning it into an empty timetable', async (_label, data) => {
+  firestore.getDoc.mockResolvedValue({ exists: () => true, data: () => data });
+  await expect(loadPersonalTimetable('u-1', 'pu', 'school:u-1')).rejects.toThrow('雲端課表格式異常');
+  expect(localStorage.length).toBe(0);
+  expect(firestore.setDoc).not.toHaveBeenCalled();
+});
+
+it.each(['offline', 'malformed'])(
+  'keeps a recoverable same-school legacy copy when the cloud is %s',
+  async (outcome) => {
+    const key = 'campus-one-personal-timetable:u-1';
+    const raw = JSON.stringify(storedTimetable());
+    localStorage.setItem(key, raw);
+    if (outcome === 'offline') firestore.getDoc.mockRejectedValue(new Error('offline'));
+    else firestore.getDoc.mockResolvedValue({
+      exists: () => true,
+      data: () => ({ ...storedTimetable(), courses: 'not-a-course-list' }),
+    });
+    expect((await loadPersonalTimetable('u-1', 'pu', 'school:u-1')).courses).toEqual([course]);
+    expect(localStorage.getItem(key)).toBe(raw);
+    expect(localStorage.getItem('campus-one-personal-timetable:school:u-1:pu')).toBeNull();
+    expect(firestore.setDoc).not.toHaveBeenCalled();
+  },
+);
+
+it.each(['platform:account-a', 'nuni:account-a', 'school:u-2', 'guest'])(
+  'does not read a Firebase account timetable into the different local owner %s',
+  async (owner) => {
+    firestore.getDoc.mockResolvedValue({ exists: () => true, data: () => storedTimetable() });
+    expect((await loadPersonalTimetable('u-1', 'pu', owner)).courses).toEqual([]);
+    expect(firestore.getDoc).not.toHaveBeenCalled();
+    expect(firestore.setDoc).not.toHaveBeenCalled();
+  },
+);
+
+it('does not let a guest device copy replace an existing account cloud record for an old caller', async () => {
+  const guest = JSON.stringify({ ...storedTimetable(), updatedAt: '2099-01-01T00:00:00.000Z' });
+  localStorage.setItem('campus-one-personal-timetable:local:pu', guest);
+  const remote = { ...course, name: '帳號原有課程' };
+  firestore.getDoc.mockResolvedValue({
+    exists: () => true,
+    data: () => storedTimetable([remote]),
+  });
+  expect((await loadPersonalTimetable('u-1', 'pu')).courses).toEqual([remote]);
+  expect(localStorage.getItem('campus-one-personal-timetable:local:pu')).toBe(guest);
 });
