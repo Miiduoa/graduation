@@ -1,4 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { renderToString } from 'react-dom/server';
+import { hydrateRoot, type Root } from 'react-dom/client';
 import { beforeEach, expect, it, vi } from 'vitest';
 import HomePage from './page';
 import { loadHomeData, type HomeData } from '@/lib/homeOverview';
@@ -878,4 +880,43 @@ it('keeps today work and feedback when materials fail, and retries only material
   expect(screen.queryByRole('heading', { name: HOME_MATERIALS_UNAVAILABLE })).toBeNull();
   expect(screen.getByRole('link', { name: /週五提案/ })).toBeTruthy();
   expect(screen.getByTestId('recent-feedback').textContent).toContain('結構清楚');
+});
+
+it('hydrates the signed-in home page against the server loading markup', async () => {
+  state.uid = null;
+  state.session = null;
+  state.sessionLoading = true;
+  const courseId = 'cw_11111111-1111-4111-8111-111111111111';
+  vi.mocked(loadNuniHomeData).mockResolvedValue({
+    ...data('資料庫系統'),
+    courses: [
+      {
+        id: courseId,
+        name: '資料庫系統',
+        role: 'student',
+        unreadCount: 0,
+        href: `/classroom/course/${courseId}`,
+      },
+    ],
+  });
+  const app = <HomePage />;
+  const container = document.createElement('div');
+  container.innerHTML = renderToString(app);
+  document.body.append(container);
+  expect(container.querySelector('[role="status"]')?.textContent).toBe('正在讀取課程與待辦…');
+  state.session = { context: 'session-a', platformAccountId: 'student-a' };
+  state.sessionLoading = false;
+  const onRecoverableError = vi.fn();
+  let root: Root | undefined;
+  try {
+    await act(async () => {
+      root = hydrateRoot(container, app, { onRecoverableError });
+    });
+    expect(onRecoverableError).not.toHaveBeenCalled();
+    expect(await screen.findByRole('link', { name: /資料庫系統/ })).toBeTruthy();
+    expect(screen.getByLabelText('找所有課的教材')).toBeTruthy();
+  } finally {
+    await act(async () => root?.unmount());
+    container.remove();
+  }
 });

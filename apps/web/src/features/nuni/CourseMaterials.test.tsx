@@ -1,7 +1,10 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { renderToString } from 'react-dom/server';
+import { hydrateRoot, type Root } from 'react-dom/client';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { NuniError, type NuniMaterial, type NuniWorkspace } from '@campus/shared/src/nuni';
 import { COURSE_WORK_LANDING_ATTR, COURSE_WORK_MISSING_MATERIAL } from '@/lib/courseWorkLanding';
+import { MATERIAL_READ_KEY_PREFIX, markMaterialRead } from '@/lib/courseMaterials';
 import { CourseMaterials } from './CourseMaterials';
 
 const state = vi.hoisted(() => ({ context: 'session-a', request: vi.fn(), refresh: vi.fn() }));
@@ -488,4 +491,46 @@ it('filters the current course cabinet by keyword without leaving the page', asy
   expect(screen.getByText(/找不到符合「沒有這份」的教材/)).toBeTruthy();
   fireEvent.change(screen.getByLabelText('在這門課找教材'), { target: { value: '主鍵' } });
   expect(screen.getByRole('article', { name: material.title })).toBeTruthy();
+});
+
+it('hydrates the cabinet loading markup, then shows unread until the file is opened', async () => {
+  const account = 'pa_11111111-1111-4111-8111-111111111111';
+  localStorage.setItem(MATERIAL_READ_KEY_PREFIX + account, JSON.stringify([olderMaterial.id]));
+  const app = <CourseMaterials workspace={{ ...workspace, memberRole: 'student' }} />;
+  const container = document.createElement('div');
+  container.innerHTML = renderToString(app);
+  document.body.append(container);
+  expect(container.textContent).toContain('正在讀取教材櫃…');
+  expect(container.textContent).not.toContain('未讀');
+  const onRecoverableError = vi.fn();
+  let root: Root | undefined;
+  try {
+    await act(async () => {
+      root = hydrateRoot(container, app, { onRecoverableError });
+    });
+    expect(onRecoverableError).not.toHaveBeenCalled();
+    const card = await screen.findByRole('article', { name: material.title });
+    expect(within(card).getByText('未讀')).toBeTruthy();
+    fireEvent.click(within(card).getByRole('link', { name: '開啟' }));
+    expect(within(card).queryByText('未讀')).toBeNull();
+  } finally {
+    await act(async () => root?.unmount());
+    container.remove();
+  }
+});
+
+it('marks a landed material as read on this device', async () => {
+  window.history.replaceState(null, '', `/#material-${material.id}`);
+  render(<CourseMaterials workspace={{ ...workspace, memberRole: 'student' }} />);
+  const card = await screen.findByRole('article', { name: material.title });
+  card.scrollIntoView = vi.fn();
+  await waitFor(() => expect(card.getAttribute(COURSE_WORK_LANDING_ATTR)).toBe('true'));
+  await waitFor(() => expect(within(card).queryByText('未讀')).toBeNull());
+});
+
+it('keeps unread badges after a client clock tick without inventing a read', async () => {
+  markMaterialRead('pa_11111111-1111-4111-8111-111111111111', olderMaterial.id, localStorage);
+  render(<CourseMaterials workspace={{ ...workspace, memberRole: 'student' }} />);
+  const card = await screen.findByRole('article', { name: material.title });
+  expect(within(card).getByText('未讀')).toBeTruthy();
 });
