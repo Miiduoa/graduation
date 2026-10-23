@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { revealStopResult } from '@/lib/revealStopResult';
 import {
   CAMPUS_TRANSIT, TRANSIT_CITIES, TRANSIT_MESSAGES, arrivalKind, arrivalLabel, arrivalMatchesCampusGroup,
   directionLabel, formatDistance, hasCampusNext, isCity, isPosition, isStaticTransitStop,
@@ -35,6 +36,7 @@ function listedKey(stop: TransitStop) {
 }
 
 function StopArrivals({ stop, groupLabel }: { stop: TransitStop; groupLabel?: string }) {
+  const pane = useRef<HTMLElement>(null);
   const [result, setResult] = useState<TransitResult | null>(null);
   const [busy, setBusy] = useState(true);
   const [revision, setRevision] = useState(0);
@@ -113,6 +115,9 @@ function StopArrivals({ stop, groupLabel }: { stop: TransitStop; groupLabel?: st
       window.removeEventListener('offline', resume);
     };
   }, [stop.city, stop.id, revision]);
+  useEffect(() => {
+    revealStopResult(pane.current);
+  }, [stop.city, stop.id]);
   const rows = result?.status === 'ready' && result.kind === 'arrivals' ? result.arrivals : [];
   const shown = rows.filter((row) => row.route.toLocaleLowerCase().includes(filter.trim().toLocaleLowerCase()) &&
     (direction === 'all' || String(row.direction) === direction) &&
@@ -127,7 +132,14 @@ function StopArrivals({ stop, groupLabel }: { stop: TransitStop; groupLabel?: st
     <strong className={css.eta}>{offline ? '離線，待更新' : arrivalLabel(row, clock)}</strong>
   </li>;
   return (
-    <section className={css.arrivals} aria-labelledby="transit-arrivals-title" aria-busy={busy}>
+    <section
+      ref={pane}
+      className={css.arrivals}
+      data-testid="stop-arrivals-pane"
+      tabIndex={-1}
+      aria-labelledby="transit-arrivals-title"
+      aria-busy={busy}
+    >
       <div className={css.sectionHeading}>
         <div><p className={css.eyebrow}>候車站牌 · {TRANSIT_CITIES[stop.city]}</p><h3 id="transit-arrivals-title">{stop.name}</h3></div>
         <button type="button" className={css.secondary} disabled={busy || offline || coolingDown} onClick={() => { setBusy(true); setRevision((value) => value + 1); }}>
@@ -161,7 +173,18 @@ function StopArrivals({ stop, groupLabel }: { stop: TransitStop; groupLabel?: st
 
 
 function StaticStopDetails({ stop }: { stop: TransitStop }) {
-  return <section className={css.arrivals} aria-labelledby="transit-static-title">
+  const pane = useRef<HTMLElement>(null);
+  useEffect(() => {
+    revealStopResult(pane.current);
+  }, [stop.city, stop.id]);
+  return (
+    <section
+      ref={pane}
+      className={css.arrivals}
+      data-testid="stop-arrivals-pane"
+      tabIndex={-1}
+      aria-labelledby="transit-static-title"
+    >
     <div className={css.sectionHeading}>
       <div><p className={css.eyebrow}>候車站牌 · 臺中市</p><h3 id="transit-static-title">{stop.name}</h3></div>
       <span className={css.source}>靜態站牌資料</span>
@@ -182,7 +205,8 @@ function StaticStopDetails({ stop }: { stop: TransitStop }) {
       {stop.catalogDate && <>資料快照：{new Date(stop.catalogDate).toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' })}。</>}
       來源不定期更新，路線可能調整；收藏會保留當時的資料。
     </p>
-  </section>;
+    </section>
+  );
 }
 
 function StopResults({ query, saved, toggleSaved }: {
