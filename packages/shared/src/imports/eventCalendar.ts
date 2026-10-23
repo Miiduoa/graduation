@@ -26,6 +26,7 @@ function utf8Bytes(value: string): number {
 
 function escapeIcsText(value: string): string {
   return value
+    // eslint-disable-next-line no-control-regex -- ICS text must omit non-text control bytes.
     .replace(/[\u0000-\u0009\u000b-\u000c\u000e-\u001f\u007f]/g, '')
     .replace(/\\/g, '\\\\')
     .replace(/\r\n|\r|\n/g, '\\n')
