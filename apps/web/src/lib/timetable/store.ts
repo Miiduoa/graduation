@@ -60,8 +60,17 @@ type LocalTimetableRead = {
   timetable: StoredTimetable;
   // Only an actual current-school record may compete with a cloud copy.
   found: boolean;
+  scoped: boolean;
   recordedAt: number;
 };
+
+function hasTimetableContent(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const data = value as Partial<StoredTimetable>;
+  return Array.isArray(data.courses) && data.courses.length <= 80 &&
+    data.courses.every((row) => row && typeof row === 'object' && !Array.isArray(row)) &&
+    (data.meta === undefined || !!data.meta && typeof data.meta === 'object' && !Array.isArray(data.meta));
+}
 
 function readLocalSnapshot(ownerKey: string, schoolId: string): LocalTimetableRead {
   let scopedRaw: string | null;
@@ -73,24 +82,21 @@ function readLocalSnapshot(ownerKey: string, schoolId: string): LocalTimetableRe
     throw new TimetableLocalReadError('unavailable');
   }
   const raw = scopedRaw ?? legacyRaw;
-  if (raw === null) return { timetable: emptyTimetable(schoolId), found: false, recordedAt: 0 };
+  if (raw === null) return { timetable: emptyTimetable(schoolId), found: false, scoped: false, recordedAt: 0 };
   let parsed: StoredTimetable;
   try {
     parsed = JSON.parse(raw) as StoredTimetable;
   } catch {
     throw new TimetableLocalReadError('corrupt');
   }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) ||
-      !Array.isArray(parsed.courses) || parsed.courses.length > 80 ||
-      parsed.courses.some((row) => !row || typeof row !== 'object' || Array.isArray(row)) ||
-      (parsed.meta !== undefined && (!parsed.meta || typeof parsed.meta !== 'object' || Array.isArray(parsed.meta)))) {
+  if (!hasTimetableContent(parsed)) {
     throw new TimetableLocalReadError('corrupt');
   }
   // An unscoped legacy copy without an explicit school must never be claimed.
   // A mismatched scoped copy is potentially damaged and must remain untouched.
   if (parsed.schoolId !== schoolId) {
     if (scopedRaw !== null) throw new TimetableLocalReadError('corrupt');
-    return { timetable: emptyTimetable(schoolId), found: false, recordedAt: 0 };
+    return { timetable: emptyTimetable(schoolId), found: false, scoped: false, recordedAt: 0 };
   }
   return {
     timetable: {
@@ -101,6 +107,7 @@ function readLocalSnapshot(ownerKey: string, schoolId: string): LocalTimetableRe
       schoolId: parsed.schoolId || schoolId,
     },
     found: true,
+    scoped: scopedRaw !== null,
     // Missing timestamps from old records must not inherit the fresh default date.
     recordedAt: savedAtMillis(parsed.updatedAt),
   };
@@ -154,31 +161,49 @@ export async function loadPersonalTimetable(
   const ownerKey = localOwner === 'guest' ? 'local' : localOwner || uid || 'local';
   // The school-account namespace replaces the older uid key. Only that exact
   // identity may read its old copy, and an existing new copy (even empty) wins.
-  const readOwnerKey =
-    uid && localOwner === `school:${uid}` && !hasLocal(ownerKey, schoolId) ? uid : ownerKey;
-  if (!uid || !isFirebaseConfigured()) return readLocal(readOwnerKey, schoolId);
-  // 登入學校帳號前在這台瀏覽器排的課表，登入後先接著用，下次存檔就一起存到雲端
-  const localSnapshot = localOwner
-    ? readLocalSnapshot(readOwnerKey, schoolId)
-    : hasLocal(uid, schoolId)
-      ? readLocalSnapshot(uid, schoolId)
-      : readLocalSnapshot('local', schoolId);
-  const local = localSnapshot.timetable;
+  const readCurrentLocal = () => {
+    const readOwnerKey =
+      uid && localOwner === `school:${uid}` && !hasLocal(ownerKey, schoolId) ? uid : ownerKey;
+    return readLocalSnapshot(readOwnerKey, schoolId);
+  };
+  const initial = readCurrentLocal();
+  if (!uid || !isFirebaseConfigured() || (localOwner && localOwner !== `school:${uid}`)) {
+    return initial.timetable;
+  }
+  // Scoped records are explicit device-only saves, not a cloud cache. A newer
+  // legacy cloud timestamp must not replace edits or revive a deleted course.
+  if (initial.scoped) return initial.timetable;
   let snap;
   try {
     snap = await getDoc(doc(getDb(), 'users', uid, 'personalTimetable', 'current'));
-  } catch {
-    return local;
+  } catch (error) {
+    const latest = readCurrentLocal();
+    if (latest.found) return latest.timetable;
+    throw error;
   }
-  if (!snap.exists()) return local;
+  // Another tab can save while the request is pending. Re-read the exact owner
+  // and school before using a response, including a confirmed missing record.
+  const localSnapshot = readCurrentLocal();
+  const local = localSnapshot.timetable;
+  if (localSnapshot.scoped) return local;
+  if (!snap.exists()) {
+    if (localSnapshot.found || localOwner) return local;
+    // Compatibility for old callers: adopt a guest copy only after the account
+    // is confirmed empty. Scoped platform and school accounts stay isolated.
+    return readLocal('local', schoolId);
+  }
   const data = snap.data() as StoredTimetable & { updatedAt?: unknown };
+  if (!hasTimetableContent(data) ||
+      (data.schoolId !== undefined && typeof data.schoolId !== 'string')) {
+    if (localSnapshot.found) return local;
+    throw new Error('雲端課表格式異常，無法確認課表內容。請保留本機資料並重新讀取。');
+  }
   // Early cloud timetables had no school marker because the timetable only
   // supported PU. Allow that legacy copy only when PU is explicitly selected;
   // an untagged remote document cannot become a different university's data.
   if (data.schoolId && data.schoolId !== schoolId) return local;
   if (!data.schoolId && schoolId !== 'pu') return local;
-  // Removing the final course is a real local edit. An older cloud copy must not
-  // bring it back merely because the new timetable has zero courses.
+  // Unscoped legacy copies still use their original timestamps for recovery.
   if (localSnapshot.found && localSnapshot.recordedAt > savedAtMillis(data.updatedAt)) {
     return local;
   }

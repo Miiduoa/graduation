@@ -33,12 +33,12 @@ export function HomeCampusBusCard({ schoolId }: { schoolId: string }) {
     };
   }, [schoolId]);
   const summary = campusHomeSummary(pickCampusNext(arrivals ?? [], clock, CAMPUS_NEXT_ROUTES), clock);
-  const line = !ready ? '正在查看…' : summary || '看全部';
+  if (!ready || !summary) return null;
   return (
-    <nav className={styles.busEntry} aria-label="公車" data-testid="home-bus-entry">
+    <nav className={styles.busEntry} aria-label="下一班公車" data-testid="home-bus-entry">
       <Link className={styles.busEntryLink} href="/bus">
-        <strong>校門口公車</strong>
-        <span className={styles.busEntryMeta}>{line}</span>
+        <strong>下一班公車</strong>
+        <span className={styles.busEntryMeta}>{summary}</span>
       </Link>
     </nav>
   );

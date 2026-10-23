@@ -3,6 +3,18 @@
 -- 由 qa-cleanup.sh 包在一個 transaction 裡：list 只讀後 ROLLBACK；apply 核對後 COMMIT。
 
 \set ON_ERROR_STOP on
+SELECT CASE WHEN :'apply' = '1' THEN 1 ELSE 0 END AS do_apply
+\gset
+\if :do_apply
+SET LOCAL lock_timeout = '5s';
+LOCK TABLE public.class_workspaces, public.class_workspace_assignments,
+  public.class_workspace_members, public.class_workspace_invites,
+  public.class_workspace_assignment_submissions, public.class_assignment_submission_files,
+  public.class_assignment_file_idempotency, public.class_workspace_submission_feedback_idempotency,
+  public.class_workspace_submission_idempotency, public.class_workspace_assignment_idempotency,
+  public.class_workspace_join_idempotency, public.class_workspace_invite_idempotency
+  IN SHARE ROW EXCLUSIVE MODE;
+\endif
 
 -- 固定識別。改這裡等於改清理範圍，不要用模糊搜尋。
 SELECT
@@ -27,11 +39,7 @@ SELECT CASE
   ELSE 0
 END AS assignment_title_ok
 \gset
-SELECT CASE WHEN :assignment_title_ok = 1 THEN 1
-            ELSE (SELECT 1 / 0) END AS assignment_title_guard;
--- 上面在標題不符時除以零中止，避免誤刪真實作業。
--- 注意：ELSE (SELECT 1/0) 只有在 WHEN 是常數時才安全；runtime EXISTS
--- 會被 planner 拉去執行 ELSE，所以下面改成 \gset 後再除以零。
+SELECT 1 / :assignment_title_ok AS assignment_title_guard;
 
 -- 若這份 QA 作業上還有其他學生的繳交／檔案，停止。預設 FK 是 NO ACTION，
 -- 沒有這道檢查也可能刪失敗；有 CASCADE 時沒檢查會連帶刪掉別人的資料。
@@ -45,8 +53,7 @@ SELECT CASE WHEN NOT EXISTS (
      AND platform_account_id <> :'student_id'
 ) THEN 1 ELSE 0 END AS other_student_ok
 \gset
-SELECT CASE WHEN :other_student_ok = 1 THEN 1
-            ELSE (SELECT 1 / 0) END AS other_student_guard;
+SELECT 1 / :other_student_ok AS other_student_guard;
 
 SELECT count(*) AS other_assignments_before
   FROM public.class_workspace_assignments
@@ -63,89 +70,107 @@ SELECT count(*) AS teacher_members_before
 CREATE TEMP TABLE qa_preview (
   relation text PRIMARY KEY,
   row_count bigint NOT NULL,
-  sample jsonb NOT NULL
+  sample jsonb NOT NULL,
+  fingerprint text NOT NULL
 );
 
 INSERT INTO qa_preview
-SELECT 'class_assignment_file_idempotency', count(*), coalesce(jsonb_agg(jsonb_build_object('actor_id', actor_id, 'key', key)), '[]'::jsonb)
-  FROM public.class_assignment_file_idempotency
+SELECT 'class_assignment_file_idempotency', count(*), coalesce(jsonb_agg(jsonb_build_object('actor_id', actor_id, 'key', key)), '[]'::jsonb),
+       encode(sha256(convert_to(coalesce(jsonb_agg(to_jsonb(target) ORDER BY to_jsonb(target)::text), '[]'::jsonb)::text, 'UTF8')), 'hex')
+  FROM public.class_assignment_file_idempotency AS target
  WHERE actor_id = :'student_id'
    AND (key LIKE 'smoke-%' OR key LIKE 'qa-file-smoke-%');
 
 INSERT INTO qa_preview
-SELECT 'class_assignment_submission_files', count(*), coalesce(jsonb_agg(jsonb_build_object('id', id, 'storage_key', storage_key)), '[]'::jsonb)
-  FROM public.class_assignment_submission_files
+SELECT 'class_assignment_submission_files', count(*), coalesce(jsonb_agg(jsonb_build_object('id', id, 'storage_key', storage_key)), '[]'::jsonb),
+       encode(sha256(convert_to(coalesce(jsonb_agg(to_jsonb(target) ORDER BY to_jsonb(target)::text), '[]'::jsonb)::text, 'UTF8')), 'hex')
+  FROM public.class_assignment_submission_files AS target
  WHERE assignment_id = :'assignment_id'
    AND workspace_id = :'workspace_id'
    AND platform_account_id = :'student_id';
 
 INSERT INTO qa_preview
-SELECT 'class_workspace_submission_feedback_idempotency', count(*), coalesce(jsonb_agg(jsonb_build_object('idempotency_key', idempotency_key)), '[]'::jsonb)
-  FROM public.class_workspace_submission_feedback_idempotency
+SELECT 'class_workspace_submission_feedback_idempotency', count(*), coalesce(jsonb_agg(jsonb_build_object('idempotency_key', idempotency_key)), '[]'::jsonb),
+       encode(sha256(convert_to(coalesce(jsonb_agg(to_jsonb(target) ORDER BY to_jsonb(target)::text), '[]'::jsonb)::text, 'UTF8')), 'hex')
+  FROM public.class_workspace_submission_feedback_idempotency AS target
  WHERE assignment_id = :'assignment_id'
    AND student_platform_account_id = :'student_id';
 
 INSERT INTO qa_preview
-SELECT 'class_workspace_submission_idempotency', count(*), coalesce(jsonb_agg(jsonb_build_object('idempotency_key', idempotency_key)), '[]'::jsonb)
-  FROM public.class_workspace_submission_idempotency
+SELECT 'class_workspace_submission_idempotency', count(*), coalesce(jsonb_agg(jsonb_build_object('idempotency_key', idempotency_key)), '[]'::jsonb),
+       encode(sha256(convert_to(coalesce(jsonb_agg(to_jsonb(target) ORDER BY to_jsonb(target)::text), '[]'::jsonb)::text, 'UTF8')), 'hex')
+  FROM public.class_workspace_submission_idempotency AS target
  WHERE assignment_id = :'assignment_id'
    AND platform_account_id = :'student_id';
 
 INSERT INTO qa_preview
-SELECT 'class_workspace_assignment_submissions', count(*), coalesce(jsonb_agg(jsonb_build_object('platform_account_id', platform_account_id, 'body', left(body, 40))), '[]'::jsonb)
-  FROM public.class_workspace_assignment_submissions
+SELECT 'class_workspace_assignment_submissions', count(*), coalesce(jsonb_agg(jsonb_build_object('platform_account_id', platform_account_id, 'body', left(body, 40))), '[]'::jsonb),
+       encode(sha256(convert_to(coalesce(jsonb_agg(to_jsonb(target) ORDER BY to_jsonb(target)::text), '[]'::jsonb)::text, 'UTF8')), 'hex')
+  FROM public.class_workspace_assignment_submissions AS target
  WHERE assignment_id = :'assignment_id'
    AND platform_account_id = :'student_id';
 
 INSERT INTO qa_preview
-SELECT 'class_workspace_assignment_idempotency', count(*), coalesce(jsonb_agg(jsonb_build_object('idempotency_key', idempotency_key)), '[]'::jsonb)
-  FROM public.class_workspace_assignment_idempotency
+SELECT 'class_workspace_assignment_idempotency', count(*), coalesce(jsonb_agg(jsonb_build_object('idempotency_key', idempotency_key)), '[]'::jsonb),
+       encode(sha256(convert_to(coalesce(jsonb_agg(to_jsonb(target) ORDER BY to_jsonb(target)::text), '[]'::jsonb)::text, 'UTF8')), 'hex')
+  FROM public.class_workspace_assignment_idempotency AS target
  WHERE assignment_id = :'assignment_id'
    AND workspace_id = :'workspace_id'
    AND idempotency_key LIKE 'qa-file-smoke-assignment-%';
 
 INSERT INTO qa_preview
-SELECT 'class_workspace_assignments', count(*), coalesce(jsonb_agg(jsonb_build_object('id', id, 'title', title)), '[]'::jsonb)
-  FROM public.class_workspace_assignments
+SELECT 'class_workspace_assignments', count(*), coalesce(jsonb_agg(jsonb_build_object('id', id, 'title', title)), '[]'::jsonb),
+       encode(sha256(convert_to(coalesce(jsonb_agg(to_jsonb(target) ORDER BY to_jsonb(target)::text), '[]'::jsonb)::text, 'UTF8')), 'hex')
+  FROM public.class_workspace_assignments AS target
  WHERE id = :'assignment_id'
    AND workspace_id = :'workspace_id'
    AND title = :'assignment_title';
 
 INSERT INTO qa_preview
-SELECT 'class_workspace_members', count(*), coalesce(jsonb_agg(jsonb_build_object('platform_account_id', platform_account_id, 'role', role)), '[]'::jsonb)
-  FROM public.class_workspace_members
+SELECT 'class_workspace_members', count(*), coalesce(jsonb_agg(jsonb_build_object('platform_account_id', platform_account_id, 'role', role)), '[]'::jsonb),
+       encode(sha256(convert_to(coalesce(jsonb_agg(to_jsonb(target) ORDER BY to_jsonb(target)::text), '[]'::jsonb)::text, 'UTF8')), 'hex')
+  FROM public.class_workspace_members AS target
  WHERE workspace_id = :'workspace_id'
    AND platform_account_id = :'student_id'
    AND role = 'student';
 
 INSERT INTO qa_preview
-SELECT 'class_workspace_join_idempotency', count(*), coalesce(jsonb_agg(jsonb_build_object('idempotency_key', idempotency_key)), '[]'::jsonb)
-  FROM public.class_workspace_join_idempotency
+SELECT 'class_workspace_join_idempotency', count(*), coalesce(jsonb_agg(jsonb_build_object('idempotency_key', idempotency_key)), '[]'::jsonb),
+       encode(sha256(convert_to(coalesce(jsonb_agg(to_jsonb(target) ORDER BY to_jsonb(target)::text), '[]'::jsonb)::text, 'UTF8')), 'hex')
+  FROM public.class_workspace_join_idempotency AS target
  WHERE workspace_id = :'workspace_id'
    AND platform_account_id = :'student_id'
    AND idempotency_key LIKE 'qa-file-smoke-join-%';
 
 INSERT INTO qa_preview
-SELECT 'class_workspace_invite_idempotency', count(*), coalesce(jsonb_agg(jsonb_build_object('idempotency_key', idempotency_key, 'invite_id', invite_id)), '[]'::jsonb)
-  FROM public.class_workspace_invite_idempotency
+SELECT 'class_workspace_invite_idempotency', count(*), coalesce(jsonb_agg(jsonb_build_object('idempotency_key', idempotency_key, 'invite_id', invite_id)), '[]'::jsonb),
+       encode(sha256(convert_to(coalesce(jsonb_agg(to_jsonb(target) ORDER BY to_jsonb(target)::text), '[]'::jsonb)::text, 'UTF8')), 'hex')
+  FROM public.class_workspace_invite_idempotency AS target
  WHERE invite_id = :'invite_id'
    AND workspace_id = :'workspace_id'
    AND idempotency_key LIKE 'qa-file-smoke-invite-%';
 
 INSERT INTO qa_preview
-SELECT 'class_workspace_invites', count(*), coalesce(jsonb_agg(jsonb_build_object('id', id, 'state', state, 'max_uses', max_uses)), '[]'::jsonb)
-  FROM public.class_workspace_invites
+SELECT 'class_workspace_invites', count(*), coalesce(jsonb_agg(jsonb_build_object('id', id, 'state', state, 'max_uses', max_uses)), '[]'::jsonb),
+       encode(sha256(convert_to(coalesce(jsonb_agg(to_jsonb(target) ORDER BY to_jsonb(target)::text), '[]'::jsonb)::text, 'UTF8')), 'hex')
+  FROM public.class_workspace_invites AS target
  WHERE id = :'invite_id'
    AND workspace_id = :'workspace_id';
 
 \echo ===qa_preview===
 SELECT relation, row_count, sample FROM qa_preview ORDER BY relation;
 
--- apply=1 時才刪。list 模式由外層 ROLLBACK。
-SELECT CASE WHEN :'apply' = '1' THEN 1 ELSE 0 END AS do_apply
+-- Bind every selected row (including full body/metadata) to the reviewed receipt.
+SELECT encode(sha256(convert_to(string_agg(relation || ':' || row_count || ':' || fingerprint, ',' ORDER BY relation), 'UTF8')), 'hex') AS preview_digest
+FROM qa_preview
 \gset
+\echo QA_PREVIEW_DIGEST :preview_digest
 
+-- apply=1 時才刪；持有鎖時重新核對完整指紋，過期 receipt 必須中止。
 \if :do_apply
+SELECT CASE WHEN :'preview_digest' = :'expected_preview_digest' THEN 1 ELSE 0 END AS receipt_matches
+\gset
+SELECT 1 / :receipt_matches AS receipt_guard;
 DELETE FROM public.class_assignment_file_idempotency
  WHERE actor_id = :'student_id'
    AND (key LIKE 'smoke-%' OR key LIKE 'qa-file-smoke-%');

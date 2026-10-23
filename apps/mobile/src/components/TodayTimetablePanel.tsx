@@ -29,6 +29,7 @@ export function TodayTimetablePanel({ onOpenImport, onOpenTimetable, refreshKey 
   const generation = useRef(0);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [selection, setSelection] = useState({ scope: '', term: '' });
+  const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date(Date.now()));
   const visible = scopeKey && snapshot?.scope === scopeKey ? snapshot : null;
   const load = useCallback(async () => {
@@ -80,17 +81,65 @@ export function TodayTimetablePanel({ onOpenImport, onOpenTimetable, refreshKey 
       }),
     [visible, scope?.schoolId, scopeKey, selection, now],
   );
-  const openButton = (label: string, onPress: () => void) => (
-    <Pressable accessibilityRole="button" onPress={onPress} style={s.button}>
-      <Text style={s.buttonText}>{label}</Text>
+  const openButton = (label: string, onPress: () => void, primary = false) => (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [
+        s.button,
+        primary && s.primaryButton,
+        pressed && (primary ? s.primaryPressed : s.pressed),
+      ]}
+    >
+      <Text style={[s.buttonText, primary && s.primaryText]}>{label}</Text>
     </Pressable>
   );
   const selectedTerm = plan.terms.find((term) => term.key === plan.termKey);
+  const remaining = plan.today.filter((item) => item.status !== 'ended');
+  const ended = plan.today.filter((item) => item.status === 'ended');
+  const historyKey = JSON.stringify([
+    scopeKey,
+    plan.termKey,
+    now.toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' }),
+  ]);
+  const historyVisible = expandedHistory === historyKey;
+  const renderCourse = (item: (typeof plan.today)[number]) => (
+    <View
+      key={item.row.id}
+      style={[
+        s.course,
+        (item.status === 'ongoing' || item.row.id === plan.nextId) && s.currentCourse,
+      ]}
+    >
+      <Text style={[s.time, item.status === 'ended' && s.endedTime]}>
+        {item.startTime}–{item.endTime} ·{' '}
+        {item.status === 'ongoing'
+          ? '上課時段'
+          : item.status === 'ended'
+            ? '已過下課時間'
+            : item.row.id === plan.nextId
+              ? '下一堂'
+              : '待上課'}
+      </Text>
+      <Text style={s.courseTitle}>{item.row.title}</Text>
+      <Text style={s.detail}>
+        {item.row.location || '教室未填'}
+        {item.row.teacher ? ` · ${item.row.teacher}` : ''}
+      </Text>
+      <Text style={s.note}>
+        {item.row.id.startsWith('manual:') ? '來源：自行編輯' : '來源：個人匯入'}
+      </Text>
+      {item.conflict ? <Text style={s.warning}>上課時間重疊，請核對課表。</Text> : null}
+    </View>
+  );
   return (
     <View style={s.panel} testID="today-timetable">
-      <Text accessibilityRole="header" style={s.heading}>
-        今天的課表
-      </Text>
+      <View style={s.headingRow}>
+        <View style={s.headingAccent} accessibilityElementsHidden />
+        <Text accessibilityRole="header" style={s.heading}>
+          今天的課表
+        </Text>
+      </View>
       {!scopeKey ? (
         <Text style={s.detail}>正在確認帳號，暫時不顯示個人課表。</Text>
       ) : !visible || visible.status === 'loading' ? (
@@ -118,7 +167,11 @@ export function TodayTimetablePanel({ onOpenImport, onOpenTimetable, refreshKey 
                   accessibilityLabel={`查看 ${term.academicYear}／${term.semester} 課表`}
                   accessibilityState={{ selected: plan.termKey === term.key }}
                   onPress={() => setSelection({ scope: scopeKey, term: term.key })}
-                  style={[s.term, plan.termKey === term.key && s.selectedTerm]}
+                  style={({ pressed }) => [
+                    s.term,
+                    plan.termKey === term.key && s.selectedTerm,
+                    pressed && s.pressed,
+                  ]}
                 >
                   <Text style={s.buttonText}>
                     {term.academicYear}／{term.semester}
@@ -128,29 +181,35 @@ export function TodayTimetablePanel({ onOpenImport, onOpenTimetable, refreshKey 
             </View>
           ) : null}
           {plan.today.length ? (
-            plan.today.map((item) => (
-              <View key={item.row.id} style={s.course}>
-                <Text style={s.time}>
-                  {item.startTime}–{item.endTime} ·{' '}
-                  {item.status === 'ongoing'
-                    ? '上課時段'
-                    : item.status === 'ended'
-                      ? '已過下課時間'
-                      : item.row.id === plan.nextId
-                        ? '下一堂'
-                        : '待上課'}
-                </Text>
-                <Text style={s.courseTitle}>{item.row.title}</Text>
-                <Text style={s.detail}>
-                  {item.row.location || '教室未填'}
-                  {item.row.teacher ? ` · ${item.row.teacher}` : ''}
-                </Text>
-                <Text style={s.note}>
-                  {item.row.id.startsWith('manual:') ? '來源：自行編輯' : '來源：個人匯入'}
-                </Text>
-                {item.conflict ? <Text style={s.warning}>上課時間重疊，請核對課表。</Text> : null}
-              </View>
-            ))
+            <>
+              {remaining.map(renderCourse)}
+              {!remaining.length ? <Text style={s.detail}>今天的上課時段已結束。</Text> : null}
+              {ended.length ? (
+                <View style={s.history}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      historyVisible ? '收合已結束課程' : `查看已結束的 ${ended.length} 堂課`
+                    }
+                    accessibilityState={{ expanded: historyVisible }}
+                    onPress={() => setExpandedHistory(historyVisible ? null : historyKey)}
+                    style={({ pressed }) => [s.historyButton, pressed && s.pressed]}
+                  >
+                    <Text style={s.buttonText}>
+                      {historyVisible ? '收合已結束課程' : `查看已結束的 ${ended.length} 堂課`}
+                    </Text>
+                    <Text
+                      accessibilityElementsHidden
+                      importantForAccessibility="no"
+                      style={s.historyIndicator}
+                    >
+                      {historyVisible ? '−' : '+'}
+                    </Text>
+                  </Pressable>
+                  {historyVisible ? ended.map(renderCourse) : null}
+                </View>
+              ) : null}
+            </>
           ) : (
             <Text style={s.detail}>
               {plan.unplacedCount ? '目前沒有可確認時間的今日課程。' : '這份課表今天沒有排課。'}
@@ -174,8 +233,10 @@ export function TodayTimetablePanel({ onOpenImport, onOpenTimetable, refreshKey 
           <Text style={s.detail}>
             匯入課表後，就能在這裡查看上課時間與教室。資料只儲存在這台裝置。
           </Text>
-          {openButton('匯入我的課表', onOpenImport)}
-          {openButton('自行編輯課表', () => onOpenTimetable())}
+          <View style={s.actions}>
+            {openButton('匯入我的課表', onOpenImport, true)}
+            {openButton('自行編輯課表', () => onOpenTimetable())}
+          </View>
         </>
       )}
     </View>
@@ -185,25 +246,55 @@ export function TodayTimetablePanel({ onOpenImport, onOpenTimetable, refreshKey 
 const createStyles = () =>
   StyleSheet.create({
     panel: {
-      gap: 12,
-      paddingVertical: 20,
-      marginBottom: 12,
-      borderTopWidth: 1,
-      borderTopColor: theme.colors.border,
+      gap: 10,
+      padding: 18,
+      marginVertical: 14,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: 14,
+      backgroundColor: theme.colors.surface,
     },
-    heading: { color: theme.colors.text, fontSize: 20, fontWeight: '600' },
+    headingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 3 },
+    headingAccent: { width: 3, height: 19, backgroundColor: theme.colors.accent, borderRadius: 2 },
+    heading: { color: theme.colors.text, fontSize: 19, lineHeight: 27, fontWeight: '600', flex: 1 },
     detail: { color: theme.colors.textSecondary, fontSize: 14, lineHeight: 22 },
     note: { color: theme.colors.muted, fontSize: 12, lineHeight: 19 },
     course: {
-      paddingVertical: 12,
+      paddingVertical: 14,
+      paddingHorizontal: 14,
       gap: 6,
-      borderBottomWidth: 1,
-      borderBottomColor: theme.colors.border,
+      borderLeftWidth: 2,
+      borderLeftColor: theme.colors.border,
     },
-    time: { color: theme.colors.accent, fontSize: 13, fontWeight: '600' },
+    currentCourse: {
+      backgroundColor: theme.colors.focusSurface,
+      borderLeftColor: theme.colors.accent,
+      borderTopRightRadius: 8,
+      borderBottomRightRadius: 8,
+    },
+    time: {
+      color: theme.colors.accent,
+      fontSize: 13,
+      lineHeight: 21,
+      fontWeight: '600',
+      fontVariant: ['tabular-nums'],
+    },
     courseTitle: { color: theme.colors.text, fontSize: 18, fontWeight: '600', lineHeight: 26 },
+    endedTime: { color: theme.colors.muted },
+    history: { gap: 8, borderTopWidth: 1, borderTopColor: theme.colors.border, paddingTop: 4 },
+    historyButton: {
+      minHeight: 48,
+      paddingHorizontal: 10,
+      paddingVertical: 10,
+      borderRadius: 7,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+    },
+    historyIndicator: { color: theme.colors.muted, fontSize: 20 },
     warning: { color: theme.colors.danger, fontSize: 13, lineHeight: 21 },
-    actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 18 },
+    actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingTop: 4 },
     terms: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
     term: {
       minHeight: 44,
@@ -214,6 +305,17 @@ const createStyles = () =>
       borderRadius: 6,
     },
     selectedTerm: { backgroundColor: theme.colors.focusSurface, borderColor: theme.colors.accent },
-    button: { minHeight: 44, justifyContent: 'center' },
-    buttonText: { color: theme.colors.accent, fontSize: 14, fontWeight: '600' },
+    button: {
+      minHeight: 48,
+      justifyContent: 'center',
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      borderRadius: 7,
+      alignSelf: 'flex-start',
+    },
+    buttonText: { color: theme.colors.accent, fontSize: 14, lineHeight: 21, fontWeight: '600' },
+    primaryButton: { backgroundColor: theme.colors.accent },
+    primaryText: { color: theme.colors.onAccent },
+    pressed: { backgroundColor: theme.colors.surfaceInteractive },
+    primaryPressed: { backgroundColor: theme.colors.accentHover },
   });

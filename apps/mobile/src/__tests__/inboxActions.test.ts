@@ -11,9 +11,13 @@ import {
 } from '../services/inboxActions';
 import type { InboxTask } from '../data/types';
 import { navigateToCourseScreen } from '../utils/courseNavigation';
+import { safeNavigate } from '../utils/safeNavigate';
 
 jest.mock('../utils/courseNavigation', () => ({
   navigateToCourseScreen: jest.fn(),
+}));
+jest.mock('../utils/safeNavigate', () => ({
+  safeNavigate: jest.fn(() => true),
 }));
 jest.mock('../services/companionSignalRecorder', () => ({
   recordCompanionEvent: jest.fn(),
@@ -184,6 +188,67 @@ describe('navigateFromInboxTask', () => {
         dueAt: '2026-10-20T16:00:00.000Z',
       },
     );
+  });
+
+  test('nuni assignment opens the course submit area in one tap', () => {
+    const workspaceId = 'cw_11111111-1111-4111-8111-111111111111';
+    const assignmentId = 'cwa_22222222-2222-4222-8222-222222222222';
+    const ok = navigateFromInboxTask(
+      {},
+      baseTask({ groupId: workspaceId, assignmentId }),
+      { role: 'student', isTeachingRole: false },
+    );
+    expect(ok).toBe(true);
+    expect(safeNavigate).toHaveBeenCalledWith(
+      {},
+      'NuniWorkspace',
+      {
+        tab: 'courses',
+        workspaceId,
+        assignmentId,
+      },
+    );
+    expect(navigateToCourseScreen).not.toHaveBeenCalled();
+  });
+
+  test('nuni quiz opens the course answer area in one tap', () => {
+    const workspaceId = 'cw_11111111-1111-4111-8111-111111111111';
+    const quizId = 'cwq_33333333-3333-4333-8333-333333333333';
+    const ok = navigateFromInboxTask(
+      {},
+      baseTask({ kind: 'quiz', groupId: workspaceId, assignmentId: quizId }),
+      { role: 'student', isTeachingRole: false },
+    );
+    expect(ok).toBe(true);
+    expect(safeNavigate).toHaveBeenCalledWith(
+      {},
+      'NuniWorkspace',
+      {
+        tab: 'courses',
+        workspaceId,
+        assignmentId: quizId,
+      },
+    );
+    expect(navigateToCourseScreen).not.toHaveBeenCalled();
+  });
+
+  test('nuni assignment without work id still opens the course', () => {
+    const workspaceId = 'cw_11111111-1111-4111-8111-111111111111';
+    const ok = navigateFromInboxTask(
+      {},
+      baseTask({ groupId: workspaceId, assignmentId: undefined }),
+      { role: 'student', isTeachingRole: false },
+    );
+    expect(ok).toBe(true);
+    expect(safeNavigate).toHaveBeenCalledWith(
+      {},
+      'NuniWorkspace',
+      {
+        tab: 'courses',
+        workspaceId,
+      },
+    );
+    expect(navigateToCourseScreen).not.toHaveBeenCalled();
   });
 
   test('assignment without id does not open the class feed', () => {

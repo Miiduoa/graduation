@@ -19,6 +19,7 @@ WORKDIR="${WORKDIR:-$DUMP_DIR/verify}"
 mkdir_private "$WORKDIR"
 
 capture_dest() {
+  psql_url "$DEST_DATABASE_URL" -At -F $'\t' --file ./public-acl.sql >"$WORKDIR/dest_public_acl.tsv"
   psql_url "$DEST_DATABASE_URL" -At -F $'\t' -c "
 SELECT n.nspname, c.relname, (
   xpath('row/c/text()', query_to_xml(format('SELECT count(*) AS c FROM %I.%I', n.nspname, c.relname), false, true, ''))
@@ -150,6 +151,7 @@ capture_dest
 if [[ "${COMPARE_INVENTORY:-}" == "yes" ]]; then
   [[ -f "$DUMP_DIR/inventory/table_counts.tsv" ]] || die "找不到 dump 盤點"
   [[ -s "$DUMP_DIR/inventory/schema_migrations.tsv" ]] || die "dump 盤點沒有 schema_migrations，拒絕核對"
+  SRC_PUBLIC_ACL="$DUMP_DIR/inventory/public_acl.tsv"
   SRC_COUNTS="$DUMP_DIR/inventory/table_counts.tsv"
   SRC_MIGRATIONS="$DUMP_DIR/inventory/schema_migrations.tsv"
   SRC_SEQ="$DUMP_DIR/inventory/sequences.tsv"
@@ -196,6 +198,8 @@ SELECT n.nspname, c.relname, t.tgname
  WHERE n.nspname = 'public' AND NOT t.tgisinternal
  ORDER BY 1,2,3
 " >"$WORKDIR/src_triggers.tsv"
+  psql_url "$SOURCE_DATABASE_URL" -At -F $'\t' --file ./public-acl.sql >"$WORKDIR/src_public_acl.tsv"
+  SRC_PUBLIC_ACL="$WORKDIR/src_public_acl.tsv"
   SRC_COUNTS="$WORKDIR/src_table_counts.tsv"
   SRC_MIGRATIONS="$WORKDIR/src_schema_migrations.tsv"
   SRC_SEQ="$WORKDIR/src_sequences.tsv"
@@ -257,6 +261,8 @@ if src != dest:
     sys.exit(1)
 PY
 
+[[ -f "$SRC_PUBLIC_ACL" ]] || die "缺少 PUBLIC ACL 盤點，請用新版 01-export.sh 重新匯出"
+compare_tsv_set "PUBLIC ACL" "$SRC_PUBLIC_ACL" "$WORKDIR/dest_public_acl.tsv"
 compare_tsv_set extensions "$SRC_EXT" "$WORKDIR/dest_extensions.tsv"
 compare_tsv_set functions "$SRC_FUNCS" "$WORKDIR/dest_functions.tsv"
 compare_tsv_set triggers "$SRC_TRIGGERS" "$WORKDIR/dest_triggers.tsv"
@@ -293,7 +299,7 @@ if missing:
     if os.environ.get("IGNORE_MISSING_ROLES") == "yes":
         print("IGNORE_MISSING_ROLES=yes，只警告。")
     else:
-        print("這些角色的 GRANT 可能已被跳過。在新 project 建好後重跑匯入，或設 IGNORE_MISSING_ROLES=yes。")
+        print("這些角色的 GRANT 可能已被跳過。在新 project 建好後重放 grants-skipped.txt 並重新核對；不要重跑整份匯入。")
         sys.exit(1)
 PY
 
