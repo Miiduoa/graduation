@@ -17,7 +17,9 @@ import {
   loadNuniHomeMaterials,
 } from '@/lib/nuniHomeOverview';
 import { CourseMaterialSearch } from '@/features/nuni/CourseMaterialSearch';
-import { isMaterialNew, isMaterialUnread } from '@/lib/courseMaterials';
+import { isMaterialNew } from '@/lib/courseMaterials';
+import { useClientHydrated } from '@/lib/useClientHydrated';
+import { useMaterialReadIds } from '@/lib/useMaterialClientState';
 import { publicCampusServices } from '@/lib/publicCampusServices';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { isTeacherRole, useSchoolRole } from '@/lib/useSchoolRole';
@@ -148,17 +150,18 @@ function Deadline({ task, now }: { task: HomeTask; now: Date | null }) {
 }
 
 export default function HomePage() {
+  const hydrated = useClientHydrated();
   const { user, loading: authLoading } = useAuth();
   const nuni = useNuniSession();
   const refreshSession = nuni.refresh;
-  const context = nuni.session?.context;
-  const accountId = nuni.session?.platformAccountId;
-  const uid = user?.uid;
+  const context = hydrated ? nuni.session?.context : undefined;
+  const accountId = hydrated ? nuni.session?.platformAccountId : undefined;
+  const uid = hydrated ? user?.uid : undefined;
   const school = useOptionalSelectedSchool();
   const role = useSchoolRole(uid, school?.selectedSchoolId || 'pu');
   const owner =
     context && accountId ? `nuni:${context}:${accountId}` : uid ? `school:${uid}` : null;
-  const sessionLoading = authLoading || nuni.loading;
+  const sessionLoading = !hydrated || authLoading || nuni.loading;
   const blocked = nuni.pendingLogout || (!!nuni.error && !uid);
   const [result, setResult] = useState<{ owner: string; data: HomeData } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -259,15 +262,13 @@ export default function HomePage() {
   const laterTasks = data ? selectLaterCourseWork(data.tasks, now ?? new Date()) : [];
   const recentFeedback = data?.recentFeedback ?? [];
   const materialAccount = accountId || uid || '';
-  const newMaterials = (data?.materials ?? []).filter(
-    (item) =>
-      isMaterialNew(item.createdAt, (now ?? new Date()).getTime()) ||
-      isMaterialUnread(
-        materialAccount,
-        item.id,
-        typeof localStorage === 'undefined' ? null : localStorage,
-      ),
-  );
+  const readIds = useMaterialReadIds(materialAccount);
+  const nowMs = now?.getTime() ?? null;
+  const newMaterials = (data?.materials ?? []).filter((item) => {
+    const fresh = nowMs != null && isMaterialNew(item.createdAt, nowMs);
+    const unread = readIds != null && !readIds.has(item.id);
+    return fresh || unread;
+  });
   const teacherOnly = !!teaching.length && !studying.length;
   const sensePhase: SensePhase = blocked
     ? 'hidden'

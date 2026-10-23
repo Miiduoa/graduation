@@ -1,14 +1,6 @@
 'use client';
 
-import {
-  use,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from 'react';
+import { use, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
@@ -28,9 +20,11 @@ import {
   landOnCourseWork,
   parseCourseWorkHash,
 } from '@/lib/courseWorkLanding';
-import { describeMaterial, isMaterialUnread, markMaterialRead } from '@/lib/courseMaterials';
+import { describeMaterial, markMaterialRead } from '@/lib/courseMaterials';
 import { useLocationHash } from '@/lib/useLocationHash';
 import { gradeReadOwner, markPublishedGradeReadByLanding } from '@/lib/lmsStudentGrades';
+import { useClientHydrated } from '@/lib/useClientHydrated';
+import { materialBrowserStorage, useMaterialReadIds } from '@/lib/useMaterialClientState';
 import styles from '../../home.module.css';
 
 function workKind(assignment: CourseAssignment) {
@@ -193,10 +187,11 @@ function Assignment({
 
 export default function CoursePage({ params }: { params: Promise<{ courseId: string }> }) {
   const { courseId } = use(params);
+  const hydrated = useClientHydrated();
   const { user, loading: authLoading } = useAuth();
   const school = useOptionalSelectedSchool();
   const hash = useLocationHash();
-  const scopeLoading = authLoading || school?.loading;
+  const scopeLoading = !hydrated || authLoading || school?.loading;
   const returnPath = coursePageReturnPath(courseId, hash);
 
   if (scopeLoading || !user) {
@@ -250,12 +245,7 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
   const active = useRef(false);
   const hash = useLocationHash();
   const revealed = useRef('');
-  const [readTick, setReadTick] = useState(0);
-  const storageReady = useSyncExternalStore(
-    () => () => {},
-    () => true,
-    () => false,
-  );
+  const readIds = useMaterialReadIds(uid);
   const linked = parseCourseWorkHash(hash);
   useLayoutEffect(() => {
     active.current = true;
@@ -297,8 +287,7 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
       if (!landOnCourseWork(target)) return;
       revealed.current = target;
       if (linked.kind === 'material') {
-        markMaterialRead(uid, linked.id, window.localStorage);
-        setReadTick((value) => value + 1);
+        markMaterialRead(uid, linked.id, materialBrowserStorage());
         return;
       }
       const current = course.assignments.find((entry) => entry.id === linked.id);
@@ -366,10 +355,7 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
                   title: module.title,
                   body: [module.description, module.resourceUrl].filter(Boolean).join('\n'),
                 });
-                const unread =
-                  storageReady &&
-                  readTick >= 0 &&
-                  isMaterialUnread(uid, module.id, window.localStorage);
+                const unread = readIds != null && !readIds.has(module.id);
                 return (
                   <article
                     key={module.id}
@@ -395,8 +381,7 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
                         rel="noopener noreferrer"
                         className={styles.primary}
                         onClick={() => {
-                          markMaterialRead(uid, module.id, window.localStorage);
-                          setReadTick((value) => value + 1);
+                          markMaterialRead(uid, module.id, materialBrowserStorage());
                         }}
                       >
                         {module.resourceLabel || described.open.label}

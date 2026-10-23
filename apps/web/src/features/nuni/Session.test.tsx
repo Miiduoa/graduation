@@ -1,4 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { renderToString } from 'react-dom/server';
+import { hydrateRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { browserRequest, NuniSessionProvider, useNuniSession } from './Session';
 
@@ -152,4 +154,30 @@ it('keeps the same session mounted during revalidation and replaces it only afte
   });
   await screen.findByText(accountB);
   expect(screen.queryByText(accountA)).toBeNull();
+});
+
+it('hydrates against the server loading markup after a restored session', async () => {
+  fetcher.mockResolvedValue(response(signed()));
+  const app = (
+    <NuniSessionProvider>
+      <View />
+    </NuniSessionProvider>
+  );
+  const container = document.createElement('div');
+  container.innerHTML = renderToString(app);
+  document.body.append(container);
+  expect(container.querySelector('span')?.textContent).toBe('checking');
+  expect(container.querySelector('output')?.textContent).toBe('signed-out');
+  const onRecoverableError = vi.fn();
+  let root: Root | undefined;
+  try {
+    await act(async () => {
+      root = hydrateRoot(container, app, { onRecoverableError });
+    });
+    expect(onRecoverableError).not.toHaveBeenCalled();
+    expect(await screen.findByText(accountA)).toBeTruthy();
+  } finally {
+    await act(async () => root?.unmount());
+    container.remove();
+  }
 });

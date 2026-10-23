@@ -239,6 +239,29 @@ export function listReadMaterialIds(
   }
 }
 
+const readListeners = new Set<() => void>();
+
+export function subscribeMaterialReads(onChange: () => void) {
+  readListeners.add(onChange);
+  if (typeof window === 'undefined') {
+    return () => {
+      readListeners.delete(onChange);
+    };
+  }
+  const onStorage = (event: StorageEvent) => {
+    if (event.key?.startsWith(MATERIAL_READ_KEY_PREFIX)) onChange();
+  };
+  window.addEventListener('storage', onStorage);
+  return () => {
+    readListeners.delete(onChange);
+    window.removeEventListener('storage', onStorage);
+  };
+}
+
+function notifyMaterialReads() {
+  readListeners.forEach((listener) => listener());
+}
+
 export function markMaterialRead(
   accountId: string,
   materialId: string,
@@ -252,6 +275,7 @@ export function markMaterialRead(
   } catch {
     /* Private mode or quota: unread badges stay until storage is available. */
   }
+  notifyMaterialReads();
   return ids;
 }
 

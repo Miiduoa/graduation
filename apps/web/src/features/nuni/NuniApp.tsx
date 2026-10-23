@@ -14,6 +14,7 @@ import { taipeiWallTimeToIso } from '@campus/shared/src/taipeiTime';
 import { AppHeader } from '@/components/AppHeader';
 import { NuniSignIn } from '@/components/NuniSignIn';
 import { SiteShell } from '@/components/SiteShell';
+import { useClientHydrated } from '@/lib/useClientHydrated';
 import { useLocationHash } from '@/lib/useLocationHash';
 import { useNuniSession } from './Session';
 import { CourseAccessBoundary, MutationForm, useClasses } from './CourseUI';
@@ -359,9 +360,10 @@ function Workspace({ id }: { id: string }) {
 
 function NuniContent() {
   const pathname = usePathname() || '/';
+  const hydrated = useClientHydrated();
   const { session, loading, error, refresh, pendingLogout, logout } = useNuniSession();
   let content: ReactNode;
-  if (loading && !session) content = <p role="status">正在確認登入狀態…</p>;
+  if (!hydrated || (loading && !session)) content = <p role="status">正在確認登入狀態…</p>;
   else if (!session || pathname === '/classroom/login') content = <Login />;
   else if (pathname === '/classroom/account')
     content = (
