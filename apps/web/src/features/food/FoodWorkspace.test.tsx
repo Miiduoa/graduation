@@ -1,4 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { renderToString } from 'react-dom/server';
+import { hydrateRoot, type Root } from 'react-dom/client';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
 import { FoodWorkspace } from './FoodWorkspace';
@@ -428,3 +430,41 @@ it('quietly polls order detail to ready/fulfilled, drops the QR, and skips hidde
   expect(screen.queryByRole('button', { name: '出示取餐憑證' })).toBeNull();
   vi.useRealTimers();
 });
+
+it.each([
+  {
+    name: 'a restored platform session',
+    session: { platformAccountId: 'account-a', context: 'context-a' },
+    ready: '我要點餐',
+  },
+  {
+    name: 'a signed-out account',
+    session: null,
+    ready: '登入後點餐',
+  },
+])(
+  'hydrates /food against the server loading markup after resolving $name',
+  async ({ session, ready }) => {
+    mocks.auth.session = null;
+    mocks.auth.loading = true;
+    const app = <FoodWorkspace />;
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(app);
+    document.body.append(container);
+    expect(container.querySelector('[role="status"]')?.textContent).toBe('正在確認帳號…');
+    mocks.auth.session = session;
+    mocks.auth.loading = false;
+    const onRecoverableError = vi.fn();
+    let root: Root | undefined;
+    try {
+      await act(async () => {
+        root = hydrateRoot(container, app, { onRecoverableError });
+      });
+      expect(onRecoverableError).not.toHaveBeenCalled();
+      expect(screen.getByRole(session ? 'button' : 'link', { name: ready })).toBeTruthy();
+    } finally {
+      await act(async () => root?.unmount());
+      container.remove();
+    }
+  },
+);
