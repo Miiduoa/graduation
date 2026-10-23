@@ -5,8 +5,10 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from 'react';
 import {
@@ -24,7 +26,39 @@ type SessionState = {
   pendingLogout: boolean;
 };
 type Auth = SessionState & { refresh: () => Promise<void>; logout: () => Promise<void> };
-const Context = createContext<Auth | null>(null);
+const initialSessionState: SessionState = {
+  session: null,
+  loading: true,
+  error: '',
+  pendingLogout: false,
+};
+
+function createSessionStore(initialState: SessionState) {
+  let state = initialState;
+  const listeners = new Set<() => void>();
+  return {
+    getSnapshot: () => state,
+    // Delayed Suspense under CampusProviders must hydrate against this loading snapshot.
+    getServerSnapshot: () => initialState,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    setState: (next: SessionState | ((previous: SessionState) => SessionState)) => {
+      state = typeof next === 'function' ? next(state) : next;
+      listeners.forEach((listener) => listener());
+    },
+  };
+}
+
+type SessionStore = ReturnType<typeof createSessionStore>;
+const Context = createContext<{
+  store: SessionStore;
+  refresh: Auth['refresh'];
+  logout: Auth['logout'];
+} | null>(null);
 const LOGOUT_KEY = 'campus-one.nuni.logout-pending';
 const CHANGE_KEY = 'campus-one.nuni.session-change';
 
@@ -120,12 +154,8 @@ function announce(context: string | null): void {
 }
 
 export function NuniSessionProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<SessionState>({
-    session: null,
-    loading: true,
-    error: '',
-    pendingLogout: false,
-  });
+  const [store] = useState(() => createSessionStore(initialSessionState));
+  const { setState } = store;
   const generation = useRef(0);
   const logoutActive = useRef(false);
   const currentContext = useRef<string | null>(null);
@@ -186,7 +216,7 @@ export function NuniSessionProvider({ children }: { children: ReactNode }) {
           pendingLogout: !!pendingContext(),
         });
     }
-  }, []);
+  }, [setState]);
   const logout = useCallback(async () => {
     if (logoutActive.current) return;
     const expectedContext = currentContext.current || pendingContext();
@@ -226,7 +256,7 @@ export function NuniSessionProvider({ children }: { children: ReactNode }) {
     } finally {
       logoutActive.current = false;
     }
-  }, []);
+  }, [setState]);
   useEffect(() => {
     void refresh();
     const onStorage = (event: StorageEvent) => {
@@ -245,16 +275,32 @@ export function NuniSessionProvider({ children }: { children: ReactNode }) {
       document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [refresh]);
-  return <Context.Provider value={{ ...state, refresh, logout }}>{children}</Context.Provider>;
+  const value = useMemo(() => ({ store, refresh, logout }), [store, refresh, logout]);
+  return <Context.Provider value={value}>{children}</Context.Provider>;
+}
+
+const absentStore = createSessionStore({
+  session: null,
+  loading: false,
+  error: '',
+  pendingLogout: false,
+});
+
+function useSessionState(store: SessionStore) {
+  return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getServerSnapshot);
 }
 
 /** 沒有 NuniSessionProvider 時回傳 null（例如單獨測試頁面）。 */
 export function useOptionalNuniSession() {
-  return useContext(Context);
+  const value = useContext(Context);
+  const state = useSessionState(value?.store ?? absentStore);
+  if (!value) return null;
+  return { ...state, refresh: value.refresh, logout: value.logout };
 }
 
 export function useNuniSession() {
   const value = useContext(Context);
   if (!value) throw new Error('NuniSessionProvider is required');
-  return value;
+  const state = useSessionState(value.store);
+  return { ...state, refresh: value.refresh, logout: value.logout };
 }
