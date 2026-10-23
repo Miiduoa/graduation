@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { gzipSync } from 'node:zlib';
 
 export const TDX = 'https://tdx.transportdata.tw';
 export const ORIGIN = 'https://nuni.tw';
@@ -284,8 +285,10 @@ async function probeStaticCatalog(revision, html, fetcher, now) {
 
 export function buildRemoteCommand(source, profile = LIVE_PROFILE) {
   validateProfile(profile);
-  const moduleUrl = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
-  const program = `import(${JSON.stringify(moduleUrl)}).then(async(m)=>{try{const r=await m.probeRuntime(${JSON.stringify(profile)});console.log(${JSON.stringify(MARKER)}+JSON.stringify(r))}catch(e){console.log(${JSON.stringify(MARKER)}+JSON.stringify({ready:false,reason:m.sanitizedRemoteFailure(e)}));process.exitCode=1}})`;
+  // The full source exceeds the Machines exec request limit. Transfer it compressed
+  // and restore the exact module in memory, without files or additional packages.
+  const compressedSource = gzipSync(source).toString('base64');
+  const program = `import("node:zlib").then(({gunzipSync})=>import("data:text/javascript;base64,"+gunzipSync(Buffer.from(${JSON.stringify(compressedSource)},"base64")).toString("base64"))).then(async(m)=>{try{const r=await m.probeRuntime(${JSON.stringify(profile)});console.log(${JSON.stringify(MARKER)}+JSON.stringify(r))}catch(e){console.log(${JSON.stringify(MARKER)}+JSON.stringify({ready:false,reason:m.sanitizedRemoteFailure(e)}));process.exitCode=1}})`;
   return `node --input-type=module -e '${program.replaceAll("'", "'\\''")}'`;
 }
 
