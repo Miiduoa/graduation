@@ -84,8 +84,8 @@ it('brings a heading that sits above the viewport back into view', () => {
 it('uses an absolute scroll position so a second reveal cannot overshoot', () => {
   let scrollY = 0;
   vi.spyOn(window, 'scrollY', 'get').mockImplementation(() => scrollY);
-  const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation((opts: string | ScrollToOptions) => {
-    if (typeof opts === 'object') scrollY = Number(opts.top);
+  const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation((x: number | ScrollToOptions, y?: number) => {
+    scrollY = typeof x === 'object' ? Number(x.top) : Number(y);
   });
   const { node } = paneAt(850);
   revealStopResult(node);
