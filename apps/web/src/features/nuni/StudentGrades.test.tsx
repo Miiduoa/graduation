@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { renderToString } from 'react-dom/server';
+import { hydrateRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 import { StudentGradesBoard, StudentGradesPage } from './StudentGrades';
 import {
@@ -21,10 +23,21 @@ const authState = vi.hoisted(() => ({
   user: null as null | { uid: string },
   loading: false,
 }));
+const loaders = vi.hoisted(() => ({
+  nuni: vi.fn(),
+  school: vi.fn(),
+}));
 
 vi.mock('./Session', () => ({
   useNuniSession: () => sessionState,
   browserRequest: vi.fn(),
+}));
+vi.mock('@/lib/nuniStudentGrades', () => ({
+  loadNuniStudentGrades: (...args: unknown[]) => loaders.nuni(...args),
+  isNuniSessionError: () => false,
+}));
+vi.mock('@/lib/schoolStudentGrades', () => ({
+  loadSchoolStudentGrades: (...args: unknown[]) => loaders.school(...args),
 }));
 vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => authState,
@@ -65,6 +78,8 @@ afterEach(() => {
   sessionState.pendingLogout = false;
   authState.user = null;
   authState.loading = false;
+  loaders.nuni.mockReset();
+  loaders.school.mockReset();
 });
 
 function item(patch: Partial<GradeItem> = {}): GradeItem {
@@ -245,4 +260,70 @@ it('says it is loading while the session is still resolving', () => {
   sessionState.loading = true;
   render(<StudentGradesPage />);
   expect(screen.getByRole('status').textContent).toBe(GRADE_COPY.loading);
+});
+
+it('hydrates the signed-in grades page against the server loading markup', async () => {
+  sessionState.session = { context: 'session-a', platformAccountId: 'student-a' };
+  sessionState.loading = false;
+  authState.user = { uid: 'alice' };
+  loaders.nuni.mockResolvedValue(book([section()]));
+  loaders.school.mockResolvedValue(book([]));
+  const app = <StudentGradesPage />;
+  const container = document.createElement('div');
+  container.innerHTML = renderToString(app);
+  document.body.append(container);
+  expect(container.querySelector('[role="status"]')?.textContent).toBe(GRADE_COPY.loading);
+  expect(container.textContent).not.toContain(GRADE_COPY.unread);
+  expect(container.querySelector('time')).toBeNull();
+  const onRecoverableError = vi.fn();
+  let root: Root | undefined;
+  try {
+    await act(async () => {
+      root = hydrateRoot(container, app, { onRecoverableError });
+    });
+    expect(onRecoverableError).not.toHaveBeenCalled();
+    const homework = await screen.findByRole('link', { name: /作業一/ });
+    expect(homework.textContent).toContain(GRADE_COPY.unread);
+    expect(container.querySelector('time')).toBeTruthy();
+  } finally {
+    await act(async () => root?.unmount());
+    container.remove();
+  }
+});
+
+it('hydrates published grade rows without unread or time on the server markup', async () => {
+  const app = (
+    <StudentGradesBoard
+      nuni={book([section()])}
+      school={null}
+      ownerId={ownerId}
+      filter="all"
+      onFilter={vi.fn()}
+      onOpen={vi.fn()}
+    />
+  );
+  const container = document.createElement('div');
+  container.innerHTML = renderToString(app);
+  document.body.append(container);
+  expect(container.textContent).toContain('作業一');
+  expect(container.querySelector('[aria-label="成績摘要"]')?.textContent).toContain('未讀0');
+  expect(container.querySelector('a[href*="#assignment-"]')?.textContent).not.toContain(
+    GRADE_COPY.unread,
+  );
+  expect(container.querySelector('time')).toBeNull();
+  const onRecoverableError = vi.fn();
+  let root: Root | undefined;
+  try {
+    await act(async () => {
+      root = hydrateRoot(container, app, { onRecoverableError });
+    });
+    expect(onRecoverableError).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: /作業一/ }).textContent).toContain(GRADE_COPY.unread),
+    );
+    expect(container.querySelector('time')?.dateTime).toBe('2026-10-09T04:00:00Z');
+  } finally {
+    await act(async () => root?.unmount());
+    container.remove();
+  }
 });

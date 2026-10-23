@@ -8,6 +8,7 @@ import { SiteShell } from '@/components/SiteShell';
 import { NuniSignIn } from '@/components/NuniSignIn';
 import { LoginLink } from '@/components/LoginLink';
 import { useAuth } from '@/components/AuthGuard';
+import { useClientHydrated } from '@/lib/useClientHydrated';
 import { browserRequest, useNuniSession } from './Session';
 import {
   GRADE_COPY,
@@ -34,11 +35,10 @@ import shared from './NuniApp.module.css';
 const FILTERS: GradeFilter[] = ['all', 'unread', 'graded', 'waiting', 'missing'];
 
 function useOnline() {
-  const [online, setOnline] = useState(
-    typeof navigator === 'undefined' ? true : navigator.onLine,
-  );
+  const [online, setOnline] = useState(true);
   useEffect(() => {
     const update = () => setOnline(navigator.onLine);
+    update();
     window.addEventListener('online', update);
     window.addEventListener('offline', update);
     return () => {
@@ -51,14 +51,6 @@ function useOnline() {
 
 function useGradeReadEpoch() {
   return useSyncExternalStore(subscribeGradeRead, getGradeReadEpoch, () => 0);
-}
-
-function useStorageReady() {
-  return useSyncExternalStore(
-    () => () => {},
-    () => true,
-    () => false,
-  );
 }
 
 export function StudentGradesBoard({
@@ -81,7 +73,7 @@ export function StudentGradesBoard({
   onOpen: (item: GradeItem, ownerId: string) => void;
 }) {
   useGradeReadEpoch();
-  const storageReady = useStorageReady();
+  const hydrated = useClientHydrated();
   const ownerFor = (item: GradeItem) =>
     gradeOwnerForSource(item.source, nuniAccountId, schoolUid) || ownerId || '';
   const courses = [...(nuni?.courses ?? []), ...(school?.courses ?? [])];
@@ -96,14 +88,14 @@ export function StudentGradesBoard({
     if (item.status === 'graded') summary.graded += 1;
     if (item.status === 'waiting') summary.waiting += 1;
     if (item.status === 'missing') summary.missing += 1;
-    if (storageReady && isPublishedGradeUnread(ownerFor(item), item)) summary.unread += 1;
+    if (hydrated && isPublishedGradeUnread(ownerFor(item), item)) summary.unread += 1;
   }
   const visibleCourses = courses
     .map((course) => ({
       ...course,
       visible: course.items.filter((item) => {
         if (filter === 'unread') {
-          return storageReady && isPublishedGradeUnread(ownerFor(item), item);
+          return hydrated && isPublishedGradeUnread(ownerFor(item), item);
         }
         return matchesGradeFilter(item, filter, ownerFor(item));
       }),
@@ -181,7 +173,7 @@ export function StudentGradesBoard({
           ownerId={ownerId}
           nuniAccountId={nuniAccountId}
           schoolUid={schoolUid}
-          storageReady={storageReady}
+          hydrated={hydrated}
           filter={filter}
           onOpen={onOpen}
         />
@@ -202,7 +194,7 @@ function CourseSection({
   ownerId,
   nuniAccountId,
   schoolUid,
-  storageReady,
+  hydrated,
   filter,
   onOpen,
 }: {
@@ -211,7 +203,7 @@ function CourseSection({
   ownerId?: string;
   nuniAccountId?: string | null;
   schoolUid?: string | null;
-  storageReady: boolean;
+  hydrated: boolean;
   filter: GradeFilter;
   onOpen: (item: GradeItem, ownerId: string) => void;
 }) {
@@ -257,7 +249,7 @@ function CourseSection({
               key={gradeRowKey(item)}
               item={item}
               ownerId={gradeOwnerForSource(item.source, nuniAccountId, schoolUid) || ownerId || ''}
-              storageReady={storageReady}
+              hydrated={hydrated}
               onOpen={onOpen}
             />
           ))}
@@ -274,15 +266,15 @@ function gradeRowKey(item: GradeItem) {
 function GradeRow({
   item,
   ownerId,
-  storageReady,
+  hydrated,
   onOpen,
 }: {
   item: GradeItem;
   ownerId: string;
-  storageReady: boolean;
+  hydrated: boolean;
   onOpen: (item: GradeItem, ownerId: string) => void;
 }) {
-  const unread = storageReady && isPublishedGradeUnread(ownerId, item);
+  const unread = hydrated && isPublishedGradeUnread(ownerId, item);
   const when = item.publishedAt || item.submittedAt;
   return (
     <li>
@@ -305,7 +297,7 @@ function GradeRow({
           {item.feedback ? (
             <span className={styles.preview}>老師評語：{item.feedback}</span>
           ) : null}
-          {when ? (
+          {when && hydrated ? (
             <span className={styles.meta}>
               <time dateTime={when}>{formatTaipeiDateTime(when, { seconds: false })}</time>
             </span>
@@ -321,6 +313,7 @@ function GradeRow({
 }
 
 export function StudentGradesPage() {
+  const hydrated = useClientHydrated();
   const nuni = useNuniSession();
   const { user, loading: authLoading } = useAuth();
   const online = useOnline();
@@ -330,12 +323,12 @@ export function StudentGradesPage() {
   const [nuniLoading, setNuniLoading] = useState(false);
   const [schoolLoading, setSchoolLoading] = useState(false);
   const generation = useRef(0);
-  const nuniAccount = nuni.session?.platformAccountId;
-  const nuniContext = nuni.session?.context;
+  const nuniAccount = hydrated ? nuni.session?.platformAccountId : undefined;
+  const nuniContext = hydrated ? nuni.session?.context : undefined;
   const refreshNuni = nuni.refresh;
-  const uid = user?.uid;
+  const uid = hydrated ? user?.uid : undefined;
   const signedIn = !!nuniAccount || !!uid;
-  const sessionLoading = nuni.loading || authLoading;
+  const sessionLoading = !hydrated || nuni.loading || authLoading;
   const blocked = nuni.pendingLogout || (!!nuni.error && !nuniAccount && !uid);
 
   const load = useCallback(async () => {
