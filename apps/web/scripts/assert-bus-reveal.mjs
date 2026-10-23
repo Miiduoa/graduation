@@ -7,7 +7,13 @@
  *   BUS_PAGE_URL=http://127.0.0.1:3000/bus?schoolId=pu node apps/web/scripts/assert-bus-reveal.mjs
  */
 import { mkdir, writeFile } from 'node:fs/promises';
-import { chromium } from 'playwright';
+import { pathToFileURL } from 'node:url';
+
+const { chromium } = await import(
+  process.env.PLAYWRIGHT_MODULE
+    ? pathToFileURL(process.env.PLAYWRIGHT_MODULE).href
+    : 'playwright'
+);
 
 const url = process.env.BUS_PAGE_URL || 'http://127.0.0.1:3000/bus?schoolId=pu&campus=pu';
 const outDir = process.env.BUS_REVEAL_OUT || '/tmp/bus-reveal';
