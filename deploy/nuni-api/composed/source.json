@@ -78,7 +78,7 @@
     },
     "apps/api/src/public-cafeterias/merchantMode.ts": {
       "source": "packages/shared/src/merchantMode.ts",
-      "sha256": "b43477b444d7b1dafaaca9d844b9b68b89e454548510dcf2f9efc853ceb8f06f"
+      "sha256": "99328337753fc0f922a987b770f5050186cbcf2628873e53463c01d3fde9714b"
     },
     "apps/api/src/public-cafeterias/routes.ts": {
       "source": "deploy/nuni-api/public-cafeterias/routes.ts",
@@ -96,8 +96,8 @@
       "sha256": "03bd7b3497d39758d52a04fd33603c15abd4cfe9bc606499a7246c70cc0c2a0e"
     }
   ],
-  "overlayTree": "c9746b456b56aee6b6d1ff067a6627fa281890fc",
+  "overlayTree": "14c1ec316f8b553fc4d94217635ebc5884f28ed6",
   "patchedAppSha256": "ebab4626e20f64204db95528e2cd2819c6270c0d2f0efa6f440aaac9f71a5636",
   "runtimeInventoryScope": "Pinned base analysis only; not a composed API grant receipt",
-  "candidateTree": "b0a10ac814cd03fbfb45132566035acce8339f17"
+  "candidateTree": "dbb75af7df295bf891d4bd09d262637c136847c1"
 }
