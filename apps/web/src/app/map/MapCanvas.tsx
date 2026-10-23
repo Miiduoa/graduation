@@ -37,11 +37,13 @@ export default function MapCanvas({
         const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
           attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
           maxZoom: 19,
+          detectRetina: true,
         });
         tiles.on('tileerror', () => {
           if (active) setError(true);
         });
         tiles.addTo(map);
+        map.invalidateSize();
         setRuntime({ map, L });
       })
       .catch(() => {

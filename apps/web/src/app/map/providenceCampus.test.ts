@@ -1,12 +1,16 @@
 import { expect, it } from 'vitest';
 import {
   isProvidencePendingVerification,
+  locationMatchesSearch,
   PROVIDENCE_BUS_STOPS,
   PROVIDENCE_CAMPUS_BOUNDS,
   PROVIDENCE_CAMPUS_CENTER,
   PROVIDENCE_CAMPUS_PLACES,
+  PROVIDENCE_CAMPUS_SOURCE,
   providencePlaceSourceUrl,
   walkingEstimateLabel,
+  walkingMinutesFromMeters,
+  WALKING_METERS_PER_MINUTE,
   withProvidenceCampusPlaces,
 } from './providenceCampus';
 import type { MapLocation } from './mapService';
@@ -33,10 +37,21 @@ it('keeps every Providence place inside the published campus bounds area', () =>
 });
 
 it('carries audited verification states, transit codes and no unverified ATM', () => {
-  expect(PROVIDENCE_CAMPUS_PLACES).toHaveLength(23);
+  expect(PROVIDENCE_CAMPUS_PLACES).toHaveLength(24);
   expect(PROVIDENCE_CAMPUS_PLACES.some((place) => place.name.includes('ATM'))).toBe(false);
   expect(PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-yiyuan')?.name).toBe('宜園餐廳');
   expect(PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-pool')?.name).toBe('溫水游泳池');
+  expect(PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-xijia')).toMatchObject({
+    name: '希嘉學苑',
+    lat: 24.228017,
+    lng: 120.58067,
+    sourceUrl: 'https://www.openstreetmap.org/relation/9246899',
+    verification: 'cross-checked',
+  });
+  expect(PROVIDENCE_CAMPUS_PLACES.some((place) => place.name.includes('善牧'))).toBe(false);
+  expect(PROVIDENCE_CAMPUS_PLACES.some((place) => place.sourceUrl.includes('4081204263'))).toBe(
+    false,
+  );
   expect(
     PROVIDENCE_CAMPUS_PLACES.filter((place) => place.verification === 'single-source').map(
       (place) => place.id,
@@ -48,8 +63,24 @@ it('carries audited verification states, transit codes and no unverified ATM', (
     for (const id of stop.transitStopIds!) expect(id).toMatch(/^TCOD_[A-Za-z0-9_-]+$/);
     expect(stop.description).toContain('往');
   }
-  expect(walkingEstimateLabel(400)).toBe('步行約 5 分鐘（直線估算，實際路線會更長）');
+  expect(WALKING_METERS_PER_MINUTE).toBe(80);
+  expect(walkingMinutesFromMeters(400)).toBe(5);
+  expect(walkingEstimateLabel(400)).toBe(
+    '步行約 5 分鐘（直線 400 公尺 ÷ 每分鐘 80 公尺，四捨五入；不是導航路線時間）',
+  );
   expect(walkingEstimateLabel(-1)).toBe('');
+});
+
+it('only matches dorm, restroom and print searches to cross-checked buildings', () => {
+  const byTerm = (term: string) =>
+    PROVIDENCE_CAMPUS_PLACES.filter((place) => locationMatchesSearch(place, term)).map(
+      (place) => place.id,
+    );
+  expect(byTerm('宿舍').sort()).toEqual(['pu-sigao', 'pu-xijia']);
+  expect(byTerm('廁所').sort()).toEqual(['pu-sigao', 'pu-xijia']);
+  expect(byTerm('影印').sort()).toEqual(['pu-library', 'pu-zhishan']);
+  expect(PROVIDENCE_CAMPUS_SOURCE.dormXijiaUrl).toMatch(/^https:\/\/osadorm\.pu\.edu\.tw\//);
+  expect(PROVIDENCE_CAMPUS_SOURCE.libraryPrintUrl).toMatch(/^https:\/\/b028\.pu\.edu\.tw\//);
 });
 
 it('uses the bundled OpenStreetMap places only when the Providence source is empty', () => {

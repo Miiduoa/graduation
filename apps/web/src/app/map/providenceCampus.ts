@@ -19,18 +19,31 @@ import type { MapLocation } from './mapService';
  * 對應建築範圍內，並與校方「校園地圖實境導覽」的建築名單核對名稱。
  * 對得上標 cross-checked；只有單一來源的標 single-source，畫面會顯示
  * 「待確認」。「郵局 ATM」只有單一節點、又不在任何已核對建築範圍內，
- * 已先拿下，不為了湊數留著。完整逐筆表見 docs/campus-map-providence.md。
+ * 已先拿下，不為了湊數留著。2026-10-23 補上希嘉學苑（OSM relation
+ * 9246899，校方地圖編號 13）；宿舍／廁所／影印只掛在已交叉核對的建築
+ * 上，不另猜獨立座標。善牧學苑與未命名 OSM 廁所節點未放上。完整逐筆表
+ * 見 docs/campus-map-providence.md。
  */
 
 export const PROVIDENCE_CAMPUS_SOURCE = {
   retrievedAt: '2026-10-19',
+  facilitiesRetrievedAt: '2026-10-23',
   mapDataLabel: 'OpenStreetMap 貢獻者',
   mapDataUrl: 'https://www.openstreetmap.org/copyright',
   officialCampusMapUrl: 'https://gnl.pu.edu.tw/p/426-1007-8.php?Lang=zh-tw',
+  officialCampusTourUrl: 'https://www.pu.edu.tw/p/404-1000-1131.php?Lang=zh-tw',
   officialDirectionsUrl: 'https://www.pu.edu.tw/p/406-1000-2733,r192.php?Lang=zh-tw',
+  dormXijiaUrl: 'https://osadorm.pu.edu.tw/p/412-1065-2647.php?Lang=zh-tw',
+  dormSigaoUrl: 'https://osadorm.pu.edu.tw/p/412-1065-2731.php?Lang=zh-tw',
+  libraryPrintUrl: 'https://b028.pu.edu.tw/p/426-1054-48.php?Lang=zh-tw',
+  zhishanPrintNoticeUrl: 'https://tecr.pu.edu.tw/p/16-1024-46936.php?Lang=zh-tw',
+  zhishanFoodCourtPdfUrl: 'https://dbs.pu.edu.tw/var/file/69/1069/img/1213/113-restr-yi.pdf',
   transitDatasetUrl: 'https://data.gov.tw/dataset/81555',
   transitCatalogDate: '2026-10-18',
 } as const;
+
+/** 直線步行估算：每分鐘 80 公尺（約 4.8 km/h），四捨五入到整分、最少 1 分鐘。 */
+export const WALKING_METERS_PER_MINUTE = 80;
 
 /** OpenStreetMap「靜宜大學」校園範圍（way 117553450）的外框與中心。 */
 export const PROVIDENCE_CAMPUS_BOUNDS = {
@@ -53,6 +66,7 @@ export type ProvidencePlace = MapLocation & {
 
 const osmWay = (id: number) => `https://www.openstreetmap.org/way/${id}`;
 const osmNode = (id: number) => `https://www.openstreetmap.org/node/${id}`;
+const osmRelation = (id: number) => `https://www.openstreetmap.org/relation/${id}`;
 
 export const PROVIDENCE_CAMPUS_PLACES: readonly ProvidencePlace[] = [
   { id: 'pu-zhugu', name: '主顧樓', category: '教學', description: '', lat: 24.226939, lng: 120.583587, sourceUrl: osmWay(255784268) , verification: 'cross-checked' },
@@ -63,13 +77,58 @@ export const PROVIDENCE_CAMPUS_PLACES: readonly ProvidencePlace[] = [
   { id: 'pu-fangji', name: '方濟樓', category: '教學', description: '', lat: 24.227864, lng: 120.583509, sourceUrl: osmWay(255784368) , verification: 'cross-checked' },
   { id: 'pu-siyuan', name: '思源樓', category: '教學', description: '', lat: 24.226931, lng: 120.582346, sourceUrl: osmWay(295684731) , verification: 'cross-checked' },
   { id: 'pu-jingan', name: '靜安樓', category: '教學', description: '', lat: 24.226214, lng: 120.5823, sourceUrl: osmWay(293503497) , verification: 'cross-checked' },
-  { id: 'pu-zhishan', name: '至善樓', category: '教學', description: '', lat: 24.228147, lng: 120.579773, sourceUrl: osmWay(255784219) , verification: 'cross-checked' },
-  { id: 'pu-library', name: '蓋夏圖書館', category: '圖書館', description: '', lat: 24.226282, lng: 120.581377, sourceUrl: osmWay(255784049) , verification: 'cross-checked' },
+  {
+    id: 'pu-zhishan',
+    name: '至善樓',
+    category: '教學',
+    description:
+      '校方校園地圖編號 15。校內影印在這棟（師資培育中心轉知「至善樓采崴影印」；事務組餐廳簡介寫至善餐廳 1F「采葳影印輸出」）。搜尋「影印」會對到這棟已核對建築，不是獨立店面座標。',
+    lat: 24.228147,
+    lng: 120.579773,
+    sourceUrl: osmWay(255784219),
+    verification: 'cross-checked',
+    facilities: ['影印', '列印'],
+  },
+  {
+    id: 'pu-library',
+    name: '蓋夏圖書館',
+    category: '圖書館',
+    description:
+      '校方校園地圖編號 4。蓋夏圖書館「列印／影印」頁：1F 參考諮詢檯購卡，B1–1F、3F–4F 影印區，1F 資料檢索區列印。搜尋「影印」會對到這棟已核對建築。',
+    lat: 24.226282,
+    lng: 120.581377,
+    sourceUrl: osmWay(255784049),
+    verification: 'cross-checked',
+    facilities: ['影印', '列印'],
+  },
   { id: 'pu-chapel', name: '主顧聖母堂', category: '宗教', description: '', lat: 24.228164, lng: 120.581515, sourceUrl: osmWay(665651135) , verification: 'cross-checked' },
   { id: 'pu-monastery', name: '修院', category: '宗教', description: '', lat: 24.227833, lng: 120.582498, sourceUrl: osmWay(255784429) , verification: 'cross-checked' },
   { id: 'pu-jingyuan', name: '靜園餐廳', category: '餐飲', description: '', lat: 24.227517, lng: 120.58157, sourceUrl: osmWay(255784235) , verification: 'cross-checked' },
   { id: 'pu-yiyuan', name: '宜園餐廳', category: '餐飲', description: '', lat: 24.227152, lng: 120.579543, sourceUrl: osmWay(255784490) , verification: 'cross-checked' },
-  { id: 'pu-sigao', name: '思高學苑', category: '住宿', description: '', lat: 24.22906, lng: 120.58206, sourceUrl: osmWay(255784179) , verification: 'cross-checked' },
+  {
+    id: 'pu-xijia',
+    name: '希嘉學苑',
+    category: '住宿',
+    description:
+      '校方校園地圖編號 13，女生宿舍與住宿組。住宿服務組列出公共盥洗室。搜尋「宿舍」「盥洗室」「廁所」會對到這棟已核對建築，不是獨立廁所座標。',
+    lat: 24.228017,
+    lng: 120.58067,
+    sourceUrl: osmRelation(9246899),
+    verification: 'cross-checked',
+    facilities: ['宿舍', '女生宿舍', '盥洗室', '廁所'],
+  },
+  {
+    id: 'pu-sigao',
+    name: '思高學苑',
+    category: '住宿',
+    description:
+      '校方校園地圖編號 16，男生宿舍與住宿組。住宿服務組寫寢室單元含衛浴設施。搜尋「宿舍」「衛浴」「廁所」會對到這棟已核對建築，不是獨立廁所座標。',
+    lat: 24.22906,
+    lng: 120.58206,
+    sourceUrl: osmWay(255784179),
+    verification: 'cross-checked',
+    facilities: ['宿舍', '男生宿舍', '衛浴', '廁所'],
+  },
   { id: 'pu-gym', name: '若望保祿二世體育館', category: '運動', description: '', lat: 24.229194, lng: 120.581062, sourceUrl: osmWay(255784165) , verification: 'cross-checked' },
   { id: 'pu-pool', name: '溫水游泳池', category: '運動', description: '', lat: 24.229419, lng: 120.580272, sourceUrl: osmWay(255784072) , verification: 'cross-checked' },
   { id: 'pu-health', name: '保健中心', category: '健康', description: '', lat: 24.228113, lng: 120.579668, sourceUrl: osmNode(4081270496) , verification: 'cross-checked' },
@@ -151,12 +210,43 @@ export function isProvidencePendingVerification(location: MapLocation): boolean 
   return place?.verification === 'single-source';
 }
 
+/** OpenStreetMap 閘門標記，與校方「如何到靜宜」GPS（24.2257, 120.5772）相距約 11 公尺。 */
+export const PROVIDENCE_WALK_ORIGIN = {
+  lat: 24.225714,
+  lng: 120.577096,
+} as const;
+
+export function walkingMinutesFromMeters(distanceInMeters: number): number | null {
+  if (!Number.isFinite(distanceInMeters) || distanceInMeters < 0) return null;
+  return Math.max(1, Math.round(distanceInMeters / WALKING_METERS_PER_MINUTE));
+}
+
 /**
- * 用直線距離粗估步行時間（約每分鐘 80 公尺）。
- * 這只是幫忙判斷遠近，不是路線導航時間，畫面必須照實標明。
+ * 用直線距離粗估步行時間：公尺 ÷ 每分鐘 80 公尺，四捨五入，最少 1 分鐘。
+ * 這不是路線導航時間，畫面必須把公式寫出來。
  */
 export function walkingEstimateLabel(distanceInMeters: number): string {
-  if (!Number.isFinite(distanceInMeters) || distanceInMeters < 0) return '';
-  const minutes = Math.max(1, Math.round(distanceInMeters / 80));
-  return `步行約 ${minutes} 分鐘（直線估算，實際路線會更長）`;
+  const minutes = walkingMinutesFromMeters(distanceInMeters);
+  if (minutes == null) return '';
+  const metres = Math.round(distanceInMeters);
+  return `步行約 ${minutes} 分鐘（直線 ${metres} 公尺 ÷ 每分鐘 ${WALKING_METERS_PER_MINUTE} 公尺，四捨五入；不是導航路線時間）`;
+}
+
+export function locationSearchText(location: MapLocation): string {
+  return [
+    location.name,
+    location.category,
+    location.description,
+    location.building,
+    location.floor,
+    ...(location.facilities ?? []),
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+export function locationMatchesSearch(location: MapLocation, rawTerm: string): boolean {
+  const term = rawTerm.trim().toLocaleLowerCase('zh-TW');
+  if (!term) return true;
+  return locationSearchText(location).toLocaleLowerCase('zh-TW').includes(term);
 }

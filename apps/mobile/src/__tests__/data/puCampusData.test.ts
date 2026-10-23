@@ -23,6 +23,7 @@ const AUDITED: ReadonlyArray<{
   { id: 'pu-monastery', name: '修院', lat: 24.227833, lng: 120.582498, verification: 'cross-checked' },
   { id: 'pu-jingyuan', name: '靜園餐廳', lat: 24.227517, lng: 120.58157, verification: 'cross-checked' },
   { id: 'pu-yiyuan', name: '宜園餐廳', lat: 24.227152, lng: 120.579543, verification: 'cross-checked' },
+  { id: 'pu-xijia', name: '希嘉學苑', lat: 24.228017, lng: 120.58067, verification: 'cross-checked' },
   { id: 'pu-sigao', name: '思高學苑', lat: 24.22906, lng: 120.58206, verification: 'cross-checked' },
   { id: 'pu-gym', name: '若望保祿二世體育館', lat: 24.229194, lng: 120.581062, verification: 'cross-checked' },
   { id: 'pu-pool', name: '溫水游泳池', lat: 24.229419, lng: 120.580272, verification: 'cross-checked' },
