@@ -7,6 +7,7 @@ import { NuniError, nuniErrorMessage, type NuniWorkspace } from '@campus/shared/
 import { MutationForm, useClasses } from './CourseUI';
 import { useNuniSession } from './Session';
 import { courseRoleLabels } from './courseTasks';
+import { CourseMaterialSearch } from './CourseMaterialSearch';
 import styles from './NuniApp.module.css';
 
 function CourseList({ title, items }: { title: string; items: NuniWorkspace[] }) {
@@ -87,6 +88,7 @@ export function WorkspaceList() {
           更新課程
         </button>
       </div>
+      {items && items.length > 0 ? <CourseMaterialSearch /> : null}
       <div className={styles.grid}>
         <div>
           {error ? (

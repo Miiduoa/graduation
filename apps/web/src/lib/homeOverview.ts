@@ -1,6 +1,7 @@
 import { collection, doc, getDoc, getDocs } from 'firebase/firestore';
 import { parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
 import { getDb, isFirebaseConfigured } from './firebase';
+import type { MaterialSearchSeed } from './courseMaterials';
 
 export interface HomeCourse {
   id: string;
@@ -18,6 +19,15 @@ export interface HomeTask {
   dueAt: string | null;
   href?: string;
   acceptsLate?: boolean;
+}
+export interface HomeMaterial {
+  id: string;
+  courseId: string;
+  courseName: string;
+  title: string;
+  unitTitle: string | null;
+  createdAt: string;
+  href: string;
 }
 /** Published teacher feedback visible to the signed-in student. */
 export interface HomeFeedback {
@@ -60,6 +70,11 @@ export interface HomeData {
   tasks: HomeTask[];
   /** Newest published teacher feedback across enrolled courses (student view). */
   recentFeedback?: HomeFeedback[];
+  materials?: HomeMaterial[];
+  /** Set when materials could not be read; assignments and feedback may still be present. */
+  materialsError?: string | null;
+  /** Successful material reads the today-page search box can reuse without another round-trip. */
+  materialSearchSeed?: MaterialSearchSeed;
   unreadCount: number;
   archivedCount?: number;
 }
