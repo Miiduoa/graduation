@@ -77,13 +77,18 @@
   padding: 10px 11px;
   border-radius: 7px;
   color: var(--muted);
-  font-size: 14px;
+  font-size: var(--font-body-sm-size);
   line-height: 20px;
   white-space: nowrap;
   text-decoration: none;
   transition:
     background-color 160ms ease,
     color 160ms ease;
+}
+
+.nav > a:active {
+  background: var(--panel);
+  color: var(--text);
 }
 
 .nav > a > svg {
