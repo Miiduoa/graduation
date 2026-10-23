@@ -19,7 +19,7 @@ export const SERVICE_ACCESS = {
 export const CAMPUS_SERVICES = [
   {
     name: '個人行事曆',
-    text: '查看自行匯入的活動、考試與行程',
+    text: '新增、編輯與查看自己的活動、考試與行程',
     href: '/calendar',
     access: 'device',
     keywords: '行事曆 活動 考試 日期 calendar',

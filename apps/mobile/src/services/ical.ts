@@ -145,19 +145,82 @@ export async function exportAndShareICalFile(
   calendarName?: string,
 ): Promise<void> {
   const icsContent = generateICalString(events, calendarName);
-  const file = new File(Paths.cache, filename);
+  await shareICalContent(icsContent, filename);
+}
 
-  await file.write(icsContent);
+type ICalShareDependencies = {
+  isAvailable(): Promise<boolean>;
+  write(content: string, filename: string): Promise<{ uri: string; remove(): void }>;
+  share(uri: string): Promise<void>;
+};
 
-  const canShare = await isAvailableAsync();
-  if (canShare) {
-    await shareAsync(file.uri, {
+let nextOwnedICalExportSeq = 0;
+
+/**
+ * Distinct cache basename for one export invocation.
+ * Keeps a human-readable stem and `.ics` while isolating overlapping shares / account switches.
+ */
+export function ownedICalCacheFilename(requestedName: string, now = Date.now()): string {
+  nextOwnedICalExportSeq += 1;
+  const trimmed = requestedName.trim() || 'campus-calendar.ics';
+  const withoutExt = /\.ics$/i.test(trimmed) ? trimmed.slice(0, -4) : trimmed;
+  const stem = withoutExt.replace(/[/\\]/g, '-').trim() || 'campus-calendar';
+  return `${stem}-${now}-${nextOwnedICalExportSeq}.ics`;
+}
+
+const nativeICalShare: ICalShareDependencies = {
+  isAvailable: isAvailableAsync,
+  async write(content, filename) {
+    const file = new File(Paths.cache, ownedICalCacheFilename(filename));
+    await file.write(content);
+    return {
+      uri: file.uri,
+      remove: () => {
+        if (file.exists) file.delete();
+      },
+    };
+  },
+  share: (uri) =>
+    shareAsync(uri, {
       mimeType: 'text/calendar',
       dialogTitle: '匯出行事曆',
       UTI: 'public.calendar',
-    });
-  } else {
-    throw new Error('分享功能不可用');
+    }),
+};
+
+/**
+ * Writes an ICS payload to a cache file and opens the native share sheet.
+ * Scope fencing must be provided by callers so a deferred share cannot cross accounts.
+ */
+export async function shareICalContent(
+  content: string,
+  filename = 'campus-one-personal-events.ics',
+  active: () => boolean = () => true,
+  dependencies: ICalShareDependencies = nativeICalShare,
+): Promise<void> {
+  const requireActive = () => {
+    if (!active()) throw new Error('帳號或學校已切換，這次匯出已停止。');
+  };
+  requireActive();
+  if (!content.trim()) throw new Error('目前沒有可匯出的行程。');
+  const available = await dependencies.isAvailable();
+  requireActive();
+  if (!available) throw new Error('這台裝置暫時無法開啟分享選單，行程仍保留，請稍後再試。');
+  const file = await dependencies.write(content, filename);
+  try {
+    requireActive();
+  } catch (error) {
+    file.remove();
+    throw error;
+  }
+  try {
+    await dependencies.share(file.uri);
+    // Keep the owned cache file only while the same scope is still active: some targets
+    // finish reading asynchronously. A post-share scope change must remove the old file.
+    requireActive();
+  } catch (error) {
+    file.remove();
+    throw error instanceof Error ? error : new Error('分享選單未能開啟，請重試。');
   }
 }
 
