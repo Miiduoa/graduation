@@ -317,10 +317,22 @@ export function probeFlyMachine(machineId, command, profile = LIVE_PROFILE, exec
   try {
     // Use the existing deployment token through the Machines API. SSH would
     // create an additional certificate for a read-only runtime probe.
-    stdout = execute('flyctl',['machine','exec',machineId,'--app','nuni-web','--timeout','300',command],
+    stdout = execute('flyctl',['machine','exec',machineId,'--app','nuni-web','--timeout','300','--json',command],
       {encoding:'utf8',timeout:310_000,maxBuffer:256*1024,stdio:['ignore','pipe','pipe']});
   } catch (error) { fail(failureFromFlyExecError(error, profile)); }
-  return {machineId,...parseRemoteReport(stdout, profile)};
+  let result;
+  if (typeof stdout !== 'string') fail('runtime-probe-output-invalid');
+  try { result = JSON.parse(stdout); } catch { fail('runtime-probe-output-invalid'); }
+  if (!record(result) || typeof result.stdout !== 'string' ||
+      Object.keys(result).some((key) => !['stdout','stderr','exit_code'].includes(key)) ||
+      (Object.hasOwn(result, 'stderr') && typeof result.stderr !== 'string') ||
+      (Object.hasOwn(result, 'exit_code') && !Number.isInteger(result.exit_code))) fail('runtime-probe-output-invalid');
+  // flyctl's JSON response uses Go's omitempty: a successful zero exit is
+  // omitted. Its own CLI exit code does not reflect a remote command failure.
+  // Never accept a success marker from a command that exited unsuccessfully.
+  if (Object.hasOwn(result, 'exit_code') && result.exit_code !== 0)
+    fail(failureFromFlyExecError({stdout: result.stdout}, profile));
+  return {machineId,...parseRemoteReport(result.stdout, profile)};
 }
 
 async function main() {
