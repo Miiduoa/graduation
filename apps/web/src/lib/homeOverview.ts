@@ -19,6 +19,15 @@ export interface HomeTask {
   href?: string;
   acceptsLate?: boolean;
 }
+export interface HomeMaterial {
+  id: string;
+  courseId: string;
+  courseName: string;
+  title: string;
+  unitTitle: string | null;
+  createdAt: string;
+  href: string;
+}
 /** Published teacher feedback visible to the signed-in student. */
 export interface HomeFeedback {
   kind: 'assignment' | 'quiz';
@@ -60,6 +69,7 @@ export interface HomeData {
   tasks: HomeTask[];
   /** Newest published teacher feedback across enrolled courses (student view). */
   recentFeedback?: HomeFeedback[];
+  materials?: HomeMaterial[];
   unreadCount: number;
   archivedCount?: number;
 }

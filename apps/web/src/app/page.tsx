@@ -10,8 +10,10 @@ import { AccountIdentity } from '@/components/AccountIdentity';
 import { NextClassCard, TodayTimetable } from '@/components/timetable/TodayTimetable';
 import { browserRequest, useNuniSession } from '@/features/nuni/Session';
 import { FeedbackList } from '@/components/home/FeedbackList';
-import { loadHomeData, type HomeCourse, type HomeData, type HomeTask } from '@/lib/homeOverview';
+import { loadHomeData, type HomeCourse, type HomeData, type HomeMaterial, type HomeTask } from '@/lib/homeOverview';
 import { loadNuniHomeData } from '@/lib/nuniHomeOverview';
+import { CourseMaterialSearch } from '@/features/nuni/CourseMaterialSearch';
+import { isMaterialNew, isMaterialUnread } from '@/lib/courseMaterials';
 import { publicCampusServices } from '@/lib/publicCampusServices';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { isTeacherRole, useSchoolRole } from '@/lib/useSchoolRole';
@@ -49,6 +51,34 @@ const serviceIcons: Record<string, CampusIconName> = {
   '/cafeteria': 'cafeteria',
   '/library': 'library',
 };
+
+function MaterialList({ items }: { items: HomeMaterial[] }) {
+  return (
+    <ul className={styles.list} data-testid="today-material-list">
+      {items.map((item) => (
+        <li key={`${item.courseId}-${item.id}`}>
+          <Link href={item.href} className={styles.task}>
+            <span className={styles.taskMarker} aria-hidden="true">
+              <CampusIcon name="course" size={20} />
+            </span>
+            <span className={styles.taskContent}>
+              <strong>{item.title}</strong>
+              <span>
+                {item.courseName}
+                {item.unitTitle ? ` · ${item.unitTitle}` : ''}
+                {' · 教材'}
+              </span>
+            </span>
+            <span className={styles.deadline}>開啟這份教材</span>
+            <span aria-hidden className={styles.arrow}>
+              →
+            </span>
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 function WorkList({ tasks, now, testId }: { tasks: HomeTask[]; now: Date | null; testId: string }) {
   return (
@@ -191,6 +221,16 @@ export default function HomePage() {
   const todayTasks = data ? selectTodayCourseWork(data.tasks, now ?? new Date()) : [];
   const laterTasks = data ? selectLaterCourseWork(data.tasks, now ?? new Date()) : [];
   const recentFeedback = data?.recentFeedback ?? [];
+  const materialAccount = accountId || uid || '';
+  const newMaterials = (data?.materials ?? []).filter(
+    (item) =>
+      isMaterialNew(item.createdAt, (now ?? new Date()).getTime()) ||
+      isMaterialUnread(
+        materialAccount,
+        item.id,
+        typeof localStorage === 'undefined' ? null : localStorage,
+      ),
+  );
   const teacherOnly = !!teaching.length && !studying.length;
   const sensePhase: SensePhase = blocked
     ? 'hidden'
@@ -379,6 +419,20 @@ export default function HomePage() {
                 ) : null}
               </section>
             )}
+            {signedIn && !!context && !busy && !error ? <CourseMaterialSearch compact /> : null}
+            {signedIn && newMaterials.length > 0 ? (
+              <section className={styles.section} aria-labelledby="new-materials-title">
+                <div className={styles.sectionHeading}>
+                  <h2 id="new-materials-title">
+                    新教材 <span>{newMaterials.length}</span>
+                  </h2>
+                </div>
+                <p className={styles.sectionNote}>
+                  近兩週發布、這台裝置尚未開啟，或七天內的新教材。點一下落到該份教材，有留白與高亮。
+                </p>
+                <MaterialList items={newMaterials} />
+              </section>
+            ) : null}
             <TodayTimetable now={now} />
             {showSense ? (
               <TodaySensePanel

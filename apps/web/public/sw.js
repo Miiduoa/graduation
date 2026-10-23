@@ -107,15 +107,25 @@ function courseWorkPath(data) {
   if (!path) return null;
   const quizId = textId(data.quizId);
   const assignmentId = textId(data.assignmentId);
+  const materialId = textId(data.materialId);
+  const material =
+    data.type === 'material' ||
+    data.type === 'unread_material' ||
+    data.type === 'course_material' ||
+    data.kind === 'material';
   const quiz =
     data.isQuiz === true ||
     data.isQuiz === 'true' ||
     data.kind === 'quiz' ||
     data.type === 'quiz' ||
     data.category === 'exam';
-  const workId = quiz ? quizId || assignmentId : assignmentId || quizId;
+  const workId = material
+    ? materialId
+    : quiz
+      ? quizId || assignmentId
+      : assignmentId || quizId;
   if (!workId) return path;
-  return `${path}#${quiz ? 'quiz' : 'assignment'}-${encodeURIComponent(workId)}`;
+  return `${path}#${material ? 'material' : quiz ? 'quiz' : 'assignment'}-${encodeURIComponent(workId)}`;
 }
 
 self.addEventListener('notificationclick', (event) => {
@@ -134,6 +144,9 @@ self.addEventListener('notificationclick', (event) => {
     case 'assignment_due':
     case 'homework':
     case 'quiz':
+    case 'material':
+    case 'unread_material':
+    case 'course_material':
       path = work || '/';
       break;
     case 'grade':

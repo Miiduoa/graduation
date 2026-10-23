@@ -768,3 +768,31 @@ it('keeps today-work and next-class rows wrapping on a 390-wide phone', async ()
   expect(css).toMatch(/\.courseWorkTarget \{[^}]*scroll-margin-top: 48px/);
   expect(css).toMatch(/@media \(max-width: 480px\) \{[\s\S]*?\.task \{[\s\S]*?padding: 12px 0/);
 });
+
+it('lists new materials on today and opens the cabinet hash', async () => {
+  state.uid = null;
+  state.session = { context: 'session-a', platformAccountId: 'student-a' };
+  const materialId = 'cwm_11111111-1111-4111-8111-111111111111';
+  const courseId = 'cw_11111111-1111-4111-8111-111111111111';
+  vi.mocked(loadNuniHomeData).mockResolvedValue({
+    ...data('資料庫系統'),
+    courses: [{ id: courseId, name: '資料庫系統', role: 'student', unreadCount: 0, href: `/classroom/course/${courseId}` }],
+    materials: [
+      {
+        id: materialId,
+        courseId,
+        courseName: '資料庫系統',
+        title: '本週講義',
+        unitTitle: '第 03 週',
+        createdAt: new Date().toISOString(),
+        href: `/classroom/course/${courseId}#material-${materialId}`,
+      },
+    ],
+  });
+  render(<HomePage />);
+  const link = await screen.findByRole('link', { name: /本週講義/ });
+  expect(link.getAttribute('href')).toBe(`/classroom/course/${courseId}#material-${materialId}`);
+  expect(link.textContent).toContain('資料庫系統');
+  expect(link.textContent).toContain('第 03 週');
+  expect(screen.getByLabelText('找所有課的教材')).toBeTruthy();
+});
