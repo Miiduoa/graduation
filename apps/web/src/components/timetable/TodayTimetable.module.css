@@ -1,8 +1,8 @@
 .panel {
-  margin-bottom: 24px;
-  padding: 24px;
+  margin: 0;
+  padding: 26px 28px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 12px;
   background: var(--surface);
 }
 .heading {
@@ -13,9 +13,39 @@
   gap: 12px;
 }
 .panel h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin: 0;
-  font-size: 21px;
+  font-size: var(--font-h2-size);
   font-weight: 600;
+}
+.panel h2 svg {
+  color: var(--brand);
+  flex-shrink: 0;
+}
+.panel .heading > a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--font-body-sm-size);
+  text-decoration: none;
+}
+.panel .heading > a:hover {
+  color: var(--brand);
+  text-decoration: underline;
+}
+.emptyState {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+.emptyState > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-body-sm-size);
 }
 .panel p {
   line-height: 1.65;
@@ -60,6 +90,32 @@
   gap: 16px;
   padding: 16px 0;
   border-top: 1px solid var(--border);
+  position: relative;
+}
+.list .ongoing,
+.list .upcoming {
+  padding-left: 14px;
+}
+.ongoing::before,
+.upcoming::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 17px;
+  bottom: 17px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--brand);
+}
+.upcoming::before {
+  background: var(--border-strong);
+}
+.ongoing .status {
+  color: var(--brand);
+  background: var(--accent-soft);
+  border-radius: 4px;
+  padding: 3px 7px;
+  font-weight: 600;
 }
 .time {
   font-variant-numeric: tabular-nums;
@@ -108,6 +164,15 @@
   display: inline-flex;
   align-items: center;
   min-height: 44px;
+}
+.actions a[class*='primary'] {
+  text-decoration: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  .term select:hover,
+  .panel button:hover {
+    border-color: var(--border-strong);
+  }
 }
 @media (max-width: 480px) {
   .panel {

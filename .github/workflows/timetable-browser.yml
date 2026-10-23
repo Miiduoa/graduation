@@ -6,7 +6,17 @@ on:
       - 'apps/web/src/components/timetable/**'
       - 'apps/web/src/components/ui/Modal*'
       - 'apps/web/src/components/ui/modalSession*'
+      - 'apps/web/src/app/page.tsx'
+      - 'apps/web/src/app/home.module.css'
+      - 'apps/web/src/app/globals.css'
+      - 'apps/web/src/app/life/**'
+      - 'apps/web/src/components/AppHeader*'
+      - 'apps/web/src/components/CampusIcon*'
+      - 'apps/web/src/components/CampusWeek*'
+      - 'apps/web/src/components/CampusServiceMenu*'
+      - 'apps/web/src/components/SchoolSelector*'
       - 'scripts/timetable-browser-smoke.py'
+      - 'scripts/campus-visual-smoke.py'
       - '.github/workflows/timetable-browser.yml'
   workflow_dispatch:
 permissions:
@@ -58,10 +68,13 @@ jobs:
           if (!ready) throw new Error('Web server did not become ready');
           NODE
           python scripts/timetable-browser-smoke.py
+          python scripts/campus-visual-smoke.py
       - name: Upload screenshots and results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: timetable-browser
-          path: artifacts/timetable-browser
+          path: |
+            artifacts/timetable-browser
+            artifacts/campus-visual
           retention-days: 7

@@ -80,17 +80,24 @@ export function TodayTimetablePanel({ onOpenImport, onOpenTimetable, refreshKey 
       }),
     [visible, scope?.schoolId, scopeKey, selection, now],
   );
-  const openButton = (label: string, onPress: () => void) => (
-    <Pressable accessibilityRole="button" onPress={onPress} style={s.button}>
-      <Text style={s.buttonText}>{label}</Text>
+  const openButton = (label: string, onPress: () => void, primary = false) => (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [s.button, primary && s.primaryButton, pressed && s.pressed]}
+    >
+      <Text style={[s.buttonText, primary && s.primaryText]}>{label}</Text>
     </Pressable>
   );
   const selectedTerm = plan.terms.find((term) => term.key === plan.termKey);
   return (
     <View style={s.panel} testID="today-timetable">
-      <Text accessibilityRole="header" style={s.heading}>
-        今天的課表
-      </Text>
+      <View style={s.headingRow}>
+        <View style={s.headingAccent} accessibilityElementsHidden />
+        <Text accessibilityRole="header" style={s.heading}>
+          今天的課表
+        </Text>
+      </View>
       {!scopeKey ? (
         <Text style={s.detail}>正在確認帳號，暫時不顯示個人課表。</Text>
       ) : !visible || visible.status === 'loading' ? (
@@ -118,7 +125,11 @@ export function TodayTimetablePanel({ onOpenImport, onOpenTimetable, refreshKey 
                   accessibilityLabel={`查看 ${term.academicYear}／${term.semester} 課表`}
                   accessibilityState={{ selected: plan.termKey === term.key }}
                   onPress={() => setSelection({ scope: scopeKey, term: term.key })}
-                  style={[s.term, plan.termKey === term.key && s.selectedTerm]}
+                  style={({ pressed }) => [
+                    s.term,
+                    plan.termKey === term.key && s.selectedTerm,
+                    pressed && s.pressed,
+                  ]}
                 >
                   <Text style={s.buttonText}>
                     {term.academicYear}／{term.semester}
@@ -129,7 +140,13 @@ export function TodayTimetablePanel({ onOpenImport, onOpenTimetable, refreshKey 
           ) : null}
           {plan.today.length ? (
             plan.today.map((item) => (
-              <View key={item.row.id} style={s.course}>
+              <View
+                key={item.row.id}
+                style={[
+                  s.course,
+                  (item.status === 'ongoing' || item.row.id === plan.nextId) && s.currentCourse,
+                ]}
+              >
                 <Text style={s.time}>
                   {item.startTime}–{item.endTime} ·{' '}
                   {item.status === 'ongoing'
@@ -174,8 +191,10 @@ export function TodayTimetablePanel({ onOpenImport, onOpenTimetable, refreshKey 
           <Text style={s.detail}>
             匯入課表後，就能在這裡查看上課時間與教室。資料只儲存在這台裝置。
           </Text>
-          {openButton('匯入我的課表', onOpenImport)}
-          {openButton('自行編輯課表', () => onOpenTimetable())}
+          <View style={s.actions}>
+            {openButton('匯入我的課表', onOpenImport, true)}
+            {openButton('自行編輯課表', () => onOpenTimetable())}
+          </View>
         </>
       )}
     </View>
@@ -186,24 +205,41 @@ const createStyles = () =>
   StyleSheet.create({
     panel: {
       gap: 12,
-      paddingVertical: 20,
-      marginBottom: 12,
-      borderTopWidth: 1,
-      borderTopColor: theme.colors.border,
+      padding: 20,
+      marginVertical: 16,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: 14,
+      backgroundColor: theme.colors.surface,
     },
-    heading: { color: theme.colors.text, fontSize: 20, fontWeight: '600' },
+    headingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 3 },
+    headingAccent: { width: 3, height: 19, backgroundColor: theme.colors.accent, borderRadius: 2 },
+    heading: { color: theme.colors.text, fontSize: 19, lineHeight: 27, fontWeight: '600', flex: 1 },
     detail: { color: theme.colors.textSecondary, fontSize: 14, lineHeight: 22 },
     note: { color: theme.colors.muted, fontSize: 12, lineHeight: 19 },
     course: {
-      paddingVertical: 12,
+      paddingVertical: 14,
+      paddingHorizontal: 14,
       gap: 6,
-      borderBottomWidth: 1,
-      borderBottomColor: theme.colors.border,
+      borderLeftWidth: 2,
+      borderLeftColor: theme.colors.border,
     },
-    time: { color: theme.colors.accent, fontSize: 13, fontWeight: '600' },
+    currentCourse: {
+      backgroundColor: theme.colors.accentSoft,
+      borderLeftColor: theme.colors.accent,
+      borderTopRightRadius: 8,
+      borderBottomRightRadius: 8,
+    },
+    time: {
+      color: theme.colors.accent,
+      fontSize: 13,
+      lineHeight: 21,
+      fontWeight: '600',
+      fontVariant: ['tabular-nums'],
+    },
     courseTitle: { color: theme.colors.text, fontSize: 18, fontWeight: '600', lineHeight: 26 },
     warning: { color: theme.colors.danger, fontSize: 13, lineHeight: 21 },
-    actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 18 },
+    actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingTop: 4 },
     terms: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
     term: {
       minHeight: 44,
@@ -214,6 +250,16 @@ const createStyles = () =>
       borderRadius: 6,
     },
     selectedTerm: { backgroundColor: theme.colors.focusSurface, borderColor: theme.colors.accent },
-    button: { minHeight: 44, justifyContent: 'center' },
-    buttonText: { color: theme.colors.accent, fontSize: 14, fontWeight: '600' },
+    button: {
+      minHeight: 46,
+      justifyContent: 'center',
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      borderRadius: 7,
+      alignSelf: 'flex-start',
+    },
+    buttonText: { color: theme.colors.accent, fontSize: 14, lineHeight: 21, fontWeight: '600' },
+    primaryButton: { backgroundColor: theme.colors.accent },
+    primaryText: { color: theme.colors.onAccent },
+    pressed: { opacity: 0.72 },
   });
