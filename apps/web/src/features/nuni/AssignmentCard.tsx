@@ -145,7 +145,7 @@ function Assignment({ item, workspace, onConfirmed }: Props) {
 
   return (
     <article
-      className={shared.panel}
+      className={`${shared.panel} ${shared.courseWorkTarget}`}
       id={`assignment-${item.id}`}
       tabIndex={-1}
       aria-labelledby={`assignment-title-${item.id}`}

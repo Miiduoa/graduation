@@ -1198,6 +1198,43 @@ it('does not scroll a submit area when no assignment is deep-linked', async () =
   expect(mockScrollAssignment.reveal).not.toHaveBeenCalled();
 });
 
+it('opens the deep-linked quiz answer area and keeps the submitted receipt visible', async () => {
+  quiz = { ...quiz, myResponse: quizReceipt('已交測驗'), responseCount: 1 };
+  const cache = new Map<string, unknown>([
+    [`course:${courseId}:tab`, 'materials'],
+    [`course:${courseId}:activity-filter`, 'pending'],
+  ]);
+  const view = render(
+    <NuniDraftProvider cache={cache}>
+      <NuniCourses initialWorkspaceId={courseId} initialAssignmentId={quizId} />
+    </NuniDraftProvider>,
+  );
+  const card = await view.findByTestId(`quiz-${quizId}`);
+  const submit = await view.findByTestId(`quiz-submit-${quizId}`);
+  expect(within(card).getByLabelText('測驗作答區：需求練習')).toBeTruthy();
+  expect(within(card).getByText('已作答')).toBeTruthy();
+  expect(within(card).getByText('已交測驗')).toBeTruthy();
+  expect(view.queryByText('老師尚未發布教材。')).toBeNull();
+  fireEvent(submit, 'layout');
+  expect(mockScrollAssignment.reveal).toHaveBeenCalled();
+});
+
+it('explains a missing linked assignment instead of a blank course page', async () => {
+  const view = render(
+    <NuniCourses
+      initialWorkspaceId={courseId}
+      initialAssignmentId="cwa_99999999-9999-4999-8999-999999999999"
+    />,
+  );
+  expect(
+    await view.findByText(
+      '找不到這份作業。可能已被老師刪除，或你沒有查看權限。請從作業列表選擇其他作業。',
+    ),
+  ).toBeTruthy();
+  expect(view.getByText('校園訪談')).toBeTruthy();
+  expect(mockScrollAssignment.reveal).not.toHaveBeenCalled();
+});
+
 it('shows 遲交, Taipei time, and download on teacher receipts', async () => {
   course = { ...course, memberRole: 'owner-teacher' };
   fileSubmitFlag.on = true;
