@@ -1,4 +1,5 @@
 import { readFile, writeFile, appendFile, mkdir } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { hasBusShell, validateProfile } from './transit-release-gate.mjs';
 
@@ -57,6 +58,26 @@ export function summarizeMachines(rows) {
 
 export function requireStable(before, current) {
   if (JSON.stringify(before) !== JSON.stringify(current)) fail('Production changed during build; refusing to overwrite another release.');
+}
+
+export function rollbackImage(before, currentImage) {
+  if (!Array.isArray(before) || before.length !== EXPECTED_MACHINES.length) fail('Rollback snapshot is invalid.');
+  const images = [...new Set(before.map((row) => row?.image))];
+  if (images.length !== 1 || !IMAGE.test(images[0])) fail('Cannot establish an immutable rollback image.');
+  if (typeof currentImage === 'string' && currentImage === images[0]) fail('Rollback image matches the failed release; refusing to redeploy it.');
+  return images[0];
+}
+
+export function rollbackDeployArgs(image) {
+  if (!IMAGE.test(image)) fail('Cannot establish an immutable rollback image.');
+  return ['deploy', '--app', APP, '--config', 'deploy/web/fly.nuni.toml', '--image', image,
+    '--strategy', 'rolling', '--update-only', '--ha=false', '--yes'];
+}
+
+export function requireRolledBack(rows, image) {
+  if (!IMAGE.test(image) || !Array.isArray(rows) || !rows.every((row) => row?.image === image)) {
+    fail('Rollback did not restore the previous image on every Web machine.');
+  }
 }
 
 export async function getJson(url, { fetcher = fetch, headers = {}, query } = {}) {
@@ -142,6 +163,23 @@ async function main() {
     if (env.GITHUB_STEP_SUMMARY) await appendFile(env.GITHUB_STEP_SUMMARY,
       `## Campus One Web release\n\nExpected: ${report.expectedRevision}\n\nObserved: ${report.revision ?? 'unknown'}\n\nTransit release profile: ${report.profile}\n\nWeb deployment verified: ${report.webDeployed}\n\nTransit station query: ${report.transit.status}\n\nLive arrivals and device geolocation require separate verification.\n`);
     if (!report.webDeployed) fail('Public Web verification did not pass. Inspect the evidence before any rollback.');
+    return;
+  }
+  if (command === 'rollback') {
+    const image = rollbackImage(await json(input), env.RELEASE_IMAGE);
+    if (!env.FLY_API_TOKEN) fail('fly-deploy-credential-missing');
+    try {
+      execFileSync('flyctl', rollbackDeployArgs(image), { timeout: 600_000, stdio: 'inherit' });
+    } catch { fail('web-release-rollback-failed'); }
+    let listed;
+    try {
+      listed = execFileSync('flyctl', ['machine', 'list', '--app', APP, '--json'],
+        { encoding: 'utf8', timeout: 60_000, stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch { fail('web-release-rollback-failed'); }
+    const rows = summarizeMachines(JSON.parse(listed));
+    requireRolledBack(rows, image);
+    await save('release-evidence/rollback.json', { restoredImage: image, machines: rows });
+    console.log('Restored the previous Web image on every existing machine after a failed verification.');
     return;
   }
   fail('Unknown release check command.');

@@ -34,7 +34,7 @@ Machines API 檢查使用 `flyctl machine exec --json`，不能以 flyctl 本身
 
 ## 驗證邊界
 
-`node --test deploy/web/transit-release-gate.test.mjs` 使用明確的本機傳輸替身，不能當作正式 TDX 連線紀錄。機內檢查失敗時只回固定錯誤代碼（如 `rate-limited`、`tdx-not-configured`），不回供應商回應內容或憑證資料；Fly Machines API 執行失敗則另記 `fly-runtime-probe-failed`。發布最後的公開驗證會在機內檢查剛用過同一把 TDX 金鑰後執行，正式站可能因保護共用額度回 429 與 `Retry-After`；公開驗證只對 429 依 `Retry-After`（上限 120 秒、且不短於自身 30／60／60 秒間隔）有界重試，整次最多等 240 秒，仍被擋就以 `rate-limited` 停止。不設白名單標頭、不放寬一般使用者限流；機內檢查則維持固定間隔，避免超過 Fly Machines API 執行時限。手機實機定位、道路兩側現場方向與多機器共享配額仍須另行驗收。只有正式機器、憑證、TDX 及發布流程都通過實際檢查，才可宣稱即時公車已啟用；官方入口模式的 Web 發布必須另外註明即時公車尚未啟用。
+`node --test deploy/web/transit-release-gate.test.mjs` 使用明確的本機傳輸替身，不能當作正式 TDX 連線紀錄。機內檢查失敗時只回固定錯誤代碼（如 `rate-limited`、`tdx-not-configured`），不回供應商回應內容或憑證資料；Fly Machines API 執行失敗則另記 `fly-runtime-probe-failed`。發布流程對該傳輸錯誤有界重試（3 秒、7 秒各一次），應用層錯誤碼不重試。遠端模組若無法載入，改回 `runtime-transit-preflight-failed` 標記，避免空白 stdout。Rollout 後若驗證仍失敗，Web release 會把兩台機器 rolling 回 `before.json` 的上一映像。發布最後的公開驗證會在機內檢查剛用過同一把 TDX 金鑰後執行，正式站可能因保護共用額度回 429 與 `Retry-After`；公開驗證只對 429 依 `Retry-After`（上限 120 秒、且不短於自身 30／60／60 秒間隔）有界重試，整次最多等 240 秒，仍被擋就以 `rate-limited` 停止。不設白名單標頭、不放寬一般使用者限流；機內檢查則維持固定間隔，避免超過 Fly Machines API 執行時限。手機實機定位、道路兩側現場方向與多機器共享配額仍須另行驗收。只有正式機器、憑證、TDX 及發布流程都通過實際檢查，才可宣稱即時公車已啟用；官方入口模式的 Web 發布必須另外註明即時公車尚未啟用。
 
 ## 兩台機器共用公車快取
 
