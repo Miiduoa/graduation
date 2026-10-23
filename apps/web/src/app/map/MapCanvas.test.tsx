@@ -86,6 +86,19 @@ it('replaces markers when equal-length source data changes and treats tooltip na
   expect(select).toHaveBeenCalledWith(namedPlace);
 });
 
+it('requests retina tiles and invalidates size after the map is created', async () => {
+  const invalidateSize = vi.spyOn(L.Map.prototype, 'invalidateSize');
+  render(<MapCanvas locations={[library]} selected={null} route={null} onSelect={vi.fn()} />);
+  await waitFor(() => expect(vi.mocked(L.map)).toHaveBeenCalled());
+  const map = vi.mocked(L.map).mock.results.at(-1)!.value as L.Map;
+  let tiles: L.TileLayer | undefined;
+  map.eachLayer((layer) => {
+    if (layer instanceof L.TileLayer) tiles = layer;
+  });
+  expect(tiles?.options.detectRetina).toBe(true);
+  expect(invalidateSize).toHaveBeenCalled();
+});
+
 it('keeps the location list usable when tiles fail and recreates the map on retry', async () => {
   render(<MapCanvas locations={[library]} selected={null} route={null} onSelect={vi.fn()} />);
   await waitFor(() => expect(vi.mocked(L.map)).toHaveBeenCalled());

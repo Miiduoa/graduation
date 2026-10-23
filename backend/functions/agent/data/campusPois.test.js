@@ -4,7 +4,13 @@ const { CAMPUS_POIS, getPoiById, searchPois } = require('./campusPois');
 
 describe('campusPois 靜宜 POI 逐筆翻修', () => {
   it('與核對資料一致且座標落在校園合理範圍', () => {
-    expect(CAMPUS_POIS).toHaveLength(33);
+    expect(CAMPUS_POIS).toHaveLength(34);
+    expect(getPoiById('pu-xijia')).toMatchObject({
+      name: '希嘉學苑',
+      lat: 24.228017,
+      lng: 120.58067,
+      sourceUrl: 'https://www.openstreetmap.org/relation/9246899',
+    });
     for (const poi of CAMPUS_POIS) {
       expect(poi.lat).toBeGreaterThan(24.22);
       expect(poi.lat).toBeLessThan(24.235);

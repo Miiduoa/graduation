@@ -20,7 +20,9 @@ import {
   hasBundledCampusPlaces,
   isBusStopLocation,
   isProvidencePendingVerification,
+  locationMatchesSearch,
   PROVIDENCE_CAMPUS_SOURCE,
+  PROVIDENCE_WALK_ORIGIN,
   providencePlaceSourceUrl,
   walkingEstimateLabel,
   withProvidenceCampusPlaces,
@@ -163,18 +165,10 @@ function MapContent({
     [locations],
   );
   const filtered = useMemo(() => {
-    const term = search.trim().toLocaleLowerCase('zh-TW');
     const matched = locations.filter(
       (location) =>
         (category === '全部' || location.category === category) &&
-        [
-          location.name,
-          location.category,
-          location.description,
-          location.building,
-          location.floor,
-          ...(location.facilities ?? []),
-        ].filter(Boolean).join(' ').toLocaleLowerCase('zh-TW').includes(term) &&
+        locationMatchesSearch(location, search) &&
         (!onlyFavorites || favorites.status !== 'ready' || favorites.ids.has(location.id)) &&
         (!nearbyOnly || !myLocation || distanceMeters(myLocation, location) <= 1000),
     );
@@ -204,6 +198,8 @@ function MapContent({
     ? locations.find((location) => location.id === routeDraft.from)
     : null;
   const selectLocation = useCallback((location: MapLocation) => setSelection(location.id), []);
+  const walkFrom = myLocation ?? (school === 'pu' ? PROVIDENCE_WALK_ORIGIN : null);
+  const walkFromGate = Boolean(walkFrom && !myLocation);
   const mapLocations = useMemo(() => {
     const visible = new Map(filtered.map((location) => [location.id, location]));
     for (const location of [...(routeLocations ?? []), ...(selected ? [selected] : [])])
@@ -385,7 +381,7 @@ function MapContent({
           <input
             className="input"
             type="search"
-            placeholder="輸入建築、設施，或公車路線（例如 300）"
+            placeholder="搜尋宿舍、廁所、影印，或公車路線（例如 300）"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
@@ -447,6 +443,13 @@ function MapContent({
           ))}
         </div>
       </div>
+      <MapCanvas
+        locations={mapLocations}
+        selected={selected}
+        route={routeLocations}
+        myLocation={myLocation}
+        onSelect={selectLocation}
+      />
       {school === 'pu' && (
         <section className={`card ${styles.state}`} aria-label="地圖資料來源">
           <h2>靜宜地圖資料來源</h2>
@@ -455,23 +458,21 @@ function MapContent({
             <a href={PROVIDENCE_CAMPUS_SOURCE.mapDataUrl} target="_blank" rel="noopener noreferrer">
               OpenStreetMap 貢獻者資料
             </a>
-            （查詢日期 {PROVIDENCE_CAMPUS_SOURCE.retrievedAt}），底圖上也保留 OpenStreetMap 署名；
+            （查詢日期 {PROVIDENCE_CAMPUS_SOURCE.retrievedAt}），並與{' '}
+            <a href={PROVIDENCE_CAMPUS_SOURCE.officialCampusTourUrl} target="_blank" rel="noopener noreferrer">
+              校方校園地圖實境導覽
+            </a>
+            交叉核對名稱；底圖上也保留 OpenStreetMap 署名。宿舍、廁所、影印只掛在已核對建築，沒有獨立、對不上的座標就不放。
             公車站牌取自{' '}
             <a href={PROVIDENCE_CAMPUS_SOURCE.transitDatasetUrl} target="_blank" rel="noopener noreferrer">
               臺中市公車站牌資料
             </a>
             （快照 {PROVIDENCE_CAMPUS_SOURCE.transitCatalogDate}）。點公車站可到公車頁看即時到站；
             出入口目前只有一筆標記、名稱待補，其他學校的地點待補，不會先用靜宜資料代替。
+            步行分鐘是直線公尺 ÷ 每分鐘 80 公尺後四捨五入，不是導航路線時間。
           </p>
         </section>
       )}
-      <MapCanvas
-        locations={mapLocations}
-        selected={selected}
-        route={routeLocations}
-        myLocation={myLocation}
-        onSelect={selectLocation}
-      />
       {selected && (
         <section className={`card ${styles.detail}`} aria-label="地點詳情">
           <div>
@@ -484,10 +485,12 @@ function MapContent({
             {Boolean(selected.facilities?.length) && (
               <p>提供設施：{selected.facilities!.join('、')}</p>
             )}
-            {myLocation && (
+            {walkFrom && (
               <p>
-                距離我的位置約 {formatDistance(distanceMeters(myLocation, selected))}（直線距離）；
-                {walkingEstimateLabel(distanceMeters(myLocation, selected))}
+                {walkFromGate
+                  ? `從校園出入口（OpenStreetMap 閘門標記）直線約 ${formatDistance(distanceMeters(walkFrom, selected))}；`
+                  : `距離我的位置約 ${formatDistance(distanceMeters(walkFrom, selected))}（直線距離）；`}
+                {walkingEstimateLabel(distanceMeters(walkFrom, selected))}
               </p>
             )}
             {isProvidencePendingVerification(selected) && (
@@ -630,7 +633,8 @@ function MapContent({
                   </span>
                   <span className={styles.note}>
                     {[location.category, location.building, location.floor && `樓層：${location.floor}`].filter(Boolean).join(' · ')}
-                    {myLocation && ` · 直線距離 ${formatDistance(distanceMeters(myLocation, location))} · ${walkingEstimateLabel(distanceMeters(myLocation, location))}`}
+                    {walkFrom &&
+                      ` · ${walkFromGate ? '從校園出入口直線' : '直線距離'} ${formatDistance(distanceMeters(walkFrom, location))} · ${walkingEstimateLabel(distanceMeters(walkFrom, location))}`}
                   </span>
                   {location.description && (
                     <span className={styles.description}>{location.description}</span>
