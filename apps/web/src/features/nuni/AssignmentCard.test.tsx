@@ -99,6 +99,30 @@ it.each(['student', 'owner-teacher'] as const)(
   },
 );
 
+it.each(['student', 'owner-teacher'] as const)(
+  'does not mark a current mixed-offset review stale for %s',
+  async (role) => {
+    const current = {
+      ...reviewed(),
+      submittedAt: '2026-10-11T10:00:00',
+      reviewedAt: '2026-10-11T03:00:00Z',
+    };
+    state.request.mockResolvedValueOnce({ submissions: [current] });
+    render(
+      <AssignmentCard
+        item={{ ...assignment, mySubmission: role === 'student' ? current : null }}
+        workspace={{ ...workspace, memberRole: role }}
+        reload={reload}
+      />,
+    );
+    if (role === 'owner-teacher') {
+      await openSubmissions();
+      expect(screen.getByRole('button', { name: '已回饋 1' })).toBeTruthy();
+    }
+    expect(screen.queryByText('這則回饋早於最近一次繳交，請老師確認是否仍適用。')).toBeNull();
+  },
+);
+
 it('requires a teacher decision when a student updates the answer under a dirty feedback draft', async () => {
   const original = reviewed();
   state.request

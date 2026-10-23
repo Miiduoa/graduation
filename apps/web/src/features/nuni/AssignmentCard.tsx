@@ -218,8 +218,7 @@ function Assignment({ item, workspace, onConfirmed }: Props) {
               <h4>老師回饋</h4>
               <CourseText text={assignment.mySubmission.teacherFeedback} />
               {assignment.mySubmission.reviewedAt &&
-                Date.parse(assignment.mySubmission.reviewedAt) <
-                  Date.parse(assignment.mySubmission.submittedAt) && (
+                needsFeedbackReview(assignment.mySubmission) && (
                   <p className={styles.note}>這則回饋早於最近一次繳交，請老師確認是否仍適用。</p>
                 )}
               {assignment.mySubmission.reviewedAt && (
@@ -476,7 +475,7 @@ function FeedbackRow({
         <section className={styles.feedback} aria-label="目前老師回饋">
           <h5>目前回饋</h5>
           <CourseText text={entry.teacherFeedback} />
-          {entry.reviewedAt && Date.parse(entry.reviewedAt) < Date.parse(entry.submittedAt) && (
+          {entry.reviewedAt && needsFeedbackReview(entry) && (
             <p className={styles.note}>這則回饋早於最近一次繳交，請老師確認是否仍適用。</p>
           )}
         </section>

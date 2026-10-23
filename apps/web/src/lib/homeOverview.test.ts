@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import { loadHomeData } from './homeOverview';
+import { feedbackPredatesSubmission, loadHomeData } from './homeOverview';
 import { getDoc, getDocs } from 'firebase/firestore';
 import { isFirebaseConfigured } from './firebase';
 
@@ -14,6 +14,11 @@ const entry = (id: string, data: Record<string, unknown>) => ({ id, data: () => 
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(isFirebaseConfigured).mockReturnValue(true);
+});
+it('compares feedback and resubmissions using the accepted Taipei wall-time contract', () => {
+  expect(feedbackPredatesSubmission('2026-10-11T10:00:00', '2026-10-11T03:00:00Z')).toBe(true);
+  expect(feedbackPredatesSubmission('2026-10-11T03:00:00Z', '2026-10-11T10:00:00')).toBe(false);
+  expect(feedbackPredatesSubmission('2026-10-11T10:00:00', '2026-10-11T02:00:00Z')).toBe(false);
 });
 it('requires a configured service and authenticated user', async () => {
   await expect(loadHomeData('')).rejects.toThrow();
