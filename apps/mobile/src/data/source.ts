@@ -82,7 +82,7 @@ export type DataSourceEvidence = {
 export type DataSource = {
   // 公告
   listAnnouncements: (schoolId?: string, options?: QueryOptions) => Promise<Announcement[]>;
-  getAnnouncement: (id: string) => Promise<Announcement | null>;
+  getAnnouncement: (id: string, schoolId?: string) => Promise<Announcement | null>;
 
   // 活動
   listEvents: (schoolId?: string, options?: QueryOptions) => Promise<ClubEvent[]>;

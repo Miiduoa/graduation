@@ -38,10 +38,10 @@ test('a newer main run cannot cancel production; PR/develop validation remains c
   }
 });
 
-test('only a main push can enter the production deployment job', () => {
+test('only a manual run on main can enter the production deployment job', () => {
   for (const [ref, event_name, allowed] of [
-    ['refs/heads/main', 'push', true],
-    ['refs/heads/main', 'workflow_dispatch', false],
+    ['refs/heads/main', 'workflow_dispatch', true],
+    ['refs/heads/main', 'push', false],
     ['refs/pull/30/merge', 'pull_request', false],
     ['refs/heads/develop', 'push', false],
   ]) {
@@ -80,8 +80,7 @@ for (const [failure, stages, hasPreflight] of [
   ['credential-exchange', ['preflight'], false],
   ['preflight', ['preflight'], true],
   ['indexes', ['preflight', 'rules', 'indexes'], true],
-  ['functions', ['preflight', 'rules', 'indexes', 'functions'], true],
-  ['', ['preflight', 'rules', 'indexes', 'functions'], true],
+  ['', ['preflight', 'rules', 'indexes'], true],
 ]) {
   test(`deployment evidence survives ${failure || 'success'} without exposing credentials`, (t) => {
     const { cwd, bin } = fixture(t);
@@ -115,6 +114,9 @@ for (const [failure, stages, hasPreflight] of [
     );
     for (const command of commands) {
       assert.equal(command.args[command.args.indexOf('--project') + 1], 'campus-one-tw');
+      if (command.stage === 'preflight') {
+        assert.equal(command.args[command.args.indexOf('--mode') + 1], 'rules-only');
+      }
     }
     if (!failure) {
       assert.ok(commands[1].args.includes('firestore:rules,storage,firestore:indexes'));
@@ -151,6 +153,13 @@ for (const [failure, stages, hasPreflight] of [
   });
 }
 
+test('Spark production job deploys rules and indexes only, never Cloud Functions', () => {
+  assert.equal(deploy.run.includes('deploy --only functions'), false);
+  assert.ok(deploy.run.includes('firestore:rules,storage,firestore:indexes'));
+  assert.ok(deploy.run.includes('docs/deploy/functions-on-fly.md'));
+  assert.equal(job.if.includes('workflow_dispatch'), true);
+});
+
 test('both successful and failed attempts retain versioned reports without weakening the gate', () => {
   assert.equal(record.if, 'always()');
   assert.equal(upload.if, 'always()');
@@ -165,4 +174,50 @@ test('both successful and failed attempts retain versioned reports without weake
     (step) => step.name === 'Test deployment readiness gates',
   );
   assert.ok(readiness.run.includes('scripts/firebase-ci-workflow.test.cjs'));
+  assert.ok(readiness.run.includes('scripts/nuni-merchant-api-boundary.test.mjs'));
+});
+
+function parseWorkflow(name) {
+  return firebaseRequire('yaml').parse(
+    fs.readFileSync(path.join(__dirname, '../.github/workflows', name), 'utf8'),
+  );
+}
+
+function assertFailsOffMain(step) {
+  assert.ok(step, 'missing require-main step');
+  assert.match(step.run, /refs\/heads\/main/);
+  assert.match(step.run, /::error::/);
+  assert.match(step.run, /exit 1/);
+}
+
+test('production workflows fail closed unless the run is on main', () => {
+  assert.equal(job.if, "github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'");
+  assertFailsOffMain(job.steps[0]);
+
+  const release = parseWorkflow('release.yml');
+  for (const name of ['preflight', 'build-ios', 'build-android', 'create-release']) {
+    assertFailsOffMain(release.jobs[name].steps[0]);
+  }
+
+  const webRelease = parseWorkflow('web-release.yml');
+  const reject = webRelease.jobs['reject-non-main'];
+  assert.equal(
+    reject.if,
+    "github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'",
+  );
+  assertFailsOffMain(reject.steps[0]);
+  assert.equal(
+    webRelease.jobs.release.if,
+    "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'",
+  );
+  assert.equal(webRelease.on.workflow_dispatch.inputs.expected_revision.required, true);
+  assert.equal(webRelease.on.workflow_dispatch.inputs.confirm_app.required, true);
+  assert.ok(
+    webRelease.jobs.release.steps.some(
+      (step) => typeof step.run === 'string' && step.run.includes('release-check.mjs gate'),
+    ),
+  );
+
+  const announcements = parseWorkflow('campus-announcement-sync.yml');
+  assertFailsOffMain(announcements.jobs.sync.steps[0]);
 });

@@ -1,0 +1,55 @@
+name: Course access review
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [feature/course-matching-review-20261014]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  policy-and-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: course_access_test
+          POSTGRES_USER: course_test
+          POSTGRES_PASSWORD: isolated-test-only
+        ports: [5432:5432]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated test tools (no application secrets)
+        run: npm install --prefix "$RUNNER_TEMP/course-tools" --ignore-scripts --no-audit --no-fund typescript@5.5.4 @types/node@22.10.2 pg@8.16.3
+      - name: Compile contracts and run policy and PostgreSQL integration tests
+        env:
+          COURSE_TEST_DATABASE_URL: postgres://course_test:isolated-test-only@localhost:5432/course_access_test
+        run: |
+          set -o pipefail
+          export COURSE_TEST_TSC="$RUNNER_TEMP/course-tools/node_modules/.bin/tsc"
+          export COURSE_TEST_TYPE_ROOTS="$RUNNER_TEMP/course-tools/node_modules/@types"
+          export COURSE_TEST_DEPS="$RUNNER_TEMP/course-tools/node_modules"
+          node scripts/test-course-access.mjs | tee course-access-results.tap
+          python3 -m unittest discover -s scripts/course-access -p '*_test.py' -v
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: course-access-results
+          path: course-access-results.tap
+          if-no-files-found: error
+          retention-days: 14

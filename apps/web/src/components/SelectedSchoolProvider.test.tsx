@@ -72,19 +72,18 @@ it('uses only the supplied directory, searches it, and treats selection as brows
   expect(navigation.search).toBe('?campus=all');
 });
 
-it('changes only campus and preserves existing school authority, route, query and fragment', () => {
-  navigation.pathname = '/teacher/course/course-a';
-  navigation.search = 'school=PU&schoolId=pu&tab=grades';
+it('updates schoolId when switching campus and keeps the current route, extra query and fragment', () => {
+  navigation.pathname = '/announcements';
+  navigation.search = 'school=PU&schoolId=pu&tab=list';
   window.history.replaceState({}, '', '/#assignment-a');
   render(<View />);
   fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
   const [href, options] = navigation.replace.mock.calls[0];
   const target = new URL(href, 'https://campus.test');
-  expect(target.pathname).toBe('/teacher/course/course-a');
-  expect(target.searchParams.get('school')).toBe('PU');
-  expect(target.searchParams.get('schoolId')).toBe('pu');
+  expect(target.pathname).toBe('/announcements');
+  expect(target.searchParams.get('schoolId')).toBe('school-b');
   expect(target.searchParams.get('campus')).toBe('school-b');
-  expect(target.searchParams.get('tab')).toBe('grades');
+  expect(target.searchParams.get('tab')).toBe('list');
   expect(target.hash).toBe('#assignment-a');
   expect(options).toEqual({ scroll: false });
 });
@@ -215,5 +214,61 @@ it('distinguishes a listed campus from an opened school service', () => {
   expect(screen.getByRole('option', { name: '甲校（校務尚未開通）' })).toBeTruthy();
   fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-a' } });
   expect(screen.getByText(/此校目前可瀏覽公開交流，校務服務尚未開通/)).toBeTruthy();
-  expect(navigation.search).toBe('?campus=school-a');
+  expect(navigation.search).toBe('?schoolId=school-a&campus=school-a&school=A');
+});
+
+it('uses Providence on a first visit when the directory includes it, without writing a choice', () => {
+  render(<View ownerKey={null} schools={[{ id: 'pu', name: '靜宜大學' }, ...schools]} />);
+  expect(screen.getByTestId('selected-school').textContent).toBe('靜宜大學');
+  expect(localStorage.getItem(schoolPreferenceKey(null))).toBeNull();
+});
+
+it('keeps an explicit all-campus choice instead of forcing Providence', () => {
+  localStorage.setItem(schoolPreferenceKey(defaults.ownerKey), JSON.stringify({ schoolId: null }));
+  render(<View schools={[{ id: 'pu', name: '靜宜大學' }, ...schools]} />);
+  expect(screen.getByTestId('selected-school').textContent).toBe('不限校園');
+});
+
+it('uses an explicit schoolId deep link ahead of a saved browsing preference', () => {
+  localStorage.setItem(schoolPreferenceKey(defaults.ownerKey), JSON.stringify({ schoolId: 'school-a' }));
+  navigation.search = '?schoolId=school-b';
+  render(<View />);
+  expect(screen.getByTestId('selected-school').textContent).toBe('乙校');
+  expect(JSON.parse(localStorage.getItem(schoolPreferenceKey(defaults.ownerKey))!)).toEqual({ schoolId: 'school-a' });
+});
+
+it('clears an old code when changing to a school listed only by the live directory', () => {
+  navigation.search = '?school=PU&schoolId=pu&campus=pu';
+  render(<View schools={[{ id: 'tw-new-university', name: '新大學' }]} />);
+  fireEvent.change(screen.getByLabelText('瀏覽校園'), {
+    target: { value: 'tw-new-university' },
+  });
+  const params = new URLSearchParams(navigation.search);
+  expect(params.get('schoolId')).toBe('tw-new-university');
+  expect(params.get('campus')).toBe('tw-new-university');
+  expect(params.has('school')).toBe(false);
+});
+
+it('clears map deep links when changing campuses while preserving unrelated map search filters', () => {
+  navigation.pathname = '/map';
+  navigation.search = '?schoolId=school-a&campus=school-a&route=library,gate&focus=library&q=%E8%87%AA%E7%BF%92';
+  render(<View />);
+  expect(screen.getByTestId('selected-school').textContent).toBe('甲校');
+  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
+  const next = new URLSearchParams(navigation.search);
+  expect(next.get('schoolId')).toBe('school-b');
+  expect(next.get('campus')).toBe('school-b');
+  expect(next.has('route')).toBe(false);
+  expect(next.has('focus')).toBe(false);
+  expect(next.get('q')).toBe('自習');
+});
+
+it('keeps a current-school map link intact when choosing the same campus again', () => {
+  navigation.pathname = '/map';
+  navigation.search = '?schoolId=school-a&campus=school-a&route=library,gate&focus=library';
+  render(<View />);
+  act(() => capturedSelection.selectSchool('school-a'));
+  const next = new URLSearchParams(navigation.search);
+  expect(next.get('route')).toBe('library,gate');
+  expect(next.get('focus')).toBe('library');
 });

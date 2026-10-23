@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import re
 import traceback
 from pathlib import Path
 from urllib.parse import urlparse
@@ -15,24 +16,58 @@ OUT.mkdir(parents=True, exist_ok=True)
 SEED = {'courses': [{'id': 'browser-database', 'name': '資料庫管理', 'day': 1, 'start': 3, 'end': 4,
                      'teacher': '測試教師', 'room': '主顧303'}],
         'meta': {'title': '測試課表'}, 'schoolId': 'pu', 'shareWithFriends': False, 'updatedAt': '2026-10-12T00:00:00Z'}
-READ_COPY = '''() => {
-    const scoped = localStorage.getItem('campus-one-personal-timetable:v2:' + JSON.stringify([null, 'pu']));
-    return scoped ? JSON.parse(scoped).value : JSON.parse(localStorage.getItem('campus-one-personal-timetable:local'));
-}'''
+NTHU_SEED = {'courses': [{'id': 'browser-nthu', 'name': '清大測試課程', 'day': 3, 'start': 2, 'end': 3,
+                          'teacher': '測試教師', 'room': '測試教室'}],
+             'meta': {'title': '清大測試課表'}, 'schoolId': 'nthu', 'shareWithFriends': False,
+             'updatedAt': '2026-10-12T00:00:00Z'}
 
 async def main():
     results = []
     async with async_playwright() as p:
-        browser = await p.chromium.launch()
+        browser = await p.chromium.launch(executable_path=os.environ.get('TIMETABLE_CHROMIUM'))
         page = await browser.new_page(viewport={'width': 1440, 'height': 1000})
         await page.context.tracing.start(screenshots=True, snapshots=True)
         errors = []
         page.on('pageerror', lambda error: errors.append(str(error)))
         await page.add_init_script('if (!localStorage.getItem("campus-one-personal-timetable:local")) localStorage.setItem("campus-one-personal-timetable:local", ' + json.dumps(json.dumps(SEED, ensure_ascii=False)) + ');')
+        await page.add_init_script('if (!localStorage.getItem("campus-one-personal-timetable:local:nthu")) localStorage.setItem("campus-one-personal-timetable:local:nthu", ' + json.dumps(json.dumps(NTHU_SEED, ensure_ascii=False)) + ');')
+        # This local browser smoke owns its directory fixture. Never depend on a
+        # deployed campus gateway or silently treat the guest as a PU student.
+        async def local_school_directory(route):
+            await route.fulfill(status=200, content_type='application/json', body=json.dumps({
+                'schools': [{'id': 'pu', 'name': '靜宜大學', 'status': 'not-open'},
+                            {'id': 'nthu', 'name': '國立清華大學', 'status': 'not-open'}]
+            }, ensure_ascii=False))
+        await page.route('**/api/schools', local_school_directory)
         try:
-            await page.goto(BASE + '/timetable', wait_until='networkidle')
+            await page.goto(BASE + '/timetable?campus=all', wait_until='networkidle')
+            await expect(page.get_by_role('status').filter(has_text='請先選擇一所學校')).to_be_visible()
+            assert await page.get_by_role('button', name='移動課程', exact=True).count() == 0
+            results.append('no private timetable is loaded before explicitly selecting a campus')
+            await page.locator('header summary[aria-label="切換校園：不限校園"]').click()
+            await page.get_by_role('combobox', name='瀏覽校園').select_option('pu')
             await expect(page.get_by_role('button', name='移動課程', exact=True)).to_be_visible()
-            await expect(page.get_by_role('region', name='課表儲存狀態').get_by_role('status')).to_contain_text('本機課表')
+            await expect(page.get_by_role('button', name=re.compile(r'^編輯 資料庫管理')).first).to_be_visible()
+            assert await page.evaluate('localStorage.getItem("campus-one-personal-timetable:local:pu")') is None, 'Reading a legacy timetable must not silently rewrite it'
+            # A second university has its own scoped copy; neither copy may leak
+            # when navigating back and forth in the same browser session.
+            await page.locator('header summary[aria-label^="切換校園："]').click()
+            await page.get_by_role('combobox', name='瀏覽校園').select_option('nthu')
+            await expect(page.get_by_role('button', name=re.compile(r'^編輯 清大測試課程')).first).to_be_visible()
+            assert await page.get_by_role('button', name=re.compile(r'^編輯 資料庫管理')).count() == 0, 'PU courses leaked into NTHU'
+            await page.locator('header summary[aria-label^="切換校園："]').click()
+            await page.get_by_role('combobox', name='瀏覽校園').select_option('')
+            await expect(page.get_by_role('status').filter(has_text='請先選擇一所學校')).to_be_visible()
+            assert await page.get_by_role('button', name='移動課程', exact=True).count() == 0, 'Private timetable leaked into campus=all'
+            await page.locator('header summary[aria-label^="切換校園："]').click()
+            await page.get_by_role('combobox', name='瀏覽校園').select_option('pu')
+            await expect(page.get_by_role('button', name=re.compile(r'^編輯 資料庫管理')).first).to_be_visible()
+            assert await page.get_by_role('button', name=re.compile(r'^編輯 清大測試課程')).count() == 0, 'NTHU courses leaked into PU'
+            legacy = await page.evaluate('JSON.parse(localStorage.getItem("campus-one-personal-timetable:local"))')
+            nthu = await page.evaluate('JSON.parse(localStorage.getItem("campus-one-personal-timetable:local:nthu"))')
+            assert legacy['schoolId'] == 'pu' and legacy['courses'][0]['id'] == 'browser-database'
+            assert nthu['schoolId'] == 'nthu' and nthu['courses'][0]['id'] == 'browser-nthu'
+            results.append('PU legacy and NTHU scoped copies are isolated through PU → NTHU → all → PU')
             async def choose():
                 await page.get_by_role('button', name='移動課程', exact=True).click()
                 await page.get_by_role('combobox', name='要移動的課程', exact=True).select_option('browser-database')
@@ -50,11 +85,13 @@ async def main():
             confirm = page.get_by_role('dialog', name='放棄這次修改？', exact=True)
             await expect(confirm.get_by_role('button', name='繼續編輯')).to_be_focused()
             await confirm.get_by_role('button', name='放棄修改', exact=True).click()
-            saved = await page.evaluate(READ_COPY)
+            saved = await page.evaluate('JSON.parse(localStorage.getItem("campus-one-personal-timetable:local"))')
             assert saved['courses'][0]['day'] == 1
             await expect(page.get_by_role('status').filter(has_text='確認儲存後才會移動')).to_have_count(0)
             results.append('keyboard move, cancel and draft protection')
             await expect(dialog).to_have_count(0)
+            # A new import link never grants movement privileges to a private manual timetable.
+            await expect(page.get_by_role('button', name='移動課程', exact=True)).to_be_visible()
             await page.evaluate('''() => {
                 window.dragEvents = [];
                 for (const type of ['mousedown', 'dragstart', 'dragover', 'drop', 'dragend']) {
@@ -89,11 +126,7 @@ async def main():
             await expect(dialog).to_have_count(0)
             await page.reload(wait_until='networkidle')
             await expect(page.get_by_role('button', name='編輯 資料庫管理，星期二第 6 節', exact=True)).to_be_visible()
-            saved = await page.evaluate(READ_COPY)
-            assert saved['courses'][0]['day'] == 2
-            legacy = await page.evaluate('JSON.parse(localStorage.getItem("campus-one-personal-timetable:local"))')
-            assert legacy['courses'][0]['day'] == 1, 'Migration destroyed the original legacy record'
-            results.append('real drag with continuation offset, scoped save and reload; legacy retained')
+            results.append('real drag with continuation offset, save and reload')
             await page.screenshot(path=str(OUT / 'desktop.png'), full_page=True, animations='disabled')
             await page.set_viewport_size({'width': 390, 'height': 844})
             assert await page.evaluate('document.documentElement.scrollWidth <= innerWidth'), 'mobile page overflows horizontally'
@@ -112,36 +145,17 @@ async def main():
             await page.screenshot(path=str(OUT / 'mobile.png'), full_page=True, animations='disabled')
             results.append('390px layout, reachable editor actions and non-dragging movement')
             await page.evaluate('''() => {
-                const key = 'campus-one-personal-timetable:v2:' + JSON.stringify([null, 'pu']);
+                // Saving creates the campus-scoped copy, which must take precedence over legacy.
+                const key = 'campus-one-personal-timetable:local:pu';
                 const data = JSON.parse(localStorage.getItem(key));
-                data.value.courses.push({...data.value.courses[0],id:'pending',name:'時間未定',day:0,start:0,end:0});
-                localStorage.setItem(key,JSON.stringify(data));
+                if (!data || !data.courses.length) throw new Error('Scoped timetable was not saved');
+                data.courses.push({...data.courses[0],id:'pending',name:'時間未定',day:0,start:0,end:0});
+                localStorage.setItem(key, JSON.stringify(data));
             }''')
             await page.reload(wait_until='networkidle')
             await expect(page.get_by_role('button', name='今天空堂', exact=True)).to_be_disabled()
             await expect(page.get_by_role('button', name='排讀書時間', exact=True)).to_be_disabled()
             results.append('incomplete schedules do not produce planning suggestions')
-            await page.evaluate('''() => {
-                const key = 'campus-one-personal-timetable:v2:' + JSON.stringify([null, 'pu']);
-                const data = JSON.parse(localStorage.getItem(key));
-                data.value.courses = []; data.pending = true;
-                localStorage.setItem(key, JSON.stringify(data));
-            }''')
-            await page.reload(wait_until='networkidle')
-            await expect(page.get_by_role('button', name='今天空堂', exact=True)).to_be_disabled()
-            await expect(page.locator('button[aria-label^="編輯 資料庫管理"]')).to_have_count(0)
-            assert (await page.evaluate(READ_COPY))['courses'] == []
-            await page.screenshot(path=str(OUT / 'mobile-empty.png'), full_page=True, animations='disabled')
-            results.append('empty scoped copy is not resurrected from the legacy timetable')
-            await page.evaluate('''() => {
-                localStorage.setItem('campus-one-personal-timetable:v2:' + JSON.stringify([null, 'pu']), '{broken');
-            }''')
-            await page.reload(wait_until='networkidle')
-            await expect(page.locator('section[aria-label="課表讀取失敗"]')).to_be_visible()
-            await expect(page.get_by_role('region', name='課表儲存狀態').get_by_role('status')).to_contain_text('沒有用空白課表覆蓋')
-            assert await page.evaluate('localStorage.getItem("campus-one-personal-timetable:v2:" + JSON.stringify([null, "pu"]))') == '{broken'
-            await page.screenshot(path=str(OUT / 'storage-error.png'), full_page=True, animations='disabled')
-            results.append('corrupted local record is preserved and an explicit read error is shown')
             assert not errors, errors
         except Exception:
             (OUT / 'failure.txt').write_text(traceback.format_exc(), encoding='utf-8')

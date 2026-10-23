@@ -63,7 +63,10 @@ function navigateFromNotificationData(rawData: unknown, profileRole?: UserRole |
         });
       }
       break;
-    case 'assignment': {
+    case 'assignment':
+    case 'assignment_due':
+    case 'homework':
+    case 'quiz': {
       const task = inboxTaskFromAssignmentPushData(data);
       const navigated =
         task &&

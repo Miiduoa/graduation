@@ -6,14 +6,15 @@
  * 對應 mobile/StoryComposeScreen：文字 / 圖片兩種，背景色 palette，可帶入 POI。
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { CommunityAccess } from '../../_components/CommunityAccess';
 import { SiteShell } from '@/components/SiteShell';
+import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
-import { findSocialPoi } from '@/lib/community/pois';
+import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
+import { findSocialPoi, verifiedSocialPoisForSchool } from '@/lib/community/pois';
 import { publishStory, type StoryKind } from '@/lib/community/firestore';
 import { uploadCampusMedia } from '@/lib/community/media';
 
@@ -22,26 +23,32 @@ const TTL_24H = 24 * 3600 * 1000;
 const MAX_TEXT = 220;
 
 export default function StoryComposePage() {
-  const { schoolName } = resolveSchoolPageContext({});
+  const { schoolId, schoolName, ready } = useBrowsingSchoolPageContext();
   return (
     <SiteShell
       title="發布限時動態"
       subtitle="分享此刻的校園生活，動態保留 24 小時。"
-      schoolName={schoolName}
+      schoolName={ready ? schoolName : undefined}
     >
-      <CommunityAccess>
-        <StoryComposeInner />
-      </CommunityAccess>
+      {ready ? (
+        <CommunityAccess>
+          <StoryComposeInner key={schoolId} schoolId={schoolId} />
+        </CommunityAccess>
+      ) : (
+        <SchoolScopePlaceholder />
+      )}
     </SiteShell>
   );
 }
 
-function StoryComposeInner() {
+function StoryComposeInner({ schoolId }: { schoolId: string }) {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
-  const { schoolId } = useMemo(() => resolveSchoolPageContext({}), []);
   const searchParams = useSearchParams();
-  const initialPoiId = searchParams?.get('poiId') ?? null;
+  const requestedPoiId = searchParams?.get('poiId') ?? null;
+  const initialPoiId = verifiedSocialPoisForSchool(schoolId).some(
+    (poi) => poi.id === requestedPoiId,
+  ) ? requestedPoiId : null;
   const initialPoi = initialPoiId ? findSocialPoi(initialPoiId) : null;
 
   const [kind, setKind] = useState<StoryKind>('text');
@@ -110,7 +117,7 @@ function StoryComposeInner() {
         expiresAtMs: Date.now() + TTL_24H,
       });
       alert('限時動態已發布，24 小時後不再顯示。');
-      router.push('/community?tab=realtime');
+      router.push(`/community?tab=realtime&schoolId=${encodeURIComponent(schoolId)}`);
     } catch {
       alert('這次未能發佈，請稍後再試。');
     } finally {

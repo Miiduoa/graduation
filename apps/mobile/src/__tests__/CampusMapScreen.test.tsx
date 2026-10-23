@@ -4,8 +4,9 @@ import { Linking } from 'react-native';
 import * as Location from 'expo-location';
 import { GoogleMapsLikeScreen } from '../screens/GoogleMapsLikeScreen';
 import { loadCampusMapPlaces, type CampusMapPlace } from '../features/campusMap';
+import { safeNavigate } from '../utils/safeNavigate';
 
-let mockSchool = { id: 'school-a' };
+let mockSchool: { id: string; name?: string } = { id: 'school-a' };
 let mockUser: { uid: string } | null = { uid: 'user-a' };
 let mockParams: Record<string, unknown> = {};
 const mockInject = jest.fn();
@@ -27,6 +28,7 @@ jest.mock('../ui/PuWebView', () => {
     }),
   };
 });
+jest.mock('../utils/safeNavigate', () => ({ safeNavigate: jest.fn() }));
 jest.mock('../features/campusMap', () => ({
   ...jest.requireActual('../features/campusMap'),
   loadCampusMapPlaces: jest.fn(),
@@ -217,4 +219,272 @@ test('a visitor can load the public map without a school identity', async () => 
   expect(loadCampusMapPlaces).toHaveBeenCalledWith('school-a');
   expect(view.getByText('學校發布的圖書館')).toBeTruthy();
   expect(Location.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
+});
+
+
+test('an empty university map can search that university externally without inventing local POIs', async () => {
+  mockSchool = { id: 'nthu', name: '國立清華大學' };
+  jest.mocked(loadCampusMapPlaces).mockResolvedValue([]);
+  const view = render(<GoogleMapsLikeScreen />);
+  await view.findByText('尚未提供校園地點');
+  expect(view.queryByText('學校發布的圖書館')).toBeNull();
+  await act(async () => fireEvent.press(view.getByText('在 Google 地圖搜尋國立清華大學')));
+  const url = new URL(jest.mocked(Linking.openURL).mock.calls[0][0]);
+  expect(url.origin).toBe('https://www.google.com');
+  expect(url.pathname).toBe('/maps/search/');
+  expect(url.searchParams.get('query')).toBe('國立清華大學 校園');
+  expect(view.getByText(/第三方地圖搜尋結果尚未由校方核對/)).toBeTruthy();
+  expect(Location.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
+});
+
+test('unresolved campus titles do not create misleading Google Maps searches', async () => {
+  mockSchool = { id: 'unknown', name: '所選校園（unknown）' };
+  jest.mocked(loadCampusMapPlaces).mockResolvedValue([]);
+  const view = render(<GoogleMapsLikeScreen />);
+  await view.findByText('尚未提供校園地點');
+  expect(view.queryByText(/在 Google 地圖搜尋/)).toBeNull();
+});
+
+
+test('uses the confirmed user position for directions only after an explicit location request', async () => {
+  mockParams = { toPoiId: 'library' };
+  const view = await openMap();
+  expect(Location.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(view.getByText('查看目前位置')));
+  await act(async () => fireEvent.press(view.getByText('查看步行路線')));
+  expect(Linking.openURL).toHaveBeenCalledWith(expect.stringContaining('&origin=25.2%2C121.3'));
+  expect(view.getByText(/與目前位置直線相距約/)).toBeTruthy();
+});
+
+test('lets a visitor choose the start and destination from real school points', async () => {
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([
+    place,
+    { ...place, id: 'gate', name: '學校正門', lat: 25.11, lng: 121.21 },
+  ]);
+  const view = await openMap();
+  fireEvent.press(view.getByText(place.name));
+  fireEvent.press(view.getByText('設為步行起點'));
+  await act(async () => fireEvent.press(view.getByText('查看步行路線')));
+  expect(Linking.openURL).not.toHaveBeenCalled();
+  expect(view.getByText(/起點與終點不能相同/)).toBeTruthy();
+  fireEvent.press(view.getByText('學校正門'));
+  await act(async () => fireEvent.press(view.getByText('查看步行路線')));
+  expect(Linking.openURL).toHaveBeenCalledWith(expect.stringContaining('&origin=25.1%2C121.2'));
+  expect(view.getByText(/兩地直線距離約/)).toBeTruthy();
+});
+
+test('sorts nearby places only after location permission and supports clearing the radius filter', async () => {
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([
+    place,
+    { ...place, id: 'near', name: '附近教室', lat: 25.2, lng: 121.3 },
+  ]);
+  const view = await openMap();
+  expect(view.queryByText('附近 1 公里')).toBeNull();
+  await act(async () => fireEvent.press(view.getByText('查看目前位置')));
+  fireEvent.press(view.getByText('附近 1 公里'));
+  expect(view.queryByText(place.name)).toBeNull();
+  expect(view.getByText('附近教室')).toBeTruthy();
+  fireEvent.press(view.getByText('附近 1 公里'));
+  expect(view.getByText(place.name)).toBeTruthy();
+});
+
+test('does not invent cross-school points when a deep link targets an unpublished place', async () => {
+  mockParams = { focusPoiId: 'from-previous-campus' };
+  const view = await openMap();
+  expect(view.getByText('找不到連結指定的地點')).toBeTruthy();
+  expect(Linking.openURL).not.toHaveBeenCalled();
+  expect(view.queryByText('查看步行路線')).toBeNull();
+});
+
+test('does not interpret an old campus POI id as another campus destination after a school switch', async () => {
+  mockParams = { toPoiId: 'library' };
+  const view = await openMap();
+  expect(view.getByText('查看步行路線')).toBeTruthy();
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([{
+    ...place,
+    id: 'library',
+    name: '乙校圖書館',
+    lat: 23.8,
+    lng: 120.5,
+  }]);
+  mockSchool = { id: 'school-b' };
+  view.rerender(<GoogleMapsLikeScreen />);
+  await view.findByText('乙校圖書館');
+  expect(view.queryByText('查看步行路線')).toBeNull();
+  fireEvent.press(view.getByText('乙校圖書館'));
+  await act(async () => fireEvent.press(view.getByText('查看步行路線')));
+  expect(Linking.openURL).toHaveBeenCalledWith(
+    expect.stringContaining('destination=23.8%2C120.5'),
+  );
+});
+
+
+test('opens the verified library floor directory from Providence campus map only', async () => {
+  mockSchool = { id: 'pu', name: '靜宜大學' };
+  mockParams = { poiId: 'pu-library' };
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([
+    { ...place, id: 'pu-library', name: '蓋夏圖書館', category: '圖書館' },
+  ]);
+  const view = await openMap();
+  expect(view.getByText('查看校方樓層導覽')).toBeTruthy();
+  fireEvent.press(view.getByText('查看校方樓層導覽'));
+  expect(safeNavigate).toHaveBeenCalledWith(expect.any(Object), 'IndoorFloorMap', {
+    poiId: 'pu-library',
+  });
+  expect(Linking.openURL).not.toHaveBeenCalled();
+});
+
+test('never offers a Providence floor directory for a different university', async () => {
+  mockSchool = { id: 'nthu', name: '國立清華大學' };
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([
+    { ...place, id: 'pu-library', name: '蓋夏圖書館', category: '圖書館' },
+  ]);
+  const view = await openMap();
+  expect(view.queryByText('查看校方樓層導覽')).toBeNull();
+  expect(safeNavigate).not.toHaveBeenCalled();
+});
+
+
+test('shows the verified campus plan alongside public map POIs without automatically leaving the app', async () => {
+  mockSchool = { id: 'pu', name: '靜宜大學' };
+  const view = await openMap();
+  expect(view.getByText('查看校方校區平面圖')).toBeTruthy();
+  expect(Linking.openURL).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(view.getByText('查看校方校區平面圖')));
+  expect(Linking.openURL).toHaveBeenCalledWith('https://gnl.pu.edu.tw/p/426-1007-8.php?Lang=zh-tw');
+});
+
+test('offers the university plan when its POI source is unavailable, and reports browser handoff failures', async () => {
+  mockSchool = { id: 'pu', name: '靜宜大學' };
+  jest.mocked(loadCampusMapPlaces).mockRejectedValueOnce(new Error('offline'));
+  const view = render(<GoogleMapsLikeScreen />);
+  await view.findByText('目前無法讀取校園地點');
+  jest.mocked(Linking.openURL).mockRejectedValueOnce(new Error('not available'));
+  await act(async () => fireEvent.press(view.getByText('查看校方校區平面圖')));
+  expect(view.getByText(/無法開啟校方校區平面圖/)).toBeTruthy();
+});
+
+test('links to the university plan for a confirmed empty Providence collection', async () => {
+  mockSchool = { id: 'pu', name: '靜宜大學' };
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([]);
+  const view = render(<GoogleMapsLikeScreen />);
+  await view.findByText('尚未提供校園地點');
+  await act(async () => fireEvent.press(view.getByText('查看校方校區平面圖')));
+  expect(Linking.openURL).toHaveBeenCalledWith('https://gnl.pu.edu.tw/p/426-1007-8.php?Lang=zh-tw');
+});
+
+test('never substitutes Providence official campus maps for an unverified university id', async () => {
+  mockSchool = { id: 'tw-demo-uni', name: '示範大學' };
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([]);
+  const view = render(<GoogleMapsLikeScreen />);
+  await view.findByText('尚未提供校園地點');
+  expect(view.queryByText('查看校方校區平面圖')).toBeNull();
+  expect(view.getByText('在 Google 地圖搜尋示範大學')).toBeTruthy();
+});
+
+test('opens the selected university official map instead of Providence for a non-Providence school', async () => {
+  mockSchool = { id: 'nthu', name: '國立清華大學' };
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([]);
+  const view = render(<GoogleMapsLikeScreen />);
+  await view.findByText('尚未提供校園地點');
+  await act(async () => fireEvent.press(view.getByText('查看校方校區平面圖')));
+  expect(Linking.openURL).toHaveBeenCalledWith('https://www.nthu.edu.tw/campusmap');
+});
+
+test('never revives an old deep-link destination after switching A → B → A in the same screen', async () => {
+  mockParams = { toPoiId: 'library' };
+  const view = await openMap();
+  expect(view.getByText('查看步行路線')).toBeTruthy();
+
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([{
+    ...place,
+    name: '乙校圖書館',
+  }]);
+  mockSchool = { id: 'school-b' };
+  view.rerender(<GoogleMapsLikeScreen />);
+  await view.findByText('乙校圖書館');
+  expect(view.queryByText('查看步行路線')).toBeNull();
+
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([{
+    ...place,
+    name: '甲校圖書館',
+  }]);
+  mockSchool = { id: 'school-a' };
+  view.rerender(<GoogleMapsLikeScreen />);
+  await view.findByText('甲校圖書館');
+  expect(view.queryByText('查看步行路線')).toBeNull();
+  fireEvent.press(view.getByText('甲校圖書館'));
+  expect(view.getByText('查看步行路線')).toBeTruthy();
+});
+
+test('lets a visitor clear a linked school origin before opening directions', async () => {
+  mockParams = { fromPoiId: 'gate', toPoiId: 'library' };
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([
+    place,
+    { ...place, id: 'gate', name: '校園正門', lat: 25, lng: 121 },
+  ]);
+  const view = await openMap();
+  expect(view.getByText('清除步行起點')).toBeTruthy();
+  expect(mockInject.mock.calls.some(([script]) => script.includes('route') && script.includes('start'))).toBe(true);
+  fireEvent.press(view.getByText('清除步行起點'));
+  await act(async () => fireEvent.press(view.getByText('查看步行路線')));
+  expect(Linking.openURL).toHaveBeenCalledWith(
+    'https://www.google.com/maps/dir/?api=1&destination=25.1%2C121.2&travelmode=walking',
+  );
+  expect(mockInject.mock.calls.some(([script]) => script.includes('clearRoute'))).toBe(true);
+});
+
+test('keeps the selected map marker after a search hides it from the directory', async () => {
+  mockParams = { toPoiId: 'library' };
+  const view = await openMap();
+  mockInject.mockClear();
+  fireEvent.changeText(view.getByLabelText('搜尋校園地點'), '不存在的設施');
+  expect(mockInject.mock.calls.some(([script]) =>
+    script.includes('places') && script.includes('學校發布的圖書館')
+  )).toBe(true);
+});
+
+
+test('accepts a new explicit destination for the current campus after a school change', async () => {
+  mockParams = { toPoiId: 'library' };
+  const view = await openMap();
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([
+    { ...place, name: '乙校圖書館' },
+    { ...place, id: 'entrance', name: '乙校正門', lat: 24.1, lng: 121.1 },
+  ]);
+  mockSchool = { id: 'school-b' };
+  view.rerender(<GoogleMapsLikeScreen />);
+  await view.findByText('乙校正門');
+  expect(view.queryByText('查看步行路線')).toBeNull();
+
+  mockParams = { toPoiId: 'entrance' };
+  view.rerender(<GoogleMapsLikeScreen />);
+  expect(view.getByText('查看步行路線')).toBeTruthy();
+  await act(async () => fireEvent.press(view.getByText('查看步行路線')));
+  expect(Linking.openURL).toHaveBeenCalledWith(expect.stringContaining('destination=24.1%2C121.1'));
+});
+
+
+test('does not replace the WebView document when only the map search changes', async () => {
+  const view = await openMap();
+  const source = view.getByTestId('campus-map-webview').props.source;
+  fireEvent.changeText(view.getByLabelText('搜尋校園地點'), '沒有這個校舍');
+  expect(view.getByTestId('campus-map-webview').props.source).toBe(source);
+  fireEvent.changeText(view.getByLabelText('搜尋校園地點'), '圖書館');
+  expect(view.getByTestId('campus-map-webview').props.source).toBe(source);
+});
+
+
+test('keeps a route starting-point marker visible when the start is filtered out', async () => {
+  mockParams = { fromPoiId: 'gate', toPoiId: 'library' };
+  jest.mocked(loadCampusMapPlaces).mockResolvedValueOnce([
+    place,
+    { ...place, id: 'gate', name: '校園正門', lat: 25, lng: 121 },
+  ]);
+  const view = await openMap();
+  mockInject.mockClear();
+  fireEvent.changeText(view.getByLabelText('搜尋校園地點'), '圖書館');
+  expect(mockInject.mock.calls.some(([script]) =>
+    script.includes('places') && script.includes('校園正門') && script.includes('學校發布的圖書館')
+  )).toBe(true);
 });

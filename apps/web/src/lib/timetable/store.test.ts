@@ -6,25 +6,17 @@ const firestore = vi.hoisted(() => ({
   setDoc: vi.fn(),
 }));
 const auth = vi.hoisted(() => ({ currentUser: { uid: 'u-1' } as { uid: string } | null }));
+const firebase = vi.hoisted(() => ({ configured: true }));
 
 vi.mock('firebase/firestore', () => ({
   collection: vi.fn(),
   deleteDoc: vi.fn(),
   doc: vi.fn(() => ({})),
   getDoc: firestore.getDoc,
-  getDocFromServer: firestore.getDoc,
   getDocs: vi.fn(),
   query: vi.fn(),
   serverTimestamp: () => 'server-time',
   setDoc: firestore.setDoc,
-  runTransaction: vi.fn(async (_db, work) => {
-    let commit: unknown;
-    await work({
-      get: async () => ({ exists: () => false }),
-      set: (...args: unknown[]) => { commit = firestore.setDoc(...args); },
-    });
-    await commit;
-  }),
   updateDoc: vi.fn(),
   where: vi.fn(),
 }));
@@ -33,13 +25,15 @@ vi.mock('@/lib/firebase', () => ({
   getAuth: () => auth,
   getDb: () => ({}),
   getFunctionsInstance: () => ({}),
-  isFirebaseConfigured: () => true,
+  isFirebaseConfigured: () => firebase.configured,
 }));
 
 import {
-  TimetableCloudSaveError,
+  TIMETABLE_DEVICE_ONLY_STORED_COPY,
+  TIMETABLE_DEVICE_ONLY_SUBMIT_COPY,
   loadPersonalTimetable,
   savePersonalTimetable,
+  type StoredTimetable,
 } from './store';
 
 const course: PersonalCourse = {
@@ -53,15 +47,23 @@ const course: PersonalCourse = {
   color: 'blue',
 };
 
+const storedTimetable = (courses: PersonalCourse[] = [course]): StoredTimetable => ({
+  courses,
+  meta: {} as never,
+  shareWithFriends: true,
+  updatedAt: '2026-10-01T00:00:00.000Z',
+  schoolId: 'pu',
+});
+
 beforeEach(() => {
   localStorage.clear();
   firestore.getDoc.mockReset();
   firestore.setDoc.mockReset();
   auth.currentUser = { uid: 'u-1' };
+  firebase.configured = true;
 });
 
-it('keeps the browser copy when the cloud save fails, so a refresh shows the same timetable', async () => {
-  firestore.setDoc.mockRejectedValue(new Error('offline'));
+it('keeps imported timetables on this device and does not send them to the cloud', async () => {
   const timetable = {
     courses: [course],
     meta: {} as never,
@@ -69,12 +71,14 @@ it('keeps the browser copy when the cloud save fails, so a refresh shows the sam
     updatedAt: new Date().toISOString(),
     schoolId: 'pu',
   };
-  await expect(savePersonalTimetable('u-1', timetable)).rejects.toBeInstanceOf(
-    TimetableCloudSaveError,
-  );
+  await expect(savePersonalTimetable('u-1', timetable)).resolves.toEqual({ stored: 'local' });
+  expect(firestore.setDoc).not.toHaveBeenCalled();
+  expect(TIMETABLE_DEVICE_ONLY_SUBMIT_COPY).toBe('存在這台裝置');
+  expect(TIMETABLE_DEVICE_ONLY_STORED_COPY).toBe('已存在這台裝置，換手機或清除瀏覽器資料就會不見');
+  expect(TIMETABLE_DEVICE_ONLY_STORED_COPY).not.toMatch(/已儲存|已同步/);
   firestore.getDoc.mockResolvedValue({
     exists: () => true,
-    data: () => ({ courses: [], schoolId: 'pu', updatedAt: { toMillis: () => Date.now() - 60_000 } }),
+    data: () => ({ courses: [], updatedAt: { toMillis: () => Date.now() - 60_000 } }),
   });
   const loaded = await loadPersonalTimetable('u-1', 'pu');
   expect(loaded.courses.map((item) => item.name)).toEqual(['資料庫']);
@@ -118,10 +122,306 @@ it('prefers a newer cloud copy over an older browser copy', async () => {
     exists: () => true,
     data: () => ({
       courses: [{ ...course, id: 'c-2', name: '作業系統' }],
-      schoolId: 'pu',
       updatedAt: { toMillis: () => Date.parse('2026-10-11T00:00:00.000Z') },
     }),
   });
   const loaded = await loadPersonalTimetable('u-1', 'pu');
   expect(loaded.courses.map((item) => item.name)).toEqual(['作業系統']);
+});
+
+
+it('reads a schoolless pre-scope cloud timetable only for explicitly selected PU', async () => {
+  firestore.getDoc.mockResolvedValue({
+    exists: () => true,
+    data: () => ({
+      courses: [course],
+      updatedAt: { toMillis: () => Date.parse('2026-10-11T00:00:00.000Z') },
+    }),
+  });
+  expect((await loadPersonalTimetable('u-1', 'nthu', 'school:u-1')).courses).toEqual([]);
+  expect((await loadPersonalTimetable('u-1', 'pu', 'school:u-1')).courses).toEqual([course]);
+  expect(firestore.setDoc).not.toHaveBeenCalled();
+});
+
+it('does not mix explicitly tagged remote university timetables when switching campuses', async () => {
+  firestore.getDoc.mockResolvedValue({
+    exists: () => true,
+    data: () => ({
+      courses: [{ ...course, id: 'nthu-course', name: '清大資料' }],
+      schoolId: 'nthu',
+      updatedAt: { toMillis: () => Date.parse('2026-10-11T00:00:00.000Z') },
+    }),
+  });
+  expect((await loadPersonalTimetable('u-1', 'pu', 'school:u-1')).courses).toEqual([]);
+  expect((await loadPersonalTimetable('u-1', 'nthu', 'school:u-1')).courses.map((row) => row.name)).toEqual(['清大資料']);
+  expect((await loadPersonalTimetable('u-1', 'pu', 'school:u-1')).courses).toEqual([]);
+});
+
+it.each(['campus-one-personal-timetable:u-1', 'campus-one-personal-timetable:u-1:pu'])(
+  'recovers the same school-account legacy key %s without migrating or deleting it',
+  async (key) => {
+    const raw = JSON.stringify({
+      courses: [course],
+      updatedAt: '2026-10-01T00:00:00.000Z',
+      schoolId: 'pu',
+    });
+    localStorage.setItem(key, raw);
+    firestore.getDoc.mockResolvedValue({ exists: () => false });
+    const loaded = await loadPersonalTimetable('u-1', 'pu', 'school:u-1');
+    expect(loaded.courses.map((item) => item.name)).toEqual(['資料庫']);
+    expect(localStorage.getItem(key)).toBe(raw);
+    expect(localStorage.getItem('campus-one-personal-timetable:school:u-1:pu')).toBeNull();
+  },
+);
+
+it('recovers the same school-account legacy copy when Firebase is unavailable', async () => {
+  firebase.configured = false;
+  localStorage.setItem(
+    'campus-one-personal-timetable:u-1',
+    JSON.stringify({ courses: [course], schoolId: 'pu' }),
+  );
+  const loaded = await loadPersonalTimetable('u-1', 'pu', 'school:u-1');
+  expect(loaded.courses.map((item) => item.name)).toEqual(['資料庫']);
+  expect(firestore.getDoc).not.toHaveBeenCalled();
+});
+
+it('does not resurrect a legacy copy after an empty timetable is saved in the new namespace', async () => {
+  localStorage.setItem(
+    'campus-one-personal-timetable:u-1',
+    JSON.stringify({ courses: [course], schoolId: 'pu' }),
+  );
+  firestore.getDoc.mockResolvedValue({ exists: () => false });
+  await savePersonalTimetable(
+    'u-1',
+    {
+      courses: [],
+      meta: {} as never,
+      shareWithFriends: true,
+      updatedAt: '',
+      schoolId: 'pu',
+    },
+    'school:u-1',
+  );
+  expect((await loadPersonalTimetable('u-1', 'pu', 'school:u-1')).courses).toEqual([]);
+  expect(JSON.parse(localStorage.getItem('campus-one-personal-timetable:u-1')!).courses).toEqual([
+    course,
+  ]);
+});
+
+it.each(['platform:account-a', 'nuni:account-a', 'school:u-2', 'guest'])(
+  'never exposes a school-account legacy copy through the different owner %s',
+  async (owner) => {
+    localStorage.setItem(
+      'campus-one-personal-timetable:u-1',
+      JSON.stringify({ courses: [course], schoolId: 'pu' }),
+    );
+    firestore.getDoc.mockResolvedValue({ exists: () => false });
+    expect((await loadPersonalTimetable('u-1', 'pu', owner)).courses).toEqual([]);
+  },
+);
+
+it('keeps school and uid boundaries when falling back to legacy storage', async () => {
+  localStorage.setItem(
+    'campus-one-personal-timetable:u-1',
+    JSON.stringify({ courses: [course], schoolId: 'other' }),
+  );
+  firestore.getDoc.mockResolvedValue({ exists: () => false });
+  expect((await loadPersonalTimetable('u-1', 'pu', 'school:u-1')).courses).toEqual([]);
+  expect((await loadPersonalTimetable('u-2', 'other', 'school:u-2')).courses).toEqual([]);
+  expect((await loadPersonalTimetable(null, 'other', 'school:u-1')).courses).toEqual([]);
+});
+
+
+it.each([
+  ['invalid JSON', '{broken'],
+  ['non-array course list', JSON.stringify({ schoolId: 'pu', courses: 'missing-list', meta: {} })],
+  ['oversized course list', JSON.stringify({ schoolId: 'pu', courses: Array.from({ length: 81 }, () => course), meta: {} })],
+  ['foreign scoped school', JSON.stringify({ schoolId: 'ntu', courses: [course], meta: {} })],
+])('preserves %s from a damaged scoped copy instead of treating it as empty', async (_label, raw) => {
+  const key = 'campus-one-personal-timetable:school:u-1:pu';
+  localStorage.setItem(key, raw);
+  await expect(loadPersonalTimetable('u-1', 'pu', 'school:u-1')).rejects.toThrow();
+  await expect(savePersonalTimetable('u-1', {
+    courses: [course], meta: {} as never, shareWithFriends: true,
+    updatedAt: new Date().toISOString(), schoolId: 'pu',
+  }, 'school:u-1')).rejects.toThrow();
+  expect(localStorage.getItem(key)).toBe(raw);
+  expect(firestore.setDoc).not.toHaveBeenCalled();
+});
+
+it('retains a mismatched unscoped legacy school without exposing it', async () => {
+  const legacyKey = 'campus-one-personal-timetable:u-1';
+  const raw = JSON.stringify({ schoolId: 'ntu', courses: [course] });
+  localStorage.setItem(legacyKey, raw);
+  firestore.getDoc.mockResolvedValue({ exists: () => false });
+  expect((await loadPersonalTimetable('u-1', 'pu', 'school:u-1')).courses).toEqual([]);
+  expect(localStorage.getItem(legacyKey)).toBe(raw);
+});
+
+
+it('does not claim an unscoped legacy copy with no school or silently migrate it', async () => {
+  const key = 'campus-one-personal-timetable:u-1';
+  const raw = JSON.stringify({ courses: [course], updatedAt: '2026-10-12T00:00:00Z' });
+  localStorage.setItem(key, raw);
+  firestore.getDoc.mockResolvedValue({ exists: () => false });
+  expect((await loadPersonalTimetable('u-1', 'pu', 'school:u-1')).courses).toEqual([]);
+  expect(localStorage.getItem(key)).toBe(raw);
+});
+
+it('rejects a scoped timetable missing the school marker without erasing it', async () => {
+  const key = 'campus-one-personal-timetable:school:u-1:pu';
+  const raw = JSON.stringify({ courses: [course], updatedAt: '2026-10-12T00:00:00Z' });
+  localStorage.setItem(key, raw);
+  await expect(savePersonalTimetable('u-1', {
+    courses: [course], meta: {} as never, shareWithFriends: true, updatedAt: '', schoolId: 'pu',
+  }, 'school:u-1')).rejects.toThrow('資料');
+  expect(localStorage.getItem(key)).toBe(raw);
+});
+
+
+it('preserves an intentional empty local timetable against an older cloud snapshot', async () => {
+  const schoolOwner = 'school:u-1';
+  const updated = await savePersonalTimetable('u-1', {
+    courses: [],
+    meta: {} as never,
+    shareWithFriends: false,
+    updatedAt: '2026-10-14T00:00:00.000Z',
+    schoolId: 'pu',
+  }, schoolOwner);
+  expect(updated).toEqual({ stored: 'local' });
+  const raw = localStorage.getItem('campus-one-personal-timetable:school:u-1:pu');
+  expect(raw).toContain('"courses":[]');
+  firestore.getDoc.mockResolvedValue({
+    exists: () => true,
+    data: () => ({
+      courses: [course],
+      shareWithFriends: true,
+      updatedAt: { toMillis: () => Date.parse('2026-10-01T00:00:00.000Z') },
+      schoolId: 'pu',
+    }),
+  });
+  const loaded = await loadPersonalTimetable('u-1', 'pu', schoolOwner);
+  expect(loaded.courses).toEqual([]);
+  expect(loaded.shareWithFriends).toBe(false);
+  expect(localStorage.getItem('campus-one-personal-timetable:school:u-1:pu')).toBe(raw);
+});
+
+it('does not treat a foreign legacy timetable or a missing timestamp as a fresh empty edit', async () => {
+  const key = 'campus-one-personal-timetable:u-1';
+  const remote = { ...course, name: '雲端學期課程' };
+  firestore.getDoc.mockResolvedValue({
+    exists: () => true,
+    data: () => ({
+      courses: [remote], schoolId: 'pu',
+      updatedAt: { toMillis: () => Date.parse('2026-10-11T00:00:00.000Z') },
+    }),
+  });
+  localStorage.setItem(key, JSON.stringify({ courses: [course], schoolId: 'ntu' }));
+  expect((await loadPersonalTimetable('u-1', 'pu', 'school:u-1')).courses).toEqual([remote]);
+  localStorage.setItem(key, JSON.stringify({ courses: [course], schoolId: 'pu' }));
+  expect((await loadPersonalTimetable('u-1', 'pu', 'school:u-1')).courses).toEqual([remote]);
+  expect(firestore.setDoc).not.toHaveBeenCalled();
+});
+
+it('surfaces an uncached account read failure without adopting guest data or claiming an empty timetable', async () => {
+  const guest = JSON.stringify(storedTimetable());
+  localStorage.setItem('campus-one-personal-timetable:local:pu', guest);
+  firestore.getDoc.mockRejectedValue(new Error('offline'));
+  await expect(loadPersonalTimetable('u-1', 'pu', 'school:u-1')).rejects.toThrow('offline');
+  await expect(loadPersonalTimetable('u-1', 'pu')).rejects.toThrow('offline');
+  expect(localStorage.getItem('campus-one-personal-timetable:local:pu')).toBe(guest);
+  expect(localStorage.getItem('campus-one-personal-timetable:school:u-1:pu')).toBeNull();
+  expect(firestore.setDoc).not.toHaveBeenCalled();
+});
+
+it('preserves an intentional device-only deletion without comparing it to legacy cloud timestamps', async () => {
+  await savePersonalTimetable('u-1', storedTimetable([]), 'school:u-1');
+  const key = 'campus-one-personal-timetable:school:u-1:pu';
+  const saved = localStorage.getItem(key);
+  firestore.getDoc.mockResolvedValue({
+    exists: () => true,
+    data: () => ({ ...storedTimetable(), updatedAt: '2099-01-01T00:00:00.000Z' }),
+  });
+  expect((await loadPersonalTimetable('u-1', 'pu', 'school:u-1')).courses).toEqual([]);
+  expect(localStorage.getItem(key)).toBe(saved);
+  expect(firestore.getDoc).not.toHaveBeenCalled();
+  expect(firestore.setDoc).not.toHaveBeenCalled();
+});
+
+it.each(['found', 'missing', 'offline'])(
+  'retains a device edit made while a legacy cloud read is pending (%s)',
+  async (outcome) => {
+    let finish!: (value: unknown) => void;
+    let fail!: (error: Error) => void;
+    firestore.getDoc.mockImplementation(() => new Promise((resolve, reject) => {
+      finish = resolve;
+      fail = reject;
+    }));
+    const loading = loadPersonalTimetable('u-1', 'pu', 'school:u-1');
+    await savePersonalTimetable('u-1', storedTimetable([]), 'school:u-1');
+    const key = 'campus-one-personal-timetable:school:u-1:pu';
+    const saved = localStorage.getItem(key);
+    if (outcome === 'offline') fail(new Error('offline'));
+    else finish({
+      exists: () => outcome === 'found',
+      data: () => storedTimetable(),
+    });
+    expect((await loading).courses).toEqual([]);
+    expect(localStorage.getItem(key)).toBe(saved);
+    expect(firestore.setDoc).not.toHaveBeenCalled();
+  },
+);
+
+it.each([
+  ['missing payload', null],
+  ['non-array courses', { ...storedTimetable(), courses: 'not-a-course-list' }],
+  ['invalid course row', { ...storedTimetable(), courses: [null] }],
+  ['oversized course list', { ...storedTimetable(), courses: Array.from({ length: 81 }, () => course) }],
+  ['invalid metadata', { ...storedTimetable(), meta: [] }],
+  ['invalid school marker', { ...storedTimetable(), schoolId: { id: 'pu' } }],
+])('refuses %s in an uncached cloud record without turning it into an empty timetable', async (_label, data) => {
+  firestore.getDoc.mockResolvedValue({ exists: () => true, data: () => data });
+  await expect(loadPersonalTimetable('u-1', 'pu', 'school:u-1')).rejects.toThrow('雲端課表格式異常');
+  expect(localStorage.length).toBe(0);
+  expect(firestore.setDoc).not.toHaveBeenCalled();
+});
+
+it.each(['offline', 'malformed'])(
+  'keeps a recoverable same-school legacy copy when the cloud is %s',
+  async (outcome) => {
+    const key = 'campus-one-personal-timetable:u-1';
+    const raw = JSON.stringify(storedTimetable());
+    localStorage.setItem(key, raw);
+    if (outcome === 'offline') firestore.getDoc.mockRejectedValue(new Error('offline'));
+    else firestore.getDoc.mockResolvedValue({
+      exists: () => true,
+      data: () => ({ ...storedTimetable(), courses: 'not-a-course-list' }),
+    });
+    expect((await loadPersonalTimetable('u-1', 'pu', 'school:u-1')).courses).toEqual([course]);
+    expect(localStorage.getItem(key)).toBe(raw);
+    expect(localStorage.getItem('campus-one-personal-timetable:school:u-1:pu')).toBeNull();
+    expect(firestore.setDoc).not.toHaveBeenCalled();
+  },
+);
+
+it.each(['platform:account-a', 'nuni:account-a', 'school:u-2', 'guest'])(
+  'does not read a Firebase account timetable into the different local owner %s',
+  async (owner) => {
+    firestore.getDoc.mockResolvedValue({ exists: () => true, data: () => storedTimetable() });
+    expect((await loadPersonalTimetable('u-1', 'pu', owner)).courses).toEqual([]);
+    expect(firestore.getDoc).not.toHaveBeenCalled();
+    expect(firestore.setDoc).not.toHaveBeenCalled();
+  },
+);
+
+it('does not let a guest device copy replace an existing account cloud record for an old caller', async () => {
+  const guest = JSON.stringify({ ...storedTimetable(), updatedAt: '2099-01-01T00:00:00.000Z' });
+  localStorage.setItem('campus-one-personal-timetable:local:pu', guest);
+  const remote = { ...course, name: '帳號原有課程' };
+  firestore.getDoc.mockResolvedValue({
+    exists: () => true,
+    data: () => storedTimetable([remote]),
+  });
+  expect((await loadPersonalTimetable('u-1', 'pu')).courses).toEqual([remote]);
+  expect(localStorage.getItem('campus-one-personal-timetable:local:pu')).toBe(guest);
 });

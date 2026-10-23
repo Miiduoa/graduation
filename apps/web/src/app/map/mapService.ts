@@ -1,3 +1,7 @@
+import type { CampusCoordinate } from '@campus/shared/src/campusGeo';
+import { parseCampusMapRecord } from '@campus/shared/src/campusMapRecords';
+export { distanceMeters, formatDistance } from '@campus/shared/src/campusGeo';
+
 import {
   collection,
   doc,
@@ -9,6 +13,8 @@ import {
 } from 'firebase/firestore';
 import { getAuth, getDb, isFirebaseConfigured } from '@/lib/firebase';
 
+export type MapCoordinate = CampusCoordinate;
+
 export type MapLocation = {
   id: string;
   name: string;
@@ -16,30 +22,50 @@ export type MapLocation = {
   description: string;
   lat: number;
   lng: number;
-};
-
-const categoryNames: Record<string, string> = {
-  academic: '教學',
-  research: '研究',
-  library: '圖書館',
-  admin: '行政',
-  cafeteria: '餐飲',
-  dormitory: '住宿',
-  sports: '運動',
-  parking: '停車',
-  convenience: '生活',
-  medical: '健康',
-  religious: '宗教',
-  gate: '交通',
-  other: '其他',
+  building?: string;
+  floor?: string;
+  facilities?: string[];
 };
 
 function validId(value: string) {
   return value.length > 0 && !value.includes('/');
 }
 
-export async function loadMapLocations(schoolId: string): Promise<MapLocation[]> {
+/** 地點來源最多等這麼久；連線卡住時不能讓畫面永遠停在「正在載入」。 */
+export const MAP_SOURCE_TIMEOUT_MS = 8000;
+
+export class MapSourceTimeoutError extends Error {
+  constructor() {
+    super('Map source timed out');
+    this.name = 'MapSourceTimeoutError';
+  }
+}
+
+export function withTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new MapSourceTimeoutError()), timeoutMs);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+export async function loadMapLocations(
+  schoolId: string,
+  { timeoutMs = MAP_SOURCE_TIMEOUT_MS }: { timeoutMs?: number } = {},
+): Promise<MapLocation[]> {
   if (!isFirebaseConfigured() || !validId(schoolId)) throw new Error('Map source unavailable');
+  return withTimeout(readMapLocations(schoolId), timeoutMs);
+}
+
+async function readMapLocations(schoolId: string): Promise<MapLocation[]> {
   const db = getDb();
   let snapshot = await getDocsFromServer(collection(db, 'schools', schoolId, 'pois'));
   // Only use the migration source after the canonical source confirms it is empty.
@@ -50,31 +76,19 @@ export async function loadMapLocations(schoolId: string): Promise<MapLocation[]>
   }
   return snapshot.docs
     .flatMap((entry) => {
-      const data = entry.data();
-      if (data.schoolId != null && data.schoolId !== schoolId)
-        throw new Error('Invalid map school');
-      if (
-        typeof data.name !== 'string' ||
-        !data.name.trim() ||
-        typeof data.lat !== 'number' ||
-        !Number.isFinite(data.lat) ||
-        Math.abs(data.lat) > 90 ||
-        typeof data.lng !== 'number' ||
-        !Number.isFinite(data.lng) ||
-        Math.abs(data.lng) > 180
-      )
-        return [];
-      const category = typeof data.category === 'string' ? data.category.trim() : '';
-      return [
-        {
-          id: entry.id,
-          name: data.name.trim(),
-          category: categoryNames[category] ?? (category || '其他'),
-          description: typeof data.description === 'string' ? data.description : '',
-          lat: data.lat,
-          lng: data.lng,
-        },
-      ];
+      const place = parseCampusMapRecord(entry.id, entry.data(), schoolId);
+      if (!place) return [];
+      return [{
+        id: place.id,
+        name: place.name,
+        category: place.category,
+        description: place.description,
+        lat: place.lat,
+        lng: place.lng,
+        ...(place.building ? { building: place.building } : {}),
+        ...(place.floor ? { floor: place.floor } : {}),
+        ...(place.facilities.length ? { facilities: place.facilities } : {}),
+      }];
     })
     .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
 }
@@ -142,7 +156,7 @@ export async function setMapFavorite(
   assertCurrent(uid, current);
 }
 
-export function walkingDirectionsUrl(destination: MapLocation, origin?: MapLocation): string {
+export function walkingDirectionsUrl(destination: MapCoordinate, origin?: MapCoordinate): string {
   const parameters = new URLSearchParams({
     api: '1',
     destination: `${destination.lat},${destination.lng}`,

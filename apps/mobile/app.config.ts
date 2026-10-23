@@ -348,6 +348,11 @@ export default ({ config }: any) => {
       errorReportingEndpoint,
       firebase,
       cloudFunctionRegion: process.env.EXPO_PUBLIC_CLOUD_FUNCTION_REGION ?? 'asia-east1',
+      functionsBaseUrl: process.env.EXPO_PUBLIC_FUNCTIONS_BASE_URL ?? '',
+      cloudFunctionBaseUrl:
+        process.env.EXPO_PUBLIC_CLOUD_FUNCTION_BASE_URL ??
+        process.env.EXPO_PUBLIC_FUNCTIONS_BASE_URL ??
+        '',
       // Release builds must always use the backend proxy. Local Ollama/offline AI is only
       // for development, training, and evaluation; it cannot be an App Store dependency.
       aiProvider: releaseAiProvider,
@@ -375,6 +380,10 @@ export default ({ config }: any) => {
       allowLocalMockAuth,
       /** `false` 時不對 TronClass 發網路請求；口試／離線 Demo：`EXPO_PUBLIC_TRONCLASS_DATA_ENABLED=false` */
       tronClassDataEnabled: parseBoolean(process.env.EXPO_PUBLIC_TRONCLASS_DATA_ENABLED, true),
+      assignmentFileSubmit: parseBoolean(
+        process.env.EXPO_PUBLIC_ASSIGNMENT_FILE_SUBMIT_ENABLED,
+        false,
+      ),
       googleWebClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? '',
       googleIosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ?? '',
       googleAndroidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID ?? '',

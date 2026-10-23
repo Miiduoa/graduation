@@ -2,10 +2,10 @@
 
 import { use, useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
-import { findSchoolById, findSchoolsByCode } from '@campus/shared/src/schools';
 import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
+import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { joinByCode, leaveMemberGroup, loadMyGroups, type MemberGroup } from './groupService';
 import styles from './groups.module.css';
 
@@ -285,14 +285,14 @@ export function GroupDirectory({
   searchParams,
 }: {
   mode: Mode;
-  searchParams?: Promise<{ school?: string; schoolId?: string }>;
+  searchParams?: Promise<{ school?: string; schoolId?: string; campus?: string }>;
 }) {
   const params = searchParams ? use(searchParams) : undefined;
-  const matches = findSchoolsByCode(params?.school);
-  const school =
-    findSchoolById(params?.schoolId) ??
-    (matches.length === 1 ? matches[0] : resolveSchoolPageContext().school);
+  const { school, ready } = useBrowsingSchoolPageContext(params);
   const { user, loading } = useAuth();
+  if (!ready) {
+    return <SiteShell title={mode === 'clubs' ? '我的社團' : '我的群組'}><SchoolScopePlaceholder /></SiteShell>;
+  }
   return (
     <SiteShell
       schoolName={school.name}

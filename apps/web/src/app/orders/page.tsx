@@ -72,8 +72,8 @@ export default function OrdersPage() {
   return <SiteShell
     title={orderingOn ? '我的訂單' : ONLINE_ORDERING_OFF_TEXT}
     subtitle={orderingOn ? '取餐號碼和訂單狀態以店家那邊為準，會自動更新。' : ONLINE_ORDERING_OFF_TEXT}
-    schoolName={school.schoolName}
-    schoolCode={school.schoolCode}
+    schoolName={orderingOn ? school.schoolName : undefined}
+    schoolCode={orderingOn ? school.schoolCode : undefined}
   >
     <OrdersRoute />
   </SiteShell>;

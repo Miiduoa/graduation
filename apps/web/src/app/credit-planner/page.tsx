@@ -173,7 +173,12 @@ function CreditPlanner({ records }: { records: AcademicGradeResponse }) {
 }
 export default function CreditPlannerPage() {
   return (
-    <AcademicPage kind="grades" title="學分規劃" subtitle="整理修課紀錄，替下一個學期留好空間。">
+    <AcademicPage
+      kind="grades"
+      title="學分規劃"
+      subtitle="整理修課紀錄，替下一個學期留好空間。"
+      closedAlternative="學分請先到學校的 e 校園或向系辦確認。"
+    >
       {({ records }) => <CreditPlanner records={records} />}
     </AcademicPage>
   );

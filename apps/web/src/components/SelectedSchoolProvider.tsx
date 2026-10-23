@@ -11,6 +11,8 @@ import {
   type ReactNode,
 } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { findSchoolById } from '@campus/shared/src/schools';
+import { defaultBrowseSchoolId } from '@/lib/defaultBrowseSchool';
 
 export type BrowseSchool = {
   id: string;
@@ -48,17 +50,17 @@ export function schoolPreferenceKey(ownerKey: string | null) {
   return `campus.browse-school.v1:${ownerKey === null ? 'guest' : `account:${encodeURIComponent(ownerKey)}`}`;
 }
 
-function storedSelection(value: string | null): string | null {
-  if (!value) return null;
+function storedSelection(value: string | null): { present: boolean; schoolId: string | null } {
+  if (!value) return { present: false, schoolId: null };
   try {
     const stored: unknown = JSON.parse(value);
     if (stored && typeof stored === 'object' && 'schoolId' in stored) {
-      return typeof stored.schoolId === 'string' ? stored.schoolId : null;
+      return { present: true, schoolId: typeof stored.schoolId === 'string' ? stored.schoolId : null };
     }
   } catch {
     // Invalid or old browser preferences do not establish a school selection.
   }
-  return null;
+  return { present: false, schoolId: null };
 }
 
 export function SelectedSchoolProvider({
@@ -79,12 +81,14 @@ export function SelectedSchoolProvider({
   const [preference, setPreference] = useState<{
     scope: typeof scope;
     schoolId: string | null;
+    stored: boolean;
     storageError: string | null;
   } | null>(null);
   // Hide previous identity state immediately without remounting page content or losing drafts.
   const currentPreference = preference?.scope === scope ? preference : null;
   const hydrated = currentPreference !== null;
   const savedSchoolId = currentPreference?.schoolId ?? null;
+  const stored = currentPreference?.stored ?? false;
   const storageError = currentPreference?.storageError ?? null;
 
   useLayoutEffect(() => {
@@ -97,21 +101,25 @@ export function SelectedSchoolProvider({
   useEffect(() => {
     if (!loading) {
       let schoolId: string | null = null;
+      let stored = false;
       let storageError: string | null = null;
       try {
-        schoolId = storedSelection(localStorage.getItem(storageKey));
+        const parsed = storedSelection(localStorage.getItem(storageKey));
+        schoolId = parsed.schoolId;
+        stored = parsed.present;
       } catch {
         storageError = '此瀏覽器無法儲存校園偏好，仍可使用網址切換校園。';
       }
       // Read this browser-only preference after hydration so server markup stays account-neutral.
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setPreference({ scope, schoolId, storageError });
+      setPreference({ scope, schoolId, stored, storageError });
     }
     const changed = (event: StorageEvent) => {
       if (!loading && (event.key === storageKey || event.key === null)) {
+        const parsed = storedSelection(event.newValue);
         setPreference((current) =>
           current?.scope === scope
-            ? { ...current, schoolId: storedSelection(event.newValue) }
+            ? { ...current, schoolId: parsed.schoolId, stored: parsed.present }
             : current,
         );
       }
@@ -130,8 +138,13 @@ export function SelectedSchoolProvider({
       return true;
     });
   }, [schools]);
-  const queryId = params?.get('campus');
-  const requestedId = queryId === 'all' ? null : queryId || savedSchoolId;
+  const queryId = params?.get('campus') ?? params?.get('schoolId');
+  const requestedId = defaultBrowseSchoolId(
+    catalog.map((school) => school.id),
+    queryId,
+    stored,
+    savedSchoolId,
+  );
   const ready = !loading && hydrated && catalogStatus === 'ready';
   const selectedSchool = ready
     ? (catalog.find((school) => school.id === requestedId) ?? null)
@@ -151,10 +164,23 @@ export function SelectedSchoolProvider({
     } catch {
       storageError = '此瀏覽器無法儲存校園偏好，仍可使用網址切換校園。';
     }
-    setPreference({ scope, schoolId: id, storageError });
+    setPreference({ scope, schoolId: id, stored: true, storageError });
     const next = new URLSearchParams(params?.toString());
-    next.set('campus', id ?? 'all');
-    // Browsing preference never writes school/schoolId, account claims or a school login.
+    if (pathname === '/map' && selectedSchool?.id !== id) {
+      next.delete('route');
+      next.delete('focus');
+    }
+    if (id) {
+      next.set('schoolId', id);
+      next.set('campus', id);
+      const code = catalog.find((school) => school.id === id)?.code || findSchoolById(id)?.code;
+      if (code) next.set('school', code);
+      else next.delete('school');
+    } else {
+      next.delete('schoolId');
+      next.delete('school');
+      next.set('campus', 'all');
+    }
     router.replace(`${pathname}?${next.toString()}${window.location.hash}`, { scroll: false });
   }
 

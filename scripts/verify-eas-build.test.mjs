@@ -4,7 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
-import { releaseTarget, verifyBuild } from './verify-eas-build.mjs';
+import {
+  releaseEnvironment,
+  releaseTarget,
+  verifyBuild,
+  verifyReleaseRequest,
+} from './verify-eas-build.mjs';
 
 const env = {
   BUILD_PLATFORM: 'ios',
@@ -83,6 +88,55 @@ test('accepts preview internal device builds without claiming store distribution
     ),
     build().id,
   );
+});
+test('production-device keeps production identity and signed distribution but requires an APK', () => {
+  const device = releaseTarget({
+    ...env,
+    BUILD_PLATFORM: 'android',
+    BUILD_PROFILE: 'production-device',
+  });
+  assert.equal(releaseEnvironment(device.profile), 'production');
+  const record = build({
+    platform: 'ANDROID',
+    buildProfile: 'production-device',
+    artifacts: { applicationArchiveUrl: 'https://example.com/campus.apk' },
+  });
+  assert.equal(verifyBuild([record], device), record.id);
+  for (const patch of [
+    { artifacts: { applicationArchiveUrl: 'https://example.com/campus.aab' } },
+    { buildProfile: 'production' },
+    { distribution: 'INTERNAL' },
+    { appIdentifier: 'com.example.dev' },
+  ])
+    assert.throws(() => verifyBuild([{ ...record, ...patch }], device));
+  assert.throws(() => releaseTarget({ ...env, BUILD_PROFILE: 'production-device' }), /Android/);
+  assert.throws(
+    () =>
+      releaseTarget({
+        ...env,
+        BUILD_PROFILE: 'production-device',
+        BUILD_PLATFORM: 'android',
+        EXPECTED_APP_IDENTIFIER: 'com.example.dev',
+      }),
+    /development app identifier/,
+  );
+});
+test('device APK dispatch refuses store submission and every non-Android target', () => {
+  const request = {
+    BUILD_PLATFORM: 'android',
+    BUILD_PROFILE: 'production-device',
+    SUBMIT_TO_STORE: 'false',
+  };
+  verifyReleaseRequest(request);
+  for (const submit of ['true', '', undefined])
+    assert.throws(() => verifyReleaseRequest({ ...request, SUBMIT_TO_STORE: submit }), /submit/);
+  for (const platform of ['all', 'ios'])
+    assert.throws(() => verifyReleaseRequest({ ...request, BUILD_PLATFORM: platform }), /Android/);
+  verifyReleaseRequest({
+    BUILD_PLATFORM: 'all',
+    BUILD_PROFILE: 'production',
+    SUBMIT_TO_STORE: 'true',
+  });
 });
 test('CLI emits a build ID only on successful verification', () => {
   const dir = mkdtempSync(join(tmpdir(), 'campus-release-'));

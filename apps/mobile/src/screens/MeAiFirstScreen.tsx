@@ -6,6 +6,7 @@ import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { usePermissions } from '../hooks/usePermissions';
 import { safeNavigate } from '../utils/safeNavigate';
+import { loadFailureCopy } from '../utils/loadFailureCopy';
 import { rootNavigate, rootNavigateNested } from '../app/rootNavigation';
 
 export default function MeAiFirstScreen() {
@@ -73,7 +74,9 @@ export default function MeAiFirstScreen() {
           </Text>
           {!profile && !auth.profileLoading ? (
             <Text style={{ color: aiTokens.muted, marginTop: 8 }}>
-              目前無法讀取個人檔案，請確認登入狀態。
+              {uid && !auth.profile
+                ? auth.error || loadFailureCopy()
+                : '目前無法讀取個人檔案，請確認登入狀態。'}
             </Text>
           ) : null}
         </AICard>
@@ -107,6 +110,7 @@ export default function MeAiFirstScreen() {
         <AIRow title="我的群組" subtitle="查看已加入的課程與社團群組" onPress={go('Groups')} />
       </AISection>
       <AISection title="通知與資料">
+        <AIRow title="通知中心" subtitle="查看這組帳號的作業與系統通知" onPress={go('Notifications')} />
         <AIRow title="通知設定" onPress={go('NotificationSettings')} />
         <AIRow title="匯出我的資料" subtitle="取得帳號可匯出的資料" onPress={go('DataExport')} />
         <AIRow title="刪除帳號" subtitle="查看刪除範圍與確認步驟" onPress={go('AccountDeletion')} />

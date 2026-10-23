@@ -11,6 +11,7 @@ let mockAuth: {
   user: { uid: string; email: string } | null;
   profile: UserProfile | null;
   profileLoading: boolean;
+  error: string | null;
   refreshProfile: jest.Mock;
 };
 jest.mock('../state/auth', () => ({ useAuth: () => mockAuth }));
@@ -60,6 +61,7 @@ beforeEach(() => {
       studentId: 'S123',
     },
     profileLoading: false,
+    error: null,
     refreshProfile: jest.fn().mockResolvedValue(undefined),
   };
   jest.mocked(firebaseSource.updateUser).mockResolvedValue(saved());
@@ -143,6 +145,17 @@ test('a stale profile is hidden until it matches the currently signed-in user', 
   expect(view.queryByText('真實系所')).toBeNull();
   expect(view.queryByText('儲存')).toBeNull();
   expect(view.getByText('目前無法讀取個人資料，請確認登入狀態後重新開啟。')).toBeTruthy();
+});
+
+test('a signed-in profile load failure uses the shared network copy only for fetch-layer errors', () => {
+  mockAuth.profile = null;
+  mockAuth.error = '請確認網路後再試';
+  const view = render(<ProfileEditAiFirstScreen />);
+  expect(view.getByText('請確認網路後再試')).toBeTruthy();
+  expect(view.queryByText('目前無法讀取個人資料，請確認登入狀態後重新開啟。')).toBeNull();
+  mockAuth.error = '暫時讀不到資料，請稍後再試';
+  view.rerender(<ProfileEditAiFirstScreen />);
+  expect(view.getByText('暫時讀不到資料，請稍後再試')).toBeTruthy();
 });
 
 test('a mismatched server readback never becomes a saved claim', async () => {

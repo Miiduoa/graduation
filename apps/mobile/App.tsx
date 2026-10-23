@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   NavigationContainer,
   DefaultTheme,
+  getStateFromPath,
   type LinkingOptions,
 } from '@react-navigation/native';
 import { createBottomTabNavigator, BottomTabBarProps } from '@react-navigation/bottom-tabs';
@@ -29,6 +30,7 @@ import { DemoProvider } from './src/state/demo';
 import { DemoRoleProvider } from './src/state/demoRole';
 import { DemoStoreProvider } from './src/state/demoStore';
 import { AuthProvider, useAuth } from './src/state/auth';
+import { PersonalImportSyncBridge } from './src/components/PersonalImportSyncBridge';
 import { NuniSessionProvider } from './src/state/nuniSession';
 import { ThemeProvider, useThemeMode } from './src/state/theme';
 import { NotificationsProvider } from './src/state/notifications';
@@ -84,12 +86,16 @@ import {
   parseGroupCourseHubDeepLink,
   isInterceptedMessagingDeepLink,
 } from './src/app/assignmentDeepLink';
-import { navigateFromInboxTask, inboxTaskFromLegacyAssignmentActionTarget } from './src/services/inboxActions';
+import {
+  navigateFromInboxTask,
+  inboxTaskFromLegacyAssignmentActionTarget,
+} from './src/services/inboxActions';
 import { isTeachingRole } from './src/utils/campusOs';
 import type { InboxTask } from './src/data/types';
 import { navigateToCourseScreen } from './src/utils/courseNavigation';
 import { initCrossModuleConnections } from './src/services/crossModuleConnector';
 import { registerCompanionCampusBusBridge } from './src/services/companionBusBridge';
+import { rewriteLegacyShopsPath } from './src/app/legacyShopsPath';
 
 /**
  * 學生四個入口：今天｜課務｜生活｜我
@@ -221,6 +227,7 @@ const linkingBase: LinkingOptions<RootTabParamList> = {
       },
     },
   },
+  getStateFromPath: (path, options) => getStateFromPath(rewriteLegacyShopsPath(path), options),
 };
 
 const { usingFirebase: USING_FIREBASE } = initializeRuntimeDataSource();
@@ -485,7 +492,7 @@ function TokenErrorHandler() {
 function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
   const auth = useAuth();
   const { school } = useSchool();
-  const schoolSessionReady = hasReadySchoolSession(auth);
+  const schoolSessionReady = hasReadySchoolSession(auth, school?.id ?? null);
   const userId = schoolSessionReady ? auth.user!.uid : null;
   const appState = useRef(AppState.currentState);
 
@@ -560,7 +567,7 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const visibleTabKeys = permissions.tabs.map((t) => t.key);
   const visibleRoutes = state.routes.filter((r) => visibleTabKeys.includes(r.name));
 
-  const renderTab = (route: typeof visibleRoutes[number]) => {
+  const renderTab = (route: (typeof visibleRoutes)[number]) => {
     const originalIndex = state.routes.findIndex((r) => r.key === route.key);
     const { options } = descriptors[route.key];
     const focused = state.index === originalIndex;
@@ -628,9 +635,7 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
                   borderColor: theme.colors.chromeTabBar,
                 }}
               >
-                <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800' }}>
-                  {badgeLabel}
-                </Text>
+                <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800' }}>{badgeLabel}</Text>
               </View>
             ) : null}
           </View>
@@ -720,11 +725,7 @@ function AppTabNavigator() {
       <Tab.Screen name="Today" component={HomeStack} />
       <Tab.Screen name="學習" component={LearnStack} />
       <Tab.Screen name="校園" component={MapStack} />
-      <Tab.Screen
-        name="訊息"
-        component={MessagesStack}
-        options={{ tabBarButton: () => null }}
-      />
+      <Tab.Screen name="訊息" component={MessagesStack} options={{ tabBarButton: () => null }} />
       <Tab.Screen name="我的" component={MeStack} />
     </Tab.Navigator>
   );
@@ -1056,6 +1057,7 @@ function AppInner() {
     <SchoolProvider>
       <NuniSessionProvider>
         <AuthProvider>
+          <PersonalImportSyncBridge />
           <NotificationsProvider>
             <ToastProvider>
               <AuthAwareStateProviders>

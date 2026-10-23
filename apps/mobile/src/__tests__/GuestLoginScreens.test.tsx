@@ -6,6 +6,11 @@ import { signInWithCredential } from 'firebase/auth';
 import LoginLandingScreen from '../screens/LoginLandingScreen';
 import { SSOLoginScreen } from '../screens/SSOLoginScreen';
 import { signInWithStudentId } from '../services/studentIdAuth';
+import {
+  resetSchoolLoginProviderCache,
+  setSchoolLoginProviderKinds,
+} from '../services/schoolLoginAvailability';
+import { SCHOOL_LOGIN_BIND_HINT } from '@campus/shared/src/schoolLogin';
 import { safeNavigate } from '../utils/safeNavigate';
 import { applyTheme, createLightTheme, createDarkTheme, clearSchoolTheme } from '../ui/theme';
 import { Button } from '../ui/components';
@@ -18,6 +23,7 @@ let mockPlatformAuth = {
   error: '',
   pendingLogout: false,
 };
+let mockSchool = { id: 'pu', name: '靜宜大學', shortName: '靜宜' };
 let mockFocus: (() => void) | undefined;
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => mockNavigation,
@@ -27,10 +33,11 @@ jest.mock('@react-navigation/native', () => ({
   },
 }));
 jest.mock('../utils/safeNavigate', () => ({ safeNavigate: jest.fn() }));
+jest.mock('../components/TodayTimetablePanel', () => ({ TodayTimetablePanel: () => null }));
 jest.mock('../state/auth', () => ({ useAuth: () => ({ refreshProfile: mockRefreshProfile }) }));
 jest.mock('../state/nuniSession', () => ({ useNuniSession: () => mockPlatformAuth }));
 jest.mock('../state/school', () => ({
-  useSchool: () => ({ school: { id: 'pu', name: '靜宜大學', shortName: '靜宜' } }),
+  useSchool: () => ({ school: mockSchool }),
 }));
 jest.mock('../services/studentIdAuth', () => ({ signInWithStudentId: jest.fn() }));
 jest.mock('../firebase', () => ({ getAuthInstance: jest.fn() }));
@@ -45,6 +52,8 @@ jest.mock('../ui/navigationTheme', () => ({
 beforeEach(() => {
   jest.clearAllMocks();
   Object.assign(Constants.expoConfig!, { extra: { appEnv: 'development' } });
+  setSchoolLoginProviderKinds(['school-issued']);
+  mockSchool = { id: 'pu', name: '靜宜大學', shortName: '靜宜' };
   mockPlatformAuth = { session: null, loading: false, error: '', pendingLogout: false };
   jest.mocked(signInWithStudentId).mockReset();
   mockRefreshProfile.mockReset();
@@ -57,6 +66,7 @@ beforeEach(() => {
 afterEach(() => {
   jest.useRealTimers();
   jest.restoreAllMocks();
+  resetSchoolLoginProviderCache();
   act(() => applyTheme('light'));
 });
 
@@ -248,6 +258,54 @@ test('a school service completion after unmount cannot refresh the screen or sho
   expect(goBack).not.toHaveBeenCalled();
 });
 
+test('after login from a storefront, returns to the same shop', async () => {
+  jest.useFakeTimers();
+  try {
+    jest.mocked(signInWithStudentId).mockResolvedValueOnce(schoolResult);
+    const goBack = jest.fn();
+    const view = render(
+      <SSOLoginScreen
+        navigation={{ goBack, navigate: mockNavigation.navigate }}
+        route={{ params: { returnTo: '/cafeteria/stall' } }}
+      />,
+    );
+    enterSchoolCredentials(view);
+    await act(async () => fireEvent.press(view.getByText('使用學號登入')));
+    act(() => jest.advanceTimersByTime(250));
+    const confirm = jest.mocked(Alert.alert).mock.calls[0][2]?.[0].onPress;
+    act(() => confirm?.());
+    expect(safeNavigate).toHaveBeenCalledWith(expect.anything(), 'Storefront', {
+      cafeteriaId: 'stall',
+    });
+    expect(goBack).not.toHaveBeenCalled();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test('blocks an off-site returnTo after login', async () => {
+  jest.useFakeTimers();
+  try {
+    jest.mocked(signInWithStudentId).mockResolvedValueOnce(schoolResult);
+    const goBack = jest.fn();
+    const view = render(
+      <SSOLoginScreen
+        navigation={{ goBack, navigate: mockNavigation.navigate }}
+        route={{ params: { returnTo: 'https://evil.test' } }}
+      />,
+    );
+    enterSchoolCredentials(view);
+    await act(async () => fireEvent.press(view.getByText('使用學號登入')));
+    act(() => jest.advanceTimersByTime(250));
+    const confirm = jest.mocked(Alert.alert).mock.calls[0][2]?.[0].onPress;
+    act(() => confirm?.());
+    expect(safeNavigate).not.toHaveBeenCalled();
+    expect(goBack).toHaveBeenCalled();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 test('an already displayed success dialog cannot navigate after its screen unmounts', async () => {
   jest.useFakeTimers();
   try {
@@ -295,6 +353,19 @@ test('pending logout explains the next step without presenting a restored accoun
   expect(view.queryByText('回到我的 Campus One')).toBeNull();
 });
 
+test('hides the school login button when no usable school provider is listed', () => {
+  setSchoolLoginProviderKinds([]);
+  const landing = render(<LoginLandingScreen />);
+  expect(landing.getByText(SCHOOL_LOGIN_BIND_HINT)).toBeTruthy();
+  expect(landing.queryByTestId('school-login-start')).toBeNull();
+  expect(landing.queryByText('前往學校登入')).toBeNull();
+  landing.unmount();
+  const direct = render(<SSOLoginScreen />);
+  expect(direct.getByText(SCHOOL_LOGIN_BIND_HINT)).toBeTruthy();
+  expect(direct.queryByTestId('student-password-input')).toBeNull();
+  expect(direct.queryByText('使用學號登入')).toBeNull();
+});
+
 test('a release without school SSO keeps public and platform entries, but does not collect school credentials', () => {
   Object.assign(Constants.expoConfig!, {
     extra: {
@@ -305,8 +376,10 @@ test('a release without school SSO keeps public and platform entries, but does n
       },
     },
   });
+  setSchoolLoginProviderKinds([]);
   const landing = render(<LoginLandingScreen />);
-  expect(landing.getByTestId('school-login-start')).toBeDisabled();
+  expect(landing.getByText(SCHOOL_LOGIN_BIND_HINT)).toBeTruthy();
+  expect(landing.queryByTestId('school-login-start')).toBeNull();
   fireEvent.press(landing.getByTestId('public-Map'));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'Map');
   fireEvent.press(landing.getByTestId('login-start'));
@@ -318,5 +391,61 @@ test('a release without school SSO keeps public and platform entries, but does n
   expect(direct.queryByText('使用學號登入')).toBeNull();
   fireEvent.press(direct.getByText('用 Google 帳號登入'));
   expect(mockNavigation.navigate).toHaveBeenCalledWith('NuniWorkspace');
+  expect(signInWithStudentId).not.toHaveBeenCalled();
+});
+
+
+test('the guest school-login entry always follows the selected university', () => {
+  const view = render(<LoginLandingScreen />);
+  expect(view.getByTestId('school-login-start')).toBeTruthy();
+  mockSchool = { id: 'nthu', name: '國立清華大學', shortName: '清大' };
+  view.rerender(<LoginLandingScreen />);
+  expect(view.queryByTestId('school-login-start')).toBeNull();
+  expect(view.getByText(SCHOOL_LOGIN_BIND_HINT)).toBeTruthy();
+  expect(view.getByTestId('login-start')).toBeTruthy();
+  mockSchool = { id: 'pu', name: '靜宜大學', shortName: '靜宜' };
+  view.rerender(<LoginLandingScreen />);
+  expect(view.getByTestId('school-login-start')).toBeTruthy();
+});
+
+test('a direct school login route cannot show Providence credentials while browsing NTHU', () => {
+  mockSchool = { id: 'nthu', name: '國立清華大學', shortName: '清大' };
+  const view = render(<SSOLoginScreen />);
+  expect(view.getByText('Campus One · 國立清華大學')).toBeTruthy();
+  expect(view.getByText(SCHOOL_LOGIN_BIND_HINT)).toBeTruthy();
+  expect(view.queryByTestId('student-id-input')).toBeNull();
+  expect(view.queryByTestId('student-password-input')).toBeNull();
+  expect(view.getByRole('button', { name: '用 Google 帳號登入' })).not.toBeDisabled();
+  expect(signInWithStudentId).not.toHaveBeenCalled();
+});
+
+test('changing university cancels the old credential form and drops its late response', async () => {
+  let resolveSchoolLogin!: (value: typeof schoolResult) => void;
+  jest.mocked(signInWithStudentId).mockImplementation(
+    () => new Promise((resolve) => { resolveSchoolLogin = resolve; }),
+  );
+  const view = render(<SSOLoginScreen />);
+  enterSchoolCredentials(view);
+  fireEvent.press(view.getByText('使用學號登入'));
+  expect(signInWithStudentId).toHaveBeenCalledWith(
+    expect.objectContaining({ schoolId: 'pu' }),
+  );
+  mockSchool = { id: 'nthu', name: '國立清華大學', shortName: '清大' };
+  view.rerender(<SSOLoginScreen />);
+  expect(view.queryByTestId('student-password-input')).toBeNull();
+  expect(view.getByRole('button', { name: '用 Google 帳號登入' })).not.toBeDisabled();
+  await act(async () => { resolveSchoolLogin(schoolResult); });
+  expect(mockRefreshProfile).not.toHaveBeenCalled();
+  expect(Alert.alert).not.toHaveBeenCalled();
+});
+
+
+test('public landing shows the current browsing campus and opens its library without school login', () => {
+  const view = render(<LoginLandingScreen />);
+  expect(view.getByText('瀏覽校園')).toBeTruthy();
+  expect(view.getByText('靜宜大學')).toBeTruthy();
+  expect(view.getByTestId('public-Library')).toBeTruthy();
+  fireEvent.press(view.getByTestId('public-Library'));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'Library');
   expect(signInWithStudentId).not.toHaveBeenCalled();
 });

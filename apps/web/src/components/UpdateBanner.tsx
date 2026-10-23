@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { activateServiceWorkerUpdate } from '@/lib/serviceWorkerUpdates';
+import { loadFailureCopy } from '@campus/shared/src/loadFailureCopy';
 import { Button } from './ui/Button';
 import styles from './SystemNotice.module.css';
 
@@ -43,8 +44,12 @@ export function UpdateBanner() {
     try {
       await activateServiceWorkerUpdate(registration.current);
       if (mounted.current) window.location.reload();
-    } catch {
-      if (mounted.current) setError('更新尚未完成，頁面已保留。請確認網路後再試。');
+    } catch (error) {
+      if (mounted.current) {
+        setError(
+          `更新尚未完成，頁面已保留。${loadFailureCopy(error, { online: navigator.onLine })}。`,
+        );
+      }
     } finally {
       updating.current = false;
       if (mounted.current) setBusy(false);

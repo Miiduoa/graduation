@@ -49,10 +49,26 @@
   gap: 8px;
   font-weight: 600;
 }
-.categories {
+.categories,
+.tools,
+.actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
+}
+.tools button[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--brand);
+  border-color: var(--brand);
+}
+.tools button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.actions a,
+.actions button {
+  white-space: normal;
 }
 .categories button,
 .favorite,
@@ -96,6 +112,12 @@
   border-radius: 50% 50% 50% 0;
   transform: rotate(-45deg);
   box-shadow: var(--shadow-md);
+}
+.pinSelected {
+  background: var(--text);
+  width: 34px;
+  height: 34px;
+  box-shadow: 0 0 0 5px var(--accent-soft), var(--shadow-md);
 }
 .map :global(.leaflet-control-zoom a),
 .map :global(.leaflet-control-attribution),
@@ -194,6 +216,19 @@
 }
 .locationName {
   font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pending {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--warning);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: var(--warning-soft);
 }
 .description {
   color: var(--muted);
@@ -220,6 +255,15 @@
   background: var(--surface);
 }
 @media (max-width: 600px) {
+  .categories button,
+  .tools .btn,
+  .actions .btn,
+  .actions button {
+    min-height: 44px;
+  }
+  .location {
+    padding: 6px 0;
+  }
   .route {
     flex-direction: column;
   }

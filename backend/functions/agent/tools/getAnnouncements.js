@@ -19,7 +19,7 @@ async function execute(ctx, rawInput) {
 module.exports = {
   name: 'getAnnouncements',
   description:
-    '取得學校近期公告列表（標題、來源、發布時間）。使用者問公告、通知、校園消息時呼叫；schoolId 可省略（沿用登入學校）。',
+    '取得學校近期公開公告（標題、來源、摘要、原文連結）。來源抓取失敗要標「暫時抓不到」，不要把過期稿當成新公告；沒有可顯示的稿時引導到該處室原始網址。不要把 E校園或 TronClass 個人通知混進來。',
   inputSchema,
   execute,
 };

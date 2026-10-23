@@ -1,90 +1,86 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import BusPage from './page';
-import { loadBusArrivals, loadBusRoutes, type BusArrivals } from '@/lib/bus';
 
-vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams('schoolId=pu') }));
-vi.mock('@/components/SiteShell', () => ({
-  SiteShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main>,
+const navigation = vi.hoisted(() => ({ query: '' }));
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => new URLSearchParams(navigation.query),
 }));
-vi.mock('@/lib/bus', async (original) => ({
-  ...(await original<typeof import('@/lib/bus')>()),
-  loadBusRoutes: vi.fn(),
-  loadBusArrivals: vi.fn(),
+vi.mock('@/components/SiteShell', () => ({
+  SiteShell: ({ children, schoolName }: { children: React.ReactNode; schoolName?: string }) => (
+    <main>
+      <p>{schoolName}</p>
+      {children}
+    </main>
+  ),
+}));
+vi.mock('@/components/TransitExplorer', () => ({
+  TransitExplorer: ({ schoolId, legacy }: { schoolId: string; legacy?: React.ReactNode }) => (
+    <div>
+      <output data-testid="bus-school">{schoolId}</output>
+      {legacy}
+    </div>
+  ),
 }));
 
 beforeEach(() => {
-  vi.clearAllMocks();
-  vi.mocked(loadBusRoutes).mockResolvedValue([
-    {
-      id: 'route',
-      name: '實際路線',
-      description: '',
-      city: 'Taichung',
-      stops: [
-        { id: 'one', name: '第一站', order: 1 },
-        { id: 'two', name: '第二站', order: 2 },
-      ],
-    },
-  ]);
-  vi.mocked(loadBusArrivals).mockResolvedValue({
-    status: 'unavailable',
-    arrivals: [],
-    fetchedAt: null,
-  });
+  navigation.query = '';
+  vi.stubEnv('TDX_CLIENT_ID', undefined);
+  vi.stubEnv('TDX_CLIENT_SECRET', undefined);
 });
-afterEach(() => {
-  vi.useRealTimers();
-  vi.restoreAllMocks();
-});
+afterEach(() => { cleanup(); vi.unstubAllEnvs(); });
 
-it('offers the official service without inventing an arrival when realtime data is unavailable', async () => {
+it('uses campus over a stale schoolId when locating bus stops', () => {
+  navigation.query = '?campus=cgu&schoolId=pu';
   render(<BusPage />);
-  expect(await screen.findByText(/目前沒有可確認的即時到站資訊/)).toBeTruthy();
-  expect(screen.queryByText(/8 分鐘/)).toBeNull();
-  expect(screen.queryByText('校園環線')).toBeNull();
-  expect(screen.getByRole('link', { name: /臺中市官方公車查詢/ }).getAttribute('href')).toBe(
-    'https://citybus-free.taichung.gov.tw/',
-  );
+  expect(screen.getByTestId('bus-school').textContent).toBe('cgu');
+  expect(screen.getByText('長庚大學')).toBeTruthy();
 });
 
-it('ignores an old station response after the user switches stations', async () => {
-  let finish!: (data: BusArrivals) => void;
-  vi.mocked(loadBusArrivals).mockImplementationOnce(
-    () =>
-      new Promise((resolve) => {
-        finish = resolve;
-      }),
-  );
+it('keeps a not-yet-integrated university isolated from the previous school', () => {
+  navigation.query = '?campus=remote-university-12&schoolId=pu';
   render(<BusPage />);
-  fireEvent.change(await screen.findByLabelText(/候車站牌/), { target: { value: 'two' } });
-  await screen.findByText(/目前沒有可確認的即時到站資訊/);
-  await act(async () =>
-    finish({
-      status: 'ready',
-      fetchedAt: new Date().toISOString(),
-      arrivals: [{ routeName: '舊站資料', direction: '', label: '約 8 分鐘' }],
-    }),
-  );
-  expect(screen.queryByText('舊站資料')).toBeNull();
-  expect(screen.getByRole('heading', { name: '第二站 到站資訊' })).toBeTruthy();
+  expect(screen.getByTestId('bus-school').textContent).toBe('remote-university-12');
+  expect(screen.getByText('所選校園尚未接入')).toBeTruthy();
 });
 
-it('removes estimates when their source timestamp expires while the page is hidden', async () => {
-  vi.useFakeTimers();
-  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
-  vi.mocked(loadBusArrivals).mockResolvedValue({
-    status: 'ready',
-    fetchedAt: new Date().toISOString(),
-    arrivals: [{ routeName: '實際路線', direction: '', label: '約 8 分鐘' }],
-  });
-  await act(async () => {
-    render(<BusPage />);
-  });
-  expect(screen.getByText('約 8 分鐘')).toBeTruthy();
-  await act(async () => {
-    vi.advanceTimersByTime(90_000);
-  });
-  expect(screen.queryByText('約 8 分鐘')).toBeNull();
-  expect(screen.getByText(/目前沒有可確認的即時到站資訊/)).toBeTruthy();
+it('opens Providence buses when no school has been chosen yet', () => {
+  navigation.query = '?campus=all&schoolId=pu';
+  render(<BusPage />);
+  expect(screen.getByTestId('bus-school').textContent).toBe('pu');
+  expect(screen.getByText('靜宜大學')).toBeTruthy();
+  expect(screen.queryByText('請先選擇一所學校')).toBeNull();
+});
+
+it('keeps the selected campus in the registered-routes deep link', () => {
+  navigation.query = '?campus=nthu&schoolId=pu';
+  render(<BusPage />);
+  const link = screen.getByRole('link', { name: /開啟已登錄的校園路線查詢/ });
+  const href = new URL(link.getAttribute('href')!, 'https://campus.example');
+  expect(href.searchParams.get('schoolId')).toBe('nthu');
+  expect(href.searchParams.get('school')).toBe('NTHU');
+});
+
+it('keeps official transit access visible even before a campus is selected', () => {
+  navigation.query = '?campus=all';
+  render(<BusPage />);
+  expect(screen.getByRole('heading', { name: '臺中站牌可查詢，班次時間請至官方網站確認' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '臺中市官方公車查詢 ↗' }).getAttribute('href')).toBe('https://citybus.taichung.gov.tw/');
+  expect(screen.getByRole('link', { name: '其他縣市與公路客運查詢 ↗' }).getAttribute('href')).toBe('https://www.taiwanbus.tw/');
+  expect(screen.getByTestId('bus-school').textContent).toBe('pu');
+  expect(screen.queryByText('請先選擇一所學校')).toBeNull();
+});
+
+it.each([
+  { clientId: 'configured-id', clientSecret: undefined },
+  { clientId: undefined, clientSecret: 'configured-secret' },
+  { clientId: 'configured-id', clientSecret: 'configured-secret' },
+  { clientId: '', clientSecret: '' },
+])('does not disguise a configured or partially configured transit provider as an intentional static-catalog mode: %o', ({ clientId, clientSecret }) => {
+  vi.stubEnv('TDX_CLIENT_ID', clientId);
+  vi.stubEnv('TDX_CLIENT_SECRET', clientSecret);
+  render(<BusPage />);
+  expect(screen.queryByRole('heading', { name: '臺中站牌可查詢，班次時間請至官方網站確認' })).toBeNull();
+  expect(document.body.textContent).not.toContain('configured-secret');
+  expect(document.body.textContent).not.toContain('configured-id');
 });

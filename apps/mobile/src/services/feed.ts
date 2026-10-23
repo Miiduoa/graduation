@@ -63,7 +63,13 @@ export async function fetchRecentCampusPosts(
     const snap = await getDocs(qb);
     return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<CampusPostDoc, 'id'>) }));
   } catch {
-    const snap = await getDocs(query(postsCol(db, schoolId), limit(Math.min(lim, 25))));
+    const snap = await getDocs(
+      query(
+        postsCol(db, schoolId),
+        ...(boardId ? [where('boardId', '==', boardId)] : []),
+        limit(Math.min(lim, 25)),
+      ),
+    );
     return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<CampusPostDoc, 'id'>) }));
   }
 }

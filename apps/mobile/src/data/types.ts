@@ -11,6 +11,11 @@ export type Announcement = {
   pinned?: boolean;
   expiresAt?: string;
   schoolId?: string;
+  summary?: string;
+  originalUrl?: string;
+  sourceId?: string;
+  origin?: string;
+  office?: string;
 };
 
 export type AnnouncementCategory = 'general' | 'academic' | 'event' | 'emergency' | 'system';
@@ -402,6 +407,11 @@ export type Submission = {
   feedback?: string;
   gradedAt?: string;
   gradedBy?: string;
+  gradePublished?: boolean;
+  gradeScore?: number;
+  gradeFeedback?: string;
+  gradePublishedAt?: string;
+  gradeRevisionCount?: number;
   status: 'submitted' | 'graded' | 'late' | 'missing';
 };
 

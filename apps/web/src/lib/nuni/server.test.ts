@@ -9,6 +9,7 @@ import {
   LOGIN_COOKIE,
   SESSION_COOKIE,
   boundedJson,
+  fetchJson,
   openCookie,
   nuniEnabled,
   publicOrigin,
@@ -57,6 +58,24 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it('waits at least ten seconds and retries a waking API once', async () => {
+  fetcher
+    .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    .mockResolvedValueOnce(response({ ok: true }));
+  await expect(fetchJson('https://api.nuni.tw/v1/public/schools/pu/cafeterias', {})).resolves.toEqual(
+    { ok: true },
+  );
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+it('does not retry a 4xx API failure', async () => {
+  fetcher.mockResolvedValueOnce(response({ error: { code: 'AUTH_REQUIRED' } }, 401));
+  await expect(fetchJson('https://api.nuni.tw/v1/public/schools/pu/cafeterias', {})).rejects.toMatchObject({
+    status: 401,
+  });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
 describe('Nuni additive classroom configuration', () => {
   it('keeps the guest shell usable when optional course integration is disabled without opening course APIs', async () => {
     vi.stubEnv('NUNI_CLASSROOM_ENABLED', '');
@@ -64,7 +83,7 @@ describe('Nuni additive classroom configuration', () => {
     const current = await handleNuni(request('api/nuni/session'), ['session']);
     expect(await current.json()).toEqual({ authenticated: false });
     const options = await handleNuni(request('api/nuni/sign-in-options'), ['sign-in-options']);
-    expect(await options.json()).toEqual({ google: false });
+    expect(await options.json()).toEqual({ google: false, studentId: false });
     const courses = await handleNuni(request('api/nuni/class-workspaces'), ['class-workspaces']);
     expect(courses.status).toBe(404);
     expect(fetcher).not.toHaveBeenCalled();
@@ -149,19 +168,34 @@ describe('Nuni additive classroom configuration', () => {
 describe('Nuni browser session boundary', () => {
   it('only advertises Google when both the Web and the API are configured', async () => {
     vi.stubEnv('PLATFORM_GOOGLE_CLIENT_SECRET', '');
+    fetcher.mockResolvedValueOnce(response({ kinds: ['google-consumer'] }));
     expect(
       await (await handleNuni(request('api/nuni/sign-in-options'), ['sign-in-options'])).json(),
-    ).toEqual({ google: false });
-    expect(fetcher).not.toHaveBeenCalled();
+    ).toEqual({ google: false, studentId: false });
+    expect(fetcher).toHaveBeenCalledOnce();
     vi.stubEnv('PLATFORM_GOOGLE_CLIENT_SECRET', 'test-secret');
     fetcher.mockResolvedValueOnce(response({ kinds: [] }));
     expect(
       await (await handleNuni(request('api/nuni/sign-in-options'), ['sign-in-options'])).json(),
-    ).toEqual({ google: false });
+    ).toEqual({ google: false, studentId: false });
     fetcher.mockResolvedValueOnce(response({ kinds: ['google-consumer'] }));
     expect(
       await (await handleNuni(request('api/nuni/sign-in-options'), ['sign-in-options'])).json(),
-    ).toEqual({ google: true });
+    ).toEqual({ google: true, studentId: false });
+  });
+  it('advertises student ID only when the API lists it, never by default', async () => {
+    fetcher.mockResolvedValueOnce(response({ kinds: ['google-consumer'] }));
+    expect(
+      await (await handleNuni(request('api/nuni/sign-in-options'), ['sign-in-options'])).json(),
+    ).toEqual({ google: true, studentId: false });
+    fetcher.mockResolvedValueOnce(response({ kinds: ['google-consumer', 'school-issued'] }));
+    expect(
+      await (await handleNuni(request('api/nuni/sign-in-options'), ['sign-in-options'])).json(),
+    ).toEqual({ google: true, studentId: true });
+    fetcher.mockResolvedValueOnce(response({ kinds: ['student-id'] }));
+    expect(
+      await (await handleNuni(request('api/nuni/sign-in-options'), ['sign-in-options'])).json(),
+    ).toEqual({ google: false, studentId: true });
   });
   it('does not treat an unrelated successful JSON response as acknowledged logout', async () => {
     const value = session();
@@ -260,7 +294,7 @@ describe('Nuni browser session boundary', () => {
   });
   it('blocks ordinary reads after logout revocation fails, while allowing a retry', async () => {
     const value = session();
-    fetcher.mockRejectedValueOnce(new TypeError('offline'));
+    fetcher.mockRejectedValue(new TypeError('offline'));
     const failed = await handleNuni(
       request('api/nuni/logout', {
         post: {},
@@ -280,7 +314,7 @@ describe('Nuni browser session boundary', () => {
       ['class-workspaces'],
     );
     expect(blocked.status).toBe(401);
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledTimes(2);
     fetcher.mockResolvedValueOnce(response({ signedOut: true }));
     const done = await handleNuni(
       request('api/nuni/logout', {
@@ -396,6 +430,7 @@ describe('Nuni Google authorization code flow', () => {
     '/map?school=pu&focus=library#route',
     '/bus?school=pu',
     '/announcements/news-123?schoolId=tw-pu',
+    '/cafeteria/stall?schoolId=pu',
     '/classroom/course/cw_11111111-1111-4111-8111-111111111111#assignment-cwa_22222222-2222-4222-8222-222222222222',
   ])('returns to the verified original task after OAuth: %s', async (returnUrl) => {
     fetcher.mockResolvedValueOnce(response(tx()));

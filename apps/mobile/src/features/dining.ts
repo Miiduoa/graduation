@@ -4,9 +4,20 @@ import * as firestore from 'firebase/firestore';
 import { collection, doc, getDocFromServer, getDocsFromServer } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { getAuthInstance, getDb, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
+import { fetchCafeteriaCatalog } from '../services/cafeteriaCatalog';
+import {
+  parseCafeteriaReviewStatus,
+  type CafeteriaReviewStatus,
+} from '@campus/shared/src/cafeteriaCatalog';
 
 export type DiningScope = { userId: string; schoolId: string };
-export type DiningVenue = { id: string; name: string; location: string; orderingEnabled: boolean };
+export type DiningVenue = {
+  id: string;
+  name: string;
+  location: string;
+  orderingEnabled: boolean;
+  reviewStatus: CafeteriaReviewStatus;
+};
 export type DiningMenu = {
   id: string;
   name: string;
@@ -110,11 +121,57 @@ export const diningTotal = (price: number, quantity = 1) => {
   const tax = Math.round(subtotal * 0.05);
   return { subtotal, tax, total: (subtotalCents + tax * 100) / 100 };
 };
+async function loadDiningCatalogFromApi(schoolId: string): Promise<DiningCatalog> {
+  const { cafeterias: locations, menus: items } = await fetchCafeteriaCatalog(schoolId);
+  const venues = locations.map((row) => ({
+    id: row.id,
+    name: row.name,
+    location: row.location ?? '',
+    orderingEnabled: row.merchantMode === 'native_order',
+    reviewStatus: row.reviewStatus,
+  }));
+  const menus = items.map((item) => {
+      const venue = venues.find((row) => row.id === item.cafeteriaId);
+      const price =
+        typeof item.price === 'number' &&
+        Number.isFinite(item.price) &&
+        item.price >= 0 &&
+        Number.isSafeInteger(Math.round(item.price * 100))
+          ? item.price
+          : null;
+      return {
+        id: item.id,
+        name: item.name,
+        cafeteriaId: item.cafeteriaId,
+        description: item.description ?? '',
+        price,
+        orderable:
+          item.available === true &&
+          item.soldOut !== true &&
+          price !== null &&
+          Boolean(venue?.orderingEnabled),
+      };
+    });
+  return { venues, menus };
+}
+
+export async function loadPublicDiningCatalog(schoolId: string): Promise<DiningCatalog> {
+  if (!schoolId) throw new DiningError('請指定學校');
+  return loadDiningCatalogFromApi(schoolId);
+}
+
 export async function loadDiningCatalog(
   scope: DiningScope,
   isCurrent: () => boolean,
 ): Promise<DiningCatalog> {
   assertScope(scope, isCurrent);
+  try {
+    const catalog = await loadDiningCatalogFromApi(scope.schoolId);
+    assertScope(scope, isCurrent);
+    return catalog;
+  } catch {
+    // Platform catalog unavailable: keep the school-scoped Firestore read.
+  }
   const db = getDb();
   const [venueSnap, firstMenus] = await Promise.all([
     getDocsFromServer(collection(db, 'schools', scope.schoolId, 'cafeterias')),
@@ -139,6 +196,9 @@ export async function loadDiningCatalog(
       name: typeof data.name === 'string' ? data.name : '未提供店名',
       location: typeof data.location === 'string' ? data.location : '',
       orderingEnabled: data.pilotStatus === 'live' && data.orderingEnabled === true,
+      reviewStatus: parseCafeteriaReviewStatus(
+        data.reviewStatus ?? data.verificationStatus ?? data.catalogReview,
+      ),
     };
   });
   const menus = menuSnap.docs.map((entry) => {

@@ -10,6 +10,7 @@ import {
   merchantWorkspaceStateLabel,
   type NuniMerchantApplicationInput,
 } from '@campus/shared/src/nuniMerchant';
+import { NuniMerchantWorkspace } from './NuniMerchantWorkspace';
 import { useNuniSession } from '../../state/nuniSession';
 import { useNuniDraftState } from '../../state/nuniDrafts';
 import { theme } from '../../ui/theme';
@@ -111,6 +112,9 @@ function MerchantAccount({ context }: { context: string }) {
   const styles = useThemeStyleSheet(createStyles);
   const { request, refresh } = useNuniSession();
   const [overview, setOverview] = useState<Overview | null>(null);
+  const [selectedWorkspace, setSelectedWorkspace] = useState<Overview['workspaces'][number] | null>(
+    null,
+  );
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [invalidSession, setInvalidSession] = useState(false);
@@ -237,6 +241,20 @@ function MerchantAccount({ context }: { context: string }) {
     }
   }
 
+  if (selectedWorkspace)
+    return (
+      <NuniMerchantWorkspace
+        key={`${selectedWorkspace.tenantId}:${selectedWorkspace.locationId}`}
+        tenantId={selectedWorkspace.tenantId}
+        locationId={selectedWorkspace.locationId}
+        context={context}
+        onBack={() => {
+          setSelectedWorkspace(null);
+          void load();
+        }}
+      />
+    );
+
   const selected = overview?.programs.find((program) => program.tenantId === draft.tenantId);
   const locked = busy || Boolean(pending);
   return (
@@ -297,6 +315,10 @@ function MerchantAccount({ context }: { context: string }) {
                     {workspace.tenantName} · {workspace.campusName}
                   </Text>
                   <Text style={styles.text}>{merchantWorkspaceStateLabel(workspace)}</Text>
+                  <Action
+                    disabled={busy}
+                    onPress={() => setSelectedWorkspace(workspace)}
+                  >{`管理門市：${workspace.locationName}`}</Action>
                   {workspace.missingRequirements.map((requirement) => (
                     <Text key={requirement} style={styles.text}>
                       {requirementLabels[requirement] ?? '請向場域管理者確認待完成項目'}

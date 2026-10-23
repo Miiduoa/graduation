@@ -172,6 +172,22 @@ describe('aiAppContext', () => {
     expect(data.washingReservations).toHaveLength(1);
   });
 
+  it('skips lost-found reads when the user is not signed in', async () => {
+    const ds = {
+      listLostFoundItems: jest.fn(async () => [{ id: 'lf-1' }]),
+    } as unknown as DataSource;
+
+    const data = await loadAIAppRuntimeData({
+      dataSource: ds,
+      userId: null,
+      schoolId: 'tw-pu',
+      now: new Date('2026-05-05T08:00:00+08:00'),
+    });
+
+    expect(ds.listLostFoundItems).not.toHaveBeenCalled();
+    expect(data.lostFoundItems).toEqual([]);
+  });
+
   it('derives pending assignments from inbox tasks and quizzes when the direct list is empty', () => {
     const now = new Date('2026-05-05T08:00:00+08:00');
     const context = buildAIAppContext({

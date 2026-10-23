@@ -6,6 +6,7 @@ import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import {
   loadDiningCatalog,
+  loadPublicDiningCatalog,
   watchDiningReceipt,
   loadDiningIntent,
   prepareDiningIntent,
@@ -20,11 +21,17 @@ import {
   type DiningMenu,
   type DiningReceipt,
 } from '../features/dining';
+import { NETWORK_RETRY_TEXT, loadServiceFailureCopy } from '../utils/loadFailureCopy';
 import {
   describePickupNumber,
   formatShortOrderCode,
 } from '@campus/shared/src/ordering/pickupNumber';
+import {
+  CAFETERIA_EMPTY_SCHOOL_TEXT,
+  cafeteriaReviewBadge,
+} from '@campus/shared/src/cafeteriaCatalog';
 import { MY_ORDER_STATUS_LABELS as statuses } from './MyOrdersScreen';
+import { safeNavigate } from '../utils/safeNavigate';
 
 type Props = {
   navigation?: { goBack?: () => void; navigate?: (route: string) => void };
@@ -62,7 +69,7 @@ function DiningContent({
   const [selected, setSelected] = useState<DiningMenu | null>(null);
   const [pending, setPending] = useState<DiningIntent | null>(null);
   const [receipt, setReceipt] = useState<DiningReceipt | null>(null);
-  const [loading, setLoading] = useState(Boolean(scope.userId));
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const mounted = useRef(true);
@@ -70,15 +77,17 @@ function DiningContent({
   const generation = useRef(0);
   const isCurrent = () => mounted.current && activeScope.current === scopeKey;
   const load = async () => {
-    if (!scope.userId || !isCurrent() || lock.current) return;
+    if (!isCurrent() || lock.current) return;
     const request = ++generation.current;
     setLoading(true);
     setError('');
     setCatalog(null);
     try {
       const [next, saved] = await Promise.all([
-        loadDiningCatalog(scope, isCurrent),
-        loadDiningIntent(scope, isCurrent),
+        scope.userId
+          ? loadDiningCatalog(scope, isCurrent)
+          : loadPublicDiningCatalog(scope.schoolId),
+        scope.userId ? loadDiningIntent(scope, isCurrent) : Promise.resolve(null),
       ]);
       if (isCurrent() && request === generation.current) {
         setCatalog(next);
@@ -87,9 +96,7 @@ function DiningContent({
     } catch (reason) {
       if (isCurrent() && request === generation.current)
         setError(
-          reason instanceof DiningError
-            ? reason.message
-            : '目前無法取得餐廳資料，請確認連線後重試。',
+          reason instanceof DiningError ? reason.message : loadServiceFailureCopy(reason),
         );
     } finally {
       if (isCurrent() && request === generation.current) setLoading(false);
@@ -122,9 +129,7 @@ function DiningContent({
       }
     } catch (reason) {
       if (isCurrent()) {
-        setError(
-          reason instanceof DiningError ? reason.message : ORDER_NOT_SENT_TEXT,
-        );
+        setError(reason instanceof DiningError ? reason.message : ORDER_NOT_SENT_TEXT);
         if (reason instanceof DiningError && reason.kind === 'not-sent') {
           setPending(null);
           setSelected(null);
@@ -178,13 +183,16 @@ function DiningContent({
       subtitle="看看餐點，確認店家是否開放接單。"
       onBack={() => navigation?.goBack?.()}
     >
-      {!scope.userId ? (
-        <AICard title="登入後查看菜單">
-          <Text style={{ color: aiTokens.muted }}>請先登入學校帳號，再查看餐廳與訂單。</Text>
-        </AICard>
-      ) : (
-        <>
-          {navigation?.navigate ? (
+      <AICard title="平台點餐與取餐">
+        <Text style={{ color: aiTokens.textSecondary, lineHeight: 24 }}>
+          使用 Google 帳號選餐、查看訂單與出示取餐憑證。學校原有餐廳服務仍保留在下方。
+        </Text>
+        <AIButton
+          label="前往平台點餐"
+          onPress={() => safeNavigate(navigation, 'NuniWorkspace', { tab: 'food' })}
+        />
+      </AICard>
+      {scope.userId && navigation?.navigate ? (
             <View style={{ alignItems: 'flex-start' }}>
               <AIButton
                 label="我的訂單"
@@ -235,10 +243,21 @@ function DiningContent({
             </AICard>
           ) : null}
           {pending ? (
-            <AICard title={busy ? '訂單送出中' : error === ORDER_CHECKING_TEXT ? '還在確認訂單' : '訂單沒送出去'}>
+            <AICard
+              title={
+                busy
+                  ? '訂單送出中'
+                  : error === ORDER_CHECKING_TEXT
+                    ? '還在確認訂單'
+                    : '訂單沒送出去'
+              }
+            >
               <View style={{ gap: 12 }}>
                 {busy ? null : (
-                  <Text accessibilityRole="alert" style={{ color: aiTokens.text, fontWeight: '700' }}>
+                  <Text
+                    accessibilityRole="alert"
+                    style={{ color: aiTokens.text, fontWeight: '700' }}
+                  >
                     {error || ORDER_NOT_SENT_TEXT}
                   </Text>
                 )}
@@ -296,17 +315,32 @@ function DiningContent({
                 <ActivityIndicator accessibilityLabel="讀取餐廳" color={aiTokens.ai} />
               ) : null}
               {error && !pending ? (
-                <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>
-                  {error}
-                </Text>
+                <View style={{ gap: 12 }}>
+                  <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>
+                    {error}
+                  </Text>
+                  {error === NETWORK_RETRY_TEXT ? (
+                    <AIButton label="重新整理" variant="ghost" onPress={() => void load()} />
+                  ) : null}
+                </View>
               ) : null}
             </View>
           </AICard>
           {catalog ? (
             <>
               {visibleMenus.length === 0 ? (
-                <AICard title="目前沒有符合的餐點">
-                  <Text style={{ color: aiTokens.muted }}>試著換個關鍵字，或稍後更新菜單。</Text>
+                <AICard
+                  title={
+                    !keyword.trim() && catalog.venues.length === 0
+                      ? CAFETERIA_EMPTY_SCHOOL_TEXT
+                      : '目前沒有符合的餐點'
+                  }
+                >
+                  <Text style={{ color: aiTokens.muted }}>
+                    {!keyword.trim() && catalog.venues.length === 0
+                      ? '這間學校還沒提供餐廳資料，不會沿用其他學校的店家。'
+                      : '試著換個關鍵字，或稍後更新菜單。'}
+                  </Text>
                 </AICard>
               ) : (
                 visibleMenus.map((menu) => (
@@ -318,7 +352,7 @@ function DiningContent({
                       {menu.description ? (
                         <Text style={{ color: aiTokens.muted }}>{menu.description}</Text>
                       ) : null}
-                      {menu.orderable ? (
+                      {menu.orderable && scope.userId ? (
                         <AIButton
                           label={`選擇${menu.name}`}
                           disabled={busy || Boolean(pending)}
@@ -337,6 +371,11 @@ function DiningContent({
               )}
               {catalog.venues.map((venue) => (
                 <AICard key={venue.id} title={venue.name}>
+                  {cafeteriaReviewBadge(venue.reviewStatus) ? (
+                    <Text style={{ color: aiTokens.muted }}>
+                      {cafeteriaReviewBadge(venue.reviewStatus)}
+                    </Text>
+                  ) : null}
                   <Text style={{ color: aiTokens.muted }}>
                     {venue.location || '位置資訊未提供'}
                   </Text>
@@ -399,8 +438,6 @@ function DiningContent({
               </View>
             </View>
           </Modal>
-        </>
-      )}
     </AIDetailScreen>
   );
 }

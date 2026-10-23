@@ -73,6 +73,12 @@ it('recovers from unavailable login options and ignores an old request', async (
   expect(screen.queryByRole('button', { name: '使用 Google 帳號繼續' })).toBeNull();
 });
 
+it('shows the Google button only when the backend says Google is available', async () => {
+  mocks.request.mockResolvedValue({ google: false, studentId: true });
+  render(<NuniSignIn />);
+  expect(await screen.findByText('目前無法使用帳號登入，請稍後再試。')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '使用 Google 帳號繼續' })).toBeNull();
+});
 it('uses one Google flow for a first account and a returning account', async () => {
   render(<NuniSignIn />);
   expect(screen.getByText(/第一次使用？透過 Google 繼續即可建立帳號/)).toBeTruthy();

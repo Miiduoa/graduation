@@ -7,6 +7,7 @@ import { AppActionIcon } from '../ui/AppActionIcon';
 import type { GeneratedButtonIconId } from '../ui/generatedButtonIcons';
 import { useTheme } from '../state/theme';
 import { useSchool } from '../state/school';
+import { supportsLegacyTransportHub } from '../features/campusTransportScope';
 import { safeNavigate } from '../utils/safeNavigate';
 import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
 import { OpenOrderCard } from '../components/OpenOrderCard';
@@ -146,13 +147,22 @@ const sections: Array<{ title: string; items: ServiceItem[] }> = [
 type Navigation = Parameters<typeof safeNavigate>[0];
 export function CampusHubScreen({ navigation }: { navigation?: Navigation }) {
   const { school } = useSchool();
-  return <CampusDirectory key={school.id} schoolName={school.name} navigation={navigation} />;
+  return (
+    <CampusDirectory
+      key={school.id}
+      schoolId={school.id}
+      schoolName={school.name}
+      navigation={navigation}
+    />
+  );
 }
 
 function CampusDirectory({
+  schoolId,
   schoolName,
   navigation,
 }: {
+  schoolId: string;
   schoolName: string;
   navigation?: Navigation;
 }) {
@@ -160,17 +170,25 @@ function CampusDirectory({
   const [query, setQuery] = useState('');
   const filtered = useMemo(() => {
     const keyword = query.trim().toLowerCase();
+    const isProvidence = supportsLegacyTransportHub(schoolId);
     return sections
       .map((section) => ({
         ...section,
-        items: section.items.filter((item) =>
-          [item.label, item.description, ...item.keywords].some((text) =>
+        items: section.items.filter((item) => {
+          // The legacy transport hub uses PU/Taichung rail and bus defaults.
+          // Never show that regional service for an unrelated campus.
+          if (!isProvidence && item.screen === 'TransportHub') return false;
+          const keywords =
+            !isProvidence && item.screen === 'Library'
+              ? item.keywords.filter((word) => word !== '蓋夏')
+              : item.keywords;
+          return [item.label, item.description, ...keywords].some((text) =>
             text.toLowerCase().includes(keyword),
-          ),
-        ),
+          );
+        }),
       }))
       .filter((section) => section.items.length > 0);
-  }, [query]);
+  }, [query, schoolId]);
   const openService = (item: ServiceItem) => {
     safeNavigate(navigation, item.screen, undefined, {
       fallbackMessage: `「${item.label}」目前無法開啟。`,

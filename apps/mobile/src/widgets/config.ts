@@ -93,7 +93,7 @@ export const widgetConfigs: Record<WidgetType, WidgetConfig> = {
     supportedSizes: ['medium', 'large'],
     supportedFamilies: ['systemMedium', 'systemLarge'],
     refreshInterval: 60, // 每小時更新
-    requiresAuth: false,
+    requiresAuth: true,
   },
 };
 

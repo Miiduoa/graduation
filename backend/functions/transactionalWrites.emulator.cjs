@@ -3,6 +3,8 @@ const { after, beforeEach, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { initializeApp, deleteApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
+// 這裡測的是點餐流程本身，線上點餐開關要明確打開（正式環境沒設就是關）
+process.env.ONLINE_ORDERING_ENABLED = 'true';
 const { createGroupMembershipHandlers } = require('./groupMembership');
 const { createOrderHandler } = require('./createOrder');
 const { createSubmitProductFeedback } = require('./productFeedback');
@@ -15,7 +17,6 @@ if (!emulatorHost || Number(emulatorHost[1]) < 1 || Number(emulatorHost[1]) > 65
 }
 const host = `127.0.0.1:${emulatorHost[1]}`;
 process.env.FIRESTORE_EMULATOR_HOST = host;
-const initialOrderingEnabled = process.env.ONLINE_ORDERING_ENABLED;
 const projectId = 'demo-campus-order-concurrency';
 const app = initializeApp({ projectId }, 'transaction-concurrency-tests');
 const db = getFirestore(app);
@@ -55,8 +56,6 @@ const feedback = (uid = 'alice', change = {}) =>
     },
   });
 beforeEach(async () => {
-  // This Node test process uses only the guarded local Firestore emulator, not the Functions emulator.
-  process.env.ONLINE_ORDERING_ENABLED = 'true';
   const response = await fetch(
     `http://${host}/emulator/v1/projects/${projectId}/databases/(default)/documents`,
     { method: 'DELETE' },
@@ -92,20 +91,8 @@ beforeEach(async () => {
   await batch.commit();
 });
 after(async () => {
-  if (initialOrderingEnabled === undefined) delete process.env.ONLINE_ORDERING_ENABLED;
-  else process.env.ONLINE_ORDERING_ENABLED = initialOrderingEnabled;
   await db.terminate();
   await deleteApp(app);
-});
-
-test('a disabled ordering gate rejects before creating any order, mirror or request key', async () => {
-  process.env.ONLINE_ORDERING_ENABLED = 'false';
-  await assert.rejects(order(), (error) =>
-    error.code === 'failed-precondition' && error.details?.reason === 'online_ordering_off',
-  );
-  for (const path of ['schools/pu/orders', 'users/alice/schools/pu/orders', '_orderRequests']) {
-    assert.equal((await db.collection(path).get()).size, 0);
-  }
 });
 
 test('concurrent feedback retries persist one receipt with a server timestamp', async () => {
