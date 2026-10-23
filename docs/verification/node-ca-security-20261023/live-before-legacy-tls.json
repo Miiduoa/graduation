@@ -1,0 +1,142 @@
+{
+  "checkedAt": "2026-10-23T12:45:30.097Z",
+  "runtime": {
+    "node": "v24.21.0",
+    "abi": "137",
+    "openssl": "3.5.8",
+    "platform": "linux",
+    "arch": "x64"
+  },
+  "environmentPresent": {
+    "NODE_TLS_REJECT_UNAUTHORIZED": false,
+    "NODE_OPTIONS": false,
+    "NODE_EXTRA_CA_CERTS": false,
+    "NODE_USE_SYSTEM_CA": false,
+    "SSL_CERT_FILE": false,
+    "SSL_CERT_DIR": false,
+    "CURL_CA_BUNDLE": false,
+    "REQUESTS_CA_BUNDLE": false,
+    "GRPC_DEFAULT_SSL_ROOTS_FILE_PATH": false,
+    "HTTPS_PROXY": false,
+    "HTTP_PROXY": false,
+    "ALL_PROXY": false,
+    "NO_PROXY": false
+  },
+  "discovery": [
+    {
+      "appRoot": 0,
+      "module": "node-fetch",
+      "status": "not-installed"
+    },
+    {
+      "appRoot": 0,
+      "module": "gaxios",
+      "status": "not-installed"
+    },
+    {
+      "appRoot": 0,
+      "module": "undici",
+      "status": "not-installed"
+    },
+    {
+      "appRoot": 0,
+      "module": "@grpc/grpc-js",
+      "status": "not-installed"
+    }
+  ],
+  "results": [
+    {
+      "client": {
+        "name": "global-fetch"
+      },
+      "kind": "trusted-control",
+      "url": "https://nodejs.org/dist/index.json",
+      "httpStatus": 200,
+      "outcome": "response",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "global-fetch"
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-emudhra.we-have-a-problem.com/",
+      "httpStatus": 200,
+      "outcome": "response",
+      "passed": false
+    },
+    {
+      "client": {
+        "name": "global-fetch"
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-aaa-emudhra.we-have-a-problem.com/",
+      "category": "certificate",
+      "code": "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+      "outcome": "rejected",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "node:https"
+      },
+      "kind": "trusted-control",
+      "url": "https://nodejs.org/dist/index.json",
+      "httpStatus": 200,
+      "outcome": "response",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "node:https"
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-emudhra.we-have-a-problem.com/",
+      "httpStatus": 200,
+      "outcome": "response",
+      "passed": false
+    },
+    {
+      "client": {
+        "name": "node:https"
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-aaa-emudhra.we-have-a-problem.com/",
+      "category": "certificate",
+      "code": "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+      "outcome": "rejected",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "node:http2"
+      },
+      "kind": "trusted-control",
+      "url": "https://nodejs.org/dist/index.json",
+      "httpStatus": 200,
+      "outcome": "response",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "node:http2"
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-emudhra.we-have-a-problem.com/",
+      "category": "transport-or-client",
+      "outcome": "inconclusive",
+      "passed": false
+    },
+    {
+      "client": {
+        "name": "node:http2"
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-aaa-emudhra.we-have-a-problem.com/",
+      "category": "transport-or-client",
+      "outcome": "inconclusive",
+      "passed": false
+    }
+  ],
+  "passed": false
+}

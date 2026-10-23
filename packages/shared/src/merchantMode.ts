@@ -1,7 +1,7 @@
 export const MERCHANT_MODES = ['native_order', 'showcase_link', 'info_only'] as const;
 export type MerchantMode = (typeof MERCHANT_MODES)[number];
 
-export const PRICE_DISCLAIMER = '價格、是否賣完、是否接單以店家訂餐頁為準。Nuni 不處理這筆的付款與退款。';
+export const PRICE_DISCLAIMER = '價格、是否賣完、是否接單以店家訂餐頁為準，付款與退款由店家處理。';
 export const EXTERNAL_ORDER_HONEST_TEXT =
   '訂單在店家系統，請到店家查看。我們沒有這筆的訂單號碼、餐點明細或付款狀態。';
 export const MENU_STALE_TEXT = '菜單可能過期，價格以店家頁面為準。';
@@ -17,10 +17,12 @@ export function normalizeMerchantMode(value: unknown): MerchantMode {
   return MERCHANT_MODES.includes(value as MerchantMode) ? (value as MerchantMode) : 'info_only';
 }
 
-export function resolveStoredMerchantMode(cafeteria: {
-  merchantMode?: unknown;
-  orderingEnabled?: boolean;
-} = {}): MerchantMode {
+export function resolveStoredMerchantMode(
+  cafeteria: {
+    merchantMode?: unknown;
+    orderingEnabled?: boolean;
+  } = {},
+): MerchantMode {
   if (MERCHANT_MODES.includes(cafeteria.merchantMode as MerchantMode)) {
     return cafeteria.merchantMode as MerchantMode;
   }
@@ -103,14 +105,19 @@ export function buildShowcaseOrderingUrl(
   return url.toString();
 }
 
-export function isMenuStale(menuSyncedAt: string | Date | null | undefined, now = new Date()): boolean {
+export function isMenuStale(
+  menuSyncedAt: string | Date | null | undefined,
+  now = new Date(),
+): boolean {
   if (!menuSyncedAt) return true;
   const date = menuSyncedAt instanceof Date ? menuSyncedAt : new Date(menuSyncedAt);
   if (!Number.isFinite(date.getTime())) return true;
   return now.getTime() - date.getTime() > MENU_STALE_AFTER_HOURS * 60 * 60 * 1000;
 }
 
-export function parseMenuCsv(text: string): { name: string; price: number | null; category: string }[] {
+export function parseMenuCsv(
+  text: string,
+): { name: string; price: number | null; category: string }[] {
   const lines = String(text || '')
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -127,12 +134,15 @@ export function parseMenuCsv(text: string): { name: string; price: number | null
     const name = ((nameIndex >= 0 ? cells[nameIndex] : cells[0]) ?? '').trim();
     if (!name) return [];
     const rawPrice = priceIndex >= 0 ? cells[priceIndex] : cells[1];
-    const parsed = rawPrice != null && rawPrice !== '' ? Number(String(rawPrice).replace(/[^\d.]/g, '')) : NaN;
+    const parsed =
+      rawPrice != null && rawPrice !== '' ? Number(String(rawPrice).replace(/[^\d.]/g, '')) : NaN;
     return [
       {
         name: name.slice(0, 80),
         price: Number.isFinite(parsed) && parsed >= 0 ? parsed : null,
-        category: ((categoryIndex >= 0 ? cells[categoryIndex] : cells[2]) || '').trim().slice(0, 40),
+        category: ((categoryIndex >= 0 ? cells[categoryIndex] : cells[2]) || '')
+          .trim()
+          .slice(0, 40),
       },
     ];
   });

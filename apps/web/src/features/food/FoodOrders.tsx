@@ -12,6 +12,8 @@ import { Button } from '@/components/ui/Button';
 import { Select, Textarea } from '@/components/ui/Input';
 import type { FoodClient } from './FoodWorkspace';
 import {
+  FOOD_POLL_MS,
+  FOOD_TERMINAL_STATES,
   FoodMutationStatus,
   foodKey,
   foodMoney,
@@ -28,11 +30,13 @@ import styles from './Food.module.css';
 export function FoodOrders({
   client,
   cache,
+  accountId,
   tenantId,
   initialOrder,
 }: {
   client: FoodClient;
   cache: FoodDraftCache;
+  accountId: string;
   tenantId: string;
   initialOrder: string;
 }) {
@@ -52,7 +56,7 @@ export function FoodOrders({
       }),
     [client, tenantId, cursor, state],
   );
-  const orders = useFoodRead(load);
+  const orders = useFoodRead(load, { pollMs: FOOD_POLL_MS });
   return (
     <div className={styles.stack}>
       {selected && (
@@ -60,6 +64,7 @@ export function FoodOrders({
           key={`${tenantId}:${selected}`}
           client={client}
           cache={cache}
+          accountId={accountId}
           tenantId={tenantId}
           orderId={selected}
           onChange={orders.reload}
@@ -128,6 +133,7 @@ export function FoodOrders({
 export function FoodOrderDetail({
   client,
   cache,
+  accountId,
   tenantId,
   orderId,
   onChange,
@@ -135,6 +141,7 @@ export function FoodOrderDetail({
 }: {
   client: FoodClient;
   cache: FoodDraftCache;
+  accountId: string;
   tenantId: string;
   orderId: string;
   onChange(): Promise<unknown>;
@@ -142,7 +149,10 @@ export function FoodOrderDetail({
 }) {
   const scope = `food:order:${tenantId}:${orderId}`;
   const load = useCallback(() => client.getOrder(tenantId, orderId), [client, tenantId, orderId]);
-  const order = useFoodRead(load);
+  const order = useFoodRead(load, {
+    pollMs: FOOD_POLL_MS,
+    shouldPoll: (data) => !data || !FOOD_TERMINAL_STATES.has(data.state),
+  });
   const [reason, setReason] = useFoodDraft<NuniFoodCustomerCancelReason>(
     cache,
     `${scope}:reason`,
@@ -156,6 +166,7 @@ export function FoodOrderDetail({
   const task = useFoodMutation({
     cache,
     scope,
+    accountId,
     enabled: !!order.data,
     reload: async () => {
       await order.reload();
@@ -171,7 +182,7 @@ export function FoodOrderDetail({
       if (intent.action === 'pay') setCheckout(result as NuniFoodPaymentSessionProjection);
     },
   });
-  const locked = !order.data || task.busy || !!task.pending;
+  const locked = !order.data || task.busy || !!task.pending || task.storageBlocked;
   const receipt = order.data;
   const payment = checkout ?? receipt?.paymentSession;
   const token = receipt?.pickup.credential;

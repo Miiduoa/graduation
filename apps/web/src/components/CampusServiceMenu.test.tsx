@@ -71,6 +71,8 @@ it('retains all existing services and search while adding a separate classroom e
   expect(screen.getByRole('link', { name: '跨校交流' }).getAttribute('href')).toBe('/social');
   expect(screen.getByRole('link', { name: '店家合作' }).getAttribute('href')).toBe('/merchant');
   expect(screen.getByRole('link', { name: '點餐與取餐' }).getAttribute('href')).toBe('/food');
+  expect(screen.getByText('目前還不能線上點餐')).toBeTruthy();
+  expect(screen.queryByText('選餐點、查訂單、出示取餐憑證')).toBeNull();
   expect(screen.getAllByRole('link')).toHaveLength(32);
 });
 
@@ -176,9 +178,7 @@ it('does not stack the school course hash when the header 登入 link is used', 
   window.history.replaceState({}, '', '/course/cs101#assignment-hw-3#assignment-hw-3');
   render(<AppHeader />);
   const login = screen.getByRole('link', { name: '登入' });
-  expect(login.getAttribute('href')).toBe(
-    '/login?returnUrl=%2Fcourse%2Fcs101%23assignment-hw-3#',
-  );
+  expect(login.getAttribute('href')).toBe('/login?returnUrl=%2Fcourse%2Fcs101%23assignment-hw-3#');
   const assign = vi.fn();
   vi.stubGlobal('location', {
     ...window.location,
