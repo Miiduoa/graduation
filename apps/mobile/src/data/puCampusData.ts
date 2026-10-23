@@ -52,7 +52,7 @@ export type CampusPoi = {
 };
 
 // ═══════════════════════════════════════════════════════
-// 校園 POI 資料（與網頁地圖核對資料一致，共 33 筆）
+// 校園 POI 資料（與網頁地圖核對資料一致，共 34 筆）
 // ═══════════════════════════════════════════════════════
 
 export const CAMPUS_POIS: CampusPoi[] = [
@@ -229,7 +229,7 @@ export const CAMPUS_POIS: CampusPoi[] = [
     floor: '',
     description: '',
     departments: [],
-    facilities: [],
+    facilities: ['影印', '列印'],
     accessible: false,
     hasElevator: false,
     openTime: '',
@@ -337,6 +337,26 @@ export const CAMPUS_POIS: CampusPoi[] = [
     imageUrl: null,
   },
   {
+    id: 'pu-xijia',
+    code: '',
+    name: '希嘉學苑',
+    nameEn: '',
+    category: 'dormitory',
+    lat: 24.228017,
+    lng: 120.58067,
+    verification: 'cross-checked',
+    sourceUrl: 'https://www.openstreetmap.org/relation/9246899',
+    floor: '',
+    description: '',
+    departments: [],
+    facilities: ['宿舍', '女生宿舍', '盥洗室', '廁所'],
+    accessible: false,
+    hasElevator: false,
+    openTime: '',
+    closeTime: '',
+    imageUrl: null,
+  },
+  {
     id: 'pu-sigao',
     code: '',
     name: '思高學苑',
@@ -349,7 +369,7 @@ export const CAMPUS_POIS: CampusPoi[] = [
     floor: '',
     description: '',
     departments: [],
-    facilities: [],
+    facilities: ['宿舍', '男生宿舍', '衛浴', '廁所'],
     accessible: false,
     hasElevator: false,
     openTime: '',
