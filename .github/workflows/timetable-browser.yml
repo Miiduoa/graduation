@@ -32,7 +32,7 @@ concurrency:
 jobs:
   guest-interactions:
     name: Guest timetable interactions
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       TZ: Asia/Taipei
