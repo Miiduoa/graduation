@@ -71,9 +71,38 @@ self.addEventListener('push', (event) => {
   );
 });
 
+function courseWorkPath(data) {
+  const courseId = data.workspaceId || data.courseId || data.groupId;
+  const quizId = data.quizId;
+  const assignmentId = data.assignmentId;
+  const quiz =
+    data.isQuiz === true ||
+    data.isQuiz === 'true' ||
+    data.kind === 'quiz' ||
+    data.type === 'quiz' ||
+    data.category === 'exam';
+  const workId = quiz ? quizId || assignmentId : assignmentId || quizId;
+  if (
+    typeof courseId !== 'string' ||
+    typeof workId !== 'string' ||
+    !courseId ||
+    !workId ||
+    courseId.includes('/') ||
+    workId.includes('/')
+  ) {
+    return null;
+  }
+  const hash = `${quiz ? 'quiz' : 'assignment'}-${encodeURIComponent(workId)}`;
+  if (/^cw_[0-9a-f-]{36}$/i.test(courseId)) {
+    return `/classroom/course/${encodeURIComponent(courseId)}#${hash}`;
+  }
+  return `/course/${encodeURIComponent(courseId)}#${hash}`;
+}
+
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const data = event.notification.data || {};
+  const work = courseWorkPath(data);
   let path = '/';
   switch (data.type) {
     case 'announcement':
@@ -82,8 +111,14 @@ self.addEventListener('notificationclick', (event) => {
     case 'event':
       path = `/clubs?eventId=${encodeURIComponent(data.id)}`;
       break;
+    case 'assignment':
+    case 'assignment_due':
+    case 'homework':
+    case 'quiz':
+      path = work || '/';
+      break;
     case 'grade':
-      path = '/grades';
+      path = work || '/grades';
       break;
     case 'message':
       path = `/groups?messageId=${encodeURIComponent(data.id)}`;

@@ -2,6 +2,11 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { beforeEach, expect, it, vi } from 'vitest';
 import CoursePage from './page';
 import { loadCourseWork, submitCourseText, type CourseAssignment, type CourseWork } from '@/lib/courseWork';
+import {
+  COURSE_WORK_LANDING_ATTR,
+  COURSE_WORK_MISSING_ASSIGNMENT,
+  COURSE_WORK_MISSING_QUIZ,
+} from '@/lib/courseWorkLanding';
 
 const auth = vi.hoisted(() => ({
   user: { uid: 'alice' } as { uid: string } | null,
@@ -71,7 +76,7 @@ it('keeps guests outside coursework while showing its sign-in destination in the
   await mount();
   expect(screen.getByRole('heading', { level: 1, name: '課程內容' })).toBeTruthy();
   expect(screen.getByRole('link', { name: '登入帳號' }).getAttribute('href')).toBe(
-    '/login?redirect=%2Fcourse%2Fcourse',
+    '/login?returnUrl=%2Fcourse%2Fcourse',
   );
   expect(screen.getByRole('navigation', { name: '網站資訊' })).toBeTruthy();
   expect(loadCourseWork).not.toHaveBeenCalled();
@@ -218,4 +223,48 @@ it('hides coursework during auth verification and rechecks access before restori
   await act(async () => { recheck.resolve(coursework()); });
   expect(answer('B').value).toBe('');
   expect(loadCourseWork).toHaveBeenCalledTimes(2);
+});
+
+it('keeps the assignment hash through sign-in so the student returns to the same work', async () => {
+  auth.user = null;
+  window.history.replaceState(null, '', '/course/course#assignment-A');
+  await mount();
+  expect(screen.getByRole('link', { name: '登入帳號' }).getAttribute('href')).toBe(
+    '/login?returnUrl=%2Fcourse%2Fcourse%23assignment-A',
+  );
+});
+
+it('lands on the assignment submit area with top space and shows submitted work', async () => {
+  vi.mocked(loadCourseWork).mockResolvedValue(
+    coursework({
+      assignments: [
+        assignment('A'),
+        assignment('B', {
+          submittedAt: '2026-10-08T03:00:00.000Z',
+          submittedText: '已繳的報告',
+        }),
+      ],
+    }),
+  );
+  window.history.replaceState(null, '', '/course/course#assignment-B');
+  await mount();
+  const card = await screen.findByRole('region', { name: '作業 B' });
+  card.scrollIntoView = vi.fn();
+  await waitFor(() => expect(card.getAttribute(COURSE_WORK_LANDING_ATTR)).toBe('true'));
+  expect(within(card).getByText(/已繳交/)).toBeTruthy();
+  expect(within(card).getByText('已繳的報告')).toBeTruthy();
+});
+
+it('explains a missing assignment instead of a blank screen', async () => {
+  window.history.replaceState(null, '', '/course/course#assignment-gone');
+  await mount();
+  expect(await screen.findByText(COURSE_WORK_MISSING_ASSIGNMENT)).toBeTruthy();
+  expect(screen.getByRole('region', { name: '作業 A' })).toBeTruthy();
+});
+
+it('explains a missing quiz instead of a blank screen', async () => {
+  window.history.replaceState(null, '', '/course/course#quiz-gone');
+  await mount();
+  expect(await screen.findByText(COURSE_WORK_MISSING_QUIZ)).toBeTruthy();
+  expect(screen.getByRole('region', { name: '作業 A' })).toBeTruthy();
 });

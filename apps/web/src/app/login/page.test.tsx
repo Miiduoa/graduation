@@ -200,6 +200,19 @@ it('uses school identity only for the explicit legacy map favorite action and re
   await waitFor(() => expect(replace).toHaveBeenCalledWith(destination));
   expect(signIn).toHaveBeenCalledOnce();
 });
+it('returns to the original assignment after school sign-in', async () => {
+  state.user = null;
+  state.studentId = true;
+  const destination = '/course/cs101#assignment-hw-1';
+  state.params = new URLSearchParams({ returnUrl: destination });
+  render(<LoginPage />);
+  expect(screen.queryByTestId('platform-sign-in')).toBeNull();
+  fillSchoolLogin();
+  fireEvent.submit(screen.getByLabelText('學號').closest('form')!);
+  await waitFor(() => expect(replace).toHaveBeenCalledWith(destination));
+  expect(signIn).toHaveBeenCalledOnce();
+});
+
 it('returns to the same storefront after a platform login', () => {
   state.user = null;
   const destination = '/cafeteria/stall?schoolId=pu';

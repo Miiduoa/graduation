@@ -347,4 +347,38 @@ it('notification destinations only use supported local tasks and never arbitrary
   expect(
     notificationDestination({ ...notice, type: 'message', data: { conversationId: '../other' } }),
   ).toBeNull();
+  expect(
+    notificationDestination({
+      ...notice,
+      type: 'assignment',
+      data: { courseId: 'cs101', assignmentId: 'hw-1' },
+    }),
+  ).toEqual({ href: '/course/cs101#assignment-hw-1', label: '前往這份作業' });
+  expect(
+    notificationDestination({
+      ...notice,
+      type: 'assignment_due',
+      data: {
+        workspaceId: 'cw_11111111-1111-4111-8111-111111111111',
+        assignmentId: 'cwa_22222222-2222-4222-8222-222222222222',
+      },
+    }),
+  ).toEqual({
+    href: '/classroom/course/cw_11111111-1111-4111-8111-111111111111#assignment-cwa_22222222-2222-4222-8222-222222222222',
+    label: '前往這份作業',
+  });
+  expect(
+    notificationDestination({
+      ...notice,
+      type: 'quiz',
+      data: { courseId: 'phys', quizId: 'q1' },
+    }),
+  ).toEqual({ href: '/course/phys#quiz-q1', label: '前往這份測驗' });
+  expect(
+    notificationDestination({
+      ...notice,
+      type: 'assignment',
+      data: { courseId: '../other', assignmentId: 'hw-1' },
+    }),
+  ).toBeNull();
 });

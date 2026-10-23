@@ -9,6 +9,11 @@ import {
   type NuniUnit,
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
+import {
+  COURSE_WORK_MISSING_QUIZ,
+  landOnCourseWork,
+  parseCourseWorkHash,
+} from '@/lib/courseWorkLanding';
 import { useLocationHash } from '@/lib/useLocationHash';
 import { MutationForm, useClasses } from './CourseUI';
 import { CourseUnitSelect } from './CourseUnitSelect';
@@ -79,6 +84,11 @@ function QuizList({ workspace, accountId, units, onChanged }: { workspace: NuniW
     window.addEventListener('hashchange', revealLinkedQuiz);
     return () => window.removeEventListener('hashchange', revealLinkedQuiz);
   }, []);
+  const linked = parseCourseWorkHash(hash);
+  const missingLinked =
+    items !== null &&
+    linked?.kind === 'quiz' &&
+    !items.some((item) => item.id === linked.id);
   useEffect(() => {
     const target = hash.slice(1);
     if (
@@ -88,12 +98,7 @@ function QuizList({ workspace, accountId, units, onChanged }: { workspace: NuniW
     )
       return;
     const frame = window.requestAnimationFrame(() => {
-      const element = document.getElementById(target);
-      if (element) {
-        element.scrollIntoView?.({ block: 'start' });
-        element.focus({ preventScroll: true });
-        revealed.current = target;
-      }
+      if (landOnCourseWork(target)) revealed.current = target;
     });
     return () => window.cancelAnimationFrame(frame);
   }, [filter, hash, items]);
@@ -187,6 +192,11 @@ function QuizList({ workspace, accountId, units, onChanged }: { workspace: NuniW
       {!writable && (
         <p className={styles.note}>課程已封存，這裡僅供查看已發布的測驗與自己的作答。</p>
       )}
+      {missingLinked ? (
+        <p role="status" className={styles.notice}>
+          {COURSE_WORK_MISSING_QUIZ}
+        </p>
+      ) : null}
       {error && (
         <div className={styles.notice} role="alert">
           {error}
@@ -374,7 +384,7 @@ function Quiz({
 
   return (
     <article
-      className={styles.panel}
+      className={`${styles.panel} ${styles.courseWorkTarget}`}
       id={`quiz-${item.id}`}
       tabIndex={-1}
       aria-label={`測驗：${item.title}`}

@@ -16,6 +16,11 @@ import {
   type Transaction,
 } from 'firebase/firestore';
 import { getAuth, getDb, isFirebaseConfigured } from './firebase';
+import {
+  courseWorkHrefFromData,
+  courseWorkOpenLabel,
+  isAssignmentNotificationType,
+} from './courseWorkLanding';
 
 export type MessagingSession = { uid: string; schoolId: string };
 export type MessagingFailure = 'permission' | 'unavailable' | 'stale';
@@ -559,7 +564,12 @@ export function notificationDestination(
   notification: AccountNotification,
 ): { href: string; label: string } | null {
   if (notification.type === 'announcement') return { href: '/announcements', label: '查看公告' };
-  if (notification.type === 'grade') return { href: '/grades', label: '查看成績' };
+  if (notification.type === 'grade') {
+    const work = courseWorkHrefFromData(notification.data, notification.type);
+    return work
+      ? { href: work, label: courseWorkOpenLabel(work) }
+      : { href: '/grades', label: '查看成績' };
+  }
   if (
     notification.type === 'message' &&
     typeof notification.data.conversationId === 'string' &&
@@ -570,12 +580,9 @@ export function notificationDestination(
       href: `/dms/${encodeURIComponent(notification.data.conversationId)}`,
       label: '開啟對話',
     };
-  if (
-    notification.type === 'assignment' &&
-    typeof notification.data.courseId === 'string' &&
-    notification.data.courseId &&
-    !notification.data.courseId.includes('/')
-  )
-    return { href: `/course/${encodeURIComponent(notification.data.courseId)}`, label: '開啟課程' };
+  if (isAssignmentNotificationType(notification.type)) {
+    const href = courseWorkHrefFromData(notification.data, notification.type);
+    return href ? { href, label: courseWorkOpenLabel(href) } : null;
+  }
   return null;
 }

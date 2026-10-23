@@ -8,8 +8,25 @@
 import type { InboxTask, NextBestAction } from '../data/types';
 import type { CourseNavigationRole, NavigationLike } from '../utils/courseNavigation';
 import { navigateToCourseScreen } from '../utils/courseNavigation';
+import { safeNavigate } from '../utils/safeNavigate';
 import { aiOverlay } from '../app/useAIOverlay';
 import { recordCompanionEvent } from './companionSignalRecorder';
+
+function isNuniCourseId(id: string): boolean {
+  return /^cw_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+}
+
+function openNuniWork(
+  navigation: NavigationLike | null | undefined,
+  workspaceId: string,
+  workId: string,
+): boolean {
+  return safeNavigate(navigation, 'NuniWorkspace', {
+    tab: 'courses',
+    workspaceId,
+    assignmentId: workId,
+  });
+}
 
 export type InboxActionTarget =
   | 'submit_assignment'
@@ -172,6 +189,11 @@ export function navigateFromInboxTask(
       if (typeof hwId !== 'string' || !hwId) {
         return fallBackToCourseHub();
       }
+      if (isNuniCourseId(courseId)) {
+        const opened = openNuniWork(navigation, courseId, hwId);
+        if (opened) emitInboxNavigationSignal(resolved);
+        return opened;
+      }
       const dueAt =
         task.dueAt instanceof Date && Number.isFinite(task.dueAt.getTime())
           ? task.dueAt.toISOString()
@@ -199,6 +221,11 @@ export function navigateFromInboxTask(
       const quizId = resolved.params?.quizId ?? task.assignmentId;
       if (typeof quizId !== 'string' || !quizId) {
         return fallBackToCourseHub();
+      }
+      if (isNuniCourseId(courseId)) {
+        const opened = openNuniWork(navigation, courseId, quizId);
+        if (opened) emitInboxNavigationSignal(resolved);
+        return opened;
       }
       const dueAt =
         task.dueAt instanceof Date && Number.isFinite(task.dueAt.getTime())

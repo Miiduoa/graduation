@@ -12,7 +12,9 @@ export type AssignmentScrollHost = {
   scrollTo?(options: { x?: number; y?: number; animated?: boolean }): void;
 };
 
-/** Scroll the course list so the linked assignment submit area sits at the top. */
+const LANDING_TOP_GAP = 48;
+
+/** Scroll the course list so the linked assignment submit area sits below a top gap. */
 export function revealAssignmentSubmitArea(
   scroll: AssignmentScrollHost | null | undefined,
   target: AssignmentScrollHost | null | undefined,
@@ -23,7 +25,7 @@ export function revealAssignmentSubmitArea(
   if (!scroll || !target || !measureScroll || !measureTarget || !scrollTo) return;
   measureTarget.call(target, (_x, _y, _width, _height, _pageX, pageY) => {
     measureScroll.call(scroll, (_sx, _sy, _sw, _sh, _sPageX, scrollPageY) => {
-      const y = pageY - scrollPageY;
+      const y = pageY - scrollPageY - LANDING_TOP_GAP;
       if (!Number.isFinite(y)) return;
       scrollTo.call(scroll, { y: Math.max(0, y), animated: false });
     });
