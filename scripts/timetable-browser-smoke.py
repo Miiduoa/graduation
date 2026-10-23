@@ -24,7 +24,7 @@ NTHU_SEED = {'courses': [{'id': 'browser-nthu', 'name': '清大測試課程', 'd
 async def main():
     results = []
     async with async_playwright() as p:
-        browser = await p.chromium.launch()
+        browser = await p.chromium.launch(executable_path=os.environ.get('TIMETABLE_CHROMIUM'))
         page = await browser.new_page(viewport={'width': 1440, 'height': 1000})
         await page.context.tracing.start(screenshots=True, snapshots=True)
         errors = []
@@ -44,22 +44,22 @@ async def main():
             await expect(page.get_by_role('status').filter(has_text='請先選擇一所學校')).to_be_visible()
             assert await page.get_by_role('button', name='移動課程', exact=True).count() == 0
             results.append('no private timetable is loaded before explicitly selecting a campus')
-            await page.get_by_text('瀏覽校園：不限校園', exact=True).click()
+            await page.locator('header summary[aria-label="切換校園：不限校園"]').click()
             await page.get_by_role('combobox', name='瀏覽校園').select_option('pu')
             await expect(page.get_by_role('button', name='移動課程', exact=True)).to_be_visible()
             await expect(page.get_by_role('button', name=re.compile(r'^編輯 資料庫管理')).first).to_be_visible()
             assert await page.evaluate('localStorage.getItem("campus-one-personal-timetable:local:pu")') is None, 'Reading a legacy timetable must not silently rewrite it'
             # A second university has its own scoped copy; neither copy may leak
             # when navigating back and forth in the same browser session.
-            await page.locator('details summary').filter(has_text='瀏覽校園：').click()
+            await page.locator('header summary[aria-label^="切換校園："]').click()
             await page.get_by_role('combobox', name='瀏覽校園').select_option('nthu')
             await expect(page.get_by_role('button', name=re.compile(r'^編輯 清大測試課程')).first).to_be_visible()
             assert await page.get_by_role('button', name=re.compile(r'^編輯 資料庫管理')).count() == 0, 'PU courses leaked into NTHU'
-            await page.locator('details summary').filter(has_text='瀏覽校園：').click()
+            await page.locator('header summary[aria-label^="切換校園："]').click()
             await page.get_by_role('combobox', name='瀏覽校園').select_option('')
             await expect(page.get_by_role('status').filter(has_text='請先選擇一所學校')).to_be_visible()
             assert await page.get_by_role('button', name='移動課程', exact=True).count() == 0, 'Private timetable leaked into campus=all'
-            await page.locator('details summary').filter(has_text='瀏覽校園：').click()
+            await page.locator('header summary[aria-label^="切換校園："]').click()
             await page.get_by_role('combobox', name='瀏覽校園').select_option('pu')
             await expect(page.get_by_role('button', name=re.compile(r'^編輯 資料庫管理')).first).to_be_visible()
             assert await page.get_by_role('button', name=re.compile(r'^編輯 清大測試課程')).count() == 0, 'NTHU courses leaked into PU'
