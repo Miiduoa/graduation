@@ -42,8 +42,35 @@ it('does not treat a failed lookup as student ID being available', async () => {
   expect(result.current.loading).toBe(true);
   await waitFor(() => expect(result.current.loading).toBe(false));
   expect(result.current).toMatchObject({ google: false, studentId: false });
+  expect(result.current.error).toBe(true);
   request.mockResolvedValueOnce({ google: true, studentId: true });
   await act(async () => result.current.retry());
   await waitFor(() => expect(result.current.studentId).toBe(true));
   expect(result.current.google).toBe(true);
+  expect(result.current.error).toBe(false);
+});
+
+it.each([null, {}, { google: true }, { google: 'true', studentId: false }])(
+  'keeps an invalid response distinguishable from closed login: %j',
+  async (value) => {
+    request.mockResolvedValueOnce(value);
+    const { result } = renderHook(() => useSignInOptions());
+    await waitFor(() => expect(result.current.error).toBe(true));
+    expect(result.current.studentId).toBe(false);
+    expect(result.current.loading).toBe(false);
+  },
+);
+
+it('clears previously enabled options while retrying and ignores a superseded response', async () => {
+  const pending: Array<(value: unknown) => void> = [];
+  request.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+  const { result } = renderHook(() => useSignInOptions());
+  await act(async () => pending[0]({ google: true, studentId: true }));
+  expect(result.current.studentId).toBe(true);
+  act(() => result.current.retry());
+  expect(result.current).toMatchObject({ loading: true, studentId: false, error: false });
+  act(() => result.current.retry());
+  await act(async () => pending[2]({ google: true, studentId: false }));
+  await act(async () => pending[1]({ google: true, studentId: true }));
+  expect(result.current).toMatchObject({ loading: false, studentId: false, error: false });
 });

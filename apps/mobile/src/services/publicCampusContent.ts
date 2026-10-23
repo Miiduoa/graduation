@@ -19,7 +19,9 @@ import {
   announcementSourceIdsForSchool,
   isAnnouncementSchoolVisibleToPublic,
   mergeAnnouncementsById,
-  SOURCE_DOWN_EMPTY_TEXT,
+  selectOfficialAnnouncements,
+  selectStudentAnnouncements,
+  SOURCE_UNAVAILABLE_TEXT,
 } from '@campus/shared/src/campusAnnouncements';
 import { getRawAppEnv } from './release';
 
@@ -118,7 +120,10 @@ function announcement(document: SourceDocument, schoolId: string): Announcement 
       : 'general',
     pinned: data.pinned === true,
     attachments,
-  };
+    studentFeed: data.studentFeed !== false,
+    visible: data.visible !== false,
+    audience: typeof data.audience === 'string' ? data.audience : undefined,
+  } as Announcement;
 }
 
 export type AnnouncementSourceHealth = {
@@ -132,6 +137,7 @@ export type AnnouncementSourceHealth = {
 
 export type CampusAnnouncementFeed = {
   announcements: Announcement[];
+  officialAnnouncements?: Announcement[];
   sources: AnnouncementSourceHealth[];
   allUnavailable: boolean;
 };
@@ -147,7 +153,7 @@ async function loadAnnouncementSources(schoolId: string): Promise<AnnouncementSo
       sourceId: typeof data.sourceId === 'string' ? data.sourceId : document.id,
       office: typeof data.office === 'string' ? data.office : document.id,
       status: unavailable ? 'unavailable' : 'healthy',
-      message: unavailable ? SOURCE_DOWN_EMPTY_TEXT : '',
+      message: unavailable ? SOURCE_UNAVAILABLE_TEXT : '',
       listUrl: isPublicWebUrl(data.listUrl) ? data.listUrl : undefined,
       lastSuccessAt: dateString(data.lastSuccessAt) || undefined,
     };
@@ -160,15 +166,9 @@ async function loadAnnouncementRows(
   maxItems: number,
 ) {
   const db = sourceDb(schoolId);
-  const constraints = [...extra, limit(maxItems)];
-  let snapshot = await getDocsFromServer(
-    query(collection(db, 'schools', schoolId, 'announcements'), ...constraints),
+  const snapshot = await getDocsFromServer(
+    query(collection(db, 'schools', schoolId, 'announcements'), ...extra, limit(maxItems)),
   );
-  if (snapshot.empty) {
-    snapshot = await getDocsFromServer(
-      query(collection(db, 'announcements'), where('schoolId', '==', schoolId), ...constraints),
-    );
-  }
   return snapshot.docs.flatMap((document) => {
     try {
       return [announcement(document, schoolId)];
@@ -178,9 +178,11 @@ async function loadAnnouncementRows(
   });
 }
 
-export async function loadCampusAnnouncementFeed(schoolId: string): Promise<CampusAnnouncementFeed> {
+export async function loadCampusAnnouncementFeed(
+  schoolId: string,
+): Promise<CampusAnnouncementFeed> {
   if (!isAnnouncementSchoolVisibleToPublic({ schoolId }, getRawAppEnv())) {
-    return { announcements: [], sources: [], allUnavailable: false };
+    return { announcements: [], officialAnnouncements: [], sources: [], allUnavailable: false };
   }
   const recent = await loadAnnouncementRows(
     schoolId,
@@ -194,13 +196,25 @@ export async function loadCampusAnnouncementFeed(schoolId: string): Promise<Camp
   const missing = announcementSourceIdsForSchool(schoolId, sources).filter(
     (sourceId) => !present.has(sourceId),
   );
-  const extras = await Promise.all(
-    missing.map((sourceId) =>
-      loadAnnouncementRows(schoolId, [where('sourceId', '==', sourceId)], ANNOUNCEMENT_SOURCE_LIMIT),
-    ),
-  );
+  // 學校自己的集合已確定是 0 則時，不必再依處室補查。
+  const extras =
+    recent.length === 0 || missing.length === 0
+      ? []
+      : await Promise.all(
+          missing.map((sourceId) =>
+            loadAnnouncementRows(
+              schoolId,
+              [where('sourceId', '==', sourceId)],
+              ANNOUNCEMENT_SOURCE_LIMIT,
+            ),
+          ),
+        );
+  const merged = mergeAnnouncementsById([recent, ...extras]);
+  const announcements = selectStudentAnnouncements(merged, sources);
+  const officialAnnouncements = selectOfficialAnnouncements(merged, sources);
   return {
-    announcements: mergeAnnouncementsById([recent, ...extras]),
+    announcements,
+    officialAnnouncements,
     sources,
     allUnavailable: sources.length > 0 && sources.every((item) => item.status === 'unavailable'),
   };

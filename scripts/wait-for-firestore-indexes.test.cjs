@@ -155,10 +155,23 @@ test('supports array indexes and an explicit __name__ order', () => {
   assert.equal(indexKey(explicit, explicit.collectionGroup, true), indexKey(explicit));
 });
 
-test('consumes paginated results before declaring any required index missing', async () => {
+test('lists wildcard indexes without a page size and follows every page token', async () => {
   const f = fixture([
-    { indexes: [], nextPageToken: 'second-page' },
     (request) => {
+      assert.equal(
+        request.url.pathname,
+        `/v1/projects/${project}/databases/(default)/collectionGroups/-/indexes`,
+      );
+      assert.equal(request.url.searchParams.has('pageSize'), false);
+      assert.equal(request.url.searchParams.has('pageToken'), false);
+      return reply({ indexes: [], nextPageToken: 'second-page' });
+    },
+    (request) => {
+      assert.equal(
+        request.url.pathname,
+        `/v1/projects/${project}/databases/(default)/collectionGroups/-/indexes`,
+      );
+      assert.equal(request.url.searchParams.has('pageSize'), false);
       assert.equal(request.url.searchParams.get('pageToken'), 'second-page');
       return reply({ indexes: [remote()] });
     },
@@ -266,6 +279,16 @@ test('reads the same database and index file as Firebase deploy', () => {
   for (const index of actual.indexes) assert.ok(indexKey(index, index.collectionGroup, true));
 });
 
+test('checked-in composite indexes contain at least two fields', () => {
+  const actual = loadDeployment(path.resolve(__dirname, '../firebase.json'));
+  for (const index of actual.indexes) {
+    assert.ok(
+      index.fields.length >= 2,
+      `${index.collectionGroup} single-field indexes belong in fieldOverrides.`,
+    );
+  }
+});
+
 test('rejects unsupported multiple databases and malformed field overrides', (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'campus-index-gate-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
@@ -369,12 +392,19 @@ test('supports field-only deployments and protobuf-omitted single-field paths wi
   assert.match(f.logs.at(-1), /0 required indexes and 1 field configurations/);
 });
 
-test('consumes every field page before checking a required field', async () => {
-  const f = fieldFixture((request) =>
-    request.url.searchParams.get('pageToken') === 'fields-next'
+test('lists wildcard fields without a page size and preserves the filter across pages', async () => {
+  const f = fieldFixture((request, count) => {
+    assert.equal(request.url.pathname, `/v1/${fieldParent}-/fields`);
+    assert.equal(request.url.searchParams.has('pageSize'), false);
+    assert.equal(
+      request.url.searchParams.get('filter'),
+      'indexConfig.usesAncestorConfig=false OR ttlConfig:*',
+    );
+    assert.equal(request.url.searchParams.get('pageToken'), count === 1 ? null : 'fields-next');
+    return count === 2
       ? reply({ fields: [remoteField()] })
-      : reply({ fields: [], nextPageToken: 'fields-next' }),
-  );
+      : reply({ fields: [], nextPageToken: 'fields-next' });
+  });
   await waitForIndexes(f.options);
   assert.equal(f.fieldRequests.length, 2);
 });
@@ -574,4 +604,17 @@ test('the deployed activity deletion override is loaded and validated rather tha
     override,
   );
   assert.equal(fieldRequirements(actual.fieldOverrides)[0].keys.length, 4);
+});
+
+test('directory display-name group queries use a single-field override without losing collection defaults', () => {
+  const actual = loadDeployment(path.resolve(__dirname, '../firebase.json'));
+  const directory = actual.fieldOverrides.filter(
+    (field) => field.collectionGroup === 'directory' && field.fieldPath === 'displayName',
+  );
+  assert.deepEqual(directory, [{
+    ...override,
+    collectionGroup: 'directory',
+    fieldPath: 'displayName',
+  }]);
+  assert.equal(fieldRequirements(directory)[0].keys.length, 4);
 });

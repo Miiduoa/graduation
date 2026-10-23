@@ -8,6 +8,7 @@ import ProfileEditAiFirstScreen from './ProfileEditAiFirstScreen';
 import AchievementsAiFirstScreen from './AchievementsAiFirstScreen';
 import SettingsAiFirstScreen from './SettingsAiFirstScreen';
 import { NotificationSettingsScreen } from './NotificationSettingsScreen';
+import NotificationsAiFirstScreen from './NotificationsAiFirstScreen';
 import { QRCodeScreen } from './QRCodeScreen';
 import { GlobalSearchScreen } from './GlobalSearchScreen';
 import { WidgetPreviewScreen } from './WidgetPreviewScreen';
@@ -180,7 +181,7 @@ export function MeStack() {
       />
       <Stack.Screen
         name="Notifications"
-        component={UnavailableFeatureScreen}
+        component={NotificationsAiFirstScreen}
         options={{ title: '通知', headerShown: false }}
       />
       <Stack.Screen

@@ -1,9 +1,18 @@
-將下列檔案依序貼到 Supabase Dashboard → SQL Editor（或使用 Supabase CLI db push）：
+資料庫結構以 supabase/migrations/ 內依時間排序的完整 migration history 為準。
+請先閱讀 docs/SUPABASE_DATA_API_PERMISSIONS.md 的盤點、測試與部署章節。
 
-1) supabase/migrations/20260117120001_core.sql
-2) supabase/migrations/20260117120002_assignments_quizzes.sql
-3) supabase/migrations/20260117120003_forum_grades.sql
-4) supabase/migrations/20260117120004_live.sql
+全新／預覽環境：使用完整 migrations 目錄；不要只套用前四份核心 SQL。
+既有環境：核對 migration history 後，只追加尚未套用的 migration，不重跑 CREATE TABLE。
+supabase/migrations_combined.sql 是歷史快照，不是目前可部署的 canonical migration 清單。
+
+2026-10-30 Data API 預設授權變更的修正：
+supabase/migrations/20261021055702_explicit_data_api_privileges.sql
+
+隔離驗證（固定 Supabase CLI 2.121.0，需要 Docker、psql、Node 22）：
+node scripts/supabase-permissions/run-supabase.mjs
+
+本機驗證使用獨立臨時專案與 --local reset，不會修改 hosted project。
+正式部署仍須經核准的 migration 流程，並在部署後實際驗收所需 API 與 worker。
 
 完成後請確認：
 - Authentication → Email provider 依需求開啟。

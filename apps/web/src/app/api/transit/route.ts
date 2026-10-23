@@ -1,13 +1,17 @@
-import { createTransitService } from '@/lib/transit-server';
+import { createTransitService, PROVIDENCE_PRELOAD_ROUTES } from '@/lib/transit-server';
+import { transitReplayHeader } from '@/lib/transit-replay';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const execute = createTransitService({
   credentials: () => ({ clientId: process.env.TDX_CLIENT_ID, clientSecret: process.env.TDX_CLIENT_SECRET }),
+  preloadRoutes: PROVIDENCE_PRELOAD_ROUTES,
 });
 const headers = { 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' };
 
 export async function POST(request: Request): Promise<Response> {
+  const replay = transitReplayHeader(process.env.FLY_MACHINE_ID, request.headers);
+  if (replay) return new Response(null, { status: 204, headers: { ...headers, 'fly-replay': replay } });
   if (request.headers.get('sec-fetch-site') === 'cross-site')
     return Response.json({ status: 'unavailable', reason: 'invalid-query' }, { status: 403, headers });
   if (!request.headers.get('content-type')?.toLowerCase().startsWith('application/json'))

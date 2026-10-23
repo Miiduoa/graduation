@@ -28,7 +28,7 @@ jobs:
         env:
           NODE_PATH: ${{ runner.temp }}/transit-tools/node_modules
         run: |
-          "$RUNNER_TEMP/transit-tools/node_modules/.bin/tsc" --noEmit --strict --target es2022 --lib es2022,dom --module commonjs apps/web/src/lib/transit.ts apps/web/src/lib/transit-server.ts
+          "$RUNNER_TEMP/transit-tools/node_modules/.bin/tsc" --noEmit --strict --target es2022 --lib es2022,dom --module commonjs --resolveJsonModule --esModuleInterop --moduleResolution node apps/web/src/lib/transit.ts apps/web/src/lib/transit-server.ts
           node --test scripts/test-transit.cjs
           node --test deploy/web/release-check.test.mjs
           if [ -f deploy/web/transit-release-gate.test.mjs ]; then node --test deploy/web/transit-release-gate.test.mjs; fi

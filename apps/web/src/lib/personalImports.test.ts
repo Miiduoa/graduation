@@ -53,7 +53,11 @@ it('does not lose old data on failed persistence or conflicting grades', async (
   await expect(
     savePersonalImportBatch(scope, rows('課程名稱,學分,成績\n資料庫,3,60')),
   ).rejects.toThrow('成績或學分不同');
-  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+  // The test setup may supply an own-method storage shim on newer Node versions.
+  const storageMethods = Object.hasOwn(localStorage, 'setItem')
+    ? localStorage
+    : Object.getPrototypeOf(localStorage);
+  vi.spyOn(storageMethods, 'setItem').mockImplementation(() => {
     throw new Error('quota');
   });
   await expect(
@@ -115,4 +119,34 @@ it('restores against the latest locked ledger, preserving existing links without
     }),
   ).rejects.toThrow('成績或學分不同');
   expect(readPersonalImports(scope)).toEqual(original);
+});
+
+it('serializes sync with local edits and persists records and merge base atomically', async () => {
+  const { withPersonalImportSyncLock, readPersonalImportSyncState } = await import('./personalImports');
+  await savePersonalImportBatch(scope, rows());
+  let release!: () => void;
+  const barrier = new Promise<void>((resolve) => { release = resolve; });
+  const sync = withPersonalImportSyncLock(scope, async (state) => {
+    await barrier;
+    const records = state.records.map((row) => ({ ...row, grade: '88' }));
+    return { state: { records, sync: { enabled: true, base: { schoolId: 'pu', revision: 2, updatedAt: '2026-10-15T00:00:00Z', records } } }, result: undefined };
+  });
+  const edit = savePersonalImportBatch(scope, rows('課程名稱,學分,成績\n英文,2,90'));
+  release(); await Promise.all([sync, edit]);
+  expect(readPersonalImports(scope).map((row) => row.grade)).toEqual(['88', '90']);
+  expect(readPersonalImportSyncState(scope).base?.records.map((row) => row.grade)).toEqual(['88']);
+  expect(readPersonalImportSyncState(scope).enabled).toBe(true);
+});
+it('leaves the complete envelope untouched when sync storage fails or the account changes', async () => {
+  const { withPersonalImportSyncLock } = await import('./personalImports');
+  await savePersonalImportBatch(scope, rows());
+  const before = localStorage.getItem(personalImportsStorageKey(scope));
+  let active = true;
+  await expect(withPersonalImportSyncLock(scope, async (state) => {
+    active = false; return { state: { ...state, records: [] }, result: undefined };
+  }, () => active)).rejects.toThrow('帳號或校園');
+  expect(localStorage.getItem(personalImportsStorageKey(scope))).toBe(before);
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
+  await expect(withPersonalImportSyncLock(scope, async (state) => ({ state: { ...state, records: [] }, result: undefined }))).rejects.toThrow('裝置空間不足');
+  expect(localStorage.getItem(personalImportsStorageKey(scope))).toBe(before);
 });

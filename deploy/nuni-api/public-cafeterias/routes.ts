@@ -9,9 +9,29 @@ const listPath = /^\/v1\/public\/schools\/([^/]+)\/cafeterias\/?$/;
 const missingSchoolPath = /^\/v1\/public\/(?:schools\/)?cafeterias\/?$/;
 const limiter = createWindowLimiter({ max: 60, windowMs: 60_000 });
 const ROUTE_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
+const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+const orderingPath =
+  /^\/v1\/(?:.*\/)?food\/(?:.*\/)?(?:orders|quotes|pos-orders|pickup[^/]*)(?:\/|$)/;
+const merchantOrderPath =
+  /^\/v1\/(?:auth\/platform\/)?merchant-workspaces\/[^/]+\/[^/]+\/orders(?:\/|$)/;
 
 export function resetPublicCafeteriaLimiter() {
   limiter.reset();
+}
+
+/** 未設或不是字面 true 就是關；本機測試要開才明確設 ONLINE_ORDERING_ENABLED=true。 */
+export function onlineOrderingEnabled() {
+  return process.env.ONLINE_ORDERING_ENABLED === 'true';
+}
+
+export function isOrderingRoute(path: string) {
+  const pathname = path.split('?', 1)[0] ?? path;
+  if (/\/purchase-orders(?:\/|$)/.test(pathname)) return false;
+  return orderingPath.test(pathname) || merchantOrderPath.test(pathname);
+}
+
+export function isOrderingWrite(method: string, path: string) {
+  return WRITE_METHODS.has(method.toUpperCase()) && isOrderingRoute(path);
 }
 
 export function isPublicCafeteriaRoute(_method: string, path: string) {
@@ -27,6 +47,12 @@ export function registerPublicCafeteriaRoutes(
   app: FastifyInstance,
   db: { query: PublicCafeteriaService['list'] extends never ? never : ConstructorParameters<typeof PublicCafeteriaService>[0]['query'] },
 ) {
+  app.addHook('onRequest', async (request, reply) => {
+    if (onlineOrderingEnabled() || !isOrderingWrite(request.method, request.url)) return;
+    return reply.code(412).send({
+      error: { code: 'ONLINE_ORDERING_DISABLED', message: '線上點餐尚未開放' },
+    });
+  });
   const service = new PublicCafeteriaService(db);
   const send = async (request: FastifyRequest, reply: FastifyReply, schoolId: unknown) => {
     try {

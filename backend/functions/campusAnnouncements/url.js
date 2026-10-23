@@ -69,19 +69,8 @@ function decodeHtml(value) {
 }
 
 function parseDate(value) {
-  const text = decodeHtml(value);
-  const iso = text.match(/(20\d{2})[./-](\d{1,2})[./-](\d{1,2})/);
-  if (iso) {
-    const date = new Date(Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])));
-    return Number.isFinite(date.getTime()) ? date.toISOString() : '';
-  }
-  const roc = text.match(/(\d{2,3})[./年](\d{1,2})[./月](\d{1,2})/);
-  if (roc && Number(roc[1]) < 200) {
-    const date = new Date(Date.UTC(Number(roc[1]) + 1911, Number(roc[2]) - 1, Number(roc[3])));
-    return Number.isFinite(date.getTime()) ? date.toISOString() : '';
-  }
-  const parsed = new Date(text);
-  return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : '';
+  const { parseAnnouncementDate } = require('./quality');
+  return parseAnnouncementDate(value) || '';
 }
 
 function htmlFingerprint(html) {

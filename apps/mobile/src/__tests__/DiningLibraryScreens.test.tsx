@@ -376,11 +376,9 @@ test('a failed menu read shows retry without fabricated restaurants', async () =
   const view = render(<CafeteriaAiFirstScreen />);
   await act(async () => {});
   expect(view.queryByText('今日餐點')).toBeNull();
-  expect(view.getByText('暫時讀不到資料，請稍後再試')).toBeTruthy();
+  expect(view.getByText('服務暫時停止，我們正在處理，請稍後再來。')).toBeTruthy();
   expect(view.queryByText('請確認網路後再試')).toBeNull();
-  fireEvent.press(view.getByText('重新整理'));
-  await act(async () => {});
-  expect(view.getByText('今日餐點')).toBeTruthy();
+  expect(view.queryByText('重新整理')).toBeNull();
 });
 test('lets a guest read restaurants without asking them to sign in first', async () => {
   mockUser = null;
@@ -467,7 +465,11 @@ test('restaurant keeps the school catalog and does not invite platform ordering 
   await act(async () => {});
   expect(view.getByText('目前還不能線上點餐')).toBeTruthy();
   expect(view.queryByText('前往平台點餐')).toBeNull();
-  expect(view.queryByText('使用 Google 帳號選餐、查看訂單與出示取餐憑證。學校原有餐廳服務仍保留在下方。')).toBeNull();
+  expect(
+    view.queryByText(
+      '使用 Google 帳號選餐、查看訂單與出示取餐憑證。學校原有餐廳服務仍保留在下方。',
+    ),
+  ).toBeNull();
   expect(view.getByText('選擇今日餐點')).toBeTruthy();
   expect(navigate).not.toHaveBeenCalled();
 });
@@ -523,7 +525,6 @@ test('changing the university replaces both the catalog destination and previous
   expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
 });
 
-
 test('Soochow library search uses its verified Primo view instead of a different campus', async () => {
   mockSchool = { id: 'scu' };
   const view = render(<LibraryAiFirstScreen />);
@@ -545,7 +546,6 @@ test('Chang Gung library uses its official iGrid catalog rather than Providence'
   expect(Clipboard.setStringAsync).toHaveBeenCalledWith('護理');
   expect(view.queryByText('蓋夏圖書館')).toBeNull();
 });
-
 
 test('Chung Yuan library account and catalog stay on its official domain', async () => {
   mockSchool = { id: 'cycu' };

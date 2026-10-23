@@ -1,11 +1,18 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
+  parsePersonalImportSyncState,
+  type PersonalImportSyncState,
+} from '@campus/shared/src/imports/sync';
+import {
   createPersonalImportId,
+  periodCount,
+  periodProfileForSchool,
   planPersonalImport,
   preparePersonalImportBackupRestore,
   PERSONAL_IMPORT_BACKUP_MAX_RECORDS,
   personalImportKey,
   mapPersonalImportPeriods,
+  samePersonalCourse,
   validatePersonalImportRow,
   type PersonalImportRow,
   type PersonalImportRecord,
@@ -17,11 +24,20 @@ export type PersonalImportLedger = {
   version: 1;
   records: PersonalImportRecord[];
   batches: Array<{ id: string; createdAt: string; count: number }>;
+  sync?: PersonalImportSyncState;
 };
 export const personalImportStorageKey = (scope: PersonalImportScope) =>
   `campus.personal-imports.v1:${encodeURIComponent(scope.owner)}:${encodeURIComponent(scope.schoolId)}`;
 const empty = (): PersonalImportLedger => ({ version: 1, records: [], batches: [] });
 const locks = new Map<string, Promise<unknown>>();
+type ImportChange = { scope: PersonalImportScope; source: 'local' | 'sync' };
+const listeners = new Set<(change: ImportChange) => void>();
+export function subscribePersonalImports(listener: (change: ImportChange) => void) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
 
 function retainActiveBatches(
   batches: PersonalImportLedger['batches'],
@@ -70,7 +86,7 @@ export async function loadPersonalImports(
         typeof row.source.rawText !== 'string' ||
         (row.source.name !== undefined && typeof row.source.name !== 'string') ||
         validatePersonalImportRow(row, {
-          periodProfile: scope.schoolId === 'pu' ? 'pu' : undefined,
+          periodProfile: periodProfileForSchool(scope.schoolId),
         }).some((issue) => issue.severity === 'error'),
     ) ||
     new Set(value.records.map((row) => row.id)).size !== value.records.length ||
@@ -87,13 +103,21 @@ export async function loadPersonalImports(
   ) {
     throw new Error('儲存的匯入資料無法讀取，請保留此裝置上的資料並稍後重試。');
   }
+  if (value.sync !== undefined)
+    value.sync = parsePersonalImportSyncState(value.sync, scope.schoolId);
   return value;
 }
 
-function mutate<T>(
+export function mutatePersonalImportLedger<T>(
   scope: PersonalImportScope,
   active: () => boolean,
-  update: (ledger: PersonalImportLedger) => { ledger: PersonalImportLedger; result: T },
+  update: (
+    ledger: PersonalImportLedger,
+    checkpoint: (ledger: PersonalImportLedger) => Promise<void>,
+  ) =>
+    | { ledger: PersonalImportLedger; result: T }
+    | Promise<{ ledger: PersonalImportLedger; result: T }>,
+  source: ImportChange['source'] = 'local',
 ): Promise<T> {
   const key = personalImportStorageKey(scope);
   const previous = locks.get(key) || Promise.resolve();
@@ -103,8 +127,22 @@ function mutate<T>(
       if (!active()) throw new Error('帳號或學校已切換，請重新開啟匯入。');
       const current = await loadPersonalImports(scope);
       if (!active()) throw new Error('帳號或學校已切換，請重新開啟匯入。');
-      const { ledger, result } = update(current);
-      await AsyncStorage.setItem(key, JSON.stringify(ledger));
+      let persisted = current;
+      const checkpoint = async (ledger: PersonalImportLedger) => {
+        if (!active()) throw new Error('帳號或學校已切換，請重新開啟匯入。');
+        if (JSON.stringify(persisted) === JSON.stringify(ledger)) return;
+        await AsyncStorage.setItem(key, JSON.stringify(ledger));
+        persisted = ledger;
+        for (const listener of listeners) {
+          try {
+            listener({ scope, source });
+          } catch {
+            /* A view cannot invalidate a durable write. */
+          }
+        }
+      };
+      const { ledger, result } = await update(current, checkpoint);
+      await checkpoint(ledger);
       return result;
     });
   locks.set(key, task);
@@ -115,6 +153,7 @@ function mutate<T>(
     .catch(() => undefined);
   return task;
 }
+const mutate = mutatePersonalImportLedger;
 
 export function appendPersonalImports(
   scope: PersonalImportScope,
@@ -133,7 +172,7 @@ export function appendPersonalImports(
     const planned = planPersonalImport(current.records, incoming, {
       batchId: id,
       importedAt: createdAt,
-      periodProfile: scope.schoolId === 'pu' ? 'pu' : undefined,
+      periodProfile: periodProfileForSchool(scope.schoolId),
     });
     const errors = planned.issues.filter(
       (issue) => issue.severity === 'error' || issue.code === 'duplicate-metadata-conflict',
@@ -142,6 +181,7 @@ export function appendPersonalImports(
     if (planned.records.length > PERSONAL_IMPORT_BACKUP_MAX_RECORDS)
       throw new Error('這台裝置已達 2,000 筆上限，請先備份並移除不需要的紀錄。');
     const ledger: PersonalImportLedger = {
+      ...current,
       version: 1,
       records: planned.records,
       batches: planned.added.length
@@ -170,11 +210,11 @@ export function editPersonalImport(
     if (next.id !== before.id || next.schoolId !== scope.schoolId)
       throw new Error('資料範圍不符。');
     const errors = validatePersonalImportRow(next, {
-      periodProfile: scope.schoolId === 'pu' ? 'pu' : undefined,
+      periodProfile: periodProfileForSchool(scope.schoolId),
     }).filter((issue) => issue.severity === 'error');
     if (errors.length) throw new Error(errors[0].message);
     const mapped = mapPersonalImportPeriods(next, {
-      periodProfile: scope.schoolId === 'pu' ? 'pu' : undefined,
+      periodProfile: periodProfileForSchool(scope.schoolId),
     });
     if (
       current.records.some(
@@ -234,12 +274,14 @@ export function undoLastPersonalImport(
   });
 }
 
-/** The legacy grid uses Providence period times. Never invent equivalent times for another school. */
+/** The grid uses the school's official period table. Unknown schools stay off the grid. */
 export function personalImportCourses(
   records: PersonalImportRecord[],
   schoolId: string,
 ): PersonalCourse[] {
-  if (schoolId !== 'pu') return [];
+  const profile = periodProfileForSchool(schoolId);
+  if (!profile) return [];
+  const slots = periodCount(profile);
   return records
     .filter(
       (row) =>
@@ -252,7 +294,7 @@ export function personalImportCourses(
         Number.isInteger(row.endPeriod) &&
         row.startPeriod! >= 1 &&
         row.endPeriod! >= row.startPeriod! &&
-        row.endPeriod! <= 13,
+        row.endPeriod! <= slots,
     )
     .map((row) => ({
       id: `import:${row.id}`,
@@ -288,13 +330,7 @@ export function selectPersonalTimetableCourses(
     ...legacy,
     ...projected.filter(
       (course) =>
-        !legacy.some(
-          (old) =>
-            old.name === course.name &&
-            old.day === course.day &&
-            old.start === course.start &&
-            old.end === course.end,
-        ),
+        !legacy.some((old) => samePersonalCourse(old, course)),
     ),
   ];
 }

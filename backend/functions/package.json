@@ -13,6 +13,7 @@
     "logs": "firebase functions:log",
     "lint": "eslint .",
     "sync:announcements": "node campusAnnouncements/cli.js",
+    "sync:announcements:probe": "node campusAnnouncements/probe.js",
     "backfill:canonical": "node backfillCanonicalData.js",
     "build:shared": "node ../../scripts/build-functions-shared.cjs",
     "test": "pnpm run build:shared && ONLINE_ORDERING_ENABLED=true jest"

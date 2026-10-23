@@ -10,6 +10,7 @@ import {
   type NuniUnit,
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
+import { taipeiWallTimeToIso } from '@campus/shared/src/taipeiTime';
 import { AppHeader } from '@/components/AppHeader';
 import { NuniSignIn } from '@/components/NuniSignIn';
 import { SiteShell } from '@/components/SiteShell';
@@ -297,7 +298,7 @@ function Workspace({ id }: { id: string }) {
                         await classes.createAssignment(id, {
                           title: String(form.get('title')),
                           instructions: String(form.get('instructions')),
-                          dueAt: due ? new Date(due).toISOString() : null,
+                          dueAt: taipeiWallTimeToIso(due),
                           unitId: selectCourseUnit(form, units),
                           idempotencyKey: key,
                         });

@@ -115,8 +115,7 @@ function QuizNotices({
         <>
           <AICard title="應試方式">
             <Text style={body}>
-              請依教師公告的方式應試。目前未提供 App
-              內作答與成績回傳；測驗時間、繳交狀態及成績以授課教師或校方教學平台為準。
+              有題目的評量可在 App 內作答；沒有題目時可依教師說明以文字作答。成績以教師發布後的結果為準。
             </Text>
           </AICard>
           {!notices.length ? (
@@ -136,6 +135,15 @@ function QuizNotices({
                   <Text style={body}>
                     {notice.description || '教師尚未提供應試說明，請查看課程公告。'}
                   </Text>
+                  <AIButton
+                    label="前往作答"
+                    onPress={() =>
+                      safeNavigate(navigation, 'QuizTaking', {
+                        groupId,
+                        quizId: notice.id,
+                      })
+                    }
+                  />
                 </View>
               </AICard>
             ))

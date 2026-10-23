@@ -1,4 +1,6 @@
 import {
+  nuniBffFilePut,
+  nuniBffRequest,
   nuniPlatformRequest,
   parseNuniLoginSession,
   parseNuniLoginTransaction,
@@ -65,6 +67,16 @@ it('sends a platform credential only to the fixed HTTPS API and refuses paths th
   }
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
+it('retries a waking API failure once before giving up', async () => {
+  const fetchMock = jest
+    .fn()
+    .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    .mockResolvedValueOnce({ ok: true, text: async () => '{"ready":true}' });
+  global.fetch = fetchMock as unknown as typeof fetch;
+  await expect(nuniPlatformRequest('session')).resolves.toEqual({ ready: true });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
 it('maps bounded API errors without reflecting arbitrary server messages', async () => {
   global.fetch = jest.fn(async () => ({
     ok: false,
@@ -155,4 +167,109 @@ it('uses the API settings PUT contract without changing the credential origin', 
       headers: expect.objectContaining({ Authorization: `Platform ${handle}` }),
     }),
   );
+});
+
+it('permits large import snapshots only on the two exact sync endpoints', async () => {
+  const body = JSON.stringify({ records: 'a'.repeat(2_000_001) });
+  global.fetch = jest.fn(async () => ({
+    ok: true,
+    text: async () => body,
+  })) as unknown as typeof fetch;
+  for (const path of ['personal-imports/read', 'personal-imports/write']) {
+    await expect(nuniPlatformRequest(path, handle, {})).resolves.toHaveProperty('records');
+  }
+  for (const path of [
+    'sessions/current',
+    'personal-imports/read/extra',
+    'personal-imports/read-other',
+  ]) {
+    await expect(nuniPlatformRequest(path, handle, {})).rejects.toMatchObject({
+      code: 'INVALID_RESPONSE',
+    });
+  }
+  global.fetch = jest.fn(async () => ({
+    ok: true,
+    text: async () => ' '.repeat(8 * 1024 * 1024 + 16 * 1024 + 1),
+  })) as unknown as typeof fetch;
+  await expect(nuniPlatformRequest('personal-imports/read', handle, {})).rejects.toMatchObject({
+    code: 'INVALID_RESPONSE',
+  });
+});
+
+it('keeps wake retry on personal-import sync while still aborting via external signal', async () => {
+  const fetchMock = jest
+    .fn()
+    .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    .mockResolvedValueOnce({
+      ok: true,
+      text: async () => JSON.stringify({ records: [] }),
+    });
+  global.fetch = fetchMock as unknown as typeof fetch;
+  await expect(nuniPlatformRequest('personal-imports/read', handle, {})).resolves.toEqual({
+    records: [],
+  });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+
+  let sentSignal: AbortSignal | undefined;
+  global.fetch = jest.fn(
+    (_url, options) =>
+      new Promise((_resolve, reject) => {
+        sentSignal = options?.signal as AbortSignal;
+        sentSignal.addEventListener('abort', () => reject(new Error('aborted')));
+      }),
+  ) as unknown as typeof fetch;
+  const controller = new AbortController();
+  const work = nuniPlatformRequest(
+    'personal-imports/write',
+    handle,
+    { records: [] },
+    controller.signal,
+  );
+  const rejection = expect(work).rejects.toMatchObject({ code: 'REQUEST_CANCELLED' });
+  controller.abort();
+  await rejection;
+  expect(sentSignal?.aborted).toBe(true);
+});
+
+it('sends assignment file JSON and bytes only to the nuni.tw BFF', async () => {
+  const fetchMock = jest.fn(async () => ({
+    ok: true,
+    text: async () => JSON.stringify({ id: 'cwf_11111111-1111-4111-8111-111111111111' }),
+  }));
+  global.fetch = fetchMock as unknown as typeof fetch;
+  await nuniBffRequest(
+    'class-workspaces/cw_11111111-1111-4111-8111-111111111111/assignments/cwa_22222222-2222-4222-8222-222222222222/files/intents',
+    handle,
+    {
+      originalName: 'shot.jpg',
+      contentType: 'image/jpeg',
+      byteSize: 8,
+      idempotencyKey: 'intent-key',
+    },
+  );
+  expect(fetchMock.mock.calls[0]?.[0]).toBe(
+    'https://nuni.tw/api/nuni/class-workspaces/cw_11111111-1111-4111-8111-111111111111/assignments/cwa_22222222-2222-4222-8222-222222222222/files/intents',
+  );
+  expect(fetchMock.mock.calls[0]?.[1]).toEqual(
+    expect.objectContaining({
+      method: 'POST',
+      headers: expect.objectContaining({ Authorization: `Platform ${handle}` }),
+    }),
+  );
+  await nuniBffFilePut(
+    'class-workspaces/cw_11111111-1111-4111-8111-111111111111/assignments/cwa_22222222-2222-4222-8222-222222222222/files/cwf_11111111-1111-4111-8111-111111111111/content',
+    handle,
+    Uint8Array.from([0xff, 0xd8, 0xff]),
+    'image/jpeg',
+  );
+  expect(String(fetchMock.mock.calls[1]?.[0])).toContain('https://nuni.tw/api/nuni/');
+  expect(fetchMock.mock.calls[1]?.[1]).toEqual(
+    expect.objectContaining({
+      method: 'PUT',
+      headers: expect.objectContaining({ Authorization: `Platform ${handle}` }),
+    }),
+  );
+  await expect(nuniBffRequest('https://foreign.invalid', handle)).rejects.toMatchObject({
+    code: 'INVALID_REQUEST',
+  });
 });

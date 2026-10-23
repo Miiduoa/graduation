@@ -11,7 +11,8 @@ import { Select } from '@/components/ui/Input';
 import { FoodMenu } from './FoodMenu';
 import { FoodOrders } from './FoodOrders';
 import { useFoodDraft, useFoodRead, type FoodDraftCache } from './foodState';
-import { isWebOnlineOrderingEnabled, ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
+import { isWebOnlineOrderingEnabled } from '@/lib/onlineOrdering';
+import { foodPageSubtitle } from '@campus/shared/src/foodPageCopy';
 import styles from './Food.module.css';
 
 export type FoodClient = ReturnType<typeof createNuniFoodClient>;
@@ -36,12 +37,8 @@ export function FoodWorkspace({
   }
   const orderingOn = isWebOnlineOrderingEnabled();
   return (
-    <SiteShell
-      title="點餐與取餐"
-      subtitle={orderingOn ? '先看菜單與金額，確認後才送出訂單。' : ONLINE_ORDERING_OFF_TEXT}
-    >
+    <SiteShell title="點餐與取餐" subtitle={foodPageSubtitle(orderingOn)}>
       <div className={styles.stack}>
-        {!orderingOn ? <p>{ONLINE_ORDERING_OFF_TEXT}</p> : null}
         <nav className={styles.bar} aria-label="餐飲服務">
           <Link href="/cafeteria">餐廳資訊</Link>
           <Link href="/orders">原有餐廳訂單</Link>

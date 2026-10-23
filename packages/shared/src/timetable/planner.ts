@@ -1,4 +1,11 @@
-import { PERIOD_COUNT, periodEnd, periodStart, timeToMinutes, weekdayLabel } from './periods';
+import {
+  periodCount,
+  periodEnd,
+  periodStart,
+  timeToMinutes,
+  weekdayLabel,
+  type PeriodProfileId,
+} from './periods';
 import type { PersonalCourse } from './course';
 
 export type FreeBlock = {
@@ -35,22 +42,29 @@ function cleanQuery(value: string): string {
     .toLowerCase();
 }
 
-function blockMinutes(block: FreeBlock): number {
-  return Math.max(50, timeToMinutes(periodEnd(block.end)) - timeToMinutes(periodStart(block.start)));
+function blockMinutes(block: FreeBlock, profile: PeriodProfileId = 'pu'): number {
+  return Math.max(
+    50,
+    timeToMinutes(periodEnd(block.end, profile)) - timeToMinutes(periodStart(block.start, profile)),
+  );
 }
 
-function blockLabel(block: FreeBlock): string {
-  return `${weekdayLabel(block.day)} ${periodStart(block.start)}–${periodEnd(block.end)}`;
+function blockLabel(block: FreeBlock, profile: PeriodProfileId = 'pu'): string {
+  return `${weekdayLabel(block.day)} ${periodStart(block.start, profile)}–${periodEnd(block.end, profile)}`;
 }
 
-export function nextClass(courses: PersonalCourse[], now = new Date()): NextClassResult {
+export function nextClass(
+  courses: PersonalCourse[],
+  now = new Date(),
+  profile: PeriodProfileId = 'pu',
+): NextClassResult {
   const list = scheduledCourses(courses);
   const day = now.getDay();
   const minute = now.getHours() * 60 + now.getMinutes();
   if (day >= 1 && day <= 5) {
     for (const course of list.filter((item) => item.day === day).sort((a, b) => a.start - b.start)) {
-      const start = timeToMinutes(periodStart(course.start));
-      const end = timeToMinutes(periodEnd(course.end));
+      const start = timeToMinutes(periodStart(course.start, profile));
+      const end = timeToMinutes(periodEnd(course.end, profile));
       if (minute >= start && minute < end) return { kind: 'now', course, minutes: end - minute };
       if (minute < start) return { kind: 'next', course, minutes: start - minute };
     }
@@ -64,8 +78,14 @@ export function nextClass(courses: PersonalCourse[], now = new Date()): NextClas
   return null;
 }
 
-export function freeBlocks(courses: PersonalCourse[], day: number | null = null, minPeriods = 1): FreeBlock[] {
+export function freeBlocks(
+  courses: PersonalCourse[],
+  day: number | null = null,
+  minPeriods = 1,
+  profile: PeriodProfileId = 'pu',
+): FreeBlock[] {
   const list = scheduledCourses(courses);
+  const slots = periodCount(profile);
   const out: FreeBlock[] = [];
   for (let current = day || 1; current <= (day || 5); current += 1) {
     const busy = new Set<number>();
@@ -75,9 +95,9 @@ export function freeBlocks(courses: PersonalCourse[], day: number | null = null,
         for (let period = course.start; period <= course.end; period += 1) busy.add(period);
       });
     let start: number | null = null;
-    for (let period = 1; period <= PERIOD_COUNT; period += 1) {
+    for (let period = 1; period <= slots; period += 1) {
       if (!busy.has(period) && start === null) start = period;
-      if ((busy.has(period) || period === PERIOD_COUNT) && start !== null) {
+      if ((busy.has(period) || period === slots) && start !== null) {
         const end = busy.has(period) ? period - 1 : period;
         if (end - start + 1 >= minPeriods) out.push({ day: current, start, end });
         start = null;
@@ -94,12 +114,17 @@ function minutesToTime(total: number): string {
 }
 
 /** 在某一天的空堂裡找放得下指定時數的時段，從空堂開始時間往後排。 */
-export function studySlots(courses: PersonalCourse[], day: number, hours: number): string[] {
+export function studySlots(
+  courses: PersonalCourse[],
+  day: number,
+  hours: number,
+  profile: PeriodProfileId = 'pu',
+): string[] {
   const need = Math.max(1, Math.round(hours * 60));
-  return freeBlocks(courses, day, 1)
-    .filter((block) => blockMinutes(block) >= need)
+  return freeBlocks(courses, day, 1, profile)
+    .filter((block) => blockMinutes(block, profile) >= need)
     .map((block) => {
-      const start = timeToMinutes(periodStart(block.start));
+      const start = timeToMinutes(periodStart(block.start, profile));
       return `${weekdayLabel(block.day)} ${minutesToTime(start)}–${minutesToTime(start + need)}`;
     });
 }
@@ -109,7 +134,9 @@ export function commonFree(
   theirs: PersonalCourse[],
   day: number | null = null,
   minPeriods = 2,
+  profile: PeriodProfileId = 'pu',
 ): FreeBlock[] {
+  const slots = periodCount(profile);
   const out: FreeBlock[] = [];
   for (let current = day || 1; current <= (day || 5); current += 1) {
     const busy = new Set<number>();
@@ -119,9 +146,9 @@ export function commonFree(
         for (let period = course.start; period <= course.end; period += 1) busy.add(period);
       });
     let start: number | null = null;
-    for (let period = 1; period <= PERIOD_COUNT; period += 1) {
+    for (let period = 1; period <= slots; period += 1) {
       if (!busy.has(period) && start === null) start = period;
-      if ((busy.has(period) || period === PERIOD_COUNT) && start !== null) {
+      if ((busy.has(period) || period === slots) && start !== null) {
         const end = busy.has(period) ? period - 1 : period;
         if (end - start + 1 >= minPeriods) out.push({ day: current, start, end });
         start = null;
@@ -189,14 +216,17 @@ export function durationLabel(minutes: number): string {
  * 「現在在上：資料庫，主顧303（還有 40 分下課）」
  * 「下一堂：星期三 08:10 英文，任垣201」
  */
-export function describeNext(result: NextClassResult): string {
+export function describeNext(
+  result: NextClassResult,
+  profile: PeriodProfileId = 'pu',
+): string {
   if (!result) return '這週接下來沒有課。';
   const room = result.course.room ? `，${result.course.room}` : '';
   if (result.kind === 'now') return `現在在上：${result.course.name}${room}（還有 ${durationLabel(result.minutes)}下課）`;
   if (result.kind === 'next') {
-    return `下一堂：今天 ${periodStart(result.course.start)} ${result.course.name}${room}（還有 ${durationLabel(result.minutes)}）`;
+    return `下一堂：今天 ${periodStart(result.course.start, profile)} ${result.course.name}${room}（還有 ${durationLabel(result.minutes)}）`;
   }
-  return `下一堂：${weekdayLabel(result.course.day)} ${periodStart(result.course.start)} ${result.course.name}${room}`;
+  return `下一堂：${weekdayLabel(result.course.day)} ${periodStart(result.course.start, profile)} ${result.course.name}${room}`;
 }
 
 export class SchedulePlanner {
@@ -209,6 +239,7 @@ export class SchedulePlanner {
     private courses: PersonalCourse[] = [],
     private friends: PlannerFriend[] = [],
     private selectedFriendId: string | null = null,
+    private profile: PeriodProfileId = 'pu',
   ) {}
 
   setCourses(courses: PersonalCourse[]) {
@@ -245,12 +276,12 @@ export class SchedulePlanner {
       this.day = course.day;
     }
     if (/下一堂|下一節|等等上|現在上|正在上/.test(query)) {
-      const result = nextClass(this.courses, now);
+      const result = nextClass(this.courses, now, this.profile);
       if (result) {
         this.courseId = result.course.id;
         this.day = result.course.day;
       }
-      return describeNext(result);
+      return describeNext(result, this.profile);
     }
     if (course && /老師|誰教|教授|授課/.test(query)) {
       return `「${course.name}」的老師是 ${course.teacher || '課表沒有填老師'}。`;
@@ -259,7 +290,7 @@ export class SchedulePlanner {
       return course.room ? `「${course.name}」在 ${course.room}。` : `「${course.name}」目前沒有填教室。`;
     }
     if (course && /幾點|時間|第幾節|什麼時候/.test(query)) {
-      return `「${course.name}」是${weekdayLabel(course.day)}第 ${course.start}${course.end > course.start ? `–${course.end}` : ''} 節，${periodStart(course.start)}–${periodEnd(course.end)}。`;
+      return `「${course.name}」是${weekdayLabel(course.day)}第 ${course.start}${course.end > course.start ? `–${course.end}` : ''} 節，${periodStart(course.start, this.profile)}–${periodEnd(course.end, this.profile)}。`;
     }
     if (day && /(有什麼課|有哪些課|上什麼|幾堂|課表|課程)/.test(query)) {
       const list = scheduledCourses(this.courses)
@@ -267,7 +298,7 @@ export class SchedulePlanner {
         .sort((a, b) => a.start - b.start);
       if (!list.length) return `${weekdayLabel(day)}沒有排課。`;
       return `${weekdayLabel(day)}有 ${list.length} 門課：\n${list
-        .map((item, index) => `${index + 1}. ${periodStart(item.start)}–${periodEnd(item.end)}｜${item.name}${item.room ? `｜${item.room}` : ''}`)
+        .map((item, index) => `${index + 1}. ${periodStart(item.start, this.profile)}–${periodEnd(item.end, this.profile)}｜${item.name}${item.room ? `｜${item.room}` : ''}`)
         .join('\n')}`;
     }
     if (/最忙|最累|哪天.*忙|哪天.*累/.test(query)) {
@@ -286,16 +317,16 @@ export class SchedulePlanner {
     if (/共同空堂|跟.*(?:好友|朋友).*空|一起有空/.test(query)) {
       const friend = this.friends.find((item) => item.id === this.selectedFriendId);
       if (!friend) return '先選一位朋友，才能比較你們兩個的課表。';
-      const blocks = commonFree(this.courses, friend.courses, day).slice(0, 5);
+      const blocks = commonFree(this.courses, friend.courses, day, 2, this.profile).slice(0, 5);
       if (!blocks.length) return '目前沒有找到至少兩節連續的共同空堂。';
-      return `你們比較好約的時間：\n${blocks.map((block, index) => `${index + 1}. ${blockLabel(block)}`).join('\n')}`;
+      return `你們比較好約的時間：\n${blocks.map((block, index) => `${index + 1}. ${blockLabel(block, this.profile)}`).join('\n')}`;
     }
     if (/空堂|空檔|有空|自由時間/.test(query)) {
-      const blocks = freeBlocks(this.courses, day, 2)
-        .sort((a, b) => blockMinutes(b) - blockMinutes(a))
+      const blocks = freeBlocks(this.courses, day, 2, this.profile)
+        .sort((a, b) => blockMinutes(b, this.profile) - blockMinutes(a, this.profile))
         .slice(0, 5);
       if (!blocks.length) return '目前沒有找到兩節以上的連續空堂。';
-      return `${day ? weekdayLabel(day) : '這週'}比較長的空檔：\n${blocks.map((block, index) => `${index + 1}. ${blockLabel(block)}`).join('\n')}`;
+      return `${day ? weekdayLabel(day) : '這週'}比較長的空檔：\n${blocks.map((block, index) => `${index + 1}. ${blockLabel(block, this.profile)}`).join('\n')}`;
     }
     if (/安排|規劃|排.*(?:讀書|作業|複習|準備)|\d+\s*(?:小時|分鐘|節)/.test(query)) {
       return this.planWeek(query);
@@ -319,25 +350,33 @@ export class SchedulePlanner {
     const evening = /晚上|傍晚/.test(text);
     const avoidLate = /不要太晚|別太晚|早點/.test(text);
     const split = /分段|拆開|分兩/.test(text);
-    let blocks = freeBlocks(this.courses, day, 1);
-    if (evening) blocks = blocks.filter((block) => timeToMinutes(periodStart(block.start)) >= 17 * 60);
-    if (avoidLate) blocks = blocks.filter((block) => timeToMinutes(periodEnd(block.end)) <= 20 * 60 + 45);
+    let blocks = freeBlocks(this.courses, day, 1, this.profile);
+    if (evening)
+      blocks = blocks.filter(
+        (block) => timeToMinutes(periodStart(block.start, this.profile)) >= 17 * 60,
+      );
+    if (avoidLate)
+      blocks = blocks.filter(
+        (block) => timeToMinutes(periodEnd(block.end, this.profile)) <= 20 * 60 + 45,
+      );
     blocks.sort((a, b) =>
-      split ? a.day - b.day || a.start - b.start : blockMinutes(b) - blockMinutes(a) || a.day - b.day,
+      split
+        ? a.day - b.day || a.start - b.start
+        : blockMinutes(b, this.profile) - blockMinutes(a, this.profile) || a.day - b.day,
     );
     if (!blocks.length) return '目前課表裡找不到符合這些條件的空檔。可以換一天或把時間限制放寬一點。';
     let remain = duration;
     const picks: Array<FreeBlock & { use: number }> = [];
     for (const block of blocks) {
       if (remain <= 0) break;
-      const use = Math.min(remain, blockMinutes(block));
+      const use = Math.min(remain, blockMinutes(block, this.profile));
       picks.push({ ...block, use });
       remain -= use;
       if (!split && picks.length >= 3) break;
     }
     this.plan = { subject, duration };
     this.day = day || this.day;
-    const lines = picks.map((block, index) => `${index + 1}. ${blockLabel(block)}｜${subject}，約 ${block.use} 分鐘`);
+    const lines = picks.map((block, index) => `${index + 1}. ${blockLabel(block, this.profile)}｜${subject}，約 ${block.use} 分鐘`);
     return `我會先這樣排：\n${lines.join('\n')}${remain > 0 ? `\n還差約 ${remain} 分鐘，可以再補一段課後時間。` : ''}`;
   }
 }

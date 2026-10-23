@@ -7,9 +7,9 @@ import { SiteShell } from '@/components/SiteShell';
 import type { Announcement } from '@/lib/firebase';
 import { loadAnnouncement } from '../publicAnnouncements';
 import {
+  ANNOUNCEMENT_READ_FAILURE_TEXT,
+  ANNOUNCEMENT_RETRY_TEXT,
   formatStaleAnnouncementNotice,
-  listAnnouncementCatalogLinks,
-  SOURCE_NOT_CONNECTED_TEXT,
   staleAnnouncementUpdatedAt,
 } from '@campus/shared/src/campusAnnouncements';
 import { isAnnouncementSchoolVisibleToPublic } from '@campus/shared/src/campusAnnouncements';
@@ -18,36 +18,29 @@ import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import styles from '../announcements.module.css';
 
 type LoadState =
-  | { status: 'loading' }
-  | { status: 'not_connected' }
-  | { status: 'ready'; announcement: Announcement | null; fetchedAt: string; stale: boolean };
+  | { status: 'loading'; schoolId: string; id: string }
+  | { status: 'failed'; schoolId: string; id: string }
+  | {
+      status: 'ready';
+      schoolId: string;
+      id: string;
+      announcement: Announcement | null;
+      fetchedAt: string;
+      stale: boolean;
+    };
 
-function OfficeSourceLinks({
-  links,
-}: {
-  links: Array<{ sourceId: string; office: string; listUrl?: string }>;
-}) {
-  const items = links.filter((item) => item.listUrl);
-  if (!items.length) return null;
-  return (
-    <p>
-      {items.map((item, index) => (
-        <span key={item.sourceId}>
-          {index > 0 ? '、' : null}
-          <a href={item.listUrl} rel="noopener noreferrer" target="_blank">
-            {item.office}
-          </a>
-        </span>
-      ))}
-    </p>
-  );
+function detailForRequest(state: LoadState, schoolId: string, id: string): LoadState {
+  return state.schoolId === schoolId && state.id === id
+    ? state
+    : { status: 'loading', schoolId, id };
 }
 
 function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) {
-  const [state, setState] = useState<LoadState>({ status: 'loading' });
+  const [state, setState] = useState<LoadState>({ status: 'loading', schoolId, id });
   const [notice, setNotice] = useState('');
   const generation = useRef(0);
   const mounted = useRef(false);
+  const view = detailForRequest(state, schoolId, id);
   const load = useCallback(() => {
     const request = ++generation.current;
     return loadAnnouncement(schoolId, id).then(
@@ -55,6 +48,8 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
         if (mounted.current && request === generation.current) {
           setState({
             status: 'ready',
+            schoolId,
+            id,
             announcement,
             fetchedAt: new Date().toISOString(),
             stale: false,
@@ -64,9 +59,12 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
       () => {
         if (!mounted.current || request !== generation.current) return;
         setState((current) =>
-          current.status === 'ready' && current.announcement
+          current.schoolId === schoolId &&
+          current.id === id &&
+          current.status === 'ready' &&
+          current.announcement
             ? { ...current, stale: true }
-            : { status: 'not_connected' },
+            : { status: 'failed', schoolId, id },
         );
       },
     );
@@ -84,7 +82,12 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
   function refresh() {
     setNotice('');
     setState((current) =>
-      current.status === 'ready' && current.announcement ? current : { status: 'loading' },
+      current.schoolId === schoolId &&
+      current.id === id &&
+      current.status === 'ready' &&
+      current.announcement
+        ? current
+        : { status: 'loading', schoolId, id },
     );
     void load();
   }
@@ -103,21 +106,23 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
     }
   }
 
-  if (state.status === 'loading')
+  if (view.status === 'loading')
     return (
       <p className={styles.status} role="status">
         正在讀取公告…
       </p>
     );
-  if (state.status === 'not_connected') {
+  if (view.status === 'failed') {
     return (
       <section className={styles.status}>
-        <h2>{SOURCE_NOT_CONNECTED_TEXT}</h2>
-        <OfficeSourceLinks links={listAnnouncementCatalogLinks(schoolId)} />
+        <h2>{ANNOUNCEMENT_READ_FAILURE_TEXT}</h2>
+        <button className="btn" type="button" onClick={refresh}>
+          {ANNOUNCEMENT_RETRY_TEXT}
+        </button>
       </section>
     );
   }
-  if (!state.announcement) {
+  if (!view.announcement) {
     return (
       <section className={styles.status}>
         <h2>找不到這則公告</h2>
@@ -125,7 +130,7 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
       </section>
     );
   }
-  const announcement = state.announcement;
+  const announcement = view.announcement;
   return (
     <article className={styles.announcement}>
       <div className={styles.meta}>
@@ -145,11 +150,11 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
           <span>未提供發布日期</span>
         )}
       </div>
-      {state.stale ? (
+      {view.stale ? (
         <p role="status" className={styles.notice}>
           {formatStaleAnnouncementNotice(
             staleAnnouncementUpdatedAt(
-              [{ status: 'unavailable', lastSuccessAt: state.fetchedAt }],
+              [{ status: 'unavailable', lastSuccessAt: view.fetchedAt }],
               [announcement],
             ),
             'firestore',
@@ -197,16 +202,12 @@ export default function AnnouncementDetailPage(props: {
   const schoolId = context.schoolId;
   const visible =
     context.status === 'ready' &&
-    Boolean(schoolId && isAnnouncementSchoolVisibleToPublic(
-      { schoolId },
-      getAnnouncementVisibilityEnv(),
-    ));
+    Boolean(
+      schoolId && isAnnouncementSchoolVisibleToPublic({ schoolId }, getAnnouncementVisibilityEnv()),
+    );
   const { user, loading } = useAuth();
   return (
-    <SiteShell
-      schoolName={visible ? context.schoolName : undefined}
-      title="公告詳情"
-    >
+    <SiteShell schoolName={visible ? context.schoolName : undefined} title="公告詳情">
       <div className={styles.page}>
         <Link
           className={styles.back}
