@@ -29,7 +29,21 @@ vi.mock('@/features/nuni/Session', () => ({
   useNuniSession: () => mocks.auth,
 }));
 vi.mock('@/components/SiteShell', () => ({
-  SiteShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main>,
+  SiteShell: ({
+    title,
+    subtitle,
+    children,
+  }: {
+    title?: string;
+    subtitle?: string;
+    children: React.ReactNode;
+  }) => (
+    <main>
+      {title ? <h1>{title}</h1> : null}
+      {subtitle ? <p>{subtitle}</p> : null}
+      {children}
+    </main>
+  ),
 }));
 vi.mock('@/components/NuniSignIn', () => ({
   NuniSignIn: ({ returnUrl }: { returnUrl: string }) => <a href={returnUrl}>登入後點餐</a>,
@@ -61,6 +75,7 @@ async function respond(path: string, _context: string, input?: Record<string, un
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'true');
   sessionStorage.clear();
   mocks.auth.session = { platformAccountId: 'account-a', context: 'context-a' };
   mocks.auth.error = '';
@@ -84,6 +99,14 @@ async function quote() {
   await screen.findByRole('region', { name: '送出前確認' });
   await waitFor(() => expect(screen.queryByText('正在讀取菜單…')).toBeNull());
 }
+
+it('omits confirm-to-submit copy on /food when online ordering is off', async () => {
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'false');
+  render(<FoodWorkspace />);
+  expect(screen.getByText('目前還不能線上點餐')).toBeTruthy();
+  expect(screen.queryByText('確認後才送出訂單')).toBeNull();
+  expect(screen.queryByText('先看菜單與金額，確認後才送出訂單。')).toBeNull();
+});
 
 it('requires options and final confirmation, then shows the actual order and keeps legacy entrances', async () => {
   render(<FoodWorkspace />);
@@ -222,6 +245,17 @@ it('rereads a rejected quote and keeps editable cart contents without offering s
   await waitFor(() => expect(button('計算金額與確認庫存').disabled).toBe(false));
   expect((screen.getByLabelText('蔬菜便當 數量') as HTMLInputElement).value).toBe('1');
   expect(screen.queryByRole('button', { name: '確認送出訂單' })).toBeNull();
+});
+
+it('keeps placed orders visible and does not invite a new order while online ordering is off', async () => {
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'false');
+  render(<FoodWorkspace initialTenant="campus-one" initialOrder="order-1" />);
+  expect(screen.getByText('目前還不能線上點餐')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '我要點餐' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '查看菜單：米飯店' })).toBeNull();
+  expect(screen.queryByText('先看菜單與金額，確認後才送出訂單。')).toBeNull();
+  await screen.findByText('米飯店 · 待付款');
+  expect(screen.getByRole('link', { name: '原有餐廳訂單' }).getAttribute('href')).toBe('/orders');
 });
 
 it('does not read private food data without a platform session', () => {

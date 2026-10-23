@@ -10,7 +10,7 @@ import {
   setDoc,
   where,
 } from 'firebase/firestore';
-import { getDb, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
+import { getAuthInstance, getDb, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
 import { joinClassroomAttendance } from '../services/liveAttendance';
 import {
   buildCourseSummaries,
@@ -248,9 +248,24 @@ export async function submitQuiz(input: {
   answers?: Record<string, string | string[]>;
   attachments?: Submission['attachments'];
 }): Promise<Submission & { autoScore?: { earned: number; total: number; percentage: number | null; needsManualGrading: boolean } }> {
+  const content = input.content?.trim() ?? '';
+  const answers = input.answers ?? {};
+  if (!input.courseSpaceId || !input.quizId || !input.userId) {
+    throw new Error('找不到這份評量。');
+  }
+  if (!content && Object.keys(answers).length === 0) {
+    throw new Error('請先作答再送出。');
+  }
+  if (content.length > 20000) {
+    throw new Error('請輸入 1 至 20,000 字的作答內容。');
+  }
+  if (getAuthInstance().currentUser?.uid !== input.userId) {
+    throw new Error('登入身分已變更，請重新開啟課程。');
+  }
   const db = getDb();
   const now = new Date().toISOString();
   const status: Submission['status'] = 'submitted';
+  const assignmentRef = doc(db, 'groups', input.courseSpaceId, 'assignments', input.quizId);
   const ref = doc(
     db,
     'groups',
@@ -304,17 +319,32 @@ export async function submitQuiz(input: {
   }
 
   await runTransaction(db, async (transaction) => {
+    const assignmentSnap = await transaction.get(assignmentRef);
+    if (!assignmentSnap.exists()) throw new Error('此評量已不存在。');
+    const assignment = assignmentSnap.data() as Record<string, unknown>;
+    if (assignment.published === false || ['draft', 'closed'].includes(String(assignment.status ?? ''))) {
+      throw new Error('此評量尚未開放。');
+    }
+    if (!['quiz', 'exam'].includes(String(assignment.type ?? ''))) {
+      throw new Error('請透過作業頁面繳交。');
+    }
+    const due = toDate(assignment.dueAt);
+    if (due && due.getTime() < Date.now() && assignment.allowLateSubmission !== true) {
+      throw new Error('評量已截止，請聯絡授課教師。');
+    }
     const existing = await transaction.get(ref);
-    if (existing.exists() && existing.data().submittedAt) {
+    if (existing.exists() && existing.data()?.submittedAt) {
       throw new Error('這份評量已有繳交紀錄，請重新整理確認。');
+    }
+    if (getAuthInstance().currentUser?.uid !== input.userId) {
+      throw new Error('登入身分已變更，請重新開啟課程。');
     }
     transaction.set(ref, {
       groupId: input.courseSpaceId,
       assignmentId: input.quizId,
       userId: input.userId,
-      content: input.content?.trim() ?? '',
-      answers: input.answers ?? {},
-      attachments: input.attachments ?? [],
+      content,
+      answers,
       status,
       submittedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),

@@ -1,0 +1,202 @@
+import React from 'react';
+import { ActivityIndicator, RefreshControl } from 'react-native';
+import { act, fireEvent, render } from '@testing-library/react-native';
+import { HomeFeedScreen } from '../screens/social/HomeFeedScreen';
+import { BoardsScreen } from '../screens/social/BoardsScreen';
+import { fetchRecentCampusPosts } from '../services/feed';
+import { listBoards, listSubscribedBoardIds } from '../services/boards';
+import { listActiveStoriesForSchool } from '../services/stories';
+
+let mockUser = { uid: 'alice' };
+let mockSchoolId = 'pu';
+let mockAuthLoading = false;
+jest.mock('../state/auth', () => ({ useAuth: () => ({ user: mockUser, loading: mockAuthLoading }) }));
+jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: mockSchoolId } }) }));
+jest.mock('../firebase', () => ({ isFirebaseMockMode: () => false, getDb: () => ({}) }));
+jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
+jest.mock('../ui/components', () => ({
+  EmptyState: ({ title }: { title: string }) => {
+    const { Text } = require('react-native');
+    return <Text>{title}</Text>;
+  },
+}));
+jest.mock('../services/feed', () => ({
+  fetchRecentCampusPosts: jest.fn(),
+  rankFeedPosts: (rows: unknown[]) => rows,
+  toggleCampusPostLike: jest.fn(),
+}));
+jest.mock('../services/boards', () => ({
+  listBoards: jest.fn(),
+  listSubscribedBoardIds: jest.fn(async () => []),
+  subscribeToBoard: jest.fn(),
+  unsubscribeFromBoard: jest.fn(),
+  groupBoardsByType: (rows: unknown[]) => ({ topic: rows }),
+  createBoard: jest.fn(),
+  CAMPUS_BOARD_TYPE_LABEL: { department: '系所', course: '課程', topic: '主題', anon: '匿名' },
+}));
+jest.mock('../services/stories', () => ({
+  listActiveStoriesForSchool: jest.fn(async () => []),
+  groupStoriesByAuthor: () => [],
+}));
+jest.mock('../services/memberDirectory', () => ({
+  fetchSchoolDirectoryProfiles: jest.fn(async () => []),
+}));
+
+const post = {
+  id: 'post',
+  schoolId: 'pu',
+  boardId: 'board',
+  anonymous: true,
+  aliasSnapshot: '同學',
+  title: '讀書會時間',
+  content: '週三下午在圖書館',
+};
+const board = { id: 'board', name: '讀書會', type: 'topic' };
+const screens = [
+  {
+    name: 'feed',
+    Component: HomeFeedScreen,
+    load: fetchRecentCampusPosts as jest.Mock,
+    data: post,
+    title: '讀書會時間',
+    error: '暫時無法更新校園動態。請確認網路與登入狀態，再試一次。',
+    retry: '重新讀取動態',
+    empty: '尚無校園貼文',
+  },
+  {
+    name: 'boards',
+    Component: BoardsScreen,
+    load: listBoards as jest.Mock,
+    data: board,
+    title: '讀書會',
+    error: '暫時無法更新看板。請確認網路與登入狀態，再試一次。',
+    retry: '重新讀取看板',
+    empty: '尚無任何看板',
+  },
+];
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  mockSchoolId = 'pu';
+  mockUser = { uid: 'alice' };
+  mockAuthLoading = false;
+  jest.mocked(fetchRecentCampusPosts).mockResolvedValue([]);
+  jest.mocked(listBoards).mockResolvedValue([]);
+  jest.mocked(listSubscribedBoardIds).mockResolvedValue([]);
+  jest.mocked(listActiveStoriesForSchool).mockResolvedValue([]);
+});
+
+test.each(screens)(
+  '$name ends a failed initial load and lets the user retry',
+  async ({ Component, load, data, title, error, retry, empty }) => {
+    load.mockRejectedValueOnce(new Error('offline'));
+    const view = render(<Component />);
+    expect(await view.findByText(error)).toBeTruthy();
+    expect(view.UNSAFE_queryByType(ActivityIndicator)).toBeNull();
+    expect(view.queryByText(empty)).toBeNull();
+    load.mockResolvedValueOnce([data]);
+    await act(async () => {
+      fireEvent.press(view.getByText(retry));
+    });
+    expect(view.getByText(title)).toBeTruthy();
+    expect(view.queryByText(error)).toBeNull();
+    expect(view.UNSAFE_getByType(RefreshControl).props.refreshing).toBe(false);
+  },
+);
+
+test.each(screens)(
+  '$name retains the displayed content if refresh fails and stops refreshing',
+  async ({ Component, load, data, title, error }) => {
+    load.mockResolvedValueOnce([data]);
+    const view = render(<Component />);
+    expect(await view.findByText(title)).toBeTruthy();
+    load.mockRejectedValueOnce(new Error('offline'));
+    await act(async () => {
+      view.UNSAFE_getByType(RefreshControl).props.onRefresh();
+    });
+    expect(view.getByText(title)).toBeTruthy();
+    expect(view.getByText(error)).toBeTruthy();
+    expect(view.UNSAFE_getByType(RefreshControl).props.refreshing).toBe(false);
+  },
+);
+
+test.each(screens)(
+  '$name rejects a response from the previous school',
+  async ({ Component, load, data, title }) => {
+    let resolve!: (value: unknown[]) => void;
+    load.mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    const view = render(<Component />);
+    mockSchoolId = 'other';
+    view.rerender(<Component />);
+    await act(async () => {
+      resolve([data]);
+    });
+    expect(view.queryByText(title)).toBeNull();
+    expect(view.UNSAFE_queryByType(ActivityIndicator)).toBeNull();
+  },
+);
+
+test.each(screens)(
+  '$name removes previously shown content when school access is revoked',
+  async ({ Component, load, data, title, error }) => {
+    load.mockResolvedValueOnce([data]);
+    const view = render(<Component />);
+    expect(await view.findByText(title)).toBeTruthy();
+    load.mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'permission-denied' }));
+    await act(async () => {
+      view.UNSAFE_getByType(RefreshControl).props.onRefresh();
+    });
+    expect(view.queryByText(title)).toBeNull();
+    expect(view.getByText(error)).toBeTruthy();
+    expect(view.UNSAFE_getByType(RefreshControl).props.refreshing).toBe(false);
+  },
+);
+
+test.each(screens)(
+  '$name keeps subscriptions when that dependency fails during refresh',
+  async ({ Component, load, data, title, error }) => {
+    load.mockResolvedValue([data]);
+    jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);
+    const view = render(<Component />);
+    expect(await view.findByText(title)).toBeTruthy();
+    jest.mocked(listSubscribedBoardIds).mockRejectedValueOnce(new Error('offline'));
+    await act(async () => {
+      view.UNSAFE_getByType(RefreshControl).props.onRefresh();
+    });
+    expect(view.getByText(title)).toBeTruthy();
+    expect(view.getByText(error)).toBeTruthy();
+    expect(listSubscribedBoardIds).toHaveBeenLastCalledWith('alice', 'pu', { throwOnError: true });
+    if (Component === BoardsScreen) expect(view.getByText('已訂閱')).toBeTruthy();
+  },
+);
+
+test('a story read failure is reported without wiping the existing feed', async () => {
+  jest.mocked(fetchRecentCampusPosts).mockResolvedValue([post]);
+  const view = render(<HomeFeedScreen />);
+  expect(await view.findByText(post.title)).toBeTruthy();
+  jest.mocked(listActiveStoriesForSchool).mockRejectedValueOnce(new Error('offline'));
+  await act(async () => {
+    view.UNSAFE_getByType(RefreshControl).props.onRefresh();
+  });
+  expect(view.getByText(post.title)).toBeTruthy();
+  expect(view.getByText(screens[0].error)).toBeTruthy();
+  expect(listActiveStoriesForSchool).toHaveBeenLastCalledWith('pu', 80, { throwOnError: true });
+});
+
+test.each(screens)('$name hides private content while the same account is revalidated', async ({ Component, load, data, title }) => {
+  load.mockResolvedValueOnce([data]);
+  const view = render(<Component />);
+  expect(await view.findByText(title)).toBeTruthy();
+  mockAuthLoading = true;
+  view.rerender(<Component />);
+  expect(view.getByText('正在確認登入狀態…')).toBeTruthy();
+  expect(view.queryByText(title)).toBeNull();
+  mockAuthLoading = false;
+  view.rerender(<Component />);
+  await act(async () => {});
+  expect(view.queryByText(title)).toBeNull();
+});

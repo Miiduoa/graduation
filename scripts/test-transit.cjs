@@ -15,19 +15,22 @@ process.on('exit', () => fs.rmSync(output, { recursive: true, force: true }));
 for (const [source, name] of [
   ['apps/web/src/lib/transit.ts', 'transit'],
   ['apps/web/src/lib/transit-server.ts', 'transit-server'],
+  ['apps/web/src/lib/transit-catalog.ts', 'transit-catalog'],
+  ['apps/web/src/lib/transit-replay.ts', 'transit-replay'],
   ['apps/web/src/app/api/transit/route.ts', 'route'],
 ]) {
   const result = ts.transpileModule(fs.readFileSync(path.join(root, source), 'utf8'), {
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true },
     fileName: source,
     reportDiagnostics: true,
   });
   assert.equal((result.diagnostics || []).filter((entry) => entry.category === ts.DiagnosticCategory.Error).length, 0);
-  fs.writeFileSync(path.join(output, `${name}.js`), result.outputText.replace('"@/lib/transit-server"', '"./transit-server"'));
+  fs.writeFileSync(path.join(output, `${name}.js`), result.outputText.replace('"@/lib/transit-server"', '"./transit-server"').replace('"@/lib/transit-replay"', '"./transit-replay"').replace('"../data/taichung-transit-catalog.json"', JSON.stringify(path.join(root, 'apps/web/src/data/taichung-transit-catalog.json'))));
 }
 const client = require(path.join(output, 'transit.js'));
 const server = require(path.join(output, 'transit-server.js'));
 const route = require(path.join(output, 'route.js'));
+const studentReport = require(path.join(root, 'apps/web/src/lib/fixtures/tdx-providence-student-report.json'));
 const NOW = Date.parse('2026-10-12T08:00:00Z');
 const at = (offset = 0) => new Date(NOW + offset).toISOString();
 const point = { lat: 24.22, lon: 120.58 };
@@ -74,6 +77,241 @@ test('campus lookup uses the registered school and unknown schools do not silent
   assert.throws(() => server.validateTransitQuery({ action: 'campus', schoolId: 'unknown' }));
   assert.equal(client.isCity('toString'), false);
 });
+test('campus-next is limited to Providence and unknown schools stay invalid', () => {
+  assert.deepEqual(server.validateTransitQuery({ action: 'campus-next', schoolId: 'pu' }), { action: 'campus-next', schoolId: 'pu' });
+  assert.throws(() => server.validateTransitQuery({ action: 'campus-next', schoolId: 'nthu' }));
+  assert.throws(() => server.validateTransitQuery({ action: 'campus-next', schoolId: 'unknown' }));
+});
+test('campus-next uses one arrival query for the four Providence routes and keeps the 15 second cache', async () => {
+  const mock = service((url) => Response.json(url.includes('/StopOfRoute/') ? [] : [
+    arrival({ StopUID: 'TXG-GATE', RouteUID: 'TXG162', RouteName: { Zh_tw: '162' }, StopName: { Zh_tw: '靜宜大學(校門)' }, EstimateTime: 180 }),
+    arrival({ StopUID: 'TXG-GATE', RouteUID: 'TXG301', RouteName: { Zh_tw: '301' }, StopName: { Zh_tw: '靜宜大學(校門)' }, StopStatus: 0, EstimateTime: null, NextBusTime: at(45 * 60_000) }),
+  ]));
+  const query = { action: 'campus-next', schoolId: 'pu' };
+  const first = await mock.execute(query);
+  assert.equal(first.status, 'ready');
+  assert.equal(first.kind, 'arrivals');
+  const etaUrls = mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/'));
+  assert.equal(etaUrls.length, 1);
+  assert.equal(mock.calls.filter((call) => call.url.includes('/Stop/City/')).length, 0);
+  const filter = new URL(etaUrls[0].url).searchParams.get('$filter');
+  assert.equal(filter.startsWith("contains(StopName/Zh_tw,'靜宜大學') and ("), true);
+  assert.match(filter, /contains\(StopName\/Zh_tw,'專用道'\)/);
+  assert.equal(/\) or contains\(StopName\/Zh_tw,'專用道'\)\s*$/.test(filter), false);
+  assert.match(filter, /RouteUID eq 'TXG162'/);
+  assert.match(filter, /RouteUID eq 'TXG301'/);
+  assert.match(filter, /RouteUID eq 'TXG368'/);
+  assert.match(filter, /RouteUID eq 'TXG326'/);
+  mock.tick(14_999); await mock.execute(query);
+  assert.equal(mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/')).length, 1);
+  mock.tick(1); await mock.execute(query);
+  assert.equal(mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/')).length, 2);
+  const gate = first.arrivals.find((row) => row.route === '162');
+  assert.equal(gate.stopName, '靜宜大學(校門)');
+  const scheduled = first.arrivals.find((row) => row.route === '301');
+  assert.equal(scheduled.scheduledAt, at(45 * 60_000));
+  assert.match(client.arrivalLabel(scheduled, NOW), /^表定 \d{2}:\d{2}$/);
+  assert.equal(client.pickCampusNext(first.arrivals, NOW).map((row) => row.route).join(','), '162,301,326,368');
+});
+test('campus-next includes 專用道 in the same ETA query and does not fetch extra StopOfRoute', async () => {
+  const mock = service((url) => Response.json(url.includes('/StopOfRoute/') ? [] : [
+    arrival({ StopUID: 'TXG-BRT', RouteUID: 'TXG300', RouteName: { Zh_tw: '300' }, StopName: { Zh_tw: '靜宜大學(專用道)' }, DestinationStopNameZh: '臺中車站', EstimateTime: 240 }),
+    arrival({ StopUID: 'TXG-GATE', RouteUID: 'TXG162', RouteName: { Zh_tw: '162' }, StopName: { Zh_tw: '靜宜大學(校門)' }, EstimateTime: 180 }),
+  ]));
+  const result = await mock.execute({ action: 'campus-next', schoolId: 'pu' });
+  assert.equal(result.status, 'ready');
+  const etaUrls = mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/'));
+  assert.equal(etaUrls.length, 1);
+  const filter = new URL(etaUrls[0].url).searchParams.get('$filter');
+  assert.equal(filter.startsWith("contains(StopName/Zh_tw,'靜宜大學') and ("), true);
+  assert.match(filter, /contains\(StopName\/Zh_tw,'專用道'\)/);
+  assert.equal(/\) or contains\(StopName\/Zh_tw,'專用道'\)\s*$/.test(filter), false);
+  const stopOrder = mock.calls.filter((call) => call.url.includes('/StopOfRoute/'));
+  assert.equal(stopOrder.some((call) => new URL(call.url).searchParams.get('$filter').includes('TXG300')), false);
+  const brt = result.arrivals.find((row) => row.route === '300');
+  assert.equal(brt.stopName, '靜宜大學(專用道)');
+  assert.equal(brt.destination, '台中車站');
+  const rows = client.campusSegmentRows(result.arrivals, '專用道', NOW);
+  assert.deepEqual(rows.map((row) => row.route), ['300']);
+});
+test('campus-next fills 專用道 termini from the static catalog without extra StopOfRoute', async () => {
+  const mock = service((url) => Response.json(url.includes('/StopOfRoute/') ? [] : [
+    arrival({ StopUID: 'TXG-BRT-300', RouteUID: 'TXG300', RouteName: { Zh_tw: '300' }, StopName: { Zh_tw: '靜宜大學(專用道)' }, Direction: 0, EstimateTime: 240 }),
+    arrival({ StopUID: 'TXG-BRT-306', RouteUID: 'TXG306', RouteName: { Zh_tw: '306' }, StopName: { Zh_tw: '靜宜大學(專用道)' }, Direction: 1, EstimateTime: 1080 }),
+    arrival({ StopUID: 'TXG-BRT-305', RouteUID: 'TXG305', RouteName: { Zh_tw: '305' }, StopName: { Zh_tw: '靜宜大學(專用道)' }, Direction: 0, EstimateTime: 1200 }),
+  ]));
+  const result = await mock.execute({ action: 'campus-next', schoolId: 'pu' });
+  assert.equal(result.status, 'ready');
+  assert.equal(mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/')).length, 1);
+  assert.equal(mock.calls.filter((call) => call.url.includes('/StopOfRoute/')).some((call) => {
+    const filter = new URL(call.url).searchParams.get('$filter') ?? '';
+    return /TXG300|TXG305|TXG306/.test(filter);
+  }), false);
+  const outbound = result.arrivals.find((row) => row.route === '300');
+  const coastal = result.arrivals.find((row) => row.route === '306');
+  assert.equal(outbound.destination, '台中車站');
+  assert.equal(coastal.destination, '清水');
+  const rows = client.campusSegmentRows(result.arrivals, '專用道', NOW);
+  assert.equal(rows.every((row) => !client.campusHeadingText(row).includes('終點未提供')), true);
+  const display = client.campusLaneDisplay(rows, NOW);
+  assert.deepEqual(display.shown.map((row) => [row.route, client.campusHeadingText(row)]), [
+    ['300', '往 台中車站'],
+    ['306', '往 清水'],
+  ]);
+  assert.deepEqual(display.extra.map((row) => row.route), ['305']);
+});
+test('campus-next 專用道 inbound keeps 往靜宜 and does not reuse the outbound terminus', async () => {
+  const mock = service((url) => Response.json(url.includes('/StopOfRoute/') ? [] : [
+    arrival({
+      StopUID: 'TXG-BRT-300', RouteUID: 'TXG300', RouteName: { Zh_tw: '300' },
+      StopName: { Zh_tw: '靜宜大學(專用道)' }, Direction: 1, DestinationStopNameZh: '靜宜大學(專用道)', EstimateTime: 240,
+    }),
+    arrival({
+      StopUID: 'TXG-BRT-310', RouteUID: 'TXG310', SubRouteUID: 'TXG310B', RouteName: { Zh_tw: '310區2' },
+      StopName: { Zh_tw: '靜宜大學(專用道)' }, Direction: 1, EstimateTime: 360,
+    }),
+    arrival({
+      StopUID: 'TXG-BRT-DEAD', RouteUID: 'TXG999', RouteName: { Zh_tw: '專用道終點班' },
+      StopName: { Zh_tw: '靜宜大學(專用道)' }, Direction: 1, DestinationStopNameZh: '靜宜大學(專用道)', EstimateTime: 90,
+    }),
+  ]));
+  const result = await mock.execute({ action: 'campus-next', schoolId: 'pu' });
+  assert.equal(result.status, 'ready');
+  assert.equal(mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/')).length, 1);
+  assert.equal(mock.calls.filter((call) => call.url.includes('/StopOfRoute/')).some((call) => {
+    const filter = new URL(call.url).searchParams.get('$filter') ?? '';
+    return /TXG300|TXG310|TXG999/.test(filter);
+  }), false);
+  const inbound = result.arrivals.find((row) => row.route === '300');
+  const branch = result.arrivals.find((row) => row.route === '310區2');
+  assert.equal(inbound.destination, '靜宜');
+  assert.equal(branch.destination, '靜宜');
+  assert.equal(result.arrivals.some((row) => row.route === '專用道終點班'), false);
+  const rows = client.campusSegmentRows(result.arrivals, '專用道', NOW);
+  assert.deepEqual(rows.map((row) => [row.route, client.campusHeadingText(row)]), [
+    ['300', '往 靜宜'],
+    ['310區2', '往 靜宜'],
+  ]);
+  assert.equal(rows.every((row) => !client.campusHeadingText(row).includes('到本站')), true);
+  assert.equal(rows.every((row) => !client.campusHeadingText(row).includes('台中車站')), true);
+  assert.equal(rows.every((row) => !client.campusHeadingText(row).startsWith('從')), true);
+});
+test('recorded TDX fixture: 專用道 300 inbound stays 往靜宜 8 分 and downtown falls back to 表定 14:38', async () => {
+  const now = Date.parse(studentReport.nowIso.directionBug);
+  const rows = studentReport.estimatedTimeOfArrival.filter((row) => row.scenario === 'direction-reversed-300' || row.scenario === 'wrap-307-branch');
+  const mock = service((url) => Response.json(url.includes('/StopOfRoute/')
+    ? studentReport.stopOfRoute.filter((row) => row.RouteUID === 'TXG300')
+    : rows), { now: () => now });
+  const result = await mock.execute({ action: 'campus-next', schoolId: 'pu' });
+  assert.equal(result.status, 'ready');
+  const inbound = result.arrivals.find((row) => row.route === '300' && row.direction === 1);
+  const outbound = result.arrivals.find((row) => row.route === '300' && row.direction === 0);
+  assert.equal(inbound.destination, '靜宜');
+  assert.equal(client.campusEtaView(inbound, now).text, '8 分');
+  assert.equal(outbound.destination, '台中車站');
+  assert.equal(client.campusEtaView(outbound, now).text, '表定 14:38');
+  const lane = client.campusSegmentRows(result.arrivals, '專用道', now);
+  assert.deepEqual(lane.map((row) => [row.route, client.campusHeadingText(row), client.campusEtaView(row.arrival, now).text]), [
+    ['300', '往 靜宜', '8 分'],
+    ['307副', '往 八德東大勇路口', '12 分'],
+    ['300', '往 台中車站', '表定 14:38'],
+  ]);
+  const long = lane.find((row) => row.route === '307副');
+  assert.equal(client.campusDestinationFull(long), '八德東大勇路口');
+  assert.equal(client.campusArrivalA11yLabel(long, now), '307副 往 八德東大勇路口 12 分');
+  assert.equal(client.campusHeadingText(long).includes('\n'), false);
+});
+test('recorded TDX fixture: 162 往校內 uses 英才路 11 分, not the gate 17 分', async () => {
+  const now = Date.parse(studentReport.nowIso.etaBug);
+  const rows = studentReport.estimatedTimeOfArrival.filter((row) =>
+    ['eta-gap-162', 'matched-368', 'matched-301', 'matched-326-ended'].includes(row.scenario));
+  const mock = service((url) => {
+    if (!url.includes('/StopOfRoute/')) return Response.json(rows);
+    const uid = (new URL(url).searchParams.get('$filter') ?? '').match(/'(TXG[^']+)'/)?.[1];
+    return Response.json(studentReport.stopOfRoute.filter((row) => row.RouteUID === uid));
+  }, { now: () => now });
+  const result = await mock.execute({ action: 'campus-next', schoolId: 'pu' });
+  assert.equal(result.status, 'ready');
+  const inbound = client.campusSegmentRows(result.arrivals, '校門口・往校內', now);
+  const oneSixTwo = inbound.find((row) => row.route === '162');
+  assert.equal(oneSixTwo.arrival.stopName, '靜宜大學(英才路)');
+  assert.equal(oneSixTwo.arrival.seconds, 660);
+  assert.deepEqual(client.campusEtaView(oneSixTwo.arrival, now), { kind: 'live', text: '11 分', minutes: 11 });
+  const chapel = inbound.find((row) => row.route === '368');
+  assert.equal(chapel.arrival.stopName, '靜宜大學(校門)');
+  const campus301 = inbound.find((row) => row.route === '301');
+  assert.deepEqual(client.campusEtaView(campus301.arrival, now), { kind: 'live', text: '7 分', minutes: 7 });
+  const outbound = client.campusSegmentRows(result.arrivals, '校門口・往沙鹿', now);
+  assert.equal(outbound[0].route, '162');
+  assert.deepEqual(client.campusEtaView(outbound[0].arrival, now), { kind: 'live', text: '3 分', minutes: 3 });
+  const city = client.campusSegmentRows(result.arrivals, '校門口・往市區', now);
+  assert.equal(client.campusEtaView(city[0].arrival, now).text, '今天收班');
+});
+test('campus-next never lists other 專用道 stops such as 市政府 in segments or home', async () => {
+  const cityHall = arrival({
+    StopUID: 'TXG-CITY-HALL', RouteUID: 'TXG301', RouteName: { Zh_tw: '301' }, StopName: { Zh_tw: '市政府(專用道)' },
+    DestinationStopNameZh: '沙鹿車站', EstimateTime: 60,
+  });
+  const gate = arrival({
+    StopUID: 'TXG-GATE', RouteUID: 'TXG162', RouteName: { Zh_tw: '162' }, StopName: { Zh_tw: '靜宜大學(校門)' },
+    DestinationStopNameZh: '沙鹿車站', EstimateTime: 180,
+  });
+  const brt = arrival({
+    StopUID: 'TXG-BRT', RouteUID: 'TXG300', RouteName: { Zh_tw: '300' }, StopName: { Zh_tw: '靜宜大學(專用道)' },
+    DestinationStopNameZh: '臺中車站', EstimateTime: 240,
+  });
+  const mock = service((url) => Response.json(url.includes('/StopOfRoute/') ? [] : [cityHall, gate, brt]));
+  const result = await mock.execute({ action: 'campus-next', schoolId: 'pu' });
+  assert.equal(result.status, 'ready');
+  const etaUrls = mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/'));
+  assert.equal(etaUrls.length, 1);
+  const filter = new URL(etaUrls[0].url).searchParams.get('$filter');
+  assert.equal(filter.startsWith("contains(StopName/Zh_tw,'靜宜大學') and ("), true);
+  assert.equal(result.arrivals.some((row) => (row.stopName ?? '').includes('市政府')), false);
+  assert.equal(result.arrivals.some((row) => row.route === '162' && row.stopName === '靜宜大學(校門)'), true);
+  const leaked = { ...cityHall, id: 'city-301', route: '301', destination: '沙鹿火車站', stopName: '市政府(專用道)', seconds: 60, updatedAt: at() };
+  const mixed = [...result.arrivals, leaked];
+  for (const segment of client.CAMPUS_SEGMENTS) {
+    const rows = client.campusSegmentRows(mixed, segment.group, NOW);
+    assert.equal(rows.some((row) => (row.arrival?.stopName ?? '').includes('市政府')), false);
+  }
+  const shaLu = client.campusSegmentRows(mixed, '校門口・往沙鹿', NOW);
+  assert.equal(shaLu[0]?.route, '162');
+  assert.equal(shaLu.some((row) => row.route === '301' && row.arrival), false);
+  const home = client.pickCampusNext(mixed, NOW);
+  assert.equal(home.some((row) => (row.arrival?.stopName ?? '').includes('市政府')), false);
+  assert.match(client.campusHomeSummary(home, NOW), /^162 /);
+  assert.equal(client.campusHomeSummary(home, NOW).includes('301'), false);
+  assert.equal(client.arrivalMatchesCampusGroup(leaked, '校門口・往沙鹿'), false);
+  assert.equal(client.arrivalMatchesCampusGroup(leaked, '專用道'), false);
+});
+test('campus-next keeps gate routes when other 專用道 rows would fill the 200 cap', async () => {
+  const cityLane = Array.from({ length: 220 }, (_, index) => arrival({
+    StopUID: `TXG-CITY-${index}`, RouteUID: 'TXG301', SubRouteUID: `TXG301-${index}`,
+    RouteName: { Zh_tw: '301' }, StopName: { Zh_tw: '市政府(專用道)' },
+    DestinationStopNameZh: '沙鹿車站', EstimateTime: 30,
+  }));
+  const gate = [
+    arrival({ StopUID: 'TXG-GATE-162', RouteUID: 'TXG162', RouteName: { Zh_tw: '162' }, StopName: { Zh_tw: '靜宜大學(校門)' }, DestinationStopNameZh: '沙鹿車站', EstimateTime: 180 }),
+    arrival({ StopUID: 'TXG-GATE-301', RouteUID: 'TXG301', RouteName: { Zh_tw: '301' }, StopName: { Zh_tw: '靜宜大學(校門)' }, DestinationStopNameZh: '沙鹿車站', EstimateTime: 240 }),
+    arrival({ StopUID: 'TXG-GATE-368', RouteUID: 'TXG368', RouteName: { Zh_tw: '368' }, StopName: { Zh_tw: '靜宜大學(校門)' }, DestinationStopNameZh: '沙鹿車站', EstimateTime: 300 }),
+    arrival({ StopUID: 'TXG-GATE-326', RouteUID: 'TXG326', RouteName: { Zh_tw: '326' }, StopName: { Zh_tw: '靜宜大學(校門)' }, DestinationStopNameZh: '沙鹿車站', EstimateTime: 360 }),
+  ];
+  const mock = service((url) => Response.json(url.includes('/StopOfRoute/') ? [] : [...cityLane, ...gate]));
+  const result = await mock.execute({ action: 'campus-next', schoolId: 'pu' });
+  assert.equal(result.status, 'ready');
+  assert.equal(mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/')).length, 1);
+  assert.equal(result.arrivals.length <= 200, true);
+  assert.equal(result.arrivals.some((row) => (row.stopName ?? '').includes('市政府')), false);
+  assert.deepEqual(['162', '301', '368', '326'].filter((route) => result.arrivals.some((row) => row.route === route && row.stopName === '靜宜大學(校門)')), ['162', '301', '368', '326']);
+  const shaLu = client.campusSegmentRows(result.arrivals, '校門口・往沙鹿', NOW);
+  assert.deepEqual(shaLu.map((row) => row.route).sort(), ['162', '301', '326', '368']);
+});
+test('campus-next without credentials stays unavailable and does not invent times', async () => {
+  const mock = service([], { credentials: () => ({}) });
+  assert.deepEqual(await mock.execute({ action: 'campus-next', schoolId: 'pu' }), { status: 'unavailable', reason: 'not-configured' });
+  assert.equal(mock.calls.length, 0);
+});
 test('same-named stops on opposite sides remain separate and invalid positions are excluded', () => {
   const rows = [stop('TXG123'), stop('TXG124'), stop('TXG123'), stop('TXG999', 999), { StopName: { Zh_tw: '靜宜大學' } }];
   assert.deepEqual(server.normalizeTransitStops(rows, 'Taichung', campusQuery).map((row) => row.id), ['TXG123', 'TXG124']);
@@ -101,14 +339,24 @@ test('source timestamps, not a fresh HTTP response, decide whether an estimate c
 });
 test('unknown or passed estimates never become misleading imminent-arrival labels', () => {
   const [fresh] = server.normalizeTransitArrivals([arrival({ EstimateTime: 0 })], 'TXG123');
-  assert.equal(client.arrivalLabel(fresh, NOW), '即將到站');
+  assert.equal(client.arrivalLabel(fresh, NOW), '進站中');
   assert.equal(client.arrivalLabel(fresh, NOW + 31_000), '等待更新');
-  for (const seconds of [null, -10, Infinity, NaN]) assert.equal(client.arrivalLabel({ ...fresh, seconds }, NOW), '暫無到站預估');
+  for (const seconds of [null, -10, Infinity, NaN]) assert.equal(client.arrivalLabel({ ...fresh, seconds }, NOW), '暫無班次資訊');
 });
 test('each stop status remains distinct, including no service today', () => {
   const [fresh] = server.normalizeTransitArrivals([arrival()], 'TXG123');
-  const labels = { 1: '尚未發車', 2: '交管不停靠', 3: '末班車已駛離', 4: '今日未營運' };
+  const labels = { 1: '尚未發車', 2: '交管不停靠', 3: '今天收班', 4: '今天收班' };
   for (const [status, label] of Object.entries(labels)) assert.equal(client.arrivalLabel({ ...fresh, status: Number(status) }, NOW), label);
+});
+test('daytime copy uses the first late-night scheduled hour instead of 今天收班', () => {
+  const [fresh] = server.normalizeTransitArrivals([arrival({ StopStatus: 3, EstimateTime: null, NextBusTime: '2026-10-12T16:05:00Z' })], 'TXG123');
+  assert.equal(fresh.scheduledAt, '2026-10-12T16:05:00.000Z');
+  assert.equal(client.arrivalLabel(fresh, NOW), '夜間公車，00:05 起');
+  assert.equal(client.campusEtaView(fresh, NOW).text, '夜間公車，00:05 起');
+  const [morning] = server.normalizeTransitArrivals([arrival({ StopStatus: 3, EstimateTime: null, NextBusTime: '2026-10-12T22:00:00Z' })], 'TXG123');
+  assert.equal(client.arrivalLabel(morning, NOW), '今天收班');
+  const [sameDay] = server.normalizeTransitArrivals([arrival({ StopStatus: 3, EstimateTime: null, NextBusTime: at(2 * 3600_000) })], 'TXG123');
+  assert.match(client.arrivalLabel(sameDay, NOW), /^表定 \d{2}:\d{2}$/);
 });
 test('filters exact StopUID and retains direction/subroute identity instead of mixing platforms', () => {
   const rows = server.normalizeTransitArrivals([
@@ -126,10 +374,105 @@ test('newer source data wins over an old or timestamp-less duplicate', () => {
 });
 test('does not invent a destination from a generic route headsign', () => {
   const [row] = server.normalizeTransitArrivals([arrival({ HeadSign: 'A－B' })], 'TXG123');
-  assert.equal(client.directionLabel(row), '去程');
-  assert.equal(client.directionLabel({ ...row, direction: 1 }), '返程');
+  // 來源沒有給終點時不編造目的地，也不拿通用路線牌充當終點；
+  // 標示必須明講終點未提供，讓學生知道要再核對車頭方向。
+  assert.equal(row.destination, '');
+  assert.equal(client.directionLabel(row), '去程（終點未提供）');
+  assert.equal(client.directionLabel({ ...row, direction: 1 }), '返程（終點未提供）');
   assert.equal(client.directionLabel({ ...row, direction: null }), '方向未提供');
-  assert.equal(client.directionLabel({ ...row, destination: '臺中車站' }), '往 臺中車站');
+  assert.ok(!client.directionLabel(row).includes('A－B'));
+  assert.ok(!client.directionLabel(row).includes('往'));
+  assert.equal(client.directionLabel({ ...row, destination: '臺中車站' }), '往 台中車站');
+});
+test('route stop order gives the real terminus per direction, never the headsign', () => {
+  const destinations = server.normalizeRouteDestinations([
+    { RouteUID: 'TXG162', SubRouteUID: 'TXG162', Direction: 0, Headsign: '靜宜大學-嘉陽高中-靜宜大學',
+      Stops: [{ StopName: { Zh_tw: '靜宜大學主顧聖母堂' } }, { StopName: { Zh_tw: '嘉陽高中' } }] },
+    { RouteUID: 'TXG162', SubRouteUID: 'TXG162', Direction: 1,
+      Stops: [{ StopName: { Zh_tw: '嘉陽高中' } }, { StopName: { Zh_tw: '靜宜大學主顧聖母堂' } }] },
+    { RouteUID: 'TXG999', Direction: 0, Stops: [] },
+    { RouteUID: 'TXG998', Direction: null, Stops: [{ StopName: { Zh_tw: '某站' } }] },
+  ]);
+  assert.equal(destinations.get('TXG162:0'), '嘉陽高中');
+  assert.equal(destinations.get('TXG162:1'), '主顧聖母堂');
+  assert.equal(destinations.size, 2);
+  const [outbound, inbound] = server.normalizeTransitArrivals([
+    arrival({ RouteUID: 'TXG162', SubRouteUID: 'TXG162', RouteName: { Zh_tw: '162' }, Direction: 0 }),
+    arrival({ RouteUID: 'TXG162', SubRouteUID: 'TXG162', RouteName: { Zh_tw: '162' }, Direction: 1 }),
+  ], 'TXG123', destinations);
+  assert.equal(client.directionLabel(outbound), '往 嘉陽高中');
+  assert.equal(client.directionLabel(inbound), '往 主顧聖母堂');
+  // 到站資料自己給的終點優先，站序不能蓋掉它；方向不明時不補。
+  const [own] = server.normalizeTransitArrivals([
+    arrival({ RouteUID: 'TXG162', Direction: 0, DestinationStopNameZh: '來源終點' }),
+    arrival({ RouteUID: 'TXG162', Direction: null }),
+  ], 'TXG123', destinations);
+  assert.equal(own.destination, '來源終點');
+});
+test('remaining stops after boarding rewrite campus termini to public headings', () => {
+  const outbound = {
+    RouteUID: 'TXG162', SubRouteUID: 'TXG162', Direction: 0,
+    Stops: [
+      { StopUID: 'GATE', StopName: { Zh_tw: '靜宜大學(校門)' } },
+      { StopUID: 'YING', StopName: { Zh_tw: '靜宜大學(英才路)' } },
+      { StopUID: 'SHA', StopName: { Zh_tw: '沙鹿車站' } },
+      { StopUID: 'END', StopName: { Zh_tw: '嘉陽高中' } },
+    ],
+  };
+  const inbound368 = {
+    RouteUID: 'TXG368', SubRouteUID: 'TXG368', Direction: 0,
+    Stops: [
+      { StopUID: 'YING', StopName: { Zh_tw: '靜宜大學(英才路)' } },
+      { StopUID: 'GATE', StopName: { Zh_tw: '靜宜大學(校門)' } },
+      { StopUID: 'CHAPEL', StopName: { Zh_tw: '靜宜大學主顧聖母堂' } },
+    ],
+  };
+  const outbound368 = {
+    RouteUID: 'TXG368', SubRouteUID: 'TXG368', Direction: 1,
+    Stops: [
+      { StopUID: 'CHAPEL', StopName: { Zh_tw: '靜宜大學主顧聖母堂' } },
+      { StopUID: 'HALL', StopName: { Zh_tw: '靜宜大學(會館)' } },
+      { StopUID: 'YING', StopName: { Zh_tw: '靜宜大學(英才路)' } },
+      { StopUID: 'BUS', StopName: { Zh_tw: '巨業沙鹿站' } },
+    ],
+  };
+  const sequences = server.normalizeRouteSequences([outbound, inbound368, outbound368]);
+  const [fromYing] = server.normalizeTransitArrivals([
+    arrival({ StopUID: 'YING', RouteUID: 'TXG162', SubRouteUID: 'TXG162', RouteName: { Zh_tw: '162' }, Direction: 0, DestinationStopNameZh: '嘉陽高中', StopName: { Zh_tw: '靜宜大學(英才路)' } }),
+  ], 'YING', new Map(), sequences);
+  const [fromGate] = server.normalizeTransitArrivals([
+    arrival({ StopUID: 'GATE', RouteUID: 'TXG368', SubRouteUID: 'TXG368', RouteName: { Zh_tw: '368' }, Direction: 0, DestinationStopNameZh: '靜宜大學主顧聖母堂', StopName: { Zh_tw: '靜宜大學(校門)' } }),
+  ], 'GATE', new Map(), sequences);
+  assert.equal(fromYing.destination, '沙鹿火車站');
+  assert.equal(fromGate.destination, '主顧聖母堂');
+  const inboundStops = sequences.find((row) => row.routeUid === 'TXG368' && row.direction === 0)?.stops.map((stop) => stop.id);
+  const outboundStops = sequences.find((row) => row.routeUid === 'TXG368' && row.direction === 1)?.stops.map((stop) => stop.id);
+  assert.deepEqual(inboundStops, ['YING', 'GATE', 'CHAPEL']);
+  assert.equal(outboundStops.includes('GATE'), false);
+  assert.equal(outboundStops.includes('YING'), true);
+  assert.equal(server.routesAtCampusStop('GATE', sequences).some((route) => route.name === '368' && route.destination === '主顧聖母堂'), true);
+  assert.equal(server.routesAtCampusStop('YING', sequences).some((route) => route.name === '368' && route.destination === '巨業沙鹿站'), true);
+});
+test('arrivals fill destinations from stop order and keep arrivals when that lookup fails', async () => {
+  const stopOrder = (uid, last) => [{ RouteUID: uid, SubRouteUID: uid, Direction: 1, Stops: [{ StopName: { Zh_tw: '起站' } }, { StopName: { Zh_tw: last } }] }];
+  const mock = service((url) => {
+    if (url.includes('/StopOfRoute/')) return Response.json(stopOrder('TXG300', '靜宜大學主顧聖母堂'));
+    return Response.json([arrival({ Direction: 1 })]);
+  });
+  const result = await mock.execute({ action: 'arrivals', city: 'Taichung', stopId: 'TXG123' });
+  assert.equal(result.arrivals[0].destination, '主顧聖母堂');
+  assert.equal(client.directionLabel(result.arrivals[0]), '往 主顧聖母堂');
+  assert.ok(mock.calls.some((call) => new URL(call.url).pathname.endsWith('/StopOfRoute/City/Taichung') &&
+    new URL(call.url).searchParams.get('$filter') === "RouteUID eq 'TXG300'"));
+  // 站序快取 6 小時：15 秒後重查到站不應再打站序。
+  mock.tick(15_000); await mock.execute({ action: 'arrivals', city: 'Taichung', stopId: 'TXG123' });
+  assert.equal(mock.calls.filter((call) => call.url.includes('/StopOfRoute/')).length, 1);
+  const failing = service((url) => url.includes('/StopOfRoute/')
+    ? new Response('', { status: 500 }) : Response.json([arrival({ Direction: 1 })]));
+  const fallback = await failing.execute({ action: 'arrivals', city: 'Taichung', stopId: 'TXG123' });
+  assert.equal(fallback.status, 'ready');
+  assert.equal(fallback.arrivals[0].destination, '');
+  assert.equal(client.directionLabel(fallback.arrivals[0]), '返程（終點未提供）');
 });
 test('saved stops tolerate corruption, deduplicate, cap size, and strip location-derived distance', () => {
   assert.deepEqual(client.readSavedStops('{broken'), []);
@@ -147,15 +490,39 @@ test('walking link contains only the public station location, never an origin or
   assert.equal(link.searchParams.has('origin'), false);
   assert.equal(link.searchParams.has('key'), false);
 });
-test('missing server credentials return an explicit state and never generate sample stops', async () => {
+test('absent credentials use verified Taichung catalog without network; other cities and arrivals remain unavailable', async () => {
   const mock = service([], { credentials: () => ({}) });
-  assert.deepEqual(await mock.execute(campusQuery), { status: 'unavailable', reason: 'not-configured' });
+  const result = await mock.execute(campusQuery);
+  assert.equal(result.status, 'ready');
+  assert.equal(result.kind, 'stops');
+  assert.ok(result.stops.length > 0);
+  assert.ok(result.stops.every(row => row.source === 'taichung-open-data' && row.id.startsWith('TCOD_') && row.name.includes('靜宜大學') && row.routes.length));
+  assert.deepEqual(await mock.execute({ action:'search', city:'Taichung', text:'靜宜大學' }), result);
+  assert.deepEqual(await mock.execute({ action:'search', city:'Taipei', text:'靜宜大學' }), { status:'unavailable', reason:'not-configured' });
+  const first = result.stops[0];
+  const nearby = await mock.execute({action:'nearby',city:'Taichung',lat:first.lat,lon:first.lon,radius:300});
+  assert.ok(nearby.stops.some(row => row.id === first.id));
+  assert.ok(nearby.stops.every(row => row.distance >= 0 && row.distance <= 300));
+  assert.deepEqual(await mock.execute({action:'arrivals',city:'Taichung',stopId:first.id}), {status:'unavailable',reason:'not-configured'});
   assert.equal(mock.calls.length, 0);
+});
+test('static catalog IDs are never forwarded to TDX even after credentials are configured', async () => {
+  const mock = service();
+  assert.deepEqual(await mock.execute({action:'arrivals',city:'Taichung',stopId:'TCOD_valid'}), {status:'unavailable',reason:'not-configured'});
+  assert.equal(mock.calls.length, 0);
+});
+test('partial or blank credentials do not silently select static mode', async () => {
+  for (const credentials of [{clientId:'x'}, {clientSecret:'x'}, {clientId:'',clientSecret:''}]) {
+    const mock=service([], {credentials:()=>credentials});
+    assert.deepEqual(await mock.execute(campusQuery),{status:'unavailable',reason:'not-configured'});
+    assert.equal(mock.calls.length,0);
+  }
 });
 test('OAuth single-flight and query cache collapse concurrent requests without exposing credentials', async () => {
   const mock = service();
   const results = await Promise.all(Array.from({ length: 8 }, () => mock.execute(campusQuery)));
-  assert.equal(mock.calls.length, 2);
+  // token + campus stops + the four preloaded Providence StopOfRoute queries
+  assert.equal(mock.calls.length, 6);
   assert.equal(results.every((result) => result.status === 'ready'), true);
   assert.equal(JSON.stringify(results).includes('test-only-secret'), false);
   assert.equal(mock.calls[0].init.method, 'POST');
@@ -166,8 +533,8 @@ test('OAuth single-flight and query cache collapse concurrent requests without e
 test('stop cache expires and OAuth is renewed before token expiry', async () => {
   const mock = service();
   await mock.execute(campusQuery);
-  mock.tick(119_999); await mock.execute(campusQuery); assert.equal(mock.calls.length, 2);
-  mock.tick(1); await mock.execute(campusQuery); assert.equal(mock.calls.length, 3);
+  mock.tick(119_999); await mock.execute(campusQuery); assert.equal(mock.calls.length, 6);
+  mock.tick(1); await mock.execute(campusQuery); assert.equal(mock.calls.length, 7);
   mock.tick(3_420_001); await mock.execute(campusQuery);
   assert.equal(mock.calls.filter((call) => call.url.includes('/openid-connect/token')).length, 2);
 });
@@ -227,7 +594,8 @@ test('arrival queries use exact StopUID with a shorter cache and still preserve 
   const result = await mock.execute(query);
   assert.equal(new URL(mock.calls[1].url).searchParams.get('$filter'), "StopUID eq 'TXG123'");
   assert.equal(client.arrivalLabel(result.arrivals[0], NOW), '資料待更新');
-  mock.tick(15_000); await mock.execute(query); assert.equal(mock.calls.length, 3);
+  // 首次查詢另含一次站序補終點；15 秒後只有到站重查，站序快取 6 小時不重打。
+  mock.tick(15_000); await mock.execute(query); assert.equal(mock.calls.length, 4);
 });
 test('POST enforces content type, cross-site rejection, malformed JSON and a bounded body', async () => {
   const request = (body, headers = {}) => new Request('https://campus.example/api/transit', {
@@ -240,4 +608,193 @@ test('POST enforces content type, cross-site rejection, malformed JSON and a bou
   const invalid = await route.POST(request('{}'));
   assert.equal(invalid.status, 400);
   assert.equal(invalid.headers.get('cache-control'), 'private, no-store');
+});
+
+// 多人同時查與 TDX 限流：共用快取、合併相同請求，被擋時回最近一份並標當時資料時間。
+const etaQuery = (stopId = 'TXG123') => ({ action: 'arrivals', city: 'Taichung', stopId });
+test('concurrent viewers of the same stop share one upstream arrival request', async () => {
+  const mock = service((url) => Response.json(url.includes('/StopOfRoute/') ? [] : [arrival()]));
+  const results = await Promise.all(Array.from({ length: 20 }, () => mock.execute(etaQuery())));
+  assert.equal(results.every((result) => result.status === 'ready' && !result.stale), true);
+  assert.equal(mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/')).length, 1);
+});
+test('campus-next keeps the last copy when TDX is busy, using the same retention window as other arrivals', async () => {
+  let limited = false;
+  const mock = service((url) => {
+    if (limited) return new Response('', { status: 429, headers: { 'Retry-After': '60' } });
+    return Response.json(url.includes('/StopOfRoute/') ? [] : [arrival({ RouteName: { Zh_tw: '162' }, StopName: { Zh_tw: '靜宜大學(校門)' } })]);
+  });
+  const query = { action: 'campus-next', schoolId: 'pu' };
+  const first = await mock.execute(query);
+  limited = true;
+  mock.tick(20_000);
+  const busy = await mock.execute(query);
+  assert.equal(busy.status, 'ready');
+  assert.equal(busy.stale, true);
+  assert.equal(busy.fetchedAt, first.fetchedAt);
+  const before = mock.calls.length;
+  mock.tick(10_000); await mock.execute(query);
+  assert.equal(mock.calls.length, before);
+});
+test('a TDX 429 after the cache expires returns the last arrivals with their original time and stale flag', async () => {
+  let limited = false;
+  const mock = service((url) => {
+    if (limited) return new Response('', { status: 429, headers: { 'Retry-After': '60' } });
+    return Response.json(url.includes('/StopOfRoute/') ? [] : [arrival()]);
+  });
+  const first = await mock.execute(etaQuery());
+  assert.equal(first.fetchedAt, at());
+  limited = true;
+  mock.tick(20_000);
+  const busy = await mock.execute(etaQuery());
+  assert.equal(busy.status, 'ready');
+  assert.equal(busy.stale, true);
+  assert.equal(busy.fetchedAt, at(), 'data time is when TDX was really queried, not now');
+  assert.equal(busy.arrivals[0].updatedAt, at());
+  assert.notEqual(client.arrivalLabel(busy.arrivals[0], NOW + 20_000), '資料待更新');
+  // 90 秒規則維持：保留資料超過來源時間 90 秒就不再顯示倒數。
+  assert.equal(client.arrivalLabel(busy.arrivals[0], NOW + 90_000), '資料待更新');
+  // 封鎖期間不再打 TDX，保護不放寬。
+  const before = mock.calls.length;
+  mock.tick(10_000); await mock.execute(etaQuery());
+  assert.equal(mock.calls.length, before);
+});
+test('own budget exhaustion also falls back to the last good copy, but never invents data for a new stop', async () => {
+  const mock = service((url) => Response.json(url.includes('/StopOfRoute/') ? [] : url.includes('/EstimatedTimeOfArrival/') ? [arrival()] : []));
+  await mock.execute(etaQuery());
+  for (let i = 0; i < 60; i++) await mock.execute({ action: 'search', city: 'Taichung', text: `stop${i}` });
+  mock.tick(20_000);
+  const kept = await mock.execute(etaQuery());
+  assert.equal(kept.status, 'ready'); assert.equal(kept.stale, true);
+  assert.deepEqual(await mock.execute(etaQuery('TXG999')), { status: 'unavailable', reason: 'rate-limited' });
+});
+test('a kept copy older than the retention window is not served', async () => {
+  let limited = false;
+  const mock = service((url) => limited ? new Response('', { status: 429 }) : Response.json(url.includes('/StopOfRoute/') ? [] : [arrival()]));
+  await mock.execute(etaQuery());
+  limited = true;
+  mock.tick(server.TRANSIT_STALE_RETENTION_MS + 1);
+  assert.deepEqual(await mock.execute(etaQuery()), { status: 'unavailable', reason: 'rate-limited' });
+});
+test('more simultaneous different stops than the concurrency cap queue briefly instead of failing', async () => {
+  let running = 0; let peak = 0;
+  const mock = service(async (url) => {
+    running += 1; peak = Math.max(peak, running);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    running -= 1;
+    return Response.json(url.includes('/StopOfRoute/') ? [] : [arrival({ StopUID: new URL(url).searchParams.get('$filter').slice(11, -1) })]);
+  });
+  const stops = Array.from({ length: 8 }, (_, index) => `TXG${200 + index}`);
+  await mock.execute(etaQuery('TXG100')); // 先取得 token
+  const results = await Promise.all(stops.map((id) => mock.execute(etaQuery(id))));
+  assert.equal(results.every((result) => result.status === 'ready'), true);
+  assert.ok(peak <= 4, `peak concurrency ${peak} must stay within the cap`);
+});
+test('a queued request that cannot get a slot in time is reported busy rather than overloading TDX', async () => {
+  const hang = new Promise(() => {});
+  const mock = service((url) => url.includes('/openid-connect/token') ? undefined : hang, { wait: async () => {} });
+  const stuck = Array.from({ length: 4 }, (_, index) => mock.execute(etaQuery(`TXG30${index}`)));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(await mock.execute(etaQuery('TXG399')), { status: 'unavailable', reason: 'rate-limited' });
+  assert.equal(mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/')).length, 4);
+  void stuck;
+});
+test('client keeps the stale marker only when the server sends it', async () => {
+  const original = globalThis.fetch;
+  try {
+    for (const [stale, expected] of [[true, true], [undefined, undefined], ['yes', undefined]]) {
+      globalThis.fetch = async () => Response.json({ status: 'ready', kind: 'arrivals', arrivals: [], fetchedAt: at(), ...(stale === undefined ? {} : { stale }) });
+      const result = await client.queryTransit(etaQuery(), new AbortController().signal);
+      assert.equal(result.stale, expected);
+      assert.equal(result.fetchedAt, at());
+    }
+  } finally { globalThis.fetch = original; }
+});
+
+// 兩台機器共用快取：集中到第一台處理，主機不在時退回本機，不形成單點故障。
+const replay = require(path.join(output, 'transit-replay.js'));
+const noHeaders = { get: () => null };
+const withHeader = (name, value = 'x') => ({ get: (key) => key.toLowerCase() === name ? value : null });
+test('the second machine replays transit queries to the first with a timeout and self fallback', () => {
+  const [leader, other] = replay.TRANSIT_LEADER_MACHINES;
+  assert.equal(replay.transitReplayHeader(other, noHeaders), `instance=${leader};timeout=3s;fallback=prefer_self`);
+  assert.equal(replay.transitReplayHeader(leader, noHeaders), null);
+});
+test('replayed, fallback and reassigned requests are handled locally so nothing loops', () => {
+  const other = replay.TRANSIT_LEADER_MACHINES[1];
+  for (const name of ['fly-replay-src', 'fly-replay-failed', 'fly-preferred-instance-unavailable'])
+    assert.equal(replay.transitReplayHeader(other, withHeader(name)), null, name);
+});
+test('outside Fly or on an unknown machine nothing is replayed', () => {
+  for (const id of [undefined, '', 'unknownmachine1', 'BAD ID;instance=x']) assert.equal(replay.transitReplayHeader(id, noHeaders), null);
+});
+test('the route answers a replay before reading the body and still serves locally on the leader or after fallback', async () => {
+  const original = process.env.FLY_MACHINE_ID;
+  const [leader, other] = replay.TRANSIT_LEADER_MACHINES;
+  const make = (extra = {}) => new Request('https://nuni.tw/api/transit', { method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...extra }, body: JSON.stringify({ action: 'nope' }) });
+  try {
+    process.env.FLY_MACHINE_ID = other;
+    const replayed = await route.POST(make());
+    assert.equal(replayed.status, 204);
+    assert.equal(replayed.headers.get('fly-replay'), `instance=${leader};timeout=3s;fallback=prefer_self`);
+    assert.equal(replayed.headers.get('cache-control'), 'private, no-store');
+    assert.equal((await route.POST(make({ 'fly-replay-failed': 'reason=timeout' }))).status, 400);
+    process.env.FLY_MACHINE_ID = leader;
+    const local = await route.POST(make());
+    assert.equal(local.status, 400);
+    assert.equal(local.headers.get('fly-replay'), null);
+  } finally {
+    if (original === undefined) delete process.env.FLY_MACHINE_ID; else process.env.FLY_MACHINE_ID = original;
+  }
+});
+test('Providence route stop orders are preloaded once in the background through the same protections', async () => {
+  const stopOrder = (uid) => [{ RouteUID: uid, SubRouteUID: uid, Direction: 1, Stops: [{ StopName: { Zh_tw: '起站' } }, { StopName: { Zh_tw: `${uid}末站` } }] }];
+  const mock = service((url) => url.includes('/StopOfRoute/')
+    ? Response.json(stopOrder(new URL(url).searchParams.get('$filter').slice(13, -1)))
+    : Response.json([arrival({ RouteUID: 'TXG162', SubRouteUID: 'TXG162', Direction: 1 })]),
+  { preloadRoutes: server.PROVIDENCE_PRELOAD_ROUTES });
+  await mock.execute(campusQuery);
+  for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve));
+  const preloaded = mock.calls.filter((call) => call.url.includes('/StopOfRoute/')).map((call) => new URL(call.url).searchParams.get('$filter'));
+  assert.deepEqual(preloaded, server.PROVIDENCE_PRELOAD_ROUTES.routeUids.map((uid) => `RouteUID eq '${uid}'`));
+  await mock.execute(campusQuery);
+  assert.equal(mock.calls.filter((call) => call.url.includes('/StopOfRoute/')).length, preloaded.length, 'preload runs once');
+  // 之後查到站直接用預載的 TDX 站序補終點，不再打站序。
+  const result = await mock.execute(etaQuery());
+  assert.equal(result.arrivals[0].destination, 'TXG162末站');
+  assert.equal(mock.calls.filter((call) => call.url.includes('/StopOfRoute/')).length, preloaded.length);
+});
+test('route stop orders survive a rate limit far longer than arrivals, but arrivals keep the short window', async () => {
+  let limited = false;
+  const stopOrder = [{ RouteUID: 'TXG300', SubRouteUID: 'TXG300A', Direction: 0, Stops: [{ StopName: { Zh_tw: '起站' } }, { StopName: { Zh_tw: '真終點' } }] }];
+  const mock = service((url) => limited ? new Response('', { status: 429 })
+    : Response.json(url.includes('/StopOfRoute/') ? stopOrder : [arrival()]));
+  await mock.execute(etaQuery());
+  limited = true;
+  mock.tick(7 * 60 * 60_000); // 站序 6 小時快取已過期，到站保留也已過期
+  assert.deepEqual(await mock.execute(etaQuery()), { status: 'unavailable', reason: 'rate-limited' });
+  limited = false;
+  mock.tick(61_000); // 429 後依預設暫停 60 秒，保護不放寬
+  const fresh = await mock.execute(etaQuery());
+  assert.equal(fresh.status, 'ready');
+  // 到站重新取得、站序再被擋：仍用 24 小時內的最近一份 TDX 站序補終點。
+  const mixed = service((url) => url.includes('/StopOfRoute/') ? (limited ? new Response('', { status: 429 }) : Response.json(stopOrder)) : Response.json([arrival({ SrcUpdateTime: new Date(NOW + 7 * 60 * 60_000).toISOString() })]));
+  await mixed.execute(etaQuery());
+  limited = true;
+  mixed.tick(7 * 60 * 60_000);
+  const kept = await mixed.execute(etaQuery());
+  assert.equal(kept.status, 'ready');
+  assert.equal(kept.arrivals[0].destination, '真終點');
+  mixed.tick(server.ROUTE_STOPS_RETENTION_MS);
+  const expired = await mixed.execute(etaQuery());
+  assert.equal(expired.arrivals[0].destination, '');
+});
+test('preload is skipped without credentials and never blocks the static catalog', async () => {
+  const calls = [];
+  const execute = server.createTransitService({ credentials: () => ({}), fetcher: async (url) => { calls.push(url); return Response.json([]); },
+    now: () => NOW, preloadRoutes: server.PROVIDENCE_PRELOAD_ROUTES });
+  assert.equal((await execute(campusQuery)).status, 'ready');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls.length, 0);
 });

@@ -9,6 +9,7 @@ import type {
   NuniWorkspace,
 } from '@campus/shared/src/nuni';
 import { nuniErrorMessage } from '@campus/shared/src/nuni';
+import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
 import { MutationForm, useClasses } from './CourseUI';
 import { buildCourseOutline, courseActivityStatus, courseTaskTotals } from './courseOutline';
 import shared from './NuniApp.module.css';
@@ -27,7 +28,7 @@ type Props = {
 
 function suggestedTime(value: string | null) {
   if (!value) return '';
-  return new Date(value).toLocaleString('zh-TW', { dateStyle: 'medium', timeStyle: 'short' });
+  return formatTaipeiDateTime(value, { seconds: false });
 }
 
 export function CourseLearningPath({

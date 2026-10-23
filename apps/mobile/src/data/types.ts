@@ -407,6 +407,11 @@ export type Submission = {
   feedback?: string;
   gradedAt?: string;
   gradedBy?: string;
+  gradePublished?: boolean;
+  gradeScore?: number;
+  gradeFeedback?: string;
+  gradePublishedAt?: string;
+  gradeRevisionCount?: number;
   status: 'submitted' | 'graded' | 'late' | 'missing';
 };
 

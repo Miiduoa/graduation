@@ -85,7 +85,12 @@ export function MerchantOrderDesk({
   const [openNext, setOpenNext] = useFoodDraft(cache, `${scope}:open-next`, false);
   const [nextCash, setNextCash] = useFoodDraft(cache, `${scope}:next-cash`, '0');
   const [handoverNote, setHandoverNote] = useFoodDraft(cache, `${scope}:handover-note`, '');
-  const [shiftConfirm, setShiftConfirm] = useState(false);
+  const [confirmedShift, setConfirmedShift] = useState<{ id: string | null } | null>(null);
+  const shiftConfirm =
+    !!confirmedShift && !!data.data && confirmedShift.id === (data.data.shift?.id ?? null);
+  const setShiftConfirm = (confirmed: boolean) => {
+    setConfirmedShift(confirmed ? { id: data.data?.shift?.id ?? null } : null);
+  };
   const [selected, setSelected] = useState<{ action: string; orderId: string } | null>(null);
   const [fields, setFields] = useFoodDraft<
     Record<string, { token: string; reason: string; detail: string }>
@@ -149,6 +154,15 @@ export function MerchantOrderDesk({
     },
   });
   const locked = !data.data || task.busy || !!task.pending || task.storageBlocked;
+  useEffect(() => {
+    if (!confirmedShift || !data.data || task.busy || task.pending) return;
+    const shift = data.data.shift;
+    if (
+      confirmedShift.id !== (shift?.id ?? null) ||
+      (shift && !shift.allowedActions.includes('handover'))
+    )
+      setConfirmedShift(null);
+  }, [confirmedShift, data.data, task.busy, task.pending]);
   const chosen = data.data?.queue.orders.find((order) => order.id === selected?.orderId);
   useEffect(() => {
     if (!selected || !data.data || task.busy || task.pending) return;

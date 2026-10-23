@@ -313,6 +313,7 @@ export function useFoodMutation<I>(
   const [error, setError] = useState('');
   const [hydrated, setHydrated] = useState(false);
   const [storageBlocked, setStorageBlocked] = useState(false);
+  const [storageRevision, setStorageRevision] = useState(0);
   const mounted = useRef(false);
   const lock = useRef(false);
   const accountRef = useRef(accountId);
@@ -342,6 +343,7 @@ export function useFoodMutation<I>(
         if (cancelled || !mounted.current || accountRef.current !== accountId) return;
         if (stored) setPending(stored);
         setStorageBlocked(false);
+        setError('');
       } catch (failure) {
         if (cancelled || !mounted.current || accountRef.current !== accountId) return;
         setStorageBlocked(true);
@@ -357,7 +359,17 @@ export function useFoodMutation<I>(
     return () => {
       cancelled = true;
     };
-  }, [accountId, key, setPending]);
+  }, [accountId, key, setPending, storageRevision]);
+
+  const recoverStorage = () => {
+    if (!mounted.current || lock.current || !hydrated) return;
+    // Read the durable record again before enabling any new operation. A failed
+    // save may have written the original intent before its verification failed.
+    setHydrated(false);
+    setStorageBlocked(true);
+    setError('');
+    setStorageRevision((revision) => revision + 1);
+  };
 
   const send = async (fresh?: I) => {
     if (lock.current || !mounted.current) return;
@@ -405,6 +417,7 @@ export function useFoodMutation<I>(
       } catch {
         /* best-effort after confirmed result */
       }
+      if (!mounted.current || accountRef.current !== owner) return;
       setPending(null);
       onReceipt(receipt, intent);
     } catch (failure) {
@@ -419,6 +432,7 @@ export function useFoodMutation<I>(
         } catch {
           /* ignore */
         }
+        if (!mounted.current || accountRef.current !== owner) return;
         setPending(null);
       }
       setError(
@@ -443,9 +457,29 @@ export function useFoodMutation<I>(
     send,
     hydrated,
     storageBlocked,
+    recoverStorage,
     locked: busy || pending !== null || !hydrated || storageBlocked,
   };
 }
+
+export function FoodStorageRecovery({
+  mutation,
+}: {
+  mutation: {
+    busy: boolean;
+    hydrated: boolean;
+    storageBlocked: boolean;
+    recoverStorage(): void;
+  };
+}) {
+  if (!mutation.storageBlocked) return null;
+  return (
+    <FoodButton disabled={mutation.busy || !mutation.hydrated} onPress={mutation.recoverStorage}>
+      {mutation.hydrated ? '重新確認裝置儲存' : '正在確認裝置儲存…'}
+    </FoodButton>
+  );
+}
+
 export function FoodReadState({
   resource,
   disabled = false,

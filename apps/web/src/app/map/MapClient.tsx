@@ -17,6 +17,15 @@ import {
 } from './mapService';
 import styles from './map.module.css';
 import {
+  hasBundledCampusPlaces,
+  isBusStopLocation,
+  isProvidencePendingVerification,
+  PROVIDENCE_CAMPUS_SOURCE,
+  providencePlaceSourceUrl,
+  walkingEstimateLabel,
+  withProvidenceCampusPlaces,
+} from './providenceCampus';
+import {
   buildCampusMapSearchUrl,
   getOfficialCampusMapUrl,
   hasOfficialProvidenceLibraryGuide,
@@ -59,32 +68,55 @@ function MapContent({
   const hash = useLocationHash();
   const fallbackMapUrl = buildCampusMapSearchUrl(schoolName);
   const officialMapUrl = getOfficialCampusMapUrl(school);
+  // 有內建地點的學校先直接顯示，外部來源只是補充；外部卡住或失敗都不擋住清單。
+  const bundled = hasBundledCampusPlaces(school);
+  const initialPlaces = () => ({
+    status: bundled ? ('ready' as const) : ('loading' as const),
+    source: 'loading' as const,
+    locations: bundled ? withProvidenceCampusPlaces(school, []) : [],
+  });
   const [placeState, setPlaceState] = useState<{
     status: 'loading' | 'error' | 'ready';
+    source: 'loading' | 'error' | 'ready';
     locations: MapLocation[];
-  }>({ status: 'loading', locations: [] });
+  }>(initialPlaces);
   const [placeAttempt, setPlaceAttempt] = useState(0);
   const { locations } = placeState;
   const loading = placeState.status === 'loading';
   const error = placeState.status === 'error';
+  const sourcePending = placeState.source === 'loading';
   function retry() {
-    setPlaceState({ status: 'loading', locations: [] });
+    setPlaceState((previous) =>
+      previous.status === 'ready'
+        ? { ...previous, source: 'loading' }
+        : { status: 'loading', source: 'loading', locations: [] },
+    );
     setPlaceAttempt((value) => value + 1);
   }
   useEffect(() => {
     let active = true;
     void loadMapLocations(school).then(
-      (locations) => {
-        if (active) setPlaceState({ status: 'ready', locations });
+      (loaded) => {
+        if (active)
+          setPlaceState({
+            status: 'ready',
+            source: 'ready',
+            locations: withProvidenceCampusPlaces(school, loaded),
+          });
       },
       () => {
-        if (active) setPlaceState({ status: 'error', locations: [] });
+        if (!active) return;
+        setPlaceState((previous) =>
+          bundled
+            ? { status: 'ready', source: 'error', locations: previous.locations.length ? previous.locations : withProvidenceCampusPlaces(school, []) }
+            : { status: 'error', source: 'error', locations: [] },
+        );
       },
     );
     return () => {
       active = false;
     };
-  }, [school, placeAttempt]);
+  }, [school, placeAttempt, bundled]);
   const [category, setCategory] = useState('全部');
   const [search, setSearch] = useState('');
   const [selection, setSelection] = useState<string | null>(null);
@@ -243,14 +275,14 @@ function MapContent({
   if (loading)
     return (
       <div className="card" role="status">
-        正在載入校園地點…
+        正在載入校園地點…（最多約 8 秒，讀不到會提示並可重試）
       </div>
     );
   if (error)
     return (
       <div className={`card ${styles.state}`} role="alert">
         <h2>暫時無法取得校園地點</h2>
-        <p>請稍後重新載入。確認地點資料後，就能搜尋設施與開啟導航。</p>
+        <p>地點資料連線逾時或失敗，請檢查網路後重新載入。確認地點資料後，就能搜尋設施與開啟導航。</p>
         <div className={styles.actions}>
           <button className="btn" onClick={retry}>
             重新載入地點
@@ -292,12 +324,25 @@ function MapContent({
 
   return (
     <div className={`pageStack ${styles.page}`}>
-      {route && !deepLinkRoute && routeDraft === null && (
+      {placeState.source === 'error' && (
+        <div className={styles.notice} role="alert">
+          <p>校方地點資料暫時讀不到，先顯示已核對過的靜宜建築與公車站牌，收藏與部分地點可能缺少。</p>
+          <button className="btn" onClick={retry}>
+            重新讀取地點資料
+          </button>
+        </div>
+      )}
+      {sourcePending && bundled && (
+        <p className={styles.notice} role="status">
+          正在同步校方地點資料，已先顯示核對過的靜宜地點。
+        </p>
+      )}
+      {!sourcePending && route && !deepLinkRoute && routeDraft === null && (
         <p className={styles.notice} role="status">
           這個連結的起點或終點已不在目前地點資料中，請從下方列表重新選擇。
         </p>
       )}
-      {focus && !locations.some((location) => location.id === focus) && (
+      {!sourcePending && focus && !locations.some((location) => location.id === focus) && (
         <p className={styles.notice} role="status">
           找不到連結指定的地點，請搜尋地點名稱。
         </p>
@@ -340,7 +385,7 @@ function MapContent({
           <input
             className="input"
             type="search"
-            placeholder="輸入建築、設施或關鍵字"
+            placeholder="輸入建築、設施，或公車路線（例如 300）"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
@@ -353,6 +398,16 @@ function MapContent({
           )}
           <button className="btn" onClick={locate} disabled={positionStatus === 'loading'}>
             {positionStatus === 'loading' ? '正在定位…' : myLocation ? '更新我的位置' : '查看我的位置'}
+          </button>
+          <button
+            className="btn"
+            onClick={() => {
+              setSelection('');
+              setSearch('');
+              setCategory('全部');
+            }}
+          >
+            看整個校園
           </button>
           <button
             className="btn"
@@ -392,6 +447,24 @@ function MapContent({
           ))}
         </div>
       </div>
+      {school === 'pu' && (
+        <section className={`card ${styles.state}`} aria-label="地圖資料來源">
+          <h2>靜宜地圖資料來源</h2>
+          <p>
+            建築與設施位置取自{' '}
+            <a href={PROVIDENCE_CAMPUS_SOURCE.mapDataUrl} target="_blank" rel="noopener noreferrer">
+              OpenStreetMap 貢獻者資料
+            </a>
+            （查詢日期 {PROVIDENCE_CAMPUS_SOURCE.retrievedAt}），底圖上也保留 OpenStreetMap 署名；
+            公車站牌取自{' '}
+            <a href={PROVIDENCE_CAMPUS_SOURCE.transitDatasetUrl} target="_blank" rel="noopener noreferrer">
+              臺中市公車站牌資料
+            </a>
+            （快照 {PROVIDENCE_CAMPUS_SOURCE.transitCatalogDate}）。點公車站可到公車頁看即時到站；
+            出入口目前只有一筆標記、名稱待補，其他學校的地點待補，不會先用靜宜資料代替。
+          </p>
+        </section>
+      )}
       <MapCanvas
         locations={mapLocations}
         selected={selected}
@@ -412,7 +485,13 @@ function MapContent({
               <p>提供設施：{selected.facilities!.join('、')}</p>
             )}
             {myLocation && (
-              <p>距離我的位置約 {formatDistance(distanceMeters(myLocation, selected))}（直線距離）</p>
+              <p>
+                距離我的位置約 {formatDistance(distanceMeters(myLocation, selected))}（直線距離）；
+                {walkingEstimateLabel(distanceMeters(myLocation, selected))}
+              </p>
+            )}
+            {isProvidencePendingVerification(selected) && (
+              <p role="status">這個地點目前只有單一資料來源，位置待再次確認，先不要把它當成已核對的導航點。</p>
             )}
             <div className={styles.actions}>
               <a
@@ -423,6 +502,21 @@ function MapContent({
               >
                 從目前位置導航
               </a>
+              {isBusStopLocation(selected) && (
+                <Link className="btn primary" href={`/bus?schoolId=${encodeURIComponent(school)}`}>
+                  查看即時到站
+                </Link>
+              )}
+              {providencePlaceSourceUrl(selected) && (
+                <a
+                  className="btn"
+                  href={providencePlaceSourceUrl(selected)!}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  查看地點來源 ↗
+                </a>
+              )}
               {hasOfficialProvidenceLibraryGuide(school, selected) && (
                 <a
                   className="btn"
@@ -528,10 +622,15 @@ function MapContent({
                   aria-pressed={selected?.id === location.id}
                   onClick={() => selectLocation(location)}
                 >
-                  <span className={styles.locationName}>{location.name}</span>
+                  <span className={styles.locationName}>
+                    {location.name}
+                    {isProvidencePendingVerification(location) && (
+                      <span className={styles.pending}>待確認</span>
+                    )}
+                  </span>
                   <span className={styles.note}>
                     {[location.category, location.building, location.floor && `樓層：${location.floor}`].filter(Boolean).join(' · ')}
-                    {myLocation && ` · 直線距離 ${formatDistance(distanceMeters(myLocation, location))}`}
+                    {myLocation && ` · 直線距離 ${formatDistance(distanceMeters(myLocation, location))} · ${walkingEstimateLabel(distanceMeters(myLocation, location))}`}
                   </span>
                   {location.description && (
                     <span className={styles.description}>{location.description}</span>

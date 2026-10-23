@@ -72,6 +72,53 @@ const quiz = { ...common, id: quizId, prompt: '說明你的理由', responseCoun
 const invalidResponse = { status: 502, code: 'INVALID_RESPONSE' };
 
 describe('Nuni course response contracts', () => {
+  it('keeps legacy materials unchanged and reads bounded pages with query outside the path', async () => {
+    const transport = vi.fn(async (): Promise<unknown> => ({ materials: [material], nextCursor: 'next_page' }));
+    const classes = createNuniClasses(transport);
+    expect(await classes.materials(workspaceId)).toEqual([material]);
+    expect(transport).toHaveBeenLastCalledWith(`class-workspaces/${workspaceId}/materials`);
+    expect(await classes.materialsPage(workspaceId)).toEqual({
+      materials: [material], nextCursor: 'next_page',
+    });
+    expect(transport).toHaveBeenLastCalledWith(`class-workspaces/${workspaceId}/materials/page`);
+    transport.mockResolvedValueOnce({ materials: [material], nextCursor: null });
+    expect(await classes.materialsPage(workspaceId, 'next_page')).toEqual({
+      materials: [material], nextCursor: null,
+    });
+    expect(transport).toHaveBeenLastCalledWith(
+      `class-workspaces/${workspaceId}/materials/page`, undefined, { cursor: 'next_page' },
+    );
+  });
+
+  it('rejects malformed cursor inputs before making a request', async () => {
+    const transport = vi.fn();
+    for (const cursor of ['', 'a'.repeat(501), '../other', 'cursor&owner=other', 'base64='])
+      await expect(createNuniClasses(transport).materialsPage(workspaceId, cursor))
+        .rejects.toMatchObject({ code: 'CLASS_WORKSPACE_MATERIAL_CURSOR_INVALID' });
+    expect(transport).not.toHaveBeenCalled();
+  });
+
+  it('rejects truncated pagination metadata, repeated cursors and mixed or duplicate records', async () => {
+    for (const value of [
+      { materials: [material] },
+      { materials: [material], nextCursor: '' },
+      { materials: [material], nextCursor: 'a'.repeat(501) },
+      { materials: [material], nextCursor: 'bad=value' },
+      { materials: [material], nextCursor: 'used_cursor' },
+      { materials: [], nextCursor: 'next_page' },
+      { materials: [material, material], nextCursor: null },
+      { materials: [{ ...material, workspaceId: otherWorkspace }], nextCursor: null },
+      { materials: Array.from({ length: 51 }, (_, i) => ({
+        ...material, id: `cwm_00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+      })), nextCursor: null },
+    ]) {
+      await expect(createNuniClasses(async () => value).materialsPage(workspaceId, 'used_cursor'))
+        .rejects.toMatchObject(invalidResponse);
+    }
+    expect(await createNuniClasses(async () => ({ materials: [], nextCursor: null }))
+      .materialsPage(workspaceId)).toEqual({ materials: [], nextCursor: null });
+  });
+
   it('keeps exact server projections and omits unsupported grade or privilege fields', () => {
     expect(parseNuniUnit(unit)).toEqual(unit);
     expect(parseNuniMaterial({ ...material, accessToken: 'unrelated' })).toEqual(material);
@@ -79,6 +126,12 @@ describe('Nuni course response contracts', () => {
     expect(parseNuniSubmission({ ...submission, grade: 100 })).toEqual(submission);
     expect(parseNuniQuiz(quiz)).toEqual(quiz);
     expect(parseNuniQuizResponse({ ...answer, grade: 100 })).toEqual(answer);
+    expect(parseNuniQuiz({ ...quiz, dueAt: '2026-10-07T16:00:00' }).dueAt).toBe(
+      '2026-10-07T16:00:00',
+    );
+    expect(parseNuniAssignment({ ...assignment, dueAt: '2026-10-22T23:59:00' }).dueAt).toBe(
+      '2026-10-22T23:59:00',
+    );
   });
 
   it.each([
@@ -366,6 +419,89 @@ describe('Nuni course response contracts', () => {
       code: 'CLASS_WORKSPACE_QUIZ_CLOSED',
     });
     expect(conflict).toHaveBeenCalledTimes(1);
+  });
+
+  it('creates a batch of assignment file intents in one request', async () => {
+    const intent = {
+      id: 'cwf_77777777-7777-4777-8777-777777777777',
+      uploadPath: `class-workspaces/${workspaceId}/assignments/${assignmentId}/files/cwf_77777777-7777-4777-8777-777777777777/content`,
+      originalName: 'shot.jpg',
+      contentType: 'image/jpeg',
+      byteSize: 12,
+      kind: 'image',
+    };
+    const transport = vi.fn(async () => ({ intents: [intent] }));
+    expect(
+      await createNuniClasses(transport).createAssignmentFileIntents(workspaceId, assignmentId, {
+        files: [
+          {
+            originalName: 'shot.jpg',
+            contentType: 'image/jpeg',
+            byteSize: 12,
+            idempotencyKey: 'file-key-1',
+          },
+        ],
+        idempotencyKey: key,
+      }),
+    ).toEqual([intent]);
+    expect(transport).toHaveBeenCalledWith(
+      `class-workspaces/${workspaceId}/assignments/${assignmentId}/files/intents`,
+      {
+        files: [
+          {
+            originalName: 'shot.jpg',
+            contentType: 'image/jpeg',
+            byteSize: 12,
+            idempotencyKey: 'file-key-1',
+          },
+        ],
+        idempotencyKey: key,
+      },
+    );
+  });
+
+  it('submits assignment files through a dedicated endpoint without changing text submit', async () => {
+    const files = [
+      {
+        id: 'cwf_77777777-7777-4777-8777-777777777777',
+        originalName: 'shot.jpg',
+        contentType: 'image/jpeg',
+        byteSize: 12,
+        kind: 'image',
+        downloadPath: `class-workspaces/${workspaceId}/assignments/${assignmentId}/files/cwf_77777777-7777-4777-8777-777777777777/content`,
+        downloadExp: '1',
+        downloadSig: 'sig',
+      },
+    ];
+    const withFiles = {
+      ...assignment,
+      submissionCount: 1,
+      mySubmission: { ...submission, late: true, files },
+    };
+    const transport = vi.fn(async () => withFiles);
+    const upload = vi.fn(async () => files[0]);
+    expect(
+      (
+        await createNuniClasses(transport, accountId, upload).submitFiles(workspaceId, assignmentId, {
+          fileIds: [files[0].id],
+          idempotencyKey: key,
+        })
+      ).mySubmission?.files,
+    ).toEqual(files);
+    expect(transport).toHaveBeenCalledWith(
+      `class-workspaces/${workspaceId}/assignments/${assignmentId}/submit-files`,
+      { fileIds: [files[0].id], idempotencyKey: key },
+    );
+    const text = vi.fn(async () => ({
+      ...assignment,
+      submissionCount: 1,
+      mySubmission: submission,
+    }));
+    await createNuniClasses(text, accountId).submit(workspaceId, assignmentId, '我的觀察', key);
+    expect(text).toHaveBeenCalledWith(
+      `class-workspaces/${workspaceId}/assignments/${assignmentId}/submit`,
+      { body: '我的觀察', idempotencyKey: key },
+    );
   });
 
   it('rejects IDs that could escape the selected resource before transport', async () => {

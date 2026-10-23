@@ -7,11 +7,11 @@
   "packageManager": "pnpm@10.28.2",
   "pnpm": {
     "overrides": {
-      "@next/eslint-plugin-next": "16.3.8",
-      "eslint-config-next": "16.3.8",
+      "@next/eslint-plugin-next": "16.4.2",
+      "eslint-config-next": "16.4.2",
       "fast-xml-parser": "5.7.0",
       "js-yaml": "4.3.2",
-      "next": "16.3.8",
+      "next": "16.4.2",
       "@tootallnate/once": "3.0.1",
       "minimatch": "9.0.9",
       "qs": "6.14.2",
@@ -97,17 +97,23 @@
     "release:preview": "pnpm --filter mobile exec eas build --profile preview --platform all --non-interactive",
     "release:production": "pnpm --filter mobile exec eas build --profile production --platform all --non-interactive",
     "submit:ios": "pnpm --filter mobile exec eas submit --platform ios --profile production --id \"${EAS_BUILD_ID:?Set EAS_BUILD_ID to the verified iOS build ID}\" --wait --non-interactive",
-    "submit:android": "pnpm --filter mobile exec eas submit --platform android --profile production --id \"${EAS_BUILD_ID:?Set EAS_BUILD_ID to the verified Android build ID}\" --wait --non-interactive"
+    "submit:android": "pnpm --filter mobile exec eas submit --platform android --profile production --id \"${EAS_BUILD_ID:?Set EAS_BUILD_ID to the verified Android build ID}\" --wait --non-interactive",
+    "documents:build": "node scripts/document-import/build.mjs",
+    "documents:check": "node scripts/document-import/build.mjs --check",
+    "test:documents": "node --test scripts/document-import/reader.test.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
     "@firebase/rules-unit-testing": "^5.0.0",
+    "esbuild": "0.28.2",
     "eslint": "^9.39.2",
     "eslint-plugin-react-hooks": "^7.0.1",
+    "fflate": "0.8.2",
     "firebase-tools": "^15.4.0",
     "globals": "^17.4.0",
+    "pdfjs-dist": "6.4.299",
     "prettier": "^3.8.1",
-    "typescript-eslint": "^8.57.1"
-  },
-  "dependencies": {}
+    "typescript-eslint": "^8.57.1",
+    "xlsx": "file:vendor/xlsx-0.20.3.tgz"
+  }
 }

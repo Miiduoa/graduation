@@ -7,13 +7,20 @@ import { SiteShell } from '@/components/SiteShell';
 import type { Announcement } from '@/lib/firebase';
 import { loadAnnouncementFeed, type AnnouncementSourceHealth } from './publicAnnouncements';
 import {
+  ANNOUNCEMENT_ALL_VIEW_LABEL,
+  ANNOUNCEMENT_EMPTY_CONNECTED_TEXT,
+  ANNOUNCEMENT_EMPTY_SCHOOL_TEXT,
+  ANNOUNCEMENT_OFFICIAL_SITE_BUTTON,
+  ANNOUNCEMENT_READ_FAILURE_TEXT,
+  ANNOUNCEMENT_RETRY_TEXT,
+  ANNOUNCEMENT_STUDENT_WALL_LABEL,
+  announcementEmptyHeading,
   announcementEmptyKind,
   announcementMatchesSearch,
   formatStaleAnnouncementNotice,
   listAnnouncementCatalogLinks,
-  SOURCE_DOWN_EMPTY_TEXT,
-  SOURCE_NOT_CONNECTED_TEXT,
   staleAnnouncementUpdatedAt,
+  verifiedOfficialAnnouncementUrl,
 } from '@campus/shared/src/campusAnnouncements';
 import { isAnnouncementSchoolVisibleToPublic } from '@campus/shared/src/campusAnnouncements';
 import { getAnnouncementVisibilityEnv } from '@/lib/runtime';
@@ -21,25 +28,24 @@ import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import styles from './announcements.module.css';
 
 type Category = 'all' | 'academic' | 'event' | 'general';
+type ListView = 'student' | 'all';
 type ReadyState = {
   status: 'ready';
+  schoolId: string;
   announcements: Announcement[];
+  officialAnnouncements: Announcement[];
   sources: AnnouncementSourceHealth[];
   allUnavailable: boolean;
   fetchedAt: string;
   stale: boolean;
 };
-type LoadState = { status: 'loading' } | ReadyState;
+type LoadState =
+  | { status: 'loading'; schoolId: string }
+  | { status: 'failed'; schoolId: string }
+  | ReadyState;
 
-function emptyFeed(fetchedAt = new Date().toISOString()): ReadyState {
-  return {
-    status: 'ready',
-    announcements: [],
-    sources: [],
-    allUnavailable: false,
-    fetchedAt,
-    stale: false,
-  };
+function feedForSchool(state: LoadState, schoolId: string): LoadState {
+  return state.schoolId === schoolId ? state : { status: 'loading', schoolId };
 }
 
 const categories: { id: Category; label: string }[] = [
@@ -76,14 +82,44 @@ function OfficeSourceLinks({
   );
 }
 
+function OfficialSiteButton({
+  schoolId,
+  secondary = false,
+}: {
+  schoolId: string;
+  secondary?: boolean;
+}) {
+  const url = verifiedOfficialAnnouncementUrl(schoolId);
+  if (!url) return null;
+  return (
+    <p>
+      <a
+        className={secondary ? undefined : 'btn'}
+        href={url}
+        rel="noopener noreferrer"
+        target="_blank"
+      >
+        {ANNOUNCEMENT_OFFICIAL_SITE_BUTTON}
+      </a>
+    </p>
+  );
+}
+
+function VerifiedCatalogLinks({ schoolId }: { schoolId: string }) {
+  if (!verifiedOfficialAnnouncementUrl(schoolId)) return null;
+  return <OfficeSourceLinks links={listAnnouncementCatalogLinks(schoolId)} />;
+}
+
 function AnnouncementReader({ schoolId }: { schoolId: string }) {
-  const [state, setState] = useState<LoadState>({ status: 'loading' });
+  const [state, setState] = useState<LoadState>({ status: 'loading', schoolId });
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState<Category>('all');
+  const [listView, setListView] = useState<ListView>('student');
   const [pinnedOnly, setPinnedOnly] = useState(false);
   const [notice, setNotice] = useState('');
   const generation = useRef(0);
   const mounted = useRef(false);
+  const view = feedForSchool(state, schoolId);
 
   const load = useCallback(() => {
     const request = ++generation.current;
@@ -92,7 +128,9 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
         if (mounted.current && request === generation.current) {
           setState({
             status: 'ready',
+            schoolId,
             announcements: feed.announcements,
+            officialAnnouncements: feed.officialAnnouncements,
             sources: feed.sources,
             allUnavailable: feed.allUnavailable,
             fetchedAt: new Date().toISOString(),
@@ -103,9 +141,11 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
       () => {
         if (!mounted.current || request !== generation.current) return;
         setState((current) =>
-          current.status === 'ready' && current.announcements.length > 0
+          current.schoolId === schoolId &&
+          current.status === 'ready' &&
+          current.announcements.length > 0
             ? { ...current, stale: true }
-            : emptyFeed(),
+            : { status: 'failed', schoolId },
         );
       },
     );
@@ -114,9 +154,11 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
   function refresh() {
     setNotice('');
     setState((current) =>
-      current.status === 'ready' && current.announcements.length > 0
+      current.schoolId === schoolId &&
+      current.status === 'ready' &&
+      current.announcements.length > 0
         ? current
-        : { status: 'loading' },
+        : { status: 'loading', schoolId },
     );
     void load();
   }
@@ -157,37 +199,50 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
     }
   }
 
-  if (state.status === 'loading') {
+  if (view.status === 'loading') {
     return (
       <div className={styles.status} role="status">
         正在讀取公告…
       </div>
     );
   }
-  const filtered = state.announcements.filter((announcement) => {
+  if (view.status === 'failed') {
+    return (
+      <section className={styles.status}>
+        <h2>{ANNOUNCEMENT_READ_FAILURE_TEXT}</h2>
+        <button className="btn" type="button" onClick={() => void refresh()}>
+          {ANNOUNCEMENT_RETRY_TEXT}
+        </button>
+      </section>
+    );
+  }
+  const student = view.announcements;
+  const official = view.officialAnnouncements || [];
+  const listed = listView === 'all' ? official : student;
+  const emptyKind = announcementEmptyKind(student, view.sources);
+  const showFeed = official.length > 0 || student.length > 0;
+  const filtered = listed.filter((announcement) => {
     return (
       announcementMatchesSearch(announcement, search) &&
       (category === 'all' || categoryOf(announcement) === category) &&
       (!pinnedOnly || announcement.pinned)
     );
   });
-  const emptyKind = announcementEmptyKind(state.announcements, state.sources);
-  const downLinks = state.sources.filter((item) => item.status === 'unavailable' && item.listUrl);
+  const downLinks = view.sources.filter((item) => item.status === 'unavailable' && item.listUrl);
   const showStaleNotice =
-    state.announcements.length > 0 &&
-    (state.stale || state.sources.some((item) => item.status === 'unavailable'));
+    listed.length > 0 && (view.stale || view.sources.some((item) => item.status === 'unavailable'));
   const staleSources =
-    state.stale && !state.sources.some((item) => item.status === 'unavailable')
-      ? [{ status: 'unavailable' as const, lastSuccessAt: state.fetchedAt }]
-      : state.sources;
+    view.stale && !view.sources.some((item) => item.status === 'unavailable')
+      ? [{ status: 'unavailable' as const, lastSuccessAt: view.fetchedAt }]
+      : view.sources;
 
   return (
     <div className={styles.page}>
       <div className={styles.source}>
         <p>
-          公開公告 · 最近 {state.announcements.length} 則
+          公開公告 · 最近 {listed.length} 則
           <span>
-            {new Date(state.fetchedAt).toLocaleTimeString('zh-TW', {
+            {new Date(view.fetchedAt).toLocaleTimeString('zh-TW', {
               timeZone: 'Asia/Taipei',
               hour: '2-digit',
               minute: '2-digit',
@@ -199,37 +254,51 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
           更新公告
         </button>
       </div>
-      <div className={styles.toolbar}>
-        <label className={styles.search}>
-          搜尋公告
-          <input
-            type="search"
-            placeholder="標題、內容或發布單位"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-          />
-        </label>
-        <div className={styles.filters} aria-label="公告分類">
-          {categories.map((item) => (
+      {showFeed ? (
+        <div className={styles.toolbar}>
+          <label className={styles.search}>
+            搜尋公告
+            <input
+              type="search"
+              placeholder="標題、內容或發布單位"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </label>
+          <div className={styles.filters} aria-label="公告檢視">
             <button
-              key={item.id}
               type="button"
-              aria-pressed={category === item.id}
-              onClick={() => setCategory(item.id)}
+              aria-pressed={listView === 'student'}
+              onClick={() => setListView('student')}
             >
-              {item.label}
+              {ANNOUNCEMENT_STUDENT_WALL_LABEL}
             </button>
-          ))}
+            <button type="button" aria-pressed={listView === 'all'} onClick={() => setListView('all')}>
+              {ANNOUNCEMENT_ALL_VIEW_LABEL}
+            </button>
+          </div>
+          <div className={styles.filters} aria-label="公告分類">
+            {categories.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                aria-pressed={category === item.id}
+                onClick={() => setCategory(item.id)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          <label className={styles.pinnedFilter}>
+            <input
+              type="checkbox"
+              checked={pinnedOnly}
+              onChange={(event) => setPinnedOnly(event.target.checked)}
+            />
+            只看置頂
+          </label>
         </div>
-        <label className={styles.pinnedFilter}>
-          <input
-            type="checkbox"
-            checked={pinnedOnly}
-            onChange={(event) => setPinnedOnly(event.target.checked)}
-          />
-          只看置頂
-        </label>
-      </div>
+      ) : null}
       {notice && (
         <p role="status" className={styles.notice}>
           {notice}
@@ -238,33 +307,51 @@ function AnnouncementReader({ schoolId }: { schoolId: string }) {
       {showStaleNotice && (
         <p role="status" className={styles.notice}>
           {formatStaleAnnouncementNotice(
-            staleAnnouncementUpdatedAt(staleSources, state.announcements),
-            state.stale ? 'firestore' : 'source_down',
+            staleAnnouncementUpdatedAt(staleSources, listed),
+            view.stale ? 'firestore' : 'source_down',
           )}
         </p>
       )}
-      {filtered.length === 0 ? (
+      {!showFeed ? (
         <section className={styles.status}>
-          {emptyKind === 'not_connected' ? (
+          {emptyKind === 'source_down' ? (
             <>
-              <h2>{SOURCE_NOT_CONNECTED_TEXT}</h2>
-              <OfficeSourceLinks links={listAnnouncementCatalogLinks(schoolId)} />
-            </>
-          ) : emptyKind === 'source_down' ? (
-            <>
-              <h2>{SOURCE_DOWN_EMPTY_TEXT}</h2>
+              <h2>{ANNOUNCEMENT_READ_FAILURE_TEXT}</h2>
+              <p>
+                <button className="btn" type="button" onClick={() => void refresh()}>
+                  {ANNOUNCEMENT_RETRY_TEXT}
+                </button>
+              </p>
+              <OfficialSiteButton schoolId={schoolId} secondary />
               <OfficeSourceLinks
-                links={downLinks.length ? downLinks : listAnnouncementCatalogLinks(schoolId)}
+                links={
+                  downLinks.length
+                    ? downLinks
+                    : verifiedOfficialAnnouncementUrl(schoolId)
+                      ? listAnnouncementCatalogLinks(schoolId)
+                      : []
+                }
               />
             </>
           ) : (
             <>
-              <h2>{state.announcements.length ? '沒有符合條件的公告' : '目前沒有公開公告'}</h2>
-              <p>
-                {state.announcements.length
-                  ? '試試其他關鍵字或分類。'
-                  : '學校發布新的公告後，會顯示在這裡。'}
-              </p>
+              <h2>{announcementEmptyHeading(emptyKind) ?? ANNOUNCEMENT_EMPTY_SCHOOL_TEXT}</h2>
+              <OfficialSiteButton schoolId={schoolId} />
+              <VerifiedCatalogLinks schoolId={schoolId} />
+            </>
+          )}
+        </section>
+      ) : filtered.length === 0 ? (
+        <section className={styles.status}>
+          {listView === 'student' && student.length === 0 ? (
+            <>
+              <h2>{ANNOUNCEMENT_EMPTY_CONNECTED_TEXT}</h2>
+              <p>教師向、資安轉知等正式公告可到「{ANNOUNCEMENT_ALL_VIEW_LABEL}」查看。</p>
+            </>
+          ) : (
+            <>
+              <h2>沒有符合條件的公告</h2>
+              <p>試試其他關鍵字或分類。</p>
             </>
           )}
         </section>
@@ -354,9 +441,13 @@ export default function AnnouncementsPage(props: {
       {!visible ? (
         <section className={styles.status}>
           <h2>
-            {context.status === 'loading' ? '正在讀取所選校園…' :
-              context.status === 'error' ? '無法取得校園目錄' :
-              context.status === 'unselected' ? '先選擇一所學校' : '目前沒有公開公告'}
+            {context.status === 'loading'
+              ? '正在讀取所選校園…'
+              : context.status === 'error'
+                ? '無法取得校園目錄'
+                : context.status === 'unselected'
+                  ? '先選擇一所學校'
+                  : '目前沒有公開公告'}
           </h2>
         </section>
       ) : loading ? (

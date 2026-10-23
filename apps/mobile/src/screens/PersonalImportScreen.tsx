@@ -18,25 +18,41 @@ import {
   serializePersonalImportsCsv,
   parsePersonalImport,
   parsePersonalImportBackup,
+  parsePersonalImportDocument,
+  personalImportDocumentFormat,
   personalImportErrorMessage,
+  personalImportPreviewNotice,
   personalImportSavedNotice,
   personalImportUndoBody,
   personalImportUndoneNotice,
   PERSONAL_IMPORT_BACKUP_MAX_BYTES,
+  PERSONAL_IMPORT_DOCUMENT_LIMITS,
   PERSONAL_IMPORT_IMAGE_UNREADABLE,
+  PERSONAL_IMPORT_MAX_ROWS,
   PERSONAL_IMPORT_UNDO_CONFIRM,
   PERSONAL_IMPORT_UNDO_KEEP,
   PERSONAL_IMPORT_UNDO_LABEL,
   PERSONAL_IMPORT_UNDO_TITLE,
+  PersonalImportDocumentError,
+  periodCount,
+  periodDisplayLabel,
+  periodLabelAt,
+  periodProfileForSchool,
+  PERIOD_PROFILE_TITLES,
+  slotIndexForLabel,
   validatePersonalImportRow,
+  type PersonalImportDocument,
+  type PeriodProfileId,
   type PersonalImportRow,
   type PersonalImportRecord,
   type ImportIssue,
 } from '@campus/shared';
 import { createNuniClasses, type NuniWorkspace } from '@campus/shared/src/nuni';
 import { CourseAccessPanel } from '../components/CourseAccessPanel';
+import { DocumentImportHost } from '../components/DocumentImportHost';
 import { Screen, Button } from '../ui/components';
 import { theme } from '../ui/theme';
+import { PersonalImportSyncPanel } from '../components/PersonalImportSyncPanel';
 import { useNuniSession } from '../state/nuniSession';
 import { useSchool } from '../state/school';
 import { usePersonalImportScope } from '../state/personalImportScope';
@@ -58,6 +74,15 @@ import {
   type PersonalImportLedger,
 } from '../services/personalImports';
 import { sharePersonalImportBackup } from '../services/personalImportBackupSharing';
+
+const DOCUMENT_PREVIEW_ROWS = 6;
+
+type DocumentPrep = {
+  document: PersonalImportDocument;
+  /** sectionId → chosen header line (original worksheet/page line). */
+  selections: Record<string, number>;
+};
+type DocumentSource = { uri: string; name: string; size?: number };
 
 const kinds = [
   ['timetable', '課表'],
@@ -140,12 +165,14 @@ function RowEditor({
   workspaces,
   disabled = false,
   onRefreshWorkspaces,
+  periodProfile,
 }: {
   row: PersonalImportRow;
   onChange(row: PersonalImportRow): void;
   workspaces: NuniWorkspace[];
   disabled?: boolean;
   onRefreshWorkspaces?: () => void;
+  periodProfile?: PeriodProfileId;
 }) {
   const fields = [...commonFields, ...extraFields[row.kind]];
   return (
@@ -168,11 +195,24 @@ function RowEditor({
           key={key}
           disabled={disabled}
           label={label}
-          value={row[key] == null ? '' : String(row[key])}
+          value={
+            periodProfile && (key === 'startPeriod' || key === 'endPeriod') && row[key]
+              ? periodLabelAt(Number(row[key]), periodProfile)
+              : row[key] == null
+                ? ''
+                : String(row[key])
+          }
           onChange={(value) =>
             onChange({
               ...row,
-              [key]: numeric.has(key) ? (value.trim() ? Number(value) : undefined) : value,
+              [key]:
+                periodProfile && (key === 'startPeriod' || key === 'endPeriod')
+                  ? slotIndexForLabel(value, periodProfile)
+                  : numeric.has(key)
+                    ? value.trim()
+                      ? Number(value)
+                      : undefined
+                    : value,
             })
           }
         />
@@ -212,12 +252,17 @@ function RowEditor({
   );
 }
 
-function rowSummary(row: PersonalImportRow) {
+function rowSummary(row: PersonalImportRow, profile?: PeriodProfileId) {
   if (row.kind === 'grades')
     return `${row.academicYear}／${row.semester} · ${row.credits ?? '未填'} 學分 · 成績 ${row.grade || '未填'}`;
   if (row.kind === 'events')
     return `${row.date || '日期待填'} ${row.startTime || '全天'}${row.endTime ? `–${row.endTime}` : ''} · ${row.location || '地點未填'}`;
-  return `星期 ${row.dayOfWeek ?? '未填'} · ${row.startPeriod ? `第 ${row.startPeriod}–${row.endPeriod ?? '?'} 節` : row.periodLabel || `${row.startTime || '?'}–${row.endTime || '?'}`} · ${row.teacher || '教師未填'}`;
+  const periods = row.startPeriod
+    ? profile
+      ? `${periodDisplayLabel(row.startPeriod, profile)}–${periodDisplayLabel(row.endPeriod ?? row.startPeriod, profile)}`
+      : `第 ${row.startPeriod}–${row.endPeriod ?? '?'} 節`
+    : row.periodLabel || `${row.startTime || '?'}–${row.endTime || '?'}`;
+  return `星期 ${row.dayOfWeek ?? '未填'} · ${periods} · ${row.teacher || '教師未填'}`;
 }
 
 function ImportWorkspace({
@@ -269,6 +314,7 @@ function ImportWorkspace({
   const [visibleSavedCount, setVisibleSavedCount] = useState(40);
   const [savedFeedback, setSavedFeedback] = useState('');
   const [exporting, setExporting] = useState(false);
+  const [documentPrep, setDocumentPrep] = useState<DocumentPrep | null>(null);
   const alive = useRef(true);
   const focused = useRef(true);
   const generation = useRef(0);
@@ -277,13 +323,20 @@ function ImportWorkspace({
   const ledgerGeneration = useRef(0);
   const abort = useRef<AbortController | null>(null);
   const ocr = useRef<TimetableOcrHandle>(null);
-  const profile = scope.schoolId === 'pu' ? ('pu' as const) : undefined;
+  const documents = useRef<React.ElementRef<typeof DocumentImportHost>>(null);
+  /** Picked PDF URI stays in memory only until confirm, cancel, or unmount / scope remount. */
+  const documentSource = useRef<DocumentSource | null>(null);
+  const profile = periodProfileForSchool(scope.schoolId);
   const active = () => alive.current && focused.current && availableRef.current;
   const current = (run: number) => alive.current && focused.current && generation.current === run;
+  const clearDocumentSource = () => {
+    documentSource.current = null;
+  };
   const cancel = () => {
     generation.current += 1;
     abort.current?.abort();
     ocr.current?.cancel();
+    documents.current?.cancel();
     setBusy(false);
   };
   useEffect(() => {
@@ -292,6 +345,8 @@ function ImportWorkspace({
       alive.current = false;
       generation.current += 1;
       abort.current?.abort();
+      documents.current?.cancel();
+      clearDocumentSource();
     };
   }, []);
 
@@ -316,6 +371,7 @@ function ImportWorkspace({
         generation.current += 1;
         abort.current?.abort();
         ocr.current?.cancel();
+        documents.current?.cancel();
         setBusy(false);
       };
     }, [load]),
@@ -388,6 +444,8 @@ function ImportWorkspace({
           .flatMap((row) => validatePersonalImportRow(row, { periodProfile: profile }))
           .map((issue) => JSON.stringify(issue)),
       );
+      clearDocumentSource();
+      setDocumentPrep(null);
       setBackupPreview(null);
       setVisibleRowCount(50);
       setRows(parsed.rows);
@@ -398,7 +456,7 @@ function ImportWorkspace({
       setExpanded(parsed.rows[0]?.id || null);
       setNotice(
         parsed.rows.length
-          ? '請逐筆核對。確認儲存前不會寫入。'
+          ? personalImportPreviewNotice(parsed.rows.length)
           : '沒有找到可匯入的資料。可修正文字，或手動新增一筆。',
       );
     } catch (error) {
@@ -440,6 +498,8 @@ function ImportWorkspace({
       if (!current(run)) return;
       setText(result);
       setSource({ type: 'screenshot', name: asset.fileName || '截圖' });
+      clearDocumentSource();
+      setDocumentPrep(null);
       setBackupPreview(null);
       setRows([]);
       setIssues([]);
@@ -459,33 +519,209 @@ function ImportWorkspace({
     cancel();
     const run = generation.current;
     setBusy(true);
+    setNotice('');
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: ['text/*', 'application/csv', 'application/octet-stream'],
+        type: [
+          'text/*',
+          'application/csv',
+          'text/tab-separated-values',
+          'application/octet-stream',
+          'application/pdf',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ],
         copyToCacheDirectory: true,
         multiple: false,
       });
       if (!current(run) || result.canceled) return;
       const asset = result.assets[0];
-      if (!/\.(txt|csv|ics)$/i.test(asset.name))
-        throw new Error('目前支援 TXT、CSV、ICS。PDF 或試算表請先轉存文字或截圖。');
+      const name = asset.name || '';
+      if (personalImportDocumentFormat(name)) {
+        const size = asset.size;
+        if (typeof size === 'number') {
+          if (size <= 0) throw new Error('這個檔案沒有內容，請重新選擇。');
+          if (size > PERSONAL_IMPORT_DOCUMENT_LIMITS.bytes)
+            throw new Error('PDF／Excel 上限 8 MiB，請拆成較小的檔案。');
+        }
+        if (!documents.current) throw new Error('文件讀取程式尚未就緒，請改用 CSV 或截圖。');
+        setNotice('正在讀取文件，可隨時取消。不會上傳網路。');
+        abort.current = new AbortController();
+        const source = { uri: asset.uri, name, size: asset.size };
+        const document = await documents.current.read(source, abort.current.signal);
+        if (!current(run)) return;
+        setBackupPreview(null);
+        documentSource.current = document.format === 'pdf' ? source : null;
+        setDocumentPrep({ document, selections: {} });
+        setNotice(
+          document.sections.some((section) => !section.needsOcr && section.rows.length)
+            ? '請選擇要讀取的工作表或頁面，並指定標題列。確認前不會寫入。'
+            : '這個檔案沒有可讀取的文字頁。掃描 PDF 請改用「選擇截圖」；若預覽不完整也可試「重新辨識 PDF 整頁」。',
+        );
+        return;
+      }
+      if (!/\.(txt|csv|tsv|ics)$/i.test(name))
+        throw new Error('目前支援 TXT、CSV、TSV、ICS、PDF、XLSX。舊版 XLS 請先另存為 XLSX。');
       const file = new File(asset.uri);
       if ((asset.size || file.size) > 512 * 1024)
         throw new Error('文字檔上限 512 KB，請分批匯入。');
       const resultText = await file.text();
       if (!current(run)) return;
       if (resultText.length > 100_000) throw new Error('文字過長，請分批匯入。');
+      clearDocumentSource();
+      setDocumentPrep(null);
       setText(resultText);
-      setSource({ type: 'file', name: asset.name });
+      setSource({ type: 'file', name });
       setBackupPreview(null);
       setRows([]);
       setIssues([]);
-      if (/\.ics$/i.test(asset.name)) setKind('events');
-      setNotice(`已讀取 ${asset.name}，請核對內容後整理。`);
+      if (/\.ics$/i.test(name)) setKind('events');
+      setNotice(`已讀取 ${name}，請核對內容後整理。`);
     } catch (error) {
-      if (current(run)) setNotice(personalImportErrorMessage(error, '檔案讀取失敗。'));
+      if (current(run))
+        setNotice(
+          personalImportErrorMessage(error, '檔案讀取失敗。可能已加密、損壞、過大或無法開啟。'),
+        );
     } finally {
       if (current(run)) setBusy(false);
+    }
+  };
+  const toggleDocumentSection = (sectionId: string) => {
+    if (busy || saving) return;
+    setDocumentPrep((currentPrep) => {
+      if (!currentPrep) return currentPrep;
+      const section = currentPrep.document.sections.find((item) => item.id === sectionId);
+      if (!section) return currentPrep;
+      const selections = { ...currentPrep.selections };
+      if (sectionId in selections) {
+        delete selections[sectionId];
+        return { ...currentPrep, selections };
+      }
+      if (section.needsOcr || !section.rows.length) return currentPrep;
+      selections[sectionId] = section.rows[0].line;
+      return { ...currentPrep, selections };
+    });
+  };
+  const setDocumentHeaderLine = (sectionId: string, headerLine: number) => {
+    if (busy || saving) return;
+    setDocumentPrep((currentPrep) => {
+      if (!currentPrep || !(sectionId in currentPrep.selections)) return currentPrep;
+      return {
+        ...currentPrep,
+        selections: { ...currentPrep.selections, [sectionId]: headerLine },
+      };
+    });
+  };
+  const cancelDocumentPrep = () => {
+    if (busy || saving) return;
+    clearDocumentSource();
+    setDocumentPrep(null);
+    setNotice('已取消文件準備，先前草稿保留。');
+  };
+  const rereadDocumentPdf = async () => {
+    if (
+      !documentPrep ||
+      documentPrep.document.format !== 'pdf' ||
+      !documentSource.current ||
+      busy ||
+      saving ||
+      savingRef.current ||
+      !documents.current
+    )
+      return;
+    const source = documentSource.current;
+    generation.current += 1;
+    abort.current?.abort();
+    documents.current.cancel();
+    const run = generation.current;
+    setBusy(true);
+    setNotice('正在這台裝置重新辨識 PDF 每一頁，原本的預覽會保留到讀取完成…');
+    try {
+      abort.current = new AbortController();
+      const document = await documents.current.read(source, abort.current.signal, {
+        pdfMode: 'ocr',
+      });
+      if (!current(run)) return;
+      setDocumentPrep({ document, selections: {} });
+      setNotice(
+        document.sections.some((section) => !section.needsOcr && section.rows.length)
+          ? '已重新辨識整頁。請再選擇頁面與標題列；確認前不會寫入。'
+          : '重新辨識後仍沒有可讀取的文字頁。請改用「選擇截圖」。',
+      );
+    } catch (error) {
+      if (
+        current(run) &&
+        !(error instanceof PersonalImportDocumentError && error.code === 'cancelled')
+      )
+        setNotice(personalImportErrorMessage(error, '重新辨識失敗。原本的文件預覽仍可使用。'));
+      else if (current(run)) setNotice('已取消重新辨識，原本的文件預覽保留。');
+    } finally {
+      if (current(run)) setBusy(false);
+    }
+  };
+  const applyDocumentSelection = () => {
+    if (!documentPrep || busy || saving || savingRef.current) return;
+    const entries = Object.entries(documentPrep.selections);
+    if (!entries.length) {
+      setNotice('請先選擇至少一個工作表或頁面。');
+      return;
+    }
+    const blocked = entries.find(
+      ([sectionId]) =>
+        documentPrep.document.sections.find((item) => item.id === sectionId)?.needsOcr,
+    );
+    if (blocked) {
+      setNotice('選取的頁面沒有可讀文字。請改用「選擇截圖」辨識掃描頁。');
+      return;
+    }
+    setBusy(true);
+    try {
+      const options = {
+        kind,
+        schoolId: scope.schoolId,
+        academicYear,
+        semester,
+        periodProfile: profile,
+      };
+      const parsedRows: PersonalImportRow[] = [];
+      const parsedIssues: ImportIssue[] = [];
+      for (const [sectionId, headerLine] of entries) {
+        const parsed = parsePersonalImportDocument(
+          documentPrep.document,
+          sectionId,
+          headerLine,
+          options,
+        );
+        parsedRows.push(...parsed.rows);
+        parsedIssues.push(...parsed.issues);
+      }
+      if (parsedRows.length > PERSONAL_IMPORT_MAX_ROWS)
+        throw new Error('選取的內容超過 500 筆，請減少工作表或頁面，分次匯入。');
+      const validationKeys = new Set(
+        parsedRows
+          .flatMap((row) => validatePersonalImportRow(row, { periodProfile: profile }))
+          .map((issue) => JSON.stringify(issue)),
+      );
+      clearDocumentSource();
+      setDocumentPrep(null);
+      setBackupPreview(null);
+      setText('');
+      setSource({ type: 'file', name: documentPrep.document.name });
+      setVisibleRowCount(50);
+      setRows(parsedRows);
+      setSelected(new Set(parsedRows.map((row) => row.id)));
+      setIssues(parsedIssues.filter((issue) => !validationKeys.has(JSON.stringify(issue))));
+      setExpanded(parsedRows[0]?.id || null);
+      setNotice(
+        parsedRows.length
+          ? personalImportPreviewNotice(parsedRows.length)
+          : '選取範圍沒有找到可匯入的資料。可調整標題列，或改貼文字。',
+      );
+    } catch (error) {
+      setNotice(
+        personalImportErrorMessage(error, '無法讀取選取內容，請調整工作表、頁面或標題列。'),
+      );
+    } finally {
+      setBusy(false);
     }
   };
   const readBackup = async () => {
@@ -513,6 +749,8 @@ function ImportWorkspace({
         throw new Error(
           `這份備份屬於 ${summary.schoolId}，與目前學校不同。請先切換學校再還原；原有資料沒有變更。`,
         );
+      clearDocumentSource();
+      setDocumentPrep(null);
       setText('');
       setRows(restored);
       setSelected(new Set(restored.map((row) => row.id)));
@@ -577,7 +815,7 @@ function ImportWorkspace({
       setExpanded(null);
       setText('');
       setSource({ type: 'paste' });
-      setNotice(personalImportSavedNotice(result.added));
+      setNotice(personalImportSavedNotice(result.added, !!ledger.sync?.enabled));
     } catch (error) {
       if (active()) setNotice(personalImportErrorMessage(error, '儲存失敗，請重試。'));
     } finally {
@@ -719,6 +957,7 @@ function ImportWorkspace({
   return (
     <Screen title="匯入我的資料" subtitle="課表、成績、活動，從你手上的資料開始">
       <TimetableOcrHost ref={ocr} />
+      <DocumentImportHost ref={documents} />
       {!available ? (
         <View style={{ padding: 20, gap: 10 }}>
           <Text style={textStyle}>
@@ -732,7 +971,7 @@ function ImportWorkspace({
           contentContainerStyle={{ padding: 18, gap: 16, paddingBottom: 120 }}
         >
           <Text style={textStyle}>
-            只儲存在這台裝置，依目前帳號與學校分開。尚未同步到其他裝置，也不會改動學校的正式紀錄。
+            個人資料依目前帳號與學校分開，不會改動學校的正式紀錄。未開啟帳號同步時，資料只留在這台裝置。
             {scope.owner === 'guest:device' ? '目前是訪客資料，登入後不會自動搬移。' : ''}
           </Text>
           <Text style={{ color: theme.colors.muted }}>
@@ -749,6 +988,8 @@ function ImportWorkspace({
                 onPress={() => {
                   cancel();
                   setKind(value);
+                  clearDocumentSource();
+                  setDocumentPrep(null);
                   if (!backupPreview) {
                     setRows([]);
                     setIssues([]);
@@ -762,6 +1003,12 @@ function ImportWorkspace({
               />
             ))}
           </View>
+          <PersonalImportSyncPanel
+            scope={scope}
+            active={active}
+            available={available}
+            onSynced={load}
+          />
           <Text style={{ ...textStyle, fontWeight: '700' }}>備份與換裝置</Text>
           <Text style={{ color: theme.colors.muted }}>
             備份包含目前帳號與學校的全部課表、成績、活動與來源文字，檔案沒有加密。請只存到你信任的位置；分享選單開啟不代表已保存。
@@ -808,6 +1055,123 @@ function ImportWorkspace({
                 }}
               />
             </View>
+          ) : documentPrep ? (
+            <View style={{ gap: 12 }}>
+              <Text style={{ ...textStyle, fontWeight: '700' }}>
+                準備讀取：{documentPrep.document.name}
+              </Text>
+              <Text style={{ color: theme.colors.muted }}>
+                {documentPrep.document.format === 'pdf' ? 'PDF' : 'Excel'}
+                。請自行選取工作表或頁面與標題列；不會自動只取第一頁。檔案只在這台裝置讀取。
+              </Text>
+              {documentPrep.document.warnings.map((warning, index) => (
+                <Text key={`doc-warn-${index}`} style={{ color: theme.colors.muted }}>
+                  {warning}
+                </Text>
+              ))}
+              {documentPrep.document.format === 'pdf' ? (
+                <View style={{ gap: 8 }}>
+                  <Text style={{ color: theme.colors.muted }}>
+                    預覽只有標題，或表格文字不完整？可以重新辨識整頁，再核對一次。不會自動對每個 PDF
+                    做整頁辨識。
+                  </Text>
+                  <Button
+                    text="重新辨識 PDF 整頁"
+                    disabled={busy || saving || !documentSource.current}
+                    onPress={() => void rereadDocumentPdf()}
+                  />
+                </View>
+              ) : null}
+              {busy ? (
+                <>
+                  <ActivityIndicator accessibilityLabel="正在讀取文件" />
+                  <Button
+                    text="取消讀取"
+                    onPress={() => {
+                      cancel();
+                      setNotice('已取消重新辨識，原本的文件預覽保留。');
+                    }}
+                  />
+                </>
+              ) : null}
+              <Text style={textStyle}>選擇工作表／頁面</Text>
+              {documentPrep.document.sections.map((section) => {
+                const selectedSection = section.id in documentPrep.selections;
+                const headerLine = documentPrep.selections[section.id];
+                return (
+                  <View
+                    key={section.id}
+                    style={{
+                      borderTopWidth: 1,
+                      borderColor: theme.colors.border,
+                      paddingTop: 12,
+                      gap: 8,
+                    }}
+                  >
+                    <Button
+                      text={`${selectedSection ? '☑' : '□'} ${section.label}${
+                        section.needsOcr ? '（無文字，需截圖）' : ''
+                      }`}
+                      kind={selectedSection ? 'primary' : 'outline'}
+                      disabled={busy || saving || section.needsOcr || !section.rows.length}
+                      onPress={() => toggleDocumentSection(section.id)}
+                    />
+                    {section.needsOcr ? (
+                      <Text style={{ color: theme.colors.muted }}>
+                        此頁沒有可讀文字（可能是掃描影像）。請改用「選擇截圖」辨識，不要當成已成功讀取。
+                      </Text>
+                    ) : null}
+                    {section.warnings.map((warning, index) => (
+                      <Text
+                        key={`${section.id}-warn-${index}`}
+                        style={{ color: theme.colors.muted }}
+                      >
+                        {warning}
+                      </Text>
+                    ))}
+                    {selectedSection ? (
+                      <>
+                        <Text style={textStyle}>標題列（欄位名稱所在列）</Text>
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                          {section.rows.slice(0, DOCUMENT_PREVIEW_ROWS).map((row) => (
+                            <Button
+                              key={`${section.id}-header-${row.line}`}
+                              text={`第 ${row.line} 列`}
+                              kind={headerLine === row.line ? 'primary' : 'outline'}
+                              disabled={busy || saving}
+                              onPress={() => setDocumentHeaderLine(section.id, row.line)}
+                            />
+                          ))}
+                        </View>
+                        <Text style={{ color: theme.colors.muted }}>前幾列預覽</Text>
+                        {section.rows.slice(0, DOCUMENT_PREVIEW_ROWS).map((row) => (
+                          <Text
+                            key={`${section.id}-preview-${row.line}`}
+                            style={{
+                              ...textStyle,
+                              fontWeight: headerLine === row.line ? '700' : '400',
+                            }}
+                          >
+                            {row.line}. {row.cells.join('｜') || '（空列）'}
+                          </Text>
+                        ))}
+                      </>
+                    ) : null}
+                  </View>
+                );
+              })}
+              <Button
+                text="讀取選取內容"
+                kind="primary"
+                disabled={busy || saving || !Object.keys(documentPrep.selections).length}
+                onPress={applyDocumentSelection}
+              />
+              <Button
+                text="取消，回到先前草稿"
+                disabled={busy || saving}
+                onPress={cancelDocumentPrep}
+              />
+            </View>
           ) : (
             <>
               <Field
@@ -833,7 +1197,7 @@ function ImportWorkspace({
               <Text style={textStyle}>1. 放入資料</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                 <Button text="選擇截圖" onPress={pickImage} disabled={busy || saving} />
-                <Button text="選擇文字檔" onPress={pickFile} disabled={busy || saving} />
+                <Button text="選擇檔案" onPress={pickFile} disabled={busy || saving} />
                 {busy ? (
                   <Button
                     text="取消讀取"
@@ -845,8 +1209,8 @@ function ImportWorkspace({
                 ) : null}
               </View>
               <Text style={{ color: theme.colors.muted }}>
-                截圖支援 PNG、JPG，最多 8 MB。圖片在裝置上辨識，使用 App
-                內的辨識程式與中英文字庫。文字檔支援 TXT、CSV；行事曆也可讀 ICS。
+                截圖支援 PNG、JPG，最多 8 MB。圖片在裝置上辨識。文字檔支援 TXT、CSV、TSV；行事曆可讀
+                ICS。PDF／XLSX 上限 8 MiB，只在裝置讀取、不會上傳。
               </Text>
               {busy ? <ActivityIndicator accessibilityLabel="正在讀取資料" /> : null}
               <TextInput
@@ -867,10 +1231,12 @@ function ImportWorkspace({
               />
               <Text style={{ color: theme.colors.muted }}>
                 {kind === 'timetable'
-                  ? '文字範例：資料庫 星期一 第3-4節 老師：王老師 教室：主顧303'
+                  ? profile
+                    ? `目前使用${PERIOD_PROFILE_TITLES[profile]} ${periodCount(profile)} 節。文字範例：資料庫 星期一 第3-4節 老師：王老師 教室：主顧303`
+                    : '這所學校尚未設定課表格線，請保留原始時間。文字範例：資料庫 星期一 09:00-12:00 老師：王老師'
                   : kind === 'grades'
-                    ? 'CSV 欄位：課程名稱,學分,成績,課號,教師'
-                    : 'CSV 欄位：活動名稱,日期,開始時間,結束時間,地點。全天活動加「全天」欄並填「是」，時間留空。'}
+                    ? 'CSV／TSV 欄位：課程名稱,學分,成績,課號,教師'
+                    : 'CSV／TSV 欄位：活動名稱,日期,開始時間,結束時間,地點。全天活動加「全天」欄並填「是」，時間留空。'}
               </Text>
               <Button
                 text="整理成可編輯資料"
@@ -903,7 +1269,7 @@ function ImportWorkspace({
               {notice}
             </Text>
           ) : null}
-          {issues.length ? (
+          {issues.length && !documentPrep ? (
             <View style={{ gap: 5 }}>
               {issues.map((issue, i) => (
                 <Text key={i} style={{ color: theme.colors.muted }}>
@@ -912,7 +1278,7 @@ function ImportWorkspace({
               ))}
             </View>
           ) : null}
-          {rows.length ? (
+          {rows.length && !documentPrep ? (
             <>
               <Text
                 accessibilityRole="header"
@@ -951,7 +1317,7 @@ function ImportWorkspace({
                       {row.title || '名稱待填'}
                     </Text>
                   </Pressable>
-                  <Text style={textStyle}>{rowSummary(row)}</Text>
+                  <Text style={textStyle}>{rowSummary(row, profile)}</Text>
                   {backupPreview?.proposedLinks[row.id] ? (
                     <Text style={{ color: theme.colors.muted }}>
                       原備份有課班對照：
@@ -981,6 +1347,7 @@ function ImportWorkspace({
                       disabled={saving}
                       row={row}
                       workspaces={workspaces}
+                      periodProfile={profile}
                       onRefreshWorkspaces={() => void loadLinks()}
                       onChange={(next) =>
                         setRows((items) => items.map((item) => (item.id === row.id ? next : item)))
@@ -1099,14 +1466,13 @@ function ImportWorkspace({
               }}
             >
               <Text style={{ ...textStyle, fontWeight: '700' }}>{row.title}</Text>
-              <Text style={textStyle}>{rowSummary(row)}</Text>
+              <Text style={textStyle}>{rowSummary(row, profile)}</Text>
               {row.kind === 'timetable' &&
-              (scope.schoolId !== 'pu' ||
-                !row.startPeriod ||
-                !row.endPeriod ||
-                (row.dayOfWeek || 0) > 5) ? (
+              (!profile || !row.startPeriod || !row.endPeriod || (row.dayOfWeek || 0) > 5) ? (
                 <Text style={{ color: theme.colors.muted }}>
-                  已保存原始上課時間；目前課表格子只支援靜宜週一至週五的節次，這筆尚未放入格子。
+                  {profile
+                    ? '這筆缺少星期一至五的節次，尚未放入課表格子。'
+                    : '已保存原始上課時間；這所學校尚未設定課表格線，這筆不會放入格子。'}
                 </Text>
               ) : null}
               {row.linkedCourseId ? (
@@ -1122,6 +1488,7 @@ function ImportWorkspace({
                     disabled={saving}
                     row={editing.row}
                     workspaces={workspaces}
+                    periodProfile={profile}
                     onRefreshWorkspaces={() => void loadLinks()}
                     onChange={(next) => setEditing({ before: editing.before, row: next })}
                   />

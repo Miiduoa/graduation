@@ -24,7 +24,7 @@ Web／App 的訂單場域清單需要第六份補丁；最後一家門市暫停�
 python3 deploy/nuni-api/build.py --food-ordering-candidate
 ```
 
-產物 tag 為 `nuni-api:food-ordering-candidate`。此選項與 `--course-access-candidate`、`--public-cafeterias-candidate` 互斥，也不套入其他候選或執行其 migration。各候選尚未組合驗收；不要把此 image 當成包含其他候選的整合版。建置成功不代表部署、資料庫 ACL 或真實帳號／裝置驗收完成。
+產物 tag 為 `nuni-api:food-ordering-candidate`。此選項與 `--course-access-candidate`、`--public-cafeterias-candidate`、`--imports-candidate`、`--imports-compatible-rollback` 互斥，也不套入其他候選或執行其 migration。既有 `--imports-candidate` 仍提供餐廳目錄、課程審核與個人匯入的組合；點餐候選尚未與該組合一起驗收，不能將此 image 當成完整整合版。建置成功不代表部署、資料庫 ACL 或真實帳號／裝置驗收完成。
 
 來源與邊界回歸不需要資料庫：
 

@@ -8,7 +8,7 @@
 
 「找我附近」取得一次使用者授權的位置，在所選縣市內查詢 300、600 或 1,000 公尺半徑，依直線距離排序。縣市不會從 GPS 自動推測；跨縣市須切換縣市，邊界外的站點可能未列入。只顯示最多 16 個站牌，來源或畫面結果截斷時標示為部分結果。導航使用公開站牌座標，不假裝直線距離等於步行距離，也不自行估算步行時間。
 
-到站估計以每筆 SrcUpdateTime（缺少時才使用 UpdateTime）檢查新鮮度，來源超過 90 秒或明顯來自未來就不顯示倒數。去返程只在有明確目的地資料時標示「往某站」，不從路線名稱猜方向。尚未發車、交管不停靠、末班已過、今日未營運、沒有預估、離線及查詢失敗分開處理。
+到站估計以每筆 SrcUpdateTime（缺少時才使用 UpdateTime）檢查新鮮度，來源超過 90 秒或明顯來自未來就不顯示倒數。去返程只在有明確目的地資料時標示「往某站」，不從路線名稱猜方向。到站資料（EstimatedTimeOfArrival）實查未提供終點站名時，伺服器以路線站序（StopOfRoute）該方向的最後一站補上終點並快取 6 小時；路線基本資料（Route）的訖站只與去程末站一致、返程名稱與實際末站有出入（實查 162、301），故不用起站名或路線牌（Headsign）充當終點。站序也查不到的方向維持「終點未提供」，補查失敗不影響即時到站本身。尚未發車、交管不停靠、末班已過、今日未營運、沒有預估、離線及查詢失敗分開處理。
 
 ## 啟用條件
 
@@ -44,4 +44,5 @@ Node 測試使用注入的本地傳輸替身，直接執行正式 transit 與 AP
 - TDX 空間查詢： https://motc-ptx.gitbook.io/tdx-xin-shou-zhi-yin/api-te-se-shuo-ming/zhi-yuan-odata-cha-xun-yu-fa/odata-cha-xun/odata-cha-xun-xuan-xiang-spatialfilter
 - 市區公車站牌：`/api/basic/v2/Bus/Stop/City/{City}`
 - 市區公車到站預估：`/api/basic/v2/Bus/EstimatedTimeOfArrival/City/{City}`
+- 市區公車路線站序（各方向終點）：`/api/basic/v2/Bus/StopOfRoute/City/{City}`
 - OAuth：`/auth/realms/TDXConnect/protocol/openid-connect/token`
