@@ -48,10 +48,9 @@ describe('inboxTaskFromAssignmentNotification', () => {
     expect(t?.assignmentId).toBe('a1');
   });
 
-  test('assignment_due 與 courseId 也直達作業', () => {
+  test('courseId 也直達作業', () => {
     const t = inboxTaskFromAssignmentNotification({
       ...base,
-      type: 'assignment_due',
       data: { courseId: 'cs101', assignmentId: 'hw-1', groupName: '資料結構' },
     });
     expect(t?.groupId).toBe('cs101');

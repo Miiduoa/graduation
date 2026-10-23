@@ -44,20 +44,13 @@ export function inboxTaskFromAssignmentPushData(data: Record<string, unknown>): 
 }
 
 export function inboxTaskFromAssignmentNotification(n: Notification): InboxTask | null {
-  if (
-    n.type !== 'assignment' &&
-    n.type !== 'assignment_due' &&
-    n.type !== 'homework' &&
-    n.type !== 'quiz' &&
-    n.type !== 'grade'
-  )
-    return null;
+  if (n.type !== 'assignment' && n.type !== 'grade') return null;
   const data = (n.data ?? {}) as Record<string, unknown>;
   const gid = courseIdFromData(data);
   const aid = workIdFromData(data);
   if (!gid || !aid) return null;
 
-  const isQuiz = n.type === 'quiz' || isQuizData(data) || typeof data.quizId === 'string';
+  const isQuiz = isQuizData(data) || typeof data.quizId === 'string';
 
   return {
     id: `notif-${n.id}`,
