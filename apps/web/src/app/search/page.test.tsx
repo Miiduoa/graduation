@@ -75,6 +75,15 @@ it('keeps the existing course directory alongside the added Nuni classroom', () 
   expect(paths).toContain('/calendar');
 });
 
+it('shows ordering-off copy for /food while keeping bus and announcements', () => {
+  render(<SearchPage />);
+  expect(screen.getByRole('link', { name: /點餐與取餐/ }).textContent).toContain('目前還不能線上點餐');
+  expect(screen.queryByText('選餐點、查訂單、出示取餐憑證')).toBeNull();
+  expect(screen.getByRole('link', { name: /^公車/ })).toBeTruthy();
+  expect(screen.getByRole('link', { name: /^公告/ }).getAttribute('href')).toBe('/announcements');
+  expect(screen.queryByText('Nuni 不處理這筆的付款與退款')).toBeNull();
+});
+
 it('restores a shareable search and preserves only browsing context in service links', () => {
   window.history.replaceState(
     {},
