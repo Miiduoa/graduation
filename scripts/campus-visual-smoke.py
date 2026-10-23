@@ -77,13 +77,18 @@ async def check_task_text_scaling(page):
     await page.evaluate(r'''() => {
         const css = [...document.styleSheets]
             .flatMap(sheet => [...sheet.cssRules].map(rule => rule.cssText)).join('\n');
-        const names = [...css.matchAll(/\.([-_a-zA-Z][-_a-zA-Z0-9]*)/g)]
-            .map(match => match[1]);
+        const names = [...new Set([...css.matchAll(/\.([-_a-zA-Z][-_a-zA-Z0-9]*)/g)]
+            .map(match => match[1]))];
+        const main = document.querySelector('#today-content');
+        const namespaces = [...(main?.classList ?? [])]
+            .map(value => value.match(/^(.+)_main(?:__[-_a-zA-Z0-9]+)?$/)?.[1])
+            .filter(Boolean);
+        if (namespaces.length !== 1) throw new Error('Missing unique rendered home namespace');
         const c = name => {
-            const value = names.find(value => /^home[_-]/.test(value)
-                && new RegExp('(?:^|_)' + name + '(?:_|$)').test(value));
-            if (!value) throw new Error('Missing built home class: ' + name);
-            return value;
+            const expected = namespaces[0] + '_' + name;
+            const matches = names.filter(value => value === expected || value.startsWith(expected + '__'));
+            if (matches.length !== 1) throw new Error('Missing unique built home class: ' + name);
+            return matches[0];
         };
         const fixture = document.createElement('div');
         fixture.dataset.taskTypographyFixture = 'true';
