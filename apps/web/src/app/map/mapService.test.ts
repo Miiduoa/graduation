@@ -4,6 +4,8 @@ import {
   formatDistance,
   loadMapFavorites,
   loadMapLocations,
+  MapSourceTimeoutError,
+  withTimeout,
   setMapFavorite,
   type MapLocation,
 } from './mapService';
@@ -220,4 +222,40 @@ it('does not promote malformed primary coordinates over a second nested coordina
     location: { lat: 24.22, lng: 120.56 },
   })));
   expect(await loadMapLocations('pu')).toEqual([]);
+});
+
+it('does not publish locations from historical unflagged demo seed documents', async () => {
+  respond(snapshot(
+    entry('tw-nchu-poi-1', { schoolId: 'tw-nchu', name: '工程館', category: 'building', location: { lat: 24.1234, lng: 120.789 } }),
+    entry('tw-nchu-poi-2', { schoolId: 'tw-nchu', name: '圖書館', category: 'library', location: { lat: 24.124, lng: 120.7885 } }),
+    entry('tw-nchu-poi-3', { schoolId: 'tw-nchu', name: '學生餐廳', category: 'cafeteria', location: { lat: 24.122, lng: 120.79 } }),
+    entry('official', { schoolId: 'tw-nchu', name: '圖書館', category: 'library', lat: 24.12, lng: 120.67 }),
+  ));
+  expect((await loadMapLocations('tw-nchu')).map((place) => place.id)).toEqual(['official']);
+});
+
+it('excludes explicitly marked demo data but does not discard verified POIs merely for sharing a name', async () => {
+  respond(snapshot(
+    entry('marked', { name: '第一圖書館', isDemo: true, lat: 24.2, lng: 120.5 }),
+    entry('tw-nchu-poi-2', { name: '圖書館', lat: 24.12, lng: 120.67 }),
+  ));
+  expect((await loadMapLocations('tw-nchu')).map((place) => place.id)).toEqual(['tw-nchu-poi-2']);
+});
+
+it('fails a stuck map source after the timeout instead of loading forever', async () => {
+  vi.useFakeTimers();
+  try {
+    vi.mocked(getDocsFromServer).mockReturnValueOnce(new Promise(() => {}) as never);
+    const result = loadMapLocations('pu', { timeoutMs: 50 });
+    const settled = expect(result).rejects.toBeInstanceOf(MapSourceTimeoutError);
+    await vi.advanceTimersByTimeAsync(50);
+    await settled;
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('passes through a source answer that arrives before the timeout', async () => {
+  await expect(withTimeout(Promise.resolve(['ok']), 1000)).resolves.toEqual(['ok']);
+  await expect(withTimeout(Promise.reject(new Error('denied')), 1000)).rejects.toThrow('denied');
 });

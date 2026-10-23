@@ -6,6 +6,7 @@ import {
   type CafeteriaCatalogMenuItem,
   type CafeteriaCatalogRecord,
 } from '@campus/shared/src/cafeteriaCatalog';
+import { publicDiningCafeterias } from '@campus/shared/src/publicDiningCatalog';
 import { nuniPublicRequest } from './nuniClient';
 
 const TENANT = /^[a-z0-9][a-z0-9-]{0,78}[a-z0-9]$/;
@@ -54,7 +55,18 @@ export async function fetchCafeteriaCatalog(schoolId: string): Promise<{
   menus: CafeteriaCatalogMenuItem[];
 }> {
   if (!TENANT.test(schoolId)) return { cafeterias: [], menus: [] };
-  return asCatalog(await nuniPublicRequest(`schools/${schoolId}/cafeterias`), schoolId);
+  const fallback = {
+    cafeterias: publicDiningCafeterias(schoolId),
+    menus: [] as CafeteriaCatalogMenuItem[],
+  };
+  try {
+    const catalog = asCatalog(await nuniPublicRequest(`schools/${schoolId}/cafeterias`), schoolId);
+    if (catalog.cafeterias.length) return catalog;
+    return fallback.cafeterias.length ? fallback : catalog;
+  } catch (error) {
+    if (fallback.cafeterias.length) return fallback;
+    throw error;
+  }
 }
 
 export async function fetchCafeteriaLocations(

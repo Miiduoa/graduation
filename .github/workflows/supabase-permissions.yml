@@ -1,0 +1,52 @@
+name: Supabase permission migrations
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'supabase/migrations/**'
+      - 'supabase/tests/**'
+      - 'supabase/config.toml'
+      - 'supabase/functions/**'
+      - 'scripts/supabase-permissions/**'
+      - '.github/workflows/supabase-permissions.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-permissions-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  local-supabase:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.121.0
+      - name: Verify local-only tools
+        run: |
+          supabase --version
+          supabase start --help
+          supabase db reset --help
+          psql --version
+          docker info > /dev/null
+      - name: Replay migrations, reset, and verify ACL, RLS, and HTTP API
+        run: |
+          set -o pipefail
+          node scripts/supabase-permissions/run-supabase.mjs | tee supabase-permissions-results.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: supabase-permissions-results
+          path: supabase-permissions-results.txt
+          if-no-files-found: warn
+          retention-days: 14

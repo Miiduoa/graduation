@@ -6,6 +6,7 @@ import type {
   NuniFoodStaffOrderQueueItem,
 } from '@campus/shared/src/nuniFood';
 import { future, money, queueFixture, shiftFixture } from '@/features/food/foodTestFixtures';
+import { loadFoodPending } from '@/features/food/foodPersistence';
 import { MerchantOrderDesk } from './MerchantOrderDesk';
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
@@ -145,6 +146,10 @@ beforeEach(() => {
   mocks.request.mockImplementation(respond);
 });
 const button = (name: string) => screen.getByRole('button', { name }) as HTMLButtonElement;
+async function quietRefresh() {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+}
 function mount(cache = new Map<string, unknown>(), context = 'context-a', locationId = 'store-1') {
   return render(
     <MerchantOrderDesk
@@ -162,6 +167,73 @@ async function confirm(name: string, label: string) {
   fireEvent.click(screen.getByLabelText(label));
   fireEvent.click(button(`確認：${name}`));
 }
+
+it('requires a new cash confirmation when polling finds a different shift', async () => {
+  mount();
+  await screen.findByText('目前收銀班別');
+  fireEvent.change(screen.getByLabelText('交班實點現金（元）'), { target: { value: '620' } });
+  fireEvent.click(screen.getByLabelText('我已清點現金，確認交班內容'));
+  expect(button('確認交班').disabled).toBe(false);
+  shift = { ...shift!, id: 'shift-replacement' };
+  await quietRefresh();
+  await waitFor(() => expect(button('確認交班').disabled).toBe(true));
+  expect((screen.getByLabelText('我已清點現金，確認交班內容') as HTMLInputElement).checked).toBe(
+    false,
+  );
+  expect((screen.getByLabelText('交班實點現金（元）') as HTMLInputElement).value).toBe('620');
+  expect(mocks.request.mock.calls.some(([path]) => path.endsWith('/handover'))).toBe(false);
+});
+
+it('does not restore a previous handover confirmation after permissions are revoked and granted again', async () => {
+  mount();
+  await screen.findByText('目前收銀班別');
+  fireEvent.change(screen.getByLabelText('交班實點現金（元）'), { target: { value: '620' } });
+  fireEvent.click(screen.getByLabelText('我已清點現金，確認交班內容'));
+  shift = { ...shift!, allowedActions: ['view'] };
+  await quietRefresh();
+  await waitFor(() => expect(screen.queryByLabelText('我已清點現金，確認交班內容')).toBeNull());
+  shift = { ...shift!, allowedActions: ['view', 'handover'] };
+  await quietRefresh();
+  expect((screen.getByLabelText('我已清點現金，確認交班內容') as HTMLInputElement).checked).toBe(
+    false,
+  );
+  expect(button('確認交班').disabled).toBe(true);
+});
+
+it('does not carry an open-shift confirmation into a shift opened elsewhere', async () => {
+  shift = null;
+  mount();
+  await screen.findByText('開始收銀');
+  fireEvent.click(screen.getByLabelText('我已清點這一班的期初現金'));
+  expect(button('確認開班').disabled).toBe(false);
+  shift = shiftFixture();
+  await quietRefresh();
+  await screen.findByText('目前收銀班別');
+  expect((screen.getByLabelText('我已清點現金，確認交班內容') as HTMLInputElement).checked).toBe(
+    false,
+  );
+});
+
+it('retains an uncertain handover with its original key when a newer shift is observed', async () => {
+  mocks.request.mockImplementation((path, context, input) =>
+    path.endsWith('/handover')
+      ? Promise.reject(new NuniError(0, 'NETWORK_ERROR'))
+      : respond(path, context, input),
+  );
+  mount();
+  await screen.findByText('目前收銀班別');
+  fireEvent.change(screen.getByLabelText('交班實點現金（元）'), { target: { value: '620' } });
+  fireEvent.click(screen.getByLabelText('我已清點現金，確認交班內容'));
+  fireEvent.click(button('確認交班'));
+  await screen.findByText(/尚未確認這次操作的結果/);
+  const original = loadFoodPending('account-a', 'merchant-food:campus-one:store-1');
+  expect(original?.action).toBe('handover');
+  shift = { ...shift!, id: 'shift-replacement' };
+  await quietRefresh();
+  expect(loadFoodPending('account-a', 'merchant-food:campus-one:store-1')).toEqual(original);
+  expect(screen.getByRole('button', { name: '重試同一份操作' })).toBeTruthy();
+  expect(mocks.request.mock.calls.filter(([path]) => path.endsWith('/handover'))).toHaveLength(1);
+});
 
 it('completes real cashier, preparation, token handoff and counted-cash handover with explicit confirmations', async () => {
   shift = null;

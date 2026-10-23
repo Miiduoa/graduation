@@ -132,7 +132,7 @@ async function listFields({ project, database, accessToken, fetchImpl, signal })
   const url = new URL(`https://firestore.googleapis.com/v1/${parent}-/fields`);
   // ListFields only supports explicit index overrides or TTL configurations.
   url.searchParams.set('filter', 'indexConfig.usesAncestorConfig=false OR ttlConfig:*');
-  url.searchParams.set('pageSize', '1000');
+  // Wildcard listings only accept the server-default page size (0).
   const fields = new Map();
   const seenPages = new Set();
   while (true) {
@@ -298,7 +298,7 @@ async function getAccessToken({ firebaseToken, oauthClient, fetchImpl, signal })
 async function listIndexes({ project, database, accessToken, fetchImpl, signal }) {
   const parent = `projects/${project}/databases/${database}/collectionGroups/`;
   const url = new URL(`https://firestore.googleapis.com/v1/${parent}-/indexes`);
-  url.searchParams.set('pageSize', '1000');
+  // Wildcard listings only accept the server-default page size (0).
   const indexes = [];
   const seenPages = new Set();
   while (true) {

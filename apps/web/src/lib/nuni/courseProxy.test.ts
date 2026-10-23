@@ -111,6 +111,63 @@ afterEach(() => {
 });
 
 describe('Nuni course proxy allowlist', () => {
+  it.each(['', '?cursor=older_page-1'])('reads the paginated materials endpoint with query %s', async (query) => {
+    const page = { materials: [material], nextCursor: 'next_page-2' };
+    reply(page);
+    const result = await invoke('materials/page', undefined, { query });
+    expect(result.status).toBe(200);
+    expect(await result.json()).toEqual(page);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0][0]).toBe(
+      `https://api.nuni.tw/v1/auth/platform/class-workspaces/${id}/materials/page${query}`,
+    );
+    expect(fetcher.mock.calls[0][1].headers.Authorization).toBe(`Platform ${session.sessionHandle}`);
+    expect(result.headers.get('cache-control')).toContain('no-store');
+  });
+
+  it.each([
+    '?cursor=first&cursor=second',
+    '?cursor=first&cursor=first',
+    '?cursor=first&schoolId=other',
+    '?page=2',
+  ])('rejects unapproved or duplicate pagination query %s before forwarding', async (query) => {
+    expect((await invoke('materials/page', undefined, { query })).status).toBe(400);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each(['?cursor=', '?cursor=with%20space', `?cursor=${'x'.repeat(501)}`])(
+    'rejects invalid cursor %s before forwarding',
+    async (query) => {
+      const result = await invoke('materials/page', undefined, { query });
+      expect(result.status).toBe(422);
+      expect(fetcher).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps the page endpoint read-only and requires the current session for pagination', async () => {
+    expect((await invoke('materials/page', {})).status).toBe(404);
+    expect((await invoke('materials/page', undefined, { cookie: false })).status).toBe(401);
+    expect((await invoke('materials/page', undefined, { context: 'previous-session' })).status).toBe(409);
+    expect((await invoke('materials', undefined, { query: '?cursor=older-page' })).status).toBe(400);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each([403, 404, 422])('preserves a paginated upstream %i response', async (status) => {
+    fetcher.mockResolvedValue(response({
+      error: { code: status === 422 ? 'CLASS_WORKSPACE_MATERIAL_CURSOR_INVALID' : 'REQUEST_FAILED' },
+    }, status));
+    const result = await invoke('materials/page', undefined, { query: '?cursor=older-page' });
+    expect(result.status).toBe(status);
+    expect(await result.json()).toEqual({
+      error: status === 422 ? 'CLASS_WORKSPACE_MATERIAL_CURSOR_INVALID' : 'REQUEST_FAILED',
+    });
+  });
+
+  it('rejects a malformed page rather than treating it as the last page', async () => {
+    reply({ materials: [material] });
+    expect((await invoke('materials/page')).status).toBe(502);
+  });
+
   it.each([
     ['units', { units: [unit] }],
     ['materials', { materials: [material] }],

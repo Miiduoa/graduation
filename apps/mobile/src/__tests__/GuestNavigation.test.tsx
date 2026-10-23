@@ -76,6 +76,14 @@ jest.mock('../screens/SSOLoginScreen', () => ({
     return <Text testID="school-login-form">登入學校帳號</Text>;
   },
 }));
+jest.mock('../screens/PersonalImportScreen', () => {
+  const { Text } = require('react-native');
+  return { __esModule: true, default: () => <Text testID="personal-import-screen">匯入課表紀錄</Text> };
+});
+jest.mock('../screens/PersonalTimetableScreen', () => {
+  const { Text } = require('react-native');
+  return { __esModule: true, default: () => <Text testID="personal-timetable-screen">整週個人課表</Text> };
+});
 
 jest.mock('../screens/GoogleMapsLikeScreen', () => {
   const { Text } = require('react-native');
@@ -131,9 +139,25 @@ test('the primary signed-out entry opens the independent platform workspace', as
   expect(navigation.getCurrentRoute()?.name).toBe('NuniWorkspace');
 });
 
+test('a guest can open the real import route without a school or platform account', async () => {
+  const navigation = createNavigationContainerRef();
+  const onUnhandledAction = jest.fn();
+  const view = render(
+    <NavigationContainer ref={navigation} onUnhandledAction={onUnhandledAction}>
+      <PreAuthStack />
+    </NavigationContainer>,
+  );
+  fireEvent.press(await view.findByRole('button', { name: '匯入我的課表' }));
+  await view.findByTestId('personal-import-screen');
+  expect(navigation.getCurrentRoute()?.name).toBe('PersonalImport');
+  expect(navigation.getCurrentRoute()?.params).toEqual({ kind: 'timetable' });
+  expect(onUnhandledAction).not.toHaveBeenCalled();
+});
+
 test.each([
   ['campus://campus-one', 'NuniWorkspace', 'platform-workspace'],
   ['campus://sso-login', 'SSOLogin', 'school-login-form'],
+  ['campus://shops', 'SSOLogin', 'school-login-form'],
 ])('a cold %s opens before any school authentication', async (url, route, target) => {
   mockInitialUrl = url;
   const navigation = createNavigationContainerRef();

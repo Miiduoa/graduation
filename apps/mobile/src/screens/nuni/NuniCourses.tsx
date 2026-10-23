@@ -1,5 +1,14 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from 'react';
+import { Image, Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { revealAssignmentSubmitArea } from './scrollAssignment';
 import { randomUUID } from 'expo-crypto';
 import {
   createNuniClasses,
@@ -12,6 +21,26 @@ import {
   type NuniSubmission,
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
+import {
+  assignmentLateOpenLabel,
+  assignmentReceiptStatusLabel,
+  assignmentSubmissionLate,
+} from '@campus/shared/src/assignmentFiles';
+import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
+import {
+  assignmentFileDownloadUrl,
+  assignmentFileSubmitEnabledNative,
+  localFileSizeLabel,
+  moveNativeFile,
+  pickAssignmentAlbum,
+  pickAssignmentCamera,
+  pickAssignmentDocuments,
+  removeNativeFile,
+  submitNativeAssignmentFiles,
+  usesAssignmentFileBff,
+  type LocalNativeFile,
+  type NativeUploadProgress,
+} from './assignmentFileSubmit';
 import { courseRoleLabels } from '@campus/shared/src/nuniCourseTasks';
 import { useNuniSession } from '../../state/nuniSession';
 import { useNuniDraftState } from '../../state/nuniDrafts';
@@ -37,8 +66,7 @@ type Activity = NuniAssignment | NuniQuiz;
 type Receipt = NuniSubmission | NuniQuizResponse;
 // Matches parseNuniQuizResponse and the platform quiz submission endpoint.
 const QUIZ_ANSWER_LIMIT = 2000;
-const time = (value: string) =>
-  new Date(value).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
+const time = (value: string) => formatTaipeiDateTime(value);
 const feedbackPredatesSubmission = (receipt: Receipt) =>
   !!receipt.teacherFeedback &&
   !!receipt.reviewedAt &&
@@ -315,7 +343,7 @@ function MutationForm({
   );
 }
 
-function useLoad<T>(load: () => Promise<T>, automatic = true) {
+function useLoad<T>(load: () => Promise<T>, automatic = true, clearOnDenied = false) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(automatic);
@@ -333,7 +361,15 @@ function useLoad<T>(load: () => Promise<T>, automatic = true) {
         const value = await load();
         if (mounted.current && run === generation.current) setData(value);
       } catch (failure) {
-        if (mounted.current && run === generation.current) setError(nuniErrorMessage(failure));
+        if (mounted.current && run === generation.current) {
+          setError(nuniErrorMessage(failure));
+          if (
+            clearOnDenied &&
+            failure instanceof NuniError &&
+            (failure.status === 403 || failure.status === 404)
+          )
+            setData(null);
+        }
       } finally {
         if (mounted.current && run === generation.current) {
           reading.current = false;
@@ -346,7 +382,7 @@ function useLoad<T>(load: () => Promise<T>, automatic = true) {
         }
       }
     },
-    [load],
+    [load, clearOnDenied],
   );
   useEffect(() => {
     mounted.current = true;
@@ -370,33 +406,92 @@ function useLoad<T>(load: () => Promise<T>, automatic = true) {
     },
     [refresh],
   );
-  return { data, commit, error, loading, refresh, version: generation.current };
+  const reloadAfterMutation = useCallback(() => {
+    if (!mounted.current) return;
+    if (reading.current) confirmedDuringRead.current = true;
+    else void refresh();
+  }, [refresh]);
+  return {
+    data,
+    commit,
+    error,
+    loading,
+    refresh,
+    reloadAfterMutation,
+    version: generation.current,
+  };
 }
 
-export function NuniCourses() {
+export function NuniCourses({
+  initialWorkspaceId,
+  initialAssignmentId,
+}: {
+  initialWorkspaceId?: string;
+  initialAssignmentId?: string;
+} = {}) {
   const auth = useNuniSession();
   if (!auth.session || auth.loading || auth.pendingLogout) return null;
-  return <CourseScope key={auth.session.context} session={auth.session} request={auth.request} />;
+  return (
+    <CourseScope
+      key={auth.session.context}
+      session={auth.session}
+      request={auth.request}
+      upload={auth.upload}
+      bffRequest={auth.bffRequest}
+      initialWorkspaceId={initialWorkspaceId}
+      initialAssignmentId={initialAssignmentId}
+    />
+  );
 }
 function CourseScope({
   session,
   request,
+  upload,
+  bffRequest,
+  initialWorkspaceId,
+  initialAssignmentId,
 }: {
   session: NativeNuniSession;
   request: ReturnType<typeof useNuniSession>['request'];
+  upload?: ReturnType<typeof useNuniSession>['upload'];
+  bffRequest?: ReturnType<typeof useNuniSession>['bffRequest'];
+  initialWorkspaceId?: string;
+  initialAssignmentId?: string;
 }) {
   const theme = useTheme();
   const classes = useMemo(
     () =>
       createNuniClasses(
-        (path, input) => request(path, session.context, input),
+        (path, input, query) => {
+          const send =
+            assignmentFileSubmitEnabledNative() &&
+            bffRequest &&
+            usesAssignmentFileBff(path, input)
+              ? bffRequest
+              : request;
+          return query
+            ? send(path, session.context, input, undefined, query)
+            : send(path, session.context, input);
+        },
         session.platformAccountId,
+        upload
+          ? (path, body, contentType) => upload(path, session.context, body, contentType)
+          : undefined,
       ),
-    [request, session.context, session.platformAccountId],
+    [bffRequest, request, session.context, session.platformAccountId, upload],
   );
-  const [selected, setSelected] = useNuniDraftState<string | null>('courses:selected', null);
+  const scrollRef = useRef<ScrollView>(null);
+  const [selected, setSelected] = useNuniDraftState<string | null>(
+    'courses:selected',
+    initialWorkspaceId ?? null,
+  );
+  useEffect(() => {
+    if (initialWorkspaceId) setSelected(initialWorkspaceId);
+  }, [initialWorkspaceId, setSelected]);
   return (
     <ScrollView
+      ref={scrollRef}
+      testID="nuni-courses-scroll"
       keyboardShouldPersistTaps="handled"
       contentContainerStyle={{ padding: 20, paddingBottom: 48, gap: 16 }}
       style={{ backgroundColor: theme.colors.bg }}
@@ -407,6 +502,8 @@ function CourseScope({
           id={selected}
           classes={classes}
           onBack={() => setSelected(null)}
+          initialAssignmentId={initialAssignmentId}
+          scrollRef={scrollRef}
         />
       ) : (
         <CourseList classes={classes} open={setSelected} />
@@ -502,20 +599,59 @@ function CourseList({ classes, open }: { classes: Classes; open(id: string): voi
 type CourseData = {
   course: NuniWorkspace;
   materials: NuniMaterial[];
+  materialsCursor: string | null;
   assignments: NuniAssignment[];
   quizzes: NuniQuiz[];
 };
-function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; onBack(): void }) {
+function CourseDetail({
+  id,
+  classes,
+  onBack,
+  initialAssignmentId,
+  scrollRef,
+}: {
+  id: string;
+  classes: Classes;
+  onBack(): void;
+  initialAssignmentId?: string;
+  scrollRef: RefObject<ScrollView | null>;
+}) {
+  const pageGeneration = useRef(0);
+  const pagePending = useRef(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [materialsError, setMaterialsError] = useState('');
+  const [materialsDenied, setMaterialsDenied] = useState(false);
+  const [cursorInvalid, setCursorInvalid] = useState(false);
+  useEffect(
+    () => () => {
+      pageGeneration.current += 1;
+    },
+    [classes, id],
+  );
   const load = useCallback(async (): Promise<CourseData> => {
+    // Reloads and confirmed publication restart at the newest page. An older
+    // pending page must never append into this new authority snapshot.
+    pageGeneration.current += 1;
+    pagePending.current = false;
+    setLoadingMore(false);
+    setMaterialsError('');
+    setMaterialsDenied(false);
+    setCursorInvalid(false);
     const course = await classes.get(id);
-    const [materials, assignments, quizzes] = await Promise.all([
-      classes.materials(id),
+    const [page, assignments, quizzes] = await Promise.all([
+      classes.materialsPage(id),
       classes.assignments(id),
       classes.quizzes(id),
     ]);
-    return { course, materials, assignments, quizzes };
+    return {
+      course,
+      materials: page.materials,
+      materialsCursor: page.nextCursor,
+      assignments,
+      quizzes,
+    };
   }, [classes, id]);
-  const result = useLoad(load);
+  const result = useLoad(load, true, true);
   const [tab, setTab] = useNuniDraftState<'assignments' | 'materials' | 'quizzes'>(
     `course:${id}:tab`,
     'assignments',
@@ -525,6 +661,71 @@ function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; o
     'all',
   );
   const data = result.data;
+  const linkedAssignment =
+    !!initialAssignmentId && !!data?.assignments.some((item) => item.id === initialAssignmentId);
+  const linkedQuiz =
+    !!initialAssignmentId && !!data?.quizzes.some((item) => item.id === initialAssignmentId);
+  const missingLinkedWork =
+    !!initialAssignmentId && !!data && !linkedAssignment && !linkedQuiz;
+  const linkedQuizTab =
+    !!initialAssignmentId &&
+    (linkedQuiz || (!linkedAssignment && /^cwq_/i.test(initialAssignmentId)));
+  useEffect(() => {
+    if (!initialAssignmentId) return;
+    setTab(linkedQuizTab ? 'quizzes' : 'assignments');
+    setActivityFilter('all');
+  }, [initialAssignmentId, linkedQuizTab, setActivityFilter, setTab]);
+  const loadOlderMaterials = async () => {
+    if (
+      !data?.materialsCursor ||
+      result.loading ||
+      result.error ||
+      cursorInvalid ||
+      materialsDenied ||
+      pagePending.current
+    )
+      return;
+    const run = pageGeneration.current;
+    pagePending.current = true;
+    setLoadingMore(true);
+    setMaterialsError('');
+    try {
+      const page = await classes.materialsPage(id, data.materialsCursor);
+      if (run !== pageGeneration.current) return;
+      result.commit((current) => {
+        if (!current || run !== pageGeneration.current) return current;
+        const loaded = new Set(current.materials.map((item) => item.id));
+        return {
+          ...current,
+          materials: [
+            ...current.materials,
+            ...page.materials.filter((item) => !loaded.has(item.id)),
+          ],
+          materialsCursor: page.nextCursor,
+        };
+      }, result.version);
+    } catch (failure) {
+      if (run !== pageGeneration.current) return;
+      setMaterialsError(nuniErrorMessage(failure));
+      if (failure instanceof NuniError && (failure.status === 403 || failure.status === 404)) {
+        pageGeneration.current += 1;
+        pagePending.current = false;
+        setLoadingMore(false);
+        setMaterialsDenied(true);
+        result.commit(() => null, result.version);
+      } else if (
+        failure instanceof NuniError &&
+        failure.code === 'CLASS_WORKSPACE_MATERIAL_CURSOR_INVALID'
+      ) {
+        setCursorInvalid(true);
+      }
+    } finally {
+      if (run === pageGeneration.current) {
+        pagePending.current = false;
+        setLoadingMore(false);
+      }
+    }
+  };
   const saveActivity = (item: Activity) => {
     result.commit(
       (current) =>
@@ -552,6 +753,7 @@ function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; o
       <Button label="返回我的課程" onPress={onBack} />
       {result.loading ? <Copy>正在讀取課程內容…</Copy> : null}
       {result.error ? <Copy alert>{result.error}</Copy> : null}
+      {materialsDenied ? <Copy alert>{materialsError}</Copy> : null}
       <Button label="更新內容" onPress={() => void result.refresh()} disabled={result.loading} />
       {data ? (
         <View style={{ gap: 16, display: result.loading || result.error ? 'none' : 'flex' }}>
@@ -565,6 +767,13 @@ function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; o
               ? '教學操作僅限這門課；不代表校方教職員身分。'
               : `待繳作業 ${data.assignments.filter((item) => isPendingActivity(item, data.course)).length} · 待答測驗 ${data.quizzes.filter((item) => isPendingActivity(item, data.course)).length}`}
           </Copy>
+          {missingLinkedWork ? (
+            <Copy alert>
+              {linkedQuizTab
+                ? '找不到這份測驗。可能已被老師刪除，或你沒有查看權限。請從測驗列表選擇其他測驗。'
+                : '找不到這份作業。可能已被老師刪除，或你沒有查看權限。請從作業列表選擇其他作業。'}
+            </Copy>
+          ) : null}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             <Button
               label={`作業 ${data.assignments.length}`}
@@ -572,7 +781,7 @@ function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; o
               selected={tab === 'assignments'}
             />
             <Button
-              label={`教材 ${data.materials.length}`}
+              label={`教材 ${data.materials.length}${data.materialsCursor ? '+' : ''}`}
               onPress={() => setTab('materials')}
               selected={tab === 'materials'}
             />
@@ -611,7 +820,13 @@ function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; o
                   course={data.course}
                   classes={classes}
                   saved={saveActivity}
-                  hidden={!teacher && !matchesActivityFilter(item, data.course, activityFilter)}
+                  hidden={
+                    !teacher &&
+                    !matchesActivityFilter(item, data.course, activityFilter) &&
+                    item.id !== initialAssignmentId
+                  }
+                  focused={item.id === initialAssignmentId}
+                  scrollRef={scrollRef}
                 />
               ))
             )}
@@ -628,6 +843,13 @@ function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; o
             ) : null}
           </View>
           <View style={{ display: tab === 'materials' ? 'flex' : 'none', gap: 16 }}>
+            {data.materials.length > 0 ? (
+              <Copy>
+                {data.materialsCursor
+                  ? `已載入 ${data.materials.length} 筆教材，還有較早內容。`
+                  : `共 ${data.materials.length} 筆教材。`}
+              </Copy>
+            ) : null}
             {data.materials.length === 0 ? (
               <Copy>老師尚未發布教材。</Copy>
             ) : (
@@ -639,6 +861,22 @@ function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; o
                 </Section>
               ))
             )}
+            {materialsError ? <Copy alert>{materialsError}</Copy> : null}
+            {cursorInvalid ? (
+              <Button label="更新教材" onPress={() => void result.refresh()} />
+            ) : data.materialsCursor ? (
+              <Button
+                label={
+                  loadingMore
+                    ? '正在載入教材…'
+                    : materialsError
+                      ? '重試載入較早教材'
+                      : '載入較早教材'
+                }
+                onPress={() => void loadOlderMaterials()}
+                disabled={loadingMore}
+              />
+            ) : null}
           </View>
           <View style={{ display: tab === 'quizzes' ? 'flex' : 'none', gap: 16 }}>
             {data.quizzes.length === 0 ? (
@@ -651,7 +889,13 @@ function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; o
                   course={data.course}
                   classes={classes}
                   saved={saveActivity}
-                  hidden={!teacher && !matchesActivityFilter(item, data.course, activityFilter)}
+                  hidden={
+                    !teacher &&
+                    !matchesActivityFilter(item, data.course, activityFilter) &&
+                    item.id !== initialAssignmentId
+                  }
+                  focused={item.id === initialAssignmentId}
+                  scrollRef={scrollRef}
                 />
               ))
             )}
@@ -673,7 +917,11 @@ function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; o
               tab={tab}
               classes={classes}
               course={data.course}
-              created={(item) =>
+              created={(item) => {
+                if (!('instructions' in item) && !('prompt' in item)) {
+                  result.reloadAfterMutation();
+                  return;
+                }
                 result.commit((current) => {
                   if (!current) return current;
                   if ('instructions' in item)
@@ -689,12 +937,9 @@ function CourseDetail({ id, classes, onBack }: { id: string; classes: Classes; o
                       ...current,
                       quizzes: [...current.quizzes.filter((entry) => entry.id !== item.id), item],
                     };
-                  return {
-                    ...current,
-                    materials: [...current.materials.filter((entry) => entry.id !== item.id), item],
-                  };
-                }, result.version)
-              }
+                  return current;
+                }, result.version);
+              }}
             />
           ) : null}
           {data.course.memberRole === 'owner-teacher' && data.course.state === 'active' ? (
@@ -724,12 +969,16 @@ function ActivityCard({
   classes,
   saved,
   hidden = false,
+  focused = false,
+  scrollRef,
 }: {
   item: Activity;
   course: NuniWorkspace;
   classes: Classes;
   saved(item: Activity): void;
   hidden?: boolean;
+  focused?: boolean;
+  scrollRef?: RefObject<ScrollView | null>;
 }) {
   const assignment = 'instructions' in item;
   const receipt = assignment ? item.mySubmission : item.myResponse;
@@ -738,8 +987,152 @@ function ActivityCard({
   const active = course.state === 'active';
   const canSubmit = student && active && item.state === 'open';
   const kind = assignment ? '作業' : '測驗';
+  const fileSubmit = assignment && assignmentFileSubmitEnabledNative();
+  const [localFiles, setLocalFiles] = useState<LocalNativeFile[]>([]);
+  const [previewUri, setPreviewUri] = useState<string | null>(null);
+  const [progress, setProgress] = useState<NativeUploadProgress | null>(null);
+  const lateOpen = assignment
+    ? assignmentLateOpenLabel(item.dueAt, item.state, course.state)
+    : null;
+  const submitRef = useRef<View>(null);
+  const revealed = useRef(false);
+  const revealSubmit = () => {
+    if (!focused || revealed.current) return;
+    const scroll = scrollRef?.current;
+    const target = submitRef.current;
+    if (!scroll || !target) return;
+    revealed.current = true;
+    revealAssignmentSubmitArea(scroll, target);
+  };
+  const landKind = assignment ? 'assignment' : 'quiz';
+  const landLabel = assignment ? '作業繳交區' : '測驗作答區';
+  const submitArea = (
+    <>
+      {focused ? (
+        <Text accessibilityLabel={`${landLabel}：${item.title}`}>{landLabel}</Text>
+      ) : null}
+      {canSubmit && fileSubmit ? (
+        <View style={{ gap: 8 }}>
+          <Button label="拍照" onPress={() => void pickAssignmentCamera(localFiles).then(setLocalFiles)} />
+          <Button label="相簿" onPress={() => void pickAssignmentAlbum(localFiles).then(setLocalFiles)} />
+          <Button
+            label="檔案"
+            onPress={() => void pickAssignmentDocuments(localFiles).then(setLocalFiles)}
+          />
+          <Copy>網路不穩時再送一次，不會重複交。選好的照片可以刪除或調整順序後再送出。</Copy>
+          {progress ? <Copy>上傳中 {progress.completed}/{progress.total}，請保持網路連線。</Copy> : null}
+          {localFiles.map((file, index) => (
+            <View
+              key={file.key}
+              style={{ flexDirection: 'row', gap: 10, alignItems: 'center', minWidth: 0 }}
+            >
+              {file.kind === 'image' ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`放大預覽 ${file.name}`}
+                  onPress={() => setPreviewUri(file.uri)}
+                >
+                  <Image
+                    source={{ uri: file.uri }}
+                    accessibilityLabel={file.name}
+                    style={{ width: 56, height: 56, borderRadius: 8 }}
+                  />
+                </Pressable>
+              ) : null}
+              <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+                <Copy>{localFileSizeLabel(file)}</Copy>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                  <Button
+                    label="上移"
+                    onPress={() => setLocalFiles(moveNativeFile(localFiles, index, -1))}
+                  />
+                  <Button
+                    label="下移"
+                    onPress={() => setLocalFiles(moveNativeFile(localFiles, index, 1))}
+                  />
+                  <Button
+                    label="刪除"
+                    onPress={() => setLocalFiles(removeNativeFile(localFiles, file.key))}
+                  />
+                </View>
+              </View>
+            </View>
+          ))}
+          {previewUri ? (
+            <View>
+              <Button label="關閉預覽" onPress={() => setPreviewUri(null)} />
+              <Image
+                source={{ uri: previewUri }}
+                accessibilityLabel="放大預覽"
+                style={{ width: '100%', height: 280, borderRadius: 8 }}
+                resizeMode="contain"
+              />
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+      {canSubmit ? (
+        <MutationForm
+          draftKey={`course:${course.id}:${course.memberRole}:${course.state}:${assignment ? 'assignment' : 'quiz'}:${item.id}:${item.state}`}
+          savedContent={{
+            values: { body: receipt ? ('body' in receipt ? receipt.body : receipt.answer) : '' },
+            revision: JSON.stringify(
+              receipt
+                ? ['body' in receipt ? receipt.body : receipt.answer, receipt.submittedAt]
+                : null,
+            ),
+          }}
+          fields={[
+            {
+              name: 'body',
+              label: `${kind}內容：${item.title}`,
+              max: assignment ? 8000 : QUIZ_ANSWER_LIMIT,
+              min: fileSubmit ? 0 : 1,
+              multiline: true,
+              hint: assignment
+                ? fileSubmit
+                  ? '可寫說明，或直接拍照／選檔後送出。網路不穩時再送一次，不會重複交。'
+                  : undefined
+                : `最多 ${QUIZ_ANSWER_LIMIT} 字。老師停止收件前仍可修改。`,
+            },
+          ]}
+          label={receipt ? `更新${kind}繳交` : `繳交${kind}`}
+          submit={async ({ body }, key, stillActive) => {
+            if (assignment && fileSubmit && localFiles.length) {
+              try {
+                const confirmed = await submitNativeAssignmentFiles(
+                  classes,
+                  course.id,
+                  item.id,
+                  body,
+                  localFiles,
+                  key,
+                  setProgress,
+                );
+                if (stillActive()) {
+                  setLocalFiles([]);
+                  setPreviewUri(null);
+                  saved(confirmed);
+                }
+                return '已收到伺服器繳交紀錄。';
+              } finally {
+                if (stillActive()) setProgress(null);
+              }
+            }
+            const confirmed = assignment
+              ? await classes.submit(course.id, item.id, body, key)
+              : await classes.submitQuiz(course.id, item.id, body, key);
+            if (stillActive()) saved(confirmed);
+            return '已收到伺服器繳交紀錄。';
+          }}
+        />
+      ) : null}
+    </>
+  );
   return (
     <View
+      nativeID={`${landKind}-${item.id}`}
+      testID={`${landKind}-${item.id}`}
       style={{ display: hidden ? 'none' : 'flex' }}
       accessibilityElementsHidden={hidden}
       importantForAccessibility={hidden ? 'no-hide-descendants' : 'auto'}
@@ -754,10 +1147,39 @@ function ActivityCard({
         {item.dueAt && item.state === 'open' && active ? (
           <Copy>目前仍開放繳交，收件狀態以老師是否停止收件為準。</Copy>
         ) : null}
+        {fileSubmit && lateOpen ? <Copy alert>{lateOpen}</Copy> : null}
         {receipt ? (
           <View style={{ gap: 8 }}>
-            <Copy title>已繳交</Copy>
+            <Copy title>
+              {assignment
+                ? assignmentReceiptStatusLabel(
+                    'late' in receipt
+                      ? receipt.late === true ||
+                        assignmentSubmissionLate(item.dueAt, receipt.submittedAt)
+                      : false,
+                  )
+                : '已作答'}
+            </Copy>
             <Copy>{time(receipt.submittedAt)}</Copy>
+            {assignment && 'files' in receipt && receipt.files?.length
+              ? receipt.files.map((file) => (
+                  <View
+                    key={file.id}
+                    style={{ flexDirection: 'row', gap: 10, alignItems: 'center', minWidth: 0 }}
+                  >
+                    {file.kind === 'image' ? (
+                      <Image
+                        source={{ uri: assignmentFileDownloadUrl(file) }}
+                        accessibilityLabel={file.originalName}
+                        style={{ width: 56, height: 56, borderRadius: 8 }}
+                      />
+                    ) : null}
+                    <Copy>
+                      {file.originalName} · {file.kind === 'image' ? '照片' : '檔案'}
+                    </Copy>
+                  </View>
+                ))
+              : null}
             <Copy>{'body' in receipt ? receipt.body : receipt.answer}</Copy>
             <Copy>
               {receipt.teacherFeedback
@@ -770,38 +1192,18 @@ function ActivityCard({
             ) : null}
           </View>
         ) : null}
-        {canSubmit ? (
-          <MutationForm
-            draftKey={`course:${course.id}:${course.memberRole}:${course.state}:${assignment ? 'assignment' : 'quiz'}:${item.id}:${item.state}`}
-            savedContent={{
-              values: { body: receipt ? ('body' in receipt ? receipt.body : receipt.answer) : '' },
-              revision: JSON.stringify(
-                receipt
-                  ? ['body' in receipt ? receipt.body : receipt.answer, receipt.submittedAt]
-                  : null,
-              ),
-            }}
-            fields={[
-              {
-                name: 'body',
-                label: `${kind}內容：${item.title}`,
-                max: assignment ? 8000 : QUIZ_ANSWER_LIMIT,
-                multiline: true,
-                hint: assignment
-                  ? undefined
-                  : `最多 ${QUIZ_ANSWER_LIMIT} 字。老師停止收件前仍可修改。`,
-              },
-            ]}
-            label={receipt ? `更新${kind}繳交` : `繳交${kind}`}
-            submit={async ({ body }, key, stillActive) => {
-              const confirmed = assignment
-                ? await classes.submit(course.id, item.id, body, key)
-                : await classes.submitQuiz(course.id, item.id, body, key);
-              if (stillActive()) saved(confirmed);
-              return '已收到伺服器繳交紀錄。';
-            }}
-          />
-        ) : null}
+        {focused ? (
+          <View
+            ref={submitRef}
+            testID={`${landKind}-submit-${item.id}`}
+            nativeID={`${landKind}-submit-${item.id}`}
+            onLayout={revealSubmit}
+          >
+            {submitArea}
+          </View>
+        ) : (
+          submitArea
+        )}
         {!active ? <Copy>這門課已封存，現在只能查看保留的紀錄。</Copy> : null}
         {!student ? (
           <TeacherReceipts
@@ -849,8 +1251,45 @@ function TeacherReceipts({
         {receipts?.map((receipt) => (
           <Section key={receipt.platformAccountId}>
             <Copy title>{receipt.displayName}</Copy>
+            <Copy>
+              {assignment
+                ? assignmentReceiptStatusLabel(
+                    'late' in receipt
+                      ? receipt.late === true ||
+                        assignmentSubmissionLate(item.dueAt, receipt.submittedAt)
+                      : false,
+                  )
+                : '已作答'}
+            </Copy>
             <Copy>{time(receipt.submittedAt)}</Copy>
             <Copy>{'body' in receipt ? receipt.body : receipt.answer}</Copy>
+            {'files' in receipt && receipt.files?.length
+              ? receipt.files.map((file) => (
+                  <View
+                    key={file.id}
+                    style={{ flexDirection: 'row', gap: 10, alignItems: 'center', minWidth: 0 }}
+                  >
+                    {file.kind === 'image' ? (
+                      <Image
+                        source={{ uri: assignmentFileDownloadUrl(file) }}
+                        accessibilityLabel={file.originalName}
+                        style={{ width: 56, height: 56, borderRadius: 8 }}
+                      />
+                    ) : null}
+                    <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+                      <Copy>{file.originalName}</Copy>
+                      <Button
+                        label="查看"
+                        onPress={() => void Linking.openURL(assignmentFileDownloadUrl(file))}
+                      />
+                      <Button
+                        label="下載"
+                        onPress={() => void Linking.openURL(assignmentFileDownloadUrl(file, true))}
+                      />
+                    </View>
+                  </View>
+                ))
+              : null}
             {receipt.teacherFeedback ? (
               <Copy>已回饋：{receipt.teacherFeedback}</Copy>
             ) : (

@@ -5,6 +5,11 @@
  * App 上架、後端 ONLINE_ORDERING_ENABLED 打開之後，再把這個設成 true。
  */
 export const ONLINE_ORDERING_OFF_TEXT = '目前還不能線上點餐';
+export {
+  FOOD_PAGE_SUBTITLE_WHEN_ORDERING_OFF,
+  FOOD_PAGE_SUBTITLE_WHEN_ORDERING_ON,
+  foodPageSubtitle,
+} from '@campus/shared/src/foodPageCopy';
 
 export function isWebOnlineOrderingEnabled(raw: string | undefined = process.env.NEXT_PUBLIC_ONLINE_ORDERING): boolean {
   return typeof raw === 'string' && /^(1|true|on|yes)$/i.test(raw.trim());

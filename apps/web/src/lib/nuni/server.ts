@@ -8,6 +8,7 @@ import {
 } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { NuniError, nuniRecord } from '@campus/shared/src/nuni';
+import { WAKE_REQUEST_TIMEOUT_MS, withWakeRetry } from '@campus/shared/src/wakeAwareRequest';
 
 export const SESSION_COOKIE =
   process.env.NODE_ENV === 'production'
@@ -157,6 +158,63 @@ export function requireSession(request: NextRequest): PlatformSession {
   return session;
 }
 
+export async function boundedBytes(source: Request, limit: number): Promise<Uint8Array> {
+  const declared = source.headers.get('content-length');
+  if (declared && Number(declared) > limit) throw new NuniError(413, 'BODY_TOO_LARGE');
+  if (!source.body) throw new NuniError(400, 'INVALID_INPUT');
+  const reader = source.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new NuniError(503, 'READ_TIMEOUT')), WAKE_REQUEST_TIMEOUT_MS);
+  });
+  try {
+    while (true) {
+      const result = await Promise.race([reader.read(), deadline]);
+      if (result.done) break;
+      size += result.value.byteLength;
+      if (size > limit) throw new NuniError(413, 'BODY_TOO_LARGE');
+      chunks.push(result.value);
+    }
+    return Buffer.concat(chunks);
+  } catch (error) {
+    void reader.cancel().catch(() => {});
+    if (error instanceof NuniError) throw error;
+    throw new NuniError(400, 'INVALID_INPUT');
+  } finally {
+    clearTimeout(timer);
+    reader.releaseLock();
+  }
+}
+
+export function binaryResponse(
+  bytes: Uint8Array,
+  contentType: string,
+  fileName: string,
+  download = false,
+): NextResponse {
+  const safeName = fileName.replace(/["\r\n]/g, '_');
+  return new NextResponse(Buffer.from(bytes), {
+    status: 200,
+    headers: {
+      'Content-Type': contentType,
+      'Content-Length': String(bytes.byteLength),
+      'Content-Disposition': `${download ? 'attachment' : 'inline'}; filename="${safeName}"`,
+      'Cache-Control': 'no-store, private',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'no-referrer',
+    },
+  });
+}
+
+export function readPlatformAuthorization(request: NextRequest): PlatformSession | null {
+  const header = request.headers.get('authorization') ?? '';
+  const match = /^Platform (ps_[A-Za-z0-9_-]{43})$/.exec(header);
+  if (!match) return null;
+  return { sessionHandle: match[1], expiresAt: Date.now() + 3600_000 };
+}
+
 export async function boundedJson(
   source: Request | Response,
   limit = 1024 * 1024,
@@ -171,7 +229,7 @@ export async function boundedJson(
   let size = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new NuniError(503, 'READ_TIMEOUT')), 8000);
+    timer = setTimeout(() => reject(new NuniError(503, 'READ_TIMEOUT')), WAKE_REQUEST_TIMEOUT_MS);
   });
   try {
     while (true) {
@@ -210,33 +268,41 @@ export function apiOrigin(): string {
   return url.origin;
 }
 
-export async function fetchJson(url: string, init: RequestInit): Promise<unknown> {
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      ...init,
-      cache: 'no-store',
-      redirect: 'error',
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!response.ok) {
-      let code = 'REQUEST_FAILED';
+export async function fetchJson(
+  url: string,
+  init: RequestInit,
+  responseLimit = 1024 * 1024,
+): Promise<unknown> {
+  return withWakeRetry(
+    async (signal) => {
       try {
-        const body = nuniRecord(await boundedJson(response, 8192));
-        const failure =
-          typeof body.error === 'object' && body.error ? nuniRecord(body.error) : body;
-        if (typeof failure.code === 'string' && /^[A-Z0-9_]{1,100}$/.test(failure.code))
-          code = failure.code;
-      } catch {
-        void response.body?.cancel().catch(() => {});
+        const response = await fetch(url, {
+          ...init,
+          cache: 'no-store',
+          redirect: 'error',
+          signal,
+        });
+        if (!response.ok) {
+          let code = 'REQUEST_FAILED';
+          try {
+            const body = nuniRecord(await boundedJson(response, 8192));
+            const failure =
+              typeof body.error === 'object' && body.error ? nuniRecord(body.error) : body;
+            if (typeof failure.code === 'string' && /^[A-Z0-9_]{1,100}$/.test(failure.code))
+              code = failure.code;
+          } catch {
+            void response.body?.cancel().catch(() => {});
+          }
+          throw new NuniError(response.status >= 500 ? 503 : response.status, code);
+        }
+        return await boundedJson(response, responseLimit);
+      } catch (error) {
+        if (error instanceof NuniError) throw error;
+        throw new NuniError(503, 'SERVICE_UNAVAILABLE');
       }
-      throw new NuniError(response.status >= 500 ? 503 : response.status, code);
-    }
-    return await boundedJson(response);
-  } catch (error) {
-    if (error instanceof NuniError) throw error;
-    throw new NuniError(503, 'SERVICE_UNAVAILABLE');
-  }
+    },
+    { timeoutMs: WAKE_REQUEST_TIMEOUT_MS, externalSignal: init.signal ?? undefined },
+  );
 }
 
 export function platformRequest(

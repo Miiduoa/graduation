@@ -44,6 +44,16 @@ describe('resolveSchoolPageContext', () => {
     expect(context.schoolName).toBe('長庚大學');
   });
 
+  it('keeps the Nuni tenant nchu unaliased from catalog school tw-nchu', () => {
+    const nuniId = resolveSchoolPageContext({ campus: 'nchu', schoolId: 'tw-nchu' });
+    expect(nuniId.schoolId).toBe('nchu');
+    expect(nuniId.schoolName).toBe('所選校園尚未接入');
+    expect(nuniId.schoolCode).toBe('');
+    const catalogId = resolveSchoolPageContext({ campus: 'tw-nchu' });
+    expect(catalogId.schoolId).toBe('tw-nchu');
+    expect(catalogId.schoolName).toBe('國立中興大學');
+  });
+
   it('preserves a remote directory school identity instead of reading Providence data', () => {
     const context = resolveSchoolPageContext({
       campus: 'remote-university-12',

@@ -86,3 +86,14 @@ test('BFF allowlist rejects path escape, arbitrary grants and malformed IDs', ()
   for (const path of ['course-access/match', `course-access/requests/${id('car')}/decide`]) assert.equal(isCourseAccessPath(path), true);
   for (const path of ['course-access/../ops', 'course-access/grant-teacher', 'course-access/requests/pa_x/decide', 'course-access/match?school=other', 'course-access/match/']) assert.equal(isCourseAccessPath(path), false);
 });
+
+test('workspace readback is scoped, sanitized and never upgrades an unreviewed workspace', async () => {
+  const good = { workspaceId: id('cw'), memberRole: 'student', membershipActive: true, status: 'reviewed', course: candidate() };
+  assert.equal((await createCourseAccess(async () => good).workspace(id('cw'), 'pu')).course.teacher, metadata.teacher);
+  const plain = await createCourseAccess(async () => ({ ...good, status: 'unreviewed', course: null, privateEvidence: 'never-emit' })).workspace(id('cw'), 'pu');
+  assert.equal(plain.course, null); assert.equal('privateEvidence' in plain, false);
+  for (const change of [{ workspaceId: id('cw', 2) }, { membershipActive: false }, { memberRole: 'co-teacher' }, { status: 'school-verified' }, { course: candidate(1, { schoolId: 'other' }) }, { course: candidate(2) }])
+    await assert.rejects(createCourseAccess(async () => ({ ...good, ...change })).workspace(id('cw'), 'pu'));
+  assert.equal(isCourseAccessPath('course-access/workspace-course'), true);
+  assert.equal(isCourseAccessPath('course-access/workspace-course/other'), false);
+});

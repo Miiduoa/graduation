@@ -119,6 +119,7 @@ import {
   hasPuOfficialMenuSignal,
   isProvidenceDiningSchoolId,
 } from './puDiningCatalog';
+import { publicDiningCafeterias } from '@campus/shared/src/publicDiningCatalog';
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -188,6 +189,13 @@ function parseDocument<T extends { id: string }>(doc: {
   }
 
   return parsed as T;
+}
+
+function isoTimestamp(value: unknown): string | null {
+  if (!value) return null;
+  const stamp = value as { toDate?: () => Date };
+  const date = typeof stamp.toDate === 'function' ? stamp.toDate() : new Date(String(value));
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
 }
 
 function normalizeConversationRecord(row: Record<string, unknown>): Conversation {
@@ -1184,15 +1192,17 @@ export const firebaseSource: DataSource = {
         const normalized = rows.map((row) =>
           normalizeCafeteriaRecord(row as unknown as Record<string, unknown>),
         );
-        if (
-          !isProvidenceDiningSchoolId(schoolId) ||
-          normalized.some((row) => hasPuOfficialCafeteriaName(row.name))
-        ) {
-          return normalized;
+        if (normalized.length) {
+          if (
+            !isProvidenceDiningSchoolId(schoolId) ||
+            normalized.some((row) => hasPuOfficialCafeteriaName(row.name))
+          ) {
+            return normalized;
+          }
+          console.info(
+            '[firebaseSource] Falling back to curated PU cafeteria catalog because Firestore data does not match verified campus venues.',
+          );
         }
-        console.info(
-          '[firebaseSource] Falling back to curated PU cafeteria catalog because Firestore data does not match verified campus venues.',
-        );
       } catch (error) {
         console.warn('[firebaseSource] listCafeterias school-scoped read failed:', error);
       }
@@ -1202,7 +1212,18 @@ export const firebaseSource: DataSource = {
       return getPuDiningCafeterias(schoolId || 'pu');
     }
 
-    return [];
+    return publicDiningCafeterias(schoolId || '').map((row) => ({
+      id: row.id,
+      schoolId: row.schoolId,
+      name: row.name,
+      description: row.intro,
+      location: row.location,
+      openingHours: row.openingHours,
+      orderingEnabled: false,
+      pilotStatus: 'live' as const,
+      sourceLabel: row.sourceLabel,
+      sourceUrl: row.websiteUrl,
+    }));
   },
 
   async listMenus(schoolId, options) {
@@ -1230,6 +1251,7 @@ export const firebaseSource: DataSource = {
         console.warn('[firebaseSource] listMenus falling back to curated PU catalog:', error);
         return getPuDiningMenuItems(schoolId || 'pu');
       }
+      if (publicDiningCafeterias(schoolId || '').length) return [];
       throw error;
     }
   },
@@ -1971,36 +1993,64 @@ export const firebaseSource: DataSource = {
   },
 
   async submitAssignment(data) {
+    const userId = data.userId;
+    const assignmentId = data.assignmentId;
+    const groupId = typeof data.groupId === 'string' ? data.groupId.trim() : '';
+    const content = data.content?.trim() ?? '';
+    if (!userId || !content || content.length > 20000) {
+      throw new Error('請輸入 1 至 20,000 字的作業內容。');
+    }
+    if (!groupId || !assignmentId) {
+      throw new Error('找不到這份作業。');
+    }
+    if (getAuthInstance().currentUser?.uid !== userId) {
+      throw new Error('登入身分已變更，請重新開啟課程。');
+    }
+
     const db = getDb();
-    const groupId = (data as any).groupId as string;
+    const assignmentPath = buildGroupCollectionPath(groupId, 'assignments', assignmentId);
     const submissionPath = buildGroupCollectionPath(
       groupId,
       'assignments',
-      data.assignmentId,
+      assignmentId,
       'submissions',
-      data.userId,
+      userId,
     );
-    const content = data.content?.trim() ?? '';
-    const attachments = data.attachments ?? [];
-    if ((!content && attachments.length === 0) || content.length > 20000 || attachments.length > 20) {
-      throw new Error('請填寫作業內容或附加檔案，文字上限為 20,000 字。');
-    }
     await runTransaction(db, async (transaction) => {
+      const assignmentSnap = await transaction.get(docFromSegments(db, assignmentPath));
+      if (!assignmentSnap.exists()) throw new Error('此作業已不存在。');
+      const assignment = assignmentSnap.data() as Record<string, unknown>;
+      if (assignment.published === false || ['draft', 'closed'].includes(String(assignment.status ?? ''))) {
+        throw new Error('此作業尚未開放。');
+      }
+      if (['quiz', 'exam'].includes(String(assignment.type ?? ''))) {
+        throw new Error('請透過評量頁面作答。');
+      }
+      const due = isoTimestamp(assignment.dueAt);
+      if (due && Date.parse(due) < Date.now() && assignment.allowLateSubmission !== true) {
+        throw new Error('作業已截止，請聯絡授課教師。');
+      }
       const ref = docFromSegments(db, submissionPath);
       const existing = await transaction.get(ref);
-      if (existing.exists() && existing.data().submittedAt) {
+      if (existing.exists() && existing.data()?.submittedAt) {
         throw new Error('這份作業已有繳交紀錄，請重新整理確認。');
       }
-      transaction.set(ref, {
-        userId: data.userId,
-        groupId,
-        assignmentId: data.assignmentId,
-        content,
-        attachments,
-        status: 'submitted',
-        submittedAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
+      if (getAuthInstance().currentUser?.uid !== userId) {
+        throw new Error('登入身分已變更，請重新開啟課程。');
+      }
+      transaction.set(
+        ref,
+        {
+          userId,
+          groupId,
+          assignmentId,
+          content,
+          status: 'submitted',
+          submittedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
     });
 
     return (await fetchDocumentAtPath<Submission>(submissionPath)) as Submission;

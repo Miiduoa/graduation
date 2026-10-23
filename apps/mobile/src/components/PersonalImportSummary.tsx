@@ -1,15 +1,16 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { Text, View } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { PersonalImportKind, PersonalImportRecord } from '@campus/shared';
 import { usePersonalImportScope } from '../state/personalImportScope';
 import { loadPersonalImports } from '../services/personalImports';
-import { rootNavigateNested } from '../app/rootNavigation';
+import { safeNavigate } from '../utils/safeNavigate';
 import { Button } from '../ui/components';
 import { theme } from '../ui/theme';
 
 /** Personal records stay visibly separate from official grades and calendar feeds. */
 export function PersonalImportSummary({ kind }: { kind: PersonalImportKind }) {
+  const navigation = useNavigation();
   const scope = usePersonalImportScope();
   const key = scope ? JSON.stringify([scope, kind]) : '';
   const current = useRef(key);
@@ -43,7 +44,7 @@ export function PersonalImportSummary({ kind }: { kind: PersonalImportKind }) {
       <Button
         text={`匯入${names[kind]}／查看個人紀錄`}
         onPress={() => {
-          rootNavigateNested('學習', 'PersonalImport', { kind });
+          safeNavigate(navigation, 'PersonalImport', { kind });
         }}
       />
       <Text style={{ color: theme.colors.muted }}>

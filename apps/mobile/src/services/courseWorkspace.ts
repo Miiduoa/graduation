@@ -70,6 +70,14 @@ export type CourseQuiz = {
   points?: number;
   weight?: number;
   source: 'quiz' | 'assignment';
+  questions?: Array<{
+    id: string;
+    prompt: string;
+    type: 'single_choice' | 'multiple_choice' | 'short_answer' | 'essay' | 'true_false';
+    required?: boolean;
+    options?: Array<{ id: string; label: string; value: string }>;
+    points?: number;
+  }>;
 };
 
 export type AttendanceSession = {
@@ -526,6 +534,7 @@ export async function listCourseQuizzes(
           points: typeof data.points === 'number' ? data.points : undefined,
           weight: typeof data.weight === 'number' ? data.weight : undefined,
           source: 'quiz',
+          questions: Array.isArray(data.questions) ? (data.questions as CourseQuiz['questions']) : undefined,
         });
       }
 
@@ -559,6 +568,7 @@ export async function listCourseQuizzes(
           points: typeof data.points === 'number' ? data.points : undefined,
           weight: typeof data.weight === 'number' ? data.weight : undefined,
           source: 'assignment',
+          questions: Array.isArray(data.questions) ? (data.questions as CourseQuiz['questions']) : undefined,
         });
       }
 

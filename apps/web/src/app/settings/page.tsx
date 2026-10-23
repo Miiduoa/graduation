@@ -9,6 +9,13 @@ import {
   defaultNotificationPreferences,
   normalizeNotificationPreferences,
 } from '@campus/shared/src';
+import {
+  AGENT_DELETE_MODEL_ACTION,
+  AGENT_MODEL_EVENT,
+  listAcceptedAgentConsentKeys,
+  notifyAgentModelChanged,
+} from '@campus/shared/src/todaySenseAgent';
+import { deleteTodaySenseModelCache } from '@/lib/todaySenseAgentRuntime';
 
 import { SiteShell } from '@/components/SiteShell';
 import { NuniAccountPanel } from '@/components/NuniAccountPanel';
@@ -166,22 +173,10 @@ export default function SettingsPage(props: {
         <p role="status">確認帳號…</p>
       </SiteShell>
     );
-  return (
-    <SettingsContent
-      key={user?.uid ?? 'guest'}
-      user={user}
-      schoolSearch={schoolSearch}
-    />
-  );
+  return <SettingsContent key={user?.uid ?? 'guest'} user={user} schoolSearch={schoolSearch} />;
 }
 
-function SettingsContent({
-  user,
-  schoolSearch,
-}: {
-  user: User | null;
-  schoolSearch: string;
-}) {
+function SettingsContent({ user, schoolSearch }: { user: User | null; schoolSearch: string }) {
   const { signOutUser } = useAuth();
   const nuni = useNuniSession();
   const schoolLoginReady = useSignInOptions().studentId;
@@ -216,6 +211,26 @@ function SettingsContent({
   );
   const [localPrefsReady, setLocalPrefsReady] = useState(false);
   const [localPrefsSaved, setLocalPrefsSaved] = useState(true);
+  const [agentModelInstalled, setAgentModelInstalled] = useState(false);
+  const [agentModelMessage, setAgentModelMessage] = useState('');
+  const [deletingAgentModel, setDeletingAgentModel] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const refreshAgentModel = () => {
+      setAgentModelInstalled(listAcceptedAgentConsentKeys(window.localStorage).length > 0);
+    };
+    refreshAgentModel();
+    window.addEventListener('storage', refreshAgentModel);
+    window.addEventListener(AGENT_MODEL_EVENT, refreshAgentModel);
+    return () => {
+      window.removeEventListener('storage', refreshAgentModel);
+      window.removeEventListener(AGENT_MODEL_EVENT, refreshAgentModel);
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -703,7 +718,7 @@ function SettingsContent({
           </button>
         </div>
         <div className={styles.group}>
-          <SettingRow title="色彩模式" subtitle="可跟隨裝置的明暗設定。">
+          <SettingRow title="色彩模式" subtitle="深色使用純黑背景，也可跟隨裝置的明暗設定。">
             <div className={styles.segmented} role="group" aria-label="色彩模式">
               {(
                 [
@@ -829,7 +844,37 @@ function SettingsContent({
           >
             <span className={styles.value}>本機保存</span>
           </SettingRow>
+          {agentModelInstalled ? (
+            <SettingRow
+              title="裝置端模型"
+              subtitle="刪除後自動退回規則版，不再用已下載的模型排序。"
+            >
+              <button
+                type="button"
+                className="btn"
+                disabled={deletingAgentModel}
+                onClick={async () => {
+                  if (deletingAgentModel) return;
+                  setDeletingAgentModel(true);
+                  try {
+                    for (const key of listAcceptedAgentConsentKeys(window.localStorage)) {
+                      window.localStorage.removeItem(key);
+                    }
+                    const result = await deleteTodaySenseModelCache();
+                    notifyAgentModelChanged();
+                    setAgentModelInstalled(false);
+                    setAgentModelMessage(result.message);
+                  } finally {
+                    setDeletingAgentModel(false);
+                  }
+                }}
+              >
+                {AGENT_DELETE_MODEL_ACTION}
+              </button>
+            </SettingRow>
+          ) : null}
         </div>
+        {agentModelMessage ? <p role="status">{agentModelMessage}</p> : null}
         <div>
           <Link className="btn" href={`/privacy${schoolSearch}`}>
             查看隱私政策

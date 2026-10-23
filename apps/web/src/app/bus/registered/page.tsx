@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
+import { fallbackBusSchool } from '@/lib/defaultBrowseSchool';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import {
   BUS_FRESHNESS_MS,
@@ -262,19 +263,20 @@ function SchoolBus({ schoolId }: { schoolId: string }) {
 
 function BusContext() {
   const search = useSearchParams();
-  const { schoolId, schoolName, status } = useCampusBrowseContext({
+  const browse = useCampusBrowseContext({
     school: search.get('school') ?? undefined,
     schoolId: search.get('schoolId') ?? undefined,
     campus: search.get('campus') ?? undefined,
   });
+  const { schoolId, schoolName } = fallbackBusSchool(browse.schoolId, browse.schoolName, browse.status);
   return (
     <SiteShell title="公車與交通" subtitle="查看候車站牌，確認到站資訊。" schoolName={schoolName}>
-      {status !== 'ready' || !schoolId ? (
+      {browse.status === 'loading' || browse.status === 'error' || !schoolId ? (
         <section className={styles.empty} role="status">
           <h2>
-            {status === 'loading'
+            {browse.status === 'loading'
               ? '正在確認所選校園…'
-              : status === 'error'
+              : browse.status === 'error'
                 ? '無法確認所選校園'
                 : '請先選擇一所學校'}
           </h2>
