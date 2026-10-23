@@ -31,14 +31,14 @@ The Mobile failure was the existing `AdminEventPolicy.test.tsx` assertion agains
 
 ## Remaining acceptance
 
-No deployed SHA, actual school-account user journey, real background push, Google cross-device calendar synchronization, physical-device sharing, signed installable bundle, or store acceptance was established by these checks. See the [13-domain ledger](../PRODUCT_COMPLETION_2026-10-23.md). Additional group ownership transfer is under review and is not included in the counts above.
+No deployed SHA, actual school-account user journey, real background push, Google cross-device calendar synchronization, physical-device sharing, signed installable bundle, or store acceptance was established by these checks. See the [13-domain ledger](../PRODUCT_COMPLETION_2026-10-23.md). The initial counts above predate group ownership transfer; final integration evidence follows.
 
 ## Final source validation (integration candidate)
 
 **Source SHA (implementation + ownership + pinned main + test:rules wiring + emulator lint fix):** `8d28ec088f3f609db5ae265ce4aa7f45cf3c0206`  
 Branch: `cursor/product-completion-20261023`. Working tree clean at validation time.  
 Pinned main merged: `27f7206880954b6a89d22e5fac2d638c9c0670da`. Ownership cherry-pick from `0e9b4dc823382cd85fdffbfe30a549ab1f30e9d9` completed (discussion links + ownership transfer both retained).  
-Tooling: Node `22.23.4` (`/opt/homebrew/opt/node@22/bin`), pnpm `10.28.2`. Logs: `../validation-8d28ec0/` (do not conflate with older `validation-e5a47b1` / `validation-40247a2`).
+Tooling: Node `22.23.4` (`/opt/homebrew/opt/node@22/bin`), pnpm `10.28.2`. Local workspace logs: `work/validation-8d28ec0/` (outside the repository). A compact tracked result is in [validation summary](./product-completion-20261023-summary.json). Do not conflate with older `validation-e5a47b1` / `validation-40247a2`.
 
 | Job | Command | Result |
 | --- | --- | --- |
@@ -50,6 +50,10 @@ Tooling: Node `22.23.4` (`/opt/homebrew/opt/node@22/bin`), pnpm `10.28.2`. Logs:
 | web-build | `pnpm --filter web build` | production build passed |
 | diff-check | `git diff --check` | passed |
 
-`transferGroupOwnership` remains exported beside join/leave in `backend/functions/index.js` and is covered by `groupMembership.test.js` registration tests. `groupOwnership.emulator.cjs` is listed in root `pnpm test:rules` (CI uses that script). Ownership Firestore emulator suite was previously validated 12/12 on owned stopped ports by a separate agent; this full-suite run did not re-start shared/default emulator ports.
+`transferGroupOwnership` remains exported beside join/leave in `backend/functions/index.js` and is covered by `groupMembership.test.js` registration tests. `groupOwnership.emulator.cjs` is listed in root `pnpm test:rules` (CI uses that script). Independent full Firestore/Storage validation then passed all 148 tests across the seven configured files, including 12 ownership tests, on dedicated localhost ports. It used `demo-campus-security` for Storage cross-service rule lookups and `singleProjectMode=false`; every emulator was stopped afterward. The 279 tracked backend file hashes and test script were unchanged throughout the final run. An earlier diagnostic used a mismatched emulator project and failed one Storage fixture; the corrected, stable final run is the result reported here.
 
 **Not established by this candidate:** all 13 domains complete; deployed SHA; real school roles / devices / store; leave / dorm school intake / online payment cooperation (unavailable until agreements). Platform Google vs school Firebase remain distinct.
+
+### Final built-browser check
+
+The standalone production build at source `8d28ec08` was launched only on localhost. A synthetic guest created a dated personal event, reloaded and observed it preserved. At 390×844, document width equalled viewport width (390); the screenshot was visually inspected. The browser console recorded 0 errors and 0 warnings during this run. An unauthenticated group deep link required school login and preserved its full return URL. These checks do not establish real school login, Google cross-device sync, or physical-device acceptance.
