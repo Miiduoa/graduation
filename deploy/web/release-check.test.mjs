@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { validateTarget, validateFirebase, summarizeMachines, requireStable, inspectPublic, getJson, EXPECTED_MACHINES, rollbackImage, rollbackDeployArgs, requireRolledBack } from './release-check.mjs';
+import { validateTarget, validateFirebase, summarizeMachines, requireStable, inspectPublic, inspectLocalPages, getJson, EXPECTED_MACHINES, PUBLIC_RELEASE_PAGES, rollbackImage, rollbackDeployArgs, requireRolledBack } from './release-check.mjs';
 // Reduced from the public /bus SSR response: campus selection resolves after hydration.
 const busLoadingHtml = readFileSync(new URL('./fixtures/bus-loading.html', import.meta.url), 'utf8');
 const sha = 'a'.repeat(40);
@@ -64,6 +64,7 @@ function fakeFetch(health = {}, transit = { status: 'unavailable', reason: 'not-
 test('accepts the campus loading shell without claiming TDX or browser interaction', async () => {
   const report = await inspectPublic(sha, fakeFetch());
   assert.equal(report.webDeployed, true);
+  assert.deepEqual(report.pages.map((page) => page.path), PUBLIC_RELEASE_PAGES);
   assert.equal(report.pages.find((page) => page.path === '/bus').newBusPage, true);
   assert.equal(report.transit.status, 'not-configured');
   assert.equal(report.browserControlsVerified, false);
@@ -108,6 +109,37 @@ test('the previous bus shell without the spec marker cannot pass as a new page',
     ? Promise.resolve(new Response('<html><div data-campus-bus-shell="true">公車與交通往沙鹿</div></html>', {headers:{'Content-Type':'text/html','Permissions-Policy':'geolocation=(self)'}}))
     : healthy(url, init);
   assert.equal((await inspectPublic(sha, fetcher)).webDeployed, false);
+});
+
+test('dual-runtime public pages must remain 200 html', async () => {
+  const healthy = fakeFetch();
+  const report = await inspectPublic(sha, healthy);
+  assert.ok(PUBLIC_RELEASE_PAGES.includes('/life'));
+  assert.ok(PUBLIC_RELEASE_PAGES.includes('/privacy'));
+  assert.equal(report.pages.find((page) => page.path === '/life').status, 200);
+  assert.equal(report.pages.find((page) => page.path === '/privacy').status, 200);
+  for (const missing of ['/life', '/privacy']) {
+    const fetcher = (url, init) => url.endsWith(missing)
+      ? Promise.resolve(new Response('missing', { status: 404, headers: { 'Content-Type': 'text/html' } }))
+      : healthy(url, init);
+    assert.equal((await inspectPublic(sha, fetcher)).webDeployed, false);
+  }
+});
+
+test('local smoke only accepts loopback origins and current public pages', async () => {
+  const fetcher = async (url, init) => {
+    assert.equal(init.redirect, 'error');
+    assert.ok(url.startsWith('http://127.0.0.1:18080'));
+    const path = new URL(url).pathname;
+    const html = path === '/bus' ? busLoadingHtml : '<html>ok</html>';
+    return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html' } });
+  };
+  await inspectLocalPages('http://127.0.0.1:18080', fetcher);
+  await assert.rejects(inspectLocalPages('https://nuni.tw', fetcher), /loopback/);
+  await assert.rejects(inspectLocalPages('http://127.0.0.1:18080', async (url, init) => {
+    if (url.endsWith('/privacy')) return new Response('missing', { status: 404, headers: { 'Content-Type': 'text/html' } });
+    return fetcher(url, init);
+  }), /Local page \/privacy is not ready/);
 });
 
 test('rollback restores the recorded previous image and refuses to redeploy the failed one', () => {
