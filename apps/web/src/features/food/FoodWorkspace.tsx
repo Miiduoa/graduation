@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { createNuniFoodClient } from '@campus/shared/src/nuniFood';
 import { browserRequest, useNuniSession } from '@/features/nuni/Session';
@@ -16,6 +16,10 @@ import { isWebOnlineOrderingEnabled } from '@/lib/onlineOrdering';
 import { foodPageSubtitle } from '@campus/shared/src/foodPageCopy';
 import styles from './Food.module.css';
 
+const subscribeToHydration = () => () => {};
+const clientHydrated = () => true;
+const serverHydrated = () => false;
+
 export type FoodClient = ReturnType<typeof createNuniFoodClient>;
 export function FoodWorkspace({
   initialTenant = '',
@@ -25,6 +29,8 @@ export function FoodWorkspace({
   initialOrder?: string;
 }) {
   const auth = useNuniSession();
+  // Delayed Suspense on /food must hydrate against the server's account-checking markup.
+  const hydrated = useSyncExternalStore(subscribeToHydration, clientHydrated, serverHydrated);
   const [cleanupError, setCleanupError] = useState('');
   const [scope, setScope] = useState<{ account: string | null; drafts: FoodDraftCache }>(() => ({
     account: null,
@@ -33,7 +39,7 @@ export function FoodWorkspace({
   const account = auth.pendingLogout
     ? null
     : (auth.session?.platformAccountId ?? (!auth.loading && !auth.error ? null : scope.account));
-  if (account !== scope.account) {
+  if (hydrated && account !== scope.account) {
     if (scope.account && !account) {
       try {
         clearAllFoodPendingForAccount(scope.account);
@@ -45,6 +51,7 @@ export function FoodWorkspace({
     return null;
   }
   const orderingOn = isWebOnlineOrderingEnabled();
+  const checkingAccount = !hydrated || auth.loading;
   return (
     <SiteShell title="點餐與取餐" subtitle={foodPageSubtitle(orderingOn)}>
       <div className={styles.stack}>
@@ -54,7 +61,7 @@ export function FoodWorkspace({
           <Link href="/orders">原有餐廳訂單</Link>
           <Link href="/merchant">店家工作台</Link>
         </nav>
-        {auth.loading ? (
+        {checkingAccount ? (
           <p role="status">正在確認帳號…</p>
         ) : auth.error ? (
           <div role="alert">
