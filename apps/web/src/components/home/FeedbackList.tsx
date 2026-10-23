@@ -1,0 +1,80 @@
+'use client';
+
+import Link from 'next/link';
+import { CampusIcon } from '@/components/CampusIcon';
+import {
+  feedbackPredatesSubmission,
+  type HomeFeedback,
+} from '@/lib/homeOverview';
+import { sanitizeInternalPath } from '@/lib/navigation';
+import { courseTaskHref } from '@/lib/todayCourseWork';
+import styles from '@/app/home.module.css';
+
+function feedbackHref(item: HomeFeedback): string {
+  return sanitizeInternalPath(
+    item.href,
+    courseTaskHref({
+      kind: item.kind,
+      id: item.id,
+      courseId: item.courseId,
+      courseName: item.courseName,
+      title: item.title,
+      dueAt: null,
+      href: item.href,
+    }),
+  );
+}
+
+export function FeedbackList({ items }: { items: HomeFeedback[] }) {
+  return (
+    <ul className={styles.list} data-testid="recent-feedback-list">
+      {items.map((item) => {
+        const stale = feedbackPredatesSubmission(item.reviewedAt, item.submittedAt);
+        return (
+          <li key={`${item.courseId}-${item.kind}-${item.id}`}>
+            <Link href={feedbackHref(item)} className={styles.task}>
+              <span className={styles.taskMarker} aria-hidden="true">
+                <CampusIcon name="course" size={20} />
+              </span>
+              <span className={styles.taskContent}>
+                <strong>{item.title}</strong>
+                <span>
+                  {item.courseName} · {item.kind === 'quiz' ? '測驗回饋' : '作業回饋'}
+                  {item.score !== null ? ` · ${item.score} 分` : ''}
+                  {stale ? ' · 早於最近繳交' : ''}
+                </span>
+                {item.feedback ? (
+                  <span className={styles.feedbackPreview}>{item.feedback}</span>
+                ) : null}
+                {stale ? (
+                  <span className={styles.feedbackPreview}>
+                    這則回饋早於你最近一次繳交，請到作業頁確認是否仍適用。
+                  </span>
+                ) : null}
+              </span>
+              <span className={styles.deadline}>
+                {item.reviewedAt ? (
+                  <time dateTime={item.reviewedAt}>
+                    {new Date(item.reviewedAt).toLocaleString('zh-TW', {
+                      timeZone: 'Asia/Taipei',
+                      month: 'numeric',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      hour12: false,
+                    })}
+                  </time>
+                ) : (
+                  '已發布'
+                )}
+              </span>
+              <span aria-hidden className={styles.arrow}>
+                →
+              </span>
+            </Link>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}

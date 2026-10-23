@@ -1,6 +1,12 @@
 'use client';
 
-import { useRef, useState, type FormEvent } from 'react';
+import { useMemo, useRef, useState, type FormEvent } from 'react';
+import {
+  gradeQueueLabel,
+  matchesGradeQueueFilter,
+  sortGradeQueue,
+  type GradeQueueFilter,
+} from '@campus/shared/src/lmsReviewQueue';
 import { useAuth } from '@/components/AuthGuard';
 import {
   loadTeacherSubmissions,
@@ -19,6 +25,8 @@ import {
 } from '@/lib/teacherAssignments';
 import type { TeacherScope } from '@/lib/teacherCourse';
 import styles from './TeacherAssignments.module.css';
+
+const GRADE_FILTERS: GradeQueueFilter[] = ['all', 'needs_grade', 'graded'];
 
 type Props = {
   schoolId: string;
@@ -70,7 +78,14 @@ export function TeacherAssignments({ schoolId, courseId, assignments, refresh }:
   const [editDraft, setEditDraft] = useState({ title: '', description: '', dueAt: '', allowLateSubmission: false, updatedAt: null as string | null });
   const [editError, setEditError] = useState('');
   const [editBusy, setEditBusy] = useState(false);
+  const [gradeFilter, setGradeFilter] = useState<GradeQueueFilter>('needs_grade');
   const scope: TeacherScope = { uid: user?.uid ?? '', schoolId, courseId };
+  const queuedSubmissions = useMemo(() => {
+    if (!review) return [];
+    return sortGradeQueue(review.submissions).filter((row) =>
+      matchesGradeQueueFilter(row, gradeFilter),
+    );
+  }, [review, gradeFilter]);
 
   async function publish(event: FormEvent) {
     event.preventDefault();
@@ -119,6 +134,7 @@ export function TeacherAssignments({ schoolId, courseId, assignments, refresh }:
     setGradeValues({});
     setEditingUid(null);
     setRevisionReason('');
+    setGradeFilter('needs_grade');
     revisionToken.current = null;
     historyGeneration.current += 1;
     setGradeHistory(null);
@@ -126,7 +142,12 @@ export function TeacherAssignments({ schoolId, courseId, assignments, refresh }:
     setLoadingReview(true);
     try {
       const data = await loadTeacherSubmissions(scope, id);
-      if (reviewGeneration.current === generation) setReview(data);
+      if (reviewGeneration.current === generation) {
+        setReview(data);
+        setGradeFilter(
+          data.submissions.some((row) => row.score === null) ? 'needs_grade' : 'all',
+        );
+      }
     } catch (error) {
       if (reviewGeneration.current === generation)
         setReviewError(message(error, '無法確認作業繳交紀錄。'));
@@ -357,12 +378,39 @@ export function TeacherAssignments({ schoolId, courseId, assignments, refresh }:
                 {review && !loadingReview ? (
                   review.submissions.length === 0 ? <p>尚無學生繳交。</p> : (
                     <div className={styles.submissionList}>
-                      {review.submissions.map((submission) => {
+                      <div className={styles.queueFilters} role="group" aria-label="篩選繳交狀態">
+                        {GRADE_FILTERS.map((value) => {
+                          const count = review.submissions.filter((row) =>
+                            matchesGradeQueueFilter(row, value),
+                          ).length;
+                          return (
+                            <button
+                              key={value}
+                              type="button"
+                              className={styles.secondary}
+                              aria-pressed={gradeFilter === value}
+                              onClick={() => setGradeFilter(value)}
+                            >
+                              {gradeQueueLabel(value)} {count}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className={styles.note}>
+                        預設先看尚未評分的繳交。發布後，學生才看得到分數。
+                      </p>
+                      {queuedSubmissions.length === 0 ? (
+                        <p role="status">
+                          「{gradeQueueLabel(gradeFilter)}」目前沒有繳交。可改選「全部」查看其他狀態。
+                        </p>
+                      ) : null}
+                      {queuedSubmissions.map((submission) => {
                         const input = gradeValues[submission.uid] ?? { score: '', feedback: '' };
                         return (
                           <article key={submission.uid} className={styles.submission}>
                             <p className={styles.note}>
-                              學生編號：{submission.uid} · {timeLabel(submission.submittedAt)}
+                              學生編號：{submission.uid} · {timeLabel(submission.submittedAt)} ·{' '}
+                              {submission.score !== null ? '已評分並發布' : '已繳交・尚未評分'}
                             </p>
                             <p className={styles.answer}>{submission.content || '本次繳交未包含文字內容。'}</p>
                             {submission.score !== null ? (

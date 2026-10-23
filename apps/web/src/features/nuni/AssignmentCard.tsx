@@ -12,6 +12,13 @@ import {
   assignmentReceiptStatusLabel,
   assignmentSubmissionLate,
 } from '@campus/shared/src/assignmentFiles';
+import {
+  feedbackQueueLabel,
+  matchesFeedbackQueueFilter,
+  needsFeedbackReview,
+  sortFeedbackQueue,
+  type FeedbackQueueFilter,
+} from '@campus/shared/src/lmsReviewQueue';
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
 import { MutationForm, useClasses } from './CourseUI';
 import { CourseText } from './CourseMaterials';
@@ -79,8 +86,14 @@ function Assignment({ item, workspace, onConfirmed }: Props) {
   const [confirmClose, setConfirmClose] = useState(false);
   const [closeNotice, setCloseNotice] = useState('');
   const [accessDenied, setAccessDenied] = useState(false);
+  const [feedbackFilter, setFeedbackFilter] = useState<FeedbackQueueFilter>('needs_feedback');
   const mounted = useRef(true);
   const request = useRef(0);
+  const FEEDBACK_FILTERS: FeedbackQueueFilter[] = ['all', 'needs_feedback', 'reviewed'];
+  const orderedSubmissions = submissions === null ? null : sortFeedbackQueue(submissions);
+  const visibleCount =
+    orderedSubmissions?.filter((entry) => matchesFeedbackQueueFilter(entry, feedbackFilter))
+      .length ?? 0;
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -97,7 +110,12 @@ function Assignment({ item, workspace, onConfirmed }: Props) {
     setReading(true);
     try {
       const result = await classes.submissions(workspace.id, item.id);
-      if (mounted.current && run === request.current) setSubmissions(result);
+      if (mounted.current && run === request.current) {
+        setSubmissions(result);
+        setFeedbackFilter(
+          result.some((entry) => needsFeedbackReview(entry)) ? 'needs_feedback' : 'all',
+        );
+      }
     } catch (failure) {
       if (mounted.current && run === request.current) {
         if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
@@ -297,34 +315,72 @@ function Assignment({ item, workspace, onConfirmed }: Props) {
           )}
           {submissions !== null &&
             (submissions.length ? (
-              <ul className={`${shared.list} ${styles.submissions}`}>
-                {submissions.map((entry) => (
-                  <FeedbackRow
-                    key={entry.platformAccountId}
-                    entry={entry}
-                    dueAt={assignment.dueAt}
-                    save={async (feedback, key) => {
-                      const receipt = await classes.assignmentFeedback(
-                        workspace.id,
-                        item.id,
-                        entry.platformAccountId,
-                        feedback,
-                        key,
-                      );
-                      if (!mounted.current) throw new NuniError(409, 'SESSION_CHANGED');
-                      ++request.current;
-                      setReading(false);
-                      setSubmissions(
-                        (previous) =>
-                          previous?.map((value) =>
-                            value.platformAccountId === receipt.platformAccountId ? receipt : value,
-                          ) ?? [receipt],
-                      );
-                      return receipt;
-                    }}
-                  />
-                ))}
-              </ul>
+              <div>
+                <div className={shared.filters} role="group" aria-label="篩選回饋狀態">
+                  {FEEDBACK_FILTERS.map((value) => {
+                    const count = submissions.filter((entry) =>
+                      matchesFeedbackQueueFilter(entry, value),
+                    ).length;
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        aria-pressed={feedbackFilter === value}
+                        onClick={() => setFeedbackFilter(value)}
+                      >
+                        {feedbackQueueLabel(value)} {count}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className={styles.note}>
+                  預設先看尚未回饋的繳交。儲存後，學生才看得到。
+                </p>
+                {visibleCount === 0 ? (
+                  <p role="status" className={shared.muted}>
+                    「{feedbackQueueLabel(feedbackFilter)}」目前沒有繳交。可改選「全部」查看其他狀態。
+                  </p>
+                ) : null}
+                <ul className={`${shared.list} ${styles.submissions}`}>
+                  {/* Keep each row mounted so filter switches cannot discard unsaved editor state. */}
+                  {(orderedSubmissions ?? []).map((entry) => (
+                    <li
+                      key={entry.platformAccountId}
+                      hidden={!matchesFeedbackQueueFilter(entry, feedbackFilter)}
+                    >
+                      <FeedbackRow
+                        entry={entry}
+                        dueAt={assignment.dueAt}
+                        save={async (feedback, key) => {
+                          const receipt = await classes.assignmentFeedback(
+                            workspace.id,
+                            item.id,
+                            entry.platformAccountId,
+                            feedback,
+                            key,
+                          );
+                          if (!mounted.current) throw new NuniError(409, 'SESSION_CHANGED');
+                          ++request.current;
+                          setReading(false);
+                          setSubmissions(
+                            (previous) =>
+                              previous?.map((value) =>
+                                value.platformAccountId === receipt.platformAccountId
+                                  ? receipt
+                                  : value,
+                              ) ?? [receipt],
+                          );
+                          // Keep the just-saved row visible so the receipt/status stays on screen.
+                          setFeedbackFilter((current) =>
+                            matchesFeedbackQueueFilter(receipt, current) ? current : 'all',
+                          );
+                          return receipt;
+                        }}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </div>
             ) : (
               <p className={shared.muted}>尚未收到作業。</p>
             ))}
@@ -402,37 +458,36 @@ function FeedbackRow({
     };
   }, []);
   return (
-    <li>
-      <article aria-label={`${entry.displayName || '課程成員'}的繳交`}>
-        <div className={styles.heading}>
-          <h4>{entry.displayName || '課程成員'}</h4>
-          <span className={styles.metadata}>
-            <strong>
-              {assignmentReceiptStatusLabel(
-                entry.late === true || assignmentSubmissionLate(dueAt, entry.submittedAt),
-              )}
-            </strong>
-            <time dateTime={entry.submittedAt}>{formatTaipeiDateTime(entry.submittedAt)}</time>
-          </span>
-        </div>
-        {entry.files?.length ? <SubmittedFileList files={entry.files} /> : null}
-        <CourseText text={entry.body} />
-        {entry.teacherFeedback && (
-          <section className={styles.feedback} aria-label="目前老師回饋">
-            <h5>目前回饋</h5>
-            <CourseText text={entry.teacherFeedback} />
-            {entry.reviewedAt && Date.parse(entry.reviewedAt) < Date.parse(entry.submittedAt) && (
-              <p className={styles.note}>這則回饋早於最近一次繳交，請老師確認是否仍適用。</p>
+    <article aria-label={`${entry.displayName || '課程成員'}的繳交`}>
+      <div className={styles.heading}>
+        <h4>{entry.displayName || '課程成員'}</h4>
+        <span className={styles.metadata}>
+          <strong>
+            {assignmentReceiptStatusLabel(
+              entry.late === true || assignmentSubmissionLate(dueAt, entry.submittedAt),
             )}
-          </section>
-        )}
-        {notice && (
-          <p role="status" className={shared.receipt}>
-            {notice}
-          </p>
-        )}
-        <details className={`${shared.compose} ${styles.compose}`}>
-          <summary>{entry.teacherFeedback ? '編輯回饋' : '留下回饋'}</summary>
+          </strong>
+          <time dateTime={entry.submittedAt}>{formatTaipeiDateTime(entry.submittedAt)}</time>
+        </span>
+      </div>
+      {entry.files?.length ? <SubmittedFileList files={entry.files} /> : null}
+      <CourseText text={entry.body} />
+      {entry.teacherFeedback && (
+        <section className={styles.feedback} aria-label="目前老師回饋">
+          <h5>目前回饋</h5>
+          <CourseText text={entry.teacherFeedback} />
+          {entry.reviewedAt && Date.parse(entry.reviewedAt) < Date.parse(entry.submittedAt) && (
+            <p className={styles.note}>這則回饋早於最近一次繳交，請老師確認是否仍適用。</p>
+          )}
+        </section>
+      )}
+      {notice && (
+        <p role="status" className={shared.receipt}>
+          {notice}
+        </p>
+      )}
+      <details className={`${shared.compose} ${styles.compose}`}>
+        <summary>{entry.teacherFeedback ? '編輯回饋' : '留下回饋'}</summary>
           <MutationForm
             label="儲存回饋"
             submit={async (data, key) => {
@@ -508,6 +563,5 @@ function FeedbackRow({
           </MutationForm>
         </details>
       </article>
-    </li>
   );
 }
