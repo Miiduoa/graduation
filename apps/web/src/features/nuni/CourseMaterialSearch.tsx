@@ -37,7 +37,10 @@ function Search({ compact }: { compact: boolean }) {
   const request = useRef(0);
   const loadStarted = useRef(false);
   const mounted = useRef(true);
-  courseApi.current = classes;
+
+  useEffect(() => {
+    courseApi.current = classes;
+  });
 
   useEffect(() => {
     mounted.current = true;
