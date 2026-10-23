@@ -72,6 +72,43 @@ it('publishes once with a reserved assignment id and confirms success', async ()
   expect(props.refresh).toHaveBeenCalledOnce();
 });
 
+it('defaults the review queue to ungraded work and keeps graded rows behind the graded filter', async () => {
+  vi.mocked(loadTeacherSubmissions).mockResolvedValue({
+    title: '練習一',
+    points: 100,
+    submissions: [
+      {
+        uid: 'done',
+        content: '已評內容',
+        submittedAt: '2026-10-07T00:00:00Z',
+        score: 90,
+        feedback: '很好',
+        gradedAt: '2026-10-07T01:00:00Z',
+        revisionCount: 0,
+      },
+      {
+        uid: 'pending',
+        content: '待評內容',
+        submittedAt: '2026-10-08T00:00:00Z',
+        score: null,
+        feedback: '',
+        gradedAt: null,
+        revisionCount: 0,
+      },
+    ],
+  });
+  render(<TeacherAssignments {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: '查看繳交' }));
+  await waitFor(() => expect(screen.getByText('待評內容')).toBeTruthy());
+  expect(screen.queryByText('已評內容')).toBeNull();
+  expect(screen.getByRole('button', { name: '尚未評分 1' }).getAttribute('aria-pressed')).toBe(
+    'true',
+  );
+  fireEvent.click(screen.getByRole('button', { name: '已評分 1' }));
+  expect(screen.getByText('已評內容')).toBeTruthy();
+  expect(screen.queryByText('待評內容')).toBeNull();
+});
+
 it('loads real submissions and publishes grading without changing course totals', async () => {
   vi.mocked(loadTeacherSubmissions)
     .mockResolvedValueOnce({
@@ -99,6 +136,9 @@ it('loads real submissions and publishes grading without changing course totals'
     { uid: 'teacher', schoolId: 'pu', courseId: 'course' },
     'work', 'student', 0, '需訂正',
   ));
+  // After publish, the row leaves the default「尚未評分」queue.
+  await waitFor(() => expect(screen.getByRole('button', { name: '已評分 1' })).toBeTruthy());
+  fireEvent.click(screen.getByRole('button', { name: '已評分 1' }));
   await waitFor(() => expect(screen.getByText('已發布：0 / 100 分')).toBeTruthy());
 });
 

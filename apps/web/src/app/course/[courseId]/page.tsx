@@ -104,11 +104,16 @@ function Assignment({
       {submitted ? (
         <div role="status">
           <p>
-            已繳交
+            {assignment.grade
+              ? '已繳交 · 教師已發布評分'
+              : '已繳交 · 等待老師評分'}
             {assignment.submittedAt
               ? ` · ${new Date(assignment.submittedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}`
               : ''}
           </p>
+          {!assignment.grade ? (
+            <p>作業已收到；老師公布評分後，會顯示在這裡。</p>
+          ) : null}
           <p style={{ whiteSpace: 'pre-wrap' }}>{assignment.submittedText ?? savedText}</p>
           {assignment.grade ? (
             <div

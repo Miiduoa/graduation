@@ -321,12 +321,39 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
                       </Text>
                     ) : null}
                   </View>
-                ) : null}
+                ) : (
+                  <View
+                    style={{
+                      marginTop: 16,
+                      backgroundColor: '#fff',
+                      borderRadius: 12,
+                      padding: 14,
+                      borderWidth: 1,
+                      borderColor: '#E5E5EA',
+                    }}
+                  >
+                    <Text style={{ fontSize: 14, color: '#3C3C43', lineHeight: 22 }}>
+                      作業已收到；老師公布評分後，會顯示在這裡。
+                    </Text>
+                  </View>
+                )}
                 <View
-                  style={{ marginTop: 16, padding: 14, backgroundColor: '#dcfce7', borderRadius: 12 }}
+                  style={{
+                    marginTop: 16,
+                    padding: 14,
+                    backgroundColor: grade ? '#dcfce7' : '#e8f1ff',
+                    borderRadius: 12,
+                  }}
                 >
-                  <Text style={{ color: '#166534', fontSize: 14, fontWeight: '600', textAlign: 'center' }}>
-                    你已繳交此作業
+                  <Text
+                    style={{
+                      color: grade ? '#166534' : '#003F8A',
+                      fontSize: 14,
+                      fontWeight: '600',
+                      textAlign: 'center',
+                    }}
+                  >
+                    {grade ? '已繳交 · 教師已發布評分' : '已繳交 · 等待老師評分'}
                   </Text>
                 </View>
               </View>
