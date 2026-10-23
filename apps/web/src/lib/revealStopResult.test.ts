@@ -3,18 +3,25 @@ import { revealStopResult } from './revealStopResult';
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
-it('scrolls the stop result to the start of the viewport', () => {
+function paneAt(top: number) {
   const node = document.createElement('section');
-  const scrollIntoView = vi.fn();
-  node.scrollIntoView = scrollIntoView;
-  revealStopResult(node);
-  expect(scrollIntoView).toHaveBeenCalledWith({
-    block: 'start',
-    inline: 'nearest',
-    behavior: 'smooth',
+  node.tabIndex = -1;
+  vi.spyOn(node, 'getBoundingClientRect').mockReturnValue({
+    x: 0, y: top, top, bottom: top + 400, left: 0, right: 360, width: 360, height: 400, toJSON() { return this; },
   });
+  const focus = vi.spyOn(node, 'focus');
+  return { node, focus };
+}
+
+it('scrolls by the visual offset so CSS order cannot hide the heading', () => {
+  const scrollBy = vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
+  const { node, focus } = paneAt(850);
+  revealStopResult(node);
+  expect(scrollBy).toHaveBeenCalledWith({ top: 826, left: 0, behavior: 'smooth' });
+  expect(focus).toHaveBeenCalledWith({ preventScroll: true });
 });
 
 it('uses instant scrolling when the user prefers reduced motion', () => {
@@ -24,15 +31,17 @@ it('uses instant scrolling when the user prefers reduced motion', () => {
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   }));
-  const node = document.createElement('section');
-  const scrollIntoView = vi.fn();
-  node.scrollIntoView = scrollIntoView;
+  const scrollBy = vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
+  const { node } = paneAt(400);
   revealStopResult(node);
-  expect(scrollIntoView).toHaveBeenCalledWith({
-    block: 'start',
-    inline: 'nearest',
-    behavior: 'auto',
-  });
+  expect(scrollBy).toHaveBeenCalledWith({ top: 376, left: 0, behavior: 'auto' });
+});
+
+it('does not move the page when the result is already at the top', () => {
+  const scrollBy = vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
+  const { node } = paneAt(24);
+  revealStopResult(node);
+  expect(scrollBy).not.toHaveBeenCalled();
 });
 
 it('ignores a missing node instead of throwing', () => {

@@ -30,6 +30,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   Element.prototype.scrollIntoView = vi.fn();
+  vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
   vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
   vi.stubGlobal('isSecureContext', true);
@@ -415,11 +416,8 @@ it('scrolls arrival results into view as soon as a stop is selected', async () =
   renderListing();
   fireEvent.click(await findGroupButton('校門口・往沙鹿'));
   const pane = await screen.findByTestId('stop-arrivals-pane');
-  expect(pane.scrollIntoView).toHaveBeenCalledWith({
-    block: 'start',
-    inline: 'nearest',
-    behavior: 'smooth',
-  });
+  expect(window.scrollBy).toHaveBeenCalled();
+  expect(document.activeElement).toBe(pane);
   expect(await screen.findByText(/正在取得這個站牌的班次|目前沒有班次預估/)).toBeTruthy();
 });
 
@@ -436,14 +434,11 @@ it('scrolls the opened route panel into view instead of leaving it below the fol
   } : emptyArrivals());
   renderExplorer();
   const row = await screen.findByRole('button', { name: '162 往 沙鹿火車站 3 分' });
-  vi.mocked(Element.prototype.scrollIntoView).mockClear();
+  vi.mocked(window.scrollBy).mockClear();
   fireEvent.click(row);
   expect(row.getAttribute('aria-expanded')).toBe('true');
-  expect(screen.getByTestId('opened-route-panel').scrollIntoView).toHaveBeenCalledWith({
-    block: 'start',
-    inline: 'nearest',
-    behavior: 'smooth',
-  });
+  expect(screen.getByTestId('opened-route-panel')).toBeTruthy();
+  expect(window.scrollBy).toHaveBeenCalled();
 });
 
 it('abort and selection identity prevent an old station response from replacing the current one', async () => {
