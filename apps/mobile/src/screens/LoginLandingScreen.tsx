@@ -34,19 +34,39 @@ export default function LoginLandingScreen() {
   return (
     <SafeAreaView testID="login-landing" style={s.page}>
       <ScrollView contentContainerStyle={s.content}>
-        <Text style={s.brand}>CAMPUS ONE</Text>
+        <View style={s.brandRow}>
+          <View
+            style={s.brandMark}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
+            <Text style={s.brandLetter}>
+              C<Text style={s.brandNumber}>1</Text>
+            </Text>
+          </View>
+          <Text style={s.brand}>Campus One</Text>
+        </View>
         <View style={s.intro}>
           <Text style={s.school}>課程・校園・每天的事</Text>
-          <Text style={s.heading}>校園資訊，{'\n'}打開就能查看。</Text>
+          <Text accessibilityRole="header" style={s.heading}>
+            校園資訊，{'\n'}打開就能查看。
+          </Text>
           <Text style={s.body}>不必登入學校帳號，就能查看各校地圖、公車、圖書館與公開公告。</Text>
         </View>
         <SchoolBrowsingControl />
         <TodayTimetablePanel
           onOpenImport={() => safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })}
-          onOpenTimetable={(term) => safeNavigate(navigation, 'PersonalTimetable', term ? { term } : undefined)}
+          onOpenTimetable={(term) =>
+            safeNavigate(navigation, 'PersonalTimetable', term ? { term } : undefined)
+          }
         />
         <View style={s.publicPanel}>
-          <Text style={s.title}>先找需要的資訊</Text>
+          <View style={s.sectionHeading}>
+            <Text accessibilityRole="header" style={s.title}>
+              先找需要的資訊
+            </Text>
+            <Text style={s.sectionCaption}>校園生活</Text>
+          </View>
           {(
             [
               ['Map', '校園地圖', '搜尋地點、查看位置與步行路線'],
@@ -54,22 +74,40 @@ export default function LoginLandingScreen() {
               ['BusSchedule', '公車查詢', '查看站點與官方到站資訊'],
               ['公告總覽', '公開公告', '查看學校發布的消息'],
             ] as const
-          ).map(([route, title, detail]) => (
+          ).map(([route, title, detail], index) => (
             <Pressable
               key={route}
               testID={`public-${route}`}
               accessibilityRole="button"
               accessibilityLabel={title}
-              style={s.publicButton}
+              style={({ pressed }) => [s.publicButton, pressed && s.rowPressed]}
               onPress={() => safeNavigate(navigation, route)}
             >
-              <Text style={s.publicTitle}>{title}</Text>
-              <Text style={s.publicDetail}>{detail}</Text>
+              <Text
+                style={s.serviceNumber}
+                accessibilityElementsHidden
+                importantForAccessibility="no"
+              >
+                {String(index + 1).padStart(2, '0')}
+              </Text>
+              <View style={s.serviceCopy}>
+                <Text style={s.publicTitle}>{title}</Text>
+                <Text style={s.publicDetail}>{detail}</Text>
+              </View>
+              <Text
+                style={s.serviceArrow}
+                accessibilityElementsHidden
+                importantForAccessibility="no"
+              >
+                →
+              </Text>
             </Pressable>
           ))}
         </View>
         <View style={s.panel}>
-          <Text style={s.title}>Google 帳號</Text>
+          <Text accessibilityRole="header" style={s.title}>
+            Google 帳號
+          </Text>
           <Text style={s.body}>和網頁版使用同一個帳號，加入課程、繳交作業或管理店家。</Text>
           {auth.pendingLogout || auth.error ? (
             <Text accessibilityRole="alert" style={s.body}>
@@ -79,7 +117,7 @@ export default function LoginLandingScreen() {
           <Pressable
             testID="login-start"
             accessibilityRole="button"
-            style={s.button}
+            style={({ pressed }) => [s.button, pressed && s.buttonPressed]}
             onPress={() => safeNavigate(navigation, 'NuniWorkspace')}
           >
             <Text style={s.buttonText}>
@@ -96,7 +134,9 @@ export default function LoginLandingScreen() {
           </Pressable>
         </View>
         <View style={s.schoolPanel}>
-          <Text style={s.title}>連線學校帳號</Text>
+          <Text accessibilityRole="header" style={s.title}>
+            連線學校帳號
+          </Text>
           <Text style={s.body} testID={schoolEntry ? undefined : 'school-login-hint'}>
             {schoolEntry
               ? '只有讀取學校提供的個人課表與成績，才需要連線學校帳號。'
@@ -106,7 +146,7 @@ export default function LoginLandingScreen() {
             <Pressable
               testID="school-login-start"
               accessibilityRole="button"
-              style={s.schoolButton}
+              style={({ pressed }) => [s.schoolButton, pressed && s.rowPressed]}
               onPress={() => safeNavigate(navigation, 'SSOLogin')}
             >
               <Text style={s.schoolButtonText}>前往學校登入</Text>
@@ -121,49 +161,119 @@ export default function LoginLandingScreen() {
 const createStyles = () =>
   StyleSheet.create({
     page: { flex: 1, backgroundColor: theme.colors.bg },
-    content: { padding: 28, flexGrow: 1 },
+    content: {
+      paddingHorizontal: 24,
+      paddingTop: 20,
+      flexGrow: 1,
+      width: '100%',
+      maxWidth: 640,
+      alignSelf: 'center',
+    },
+    brandRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    brandMark: {
+      width: 34,
+      height: 34,
+      borderRadius: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: theme.colors.accent,
+    },
+    brandLetter: { color: theme.colors.onAccent, fontSize: 23, fontWeight: '600' },
+    brandNumber: { fontSize: 13 },
     brand: {
       color: theme.colors.text,
-      letterSpacing: 2,
+      letterSpacing: -0.4,
       fontWeight: '700',
-      fontSize: 14,
-      marginTop: 16,
+      fontSize: 19,
     },
-    intro: { paddingVertical: 36 },
-    publicPanel: { marginBottom: 28 },
+    intro: { paddingTop: 34, paddingBottom: 30 },
+    publicPanel: { marginTop: 12, marginBottom: 32 },
+    sectionHeading: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'baseline',
+      justifyContent: 'space-between',
+      gap: 8,
+      paddingBottom: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    sectionCaption: { color: theme.colors.muted, fontSize: 12 },
     publicButton: {
+      minHeight: 84,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
       paddingVertical: 18,
       borderBottomWidth: 1,
       borderBottomColor: theme.colors.border,
     },
-    publicTitle: { color: theme.colors.accent, fontSize: 17, fontWeight: '600' },
-    publicDetail: { color: theme.colors.muted, fontSize: 13, marginTop: 6 },
-    school: { color: theme.colors.textSecondary, fontSize: 13, marginBottom: 18 },
+    serviceNumber: {
+      color: theme.colors.muted,
+      fontSize: 12,
+      fontVariant: ['tabular-nums'],
+      width: 24,
+    },
+    serviceCopy: { flex: 1, minWidth: 0 },
+    serviceArrow: { color: theme.colors.accent, fontSize: 22 },
+    rowPressed: { backgroundColor: theme.colors.accentSoft },
+    buttonPressed: { opacity: 0.82 },
+    publicTitle: { color: theme.colors.text, fontSize: 16, fontWeight: '600', lineHeight: 23 },
+    publicDetail: { color: theme.colors.muted, fontSize: 13, lineHeight: 21, marginTop: 4 },
+    school: {
+      color: theme.colors.textSecondary,
+      fontSize: 12,
+      letterSpacing: 0.5,
+      marginBottom: 14,
+    },
     heading: {
       color: theme.colors.text,
-      fontSize: 36,
+      fontSize: 34,
       fontWeight: '600',
-      lineHeight: 49,
-      letterSpacing: -1,
+      lineHeight: 47,
+      letterSpacing: -0.6,
     },
     body: { color: theme.colors.muted, fontSize: 14, lineHeight: 25, marginTop: 16 },
     panel: {
-      padding: 24,
+      padding: 22,
       backgroundColor: theme.colors.focusSurface,
       borderColor: theme.colors.border,
       borderWidth: 1,
-      borderRadius: 8,
+      borderRadius: 14,
     },
-    title: { color: theme.colors.text, fontSize: 19, fontWeight: '600' },
-    button: { backgroundColor: theme.colors.accent, padding: 15, borderRadius: 4, marginTop: 24 },
+    title: { color: theme.colors.text, fontSize: 18, lineHeight: 26, fontWeight: '600' },
+    button: {
+      backgroundColor: theme.colors.accent,
+      minHeight: 50,
+      justifyContent: 'center',
+      padding: 15,
+      borderRadius: 8,
+      marginTop: 22,
+    },
     buttonText: {
       color: theme.colors.onAccent,
       textAlign: 'center',
       fontSize: 15,
       fontWeight: '600',
     },
-    schoolPanel: { paddingTop: 28 },
-    schoolButton: { minHeight: 48, justifyContent: 'center', paddingVertical: 14, marginTop: 10 },
+    schoolPanel: { paddingTop: 28, paddingHorizontal: 2 },
+    schoolButton: {
+      minHeight: 48,
+      alignSelf: 'flex-start',
+      justifyContent: 'center',
+      paddingVertical: 14,
+      paddingHorizontal: 8,
+      marginLeft: -8,
+      marginTop: 10,
+      borderRadius: 6,
+    },
     schoolButtonText: { color: theme.colors.accent, fontSize: 15, fontWeight: '600' },
-    footer: { color: theme.colors.muted, fontSize: 11, paddingVertical: 40 },
+    footer: {
+      color: theme.colors.muted,
+      fontSize: 11,
+      paddingVertical: 28,
+      marginTop: 24,
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border,
+    },
   });
