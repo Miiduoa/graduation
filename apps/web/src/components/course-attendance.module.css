@@ -1,0 +1,223 @@
+.workspace {
+  min-width: 0;
+}
+.navigation {
+  margin-bottom: 28px;
+}
+.navigation a {
+  display: inline-flex;
+  align-items: center;
+  gap: 24px;
+  min-height: 44px;
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.workspaceHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.workspaceHeading h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.startPanel {
+  padding: 24px;
+  background: var(--accent-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+.startPanel > div {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+.startPanel h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 600;
+}
+.startPanel p {
+  margin: 0;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.history {
+  margin-top: 36px;
+  margin-bottom: 4px;
+  font-size: 18px;
+  font-weight: 600;
+}
+.detail {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.session {
+  padding: 24px 0;
+  border-bottom: 1px solid var(--border);
+}
+.sessionHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.sessionHeading :is(h3, h4, p) {
+  margin: 0;
+}
+.sessionHeading > div {
+  min-width: 0;
+}
+.label {
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: var(--muted);
+}
+.sessionHeading h3 {
+  font-size: 17px;
+  font-weight: 600;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+.count {
+  color: var(--muted);
+}
+.count strong {
+  font-size: 24px;
+  color: var(--text);
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+.codePanel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 24px;
+  margin-top: 24px;
+  padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.codePanel img {
+  max-width: 100%;
+  height: auto;
+}
+.codePanel > div {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.codePanel code {
+  display: block;
+  overflow-wrap: anywhere;
+  margin-bottom: 16px;
+  font-size: 14px;
+  padding: 12px;
+  background: var(--panel);
+  border-radius: var(--radius-sm);
+}
+.form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 20px;
+  max-width: 520px;
+}
+.form p {
+  margin: 0;
+}
+.confirmed {
+  padding: 12px 16px;
+  background: var(--success-soft);
+  color: var(--success);
+  border-radius: var(--radius-sm);
+  line-height: 1.8;
+}
+.roster {
+  margin-top: 24px;
+  padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.roster ul {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0 0;
+}
+.roster li {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.roster li > span {
+  min-width: 0;
+}
+.roster small {
+  display: block;
+  color: var(--muted);
+}
+.roster time {
+  font-size: 13px;
+  color: var(--muted);
+}
+.empty {
+  padding: 28px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-top: 20px;
+}
+.empty h3 {
+  margin: 0 0 12px;
+  font-size: 17px;
+  font-weight: 600;
+}
+.empty p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.8;
+}
+@media (max-width: 560px) {
+  .codePanel {
+    padding: 12px;
+  }
+  .startPanel {
+    padding: 20px;
+  }
+  .sessionHeading {
+    gap: 12px;
+  }
+  .roster,
+  .empty {
+    padding: 20px;
+  }
+}
+@media (max-width: 380px) {
+  .actions > button,
+  .startPanel > button,
+  .sessionHeading > button {
+    flex: 1 1 100%;
+  }
+}

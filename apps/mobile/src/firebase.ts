@@ -115,6 +115,11 @@ export function getFirebaseApp() {
     });
   }
 
+  if (USE_FIREBASE_EMULATOR && !String(cfg.projectId || '').startsWith('demo-')) {
+    // 模擬器模式只能接 demo- 專案，避免測試資料寫進正式專案
+    throw new Error(`模擬器模式只能用 demo- 開頭的專案，現在是「${cfg.projectId}」。`);
+  }
+
   return initializeApp({
     apiKey: cfg.apiKey,
     authDomain: cfg.authDomain,
@@ -162,8 +167,30 @@ export function getCloudFunctionRegion(): string {
   );
 }
 
+function trimFunctionsBaseUrl(value: string): string {
+  return value.trim().replace(/\/+$/, '');
+}
+
+export function getFunctionsBaseUrl(): string | null {
+  if (USE_FIREBASE_EMULATOR) return null;
+  const extra = (Constants.expoConfig as any)?.extra ?? (Constants as any)?.manifest?.extra ?? {};
+  const raw = String(
+    extra.functionsBaseUrl ??
+      process.env.EXPO_PUBLIC_FUNCTIONS_BASE_URL ??
+      extra.cloudFunctionBaseUrl ??
+      process.env.EXPO_PUBLIC_CLOUD_FUNCTION_BASE_URL ??
+      '',
+  ).trim();
+  if (!raw) return null;
+  const trimmed = trimFunctionsBaseUrl(raw);
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
 export function getFunctionsInstance(): Functions {
-  const functions = getFunctions(getFirebaseApp(), getCloudFunctionRegion());
+  const customDomain = getFunctionsBaseUrl();
+  const functions = customDomain
+    ? getFunctions(getFirebaseApp(), customDomain)
+    : getFunctions(getFirebaseApp(), getCloudFunctionRegion());
   if (USE_FIREBASE_EMULATOR && !_emulatorWired.functions) {
     try {
       connectFunctionsEmulator(functions, EMULATOR_HOST, EMULATOR_FUNCTIONS_PORT);

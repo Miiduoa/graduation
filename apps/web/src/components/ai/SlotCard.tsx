@@ -1,11 +1,10 @@
 'use client';
 
 /**
- * Campus AI-First — SlotCard
+ * SlotCard
  * --------------------------
  * AI 生成的卡片基底（Answer / Action / Compare / Schedule 四變體）
  *
- * 設計規範對應：docs/design/AI_FIRST_REDESIGN.md §4 Slot Card
  *  - 來源戳記 100% 覆蓋
  *  - 信心度永遠顯示
  *  - 可釘到 Today / 可展開為頁

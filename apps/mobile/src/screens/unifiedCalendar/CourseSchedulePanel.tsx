@@ -50,15 +50,15 @@ const PERIODS = [
   { period: 2, time: '09:10-10:00' },
   { period: 3, time: '10:10-11:00' },
   { period: 4, time: '11:10-12:00' },
-  { period: 5, time: '12:10-13:00' },
-  { period: 6, time: '13:10-14:00' },
-  { period: 7, time: '14:10-15:00' },
-  { period: 8, time: '15:10-16:00' },
-  { period: 9, time: '16:10-17:00' },
-  { period: 10, time: '17:10-18:00' },
-  { period: 11, time: '18:30-19:20' },
-  { period: 12, time: '19:25-20:15' },
-  { period: 13, time: '20:20-21:10' },
+  { period: 5, time: '13:10-14:00' },
+  { period: 6, time: '14:10-15:00' },
+  { period: 7, time: '15:10-16:00' },
+  { period: 8, time: '16:10-17:00' },
+  { period: 9, time: '17:10-18:00' },
+  { period: 10, time: '18:05-18:55' },
+  { period: 11, time: '19:00-19:50' },
+  { period: 12, time: '19:55-20:45' },
+  { period: 13, time: '20:50-21:40' },
 ];
 
 const COURSE_COLORS = [
@@ -66,9 +66,9 @@ const COURSE_COLORS = [
   '#FF2D55',
   '#FF9500',
   '#34C759',
-  '#5856D6',
+  theme.colors.accent,
   '#FF3B30',
-  '#5856D6',
+  theme.colors.accent,
   '#14B8A6',
 ];
 

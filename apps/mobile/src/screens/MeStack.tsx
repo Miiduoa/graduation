@@ -2,15 +2,13 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
-// AI-First v1：我的 Tab 主入口（舊版 PersonalHubScreen / ProfileEditScreen /
-// SettingsScreen / NotificationsScreen / AchievementsScreen 已下架，
-// 引用全部走 *AiFirstScreen）
+// 「我」入口：個人資料、課表、訊息、設定
 import MeAiFirstScreen from './MeAiFirstScreen';
 import ProfileEditAiFirstScreen from './ProfileEditAiFirstScreen';
 import AchievementsAiFirstScreen from './AchievementsAiFirstScreen';
 import SettingsAiFirstScreen from './SettingsAiFirstScreen';
-import NotificationsAiFirstScreen from './NotificationsAiFirstScreen';
 import { NotificationSettingsScreen } from './NotificationSettingsScreen';
+import NotificationsAiFirstScreen from './NotificationsAiFirstScreen';
 import { QRCodeScreen } from './QRCodeScreen';
 import { GlobalSearchScreen } from './GlobalSearchScreen';
 import { WidgetPreviewScreen } from './WidgetPreviewScreen';
@@ -20,8 +18,11 @@ import CompanionCollectionScreen from './CompanionCollectionScreen';
 import ConstellationScreen from './ConstellationScreen';
 import DataFlowDebugScreen from './DataFlowDebugScreen';
 import { AdminDashboardScreen } from './AdminDashboardScreen';
+import { UnavailableFeatureScreen } from './UnavailableFeatureScreen';
+import ShopDockScreen from './ShopDockScreen';
 import { AdminCourseVerifyScreen } from './AdminCourseVerifyScreen';
 import { SSOLoginScreen } from './SSOLoginScreen';
+import { NuniWorkspaceScreen } from './NuniWorkspaceScreen';
 import { DataExportScreen } from './DataExportScreen';
 import { AccountDeletionScreen } from './AccountDeletionScreen';
 import { AccessibilitySettingsScreen } from './AccessibilitySettingsScreen';
@@ -31,7 +32,6 @@ import { ThemePreviewScreen } from './ThemePreviewScreen';
 import { FeedbackScreen } from './FeedbackScreen';
 import { HelpScreen } from './HelpScreen';
 import { PostLoginDebugScreen } from './PostLoginDebugScreen';
-import { MerchantHubScreen } from './MerchantHubScreen';
 import { CreditAuditStack } from './CreditAuditStack';
 import AIModelManagerScreen from './AIModelManagerScreen';
 import { useThemeMode } from '../state/theme';
@@ -69,35 +69,75 @@ function GuardedCreditAuditStack(props: any) {
   return <CreditAuditMeBlockedScreen roleLabel={displayName} navigation={props.navigation} />;
 }
 
-function CreditAuditMeBlockedScreen({ roleLabel, navigation }: { roleLabel: string; navigation: any }) {
+function CreditAuditMeBlockedScreen({
+  roleLabel,
+  navigation,
+}: {
+  roleLabel: string;
+  navigation: any;
+}) {
   const { View, Text, Pressable, ScrollView } = require('react-native');
   const { Ionicons } = require('@expo/vector-icons');
   const { theme } = require('../ui/theme');
   return (
-    <ScrollView contentContainerStyle={{ padding: 20, alignItems: 'center', backgroundColor: theme.bg }}>
+    <ScrollView
+      contentContainerStyle={{
+        padding: 20,
+        alignItems: 'center',
+        backgroundColor: theme.colors.bg,
+      }}
+    >
       <View style={{ marginTop: 60, padding: 24, alignItems: 'center', maxWidth: 420 }}>
-        <View style={{
-          width: 80, height: 80, borderRadius: 24,
-          backgroundColor: 'rgba(88,86,214,0.10)',
-          alignItems: 'center', justifyContent: 'center', marginBottom: 16,
-        }}>
-          <Ionicons name="school-outline" size={48} color="#5856D6" />
+        <View
+          style={{
+            width: 80,
+            height: 80,
+            borderRadius: 24,
+            backgroundColor: theme.colors.accentSoft,
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: 16,
+          }}
+        >
+          <Ionicons name="school-outline" size={48} color={theme.colors.accent} />
         </View>
-        <Text style={{ fontSize: 20, fontWeight: '700', color: theme.text, marginBottom: 8, textAlign: 'center' }}>
+        <Text
+          style={{
+            fontSize: 20,
+            fontWeight: '700',
+            color: theme.colors.text,
+            marginBottom: 8,
+            textAlign: 'center',
+          }}
+        >
           學分試算僅限在校學生使用
         </Text>
-        <Text style={{ fontSize: 14, color: theme.muted, lineHeight: 22, textAlign: 'center', marginBottom: 24 }}>
-          目前身份為 <Text style={{ fontWeight: '700', color: theme.text }}>{roleLabel}</Text>。
-          學分試算是學生個人選課與畢業進度規劃工具 — 教師/職員請使用「教學工作台」,系主任/管理員請使用「管理後台」。
+        <Text
+          style={{
+            fontSize: 14,
+            color: theme.colors.muted,
+            lineHeight: 22,
+            textAlign: 'center',
+            marginBottom: 24,
+          }}
+        >
+          目前身份為{' '}
+          <Text style={{ fontWeight: '700', color: theme.colors.text }}>{roleLabel}</Text>。
+          學分試算是學生個人選課與畢業進度規劃工具 —
+          教師/職員請使用「教學工作台」,系主任/管理員請使用「管理後台」。
         </Text>
         <Pressable
           onPress={() => navigation?.goBack?.()}
           style={{
-            paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12,
-            backgroundColor: '#5856D6',
+            paddingHorizontal: 20,
+            paddingVertical: 12,
+            borderRadius: 12,
+            backgroundColor: theme.colors.accent,
           }}
         >
-          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>← 返回</Text>
+          <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 14 }}>
+            ← 返回
+          </Text>
         </Pressable>
       </View>
     </ScrollView>
@@ -122,7 +162,7 @@ export function MeStack() {
       initialRouteName="MeHome"
       screenOptions={createStackScreenOptions()}
     >
-      {/* AI-First v1：landing 換新版 */}
+      {/* landing 換新版 */}
       <Stack.Screen
         name="MeHome"
         component={MeAiFirstScreen}
@@ -135,6 +175,11 @@ export function MeStack() {
       />
       <Stack.Screen name="SSOLogin" component={SSOLoginScreen} options={{ title: '學校登入' }} />
       <Stack.Screen
+        name="NuniWorkspace"
+        component={NuniWorkspaceScreen}
+        options={{ title: 'Campus One' }}
+      />
+      <Stack.Screen
         name="Notifications"
         component={NotificationsAiFirstScreen}
         options={{ title: '通知', headerShown: false }}
@@ -142,30 +187,30 @@ export function MeStack() {
       <Stack.Screen
         name="NotificationSettings"
         component={NotificationSettingsScreen}
-        options={{ title: '通知設定' }}
+        options={{ title: '通知設定', headerShown: false }}
       />
-      <Stack.Screen name="QRCode" component={QRCodeScreen} options={{ title: 'QR 碼' }} />
+      <Stack.Screen
+        name="QRCode"
+        component={QRCodeScreen}
+        options={{ title: 'QR 碼', headerShown: false }}
+      />
       <Stack.Screen
         name="MerchantHub"
-        component={MerchantHubScreen}
-        options={{ title: '商家接單' }}
+        component={ShopDockScreen}
+        options={{ title: '店家工作台', headerShown: false }}
       />
 
       <Stack.Screen
         name="Achievements"
         component={GuardedAchievementsAiFirst}
-        options={{ title: '成就與積分' }}
+        options={{ title: '成就與積分', headerShown: false }}
       />
       <Stack.Screen
         name="CampusGarden"
         component={CampusGardenScreen}
         options={{ title: '校園園地' }}
       />
-      <Stack.Screen
-        name="Companion"
-        component={CompanionScreen}
-        options={{ title: '校園精靈' }}
-      />
+      <Stack.Screen name="Companion" component={CompanionScreen} options={{ title: '校園精靈' }} />
       <Stack.Screen
         name="CompanionCollection"
         component={CompanionCollectionScreen}
@@ -200,43 +245,55 @@ export function MeStack() {
       <Stack.Screen
         name="AIModelManager"
         component={AIModelManagerScreen}
-        options={{ title: 'AI 模型管理' }}
+        options={{ title: '裝置模型' }}
       />
-      <Stack.Screen name="Settings" component={SettingsAiFirstScreen} options={{ title: '設定', headerShown: false }} />
+      <Stack.Screen
+        name="Settings"
+        component={SettingsAiFirstScreen}
+        options={{ title: '設定', headerShown: false }}
+      />
       <Stack.Screen
         name="LanguageSettings"
         component={LanguageSettingsScreen}
-        options={{ title: '語言設定' }}
+        options={{ title: '語言設定', headerShown: false }}
       />
       <Stack.Screen
         name="AccessibilitySettings"
         component={AccessibilitySettingsScreen}
-        options={{ title: '無障礙設定' }}
+        options={{ title: '無障礙設定', headerShown: false }}
       />
       <Stack.Screen
         name="ThemePreview"
         component={ThemePreviewScreen}
-        options={{ title: '主題預覽' }}
+        options={{ title: '外觀', headerShown: false }}
       />
 
-      <Stack.Screen name="Help" component={HelpScreen} options={{ title: '幫助中心' }} />
+      <Stack.Screen
+        name="Help"
+        component={HelpScreen}
+        options={{ title: '幫助與回饋', headerShown: false }}
+      />
       <Stack.Screen
         name="PostLoginDebug"
         component={PostLoginDebugScreen}
         options={{ title: 'Post-login 除錯' }}
       />
-      <Stack.Screen name="Feedback" component={FeedbackScreen} options={{ title: '意見回饋' }} />
+      <Stack.Screen
+        name="Feedback"
+        component={FeedbackScreen}
+        options={{ title: '意見回饋', headerShown: false }}
+      />
       <Stack.Screen name="BugReport" component={BugReportScreen} options={{ title: '回報問題' }} />
 
       <Stack.Screen
         name="DataExport"
         component={DataExportScreen}
-        options={{ title: '資料匯出' }}
+        options={{ title: '資料匯出', headerShown: false }}
       />
       <Stack.Screen
         name="AccountDeletion"
         component={AccountDeletionScreen}
-        options={{ title: '刪除帳號' }}
+        options={{ title: '刪除帳號', headerShown: false }}
       />
 
       {/* 🔒 Route-guarded — 非授權使用者即使 deep-link 也會看到拒絕畫面 */}

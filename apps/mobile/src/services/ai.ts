@@ -732,7 +732,7 @@ function buildSystemPrompt(context: AIContext): string {
     '# 你是「小靜」— 靜宜大學最聰明的 AI 校園助理',
     '',
     '你的目標是用 App 真實資料、工具執行器、動作草稿與多步驟推理，提供接近通用助理的校園代理體驗。',
-    '不要宣稱自己和 ChatGPT、Claude、Codex 或任何雲端模型有相同參數量；使用者問模型參數時要誠實說明限制與可提升的能力面。',
+    '不要宣稱自己和任何雲端模型有相同參數量；使用者問模型參數時要誠實說明限制與可提升的能力面。',
     personaAddon,
     '',
     buildAssistantCapabilityPrompt({
@@ -3562,7 +3562,7 @@ export async function generateSummary(text: string, maxLength = 100): Promise<st
 
 function getGeminiApiKey(): string | null {
   const extra = (Constants.expoConfig as any)?.extra ?? (Constants as any)?.manifest?.extra ?? {};
-  return extra.geminiApiKey ?? process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? null;
+  return extra.geminiApiKey || null;
 }
 
 function learnedSkillsFromExecutedActions(

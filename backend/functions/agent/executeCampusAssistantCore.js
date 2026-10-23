@@ -2,6 +2,7 @@
 
 const { getFirestore } = require('firebase-admin/firestore');
 const { createAuthzHelpers } = require('../authz');
+const { isOnlineOrderingEnabled, ONLINE_ORDERING_OFF_MESSAGE } = require('../lib/onlineOrdering');
 const {
   answerWithServerWebSearch,
   shouldUseServerWebSearch,
@@ -9,9 +10,12 @@ const {
 } = require('../assistantAgent');
 const {
   getLastUserMessage,
+  normalizeAssistantText,
   detectCampusAssistantIntent,
   toJsDate,
   formatAssistantDate,
+  isScheduleQuestionMessage,
+  extractScheduleSnippet,
 } = require('../lib/assistantFormat');
 
 function extractRepairIdFromMessage(text) {
@@ -51,11 +55,28 @@ const {
   resolveFoodOrderInput,
 } = require('../lib/campusWriteIntentResolve');
 const searchCampusDocs = require('./tools/searchCampusDocs');
+const { relevantItems } = require('../lib/assistantRelevance');
 const { runTool } = require('./tools/registry');
 
 const db = getFirestore();
 
 /** 這些意圖走結構化寫入草稿（含確認卡），略過 LLM 主路徑以免搶答成一般聊天 */
+const ASSISTANT_UNAVAILABLE_COPY = '助理暫時沒辦法回答，請稍後再試。';
+
+function modelTimeoutMs() {
+  const value = Number(process.env.ASSISTANT_MODEL_TIMEOUT_MS);
+  return Number.isFinite(value) && value > 0 ? value : 45000;
+}
+
+/** 模型太久沒回就當作失敗。 */
+function withModelTimeout(promise) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('model-timeout')), modelTimeoutMs());
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 const INTENTS_SKIP_LLM = new Set([
   'reserve_seat',
   'borrow_book',
@@ -137,7 +158,7 @@ async function executeCampusAssistantCore({
   const context =
     request.data?.context && typeof request.data.context === 'object' ? request.data.context : {};
   const timeZone = context.timezone || 'Asia/Taipei';
-  const lastUserMessage = getLastUserMessage(rawMessages);
+  const lastUserMessage = normalizeAssistantText(getLastUserMessage(rawMessages));
   const intent =
     typeof routingIntent === 'string' && routingIntent.trim()
       ? routingIntent.trim()
@@ -186,6 +207,11 @@ async function executeCampusAssistantCore({
 
   if (uid) {
     await assertActiveSchoolMember(schoolId, uid);
+  }
+  // The profile may change between runtime prefetch and core execution.
+  // Never attach data collected for another account or school to this response.
+  if (prefetched.scope?.uid !== uid || prefetched.scope?.schoolId !== schoolId) {
+    prefetched = {};
   }
 
   const response = {
@@ -261,6 +287,17 @@ async function executeCampusAssistantCore({
     }
   }
 
+  let modelUnavailable = false;
+  const answerUnavailable = async (route = 'model_unavailable') => {
+    response.content = ASSISTANT_UNAVAILABLE_COPY;
+    response.suggestions = [];
+    response.actions = [];
+    response.citations = [];
+    response.unavailable = true;
+    response.debug.route = route;
+    return await finalizeResponse();
+  };
+
   if (!INTENTS_SKIP_LLM.has(intent) && lastUserMessage) {
     const tFetch = Date.now();
     const [announcements, events, menus, pois] = await Promise.all([
@@ -306,10 +343,13 @@ async function executeCampusAssistantCore({
       events,
       menus,
       pois,
+      pendingAssignments: Array.isArray(prefetched.assignments) ? prefetched.assignments : null,
       todaySchedule: prefetched.todaySchedule || null,
       dailyBrief: prefetched.dailyBrief || null,
     });
-    const modelBacked = await buildModelBackedAssistantResponse({
+    let modelBacked = { modelResult: null, response: null };
+    try {
+      modelBacked = await withModelTimeout(buildModelBackedAssistantResponse({
       rawMessages,
       lastUserMessage,
       schoolId,
@@ -328,7 +368,11 @@ async function executeCampusAssistantCore({
       },
       uid,
       sessionId: context.sessionId != null && String(context.sessionId).trim() ? String(context.sessionId).trim() : null,
-    });
+    }));
+    } catch (error) {
+      console.warn('[AI] model call failed:', error?.message || error);
+      modelBacked = { modelResult: { provider: 'none', errors: [{ message: error?.message || String(error) }] }, response: null };
+    }
     modelTrace = {
       provider: modelBacked.modelResult?.provider || 'none',
       model: modelBacked.modelResult?.model || null,
@@ -362,6 +406,9 @@ async function executeCampusAssistantCore({
         (ragWebAnswer?.sources?.length || 0);
       return await finalizeResponse();
     }
+    // 沒有金鑰、模型出錯或逾時：下面查得到實際資料的問題（公告、活動、作業…）照樣用資料回答；
+    // 一般問題不拿校園摘要充當答案，改成照實說沒辦法回答
+    modelUnavailable = true;
   }
 
   if (intent === 'leave_status') {
@@ -696,7 +743,7 @@ async function executeCampusAssistantCore({
       isRenew ? '我已整理續借確認，確認後才會更新借閱期限。' : '我已整理還書確認，確認後才會更新借閱狀態。',
       '',
       `書籍：${loanTitle}`,
-      resolvedLoan.loan.dueAt ? `到期：${formatAssistantDate(toJsDate(resolvedLoan.loan.dueAt), timeZone)}` : '',
+      resolvedLoan.loan.dueAt ? `到期：${formatAssistantDate(resolvedLoan.loan.dueAt)}` : '',
     ].filter(Boolean).join('\n');
     response.suggestions = isRenew ? ['查看借閱', '改續借其他書', '今日摘要'] : ['查看借閱', '改還其他書', '今日摘要'];
     response.actions = [
@@ -782,6 +829,13 @@ async function executeCampusAssistantCore({
   }
 
   if (intent === 'food_order') {
+    if (!isOnlineOrderingEnabled()) {
+      response.content = ONLINE_ORDERING_OFF_MESSAGE;
+      response.suggestions = [];
+      response.actions = [];
+      response.cards = [];
+      return await finalizeResponse();
+    }
     if (!uid) {
       response.content = '訂餐要先登入，並說明餐廳與品項（例：學生餐廳雞排飯＋紅茶）。';
       response.suggestions = ['功能說明'];
@@ -818,7 +872,7 @@ async function executeCampusAssistantCore({
 
     const pendingAssignments = Array.isArray(prefetched.assignments)
       ? prefetched.assignments
-      : await fetchAssistantPendingAssignments(uid, context.groupId);
+      : await fetchAssistantPendingAssignments(uid, schoolId, { preferredGroupId: context.groupId });
     response.debug.sourcesUsed = pendingAssignments.length;
     const target = pendingAssignments[0];
 
@@ -837,7 +891,7 @@ async function executeCampusAssistantCore({
       '3. 用 45 分鐘完成第一版內容。',
       '4. 截止前預留 20 分鐘檢查格式與附件。',
       '',
-      `截止時間：${formatAssistantDate(target.dueAt, true) || '未設定'}`,
+      `截止時間：${formatAssistantDate(target.dueAt) || '未設定'}`,
     ].join('\n');
     response.suggestions = ['設定提醒', '更細拆步驟', '查看作業'];
     response.actions = [
@@ -873,11 +927,11 @@ async function executeCampusAssistantCore({
       return await finalizeResponse();
     }
 
-    const pendingAssignments = Array.isArray(prefetched.assignments)
+    let pendingAssignments = Array.isArray(prefetched.assignments)
       ? prefetched.assignments
-      : await fetchAssistantPendingAssignments(uid, context.groupId);
+      : await fetchAssistantPendingAssignments(uid, schoolId, { preferredGroupId: context.groupId });
     const [weeklyReport, announcements] = await Promise.all([
-      fetchAssistantWeeklyReport(uid),
+      fetchAssistantWeeklyReport(uid, schoolId),
       Array.isArray(prefetched.announcements)
         ? Promise.resolve(prefetched.announcements)
         : fetchAssistantAnnouncements(schoolId),
@@ -887,6 +941,12 @@ async function executeCampusAssistantCore({
       pendingAssignments.length + (weeklyReport ? 1 : 0) + announcements.length;
 
     if (intent === 'assignment_status') {
+      if (modelUnavailable) {
+        // 沒有模型時：對得上問題的作業才列；一份都對不上（或讀不到）就照實說沒辦法回答
+        const related = relevantItems(lastUserMessage, pendingAssignments, (item) => `${item.title || ''} ${item.groupName || ''}`);
+        if (related.length === 0) return await answerUnavailable();
+        pendingAssignments = related;
+      }
       if (pendingAssignments.length === 0) {
         response.content =
           '目前沒有快到期的待繳作業。你可以改問我近期公告、活動，或請我幫你規劃今天的學習重點。';
@@ -935,11 +995,16 @@ async function executeCampusAssistantCore({
       return await finalizeResponse();
     }
 
+    if (modelUnavailable) return await answerUnavailable();
     const lines = [];
     if (displayName) {
       lines.push(`${displayName}，這是你目前最值得先關注的重點：`);
     } else {
       lines.push('這是你目前最值得先關注的重點：');
+    }
+
+    if (prefetched.todaySchedule?.status === 'unavailable') {
+      lines.push(prefetched.todaySchedule.message);
     }
 
     if (pendingAssignments.length > 0) {
@@ -985,9 +1050,14 @@ async function executeCampusAssistantCore({
   }
 
   if (intent === 'announcements') {
-    const announcements = Array.isArray(prefetched.announcements)
+    let announcements = Array.isArray(prefetched.announcements)
       ? prefetched.announcements
       : await fetchAssistantAnnouncements(schoolId);
+    if (modelUnavailable) {
+      // 沒有模型時只拿對得上問題的公告；對不上就照實說沒辦法回答
+      announcements = relevantItems(lastUserMessage, announcements, (item) => `${item.title || ''} ${item.body || item.content || ''}`);
+      if (announcements.length === 0) return await answerUnavailable();
+    }
     response.debug.sourcesUsed = announcements.length;
 
     if (announcements.length === 0) {
@@ -997,15 +1067,20 @@ async function executeCampusAssistantCore({
       return await finalizeResponse();
     }
 
+    // 問「什麼時候、幾點」時，把公告內文裡講時段的那一句帶出來，不只給標題和發布時間
+    const asksSchedule = isScheduleQuestionMessage(lastUserMessage);
     response.content = [
       `目前先幫你整理 ${Math.min(announcements.length, 3)} 則最新公告：`,
       '',
       announcements
         .slice(0, 3)
-        .map(
-          (announcement, index) =>
-            `${index + 1}. ${announcement.title ?? '未命名公告'}${announcement.publishedAt ? `（${formatAssistantDate(announcement.publishedAt)}）` : ''}`,
-        )
+        .map((announcement, index) => {
+          const line = `${index + 1}. ${announcement.title ?? '未命名公告'}${announcement.publishedAt ? `（${formatAssistantDate(announcement.publishedAt)}）` : ''}`;
+          const timeNote = asksSchedule
+            ? extractScheduleSnippet(String(announcement.body || announcement.content || ''))
+            : '';
+          return timeNote ? `${line}\n   時段：${timeNote}` : line;
+        })
         .join('\n'),
     ].join('\n');
     response.suggestions = ['查看詳情', '近期活動', '推薦餐點'];
@@ -1028,12 +1103,16 @@ async function executeCampusAssistantCore({
   }
 
   if (intent === 'events') {
-    const events = (await fetchAssistantEvents(schoolId))
+    let events = (await fetchAssistantEvents(schoolId))
       .filter((event) => {
         const start = toJsDate(event.startsAt);
         return !start || start >= new Date(Date.now() - 60 * 60 * 1000);
       })
       .slice(0, 4);
+    if (modelUnavailable) {
+      events = relevantItems(lastUserMessage, events, (item) => `${item.title || ''} ${item.description || ''} ${item.location || ''}`);
+      if (events.length === 0) return await answerUnavailable();
+    }
 
     response.debug.sourcesUsed = events.length;
 
@@ -1050,7 +1129,7 @@ async function executeCampusAssistantCore({
         .slice(0, 3)
         .map(
           (event, index) =>
-            `${index + 1}. ${event.title ?? '未命名活動'}${event.location ? `（${event.location}）` : ''}${event.startsAt ? `，${formatAssistantDate(event.startsAt, true)}` : ''}`,
+            `${index + 1}. ${event.title ?? '未命名活動'}${event.location ? `（${event.location}）` : ''}${event.startsAt ? `，${formatAssistantDate(event.startsAt)}` : ''}`,
         )
         .join('\n'),
     ].join('\n');
@@ -1072,7 +1151,11 @@ async function executeCampusAssistantCore({
   }
 
   if (intent === 'menus') {
-    const menus = (await fetchAssistantMenus(schoolId)).slice(0, 5);
+    let menus = (await fetchAssistantMenus(schoolId)).slice(0, 5);
+    if (modelUnavailable) {
+      menus = relevantItems(lastUserMessage, menus, (item) => `${item.name || ''} ${item.cafeteria || item.cafeteriaName || ''} ${item.description || ''}`);
+      if (menus.length === 0) return await answerUnavailable();
+    }
     response.debug.sourcesUsed = menus.length;
 
     if (menus.length === 0) {
@@ -1111,15 +1194,16 @@ async function executeCampusAssistantCore({
 
   if (intent === 'pois') {
     const pois = await fetchAssistantPois(schoolId);
-    const poi = buildPoiResponse(lastUserMessage, pois);
+    let poi = buildPoiResponse(lastUserMessage, pois);
+    if (poi) {
+      // 地點不經過模型：找到的地點也要真的對得上問題，不然就當作沒找到
+      const related = relevantItems(lastUserMessage, [poi], (item) => `${item.name || ''} ${item.category || ''} ${item.description || ''}`);
+      poi = related[0] || null;
+    }
     response.debug.sourcesUsed = pois.length > 0 ? 1 : 0;
 
-    if (!poi) {
-      response.content =
-        '我目前找不到符合的校園地點。你可以再說更具體一點，例如圖書館、行政大樓、餐廳或宿舍。';
-      response.suggestions = ['圖書館', '行政大樓', '餐廳'];
-      return await finalizeResponse();
-    }
+    // 找不到對得上的地點：跟其他查不到的情況一樣照實說沒辦法回答
+    if (!poi) return await answerUnavailable('pois_no_match');
 
     response.content = [
       `找到「${poi.name ?? '未命名地點'}」了。`,
@@ -1175,6 +1259,7 @@ async function executeCampusAssistantCore({
     return await finalizeResponse();
   }
 
+  if (modelUnavailable) return await answerUnavailable();
   const [announcements, events] = await Promise.all([
     fetchAssistantAnnouncements(schoolId),
     fetchAssistantEvents(schoolId),
@@ -1195,4 +1280,4 @@ async function executeCampusAssistantCore({
   return await finalizeResponse();
 }
 
-module.exports = { executeCampusAssistantCore };
+module.exports = { executeCampusAssistantCore, ASSISTANT_UNAVAILABLE_COPY };

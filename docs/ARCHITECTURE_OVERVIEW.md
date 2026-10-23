@@ -81,7 +81,7 @@ Today → role workspace → Campus → Inbox → Me
 
 ## AI boundary
 
-AI 路徑不是資料權威來源。授權 context 先經 retriever / tool boundary，再由模型提出 suggestion、draft 或 candidate action；高敏感 write 需要 confirmation。詳細設計：[AI_ASSISTANT_ARCHITECTURE](AI_ASSISTANT_ARCHITECTURE.md)。
+AI 路徑不是資料權威來源。授權 context 先經 retriever / tool boundary，再由模型提出 suggestion、draft 或 candidate action；高敏感 write 需要 confirmation。
 
 ## Degraded mode
 

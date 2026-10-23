@@ -12,6 +12,7 @@
  * 資料來源：後端 callable `computeCompanionState` + 本機 cache。
  */
 import React, { useCallback, useEffect, useState } from 'react';
+import { theme } from '../ui/theme';
 import { ScrollView, Text, View, RefreshControl, Pressable, ActivityIndicator } from 'react-native';
 import type {
   SpriteState,
@@ -112,7 +113,7 @@ export default function CompanionScreen({ navigation }: { navigation?: { navigat
 
       {/* ── 4 需求 ── */}
       <Section title="今日精靈四象">
-        <NeedBar label="學" value={sprite.needs.study} color="#5856D6" />
+        <NeedBar label="學" value={sprite.needs.study} color={theme.colors.accent} />
         <NeedBar label="動" value={sprite.needs.move} color="#34C759" />
         <NeedBar label="食" value={sprite.needs.nourish} color="#FF9500" />
         <NeedBar label="友" value={sprite.needs.social} color="#FF3B30" />

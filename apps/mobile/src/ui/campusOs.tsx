@@ -1,9 +1,10 @@
 import React from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, Text, View, Platform } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { AmbientCueSignalType } from '../data/types';
 import { shadowStyle, theme } from './theme';
+import { useThemeVersion } from './useThemeStyleSheet';
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
@@ -68,11 +69,12 @@ export function ContextStrip(props: {
   description?: string;
   right?: React.ReactNode;
 }) {
+  useThemeVersion();
   return (
     <View
       style={{
         padding: theme.space.lg,
-        borderRadius: 22,
+        borderRadius: theme.radius.xl,
         backgroundColor: theme.colors.surface,
         gap: theme.space.sm,
         ...shadowStyle(theme.shadows.md),
@@ -119,13 +121,14 @@ export function ConfidenceBadge(props: {
   state: 'high' | 'medium' | 'low' | 'live';
   label: string;
 }) {
+  useThemeVersion();
   const colors =
     props.state === 'high'
       ? { bg: theme.colors.successSoft, fg: theme.colors.success }
       : props.state === 'medium'
         ? { bg: theme.colors.warningSoft, fg: theme.colors.warning }
         : props.state === 'live'
-          ? { bg: theme.colors.fresh, fg: theme.colors.fresh }
+          ? { bg: theme.colors.freshSoft, fg: theme.colors.fresh }
           : { bg: theme.colors.dangerSoft, fg: theme.colors.danger };
 
   return (
@@ -134,7 +137,7 @@ export function ConfidenceBadge(props: {
         alignSelf: 'flex-start',
         paddingHorizontal: 10,
         paddingVertical: 4,
-        borderRadius: 20,
+        borderRadius: theme.radius.full,
         backgroundColor: colors.bg,
       }}
     >
@@ -145,7 +148,7 @@ export function ConfidenceBadge(props: {
   );
 }
 
-// ─── Hero Action Card — full gradient background ────────
+// Primary task card
 export function HeroActionCard(props: {
   icon: IconName;
   eyebrow: string;
@@ -156,43 +159,10 @@ export function HeroActionCard(props: {
   actionLabel?: string;
   onPress?: () => void;
 }) {
-  const palette =
-    props.tone === 'warning'
-      ? { colors: ['#FEF3C7', '#FDE68A'] as [string, string], fg: '#FF9500', iconBg: '#FEF3C720' }
-      : props.tone === 'success'
-        ? { colors: ['#D1FAE5', '#A7F3D0'] as [string, string], fg: '#34C759', iconBg: '#D1FAE520' }
-        : props.tone === 'danger'
-          ? {
-              colors: ['#FEE2E2', '#FECACA'] as [string, string],
-              fg: '#D70015',
-              iconBg: '#FEE2E220',
-            }
-          : {
-              colors: ['#F2F2F7', '#E5E5EA'] as [string, string],
-              fg: '#5856D6',
-              iconBg: 'rgba(17,24,39,0.06)',
-            };
-
-  // Dark mode adjustments
-  const isDark = theme.mode === 'dark';
-  const gradColors = isDark
-    ? props.tone === 'warning'
-      ? ['#422006', '#451A03']
-      : props.tone === 'success'
-        ? ['#064E3B', '#052E16']
-        : props.tone === 'danger'
-          ? ['#450A0A', '#7F1D1D']
-          : ['#2E1065', '#1E1B4B']
-    : palette.colors;
-  const fg = isDark
-    ? props.tone === 'warning'
-      ? '#FBBF24'
-      : props.tone === 'success'
-        ? '#34D399'
-        : props.tone === 'danger'
-          ? '#F87171'
-          : '#A78BFA'
-    : palette.fg;
+  useThemeVersion();
+  const tone = props.tone ?? 'accent';
+  const fg = theme.colors[tone];
+  const gradColors: [string, string] = [theme.colors[`${tone}Soft`], theme.colors.surface];
 
   const content = (
     <LinearGradient
@@ -201,7 +171,7 @@ export function HeroActionCard(props: {
       end={{ x: 1, y: 1 }}
       style={{
         padding: 22,
-        borderRadius: 22,
+        borderRadius: theme.radius.xl,
         gap: 16,
         ...shadowStyle(theme.shadows.lg),
       }}
@@ -212,10 +182,10 @@ export function HeroActionCard(props: {
           style={{
             width: 52,
             height: 52,
-            borderRadius: 18,
+            borderRadius: theme.radius.lg,
             alignItems: 'center',
             justifyContent: 'center',
-            backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.6)',
+            backgroundColor: theme.colors.surface,
           }}
         >
           <Ionicons name={props.icon} size={24} color={fg} />
@@ -232,14 +202,13 @@ export function HeroActionCard(props: {
             fontWeight: '700',
             letterSpacing: 1.5,
             textTransform: 'uppercase',
-            opacity: 0.8,
           }}
         >
           {props.eyebrow}
         </Text>
         <Text
           style={{
-            color: isDark ? '#F5F3FF' : theme.colors.text,
+            color: theme.colors.text,
             fontSize: 20,
             fontWeight: '700',
             letterSpacing: -0.4,
@@ -251,7 +220,7 @@ export function HeroActionCard(props: {
         {props.description && (
           <Text
             style={{
-              color: isDark ? 'rgba(245,243,255,0.7)' : theme.colors.textSecondary,
+              color: theme.colors.textSecondary,
               fontSize: 14,
               lineHeight: 21,
               marginTop: 2,
@@ -269,8 +238,8 @@ export function HeroActionCard(props: {
             alignSelf: 'flex-start',
             paddingHorizontal: 18,
             paddingVertical: 10,
-            borderRadius: 14,
-            backgroundColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.7)',
+            borderRadius: theme.radius.md,
+            backgroundColor: theme.colors.surface,
           }}
         >
           <Text style={{ color: fg, fontSize: 14, fontWeight: '700' }}>{props.actionLabel}</Text>
@@ -284,6 +253,16 @@ export function HeroActionCard(props: {
   return (
     <Pressable
       onPress={props.onPress}
+      accessibilityLabel={[
+        props.eyebrow,
+        props.title,
+        props.description,
+        props.meta,
+        props.actionLabel,
+      ]
+        .filter(Boolean)
+        .join('，')}
+      accessibilityRole="button"
       style={({ pressed }) => ({
         opacity: pressed ? 0.85 : 1,
         transform: [{ scale: pressed ? 0.98 : 1 }],
@@ -294,7 +273,7 @@ export function HeroActionCard(props: {
   );
 }
 
-// ─── Timeline Card (redesigned) ─────────────────────────
+// Timeline card
 export function TimelineCard(props: {
   icon: IconName;
   title: string;
@@ -304,14 +283,19 @@ export function TimelineCard(props: {
   tint?: string;
   onPress?: () => void;
 }) {
+  useThemeVersion();
   const tint = props.tint ?? theme.colors.accent;
   return (
     <Pressable
       disabled={!props.onPress}
       onPress={props.onPress}
+      accessibilityLabel={[props.title, props.description, props.meta, props.hint]
+        .filter(Boolean)
+        .join('，')}
+      accessibilityRole={props.onPress ? 'button' : undefined}
       style={({ pressed }) => ({
         padding: 16,
-        borderRadius: 20,
+        borderRadius: theme.radius.xl,
         backgroundColor: theme.colors.surface,
         gap: 10,
         opacity: pressed ? 0.85 : 1,
@@ -333,7 +317,7 @@ export function TimelineCard(props: {
             style={{
               width: 44,
               height: 44,
-              borderRadius: 14,
+              borderRadius: theme.radius.md,
               alignItems: 'center',
               justifyContent: 'center',
             }}
@@ -390,6 +374,7 @@ export function ActionableInboxRow(props: {
   actionLabel: string;
   onPress: () => void;
 }) {
+  useThemeVersion();
   const palette =
     props.urgency === 'critical'
       ? { bg: theme.colors.dangerSoft, fg: theme.colors.danger }
@@ -402,9 +387,19 @@ export function ActionableInboxRow(props: {
   return (
     <Pressable
       onPress={props.onPress}
+      accessibilityLabel={[
+        props.title,
+        props.reason,
+        props.consequence,
+        props.nextStep,
+        props.actionLabel,
+      ]
+        .filter(Boolean)
+        .join('，')}
+      accessibilityRole="button"
       style={({ pressed }) => ({
         padding: 18,
-        borderRadius: 22,
+        borderRadius: theme.radius.xl,
         backgroundColor: theme.colors.surface,
         gap: 14,
         opacity: pressed ? 0.85 : 1,
@@ -426,7 +421,7 @@ export function ActionableInboxRow(props: {
             style={{
               width: 44,
               height: 44,
-              borderRadius: 14,
+              borderRadius: theme.radius.md,
               alignItems: 'center',
               justifyContent: 'center',
             }}
@@ -459,7 +454,7 @@ export function ActionableInboxRow(props: {
       <View
         style={{
           padding: 12,
-          borderRadius: 14,
+          borderRadius: theme.radius.md,
           backgroundColor: theme.colors.surface2,
           gap: 4,
         }}
@@ -477,7 +472,7 @@ export function ActionableInboxRow(props: {
           alignSelf: 'flex-start',
           paddingHorizontal: 16,
           paddingVertical: 10,
-          borderRadius: 14,
+          borderRadius: theme.radius.md,
           backgroundColor: palette.bg,
         }}
       >
@@ -499,15 +494,20 @@ export function AmbientCueCard(props: {
   onPress?: () => void;
   onDismiss?: () => void;
 }) {
+  useThemeVersion();
   const palette = getAmbientCuePalette(props.signalType);
 
   return (
     <Pressable
       disabled={!props.onPress}
       onPress={props.onPress}
+      accessibilityLabel={[props.headline, props.body, props.metric, props.actionLabel]
+        .filter(Boolean)
+        .join('，')}
+      accessibilityRole={props.onPress ? 'button' : undefined}
       style={({ pressed }) => ({
         padding: 18,
-        borderRadius: 22,
+        borderRadius: theme.radius.xl,
         backgroundColor: theme.colors.surface,
         gap: 14,
         opacity: pressed ? 0.85 : 1,
@@ -521,7 +521,7 @@ export function AmbientCueCard(props: {
           style={{
             width: 44,
             height: 44,
-            borderRadius: 14,
+            borderRadius: theme.radius.md,
             alignItems: 'center',
             justifyContent: 'center',
           }}
@@ -578,7 +578,7 @@ export function AmbientCueCard(props: {
           style={{
             paddingHorizontal: 16,
             paddingVertical: 8,
-            borderRadius: 14,
+            borderRadius: theme.radius.md,
             backgroundColor: palette.bg,
           }}
         >
@@ -600,32 +600,19 @@ export function RoleCtaCard(props: {
   actionLabel: string;
   onPress: () => void;
 }) {
-  const palette =
-    props.tone === 'teacher'
-      ? { colors: ['#D1FAE5', '#A7F3D0'] as const, fg: '#34C759' }
-      : props.tone === 'admin'
-        ? { colors: ['#FEF3C7', '#FDE68A'] as const, fg: '#FF9500' }
-        : { colors: ['#F2F2F7', '#E5E5EA'] as const, fg: '#5856D6' };
-
-  const isDark = theme.mode === 'dark';
-  const gradColors = isDark
-    ? props.tone === 'teacher'
-      ? ['#064E3B', '#052E16']
-      : props.tone === 'admin'
-        ? ['#422006', '#451A03']
-        : ['#2E1065', '#1E1B4B']
-    : palette.colors;
-  const fg = isDark
-    ? props.tone === 'teacher'
-      ? '#34D399'
-      : props.tone === 'admin'
-        ? '#FBBF24'
-        : '#A78BFA'
-    : palette.fg;
+  useThemeVersion();
+  const role =
+    props.tone === 'admin' ? 'roleAdmin' : props.tone === 'teacher' ? 'roleTeacher' : 'roleStudent';
+  const fg = theme.colors[role];
+  const gradColors: [string, string] = [theme.colors[`${role}Soft`], theme.colors.surface];
 
   return (
     <Pressable
       onPress={props.onPress}
+      accessibilityLabel={[props.roleLabel, props.title, props.description, props.actionLabel]
+        .filter(Boolean)
+        .join('，')}
+      accessibilityRole="button"
       style={({ pressed }) => ({
         opacity: pressed ? 0.85 : 1,
         transform: [{ scale: pressed ? 0.97 : 1 }],
@@ -637,7 +624,7 @@ export function RoleCtaCard(props: {
         end={{ x: 1, y: 1 }}
         style={{
           padding: 22,
-          borderRadius: 22,
+          borderRadius: theme.radius.xl,
           gap: 14,
           ...shadowStyle(theme.shadows.md),
         }}
@@ -647,10 +634,10 @@ export function RoleCtaCard(props: {
             style={{
               width: 48,
               height: 48,
-              borderRadius: 16,
+              borderRadius: theme.radius.lg,
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.6)',
+              backgroundColor: theme.colors.surface,
             }}
           >
             <Ionicons name={props.icon} size={22} color={fg} />
@@ -663,14 +650,13 @@ export function RoleCtaCard(props: {
                 fontWeight: '700',
                 letterSpacing: 1.5,
                 textTransform: 'uppercase',
-                opacity: 0.8,
               }}
             >
               {props.roleLabel}
             </Text>
             <Text
               style={{
-                color: isDark ? '#F5F3FF' : theme.colors.text,
+                color: theme.colors.text,
                 fontSize: 16,
                 fontWeight: '700',
                 marginTop: 3,
@@ -683,7 +669,7 @@ export function RoleCtaCard(props: {
         {props.description && (
           <Text
             style={{
-              color: isDark ? 'rgba(245,243,255,0.7)' : theme.colors.textSecondary,
+              color: theme.colors.textSecondary,
               lineHeight: 21,
               fontSize: 14,
             }}
@@ -700,22 +686,22 @@ export function RoleCtaCard(props: {
   );
 }
 
-// ─── Completion State (redesigned with gradient) ────────
+// Completion state
 export function CompletionState(props: {
   title: string;
   description: string;
   actionLabel?: string;
   onPress?: () => void;
 }) {
-  const isDark = theme.mode === 'dark';
+  useThemeVersion();
   return (
     <LinearGradient
-      colors={isDark ? ['#064E3B', '#052E16'] : ['#D1FAE5', '#ECFDF5']}
+      colors={[theme.colors.successSoft, theme.colors.surface]}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={{
         padding: 24,
-        borderRadius: 22,
+        borderRadius: theme.radius.xl,
         alignItems: 'center',
         gap: 14,
         ...shadowStyle(theme.shadows.md),
@@ -725,17 +711,17 @@ export function CompletionState(props: {
         style={{
           width: 60,
           height: 60,
-          borderRadius: 20,
+          borderRadius: theme.radius.full,
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.7)',
+          backgroundColor: theme.colors.surface,
         }}
       >
-        <Ionicons name="checkmark-done" size={28} color={isDark ? '#34D399' : '#34C759'} />
+        <Ionicons name="checkmark-done" size={28} color={theme.colors.success} />
       </View>
       <Text
         style={{
-          color: isDark ? '#F5F3FF' : theme.colors.text,
+          color: theme.colors.text,
           fontSize: 17,
           fontWeight: '700',
         }}
@@ -744,7 +730,7 @@ export function CompletionState(props: {
       </Text>
       <Text
         style={{
-          color: isDark ? 'rgba(245,243,255,0.7)' : theme.colors.textSecondary,
+          color: theme.colors.textSecondary,
           fontSize: 14,
           lineHeight: 21,
           textAlign: 'center',
@@ -755,16 +741,17 @@ export function CompletionState(props: {
       {props.actionLabel && props.onPress ? (
         <Pressable
           onPress={props.onPress}
+          accessibilityRole="button"
           style={({ pressed }) => ({
             marginTop: 4,
             paddingHorizontal: 22,
             paddingVertical: 12,
-            borderRadius: 14,
-            backgroundColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.7)',
+            borderRadius: theme.radius.md,
+            backgroundColor: theme.colors.surface,
             opacity: pressed ? 0.8 : 1,
           })}
         >
-          <Text style={{ color: isDark ? '#34D399' : '#34C759', fontSize: 14, fontWeight: '700' }}>
+          <Text style={{ color: theme.colors.success, fontSize: 14, fontWeight: '700' }}>
             {props.actionLabel}
           </Text>
         </Pressable>

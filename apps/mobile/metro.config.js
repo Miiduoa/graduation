@@ -14,5 +14,8 @@ config.resolver.nodeModulesPaths = [
 ];
 
 config.resolver.disableHierarchicalLookup = false;
+config.resolver.assetExts = [
+  ...new Set([...(config.resolver.assetExts || []), 'bin', 'gz', 'wasm']),
+];
 
 module.exports = config;

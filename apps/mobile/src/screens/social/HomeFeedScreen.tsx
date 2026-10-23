@@ -1,14 +1,5 @@
 /* eslint-disable */
-/**
- * 校園動態（Feed）
- *
- * 變更（vs. 舊版）：
- *  - 頂端加入 Story Strip（24h Story 的圓形入口列，含「+ 我的」）
- *  - 加入篩選列（全部 / 我訂閱 / 圖文）
- *  - 卡片支援 mediaUrls 的圖片 grid（最多 4 張）
- *  - 卡片提供「按讚 / 留言數 / 看板 chip」三個可點觸點
- *  - 提供 saved/blocked 過濾的擴充點（未來接 user/{uid}/savedPosts 與 blockedUsers）
- */
+/** 同校貼文與限時動態，可依訂閱看板或圖片篩選。 */
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   View,
@@ -27,6 +18,7 @@ import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme, shadowStyle } from '../../ui/theme';
+import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 import { EmptyState } from '../../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../../ui/navigationTheme';
 import { useAuth } from '../../state/auth';
@@ -85,6 +77,21 @@ function mediaUrlsOf(p: CampusPostDoc): string[] {
 }
 
 export function HomeFeedScreen() {
+  const { user, loading } = useAuth();
+  const { school } = useSchool();
+  if (loading) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+        <ActivityIndicator color={theme.colors.accent} />
+        <Text style={{ color: theme.colors.textSecondary }}>正在確認登入狀態…</Text>
+      </View>
+    );
+  }
+  return <HomeFeedContent key={JSON.stringify([user?.uid, school?.id])} />;
+}
+
+function HomeFeedContent() {
+  const styles = useThemeStyleSheet(createStyles);
   const injectedNav = useCampusSocialStackNav();
   const fallbackNav = useNavigation<any>();
   const nav = injectedNav ?? fallbackNav;
@@ -101,32 +108,55 @@ export function HomeFeedScreen() {
   const [filter, setFilter] = useState<FilterKey>('all');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const likeFlightRef = useRef(false);
+  const loadVersion = useRef(0);
 
   const load = useCallback(async () => {
-    if (isFirebaseMockMode() || !school?.id || !auth.user?.uid) {
-      setPosts([]);
-      setBoards([]);
-      setSubscribedBoardIds(new Set());
-      setStories([]);
-      return;
+    const version = ++loadVersion.current;
+    setLoadError('');
+    try {
+      if (isFirebaseMockMode() || !school?.id || !auth.user?.uid) {
+        setPosts([]);
+        setBoards([]);
+        setSubscribedBoardIds(new Set());
+        setStories([]);
+        return;
+      }
+      const [rows, boardList, subs, storyRows] = await Promise.all([
+        fetchRecentCampusPosts(school.id, undefined, 60),
+        listBoards(school.id, 80),
+        listSubscribedBoardIds(auth.user.uid, school.id, { throwOnError: true }),
+        listActiveStoriesForSchool(school.id, 80, { throwOnError: true }),
+      ]);
+      if (loadVersion.current !== version) return;
+      setPosts(rankFeedPosts(rows, 80));
+      setBoards(boardList);
+      setSubscribedBoardIds(new Set(subs));
+      setStories(groupStoriesByAuthor(storyRows, auth.user.uid));
+    } catch (cause) {
+      if (loadVersion.current !== version) return;
+      const code = (cause as { code?: string })?.code ?? '';
+      if (code.endsWith('permission-denied') || code.endsWith('unauthenticated')) {
+        setPosts([]);
+        setBoards([]);
+        setSubscribedBoardIds(new Set());
+        setStories([]);
+        setNameByUid({});
+        setAvatarByUid({});
+      }
+      setLoadError('暫時無法更新校園動態。請確認網路與登入狀態，再試一次。');
+    } finally {
+      if (loadVersion.current === version) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-    const [rows, boardList, subs, storyRows] = await Promise.all([
-      fetchRecentCampusPosts(school.id, undefined, 60),
-      listBoards(school.id, 80),
-      listSubscribedBoardIds(auth.user.uid, school.id),
-      listActiveStoriesForSchool(school.id, 80),
-    ]);
-    setPosts(rankFeedPosts(rows, 80));
-    setBoards(boardList);
-    setSubscribedBoardIds(new Set(subs));
-    setStories(groupStoriesByAuthor(storyRows, auth.user.uid));
   }, [school?.id, auth.user?.uid]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await load();
-    setRefreshing(false);
   }, [load]);
 
   const onToggleLike = useCallback(
@@ -170,14 +200,10 @@ export function HomeFeedScreen() {
   );
 
   React.useEffect(() => {
-    let c = false;
-    (async () => {
-      setLoading(true);
-      await load();
-      if (!c) setLoading(false);
-    })();
+    setLoading(true);
+    void load();
     return () => {
-      c = true;
+      loadVersion.current += 1;
     };
   }, [load]);
 
@@ -254,6 +280,20 @@ export function HomeFeedScreen() {
 
   return (
     <View style={[styles.root, { paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + insets.bottom }]}>
+      {!!loadError && (
+        <View style={{ padding: 16, gap: 8 }}>
+          <Text accessibilityRole="alert" style={{ color: theme.colors.textSecondary }}>
+            {loadError}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => void onRefresh()}
+            style={{ paddingVertical: 10 }}
+          >
+            <Text style={{ color: theme.colors.accent, fontWeight: '600' }}>重新讀取動態</Text>
+          </Pressable>
+        </View>
+      )}
       {loading ? (
         <View style={styles.center}>
           <ActivityIndicator color={theme.colors.accent} />
@@ -283,15 +323,17 @@ export function HomeFeedScreen() {
             />
           }
           ListEmptyComponent={
-            <EmptyState
-              showCalmHero
-              title={filter === 'subscribed' ? '尚無已訂閱看板的新貼文' : '尚無校園貼文'}
-              subtitle={
-                filter === 'subscribed'
-                  ? '到「看板」訂閱你想追的版面，或點右下角發第一篇。'
-                  : '點右下角的鉛筆，發出你的第一篇貼文。'
-              }
-            />
+            loadError ? null : (
+              <EmptyState
+                showCalmHero
+                title={filter === 'subscribed' ? '尚無已訂閱看板的新貼文' : '尚無校園貼文'}
+                subtitle={
+                  filter === 'subscribed'
+                    ? '到「看板」訂閱你想追的版面，或點右下角發第一篇。'
+                    : '點右下角的鉛筆，發出你的第一篇貼文。'
+                }
+              />
+            )
           }
           renderItem={({ item }) => {
             const uid = auth.user?.uid;
@@ -326,7 +368,10 @@ export function HomeFeedScreen() {
                     <Pressable
                       hitSlop={6}
                       onPress={() =>
-                        nav?.navigate?.('BoardDetail' as never, { boardId: item.boardId, boardName: board })
+                        nav?.navigate?.('BoardDetail' as never, {
+                          boardId: item.boardId,
+                          boardName: board,
+                        })
                       }
                     >
                       <Text style={styles.boardChip}>＃{board}</Text>
@@ -415,7 +460,17 @@ function FeedHeader(props: {
   onComposeStory: () => void;
   onComposePost: () => void;
 }) {
-  const { stories, avatarByUid, nameByUid, myUid, filter, onSelectFilter, onOpenStoryGroup, onComposeStory } = props;
+  const styles = useThemeStyleSheet(createStyles);
+  const {
+    stories,
+    avatarByUid,
+    nameByUid,
+    myUid,
+    filter,
+    onSelectFilter,
+    onOpenStoryGroup,
+    onComposeStory,
+  } = props;
 
   const myGroup = stories.find((g) => g.authorUid === myUid) ?? null;
   const others = stories.filter((g) => g.authorUid !== myUid);
@@ -500,6 +555,7 @@ function FeedHeader(props: {
 // ─── Media Grid（1~4 張） ───────────────────────────────────
 
 function MediaGrid({ uris }: { uris: string[] }) {
+  const styles = useThemeStyleSheet(createStyles);
   const w = Dimensions.get('window').width - 28; // root padding 14*2
   const inner = w - 24; // card padding 12*2
   if (uris.length === 1) {
@@ -528,12 +584,15 @@ function openStoryGroup(grp: StoryAuthorGroup, nav: any) {
   if (!first) return;
   const summary = first.text ?? '(媒體 Story)';
   Alert.alert(`${grp.isMine ? '我的' : ''}Story · ${grp.stories.length} 則`, summary, [
-    { text: '到「即時」分頁看詳情', onPress: () => nav?.navigate?.('CampusSocialScreen' as never, { initialTab: 'realtime' }) },
+    {
+      text: '到「即時」分頁看詳情',
+      onPress: () => nav?.navigate?.('CampusSocialScreen' as never, { initialTab: 'realtime' }),
+    },
     { text: '關閉', style: 'cancel' },
   ]);
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: theme.colors.bg,
@@ -603,35 +662,39 @@ const styles = StyleSheet.create({
   filterTxt: { fontSize: 12, color: theme.colors.textSecondary, fontWeight: '600' },
   filterTxtActive: { color: theme.colors.onAccent },
 
-  card: {
-    backgroundColor: theme.colors.surfaceElevated,
-    marginHorizontal: 14,
-    marginTop: theme.space.md,
-    borderRadius: theme.radius.xl,
-    padding: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border,
-    ...(theme.mode === 'light' ? shadowStyle(theme.shadows.md) : shadowStyle(theme.shadows.sm)),
-  },
-  cardTop: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
-  avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: theme.colors.surface },
-  avatarAnon: { backgroundColor: theme.colors.surface, alignItems: 'center', justifyContent: 'center' },
-  avatarPlaceholder: {
-    backgroundColor: theme.colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarLetter: { color: theme.colors.onAccent, fontWeight: '700' },
-  authorRow: { fontSize: 13, color: theme.colors.text },
-  author: { color: theme.colors.text, fontWeight: '700' },
-  dot: { color: theme.colors.muted },
-  meta: { color: theme.colors.textSecondary, fontWeight: '500', fontSize: 12 },
-  boardChip: {
-    marginTop: 2,
-    color: theme.colors.accent,
-    fontWeight: '700',
-    fontSize: 12,
-  },
+    card: {
+      backgroundColor: theme.colors.surfaceElevated,
+      marginHorizontal: 14,
+      marginTop: theme.space.md,
+      borderRadius: theme.radius.xl,
+      padding: 12,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.border,
+      ...(theme.mode === 'light' ? shadowStyle(theme.shadows.md) : shadowStyle(theme.shadows.sm)),
+    },
+    cardTop: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
+    avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: theme.colors.surface },
+    avatarAnon: {
+      backgroundColor: theme.colors.surface,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    avatarPlaceholder: {
+      backgroundColor: theme.colors.accent,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    avatarLetter: { color: theme.colors.onAccent, fontWeight: '700' },
+    authorRow: { fontSize: 13, color: theme.colors.text },
+    author: { color: theme.colors.text, fontWeight: '700' },
+    dot: { color: theme.colors.muted },
+    meta: { color: theme.colors.textSecondary, fontWeight: '500', fontSize: 12 },
+    boardChip: {
+      marginTop: 2,
+      color: theme.colors.accent,
+      fontWeight: '700',
+      fontSize: 12,
+    },
 
   cardTitle: { fontSize: 16, fontWeight: '700', color: theme.colors.text, marginBottom: 4 },
   preview: { fontSize: 14, color: theme.colors.textSecondary, lineHeight: 20 },

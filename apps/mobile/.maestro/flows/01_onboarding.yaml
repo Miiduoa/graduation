@@ -1,40 +1,65 @@
-# 01_onboarding.yaml
-# 冷啟動／首次狀態（OnboardingScreen 目前為自動完成的 stub，無多頁引導 UI）
-# 執行請用 package.json：`pnpm e2e:maestro:onboarding` 或 `e2e:maestro:onboarding:dev`（傳入 APP_ID）
-
 appId: ${APP_ID}
-name: Onboarding Flow
+name: Guest startup and login navigation
 tags:
   - smoke
   - onboarding
 
 ---
-# 注意：勿在此對 Expo development client 使用 clearState — Maestro 會 reinstall，會清空 JS bundle URL，出現「No script URL provided」（需 Metro：`pnpm dev`）。
-# 啟動 App（development client 需先有 Metro：`pnpm dev` / `expo start`，見上方）
+# Guest access must not depend on a Google or university login.
 - launchApp
-
 - extendedWaitUntil:
     visible:
-      id: 'tab-Today'
-    timeout: 45000
+      id: login-landing
+    timeout: 90000
+- assertVisible:
+    id: public-Map
+- assertNotVisible:
+    id: tab-Today
+- takeScreenshot: guest_startup
 
-# iOS 部分版本在連續截視圖／斷言之間需放行動畫，否則 XCTest 會 kAXErrorInvalidUIElement
-- waitForAnimationToEnd:
-    timeout: 3000
-
+# The platform account is the path for courses, assignments and merchant work.
+- scrollUntilVisible:
+    element:
+      id: login-start
+    direction: DOWN
+- assertVisible: 'Google 帳號'
+- tapOn:
+    id: login-start
+# The navigation target is valid even when the remote session check fails.
+# The offline/error state must not pretend that a Google login succeeded.
 - extendedWaitUntil:
     visible:
-      id: 'tab-學習'
+      id: nuni-workspace
     timeout: 20000
+- takeScreenshot: platform_account_state
 
+# On iOS the navigation header owns the back action; a device-level back gesture
+# does not reliably pop the React Navigation stack.
+- tapOn:
+    id: BackButton
 - extendedWaitUntil:
     visible:
-      id: 'tab-校園'
+      id: login-landing
     timeout: 20000
-
-- extendedWaitUntil:
-    visible:
-      id: 'tab-訊息'
-    timeout: 20000
-
-- takeScreenshot: main_screen_after_cold_start
+- scrollUntilVisible:
+    element:
+      text: '只有讀取學校提供的個人課表與成績，才需要連線學校帳號。|目前只能用 Google 帳號登入，登入後再綁定你的學校。'
+    direction: DOWN
+- assertVisible: '連線學校帳號'
+# School-issued sign-in is hidden unless a verified provider is available.
+# Both states must show a truthful explanation; never assume school login works.
+- runFlow:
+    when:
+      visible:
+        id: school-login-start
+    commands:
+      - assertNotVisible:
+          id: school-login-hint
+- runFlow:
+    when:
+      visible:
+        id: school-login-hint
+    commands:
+      - assertNotVisible:
+          id: school-login-start
+- takeScreenshot: school_login_availability

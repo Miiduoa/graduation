@@ -34,7 +34,7 @@ export default function AdminHomePage() {
           <Link href="/lms-admin/export-jobs">匯出任務（非同步 worker）</Link>
         </li>
         <li>
-          <Link href="/lms-admin/ai-compliance">AI 合規組態（quota／保留期／PII／跨境）</Link>
+          <Link href="/lms-admin/ai-compliance">資料處理設定（用量／保留期／個資／跨境）</Link>
         </li>
         <li>
           <Link href="/lms-admin/audit">audit_logs（forum / grades 異動）</Link>

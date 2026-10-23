@@ -1,505 +1,298 @@
-/**
- * Login Landing — APP 首次開啟 / 登出後的入口
- *
- * 兩條路徑：
- *  1. 「真實登入」→ 跳既有 SSO / 學號登入流程
- *  2. 「demo 體驗」→ 一鍵以 8 種角色之一登入：
- *      student / teacher / ta / club_officer / department_head / admin / vendor /
- *      alumni / guest
- *      用 saveMockAuthSession 寫入 mockAuth，auth.tsx 會自動 picks up。
- *
- * 設計：
- *  - 純前端，無 Firebase 依賴
- *  - 視覺乾淨：頂部 hero + 兩個大區塊
- *  - 進入後立即去主畫面（auth.profile 會在背景填好）
- *  - 與 apps/web/src/lib/demoData.ts → DEMO_USERS 對齊，故事一致
- */
-import React, { useCallback, useState } from 'react';
-import {
-  ScrollView,
-  View,
-  Text,
-  Pressable,
-  ActivityIndicator,
-  Alert,
-  StyleSheet,
-} from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import React, { useEffect, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-
-import { saveMockAuthSession, loadMockAuthSession, clearMockAuthSession } from '../services/mockAuth';
-import { clearRoleEventInbox } from '../services/roleEventBus';
-import { seedDemoInboxIfNeeded, resetSeedFlag } from '../services/demoInboxSeeder';
-import { theme, softShadowStyle } from '../ui/theme';
-import { Button } from '../ui/components';
-import { useAuth, type UserRole } from '../state/auth';
-import type { PreAuthStackParamList } from './preAuthTypes';
-
-interface DemoRolePreset {
-  role: UserRole;
-  uid: string;
-  email: string;
-  displayName: string;
-  schoolId: string;
-  department: string;
-  studentId?: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  description: string;
-  color: string;
-}
-
-const DEMO_PRESETS: DemoRolePreset[] = [
-  {
-    role: 'student',
-    uid: 'demo_student_kuchih',
-    email: 'demo.student@pu.edu.tw',
-    displayName: '顧晉瑋（demo 學生）',
-    schoolId: 'pu',
-    department: '資訊管理學系',
-    studentId: '411211325',
-    icon: 'person-outline',
-    description: 'AI 先排今日任務、風險提醒、作業與學伴行動',
-    color: '#5856D6',
-  },
-  {
-    role: 'teacher',
-    uid: 'demo_teacher_chang',
-    email: 'demo.teacher@pu.edu.tw',
-    displayName: '張怡君（demo 老師）',
-    schoolId: 'pu',
-    department: '資訊管理學系',
-    icon: 'school-outline',
-    description: 'AI 預判缺交、起草評語、整理待批與提醒',
-    color: '#3567C8',
-  },
-  {
-    // 修正：原本誤掛 'staff'，導致 TA 走錯權限矩陣（看不到批改頁、被當成餐廳員工）。
-    role: 'ta',
-    uid: 'demo_ta_lin',
-    email: 'demo.ta@pu.edu.tw',
-    displayName: '林助教（demo TA）',
-    schoolId: 'pu',
-    department: '資訊管理學系',
-    icon: 'people-outline',
-    description: 'AI 彙整求助、討論與批改優先順序',
-    color: '#7B4DB8',
-  },
-  {
-    role: 'club_officer',
-    uid: 'demo_club_wei',
-    email: 'demo.club@pu.edu.tw',
-    displayName: '魏社長（demo 程式設計社）',
-    schoolId: 'pu',
-    department: '學生社團',
-    icon: 'flag-outline',
-    description: '社團公告、成員管理、活動發布、報名審核',
-    color: '#34C759',
-  },
-  {
-    // 系主任：保留 'admin' role 以便沿用 LearnStack DepartmentDashboard 派發
-    // 但 displayName 與 uid 明確標示為「系所主管」，避免與系統管理員混淆
-    role: 'department_head',
-    uid: 'demo_admin_huang',
-    email: 'demo.admin@pu.edu.tw',
-    displayName: '黃主任（demo 系所主管）',
-    schoolId: 'pu',
-    department: '資訊管理學系',
-    icon: 'business-outline',
-    description: 'AI 看全系健康度、待審公告、教師名冊',
-    color: '#C79532',
-  },
-  {
-    role: 'admin',
-    uid: 'demo_admin_sys',
-    email: 'demo.sysadmin@pu.edu.tw',
-    displayName: '系統管理員（demo）',
-    schoolId: 'pu',
-    department: '校務系統',
-    icon: 'shield-checkmark-outline',
-    description: '全校管理、使用者、學校設定、系統日誌',
-    color: '#FF3B30',
-  },
-  {
-    // 修正：原本誤掛 'staff'，導致餐廳員工得到 staff group 的全部 facilities 權限。
-    role: 'vendor',
-    uid: 'demo_cafeteria',
-    email: 'demo.vendor@pu.edu.tw',
-    displayName: '阿英（demo 餐廳）',
-    schoolId: 'pu',
-    department: '校園服務',
-    icon: 'restaurant-outline',
-    description: 'AI 提醒訂單佇列、熱門品項與下一步營運',
-    color: '#C95F28',
-  },
-  {
-    role: 'alumni',
-    uid: 'demo_alumni_chang',
-    email: 'demo.alumni@pu.edu.tw',
-    displayName: '張學長（demo 校友 / 109 屆）',
-    schoolId: 'pu',
-    department: '資訊管理學系（已畢業）',
-    icon: 'ribbon-outline',
-    description: '瀏覽公告、地圖、校友動態（無法加社團、借書）',
-    color: '#8E8E93',
-  },
-  {
-    role: 'guest',
-    uid: 'demo_guest',
-    email: 'demo.guest@pu.edu.tw',
-    displayName: '訪客（demo 試用）',
-    schoolId: 'pu',
-    department: '訪客',
-    icon: 'eye-outline',
-    description: '只看公開公告、校園地圖、餐廳、公車',
-    color: '#6E6E73',
-  },
-];
+import { safeNavigate } from '../utils/safeNavigate';
+import { theme } from '../ui/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
+import { useNuniSession } from '../state/nuniSession';
+import { useSchool } from '../state/school';
+import { SchoolBrowsingControl } from '../components/SchoolBrowsingControl';
+import { TodayTimetablePanel } from '../components/TodayTimetablePanel';
+import {
+  SCHOOL_LOGIN_BIND_HINT,
+  isSchoolLoginEntryAvailable,
+  loadSchoolLoginProviderKinds,
+} from '../services/schoolLoginAvailability';
 
 export default function LoginLandingScreen() {
-  const navigation = useNavigation<NativeStackNavigationProp<PreAuthStackParamList>>();
-  const { refreshProfile } = useAuth();
-  const insets = useSafeAreaInsets();
-  const [busy, setBusy] = useState<string | null>(null);
-
-  const handleDemoLogin = useCallback(
-    async (preset: DemoRolePreset) => {
-      setBusy(preset.uid);
-      try {
-        // 🧹 如果先前有別的 demo 角色登入，要先清掉他殘留的 inbox 事件
-        // 否則切角色時會看到上一個角色已收到的舊事件
-        const prev = await loadMockAuthSession().catch(() => null);
-        if (prev?.uid && prev.uid !== preset.uid) {
-          // 清掉前一個角色的個人 inbox，但 **保留 __all__ 廣播 inbox**
-          //   ── 這是跨角色 demo 的關鍵：學生下單 / 老師批改 / 主任公告等事件
-          //     都是 broadcast，要在切角色後另一個 demo 帳號還能看到。
-          //   ── 若清掉 __all__，學生剛下的訂單在切到餐廳帳號時會消失。
-          await clearRoleEventInbox(prev.uid).catch(() => {});
-          // 重置這個 preset uid 的 seed flag（讓重 login 也能看到 demo 事件）
-          await resetSeedFlag(preset.uid).catch(() => {});
-          await clearMockAuthSession().catch(() => {});
-        }
-
-        // 種一批 demo 歷史事件（idempotent）
-        await seedDemoInboxIfNeeded(preset.uid).catch(() => {});
-
-        await saveMockAuthSession({
-          uid: preset.uid,
-          email: preset.email,
-          schoolId: preset.schoolId,
-          displayName: preset.displayName,
-          role: preset.role,
-          department: preset.department,
-          studentId: preset.studentId ?? null,
-          loginAccount: preset.email,
-        });
-        // ⚠ 寫入 mockAuth 後必須主動觸發 auth provider 重新讀取 session，
-        //    否則 App.tsx 不會知道使用者已登入。
-        await refreshProfile();
-      } catch (e) {
-        Alert.alert('登入失敗', String((e as Error)?.message ?? e));
-      } finally {
-        setBusy(null);
-      }
-    },
-    [refreshProfile],
-  );
-
-  const handleRealLogin = useCallback(() => {
-    try {
-      navigation.navigate('SSOLogin');
-    } catch {
-      Alert.alert(
-        '真實登入',
-        '正式版需連到靜宜 SSO；目前 demo 環境請選下方任一角色快速體驗。',
-      );
-    }
-  }, [navigation]);
-
+  const navigation = useNavigation();
+  const auth = useNuniSession();
+  const { school } = useSchool();
+  const s = useThemeStyleSheet(createStyles);
+  const [, refreshProviders] = useState(0);
+  const schoolEntry = isSchoolLoginEntryAvailable(school.id);
+  useEffect(() => {
+    let active = true;
+    void loadSchoolLoginProviderKinds().then(() => {
+      if (active) refreshProviders((revision) => revision + 1);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.bg }} edges={['top', 'left', 'right']}>
-      <ScrollView
-        style={{ flex: 1, backgroundColor: theme.colors.bg }}
-        contentContainerStyle={{
-          paddingHorizontal: theme.layout.screenHorizontalPadding,
-          paddingTop: theme.space.md,
-          paddingBottom: theme.space.xxxl + theme.space.lg + insets.bottom,
-        }}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Hero：AI-first 入口 */}
-        <LinearGradient
-          colors={
-            theme.mode === 'dark'
-              ? ([theme.colors.surfaceElevated, theme.colors.surface] as const)
-              : ([theme.colors.surface, theme.colors.surfaceMuted] as const)
-          }
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={{
-            borderRadius: theme.radius.lg,
-            padding: theme.layout.cardPadding,
-            marginBottom: theme.space.lg,
-            borderWidth: 1,
-            borderColor: theme.colors.border,
-            ...softShadowStyle(theme.shadows.sm),
-          }}
-        >
-          <View style={{ alignItems: 'center' }}>
-            <View
-              style={{
-                width: 64,
-                height: 64,
-                borderRadius: 20,
-                backgroundColor: theme.colors.accentSoft,
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: theme.space.md,
-              }}
-            >
-              <Ionicons name="sparkles-outline" size={30} color={theme.colors.accent} />
-            </View>
-            <Text
-              style={{
-                color: theme.colors.accent,
-                fontSize: theme.typography.overline.fontSize,
-                lineHeight: theme.typography.overline.lineHeight,
-                letterSpacing: theme.typography.overline.letterSpacing,
-                fontWeight: theme.typography.overline.fontWeight ?? '700',
-                marginBottom: theme.space.xs,
-              }}
-            >
-              CAMPUS AI CORE
-            </Text>
-            <Text
-              style={{
-                fontSize: theme.typography.display.fontSize,
-                lineHeight: theme.typography.display.lineHeight,
-                letterSpacing: theme.typography.display.letterSpacing,
-                fontWeight: theme.typography.display.fontWeight ?? '700',
-                color: theme.colors.text,
-                textAlign: 'center',
-              }}
-            >
-              AI 校園工作台
-            </Text>
-            <Text
-              style={{
-                marginTop: theme.space.sm,
-                fontSize: theme.typography.body.fontSize,
-                lineHeight: theme.typography.body.lineHeight,
-                color: theme.colors.textSecondary,
-                textAlign: 'center',
-              }}
-            >
-              登入後先看到 AI 幫你整理的下一步，{'\n'}
-              再進入學習、校園、訊息與跨角色協作。
-            </Text>
-          </View>
-        </LinearGradient>
-
-        <Button
-          text="真實登入（靜宜 SSO）"
-          kind="primary"
-          fullWidth
-          size="large"
-          icon="lock-closed-outline"
-          onPress={handleRealLogin}
-          style={{ marginBottom: theme.space.sm }}
-        />
-        <Text
-          style={{
-            textAlign: 'center',
-            fontSize: theme.typography.caption.fontSize,
-            lineHeight: theme.typography.caption.lineHeight,
-            color: theme.colors.muted,
-            marginBottom: theme.space.lg,
-          }}
-        >
-          用學號／教師帳號連到正式系統，直接進入 AI Today。
-        </Text>
-
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: theme.space.sm,
-            marginBottom: theme.space.md,
-          }}
-        >
-          <View style={{ flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: theme.colors.separator }} />
-          <Text
-            style={{
-              fontSize: theme.typography.labelSmall.fontSize,
-              fontWeight: '600',
-              letterSpacing: theme.typography.overline.letterSpacing * 0.4,
-              color: theme.colors.muted,
-              textTransform: 'uppercase',
-            }}
-          >
-            demo 角色
-          </Text>
-          <View style={{ flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: theme.colors.separator }} />
-        </View>
-
-        <View style={{ gap: theme.space.sm + theme.space.xs }}>
-          {DEMO_PRESETS.map((preset) => {
-            const isBusy = busy === preset.uid;
-            return (
-              <Pressable
-                key={preset.uid}
-                onPress={() => handleDemoLogin(preset)}
-                disabled={!!busy}
-                accessibilityRole="button"
-                accessibilityState={{ busy: isBusy, disabled: !!busy && !isBusy }}
-                style={({ pressed }) => ({
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: theme.space.sm,
-                  padding: theme.space.md,
-                  borderRadius: theme.radius.md,
-                  backgroundColor: theme.colors.surface,
-                  borderWidth: 1,
-                  borderColor: theme.colors.border,
-                  borderLeftWidth: 4,
-                  borderLeftColor: preset.color,
-                  opacity: busy ? (isBusy ? 1 : 0.45) : pressed ? 0.92 : 1,
-                  ...softShadowStyle(theme.mode === 'light' ? theme.shadows.sm : theme.shadows.soft),
-                })}
-              >
-                <View
-                  style={{
-                    width: 52,
-                    height: 52,
-                    borderRadius: theme.radius.md,
-                    backgroundColor: preset.color + '18',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Ionicons name={preset.icon} size={24} color={preset.color} />
-                </View>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text
-                    style={{
-                      color: theme.colors.text,
-                      fontSize: theme.typography.body.fontSize,
-                      fontWeight: '700',
-                    }}
-                    numberOfLines={2}
-                  >
-                    {preset.displayName}
-                  </Text>
-                  <Text
-                    style={{
-                      color: theme.colors.muted,
-                      fontSize: theme.typography.bodySmall.fontSize,
-                      lineHeight: theme.typography.bodySmall.lineHeight,
-                      marginTop: theme.space.xxs,
-                    }}
-                    numberOfLines={3}
-                  >
-                    {preset.description}
-                  </Text>
-                </View>
-                {isBusy ? (
-                  <ActivityIndicator color={preset.color} />
-                ) : (
-                  <Ionicons name="chevron-forward" size={22} color={preset.color} />
-                )}
-              </Pressable>
-            );
-          })}
-        </View>
-
-        {/* 7 分鐘 demo 導覽腳本卡（口委用） */}
-        <View
-          style={{
-            marginTop: theme.space.lg,
-            padding: theme.space.md,
-            borderRadius: theme.radius.md,
-            backgroundColor: theme.colors.surface,
-            borderWidth: StyleSheet.hairlineWidth,
-            borderColor: theme.colors.border,
-          }}
-        >
+    <SafeAreaView testID="login-landing" style={s.page}>
+      <ScrollView contentContainerStyle={s.content}>
+        <View style={s.brandRow}>
           <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: theme.space.xs,
-              marginBottom: theme.space.xs,
-            }}
+            style={s.brandMark}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
           >
-            <Ionicons name="play-circle-outline" size={15} color={theme.colors.muted} />
-            <Text
-              style={{
-                fontSize: theme.typography.labelSmall.fontSize,
-                fontWeight: '700',
-                color: theme.colors.muted,
-                letterSpacing: 0,
-              }}
-            >
-              7 分鐘 demo 導覽腳本
+            <Text style={s.brandLetter}>
+              C<Text style={s.brandNumber}>1</Text>
             </Text>
           </View>
-          {[
-            { sec: '0:30', step: '張怡君老師 → 批量提醒 → AI 預測補交率 → 起草評語' },
-            { sec: '2:00', step: '切到顧晉瑋學生 → 收到老師的提醒與評語 inbox' },
-            { sec: '3:00', step: '繳交作業 → 點焦點 CTA「開始 25 分鐘」進入番茄' },
-            { sec: '4:00', step: '切到阿英餐廳 → 訂單佇列推進 → AI 建議下一步' },
-            { sec: '5:00', step: '學生同步收到「餐已備好」通知' },
-            { sec: '6:00', step: '切到黃主任 → 系所健康度 + 風險課程 → 發公告' },
-            { sec: '6:30', step: '切回任一角色 → 看到主任的公告進 inbox' },
-          ].map((row) => (
-            <View
-              key={row.sec}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'flex-start',
-                paddingVertical: theme.space.xxs + 2,
-              }}
+          <Text style={s.brand}>Campus One</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="開啟課程與作業"
+            onPress={() => safeNavigate(navigation, 'NuniWorkspace')}
+            style={({ pressed }) => [s.workspaceShortcut, pressed && s.rowPressed]}
+          >
+            <Text style={s.workspaceShortcutText}>課程與作業</Text>
+          </Pressable>
+        </View>
+        <View style={s.intro}>
+          <Text style={s.school}>課程・校園・每天的事</Text>
+          <Text accessibilityRole="header" style={s.heading}>
+            校園生活
+          </Text>
+          <Text style={s.body}>不必登入學校帳號，就能查看各校地圖、公車、圖書館與公開公告。</Text>
+        </View>
+        <SchoolBrowsingControl />
+        <View style={s.publicPanel}>
+          <View style={s.sectionHeading}>
+            <Text accessibilityRole="header" style={s.title}>
+              先找需要的資訊
+            </Text>
+            <Text style={s.sectionCaption}>公開資訊</Text>
+          </View>
+          {(
+            [
+              ['Map', '校園地圖', '搜尋地點、查看位置與步行路線'],
+              ['Library', '圖書館', '搜尋目前選擇學校的館藏與官方服務'],
+              ['BusSchedule', '公車查詢', '查看站點與官方到站資訊'],
+              ['公告總覽', '公開公告', '查看學校發布的消息'],
+            ] as const
+          ).map(([route, title, detail], index) => (
+            <Pressable
+              key={route}
+              testID={`public-${route}`}
+              accessibilityRole="button"
+              accessibilityLabel={title}
+              style={({ pressed }) => [s.publicButton, pressed && s.rowPressed]}
+              onPress={() => safeNavigate(navigation, route)}
             >
               <Text
-                style={{
-                  width: 44,
-                  color: theme.colors.accent,
-                  fontWeight: '700',
-                  fontSize: theme.typography.bodySmall.fontSize,
-                }}
+                style={s.serviceNumber}
+                accessibilityElementsHidden
+                importantForAccessibility="no"
               >
-                {row.sec}
+                {String(index + 1).padStart(2, '0')}
               </Text>
+              <View style={s.serviceCopy}>
+                <Text style={s.publicTitle}>{title}</Text>
+                <Text style={s.publicDetail}>{detail}</Text>
+              </View>
               <Text
-                style={{
-                  flex: 1,
-                  color: theme.colors.text,
-                  fontSize: theme.typography.bodySmall.fontSize,
-                  lineHeight: theme.typography.bodySmall.lineHeight,
-                }}
+                style={s.serviceArrow}
+                accessibilityElementsHidden
+                importantForAccessibility="no"
               >
-                {row.step}
+                →
               </Text>
-            </View>
+            </Pressable>
           ))}
         </View>
-
-        <Text
-          style={{
-            color: theme.colors.muted,
-            fontSize: theme.typography.caption.fontSize,
-            lineHeight: theme.typography.caption.lineHeight + 4,
-            textAlign: 'center',
-            marginTop: theme.space.lg,
-          }}
-        >
-          Demo 角色資料皆為示範，所有變更只存在你的裝置上。{'\n'}
-          登出時會清除所有 demo 資料。
-        </Text>
+        <TodayTimetablePanel
+          onOpenImport={() => safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })}
+          onOpenTimetable={(term) =>
+            safeNavigate(navigation, 'PersonalTimetable', term ? { term } : undefined)
+          }
+        />
+        <View style={s.panel}>
+          <Text accessibilityRole="header" style={s.title}>
+            Google 帳號
+          </Text>
+          <Text style={s.body}>和網頁版使用同一個帳號，加入課程、繳交作業或管理店家。</Text>
+          {auth.pendingLogout || auth.error ? (
+            <Text accessibilityRole="alert" style={s.body}>
+              {auth.pendingLogout ? '上次登出還沒完成，請先完成登出再使用其他帳號。' : auth.error}
+            </Text>
+          ) : null}
+          <Pressable
+            testID="login-start"
+            accessibilityRole="button"
+            style={({ pressed }) => [s.button, pressed && s.buttonPressed]}
+            onPress={() => safeNavigate(navigation, 'NuniWorkspace')}
+          >
+            <Text style={s.buttonText}>
+              {auth.session && !auth.loading && !auth.error && !auth.pendingLogout
+                ? '回到我的 Campus One'
+                : auth.loading
+                  ? '確認 Google 帳號'
+                  : auth.pendingLogout
+                    ? '處理未完成的登出'
+                    : auth.error
+                      ? '查看登入問題'
+                      : '登入或建立帳號'}
+            </Text>
+          </Pressable>
+        </View>
+        <View style={s.schoolPanel}>
+          <Text accessibilityRole="header" style={s.title}>
+            連線學校帳號
+          </Text>
+          <Text style={s.body} testID={schoolEntry ? undefined : 'school-login-hint'}>
+            {schoolEntry
+              ? '只有讀取學校提供的個人課表與成績，才需要連線學校帳號。'
+              : SCHOOL_LOGIN_BIND_HINT}
+          </Text>
+          {schoolEntry ? (
+            <Pressable
+              testID="school-login-start"
+              accessibilityRole="button"
+              style={({ pressed }) => [s.schoolButton, pressed && s.rowPressed]}
+              onPress={() => safeNavigate(navigation, 'SSOLogin')}
+            >
+              <Text style={s.schoolButtonText}>前往學校登入</Text>
+            </Pressable>
+          ) : null}
+        </View>
+        <Text style={s.footer}>Campus One · 課程與校園生活</Text>
       </ScrollView>
     </SafeAreaView>
   );
 }
+const createStyles = () =>
+  StyleSheet.create({
+    page: { flex: 1, backgroundColor: theme.colors.bg },
+    content: {
+      paddingHorizontal: 24,
+      paddingTop: 20,
+      flexGrow: 1,
+      width: '100%',
+      maxWidth: 640,
+      alignSelf: 'center',
+    },
+    brandRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 9 },
+    brandMark: {
+      width: 34,
+      height: 34,
+      borderRadius: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: theme.colors.accent,
+    },
+    brandLetter: { color: theme.colors.onAccent, fontSize: 23, fontWeight: '600' },
+    brandNumber: { fontSize: 13 },
+    brand: {
+      color: theme.colors.text,
+      letterSpacing: -0.4,
+      fontWeight: '700',
+      fontSize: 17,
+    },
+    workspaceShortcut: {
+      marginLeft: 'auto',
+      paddingHorizontal: 10,
+      minHeight: 44,
+      justifyContent: 'center',
+      borderRadius: 7,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    workspaceShortcutText: { color: theme.colors.accent, fontSize: 12, fontWeight: '600' },
+    intro: { paddingTop: 24, paddingBottom: 24 },
+    publicPanel: { marginTop: 24, marginBottom: 8 },
+    sectionHeading: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'baseline',
+      justifyContent: 'space-between',
+      gap: 8,
+      paddingBottom: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    sectionCaption: { color: theme.colors.muted, fontSize: 12 },
+    publicButton: {
+      minHeight: 76,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
+      paddingVertical: 14,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    serviceNumber: {
+      color: theme.colors.muted,
+      fontSize: 12,
+      fontVariant: ['tabular-nums'],
+      width: 24,
+    },
+    serviceCopy: { flex: 1, minWidth: 0 },
+    serviceArrow: { color: theme.colors.accent, fontSize: 22 },
+    rowPressed: { backgroundColor: theme.colors.surfaceInteractive },
+    buttonPressed: { backgroundColor: theme.colors.accentHover },
+    publicTitle: { color: theme.colors.text, fontSize: 16, fontWeight: '600', lineHeight: 23 },
+    publicDetail: { color: theme.colors.muted, fontSize: 13, lineHeight: 21, marginTop: 4 },
+    school: {
+      color: theme.colors.textSecondary,
+      fontSize: 12,
+      letterSpacing: 0.5,
+      marginBottom: 10,
+    },
+    heading: {
+      color: theme.colors.text,
+      fontSize: 32,
+      fontWeight: '600',
+      lineHeight: 42,
+      letterSpacing: -0.6,
+    },
+    body: { color: theme.colors.muted, fontSize: 14, lineHeight: 24, marginTop: 12 },
+    panel: {
+      padding: 22,
+      backgroundColor: theme.colors.focusSurface,
+      borderColor: theme.colors.border,
+      borderWidth: 1,
+      borderRadius: 14,
+      marginTop: 10,
+    },
+    title: { color: theme.colors.text, fontSize: 18, lineHeight: 26, fontWeight: '600' },
+    button: {
+      backgroundColor: theme.colors.accent,
+      minHeight: 50,
+      justifyContent: 'center',
+      padding: 15,
+      borderRadius: 8,
+      marginTop: 22,
+    },
+    buttonText: {
+      color: theme.colors.onAccent,
+      textAlign: 'center',
+      fontSize: 15,
+      fontWeight: '600',
+    },
+    schoolPanel: { paddingTop: 28, paddingHorizontal: 2 },
+    schoolButton: {
+      minHeight: 48,
+      alignSelf: 'flex-start',
+      justifyContent: 'center',
+      paddingVertical: 14,
+      paddingHorizontal: 8,
+      marginLeft: -8,
+      marginTop: 10,
+      borderRadius: 6,
+    },
+    schoolButtonText: { color: theme.colors.accent, fontSize: 15, fontWeight: '600' },
+    footer: {
+      color: theme.colors.muted,
+      fontSize: 11,
+      paddingVertical: 28,
+      marginTop: 24,
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border,
+    },
+  });

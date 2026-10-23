@@ -5,13 +5,18 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useAuth } from '../state/auth';
 import { shouldBlockForNoLogin, isDemoUid } from '../services/demoSession';
-import { useAsyncList } from '../hooks/useAsyncList';
-import { listMerchantOrders, updateMerchantOrderStatus } from '../services/merchant';
+import { useMerchantOrders } from '../hooks/useMerchantOrders';
+import { ordersForView, type MerchantOrderView } from '../features/merchantOrderViews';
 import {
-  listDemoMerchantOrders,
-  updateDemoOrderStatus,
-  subscribeDemoOrders,
-} from '../services/demoMerchantOrders';
+  giveMerchantQueueNumber,
+  updateMerchantOrderStatus,
+} from '../services/merchant';
+import {
+  PICKUP_NUMBER_PENDING_LABEL,
+  formatShortOrderCode,
+  formatTaipeiOrderTime,
+} from '@campus/shared/src/ordering/pickupNumber';
+import { updateDemoOrderStatus } from '../services/demoMerchantOrders';
 import { updateOrderStatus as updateDemoStoreOrderStatus } from '../services/demoStore';
 import { Screen, AnimatedCard, Button, Pill, Spinner } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
@@ -21,9 +26,9 @@ import type { MerchantAssignment, Order } from '../data/types';
 function getOrderStatusLabel(status: Order['status']) {
   switch (status) {
     case 'pending':
-      return '待確認';
+      return '待接單';
     case 'confirmed':
-      return '已確認';
+      return '已接單';
     case 'preparing':
       return '製作中';
     case 'ready':
@@ -52,22 +57,36 @@ function getOrderStatusKind(status: Order['status']) {
   }
 }
 
+function realQueueNumber(value: unknown): number | null {
+  const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 function getNextOrderAction(status: Order['status']) {
   switch (status) {
     case 'pending':
-      return { status: 'confirmed', label: '確認接單' };
+      return { status: 'confirmed' as const, label: '確認接單' };
     case 'confirmed':
-      return { status: 'preparing', label: '開始製作' };
+      return { status: 'preparing' as const, label: '開始製作' };
     case 'preparing':
-      return { status: 'ready', label: '標記可取餐' };
+      return { status: 'ready' as const, label: '標記可取餐' };
     case 'ready':
-      return { status: 'completed', label: '標記已完成' };
+      return { status: 'completed' as const, label: '標記已完成' };
     default:
       return null;
   }
 }
 
-export function MerchantHubScreen() {
+export { ordersForView, type MerchantOrderView } from '../features/merchantOrderViews';
+
+export function MerchantHubScreen({
+  view,
+  onAssignmentChange,
+}: {
+  view?: MerchantOrderView;
+  /** 讓外層（店家工作台）知道現在看哪家店，分頁標題的數字才會對同一家店 */
+  onAssignmentChange?: (cafeteriaId: string | null) => void;
+} = {}) {
   const auth = useAuth();
   const assignments = useMemo(
     () =>
@@ -81,6 +100,10 @@ export function MerchantHubScreen() {
   );
   const [showAllOrders, setShowAllOrders] = useState(false);
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
+  // 按了「給號碼」之後先換上伺服器回的號碼，重新整理後以訂單資料為準
+  const [givenNumbers, setGivenNumbers] = useState<Record<string, number>>({});
+  // 給號碼失敗的單：按鈕旁邊寫「號碼沒給出去，請再按一次。」，成功後拿掉
+  const [numberFailed, setNumberFailed] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (!assignments.some((assignment) => assignment.cafeteriaId === selectedAssignmentId)) {
@@ -93,53 +116,26 @@ export function MerchantHubScreen() {
 
   const isDemoSession = isDemoUid(auth.user?.uid);
 
-  const {
-    items: orders,
-    loading,
-    refreshing,
-    error,
-    refresh,
-  } = useAsyncList<Order>(
-    () => {
-      if (!selectedAssignment) return Promise.resolve([]);
-      // demo 模式直接讀本地 store + 預塞訂單，避免 Firestore 404 + 跨 id 對不上
-      if (isDemoSession) {
-        const merchantKey =
-          selectedAssignment.merchantId ?? selectedAssignment.cafeteriaId;
-        return Promise.resolve(listDemoMerchantOrders(merchantKey));
-      }
-      return listMerchantOrders({
-        schoolId: selectedAssignment.schoolId,
-        cafeteriaId: selectedAssignment.cafeteriaId,
-        max: 80,
-      });
-    },
-    [
-      selectedAssignment?.schoolId,
-      selectedAssignment?.cafeteriaId,
-      selectedAssignment?.merchantId,
-      isDemoSession,
-    ],
-    { keepPreviousData: true },
-  );
-
-  // demo 模式：學生剛下的單會走 demoMerchantOrders store。
-  // 訂閱它的變化，店家畫面就能即時刷新「新訂單」
   useEffect(() => {
-    if (!isDemoSession) return undefined;
-    return subscribeDemoOrders(() => {
-      void refresh();
-    });
-  }, [isDemoSession, refresh]);
+    onAssignmentChange?.(selectedAssignment?.cafeteriaId ?? null);
+  }, [onAssignmentChange, selectedAssignment?.cafeteriaId]);
+
+  // 即時監聽這家店的訂單，新單進來不用下拉；換店或離開畫面就關掉監聽
+  const { orders, loading, refreshing, error, refresh } = useMerchantOrders({
+    assignment: selectedAssignment,
+    isDemo: isDemoSession,
+    includeClosed: !view && showAllOrders,
+  });
 
   const filteredOrders = useMemo(() => {
+    if (view) return ordersForView(orders, view);
     if (showAllOrders) {
       return orders;
     }
     return orders.filter((order) =>
       ['pending', 'confirmed', 'preparing', 'ready'].includes(order.status),
     );
-  }, [orders, showAllOrders]);
+  }, [orders, showAllOrders, view]);
 
   const summary = useMemo(
     () => ({
@@ -152,7 +148,7 @@ export function MerchantHubScreen() {
 
   const handleAdvanceOrder = async (
     order: Order,
-    nextStatus: NonNullable<ReturnType<typeof getNextOrderAction>>['status'],
+    nextStatus: Order['status'],
   ) => {
     if (!selectedAssignment) return;
 
@@ -199,14 +195,67 @@ export function MerchantHubScreen() {
         });
       }
       await refresh();
-      void import('../services/companionEngine').then((m) =>
-        m.recordCompanionFeatureSignal('vendor_hub'),
-      );
+      // 使用紀錄失敗不影響已經改好的訂單狀態
+      try {
+        void import('../services/companionEngine')
+          .then((m) => m.recordCompanionFeatureSignal('vendor_hub'))
+          .catch(() => undefined);
+      } catch {
+        // ignore
+      }
     } catch (error: any) {
       Alert.alert('更新失敗', error?.message ?? '請稍後再試。');
     } finally {
       setUpdatingOrderId(null);
     }
+  };
+
+  // 給號碼：伺服器發號碼；還沒接的單一併接下來，會從「待接單」移到「出餐」
+  const handleGiveNumber = async (order: Order) => {
+    if (!selectedAssignment || isDemoSession) return;
+    setUpdatingOrderId(order.id);
+    try {
+      const given = await giveMerchantQueueNumber({
+        schoolId: selectedAssignment.schoolId,
+        orderId: order.id,
+        cafeteriaId: selectedAssignment.cafeteriaId,
+      });
+      setGivenNumbers((current) => ({ ...current, [order.id]: given.queueNumber }));
+      setNumberFailed((current) => {
+        const { [order.id]: _cleared, ...rest } = current;
+        return rest;
+      });
+      await refresh();
+    } catch (error: any) {
+      console.warn('[MerchantHub] giveMerchantQueueNumber failed:', error?.message ?? error);
+      setNumberFailed((current) => ({ ...current, [order.id]: true }));
+    } finally {
+      setUpdatingOrderId(null);
+    }
+  };
+
+  // 拒單：走原本的取消訂單，學生那邊會看到「這張單店家取消了」，號碼也拿掉
+  const handleReject = (order: Order) => {
+    Alert.alert('確定拒單？', '學生會看到「這張單店家取消了」。', [
+      { text: '先不要', style: 'cancel' },
+      {
+        text: '拒單',
+        style: 'destructive',
+        onPress: () => void handleAdvanceOrder(order, 'cancelled'),
+      },
+    ]);
+  };
+
+  // 出餐頁取消：缺料或學生沒來時用，走同一條取消訂單，學生那邊寫「這張單店家取消了」，號碼拿掉
+  const handleCancelAccepted = (order: Order) => {
+    Alert.alert('確定取消這張單？', '學生會收到通知。', [
+      { text: '先不要', style: 'cancel' },
+      {
+        text: '取消訂單',
+        style: 'destructive',
+        onPress: () => void handleAdvanceOrder(order, 'cancelled'),
+      },
+    ]);
   };
 
   // Check if user has merchant role
@@ -256,7 +305,7 @@ export function MerchantHubScreen() {
         <View style={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}>
           <AnimatedCard title="商家接單" subtitle={selectedAssignment?.schoolName ?? '店家營運'}>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-              <Pill text={`${summary.pending} 筆待確認`} kind="warning" />
+              <Pill text={`${summary.pending} 筆待接單`} kind="warning" />
               <Pill text={`${summary.preparing} 筆製作中`} kind="accent" />
               <Pill text={`${summary.ready} 筆可取餐`} kind="success" />
             </View>
@@ -313,14 +362,16 @@ export function MerchantHubScreen() {
             style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
           >
             <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 17 }}>
-              訂單列表
+              {view === 'pending' ? '待接單' : view === 'kitchen' ? '出餐' : '訂單列表'}
             </Text>
-            <Button
-              text={showAllOrders ? '只看待處理' : '顯示全部'}
-              kind="outline"
-              size="small"
-              onPress={() => setShowAllOrders((value) => !value)}
-            />
+            {view ? null : (
+              <Button
+                text={showAllOrders ? '只看待處理' : '顯示全部'}
+                kind="outline"
+                size="small"
+                onPress={() => setShowAllOrders((value) => !value)}
+              />
+            )}
           </View>
 
           {loading ? (
@@ -334,14 +385,37 @@ export function MerchantHubScreen() {
               <Button text="重試" onPress={refresh} style={{ marginTop: 12 }} />
             </AnimatedCard>
           ) : filteredOrders.length === 0 ? (
-            <AnimatedCard title="目前沒有訂單" subtitle="新的訂單會出現在這裡">
+            <AnimatedCard
+              title={view === 'pending' ? '沒有待接的單' : view === 'kitchen' ? '沒有要出的餐' : '目前沒有訂單'}
+              subtitle={view === 'kitchen' ? '接下來的單會出現在這裡' : '新的訂單會出現在這裡'}
+            >
               <Text style={{ color: theme.colors.muted }}>
-                {showAllOrders ? '尚無任何訂單。' : '目前沒有待處理訂單。'}
+                {view === 'pending'
+                  ? '學生下單後會先出現在這裡。'
+                  : view === 'kitchen'
+                    ? '在「待接單」按「給號碼並接單」或「確認接單」後，單會移到這裡。'
+                    : showAllOrders
+                      ? '尚無任何訂單。'
+                      : '目前沒有待處理訂單。'}
               </Text>
             </AnimatedCard>
           ) : (
             filteredOrders.map((order, index) => {
-              const nextAction = getNextOrderAction(order.status);
+              const cancelled = order.status === 'cancelled';
+              const queueNumber = cancelled
+                ? null
+                : (realQueueNumber(order.queueNumber) ?? givenNumbers[order.id] ?? null);
+              // 待給號碼：店家按「給號碼並接單」（待接單）或「給號碼」（出餐）由伺服器發真的號碼
+              const needsNumber =
+                !isDemoSession &&
+                queueNumber == null &&
+                order.status !== 'completed' &&
+                !cancelled;
+              const isPending = order.status === 'pending';
+              const isAccepted = ['confirmed', 'preparing', 'ready'].includes(order.status);
+              const nextAction =
+                needsNumber && isPending ? null : getNextOrderAction(order.status);
+              const busy = updatingOrderId === order.id;
               const customerLabel = order.customerName ?? order.userId;
               const customerRole = order.customerRole ? ` · ${order.customerRole}` : '';
               return (
@@ -359,7 +433,7 @@ export function MerchantHubScreen() {
                           {order.cafeteria ?? selectedAssignment?.cafeteriaName ?? '餐廳訂單'}
                         </Text>
                         <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-                          訂單 #{order.id.slice(0, 8)} · {customerLabel}{customerRole}
+                          {formatShortOrderCode(order.id)} · {customerLabel}{customerRole}
                         </Text>
                       </View>
                       <Pill
@@ -426,14 +500,62 @@ export function MerchantHubScreen() {
                       ) : null}
                     </View>
 
+                    {queueNumber != null ? (
+                      <Text style={{ color: theme.colors.text, fontWeight: '700' }}>
+                        取餐號碼 {queueNumber}
+                      </Text>
+                    ) : needsNumber ? (
+                      <Text style={{ color: theme.colors.danger, fontWeight: '700' }}>
+                        取餐號碼：{PICKUP_NUMBER_PENDING_LABEL}
+                        {formatTaipeiOrderTime(order.createdAt)
+                          ? `・下單 ${formatTaipeiOrderTime(order.createdAt)}`
+                          : ''}
+                      </Text>
+                    ) : null}
+
+                    {needsNumber ? (
+                      <Button
+                        text={busy ? '給號碼中...' : isPending ? '給號碼並接單' : '給號碼'}
+                        kind="primary"
+                        disabled={busy}
+                        onPress={() => handleGiveNumber(order)}
+                      />
+                    ) : null}
+
+                    {needsNumber && numberFailed[order.id] && !busy ? (
+                      <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>
+                        號碼沒給出去，請再按一次。
+                      </Text>
+                    ) : null}
+
                     {nextAction ? (
                       <Button
-                        text={updatingOrderId === order.id ? '更新中...' : nextAction.label}
+                        text={busy ? '更新中...' : nextAction.label}
                         kind="primary"
-                        disabled={updatingOrderId === order.id}
+                        disabled={busy}
                         onPress={() => handleAdvanceOrder(order, nextAction.status)}
                       />
-                    ) : (
+                    ) : null}
+
+                    {isPending ? (
+                      <Button
+                        text="拒單"
+                        kind="outline"
+                        disabled={busy}
+                        onPress={() => handleReject(order)}
+                      />
+                    ) : null}
+
+                    {isAccepted ? (
+                      <Button
+                        text="取消訂單"
+                        kind="outline"
+                        disabled={busy}
+                        onPress={() => handleCancelAccepted(order)}
+                      />
+                    ) : null}
+
+                    {nextAction || needsNumber || isPending || isAccepted ? null : (
                       <Text style={{ color: theme.colors.muted, textAlign: 'center' }}>
                         此訂單目前不需要進一步操作。
                       </Text>

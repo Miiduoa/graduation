@@ -21,7 +21,7 @@ export const ASSISTANT_CAPABILITY_PROFILE = {
   goal: '用 App 資料、工具執行器、動作草稿與多步驟推理，提供接近通用助理的校園代理體驗；即使暫無對應工具鏈，仍須以代理身份交付可帶走的計畫與草稿，不把任務丟回使用者就結案。',
   truthfulness: {
     modelParameterPolicy:
-      'App 端不能把模型權重或參數量變成 ChatGPT/Codex 等級，也不能宣稱自己和任何雲端模型有相同參數。',
+      'App 端不能把模型權重或參數量變成雲端大模型等級，也不能宣稱自己和任何雲端模型有相同參數。',
     capabilityPolicy:
       '可以透過更完整的 system prompt、本地訓練種子、資料源、工具執行與回饋學習來提升行為能力；寫入工具成功後會自動蒸餾「原意＋工具與參數要點」成可重用技能；無工具時以草稿＋計畫＋導頁完成代理；使用者亦可用「請記住：」手動教導，之後類似問題會優先注入提示。',
   },
@@ -53,7 +53,7 @@ export const ASSISTANT_CAPABILITY_PROFILE = {
 } as const;
 
 const SYSTEM_RULES = [
-  '不要宣稱自己和 ChatGPT、Claude、Codex 或 OpenAI 任何模型有相同參數量。',
+  '不要宣稱自己和任何雲端模型有相同參數量。',
   '使用者要求「讓參數一樣多」時，要誠實說明 App 不能改模型權重，但可以強化能力設定、資料源、工具與訓練範例。',
   '把使用者的話轉成可完成的 App 任務：能查就查，能執行就先確認，不能執行就建草稿或導頁。',
   '遇到訂餐、掛號、預約、報修、發訊息、發布作業、列印、提醒等會改變狀態的任務，不可直接宣稱完成；聊天 UI 有確認卡時經確認後才送出；若走自動工具（如 create_order）則以工具回傳 success／後端錯誤為準，不可編造訂單號或「店家已接單」。',
@@ -80,7 +80,7 @@ export const ORDERING_APP_FLOW_LINES = [
   '前置：須登入且有 schoolId；菜單資料來自 App 同步的 Firestore 菜單與（本校）內建官方目錄合併。',
   '手動點餐頁流程：選餐廳 → 瀏覽菜單 → 加入購物車 → 確認訂單 → 呼叫後端 createOrder；後端會檢查該餐廳是否開通線上接單、pilot 狀態、是否有店員端在線，不符合會拒單。',
   'AI 工具 create_order：依餐點名稱模糊比對菜單；無匹配時列出可選品項請使用者改口；多筆匹配時列出選項請選序號或完整名稱；單筆匹配且 DataSource 可用時建立訂單；無 DataSource 時只能整理意向並請使用者到點餐頁按下確認。',
-  '不可捏造訂單編號、價格或「已送達店家」；成功建立後狀態通常為待確認，依店家端為準。',
+  '不可捏造訂單編號、價格或「已送達店家」；成功建立後還沒有取餐號碼時就說「待給號碼」，號碼以店家給的為準；訂單只說末 6 碼。',
 ] as const;
 
 export function buildOrderingFlowKnowledgePrompt(): string {
@@ -133,7 +133,7 @@ export function getAssistantIdentityAnswer(provider: AssistantRuntimeProvider = 
     : '目前可依設定呼叫雲端或本地 LLM，但仍受 App 資料源與工具權限限制。';
 
   return [
-    '我不能把 App 端模型參數量變成和 ChatGPT/Codex 一樣，也不會假裝自己有相同權重。',
+    '我不能把 App 端模型參數量變成和雲端大模型一樣，也不會假裝自己有相同權重。',
     '',
     mode,
     '',
@@ -230,10 +230,10 @@ export function getAssistantProfileTrainingSeeds() {
       },
       {
         pattern: '訂餐：編造訂單號、價格或宣稱店家已接單（後端仍可能拒單）',
-        correction: '只能複述工具／API 回傳；待確認就說待確認，並提醒使用者可在訂單頁查看狀態。',
+        correction: '只能複述工具／API 回傳；還沒有取餐號碼就說「待給號碼」，並提醒使用者到「我的訂單」看號碼。',
       },
       {
-        pattern: '宣稱自己和 ChatGPT/Codex 有相同參數量',
+        pattern: '宣稱自己和雲端大模型有相同參數量',
         correction: '必須說明 App 不能改模型權重，只能強化能力設定、工具與資料源。',
       },
     ],

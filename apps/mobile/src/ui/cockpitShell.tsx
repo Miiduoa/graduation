@@ -1,30 +1,18 @@
-/**
- * Cockpit Shell — 5 角色共用 UI primitives（高級現代簡約 v2）
- *
- * 設計理念（參考 Linear / Notion / iOS 17 Reminders / Apple Health）：
- *  - **層次** typography 而非顏色：display → h2 → body → caption
- *  - **微互動**：press 時 scale + opacity 雙效
- *  - **留白優先**：section 間 spacing 大、card padding 多
- *  - **顏色克制**：accent 一個、其他都 surface / muted 灰階
- *  - **邊框** 1px hairline，不用粗框
- *  - **圓角** 一致用 theme.radius.md / lg
- */
+/** 各角色工作台共用的標題、統計與操作元件。 */
 import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { theme } from './theme';
+import { useThemeVersion } from './useThemeStyleSheet';
 import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
 
 // ─────────────────────────────────────────────────────────
 // Hero — 大字 + 細 eyebrow + 摘要
 // ─────────────────────────────────────────────────────────
 
-export function CockpitHero(props: {
-  eyebrow: string;
-  title: string;
-  summary?: string;
-}) {
+export function CockpitHero(props: { eyebrow: string; title: string; summary?: string }) {
+  useThemeVersion();
   return (
     <View style={{ marginBottom: theme.space.lg }}>
       <View
@@ -58,7 +46,7 @@ export function CockpitHero(props: {
             }}
             numberOfLines={1}
           >
-            AI-first 工作台
+            Campus One
           </Text>
         </View>
         <View
@@ -71,7 +59,7 @@ export function CockpitHero(props: {
             justifyContent: 'center',
           }}
         >
-          <Ionicons name="sparkles-outline" size={18} color={theme.colors.accent} />
+          <Ionicons name="layers-outline" size={18} color={theme.colors.accent} />
         </View>
       </View>
       <View
@@ -94,34 +82,35 @@ export function CockpitHero(props: {
             letterSpacing: theme.typography.overline.letterSpacing,
           }}
         >
-          AI 下一步
+          接下來
         </Text>
-      <Text
-        style={{
-          fontSize: theme.typography.hero?.fontSize ?? theme.typography.display.fontSize,
-          lineHeight: theme.typography.hero?.lineHeight ?? theme.typography.display.lineHeight,
-          letterSpacing: theme.typography.hero?.letterSpacing ?? theme.typography.display.letterSpacing,
-          fontWeight: '700',
-          color: theme.colors.text,
-          marginTop: theme.space.xs,
-        }}
-        numberOfLines={3}
-      >
-        {props.title}
-      </Text>
-      {props.summary ? (
         <Text
           style={{
-            fontSize: theme.typography.body.fontSize,
-            lineHeight: theme.typography.body.lineHeight,
-            color: theme.colors.textSecondary,
-            marginTop: theme.space.sm + 2,
+            fontSize: theme.typography.hero?.fontSize ?? theme.typography.display.fontSize,
+            lineHeight: theme.typography.hero?.lineHeight ?? theme.typography.display.lineHeight,
+            letterSpacing:
+              theme.typography.hero?.letterSpacing ?? theme.typography.display.letterSpacing,
+            fontWeight: '700',
+            color: theme.colors.text,
+            marginTop: theme.space.xs,
           }}
-          numberOfLines={4}
+          numberOfLines={3}
         >
-          {props.summary}
+          {props.title}
         </Text>
-      ) : null}
+        {props.summary ? (
+          <Text
+            style={{
+              fontSize: theme.typography.body.fontSize,
+              lineHeight: theme.typography.body.lineHeight,
+              color: theme.colors.textSecondary,
+              marginTop: theme.space.sm + 2,
+            }}
+            numberOfLines={4}
+          >
+            {props.summary}
+          </Text>
+        ) : null}
       </View>
     </View>
   );
@@ -132,6 +121,7 @@ export function CockpitHero(props: {
 // ─────────────────────────────────────────────────────────
 
 export function CockpitMetricRow(props: { children: React.ReactNode }) {
+  useThemeVersion();
   return (
     <View
       style={{
@@ -151,11 +141,15 @@ export function CockpitMetricChip(props: {
   value: number | string;
   tone?: 'danger' | 'warn' | 'success';
 }) {
+  useThemeVersion();
   const tint =
-    props.tone === 'danger' ? theme.colors.danger
-    : props.tone === 'warn' ? theme.colors.warning
-    : props.tone === 'success' ? theme.colors.success
-    : theme.colors.text;
+    props.tone === 'danger'
+      ? theme.colors.danger
+      : props.tone === 'warn'
+        ? theme.colors.warning
+        : props.tone === 'success'
+          ? theme.colors.success
+          : theme.colors.text;
   return (
     <View
       style={{
@@ -210,6 +204,7 @@ export function CockpitSection(props: {
   onToggle: () => void;
   children: React.ReactNode;
 }) {
+  useThemeVersion();
   return (
     <View
       style={{
@@ -223,6 +218,9 @@ export function CockpitSection(props: {
     >
       <Pressable
         onPress={props.onToggle}
+        accessibilityRole="button"
+        accessibilityLabel={props.label}
+        accessibilityState={{ expanded: props.open }}
         style={({ pressed }) => ({
           flexDirection: 'row',
           alignItems: 'center',
@@ -302,11 +300,15 @@ export function CockpitRow(props: {
   rightSlot?: React.ReactNode;
   onPress?: () => void;
 }) {
+  useThemeVersion();
   const subtitleTint =
-    props.tone === 'danger' ? theme.colors.danger
-    : props.tone === 'warn' ? theme.colors.warning
-    : props.tone === 'success' ? theme.colors.success
-    : theme.colors.muted;
+    props.tone === 'danger'
+      ? theme.colors.danger
+      : props.tone === 'warn'
+        ? theme.colors.warning
+        : props.tone === 'success'
+          ? theme.colors.success
+          : theme.colors.muted;
   const Inner = (
     <View
       style={{
@@ -370,6 +372,7 @@ export function CockpitRow(props: {
     return (
       <Pressable
         onPress={props.onPress}
+        accessibilityRole="button"
         style={({ pressed }) => ({
           opacity: pressed ? 0.55 : 1,
           transform: [{ scale: pressed ? 0.99 : 1 }],
@@ -391,13 +394,17 @@ export function CockpitToolChip(props: {
   label: string;
   onPress: () => void;
 }) {
+  useThemeVersion();
   return (
     <Pressable
       onPress={props.onPress}
+      accessibilityRole="button"
+      accessibilityLabel={props.label}
       style={({ pressed }) => ({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 6,
+        minHeight: 44,
         paddingVertical: theme.space.xs + 6,
         paddingHorizontal: theme.space.sm + 4,
         borderRadius: theme.radius.md,
@@ -435,14 +442,19 @@ export function CockpitAccentCard(props: {
   ctaIcon?: keyof typeof Ionicons.glyphMap;
   onPress?: () => void;
 }) {
+  useThemeVersion();
   return (
     <Pressable
       onPress={props.onPress}
+      accessibilityLabel={[props.eyebrow, props.title, props.meta, props.ctaLabel]
+        .filter(Boolean)
+        .join('，')}
       disabled={!props.onPress}
+      accessibilityRole={props.onPress ? 'button' : undefined}
       style={({ pressed }) => ({
         padding: theme.space.lg,
         borderRadius: theme.radius.lg,
-        backgroundColor: theme.mode === 'dark' ? theme.colors.surfaceElevated : theme.colors.accent,
+        backgroundColor: theme.colors.accent,
         opacity: pressed ? 0.88 : 1,
         transform: [{ scale: pressed ? 0.99 : 1 }],
         marginBottom: theme.space.lg,
@@ -452,7 +464,6 @@ export function CockpitAccentCard(props: {
         <Text
           style={{
             color: theme.colors.onAccent,
-            opacity: 0.55,
             fontSize: theme.typography.labelSmall.fontSize,
             fontWeight: '500',
             letterSpacing: 0,
@@ -486,14 +497,15 @@ export function CockpitAccentCard(props: {
         {props.meta ? (
           <Text
             style={{
-          color: theme.colors.onAccent,
-              opacity: 0.55,
+              color: theme.colors.onAccent,
               fontSize: theme.typography.bodySmall.fontSize,
             }}
           >
             {props.meta}
           </Text>
-        ) : <View />}
+        ) : (
+          <View />
+        )}
         {props.ctaLabel && (
           <View
             style={{
@@ -503,10 +515,12 @@ export function CockpitAccentCard(props: {
               paddingHorizontal: theme.space.sm + 4,
               paddingVertical: theme.space.xs + 4,
               borderRadius: theme.radius.full,
-              backgroundColor: theme.mode === 'dark' ? theme.colors.accent : theme.colors.surface,
+              backgroundColor: theme.colors.surface,
             }}
           >
-            {props.ctaIcon && <Ionicons name={props.ctaIcon} size={12} color={theme.colors.accent} />}
+            {props.ctaIcon && (
+              <Ionicons name={props.ctaIcon} size={12} color={theme.colors.accent} />
+            )}
             <Text
               style={{
                 color: theme.colors.accent,

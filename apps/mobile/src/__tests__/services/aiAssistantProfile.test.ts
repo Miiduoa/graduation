@@ -35,7 +35,7 @@ describe('AI assistant capability profile', () => {
       isOnline: false,
     });
 
-    expect(prompt).toContain('不能把模型權重或參數量變成 ChatGPT/Codex 等級');
+    expect(prompt).toContain('不能把模型權重或參數量變成雲端大模型等級');
     expect(prompt).toContain('確認卡');
     expect(prompt).toContain('草稿');
     expect(prompt).toContain('不偽造完成');

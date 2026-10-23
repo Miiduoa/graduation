@@ -1,3 +1,6 @@
+import { sanitizeLoginReturnPath } from '@campus/shared/src/signedInSocialReads';
+import { findSchoolById } from '@campus/shared/src/schools';
+
 export type SchoolContext = {
   code: string;
   id: string;
@@ -8,9 +11,69 @@ function toUrl(path: string): URL {
 }
 
 export function sanitizeInternalPath(value?: string | null, fallback: string = '/'): string {
-  if (!value) return fallback;
-  if (!value.startsWith('/') || value.startsWith('//')) return fallback;
-  return value;
+  return sanitizeLoginReturnPath(value, fallback);
+}
+
+/** Keep the first fragment only so a leftover document hash cannot stack onto returnUrl. */
+export function collapseInternalPathHash(path: string): string {
+  const first = path.indexOf('#');
+  if (first < 0) return path;
+  const extra = path.indexOf('#', first + 1);
+  return extra < 0 ? path : path.slice(0, extra);
+}
+
+export function readLoginReturnParam(params: { get(name: string): string | null }): string | null {
+  return params.get('returnUrl') || params.get('returnTo') || params.get('redirect');
+}
+
+export function currentReturnPath(
+  pathname?: string | null,
+  search?: string | null,
+  hash?: string | null,
+): string {
+  const path = pathname && pathname.startsWith('/') ? pathname : '/';
+  const rawSearch = (search || '').replace(/^\?/, '');
+  const query = rawSearch ? `?${rawSearch}` : '';
+  const fragment = hash ? (hash.startsWith('#') ? hash : `#${hash}`) : '';
+  return collapseInternalPathHash(`${path}${query}${fragment}`);
+}
+
+export function loginHref(returnPath: string): string {
+  const safe = collapseInternalPathHash(sanitizeInternalPath(returnPath));
+  const href = `/login?returnUrl=${encodeURIComponent(safe)}`;
+  // Next.js <Link> keeps the current document fragment when the target has none.
+  // Encoded %23 in returnUrl is not a fragment, so end with # to replace it.
+  return safe.includes('#') ? `${href}#` : href;
+}
+
+export function followLoginHref(
+  event: {
+    preventDefault(): void;
+    stopPropagation?(): void;
+    currentTarget: { setAttribute(name: string, value: string): void };
+  },
+  returnPath: string,
+): void {
+  const next = loginHref(returnPath);
+  event.preventDefault();
+  event.stopPropagation?.();
+  event.currentTarget.setAttribute('href', next);
+  window.location.assign(next);
+}
+
+export function navigateAfterLogin(
+  replace: (href: string) => void,
+  destination: string,
+): void {
+  const target = collapseInternalPathHash(destination);
+  if (typeof window !== 'undefined' && window.location.hash) {
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${window.location.pathname}${window.location.search}`,
+    );
+  }
+  replace(target);
 }
 
 export function extractSchoolContextFromPath(path?: string | null): {
@@ -24,6 +87,23 @@ export function extractSchoolContextFromPath(path?: string | null): {
     school: url.searchParams.get('school') || undefined,
     schoolId: url.searchParams.get('schoolId') || undefined,
   };
+}
+
+/** Preserve the browsing campus when moving between public service pages. */
+export function browsingSchoolSearch(
+  params: { get(name: string): string | null } | null | undefined,
+  selectedSchoolId: string | null,
+): string {
+  const campus = params?.get('campus');
+  if (campus === 'all') return '?campus=all';
+
+  const schoolId = campus || params?.get('schoolId') || selectedSchoolId;
+  if (!schoolId || !/^[a-z0-9][a-z0-9-]{0,78}[a-z0-9]$/.test(schoolId)) return '';
+
+  const school = findSchoolById(schoolId);
+  const search = school ? buildSchoolSearch({ code: school.code, id: school.id })
+    : `?schoolId=${encodeURIComponent(schoolId)}`;
+  return `${search}&campus=${encodeURIComponent(schoolId)}`;
 }
 
 export function buildSchoolSearch(context: SchoolContext): string {

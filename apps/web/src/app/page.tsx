@@ -1,591 +1,513 @@
 'use client';
 
-/**
- * Campus AI-First — Home (/)
- * --------------------------
- * 主入口已換成 AI-First 設計。
- *
- * 完整設計文件：docs/design/AI_FIRST_REDESIGN.md
- * 視覺原型：docs/design/prototype.html
- *
- * 舊版 page.legacy.tsx 已下架，僅保留 5 行 stub。
- */
-
-import { useCallback, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { AppShell } from '@/components/AppShell';
-import { CommandBar } from '@/components/ai/CommandBar';
-import { SlotCard } from '@/components/ai/SlotCard';
+import { NuniError, nuniErrorMessage } from '@campus/shared/src/nuni';
+import { AppHeader } from '@/components/AppHeader';
+import { SiteFooter } from '@/components/SiteFooter';
+import { useAuth } from '@/components/AuthGuard';
+import { AccountIdentity } from '@/components/AccountIdentity';
+import { NextClassCard, TodayTimetable } from '@/components/timetable/TodayTimetable';
+import { browserRequest, useNuniSession } from '@/features/nuni/Session';
+import { loadHomeData, type HomeCourse, type HomeData, type HomeTask } from '@/lib/homeOverview';
+import { loadNuniHomeData } from '@/lib/nuniHomeOverview';
+import { publicCampusServices } from '@/lib/publicCampusServices';
+import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
+import { isTeacherRole, useSchoolRole } from '@/lib/useSchoolRole';
+import { TodaySensePanel } from '@/components/TodaySensePanel';
+import { HomeCampusBusCard } from '@/components/HomeCampusBusCard';
+import { CampusIcon, type CampusIconName } from '@/components/CampusIcon';
+import { CampusWeek } from '@/components/CampusWeek';
+import { hasCampusNext } from '@/lib/transit';
+import {
+  LATER_WORK_TITLE,
+  TODAY_WORK_EMPTY,
+  TODAY_WORK_NO_CLASS,
+  TODAY_WORK_NOTE,
+  TODAY_WORK_TITLE,
+  TODAY_WORK_UNSIGNED,
+  courseTaskHref,
+  selectLaterCourseWork,
+  selectTodayCourseWork,
+} from '@/lib/todayCourseWork';
+import {
+  emptySenseState,
+  selectSenseCards,
+  type SenseInputItem,
+  type SensePhase,
+} from '@campus/shared/src/todaySense';
+import styles from './home.module.css';
+
+const teachingRoles = ['owner', 'instructor', 'moderator', 'owner-teacher', 'co-teacher'];
+const courseHref = (course: HomeCourse) =>
+  course.href ?? `/course/${encodeURIComponent(course.id)}`;
+const serviceIcons: Record<string, CampusIconName> = {
+  '/map': 'map',
+  '/bus': 'bus',
+  '/announcements': 'announcements',
+  '/cafeteria': 'cafeteria',
+  '/library': 'library',
+};
+
+function WorkList({ tasks, now, testId }: { tasks: HomeTask[]; now: Date | null; testId: string }) {
+  return (
+    <ul className={styles.list} data-testid={testId}>
+      {tasks.map((task) => (
+        <li key={`${task.courseId}-${task.id}`}>
+          <Link href={courseTaskHref(task)} className={styles.task}>
+            <span className={styles.taskMarker} aria-hidden="true">
+              <CampusIcon name={task.kind === 'quiz' ? 'course' : 'calendar'} size={20} />
+            </span>
+            <span className={styles.taskContent}>
+              <strong>{task.title}</strong>
+              <span>
+                {task.courseName} · {task.kind === 'quiz' ? '測驗' : '作業'}
+              </span>
+            </span>
+            <Deadline task={task} now={now} />
+            <span aria-hidden className={styles.arrow}>
+              →
+            </span>
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function Deadline({ task, now }: { task: HomeTask; now: Date | null }) {
+  const due = task.dueAt ? new Date(task.dueAt) : null;
+  const overdue = !!(due && now && due.getTime() < now.getTime());
+  return (
+    <span className={overdue ? styles.overdue : styles.deadline}>
+      {due ? (
+        <time dateTime={task.dueAt!}>
+          {due.toLocaleString('zh-TW', {
+            timeZone: 'Asia/Taipei',
+            month: 'numeric',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+          })}
+        </time>
+      ) : (
+        '未設期限'
+      )}
+      <small>
+        {due
+          ? overdue
+            ? task.acceptsLate
+              ? task.kind === 'quiz'
+                ? '已過參考期限・仍可作答'
+                : '已過參考期限・仍可繳交'
+              : '已截止'
+            : task.acceptsLate
+              ? '參考期限'
+              : '截止'
+          : ''}
+      </small>
+    </span>
+  );
+}
 
 export default function HomePage() {
-  const router = useRouter();
-  const [pinned, setPinned] = useState<string[]>([]);
-  const [leaveSubmitted, setLeaveSubmitted] = useState(false);
-  const [pickedLunch, setPickedLunch] = useState<string | null>(null);
-
-  const handlePin = (id: string) =>
-    setPinned((p) => (p.includes(id) ? p : [...p, id]));
-
-  // 統一的路由 / 動作 handler — 避免 button 沒有 onClick 而看起來壞掉
-  const go = useCallback(
-    (path: string) => () => {
-      try {
-        router.push(path);
-      } catch (err) {
-        console.warn('[HomePage] router.push failed', path, err);
+  const { user, loading: authLoading } = useAuth();
+  const nuni = useNuniSession();
+  const refreshSession = nuni.refresh;
+  const context = nuni.session?.context;
+  const accountId = nuni.session?.platformAccountId;
+  const uid = user?.uid;
+  const school = useOptionalSelectedSchool();
+  const role = useSchoolRole(uid, school?.selectedSchoolId || 'pu');
+  const owner =
+    context && accountId ? `nuni:${context}:${accountId}` : uid ? `school:${uid}` : null;
+  const sessionLoading = authLoading || nuni.loading;
+  const blocked = nuni.pendingLogout || (!!nuni.error && !uid);
+  const [result, setResult] = useState<{ owner: string; data: HomeData } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [now, setNow] = useState<Date | null>(null);
+  const generation = useRef(0);
+  const data = !sessionLoading && !blocked && result?.owner === owner ? result?.data : null;
+  const refresh = useCallback(async () => {
+    const request = ++generation.current;
+    setResult(null);
+    setError('');
+    if (!owner || sessionLoading || blocked) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      const next =
+        context && accountId
+          ? await loadNuniHomeData((path, input) => browserRequest(path, context, input), accountId)
+          : await loadHomeData(uid!);
+      if (request === generation.current) setResult({ owner, data: next });
+    } catch (failure) {
+      if (request === generation.current) {
+        setError(context ? nuniErrorMessage(failure) : '無法讀取課程資料，請確認連線後重試。');
+        if (
+          context &&
+          failure instanceof NuniError &&
+          (failure.status === 401 || failure.code === 'SESSION_CHANGED')
+        )
+          void refreshSession();
       }
-    },
-    [router],
-  );
-
-  const submitLeave = useCallback(() => {
-    setLeaveSubmitted(true);
-    // 後端 API 串接前先給使用者明確 feedback，不要靜默
-    setTimeout(() => setLeaveSubmitted(false), 4000);
+    } finally {
+      if (request === generation.current) setLoading(false);
+    }
+  }, [owner, context, accountId, uid, sessionLoading, blocked, refreshSession]);
+  useEffect(() => {
+    void refresh();
+    return () => {
+      generation.current += 1;
+    };
+  }, [refresh]);
+  useEffect(() => {
+    const tick = () => setNow(new Date());
+    tick();
+    const timer = setInterval(tick, 60_000);
+    return () => clearInterval(timer);
   }, []);
 
-  return (
-    <AppShell rightDrawer={<AiDrawer />}>
-      <div style={{ maxWidth: 960, margin: '0 auto', paddingTop: 16 }}>
-        <CommandBar
-          quickChips={[
-            { id: 'next', label: '下節課在哪？' },
-            { id: 'week', label: '這週還要交什麼？' },
-            { id: 'leave', label: '幫我請週四的假' },
-            { id: 'lunch', label: '中午吃什麼便宜營養' },
-          ]}
-        />
-
-        {/* Legacy switch hint — 過渡期顯示 */}
-        <div
-          role="note"
-          style={{
-            marginTop: 12,
-            padding: '6px 14px',
-            fontSize: 11,
-            color: 'var(--muted)',
-            background: 'var(--ai-soft)',
-            borderRadius: 'var(--radius-pill)',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 8,
-          }}
-        >
-          <span style={{ color: 'var(--ai)', fontWeight: 600 }}>✨ AI-First v1</span>
-          <span>·</span>
-          <span>新版設計已上線</span>
-        </div>
-
-        {/* Hero */}
-        <section
-          aria-label="今日總覽"
-          style={{
-            marginTop: 24,
-            padding: '28px 32px',
-            background: 'var(--ai-gradient-soft)',
-            borderRadius: 'var(--radius-lg)',
-            border: '1px solid var(--border)',
-            position: 'relative',
-            overflow: 'hidden',
-          }}
-        >
-          <span
-            aria-hidden
-            style={{
-              position: 'absolute',
-              top: -40,
-              right: -40,
-              width: 200,
-              height: 200,
-              background: 'var(--ai-gradient)',
-              opacity: 0.08,
-              borderRadius: '50%',
-              filter: 'blur(40px)',
-            }}
-          />
-          <div
-            style={{
-              fontSize: 12,
-              color: 'var(--ai)',
-              fontWeight: 600,
-              letterSpacing: 0.4,
-              textTransform: 'uppercase',
-            }}
-          >
-            Today · {new Date().toLocaleDateString('zh-TW', { weekday: 'long', month: 'long', day: 'numeric' })}
-          </div>
-          <h1
-            style={{
-              fontSize: 28,
-              fontWeight: 700,
-              margin: '8px 0',
-              letterSpacing: -0.4,
-              color: 'var(--text)',
-            }}
-          >
-            今天 3 堂課、2 份作業，
-            <br />
-            AI 幫你排好了。
-          </h1>
-          <p style={{ color: 'var(--muted)', fontSize: 14, margin: 0 }}>
-            下節課 09:10 資料結構 工程館 302（步行 4 分鐘） · 23:59 截止 Lab 3 進度 60%
-          </p>
-        </section>
-
-        {/* Slot Cards */}
-        <section
-          aria-label="AI 為你準備的卡片"
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-            gap: 16,
-            marginTop: 24,
-          }}
-        >
-          <SlotCard
-            variant="answer"
-            title="下節課"
-            icon="⏰"
-            confidence="high"
-            source={{ name: '教務系統', timestamp: new Date() }}
-            onPinToToday={() => handlePin('next-class')}
-            actions={
-              <>
-                <button
-                  type="button"
-                  className="actionPrimary"
-                  onClick={go('/map?building=eng302')}
-                >
-                  🧭 導航
-                </button>
-                <button
-                  type="button"
-                  className="actionGhost"
-                  onClick={go('/course/CS302')}
-                >
-                  課程資料
-                </button>
-                <button
-                  type="button"
-                  className="actionGhost"
-                  onClick={go('/today-v2?action=leave')}
-                >
-                  請假
-                </button>
-              </>
-            }
-          >
-            <strong>資料結構</strong> · 09:10–10:50
-            <br />
-            📍 工程館 302（步行 4 分鐘）
-            <br />
-            👨‍🏫 王大明老師
-          </SlotCard>
-
-          <SlotCard
-            variant="schedule"
-            title="本週待辦"
-            icon="📅"
-            confidence="high"
-            source={{ name: 'LMS', timestamp: new Date() }}
-            onPinToToday={() => handlePin('week-todo')}
-            actions={
-              <>
-                <button
-                  type="button"
-                  className="actionPrimary"
-                  onClick={go('/timetable?addToCalendar=1')}
-                >
-                  📥 加入行事曆
-                </button>
-                <button
-                  type="button"
-                  className="actionGhost"
-                  onClick={go('/ai-assistant?prompt=help-me-plan-this-week')}
-                >
-                  AI 排週計畫
-                </button>
-              </>
-            }
-          >
-            <ScheduleRow when="週三 23:59" text="作業系統 Lab 3" tag="未開始" tone="warn" />
-            <ScheduleRow when="週四 09:00" text="資料庫小考" tag="已準備" tone="done" />
-            <ScheduleRow when="週五 14:00" text="專題期中報告 60%" tag="進行中" tone="todo" />
-          </SlotCard>
-
-          <SlotCard
-            variant="compare"
-            title="中午選擇 · 3 個建議"
-            icon="🍱"
-            confidence="mid"
-            source={{ name: '餐廳 + 你的偏好', timestamp: new Date() }}
-            onPinToToday={() => handlePin('lunch')}
-            actions={
-              <button
-                type="button"
-                className="actionGhost"
-                onClick={go('/cafeteria')}
-              >
-                展開全部 12 個
-              </button>
-            }
-          >
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-              <CompareOption
-                name="學餐"
-                price="$65"
-                star="⭐ 4.2"
-                time="5 min"
-                onClick={() => setPickedLunch('學餐')}
-                picked={pickedLunch === '學餐'}
-              />
-              <CompareOption
-                name="主餐廳 ★"
-                price="$95"
-                star="⭐ 4.5"
-                time="8 min"
-                recommended
-                onClick={() => setPickedLunch('主餐廳')}
-                picked={pickedLunch === '主餐廳'}
-              />
-              <CompareOption
-                name="7-11"
-                price="$45"
-                star="⭐ 3.8"
-                time="2 min"
-                onClick={() => setPickedLunch('7-11')}
-                picked={pickedLunch === '7-11'}
-              />
-            </div>
-            {pickedLunch && (
-              <div style={{ marginTop: 10, fontSize: 12, color: 'var(--ai)' }}>
-                ✓ 已選擇：{pickedLunch}（再次點擊可換選）
-              </div>
-            )}
-          </SlotCard>
-
-          <SlotCard
-            variant="action"
-            title="請假草稿（待你確認）"
-            icon="📝"
-            confidence="mid"
-            source={{ name: '從對話自動填入' }}
-            actions={
-              <>
-                <button
-                  type="button"
-                  className="actionGhost"
-                  onClick={() => setLeaveSubmitted(false)}
-                  disabled={leaveSubmitted}
-                >
-                  取消
-                </button>
-                <button
-                  type="button"
-                  className="actionPrimary"
-                  onClick={submitLeave}
-                  disabled={leaveSubmitted}
-                >
-                  {leaveSubmitted ? '已送出 ✓' : '提交給授課老師 →'}
-                </button>
-                <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--muted)' }}>
-                  ⚠ AI 不會自動送出
-                </span>
-              </>
-            }
-          >
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <div><strong>日期：</strong>5/22（週四）</div>
-              <div><strong>課程：</strong>資料庫系統 (CS302)</div>
-              <div><strong>事由：</strong>病假</div>
-              <div><strong>附件：</strong>診斷證明（選用）</div>
-            </div>
-            {leaveSubmitted && (
-              <div
-                role="status"
-                style={{
-                  marginTop: 10,
-                  padding: '8px 12px',
-                  background: 'var(--ai-soft)',
-                  color: 'var(--ai)',
-                  borderRadius: 'var(--radius-sm)',
-                  fontSize: 13,
-                }}
-              >
-                ✓ 草稿已送出給授課老師（後端真實串接前為 demo 行為）
-              </div>
-            )}
-          </SlotCard>
-        </section>
-
-        {pinned.length > 0 && (
-          <div
-            role="status"
-            style={{
-              marginTop: 20,
-              padding: 12,
-              borderRadius: 'var(--radius-md)',
-              background: 'var(--ai-soft)',
-              color: 'var(--ai)',
-              fontSize: 13,
-            }}
-          >
-            ✨ 已釘到 Today {pinned.length} 張卡片
-          </div>
-        )}
-
-        <footer
-          style={{
-            marginTop: 40,
-            padding: '20px 0',
-            borderTop: '1px solid var(--border)',
-            color: 'var(--muted)',
-            fontSize: 12,
-            textAlign: 'center',
-          }}
-        >
-          Campus AI-First v1 · 設計總綱：<code>docs/design/AI_FIRST_REDESIGN.md</code>
-        </footer>
-
-        <style jsx global>{`
-          .actionPrimary {
-            padding: 8px 14px;
-            border-radius: var(--radius-sm);
-            font-size: 13px;
-            font-weight: 500;
-            background: var(--ai);
-            color: white;
-            border: 1px solid var(--ai);
-            cursor: pointer;
-            font-family: inherit;
-            transition: background 0.15s;
-          }
-          .actionPrimary:hover { background: var(--ai-strong); }
-          .actionGhost {
-            padding: 8px 14px;
-            border-radius: var(--radius-sm);
-            font-size: 13px;
-            font-weight: 500;
-            background: var(--surface);
-            color: var(--text);
-            border: 1px solid var(--border);
-            cursor: pointer;
-            font-family: inherit;
-            transition: background 0.15s;
-          }
-          .actionGhost:hover { background: var(--panel); }
-        `}</style>
-      </div>
-    </AppShell>
-  );
-}
-
-function ScheduleRow({
-  when, text, tag, tone,
-}: {
-  when: string; text: string; tag: string; tone: 'todo' | 'warn' | 'done';
-}) {
-  const map = {
-    todo: { dot: 'var(--ai)', bg: 'var(--ai-soft)', color: 'var(--ai)' },
-    warn: { dot: 'var(--warning)', bg: 'rgba(255,149,0,0.12)', color: 'var(--warning)' },
-    done: { dot: 'var(--success)', bg: 'rgba(52,199,89,0.12)', color: 'var(--success)' },
-  };
-  const t = map[tone];
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', fontSize: 13 }}>
-      <span style={{ fontSize: 12, color: 'var(--muted)', width: 80, flexShrink: 0 }}>{when}</span>
-      <span aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', background: t.dot, flexShrink: 0 }} />
-      <span style={{ flex: 1 }}>{text}</span>
-      <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 6, fontWeight: 600, background: t.bg, color: t.color }}>
-        {tag}
-      </span>
-    </div>
-  );
-}
-
-function CompareOption({
-  name, price, star, time, recommended, onClick, picked,
-}: {
-  name: string;
-  price: string;
-  star: string;
-  time: string;
-  recommended?: boolean;
-  onClick?: () => void;
-  picked?: boolean;
-}) {
-  const highlighted = picked || recommended;
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={picked}
-      style={{
-        border: `2px solid ${picked ? 'var(--ai)' : recommended ? 'var(--ai)' : 'var(--border)'}`,
-        borderRadius: 'var(--radius-sm)',
-        padding: 10,
-        textAlign: 'center',
-        cursor: 'pointer',
-        transition: 'all 0.18s',
-        background: highlighted ? 'var(--ai-soft)' : 'var(--surface)',
-        font: 'inherit',
-        color: 'var(--text)',
-      }}
-    >
-      <div style={{ fontWeight: 600, fontSize: 13, color: highlighted ? 'var(--ai)' : 'var(--text)' }}>
-        {name}{picked ? ' ✓' : ''}
-      </div>
-      <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--ai)', marginTop: 4 }}>{price}</div>
-      <div style={{ fontSize: 11, color: 'var(--warning)', marginTop: 2 }}>{star}</div>
-      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{time}</div>
-    </button>
-  );
-}
-
-type DrawerMsg = { id: string; role: 'user' | 'ai'; text: string; at: Date };
-
-function AiDrawer() {
-  const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<DrawerMsg[]>([
+  const teaching = data?.courses.filter((course) => teachingRoles.includes(course.role)) ?? [];
+  const studying = data?.courses.filter((course) => !teachingRoles.includes(course.role)) ?? [];
+  const signedIn = !!owner && !blocked;
+  const busy = sessionLoading || (!!owner && loading);
+  const todayTasks = data ? selectTodayCourseWork(data.tasks, now ?? new Date()) : [];
+  const laterTasks = data ? selectLaterCourseWork(data.tasks, now ?? new Date()) : [];
+  const teacherOnly = !!teaching.length && !studying.length;
+  const sensePhase: SensePhase = blocked
+    ? 'hidden'
+    : !signedIn
+      ? 'unsigned'
+      : busy
+        ? 'loading'
+        : error
+          ? 'error'
+          : 'ready';
+  const todayIds = new Set(todayTasks.map((task) => `${task.courseId}:${task.id}`));
+  const senseItems: SenseInputItem[] =
+    data?.tasks
+      .filter((task) => !todayIds.has(`${task.courseId}:${task.id}`))
+      .map((task) => ({
+        id: task.id,
+        kind: task.kind === 'quiz' ? 'quiz' : 'assignment',
+        courseId: task.courseId,
+        courseName: task.courseName,
+        title: task.title,
+        dueAt: task.dueAt,
+        href: courseTaskHref(task),
+      })) ?? [];
+  const uniqueSenseCards =
+    sensePhase === 'ready' && now
+      ? selectSenseCards({ now, items: senseItems, state: emptySenseState() }).cards.length
+      : 0;
+  const showSense =
+    sensePhase === 'unsigned' ||
+    uniqueSenseCards > 0 ||
+    (sensePhase === 'ready' && !todayTasks.length);
+  const courseSections = [
+    { title: '修習課程', items: studying, description: '查看教材、繳交作業與老師回饋。' },
     {
-      id: 'seed-1',
-      role: 'ai',
-      text: '早安王同學 ☀️ 今天我幫你抓到幾件重要的事，已放在 Today 區塊。要先聊哪一件？',
-      at: new Date(),
+      title: '授課與協作',
+      items: teaching,
+      description: '進入課程，發佈教材、查看收件與回覆學生。',
     },
-  ]);
-
-  const send = useCallback(() => {
-    const text = input.trim();
-    if (!text) return;
-    const userMsg: DrawerMsg = {
-      id: `u-${Date.now()}`,
-      role: 'user',
-      text,
-      at: new Date(),
-    };
-    const aiStub: DrawerMsg = {
-      id: `a-${Date.now() + 1}`,
-      role: 'ai',
-      text: '收到，AI 後端串接前先記下：「' + text + '」',
-      at: new Date(),
-    };
-    setMessages((prev) => [...prev, userMsg, aiStub]);
-    setInput('');
-  }, [input]);
+  ];
 
   return (
-    <>
-      <header
-        style={{
-          padding: '16px 20px',
-          borderBottom: '1px solid var(--border)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-        }}
-      >
-        <span
-          aria-hidden
-          style={{
-            width: 32, height: 32, borderRadius: '50%',
-            background: 'var(--ai-gradient)',
-            animation: 'aiBreath var(--ai-breath-duration) ease-in-out infinite',
-          }}
-        />
-        <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 600 }}>校園 AI</div>
-          <div style={{ fontSize: 11, color: 'var(--success)', display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--success)' }} />
-            線上 · 已連結 7 個系統
+    <div className={styles.page}>
+      <a href="#today-content" className={styles.skip}>
+        跳到主要內容
+      </a>
+      <AppHeader />
+      <main id="today-content" className={styles.main} tabIndex={-1}>
+        <header className={styles.homeHeading}>
+          <div>
+            <p className={styles.homeDate}>
+              <span className={styles.dayDot} aria-hidden="true" />
+              {now?.toLocaleDateString('zh-TW', {
+                timeZone: 'Asia/Taipei',
+                month: 'long',
+                day: 'numeric',
+                weekday: 'long',
+              }) ?? '今日'}
+            </p>
+            <h1>今天的校園日常</h1>
+            <p className={styles.homeIntro}>課表、待辦，還有校園裡的大小事。</p>
           </div>
-        </div>
-      </header>
-
-      <div
-        style={{
-          flex: 1, overflowY: 'auto', padding: '16px 20px',
-          display: 'flex', flexDirection: 'column', gap: 16,
-        }}
-      >
-        {messages.map((m) =>
-          m.role === 'ai' ? (
-            <div key={m.id}>
-              <div
-                style={{
-                  background: 'var(--ai-surface)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-md)',
-                  padding: '10px 14px',
-                  fontSize: 14,
-                  lineHeight: 1.5,
-                }}
-              >
-                {m.text}
-              </div>
-              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
-                校園 AI · {m.at.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })}
-              </div>
-            </div>
-          ) : (
-            <div key={m.id} style={{ alignSelf: 'flex-end', maxWidth: '90%' }}>
-              <div
-                style={{
-                  background: 'var(--ai)',
-                  color: 'white',
-                  padding: '10px 14px',
-                  borderRadius: 'var(--radius-md)',
-                  fontSize: 14,
-                }}
-              >
-                {m.text}
-              </div>
-              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4, textAlign: 'right' }}>
-                你 · {m.at.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })}
-              </div>
-            </div>
-          ),
+          <CampusWeek now={now} />
+        </header>
+        {isTeacherRole(role) && (
+          <p className={styles.notice}>
+            <Link href="/teacher">老師工作台 →</Link> 看學生送來的課程申訴。
+          </p>
         )}
-      </div>
-
-      <footer style={{ padding: '12px 16px', borderTop: '1px solid var(--border)' }}>
-        <div style={{
-          display: 'flex', gap: 8, alignItems: 'center',
-          background: 'var(--panel)', borderRadius: 'var(--radius-pill)', padding: '8px 12px',
-        }}>
-          <input
-            placeholder="繼續對話..."
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                send();
-              }
-            }}
-            style={{
-              flex: 1, border: 'none', background: 'transparent',
-              outline: 'none', fontSize: 14, fontFamily: 'inherit', color: 'var(--text)',
-            }}
-          />
-          <button
-            type="button"
-            aria-label="送出"
-            onClick={send}
-            disabled={!input.trim()}
-            style={{
-              width: 32, height: 32, borderRadius: '50%',
-              background: 'var(--ai-gradient)', color: 'white',
-              border: 'none', cursor: input.trim() ? 'pointer' : 'not-allowed',
-              fontSize: 13,
-              opacity: input.trim() ? 1 : 0.5,
-            }}
-          >
-            ↑
-          </button>
+        <div className={styles.todayFacts}>
+          <NextClassCard now={now} />
+          {!school?.selectedSchoolId || hasCampusNext(school.selectedSchoolId) ? (
+            <HomeCampusBusCard schoolId={school?.selectedSchoolId || 'pu'} />
+          ) : null}
         </div>
-      </footer>
-    </>
+        <div className={styles.columns}>
+          <div className={styles.dayContent}>
+            {blocked ? (
+              <section className={styles.focus} aria-labelledby="session-title">
+                <h2 id="session-title">
+                  {nuni.pendingLogout ? '登出尚未完成' : '暫時無法確認 Google 帳號'}
+                </h2>
+                <p role="alert">{nuni.error || '請重試登出，再切換帳號。'}</p>
+                <div className={styles.focusActions}>
+                  <button
+                    type="button"
+                    className={styles.primary}
+                    onClick={() => void (nuni.pendingLogout ? nuni.logout() : nuni.refresh())}
+                    disabled={sessionLoading}
+                  >
+                    {nuni.pendingLogout ? '重試登出' : '重新確認登入'}
+                  </button>
+                </div>
+              </section>
+            ) : busy ? (
+              <section className={styles.focus} aria-busy="true" data-testid="today-work">
+                <p role="status">正在讀取課程與待辦…</p>
+                <div className={styles.loadingLines} aria-hidden="true">
+                  <span />
+                  <span />
+                  <span />
+                </div>
+              </section>
+            ) : error ? (
+              <section className={styles.focus}>
+                <h2>課程資料尚未讀取完成</h2>
+                <p role="alert">{error}</p>
+                <div className={styles.focusActions}>
+                  <button type="button" className={styles.primary} onClick={() => void refresh()}>
+                    重試
+                  </button>
+                  <Link className={styles.secondary} href={context ? '/classroom' : '/#courses'}>
+                    查看課程
+                  </Link>
+                </div>
+              </section>
+            ) : teacherOnly ? (
+              <section className={styles.focus} aria-labelledby="focus-title">
+                <div className={styles.focusLabel}>教學安排</div>
+                <h2 id="focus-title">{`${teaching.length} 門課正在進行`}</h2>
+                <p>從授課課程查看學生繳交內容，安排教材與下一次作業。</p>
+                <div className={styles.focusActions}>
+                  <Link className={styles.primary} href="#teaching-courses">
+                    查看授課課程 <span aria-hidden>→</span>
+                  </Link>
+                  <Link className={styles.secondary} href="/timetable">
+                    查看課表
+                  </Link>
+                </div>
+              </section>
+            ) : (
+              <section
+                className={styles.workPanel}
+                aria-labelledby="today-work-title"
+                data-testid="today-work"
+              >
+                <div className={styles.panelLabel}>
+                  <CampusIcon name="calendar" size={17} />
+                  <span>{signedIn ? '課程待辦' : '課程空間'}</span>
+                </div>
+                <div className={styles.sectionHeading}>
+                  <h2 id="today-work-title">
+                    {signedIn ? TODAY_WORK_TITLE : '課程與作業'}
+                    {signedIn ? <span>{todayTasks.length}</span> : null}
+                  </h2>
+                  {signedIn ? (
+                    <button
+                      type="button"
+                      className={styles.textButton}
+                      onClick={() => void refresh()}
+                      disabled={loading}
+                    >
+                      更新課程
+                    </button>
+                  ) : null}
+                </div>
+                <p className={styles.sectionNote}>
+                  {signedIn ? TODAY_WORK_NOTE : TODAY_WORK_UNSIGNED}
+                </p>
+                {!signedIn ? (
+                  <div className={styles.guestWelcome}>
+                    <div className={styles.focusActions}>
+                      <Link className={styles.primary} href="/classroom/login?returnUrl=%2F">
+                        用 Google 帳號登入 <CampusIcon name="arrow" size={18} />
+                      </Link>
+                      <Link className={styles.secondary} href="#public-services">
+                        先瀏覽校園資訊
+                      </Link>
+                    </div>
+                  </div>
+                ) : todayTasks.length ? (
+                  <WorkList tasks={todayTasks} now={now} testId="today-work-list" />
+                ) : (
+                  <p className={styles.empty}>
+                    {data?.courses.length ? TODAY_WORK_EMPTY : TODAY_WORK_NO_CLASS}
+                  </p>
+                )}
+                {signedIn && !data?.courses.length ? (
+                  <div className={styles.focusActions}>
+                    <Link className={styles.primary} href="/classroom">
+                      進入課程空間 <span aria-hidden>→</span>
+                    </Link>
+                    <Link className={styles.secondary} href="/import?kind=timetable">
+                      匯入課表
+                    </Link>
+                  </div>
+                ) : null}
+              </section>
+            )}
+            <TodayTimetable now={now} />
+            {showSense ? (
+              <TodaySensePanel
+                ownerId={owner}
+                schoolId={school?.selectedSchoolId}
+                items={senseItems}
+                now={now}
+                phase={sensePhase}
+                hideWhenEmpty={todayTasks.length > 0}
+              />
+            ) : null}
+            {data && (
+              <>
+                {!!laterTasks.length && (
+                  <section className={styles.section} aria-labelledby="later-work-title">
+                    <div className={styles.sectionHeading}>
+                      <h2 id="later-work-title">
+                        {LATER_WORK_TITLE} <span>{laterTasks.length}</span>
+                      </h2>
+                    </div>
+                    <p className={styles.sectionNote}>{TODAY_WORK_NOTE}</p>
+                    <WorkList tasks={laterTasks} now={now} testId="later-work-list" />
+                  </section>
+                )}
+                {courseSections.map(
+                  ({ title, items, description }, index) =>
+                    items.length > 0 && (
+                      <section
+                        key={title}
+                        id={index ? 'teaching-courses' : 'courses'}
+                        className={styles.section}
+                        aria-labelledby={`courses-title-${index}`}
+                      >
+                        <div className={styles.sectionHeading}>
+                          <h2 id={`courses-title-${index}`}>
+                            {title} <span>{items.length}</span>
+                          </h2>
+                          {!!context && <Link href="/classroom">我的課程 →</Link>}
+                        </div>
+                        <p className={styles.sectionNote}>{description}</p>
+                        <div className={styles.courses}>
+                          {items.map((course) => (
+                            <Link
+                              key={course.id}
+                              href={courseHref(course)}
+                              className={styles.course}
+                            >
+                              <span>
+                                {course.role === 'owner-teacher'
+                                  ? '課程建立者'
+                                  : course.role === 'co-teacher'
+                                    ? '協同教師'
+                                    : index
+                                      ? '授課成員'
+                                      : '學生'}
+                              </span>
+                              <h3>{course.name}</h3>
+                              <p>
+                                {course.unreadCount
+                                  ? `${course.unreadCount} 則新動態`
+                                  : index
+                                    ? '教材、收件與回饋'
+                                    : '教材與作業'}
+                              </p>
+                              <span className={styles.courseArrow} aria-hidden>
+                                →
+                              </span>
+                            </Link>
+                          ))}
+                        </div>
+                      </section>
+                    ),
+                )}
+                {!!data.archivedCount && (
+                  <p className={styles.sectionNote}>
+                    另有 {data.archivedCount} 門已封存課程，可到
+                    <Link href="/classroom">課程空間</Link>查看過往紀錄。
+                  </p>
+                )}
+                {teaching.length > 0 && !studying.length && (
+                  <button
+                    type="button"
+                    className={styles.textButton}
+                    onClick={() => void refresh()}
+                    disabled={loading}
+                  >
+                    更新課程
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+          <aside className={styles.sidebar}>
+            <section
+              id="public-services"
+              className={styles.services}
+              aria-labelledby="daily-links-title"
+            >
+              <div className={styles.servicesHeading}>
+                <h2 id="daily-links-title">校園生活</h2>
+                <Link href="/life" aria-label="查看所有校園生活服務">
+                  所有服務 <span aria-hidden="true">↗</span>
+                </Link>
+              </div>
+              <p className={styles.sectionNote}>這些入口不需登入；個人校務資料需另行驗證。</p>
+              {publicCampusServices.map(({ href, title, detail }) => (
+                <Link key={href} href={href}>
+                  <span className={styles.serviceIcon}>
+                    <CampusIcon name={serviceIcons[href] ?? 'support'} size={21} />
+                  </span>
+                  <span>
+                    <strong>{title}</strong>
+                    <small>{detail}</small>
+                  </span>
+                  <CampusIcon name="arrow" size={17} className={styles.serviceArrow} />
+                </Link>
+              ))}
+            </section>
+            {signedIn && context && accountId ? (
+              <AccountIdentity
+                key={`identity:${accountId}:${context}`}
+                context={context}
+                accountId={accountId}
+              />
+            ) : null}
+            <section className={styles.schoolAccess}>
+              <span className={styles.recordIcon}>
+                <CampusIcon name="import" size={22} />
+              </span>
+              <h2>課表與成績紀錄</h2>
+              <p>
+                可匯入課表或成績，核對後存在這台瀏覽器。學校資料尚未自動同步，正式紀錄請到校方系統確認。
+              </p>
+              <Link href="/import">匯入與備份個人資料 →</Link>
+            </section>
+            <Link className={styles.supportLink} href="/ai-assistant">
+              校園助理 →
+            </Link>
+          </aside>
+        </div>
+        <SiteFooter />
+      </main>
+    </div>
   );
 }

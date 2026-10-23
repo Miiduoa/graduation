@@ -1,14 +1,13 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import styles from './SystemNotice.module.css';
 
 export function OfflineBanner() {
-  const [isOffline, setIsOffline] = useState(() => {
-    if (typeof navigator === 'undefined') return false;
-    return !navigator.onLine;
-  });
+  const [isOffline, setIsOffline] = useState(false);
 
   useEffect(() => {
+    setIsOffline(!navigator.onLine);
     const handleOnline = () => setIsOffline(false);
     const handleOffline = () => setIsOffline(true);
 
@@ -21,20 +20,11 @@ export function OfflineBanner() {
     };
   }, []);
 
-  useEffect(() => {
-    const root = document.documentElement;
-    root.style.setProperty('--top-offset', isOffline ? '44px' : '0px');
-    return () => {
-      root.style.setProperty('--top-offset', '0px');
-    };
-  }, [isOffline]);
-
   if (!isOffline) return null;
 
   return (
-    <div className="offlineBanner">
-      <span>📡</span>
-      <span>您目前處於離線狀態，部分功能可能無法使用</span>
+    <div className={styles.offline} role="status">
+      <span>目前沒有網路連線，恢復連線後再試。</span>
     </div>
   );
 }

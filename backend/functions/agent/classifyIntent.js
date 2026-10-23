@@ -1,7 +1,12 @@
 'use strict';
 
 const cases = require('./cases.json');
-const { detectCampusAssistantIntent, isDormRepairStatusQueryMessage } = require('../lib/assistantFormat');
+const {
+  detectCampusAssistantIntent,
+  isDormRepairStatusQueryMessage,
+  isScheduleQuestionMessage,
+  mentionsOwnRepairTicket,
+} = require('../lib/assistantFormat');
 const {
   classifyRichIntent,
   richRawScoreToConfidence01,
@@ -134,8 +139,12 @@ function mapRichCategoryToAssistantIntent(category, rawMessage, richSubIntent) {
       const hasDormRepairSignal = /宿舍|報修|維修|維修單|工單|冷氣|空調|房間|洗衣|洗衣機|包裹/.test(m);
       if (!hasDormRepairSignal) return 'general';
       if (richSubIntent === 'repair_status') return 'check_repair_status';
-      if (isDormRepairStatusQueryMessage(rawMessage)) return 'check_repair_status';
       if (/洗衣機|洗衣/.test(m) && /預約|幫我|訂|今晚|明天/.test(m)) return 'wash_reserve';
+      // 「宿舍網路什麼時候維修」是在問時間：查自己的報修單就看進度，其他的去公告找，不整理報修草稿
+      if (isScheduleQuestionMessage(rawMessage)) {
+        return mentionsOwnRepairTicket(rawMessage) ? 'check_repair_status' : 'announcements';
+      }
+      if (isDormRepairStatusQueryMessage(rawMessage)) return 'check_repair_status';
       if (
         /報修|維修|送.*單|送一個.*單|維修單|送\s*修|送.*報修/.test(m) ||
         (/壞了|故障|不冷|不會轉|漏水|怪怪的|好熱|太熱|熱爆|不涼|沒風|異音|忽冷忽熱/.test(m) &&

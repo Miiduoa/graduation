@@ -1,18 +1,20 @@
 import type { Metadata } from 'next';
+import { SiteShell } from '@/components/SiteShell';
+import styles from '../servicePages.module.css';
 
 export const metadata: Metadata = {
-  title: '使用條款 | 校園助手',
-  description: '校園助手正式版使用條款',
+  title: '使用條款 | Campus One',
+  description: 'Campus One 使用條款',
 };
 
 const sections = [
   {
     title: '服務範圍',
-    body: '校園助手提供公告、課程、成績、校園地圖、訊息與經學校驗證的延伸服務。未完成整合驗收的學校與功能不會出現在正式版。',
+    body: 'Campus One 提供公告、課程、成績、校園地圖、訊息與經學校驗證的延伸服務。各項服務依學校開通情況提供。',
   },
   {
     title: '帳號責任',
-    body: '你必須對自己的登入狀態與裝置安全負責，不得冒用、濫用學校帳號、爬取資料或干擾其他使用者正常使用。',
+    body: '請妥善保管登入資訊與裝置，並對自己的帳號使用負責。不得冒用或濫用學校帳號、爬取資料，或干擾其他使用者正常使用。',
   },
   {
     title: '支付與交易',
@@ -22,32 +24,47 @@ const sections = [
     title: '服務調整',
     body: '我們可能因法規、學校要求、資訊安全或維運需要調整服務內容。重大變更會透過 App 內公告、Email 或校務通知說明。',
   },
+  {
+    title: '聯絡方式',
+    body: (
+      <>
+        對服務或使用條款有疑問，請來信{' '}
+        <a href="mailto:demohan513@gmail.com">demohan513@gmail.com</a>。
+      </>
+    ),
+  },
 ];
 
 export default function TermsPage() {
   return (
-    <main
-      className="pageStack"
-      style={{ maxWidth: 880, margin: '0 auto', padding: '32px 20px 72px' }}
-    >
-      <section className="card" style={{ display: 'grid', gap: 16 }}>
-        <span className="pill brand">Terms of Service</span>
-        <div>
-          <h1 className="h1" style={{ marginBottom: 10 }}>
-            校園助手使用條款
-          </h1>
-          <p className="sub" style={{ margin: 0 }}>
-            使用校園助手代表你同意依本條款與所屬學校的校務規範使用本服務。
-          </p>
-        </div>
-      </section>
-
-      {sections.map((section) => (
-        <section key={section.title} className="card" style={{ display: 'grid', gap: 10 }}>
-          <h2 style={{ margin: 0, fontSize: 22 }}>{section.title}</h2>
-          <p style={{ margin: 0, lineHeight: 1.8 }}>{section.body}</p>
-        </section>
-      ))}
-    </main>
+    <SiteShell title="使用條款" subtitle="使用 Campus One 前，請先了解服務範圍與帳號責任。">
+      <div className={styles.documentLayout}>
+        <nav className={styles.contents} aria-label="使用條款章節">
+          <p>本頁內容</p>
+          <ol>
+            {sections.map((section, index) => (
+              <li key={section.title}>
+                <a href={`#terms-${index + 1}`}>
+                  <span aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
+                  {section.title}
+                </a>
+              </li>
+            ))}
+          </ol>
+        </nav>
+        <article className={styles.document} aria-label="使用條款內容">
+          {sections.map((section, index) => (
+            <section
+              key={section.title}
+              id={`terms-${index + 1}`}
+              aria-labelledby={`terms-title-${index + 1}`}
+            >
+              <h2 id={`terms-title-${index + 1}`}>{section.title}</h2>
+              <p>{section.body}</p>
+            </section>
+          ))}
+        </article>
+      </div>
+    </SiteShell>
   );
 }

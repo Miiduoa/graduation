@@ -19,12 +19,12 @@ import uuid
 from pathlib import Path
 
 COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188").rstrip("/")
-WORKSPACE = Path(os.environ.get("GRAD_PROJECT_ROOT", "/Users/miiduoa/Desktop/畢業專題")).resolve()
-COMFY_OUT = Path(
-    os.environ.get("COMFYUI_OUTPUT", "/Users/miiduoa/Desktop/AI圖像本地引擎/output")
-).resolve()
+WORKSPACE = Path(os.environ.get("GRAD_PROJECT_ROOT") or Path(__file__).resolve().parents[1]).resolve()
+# ComfyUI 的輸出資料夾依各自安裝位置而定，一定要用環境變數指定
+COMFY_OUT_ENV = os.environ.get("COMFYUI_OUTPUT", "").strip()
+COMFY_OUT = Path(COMFY_OUT_ENV).resolve() if COMFY_OUT_ENV else None
 
-# Theme: 校園助手 — 靜宜紫金 (#5B21B6 / #D4A843) on dark #1a1a2e, AI-first campus app
+# Theme: 校園助手 — 靜宜紫金 (#5B21B6 / #D4A843) on dark #1a1a2e
 POS_CLIP_L = (
     "mobile app icon, square format, centered composition, abstract modern symbol, "
     "minimal flat vector, soft gradient, violet and gold accents on deep navy background, "
@@ -165,6 +165,9 @@ def find_saved_png(history_entry: dict) -> tuple[str, str]:
 
 
 def main() -> int:
+    if COMFY_OUT is None:
+        print("請設定 COMFYUI_OUTPUT（ComfyUI 的 output 資料夾）", file=sys.stderr)
+        return 2
     seed = int(os.environ.get("ICON_SEED", str(int(time.time()) % (2**31))))
     steps = int(os.environ.get("ICON_STEPS", "24"))
     w = int(os.environ.get("ICON_WIDTH", "1024"))

@@ -16,12 +16,14 @@ import {
 } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
+import { useThemeMode } from '../state/theme';
 import { useAuth } from '../state/auth';
 import { shouldBlockForNoLogin, isDemoUid } from '../services/demoSession';
 import { useSchool } from '../state/school';
 import { getDataSource, hasDataSource } from '../data';
 import type { Grade as DataGrade } from '../data/types';
 import { analytics } from '../services/analytics';
+import { PersonalImportSummary } from '../components/PersonalImportSummary';
 
 type Grade = {
   id: string;
@@ -135,8 +137,8 @@ const GRADE_COLORS: Record<string, string> = {
   'A+': '#22C55E',
   A: '#22C55E',
   'A-': '#4ADE80',
-  'B+': '#5856D6',
-  B: '#5856D6',
+  get 'B+'() { return theme.colors.info; },
+  get B() { return theme.colors.info; },
   'B-': '#60A5FA',
   'C+': '#FF9500',
   C: '#FF9500',
@@ -159,13 +161,14 @@ function inferCategory(courseCode?: string, courseName?: string): Grade['categor
 }
 
 const CATEGORY_LABELS: Record<string, { label: string; color: string }> = {
-  required: { label: '必修', color: '#5856D6' },
+  required: { label: '必修', get color() { return theme.colors.accent; } },
   elective: { label: '選修', color: '#AF52DE' },
   general: { label: '通識', color: '#34C759' },
   english: { label: '英文', color: '#FF9500' },
 };
 
 function GradeCard({ course }: { course: Grade }) {
+  useThemeMode();
   const categoryInfo = CATEGORY_LABELS[course.category];
   const gradeColor = course.grade
     ? (GRADE_COLORS[course.grade] ?? theme.colors.muted)
@@ -253,6 +256,7 @@ function GradeCard({ course }: { course: Grade }) {
 }
 
 export function GradesScreen(props: Record<string, unknown>) {
+  useThemeMode();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const nav = props?.navigation as any;
   const auth = useAuth();
@@ -423,6 +427,7 @@ export function GradesScreen(props: Record<string, unknown>) {
   if (shouldBlockForNoLogin({ uid: auth.user?.uid ?? null, hasUser: !!auth.user })) {
     return (
       <Screen>
+        <PersonalImportSummary kind="grades" />
         <AnimatedCard title="成績查詢" subtitle="請先登入">
           <Text style={{ color: theme.colors.muted, marginBottom: 12 }}>
             登入後才能查看成績資料
@@ -436,6 +441,7 @@ export function GradesScreen(props: Record<string, unknown>) {
   if (loading) {
     return (
       <Screen>
+        <PersonalImportSummary kind="grades" />
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
           <Spinner />
           <Text style={{ color: theme.colors.muted, marginTop: 12 }}>載入成績中...</Text>
@@ -446,6 +452,7 @@ export function GradesScreen(props: Record<string, unknown>) {
 
   return (
     <Screen>
+      <PersonalImportSummary kind="grades" />
       <View style={{ flex: 1 }}>
         <SegmentedControl options={TABS} selected={selectedTab} onChange={setSelectedTab} />
 
@@ -689,7 +696,7 @@ export function GradesScreen(props: Record<string, unknown>) {
                       alignItems: 'center',
                     }}
                   >
-                    <Text style={{ color: '#5856D6', fontWeight: '700', fontSize: 24 }}>
+                    <Text style={{ color: theme.colors.info, fontWeight: '700', fontSize: 24 }}>
                       {
                         semesters.filter((s) => s.courses.some((c) => c.status === 'completed'))
                           .length
@@ -709,7 +716,7 @@ export function GradesScreen(props: Record<string, unknown>) {
                       label === 'A系列'
                         ? '#22C55E'
                         : label === 'B系列'
-                          ? '#5856D6'
+                          ? theme.colors.info
                           : label === 'C系列'
                             ? '#FF9500'
                             : theme.colors.muted;
