@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
 import { CampusIcon } from '@/components/CampusIcon';
 import {
   feedbackPredatesSubmission,
@@ -30,6 +31,7 @@ export function FeedbackList({ items }: { items: HomeFeedback[] }) {
     <ul className={styles.list} data-testid="recent-feedback-list">
       {items.map((item) => {
         const stale = feedbackPredatesSubmission(item.reviewedAt, item.submittedAt);
+        const reviewedTime = item.reviewedAt ? parseTaipeiInstant(item.reviewedAt) : null;
         return (
           <li key={`${item.courseId}-${item.kind}-${item.id}`}>
             <Link href={feedbackHref(item)} className={styles.task}>
@@ -53,9 +55,9 @@ export function FeedbackList({ items }: { items: HomeFeedback[] }) {
                 ) : null}
               </span>
               <span className={styles.deadline}>
-                {item.reviewedAt ? (
-                  <time dateTime={item.reviewedAt}>
-                    {new Date(item.reviewedAt).toLocaleString('zh-TW', {
+                {reviewedTime !== null ? (
+                  <time dateTime={new Date(reviewedTime).toISOString()}>
+                    {new Date(reviewedTime).toLocaleString('zh-TW', {
                       timeZone: 'Asia/Taipei',
                       month: 'numeric',
                       day: 'numeric',

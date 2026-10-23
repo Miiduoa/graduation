@@ -1,4 +1,5 @@
 import { createNuniClasses, type NuniTransport } from '@campus/shared/src/nuni';
+import { parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
 import type { HomeData, HomeFeedback, HomeTask } from './homeOverview';
 
 const FEEDBACK_LIMIT = 8;
@@ -7,8 +8,8 @@ function sortFeedback(rows: HomeFeedback[]): HomeFeedback[] {
   return rows
     .sort(
       (a, b) =>
-        (b.reviewedAt ? Date.parse(b.reviewedAt) : 0) -
-        (a.reviewedAt ? Date.parse(a.reviewedAt) : 0),
+        (b.reviewedAt ? parseTaipeiInstant(b.reviewedAt) ?? 0 : 0) -
+        (a.reviewedAt ? parseTaipeiInstant(a.reviewedAt) ?? 0 : 0),
     )
     .slice(0, FEEDBACK_LIMIT);
 }
