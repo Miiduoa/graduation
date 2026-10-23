@@ -239,7 +239,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Test web server lifecycle
-        run: node --test deploy/web/start.test.cjs
+        run: node --test deploy/web/start.test.cjs deploy/web/release-check.test.mjs deploy/web/transit-release-gate.test.mjs deploy/web/release-safety.test.mjs
 
       - name: Test shared ordering contracts
         run: pnpm --filter @campus/shared test:food

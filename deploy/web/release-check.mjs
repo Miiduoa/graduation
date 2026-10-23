@@ -7,6 +7,7 @@ export const APP = 'nuni-web';
 export const ORIGIN = 'https://nuni.tw';
 export const REPOSITORY = 'Miiduoa/graduation';
 export const EXPECTED_MACHINES = ['683e513be2d358', '80e447b6140178'];
+export const PUBLIC_RELEASE_PAGES = ['/', '/bus', '/login', '/life', '/privacy'];
 const SHA = /^[a-f0-9]{40}$/;
 const IMAGE = /^registry\.fly\.io\/nuni-web@sha256:[a-f0-9]{64}$/;
 const object = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -96,7 +97,7 @@ export async function inspectPublic(expected, fetcher = fetch, profile = 'live-t
   const webReady = health.status === 200 && health.body?.service === 'campus-one-web' &&
     health.body.status === 'ready' && health.body.legacy === 'ready' && health.body.revision === expected;
   const pages = [];
-  for (const path of ['/', '/bus', '/login']) {
+  for (const path of PUBLIC_RELEASE_PAGES) {
     const response = await fetcher(`${ORIGIN}${path}`, { cache: 'no-store', redirect: 'error',
       credentials: 'omit', signal: AbortSignal.timeout(15000) });
     const html = await response.text();
@@ -119,6 +120,18 @@ export async function inspectPublic(expected, fetcher = fetch, profile = 'live-t
     revision: SHA.test(health.body?.revision ?? '') ? health.body.revision : null,
     webDeployed: webReady && pages.every((page) => page.status === 200 && page.html && page.geolocationAllowed && page.newBusPage),
     pages, transit, browserControlsVerified: false, liveArrivalsVerified: false };
+}
+
+export async function inspectLocalPages(origin, fetcher = fetch, paths = PUBLIC_RELEASE_PAGES) {
+  if (!/^https?:\/\/127\.0\.0\.1:\d+$/.test(origin ?? '')) fail('Local smoke origin must be loopback.');
+  for (const path of paths) {
+    const response = await fetcher(`${origin}${path}`, { cache: 'no-store', redirect: 'error',
+      credentials: 'omit', signal: AbortSignal.timeout(15000) });
+    const html = await response.text();
+    const isHtml = response.headers.get('content-type')?.includes('text/html') === true;
+    if (response.status !== 200 || !isHtml) fail(`Local page ${path} is not ready.`);
+    if (path === '/bus' && !hasBusShell(html)) fail('Local bus page is not the current shell.');
+  }
 }
 
 async function requireMainAndCi(env) {
@@ -157,6 +170,11 @@ async function main() {
     return;
   }
   if (command === 'stable') return requireStable(await json(input), await json(output));
+  if (command === 'smoke') {
+    await inspectLocalPages(input);
+    console.log('Verified local release pages on loopback; production was not contacted.');
+    return;
+  }
   if (command === 'verify') {
     const report = await inspectPublic(env.EXPECTED_RELEASE_SHA, fetch, validateProfile(env.TRANSIT_RELEASE_PROFILE));
     await save('release-evidence/public-check.json', report);
