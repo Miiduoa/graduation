@@ -609,10 +609,12 @@
 }
 .deadline,
 .overdue {
+  min-width: 0;
+  max-width: 45%;
   text-align: right;
   font-size: var(--font-body-size);
   line-height: var(--font-body-line-height);
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .overdue {
   color: var(--danger);
@@ -1397,6 +1399,7 @@
   }
   .task > :is(.deadline, .overdue) {
     grid-column: 2;
+    max-width: none;
     text-align: left;
     font-size: var(--font-body-size);
     line-height: var(--font-body-line-height);
@@ -1415,9 +1418,5 @@
   .task > :is(.deadline, .overdue) {
     overflow-wrap: anywhere;
     word-break: break-word;
-  }
-  .deadline,
-  .overdue {
-    white-space: normal;
   }
 }
