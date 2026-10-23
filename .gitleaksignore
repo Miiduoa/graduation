@@ -1,0 +1,25 @@
+# Reviewed false positives from dependency checksums and a synthetic test request key.
+# Keep the default Gitleaks rules active for all other findings.
+5ee68155df73d3d3995d1a84dbce8cf28c1bb025:apps/web/src/lib/nuni/merchant.test.ts:generic-api-key:17
+5ee68155df73d3d3995d1a84dbce8cf28c1bb025:apps/mobile/ios/Podfile.lock:generic-api-key:2490
+5ee68155df73d3d3995d1a84dbce8cf28c1bb025:apps/mobile/ios/Podfile.lock:generic-api-key:2492
+5ee68155df73d3d3995d1a84dbce8cf28c1bb025:apps/mobile/ios/Podfile.lock:generic-api-key:2514
+5ee68155df73d3d3995d1a84dbce8cf28c1bb025:apps/mobile/ios/Podfile.lock:generic-api-key:2534
+# Reviewed public Firebase client configuration, verified against the existing
+# https://campus-one-tw.firebaseapp.com/__/firebase/init.json on 2026-10-11.
+# This exact historical finding is public app configuration, not a server credential.
+a1d1202b5c4fcd3891f4974455af846f5bff6ab1:apps/mobile/eas.json:gcp-api-key:55
+# Historical emulator-only password fixture; requires demo- project and Firebase emulator hosts.
+# Reviewed exact commit/line only; keep all other Gitleaks findings active.
+15e53bae378e9ba570c1bc47d03402a130a8328f:scripts/test-env/seed.cjs:generic-api-key:20
+# Reviewed public source and migration SHA-256 checksums, not credentials.
+4977c46dd1150c4ef3c41fad733b01188edb980b:deploy/nuni-api/composed/rollback-source.json:generic-api-key:6
+4977c46dd1150c4ef3c41fad733b01188edb980b:deploy/nuni-api/composed/source.json:generic-api-key:11
+# Reviewed synthetic idempotency keys in the loopback-only materials acceptance runner.
+# These identify test requests and confer no authentication or access.
+2c4a285abdb24aa2346e9783d24bf1fb3c420356:scripts/verify-nuni-materials-api.mjs:generic-api-key:164
+2c4a285abdb24aa2346e9783d24bf1fb3c420356:scripts/verify-nuni-materials-api.mjs:generic-api-key:166
+2c4a285abdb24aa2346e9783d24bf1fb3c420356:scripts/verify-nuni-materials-api.mjs:generic-api-key:195
+e183d174c92bd8683107b77312bb2478edc7e106:scripts/verify-nuni-materials-api.mjs:generic-api-key:164
+e183d174c92bd8683107b77312bb2478edc7e106:scripts/verify-nuni-materials-api.mjs:generic-api-key:166
+e183d174c92bd8683107b77312bb2478edc7e106:scripts/verify-nuni-materials-api.mjs:generic-api-key:195

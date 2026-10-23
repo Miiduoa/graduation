@@ -1,11 +1,9 @@
 'use client';
 
 /**
- * Campus AI-First — AppShell (新版三層導航殼)
+ * AppShell（三層導航殼）
  * --------------------------------------------
  * 取代舊 SiteShell。Layer 0: Command Bar(在頁面內)、Layer 1: 三大時空軸 (Today/Hub/Me)、Layer 2: 子內容。
- *
- * 設計規範對應：docs/design/AI_FIRST_REDESIGN.md §2-3
  *
  * 注意：本檔不取代 SiteShell；它與 SiteShell 共存。
  *   - 新頁面（如新版 /today, /hub, /me）使用 AppShell
@@ -29,7 +27,7 @@ const PRIMARY_TABS: ShellTab[] = [
     href: '/',
     label: 'Today',
     icon: '☀️',
-    description: '今日課表、作業、訊息、AI 主動提醒',
+    description: '今天的課表、作業與訊息',
   },
   {
     href: '/hub',
@@ -236,26 +234,20 @@ function AppShellInner({
           <span>Hub</span>
         </Link>
         <Link
-          href="/ai-assistant"
-          aria-label="AI 助理（主入口）"
+          href="/timetable"
           style={{
-            width: 56,
-            height: 56,
-            borderRadius: '50%',
-            background: 'var(--ai-gradient)',
-            color: 'white',
+            flex: 1,
             display: 'flex',
+            flexDirection: 'column',
             alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: 24,
-            marginTop: -28,
-            boxShadow: 'var(--shadow-ai)',
-            animation: 'aiBreath var(--ai-breath-duration) ease-in-out infinite',
-            flexShrink: 0,
+            gap: 2,
+            fontSize: 10,
+            color: isActive('/timetable') ? 'var(--ai)' : 'var(--muted)',
             textDecoration: 'none',
           }}
         >
-          ✨
+          <span style={{ fontSize: 22 }}>📒</span>
+          <span>課務</span>
         </Link>
         <Link
           href="/me"

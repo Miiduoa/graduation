@@ -37,6 +37,7 @@ import { useAuth } from '../../state/auth';
 import { shouldBlockForNoLogin, isDemoUid } from '../../services/demoSession';
 import { useSchool } from '../../state/school';
 import { theme } from '../../ui/theme';
+import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../../ui/navigationTheme';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -58,6 +59,7 @@ import { submitCampusReport } from '../../services/reportSystem';
 import { flattenCampusRepliesThread } from '../../utils/campusReplyThread';
 
 export function PostDetailScreen(props: any) {
+  const styles = useThemeStyleSheet(createStyles);
   const auth = useAuth();
   const { school } = useSchool();
   const postId = props?.route?.params?.postId as string | undefined;
@@ -578,6 +580,7 @@ function EditPostModal(props: {
   onSubmit: (input: { title: string; content: string; tagsRaw: string }) => Promise<void>;
   initial: { title: string; content: string; tagsRaw: string };
 }) {
+  const styles = useThemeStyleSheet(createStyles);
   const [title, setTitle] = useState(props.initial.title);
   const [content, setContent] = useState(props.initial.content);
   const [tagsRaw, setTagsRaw] = useState(props.initial.tagsRaw);
@@ -647,7 +650,7 @@ function EditPostModal(props: {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
   headerRow: {

@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { theme } from './theme';
+import { useThemeVersion } from './useThemeStyleSheet';
 import { generatedUiAssets } from './generatedUiAssets';
 import type { WeatherAmbientTone } from '../services/weather';
 
@@ -53,12 +54,13 @@ export function BrandFluxImageHeader(props: {
   /** 額外包在內容外層的 style（寬度、陰影等） */
   style?: StyleProp<ViewStyle>;
 }) {
+  useThemeVersion();
   const isDark = theme.mode === 'dark';
   const padB = props.paddingBottom ?? theme.space.md;
   const tone = props.ambientTone ?? 'default';
   const overlayColors = (
     isDark
-      ? (['rgba(21,18,30,0.92)', 'rgba(21,18,30,0.55)', 'rgba(21,18,30,0.12)'] as const)
+      ? (['rgba(23,31,27,0.92)', 'rgba(23,31,27,0.55)', 'rgba(23,31,27,0.12)'] as const)
       : lightOverlayForAmbient(tone)
   );
   const source = sourceForVariant(props.variant);

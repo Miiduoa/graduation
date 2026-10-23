@@ -4,9 +4,11 @@ import {
   getDoc,
   getDocs,
   limit,
+  onSnapshot,
   query,
   where,
   type Firestore,
+  type Unsubscribe,
 } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 
@@ -88,6 +90,44 @@ export async function listMerchantOrders(input: {
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+/** 還沒結束的單：待接單（含待給號碼）跟出餐兩個分頁要看的狀態 */
+export const OPEN_MERCHANT_ORDER_STATUSES = ['pending', 'confirmed', 'preparing', 'ready'] as const;
+
+/**
+ * 即時看這家店的訂單。查詢一定帶 cafeteriaId == 這家店，規則只放行這家店在職的店員，
+ * 別家的單查不到。預設只看還沒結束的單；includeClosed 才連已完成／已取消一起看。
+ * 回傳的函式要在畫面卸載時呼叫，把監聽關掉。
+ */
+export function watchMerchantOrders(
+  input: {
+    schoolId: string;
+    cafeteriaId: string;
+    includeClosed?: boolean;
+    max?: number;
+    db?: Firestore;
+  },
+  onOrders: (orders: Order[]) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe {
+  const db = input.db ?? getDb();
+  const constraints = [
+    where('cafeteriaId', '==', input.cafeteriaId),
+    ...(input.includeClosed ? [] : [where('status', 'in', [...OPEN_MERCHANT_ORDER_STATUSES])]),
+    limit(input.max ?? 100),
+  ];
+  return onSnapshot(
+    query(collection(db, 'schools', input.schoolId, 'orders'), ...constraints),
+    (snap) => {
+      onOrders(
+        snap.docs
+          .map((docSnap) => mapOrderRecord(docSnap.id, docSnap.data() as Record<string, unknown>))
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+      );
+    },
+    (error) => onError?.(error),
+  );
+}
+
 export async function getMerchantOrder(input: {
   schoolId: string;
   orderId: string;
@@ -122,4 +162,31 @@ export async function updateMerchantOrderStatus(input: {
     schoolId: input.schoolId,
     orderId: input.orderId,
   });
+}
+
+/**
+ * 店家按「給號碼」：走同一支 assignQueueNumber（一定帶 orderId，as: 'merchant'）。
+ * 伺服器檢查是不是這家店在職的店員；同一筆訂單已經有號碼就回原本那個號碼。
+ * 待接單的訂單會一併接單。
+ */
+export async function giveMerchantQueueNumber(input: {
+  schoolId: string;
+  orderId: string;
+  cafeteriaId: string;
+}): Promise<{ queueNumber: number; status?: Order['status'] }> {
+  const callable = httpsCallable<
+    { schoolId: string; orderId: string; vendorId: string; as: 'merchant' },
+    { queueNumber?: number; status?: Order['status'] }
+  >(getFunctionsInstance(), 'assignQueueNumber');
+  const result = await callable({
+    schoolId: input.schoolId,
+    orderId: input.orderId,
+    vendorId: input.cafeteriaId,
+    as: 'merchant',
+  });
+  const queueNumber = result.data?.queueNumber;
+  if (typeof queueNumber !== 'number' || !Number.isSafeInteger(queueNumber) || queueNumber <= 0) {
+    throw new Error('號碼還沒給出去，請稍後再試一次。');
+  }
+  return { queueNumber, status: result.data?.status };
 }

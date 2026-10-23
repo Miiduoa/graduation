@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { googleIosInfoPlist } from './scripts/configure-nuni-google.cjs';
 
 type AppEnvironment = 'development' | 'preview' | 'production';
 
@@ -49,6 +50,27 @@ function requireReleaseValue(
   return normalized;
 }
 
+function errorReportingUrl(value: string | undefined): string {
+  const endpoint = value?.trim();
+  if (!endpoint) {
+    throw new Error(
+      '[app.config] Remote error reporting requires EXPO_PUBLIC_ERROR_REPORTING_ENDPOINT',
+    );
+  }
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    throw new Error('[app.config] EXPO_PUBLIC_ERROR_REPORTING_ENDPOINT must be an HTTPS URL');
+  }
+  if (url.protocol !== 'https:' || url.username || url.password || url.hash) {
+    throw new Error(
+      '[app.config] EXPO_PUBLIC_ERROR_REPORTING_ENDPOINT must be an HTTPS URL without credentials or a fragment',
+    );
+  }
+  return endpoint;
+}
+
 function requirePositiveInteger(
   name: string,
   value: string | number | undefined,
@@ -82,10 +104,8 @@ export default ({ config }: any) => {
     widgets: parseBoolean(process.env.EXPO_PUBLIC_FEATURE_WIDGETS, !isReleaseLike),
     deeplinks: parseBoolean(process.env.EXPO_PUBLIC_FEATURE_DEEPLINKS, !isReleaseLike),
   };
-  const enableUniversalDevAccounts = parseBoolean(
-    process.env.EXPO_PUBLIC_ENABLE_UNIVERSAL_DEV_ACCOUNTS,
-    appEnv !== 'production',
-  );
+  const enableUniversalDevAccounts =
+    !isProduction && parseBoolean(process.env.EXPO_PUBLIC_ENABLE_UNIVERSAL_DEV_ACCOUNTS, true);
   const allowLocalMockAuth =
     appEnv === 'development' && process.env.EXPO_PUBLIC_ALLOW_LOCAL_MOCK_AUTH === 'true';
 
@@ -132,20 +152,21 @@ export default ({ config }: any) => {
     process.env.EXPO_PUBLIC_LEGAL_BASE_URL,
     isReleaseLike,
   );
-  const errorReportingEndpoint = requireReleaseValue(
-    'EXPO_PUBLIC_ERROR_REPORTING_ENDPOINT',
-    process.env.EXPO_PUBLIC_ERROR_REPORTING_ENDPOINT,
-    isReleaseLike,
-  );
-  const mapsApiKey = requireReleaseValue(
-    'EXPO_PUBLIC_GOOGLE_MAPS_API_KEY',
-    process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
-    isReleaseLike,
-  );
+  // Reporting already keeps diagnostics locally when no endpoint is configured.
+  // Never invent a remote destination just to make a platform build pass.
+  const remoteErrorReporting = parseBoolean(process.env.EXPO_PUBLIC_ERROR_REPORTING_ENABLED, false);
+  const errorReportingEndpoint = remoteErrorReporting
+    ? errorReportingUrl(process.env.EXPO_PUBLIC_ERROR_REPORTING_ENDPOINT)
+    : undefined;
+  // The current campus map uses Leaflet/OpenStreetMap, not the native Google SDK.
+  const mapsApiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() || undefined;
 
-  if (isReleaseLike && releasedSchoolIds.length === 0) {
+  const hasSchoolFeatures = Object.entries(featureAvailability).some(
+    ([feature, enabled]) => feature !== 'enabled' && enabled,
+  );
+  if (isReleaseLike && hasSchoolFeatures && releasedSchoolIds.length === 0) {
     throw new Error(
-      '[app.config] EXPO_PUBLIC_RELEASED_SCHOOL_IDS must contain at least one school for preview/production builds',
+      '[app.config] Enabled school features require verified schools in EXPO_PUBLIC_RELEASED_SCHOOL_IDS',
     );
   }
 
@@ -157,6 +178,16 @@ export default ({ config }: any) => {
     process.env.ANDROID_PACKAGE_NAME?.trim() ||
     config.android?.package ||
     (isProduction ? 'com.campus.app' : 'com.campus.app.dev');
+  const googleIosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID?.trim();
+  if (
+    googleIosClientId ===
+      '1096741064465-b8ue803rbqdpcq75t1g03o5t49vi0s4q.apps.googleusercontent.com' &&
+    bundleIdentifier !== 'com.nuni.app'
+  ) {
+    throw new Error(
+      '[app.config] The registered production Google iOS client requires com.nuni.app.',
+    );
+  }
   const buildNumber =
     requireReleaseValue(
       'IOS_BUILD_NUMBER',
@@ -201,7 +232,7 @@ export default ({ config }: any) => {
     [
       'expo-notifications',
       {
-        color: '#007AFF',
+        color: '#314D40',
         sounds: ['./assets/sounds/notification.wav'],
       },
     ],
@@ -221,12 +252,13 @@ export default ({ config }: any) => {
   ];
   const configuredAiProvider = process.env.EXPO_PUBLIC_AI_PROVIDER ?? 'gemini';
   const releaseAiProviderOverride = process.env.EXPO_PUBLIC_RELEASE_AI_PROVIDER?.trim();
-  const releaseAiProvider =
-    isReleaseLike && releaseAiProviderOverride
-      ? releaseAiProviderOverride
-      : isReleaseLike
-        ? 'cloud'
-        : configuredAiProvider;
+  if (isReleaseLike && releaseAiProviderOverride && releaseAiProviderOverride !== 'cloud') {
+    throw new Error('[app.config] Release AI provider must be cloud');
+  }
+  if (isReleaseLike && process.env.EXPO_PUBLIC_GEMINI_API_KEY?.trim()) {
+    throw new Error('[app.config] Remove EXPO_PUBLIC_GEMINI_API_KEY from release builds');
+  }
+  const releaseAiProvider = isReleaseLike ? 'cloud' : configuredAiProvider;
   const aiOfflineFirstBuild = parseBoolean(process.env.EXPO_PUBLIC_AI_OFFLINE_FIRST, false);
 
   const androidIntentFilters = [
@@ -249,7 +281,7 @@ export default ({ config }: any) => {
 
   return {
     ...config,
-    name: config.name ?? '校園助手',
+    name: config.name ?? 'Campus One',
     slug: config.slug ?? 'campus-app',
     version: config.version ?? '1.0.0',
     orientation: 'portrait',
@@ -268,6 +300,7 @@ export default ({ config }: any) => {
       bundleIdentifier,
       buildNumber,
       infoPlist: {
+        ...googleIosInfoPlist(config.ios?.infoPlist ?? {}, googleIosClientId),
         NSCameraUsageDescription: '需要相機權限以掃描 QR 碼和拍照',
         NSPhotoLibraryUsageDescription: '需要相簿權限以選擇照片',
         NSLocationWhenInUseUsageDescription: '需要位置權限以提供校園導航',
@@ -276,9 +309,7 @@ export default ({ config }: any) => {
         UIBackgroundModes: ['fetch', 'remote-notification'],
       },
       associatedDomains: deepLinkHost ? [`applinks:${deepLinkHost}`] : undefined,
-      config: {
-        googleMapsApiKey: mapsApiKey,
-      },
+      config: mapsApiKey ? { googleMapsApiKey: mapsApiKey } : undefined,
       entitlements: {
         'com.apple.developer.applesignin': ['Default'],
         'aps-environment': isProduction ? 'production' : 'development',
@@ -305,11 +336,7 @@ export default ({ config }: any) => {
         'USE_FINGERPRINT',
         'USE_BIOMETRIC',
       ],
-      config: {
-        googleMaps: {
-          apiKey: mapsApiKey,
-        },
-      },
+      config: mapsApiKey ? { googleMaps: { apiKey: mapsApiKey } } : undefined,
       intentFilters: androidIntentFilters,
     },
     plugins,
@@ -321,6 +348,11 @@ export default ({ config }: any) => {
       errorReportingEndpoint,
       firebase,
       cloudFunctionRegion: process.env.EXPO_PUBLIC_CLOUD_FUNCTION_REGION ?? 'asia-east1',
+      functionsBaseUrl: process.env.EXPO_PUBLIC_FUNCTIONS_BASE_URL ?? '',
+      cloudFunctionBaseUrl:
+        process.env.EXPO_PUBLIC_CLOUD_FUNCTION_BASE_URL ??
+        process.env.EXPO_PUBLIC_FUNCTIONS_BASE_URL ??
+        '',
       // Release builds must always use the backend proxy. Local Ollama/offline AI is only
       // for development, training, and evaluation; it cannot be an App Store dependency.
       aiProvider: releaseAiProvider,
@@ -328,7 +360,7 @@ export default ({ config }: any) => {
       aiServerBaseUrl: process.env.EXPO_PUBLIC_AI_SERVER_URL ?? '',
       /** Cloudflare Worker OPAC proxy base URL (no trailing slash); empty → device direct fetch only */
       libraryOpacProxyUrl: process.env.EXPO_PUBLIC_LIBRARY_OPAC_PROXY_URL ?? '',
-      geminiApiKey: process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? '',
+      geminiApiKey: isReleaseLike ? '' : (process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? ''),
       /** 預設 GGUF：`qwen2.5-7b`（與 MLX 微調基底對齊）；可改 `qwen2.5-3b` 等 `MODEL_REGISTRY` 鍵 */
       localLlmDefaultModelId: process.env.EXPO_PUBLIC_LOCAL_LLM_MODEL ?? 'qwen2.5-7b',
       /** true：預設關閉網搜／預抓學習（完全離線優先）；仍可用對應 EXPO_PUBLIC_AI_* =true 強制開啟 */
@@ -348,6 +380,10 @@ export default ({ config }: any) => {
       allowLocalMockAuth,
       /** `false` 時不對 TronClass 發網路請求；口試／離線 Demo：`EXPO_PUBLIC_TRONCLASS_DATA_ENABLED=false` */
       tronClassDataEnabled: parseBoolean(process.env.EXPO_PUBLIC_TRONCLASS_DATA_ENABLED, true),
+      assignmentFileSubmit: parseBoolean(
+        process.env.EXPO_PUBLIC_ASSIGNMENT_FILE_SUBMIT_ENABLED,
+        false,
+      ),
       googleWebClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? '',
       googleIosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ?? '',
       googleAndroidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID ?? '',
@@ -370,8 +406,7 @@ export default ({ config }: any) => {
           url: `https://u.expo.dev/${easProjectId}`,
         }
       : undefined,
-    runtimeVersion: {
-      policy: 'sdkVersion',
-    },
+    // A new native Google module needs a new binary/runtime before any OTA update.
+    runtimeVersion: isProduction ? 'campus-one-native-google-1' : { policy: 'sdkVersion' },
   };
 };

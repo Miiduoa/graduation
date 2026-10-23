@@ -1,7 +1,7 @@
 {
   "cli": {
     "version": ">= 16.18.0",
-    "appVersionSource": "local"
+    "appVersionSource": "remote"
   },
   "build": {
     "base": {
@@ -34,31 +34,60 @@
         "buildType": "apk"
       }
     },
+    "production-device": {
+      "extends": "production",
+      "android": {
+        "buildType": "apk"
+      }
+    },
     "production": {
       "extends": "base",
       "channel": "production",
       "autoIncrement": true,
       "env": {
-        "APP_ENV": "production"
+        "APP_ENV": "production",
+        "EXPO_PUBLIC_API_ENV": "production",
+        "EXPO_PUBLIC_DATA_SOURCE_MODE": "firebase",
+        "EXPO_PUBLIC_FORCE_REAL_DATA": "true",
+        "EXPO_PUBLIC_HYBRID_FALLBACK_TO_MOCK": "false",
+        "EXPO_PUBLIC_ENABLE_UNIVERSAL_DEV_ACCOUNTS": "false",
+        "EXPO_PUBLIC_ALLOW_LOCAL_MOCK_AUTH": "false",
+        "EXPO_PUBLIC_EAS_PROJECT_ID": "8955b97c-802c-463c-bd1d-d5f02e30a966",
+        "IOS_BUNDLE_IDENTIFIER": "com.nuni.app",
+        "ANDROID_PACKAGE_NAME": "com.nuni.app",
+        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "1096741064465-b8ue803rbqdpcq75t1g03o5t49vi0s4q.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "1096741064465-39b13khidhmohvo1go3nlmomgk3p07d4.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "1096741064465-0t5dq62t7oklrh8tnib7d4v27tm0apma.apps.googleusercontent.com",
+        "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyA-YUguaPvxTDTZhPBgoW-XjSECr_DQBeU",
+        "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "campus-one-tw.firebaseapp.com",
+        "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "campus-one-tw",
+        "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "campus-one-tw.firebasestorage.app",
+        "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "926503979533",
+        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:926503979533:web:c1a8d6dc9903e888032344",
+        "EXPO_PUBLIC_LEGAL_BASE_URL": "https://nuni.tw",
+        "EXPO_PUBLIC_ERROR_REPORTING_ENABLED": "false",
+        "EXPO_PUBLIC_FEATURE_SSO": "false",
+        "EXPO_PUBLIC_FEATURE_COURSES": "false",
+        "EXPO_PUBLIC_FEATURE_GRADES": "false",
+        "EXPO_PUBLIC_FEATURE_PAYMENTS": "false",
+        "EXPO_PUBLIC_FEATURE_WIDGETS": "false",
+        "EXPO_PUBLIC_FEATURE_DEEPLINKS": "false"
       },
       "ios": {
         "resourceClass": "m-medium"
       },
       "android": {
         "buildType": "app-bundle"
-      }
+      },
+      "environment": "production"
     }
   },
   "submit": {
     "production": {
       "ios": {
-        "appleId": "${APPLE_ID}",
-        "ascAppId": "${ASC_APP_ID}",
-        "appleTeamId": "${APPLE_TEAM_ID}",
         "language": "zh-Hant"
       },
       "android": {
-        "serviceAccountKeyPath": "${GOOGLE_SERVICE_ACCOUNT_KEY_PATH}",
         "track": "internal",
         "releaseStatus": "draft",
         "changesNotSentForReview": true

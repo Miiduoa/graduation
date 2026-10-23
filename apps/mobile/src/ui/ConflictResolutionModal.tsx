@@ -3,6 +3,7 @@ import { Modal, View, Text, ScrollView, Pressable, ActivityIndicator } from 'rea
 import { Ionicons } from '@expo/vector-icons';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from './navigationTheme';
 import { theme } from './theme';
+import { useThemeVersion } from './useThemeStyleSheet';
 import type { ConflictInfo } from '../services/offline';
 
 type ConflictResolutionModalProps = {
@@ -33,6 +34,7 @@ function ConflictItem({
   conflict: ConflictInfo;
   onResolve: (resolution: 'keep_local' | 'keep_server' | 'merge') => Promise<void>;
 }) {
+  useThemeVersion();
   const [resolving, setResolving] = useState(false);
   const [selectedResolution, setSelectedResolution] = useState<string | null>(null);
 
@@ -76,13 +78,13 @@ function ConflictItem({
             width: 40,
             height: 40,
             borderRadius: 20,
-            backgroundColor: '#FF950020',
+            backgroundColor: theme.colors.warningSoft,
             alignItems: 'center',
             justifyContent: 'center',
             marginRight: 12,
           }}
         >
-          <Ionicons name="git-compare" size={20} color="#FF9500" />
+          <Ionicons name="git-compare" size={20} color={theme.colors.warning} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 15 }}>
@@ -117,14 +119,18 @@ function ConflictItem({
           <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 4 }}>{field}</Text>
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <View style={{ flex: 1 }}>
-              <Text style={{ color: '#22C55E', fontSize: 10, marginBottom: 2 }}>本地</Text>
+              <Text style={{ color: theme.colors.success, fontSize: 10, marginBottom: 2 }}>
+                本地
+              </Text>
               <Text style={{ color: theme.colors.text, fontSize: 13 }} numberOfLines={2}>
                 {formatValue(conflict.clientData[field])}
               </Text>
             </View>
             <View style={{ width: 1, backgroundColor: theme.colors.border }} />
             <View style={{ flex: 1 }}>
-              <Text style={{ color: '#5856D6', fontSize: 10, marginBottom: 2 }}>伺服器</Text>
+              <Text style={{ color: theme.colors.accent, fontSize: 10, marginBottom: 2 }}>
+                伺服器
+              </Text>
               <Text style={{ color: theme.colors.text, fontSize: 13 }} numberOfLines={2}>
                 {formatValue(conflict.serverData[field])}
               </Text>
@@ -148,19 +154,26 @@ function ConflictItem({
             paddingVertical: 10,
             paddingHorizontal: 12,
             borderRadius: theme.radius.md,
-            backgroundColor: '#22C55E20',
+            backgroundColor: theme.colors.successSoft,
             borderWidth: 1,
-            borderColor: '#22C55E50',
+            borderColor: theme.colors.success,
             alignItems: 'center',
             opacity: resolving ? 0.5 : 1,
           }}
         >
           {resolving && selectedResolution === 'keep_local' ? (
-            <ActivityIndicator size="small" color="#22C55E" />
+            <ActivityIndicator size="small" color={theme.colors.success} />
           ) : (
             <>
-              <Ionicons name="phone-portrait" size={16} color="#22C55E" />
-              <Text style={{ color: '#22C55E', fontSize: 12, fontWeight: '600', marginTop: 4 }}>
+              <Ionicons name="phone-portrait" size={16} color={theme.colors.success} />
+              <Text
+                style={{
+                  color: theme.colors.success,
+                  fontSize: 12,
+                  fontWeight: '600',
+                  marginTop: 4,
+                }}
+              >
                 保留本地
               </Text>
             </>
@@ -175,19 +188,26 @@ function ConflictItem({
             paddingVertical: 10,
             paddingHorizontal: 12,
             borderRadius: theme.radius.md,
-            backgroundColor: '#5856D620',
+            backgroundColor: theme.colors.accentSoft,
             borderWidth: 1,
-            borderColor: '#5856D650',
+            borderColor: theme.colors.accent,
             alignItems: 'center',
             opacity: resolving ? 0.5 : 1,
           }}
         >
           {resolving && selectedResolution === 'keep_server' ? (
-            <ActivityIndicator size="small" color="#5856D6" />
+            <ActivityIndicator size="small" color={theme.colors.accent} />
           ) : (
             <>
-              <Ionicons name="cloud" size={16} color="#5856D6" />
-              <Text style={{ color: '#5856D6', fontSize: 12, fontWeight: '600', marginTop: 4 }}>
+              <Ionicons name="cloud" size={16} color={theme.colors.accent} />
+              <Text
+                style={{
+                  color: theme.colors.accent,
+                  fontSize: 12,
+                  fontWeight: '600',
+                  marginTop: 4,
+                }}
+              >
                 保留伺服器
               </Text>
             </>
@@ -204,6 +224,7 @@ export function ConflictResolutionModal({
   onResolve,
   onDismiss,
 }: ConflictResolutionModalProps) {
+  useThemeVersion();
   const [resolvedCount, setResolvedCount] = useState(0);
 
   const handleResolve = async (
@@ -223,7 +244,7 @@ export function ConflictResolutionModal({
       <View
         style={{
           flex: 1,
-          backgroundColor: 'rgba(0,0,0,0.6)',
+          backgroundColor: theme.colors.overlay,
           justifyContent: 'flex-end',
         }}
       >
@@ -252,12 +273,12 @@ export function ConflictResolutionModal({
                   width: 40,
                   height: 40,
                   borderRadius: 20,
-                  backgroundColor: '#FF950020',
+                  backgroundColor: theme.colors.warningSoft,
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}
               >
-                <Ionicons name="warning" size={20} color="#FF9500" />
+                <Ionicons name="warning" size={20} color={theme.colors.warning} />
               </View>
               <View>
                 <Text style={{ color: theme.colors.text, fontSize: 17, fontWeight: '700' }}>

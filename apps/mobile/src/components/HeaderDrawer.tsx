@@ -3,8 +3,8 @@
  * ═══════════════════════════════════════════════════════════════════════
  * 設計：
  * - 由各 Tab 主頁左上角頭像按鈕觸發
- * - 從左側滑入；包含個人資料、設定、AI 模型、管理工具入口等
- * - 重要：管理員/主管/職員/商家入口隱藏在這裡，不再佔據 Tab 位置
+ * - 從左側滑入；包含個人資料、課表、訊息、設定、管理工具入口
+ * - 管理員/主管/職員/商家入口藏在這裡，不佔底部入口
  *
  * 心理學：
  * - Spatial Memory：左上頭像 = 個人空間（與 Google 帳號按鈕一致）
@@ -32,7 +32,7 @@ import { BrandFluxImageHeader } from '../ui/BrandFluxImageHeader';
 import { useAuth } from '../state/auth';
 import { useNotifications } from '../state/notifications';
 import { usePermissions } from '../hooks/usePermissions';
-import { rootNavigateCampusCommunity, rootNavigate, rootNavigateMeScreen } from '../app/rootNavigation';
+import { rootNavigateCampusCommunity, rootNavigate, rootNavigateMeScreen, rootNavigateNested } from '../app/rootNavigation';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const DRAWER_WIDTH = Math.min(SCREEN_WIDTH * 0.85, 360);
@@ -367,13 +367,31 @@ export function HeaderDrawerHost() {
               />
             </DrawerSection>
 
-            {/* ─── AI ─── */}
-            <DrawerSection title="AI 與工具">
+            <DrawerSection title="課表與訊息">
               <DrawerRow
-                icon="ic_ai_chip"
-                label="AI 模型管理"
-                tint={theme.colors.social}
-                onPress={() => go('AIModelManager')}
+                icon="ic_tab_study"
+                label="我的課表"
+                tint={theme.colors.roleTeacher}
+                onPress={() => {
+                  handleClose();
+                  setTimeout(() => rootNavigateNested('學習', 'PersonalTimetable'), 220);
+                }}
+              />
+              <DrawerRow
+                icon="ic_notifications"
+                label="訊息"
+                onPress={() => {
+                  handleClose();
+                  setTimeout(() => rootNavigate('訊息'), 220);
+                }}
+              />
+              <DrawerRow
+                icon="ic_profile"
+                label="找人"
+                onPress={() => {
+                  handleClose();
+                  setTimeout(() => rootNavigateNested('訊息', 'FriendSearch'), 220);
+                }}
               />
               <DrawerRow
                 icon="ic_grid_widgets"
@@ -628,7 +646,7 @@ function DrawerRow({
             justifyContent: 'center',
           }}
         >
-          <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>
+          <Text style={{ color: theme.colors.onDanger, fontSize: 10, fontWeight: '700' }}>
             {badge}
           </Text>
         </View>

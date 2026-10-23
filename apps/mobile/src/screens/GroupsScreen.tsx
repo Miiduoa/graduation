@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useSyncExternalStore } from 'react';
 import { ScrollView, Text, TextInput, View, Pressable } from 'react-native';
 import {
   Screen,
@@ -12,7 +12,7 @@ import {
 } from '../ui/components';
 import { normalizeJoinCode, formatJoinCode, isValidJoinCode } from '../utils/joinCode';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
-import { theme } from '../ui/theme';
+import { theme, getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useSchool } from '../state/school';
 import { useAuth } from '../state/auth';
 import { getDb, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
@@ -47,10 +47,42 @@ type UserGroup = {
 
 // ─── Demo mode data ────────────────────────────────────────────────────────
 const DEMO_PUBLISHED_COURSES: Group[] = [
-  { id: 'grp-db-sys', schoolId: 'demo', type: 'course', name: '資料庫系統', joinCode: 'DBSYS001', isPublished: true, verification: { status: 'verified_teacher' } },
-  { id: 'grp-prog2', schoolId: 'demo', type: 'course', name: '程式設計二', joinCode: 'PROG0002', isPublished: true, verification: { status: 'verified_teacher' } },
-  { id: 'grp-algo', schoolId: 'demo', type: 'course', name: '演算法導論', joinCode: 'ALGO0003', isPublished: true, verification: { status: 'unverified' } },
-  { id: 'grp-web', schoolId: 'demo', type: 'course', name: 'Web 程式設計', joinCode: 'WEBP0004', isPublished: true, verification: { status: 'verified_teacher' } },
+  {
+    id: 'grp-db-sys',
+    schoolId: 'demo',
+    type: 'course',
+    name: '資料庫系統',
+    joinCode: 'DBSYS001',
+    isPublished: true,
+    verification: { status: 'verified_teacher' },
+  },
+  {
+    id: 'grp-prog2',
+    schoolId: 'demo',
+    type: 'course',
+    name: '程式設計二',
+    joinCode: 'PROG0002',
+    isPublished: true,
+    verification: { status: 'verified_teacher' },
+  },
+  {
+    id: 'grp-algo',
+    schoolId: 'demo',
+    type: 'course',
+    name: '演算法導論',
+    joinCode: 'ALGO0003',
+    isPublished: true,
+    verification: { status: 'unverified' },
+  },
+  {
+    id: 'grp-web',
+    schoolId: 'demo',
+    type: 'course',
+    name: 'Web 程式設計',
+    joinCode: 'WEBP0004',
+    isPublished: true,
+    verification: { status: 'verified_teacher' },
+  },
 ];
 
 const DEMO_COURSE_META_MAP: Record<string, Group> = Object.fromEntries(
@@ -61,22 +93,70 @@ function getDemoGroupsForRole(role: string | undefined): UserGroup[] {
   switch (role) {
     case 'student':
       return [
-        { groupId: 'grp-db-sys', schoolId: 'demo', type: 'course', name: '資料庫系統', joinCode: 'DBSYS001', role: 'member', status: 'active' },
-        { groupId: 'grp-prog2', schoolId: 'demo', type: 'course', name: '程式設計二', joinCode: 'PROG0002', role: 'member', status: 'active' },
+        {
+          groupId: 'grp-db-sys',
+          schoolId: 'demo',
+          type: 'course',
+          name: '資料庫系統',
+          joinCode: 'DBSYS001',
+          role: 'member',
+          status: 'active',
+        },
+        {
+          groupId: 'grp-prog2',
+          schoolId: 'demo',
+          type: 'course',
+          name: '程式設計二',
+          joinCode: 'PROG0002',
+          role: 'member',
+          status: 'active',
+        },
       ];
     case 'teacher':
       return [
-        { groupId: 'grp-db-sys', schoolId: 'demo', type: 'course', name: '資料庫系統', joinCode: 'DBSYS001', role: 'instructor', status: 'active' },
-        { groupId: 'grp-web', schoolId: 'demo', type: 'course', name: 'Web 程式設計', joinCode: 'WEBP0004', role: 'instructor', status: 'active' },
+        {
+          groupId: 'grp-db-sys',
+          schoolId: 'demo',
+          type: 'course',
+          name: '資料庫系統',
+          joinCode: 'DBSYS001',
+          role: 'instructor',
+          status: 'active',
+        },
+        {
+          groupId: 'grp-web',
+          schoolId: 'demo',
+          type: 'course',
+          name: 'Web 程式設計',
+          joinCode: 'WEBP0004',
+          role: 'instructor',
+          status: 'active',
+        },
       ];
     case 'club_officer':
       return [
-        { groupId: 'grp-club-im', schoolId: 'demo', type: 'club', name: '資管學會', joinCode: 'IMCLUB1X', role: 'owner', status: 'active' },
+        {
+          groupId: 'grp-club-im',
+          schoolId: 'demo',
+          type: 'club',
+          name: '資管學會',
+          joinCode: 'IMCLUB1X',
+          role: 'owner',
+          status: 'active',
+        },
       ];
     case 'department_head':
     case 'admin':
       return [
-        { groupId: 'grp-admin-dept', schoolId: 'demo', type: 'admin', name: '資管系行政群組', joinCode: 'ADMIN001', role: 'owner', status: 'active' },
+        {
+          groupId: 'grp-admin-dept',
+          schoolId: 'demo',
+          type: 'admin',
+          name: '資管系行政群組',
+          joinCode: 'ADMIN001',
+          role: 'owner',
+          status: 'active',
+        },
       ];
     default:
       return [];
@@ -88,51 +168,8 @@ function getDemoCourseMetaForIds(ids: string[]): Group[] {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-const AVATAR_COLORS_G = ['#5856D6', '#34C759', '#FF9500', '#5856D6', '#BF5AF2'];
-const AVATAR_EMOJIS_G = ['🧑‍💻', '👩‍🎓', '👨‍🎓', '🙋', '👩‍💻'];
-
-function hashCodeG(str: string) {
-  let h = 0;
-  for (let i = 0; i < str.length; i++) h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
-  return Math.abs(h);
-}
-
-function GroupSocialBadge({ groupId }: { groupId: string }) {
-  const seed = hashCodeG(groupId);
-  const active = 2 + (seed % 5);
-  const avatars = Array.from({ length: Math.min(active, 3) }, (_, i) => ({
-    emoji: AVATAR_EMOJIS_G[(seed + i) % AVATAR_EMOJIS_G.length],
-    color: AVATAR_COLORS_G[(seed + i) % AVATAR_COLORS_G.length],
-  }));
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 }}>
-      <View style={{ flexDirection: 'row' }}>
-        {avatars.map((a, i) => (
-          <View
-            key={i}
-            style={{
-              width: 20,
-              height: 20,
-              borderRadius: 10,
-              backgroundColor: `${a.color}20`,
-              borderWidth: 1.5,
-              borderColor: theme.colors.bg,
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginLeft: i === 0 ? 0 : -4,
-            }}
-          >
-            <Text style={{ fontSize: 9 }}>{a.emoji}</Text>
-          </View>
-        ))}
-      </View>
-      <Text style={{ fontSize: 11, color: theme.colors.muted }}>{active} 位同學今日活躍</Text>
-      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#34C759' }} />
-    </View>
-  );
-}
-
 export function GroupsScreen(props: any) {
+  useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const nav = props?.navigation;
   const { school } = useSchool();
   const auth = useAuth();
@@ -347,11 +384,12 @@ export function GroupsScreen(props: any) {
               </Text>
             </View>
             <TextInput
+              accessibilityLabel="群組加入碼"
               value={formatJoinCode(joinCode)}
               onChangeText={(t) => setJoinCode(normalizeJoinCode(t))}
               autoCapitalize="characters"
               placeholder="XXXX-XXXX"
-              placeholderTextColor="rgba(168,176,194,0.6)"
+              placeholderTextColor={theme.colors.muted}
               maxLength={9}
               style={{
                 marginTop: 10,
@@ -378,20 +416,23 @@ export function GroupsScreen(props: any) {
             </View>
             <View style={{ marginTop: 10 }}>
               <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-                提醒：請先到「我的」登入。群組資料目前從 Firestore 讀寫。
+                {auth.user
+                  ? '向老師或群組管理員索取加入碼。'
+                  : '登入後，即可使用加入碼加入課程或群組。'}
               </Text>
             </View>
           </Card>
 
           {auth.user ? (
-            <Card title="建立課程" subtitle="(v1) 建立後會自動產生 8 碼加入碼，預設未發布。">
+            <Card title="建立課程" subtitle="建立後會取得加入碼。發布前，課程不會出現在公開列表。">
               {err ? <Pill text={err} /> : null}
               <Text style={{ color: theme.colors.muted }}>課程名稱</Text>
               <TextInput
+                accessibilityLabel="課程名稱"
                 value={newCourseName}
                 onChangeText={setNewCourseName}
                 placeholder="例如 資料庫系統"
-                placeholderTextColor="rgba(168,176,194,0.6)"
+                placeholderTextColor={theme.colors.muted}
                 style={{
                   marginTop: 10,
                   paddingVertical: 12,
@@ -432,7 +473,7 @@ export function GroupsScreen(props: any) {
                     accessibilityRole="button"
                     accessibilityLabel={`進入課程：${g.name}`}
                   >
-                    <Card title={g.name} subtitle={`course｜${g.joinCode}`}>
+                    <Card title={g.name} subtitle={`加入碼 ${g.joinCode}`}>
                       <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
                         <Pill
                           text={v === 'verified_teacher' ? '老師認證' : '未驗證'}
@@ -440,7 +481,6 @@ export function GroupsScreen(props: any) {
                         />
                         <Pill text={meta?.isPublished ? '已發布' : '未發布'} />
                       </View>
-                      <GroupSocialBadge groupId={g.groupId} />
                       <View style={{ marginTop: 12 }}>
                         <Button text="退出課程" onPress={() => onLeave(g.groupId)} />
                       </View>
@@ -466,10 +506,13 @@ export function GroupsScreen(props: any) {
                   accessibilityRole="button"
                   accessibilityLabel={`進入群組：${g.name}`}
                 >
-                  <Card title={g.name} subtitle={`${g.type}｜${g.joinCode}`}>
+                  <Card
+                    title={g.name}
+                    subtitle={`${g.type === 'club' ? '社團' : '行政群組'} · 加入碼 ${g.joinCode}`}
+                  >
                     <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
                       <Pill text="公告" kind="accent" />
-                      <Pill text="Q&A" kind="accent" />
+                      <Pill text="問答" kind="accent" />
                       <Pressable onPress={() => nav?.navigate?.('Dms')}>
                         <Pill text="私訊" kind="accent" />
                       </Pressable>
@@ -491,7 +534,7 @@ export function GroupsScreen(props: any) {
             <SectionTitle text={`數量：${publishedCourses.length}`} />
             <View style={{ marginTop: 10, gap: 10 }}>
               {publishedCourses.map((g) => (
-                <Card key={g.id} title={g.name} subtitle={`course｜${g.id}`}>
+                <Card key={g.id} title={g.name} subtitle="公開課程">
                   <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
                     <Pill
                       text={

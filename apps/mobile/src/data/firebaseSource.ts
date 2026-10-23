@@ -1,5 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import type { DataSource } from './source';
+import { lostFoundSource } from './lostFoundSource';
+import { createOrderThroughServer } from './orderSource';
 import type {
   Announcement,
   ActionQueueItem,
@@ -59,6 +61,7 @@ import {
   query,
   QueryConstraint,
   serverTimestamp,
+  runTransaction,
   setDoc,
   Timestamp,
   updateDoc,
@@ -77,7 +80,14 @@ import {
   buildUserCollectionPath,
   buildUserSchoolCollectionPath,
   PROVIDENCE_UNIVERSITY_SCHOOL_ID,
+  permissionDeniedError,
 } from '@campus/shared/src';
+import {
+  ANNOUNCEMENT_RECENT_LIMIT,
+  ANNOUNCEMENT_SOURCE_LIMIT,
+  announcementSourceIdsForSchool,
+  mergeAnnouncementsById,
+} from '@campus/shared/src/campusAnnouncements';
 import { collectionFromSegments, docFromSegments } from './firestorePath';
 import {
   checkInAttendance as checkInCourseAttendance,
@@ -109,6 +119,7 @@ import {
   hasPuOfficialMenuSignal,
   isProvidenceDiningSchoolId,
 } from './puDiningCatalog';
+import { publicDiningCafeterias } from '@campus/shared/src/publicDiningCatalog';
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -178,6 +189,13 @@ function parseDocument<T extends { id: string }>(doc: {
   }
 
   return parsed as T;
+}
+
+function isoTimestamp(value: unknown): string | null {
+  if (!value) return null;
+  const stamp = value as { toDate?: () => Date };
+  const date = typeof stamp.toDate === 'function' ? stamp.toDate() : new Date(String(value));
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
 }
 
 function normalizeConversationRecord(row: Record<string, unknown>): Conversation {
@@ -888,17 +906,53 @@ function getCollectionLabel(collectionName: string): string {
 export const firebaseSource: DataSource = {
   // ===== 公告 =====
   async listAnnouncements(schoolId, options) {
-    return fetchCanonicalSchoolCollection<Announcement>({
+    const recent = await fetchCanonicalSchoolCollection<Announcement>({
       schoolId,
       canonicalCollections: ['announcements'],
       schoolConstraints: [orderBy('publishedAt', 'desc')],
       fallbackCollection: 'announcements',
       fallbackConstraints: [bySchool(schoolId), orderBy('publishedAt', 'desc')],
-      options,
+      options: { ...options, limit: options?.limit ?? ANNOUNCEMENT_RECENT_LIMIT },
     });
+    if (!schoolId) return recent;
+    const present = new Set(
+      recent
+        .map((item) => item.sourceId)
+        .filter((value): value is string => typeof value === 'string' && value.length > 0),
+    );
+    const missing = announcementSourceIdsForSchool(schoolId).filter(
+      (sourceId) => !present.has(sourceId),
+    );
+    if (missing.length === 0) return recent;
+    const extras = await Promise.all(
+      missing.map((sourceId) =>
+        fetchCanonicalSchoolCollection<Announcement>({
+          schoolId,
+          canonicalCollections: ['announcements'],
+          schoolConstraints: [where('sourceId', '==', sourceId)],
+          fallbackCollection: 'announcements',
+          fallbackConstraints: [bySchool(schoolId), where('sourceId', '==', sourceId)],
+          options: { limit: ANNOUNCEMENT_SOURCE_LIMIT },
+        }),
+      ),
+    );
+    return mergeAnnouncementsById([recent, ...extras]);
   },
 
-  async getAnnouncement(id) {
+  async getAnnouncement(id, schoolId) {
+    if (!id || id.includes('/')) return null;
+    if (schoolId) {
+      const canonical = await fetchDocumentAtPath<Announcement>(
+        buildSchoolCollectionPath(schoolId, 'announcements', id),
+      );
+      if (canonical) {
+        if (canonical.schoolId && canonical.schoolId !== schoolId) return null;
+        return { ...canonical, schoolId };
+      }
+      const legacy = await fetchDocument<Announcement>('announcements', id);
+      if (!legacy || legacy.schoolId !== schoolId) return null;
+      return { ...legacy, schoolId };
+    }
     return fetchDocument<Announcement>('announcements', id);
   },
 
@@ -1007,6 +1061,7 @@ export const firebaseSource: DataSource = {
   },
 
   async listPoiReviews(poiId, schoolId = undefined) {
+    if (!getAuthInstance().currentUser) throw permissionDeniedError();
     if (schoolId) {
       try {
         const rows = await fetchCollectionAtPath<PoiReview>(
@@ -1022,6 +1077,7 @@ export const firebaseSource: DataSource = {
           }));
         }
       } catch (error) {
+        if (isPermissionDeniedError(error)) throw error;
         console.warn('[firebaseSource] listPoiReviews school-scoped read failed:', error);
       }
     }
@@ -1030,7 +1086,10 @@ export const firebaseSource: DataSource = {
       buildLegacyPoiCollectionPath(poiId, 'reviews'),
       [orderBy('createdAt', 'desc')],
       { pageSize: 100 },
-    ).catch(() => []);
+    ).catch((error) => {
+      if (isPermissionDeniedError(error)) throw error;
+      return [];
+    });
 
     return legacyRows.map((row) => ({
       ...row,
@@ -1133,15 +1192,17 @@ export const firebaseSource: DataSource = {
         const normalized = rows.map((row) =>
           normalizeCafeteriaRecord(row as unknown as Record<string, unknown>),
         );
-        if (
-          !isProvidenceDiningSchoolId(schoolId) ||
-          normalized.some((row) => hasPuOfficialCafeteriaName(row.name))
-        ) {
-          return normalized;
+        if (normalized.length) {
+          if (
+            !isProvidenceDiningSchoolId(schoolId) ||
+            normalized.some((row) => hasPuOfficialCafeteriaName(row.name))
+          ) {
+            return normalized;
+          }
+          console.info(
+            '[firebaseSource] Falling back to curated PU cafeteria catalog because Firestore data does not match verified campus venues.',
+          );
         }
-        console.info(
-          '[firebaseSource] Falling back to curated PU cafeteria catalog because Firestore data does not match verified campus venues.',
-        );
       } catch (error) {
         console.warn('[firebaseSource] listCafeterias school-scoped read failed:', error);
       }
@@ -1151,7 +1212,18 @@ export const firebaseSource: DataSource = {
       return getPuDiningCafeterias(schoolId || 'pu');
     }
 
-    return [];
+    return publicDiningCafeterias(schoolId || '').map((row) => ({
+      id: row.id,
+      schoolId: row.schoolId,
+      name: row.name,
+      description: row.intro,
+      location: row.location,
+      openingHours: row.openingHours,
+      orderingEnabled: false,
+      pilotStatus: 'live' as const,
+      sourceLabel: row.sourceLabel,
+      sourceUrl: row.websiteUrl,
+    }));
   },
 
   async listMenus(schoolId, options) {
@@ -1179,6 +1251,7 @@ export const firebaseSource: DataSource = {
         console.warn('[firebaseSource] listMenus falling back to curated PU catalog:', error);
         return getPuDiningMenuItems(schoolId || 'pu');
       }
+      if (publicDiningCafeterias(schoolId || '').length) return [];
       throw error;
     }
   },
@@ -1920,32 +1993,65 @@ export const firebaseSource: DataSource = {
   },
 
   async submitAssignment(data) {
+    const userId = data.userId;
+    const assignmentId = data.assignmentId;
+    const groupId = typeof data.groupId === 'string' ? data.groupId.trim() : '';
+    const content = data.content?.trim() ?? '';
+    if (!userId || !content || content.length > 20000) {
+      throw new Error('請輸入 1 至 20,000 字的作業內容。');
+    }
+    if (!groupId || !assignmentId) {
+      throw new Error('找不到這份作業。');
+    }
+    if (getAuthInstance().currentUser?.uid !== userId) {
+      throw new Error('登入身分已變更，請重新開啟課程。');
+    }
+
     const db = getDb();
-    const groupId = (data as any).groupId as string;
+    const assignmentPath = buildGroupCollectionPath(groupId, 'assignments', assignmentId);
     const submissionPath = buildGroupCollectionPath(
       groupId,
       'assignments',
-      data.assignmentId,
+      assignmentId,
       'submissions',
-      data.userId,
+      userId,
     );
-    await setDoc(
-      docFromSegments(db, submissionPath),
-      {
-        ...data,
-        status: 'submitted',
-        submittedAt: new Date().toISOString(),
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true },
-    );
-
-    await updateDoc(
-      docFromSegments(db, buildGroupCollectionPath(groupId, 'assignments', data.assignmentId)),
-      {
-        submissionCount: increment(1),
-      },
-    );
+    await runTransaction(db, async (transaction) => {
+      const assignmentSnap = await transaction.get(docFromSegments(db, assignmentPath));
+      if (!assignmentSnap.exists()) throw new Error('此作業已不存在。');
+      const assignment = assignmentSnap.data() as Record<string, unknown>;
+      if (assignment.published === false || ['draft', 'closed'].includes(String(assignment.status ?? ''))) {
+        throw new Error('此作業尚未開放。');
+      }
+      if (['quiz', 'exam'].includes(String(assignment.type ?? ''))) {
+        throw new Error('請透過評量頁面作答。');
+      }
+      const due = isoTimestamp(assignment.dueAt);
+      if (due && Date.parse(due) < Date.now() && assignment.allowLateSubmission !== true) {
+        throw new Error('作業已截止，請聯絡授課教師。');
+      }
+      const ref = docFromSegments(db, submissionPath);
+      const existing = await transaction.get(ref);
+      if (existing.exists() && existing.data()?.submittedAt) {
+        throw new Error('這份作業已有繳交紀錄，請重新整理確認。');
+      }
+      if (getAuthInstance().currentUser?.uid !== userId) {
+        throw new Error('登入身分已變更，請重新開啟課程。');
+      }
+      transaction.set(
+        ref,
+        {
+          userId,
+          groupId,
+          assignmentId,
+          content,
+          status: 'submitted',
+          submittedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
+    });
 
     return (await fetchDocumentAtPath<Submission>(submissionPath)) as Submission;
   },
@@ -2115,52 +2221,7 @@ export const firebaseSource: DataSource = {
   },
 
   // ===== 失物招領 =====
-  async listLostFoundItems(schoolId, options) {
-    const resolvedSchoolId = schoolId || DEFAULT_SCHOOL_ID;
-
-    if (schoolId) {
-      try {
-        const canonicalRows = await fetchCollectionAtPath<LostFoundItem>(
-          buildSchoolCollectionPath(schoolId, 'lostFound'),
-          [orderBy('createdAt', 'desc')],
-          options,
-        );
-        if (canonicalRows.length > 0) return canonicalRows;
-      } catch (error) {
-        logFirebaseReadFailure(`schools/${schoolId}/lostFound`, error);
-      }
-    }
-
-    const fallbackRows = await fetchCollection<LostFoundItem>(
-      'lostFoundItems',
-      [bySchool(resolvedSchoolId)],
-      resolvedSchoolId,
-      optionsWithoutFirestoreSort(options),
-    );
-    return limitRows(sortByCreatedAtDesc(fallbackRows), options);
-  },
-
-  async getLostFoundItem(id) {
-    return fetchDocument<LostFoundItem>('lostFoundItems', id);
-  },
-
-  async createLostFoundItem(data) {
-    return createDocument<LostFoundItem>('lostFoundItems', {
-      ...data,
-      status: 'open',
-    } as Omit<LostFoundItem, 'id'>);
-  },
-
-  async updateLostFoundItem(id, data) {
-    return updateDocument<LostFoundItem>('lostFoundItems', id, data);
-  },
-
-  async resolveLostFoundItem(id) {
-    await updateDocument<LostFoundItem>('lostFoundItems', id, {
-      status: 'resolved',
-      resolvedAt: new Date().toISOString(),
-    });
-  },
+  ...lostFoundSource,
 
   // ===== 圖書館 =====
   async searchBooks(searchQuery, schoolId, options) {
@@ -2648,59 +2709,7 @@ export const firebaseSource: DataSource = {
     return fetchDocument<Order>('orders', id);
   },
 
-  async createOrder(data) {
-    const resolvedSchoolId = await resolveUserSchoolId(data.userId, (data as any).schoolId);
-    if (!resolvedSchoolId) {
-      throw new Error('缺少 schoolId，無法建立訂單');
-    }
-    const createOrder = httpsCallable<
-      {
-        schoolId: string;
-        cafeteriaId: string;
-        merchantId?: string;
-        cafeteria?: string;
-        items: Array<Record<string, unknown>>;
-        pickupTime?: string;
-        note?: string;
-        paymentMethod?: string;
-        source?: string;
-      },
-      { orderId?: string; total?: number }
-    >(getFunctionsInstance(), 'createOrder');
-    const cafeteriaId = (data as Record<string, unknown>).cafeteriaId as string | undefined;
-    if (!cafeteriaId) {
-      throw new Error('缺少 cafeteriaId，無法建立訂單');
-    }
-    const result = await createOrder({
-      schoolId: resolvedSchoolId,
-      cafeteriaId,
-      merchantId: (data as Record<string, unknown>).merchantId as string | undefined,
-      cafeteria: (data as Record<string, unknown>).cafeteria as string | undefined,
-      items: data.items as Array<Record<string, unknown>>,
-      pickupTime: (data as Record<string, unknown>).pickupTime as string | undefined,
-      note: (data as Record<string, unknown>).note as string | undefined,
-      paymentMethod: (data as Record<string, unknown>).paymentMethod as string | undefined,
-      ...((data as Record<string, unknown>).source === 'ai_agent'
-        ? { source: 'ai_agent' as const }
-        : {}),
-    });
-    const orderId = result.data?.orderId;
-    if (!orderId) {
-      throw new Error('建立訂單失敗');
-    }
-
-    const order = await fetchCanonicalUserSchoolDocument<Order>({
-      uid: data.userId,
-      schoolId: resolvedSchoolId,
-      canonicalCollection: 'orders',
-      docId: orderId,
-      fallbackRootCollection: 'orders',
-    });
-    if (!order) {
-      throw new Error('建立訂單後找不到訂單資料');
-    }
-    return order;
-  },
+  createOrder: (data) => createOrderThroughServer(data, resolveUserSchoolId),
 
   async updateOrderStatus(id, status, userId = undefined, schoolId = undefined) {
     const resolvedSchoolId = userId

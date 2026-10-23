@@ -119,4 +119,28 @@ describe('classifyIntent', () => {
     const r = classifyIntent('幫我訂早餐三明治');
     expect(r.name).toBe('food_order');
   });
+
+  describe('問維修、停水這類時間，不整理報修草稿', () => {
+    test.each([
+      '宿舍網路什麼時候維修',
+      '宿舍網路何時維修',
+      '宿舍網路維修是幾號',
+      '電梯維修幾點結束',
+      '宿舍停水是哪天',
+    ])('「%s」去公告找', (text) => {
+      expect(classifyIntent(text).name).toBe('announcements');
+    });
+
+    test.each(['我的報修什麼時候會好', '我報修的冷氣何時處理'])('「%s」問的是自己的報修單，查進度', (text) => {
+      expect(classifyIntent(text).name).toBe('check_repair_status');
+    });
+
+    test.each(['宿舍冷氣壞了', '宿舍冷氣壞了幫我報修'])('「%s」沒問時間，照樣整理報修', (text) => {
+      expect(classifyIntent(text).name).toBe('submit_repair_request');
+    });
+
+    test('約洗衣機時間照樣是預約', () => {
+      expect(classifyIntent('明天幾點幫我預約洗衣機').name).toBe('wash_reserve');
+    });
+  });
 });

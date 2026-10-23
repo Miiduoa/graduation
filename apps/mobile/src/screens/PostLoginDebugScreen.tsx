@@ -247,7 +247,7 @@ export function PostLoginDebugScreen() {
         <AnimatedCard title="Firestore agentRuns" subtitle="最近 25 筆 campus assistant／agent 執行（新→舊）">
           <Text style={{ ...textSecondary, marginBottom: 8 }}>{agentRunToolSummary}</Text>
           <Text style={textSecondary}>
-            大量抽樣請用 Firebase Console 或見 docs/agentruns-sampling.md。
+            大量抽樣請用 Firebase Console。
           </Text>
           <Divider spacing={8} />
           {agentRuns.length === 0 ? (

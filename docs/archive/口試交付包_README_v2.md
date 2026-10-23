@@ -17,7 +17,7 @@
 | 截圖數 | 10 張 | 18 張 |
 | PPT 張數 | 14 張 | 22 張（內容更豐富） |
 
-## 4 份 v2 檔案（都在 /Users/miiduoa/Desktop/畢業專題/）
+## 4 份 v2 檔案（都在 repo 根目錄）
 
 | 檔案 | 內容 |
 |------|------|
@@ -71,7 +71,7 @@ Perceive 感知 → Think 思考 → Act 動作 → Background 掃描 → Learn 
 3. **V09** — AI 學伴配對嚴格模式 + 邀請 Alert
 4. **V12** — Web 8 角色切換 + alumni 攔截卡
 
-存到 `/Users/miiduoa/Desktop/畢業專題/demo-media/`，照檔名規範。PPT 已預留 placeholder。
+存到 repo 根目錄的 `demo-media/`，照檔名規範。PPT 已預留 placeholder。
 
 ## 4 組員分工（重新分配）
 

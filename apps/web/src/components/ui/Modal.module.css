@@ -1,0 +1,69 @@
+.dialog {
+  box-sizing: border-box;
+  width: min(var(--dialog-width, 480px), calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  color: var(--text);
+  background: var(--surface, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 20px);
+  box-shadow: 0 24px 72px rgb(0 0 0 / 24%);
+}
+.dialog[open] { display: flex; flex-direction: column; animation: appear 160ms ease-out; }
+.dialog::backdrop { background: rgb(0 0 0 / 48%); }
+.header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border);
+}
+.heading { min-width: 0; }
+.title { margin: 0; font-size: 20px; font-weight: 650; line-height: 1.4; overflow-wrap: anywhere; }
+.description { margin: 8px 0 0; color: var(--muted); font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+.close {
+  display: inline-flex;
+  flex: 0 0 44px;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  color: var(--text);
+  background: var(--panel, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+}
+.close:focus-visible, .dialog button:focus-visible {
+  outline: 3px solid var(--focus-ring, var(--brand));
+  outline-offset: 3px;
+}
+.body { min-height: 0; padding: 24px; overflow-y: auto; overscroll-behavior: contain; overflow-wrap: anywhere; }
+.footer {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--border);
+}
+.footer > * { min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.message { margin: 0; color: var(--text); font-size: 15px; line-height: 1.8; white-space: pre-line; }
+.notice { margin: 16px 0 0; color: var(--muted); font-size: 14px; line-height: 1.7; }
+.error { margin: 16px 0 0; padding: 12px; background: var(--danger-soft); color: var(--danger); border-radius: 10px; font-size: 14px; line-height: 1.7; }
+@keyframes appear { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 420px) {
+  .header { padding: 18px 20px; }
+  .body { padding: 20px; }
+  .footer { padding: 16px 20px; }
+  .footer > * { flex: 1 1 100%; }
+}
+@media (prefers-reduced-motion: reduce) { .dialog[open] { animation: none; } }

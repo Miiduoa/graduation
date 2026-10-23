@@ -1,5 +1,5 @@
 /* eslint-disable */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,19 +14,16 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Screen } from '../ui/components';
 import { theme } from '../ui/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { useAuth } from '../state/auth';
-import { shouldBlockForNoLogin, isDemoUid } from '../services/demoSession';
 import { useSchool } from '../state/school';
 import { isFirebaseMockMode } from '../firebase';
 import type { SchoolDirectoryProfile } from '../services/memberDirectory';
 import { searchSchoolDirectoryByDisplayNamePrefix } from '../services/memberDirectory';
 import { RelationshipButtons } from '../components/RelationshipButtons';
 import { PeerFollowButton } from '../components/PeerFollowButton';
-import {
-  getFriendshipBetween,
-  type Friendship,
-} from '../services/friends';
+import { getFriendshipBetween, type Friendship } from '../services/friends';
 
 type RowProps = {
   profile: SchoolDirectoryProfile;
@@ -38,8 +35,15 @@ type RowProps = {
 };
 
 function FriendshipRow(props: RowProps) {
-  const { profile, friendship, myUid, loadingRel, navigation: navigationProp, onFriendshipChange } =
-    props;
+  const styles = useThemeStyleSheet(createStyles);
+  const {
+    profile,
+    friendship,
+    myUid,
+    loadingRel,
+    navigation: navigationProp,
+    onFriendshipChange,
+  } = props;
 
   const label = profile.displayName ?? profile.uid.slice(0, 8);
   const sub = [profile.roleLabel, profile.department].filter(Boolean).join(' · ');
@@ -68,17 +72,82 @@ function FriendshipRow(props: RowProps) {
 }
 
 export function FriendSearchScreen(props: any) {
-  const nav = props?.navigation;
-  const presetUid = props?.route?.params?.presetUid as string | undefined;
+  const styles = useThemeStyleSheet(createStyles);
   const auth = useAuth();
   const { school } = useSchool();
   const myUid = auth.user?.uid ?? '';
+  if (auth.loading) {
+    return (
+      <Screen>
+        <View style={styles.center}>
+          <ActivityIndicator color={theme.colors.accent} />
+          <Text style={styles.help}>正在確認登入狀態…</Text>
+        </View>
+      </Screen>
+    );
+  }
+  if (!myUid) {
+    return (
+      <Screen>
+        <View style={styles.center}>
+          <Text style={styles.help}>登入後，就能尋找同校成員並傳送好友邀請。</Text>
+        </View>
+      </Screen>
+    );
+  }
+  return (
+    <FriendSearchContent
+      key={JSON.stringify([myUid, school?.id])}
+      myUid={myUid}
+      schoolId={school?.id ?? ''}
+      navigation={props?.navigation}
+      presetUid={props?.route?.params?.presetUid}
+    />
+  );
+}
+
+function FriendSearchContent({
+  myUid,
+  schoolId,
+  navigation: nav,
+  presetUid,
+}: {
+  myUid: string;
+  schoolId: string;
+  navigation: any;
+  presetUid?: string;
+}) {
+  const styles = useThemeStyleSheet(createStyles);
 
   const [text, setText] = useState('');
   const [debounced, setDebounced] = useState('');
   const [loading, setLoading] = useState(false);
-  const [results, setResults] = useState<SchoolDirectoryProfile[]>([]);
+  const [result, setResult] = useState<{
+    query: string;
+    rows: SchoolDirectoryProfile[];
+    error: string;
+  }>({
+    query: '',
+    rows: [],
+    error: '',
+  });
   const [rels, setRels] = useState<Record<string, Friendship | null>>({});
+  const mounted = useRef(true);
+  const requestVersion = useRef(0);
+  const searchQuery = text.trim();
+  const currentQuery = useRef(searchQuery);
+  currentQuery.current = searchQuery;
+  const results = result.query === searchQuery ? result.rows : [];
+  const error = result.query === searchQuery ? result.error : '';
+  const searching = searchQuery !== debounced || loading;
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      requestVersion.current += 1;
+    };
+  }, []);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(text.trim()), 380);
@@ -92,26 +161,37 @@ export function FriendSearchScreen(props: any) {
   }, [presetUid]);
 
   useEffect(() => {
-    props?.navigation?.setOptions?.({ title: '搜尋／加好友' });
-  }, [props?.navigation]);
+    nav?.setOptions?.({ title: '尋找同校成員' });
+  }, [nav]);
 
   const fetchResults = useCallback(async () => {
-    if (!school?.id || !debounced || debounced.length < 1 || isFirebaseMockMode()) {
-      setResults([]);
+    const version = ++requestVersion.current;
+    const current = () =>
+      mounted.current && requestVersion.current === version && currentQuery.current === debounced;
+    if (!schoolId || !debounced || isFirebaseMockMode()) {
+      setResult({ query: debounced, rows: [], error: '' });
       setLoading(false);
       return;
     }
     setLoading(true);
+    setResult({ query: debounced, rows: [], error: '' });
+    setRels({});
     try {
-      const rows = await searchSchoolDirectoryByDisplayNamePrefix(school.id, debounced, 24);
-      setResults(rows.filter((r) => r.uid !== myUid));
-      setRels({});
-    } catch {
-      setResults([]);
+      const rows = await searchSchoolDirectoryByDisplayNamePrefix(schoolId, debounced, 24);
+      if (current())
+        setResult({ query: debounced, rows: rows.filter((r) => r.uid !== myUid), error: '' });
+    } catch (cause) {
+      if (!current()) return;
+      const code = (cause as { code?: string })?.code ?? '';
+      const message =
+        code.endsWith('permission-denied') || code.endsWith('unauthenticated')
+          ? '目前無法查詢這所學校的成員。請確認登入狀態與學校資格後再試。'
+          : '暫時無法搜尋。請確認網路後再試，輸入的內容仍保留。';
+      setResult({ query: debounced, rows: [], error: message });
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
-  }, [school?.id, debounced, myUid]);
+  }, [schoolId, debounced, myUid]);
 
   useEffect(() => {
     void fetchResults();
@@ -120,12 +200,12 @@ export function FriendSearchScreen(props: any) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!school?.id || !myUid || results.length === 0) return;
+      if (!schoolId || result.query !== searchQuery || result.rows.length === 0) return;
       const map: Record<string, Friendship | null> = {};
       await Promise.all(
-        results.map(async (r) => {
+        result.rows.map(async (r) => {
           try {
-            const f = await getFriendshipBetween(school.id!, myUid, r.uid);
+            const f = await getFriendshipBetween(schoolId, myUid, r.uid);
             if (!cancelled) map[r.uid] = f;
           } catch {
             if (!cancelled) map[r.uid] = null;
@@ -137,21 +217,12 @@ export function FriendSearchScreen(props: any) {
     return () => {
       cancelled = true;
     };
-  }, [school?.id, myUid, results]);
+  }, [schoolId, myUid, result, searchQuery]);
 
   const onRelChange = (uid: string, f: Friendship | null) => {
+    if (!mounted.current || currentQuery.current !== result.query) return;
     setRels((prev) => ({ ...prev, [uid]: f }));
   };
-
-  if (shouldBlockForNoLogin({ uid: auth.user?.uid ?? null, hasUser: !!auth.user })) {
-    return (
-      <Screen>
-        <View style={styles.center}>
-          <Text style={styles.help}>請先登入</Text>
-        </View>
-      </Screen>
-    );
-  }
 
   return (
     <Screen>
@@ -165,28 +236,51 @@ export function FriendSearchScreen(props: any) {
             <TextInput
               value={text}
               onChangeText={setText}
-              placeholder="名字字首、暱稱，或貼上對方 UID"
+              accessibilityLabel="搜尋同校成員"
+              placeholder="輸入名字開頭，或貼上對方帳號 ID"
+              maxLength={128}
               placeholderTextColor={theme.colors.muted}
               style={styles.input}
               autoCapitalize="none"
               autoCorrect={false}
             />
             {text.length > 0 && (
-              <Pressable hitSlop={8} onPress={() => setText('')}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="清除搜尋"
+                hitSlop={8}
+                onPress={() => setText('')}
+              >
                 <Ionicons name="close-circle" size={18} color={theme.colors.muted} />
               </Pressable>
             )}
           </View>
-          <Text style={styles.hint}>搜尋同校的 directory 通訊錄（Firestore displayName 字首比對）</Text>
+          <Text style={styles.hint}>
+            只會顯示同校且允許被搜尋的成員。也可以請對方分享好友 QR Code。
+          </Text>
         </View>
 
         {isFirebaseMockMode() ? (
           <View style={styles.center}>
-            <Text style={styles.help}>模擬模式無法連線通訊錄</Text>
+            <Text style={styles.help}>示範模式未連接學校通訊錄。</Text>
           </View>
-        ) : loading ? (
+        ) : searching ? (
           <View style={styles.center}>
             <ActivityIndicator color={theme.colors.accent} />
+            <Text style={styles.help}>正在搜尋…</Text>
+          </View>
+        ) : error ? (
+          <View style={styles.center}>
+            <Text accessibilityRole="alert" style={styles.help}>
+              {error}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => void fetchResults()}
+              style={styles.retry}
+            >
+              <Text style={{ color: theme.colors.accent, fontWeight: '600' }}>重新搜尋</Text>
+            </Pressable>
           </View>
         ) : (
           <FlatList
@@ -196,7 +290,11 @@ export function FriendSearchScreen(props: any) {
             ListEmptyComponent={
               <View style={{ paddingVertical: 40 }}>
                 <Text style={styles.help}>
-                  {debounced.length < 1 ? '請輸入至少 1 字開始搜尋' : '找不到符合的同校成員'}
+                  {!schoolId
+                    ? '請先選擇學校。'
+                    : !searchQuery
+                      ? '輸入名字開頭或帳號 ID，尋找想加的朋友。'
+                      : '找不到符合的成員。請確認名字或帳號 ID，對方也可能尚未開啟搜尋。'}
                 </Text>
               </View>
             }
@@ -217,34 +315,36 @@ export function FriendSearchScreen(props: any) {
   );
 }
 
-const styles = StyleSheet.create({
-  searchWrap: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 10 },
-  searchBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: theme.colors.surface2,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border,
-  },
-  input: { flex: 1, color: theme.colors.text, fontSize: 15 },
-  hint: { color: theme.colors.muted, fontSize: 12, marginTop: 8 },
-  card: {
-    marginHorizontal: 16,
-    padding: 14,
-    borderRadius: theme.radius.md,
-    backgroundColor: theme.colors.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border,
-  },
-  cardTitle: { fontSize: 16, fontWeight: '700', color: theme.colors.text },
-  cardSub: { fontSize: 12, color: theme.colors.textSecondary, marginTop: 4 },
-  uidHint: { fontSize: 11, color: theme.colors.muted, marginTop: 6 },
-  help: { color: theme.colors.muted, textAlign: 'center', fontSize: 14 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 },
-});
+const createStyles = () =>
+  StyleSheet.create({
+    searchWrap: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 10 },
+    searchBox: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      backgroundColor: theme.colors.surface2,
+      borderRadius: 14,
+      paddingHorizontal: 12,
+      paddingVertical: 11,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.border,
+    },
+    input: { flex: 1, color: theme.colors.text, fontSize: 15 },
+    hint: { color: theme.colors.muted, fontSize: 12, marginTop: 8 },
+    card: {
+      marginHorizontal: 16,
+      padding: 14,
+      borderRadius: theme.radius.md,
+      backgroundColor: theme.colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.border,
+    },
+    cardTitle: { fontSize: 16, fontWeight: '700', color: theme.colors.text },
+    cardSub: { fontSize: 12, color: theme.colors.textSecondary, marginTop: 4 },
+    uidHint: { fontSize: 11, color: theme.colors.muted, marginTop: 6 },
+    help: { color: theme.colors.muted, textAlign: 'center', fontSize: 14 },
+    center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 },
+    retry: { marginTop: 16, paddingHorizontal: 20, paddingVertical: 12 },
+  });
 
 export default FriendSearchScreen;

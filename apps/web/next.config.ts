@@ -1,16 +1,26 @@
 import type { NextConfig } from 'next';
+import { legacyEnabled, legacyRewrites } from './src/lib/legacy-routing';
+
+// 本機測試環境（Firebase 模擬器、demo- 專案）才放行 127.0.0.1／localhost，正式建置不會加。
+const emulatorTestEnv =
+  ['1', 'true'].includes(process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR || '') &&
+  (process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || '').startsWith('demo-');
+const emulatorConnectSrc = emulatorTestEnv
+  ? ' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*'
+  : '';
 
 const contentSecurityPolicy = [
   "default-src 'self'",
   "base-uri 'self'",
   "frame-ancestors 'none'",
   "object-src 'none'",
-  "form-action 'self'",
+  "form-action 'self' https://accounts.google.com",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data: https:",
   "style-src 'self' 'unsafe-inline' https:",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-  "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net https://*.web.app https://*.firebaseapp.com wss:",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'",
+  "worker-src 'self' blob:",
+  "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net https://*.fly.dev https://*.web.app https://*.firebaseapp.com https://huggingface.co https://*.huggingface.co https://*.hf.co wss:" + emulatorConnectSrc,
 ].join('; ');
 
 const securityHeaders = [
@@ -24,7 +34,31 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  output: 'standalone',
   poweredByHeader: false,
+  agentRules: false,
+  // 4B 只在瀏覽器以 Transformers.js 下載並推論。Next 已預設把
+  // @huggingface/transformers 當 server external，不可再列入 transpilePackages，
+  // 否則與 serverExternalPackages 衝突，Turbopack 建置會失敗。
+  // 原生 Node 綁定不進瀏覽器包；權重也不進伺服器映像。
+  serverExternalPackages: ['onnxruntime-node'],
+  turbopack: {
+    resolveAlias: {
+      'onnxruntime-node': { browser: './src/lib/nodeNativeStub.ts' },
+      sharp: { browser: './src/lib/nodeNativeStub.ts' },
+    },
+  },
+  webpack: (config) => {
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      'onnxruntime-node$': false,
+      sharp$: false,
+    };
+    return config;
+  },
+  async rewrites() {
+    return legacyRewrites(legacyEnabled());
+  },
   async headers() {
     return [
       {
@@ -34,6 +68,44 @@ const nextConfig: NextConfig = {
           ...securityHeaders,
         ],
       },
+      {
+        source: '/documents/reader.html',
+        headers: [
+          {
+            key: 'Content-Security-Policy',
+            value: contentSecurityPolicy.replace("frame-ancestors 'none'", "frame-ancestors 'self'"),
+          },
+        ],
+      },
+      {
+        source: '/merchant',
+        headers: [
+          { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=(self)' },
+        ],
+      },
+      // classroom camera 是建置時讀進映像的；開 ASSIGNMENT_FILE_SUBMIT_ENABLED 必須重建 Web 映像。
+      ...(process.env.ASSIGNMENT_FILE_SUBMIT_ENABLED === 'true'
+        ? [
+            {
+              source: '/classroom',
+              headers: [
+                {
+                  key: 'Permissions-Policy',
+                  value: 'camera=(self), microphone=(), geolocation=(self)',
+                },
+              ],
+            },
+            {
+              source: '/classroom/:path*',
+              headers: [
+                {
+                  key: 'Permissions-Policy',
+                  value: 'camera=(self), microphone=(), geolocation=(self)',
+                },
+              ],
+            },
+          ]
+        : []),
       {
         source: '/sso-callback',
         headers: [

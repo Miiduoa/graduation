@@ -1,76 +1,51 @@
-# 05_map.yaml
-# campus://campus/map → 校園地圖
-
 appId: ${APP_ID}
-name: Map Flow
+name: Guest campus map access
 tags:
   - smoke
   - map
-
 ---
-- launchApp
+- launchApp:
+    clearState: true
 
 - extendedWaitUntil:
     visible:
-      id: 'tab-Today'
-    timeout: 45000
+      id: login-landing
+    timeout: 90000
 
-- waitForAnimationToEnd:
-    timeout: 2500
+- assertVisible:
+    id: public-Map
 
-- openLink: campus://campus/map
+# Keep the tap target clear of the development warning banner at the screen edge.
+- scrollUntilVisible:
+    element:
+      id: public-Map
+    direction: DOWN
+    centerElement: true
 
+- tapOn:
+    id: public-Map
+
+# The landing-page button also says "校園地圖"; require the map-only subtitle.
 - extendedWaitUntil:
-    visible: '校園地圖'
+    visible: '找到校園地點，再安排怎麼過去。'
     timeout: 20000
 
-- takeScreenshot: map_screen
+- assertNotVisible:
+    id: login-landing
+
+- takeScreenshot: map_guest_opened
+
+# Both data-backed maps and explicit unavailable states are valid offline.
+- extendedWaitUntil:
+    visible: '校區位置|尚未提供校園地點|目前無法讀取校園地點'
+    timeout: 45000
+
+- takeScreenshot: map_guest_source_state
 
 - tapOn:
-    text: '全部'
-    optional: true
-
-- tapOn:
-    text: '教學大樓'
-    optional: true
-
-- takeScreenshot: map_buildings
-
-- tapOn:
-    text: '圖書館'
-    optional: true
-
-- takeScreenshot: map_library
-
-- tapOn:
-    text: '餐廳'
-    optional: true
-
-- takeScreenshot: map_cafeteria
-
-- tapOn:
-    text: '全部'
-    optional: true
-
-- tapOn:
-    index: 0
-    below:
-      text: '地圖'
-    optional: true
+    text: '返回'
 
 - extendedWaitUntil:
-    visible: '導航'
-    timeout: 8000
-    optional: true
-
-- takeScreenshot: poi_detail
-
-- tapOn:
-    text: '導航'
-    optional: true
-
-- tapOn:
-    text: 'AR 實景導航'
-    optional: true
-
-- back
+    visible:
+      id: login-landing
+    timeout: 20000

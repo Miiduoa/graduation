@@ -1,12 +1,17 @@
-// @ts-nocheck — pre-existing type breakage from main; mobile demoStore PR 範圍外
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
-import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  useCallback,
+  useRef,
+} from 'react';
 import {
   collection,
   getDocs,
   query,
-  where,
   orderBy,
   limit,
   doc,
@@ -47,56 +52,58 @@ type NotificationsContextValue = {
   reload: () => void;
 };
 
-const STORAGE_KEY = 'campus.notifications.lastRead.v1';
 const NotificationsContext = createContext<NotificationsContextValue | null>(null);
+type NotificationOwner = { uid: string | null; db: ReturnType<typeof getDb> | null };
+type NotificationState = {
+  owner: NotificationOwner;
+  items: Notification[];
+  loading: boolean;
+  error: string | null;
+};
 
 export function NotificationsProvider(props: { children: React.ReactNode }) {
   const auth = useAuth();
-  const db = useMemo(() => {
-    if (!hasUsableFirebaseConfig()) return null;
-    return getDb();
-  }, []);
-
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [lastRead, setLastRead] = useState<string | null>(null);
+  const db = useMemo(() => (hasUsableFirebaseConfig() ? getDb() : null), []);
+  // A new owner object also fences A -> B -> A, where the uid alone would match.
+  const owner = useMemo(() => ({ uid: auth.user?.uid ?? null, db }), [auth.user?.uid, db]);
+  const activeOwner = useRef(owner);
+  activeOwner.current = owner;
+  const mounted = useRef(false);
+  const isCurrent = useCallback(() => mounted.current && activeOwner.current === owner, [owner]);
+  const [state, setState] = useState<NotificationState>(() => ({
+    owner,
+    items: [],
+    loading: !!(owner.uid && owner.db),
+    error: null,
+  }));
   const [reloadTrigger, setReloadTrigger] = useState(0);
 
   useEffect(() => {
-    AsyncStorage.getItem(STORAGE_KEY)
-      .then((v) => setLastRead(v))
-      .catch(() => void 0);
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
   }, []);
 
   useEffect(() => {
-    if (!db) {
-      setNotifications([]);
-      setLoading(false);
-      setError(null);
+    if (!owner.db || !owner.uid) {
+      setState({ owner, items: [], loading: false, error: null });
       return;
     }
-
-    if (!auth.user) {
-      setNotifications([]);
-      return;
-    }
-
-    const uid = auth.user.uid;
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-
+    setState((previous) => ({
+      owner,
+      items: previous.owner === owner ? previous.items : [],
+      loading: true,
+      error: null,
+    }));
     (async () => {
       try {
-        const ref = collection(db, 'users', uid, 'notifications');
-        const qy = query(ref, orderBy('createdAt', 'desc'), limit(50));
-        const snap = await getDocs(qy);
-
-        if (cancelled) return;
-
+        const ref = collection(owner.db!, 'users', owner.uid!, 'notifications');
+        const snap = await getDocs(query(ref, orderBy('createdAt', 'desc'), limit(50)));
+        if (cancelled || !isCurrent()) return;
         const items = snap.docs.map((d) => {
-          const data = d.data() as any;
+          const data = d.data();
           return {
             id: d.id,
             type: data.type ?? 'system',
@@ -107,162 +114,163 @@ export function NotificationsProvider(props: { children: React.ReactNode }) {
             data: data.data ?? {},
           } as Notification;
         });
-
-        setNotifications(items);
-      } catch (e: any) {
-        if (!cancelled) setError(e?.message ?? '載入通知失敗');
-      } finally {
-        if (!cancelled) setLoading(false);
+        setState({ owner, items, loading: false, error: null });
+      } catch (failure: any) {
+        if (!cancelled && isCurrent()) {
+          setState((previous) =>
+            previous.owner === owner
+              ? { ...previous, loading: false, error: failure?.message ?? '載入通知失敗' }
+              : previous,
+          );
+        }
       }
     })();
-
     return () => {
       cancelled = true;
     };
-  }, [db, auth.user?.uid, reloadTrigger]);
+  }, [owner, isCurrent, reloadTrigger]);
 
-  const unreadCount = useMemo(() => {
-    return notifications.filter((n) => !n.read).length;
-  }, [notifications]);
+  // Effects run after rendering: never expose the previous owner's rows or count,
+  // even for the first render of a new account or logout.
+  const notifications = useMemo(
+    () => (state.owner === owner ? state.items : []),
+    [state.owner, state.items, owner],
+  );
+  const loading = state.owner === owner ? state.loading : !!(owner.uid && owner.db);
+  const error = state.owner === owner ? state.error : null;
+  const unreadCount = notifications.filter((notification) => !notification.read).length;
+
+  const reportReadOutcome = useCallback(
+    (input: Record<string, unknown>, success: boolean, message: string, failure?: unknown) => {
+      void import('../services/aiBrain')
+        .then(({ aiBrain }) => {
+          if (isCurrent()) {
+            aiBrain.reportToolOutcome(
+              'mark_notifications_read',
+              input,
+              success ? 'success' : 'failure',
+              failure === undefined ? undefined : String(failure),
+              message,
+            );
+          }
+        })
+        .catch(() => {
+          /* Reporting cannot change a confirmed Firestore result. */
+        });
+    },
+    [isCurrent],
+  );
 
   const markAsRead = useCallback(
     async (id: string) => {
-      if (!auth.user) return;
-
-      // 使用 functional update 來獲取當前狀態的快照，避免閉包問題
-      let notificationsSnapshot: Notification[] = [];
-      let wasUnread = false;
-
-      setNotifications((prev) => {
-        notificationsSnapshot = prev;
-        const target = prev.find((n) => n.id === id);
-        wasUnread = !!target && !target.read;
-        if (!wasUnread) return prev;
-        return prev.map((n) => (n.id === id ? { ...n, read: true } : n));
-      });
-
-      if (!wasUnread) return;
-
+      if (!owner.uid || !owner.db || !isCurrent()) return;
+      const original = notifications.find((notification) => notification.id === id);
+      if (!original || original.read) return;
+      const optimistic = { ...original, read: true };
+      setState((previous) =>
+        previous.owner === owner
+          ? {
+              ...previous,
+              items: previous.items.map((row) => (row === original ? optimistic : row)),
+            }
+          : previous,
+      );
       try {
         await setDoc(
-          doc(db, 'users', auth.user.uid, 'notifications', id),
+          doc(owner.db, 'users', owner.uid, 'notifications', id),
           { read: true, readAt: serverTimestamp() },
           { merge: true },
         );
-        const { aiBrain } = await import('../services/aiBrain');
-        aiBrain.reportToolOutcome(
-          'mark_notifications_read',
+        if (!isCurrent()) return;
+        reportReadOutcome(
           { action: 'single', notificationId: id },
-          'success',
-          undefined,
+          true,
           '使用者在通知中心將單則通知標為已讀',
         );
-      } catch (e: any) {
-        console.warn('Failed to mark notification as read:', e);
-        const errMsg = e?.message != null ? String(e.message) : String(e);
-        void import('../services/aiBrain').then(({ aiBrain }) =>
-          aiBrain.reportToolOutcome(
-            'mark_notifications_read',
-            { action: 'single', notificationId: id },
-            'failure',
-            errMsg,
-            '通知標為已讀失敗',
-          ),
+      } catch (failure) {
+        if (!isCurrent()) return;
+        reportReadOutcome(
+          { action: 'single', notificationId: id },
+          false,
+          '通知標為已讀失敗',
+          failure,
         );
-        // 回滾時也使用 functional update，確保只回滾我們的修改
-        setNotifications((current) => {
-          // 檢查是否已經被其他操作修改過，如果是則不回滾
-          const targetNotification = current.find((n) => n.id === id);
-          const originalNotification = notificationsSnapshot.find((n) => n.id === id);
-
-          if (
-            targetNotification &&
-            originalNotification &&
-            targetNotification.read !== originalNotification.read
-          ) {
-            // 只回滾這一個通知的 read 狀態
-            return current.map((n) =>
-              n.id === id ? { ...n, read: originalNotification.read } : n,
-            );
-          }
-          return current;
-        });
+        setState((previous) =>
+          previous.owner === owner
+            ? {
+                ...previous,
+                items: previous.items.map((row) => (row === optimistic ? original : row)),
+              }
+            : previous,
+        );
       }
     },
-    [auth.user, db],
+    [owner, isCurrent, notifications, reportReadOutcome],
   );
 
   const markAllAsRead = useCallback(async () => {
-    if (!auth.user || !db) return;
-
-    // 使用 functional update 來獲取當前狀態並計算需要更新的項目
-    let unreadIds: string[] = [];
-    const originalReadStates: Map<string, boolean> = new Map();
-
-    setNotifications((prev) => {
-      const unread = prev.filter((n) => !n.read);
-      if (unread.length === 0) return prev;
-
-      // 記錄原始狀態
-      unreadIds = unread.map((n) => n.id);
-      prev.forEach((n) => originalReadStates.set(n.id, n.read));
-
-      return prev.map((n) => ({ ...n, read: true }));
-    });
-
-    // 如果沒有未讀通知，提前返回
-    if (unreadIds.length === 0) return;
-
-    try {
-      const batch = writeBatch(db);
-      const readAt = serverTimestamp();
-
-      for (const nId of unreadIds) {
-        const notifRef = doc(db, 'users', auth.user.uid, 'notifications', nId);
-        batch.update(notifRef, { read: true, readAt });
-      }
-
-      await batch.commit();
-      const { aiBrain } = await import('../services/aiBrain');
-      aiBrain.reportToolOutcome(
-        'mark_notifications_read',
-        { action: 'all', notificationIds: unreadIds },
-        'success',
-        undefined,
-        `使用者在通知中心將 ${unreadIds.length} 則通知全部標為已讀`,
-      );
-      if (unreadIds.length >= 3) {
-        void import('../services/companionEngine').then((m) =>
-          m.recordCompanionFeatureSignal('notification_batch'),
-        );
-      }
-    } catch (e: any) {
-      console.warn('Failed to mark all notifications as read:', e);
-      const errMsg = e?.message != null ? String(e.message) : String(e);
-      void import('../services/aiBrain').then(({ aiBrain }) =>
-        aiBrain.reportToolOutcome(
-          'mark_notifications_read',
-          { action: 'all', notificationIds: unreadIds },
-          'failure',
-          errMsg,
-          '全部通知標為已讀失敗',
-        ),
-      );
-      // 精確回滾：只回滾我們修改過的項目
-      setNotifications((current) =>
-        current.map((n) => {
-          const originalRead = originalReadStates.get(n.id);
-          if (originalRead !== undefined && unreadIds.includes(n.id)) {
-            return { ...n, read: originalRead };
+    if (!owner.uid || !owner.db || !isCurrent()) return;
+    const unread = notifications.filter((notification) => !notification.read);
+    if (!unread.length) return;
+    const originals = new Map(unread.map((row) => [row.id, row]));
+    const optimistic = new Map(unread.map((row) => [row.id, { ...row, read: true }]));
+    setState((previous) =>
+      previous.owner === owner
+        ? {
+            ...previous,
+            items: previous.items.map((row) =>
+              row === originals.get(row.id) ? optimistic.get(row.id)! : row,
+            ),
           }
-          return n;
-        }),
+        : previous,
+    );
+    try {
+      const batch = writeBatch(owner.db);
+      const readAt = serverTimestamp();
+      for (const row of unread) {
+        batch.update(doc(owner.db, 'users', owner.uid, 'notifications', row.id), {
+          read: true,
+          readAt,
+        });
+      }
+      await batch.commit();
+      if (!isCurrent()) return;
+      reportReadOutcome(
+        { action: 'all', notificationIds: unread.map((row) => row.id) },
+        true,
+        `使用者在通知中心將 ${unread.length} 則通知全部標為已讀`,
+      );
+      if (unread.length >= 3) {
+        void import('../services/companionEngine')
+          .then((module) => {
+            if (isCurrent()) module.recordCompanionFeatureSignal('notification_batch');
+          })
+          .catch(() => {});
+      }
+    } catch (failure) {
+      if (!isCurrent()) return;
+      reportReadOutcome(
+        { action: 'all', notificationIds: unread.map((row) => row.id) },
+        false,
+        '全部通知標為已讀失敗',
+        failure,
+      );
+      setState((previous) =>
+        previous.owner === owner
+          ? {
+              ...previous,
+              items: previous.items.map((row) =>
+                row === optimistic.get(row.id) ? originals.get(row.id)! : row,
+              ),
+            }
+          : previous,
       );
     }
-  }, [auth.user, db]);
+  }, [owner, isCurrent, notifications, reportReadOutcome]);
 
-  const reload = useCallback(() => setReloadTrigger((t) => t + 1), []);
-
+  const reload = useCallback(() => {
+    if (isCurrent()) setReloadTrigger((value) => value + 1);
+  }, [isCurrent]);
   const value = useMemo(
     () => ({
       notifications,

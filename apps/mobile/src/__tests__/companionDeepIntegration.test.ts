@@ -27,10 +27,10 @@ import {
 describe('signalAggregator', () => {
   test('多種事件依日期聚合', () => {
     const events: CompanionEvent[] = [
-      { eventId: 'e1', kind: 'assignment_submitted', at: '2026-05-13T10:00:00Z' },
-      { eventId: 'e2', kind: 'meal_ordered', at: '2026-05-13T12:00:00Z', payload: { vendorId: 'v1', balanced: true } },
-      { eventId: 'e3', kind: 'library_borrow', at: '2026-05-13T15:00:00Z' },
-      { eventId: 'e4', kind: 'poi_visited', at: '2026-05-13T16:00:00Z', payload: { poiId: 'd305' } },
+      { eventId: 'e1', kind: 'assignment_submitted', at: '2026-05-13T10:00:00+08:00' },
+      { eventId: 'e2', kind: 'meal_ordered', at: '2026-05-13T12:00:00+08:00', payload: { vendorId: 'v1', balanced: true } },
+      { eventId: 'e3', kind: 'library_borrow', at: '2026-05-13T15:00:00+08:00' },
+      { eventId: 'e4', kind: 'poi_visited', at: '2026-05-13T16:00:00+08:00', payload: { poiId: 'd305' } },
     ];
     const r = aggregateCompanionEvents(events);
     expect(r.days).toHaveLength(1);
@@ -45,8 +45,8 @@ describe('signalAggregator', () => {
 
   test('重複 eventId 會去重', () => {
     const events: CompanionEvent[] = [
-      { eventId: 'dup', kind: 'attendance_checkin', at: '2026-05-13T09:00:00Z' },
-      { eventId: 'dup', kind: 'attendance_checkin', at: '2026-05-13T09:00:00Z' },
+      { eventId: 'dup', kind: 'attendance_checkin', at: '2026-05-13T09:00:00+08:00' },
+      { eventId: 'dup', kind: 'attendance_checkin', at: '2026-05-13T09:00:00+08:00' },
     ];
     const r = aggregateCompanionEvents(events);
     expect(r.days[0].attendanceCheckins).toBe(1);
@@ -56,7 +56,7 @@ describe('signalAggregator', () => {
     const events: CompanionEvent[] = Array.from({ length: 5 }, (_, i) => ({
       eventId: `s${i}`,
       kind: 'steps_logged',
-      at: `2026-05-${11 + i}T09:00:00Z`,
+      at: `2026-05-${11 + i}T09:00:00+08:00`,
       payload: { steps: 8000 },
     }));
     const r = aggregateCompanionEvents(events);
@@ -65,20 +65,31 @@ describe('signalAggregator', () => {
 
   test('hibernate 標記會吃進當天', () => {
     const r = aggregateCompanionEvents([
-      { eventId: 'h', kind: 'mark_hibernate', at: '2026-05-13T00:00:00Z' },
+      { eventId: 'h', kind: 'mark_hibernate', at: '2026-05-13T00:00:00+08:00' },
     ]);
     expect(r.days[0].hibernated).toBe(true);
   });
 
   test('同店家當日只計一次 distinct，但 mealsOrdered 累加', () => {
     const events: CompanionEvent[] = [
-      { eventId: 'm1', kind: 'meal_ordered', at: '2026-05-13T12:00:00Z', payload: { vendorId: 'v1' } },
-      { eventId: 'm2', kind: 'meal_ordered', at: '2026-05-13T18:00:00Z', payload: { vendorId: 'v1' } },
-      { eventId: 'm3', kind: 'meal_ordered', at: '2026-05-13T19:00:00Z', payload: { vendorId: 'v2' } },
+      { eventId: 'm1', kind: 'meal_ordered', at: '2026-05-13T12:00:00+08:00', payload: { vendorId: 'v1' } },
+      { eventId: 'm2', kind: 'meal_ordered', at: '2026-05-13T18:00:00+08:00', payload: { vendorId: 'v1' } },
+      { eventId: 'm3', kind: 'meal_ordered', at: '2026-05-13T19:00:00+08:00', payload: { vendorId: 'v2' } },
     ];
     const r = aggregateCompanionEvents(events);
     expect(r.days[0].mealsOrdered).toBe(3);
     expect(r.days[0].distinctVendors).toBe(2);
+  });
+
+  test('用台灣日期分天：UTC 前一天 16:00 以後算台灣隔天，台灣 23:59 和 00:01 分在兩天', () => {
+    const r = aggregateCompanionEvents([
+      { eventId: 'a', kind: 'attendance_checkin', at: '2026-05-12T23:59:00Z' },
+      { eventId: 'b', kind: 'attendance_checkin', at: '2026-05-13T00:01:00Z' },
+      { eventId: 'c', kind: 'attendance_checkin', at: '2026-05-13T15:59:00Z' },
+      { eventId: 'd', kind: 'attendance_checkin', at: '2026-05-13T16:01:00Z' },
+    ]);
+    const byDate = Object.fromEntries(r.days.map((day) => [day.date, day.attendanceCheckins]));
+    expect(byDate).toEqual({ '2026-05-13': 3, '2026-05-14': 1 });
   });
 });
 

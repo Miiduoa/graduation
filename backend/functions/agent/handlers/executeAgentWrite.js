@@ -1,10 +1,16 @@
 'use strict';
 
-const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { onCall: firebaseOnCall, HttpsError } = require('firebase-functions/v2/https');
+const { createAccountGuardedOnCall } = require('../../accountLifecycle');
+const onCall = createAccountGuardedOnCall({
+  onCall: firebaseOnCall,
+  getDb: () => require('firebase-admin/firestore').getFirestore(),
+});
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { createAuthzHelpers } = require('../../authz');
 const { fetchAssistantUserProfile } = require('../../lib/assistantFetchers');
 const { runTool, byName } = require('../tools/registry');
+const { assertOnlineOrderingEnabled } = require('../../lib/onlineOrdering');
 
 const REGION = 'asia-east1';
 
@@ -70,6 +76,7 @@ module.exports = onCall(
     if (!ALLOWED_TOOLS.has(toolName)) {
       throw new HttpsError('invalid-argument', 'Unsupported tool');
     }
+    if (toolName === 'createOrder') assertOnlineOrderingEnabled();
 
     const userProfile = await fetchAssistantUserProfile(uid);
     const schoolId = userProfile?.schoolId ?? null;
@@ -79,7 +86,8 @@ module.exports = onCall(
 
     await assertActiveSchoolMember(schoolId, uid);
 
-    const reqCtx = request.data?.context && typeof request.data.context === 'object' ? request.data.context : {};
+    const reqCtx =
+      request.data?.context && typeof request.data.context === 'object' ? request.data.context : {};
     const toolCtx = {
       uid,
       schoolId,
@@ -88,7 +96,8 @@ module.exports = onCall(
       prefetched: {},
     };
 
-    const rawInput = request.data?.input && typeof request.data.input === 'object' ? request.data.input : {};
+    const rawInput =
+      request.data?.input && typeof request.data.input === 'object' ? request.data.input : {};
     const agentRunId =
       request.data?.agentRunId != null && String(request.data.agentRunId).trim()
         ? String(request.data.agentRunId).trim()

@@ -16,6 +16,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from './navigationTheme';
 import { theme, softShadowStyle } from './theme';
+import { useThemeVersion } from './useThemeStyleSheet';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -42,6 +43,7 @@ export function Modal({
   size = 'medium',
   footer,
 }: ModalProps) {
+  useThemeVersion();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.92)).current;
 
@@ -210,6 +212,7 @@ export function AlertDialog({
   message,
   actions = [{ text: '確定', onPress: onClose }],
 }: AlertDialogProps) {
+  useThemeVersion();
   return (
     <Modal
       visible={visible}
@@ -313,6 +316,7 @@ export function ConfirmDialog({
   cancelText = '取消',
   destructive = false,
 }: ConfirmDialogProps) {
+  useThemeVersion();
   return (
     <AlertDialog
       visible={visible}
@@ -330,6 +334,7 @@ export function ConfirmDialog({
 type LoadingModalProps = { visible: boolean; message?: string };
 
 export function LoadingModal({ visible, message = '載入中...' }: LoadingModalProps) {
+  useThemeVersion();
   const spinAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {

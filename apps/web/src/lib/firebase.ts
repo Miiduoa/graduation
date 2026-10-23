@@ -4,7 +4,7 @@
  * 提供與 Firebase Firestore 和 Auth 的連接
  */
 
-import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
+import { initializeApp, deleteApp, getApps, FirebaseApp } from 'firebase/app';
 import {
   getFirestore,
   collection,
@@ -31,6 +31,9 @@ import {
 } from 'firebase/firestore';
 import {
   getAuth as firebaseGetAuth,
+  initializeAuth,
+  inMemoryPersistence,
+  updateCurrentUser,
   Auth,
   onAuthStateChanged,
   signInWithEmailAndPassword,
@@ -48,19 +51,23 @@ import {
   connectFunctionsEmulator,
   type Functions,
 } from 'firebase/functions';
+import { getCloudFunctionUrl as resolveCloudFunctionUrl, getFunctionsBaseUrl } from './cloudFunctions';
 import {
   findUniversalDevAccountByEmail,
   buildGroupCollectionPath,
   buildSchoolCollectionPath,
   buildUserSchoolCollectionPath,
   defaultNotificationPreferences,
+  isPermissionDeniedError,
   normalizeNotificationPreferences,
+  permissionDeniedError,
   type PuStudentLoginResponse,
   normalizeSchoolSSOConfig,
   type NotificationPreferences,
   type SchoolSSOConfig,
   type SSOCallbackResult,
   type SSOProvider,
+  safeStorefrontUrl,
 } from '@campus/shared/src';
 
 export type {
@@ -71,6 +78,7 @@ export type {
 } from '@campus/shared/src';
 import { collectionFromSegments, docFromSegments } from './firestorePath';
 import { areUniversalDevAccountsEnabled } from './runtime';
+import { subscribePreferredCollection } from './preferredCollection';
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -98,6 +106,17 @@ const EMULATOR_AUTH_PORT = Number(
   process.env.NEXT_PUBLIC_FIREBASE_EMULATOR_AUTH_PORT || '9099',
 );
 const _emulatorWired = { functions: false, firestore: false, auth: false };
+
+// 測試環境只能接 demo- 開頭的模擬器專案，避免本機測試不小心寫進正式專案。
+export function isEmulatorTestEnv(): boolean {
+  return USE_FIREBASE_EMULATOR && String(firebaseConfig.projectId || '').startsWith('demo-');
+}
+
+if (USE_FIREBASE_EMULATOR && !String(firebaseConfig.projectId || '').startsWith('demo-')) {
+  throw new Error(
+    `模擬器模式只能用 demo- 開頭的專案，現在是「${firebaseConfig.projectId || '（未設定）'}」。請改用 pnpm test-env:start。`,
+  );
+}
 
 let app: FirebaseApp | null = null;
 let db: Firestore | null = null;
@@ -138,7 +157,7 @@ export function getDb(): Firestore {
 }
 
 export function getAuth(): Auth | null {
-  if (typeof window === 'undefined') return null;
+  if (typeof window === 'undefined' || !isFirebaseConfigured()) return null;
   if (!auth) {
     try {
       auth = firebaseGetAuth(getApp());
@@ -161,14 +180,28 @@ export function getAuth(): Auth | null {
   return auth;
 }
 
+export { getFunctionsBaseUrl };
+
+export function getCloudFunctionUrl(functionName: string): string {
+  return resolveCloudFunctionUrl(functionName, {
+    projectId: firebaseConfig.projectId,
+    region: process.env.NEXT_PUBLIC_CLOUD_FUNCTION_REGION || 'asia-east1',
+  });
+}
+
 export function getFunctionsInstance(): Functions {
   if (typeof window === "undefined") {
     throw new Error("Firebase Functions can only be used in the browser.");
   }
 
   if (!functionsInstance) {
-    const region = process.env.NEXT_PUBLIC_CLOUD_FUNCTION_REGION || "asia-east1";
-    functionsInstance = getFunctions(getApp(), region);
+    const customDomain = getFunctionsBaseUrl();
+    if (customDomain) {
+      functionsInstance = getFunctions(getApp(), customDomain);
+    } else {
+      const region = process.env.NEXT_PUBLIC_CLOUD_FUNCTION_REGION || "asia-east1";
+      functionsInstance = getFunctions(getApp(), region);
+    }
   }
   if (USE_FIREBASE_EMULATOR && !_emulatorWired.functions) {
     try {
@@ -237,10 +270,29 @@ async function signInWithUniversalDevAccount(params: {
   return signInWithCustomAuthToken(data.customToken);
 }
 
+let schoolLoginAttempt = 0;
+let schoolLoginCommit: Promise<void> = Promise.resolve();
+let lastSchoolUser: User | null = null;
+
 export async function signInWithPuStudentId(
   studentId: string,
   password: string,
+  signal?: AbortSignal,
 ): Promise<User | null> {
+  const attempt = ++schoolLoginAttempt;
+  const mainAuth = getAuth();
+  if (!mainAuth) return null;
+  if (isEmulatorTestEnv()) {
+    // 測試環境不連學校，學號對應到模擬器裡的測試帳號
+    const credential = await signInWithEmailAndPassword(
+      mainAuth,
+      `${studentId.trim().toLowerCase()}@test.campus-one.local`,
+      password,
+    );
+    lastSchoolUser = credential.user;
+    return credential.user;
+  }
+  const previousUser = mainAuth.currentUser;
   const response = await fetch(getCloudFunctionUrl('signInPuStudentId'), {
     method: 'POST',
     headers: {
@@ -250,6 +302,7 @@ export async function signInWithPuStudentId(
       studentId,
       password,
     }),
+    signal,
   });
 
   const data = (await parseFunctionJsonResponse(
@@ -263,7 +316,40 @@ export async function signInWithPuStudentId(
     );
   }
 
-  return signInWithCustomAuthToken(data.customToken);
+  // Firebase's network exchange cannot be cancelled. Keep it off the shared Auth
+  // instance so leaving this task cannot later replace another signed-in user.
+  signal?.throwIfAborted();
+  const stagingApp = initializeApp(getApp().options, `school-login-${attempt}`);
+  try {
+    const stagingAuth = initializeAuth(stagingApp, { persistence: inMemoryPersistence });
+    if (USE_FIREBASE_EMULATOR) {
+      connectAuthEmulator(stagingAuth, `http://${EMULATOR_HOST}:${EMULATOR_AUTH_PORT}`, {
+        disableWarnings: true,
+      });
+    }
+    const credential = await firebaseSignInWithCustomToken(stagingAuth, data.customToken);
+    const commit = schoolLoginCommit.then(async () => {
+      signal?.throwIfAborted();
+      if (
+        attempt !== schoolLoginAttempt ||
+        (mainAuth.currentUser !== previousUser &&
+          (!lastSchoolUser || mainAuth.currentUser !== lastSchoolUser))
+      )
+        throw new Error('登入狀態已變更，請重新確認。');
+      // This local commit is the cancellation boundary; never roll it back by
+      // signing out the shared Auth, which could clear a newer user's session.
+      await updateCurrentUser(mainAuth, credential.user);
+      lastSchoolUser = mainAuth.currentUser;
+      return mainAuth.currentUser;
+    });
+    schoolLoginCommit = commit.then(
+      () => undefined,
+      () => undefined,
+    );
+    return await commit;
+  } finally {
+    await deleteApp(stagingApp);
+  }
 }
 
 export async function signIn(
@@ -329,15 +415,6 @@ export function getCurrentUser(): User | null {
 }
 
 export { onAuthStateChanged };
-
-function getCloudFunctionUrl(functionName: string): string {
-  if (!firebaseConfig.projectId) {
-    throw new Error('Firebase projectId is missing. Check your web environment variables.');
-  }
-
-  const region = process.env.NEXT_PUBLIC_CLOUD_FUNCTION_REGION || 'asia-east1';
-  return `https://${region}-${firebaseConfig.projectId}.cloudfunctions.net/${functionName}`;
-}
 
 function parseDocument<T extends { id: string }>(docSnap: {
   id: string;
@@ -422,6 +499,11 @@ export type Announcement = {
   category?: string;
   pinned?: boolean;
   schoolId?: string;
+  summary?: string;
+  originalUrl?: string;
+  sourceId?: string;
+  origin?: string;
+  office?: string;
   /** 若公告綁定到某課程，可從這裡跳到 /course/[id] */
   relatedCourseId?: string;
   /** 若公告綁定到某社團，可從這裡跳到 /clubs */
@@ -470,10 +552,18 @@ export type Cafeteria = {
   currentOccupancy?: number;
   activeOperatorCount?: number;
   orderingEnabled?: boolean;
+  merchantMode?: 'native_order' | 'showcase_link' | 'info_only';
+  orderingUrl?: string;
+  intro?: string;
+  coverUrl?: string;
+  websiteUrl?: string;
+  menuSource?: string;
+  menuSyncedAt?: string;
   pilotStatus?: CafeteriaPilotStatus;
   rating?: number;
   reviewCount?: number;
   schoolId?: string;
+  reviewStatus?: 'verified' | 'unverified' | 'demo';
   createdAt?: string;
   updatedAt?: string;
 };
@@ -594,6 +684,20 @@ function normalizeCafeteriaRecord(row: Record<string, unknown>): Cafeteria {
     currentOccupancy: toOptionalNumber(row.currentOccupancy),
     activeOperatorCount: toOptionalNumber(row.activeOperatorCount),
     orderingEnabled: row.orderingEnabled === true,
+    merchantMode:
+      row.merchantMode === 'native_order' ||
+      row.merchantMode === 'showcase_link' ||
+      row.merchantMode === 'info_only'
+        ? row.merchantMode
+        : row.orderingEnabled === true
+          ? 'native_order'
+          : 'info_only',
+    orderingUrl: safeStorefrontUrl(row.orderingUrl),
+    intro: toOptionalString(row.intro),
+    coverUrl: toOptionalString(row.coverUrl),
+    websiteUrl: safeStorefrontUrl(row.websiteUrl),
+    menuSource: toOptionalString(row.menuSource),
+    menuSyncedAt: toOptionalString(row.menuSyncedAt),
     pilotStatus: normalizeCafeteriaPilotStatus(row.pilotStatus),
     rating: toOptionalNumber(row.rating),
     reviewCount: toOptionalNumber(row.reviewCount),
@@ -677,7 +781,12 @@ function subscribeCollectionAtPath<T extends { id: string }>(
 
   return onSnapshot(
     q,
+    { includeMetadataChanges: true },
     (snap) => {
+      if (snap.metadata.fromCache || snap.metadata.hasPendingWrites) {
+        onError(new Error('Waiting for confirmed school data'));
+        return;
+      }
       onData(
         snap.docs
           .map((d) => parseDocument<T>({ id: d.id, data: () => d.data() }))
@@ -699,7 +808,12 @@ function subscribeRootCollection<T extends { id: string }>(
 
   return onSnapshot(
     q,
+    { includeMetadataChanges: true },
     (snap) => {
+      if (snap.metadata.fromCache || snap.metadata.hasPendingWrites) {
+        onError(new Error('Waiting for confirmed school data'));
+        return;
+      }
       onData(
         snap.docs
           .map((d) => parseDocument<T>({ id: d.id, data: () => d.data() }))
@@ -708,56 +822,6 @@ function subscribeRootCollection<T extends { id: string }>(
     },
     onError,
   );
-}
-
-function subscribePreferredCollection<T>(
-  sources: Array<{
-    key: string;
-    subscribe: (onData: (rows: T[]) => void, onError: (error: unknown) => void) => Unsubscribe;
-  }>,
-  onData: (rows: T[]) => void,
-  onError: (error: unknown) => void,
-): Unsubscribe {
-  const snapshots = new Map<string, T[]>();
-  let failedSources = 0;
-
-  const emitPreferred = () => {
-    for (const source of sources) {
-      const rows = snapshots.get(source.key);
-      if (rows && rows.length > 0) {
-        onData(rows);
-        return;
-      }
-    }
-
-    for (const source of sources) {
-      if (snapshots.has(source.key)) {
-        onData(snapshots.get(source.key) ?? []);
-        return;
-      }
-    }
-  };
-
-  const unsubs = sources.map((source) =>
-    source.subscribe(
-      (rows) => {
-        snapshots.set(source.key, rows);
-        emitPreferred();
-      },
-      (error) => {
-        failedSources += 1;
-        console.warn(`[Firebase] Live subscription failed for ${source.key}:`, error);
-
-        if (failedSources >= sources.length) {
-          onError(error);
-        }
-      },
-    ),
-  );
-
-  return () => {
-    unsubs.forEach((unsubscribe) => unsubscribe());
-  };
 }
 
 export async function fetchSchoolSSOConfig(schoolId: string): Promise<SchoolSSOConfig | null> {
@@ -1979,6 +2043,9 @@ export async function fetchComments(
   if (!isFirebaseConfigured()) {
     return [];
   }
+  if (!getAuth()?.currentUser) {
+    throw permissionDeniedError();
+  }
 
   try {
     const firestore = getDb();
@@ -2006,7 +2073,8 @@ export async function fetchComments(
       limit(maxItems),
     );
 
-    const snap = await getDocs(q).catch(async () => {
+    const snap = await getDocs(q).catch(async (error) => {
+      if (isPermissionDeniedError(error)) throw error;
       if (!schoolId || targetType === 'announcement') {
         throw new Error('comments query failed');
       }
@@ -2033,6 +2101,7 @@ export async function fetchComments(
       };
     });
   } catch (error) {
+    if (isPermissionDeniedError(error)) throw error;
     console.error('[Firebase] Failed to fetch comments:', error);
     return [];
   }
@@ -2323,19 +2392,22 @@ export async function updateUserProfile(
   }
 
   try {
+    const authInstance = getAuth();
+    const owner = authInstance?.currentUser;
+    if (!owner || owner.uid !== userId) return { success: false, error: 'Account changed' };
     const firestore = getDb();
     const userRef = doc(firestore, 'users', userId);
 
     await updateDoc(userRef, {
-      ...updates,
+      ...Object.fromEntries(Object.entries(updates).filter(([, value]) => value !== undefined)),
       updatedAt: serverTimestamp(),
     });
 
-    const authInstance = getAuth();
-    if (authInstance?.currentUser && updates.displayName) {
-      await updateProfile(authInstance.currentUser, { displayName: updates.displayName });
+    if (authInstance.currentUser !== owner) return { success: false, error: 'Account changed' };
+    if (updates.displayName !== undefined) {
+      await updateProfile(owner, { displayName: updates.displayName });
     }
-
+    if (authInstance.currentUser !== owner) return { success: false, error: 'Account changed' };
     return { success: true };
   } catch (error) {
     console.error('[Firebase] Failed to update user profile:', error);

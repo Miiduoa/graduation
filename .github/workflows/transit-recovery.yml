@@ -1,0 +1,47 @@
+name: Transit recovery checks
+
+on:
+  push:
+    branches: [fix/transit-service-reconnect]
+  pull_request:
+    paths:
+      - 'deploy/web/transit-*'
+      - '.github/workflows/transit-recovery.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '22'
+      - name: Install isolated TypeScript compiler
+        run: npm install --prefix "$RUNNER_TEMP/transit-tools" --ignore-scripts --no-audit --no-fund typescript@5.8.3
+      - name: Check restored transit modules
+        env:
+          NODE_PATH: ${{ runner.temp }}/transit-tools/node_modules
+        run: |
+          "$RUNNER_TEMP/transit-tools/node_modules/.bin/tsc" --noEmit --strict --target es2022 --lib es2022,dom --module commonjs --resolveJsonModule --esModuleInterop --moduleResolution node apps/web/src/lib/transit.ts apps/web/src/lib/transit-server.ts
+          node --test scripts/test-transit.cjs
+          node --test deploy/web/release-check.test.mjs
+          if [ -f deploy/web/transit-release-gate.test.mjs ]; then node --test deploy/web/transit-release-gate.test.mjs; fi
+      - name: Preserve exact reviewed source without environment files
+        if: always()
+        run: |
+          mkdir -p evidence
+          git archive --format=zip HEAD apps/web/src/lib/transit.ts apps/web/src/lib/transit-server.ts apps/web/src/app/api/transit/route.ts apps/web/src/app/bus apps/web/src/components/TransitExplorer.tsx apps/web/src/components/TransitExplorer.test.tsx apps/web/src/components/transit.module.css scripts/test-transit.cjs deploy/web .github/workflows/web-release.yml .github/workflows/transit-recovery.yml docs/TRANSIT.md > evidence/transit-reviewed-source.zip
+          git rev-parse HEAD > evidence/revision.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: transit-reviewed-source-${{ github.sha }}
+          path: evidence/
+          retention-days: 7
+          if-no-files-found: error

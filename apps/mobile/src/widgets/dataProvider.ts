@@ -492,6 +492,7 @@ export async function getWidgetData(
       return getGradesData(userId, schoolId);
 
     case 'lostFound':
+      if (!userId) throw new Error('需要登入才能使用此 Widget');
       return getLostFoundData(schoolId);
 
     default:

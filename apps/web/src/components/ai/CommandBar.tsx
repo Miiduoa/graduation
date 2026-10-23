@@ -1,11 +1,9 @@
 'use client';
 
 /**
- * Campus AI-First — Global Command Bar
+ * Global Command Bar
  * --------------------------------------
  * 永遠置頂的 AI 對話入口。Cmd+K 觸發全屏，點擊 inline 觸發 drawer。
- *
- * 設計規範對應：docs/design/AI_FIRST_REDESIGN.md §3 Navigation
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';

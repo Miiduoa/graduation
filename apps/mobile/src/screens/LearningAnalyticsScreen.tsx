@@ -291,10 +291,8 @@ function HeatmapGrid({ title, data }: { title: string; data: number[][] }) {
                       width: 30,
                       height: 14,
                       borderRadius: 3,
-                      backgroundColor:
-                        intensity > 0
-                          ? `rgba(88,86,214,${0.1 + intensity * 0.9})`
-                          : theme.colors.surface2,
+                      backgroundColor: intensity > 0 ? theme.colors.accent : theme.colors.surface2,
+                      opacity: intensity > 0 ? 0.1 + intensity * 0.9 : 1,
                     }}
                   />
                 );

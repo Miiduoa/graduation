@@ -1,9 +1,20 @@
 'use client';
 
-import { useEffect, useState, ReactNode, createContext, useContext, useCallback } from 'react';
+import {
+  useEffect,
+  useState,
+  ReactNode,
+  createContext,
+  useContext,
+  useCallback,
+  useMemo,
+  useSyncExternalStore,
+} from 'react';
 import { onAuthStateChanged, User, signOut } from 'firebase/auth';
 import { getAuth } from '@/features/auth/client';
 import Link from 'next/link';
+import { getSupabaseClient } from '@/lib/supabaseClient';
+import { readLoginReturnParam, sanitizeInternalPath } from '@/lib/navigation';
 
 interface AuthState {
   user: User | null;
@@ -16,61 +27,124 @@ interface AuthContextType extends AuthState {
   refreshUser: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextType | null>(null);
+const initialAuthState: AuthState = { user: null, loading: true, error: null };
 
-export function useAuth() {
+function createAuthStore(initialState: AuthState) {
+  let state = initialState;
+  const listeners = new Set<() => void>();
+  return {
+    getSnapshot: () => state,
+    // Each delayed Suspense boundary must hydrate against the server's account-neutral state.
+    getServerSnapshot: () => initialState,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    setState: (next: AuthState | ((previous: AuthState) => AuthState)) => {
+      state = typeof next === 'function' ? next(state) : next;
+      listeners.forEach((listener) => listener());
+    },
+  };
+}
+
+type AuthStore = ReturnType<typeof createAuthStore>;
+const AuthContext = createContext<{
+  store: AuthStore;
+  signOutUser: AuthContextType['signOutUser'];
+  refreshUser: AuthContextType['refreshUser'];
+} | null>(null);
+
+export function GuestAuthProvider({ children }: { children: ReactNode }) {
+  const [store] = useState(() => createAuthStore({ user: null, loading: false, error: null }));
+  return (
+    <AuthContext.Provider
+      value={{
+        store,
+        signOutUser: async () => {},
+        refreshUser: async () => {},
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth(): AuthContextType {
   const context = useContext(AuthContext);
   if (!context) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
-  return context;
+  const { store, signOutUser, refreshUser } = context;
+  const state = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getServerSnapshot);
+  return { ...state, signOutUser, refreshUser };
 }
 
 interface AuthProviderProps {
   children: ReactNode;
 }
 
+async function clearTeachingSession() {
+  const client = getSupabaseClient();
+  if (!client) return;
+  const result = await client.auth.signOut({ scope: 'local' });
+  if (result.error) throw result.error;
+}
+
 export function AuthProvider({ children }: AuthProviderProps) {
-  const [state, setState] = useState<AuthState>(() => {
-    const auth = getAuth();
-    if (!auth) {
-      return { user: null, loading: false, error: null };
-    }
-    return { user: auth.currentUser, loading: true, error: null };
-  });
+  const [store] = useState(() => createAuthStore(initialAuthState));
+  const { setState } = store;
 
   useEffect(() => {
     const auth = getAuth();
     if (!auth) {
+      void clearTeachingSession().catch(() =>
+        console.warn('Could not clear the separate teaching session'),
+      );
+      setState({ user: null, loading: false, error: null });
       return;
     }
 
+    let previousUid: string | null | undefined;
     const unsubscribe = onAuthStateChanged(
       auth,
       (user) => {
+        const uid = user?.uid ?? null;
+        if (previousUid !== uid) {
+          previousUid = uid;
+          void clearTeachingSession().catch(() =>
+            console.warn('Could not clear the separate teaching session'),
+          );
+        }
         setState({ user, loading: false, error: null });
       },
       (error) => {
         console.error('Auth state change error:', error);
+        void clearTeachingSession().catch(() =>
+          console.warn('Could not clear the separate teaching session'),
+        );
         setState({ user: null, loading: false, error });
       },
     );
 
     return () => unsubscribe();
-  }, []);
+  }, [setState]);
 
   const signOutUser = useCallback(async () => {
     const auth = getAuth();
-    if (!auth) return;
-
-    try {
-      await signOut(auth);
-      setState({ user: null, loading: false, error: null });
-    } catch (error) {
-      console.error('Sign out error:', error);
-      throw error;
+    // Hide user-scoped readers immediately, including when a network logout later fails.
+    setState({ user: null, loading: false, error: null });
+    const results = await Promise.allSettled([
+      auth ? signOut(auth) : Promise.resolve(),
+      clearTeachingSession(),
+    ]);
+    const failure = results.find((result) => result.status === 'rejected');
+    if (failure?.status === 'rejected') {
+      console.error('Sign out error:', failure.reason);
+      throw failure.reason;
     }
-  }, []);
+  }, [setState]);
 
   const refreshUser = useCallback(async () => {
     const auth = getAuth();
@@ -85,13 +159,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
     } catch (error) {
       console.error('Refresh user error:', error);
     }
-  }, []);
+  }, [setState]);
 
-  return (
-    <AuthContext.Provider value={{ ...state, signOutUser, refreshUser }}>
-      {children}
-    </AuthContext.Provider>
+  const context = useMemo(
+    () => ({ store, signOutUser, refreshUser }),
+    [store, signOutUser, refreshUser],
   );
+
+  return <AuthContext.Provider value={context}>{children}</AuthContext.Provider>;
 }
 
 interface AuthGuardProps {
@@ -111,7 +186,7 @@ export function AuthGuard({
 
   useEffect(() => {
     if (!loading && requireAuth && !user) {
-      const currentPath = window.location.pathname + window.location.search;
+      const currentPath = window.location.pathname + window.location.search + window.location.hash;
       const loginUrl = `${redirectTo}?returnUrl=${encodeURIComponent(currentPath)}`;
       window.location.href = loginUrl;
     }
@@ -248,8 +323,9 @@ export function GuestOnly({ children, redirectTo = '/' }: GuestOnlyProps) {
   useEffect(() => {
     if (!loading && user) {
       const searchParams = new URLSearchParams(window.location.search);
-      const returnUrl = searchParams.get('returnUrl') || redirectTo;
-      window.location.href = returnUrl;
+      window.location.replace(
+        sanitizeInternalPath(readLoginReturnParam(searchParams), redirectTo),
+      );
     }
   }, [user, loading, redirectTo]);
 

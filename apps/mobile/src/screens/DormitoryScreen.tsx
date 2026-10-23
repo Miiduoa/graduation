@@ -1,17 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars, @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps */
 /**
- * 靜宜大學宿舍服務 — 商業級智慧宿舍體驗
- *
- * 創新功能：
- * 1. 時段感知首頁 — 早上推薦洗衣、傍晚提醒取包裹、深夜顯示緊急聯絡
- * 2. 即時洗衣儀表板 — 全棟洗衣/烘衣機狀態 + 完成通知 + 尖峰預警
- * 3. 智慧報修 — 9 大類別 + 平均回應時間 + 進度追蹤 + 維修評分
- * 4. 包裹即時追蹤 — 物流辨識 + 到件通知 + 取件確認
- * 5. 社區互動 — 借物/揪團/失物/二手交易/生活分享
- * 6. 宿舍評分 — 整潔/安靜/設備/安全/交通 五維度評分
- * 7. 電費追蹤 — IC 卡餘額 + 每月用量分析
- * 8. 緊急求助 — SOS 一鍵撥號 + 24hr 緊急聯絡
- * 9. 門禁管理 — 夜歸登記 + 訪客登記 + 門禁延長申請
+ * 靜宜宿舍展示頁。設備、電費、抽籤及評分為示範資料。
+ * 正式入口維持服務開放限制，並提供住宿服務組官網。
  */
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
@@ -39,6 +29,8 @@ import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { useDataSource } from '../hooks/useDataSource';
 import { useSchool } from '../state/school';
+import { isDevelopmentDemoSession } from '../services/release';
+import { UnavailableFeatureScreen } from './UnavailableFeatureScreen';
 import { submitDormRepair as submitDormRepairToDemoStore } from '../services/demoStore';
 import { formatDateTime } from '../utils/format';
 import type {
@@ -136,7 +128,7 @@ function getLaundryStatusColor(status: LaundryStatus): string {
   const m: Record<LaundryStatus, string> = {
     available: theme.colors.success,
     inUse: '#FF9500',
-    finished: '#5856D6',
+    finished: theme.colors.success,
     maintenance: theme.colors.danger,
     reserved: theme.colors.accent,
   };
@@ -148,6 +140,14 @@ function getLaundryStatusColor(status: LaundryStatus): string {
 // ═══════════════════════════════════════════════════
 
 export function DormitoryScreen(props: any) {
+  const auth = useAuth();
+  if (!isDevelopmentDemoSession(auth.user?.uid)) {
+    return <UnavailableFeatureScreen {...props} route={{ name: 'Dormitory' }} />;
+  }
+  return <DormitoryDemoScreen key={auth.user?.uid} {...props} />;
+}
+
+function DormitoryDemoScreen(props: any) {
   const nav = props?.navigation;
   const ds = useDataSource();
   const auth = useAuth();
@@ -372,58 +372,21 @@ export function DormitoryScreen(props: any) {
 
   // ── 洗衣預約 ──
   const handleReserveLaundry = (machine: LaundryMachine) => {
-    if (!auth.user) return Alert.alert('請先登入');
     if (machine.status !== 'available') return;
-    Alert.alert(
-      '預約確認',
-      `預約 ${machine.floor} ${machine.number} 號${machine.type === 'washer' ? '洗衣機' : '烘乾機'}？\n費用：$${machine.price}`,
-      [
-        { text: '取消', style: 'cancel' },
-        {
-          text: '確認預約',
-          onPress: async () => {
-            try {
-              await ds.reserveWashingMachine(machine.id, auth.user!.uid, school?.id);
-              setLaundryMachines(
-                laundryMachines.map((m) =>
-                  m.id === machine.id ? { ...m, status: 'reserved' as LaundryStatus } : m,
-                ),
-              );
-              try {
-                const { aiBrain } = await import('../services/aiBrain');
-                aiBrain.reportToolOutcome(
-                  'reserve_washing_machine',
-                  {
-                    machineId: machine.id,
-                    floor: machine.floor,
-                    type: machine.type,
-                  },
-                  'success',
-                  undefined,
-                  `預約 ${machine.floor} ${machine.number} 號${machine.type === 'washer' ? '洗衣機' : '烘乾機'}`,
-                );
-              } catch (brainErr) {
-                console.warn('[Dormitory] brain.observe failed:', brainErr);
-              }
-              Alert.alert('預約成功 ✅', '請在 10 分鐘內前往使用');
-            } catch (e: any) {
-              try {
-                const { aiBrain } = await import('../services/aiBrain');
-                aiBrain.reportToolOutcome(
-                  'reserve_washing_machine',
-                  { machineId: machine.id },
-                  'failure',
-                  e?.message,
-                );
-              } catch (brainErr) {
-                console.warn('[Dormitory] brain.observe failed:', brainErr);
-              }
-              Alert.alert('預約失敗', e?.message ?? '請稍後再試');
-            }
-          },
+    Alert.alert('示範洗衣預約', '此設備為示範資料，只會更新本頁，不會預約現場設備。', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '試用預約',
+        onPress: () => {
+          setLaundryMachines((current) =>
+            current.map((m) =>
+              m.id === machine.id ? { ...m, status: 'reserved' as LaundryStatus } : m,
+            ),
+          );
+          Alert.alert('示範預約完成', '未預約現場設備，請至洗衣間確認。');
         },
-      ],
-    );
+      },
+    ]);
   };
 
   // ── 夜歸登記 ──
@@ -846,7 +809,7 @@ export function DormitoryScreen(props: any) {
                 notice: theme.colors.accent,
                 warning: '#FF9500',
                 emergency: theme.colors.danger,
-                maintenance: '#5856D6',
+                maintenance: theme.colors.info,
               };
               const color = typeColor[ann.type] ?? theme.colors.muted;
               return (
@@ -1332,69 +1295,69 @@ export function DormitoryScreen(props: any) {
   const handleSubmitLottery = () => {
     if (!auth.user) return Alert.alert('請先登入', '需要登入才能申請抽籤');
     if (lotteryWishes.length === 0) return Alert.alert('請至少填寫一個志願');
-    Alert.alert('確認送出', `將送出 ${lotteryWishes.length} 個志願，送出後可在確認期前修改`, [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '送出申請',
-        onPress: () => {
-          setMyApplication({
-            id: `app-${Date.now()}`,
-            userId: auth.user!.uid,
-            userName: '同學',
-            status: 'submitted',
-            wishes: lotteryWishes,
-            preferredRoommates: [],
-            priorityPoints: 38,
-            priorityBreakdown: [
-              { ruleId: 'distance', points: 20 },
-              { ruleId: 'gpa_mid', points: 8 },
-              { ruleId: 'good_record', points: 5 },
-              { ruleId: 'dorm_staff_bonus', points: 5 },
-            ],
-            appliedAt: new Date().toISOString(),
-          });
-          Alert.alert('申請成功 ✅', '志願已送出，可在截止前修改');
-        },
-      },
-    ]);
-  };
-
-  const handleConfirmLottery = () => {
-    if (!myApplication || myApplication.status !== 'won') return;
     Alert.alert(
-      '確認入住',
-      `確認入住 ${DORM_BUILDINGS.find((b) => b.id === myApplication.resultBuildingId)?.name ?? ''} ${myApplication.resultRoom ?? ''}？\n確認後需在 7 日內完成繳費`,
+      '示範抽籤申請',
+      `試填 ${lotteryWishes.length} 個志願，只保存在本頁，不會送交校方。`,
       [
         { text: '取消', style: 'cancel' },
         {
-          text: '確認入住',
+          text: '送出申請',
           onPress: () => {
             setMyApplication({
-              ...myApplication,
-              status: 'confirmed',
-              confirmedAt: new Date().toISOString(),
+              id: `app-${Date.now()}`,
+              userId: auth.user!.uid,
+              userName: '同學',
+              status: 'submitted',
+              wishes: lotteryWishes,
+              preferredRoommates: [],
+              priorityPoints: 38,
+              priorityBreakdown: [
+                { ruleId: 'distance', points: 20 },
+                { ruleId: 'gpa_mid', points: 8 },
+                { ruleId: 'good_record', points: 5 },
+                { ruleId: 'dorm_staff_bonus', points: 5 },
+              ],
+              appliedAt: new Date().toISOString(),
             });
-            Alert.alert('確認成功 ✅', '請於 7 日內至出納組完成繳費');
-          },
-        },
-        {
-          text: '放棄資格',
-          style: 'destructive',
-          onPress: () => {
-            Alert.alert('確認放棄', '放棄後名額將轉給候補同學，無法復原', [
-              { text: '再想想', style: 'cancel' },
-              {
-                text: '確認放棄',
-                style: 'destructive',
-                onPress: () => {
-                  setMyApplication({ ...myApplication, status: 'forfeited' });
-                },
-              },
-            ]);
+            Alert.alert('示範志願已儲存', '未送交校方；正式抽籤請依住宿服務組公告辦理。');
           },
         },
       ],
     );
+  };
+
+  const handleConfirmLottery = () => {
+    if (!myApplication || myApplication.status !== 'won') return;
+    Alert.alert('示範入住確認', '只會更新本頁的示範狀態，不會保留床位或產生繳費義務。', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '確認入住',
+        onPress: () => {
+          setMyApplication({
+            ...myApplication,
+            status: 'confirmed',
+            confirmedAt: new Date().toISOString(),
+          });
+          Alert.alert('示範確認完成', '未向校方確認入住，也未產生繳費單。');
+        },
+      },
+      {
+        text: '放棄資格',
+        style: 'destructive',
+        onPress: () => {
+          Alert.alert('放棄示範資格', '只會更新本頁的示範狀態，不會變更正式住宿資格。', [
+            { text: '再想想', style: 'cancel' },
+            {
+              text: '確認放棄',
+              style: 'destructive',
+              onPress: () => {
+                setMyApplication({ ...myApplication, status: 'forfeited' });
+              },
+            },
+          ]);
+        },
+      },
+    ]);
   };
 
   const handleAddWish = () => {
@@ -1419,8 +1382,8 @@ export function DormitoryScreen(props: any) {
   const handleSwapRequest = () => {
     if (!auth.user) return Alert.alert('請先登入');
     Alert.prompt(
-      '換房申請',
-      '請輸入對方房號（如 A棟-305）',
+      '示範換房申請',
+      '只會試填資料，不會送交校方。請輸入示範房號（如 A棟-305）。',
       [
         { text: '取消', style: 'cancel' },
         {
@@ -1436,7 +1399,7 @@ export function DormitoryScreen(props: any) {
                   text: '送出申請',
                   onPress: (reason) => {
                     if (!reason?.trim()) return;
-                    Alert.alert('申請已送出 ✅', '對方確認後將由住服組審核');
+                    Alert.alert('示範填寫完成', '未送交校方，也未通知其他住宿生。');
                   },
                 },
               ],
@@ -2211,7 +2174,7 @@ export function DormitoryScreen(props: any) {
                     bld.gender === 'female'
                       ? '#FF2D5515'
                       : bld.gender === 'male'
-                        ? '#5856D615'
+                        ? theme.colors.accentSoft
                         : '#AF52DE15',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -2224,7 +2187,7 @@ export function DormitoryScreen(props: any) {
                     bld.gender === 'female'
                       ? '#FF2D55'
                       : bld.gender === 'male'
-                        ? '#5856D6'
+                        ? theme.colors.accent
                         : '#AF52DE'
                   }
                 />
@@ -2622,6 +2585,12 @@ export function DormitoryScreen(props: any) {
   return (
     <Screen>
       <View style={{ flex: 1 }}>
+        <View style={{ padding: 12, gap: 4, backgroundColor: theme.colors.accentSoft }}>
+          <Text style={{ color: theme.colors.text, fontWeight: '700' }}>宿舍功能示範</Text>
+          <Text style={{ color: theme.colors.muted, lineHeight: 20 }}>
+            設備、電費、抽籤與評分為示範資料；此頁操作不代表校方已收件。
+          </Text>
+        </View>
         <SegmentedControl options={TABS} selected={tab} onChange={(k) => setTab(k)} />
 
         <ScrollView

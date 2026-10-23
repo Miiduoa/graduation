@@ -1,420 +1,176 @@
-/* eslint-disable */
 import React, { useState } from 'react';
-import { ScrollView, Text, View, Pressable, Alert } from 'react-native';
+import { Alert, Pressable, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import {
-  Screen,
-  AnimatedCard,
-  Button,
-  SearchBar,
-  FeatureHighlight,
-  ListItem,
-} from '../ui/components';
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
-import { theme } from '../ui/theme';
+import Constants from 'expo-constants';
+import { AIDetailScreen, AICard, AISection, AIRow, AIButton } from '../ui/aiFirst';
+import { useTheme } from '../state/theme';
 import { getLegalUrl } from '../services/release';
 import { isTronClassPuHostedUrl } from '../services/tronClassDataEnabled';
 import { linkingOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 
-type FAQItem = {
-  id: string;
-  question: string;
-  answer: string;
-  category: string;
-};
-
-const FAQ_DATA: FAQItem[] = [
+type Props = { navigation?: { goBack?: () => void; navigate?: (screen: string) => void } };
+const questions = [
   {
-    id: '1',
-    question: '目前支援哪個學校？',
+    id: 'login',
+    question: '忘記學校帳號密碼怎麼辦？',
+    answer: '學校帳號的密碼由校方管理。請使用學校帳號服務重設密碼，或聯絡校方帳號服務窗口。',
+  },
+  {
+    id: 'profile',
+    question: '如何修改個人資料？',
     answer:
-      '目前這個版本已鎖定為靜宜大學（PU），登入、課表、成績與 TronClass 同步都以靜宜校園為主，不再提供校碼切換。',
-    category: '基本操作',
+      '前往「我的」→「個人資料」，可以修改顯示名稱、簡介與電話。學號與系所由帳號資料提供，無法在這裡修改。',
   },
   {
-    id: '2',
-    question: '如何加入群組？',
+    id: 'notifications',
+    question: '如何設定通知？',
     answer:
-      '在「訊息」分頁的工作台點擊「群組」，輸入 8 碼加入碼即可加入。你也可以請群組管理員分享 QR 碼給你掃描加入。',
-    category: '群組功能',
+      '前往「我的」→「通知設定」，調整通知類型與免打擾時段。推播需要在每台裝置分別授權，頁面會顯示註冊結果與設定是否已儲存。',
   },
   {
-    id: '3',
-    question: '如何收藏公告或活動？',
+    id: 'assistant',
+    question: '校園助理可以做什麼？',
     answer:
-      '在公告或活動的詳情頁面，點擊「收藏」按鈕即可。收藏的項目可以在「我的」→「收藏」中查看。',
-    category: '基本操作',
+      '登入後可以詢問課程、公告與校園資訊。需要提交申請或付款時，請到對應服務確認辦理。重要的課務資訊，請再向校方確認。',
   },
   {
-    id: '4',
-    question: '如何報名活動？',
+    id: 'appearance',
+    question: '如何切換深色模式？',
+    answer: '前往「我的」→「外觀」，選擇淺色或深色。選擇後立即套用，並保留在這台裝置。',
+  },
+  {
+    id: 'data',
+    question: '如何匯出資料或刪除帳號？',
     answer:
-      '在活動詳情頁面點擊「立即報名」。需要先登入帳號才能報名。報名後可以在活動頁面取消報名。',
-    category: '活動功能',
-  },
-  {
-    id: '5',
-    question: '如何使用 AI 助理？',
-    answer:
-      '前往「我的」→「AI 助理」，可以用自然語言詢問校園相關問題，例如「圖書館在哪裡？」、「今天有什麼活動？」',
-    category: 'AI 功能',
-  },
-  {
-    id: '6',
-    question: '如何啟用推播通知？',
-    answer:
-      '前往「我的」→「通知」→「前往通知設定」，開啟「啟用推播通知」。首次開啟需要授權通知權限。',
-    category: '通知設定',
-  },
-  {
-    id: '7',
-    question: '如何設定免打擾時段？',
-    answer: '在「通知設定」頁面，可以設定免打擾時段。在此時段內，App 不會發送推播通知。',
-    category: '通知設定',
-  },
-  {
-    id: '8',
-    question: '如何使用學分試算？',
-    answer:
-      '前往「我的」→「學分試算」，可以新增已修課程，系統會自動計算各類別學分進度，並提供 AI 選課建議。',
-    category: '學業功能',
-  },
-  {
-    id: '9',
-    question: '如何導航到校園地點？',
-    answer: '在「校園」頁面進入地圖與點位詳情後點擊「導航」，會自動開啟手機地圖 App 進行導航。',
-    category: '地圖功能',
-  },
-  {
-    id: '10',
-    question: '如何查看餐廳菜單？',
-    answer: '在「餐廳」頁面可以查看所有餐點，支援按餐廳、價格篩選。點擊餐點可查看營養資訊和評價。',
-    category: '餐廳功能',
-  },
-  {
-    id: '11',
-    question: '忘記密碼怎麼辦？',
-    answer:
-      '目前登入方式是靜宜學號登入。若忘記密碼，請改用靜宜 e 校園既有的密碼重設或校內帳號協助流程處理，Campus One 不另外提供電子郵件重設。',
-    category: '帳號相關',
-  },
-  {
-    id: '12',
-    question: '如何登出帳號？',
-    answer: '在「我的」頁面點擊「登出」按鈕即可登出。',
-    category: '帳號相關',
+      '「我的」頁面提供「匯出我的資料」和「刪除帳號」。刪除前請先閱讀資料範圍與確認步驟；需要保留的資料，請先完成匯出。',
   },
 ];
 
-const CATEGORIES = [
-  '全部',
-  '基本操作',
-  '群組功能',
-  '活動功能',
-  'AI 功能',
-  '通知設定',
-  '學業功能',
-  '地圖功能',
-  '餐廳功能',
-  '帳號相關',
-];
-
-const GUIDES = [
-  {
-    id: 'quickstart',
-    title: '新手入門',
-    description: '5 分鐘快速了解 App 的核心功能',
-    icon: 'rocket-outline',
-    color: theme.colors.accent,
-  },
-  {
-    id: 'groups',
-    title: '群組使用教學',
-    description: '如何加入、建立和管理群組',
-    icon: 'people-outline',
-    color: theme.colors.success,
-  },
-  {
-    id: 'calendar',
-    title: '行事曆同步',
-    description: '將活動和作業同步到手機行事曆',
-    icon: 'calendar-outline',
-    color: theme.colors.warning,
-  },
-  {
-    id: 'achievements',
-    title: '成就系統介紹',
-    description: '了解如何獲得成就徽章',
-    icon: 'trophy-outline',
-    color: theme.colors.social,
-  },
-];
-
-export function HelpScreen(props: any) {
-  const nav = props?.navigation;
-
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('全部');
-  const [expandedIds, setExpandedIds] = useState<string[]>([]);
-
-  const filteredFAQ = FAQ_DATA.filter((item) => {
-    const matchesSearch =
-      searchQuery.trim() === '' ||
-      item.question.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.answer.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = selectedCategory === '全部' || item.category === selectedCategory;
-    return matchesSearch && matchesCategory;
-  });
-
-  const toggleExpand = (id: string) => {
-    setExpandedIds((prev) => (prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]));
-  };
-
-  const navigateToTab = (tabName: string, screen: string) => {
-    nav?.getParent?.()?.navigate?.(tabName, { screen });
-  };
-
-  const handleGuidePress = (guideId: string) => {
-    switch (guideId) {
-      case 'quickstart':
-        Alert.alert(
-          '新手入門',
-          '1. 先確認靜宜校園與你的角色設定\n2. 在 Today 看今天最重要的一步\n3. 到課程頁整理課表、教材與學分\n4. 開啟通知設定，避免錯過重要提醒',
-          [
-            { text: '前往 Today', onPress: () => navigateToTab('Today', 'TodayHome') },
-            { text: '前往設定', onPress: () => nav?.navigate?.('Settings') },
-            { text: '關閉', style: 'cancel' },
-          ],
-        );
-        return;
-      case 'groups':
-        navigateToTab('訊息', 'Groups');
-        return;
-      case 'calendar':
-        navigateToTab('學習', 'Calendar');
-        return;
-      case 'achievements':
-        nav?.navigate?.('Achievements');
-        return;
-      default:
-        return;
-    }
-  };
-
-  const handleContact = () => {
-    void linkingOpenWithPuTronClassGate('mailto:support@campus-app.com?subject=校園App問題諮詢');
-  };
-
-  const openLegalDocument = (type: 'privacy' | 'terms') => {
+export function HelpScreen({ navigation }: Props) {
+  const theme = useTheme();
+  const [query, setQuery] = useState('');
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const keyword = query.trim().toLocaleLowerCase();
+  const results = questions.filter((item) =>
+    `${item.question} ${item.answer}`.toLocaleLowerCase().includes(keyword),
+  );
+  const version = Constants.expoConfig?.version;
+  const openLegalDocument = async (type: 'privacy' | 'terms') => {
     const url = getLegalUrl(type);
-    if (!url) {
-      Alert.alert('尚未設定', '正式法律頁尚未設定完成');
-      return;
+    if (!url) return;
+    try {
+      const opened = await linkingOpenWithPuTronClassGate(url);
+      if (!opened && !isTronClassPuHostedUrl(url))
+        Alert.alert('無法開啟網頁', '請確認網路連線後重試。');
+    } catch {
+      Alert.alert('無法開啟網頁', '請確認網路連線後重試。');
     }
-
-    void linkingOpenWithPuTronClassGate(url).then((ok) => {
-      if (!ok && !isTronClassPuHostedUrl(url)) {
-        Alert.alert('無法開啟', '請稍後再試');
-      }
-    });
   };
-
   return (
-    <Screen>
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
-      >
-        <SearchBar value={searchQuery} onChange={setSearchQuery} placeholder="搜尋常見問題..." />
-
-        <AnimatedCard title="使用教學" subtitle="影片和圖文教學">
-          <View style={{ gap: 10 }}>
-            {GUIDES.map((guide) => (
+    <AIDetailScreen title="幫助與回饋" onBack={() => navigation?.goBack?.()}>
+      <AICard title="尋找使用說明">
+        <TextInput
+          accessibilityLabel="搜尋常見問題"
+          placeholder="輸入關鍵字，例如通知、帳號"
+          placeholderTextColor={theme.colors.muted}
+          value={query}
+          onChangeText={setQuery}
+          returnKeyType="search"
+          style={{
+            ...theme.typography.body,
+            minHeight: 48,
+            color: theme.colors.text,
+            backgroundColor: theme.colors.surface,
+            borderColor: theme.colors.border,
+            borderWidth: 1,
+            borderRadius: theme.radius.md,
+            padding: theme.space.sm,
+          }}
+        />
+      </AICard>
+      <AICard title="常見問題">
+        <View style={{ gap: theme.space.sm }}>
+          {results.length === 0 ? (
+            <View style={{ gap: theme.space.sm }}>
+              <Text style={{ ...theme.typography.body, color: theme.colors.text }}>
+                找不到相關說明
+              </Text>
+              <Text style={{ ...theme.typography.bodySmall, color: theme.colors.muted }}>
+                換個關鍵字試試，或透過下方的意見回饋告訴我們。
+              </Text>
+              <AIButton label="清除搜尋" variant="ghost" onPress={() => setQuery('')} />
+            </View>
+          ) : (
+            results.map((item) => (
               <Pressable
-                key={guide.id}
-                onPress={() => handleGuidePress(guide.id)}
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  padding: 14,
-                  borderRadius: theme.radius.md,
-                  backgroundColor: theme.colors.surface2,
-                  borderWidth: 1,
-                  borderColor: theme.colors.border,
-                  gap: 12,
-                }}
-              >
-                <View
-                  style={{
-                    width: 44,
-                    height: 44,
-                    borderRadius: 22,
-                    backgroundColor: `${guide.color}20`,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Ionicons name={guide.icon as any} size={22} color={guide.color} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: theme.colors.text, fontWeight: '700' }}>{guide.title}</Text>
-                  <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
-                    {guide.description}
-                  </Text>
-                </View>
-                <Ionicons
-                  name="arrow-forward-circle-outline"
-                  size={24}
-                  color={theme.colors.accent}
-                />
-              </Pressable>
-            ))}
-          </View>
-        </AnimatedCard>
-
-        <AnimatedCard title="常見問題" subtitle={`共 ${filteredFAQ.length} 則`} delay={100}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ gap: 8, marginBottom: 14 }}
-          >
-            {CATEGORIES.map((cat) => (
-              <Pressable
-                key={cat}
-                onPress={() => setSelectedCategory(cat)}
+                key={item.id}
+                accessibilityRole="button"
+                accessibilityLabel={item.question}
+                accessibilityState={{ expanded: expanded === item.id }}
+                aria-expanded={expanded === item.id}
+                onPress={() => setExpanded(expanded === item.id ? null : item.id)}
                 style={({ pressed }) => ({
-                  paddingHorizontal: 14,
-                  paddingVertical: 8,
-                  borderRadius: 999,
+                  minHeight: 48,
+                  padding: theme.layout.cardPadding,
+                  borderRadius: theme.radius.md,
                   borderWidth: 1,
-                  borderColor: selectedCategory === cat ? theme.colors.accent : theme.colors.border,
+                  borderColor: expanded === item.id ? theme.colors.accent : theme.colors.border,
                   backgroundColor:
-                    selectedCategory === cat
+                    pressed || expanded === item.id
                       ? theme.colors.accentSoft
-                      : pressed
-                        ? theme.colors.surface2
-                        : 'transparent',
+                      : theme.colors.surface,
+                  gap: theme.space.sm,
                 })}
               >
-                <Text
-                  style={{
-                    color: selectedCategory === cat ? theme.colors.accent : theme.colors.muted,
-                    fontWeight: '600',
-                    fontSize: 12,
-                  }}
-                >
-                  {cat}
-                </Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-
-          <View style={{ gap: 8 }}>
-            {filteredFAQ.length === 0 ? (
-              <View style={{ alignItems: 'center', padding: 20 }}>
-                <Ionicons name="search-outline" size={40} color={theme.colors.muted} />
-                <Text style={{ color: theme.colors.muted, marginTop: 10 }}>找不到相關問題</Text>
-              </View>
-            ) : (
-              filteredFAQ.map((item) => {
-                const isExpanded = expandedIds.includes(item.id);
-                return (
-                  <Pressable
-                    key={item.id}
-                    onPress={() => toggleExpand(item.id)}
+                <View style={{ flexDirection: 'row', gap: theme.space.sm, alignItems: 'center' }}>
+                  <Text
                     style={{
-                      padding: 14,
-                      borderRadius: theme.radius.md,
-                      backgroundColor: isExpanded ? theme.colors.accentSoft : theme.colors.surface2,
-                      borderWidth: 1,
-                      borderColor: isExpanded ? theme.colors.accent : theme.colors.border,
+                      ...theme.typography.body,
+                      color: theme.colors.text,
+                      fontWeight: '600',
+                      flex: 1,
                     }}
                   >
-                    <View
-                      style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                      }}
-                    >
-                      <View style={{ flex: 1, paddingRight: 10 }}>
-                        <Text
-                          style={{ color: theme.colors.text, fontWeight: '700', lineHeight: 22 }}
-                        >
-                          {item.question}
-                        </Text>
-                      </View>
-                      <Ionicons
-                        name={isExpanded ? 'chevron-up' : 'chevron-down'}
-                        size={20}
-                        color={theme.colors.muted}
-                      />
-                    </View>
-                    {isExpanded && (
-                      <View
-                        style={{
-                          marginTop: 12,
-                          paddingTop: 12,
-                          borderTopWidth: 1,
-                          borderTopColor: theme.colors.border,
-                        }}
-                      >
-                        <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
-                          {item.answer}
-                        </Text>
-                        <View style={{ marginTop: 10 }}>
-                          <Text style={{ color: theme.colors.accent, fontSize: 12 }}>
-                            分類：{item.category}
-                          </Text>
-                        </View>
-                      </View>
-                    )}
-                  </Pressable>
-                );
-              })
-            )}
-          </View>
-        </AnimatedCard>
-
-        <AnimatedCard title="仍有問題？" subtitle="聯繫我們" delay={200}>
-          <View style={{ gap: 10 }}>
-            <FeatureHighlight
-              icon="mail-outline"
-              title="Email 客服"
-              description="support@campus-app.com"
-              color={theme.colors.accent}
-            />
-            <FeatureHighlight
-              icon="chatbubble-outline"
-              title="意見回饋"
-              description="幫助我們改善 App"
-              color={theme.colors.success}
-            />
-          </View>
-          <View style={{ marginTop: 14, gap: 10 }}>
-            <Button text="發送 Email" kind="primary" onPress={handleContact} />
-            <Button text="前往意見回饋" onPress={() => nav?.navigate?.('Feedback')} />
-          </View>
-        </AnimatedCard>
-
-        <AnimatedCard title="App 資訊" subtitle="" delay={300}>
-          <View style={{ gap: 8 }}>
-            <ListItem title="版本" rightText="1.0.0 (MVP)" />
-            <ListItem title="最後更新" rightText="2024 年 2 月" />
-            <ListItem title="開發團隊" rightText="畢業專題團隊" />
-            <ListItem
-              title="隱私政策"
-              rightIcon="open-outline"
-              onPress={() => openLegalDocument('privacy')}
-            />
-            <ListItem
-              title="使用條款"
-              rightIcon="open-outline"
-              onPress={() => openLegalDocument('terms')}
-            />
-          </View>
-        </AnimatedCard>
-      </ScrollView>
-    </Screen>
+                    {item.question}
+                  </Text>
+                  <Ionicons
+                    name={expanded === item.id ? 'chevron-up' : 'chevron-down'}
+                    size={18}
+                    color={theme.colors.muted}
+                  />
+                </View>
+                {expanded === item.id ? (
+                  <Text
+                    style={{ ...theme.typography.bodySmall, color: theme.colors.textSecondary }}
+                  >
+                    {item.answer}
+                  </Text>
+                ) : null}
+              </Pressable>
+            ))
+          )}
+        </View>
+      </AICard>
+      <AICard title="需要協助？">
+        <View style={{ gap: theme.space.md }}>
+          <Text style={{ ...theme.typography.bodySmall, color: theme.colors.muted }}>
+            遇到操作問題或有改善建議，可以留下回饋。登入後即可送出，收到後會提供回饋編號。
+          </Text>
+          <AIButton label="前往意見回饋" onPress={() => navigation?.navigate?.('Feedback')} />
+        </View>
+      </AICard>
+      <AISection title="關於 Campus One">
+        {version ? <AIRow title="版本" subtitle={version} static /> : null}
+        {(['privacy', 'terms'] as const).map((type) => (
+          <AIRow
+            key={type}
+            title={type === 'privacy' ? '隱私政策' : '服務條款'}
+            subtitle={getLegalUrl(type) ? undefined : '目前無法提供連結'}
+            disabled={!getLegalUrl(type)}
+            onPress={() => void openLegalDocument(type)}
+          />
+        ))}
+      </AISection>
+    </AIDetailScreen>
   );
 }

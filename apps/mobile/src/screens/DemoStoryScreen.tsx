@@ -59,7 +59,7 @@ const ROUTE_TO_TAB: Record<string, RootTabName> = {
 
 const CATEGORY_COLOR: Record<TimelineEvent['category'], string> = {
   wake: '#FF9500',
-  bus: '#5856D6',
+  bus: theme.colors.accent,
   class: '#AF52DE',
   food: '#FF3B30',
   study: '#06B6D4',
@@ -283,7 +283,7 @@ export function DemoStoryScreen(_props: Record<string, unknown>) {
             {persona.subscribedRoutes[0] && (
               <PersonaShortcut
                 icon="bus-outline"
-                color="#5856D6"
+                color={theme.colors.accent}
                 title="即時公車"
                 subtitle={`常搭 ${persona.subscribedRoutes[0].shortName}`}
                 onPress={() =>
@@ -323,7 +323,7 @@ export function DemoStoryScreen(_props: Record<string, unknown>) {
             {/* AI 助理 */}
             <PersonaShortcut
               icon="sparkles-outline"
-              color="#5856D6"
+              color={theme.colors.accent}
               title="校園 AI 助理"
               subtitle="可代下單 / 查課表"
               onPress={() => rootNavigateNested('Today', 'AIChat')}

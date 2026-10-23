@@ -8,6 +8,10 @@ import {
   type SchoolIntegrationStatus,
   toConfigObject,
 } from '@campus/shared/src';
+import {
+  allowsPlaceholderAnnouncementSchools,
+  isPlaceholderAnnouncementSchool,
+} from '@campus/shared/src/campusAnnouncements';
 
 type LegalDocumentType = 'privacy' | 'terms';
 
@@ -35,7 +39,14 @@ export function getReleaseConfig(): RuntimeReleaseConfig {
   });
 }
 
+/** 示範學校用原始 extra.appEnv。未設定、空字串都當關，不走 normalize 的 development 預設。 */
+export function getRawAppEnv(): string {
+  const extra = getExtra();
+  return typeof extra.appEnv === 'string' ? extra.appEnv : '';
+}
+
 export function areUniversalDevAccountsEnabled(): boolean {
+  if (getReleaseConfig().appEnv === 'production') return false;
   const extra = getExtra();
   if (typeof extra.enableUniversalDevAccounts === 'boolean') {
     return extra.enableUniversalDevAccounts;
@@ -78,5 +89,22 @@ export function isSchoolVisibleInDirectory(
   schoolId: string,
   input?: Partial<SchoolIntegrationStatus> | null,
 ): boolean {
+  if (isPlaceholderAnnouncementSchool({ schoolId })) {
+    return allowsPlaceholderAnnouncementSchools(getRawAppEnv());
+  }
   return getSchoolIntegrationStatus(schoolId, input).enabled;
+}
+
+/** Explicit local demos are never enabled by production or preview configuration. */
+export function isDevelopmentDemoSession(uid?: string | null): boolean {
+  const config = getReleaseConfig();
+  return (
+    typeof __DEV__ !== 'undefined' &&
+    __DEV__ &&
+    config.appEnv === 'development' &&
+    !config.isReleaseLike &&
+    getExtra().enableUniversalDevAccounts === true &&
+    typeof uid === 'string' &&
+    uid.startsWith('demo_')
+  );
 }

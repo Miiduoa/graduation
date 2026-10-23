@@ -20,7 +20,7 @@ export type ThemeColors = {
   accentSoft: string;
   accentHover: string;
   accentStrong: string;
-  /** 靜宜金 — 用於獎勵、高亮、CTA 輔色 */
+  /** 用於獎勵與重點標示 */
   gold: string;
   goldSoft: string;
   gradientStart: string;
@@ -41,27 +41,27 @@ export type ThemeColors = {
   disabledText: string;
   cardShadow: string;
   shimmer: string;
-  /** 心理學情緒色盤 — Psychological Emotional Palette */
-  /** 成就/獎勵（靜宜金）— Variable Reward + Competence */
+  /** 狀態、進度與提醒 */
+  /** 成就／獎勵 */
   achievement: string;
   achievementSoft: string;
-  /** 連續打卡 Streak（活力橘紅）— Habit Loop + Loss Aversion */
+  /** 連續打卡 */
   streak: string;
   streakSoft: string;
-  /** 成長/完成（翡翠綠）— Growth Mindset + Competence */
+  /** 成長／完成 */
   growth: string;
   growthSoft: string;
-  /** 情感安撫（天空藍）— Anxiety Reduction，用於截止日期提醒 */
+  /** 一般提醒 */
   calm: string;
   calmSoft: string;
-  /** 輕度警示（暖黃）— Framing Effect，取代部分紅色場景 */
+  /** 非緊急警示 */
   gentleWarn: string;
   gentleWarnSoft: string;
   urgent: string;
   urgentSoft: string;
   fresh: string;
   freshSoft: string;
-  /** 社交互動（靜宜紫）— Creativity + Social Connection */
+  /** 社交互動 */
   social: string;
   socialSoft: string;
   confidenceHigh: string;
@@ -85,6 +85,9 @@ export type ThemeColors = {
   card: string;
   /** 鋪滿主色／accent 按鈕上的文字與圖示（維持對比） */
   onAccent: string;
+  /** 實心狀態標籤上的文字與圖示 */
+  onDanger: string;
+  onSuccess: string;
   /** 底部導覽列半透明底 */
   chromeTabBar: string;
   chromeTabBorder: string;
@@ -99,10 +102,7 @@ export type ThemeShadow = {
   elevation: number;
 };
 
-/**
- * Calm Clarity: 單向 elevation 陰影（移除 Neumorphic 雙向陰影）
- * 心理學：明確的物件感知 (Object Perception)，減少認知負荷
- */
+/** 共用陰影，保留舊元件支援的屬性。 */
 export type SoftShadow = {
   shadowColor?: string;
   shadowOpacity?: number;
@@ -145,7 +145,7 @@ export type ThemeSpace = {
   xl: number;
   xxl: number;
   xxxl: number;
-  /** 區塊間分隔 — 心理分離感 */
+  /** 區塊間分隔 */
   section: number;
 };
 
@@ -236,11 +236,11 @@ export type Theme = {
 
 const sharedRadius: ThemeRadius = {
   full: 9999,
-  xl: 20,
-  lg: 16,
-  md: 12,
-  sm: 8,
-  xs: 6,
+  xl: 12,
+  lg: 8,
+  md: 6,
+  sm: 4,
+  xs: 3,
 };
 
 const sharedSpace: ThemeSpace = {
@@ -256,8 +256,8 @@ const sharedSpace: ThemeSpace = {
 };
 
 const sharedLayout: ThemeLayout = {
-  screenPadding: sharedSpace.md + sharedSpace.xs,
-  screenHorizontalPadding: sharedSpace.md + sharedSpace.xs,
+  screenPadding: 22,
+  screenHorizontalPadding: 22,
   sectionGap: sharedSpace.lg,
   sectionGapLarge: sharedSpace.section,
   cardPadding: sharedSpace.lg,
@@ -283,16 +283,16 @@ export function tabBarExtraScrollPadding(insetsBottom: number): number {
 
 const sharedTypography: ThemeTypography = {
   hero: {
-    fontSize: 30,
+    fontSize: 28,
     lineHeight: 38,
     letterSpacing: 0,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   display: {
-    fontSize: 24,
+    fontSize: 25,
     lineHeight: 32,
     letterSpacing: 0,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   h1: {
     fontSize: 21,
@@ -357,18 +357,11 @@ const sharedAnimation: ThemeAnimation = {
   spring: { friction: 7, tension: 80 },
 };
 
-/*
- * Apple HIG — iOS system surfaces / typography scales；
- * Primary interactive：AI-First 使用 Indigo（見下方 DEFAULT_ACCENT），狀態色仍對齊 iOS system colors。
- * Secondary: campus gold for achievement/reward signal only (kept restrained for low-frequency use).
- */
-// ── AI-First v1：主色從校園綠改為 AI Indigo（#5856D6）──
-// 此覆寫讓所有沿用 theme.colors.accent 的舊畫面自動變紫色 AI 配色
-// 設計總綱：docs/design/AI_FIRST_REDESIGN.md
-// Dark theme default accent：較亮一階的 Indigo，在深色系統底上維持對比（對齊 iOS「深色用較亮主色」）
-const DEFAULT_ACCENT = '#5856D6';
-const DEFAULT_ACCENT_DARK = '#818CF8';
-const DEFAULT_GOLD = '#C79532';
+// Product controls share one palette; school identity remains available as brand metadata.
+const DEFAULT_ACCENT = '#314D40';
+const DEFAULT_ACCENT_DARK = '#A9C6A3';
+const DEFAULT_GOLD = '#8B631E';
+const DEFAULT_GOLD_DARK = '#DEC080';
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
@@ -383,7 +376,7 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
 
 function rgba(hex: string, opacity: number): string {
   const rgb = hexToRgb(hex);
-  if (!rgb) return `rgba(91,33,182,${opacity})`;
+  if (!rgb) return `rgba(40,72,59,${opacity})`;
   return `rgba(${rgb.r},${rgb.g},${rgb.b},${opacity})`;
 }
 
@@ -405,49 +398,46 @@ export function createDarkTheme(
   schoolId?: string,
   brand?: SchoolBrand,
 ): Theme {
-  const gold = brand?.secondary ?? DEFAULT_GOLD;
+  const gold = brand?.secondary ?? DEFAULT_GOLD_DARK;
   const orbLilac = lighten(accent, 0.42);
-  const orbPeri = lighten('#818CF8', 0.12);
+  const orbPeri = lighten(accent, 0.12);
   return {
     mode: 'dark',
     colors: {
-      // iOS Dark: 純黑底 + elevated surfaces（systemBackground / secondarySystemBackground）
       bg: '#000000',
       background: '#000000',
-      surface: '#1C1C1E',
-      surface2: '#2C2C2E',
-      surface3: '#3A3A3C',
-      surfaceElevated: '#2C2C2E',
-      surfaceInteractive: '#2C2C2E',
-      surfaceInteractiveStrong: '#3A3A3C',
-      surfaceMuted: '#1C1C1E',
-      // iOS Dark: separator / opaqueSeparator
-      border: '#38383A',
-      separator: '#48484A',
-      // iOS Dark: label / secondaryLabel / tertiaryLabel
-      text: '#FFFFFF',
-      textSecondary: '#EBEBF5',
-      muted: '#8E8E93',
+      surface: '#111111',
+      surface2: '#191919',
+      surface3: '#232323',
+      surfaceElevated: '#191919',
+      surfaceInteractive: '#232323',
+      surfaceInteractiveStrong: '#303030',
+      surfaceMuted: '#080808',
+      border: '#2B2B2B',
+      separator: '#2B2B2B',
+      text: '#F2F3F1',
+      textSecondary: '#CBCFCB',
+      muted: '#A5AAA7',
       accent,
-      accentSoft: createAccentSoft(accent, 0.2),
+      accentSoft: createAccentSoft(accent, 0.12),
       accentHover: lighten(accent, 0.16),
       accentStrong: lighten(accent, 0.28),
       gold,
       goldSoft: rgba(gold, 0.2),
-      gradientStart: accent,
-      gradientMid: lighten(accent, 0.18),
-      gradientEnd: '#5AC8FA',
-      // iOS Dark system colors
-      success: '#30D158',
-      successSoft: 'rgba(48,209,88,0.16)',
-      danger: '#FF453A',
-      error: '#FF453A',
-      dangerSoft: 'rgba(255,69,58,0.18)',
-      warning: '#FF9F0A',
-      warningSoft: 'rgba(255,159,10,0.16)',
-      info: '#5AC8FA',
-      infoSoft: 'rgba(90,200,250,0.16)',
-      focusRing: rgba(accent, 0.45),
+      gradientStart: '#191919',
+      gradientMid: '#111111',
+      gradientEnd: '#000000',
+      // Status labels
+      success: '#A6CA9E',
+      successSoft: 'rgba(166,202,158,0.16)',
+      danger: '#EFAC9A',
+      error: '#EFAC9A',
+      dangerSoft: 'rgba(239,172,154,0.16)',
+      warning: '#DEC080',
+      warningSoft: 'rgba(222,192,128,0.16)',
+      info: '#A7C7CA',
+      infoSoft: 'rgba(167,199,202,0.16)',
+      focusRing: accent,
       overlay: 'rgba(0,0,0,0.6)',
       disabledBg: 'rgba(255,255,255,0.07)',
       disabledText: 'rgba(255,255,255,0.24)',
@@ -455,50 +445,50 @@ export function createDarkTheme(
       shimmer: 'rgba(255,255,255,0.05)',
       achievement: gold,
       achievementSoft: rgba(gold, 0.2),
-      streak: '#FF9F0A',
-      streakSoft: 'rgba(255,159,10,0.18)',
-      growth: '#30D158',
-      growthSoft: 'rgba(48,209,88,0.16)',
-      calm: '#5AC8FA',
-      calmSoft: 'rgba(90,200,250,0.16)',
-      gentleWarn: '#FFD60A',
-      gentleWarnSoft: 'rgba(255,214,10,0.16)',
-      urgent: '#FF453A',
-      urgentSoft: 'rgba(255,69,58,0.16)',
-      fresh: '#5AC8FA',
-      freshSoft: 'rgba(90,200,250,0.16)',
-      // iOS System Purple
-      social: '#BF5AF2',
-      socialSoft: 'rgba(191,90,242,0.16)',
-      confidenceHigh: '#30D158',
-      confidenceHighSoft: 'rgba(48,209,88,0.16)',
-      confidenceMedium: '#FF9F0A',
-      confidenceMediumSoft: 'rgba(255,159,10,0.16)',
-      confidenceLow: '#FF453A',
-      confidenceLowSoft: 'rgba(255,69,58,0.16)',
+      streak: '#DEC080',
+      streakSoft: 'rgba(222,192,128,0.16)',
+      growth: '#A6CA9E',
+      growthSoft: 'rgba(166,202,158,0.16)',
+      calm: '#A7C7CA',
+      calmSoft: 'rgba(167,199,202,0.16)',
+      gentleWarn: '#DEC080',
+      gentleWarnSoft: 'rgba(222,192,128,0.16)',
+      urgent: '#EFAC9A',
+      urgentSoft: 'rgba(239,172,154,0.16)',
+      fresh: '#A7C7CA',
+      freshSoft: 'rgba(167,199,202,0.16)',
+      // Social labels
+      social: '#CFB5C9',
+      socialSoft: 'rgba(207,181,201,0.16)',
+      confidenceHigh: '#A6CA9E',
+      confidenceHighSoft: 'rgba(166,202,158,0.16)',
+      confidenceMedium: '#DEC080',
+      confidenceMediumSoft: 'rgba(222,192,128,0.16)',
+      confidenceLow: '#EFAC9A',
+      confidenceLowSoft: 'rgba(239,172,154,0.16)',
       roleStudent: accent,
       roleStudentSoft: createAccentSoft(accent, 0.2),
-      roleTeacher: '#BF5AF2',
-      roleTeacherSoft: 'rgba(191,90,242,0.16)',
+      roleTeacher: accent,
+      roleTeacherSoft: createAccentSoft(accent, 0.2),
       roleAdmin: gold,
       roleAdminSoft: rgba(gold, 0.2),
-      focusSurface: rgba(accent, 0.18),
+      focusSurface: '#141414',
       primary: accent,
       secondary: gold,
-      card: '#1C1C1E',
-      onAccent: '#FFFFFF',
-      // iOS Tab Bar：blur + translucent
-      // iOS Tab Bar：半透明使 BlurView 玻璃磨砂可見（與 expo-blur intensity 配合）
-      chromeTabBar: 'rgba(28,28,30,0.55)',
-      chromeTabBorder: 'rgba(255,255,255,0.10)',
-      chromeTabItemActive: createAccentSoft(accent, 0.22),
+      card: '#111111',
+      onAccent: '#0B140E',
+      onDanger: '#0B140E',
+      onSuccess: '#0B140E',
+      chromeTabBar: '#111111',
+      chromeTabBorder: '#333333',
+      chromeTabItemActive: createAccentSoft(accent, 0.14),
     },
     shadows: {
       sm: { color: '#000000', opacity: 0.22, radius: 10, offsetY: 3, elevation: 2 },
-      md: { color: '#000000', opacity: 0.30, radius: 18, offsetY: 5, elevation: 5 },
+      md: { color: '#000000', opacity: 0.3, radius: 18, offsetY: 5, elevation: 5 },
       lg: { color: '#000000', opacity: 0.38, radius: 24, offsetY: 8, elevation: 8 },
       xl: { color: '#000000', opacity: 0.46, radius: 34, offsetY: 12, elevation: 14 },
-      glow: { color: accent, opacity: 0.28, radius: 26, offsetY: 0, elevation: 0 },
+      glow: { color: accent, opacity: 0.12, radius: 20, offsetY: 0, elevation: 0 },
       soft: {
         shadowColor: '#000000',
         shadowOpacity: 0.26,
@@ -520,11 +510,11 @@ export function createDarkTheme(
     typography: sharedTypography,
     animation: sharedAnimation,
     gradients: {
-      drawerHeader: ['#2C2C2E', '#000000'] as const,
-      profileHero: ['#1C1C1E', '#000000', '#000000'] as const,
+      drawerHeader: ['#111111', '#000000'] as const,
+      profileHero: ['#191919', '#111111', '#000000'] as const,
       avatar: [lighten(accent, 0.22), accent] as const,
       aiOrbNormal: [orbLilac, lighten(accent, 0.12), orbPeri] as const,
-      aiOrbUrgent: ['#FF6961', '#FF453A', '#D70015'] as const,
+      aiOrbUrgent: ['#FF6961', '#EFAC9A', '#D70015'] as const,
     },
     schoolId,
     brand,
@@ -546,44 +536,40 @@ export function createLightTheme(
   return {
     mode: 'light',
     colors: {
-      // iOS Light: 中性灰底（systemGroupedBackground）
-      bg: '#F2F2F7',
-      background: '#F2F2F7',
+      bg: '#F8F7F3',
+      background: '#F8F7F3',
       surface: '#FFFFFF',
-      surface2: '#F2F2F7',
-      surface3: '#E5E5EA',
+      surface2: '#EEEEE8',
+      surface3: '#E2E7DD',
       surfaceElevated: '#FFFFFF',
-      surfaceInteractive: '#F2F2F7',
-      surfaceInteractiveStrong: '#E5E5EA',
-      surfaceMuted: '#F2F2F7',
-      // iOS Light: separator / opaqueSeparator
-      border: '#E5E5EA',
-      separator: '#C6C6C8',
-      /** iOS label：對比約 16:1，符合 WCAG AAA */
-      text: '#1C1C1E',
-      textSecondary: '#3C3C43',
-      /** iOS secondaryLabel（灰 500），約 4.7:1 */
-      muted: '#8E8E93',
+      surfaceInteractive: '#EEEEE8',
+      surfaceInteractiveStrong: '#E2E7DD',
+      surfaceMuted: '#F0F1EB',
+      border: '#DDDEDA',
+      separator: '#DDDEDA',
+      text: '#243B35',
+      textSecondary: '#526750',
+      muted: '#626E67',
       accent,
-      accentSoft: createAccentSoft(accent, 0.12),
+      accentSoft: accent === DEFAULT_ACCENT ? '#E6ECE5' : createAccentSoft(accent, 0.12),
       accentHover: lighten(accent, 0.12),
       accentStrong: lighten(accent, 0.22),
       gold,
       goldSoft: rgba(gold, 0.14),
       /** iOS：大面積漸層用 system 中性灰，accent 僅限按鈕等小面積 */
-      gradientStart: '#F2F2F7',
-      gradientMid: '#E5E5EA',
-      gradientEnd: '#FFFFFF',
-      // iOS System Colors (Light)
-      success: '#34C759',
-      successSoft: 'rgba(52,199,89,0.12)',
-      danger: '#FF3B30',
-      error: '#FF3B30',
-      dangerSoft: 'rgba(255,59,48,0.12)',
-      warning: '#FF9500',
-      warningSoft: 'rgba(255,149,0,0.12)',
-      info: '#5AC8FA',
-      infoSoft: 'rgba(90,200,250,0.12)',
+      gradientStart: '#E6ECE5',
+      gradientMid: '#F0F1EB',
+      gradientEnd: '#F8F7F3',
+      // Status labels
+      success: '#386146',
+      successSoft: '#E6EEE4',
+      danger: '#983F32',
+      error: '#983F32',
+      dangerSoft: '#F7E9E3',
+      warning: '#8B631E',
+      warningSoft: '#F6EEDA',
+      info: '#41646A',
+      infoSoft: '#E6EEEE',
       focusRing: rgba(accent, 0.28),
       overlay: 'rgba(0,0,0,0.36)',
       disabledBg: 'rgba(142,142,147,0.12)',
@@ -592,48 +578,50 @@ export function createLightTheme(
       shimmer: 'rgba(255,255,255,0.9)',
       achievement: gold,
       achievementSoft: rgba(gold, 0.14),
-      streak: '#FF6B35',
-      streakSoft: 'rgba(255,107,53,0.12)',
-      growth: '#34C759',
-      growthSoft: 'rgba(52,199,89,0.12)',
-      calm: '#5AC8FA',
-      calmSoft: 'rgba(90,200,250,0.12)',
-      gentleWarn: '#FFCC00',
-      gentleWarnSoft: 'rgba(255,204,0,0.16)',
-      urgent: '#FF3B30',
-      urgentSoft: 'rgba(255,59,48,0.12)',
-      fresh: '#5AC8FA',
-      freshSoft: 'rgba(90,200,250,0.12)',
-      // iOS System Purple (Light)
-      social: '#AF52DE',
-      socialSoft: 'rgba(175,82,222,0.12)',
-      confidenceHigh: '#34C759',
-      confidenceHighSoft: 'rgba(52,199,89,0.12)',
-      confidenceMedium: '#FF9500',
-      confidenceMediumSoft: 'rgba(255,149,0,0.12)',
-      confidenceLow: '#FF3B30',
-      confidenceLowSoft: 'rgba(255,59,48,0.12)',
+      streak: '#A54C2B',
+      streakSoft: '#F7E9E3',
+      growth: '#386146',
+      growthSoft: '#E6EEE4',
+      calm: '#41646A',
+      calmSoft: '#E6EEEE',
+      gentleWarn: '#8B631E',
+      gentleWarnSoft: '#F6EEDA',
+      urgent: '#983F32',
+      urgentSoft: '#F7E9E3',
+      fresh: '#41646A',
+      freshSoft: '#E6EEEE',
+      // Social labels
+      social: '#765B72',
+      socialSoft: '#F0E9EE',
+      confidenceHigh: '#386146',
+      confidenceHighSoft: '#E6EEE4',
+      confidenceMedium: '#8B631E',
+      confidenceMediumSoft: '#F6EEDA',
+      confidenceLow: '#983F32',
+      confidenceLowSoft: '#F7E9E3',
       roleStudent: accent,
       roleStudentSoft: createAccentSoft(accent, 0.12),
-      roleTeacher: '#AF52DE',
-      roleTeacherSoft: 'rgba(175,82,222,0.12)',
+      roleTeacher: accent,
+      roleTeacherSoft: createAccentSoft(accent, 0.12),
       roleAdmin: gold,
       roleAdminSoft: rgba(gold, 0.14),
-      focusSurface: 'rgba(0,0,0,0.04)',
+      focusSurface: '#E6ECE5',
       primary: accent,
       secondary: gold,
       card: '#FFFFFF',
       onAccent: '#FFFFFF',
+      onDanger: '#FFFFFF',
+      onSuccess: '#FFFFFF',
       // iOS Tab Bar：blur + translucent white
       // iOS Tab Bar：半透明使 BlurView 玻璃磨砂可見（與 expo-blur intensity 配合）
-      chromeTabBar: 'rgba(255,255,255,0.55)',
-      chromeTabBorder: 'rgba(0,0,0,0.10)',
-      chromeTabItemActive: createAccentSoft(accent, 0.10),
+      chromeTabBar: 'rgba(255,255,255,0.96)',
+      chromeTabBorder: '#DDDEDA',
+      chromeTabItemActive: createAccentSoft(accent, 0.1),
     },
     shadows: {
       sm: { color: '#000000', opacity: 0.06, radius: 10, offsetY: 2, elevation: 2 },
       md: { color: '#000000', opacity: 0.08, radius: 18, offsetY: 5, elevation: 5 },
-      lg: { color: '#000000', opacity: 0.10, radius: 24, offsetY: 9, elevation: 9 },
+      lg: { color: '#000000', opacity: 0.1, radius: 24, offsetY: 9, elevation: 9 },
       xl: { color: '#000000', opacity: 0.12, radius: 32, offsetY: 13, elevation: 13 },
       glow: { color: accent, opacity: 0.16, radius: 24, offsetY: 0, elevation: 0 },
       soft: {
@@ -657,11 +645,11 @@ export function createLightTheme(
     typography: sharedTypography,
     animation: sharedAnimation,
     gradients: {
-      drawerHeader: ['#F2F2F7', '#FFFFFF'] as const,
-      profileHero: ['#F2F2F7', '#FFFFFF', '#FFFFFF'] as const,
+      drawerHeader: ['#E6ECE5', '#F8F7F3'] as const,
+      profileHero: ['#E6ECE5', '#F0F1EB', '#F8F7F3'] as const,
       avatar: [lighten(accent, 0.12), accent] as const,
       aiOrbNormal: [orbTint, orbMid, accent] as const,
-      aiOrbUrgent: ['#FFD2D0', '#FF6961', '#FF3B30'] as const,
+      aiOrbUrgent: ['#FFD2D0', '#FF6961', '#983F32'] as const,
     },
     schoolId,
     brand,
@@ -711,7 +699,7 @@ export function createSchoolTheme(
     secondary: config?.secondary,
     logo: config?.logo,
   };
-  return getTheme(mode, accent, schoolId, brand);
+  return getTheme(mode, undefined, schoolId, brand);
 }
 
 let _currentTheme: Theme = lightTheme;

@@ -1,4 +1,6 @@
 import React from 'react';
+import { theme } from '../../ui/theme';
+import { useThemeMode } from '../../state/theme';
 import { View, Alert } from 'react-native';
 import { getSupabaseClient } from '../../services/supabaseClient';
 import { checkInLive, endLiveSession } from '../../services/lmsV2WriteTools';
@@ -11,6 +13,7 @@ import {
 } from './_courseV2Shell';
 
 export default function CourseLiveV2Screen() {
+  useThemeMode();
   const { courseId, courseName } = useCourseV2Params();
   const loadable = useLoadable(async () => {
     const sb = getSupabaseClient();
@@ -32,7 +35,7 @@ export default function CourseLiveV2Screen() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#F2F2F7' }}>
+    <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       <CourseV2Header title="直播 / 點名" subtitle={courseName} />
       <CourseV2List
         loadable={loadable}
