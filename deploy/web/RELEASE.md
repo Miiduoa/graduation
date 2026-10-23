@@ -19,6 +19,6 @@
 
 模式必須主動選擇，未知值會停止；`live-tdx` 失敗不會自動降級。保留 sanitized `transit-preflight.json`、`transit-before-rollout.json`、`transit-after-rollout.json` 與 `transit-public.json`，不輸出機器環境內容或原始 provider error。本流程不新增、搬移或推測 TDX 憑證。Web 發布成功、取得站牌、即時到站及手機定位分別記錄，不互相冒充完成。驗證失敗且已 rollout 時，流程會先用 `before.json` 的舊 digest 自動回復兩台機器；若自動回滾也失敗，再檢視 sanitized artifact 中的 `before.json` / `image.json` / `rollback.json` / `public-check.json`。不要以舊資料庫覆蓋新資料。
 
-驗證失敗且 rollout 已成功時，會用 `before.json` 的不可變映像自動 rolling 回到上一版，並寫入 `rollback.json`。不會在探測失敗時留下新映像。回滾與探測重試的本機測試：`node --test deploy/web/release-check.test.mjs deploy/web/transit-release-gate.test.mjs`。測試使用替身資料與假 flyctl，不連正式 Fly、不部署、不取用真實憑證。不要用 `workflow_dispatch` 對 production 驗證這項修正。
+驗證失敗且 rollout 已成功時，會用 `before.json` 的不可變映像自動 rolling 回到上一版，並寫入 `rollback.json`。不會在探測失敗時留下新映像。回滾與探測重試的本機測試：`node --test deploy/web/release-check.test.mjs deploy/web/transit-release-gate.test.mjs deploy/web/release-safety.test.mjs`。測試使用替身資料與假 flyctl，不連正式 Fly、不部署、不取用真實憑證。不要用 `workflow_dispatch` 對 production 驗證這項修正。建置後的本機容器會再檢查 `/`、`/bus`、`/login`、`/life`、`/privacy`，只打 loopback，不連正式站。
 
 檢查本身：`node --test deploy/web/release-check.test.mjs`。測試使用替身資料，不對正式站寫入，也不取用真實憑證。建立此流程不等於已執行或通過正式發布。
