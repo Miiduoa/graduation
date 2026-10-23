@@ -1,0 +1,136 @@
+{
+  "source_sha": "8d28ec088f3f609db5ae265ce4aa7f45cf3c0206",
+  "pinned_main": "27f7206880954b6a89d22e5fac2d638c9c0670da",
+  "node": "22.23.4",
+  "pnpm": "10.28.2",
+  "jobs": {
+    "summary": {
+      "sha": "8d28ec088f3f609db5ae265ce4aa7f45cf3c0206",
+      "failures": 0,
+      "out": "/Users/miiduoa/Documents/Codex/2026-10-23/lms-cursor/work/validation-8d28ec0"
+    },
+    "types-lint": {
+      "sha": "8d28ec088f3f609db5ae265ce4aa7f45cf3c0206",
+      "job": "types-lint",
+      "results": [
+        {
+          "command": [
+            "pnpm",
+            "typecheck"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "pnpm",
+            "lint"
+          ],
+          "exit_code": 0
+        }
+      ]
+    },
+    "functions-tests": {
+      "sha": "8d28ec088f3f609db5ae265ce4aa7f45cf3c0206",
+      "job": "functions-tests",
+      "results": [
+        {
+          "command": [
+            "pnpm",
+            "--filter",
+            "functions",
+            "test",
+            "--runInBand"
+          ],
+          "exit_code": 0
+        }
+      ]
+    },
+    "web-tests": {
+      "sha": "8d28ec088f3f609db5ae265ce4aa7f45cf3c0206",
+      "job": "web-tests",
+      "results": [
+        {
+          "command": [
+            "pnpm",
+            "--filter",
+            "web",
+            "test"
+          ],
+          "exit_code": 0
+        }
+      ]
+    },
+    "mobile-tests": {
+      "sha": "8d28ec088f3f609db5ae265ce4aa7f45cf3c0206",
+      "job": "mobile-tests",
+      "results": [
+        {
+          "command": [
+            "pnpm",
+            "--filter",
+            "mobile",
+            "test"
+          ],
+          "exit_code": 0
+        }
+      ]
+    },
+    "diff-check": {
+      "sha": "8d28ec088f3f609db5ae265ce4aa7f45cf3c0206",
+      "job": "diff-check",
+      "results": [
+        {
+          "command": [
+            "git",
+            "diff",
+            "--check"
+          ],
+          "exit_code": 0
+        }
+      ]
+    },
+    "web-build": {
+      "sha": "8d28ec088f3f609db5ae265ce4aa7f45cf3c0206",
+      "job": "web-build",
+      "results": [
+        {
+          "command": [
+            "pnpm",
+            "--filter",
+            "web",
+            "build"
+          ],
+          "exit_code": 0
+        }
+      ]
+    }
+  },
+  "counts": {
+    "web": {
+      "passed": 2265,
+      "skipped": 1
+    },
+    "mobile": {
+      "passed": 2880,
+      "skipped": 1
+    },
+    "functions": {
+      "passed": 997,
+      "skipped": 0
+    },
+    "rules_emulator": {
+      "passed": 148,
+      "failed": 0,
+      "skipped": 0,
+      "files": 7
+    }
+  },
+  "emulator": {
+    "project": "demo-campus-security",
+    "backend_files_hashed": 279,
+    "backend_sha256_manifest": "5e7e10df989ab5ace20f67fd908430b0cee2c8d2fa99b20e52f4856ae2e70d86",
+    "sources_unchanged": true,
+    "all_owned_processes_stopped": true
+  },
+  "acceptance": "Local code, tests, and synthetic browser only; no deployment, real-role, physical-device or store acceptance."
+}
