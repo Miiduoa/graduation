@@ -1,5 +1,5 @@
 /**
- * Campus AI-First — 社團頁 V2
+ * 社團頁 V2
  *
  * 接 demoStore：
  *   - 學生：對「招新中」社團可按「申請加入」→ 寫入 clubMemberships(pending)，

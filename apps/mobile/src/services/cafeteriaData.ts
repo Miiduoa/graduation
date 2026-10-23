@@ -7,7 +7,7 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getDb, getFunctionsInstance, getAuthInstance } from '../firebase';
+import { getDb, getFunctionsInstance, getAuthInstance, isFirebaseMockMode } from '../firebase';
 import {
   collection,
   doc,
@@ -154,8 +154,13 @@ export type Order = {
   completedAt: string | null;
   cancelledAt: string | null;
   cancelReason: string | null;
+  /** 取餐號碼，只認伺服器發的；沒拿到是 null */
   queueNumber: number | null;
+  /** 'pending_confirmation' = 號碼還沒拿到（待給號碼），店家可以按「給號碼」 */
+  queueStatus?: OrderQueueStatus;
 };
+
+export type OrderQueueStatus = 'assigned' | 'pending_confirmation';
 
 export type OrderItem = {
   menuItemId: string;
@@ -175,7 +180,7 @@ export type OrderStatus =
   | 'cancelled'; // 已取消
 
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
-  pending: '等待確認',
+  pending: '等店家接單',
   confirmed: '已接單',
   preparing: '製作中',
   ready: '可取餐',
@@ -3728,6 +3733,11 @@ function _mapFirestoreToLocalOrder(id: string, data: Record<string, any>): Order
     cancelledAt: toIso(data.cancelledAt) ?? null,
     cancelReason: data.cancelReason ?? null,
     queueNumber: typeof data.queueNumber === 'number' ? data.queueNumber : (typeof data.queueNumber === 'string' ? parseInt(data.queueNumber, 10) || null : null),
+    queueStatus:
+      (typeof data.queueNumber === 'number' && data.queueNumber > 0) ||
+      (typeof data.queueNumber === 'string' && parseInt(data.queueNumber, 10) > 0)
+        ? 'assigned'
+        : 'pending_confirmation',
   };
 }
 
@@ -3794,8 +3804,21 @@ export async function getOrders(studentUid?: string, vendorId?: string): Promise
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
+/** 訂單沒送到伺服器時給學生看的話；重試要沿用同一個送出編號，伺服器不會建出第二筆 */
+export const ORDER_NOT_SENT_TEXT = '訂單沒送出去，請再試一次。';
+
+export class OrderNotSentError extends Error {
+  constructor(readonly requestId: string | null) {
+    super(ORDER_NOT_SENT_TEXT);
+    this.name = 'OrderNotSentError';
+  }
+}
+
 /**
- * 建立訂單 — Firestore Cloud Function 優先
+ * 建立訂單 — 一律交給伺服器 createOrder。
+ * 伺服器沒建成就丟 OrderNotSentError（「訂單沒送出去，請再試一次。」），不在手機上自己建一張單；
+ * 重試帶同一個 requestId，伺服器用它算出同一個訂單編號，不會重複下單。
+ * 只有示範模式（沒有伺服器）才在本機建示範訂單。
  */
 export async function createOrder(
   order: Omit<
@@ -3808,90 +3831,126 @@ export async function createOrder(
     | 'cancelledAt'
     | 'cancelReason'
     | 'queueNumber'
-  >,
+    | 'queueStatus'
+  > & { requestId?: string },
 ): Promise<Order> {
-  const schoolId = _getSchoolId();
-
-  // ── 嘗試 Firestore Cloud Function ──
-  if (schoolId && _tryFirebase() && getAuthInstance().currentUser) {
-    try {
-      const createOrderFn = httpsCallable<
-        Record<string, unknown>,
-        { orderId?: string; total?: number }
-      >(getFunctionsInstance(), 'createOrder');
-
-      const result = await createOrderFn({
-        schoolId,
-        cafeteriaId: order.cafeteriaId || order.vendorId,
-        merchantId: order.vendorId,
-        items: order.items.map(it => ({
-          menuItemId: it.menuItemId,
-          name: it.menuItemName,
-          price: it.unitPrice,
-          quantity: it.quantity,
-          note: '',
-        })),
-        totalAmount: order.totalPrice,
-        note: order.note || '',
-      });
-
-      const orderId = result.data?.orderId;
-      if (orderId) {
-        // 從 Firestore 讀回完整訂單
-        const db = getDb();
-        const docRef = doc(db, 'schools', schoolId, 'orders', orderId);
-        const snap = await getDoc(docRef);
-        if (snap.exists()) {
-          const newOrder = _mapFirestoreToLocalOrder(snap.id, snap.data());
-          // 同步到本地
-          const local = await readStorage<Order[]>(STORAGE_KEYS.orders, []);
-          local.push(newOrder);
-          await writeStorage(STORAGE_KEYS.orders, local);
-          return newOrder;
-        }
-        // docRef 可能還沒同步，用已知資訊建構
-        const fallback: Order = {
-          ...order,
-          id: orderId,
-          status: 'pending',
-          createdAt: new Date().toISOString(),
-          readyAt: null,
-          completedAt: null,
-          cancelledAt: null,
-          cancelReason: null,
-          queueNumber: null,
-        };
-        const local = await readStorage<Order[]>(STORAGE_KEYS.orders, []);
-        local.push(fallback);
-        await writeStorage(STORAGE_KEYS.orders, local);
-        return fallback;
-      }
-    } catch (err) {
-      console.warn('[cafeteriaData] Firestore createOrder failed, falling back to local:', err);
-    }
+  if (isFirebaseMockMode()) {
+    const orders = await readStorage<Order[]>(STORAGE_KEYS.orders, []);
+    const demoOrder: Order = {
+      ...order,
+      id: `ord-${Date.now()}`,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      readyAt: null,
+      completedAt: null,
+      cancelledAt: null,
+      cancelReason: null,
+      queueNumber: null,
+      queueStatus: 'pending_confirmation',
+    };
+    orders.push(demoOrder);
+    await writeStorage(STORAGE_KEYS.orders, orders);
+    return demoOrder;
   }
 
-  // ── 降級：本地建立 ──
-  const orders = await readStorage<Order[]>(STORAGE_KEYS.orders, []);
-  const queueNumber =
-    orders.filter(
-      (o) => o.vendorId === order.vendorId && o.status !== 'completed' && o.status !== 'cancelled',
-    ).length + 1;
+  const schoolId = _getSchoolId();
+  const requestId = typeof order.requestId === 'string' ? order.requestId.trim() : '';
+  if (!schoolId || !requestId || !_tryFirebase() || !getAuthInstance().currentUser) {
+    throw new OrderNotSentError(requestId || null);
+  }
+  let result: { data?: { orderId?: string; queueNumber?: number | null; createdAt?: string | null } };
+  try {
+    const createOrderFn = httpsCallable<
+      Record<string, unknown>,
+      { orderId?: string; queueNumber?: number | null; createdAt?: string | null }
+    >(getFunctionsInstance(), 'createOrder');
+    result = await createOrderFn({
+      schoolId,
+      requestId,
+      cafeteriaId: order.cafeteriaId || order.vendorId,
+      items: order.items.map((it) => ({ menuItemId: it.menuItemId, quantity: it.quantity })),
+      expectedTotal: order.totalPrice,
+      ...(order.note ? { note: order.note } : {}),
+    });
+  } catch (err) {
+    console.warn('[cafeteriaData] createOrder not sent:', err);
+    throw new OrderNotSentError(requestId);
+  }
+  const orderId = result.data?.orderId;
+  if (!orderId) throw new OrderNotSentError(requestId);
 
-  const newOrder: Order = {
-    ...order,
-    id: `ord-${Date.now()}`,
-    status: 'pending',
-    createdAt: new Date().toISOString(),
-    readyAt: null,
-    completedAt: null,
-    cancelledAt: null,
-    cancelReason: null,
-    queueNumber,
-  };
-  orders.push(newOrder);
-  await writeStorage(STORAGE_KEYS.orders, orders);
+  let newOrder: Order | null = null;
+  try {
+    const snap = await getDoc(doc(getDb(), 'schools', schoolId, 'orders', orderId));
+    if (snap.exists()) newOrder = _mapFirestoreToLocalOrder(snap.id, snap.data());
+  } catch {
+    newOrder = null;
+  }
+  if (!newOrder) {
+    // 伺服器已經建好，只是還讀不到；用伺服器回的號碼，沒有就是待給號碼
+    const queueNumber =
+      typeof result.data?.queueNumber === 'number' && result.data.queueNumber > 0
+        ? result.data.queueNumber
+        : null;
+    const { requestId: _omit, ...rest } = order;
+    newOrder = {
+      ...rest,
+      id: orderId,
+      status: 'pending',
+      createdAt: result.data?.createdAt ?? new Date().toISOString(),
+      readyAt: null,
+      completedAt: null,
+      cancelledAt: null,
+      cancelReason: null,
+      queueNumber,
+      queueStatus: queueNumber ? 'assigned' : 'pending_confirmation',
+    };
+  }
+  const local = await readStorage<Order[]>(STORAGE_KEYS.orders, []);
+  await writeStorage(STORAGE_KEYS.orders, [...local.filter((o) => o.id !== orderId), newOrder]);
   return newOrder;
+}
+
+/**
+ * 幫訂單拿取餐號碼（Cloud Function `assignQueueNumber`，一定帶 orderId）。
+ * - 學生自己重試：asMerchant 不帶。
+ * - 店家按「給號碼」：asMerchant = true，伺服器會檢查是不是這家店的店員，待接單的訂單一併接單。
+ * 同一筆訂單重複呼叫回同一個號碼。拿不到就丟錯，不會在手機上自己算號碼。
+ */
+export async function assignOrderQueueNumber(
+  orderId: string,
+  options: { asMerchant?: boolean; vendorId?: string } = {},
+): Promise<{ queueNumber: number; status?: OrderStatus }> {
+  const schoolId = _getSchoolId();
+  if (!schoolId || !_tryFirebase() || !getAuthInstance().currentUser) {
+    throw new Error('目前連不上伺服器，號碼還沒拿到，請到櫃台確認。');
+  }
+  const fn = httpsCallable<
+    { schoolId: string; orderId: string; vendorId?: string; as?: 'merchant' },
+    { ok?: boolean; queueNumber?: number; status?: OrderStatus }
+  >(getFunctionsInstance(), 'assignQueueNumber');
+  const result = await fn({
+    schoolId,
+    orderId,
+    ...(options.vendorId ? { vendorId: options.vendorId } : {}),
+    ...(options.asMerchant ? { as: 'merchant' as const } : {}),
+  });
+  const queueNumber = result.data?.queueNumber;
+  if (typeof queueNumber !== 'number' || !Number.isSafeInteger(queueNumber) || queueNumber <= 0) {
+    throw new Error('號碼還沒拿到，請到櫃台確認。');
+  }
+  const local = await readStorage<Order[]>(STORAGE_KEYS.orders, []);
+  const idx = local.findIndex((o) => o.id === orderId);
+  if (idx >= 0) {
+    local[idx] = {
+      ...local[idx],
+      queueNumber,
+      queueStatus: 'assigned',
+      ...(result.data?.status ? { status: result.data.status } : {}),
+    };
+    await writeStorage(STORAGE_KEYS.orders, local);
+  }
+  return { queueNumber, status: result.data?.status };
 }
 
 /**

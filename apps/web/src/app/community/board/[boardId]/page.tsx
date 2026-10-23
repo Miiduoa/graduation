@@ -6,12 +6,14 @@
  * 對應 mobile/BoardDetailScreen：板規 / 訂閱 toggle / 發文按鈕 / 該板貼文列表
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import { CommunityAccess } from '../../_components/CommunityAccess';
 import { SiteShell } from '@/components/SiteShell';
+import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import {
   CAMPUS_BOARD_TYPE_LABEL,
   fetchRecentCampusPosts,
@@ -31,23 +33,30 @@ async function checkIsSubscribed(uid: string, schoolId: string, boardId: string)
 }
 
 export default function BoardDetailPage() {
+  const { schoolId, schoolName, ready } = useBrowsingSchoolPageContext();
   return (
-    <SiteShell title="看板" subtitle="校園社群">
-      <BoardDetailInner />
+    <SiteShell title="看板" subtitle="校園交流" schoolName={ready ? schoolName : undefined}>
+      {ready ? (
+        <CommunityAccess>
+          <BoardDetailInner key={schoolId} schoolId={schoolId} />
+        </CommunityAccess>
+      ) : (
+        <SchoolScopePlaceholder />
+      )}
     </SiteShell>
   );
 }
 
-function BoardDetailInner() {
+function BoardDetailInner({ schoolId }: { schoolId: string }) {
   const params = useParams<{ boardId: string }>();
   const boardId = params?.boardId;
   const { user } = useAuth();
-  const { schoolId } = useMemo(() => resolveSchoolPageContext({}), []);
 
   const [board, setBoard] = useState<CampusBoard | null>(null);
   const [posts, setPosts] = useState<CampusPostDoc[]>([]);
   const [subscribed, setSubscribed] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   const reload = useCallback(async () => {
     if (!boardId || !schoolId) return;
@@ -64,8 +73,13 @@ function BoardDetailInner() {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      await reload();
-      setLoading(false);
+      try {
+        await reload();
+      } catch {
+        setError('無法讀取看板，請確認連線與學校資格後重試。');
+      } finally {
+        setLoading(false);
+      }
     })();
   }, [reload]);
 
@@ -78,29 +92,56 @@ function BoardDetailInner() {
       if (subscribed) await unsubscribeFromBoard(user.uid, schoolId, boardId);
       else await subscribeToBoard(user.uid, schoolId, boardId);
       setSubscribed(!subscribed);
-    } catch (e: any) {
-      alert(`訂閱失敗：${e?.message ?? String(e)}`);
+    } catch {
+      alert('這次未能訂閱，請稍後再試。');
     }
   };
 
   if (!boardId) {
-    return <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>無看板 ID</div>;
+    return (
+      <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>
+        找不到這個看板
+      </div>
+    );
   }
 
+  if (error)
+    return (
+      <div role="alert" className="card" style={{ padding: 24 }}>
+        <p>{error}</p>
+        <button
+          className="btn"
+          onClick={() => {
+            setError('');
+            setLoading(true);
+            void reload()
+              .catch(() => setError('無法讀取看板，請稍後重試。'))
+              .finally(() => setLoading(false));
+          }}
+        >
+          重試
+        </button>
+      </div>
+    );
+
   if (loading) {
-    return <div className="card" style={{ padding: 24 }}>載入中…</div>;
+    return (
+      <div className="card" style={{ padding: 24 }}>
+        載入中…
+      </div>
+    );
   }
 
   return (
     <div style={{ maxWidth: 720 }}>
       <div className="card" style={{ padding: 18, marginBottom: 14 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
           <div
             style={{
               width: 52,
               height: 52,
               borderRadius: 8,
-              background: 'var(--panel2, #F2F2F7)',
+              background: 'var(--panel2)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -108,7 +149,11 @@ function BoardDetailInner() {
             }}
           >
             {board?.coverImage ? (
-              <img src={board.coverImage} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }} />
+              <img
+                src={board.coverImage}
+                alt=""
+                style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }}
+              />
             ) : (
               '🗂'
             )}
@@ -129,9 +174,9 @@ function BoardDetailInner() {
               gap: 5,
               padding: '6px 12px',
               borderRadius: 999,
-              border: '1px solid var(--brand, #5856D6)',
-              background: subscribed ? 'var(--brand, #5856D6)' : 'transparent',
-              color: subscribed ? '#fff' : 'var(--brand, #5856D6)',
+              border: '1px solid var(--brand)',
+              background: subscribed ? 'var(--brand)' : 'transparent',
+              color: subscribed ? 'var(--on-brand)' : 'var(--brand)',
               cursor: 'pointer',
               fontSize: 12,
               fontWeight: 700,
@@ -140,7 +185,7 @@ function BoardDetailInner() {
             {subscribed ? '🔔 已訂閱' : '訂閱'}
           </button>
           <Link
-            href={`/community/post/new?boardId=${encodeURIComponent(boardId)}`}
+            href={`/community/post/new?boardId=${encodeURIComponent(boardId)}&schoolId=${encodeURIComponent(schoolId)}`}
             className="btn primary"
             style={{ fontSize: 12, padding: '6px 12px' }}
           >
@@ -152,7 +197,7 @@ function BoardDetailInner() {
             style={{
               marginTop: 10,
               padding: '10px 12px',
-              background: 'var(--panel2, #F2F2F7)',
+              background: 'var(--panel2)',
               borderRadius: 8,
               fontSize: 12,
               color: 'var(--muted)',
@@ -175,12 +220,16 @@ function BoardDetailInner() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {posts.map((p) => {
             const likes =
-              typeof p.likes === 'number' ? p.likes : Array.isArray(p.likedBy) ? p.likedBy.length : 0;
+              typeof p.likes === 'number'
+                ? p.likes
+                : Array.isArray(p.likedBy)
+                  ? p.likedBy.length
+                  : 0;
             const cc = typeof p.commentCount === 'number' ? p.commentCount : 0;
             return (
               <Link
                 key={p.id}
-                href={`/community/post/${p.id}`}
+                href={`/community/post/${p.id}?schoolId=${encodeURIComponent(schoolId)}`}
                 className="card"
                 style={{ padding: 14, textDecoration: 'none', color: 'var(--text)' }}
               >
@@ -188,14 +237,14 @@ function BoardDetailInner() {
                   <span
                     style={{
                       fontSize: 11,
-                      color: 'var(--brand, #5856D6)',
-                      background: 'rgba(88,86,214,0.10)',
+                      color: 'var(--brand)',
+                      background: 'var(--accent-soft)',
                       padding: '2px 8px',
                       borderRadius: 999,
                       fontWeight: 700,
                     }}
                   >
-                    {p.anonymous ? p.aliasSnapshot ?? '匿名' : '實名'}
+                    {p.anonymous ? (p.aliasSnapshot ?? '匿名') : '實名'}
                   </span>
                 </div>
                 <div style={{ fontSize: 15, fontWeight: 700 }}>{p.title}</div>

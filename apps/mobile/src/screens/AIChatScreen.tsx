@@ -1,5 +1,8 @@
 /* eslint-disable */
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { safeNavigate } from '../utils/safeNavigate';
+import { describePickupNumber, formatShortOrderCode } from '@campus/shared/src/ordering/pickupNumber';
+import { resolveUnknownOrderOutcome } from '../services/orderLookup';
 import {
   ScrollView,
   Text,
@@ -143,8 +146,6 @@ import {
   matchTaskChain,
   getAgentCapabilitySummary,
   simulateAgentGreeting,
-  simulateRecentExecutions,
-  simulateProactiveMessages,
   getDefaultMemory,
   getInitialContext,
   getMemoryStorageKey,
@@ -227,7 +228,9 @@ type OrderSuccessSummary = {
   itemName: string;
   quantity: number;
   total?: number;
-  statusHint?: string;
+  queueNumber?: unknown;
+  createdAt?: unknown;
+  status?: unknown;
 };
 
 function extractCreateOrderSuccess(
@@ -250,27 +253,16 @@ function extractCreateOrderSuccess(
       : 1;
   const merchantLabel = String(d.merchantName ?? d.cafeteria ?? '餐廳');
   const total = typeof d.totalAmount === 'number' ? d.totalAmount : undefined;
-  return { orderId, merchantLabel, itemName, quantity, total, statusHint: '待店家確認' };
-}
-
-/**
- * 把內部 mock id 轉成使用者友善的短代號：
- *   mock_1778928670157_lazdpl4 → #LAZDPL4
- *   normal-id-XYZ-9            → #XYZ-9
- * 不適合顯示給使用者的內部前綴會被剝掉。
- */
-function friendlyOrderCode(rawId: string | undefined): string {
-  const id = String(rawId ?? '').trim();
-  if (!id) return '#—';
-  if (id.startsWith('mock_')) {
-    const parts = id.split('_');
-    const tail = parts[parts.length - 1];
-    if (tail) return `#${tail.toUpperCase()}`;
-  }
-  // 一般情況：取後 8 碼大寫
-  const compact = id.replace(/[^A-Za-z0-9-]/g, '');
-  const tail = compact.length > 8 ? compact.slice(-8) : compact;
-  return `#${tail.toUpperCase()}`;
+  return {
+    orderId,
+    merchantLabel,
+    itemName,
+    quantity,
+    total,
+    queueNumber: d.queueNumber,
+    createdAt: d.createdAt,
+    status: d.status,
+  };
 }
 
 function OrderSuccessCard(props: { summary: OrderSuccessSummary }) {
@@ -301,10 +293,26 @@ function OrderSuccessCard(props: { summary: OrderSuccessSummary }) {
         {summary.itemName} × {summary.quantity}
       </Text>
 
-      {/* 下一步指引 */}
-      <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 6 }}>
-        可到「校園 → 點餐 → 我的訂單」追蹤進度。
-      </Text>
+      {/* 取餐號碼：有號碼寫號碼；沒號碼寫待給號碼兩行（下單時間・品項） */}
+      {(() => {
+        const pickup = describePickupNumber({
+          queueNumber: summary.queueNumber,
+          createdAt: summary.createdAt,
+          status: summary.status,
+          items: [{ name: summary.itemName, quantity: summary.quantity }],
+        });
+        return (
+          <View style={{ marginTop: 6, gap: 2 }}>
+            <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: '700' }}>{pickup.text}</Text>
+            {pickup.state === 'pending' && pickup.detail ? (
+              <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{pickup.detail}</Text>
+            ) : null}
+            {pickup.state === 'pending' ? (
+              <Text style={{ color: theme.colors.muted, fontSize: 12 }}>狀態：{pickup.label}</Text>
+            ) : null}
+          </View>
+        );
+      })()}
 
       {/* 訂單代號 + 金額 — 同一行；金額未確認時顯示「店家未報價」*/}
       <View
@@ -320,17 +328,11 @@ function OrderSuccessCard(props: { summary: OrderSuccessSummary }) {
         }}
       >
         <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-          訂單代號：
-          <Text style={{ fontFamily: 'monospace', color: theme.colors.text }}>
-            {friendlyOrderCode(summary.orderId)}
-          </Text>
+          {formatShortOrderCode(summary.orderId)}
         </Text>
         <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
           {hasPrice ? `金額約 $${summary.total}` : '金額待店家報價'}
         </Text>
-        {summary.statusHint ? (
-          <Text style={{ color: theme.colors.muted, fontSize: 12 }}>· {summary.statusHint}</Text>
-        ) : null}
       </View>
     </View>
   );
@@ -605,9 +607,9 @@ function ThinkingBubble(props: { steps: ThinkingStepUI[]; collapsed?: boolean })
   const [isExpanded, setIsExpanded] = useState(false);
   const statusIcon: Record<string, { icon: string; color: string }> = {
     done: { icon: 'checkmark-circle', color: '#34C759' },
-    checking: { icon: 'sync-outline', color: '#5856D6' },
+    checking: { icon: 'sync-outline', color: theme.colors.accent },
     warning: { icon: 'alert-circle', color: '#FF9500' },
-    info: { icon: 'information-circle', color: '#5856D6' },
+    info: { icon: 'information-circle', color: theme.colors.accent },
   };
 
   return (
@@ -800,8 +802,8 @@ function ToolStatusCard(props: { execution: ToolExecution; tool: AgentTool | und
   const statusConfig: Record<ToolExecutionStatus, { icon: string; color: string; label: string }> =
     {
       pending: { icon: 'hourglass-outline', color: '#FF9500', label: '等待中' },
-      confirming: { icon: 'help-circle-outline', color: '#5856D6', label: '待確認' },
-      executing: { icon: 'sync-outline', color: '#5856D6', label: '執行中' },
+      confirming: { icon: 'help-circle-outline', color: theme.colors.accent, label: '待確認' },
+      executing: { icon: 'sync-outline', color: theme.colors.accent, label: '執行中' },
       success: { icon: 'checkmark-circle', color: '#34C759', label: '完成' },
       failed: { icon: 'close-circle', color: '#FF3B30', label: '失敗' },
       cancelled: { icon: 'ban-outline', color: '#8E8E93', label: '已取消' },
@@ -1487,15 +1489,15 @@ function MessageBubble(props: {
               width: 22,
               height: 22,
               borderRadius: 11,
-              backgroundColor: '#5856D6',
+              backgroundColor: theme.colors.accent,
               alignItems: 'center',
               justifyContent: 'center',
             }}
           >
-            <Ionicons name="flash" size={12} color="#fff" />
+            <Ionicons name="chatbubble-outline" size={12} color={theme.colors.onAccent} />
           </View>
           <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: '600' }}>
-            AI Agent
+            校園助理
           </Text>
           {message.choiceMenu && message.choiceMenu.options.length > 0 && (
             <View
@@ -1515,10 +1517,10 @@ function MessageBubble(props: {
                 paddingHorizontal: 6,
                 paddingVertical: 1,
                 borderRadius: 4,
-                backgroundColor: '#5856D615',
+                backgroundColor: theme.colors.accentSoft,
               }}
             >
-              <Text style={{ color: '#5856D6', fontSize: 9, fontWeight: '600' }}>
+              <Text style={{ color: theme.colors.accent, fontSize: 9, fontWeight: '600' }}>
                 {message.agentType === 'tool_confirm'
                   ? '確認'
                   : message.agentType === 'tool_executing'
@@ -1792,12 +1794,10 @@ export function AIChatScreen(props: any) {
   const deliveredRouteSeedPromptRef = useRef<string | null>(null);
   const [latestProactiveReports, setLatestProactiveReports] = useState<ProactiveAIReport[]>([]);
   const [showCapabilities, setShowCapabilities] = useState(true);
-  const [recentExecutions, setRecentExecutions] = useState<ToolExecution[]>(() =>
-    isOfflineAI ? [] : simulateRecentExecutions(),
-  );
-  const [proactiveMessages, setProactiveMessages] = useState(() =>
-    isOfflineAI ? [] : simulateProactiveMessages(),
-  );
+  const [recentExecutions, setRecentExecutions] = useState<ToolExecution[]>([]);
+  const [proactiveMessages, setProactiveMessages] = useState<
+    { trigger: ProactiveTrigger; message: string }[]
+  >([]);
   const [agentContext, setAgentContext] = useState<ConversationContext>(() => getInitialContext());
   const [agentMemory, setAgentMemory] = useState<AgentMemory>(() =>
     getDefaultMemory(effectiveUserId ?? 'guest'),
@@ -1876,7 +1876,7 @@ export function AIChatScreen(props: any) {
           ? '使用已下載的 AI 模型在裝置上推理'
           : '連線到你設定的本機 LLM server',
         icon: 'hardware-chip-outline' as const,
-        color: aiStatus.localModelReady ? '#AF52DE' : '#5856D6',
+        color: aiStatus.localModelReady ? '#AF52DE' : theme.colors.accent,
       };
     }
     return {
@@ -4004,7 +4004,7 @@ export function AIChatScreen(props: any) {
         return {
           id: uid(),
           role: 'assistant',
-          content: `我是你的校園全能 AI 助理，可以幫你規劃並執行已串接的校園操作：\n\n${caps.join('\n')}\n\n餐廳已開通線上接單時，我會送到餐廳點餐 API；沒有正式 API 的項目，我會建立請假信或報修草稿，不會假裝已送出。\n試試說「幫我訂午餐」或「我想請假」。`,
+          content: `我是你的校園助理，可以幫你規劃並執行已串接的校園操作：\n\n${caps.join('\n')}\n\n餐廳已開通線上接單時，我會送到餐廳點餐 API；沒有正式 API 的項目，我會建立請假信或報修草稿，不會假裝已送出。\n試試說「幫我訂午餐」或「我想請假」。`,
           timestamp: new Date(),
           agentType: 'text',
           suggestions: ['幫我訂午餐', '我頭有點痛', '幫我查成績'],
@@ -4192,17 +4192,6 @@ export function AIChatScreen(props: any) {
       pickupTime: params.pickup_time,
       aiPrefill: true,
       source: 'ai_agent',
-    };
-  }
-
-  function buildDiningOrderViewParams(
-    params: Record<string, any>,
-    userMessage = '',
-  ): Record<string, unknown> {
-    return {
-      ...buildDiningOrderParams(params, userMessage),
-      aiPrefill: false,
-      initialTab: 2,
     };
   }
 
@@ -4434,7 +4423,7 @@ export function AIChatScreen(props: any) {
         {
           label: '查看我的訂單',
           action: 'navigate',
-          params: buildDiningOrderViewParams(params, userMessage),
+          params: { screen: 'StudentOrders' },
           sensitivity: 'low',
           status: 'confirmed',
         },
@@ -4784,9 +4773,6 @@ export function AIChatScreen(props: any) {
       startedAt: new Date().toISOString(),
       completedAt: new Date().toISOString(),
     };
-    if (!isOfflineAI) {
-      setRecentExecutions((prev) => [execution, ...prev].slice(0, 5));
-    }
     setAgentContext((prev) => ({ ...prev, state: 'reporting', currentTool: undefined }));
     return {
       id: genMsgId(),
@@ -4980,11 +4966,14 @@ export function AIChatScreen(props: any) {
 
       let status: ToolExecutionStatus = 'success';
       let result = '';
+      let hasExecutionReceipt = false;
       let resultActions: AssistantActionProposal[] | undefined;
       try {
         const executionResult = await executeConfirmedToolResult(tool, params);
         status = executionResult.kind === 'blocked' ? 'failed' : 'success';
         result = executionResult.message;
+        hasExecutionReceipt =
+          executionResult.kind === 'executed' && Boolean(executionResult.recordId);
         resultActions = executionResult.actions;
       } catch (error: any) {
         status = 'failed';
@@ -5000,7 +4989,7 @@ export function AIChatScreen(props: any) {
             result,
             completedAt: new Date().toISOString(),
           };
-          if (status === 'success' && !isOfflineAI) {
+          if (status === 'success' && hasExecutionReceipt) {
             setRecentExecutions((r) => [updatedExec, ...r].slice(0, 5));
           }
           return {
@@ -7133,14 +7122,14 @@ export function AIChatScreen(props: any) {
         if (!emergencyContent) {
           if (/你好|嗨|哈囉|hello|hi|hey|早安|午安|晚安/.test(_userText)) {
             emergencyContent =
-              '你好！我是靜宜校園 AI 助理 🎓\n\n可以問我交通資訊、校園設施、課程問題等，我會盡力幫你解答！';
+              '你好！我是校園助理\n\n可以問我交通資訊、校園設施、課程問題等，我會盡力幫你解答！';
             emergencySuggestions = ['怎麼去台中車站', '圖書館開放時間', '今天有什麼課'];
           } else if (/謝謝|感謝|thx|thanks/.test(_userText)) {
             emergencyContent = '不客氣！有其他問題隨時問我 😊';
             emergencySuggestions = ['還有其他問題', '查課表', '查交通'];
           } else if (/你是誰|你叫什麼|自我介紹/.test(_userText)) {
             emergencyContent =
-              '我是靜宜大學校園 AI 助理！\n\n我可以幫你：\n- 🚌 查交通路線（怎麼去台中車站、高鐵等）\n- 📚 查課程和作業資訊\n- 🏫 校園設施位置與開放時間\n- 🍽️ 餐廳和用餐資訊\n- 📋 請假、選課等學務問題\n\n有什麼想問的，儘管說！';
+              '我是靜宜大學校園助理！\n\n我可以幫你：\n- 🚌 查交通路線（怎麼去台中車站、高鐵等）\n- 📚 查課程和作業資訊\n- 🏫 校園設施位置與開放時間\n- 🍽️ 餐廳和用餐資訊\n- 📋 請假、選課等學務問題\n\n有什麼想問的，儘管說！';
             emergencySuggestions = ['怎麼去台中車站', '圖書館在哪', '今天吃什麼'];
           }
         }
@@ -7360,11 +7349,11 @@ export function AIChatScreen(props: any) {
               text: '確認下單',
               onPress: () => {
                 void (async () => {
-                  const renderOrderFailure = () => {
+                  const renderOrderFailure = (message: string = ORDER_FAIL_COPY) => {
                     pushAssistantMessage({
                       id: genMsgId('order-fail'),
                       role: 'assistant',
-                      content: ORDER_FAIL_COPY,
+                      content: message,
                       timestamp: new Date(),
                       agentType: 'tool_result',
                       suggestions: ['前往點餐頁面', '查看我的訂單'],
@@ -7382,7 +7371,12 @@ export function AIChatScreen(props: any) {
                         ? result.orderId
                         : undefined;
                     if (result.success !== true || !oid) {
-                      renderOrderFailure();
+                      // 伺服器明確說不成立（菜單或金額變了、還不能線上點餐）就照實轉述
+                      renderOrderFailure(
+                        result.orderOutcome === 'not_created' && typeof result.errorMessage === 'string' && result.errorMessage
+                          ? result.errorMessage
+                          : ORDER_FAIL_COPY,
+                      );
                       return;
                     }
                     const totalText =
@@ -7397,10 +7391,9 @@ export function AIChatScreen(props: any) {
                       content: [
                         '✅ 下單成功。',
                         '',
-                        `訂單編號：${oid}${cafeteriaText}${totalText}`,
+                        `${formatShortOrderCode(oid)}${cafeteriaText}${totalText}`,
+                        describePickupNumber({ queueNumber: result.queueNumber, createdAt: result.createdAt, status: result.status }).text,
                         `品項數：${itemCount}`,
-                        '',
-                        '可到「校園 → 點餐」查看訂單狀態。',
                       ].join('\n'),
                       timestamp: new Date(),
                       agentType: 'tool_result',
@@ -7409,14 +7402,48 @@ export function AIChatScreen(props: any) {
                         {
                           label: '查看我的訂單',
                           action: 'navigate',
-                          params: { screen: '校園', nested: 'Ordering', initialTab: 2 },
+                          params: { screen: 'StudentOrders' },
                           requiresConfirmation: false,
                           sensitivity: 'low',
                         },
                       ],
                     });
-                  } catch {
-                    renderOrderFailure();
+                  } catch (error: any) {
+                    if (error?.details?.orderOutcome === 'not_created') {
+                      renderOrderFailure(typeof error?.message === 'string' && error.message ? error.message : ORDER_FAIL_COPY);
+                      return;
+                    }
+                    const requestId = typeof input.requestId === 'string' ? input.requestId : '';
+                    if (!requestId) {
+                      renderOrderFailure();
+                      return;
+                    }
+                    // 結果不明（斷線、逾時）：先用同一個送出編號查一次
+                    const outcome = await resolveUnknownOrderOutcome(school.id, requestId);
+                    if (outcome.kind === 'found') {
+                      pushAssistantMessage({
+                        id: genMsgId('order-ok'),
+                        role: 'assistant',
+                        content: [
+                          '✅ 下單成功。',
+                          '',
+                          formatShortOrderCode(outcome.order.orderId),
+                          describePickupNumber(outcome.order).text,
+                        ].join('\n'),
+                        timestamp: new Date(),
+                        agentType: 'tool_result',
+                        suggestions: ['查看我的訂單'],
+                      });
+                      return;
+                    }
+                    pushAssistantMessage({
+                      id: genMsgId('order-unknown'),
+                      role: 'assistant',
+                      content: outcome.message,
+                      timestamp: new Date(),
+                      agentType: 'tool_result',
+                      suggestions: outcome.kind === 'checking' ? ['查看我的訂單'] : [],
+                    });
                   }
                 })();
               },
@@ -7505,6 +7532,11 @@ export function AIChatScreen(props: any) {
         }
       }
 
+      if (screen === 'StudentOrders') {
+        safeNavigate(nav, 'StudentOrders');
+        return;
+      }
+
       const nestedParams = { ...params };
       delete nestedParams.screen;
       delete nestedParams.nested;
@@ -7536,6 +7568,11 @@ export function AIChatScreen(props: any) {
     // 點擊建議選項 = 正面訊號（表示 AI 的引導有用）
     if (lastQAPairIdRef.current) {
       setTrainingDB((prev) => updatePairQuality(prev, lastQAPairIdRef.current!, +1, true));
+    }
+    // 「查看我的訂單」直接開我的訂單，不再丟回對話（以前會帶到菜單頁）
+    if (text === '查看我的訂單') {
+      safeNavigate(nav, 'StudentOrders');
+      return;
     }
     void handleSend(text);
   };
@@ -7647,8 +7684,8 @@ export function AIChatScreen(props: any) {
           };
           setMessages([greeting]);
           setShowCapabilities(true);
-          setRecentExecutions(isOfflineAI ? [] : simulateRecentExecutions());
-          setProactiveMessages(isOfflineAI ? [] : simulateProactiveMessages());
+          setRecentExecutions([]);
+          setProactiveMessages([]);
           setAgentContext(getInitialContext());
         },
       },
@@ -7796,12 +7833,12 @@ export function AIChatScreen(props: any) {
                       width: 22,
                       height: 22,
                       borderRadius: 11,
-                      backgroundColor: '#5856D6',
+                      backgroundColor: theme.colors.accent,
                       alignItems: 'center',
                       justifyContent: 'center',
                     }}
                   >
-                    <Ionicons name="flash" size={12} color="#fff" />
+                    <Ionicons name="chatbubble-outline" size={12} color={theme.colors.onAccent} />
                   </View>
                   <Text style={{ color: theme.colors.muted, fontSize: 11 }}>思考中...</Text>
                 </View>
@@ -7857,7 +7894,7 @@ export function AIChatScreen(props: any) {
                       : agentContext.state === 'confirming' ||
                           agentContext.state === 'waiting_chain_confirm'
                         ? '#FF9500'
-                        : '#5856D6',
+                        : theme.colors.accent,
                 }}
               />
               <Text style={{ color: theme.colors.muted, fontSize: 11 }}>
@@ -7922,13 +7959,13 @@ export function AIChatScreen(props: any) {
                 width: 40,
                 height: 40,
                 borderRadius: 20,
-                backgroundColor: input.trim() ? '#5856D6' : theme.colors.surface2,
+                backgroundColor: input.trim() ? theme.colors.accent : theme.colors.surface2,
                 alignItems: 'center',
                 justifyContent: 'center',
                 opacity: pressed ? 0.8 : 1,
               })}
             >
-              <Ionicons name="send" size={18} color={input.trim() ? '#fff' : theme.colors.muted} />
+              <Ionicons name="send" size={18} color={input.trim() ? theme.colors.onAccent : theme.colors.muted} />
             </Pressable>
           </View>
         </View>

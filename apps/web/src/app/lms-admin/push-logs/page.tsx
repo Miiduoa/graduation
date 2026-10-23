@@ -295,9 +295,9 @@ export default function PushLogsPage() {
                 <YAxis allowDecimals={false} width={40} />
                 <Tooltip />
                 <Legend />
-                <Bar dataKey="success" stackId="a" fill="#34C759" name="success" />
-                <Bar dataKey="attempted" stackId="a" fill="#5856D6" name="attempted" />
-                <Bar dataKey="failed" stackId="a" fill="#FF3B30" name="failed" />
+                <Bar dataKey="success" stackId="a" fill="var(--success)" name="success" />
+                <Bar dataKey="attempted" stackId="a" fill="var(--brand)" name="attempted" />
+                <Bar dataKey="failed" stackId="a" fill="var(--danger)" name="failed" />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -335,7 +335,7 @@ export default function PushLogsPage() {
         </div>
 
         {dlqError ? (
-          <p style={{ color: '#FF3B30', marginTop: 12 }}>
+          <p style={{ color: 'var(--danger)', marginTop: 12 }}>
             DLQ 讀取錯誤：{dlqError}（若 migration 未到帳或未具 admin RLS）
           </p>
         ) : null}
@@ -409,7 +409,7 @@ export default function PushLogsPage() {
         />
       </label>
       <p style={{ color: '#8E8E93', fontSize: 13 }}>目前顯示 {summaryView.count} 筆（最多 120）。</p>
-      {error ? <p style={{ color: '#FF3B30' }}>{error}</p> : null}
+      {error ? <p style={{ color: 'var(--danger)' }}>{error}</p> : null}
       <div style={{ overflowX: 'auto', marginTop: 16 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
@@ -471,7 +471,7 @@ function SummaryCell({ label, value, highlight }: { label: string; value?: numbe
         border: highlight ? '1px solid #fecaca' : '1px solid #E5E5EA',
       }}>
       <div style={{ fontSize: 12, color: '#8E8E93' }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 700, color: highlight ? '#FF3B30' : '#1C1C1E' }}>
+      <div style={{ fontSize: 22, fontWeight: 700, color: highlight ? 'var(--danger)' : '#1C1C1E' }}>
         {value == null ? '—' : value}
       </div>
     </div>

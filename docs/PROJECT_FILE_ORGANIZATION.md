@@ -76,7 +76,6 @@
 - build / cache：`.next/`、`.expo/`、`build/`、`dist/`、`web-build/`、`*.tsbuildinfo`
 - 本機設定與 secret：`.env`、`.env.*`，但保留 `*.env.example`
 - log / debug：`*.log`、`firebase-debug.log*`、`firestore-debug.log*`
-- OS / IDE / agent state：`.DS_Store`、`.claude/`、`.cursor/`、`.playwright-cli/`
 - 暫存輸出：`tmp/`、`outputs/`
 - Python runtime data：`__pycache__/`、`*.pyc`、`backend/ai-server/.venv/`、`backend/ai-server/data/`
 

@@ -1,5 +1,5 @@
 # 02_authentication.yaml
-# AI-First shell：從頭像抽屜進入學號登入或個人資料（無底部「我的」Tab）
+# 從頭像抽屜進入學號登入或個人資料（無底部「我的」Tab）
 
 appId: ${APP_ID}
 name: Authentication Flow

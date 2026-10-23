@@ -1,138 +1,143 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { Button } from './ui/Button';
+import styles from './SystemNotice.module.css';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
 }
 
+const DISMISSED_KEY = 'pwa-install-dismissed';
+
+function wasDismissed() {
+  try {
+    return Boolean(localStorage.getItem(DISMISSED_KEY));
+  } catch {
+    return false;
+  }
+}
+
 export function PWAInstallBanner() {
-  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
-  const [isInstalled, setIsInstalled] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    return window.matchMedia('(display-mode: standalone)').matches;
-  });
-  const [isVisible, setIsVisible] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
-    if (isStandalone) return false;
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-    if (!isIOS) return false;
-    return !localStorage.getItem('pwa-install-dismissed');
-  });
-  const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent);
+  // Browser-only preferences are read after hydration, including on iOS.
+  const [isIOS, setIsIOS] = useState(false);
+  const [isVisible, setIsVisible] = useState(false);
+  const [canPrompt, setCanPrompt] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const prompt = useRef<BeforeInstallPromptEvent | null>(null);
+  const mounted = useRef(false);
+  const requesting = useRef(false);
+  const dismissed = useRef(false);
 
   useEffect(() => {
-    if (isInstalled || isIOS) {
-      return;
-    }
+    mounted.current = true;
+    dismissed.current = wasDismissed();
+    const standalone = () =>
+      window.matchMedia('(display-mode: standalone)').matches ||
+      (navigator as Navigator & { standalone?: boolean }).standalone === true;
+    const ios =
+      /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    setIsIOS(ios);
+    const onBus = /^\/bus(\/|$)/.test(window.location.pathname);
+    setIsVisible(ios && !standalone() && !dismissed.current && !onBus);
 
-    const handler = (e: Event) => {
-      e.preventDefault();
-      setDeferredPrompt(e as BeforeInstallPromptEvent);
-
-      // Check if previously dismissed
-      const dismissed = localStorage.getItem('pwa-install-dismissed');
-      if (!dismissed) {
-        setIsVisible(true);
+    const handlePrompt = (event: Event) => {
+      event.preventDefault();
+      prompt.current = event as BeforeInstallPromptEvent;
+      setCanPrompt(true);
+      setError('');
+      if (!standalone() && !dismissed.current && !/^\/bus(\/|$)/.test(window.location.pathname)) setIsVisible(true);
+    };
+    const handleInstalled = () => {
+      prompt.current = null;
+      setCanPrompt(false);
+      setIsVisible(false);
+    };
+    const handleDismissed = (event: StorageEvent) => {
+      if (event.key === DISMISSED_KEY && event.newValue) {
+        dismissed.current = true;
+        setIsVisible(false);
       }
     };
-
-    const appInstalledHandler = () => {
-      setIsInstalled(true);
-      setIsVisible(false);
-    };
-
-    window.addEventListener('beforeinstallprompt', handler);
-    window.addEventListener('appinstalled', appInstalledHandler);
-
+    window.addEventListener('beforeinstallprompt', handlePrompt);
+    window.addEventListener('appinstalled', handleInstalled);
+    window.addEventListener('storage', handleDismissed);
     return () => {
-      window.removeEventListener('beforeinstallprompt', handler);
-      window.removeEventListener('appinstalled', appInstalledHandler);
+      mounted.current = false;
+      window.removeEventListener('beforeinstallprompt', handlePrompt);
+      window.removeEventListener('appinstalled', handleInstalled);
+      window.removeEventListener('storage', handleDismissed);
     };
-  }, [isInstalled, isIOS]);
+  }, []);
 
-  const handleInstall = async () => {
-    if (!deferredPrompt) return;
-
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-
-    if (outcome === 'accepted') {
-      setIsVisible(false);
+  async function handleInstall() {
+    const event = prompt.current;
+    if (!event || requesting.current) return;
+    requesting.current = true;
+    prompt.current = null;
+    setBusy(true);
+    setError('');
+    try {
+      await event.prompt();
+      await event.userChoice;
+      if (mounted.current) setIsVisible(false);
+    } catch {
+      if (mounted.current) setError('無法開啟安裝視窗。你可以稍後從瀏覽器選單加入主畫面。');
+    } finally {
+      requesting.current = false;
+      if (mounted.current) {
+        setBusy(false);
+        setCanPrompt(Boolean(prompt.current));
+      }
     }
+  }
 
-    setDeferredPrompt(null);
-  };
-
-  const handleDismiss = () => {
+  function handleDismiss() {
+    dismissed.current = true;
     setIsVisible(false);
-    localStorage.setItem('pwa-install-dismissed', 'true');
-  };
+    try {
+      localStorage.setItem(DISMISSED_KEY, 'true');
+    } catch {
+      // Dismissal still works for this page when browser storage is unavailable.
+    }
+  }
 
-  if (!isVisible || isInstalled) return null;
+  if (!isVisible) return null;
 
   return (
-    <div className="pwaInstallBanner">
-      <div
-        style={{
-          maxWidth: 600,
-          margin: '0 auto',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 16,
-        }}
-      >
-        <div style={{ fontSize: 32 }}>📲</div>
-
-        <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 700, marginBottom: 4 }}>安裝校園助手 App</div>
-          <div style={{ fontSize: 13, opacity: 0.9 }}>
-            {isIOS ? (
-              <>
-                點擊 <span style={{ fontWeight: 600 }}>分享</span> 按鈕，然後選擇{' '}
-                <span style={{ fontWeight: 600 }}>加入主畫面</span>
-              </>
-            ) : (
-              '快速存取校園資訊，支援離線瀏覽'
-            )}
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', gap: 8 }}>
-          {!isIOS && (
-            <button
-              onClick={handleInstall}
-              style={{
-                background: '#fff',
-                color: '#5856D6',
-                border: 'none',
-                padding: '10px 20px',
-                borderRadius: 8,
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              安裝
-            </button>
-          )}
-          <button
-            onClick={handleDismiss}
-            style={{
-              background: 'rgba(255,255,255,0.2)',
-              color: '#fff',
-              border: 'none',
-              padding: '10px 16px',
-              borderRadius: 8,
-              cursor: 'pointer',
-            }}
-          >
-            ✕
-          </button>
-        </div>
+    <section className={styles.notice} aria-label="加入主畫面">
+      <div className={styles.content}>
+        <h2 className={styles.title}>把 Campus One 加入主畫面</h2>
+        <p className={styles.description}>
+          {isIOS
+            ? '在瀏覽器選單選擇「分享」，再選「加入主畫面」。'
+            : '下次從主畫面直接開啟。課程與個人資料仍需網路連線。'}
+        </p>
       </div>
-    </div>
+      <div className={styles.actions}>
+        {canPrompt && (
+          <Button
+            type="button"
+            variant="primary"
+            loading={busy}
+            onClick={() => void handleInstall()}
+          >
+            {busy ? '開啟安裝視窗…' : '加入主畫面'}
+          </Button>
+        )}
+        <Button type="button" disabled={busy} onClick={handleDismiss}>
+          暫時不用
+        </Button>
+      </div>
+      {error && (
+        <p className={styles.error} role="alert">
+          {error}
+        </p>
+      )}
+    </section>
   );
 }
 

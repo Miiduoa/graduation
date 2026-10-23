@@ -4,7 +4,7 @@ const { z } = require('zod');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const {
   verifyAttendance,
-} = require('../../../../packages/shared/dist-cjs/lms/attendanceEngine');
+} = require('../../generated/shared/lms/attendanceEngine');
 
 /**
  * verifyAttendanceClaim — server-side 點名驗證

@@ -9,6 +9,7 @@ type CloudFunctionConfig = {
   firebase?: { projectId?: string };
   cloudFunctionRegion?: string;
   cloudFunctionBaseUrl?: string;
+  functionsBaseUrl?: string;
   useCloudFunctionEmulator?: boolean | string;
 };
 
@@ -39,9 +40,13 @@ function shouldUseEmulator(extra: CloudFunctionConfig, _projectId: string): bool
   )
     .trim()
     .toLowerCase();
+  if (explicit === 'true' || explicit === '1') return true;
 
-  if (explicit === 'true') return true;
-  // 預設不走 emulator — 即使在 dev 模式也直接連 Cloud Functions
+  const firebaseEmulator = String(process.env.EXPO_PUBLIC_USE_FIREBASE_EMULATOR || '')
+    .trim()
+    .toLowerCase();
+  if (firebaseEmulator === 'true' || firebaseEmulator === '1') return true;
+
   return false;
 }
 
@@ -51,19 +56,24 @@ function getEmulatorHost(): string {
 
 export function getCloudFunctionBaseUrl(): string {
   const extra = getExpoExtra();
-  const configuredBaseUrl = String(
-    extra.cloudFunctionBaseUrl ?? process.env.EXPO_PUBLIC_CLOUD_FUNCTION_BASE_URL ?? '',
-  ).trim();
-
-  if (configuredBaseUrl) {
-    return trimTrailingSlash(configuredBaseUrl);
-  }
-
   const projectId = getProjectId(extra);
   const region = getRegion(extra);
 
   if (shouldUseEmulator(extra, projectId)) {
     return `http://${getEmulatorHost()}:5001/${projectId || DEFAULT_DEV_PROJECT_ID}/${region}`;
+  }
+
+  const configuredBaseUrl = String(
+    extra.functionsBaseUrl ??
+      process.env.EXPO_PUBLIC_FUNCTIONS_BASE_URL ??
+      extra.cloudFunctionBaseUrl ??
+      process.env.EXPO_PUBLIC_CLOUD_FUNCTION_BASE_URL ??
+      '',
+  ).trim();
+
+  if (configuredBaseUrl) {
+    const trimmed = trimTrailingSlash(configuredBaseUrl);
+    return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
   }
 
   const effectiveProjectId = projectId || DEFAULT_DEV_PROJECT_ID;

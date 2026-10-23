@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, Text, View, Pressable, TextInput, Alert, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { isAvailableAsync, shareAsync } from 'expo-sharing';
@@ -22,6 +22,7 @@ import { theme } from '../ui/theme';
 import { useSchool } from '../state/school';
 import { useAuth } from '../state/auth';
 import { getDb } from '../firebase';
+import { useAdminEvents } from '../hooks/useAdminEvents';
 import { useAsyncList } from '../hooks/useAsyncList';
 import { useAmbientCues } from '../features/engagement';
 import { AmbientCueCard } from '../ui/campusOs';
@@ -40,7 +41,6 @@ import {
 } from '../services/admin';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
 import {
-  isDemoUid,
   DEMO_ADMIN_ANNOUNCEMENTS,
   DEMO_ADMIN_EVENTS,
   DEMO_ADMIN_MEMBERS,
@@ -48,6 +48,13 @@ import {
   DEMO_ADMIN_CAFETERIAS,
 } from '../services/demoAdminMock';
 import { formatDateTime } from '../utils/format';
+import { isDevelopmentDemoSession } from '../services/release';
+import { eventRegistrationCount } from '../services/eventRegistrationCount';
+import {
+  EventRegistrationPolicyFields,
+  registrationPolicyDraft,
+  registrationPolicyInput,
+} from '../components/EventRegistrationPolicyFields';
 import { AIMissionControl } from '../components/AIMissionControl';
 
 type AdminTab = 'overview' | 'announcements' | 'events' | 'members' | 'settings';
@@ -72,6 +79,8 @@ type ClubEvent = {
   endsAt?: any;
   capacity?: number;
   registeredCount?: number;
+  appRegistrationCount?: number;
+  registrationPolicy?: Record<string, unknown>;
 };
 
 type SchoolMember = {
@@ -242,6 +251,18 @@ export function AdminDashboardScreen(props: any) {
   const { school } = useSchool();
   const auth = useAuth();
   const db = getDb();
+  const eventScope = JSON.stringify([auth.user?.uid, school.id]);
+  const currentEventScope = useRef(eventScope);
+  currentEventScope.current = eventScope;
+  const eventFormGeneration = useRef(0);
+  const eventSaving = useRef(false);
+  const eventMounted = useRef(true);
+  useEffect(() => {
+    eventMounted.current = true;
+    return () => {
+      eventMounted.current = false;
+    };
+  }, []);
   const {
     cue: ambientCue,
     dismissCue: dismissAmbientCue,
@@ -257,6 +278,7 @@ export function AdminDashboardScreen(props: any) {
   const [tab, setTab] = useState<AdminTab>('overview');
   const [showAnnouncementModal, setShowAnnouncementModal] = useState(false);
   const [showEventModal, setShowEventModal] = useState(false);
+  const [eventFormScope, setEventFormScope] = useState(eventScope);
   const [showCafeteriaModal, setShowCafeteriaModal] = useState(false);
   const [showOperatorModal, setShowOperatorModal] = useState(false);
   const [editingAnnouncement, setEditingAnnouncement] = useState<Announcement | null>(null);
@@ -292,6 +314,9 @@ export function AdminDashboardScreen(props: any) {
   const [evtDescription, setEvtDescription] = useState('');
   const [evtLocation, setEvtLocation] = useState('');
   const [evtCapacity, setEvtCapacity] = useState('');
+  const [evtRegistrationPolicy, setEvtRegistrationPolicy] = useState(() =>
+    registrationPolicyDraft(),
+  );
   const [evtStartsAt, setEvtStartsAt] = useState('');
   const [evtEndsAt, setEvtEndsAt] = useState('');
   const [cafeteriaName, setCafeteriaName] = useState('');
@@ -308,9 +333,7 @@ export function AdminDashboardScreen(props: any) {
   const [operatorRole, setOperatorRole] = useState<'owner' | 'manager' | 'staff'>('staff');
   const [operatorStatus, setOperatorStatus] = useState<'active' | 'inactive'>('active');
 
-  // demo 模式 short-circuit：demo_admin_* uid 過不了 Firestore security rules，
-  //   每條 useAsyncList 開頭都先檢查；是 demo uid 就回傳 mock，避免畫面整片空白。
-  const demoMode = isDemoUid(auth.user?.uid);
+  const demoMode = isDevelopmentDemoSession(auth.user?.uid);
 
   const {
     items: announcements,
@@ -330,17 +353,16 @@ export function AdminDashboardScreen(props: any) {
   const {
     items: events,
     loading: evtLoading,
+    busy: evtBusy,
+    error: evtError,
+    hasMore: moreEvents,
+    loadMore: loadMoreEvents,
     reload: reloadEvt,
-  } = useAsyncList<ClubEvent>(async () => {
-    if (demoMode) return DEMO_ADMIN_EVENTS as ClubEvent[];
-    const qy = query(
-      collection(db, 'schools', school.id, 'clubEvents'),
-      orderBy('startsAt', 'desc'),
-      limit(50),
-    );
-    const snap = await getDocs(qy);
-    return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-  }, [db, school.id, demoMode]);
+  } = useAdminEvents<ClubEvent>(
+    school.id,
+    auth.user?.uid ?? '',
+    demoMode ? (DEMO_ADMIN_EVENTS as ClubEvent[]) : undefined,
+  );
 
   const {
     items: members,
@@ -419,7 +441,7 @@ export function AdminDashboardScreen(props: any) {
         updatedAt: data.updatedAt,
       } satisfies SchoolCafeteria;
     });
-  }, [db, school.id]);
+  }, [db, school.id, demoMode]);
 
   const {
     items: cafeteriaOperators,
@@ -604,7 +626,18 @@ export function AdminDashboardScreen(props: any) {
     ]);
   };
 
+  const closeEventModal = () => {
+    eventSaving.current = false;
+    eventFormGeneration.current += 1;
+    setShowEventModal(false);
+    setSaving(false);
+  };
   const openEventModal = (evt?: ClubEvent) => {
+    eventSaving.current = false;
+    eventFormGeneration.current += 1;
+    setEventFormScope(eventScope);
+    setSaving(false);
+    setEvtRegistrationPolicy(registrationPolicyDraft(evt?.registrationPolicy));
     if (evt) {
       setEditingEvent(evt);
       setEvtTitle(evt.title);
@@ -727,6 +760,12 @@ export function AdminDashboardScreen(props: any) {
   };
 
   const saveEvent = async () => {
+    const generation = eventFormGeneration.current;
+    const current = () =>
+      eventMounted.current &&
+      currentEventScope.current === eventScope &&
+      eventFormGeneration.current === generation;
+    if (!current() || eventSaving.current) return;
     if (!evtTitle.trim()) {
       Alert.alert('錯誤', '請輸入活動名稱');
       return;
@@ -754,11 +793,13 @@ export function AdminDashboardScreen(props: any) {
       return;
     }
 
+    eventSaving.current = true;
     setSaving(true);
     try {
       await upsertSchoolEvent({
         schoolId: school.id,
         eventId: editingEvent?.id ?? null,
+        registrationPolicy: registrationPolicyInput(evtRegistrationPolicy),
         title: evtTitle.trim(),
         description: evtDescription.trim(),
         location: evtLocation.trim(),
@@ -766,14 +807,18 @@ export function AdminDashboardScreen(props: any) {
         startsAt: startDate ? startDate.toISOString() : null,
         endsAt: endDate ? endDate.toISOString() : null,
       });
+      if (!current()) return;
       setShowEventModal(false);
       reloadEvt();
       reloadLogs();
       Alert.alert('成功', editingEvent ? '活動已更新' : '活動已建立');
     } catch (e: any) {
-      Alert.alert('錯誤', e?.message ?? '儲存失敗');
+      if (current()) Alert.alert('錯誤', e?.message ?? '儲存失敗');
     } finally {
-      setSaving(false);
+      if (current()) {
+        eventSaving.current = false;
+        setSaving(false);
+      }
     }
   };
 
@@ -969,7 +1014,7 @@ export function AdminDashboardScreen(props: any) {
           formatDateTime(evt.startsAt),
           formatDateTime(evt.endsAt),
           evt.capacity ?? '',
-          evt.registeredCount ?? '',
+          eventRegistrationCount(evt) ?? '待確認',
         ]),
       );
       const filename = `events-${school.code}-${Date.now()}.csv`;
@@ -1060,7 +1105,15 @@ export function AdminDashboardScreen(props: any) {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 }}>
           <HeaderAvatarButton />
           <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: '700', letterSpacing: 1.5, textTransform: 'uppercase' }}>
+            <Text
+              style={{
+                color: theme.colors.muted,
+                fontSize: 11,
+                fontWeight: '700',
+                letterSpacing: 1.5,
+                textTransform: 'uppercase',
+              }}
+            >
               學習 · 管理員模式
             </Text>
             <Text style={{ color: theme.colors.text, fontSize: 22, fontWeight: '700' }}>
@@ -1103,12 +1156,9 @@ export function AdminDashboardScreen(props: any) {
 
         {tab === 'overview' && (
           <>
-            {/* AI 任務指揮 — 管理員專屬下一步 */}
-            <AIMissionControl
-              uid={auth.user?.uid ?? 'demo_admin_sys'}
-              maxVisible={3}
-              hideWhenEmpty
-            />
+            {demoMode && (
+              <AIMissionControl uid={auth.user?.uid ?? ''} maxVisible={3} hideWhenEmpty />
+            )}
 
             <AnimatedCard title="管理員總覽" subtitle={`${school.name}（${school.code}）`}>
               <View
@@ -1359,7 +1409,10 @@ export function AdminDashboardScreen(props: any) {
         )}
 
         {tab === 'events' && (
-          <Card title="活動管理" subtitle={`共 ${events.length} 個活動`}>
+          <Card
+            title="活動管理"
+            subtitle={`已載入 ${events.length} 個活動；搜尋、排序與匯出僅涵蓋已載入項目。`}
+          >
             <View style={{ marginBottom: 12 }}>
               <TextInput
                 value={eventKeyword}
@@ -1432,11 +1485,11 @@ export function AdminDashboardScreen(props: any) {
                       </Text>
                     )}
                     <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>
-                      🗓️ {formatDateTime(evt.startsAt)}
+                      🗓️ {formatDateTime(evt.startsAt) || '時間尚未公布'}
                     </Text>
                     {evt.capacity && (
                       <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
-                        👥 {evt.registeredCount ?? 0} / {evt.capacity} 人
+                        👥 {eventRegistrationCount(evt) ?? '待確認'} / {evt.capacity} 人
                       </Text>
                     )}
                     <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
@@ -1451,6 +1504,21 @@ export function AdminDashboardScreen(props: any) {
                 )}
               </View>
             )}
+            {evtError && (
+              <Text style={{ color: theme.colors.danger }}>無法更新活動，已載入的內容仍保留。</Text>
+            )}
+            {moreEvents && (
+              <Button
+                text={evtBusy ? '載入中...' : '載入更多活動'}
+                disabled={evtBusy}
+                onPress={() => void loadMoreEvents()}
+              />
+            )}
+            <Button
+              text={evtBusy ? '更新中...' : '更新活動列表'}
+              disabled={evtBusy}
+              onPress={() => void reloadEvt()}
+            />
           </Card>
         )}
 
@@ -1885,10 +1953,10 @@ export function AdminDashboardScreen(props: any) {
       </Modal>
 
       <Modal
-        visible={showEventModal}
+        visible={showEventModal && eventFormScope === eventScope}
         animationType="slide"
         presentationStyle="pageSheet"
-        onRequestClose={() => setShowEventModal(false)}
+        onRequestClose={closeEventModal}
       >
         <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
           <View
@@ -1901,7 +1969,7 @@ export function AdminDashboardScreen(props: any) {
               borderBottomColor: theme.colors.border,
             }}
           >
-            <Pressable onPress={() => setShowEventModal(false)}>
+            <Pressable onPress={closeEventModal}>
               <Text style={{ color: theme.colors.accent, fontWeight: '600' }}>取消</Text>
             </Pressable>
             <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>
@@ -1920,6 +1988,7 @@ export function AdminDashboardScreen(props: any) {
           </View>
 
           <ScrollView
+            pointerEvents={saving ? 'none' : 'auto'}
             contentContainerStyle={{ padding: 16, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
           >
             <FormInput
@@ -1960,8 +2029,12 @@ export function AdminDashboardScreen(props: any) {
               placeholder="YYYY-MM-DD HH:mm"
             />
             <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 8 }}>
-              💡 未填開始時間時，系統會預設為 7 天後；可另外填入結束時間。
+              未填開始時間時，活動會顯示「時間尚未公布」。
             </Text>
+            <EventRegistrationPolicyFields
+              value={evtRegistrationPolicy}
+              onChange={setEvtRegistrationPolicy}
+            />
           </ScrollView>
         </View>
       </Modal>

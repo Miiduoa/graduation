@@ -34,7 +34,7 @@
 1. **錄影 + 截圖**（依 docx 第 4 節 / xlsx Sheet 5 拍攝清單）
    - 8 段影片 V01-V08（每段 8-15 秒）
    - 10 張截圖 S01-S10
-   - 全部存到 `/Users/miiduoa/Desktop/畢業專題/demo-media/` 並照命名規範
+   - 全部存到 repo 根目錄的 `demo-media/` 並照命名規範
 2. **錄完後**：開 PPT 把 placeholder 框換成實機影片/截圖（檔名都對得上，PPT 已預留）
 3. **跑一次完整 demo**（4 人從頭演到尾）
 
@@ -49,7 +49,7 @@ PPT 用 **PingFang TC** 字體 + 中文 emoji。在你 Mac 的 PowerPoint 或 Ke
 
 PPT 裡 8 個影片 + 4 個截圖位置都是虛線框 placeholder，等你錄完媒體後：
 1. 把實機檔案放到 `demo-media/` 資料夾
-2. 重新跑 `node /Users/miiduoa/Library/Application\ Support/Claude/local-agent-mode-sessions/.../delivery/build_pptx.js`（或在 PPT 裡手動拖進去）
+2. 在 PPT 裡把媒體手動拖進對應的虛線框
 
 ## 4 人分工速查
 

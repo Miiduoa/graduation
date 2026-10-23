@@ -6,19 +6,29 @@ const {
 } = require('../assistantAgent');
 
 const CAMPUS_ASSISTANT_MESSAGE_WINDOW = 20;
+const CAMPUS_ASSISTANT_MESSAGE_CHARS = 4000;
 const { tools } = require('../agent/tools/registry');
 const agentCases = require('../agent/cases.json');
-const { normalizeAssistantText } = require('./assistantFormat');
+const { normalizeAssistantText, formatAssistantDate, extractScheduleSnippet } = require('./assistantFormat');
 const {
   loadConversationMessages,
   saveConversationMessages,
 } = require('./assistantConversationStore');
 
+// 給模型看的時間先換成台灣時間的字，免得模型照 UTC 念給使用者
+const ASSISTANT_DATE_FIELDS = new Set(['publishedAt', 'startsAt', 'endsAt', 'dueAt']);
+
 function compactAssistantItems(items, fields, limit = 5) {
   return (items || []).slice(0, limit).map((item) => {
     const row = { id: item.id };
     fields.forEach((field) => {
-      if (item[field] != null) row[field] = item[field];
+      if (item[field] == null) return;
+      if (ASSISTANT_DATE_FIELDS.has(field)) {
+        const text = formatAssistantDate(item[field]);
+        if (text) row[field] = text;
+        return;
+      }
+      row[field] = item[field];
     });
     return row;
   });
@@ -33,7 +43,7 @@ function buildAuthorizedAssistantContext({
   events = [],
   menus = [],
   pois = [],
-  pendingAssignments = [],
+  pendingAssignments = null,
   weeklyReport = null,
   todaySchedule = null,
   dailyBrief = null,
@@ -43,19 +53,28 @@ function buildAuthorizedAssistantContext({
     displayName,
     actorRole,
     intent,
-    announcements: compactAssistantItems(announcements, ['title', 'source', 'publishedAt'], 5),
+    announcements: compactAssistantItems(announcements, ['title', 'source', 'publishedAt'], 5).map((row, index) => {
+      // 內文裡講時段的那一句也給模型，問「什麼時候維修」才答得出時段
+      const timeNote = extractScheduleSnippet(String(announcements[index]?.body || announcements[index]?.content || ''));
+      return timeNote ? { ...row, timeNote } : row;
+    }),
     events: compactAssistantItems(events, ['title', 'location', 'startsAt'], 5),
     menus: compactAssistantItems(menus, ['name', 'title', 'price', 'cafeteria'], 6),
     pois: compactAssistantItems(pois, ['name', 'category', 'description', 'openingHours'], 8),
-    pendingAssignments: compactAssistantItems(
-      pendingAssignments,
-      ['title', 'groupId', 'groupName', 'dueAt'],
-      6,
-    ),
+    pendingAssignments: Array.isArray(pendingAssignments)
+      ? compactAssistantItems(pendingAssignments, ['title', 'groupId', 'groupName', 'dueAt'], 6)
+      : null,
+    pendingAssignmentsStatus: Array.isArray(pendingAssignments) ? 'available' : 'unavailable',
+    ...(!Array.isArray(pendingAssignments) && {
+      pendingAssignmentsNote: '尚未取得本人待繳作業資料，不能據此判定沒有作業。',
+    }),
     weeklyReport: weeklyReport?.summary ? { summary: weeklyReport.summary } : null,
   };
 
-  if (todaySchedule && Array.isArray(todaySchedule.slots)) {
+  if (todaySchedule?.status === 'unavailable') {
+    base.todayScheduleStatus = 'unavailable';
+    base.todayScheduleNote = todaySchedule.message;
+  } else if (todaySchedule && Array.isArray(todaySchedule.slots)) {
     base.todaySchedule = todaySchedule.slots.slice(0, 12).map((s) => ({
       name: s.name,
       startTime: s.startTime,
@@ -137,7 +156,7 @@ async function buildModelBackedAssistantResponse({
   });
 
   const norm = (s) => String(s || '').trim();
-  const userSlice = normalizeAssistantText(lastUserMessage).slice(0, 1600);
+  const userSlice = normalizeAssistantText(lastUserMessage).slice(0, CAMPUS_ASSISTANT_MESSAGE_CHARS);
 
   let history = [];
 
@@ -147,7 +166,7 @@ async function buildModelBackedAssistantResponse({
       history = prior.map((m) => {
         const row = {
           role: m.role,
-          content: m.content != null ? String(m.content).slice(0, 1600) : '',
+          content: m.content != null ? String(m.content).slice(0, CAMPUS_ASSISTANT_MESSAGE_CHARS) : '',
         };
         if (Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
           row.tool_calls = m.tool_calls;
@@ -170,7 +189,7 @@ async function buildModelBackedAssistantResponse({
       .filter((message) => message?.role === 'user' || message?.role === 'assistant')
       .map((message) => ({
         role: message.role,
-        content: normalizeAssistantText(message.content).slice(0, 1600),
+        content: normalizeAssistantText(message.content).slice(0, CAMPUS_ASSISTANT_MESSAGE_CHARS),
       }));
     if (history.length === 0 || history[history.length - 1].role !== 'user') {
       history.push({ role: 'user', content: userSlice });

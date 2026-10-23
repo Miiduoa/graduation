@@ -31,6 +31,15 @@ if (typeof window !== 'undefined' && typeof window.localStorage?.removeItem !== 
   });
 }
 
+if (typeof URL !== 'undefined') {
+  if (typeof URL.createObjectURL !== 'function') {
+    URL.createObjectURL = () => 'blob:assignment-file-preview';
+  }
+  if (typeof URL.revokeObjectURL !== 'function') {
+    URL.revokeObjectURL = () => {};
+  }
+}
+
 beforeEach(() => {
   // 每個測試的 localStorage 從乾淨狀態開始
   if (typeof window !== 'undefined') {

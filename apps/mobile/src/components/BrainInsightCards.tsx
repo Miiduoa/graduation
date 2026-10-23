@@ -18,6 +18,7 @@ import { View, Text, Pressable, StyleSheet, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { aiBrain, type BrainInsight } from '../services/aiBrain';
 import { theme } from '../ui/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import type { ThemeColors } from '../ui/theme';
 import { useTheme } from '../state/theme';
 
@@ -87,6 +88,7 @@ const CATEGORY_LABEL: Record<BrainInsight['category'], string> = {
 };
 
 export function BrainInsightCards(props: BrainInsightCardsProps) {
+  const styles = useThemeStyleSheet(createStyles);
   const {
     maxVisible = 3,
     title = 'AI 為你發現的事',
@@ -191,6 +193,7 @@ function InsightCard(props: {
   onAction: () => void;
   onDismiss: () => void;
 }) {
+  const styles = useThemeStyleSheet(createStyles);
   const { insight, onPress, onAction, onDismiss } = props;
   const th = useTheme();
   const severityStyles = useMemo(() => buildSeverityPalette(th.colors), [th]);
@@ -265,7 +268,7 @@ function InsightCard(props: {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   wrapper: {
     marginHorizontal: 16,
     marginBottom: 16,

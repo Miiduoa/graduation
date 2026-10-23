@@ -11,6 +11,8 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { campusEventBus } from './campusEventBus';
+import { emitAttendanceCheckedIn } from './roleEventBus';
+import { getReleaseConfig } from './release';
 import {
   tcFetchCourses,
   tcFetchAttendance,
@@ -185,6 +187,12 @@ const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 const FIRESTORE_COLLECTION = 'attendanceSessions';
 const FIRESTORE_LEAVES_COLLECTION = 'attendanceLeaves';
 
+function requireLocalAttendanceEnvironment(): void {
+  if (getReleaseConfig().appEnv === 'production') {
+    throw new Error('此點名方式尚未開放。請使用課程內的課堂點名，或聯絡授課教師確認紀錄。');
+  }
+}
+
 /** 將本地 session 寫入 Firestore（教師建立/更新時呼叫） */
 async function syncSessionToFirestore(session: AttendanceSession): Promise<void> {
   if (isFirebaseMockMode()) return;
@@ -201,23 +209,19 @@ async function syncSessionToFirestore(session: AttendanceSession): Promise<void>
 }
 
 /** 從 Firestore 讀取進行中的場次（學生端用） */
-async function fetchActiveSessionsFromFirestore(courseIds?: string[]): Promise<AttendanceSession[]> {
-  if (isFirebaseMockMode()) return [];
+async function fetchActiveSessionsFromFirestore(courseIds: string[]): Promise<AttendanceSession[]> {
+  if (isFirebaseMockMode() || courseIds.length === 0) return [];
   try {
     const db = getDb();
     const col = collection(db, FIRESTORE_COLLECTION);
     const q = query(col, where('status', '==', 'active'));
     const snap = await getDocs(q);
-    let sessions: AttendanceSession[] = [];
+    const idSet = new Set(courseIds);
+    const sessions: AttendanceSession[] = [];
     snap.forEach((d) => {
       const data = d.data() as AttendanceSession;
-      sessions.push({ ...data, id: d.id });
+      if (idSet.has(data.courseId)) sessions.push({ ...data, id: d.id });
     });
-    // 如果有課程 ID 過濾
-    if (courseIds && courseIds.length > 0) {
-      const idSet = new Set(courseIds);
-      sessions = sessions.filter((s) => idSet.has(s.courseId));
-    }
     return sessions;
   } catch (e) {
     console.warn('[Attendance] Firestore fetch failed:', e);
@@ -230,17 +234,31 @@ export function subscribeToSession(
   sessionId: string,
   callback: (session: AttendanceSession | null) => void,
 ): Unsubscribe {
-  if (isFirebaseMockMode()) {
-    // fallback：每 3 秒輪詢本地
-    const interval = setInterval(async () => {
-      const s = await getSessionById(sessionId);
-      callback(s);
+  let disposed = false;
+  let reading = false;
+  let interval: ReturnType<typeof setInterval> | undefined;
+  const startLocalPolling = () => {
+    if (disposed || interval) return;
+    interval = setInterval(async () => {
+      if (reading) return;
+      reading = true;
+      try {
+        const session = await getSessionById(sessionId);
+        if (!disposed) callback(session);
+      } catch (error) {
+        console.warn('[Attendance] Local session refresh failed:', error);
+      } finally {
+        reading = false;
+      }
     }, 3000);
-    return () => clearInterval(interval);
-  }
+  };
+  let unsubscribe: Unsubscribe | undefined;
+  if (isFirebaseMockMode()) startLocalPolling();
+  else {
   const db = getDb();
   const ref = doc(collection(db, FIRESTORE_COLLECTION), sessionId);
-  return onSnapshot(ref, (snap) => {
+  unsubscribe = onSnapshot(ref, (snap) => {
+    if (disposed) return;
     if (snap.exists()) {
       callback({ ...(snap.data() as AttendanceSession), id: snap.id });
     } else {
@@ -248,7 +266,14 @@ export function subscribeToSession(
     }
   }, (err) => {
     console.warn('[Attendance] onSnapshot error:', err);
+    startLocalPolling();
   });
+  }
+  return () => {
+    disposed = true;
+    if (interval) clearInterval(interval);
+    unsubscribe?.();
+  };
 }
 
 /** 即時監聽學生可見的進行中場次 */
@@ -256,10 +281,14 @@ export function subscribeToActiveSessions(
   courseIds: string[],
   callback: (sessions: AttendanceSession[]) => void,
 ): Unsubscribe {
+  if (!courseIds.length) {
+    callback([]);
+    return () => {};
+  }
   if (isFirebaseMockMode()) {
     const interval = setInterval(async () => {
       const s = await getActiveSessions();
-      callback(s);
+      callback(filterActiveSessionsForStudent(s, courseIds));
     }, 5000);
     return () => clearInterval(interval);
   }
@@ -267,15 +296,12 @@ export function subscribeToActiveSessions(
   const col = collection(db, FIRESTORE_COLLECTION);
   const q = query(col, where('status', '==', 'active'));
   return onSnapshot(q, (snap) => {
-    const idSet = new Set(courseIds);
     const sessions: AttendanceSession[] = [];
     snap.forEach((d) => {
       const data = d.data() as AttendanceSession;
-      if (idSet.size === 0 || idSet.has(data.courseId)) {
-        sessions.push({ ...data, id: d.id });
-      }
+      sessions.push({ ...data, id: d.id });
     });
-    callback(sessions);
+    callback(filterActiveSessionsForStudent(sessions, courseIds));
   }, (err) => {
     console.warn('[Attendance] subscribeToActiveSessions error:', err);
   });
@@ -522,6 +548,7 @@ export async function createSession(config: {
   location?: string;
   lateThresholdMinutes?: number;
 }): Promise<AttendanceSession> {
+  requireLocalAttendanceEnvironment();
   const now = Date.now();
   const id = `sess_${now}`;
   const students = await getCourseStudents(config.tcCourseId);
@@ -561,11 +588,23 @@ export async function createSession(config: {
   };
 
   const sessions = await getAllSessions();
+  const closed: AttendanceSession[] = [];
+  for (const existing of sessions) {
+    if (existing.courseId === config.courseId && existing.status === 'active') {
+      existing.status = 'completed';
+      existing.endTime = now;
+      existing.presentCount = existing.records.filter((r) => r.status === 'present').length;
+      existing.lateCount = existing.records.filter((r) => r.status === 'late').length;
+      existing.absentCount = existing.records.filter((r) => r.status === 'absent').length;
+      existing.excusedCount = existing.records.filter((r) => r.status === 'excused').length;
+      closed.push(existing);
+    }
+  }
   sessions.push(session);
   await AsyncStorage.setItem(STORAGE.SESSIONS, JSON.stringify(sessions));
 
   // 同步到 Firestore — 讓學生端即時看到
-  await syncSessionToFirestore(session);
+  await Promise.all([syncSessionToFirestore(session), ...closed.map((row) => syncSessionToFirestore(row))]);
 
   // Emit event → 行事曆 + 推播引擎會自動反應
   campusEventBus.emit('session:started', {
@@ -581,6 +620,7 @@ export async function createSession(config: {
 
 /** 取得所有場次 */
 export async function getAllSessions(courseId?: string): Promise<AttendanceSession[]> {
+  if (getReleaseConfig().appEnv === 'production') return [];
   const data = await AsyncStorage.getItem(STORAGE.SESSIONS);
   let sessions: AttendanceSession[] = data ? JSON.parse(data) : [];
   if (courseId) sessions = sessions.filter((s) => s.courseId === courseId);
@@ -606,6 +646,27 @@ export async function getActiveSessions(): Promise<AttendanceSession[]> {
 }
 
 /**
+ * 學生可簽到的場次：只顯示自己修的課，且同一課只留最新一場開著的點名。
+ * 沒有選課名單時不回傳任何場次，避免看到別班的簽到框。
+ */
+export function filterActiveSessionsForStudent(
+  sessions: AttendanceSession[],
+  enrolledCourseIds: string[],
+): AttendanceSession[] {
+  if (!enrolledCourseIds.length) return [];
+  const allowed = new Set(enrolledCourseIds);
+  const latestByCourse = new Map<string, AttendanceSession>();
+  for (const session of sessions) {
+    if (session.status !== 'active' || !allowed.has(session.courseId)) continue;
+    const current = latestByCourse.get(session.courseId);
+    if (!current || session.startTime > current.startTime) {
+      latestByCourse.set(session.courseId, session);
+    }
+  }
+  return Array.from(latestByCourse.values());
+}
+
+/**
  * 取得學生可簽到的場次 — 只回傳「我有修的課 + 老師已啟動點名」的場次
  *
  * 規則：
@@ -627,11 +688,12 @@ export async function getActiveSessionsForStudent(
       }
     } catch (_) {}
   }
+  if (courseIdFilter.length === 0) return [];
 
   // 2. 同時查詢本機 + Firestore（教師場次在雲端）
   const [localSessions, firestoreSessions] = await Promise.all([
     getAllSessions().then((s) => s.filter((ss) => ss.status === 'active')),
-    fetchActiveSessionsFromFirestore(courseIdFilter.length > 0 ? courseIdFilter : undefined),
+    fetchActiveSessionsFromFirestore(courseIdFilter),
   ]);
 
   // 3. 合併去重（以 session.id 為主鍵，Firestore 版本優先）
@@ -639,19 +701,12 @@ export async function getActiveSessionsForStudent(
   localSessions.forEach((s) => merged.set(s.id, s));
   firestoreSessions.forEach((s) => merged.set(s.id, s)); // Firestore 覆蓋本地
 
-  let results = Array.from(merged.values());
-
-  // 4. 嚴格過濾：只回傳學生修的課
-  if (courseIdFilter.length > 0) {
-    const idSet = new Set(courseIdFilter);
-    results = results.filter((s) => idSet.has(s.courseId));
-  }
-
-  return results;
+  return filterActiveSessionsForStudent(Array.from(merged.values()), courseIdFilter);
 }
 
 /** 結束點名場次 */
 export async function endSession(sessionId: string): Promise<void> {
+  requireLocalAttendanceEnvironment();
   const sessions = await getAllSessions();
   const session = sessions.find((s) => s.id === sessionId);
   if (!session) return;
@@ -699,13 +754,25 @@ export async function checkIn(
   sessionId: string,
   studentId: string,
   studentName: string,
+  proof: { method: 'number_code' | 'rotating_qr'; code: string },
 ): Promise<{ success: boolean; status: AttendanceStatus; message: string }> {
+  requireLocalAttendanceEnvironment();
   const sessions = await getAllSessions();
   const session = sessions.find((s) => s.id === sessionId);
 
   if (!session) return { success: false, status: 'absent', message: '點名場次不存在' };
   if (session.status !== 'active')
     return { success: false, status: 'absent', message: '點名已結束' };
+  if (!studentId || studentId === session.teacherId)
+    return { success: false, status: 'absent', message: '請以學生帳號簽到' };
+  if (session.mode === 'manual')
+    return { success: false, status: 'absent', message: '此場次由教師手動點名' };
+  const validProof = proof?.method === 'number_code'
+    ? /^\d{6}$/.test(proof.code) && proof.code === session.numberCode
+    : proof?.method === 'rotating_qr' && session.mode === 'rotating_qr'
+      && validateRotatingQR(session.id, session.qrSecret, proof.code);
+  if (!validProof)
+    return { success: false, status: 'absent', message: '簽到碼錯誤或已過期，請重新輸入或掃描' };
 
   const elapsed = (Date.now() - session.startTime) / 60000;
   const isLate = elapsed > session.lateThresholdMinutes;
@@ -751,6 +818,18 @@ export async function checkIn(
     status,
   });
 
+  // 持久化成功後才通知建立場次的教師，保留原始課程 ID。
+  if (session.teacherId) {
+    await emitAttendanceCheckedIn({
+      actorUid: studentId,
+      actorName: studentName,
+      targetUids: [session.teacherId],
+      courseId: session.courseId,
+      courseName: session.courseName,
+      payload: { sessionId, method: proof.method, status, studentName },
+    }).catch((error) => console.warn('[Attendance] Teacher notification failed:', error));
+  }
+
   return {
     success: true,
     status,
@@ -768,6 +847,7 @@ export async function updateStudentStatus(
   newStatus: AttendanceStatus,
   note?: string,
 ): Promise<void> {
+  requireLocalAttendanceEnvironment();
   const sessions = await getAllSessions();
   const session = sessions.find((s) => s.id === sessionId);
   if (!session) return;
@@ -804,6 +884,7 @@ export async function submitLeaveRequest(req: {
   reason: string;
   category: LeaveCategory;
 }): Promise<LeaveRequest> {
+  requireLocalAttendanceEnvironment();
   const requests = await getLeaveRequests();
   const newReq: LeaveRequest = {
     ...req,
@@ -825,6 +906,7 @@ export async function reviewLeaveRequest(
   approved: boolean,
   note?: string,
 ): Promise<void> {
+  requireLocalAttendanceEnvironment();
   const requests = await getLeaveRequests();
   const req = requests.find((r) => r.id === requestId);
   if (req) {

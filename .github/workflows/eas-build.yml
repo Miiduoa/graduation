@@ -1,4 +1,4 @@
-name: EAS Build
+name: EAS Development & Preview
 
 on:
   workflow_dispatch:
@@ -13,20 +13,32 @@ on:
           - android
           - all
       profile:
-        description: 'Build profile'
+        description: 'Build profile (production builds use the Release workflow)'
         required: true
         default: 'preview'
         type: choice
         options:
           - development
           - preview
-          - production
 
 jobs:
   build:
     name: EAS Build (${{ github.event.inputs.platform }})
     runs-on: ubuntu-latest
+    env:
+      BUILD_PROFILE: ${{ inputs.profile }}
     steps:
+      - name: Require a development or preview profile
+        shell: bash
+        run: |
+          case "$BUILD_PROFILE" in
+            development|preview) ;;
+            *)
+              echo "::error::This workflow only builds development and preview profiles. For production, use Release (.github/workflows/release.yml), which verifies the release configuration and completed artifact."
+              exit 1
+              ;;
+          esac
+
       - name: Checkout
         uses: actions/checkout@v7
 
@@ -52,9 +64,9 @@ jobs:
       - name: Build iOS
         if: ${{ github.event.inputs.platform == 'ios' || github.event.inputs.platform == 'all' }}
         working-directory: apps/mobile
-        run: eas build --platform ios --profile ${{ github.event.inputs.profile }} --non-interactive
+        run: eas build --platform ios --profile "$BUILD_PROFILE" --non-interactive
 
       - name: Build Android
         if: ${{ github.event.inputs.platform == 'android' || github.event.inputs.platform == 'all' }}
         working-directory: apps/mobile
-        run: eas build --platform android --profile ${{ github.event.inputs.profile }} --non-interactive
+        run: eas build --platform android --profile "$BUILD_PROFILE" --non-interactive

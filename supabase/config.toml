@@ -6,6 +6,7 @@ project_id = "campus-agent-lms-v2"
 
 [api]
 enabled = true
+auto_expose_new_tables = false
 port = 54321
 schemas = ["public", "storage", "graphql_public"]
 extra_search_path = ["public", "extensions"]
@@ -27,7 +28,7 @@ enabled = true
 port = 54323
 api_url = "http://127.0.0.1"
 
-[inbucket]
+[local_smtp]
 enabled = true
 port = 54324
 

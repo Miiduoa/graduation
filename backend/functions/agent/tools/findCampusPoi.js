@@ -1,7 +1,7 @@
 'use strict';
 
 const { z } = require('zod');
-const { searchPois, isPoiOpenNow } = require('../data/campusPois');
+const { readAssistantPois, matchPois } = require('../../lib/assistantPois');
 
 const inputSchema = z.object({
   query: z.string().min(1).max(80),
@@ -28,15 +28,18 @@ const inputSchema = z.object({
 async function execute(ctx, rawInput) {
   try {
     const input = inputSchema.parse(rawInput ?? {});
+    if (!ctx.schoolId) return { success: false, errorCode: 'missing_school', errorMessage: '請先選擇學校。' };
     const limit = input.limit || 5;
-    const matches = searchPois(input.query, input.category).slice(0, limit);
-    const now = new Date();
+    const pois = await readAssistantPois(ctx.schoolId);
+    const matches = matchPois(pois, input.query, input.category).slice(0, limit);
     return {
       success: true,
+      schoolId: ctx.schoolId,
       query: input.query,
       count: matches.length,
       pois: matches.map((p) => ({
         id: p.id,
+        schoolId: p.schoolId,
         code: p.code,
         name: p.name,
         nameEn: p.nameEn,
@@ -48,7 +51,7 @@ async function execute(ctx, rawInput) {
         departments: p.departments,
         openTime: p.openTime,
         closeTime: p.closeTime,
-        openNow: isPoiOpenNow(p, now),
+        openNow: null,
         cafeteriaId: p.cafeteriaId || null,
       })),
     };
@@ -56,7 +59,7 @@ async function execute(ctx, rawInput) {
     return {
       success: false,
       errorCode: e?.name === 'ZodError' ? 'invalid_input' : 'search_failed',
-      errorMessage: String(e?.message || e).slice(0, 300),
+      errorMessage: e?.name === 'ZodError' ? '請輸入要查詢的地點。' : '目前無法讀取校園地點，請稍後再試。',
     };
   }
 }
@@ -64,7 +67,7 @@ async function execute(ctx, rawInput) {
 module.exports = {
   name: 'findCampusPoi',
   description:
-    '在校園地圖找建築/教室/餐廳/設施。傳入 query（中文名稱、代碼如 AK、系所或關鍵字），可選 category 篩選。回傳 POI 含 id、lat/lng、樓層、開放時間、是否營業中。若使用者問「XX 在哪」「找最近的 OO」優先呼叫。',
+    '搜尋目前學校正式登錄的建築與設施。可傳名稱、代碼、系所或關鍵字；只回傳來源已有的座標與時間，無法判定即時營業狀態。',
   inputSchema,
   execute,
 };

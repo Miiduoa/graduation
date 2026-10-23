@@ -326,7 +326,7 @@ export default function AdminReportsPage() {
         報表底層為 view／materialized view，RLS 仍由各業務表強制；平台管理員以 admin_* RPC 取得；
         大量匯出請以「入列匯出任務」走非同步 Worker（避免瀏覽器拖慢）。
       </p>
-      {error ? <p style={{ color: '#FF3B30' }}>{error}</p> : null}
+      {error ? <p style={{ color: 'var(--danger)' }}>{error}</p> : null}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-end', marginTop: 20 }}>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -372,7 +372,7 @@ export default function AdminReportsPage() {
             type="button"
             disabled={exportBusy || (!courseId && viewMode !== 'engagement')}
             onClick={() => void enqueueExportJob(reportKindOf(viewMode), 'xlsx')}
-            style={{ ...primaryBtnStyle, background: '#34C759', borderColor: '#34C759' }}>
+            style={{ ...primaryBtnStyle, background: 'var(--success)', borderColor: 'var(--success)' }}>
             入列 XLSX 匯出
           </button>
         </div>
@@ -414,8 +414,8 @@ const selectStyle: React.CSSProperties = {
 const primaryBtnStyle: React.CSSProperties = {
   padding: '10px 14px',
   borderRadius: 10,
-  border: '1px solid #5856D6',
-  background: '#5856D6',
+  border: '1px solid var(--brand)',
+  background: 'var(--brand)',
   color: '#fff',
   fontWeight: 700,
   cursor: 'pointer',
@@ -453,7 +453,7 @@ function RollupView({
             <YAxis domain={[0, 100]} unit="%" width={52} />
             <Tooltip formatter={(value: number) => [`${value?.toFixed(2)}%`, 'weighted']} />
             <Legend />
-            <Bar name="weighted %" dataKey="pct" fill="#5856D6" radius={[8, 8, 2, 2]} />
+            <Bar name="weighted %" dataKey="pct" fill="var(--brand)" radius={[8, 8, 2, 2]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -502,7 +502,7 @@ function DetailView({
             <YAxis domain={[0, 100]} unit="%" width={52} />
             <Tooltip formatter={(value: number) => [`${value?.toFixed(2)}%`, 'avg 達成率']} />
             <Legend />
-            <Bar name="平均達成率" dataKey="avgPct" fill="#34C759" radius={[8, 8, 2, 2]} />
+            <Bar name="平均達成率" dataKey="avgPct" fill="var(--success)" radius={[8, 8, 2, 2]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -544,7 +544,7 @@ function QuizView({
             <YAxis />
             <Tooltip />
             <Legend />
-            <Bar name="avg score" dataKey="avg" fill="#AF52DE" />
+            <Bar name="avg score" dataKey="avg" fill="var(--brand)" />
             <Bar name="繳交人次" dataKey="students" fill="#0ea5e9" />
           </BarChart>
         </ResponsiveContainer>
@@ -666,8 +666,8 @@ function EngagementView({
             <Tooltip />
             <Legend />
             <Bar dataKey="forum" name="討論" fill="#0ea5e9" stackId="a" />
-            <Bar dataKey="quiz" name="作答" fill="#34C759" stackId="a" />
-            <Bar dataKey="live" name="簽到" fill="#FF9500" stackId="a" />
+            <Bar dataKey="quiz" name="作答" fill="var(--success)" stackId="a" />
+            <Bar dataKey="live" name="簽到" fill="var(--warning)" stackId="a" />
           </BarChart>
         </ResponsiveContainer>
       </div>

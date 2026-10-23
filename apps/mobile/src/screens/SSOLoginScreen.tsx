@@ -1,25 +1,31 @@
-import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, Text, TextInput, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import Constants from 'expo-constants';
-import * as WebBrowser from 'expo-web-browser';
-import { useIdTokenAuthRequest } from 'expo-auth-session/providers/google';
-import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
-
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  PROVIDENCE_UNIVERSITY_SCHOOL_CODE,
-  PROVIDENCE_UNIVERSITY_SCHOOL_ID,
-} from '@campus/shared/src';
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect, useNavigation, type NavigationProp } from '@react-navigation/native';
+
+import { PROVIDENCE_UNIVERSITY_SCHOOL_ID } from '@campus/shared/src';
 
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
+import { finishLoginReturn } from '../utils/loginReturn';
 import { signInWithStudentId, type LoginProgress } from '../services/studentIdAuth';
-import { getAuthInstance } from '../firebase';
-import { Screen, Button, AnimatedCard, Card, Pill } from '../ui/components';
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
+import {
+  SCHOOL_LOGIN_BIND_HINT,
+  isSchoolLoginEntryAvailable,
+  loadSchoolLoginProviderKinds,
+} from '../services/schoolLoginAvailability';
+import { Screen, Button, AnimatedCard } from '../ui/components';
+import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
-
-WebBrowser.maybeCompleteAuthSession();
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 
 type LoginStep =
   | 'idle'
@@ -33,164 +39,170 @@ type LoginStep =
 type SSOLoginScreenProps = {
   navigation?: {
     goBack?: () => void;
+    navigate?: (screen: string, params?: Record<string, unknown>) => void;
   };
+  route?: { params?: { returnTo?: string } };
 };
 
+type LoginAttempt = { provider: 'school' | 'platform' };
+
 export function SSOLoginScreen(props: SSOLoginScreenProps) {
-  const nav = props?.navigation;
-  const auth = useAuth();
   const { school } = useSchool();
+  return <SchoolLoginContent key={school.id} school={school} {...props} />;
+}
+
+function SchoolLoginContent(
+  props: SSOLoginScreenProps & { school: ReturnType<typeof useSchool>['school'] },
+) {
+  const { school } = props;
+  const styles = useThemeStyleSheet(createStyles);
+  const bottomPadding = useTabBarContentBottomPadding();
+  const passwordInput = useRef<TextInput>(null);
+  const routeNavigation = useNavigation<NavigationProp<Record<string, undefined>>>();
+  const nav = props?.navigation ?? routeNavigation;
+  const auth = useAuth();
+
+  const [schoolLoginAvailable, setSchoolLoginAvailable] = useState(
+    isSchoolLoginEntryAvailable(school.id),
+  );
 
   const [studentIdInput, setStudentIdInput] = useState('');
   const [studentPwInput, setStudentPwInput] = useState('');
   const [step, setStep] = useState<LoginStep>('idle');
-  const [stageDetail, setStageDetail] = useState('驗證靜宜帳密');
+  const [stageDetail, setStageDetail] = useState('確認學校帳號');
   const [error, setError] = useState<string | null>(null);
   const [isRetryable, setIsRetryable] = useState(false);
-  const [googleBusy, setGoogleBusy] = useState(false);
+  const [leavingForPlatform, setLeavingForPlatform] = useState(false);
+  const mounted = useRef(true);
+  const activeAttempt = useRef<LoginAttempt | null>(null);
+  const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const googleIds = useMemo(() => {
-    const extra = (Constants.expoConfig?.extra ?? {}) as Record<string, unknown>;
-    return {
-      web: typeof extra.googleWebClientId === 'string' ? extra.googleWebClientId.trim() : '',
-      ios: typeof extra.googleIosClientId === 'string' ? extra.googleIosClientId.trim() : '',
-      android:
-        typeof extra.googleAndroidClientId === 'string' ? extra.googleAndroidClientId.trim() : '',
+  useEffect(() => {
+    mounted.current = true;
+    void loadSchoolLoginProviderKinds().then(() => {
+      if (mounted.current) setSchoolLoginAvailable(isSchoolLoginEntryAvailable(school.id));
+    });
+    return () => {
+      mounted.current = false;
+      // Authentication may still finish; only this screen's callbacks are invalidated.
+      activeAttempt.current = null;
+      if (successTimer.current !== null) clearTimeout(successTimer.current);
     };
   }, []);
 
-  const [, , googlePromptAsync] = useIdTokenAuthRequest({
-    webClientId: googleIds.web || '000000000000-not-configured.apps.googleusercontent.com',
-    iosClientId: googleIds.ios || undefined,
-    androidClientId: googleIds.android || undefined,
-  });
+  function beginAttempt(provider: LoginAttempt['provider']) {
+    if (!mounted.current || activeAttempt.current) return null;
+    const attempt: LoginAttempt = { provider };
+    activeAttempt.current = attempt;
+    return attempt;
+  }
 
-  const schoolName = useMemo(
-    () => (school.id === PROVIDENCE_UNIVERSITY_SCHOOL_ID ? school.name : '靜宜大學'),
-    [school.id, school.name],
+  function isCurrent(attempt: LoginAttempt) {
+    return mounted.current && activeAttempt.current === attempt;
+  }
+
+  function showSuccess(attempt: LoginAttempt, message: string, onConfirm?: () => void) {
+    successTimer.current = setTimeout(() => {
+      successTimer.current = null;
+      if (!isCurrent(attempt)) return;
+      Alert.alert('登入成功', message, [
+        {
+          text: '確定',
+          onPress: () => {
+            if (!isCurrent(attempt)) return;
+            onConfirm?.();
+          },
+        },
+      ]);
+    }, 250);
+  }
+
+  useFocusEffect(
+    useCallback(() => {
+      if (activeAttempt.current?.provider === 'platform') {
+        activeAttempt.current = null;
+        setLeavingForPlatform(false);
+      }
+    }, []),
   );
 
-  const bootstrapStepOrder: LoginStep[] = [
-    'authenticating',
-    'syncingCampus',
-    'syncingTronClass',
-    'linking',
-  ];
+  const openPlatformAccount = () => {
+    if (!nav.navigate || !beginAttempt('platform')) return;
+    setLeavingForPlatform(true);
+    nav.navigate('NuniWorkspace');
+  };
+
+  const schoolName = school.name;
 
   const stepLabels: Record<LoginStep, string> = {
     idle: '等待登入',
-    authenticating: '驗證靜宜帳密',
+    authenticating: '確認學校帳號',
     syncingCampus: '同步 E 校園資料',
-    syncingTronClass: '同步 TronClass 課程',
-    linking: '建立 Campus One 帳號',
+    syncingTronClass: '同步課程資料',
+    linking: '連上學校帳號',
     success: '登入完成',
     error: '登入失敗',
   };
 
   const handleStudentIdLogin = async () => {
+    if (
+      !schoolLoginAvailable ||
+      school.id !== PROVIDENCE_UNIVERSITY_SCHOOL_ID ||
+      !studentIdInput.trim() ||
+      !studentPwInput.trim()
+    ) return;
+    const attempt = beginAttempt('school');
+    if (!attempt) return;
     setError(null);
     setIsRetryable(false);
     setStep('authenticating');
-    setStageDetail('驗證靜宜帳密');
+    setStageDetail('確認學校帳號');
 
-    const onProgress = (progressStep: LoginProgress, detail?: string) => {
+    const onProgress = (progressStep: LoginProgress) => {
+      if (!isCurrent(attempt)) return;
       setStep(progressStep);
-      if (detail) setStageDetail(detail);
+      setStageDetail(stepLabels[progressStep]);
     };
 
     try {
       const result = await signInWithStudentId({
         studentId: studentIdInput,
         password: studentPwInput,
-        schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
+        schoolId: school.id,
         schoolName,
         onProgress,
       });
 
+      if (!isCurrent(attempt)) return;
       setStep('linking');
       setStageDetail('完成登入');
       await auth.refreshProfile();
+      if (!isCurrent(attempt)) return;
       setStep('success');
 
       const deptLabel = result.department ? `（${result.department}）` : '';
-      setTimeout(() => {
-        Alert.alert('登入成功', `歡迎，${result.displayName}${deptLabel}`, [
-          {
-            text: '確定',
-            onPress: () => {
-              void import('../services/companionEngine').then((m) =>
-                m.recordCompanionFeatureSignal('sso_login'),
-              );
-              nav?.goBack?.();
-            },
-          },
-        ]);
-      }, 250);
+      showSuccess(attempt, `歡迎，${result.displayName}${deptLabel}`, () => {
+        void import('../services/companionEngine')
+          .then((m) => m.recordCompanionFeatureSignal('sso_login'))
+          .catch(() => undefined);
+        finishLoginReturn(nav, props.route?.params?.returnTo);
+      });
     } catch (loginError) {
+      if (!isCurrent(attempt)) return;
+      activeAttempt.current = null;
       console.warn('Student ID login error:', loginError);
-      setError(loginError instanceof Error ? loginError.message : '學號登入失敗');
+      setError('學校帳號登入未完成，請確認帳號密碼與網路連線後重試。');
       setIsRetryable(true);
       setStep('error');
     }
   };
 
   const handleRetry = () => {
+    if (!mounted.current || activeAttempt.current) return;
     setStep('idle');
-    setStageDetail('驗證靜宜帳密');
+    setStageDetail('確認學校帳號');
     setError(null);
     setIsRetryable(false);
-  };
-
-  const handleGoogleLogin = async () => {
-    if (!googleIds.web) {
-      Alert.alert(
-        '無法使用 Google 登入',
-        '請在環境變數設定 EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID（Firebase Console「專案設定」→ 一般 → Web 應用程式用戶端 ID），並確定已啟用 Google 登入提供者。',
-      );
-      return;
-    }
-
-    setError(null);
-    setIsRetryable(false);
-    setGoogleBusy(true);
-
-    try {
-      const result = await googlePromptAsync();
-      if (result.type === 'dismiss' || result.type === 'cancel') return;
-      if (result.type !== 'success') {
-        throw new Error('Google 登入未完成');
-      }
-      const idToken = result.params.id_token;
-      if (!idToken || typeof idToken !== 'string') {
-        throw new Error('未取得 id_token');
-      }
-
-      const cred = GoogleAuthProvider.credential(idToken);
-      await signInWithCredential(getAuthInstance(), cred);
-      await auth.refreshProfile();
-      void import('../services/companionEngine').then((m) =>
-        m.recordCompanionFeatureSignal('sso_login'),
-      );
-      setStep('success');
-
-      setTimeout(() => {
-        Alert.alert('登入成功', '已使用 Google 帳號登入', [
-          {
-            text: '確定',
-            onPress: () => {
-              nav?.goBack?.();
-            },
-          },
-        ]);
-      }, 250);
-    } catch (loginError) {
-      console.warn('Google login error:', loginError);
-      setError(loginError instanceof Error ? loginError.message : 'Google 登入失敗');
-      setIsRetryable(true);
-      setStep('error');
-    } finally {
-      setGoogleBusy(false);
-    }
   };
 
   const isBusy =
@@ -199,407 +211,186 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
     step === 'syncingTronClass' ||
     step === 'linking';
 
-  const formLocked = isBusy || googleBusy;
+  const formLocked = isBusy || leavingForPlatform || step === 'success';
 
   return (
-    <Screen>
+    <Screen noPadding>
       <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
+        testID="sso-login-form"
+        style={styles.scroll}
+        contentContainerStyle={[styles.content, { paddingBottom: bottomPadding + theme.space.lg }]}
+        automaticallyAdjustKeyboardInsets
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
       >
-        {/* ── 學校資訊卡片 ── */}
-        <AnimatedCard title="選擇學校" subtitle="使用靜宜大學帳號登入">
-          <View
-            style={{
-              padding: 16,
-              borderRadius: theme.radius.lg,
-              backgroundColor: theme.colors.surface2,
-              borderWidth: 1,
-              borderColor: theme.colors.border,
-              gap: 12,
-            }}
-          >
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <View
-                style={{
-                  width: 48,
-                  height: 48,
-                  borderRadius: 24,
-                  backgroundColor: school.themeColor ?? theme.colors.accentSoft,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <Ionicons name="school" size={24} color="#fff" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: theme.colors.text, fontSize: 17, fontWeight: '700' }}>
-                  {schoolName}
+        <View style={styles.intro}>
+          <Text style={styles.eyebrow}>Campus One · {schoolName}</Text>
+          <Text accessibilityRole="header" style={styles.heading}>
+            從你的課程開始。
+          </Text>
+          <Text style={styles.body}>只有讀取個人校務資料，才需要連線學校帳號。</Text>
+        </View>
+
+        {schoolLoginAvailable ? (
+          <AnimatedCard title="學校帳號登入" subtitle="使用靜宜 E 校園帳號與密碼">
+            <View style={styles.fields}>
+              <View style={styles.field}>
+                <Text nativeID="student-id-label" style={styles.label}>
+                  學號
                 </Text>
-                <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 3 }}>
-                  {school.shortName ? `${school.shortName} · ` : ''}
-                  {PROVIDENCE_UNIVERSITY_SCHOOL_CODE}
-                </Text>
+                <TextInput
+                  testID="student-id-input"
+                  accessibilityLabel="學號"
+                  accessibilityLabelledBy="student-id-label"
+                  value={studentIdInput}
+                  onChangeText={setStudentIdInput}
+                  placeholder="輸入 E 校園帳號"
+                  placeholderTextColor={theme.colors.muted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="username"
+                  textContentType="username"
+                  returnKeyType="next"
+                  onSubmitEditing={() => passwordInput.current?.focus()}
+                  editable={!formLocked}
+                  style={styles.input}
+                />
               </View>
-              <Pill text={PROVIDENCE_UNIVERSITY_SCHOOL_CODE} kind="accent" />
-            </View>
-            <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
-              建議優先使用 Google 登入；校方 E 校園帳號為進階選項。若已關閉 LMS，仍可使用下方 Demo／校園流程。
-            </Text>
-          </View>
-        </AnimatedCard>
-
-        {/* ── Google 登入（主路） ── */}
-        <AnimatedCard title="Google 登入" subtitle="Gmail／Google 帳號（Firebase）">
-          <View style={{ gap: 14 }}>
-            <Button
-              text={
-                googleBusy
-                  ? 'Google 登入處理中…'
-                  : googleIds.web
-                    ? '使用 Google 繼續'
-                    : '使用 Google 繼續（尚未設定 Client ID）'
-              }
-              kind="primary"
-              onPress={() => void handleGoogleLogin()}
-              disabled={googleBusy || !googleIds.web}
-            />
-            <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
-              以 Google 身分註冊或登入後，將與 Firebase Auth 連動；Firestore 無 `users` 文件時仍會暫時以 Firebase
-              顯示名稱與頭像顯示。正式上線請在 Firebase／Google Cloud 設定 OAuth 與 iOS/Android 反向 URL。
-            </Text>
-          </View>
-        </AnimatedCard>
-
-        {/* ── 校方帳號（進階） ── */}
-        <AnimatedCard title="校方進階登入" subtitle="靜宜 E 校園帳號與密碼（選用）">
-          <View style={{ gap: 14 }}>
-            <View
-              style={{
-                borderRadius: theme.radius.lg,
-                borderWidth: 1,
-                borderColor: theme.colors.border,
-                backgroundColor: theme.colors.surface,
-                paddingHorizontal: 14,
-                minHeight: 54,
-                justifyContent: 'center',
-              }}
-            >
-              <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
-                學號
-              </Text>
-              <TextInput
-                testID="student-id-input"
-                value={studentIdInput}
-                onChangeText={setStudentIdInput}
-                placeholder="E校園帳號"
-                placeholderTextColor={theme.colors.muted}
-                autoCapitalize="none"
-                autoCorrect={false}
-                editable={!formLocked}
-                style={{ color: theme.colors.text, fontSize: 16, paddingVertical: 0 }}
-              />
-            </View>
-
-            <View
-              style={{
-                borderRadius: theme.radius.lg,
-                borderWidth: 1,
-                borderColor: theme.colors.border,
-                backgroundColor: theme.colors.surface,
-                paddingHorizontal: 14,
-                minHeight: 54,
-                justifyContent: 'center',
-              }}
-            >
-              <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
-                密碼
-              </Text>
-              <TextInput
-                testID="student-password-input"
-                value={studentPwInput}
-                onChangeText={setStudentPwInput}
-                placeholder="輸入 e 校園密碼"
-                placeholderTextColor={theme.colors.muted}
-                secureTextEntry
-                autoCapitalize="none"
-                autoCorrect={false}
-                editable={!formLocked}
-                style={{ color: theme.colors.text, fontSize: 16, paddingVertical: 0 }}
-              />
-            </View>
-
-            <Button
-              text={isBusy ? '登入中...' : '使用學號登入'}
-              kind="primary"
-              onPress={handleStudentIdLogin}
-              disabled={formLocked || !studentIdInput.trim() || !studentPwInput.trim()}
-            />
-
-            <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
-              需同步課表／成績時使用。若建置開關關閉 TronClass，登入仍可略過 LMS 並走 Demo／E 校園可及資料。
-            </Text>
-          </View>
-        </AnimatedCard>
-
-        {/* ── 登入進度 ── */}
-        {isBusy ? (
-          <AnimatedCard title="登入處理中" subtitle={stepLabels[step]}>
-            <View style={{ alignItems: 'center', gap: 12, paddingVertical: 12 }}>
-              <ActivityIndicator color={theme.colors.accent} size="large" />
-              <Text style={{ color: theme.colors.text, fontWeight: '700' }}>{stageDetail}</Text>
-              <Text style={{ color: theme.colors.muted, textAlign: 'center', lineHeight: 20 }}>
-                這會依序驗證帳密、同步 E 校園核心資料、同步 TronClass 課程，最後才建立 Campus One
-                內部登入狀態。
-              </Text>
-              <View style={{ width: '100%', gap: 8, marginTop: 4 }}>
-                {bootstrapStepOrder.map((candidate, index) => {
-                  const currentIndex = bootstrapStepOrder.indexOf(step);
-                  const candidateIndex = bootstrapStepOrder.indexOf(candidate);
-                  const isActive = currentIndex === candidateIndex;
-                  const isDone = currentIndex > candidateIndex;
-
-                  return (
-                    <View
-                      key={candidate}
-                      style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        gap: 10,
-                        paddingHorizontal: 12,
-                        paddingVertical: 10,
-                        borderRadius: theme.radius.md,
-                        backgroundColor: isActive ? theme.colors.accentSoft : theme.colors.surface2,
-                        borderWidth: 1,
-                        borderColor: isActive ? `${theme.colors.accent}40` : theme.colors.border,
-                        opacity: isDone ? 0.9 : 1,
-                      }}
-                    >
-                      <Text style={{ color: isDone ? theme.colors.success : theme.colors.muted }}>
-                        {isDone ? '✓' : isActive ? '…' : `${index + 1}`}
-                      </Text>
-                      <Text
-                        style={{
-                          color: isActive ? theme.colors.accent : theme.colors.text,
-                          fontWeight: isActive ? '700' : '500',
-                        }}
-                      >
-                        {stepLabels[candidate]}
-                      </Text>
-                    </View>
-                  );
-                })}
+              <View style={styles.field}>
+                <Text nativeID="student-password-label" style={styles.label}>
+                  密碼
+                </Text>
+                <TextInput
+                  ref={passwordInput}
+                  testID="student-password-input"
+                  accessibilityLabel="密碼"
+                  accessibilityLabelledBy="student-password-label"
+                  value={studentPwInput}
+                  onChangeText={setStudentPwInput}
+                  placeholder="輸入 E 校園密碼"
+                  placeholderTextColor={theme.colors.muted}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="current-password"
+                  textContentType="password"
+                  returnKeyType="done"
+                  editable={!formLocked}
+                  style={styles.input}
+                />
               </View>
               <Button
-                text="取消登入"
-                kind="secondary"
-                onPress={handleRetry}
+                text={isBusy ? '登入中…' : '使用學號登入'}
+                kind="primary"
+                onPress={handleStudentIdLogin}
+                disabled={formLocked || !studentIdInput.trim() || !studentPwInput.trim()}
               />
+              <Text style={styles.note}>可同步的課程與成績依學校提供內容而定。</Text>
             </View>
           </AnimatedCard>
-        ) : null}
-
-        {/* ── 登入成功 ── */}
-        {step === 'success' ? (
-          <AnimatedCard title="登入進度" subtitle="">
-            <View style={{ alignItems: 'center', paddingVertical: 16 }}>
-              <View
-                style={{
-                  width: 60,
-                  height: 60,
-                  borderRadius: 30,
-                  backgroundColor: `${theme.colors.success}20`,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  marginBottom: 12,
-                }}
-              >
-                <Ionicons name="checkmark-circle" size={36} color={theme.colors.success} />
-              </View>
-              <Text style={{ color: theme.colors.success, fontSize: 16, fontWeight: '700' }}>
-                登入成功！
-              </Text>
-            </View>
+        ) : (
+          <AnimatedCard title="學校連線尚未開放">
+            <Text style={styles.body}>{SCHOOL_LOGIN_BIND_HINT}</Text>
           </AnimatedCard>
+        )}
+
+        {isBusy ? (
+          <View
+            style={styles.status}
+            accessible
+            accessibilityRole="progressbar"
+            accessibilityLabel={`登入處理中，${stageDetail}`}
+            accessibilityState={{ busy: true }}
+            accessibilityLiveRegion="polite"
+          >
+            <ActivityIndicator color={theme.colors.accent} />
+            <View style={styles.statusContent}>
+              <Text style={styles.statusTitle}>{stageDetail}</Text>
+              <Text style={styles.note}>正在讀取學校資料，請保持網路連線。</Text>
+            </View>
+          </View>
         ) : null}
 
-        {/* ── 登入失敗 ── */}
         {step === 'error' && error ? (
-          <AnimatedCard title="登入失敗" subtitle="請檢查帳號密碼或稍後再試">
-            <View style={{ gap: 14 }}>
-              <View
-                style={{
-                  padding: 14,
-                  borderRadius: theme.radius.md,
-                  backgroundColor: theme.colors.dangerSoft ?? `${theme.colors.danger}15`,
-                  borderWidth: 1,
-                  borderColor: `${theme.colors.danger}30`,
-                }}
-              >
-                <Text style={{ color: theme.colors.danger, lineHeight: 20 }}>{error}</Text>
-              </View>
-              {isRetryable ? <Button text="重新嘗試" onPress={handleRetry} kind="primary" /> : null}
-            </View>
-          </AnimatedCard>
+          <View style={styles.errorPanel}>
+            <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.error}>
+              {error}
+            </Text>
+            {isRetryable ? <Button text="重新嘗試" onPress={handleRetry} kind="secondary" /> : null}
+          </View>
         ) : null}
 
-        {/* ── 關於學校帳號登入（說明卡片）── */}
-        {step === 'idle' ? (
-          <Card title="關於學校帳號登入" subtitle="安全、快速、自動同步">
-            <View style={{ gap: 12 }}>
-              <View style={{ flexDirection: 'row', gap: 12 }}>
-                <View
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 18,
-                    backgroundColor: theme.colors.accentSoft,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Ionicons name="shield-checkmark" size={18} color={theme.colors.accent} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: theme.colors.text, fontWeight: '700' }}>安全可靠</Text>
-                  <Text
-                    style={{
-                      color: theme.colors.muted,
-                      fontSize: 12,
-                      marginTop: 2,
-                      lineHeight: 18,
-                    }}
-                  >
-                    透過學校 E 校園認證系統驗證身份，密碼僅用於本次登入驗證
-                  </Text>
-                </View>
-              </View>
-
-              <View style={{ flexDirection: 'row', gap: 12 }}>
-                <View
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 18,
-                    backgroundColor: theme.colors.accentSoft,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Ionicons name="flash" size={18} color={theme.colors.accent} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: theme.colors.text, fontWeight: '700' }}>快速便捷</Text>
-                  <Text
-                    style={{
-                      color: theme.colors.muted,
-                      fontSize: 12,
-                      marginTop: 2,
-                      lineHeight: 18,
-                    }}
-                  >
-                    使用現有學校帳號，無需另外註冊，登入後自動建立 Campus One 帳號
-                  </Text>
-                </View>
-              </View>
-
-              <View style={{ flexDirection: 'row', gap: 12 }}>
-                <View
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 18,
-                    backgroundColor: theme.colors.accentSoft,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Ionicons name="sync" size={18} color={theme.colors.accent} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: theme.colors.text, fontWeight: '700' }}>自動同步</Text>
-                  <Text
-                    style={{
-                      color: theme.colors.muted,
-                      fontSize: 12,
-                      marginTop: 2,
-                      lineHeight: 18,
-                    }}
-                  >
-                    自動同步您的姓名、學號、系所、課表、成績與 TronClass 課程資訊
-                  </Text>
-                </View>
-              </View>
-
-              <View style={{ flexDirection: 'row', gap: 12 }}>
-                <View
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 18,
-                    backgroundColor: theme.colors.accentSoft,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Ionicons name="cloud-done" size={18} color={theme.colors.accent} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: theme.colors.text, fontWeight: '700' }}>離線快取</Text>
-                  <Text
-                    style={{
-                      color: theme.colors.muted,
-                      fontSize: 12,
-                      marginTop: 2,
-                      lineHeight: 18,
-                    }}
-                  >
-                    課表與成績會快取在本機，下次開啟不用重新抓取，定期自動更新
-                  </Text>
-                </View>
-              </View>
-            </View>
-          </Card>
+        {step === 'success' ? (
+          <View style={styles.status} accessibilityLiveRegion="polite">
+            <Ionicons name="checkmark-circle" size={24} color={theme.colors.success} />
+            <Text style={[styles.statusTitle, styles.statusContent]}>登入完成</Text>
+          </View>
         ) : null}
 
-        {/* ── 技術資訊 ── */}
-        {step === 'idle' ? (
-          <Card title="技術資訊" subtitle="開發者參考">
-            <View style={{ gap: 8 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Text style={{ color: theme.colors.muted }}>認證方式</Text>
-                <Text style={{ color: theme.colors.text, fontWeight: '600' }}>
-                  E 校園 + TronClass
-                </Text>
-              </View>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Text style={{ color: theme.colors.muted }}>E 校園端點</Text>
-                <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 11 }}>
-                  alcat.pu.edu.tw
-                </Text>
-              </View>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Text style={{ color: theme.colors.muted }}>TronClass 端點</Text>
-                <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 11 }}>
-                  tronclass.pu.edu.tw
-                </Text>
-              </View>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Text style={{ color: theme.colors.muted }}>資料快取</Text>
-                <Text style={{ color: theme.colors.text, fontWeight: '600' }}>
-                  AsyncStorage + TTL
-                </Text>
-              </View>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Text style={{ color: theme.colors.muted }}>登入策略</Text>
-                <Text style={{ color: theme.colors.text, fontWeight: '600' }}>
-                  後端優先 + 手機直連降級
-                </Text>
-              </View>
-            </View>
-          </Card>
-        ) : null}
+        <AnimatedCard title="Google 帳號" subtitle="和網頁版使用同一個帳號">
+          <Button
+            text="用 Google 帳號登入"
+            kind="secondary"
+            onPress={openPlatformAccount}
+            disabled={formLocked}
+          />
+          <Text style={styles.note}>
+            用於加入課程、繳交作業與校園社群。學校課表與成績仍需連線學校帳號。
+          </Text>
+        </AnimatedCard>
+        <Text style={styles.note}>已同步的資料可離線查看，更新內容時仍需網路連線。</Text>
       </ScrollView>
     </Screen>
   );
 }
+
+const createStyles = () =>
+  StyleSheet.create({
+    scroll: { flex: 1 },
+    content: {
+      width: '100%',
+      maxWidth: 560,
+      alignSelf: 'center',
+      paddingHorizontal: theme.layout.screenHorizontalPadding,
+      paddingTop: theme.layout.contentPaddingTop,
+      gap: theme.layout.sectionGap,
+    },
+    intro: { gap: theme.space.sm, paddingVertical: theme.space.md },
+    eyebrow: { ...theme.typography.labelSmall, color: theme.colors.textSecondary },
+    heading: { ...theme.typography.h1, color: theme.colors.text },
+    body: { ...theme.typography.body, color: theme.colors.textSecondary },
+    fields: { gap: theme.space.md },
+    field: { gap: theme.space.xs },
+    label: { ...theme.typography.label, color: theme.colors.text },
+    input: {
+      minHeight: 48,
+      paddingHorizontal: theme.space.md,
+      paddingVertical: theme.space.sm,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radius.md,
+      backgroundColor: theme.colors.bg,
+      color: theme.colors.text,
+      fontSize: 16,
+    },
+    note: { ...theme.typography.bodySmall, color: theme.colors.muted },
+    status: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.space.md,
+      padding: theme.space.md,
+      borderRadius: theme.radius.md,
+      backgroundColor: theme.colors.accentSoft,
+    },
+    statusContent: { flex: 1, minWidth: 0, gap: theme.space.xs },
+    statusTitle: { ...theme.typography.label, color: theme.colors.text },
+    errorPanel: {
+      gap: theme.space.md,
+      padding: theme.space.md,
+      borderRadius: theme.radius.md,
+      borderWidth: 1,
+      borderColor: theme.colors.danger,
+      backgroundColor: theme.colors.dangerSoft,
+    },
+    error: { ...theme.typography.bodySmall, color: theme.colors.danger },
+  });

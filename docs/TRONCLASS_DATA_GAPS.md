@@ -56,7 +56,7 @@ const graded = hw.is_graded === true || hw.submission_status === 'graded' || /*�
 
 ## 二、新加的診斷工具
 
-[DataFlowDebugScreen](computer:///Users/miiduoa/Desktop/畢業專題/apps/mobile/src/screens/DataFlowDebugScreen.tsx) — 一個 dev-mode 畫面列 17 個 endpoint：
+[DataFlowDebugScreen](../apps/mobile/src/screens/DataFlowDebugScreen.tsx) — 一個 dev-mode 畫面列 17 個 endpoint：
 
 | Endpoint | 用途 |
 |---|---|

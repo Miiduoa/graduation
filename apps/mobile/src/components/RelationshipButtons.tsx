@@ -2,14 +2,18 @@
 import React, { useState } from 'react';
 import { View, Text, Pressable, ActivityIndicator, Alert, StyleSheet, type ViewStyle } from 'react-native';
 import { theme } from '../ui/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import {
   sendFriendRequest,
   acceptFriendRequest,
   removeFriendship,
   getFriendshipBetween,
-  blockFromPending,
+  blockUser,
+  declineFriendRequest,
+  friendshipDeclinedAtMs,
   type Friendship,
 } from '../services/friends';
+import { canResendFriendRequest, friendResendCopy } from '@campus/shared';
 import { useSchool } from '../state/school';
 import { isFirebaseMockMode } from '../firebase';
 
@@ -26,6 +30,7 @@ export type RelationshipButtonsProps = {
 };
 
 export function RelationshipButtons(props: RelationshipButtonsProps) {
+  const styles = useThemeStyleSheet(createStyles);
   const {
     profileUid,
     myUid,
@@ -52,6 +57,14 @@ export function RelationshipButtons(props: RelationshipButtonsProps) {
     friendship.fromUid === myUid &&
     friendship.toUid === profileUid;
   const isFriend = status === 'accepted';
+  // 只有送出邀請的人看得到婉拒；被邀請的人那邊什麼都不顯示
+  const declinedAtMs = friendshipDeclinedAtMs(friendship);
+  const waitingAfterDecline =
+    status === 'declined' &&
+    !!friendship &&
+    friendship.fromUid === myUid &&
+    declinedAtMs > 0 &&
+    !canResendFriendRequest(declinedAtMs);
   const isBlocked = status === 'blocked';
 
   const onAddFriend = async () => {
@@ -63,7 +76,12 @@ export function RelationshipButtons(props: RelationshipButtonsProps) {
       onFriendshipChange(profileUid, next);
       Alert.alert('已送出邀請');
     } catch (e: any) {
-      Alert.alert('無法送出', e?.message ?? String(e));
+      if (e?.message === 'declined-wait') {
+        const next = await getFriendshipBetween(school.id, myUid, profileUid);
+        onFriendshipChange(profileUid, next);
+      } else {
+        Alert.alert('無法送出', e?.message ?? String(e));
+      }
     } finally {
       setBusy(false);
     }
@@ -83,9 +101,22 @@ export function RelationshipButtons(props: RelationshipButtonsProps) {
     }
   };
 
+  const onDecline = async () => {
+    if (!friendship?.id || !school?.id) return;
+    setBusy(true);
+    try {
+      await declineFriendRequest(friendship.id);
+      onFriendshipChange(profileUid, null);
+    } catch (e: any) {
+      Alert.alert('婉拒失敗', e?.message ?? String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const onBlockIncoming = () => {
     if (!friendship?.id || !school?.id) return;
-    Alert.alert('封鎖對方', '對方將無法再以這筆邀請與你互動（可稍後移除封鎖紀錄）。', [
+    Alert.alert('封鎖對方', '封鎖後，對方不能再送好友邀請給你。', [
       { text: '取消', style: 'cancel' },
       {
         text: '封鎖',
@@ -93,7 +124,7 @@ export function RelationshipButtons(props: RelationshipButtonsProps) {
         onPress: async () => {
           setBusy(true);
           try {
-            await blockFromPending(friendship.id);
+            await blockUser(school.id, myUid, profileUid, friendship.id);
             const next = await getFriendshipBetween(school.id, myUid, profileUid);
             onFriendshipChange(profileUid, next);
           } catch (e: any) {
@@ -163,8 +194,8 @@ export function RelationshipButtons(props: RelationshipButtonsProps) {
           <Pressable onPress={onAccept} style={[styles.btn, styles.btnPrimary]} disabled={busy}>
             <Text style={styles.btnPrimaryText}>接受好友</Text>
           </Pressable>
-          <Pressable onPress={onRemove} style={[styles.btn, styles.btnGhost]} disabled={busy}>
-            <Text style={styles.btnGhostText}>略過</Text>
+          <Pressable onPress={onDecline} style={[styles.btn, styles.btnGhost]} disabled={busy}>
+            <Text style={styles.btnGhostText}>婉拒</Text>
           </Pressable>
           <Pressable onPress={onBlockIncoming} style={[styles.btn, styles.btnOutline]} disabled={busy}>
             <Text style={[styles.btnOutlineText, { color: theme.colors.danger }]}>封鎖</Text>
@@ -176,6 +207,17 @@ export function RelationshipButtons(props: RelationshipButtonsProps) {
           <Pressable onPress={onRemove} style={[styles.btn, styles.btnOutline]} disabled={busy}>
             <Text style={styles.btnOutlineText}>撤回</Text>
           </Pressable>
+        </View>
+      ) : waitingAfterDecline ? (
+        <View style={{ gap: 4 }}>
+          <Pressable
+            accessibilityState={{ disabled: true }}
+            style={[styles.btn, styles.btnOutline, { opacity: 0.5 }]}
+            disabled
+          >
+            <Text style={styles.btnOutlineText}>加好友</Text>
+          </Pressable>
+          <Text style={styles.meta}>{friendResendCopy(declinedAtMs)}</Text>
         </View>
       ) : (
         <>
@@ -191,7 +233,7 @@ export function RelationshipButtons(props: RelationshipButtonsProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   inline: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   btn: { paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10 },
@@ -202,7 +244,7 @@ const styles = StyleSheet.create({
   },
   btnOutlineText: { color: theme.colors.accent, fontWeight: '700', fontSize: 13 },
   btnPrimary: { backgroundColor: theme.colors.accent },
-  btnPrimaryText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  btnPrimaryText: { color: theme.colors.onAccent, fontWeight: '700', fontSize: 13 },
   btnGhost: { backgroundColor: theme.colors.surface2 },
   btnGhostText: { color: theme.colors.text, fontWeight: '700', fontSize: 13 },
   meta: { color: theme.colors.muted, fontSize: 13 },

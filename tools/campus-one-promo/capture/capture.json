@@ -1,0 +1,85 @@
+{
+  "started_at": "2026-10-14T04:32:50.494Z",
+  "source_commit": "cfc66467779790ba4f1a7a03a40925caee720864",
+  "viewport": "393x852 @2x",
+  "captures": [
+    {
+      "name": "home",
+      "url": "https://nuni.tw/",
+      "captured_at": "2026-10-14T04:32:50.537Z",
+      "status": 200,
+      "title": "Campus One｜課程與校園生活",
+      "final_url": "https://nuni.tw/",
+      "visible_text": "跳到主要內容\nC\n1\nCampus One\n今天\n課務\n生活\n我\n所有服務\n瀏覽校園：不限校園\n登入\n\nCAMPUS ONE\n\n課程與校園生活\n\n先查校園資訊，需要課程與個人服務時再登入。\n\n10月14日\n星期三\n課程與待辦\n先回到你的課程\n\n使用 Google 帳號查看教材、作業與回饋，不需要先連線學校帳號。\n\n用 Google 帳號登入\n→\n先瀏覽校園資訊\n校園生活\n\n這些入口不需登入；個人校務資料需另行驗證。\n\n校園地圖\n找教室與校園設施\n→\n公車資訊\n路線與到站時間\n→\n公開公告\n學校發布的公開消息\n→\n餐廳\n菜單與營業資訊\n→\n圖書館\n館藏查詢與官方服務入口\n→\n學校課表與成績\n\n這個功能還沒接通。課表可以先在這台瀏覽器整理；成績請先到學校的 e 校園查看。\n\n查看這台瀏覽器上的課表 →\n校園助理 →\nCampus One\n服務條款\n隱私政策\n支援\n刪除帳號\n設定",
+      "sha256": "13c049cf024358a3ac11f3517a8e69fce48a6c40a07ca955f915bcbd54d96956",
+      "image_bytes": 148042
+    },
+    {
+      "name": "timetable",
+      "url": "https://nuni.tw/timetable",
+      "captured_at": "2026-10-14T04:32:57.182Z",
+      "status": 200,
+      "title": "Campus One｜課程與校園生活",
+      "final_url": "https://nuni.tw/timetable",
+      "visible_text": "跳到主要內容\nC\n1\nCampus One\n今天\n課務\n生活\n我\n所有服務\n瀏覽校園：不限校園\n登入\n我的課表\n\n先看這週去哪上課。截圖或學校課表都要確認後才會寫入。\n\n老師在 Nuni 開的課、教材和作業在這裡：Nuni 課程 →\n\n已存在這台裝置，換手機或清除瀏覽器資料就會不見 這個功能還沒接通，雲端備份先不用。\n\n格子\n一週\n單日\n上課日\n星期一\n星期二\n星期三\n星期四\n星期五\n新增課程\n\n這個功能還沒接通。分享連結要等學校帳號接上才能用，課表仍可先在這台瀏覽器整理。\n\n節次\n星期一\n星期二\n星期三\n星期四\n星期五\n1\n08:10\n2\n09:10\n3\n10:10\n4\n11:10\n5\n13:10\n6\n14:10\n7\n15:10\n8\n16:10\n9\n17:10\n10\n18:05\n11\n19:00\n12\n19:55\n13\n20:50\n匯入課表\n\n截圖或貼上文字後會先變成草稿。課表尚未被修改，按確認匯入後才會套用\n\n課表截圖\n匯入方式\n整份取代\n只加入還沒有的課\n\n這個功能還沒接通。請先貼上課表文字，或手動新增。\n\n或貼上課表文字\n辨識文字\n幫我安排\n\n用你現在這份課表算。\n\n下一堂\n今天空堂\n星期\n星期一\n星期二\n星期三\n星期四\n星期五\n時數\n1 小時\n2 小時\n3 小時\n4 小時\n排讀書時間\n共同空堂\n這個功能還沒接通\n\n空堂可以先看自己這台瀏覽器上的課表。\n\n加好友後才看得到對方課表，沒加好友不會露出任何人的時間。\n\nCampus One\n服務條款\n隱私政策\n支援\n刪除帳號\n",
+      "sha256": "a47984a34cc85e34709ed82792d14e26bb84d0651ceccbe1d23973284fff62b4",
+      "image_bytes": 149758
+    },
+    {
+      "name": "bus",
+      "url": "https://nuni.tw/bus",
+      "captured_at": "2026-10-14T04:33:02.547Z",
+      "status": 200,
+      "title": "Campus One｜課程與校園生活",
+      "final_url": "https://nuni.tw/bus",
+      "visible_text": "跳到主要內容\nC\n1\nCampus One\n今天\n課務\n生活\n我\n所有服務\n瀏覽校園：不限校園\n登入\n\n靜宜大學\n\n公車與交通\n\n找站牌、確認方向，再出發。\n\n出發前，少一點猜測\n\n從你身邊的站牌開始\n\n先找上車地點，再確認路線和方向。沒有開啟定位，也能查詢。\n\n資料來源 TDX\n學校站牌\n找我附近\n搜尋站名\n常用站牌\n\n靜宜大學 · 尋找名稱含「靜宜大學」的站牌，不需要先記住路線號碼。\n\n可搭乘站牌\n0 站\n\n附近站牌服務尚未啟用。你仍可查看已登錄路線，或開啟官方公車網站。\n\n重新查詢\n\n到站時間為預估值，請以現場車況與業者公告為準。\n\n官方公車網站 ↗\n已登錄校園路線 · 備用查詢\nCampus One\n服務條款\n隱私政策\n支援\n刪除帳號\n設定",
+      "sha256": "a4e2ab99f9f7fa2d5bcd78d6320929c881378530902c3c0d064fae06c8580ca9",
+      "image_bytes": 146477
+    },
+    {
+      "name": "map",
+      "url": "https://nuni.tw/map",
+      "captured_at": "2026-10-14T04:33:07.607Z",
+      "status": 200,
+      "title": "Campus One｜課程與校園生活",
+      "final_url": "https://nuni.tw/map",
+      "visible_text": "跳到主要內容\nC\n1\nCampus One\n今天\n課務\n生活\n我\n所有服務\n瀏覽校園：不限校園\n登入\n\n靜宜大學\n\n校園地圖\n\n找教室、查設施，規劃前往目的地的路線\n\n目前沒有可顯示的校園地點\n\n地點需要有完整的名稱與座標才能顯示。你也可以先查詢校方提供的校園資訊。\n\n開啟靜宜大學網站\n找校園地點\n找不到建築或設施？用地圖搜尋，或打開校園目錄。\n詢問地點 →\nCampus One\n服務條款\n隱私政策\n支援\n刪除帳號\n設定",
+      "sha256": "6ac00c3ee172584278dcb0077bf18740cdf01e2f60e260ff2d721ba23cfc05a0",
+      "image_bytes": 147721
+    },
+    {
+      "name": "social",
+      "url": "https://nuni.tw/social",
+      "captured_at": "2026-10-14T04:33:12.593Z",
+      "status": 200,
+      "title": "Campus One｜課程與校園生活",
+      "final_url": "https://nuni.tw/social",
+      "visible_text": "跳到主要內容\nC\n1\nCampus One\n今天\n課務\n生活\n我\n所有服務\n瀏覽校園：不限校園\n登入\n跨校公開交流\n\n從一個想法、一個問題，開始和不同校園的人交流。\n\n登入後參與公開交流\n\n使用 Google 帳號，閱讀與發表跨校公開貼文。\n\n登入帳號\n前往校內交流\nCampus One\n服務條款\n隱私政策\n支援\n刪除帳號\n設定",
+      "sha256": "dd060cd37ec502ba0c6e684bcdfe9976bacbcc1ff547bd4189f012b8574d62c8",
+      "image_bytes": 117502
+    },
+    {
+      "name": "search",
+      "url": "https://nuni.tw/search?q=%E5%85%AC%E8%BB%8A",
+      "captured_at": "2026-10-14T04:33:17.618Z",
+      "status": 200,
+      "title": "Campus One｜課程與校園生活",
+      "final_url": "https://nuni.tw/search?q=%E5%85%AC%E8%BB%8A",
+      "visible_text": "跳到主要內容\nC\n1\nCampus One\n今天\n課務\n生活\n我\n所有服務\n瀏覽校園：不限校園\n登入\n所有服務\n\n搜尋要做的事，或依分類查找。每項服務都標示需要的帳號。\n\n想找什麼？\n全部\n學習與課務\n校園生活\n消息與交流\n帳號與協助\n\n找到 1 項服務\n\n清除篩選\n校園生活\n\n找教室、看公車，安排課堂以外的時間。\n\n公車\n\n查詢路線與站牌\n\n可直接瀏覽\n→\nCampus One\n服務條款\n隱私政策\n支援\n刪除帳號\n設定",
+      "sha256": "4e2c4c81b77efc0a3fae18055d34bdfb2fbc95f5715f3cf891e0794e6a1c889e",
+      "image_bytes": 126660
+    },
+    {
+      "name": "cafeteria",
+      "url": "https://nuni.tw/cafeteria",
+      "captured_at": "2026-10-14T04:33:22.477Z",
+      "status": 200,
+      "title": "Campus One｜課程與校園生活",
+      "final_url": "https://nuni.tw/cafeteria",
+      "visible_text": "跳到主要內容\nC\n1\nCampus One\n今天\n課務\n生活\n我\n所有服務\n瀏覽校園：不限校園\n登入\n\n靜宜大學\n\n餐廳\n\n查看校內餐廳與菜單\n\n餐廳資料 · 0 間餐廳 · 0 道餐點\n\n資料更新：尚未提供更新時間\n\n目前還不能線上點餐。依店家提供的資料顯示；實際營業與餐點供應請向店家確認。一般帳號即可看店面與菜單。價格、是否賣完、是否接單以店家訂餐頁為準。Nuni 不處理這筆的付款與退款。\n\n搜尋餐點或餐廳\n全部餐廳\n目前沒有餐廳資料\n\n店家提供餐廳與菜單資料後，會顯示在這裡。\n\nCampus One\n服務條款\n隱私政策\n支援\n刪除帳號\n設定",
+      "sha256": "1b0ca329cee5c4164494d3fcf72802e614bffd9d7758fc4f3f696d1e4e0e0232",
+      "image_bytes": 166265
+    }
+  ],
+  "finished_at": "2026-10-14T04:33:27.645Z"
+}

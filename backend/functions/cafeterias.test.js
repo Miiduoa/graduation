@@ -40,8 +40,23 @@ describe('cafeteria ordering helpers', () => {
     ).toEqual({
       pilotStatus: 'live',
       orderingEnabled: true,
+      merchantMode: 'native_order',
       merchantId: 'merchant-1',
       cafeteriaName: '第一餐廳',
     });
+  });
+
+  test('showcase_link stores cannot be treated as native ordering', () => {
+    expect(() =>
+      resolveCafeteriaOrderingMetadata(
+        {
+          orderingEnabled: true,
+          merchantMode: 'showcase_link',
+          orderingUrl: 'https://shop.example/order',
+          pilotStatus: 'live',
+        },
+        { cafeteriaId: 'cafeteria-1', hasActiveOperator: true, HttpsError },
+      ),
+    ).toThrow('店家尚未開通接單');
   });
 });

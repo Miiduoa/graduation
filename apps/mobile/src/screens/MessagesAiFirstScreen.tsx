@@ -1,8 +1,7 @@
 /**
- * Campus AI-First — 訊息 Tab Landing
+ * 訊息 Tab Landing
  *
  * 設計：AI 自動分類訊息 + 跨角色動作面板 + 重點摘要
- * 設計規範：docs/design/AI_FIRST_REDESIGN.md
  *
  * 本版接 mobile demoStore（services/demoStore.ts）：
  *  - 顯示動態 dynamicMessages（依目前 demoRole 過濾 recipientRoles）

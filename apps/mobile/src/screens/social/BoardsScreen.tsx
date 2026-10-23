@@ -1,15 +1,6 @@
 /* eslint-disable */
-/**
- * 校園社群 — 看板列表
- *
- * 變更（vs. 舊版）：
- *  - 分區顯示（系所 / 課程 / 主題 / 匿名）
- *  - 顯示訂閱狀態 chip（已訂閱）
- *  - 點訂閱 icon 直接 toggle（不需進入詳情）
- *  - 預先載入 user 的訂閱集合，避免每張卡再打一次 query
- *  - 提供「建立看板」入口（任何使用者都可以在本機 UI 操作；rules 由後端把關）
- */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+/** 依類型列出校園看板，並管理目前帳號的訂閱。 */
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -31,6 +22,7 @@ import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme } from '../../ui/theme';
+import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../../ui/navigationTheme';
 import { useSchool } from '../../state/school';
 import { useAuth } from '../../state/auth';
@@ -48,9 +40,7 @@ import {
 } from '../../services/boards';
 import { useCampusSocialStackNav } from './CampusSocialNavContext';
 
-type RowItem =
-  | { kind: 'header'; type: CampusBoardType }
-  | { kind: 'board'; board: CampusBoard };
+type RowItem = { kind: 'header'; type: CampusBoardType } | { kind: 'board'; board: CampusBoard };
 
 const TYPE_ICON: Record<CampusBoardType, keyof typeof import('@expo/vector-icons').Ionicons.glyphMap> = {
   department: 'school-outline',
@@ -60,6 +50,21 @@ const TYPE_ICON: Record<CampusBoardType, keyof typeof import('@expo/vector-icons
 };
 
 export function BoardsScreen() {
+  const { user, loading } = useAuth();
+  const { school } = useSchool();
+  if (loading) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+        <ActivityIndicator color={theme.colors.accent} />
+        <Text style={{ color: theme.colors.textSecondary }}>正在確認登入狀態…</Text>
+      </View>
+    );
+  }
+  return <BoardsContent key={JSON.stringify([user?.uid, school?.id])} />;
+}
+
+function BoardsContent() {
+  const styles = useThemeStyleSheet(createStyles);
   const injectedNav = useCampusSocialStackNav();
   const fb = useNavigation<any>();
   const nav = injectedNav ?? fb;
@@ -72,42 +77,61 @@ export function BoardsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const loadVersion = useRef(0);
 
   const load = useCallback(async () => {
-    if (isFirebaseMockMode() || !school?.id) {
-      setBoards([]);
-      setSubscribed(new Set());
-      return;
+    const version = ++loadVersion.current;
+    setLoadError('');
+    try {
+      if (isFirebaseMockMode() || !school?.id || !auth.user?.uid) {
+        setBoards([]);
+        setSubscribed(new Set());
+        return;
+      }
+      const [rows, subs] = await Promise.all([
+        listBoards(school.id, 120),
+        listSubscribedBoardIds(auth.user.uid, school.id, { throwOnError: true }),
+      ]);
+      if (loadVersion.current !== version) return;
+      setBoards(rows);
+      setSubscribed(new Set(subs));
+    } catch (cause) {
+      if (loadVersion.current !== version) return;
+      const code = (cause as { code?: string })?.code ?? '';
+      if (code.endsWith('permission-denied') || code.endsWith('unauthenticated')) {
+        setBoards([]);
+        setSubscribed(new Set());
+      }
+      setLoadError('暫時無法更新看板。請確認網路與登入狀態，再試一次。');
+    } finally {
+      if (loadVersion.current === version) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-    const [rows, subs] = await Promise.all([
-      listBoards(school.id, 120),
-      auth.user?.uid
-        ? listSubscribedBoardIds(auth.user.uid, school.id)
-        : Promise.resolve([] as string[]),
-    ]);
-    setBoards(rows);
-    setSubscribed(new Set(subs));
   }, [school?.id, auth.user?.uid]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await load();
-    setRefreshing(false);
   }, [load]);
 
   useEffect(() => {
-    (async () => {
-      setLoading(true);
-      await load();
-      setLoading(false);
-    })();
+    setLoading(true);
+    void load();
+    return () => {
+      loadVersion.current += 1;
+    };
   }, [load]);
 
   const q = filter.trim().toLowerCase();
   const visibleBoards = useMemo(
     () =>
       q
-        ? boards.filter((b) => `${b.name} ${b.slug ?? ''} ${b.rules ?? ''}`.toLowerCase().includes(q))
+        ? boards.filter((b) =>
+            `${b.name} ${b.slug ?? ''} ${b.rules ?? ''}`.toLowerCase().includes(q),
+          )
         : boards,
     [boards, q],
   );
@@ -158,6 +182,14 @@ export function BoardsScreen() {
     [auth.user?.uid, school?.id, subscribed],
   );
 
+  if (!auth.user?.uid) {
+    return (
+      <View style={styles.center}>
+        <Text style={{ color: theme.colors.textSecondary }}>請先登入以瀏覽看板</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.root, { paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + insets.bottom }]}>
       <View style={styles.searchBox}>
@@ -176,6 +208,20 @@ export function BoardsScreen() {
         )}
       </View>
 
+      {!!loadError && (
+        <View style={{ padding: 16, gap: 8 }}>
+          <Text accessibilityRole="alert" style={{ color: theme.colors.textSecondary }}>
+            {loadError}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => void onRefresh()}
+            style={{ paddingVertical: 10 }}
+          >
+            <Text style={{ color: theme.colors.accent, fontWeight: '600' }}>重新讀取看板</Text>
+          </Pressable>
+        </View>
+      )}
       {loading ? (
         <View style={styles.center}>
           <ActivityIndicator color={theme.colors.accent} />
@@ -184,18 +230,24 @@ export function BoardsScreen() {
         <FlatList
           style={{ flex: 1 }}
           data={items}
-          keyExtractor={(it, idx) => (it.kind === 'header' ? `h_${it.type}` : `b_${it.board.id}_${idx}`)}
+          keyExtractor={(it, idx) =>
+            it.kind === 'header' ? `h_${it.type}` : `b_${it.board.id}_${idx}`
+          }
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           ListEmptyComponent={
-            <View style={styles.emptyWrap}>
-              <Ionicons name="layers-outline" size={36} color={theme.colors.textSecondary} />
-              <Text style={styles.emptyTitle}>{boards.length === 0 ? '尚無任何看板' : '沒有符合條件的看板'}</Text>
-              <Text style={styles.emptyDesc}>
-                {boards.length === 0
-                  ? '請學校管理員到 Firestore `schools/{id}/boards` 加入種子，或點右下按鈕建立新看板。'
-                  : '清空搜尋字串再試一次'}
-              </Text>
-            </View>
+            loadError ? null : (
+              <View style={styles.emptyWrap}>
+                <Ionicons name="layers-outline" size={36} color={theme.colors.textSecondary} />
+                <Text style={styles.emptyTitle}>
+                  {boards.length === 0 ? '尚無任何看板' : '沒有符合條件的看板'}
+                </Text>
+                <Text style={styles.emptyDesc}>
+                  {boards.length === 0
+                    ? '這所學校還沒有看板。你可以建立一個，邀請同學一起討論。'
+                    : '試試其他關鍵字，或清除搜尋。'}
+                </Text>
+              </View>
+            )
           }
           ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
           renderItem={({ item }) => {
@@ -273,10 +325,7 @@ export function BoardsScreen() {
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="建立新看板"
-        style={[
-          styles.fab,
-          { bottom: insets.bottom + TAB_BAR_CONTENT_BOTTOM_PADDING + 16 },
-        ]}
+        style={[styles.fab, { bottom: insets.bottom + TAB_BAR_CONTENT_BOTTOM_PADDING + 16 }]}
         onPress={() => setComposeOpen(true)}
       >
         <Ionicons name="add" size={24} color={theme.colors.onAccent} />
@@ -296,7 +345,12 @@ export function BoardsScreen() {
 
 // ─── CreateBoardModal ──────────────────────────────────────
 
-function CreateBoardModal(props: { visible: boolean; onDismiss: () => void; onCreated: () => void }) {
+function CreateBoardModal(props: {
+  visible: boolean;
+  onDismiss: () => void;
+  onCreated: () => void;
+}) {
+  const styles = useThemeStyleSheet(createStyles);
   const auth = useAuth();
   const { school } = useSchool();
   const [name, setName] = useState('');
@@ -322,7 +376,10 @@ function CreateBoardModal(props: { visible: boolean; onDismiss: () => void; onCr
     const uid = auth.user?.uid;
     const sid = school?.id;
     if (!uid || !sid || isFirebaseMockMode()) {
-      Alert.alert('無法建立', isFirebaseMockMode() ? '模擬模式下無法寫入 Firestore' : '需要登入並選擇學校');
+      Alert.alert(
+        '無法建立',
+        isFirebaseMockMode() ? '模擬模式下無法寫入 Firestore' : '需要登入並選擇學校',
+      );
       return;
     }
     if (name.trim().length < 2) {
@@ -427,7 +484,7 @@ function CreateBoardModal(props: { visible: boolean; onDismiss: () => void; onCr
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   root: { flex: 1, backgroundColor: theme.colors.bg, paddingHorizontal: 14 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 

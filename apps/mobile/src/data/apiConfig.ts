@@ -9,9 +9,14 @@ export type ApiEnvironment = 'development' | 'staging' | 'production';
 
 /** 靜宜／PU 適配器：一律打正式 Cloud Functions（與 Firestore 同一專案），不依賴本機 Functions emulator。 */
 function twPuCloudFunctionsBaseUrl(): string {
-  const trimmedOverride = (process.env.EXPO_PUBLIC_CLOUD_FUNCTION_BASE_URL ?? '').trim();
+  const trimmedOverride = (
+    process.env.EXPO_PUBLIC_FUNCTIONS_BASE_URL ??
+    process.env.EXPO_PUBLIC_CLOUD_FUNCTION_BASE_URL ??
+    ''
+  ).trim();
   if (trimmedOverride) {
-    return trimmedOverride.replace(/\/+$/, '');
+    const trimmed = trimmedOverride.replace(/\/+$/, '');
+    return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
   }
   const region = (process.env.EXPO_PUBLIC_CLOUD_FUNCTION_REGION ?? 'asia-east1').trim() || 'asia-east1';
   const projectId =

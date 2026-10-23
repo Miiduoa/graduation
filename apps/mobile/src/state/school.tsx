@@ -5,7 +5,7 @@ import {
   PROVIDENCE_UNIVERSITY_SCHOOL_ID,
   type School,
 } from '@campus/shared/src';
-import { findSchoolById, normalizeSchoolCode, resolveSchool } from '@campus/shared/src/schools';
+import { findSchoolById, findSchoolsByCode, normalizeSchoolCode, resolveSchool } from '@campus/shared/src/schools';
 import { clearCacheExceptSchool } from '../data/cachedSource';
 import { setHybridSourceSchoolContext } from '../data/hybridSource';
 import { applySchoolTheme, registerSchoolTheme } from '../ui/theme';
@@ -51,8 +51,38 @@ function toSelection(school: School): SchoolSelection {
   };
 }
 
-function normalizeSelection(_selection: Partial<SchoolSelection>): SchoolSelection {
-  return toSelection(getProvidenceSchool());
+export function schoolFromSelection(selection: Partial<SchoolSelection>): School {
+  const byId = findSchoolById(selection.schoolId);
+  if (byId) return byId;
+  const id = selection.schoolId?.trim();
+  if (id && /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(id)) {
+    // The public directory can introduce schools before the bundled legacy catalog is updated.
+    // Preserve their identity instead of silently rendering another institution's data.
+    const chosenCode = normalizeSchoolCode(selection.code);
+    const codeOwner = findSchoolsByCode(chosenCode);
+    const code =
+      /^[A-Z0-9_-]{1,120}$/.test(chosenCode) &&
+      !(codeOwner.length === 1 && codeOwner[0].id !== id)
+        ? chosenCode
+        : id.toUpperCase();
+    const name = typeof selection.schoolName === 'string' ? selection.schoolName.trim() : '';
+    const shortName = typeof selection.shortName === 'string' ? selection.shortName.trim() : '';
+    const color = typeof selection.themeColor === 'string' ? selection.themeColor : '';
+    return {
+      id,
+      code,
+      name: name.slice(0, 160) || `所選校園（${id}）`,
+      shortName: shortName.slice(0, 80) || undefined,
+      themeColor: /^#[0-9a-fA-F]{6}$/.test(color) ? color : undefined,
+      // Browsing metadata is not evidence of an authorized email domain.
+    };
+  }
+  const matches = findSchoolsByCode(selection.code);
+  return matches.length === 1 ? matches[0] : getProvidenceSchool();
+}
+
+function normalizeSelection(selection: Partial<SchoolSelection>): SchoolSelection {
+  return toSelection(schoolFromSelection(selection));
 }
 
 export function SchoolProvider(props: {
@@ -61,28 +91,33 @@ export function SchoolProvider(props: {
 }) {
   const initialSelection = normalizeSelection({
     code: props.initial?.code ?? PROVIDENCE_UNIVERSITY_SCHOOL_CODE,
-    schoolId: props.initial?.schoolId ?? PROVIDENCE_UNIVERSITY_SCHOOL_ID,
+    schoolId: props.initial?.schoolId ?? (props.initial?.code ? null : PROVIDENCE_UNIVERSITY_SCHOOL_ID),
   });
   const [selection, setSelectionState] = useState<SchoolSelection>(initialSelection);
   const [loaded, setLoaded] = useState(false);
+  // Any user-initiated selection takes priority over an earlier pending storage read.
+  const selectionRevision = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
+    const startingRevision = selectionRevision.current;
     (async () => {
       try {
         const raw = await AsyncStorage.getItem(STORAGE_KEY);
         if (!raw) return;
         const parsed = JSON.parse(raw) as Partial<SchoolSelection>;
-        if (cancelled) return;
+        if (cancelled || selectionRevision.current !== startingRevision) return;
         setSelectionState((prev) =>
-          normalizeSelection({
-            code: parsed.code ?? prev.code,
-            schoolId: parsed.schoolId ?? prev.schoolId,
-            schoolName: parsed.schoolName ?? prev.schoolName ?? null,
-            shortName: parsed.shortName ?? prev.shortName ?? null,
-            themeColor: parsed.themeColor ?? prev.themeColor ?? null,
-            domains: parsed.domains ?? prev.domains ?? null,
-          }),
+          selectionRevision.current !== startingRevision
+            ? prev
+            : normalizeSelection({
+                code: parsed.code ?? prev.code,
+                schoolId: parsed.schoolId === undefined ? (parsed.code ? null : prev.schoolId) : parsed.schoolId,
+                schoolName: parsed.schoolName ?? prev.schoolName ?? null,
+                shortName: parsed.shortName ?? prev.shortName ?? null,
+                themeColor: parsed.themeColor ?? prev.themeColor ?? null,
+                domains: parsed.domains ?? prev.domains ?? null,
+              }),
         );
       } catch {
         // ignore invalid persisted state
@@ -99,10 +134,16 @@ export function SchoolProvider(props: {
   const previousSchoolRef = useRef<string | null>(null);
 
   const setSelection = (next: Partial<SchoolSelection>) => {
+    // Never let the initialization read overwrite a campus chosen while it was pending.
+    selectionRevision.current += 1;
     setSelectionState((prev) => {
       const identityChanged = next.code !== undefined || next.schoolId !== undefined;
       const code = next.code != null ? normalizeSchoolCode(next.code) : prev.code;
-      const schoolId = next.schoolId === undefined ? prev.schoolId : next.schoolId;
+      const schoolId = next.schoolId === undefined
+        ? next.code === undefined
+          ? prev.schoolId
+          : null
+        : next.schoolId;
       const schoolName =
         next.schoolName === undefined
           ? identityChanged
@@ -148,9 +189,11 @@ export function SchoolProvider(props: {
     AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(selection)).catch(() => void 0);
   }, [loaded, selection]);
 
-  const school = useMemo(() => {
-    return getProvidenceSchool();
-  }, []);
+  const normalizedSelection = useMemo(() => normalizeSelection(selection), [selection]);
+  const school = useMemo(
+    () => schoolFromSelection(normalizedSelection),
+    [normalizedSelection],
+  );
 
   useEffect(() => {
     if (!loaded || !school) return;
@@ -165,8 +208,6 @@ export function SchoolProvider(props: {
     applySchoolTheme(school.id, school.themeColor);
     setHybridSourceSchoolContext(school.id);
   }, [loaded, school]);
-
-  const normalizedSelection = useMemo(() => normalizeSelection(selection), [selection]);
 
   const value: SchoolContextValue = useMemo(
     () => ({

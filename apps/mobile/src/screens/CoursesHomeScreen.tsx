@@ -105,9 +105,9 @@ const COURSE_COLORS = [
   '#FF2D55',
   '#FF9500',
   '#34C759',
-  '#5856D6',
+  theme.colors.accent,
   '#FF3B30',
-  '#5856D6',
+  theme.colors.accent,
   '#14B8A6',
 ];
 
@@ -432,7 +432,7 @@ function CourseToolsSection(props: { nav: any; variant: 'compact' | 'empty' }) {
       title: '課綱查詢',
       subtitle: '全校課程搜尋',
       icon: 'library-outline' as const,
-      color: '#5856D6',
+      color: theme.colors.accent,
       onPress: () => props.nav?.navigate?.('CourseCatalog'),
     },
     {
@@ -954,8 +954,8 @@ function CourseListView(props: { courses: TCCourse[]; nav: any; onRefresh: () =>
             onPress={() => {
               if (fromTronClass) {
                 props.nav?.navigate?.('CourseHub', {
-                  groupId: String(course.id),
-                  groupName: course.name,
+                  source: 'tronclass',
+                  courseId: course.id,
                 });
               } else {
                 props.nav?.navigate?.('CourseSchedule');
@@ -1010,7 +1010,7 @@ function CourseListView(props: { courses: TCCourse[]; nav: any; onRefresh: () =>
                 <CourseChip
                   icon="albums-outline"
                   label="教材"
-                  color="#5856D6"
+                  color={theme.colors.accent}
                   onPress={() =>
                     props.nav?.navigate?.('CourseModules', {
                       groupId: String(course.id),
@@ -1110,6 +1110,22 @@ function CourseListView(props: { courses: TCCourse[]; nav: any; onRefresh: () =>
 
 // ─── Homework Tab ────────────────────────────────────────
 
+export function homeworkSubmitParams(item: {
+  id: string | number;
+  course_id: string | number;
+  title: string;
+  end_time?: string | null;
+  description?: string | null;
+}) {
+  return {
+    courseId: String(item.course_id),
+    hwId: String(item.id),
+    hwTitle: item.title,
+    dueAt: item.end_time ?? undefined,
+    description: item.description ?? undefined,
+  };
+}
+
 function HomeworkView(props: {
   activities: Record<number, TCActivity[]>;
   courses: TCCourse[];
@@ -1190,7 +1206,7 @@ function HomeworkView(props: {
       statusText = item.score != null ? `${item.score}/${item.total_score ?? 100}` : '已批改';
       statusIcon = 'checkmark-circle';
     } else if (isSubmitted) {
-      statusColor = '#5856D6';
+      statusColor = theme.colors.success;
       statusText = '已繳交';
       statusIcon = 'checkmark-done-outline';
     } else if (isOverdue) {
@@ -1216,18 +1232,7 @@ function HomeworkView(props: {
       <Pressable
         key={`${item.course_id}-${item.id}`}
         onPress={() =>
-          isSubmitted
-            ? props.nav?.navigate?.('CourseModules', {
-                groupId: String(item.course_id),
-                groupName: item.courseName,
-              })
-            : props.nav?.navigate?.('HomeworkSubmit', {
-                courseId: String(item.course_id),
-                hwId: String(item.id),
-                hwTitle: item.title,
-                dueAt: item.end_time ?? undefined,
-                description: item.description,
-              })
+          props.nav?.navigate?.('HomeworkSubmit', homeworkSubmitParams(item))
         }
         style={({ pressed }) => ({
           padding: 14,

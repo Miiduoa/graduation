@@ -7,9 +7,11 @@
  * 與 apps/mobile/src/firebase.ts 對齊（避免 region 不一致與 emulator 重複 wire）。
  */
 import { httpsCallable } from 'firebase/functions';
-import { getFunctionsInstance, isFirebaseConfigured } from './firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { getAuth, getDb, getFunctionsInstance, isFirebaseConfigured } from './firebase';
 
 export type AgentCardKind =
+  | 'directions_card'
   | 'route_card'
   | 'poi_card'
   | 'menu_card'
@@ -38,28 +40,36 @@ export interface CampusAssistantEnvelope {
 }
 
 export interface CallCampusAssistantInput {
+  userId: string;
   messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>;
   schoolId?: string;
+  groupId?: string;
   sessionId?: string | null;
   screen?: string;
 }
 
-/**
- * Call the deployed askCampusAssistant Cloud Function.
- * Returns null if Firebase config is not available (Web falls back to local
- * demo reply in that case).
- */
+export class CampusAssistantError extends Error {
+  constructor(public readonly code: 'unavailable' | 'session-changed' | 'invalid-response') {
+    super(code);
+    this.name = 'CampusAssistantError';
+  }
+}
+
+/** Only accept a response for the account that started the request. */
 export async function callCampusAssistant(
   input: CallCampusAssistantInput,
   signal?: AbortSignal,
-): Promise<CampusAssistantEnvelope | null> {
+): Promise<CampusAssistantEnvelope> {
   if (!isFirebaseConfigured()) {
-    console.warn(
-      '[campusAssistantClient] Firebase Web config missing. Set NEXT_PUBLIC_FIREBASE_* env vars.',
-    );
-    return null;
+    throw new CampusAssistantError('unavailable');
   }
-  if (signal?.aborted) return null;
+  const assertCurrentSession = () => {
+    if (signal?.aborted) throw new DOMException('Request aborted', 'AbortError');
+    if (!input.userId || getAuth()?.currentUser?.uid !== input.userId) {
+      throw new CampusAssistantError('session-changed');
+    }
+  };
+  assertCurrentSession();
 
   try {
     const callable = httpsCallable<
@@ -77,15 +87,20 @@ export async function callCampusAssistant(
         screen: input.screen || 'web/ai-assistant',
         locale: 'zh-TW',
         timezone: 'Asia/Taipei',
+        ...(input.groupId ? { groupId: input.groupId } : {}),
         ...(input.sessionId ? { sessionId: input.sessionId } : {}),
       },
     });
 
-    return result.data as CampusAssistantEnvelope;
+    assertCurrentSession();
+    const data = result.data;
+    if (!data || data.error || data.run?.status === 'failed' || typeof data.content !== 'string' || !data.content.trim()) {
+      throw new CampusAssistantError('invalid-response');
+    }
+    return data;
   } catch (e) {
-    const err = e as { code?: string; message?: string };
-    console.warn('[campusAssistantClient] callable failed:', err?.code, err?.message);
-    return null;
+    assertCurrentSession();
+    throw e;
   }
 }
 
@@ -96,6 +111,8 @@ export async function callCampusAssistant(
  */
 export interface CreateOrderInput {
   schoolId: string;
+  /** 同一張草稿重送沿用同一個編號，伺服器靠它避免重複下單 */
+  requestId: string;
   cafeteriaId: string;
   items: Array<{
     menuItemId: string;
@@ -115,8 +132,15 @@ export interface CreateOrderResult {
   cafeteria?: string;
   total?: number;
   itemCount?: number;
+  /** 伺服器下單時一起發的取餐號碼；沒拿到是 null */
+  queueNumber?: number | null;
+  queueStatus?: 'assigned' | 'pending_confirmation';
+  createdAt?: string | null;
+  items?: Array<{ name: string; quantity: number }>;
   errorCode?: string;
   errorMessage?: string;
+  /** 伺服器明確說這張單不成立（菜單或金額變了）；要換新的送出編號重新確認 */
+  notCreated?: boolean;
 }
 
 export async function confirmCreateOrder(input: CreateOrderInput): Promise<CreateOrderResult> {
@@ -131,11 +155,37 @@ export async function confirmCreateOrder(input: CreateOrderInput): Promise<Creat
     const result = await callable(input);
     return result.data;
   } catch (e) {
-    const err = e as { code?: string; message?: string };
+    const err = e as { code?: string; message?: string; details?: { orderOutcome?: string } };
     return {
       success: false,
       errorCode: err?.code || 'callable_failed',
       errorMessage: err?.message || '下單失敗',
+      notCreated: err?.details?.orderOutcome === 'not_created',
     };
+  }
+}
+
+/**
+ * 號碼還沒拿到時盯著學生自己的訂單副本；店家按「給號碼」後回呼真的號碼。
+ * 回傳取消監聽；沒登入或沒辦法監聽時回 null。
+ */
+export function watchOrderQueueNumber(
+  schoolId: string,
+  orderId: string,
+  onNumber: (queueNumber: number) => void,
+): (() => void) | null {
+  const uid = getAuth()?.currentUser?.uid;
+  if (!uid || !isFirebaseConfigured()) return null;
+  try {
+    return onSnapshot(
+      doc(getDb(), 'users', uid, 'schools', schoolId, 'orders', orderId),
+      snapshot => {
+        const value = snapshot.exists() ? snapshot.data()?.queueNumber : null;
+        if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) onNumber(value);
+      },
+      () => undefined,
+    );
+  } catch {
+    return null;
   }
 }

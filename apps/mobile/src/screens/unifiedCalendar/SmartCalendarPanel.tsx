@@ -318,7 +318,7 @@ export function SmartCalendarPanel({
                 >
                   <Text
                     style={{
-                      color: activeTab === tab.key ? theme.colors.accent : '#fff',
+                      color: activeTab === tab.key ? theme.colors.accent : theme.colors.onDanger,
                       fontSize: 10,
                       fontWeight: '700',
                     }}
@@ -418,7 +418,7 @@ function WeekSummaryCard({ weekView }: { weekView: WeekView }) {
                     <View
                       style={{
                         height: `${(day.classMinutes / total) * 100}%` as any,
-                        backgroundColor: day.isToday ? theme.colors.accent : '#5856D6',
+                        backgroundColor: day.isToday ? theme.colors.accent : theme.colors.accent,
                       }}
                     />
                   )}
@@ -441,7 +441,7 @@ function WeekSummaryCard({ weekView }: { weekView: WeekView }) {
       {/* Stats */}
       <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
         {[
-          { label: '上課', value: `${weekSummary.totalClassHours}h`, color: '#5856D6' },
+          { label: '上課', value: `${weekSummary.totalClassHours}h`, color: theme.colors.accent },
           { label: '自習', value: `${weekSummary.totalStudyHours}h`, color: '#34C759' },
           { label: '待辦', value: `${weekSummary.upcomingDeadlines}`, color: '#FF3B30' },
         ].map((s) => (
@@ -801,7 +801,7 @@ function PomodoroSection({
             opacity: pressed ? 0.7 : 1,
           })}
         >
-          <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>
+          <Text style={{ color: active ? theme.colors.onDanger : theme.colors.onAccent, fontSize: 16, fontWeight: '700' }}>
             {active ? '停止' : '開始專注 25 分鐘'}
           </Text>
         </Pressable>
@@ -847,7 +847,7 @@ function PomodoroSection({
                 label: '本週',
                 value: `${stats.weekSessions}`,
                 sub: `${stats.weekMinutes}分鐘`,
-                color: '#5856D6',
+                color: theme.colors.accent,
               },
               { label: '連續', value: `${stats.streak}天`, sub: '', color: '#FF9500' },
             ].map((s) => (

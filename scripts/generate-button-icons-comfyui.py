@@ -233,7 +233,7 @@ def main() -> int:
     if not comfy_reachable(base):
         print(
             f"ComfyUI 似乎未在 {base} 運行。請先啟動本地 ComfyUI，並確認埠號為 {args.port}。\n"
-            "參考工作目錄：`/Users/miiduoa/Desktop/AI圖像本地引擎`（依你的安裝為準）。",
+            "ComfyUI 的安裝位置依各自環境而定。",
             file=sys.stderr,
         )
         return 2

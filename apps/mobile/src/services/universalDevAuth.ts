@@ -7,6 +7,7 @@ import {
 } from '@campus/shared/src/devUniversalAccounts';
 
 import { getAuthInstance, hasUsableFirebaseConfig } from '../firebase';
+import { getCloudFunctionUrl } from './cloudFunctions';
 import { saveMockAuthSession } from './mockAuth';
 
 import type { UserRole } from '../state/auth';
@@ -48,21 +49,6 @@ async function parseFunctionJsonResponse(
       error: response.ok ? fallbackMessage : `${fallbackMessage}（HTTP ${response.status}）`,
     };
   }
-}
-
-function getCloudFunctionUrl(functionName: string): string {
-  const extra = getExtra() as {
-    firebase?: { projectId?: string };
-    cloudFunctionRegion?: string;
-  };
-  const projectId = extra.firebase?.projectId;
-  const region = extra.cloudFunctionRegion ?? 'asia-east1';
-
-  if (!projectId) {
-    throw new Error('Firebase projectId not configured. 無法使用通用測試帳號登入。');
-  }
-
-  return `https://${region}-${projectId}.cloudfunctions.net/${functionName}`;
 }
 
 export async function signInWithUniversalDevAccount(params: {

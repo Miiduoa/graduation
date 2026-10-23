@@ -1,8 +1,28 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { httpsCallable } from 'firebase/functions';
 import { getFunctionsInstance } from '../firebase';
+import { safeNavigate } from '../utils/safeNavigate';
+import { describePickupNumber, formatShortOrderCode } from '@campus/shared/src/ordering/pickupNumber';
+import {
+  ORDER_NOT_SENT_TEXT,
+  placedItems,
+  resolveUnknownOrderOutcome,
+  type PlacedOrder,
+} from '../services/orderLookup';
+
+function PlacedOrderLines({ order }: { order: PlacedOrder }) {
+  const pickup = describePickupNumber(order);
+  return (
+    <View style={{ gap: 4 }}>
+      <Text style={styles.resultOkText}>{formatShortOrderCode(order.orderId)}</Text>
+      <Text style={[styles.resultOkText, { fontWeight: '700' }]}>{pickup.text}</Text>
+      {pickup.state === 'pending' && pickup.detail ? <Text style={styles.resultOkText}>{pickup.detail}</Text> : null}
+      {pickup.state === 'pending' ? <Text style={styles.resultOkText}>狀態：{pickup.label}</Text> : null}
+    </View>
+  );
+}
 
 export interface AgentCard {
   kind:
@@ -184,7 +204,14 @@ function MenuCard({ payload }: { payload: any }) {
 function OrderDraftCard({ payload }: { payload: any }) {
   const [paymentMethod, setPaymentMethod] = useState<string>(payload.paymentMethod || 'campus_card');
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [result, setResult] = useState<
+    { ok: boolean; order?: PlacedOrder; message?: string; checking?: boolean } | null
+  >(null);
+  const nav = useNavigation<any>();
+  // 同一張草稿「再試一次」沿用同一個送出編號，伺服器不會建出第二筆
+  const requestIdRef = useRef<string | null>(null);
+  // 連點時第二下還沒等到畫面變灰就進來了，用 ref 擋住，同時只會有一個請求在路上
+  const inFlightRef = useRef(false);
   const items: any[] = payload.items || [];
 
   const handleConfirm = async () => {
@@ -195,11 +222,21 @@ function OrderDraftCard({ payload }: { payload: any }) {
       );
       return;
     }
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     setSubmitting(true);
+    setResult(null);
+    requestIdRef.current ??=
+      typeof globalThis.crypto?.randomUUID === 'function'
+        ? `app-${globalThis.crypto.randomUUID()}`
+        : `app-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+    const schoolId = payload.confirmAction?.input?.schoolId || 'pu';
+    const requestId = requestIdRef.current;
     try {
       const callable = httpsCallable(getFunctionsInstance(), 'createOrder');
       const res = await callable({
-        schoolId: payload.confirmAction?.input?.schoolId || 'pu',
+        requestId,
+        schoolId,
         cafeteriaId: payload.cafeteriaId,
         items: items.map((it) => ({
           menuItemId: it.menuItemId,
@@ -215,13 +252,29 @@ function OrderDraftCard({ payload }: { payload: any }) {
       });
       const data = (res.data as any) || {};
       if (data.success && data.orderId) {
-        setResult({ ok: true, message: `✓ 訂單建立成功！訂單號 ${data.orderId}` });
+        setResult({
+          ok: true,
+          order: { orderId: data.orderId, queueNumber: data.queueNumber, createdAt: data.createdAt, status: data.status, items: placedItems(data.items) },
+        });
       } else {
-        setResult({ ok: false, message: data.errorMessage || '下單失敗，請稍後再試' });
+        setResult({ ok: false, message: ORDER_NOT_SENT_TEXT });
       }
     } catch (e: any) {
-      setResult({ ok: false, message: e?.message || '下單失敗' });
+      // 伺服器明確說不成立（菜單或金額變了、還不能線上點餐）才照實轉述並換新編號
+      if (e?.details?.orderOutcome === 'not_created') {
+        requestIdRef.current = null;
+        setResult({ ok: false, message: e?.message || ORDER_NOT_SENT_TEXT });
+      } else {
+        // 結果不明：先用同一個編號查一次，查到就顯示那張單；確定沒有才請學生再試；查不出結果就請學生看我的訂單
+        const outcome = await resolveUnknownOrderOutcome(schoolId, requestId);
+        setResult(
+          outcome.kind === 'found'
+            ? { ok: true, order: outcome.order }
+            : { ok: false, message: outcome.message, checking: outcome.kind === 'checking' },
+        );
+      }
     } finally {
+      inFlightRef.current = false;
       setSubmitting(false);
     }
   };
@@ -270,8 +323,32 @@ function OrderDraftCard({ payload }: { payload: any }) {
       </View>
       {result ? (
         <View style={[styles.resultBox, result.ok ? styles.resultOk : styles.resultErr]}>
-          <Text style={result.ok ? styles.resultOkText : styles.resultErrText}>{result.message}</Text>
+          {result.ok && result.order ? (
+            <>
+              <Text style={[styles.resultOkText, { fontWeight: '700' }]}>下單成功</Text>
+              <PlacedOrderLines order={result.order} />
+            </>
+          ) : (
+            <Text style={styles.resultErrText}>{result.message}</Text>
+          )}
         </View>
+      ) : null}
+      {result?.ok ? (
+        <TouchableOpacity style={styles.actionButton} onPress={() => safeNavigate(nav, 'StudentOrders')}>
+          <Text style={styles.actionButtonText}>我的訂單</Text>
+        </TouchableOpacity>
+      ) : result && !result.ok && result.checking ? (
+        <TouchableOpacity style={styles.actionButton} onPress={() => safeNavigate(nav, 'StudentOrders')}>
+          <Text style={styles.actionButtonText}>我的訂單</Text>
+        </TouchableOpacity>
+      ) : result ? (
+        <TouchableOpacity
+          style={[styles.confirmBtn, submitting && styles.confirmBtnDisabled]}
+          onPress={handleConfirm}
+          disabled={submitting}
+        >
+          {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.confirmBtnText}>再試一次</Text>}
+        </TouchableOpacity>
       ) : (
         <TouchableOpacity
           style={[styles.confirmBtn, submitting && styles.confirmBtnDisabled]}
@@ -342,15 +419,15 @@ const PERIOD_TIME: Record<number, string> = {
   2: '09:10',
   3: '10:10',
   4: '11:10',
-  5: '12:10',
-  6: '13:10',
-  7: '14:10',
-  8: '15:10',
-  9: '16:10',
-  10: '17:10',
-  11: '18:30',
-  12: '19:20',
-  13: '20:10',
+  5: '13:10',
+  6: '14:10',
+  7: '15:10',
+  8: '16:10',
+  9: '17:10',
+  10: '18:05',
+  11: '19:00',
+  12: '19:55',
+  13: '20:50',
 };
 
 function ScheduleTodayCard({ payload }: { payload: any }) {
@@ -498,9 +575,13 @@ function OrderSubmittedCard({ payload }: { payload: any }) {
       <CardHeader icon="✅" title="下單成功" color="#1B5E20" />
       <InfoRow label="餐廳" value={payload.cafeteria || payload.restaurantId || '—'} />
       <InfoRow label="金額" value={payload.total ? `NT$${payload.total}` : '—'} />
-      <InfoRow label="訂單編號" value={payload.orderId || '—'} />
-      <TouchableOpacity style={styles.actionButton} onPress={() => nav.navigate('CafeteriaScreen')}>
-        <Text style={styles.actionButtonText}>查看訂單</Text>
+      {payload.orderId ? (
+        <PlacedOrderLines
+          order={{ orderId: String(payload.orderId), queueNumber: payload.queueNumber, createdAt: payload.createdAt, status: payload.status, items: placedItems(payload.items) }}
+        />
+      ) : null}
+      <TouchableOpacity style={styles.actionButton} onPress={() => safeNavigate(nav, 'StudentOrders')}>
+        <Text style={styles.actionButtonText}>查看我的訂單</Text>
       </TouchableOpacity>
     </View>
   );

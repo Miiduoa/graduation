@@ -331,12 +331,17 @@ export type AtomicOrderRequest = {
   groupOrderId?: string;
   /** 取餐方式 */
   pickupType?: 'self_pickup' | 'dine_in';
+  /** 送出編號；「再試一次」時帶回上一次失敗回傳的 failure.requestId，伺服器不會建出第二筆 */
+  requestId?: string;
 };
 
 export type AtomicOrderResponse = {
   ok: boolean;
   orderId: string | null;
+  /** 伺服器發的取餐號碼；沒拿到是 null，畫面顯示「號碼還沒拿到，請到櫃台確認。」 */
   queueNumber: number | null;
+  /** 'pending_confirmation' = 待給號碼，店家可以按「給號碼」 */
+  queueStatus?: 'assigned' | 'pending_confirmation';
   pickupCode: PickupCode | null;
   walletHoldId: string | null;
   /** 預估完成時間（分鐘） */
@@ -355,6 +360,8 @@ export type AtomicOrderResponse = {
     message: string;
     /** 是否有部分回滾失敗（需 admin 介入） */
     needsManualReconciliation?: boolean;
+    /** 訂單沒送出去時的送出編號，「再試一次」要帶回同一個 */
+    requestId?: string;
   };
 };
 

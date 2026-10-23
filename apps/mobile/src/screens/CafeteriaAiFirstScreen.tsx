@@ -1,244 +1,443 @@
-/**
- * Campus AI-First — 餐廳列表 V2
- *
- * 接 demoStore：點餐按鈕 → placeOrder（寫 orders + 通知學生 + 通知商家收件匣）
- * → 切換到「餐廳」角色可在「訊息」收件匣看到 + 推進訂單狀態；
- *   VendorManagement 後台則由 cafeteriaData.getOrders 提供（非 demoStore 路徑）。
- */
-import React, { useState } from 'react';
-import { Alert, View, Text } from 'react-native';
-import {
-  AIDetailScreen,
-  AIInsightBanner,
-  AISection,
-  AICard,
-  AIRow,
-  AIChip,
-  AIButton,
-  aiTokens,
-} from '../ui/aiFirst';
-import { useDemoRole } from '../state/demoRole';
-import { useDemoStore } from '../state/demoStore';
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { ActivityIndicator, Modal, Text, TextInput, View } from 'react-native';
+import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
+import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useAuth } from '../state/auth';
-import { createDemoDiningOrder, type DemoPaymentMethod } from '../services/demoOrdering';
-import { resolveEffectiveDemoAIUser } from '../services/demoAiContext';
+import { useSchool } from '../state/school';
+import {
+  loadDiningCatalog,
+  loadPublicDiningCatalog,
+  watchDiningReceipt,
+  loadDiningIntent,
+  prepareDiningIntent,
+  submitDiningIntent,
+  diningTotal,
+  DiningError,
+  ORDER_NOT_SENT_TEXT,
+  ORDER_CHECKING_TEXT,
+  type DiningScope,
+  type DiningCatalog,
+  type DiningIntent,
+  type DiningMenu,
+  type DiningReceipt,
+} from '../features/dining';
+import { NETWORK_RETRY_TEXT, loadServiceFailureCopy } from '../utils/loadFailureCopy';
+import {
+  describePickupNumber,
+  formatShortOrderCode,
+} from '@campus/shared/src/ordering/pickupNumber';
+import {
+  CAFETERIA_EMPTY_SCHOOL_TEXT,
+  cafeteriaReviewBadge,
+} from '@campus/shared/src/cafeteriaCatalog';
+import { MY_ORDER_STATUS_LABELS as statuses } from './MyOrdersScreen';
+import { safeNavigate } from '../utils/safeNavigate';
 
-export default function CafeteriaAiFirstScreen(props: any) {
-  const navigation = props?.navigation;
-  const [filter, setFilter] = useState<string>('all');
-  const { role, definition } = useDemoRole();
-  const auth = useAuth();
-  const store = useDemoStore();
-  const effectiveUser = resolveEffectiveDemoAIUser({
-    profile: auth.profile as any,
-    user: auth.user,
-    demoRole: role,
-  });
-  const myUid = effectiveUser.uid ?? 'demo_guest';
-  const myName = effectiveUser.displayName ?? definition.label;
-  const mySchoolId = effectiveUser.schoolId ?? auth.profile?.schoolId ?? 'pu';
-  const myRole = effectiveUser.role ?? role;
-  const myOrderCount = store.orders.filter((o) => o.studentId === myUid).length;
-
-  // 訂餐開放給所有 demo 角色 — 教師、系主任、管理員、商家、校友、訪客都會吃午餐。
-  async function handleOrder(vendor: string, item: string, price: number, paymentMethod: DemoPaymentMethod) {
-    let orderId = '';
-    let merchantLabel = vendor;
-    let itemLabel = item;
-    let total = price;
-    const paymentLabel = paymentMethod === 'onsite' ? '到店付款' : '線上付款';
+type Props = {
+  navigation?: { goBack?: () => void; navigate?: (route: string) => void };
+};
+export default function CafeteriaAiFirstScreen({ navigation }: Props) {
+  useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
+  const { user } = useAuth();
+  const { school } = useSchool();
+  const scope = { userId: user?.uid ?? '', schoolId: school.id };
+  const scopeKey = JSON.stringify(scope);
+  const activeScope = useRef(scopeKey);
+  activeScope.current = scopeKey;
+  return (
+    <DiningContent
+      key={scopeKey}
+      scope={scope}
+      scopeKey={scopeKey}
+      activeScope={activeScope}
+      navigation={navigation}
+    />
+  );
+}
+function DiningContent({
+  scope,
+  scopeKey,
+  activeScope,
+  navigation,
+}: Props & {
+  scope: DiningScope;
+  scopeKey: string;
+  activeScope: React.MutableRefObject<string>;
+}) {
+  const [catalog, setCatalog] = useState<DiningCatalog | null>(null);
+  const [keyword, setKeyword] = useState('');
+  const [selected, setSelected] = useState<DiningMenu | null>(null);
+  const [pending, setPending] = useState<DiningIntent | null>(null);
+  const [receipt, setReceipt] = useState<DiningReceipt | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const mounted = useRef(true);
+  const lock = useRef(false);
+  const generation = useRef(0);
+  const isCurrent = () => mounted.current && activeScope.current === scopeKey;
+  const load = async () => {
+    if (!isCurrent() || lock.current) return;
+    const request = ++generation.current;
+    setLoading(true);
+    setError('');
+    setCatalog(null);
     try {
-      const result = await createDemoDiningOrder({
-        userId: myUid,
-        userName: myName,
-        role: myRole,
-        schoolId: mySchoolId,
-        merchantName: vendor,
-        itemName: item,
-        quantity: 1,
-        price,
-        paymentMethod,
-        source: 'cafeteria_ai_first',
-      });
-      orderId = result.order.id;
-      merchantLabel = result.merchant.name;
-      itemLabel = result.item.name;
-      total = result.total;
-    } catch (error: any) {
-      Alert.alert('訂餐失敗', error?.message ?? 'demo 訂餐流程暫時無法建立訂單。');
-      return;
+      const [next, saved] = await Promise.all([
+        scope.userId
+          ? loadDiningCatalog(scope, isCurrent)
+          : loadPublicDiningCatalog(scope.schoolId),
+        scope.userId ? loadDiningIntent(scope, isCurrent) : Promise.resolve(null),
+      ]);
+      if (isCurrent() && request === generation.current) {
+        setCatalog(next);
+        setPending(saved);
+      }
+    } catch (reason) {
+      if (isCurrent() && request === generation.current)
+        setError(
+          reason instanceof DiningError ? reason.message : loadServiceFailureCopy(reason),
+        );
+    } finally {
+      if (isCurrent() && request === generation.current) setLoading(false);
     }
-    Alert.alert(
-      '訂單已成立',
-      `${merchantLabel} 已收到 ${definition.icon} ${myName} 的訂單《${itemLabel}》NT$${total}。\n付款方式：${paymentLabel}\n訂單編號：${orderId}\n切到「餐廳 阿英」可看到訂單；目前角色的訊息 / 訂單頁也會看到紀錄。`,
-    );
-  }
-  function choosePaymentAndOrder(vendor: string, item: string, price: number) {
-    Alert.alert('選擇付款方式', `${item} · NT$${price}`, [
-      { text: '取消', style: 'cancel' },
-      { text: '到店付款', onPress: () => void handleOrder(vendor, item, price, 'onsite') },
-      { text: '線上付款', onPress: () => void handleOrder(vendor, item, price, 'online') },
-    ]);
-  }
-  const hour = new Date().getHours();
-  const isLunch = hour >= 11 && hour < 14;
-  const isDinner = hour >= 17 && hour < 21;
-  const period = isLunch ? '中餐' : isDinner ? '晚餐' : '時段';
-
+  };
+  useEffect(() => {
+    mounted.current = true;
+    void load();
+    return () => {
+      mounted.current = false;
+      generation.current += 1;
+    };
+    // This content remounts for every account and school change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const submit = async () => {
+    if (!isCurrent() || lock.current || (!pending && !selected)) return;
+    lock.current = true;
+    setBusy(true);
+    setError('');
+    try {
+      const intent = pending ?? (await prepareDiningIntent(scope, selected!, isCurrent));
+      if (!isCurrent()) return;
+      setPending(intent);
+      setSelected(null);
+      const next = await submitDiningIntent(intent, isCurrent);
+      if (isCurrent()) {
+        setReceipt(next);
+        setPending(null);
+      }
+    } catch (reason) {
+      if (isCurrent()) {
+        setError(reason instanceof DiningError ? reason.message : ORDER_NOT_SENT_TEXT);
+        if (reason instanceof DiningError && reason.kind === 'not-sent') {
+          setPending(null);
+          setSelected(null);
+          setCatalog(null);
+        }
+      }
+    } finally {
+      if (isCurrent()) {
+        lock.current = false;
+        setBusy(false);
+      }
+    }
+  };
+  const visibleMenus = (catalog?.menus ?? []).filter(
+    (menu) =>
+      menu.name.includes(keyword.trim()) ||
+      catalog?.venues.find((venue) => venue.id === menu.cafeteriaId)?.name.includes(keyword.trim()),
+  );
+  const venueName = (menu: DiningMenu) =>
+    catalog?.venues.find((venue) => venue.id === menu.cafeteriaId)?.name ?? '未提供餐廳資料';
+  // 訂單還沒結束前一直盯著：店家給號碼就換成真的號碼，店家取消就拿掉號碼
+  const receiptId = receipt?.id ?? null;
+  const receiptOpen = Boolean(
+    receipt && receipt.status !== 'completed' && receipt.status !== 'cancelled',
+  );
+  useEffect(() => {
+    if (!receiptId || !receiptOpen || !scope.userId) return;
+    const stop = watchDiningReceipt({ ...scope, orderId: receiptId }, (patch) => {
+      if (!isCurrent()) return;
+      setReceipt((current) =>
+        current && current.id === receiptId
+          ? {
+              ...current,
+              queueNumber: patch.queueNumber,
+              status: patch.status ?? current.status,
+              cancelledBy: patch.cancelledBy ?? current.cancelledBy ?? null,
+              cancelReason: patch.cancelReason ?? current.cancelReason ?? null,
+            }
+          : current,
+      );
+    });
+    return () => stop?.();
+    // scope is fixed for this mounted content (remounts on account/school change)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [receiptId, receiptOpen]);
+  const pickup = receipt ? describePickupNumber(receipt) : null;
+  const quote = selected?.price != null ? diningTotal(selected.price) : null;
   return (
     <AIDetailScreen
       title="校園餐廳"
-      subtitle={`現營業 8 家 · ${period}尖峰`}
+      subtitle="看看餐點，確認店家是否開放接單。"
       onBack={() => navigation?.goBack?.()}
     >
-      <AIInsightBanner
-        text={
-          role === 'student' && myOrderCount > 0
-            ? `你已下 ${myOrderCount} 筆訂單，可至訊息收件匣追蹤備餐進度`
-            : `現在 ${hour}:00${
-                isLunch ? '，主餐廳人多但便宜實惠' : isDinner ? '，學餐熱炒推薦' : '，仍有 4 家營業中'
-              } · 你最近 7 天平均花費 $82 · AI 給你 3 個建議`
-        }
-        source={role === 'student' && myOrderCount > 0 ? '訂單紀錄' : 'AI · 餐廳人潮 + 你的偏好'}
-        confidence="mid"
-      />
-
-      {/* AI 推薦 */}
-      <AISection title="AI 為你推薦" subtitle="基於時間、預算、營養">
-        <AICard
-          aiGenerated
-          icon="🍱"
-          title="口試 Demo 便當店 · 口試招牌雞腿便當"
-          badge="保證可訂"
-          badgeTone="ai"
-          source="demo ordering · 餐廳員工可接單"
-          confidence="high"
-        >
-          <Text style={{ fontSize: 13, color: aiTokens.text, lineHeight: 19 }}>
-            <Text style={{ fontWeight: '700' }}>$95</Text> · 口試展示專用 · AI 助理與所有角色都能下單{'\n'}
-            切到「餐廳 阿英」即可看到新訂單並推進狀態。
-          </Text>
-          <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-            <AIButton label="線上付款" onPress={() => handleOrder('口試 Demo 便當店', '口試招牌雞腿便當', 95, 'online')} />
-            <AIButton label="到店付款" variant="ghost" onPress={() => handleOrder('口試 Demo 便當店', '口試招牌雞腿便當', 95, 'onsite')} />
-          </View>
-        </AICard>
-
-        <AICard
-          aiGenerated
-          icon="🍱"
-          title="主餐廳 · 紅燒牛肉麵"
-          badge="★ 最推薦"
-          badgeTone="ai"
-          source="餐廳人潮 + 你上次給 ⭐4.5"
-          confidence="mid"
-        >
-          <Text style={{ fontSize: 13, color: aiTokens.text, lineHeight: 19 }}>
-            <Text style={{ fontWeight: '700' }}>$95</Text> · 步行 8 分 · 等位約 5 分{'\n'}
-            營養：650 kcal · 蛋白質 32g
-          </Text>
-          <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-            <AIButton label="立即點餐" onPress={() => choosePaymentAndOrder('主餐廳', '紅燒牛肉麵', 95)} />
-            <AIButton label="🧭 導航" variant="ghost" onPress={() => navigation?.navigate?.('MapV2' as never, { destination: '主餐廳' } as never)} />
-            <AIButton label="查看菜單" variant="ghost" onPress={() => navigation?.navigate?.('MenuDetail' as never, { name: '主餐廳' } as never)} />
-          </View>
-        </AICard>
-
-        <View style={{ flexDirection: 'row', gap: 8, marginHorizontal: aiTokens.space.md, marginBottom: 8 }}>
-          <View
-            style={{
-              flex: 1,
-              padding: 12,
-              backgroundColor: aiTokens.surface,
-              borderRadius: aiTokens.radius.md,
-              borderWidth: 1,
-              borderColor: aiTokens.border,
+      <AICard title="平台點餐與取餐">
+        <Text style={{ color: aiTokens.textSecondary, lineHeight: 24 }}>
+          使用 Google 帳號選餐、查看訂單與出示取餐憑證。學校原有餐廳服務仍保留在下方。
+        </Text>
+        <AIButton
+          label="前往平台點餐"
+          onPress={() => safeNavigate(navigation, 'NuniWorkspace', { tab: 'food' })}
+        />
+      </AICard>
+      {scope.userId && navigation?.navigate ? (
+            <View style={{ alignItems: 'flex-start' }}>
+              <AIButton
+                label="我的訂單"
+                variant="ghost"
+                onPress={() => navigation.navigate?.('StudentOrders')}
+              />
+            </View>
+          ) : null}
+          {receipt ? (
+            <AICard title={statuses[receipt.status] ?? '訂單紀錄'}>
+              <Text style={{ color: aiTokens.text }}>
+                {receipt.label} · 訂單金額 NT${receipt.total}
+              </Text>
+              {pickup?.state === 'assigned' ? (
+                <Text
+                  accessibilityLabel={pickup.text}
+                  style={{ color: aiTokens.text, fontSize: 20, fontWeight: '700', marginTop: 8 }}
+                >
+                  {pickup.text}
+                </Text>
+              ) : pickup?.state === 'cancelled' ? (
+                <Text style={{ color: aiTokens.danger, fontWeight: '700', marginTop: 8 }}>
+                  {pickup.text}
+                </Text>
+              ) : pickup ? (
+                <View style={{ marginTop: 8, gap: 4 }}>
+                  <Text style={{ color: aiTokens.text, fontWeight: '700' }}>{pickup.text}</Text>
+                  {pickup.detail ? (
+                    <Text selectable style={{ color: aiTokens.text }}>
+                      {pickup.detail}
+                    </Text>
+                  ) : null}
+                  <Text style={{ color: aiTokens.muted }}>狀態：{pickup.label}</Text>
+                </View>
+              ) : null}
+              <Text selectable style={{ color: aiTokens.muted, marginTop: 8 }}>
+                {formatShortOrderCode(receipt.id)}
+              </Text>
+              {navigation?.navigate ? (
+                <View style={{ marginTop: 12 }}>
+                  <AIButton
+                    label="看我的訂單"
+                    variant="ghost"
+                    onPress={() => navigation.navigate?.('StudentOrders')}
+                  />
+                </View>
+              ) : null}
+            </AICard>
+          ) : null}
+          {pending ? (
+            <AICard
+              title={
+                busy
+                  ? '訂單送出中'
+                  : error === ORDER_CHECKING_TEXT
+                    ? '還在確認訂單'
+                    : '訂單沒送出去'
+              }
+            >
+              <View style={{ gap: 12 }}>
+                {busy ? null : (
+                  <Text
+                    accessibilityRole="alert"
+                    style={{ color: aiTokens.text, fontWeight: '700' }}
+                  >
+                    {error || ORDER_NOT_SENT_TEXT}
+                  </Text>
+                )}
+                <Text style={{ color: aiTokens.text }}>
+                  {pending.label} · 到店應付 NT${pending.expectedTotal}
+                </Text>
+                <Text style={{ color: aiTokens.muted }}>
+                  再試一次會沿用同一個訂單編號，不會重複下單。
+                </Text>
+                {!busy && error === ORDER_CHECKING_TEXT ? (
+                  navigation?.navigate ? (
+                    <AIButton
+                      label="我的訂單"
+                      onPress={() => navigation.navigate?.('StudentOrders')}
+                    />
+                  ) : null
+                ) : (
+                  <AIButton
+                    label={busy ? '送出中' : '再試一次'}
+                    disabled={busy}
+                    onPress={() => void submit()}
+                  />
+                )}
+              </View>
+            </AICard>
+          ) : null}
+          <AICard title="找餐點">
+            <View style={{ gap: 12 }}>
+              <TextInput
+                accessibilityLabel="餐點或店名"
+                value={keyword}
+                maxLength={100}
+                onChangeText={setKeyword}
+                placeholder="搜尋餐點或店名"
+                placeholderTextColor={aiTokens.muted}
+                style={{
+                  color: aiTokens.text,
+                  borderColor: aiTokens.border,
+                  borderWidth: 1,
+                  borderRadius: 12,
+                  padding: 12,
+                  minHeight: 48,
+                }}
+              />
+              <AIButton
+                label={loading ? '讀取中' : '更新菜單'}
+                variant="ghost"
+                disabled={loading || busy}
+                onPress={() => void load()}
+              />
+              <Text style={{ color: aiTokens.muted }}>
+                目前僅提供已開通店家的到店付款。線上付款尚未開放。
+              </Text>
+              {loading ? (
+                <ActivityIndicator accessibilityLabel="讀取餐廳" color={aiTokens.ai} />
+              ) : null}
+              {error && !pending ? (
+                <View style={{ gap: 12 }}>
+                  <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>
+                    {error}
+                  </Text>
+                  {error === NETWORK_RETRY_TEXT ? (
+                    <AIButton label="重新整理" variant="ghost" onPress={() => void load()} />
+                  ) : null}
+                </View>
+              ) : null}
+            </View>
+          </AICard>
+          {catalog ? (
+            <>
+              {visibleMenus.length === 0 ? (
+                <AICard
+                  title={
+                    !keyword.trim() && catalog.venues.length === 0
+                      ? CAFETERIA_EMPTY_SCHOOL_TEXT
+                      : '目前沒有符合的餐點'
+                  }
+                >
+                  <Text style={{ color: aiTokens.muted }}>
+                    {!keyword.trim() && catalog.venues.length === 0
+                      ? '這間學校還沒提供餐廳資料，不會沿用其他學校的店家。'
+                      : '試著換個關鍵字，或稍後更新菜單。'}
+                  </Text>
+                </AICard>
+              ) : (
+                visibleMenus.map((menu) => (
+                  <AICard key={menu.id} title={menu.name} source={venueName(menu)}>
+                    <View style={{ gap: 10 }}>
+                      <Text style={{ color: aiTokens.text }}>
+                        {menu.price === null ? '價格未提供' : `NT$${menu.price}`}
+                      </Text>
+                      {menu.description ? (
+                        <Text style={{ color: aiTokens.muted }}>{menu.description}</Text>
+                      ) : null}
+                      {menu.orderable && scope.userId ? (
+                        <AIButton
+                          label={`選擇${menu.name}`}
+                          disabled={busy || Boolean(pending)}
+                          onPress={() => {
+                            if (isCurrent()) setSelected(menu);
+                          }}
+                        />
+                      ) : (
+                        <Text style={{ color: aiTokens.muted }}>
+                          此餐點目前未開放線上訂購，請向店家確認。
+                        </Text>
+                      )}
+                    </View>
+                  </AICard>
+                ))
+              )}
+              {catalog.venues.map((venue) => (
+                <AICard key={venue.id} title={venue.name}>
+                  {cafeteriaReviewBadge(venue.reviewStatus) ? (
+                    <Text style={{ color: aiTokens.muted }}>
+                      {cafeteriaReviewBadge(venue.reviewStatus)}
+                    </Text>
+                  ) : null}
+                  <Text style={{ color: aiTokens.muted }}>
+                    {venue.location || '位置資訊未提供'}
+                  </Text>
+                </AICard>
+              ))}
+            </>
+          ) : null}
+          <Modal
+            visible={Boolean(selected)}
+            transparent
+            animationType="fade"
+            onRequestClose={() => {
+              if (!busy) setSelected(null);
             }}
           >
-            <Text style={{ fontSize: 13, fontWeight: '700' }}>學餐 · 雞腿便當</Text>
-            <Text style={{ fontSize: 16, fontWeight: '700', color: aiTokens.ai, marginTop: 4 }}>$65</Text>
-            <Text style={{ fontSize: 11, color: aiTokens.muted, marginTop: 2 }}>5 min · ⭐4.2</Text>
-          </View>
-          <View
-            style={{
-              flex: 1,
-              padding: 12,
-              backgroundColor: aiTokens.surface,
-              borderRadius: aiTokens.radius.md,
-              borderWidth: 1,
-              borderColor: aiTokens.border,
-            }}
-          >
-            <Text style={{ fontSize: 13, fontWeight: '700' }}>7-11 · 御飯糰套餐</Text>
-            <Text style={{ fontSize: 16, fontWeight: '700', color: aiTokens.ai, marginTop: 4 }}>$45</Text>
-            <Text style={{ fontSize: 11, color: aiTokens.muted, marginTop: 2 }}>2 min · ⭐3.8</Text>
-          </View>
-        </View>
-      </AISection>
-
-      {/* 篩選 */}
-      <View
-        style={{
-          flexDirection: 'row',
-          flexWrap: 'wrap',
-          gap: 8,
-          paddingHorizontal: aiTokens.space.md,
-          marginTop: aiTokens.space.md,
-        }}
-      >
-        <AIChip label="全部" active={filter === 'all'} onPress={() => setFilter('all')} />
-        <AIChip label="便宜 $50↓" active={filter === 'cheap'} onPress={() => setFilter('cheap')} />
-        <AIChip label="快速 5min↓" active={filter === 'fast'} onPress={() => setFilter('fast')} />
-        <AIChip label="健康輕食" active={filter === 'healthy'} onPress={() => setFilter('healthy')} />
-        <AIChip label="素食友善" active={filter === 'veg'} onPress={() => setFilter('veg')} />
-      </View>
-
-      {/* 餐廳列表 */}
-      <AISection title="所有餐廳" subtitle="9 家 · 8 家現營業">
-        <AIRow
-          icon="🍱"
-          title="口試 Demo 便當店"
-          subtitle="口試展示 / AI 可代理下單 / 餐廳員工可接單"
-          tag="保證可訂"
-          tagTone="ai"
-          onPress={() => choosePaymentAndOrder('口試 Demo 便當店', '口試招牌雞腿便當', 95)}
-        />
-        <AIRow
-          icon="🍜"
-          title="主餐廳"
-          subtitle="麵點 / 便當 / 飲料 · 步行 8 min"
-          tag="尖峰"
-          tagTone="warning"
-          onPress={() => choosePaymentAndOrder('主餐廳', '招牌麵點便當', 90)}
-        />
-        <AIRow
-          icon="🍱"
-          title="學生餐廳"
-          subtitle="便當 / 自助餐 · 步行 5 min"
-          tag="營業中"
-          tagTone="success"
-          onPress={() => choosePaymentAndOrder('學生餐廳', '雞腿便當', 65)}
-        />
-        <AIRow
-          icon="🥗"
-          title="輕食吧"
-          subtitle="沙拉 / 三明治 · 步行 6 min"
-          tag="營業中"
-          tagTone="success"
-          onPress={() => choosePaymentAndOrder('輕食吧', '凱薩沙拉', 75)}
-        />
-        <AIRow
-          icon="☕"
-          title="咖啡角落"
-          subtitle="飲料 / 點心 · 步行 3 min"
-          tag="營業中"
-          tagTone="success"
-          onPress={() => choosePaymentAndOrder('咖啡角落', '拿鐵 + 司康', 110)}
-        />
-        <AIRow icon="🍔" title="速食吧" subtitle="漢堡 / 薯條 · 步行 10 min" tag="休息" tagTone="muted" disabled />
-        <AIRow icon="🍕" title="義式廚房" subtitle="披薩 / 義大利麵 · 步行 12 min" tag="休息" tagTone="muted" disabled />
-        <AIRow icon="🏪" title="7-11 校區店" subtitle="便利商店 · 步行 2 min" tag="24h" tagTone="ai" onPress={() => choosePaymentAndOrder('7-11 校區店', '御飯糰套餐', 45)} />
-      </AISection>
+            <View
+              style={{
+                flex: 1,
+                justifyContent: 'center',
+                backgroundColor: 'rgba(0,0,0,0.35)',
+                padding: 20,
+              }}
+            >
+              <View
+                accessibilityViewIsModal
+                style={{
+                  backgroundColor: aiTokens.surface,
+                  borderRadius: 16,
+                  padding: 24,
+                  gap: 16,
+                }}
+              >
+                <Text style={{ color: aiTokens.text, fontSize: 20, fontWeight: '600' }}>
+                  確認餐點
+                </Text>
+                <Text style={{ color: aiTokens.text }}>{selected?.name} · 1 份</Text>
+                <Text style={{ color: aiTokens.muted }}>{selected ? venueName(selected) : ''}</Text>
+                <Text style={{ color: aiTokens.text }}>
+                  餐點 NT${quote?.subtotal} + 稅額 NT${quote?.tax}
+                </Text>
+                <Text style={{ color: aiTokens.text, fontWeight: '600' }}>
+                  到店付款合計 NT${quote?.total}
+                </Text>
+                {error ? (
+                  <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>
+                    {error}
+                  </Text>
+                ) : null}
+                <AIButton
+                  label={busy ? '送出中' : '送出訂單，到店付款'}
+                  disabled={busy}
+                  onPress={() => void submit()}
+                />
+                <AIButton
+                  label="返回菜單"
+                  variant="ghost"
+                  disabled={busy}
+                  onPress={() => setSelected(null)}
+                />
+              </View>
+            </View>
+          </Modal>
     </AIDetailScreen>
   );
 }

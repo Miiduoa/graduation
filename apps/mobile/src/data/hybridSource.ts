@@ -1,6 +1,7 @@
 /* eslint-disable */
 import { PROVIDENCE_UNIVERSITY_SCHOOL_ID } from '@campus/shared/src';
 import type { DataSource } from './source';
+import { assertOrderRequest } from './orderSource';
 import type {
   Announcement,
   Cafeteria,
@@ -44,6 +45,38 @@ import {
 import { firebaseSource } from './firebaseSource';
 import { mockSource } from './mockSource';
 import { isProvidenceSchoolId, toInternalSchoolId, toPublicSchoolId } from './schoolIds';
+import {
+  fetchCafeteriaLocations,
+  fetchCafeteriaMenu,
+} from '../services/cafeteriaCatalog';
+import type { CafeteriaCatalogMenuItem, CafeteriaCatalogRecord } from '@campus/shared/src/cafeteriaCatalog';
+
+function toHybridCafeteria(row: CafeteriaCatalogRecord): Cafeteria {
+  return {
+    id: row.id,
+    schoolId: row.schoolId,
+    name: row.name,
+    location: row.location,
+    openingHours: row.openingHours,
+    description: row.intro,
+    sourceLabel: row.sourceLabel,
+    sourceUrl: row.websiteUrl,
+  };
+}
+
+function toHybridMenu(row: CafeteriaCatalogMenuItem): MenuItem {
+  return {
+    id: row.id,
+    name: row.name,
+    cafeteria: row.cafeteria,
+    cafeteriaId: row.cafeteriaId,
+    availableOn: row.availableOn,
+    price: row.price,
+    description: row.description,
+    soldOut: row.soldOut,
+    schoolId: row.schoolId,
+  };
+}
 
 /**
  * 嘗試取得 PUAdapter 實例（用於 TronClass 資料）。
@@ -247,9 +280,9 @@ export const hybridSource: DataSource = {
     );
   },
 
-  getAnnouncement: async (id: string): Promise<Announcement | null> => {
-    const schoolId = resolveSchoolId(undefined, id);
-    return fetchWithFallback(schoolId, 'getAnnouncement', () => mockSource.getAnnouncement(id), id);
+  getAnnouncement: async (id: string, schoolId?: string): Promise<Announcement | null> => {
+    const sid = resolveSchoolId(schoolId, id);
+    return fetchWithFallback(sid, 'getAnnouncement', () => mockSource.getAnnouncement(id, sid), id, sid);
   },
 
   listEvents: async (schoolId?: string, options?: QueryOptions): Promise<ClubEvent[]> => {
@@ -289,11 +322,16 @@ export const hybridSource: DataSource = {
   },
 
   listCafeterias: async (schoolId?: string, options?: QueryOptions): Promise<Cafeteria[]> => {
+    const sid = schoolId ?? currentSchoolContextId ?? undefined;
+    if (sid) {
+      try {
+        return (await fetchCafeteriaLocations(sid)).map(toHybridCafeteria);
+      } catch {
+        // Keep the existing Firebase path when the platform catalog is unavailable.
+      }
+    }
     try {
-      return await firebaseSource.listCafeterias(
-        schoolId ?? currentSchoolContextId ?? undefined,
-        options,
-      );
+      return await firebaseSource.listCafeterias(sid, options);
     } catch (error) {
       console.warn('[HybridSource] Falling back to mock cafeterias:', error);
       return mockSource.listCafeterias(schoolId, options);
@@ -302,6 +340,17 @@ export const hybridSource: DataSource = {
 
   listMenus: async (schoolId?: string, options?: QueryOptions): Promise<MenuItem[]> => {
     const sid = resolveSchoolId(schoolId);
+    if (sid) {
+      try {
+        const locations = await fetchCafeteriaLocations(sid);
+        const menus = (
+          await Promise.all(locations.slice(0, 40).map((row) => fetchCafeteriaMenu(sid, row)))
+        ).flat();
+        return menus.map(toHybridMenu);
+      } catch {
+        // Keep the existing Firebase path when the platform catalog is unavailable.
+      }
+    }
     return fetchWithFallback(sid, 'listMenu', () => mockSource.listMenus(schoolId, options));
   },
 
@@ -784,16 +833,9 @@ export const hybridSource: DataSource = {
       return mockSource.getOrder(id, userId, schoolId);
     }
   },
-  createOrder: async (data: any) => {
-    try {
-      return await firebaseSource.createOrder(data);
-    } catch (error) {
-      console.warn(
-        '[HybridSource] createOrder failed; not falling back to mock because orders must reach the restaurant ordering backend:',
-        error,
-      );
-      throw error;
-    }
+  createOrder: async (data) => {
+    assertOrderRequest(data);
+    return firebaseSource.createOrder(data);
   },
   updateOrderStatus: async (
     id: string,

@@ -5,9 +5,11 @@
  *
  *   1. 過敏原檢查 (allergens.checkAllergens)
  *   2. 預扣庫存 (stock.reserveStock) — 對每個品項
- *   3. 取得號碼牌 (Cloud Function `assignQueueNumber`，含 client fallback)
- *   4. Wallet hold (wallet.holdWallet)
- *   5. 建立訂單 (cafeteriaData.createOrder)
+ *   3. Wallet hold (wallet.holdWallet)
+ *   4. 建立訂單 (cafeteriaData.createOrder)
+ *   5. 取得號碼牌：訂單建好之後用 orderId 跟伺服器拿（Cloud Function `assignQueueNumber`）。
+ *      拿不到不算下單失敗，訂單照樣成立，標「待給號碼」，畫面顯示「號碼還沒拿到，請到櫃台確認。」，
+ *      店家可以按「給號碼」補發。手機不自己算號碼。
  *   6. 產生取餐碼 (pickupCode.issuePickupCode)
  *
  * 任一階段失敗 → 回滾前面所有階段。
@@ -28,11 +30,9 @@
  */
 
 import {
-  httpsCallable,
-} from 'firebase/functions';
-import { getFunctionsInstance, getAuthInstance } from '../../firebase';
-import {
   createOrder as cafeteriaCreateOrder,
+  assignOrderQueueNumber,
+  ORDER_NOT_SENT_TEXT,
   updateOrderStatus,
   logNutrition,
   trackSpending,
@@ -72,45 +72,6 @@ import { createRefund } from './refund';
 import { getCancelReasonInfo } from './cancelReason';
 
 type RollbackStep = () => Promise<void>;
-
-function tryFirebase(): boolean {
-  try {
-    getAuthInstance();
-    getFunctionsInstance();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * 取得號碼牌 — Cloud Function 優先，本機 fallback
- *
- * Cloud Function: assignQueueNumber({ schoolId, vendorId }) → { serial }
- */
-async function assignQueueNumber(
-  schoolId: string,
-  vendorId: string,
-): Promise<number> {
-  if (tryFirebase() && getAuthInstance().currentUser) {
-    try {
-      const fn = httpsCallable<
-        { schoolId: string; vendorId: string },
-        { serial?: number }
-      >(getFunctionsInstance(), 'assignQueueNumber');
-      const result = await fn({ schoolId, vendorId });
-      const serial = result.data?.serial;
-      if (typeof serial === 'number' && serial > 0) return serial;
-    } catch (err) {
-      console.warn('[atomicOrder] cloud assignQueueNumber failed:', err);
-    }
-  }
-  // 本機 fallback：基於時間的偽序號
-  const today = new Date();
-  const dayMinutes =
-    today.getHours() * 60 + today.getMinutes() - 7 * 60; // 從早上 7 點起算
-  return Math.max(1, Math.floor(dayMinutes / 2));
-}
 
 /**
  * 主要 API：原子下單
@@ -212,15 +173,7 @@ export async function placeOrderAtomic(
     );
   }
 
-  // 3. 號碼牌
-  let queueNumber: number;
-  try {
-    queueNumber = await assignQueueNumber(request.schoolId, request.vendorId);
-  } catch (err: any) {
-    return fail('queue_assign', 'queue_failed', err?.message ?? '號碼牌取得失敗');
-  }
-
-  // 4. Wallet hold
+  // 3. Wallet hold
   const holdResult = await holdWallet({
     uid: request.studentUid,
     schoolId: request.schoolId,
@@ -243,30 +196,42 @@ export async function placeOrderAtomic(
     }).then(() => undefined),
   );
 
-  // 5. 建立訂單
+  // 4. 建立訂單：交給伺服器，沒建成就「訂單沒送出去，請再試一次。」，不在手機上自己建單。
+  // 重試時呼叫端帶回同一個 requestId，伺服器算出同一個訂單編號，不會重複下單。
+  const requestId = request.requestId?.trim() || newRequestId();
   let order: Order;
   try {
     order = await cafeteriaCreateOrder({
+      requestId,
       studentUid: request.studentUid,
       vendorId: request.vendorId,
       cafeteriaId: request.cafeteriaId,
       items: request.items,
       totalPrice: request.totalPrice,
-      note: buildOrderNote(request, holdResult.holdId!, queueNumber),
+      note: buildOrderNote(request, holdResult.holdId!),
       estimatedPickup: null,
     });
-  } catch (err: any) {
-    return fail(
-      'order_persist',
-      'persist_failed',
-      err?.message ?? '訂單建立失敗',
-    );
+  } catch {
+    const response = await fail('order_persist', 'order_not_sent', ORDER_NOT_SENT_TEXT);
+    return { ...response, failure: { ...response.failure!, requestId } };
   }
   rollback.push(async () => {
     await updateOrderStatus(order.id, 'cancelled', {
       cancelReason: 'system_payment_failed',
     });
   });
+
+  // 5. 號碼牌：綁這筆訂單跟伺服器拿；拿不到就留「待給號碼」，不給假號碼
+  let queueNumber: number | null = isRealQueueNumber(order.queueNumber) ? order.queueNumber : null;
+  if (queueNumber == null) {
+    try {
+      queueNumber = (await assignOrderQueueNumber(order.id, { vendorId: request.vendorId }))
+        .queueNumber;
+    } catch (err) {
+      console.warn('[atomicOrder] queue number pending confirmation:', err);
+      queueNumber = null;
+    }
+  }
 
   // 6. 取餐碼
   let pickupCode: PickupCode;
@@ -286,26 +251,34 @@ export async function placeOrderAtomic(
   }
 
   // 估算等待時間（每單 5 分鐘 + 號碼牌前面的等候）
-  const estimatedMinutes = Math.max(5, Math.min(45, 5 + Math.floor(queueNumber / 6)));
+  const estimatedMinutes = Math.max(5, Math.min(45, 5 + Math.floor((queueNumber ?? 0) / 6)));
 
   return {
     ok: true,
     orderId: order.id,
     queueNumber,
+    queueStatus: queueNumber == null ? 'pending_confirmation' : 'assigned',
     pickupCode,
     walletHoldId: holdResult.holdId,
     estimatedMinutes,
   };
 }
 
-function buildOrderNote(
-  request: AtomicOrderRequest,
-  holdId: string,
-  queueNumber: number,
-): string {
+function newRequestId(): string {
+  const random =
+    typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+  return `app-${random}`;
+}
+
+function isRealQueueNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
+
+function buildOrderNote(request: AtomicOrderRequest, holdId: string): string {
   const parts = [request.note?.trim() ?? ''];
   parts.push(`[hold:${holdId}]`);
-  parts.push(`[queue:${queueNumber}]`);
   if (request.source === 'ai_agent') parts.push('[source:ai_agent]');
   if (request.groupOrderId) parts.push(`[group:${request.groupOrderId}]`);
   return parts.filter(Boolean).join(' ');

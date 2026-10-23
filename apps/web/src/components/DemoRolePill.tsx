@@ -8,6 +8,7 @@ import {
   useDemoRole,
   type DemoRole,
 } from '@/lib/demoRole';
+import { areUniversalDevAccountsEnabled } from '@/lib/runtime';
 import { getDemoUser } from '@/lib/demoData';
 
 /**
@@ -42,7 +43,7 @@ export function DemoRolePill() {
     return () => window.removeEventListener('mousedown', handler);
   }, [open]);
 
-  if (!mounted) {
+  if (!mounted || !areUniversalDevAccountsEnabled()) {
     // SSR / pre-hydration 不顯示，避免閃爍
     return null;
   }
@@ -86,7 +87,7 @@ export function DemoRolePill() {
     padding: '6px 12px',
     borderRadius: 999,
     background: def.toneSoft,
-    border: `1px solid ${def.tone}40`,
+    border: `1px solid color-mix(in srgb, ${def.tone} 25.1%, transparent)`,
     color: def.tone,
     fontSize: 12,
     fontWeight: 700,

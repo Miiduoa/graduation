@@ -22,6 +22,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 
 import { theme } from '../ui/theme';
+import { useThemeMode } from '../state/theme';
 import { useAuth } from '../state/auth';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 import { safeNavigate } from '../utils/safeNavigate';
@@ -64,14 +65,14 @@ function inferRoleFromUid(uid?: string | null): AgentRole {
 }
 
 const STATUS_META: Record<string, { emoji: string; label: string; color: string }> = {
-  planning: { emoji: '⚙️', label: '規劃中', color: theme.colors.muted },
-  awaiting_approval: { emoji: '🟡', label: '待批准', color: theme.colors.warning },
-  executing: { emoji: '🟢', label: '執行中', color: theme.colors.accent },
-  verifying: { emoji: '🔍', label: 'AI 自我審計', color: theme.colors.accent },
-  done: { emoji: '✅', label: '已完成', color: theme.colors.success },
-  failed: { emoji: '❌', label: '失敗', color: theme.colors.danger },
-  rejected: { emoji: '🚫', label: '已拒絕', color: theme.colors.muted },
-  cancelled: { emoji: '⛔', label: '已取消', color: theme.colors.muted },
+  planning: { emoji: '⚙️', label: '規劃中', get color() { return theme.colors.muted; } },
+  awaiting_approval: { emoji: '🟡', label: '待批准', get color() { return theme.colors.warning; } },
+  executing: { emoji: '🟢', label: '執行中', get color() { return theme.colors.accent; } },
+  verifying: { emoji: '🔍', label: 'AI 自我審計', get color() { return theme.colors.accent; } },
+  done: { emoji: '✅', label: '已完成', get color() { return theme.colors.success; } },
+  failed: { emoji: '❌', label: '失敗', get color() { return theme.colors.danger; } },
+  rejected: { emoji: '🚫', label: '已拒絕', get color() { return theme.colors.muted; } },
+  cancelled: { emoji: '⛔', label: '已取消', get color() { return theme.colors.muted; } },
 };
 
 const MODE_META: Record<AutonomyMode, { label: string; desc: string; emoji: string }> = {
@@ -81,6 +82,7 @@ const MODE_META: Record<AutonomyMode, { label: string; desc: string; emoji: stri
 };
 
 export default function AIAgentConsoleScreen() {
+  useThemeMode();
   const auth = useAuth();
   const navigation = useNavigation<any>();
   const tabBarBottomPad = useTabBarContentBottomPadding();
@@ -382,6 +384,7 @@ export default function AIAgentConsoleScreen() {
 
 // ── 單張 Plan 卡片 ──
 function PlanCard(props: { plan: ActionPlan; onApprove?: () => void; onReject?: () => void }) {
+  useThemeMode();
   const { plan: p, onApprove, onReject } = props;
   const meta = STATUS_META[p.status] ?? STATUS_META.planning;
   const [expanded, setExpanded] = useState(false);
