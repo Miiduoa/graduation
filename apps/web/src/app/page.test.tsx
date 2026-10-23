@@ -358,7 +358,18 @@ it('keeps an overdue but open quiz actionable before later tasks', async () => {
   );
 });
 
-it('builds a sense card from the real overdue task, writes local state after preview, and undoes it', async () => {
+function dueSoonTomorrow() {
+  return new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+}
+
+it('hides 現在可處理 when later work was already handled and today work exists', async () => {
+  const cardId = makeSenseCardId('due_soon', { courseId: 'cs101', id: 'later' });
+  window.localStorage.setItem(
+    senseStorageKey('school:alice'),
+    serializeSenseState(
+      applySenseAction(emptySenseState(), 'handle', { id: cardId, title: '遠期作業' }, new Date()),
+    ),
+  );
   vi.mocked(loadHomeData).mockResolvedValue({
     ...data('資料結構'),
     tasks: [
@@ -370,11 +381,49 @@ it('builds a sense card from the real overdue task, writes local state after pre
         dueAt: '2020-01-02T12:30:00Z',
         href: '/course/cs101#assignment-hw-1',
       },
+      {
+        id: 'later',
+        courseId: 'cs101',
+        courseName: '資料結構',
+        title: '遠期作業',
+        dueAt: dueSoonTomorrow(),
+        href: '/course/cs101#assignment-later',
+      },
+    ],
+  });
+  render(<HomePage />);
+  expect(await screen.findByTestId('today-work-list')).toBeTruthy();
+  await waitFor(() => {
+    expect(screen.queryByRole('heading', { name: /現在可處理/ })).toBeNull();
+  });
+});
+
+it('does not repeat today-due work under 現在可處理', async () => {
+  vi.mocked(loadHomeData).mockResolvedValue(overdueHome());
+  render(<HomePage />);
+  expect(await screen.findByRole('link', { name: /期末報告/ })).toBeTruthy();
+  expect(screen.getByTestId('today-work-list').textContent).toContain('期末報告');
+  expect(screen.queryByRole('heading', { name: /現在可處理/ })).toBeNull();
+  expect(screen.queryByText(/依據作業「期末報告」已過截止時間/)).toBeNull();
+});
+
+it('builds a sense card from later work due within a day, writes local state after preview, and undoes it', async () => {
+  vi.mocked(loadHomeData).mockResolvedValue({
+    ...data('資料結構'),
+    tasks: [
+      {
+        id: 'hw-1',
+        courseId: 'cs101',
+        courseName: '資料結構',
+        title: '期末報告',
+        dueAt: dueSoonTomorrow(),
+        href: '/course/cs101#assignment-hw-1',
+      },
     ],
   });
   render(<HomePage />);
   expect(await screen.findByRole('heading', { name: /現在可處理/ })).toBeTruthy();
-  expect(screen.getByText(/依據作業「期末報告」已過截止時間/)).toBeTruthy();
+  expect(screen.getByText(/依據作業「期末報告」將於 24 小時內截止/)).toBeTruthy();
   expect(screen.getByRole('link', { name: /前往這份作業/ }).getAttribute('href')).toBe(
     '/course/cs101#assignment-hw-1',
   );
@@ -384,7 +433,7 @@ it('builds a sense card from the real overdue task, writes local state after pre
   expect(await screen.findByText(SENSE_EMPTY_TEXT)).toBeTruthy();
   expect(window.localStorage.getItem(senseStorageKey('school:alice'))).toContain('"handle"');
   fireEvent.click(screen.getByRole('button', { name: '撤銷上次操作' }));
-  expect(await screen.findByText(/依據作業「期末報告」已過截止時間/)).toBeTruthy();
+  expect(await screen.findByText(/依據作業「期末報告」將於 24 小時內截止/)).toBeTruthy();
 });
 
 const overdueHome = (): HomeData => ({
@@ -401,13 +450,27 @@ const overdueHome = (): HomeData => ({
   ],
 });
 
+const soonHome = (): HomeData => ({
+  ...data('資料結構'),
+  tasks: [
+    {
+      id: 'hw-1',
+      courseId: 'cs101',
+      courseName: '資料結構',
+      title: '期末報告',
+      dueAt: dueSoonTomorrow(),
+      href: '/course/cs101#assignment-hw-1',
+    },
+  ],
+});
+
 it.each([
   ['從清單移出', '確認移出', '"handle"'],
   ['稍後一小時', '確認稍後', '"snooze"'],
 ] as const)('keeps %s after remounting from saved local state', async (action, confirm, token) => {
-  vi.mocked(loadHomeData).mockResolvedValue(overdueHome());
+  vi.mocked(loadHomeData).mockResolvedValue(soonHome());
   const view = render(<HomePage />);
-  expect(await screen.findByText(/依據作業「期末報告」已過截止時間/)).toBeTruthy();
+  expect(await screen.findByText(/依據作業「期末報告」將於 24 小時內截止/)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: action }));
   fireEvent.click(screen.getByRole('button', { name: confirm }));
   expect(await screen.findByText(SENSE_EMPTY_TEXT)).toBeTruthy();
@@ -415,13 +478,13 @@ it.each([
   view.unmount();
   render(<HomePage />);
   expect(await screen.findByText(SENSE_EMPTY_TEXT)).toBeTruthy();
-  expect(screen.queryByText(/依據作業「期末報告」已過截止時間/)).toBeNull();
+  expect(screen.queryByText(/依據作業「期末報告」將於 24 小時內截止/)).toBeNull();
   expect(screen.queryByRole('button', { name: action })).toBeNull();
 });
 
 it('reads a previously saved handle on first mount instead of showing the card again', async () => {
-  vi.mocked(loadHomeData).mockResolvedValue(overdueHome());
-  const cardId = makeSenseCardId('overdue', { courseId: 'cs101', id: 'hw-1' });
+  vi.mocked(loadHomeData).mockResolvedValue(soonHome());
+  const cardId = makeSenseCardId('due_soon', { courseId: 'cs101', id: 'hw-1' });
   window.localStorage.setItem(
     senseStorageKey('school:alice'),
     serializeSenseState(
@@ -434,7 +497,7 @@ it('reads a previously saved handle on first mount instead of showing the card a
 });
 
 it('keeps the card and says it did not save when local write fails', async () => {
-  vi.mocked(loadHomeData).mockResolvedValue(overdueHome());
+  vi.mocked(loadHomeData).mockResolvedValue(soonHome());
   const key = senseStorageKey('school:alice');
   const memory: Record<string, string> = {};
   const previous = Object.getOwnPropertyDescriptor(window, 'localStorage');
@@ -466,11 +529,11 @@ it('keeps the card and says it did not save when local write fails', async () =>
   });
   try {
     render(<HomePage />);
-    expect(await screen.findByText(/依據作業「期末報告」已過截止時間/)).toBeTruthy();
+    expect(await screen.findByText(/依據作業「期末報告」將於 24 小時內截止/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '從清單移出' }));
     fireEvent.click(screen.getByRole('button', { name: '確認移出' }));
     expect(await screen.findByText(SENSE_SAVE_FAILED_TEXT)).toBeTruthy();
-    expect(screen.getByText(/依據作業「期末報告」已過截止時間/)).toBeTruthy();
+    expect(screen.getByText(/依據作業「期末報告」將於 24 小時內截止/)).toBeTruthy();
     expect(screen.queryByText(SENSE_EMPTY_TEXT)).toBeNull();
     expect(screen.queryByRole('button', { name: '撤銷上次操作' })).toBeNull();
     expect(window.localStorage.getItem(key)).toBeNull();
@@ -532,6 +595,7 @@ it('lists every course today item on the first screen and opens the real assignm
   expect(items[1].getAttribute('href')).toBe('/classroom/course/design#quiz-quiz-1');
   expect(items[0].getAttribute('href')).toBe('/classroom/course/design#assignment-hw-0');
   expect(screen.queryByTestId('later-work-list')).toBeNull();
+  expect(screen.queryByRole('heading', { name: /現在可處理/ })).toBeNull();
 });
 
 it('puts next class, next bus and today work on the same first screen when those facts exist', async () => {
@@ -612,4 +676,9 @@ it('keeps today-work and next-class rows wrapping on a 390-wide phone', async ()
   expect(css).toMatch(/\.nextClassBody \{[^}]*overflow-wrap: anywhere/);
   expect(css).toMatch(/\.busEntryMeta \{[^}]*overflow-wrap: anywhere/);
   expect(css).toMatch(/\.taskContent strong,\s*\.course h3 \{\s*overflow-wrap: anywhere;/);
+  expect(css).toMatch(/\.list \{[^}]*min-width: 0/);
+  expect(css).toMatch(/\.list \{[^}]*overflow-x: clip/);
+  expect(css).toMatch(/grid-template-columns: minmax\(0, 1fr\)/);
+  expect(css).toMatch(/\.courseWorkTarget \{[^}]*scroll-margin-top: 48px/);
+  expect(css).toMatch(/@media \(max-width: 480px\) \{[\s\S]*?\.task \{[\s\S]*?padding: 12px 0/);
 });

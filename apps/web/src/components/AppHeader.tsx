@@ -11,6 +11,8 @@ import { useNuniSession } from '@/features/nuni/Session';
 import { useLocationHash } from '@/lib/useLocationHash';
 import headerStyles from './AppHeader.module.css';
 import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
+import { LoginLink } from './LoginLink';
+import { currentReturnPath } from '@/lib/navigation';
 
 function Header() {
   const pathname = usePathname();
@@ -22,9 +24,12 @@ function Header() {
   const [busy, setBusy] = useState(false);
   const context = useCampusNavigationSearch(params);
   const href = (path: string) => campusServiceHref(path, context);
-  const currentPage = `${pathname || '/'}${params?.size ? `?${params}` : ''}${hash}`;
+  const currentPage = currentReturnPath(
+    pathname || '/',
+    params?.size ? `?${params}` : '',
+    hash,
+  );
   const loginPage = ['/login', '/classroom/login', '/admin/login'].includes(pathname || '');
-  const loginHref = `/login?returnUrl=${encodeURIComponent(currentPage)}`;
   const checking = loading || nuni.loading;
   return (
     <>
@@ -104,7 +109,18 @@ function Header() {
           ) : checking ? (
             <span role="status">確認帳號中…</span>
           ) : !loginPage ? (
-            <Link href={loginHref}>登入</Link>
+            <LoginLink
+              returnPath={currentPage}
+              liveReturnPath={() =>
+                currentReturnPath(
+                  window.location.pathname,
+                  window.location.search,
+                  window.location.hash,
+                )
+              }
+            >
+              登入
+            </LoginLink>
           ) : null}
         </div>
       </header>

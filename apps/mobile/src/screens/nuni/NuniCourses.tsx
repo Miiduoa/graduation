@@ -660,12 +660,21 @@ function CourseDetail({
     `course:${id}:activity-filter`,
     'all',
   );
+  const data = result.data;
+  const linkedAssignment =
+    !!initialAssignmentId && !!data?.assignments.some((item) => item.id === initialAssignmentId);
+  const linkedQuiz =
+    !!initialAssignmentId && !!data?.quizzes.some((item) => item.id === initialAssignmentId);
+  const missingLinkedWork =
+    !!initialAssignmentId && !!data && !linkedAssignment && !linkedQuiz;
+  const linkedQuizTab =
+    !!initialAssignmentId &&
+    (linkedQuiz || (!linkedAssignment && /^cwq_/i.test(initialAssignmentId)));
   useEffect(() => {
     if (!initialAssignmentId) return;
-    setTab('assignments');
+    setTab(linkedQuizTab ? 'quizzes' : 'assignments');
     setActivityFilter('all');
-  }, [initialAssignmentId, setActivityFilter, setTab]);
-  const data = result.data;
+  }, [initialAssignmentId, linkedQuizTab, setActivityFilter, setTab]);
   const loadOlderMaterials = async () => {
     if (
       !data?.materialsCursor ||
@@ -758,6 +767,13 @@ function CourseDetail({
               ? '教學操作僅限這門課；不代表校方教職員身分。'
               : `待繳作業 ${data.assignments.filter((item) => isPendingActivity(item, data.course)).length} · 待答測驗 ${data.quizzes.filter((item) => isPendingActivity(item, data.course)).length}`}
           </Copy>
+          {missingLinkedWork ? (
+            <Copy alert>
+              {linkedQuizTab
+                ? '找不到這份測驗。可能已被老師刪除，或你沒有查看權限。請從測驗列表選擇其他測驗。'
+                : '找不到這份作業。可能已被老師刪除，或你沒有查看權限。請從作業列表選擇其他作業。'}
+            </Copy>
+          ) : null}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             <Button
               label={`作業 ${data.assignments.length}`}
@@ -873,7 +889,13 @@ function CourseDetail({
                   course={data.course}
                   classes={classes}
                   saved={saveActivity}
-                  hidden={!teacher && !matchesActivityFilter(item, data.course, activityFilter)}
+                  hidden={
+                    !teacher &&
+                    !matchesActivityFilter(item, data.course, activityFilter) &&
+                    item.id !== initialAssignmentId
+                  }
+                  focused={item.id === initialAssignmentId}
+                  scrollRef={scrollRef}
                 />
               ))
             )}
@@ -982,10 +1004,12 @@ function ActivityCard({
     revealed.current = true;
     revealAssignmentSubmitArea(scroll, target);
   };
+  const landKind = assignment ? 'assignment' : 'quiz';
+  const landLabel = assignment ? '作業繳交區' : '測驗作答區';
   const submitArea = (
     <>
       {focused ? (
-        <Text accessibilityLabel={`作業繳交區：${item.title}`}>作業繳交區</Text>
+        <Text accessibilityLabel={`${landLabel}：${item.title}`}>{landLabel}</Text>
       ) : null}
       {canSubmit && fileSubmit ? (
         <View style={{ gap: 8 }}>
@@ -1107,8 +1131,8 @@ function ActivityCard({
   );
   return (
     <View
-      nativeID={assignment ? `assignment-${item.id}` : undefined}
-      testID={assignment ? `assignment-${item.id}` : undefined}
+      nativeID={`${landKind}-${item.id}`}
+      testID={`${landKind}-${item.id}`}
       style={{ display: hidden ? 'none' : 'flex' }}
       accessibilityElementsHidden={hidden}
       importantForAccessibility={hidden ? 'no-hide-descendants' : 'auto'}
@@ -1171,8 +1195,8 @@ function ActivityCard({
         {focused ? (
           <View
             ref={submitRef}
-            testID={`assignment-submit-${item.id}`}
-            nativeID={`assignment-submit-${item.id}`}
+            testID={`${landKind}-submit-${item.id}`}
+            nativeID={`${landKind}-submit-${item.id}`}
             onLayout={revealSubmit}
           >
             {submitArea}

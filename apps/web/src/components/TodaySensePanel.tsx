@@ -78,6 +78,7 @@ export function TodaySensePanel({
   items,
   now,
   phase,
+  hideWhenEmpty = false,
   inferAgent = inferTodaySenseOrder,
   downloadAgent = downloadTodaySenseModel,
   gpu,
@@ -87,6 +88,7 @@ export function TodaySensePanel({
   items: SenseInputItem[];
   now: Date | null;
   phase: SensePhase;
+  hideWhenEmpty?: boolean;
   inferAgent?: AgentInfer;
   downloadAgent?: AgentDownload;
   gpu?: unknown;
@@ -178,6 +180,7 @@ export function TodaySensePanel({
 
   if (phase === 'hidden' || phase === 'loading' || phase === 'error' || !clock) return null;
   if (phase === 'ready' && !hydrated) return null;
+  if (phase === 'ready' && hideWhenEmpty && cards.length === 0) return null;
 
   const write = (next: SenseState) => {
     if (!storageKey || typeof window === 'undefined') return false;
