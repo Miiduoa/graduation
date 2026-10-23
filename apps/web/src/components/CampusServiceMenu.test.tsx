@@ -171,6 +171,34 @@ it('keeps the linked course assignment and query when using the header login', (
   expect(new URL(login.href).searchParams.get('returnUrl')).toBe(nextDestination);
 });
 
+it('does not stack the school course hash when the header 登入 link is used', () => {
+  navigation.pathname = '/course/cs101';
+  window.history.replaceState({}, '', '/course/cs101#assignment-hw-3#assignment-hw-3');
+  render(<AppHeader />);
+  const login = screen.getByRole('link', { name: '登入' });
+  expect(login.getAttribute('href')).toBe(
+    '/login?returnUrl=%2Fcourse%2Fcs101%23assignment-hw-3#',
+  );
+  const assign = vi.fn();
+  vi.stubGlobal('location', {
+    ...window.location,
+    pathname: '/course/cs101',
+    search: '',
+    hash: '#assignment-hw-3#assignment-hw-3',
+    assign,
+  });
+  try {
+    fireEvent.click(login);
+    expect(assign).toHaveBeenCalledOnce();
+    expect(assign).toHaveBeenCalledWith('/login?returnUrl=%2Fcourse%2Fcs101%23assignment-hw-3#');
+    expect(String(assign.mock.calls[0][0]).includes('#assignment-hw-3#assignment-hw-3')).toBe(
+      false,
+    );
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
 it('closes on Escape and returns keyboard focus to the service control', () => {
   render(<CampusServiceMenu />);
   const summary = screen.getByText('所有服務');

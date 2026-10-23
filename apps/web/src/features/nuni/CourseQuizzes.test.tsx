@@ -6,6 +6,7 @@ import {
   type NuniQuizResponse,
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
+import { COURSE_WORK_LANDING_ATTR, COURSE_WORK_MISSING_QUIZ } from '@/lib/courseWorkLanding';
 import { CourseQuizzes } from './CourseQuizzes';
 
 const mocks = vi.hoisted(() => ({
@@ -734,6 +735,25 @@ it('positions and focuses incoming quiz links after loading, and responds to ano
   await waitFor(() => expect(second.scrollIntoView).toHaveBeenCalledWith({ block: 'start' }));
   expect(document.activeElement).toBe(second);
   expect(first.scrollIntoView).toHaveBeenCalledTimes(1);
+});
+
+it('shows the submitted answer when a deep link opens an already answered quiz', async () => {
+  window.history.replaceState(null, '', `#quiz-${quizId}`);
+  replyList([quiz({ myResponse: answer(), responseCount: 1 })]);
+  render(<CourseQuizzes workspace={workspace()} />);
+  const card = await screen.findByRole('article', { name: '測驗：說明研究方法' });
+  card.scrollIntoView = vi.fn();
+  await waitFor(() => expect(card.getAttribute(COURSE_WORK_LANDING_ATTR)).toBe('true'));
+  expect(within(card).getByText('已送出作答')).toBeTruthy();
+  expect(within(card).getByDisplayValue('先觀察使用情境，再確認問題。')).toBeTruthy();
+});
+
+it('explains a missing quiz link instead of a blank panel', async () => {
+  window.history.replaceState(null, '', '#quiz-missing');
+  replyList([quiz()]);
+  render(<CourseQuizzes workspace={workspace()} />);
+  expect(await screen.findByText(COURSE_WORK_MISSING_QUIZ)).toBeTruthy();
+  expect(screen.getByRole('article', { name: '測驗：說明研究方法' })).toBeTruthy();
 });
 
 it('a linked quiz leaves a filtered view without erasing an answer draft', async () => {

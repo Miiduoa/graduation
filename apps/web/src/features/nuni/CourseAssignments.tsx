@@ -2,6 +2,12 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { NuniAssignment, NuniWorkspace } from '@campus/shared/src/nuni';
+import {
+  COURSE_WORK_MISSING_ASSIGNMENT,
+  courseWorkElementId,
+  landOnCourseWork,
+  parseCourseWorkHash,
+} from '@/lib/courseWorkLanding';
 import { useLocationHash } from '@/lib/useLocationHash';
 import { AssignmentCard } from './AssignmentCard';
 import { assignmentStatus, matchesAssignmentFilter, type AssignmentFilter } from './courseTasks';
@@ -42,24 +48,24 @@ export function CourseAssignments({ assignments, workspace, reload, onConfirmed 
     return () => window.removeEventListener('hashchange', revealLinkedAssignment);
   }, []);
 
+  const linked = parseCourseWorkHash(hash);
+  const missingLinked =
+    linked?.kind === 'assignment' && !assignments.some((item) => item.id === linked.id);
+
   useEffect(() => {
-    const target = hash.slice(1);
+    if (!linked || linked.kind !== 'assignment') return;
+    const target = courseWorkElementId(linked.kind, linked.id);
     if (
       filter !== 'all' ||
       revealed.current === target ||
-      !assignments.some((item) => `assignment-${item.id}` === target)
+      !assignments.some((item) => item.id === linked.id)
     )
       return;
     const frame = window.requestAnimationFrame(() => {
-      const element = document.getElementById(target);
-      if (element) {
-        element.scrollIntoView?.({ block: 'start' });
-        element.focus({ preventScroll: true });
-        revealed.current = target;
-      }
+      if (landOnCourseWork(target)) revealed.current = target;
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [assignments, filter, hash]);
+  }, [assignments, filter, linked?.id, linked?.kind]);
 
   return (
     <section aria-label="課程作業">
@@ -99,6 +105,11 @@ export function CourseAssignments({ assignments, workspace, reload, onConfirmed 
             ))}
           </nav>
         )}
+        {missingLinked ? (
+          <p role="status" className={styles.notice}>
+            {COURSE_WORK_MISSING_ASSIGNMENT}
+          </p>
+        ) : null}
         {!shown.length && (
           <p role="status" className={styles.note}>
             {!assignments.length

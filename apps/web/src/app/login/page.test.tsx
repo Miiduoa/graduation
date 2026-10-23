@@ -200,6 +200,42 @@ it('uses school identity only for the explicit legacy map favorite action and re
   await waitFor(() => expect(replace).toHaveBeenCalledWith(destination));
   expect(signIn).toHaveBeenCalledOnce();
 });
+it('returns to the original assignment after school sign-in', async () => {
+  state.user = null;
+  state.studentId = true;
+  const destination = '/course/cs101#assignment-hw-1';
+  state.params = new URLSearchParams({ returnUrl: destination });
+  render(<LoginPage />);
+  expect(screen.queryByTestId('platform-sign-in')).toBeNull();
+  fillSchoolLogin();
+  fireEvent.submit(screen.getByLabelText('學號').closest('form')!);
+  await waitFor(() => expect(replace).toHaveBeenCalledWith(destination));
+  expect(signIn).toHaveBeenCalledOnce();
+});
+
+it('returns to the assignment once when the course page stacked the hash onto login', async () => {
+  state.user = null;
+  state.studentId = true;
+  window.history.replaceState(
+    null,
+    '',
+    '/login?returnUrl=%2Fcourse%2Fcs101%23assignment-hw-3#assignment-hw-3',
+  );
+  state.params = new URLSearchParams({
+    returnUrl: '/course/cs101#assignment-hw-3#assignment-hw-3',
+  });
+  try {
+    render(<LoginPage />);
+    fillSchoolLogin();
+    fireEvent.submit(screen.getByLabelText('學號').closest('form')!);
+    await waitFor(() => expect(replace).toHaveBeenCalledWith('/course/cs101#assignment-hw-3'));
+    expect(replace.mock.calls[0][0]).not.toContain('#assignment-hw-3#assignment-hw-3');
+    expect(window.location.hash).toBe('');
+  } finally {
+    window.history.replaceState(null, '', '/');
+  }
+});
+
 it('returns to the same storefront after a platform login', () => {
   state.user = null;
   const destination = '/cafeteria/stall?schoolId=pu';

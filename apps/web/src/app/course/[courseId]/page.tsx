@@ -11,7 +11,20 @@ import {
   type CourseAssignment,
   type CourseWork,
 } from '@/lib/courseWork';
+import { LoginLink } from '@/components/LoginLink';
+import {
+  COURSE_WORK_MISSING_ASSIGNMENT,
+  COURSE_WORK_MISSING_QUIZ,
+  coursePageReturnPath,
+  landOnCourseWork,
+  parseCourseWorkHash,
+} from '@/lib/courseWorkLanding';
+import { useLocationHash } from '@/lib/useLocationHash';
 import styles from '../../home.module.css';
+
+function workKind(assignment: CourseAssignment) {
+  return ['quiz', 'exam'].includes(assignment.type) ? 'quiz' : 'assignment';
+}
 
 function Assignment({
   assignment,
@@ -74,8 +87,9 @@ function Assignment({
   }
   return (
     <section
-      className={styles.section}
-      id={`assignment-${assignment.id}`}
+      className={`${styles.section} ${styles.courseWorkTarget}`}
+      id={`${workKind(assignment)}-${assignment.id}`}
+      tabIndex={-1}
       aria-labelledby={`assignment-title-${assignment.id}`}
     >
       <div className={styles.sectionHeading}>
@@ -165,7 +179,9 @@ export default function CoursePage({ params }: { params: Promise<{ courseId: str
   const { courseId } = use(params);
   const { user, loading: authLoading } = useAuth();
   const school = useOptionalSelectedSchool();
+  const hash = useLocationHash();
   const scopeLoading = authLoading || school?.loading;
+  const returnPath = coursePageReturnPath(courseId, hash);
 
   if (scopeLoading || !user) {
     return (
@@ -176,12 +192,13 @@ export default function CoursePage({ params }: { params: Promise<{ courseId: str
           <section className={styles.section}>
             <h2>登入後查看課程</h2>
             <p>使用這門課的學校帳號登入，即可查看教材與繳交作業。</p>
-            <Link
+            <LoginLink
               className={styles.primary}
-              href={`/login?redirect=${encodeURIComponent(`/course/${courseId}`)}`}
+              returnPath={returnPath}
+              liveReturnPath={() => coursePageReturnPath(courseId, window.location.hash)}
             >
               登入帳號
-            </Link>
+            </LoginLink>
           </section>
         )}
       </SiteShell>
@@ -215,6 +232,9 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
   const [refreshing, setRefreshing] = useState(true);
   const generation = useRef(0);
   const active = useRef(false);
+  const hash = useLocationHash();
+  const revealed = useRef('');
+  const linked = parseCourseWorkHash(hash);
   useLayoutEffect(() => {
     active.current = true;
     return () => {
@@ -243,6 +263,16 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+  useEffect(() => {
+    if (!course || !linked) return;
+    const target = `${linked.kind}-${linked.id}`;
+    if (revealed.current === target || !course.assignments.some((item) => item.id === linked.id))
+      return;
+    const frame = window.requestAnimationFrame(() => {
+      if (landOnCourseWork(target)) revealed.current = target;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [course, linked]);
   function refresh() {
     if (!active.current) return;
     // Keep same-scope forms mounted while the server refreshes sibling submissions.
@@ -305,6 +335,11 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
           <h2 id="assignments" className={styles.section}>
             作業與評量
           </h2>
+          {linked && !course.assignments.some((item) => item.id === linked.id) ? (
+            <p role="status" className={styles.notice}>
+              {linked.kind === 'quiz' ? COURSE_WORK_MISSING_QUIZ : COURSE_WORK_MISSING_ASSIGNMENT}
+            </p>
+          ) : null}
           {course.assignments.length ? (
             course.assignments.map((assignment) => (
               <Assignment

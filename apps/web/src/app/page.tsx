@@ -28,7 +28,12 @@ import {
   selectLaterCourseWork,
   selectTodayCourseWork,
 } from '@/lib/todayCourseWork';
-import type { SenseInputItem, SensePhase } from '@campus/shared/src/todaySense';
+import {
+  emptySenseState,
+  selectSenseCards,
+  type SenseInputItem,
+  type SensePhase,
+} from '@campus/shared/src/todaySense';
 import styles from './home.module.css';
 
 const teachingRoles = ['owner', 'instructor', 'moderator', 'owner-teacher', 'co-teacher'];
@@ -179,16 +184,27 @@ export default function HomePage() {
         : error
           ? 'error'
           : 'ready';
+  const todayIds = new Set(todayTasks.map((task) => `${task.courseId}:${task.id}`));
   const senseItems: SenseInputItem[] =
-    data?.tasks.map((task) => ({
-      id: task.id,
-      kind: task.kind === 'quiz' ? 'quiz' : 'assignment',
-      courseId: task.courseId,
-      courseName: task.courseName,
-      title: task.title,
-      dueAt: task.dueAt,
-      href: courseTaskHref(task),
-    })) ?? [];
+    data?.tasks
+      .filter((task) => !todayIds.has(`${task.courseId}:${task.id}`))
+      .map((task) => ({
+        id: task.id,
+        kind: task.kind === 'quiz' ? 'quiz' : 'assignment',
+        courseId: task.courseId,
+        courseName: task.courseName,
+        title: task.title,
+        dueAt: task.dueAt,
+        href: courseTaskHref(task),
+      })) ?? [];
+  const uniqueSenseCards =
+    sensePhase === 'ready' && now
+      ? selectSenseCards({ now, items: senseItems, state: emptySenseState() }).cards.length
+      : 0;
+  const showSense =
+    sensePhase === 'unsigned' ||
+    uniqueSenseCards > 0 ||
+    (sensePhase === 'ready' && !todayTasks.length);
   const courseSections = [
     { title: '修習課程', items: studying, description: '查看教材、繳交作業與老師回饋。' },
     {
@@ -324,13 +340,16 @@ export default function HomePage() {
               </section>
             )}
             <TodayTimetable now={now} />
-            <TodaySensePanel
-              ownerId={owner}
-              schoolId={school?.selectedSchoolId}
-              items={senseItems}
-              now={now}
-              phase={sensePhase}
-            />
+            {showSense ? (
+              <TodaySensePanel
+                ownerId={owner}
+                schoolId={school?.selectedSchoolId}
+                items={senseItems}
+                now={now}
+                phase={sensePhase}
+                hideWhenEmpty={todayTasks.length > 0}
+              />
+            ) : null}
             {data && (
               <>
                 {!!laterTasks.length && (
