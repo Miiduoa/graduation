@@ -21,6 +21,7 @@ import {
   courseWorkHrefFromData,
   courseWorkOpenLabel,
   isAssignmentNotificationType,
+  isMaterialNotificationType,
 } from './courseWorkLanding';
 
 export type MessagingSession = { uid: string; schoolId: string };
@@ -581,7 +582,7 @@ export function notificationDestination(
       href: `/dms/${encodeURIComponent(notification.data.conversationId)}`,
       label: '開啟對話',
     };
-  if (isAssignmentNotificationType(notification.type)) {
+  if (isAssignmentNotificationType(notification.type) || isMaterialNotificationType(notification.type)) {
     const href =
       courseWorkHrefFromData(notification.data, notification.type) ||
       courseHrefFromData(notification.data);

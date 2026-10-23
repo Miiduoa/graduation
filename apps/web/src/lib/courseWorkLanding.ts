@@ -6,14 +6,17 @@ export const COURSE_WORK_MISSING_ASSIGNMENT =
   '找不到這份作業。可能已被老師刪除，或你沒有查看權限。請從作業列表選擇其他作業。';
 export const COURSE_WORK_MISSING_QUIZ =
   '找不到這份測驗。可能已被老師刪除，或你沒有查看權限。請從測驗列表選擇其他測驗。';
+export const COURSE_WORK_MISSING_MATERIAL =
+  '找不到這份教材。可能已被老師刪除、尚未載入較早頁面，或你沒有查看權限。請從教材櫃選擇其他教材。';
 export const COURSE_WORK_OPEN_ASSIGNMENT = '前往這份作業';
 export const COURSE_WORK_OPEN_QUIZ = '前往這份測驗';
+export const COURSE_WORK_OPEN_MATERIAL = '開啟這份教材';
 export const COURSE_WORK_OPEN_COURSE = '開啟課程';
 
 const ID = /^[\w.-]{1,200}$/;
 const NUNI_COURSE = /^cw_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export type CourseWorkKind = 'assignment' | 'quiz';
+export type CourseWorkKind = 'assignment' | 'quiz' | 'material';
 
 export type CourseWorkLink = {
   kind: CourseWorkKind;
@@ -22,7 +25,7 @@ export type CourseWorkLink = {
 
 export function parseCourseWorkHash(hash: string | null | undefined): CourseWorkLink | null {
   const value = (hash || '').replace(/^#/, '').split('#')[0];
-  const match = /^(assignment|quiz)-(.+)$/.exec(value);
+  const match = /^(assignment|quiz|material)-(.+)$/.exec(value);
   if (!match) return null;
   try {
     const id = decodeURIComponent(match[2]);
@@ -74,7 +77,7 @@ function safeCourseWorkHref(value: unknown): string | null {
     const url = new URL(safe, 'https://campus.local');
     const coursePath =
       /^\/course\/[^/]+$/.test(url.pathname) || /^\/classroom\/course\/[^/]+$/.test(url.pathname);
-    return coursePath && /^#(assignment|quiz)-.+/.test(url.hash) ? safe : null;
+    return coursePath && /^#(assignment|quiz|material)-.+/.test(url.hash) ? safe : null;
   } catch {
     return null;
   }
@@ -93,6 +96,10 @@ export function isAssignmentNotificationType(type: string | null | undefined): b
   );
 }
 
+export function isMaterialNotificationType(type: string | null | undefined): boolean {
+  return type === 'material' || type === 'unread_material' || type === 'course_material';
+}
+
 export function courseWorkHrefFromData(
   data: Record<string, unknown> | null | undefined,
   type?: string | null,
@@ -103,9 +110,24 @@ export function courseWorkHrefFromData(
   const courseId = textId(row.workspaceId) || textId(row.courseId) || textId(row.groupId);
   const quizId = textId(row.quizId);
   const assignmentId = textId(row.assignmentId);
-  const kind: CourseWorkKind =
-    type === 'quiz' || quizId || isQuizFlag(row) ? 'quiz' : 'assignment';
-  const workId = kind === 'quiz' ? quizId || assignmentId : assignmentId || quizId;
+  const materialId = textId(row.materialId);
+  const materialNotice =
+    type === 'material' ||
+    type === 'unread_material' ||
+    type === 'course_material' ||
+    row.kind === 'material' ||
+    row.type === 'material';
+  const kind: CourseWorkKind = materialNotice || (materialId && !assignmentId && !quizId)
+    ? 'material'
+    : type === 'quiz' || quizId || isQuizFlag(row)
+      ? 'quiz'
+      : 'assignment';
+  const workId =
+    kind === 'material'
+      ? materialId
+      : kind === 'quiz'
+        ? quizId || assignmentId
+        : assignmentId || quizId;
   if (!courseId || !workId) return null;
   const path = coursePathFromId(courseId);
   return path ? `${path}#${kind}-${encodeURIComponent(workId)}` : null;
@@ -137,9 +159,10 @@ export function courseWorkOpenLabel(href: string): string {
   try {
     const url = new URL(href, 'https://campus.local');
     if (!url.hash) return COURSE_WORK_OPEN_COURSE;
-    return parseCourseWorkHash(url.hash)?.kind === 'quiz'
-      ? COURSE_WORK_OPEN_QUIZ
-      : COURSE_WORK_OPEN_ASSIGNMENT;
+    const kind = parseCourseWorkHash(url.hash)?.kind;
+    if (kind === 'quiz') return COURSE_WORK_OPEN_QUIZ;
+    if (kind === 'material') return COURSE_WORK_OPEN_MATERIAL;
+    return COURSE_WORK_OPEN_ASSIGNMENT;
   } catch {
     return COURSE_WORK_OPEN_ASSIGNMENT;
   }

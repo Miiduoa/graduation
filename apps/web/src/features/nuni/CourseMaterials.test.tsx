@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { NuniError, type NuniMaterial, type NuniWorkspace } from '@campus/shared/src/nuni';
+import { COURSE_WORK_LANDING_ATTR, COURSE_WORK_MISSING_MATERIAL } from '@/lib/courseWorkLanding';
 import { CourseMaterials } from './CourseMaterials';
 
 const state = vi.hoisted(() => ({ context: 'session-a', request: vi.fn(), refresh: vi.fn() }));
@@ -36,6 +37,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   state.context = 'session-a';
   state.request.mockResolvedValue(list());
+  window.history.replaceState(null, '', '/');
+  localStorage.clear();
 });
 
 it('renders real reading content and safe links for students without publication controls', async () => {
@@ -417,4 +420,72 @@ it('does not restore a pending publication or call onChanged after access is rev
   expect(screen.queryByText(/已發布「/)).toBeNull();
   expect(changed).not.toHaveBeenCalled();
   expect(state.request).toHaveBeenCalledTimes(3);
+});
+
+it('groups the cabinet by week, shows type and honest size, and opens the file in one tap', async () => {
+  const unitId = 'cwu_22222222-2222-4222-8222-222222222222';
+  const item = {
+    ...material,
+    unitId,
+    unitTitle: '第 03 週',
+    body: 'https://example.test/week3.pdf',
+    createdAt: new Date().toISOString(),
+  };
+  state.request.mockResolvedValue({ materials: [item], nextCursor: null });
+  render(
+    <CourseMaterials
+      workspace={{ ...workspace, memberRole: 'student' }}
+      units={[
+        {
+          id: unitId,
+          workspaceId: workspace.id,
+          title: '第 03 週',
+          position: 3,
+          createdAt: item.createdAt,
+        },
+      ]}
+    />,
+  );
+  expect(await screen.findByRole('heading', { name: '第 03 週' })).toBeTruthy();
+  expect(screen.getByText('PDF')).toBeTruthy();
+  expect(screen.getByText('大小未提供（教材沒有檔案大小欄位）')).toBeTruthy();
+  const open = screen.getByRole('link', { name: '下載' });
+  expect(open.getAttribute('href')).toBe('https://example.test/week3.pdf');
+  expect(open.getAttribute('download')).toBe('week3.pdf');
+});
+
+it('lands on a material hash with the same highlight used for assignments', async () => {
+  window.history.replaceState(null, '', `/#material-${material.id}`);
+  render(<CourseMaterials workspace={{ ...workspace, memberRole: 'student' }} />);
+  const card = await screen.findByRole('article', { name: material.title });
+  card.scrollIntoView = vi.fn();
+  await waitFor(() => expect(card.getAttribute(COURSE_WORK_LANDING_ATTR)).toBe('true'));
+});
+
+it('loads later pages until a linked older material is found', async () => {
+  window.history.replaceState(null, '', `/#material-${olderMaterial.id}`);
+  state.request.mockResolvedValueOnce(firstPage()).mockResolvedValueOnce({
+    materials: [olderMaterial],
+    nextCursor: null,
+  });
+  render(<CourseMaterials workspace={{ ...workspace, memberRole: 'student' }} />);
+  const card = await screen.findByRole('article', { name: olderMaterial.title });
+  await waitFor(() => expect(card.getAttribute(COURSE_WORK_LANDING_ATTR)).toBe('true'));
+});
+
+it('explains a missing material instead of a blank cabinet', async () => {
+  window.history.replaceState(null, '', '/#material-cwm_99999999-9999-4999-8999-999999999999');
+  render(<CourseMaterials workspace={{ ...workspace, memberRole: 'student' }} />);
+  expect(await screen.findByText(COURSE_WORK_MISSING_MATERIAL)).toBeTruthy();
+  expect(screen.getByRole('article', { name: material.title })).toBeTruthy();
+});
+
+it('filters the current course cabinet by keyword without leaving the page', async () => {
+  render(<CourseMaterials workspace={{ ...workspace, memberRole: 'student' }} />);
+  await screen.findByRole('article', { name: material.title });
+  fireEvent.change(screen.getByLabelText('在這門課找教材'), { target: { value: '沒有這份' } });
+  expect(screen.queryByRole('article', { name: material.title })).toBeNull();
+  expect(screen.getByText(/找不到符合「沒有這份」的教材/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('在這門課找教材'), { target: { value: '主鍵' } });
+  expect(screen.getByRole('article', { name: material.title })).toBeTruthy();
 });
