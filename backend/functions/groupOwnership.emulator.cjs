@@ -1,4 +1,4 @@
-/* global process, fetch */
+/* global process, fetch, __dirname */
 const { after, before, beforeEach, test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
