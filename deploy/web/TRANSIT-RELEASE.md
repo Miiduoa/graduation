@@ -4,7 +4,9 @@
 
 ## 發布前
 
-`live-tdx` 是 Web release 的預設 profile：先在兩台既有 `nuni-web` 機器內執行唯讀 TDX 檢查，再建置和發布；rollout 前後亦重新檢查，並分別保留證據。只傳送檢查程式，不讀出、回傳或複製機器上的 TDX Secret；需要既有 Fly 部署權杖與 SSH 權限。不會新建主機，也不會自動更換或啟用 Secret。
+`live-tdx` 是 Web release 的預設 profile：先在兩台既有 `nuni-web` 機器內執行唯讀 TDX 檢查，再建置和發布；rollout 前後亦重新檢查，並分別保留證據。只傳送檢查程式，不讀出、回傳或複製機器上的 TDX Secret；以既有 Fly 部署權杖經 Machines API 執行，不建立 SSH 憑證。不會新建主機，也不會自動更換或啟用 Secret。
+
+Machines API 檢查使用 `flyctl machine exec --json`，不能以 flyctl 本身的退出碼判定遠端命令成功：[flyctl 的實作](https://github.com/superfly/flyctl/blob/6667848c2a3fc46b9efb51f5fa0b386a70719826/internal/command/machine/exec.go)會將遠端非零退出碼留在回應中。[官方回應型別](https://github.com/superfly/fly-go/blob/v0.11.5/machine_types.go)對 `exit_code` 使用 `omitempty`，所以正常的零值會省略；檢查接受省略或整數 `0`，拒絕其他型別及任何非零值。回應還必須符合 `stdout`／可選 `stderr` 的字串結構，並在 `stdout` 中包含唯一且有效的檢查報告。即使帶有成功報告，非零遠端退出碼仍會停止發布；任一 stderr 及任意錯誤內容都不寫入輸出證據。
 
 檢查必須取得名稱包含「靜宜大學」的臺中站牌，以及至少一筆具去返程與有效來源時間的資料。超過 90 秒、來源來自未來、空資料、HTML 404 及無權限都會停止發布。TDX 對每把金鑰限流，且兩台機器與公開伺服器共用同一把金鑰：單一請求收到 429 時，只在同一次檢查、同一個已取得的 token 上有界重試（20 秒、40 秒各一次），重試後仍限流就停止發布，不會換假資料或改走官方入口。末班已過等有效狀態與真正倒數分開記錄；只有明確的正常狀態加有效秒數才會標記 countdownVerified。非營運時段若 TDX 不提供新鮮狀態，檢查會停止，不能以假倒數通過。
 
@@ -30,7 +32,7 @@
 
 ## 驗證邊界
 
-`node --test deploy/web/transit-release-gate.test.mjs` 使用明確的本機傳輸替身，不能當作正式 TDX 連線紀錄。機內檢查失敗時只回固定錯誤代碼（如 `rate-limited`、`tdx-not-configured`），不回供應商回應內容或憑證資料；Fly SSH 本身失敗則另記 `fly-runtime-probe-failed`。發布最後的公開驗證會在機內檢查剛用過同一把 TDX 金鑰後執行，正式站可能因保護共用額度回 429 與 `Retry-After`；公開驗證只對 429 依 `Retry-After`（上限 120 秒、且不短於自身 30／60／60 秒間隔）有界重試，整次最多等 240 秒，仍被擋就以 `rate-limited` 停止。不設白名單標頭、不放寬一般使用者限流；機內檢查則維持固定間隔，避免超過 Fly SSH 時限。手機實機定位、道路兩側現場方向與多機器共享配額仍須另行驗收。只有正式機器、憑證、TDX 及發布流程都通過實際檢查，才可宣稱即時公車已啟用；官方入口模式的 Web 發布必須另外註明即時公車尚未啟用。
+`node --test deploy/web/transit-release-gate.test.mjs` 使用明確的本機傳輸替身，不能當作正式 TDX 連線紀錄。機內檢查失敗時只回固定錯誤代碼（如 `rate-limited`、`tdx-not-configured`），不回供應商回應內容或憑證資料；Fly Machines API 執行失敗則另記 `fly-runtime-probe-failed`。發布最後的公開驗證會在機內檢查剛用過同一把 TDX 金鑰後執行，正式站可能因保護共用額度回 429 與 `Retry-After`；公開驗證只對 429 依 `Retry-After`（上限 120 秒、且不短於自身 30／60／60 秒間隔）有界重試，整次最多等 240 秒，仍被擋就以 `rate-limited` 停止。不設白名單標頭、不放寬一般使用者限流；機內檢查則維持固定間隔，避免超過 Fly Machines API 執行時限。手機實機定位、道路兩側現場方向與多機器共享配額仍須另行驗收。只有正式機器、憑證、TDX 及發布流程都通過實際檢查，才可宣稱即時公車已啟用；官方入口模式的 Web 發布必須另外註明即時公車尚未啟用。
 
 ## 兩台機器共用公車快取
 
