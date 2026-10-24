@@ -4253,7 +4253,7 @@ export function generateLocalAnswer(
 
   // ── 離線助理自我說明 / 使用者抱怨 / 草稿需求 ──
   else if (
-    /你是誰|你是什麼|什麼模型|模型|離線|本地|chatgpt|gpt|codex|智商|多聰明|參數|parameter|權重|訓練|跟.*一樣/.test(
+    /你是誰|你是什麼|什麼模型|模型|離線|本地|chatgpt|gpt|智商|多聰明|參數|parameter|權重|訓練|跟.*一樣/.test(
       q,
     )
   ) {
