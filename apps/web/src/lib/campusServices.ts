@@ -212,6 +212,14 @@ export const CAMPUS_SERVICES = [
     category: 'campus',
   },
   {
+    name: '學校資訊',
+    text: '查看官方聯絡電話、網站與名錄地址',
+    href: '/school-info',
+    access: 'public',
+    keywords: '總機 官網 地址 名錄 聯絡 school info contact',
+    category: 'campus',
+  },
+  {
     name: '職涯',
     text: '職涯資料還沒接到校方，先看支援說明',
     href: '/career',

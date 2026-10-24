@@ -57,6 +57,15 @@ const ITEMS: LifeService[] = [
     keywords: '借書 還書 續借 找書 書籍 閱讀 library book',
   },
   {
+    href: '/school-info',
+    title: '學校資訊',
+    text: '查看官方總機、網站與名錄地址。',
+    action: '看學校資訊',
+    icon: 'services',
+    group: 'public',
+    keywords: '總機 官網 地址 名錄 聯絡 school info contact',
+  },
+  {
     href: '/announcements',
     title: '公開公告',
     text: '查看學校發布的公開消息。',

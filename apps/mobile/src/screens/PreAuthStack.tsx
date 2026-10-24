@@ -6,6 +6,7 @@ import { GoogleMapsLikeScreen } from './GoogleMapsLikeScreen';
 import BusAiFirstScreen from './BusAiFirstScreen';
 import LibraryAiFirstScreen from './LibraryAiFirstScreen';
 import LibraryCatalogScreen from './LibraryCatalogScreen';
+import SchoolInfoScreen from './SchoolInfoScreen';
 import { CampusAnnouncementsScreen, CampusAnnouncementDetailScreen } from './CampusContentScreens';
 import { SSOLoginScreen } from './SSOLoginScreen';
 import { NuniWorkspaceScreen } from './NuniWorkspaceScreen';
@@ -37,6 +38,7 @@ export function PreAuthStack() {
       <Stack.Screen name="Map" component={GoogleMapsLikeScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Library" component={LibraryAiFirstScreen} options={{ headerShown: false }} />
       <Stack.Screen name="LibraryCatalog" component={LibraryCatalogScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="SchoolInfo" component={SchoolInfoScreen} options={{ headerShown: false }} />
       <Stack.Screen
         name="BusSchedule"
         component={BusAiFirstScreen}

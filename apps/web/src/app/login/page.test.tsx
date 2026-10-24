@@ -151,6 +151,7 @@ it.each([
   '/cafeteria',
   '/cafeteria/stall?schoolId=pu',
   '/library',
+  '/school-info',
 ])(
   'keeps public destination %s optional and preserves the task with either account or guest browsing',
   (destination) => {

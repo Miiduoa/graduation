@@ -73,6 +73,7 @@ export default function LoginLandingScreen() {
             [
               ['Map', '校園地圖', '搜尋地點、查看位置與步行路線'],
               ['Library', '圖書館', '搜尋目前選擇學校的館藏與官方服務'],
+              ['SchoolInfo', '學校資訊', '查看官方總機、網站與名錄地址'],
               ['BusSchedule', '公車查詢', '查看站點與官方到站資訊'],
               ['公告總覽', '公開公告', '查看學校發布的消息'],
             ] as const

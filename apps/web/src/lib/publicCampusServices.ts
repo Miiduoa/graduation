@@ -4,6 +4,7 @@ export const publicCampusServices = [
   { href: '/announcements', title: '公開公告', detail: '學校發布的公開消息' },
   { href: '/cafeteria', title: '餐廳', detail: '菜單與營業資訊' },
   { href: '/library', title: '圖書館', detail: '館藏查詢與官方服務入口' },
+  { href: '/school-info', title: '學校資訊', detail: '官方聯絡與名錄來源' },
 ] as const;
 
 /** Browsing a school does not establish school identity or grant academic access. */

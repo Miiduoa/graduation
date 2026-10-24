@@ -18,6 +18,7 @@ it.each([
   '/lost-found/item-1?schoolId=pu',
   '/lost-found/post',
   '/library',
+  '/school-info',
   '/classroom/course/cw_11111111-1111-4111-8111-111111111111#assignment-cwa_22222222-2222-4222-8222-222222222222',
 ])('returns to platform task %s', (path) => {
   expect(platformDestination(path)).toBe(path);
