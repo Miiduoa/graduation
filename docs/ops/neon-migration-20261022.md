@@ -37,7 +37,7 @@ API 映像內嵌的 SQL 檔 checksum 必須與這張表一致，否則**重啟�
 1. Neon console 開新免費 project：PG **18**、region **ap-southeast-1**、db `neondb`。立刻在 console 把 `neondb_owner` **換成新密碼**。建議另建 `nuni_web_files`（LOGIN，只能碰作業檔三張表＋外鍵需要的 SELECT），nuni-web 不要繼續用 owner。
 2. 記下直連 host（`ep-….ap-southeast-1.aws.neon.tech`）與 pooler host（`ep-…-pooler.…`）。**Fly 用直連 + `sslmode=require`**。Pooler（PgBouncer transaction mode）跟 node-pg 的 prepared statement／連線期 SET 不相容，nuni-api 啟動檢查也比較像 session 行為。
 3. Render：確認並 Suspend `nuni-staging-api`／`nuni-staging-web`。沒暫停的話，切換後它仍拿舊密碼打舊 host，或被改成新 host 後把新庫叫醒。
-4. Agent／本機 preview／橋接：不要再連舊庫。
+4. 本機 preview／橋接與其他開發環境：不要再連舊庫。
 5. 準備機器：`psql`／`pg_dump`／`pg_restore` **18.x**、`flyctl`、本目錄腳本。密鑰放 repo 外檔案。
 6. 選低流量時段。13:50–14:15 曾連續 25 分鐘 api 除 health 外 0 請求，但不要當成永遠如此。
 7. 寫下 CUTOVER_TS（開始停寫的時間，含時區），回滾補資料會用到。
@@ -52,7 +52,7 @@ API 映像內嵌的 SQL 檔 checksum 必須與這張表一致，否則**重啟�
 1. `fly machine list -a nuni-api`、`fly machine list -a nuni-web`，記下 machine id 與**目前映像 digest**（回滾用）。
 2. **先停 `nuni-api` 全部機器**（`fly machine stop`）。`min_machines_running=1` 可能把機器拉起來，若發生就暫時 `fly scale count 0 -a nuni-api`（web 同樣）。
 3. **再停 `nuni-web`**。否則 BFF 在 `ASSIGNMENT_FILE_SUBMIT_ENABLED=true` 時仍會用 `ASSIGNMENT_FILE_DATABASE_URL` 寫 Neon。文字課班寫入走 API，所以只停 web、留 api 仍會寫入。
-4. 確認 Render staging 已 Suspend、沒有本機／agent／Cursor cloud 還拿著舊 `DATABASE_URL`。GitHub Actions 沒有正式庫密鑰，但不要在停寫窗口另外跑會連 DB 的手動 workflow。
+4. 確認 Render staging 已 Suspend、沒有本機或其他開發環境還拿著舊 `DATABASE_URL`。GitHub Actions 沒有正式庫密鑰，但不要在停寫窗口另外跑會連 DB 的手動 workflow。
 
 學生端（停機期間）：
 
@@ -274,7 +274,7 @@ printf 'ASSIGNMENT_FILE_DATABASE_URL=%s\n' "$(cat /path/outside/repo/old-web.url
 9. **sequence**：目前 schema 看起來幾乎都是文字 id（`pa_`／`cw_`／`cwa_`），sequence 可能為 0。仍要核對；若有漏設，之後插入會撞 PK。
 10. **QA 清理誤傷**：腳本只用 CLEANUP.md 的精確 id＋`qa-file-smoke-*`／`smoke-*` 前綴＋nocard 學生 id。不依 email 模糊刪、不刪課班本身、不刪 product-qa session。
 11. **Supabase 物件**：SQL 清了但 bucket 沒刪，會留測試 jpg；反過來只刪物件、SQL 還在，畫面上傳檔 404。
-12. **舊庫 CU 見底**：dump 當下還會叫醒舊 compute。剩 ~2% 時這是最大執行風險。先把 staging／agent 連線斷乾淨，dump 一次成功，不要重試連打。
+12. **舊庫 CU 見底**：dump 當下還會叫醒舊 compute。剩 ~2% 時這是最大執行風險。先把 staging 與其他開發連線斷乾淨，dump 一次成功，不要重試連打。
 
 ## QA 測試資料：搬之前還是之後清？
 
@@ -318,7 +318,7 @@ QA 清理涉及兩個資料庫與共用 Storage 的回滾基準：一旦移除�
 
 優先（都不改 schema）：
 
-1. Agent 不要連正式庫；本機用 embedded／本機 Postgres。Neon branch 與**同一 project** 共用 CU-h，不能拿來省。
+1. 開發環境不要連正式庫；本機用 embedded／本機 Postgres。Neon branch 與**同一 project** 共用 CU-h，不能拿來省。
 2. Render staging 保持 Suspend；不要再把正式 `DATABASE_URL` 配給 staging。
 3. 外部監控打 `https://nuni.tw/health/ready`（不碰 DB），不要打 `https://api.nuni.tw/health/ready`。
 4. 非必要的 nuni-api 部署／重啟延後（啟動 schema 檢查會叫醒 DB）。
