@@ -246,7 +246,7 @@ test('CreditAuditScreen renders nonempty scoped grades and local read time', asy
   const view = render(<CreditAuditScreen />);
   await view.findByText(/本機讀取時間/);
   expect(view.getByText(/非校方正式更新時間/)).toBeTruthy();
-  expect(view.getByText(/靜宜大學公開修業參考模型/)).toBeTruthy();
+  expect(view.getByText('參考畢業門檻（靜宜模型）')).toBeTruthy();
   await expandFirstSemester(view);
   expect(view.getByText('資料庫管理')).toBeTruthy();
   expect(view.queryByText(/campusCreditAudit/)).toBeNull();
@@ -371,7 +371,7 @@ test('other school shows scoped totals without PU thresholds or graduation met c
     }),
   ]);
   const view = render(<CreditAuditScreen />);
-  await view.findByText(/沒有套用靜宜大學畢業門檻/);
+  await view.findByText(/尚未設定畢業規則/);
   expect(view.queryByText('切換系所')).toBeNull();
   expect(view.queryByText(/參考已達標|畢業門檻 128/)).toBeNull();
   expect(view.queryByText(/靜宜大學（一般系所）/)).toBeNull();

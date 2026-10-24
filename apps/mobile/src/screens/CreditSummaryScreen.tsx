@@ -145,10 +145,10 @@ export default function CreditSummaryScreen(props: Props) {
       ) : !hasRecords ? (
         <View style={{ margin: aiTokens.space.md, gap: 8 }}>
           <Text style={{ fontSize: 15, color: aiTokens.text, lineHeight: 22 }}>
-            目前帳號在「{school.name}」還沒有可確認範圍的已發布修課紀錄，所以無法試算。
+            你在「{school.name}」尚無可用的修課紀錄。
           </Text>
           <Text style={{ fontSize: 13, color: aiTokens.muted, lineHeight: 19 }}>
-            系統不會自動選課，也不會代替學校做正式畢業認定。若學校成績尚未同步，可稍後重試，或到完整試算查看說明。
+            若成績剛發布或同步，請稍後重新讀取。
           </Text>
           <Pressable
             accessibilityRole="button"
@@ -248,8 +248,8 @@ export default function CreditSummaryScreen(props: Props) {
             }}
           >
             {isPu
-              ? '以上為靜宜參考模型粗估，可能因入學年度、重修、抵免與轉學分而與正式審查不同。本畫面不會自動選課，正式結果以學校畢業審查為準。'
-              : '以上僅整理你自己的修課紀錄與分類加總，沒有套用靜宜或其他學校的畢業門檻，也不推估正式畢業資格。'}
+              ? '依靜宜參考模型試算。通過學分以60分或來源明示通過加總；入學年度、學制、重修與抵免規則請以學校審查為準。'
+              : '此校尚未設定畢業規則，目前未套用畢業門檻。參考通過學分以60分或來源明示通過加總，請核對你的學制及課程規定。'}
           </Text>
         </>
       )}
