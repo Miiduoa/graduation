@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
 import { TransitExplorer } from '@/components/TransitExplorer';
-import { fallbackBusSchool } from '@/lib/defaultBrowseSchool';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 
 export function BusContext({ availabilityNotice }: { availabilityNotice?: ReactNode }) {
@@ -15,14 +14,11 @@ export function BusContext({ availabilityNotice }: { availabilityNotice?: ReactN
     schoolId: search.get('schoolId') ?? undefined,
     campus: search.get('campus') ?? undefined,
   });
-  const { schoolId, schoolName } = fallbackBusSchool(browse.schoolId, browse.schoolName, browse.status);
-  const schoolSearch = browse.schoolId
-    ? browse.schoolSearch
-    : schoolId
-      ? `?${new URLSearchParams({ schoolId, campus: schoolId }).toString()}`
-      : browse.schoolSearch;
+  const schoolId = browse.status === 'ready' ? browse.schoolId : null;
+  const schoolName = browse.status === 'ready' ? browse.schoolName : '';
+  const schoolSearch = browse.schoolSearch;
   return (
-    <SiteShell schoolName={schoolName}>
+    <SiteShell schoolName={schoolId ? schoolName : undefined}>
       {availabilityNotice}
       {browse.status === 'loading' || browse.status === 'error' || !schoolId ? (
         <section className="card" role="status">

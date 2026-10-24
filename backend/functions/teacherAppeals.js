@@ -25,14 +25,19 @@ function studentNumberOf(uid, profile) {
   return '';
 }
 
+function requireSchoolId(value) {
+  const schoolId = typeof value === 'string' ? value.trim() : '';
+  if (!schoolId || schoolId.length > 80 || !/^[a-z0-9_-]+$/.test(schoolId)) {
+    throw new HttpsError('invalid-argument', '請先選擇學校。');
+  }
+  return schoolId;
+}
+
 function createListTeacherAppealsHandler({ db }) {
   return async (request) => {
     const uid = request.auth && request.auth.uid;
     if (!uid) throw new HttpsError('unauthenticated', '請先登入。');
-    const schoolId = String((request.data && request.data.schoolId) || '').trim();
-    if (!schoolId || schoolId.includes('/') || schoolId.length > 80) {
-      throw new HttpsError('invalid-argument', '缺少學校。');
-    }
+    const schoolId = requireSchoolId(request.data?.schoolId);
     const member = await db.doc(`schools/${schoolId}/members/${uid}`).get();
     const role = member.exists ? member.data().role : null;
     const active = member.exists && (member.data().status || 'active') === 'active';
@@ -99,23 +104,36 @@ function createListTeacherAppealsHandler({ db }) {
 /**
  * 學生端：自己課表裡的課有沒有對應老師。只回 true/false，不回老師是誰；
  * 只查得到自己課表（offeringIds）裡、或自己申訴過的開課，其他代號一律當作沒有。
+ * 課表以 users/{uid}/schools/{schoolId}/personalTimetable/current 為準；
+ * 僅當文件 schoolId 與請求學校一致時才信任 offeringIds。
+ * 正規路徑不存在時，唯讀後援 users/{uid}/personalTimetable/current（同樣要求 schoolId 吻合）；
+ * 正規文件存在但 schoolId 不符或缺漏時不後援。
  */
+function authorizedTimetableOfferingIds(timetableSnap, schoolId) {
+  if (!timetableSnap || !timetableSnap.exists) return null;
+  const data = timetableSnap.data() || {};
+  if (data.schoolId !== schoolId) return [];
+  return Array.isArray(data.offeringIds) ? data.offeringIds : [];
+}
+
 function createAppealTeacherStatusHandler({ db }) {
   return async (request) => {
     const uid = request.auth && request.auth.uid;
     if (!uid) throw new HttpsError('unauthenticated', '請先登入。');
-    const schoolId = String((request.data && request.data.schoolId) || '').trim();
-    if (!schoolId || schoolId.includes('/') || schoolId.length > 80) {
-      throw new HttpsError('invalid-argument', '缺少學校。');
-    }
+    const schoolId = requireSchoolId(request.data?.schoolId);
     const asked = Array.isArray(request.data && request.data.offeringIds) ? request.data.offeringIds : [];
     const member = await db.doc(`schools/${schoolId}/members/${uid}`).get();
     if (!member.exists || (member.data().status || 'active') !== 'active') {
       throw new HttpsError('permission-denied', '不是這間學校的成員。');
     }
-    const timetable = await db.doc(`users/${uid}/personalTimetable/current`).get();
-    const own = new Set((timetable.exists && timetable.data().offeringIds) || []);
-    // 自己送過的申訴（課後來從課表拿掉了）也查得到
+    const canonical = await db.doc(`users/${uid}/schools/${schoolId}/personalTimetable/current`).get();
+    let timetableOfferings = authorizedTimetableOfferingIds(canonical, schoolId);
+    if (timetableOfferings === null) {
+      const legacy = await db.doc(`users/${uid}/personalTimetable/current`).get();
+      timetableOfferings = authorizedTimetableOfferingIds(legacy, schoolId) || [];
+    }
+    const own = new Set(timetableOfferings);
+    // 自己送過的申訴（課後來從課表拿掉了）也查得到；與課表路徑無關、已依 schoolId 過濾
     const mine = await db
       .collection('courseAppeals')
       .where('schoolId', '==', schoolId)

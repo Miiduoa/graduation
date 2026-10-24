@@ -1,5 +1,7 @@
 import { doc, getDoc } from 'firebase/firestore';
 import { firebaseSource } from '../../data/firebaseSource';
+import { createCachedSource } from '../../data/cachedSource';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 jest.mock('../../firebase', () => ({
   getDb: () => 'db',
@@ -43,7 +45,8 @@ function snapshot(path: string, data: Record<string, unknown> | null) {
   };
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  await AsyncStorage.clear();
   jest.mocked(getDoc).mockReset();
   jest.mocked(doc).mockImplementation((...args: unknown[]) => ({ path: args.slice(1).join('/') }) as never);
 });
@@ -77,4 +80,41 @@ test('does not treat a global announcement as another school', async () => {
     title: '未標學校',
     schoolId: 'pu',
   });
+});
+
+test('actual Firebase course reads and cache stay on the explicitly requested school', async () => {
+  jest.mocked(getDoc).mockImplementation(async (ref: { path: string }) => {
+    const schoolId = ref.path.split('/')[1];
+    return snapshot(ref.path, { name: `${schoolId} course`, schoolId }) as never;
+  });
+  const cached = createCachedSource(firebaseSource);
+  await expect(cached.getCourse('shared', 'pu')).resolves.toMatchObject({ name: 'pu course' });
+  await expect(cached.getCourse('shared', 'ntu')).resolves.toMatchObject({ name: 'ntu course' });
+  expect(jest.mocked(getDoc).mock.calls.map(([ref]) => (ref as { path: string }).path))
+    .toEqual(['schools/pu/courses/shared', 'schools/ntu/courses/shared']);
+  jest.mocked(getDoc).mockClear();
+  await expect(cached.getCourse('shared', 'ntu')).resolves.toMatchObject({ schoolId: 'ntu' });
+  expect(getDoc).not.toHaveBeenCalled();
+});
+
+test('scoped course read rejects wrong-school data and legacy fallback requires a matching school', async () => {
+  jest.mocked(getDoc).mockImplementation(async (ref: { path: string }) => {
+    if (ref.path === 'schools/ntu/courses/corrupt') {
+      return snapshot(ref.path, { name: 'Wrong school', schoolId: 'pu' }) as never;
+    }
+    if (ref.path.startsWith('courses/')) {
+      return snapshot(ref.path, { name: 'Legacy PU', schoolId: 'tw-pu' }) as never;
+    }
+    return snapshot(ref.path, null) as never;
+  });
+  await expect(firebaseSource.getCourse('corrupt', 'ntu')).resolves.toBeNull();
+  await expect(firebaseSource.getCourse('legacy', 'ntu')).resolves.toBeNull();
+  await expect(firebaseSource.getCourse('legacy', 'tw-pu')).resolves.toMatchObject({ schoolId: 'pu' });
+});
+
+test('a failed scoped course read never substitutes a global legacy course', async () => {
+  jest.mocked(getDoc).mockRejectedValue(new Error('permission-denied'));
+  await expect(firebaseSource.getCourse('shared', 'ntu')).rejects.toThrow();
+  expect(jest.mocked(getDoc).mock.calls.map(([ref]) => (ref as { path: string }).path))
+    .toEqual(['schools/ntu/courses/shared']);
 });
