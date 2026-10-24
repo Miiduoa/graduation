@@ -743,6 +743,64 @@ it('keeps long route badges on one line and fits the stop-mode bar on a 350px bo
   expect(css).toMatch(/\.approach \{[^}]*top: 44px;/);
 });
 
+it('lets a Providence student type or tap a destination and see the next direct bus on the first screen', async () => {
+  const now = new Date().toISOString();
+  vi.mocked(queryTransit).mockImplementation(async (query) => {
+    if (query.action === 'campus-next') {
+      return { status: 'ready', kind: 'arrivals', arrivals: [], fetchedAt: now };
+    }
+    if (query.action === 'direct' && query.destination === '沙鹿車站') {
+      return {
+        status: 'ready', kind: 'direct', fetchedAt: now,
+        destination: { query: '沙鹿車站', label: '沙鹿車站', kind: 'landmark', lat: 24.236, lon: 120.559 },
+        origin: { lat: 24.225714, lon: 120.577096 },
+        googleMapsUrl: 'https://www.google.com/maps/dir/?api=1&origin=24.225714,120.577096&destination=24.236,120.559&travelmode=transit',
+        trips: [{
+          route: '162', boardStopName: '靜宜大學(英才路)', alightStopName: '沙鹿車站',
+          walkMeters: 240, walkMinutes: 3,
+          arrival: { id: '162', route: '162', direction: 0, destination: '沙鹿車站', status: 0, seconds: 180, updatedAt: now, stopName: '靜宜大學(英才路)' },
+        }],
+      };
+    }
+    if (query.action === 'direct') {
+      return {
+        status: 'ready', kind: 'direct', fetchedAt: now,
+        destination: { query: query.destination, label: '高鐵臺中站', kind: 'landmark', lat: 24.111, lon: 120.616 },
+        origin: { lat: 24.225714, lon: 120.577096 },
+        googleMapsUrl: 'https://www.google.com/maps/dir/?api=1&origin=24.225714,120.577096&destination=%E9%AB%98%E9%90%B5%E8%87%BA%E4%B8%AD%E7%AB%99&travelmode=transit',
+        trips: [],
+      };
+    }
+    return emptyArrivals();
+  });
+  renderExplorer();
+  expect(await screen.findByTestId('direct-bus-search')).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '去哪裡' })).toBeTruthy();
+  expect(screen.getByTestId('direct-destination-input')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '沙鹿車站' }));
+  expect(await screen.findByTestId('direct-trip-list')).toBeTruthy();
+  expect(screen.getByText('162')).toBeTruthy();
+  expect(screen.getByText('在英才路側等')).toBeTruthy();
+  expect(screen.getByText('3')).toBeTruthy();
+  expect(screen.getByText('分')).toBeTruthy();
+  expect(screen.getByText('下車 沙鹿車站')).toBeTruthy();
+  expect(vi.mocked(queryTransit).mock.calls.filter(([query]) => query.action === 'direct')).toHaveLength(1);
+  expect(vi.mocked(queryTransit).mock.calls.some(([query]) => query.action === 'arrivals')).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: '高鐵臺中站' }));
+  expect(await screen.findByTestId('direct-no-result')).toBeTruthy();
+  expect(screen.getByText('沒有直達車')).toBeTruthy();
+  expect(screen.queryByText(/末班/)).toBeNull();
+  const maps = screen.getByRole('link', { name: '用 Google 地圖看更多路線 ↗' });
+  expect(maps.getAttribute('href')).toContain('https://www.google.com/maps/dir/?');
+  expect(maps.getAttribute('href')).toContain('travelmode=transit');
+});
+
+it('does not offer Providence destination search on another campus', async () => {
+  renderListing();
+  expect(screen.queryByTestId('direct-bus-search')).toBeNull();
+  expect(screen.queryByRole('heading', { name: '去哪裡' })).toBeNull();
+});
+
 describe('static catalog stops', () => {
   beforeEach(() => { vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-18T08:00:00.000Z')); });
 

@@ -14,8 +14,9 @@ process.on('exit', () => fs.rmSync(output, { recursive: true, force: true }));
 
 for (const [source, name] of [
   ['apps/web/src/lib/transit.ts', 'transit'],
-  ['apps/web/src/lib/transit-server.ts', 'transit-server'],
   ['apps/web/src/lib/transit-catalog.ts', 'transit-catalog'],
+  ['apps/web/src/lib/transit-direct.ts', 'transit-direct'],
+  ['apps/web/src/lib/transit-server.ts', 'transit-server'],
   ['apps/web/src/lib/transit-replay.ts', 'transit-replay'],
   ['apps/web/src/app/api/transit/route.ts', 'route'],
 ]) {
@@ -29,6 +30,7 @@ for (const [source, name] of [
 }
 const client = require(path.join(output, 'transit.js'));
 const server = require(path.join(output, 'transit-server.js'));
+const direct = require(path.join(output, 'transit-direct.js'));
 const route = require(path.join(output, 'route.js'));
 const studentReport = require(path.join(root, 'apps/web/src/lib/fixtures/tdx-providence-student-report.json'));
 const NOW = Date.parse('2026-10-12T08:00:00Z');
@@ -832,4 +834,82 @@ test('preload is skipped without credentials and never blocks the static catalog
   assert.equal((await execute(campusQuery)).status, 'ready');
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(calls.length, 0);
+});
+test('direct destination search is limited to Providence and does not accept other schools', () => {
+  assert.deepEqual(server.validateTransitQuery({ action: 'direct', schoolId: 'pu', destination: '沙鹿車站' }),
+    { action: 'direct', schoolId: 'pu', destination: '沙鹿車站' });
+  assert.throws(() => server.validateTransitQuery({ action: 'direct', schoolId: 'ncku', destination: '沙鹿車站' }));
+  assert.throws(() => server.validateTransitQuery({ action: 'direct', schoolId: 'pu', destination: 'x' }));
+});
+test('direct search reuses the campus-next ETA query and does not add StopOfRoute for 300', async () => {
+  const sequence162 = {
+    RouteUID: 'TXG162', SubRouteUID: 'TXG162', RouteName: { Zh_tw: '162' }, Direction: 0,
+    Stops: ['靜宜大學(英才路)', '沙鹿車站', '嘉陽高中'].map((name, index) => ({
+      StopUID: `TXG162-${index}`, StopName: { Zh_tw: name }, StopSequence: index + 1,
+    })),
+  };
+  const mock = service((url) => {
+    if (url.includes('/StopOfRoute/')) {
+      const filter = new URL(url).searchParams.get('$filter') ?? '';
+      if (filter.includes('TXG162')) return Response.json([sequence162]);
+      return Response.json([]);
+    }
+    return Response.json([
+      arrival({ StopUID: 'TXG-YING', RouteUID: 'TXG162', RouteName: { Zh_tw: '162' }, Direction: 0, StopName: { Zh_tw: '靜宜大學(英才路)' }, DestinationStopNameZh: '嘉陽高中', EstimateTime: 180 }),
+      arrival({ StopUID: 'TXG-BRT', RouteUID: 'TXG300', RouteName: { Zh_tw: '300' }, Direction: 0, StopName: { Zh_tw: '靜宜大學(專用道)' }, DestinationStopNameZh: '臺中車站', EstimateTime: 240 }),
+    ]);
+  });
+  const board = await mock.execute({ action: 'campus-next', schoolId: 'pu' });
+  assert.equal(board.status, 'ready');
+  const etaAfterBoard = mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/')).length;
+  const stopOrderAfterBoard = mock.calls.filter((call) => call.url.includes('/StopOfRoute/')).length;
+  const result = await mock.execute({ action: 'direct', schoolId: 'pu', destination: '沙鹿車站' });
+  assert.equal(result.status, 'ready');
+  assert.equal(result.kind, 'direct');
+  assert.equal(mock.calls.filter((call) => call.url.includes('/EstimatedTimeOfArrival/')).length, etaAfterBoard);
+  assert.equal(mock.calls.filter((call) => call.url.includes('/StopOfRoute/')).length, stopOrderAfterBoard);
+  assert.equal(mock.calls.filter((call) => call.url.includes('/StopOfRoute/')).some((call) => {
+    return (new URL(call.url).searchParams.get('$filter') ?? '').includes('TXG300');
+  }), false);
+  assert.equal(result.trips.some((trip) => trip.route === '162' && trip.alightStopName.includes('沙鹿')), true);
+  const eta = client.campusEtaView(result.trips.find((trip) => trip.route === '162').arrival, NOW);
+  assert.equal(eta.kind, 'live');
+});
+test('direct search without live data labels scheduled times and never invents a last bus', async () => {
+  const mock = service((url) => Response.json(url.includes('/StopOfRoute/') ? [] : [
+    arrival({
+      StopUID: 'TXG-BRT', RouteUID: 'TXG300', RouteName: { Zh_tw: '300' }, Direction: 0,
+      StopName: { Zh_tw: '靜宜大學(專用道)' }, DestinationStopNameZh: '臺中車站',
+      StopStatus: 0, EstimateTime: null, NextBusTime: at(20 * 60_000),
+    }),
+  ]));
+  const result = await mock.execute({ action: 'direct', schoolId: 'pu', destination: '臺中車站' });
+  assert.equal(result.status, 'ready');
+  assert.equal(result.kind, 'direct');
+  const trip = result.trips.find((row) => row.route === '300');
+  assert.equal(Boolean(trip), true);
+  const view = client.campusEtaView(trip.arrival, NOW);
+  assert.equal(view.kind, 'scheduled');
+  assert.match(view.text, /^表定 /);
+  assert.equal(JSON.stringify(result).includes('末班'), false);
+});
+test('direct search says there is no one-seat ride and still returns a Google Maps link', async () => {
+  const mock = service((url) => Response.json(url.includes('/StopOfRoute/') ? [] : []));
+  const result = await mock.execute({ action: 'direct', schoolId: 'pu', destination: '高鐵臺中站' });
+  assert.equal(result.status, 'ready');
+  assert.equal(result.kind, 'direct');
+  assert.deepEqual(result.trips, []);
+  assert.match(result.googleMapsUrl, /^https:\/\/www\.google\.com\/maps\/dir\/\?/);
+  assert.match(result.googleMapsUrl, /travelmode=transit/);
+  assert.equal(result.googleMapsUrl.includes('maas'), false);
+});
+test('direct search without TDX still uses the catalog and does not invent arrival clocks', async () => {
+  const mock = service([], { credentials: () => ({}) });
+  const result = await mock.execute({ action: 'direct', schoolId: 'pu', destination: '臺中車站' });
+  assert.equal(result.status, 'ready');
+  assert.equal(result.kind, 'direct');
+  assert.equal(mock.calls.length, 0);
+  assert.equal(result.trips.some((trip) => trip.route === '300'), true);
+  assert.equal(result.trips.every((trip) => trip.arrival === null), true);
+  assert.equal(direct.buildDirectPlan({ query: '高鐵臺中站' }).trips.length, 0);
 });

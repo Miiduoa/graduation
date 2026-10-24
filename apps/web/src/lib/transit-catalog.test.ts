@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import catalog from '../data/taichung-transit-catalog.json';
-import { searchTaichungCatalog, TAICHUNG_CATALOG_METADATA } from './transit-catalog';
+import { findCatalogStopsByName, searchTaichungCatalog, TAICHUNG_CATALOG_METADATA } from './transit-catalog';
 import { distanceMetres } from './transit';
 
 describe('bundled Taichung static transit catalog', () => {
@@ -51,5 +51,12 @@ describe('bundled Taichung static transit catalog', () => {
     const first = searchTaichungCatalog({ action: 'campus', schoolId: 'pu' });
     first.stops[0].routes[0].name = 'modified';
     expect(searchTaichungCatalog({ action: 'campus', schoolId: 'pu' }).stops[0].routes[0].name).not.toBe('modified');
+  });
+
+  it('lists more than 16 臺中車站 variants for direct matching', () => {
+    const stops = findCatalogStopsByName('臺中車站');
+    expect(stops.length).toBeGreaterThan(16);
+    expect(stops.some((stop) => stop.name.includes('A月台'))).toBe(true);
+    expect(findCatalogStopsByName('x')).toEqual([]);
   });
 });
