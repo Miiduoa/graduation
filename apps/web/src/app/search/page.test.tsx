@@ -22,7 +22,8 @@ vi.mock('@/components/SiteShell', () => ({
 
 it('keeps every service discoverable without inventing a school selection', () => {
   render(<SearchPage />);
-  expect(screen.getAllByRole('link')).toHaveLength(32);
+  expect(screen.getAllByRole('link')).toHaveLength(33);
+  expect(screen.getByRole('link', { name: /^學校資訊/ }).getAttribute('href')).toBe('/school-info');
   const profile = screen.getByRole('link', { name: /個人資料 查看帳號資料/ });
   const destination = new URL(profile.getAttribute('href')!, 'https://campus.example');
   expect(destination.pathname).toBe('/profile');
@@ -34,7 +35,7 @@ it('combines category filters with keyword search and restores all services afte
   render(<SearchPage />);
   fireEvent.click(screen.getByRole('button', { name: '校園生活' }));
   expect(screen.queryByRole('link', { name: /^課表/ })).toBeNull();
-  expect(screen.getAllByRole('link')).toHaveLength(8);
+  expect(screen.getAllByRole('link')).toHaveLength(9);
   fireEvent.change(screen.getByRole('searchbox', { name: '想找什麼？' }), {
     target: { value: '借書' },
   });
@@ -42,7 +43,7 @@ it('combines category filters with keyword search and restores all services afte
   expect(screen.getByRole('link', { name: /^圖書館/ })).toBeTruthy();
   expect(screen.getByRole('status').textContent).toBe('找到 1 項服務');
   fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
-  expect(screen.getAllByRole('link')).toHaveLength(32);
+  expect(screen.getAllByRole('link')).toHaveLength(33);
   expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
 });
 
@@ -52,7 +53,7 @@ it('offers a recovery action when a query has no matching service', () => {
   expect(screen.queryAllByRole('link')).toHaveLength(0);
   expect(screen.getByRole('heading', { name: '沒有符合的服務' })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '查看所有服務' }));
-  expect(screen.getAllByRole('link')).toHaveLength(32);
+  expect(screen.getAllByRole('link')).toHaveLength(33);
 });
 
 it('matches search aliases without case or surrounding-space sensitivity', () => {
