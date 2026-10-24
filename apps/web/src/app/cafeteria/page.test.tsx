@@ -39,6 +39,7 @@ vi.mock('@/lib/cafeteriaCatalog', () => ({
 }));
 
 beforeEach(() => {
+  sessionStorage.clear();
   state.school = 'pu';
   state.fail = false;
   state.catalog = { cafeterias: [], menus: [] };
@@ -96,7 +97,9 @@ it('shows a retry when the backend catalog fails and does not keep old rows afte
   await act(async () => {
     render(<CafeteriaPage />);
   });
-  expect(screen.getByRole('alert').textContent).toContain('服務暫時停止，我們正在處理，請稍後再來。');
+  expect(screen.getByRole('alert').textContent).toContain(
+    '服務暫時停止，我們正在處理，請稍後再來。',
+  );
   expect(screen.getByRole('alert').textContent).not.toContain('請確認網路後再試');
   expect(screen.queryByRole('button', { name: '重新整理' })).toBeNull();
   expect(screen.queryByText(/示範資料/)).toBeNull();
@@ -193,6 +196,8 @@ it('distinguishes unknown availability, paused supply and sold-out meals without
   expect(restaurant.getByText('供應狀態未確認')).toBeTruthy();
   expect(restaurant.getByText('暫停供應')).toBeTruthy();
   expect(restaurant.getByText('已售完')).toBeTruthy();
+  expect(restaurant.queryByText('現有餐點')).toBeNull();
+  fireEvent.click(restaurant.getByRole('button', { name: '再看 1 道餐點' }));
   expect(restaurant.getAllByText('供應中')).toHaveLength(1);
   expect(screen.getByText(/目前還不能線上點餐/)).toBeTruthy();
   expect(screen.queryByText('可點餐餐廳')).toBeNull();
@@ -233,7 +238,7 @@ it('shows an outbound order link only when the shop has an https ordering URL', 
   expect(info.getByText('營業時間：週一到週五')).toBeTruthy();
 });
 
-it('exposes the selected restaurant and restores menus when clearing an empty search', async () => {
+it('restores menus and budget when clearing an empty search', async () => {
   await receive({
     cafeterias: [{ id: 'stall', name: '校內咖啡店' }],
     menus: [
@@ -248,18 +253,17 @@ it('exposes the selected restaurant and restores menus when clearing an empty se
       },
     ],
   });
-  fireEvent.click(screen.getByRole('button', { name: '校內咖啡店' }));
-  expect(screen.getByRole('button', { name: '校內咖啡店' }).getAttribute('aria-pressed')).toBe(
-    'true',
-  );
+  fireEvent.change(screen.getByRole('combobox', { name: '餐點預算' }), {
+    target: { value: '100' },
+  });
   fireEvent.change(screen.getByRole('searchbox', { name: '搜尋餐點或餐廳' }), {
     target: { value: '不存在的餐點' },
   });
   expect(screen.queryByText('蔬菜吐司')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
   expect(screen.getByText('蔬菜吐司')).toBeTruthy();
-  expect(screen.getByRole('button', { name: '全部餐廳' }).getAttribute('aria-pressed')).toBe(
-    'true',
+  expect((screen.getByRole('combobox', { name: '餐點預算' }) as HTMLSelectElement).value).toBe(
+    'all',
   );
   expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
 });
@@ -289,4 +293,109 @@ it('clears loaded menus after changing school and does not keep the previous sch
   expect(await screen.findByText('這間學校的餐廳還沒上架')).toBeTruthy();
   expect(screen.queryByText('蔬菜吐司')).toBeNull();
   expect(fetchCafeteriaCatalog).toHaveBeenCalledWith('cgu');
+});
+
+it('searches restaurant locations and dish descriptions without case or full-width differences', async () => {
+  await receive({
+    cafeterias: [
+      { id: 'cafe', name: 'Campus Cafe', location: '圖書館 2F' },
+      { id: 'noodles', name: '麵店', location: '學生餐廳' },
+    ],
+    menus: [
+      { id: 'tea', cafeteriaId: 'cafe', name: '紅茶', description: 'Earl Grey', price: 40 },
+      { id: 'coffee', cafeteriaId: 'cafe', name: '咖啡', price: 60 },
+    ],
+  });
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'ＣＡＭＰＵＳ grey' } });
+  expect(screen.getByText('紅茶')).toBeTruthy();
+  expect(screen.queryByText('咖啡')).toBeNull();
+  expect(screen.queryByRole('region', { name: '麵店' })).toBeNull();
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '學生餐廳' } });
+  expect(screen.getByRole('region', { name: '麵店' })).toBeTruthy();
+  expect(screen.queryByRole('region', { name: 'Campus Cafe' })).toBeNull();
+});
+
+it('combines category and budget and never counts unknown prices as affordable', async () => {
+  await receive({
+    cafeterias: [
+      { id: 'stall', name: '午餐店' },
+      { id: 'empty', name: '未提供菜單的店' },
+    ],
+    menus: [
+      { id: 'rice', cafeteriaId: 'stall', name: '蔬菜飯', category: '主食', price: 80 },
+      { id: 'set', cafeteriaId: 'stall', name: '午餐套餐', category: '主食', price: 160 },
+      { id: 'unknown', cafeteriaId: 'stall', name: '今日特餐', category: '主食' },
+      { id: 'tea', cafeteriaId: 'stall', name: '紅茶', category: '飲料', price: 30 },
+    ],
+  });
+  fireEvent.click(screen.getByRole('button', { name: '主食' }));
+  fireEvent.change(screen.getByRole('combobox', { name: '餐點預算' }), {
+    target: { value: '100' },
+  });
+  expect(screen.getByText('蔬菜飯')).toBeTruthy();
+  expect(screen.queryByText('午餐套餐')).toBeNull();
+  expect(screen.queryByText('今日特餐')).toBeNull();
+  expect(screen.queryByText('紅茶')).toBeNull();
+  expect(screen.queryByRole('region', { name: '未提供菜單的店' })).toBeNull();
+  expect(screen.getByText('1 間 · 1 道符合餐點')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
+  expect(screen.getByRole('region', { name: '未提供菜單的店' })).toBeTruthy();
+});
+
+it('keeps search and budget on return but uses separate preferences for each school', async () => {
+  state.catalog = {
+    cafeterias: [{ id: 'stall', name: '早餐店' }],
+    menus: [{ id: 'meal', cafeteriaId: 'stall', name: '吐司', price: 50 }],
+  };
+  const first = await act(async () => render(<CafeteriaPage />));
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '吐司' } });
+  fireEvent.change(screen.getByRole('combobox', { name: '餐點預算' }), {
+    target: { value: '100' },
+  });
+  first.unmount();
+  const returned = await act(async () => render(<CafeteriaPage />));
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('吐司');
+  expect((screen.getByRole('combobox', { name: '餐點預算' }) as HTMLSelectElement).value).toBe(
+    '100',
+  );
+  state.school = 'other';
+  state.catalog = { cafeterias: [], menus: [] };
+  await act(async () => returned.rerender(<CafeteriaPage />));
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+  expect((screen.getByRole('combobox', { name: '餐點預算' }) as HTMLSelectElement).value).toBe(
+    'all',
+  );
+  expect(screen.queryByText('吐司')).toBeNull();
+});
+
+it('sorts known prices first, keeps schools on links and does not expand every menu', async () => {
+  await receive({
+    cafeterias: [
+      { id: 'unknown', name: 'A 店' },
+      { id: 'priced', name: 'B 店' },
+    ],
+    menus: [
+      { id: 'm0', cafeteriaId: 'unknown', name: '特餐' },
+      ...[120, 40, 80, 90].map((price, index) => ({
+        id: `m${index + 1}`,
+        cafeteriaId: 'priced',
+        name: `餐點${index}`,
+        price,
+      })),
+    ],
+  });
+  fireEvent.change(screen.getByRole('combobox', { name: '排序' }), { target: { value: 'price' } });
+  const cards = screen
+    .getAllByRole('region')
+    .filter((node) => ['A 店', 'B 店'].includes(node.getAttribute('aria-label') || ''));
+  expect(cards.map((node) => node.getAttribute('aria-label'))).toEqual(['B 店', 'A 店']);
+  const priced = within(cards[0]);
+  expect(priced.queryByText('餐點0')).toBeNull();
+  expect(priced.getByRole('link', { name: '進入店面' }).getAttribute('href')).toBe(
+    '/cafeteria/priced?schoolId=pu',
+  );
+  fireEvent.click(priced.getByRole('button', { name: '再看 1 道餐點' }));
+  expect(priced.getByText('餐點0')).toBeTruthy();
+  fireEvent.click(priced.getByRole('button', { name: '收起餐點' }));
+  expect(priced.queryByText('餐點0')).toBeNull();
 });
