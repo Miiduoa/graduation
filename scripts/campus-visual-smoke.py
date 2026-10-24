@@ -7,6 +7,7 @@ Screenshots use a local school-directory fixture, never a signed-in account.
 import asyncio
 import json
 import os
+import re
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -57,10 +58,31 @@ async def check_mobile_navigation(page):
     }'''), 'Bottom navigation covers the last footer action'
 
 
+UNSIGNED_TODAY = '登入後，這裡會列出近期要處理的課程待辦。'
+TODAY_DATE = re.compile(r'^\d{1,2}月\d{1,2}日 週[日一二三四五六]$')
+
+
 async def goto_path(page, path):
     # Home/life keep session and transit probes alive, so networkidle can hang
     # after the page is already interactive.
     await page.goto(BASE + path, wait_until='load')
+
+
+async def check_unsigned_today(page):
+    today = page.get_by_test_id('student-today')
+    await expect(today).to_be_visible()
+    await expect(today.get_by_test_id('today-skeleton')).to_have_count(0)
+    await expect(today.get_by_role('heading', name='今天', exact=True)).to_be_visible()
+    await expect(today.locator('header p').first).to_have_text(TODAY_DATE)
+    await expect(page.get_by_text(UNSIGNED_TODAY, exact=True)).to_have_count(2)
+    await expect(page.get_by_role('link', name='登入', exact=True)).to_be_visible()
+    await expect(today.get_by_role('heading', name='今天課表', exact=True)).to_be_visible()
+    await expect(today.get_by_text('還沒有課表。', exact=True)).to_be_visible()
+    await expect(today.get_by_role('link', name='匯入課表', exact=True)).to_be_visible()
+    await expect(today.get_by_role('heading', name='待處理', exact=True)).to_be_visible()
+    await expect(page.get_by_role('heading', name='今天的校園日常')).to_have_count(0)
+    await expect(page.get_by_role('link', name='用 Google 帳號登入')).to_have_count(0)
+    await expect(page.locator('time[aria-current="date"]')).to_have_count(0)
 
 
 async def check_oled(page):
@@ -179,9 +201,7 @@ async def main():
             for width, label in [(1440, 'desktop'), (768, 'tablet'), (390, 'mobile'), (320, 'small')]:
                 await page.set_viewport_size({'width': width, 'height': 1000 if width > 768 else 844})
                 await goto_path(page, '/?campus=pu')
-                await expect(page.get_by_role('heading', name='今天的校園日常')).to_be_visible()
-                await expect(page.get_by_role('link', name='用 Google 帳號登入')).to_be_visible()
-                await expect(page.locator('time[aria-current="date"]')).to_have_count(1)
+                await check_unsigned_today(page)
                 await no_overflow(page)
                 await page.screenshot(path=str(OUT / f'home-{label}.png'), full_page=True, animations='disabled')
                 if width == 390:
@@ -240,10 +260,13 @@ async def main():
             assert parse_qs(urlparse(href).query).get('campus') == ['nthu']
             results.append('campus selection closes the picker and preserves navigation scope')
 
-            for route, heading in [('/', '今天的校園日常'), ('/life', '生活')]:
+            for route, heading in [('/', '今天'), ('/life', '生活')]:
                 await page.emulate_media(color_scheme='dark', reduced_motion='reduce')
                 await goto_path(page, route + '?campus=pu')
-                await expect(page.get_by_role('heading', name=heading, exact=True)).to_be_visible()
+                if route == '/':
+                    await check_unsigned_today(page)
+                else:
+                    await expect(page.get_by_role('heading', name=heading, exact=True)).to_be_visible()
                 await check_oled(page)
                 await no_overflow(page)
                 name = 'home' if route == '/' else 'life'
