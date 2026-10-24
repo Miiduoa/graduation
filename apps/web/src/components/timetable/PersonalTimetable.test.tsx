@@ -319,6 +319,7 @@ describe('timetable share feedback', () => {
     await ready();
     expect(screen.getByRole('button', { name: '複製分享連結' })).toBeTruthy();
     expect(screen.queryByText(/登入學校帳號後就能分享課表連結/)).toBeNull();
+    expect(screen.queryByText(/網站的學校帳號登入還沒開放/)).toBeNull();
     expect(screen.queryByText(/這個功能還沒接通。分享連結/)).toBeNull();
     expect(screen.queryByRole('link', { name: '登入學校帳號' })).toBeNull();
   });

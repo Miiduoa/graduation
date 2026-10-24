@@ -1,7 +1,11 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanMeta } from '@campus/shared';
-import { PersonalTimetable, SHARE_NEEDS_SCHOOL_LOGIN_COPY } from './PersonalTimetable';
+import {
+  PersonalTimetable,
+  SHARE_NEEDS_SCHOOL_LOGIN_COPY,
+  SHARE_SCHOOL_LOGIN_UNAVAILABLE_COPY,
+} from './PersonalTimetable';
 
 const context = vi.hoisted(() => ({
   schoolId: 'nthu',
@@ -9,6 +13,13 @@ const context = vi.hoisted(() => ({
   records: [] as Array<Record<string, unknown>>,
   load: vi.fn(),
   academic: vi.fn(),
+  signIn: {
+    studentId: false,
+    loading: false,
+    error: false,
+    google: false,
+    retry: vi.fn(),
+  },
 }));
 
 vi.mock('next/navigation', () => ({
@@ -58,6 +69,9 @@ vi.mock('@/lib/useAcademicRecords', () => ({
 vi.mock('@/components/SchoolAccountRequired', () => ({
   SchoolAccountRequired: () => null,
 }));
+vi.mock('@/lib/signInOptions', () => ({
+  useSignInOptions: () => context.signIn,
+}));
 
 const record = (schoolId: string, id: string, title: string) => ({
   id,
@@ -81,6 +95,9 @@ beforeEach(() => {
   context.schoolId = 'nthu';
   context.owner = 'guest';
   context.records = [];
+  context.signIn.studentId = false;
+  context.signIn.loading = false;
+  context.signIn.error = false;
   context.load.mockImplementation(async (_uid: string | null, schoolId: string) => ({
     schoolId,
     courses: [],
@@ -160,18 +177,47 @@ it('resets the timetable and importer when the browsing school changes', async (
   expect(context.academic).toHaveBeenCalledWith('courses', true);
 });
 
-it('offers school login for sharing instead of saying the feature is not connected', async () => {
+it('does not offer a school login link for sharing when student ID sign-in is closed', async () => {
   context.schoolId = 'pu';
   render(<PersonalTimetable />);
   await screen.findByRole('button', { name: '新增課程' });
-  expect(screen.getByText(SHARE_NEEDS_SCHOOL_LOGIN_COPY, { exact: false })).toBeTruthy();
+  expect(screen.getByText(SHARE_SCHOOL_LOGIN_UNAVAILABLE_COPY)).toBeTruthy();
+  expect(screen.queryByText(SHARE_NEEDS_SCHOOL_LOGIN_COPY)).toBeNull();
   expect(screen.queryByText(/這個功能還沒接通/)).toBeNull();
-  expect(screen.queryByText(/分享連結要等學校帳號接上才能用/)).toBeNull();
+  expect(screen.queryByRole('link', { name: '登入學校帳號' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '複製分享連結' })).toBeNull();
+});
+
+it('offers school login for sharing only when student ID sign-in is open', async () => {
+  context.schoolId = 'pu';
+  context.signIn.studentId = true;
+  render(<PersonalTimetable />);
+  await screen.findByRole('button', { name: '新增課程' });
+  expect(screen.getByText(SHARE_NEEDS_SCHOOL_LOGIN_COPY, { exact: false })).toBeTruthy();
+  expect(screen.queryByText(SHARE_SCHOOL_LOGIN_UNAVAILABLE_COPY)).toBeNull();
   expect(screen.getByRole('link', { name: '登入學校帳號' }).getAttribute('href')).toBe(
     '/login?returnUrl=%2Ftimetable',
   );
   expect(screen.queryByRole('button', { name: '複製分享連結' })).toBeNull();
 });
+
+it.each([
+  { loading: true, error: false, label: 'still loading' },
+  { loading: false, error: true, label: 'unavailable' },
+])(
+  'treats $label sign-in options as school login still closed for sharing',
+  async ({ loading, error }) => {
+    context.schoolId = 'pu';
+    context.signIn.loading = loading;
+    context.signIn.error = error;
+    context.signIn.studentId = true;
+    render(<PersonalTimetable />);
+    await screen.findByRole('button', { name: '新增課程' });
+    expect(screen.getByText(SHARE_SCHOOL_LOGIN_UNAVAILABLE_COPY)).toBeTruthy();
+    expect(screen.queryByText(SHARE_NEEDS_SCHOOL_LOGIN_COPY)).toBeNull();
+    expect(screen.queryByRole('link', { name: '登入學校帳號' })).toBeNull();
+  },
+);
 
 it('does not silently load Providence data when no campus is selected', () => {
   context.schoolId = 'personal';

@@ -50,6 +50,7 @@ import {
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
 import { isFunctionsUnconfiguredError } from '@/lib/functionsUrl';
 import { loginHref } from '@/lib/navigation';
+import { useSignInOptions } from '@/lib/signInOptions';
 import { listAcceptedFriends } from '@/lib/timetable/friends';
 import { useAcademicRecords } from '@/lib/useAcademicRecords';
 import type { AcademicCourse } from '@/lib/academicRecords';
@@ -61,6 +62,21 @@ import movement from './timetableMovement.module.css';
 
 export const SHARE_NEEDS_SCHOOL_LOGIN_COPY =
   '登入學校帳號後就能分享課表連結；目前課表先存在這台瀏覽器。';
+export const SHARE_SCHOOL_LOGIN_UNAVAILABLE_COPY =
+  '分享課表要用學校帳號登入，網站的學校帳號登入還沒開放；課表先存在這台瀏覽器。';
+
+function ShareNeedsSchoolAccountNotice() {
+  const options = useSignInOptions();
+  if (options.loading || options.error || !options.studentId) {
+    return <p className={styles.notice}>{SHARE_SCHOOL_LOGIN_UNAVAILABLE_COPY}</p>;
+  }
+  return (
+    <p className={styles.notice}>
+      {SHARE_NEEDS_SCHOOL_LOGIN_COPY}{' '}
+      <Link href={loginHref('/timetable')}>登入學校帳號</Link>
+    </p>
+  );
+}
 
 function shareFailureCopy(error: unknown): string {
   if (isFunctionsUnconfiguredError(error)) return '課表分享尚未啟用';
@@ -721,12 +737,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
           </button>
         ) : null}
       </div>
-      {!uid && (
-        <p className={styles.notice}>
-          {SHARE_NEEDS_SCHOOL_LOGIN_COPY}{' '}
-          <Link href={loginHref('/timetable')}>登入學校帳號</Link>
-        </p>
-      )}
+      {!uid && <ShareNeedsSchoolAccountNotice />}
       {shareUrl && (
         <label className={styles.field}>
           分享連結
