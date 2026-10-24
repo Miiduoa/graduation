@@ -75,6 +75,45 @@ describeEmulator('timetable share handlers against the Firestore emulator', () =
     );
   });
 
+  it('creates a share from submitted courses without writing a personal timetable', async () => {
+    await db.recursiveDelete(db.collection('users'));
+    const created = await handlers.createTimetableShare({
+      auth: { uid: 'alice' },
+      data: {
+        schoolId: 'pu',
+        name: '我的課表',
+        ownerUid: 'mallory',
+        token: 'forged',
+        courses: [
+          {
+            id: 'local',
+            name: '本機課',
+            day: 2,
+            start: 1,
+            end: 2,
+            teacher: '隱',
+            room: 'B1',
+            color: 'mint',
+            email: 'alice@example.com',
+          },
+        ],
+        meta: { title: '本機', studentId: 's1234567' },
+      },
+    });
+    expect(created.token).not.toBe('forged');
+    const share = await db.doc(`timetableShares/${created.token}`).get();
+    const owner = await db.doc(`timetableShareOwners/${created.token}`).get();
+    expect(share.data()).toMatchObject({ schoolId: 'pu', name: '本機', revoked: false });
+    expect(share.data()?.ownerUid).toBeUndefined();
+    expect(share.data()?.courses).toEqual([
+      expect.objectContaining({ name: '本機課', teacher: '', room: 'B1' }),
+    ]);
+    expect(JSON.stringify(share.data())).not.toContain('alice@example.com');
+    expect(JSON.stringify(share.data())).not.toContain('s1234567');
+    expect(owner.data()).toMatchObject({ ownerUid: 'alice' });
+    expect((await db.collection('users').limit(1).get()).empty).toBe(true);
+  });
+
   it('rejects another user and treats a second owner revoke as idempotent', async () => {
     const created = await handlers.createTimetableShare({
       auth: { uid: 'alice' },

@@ -103,6 +103,77 @@ function shareCourses(record: Record<string, unknown>) {
   return courses;
 }
 
+function submittedCourse(input: Record<string, unknown>) {
+  const day = Number(input.day);
+  const start = Number(input.start);
+  const end = Number(input.end);
+  if (!Number.isInteger(day) || day < 0 || day > 5) {
+    throw new HttpsError('invalid-argument', '課程星期或節次不正確，無法分享。');
+  }
+  if (day === 0) {
+    if (
+      (input.start != null && input.start !== '' && start !== 0) ||
+      (input.end != null && input.end !== '' && end !== 0)
+    ) {
+      throw new HttpsError('invalid-argument', '課程星期或節次不正確，無法分享。');
+    }
+  } else if (
+    !Number.isInteger(start) ||
+    start < 1 ||
+    start > MAX_PERIOD_SLOTS ||
+    !Number.isInteger(end) ||
+    end < start ||
+    end > MAX_PERIOD_SLOTS
+  ) {
+    throw new HttpsError('invalid-argument', '課程星期或節次不正確，無法分享。');
+  }
+  try {
+    return {
+      ...cleanCourse({
+        ...input,
+        day,
+        start: day === 0 ? 0 : start,
+        end: day === 0 ? 0 : end,
+      }),
+      teacher: '',
+    };
+  } catch (error) {
+    if (error instanceof HttpsError && error.message === 'Invalid text') {
+      throw new HttpsError('invalid-argument', '分享內容有欄位太長，請縮短後再試。');
+    }
+    throw error;
+  }
+}
+
+function submittedCourses(value: unknown) {
+  if (!Array.isArray(value)) {
+    throw new HttpsError('invalid-argument', '課表格式不正確，無法分享。');
+  }
+  if (value.length > MAX_COURSES) {
+    throw new HttpsError('failed-precondition', '課表課程太多，一次最多分享 80 門。');
+  }
+  const courses = value.map((course) => submittedCourse(asRecord(course)));
+  if (!courses.length) {
+    throw new HttpsError('failed-precondition', '課表是空的，沒有可分享的內容。');
+  }
+  return courses;
+}
+
+function userFacingText<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (error) {
+    if (error instanceof HttpsError && error.message === 'Invalid text') {
+      throw new HttpsError('invalid-argument', '分享內容有欄位太長，請縮短後再試。');
+    }
+    throw error;
+  }
+}
+
+function shareName(meta: unknown, name: unknown) {
+  return userFacingText(() => optionalText(asRecord(meta).title || name, 40) || '課表');
+}
+
 export { cleanCourse };
 
 export function createTimetableShareHandlers({ db }: { db: GroupFirestore }) {
@@ -114,43 +185,50 @@ export function createTimetableShareHandlers({ db }: { db: GroupFirestore }) {
     const expiresAt = Timestamp.fromMillis(Date.now() + SHARE_TTL_MS);
     const ownerRef = db.collection('timetableShareOwners').doc(token);
     const shareRef = db.collection('timetableShares').doc(token);
+    const submitted = Object.prototype.hasOwnProperty.call(payload, 'courses');
+    const courses = submitted ? submittedCourses(payload.courses) : null;
+    const meta = submitted ? userFacingText(() => publicMeta(payload.meta)) : undefined;
+    const name = submitted ? shareName(payload.meta, payload.name) : undefined;
 
     await db.runTransaction(async (transaction) => {
-      const userRef = db.collection('users').doc(uid);
-      const scopedRef = userRef
-        .collection('schools')
-        .doc(schoolId)
-        .collection('personalTimetable')
-        .doc('current');
-      const scopedSnap = await transaction.get(scopedRef);
-      let record: Record<string, unknown>;
-      if (scopedSnap.exists) {
-        record = scopedSnap.data() || {};
-        if (record.schoolId !== schoolId) {
-          throw new HttpsError(
-            'failed-precondition',
-            '無法確認這份課表所屬的學校，請重新載入後再分享。',
-          );
-        }
-      } else {
-        const legacyRef = userRef.collection('personalTimetable').doc('current');
-        const legacySnap = await transaction.get(legacyRef);
-        if (!legacySnap.exists) {
-          throw new HttpsError('not-found', '還沒有可分享的課表。');
-        }
-        record = legacySnap.data() || {};
-        if (record.schoolId !== schoolId) {
-          throw new HttpsError(
-            'failed-precondition',
-            '無法確認這份課表所屬的學校，請重新載入後再分享。',
-          );
+      let record: Record<string, unknown> | null = null;
+      if (!submitted) {
+        const userRef = db.collection('users').doc(uid);
+        const scopedRef = userRef
+          .collection('schools')
+          .doc(schoolId)
+          .collection('personalTimetable')
+          .doc('current');
+        const scopedSnap = await transaction.get(scopedRef);
+        if (scopedSnap.exists) {
+          const scoped = asRecord(scopedSnap.data());
+          if (scoped.schoolId !== schoolId) {
+            throw new HttpsError(
+              'failed-precondition',
+              '無法確認這份課表所屬的學校，請重新載入後再分享。',
+            );
+          }
+          record = scoped;
+        } else {
+          const legacyRef = userRef.collection('personalTimetable').doc('current');
+          const legacySnap = await transaction.get(legacyRef);
+          if (!legacySnap.exists) {
+            throw new HttpsError('not-found', '還沒有可分享的課表。');
+          }
+          const legacy = asRecord(legacySnap.data());
+          if (legacy.schoolId !== schoolId) {
+            throw new HttpsError(
+              'failed-precondition',
+              '無法確認這份課表所屬的學校，請重新載入後再分享。',
+            );
+          }
+          record = legacy;
         }
       }
 
-      const courses = shareCourses(record);
-      const meta = publicMeta(record.meta);
-      const name =
-        optionalText((asRecord(record.meta).title as string) || payload.name, 40) || '課表';
+      const shareCoursesList = submitted ? courses! : shareCourses(record || {});
+      const shareMeta = submitted ? meta! : publicMeta(record?.meta);
+      const shareTitle = submitted ? name! : shareName(record?.meta, payload.name);
 
       transaction.set(ownerRef, {
         ownerUid: uid,
@@ -158,9 +236,9 @@ export function createTimetableShareHandlers({ db }: { db: GroupFirestore }) {
       });
       transaction.set(shareRef, {
         schoolId,
-        name,
-        courses,
-        meta,
+        name: shareTitle,
+        courses: shareCoursesList,
+        meta: shareMeta,
         createdAt: FieldValue.serverTimestamp(),
         expiresAt,
         revoked: false,

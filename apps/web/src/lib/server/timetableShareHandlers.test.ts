@@ -288,6 +288,208 @@ it("rejects revoking another person's share and treats a second revoke as idempo
   });
 });
 
+it('creates a share from submitted local courses without a cloud timetable', async () => {
+  const { store, handlers: api } = handlers();
+  const created = await api.createTimetableShare({
+    auth: { uid: 'alice' },
+    data: {
+      schoolId: 'pu',
+      name: '我的課表',
+      token: 'forged-token',
+      ownerUid: 'mallory',
+      email: 'alice@example.com',
+      studentId: 's1234567',
+      courses: [
+        {
+          ...puCourse,
+          email: 'alice@example.com',
+          studentId: 's1234567',
+          ownerUid: 'mallory',
+          extra: 'nope',
+        },
+      ],
+      meta: {
+        title: '本機課表',
+        email: 'alice@example.com',
+        studentId: 's1234567',
+        ownerUid: 'mallory',
+      },
+    },
+  });
+  expect(created.token).toMatch(/^[A-Za-z0-9_-]+$/);
+  expect(created.token).not.toBe('forged-token');
+  const share = store.docs.get(`timetableShares/${created.token}`);
+  expect(share).toMatchObject({
+    schoolId: 'pu',
+    name: '本機課表',
+    revoked: false,
+  });
+  expect(share?.ownerUid).toBeUndefined();
+  expect(share?.courses).toEqual([
+    expect.objectContaining({
+      id: 'db',
+      name: '資料庫',
+      room: 'PH303',
+      teacher: '',
+      day: 1,
+      start: 3,
+      end: 4,
+    }),
+  ]);
+  const publicCourse = Array.isArray(share?.courses) ? share.courses[0] : undefined;
+  expect(publicCourse).not.toHaveProperty('email');
+  expect(publicCourse).not.toHaveProperty('studentId');
+  expect(publicCourse).not.toHaveProperty('ownerUid');
+  expect(publicCourse).not.toHaveProperty('extra');
+  expect(share?.meta).toEqual({ title: '本機課表' });
+  expect(JSON.stringify(share)).not.toContain('alice@example.com');
+  expect(JSON.stringify(share)).not.toContain('s1234567');
+  expect(JSON.stringify(share)).not.toContain('mallory');
+  expect(JSON.stringify(share)).not.toContain('王');
+  expect(store.docs.get(`timetableShareOwners/${created.token}`)).toMatchObject({
+    ownerUid: 'alice',
+  });
+  expect([...store.docs.keys()].some((key) => key.startsWith('users/'))).toBe(false);
+});
+
+it('prefers submitted courses over a different cloud timetable', async () => {
+  const { store, handlers: api } = handlers([
+    [
+      'users/alice/schools/pu/personalTimetable/current',
+      { schoolId: 'pu', courses: [puCourse], meta: { title: '雲端' } },
+    ],
+  ]);
+  const created = await api.createTimetableShare({
+    auth: { uid: 'alice' },
+    data: {
+      schoolId: 'pu',
+      courses: [
+        {
+          id: 'local',
+          name: '本機課',
+          day: 2,
+          start: 1,
+          end: 2,
+          teacher: '隱',
+          room: 'B1',
+          color: 'mint',
+        },
+      ],
+      meta: { title: '本機' },
+    },
+  });
+  const share = store.docs.get(`timetableShares/${created.token}`);
+  expect(share?.name).toBe('本機');
+  expect(share?.courses).toEqual([expect.objectContaining({ name: '本機課', teacher: '' })]);
+  expect(store.docs.get('users/alice/schools/pu/personalTimetable/current')).toMatchObject({
+    meta: { title: '雲端' },
+  });
+});
+
+it('rejects more than 80 submitted courses and illegal day or period', async () => {
+  const { handlers: api } = handlers();
+  const tooMany = Array.from({ length: 81 }, (_, index) => ({
+    id: `c-${index}`,
+    name: '課',
+    day: 1,
+    start: 1,
+    end: 1,
+    teacher: '',
+    room: '',
+    color: 'gray',
+  }));
+  await expect(
+    api.createTimetableShare({
+      auth: { uid: 'alice' },
+      data: { schoolId: 'pu', courses: tooMany },
+    }),
+  ).rejects.toMatchObject({
+    code: 'failed-precondition',
+    message: '課表課程太多，一次最多分享 80 門。',
+  });
+  await expect(
+    api.createTimetableShare({
+      auth: { uid: 'alice' },
+      data: {
+        schoolId: 'pu',
+        courses: [
+          {
+            id: 'bad-day',
+            name: '課',
+            day: 6,
+            start: 1,
+            end: 1,
+            teacher: '',
+            room: '',
+            color: 'gray',
+          },
+        ],
+      },
+    }),
+  ).rejects.toMatchObject({
+    code: 'invalid-argument',
+    message: '課程星期或節次不正確，無法分享。',
+  });
+  await expect(
+    api.createTimetableShare({
+      auth: { uid: 'alice' },
+      data: {
+        schoolId: 'pu',
+        courses: [
+          {
+            id: 'bad-slot',
+            name: '課',
+            day: 1,
+            start: MAX_PERIOD_SLOTS + 1,
+            end: MAX_PERIOD_SLOTS + 1,
+            teacher: '',
+            room: '',
+            color: 'gray',
+          },
+        ],
+      },
+    }),
+  ).rejects.toMatchObject({
+    code: 'invalid-argument',
+    message: '課程星期或節次不正確，無法分享。',
+  });
+});
+
+it('rejects an empty submitted timetable with a clear Chinese error', async () => {
+  const { handlers: api } = handlers();
+  await expect(
+    api.createTimetableShare({ auth: { uid: 'alice' }, data: { schoolId: 'pu', courses: [] } }),
+  ).rejects.toMatchObject({
+    code: 'failed-precondition',
+    message: '課表是空的，沒有可分享的內容。',
+  });
+});
+
+it('still reads the cloud timetable when the body omits courses', async () => {
+  const { store, handlers: api } = handlers([
+    [
+      'users/alice/schools/pu/personalTimetable/current',
+      { schoolId: 'pu', courses: [puCourse], meta: { title: '114-1' } },
+    ],
+  ]);
+  const created = await api.createTimetableShare({
+    auth: { uid: 'alice' },
+    data: { schoolId: 'pu', name: '阿瑋' },
+  });
+  expect(store.docs.get(`timetableShares/${created.token}`)?.name).toBe('114-1');
+});
+
+it('rejects revoking a locally submitted share owned by someone else', async () => {
+  const { handlers: api } = handlers();
+  const created = await api.createTimetableShare({
+    auth: { uid: 'alice' },
+    data: { schoolId: 'pu', courses: [puCourse], meta: { title: '本機' } },
+  });
+  await expect(
+    api.revokeTimetableShare({ auth: { uid: 'mallory' }, data: { token: created.token } }),
+  ).rejects.toMatchObject({ code: 'not-found' });
+});
+
 it('rejects malformed revoke tokens', async () => {
   const { handlers: api } = handlers();
   const auth = { uid: 'alice' };

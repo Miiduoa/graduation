@@ -48,6 +48,7 @@ import {
   type StoredTimetable,
 } from '@/lib/timetable/store';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
+import { isFunctionsUnconfiguredError } from '@/lib/functionsUrl';
 import { listAcceptedFriends } from '@/lib/timetable/friends';
 import { useAcademicRecords } from '@/lib/useAcademicRecords';
 import type { AcademicCourse } from '@/lib/academicRecords';
@@ -56,6 +57,14 @@ import { TimetableGrid, UnscheduledCourses } from './TimetableGrid';
 import { validateCourseDraft } from './courseEditorModel';
 import { planningReadiness } from './timetableMovement';
 import movement from './timetableMovement.module.css';
+
+function shareFailureCopy(error: unknown): string {
+  if (isFunctionsUnconfiguredError(error)) return '課表分享尚未啟用';
+  const message = error instanceof Error ? error.message.trim() : '';
+  if (message === 'need-login') return '請先登入再建立分享連結。';
+  if (message && /[\u4e00-\u9fff]/.test(message)) return message;
+  return '現在產生不了分享連結，登入學校帳號並連上網路後再試。';
+}
 
 function fromSchoolCourse(course: AcademicCourse): PersonalCourse {
   const start = course.periods[0] || 0;
@@ -384,7 +393,9 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
         <p>自行匯入 {importedCourses.length + missingImportTimes.length} 筆</p>
         <ul className={styles.list}>
           {visibleCourses.map((course) => {
-            const importId = course.id.startsWith('import:') ? course.id.slice('import:'.length) : '';
+            const importId = course.id.startsWith('import:')
+              ? course.id.slice('import:'.length)
+              : '';
             const source =
               importId &&
               imported.records.find(
@@ -525,7 +536,10 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
     setShareBusy(true);
     setShareUrl('');
     try {
-      const server = await createServerShare(schoolId, timetable.meta.title || '我的課表');
+      const server = await createServerShare(schoolId, timetable.meta.title || '我的課表', {
+        courses: timetable.courses,
+        meta: timetable.meta,
+      });
       if (!activeRef.current) return;
       const parsed = new URL(server.path, window.location.origin);
       if (
@@ -546,10 +560,10 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
       } catch {
         if (activeRef.current) setNotice('瀏覽器未完成複製，請手動複製下方連結。');
       }
-    } catch {
+    } catch (error) {
       if (activeRef.current) {
         setShareUrl('');
-        setNotice('現在產生不了分享連結，登入學校帳號並連上網路後再試。');
+        setNotice(shareFailureCopy(error));
       }
     } finally {
       sharingRef.current = false;

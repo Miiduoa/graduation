@@ -644,7 +644,11 @@ it('creates a timetable share through the same-origin /api/fn route', async () =
       },
     }),
   });
-  await expect(createServerShare('pu', '我的課表')).resolves.toEqual({
+  const snapshot = {
+    courses: [course],
+    meta: { school: '', year: '', semester: '', className: '', credits: 0, title: '我的課表' },
+  };
+  await expect(createServerShare('pu', '我的課表', snapshot)).resolves.toEqual({
     token: 'share-token',
     path: '/timetable/s/share-token',
     expiresAt: '2026-10-31T00:00:00.000Z',
@@ -652,7 +656,9 @@ it('creates a timetable share through the same-origin /api/fn route', async () =
   expect(fetchMock).toHaveBeenCalledWith('/api/fn/createTimetableShare', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer id-token' },
-    body: JSON.stringify({ data: { schoolId: 'pu', name: '我的課表' } }),
+    body: JSON.stringify({
+      data: { schoolId: 'pu', name: '我的課表', courses: snapshot.courses, meta: snapshot.meta },
+    }),
     cache: 'no-store',
   });
   expect(httpsCallable).not.toHaveBeenCalled();

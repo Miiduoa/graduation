@@ -160,3 +160,25 @@ it('refuses an off-site or malformed share path from the backend', async () => {
   expect(writeText).not.toHaveBeenCalled();
   expect(screen.queryByRole('textbox', { name: '分享連結' })).toBeNull();
 });
+
+it('shows the server reason when there is no shareable timetable', async () => {
+  mocks.share.mockRejectedValueOnce(new Error('還沒有可分享的課表。'));
+  await ready();
+  fireEvent.click(screen.getByRole('button', { name: '複製分享連結' }));
+  await screen.findByText('還沒有可分享的課表。');
+  expect(screen.queryByText(/現在產生不了分享連結/)).toBeNull();
+});
+
+it('sends the on-screen timetable when creating a share link', async () => {
+  await ready();
+  fireEvent.click(screen.getByRole('button', { name: '複製分享連結' }));
+  await waitFor(() => expect(mocks.share).toHaveBeenCalledOnce());
+  expect(mocks.share).toHaveBeenCalledWith(
+    'pu',
+    '我的課表',
+    expect.objectContaining({
+      courses: [expect.objectContaining({ name: '資料庫' })],
+      meta: expect.objectContaining({ title: '我的課表' }),
+    }),
+  );
+});

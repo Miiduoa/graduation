@@ -244,3 +244,84 @@ it('returns 429 after 20 createTimetableShare attempts from the same uid in an h
     error: { status: 'RESOURCE_EXHAUSTED', message: 'Too many requests' },
   });
 });
+
+it('creates a share from submitted courses when the cloud timetable is missing', async () => {
+  const { runtime: deps, store } = runtime({ store: createMemoryGroupStore() });
+  const res = await dispatchFnRequest(
+    'createTimetableShare',
+    request('createTimetableShare', {
+      body: {
+        data: {
+          schoolId: 'pu',
+          name: '我的課表',
+          ownerUid: 'mallory',
+          courses: [
+            {
+              id: 'db',
+              name: '資料庫',
+              day: 1,
+              start: 3,
+              end: 4,
+              teacher: '王',
+              room: 'PH303',
+              color: 'blue',
+            },
+          ],
+          meta: { title: '本機', email: 'alice@example.com' },
+        },
+      },
+      headers: { Authorization: 'Bearer valid-token' },
+    }),
+    deps,
+  );
+  expect(res.status).toBe(200);
+  const token = ((await res.json()) as { result: { token: string } }).result.token;
+  const share = store.docs.get(`timetableShares/${token}`);
+  expect(share).toMatchObject({ schoolId: 'pu', name: '本機' });
+  expect(share?.ownerUid).toBeUndefined();
+  expect(JSON.stringify(share)).not.toContain('alice@example.com');
+  expect(JSON.stringify(share)).not.toContain('王');
+  expect(store.docs.get(`timetableShareOwners/${token}`)).toMatchObject({ ownerUid: 'alice' });
+  expect([...store.docs.keys()].some((key) => key.startsWith('users/'))).toBe(false);
+});
+
+it('returns 400 for an oversized createTimetableShare body', async () => {
+  const { runtime: deps } = runtime({ store: createMemoryGroupStore() });
+  const res = await dispatchFnRequest(
+    'createTimetableShare',
+    request('createTimetableShare', {
+      body: { data: { schoolId: 'pu', courses: [{ name: 'x'.repeat(70_000) }] } },
+      headers: { Authorization: 'Bearer valid-token' },
+    }),
+    deps,
+  );
+  expect(res.status).toBe(400);
+  expect((await res.json()).error.status).toBe('INVALID_ARGUMENT');
+});
+
+it('returns 400 for illegal submitted day or period and 404 for createGroup', async () => {
+  const { runtime: deps } = runtime({ store: createMemoryGroupStore() });
+  const badDay = await dispatchFnRequest(
+    'createTimetableShare',
+    request('createTimetableShare', {
+      body: {
+        data: {
+          schoolId: 'pu',
+          courses: [
+            { id: 'x', name: '課', day: 6, start: 1, end: 1, teacher: '', room: '', color: 'gray' },
+          ],
+        },
+      },
+      headers: { Authorization: 'Bearer valid-token' },
+    }),
+    deps,
+  );
+  expect(badDay.status).toBe(400);
+  expect((await badDay.json()).error.message).toBe('課程星期或節次不正確，無法分享。');
+  const createGroup = await dispatchFnRequest(
+    'createGroup',
+    request('createGroup', { body: { data: { name: 'x' } } }),
+    deps,
+  );
+  expect(createGroup.status).toBe(404);
+});

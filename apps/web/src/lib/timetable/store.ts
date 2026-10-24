@@ -325,7 +325,7 @@ export async function loadFriendTimetable(
 
 async function callTimetableShare(
   name: 'createTimetableShare' | 'revokeTimetableShare',
-  input: Record<string, string>,
+  input: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   const user = getAuth()?.currentUser;
   if (!isFirebaseConfigured() || !user) {
@@ -358,8 +358,16 @@ async function callTimetableShare(
   return result as Record<string, unknown>;
 }
 
-export async function createServerShare(schoolId: string, name: string) {
-  const result = await callTimetableShare('createTimetableShare', { schoolId, name });
+export async function createServerShare(
+  schoolId: string,
+  name: string,
+  snapshot?: { courses: PersonalCourse[]; meta: TimetableMeta },
+) {
+  const result = await callTimetableShare('createTimetableShare', {
+    schoolId,
+    name,
+    ...(snapshot ? { courses: snapshot.courses, meta: snapshot.meta } : {}),
+  });
   const token = typeof result.token === 'string' ? result.token : '';
   const path = typeof result.path === 'string' ? result.path : '';
   const expiresAt = typeof result.expiresAt === 'string' ? result.expiresAt : '';
